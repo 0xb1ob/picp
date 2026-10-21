@@ -14,10 +14,12 @@ import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, s
 test("wake S19: a real operator reconnects read-only and delivers a gap escalation once", { timeout: 180_000 }, async (t) => {
 	const home = createScratchHome();
 	const provider = await MockProvider.start();
-	const parentModel = provider.addScript("s19-parent", [{ kind: "text", text: "Parent ready." }]);
+	const parentModel = provider.addScript("s19-parent", [{ kind: "hang", ms: 3_000 }, { kind: "hang", ms: 3_000 }]);
 	const operatorModel = provider.addScript("s19-operator", [
-		{ kind: "text", text: "Operator ready." },
-		{ kind: "text", text: "Escalation received." },
+		{ kind: "text", text: "Unseen send received." },
+		{ kind: "text", text: "Live send received." },
+		{ kind: "text", text: "Live escalation received." },
+		{ kind: "text", text: "Gap escalation received." },
 	]);
 	const agent = createAgentDir({ provider });
 	const env = { ...agent.env, CP_HOME: home.path, PI_HOME: home.path, CP_MODE: "multi" };
@@ -41,18 +43,45 @@ test("wake S19: a real operator reconnects read-only and delivers a gap escalati
 	const start = async () => {
 		const host = await attachParentHost({ home: home.path, mode: "multi", timeoutMs: 60_000 });
 		hosts.push(host);
-		await host.request("start", { home: home.path, mode: "multi", model: parentModel, modelExplicit: true });
+		const started = await host.request("start", { home: home.path, mode: "multi", model: parentModel, modelExplicit: true }) as { pid?: number };
+		host.parentPid = started.pid;
 		return host;
 	};
 	const first = await start();
+	const outbox = new OperatorRelayOutbox(operatorRelayOutboxFile(join(home.path, ".pi-command-post", "state")));
+	await first.onRelay(() => {});
+	const send = async (text: string) => {
+		const result = await first.request("send", text, 100) as { send_id?: string; pending?: string };
+		const id = result.send_id ?? result.pending;
+		assert.ok(id, JSON.stringify(result));
+		await waitFor(() => outbox.read().entries, (entries) => entries.some((entry) => entry.relay.sendId === id),
+			{ timeoutMs: 30_000, what: "real parent send outcome persists" });
+		return id;
+	};
+	const unseenId = await send("Acknowledge the unseen S19 send.");
 	operator = startPiChild({ cwd: home.path, model: operatorModel, env, extensions: [CP_BRIDGE_EXTENSION] });
-	await operator.prompt("Acknowledge readiness.");
+	await waitFor(() => provider.requests("s19-operator"), (requests) => requests.length === 1,
+		{ timeoutMs: 30_000, what: "unseen real send outcome delivered at attach" });
 	await operator.waitForSettled();
+	assert.ok(JSON.stringify(provider.requests("s19-operator")[0]!.body).includes(unseenId));
+	const seenId = await send("Acknowledge the live S19 send.");
+	await waitFor(() => provider.requests("s19-operator"), (requests) => requests.length === 2,
+		{ timeoutMs: 30_000, what: "live real send outcome delivered" });
+	await operator.waitForSettled();
+	assert.ok(JSON.stringify(provider.requests("s19-operator")[1]!.body).includes(seenId));
+	const liveStore = new EscalationStore({ home: home.path, now: () => new Date(Date.now() - 11_000) });
+	const live = await liveStore.raise({ job_ids: ["cp-s19-live"], kind: "product_ambiguity", question: "Live S19 decision",
+		options: [{ id: "hold", label: "Hold", consequence: "Wait", cost: "none" }], recommended: "hold", evidence_paths: [] });
+	await waitFor(() => provider.requests("s19-operator"), (requests) => requests.length === 3,
+		{ timeoutMs: 30_000, what: "live escalation delivered before reconnect" });
+	await operator.waitForSettled();
+	assert.ok(JSON.stringify(provider.requests("s19-operator")[2]!.body).includes(live.id));
 	const status = () => operator!.stderr() + JSON.stringify(operator!.records());
 	await waitFor(status, (text) => text.includes("cp-parent: attached"), { timeoutMs: 30_000, what: "initial bridge attachment" });
 	const paths = parentHostPaths(home.path, "multi");
 	const generation = currentHost(paths).gen;
-	await first.request("stop");
+	process.kill(first.hostPid, "SIGKILL");
+	if (first.parentPid) { try { process.kill(first.parentPid, "SIGTERM"); } catch {} }
 	await first.closed;
 	await waitFor(status, (text) => text.includes("host connection closed"), { timeoutMs: 30_000, what: "bridge detects host close" });
 	await new Promise((done) => setTimeout(done, 2_000));
@@ -63,17 +92,17 @@ test("wake S19: a real operator reconnects read-only and delivers a gap escalati
 	});
 	const second = await start();
 	await waitFor(status, (text) => text.includes(`reattached (pid ${second.hostPid})`), { timeoutMs: 45_000, what: "bridge reattaches to replacement host" });
-	await waitFor(() => provider.requests("s19-operator"), (requests) => requests.length === 2, { timeoutMs: 45_000, what: "gap escalation reaches real operator model" });
-	const request = JSON.stringify(provider.requests("s19-operator")[1]!.body);
+	await waitFor(() => provider.requests("s19-operator"), (requests) => requests.length === 4, { timeoutMs: 45_000, what: "gap escalation reaches real operator model" });
+	const request = JSON.stringify(provider.requests("s19-operator")[3]!.body);
 	assert.ok(request.includes(raised.id), "gap escalation id must reach operator context");
 	assert.ok(request.includes("Choose the S19 gap outcome"), "gap escalation question must reach operator context");
 	await operator.waitForSettled();
 	await new Promise((done) => setTimeout(done, 12_000));
-	assert.equal(provider.requests("s19-operator").length, 2, "replay and host watch must not deliver the gap twice");
+	assert.equal(provider.requests("s19-operator").length, 4, "replay and host watch must not deliver sends or escalations twice");
 	assert.equal(currentHost(paths).gen, generation + 1, "bridge must not spawn extra generations");
-	const outbox = new OperatorRelayOutbox(operatorRelayOutboxFile(join(home.path, ".pi-command-post", "state")));
 	assert.ok(outbox.read().entries.filter((entry) => entry.id.startsWith(`esc:${raised.id}`)).length <= 1);
 	assert.equal(provider.remaining("s19-operator"), 0);
+	assert.equal(provider.remaining("s19-parent"), 0);
 });
 
 

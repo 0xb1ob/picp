@@ -1,8 +1,8 @@
 # S19 declaration conversion evidence (in progress)
 
 Scope: only bridge-reattach, cp-bridge-reattach, deferred-recheck, escalation-relay-watch and send-first-gate.
-Current accounting: 4 mapped, 1 retained, 32 pending; one original file retired and replaced by one retained file.
-The other four original files remain intact. No pending declaration earns deletion credit.
+Current accounting: 5 mapped, 1 retained, 31 pending; two original files retired, with one retained replacement.
+The other three original files remain intact. No pending declaration earns deletion credit.
 
 Entry points: real `pi --mode rpc` operator with cp-bridge, real parent-host Unix socket and real parent pi;
 all models are served by MockProvider. Agent settings/models use `/tmp/cp-agent-*`, removed in test teardown.
@@ -19,6 +19,11 @@ Original escalation-relay-watch blob: `f3e85481871b4137bbf4a60168a78f9c2964d8ee`
 | 4 read failures propagate visibly | mapped S19-2 | NC-5: timeout waiting for visible read failure in parent-host log. |
 | 5 direct relay formatting and identity | mapped S19-2 | NC-4: actual host text fails project-tagged decision regex; kind, escalationId and jobId also pinned. |
 
+Original cp-bridge-reattach blob: `089f0e15737bcb406265a1613cd122a693681e53`.
+Its one declaration maps to S19-1 under NC-1, rerun after adding real parent send outcomes.
+The real host is killed by its owned PID; its owned parent is stopped, then the replacement starts explicitly.
+The operator model receives unseen/live sends and pre-gap/gap escalations in four distinct turns; no extra
+request occurs after replay. The generation stays unchanged while absent, then advances once.
 ## Executed controls
 
 Control source base: `53d55fb0d144cee0109e0086ad98add0a196e056`.
@@ -29,7 +34,7 @@ Apply the recorded patches with `git apply --unidiff-zero` against the source ba
 
 | Control / recorded patch | SHA-256 | Scenario and observed failure |
 |---|---|---|
-| [NC-1](testing-migration-s19-controls/NC-1.patch) | 3d33e3f2ca7b40c98fb267e59d6c89d0a6a28465303a890559c1f49288e3f7ea | S19-1; timeout waiting for bridge reattaches to replacement host after 45 seconds; not yet retirement evidence for cp-bridge-reattach |
+| [NC-1](testing-migration-s19-controls/NC-1.patch) | 3d33e3f2ca7b40c98fb267e59d6c89d0a6a28465303a890559c1f49288e3f7ea | S19-1; timeout waiting for bridge reattaches to replacement host after 45 seconds; rerun on the extended real-send scenario |
 | [NC-2](testing-migration-s19-controls/NC-2.patch) | 7c4d57a6682275a28ab9bd00eb9a94346ba4f7c1efb68302d50f61e55d2754ba | S19-2; failed outbox write must not reframe each tick: actual 2, expected 1 |
 | [NC-3](testing-migration-s19-controls/NC-3.patch) | 9f4653b93f70f3d463920b80ee4fdd299763b868bcc97db2081a11752d4e494d | S19-2; restart must not reframe an existing outbox relay: actual true, expected false |
 | [NC-4](testing-migration-s19-controls/NC-4.patch) | db39261155d548331f55a6ed40fbb26aa610ec643dae1a60a32dc98dee0ff344 | S19-2; actual relay text is `[project unknown] S19 mutation removed the decision text`, fails the decision regex |

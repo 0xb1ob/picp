@@ -71,7 +71,7 @@ ask-0088e0332d00, 2026-10-21.
 | S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
-| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 4 mapped, 1 retained, 32 pending across five whole files; two real-host/operator scenarios added | 1 original retired, retained replacement earns no deletion credit | +1 e2e file; one unit replaced by retained file | -5 original, +1 retained, +2 e2e = -2 net; conversion in progress |
+| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 5 mapped, 1 retained, 31 pending across five whole files; two real-host/operator scenarios added | 2 originals retired, retained replacement earns no deletion credit | -2 originals, +1 retained, +1 e2e = unchanged files | -6 original, +1 retained, +2 e2e = -3 net; conversion in progress |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -827,6 +827,7 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/escalation-relay-watch.test.ts` | a failing outbox write is reported by the caller and is not re-framed by this process each tick | S19-2 | mapped | NC S19-2 fails failed outbox write must not reframe each tick (2 versus 1); real filesystem write refusal, host log and socket frames. |
 | `tests/escalation-relay-watch.test.ts` | a store, ledger or outbox read failure propagates (the host logs it; never a silent skip) | S19-2 | mapped | NC S19-5 fails visible read failure; three real corrupt files are repaired and pending delivery recovers. |
 | `tests/escalation-relay-watch.test.ts` | directRelay: project-tagged, escalation kind, id and question in the text | S19-2 | mapped | NC S19-4 fails project-tagged decision text regex; actual host outbox relay also pins kind, escalationId and jobId. |
+| `tests/cp-bridge-reattach.test.ts` | a killed and restarted host is re-attached read-only: relays resume with no cp_parent call, the gap escalation once | S19-1 | mapped | S19-NC-1 fails replacement-host reattachment; real parent sends settle both before operator attach and live, real host stops/restarts, pre-gap and gap escalations reach actual operator model once, generation stays unchanged during absence and advances only once when explicitly started. No fake parent or fake operator extension context. |
 <!-- /manifest:assertions -->
 
 S06's [declaration control ledger](testing-migration-s06-controls.md) maps each of its 24 mapped declarations to
@@ -1444,6 +1445,16 @@ index 2dcc135..008c3bd 100644
 +		}
 +		return due.map((item) => item.id);
 +	} catch { return []; }
+```
+| S19-1 | `tests/cp-bridge-reattach.test.ts` | 6aef97e30fffc725656181ccda94e2a83732c96e | S19-1 | S19-NC-1 | 3d33e3f2ca7b40c98fb267e59d6c89d0a6a28465303a890559c1f49288e3f7ea | timeout waiting for bridge reattaches to replacement host | pass |
+
+<!-- patch:S19-NC-1 -->
+```diff
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -410 +410 @@
+-			reattach.schedule();
++			// S19 negative control: skip reconnect after host closure.
 ```
 <!-- /manifest:regressions -->
 
@@ -2695,7 +2706,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/contracts-exports.test.ts` | exception | P1 | golden: export compatibility; operator ask-0088e0332d00 (Exceptions) |
 | `tests/contracts.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
 | `tests/control-pending.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
-| `tests/cp-bridge-reattach.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/cp-bridge-reattach.test.ts` | deleted | S19 | S19-1 real operator/parent/host lifecycle; S19-NC-1 |
 | `tests/cp-bridge-restart.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
 | `tests/cp-bridge.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/curation.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
