@@ -10,6 +10,8 @@ import type { PiModelRegistryLike } from "../../src/routing.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { enableTreehouse, waitFor } from "../harness/index.ts";
 
+import { CheckpointStore } from "../../src/checkpoint.ts";
+import { listPendingReviews, readPendingReview } from "../../src/review-runs.ts";
 async function stack(t: TestContext, registry?: PiModelRegistryLike) {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo" });
@@ -368,7 +370,7 @@ test("S04: blocking review promotes the real implementer on the same branch with
 	s.agent.writeModels(s.provider);
 	assert.equal((await s.post.dispatch({ jobId: job.id, task: "Write app.ts, push and report the PR.", model, fetch: false })).receipt, "accepted");
 	await waitFor(() => s.post.fleet.get(job.id), (record) => record?.phase === "held" && !!record.reported_at, { timeoutMs: 90_000, what: "implementer held" });
-	for (let attempt = 1; attempt <= 2; attempt++) {
+	for (let attempt = 1; attempt <= 3; attempt++) {
 		const result = await s.review(job.id, { verdict: "revise", reasons: ["[severity: high] [confidence: high] missing test"], revisions: [`S04 add coverage ${attempt}`] });
 		assert.equal(result.verdict.attempt, attempt);
 		assert.equal(result.verdict.verdict, "revise");
@@ -419,4 +421,128 @@ test("S05: unknown and malformed legacy review heads never become delta baseline
 		assert.equal(result.verdict.verdict, "pass");
 		assert.match(readFileSync(join(result.scratch, "diff.md"), "utf8"), /src\/app\.ts/);
 	}
+});
+
+
+test("S05: integrating an advanced base resets the delta while an unmerged advance preserves it", { timeout: 180_000 }, async (t) => {
+	for (const integration of ["none", "merge", "rebase"] as const) {
+		const s = await stack(t);
+		const job = await s.seed({ "src/app.ts": "export const x = 1;\n" });
+		const first = await s.review(job);
+		s.repo.write("upstream/big.csv", "row,123456789\n".repeat(30_000));
+		s.repo.commitAll("base grows");
+		s.repo.git("push", "--quiet", "origin", s.repo.branch);
+		s.repo.git("checkout", "--quiet", job);
+		if (integration === "merge") s.repo.git("merge", "--quiet", "--no-edit", s.repo.branch);
+		if (integration === "rebase") s.repo.git("rebase", s.repo.branch);
+		s.repo.write("src/fix.ts", "export const fix = 1;\n");
+		s.repo.commitAll("branch fix");
+		s.repo.git("push", "--quiet", ...(integration === "rebase" ? ["--force"] : []), "origin", job);
+		s.repo.git("checkout", "--quiet", s.repo.branch);
+		const result = await s.review(job);
+		assert.equal(result.verdict.verdict, "pass", integration);
+		assert.equal(result.verdict.delta_from, integration === "none" ? first.verdict.head_sha : undefined, integration);
+		assert.equal(result.verdict.diff_stat.truncated, false);
+		const diff = readFileSync(join(result.scratch, "diff.md"), "utf8");
+		assert.match(diff, /src\/fix\.ts/);
+		assert.doesNotMatch(diff, /upstream\/big\.csv/);
+	}
+});
+
+test("S05: a settled reviewer without a verdict retries once with the full subject then surfaces", { timeout: 120_000 }, async (t) => {
+	const s = await stack(t);
+	const job = await s.seed({ "app.ts": "export const original = 1;\n" });
+	for (let attempt = 1; attempt <= 2; attempt++) {
+		const model = s.provider.addScript(`silent-${attempt}`, [{ kind: "text", text: "looks fine" }]);
+		s.agent.writeModels(s.provider);
+		const started = await s.post.diffReview({ jobId: job, model });
+		assert.ok(isDiffReviewWait(started));
+		s.post.reviewRuns.handBack(started.key);
+		await s.post.reviewRuns.settled(started.key);
+		const verdict = JSON.parse(readFileSync(join(s.home, paths.reviewFile(job, attempt)), "utf8"));
+		assert.equal(verdict.cause, attempt === 1 ? "operational" : "operational_persistent");
+		assert.equal(verdict.delta_from, undefined);
+		assert.match(verdict.reasons.join(" "), /settled without reporting a verdict/);
+		const scratch = join(s.home, paths.reviewScratchDir(job, attempt));
+		assert.match(readFileSync(join(scratch, "diff.md"), "utf8"), /export const original/);
+		assert.equal(existsSync(join(scratch, "full-diff.md")), false);
+	}
+});
+
+test("S05: pending reviews fence duplicate starts and carry the reviewed head in one wake", { timeout: 120_000 }, async (t) => {
+	const s = await stack(t);
+	const job = await s.seed({ "app.ts": "S05_PRIVATE_BODY\n" });
+	const model = s.provider.addScript("pending", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["small subject"] } }] }]);
+	s.agent.writeModels(s.provider);
+	const started = await s.post.diffReview({ jobId: job, model });
+	assert.ok(isDiffReviewWait(started));
+	assert.equal(started.head_sha, s.repo.head(job));
+	assert.equal(started.surface, "review");
+	const pending = readPendingReview(s.home, job, "review", 1);
+	assert.equal(pending?.subject?.head_sha, started.head_sha);
+	assert.equal(pending?.subject?.branch, job);
+	assert.equal(listPendingReviews(s.home, job).length, 1);
+	await s.post.registry.setReviewerModel("demo", "unavailable/reviewer");
+	await assert.rejects(() => s.post.diffReview({ jobId: job }), (error: Error) => {
+		assert.ok(error.message.includes(started.head_sha!));
+		assert.match(error.message, /wait for its cp-verdict wake-up instead of starting another; do not re-issue/);
+		return true;
+	});
+	s.post.reviewRuns.handBack(started.key);
+	await s.post.reviewRuns.settled(started.key);
+	assert.equal(readPendingReview(s.home, job, "review", 1), undefined);
+	assert.equal(listPendingReviews(s.home, job).length, 0);
+	assert.equal(s.wakes.length, 1);
+	assert.match(s.wakes[0]!, /review attempt 1: pass/);
+	assert.doesNotMatch(s.wakes[0]!, /S05_PRIVATE_BODY/);
+});
+
+
+test("S05: the fifth complete review surfaces findings and binds one final-fix checkpoint; a sixth never starts", { timeout: 120_000 }, async (t) => {
+	const s = await stack(t);
+	const job = await s.seed({ "app.ts": "export const app = 1;\n" });
+	const pr = "https://github.com/example/demo/pull/5";
+	await s.post.fleet.patch(job, { receipts: [{ kind: "pr", status: "open", title: "PR", url: pr }] });
+	const first = await s.review(job);
+	for (let n = 1; n <= 4; n++) writeFileSync(join(s.home, paths.reviewFile(job, n)), JSON.stringify({ ...first.verdict, attempt: n, verdict: "revise", revisions: ["earlier finding"] }));
+	const result = await s.review(job, { verdict: "revise", reasons: ["[severity: high] [confidence: high] missing test"], revisions: ["add the test"] });
+	assert.equal(result.verdict.attempt, 5);
+	assert.equal(result.verdict.verdict, "escalate");
+	assert.equal(result.verdict.cause, "policy");
+	assert.match(result.verdict.reasons.join(" "), /review cap/);
+	assert.equal(result.verdict.revisions, undefined);
+	const checkpoint = new CheckpointStore(s.home, { kind: "final_fix" }).get(job, { scope: s.repo.head(job).slice(0, 12) });
+	assert.equal(checkpoint?.decision, "pending");
+	assert.equal(checkpoint?.pr_url, pr);
+	assert.match(checkpoint?.question ?? "", /Operator text only/);
+	assert.ok(checkpoint?.evidence?.includes("add the test"));
+	assert.ok(checkpoint?.evidence?.includes("[severity: high] [confidence: high] missing test"));
+	await assert.rejects(() => s.post.diffReview({ jobId: job }), /already had 5 diff reviews/);
+	assert.equal(existsSync(join(s.home, paths.reviewFile(job, 6))), false);
+	assert.equal(existsSync(join(s.home, paths.reviewScratchDir(job, 6), "diff.md")), false);
+});
+
+
+test("S05: a pass at review three ends the loop and wide subjects finish synchronously without a wake", { timeout: 120_000 }, async (t) => {
+	const s = await stack(t);
+	const job = await s.seed({ "app.ts": "export const app = 1;\n" });
+	const first = await s.review(job);
+	for (let n = 1; n <= 2; n++) writeFileSync(join(s.home, paths.reviewFile(job, n)), JSON.stringify({ ...first.verdict, attempt: n, verdict: "revise", revisions: ["earlier finding"] }));
+	const pass = await s.review(job);
+	assert.equal(pass.verdict.attempt, 3);
+	assert.equal(pass.verdict.verdict, "pass");
+	assert.equal(pass.verdict.cause, null);
+	assert.equal(pass.verdict.head_sha, s.repo.head(job));
+	const wide = await s.seed(Object.fromEntries(Array.from({ length: DIFF_REVIEW_MAX_STAT_FILES + 1 }, (_, n) => [`wide-${n}.txt`, "x\n"])));
+	const wakes = s.wakes.length;
+	const stop = await s.post.diffReview({ jobId: wide });
+	assert.ok(!isDiffReviewWait(stop));
+	assert.equal(stop.model, undefined);
+	assert.equal(stop.verdict.cause, "policy");
+	assert.equal(listPendingReviews(s.home, wide).length, 0);
+	assert.equal(s.wakes.length, wakes);
+	const again = await s.post.diffReview({ jobId: wide });
+	assert.ok(!isDiffReviewWait(again));
+	assert.equal(again.verdict.attempt, stop.verdict.attempt);
+	assert.equal(existsSync(join(s.home, paths.reviewFile(wide, 2))), false);
 });
