@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { classifyPi } from "../../src/pi-compat.ts";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
 import { realpathSync as entryRealpath } from "node:fs";
 import { fileURLToPath as entryPath } from "node:url";
@@ -24,8 +25,14 @@ function piVersions(): { min: string; max: string; major: number; nextMajor: str
 	const { min, testedMax: max } = PI_COMPAT;
 	const [major = 0, , pat = 0] = max.split(".").map(Number);
 	const [minMaj = 0, minMin = 0, minPat = 0] = min.split(".").map(Number);
-	const older = minPat > 0 ? `${minMaj}.${minMin}.${minPat - 1}` : `${minMaj - 1}.99.0`;
+	// Below min by the patch, else the previous minor's x.0 (min's patch is 0), else the previous major's x.0.0.
+	const older = minPat > 0 ? `${minMaj}.${minMin}.${minPat - 1}` : minMin > 0 ? `${minMaj}.${minMin - 1}.0` : `${minMaj - 1}.0.0`;
 	return { min, max, major, nextMajor: `${major + 1}.0.0`, newerSame: max.replace(/\d+$/, String(pat + 1)), older };
+}
+/** #405: the derived older pi must classify below min, else the below-min scenarios prove nothing. */
+function checkOlder(ctx: Ctx): void {
+	const { min, max, older } = piVersions();
+	check(ctx, min.split(".").some((part) => Number(part) > 0) && classifyPi({ min, testedMax: max }, { version: older, extension: { ok: true, detail: "" } }).state === "old", `derived older pi ${older} does not classify below min ${min}`);
 }
 const esc = (text: string): string => text.replace(/\./g, "\\.");
 const RESULT_MARK = "INSTALL_SANDBOX_RESULT ";
@@ -388,6 +395,7 @@ const scenarios: Record<Scenario, (ctx: Ctx) => Promise<void>> = {
 		};
 		makePiStub();
 		const { min, max, major, nextMajor, newerSame, older } = piVersions();
+		checkOlder(ctx);
 		const updates = (): string => (existsSync(join(PI_STUB, "updates")) ? readFileSync(join(PI_STUB, "updates"), "utf8").trim() : "");
 		const range = `pi >= ${min}, tested up to ${max}, major ${major}`;
 		const refusals = [
@@ -426,6 +434,7 @@ const scenarios: Record<Scenario, (ctx: Ctx) => Promise<void>> = {
 		// #375 PR4: through a terminal with complete flags and no --yes, the one prompt is the below-min pi update.
 		const restore = makePiStub();
 		const { min, max, major, older } = piVersions();
+		checkOlder(ctx);
 		writeFileSync(join(PI_STUB, "version"), `${older}\n`);
 		writeFileSync(join(PI_STUB, "update-to"), `${max}\n`);
 		const env = { ...process.env, PATH: `${PI_STUB}:${process.env.PATH ?? ""}` };

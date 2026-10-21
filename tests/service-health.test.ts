@@ -12,7 +12,7 @@ import { EscalationStore } from "../src/escalation.ts";
 import { OperatorAsks } from "../src/operator-asks.ts";
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../src/operator-outbox.ts";
 import { initPush } from "../src/push/keys.ts";
-import { HEALTH_CHECKS, type HealthCheck, type HealthProbes, healthFile, healthSummary, hostProbes, type Observation, readHealth, runHealth, viewerDown } from "../src/service/health.ts";
+import { HEALTH_CHECKS, type HealthCheck, type HealthProbes, healthFile, healthSummary, hostProbes, type Observation, piDriftWarning, readHealth, runHealth, viewerDown } from "../src/service/health.ts";
 import { serviceAlerts } from "../src/service-alerts.ts";
 import { tunnelConfigFile } from "../src/service/daemon-tunnel-files.ts";
 import { startDeviceControl } from "../src/viewer/device-control.ts";
@@ -394,4 +394,19 @@ test("viewer probe, remote-only (no tailnet, cp-tunnel enabled): this home's liv
 	assert.match(String(await viewerDown(home!.home, {}, fetchNever, { tailnet: noTailnet })), /^remote-only viewer/, "a stopped viewer fails");
 	enable(false);
 	assert.match(String(await viewerDown(home!.home, {}, fetchNever, { tailnet: noTailnet })), /gave no address and --require-tailnet is set/, "a disabled tunnel is not remote-only: the tailnet refusal stands");
+});
+
+// pi drift in the watchdog: a mocked pi/npm/gh; the warning is logged, no check fails, and a qualify PR or an unreadable gh silences it.
+test("the health run logs a host.pi.drift warning for an unqualified newer pi and never fails a check", async (t) => {
+	const b = bench(t);
+	const now = new Date("2026-09-28T10:00:00Z");
+	const released = new Date(now.getTime() - 20 * 86_400_000).toISOString();
+	const sh = (prs: { status: number; stdout: string }) => (command: string): { status: number; stdout: string } =>
+		command === "pi" ? { status: 0, stdout: "pi 1.9.9\n" } : command === "npm" ? { status: 0, stdout: JSON.stringify({ "1.9.9": released }) } : prs;
+	const warn = (prs: { status: number; stdout: string }) => () => piDriftWarning(process.cwd(), sh(prs), now);
+	const record = await runHealth({ stateDir: b.stateDir, probes: Object.fromEntries(HEALTH_CHECKS.map((name) => [name, () => OK])) as unknown as HealthProbes, now: () => now, log: (line) => b.lines.push(line), warn: warn({ status: 0, stdout: "[]" }) });
+	assert.ok(b.lines.some((line) => line.startsWith("warn ") && line.includes("1.9.9") && line.includes("qualify pi 1.9.9")), b.lines.join("\n"));
+	assert.ok(Object.values(record.checks).every((check) => check?.status === "ok"));
+	assert.equal(warn({ status: 0, stdout: JSON.stringify([{ title: "qualify pi 1.9.9", url: "u" }]) })(), undefined);
+	assert.equal(warn({ status: 1, stdout: "" })(), undefined);
 });
