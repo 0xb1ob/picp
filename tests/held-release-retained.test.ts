@@ -144,14 +144,6 @@ test("4B1-T2: a script record is never releasable, even one shaped as a held shi
 	assert.deepEqual(release.releasable(), ["cp-model"]);
 });
 
-test("4B1-T2: capacityFree counts only releasable authors as free (dead, busy, stopping never)", async (t) => {
-	const b = await bench(t, 2, [held("cp-busy"), held("cp-idle")]);
-	b.workers.spawn("cp-busy", fakeWorker({ busy: true }));
-	b.workers.spawn("cp-idle");
-	assert.equal(b.release.capacityFree(), true, "one idle author is releasable");
-	b.busy.sending.add("cp-idle");
-	assert.equal(b.release.capacityFree(), false);
-});
 
 test("4B1-T2: makeRoom — reviewer, below the cap, and nothing releasable all do nothing", async (t) => {
 	const b = await bench(t, 2, [held("cp-h")]);
@@ -209,16 +201,4 @@ test("4B1-T3(c): busy flips between selection and re-check — refused, nothing 
 	assert.deepEqual(releasedEvents(b.home, "cp-h"), []);
 	assert.equal(b.workers.manager.reserved, 0);
 	assert.equal(b.notified(), 1);
-});
-
-test("wasReleased: the last lifecycle marker decides", async (t) => {
-	const b = await bench(t, 2, []);
-	const runs = new RunRegistry(b.home);
-	t.after(() => runs.closeAll());
-	assert.equal(b.release.wasReleased("cp-aaa1"), false);
-	runs.open("cp-aaa1").cp("spawned", {});
-	runs.open("cp-aaa1").cp("held_released", {});
-	assert.equal(b.release.wasReleased("cp-aaa1"), true);
-	runs.open("cp-aaa1").cp("worker_revived", {});
-	assert.equal(b.release.wasReleased("cp-aaa1"), false);
 });

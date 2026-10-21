@@ -5,18 +5,16 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { afterMergeDeploy } from "../src/after-merge.ts";
-import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, type MergeReceipt, paths, type Receipt } from "../src/contracts.ts";
+import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, type Receipt } from "../src/contracts.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { resolveForgeRepository, type ForgeRepository } from "../src/forge-url.ts";
-import { observerFor, type ObservationOutcome } from "../src/forges/adapter.ts";
+import type { ObservationOutcome } from "../src/forges/adapter.ts";
 import { GH_PR_FIELDS, githubObserver } from "../src/forges/github.ts";
 import { type FetchLike, gitlabObserver } from "../src/forges/gitlab.ts";
 import { MandateStore } from "../src/mandate.ts";
-import { GH_PR_FIELDS as MERGES_GH_PR_FIELDS, type CommandRunner, formatMerge, MergeStore, readMergeReceipt } from "../src/merges.ts";
+import { GH_PR_FIELDS as MERGES_GH_PR_FIELDS, type CommandRunner, MergeStore, readMergeReceipt } from "../src/merges.ts";
 import { ProjectRegistry } from "../src/projects.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
@@ -24,8 +22,6 @@ import { createScratchHome, createScratchLedger } from "./harness/index.ts";
 const CANARY = "CANARY-fake-secret-do-not-leak-0123456789";
 const HEAD = "a".repeat(40);
 const MERGE = "b".repeat(40);
-const SQUASH = "c".repeat(40);
-const noRun: CommandRunner = async () => assert.fail("no command expected");
 
 function repo(): ForgeRepository {
 	const resolved = resolveForgeRepository("git@ssh-alias:team/sub/app.git", {
@@ -150,17 +146,6 @@ test("gitlab observer sends one GET with the token only in PRIVATE-TOKEN, nested
 });
 
 
-test("gitlab HTTP failures: 401/403/404/429/500 are unavailable with status and static cause only", async () => {
-	for (const status of [401, 403, 404, 429, 500]) {
-		const body = { message: `token ${CANARY} rejected`, error_description: CANARY };
-		const { detail, reason } = failure((await observe("7", json(body, status))).outcome);
-		assert.equal(reason, "unavailable");
-		assert.match(detail, new RegExp(`HTTP ${status} \\(`));
-		assert.doesNotMatch(detail, /rejected/);
-	}
-	const unauthenticated = await gitlabObserver(repo(), { fetch: fakeFetch(json({}, 401)).fetch, env: {} }).readChangeRequest("7");
-	assert.match(failure(unauthenticated).detail, /EXAMPLE_GL_TOKEN is unset/, "the variable NAME is named, never a value");
-});
 
 test("gitlab network errors, timeouts and oversize bodies fail closed without echoing the exception", async () => {
 	const network = failure((await observe("7", () => Promise.reject(new Error(`connect ECONNREFUSED with ${CANARY}`)))).outcome);
@@ -205,7 +190,10 @@ test("a foreign or malformed MR reference makes zero requests", async () => {
 		"https://evil.example.com/gitlab/team/sub/app/-/merge_requests/7",
 		"https://code.example.com/gitlab/team/other/-/merge_requests/7",
 		"https://code.example.com/team/sub/app/-/merge_requests/7",
-		"https://github.com/team/app/pull/7", "0", "7; rm -rf /", "",
+		"https://github.com/team/app/pull/7",
+		"0",
+		"7; rm -rf /",
+		"",
 	]) {
 		const { outcome, calls } = await observe(ref);
 		assert.equal(failure(outcome).reason, "mismatch", ref);
@@ -226,15 +214,6 @@ test("a gitlab.com project sends GITLAB_TOKEN; with none set it reads unauthenti
 	assert.deepEqual(anonymous.calls[0]?.init.headers, { accept: "application/json" });
 });
 
-test("observerFor: unknown hosts are unsupported with no request; known kinds get their observer", async () => {
-	const unknown = observerFor(resolveForgeRepository("git@git.example.com:team/app.git"), { run: noRun, cwd: "/w" });
-	assert.equal(unknown.provider, "none");
-	assert.equal(failure(await unknown.readChangeRequest("7")).reason, "unsupported");
-	assert.equal(observerFor(resolveForgeRepository("git@github.com:o/r.git"), { run: noRun, cwd: "/w" }).provider, "github");
-	const gitlab = observerFor(resolveForgeRepository("git@gitlab.com:g/a.git"), { run: noRun, cwd: "/w", gitlab: { fetch: fakeFetch().fetch } });
-	assert.equal(gitlab.provider, "gitlab");
-	assert.equal(failure(await gitlab.readChangeRequest("https://evil.example.com/g/a/-/merge_requests/1")).reason, "mismatch");
-});
 
 // Retained by P3b (docs/testing-migration.md): moved verbatim from tests/merges.test.ts.
 interface GhPr {
@@ -316,7 +295,6 @@ function benchOf(t: { after(fn: () => void | Promise<void>): void }): Bench {
 	};
 }
 
-const PR_RECEIPT: Receipt = { kind: "pr", status: "open", title: "PR for cp-m1", url: "https://github.com/o/r/pull/54" };
 
 test("an unreadable receipt is no receipt, never an exception out of a gate", async (t) => {
 	const b = benchOf(t);

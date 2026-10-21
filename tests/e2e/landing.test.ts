@@ -428,6 +428,10 @@ test("landing: legacy unregistered projects retain GitHub observation and refuse
 	await assert.rejects(s.post.recordMerge({ jobId: gitlab.jobId }), /unsupported/);
 	assert.equal(s.ghCalls().length, before, "an unregistered GitLab MR never falls back to gh");
 	assert.equal(readMergeReceipt(s.home, gitlab.jobId), undefined);
+	await s.project("unknown", { cloneUrl: "https://git.example.com/o/lab.git" });
+	const unknown = await s.seed("unsupported forge", { project: "unknown", prUrl: "https://git.example.com/o/lab/-/merge_requests/7" });
+	await assert.rejects(s.post.recordMerge({ jobId: unknown.jobId }), /unsupported/);
+	assert.equal(s.ghCalls().length, before, "an unsupported registered forge sends no gh request");
 });
 
 test("landing: teardown proves landing on the project's configured trunk instead of main", { skip: SKIP, timeout: 120_000 }, async (t) => {
@@ -510,6 +514,19 @@ test("landing: forge observation failures refuse merge receipts without leaking 
 	}
 	await assert.rejects(s.post.recordMerge({ jobId: "../escape" }), /no fleet record/);
 	assert.ok(lab.asked.every((request) => request.token === token));
+	await s.post.registry.update("lab", { forge: { kind: "gitlab", web_base_url: lab.web, token_env: "CP_S06_UNSET_TOKEN" } });
+	lab.mrs[7] = { status: 401, body: { message: `rejected ${token}` } };
+	await assert.rejects(s.post.recordMerge({ jobId: gl.jobId }), (error: Error) => {
+		assert.match(error.message, /CP_S06_UNSET_TOKEN is unset/);
+		assert.doesNotMatch(error.message, /glpat-s06-canary|rejected/);
+		return true;
+	});
+	assert.equal(lab.asked.at(-1)?.token, undefined);
+	await s.project("prefixed", { cloneUrl: `${lab.web}/gitlab/o/lab.git`, forge: { kind: "gitlab", web_base_url: `${lab.web}/gitlab`, token_env: "CP_E2E_GITLAB_TOKEN" } });
+	const prefixed = await s.seed("prefix guard", { project: "prefixed", prUrl: `${lab.web}/gitlab/o/lab/-/merge_requests/7` });
+	const beforePrefix = lab.asked.length;
+	await assert.rejects(s.post.recordMerge({ jobId: prefixed.jobId, pr: `${lab.web}/o/lab/-/merge_requests/7` }), /mismatch/);
+	assert.equal(lab.asked.length, beforePrefix, "an MR outside the configured web prefix sends no credential");
 });
 
 test("landing: spawn pressure releases the oldest held author and a journal refusal leaves room retryable", { skip: SKIP, timeout: 180_000 }, async (t) => {
@@ -535,15 +552,23 @@ test("landing: spawn pressure releases the oldest held author and a journal refu
 		rmSync(eventsFile, { recursive: true });
 		writeFileSync(eventsFile, journal);
 	}
-	const result = await s.post.dispatch({ jobId: job.id, task: "Do the fresh work.", model, fetch: false })
-		.catch((error: Error) => assert.fail(`a valid held author must free room for dispatch: ${error.message}`));
-	assert.equal(result.receipt, "accepted", "the failed reservation does not block retry");
+	s.post.dispatchQueue.enqueue(job.id, { task: "Do the fresh work.", model });
+	await s.post.dispatchQueue.drain();
+	assert.ok(s.post.fleet.get(job.id), "queue capacity counts a releasable author as free after journal recovery");
 	await waitFor(() => s.provider.requests("spawn-pressure"), (requests) => requests.length > 0, { timeoutMs: 60_000, what: "fresh worker actually runs" });
 	assert.deepEqual(releases(older.jobId).map((event) => event.payload), [{ for_job: job.id, reason: "spawn cap" }]);
 	assert.equal(releases(newer.jobId).length, 0, "the newer author is not the victim");
 	assert.deepEqual([s.post.fleet.get(older.jobId)?.phase, s.post.fleet.get(older.jobId)?.worktree, s.post.fleet.get(older.jobId)?.branch], ["held", original.worktree, original.branch]);
 	assert.equal((await s.post.send({ jobId: older.jobId, message: "Continue the held job.", mode: "prompt" })).receipt, "delivered");
 	await waitFor(() => readRunEvents(s.home, older.jobId), (events) => events.some((event) => event.type === "worker_revived"), { timeoutMs: 60_000, what: "released author resumes its session" });
+	const resumedPid = s.post.fleet.get(older.jobId)!.worker.pid;
+	await s.post.send({ jobId: older.jobId, message: "Continue once more.", mode: "prompt" });
+	assert.equal(s.post.fleet.get(older.jobId)!.worker.pid, resumedPid, "a revived worker is sent to without another restoration");
+	const blocked = await s.post.ledger().create({ title: "no idle held author", project: "demo", kind: "ship", delivery: "local" });
+	s.post.dispatchQueue.enqueue(blocked.id, { task: "Wait for capacity.", model });
+	await s.post.dispatchQueue.drain();
+	assert.equal(s.post.fleet.get(blocked.id), undefined, "at cap with no releasable author, dispatch stays queued");
+	assert.ok(s.post.dispatchQueue.ids().includes(blocked.id));
 });
 
 test("landing: a deploy ledger failure preserves the merge receipt and retries through cp_merged", { skip: SKIP, timeout: 600_000 }, async (t) => {

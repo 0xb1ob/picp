@@ -1,7 +1,7 @@
 # S06 declaration controls (rule v2)
 
 This supplements the declaration dispositions in [testing-migration.md](testing-migration.md).
-All 20 mapped original declarations have an executed production mutation below; the other 20 declarations remain
+All 24 mapped original declarations have an executed production mutation below; the other 16 declarations remain
 in the four retained files. Declaration numbers are their original file order, including retained declarations.
 These are declaration controls, not merely one control per scenario.
 
@@ -31,8 +31,12 @@ before the next control. Earlier control patches and their commands are also rec
 | forge-observers / 7 redirects | `control-http`: follow GitLab redirects | expected HTTP 302 redirect refused, got redirected HTTP 404 |
 | forge-observers / 13 throwing afterRecorded | `observer-deploy`: throw instead of naming after-merge refusal | recordMerge rejects corrupt ledger instead of returning recorded receipt and retry text |
 | forge-observers / 14 ledger refusal | `observer-deploy`: same mutation, same actual failing ledger operation | recordMerge rejects before the no-deploy-record and successful retry assertions |
-| held-release / 5 room at cap | `control-release`: omit manager.shutdown(victim) | `a valid held author must free room for dispatch`: spawn cap reached |
-| held-release / 7 journal failure | `held-reservation`: omit failed-transfer reservation cleanup | same-job retry rejects already holds a reserved slot |
+| held-release / 5 room at cap | `control-release`: omit manager.shutdown(victim) | queue capacity counts a releasable author as free after journal recovery: expected worker, got undefined |
+| held-release / 7 journal failure | `held-reservation`: omit failed-transfer reservation cleanup | queue capacity counts a releasable author as free after journal recovery: expected worker, got undefined |
+| forge-observers / 6 HTTP failures | `review-unset`: suppress unauthenticated diagnostic | expected CP_S06_UNSET_TOKEN is unset, got only HTTP 401 |
+| forge-observers / 11 provider selection | `review-provider`: replace GitLab adapter with unsupported observer | expected invalid malformed-answer refusal, got unsupported GitLab disabled |
+| held-release / 3 capacityFree | `review-capacity`: return false unconditionally | queue capacity counts a releasable author as free after journal recovery: expected worker, got undefined |
+| held-release / 10 wasReleased | `review-lifecycle`: return false unconditionally | expected delivered cp_send receipt, got no live worker instead of automatic restoration |
 
 The deploy control is shared deliberately: both original declarations require that the real ledger failure be
 returned as a named after-merge result while retaining the merge receipt. Throwing that failure breaks each
@@ -72,3 +76,33 @@ not its log. The log of the same stem records the execution and assertion above.
 | control-release | src/held-release.ts: delete `await manager.shutdown(victim);` | d4ded3df1323612de76e1888efba466115d3c5d907b906f864f796879d3056a1 |
 | control-states | src/forges/gitlab.ts: use `STATES[raw.state === "opened" ? "closed" : raw.state]` | cac8fdda81232016b5a81ee4f3252231ae4444f924608702f4bbc3c9e2e4e95f |
 | control-terminal | src/foreign-ci-watch.ts: replace ended/due guard with `if (!entry.ended && (entry.next_due_at && now.getTime() < Date.parse(entry.next_due_at))) continue;` | db55fa1577148d65213901fa056c248a9acaebb0a792882c0bc8e2ad50fbd5d9 |
+
+## Review 1 controls and entry-point checks
+
+Four additional mapped declarations use review-unset/review-provider with pattern `forge observation failures`
+and review-capacity/review-lifecycle with pattern `spawn pressure releases`. Each ran with the Commands wrapper
+above and exited 1 at the assertion recorded in the declaration table. review-prefix uses the first pattern;
+it covers the reachable prefix guard within the retained reference declaration and fails expected mismatch
+with HTTP 404. All five patches were reverted before the final full landing run.
+
+| Stem | Production mutation | Patch SHA256 |
+|---|---|---|
+| review-unset | src/forges/gitlab.ts: replace unauthenticated diagnostic with empty string | 6b3ee31b8a8427c20c615cc3cc7500939eaae83360a939d9fd0d67efc7de0d9b |
+| review-prefix | src/forge-url.ts: accept equal origins and ref.path.endsWith(repository.path), ignoring installation prefix | 5d4dc5c831d9fb05d43e8047d7dd8b90a53208dfee6eb995736a00ac5e6977d9 |
+| review-provider | src/forges/adapter.ts: replace GitLab adapter with unsupported GitLab disabled observer | b0e9a4c9c37b214f491f50cd035620eb15f27d6a739c6bd382d4ffbac19eb15d |
+| review-capacity | src/held-release.ts: return false from capacityFree | 46d63066c0aa54c9020212f5f9eeeaa0edf8c031153b10a6232b7773fe48ab43 |
+| review-lifecycle | src/held-release.ts: return false from wasReleased | b22c984e91c1bd42d7594d0109b0c5aa8431051024a0f93abaa7a0f9cd20407d |
+
+The retained makeRoom declaration preserves its reviewer-role guard. An executed public-entry probe dispatched
+a research/local job using profile gate-reviewer and a generated mock model at the spawn cap. It failed with
+`gate-rubric: missing value(s) for ${original_task}` in assembleBrief (dispatch stage 5), before makeRoom (stage 6).
+The dispatch values contain task but no original_task. cp_review/cp_gate launch reviewers outside HeldRelease;
+cp_revive requires a fleet job, which those reviewer processes do not create. The below-cap and no-candidate
+outcomes are pinned by S06-6; this retained unit preserves the unreachable reviewer-role assertion intact.
+
+The releasable declaration preserves a dead-but-not-reaped selector input and an injected pending shutdown.
+CommandPost.dispatch reaches makeRoom only after synchronous manager.reap, before calling releasable. Thus a
+real dead process can be created, but dispatch cannot expose that unit's dead-yet-registered selector input.
+Public send/dispatch cannot install the unit's pending shutdown implementation or its synchronous busy getter.
+The empty MR-reference guard remains retained because recordMerge substitutes the bound URL before observing;
+its nonempty prefix variant is now exercised by a registered project with web_base_url ending in /gitlab.
