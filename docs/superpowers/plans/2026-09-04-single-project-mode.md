@@ -105,7 +105,7 @@ test("the multi layout is exactly today's constants, before and after configurat
 	};
 	assert.deepEqual({ ...LAYOUT }, expected, "unconfigured LAYOUT is the multi layout");
 	assert.deepEqual(layoutFor("multi"), expected);
-	assert.deepEqual([...NEVER_COMMIT_PATHS], ["data/", "state/", "projects/", ".beads/", ".pi-command-post/"]);
+	assert.deepEqual([...NEVER_COMMIT_PATHS], ["data/", "state/", "projects/", ".pi-command-post/"]);
 	assert.equal(currentLayoutMode(), undefined);
 
 	configureLayout("multi");
@@ -327,7 +327,7 @@ export function layoutFor(mode: Mode): Layout {
 
 /** Paths that must never be committed or pushed (T19 guard), per mode. */
 export function neverCommitFor(mode: Mode): string[] {
-	return mode === "single" ? [`${RUNTIME_DIR}/`] : ["data/", "state/", "projects/", ".beads/", `${RUNTIME_DIR}/`];
+	return mode === "single" ? [`${RUNTIME_DIR}/`] : ["data/", "state/", "projects/", `${RUNTIME_DIR}/`];
 }
 
 /**

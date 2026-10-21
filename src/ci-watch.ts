@@ -27,7 +27,7 @@
  *
  * A fact on a third-party server reaches neither. `src/widget.ts` forbids
  * widening the 5-second tick ("the widget stays files-only … a 5-second
- * `br`/`gh` call is not a widget"), and `cp_status_block`'s CI gate (cp-gmy)
+ * `gh` call is not a widget"), and `cp_status_block`'s CI gate (cp-gmy)
  * only runs *inside a parent turn* — which cannot fix a defect whose symptom is
  * the absence of turns. So this is a dedicated, slow, unref'd interval owned by
  * the extension, outside the model's context entirely.
@@ -37,7 +37,7 @@
  *  - **It never merges anything.** A green CI wake-up is evidence, never
  *    authorization: the parent verifies against `head_sha` itself and takes the
  *    merge decision by whatever authority is in force. Nothing here encodes
- *    that authority, and nothing here closes a br issue, tears anything down,
+ *    that authority, and nothing here closes a job, tears anything down,
  *    or declares an Awaiting-you row.
  *  - **It never blocks.** Every tick issues single, non-blocking queries and
  *    returns: no `sleep`, no shell loop, no `gh run watch`, no
@@ -74,7 +74,7 @@
  * This module ends at the wake-up. It observes GitHub, decides that a
  * `(job, head, event)` fact is new, and hands a stamped, coalesced notice to
  * the transport. Whoever executes afterwards — the parent by hand, or the merge
- * executor (`cp_integrate`, br cp-uug) — consumes that same wake-up as input.
+ * executor (`cp_integrate`, cp-uug) — consumes that same wake-up as input.
  * Nothing here rebases, resolves a conflict, merges, or decides who may.
  */
 
@@ -237,7 +237,7 @@ export interface CiFacts {
  *
  * A merged or closed PR ends the story, so no CI event is derived alongside it:
  * "CI is green on a commit that already merged" is not news, and the follow-on
- * (`cp_merged`, close the br issue, tear down) is the same either way.
+ * (`cp_merged`, close the job, tear down) is the same either way.
  *
  * Nothing is emitted for `in_progress`, `superseded` (no run has started on
  * this head yet) or `unknown`. Those are the states this watcher exists to sit
@@ -896,7 +896,7 @@ export function formatCiNotice(observations: readonly CiObservation[], projectOf
 		);
 	}
 	if (observations.some((observation) => observation.event === "pr_merged")) {
-		lines.push("A merged PR's follow-on is already contract: cp_merged <job-id>, close the br issue with a reason, cp_teardown.");
+		lines.push("A merged PR's follow-on is already contract: cp_merged <job-id>, close the job with a reason, cp_teardown.");
 	}
 	if (observations.some((observation) => observation.event === "pr_closed")) {
 		lines.push("A PR closed unmerged is not a delivery: relay it. Never tear down a job whose branch never landed.");

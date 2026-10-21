@@ -34,7 +34,7 @@ test("the detector ignores a ? inside a code fence or a > quote, and a URL query
 });
 
 test("N10: a choice with no ? — 'your (two) choices' — is the question; fenced it still is not", () => {
-	const tail = "Still waiting on your two choices: hand-off merges, and the beads backlog.";
+	const tail = "Still waiting on your two choices: hand-off merges, and the external backlog.";
 	assert.equal(detectHumanQuestion(`PR #12 merged.\n${tail}`), tail);
 	assert.equal(detectHumanQuestion("Both landed. Over to your choice."), "Over to your choice.");
 	assert.equal(detectHumanQuestion(`Done.\n\`\`\`\n${tail}\n\`\`\`\nAll merged.`), undefined);
@@ -51,7 +51,7 @@ test("N8: a cue with no ? while an ask is open is not nudged; a real ? question 
 	const { guard, asks, store } = fixture(t);
 	store.open({ project: "demo-app", question: "A or B?", options: [{ label: "A", consequence: "a" }], recommendation: "A" });
 	guard.runEnded();
-	assert.equal(guard.beforeSettle("Still waiting on your two choices: hand-off merges, and the beads backlog.", asks), undefined);
+	assert.equal(guard.beforeSettle("Still waiting on your two choices: hand-off merges, and the external backlog.", asks), undefined);
 	assert.equal(guard.beforeSettle("Let me know which option you prefer.", asks), undefined);
 	assert.equal(store.open().length, 1, "no card either");
 	assert.equal(guard.beforeSettle("Should I proceed with A or B?", asks)?.continue, true, "a ? question nudges even with an ask open");

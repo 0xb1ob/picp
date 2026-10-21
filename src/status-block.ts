@@ -11,7 +11,7 @@
  *    SAME `StatusSnapshot` `/status` and `/watch` already read
  *    (`assembleStatus` in `status.ts`). There is no second read path here.
  *  - Two things this module cannot derive, and does not try to: a
- *    plain-language label for a job (falls back to the br title), and the
+ *    plain-language label for a job (falls back to the job title), and the
  *    "Awaiting you" table in full (type, decision, why, what it blocks — none
  *    of that exists in any file). "Blocked"'s `waiting_on` cell is the same
  *    kind of judgment: `/status` has no notion of a *human-legible* reason a
@@ -163,7 +163,7 @@ function boundedReason(value: string): string {
 }
 
 /** Job cells pair the job id with a plain-language label (AGENTS.md contract):
- * the caller's label wins, then the br title from the same snapshot join,
+ * the caller's label wins, then the job title from the same snapshot join,
  * then the bare id — never a blank cell. */
 function labelFor(jobId: string, job: StatusJob | undefined, labels: ReadonlyMap<string, string>): string {
 	const supplied = labels.get(jobId);
@@ -229,7 +229,7 @@ function renderWithTeam(jobs: readonly StatusJob[], labels: ReadonlyMap<string, 
 	return [`With the team · ${jobs.length}:`, ...projectGroupedLines(jobs, (job) => job.project, line), ""];
 }
 
-/** Section 2, "Blocked": parent-supplied — the same rows `br dep add` and the
+/** Section 2, "Blocked": parent-supplied — the same rows `cp_job dep_add` and the
  * gate ladder already track, in the operator's language. */
 function renderBlocked(
 	rows: readonly StatusBlockBlockedInput[],

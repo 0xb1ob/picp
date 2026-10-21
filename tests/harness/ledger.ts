@@ -1,7 +1,7 @@
 /**
  * Scratch ledger: a throwaway home with an empty jobs document, so ledger
  * suites exercise the real class without touching this build's own ledger.
- * Replaces the br-backed `beads.ts`; no binary is needed any more.
+ * No external binary is needed.
  */
 
 import { mkdtempSync, rmSync } from "node:fs";

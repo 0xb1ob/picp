@@ -5,7 +5,7 @@
  *
  *  - Clone on demand into `projects/<name>`; **one canonical clone per name**.
  *    Extra checkouts are how a lease ends up in the wrong tree.
- *  - `project:<name>` br labels must match a registered Name.
+ *  - `project:<name>` job labels must match a registered Name.
  *  - Never clone into the command post root, and never lease from `~/<name>`.
  *  - The "belongs to another repo" family of traps is detected mechanically:
  *    a nested clone, a linked worktree pretending to be a clone, a shared
@@ -316,7 +316,7 @@ export class ProjectRegistry {
 	}
 
 	/**
-	 * Register a project. The name is the directory under `projects/`, the br
+	 * Register a project. The name is the directory under `projects/`, the job
 	 * label value and the fleet key, so it is validated here; a duplicate name
 	 * or a remote already registered under another name is refused (that is the
 	 * "one canonical clone" rule, made mechanical).
@@ -324,7 +324,7 @@ export class ProjectRegistry {
 	async register(input: RegisterInput): Promise<Project> {
 		if (!isSafeProjectName(input.name)) {
 			throw new ProjectError(
-				`invalid project name ${JSON.stringify(input.name)}: must match ${PROJECT_NAME_PATTERN} (it is also the projects/<name> directory and the br project: label)`,
+				`invalid project name ${JSON.stringify(input.name)}: must match ${PROJECT_NAME_PATTERN} (it is also the projects/<name> directory and the job project: label)`,
 			);
 		}
 		const delivery = input.delivery ?? "pr";
@@ -502,7 +502,7 @@ const VIEW_HEADER = `# Projects
 Rendered from data/projects.json by pi-command-post (T10). This file is a VIEW:
 edit the registry through the project tools, never here. Never committed.
 
-- Name: slug; the projects/<name> directory AND the br project:<name> label
+- Name: slug; the projects/<name> directory AND the job project:<name> label
 - Clone URL: git remote we clone/fetch from
 - Path: derived from the name, never stored (relative to the command post home)
 - Delivery: pr | local | pipeline (default for jobs in this repo)
@@ -575,7 +575,7 @@ export function formatEnsured(result: EnsureCloneResult, mergeNote?: string): st
 		`  clone: ${result.path} (${result.cloned ? "cloned now" : "already present"})`,
 		`  url:   ${result.project.clone_url}`,
 		`  merge: ${policy}${mergeNote ? ` (${mergeNote})` : ""} — change with cp_project merge_policy name:${name} policy:${policy === "repo" ? "human_handoff" : "repo"}`,
-		`  use it with the br label project:${name}`,
+		`  use it with the job label project:${name}`,
 	].join("\n");
 }
 

@@ -28,7 +28,7 @@
  *    tear for lost updates.
  *
  * `data/` is gitignored and machine-local by contract: what generalizes belongs
- * in AGENTS.md or docs/, and job history belongs in br.
+ * in AGENTS.md or docs/, and job history belongs in the ledger.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -100,7 +100,7 @@ Scope: this machine and this home only. Anything a fresh command post would
 need is a contract edit (AGENTS.md / docs/), not a learning. Project-intrinsic
 facts ("repo X's tests need flag Y") go to that repo's AGENTS.md via a worker.
 
-Job history lives in br (closed issues), not here.
+Job history lives in the ledger (closed jobs), not here.
 
 Promotion: candidates live in data/candidates.md until a curation pass
 promotes ones that generalize. Capture is not promotion, and promotion is not

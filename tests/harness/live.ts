@@ -162,7 +162,7 @@ export interface LiveFixtureOptions {
 	authorizer?: CommandPostOptions["authorizer"];
 	/** Stands in for the human a planner asks (T31). Absent = nobody attached. */
 	asker?: CommandPostOptions["asker"];
-	/** Project name; also the br `project:` label and the clone directory. */
+	/** Project name; also the job's `project:` label and the clone directory. */
 	project?: string;
 }
 
@@ -179,7 +179,7 @@ export interface LiveFixture {
 
 /**
  * A home with a registered project, its canonical clone, a treehouse pool and an
- * initialised br workspace — the state a real command post is in before its
+ * initialised jobs ledger — the state a real command post is in before its
  * first dispatch.
  */
 export async function createLiveFixture(options: LiveFixtureOptions = {}): Promise<LiveFixture> {

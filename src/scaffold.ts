@@ -38,11 +38,11 @@ import { atomicWriteJson } from "./json-store.ts";
 import { initJobsDocument, LedgerError } from "./ledger.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "./mandate-defaults.ts";
 
-/** br prefix for the ledger this package creates. Job ids are `cp-...`. */
+/** Id prefix for the ledger this package creates. Job ids are `cp-...`. */
 export const LEDGER_PREFIX = "cp";
 
 /**
- * The prefix `br init` gets for a home, from that home's environment.
+ * The ledger id prefix for a home, from that home's environment.
  *
  * Unset or empty is `cp` — every existing home, byte-for-byte. A set-but-
  * invalid value is a **refusal**, never a silent fallback to `cp`: the prefix

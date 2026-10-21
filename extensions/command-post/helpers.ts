@@ -155,7 +155,7 @@ export const FLEET_WIDGET_KEY = "command-post";
 /**
  * How often the fleet widget re-reads the run projections. Ages and current
  * tools change without any event of ours firing, so a timer is the honest way
- * to keep the widget true; it reads files only (never br, never a process) and
+ * to keep the widget true; it reads files only (never a process) and
  * is unref'd, so it can neither cost tokens nor hold the session open.
  */
 export const WIDGET_REFRESH_MS = 5000;

@@ -1,5 +1,7 @@
 # Everything home-local (data, state, projects, operator) lives here (docs/storage.md).
 .pi-command-post/
+# Legacy, inert since the tracker removal; kept so old clones don't stage it.
+.beads/
 node_modules/
 dist/
 .DS_Store

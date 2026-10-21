@@ -113,7 +113,7 @@ function issue(overrides: Partial<Job> & { id: string }): Job {
 /**
  * The reviewed fixture behind the golden files: one worker mid-tool, one held
  * job whose worker is idle, one crashed job, one torn-down job (hidden by
- * default) and one job br says is in flight that this fleet never dispatched.
+ * default) and one job the ledger says is in flight that this fleet never dispatched.
  */
 function fixture(overrides: Partial<StatusFacts> = {}): StatusFacts {
 	const records: FleetRecord[] = [
@@ -247,7 +247,7 @@ test("golden: an empty fleet with a degraded ledger still renders", () => {
 		records: [],
 		runs: new Map(),
 		alive: new Map(),
-		ledger: { ok: false, queried: true, error: "br: command not found" },
+		ledger: { ok: false, queried: true, error: "jobs.json: unreadable" },
 	});
 	assertGolden("status-table-empty.txt", formatStatusTable(snapshot));
 	assert.deepEqual(statusWidgetLines(snapshot), [], "an empty fleet clears the widget instead of drawing a header");
@@ -472,12 +472,12 @@ test("a project filter scopes the rows but never turns a claimed job into an unc
 	assert.deepEqual(
 		unfiltered.unclaimed.map((entry) => entry.job_id),
 		["cp-ghost-e5"],
-		"only the br job with no fleet record at all is unclaimed",
+		"only the ledger job with no fleet record at all is unclaimed",
 	);
 	const ghost = unfiltered.unclaimed[0];
 	assert.ok(ghost);
 	assert.equal(ghost.time_source, "br_updated_at");
-	assert.equal(ghost.timestamp, "2026-08-27T08:15:00Z", "br's sub-second stamp is truncated to the contract format");
+	assert.equal(ghost.timestamp, "2026-08-27T08:15:00Z", "the ledger's sub-second stamp is truncated to the contract format");
 	assert.equal(ghost.age_seconds, 3 * 3600 + 45 * 60);
 });
 
@@ -874,7 +874,7 @@ test("/status and the widget work in a real pi session", { timeout: 90_000 }, as
 	const table = String(notify.message);
 	assert.match(table, /1 job · 1 waiting · of which 1 live/);
 	assert.match(table, /cp-live-job/);
-	assert.ok(!table.includes("LEDGER degraded"), "--no-titles must not query br at all");
+	assert.ok(!table.includes("LEDGER degraded"), "--no-titles must not query the ledger at all");
 
 	const done = await rpc.waitFor((r) => r.type === "response" && r.id === "status");
 	assert.equal(done.success, true);

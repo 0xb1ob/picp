@@ -2,9 +2,8 @@
 
 Date: 2026-09-05. Status: approved in conversation, pending spec review.
 Item 4, after the three-item sequence of 2026-09-04. Assumes items 1 and 2
-(`2026-09-04-drop-br-ledger-design.md`, both PRs) have landed: ids are
-`job_id`, the ledger is the in-house `Ledger` behind `cp_job`, and `br` is
-gone from the codebase. Neutral on item 3 (single-project mode): every file
+(the in-house job ledger, [`docs/contracts.md` §Ledger](../../contracts.md#ledger)) have landed: ids are
+`job_id` and the ledger is the in-house `Ledger` behind `cp_job`. Neutral on item 3 (single-project mode): every file
 named here is reached through `paths.*`, so the layout switch needs nothing
 from this spec.
 

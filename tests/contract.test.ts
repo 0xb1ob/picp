@@ -223,8 +223,7 @@ test("the parity audit accounts for every capability, with real evidence", () =>
 test("PLAN.md is a pointer, not a task ledger", () => {
 	const plan = readFileSync(join(REPO_ROOT, "PLAN.md"), "utf8");
 	assert.ok(plan.split("\n").length <= 40, `PLAN.md is ${plan.split("\n").length} lines`);
-	assert.doesNotMatch(plan, /br ready/, "PLAN.md still treats `br ready` as the feature ledger");
-	assert.match(plan, /\.beads\//);
+	assert.match(plan, /cp_job ready/);
 	assert.match(plan, /src\/contracts\.ts/);
 	assert.match(plan, /docs\/contracts\.md/);
 	assert.match(plan, /docs\/build-history\.md/);

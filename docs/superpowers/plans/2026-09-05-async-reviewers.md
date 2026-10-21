@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Assumes PR 1 (`br_id` → `job_id`) and PR 2 (in-house ledger) of `2026-09-04-drop-br-ledger-design.md` have landed. Every identifier below says `job_id`, `jobId`, `JobIdSchema`, `requireJobId`, `isSafeJobId`. If a file you open still says `br_id`, stop: the prerequisite has not landed.
+- Assumes the in-house job ledger ([`docs/contracts.md` §Ledger](../../contracts.md#ledger)) has landed. Every identifier below says `job_id`, `jobId`, `JobIdSchema`, `requireJobId`, `isSafeJobId`. If a file you open still uses another id name, stop: the prerequisite has not landed.
 - Every file path is built through `paths.*` in `src/contracts.ts`. No literal `state/` anywhere in new code (single-project mode may move it).
 - One pending attempt per `(job_id, surface)`; a second `start` returns the existing pending record.
 - `finish` writes the decision file and deletes `pending.json` **before** it sends the wake-up (D8); it sends the wake-up only after `handBack` has been called for the attempt (D7).

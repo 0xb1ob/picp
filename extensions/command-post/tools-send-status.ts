@@ -157,7 +157,7 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps): 
 	// receipt exists — is read from the SAME snapshot /status and /watch already
 	// read (status.ts#assembleStatus); this tool never opens a second path to
 	// that data. What it cannot derive is the judgment: plain-language labels
-	// (falls back to the br title), why a job is Blocked, and the whole of
+	// (falls back to the job title), why a job is Blocked, and the whole of
 	// Awaiting you (type, decision, why it matters, what it blocks — none of
 	// that exists in any file). The rendered text is returned as the tool's own
 	// result, exactly like every other cp_* tool here: pi's transcript already

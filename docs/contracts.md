@@ -64,7 +64,7 @@ Schema version: `SCHEMA_VERSION = 1`. Every persisted file carries
 - [Envelope supersession](#envelope-supersession)
 - [Envelope correction](#envelope-correction)
 - [Identifiers and timestamps](#identifiers-and-timestamps)
-  - [Job id (renamed from br id)](#job-id-renamed-from-br-id)
+  - [Job id (renamed from the legacy id)](#job-id-renamed-from-the-legacy-id)
 
 ## Directory layout
 
@@ -547,8 +547,6 @@ A missing or malformed value is a **load failure**: a worker that cannot say
 which job it is must not run. Briefs never carry secrets, and the worker's
 environment is the only channel for identity.
 
-The worker environment builder strips an inherited `BEADS_DIR`/`BEADS_DB` and dispatch
-sets none: a worker never sees a retired tracker database.
 
 `self_assessment` is ported from the command-post research envelope
 (`confidence`, `scope`, `blocking_unknowns`, `destructive_scope`,
@@ -978,7 +976,7 @@ fourteen hours.
 **A third watcher shape, and the first two genuinely cannot reach this.** An
 event-driven watcher (`EnvelopeIntake`, `SettleWatcher`) needs a stream, and
 there is none. The 5-second snapshot tick (`WedgedWatch`) is *files-only* by
-rule — `src/widget.ts`: "a 5-second `br`/`gh` call is not a widget". And
+rule — `src/widget.ts`: "a 5-second `gh` call is not a widget". And
 `cp_status_block`'s CI gate (cp-gmy) only runs **inside a parent turn**, which
 cannot fix a defect whose symptom is the absence of turns. So: a dedicated,
 `.unref()`ed `setInterval` at `CI_WATCH_INTERVAL_MS` (60s, overridable with
@@ -1060,11 +1058,11 @@ retracted (it was true about a sha that is now history), and one still in flight
 is withheld by the staleness check above.
 
 **Evidence, never authorization.** A `cp-ci` wake-up merges nothing, closes no
-br issue, tears nothing down, writes no merge receipt and **declares no
+job, tears nothing down, writes no merge receipt and **declares no
 Awaiting-you row** — a background timer must never mint decisions. The watcher
 still merges nothing and decides nothing. On red there is no merge question at
 all (merging red is already forbidden). On `pr_merged` the follow-on is the
-existing contract: `cp_merged <job-id>`, close the br issue, `cp_teardown`.
+existing contract: `cp_merged <job-id>`, close the job, `cp_teardown`.
 
 **The wake-up is the read, so the parent does not re-take it (cp-3zbp).** The
 notice is derived from two REST queries against the remote for the branch's
@@ -1158,7 +1156,7 @@ review-window `HELD PR WAITING` notices (`isQuietWakeup`, N9) and relay-only
 `HELD PR STOPPED (next: resolve)` stops (§Rule-handled wakes) use
 `triggerTurn: false` even when idle and never increment the unseen-notice count.
 On the operator side a relay message whose every relay is `informational` (a
-bridge-relayed `HELD PR LANDED` or relay-only resolve stop, an idle-beads notice) is appended with
+bridge-relayed `HELD PR LANDED` or relay-only resolve stop) is appended with
 `triggerTurn: false` and acked on hand-off, since a quiet append fires no
 message hook; any other relay in the same message makes it triggering.
 `agent_settled` clears busy before anything else runs.
@@ -2405,7 +2403,7 @@ Mechanics that matter:
 
 - **Attempt state is on disk.** `readPriorAttempts` reads
   `state/runs/<id>/gate-<n>.json` in order, so the one-revise cap and the
-  operational ladder survive a parent restart. command-post kept this in br
+  operational ladder survive a parent restart. command-post kept this in ledger
   comments and re-derived it with regexes; the files are the record now.
 - **Per-attempt run directories.** Each reviewer gets
   `state/runs/<id>/gate-<n>/` as its `CP_RUN_DIR` (events, status, its
@@ -2723,10 +2721,10 @@ registration:
 - **One canonical clone per remote.** Registering a `clone_url` that already
   belongs to another name is refused — a second name for one repo is how a
   fleet leases from the wrong checkout.
-- **The name is three things at once**: the `projects/<name>` directory, the br
+- **The name is three things at once**: the `projects/<name>` directory, the job
   `project:<name>` label and the fleet key. It therefore matches
   `PROJECT_NAME_PATTERN` = `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` — T10 amendment:
-  deliberately narrower than command-post's `^[A-Za-z0-9._-]+$`, because br
+  deliberately narrower than command-post's `^[A-Za-z0-9._-]+$`, because job
   labels reject dots.
 
 `ensureClone(name)` is clone-on-demand: an existing clone is *verified*, a
@@ -3200,7 +3198,7 @@ When a pipeline opts into diff review (`PipelineRecord.review.enabled`), three a
 
 [`src/integrate.ts`](../src/integrate.ts). Everything between "the PR is green"
 and "the job is closed" — rebase, CI verification, merge, receipt, teardown,
-head deletion, br close — as **one resumable step per call**, each with a
+head deletion, job close — as **one resumable step per call**, each with a
 postcondition verified in code.
 
 ### Why a tool and not a role
@@ -3213,7 +3211,7 @@ integrator *worker* was rejected are structural, not stylistic:
 
 - it could not wait for CI at all — `src/ci-wait.ts` refuses `gh run watch` by
   name for every worker, and that guard exists because prose already lost once;
-- it would need `cp_teardown` and a br-close capability, both parent-only by
+- it would need `cp_teardown` and a job-close capability, both parent-only by
   `WORKER_FORBIDDEN_TOOLS`, so the recursion guard would have to be reopened;
 - it would be a **second writer** to a branch whose implementer is still `held`
   and promotable.
@@ -3246,7 +3244,7 @@ record. The record (`state/runs/<job-id>/integration.json`,
 | `sync` | local HEAD ≠ remote tip, tree clean, **and** HEAD an ancestor of it *or* its content proven already in the base | `git fetch` + `reset --hard <the sha ls-remote reported>` | the teardown gate compares the *local* tip |
 | `teardown` | receipt written | `Teardown.teardown` | pass reason `pushed` (or `merged`), lease returned |
 | `delete_head` | torn down | `git push origin --delete <branch>` | `ls-remote` empty |
-| `close` | torn down | `Ledger.close(job_id, reason)` | br issue closed with a reason |
+| `close` | torn down | `Ledger.close(job_id, reason)` | job closed with a reason |
 | `prune_salvage` (part of `done`) | the merge is recorded and the base has moved | delete a `refs/cp-salvage/*` ref **only** when `merge-base --is-ancestor <ref sha> <ls-remote base tip>` succeeds | pruned and kept refs are both reported; never fails the integration |
 
 Branch on `next` — `advance | wait | review | resolve | retry | surface | done` — never
@@ -3735,7 +3733,7 @@ Checkpoint kinds do not collide: `ship` keeps `<id>.json` and the Awaiting-you
 id `aw-checkpoint-<id>`; `diff` is `<id>.diff.json`; `merge` is
 `<id>.merge-<head12>.json` with the id `aw-checkpoint-merge-<id>-<head12>`.
 `listPending()` parses the file name (`parseCheckpointFileName`) rather than
-stripping a suffix, so no store can report another kind's checkpoint under a br
+stripping a suffix, so no store can report another kind's checkpoint under an
 id that was never a job id.
 
 ### Per-project human-review handoff (`merge_policy: human_handoff`)
@@ -3903,7 +3901,7 @@ The branch has exactly one writer at any moment, and the boundaries are code:
 Three facts, all cheap local reads, returned by the tool as `end_state`:
 `state/runs/<job-id>/merge.json` exists and validates; the fleet record is
 `phase: done` with `closed_reason: "gated"` (never `"forced"`) and a `pr`
-receipt of `merged`; the br issue is closed with a reason. `origin/main` moving
+receipt of `merged`; the job is closed with a reason. `origin/main` moving
 is not a check — it moves for everyone's merges — and `gh pr view` is a network
 call the receipt already made once. The point is that the parent stops
 re-deriving the sequence and reads a record that could only exist if it
@@ -3956,15 +3954,13 @@ the store, or a destination that is a directory. `has()` is total — a job id
 that is not even path-safe carries nothing, because a guard must never throw on
 hostile input.
 
-**T19 amendment.** command-post mirrored the body into a `br` comment
+**T19 amendment.** command-post mirrored the body into a ledger comment
 (`artifact:v1`) because `cmdp teardown` deleted `state/artifacts/<id>`. Here
 teardown keeps the directory unless the operator asks for cleanup, so the file
-system *is* the durable store — and copying a body into a ledger whose
-`br show --json` inlines comment bodies would manufacture the exact hazard the
-guard below exists to contain. `add` therefore registers a **file**, never a
-comment. The `br show` guard survives the amendment because bodies can still
-reach comments by other routes (an operator, an imported issue, a future
-integration) and because the ported rule was always a blanket one.
+system *is* the durable store — and copying a body into a ledger whose show
+output inlines comment bodies would manufacture the exact hazard the
+guards below exist to contain. `add` therefore registers a **file**, never a
+comment.
 
 ### The guards
 
@@ -3977,7 +3973,6 @@ move is the right one.
 |---|---|---|
 | `artifact_body_read` | `read`/`grep` on a path in the store; any bash command that would emit one | `cp_artifact get` with an out file, `cp_artifact path`, or `ls`/`stat`/`wc` |
 | `artifact_body_write` | `edit`/`write` into the store | the artifact is the worker's deliverable; `cp_artifact add` files one |
-| `ledger_inlines_artifact` | `br show`/`comments`/`export` naming an **artifact-bearing** id | `br list`/`br ready` for status, `cp_artifact get` for the body |
 | `never_commit_path` | `git add/commit/rm/stash/push` naming a `NEVER_COMMIT_PATHS` root (`.pi-command-post/`) | commit source only |
 | `bulk_stage_in_home` | `git add -A/./--all/-u` or `git commit -a` **in the command post home** | stage the explicit source paths |
 | `leased_git_mutation` | parent bash `git fetch/pull/checkout/switch/reset/clean` or force push targeting a live fleet lease, including `git -C` and compound commands | `cp_send`/`cp_revive` for worker changes, `cp_integrate` for merge/sync |
@@ -4026,7 +4021,7 @@ every caller that is not a real TUI a human is looking at.
 this code; a worker reading the artifact it was handed is the entire point of
 `cp_artifact get`.
 
-`.beads/` was tracked in git for the duration of the build (it *was* the plan's
+The ledger directory was tracked in git for the duration of the build (it *was* the plan's
 task list) while the guard refused to stage it — a contradiction that would have
 shipped a home whose ledger is committable but unstageable. `cp-rnr` ended it:
 the ledger is machine-local like `data/`, `state/` and `projects/`, the
@@ -4084,12 +4079,12 @@ tree, no local commits), because that gate is keyed on kind. `JOB_KINDS`,
 | role | `planner` | `ROLES` is fixed at three; `profiles/qa.md` reuses it (and inherits "planner profiles are read-only") |
 | next, at intake | `teardown` | only `delivery === "pr"` holds |
 
-**The br issue stays.** Every dispatch precondition keys on a job id
+**The job stays.** Every dispatch precondition keys on a job id
 (`ledger.show`, the claim, `branch = job id` unless `cp_dispatch pr` binds a PR, `state/runs/<id>`,
 `state/artifacts/<id>`, the lease holder, the fleet record), and so does the
 whole observation stack (settle recovery, revive, `/watch`, wake-up staleness).
-A "lighter id" would fork all of that to save one `br create` and one
-`br close`. Labels: `project:<name>`, `delivery:answer`, `kind:research`; the
+A "lighter id" would fork all of that to save one create and one
+close. Labels: `project:<name>`, `delivery:answer`, `kind:research`; the
 title is the question; `cp_teardown` closes with `answered: <headline>`. Lifecycle is an
 ordinary research job's: open → claimed at dispatch → `held` on the envelope →
 `cp_teardown`.
@@ -4222,7 +4217,7 @@ whatever the job's phase has since become.
 **Reproducing the TUI half (cur-20260901-5).** A green unit suite is not
 evidence that a card renders. On a real pi TUI, in a scratch home with a
 registered project: run `/cp-ask <project> "where is X configured?"`, confirm
-the br issue carries the three labels and the widget shows the job running;
+the job carries the three labels and the widget shows the job running;
 when the envelope lands, confirm the card appears in the transcript with no
 operator action and a header reading `ANSWER — <job-id> · <project> · <bytes>`;
 tear the job down immediately (`cp_teardown`, within seconds of the envelope)
@@ -4752,7 +4747,7 @@ follow-ons only within that scope and escalates scope growth (`scope expansion`)
 the objective prose for scope. Explicit `job_ids` (or the this-turn sentinel) still narrow the grant. An unqualified `#N` counts only as the whole
 objective or right after an issue-task word (`issue`, `fix`, `closes`, `resolves`, `address`,
 `implement`, `target`); a PR label (`PR #7`) or an incidental status number (`after #220 merged`)
-is prose — no verification, no job, no escalation (bead b-qbi.2). `owner/repo#N` is explicit and
+is prose — no verification, no job, no escalation (b-qbi.2). `owner/repo#N` is explicit and
 always verified; `cp_job create`'s `external_ref` stays strict.
 
 The operator note's Mandate template (`src/operator-note.ts`) tells the main LLM
@@ -4793,15 +4788,6 @@ partitioned by selection. Every other grant's result rides along in `others`; on
 renders in full, and the rest is one line each (`<id>: <status> <live>/<parallelism>, jobs <used>/<cap> —
 <kind>: <reason>`), so the answer does not grow with the number of waiting grants.
 
-`cp_next` also reads each registered project's `br ready --json` once per call
-(10-second command timeout, 4 MiB output bound), using the canonical clone's
-explicit bead database. It skips epics, `deferred` labels, and beads already
-referenced by a job, including closed jobs. With spare mandate slots or no
-active grant, it names the count and up to five IDs per project; a failed read
-is explicitly unavailable, never an empty queue. These are intake suggestions,
-not dispatch candidates or authority. A working-to-idle fleet transition reads
-the same evidence and sends one `cp-bridge` wake per idle period. Starting work
-again invalidates an outstanding idle read; repeated `cp_next` calls do not wake.
 
 The recommendation is derived from labels (`project:`, `kind:`) and the
 ledger's own dependency graph, never from prose: a blocked job enters `ready`
@@ -4930,9 +4916,9 @@ GitHub permits.
 
 ### Ported details worth keeping
 
-- **Two br issues, dep-linked.** `start()` creates `research: <title>`
+- **Two jobs, dep-linked.** `start()` creates `research: <title>`
   (`kind:research`, `delivery:pipeline`) and `ship: <title>` (`kind:ship`,
-  the intake delivery) and adds the dependency, so `br ready` cannot offer the
+  the intake delivery) and adds the dependency, so `cp_job ready` cannot offer the
   ship job while the research is open. The ledger is the operator's view; the
   pipeline file is the machine's.
 - **Hung-planner recovery.** An artifact at the predeclared path with no
@@ -5305,7 +5291,7 @@ an operator quote unless the mandate's `ask_on` omits `merge`. `cp_awaiting`
 still only `list`s and `withdraw`s. `/cp-awaiting` is the plain-text listing for
 a human at a TUI. There is no TUI overlay for decisions.
 
-**Skip records nothing, anywhere.** Not a file write, not a br comment, not a
+**Skip records nothing, anywhere.** Not a file write, not a job comment, not a
 run-log event. A skipped item simply stays `state: "open"` and is rendered
 again next time — dismiss is not an answer, the same rule T21's checkpoint
 dialog already keeps. For a derived row this is literal: skip does not even
@@ -5316,16 +5302,13 @@ the next merge re-derives the item unchanged.
 Only approve/decline-shaped text (`authorizationVerdict`) is a verdict for a
 `type: authorization` row; anything else leaves the checkpoint `pending`.
 
-**br is the audit trail, not the queue.** Answering a declared item with a
-`job_id` appends one best-effort `br` comment naming the decision, the answer,
+**The ledger is the audit trail, not the queue.** Answering a declared item with a
+`job_id` appends one best-effort job comment naming the decision, the answer,
 who and when. A failed comment never loses the answer: the write to
 `state/awaiting.json` already happened, and the item simply has no
 `audit_ref` until a later answer or sync retries it. This is the opposite
-trade-off from the operator's first instinct (br as the store) — br has no slot
-for a live, multi-item, no-job-required queue that survives br being down, and
-the parent's own guard (`ContextGuard`, `BR_INLINING_SUBCOMMANDS`) already
-blocks `br show`/`br comments` on an artifact-bearing issue, which is exactly
-the "finished research" row that matters most.
+trade-off from the operator's first instinct (the ledger as the store) — the ledger has no slot
+for a live, multi-item, no-job-required queue that survives the ledger being down.
 
 **Never blocks the parent on an absent human.** `cp_status_block` never opens a
 dialog — it only renders (merging every open item, including ones the model
@@ -5400,16 +5383,16 @@ store actually did with it:
 Declared rows were the one Awaiting-you source with no staleness rule: unasked
 wake-ups are staleness-checked, and a derived row clears when its source
 condition does (a checkpoint is decided, a PR receipt appears), but a declared
-row persisted until answered or withdrawn — through teardown, br close, merge
+row persisted until answered or withdrawn — through teardown, job close, merge
 and a parent restart. On 2026-09-04 the operator was asked at 18:52 whether to
-merge PR #111, merged at 18:45 with br cp-gb3w closed, and answered "this is
+merge PR #111, merged at 18:45 with job cp-gb3w closed, and answered "this is
 obsolete".
 
 The mechanism is **obsolete-on-read**, not a retire pass and not a store field:
 `obsoleteDeclaredReason` ([`src/awaiting.ts`](../src/awaiting.ts)) is a pure
 predicate over the same fleet snapshot every surface already reads. A declared
 row is not offered as open when its `job_id` names a job that is `phase: "done"`,
-closed in br, or carries a **merged** PR receipt. `mergeAwaiting` (so
+closed in the ledger, or carries a **merged** PR receipt. `mergeAwaiting` (so
 `/cp-decide`, the auto-open surface and the widget) drops it; `resolveAwaitingRows`
 refuses it before the store is touched, so the status block prints the reason
 under the table instead of a question.
@@ -5862,7 +5845,7 @@ A repeat is a defect, not a feature. One merge authorization
 (`aw-checkpoint-cp-ehsc.merge-f7b8769f0606`) was delivered to the parent **three
 times**, each copy reading as fresh news and each saying "approved means
 dispatch it"; by the third the PR was merged, the receipt written, the head
-deleted and the br issue closed. Nothing bad happened only because
+deleted and the job closed. Nothing bad happened only because
 `cp_integrate` is idempotent — a replayed authorization for a deploy, a
 dispatch or any non-idempotent step would have been executed once per copy.
 Two independent defects produced it:
@@ -7157,7 +7140,7 @@ discovers it by surprise, not because this feature changes its risk.
 [`src/status.ts`](../src/status.ts) is the read-only fleet view: `/status`, its
 `--json` snapshot and the persistent widget. It is a **projection of files** —
 `state/fleet.json` plus each run's `status.json`, plus one pid probe and an
-optional `br list` join. It writes nothing, and it is built per call, because a
+optional ledger join. It writes nothing, and it is built per call, because a
 status view that caches is a status view that lies.
 
 Three layers: `assembleStatus()` (pure, facts in / `StatusSnapshot` out, pinned
@@ -7348,13 +7331,13 @@ not bundled into this fix.
 | `joined_via`, `cli`, `pane`, `session`, `drawing` | dropped | the join is `job_id` (fleet.json is keyed by it), there is one CLI, and there are no panes |
 | `glyph` | renderer-only | it was a field for the HTML dashboard, which is out of scope |
 | `edges[]` (muxa parent/child) | dropped | a worker's parent is this session, always |
-| `phase: "orphaned"` nodes synthesized from br | `unclaimed[]` | see below |
+| `phase: "orphaned"` nodes synthesized from the ledger | `unclaimed[]` | see below |
 | `--origin` filter | `--project` filter | origin scoping is deferred; `origin` is still carried on every row |
 | `--html`, `--serve`, `--pane` | dropped | explicitly out of scope |
 | ported `age()` (`Ns`/`Nm`/`Nh`/`Nd`, negative clamps to 0) | identical | |
 
-**Degradation is a policy, not an accident.** A ledger join that fails (br
-missing, db locked, anything) sets `ledger: {ok: false, queried: true, error}`
+**Degradation is a policy, not an accident.** A ledger join that fails (an
+unreadable document, a lock, anything) sets `ledger: {ok: false, queried: true, error}`
 and the view still renders every worker, with a `LEDGER degraded (…)` banner —
 the ported "BROKER degraded (unavailable) -- nodes below may be stale" line.
 This is the one place the fleet deliberately does **not** fail closed, and the
@@ -7364,12 +7347,12 @@ something is already broken. Nothing is dispatched, leased or written from a
 degraded snapshot; the degradation is on the record, in the payload.
 
 **`unclaimed[]`** is the ported `orphaned` node, minus the invented phase. It
-lists jobs br calls `in_progress` that this home has **no fleet record for** —
+lists jobs the ledger calls `in_progress` that this home has **no fleet record for** —
 real evidence (a dispatch that never landed, a restart that lost a record,
 another machine). It is not given a job phase, because the four phases describe
 records this home owns, and a fifth phase for something we cannot observe is
 precisely the guessing this rebuild exists to end. Its `time_source` is
-`br_updated_at` (a fleet row's is always `dispatched_at`), and br's sub-second
+`br_updated_at` (a fleet row's is always `dispatched_at`), and sub-second ledger
 timestamps are truncated to the contract format rather than dropped.
 `unclaimed` is measured against the **whole** fleet even when the view is
 filtered: a job hidden by `--project` is still claimed.
@@ -7431,7 +7414,7 @@ block's `waiting_on` is for.
 ### Filters, counts and the widget
 
 - `include: "active"` (default) shows `waiting`, `held` and `failed`; `"all"`
-  adds `done`. Torn-down jobs are history, and history is br's job.
+  adds `done`. Torn-down jobs are history, and history is the ledger's job.
 - **Counts must equal rows.** `validateStatusSnapshot` re-checks every count and
   the job-id uniqueness before `assembleStatus` returns; a snapshot that
   disagrees with itself throws rather than renders. `usage` totals only the
@@ -7440,13 +7423,12 @@ block's `waiting_on` is for.
   then oldest dispatch, then job id — because golden files are the test and
   "whatever the map iterator did" is not an order.
 - The **widget** (`ctx.ui.setWidget`, key `command-post`) renders from
-  `statusNow()` — **files only, never br** — because it also refreshes on a
+  `statusNow()` — **files only** — because it also refreshes on a
   timer (`WIDGET_REFRESH_MS`, unref'd) so ages and tool names stay true between
   events. Identical lines are never re-sent: in RPC mode every `setWidget` is a
   protocol message. An empty fleet clears the widget instead of drawing a header.
   Its layout is [§The widget](#the-widget) below.
-- Titles come from `br list` (never `br show`, which inlines comment bodies —
-  the T19 hazard) and only `title` and `status` are kept from each issue.
+- Titles come from the ledger's job list, and only `title` and `status` are kept from each job.
 
 ### The widget
 
@@ -7756,7 +7738,7 @@ Slack. Three rules carried over, and they are the design:
    `fix`, so "a diagnosis nobody can act on" is a contract violation rather than
    a style problem. Branch on `check`, never on the prose.
 2. **Advisory stays green.** `warn` is for degraded-or-absent-by-choice (no
-   `data/routing.json`, no `.beads/` yet, no `state/` yet, a dead worker
+   `data/routing.json`, no `state/` yet, a dead worker
    reconcile will handle). `error` means *this home cannot dispatch*, and only
    an error sets the exit code (`DOCTOR_EXIT_BROKEN = 2`, ported). A fresh home
    is therefore green, which is what makes the green meaningful.
@@ -7809,32 +7791,6 @@ still do not wrap unknown tools: a foreign file tool is warned about, not
 blocked. Extending the guard to every tool whose arguments mention `state/`
 would also refuse command-post's own tools (`cp_artifact`, `/watch` paths).
 
-### The br checks this build's own history earned
-
-Recorded on `cp-t25-doctor-gc7` (evidence: commit `1803a2c`):
-
-- **`host.br.conflict`** — a homebrew `br` 0.2.19 and a `~/.local/bin` 0.5.2 on
-  one PATH made `br ready` work in one shell and fail in another. What is
-  flagged is **conflicting versions**, not duplicate paths: version managers
-  (fnm, asdf, mise) legitimately expose several shims for the *same* build, and
-  calling that broken would train an operator to ignore doctor. Every path is
-  probed the same way, so two spellings of one version cannot invent a conflict.
-- **`host.br.version`** — br older than `MIN_BR_VERSION` (`src/ledger.ts`) is an
-  `error`, not a degraded mode. This build targets **one** br and reads the
-  contract br publishes (`br schema commands --format json`); it does not sniff
-  versions at runtime or shim older envelopes, so the floor exists to be
-  *reported* rather than branched on. An unreadable `--version` is left alone —
-  `host.br` already says `(version unknown)`, and an error invented from a failed
-  probe would train an operator to ignore doctor.
-- **`ledger.schema`** — `br doctor migrate-schema plan --json` is read-only and
-  reports `from_version`/`to_version`; a gap is an `error` whose fix is the
-  review-then-apply migration, because a schema older than the binary turns
-  every ledger call into a cryptic failure.
-- **`ledger.doctor`** — br's own findings are **surfaced, not re-implemented**
-  (including `sqlite3.integrity_check`, which catches legacy DDL only br's
-  patched sqlite can reparse). br's `warn` stays a warn; anything else becomes an
-  `error`, because softening br's verdict about its own database would be a lie.
-  Unreadable or non-JSON br output is a `warn`, never a wrong verdict.
 
 ### Models, and the probe that must not lie
 
@@ -8724,7 +8680,7 @@ run history as audit. Disable restored schedules until the operator deliberately
 settings added after the snapshot must be re-added. Never downgrade below P2b with open run members:
 older authority code cannot safely judge them. Preserve the backups/manifest through rollback.
 
-**Retired: tracker connections and ready-bead discovery (cp-remove-beads-pr1b-t68e).**
+**Retired: external tracker connections and ready-item discovery (#384).**
 `data/trackers.json` is retired: nothing reads, validates or writes it, so a malformed
 one cannot break startup. A job's optional `tracker: { connection_id, item_id, linked_at }`
 link is inert legacy metadata (`LegacyTrackerLinkSchema`, `src/contracts/jobs.ts`): unique
@@ -8732,11 +8688,10 @@ across open and closed history, preserved by every native write, and never acted
 `cp_next` and its `state/next-snapshot.json` (`schema_version: 2`) list native jobs only;
 the viewer reads an older version as not yet written ("Refreshes on next scheduling pass"), an unknown one
 as unavailable, never either as nothing queued.
-There is no idle notice. Dispatch injects no tracker database: a worker's inherited
-`BEADS_DIR`/`BEADS_DB` is stripped and none is set.
+There is no idle notice. Dispatch injects no tracker database or environment into a worker.
 
 **Retired: tracker import, link and write-back (B4/B5/laf).** `cp_tracker`, its 60 s
-write-back tick, `/cp-jobs import-beads` and auto-linking on `cp_job create` and
+write-back tick, the legacy `/cp-jobs` JSONL importer and auto-linking on `cp_job create` and
 `cp_dispatch` are gone; `cp_integrate` and the `HELD PR LANDED` notice carry no
 tracker line. Existing `state/tracker-sync.json` and `state/tracker-tasks/` stay on
 disk unread and untouched. A `deferred` job is never claimed (`Ledger.claim`:
@@ -8776,8 +8731,8 @@ bad refs named in the same mission read as one open question, not two).
 ignorance is not a finding — and the job is created normally with the fact (or
 the failure) recorded on `notes`, which `cp_job show` then prints.
 
-**Retired: deferred-bead overrides (picp-t4n).** With command refs no longer
-verified there is no deferred-bead state to admit. Escalation records may still
+**Retired: deferred-reference overrides (picp-t4n).** With command refs no longer
+verified there is no deferred-reference state to admit. Escalation records may still
 carry `deferred_refs` from old journals; nothing writes or reads it any more.
 
 Every job carries labels, and they are the dispatchability contract:
@@ -8812,41 +8767,11 @@ Policy that lives in code rather than in prose:
   is not exposed — a job blocked by an open dependency is unblocked
   deliberately.
 - **Dropped work is closed, never deleted** (`drop()` prefixes
-  `dropped: `); `br delete` has no wrapper.
+  `dropped: `); there is no delete.
 - **Real dependencies only.** `addDep(blocked, blocker)` means "blocked cannot
   start until blocker lands"; a dropped close remains unresolved and self-dependencies are refused.
 - **Blockers are comments, not statuses.** A blocked job stays `in_progress`
   with a `blocker: …` comment (ported).
-- Every call passes `--json` and validates the envelope
-  (`LedgerIssueSchema`, deliberately open because br owns that shape); br's
-  error envelope becomes a `LedgerError` carrying its `code` and `hint`. Prose
-  output is never scraped.
-- **Every query states its limit.** No call omits `--limit`, because br's
-  defaults are not uniform: `br blocked` pages at **50**, while `br ready` and
-  `br list` are unlimited. `blocked()` is hard-wired to `--limit 0` and takes no
-  caller limit at all — there is no correct page size for "does this exist" — and
-  every other query sends `--limit 0` unless the caller asked for a page.
-
-  br's envelope shapes are **per command and published**, not uniform:
-  `br schema commands --format json` reports `list`, `blocked` and `search` as
-  wrapper objects whose rows are at `.issues`, while `ready`, `show`, `dep list`
-  and `comments list` are bare arrays. `unwrapIssues()` reads the rows out of
-  whichever shape arrives, which is why br's 0.5.2 → 0.5.4 change of
-  `blocked`/`list` from array to wrapper never reached dispatch — only a test
-  that read `.length` off the raw JSON noticed, and it failed as
-  `undefined !== 50`, naming neither br nor the shape. `tests/ledger.test.ts` now
-  pins the published table itself, so the next move fails with the command, the
-  new shape and the function to teach.
-
-  This is the ported rule "pass `--limit 0` when the result decides membership or
-  existence" (command-post `reports/operating-knowledge.md`), and it is a rule
-  because inheriting the default was a **fail-open** bug (`cp-i2s`): dispatch
-  refuses a job when `blockersOf()` finds blockers, so with more than 50 blocked
-  issues in a home, a job whose blocker fell past the page read as unblocked and
-  got a lease, a branch and a worker. `tests/ledger.test.ts` pins both halves —
-  the argv of every query, and br's own 50-row default against a real scratch
-  workspace, so an upstream change to that default fails our suite instead of
-  our dispatch.
 
 ### Advisory gateway capacity
 
@@ -9146,18 +9071,18 @@ the worker-prompt corpus's, for the same reason.
 matches on `scope` and `risk`, and both defaulted to `S`/`low` for any dispatch
 that omitted them — so unlabelled work silently routed as small. For every axis
 a caller does not name, `inferScopeAndRisk` reads the job's own words (task plus
-the br title and description): structural or cross-cutting wording means
+the job title and description): structural or cross-cutting wording means
 `scope: M` (not `L` — that is a human's call), and destructive,
 history-rewriting, credential-touching, money-touching or production wording
 means `risk: high`. Both `inferScopeAndRisk` and the H6 `riskKeywords` read one
-traversal, `acceptedRiskMatches` (bead b-qbi.2): every signal match is checked,
+traversal, `acceptedRiskMatches` (b-qbi.2): every signal match is checked,
 and one negated in its own short clause is dropped: `do not`, `must not`,
 `don't`, `never`, or `no` allows up to three intervening words ("no database
 migration", "no schema or data migration", "never deploy to production";
-bead nfm). `not` and `without` retain the narrower gerund/safety-verb rule
+nfm). `not` and `without` retain the narrower gerund/safety-verb rule
 ("without touching production"). Punctuation or `but`/`and`/`then` ends the clause.
 "Never force-push" is not evidence, while "deploy without tests to
-production", "do not wait to purge the table" (bead b-qbi.6) and an affirmative
+production", "do not wait to purge the table" (b-qbi.6) and an affirmative
 match elsewhere still are. Coordinated credential nouns share the negation
 ("never expose secrets or tokens"), but a new action does not ("or delete rows"
 or "or rotate credentials"). `or` starts a fresh clause by default, except
@@ -9179,7 +9104,7 @@ comma splice after a negated verb reads as a list; that is the known ceiling of 
 clause pattern.
 Markdown sections headed `Constraints`, `Non-goals`, `Test plan`, `Evidence`, `Unknowns`
 (`Unknowns/Blockers`), `Self-assessment` or `Acceptance` are excluded, including
-subsections, until the next same-level or higher heading (bead dbn, cp-wkv1); the
+subsections, until the next same-level or higher heading (dbn, cp-wkv1); the
 dispatch joins the job title as a `# Job: <title>` heading, so neither a task's last
 section nor a title such as "Evidence" swallows the job description.
 Access wording means access work (`auth`,
@@ -9270,7 +9195,7 @@ sends: **known impact is never lowered** (a `risk: high` from any source but
 escalate** (a destructive, blocked or low-confidence plan raises risk to `high`),
 and **`risk: low` is never emitted by the pipeline at all** — silence leaves that
 axis to `resolveRoutingInputs()` at dispatch, which re-reads the ship job's own
-br title and description (the original task) and defaults to `low` only when it
+job title and description (the original task) and defaults to `low` only when it
 finds nothing. **Scope may shrink**: a plan that narrows an `L` task to an `S`
 change is exactly the evidence scope is for, so the planner's `scope` wins its
 own axis and the task's is the fallback, never a floor to max against.
@@ -10460,9 +10385,9 @@ refuses a `pr_url` naming another PR. Every gate is unchanged: exact reviewed he
 green CI, review pass, merge policy; teardown and the merge receipt (`bound: true`)
 key on the job id. `dry_run` ignores `pr`.
 
-### Job id (renamed from br id)
+### Job id (renamed from the legacy id)
 
-The identifier of a job was called `br_id` after the tool that minted it. It is
+The identifier of a job was called `br_id` after the external tool that minted it. It is
 now `job_id` everywhere: schema fields, tool parameters, the `${job_id}` brief
 placeholder, the worker's `CP_JOB_ID` environment variable, and prose. The
 value and the pattern are unchanged (`JOB_ID_PATTERN`, `^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`),

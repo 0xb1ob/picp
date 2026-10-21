@@ -18,7 +18,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 	/**
 	 * cp-u3o4: the Q&A path as a tool, for a question the operator asked in chat.
 	 *
-	 * It is `cp_dispatch` with the decision already made — one br issue
+	 * It is `cp_dispatch` with the decision already made — one job
 	 * (`kind:research`, `delivery:answer`), a read-only worker, scope S — and it
 	 * returns the **dispatch record**. The answer never comes back through this
 	 * tool: it lands as a card in the operator's transcript, which is the whole

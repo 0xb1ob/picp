@@ -129,7 +129,7 @@ export const WORKER_FORBIDDEN_TOOLS: readonly string[] = Object.freeze([
 	 */
 	"cp_revive",
 	/**
-	 * cp-u3o4: `cp_ask` creates a br issue and dispatches a worker for it, so it
+	 * cp-u3o4: `cp_ask` creates a job and dispatches a worker for it, so it
 	 * is dispatch capability wearing a smaller hat — the same recursion guard as
 	 * `cp_dispatch`, for the same reason.
 	 */
@@ -168,7 +168,7 @@ export const FLEET_MUTATING_TOOLS: readonly string[] = Object.freeze([
 	"cp_pipeline",
 	/** Writes state/escalations.json. */
 	"cp_escalate",
-	/** cp-u3o4: creates a br issue and dispatches a Q&A worker — a spawn is a spawn. */
+	/** cp-u3o4: creates a job and dispatches a Q&A worker — a spawn is a spawn. */
 	"cp_ask",
 ]);
 

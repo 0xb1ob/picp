@@ -1,7 +1,7 @@
 /**
  * MILESTONE m3 — the pipeline, end to end, on the mock provider.
  *
- * Everything is the real thing except the model: a real `br` ledger, a real
+ * Everything is the real thing except the model: a real jobs ledger, a real
  * project registry and clone, real treehouse leases, real `pi --mode rpc`
  * workers (planner, gate reviewer, implementer), real files on disk. Only
  * the model's answers are scripted, which is what makes every branch reachable
@@ -140,7 +140,7 @@ async function pipeline(t: { after(fn: () => void | Promise<void>): void }): Pro
 	// The planner writes the artifact at the path it was given, then reports
 	// through the only channel there is. `$CP_ARTIFACT_PATH` comes from the
 	// worker environment; the envelope's ids are read back out of the brief,
-	// because br mints them after the script is registered.
+	// because the ledger mints them after the script is registered.
 	// cp-rte: L + destructive means routing must reach the implementer rubric row
 	// for big, risky work — and the suggested model must be ignored. routing T2
 	// swaps this out for a confident, non-destructive plan on a high-impact task.
@@ -353,7 +353,7 @@ async function pipeline(t: { after(fn: () => void | Promise<void>): void }): Pro
 
 /**
  * The brief the worker was sent is in the request, and it names the job and its
- * predeclared artifact. That is how a canned script reports for an id br only
+ * predeclared artifact. That is how a canned script reports for an id the ledger only
  * minted a moment ago.
  */
 function briefOf(request: RecordedRequest): string {
@@ -414,7 +414,7 @@ test("m3: research → gate (revise, then pass) → checkpoint → implement", {
 	const f = await pipeline(t);
 	const { research_id: researchId, ship_id: shipId } = await f.start();
 
-	// The ship job exists and is blocked by the research job: br ready cannot
+	// The ship job exists and is blocked by the research job: cp_job ready cannot
 	// offer implementation work before the plan is judged.
 	assert.deepEqual(await f.post.ledger().blockersOf(shipId), [researchId]);
 

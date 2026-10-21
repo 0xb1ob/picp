@@ -22,7 +22,7 @@ const DEFAULT_STANDING_ORDERS = `# Standing orders
 - A CI-speed timeout raise is acceptable; keep the 5000 ms floor.
 
 ## Planning
-- A bead with state transitions or merge gating goes planner-first.
+- A job with state transitions or merge gating goes planner-first.
 
 ## Review and merge
 - Start review only on a green pushed head, and merge only that reviewed head. This holds for updated and conflict-resolved heads too.
