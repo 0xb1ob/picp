@@ -74,6 +74,7 @@ test("S04: cp_review stops wide, oversized and unparseable subjects before a mod
 		["wide", Object.fromEntries(Array.from({ length: DIFF_REVIEW_MAX_STAT_FILES + 1 }, (_, n) => [`file-${n}.txt`, "x\n"])), /DIFF_REVIEW_MAX_STAT_FILES/],
 		["bytes", { "generated.txt": "line\n".repeat(DIFF_REVIEW_MAX_BYTES), "small.txt": "tiny\n" }, /DIFF_REVIEW_MAX_BYTES/],
 		["quoted", { "ä.ts": "export const a = 1;\n", 'we"ird.ts': "export const w = 1;\n" }, /omitted/],
+		["hidden-code", { "data/results.csv": "row,123456789\n".repeat(19_000), "src/app.ts": "export const hidden = true;\n".repeat(3_000) }, /src\/app\.ts/],
 	] as const) {
 		const job = await s.seed(files);
 		const result = await s.review(job);
@@ -82,12 +83,16 @@ test("S04: cp_review stops wide, oversized and unparseable subjects before a mod
 		assert.equal(result.requests.length, 0, label);
 		assert.equal(result.verdict.diff_stat.files, Object.keys(files).length, label);
 		assert.equal(result.verdict.diff_stat.truncated, true, label);
+		const replay = await s.review(job);
+		assert.equal(replay.verdict.attempt, result.verdict.attempt, label);
+		assert.equal(replay.verdict.head_sha, result.verdict.head_sha, label);
+		assert.equal(replay.requests.length, 0, label);
 		if (label === "wide") assert.equal(existsSync(join(result.scratch, "diff.md")), false);
 		if (label !== "wide") {
 			const diff = readFileSync(join(result.scratch, "diff.md"), "utf8");
 			assert.match(diff, /## Omitted/);
 			if (label === "bytes") assert.match(diff, /tiny/);
-			else assert.match(diff, /export const a = 1/);
+			if (label === "quoted") assert.match(diff, /export const a = 1/);
 		}
 	}
 });
@@ -95,13 +100,17 @@ test("S04: cp_review stops wide, oversized and unparseable subjects before a mod
 
 test("S04: review packets preserve frozen scope and context while persisted verdicts exclude gate-only fields", { timeout: 120_000 }, async (t) => {
 	const s = await stack(t);
+	const gate = { schema_version: 1, job_id: "cp-s04-1", attempt: 1, verdict: "pass", cause: null, flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["plan gate only"], decided_at: isoTimestamp() };
 	const job = await s.seed({ "src/app.ts": "export const marker = 'S04_BODY_CANARY';\n" });
 	mkdirSync(join(s.home, paths.runDir(job)), { recursive: true });
+	writeFileSync(join(s.home, paths.gateFile(job, 1)), JSON.stringify(gate));
 	const task = "Keep README.md. S04_TASK_CANARY\n";
 	writeFileSync(join(s.home, paths.originalTaskFile(job)), task);
 	writeFileSync(join(s.home, paths.taskAddendaFile(job)), [1, 2].map((n) => JSON.stringify({ schema_version: 1, n, added_at: "2026-09-24T10:00:00Z", by: "operator-quote", quote: "approved", reason: "coverage", text: `S04 extra scope ${n}.` })).join("\n") + "\n");
 	const result = await s.review(job, { decision_summary: { would_make_wrong: "Missing scope", verified: "Read the packet" } });
 	assert.equal(result.verdict.verdict, "pass");
+	assert.equal(result.verdict.attempt, 1);
+	assert.deepEqual(JSON.parse(readFileSync(join(s.home, paths.gateFile(job, 1)), "utf8")), gate);
 	assert.equal(result.verdict.head_sha, s.repo.head(job));
 	assert.equal("decision_summary" in result.verdict, false);
 	assert.equal("rubric" in result.verdict, false);
@@ -287,6 +296,21 @@ test("S04: configured reviewer denials never fall back, while an unconfigured ro
 	assert.equal(s.provider.requests("chosen").length, 0);
 	const events = readFileSync(join(s.home, paths.reviewRunDir(job, 1), "events.jsonl"), "utf8");
 	assert.match(events, /"refusal":"availability"/);
+	const inherited = await s.seed({ "axis.ts": "export const axis = 1;\n" });
+	await s.post.fleet.patch(inherited, { routing: { scope: "L", risk: "high", inferred: false } });
+	const axis = s.provider.addScript("axis", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: inherited, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["inherited route"] } }] }]);
+	s.agent.writeModels(s.provider);
+	save({ ...config, rubric: [{ id: "large-risky", role: "gate-reviewer", scope: ["L"], risk: "high", model: axis, thinking: "medium" }, ...config.rubric] });
+	const routed = await s.post.diffReview({ jobId: inherited });
+	assert.ok(isDiffReviewWait(routed));
+	s.post.reviewRuns.handBack(routed.key);
+	await s.post.reviewRuns.settled(routed.key);
+	const verdict = JSON.parse(readFileSync(join(s.home, paths.reviewFile(inherited, 1)), "utf8"));
+	assert.equal(verdict.model, axis);
+	assert.equal(verdict.verdict, "pass");
+	const routing = readFileSync(join(s.home, paths.reviewRunDir(inherited, 1), "events.jsonl"), "utf8");
+	assert.match(routing, /"rule":"large-risky"/);
+	assert.match(routing, /"thinking":"medium"/);
 });
 
 test("S04: pipeline advance holds unresolved and moved heads until a review of the current commit exists", { timeout: 120_000 }, async (t) => {
@@ -310,6 +334,21 @@ test("S04: pipeline advance holds unresolved and moved heads until a review of t
 	assert.equal(current.verdict.head_sha, s.repo.head(job));
 	assert.equal(current.verdict.attempt, 2);
 	assert.equal((await s.post.advancePipeline("cp-s04-plan")).state, "done");
+	const record = s.post.pipelines.require("cp-s04-plan");
+	for (const review of [{}, { enabled: false }]) {
+		s.post.pipelines.write({ ...record, review });
+		assert.equal((await s.post.advancePipeline("cp-s04-plan")).state, "done");
+	}
+	writeFileSync(join(s.home, paths.pipelineFile("cp-s04-plan")), JSON.stringify({ ...record, review: { enabled: true, extra: 1 } }));
+	await assert.rejects(() => s.post.advancePipeline("cp-s04-plan"), /pipeline contract/);
+	s.post.pipelines.write(record);
+	const runner = s.post.pipeline();
+	runner.checkpoints.request({ jobId: job, researchId: "cp-s04-plan", question: "original ship decision", evidence: ["plan"], at: now });
+	const shipCheckpoint = readFileSync(join(s.home, paths.checkpointFile(job)), "utf8");
+	writeFileSync(join(s.home, paths.reviewFile(job, 2)), JSON.stringify({ ...current.verdict, verdict: "escalate", cause: "flagged", flags: { destructive_scope: true, scope_growth: false, blocking_unknowns: false } }));
+	assert.notEqual((await s.post.advancePipeline("cp-s04-plan")).state, "done");
+	assert.equal(readFileSync(join(s.home, paths.checkpointFile(job)), "utf8"), shipCheckpoint);
+	assert.equal(JSON.parse(readFileSync(join(s.home, paths.checkpointFile(job, "diff")), "utf8")).decision, "pending");
 });
 
 
