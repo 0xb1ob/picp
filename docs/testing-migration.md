@@ -69,6 +69,7 @@ ask-0088e0332d00, 2026-10-21.
 | S04 (cp-e2e-slice-s04-vep1) | behavior 05; original `tests/diff-review.test.ts` declarations 1–40. [Declaration accounting](testing-migration-s04-declarations.md): 38 mapped, 2 retained, 0 pending in S04; S05 owns 41–55 and whole-file retirement. | 0; baseline intentionally kept whole | +1 incoming e2e file | 55 source declarations unchanged; +13 e2e scenarios |
 | S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
+| S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -221,6 +222,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P3c-rest | 05 | `tests/e2e/landing.test.ts` | follow-on slices: 128 pending declarations and two retained timer cases across five unfinished files |
 | S06 | 05 | `tests/e2e/landing.test.ts` | foreign CI, forge observers/runtime and held release; file-by-file conversion |
 | S08 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 1–40: 38 mapped, 2 retained (5%), 0 deleted files; nine scenarios added and 05-13 extended; [range ledger](testing-migration-s08.md); original unit file kept whole |
+| S09 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 41–80: 34 mapped, 6 retained (15%), 0 deleted files; eight scenarios added; [range ledger](testing-migration-s09.md); original unit file kept whole |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -367,6 +369,14 @@ moves first.
 | 05-S08-7 | `tests/e2e/landing.test.ts` | landing: stale bases update only for BEHIND or an authoritative strict rule |
 | 05-S08-8 | `tests/e2e/landing.test.ts` | landing: the operator bridge persists a hold without a parent and a restarted parent reads and releases it |
 | 05-S08-9 | `tests/e2e/landing.test.ts` | landing: a hold arriving during green CI stops both merge authority paths |
+| 05-S09-1 | `tests/e2e/landing.test.ts` | landing S09: exact head and branch evidence distinguish pending, superseded and absent CI |
+| 05-S09-2 | `tests/e2e/landing.test.ts` | landing S09: repository refusals and draft transitions preserve head authority |
+| 05-S09-3 | `tests/e2e/landing.test.ts` | landing S09: external PR facts stop or finish without an automated merge |
+| 05-S09-4 | `tests/e2e/landing.test.ts` | landing S09: GitLab integration observes the target and never asks GitHub to merge |
+| 05-S09-5 | `tests/e2e/landing.test.ts` | landing S09: a real repair stays single while active and conflict handoffs follow heads |
+| 05-S09-6 | `tests/e2e/landing.test.ts` | landing S09: public promotion before or during integration waits for a fresh report |
+| 05-S09-7 | `tests/e2e/landing.test.ts` | landing S09: infra reruns once while second attempts and test failures promote |
+| 05-S09-8 | `tests/e2e/landing.test.ts` | landing S09: a missing implementer surfaces without spending the same-head repair |
 | 05-S02-1 | `tests/e2e/landing.test.ts` | landing S02: only reported held PR deliveries are queried |
 | 05-S02-2 | `tests/e2e/landing.test.ts` | landing S02: aggregate CI and terminal PR facts preserve the current head |
 | 05-S02-3 | `tests/e2e/landing.test.ts` | landing S02: watch delivery, restart and query cadence survive real forge failures |
