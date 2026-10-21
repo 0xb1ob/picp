@@ -982,3 +982,48 @@ test(
 		assert.equal((await landed(near.jobId, "path_tree")).paths, 6);
 	},
 );
+
+
+test("landing: CI watch persists arrival and attempt identity, follows pushed heads and prunes finished deliveries", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("watch attempts and heads", 101);
+	const observe = async (rows: RunRow[]) => {
+		s.setGh({ runs: rows });
+		return s.tick(live.jobId);
+	};
+	const pending = await observe([run(101, live.head, "in_progress", null)]);
+	assert.deepEqual(pending.observations, [], "pending is not a verdict");
+	const first = await observe([run(101, live.head, "completed", "failure")]);
+	const failed = first.observations.find((fact) => fact.event === "ci_failed");
+	assert.ok(failed, "the failed current head is observed");
+	assert.equal(failed.run_id, 101);
+	assert.deepEqual(s.post.confirmCi([failed.key]), [failed.key]);
+	assert.deepEqual(s.post.confirmCi([failed.key]), [], "arrival is idempotent");
+	assert.deepEqual((await observe([run(101, live.head, "completed", "failure")])).observations, [], "an arrived attempt is not announced again");
+	const retry = await observe([run(101, live.head, "completed", "failure", { run_attempt: 2 })]);
+	const retried = retry.observations.find((fact) => fact.event === "ci_failed");
+	assert.ok(retried, "a new attempt is a new failure even on the same head");
+	assert.notEqual(retried.key, failed.key);
+	s.post.confirmCi([retried.key]);
+	const green = await observe([run(101, live.head, "completed", "success", { run_attempt: 3 })]);
+	const passed = green.observations.find((fact) => fact.event === "ci_green");
+	assert.ok(passed, "a green rerun follows a failed attempt");
+	s.post.confirmCi([passed.key]);
+	execFileSync("git", ["-C", live.worktree, "commit", "--quiet", "--allow-empty", "-m", "new head"]);
+	execFileSync("git", ["-C", live.worktree, "push", "--quiet", "origin", live.jobId]);
+	const head = git(live.worktree, "rev-parse", "HEAD");
+	assert.notEqual(head, live.head);
+	assert.deepEqual((await observe([run(101, live.head, "completed", "success")])).observations, [], "old green does not bless a pushed head");
+	assert.equal(s.post.ciHead(live.jobId), head);
+	const moved = await observe([run(102, head, "completed", "success")]);
+	const current = moved.observations.find((fact) => fact.event === "ci_green");
+	assert.ok(current, "the pushed head gets its own verdict");
+	assert.equal(current.head_sha, head);
+	assert.notEqual(current.key, passed.key);
+	assert.equal(s.post.ciWatch.store.job(live.jobId)?.last_ci, "green");
+	assert.ok(readRunEvents(s.home, live.jobId).some((event) => event.type === "ci_observed"));
+	assert.deepEqual(mergedCalls(s.ghCalls()), [], "observing CI does not merge");
+	await s.post.fleet.patch(live.jobId, { phase: "done" });
+	await s.post.ciTick();
+	assert.equal(s.post.ciWatch.store.job(live.jobId), undefined, "finished deliveries leave the watch");
+});
