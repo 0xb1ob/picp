@@ -1,17 +1,16 @@
 /** Internal-only main-CI contracts retained by the declaration map in docs/testing-migration-main-ci-declarations.md. */
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import { ActionsCiError, actionsJobsPath, actionsRunsPath, readActionsCi, statusRunner } from "../src/actions-ci.ts";
-import { CI_READ_NEEDED, CI_UNREADABLE, CI_UNREADABLE_LABEL, ciReadDenied } from "../src/ci-access.ts";
+import { actionsJobsPath, actionsRunsPath } from "../src/actions-ci.ts";
+import { CI_UNREADABLE, ciReadDenied } from "../src/ci-access.ts";
 import type { Mandate } from "../src/contracts.ts";
 import { classifyMainTip, MainCiStore, runMainCiTick } from "../src/main-ci.ts";
 import type { CiRun, CommandRunner } from "../src/merge-ask.ts";
 import { CiRerunStore, classifyInfraFailure, maybeRerunInfra } from "../src/ci-infra-rerun.ts";
-import { drainFile } from "../src/drain.ts";
 import { CI_UNREADABLE as VIEWER_CI_UNREADABLE } from "../src/viewer/overview-jobs.ts";
-import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
+import { createScratchHome } from "./harness/index.ts";
 import { answerActions } from "./harness/actions-api.ts";
 
 const T1 = "1111111111111111111111111111111111111111";
@@ -79,16 +78,11 @@ function setup(t: { after(fn: () => void): void }) {
 }
 
 
-test("row 6: git or gh failures are inconclusive: latch unchanged, onError names the project", async (t) => {
+test("readMainTip rejects successful git output that is not a sha", async (t) => {
 	const ctx = setup(t);
 	ctx.store.setRed("demo", T1, { login: "me" });
 	const before = readFileSync(ctx.store.file, "utf8");
-	const worlds: World[] = [
-		{ tip: T2, runs: [green(T2)], fetchFails: "fetch refused" },
-		{ tip: "fatal: bad revision", runs: [green(T2)] },
-		{ tip: T2, runs: [], ghFails: "gh boom" },
-		{ tip: T2, runs: "not json" },
-	];
+	const worlds: World[] = [{ tip: "fatal: bad revision", runs: [green(T2)] }];
 	for (const world of worlds) {
 		const errors: Array<[string | undefined, string]> = [];
 		const out = await runMainCiTick({
@@ -109,7 +103,7 @@ test("row 6: git or gh failures are inconclusive: latch unchanged, onError names
 });
 
 
-test("tick: one red transition sends exactly one wake; a refused send is reported", async (t) => {
+test("a synthetic false main-CI send result is reported", async (t) => {
 	const ctx = setup(t);
 	const sent: string[] = [];
 	const errors: string[] = [];
@@ -127,12 +121,6 @@ test("tick: one red transition sends exactly one wake; a refused send is reporte
 				return send;
 			},
 		});
-	await tick(true);
-	await tick(true);
-	assert.equal(sent.length, 1);
-	assert.match(sent[0] ?? "", /MAIN IS RED — demo: CI failed on 111111111111/);
-	assert.deepEqual(errors, []);
-	ctx.store.clear("demo");
 	await tick(false);
 	assert.match(errors[0] ?? "", /not sent/);
 });
@@ -212,25 +200,12 @@ function bench(t: { after(fn: () => void): void }, options: { view?: string; vie
 	return { home: home.path, store, calls, claimsAtRerun, failed, go };
 }
 
-test("attempt 2, a test failure, a cancel, no run id, a green head and a drain all leave it to the parent", async (t) => {
+test("the private rerun guard refuses green and id-less runs", async (t) => {
 	const b = bench(t);
 	assert.equal(await b.go([b.failed({ conclusion: "success" })]), undefined, "nothing failed: nothing to say");
-	assert.match((await b.go([b.failed({ attempt: 2 })]))?.fact ?? "", /attempt 2: a second failure is the parent's/);
-	assert.match((await b.go([b.failed({ conclusion: "cancelled" })]))?.fact ?? "", /concluded cancelled/);
-	assert.match((await b.go([b.failed({ conclusion: "timed_out" })]))?.fact ?? "", /concluded timed_out/);
 	const { databaseId: _id, ...noId } = b.failed();
 	assert.match((await b.go([noId]))?.fact ?? "", /no id or attempt/);
 	assert.deepEqual(b.calls, [], "none of those asked gh anything");
-	mkdirSync(dirname(drainFile(b.home)), { recursive: true });
-	writeFileSync(drainFile(b.home), JSON.stringify({ state: "draining", started_at: "2026-10-04T15:00:00Z", deadline: "x", timeout_s: 1, jobs: [] }));
-	assert.match((await b.go([b.failed()]))?.fact ?? "", /draining/);
-	assert.deepEqual(b.calls, []);
-
-	const tests = bench(t, { view: jobsPage(view("Run suite (typecheck + tests)")) });
-	const outcome = await tests.go([tests.failed()]);
-	assert.equal(outcome?.rerun, false);
-	assert.deepEqual(tests.calls, ["api repos/{owner}/{repo}/actions/runs/41/attempts/1/jobs"], "classified, never rerun");
-	assert.deepEqual(tests.store.read().entries, [], "no claim for a test failure");
 });
 
 // Retained by P3b (docs/testing-migration.md): moved verbatim from tests/actions-ci-policy.test.ts, where P3 had
@@ -238,32 +213,6 @@ test("attempt 2, a test failure, a cancel, no run id, a green head and a drain a
 const SHA = "d48a81d1f4d3c8a1b0d5e6f7a8b9c0d1e2f3a4b5";
 const REPO = { owner: "acme", repo: "app" };
 
-function run(id: number, extra: Record<string, unknown> = {}) {
-	return { id, run_attempt: 1, head_sha: SHA, status: "completed", conclusion: "success", name: `wf-${id}`, event: "push", ...extra };
-}
-
-function job(id: number, runId: number, extra: Record<string, unknown> = {}) {
-	return { id, run_id: runId, run_attempt: 1, head_sha: SHA, name: `job-${id}`, status: "completed", conclusion: "success", steps: [], ...extra };
-}
-
-const runsBody = (runs: unknown[], total = runs.length) => JSON.stringify({ total_count: total, workflow_runs: runs });
-const jobsBody = (jobs: unknown[], total = jobs.length) => JSON.stringify({ total_count: total, jobs });
-
-/** A fake `gh api`: answers from `routes` (string or thrower), records every endpoint, refuses anything unrouted. */
-function fakeGh(routes: Record<string, string | (() => string)>) {
-	const calls: string[] = [];
-	const exec: CommandRunner = async (command, args) => {
-		assert.equal(command, "gh");
-		assert.equal(args[0], "api");
-		assert.equal(args.length, 2);
-		const endpoint = String(args[1]);
-		calls.push(endpoint);
-		const route = routes[endpoint];
-		if (route === undefined) throw new Error(`unrouted gh api ${endpoint}`);
-		return typeof route === "function" ? route() : route;
-	};
-	return { exec, calls };
-}
 
 const runsPath = (page = 1) => actionsRunsPath({ repo: REPO, sha: SHA, page });
 const jobsPath = (runId: number, attempt = 1, page = 1) => actionsJobsPath({ repo: REPO, runId, attempt, page });
@@ -278,68 +227,6 @@ test("paths: exact head, explicit repo or gh placeholders, attempt-bound jobs; m
 	assert.throws(() => actionsJobsPath({ runId: 0, attempt: 1, page: 1 }), /refusing/);
 });
 
-test("readActionsCi: normalizes runs with identity, event, actor and their attempt's jobs and steps", async () => {
-	const { exec, calls } = fakeGh({
-		[runsPath()]: runsBody([run(11, { run_attempt: 2, triggering_actor: { login: "bot" } }), run(12, { status: "queued", conclusion: null })]),
-		[jobsPath(11, 2)]: jobsBody([job(101, 11, { run_attempt: 2, steps: [{ name: "Run tests", status: "completed", conclusion: "success" }] })]),
-		[jobsPath(12)]: jobsBody([]),
-	});
-	const runs = await readActionsCi({ cwd: "/x", exec, repo: REPO, sha: SHA });
-	assert.deepEqual(calls, [runsPath(), jobsPath(11, 2), jobsPath(12)]);
-	assert.deepEqual(runs, [
-		{
-			status: "completed",
-			conclusion: "success",
-			headSha: SHA,
-			databaseId: 11,
-			attempt: 2,
-			workflowName: "wf-11",
-			event: "push",
-			triggeringActor: "bot",
-			jobs: [{ id: 101, runId: 11, runAttempt: 2, name: "job-101", status: "completed", conclusion: "success", steps: [{ name: "Run tests", status: "completed", conclusion: "success" }] }],
-		},
-		{ status: "queued", conclusion: null, headSha: SHA, databaseId: 12, attempt: 1, workflowName: "wf-12", event: "push", jobs: [] },
-	]);
-});
-
-test("retry: never past the budget, and a structurally wrong JSON page is not retried", async () => {
-	let clock = 0;
-	const { exec, calls } = fakeGh({ [runsPath()]: () => ((clock += 900), "<html>") });
-	await assert.rejects(readActionsCi({ cwd: "/x", exec, repo: REPO, sha: SHA, timeoutMs: 1000, now: () => clock, sleep: async () => {} }), /malformed.*not JSON/);
-	assert.equal(calls.length, 1, "100 ms left is less than the 250 ms pause");
-	const wrong = fakeGh({ [runsPath()]: JSON.stringify({ workflow_runs: [] }) });
-	await assert.rejects(readActionsCi({ cwd: "/x", exec: wrong.exec, repo: REPO, sha: SHA, sleep: async () => {} }), /missing total_count/);
-	assert.equal(wrong.calls.length, 1);
-});
-
-test("budget: one total deadline across pages, each request gets only what remains", async () => {
-	let clock = 0;
-	const timeouts: number[] = [];
-	const exec: CommandRunner = async (_command, args, options) => {
-		timeouts.push(options.timeoutMs);
-		clock += 600;
-		return String(args[1]).includes("/jobs") ? jobsBody([]) : runsBody([run(1), run(2)]);
-	};
-	await assert.rejects(readActionsCi({ cwd: "/x", exec, repo: REPO, sha: SHA, timeoutMs: 1000, now: () => clock }), (error: unknown) => {
-		assert.ok(error instanceof ActionsCiError);
-		assert.equal(error.category, "deadline");
-		return true;
-	});
-	assert.deepEqual(timeouts, [1000, 400]);
-});
-
-test("statusRunner: forwards each request's remaining budget as timeoutMs; a non-zero status throws", async () => {
-	const seen: unknown[] = [];
-	const exec = statusRunner(async (cwd, bin, args, options) => {
-		seen.push({ cwd, bin, args, options });
-		return { status: String(args[1]).includes("/jobs") ? 1 : 0, stdout: runsBody([run(1)]), stderr: "HTTP 403" };
-	});
-	await assert.rejects(readActionsCi({ cwd: "/x", exec, repo: REPO, sha: SHA, timeoutMs: 1000, now: () => 0 }));
-	assert.deepEqual(seen, [
-		{ cwd: "/x", bin: "gh", args: ["api", runsPath()], options: { timeoutMs: 1000 } },
-		{ cwd: "/x", bin: "gh", args: ["api", jobsPath(1)], options: { timeoutMs: 1000 } },
-	]);
-});
 
 test("ciReadDenied: only a permission refusal of a CI read counts", () => {
 	assert.ok(ciReadDenied("gh run list --branch b failed: HTTP 403: Resource not accessible by personal access token"));
@@ -354,9 +241,3 @@ test("ciReadDenied: only a permission refusal of a CI read counts", () => {
 	assert.equal(VIEWER_CI_UNREADABLE, CI_UNREADABLE, "the viewer reads the value the watcher writes");
 });
 
-test("the browser mirrors the backend's Actions-only label and advice, keeping its needs prefix", () => {
-	const tsx = readFileSync(join(REPO_ROOT, "viewer-app/components/JobSignals.tsx"), "utf8");
-	assert.ok(tsx.includes(`CI_UNREADABLE_LABEL = "${CI_UNREADABLE_LABEL}"`), "label parity");
-	assert.ok(tsx.includes(`CI_READ_NEEDED = "needs ${CI_READ_NEEDED}"`), "advice parity");
-	assert.doesNotMatch(`${CI_UNREADABLE_LABEL} ${CI_READ_NEEDED}`, /checks|statuses/i);
-});

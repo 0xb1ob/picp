@@ -10,6 +10,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
+import { build } from "esbuild";
 import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "../../src/ci-access.ts";
 import { CommandPost } from "../../src/command-post.ts";
@@ -635,6 +636,37 @@ test("landing: a deploy ledger failure preserves the merge receipt and retries t
 });
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
 
+test("landing: Actions deadlines stop a hung request and share the budget across pages", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const s = await startStack(t);
+	const { jobId, head } = await s.held("Actions deadline", 381);
+	const runsAt = `actions/runs?head_sha=${head}`;
+	for (const acrossPages of [false, true]) {
+		const first = join(s.home, `first-${acrossPages}`);
+		const last = join(s.home, `last-${acrossPages}`);
+		s.setGh({ runs: [run(1, head, "completed", "success")], routes: acrossPages
+			? [{ match: runsAt, replies: [{ ...runsBody([run(1, head, "completed", "success")]), untilFile: first }] }, { match: "actions/runs/1/attempts/1/jobs", replies: [{ ...json({ total_count: 0, jobs: [] }), untilFile: last }] }]
+			: [{ match: runsAt, replies: [{ ...runsBody([]), untilFile: last }] }] });
+		const pending = s.integrate(jobId);
+		const release = acrossPages ? setTimeout(() => writeFileSync(first, "release"), 9_000) : undefined;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let result: Awaited<typeof pending> | undefined;
+		try {
+			result = await Promise.race([pending, new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), 22_000); })]);
+		} finally {
+			clearTimeout(timer);
+			clearTimeout(release);
+			writeFileSync(first, "release");
+			writeFileSync(last, "release");
+			await pending;
+		}
+		assert.ok(result, acrossPages ? "one total deadline bounds runs plus jobs" : "per-request timeout cancels hung gh");
+		assert.equal(result.record.next, "retry", "a deadline never grants merge authority");
+		assert.match(result.text, /read transport/, "spent retry budget reports the failed request without another attempt");
+		assert.equal(result.calls.filter((call) => call.includes(acrossPages ? "attempts/1/jobs" : runsAt)).length, 1, "spent retry budget starts no further gh request");
+		assert.deepEqual(mergedCalls(result.calls), []);
+	}
+});
+
 test(
 	"landing: a denied, rate-limited, malformed, partial or capped Actions read never merges and names its cause; a full paged read finds page two's failure",
 	{ skip: SKIP, timeout: 600_000 },
@@ -668,6 +700,22 @@ test(
 		assert.ok(watched.errors.some((error) => error.job_id === jobId), JSON.stringify(watched.errors));
 		assert.equal(s.post.ciWatch.store.job(jobId)?.last_ci, "unreadable");
 		assert.match(formatStatusTable(await s.post.status()), /waiting on: CI unreadable \(token\)/);
+		const viewer = createViewer({ home: s.home, stateDir: join(s.home, LAYOUT.state), host: "127.0.0.1", port: 0, log: () => {} });
+		await new Promise<void>((resolve) => viewer.listen(0, "127.0.0.1", resolve));
+		try {
+			const response = await fetch(`http://127.0.0.1:${(viewer.address() as AddressInfo).port}/api/jobs`);
+			const body = await response.json() as { jobs: Array<{ id: string }> };
+			const job = body.jobs.find((row) => row.id === jobId);
+			assert.ok(job, "the denied job reaches the viewer API");
+			const bundled = await build({ stdin: { contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {CiSignal} from "./viewer-app/components/JobSignals.tsx"; export const draw=job=>render(h(CiSignal,{job}));', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
+			const { draw } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]!.contents).toString("base64")}`) as { draw(job: unknown): string };
+			const html = draw(job);
+			assert.ok(html.includes(`>${CI_UNREADABLE_LABEL}</span>`), "rendered CI label matches the backend denial");
+			assert.ok(html.includes(`needs ${CI_READ_NEEDED}`), "rendered CI advice matches the backend denial");
+			assert.doesNotMatch(html, /checks|statuses/i);
+		} finally {
+			await new Promise<void>((resolve) => viewer.close(() => resolve()));
+		}
 
 		// A rate limit, on runs or jobs, is not the token: no label, no retry, and the watch says unknown.
 		const limited = await unreadable([{ match: runsAt, replies: [{ code: 1, stderr: `gh: API rate limit exceeded (HTTP 403) ${CANARY}` }] }], /read rate_limited/, "runs rate limit");
@@ -1842,7 +1890,7 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		await observe([own(tip, "failure")], { routes: [...routes, { match: "actions/runs/106/attempts/1/jobs", replies: [{ code: 1, stderr: "HTTP 403: forbidden" }] }] });
 		assert.deepEqual(rows(), [], "unreadable main attempt jobs never create a latch");
 		await observe([own(tip, "failure"), run(109, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" } })], { jobs: { 106: [setupJob("Run suite (typecheck + tests)")] } });
-		assert.deepEqual(rows().map((row) => [row.project, row.red_since_sha, row.login, row.workflow, row.failing]), [["demo", tip, "e2e", "ci", "main regression"]]);
+		assert.deepEqual(rows().map((row) => [row.project, row.red_since_sha, row.login, row.workflow, row.failing]), [["demo", tip, "e2e", "ci", "main regression"]], "normalized actor, identity, jobs and steps produce the own red latch");
 		const earlyClaims = join(s.home, LAYOUT.ciRerunsFile);
 		assert.deepEqual(existsSync(earlyClaims) ? JSON.parse(readFileSync(earlyClaims, "utf8")).entries : [], [], "suite failure claims no infra rerun");
 		assert.ok(!s.ghCalls().some((call) => call.startsWith("run rerun")), "suite failure never reruns");
@@ -1854,6 +1902,15 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		assert.equal(s.parentMessages().split("MAIN IS RED").length - 1, 1, "repeat red emits one parent wake");
 		assert.ok(s.parentMessages().includes(`MAIN IS RED — demo: CI failed on ${tip.slice(0, 12)} (ci) — failing: main regression`));
 		assert.ok(s.parentMessages().includes("cp_integrate returns wait for every demo PR except one based on the current main with green CI"));
+		git(s.post.registry.pathOf("demo"), "remote", "set-url", "origin", join(s.home, "missing-origin.git"));
+		try {
+			const journal = () => existsSync(join(s.home, LAYOUT.state, "wakeups.json")) ? readFileSync(join(s.home, LAYOUT.state, "wakeups.json"), "utf8") : "";
+			const fetchError = await waitFor(journal, (body) => body.includes("main CI (demo)") && body.includes("fetch"), { timeoutMs: 30_000, what: "failed git fetch reaches durable wake journal" }).catch(journal);
+			assert.ok(fetchError.includes("main CI (demo)") && fetchError.includes("fetch"), `failed git fetch names project and cause: ${fetchError}`);
+			assert.equal(readFileSync(file, "utf8"), latched, "failed git fetch preserves latch bytes");
+		} finally {
+			git(s.post.registry.pathOf("demo"), "remote", "set-url", "origin", s.remote);
+		}
 		const oldTip = tip;
 		tip = advanceBase(s.repo, "main-change.txt", "main advanced\n");
 		await observe([own(tip, "failure")]);

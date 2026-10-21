@@ -4,10 +4,10 @@ Owner: cp-e2e-slice-main-ci-41d3, behavior 05 / P3c-rest. Other slices keep thei
 Authorized addendum ps-20261021163741-8362b144 drops the unbuilt coverage collector prerequisite.
 Retirement gates are the migration checker, contract test, focused positives and executed semantic controls.
 
-Accounting: 39 source declarations = 27 mapped + 12 retained + 0 redundant; no pending declarations.
-Mapped declarations retire together. Retained declarations move verbatim to `tests/main-ci-retained.test.ts`.
-The retained share is 30.77%. They have missing entry points described below, rather than missing controls.
-New e2e declarations: 3 (main-red integration, scope/login, and the corruption race); existing 05-11 and 05-4 extend.
+Accounting: 39 source declarations = 32 mapped + 7 retained + 0 redundant; no pending declarations.
+Mapped declarations retire together. Seven retained tests remain in `tests/main-ci-retained.test.ts`.
+The retained share is 17.95%. Mixed declarations 8, 12 and 32 retain only their unreachable portions;
+their reachable assertions are mapped and controlled below. New e2e declarations: 4, including the Actions deadline scenario.
 
 Scenario names below are exact titles in `tests/e2e/landing.test.ts`:
 
@@ -16,6 +16,7 @@ Scenario names below are exact titles in `tests/e2e/landing.test.ts`:
 - S / 05-main-scope: `landing: main CI scope skips inactive grants and login faults preserve latches until the next successful login`.
 - C / 05-main-corrupt: `landing: main latch writes refuse corruption introduced during an Actions read`.
 - F / 05-4: `landing: an infra-only CI failure is claimed, then rerun once per head; a test failure, a cancel, a second attempt, a drain or an unreadable claim or job list goes to the parent`.
+- D / 05-main-deadlines: `landing: Actions deadlines stop a hung request and share the budget across pages`.
 
 Indices follow the original declaration order. A mapped row names the consumer assertion that fails when its behavior is broken.
 
@@ -28,11 +29,11 @@ Indices follow the original declaration order. A mapped row names the consumer a
 | 5 | row 3: a repeat red, or red on a new tip, emits nothing and keeps red_since byte-identical | mapped | T: repeat red emits one parent wake; red on a new main tip preserves original bytes |
 | 6 | row 5: stale green on an old sha never clears the latch | mapped | T: stale green never clears main red; old-tip green cannot replace current-tip red |
 | 7 | row 4: green on every run for the current tip clears once with one main_ci_green | mapped | T: pending current-tip workflow prevents clearing; green notice reaches parent; repeat green preserves bytes |
-| 8 | row 6: git or gh failures are inconclusive: latch unchanged, onError names the project | retained | No entry point makes successful real git rev-parse return the injected non-sha text. Mixed declaration stays intact; T pins actual denied/malformed read outcomes and project error wording. |
+| 8 | row 6: git or gh failures are inconclusive: latch unchanged, onError names the project | retained portion | Only successful real git output containing non-sha text stays. T now forces a real fetch failure and asserts project/cause plus unchanged bytes (nc-fetch-fault); denied/malformed gh outcomes remain mapped in T (nc-read-fault). |
 | 9 | row 7: an unreadable main-ci.json is never overwritten and is reported | mapped | T pins pre-read corruption; C races corruption after the read and before both set and clear. Treating corrupt rows as empty fails in-flight latch mutation preserves corrupt bytes. |
 | 10 | per project: one project's latch is independent of another's | mapped | T: clearing demo preserves another project's latch; the other seeded row survives |
 | 11 | row 8: a project with no clone dir is skipped without any command | mapped | S: missing clone reads no CI and creates no project error; removing exists guard creates a project error |
-| 12 | tick: one red transition sends exactly one wake; a refused send is reported | retained | The registered main-CI timer sends jobless ci stamps, which checkWakeup always accepts. This entry point cannot return the synthetic false send result; transport errors throw instead. T pins delivered wake deduplication. |
+| 12 | tick: one red transition sends exactly one wake; a refused send is reported | retained portion | Only synthetic false send stays: jobless ci stamps always pass checkWakeup; transport errors throw. T maps delivered deduplication, with nc-repeat breaking repeat red emits one parent wake. |
 | 13 | formatMainCiNotice: red and green wording | mapped | T: red wording/advice and exact current-tip green notice in real parent provider requests |
 | 14 | classifyMainTip ignores every run not on the tip | retained | No entry point supplies old-head rows directly to this classifier: readActionsCi already filters the queried head. T pins the stale-head consumer outcome. |
 | 15 | mainRedHold: fails open with a fact on unreadable state, holds a latched project | mapped | I: stale head requires wait; current green ancestry gives fix-forward; denied CI holds; corrupt latch gives not-blocking fact |
@@ -52,14 +53,14 @@ Indices follow the original declaration order. A mapped row names the consumer a
 | 29 | PR1: a suite failure on main latches with no rerun and no claim | mapped | T: initial ordinary failure latches; claim table remains empty until infra phase |
 | 30 | PR1: a refused gh run rerun latches, names the refusal and keeps its claim | mapped | T: refused infra rerun latches, keeps second claim, does not retry, refusal reaches parent |
 | 31 | classifyInfraFailure: setup steps are infra; the suite and a cancel are not | mapped | F: setup table reruns once; test/build/mixed/stepless/cancel/timeout variants do not. Rejecting Set up Node fails its wait assertion. |
-| 32 | attempt 2, a test failure, a cancel, no run id, a green head and a drain all leave it to the parent | retained | No entry point sends a green head or id-less run to maybeRerunInfra: earlier CI evaluation and Actions validation intercept them. Mixed guard declaration stays verbatim; F covers reachable variants. |
+| 32 | attempt 2, a test failure, a cancel, no run id, a green head and a drain all leave it to the parent | retained portion | Only green/id-less private guard inputs stay: CI evaluation and Actions validation intercept them before maybeRerunInfra. F maps attempt two, suite/cancel/timeout and drain; T's suite failure claims no infra rerun assertion fails nc-suite. |
 | 33 | paths: exact head, explicit repo or gh placeholders, attempt-bound jobs; malformed ids refused | retained | No entry point forwards these invalid SHA/branch/repo/id values past validated git, registry and Actions boundaries into the path builders. |
-| 34 | readActionsCi: normalizes runs with identity, event, actor and their attempt's jobs and steps | retained | No public tool returns the entire normalized run/job/step array with these exact internal field names. T/F pin decisions using those fields. |
-| 35 | retry: never past the budget, and a structurally wrong JSON page is not retried | retained | No public entry point supplies the synthetic millisecond clock and sleep function used to pin an exact remaining budget. |
-| 36 | budget: one total deadline across pages, each request gets only what remains | retained | No public entry point supplies the synthetic clock or exposes exact per-request remaining timeout values. |
-| 37 | statusRunner: forwards each request's remaining budget as timeoutMs; a non-zero status throws | retained | No external executable can inspect the internal runner options object or injected exact clock. The consumer denial behavior remains in 05-1. |
+| 34 | readActionsCi: normalizes runs with identity, event, actor and their attempt's jobs and steps | mapped | T: normalized actor, identity, jobs and steps produce the own red latch; nc-normalization drops triggeringActor and fails this assertion. |
+| 35 | retry: never past the budget, and a structurally wrong JSON page is not retried | mapped | D: spent retry budget reports the failed request without another attempt; 05-1 also asserts malformed structural JSON issues one request. |
+| 36 | budget: one total deadline across pages, each request gets only what remains | mapped | D: one total deadline bounds runs plus jobs; a runs barrier consumes nine seconds before a hung jobs request. |
+| 37 | statusRunner: forwards each request's remaining budget as timeoutMs; a non-zero status throws | mapped | D: per-request timeout cancels hung gh; 05-1 pins nonzero status as retry/denied, never green. |
 | 38 | ciReadDenied: only a permission refusal of a CI read counts | retained | No current entry point submits legacy Checks/status/gh-run classifier strings to the Actions-only reader; public tools do not expose the classifier. |
-| 39 | the browser mirrors the backend's Actions-only label and advice, keeping its needs prefix | retained | No UI entry point exposes source-literal equality; this static source-parity contract stays verbatim. |
+| 39 | the browser mirrors the backend's Actions-only label and advice, keeping its needs prefix | mapped | 05-1: real denied CI reaches viewer HTTP API; actual CiSignal rendering matches backend label and needs advice and excludes Checks/statuses. nc-viewer-label breaks the rendered label assertion. |
 
 ## Executed controls
 
@@ -102,6 +103,28 @@ Every listed e2e run exited 1 with an AssertionError on the named consumer outco
 | 29 | suite | Classify every failure as infra | suite failure claims no infra rerun |
 | 30 | rerun-refusal | Treat a refused rerun as accepted | refused infra rerun latches main |
 | 31 | setup | Reject Set up Node as an infra setup step | Set up Node expected wait/rerun, got resolve |
+| 8 reachable | fetch-fault | Ignore git fetch failure and continue on stale origin/main | failed git fetch names project and cause |
+| 12 reachable | repeat | Remove !own from red-transition guard | repeat red emits one parent wake |
+| 32 reachable | suite | Classify ordinary suite failures as infra | suite failure claims no infra rerun |
+| 34 | normalization | Drop triggeringActor normalization | normalized actor, identity, jobs and steps produce the own red latch |
+| 35 | retry-budget | Remove remaining-budget check before retry | spent retry budget reports the failed request without another attempt |
+| 36 | page-budget | Give jobs a fresh observation budget | one total deadline bounds runs plus jobs |
+| 37 | request-timeout | Drop statusRunner timeout forwarding | per-request timeout cancels hung gh |
+| 39 | viewer-label | Change browser CI label independently | rendered CI label matches the backend denial |
+
+Review-1 controls were executed against production at `573756ed385a5b8582ae4ded7ccb80b6512ef6f2`.
+Each exited 1 with the named AssertionError above; all production mutations were then restored.
+The exact patches and logs are `nc-<basename>.patch` / `.log` under
+`/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-main-ci-41d3/`.
+
+| Basename | Patch SHA-256 |
+|---|---|
+| fetch-fault | 6c7a4570c05c020763e7c80f986c86f25d472b169428440c215a752a46f81316 |
+| normalization | 6112d0c2ed362334adc724930c0f9a519972b7af7b24dcecfe9cefe04f31a2e8 |
+| page-budget | 83830c65a841388a993602663ec5edfacbba20bdabe3fd41521dbc9328d14124 |
+| request-timeout | eacb569608fc58e3b74b01d11f8dab644249143f237af66c4611967c08e8a58b |
+| retry-budget | ffa9f8d119aa222f42dabb10be93a11e8bf2c8cf007409544892d9f208e94764 |
+| viewer-label | ff37addf1889ef4c64bcd527e8cbb47338da0c0ed0c50df53439542674f3660c |
 
 The shared red mutation also fails both original declarations 1 and 3 (`nc-red-units.log`).
 The shared actor mutation also fails original declarations 17 and 25 (`nc-actor-units.log`),
@@ -109,9 +132,8 @@ including the filtered normalized-array expectation, rather than merely another 
 Additional unit sensitivity probes for unknown-clear, format, login-fault and suite are recorded separately;
 the table still assigns a consumer control to each mapped declaration.
 
-Retained entry points are concrete: the registered main-CI extension timer for 8, 12, 14 and 19;
-`cp_integrate` for 32; the timer and `cp_integrate` for 33–37;
-`cp_integrate`'s Actions reader for 38; and the browser UI for 39.
-For 12 specifically, the timer sends jobless `ci` stamps: `checkWakeup` returns fresh when `job_id` is absent,
-so `WakeupNotifier.send` returns true. A transport exception throws; it does not return the synthetic false callback value.
-Retention preserves each mixed declaration whole, with no claim that its reachable portions are untested.
+Retained entry points are concrete: the registered main-CI extension timer for the non-sha
+portion of 8, synthetic false-send portion of 12, old-head classifier input 14 and shared-login
+attribution 19; `cp_integrate` for green/id-less rerun guard inputs 32; validated timer/integrator
+paths for 33; Actions-only readers for the legacy classifier strings in 38. Reachable portions
+of mixed declarations have moved out of the retained tests and have consumer controls above.
