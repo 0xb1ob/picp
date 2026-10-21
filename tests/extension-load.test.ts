@@ -96,9 +96,7 @@ test("pi loads the command-post extension and /cp-version reports identity", { t
 });
 
 test("the sixth wake-up type is registered under the name the contract fixes", () => {
-	// The `action` parameter itself is asserted where pi actually reports the
-	// tool schema to a model (tests/e2e/diff-review.test.ts): this RPC surface has no
-	// `get_tools`, so anything here would be a string match on source.
+	// RPC has no get_tools; tests/e2e/diff-review.test.ts checks schemas through model requests.
 	assert.equal(WAKEUP_CUSTOM_TYPES.verdict, VERDICT_MESSAGE_TYPE);
 	assert.equal(VERDICT_MESSAGE_TYPE, "cp-verdict");
 });

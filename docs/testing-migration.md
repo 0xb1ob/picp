@@ -70,7 +70,7 @@ ask-0088e0332d00, 2026-10-21.
 | S05 (cp-e2e-slice-s05-mzpm) | behavior 05; declarations 41–55 and final retirement of `tests/diff-review.test.ts`. [S05 accounting and controls](testing-migration-s05-declarations.md): 15 mapped; whole file 53 mapped, 2 retained declarations plus the split unknown-job guard. | 1 original file retired; retained replacement is not deletion credit | +1 retained file (convert-owned P3c-rest), 3 tests; +7 e2e scenarios | -55 original declarations, +3 retained, +7 e2e = -45 net declarations |
 | S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
-| S15 (cp-e2e-slice-s15-764h) | behavior 05; whole-file review-context, review-merge-window, review-runs and review-tool; [declaration accounting](testing-migration-s15.md); 16 mapped, 3 retained; review-runs 19 pending | 3 | -2 test files | -16 source declarations; real reviewer and RPC cases added |
+| S15 (cp-e2e-slice-s15-764h) | behavior 05; whole-file review-context, review-merge-window, review-runs and review-tool; [declaration accounting](testing-migration-s15.md); all 38 closed: 32 mapped, 6 retained (15.8%); 2 files deleted and 2 replaced by retained subsets | 4 original paths retired | -2 test files | -32 source declarations, +13 consumer declarations; net -19 |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
@@ -412,6 +412,14 @@ moves first.
 | 05-S15-W | `tests/e2e/landing.test.ts` | landing S15: durable review evidence owns the merge window across parent restarts |
 | 05-S15-T | `tests/e2e/diff-review.test.ts` | S15: the real cp_review tool relays bounded verdicts and policy refusals without review bodies |
 | 05-S15-P | `tests/e2e/diff-review.test.ts` | S15: dispatch preview rejects parent tools in external worker profile configuration |
+| 05-S15-A | `tests/e2e/diff-review.test.ts` | S15: real reviewer attempts persist before waiting, reject duplicates and announce only after handback |
+| 05-S15-X | `tests/e2e/diff-review.test.ts` | S15: a failed verdict transport never resurrects a real review's pending slot |
+| 05-S15-O | `tests/e2e/diff-review.test.ts` | S15: orphan reconciliation consumes durable legacy markers and isolates a failed decision write |
+| 05-S15-S | `tests/e2e/diff-review.test.ts` | S15: real review decision writes recover once before persistence and preserve partial decisions |
+| 05-S15-B | `tests/e2e/diff-review.test.ts` | S15: a lost caller handback cannot swallow a real review verdict or pin its slot |
+| 05-S15-Q | `tests/e2e/diff-review.test.ts` | S15: a real quality waiter filesystem failure becomes an operational wakeup |
+| 05-S15-D | `tests/e2e/landing.test.ts` | landing S15 retry: real parent delivery confirms, retries withheld verdicts and expires permanent suppression |
+| 05-S15-L | `tests/e2e/landing.test.ts` | landing S15 order: a real verdict wakes the parent before its deadline continuation merges |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -843,6 +851,25 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/review-tool.test.ts` | (5) helper refuses injected negative file count | — | retained | tests/review-tool-retained.test.ts; cp_review validates stored and generated counts before payload construction; no verdict-input argument |
 | `tests/review-tool.test.ts` | (6) combined raw observation, revise receipt and materialized diff input | — | retained | tests/review-tool-retained.test.ts; live cp_review returns wait, then finishes asynchronously; cached and spawn-failure helper paths have no observation; T03 additionally pins reachable materialized subject leakage |
 | `tests/review-tool.test.ts` | (7) model-free stat overflow remains valid and has no subject/model | 05-S15-T | mapped | T04; real wide/large branches; fabricated model fails policy assertion |
+| `tests/review-runs.test.ts` | (1) start persists pending before wait and returns exact wait metadata | 05-S15-A | mapped | R01; real pending handed_back is true instead of false under mutation; pid, timestamps/model, persisted versus in-memory pending and start event are observed; A consumes returned key for real handback, replacing redundant helper-key equality |
+| `tests/review-runs.test.ts` | (2) duplicate registry start throws with record; independent surfaces coexist | — | retained | tests/review-runs-retained.test.ts; cp_review preflight rejects before ReviewRuns.start; gate/quality reuse pending waits, so no product entry exposes ReviewRunsError.pending; public duplicate refusal/coexistence also pinned by A/R11 |
+| `tests/review-runs.test.ts` | (3) finish persists before wake and late handback sends only once | 05-S15-A | mapped | R02; real parent wake appears before handback; decision/marker checks and repeated handback assertions stay |
+| `tests/review-runs.test.ts` | (4) early handback is ordinary order and sends once | 05-S15-A | mapped | R03; ordinary real reviewer produces zero wakes instead of one |
+| `tests/review-runs.test.ts` | (5) transport throws after durable decision and cleared pending | 05-S15-X | mapped | R04; real review pending marker remains after transport failure |
+| `tests/review-runs.test.ts` | (6) waiter throws and finishes operationally without pending | 05-S15-Q | mapped | Q01; actual quality waiter file write failure loses its operational reason and emits undefined quality pass |
+| `tests/review-runs.test.ts` | (7) successful finish returns undefined wake and clears slot | — | retained | tests/review-runs-retained.test.ts; CommandPost.diffReview, gate and quality supply concrete wake-returning finishers; no product entry accepts a custom ReviewAttempt.finish returning undefined on success |
+| `tests/review-runs.test.ts` | (8) pre-write finish failure falls back once, normalizes reason and spends attempt | 05-S15-S | mapped | R09; second atomic decision write is missing; FS/once also pins one orphan event, normalized persisted reason, one wake/no notice, cleanup and real attempt 2 |
+| `tests/review-runs.test.ts` | (9) partial pass survives with no fabricated verdict and one notice | 05-S15-S | mapped | R08; partial pass is overwritten with escalate; FS/partial checks attempt-specific durable notice and cleanup |
+| `tests/review-runs.test.ts` | (10) persistent fallback failure reports once even when reporter throws | 05-S15-S | mapped | R09 loses second write; R10 makes throwing public durable-notice callback escape settlement; FS/always pins no decision/verdict, one durable notice and cleared marker |
+| `tests/review-runs.test.ts` | (11) lost handback cannot swallow verdict or pin next attempt | 05-S15-B | mapped | B01; zero wakes after real production 60-second bound instead of one; durable pass, cleanup and actual attempt 2 asserted |
+| `tests/review-runs.test.ts` | (12) dead orphan with no decision finishes legacy markers; only handed-back wakes | 05-S15-O | mapped | R05; untold legacy marker emits a wake; durable decisions/cleanup and inert replay pinned |
+| `tests/review-runs.test.ts` | (13) throwing orphan finisher is reported once and later jobs continue | 05-S15-O | mapped | R06; later healthy orphan is absent from finished; failed marker clears and its finish-failed skip is reported |
+| `tests/review-runs.test.ts` | (14) live pid, existing decision and absent finisher leave markers alone | — | retained | tests/review-runs-retained.test.ts; CommandPost.sweepOrphanReviews always supplies review/gate/quality finishers; unknown legacy surfaces fail validation, so no entry accepts an incomplete finisher map; O also pins public live/decided skips |
+| `tests/review-runs.test.ts` | (15) unconfirmed wake resends once; confirmation removes delivery key | 05-S15-D | mapped | R15; one arrival confirms a verdict only once fails actual 2 versus expected 1; actual 120-second resend, confirmed no-resend and no stream also asserted |
+| `tests/review-runs.test.ts` | (16) withheld copies keep eligibility beyond the watcher's worst backoff | 05-S15-D | mapped | R16; withheld copies preserve resend eligibility fails because only two real attempts occur; later recovery, at least seven sends and backoff-outlasting permanent suppression asserted |
+| `tests/review-runs.test.ts` | (17) permanently withheld wake terminates at finite production lifetime | 05-S15-D | mapped | R17; suppression remains eligible for its production retry window fails at one attempt; D also pins near-cutoff eligibility, no sends after cutoff and no resurrection after facts recover |
+| `tests/review-runs.test.ts` | (18) invalid pending contract never throws or invents sweep records | 05-S15-O | mapped | R07; malformed input rejects sweep; invalid contract shape and the original invalid JSON both remain byte-for-byte with no report entries |
+| `tests/review-runs.test.ts` | (19) passing durable verdict reaches parent before completed deadline integration | 05-S15-L | mapped | W01; actual merge occurs before decided_at plus 30000ms; L pins raw parent-context receipt before deadline, durable verdict/no pending, exactly one completed merge and no second reviewer; exact injected synchronous callback/fake-clock map assertions are redundant-unreachable under named case L |
 <!-- /manifest:assertions -->
 
 S06's [declaration control ledger](testing-migration-s06-controls.md) maps each of its 24 mapped declarations to
@@ -1395,6 +1422,7 @@ diff --git a/src/held-release.ts b/src/held-release.ts
 | S15-C10 | `tests/review-context.test.ts` | 66c803bd47a3638e228a4183edd14aa34c647e8a | 05-S15-C | S15-C10 | bda2cbe060162587fea753d9651f19d0201685595492b7edb9a63672159582e5 | unchanged lib/core.py fork unexpectedly included | pass |
 | S15-W01 | `tests/review-merge-window.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-W | S15-W01 | 76fe8e4aee8fad87cbd5a6f9f100ede181f1bbbd6aab1beced777a94cdf5ca00 | fresh pass advances rather than waiting for its window | pass |
 | S15-T05 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-P | S15-T05 | 96f894ad8f6d5e6615375c7a4900dfa1155c973c18905dfba652195611ffe5c0 | missing expected rejection for a worker profile containing cp_review | pass |
+| S15-R16 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-D | S15-R16 | 04123a105db6ec2a9770f04e6a604696e9c3da3be64fa41b36525bd46ed211dc | withheld copies preserve resend eligibility rejects: only two actual attempts, never a third withheld copy | pass |
 
 <!-- patch:NC-S05-SUMMARY -->
 ```diff
@@ -1417,6 +1445,18 @@ diff --git a/src/contracts/workers.ts b/src/contracts/workers.ts
  	 */
 -	"cp_review",
  	"cp_artifact",
+```
+
+<!-- patch:S15-R16 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -536,3 +536,3 @@
+ 			firstSentAt: existing?.firstSentAt ?? at,
+-			resent: (resend && sent) || existing?.resent === true,
++			resent: resend || existing?.resent === true,
+ 		});
 ```
 
 <!-- patch:S15-W01 -->
@@ -2587,6 +2627,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/forge-observers-retained.test.ts` | S06 | eight preserved structural, security and direct-reader boundary declarations; reasons in assertion map |
 | `tests/held-release-retained.test.ts` | S06 | eight preserved private-state, schema-defense and injected-race declarations; reasons in assertion map |
 | `tests/review-tool-retained.test.ts` | S15 | convert-owned; three verbatim declarations retained from tests/review-tool.test.ts for unreachable closed-schema, invalid-verdict and combined raw-observation helper inputs; see testing-migration-s15.md |
+| `tests/review-runs-retained.test.ts` | S15 | convert-owned; three verbatim direct-registry declarations from tests/review-runs.test.ts: duplicate ReviewRunsError, undefined successful finish wake, and missing surface finisher; public entry-point traces in testing-migration-s15.md |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -2850,7 +2891,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/review-approval.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/review-context.test.ts` | deleted | P3 | S15: all ten declarations mapped to 05-S15-C/F; ten executed controls with patches/hashes in testing-migration-s15.md; known cp-c1ur N11 regression pinned by S15-C10 |
 | `tests/review-merge-window.test.ts` | deleted | P3 | S15: both declarations mapped to 05-S15-W through cp_integrate and a fresh parent; executed W01/W02 patches and hashes in testing-migration-s15.md |
-| `tests/review-runs.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/review-runs.test.ts` | deleted | P3 | S15: source path replaced by tests/review-runs-retained.test.ts; 16 mapped declarations in 05-S15-A/X/Q/S/B/O/D/L, 3 retained verbatim; production 60/120/1200-second timers and R01–R11/R15–R17/Q01/B01/W01 controls; assertion dispositions remain mapped/retained |
 | `tests/review-tool.test.ts` | deleted | P3 | S15: four mapped declarations in 05-S15-T/P; three declarations ledgered retained and moved verbatim to tests/review-tool-retained.test.ts; typed-helper/schema entry-point traces and T00–T05 controls in testing-migration-s15.md |
 | `tests/reviewer-model.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/revive.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |

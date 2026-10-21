@@ -6,7 +6,7 @@ S15 owns the whole of review-context, review-merge-window, review-runs and revie
 
 ## Dispositions
 
-Context: 10 mapped, whole source file deleted. Window: 2 mapped, whole source file deleted. Tool: 4 mapped and 3 retained in `tests/review-tool-retained.test.ts`. Review-runs accounting is still in progress; its original file remains intact.
+All 38 declarations are closed: 32 mapped and 6 retained (15.8%), with none pending and no whole declarations discarded as redundant. Context: 10 mapped, source file deleted. Window: 2 mapped, source file deleted. Tool: 4 mapped and 3 retained in `tests/review-tool-retained.test.ts`. Review-runs: 16 mapped and 3 retained in `tests/review-runs-retained.test.ts`. Thus two files are wholly deleted and two are replaced by retained subsets; four original paths retire, two retained paths are added, net two fewer test files. Thirteen consumer declarations replace the 32 removed source declarations, net 19 fewer declarations.
 
 All product entry points use real product code and mocked models. Temporary agent directories, git shims and invalid profile configuration live outside the checkout and are removed by test cleanup. Filesystem fault cases alter the OS rename boundary and restore it in `finally`.
 
@@ -36,7 +36,7 @@ The retained source keeps every original assertion for declarations 3, 5 and 6; 
 
 ## Executed additional controls
 
-Every path below is under `testing-migration-s15-controls/`. Hashes include the trailing newline. Apply one patch, run its named scenario through `node --import ./tests/harness/hermetic-env.ts --test --test-name-pattern='<prefix>' --test-force-exit tests/e2e/diff-review.test.ts`, then restore production source. All listed mutations were individually executed and restored with the anchor editor. `git apply --check` verifies reproducibility.
+Every path below is under `testing-migration-s15-controls/`. Hashes include the trailing newline. Apply one patch with `git apply --unidiff-zero`, run its named scenario through `node --import ./tests/harness/hermetic-env.ts --test --test-name-pattern='<prefix>' --test-force-exit tests/e2e/diff-review.test.ts`, then restore production source. R15–R17 instead use `--test-name-pattern='landing S15 retry:' tests/e2e/landing.test.ts`. All listed mutations were individually executed and restored with the anchor editor. `git apply --check --unidiff-zero` verifies reproducibility.
 
 | Patch | Scenario prefix | SHA-256 | Observed failing assertion |
 |---|---|---|---|
@@ -50,6 +50,10 @@ Every path below is under `testing-migration-s15-controls/`. Hashes include the 
 | R08.patch | S15: real review decision writes | e3783e5959745f709d3afaaded56e416c5f09a3ce7b913e4e1091b273113a8a6 | partial-write pass overwritten by escalate |
 | R09.patch | S15: real review decision writes | 89942e2ab53cbb3a965f2ae9047b1ca18e6055b1dcad4f9fc60b5bb7e3b331fe | transient failure emits an unwanted notice; persistent failure has one write instead of two |
 | R10.patch | S15: real review decision writes | 6d7e1ea926cbc94b248d7f434c0beeacb82657e7ba01571c093a0404859f37c2 | failing durable-notice transport rejects reviewer settlement |
+| R11.patch | S15: real reviewer attempts | 85332e44a50011652c5976890d38b3201adcead115b653f5d047433404e8f2aa | forcing quality to check the review slot fails `doesNotReject`: a different review surface uses its own slot |
+| R15.patch | landing S15 retry | 16c3e2fe2a7bb7d23276199c851708cf6ce668c9f358cbdd0d37c4dc2f54689f | retaining a confirmed key fails one arrival confirms a verdict only once: actual 2, expected 1 |
+| R16.patch | landing S15 retry | 04123a105db6ec2a9770f04e6a604696e9c3da3be64fa41b36525bd46ed211dc | spending withheld eligibility fails `doesNotReject`: withheld copies preserve resend eligibility; last count 2 |
+| R17.patch | landing S15 retry | 48c15985255254ac0c74a54d2f563afbdc6b76f6b60ac24c2245bb558ed537d1 | expiring suppression at first retry fails `doesNotReject`: suppression remains eligible for its production retry window; last count 1 |
 | Q01.patch | S15: a real quality waiter | 94227b5928c6bf246ed9cb60385e74f1365dbf8e3fc83047cdffcd3b473ed626 | wake says undefined quality pass instead of quality panel failed / reviewer wait failed |
 | B01.patch | S15: a lost caller handback | 2d5f38c287afebf30c45a08f2b9e0d5b758ab485acef2e2428211ebcf42da738 | zero wakes after the production 60-second bound, expected one |
 | T00.patch | S15: the real cp_review | 8c54f9510b953f4bb97c19d2aa056d8c6e7a137dcb751908ed187f9e2a794ca9 | unknown-job refusal names cp_pipeline instead of cp_dispatch |
@@ -60,6 +64,36 @@ Every path below is under `testing-migration-s15-controls/`. Hashes include the 
 | T05.patch | S15: dispatch preview | 96f894ad8f6d5e6615375c7a4900dfa1155c973c18905dfba652195611ffe5c0 | missing expected rejection for a worker profile containing cp_review |
 
 An earlier cached-result-only path-leak probe passed and earns no credit. T03 now reaches the actual materialized-subject path. Moving the afterWakeup hook ahead of send also passed the real landing outcome: the production continuation schedules asynchronous work, while the old unit injects synchronous work. This exploratory mutation was restored and earns no credit for exact callback order.
+
+An exploratory mutation omitting the required pending surface matched no slot and passed the lifecycle e2e; it earns no credit. Public duplicate guards still rejected the second call, which is why declaration 2's direct-registry rejection remains retained. R11 instead forces a cross-surface collision and fails the real quality-start assertion.
+
+## Review-runs assertion accounting
+
+Source blob: `09fb2d8fed9057ba48e9a762cba1448dfbf8601c`. All 19 original declarations passed before retirement. The unmodified real-parent delivery scenario passed in 1493767 ms, and all three S15 landing scenarios passed together; the final strengthened completion case additionally passed in 36050 ms. A = `S15: real reviewer attempts persist before waiting, reject duplicates and announce only after handback`; FS = `S15: real review decision writes recover once before persistence and preserve partial decisions`; O = `S15: orphan reconciliation consumes durable legacy markers and isolates a failed decision write`. These are in `tests/e2e/diff-review.test.ts`. D = `landing S15 retry: real parent delivery confirms, retries withheld verdicts and expires permanent suppression`; L = `landing S15 order: a real verdict wakes the parent before its deadline continuation merges` in `tests/e2e/landing.test.ts`.
+
+| Original declaration | Disposition | Assertion equivalence and executed control |
+|---|---|---|
+| 1 durable start/wait result | mapped A | Actual pending schema, pid, handed_back flag, wait model/attempt/surface and review_started event; R01 fails the initial false flag. |
+| 2 one pending slot per job/surface | retained | A pins duplicate preflight refusal and simultaneous real review/quality slots (R11). CommandPost.diffReview rejects a duplicate before ReviewRuns.start, while gate/quality reuse their pending wait; no product entry bypasses those guards to expose ReviewRunsError.pending. Keep the original direct-registry declaration verbatim. |
+| 3 late handback | mapped A | Real decision persists and pending disappears while wake is withheld; handback sends once and repeat handback is inert; R02 produces an early wake. |
+| 4 ordinary early handback | mapped A | Real reviewer with immediate handback produces exactly one wake; R03 removes it. |
+| 5 throwing transport | mapped | Failed-transport scenario preserves decision, removes marker and slot; R04 leaves pending.json behind. |
+| 6 throwing waiter | mapped | Real quality waiter's atomic file write fails at the filesystem boundary; Q01 loses the operational reason and emits an invalid normal quality summary. |
+| 7 finish returns no wake | retained | CommandPost.diffReview, gate and quality supply concrete finishers that return a wake on success or operational outcome. Their thrown writes take the explicit fallback/failure path, not a successful undefined return. No product entry supplies a custom ReviewAttempt.finish; preserve the direct-registry assertion. |
+| 8 finish fails before persistence | mapped FS/once | Exactly two write attempts, one normalized operational decision/wake, no notice, one orphan event, no pending marker/slot and next real attempt 2; R09 loses fallback persistence. |
+| 9 partial persisted decision | mapped FS/partial | Exactly one write, original pass retained, no fabricated verdict, one durable notice naming attempt and partial write, slot cleared; R08 overwrites pass with escalate. |
+| 10 fallback/reporting both fail | mapped FS/always | Two writes fail, no decision/wake, one durable notice, no pending marker; throwing public notice transport cannot reject settlement. R09 loses the second write; R10 makes reporter failure escape. |
+| 11 lost handback | mapped | Real lost-handback scenario waits the production 60-second bound, observes durable pass/one wake/cleared slot and starts attempt 2; B01 extends the bound and fails delivery. |
+| 12 orphan/legacy handback | mapped O | Actual dead-PID legacy markers finish operationally, preserve expected reason and clean markers; only handed-back marker wakes; replay is inert. R05 wakes the untold marker. |
+| 13 orphan failure isolation | mapped O | Unwritable decision directory leaves one failure report, clears broken marker and finishes later healthy job; R06 ends the sweep before that job. |
+| 14 live/decided/missing finisher | retained | O pins public live-PID and existing-decision skips. CommandPost.sweepOrphanReviews always supplies review, gate and quality finishers, and validation rejects any other legacy surface. No product entry supplies an incomplete finisher map; keep the original mixed declaration verbatim for its missing-finisher branch. |
+| 15 retry/confirmation | mapped D | R15 keeps a confirmed key and fails one arrival confirms a verdict only once (2 instead of 1). D also checks two sends for an unconfirmed verdict and no resend after the confirmed key's deadline. |
+| 16 withheld retry eligibility | mapped D | R16 spends eligibility on a withheld copy and fails withheld copies preserve resend eligibility (only two attempts). D keeps facts stale until near the watcher's 15-minute backoff, then requires delivery beyond the old five-copy bound and no stream. |
+| 17 finite suppression lifetime | mapped D | D requires retry eligibility beyond watcher backoff and near the production cutoff, no sends at/after cutoff, and no revival after restoring facts. R17 shortens the lifetime to zero and fails suppression remains eligible for its production retry window (last send count 1). |
+| 18 malformed marker | mapped O | Sweep never rejects the original invalid JSON or an invalid contract shape, preserves both files byte-for-byte, and creates no finished/skipped records for either; R07 makes malformed input reject the sweep. |
+| 19 wake then deadline continuation | mapped L | Real raw verdict reaches parent context before its deadline; decision is durable, pending is absent, no early merge, exactly one completed merge after 30 seconds, no second reviewer, and verdict/completion both reach the model. W01 fails the real merge-time assertion. Exact fake-clock task-map size and synchronous injected callback order are redundant-unreachable: L pins the continuation's consumer-visible completed merge. |
+
+The three retained review-runs declarations stay verbatim in `tests/review-runs-retained.test.ts`; only unused imports and comments are removed. Their public portions are additionally covered above. No production function is mocked to force an impossible callback return or finisher map.
 
 ## Context retirement proof (10 declarations)
 

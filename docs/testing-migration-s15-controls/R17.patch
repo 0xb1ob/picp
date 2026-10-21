@@ -1,0 +1,8 @@
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -567,3 +567,3 @@
+ 		for (const [key, entry] of this.#inFlight) {
+-			if (entry.resent || now.getTime() - entry.firstSentAt >= VERDICT_SUPPRESSED_RETRY_MAX_SECONDS * 1000) {
++			if (entry.resent || now.getTime() - entry.firstSentAt >= 0) {
+ 				this.#inFlight.delete(key);

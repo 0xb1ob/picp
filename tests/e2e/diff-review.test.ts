@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
@@ -13,7 +13,7 @@ import { isDiffReviewWait } from "../../src/diff-review.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT, startPiChild } from "../harness/index.ts";
 import type { PiModelRegistryLike } from "../../src/routing.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
-import { enableTreehouse, waitFor } from "../harness/index.ts";
+import { enableTreehouse, readRunEvents, waitFor } from "../harness/index.ts";
 
 import { CheckpointStore } from "../../src/checkpoint.ts";
 import { listPendingReviews, readPendingReview } from "../../src/review-runs.ts";
@@ -558,7 +558,7 @@ test("S15: reviewers receive bounded whole-file snapshots with resolved task pat
 	assert.equal(entry("img.bin")?.state, "binary");
 	assert.equal(entry("img.bin")?.bytes, 18);
 	assert.deepEqual(entries.filter((e) => e.reason === "consumer").map((e) => e.path), [1, 2, 3, 4, 5].map((n) => `src/use-${n}.ts`));
-	assert.match(entry("src/run.py")?.sha256 ?? "", /^[0-9a-f]{64}$/);
+	assert.equal(entry("src/run.py")?.sha256, "277cebd939b4d34e6b2e3c7a40b6f4847c6041d4c0b284f5f82265419cc0b24c");
 	assert.deepEqual(entries.filter((e) => e.reason === "changed").map((e) => `${e.side}:${e.path}`), ["head", "fork"].flatMap((side) => ["docs/legacy.md", "img.bin", "src/core.ts", "src/run.py", "tests/core.test.ts"].map((path) => `${side}:${path}`)));
 	const context = readFileSync(join(result.scratch, "context.md"), "utf8");
 	assert.match(context, /S15_FORK_ONLY/);
@@ -610,9 +610,17 @@ test("S15: a git object read failure is named in reviewer context without fabric
 
 
 test("S15: real reviewer attempts persist before waiting, reject duplicates and announce only after handback", { timeout: 120_000 }, async (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "cp-s15-slots-"));
+	const fifo = join(dir, "reviewer-read");
+	execFileSync("mkfifo", [fifo]);
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
 	const s = await stack(t);
 	const job = await s.seed({ "src/run.ts": "export const run = 1;\n" });
-	const model = s.provider.addScript("s15-barrier", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["S15 reviewed"] } }] }]);
+	const model = s.provider.addScript("s15-barrier", [
+		{ kind: "tool_calls", calls: [{ name: "read", args: { path: fifo } }] },
+		{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["S15 reviewed"] } }] },
+	]);
+	const qualityModel = s.provider.addScript("s15-independent-quality", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["sound"] } }] }]);
 	s.agent.writeModels(s.provider);
 	const started = await s.post.diffReview({ jobId: job, model });
 	assert.ok(isDiffReviewWait(started));
@@ -620,9 +628,26 @@ test("S15: real reviewer attempts persist before waiting, reject duplicates and 
 	const pendingFile = join(s.home, paths.pendingReviewFile(job, "review", 1));
 	const pending = JSON.parse(readFileSync(pendingFile, "utf8"));
 	assert.equal(pending.schema_version, 1);
+	assert.deepEqual([pending.job_id, pending.surface, pending.attempt, pending.model, pending.deadline], [job, "review", 1, model, started.deadline]);
+	assert.ok(Number.isFinite(Date.parse(started.deadline)));
+	assert.ok(Date.parse(pending.started_at) < Date.parse(started.deadline));
+	assert.equal(typeof pending.pid, "number");
+	assert.deepEqual(s.post.reviewRuns.pending(job, "review"), pending);
 	assert.equal(pending.handed_back, false);
 	assert.ok(pending.pid > 0);
 	await assert.rejects(() => s.post.diffReview({ jobId: job, model }), /already has a diff review in flight/);
+	const artifact = join(s.home, "independent-quality.md");
+	writeFileSync(artifact, "# Proposed change\nImplement the scoped task.\n");
+	s.post.artifacts.add(job, artifact);
+	let qualityKey = "";
+	await assert.doesNotReject(async () => {
+		const quality = await s.post.qualityPass().start({ jobId: job, task: "Implement the scoped task.", config: { verify: true, voters: 1, model: qualityModel } });
+		assert.ok(quality && "key" in quality);
+		qualityKey = quality.key;
+	}, "a different review surface uses its own slot");
+	assert.deepEqual(listPendingReviews(s.home, job).map((pending) => pending.surface).sort(), ["quality", "review"]);
+	// The reader sniffs MIME before reading the body; release it only after the path becomes a regular file.
+	await new Promise<void>((resolve, reject) => execFile("sh", ["-c", 'exec 3>"$1"; rm "$1"; printf release > "$1"; printf release >&3', "s15-fifo", fifo], { timeout: 30_000 }, (error) => error ? reject(error) : resolve()));
 	await waitFor(() => existsSync(join(s.home, paths.reviewFile(job, 1))), Boolean, { timeoutMs: 30_000, what: "durable review decision" });
 	assert.equal(existsSync(pendingFile), false);
 	assert.equal(s.wakes.length, 0);
@@ -633,9 +658,12 @@ test("S15: real reviewer attempts persist before waiting, reject duplicates and 
 	assert.equal(s.post.reviewRuns.pending(job, "review"), undefined);
 	s.post.reviewRuns.handBack(started.key);
 	assert.equal(s.wakes.length, 1);
+	s.post.reviewRuns.handBack(qualityKey);
+	await s.post.reviewRuns.settled(qualityKey);
+	assert.equal(s.wakes.length, 2);
 	const ordinary = await s.seed({ "src/ordinary.ts": "export const ordinary = 1;\n" });
 	await s.review(ordinary);
-	assert.equal(s.wakes.length, 2);
+	assert.equal(s.wakes.length, 3);
 	const events = readFileSync(join(s.home, paths.eventsFile(job)), "utf8");
 	assert.match(events, /review_started/);
 	assert.match(events, /verdict_wakeup_sent/);
@@ -747,9 +775,14 @@ test("S15: orphan reconciliation consumes durable legacy markers and isolates a 
 			chmodSync(dir, 0o500);
 		}
 	}
+	const invalidShape = join(s.home, paths.pendingReviewFile(jobs[5]!, "review", 2));
+	mkdirSync(join(invalidShape, ".."), { recursive: true });
+	writeFileSync(invalidShape, JSON.stringify({ job_id: "no-attempt" }));
 	let report!: Awaited<ReturnType<typeof s.post.sweepOrphanReviews>>;
 	try { await assert.doesNotReject(async () => { report = await s.post.sweepOrphanReviews(); }, "malformed pending files never stop the orphan sweep"); }
 	finally { chmodSync(join(s.home, paths.runDir(jobs[4]!)), 0o700); }
+	assert.equal(report.finished.length, 3);
+	assert.equal(report.skipped.length, 3);
 	assert.ok(report.skipped.some((entry) => entry.pending.job_id === jobs[4] && /finish failed/.test(entry.reason)), JSON.stringify(report));
 	assert.ok(report.finished.some((pending) => pending.job_id === jobs[0]));
 	assert.ok(report.finished.some((pending) => pending.job_id === jobs[1]));
@@ -765,6 +798,7 @@ test("S15: orphan reconciliation consumes durable legacy markers and isolates a 
 		assert.deepEqual([verdict.verdict, verdict.cause], ["escalate", "operational"]);
 	}
 	assert.equal(readFileSync(join(s.home, paths.pendingReviewFile(jobs[5]!, "review", 1)), "utf8"), "{not json");
+	assert.equal(readFileSync(invalidShape, "utf8"), JSON.stringify({ job_id: "no-attempt" }));
 	assert.equal(report.finished.some((pending) => pending.job_id === jobs[5]), false);
 	assert.equal(report.skipped.some((entry) => entry.pending.job_id === jobs[5]), false);
 	const again = await s.post.sweepOrphanReviews();
@@ -818,10 +852,15 @@ test("S15: real review decision writes recover once before persistence and prese
 		} finally { fs.renameSync = rename; syncBuiltinESMExports(); }
 		assert.equal(s.post.reviewRuns.pending(job, "review"), undefined);
 		assert.equal(existsSync(join(s.home, paths.pendingReviewFile(job, "review", 1))), false);
+		assert.equal(readRunEvents(s.home, job).filter((event) => event.type === "review_orphaned").length, 1);
 		const notices = s.post.durableWakeups.pending().filter((entry) => entry.job_id === job);
 		assert.equal(notices.length, mode === "once" ? 0 : 1);
 		assert.equal(failedNotices - noticesBefore, mode === "once" ? 0 : 1);
-		if (mode !== "once") assert.match(notices[0]!.content, /S15 filesystem unavailable/);
+		if (mode !== "once") {
+			assert.match(notices[0]!.content, /review attempt 1/);
+			assert.match(notices[0]!.content, /S15 filesystem unavailable second line/);
+			assert.match(notices[0]!.content, mode === "partial" ? /a decision was already written/ : /operational fallback also failed/);
+		}
 		if (mode === "always") {
 			assert.equal(writes, 2);
 			assert.equal(existsSync(target), false);
@@ -834,7 +873,7 @@ test("S15: real review decision writes recover once before persistence and prese
 			assert.equal(s.wakes.length, before + (mode === "once" ? 1 : 0));
 			if (mode === "once") {
 				assert.equal(verdict.cause, "operational");
-				assert.match(verdict.reasons.join(" "), /S15 filesystem unavailable/);
+				assert.match(verdict.reasons.join(" "), /^reviewer finish failed: S15 filesystem unavailable second line$/);
 				assert.doesNotMatch(verdict.reasons.join(" "), /\n/);
 				assert.equal((await s.review(job)).verdict.attempt, 2, "an operational decision consumes one attempt and releases its slot");
 			}
