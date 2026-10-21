@@ -91,7 +91,7 @@ import {
 } from "./routing.ts";
 import { installScriptHint, OPTIONAL_TOOL_INFO, OPTIONAL_TOOLS, PI_LENS_TOOLS, REQUIRED_TOOLS, type RequiredTool } from "./tool-manifest.ts";
 import { classifyPi, PI_COMPAT_CHECK, piCompatFinding, type PiProbe, readPiCompat } from "./pi-compat.ts";
-import { piDriftFinding, readDriftFacts } from "./pi-qualify.ts";
+import { PI_DRIFT_CHECK, piDriftFinding, readDriftFacts } from "./pi-qualify.ts";
 import {
 	foreignSessionTools,
 	isUncovered,
@@ -504,8 +504,8 @@ export class Doctor {
 			const sh = (command: string, args: string[]) => this.#run(command, args, this.#options.packageRoot);
 			const drift = piDriftFinding(result, compat.testedMax, readDriftFacts(result.version, sh), this.#now());
 			return drift ? [finding, drift] : [finding];
-		} catch {
-			return [finding]; // drift is advisory: a failed read drops only its own finding
+		} catch (error) {
+			return [finding, { check: PI_DRIFT_CHECK, severity: "warn", what: "host.pi.drift could not be read", detail: (error as Error).message, fix: "check `npm view` and `gh auth status` work from the package root" }];
 		}
 	}
 

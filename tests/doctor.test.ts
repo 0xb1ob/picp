@@ -1817,6 +1817,32 @@ test("doctor warns host.pi.drift for an unqualified newer pi, not once a qualify
 	assert.equal(open.length, 0);
 });
 
+// An unreadable drift fact (npm prints non-JSON) is a named warn; the control with valid output has no such finding.
+test("doctor names an unreadable drift read as a warn finding carrying the error", async (t) => {
+	const home = fixture(t);
+	const doctor = (npmOut: string) =>
+		new Doctor({
+			home: home.home.path,
+			packageRoot: REPO_ROOT,
+			fleet: new FleetStore({ home: home.home.path }),
+			run: (command, args, cwd) => {
+				if (command === "npm") return { status: 0, stdout: npmOut, stderr: "" };
+				if (command === "gh") return { status: 0, stdout: "[]", stderr: "" };
+				return healthyRunner()(command, args, cwd);
+			},
+			which: ALL_PRESENT,
+			env: {},
+			now: () => NOW,
+			piProbe: () => ({ version: "1.9.9", extension: { ok: true, detail: "" } }),
+		}).run();
+	const [bad] = find(await doctor("npm warn rate limited"), "host.pi.drift");
+	assert.equal(bad?.severity, "warn");
+	assert.match(bad?.detail ?? "", /JSON/);
+	const released = new Date(NOW.getTime() - 20 * 86_400_000).toISOString();
+	const [ok] = find(await doctor(JSON.stringify({ "1.9.9": released })), "host.pi.drift");
+	assert.doesNotMatch(ok?.what ?? "", /could not be read/);
+});
+
 // A throwing probe is an incompatible pi, never "piCompat is unreadable"; the control reads a broken package.json.
 test("doctor reports a throwing pi probe as incompatible, not as unreadable piCompat", async (t) => {
 	const home = fixture(t);
