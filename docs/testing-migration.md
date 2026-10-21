@@ -62,6 +62,7 @@ ask-0088e0332d00, 2026-10-21.
 | P2d (cp-e2e-migration-p2d-k5to) | behavior 02, fourth slice: the risk warning (02-9), risk:high pre-approval (02-10), batch risk:high (02-11), grant selection and supplements (02-12), live mandate usage (02-13) and the gateway's capacity and quota (02-14), and the P2c review's two lows. `tests/mandate.test.ts` stays with P2e. | 8 (`tests/capacity.test.ts`, `tests/mandate-selection.test.ts`, `tests/mandate-supplement.test.ts`, `tests/mandate-usage.test.ts`, `tests/quota.test.ts`, `tests/risk-batch.test.ts`, `tests/risk-preapproval.test.ts`, `tests/risk-warning.test.ts`) | 392 → 384 | 4,393 → 4,346 |
 | P2e (cp-e2e-migration-p2e-fmi5) | behavior 02, last slice: a pipeline's mandate-decided plan checkpoint (02-15), cp_mandate and cp_escalate through a real parent (02-16), and in-flight continuation under expired, revoked, serial and capped grants (02-17); the P2d review's three findings. No behavior-02 file remains; send-first-gate belongs to P4. | 1 (`tests/mandate.test.ts`) | 384 → 383 | 4,346 → 4,295 |
 | P3 (cp-e2e-migration-p3-rhym) | behavior 05, first slice: the Actions CI read behind cp_integrate, the CI watch and `/status` (05-1), the no-CI workflows question (05-2), `/doctor` `ci.<project>` (05-3) and the one infra-only rerun (05-4) in `tests/e2e/landing.test.ts`; the P2e review's three findings. The other 26 behavior-05 files stay `convert`, for P3b (a job the main session creates). | 4 (`tests/actions-ci.test.ts`, `tests/ci-access.test.ts`, `tests/ci-configured.test.ts`, `tests/ci-infra-rerun.test.ts`) | 385 → 382 | 4,300 → 4,287 |
+| P3b (cp-e2e-migration-p3b-stth) | behavior 05, second slice: merge receipts and landing proof in `tests/e2e/landing.test.ts`: cp_merged through `gh` with the after-merge deploy job (05-5), cp_merged against a local https GitLab (05-6), and cp_teardown's git-only landing proof (05-7). The other 23 behavior-05 files stay `convert` (owner P3), for P3c (a job the main session cuts). | 3 (`tests/after-merge.test.ts`, `tests/landing-proof.test.ts`, `tests/merges.test.ts`) | 382 → 379 | 4,287 → 4,272 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -142,11 +143,26 @@ read, its configuration, its doctor probe and its infra rerun. Each case runs a 
 implementers that push and report, a scratch remote and a scripted `gh` on PATH; cp_integrate, the CI watch tick,
 `/status` and `/doctor` are the consumers. Ten units are `retained`, moved verbatim: the Actions paths, normalisation,
 budget and status runner plus `ciReadDenied` and the viewer label parity to `tests/actions-ci-policy.test.ts` (an
-exception), the infra classifier table and the guards no landing entry point reaches to `tests/main-ci.test.ts`, and
+exception; P3b moved them on to `tests/main-ci.test.ts`), the infra classifier table and the guards no landing entry point reaches to `tests/main-ci.test.ts`, and
 the throwing-runner `ghCiConfigured` to `tests/merge-ask.test.ts`. Plan and tree disagree once: the infra rerun's drain
 guard is unreachable from cp_integrate, which reads no CI at all while draining (05-4 pins that); only the main CI
 watch reaches it. It also folds in the P2e review: the expired-grant matrix and the after-expiry sub-asserts are
 `retained` in `tests/decide.test.ts`, and the checker refuses a `retained` row whose note names no kept test file.
+
+P3b (cp-e2e-migration-p3b-stth) adds three cases to `tests/e2e/landing.test.ts` and deletes three of the 26 remaining
+behavior-05 files (24 declarations) under negative controls NC-28 to NC-31, one per file and at least one per
+scenario. The slice is the merge receipt and the landing proof: what cp_merged records from a forge's answer, the
+after-merge deploy job it creates, and what cp_teardown accepts as git evidence once the head branch is gone. 05-5 and
+05-6 drive cp_merged on real held jobs and on seeded legacy fleet records (a bound PR, no PR receipt); 05-6 serves the
+GitLab REST API and the repository (`git http-backend`) from one local https server with a throwaway certificate, so the
+project's real GitLab observer, its token and git's fast-forward check all run. 05-7 tears down held local jobs whose
+branches were merged, squashed, rebased or never landed on the scratch remote. Six units are `retained`, moved
+verbatim: the landing proof's injected-failure, timeout and recheck units to `tests/forge-runtime.test.ts`, and the
+total receipt reader, the throwing after-merge port and the ledger refusal to `tests/forge-observers.test.ts`; both
+files stay `convert` for P3c. The P2e review's three findings were already folded in by P3. P3b folds in the P3
+review's two lows: the seven units P3 retained in the P1 exception `tests/actions-ci-policy.test.ts` move verbatim
+to the convert-owned `tests/main-ci.test.ts`, so P3c reconsiders them, and the two "run by hand" sub-asserts (the
+upper-case head, the missing-gh ENOENT) now name the exact patch, command and failing assertion.
 
 ## Conversion PRs
 
@@ -165,7 +181,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P2d | 02 | `tests/e2e/authority.test.ts` | adds 02-9 to 02-14 |
 | P2e | 02 | `tests/e2e/authority.test.ts` | adds 02-15 to 02-17 |
 | P3 | 05 | `tests/e2e/landing.test.ts` | 4 (05-1 to 05-4) |
-| P3b | 05 | `tests/e2e/landing.test.ts` | the rest of the plan's 6 |
+| P3b | 05 | `tests/e2e/landing.test.ts` | adds 05-5 to 05-7 |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -190,8 +206,8 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 <!-- /manifest:prs -->
 
 The plan proposed 6 cases for all of behavior 05. P3 is a first slice of 4 cases over 4 files. P3b
-(cp-e2e-migration-p3b-stth) owns the other 26 behavior-05 files and takes about 250 KB of diff by behavior; a P3c
-follows if files remain.
+(cp-e2e-migration-p3b-stth) is the second, 3 cases over 3 files (merge receipts and the landing proof). The other 23
+behavior-05 files keep their `convert` rows (owner P3) for P3c, which the main session cuts.
 
 <!-- census -->
 Census snapshot, printed by the checker on `03ed8749a76085c9938517b6f149bb49ebe7a8fd`; the checker's live output wins over this table.
@@ -290,6 +306,9 @@ moves first.
 | 05-2 | `tests/e2e/landing.test.ts` | landing: only an authoritative empty workflow list is no CI; every unanswered workflows read keeps its own cause and never reads as none |
 | 05-3 | `tests/e2e/landing.test.ts` | landing: /doctor ci.<project> reads workflows, then the newest run and its attempt jobs; a refused read is loud and gh output never echoes |
 | 05-4 | `tests/e2e/landing.test.ts` | landing: an infra-only CI failure is claimed, then rerun once per head; a test failure, a cancel, a second attempt, a drain or an unreadable claim or job list goes to the parent |
+| 05-5 | `tests/e2e/landing.test.ts` | landing: cp_merged records only a merge gh observed for this job's branch, marks its PR merged once, and an opted-in deploy branch gets one blocked ops:deploy job |
+| 05-6 | `tests/e2e/landing.test.ts` | landing: cp_merged reads a GitLab MR only from the project's own GitLab with its token; a squash, or a fast-forward git sees on the target, is recorded and anything else records nothing |
+| 05-7 | `tests/e2e/landing.test.ts` | landing: cp_teardown passes a deleted branch as landed_by_git when origin's base holds its content (merge, squash, rebase, a later edit, literal odd paths) and keeps the lease when it does not |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -497,26 +516,26 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/mandate.test.ts` | resolveMandateObjectiveRef: PR prose never calls verifyRef, creates nothing, raises nothing | 02-16 | mapped | thirteen prose objectives leave gh's log, the ledger and the open asks unchanged |
 | `tests/mandate.test.ts` | schedlater S3: covers matrix — a schedule grant covers only its own schedule's jobs, any other grant no scheduled job | 02-12 | mapped | schedule-only grants leave the project-wide grant selected; a scheduled job speaks only through its schedule's grant |
 | `tests/mandate.test.ts` | S3 (T3.1): issue takes a code-only id and schedule_fire; a taken or unsafe id is refused; cp_mandate exposes neither | 02-16 | redundant-unreachable | no caller passes an id or schedule_fire: no fire mints a grant (`tests/schedule-grant.test.ts`, "PR4: no fire mints a grant"), and cp_mandate has no such parameter. 02-16 pins cp_mandate issue minting its own md- id. Standing rule 3 (ask-0088e0332d00) |
-| `tests/actions-ci.test.ts` | paths: exact head, explicit repo or gh placeholders, attempt-bound jobs; malformed ids refused | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): cp_integrate hands the read a validated 40-hex head and a job-id branch, so no entry point feeds it a malformed id. 05-1 pins the exact head, gh's placeholders and the attempt-bound, paged jobs path ("the exact head, gh's placeholders") |
-| `tests/actions-ci.test.ts` | readActionsCi: normalizes runs with identity, event, actor and their attempt's jobs and steps | 05-4 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): event and triggering actor feed only main CI's own-run counting, which no landing case drives. 05-4 pins the attempt-2 jobs path ("the run's own attempt") |
+| `tests/actions-ci.test.ts` | paths: exact head, explicit repo or gh placeholders, attempt-bound jobs; malformed ids refused | 05-1 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): cp_integrate hands the read a validated 40-hex head and a job-id branch, so no entry point feeds it a malformed id. 05-1 pins the exact head, gh's placeholders and the attempt-bound, paged jobs path ("the exact head, gh's placeholders") |
+| `tests/actions-ci.test.ts` | readActionsCi: normalizes runs with identity, event, actor and their attempt's jobs and steps | 05-4 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): event and triggering actor feed only main CI's own-run counting, which no landing case drives. 05-4 pins the attempt-2 jobs path ("the run's own attempt") |
 | `tests/actions-ci.test.ts` | readActionsCi: zero runs is an observation; two runs with one workflow name both survive | 05-1 | mapped | 05-1's 101 runs all share the workflow name `ci`; collapsing them by name loses run 101 and "ci: failed … (run 101 …)" fails. Zero runs: 05-2 asks for workflows only after an empty runs read |
 | `tests/actions-ci.test.ts` | readActionsCi: a null run status is unfinished, never success | 05-1 | mapped | a null-status run on the head: `doesNotMatch(/ci: green/)` fails if null reads as success |
 | `tests/actions-ci.test.ts` | pagination: runs and jobs pages are followed to the short page; a boundary duplicate counts once | 05-1 | mapped | two runs pages with the boundary run repeated, and run 1's 101 jobs: stopping at page one fails "ci: failed … (run 101 …)", counting the duplicate twice fails it as incomplete |
 | `tests/actions-ci.test.ts` | fail closed: a short read, conflicting duplicate, page cap or API ceiling is incomplete, never a subset | 05-1 | mapped | each case asserts `next: retry` and its own "read incomplete" cause; a subset taken as complete fails `next: retry` |
 | `tests/actions-ci.test.ts` | fail closed: malformed bodies, missing identity and a mixed head are malformed | 05-1 | mapped | the seven runs bodies each assert `read malformed` and `next: retry`; skipping the bad row fails `next: retry` |
-| `tests/actions-ci.test.ts` | parseJobsPage: a job from another run, attempt or head is malformed | 05-1 | mapped | the three job pages assert "not of the run", "not of attempt 1" and "requested head"; accepting the foreign job fails `next: retry`. The upper-case head: a run whose `head_sha` gh returns in upper case asserts "ci: green"; a case-sensitive compare reads it as a mixed head and fails it (run by hand) |
+| `tests/actions-ci.test.ts` | parseJobsPage: a job from another run, attempt or head is malformed | 05-1 | mapped | the three job pages assert "not of the run", "not of attempt 1" and "requested head"; accepting the foreign job fails `next: retry`. The upper-case head: a run whose `head_sha` gh returns in upper case asserts "ci: green"; a case-sensitive compare (`headSha !== sha` in `parseRunsPage`, `src/actions-ci.ts:158`) fails `assert.match(upper.text, /ci: green/)` with "Actions CI read malformed: … (run 1 is not on the requested head) … Nothing was merged" (run by P3b: `npm run test:one -- --test-name-pattern="a denied, rate-limited" tests/e2e/landing.test.ts`, 0 pass, 1 fail) |
 | `tests/actions-ci.test.ts` | jobs read failure fails the whole observation: no run-only green | 05-1 | mapped | a jobs 502, 404 or rate limit beside a green run asserts `next: retry`; a run-only green fails it |
 | `tests/actions-ci.test.ts` | errors: denial stays classifiable as unreadable CI; rate limit does not; raw output never carried | 05-1 | mapped | the runs 403 asserts the Actions-only label after one call, the rate limit asserts no label, and no record carries `canary`; each fails if its rule is dropped |
 | `tests/actions-ci.test.ts` | retry: a truncated body recovers on retry; a persisting one is one malformed fault with status and preview | 05-1 | mapped | "ci: green" after exactly two runs calls fails without the retry; the HTML 200 asserts "not JSON; gh exit 0; body … [redacted] …; 3 attempts" |
 | `tests/actions-ci.test.ts` | retry: an HTML 403 is a transport fault with its status and body, never a token denial; JSON 403 is denied | 05-1 | mapped | NC-24: the HTML 403 reads as denied and its `read transport … status 403` match fails |
-| `tests/actions-ci.test.ts` | retry: never past the budget, and a structurally wrong JSON page is not retried | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): the budget half needs an injected clock no entry point exposes. 05-1 pins the other half: "no total_count" asserts one runs call |
-| `tests/actions-ci.test.ts` | budget: one total deadline across pages, each request gets only what remains | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): the 15 s deadline and each request's remaining budget need an injected clock no entry point exposes |
+| `tests/actions-ci.test.ts` | retry: never past the budget, and a structurally wrong JSON page is not retried | 05-1 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): the budget half needs an injected clock no entry point exposes. 05-1 pins the other half: "no total_count" asserts one runs call |
+| `tests/actions-ci.test.ts` | budget: one total deadline across pages, each request gets only what remains | 05-1 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): the 15 s deadline and each request's remaining budget need an injected clock no entry point exposes |
 | `tests/actions-ci.test.ts` | readActionsJobs: one attempt's jobs, all pages, through the same validation | 05-4 | mapped | the rerun's own jobs read: a denied, short, empty or unparseable listing asserts "run 41 jobs unreadable" and no rerun or claim; skipping the validation reruns and fails `[reruns(), claims()]` |
-| `tests/actions-ci.test.ts` | statusRunner: forwards each request's remaining budget as timeoutMs; a non-zero status throws | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): the per-request timeout reaches no consumer. 05-1 pins a non-zero gh exit as a failed read (`next: retry`) |
-| `tests/ci-access.test.ts` | ciReadDenied: only a permission refusal of a CI read counts | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): check-runs and commit-status paths are never read (that file's own rule), and the PR-read and `gh run` forms no longer reach it. 05-1 pins the Actions denial and a rate limit that is not one |
-| `tests/ci-access.test.ts` | the browser mirrors the backend's Actions-only label and advice, keeping its needs prefix | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): source parity with `viewer-app/components/JobSignals.tsx`, which no case renders. 05-1 pins the label and advice in cp_integrate's reason |
+| `tests/actions-ci.test.ts` | statusRunner: forwards each request's remaining budget as timeoutMs; a non-zero status throws | 05-1 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): the per-request timeout reaches no consumer. 05-1 pins a non-zero gh exit as a failed read (`next: retry`) |
+| `tests/ci-access.test.ts` | ciReadDenied: only a permission refusal of a CI read counts | 05-1 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): check-runs and commit-status paths are never read (that file's own rule), and the PR-read and `gh run` forms no longer reach it. 05-1 pins the Actions denial and a rate limit that is not one |
+| `tests/ci-access.test.ts` | the browser mirrors the backend's Actions-only label and advice, keeping its needs prefix | 05-1 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): source parity with `viewer-app/components/JobSignals.tsx`, which no case renders. 05-1 pins the label and advice in cp_integrate's reason |
 | `tests/ci-access.test.ts` | a held job whose CI read was refused names the token as its wait reason, before any head is known | 05-1 | mapped | after the CI watch tick writes `last_ci: unreadable`, the `/status` table's "waiting on: CI unreadable (token)" fails without the unreadable branch in `waitReason` |
-| `tests/ci-access.test.ts` | doctor ci.<project>: workflows, then the newest run and its attempt jobs; each outcome is distinct and gh output is never echoed | 05-3 | mapped | the exact gh call sequence (`o/denied` registered as an https `.git` URL, `o/bare` as an ssh URL), each project's severity and text, and no `sentinel-credential-value` in the report; a denied jobs read read as unknown fails the `locked` row. No gh on PATH: a second `/doctor` asserts no `ci.*` finding ("no gh: host.gh says so"); dropping the ENOENT check fails it (run by hand) |
+| `tests/ci-access.test.ts` | doctor ci.<project>: workflows, then the newest run and its attempt jobs; each outcome is distinct and gh output is never echoed | 05-3 | mapped | the exact gh call sequence (`o/denied` registered as an https `.git` URL, `o/bare` as an ssh URL), each project's severity and text, and no `sentinel-credential-value` in the report; a denied jobs read read as unknown fails the `locked` row. No gh on PATH: a second `/doctor` asserts no `ci.*` finding ("no gh: host.gh says so"); dropping the ENOENT check (`&& false` on the `gh_missing` return, `src/ci-access-doctor.ts:70`) fails `deepEqual(…, [], "no gh: host.gh says so")` with an extra `ci.denied` warn "CI state unknown for o/denied: the Actions read failed (command_failed)" (run by P3b: `npm run test:one -- --test-name-pattern="doctor ci" tests/e2e/landing.test.ts`, 0 pass, 1 fail) |
 | `tests/ci-access.test.ts` | doctor ci.<project>: a jobs list shorter than its total_count is unknown, never readable | 05-3 | mapped | NC-26: `o/short` reads ok and its [warn, "the Actions read failed (incomplete)"] assertion fails |
 | `tests/ci-configured.test.ts` | only an authoritative empty workflow list is 'no CI configured' | 05-2 | mapped | the empty list asserts `none (authoritative_empty)`, "reports 0 Actions workflows" and the permission read; reading it as unreadable fails `permission: permitted` |
 | `tests/ci-configured.test.ts` | a repository that has workflows is 'present', however few runs it has produced | 05-2 | mapped | one workflow with no runs asserts "present (workflows_present) — the repository has 1 Actions workflow(s)" and the human checkpoint |
@@ -527,6 +546,30 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/ci-infra-rerun.test.ts` | an infra-only failure is claimed first, then rerun once; the same job+head never again | 05-4 | mapped | the claim is on disk when `gh run rerun` runs ("the claim was on disk before gh run rerun ran"), then "was spent at" and no second rerun; claiming after the rerun fails the first |
 | `tests/ci-infra-rerun.test.ts` | attempt 2, a test failure, a cancel, no run id, a green head and a drain all leave it to the parent | 05-4 | retained | moved verbatim to `tests/main-ci.test.ts` (P3b): a green head or an id-less run never reaches the rerun (cp_integrate calls it only on failed CI, and 05-1 refuses an id-less run as malformed), and only the main CI watch reaches the drain guard, since cp_integrate reads no CI while draining (05-4: "ci: not read — the parent is draining"). 05-4 pins attempt 2 (NC-27), the test failure, the cancel and the timeout |
 | `tests/ci-infra-rerun.test.ts` | fail closed: an unreadable claim file or jobs listing reruns nothing; a refused rerun keeps its claim | 05-4 | mapped | the corrupt claim file asserts "unparseable"; the denied, short, empty and unparseable listings assert "run 41 jobs unreadable" with no rerun or claim; gh's refusal asserts "claimed … but gh refused" and one claim, then "was spent at" |
+| `tests/after-merge.test.ts` | a merge into the deploy branch creates one blocked ops:deploy job with a frozen task file, never dispatched | 05-5 | mapped | cp_merged on a merged PR asserts exactly one deploy job with every label, `blocked_by` the merged job, `open`, its task file note and facts, the created line, the `created` record, one `after_merge_deploy` event and no fleet record; `previewDispatch` asserts profile `ops` and risk `high`, and the project-wide grant's preview asserts "would ask: risk:high". Dropping the hook fails "exactly one deploy job" |
+| `tests/after-merge.test.ts` | re-recording and a crash before the record write resume onto the same single job | 05-5 | mapped | a second cp_merged asserts no `after_merge` line; with the record removed it asserts "after-merge deploy <same id> created"; after the deploy job is dropped it asserts one deploy job ("a closed deploy job still holds the key"). Creating a second job fails that count |
+| `tests/after-merge.test.ts` | base mismatch, missing base and a pre-opt-in merge write skipped and create nothing; no opt-in is silent | 05-5 | mapped | gh answers base develop, no base and a 2020 `mergedAt`: each asserts its reason line, a `skipped` record and no deploy job (NC-31: dropping the opt-in date rule fails `before opt-in`); the project with no opt-in asserts no `after_merge` and no record file. Creating on a mismatch fails `["skipped", 0]` |
+| `tests/after-merge.test.ts` | coverage: a named grant listing the merged job enrolls the deploy; at its cap it is refused; project-wide covers | 05-5 | mapped | real grants via the mandate store: the named grant asserts "enrolled in", its `job_ids` and `coverage: enrolled`; the capped grant "job cap 1 reached" and `none`; project-wide "covered by project-wide" and `project_wide`; the research exclusion `none`. Enrolling past the cap fails the capped `job_ids` |
+| `tests/after-merge.test.ts` | a ledger refusal throws and writes no record, so the merge store names it and a retry can still create | 05-5 | retained | moved verbatim to `tests/forge-observers.test.ts` (P3b): no entry point makes the real ledger refuse a deploy job for a registered, opted-in project. 05-5 pins the retry path: a removed record resumes onto the same job |
+| `tests/landing-proof.test.ts` | landed: merge, multi-commit squash, rebase onto an advanced base and a later edit, all with the branch deleted | 05-7 | mapped | cp_teardown on held local jobs asserts `landed_by_git` with `ancestry` for the merge commit, `path_tree` with 3 paths, origin's own base sha and a witness reachable at or after the squash for the two-commit squash and later edit, and the replayed commit as the rebase's witness; one `teardown_landing_proven` event each. The worktree never fetched the squash, so a proof that does not fetch the base by sha reads unknown and fails `landed_by_git`. The read-only runner guard runs with the units in `tests/forge-runtime.test.ts` |
+| `tests/landing-proof.test.ts` | landed: path names with spaces, newlines and pathspec magic are compared literally | 05-7 | mapped | NC-30: without `:(literal)` the glob `star*[ab].txt` also compares origin's own `starXa.txt`, and the odd-paths job fails `landed_by_git` as `unpushed` |
+| `tests/landing-proof.test.ts` | not proven: partial, near-miss and extra content never pass | 05-7 | mapped | one held job (an edit, a binary file, a 755 script, a symlink, a delete and a rename) against six origin commits that each miss one path (whitespace, a binary byte, the mode, a symlink as a file, the delete, half the rename): each asserts `unpushed`, and only the exact landing asserts `path_tree` with 6 paths. Ignoring any one difference passes its near miss and fails its labelled assertion. The extra-commit case is a near miss of one path |
+| `tests/landing-proof.test.ts` | not proven: a stale tracking ref that held the squash is not the base origin advertises | 05-7 | mapped | the worktree's `origin/main` holds the squash while origin's main was reset past it: teardown asserts `unpushed` with "survives here only as a stale remote-tracking ref". A proof based on the tracking ref finds the squash and passes it |
+| `tests/landing-proof.test.ts` | unknown: missing inputs, broken commands, odd history and every budget keep the lease | 05-7 | retained | moved verbatim to `tests/forge-runtime.test.ts` (P3b): each case bends one git answer (unreachable origin, failed fetch, shallow clone, two merge bases, a hung command) or injects a limit or clock, and no entry point exposes those seams. 05-7 pins the reachable outcomes: landed or `unpushed` |
+| `tests/landing-proof.test.ts` | defaultGit kills a git that outlives its timeout and answers status null | 05-7 | retained | moved verbatim to `tests/forge-runtime.test.ts` (P3b): a git that hangs past its timeout needs an injected alias no entry point runs |
+| `tests/landing-proof.test.ts` | the pre-release recheck refuses a proof whose HEAD moved or whose tree went dirty | 05-7 | retained | moved verbatim to `tests/forge-runtime.test.ts` (P3b): the window between the proof and the lease release is inside one teardown call, which no entry point can interleave a write into |
+| `tests/merges.test.ts` | a merged PR is recorded from what gh reports, and the pr receipt becomes merged | 05-5 | mapped | the receipt's merge commit, head, `head_branch_deleted` (the branch is deleted on origin), strategy, no `bound`, the "can now pass without force" line, `pr_url` on disk, the PR receipt `merged` once, one `merge_recorded` event, and a second call's `recorded: false` with the same commit; teardown then passes as `merged` |
+| `tests/merges.test.ts` | picp-d0p: a bound job's receipt names the PR head branch and is marked bound | 05-5 | mapped | a seeded fleet record with `bound_pr` and branch `cp-b55w` asserts `head_branch` `cp-b55w` and `bound: true` in the result and on disk. Comparing the job id instead of the bound branch fails it as "not this job's delivery" |
+| `tests/merges.test.ts` | nothing is recorded for a PR gh does not call merged | 05-5 | mapped | NC-28: an open PR is not refused, and its "as open, not MERGED" match fails. The no-merge-commit and other-branch answers assert their refusals, no receipt and the PR receipt still `open` |
+| `tests/merges.test.ts` | an unreachable gh refuses and names force as the honest exit | 05-5 | mapped | a failing `gh pr view` asserts "could not read PR", `cp_teardown <job> force`, git evidence named before force, and no receipt |
+| `tests/merges.test.ts` | a job with no PR receipt must be told which PR, and an unknown job is refused | 05-5 | mapped | a seeded record with no PR receipt asserts "carries no PR receipt", then records with `pr: "77"` and adds a `merged` receipt; `cp-unknown` asserts "no fleet record" |
+| `tests/merges.test.ts` | an unreadable receipt is no receipt, never an exception out of a gate | 05-5 | retained | moved verbatim to `tests/forge-observers.test.ts` (P3b): `readMergeReceipt` on a missing or `../escape` id; job ids reach it only after fleet validation, so no entry point feeds it an unsafe id |
+| `tests/merges.test.ts` | forge PR 2: a GitLab squash MR is recorded with its squash commit, provider and project, never through gh | 05-6 | mapped | the fake GitLab's MR 7 asserts the squash commit, `squash`, `pr_number` 7, the normalised `merged_at`, `gitlab api`, the forge block, one `merge_recorded` event with provider `gitlab`, one GET with the token in PRIVATE-TOKEN, and no `gh pr view` |
+| `tests/merges.test.ts` | forge PR 3: a GitLab normal merge records its merge commit, never infers a strategy, and asks git nothing about reachability | 05-6 | mapped | MR 10 (merge and squash commits) asserts the merge commit, the source head, base `main` and `squash`; MR 11 (merge commit only) asserts strategy `unknown`. Both merge commits are absent from origin, so asking git for reachability would refuse them |
+| `tests/merges.test.ts` | forge PR 2: a GitLab fast-forward MR records its head only when git sees it on the target | 05-6 | mapped | NC-29: MR 9's head is not on origin and must be refused ("names no merge commit"); once origin's main is that head it records it with strategy `unknown` and the PR receipt `merged` |
+| `tests/merges.test.ts` | forge PR 2: a stored receipt for another job or branch is refused, and a crash before the fleet patch is repaired | 05-6 | mapped | the PR receipt patched back to `open` asserts `recorded: false`, `receipt_status_updated: true`, `merged` and one event; the branch patched to `cp-other` asserts "discharges nothing here" |
+| `tests/merges.test.ts` | forge PR 2: a mismatched observation records nothing, and a legacy receipt with no forge block still reads | 05-6 | mapped | MR 8 answering another project's `web_url` asserts "(mismatch: " and no receipt, without the token in the message; 05-5 rewrites its receipt without the forge block and asserts it still reads its head |
+| `tests/merges.test.ts` | #326: afterRecorded runs on new and existing receipts; a throwing port leaves the receipt and names the failure | 05-5 | retained | moved verbatim to `tests/forge-observers.test.ts` (P3b): the throwing port needs a ledger that refuses (see the after-merge ledger refusal). 05-5 pins the port on new and existing receipts and the quiet result with no opt-in |
 <!-- /manifest:assertions -->
 
 ## Negative controls
@@ -570,6 +613,10 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-25 | `tests/ci-configured.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-2 | NC-25-truncated-empty | 9136f6c7b38762eb24ae90db95957b08018ad14b9ce7ec99a8b64d04f10627ab | a truncated workflows page (total_count 3, no rows) reads `none (authoritative_empty)` | pass |
 | NC-26 | `tests/ci-access.test.ts` | 3701ebcf12e77e5f3bac90c498efdd56f0016c19 | 05-3 | NC-26-short-jobs | 8af5a117fa4f3344232b10a82f44e378f4c55de8632e1902025ec529063c119f | `ci.short` with 1 of 4 jobs reads ok "CI readable", expected warn "the Actions read failed (incomplete)" | pass |
 | NC-27 | `tests/ci-infra-rerun.test.ts` | 5e1dcaee597b7fb7deb4cbc4a538e104fff214b8 | 05-4 | NC-27-second-attempt | f21876229231409f51b2134f511e2234233fe8acbf75a5f5ae64b03435dcf960 | an infra failure on attempt 2 is rerun, not "a second failure is the parent's" | pass |
+| NC-28 | `tests/merges.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-5 | NC-28-open-pr | 6895859eab22d32f0a13f2a7240fde11f5e1b66e08c91d5ea07c88b48da41877 | an open PR passes the state rule and reads "merged but names no merge commit", not "as open, not MERGED — nothing is recorded" | pass |
+| NC-29 | `tests/merges.test.ts` | 3a27fd9a3c099512e779b3cf36e670efa71c7587 | 05-6 | NC-29-unseen-ff | d1140a88d18614739af2d16a773504d4784ed99314da8cd54762c08e060c9b4d | a fast-forward MR whose head origin's main lacks is recorded: "Missing expected rejection" | pass |
+| NC-30 | `tests/landing-proof.test.ts` | 3a27fd9a3c099512e779b3cf36e670efa71c7587 | 05-7 | NC-30-glob-paths | a7c56cdf50d4977e9ffaa5bace6e4d3cead67e685514bea31ae8a86046cba079 | the odd-paths job keeps its lease as `unpushed`, expected `landed_by_git` with `path_tree` | pass |
+| NC-31 | `tests/after-merge.test.ts` | 8532dda3b36d59141ef007d6996595ff2f825cbc | 05-5 | NC-31-pre-opt-in | bbd4b95f011b7fc8b6d9eea04c66a1ce7c3d169f9a7cd34abe807a103d40aa12 | a merge from before the opt-in creates a deploy job: "before opt-in" fails | pass |
 <!-- /manifest:regressions -->
 
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:
@@ -1179,6 +1226,104 @@ NC-27 drops the attempt-2 guard, so a second infra failure is rerun again:
 ℹ fail 1
 ```
 
+NC-28 lets an open PR past the state rule, as if gh's answer were enough:
+
+<!-- patch:NC-28-open-pr -->
+```diff
+--- a/src/merges.ts
++++ b/src/merges.ts
+@@ -237,7 +237,7 @@ export class MergeStore {
+ 		const jobId = record.job_id;
+ 		const label = view.provider === "gitlab" ? "GitLab" : "gh";
+ 
+-		if (view.state !== "merged") {
++		if (view.state !== "merged" && view.state !== "open") {
+ 			throw new MergeError(
+ 				`${jobId}: ${label} reports ${view.url} as ${view.state}, not MERGED — nothing is recorded. ` +
+ 					"A merge receipt is an observation, never a claim.",
+```
+
+```
+✖ landing: cp_merged records only a merge gh observed for this job's branch, marks its PR merged once, and an opted-in deploy branch gets one blocked ops:deploy job
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /reports .* as open, not MERGED — nothing is recorded/. Input:
+  'Error: cp-v2fy: gh reports https://github.com/example/demo/pull/91 merged but names no merge commit — nothing is recorded. …'
+ℹ pass 0
+ℹ fail 1
+```
+
+NC-29 skips the fast-forward reachability question, so an MR head git cannot see on the target is recorded:
+
+<!-- patch:NC-29-unseen-ff -->
+```diff
+--- a/src/merges.ts
++++ b/src/merges.ts
+@@ -329,6 +329,7 @@ export class MergeStore {
+ 	/** Fast-forward evidence: origin's `target` tip has `head` in its history (the tip object fetched by sha if missing). */
+ 	async #reachable(cwd: string, head: string, target: string): Promise<boolean> {
+ 		const git = (dir: string, args: readonly string[]) => this.#run(dir, "git", args);
++		return true;
+ 		const tip = await remoteTip(git, cwd, target);
+ 		if (!tip.ok || !tip.sha || !(await haveCommit(git, cwd, tip.sha))) return false;
+ 		return (await git(cwd, ["merge-base", "--is-ancestor", head, tip.sha])).status === 0;
+```
+
+```
+✖ landing: cp_merged reads a GitLab MR only from the project's own GitLab with its token; a squash, or a fast-forward git sees on the target, is recorded and anything else records nothing
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+ℹ pass 0
+ℹ fail 1
+```
+
+NC-30 drops the literal pathspec magic, so a changed path that is a glob also compares other files:
+
+<!-- patch:NC-30-glob-paths -->
+```diff
+--- a/src/landing-proof.ts
++++ b/src/landing-proof.ts
+@@ -152,7 +152,7 @@ export async function readLandingProof(git: GitRun, worktree: string, head: stri
+ 		const truncated = listed.length > limits.candidates;
+ 		const candidates = [baseSha, ...listed.filter((sha) => sha !== baseSha)].slice(0, limits.candidates);
+ 		// shortcut: every path rides one argv; a job past ~1 MB of path names hits ARG_MAX and reads as unknown, which keeps the lease.
+-		const pathspecs = paths.map((path) => `:(literal)${path}`);
++		const pathspecs = paths.map((path) => path);
+ 		for (const candidate of candidates) {
+ 			if ((await run(["diff", "--quiet", ...DIFF, head, candidate, "--", ...pathspecs], [0, 1])).status !== 0) continue;
+ 			if ((await run(["merge-base", "--is-ancestor", candidate, baseSha], [0, 1])).status !== 0) {
+```
+
+```
+✖ landing: cp_teardown passes a deleted branch as landed_by_git when origin's base holds its content (merge, squash, rebase, a later edit, literal odd paths) and keeps the lease when it does not
+  AssertionError [ERR_ASSERTION]: {"code":"unpushed","message":"… branch cp-hcr6 is not on origin (origin/cp-hcr6 survives here only as a stale remote-tracking ref at 2916708594e5), and origin/main does not contain its content", …}
+    actual: [ false, undefined, undefined ],
+    expected: [ true, 'landed_by_git', 'path_tree' ],
+ℹ pass 0
+ℹ fail 1
+```
+
+NC-31 drops the opt-in date rule, so a merge from before `after_merge_deploy` was enabled still creates a deploy job:
+
+<!-- patch:NC-31-pre-opt-in -->
+```diff
+--- a/src/after-merge.ts
++++ b/src/after-merge.ts
+@@ -73,7 +73,7 @@ export async function afterMergeDeploy(ports: AfterMergePorts, receipt: MergeRec
+ 		const mergedAt = receipt.merged_at ?? receipt.recorded_at;
+ 		const skip = !receipt.base_branch ? "the merge receipt names no base branch"
+ 			: receipt.base_branch !== deploy.branch ? `merged into ${receipt.base_branch}, not the deploy branch ${deploy.branch}`
+-			: Date.parse(mergedAt) < Date.parse(deploy.enabled_at) ? `merged ${mergedAt}, before after_merge_deploy was enabled ${deploy.enabled_at}`
++			: Date.parse(mergedAt) < Date.parse(deploy.enabled_at) && false ? `merged ${mergedAt}, before after_merge_deploy was enabled ${deploy.enabled_at}`
+ 			: undefined;
+ 		if (skip) {
+ 			atomicWriteJson(file, { ...base, status: "skipped", reason: skip, recorded_at: now });
+```
+
+```
+✖ landing: cp_merged records only a merge gh observed for this job's branch, marks its PR merged once, and an opted-in deploy branch gets one blocked ops:deploy job
+  AssertionError [ERR_ASSERTION]: before opt-in
+ℹ pass 0
+ℹ fail 1
+```
+
 ## Incoming
 
 Test files added after the baseline, with the PR that owns them.
@@ -1193,7 +1338,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/test-migration-check.test.ts` | #379 | exception (verification integrity, like `tests/test-file-guard.test.ts`; operator ask-0088e0332d00 (Exceptions)): tests `scripts/test-migration-check.ts` itself, which no product entry point reaches, so it has no e2e consumer path; covers accept and reject paths of `deleted-with-feature` and `feature-removed` |
 | `tests/retired-integration-guard.test.ts` | #392 | exception (verification integrity, like `tests/test-migration-check.test.ts`): tests `scripts/check-retired-integration.ts` itself, a CI guard no product entry point reaches, so it has no e2e consumer path; covers the clean tree and every rejection path |
 | `tests/e2e/viewer-endpoints-speed.test.ts` | #395 | e2e landed on main after the baseline (viewer dashboard endpoint caching); recorded by P2e so the check stays at 0 findings, disposition left to its behavior's PR |
-| `tests/e2e/landing.test.ts` | P3 | behavior 05, scenarios 05-1 to 05-4 |
+| `tests/e2e/landing.test.ts` | P3 | behavior 05, scenarios 05-1 to 05-4; P3b adds 05-5 to 05-7 |
 | `tests/e2e/installer.test.ts` | #375 | installer sandbox: real bootstrap/cp-install/cp-daemon/doctor in Docker with the mock provider; opt-in `CP_INSTALL_E2E=1` (CI's install sandbox job) |
 <!-- /manifest:incoming -->
 
@@ -1252,8 +1397,8 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | File | Disposition | Owner | Evidence |
 |---|---|---|---|
 | `tests/actions-ci-policy.test.ts` | exception | P1 | contract: disallowed forge read surface; operator ask-0088e0332d00 (Exceptions) |
-| `tests/actions-ci.test.ts` | deleted | P3 | 16 declarations: scenarios 05-1 and 05-4 (Assertion map); five units retained in `tests/actions-ci-policy.test.ts`; NC-24 |
-| `tests/after-merge.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/actions-ci.test.ts` | deleted | P3 | 16 declarations: scenarios 05-1 and 05-4 (Assertion map); five units retained in `tests/main-ci.test.ts` (moved there by P3b); NC-24 |
+| `tests/after-merge.test.ts` | deleted | P3b | 5 declarations: scenario 05-5 (Assertion map); one unit retained in `tests/forge-observers.test.ts`; NC-31 |
 | `tests/answer-card.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/answer-delivery.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/answered-restart.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
@@ -1278,7 +1423,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/budgets.test.ts` | deleted | P2 | 6 assertions mapped to 02-4; negative control NC-04 |
 | `tests/capacity.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-14 or redundant-unreachable (Assertion map); negative control NC-19 |
 | `tests/checkpoint-root.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
-| `tests/ci-access.test.ts` | deleted | P3 | 5 declarations: scenarios 05-1 and 05-3 (Assertion map); two units retained in `tests/actions-ci-policy.test.ts`; NC-26 |
+| `tests/ci-access.test.ts` | deleted | P3 | 5 declarations: scenarios 05-1 and 05-3 (Assertion map); two units retained in `tests/main-ci.test.ts` (moved there by P3b); NC-26 |
 | `tests/ci-configured.test.ts` | deleted | P3 | 5 declarations: scenario 05-2 (Assertion map); one unit retained in `tests/merge-ask.test.ts`; NC-25 |
 | `tests/ci-evidence.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/ci-host-tools.test.ts` | exception | P1 | guard: CI never silently skips treehouse acceptance; operator ask-0088e0332d00 (Exceptions) |
@@ -1375,7 +1520,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/job-skills.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/jobs-tool.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/json-store.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
-| `tests/landing-proof.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/landing-proof.test.ts` | deleted | P3b | 7 declarations: scenario 05-7 (Assertion map); three units retained in `tests/forge-runtime.test.ts`; NC-30 |
 | `tests/layout-capture.test.ts` | exception | P1 | contract: assembled layout; operator ask-0088e0332d00 (Exceptions) |
 | `tests/layout-flat.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/leases.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
@@ -1392,7 +1537,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/memory.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
 | `tests/merge-ask.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/merge-permission.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
-| `tests/merges.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/merges.test.ts` | deleted | P3b | 12 declarations: scenarios 05-5 and 05-6 (Assertion map); two units retained in `tests/forge-observers.test.ts`; NC-28, NC-29 |
 | `tests/mode.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/model-call-failure-recovery.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery); also listed under 14, owned here only |
 | `tests/next.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |

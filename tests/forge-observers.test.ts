@@ -5,12 +5,21 @@
  */
 
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { afterMergeDeploy } from "../src/after-merge.ts";
+import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, type MergeReceipt, paths, type Receipt } from "../src/contracts.ts";
+import { FleetStore } from "../src/fleet.ts";
 import { resolveForgeRepository, type ForgeRepository } from "../src/forge-url.ts";
 import { observerFor, type ObservationOutcome } from "../src/forges/adapter.ts";
 import { GH_PR_FIELDS, githubObserver } from "../src/forges/github.ts";
 import { type FetchLike, gitlabObserver } from "../src/forges/gitlab.ts";
-import { GH_PR_FIELDS as MERGES_GH_PR_FIELDS, type CommandRunner } from "../src/merges.ts";
+import { MandateStore } from "../src/mandate.ts";
+import { GH_PR_FIELDS as MERGES_GH_PR_FIELDS, type CommandRunner, formatMerge, MergeStore, readMergeReceipt } from "../src/merges.ts";
+import { ProjectRegistry } from "../src/projects.ts";
+import { RunRegistry } from "../src/runs.ts";
+import { createScratchHome, createScratchLedger } from "./harness/index.ts";
 
 const CANARY = "CANARY-fake-secret-do-not-leak-0123456789";
 const HEAD = "a".repeat(40);
@@ -291,4 +300,154 @@ test("observerFor: unknown hosts are unsupported with no request; known kinds ge
 	const gitlab = observerFor(resolveForgeRepository("git@gitlab.com:g/a.git"), { run: noRun, cwd: "/w", gitlab: { fetch: fakeFetch().fetch } });
 	assert.equal(gitlab.provider, "gitlab");
 	assert.equal(failure(await gitlab.readChangeRequest("https://evil.example.com/g/a/-/merge_requests/1")).reason, "mismatch");
+});
+
+// Retained by P3b (docs/testing-migration.md): moved verbatim from tests/merges.test.ts.
+interface GhPr {
+	number?: number;
+	url?: string;
+	state?: string;
+	mergedAt?: string;
+	mergeCommit?: { oid?: string } | null;
+	headRefName?: string;
+	headRefOid?: string;
+	baseRefName?: string;
+}
+
+/**
+ * A `gh` that answers with exactly what the test says GitHub knows, and a `git`
+ * that answers "the head branch is gone". Nothing here shells out.
+ */
+function runner(pr: GhPr | { fail: string }, options: { branchOnRemote?: boolean } = {}): CommandRunner {
+	return async (_cwd, bin, args) => {
+		if (bin === "git") {
+			assert.deepEqual([...args].slice(0, 2), ["ls-remote", "--heads"]);
+			return { status: 0, stdout: options.branchOnRemote ? `abc123\trefs/heads/x\n` : "", stderr: "" };
+		}
+		assert.equal(bin, "gh");
+		assert.deepEqual([...args].slice(0, 2), ["pr", "view"]);
+		if ("fail" in pr) return { status: 1, stdout: "", stderr: pr.fail };
+		return { status: 0, stdout: JSON.stringify(pr), stderr: "" };
+	};
+}
+
+interface Bench {
+	home: string;
+	fleet: FleetStore;
+	runs: RunRegistry;
+	store(pr: GhPr | { fail: string }, options?: { branchOnRemote?: boolean }): MergeStore;
+	addJob(jobId: string, receipts?: Receipt[]): Promise<void>;
+}
+
+function benchOf(t: { after(fn: () => void | Promise<void>): void }): Bench {
+	const home = createScratchHome();
+	const fleet = new FleetStore({ home: home.path });
+	const runs = new RunRegistry(home.path);
+	t.after(() => {
+		runs.closeAll();
+		home.cleanup();
+	});
+	return {
+		home: home.path,
+		fleet,
+		runs,
+		store(pr, options = {}) {
+			return new MergeStore({ home: home.path, fleet, runs, run: runner(pr, options) });
+		},
+		async addJob(jobId, receipts) {
+			await fleet.add({
+				job_id: jobId,
+				project: "demo",
+				kind: "ship",
+				delivery: "pr",
+				origin: DEFAULT_ORIGIN,
+				phase: "held",
+				reported_at: isoTimestamp(),
+				worker: {
+					pid: process.pid,
+					session_id: "s",
+					session_file: join(home.path, "s.jsonl"),
+					profile: "implementer",
+					role: "implementer",
+					model: "mock/model",
+					started_at: isoTimestamp(),
+				},
+				worktree: join(home.path, "worktrees", jobId),
+				branch: jobId,
+				dispatched_at: isoTimestamp(),
+				usage: EMPTY_USAGE,
+				...(receipts ? { receipts } : {}),
+			});
+		},
+	};
+}
+
+const PR_RECEIPT: Receipt = { kind: "pr", status: "open", title: "PR for cp-m1", url: "https://github.com/o/r/pull/54" };
+
+test("an unreadable receipt is no receipt, never an exception out of a gate", async (t) => {
+	const b = benchOf(t);
+	assert.equal(readMergeReceipt(b.home, "cp-none"), undefined);
+	assert.equal(readMergeReceipt(b.home, "../escape"), undefined, "an unsafe id is not a path");
+});
+
+test("#326: afterRecorded runs on new and existing receipts; a throwing port leaves the receipt and names the failure", async (t) => {
+	const b = benchOf(t);
+	await b.addJob("cp-m1", [PR_RECEIPT]);
+	const pr: GhPr = { number: 54, url: PR_RECEIPT.url, state: "MERGED", mergeCommit: { oid: "b".repeat(40) }, headRefName: "cp-m1", headRefOid: "a".repeat(40), baseRefName: "main" };
+	const seen: string[] = [];
+	const store = (afterRecorded: (receipt: import("../src/contracts.ts").MergeReceipt) => Promise<string | undefined>) =>
+		new MergeStore({ home: b.home, fleet: b.fleet, runs: b.runs, run: runner(pr), afterRecorded });
+	const failing = await store(async () => { throw new Error("ledger refused\nsecond line"); }).record({ jobId: "cp-m1" });
+	assert.equal(failing.recorded, true);
+	assert.ok(readMergeReceipt(b.home, "cp-m1"), "the receipt is written whatever the port does");
+	assert.equal(failing.after_merge, "after-merge deploy NOT created: ledger refused — cp_merged cp-m1 retries");
+	assert.match(formatMerge(failing), /can now pass without force\. after-merge deploy NOT created/);
+	const again = await store(async (receipt) => (seen.push(receipt.base_branch ?? ""), "after-merge deploy cp-d1 created")).record({ jobId: "cp-m1" });
+	assert.equal(again.recorded, false);
+	assert.equal(again.after_merge, "after-merge deploy cp-d1 created");
+	assert.deepEqual(seen, ["main"]);
+	const quiet = await store(async () => undefined).record({ jobId: "cp-m1" });
+	assert.equal("after_merge" in quiet, false);
+	assert.equal("after_merge" in (await b.store(pr).record({ jobId: "cp-m1" })), false, "no port: today's result");
+});
+
+// Retained by P3b (docs/testing-migration.md): moved verbatim from tests/after-merge.test.ts.
+const SHA = "b59fc3a1b59fc3a1b59fc3a1b59fc3a1b59fc3a1";
+
+async function bench(t: import("node:test").TestContext, options: { optIn?: boolean } = {}) {
+	const home = createScratchHome();
+	const runs = new RunRegistry(home.path);
+	t.after(() => (runs.closeAll(), home.cleanup()));
+	const registry = new ProjectRegistry({ home: home.path, now: () => new Date("2026-09-01T10:00:00Z") });
+	await registry.register({ name: "demo", clone_url: "https://github.com/o/demo.git", base_branch: "main" });
+	if (options.optIn !== false) await registry.setAfterMergeDeploy("demo", { task: "copy dist to host-a and restart", resources: ["host-a", "db"] });
+	const { ledger } = createScratchLedger({ home: home.path, knownProjects: ["demo"] });
+	const fleet = new FleetStore({ home: home.path });
+	const mandates = new MandateStore(home.path);
+	const merged = await ledger.create({ title: "ship the thing", project: "demo", delivery: "pr", kind: "ship" });
+	await fleet.add({
+		job_id: merged.id, project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "held", reported_at: isoTimestamp(),
+		worker: { pid: process.pid, session_id: "s", session_file: join(home.path, "s.jsonl"), profile: "implementer", role: "implementer", model: "mock/model", started_at: isoTimestamp() },
+		worktree: join(home.path, "worktrees", merged.id), branch: merged.id, dispatched_at: isoTimestamp(), usage: EMPTY_USAGE,
+	});
+	const receipt = (extra: Partial<MergeReceipt> = {}): MergeReceipt => ({
+		schema_version: 1, job_id: merged.id, pr_url: "https://github.com/o/demo/pull/7", merge_commit_sha: SHA, head_sha: SHA,
+		head_branch: merged.id, base_branch: "main", merged_at: "2026-09-02T00:00:00Z", recorded_at: "2026-09-02T00:01:00Z", recorded_by: "gh pr view", ...extra,
+	});
+	const ports = { home: home.path, registry, ledger: () => ledger, mandates, fleet, runs, now: () => new Date("2026-09-02T00:02:00Z") };
+	const issue = (extra: { job_ids?: string[]; job_cap?: number } = {}) => mandates.issue({
+		projects: ["demo"], objective: "ship and deploy", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: extra.job_cap ?? 10,
+		...(extra.job_ids ? { job_ids: extra.job_ids } : {}),
+	});
+	const record = () => JSON.parse(readFileSync(join(home.path, paths.afterMergeFile(merged.id)), "utf8"));
+	const deployJobs = () => ledger.read().jobs.filter((job) => job.labels.includes(`after-merge:${merged.id}`));
+	return { home: home.path, ledger, mandates, merged, receipt, ports, issue, record, deployJobs };
+}
+
+test("a ledger refusal throws and writes no record, so the merge store names it and a retry can still create", async (t) => {
+	const b = await bench(t);
+	const failing = { ...b.ports, ledger: () => { throw new Error("ledger refused: archived project"); } };
+	await assert.rejects(afterMergeDeploy(failing, b.receipt()), /ledger refused/);
+	assert.equal(existsSync(join(b.home, paths.afterMergeFile(b.merged.id))), false);
+	assert.match((await afterMergeDeploy(b.ports, b.receipt())) ?? "", /created/);
 });
