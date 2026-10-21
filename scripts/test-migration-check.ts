@@ -193,6 +193,8 @@ function main(): number {
 		if (status === "unreachable") {
 			if (!note) findings.push(`${path}: "${assertion}" is unreachable with no reason`);
 			unmapped.set(path, (unmapped.get(path) ?? 0) + 1);
+		} else if (status === "retained") {
+			if (!note) findings.push(`${path}: "${assertion}" is retained with no note naming where it is kept`);
 		} else if (!pinned) findings.push(`${path}: "${assertion}" has unknown disposition "${status}"`);
 	}
 
