@@ -1230,18 +1230,50 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 	];
 	const own = (head: string, conclusion: string, login = "e2e", event = "push") => run(login !== "e2e" ? 107 : event === "dynamic" ? 108 : 106, head, "completed", conclusion, { triggering_actor: { login }, event });
 	const file = join(s.home, LAYOUT.state, "main-ci.json");
-	const rows = (): Array<{ red_since_sha: string; login: string }> => existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).projects : [];
-	s.setGh({ routes, runs: [own(tip, "failure")] });
+	const rows = (): Array<{ project: string; red_since_sha: string; login: string; workflow?: string; failing?: string }> => existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).projects : [];
+	const observe = async (runs: RunRow[], extra: Partial<GhState> = {}) => {
+		const before = s.ghCalls().filter((call) => call.includes(`head_sha=${tip}`)).length;
+		s.setGh({ routes, runs, ...extra });
+		await waitFor(() => s.ghCalls().filter((call) => call.includes(`head_sha=${tip}`)).length, (count) => count >= before + 2, { timeoutMs: 30_000, what: "two main CI timer reads" });
+	};
+	s.setGh({ routes, runs: [] });
 	await s.parent("Observe the CI timer.", [{ kind: "text", text: "Observing." }], async () => {
 		s.post.mandates.issue({ projects: ["demo"], objective: "main CI e2e", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 10 });
-		await waitFor(rows, (value) => value.length === 1, { timeoutMs: 30_000, what: "main red latch" });
-		assert.deepEqual(rows().map((row) => [row.red_since_sha, row.login]), [[tip, "e2e"]]);
+		for (const runs of [[], [own(tip, "success")], [run(109, tip, "in_progress", null)], [own("c".repeat(40), "failure")]]) {
+			await observe(runs);
+			assert.deepEqual(rows(), [], "green, pending, absent and wrong-head runs never latch");
+		}
+		await observe([own(tip, "failure"), run(109, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" } })]);
+		assert.deepEqual(rows().map((row) => [row.project, row.red_since_sha, row.login, row.workflow, row.failing]), [["demo", tip, "e2e", "ci", "main regression"]]);
 		const latched = readFileSync(file, "utf8");
-		s.setGh({ routes, runs: [own("c".repeat(40), "success")] });
-		await waitFor(() => s.ghCalls().filter((call) => call.includes(`head_sha=${tip}`)).length, (count) => count >= 3, { timeoutMs: 30_000, what: "stale green checked" });
+		await observe([own(tip, "failure")]);
+		assert.equal(readFileSync(file, "utf8"), latched, "repeat red preserves the original latch bytes");
+		await observe([own("c".repeat(40), "success")]);
 		assert.equal(readFileSync(file, "utf8"), latched, "stale green never clears main red");
-		s.setGh({ routes, runs: [own(tip, "success"), own(tip, "failure", "someone-else"), own(tip, "failure", "e2e", "dynamic")] });
+		await observe([own(tip, "success"), run(109, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" } })]);
+		assert.equal(readFileSync(file, "utf8"), latched, "pending current-tip workflow prevents clearing");
+		await observe([], { routes: [...routes, { match: "actions/runs?", replies: [{ stdout: "not json" }] }] });
+		assert.equal(readFileSync(file, "utf8"), latched, "malformed CI never clears the latch");
+		await observe([], { routes: [...routes, { match: "actions/runs?", replies: [{ code: 1, stderr: "HTTP 403: forbidden" }] }] });
+		assert.equal(readFileSync(file, "utf8"), latched, "denied CI never clears the latch");
+		await observe([own(tip, "success"), own(tip, "failure", "someone-else"), own(tip, "failure", "e2e", "dynamic")]);
 		await waitFor(rows, (value) => value.length === 0, { timeoutMs: 30_000, what: "own current-tip green clears latch" });
+		const cleared = readFileSync(file, "utf8");
+		await observe([own(tip, "success")]);
+		assert.equal(readFileSync(file, "utf8"), cleared, "repeat green does not rewrite state");
+		await observe([own(tip, "failure")], { routes: [routes[0]!, { match: "run view 106 --log-failed", replies: [{ stdout: "nothing useful" }] }], jobs: { 106: [{ id: 1060, name: "structure checks", status: "completed", conclusion: "failure", steps: [] }] } });
+		assert.equal(rows()[0]?.failing, "structure checks", "missing failure log falls back to the failed job");
+		const saved = readFileSync(file, "utf8");
+		writeFileSync(file, "{not json");
+		s.setGh({ routes, runs: [own(tip, "success")] });
+		await waitFor(() => readFileSync(join(s.home, LAYOUT.state, "wakeups.json"), "utf8"), (body) => body.includes("main-ci.json unreadable"), { timeoutMs: 30_000, what: "corrupt main CI journaled by real timer" });
+		assert.equal(readFileSync(file, "utf8"), "{not json", "the timer never overwrites corrupt latch data");
+		writeFileSync(file, saved);
+		const legacy = JSON.parse(saved);
+		legacy.projects.push({ ...legacy.projects[0], project: "other" });
+		writeFileSync(file, JSON.stringify(legacy));
+		await observe([own(tip, "success")]);
+		assert.deepEqual(rows().map((row) => row.project), ["other"], "clearing demo preserves another project's latch");
 	});
 	assert.deepEqual(mergedCalls(s.ghCalls()), [], "the main CI timer never merges");
 });
