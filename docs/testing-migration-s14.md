@@ -35,3 +35,30 @@ Command for both: `node --import ./tests/harness/hermetic-env.ts --test --test-c
 - Earlier exploratory control removed both values from REVIEW_BLOCKING; REVIEW_REQUIRED failed the reviews/counted-review assertion. Not used for additional declaration credit.
 
 All controls failed observable assertions after real workers reported; none failed fixture startup. Fixed run and further batches are recorded below as work proceeds.
+
+## Batch 2
+
+Scenario 05-S14-resolution: `landing S14: worker PR reports resolve against the registered origin and drive the CI watch` in `tests/e2e/landing.test.ts`. Real worker report_result calls are resolved by the real CommandPost intake; corrected receipts feed a real CI-watch tick. The external git shim preserves GitHub origin identity while routing repository transport to scratch git.
+
+| Source | Declaration | Status | Control and failing assertion |
+|---|---|---|---|
+| tests/pr-resolve.test.ts | 1 typo owner corrected and named | mapped | S14-NC3 corrected: stored receipt URL is typo/demo, expected example/demo |
+| tests/pr-resolve.test.ts | 2 missing PR refuses | mapped | S14-NC3 absent: expected correction reason /no PR is on branch.*example\/demo/, actual empty |
+| tests/pr-resolve.test.ts | 3 gh down with mismatched owner refuses | mapped | S14-NC3 mismatch-down: expected correction /typo\/demo.*example\/demo/, actual empty |
+| tests/pr-resolve.test.ts | 4 matching owner unverified | mapped | S14-NC3 matching-down: unverified run event count actual 0, expected 1 |
+| tests/pr-resolve.test.ts | 5 watch uses corrected receipt | mapped | S14-NC3 corrected: the receipt consumed by the watch is wrong; fixed case also asserts repos/example/demo/pulls/151 and zero typo repository reads |
+| tests/pr-bind.test.ts | 5 absent local checkout | mapped | S14-NC4 absent: leased HEAD differs from PR c2 |
+| tests/pr-bind.test.ts | 6 behind checkout | mapped | S14-NC4 behind: leased HEAD differs from PR c2 |
+| tests/pr-bind.test.ts | 7 diverged checkout preserves history | mapped | S14-NC5 diverged: salvage ref object id is empty, expected local commit |
+| tests/pr-bind.test.ts | 8 occupied worktree refuses | mapped | S14-NC4 other-worktree: Missing expected rejection |
+| tests/pr-bind.test.ts | 9 moved PR head refuses | mapped | S14-NC4 moved: Missing expected rejection |
+
+Checkout scenario 05-S14-bind: `landing S14: binding an existing PR checks forge facts and preserves checkout history`. Consumer is real dispatch, actual leased git checkout, real bound worker report, and the model request containing the bound brief. Originals remain whole. Totals after batch 2: 18 mapped, 0 retained, 15 pending, 0 deleted files.
+
+Executed controls (same node invocation as above, name pattern respectively `landing S14: worker PR` and `landing S14: binding`):
+
+- S14-NC3, `src/pr-resolve.ts`: disable owner-mismatch fallback refusal; return verified instead of unverified for matching fallback; accept the worker URL when no PR exists; use `given ?? row.url` in the successful list resolution. All four independently named resolution subcases failed the assertions above. Restored all four mutations.
+- S14-NC4, `src/pr-bind.ts`: early `return {};` in checkoutBoundBranch. Executed after placing actual-checkout assertions before report-settle waits. Absent, behind and diverged fail HEAD=c2; occupied and moved fail expected rejection. This is consumer evidence, not a fixture timeout. Restored.
+- S14-NC5, `src/pr-bind.ts`: delete only the salvage `update-ref` command. Diverged fails salvage object-id equality, with four unaffected checkout cases passing. Restored.
+
+Fixed resolution and checkout cases passed before mutations; final fixed rerun follows each checkpoint. No unit removal credit yet.

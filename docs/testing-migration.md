@@ -69,7 +69,7 @@ ask-0088e0332d00, 2026-10-21.
 | S04 (cp-e2e-slice-s04-vep1) | behavior 05; original `tests/diff-review.test.ts` declarations 1–40. [Declaration accounting](testing-migration-s04-declarations.md): 38 mapped, 2 retained, 0 pending in S04; S05 owns 41–55 and whole-file retirement. | 0; baseline intentionally kept whole | +1 incoming e2e file | 55 source declarations unchanged; +13 e2e scenarios |
 | S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
-| S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting](testing-migration-s14.md): first batch 8 mapped, 0 retained, 25 pending; all four original files stay whole pending completion | 0 | +0 files | +1 e2e declaration |
+| S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting](testing-migration-s14.md): batches 1–2, 18 mapped, 0 retained, 15 pending; all four original files stay whole pending completion | 0 | +0 files | +3 e2e declarations |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of

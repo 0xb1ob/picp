@@ -236,6 +236,11 @@ const page = Number(query("page") || 1);
 const slice = (list) => list.slice(page === 1 ? 0 : (page - 1) * 100 - (state.overlap || 0), page * 100);
 const branchOf = Object.fromEntries(Object.entries(state.prs).map(([branch, pr]) => [pr.url, branch]));
 const all = state.runs || [];
+if (args[0] === "pr" && args[1] === "list") {
+  const branch = args[args.indexOf("--head") + 1];
+  const pr = state.prs[branch];
+  out(pr ? [{ ...pr, headRefOid: heads()[branch] }] : []);
+}
 if (args[0] === "pr" && args[1] === "view") {
   const branch = branchOf[args[2]] || (state.prs[args[2]] ? args[2] : undefined);
   if (branch && state.merged && state.merged[branch]) {
@@ -298,7 +303,7 @@ process.exit(1);
 }
 
 /** Real CommandPost, workers and optional held continuation over a registered scratch project. */
-async function startStack(t: TestContext, options: { project?: boolean; env?: Record<string, string>; continuation?: boolean } = {}) {
+async function startStack(t: TestContext, options: { project?: boolean; env?: Record<string, string>; continuation?: boolean; github?: boolean } = {}) {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", "src/a.ts": "a1\n", "src/b.ts": "b1\n" } });
 	const provider = await MockProvider.start();
@@ -349,15 +354,21 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 		const pool = enableTreehouse(clone, { maxTrees: 4 });
 		t.after(() => pool.cleanup());
 	};
-	if (options.project !== false) await project("demo");
+	if (options.project !== false) await project("demo", options.github ? { cloneUrl: "https://github.com/example/demo" } : {});
+	if (options.github) {
+		const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+		const shim = join(bin, "git");
+		writeFileSync(shim, `#!/usr/bin/env node\nconst { spawnSync } = require("child_process");\nconst args = process.argv.slice(2);\nconst result = spawnSync(${JSON.stringify(realGit)}, [...(args.includes("get-url") ? [] : ["-c", ${JSON.stringify(`url.${repo.remote}.insteadOf=https://github.com/example/demo`)}]), ...args], { stdio: "inherit" });\nprocess.exit(result.status ?? 1);\n`);
+		chmodSync(shim, 0o755);
+	}
 
 	const remoteHead = (branch: string) =>
 		execFileSync("git", ["ls-remote", repo.remote as string, `refs/heads/${branch}`], { encoding: "utf8" }).split("\t")[0]?.trim() ?? "";
 	/** A fresh job whose implementer runs `command` (default: commit and push), reports and stands by; resolves once held. */
-	const held = async (title: string, number: number, over: { delivery?: "local"; command?: (branch: string) => string; repair?: boolean; before?: string[] } = {}) => {
+	const held = async (title: string, number: number, over: { delivery?: "local"; command?: (branch: string) => string; repair?: boolean; before?: string[]; reportUrl?: string; refusal?: RegExp } = {}) => {
 		const job = await post.ledger().create({ title, project: "demo", delivery: over.delivery ?? "pr", kind: "ship" });
 		const prUrl = `https://github.com/example/demo/pull/${number}`;
-		const pr = over.delivery ? {} : { pr_url: prUrl };
+		const pr = over.delivery ? {} : { pr_url: over.reportUrl ?? prUrl };
 		const report: ScriptStep = {
 			kind: "tool_calls",
 			calls: [{ name: "report_result", args: () => ({ job_id: job.id, kind: "ship", status: "done", summary: "Opened a PR.", branch: job.id, ...pr, head_sha: remoteHead(job.id) }) }],
@@ -371,7 +382,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 			report,
 			{ kind: "text", text: "standing by" },
 			...(over.repair ? [{ kind: "tool_calls" as const, calls: [{ name: "bash", args: { command: `git commit --quiet --allow-empty -m repair && git push --quiet origin ${job.id}` } }] }] : []),
-			report,
+			...(over.refusal ? [] : [report]),
 			{ kind: "text", text: "standing by" },
 		];
 		const model = provider.addScript(`landing-${job.id}`, steps, { onExhausted: "repeat" });
@@ -380,10 +391,15 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 		setGh({});
 		const dispatched = await post.dispatch({ jobId: job.id, task: "Change change.txt and open a PR.", model, fetch: false });
 		assert.equal(dispatched.receipt, "accepted");
-		const record = await waitFor(() => readFleet(home.path).jobs.find((entry) => entry.job_id === job.id), (entry) => entry?.phase === "held" && entry.reported_at !== undefined, {
+		const record = await waitFor(() => readFleet(home.path).jobs.find((entry) => entry.job_id === job.id), (entry) => over.refusal ? entry?.envelope_correction !== undefined || entry?.phase === "held" : entry?.phase === "held" && entry.reported_at !== undefined, {
 			timeoutMs: 90_000,
 			what: `${job.id} held after its envelope`,
 		});
+		if (over.refusal) {
+			assert.match(record?.envelope_correction?.reason ?? "", over.refusal);
+			assert.equal(record?.reported_at, undefined);
+			assert.equal(record?.phase, "waiting");
+		}
 		return { jobId: job.id, head: remoteHead(job.id), prUrl, worktree: record?.worktree as string };
 	};
 	const ghCalls = () => (existsSync(logFile) ? readFileSync(logFile, "utf8").trim().split("\n").filter(Boolean).map((row) => (JSON.parse(row) as string[]).join(" ")) : []);
@@ -632,6 +648,91 @@ test("landing: a deploy ledger failure preserves the merge receipt and retries t
 	assert.equal("after_merge" in await s.post.recordMerge({ jobId: job.jobId }), false);
 });
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
+
+test("landing S14: binding an existing PR checks forge facts and preserves checkout history", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	for (const mode of ["absent", "behind", "diverged", "other-worktree", "moved"]) await t.test(mode, async (t) => {
+		const s = await startStack(t, { github: true });
+		s.repo.git("switch", "-c", "feat");
+		s.repo.write("a.txt", "one\n");
+		const c1 = s.repo.commitAll("one");
+		s.repo.write("a.txt", "two\n");
+		const c2 = s.repo.commitAll("two");
+		s.repo.git("push", "origin", "feat");
+		const clone = s.post.registry.pathOf("demo");
+		git(clone, "fetch", "origin");
+		let local: string | undefined;
+		if (mode !== "absent" && mode !== "moved") {
+			git(clone, "switch", "-c", "feat", c1);
+			if (mode === "diverged") {
+				writeFileSync(join(clone, "local.txt"), "keep this commit\n");
+				git(clone, "add", "local.txt");
+				git(clone, "commit", "-m", "local history");
+				local = git(clone, "rev-parse", "HEAD");
+			}
+			git(clone, "switch", "main");
+		}
+		if (mode === "other-worktree") git(clone, "worktree", "add", join(s.home, "other"), "feat");
+		const job = await s.post.ledger().create({ title: `bound checkout ${mode}`, project: "demo", kind: "ship", delivery: "pr" });
+		const url = "https://github.com/example/demo/pull/169";
+		const view = { number: 169, url, state: "OPEN", isDraft: false, isCrossRepository: false, headRefName: "feat", headRefOid: mode === "moved" ? c1 : c2, baseRefName: "main" };
+		s.setGh({ routes: [{ match: "pr view 169", replies: [json(view)] }] });
+		const script = `bound-${mode}`;
+		const model = s.provider.addScript(script, [{ kind: "tool_calls", calls: [{ name: "report_result", args: { job_id: job.id, kind: "ship", status: "done", summary: "Bound PR ready.", branch: "feat", pr_url: url, head_sha: c2 } }] }, { kind: "text", text: "standing by" }], { onExhausted: "repeat" });
+		s.agentDir.writeModels(s.provider);
+		const dispatch = () => s.post.dispatch({ jobId: job.id, task: "Finish the bound PR.", pr: mode === "absent" ? "https://github.com/EXAMPLE/Demo/pull/169" : "#169", model, fetch: false });
+		if (mode === "other-worktree" || mode === "moved") {
+			await assert.rejects(dispatch(), mode === "moved" ? /not the PR head.*PR moved while dispatching/ : /checked out in another worktree/);
+			assert.equal(s.provider.requests(script).length, 0);
+			return;
+		}
+		assert.equal((await dispatch()).receipt, "accepted");
+		let record = s.post.fleet.require(job.id);
+		assert.equal(record?.branch, "feat");
+		assert.equal(git(record!.worktree, "rev-parse", "HEAD"), c2);
+		assert.equal(git(record!.worktree, "rev-parse", "--abbrev-ref", "HEAD"), "feat");
+		if (mode === "absent") assert.equal(git(record!.worktree, "rev-parse", "--abbrev-ref", "feat@{upstream}"), "origin/feat");
+		if (local) {
+			const refs = git(record!.worktree, "for-each-ref", "--format=%(objectname)", `refs/cp-salvage/${job.id}/`);
+			assert.equal(refs, local);
+		}
+		record = (await waitFor(() => s.post.fleet.get(job.id), (row) => row?.phase === "held", { timeoutMs: 90_000, what: "bound worker report accepted" }))!;
+		assert.equal(record.receipts?.find((receipt) => receipt.kind === "pr")?.url, url);
+		const prompt = JSON.stringify(s.provider.requests(script)[0]!.body);
+		for (const text of ["Bound to", "do not open a PR", "merging origin/main into it, never by rebase", "push fast-forward only", "never rewrite or drop existing commits"]) assert.ok(prompt.includes(text), text);
+		assert.ok(s.ghCalls().filter((call) => call.startsWith("pr view")).every((call) => call.startsWith("pr view 169 --repo example/demo")));
+		assert.ok(s.ghCalls().every((call) => !call.startsWith("pr list")));
+	});
+});
+
+test("landing S14: worker PR reports resolve against the registered origin and drive the CI watch", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const typo = "https://github.com/typo/demo/pull/151";
+	const canonical = "https://github.com/example/demo/pull/151";
+	for (const mode of ["corrected", "absent", "mismatch-down", "matching-down"]) await t.test(mode, async (t) => {
+		const s = await startStack(t, { github: true });
+		if (mode === "absent") s.setGh({ routes: [{ match: "pr list", replies: [json([])] }] });
+		if (mode.endsWith("down")) s.setGh({ routes: [{ match: "pr list", replies: [{ code: 1, stderr: "gh: command not found" }] }] });
+		const refusal = mode === "absent" ? /no PR is on branch.*example\/demo/ : mode === "mismatch-down" ? /typo\/demo.*example\/demo/ : undefined;
+		const live = await s.held(`PR resolution ${mode}`, 151, { reportUrl: mode === "matching-down" ? canonical : typo, refusal });
+		const record = s.post.fleet.require(live.jobId);
+		if (refusal) {
+			assert.equal(record.receipts?.some((receipt) => receipt.kind === "pr") ?? false, false);
+			return;
+		}
+		assert.equal(record.receipts?.find((receipt) => receipt.kind === "pr")?.url, canonical);
+		const events = readRunEvents(s.home, live.jobId);
+		const event = events.filter((event) => event.type === (mode === "corrected" ? "pr_url_corrected" : "pr_url_unverified"));
+		assert.equal(event.length, 1);
+		assert.match(JSON.stringify(event[0]), mode === "corrected" ? /pr_url corrected:.*typo.*example/ : /pr_url unverified/);
+		const calls = s.ghCalls();
+		assert.ok(calls.some((call) => call.startsWith(`pr list --head ${live.jobId} --state all`) && call.includes("--repo example/demo")));
+		if (mode === "corrected") {
+			s.setGh({ routes: [], runs: [run(151, live.head, "completed", "success")] });
+			await s.tick(live.jobId);
+			assert.ok(s.ghCalls().some((call) => call.includes("repos/example/demo/pulls/151")));
+			assert.ok(s.ghCalls().every((call) => !call.includes("repos/typo/")));
+		}
+	});
+});
 
 test("landing S14: repository permission reports the allowlist and each blocked cause", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const checks = [{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "test" }] } }];
