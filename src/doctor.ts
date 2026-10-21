@@ -91,6 +91,7 @@ import {
 } from "./routing.ts";
 import { installScriptHint, OPTIONAL_TOOL_INFO, OPTIONAL_TOOLS, PI_LENS_TOOLS, REQUIRED_TOOLS, type RequiredTool } from "./tool-manifest.ts";
 import { classifyPi, PI_COMPAT_CHECK, piCompatFinding, type PiProbe, readPiCompat } from "./pi-compat.ts";
+import { piDriftFinding, readDriftFacts } from "./pi-qualify.ts";
 import {
 	foreignSessionTools,
 	isUncovered,
@@ -378,7 +379,7 @@ export class Doctor {
 				detail: matches.length > 1 ? `${matches[0]} (+${matches.length - 1} more on PATH)` : matches[0],
 			});
 			findings.push(...this.#conflictingVersions(tool, matches));
-			if (tool === "pi" && this.#options.piProbe) findings.push(this.#piCompat(matches[0] as string, this.#options.piProbe));
+			if (tool === "pi" && this.#options.piProbe) findings.push(...this.#piCompat(matches[0] as string, this.#options.piProbe));
 		}
 		for (const tool of OPTIONAL_TOOLS) {
 			const found = this.#which(tool)[0];
@@ -484,11 +485,17 @@ export class Doctor {
 	}
 
 	/** #375: the installer's classification of the pi on PATH (package.json piCompat), read-only. */
-	#piCompat(pi: string, probe: (pi: string) => PiProbe): DoctorFinding {
+	#piCompat(pi: string, probe: (pi: string) => PiProbe): DoctorFinding[] {
 		try {
-			return piCompatFinding(classifyPi(readPiCompat(this.#options.packageRoot), probe(pi)), pi);
+			const compat = readPiCompat(this.#options.packageRoot);
+			const result = classifyPi(compat, probe(pi));
+			const finding = piCompatFinding(result, pi);
+			if (result.state !== "newer" || !result.version) return [finding];
+			const sh = (command: string, args: string[]) => this.#run(command, args, this.#options.packageRoot);
+			const drift = piDriftFinding(result, compat.testedMax, readDriftFacts(result.version, sh), this.#now());
+			return drift ? [finding, drift] : [finding];
 		} catch (error) {
-			return { check: PI_COMPAT_CHECK, severity: "error", what: "package.json piCompat is unreadable", detail: (error as Error).message, fix: "restore piCompat {min, testedMax} in the package's package.json" };
+			return [{ check: PI_COMPAT_CHECK, severity: "error", what: "package.json piCompat is unreadable", detail: (error as Error).message, fix: "restore piCompat {min, testedMax} in the package's package.json" }];
 		}
 	}
 

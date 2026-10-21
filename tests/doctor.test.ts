@@ -1789,3 +1789,30 @@ test("pool: the probe asks the same pool the leases come from (--root)", async (
 		`the pool root must reach treehouse: ${JSON.stringify(calls.filter((c) => c[0] === "treehouse"))}`,
 	);
 });
+
+// pi version tracking: a host pi above testedMax for over 7 days with no qualify PR warns (never errors); a PR silences it.
+test("doctor warns host.pi.drift for an unqualified newer pi, not once a qualify PR is open", async (t) => {
+	const home = fixture(t);
+	const released = new Date(NOW.getTime() - 20 * 86_400_000).toISOString();
+	const doctor = (prs: string) =>
+		new Doctor({
+			home: home.home.path,
+			packageRoot: REPO_ROOT,
+			fleet: new FleetStore({ home: home.home.path }),
+			run: (command, args, cwd) => {
+				if (command === "npm") return { status: 0, stdout: JSON.stringify({ "1.9.9": released }), stderr: "" };
+				if (command === "gh") return { status: 0, stdout: prs, stderr: "" };
+				return healthyRunner()(command, args, cwd);
+			},
+			which: ALL_PRESENT,
+			env: {},
+			now: () => NOW,
+			piProbe: () => ({ version: "1.9.9", extension: { ok: true, detail: "" } }),
+		}).run();
+	const drift = find(await doctor("[]"), "host.pi.drift");
+	assert.equal(drift.length, 1);
+	assert.equal(drift[0]?.severity, "warn");
+	assert.match(drift[0]?.what ?? "", /1\.9\.9.*above the tested/);
+	const open = find(await doctor(JSON.stringify([{ title: "qualify pi 1.9.9", url: "https://example.test/pull/1" }])), "host.pi.drift");
+	assert.equal(open.length, 0);
+});
