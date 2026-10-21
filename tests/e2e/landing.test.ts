@@ -1609,7 +1609,9 @@ test("landing: held CI repairs the same real worker once while preserving an int
 	}
 	assert.equal((await peerAdvance).next, "wait");
 	await ticking;
-	await manual;
+	const manualResult = await manual;
+	assert.equal(manualResult.record.resolve_attempts, 1, "the queued manual advance sees the spent repair allowance");
+	assert.notEqual(manualResult.next, "resolve", "the queued manual advance cannot promote twice");
 	s.setGh({ routes: [] });
 	const repaired = await waitFor(() => s.post.fleet.get(live.jobId), (record) => record?.phase === "held" && (record.supersessions ?? 0) === 1, { timeoutMs: 60_000, what: "same worker repair and second envelope" });
 	await s.post.continuation.serialize(live.jobId, async () => {});
@@ -1628,7 +1630,11 @@ test("landing: held CI repairs the same real worker once while preserving an int
 	await s.post.continuation.serialize(live.jobId, async () => {});
 	assert.equal(s.post.integrator.get(live.jobId)?.next, "wait", "green CI preserves the QA hold");
 	assert.equal(s.post.integrator.get(live.jobId)?.resolve_attempts, 1);
-	await s.parent("Inspect held repair after restarting the parent.", [{ kind: "text", text: "Startup observed." }]);
+	const beforeStartup = s.post.integrator.get(live.jobId)!.updated_at;
+	await s.parent("Inspect held repair after restarting the parent.", [{ kind: "text", text: "Startup observed." }], async () => {
+		await waitFor(() => s.post.integrator.get(live.jobId)?.updated_at, (at) => at !== beforeStartup, { timeoutMs: 30_000, what: "startup recomputes held repair" });
+	});
+	assert.notEqual(s.post.integrator.get(live.jobId)?.updated_at, beforeStartup, "startup recomputes the integration record");
 	assert.equal(s.post.integrator.get(live.jobId)?.next, "wait", "startup preserves green held repair");
 	assert.equal(s.post.integrator.get(live.jobId)?.resolve_attempts, 1, "startup preserves cumulative allowance");
 	assert.deepEqual(mergedCalls(s.ghCalls()), []);
@@ -1661,7 +1667,11 @@ test("landing: held CI repair checks Sender authority before restoring a worker"
 		if (mode === "revoked") s.post.mandates.revoke(grant.id);
 		if (mode === "capped") s.post.mandates.save({ ...s.post.mandates.require(grant.id), status: "paused", pause_reason: "spend_cap", paused_at: isoTimestamp() });
 		new IntegrationHolds(s.home).hold(live.jobId, "permission probe");
-		if (!permitted) await s.post.manager.shutdownAll();
+		if (mode === "dead") {
+			const worker = s.post.manager.get(live.jobId)!.worker;
+			process.kill(identity.worker.pid, "SIGKILL");
+			await waitFor(() => worker.alive, (alive) => alive === false, { timeoutMs: 10_000, what: "held worker death observed" });
+		} else if (!permitted) await s.post.manager.shutdownAll();
 		s.setGh({ runs: [run(121, live.head, "completed", "failure")] });
 		const result = await s.post.integrate({ jobId: live.jobId });
 		assert.equal(result.next, permitted ? "resolve" : "surface", mode);
