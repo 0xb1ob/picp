@@ -15,10 +15,13 @@ import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { drainFile } from "../../src/drain.ts";
 import type { ForgeConfig } from "../../src/forge-url.ts";
+import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { formatMerge, readMergeReceipt } from "../../src/merges.ts";
 import { formatStatusTable } from "../../src/status.ts";
 import {
+	COMMAND_POST_EXTENSION,
+	startPiChild,
 	advanceBase,
 	createAgentDir,
 	createScratchHome,
@@ -48,6 +51,8 @@ interface RunRow {
 	status: string | number | null;
 	conclusion: string | null;
 	name: string;
+	event?: string;
+	triggering_actor?: { login: string };
 }
 interface Reply {
 	code?: number | "signal";
@@ -245,8 +250,8 @@ process.exit(1);
 	chmodSync(join(bin, "gh"), 0o755);
 }
 
-/** Real CommandPost over a registered scratch project; no held-PR continuation, so every cp_integrate is the test's. */
-async function startStack(t: TestContext, options: { project?: boolean; env?: Record<string, string> } = {}) {
+/** Real CommandPost, workers and optional held continuation over a registered scratch project. */
+async function startStack(t: TestContext, options: { project?: boolean; env?: Record<string, string>; continuation?: boolean } = {}) {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", "src/a.ts": "a1\n", "src/b.ts": "b1\n" } });
 	const provider = await MockProvider.start();
@@ -273,7 +278,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 	const saved = { PATH: process.env.PATH, CP_CI_WATCH_SECONDS: process.env.CP_CI_WATCH_SECONDS };
 	process.env.PATH = `${bin}:${saved.PATH ?? ""}`;
 	process.env.CP_CI_WATCH_SECONDS = "1";
-	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agentDir.env }, holdsParentLock: () => true });
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agentDir.env }, holdsParentLock: () => true, continuation: options.continuation });
 	t.after(async () => {
 		process.env.PATH = saved.PATH;
 		if (saved.CP_CI_WATCH_SECONDS === undefined) delete process.env.CP_CI_WATCH_SECONDS;
@@ -302,7 +307,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 	const remoteHead = (branch: string) =>
 		execFileSync("git", ["ls-remote", repo.remote as string, `refs/heads/${branch}`], { encoding: "utf8" }).split("\t")[0]?.trim() ?? "";
 	/** A fresh job whose implementer runs `command` (default: commit and push), reports and stands by; resolves once held. */
-	const held = async (title: string, number: number, over: { delivery?: "local"; command?: (branch: string) => string } = {}) => {
+	const held = async (title: string, number: number, over: { delivery?: "local"; command?: (branch: string) => string; repair?: boolean } = {}) => {
 		const job = await post.ledger().create({ title, project: "demo", delivery: over.delivery ?? "pr", kind: "ship" });
 		const prUrl = `https://github.com/example/demo/pull/${number}`;
 		const pr = over.delivery ? {} : { pr_url: prUrl };
@@ -317,6 +322,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 			{ kind: "tool_calls", calls: [{ name: "bash", args: { command } }] },
 			report,
 			{ kind: "text", text: "standing by" },
+			...(over.repair ? [{ kind: "tool_calls" as const, calls: [{ name: "bash", args: { command: `git commit --quiet --allow-empty -m repair && git push --quiet origin ${job.id}` } }] }] : []),
 			report,
 			{ kind: "text", text: "standing by" },
 		];
@@ -367,7 +373,23 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 		});
 		return { jobId: job.id, prUrl: prUrl || undefined, branch: over.branch ?? job.id };
 	};
-	return { home: home.path, remote: repo.remote as string, repo, post, gh, setGh, held, seed, project, ghCalls, integrate, tick };
+	let parentSeq = 0;
+	const parent = async (prompt: string, steps: ScriptStep[], settled?: () => Promise<void>) => {
+		const script = `landing-parent-${++parentSeq}`;
+		const model = provider.addScript(script, steps, { onExhausted: "repeat" });
+		agentDir.writeModels(provider);
+		const child = startPiChild({ cwd: home.path, model, env: { ...agentDir.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+		try {
+			await child.prompt(prompt);
+			await child.waitForSettled(90_000);
+			assert.equal(provider.remaining(script), 0);
+			await settled?.();
+			return child.eventsOfType("tool_execution_end");
+		} finally {
+			await child.close();
+		}
+	};
+	return { home: home.path, remote: repo.remote as string, repo, post, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent };
 }
 
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
@@ -1026,4 +1048,158 @@ test("landing: CI watch persists arrival and attempt identity, follows pushed he
 	await s.post.fleet.patch(live.jobId, { phase: "done" });
 	await s.post.ciTick();
 	assert.equal(s.post.ciWatch.store.job(live.jobId), undefined, "finished deliveries leave the watch");
+});
+
+
+test("landing: operator-forwarded CI requires a quoted current head and never substitutes for native CI", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("forwarded evidence", 103);
+	s.setGh({ runs: [run(103, live.head, "in_progress", null)] });
+	await s.tick(live.jobId);
+	const quote = "CI is green on this head; I checked the Actions tab.";
+	const params = { job_id: live.jobId, action: "record_ci", result: "success", head_sha: live.head, operator_quote: quote };
+	const calls = [
+		{ ...params, operator_quote: "Trust me, it passed." },
+		{ ...params, head_sha: "b".repeat(40) },
+		{ ...params, url: "https://github.com/example/demo/actions?token=1" },
+		params,
+		params,
+	];
+	const results = await s.parent(quote, [
+		...calls.map((args): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "cp_integrate", args }] })),
+		{ kind: "text", text: "Evidence recorded." },
+	]);
+	const text = results.map((event) => JSON.stringify(event));
+	assert.match(text[0]!, /quote not found/);
+	assert.match(text[1]!, /superseded head/);
+	assert.match(text[2]!, /plain https url/);
+	assert.match(text[3]!, /display only, native CI still gates/);
+	const evidence = JSON.parse(readFileSync(join(s.home, paths.ciEvidenceFile(live.jobId)), "utf8"));
+	assert.equal(evidence.observations.length, 1, "an identical forwarded result is stored once");
+	assert.deepEqual([evidence.observations[0].head_sha, evidence.observations[0].source, evidence.observations[0].operator_quote], [live.head, "forwarded", quote]);
+	const advance = await s.integrate(live.jobId);
+	assert.equal(advance.record.next, "wait", advance.text);
+	assert.deepEqual(mergedCalls(s.ghCalls()), [], "forwarded success cannot merge pending native CI");
+});
+
+
+test("landing: foreign CI stays read-only, follows the base repo's current head and stops after merge", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	await s.post.registry.update("demo", { clone_url: "https://github.com/example/demo" });
+	const prUrl = "https://github.com/example/demo/pull/104";
+	const job = await s.post.ledger().create({ title: "review foreign PR", project: "demo", delivery: "local", kind: "research", externalRef: prUrl, labels: ["schedule:sch-e2e"] });
+	const head = "a".repeat(40);
+	const next = "b".repeat(40);
+	const state = (sha: string, rows: RunRow[], terminal = false) => s.setGh({ runs: rows, routes: [{ match: "pulls/104", replies: [json({ number: 104, html_url: prUrl, state: terminal ? "closed" : "open", merged: terminal, merge_commit_sha: terminal ? MERGE : null, head: { sha, ref: "foreign" } })] }] });
+	const tick = async () => {
+		for (const deadline = Date.now() + 30_000; Date.now() < deadline;) {
+			const result = await s.post.foreignCiTick();
+			if (result.checked.includes(job.id)) return result;
+			await new Promise((resolve) => setTimeout(resolve, 200));
+		}
+		return assert.fail("foreign PR watch never became due");
+	};
+	await assert.rejects(s.post.dispatch({ jobId: job.id, task: "review", fetch: false }), /waits for CI/);
+	state(head, [run(104, head, "in_progress", null)]);
+	assert.deepEqual((await tick()).observations, []);
+	state(head, [run(104, head, "completed", "success")]);
+	assert.deepEqual((await tick()).observations.map((fact) => fact.event), ["ci_green"]);
+	assert.deepEqual((await tick()).observations, [], "foreign facts are reported once");
+	state(next, [run(105, next, "in_progress", null)]);
+	await assert.rejects(s.post.dispatch({ jobId: job.id, task: "review", fetch: false }), /PR head is now/);
+	assert.deepEqual((await tick()).observations.map((fact) => fact.event), ["head_moved"]);
+	state(next, [run(105, next, "completed", "failure")]);
+	assert.deepEqual((await tick()).observations.map((fact) => [fact.event, fact.head_sha]), [["ci_failed", next]]);
+	state(next, [], true);
+	assert.deepEqual((await tick()).observations.map((fact) => fact.event), ["pr_merged"]);
+	assert.deepEqual((await s.post.foreignCiTick()).checked, [], "terminal PR is no longer queried");
+	assert.ok(s.ghCalls().some((call) => call.includes(`repos/example/demo/actions/runs?head_sha=${next}`)), "CI is read from the base repository by head");
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+	assert.equal(s.post.fleet.get(job.id), undefined, "waiting reviewer never spawned");
+});
+
+
+test("landing: a real parent's timer latches only its mandated main runs and clears only current-tip green", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const tip = git(s.remote, "rev-parse", "main");
+	const routes: Route[] = [
+		{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] },
+		{ match: "run view 106 --log-failed", replies: [{ stdout: "test\t✖ main regression" }] },
+	];
+	const own = (head: string, conclusion: string, login = "e2e", event = "push") => run(login !== "e2e" ? 107 : event === "dynamic" ? 108 : 106, head, "completed", conclusion, { triggering_actor: { login }, event });
+	const file = join(s.home, LAYOUT.state, "main-ci.json");
+	const rows = (): Array<{ red_since_sha: string; login: string }> => existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).projects : [];
+	s.setGh({ routes, runs: [own(tip, "failure")] });
+	await s.parent("Observe the CI timer.", [{ kind: "text", text: "Observing." }], async () => {
+		s.post.mandates.issue({ projects: ["demo"], objective: "main CI e2e", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 10 });
+		await waitFor(rows, (value) => value.length === 1, { timeoutMs: 30_000, what: "main red latch" });
+		assert.deepEqual(rows().map((row) => [row.red_since_sha, row.login]), [[tip, "e2e"]]);
+		const latched = readFileSync(file, "utf8");
+		s.setGh({ routes, runs: [own("c".repeat(40), "success")] });
+		await waitFor(() => s.ghCalls().filter((call) => call.includes(`head_sha=${tip}`)).length, (count) => count >= 3, { timeoutMs: 30_000, what: "stale green checked" });
+		assert.equal(readFileSync(file, "utf8"), latched, "stale green never clears main red");
+		s.setGh({ routes, runs: [own(tip, "success"), own(tip, "failure", "someone-else"), own(tip, "failure", "e2e", "dynamic")] });
+		await waitFor(rows, (value) => value.length === 0, { timeoutMs: 30_000, what: "own current-tip green clears latch" });
+	});
+	assert.deepEqual(mergedCalls(s.ghCalls()), [], "the main CI timer never merges");
+});
+
+
+test("landing: parked PR timer stores native CI for each observed head without reviving its released worker", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("parked CI", 109);
+	await s.post.registry.setMergePolicy("demo", "human_handoff");
+	const parked = await s.post.awaitingMerge.park(live.jobId, { pr_url: live.prUrl, repo: "example/demo", head_sha: live.head, base: "main", handed_at: isoTimestamp() });
+	assert.equal(parked.parked, true, JSON.stringify(parked));
+	const page = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
+	const state = (head: string, runs: RunRow[], error?: Reply) => s.setGh({ runs, routes: [
+		{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] },
+		{ match: "api graphql", replies: [json({ data: { rateLimit: { remaining: 5000 }, p0: { pullRequest: { url: live.prUrl, number: 109, state: "OPEN", headRefOid: head, headRefName: live.jobId, baseRefName: "main", mergedAt: null, mergeCommit: null, latestOpinionatedReviews: { nodes: [] }, comments: page, reviews: page }, stacked: { nodes: [] } } } })] },
+		...(error ? [{ match: "actions/runs?head_sha=", replies: [error] }] : []),
+	] });
+	state(live.head, [run(109, live.head, "completed", "success")]);
+	await s.parent("Observe parked PR CI.", [{ kind: "text", text: "Observing parked CI." }], async () => {
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.last_ci === "green", { timeoutMs: 30_000, what: "parked green through extension timer" });
+		const next = "b".repeat(40);
+		state(next, [run(110, next, "in_progress", null)]);
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.head_sha === next && row.last_ci === "in_progress", { timeoutMs: 30_000, what: "moved parked head pending" });
+		state(next, [run(110, next, "completed", "failure")]);
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.last_ci === "failed", { timeoutMs: 30_000, what: "parked red" });
+		state("c".repeat(40), [], { code: 1, stderr: "gh: Resource not accessible by integration (HTTP 403)" });
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.last_ci === "unreadable", { timeoutMs: 30_000, what: "parked denied CI" });
+	});
+	assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge");
+	assert.equal(s.post.manager.get(live.jobId), undefined, "native CI does not revive the released author");
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+	assert.ok(readRunEvents(s.home, live.jobId).some((event) => event.type === "ci_observed"));
+});
+
+
+test("landing: held CI repairs the same real worker once while preserving an integration hold", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t, { continuation: true });
+	const live = await s.held("held CI repair", 111, { repair: true });
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	const identity = s.post.fleet.require(live.jobId);
+	const holds = new IntegrationHolds(s.home);
+	holds.hold(live.jobId, "QA in progress");
+	s.setGh({ runs: [run(111, live.head, "completed", "failure")] });
+	await s.tick(live.jobId);
+	const repaired = await waitFor(() => s.post.fleet.get(live.jobId), (record) => record?.phase === "held" && (record.supersessions ?? 0) === 1, { timeoutMs: 60_000, what: "same worker repair and second envelope" });
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.deepEqual([repaired?.worker.pid, repaired?.worker.session_id, repaired?.branch, repaired?.worktree], [identity.worker.pid, identity.worker.session_id, identity.branch, identity.worktree]);
+	assert.equal(holds.get(live.jobId)?.reason, "QA in progress");
+	assert.equal(s.post.integrator.get(live.jobId)?.resolve_attempts, 1);
+	const head = git(live.worktree, "rev-parse", "HEAD");
+	assert.notEqual(head, live.head, "the repaired report carries a newly pushed head");
+	s.setGh({ runs: [run(112, head, "completed", "success")] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.equal(s.post.integrator.get(live.jobId)?.next, "wait", "green CI preserves the QA hold");
+	assert.equal(s.post.integrator.get(live.jobId)?.resolve_attempts, 1);
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+	s.setGh({ runs: [run(112, head, "completed", "failure", { run_attempt: 2 })] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.equal(s.post.integrator.get(live.jobId)?.next, "surface", "a second red result exhausts the repair allowance");
+	assert.equal(s.post.fleet.require(live.jobId).supersessions, 1, "no second promotion");
 });
