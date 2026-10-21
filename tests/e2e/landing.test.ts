@@ -12,6 +12,7 @@ import { basename, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "../../src/ci-access.ts";
 import { CommandPost } from "../../src/command-post.ts";
+import { detectCiWait } from "../../src/ci-wait.ts";
 import { AwaitingStore } from "../../src/awaiting.ts";
 import { CheckpointStore } from "../../src/checkpoint.ts";
 import { CI_EVIDENCE_KEEP, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
@@ -1031,6 +1032,128 @@ test(
 );
 
 
+test("landing S03: corrupt CI memory recovers and arrival preserves fleet and decisions", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("watch corrupt memory", 301);
+	const file = join(s.home, LAYOUT.ciWatchFile);
+	const fleet = readFileSync(join(s.home, LAYOUT.fleetFile), "utf8");
+	s.setGh({ runs: [run(301, live.head, "completed", "success")] });
+	for (const corrupt of ["{ not json", JSON.stringify({ schema_version: 1, updated_at: "not-a-time", jobs: [] }), JSON.stringify({ jobs: [] })]) {
+		writeFileSync(file, corrupt);
+		const tick = await s.post.ciTick();
+		assert.equal(tick.errors.length, 0, "corrupt memory is forgotten, not a failed read");
+		assert.equal(tick.observations.length, 1, "lost memory duplicates a fact rather than losing it");
+		const key = tick.observations[0]!.key;
+		assert.deepEqual(s.post.confirmCi([key]), [key]);
+		assert.deepEqual(s.post.confirmCi([key]), [], "duplicate arrival changes nothing");
+		const persisted = JSON.parse(readFileSync(file, "utf8"));
+		assert.equal(persisted.schema_version, SCHEMA_VERSION);
+		assert.deepEqual(persisted.jobs[0].announced, [key], "arrival round-trips to disk");
+	}
+	assert.equal(readFileSync(join(s.home, LAYOUT.fleetFile), "utf8"), fleet, "the watch never changes fleet receipts");
+	assert.equal(new AwaitingStore({ home: s.home }).list().length, 0, "the watch never mints a decision");
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+});
+
+test("landing S03: actual parent CI notices carry facts and integration advice", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("watch parent notices", 302);
+	new IntegrationHolds(s.home).hold(live.jobId, "notice verification");
+	s.setGh({ runs: [run(302, live.head, "completed", "success")] });
+	await s.parent("Observe the CI notice without taking action.", [{ kind: "text", text: "Observed." }], async () => {
+		const messages = () => JSON.stringify(s.provider.requests("landing-parent-1-startup").concat(s.provider.requests("landing-parent-1")).map((request) => request.body.messages));
+		const received = await waitFor(messages, (text) => text.includes("CI/PR OBSERVED"), { timeoutMs: 30_000, what: "CI notice reaches actual parent context" });
+		const text = received.slice(received.lastIndexOf("CI/PR OBSERVED"));
+		assert.match(text, /evidence, not authorization/i);
+		assert.match(text, /Nothing has been merged/);
+		assert.match(text, /cp_integrate/);
+		assert.match(text, /do not re-query gh/i);
+		assert.doesNotMatch(text, /verify CI (against|yourself)|check ancestry/i);
+		assert.match(text, /no Awaiting-you row/i);
+		assert.ok(text.includes(live.head.slice(0, 12)));
+	});
+	assert.ok(s.post.ciWatch.store.job(live.jobId)?.announced.length, "actual message arrival confirms the fact");
+	s.setGh({ runs: [run(300, live.head, "completed", "skipped", { name: "lint" }), run(302, live.head, "completed", "failure")] });
+	await s.parent("Observe the failing CI notice without taking action.", [{ kind: "text", text: "Observed red." }], async () => {
+		const messages = () => JSON.stringify(s.provider.requests("landing-parent-2-startup").concat(s.provider.requests("landing-parent-2")).map((request) => request.body.messages));
+		const received = await waitFor(messages, (text) => text.includes("CI/PR OBSERVED"), { timeoutMs: 30_000, what: "red CI notice reaches actual parent context" });
+		const text = received.slice(received.lastIndexOf("CI/PR OBSERVED"));
+		assert.match(text, /Merging red is forbidden/);
+		assert.doesNotMatch(text, /evidence, not authorization/i);
+		assert.ok(text.includes("(run 302 https://github.com/example/demo/actions/runs/302)"), "only the failing run is named");
+		assert.ok(!text.includes("(run 300"), "a skipped run is never blamed");
+	});
+});
+
+test("landing S03: a durable review deadline resumes once and respects changed facts", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const guard of ["none", "head", "generation", "drain", "stop"]) {
+		const s = await startStack(t, { continuation: true });
+		const live = await s.held(`review deadline ${guard}`, 310);
+		await s.post.continuation.serialize(live.jobId, async () => {});
+		writeWindowPass(s.home, live.jobId, live.head, isoTimestamp());
+		s.setGh({ runs: [run(310, live.head, "completed", "success")] });
+		await s.tick(live.jobId);
+		await s.post.continuation.serialize(live.jobId, async () => {});
+		const waiting = s.post.durableWakeups.pending().filter((entry) => entry.content.includes("HELD PR WAITING"));
+		assert.equal(waiting.length, 1, "one deadline notice");
+		assert.match(waiting[0]!.content, /re-enters every gate.*by itself; no cp_integrate advance is needed/);
+		assert.match(waiting[0]!.content, /Sampled hold: none recorded/);
+		new IntegrationHolds(s.home).hold(live.jobId, "deadline hold");
+		const before = readRunEvents(s.home, live.jobId).filter((event) => event.type === "continuation").length;
+		if (guard === "head") {
+			const file = join(s.home, LAYOUT.ciWatchFile);
+			const memory = JSON.parse(readFileSync(file, "utf8"));
+			memory.jobs[0].head_sha = "a".repeat(40);
+			writeFileSync(file, JSON.stringify(memory));
+		}
+		if (guard === "generation") await s.post.fleet.patch(live.jobId, { supersessions: 1 });
+		if (guard === "drain") writeFileSync(drainFile(s.home), JSON.stringify({ state: "draining", started_at: isoTimestamp(), deadline: isoTimestamp(new Date(Date.now() + 60_000)), timeout_s: 60, jobs: [] }));
+		if (guard === "stop") await s.post.shutdown();
+		if (guard !== "stop") {
+			const events = await waitFor(() => readRunEvents(s.home, live.jobId).filter((event) => event.type === "continuation"), (events) => events.length > before, { timeoutMs: 45_000, what: `deadline resumes through ${guard}` });
+			const outcome = events.at(-1)!.payload as { action: string; steps: number };
+			assert.equal(outcome.action, guard === "none" ? "wait" : guard === "drain" ? "draining" : "stale", guard);
+			assert.equal(outcome.steps, guard === "none" ? 1 : 0, "changed facts prevent an integration step");
+			assert.deepEqual(mergedCalls(s.ghCalls()), [], "deadline rechecks the hold and never merges");
+		}
+	}
+});
+
+test("landing S03: facts changed during a forge read prevent stale review spending", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const changed of ["generation", "phase", "observed", "remote"]) {
+		const s = await startStack(t, { continuation: true });
+		const live = await s.held(`stale review ${changed}`, 320);
+		await s.post.continuation.serialize(live.jobId, async () => {});
+		const gate = join(s.home, "release-stale-read");
+		const before = s.ghCalls().length;
+		const notices = s.post.durableWakeups.pending().map((entry) => entry.id);
+		const reply = changed === "remote"
+			? json({ number: 320, url: live.prUrl, state: "OPEN", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", headRefName: live.jobId, headRefOid: "b".repeat(40), baseRefName: "main", isDraft: false })
+			: { pass: true };
+		s.setGh({ runs: [run(320, live.head, "completed", "success")], routes: [{ match: `pr view ${live.prUrl}`, replies: [{ untilFile: gate, ...reply }] }] });
+		await s.tick(live.jobId);
+		await waitFor(() => s.ghCalls().slice(before).some((call) => call.startsWith(`pr view ${live.prUrl}`)), Boolean, { timeoutMs: 10_000, what: "integration reaches real forge barrier" });
+		try {
+			if (changed === "generation") await s.post.fleet.patch(live.jobId, { supersessions: 1 });
+			if (changed === "phase") await s.post.fleet.patch(live.jobId, { phase: "waiting" });
+			if (changed === "observed") {
+				const file = join(s.home, LAYOUT.ciWatchFile);
+				const memory = JSON.parse(readFileSync(file, "utf8"));
+				memory.jobs[0].head_sha = "a".repeat(40);
+				writeFileSync(file, JSON.stringify(memory));
+			}
+		} finally {
+			writeFileSync(gate, "release");
+		}
+		await s.post.continuation.serialize(live.jobId, async () => {});
+		const outcome = readRunEvents(s.home, live.jobId).filter((event) => event.type === "continuation").at(-1)!.payload as { action: string; steps: number; reason: string };
+		assert.equal(outcome.action, changed === "phase" ? "stopped" : "stale", `${changed}: ${outcome.reason}`);
+		assert.equal(outcome.steps, 1, "the running read finishes but starts no second step");
+		assert.equal(existsSync(join(s.home, paths.reviewFile(live.jobId, 1))), false, "stale facts start no review");
+		if (changed !== "phase") assert.deepEqual(s.post.durableWakeups.pending().map((entry) => entry.id), notices, "stale facts create no actionable stop notice");
+	}
+});
+
 test("landing S02: only reported held PR deliveries are queried", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t);
 	const live = await s.held("watch eligibility", 201);
@@ -1246,12 +1369,13 @@ test("landing S02: watcher queries stay nonblocking while workers refuse CI wait
 	assert.match(messages, /A worker never waits for CI/);
 	assert.match(messages, /sleep_then_poll/);
 	assert.match(messages, /blocking_watch/);
-	s.setGh({ runs: [run(205, live.head, "in_progress", null)] });
+	s.setGh({ runs: [run(205, live.head, "in_progress", null)], routes: [{ match: "run watch", replies: [json({ number: 205, html_url: live.prUrl, state: "open", merged: false, head: { sha: live.head, ref: live.jobId } })] }] });
 	await s.tick(live.jobId);
+	for (const command of s.ghCalls()) assert.equal(detectCiWait(`gh ${command}`), undefined, `watcher command: ${command}`);
+	for (const command of s.ghCalls()) assert.doesNotMatch(command, /sleep|--watch|run watch|statusCheckRollup/);
 	assert.ok(s.ghCalls().some((command) => command.includes("/pulls/205")));
 	assert.ok(s.ghCalls().some((command) => command.includes("/actions/runs?head_sha=")));
 	assert.ok(s.ghCalls().some((command) => command.includes("/attempts/1/jobs?")));
-	for (const command of s.ghCalls()) assert.doesNotMatch(command, /sleep|--watch|run watch|statusCheckRollup/);
 });
 
 test("landing: CI watch persists arrival and attempt identity, follows pushed heads and prunes finished deliveries", { skip: SKIP, timeout: 600_000 }, async (t) => {
