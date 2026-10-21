@@ -29,9 +29,9 @@ import { RunRegistry } from "../src/runs.ts";
 import type { TeardownResult } from "../src/teardown.ts";
 import { createScratchHome, createScratchRepo, git, type ScratchRepo } from "./harness/index.ts";
 
-const BR = "cp-sync1";
+const JOB_ID = "cp-sync1";
 const PR_URL = "https://github.com/o/r/pull/99";
-const PR_RECEIPT: Receipt = { kind: "pr", status: "open", title: `PR for ${BR}`, url: PR_URL };
+const PR_RECEIPT: Receipt = { kind: "pr", status: "open", title: `PR for ${JOB_ID}`, url: PR_URL };
 
 /** A file long enough that two edits can be far apart, and numbered so a shift shows. */
 function longFile(marker: string): string {
@@ -140,17 +140,17 @@ async function fixture(
 	const teardowns: string[] = [];
 
 	// 1. the branch, two commits, pushed.
-	repo.git("checkout", "--quiet", "-b", BR);
+	repo.git("checkout", "--quiet", "-b", JOB_ID);
 	repo.write("src/app.txt", longFile("branch step one"));
 	repo.commitAll("branch: step one");
 	repo.write("src/app.txt", longFile("branch step two"));
 	repo.commitAll("branch: step two");
-	repo.git("push", "--quiet", "-u", "origin", BR);
+	repo.git("push", "--quiet", "-u", "origin", JOB_ID);
 	repo.git("checkout", "--quiet", repo.branch);
 
 	// 2. the lease: a linked worktree of this clone, on the pushed head.
-	const lease = join(repo.path, "..", `lease-${BR}`);
-	repo.git("worktree", "add", "--quiet", lease, BR);
+	const lease = join(repo.path, "..", `lease-${JOB_ID}`);
+	repo.git("worktree", "add", "--quiet", lease, JOB_ID);
 
 	// 3. unrelated churn at the top of the same file, on the base.
 	const churn = mkdtempSync(join(tmpdir(), "cp-base-"));
@@ -164,7 +164,7 @@ async function fixture(
 	git(churnWork, "push", "--quiet", "origin", repo.branch);
 
 	// 4. the server-side rebase, force-pushed onto origin/<branch>.
-	git(churnWork, "checkout", "--quiet", "-B", "replay", `origin/${BR}`);
+	git(churnWork, "checkout", "--quiet", "-B", "replay", `origin/${JOB_ID}`);
 	if (options.conflictingRebase) {
 		// A rebase whose conflict someone resolved: the cumulative diff genuinely
 		// changed, so the proof must refuse.
@@ -175,27 +175,27 @@ async function fixture(
 	} else {
 		git(churnWork, "rebase", "--quiet", `origin/${repo.branch}`);
 	}
-	git(churnWork, "push", "--quiet", "--force", "origin", `replay:${BR}`);
+	git(churnWork, "push", "--quiet", "--force", "origin", `replay:${JOB_ID}`);
 	const rebased = git(churnWork, "rev-parse", "HEAD");
 
 	// 5. the squash merge onto the base.
 	git(churnWork, "checkout", "--quiet", repo.branch);
 	git(churnWork, "merge", "--squash", "replay");
-	git(churnWork, "commit", "--quiet", "-m", `squash merge ${BR} (#99)`);
+	git(churnWork, "commit", "--quiet", "-m", `squash merge ${JOB_ID} (#99)`);
 	const mergeCommit = git(churnWork, "rev-parse", "HEAD");
 	git(churnWork, "push", "--quiet", "origin", repo.branch);
 	rmSync(churn, { recursive: true, force: true });
 
 	const preRebaseHead = git(lease, "rev-parse", "HEAD");
 	if (options.leaseInSync) {
-		git(lease, "fetch", "--quiet", "origin", BR);
+		git(lease, "fetch", "--quiet", "origin", JOB_ID);
 		git(lease, "reset", "--hard", "--quiet", rebased);
 	}
 
 	options.extra?.(lease, repo);
 
 	await fleet.add({
-		job_id: BR,
+		job_id: JOB_ID,
 		project: "demo",
 		kind: "ship",
 		delivery: "pr",
@@ -212,7 +212,7 @@ async function fixture(
 			started_at: isoTimestamp(),
 		},
 		worktree: lease,
-		branch: BR,
+		branch: JOB_ID,
 		dispatched_at: isoTimestamp(),
 		usage: EMPTY_USAGE,
 		receipts: [PR_RECEIPT],
@@ -227,7 +227,7 @@ async function fixture(
 				torn_down: true,
 				reason: "pushed",
 				worktree: lease,
-				branch: BR,
+				branch: JOB_ID,
 				lease_returned: true,
 				artifacts_removed: false,
 			} satisfies TeardownResult;
@@ -258,7 +258,7 @@ async function fixture(
 				mergeable: "MERGEABLE",
 				mergedAt: "2026-09-01T10:00:00Z",
 				mergeCommit: { oid: mergeCommit },
-				headRefName: BR,
+				headRefName: JOB_ID,
 				headRefOid: rebased,
 				baseRefName: integratorOptions.base ?? repo.branch,
 			}));
@@ -314,12 +314,12 @@ test("the 7 refusals of 2026-09-01, replayed against real git: the reset now pro
 	// tip does not, which is what refused seven times. (The fetch is the sync
 	// step's own first move; here it is only so the assertion can resolve the
 	// rebased sha, which was pushed from elsewhere.)
-	f.leaseGit("fetch", "--quiet", "origin", BR);
+	f.leaseGit("fetch", "--quiet", "origin", JOB_ID);
 	assert.equal(Number(f.leaseGit("rev-list", "--count", `${f.rebased}..HEAD`)), 2);
 	assert.notEqual(f.leaseHead, f.rebased);
 	assert.ok(f.leaseGit("status", "--porcelain").length === 0, "the lease is clean");
 
-	const result = await f.integrator().advance({ jobId: BR });
+	const result = await f.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.next, "done", result.reason);
 	assert.equal(f.leaseGit("rev-parse", "HEAD"), f.rebased, "the lease must now sit on the sha origin named");
 	assert.equal(f.teardowns.length, 1, "the whole point: teardown is reached, not a hand-proved refusal");
@@ -328,7 +328,7 @@ test("the 7 refusals of 2026-09-01, replayed against real git: the reset now pro
 	const refs = salvageRefs(f.lease);
 	assert.equal(refs.length, 1, "exactly one rescue ref");
 	const [ref, sha] = refs[0]!;
-	assert.match(ref, new RegExp(`^refs/cp-salvage/${BR}/`));
+	assert.match(ref, new RegExp(`^refs/cp-salvage/${JOB_ID}/`));
 	assert.equal(sha, f.leaseHead, "the rescue ref must point at the head that was discarded");
 	assert.equal(git(f.repo.path, "rev-parse", ref), f.leaseHead, "and be visible in the clone the lease belongs to");
 
@@ -354,7 +354,7 @@ test("the 7 refusals of 2026-09-01, replayed against real git: the reset now pro
 	const fact = result.facts.find((line) => line.includes("worktree reset to"));
 	assert.ok(fact, "the sync fact is missing");
 	assert.match(fact, /2 pre-rebase commit\(s\) were discarded/);
-	assert.match(fact, new RegExp(`kept at refs/cp-salvage/${BR}/`));
+	assert.match(fact, new RegExp(`kept at refs/cp-salvage/${JOB_ID}/`));
 });
 
 test("the dangerous inverse: a commit whose content the base does not carry still refuses, and the work survives", async (t) => {
@@ -369,7 +369,7 @@ test("the dangerous inverse: a commit whose content the base does not carry stil
 	});
 	const before = f.leaseGit("rev-parse", "HEAD");
 
-	const result = await f.integrator().advance({ jobId: BR });
+	const result = await f.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.step, "sync");
 	assert.equal(result.next, "surface");
 	assert.equal(f.teardowns.length, 0);
@@ -393,7 +393,7 @@ test("a binary-only unpushed change is not invisible to the proof: it refuses to
 		},
 	});
 	const before = f.leaseGit("rev-parse", "HEAD");
-	const result = await f.integrator().advance({ jobId: BR });
+	const result = await f.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.ok(!f.calls.some((line) => line.startsWith("git reset")));
 	assert.equal(f.leaseGit("rev-parse", "HEAD"), before);
@@ -402,7 +402,7 @@ test("a binary-only unpushed change is not invisible to the proof: it refuses to
 
 test("a rebase whose conflict was resolved by hand changed the content, so it refuses", async (t) => {
 	const f = await fixture(t, { conflictingRebase: true });
-	const result = await f.integrator().advance({ jobId: BR });
+	const result = await f.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.ok(!f.calls.some((line) => line.startsWith("git reset")), "a changed cumulative diff is not a proof");
 	assert.match(result.reason, /is not the one origin's tip carries/);
@@ -411,7 +411,7 @@ test("a rebase whose conflict was resolved by hand changed the content, so it re
 
 test("a base origin does not have proves nothing, and is never looked up as a tracking ref", async (t) => {
 	const f = await fixture(t);
-	const result = await f.integrator({ base: "release-42" }).advance({ jobId: BR });
+	const result = await f.integrator({ base: "release-42" }).advance({ jobId: JOB_ID });
 	assert.equal(result.next, "surface");
 	assert.ok(!f.calls.some((line) => line.startsWith("git reset")));
 	assert.match(result.reason, /origin did not name a tip for release-42/);
@@ -446,7 +446,7 @@ test("a rescue ref whose commit the base carries is pruned; one it does not carr
 	//    will never contain — the case where the ref may be the only copy.
 	const reachable = git(f.repo.path, "rev-list", "--max-parents=0", "HEAD");
 	const reachableRef = "refs/cp-salvage/cp-old1/2026-09-01T10-00-00Z";
-	const orphanRef = `refs/cp-salvage/${BR}/2026-09-01T11-00-00Z`;
+	const orphanRef = `refs/cp-salvage/${JOB_ID}/2026-09-01T11-00-00Z`;
 	git(f.repo.path, "update-ref", reachableRef, reachable);
 	git(f.repo.path, "update-ref", orphanRef, f.preRebaseHead);
 	// And refs this policy must never touch, in three near-miss shapes.
@@ -454,7 +454,7 @@ test("a rescue ref whose commit the base carries is pruned; one it does not carr
 	git(f.repo.path, "update-ref", "refs/keepme", reachable);
 	const branchesBefore = git(f.repo.path, "for-each-ref", "--format=%(refname)", "refs/heads");
 
-	const result = await f.integrator().advance({ jobId: BR });
+	const result = await f.integrator().advance({ jobId: JOB_ID });
 	assert.equal(result.next, "done", result.reason);
 
 	// The reachable one is gone; the orphan is still there, still resolves, and
@@ -513,7 +513,7 @@ test("an origin that cannot be asked keeps every rescue ref, and it is the ls-re
 	// answered, even though this commit genuinely is in the base.
 	git(f.repo.path, "remote", "set-url", "origin", join(f.repo.path, "..", "nowhere.git"));
 
-	const result = await f.integrator().advance({ jobId: BR });
+	const result = await f.integrator().advance({ jobId: JOB_ID });
 
 	assert.ok(
 		f.calls.includes(`git ls-remote --heads origin ${f.repo.branch}`),
@@ -540,7 +540,7 @@ test("a base origin does not have prunes nothing at all", async (t) => {
 	const ref = "refs/cp-salvage/cp-old1/2026-09-01T10-00-00Z";
 	git(f.repo.path, "update-ref", ref, reachable);
 
-	const result = await f.integrator({ base: "release-42" }).advance({ jobId: BR });
+	const result = await f.integrator({ base: "release-42" }).advance({ jobId: JOB_ID });
 
 	assert.ok(!f.calls.some((line) => line.startsWith("git update-ref -d")));
 	assert.equal(git(f.repo.path, "rev-parse", ref), reachable);
