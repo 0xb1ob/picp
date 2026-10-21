@@ -1038,6 +1038,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/test-migration-check.test.ts` | #379 | exception (verification integrity, like `tests/test-file-guard.test.ts`; operator ask-0088e0332d00 (Exceptions)): tests `scripts/test-migration-check.ts` itself, which no product entry point reaches, so it has no e2e consumer path; covers accept and reject paths of `deleted-with-feature` and `feature-removed` |
 | `tests/retired-integration-guard.test.ts` | #392 | exception (verification integrity, like `tests/test-migration-check.test.ts`): tests `scripts/check-retired-integration.ts` itself, a CI guard no product entry point reaches, so it has no e2e consumer path; covers the clean tree and every rejection path |
 | `tests/e2e/viewer-endpoints-speed.test.ts` | #395 | e2e landed on main after the baseline (viewer dashboard endpoint caching); recorded by P2e so the check stays at 0 findings, disposition left to its behavior's PR |
+| `tests/e2e/installer.test.ts` | #375 | installer sandbox: real bootstrap/cp-install/cp-daemon/doctor in Docker with the mock provider; opt-in `CP_INSTALL_E2E=1` (CI's install sandbox job) |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
