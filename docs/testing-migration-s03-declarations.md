@@ -75,4 +75,15 @@ Routing explains the result: HeldContinuation.#parked uses relay; CommandPost wi
 
 Current accounting is 26/40 S03 declarations mapped, plus S02's 36/40: 62/80 total. Still pending in S03: 45, 54–56, 58, 60, 64–68, 70–71, 78. S02's 6, 8, 32, 33 still require their retained-file disposition. Declaration 54's fresh-parent deadline path is covered, but its expired-pass/retry clauses are not all proved, so its earlier mapped row was removed. No unit file was deleted or moved, no retained file was invented, and no product mutation remains. Final retirement controls remain outstanding.
 
+## S03b parked-path verification
+
+On merged base `86b4cec` (#429), the real parked reproducer now lives in
+`tests/e2e/landing.test.ts` as `landing S03: a real parent relays a newly parked handoff without a model turn`.
+It passed (12.68 seconds), asserting exactly one durable id with prefix `continuation:parked:<job>:`
+and zero model requests whose final input contains HELD PR PARKED.
+Removing `|| id.startsWith("continuation:parked:")` from `isLandedContinuation` in
+`src/wakeup-outbox.ts` failed that exact assertion (actual 1, expected 0; 13.80 seconds).
+The mutation was restored immediately. This executes the production producer path and resolves the #429 review unknown.
+Other pending declarations and final retirement controls remain unfinished; ci-watch.test.ts stays whole.
+
 An exploratory timer-health case was also removed: two different malformed fleet shapes both surfaced as unsafe job id "-" rather than supplying the two distinct failure causes needed by declaration 71. That failed conversion attempt is not counted as mapping or negative-control evidence.

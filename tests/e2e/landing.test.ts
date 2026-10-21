@@ -1387,6 +1387,28 @@ test("landing S03: a restarted parent resumes a durable deadline and relays land
 	});
 });
 
+test("landing S03: a real parent relays a newly parked handoff without a model turn", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("quiet parked handoff", 306);
+	await s.post.manager.shutdown(live.jobId);
+	await s.post.registry.setMergePolicy("demo", "human_handoff");
+	writeWindowPass(s.home, live.jobId, live.head, isoTimestamp(new Date(Date.now() - 60_000)));
+	s.setGh({ integration: true, runs: [run(306, live.head, "in_progress", null)] });
+	await s.tick(live.jobId);
+	await s.parent("Observe this PR while its CI runs.", [{ kind: "text", text: "Waiting for CI." }], async (_events, _stderr, child) => {
+		const before = s.provider.requests("landing-parent-1").length;
+		s.setGh({ integration: true, runs: [run(306, live.head, "completed", "success")] });
+		await waitFor(() => s.post.fleet.get(live.jobId)?.phase, (phase) => phase === "awaiting_merge", { timeoutMs: 20_000, what: "green CI parks the reviewed PR through the real parent" });
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		await child.getState();
+		const box = s.post.durableWakeups.read();
+		const parked = [...box.pending, ...box.delivered, ...(box.discarded ?? [])].filter((entry) => entry.id.startsWith(`continuation:parked:${live.jobId}:`));
+		assert.equal(parked.length, 1, "one durable parked relay");
+		const parkedTurns = s.provider.requests("landing-parent-1").slice(before).filter((request) => JSON.stringify((request.body.messages as unknown[]).at(-1)).includes("HELD PR PARKED"));
+		assert.equal(parkedTurns.length, 0, "parking is relayed without waking the parent model");
+	});
+});
+
 test("landing S03: a driving worker keeps its slot and an integration write fault releases the busy fence", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t, { continuation: true });
 	const live = await s.held("busy fence", 308);
