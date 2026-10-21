@@ -5,9 +5,22 @@ import { ciAccessFinding } from "./ci-access-doctor.ts";
 import type { CommandRunner } from "./doctor.ts";
 import { resolveForgeRepository } from "./forge-url.ts";
 import type { EnsureCloneResult } from "./projects.ts";
+import { classifyPi, type PiProbe, readPiCompat } from "./pi-compat.ts";
+
+/** The host pi against package.json piCompat (#375), as doctor's `host.pi.compat` classifies it; never throws. */
+export function piReadiness(packageRoot: string, which: (command: string) => string[], probe: (pi: string) => PiProbe): string {
+	try {
+		const pi = which("pi")[0];
+		if (!pi) return "unknown: pi is not on PATH";
+		const result = classifyPi(readPiCompat(packageRoot), probe(pi));
+		return `${result.state}: ${result.detail}; supported: ${result.range}`;
+	} catch (error) {
+		return `unknown: ${(error as Error).message}`;
+	}
+}
 
 /** Advisory: a failed probe prints `unknown`, never "no CI" or gh's output; a throwing `run` propagates. */
-export function formatReadiness(home: string, project: EnsureCloneResult["project"], run: CommandRunner): string {
+export function formatReadiness(home: string, project: EnsureCloneResult["project"], run: CommandRunner, pi?: string): string {
 	const { name } = project;
 	const forge = resolveForgeRepository(project.clone_url, project.forge);
 	const forgeLine = forge.ok ? `${forge.repository.kind} (${forge.repository.path})` : `unknown: ${forge.detail}`;
@@ -42,6 +55,7 @@ export function formatReadiness(home: string, project: EnsureCloneResult["projec
 			: `picp merges a ${request} once it is reviewed, CI is green and the repository's own rules allow it (nothing forced).`;
 	return [
 		"  readiness (advisory, never blocks add; re-run cp_project add to check again):",
+		...(pi ? [`    pi:      ${pi}`] : []),
 		`    forge:   ${forgeLine}`,
 		`    CI:      ${ci}`,
 		`  tell the user: picp is set up for ${name}. ${tellMerge} ${tellCi} Work arrives as requests to the operator.`,

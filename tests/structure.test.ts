@@ -171,6 +171,7 @@ const R1_ALLOWED = [
 const R2_ALLOWED = [
 	"extensions/cp-bridge/index.ts",
 	"src/home.ts",
+	"src/pi-compat-probe.ts",
 	"src/projects.ts",
 	"src/service/units.ts",
 	"src/viewer/explorer.ts",

@@ -11,6 +11,10 @@
 	"engines": {
 		"node": "24.x"
 	},
+	"piCompat": {
+		"min": "1.0.1",
+		"testedMax": "1.0.4"
+	},
 	"pi": {
 		"extensions": [
 			"./extensions/command-post/index.ts"

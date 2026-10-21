@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
 
-export const SCENARIOS = ["fresh", "prerequisites", "rerun", "login", "recovery", "root"] as const;
+export const SCENARIOS = ["fresh", "prerequisites", "rerun", "login", "recovery", "root", "compat"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 export const IMAGE = "picp-install-sandbox:local";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -113,6 +113,38 @@ const VIEWER = "http://127.0.0.1:8766/healthz";
 const RAW_BOOTSTRAP = "https://raw.githubusercontent.com/0xb1ob/picp/main/bin/cp-bootstrap";
 /** PATH without the image's npm prefix: pi is absent. */
 const NO_PI_PATH = "/home/node/.local/bin:/usr/local/bin:/usr/bin:/bin";
+const PI_STUB = "/home/node/pi-stub";
+
+/**
+ * A stub as the only pi; the image's pi sits behind it. `--version` reads ./version, `update --self` logs and takes
+ * ./update-to (fails without one), ./broken fails all else, ./list-fails fails `--list-models`. Returns the undo.
+ */
+function makePiStub(): () => void {
+	const link = join(HOME, ".npm-global/bin/pi");
+	const real = exec("readlink", ["-f", link]).out.trim();
+	exec("mkdir", ["-p", PI_STUB]);
+	rmSync(link);
+	const script = [
+		"#!/bin/sh",
+		'd=$(dirname "$0")',
+		'if [ "$1" = --version ]; then cat "$d/version"; exit 0; fi',
+		'if [ "$1" = update ]; then echo "$*" >> "$d/updates"; [ -f "$d/update-to" ] || exit 1; cp "$d/update-to" "$d/version"; echo updated; exit 0; fi',
+		'if [ -f "$d/broken" ]; then echo "stub: this pi lacks the extension API" >&2; exit 1; fi',
+		'case " $* " in *" --list-models "*) if [ -f "$d/list-fails" ]; then echo "stub: list failed" >&2; exit 1; fi ;; esac',
+		`exec "${real}" "$@"`,
+	];
+	writeFileSync(join(PI_STUB, "pi"), `${script.join("\n")}\n`, { mode: 0o755 });
+	return () => {
+		rmSync(PI_STUB, { recursive: true, force: true });
+		exec("ln", ["-s", real, link]);
+	};
+}
+
+/** Every path, size and mtime under /etc /usr /opt /var: the root scenario's before/after. */
+function systemSnapshot(): Set<string> {
+	const listed = exec("find", ["/etc", "/usr", "/opt", "/var", "-xdev", "-printf", "%p %s %T@\\n"]);
+	return new Set(listed.out.split("\n").filter(Boolean));
+}
 
 interface Ctx { result: ScenarioResult; remote: string; seed: string; model: string }
 
@@ -246,6 +278,14 @@ const scenarios: Record<Scenario, (ctx: Ctx) => Promise<void>> = {
 		check(ctx, daemons() === 0, `no login: ${daemons()} cp-daemon processes left running`);
 		check(ctx, !existsSync(daemonPaths(CP_HOME).config), "no login: wrote data/daemon.json");
 		check(ctx, !/: doctor: /.test(none.out), "no login: a doctor ran");
+		// #402 review: a failing `pi --list-models` with no auth.json provider is no login too: exit 4, nothing started.
+		const restore = makePiStub();
+		writeFileSync(join(PI_STUB, "version"), "1.0.4\n");
+		writeFileSync(join(PI_STUB, "list-fails"), "");
+		const failed = await bootstrap(ctx, "pi --list-models fails", [], { ...process.env, PATH: `${PI_STUB}:${process.env.PATH ?? ""}` });
+		restore();
+		check(ctx, failed.status === 4 && /^fail: login: `pi --list-models` exited 1 and no provider is in /m.test(failed.out), `list fails: expected exit 4 naming it, got ${failed.status}`);
+		check(ctx, daemons() === 0 && !existsSync(daemonPaths(CP_HOME).config), "list fails: started cp-daemon or wrote data/daemon.json");
 		writeFileSync(models, saved);
 		const phase = "the printed re-run, logged in";
 		await verify(ctx, phase, await rerun(ctx, phase, lines[0]?.split("then re-run: ")[1] ?? "false"));
@@ -292,9 +332,46 @@ const scenarios: Record<Scenario, (ctx: Ctx) => Promise<void>> = {
 	async root(ctx) {
 		// uid 0 inside the container (never host sudo): every target stays per-user, under root's own HOME.
 		check(ctx, process.getuid?.() === 0, "root: the scenario is not running as uid 0");
+		const before = systemSnapshot();
 		const out = await install(ctx, "fresh install as root");
 		const system = out.split("\n").filter((line) => line.startsWith("changed: ") && /\s\/(etc|usr|opt|var)\//.test(line));
 		check(ctx, system.length === 0, `root: changed system paths: ${system.join(" | ")}`);
+		// #402 review: the files themselves, not only the install's own lines.
+		const after = systemSnapshot();
+		const moved = [...new Set([...before, ...after])].filter((entry) => before.has(entry) !== after.has(entry));
+		check(ctx, before.size > 1000 && moved.length === 0, `root: /etc /usr /opt /var changed (${moved.length} of ${before.size}): ${moved.slice(0, 10).join(" | ")}`);
+	},
+	async compat(ctx) {
+		// #375 PR3: package.json piCompat through the real installer, with a stub as the only pi on PATH.
+		const stub = (version: string, extra: { broken?: boolean; updateTo?: string } = {}): NodeJS.ProcessEnv => {
+			writeFileSync(join(PI_STUB, "version"), `${version}\n`);
+			rmSync(join(PI_STUB, "broken"), { force: true });
+			rmSync(join(PI_STUB, "update-to"), { force: true });
+			rmSync(join(PI_STUB, "updates"), { force: true });
+			if (extra.broken) writeFileSync(join(PI_STUB, "broken"), "");
+			if (extra.updateTo) writeFileSync(join(PI_STUB, "update-to"), `${extra.updateTo}\n`);
+			return { ...process.env, PATH: `${PI_STUB}:${process.env.PATH ?? ""}` };
+		};
+		makePiStub();
+		const updates = (): string => (existsSync(join(PI_STUB, "updates")) ? readFileSync(join(PI_STUB, "updates"), "utf8").trim() : "");
+		const range = "pi >= 1.0.1, tested up to 1.0.4, major 1";
+		const refusals = [
+			{ name: "old pi, --no-pi-upgrade", env: () => stub("0.99.0", { updateTo: "1.0.4" }), extra: ["--no-pi-upgrade"], says: "pi 0.99.0 is older than 1.0.1" },
+			{ name: "next-major pi", env: () => stub("2.0.0"), extra: [], says: "pi 2.0.0 is a newer major than the tested 1.0.4" },
+			{ name: "fake-incompatible pi", env: () => stub("1.0.4", { broken: true }), extra: [], says: "pi 1.0.4 failed the capability probe" },
+		];
+		for (const { name, env, extra, says } of refusals) {
+			const run = await bootstrap(ctx, name, extra, env());
+			check(ctx, run.status === 1 && run.out.includes(says) && run.out.includes(range), `${name}: expected exit 1 naming "${says}" and the range, got exit ${run.status}`);
+			check(ctx, updates() === "", `${name}: pi was updated (${updates()})`);
+			check(ctx, !existsSync(daemonPaths(CP_HOME).config) && daemons() === 0, `${name}: wrote data/daemon.json or started cp-daemon`);
+		}
+		const forced = await verify(ctx, "next-major pi, --force", await bootstrap(ctx, "next-major pi, --force", ["--force"], stub("2.0.0")));
+		check(ctx, /^skip: pi: warning: --force: proceeding with an incompatible pi: pi 2\.0\.0/m.test(forced), "--force: no warning line for the incompatible pi");
+		const newer = await verify(ctx, "newer pi, same major", await bootstrap(ctx, "newer pi, same major", [], stub("1.9.0")));
+		check(ctx, /^skip: pi: warning: pi 1\.9\.0 is newer than the tested 1\.0\.4/m.test(newer) && updates() === "", "newer: expected a warning and no update (never a downgrade)");
+		const old = await verify(ctx, "old pi, --yes", await bootstrap(ctx, "old pi, --yes", [], stub("0.99.0", { updateTo: "1.0.4" })));
+		check(ctx, updates() === "update --self" && /^ok: pi: updated 0\.99\.0 -> 1\.0\.4 /m.test(old), `old, --yes: expected one \`pi update --self\` and an updated line, got "${updates()}"`);
 	},
 };
 
