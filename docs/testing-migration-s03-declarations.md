@@ -108,7 +108,7 @@ from the pushed suite. Declaration 71 stays pending; the original unit file rema
 |---|---|---|
 | 45, 54–56, 58, 60, 64–68, 70, 78 | mapped | Main assertion ledger and docs/testing-migration-s03b-controls.md; thirteen newly mapped declarations |
 | S02 6/8/32/33 | redundant-unreachable | Named public consumer cases pin fleet refusal, invalid Actions-run refusal, continued GitLab reads and same-key restart; reachable portions remain mapped in the notes. |
-| 71 | pending-fix | Real parent must emit a durable watch-failure notice without crashing; reproducer: /home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s03b-pntl/watch-failure-reproducer.ts, outside pushed suite |
+| 71 | pending-fix | Expected: durable watch-failure notice without a crash. Upstream #433 is now merged; the operator explicitly parked this e2e conversion for follow-up. Historical reproducer remains outside the pushed suite: /home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s03b-pntl/watch-failure-reproducer.ts |
 
 `pending-fix` is recorded here because the assertion-map parser rejects that status; it is not represented as retained.
 The unit file stays whole while 71 is pending. S03 is 39 mapped / 1 pending-fix; S02 is 36 mapped / 4 redundant-unreachable.

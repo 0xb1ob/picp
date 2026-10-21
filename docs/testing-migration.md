@@ -2684,6 +2684,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/merge-permission-retained.test.ts` | S14 | structural safety: no public consumer composes ghBranchRulesArgs and detectCiWait; original declaration 13 verbatim |
 | `tests/pr-resolve-retained.test.ts` | S14 | mixed original declaration 9 verbatim: validateEnvelope refuses missing pr_url before intake resolver; all reachable variants also covered through real reporter |
 | `tests/review-approval-retained.test.ts` | S14 | original declaration verbatim: pipeline artifacts.info fails before missing matches; only production write passes seq 1; no public entry reaches seq-2/3 overwrite |
+| `tests/held-continuation-fleet-read.test.ts` | #433 | known-regression unit landed upstream after the baseline; convert-owned P3c-rest, pending the separately parked declaration-71 e2e conversion. Preserve this incoming coverage; no exception or deletion is claimed. |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
