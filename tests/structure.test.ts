@@ -158,9 +158,10 @@ const R1_ALLOWED = [
 	// Not a fixture: cp-daemon's outer may import only node:* (contracts pull typebox), so it derives its own
 	// data/state paths; tests/daemon-files.test.ts pins them equal to layoutForHome("multi", home).
 	"src/service/daemon-files.ts",
+	// The gateway e2e writes the legacy top-level data/capacity.json that cp-u3i2 must ignore.
+	"tests/e2e/authority.test.ts",
 	"tests/mode.test.ts",
 	"tests/quality.test.ts",
-	"tests/quota.test.ts",
 	"tests/repo-map.test.ts",
 	"tests/storage.test.ts",
 	"tests/task-references.test.ts",
@@ -241,4 +242,12 @@ test("no joined statements: integrate, src/command-post, human-handoff and exten
 	const files = NO_JOINED_STATEMENTS.flatMap((root) => (root.endsWith(".ts") ? [root] : sourcesBelow(root)));
 	const hits = files.flatMap((rel) => joinedStatementLines(readFileSync(join(REPO_ROOT, rel), "utf8")).map((line) => `${rel}:${line}`));
 	assert.deepEqual(hits, [], "split joined statements onto their own lines (or extract a helper); never compact to dodge a size cap");
+});
+
+// Moved from tests/mandate-usage.test.ts (P2d): the e2e parent is its own process and owns no live run to read.
+test("cp_mandate and cp_decide read the live view, so the baseline and every cap check see the same usage", () => {
+	const source = readFileSync(join(REPO_ROOT, "extensions/command-post/tools-mandate.ts"), "utf8");
+	assert.match(source, /const jobs = liveUsageJobs\(post\.fleet, post\.runs\);/);
+	assert.match(source, /usageJobs: \(\) => liveUsageJobs\(post\.fleet, post\.runs\)/);
+	assert.doesNotMatch(source, /post\.fleet\.read\(\)\.jobs/);
 });
