@@ -1027,6 +1027,120 @@ test(
 );
 
 
+test("landing S02: only reported held PR deliveries are queried", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("watch eligibility", 201);
+	const original = structuredClone(s.post.fleet.get(live.jobId)!);
+	const variants = [
+		...(["waiting", "done"] as const).map((phase) => ({ phase })),
+		{ phase: "failed" as const, failure: { class: "crash" as const, message: "exit 1", at: isoTimestamp() } },
+		...(["local", "pipeline"] as const).map((delivery) => ({ delivery })),
+		{ receipts: [] },
+		{ receipts: [{ kind: "artifact" as const, status: "written", title: "report" }] },
+		...["merged", "landed", "MERGED", " merged "].map((status) => ({ receipts: original.receipts!.map((receipt) => ({ ...receipt, status })) })),
+	];
+	for (const patch of variants) {
+		const file = join(s.home, LAYOUT.fleetFile);
+		const fleet = JSON.parse(readFileSync(file, "utf8"));
+		fleet.jobs = fleet.jobs.map((entry: { job_id: string }) => entry.job_id === live.jobId ? { ...original, ...patch } : entry);
+		writeFileSync(file, JSON.stringify(fleet));
+		const before = s.ghCalls().length;
+		const tick = await s.post.ciTick();
+		assert.ok(!tick.checked.includes(live.jobId), JSON.stringify(patch));
+		assert.equal(s.ghCalls().length, before, "excluded deliveries make no forge request");
+	}
+	await s.post.fleet.patch(live.jobId, original);
+	s.setGh({ runs: [run(201, live.head, "completed", "success")] });
+	const tick = await s.tick(live.jobId);
+	assert.equal(tick.observations[0]?.event, "ci_green", "the eligible delivery is queried");
+});
+
+test("landing S02: aggregate CI and terminal PR facts preserve the current head", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("watch aggregate and terminal facts", 202);
+	const observe = async (rows: RunRow[], pr?: Record<string, unknown>) => {
+		s.setGh({ runs: rows, routes: pr ? [{ match: "repos/example/demo/pulls/202", replies: [json({ number: 202, html_url: live.prUrl, head: { sha: live.head, ref: live.jobId }, ...pr })] }] : [] });
+		return s.tick(live.jobId);
+	};
+	assert.deepEqual((await observe([])).observations, [], "no runs is no verdict");
+	assert.deepEqual((await observe([run(202, "a".repeat(40), "completed", "success")])).observations, [], "a superseded green is no verdict");
+	assert.deepEqual((await observe([run(202, live.head, "completed", "success"), run(203, live.head, "in_progress", null)])).observations, [], "one unfinished workflow defers the aggregate");
+	const green = (await observe([run(202, live.head, "completed", "success"), run(203, live.head, "completed", "skipped")])).observations;
+	assert.equal(green.length, 1);
+	assert.equal(green[0]?.event, "ci_green");
+	assert.equal(green[0]?.head_sha, live.head);
+	s.post.confirmCi(green.map((fact) => fact.key));
+	assert.deepEqual((await observe([run(202, live.head, "completed", "success"), run(203, live.head, "completed", "skipped")])).observations, [], "confirmed facts wake once");
+	const red = (await observe([run(204, live.head, "completed", "failure")])).observations;
+	assert.equal(red.length, 1);
+	assert.equal(red[0]?.event, "ci_failed");
+	assert.equal(red[0]?.workflow, "ci");
+	assert.equal(red[0]?.conclusion, "failure");
+	const mergedAt = "2026-08-31T17:55:07Z";
+	const merged = (await observe([run(204, live.head, "completed", "failure")], { merged: true, state: "closed", merge_commit_sha: "b".repeat(40), merged_at: mergedAt })).observations;
+	assert.equal(merged.length, 1, "a merge supersedes CI");
+	assert.equal(merged[0]?.event, "pr_merged");
+	assert.equal(merged[0]?.merge_commit_sha, "b".repeat(40));
+	assert.equal(merged[0]?.merged_at, mergedAt);
+	const closed = (await observe([], { merged: false, state: "closed", closed_at: mergedAt })).observations;
+	assert.equal(closed.length, 1);
+	assert.equal(closed[0]?.event, "pr_closed");
+	assert.equal(closed[0]?.closed_at, mergedAt);
+});
+
+test("landing S02: watch delivery, restart and query cadence survive real forge failures", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("watch delivery and cadence", 203);
+	s.setGh({ runs: [run(203, live.head, "completed", "success")] });
+	t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+	const advance = (ms: number) => t.mock.timers.tick(ms);
+	const row = () => s.post.ciWatch.store.job(live.jobId)!;
+	const first = await s.post.ciTick();
+	assert.equal(first.observations.length, 1);
+	assert.equal(Date.parse(row().next_due_at!) - Date.parse(row().last_checked_at!), 5_000, "settled heads use idle cadence");
+	const before = s.ghCalls().length;
+	assert.ok((await s.post.ciTick()).skipped.includes(live.jobId));
+	assert.equal(s.ghCalls().length, before, "not-due ticks make no request");
+	advance(5_000);
+	assert.deepEqual((await s.post.ciTick()).observations, [], "queued delivery is not immediately resent");
+	advance(601_000);
+	const resend = await s.post.ciTick();
+	assert.deepEqual(resend.observations.map((fact) => fact.key), first.observations.map((fact) => fact.key), "one resend preserves identity");
+	advance(601_000);
+	assert.deepEqual((await s.post.ciTick()).observations, [], "never a third send");
+	assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "ci_observed").length, 1, "resends never duplicate the journal");
+	s.post.confirmCi(first.observations.map((fact) => fact.key));
+	const observed = s.post.ciWatch.observedAt(live.jobId);
+	for (let failure = 1; failure <= 5; failure++) {
+		s.setGh({ routes: [{ match: "repos/example/demo/pulls/203", replies: [{ code: 1, stderr: "network unreachable" }] }] });
+		advance(900_000);
+		const tick = await s.post.ciTick();
+		assert.equal(tick.errors.length, 1);
+		assert.equal(row().last_ci, "unknown", "a failed read never keeps stale green");
+		assert.equal(s.post.ciWatch.observedAt(live.jobId), observed, "failed queries never refresh an unread head");
+		assert.equal(row().head_sha, live.head);
+		assert.equal(row().consecutive_failures, failure);
+		assert.equal(Date.parse(row().next_due_at!) - Date.parse(row().last_checked_at!), 1_000 * 2 ** (failure - 1), "errors back off exponentially");
+	}
+	s.setGh({ routes: [{ match: "actions/runs?", replies: [{ code: 1, stderr: "Resource not accessible by personal access token (HTTP 403)" }] }] });
+	advance(900_000);
+	await s.post.ciTick();
+	assert.equal(row().last_ci, "unreadable");
+	s.setGh({ runs: [run(203, live.head, "in_progress", null)], routes: [] });
+	advance(900_000);
+	const [a, b] = await Promise.all([s.post.ciTick(), s.post.ciTick()]);
+	assert.deepEqual(a, b, "overlapping callers share the result");
+	assert.equal(row().consecutive_failures, 0, "success resets failures");
+	assert.equal(Date.parse(row().next_due_at!) - Date.parse(row().last_checked_at!), 1_000, "unfinished heads use base cadence");
+	s.setGh({ runs: [run(203, live.head, "completed", "success")], routes: [] });
+	advance(900_000);
+	await s.post.shutdown();
+	const restarted = new CommandPost({ home: s.home, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	t.after(() => restarted.shutdown());
+	assert.deepEqual((await restarted.ciTick()).observations, [], "confirmed arrival survives reconstruction");
+	t.mock.timers.reset();
+});
+
 test("landing: CI watch persists arrival and attempt identity, follows pushed heads and prunes finished deliveries", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t);
 	const live = await s.held("watch attempts and heads", 101);
