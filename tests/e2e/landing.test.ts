@@ -104,7 +104,7 @@ interface GitlabReply {
 }
 /**
  * A local https GitLab: `/api/v4/.../merge_requests/<iid>` answers `mrs[iid]` and logs its PRIVATE-TOKEN; every other
- * path is `git http-backend` over `remote`, served as `/o/lab.git`. Git and fetch skip verification of its throwaway cert.
+ * path is `git http-backend` over `remote`, served as `/o/lab.git`. Callers skip TLS verification of its throwaway cert.
  */
 async function startFakeGitlab(t: TestContext, remote: string) {
 	const dir = mkdtempSync(join(tmpdir(), "cp-gitlab-"));
@@ -246,7 +246,7 @@ process.exit(1);
 }
 
 /** Real CommandPost over a registered scratch project; no held-PR continuation, so every cp_integrate is the test's. */
-async function startStack(t: TestContext, options: { project?: boolean; trees?: number; env?: (home: string, remote: string) => Record<string, string> } = {}) {
+async function startStack(t: TestContext, options: { project?: boolean; env?: Record<string, string> } = {}) {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", "src/a.ts": "a1\n", "src/b.ts": "b1\n" } });
 	const provider = await MockProvider.start();
@@ -265,7 +265,7 @@ async function startStack(t: TestContext, options: { project?: boolean; trees?: 
 		rmSync(countsFile, { force: true });
 	};
 	setGh({});
-	const extraEnv = options.env?.(home.path, repo.remote as string) ?? {};
+	const extraEnv = options.env ?? {};
 	const savedEnv = Object.fromEntries(Object.keys(extraEnv).map((key) => [key, process.env[key]]));
 	Object.assign(process.env, extraEnv);
 	const bin = join(home.path, "bin");
@@ -294,17 +294,17 @@ async function startStack(t: TestContext, options: { project?: boolean; trees?: 
 		const clone = post.registry.pathOf(name);
 		execFileSync("git", ["clone", "--quiet", repo.remote as string, clone]);
 		if (over.cloneUrl) execFileSync("git", ["-C", clone, "remote", "set-url", "origin", over.cloneUrl]);
-		const pool = enableTreehouse(clone, { maxTrees: options.trees ?? 4 });
+		const pool = enableTreehouse(clone, { maxTrees: 4 });
 		t.after(() => pool.cleanup());
 	};
 	if (options.project !== false) await project("demo");
 
 	const remoteHead = (branch: string) =>
 		execFileSync("git", ["ls-remote", repo.remote as string, `refs/heads/${branch}`], { encoding: "utf8" }).split("\t")[0]?.trim() ?? "";
-	/** A fresh ledger job whose implementer runs `command` (default: commit and push), reports a PR and stands by; resolves once held. */
-	const held = async (title: string, number: number, over: { project?: string; prUrl?: string; delivery?: "local"; command?: (branch: string) => string } = {}) => {
-		const job = await post.ledger().create({ title, project: over.project ?? "demo", delivery: over.delivery ?? "pr", kind: "ship" });
-		const prUrl = over.prUrl ?? `https://github.com/example/demo/pull/${number}`;
+	/** A fresh job whose implementer runs `command` (default: commit and push), reports and stands by; resolves once held. */
+	const held = async (title: string, number: number, over: { delivery?: "local"; command?: (branch: string) => string } = {}) => {
+		const job = await post.ledger().create({ title, project: "demo", delivery: over.delivery ?? "pr", kind: "ship" });
+		const prUrl = `https://github.com/example/demo/pull/${number}`;
 		const pr = over.delivery ? {} : { pr_url: prUrl };
 		const report: ScriptStep = {
 			kind: "tool_calls",
@@ -353,7 +353,7 @@ async function startStack(t: TestContext, options: { project?: boolean; trees?: 
 		}
 		return assert.fail(`the CI watch never checked ${jobId}`);
 	};
-	/** A held fleet record with no worker or worktree (seeded legacy data): cp_merged reads only the record and the clone. */
+	/** A held fleet record with no worker or worktree (seeded legacy data): cp_merged reads the record and the clone. */
 	const seed = async (title: string, over: { project?: string; prUrl?: string | false; branch?: string; bound?: boolean } = {}) => {
 		const job = await post.ledger().create({ title, project: over.project ?? "demo", delivery: "pr", kind: "ship" });
 		const prUrl = over.prUrl ?? `https://github.com/example/demo/pull/${50 + post.ledger().read().jobs.length}`;
@@ -705,7 +705,7 @@ test(
 		const s = await startStack(t);
 		await s.post.registry.setAfterMergeDeploy("demo", { branch: "main", task: "copy dist to host-a and restart", resources: ["host-a", "db"] });
 		const mergedAt = new Date().toISOString();
-		/** What `gh pr view <ref>` answers for `jobId`'s PR: merged into main by default. */
+		/** What `gh pr view <ref>` answers for a PR from `branch`: merged into main by default. */
 		const answer = (ref: string, branch: string, over: Record<string, unknown> = {}, head = "a".repeat(40)) =>
 			s.setGh({ routes: [{ match: `pr view ${ref}`, replies: [json({ number: Number(ref.split("/").pop()), url: ref.startsWith("https://") ? ref : `https://github.com/example/demo/pull/${ref}`,
 				state: "MERGED", mergedAt, mergeCommit: { oid: MERGE }, headRefName: branch, headRefOid: head, baseRefName: "main", ...over })] }] });
@@ -836,11 +836,11 @@ test(
 	{ skip: SKIP, timeout: 600_000 },
 	async (t) => {
 		const token = "glpat-canary-0123456789";
-		const s = await startStack(t, { env: () => ({ NODE_TLS_REJECT_UNAUTHORIZED: "0", GIT_SSL_NO_VERIFY: "1", CP_E2E_GITLAB_TOKEN: token }) });
+		const s = await startStack(t, { env: { NODE_TLS_REJECT_UNAUTHORIZED: "0", GIT_SSL_NO_VERIFY: "1", CP_E2E_GITLAB_TOKEN: token } });
 		const lab = await startFakeGitlab(t, s.remote);
 		await s.project("lab", { cloneUrl: `${lab.web}/o/lab.git`, forge: { kind: "gitlab", web_base_url: lab.web, token_env: "CP_E2E_GITLAB_TOKEN" } });
 		const mrUrl = (iid: number, path = "o/lab") => `${lab.web}/${path}/-/merge_requests/${iid}`;
-		/** The MR the fake GitLab answers for `iid`: merged into main from `branch`, no landing commit unless `over` names one. */
+		/** The MR the fake GitLab answers for `iid`: merged into main from `branch`, no landing commit unless named. */
 		const mr = (iid: number, branch: string, over: Record<string, unknown> = {}) => {
 			const head = (over.sha as string | undefined) ?? "e".repeat(40);
 			lab.mrs[iid] = { body: { id: 9000 + iid, iid, project_id: 42, source_project_id: 42, target_project_id: 42, state: "merged", source_branch: branch, target_branch: "main", sha: head,
@@ -871,7 +871,7 @@ test(
 		await s.post.fleet.patch(squash.jobId, { branch: "cp-other" });
 		await assert.rejects(s.post.recordMerge({ jobId: squash.jobId }), /discharges nothing here/);
 
-		// A merge commit wins over a squash commit and is taken as named (no reachability asked); alone it infers no strategy.
+		// A merge commit wins over a squash commit, taken as named (no reachability asked); alone it infers no strategy.
 		const both = await s.seed("gitlab merge and squash", { project: "lab", prUrl: mrUrl(10) });
 		mr(10, both.branch, { merge_commit_sha: "a".repeat(40), squash_commit_sha: "f".repeat(40) });
 		const viaMerge = (await s.post.recordMerge({ jobId: both.jobId })).receipt;

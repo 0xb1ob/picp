@@ -62,6 +62,7 @@ ask-0088e0332d00, 2026-10-21.
 | P2d (cp-e2e-migration-p2d-k5to) | behavior 02, fourth slice: the risk warning (02-9), risk:high pre-approval (02-10), batch risk:high (02-11), grant selection and supplements (02-12), live mandate usage (02-13) and the gateway's capacity and quota (02-14), and the P2c review's two lows. `tests/mandate.test.ts` stays with P2e. | 8 (`tests/capacity.test.ts`, `tests/mandate-selection.test.ts`, `tests/mandate-supplement.test.ts`, `tests/mandate-usage.test.ts`, `tests/quota.test.ts`, `tests/risk-batch.test.ts`, `tests/risk-preapproval.test.ts`, `tests/risk-warning.test.ts`) | 392 → 384 | 4,393 → 4,346 |
 | P2e (cp-e2e-migration-p2e-fmi5) | behavior 02, last slice: a pipeline's mandate-decided plan checkpoint (02-15), cp_mandate and cp_escalate through a real parent (02-16), and in-flight continuation under expired, revoked, serial and capped grants (02-17); the P2d review's three findings. No behavior-02 file remains; send-first-gate belongs to P4. | 1 (`tests/mandate.test.ts`) | 384 → 383 | 4,346 → 4,295 |
 | P3 (cp-e2e-migration-p3-rhym) | behavior 05, first slice: the Actions CI read behind cp_integrate, the CI watch and `/status` (05-1), the no-CI workflows question (05-2), `/doctor` `ci.<project>` (05-3) and the one infra-only rerun (05-4) in `tests/e2e/landing.test.ts`; the P2e review's three findings. The other 26 behavior-05 files stay `convert`, for P3b (a job the main session creates). | 4 (`tests/actions-ci.test.ts`, `tests/ci-access.test.ts`, `tests/ci-configured.test.ts`, `tests/ci-infra-rerun.test.ts`) | 385 → 382 | 4,300 → 4,287 |
+| P3b (cp-e2e-migration-p3b-stth) | behavior 05, second slice: merge receipts and landing proof in `tests/e2e/landing.test.ts`: cp_merged through `gh` with the after-merge deploy job (05-5), cp_merged against a local https GitLab (05-6), and cp_teardown's git-only landing proof (05-7). The other 23 behavior-05 files stay `convert` (owner P3), for P3c (a job the main session cuts). | 3 (`tests/after-merge.test.ts`, `tests/landing-proof.test.ts`, `tests/merges.test.ts`) | 382 → 379 | 4,287 → 4,272 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -148,6 +149,18 @@ guard is unreachable from cp_integrate, which reads no CI at all while draining 
 watch reaches it. It also folds in the P2e review: the expired-grant matrix and the after-expiry sub-asserts are
 `retained` in `tests/decide.test.ts`, and the checker refuses a `retained` row whose note names no kept test file.
 
+P3b (cp-e2e-migration-p3b-stth) adds three cases to `tests/e2e/landing.test.ts` and deletes three of the 26 remaining
+behavior-05 files (24 declarations) under negative controls NC-28 to NC-31, one per file and at least one per
+scenario. The slice is the merge receipt and the landing proof: what cp_merged records from a forge's answer, the
+after-merge deploy job it creates, and what cp_teardown accepts as git evidence once the head branch is gone. 05-5 and
+05-6 drive cp_merged on real held jobs and on seeded legacy fleet records (a bound PR, no PR receipt); 05-6 serves the
+GitLab REST API and the repository (`git http-backend`) from one local https server with a throwaway certificate, so the
+project's real GitLab observer, its token and git's fast-forward check all run. 05-7 tears down held local jobs whose
+branches were merged, squashed, rebased or never landed on the scratch remote. Six units are `retained`, moved
+verbatim: the landing proof's injected-failure, timeout and recheck units to `tests/forge-runtime.test.ts`, and the
+total receipt reader, the throwing after-merge port and the ledger refusal to `tests/forge-observers.test.ts`; both
+files stay `convert` for P3c. The P2e review's three findings were already folded in by P3, so P3b has none to fold.
+
 ## Conversion PRs
 
 One row per later PR. Its candidate deletion set is every baseline row whose owner is that PR. The checker prints
@@ -190,8 +203,8 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 <!-- /manifest:prs -->
 
 The plan proposed 6 cases for all of behavior 05. P3 is a first slice of 4 cases over 4 files. P3b
-(cp-e2e-migration-p3b-stth) owns the other 26 behavior-05 files and takes about 250 KB of diff by behavior; a P3c
-follows if files remain.
+(cp-e2e-migration-p3b-stth) is the second, 3 cases over 3 files (merge receipts and the landing proof). The other 23
+behavior-05 files keep their `convert` rows (owner P3) for P3c, which the main session cuts.
 
 <!-- census -->
 Census snapshot, printed by the checker on `03ed8749a76085c9938517b6f149bb49ebe7a8fd`; the checker's live output wins over this table.
