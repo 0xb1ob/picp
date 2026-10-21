@@ -354,16 +354,16 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			return;
   }
 		case "/api/stats":
-			afterWarm(options, "stats", () => {
+			afterWarm(res, options, "stats", () => {
 				const out = statScope(() => statsView(options, url.searchParams, Date.now()));
 				if (out.status === 200) sendView(req, res, out.body); else sendJson(res, out.status, out.body);
 			});
 			return;
 		case "/api/jobs":
-			afterWarm(options, "jobs", () => sendView(req, res, statScope(() => jobsView(options))));
+			afterWarm(res, options, "jobs", () => sendView(req, res, statScope(() => jobsView(options))));
 			return;
 		case "/api/board":
-			afterWarm(options, "jobs", () => sendView(req, res, statScope(() => boardView(options))));
+			afterWarm(res, options, "jobs", () => sendView(req, res, statScope(() => boardView(options))));
 			return;
 		case "/api/reports":
 			sendView(req, res, reportsView(options, warn));
@@ -375,7 +375,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			sendView(req, res, statScope(() => overview(options)));
 			return;
 		case "/api/map":
-			afterWarm(options, "map", () => sendView(req, res, statScope(() => dependencyMap(options))));
+			afterWarm(res, options, "map", () => sendView(req, res, statScope(() => dependencyMap(options))));
 			return;
 		case "/api/dashboard":
 			sendJson(res, 200, statScope(() => dashboard(options)));
@@ -480,9 +480,9 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 }
 
 /** A slow view requested during the start-up warm waits for its stage: one scan of each run, never two side by side. */
-function afterWarm(options: ViewerOptions, view: Parameters<typeof warming>[1], respond: () => void): void {
-	const pending = warming(options, view);
-	if (pending) void pending.then(respond); else respond();
+function afterWarm(res: ServerResponse, options: ViewerOptions, view: Parameters<typeof warming>[1], respond: () => void): void {
+	const fail = () => { if (!res.headersSent) sendJson(res, 500, { error: "internal error" }); else res.destroy(); };
+	void (warming(options, view) ?? Promise.resolve()).then(respond).catch(fail);
 }
 
 export function createViewer(options: ViewerOptions): Server {
