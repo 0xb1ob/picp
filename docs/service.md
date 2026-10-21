@@ -532,7 +532,8 @@ never mid-update), the viewer (`/api/identity` for this home within 3 s; 2 runs)
 the supervisor (the parent role `failed` / `start-limit-hit` in `state/daemon-runtime.json`; skipped on a
 legacy home), disk (< 5 GiB or < 10 % free),
 `git ls-remote origin` and `gh auth status` (hourly) and the updater's last
-result. It records each check (failing, its key, since when, recovered) in `state/health.json` and pushes nothing:
+result. Hourly it also logs a warn-only `health: warn host.pi.drift` line (never a check, a failure or an escalation) when the host pi is
+above `piCompat.testedMax` for over 7 days with no open `qualify pi <version>` PR. It records each check (failing, its key, since when, recovered) in `state/health.json` and pushes nothing:
 the Overview `health failing` line shows a failure at once, and the parent raises a `service_health` escalation
 for it on the dashboard (`docs/contracts.md` §Escalation, §Web Push).
 

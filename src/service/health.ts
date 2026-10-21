@@ -12,6 +12,8 @@
  *   gh          `gh auth status --hostname github.com` fails (hourly)          → `health: gh credential`
  *   update      `last_result` a failure, or `fetch_failed` 3 times; keyed `result:to` (`drain_timeout:since`, one
  *               key per episode), so a new failure is a new key                 → `health: update failed`
+ *   pi drift    (warn-only, hourly; no record) a host pi above piCompat.testedMax for over 7 days with no `qualify pi <v>` PR
+ *               → one `health: warn host.pi.drift` log line, never a failure
  *   relay       a parent→operator relay unacked 10 min (`state/operator/relay-outbox.json` vs `relay-acks.jsonl`), or an open
  *               escalation 20 min old no ack, discard or open ask accounts for; keyed `relay:<id>` / `escalation:<id>`
  *                                                                               → `health: relay unseen`
@@ -34,6 +36,8 @@ import { daemonPaths } from "./daemon-files.ts";
 import { EscalationStore } from "../escalation.ts";
 import { OPERATOR_RELAY_OUTBOX_CAP, OperatorRelayAcks, OperatorRelayOutbox, oldestUnacked, operatorRelayAcksFile, operatorRelayOutboxFile, pendingRelays } from "../operator-outbox.ts";
 import { OperatorAsks } from "../operator-asks.ts";
+import { classifyPi, readPiCompat } from "../pi-compat.ts";
+import { piDriftFinding, readDriftFacts } from "../pi-qualify.ts";
 
 export const HEALTH_CHECKS = ["parent", "viewer", "supervisor", "disk", "git", "gh", "update", "relay"] as const;
 export type HealthCheck = (typeof HEALTH_CHECKS)[number];
@@ -92,6 +96,8 @@ export interface HealthRunOptions {
 	probes: HealthProbes;
 	now?: () => Date;
 	log?: (line: string) => void;
+	/** Warn-only notes (never a check record or a failure): logged as `warn <note>`. */
+	warn?: () => string | undefined;
 }
 
 /** One watchdog run: probe every check and write `state/health.json`. Nothing is pushed. */
@@ -112,6 +118,8 @@ export async function runHealth(options: HealthRunOptions): Promise<HealthRecord
 		const next = observe(name, record.checks[name], seen, at);
 		if (next) record.checks[name] = next;
 	}
+	const note = options.warn?.();
+	if (note) log(`warn ${note}`);
 	atomicWriteJson(healthFile(options.stateDir), record);
 	return record;
 }
@@ -126,16 +134,18 @@ export interface HostProbeOptions {
 	now?: () => Date;
 }
 
+const spawnRun = (env: NodeJS.ProcessEnv): NonNullable<HostProbeOptions["run"]> => (command, args, timeoutMs) => {
+	const out = spawnSync(command, [...args], { encoding: "utf8", timeout: timeoutMs, env: { ...env, GIT_TERMINAL_PROMPT: "0" } });
+	return { status: out.status ?? 1, stdout: out.stdout ?? "" };
+};
+
 /** The production probes for `home` (multi mode). */
 export function hostProbes(options: HostProbeOptions): HealthProbes {
 	const home = resolve(options.home);
 	const env = options.env ?? process.env;
 	const layout = layoutForHome("multi", home);
 	const stateDir = join(home, layout.state);
-	const run = options.run ?? ((command, args, timeoutMs) => {
-		const out = spawnSync(command, [...args], { encoding: "utf8", timeout: timeoutMs, env: { ...env, GIT_TERMINAL_PROMPT: "0" } });
-		return { status: out.status ?? 1, stdout: out.stdout ?? "" };
-	});
+	const run = options.run ?? spawnRun(env);
 	const fetcher = options.fetch ?? ((url, init) => fetch(url, init));
 	const now = options.now ?? (() => new Date());
 	const midUpdate = (): string | undefined => {
@@ -198,6 +208,19 @@ export function hostProbes(options: HostProbeOptions): HealthProbes {
 		},
 		relay: () => relayObservation(home, stateDir, now()),
 	};
+}
+
+/** Warn-only (never a check record): logs `host.pi.drift` when the host pi has outrun piCompat.testedMax unqualified. */
+export function piDriftWarning(app: string, run: NonNullable<HostProbeOptions["run"]>, now: Date): string | undefined {
+	try {
+		const compat = readPiCompat(app);
+		const version = run("pi", ["--version"], 10_000);
+		const result = classifyPi(compat, { version: version.status === 0 ? version.stdout.trim() : undefined, extension: { ok: true, detail: "" } });
+		if (result.state !== "newer" || !result.version) return undefined;
+		return piDriftFinding(result, compat.testedMax, readDriftFacts(result.version, (command, args) => run(command, args, 20_000)), now)?.what;
+	} catch {
+		return undefined;
+	}
 }
 
 /**
@@ -298,7 +321,7 @@ if (import.meta.main) {
 	const home = resolveHome();
 	configureLayout("multi", home);
 	const layout = layoutForHome("multi", home);
-	runHealth({ stateDir: join(home, layout.state), probes: hostProbes({ home }) }).then(
+	runHealth({ stateDir: join(home, layout.state), probes: hostProbes({ home }), warn: () => (new Date().getMinutes() < 5 ? piDriftWarning(PACKAGE_ROOT, spawnRun(process.env), new Date()) : undefined) }).then(
 		(record) => {
 			console.error(`health: ${healthSummary(record)}`);
 			process.exit(0);
