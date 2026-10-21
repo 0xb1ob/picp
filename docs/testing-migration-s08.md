@@ -4,7 +4,7 @@ Ownership: the remaining behavior-05 files are owned by P3c-rest and re-sliced b
 
 This range covers static `test(...)` declarations 1–40 of `tests/integrate.test.ts`, from the review-window loop to superseded-head CI. Loop expansions are not extra declarations. Later declarations belong to other slices. This is a range delivery: the entire original unit file is intentionally kept intact. No declarations are deleted or moved. The final range slice must reconcile every range, preserve the exceptions, and rerun negative controls against the final state before deleting that file.
 
-The intended disposition is 38 mapped declarations, two retained declarations (8 and 19), zero redundant-unreachable declarations and zero deleted files. The retained share is 5%. A retained declaration can contain mapped consumer checks alongside an injection-only check; its unmatched assertion remains in the original file. The file-level manifest remains `convert`, rather than claiming that this range retires the whole file.
+The disposition is 38 mapped declarations, two retained declarations (8 and 19), zero redundant-unreachable declarations and zero deleted files. The retained share is 5%. A retained declaration can contain mapped consumer checks alongside an injection-only check; its unmatched assertion remains in the original file. The file-level manifest remains `convert`, rather than claiming that this range retires the whole file.
 
 All scenario IDs below resolve to exact names in `docs/testing-migration.md`; all execute through `CommandPost`, the real tool extension, or the bridge extension, with mock-provider workers and scratch git/forge state. Production source is unchanged.
 
