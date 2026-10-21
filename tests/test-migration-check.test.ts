@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { declarationTitles, deletedWithFeatureFindings, featureRemovedFindings } from "../scripts/test-migration-check.ts";
+import { declarationTitles, deletedWithFeatureFindings, featureRemovedFindings, retainedFindings } from "../scripts/test-migration-check.ts";
 
 const exists = (path: string) => path === "src/kept.ts";
 
@@ -14,6 +14,14 @@ test("deleted-with-feature rejects a phase-only owner, no cited module, and a mo
 	assert.match(deletedWithFeatureFindings("tests/x.test.ts", "#12", "feature retired", exists).join("\n"), /names no removed source module/);
 	assert.match(deletedWithFeatureFindings("tests/x.test.ts", "#12", "src/x.ts, src/kept.ts", exists).join("\n"),
 		/cites src\/kept\.ts, which still exists/);
+});
+
+test("retained accepts a note naming a kept test file, and rejects no note, the unit itself or a missing file", () => {
+	const kept = (path: string) => path === "tests/decide.test.ts" || path === "tests/x.test.ts";
+	assert.deepEqual(retainedFindings("tests/x.test.ts", "a", "moved verbatim to `tests/decide.test.ts` (owned by P10)", kept), []);
+	assert.match(retainedFindings("tests/x.test.ts", "a", "", kept).join("\n"), /retained with no note naming where it is kept/);
+	assert.match(retainedFindings("tests/x.test.ts", "a", "kept in tests/x.test.ts", kept).join("\n"), /names no kept test file in the tree \(got none\)/);
+	assert.match(retainedFindings("tests/x.test.ts", "a", "moved to tests/gone.test.ts", kept).join("\n"), /\(got tests\/gone\.test\.ts\)/);
 });
 
 const source = (...titles: string[]) => titles.map((title) => `test(${JSON.stringify(title)}, () => {});`).join("\n");

@@ -410,6 +410,81 @@ test("a reviewer start keeps its pre-rule path under an expired grant: no fleet 
 	assert.throws(() => store.assertPermitted("dispatch", { ...job, jobId: "cp-new" }, held), /expired at .* fresh start/);
 });
 
+// Kept from tests/mandate.test.ts by P3 (P2e review): multi-grant ordering and the rules that still bind an expired
+// grant's continuation. 02-17 pins the single-grant diff/ship decision and the expiry refusals beside them.
+test("an expired grant decides diff and merge for an in-flight job, never a ship; every other rule still binds", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	const all = ["implement", "review", "repair", "merge"] as const;
+	const grant = issueGrant(store, { expiry: earlier(1_000), at: earlier(), ask_on: ["risk:high"], allowed_actions: [...all], spend_cap: { usd: 5, tokens: 100_000 } });
+	store.sweep();
+	const fleet = [{ job_id: "cp-old", project: "demo", phase: "held" }];
+	const subject = (over: Partial<MandateSubject> = {}): MandateSubject => ({ kind: "ship", jobId: "cp-ship1", project: "demo", jobKind: "ship", ...over });
+	const judge = (over: Partial<MandateSubject>, grants = store.list()) =>
+		evaluateAuthority(subject({ jobId: "cp-old", usageJobs: fleet, ...over }), grants);
+
+	for (const kind of ["diff", "merge"] as const) {
+		const verdict = judge({ kind });
+		assert.equal(verdict.permitted && verdict.mandateId, grant.id, `${kind} of an in-flight job continues`);
+		if (verdict.permitted) assert.match(verdict.clause, /expired grant continues in-flight cp-old/);
+	}
+	const ship = judge({ kind: "ship" });
+	assert.equal(!ship.permitted && ship.reason, `${grant.id} has expired`, "a first ship authorization never rides an expired grant");
+	const freshJob = judge({ kind: "diff", jobId: "cp-new" });
+	assert.equal(!freshJob.permitted && freshJob.reason, `${grant.id} has expired`, "no fleet record: not a continuation");
+	assert.equal(judge({ kind: "diff", project: "other" }).permitted, false);
+
+	// Exclusions, risk:high, caps, ask_on merge and allowed actions are unchanged.
+	const high = judge({ kind: "diff", risk: "high" });
+	assert.equal(!high.permitted && /risk:high/.test(high.reason), true);
+	const spent = [{ ...fleet[0]!, usage: { cost_usd: 6, total_tokens: 10 } }];
+	assert.deepEqual(judge({ kind: "merge", usageJobs: spent }), { permitted: false, reason: `${grant.id}: spend cap reached` });
+	const asks = { ...grant, id: "md-aaaaaa", ask_on: ["merge" as const] };
+	assert.deepEqual(judge({ kind: "merge" }, [asks]), { permitted: false, reason: "md-aaaaaa: ask_on includes merge" });
+	const excluded = { ...grant, id: "md-bbbbbb", exclusions: { paths: ["src/secrets"] } };
+	assert.equal(judge({ kind: "diff", pathHints: ["src/secrets/key.ts"] }, [excluded]).permitted, false);
+	const noMerge = { ...grant, id: "md-cccccc", allowed_actions: ["implement" as const, "review" as const] };
+	assert.deepEqual(judge({ kind: "merge" }, [noMerge]), { permitted: false, reason: "md-cccccc has expired" });
+
+	// Any active grant decides; otherwise the latest speaking grant does.
+	const revoked = { ...grant, id: "md-dddddd", status: "revoked" as const, expiry: later() };
+	assert.equal(judge({ kind: "diff" }, [revoked, grant]).permitted, true, "an older revoked grant does not stall the in-flight job");
+	assert.equal(judge({ kind: "diff" }, [grant, revoked]).permitted, false, "a newer revoked grant refuses its review");
+	const paused = { ...grant, id: "md-eeeeee", status: "paused" as const, pause_reason: "spend_cap", expiry: later() };
+	assert.deepEqual(judge({ kind: "diff" }, [grant, paused]), { permitted: false, reason: "md-eeeeee is paused (spend_cap)" });
+	const active = { ...grant, id: "md-ffffff", status: "active" as const, expiry: later(), ask_on: ["merge" as const] };
+	assert.deepEqual(judge({ kind: "merge" }, [grant, active]), { permitted: false, reason: "md-ffffff: ask_on includes merge" });
+	const newer = judge({ kind: "diff" }, [grant, active]);
+	assert.equal(newer.permitted && newer.mandateId, "md-ffffff", "the active grant decides, not the expired one");
+});
+
+test("after expiry: risk:high still gates the continuation; a newer expired grant without repair refuses it; a revoked-only project never refuses dispatch", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const store = new MandateStore(home.path);
+	issueGrant(store, { expiry: earlier(1_000), objective: "done", at: earlier(), spend_cap: { usd: 5, tokens: 100_000 } });
+	store.sweep();
+	const fleet = [{ job_id: "cp-old", project: "demo", kind: "ship" as const, phase: "held" }];
+	const job = (jobId = "cp-old") => ({ jobId, project: "demo", kind: "ship" as const });
+	await assert.rejects(() => store.assertDispatchAllowed({ ...job(), promotion: true, risk: "high" }, fleet), /risk:high under ask_on/);
+
+	// The latest speaking grant decides: a newer expired grant without repair refuses it.
+	const strictHome = createScratchHome();
+	t.after(() => strictHome.cleanup());
+	const strict = new MandateStore(strictHome.path);
+	issueGrant(strict, { expiry: earlier(1_000), at: earlier(), allowed_actions: ["implement", "review"] });
+	assert.throws(() => strict.assertPermitted("repair", job(), fleet), /repair is not an allowed action/);
+	await assert.rejects(() => strict.assertDispatchAllowed({ ...job(), promotion: true }, fleet), /repair is not an allowed action/);
+
+	// A revoked-only project never refuses human dispatch.
+	const otherHome = createScratchHome();
+	t.after(() => otherHome.cleanup());
+	const other = new MandateStore(otherHome.path);
+	other.revoke(issueGrant(other, { objective: "revoked grant" }).id);
+	await other.assertDispatchAllowed({ jobId: "cp-new2", project: "demo", kind: "ship" });
+});
+
 test("without a mandate the same call is refused naming the project", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());

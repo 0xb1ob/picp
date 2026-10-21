@@ -61,6 +61,7 @@ ask-0088e0332d00, 2026-10-21.
 | P2c (cp-e2e-migration-p2c-wtsd) | behavior 02, third slice: keyword risk inference (02-7), mandate defaults and the issue ladder (02-8), and the P2b review's two lows (NC-11; 02-5 raises through `cp_mandate raise_tokens`). The other 9 behavior-02 files move to P2d (8) and P2e (`tests/mandate.test.ts`). | 2 (`tests/risk-negation.test.ts`, `tests/mandate-defaults.test.ts`) | 394 → 392 | 4,415 → 4,393 |
 | P2d (cp-e2e-migration-p2d-k5to) | behavior 02, fourth slice: the risk warning (02-9), risk:high pre-approval (02-10), batch risk:high (02-11), grant selection and supplements (02-12), live mandate usage (02-13) and the gateway's capacity and quota (02-14), and the P2c review's two lows. `tests/mandate.test.ts` stays with P2e. | 8 (`tests/capacity.test.ts`, `tests/mandate-selection.test.ts`, `tests/mandate-supplement.test.ts`, `tests/mandate-usage.test.ts`, `tests/quota.test.ts`, `tests/risk-batch.test.ts`, `tests/risk-preapproval.test.ts`, `tests/risk-warning.test.ts`) | 392 → 384 | 4,393 → 4,346 |
 | P2e (cp-e2e-migration-p2e-fmi5) | behavior 02, last slice: a pipeline's mandate-decided plan checkpoint (02-15), cp_mandate and cp_escalate through a real parent (02-16), and in-flight continuation under expired, revoked, serial and capped grants (02-17); the P2d review's three findings. No behavior-02 file remains; send-first-gate belongs to P4. | 1 (`tests/mandate.test.ts`) | 384 → 383 | 4,346 → 4,295 |
+| P3 (cp-e2e-migration-p3-rhym) | behavior 05, first slice: the Actions CI read behind cp_integrate, the CI watch and `/status` (05-1), the no-CI workflows question (05-2), `/doctor` `ci.<project>` (05-3) and the one infra-only rerun (05-4) in `tests/e2e/landing.test.ts`; the P2e review's three findings. The other 26 behavior-05 files stay `convert`, for P3b (a job the main session creates). | 4 (`tests/actions-ci.test.ts`, `tests/ci-access.test.ts`, `tests/ci-configured.test.ts`, `tests/ci-infra-rerun.test.ts`) | 385 → 382 | 4,300 → 4,287 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -134,6 +135,19 @@ commit; the P2e review moved the other four. `retained` is a new assertion-map s
 assertion still runs as a unit in the file the note names, so it neither pins a scenario nor blocks a deletion. The
 P2d review's findings: 02-15 drives the exclusion row, #321's schedule half is `retained`, and P2d's count is 4,346.
 
+P3 (cp-e2e-migration-p3-rhym) adds `tests/e2e/landing.test.ts` (4 cases, 05-1 to 05-4) and deletes four of behavior
+05's 30 files (30 declarations) under negative controls NC-24 to NC-27, one per scenario. Behavior 05 is about 1 MB of
+unit tests (`tests/integrate.test.ts` alone is 192 KB), far past one reviewable diff, so P3 is a first slice: the CI
+read, its configuration, its doctor probe and its infra rerun. Each case runs a real CommandPost with mock-provider
+implementers that push and report, a scratch remote and a scripted `gh` on PATH; cp_integrate, the CI watch tick,
+`/status` and `/doctor` are the consumers. Ten units are `retained`, moved verbatim: the Actions paths, normalisation,
+budget and status runner plus `ciReadDenied` and the viewer label parity to `tests/actions-ci-policy.test.ts` (an
+exception), the infra classifier table and the guards no landing entry point reaches to `tests/main-ci.test.ts`, and
+the throwing-runner `ghCiConfigured` to `tests/merge-ask.test.ts`. Plan and tree disagree once: the infra rerun's drain
+guard is unreachable from cp_integrate, which reads no CI at all while draining (05-4 pins that); only the main CI
+watch reaches it. It also folds in the P2e review: the expired-grant matrix and the after-expiry sub-asserts are
+`retained` in `tests/decide.test.ts`, and the checker refuses a `retained` row whose note names no kept test file.
+
 ## Conversion PRs
 
 One row per later PR. Its candidate deletion set is every baseline row whose owner is that PR. The checker prints
@@ -150,7 +164,8 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P2c | 02 | `tests/e2e/authority.test.ts` | adds 02-7 and 02-8 |
 | P2d | 02 | `tests/e2e/authority.test.ts` | adds 02-9 to 02-14 |
 | P2e | 02 | `tests/e2e/authority.test.ts` | adds 02-15 to 02-17 |
-| P3 | 05 | `tests/e2e/landing.test.ts` | 6 |
+| P3 | 05 | `tests/e2e/landing.test.ts` | 4 (05-1 to 05-4) |
+| P3b | 05 | `tests/e2e/landing.test.ts` | the rest of the plan's 6 |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -173,6 +188,10 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P23 | 23 | `tests/e2e/memory.test.ts` | 3 |
 | P24 | 24 | `tests/e2e/host-compatibility.test.ts` | 3 |
 <!-- /manifest:prs -->
+
+The plan proposed 6 cases for all of behavior 05. P3 is a first slice of 4 cases over 4 files. P3b
+(cp-e2e-migration-p3b-stth) owns the other 26 behavior-05 files and takes about 250 KB of diff by behavior; a P3c
+follows if files remain.
 
 <!-- census -->
 Census snapshot, printed by the checker on `03ed8749a76085c9938517b6f149bb49ebe7a8fd`; the checker's live output wins over this table.
@@ -267,6 +286,10 @@ moves first.
 | 02-15 | `tests/e2e/authority.test.ts` | authority: a pipeline's plan checkpoint is mandate-decided and journaled; task-text exclusions, gate flags, an unnamed high and a denied project leave it pending |
 | 02-16 | `tests/e2e/authority.test.ts` | authority: cp_mandate through a real parent sets the reviewer model, names this turn's jobs, filters show, refuses every bad issue before writing, and a revoke or expiry closes its asks |
 | 02-17 | `tests/e2e/authority.test.ts` | authority: an expired, revoked, serial or job-capped grant stops fresh starts while its own in-flight workers keep promotion and repair |
+| 05-1 | `tests/e2e/landing.test.ts` | landing: a denied, rate-limited, malformed, partial or capped Actions read never merges and names its cause; a full paged read finds page two's failure |
+| 05-2 | `tests/e2e/landing.test.ts` | landing: only an authoritative empty workflow list is no CI; every unanswered workflows read keeps its own cause and never reads as none |
+| 05-3 | `tests/e2e/landing.test.ts` | landing: /doctor ci.<project> reads workflows, then the newest run and its attempt jobs; a refused read is loud and gh output never echoes |
+| 05-4 | `tests/e2e/landing.test.ts` | landing: an infra-only CI failure is claimed, then rerun once per head; a test failure, a cancel, a second attempt, a drain or an unreadable claim or job list goes to the parent |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -443,8 +466,10 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/mandate.test.ts` | a revoked grant predating dispatch has no standing for review, repair or merge; revocation after dispatch still refuses | 02-17 | mapped | a grant revoked before `before` dispatched is silent and its repair proceeds; one revoked after `after` dispatched refuses the repair ("is revoked … no repair") and its diff decision |
 | `tests/mandate.test.ts` | grantStanding: the complete status x use x in-flight matrix | 02-17 | retained | moved verbatim to `tests/decide.test.ts` (owned by P10): 216 cells; 02-2 and 02-17 drive representative cells through dispatch, cp_send and cp_decide |
 | `tests/mandate.test.ts` | after expiry: in-flight review, repair, same-kind promotion and failed-job continuation go on; fresh dispatch and kind changes never | 02-17 | mapped | after expiry `fresh` and the risk:high `risky` are refused with no risk ask; `old`'s promotion and repair continue; a newer active grant speaks for `fresh`; negative control NC-23. Kind changes and the failed column: the retained matrix |
+| `tests/mandate.test.ts` | after expiry: risk:high still gates the continuation; a newer expired grant without repair refuses it; a revoked-only project never refuses dispatch | 02-17 | retained | moved verbatim by P3 (P2e review) to `tests/decide.test.ts` (owned by P10), test of the same name: no scenario promotes a risk:high job under an expired grant, stacks two expired grants, or dispatches beside only a revoked grant |
 | `tests/mandate.test.ts` | a reviewer start keeps its pre-rule path under an expired grant: no fleet record, review not allowed, cap reached all pass; paused and revoked still refuse | 02-17 | retained | moved verbatim to `tests/decide.test.ts` (owned by P10): a cp_review start needs a pushed PR head no authority scenario has; 02-17 pins the expired grant's repair and diff decision |
-| `tests/mandate.test.ts` | an expired grant decides diff and merge for an in-flight job, never a ship; every other rule still binds | 02-17 | mapped | cp_decide approves `old`'s diff under the expired grant ("expired grant continues in-flight") and refuses its ship "has expired"; merge and the other rules: the retained matrix |
+| `tests/mandate.test.ts` | an expired grant decides diff and merge for an in-flight job, never a ship; every other rule still binds | 02-17 | mapped | cp_decide approves `old`'s diff under the expired grant ("expired grant continues in-flight") and refuses its ship "has expired"; 02-17 fails on either if the expiry rule is reverted. Merge and the other rules: the retained row below |
+| `tests/mandate.test.ts` | an expired grant decides diff and merge for an in-flight job: merge, risk:high, caps, ask_on merge, exclusions, allowed actions and multi-grant ordering | 02-17 | retained | moved verbatim by P3 (P2e review) to `tests/decide.test.ts` (owned by P10), test "an expired grant decides diff and merge for an in-flight job, never a ship; every other rule still binds": no scenario stacks grants on an expired continuation |
 | `tests/mandate.test.ts` | a project-wide grant covers follow-on jobs in the project; explicit job_ids still narrow it | 02-1 | mapped | a scoped grant speaks only for the jobs it names; an unnamed job takes the project-wide grant (02-12) |
 | `tests/mandate.test.ts` | cp_escalate caps option text and preserves the original consequence | 02-16 | mapped | a 300-character consequence is stored as 200 ending "…", the original kept, and the result names "trimmed fields: options[0].consequence" |
 | `tests/mandate.test.ts` | cp_mandate objective ref is verified into a job but never pins the grant; explicit job_ids and sentinel still narrow | 02-16 | mapped | "fix issue #17" mints a job noted 'issue open "real bug"' and the grant has no job_ids; the sentinel grant keeps its ids |
@@ -472,6 +497,36 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/mandate.test.ts` | resolveMandateObjectiveRef: PR prose never calls verifyRef, creates nothing, raises nothing | 02-16 | mapped | thirteen prose objectives leave gh's log, the ledger and the open asks unchanged |
 | `tests/mandate.test.ts` | schedlater S3: covers matrix — a schedule grant covers only its own schedule's jobs, any other grant no scheduled job | 02-12 | mapped | schedule-only grants leave the project-wide grant selected; a scheduled job speaks only through its schedule's grant |
 | `tests/mandate.test.ts` | S3 (T3.1): issue takes a code-only id and schedule_fire; a taken or unsafe id is refused; cp_mandate exposes neither | 02-16 | redundant-unreachable | no caller passes an id or schedule_fire: no fire mints a grant (`tests/schedule-grant.test.ts`, "PR4: no fire mints a grant"), and cp_mandate has no such parameter. 02-16 pins cp_mandate issue minting its own md- id. Standing rule 3 (ask-0088e0332d00) |
+| `tests/actions-ci.test.ts` | paths: exact head, explicit repo or gh placeholders, attempt-bound jobs; malformed ids refused | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): cp_integrate hands the read a validated 40-hex head and a job-id branch, so no entry point feeds it a malformed id. 05-1 pins the exact head, gh's placeholders and the attempt-bound, paged jobs path ("the exact head, gh's placeholders") |
+| `tests/actions-ci.test.ts` | readActionsCi: normalizes runs with identity, event, actor and their attempt's jobs and steps | 05-4 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): event and triggering actor feed only main CI's own-run counting, which no landing case drives. 05-4 pins the attempt-2 jobs path ("the run's own attempt") |
+| `tests/actions-ci.test.ts` | readActionsCi: zero runs is an observation; two runs with one workflow name both survive | 05-1 | mapped | 05-1's 101 runs all share the workflow name `ci`; collapsing them by name loses run 101 and "ci: failed … (run 101 …)" fails. Zero runs: 05-2 asks for workflows only after an empty runs read |
+| `tests/actions-ci.test.ts` | readActionsCi: a null run status is unfinished, never success | 05-1 | mapped | a null-status run on the head: `doesNotMatch(/ci: green/)` fails if null reads as success |
+| `tests/actions-ci.test.ts` | pagination: runs and jobs pages are followed to the short page; a boundary duplicate counts once | 05-1 | mapped | two runs pages with the boundary run repeated, and run 1's 101 jobs: stopping at page one fails "ci: failed … (run 101 …)", counting the duplicate twice fails it as incomplete |
+| `tests/actions-ci.test.ts` | fail closed: a short read, conflicting duplicate, page cap or API ceiling is incomplete, never a subset | 05-1 | mapped | each case asserts `next: retry` and its own "read incomplete" cause; a subset taken as complete fails `next: retry` |
+| `tests/actions-ci.test.ts` | fail closed: malformed bodies, missing identity and a mixed head are malformed | 05-1 | mapped | the seven runs bodies each assert `read malformed` and `next: retry`; skipping the bad row fails `next: retry` |
+| `tests/actions-ci.test.ts` | parseJobsPage: a job from another run, attempt or head is malformed | 05-1 | mapped | the three job pages assert "not of the run", "not of attempt 1" and "requested head"; accepting the foreign job fails `next: retry`. The upper-case head: a run whose `head_sha` gh returns in upper case asserts "ci: green"; a case-sensitive compare reads it as a mixed head and fails it (run by hand) |
+| `tests/actions-ci.test.ts` | jobs read failure fails the whole observation: no run-only green | 05-1 | mapped | a jobs 502, 404 or rate limit beside a green run asserts `next: retry`; a run-only green fails it |
+| `tests/actions-ci.test.ts` | errors: denial stays classifiable as unreadable CI; rate limit does not; raw output never carried | 05-1 | mapped | the runs 403 asserts the Actions-only label after one call, the rate limit asserts no label, and no record carries `canary`; each fails if its rule is dropped |
+| `tests/actions-ci.test.ts` | retry: a truncated body recovers on retry; a persisting one is one malformed fault with status and preview | 05-1 | mapped | "ci: green" after exactly two runs calls fails without the retry; the HTML 200 asserts "not JSON; gh exit 0; body … [redacted] …; 3 attempts" |
+| `tests/actions-ci.test.ts` | retry: an HTML 403 is a transport fault with its status and body, never a token denial; JSON 403 is denied | 05-1 | mapped | NC-24: the HTML 403 reads as denied and its `read transport … status 403` match fails |
+| `tests/actions-ci.test.ts` | retry: never past the budget, and a structurally wrong JSON page is not retried | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): the budget half needs an injected clock no entry point exposes. 05-1 pins the other half: "no total_count" asserts one runs call |
+| `tests/actions-ci.test.ts` | budget: one total deadline across pages, each request gets only what remains | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): the 15 s deadline and each request's remaining budget need an injected clock no entry point exposes |
+| `tests/actions-ci.test.ts` | readActionsJobs: one attempt's jobs, all pages, through the same validation | 05-4 | mapped | the rerun's own jobs read: a denied, short, empty or unparseable listing asserts "run 41 jobs unreadable" and no rerun or claim; skipping the validation reruns and fails `[reruns(), claims()]` |
+| `tests/actions-ci.test.ts` | statusRunner: forwards each request's remaining budget as timeoutMs; a non-zero status throws | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): the per-request timeout reaches no consumer. 05-1 pins a non-zero gh exit as a failed read (`next: retry`) |
+| `tests/ci-access.test.ts` | ciReadDenied: only a permission refusal of a CI read counts | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): check-runs and commit-status paths are never read (that file's own rule), and the PR-read and `gh run` forms no longer reach it. 05-1 pins the Actions denial and a rate limit that is not one |
+| `tests/ci-access.test.ts` | the browser mirrors the backend's Actions-only label and advice, keeping its needs prefix | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): source parity with `viewer-app/components/JobSignals.tsx`, which no case renders. 05-1 pins the label and advice in cp_integrate's reason |
+| `tests/ci-access.test.ts` | a held job whose CI read was refused names the token as its wait reason, before any head is known | 05-1 | mapped | after the CI watch tick writes `last_ci: unreadable`, the `/status` table's "waiting on: CI unreadable (token)" fails without the unreadable branch in `waitReason` |
+| `tests/ci-access.test.ts` | doctor ci.<project>: workflows, then the newest run and its attempt jobs; each outcome is distinct and gh output is never echoed | 05-3 | mapped | the exact gh call sequence (`o/denied` registered as an https `.git` URL, `o/bare` as an ssh URL), each project's severity and text, and no `sentinel-credential-value` in the report; a denied jobs read read as unknown fails the `locked` row. No gh on PATH: a second `/doctor` asserts no `ci.*` finding ("no gh: host.gh says so"); dropping the ENOENT check fails it (run by hand) |
+| `tests/ci-access.test.ts` | doctor ci.<project>: a jobs list shorter than its total_count is unknown, never readable | 05-3 | mapped | NC-26: `o/short` reads ok and its [warn, "the Actions read failed (incomplete)"] assertion fails |
+| `tests/ci-configured.test.ts` | only an authoritative empty workflow list is 'no CI configured' | 05-2 | mapped | the empty list asserts `none (authoritative_empty)`, "reports 0 Actions workflows" and the permission read; reading it as unreadable fails `permission: permitted` |
+| `tests/ci-configured.test.ts` | a repository that has workflows is 'present', however few runs it has produced | 05-2 | mapped | one workflow with no runs asserts "present (workflows_present) — the repository has 1 Actions workflow(s)" and the human checkpoint |
+| `tests/ci-configured.test.ts` | every way of not getting an answer is unreadable, and each is its own cause | 05-2 | mapped | NC-25: the truncated page reads `none` and its `[step, next]` = `[authorize, surface]` fails; the other nine assert their own cause |
+| `tests/ci-configured.test.ts` | the workflows question is one gh call, with gh's own owner/repo placeholders | 05-2 | mapped | every advance asserts exactly one `api repos/{owner}/{repo}/actions/workflows` |
+| `tests/ci-configured.test.ts` | ghCiConfigured maps a throwing runner onto the same rule, 403 included | 05-2 | retained | moved verbatim to `tests/merge-ask.test.ts` (P3b): the throwing runner is the merge-ask awaiting row's `ciConfigured`, which no landing case renders. 05-2 pins the same rule, 403 included, through cp_integrate's status runner |
+| `tests/ci-infra-rerun.test.ts` | classifyInfraFailure: setup steps are infra; the suite and a cancel are not | 05-4 | retained | moved verbatim to `tests/main-ci.test.ts` (P3b): 05-4 drives Install treehouse and Checkout as infra, and the suite, eval, cancelled, timed-out, build-tool, mixed and step-less jobs as not; Set up job, Set up Node and Install dependencies would each need a fresh job, so the fixture table stays |
+| `tests/ci-infra-rerun.test.ts` | an infra-only failure is claimed first, then rerun once; the same job+head never again | 05-4 | mapped | the claim is on disk when `gh run rerun` runs ("the claim was on disk before gh run rerun ran"), then "was spent at" and no second rerun; claiming after the rerun fails the first |
+| `tests/ci-infra-rerun.test.ts` | attempt 2, a test failure, a cancel, no run id, a green head and a drain all leave it to the parent | 05-4 | retained | moved verbatim to `tests/main-ci.test.ts` (P3b): a green head or an id-less run never reaches the rerun (cp_integrate calls it only on failed CI, and 05-1 refuses an id-less run as malformed), and only the main CI watch reaches the drain guard, since cp_integrate reads no CI while draining (05-4: "ci: not read — the parent is draining"). 05-4 pins attempt 2 (NC-27), the test failure, the cancel and the timeout |
+| `tests/ci-infra-rerun.test.ts` | fail closed: an unreadable claim file or jobs listing reruns nothing; a refused rerun keeps its claim | 05-4 | mapped | the corrupt claim file asserts "unparseable"; the denied, short, empty and unparseable listings assert "run 41 jobs unreadable" with no rerun or claim; gh's refusal asserts "claimed … but gh refused" and one claim, then "was spent at" |
 <!-- /manifest:assertions -->
 
 ## Negative controls
@@ -511,6 +566,10 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-21 | `tests/mandate.test.ts` | 9cba8aa2fe960ac975cd7266e6bc79ffb57d97f0 | 02-15 | NC-21-denied-project | 066c4517d1bbb7a4108205f50dc3d2ac52584324ec11bd40fd61dbaae36729ee | a denied project's plan checkpoint is auto-decided, so the implementer's preflight refuses "project_denied" | pass |
 | NC-22 | `tests/mandate.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-16 | NC-22-this-turn-jobs | 9e9711d04c7bea1a95154480de37a9d12f3376c3ce215219e35d9df5a21db086 | the sentinel grant names only the last job created this turn | pass |
 | NC-23 | `tests/mandate.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-17 | NC-23-expired-repair | e9c69c9bfa7ed2457df70ccb635fc085a15259a9a43611c6865241e17a4d112c | an expired grant refuses its in-flight job's repair: "no first authorization under it" | pass |
+| NC-24 | `tests/actions-ci.test.ts` | 2404bb71d2c653c78cb751879d269948be1ffb59 | 05-1 | NC-24-html-403 | e72132413fc99cd02b4f925f8b2c27cb86970f5fd3a97564948945fed2d947d4 | an HTML 403 proxy page reads as the token's denial, not `read transport … status 403` | pass |
+| NC-25 | `tests/ci-configured.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-2 | NC-25-truncated-empty | 9136f6c7b38762eb24ae90db95957b08018ad14b9ce7ec99a8b64d04f10627ab | a truncated workflows page (total_count 3, no rows) reads `none (authoritative_empty)` | pass |
+| NC-26 | `tests/ci-access.test.ts` | 3701ebcf12e77e5f3bac90c498efdd56f0016c19 | 05-3 | NC-26-short-jobs | 8af5a117fa4f3344232b10a82f44e378f4c55de8632e1902025ec529063c119f | `ci.short` with 1 of 4 jobs reads ok "CI readable", expected warn "the Actions read failed (incomplete)" | pass |
+| NC-27 | `tests/ci-infra-rerun.test.ts` | 5e1dcaee597b7fb7deb4cbc4a538e104fff214b8 | 05-4 | NC-27-second-attempt | f21876229231409f51b2134f511e2234233fe8acbf75a5f5ae64b03435dcf960 | an infra failure on attempt 2 is rerun, not "a second failure is the parent's" | pass |
 <!-- /manifest:regressions -->
 
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:
@@ -1024,6 +1083,102 @@ NC-23 takes repair off an expired grant's in-flight continuations:
 ℹ fail 1
 ```
 
+NC-24 reads any 403 or 404 as the token's denial, HTML proxy pages included (P3; fixed run: 4 pass, 0 fail):
+
+<!-- patch:NC-24-html-403 -->
+```diff
+--- a/src/actions-ci.ts
++++ b/src/actions-ci.ts
+@@ -260,7 +260,7 @@ async function attempt(options: ActionsReadOptions, endpoint: string, timeoutMs:
+ 		if (/rate limit/i.test(message)) return { fault: new ActionsCiError("rate_limited", endpoint), retry: false };
+ 		// GitHub's own denials are JSON; an HTML 403/404 is a proxy or abuse page, not the token's answer.
+ 		const html = body.trim() !== "" && !isJson(body);
+-		if ((code === "403" || code === "404") && !html) return { fault: new ActionsCiError("denied", endpoint, `HTTP ${code}`), retry: false };
++		if (code === "403" || code === "404") return { fault: new ActionsCiError("denied", endpoint, `HTTP ${code}`), retry: false };
+ 		// "status", not "HTTP": src/ci-access.ts reads any "HTTP 403" as the token's denial.
+ 		return { fault: new ActionsCiError("transport", endpoint, evidence(code ? `status ${code}` : "no HTTP status", body)), retry: true };
+ 	}
+```
+
+```
+✖ landing: a denied, rate-limited, malformed, partial or capped Actions read never merges and names its cause; a full paged read finds page two's failure
+  AssertionError [ERR_ASSERTION]: HTML 403: gh: https://github.com/example/demo/pull/81 is OPEN at …
+ℹ pass 3
+ℹ fail 1
+```
+
+NC-25 takes an empty first workflows page as no CI, whatever total_count says:
+
+<!-- patch:NC-25-truncated-empty -->
+```diff
+--- a/src/ci-configured.ts
++++ b/src/ci-configured.ts
+@@ -152,7 +152,7 @@ export function readCiConfigured(result: { status: number | null; stdout: string
+ 	}
+ 	// Both fields must agree on zero. A truncated page (`total_count: 3` with an
+ 	// empty first page) is not an authoritative empty list.
+-	if (total === 0 && workflows.length === 0) {
++	if (workflows.length === 0) {
+ 		return {
+ 			state: "none",
+ 			cause: "authoritative_empty",
+```
+
+```
+✖ landing: only an authoritative empty workflow list is no CI; every unanswered workflows read keeps its own cause and never reads as none
+  AssertionError [ERR_ASSERTION]: a truncated page: ci configuration: none (authoritative_empty) — …
+ℹ pass 3
+ℹ fail 1
+```
+
+NC-26 lets the doctor's jobs probe call a short jobs list readable:
+
+<!-- patch:NC-26-short-jobs -->
+```diff
+--- a/src/ci-access-doctor.ts
++++ b/src/ci-access-doctor.ts
+@@ -36,7 +36,7 @@ function probeLatestRun(run: Run, home: string, repo: string): Failed | { runs:
+ 			if (!("stdout" in answer)) return answer;
+ 			const parsed = parseJobsPage(answer.stdout, { runId: latest.databaseId, attempt: latest.attempt, sha: latest.headSha }, endpoint);
+ 			jobs += parsed.items.length;
+-			if (parsed.items.length < ACTIONS_PER_PAGE) return jobs === parsed.total ? { jobs } : { failed: "unknown", cause: "incomplete" };
++			if (parsed.items.length < ACTIONS_PER_PAGE) return { jobs };
+ 		}
+ 		return { failed: "unknown", cause: "incomplete" };
+ 	} catch (error) {
+```
+
+```
+✖ landing: /doctor ci.<project> reads workflows, then the newest run and its attempt jobs; a refused read is loud and gh output never echoes
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal: [ 'ok', 'CI readable for o/short (2 workflow(s); latest run and its 1 job(s) read)' ]
+ℹ pass 3
+ℹ fail 1
+```
+
+NC-27 drops the attempt-2 guard, so a second infra failure is rerun again:
+
+<!-- patch:NC-27-second-attempt -->
+```diff
+--- a/src/ci-infra-rerun.ts
++++ b/src/ci-infra-rerun.ts
+@@ -138,7 +138,7 @@ export async function maybeRerunInfra(input: InfraRerunInput & InfraRerunPorts):
+ 	const unidentified = failed.find((run) => run.databaseId === undefined || run.attempt === undefined);
+ 	if (unidentified) return skip("a failed run has no id or attempt to rerun by");
+ 	const repeated = failed.find((run) => (run.attempt ?? 0) >= 2);
+-	if (repeated) return skip(`run ${repeated.databaseId} is on attempt ${repeated.attempt}: a second failure is the parent's`);
++	if (repeated && false) return skip(`run ${repeated.databaseId} is on attempt ${repeated.attempt}: a second failure is the parent's`);
+ 	let claimed: CiRerunEntry | undefined;
+ 	try {
+ 		claimed = input.store.claimed(input.jobId, input.head);
+```
+
+```
+✖ landing: an infra-only CI failure is claimed, then rerun once per head; a test failure, a cancel, a second attempt, a drain or an unreadable claim or job list goes to the parent
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /run 41 is on attempt 2: a second failure is the parent's/
+ℹ pass 3
+ℹ fail 1
+```
+
 ## Incoming
 
 Test files added after the baseline, with the PR that owns them.
@@ -1038,6 +1193,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/test-migration-check.test.ts` | #379 | exception (verification integrity, like `tests/test-file-guard.test.ts`; operator ask-0088e0332d00 (Exceptions)): tests `scripts/test-migration-check.ts` itself, which no product entry point reaches, so it has no e2e consumer path; covers accept and reject paths of `deleted-with-feature` and `feature-removed` |
 | `tests/retired-integration-guard.test.ts` | #392 | exception (verification integrity, like `tests/test-migration-check.test.ts`): tests `scripts/check-retired-integration.ts` itself, a CI guard no product entry point reaches, so it has no e2e consumer path; covers the clean tree and every rejection path |
 | `tests/e2e/viewer-endpoints-speed.test.ts` | #395 | e2e landed on main after the baseline (viewer dashboard endpoint caching); recorded by P2e so the check stays at 0 findings, disposition left to its behavior's PR |
+| `tests/e2e/landing.test.ts` | P3 | behavior 05, scenarios 05-1 to 05-4 |
 | `tests/e2e/installer.test.ts` | #375 | installer sandbox: real bootstrap/cp-install/cp-daemon/doctor in Docker with the mock provider; opt-in `CP_INSTALL_E2E=1` (CI's install sandbox job) |
 <!-- /manifest:incoming -->
 
@@ -1096,7 +1252,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | File | Disposition | Owner | Evidence |
 |---|---|---|---|
 | `tests/actions-ci-policy.test.ts` | exception | P1 | contract: disallowed forge read surface; operator ask-0088e0332d00 (Exceptions) |
-| `tests/actions-ci.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/actions-ci.test.ts` | deleted | P3 | 16 declarations: scenarios 05-1 and 05-4 (Assertion map); five units retained in `tests/actions-ci-policy.test.ts`; NC-24 |
 | `tests/after-merge.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/answer-card.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/answer-delivery.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
@@ -1122,11 +1278,11 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/budgets.test.ts` | deleted | P2 | 6 assertions mapped to 02-4; negative control NC-04 |
 | `tests/capacity.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-14 or redundant-unreachable (Assertion map); negative control NC-19 |
 | `tests/checkpoint-root.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
-| `tests/ci-access.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
-| `tests/ci-configured.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/ci-access.test.ts` | deleted | P3 | 5 declarations: scenarios 05-1 and 05-3 (Assertion map); two units retained in `tests/actions-ci-policy.test.ts`; NC-26 |
+| `tests/ci-configured.test.ts` | deleted | P3 | 5 declarations: scenario 05-2 (Assertion map); one unit retained in `tests/merge-ask.test.ts`; NC-25 |
 | `tests/ci-evidence.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/ci-host-tools.test.ts` | exception | P1 | guard: CI never silently skips treehouse acceptance; operator ask-0088e0332d00 (Exceptions) |
-| `tests/ci-infra-rerun.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/ci-infra-rerun.test.ts` | deleted | P3 | 4 declarations: scenario 05-4 (Assertion map); two units retained in `tests/main-ci.test.ts`; NC-27 |
 | `tests/ci-run-ref.test.ts` | deleted | P0 | 10 assertions mapped, 4 redundant-unreachable; negative controls NC-01..NC-03 |
 | `tests/ci-wait.test.ts` | exception | P1 | contract: worker report-and-stop policy and guard; operator ask-0088e0332d00 (Exceptions) |
 | `tests/ci-watch.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
