@@ -63,6 +63,7 @@ ask-0088e0332d00, 2026-10-21.
 | P2e (cp-e2e-migration-p2e-fmi5) | behavior 02, last slice: a pipeline's mandate-decided plan checkpoint (02-15), cp_mandate and cp_escalate through a real parent (02-16), and in-flight continuation under expired, revoked, serial and capped grants (02-17); the P2d review's three findings. No behavior-02 file remains; send-first-gate belongs to P4. | 1 (`tests/mandate.test.ts`) | 384 → 383 | 4,346 → 4,295 |
 | P3 (cp-e2e-migration-p3-rhym) | behavior 05, first slice: the Actions CI read behind cp_integrate, the CI watch and `/status` (05-1), the no-CI workflows question (05-2), `/doctor` `ci.<project>` (05-3) and the one infra-only rerun (05-4) in `tests/e2e/landing.test.ts`; the P2e review's three findings. The other 26 behavior-05 files stay `convert`, for P3b (a job the main session creates). | 4 (`tests/actions-ci.test.ts`, `tests/ci-access.test.ts`, `tests/ci-configured.test.ts`, `tests/ci-infra-rerun.test.ts`) | 385 → 382 | 4,300 → 4,287 |
 | P3b (cp-e2e-migration-p3b-stth) | behavior 05, second slice: merge receipts and landing proof in `tests/e2e/landing.test.ts`: cp_merged through `gh` with the after-merge deploy job (05-5), cp_merged against a local https GitLab (05-6), and cp_teardown's git-only landing proof (05-7). The other 23 behavior-05 files stay `convert` (owner P3), for P3c (a job the main session cuts). | 3 (`tests/after-merge.test.ts`, `tests/landing-proof.test.ts`, `tests/merges.test.ts`) | 382 → 379 | 4,287 → 4,272 |
+| P3c (cp-e2e-migration-p3c-l5fc; in progress) | behavior 05, CI-watch slice only: `ci-watch`, `main-ci`, `foreign-ci-watch`, `parked-ci`, `ci-evidence`, `integrate-held-ci`, `awaiting-merge-tick`. Six new real-entry scenarios 05-8 through 05-13; deletion mapping is still in progress. The other 16 files belong to P3d, cut by the main session. | 0 so far | 379 → 379 | 4,272 → 4,278 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -309,6 +310,12 @@ moves first.
 | 05-5 | `tests/e2e/landing.test.ts` | landing: cp_merged records only a merge gh observed for this job's branch, marks its PR merged once, and an opted-in deploy branch gets one blocked ops:deploy job |
 | 05-6 | `tests/e2e/landing.test.ts` | landing: cp_merged reads a GitLab MR only from the project's own GitLab with its token; a squash, or a fast-forward git sees on the target, is recorded and anything else records nothing |
 | 05-7 | `tests/e2e/landing.test.ts` | landing: cp_teardown passes a deleted branch as landed_by_git when origin's base holds its content (merge, squash, rebase, a later edit, literal odd paths) and keeps the lease when it does not |
+| 05-8 | `tests/e2e/landing.test.ts` | landing: CI watch persists arrival and attempt identity, follows pushed heads and prunes finished deliveries |
+| 05-9 | `tests/e2e/landing.test.ts` | landing: operator-forwarded CI requires a quoted current head and never substitutes for native CI |
+| 05-10 | `tests/e2e/landing.test.ts` | landing: foreign CI stays read-only, follows the base repo's current head and stops after merge |
+| 05-11 | `tests/e2e/landing.test.ts` | landing: a real parent's timer latches only its mandated main runs and clears only current-tip green |
+| 05-12 | `tests/e2e/landing.test.ts` | landing: parked PR timer stores native CI for each observed head without reviving its released worker |
+| 05-13 | `tests/e2e/landing.test.ts` | landing: held CI repairs the same real worker once while preserving an integration hold |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -570,7 +577,36 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/merges.test.ts` | forge PR 2: a stored receipt for another job or branch is refused, and a crash before the fleet patch is repaired | 05-6 | mapped | the PR receipt patched back to `open` asserts `recorded: false`, `receipt_status_updated: true`, `merged` and one event; the branch patched to `cp-other` asserts "discharges nothing here" |
 | `tests/merges.test.ts` | forge PR 2: a mismatched observation records nothing, and a legacy receipt with no forge block still reads | 05-6 | mapped | MR 8 answering another project's `web_url` asserts "(mismatch: " and no receipt, without the token in the message; 05-5 rewrites its receipt without the forge block and asserts it still reads its head |
 | `tests/merges.test.ts` | #326: afterRecorded runs on new and existing receipts; a throwing port leaves the receipt and names the failure | 05-5 | retained | moved verbatim to `tests/forge-observers.test.ts` (P3b): the throwing port needs a ledger that refuses (see the after-merge ledger refusal). 05-5 pins the port on new and existing receipts and the quiet result with no opt-in |
+| `tests/ci-watch.test.ts` | rerunwake-12z: a re-run that fails again on the same head wakes again | 05-8 | mapped | the second attempt must emit `ci_failed` under a different key; replacing actual attempts with `.1` fails `a new attempt is a new failure even on the same head` (P3c control 05-8) |
+| `tests/ci-watch.test.ts` | rerunwake-12z: a green re-run after a red attempt wakes | 05-8 | mapped | the third attempt emits `ci_green` after confirmed red; the scenario's attempt-identity control fails before that transition if attempt changes are deduplicated |
+| `tests/ci-watch.test.ts` | rerunwake-12z: the same completed attempt polled twice wakes once | 05-8 | mapped | the confirmed red attempt emits no second observation; the distinct-attempt assertion fails under the P3c attempt-identity mutation |
+| `tests/ci-watch.test.ts` | two ticks with identical facts and an observed arrival wake once | 05-8 | mapped | the scenario asserts `an arrived attempt is not announced again`; the same case rejects attempt-insensitive keys through its distinct-attempt assertion |
+| `tests/ci-watch.test.ts` | confirming the same key twice is a no-op | 05-8 | mapped | `confirmCi` returns the key once and then `[]` (`arrival is idempotent`); the same scenario fails on the attempt-identity mutation |
+| `tests/ci-evidence.test.ts` | cp_integrate record_ci: needs a verbatim operator quote and the job's current head; stores display-only evidence | 05-9 | mapped | actual parent tool results reject a fabricated quote and superseded head, then persist source `forwarded`, quote and head; disabling the current-head guard fails `/superseded head/` (P3c control 05-9). The original unknown-head assertion remains in the source file pending its replacement |
+| `tests/foreign-ci-watch.test.ts` | a moved head gives head_moved once, then CI is re-derived for the new head | 05-10 | mapped | the watch emits `head_moved`, then `ci_failed` for the new head; disabling fresh-head comparison fails the dispatch assertion `/PR head is now/` (P3c control 05-10) |
+| `tests/main-ci.test.ts` | row 5: stale green on an old sha never clears the latch | 05-11 | mapped | the real extension timer re-reads the current tip and keeps the latch byte-identical when the only green run is on another sha; counting other actors and dynamic runs fails `own current-tip green clears latch` (P3c control 05-11) |
+| `tests/main-ci.test.ts` | cp-oc0m: a dynamic run (Dependabot Updates) never latches and never blocks a green clear | 05-11 | mapped | own green clears despite a dynamic red on the same tip; dropping actor/event filtering leaves the red row and fails `own current-tip green clears latch` (P3c control 05-11) |
+| `tests/parked-ci.test.ts` | parked CI: head A green, then the moved head B pending, then red — each stored for its own head, journaled once | 05-12 | mapped | the real parked timer must store A green, B pending, B red and a denied next head as unreadable without reviving the worker; removing its native-CI wiring fails `parked green through extension timer` (P3c control 05-12). Exact reread and journal counts remain in the original until separately pinned |
+| `tests/integrate-held-ci.test.ts` | startup repair and restart preserve the cumulative allowance after repaired green and failing reports | 05-13 | mapped | one real worker repairs and re-reports; green keeps the hold and allowance, and a second red surfaces. Zeroing the cumulative count fails `a second red result exhausts the repair allowance` (`resolve` versus `surface`, P3c control 05-13). Explicit restart assertions remain protected by the source unit |
 <!-- /manifest:assertions -->
+
+### P3c CI-watch negative controls
+
+Each command uses `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing.test.ts`.
+Only the stated semantic mutation was present during its failing run; it was restored immediately afterward.
+The fixed file passed all 13 cases without skips before these controls. No production mutation is committed.
+
+| Scenario | Pattern | Semantic mutation | Observed failing assertion |
+|---|---|---|---|
+| 05-8 | CI watch persists arrival | `src/ci-watch.ts`: completed-run identity uses `${run.databaseId}.1` instead of the actual attempt | `a new attempt is a new failure even on the same head`: actual `undefined`, expected truthy |
+| 05-9 | operator-forwarded CI | `src/ci-evidence.ts`: disable the current-head mismatch guard | `/superseded head/` fails: tool records forwarded success on `bbbbbbbbbbbb` instead |
+| 05-10 | foreign CI stays | `src/foreign-ci-watch.ts`: release any completed entry without comparing the freshly read PR head | `/PR head is now/` fails: dispatch gets past the foreign-CI gate and reaches model selection (`no usable model for planner`) |
+| 05-11 | real parent's timer | `src/main-ci.ts`: count all runs without actor or dynamic-event filtering | `own current-tip green clears latch` times out with the red row still present |
+| 05-12 | parked PR timer | `src/awaiting-merge.ts`: remove the parked watch's `observeCi` wiring | `parked green through extension timer` times out with no CI row |
+| 05-13 | held CI repairs | `src/integrate.ts`: set cumulative prior repair count to zero | `a second red result exhausts the repair allowance`: actual `resolve`, expected `surface` |
+
+These scenario controls are not blanket permission to delete the seven original files. Assertions outside the
+new scenarios remain protected by the originals until their explicit mapping or verbatim retention is recorded.
 
 ## Negative controls
 
