@@ -590,6 +590,16 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/integrate-held-ci.test.ts` | startup repair and restart preserve the cumulative allowance after repaired green and failing reports | 05-13 | mapped | one real worker repairs and re-reports; green keeps the hold and allowance, and a second red surfaces. Zeroing the cumulative count fails `a second red result exhausts the repair allowance` (`resolve` versus `surface`, P3c control 05-13). Explicit restart assertions remain protected by the source unit |
 <!-- /manifest:assertions -->
 
+<!-- patch:NC-32-attempt-identity -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -322,1 +322,1 @@
+-		.map((run) => `${run.databaseId}.${run.attempt ?? 1}`)
++		.map((run) => `${run.databaseId}.1`)
+```
+
 ### P3c CI-watch negative controls
 
 Each command uses `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing.test.ts`.
@@ -653,6 +663,7 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-29 | `tests/merges.test.ts` | 3a27fd9a3c099512e779b3cf36e670efa71c7587 | 05-6 | NC-29-unseen-ff | d1140a88d18614739af2d16a773504d4784ed99314da8cd54762c08e060c9b4d | a fast-forward MR whose head origin's main lacks is recorded: "Missing expected rejection" | pass |
 | NC-30 | `tests/landing-proof.test.ts` | 3a27fd9a3c099512e779b3cf36e670efa71c7587 | 05-7 | NC-30-glob-paths | a7c56cdf50d4977e9ffaa5bace6e4d3cead67e685514bea31ae8a86046cba079 | the odd-paths job keeps its lease as `unpushed`, expected `landed_by_git` with `path_tree` | pass |
 | NC-31 | `tests/after-merge.test.ts` | 8532dda3b36d59141ef007d6996595ff2f825cbc | 05-5 | NC-31-pre-opt-in | bbd4b95f011b7fc8b6d9eea04c66a1ce7c3d169f9a7cd34abe807a103d40aa12 | a merge from before the opt-in creates a deploy job: "before opt-in" fails | pass |
+| NC-32 | `tests/ci-watch.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-8 | NC-32-attempt-identity | 31b8070cb5bf5755fe50f02b99ec4d0c69af3829ff01b31d1ab3dc1df4807bd8 | `a new attempt is a new failure even on the same head`: actual undefined, expected truthy | pass |
 <!-- /manifest:regressions -->
 
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:

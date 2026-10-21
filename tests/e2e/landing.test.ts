@@ -1022,11 +1022,14 @@ test("landing: CI watch persists arrival and attempt identity, follows pushed he
 	assert.deepEqual(s.post.confirmCi([failed.key]), [failed.key]);
 	assert.deepEqual(s.post.confirmCi([failed.key]), [], "arrival is idempotent");
 	assert.deepEqual((await observe([run(101, live.head, "completed", "failure")])).observations, [], "an arrived attempt is not announced again");
+	assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "ci_observed").length, 1, "one journal event per completed attempt");
+	assert.deepEqual((await observe([run(101, live.head, "in_progress", null, { run_attempt: 2 })])).observations, [], "a running rerun is not terminal");
 	const retry = await observe([run(101, live.head, "completed", "failure", { run_attempt: 2 })]);
 	const retried = retry.observations.find((fact) => fact.event === "ci_failed");
 	assert.ok(retried, "a new attempt is a new failure even on the same head");
 	assert.notEqual(retried.key, failed.key);
 	s.post.confirmCi([retried.key]);
+	assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "ci_observed").length, 2);
 	const green = await observe([run(101, live.head, "completed", "success", { run_attempt: 3 })]);
 	const passed = green.observations.find((fact) => fact.event === "ci_green");
 	assert.ok(passed, "a green rerun follows a failed attempt");
