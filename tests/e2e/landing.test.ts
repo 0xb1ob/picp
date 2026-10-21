@@ -10,6 +10,7 @@ import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
+import { build } from "esbuild";
 import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "../../src/ci-access.ts";
 import { CommandPost } from "../../src/command-post.ts";
@@ -441,23 +442,25 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 		return { jobId: job.id, prUrl: prUrl || undefined, branch: over.branch ?? job.id };
 	};
 	let parentSeq = 0;
-	const parent = async (prompt: string, steps: ScriptStep[], settled?: (events: unknown[], stderr: () => string) => Promise<void>) => {
+	const parent = async (prompt: string, steps: ScriptStep[], settled?: (events: unknown[], stderr: () => string) => Promise<void>, direct = false) => {
 		const script = `landing-parent-${++parentSeq}`;
 		const model = provider.addScript(script, steps, { onExhausted: "repeat" });
 		// Recovery notices can request a turn before the operator's quote arrives.
 		const startup = provider.addScript(`${script}-startup`, [{ kind: "text", text: "Startup notices observed." }], { onExhausted: "repeat" });
 		agentDir.writeModels(provider);
-		const child = startPiChild({ cwd: home.path, model: startup, env: { ...agentDir.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+		const child = startPiChild({ cwd: home.path, model: direct ? model : startup, env: { ...agentDir.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
 		try {
 			await child.prompt(prompt);
-			await waitFor(() => provider.requests(`${script}-startup`).some((request) => JSON.stringify(request.body.messages).includes(prompt.split("\n")[0]!)), Boolean, { timeoutMs: 90_000, what: "operator request reaches parent context" });
-			await child.waitForSettled(90_000);
-			const [providerId, modelId] = model.split("/");
-			child.send({ id: script, type: "set_model", provider: providerId, modelId });
-			const switched = await child.waitFor((event) => event.type === "response" && event.id === script);
-			assert.equal(switched.success, true, JSON.stringify(switched));
-			await child.prompt("Continue the operator request already in context.");
-			await waitFor(() => provider.remaining(script), (remaining) => remaining === 0, { timeoutMs: 90_000, what: "operator script consumed" });
+			if (!direct) {
+				await waitFor(() => provider.requests(`${script}-startup`).some((request) => JSON.stringify(request.body.messages).includes(prompt.split("\n")[0]!)), Boolean, { timeoutMs: 90_000, what: "operator request reaches parent context" });
+				await child.waitForSettled(90_000);
+				const [providerId, modelId] = model.split("/");
+				child.send({ id: script, type: "set_model", provider: providerId, modelId });
+				const switched = await child.waitFor((event) => event.type === "response" && event.id === script);
+				assert.equal(switched.success, true, JSON.stringify(switched));
+				await child.prompt("Continue the operator request already in context.");
+				await waitFor(() => provider.remaining(script), (remaining) => remaining === 0, { timeoutMs: 90_000, what: "operator script consumed" });
+			}
 			await child.waitForSettled(90_000);
 			assert.equal(provider.remaining(script), 0);
 			await settled?.(child.eventsOfType("tool_execution_end"), () => `${child.stderr()}\n${JSON.stringify(child.records())}`);
@@ -466,7 +469,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 			await child.close();
 		}
 	};
-	return { home: home.path, remote: repo.remote as string, repo, post, provider, agentDir, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent };
+	return { home: home.path, remote: repo.remote as string, repo, post, provider, agentDir, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent, parentMessages: () => JSON.stringify(provider.requests().at(-1)?.body.messages ?? []) };
 }
 
 
@@ -653,6 +656,37 @@ test("landing: a deploy ledger failure preserves the merge receipt and retries t
 	assert.equal("after_merge" in await s.post.recordMerge({ jobId: job.jobId }), false);
 });
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
+
+test("landing: Actions deadlines stop a hung request and share the budget across pages", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const s = await startStack(t);
+	const { jobId, head } = await s.held("Actions deadline", 381);
+	const runsAt = `actions/runs?head_sha=${head}`;
+	for (const acrossPages of [false, true]) {
+		const first = join(s.home, `first-${acrossPages}`);
+		const last = join(s.home, `last-${acrossPages}`);
+		s.setGh({ runs: [run(1, head, "completed", "success")], routes: acrossPages
+			? [{ match: runsAt, replies: [{ ...runsBody([run(1, head, "completed", "success")]), untilFile: first }] }, { match: "actions/runs/1/attempts/1/jobs", replies: [{ ...json({ total_count: 0, jobs: [] }), untilFile: last }] }]
+			: [{ match: runsAt, replies: [{ ...runsBody([]), untilFile: last }] }] });
+		const pending = s.integrate(jobId);
+		const release = acrossPages ? setTimeout(() => writeFileSync(first, "release"), 9_000) : undefined;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let result: Awaited<typeof pending> | undefined;
+		try {
+			result = await Promise.race([pending, new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), 22_000); })]);
+		} finally {
+			clearTimeout(timer);
+			clearTimeout(release);
+			writeFileSync(first, "release");
+			writeFileSync(last, "release");
+			await pending;
+		}
+		assert.ok(result, acrossPages ? "one total deadline bounds runs plus jobs" : "per-request timeout cancels hung gh");
+		assert.equal(result.record.next, "retry", "a deadline never grants merge authority");
+		assert.match(result.text, /read transport/, "spent retry budget reports the failed request without another attempt");
+		assert.equal(result.calls.filter((call) => call.includes(acrossPages ? "attempts/1/jobs" : runsAt)).length, 1, "spent retry budget starts no further gh request");
+		assert.deepEqual(mergedCalls(result.calls), []);
+	}
+});
 
 test("landing S14: GitLab worker reports hold only on the project's MR and preserve named refusals", { skip: SKIP, timeout: 240_000 }, async (t) => {
 	for (const mode of ["verified", "wrong-branch", "fork", "unavailable", "invalid", "foreign-host", "github"]) await t.test(mode, async (t) => {
@@ -906,6 +940,22 @@ test(
 		assert.ok(watched.errors.some((error) => error.job_id === jobId), JSON.stringify(watched.errors));
 		assert.equal(s.post.ciWatch.store.job(jobId)?.last_ci, "unreadable");
 		assert.match(formatStatusTable(await s.post.status()), /waiting on: CI unreadable \(token\)/);
+		const viewer = createViewer({ home: s.home, stateDir: join(s.home, LAYOUT.state), host: "127.0.0.1", port: 0, log: () => {} });
+		await new Promise<void>((resolve) => viewer.listen(0, "127.0.0.1", resolve));
+		try {
+			const response = await fetch(`http://127.0.0.1:${(viewer.address() as AddressInfo).port}/api/jobs`);
+			const body = await response.json() as { jobs: Array<{ id: string }> };
+			const job = body.jobs.find((row) => row.id === jobId);
+			assert.ok(job, "the denied job reaches the viewer API");
+			const bundled = await build({ stdin: { contents: 'import {h} from "preact"; import render from "preact-render-to-string"; import {CiSignal} from "./viewer-app/components/JobSignals.tsx"; export const draw=job=>render(h(CiSignal,{job}));', resolveDir: REPO_ROOT, loader: "tsx" }, bundle: true, platform: "node", format: "esm", write: false, jsx: "automatic", jsxImportSource: "preact" });
+			const { draw } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0]!.contents).toString("base64")}`) as { draw(job: unknown): string };
+			const html = draw(job);
+			assert.ok(html.includes(`>${CI_UNREADABLE_LABEL}</span>`), "rendered CI label matches the backend denial");
+			assert.ok(html.includes(`needs ${CI_READ_NEEDED}`), "rendered CI advice matches the backend denial");
+			assert.doesNotMatch(html, /checks|statuses/i);
+		} finally {
+			await new Promise<void>((resolve) => viewer.close(() => resolve()));
+		}
 
 		// A rate limit, on runs or jobs, is not the token: no label, no retry, and the watch says unknown.
 		const limited = await unreadable([{ match: runsAt, replies: [{ code: 1, stderr: `gh: API rate limit exceeded (HTTP 403) ${CANARY}` }] }], /read rate_limited/, "runs rate limit");
@@ -1192,6 +1242,13 @@ test(
 		assert.equal(claims().filter((entry) => entry.job_id === b.jobId).length, 1);
 		assert.match((await advance(b.jobId, refusedRun, [setupJob("Checkout")])).fact, /was spent at/);
 		assert.deepEqual(reruns(), ["run rerun 41 --failed", "run rerun 51 --failed"]);
+		for (const step of ["Set up job", "Checkout", "Set up Node", "Install dependencies"]) {
+			rmSync(claimsFile, { force: true });
+			const setup = await advance(a.jobId, red(), [setupJob(step)]);
+			assert.equal(setup.record.next, "wait", setup.text);
+			assert.ok(setup.fact.includes(`("${step}"); reran`), setup.fact);
+			assert.equal(setup.calls.filter((call) => call === "run rerun 41 --failed").length, 1, step);
+		}
 	},
 );
 
@@ -2050,27 +2107,269 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 
 test("landing: a real parent's timer latches only its mandated main runs and clears only current-tip green", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t);
-	const tip = git(s.remote, "rev-parse", "main");
+	let tip = git(s.remote, "rev-parse", "main");
 	const routes: Route[] = [
 		{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] },
 		{ match: "run view 106 --log-failed", replies: [{ stdout: "test\t✖ main regression" }] },
 	];
 	const own = (head: string, conclusion: string, login = "e2e", event = "push") => run(login !== "e2e" ? 107 : event === "dynamic" ? 108 : 106, head, "completed", conclusion, { triggering_actor: { login }, event });
 	const file = join(s.home, LAYOUT.state, "main-ci.json");
-	const rows = (): Array<{ red_since_sha: string; login: string }> => existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).projects : [];
-	s.setGh({ routes, runs: [own(tip, "failure")] });
+	const rows = (): Array<{ project: string; red_since_sha: string; login: string; workflow?: string; failing?: string }> => existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).projects : [];
+	const observe = async (runs: RunRow[], extra: Partial<GhState> = {}) => {
+		const before = s.ghCalls().filter((call) => call.includes(`head_sha=${tip}`)).length;
+		s.setGh({ routes, runs, ...extra });
+		await waitFor(() => s.ghCalls().filter((call) => call.includes(`head_sha=${tip}`)).length, (count) => count >= before + 2, { timeoutMs: 30_000, what: "two main CI timer reads" });
+	};
+	s.setGh({ routes, runs: [] });
 	await s.parent("Observe the CI timer.", [{ kind: "text", text: "Observing." }], async () => {
 		s.post.mandates.issue({ projects: ["demo"], objective: "main CI e2e", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 10 });
-		await waitFor(rows, (value) => value.length === 1, { timeoutMs: 30_000, what: "main red latch" });
-		assert.deepEqual(rows().map((row) => [row.red_since_sha, row.login]), [[tip, "e2e"]]);
+		for (const runs of [[], [own(tip, "success")], [run(109, tip, "in_progress", null)], [own("c".repeat(40), "failure")], [own(tip, "failure", "someone")], [own(tip, "failure", "dependabot[bot]")], [own(tip, "failure", "e2e", "dynamic")], [run(109, tip, "completed", "failure", { event: "push" })], [{ ...own(tip, "failure", "someone"), run_attempt: 2 }]]) {
+			await observe(runs);
+			assert.deepEqual(rows(), [], "green, pending, absent and wrong-head runs never latch");
+		}
+		await observe([own(tip, "failure")], { routes: [...routes, { match: "actions/runs/106/attempts/1/jobs", replies: [{ code: 1, stderr: "HTTP 403: forbidden" }] }] });
+		assert.deepEqual(rows(), [], "unreadable main attempt jobs never create a latch");
+		await observe([own(tip, "failure"), run(109, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" } })], { jobs: { 106: [setupJob("Run suite (typecheck + tests)")] } });
+		assert.deepEqual(rows().map((row) => [row.project, row.red_since_sha, row.login, row.workflow, row.failing]), [["demo", tip, "e2e", "ci", "main regression"]], "normalized actor, identity, jobs and steps produce the own red latch");
+		const earlyClaims = join(s.home, LAYOUT.ciRerunsFile);
+		assert.deepEqual(existsSync(earlyClaims) ? JSON.parse(readFileSync(earlyClaims, "utf8")).entries : [], [], "suite failure claims no infra rerun");
+		assert.ok(!s.ghCalls().some((call) => call.startsWith("run rerun")), "suite failure never reruns");
 		const latched = readFileSync(file, "utf8");
-		s.setGh({ routes, runs: [own("c".repeat(40), "success")] });
-		await waitFor(() => s.ghCalls().filter((call) => call.includes(`head_sha=${tip}`)).length, (count) => count >= 3, { timeoutMs: 30_000, what: "stale green checked" });
+		await observe([own(tip, "failure")]);
+		assert.equal(readFileSync(file, "utf8"), latched, "repeat red preserves the original latch bytes");
+		const redBody = await waitFor(s.parentMessages, (body) => body.includes("MAIN IS RED"), { timeoutMs: 30_000, what: "main red wake reaches parent provider" }).catch(() => s.parentMessages());
+		assert.ok(redBody.includes("MAIN IS RED"), "main red wake reaches parent provider");
+		assert.equal(s.parentMessages().split("MAIN IS RED").length - 1, 1, "repeat red emits one parent wake");
+		assert.ok(s.parentMessages().includes(`MAIN IS RED — demo: CI failed on ${tip.slice(0, 12)} (ci) — failing: main regression`));
+		assert.ok(s.parentMessages().includes("cp_integrate returns wait for every demo PR except one based on the current main with green CI"));
+		git(s.post.registry.pathOf("demo"), "remote", "set-url", "origin", join(s.home, "missing-origin.git"));
+		try {
+			const journal = () => existsSync(join(s.home, LAYOUT.state, "wakeups.json")) ? readFileSync(join(s.home, LAYOUT.state, "wakeups.json"), "utf8") : "";
+			const fetchError = await waitFor(journal, (body) => body.includes("main CI (demo)") && body.includes("fetch"), { timeoutMs: 30_000, what: "failed git fetch reaches durable wake journal" }).catch(journal);
+			assert.ok(fetchError.includes("main CI (demo)") && fetchError.includes("fetch"), `failed git fetch names project and cause: ${fetchError}`);
+			assert.equal(readFileSync(file, "utf8"), latched, "failed git fetch preserves latch bytes");
+		} finally {
+			git(s.post.registry.pathOf("demo"), "remote", "set-url", "origin", s.remote);
+		}
+		const oldTip = tip;
+		tip = advanceBase(s.repo, "main-change.txt", "main advanced\n");
+		await observe([own(tip, "failure")]);
+		assert.equal(readFileSync(file, "utf8"), latched, "red on a new main tip preserves the original latch");
+		await observe([{ ...own(oldTip, "success"), id: 110 }, own(tip, "failure")]);
+		assert.equal(readFileSync(file, "utf8"), latched, "old-tip green cannot replace current-tip red");
+		await observe([own("c".repeat(40), "success")]);
 		assert.equal(readFileSync(file, "utf8"), latched, "stale green never clears main red");
-		s.setGh({ routes, runs: [own(tip, "success"), own(tip, "failure", "someone-else"), own(tip, "failure", "e2e", "dynamic")] });
+		await observe([own(tip, "success"), run(109, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" } })]);
+		assert.equal(readFileSync(file, "utf8"), latched, "pending current-tip workflow prevents clearing");
+		await observe([], { routes: [...routes, { match: "actions/runs?", replies: [{ stdout: "not json" }] }] });
+		assert.equal(readFileSync(file, "utf8"), latched, "malformed CI never clears the latch");
+		const malformedBody = await waitFor(s.parentMessages, (body) => body.includes("main CI (demo)") && body.includes("malformed"), { timeoutMs: 30_000, what: "malformed main CI read names project and cause" }).catch(() => s.parentMessages());
+		assert.ok(malformedBody.includes("main CI (demo)") && malformedBody.includes("malformed"), "malformed main CI read names project and cause");
+		await observe([], { routes: [...routes, { match: "actions/runs?", replies: [{ code: 1, stderr: "HTTP 403: forbidden" }] }] });
+		assert.equal(readFileSync(file, "utf8"), latched, "denied CI never clears the latch");
+		await observe([own(tip, "success"), own(tip, "failure", "someone-else"), own(tip, "failure", "e2e", "dynamic")]);
 		await waitFor(rows, (value) => value.length === 0, { timeoutMs: 30_000, what: "own current-tip green clears latch" });
+		const cleared = readFileSync(file, "utf8");
+		await observe([own(tip, "success")]);
+		assert.equal(readFileSync(file, "utf8"), cleared, "repeat green does not rewrite state");
+		await waitFor(s.parentMessages, (body) => body.includes(`MAIN IS GREEN AGAIN — demo: CI passed on ${tip.slice(0, 12)}. Call cp_integrate for held demo PRs.`), { timeoutMs: 30_000, what: "green notice reaches parent" });
+		const legacyRow = JSON.parse(cleared);
+		legacyRow.projects = [{ project: "demo", red_since_sha: oldTip, red_since_at: isoTimestamp() }];
+		writeFileSync(file, JSON.stringify(legacyRow));
+		await observe([run(109, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" } })]);
+		assert.deepEqual(rows(), [], "legacy latch releases even while main CI is inconclusive");
+		const legacyBody = await waitFor(s.parentMessages, (body) => body.includes("MAIN CI LATCH RELEASED"), { timeoutMs: 30_000, what: "legacy release reaches parent" }).catch(() => s.parentMessages());
+		assert.ok(legacyBody.includes("MAIN CI LATCH RELEASED"), "legacy release reaches parent");
+		const foreign = JSON.parse(cleared);
+		foreign.projects = [{ project: "demo", red_since_sha: oldTip, red_since_at: isoTimestamp(), login: "other" }];
+		writeFileSync(file, JSON.stringify(foreign));
+		await observe([run(109, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" } })]);
+		assert.deepEqual(rows(), [], "foreign latch releases on inconclusive main CI");
+		const releasedNotice = `MAIN CI LATCH RELEASED — demo: red since ${oldTip.slice(0, 12)} no longer counts (latched for other, this machine is e2e). Call cp_integrate for held demo PRs.`;
+		const releasedBody = await waitFor(s.parentMessages, (body) => body.includes(releasedNotice), { timeoutMs: 30_000, what: "foreign release notice reaches parent" }).catch(() => s.parentMessages());
+		assert.ok(releasedBody.includes(releasedNotice), "foreign release notice reaches parent");
+		writeFileSync(file, JSON.stringify(foreign));
+		await observe([own(tip, "failure")], { routes: [routes[0]!, { match: "run view 106 --log-failed", replies: [{ stdout: "nothing useful" }] }], jobs: { 106: [{ id: 1060, name: "structure checks", status: "completed", conclusion: "failure", steps: [] }] } });
+		assert.equal(rows()[0]?.failing, "structure checks", "missing failure log falls back to the failed job");
+		const saved = readFileSync(file, "utf8");
+		writeFileSync(file, "{not json");
+		s.setGh({ routes, runs: [own(tip, "success")] });
+		await waitFor(() => readFileSync(join(s.home, LAYOUT.state, "wakeups.json"), "utf8"), (body) => body.includes("main-ci.json unreadable"), { timeoutMs: 30_000, what: "corrupt main CI journaled by real timer" });
+		assert.equal(readFileSync(file, "utf8"), "{not json", "the timer never overwrites corrupt latch data");
+		writeFileSync(file, saved);
+		const legacy = JSON.parse(saved);
+		legacy.projects.push({ ...legacy.projects[0], project: "other" });
+		writeFileSync(file, JSON.stringify(legacy));
+		await observe([own(tip, "success")]);
+		assert.deepEqual(rows().map((row) => row.project), ["other"], "clearing demo preserves another project's latch");
+		s.setGh({ routes, runs: [own(tip, "failure")], jobs: { 106: [setupJob("Install treehouse")] } });
+		await waitFor(s.ghCalls, (calls) => calls.some((call) => call === "run rerun 106 --failed"), { timeoutMs: 30_000, what: "main infra failure reruns once" });
+		await observe([run(106, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" }, run_attempt: 2 })]);
+		assert.deepEqual(rows().map((row) => row.project), ["other"], "infra rerun does not latch demo");
+		await observe([{ ...own(tip, "failure"), run_attempt: 2 }], { jobs: { 106: [setupJob("Install treehouse")] } });
+		assert.equal(rows().find((row) => row.project === "demo")?.red_since_sha, tip, "second infra failure latches main");
+		assert.ok(rows().some((row) => row.project === "other"), "latching demo preserves another project's latch");
+		assert.equal(s.ghCalls().filter((call) => call === "run rerun 106 --failed").length, 1, "attempt two never reruns again");
+		assert.ok(s.ghCalls().includes("api repos/{owner}/{repo}/actions/runs/106/attempts/2/jobs?per_page=100&page=1"));
+		const claimAtRerun = s.ghCalls().find((call) => call.startsWith("claims-at-rerun")) ?? "";
+		assert.ok(claimAtRerun.includes("main-demo") && claimAtRerun.includes(tip), "main claim is durable before gh reruns");
+		await waitFor(s.parentMessages, (body) => body.includes("MAIN CI RERUN") && body.includes("attempt 2: a second failure"), { timeoutMs: 30_000, what: "main rerun and second-attempt notice reach parent" });
+		const claimsFile = join(s.home, LAYOUT.ciRerunsFile);
+		assert.deepEqual(JSON.parse(readFileSync(claimsFile, "utf8")).entries.map((entry: { job_id: string; head_sha: string; run_id: number; step: string }) => [entry.job_id, entry.head_sha, entry.run_id, entry.step]), [["main-demo", tip, 106, "Install treehouse"]]);
+		await observe([own(tip, "success")]);
+		tip = advanceBase(s.repo, "main-change.txt", "main advanced again\n");
+		await observe([own(tip, "failure")], { jobs: { 106: [setupJob("Install treehouse")] }, routes: [...routes, { match: "run rerun 106", replies: [{ code: 1, stderr: "HTTP 403: forbidden" }] }] });
+		assert.equal(rows().find((row) => row.project === "demo")?.red_since_sha, tip, "refused infra rerun latches main");
+		assert.equal(JSON.parse(readFileSync(claimsFile, "utf8")).entries.length, 2, "refused rerun keeps its claim");
+		assert.equal(s.ghCalls().filter((call) => call === "run rerun 106 --failed").length, 2, "refusal does not earn a retry");
+		await waitFor(s.parentMessages, (body) => body.includes("HTTP 403: forbidden"), { timeoutMs: 30_000, what: "rerun refusal reaches parent" });
 	});
 	assert.deepEqual(mergedCalls(s.ghCalls()), [], "the main CI timer never merges");
+});
+
+
+test("landing: main-red integration holds stale heads and permits only a current green fix-forward under its own mandate", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("main red gate", 120);
+	const tip = advanceBase(s.repo, "main-fix.txt", "main changed\n");
+	const grant = s.post.mandates.issue({ projects: ["demo"], objective: "main red gate", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10 });
+	s.setGh({ routes: [{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] }], runs: [run(120, live.head, "completed", "success")] });
+	const file = join(s.home, LAYOUT.state, "main-ci.json");
+	const latch = (login?: string) => writeFileSync(file, JSON.stringify({ schema_version: SCHEMA_VERSION, updated_at: isoTimestamp(), projects: [{ project: "demo", red_since_sha: tip, red_since_at: isoTimestamp(), failing: "structure", ...(login ? { login } : {}) }] }));
+	const absent = await s.integrate(live.jobId);
+	assert.doesNotMatch(absent.text, /main is red since/);
+	assert.ok(!s.ghCalls().includes("api user --jq .login"), "no latch never resolves main CI scope");
+	latch("e2e");
+	const stale = await s.integrate(live.jobId);
+	assert.equal(stale.record.next, "wait", stale.text);
+	assert.match(stale.text, /main is red since .*structure/);
+	assert.deepEqual(mergedCalls(stale.calls), []);
+	git(live.worktree, "fetch", "origin", "main");
+	git(live.worktree, "merge", "--no-edit", "origin/main");
+	git(live.worktree, "push", "origin", live.jobId);
+	const current = git(live.worktree, "rev-parse", "HEAD");
+	for (const runs of [[run(120, live.head, "completed", "success")], [run(121, current, "in_progress", null)]]) {
+		s.setGh({ runs });
+		const pending = await s.integrate(live.jobId);
+		assert.equal(pending.record.next, "wait", pending.text);
+		assert.match(pending.text, /main is red since/);
+	}
+	s.setGh({ routes: [{ match: "actions/runs?", replies: [{ code: 1, stderr: "HTTP 403: forbidden" }] }] });
+	const denied = await s.integrate(live.jobId);
+	assert.equal(denied.record.next, "wait", denied.text);
+	assert.match(denied.text, /main is red since/);
+	s.setGh({ routes: [] });
+	s.setGh({ runs: [run(121, current, "completed", "success")] });
+	const forward = await s.integrate(live.jobId);
+	assert.match(forward.text, /fix-forward: head contains origin\/main and CI green/);
+	assert.doesNotMatch(forward.record.reason, /main is red since/);
+	s.post.mandates.pause(grant.id);
+	const paused = await s.integrate(live.jobId);
+	assert.match(paused.text, /not enforced — no active mandate covers demo; not blocking/);
+	s.post.mandates.resume(grant.id);
+	for (const login of ["other", undefined]) {
+		latch(login);
+		const released = await s.integrate(live.jobId);
+		assert.match(released.text, /not blocking/, released.text);
+		assert.doesNotMatch(released.record.reason, /main is red since/);
+	}
+	writeFileSync(file, "{not json");
+	const corrupt = await s.integrate(live.jobId);
+	assert.match(corrupt.text, /main-ci.json unreadable.*not blocking/);
+	assert.equal(readFileSync(file, "utf8"), "{not json");
+	latch("e2e");
+	const mandates = join(s.home, LAYOUT.mandates);
+	rmSync(mandates, { recursive: true, force: true });
+	writeFileSync(mandates, "legacy directory replaced by a file");
+	try {
+		const unreadable = await s.integrate(live.jobId);
+		assert.match(unreadable.text, /not enforced.*ENOTDIR.*not blocking/);
+	} finally {
+		rmSync(mandates);
+		mkdirSync(mandates, { recursive: true });
+		writeFileSync(s.post.mandates.file(grant.id), JSON.stringify(grant));
+	}
+});
+
+
+test("landing: main latch writes refuse corruption introduced during an Actions read", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const tip = git(s.remote, "rev-parse", "main");
+	s.post.mandates.issue({ projects: ["demo"], objective: "main CI corruption race", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 10 });
+	const file = join(s.home, LAYOUT.state, "main-ci.json");
+	const journal = join(s.home, LAYOUT.state, "wakeups.json");
+	const routes: Route[] = [{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] }];
+	s.setGh({ routes, runs: [] });
+	await s.parent("Observe main latch corruption races.", [{ kind: "text", text: "Observing." }], async () => {
+		for (const clear of [false, true]) {
+			const valid = JSON.stringify({ schema_version: SCHEMA_VERSION, updated_at: isoTimestamp(), projects: clear ? [{ project: "demo", red_since_sha: tip, red_since_at: isoTimestamp(), login: "e2e" }] : [] });
+			writeFileSync(file, valid);
+			const release = join(s.home, `release-main-${clear}`);
+			const before = s.ghCalls().filter((call) => call.includes("actions/runs?head_sha=")).length;
+			const prior = existsSync(journal) ? readFileSync(journal, "utf8") : "";
+			s.setGh({ routes: [...routes, { match: "actions/runs?head_sha=", replies: [{ pass: true, untilFile: release }, { pass: true }] }], runs: [run(124, tip, "completed", clear ? "success" : "failure", { event: "push", triggering_actor: { login: "e2e" } })] });
+			await waitFor(() => s.ghCalls().filter((call) => call.includes("actions/runs?head_sha=")).length, (count) => count > before, { timeoutMs: 30_000, what: "main read reaches external barrier" });
+			const corrupt = clear ? "not json" : "{";
+			writeFileSync(file, corrupt);
+			writeFileSync(release, "continue");
+			await waitFor(() => ({ body: existsSync(journal) ? readFileSync(journal, "utf8") : "", bytes: readFileSync(file, "utf8") }), ({ body, bytes }) => bytes !== corrupt || (body !== prior && body.includes("not overwritten")), { timeoutMs: 30_000, what: `${clear ? "clear" : "set"} completes its in-flight mutation` });
+			assert.equal(readFileSync(file, "utf8"), corrupt, "in-flight latch mutation preserves corrupt bytes");
+			s.setGh({ routes, runs: [] });
+			writeFileSync(file, valid);
+		}
+	}, true);
+});
+
+
+test("landing: main CI scope skips inactive grants and login faults preserve latches until the next successful login", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const tip = git(s.remote, "rev-parse", "main");
+	const issue = (projects = ["demo"], over = {}) => s.post.mandates.issue({ projects, objective: "main CI scope", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 10, ...over });
+	const loginCalls = () => s.ghCalls().filter((call) => call === "api user --jq .login").length;
+	s.setGh({ routes: [{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] }], runs: [] });
+	for (const state of ["absent", "paused", "revoked", "expired", "other"]) {
+		const grant = state === "absent" ? undefined : issue(state === "other" ? ["other"] : ["demo"], state === "expired" ? { at: "2020-01-01T00:00:00Z", expiry: "2021-01-01T00:00:00Z" } : {});
+		if (state === "paused") s.post.mandates.pause(grant!.id);
+		if (state === "revoked") s.post.mandates.revoke(grant!.id);
+		const before = s.ghCalls().length;
+		await s.parent(`Observe ${state} main CI scope.`, [{ kind: "text", text: "Observing scope." }], async () => {
+			const started = Date.now();
+			await waitFor(() => Date.now() - started, (elapsed) => elapsed >= 2_200, { timeoutMs: 10_000, what: "two real CI timer intervals" });
+			assert.ok(!s.ghCalls().slice(before).some((call) => call.includes("actions/runs")), `${state} scope reads no main CI`);
+		}, true);
+		if (grant && state !== "revoked") s.post.mandates.revoke(grant.id);
+	}
+	issue();
+	const file = join(s.home, LAYOUT.state, "main-ci.json");
+	const saved = JSON.stringify({ schema_version: SCHEMA_VERSION, updated_at: isoTimestamp(), projects: [{ project: "demo", red_since_sha: tip, red_since_at: isoTimestamp(), login: "e2e" }] });
+	writeFileSync(file, saved);
+	const beforeFault = loginCalls();
+	s.setGh({ routes: [{ match: "api user --jq .login", replies: [{ code: 1, stderr: "gh: not logged in" }] }], runs: [] });
+	await s.parent("Observe an unreadable main CI login.", [{ kind: "text", text: "Observing login." }], async () => {
+		await waitFor(() => loginCalls() >= beforeFault + 2 || s.ghCalls().some((call) => call.includes("actions/runs")), Boolean, { timeoutMs: 30_000, what: "login fault either retries or improperly reads CI" });
+		assert.equal(readFileSync(file, "utf8"), saved, "unreadable login preserves latch bytes");
+		assert.ok(!s.ghCalls().some((call) => call.includes("actions/runs")), "failed login reads no CI");
+	}, true);
+	s.setGh({ routes: [{ match: "api user --jq .login", replies: [{ stdout: "not a login" }, { stdout: "e2e" }] }], runs: [run(122, tip, "completed", "success", { event: "push", triggering_actor: { login: "E2E" } })] });
+	const before = loginCalls();
+	await s.parent("Retry main CI login.", [{ kind: "text", text: "Observing retry." }], async () => {
+		await waitFor(() => JSON.parse(readFileSync(file, "utf8")).projects.length, (count) => count === 0, { timeoutMs: 30_000, what: "valid retried login clears own latch case-insensitively" });
+		assert.equal(loginCalls() - before, 2, "invalid login retries, successful login is cached");
+	}, true);
+	const bot = JSON.parse(saved);
+	bot.projects[0].login = "dependabot[bot]";
+	writeFileSync(file, JSON.stringify(bot));
+	s.setGh({ routes: [{ match: "api user --jq .login", replies: [{ stdout: "dependabot[bot]" }] }], runs: [run(123, tip, "completed", "success", { event: "push", triggering_actor: { login: "dependabot[bot]" } })] });
+	await s.parent("Observe authenticated bot login.", [{ kind: "text", text: "Observing bot." }], async () => {
+		await waitFor(() => JSON.parse(readFileSync(file, "utf8")).projects.length, (count) => count === 0, { timeoutMs: 30_000, what: "bot login is valid when it owns the run" });
+		rmSync(s.post.registry.pathOf("demo"), { recursive: true, force: true });
+		const beforeMissing = s.ghCalls().length;
+		const started = Date.now();
+		await waitFor(() => Date.now() - started, (elapsed) => elapsed >= 2_200, { timeoutMs: 10_000, what: "missing clone through real timer" });
+		assert.ok(!s.ghCalls().slice(beforeMissing).some((call) => call.includes("actions/runs")), "missing clone reads no CI");
+		const journal = join(s.home, LAYOUT.state, "wakeups.json");
+		assert.ok(!readFileSync(journal, "utf8").includes("main CI (demo)"), "missing clone creates no project error");
+	}, true);
 });
 
 
