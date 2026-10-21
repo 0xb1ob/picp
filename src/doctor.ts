@@ -90,6 +90,7 @@ import {
 	shadowedRubricRows,
 } from "./routing.ts";
 import { installScriptHint, OPTIONAL_TOOL_INFO, OPTIONAL_TOOLS, PI_LENS_TOOLS, REQUIRED_TOOLS, type RequiredTool } from "./tool-manifest.ts";
+import { classifyPi, PI_COMPAT_CHECK, piCompatFinding, type PiProbe, readPiCompat } from "./pi-compat.ts";
 import {
 	foreignSessionTools,
 	isUncovered,
@@ -244,6 +245,8 @@ export interface DoctorOptions {
 	now?: () => Date;
 	/** pi's own version, when the caller already knows it (the extension does). */
 	piVersion?: string;
+	/** pi's capability probe (src/pi-compat-probe.ts); absent means not probed here and no `host.pi.compat` line. */
+	piProbe?: (pi: string) => PiProbe;
 	/** Injected in tests: the environment the home was resolved from. */
 	env?: NodeJS.ProcessEnv;
 	/** Injected in tests: where the `service.*` lines find the cp-* units (HOME/XDG_CONFIG_HOME) and the legacy home (PI_HOME). Default process.env. */
@@ -375,6 +378,7 @@ export class Doctor {
 				detail: matches.length > 1 ? `${matches[0]} (+${matches.length - 1} more on PATH)` : matches[0],
 			});
 			findings.push(...this.#conflictingVersions(tool, matches));
+			if (tool === "pi" && this.#options.piProbe) findings.push(this.#piCompat(matches[0] as string, this.#options.piProbe));
 		}
 		for (const tool of OPTIONAL_TOOLS) {
 			const found = this.#which(tool)[0];
@@ -477,6 +481,15 @@ export class Doctor {
 				fix: `keep exactly one ${tool}: PATH order decides which one answers, so a second version fails only in some shells (the first entry wins here)`,
 			},
 		];
+	}
+
+	/** #375: the installer's classification of the pi on PATH (package.json piCompat), read-only. */
+	#piCompat(pi: string, probe: (pi: string) => PiProbe): DoctorFinding {
+		try {
+			return piCompatFinding(classifyPi(readPiCompat(this.#options.packageRoot), probe(pi)), pi);
+		} catch (error) {
+			return { check: PI_COMPAT_CHECK, severity: "error", what: "package.json piCompat is unreadable", detail: (error as Error).message, fix: "restore piCompat {min, testedMax} in the package's package.json" };
+		}
 	}
 
 	#version(tool: string, path: string): string | undefined {
@@ -1576,4 +1589,9 @@ export function formatDoctor(report: DoctorReport): string {
 
 export function formatDoctorJson(report: DoctorReport): string {
 	return JSON.stringify(report, null, 2);
+}
+
+/** The check ids of `formatDoctor`'s error lines (`✗ [check] …`): the typed identity a caller may branch on. */
+export function doctorErrorChecks(text: string): string[] {
+	return [...text.matchAll(new RegExp(`^${SEVERITY_GLYPH.error} \\[([^\\]\\s]+)\\] `, "gm"))].map((match) => match[1] as string);
 }

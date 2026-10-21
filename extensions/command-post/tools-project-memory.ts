@@ -12,8 +12,10 @@ import { type ForgeConfig, resolveForgeRepository } from "../../src/forge-url.ts
 import type { MergePolicy } from "../../src/contracts.ts";
 import { detectMergePolicy, ghMergeFlowProbe, type MergeFlowProbe } from "../../src/merge-policy-detect.ts";
 import { formatAfterMergeDeploy, formatEnsured, formatForge, formatProjects } from "../../src/projects.ts";
-import { type CommandRunner, execRunner } from "../../src/doctor.ts";
-import { formatReadiness } from "../../src/project-readiness.ts";
+import { type CommandRunner, execRunner, whichAll } from "../../src/doctor.ts";
+import { formatReadiness, piReadiness } from "../../src/project-readiness.ts";
+import { probePiSync } from "../../src/pi-compat-probe.ts";
+import { PACKAGE_ROOT } from "../../src/home.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
 /** `probe` reads who merges a newly added GitHub project, `ciRun` runs add's CI read;
@@ -171,7 +173,7 @@ export function registerProjectMemoryTools(
 			}
 			let readiness: string;
 			try {
-				readiness = formatReadiness(registry.home, result.project, ciRun);
+				readiness = formatReadiness(registry.home, result.project, ciRun, piReadiness(PACKAGE_ROOT, (command) => whichAll(command), (pi) => probePiSync(pi, PACKAGE_ROOT)));
 			} catch (error) {
 				readiness = `  readiness: unknown (${(error as Error).message}); add itself succeeded`;
 			}

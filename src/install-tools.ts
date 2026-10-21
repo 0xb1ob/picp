@@ -37,6 +37,7 @@ import {
 	REQUIRED_TOOLS,
 	TOOL_INSTALL,
 } from "./tool-manifest.ts";
+import { classifyPi, type PiCompat, type PiCompatResult, type PiProbe, piRange, selfUpdate } from "./pi-compat.ts";
 
 export type InstallerOS = "macos" | "linux" | "unsupported";
 
@@ -202,6 +203,69 @@ export const DRY_RUN_PLANNED_EXIT = 3;
 export function installExitCode(report: InstallReport): number {
 	if (report.ok) return 0;
 	return report.dryRun && report.outcomes.every((outcome) => outcome.kind === "ok" || outcome.kind === "planned") ? DRY_RUN_PLANNED_EXIT : 1;
+}
+
+export interface PiCompatGateOptions {
+	compat: PiCompat;
+	dryRun: boolean;
+	/** --yes: consent to `pi update --self`; --no-prompt: never ask (declines); --no-pi-upgrade wins over both. */
+	yes: boolean;
+	noPrompt: boolean;
+	noUpgrade: boolean;
+	/** --force: proceed past an incompatible pi with a warning; never consent to an update. */
+	force: boolean;
+	env: NodeJS.ProcessEnv;
+	which: (command: string) => string[];
+	probe: (pi: string) => PiProbe;
+	/** Runs `<pi> update --self`; never called on a dry run or without consent. */
+	update: (pi: string) => { status: number | null; output: string };
+	ask: (question: string) => string | undefined;
+	log: (line: string) => void;
+	/** The exact command that reruns this step. */
+	retry: string;
+}
+
+/** #375's pi policy after the tools step: 0 go on (maybe warning), 1 refused with its retry. Never downgrades. */
+export function piCompatGate(o: PiCompatGateOptions): number {
+	const pi = o.which("pi")[0];
+	if (!pi) return 0; // planOrInstall already reported a missing pi
+	if (o.dryRun) {
+		o.log(`… pi: compatibility not probed in a dry run (pi writes state under HOME); a real run checks ${piRange(o.compat)}`);
+		return 0;
+	}
+	const before = classifyPi(o.compat, o.probe(pi));
+	if (before.state !== "old") return verdict(o, before);
+	const update = selfUpdate(pi);
+	const refuse = (why: string): number => {
+		o.log(`✗ pi: ${before.detail} (${before.range}); ${why}; then retry: ${o.retry}`);
+		return 1;
+	};
+	if (o.noUpgrade) return refuse(`--no-pi-upgrade: not updated; update it yourself: ${update}`);
+	const session = runningUnderPi(o.env);
+	if (session) return refuse(`this process runs inside a pi session (${session}), so pi is not updated from here; run ${update} outside it`);
+	const consent = o.yes || (!o.noPrompt && /^y(es)?$/i.test(o.ask(`${before.detail} (${before.range}). Run ${update} now? [y/N] `)?.trim() ?? ""));
+	if (!consent) return refuse(`not updated without consent: rerun with --yes, or run ${update} yourself`);
+	o.log(`… pi: ${before.detail}; running ${update}`);
+	const ran = o.update(pi);
+	const tail = ran.output.trim().split("\n").slice(-5).join(" | ").slice(0, 600);
+	if (ran.status !== 0) return refuse(`${update} exited ${ran.status} (${tail || "no output"}); a pi installed by a package manager updates through that manager`);
+	const now = o.which("pi")[0];
+	const after = now ? classifyPi(o.compat, o.probe(now)) : undefined;
+	if (!now || !after) return refuse(`${update} exited 0 but pi is no longer on PATH`);
+	if (after.state === "old") return refuse(`${update} exited 0 but ${after.detail}`);
+	o.log(`✓ pi: updated ${before.version} -> ${after.version} by its own updater`);
+	return verdict(o, after);
+}
+
+function verdict(o: PiCompatGateOptions, result: PiCompatResult): number {
+	if (result.state === "supported") o.log(`✓ pi: ${result.detail} (${result.range})`);
+	else if (result.state === "newer") o.log(`! pi: warning: ${result.detail}; supported: ${result.range}`);
+	else if (o.force) o.log(`! pi: warning: --force: proceeding with an incompatible pi: ${result.detail}; supported: ${result.range}`);
+	else {
+		o.log(`✗ pi: incompatible: ${result.detail}; supported: ${result.range}; install a pi in that range, or rerun with --force to proceed anyway; retry: ${o.retry}`);
+		return 1;
+	}
+	return 0;
 }
 
 const GLYPH: Readonly<Record<ToolOutcomeKind, string>> = Object.freeze({
