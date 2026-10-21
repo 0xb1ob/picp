@@ -217,13 +217,18 @@ async function seedHeldHome(options: { ciState: "green" | "in_progress"; review?
 
 test("/doctor under rpc names the mode and running timers", { timeout: 60_000 }, async (t) => {
 	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s19-doctor", [{ kind: "text", text: "Ready." }]);
+	const agent = createAgentDir({ provider });
 	const rpc = startRpc({
 		cwd: REPO_ROOT,
-		args: ["--no-session", "-e", COMMAND_POST_EXTENSION],
-		env: { CP_HOME: home.path },
+		args: ["--no-session", "--model", model, "-e", COMMAND_POST_EXTENSION],
+		env: { ...agent.env, CP_HOME: home.path },
 	});
 	t.after(async () => {
 		await rpc.close();
+		agent.cleanup();
+		await provider.stop();
 		home.cleanup();
 	});
 	rpc.send({ id: "doc", type: "prompt", message: "/doctor" });
