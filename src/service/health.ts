@@ -12,8 +12,8 @@
  *   gh          `gh auth status --hostname github.com` fails (hourly)          → `health: gh credential`
  *   update      `last_result` a failure, or `fetch_failed` 3 times; keyed `result:to` (`drain_timeout:since`, one
  *               key per episode), so a new failure is a new key                 → `health: update failed`
- *   pi drift    (warn-only, hourly; no record) a host pi above piCompat.testedMax for over 7 days with no `qualify pi <v>` PR
- *               → one `health: warn host.pi.drift` log line, never a failure
+ *   pi drift    (warn-only, hourly; no record) a host pi above piCompat.testedMax for over 7 days with no
+ *               `qualify pi <v>` PR → one `health: warn host.pi.drift: …` log line, never a failure
  *   relay       a parent→operator relay unacked 10 min (`state/operator/relay-outbox.json` vs `relay-acks.jsonl`), or an open
  *               escalation 20 min old no ack, discard or open ask accounts for; keyed `relay:<id>` / `escalation:<id>`
  *                                                                               → `health: relay unseen`
@@ -60,7 +60,13 @@ export interface CheckRecord {
 	fails: number;
 	checked_at: string;
 }
-export interface HealthRecord { schema_version: 1; last_run_at: string; checks: Partial<Record<HealthCheck, CheckRecord>> }
+export interface HealthRecord {
+	schema_version: 1;
+	last_run_at: string;
+	/** When the hourly warn-only note last ran. */
+	warn_checked_at?: string;
+	checks: Partial<Record<HealthCheck, CheckRecord>>;
+}
 
 export const healthFile = (stateDir: string): string => join(stateDir, "health.json");
 
@@ -118,8 +124,14 @@ export async function runHealth(options: HealthRunOptions): Promise<HealthRecord
 		const next = observe(name, record.checks[name], seen, at);
 		if (next) record.checks[name] = next;
 	}
-	const note = options.warn?.();
-	if (note) log(`warn ${note}`);
+	// Hourly like the probes, off a persisted stamp (the run cadence is the timer's, not the clock's minute).
+	const age = prior?.warn_checked_at ? Date.parse(at) - Date.parse(prior.warn_checked_at) : NaN;
+	const due = !(age >= 0 && age < 3_600_000); // an unparseable or future stamp is due, like hourly()
+	if (options.warn && due) {
+		record.warn_checked_at = at;
+		const note = options.warn();
+		if (note) log(`warn ${note}`);
+	} else if (prior?.warn_checked_at) record.warn_checked_at = prior.warn_checked_at;
 	atomicWriteJson(healthFile(options.stateDir), record);
 	return record;
 }
@@ -210,14 +222,21 @@ export function hostProbes(options: HostProbeOptions): HealthProbes {
 	};
 }
 
-/** Warn-only (never a check record): logs `host.pi.drift` when the host pi has outrun piCompat.testedMax unqualified. */
+/** The production drift warning: the checkout's piCompat against the real pi, npm and gh. */
+export const hostDriftWarn = (app = PACKAGE_ROOT, run = spawnRun(process.env)) => (): string | undefined =>
+	piDriftWarning(app, run, new Date());
+
+/** Warn-only (never a check record): `host.pi.drift: …` when the host pi has outrun piCompat.testedMax unqualified. */
 export function piDriftWarning(app: string, run: NonNullable<HostProbeOptions["run"]>, now: Date): string | undefined {
 	try {
 		const compat = readPiCompat(app);
 		const version = run("pi", ["--version"], 10_000);
-		const result = classifyPi(compat, { version: version.status === 0 ? version.stdout.trim() : undefined, extension: { ok: true, detail: "" } });
+		const pi = { version: version.status === 0 ? version.stdout.trim() : undefined, extension: { ok: true, detail: "" } };
+		const result = classifyPi(compat, pi);
 		if (result.state !== "newer" || !result.version) return undefined;
-		return piDriftFinding(result, compat.testedMax, readDriftFacts(result.version, (command, args) => run(command, args, 20_000)), now)?.what;
+		const facts = readDriftFacts(result.version, (command, args) => run(command, args, 20_000));
+		const what = piDriftFinding(result, compat.testedMax, facts, now)?.what;
+		return what && `host.pi.drift: ${what}`;
 	} catch {
 		return undefined;
 	}
@@ -321,7 +340,7 @@ if (import.meta.main) {
 	const home = resolveHome();
 	configureLayout("multi", home);
 	const layout = layoutForHome("multi", home);
-	runHealth({ stateDir: join(home, layout.state), probes: hostProbes({ home }), warn: () => (new Date().getMinutes() < 5 ? piDriftWarning(PACKAGE_ROOT, spawnRun(process.env), new Date()) : undefined) }).then(
+	runHealth({ stateDir: join(home, layout.state), probes: hostProbes({ home }), warn: hostDriftWarn() }).then(
 		(record) => {
 			console.error(`health: ${healthSummary(record)}`);
 			process.exit(0);
