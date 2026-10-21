@@ -1850,6 +1850,32 @@ test("doctor names an unreadable drift read as a warn finding carrying the error
 	assert.equal(ok[0]?.detail, undefined);
 });
 
+// gh exits 1 with its reason on stderr only; the finding must carry exit status and stderr. Control: gh ok has no detail.
+test("doctor carries gh's exit status and stderr in the unreadable host.pi.drift detail", async (t) => {
+	const home = fixture(t);
+	const doctor = (gh: { status: number; stdout: string; stderr: string }) =>
+		new Doctor({
+			home: home.home.path,
+			packageRoot: REPO_ROOT,
+			fleet: new FleetStore({ home: home.home.path }),
+			run: (command, args, cwd) => {
+				const released = new Date(NOW.getTime() - 20 * 86_400_000).toISOString();
+				if (command === "npm") return { status: 0, stdout: JSON.stringify({ "1.9.9": released }), stderr: "" };
+				if (command === "gh") return gh;
+				return healthyRunner()(command, args, cwd);
+			},
+			which: ALL_PRESENT,
+			env: {},
+			now: () => NOW,
+			piProbe: () => ({ version: "1.9.9", extension: { ok: true, detail: "" } }),
+		}).run();
+	const failed = find(await doctor({ status: 1, stdout: "", stderr: "gh: To get started with GitHub CLI, run: gh auth login" }), "host.pi.drift");
+	const unknown = failed.find((f) => f.what.includes("unknown"));
+	assert.match(unknown?.detail ?? "", /^gh pr list .*: exit 1; stdout: \(empty\); stderr: gh: To get started with GitHub CLI/);
+	const ok = find(await doctor({ status: 0, stdout: "[]", stderr: "" }), "host.pi.drift");
+	assert.equal(ok.some((f) => f.what.includes("unknown")), false);
+});
+
 // A throwing probe is an incompatible pi, never "piCompat is unreadable"; the control reads a broken package.json.
 test("doctor reports a throwing pi probe as incompatible, not as unreadable piCompat", async (t) => {
 	const home = fixture(t);
