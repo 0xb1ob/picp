@@ -183,6 +183,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P2e | 02 | `tests/e2e/authority.test.ts` | adds 02-15 to 02-17 |
 | P3 | 05 | `tests/e2e/landing.test.ts` | 4 (05-1 to 05-4) |
 | P3b | 05 | `tests/e2e/landing.test.ts` | adds 05-5 to 05-7 |
+| P3c | 05 | `tests/e2e/landing.test.ts` | adds 05-8 to 05-13; seven original paths reconciled, unproved assertions retained |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
