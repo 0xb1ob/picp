@@ -435,8 +435,8 @@ export class HeldContinuation {
 
 	#parked(jobId: string, result: IntegrateResult, outcome: ContinuationOutcome): ContinuationOutcome {
 		const deliver = this.#deps.relay ?? ((notice: { content: string }) => operatorNotify(undefined, notice.content));
-		const cycle = this.#deps.fleet.get(jobId)?.awaiting_merge?.cycle ?? 0;
 		try {
+			const cycle = this.#deps.fleet.get(jobId)?.awaiting_merge?.cycle ?? 0;
 			const lines = [`HELD PR PARKED — ${jobId} (with the team, awaiting_merge cycle ${cycle})`, `  ${result.reason}`, ...(result.pr_url ? [`  ${result.pr_url}`] : [])];
 			deliver({ id: boundedWakeupId(`continuation:parked:${jobId}:${cycle}`), job_id: jobId, content: lines.join("\n") });
 		} catch {
@@ -454,8 +454,13 @@ export class HeldContinuation {
 	}
 
 	#notice(jobId: string, tag: string, next: string, reason: string, prUrl?: string): void {
-		const generation = (this.#deps.fleet.get(jobId)?.supersessions ?? 0) + 1;
 		try {
+			let generation = 1;
+			try {
+				generation = (this.#deps.fleet.get(jobId)?.supersessions ?? 0) + 1;
+			} catch {
+				// An unreadable fleet must not swallow the notice that reports it.
+			}
 			const deliver = next === "done" ? (this.#deps.relay ?? ((notice) => operatorNotify(undefined, notice.content))) : this.#deps.notify;
 			deliver({
 				id: boundedWakeupId(next === "done" ? `continuation:done:${jobId}:${generation}` : `continuation:${jobId}:${generation}:${tag}`),
