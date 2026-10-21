@@ -16,7 +16,7 @@ export const qualifyTitle = (version: string): string => `qualify pi ${version}`
 export interface PiDriftFacts { releasedAt?: Date; qualifyPr?: string; prListed?: boolean }
 export type Sh = (command: string, args: string[]) => { status: number | null; stdout: string };
 
-/** Release time of `version` (npm `time`) and the open qualify PR for it; each is undefined when unreadable. */
+/** Release time of `version` (npm `time`) and the open qualify PR; a failed command leaves a fact undefined, unparsable output throws. */
 export function readDriftFacts(version: string, sh: Sh): PiDriftFacts {
 	const facts: PiDriftFacts = {};
 	// a throwing runner or unparsable output propagates: callers surface it, never read it as "no drift"

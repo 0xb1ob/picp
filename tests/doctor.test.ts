@@ -1840,7 +1840,7 @@ test("doctor names an unreadable drift read as a warn finding carrying the error
 	assert.match(bad?.detail ?? "", /JSON/);
 	const released = new Date(NOW.getTime() - 20 * 86_400_000).toISOString();
 	const [ok] = find(await doctor(JSON.stringify({ "1.9.9": released })), "host.pi.drift");
-	assert.doesNotMatch(ok?.what ?? "", /could not be read/);
+	assert.match(ok?.what ?? "", /above the tested/);
 });
 
 // A throwing probe is an incompatible pi, never "piCompat is unreadable"; the control reads a broken package.json.
@@ -1853,6 +1853,7 @@ test("doctor reports a throwing pi probe as incompatible, not as unreadable piCo
 	};
 	const [thrown] = find(await doctor(REPO_ROOT, boom), "host.pi.compat");
 	assert.equal(thrown?.severity, "error");
+	assert.match(thrown?.fix ?? "", /install a pi in the supported range/); // the incompatible state's fix, not old's
 	assert.match(thrown?.what ?? "", /probe failed: spawn exploded/);
 	assert.doesNotMatch(thrown?.what ?? "", /unreadable/);
 	const empty = mkdtempSync(join(tmpdir(), "cp-nopkg-"));
