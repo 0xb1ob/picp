@@ -57,6 +57,31 @@ function seed(home: ReturnType<typeof createScratchHome>, now: number) {
 	return { ids, put, at };
 }
 
+/** The real viewer on `home`: a timed GET that must answer 200, and the start-up warm's log line as a promise. */
+async function serve(t: { after: (fn: () => void) => void }, home: ReturnType<typeof createScratchHome>) {
+	let warmed!: (value: { at: number; ms: number }) => void, failed!: (error: Error) => void;
+	const warm = new Promise<{ at: number; ms: number }>((resolve, reject) => { warmed = resolve; failed = reject; });
+	const log = (line: string) => {
+		const done = /caches warm in (\d+) ms/.exec(line);
+		if (done) warmed({ at: performance.now(), ms: Number(done[1]) });
+		else if (line.includes("pre-warm failed")) failed(new Error(line));
+	};
+	const options = { home: home.path, stateDir: join(home.path, LAYOUT.state), host: "127.0.0.1", port: 0, log };
+	const server = createViewer(options);
+	const stages = new Map<string, number>();
+	server.on("warm", (view: string) => stages.set(view, performance.now()));
+	await new Promise<void>((r) => server.listen(0, options.host, r));
+	t.after(() => server.close());
+	const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+	const get = async (path: string) => {
+		const start = performance.now();
+		const res = await fetch(`${base}${path}`);
+		const body = await res.text();
+		assert.equal(res.status, 200, `${path}: ${body.slice(0, 200)}`);
+		return { body, ms: performance.now() - start, end: performance.now() };
+	};
+	return { get, warm, stages };
+}
 
 /**
  * The slow-dashboard report: /api/stats, /api/jobs and /api/map took 1-5 s warm on a ~1000-run home, uncached.
@@ -67,18 +92,7 @@ test("viewer endpoints stay fast when warm on a 1000-run home, and still see edi
 	const home = createScratchHome(); t.after(() => home.cleanup());
 	const now = Date.now();
 	const { ids, put, at } = seed(home, now);
-	const options = { home: home.path, stateDir: join(home.path, LAYOUT.state), host: "127.0.0.1", port: 0 };
-	const server = createViewer(options);
-	await new Promise<void>((r) => server.listen(0, options.host, r));
-	t.after(() => server.close());
-	const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-	const get = async (path: string) => {
-		const start = performance.now();
-		const res = await fetch(`${base}${path}`);
-		const body = await res.text();
-		assert.equal(res.status, 200, `${path}: ${body.slice(0, 200)}`);
-		return { body, ms: performance.now() - start };
-	};
+	const { get } = await serve(t, home);
 	for (const path of ["/api/stats", "/api/jobs", "/api/map", "/api/schedules", "/api/overview"]) {
 		const cold = await get(path);
 		const warm = [await get(path), await get(path), await get(path)];
@@ -104,4 +118,37 @@ test("viewer endpoints stay fast when warm on a 1000-run home, and still see edi
 		payload: { message: { role: "assistant", usage: { input: 5000, output: 5000 } } } }) + "\n");
 	const after = JSON.parse((await get("/api/stats")).body) as StatsResponse;
 	assert.notDeepEqual(after.kpis, stats.kpis, "an appended event shows in the stats");
+});
+
+/**
+ * The viewer restarts on every self-update, so its first Jobs request was the cold one (3.3 s on the slow home).
+ * After listen it builds the caches in the background and logs `caches warm`; the first /api/jobs after that line
+ * is warm-fast. The budget's fallback compares with the build itself, which paid the cold reads.
+ */
+test("a restarted viewer warms its caches after listen; the first /api/jobs after the warm line is fast", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	seed(home, Date.now());
+	const { get, warm } = await serve(t, home);
+	const built = await warm;
+	const first = await get("/api/jobs");
+	t.diagnostic(`warm build ${built.ms} ms; first /api/jobs ${first.ms.toFixed(0)} ms`);
+	assert.equal((JSON.parse(first.body) as JobsResponse).jobs.length, RUNS);
+	assert.ok(first.ms < BUDGET_MS || first.ms < built.ms * BUDGET_RATIO, `first /api/jobs ${first.ms.toFixed(0)} ms after a ${built.ms} ms warm build`);
+});
+
+/**
+ * Mid-warm, other screens are still served (the build yields between small steps), and a Jobs request waits for the
+ * build's jobs stage instead of scanning the same runs beside it, so it answers only after the `warm` jobs event.
+ */
+test("during the start-up warm, other requests are served and a slow view shares the build", async (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	seed(home, Date.now());
+	const { get, warm, stages } = await serve(t, home);
+	const [schedules, jobs, built] = await Promise.all([get("/api/schedules"), get("/api/jobs"), warm]);
+	const jobsWarm = stages.get("jobs");
+	t.diagnostic(`schedules ${schedules.ms.toFixed(0)} ms, jobs ${jobs.ms.toFixed(0)} ms, warm build ${built.ms} ms`);
+	assert.ok(jobsWarm !== undefined && stages.has("map") && stages.has("stats"), "each view's warm event fires");
+	assert.ok(schedules.end < jobsWarm, "a cheap screen is not held behind the build");
+	assert.ok(jobs.end >= jobsWarm, "a Jobs request mid-warm answers from the build's jobs stage");
+	assert.equal((JSON.parse(jobs.body) as JobsResponse).jobs.length, RUNS);
 });

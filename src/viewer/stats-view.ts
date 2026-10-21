@@ -86,18 +86,38 @@ function eventScanner(limits: ScanLimits) {
 const PARENT_FILE_BYTES = 64 * 1024 * 1024;
 const ARCHIVE = /^cp-parent(?:-\d+-[a-f0-9]{8})?\.jsonl$/;
 const parentCaches = new Map<string, (file: string) => { turns: ParentTurn[]; truncated: boolean }>();
-/** Parent turns from the live session file and archives touched in the last 30 days; cached per file identity. */
-function parentStats(state: ViewerState, now: number, warnings: StatsResponse["warnings"]): StatsResponse["parent"] {
+function parentReader(state: ViewerState) {
  let read = parentCaches.get(state.stateDir);
  if (!read) parentCaches.set(state.stateDir, read = fileCache(file => { const t = parentTranscript(state, file, PARENT_FILE_BYTES); return { turns: parentTurns(t.entries), truncated: t.truncated }; }, v => v.turns.length * 64));
+ return read;
+}
+/** The live parent session file and archives touched in the last 30 days. */
+function parentFiles(state: ViewerState, now: number): string[] {
  const dir = join(state.stateDir, "sessions");
  let names: string[] = []; try { names = readdirSync(dir).filter(n => ARCHIVE.test(n)); } catch { /* no sessions dir: only the live file */ }
- const files = [...new Set([parentFile(state), ...names.map(n => join(dir, n))])].filter(f => { try { return statSync(f).mtimeMs >= now - 30 * DAY_MS; } catch { return false; } });
+ return [...new Set([parentFile(state), ...names.map(n => join(dir, n))])].filter(f => { try { return statSync(f).mtimeMs >= now - 30 * DAY_MS; } catch { return false; } });
+}
+/** Parent turns from the live session file and archives touched in the last 30 days; cached per file identity. */
+function parentStats(state: ViewerState, now: number, warnings: StatsResponse["warnings"]): StatsResponse["parent"] {
+ const read = parentReader(state);
+ const files = parentFiles(state, now);
  const turns: ParentTurn[] = []; let truncated = 0, failed = 0;
  for (const f of files) { try { const r = read(f); turns.push(...r.turns); if (r.truncated) truncated++; } catch { failed++; } }
  if (failed) warnings.push({ section: "parent", message: `${failed} parent session file(s) are unreadable and left out of the Parent figures.` });
  if (truncated) warnings.push({ section: "parent", message: `${truncated} parent session file(s) exceed 64 MiB; only their last 64 MiB count.` });
  return files.length > failed ? [parentWindow(turns, now, 7), parentWindow(turns, now, 30)] : null;
+}
+
+/** The default view's cold reads as small steps (each parent file, each finished run's logs), for a background warm. */
+export function statsWarmSteps(state: ViewerState, now: number): (() => void)[] {
+ const q = parseStatsQuery(new URLSearchParams(), now);
+ if ("error" in q) return [];
+ const read = parentReader(state); const scan = eventScanner(DEFAULT_LIMITS);
+ const finished = jobsView(state, now).jobs.filter(j => { const t = at(j.finished_at); return t !== undefined && t >= q.from && t < q.to && classifyFinished(j) !== null; });
+ return [
+  ...parentFiles(state, now).map(f => () => { try { read(f); } catch { /* the view itself counts it unreadable */ } }),
+  ...finished.map(j => () => { scan.walk(jobEventsFile(state, j.id), ""); for (const r of reviewers(state, j.id)) scan.walk(r.events, "", true); }),
+ ];
 }
 
 export function statsView(state: ViewerState, params: URLSearchParams, now: number, limits: ScanLimits = DEFAULT_LIMITS): { status: 200; body: StatsResponse } | { status: 400; body: { error: string } } {

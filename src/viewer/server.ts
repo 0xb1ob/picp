@@ -28,6 +28,7 @@ import { resolve } from "node:path";
 import { boardView, jobsView, jobView, jobEvents } from "./jobs-view.ts";
 import { statsView } from "./stats-view.ts";
 import { statScope } from "./file-cache.ts";
+import { prewarm, warming } from "./prewarm.ts";
 import { reportsView } from "./reports-view.ts";
 import { jobReport, reportImage } from "./job-report.ts";
 import { schedulesView } from "./schedules-view.ts";
@@ -352,16 +353,17 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			send(res, 200, "application/json; charset=utf-8", JSON.stringify({ ...sidebar(options), boards: listBoards(options, warn) }));
 			return;
   }
-		case "/api/stats": {
-			const out = statScope(() => statsView(options, url.searchParams, Date.now()));
-			if (out.status === 200) sendView(req, res, out.body); else sendJson(res, out.status, out.body);
+		case "/api/stats":
+			afterWarm(options, "stats", () => {
+				const out = statScope(() => statsView(options, url.searchParams, Date.now()));
+				if (out.status === 200) sendView(req, res, out.body); else sendJson(res, out.status, out.body);
+			});
 			return;
-		}
 		case "/api/jobs":
-			sendView(req, res, statScope(() => jobsView(options)));
+			afterWarm(options, "jobs", () => sendView(req, res, statScope(() => jobsView(options))));
 			return;
 		case "/api/board":
-			sendView(req, res, statScope(() => boardView(options)));
+			afterWarm(options, "jobs", () => sendView(req, res, statScope(() => boardView(options))));
 			return;
 		case "/api/reports":
 			sendView(req, res, reportsView(options, warn));
@@ -373,7 +375,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			sendView(req, res, statScope(() => overview(options)));
 			return;
 		case "/api/map":
-			sendView(req, res, statScope(() => dependencyMap(options)));
+			afterWarm(options, "map", () => sendView(req, res, statScope(() => dependencyMap(options))));
 			return;
 		case "/api/dashboard":
 			sendJson(res, 200, statScope(() => dashboard(options)));
@@ -477,7 +479,17 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 	}
 }
 
+/** A slow view requested during the start-up warm waits for its stage: one scan of each run, never two side by side. */
+function afterWarm(options: ViewerOptions, view: Parameters<typeof warming>[1], respond: () => void): void {
+	const pending = warming(options, view);
+	if (pending) void pending.then(respond); else respond();
+}
+
 export function createViewer(options: ViewerOptions): Server {
-	const warn = onceWarner(options.log ?? ((line) => process.stderr.write(line)));
-	return createServer((req, res) => handle(req, res, options, warn));
+	const log = options.log ?? ((line) => process.stderr.write(line));
+	const warn = onceWarner(log);
+	const server = createServer((req, res) => handle(req, res, options, warn));
+	// After listen, never before: the build runs in small turns behind requests. Each warm view emits `warm` (its name).
+	server.once("listening", () => prewarm(options, log, (view) => server.emit("warm", view)));
+	return server;
 }
