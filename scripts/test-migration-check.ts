@@ -87,6 +87,14 @@ export function deletedWithFeatureFindings(path: string, owner: string, evidence
 	return findings;
 }
 
+/** A `retained` assertion row: its note names the kept test file, other than the unit itself, that still holds it. */
+export function retainedFindings(path: string, assertion: string, note: string, exists: (path: string) => boolean): string[] {
+	if (!note) return [`${path}: "${assertion}" is retained with no note naming where it is kept`];
+	const kept = [...note.matchAll(/\btests\/[\w./-]+\.test\.ts\b/g)].map((match) => match[0]).filter((file) => file !== path);
+	if (kept.some(exists)) return [];
+	return [`${path}: "${assertion}" is retained but its note names no kept test file in the tree (got ${kept.join(", ") || "none"})`];
+}
+
 /**
  * Lost declarations in kept files: each `feature-removed` row names a title present at the baseline, absent from the
  * tree, and the removing PR/job; a file's net loss must be covered by that many rows.
@@ -194,7 +202,7 @@ function main(): number {
 			if (!note) findings.push(`${path}: "${assertion}" is unreachable with no reason`);
 			unmapped.set(path, (unmapped.get(path) ?? 0) + 1);
 		} else if (status === "retained") {
-			if (!note) findings.push(`${path}: "${assertion}" is retained with no note naming where it is kept`);
+			findings.push(...retainedFindings(path, assertion, note, existsSync));
 		} else if (!pinned) findings.push(`${path}: "${assertion}" has unknown disposition "${status}"`);
 	}
 
