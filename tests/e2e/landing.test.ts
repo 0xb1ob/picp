@@ -1878,6 +1878,7 @@ test("landing: parked PR timer stores native CI for each observed head without r
 		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.head_sha === next && row.last_ci === "in_progress", { timeoutMs: 30_000, what: "moved parked head pending" });
 		state(next, [run(110, next, "completed", "failure")]);
 		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.last_ci === "failed", { timeoutMs: 30_000, what: "parked red" });
+		await waitFor(observations, (list) => list.length >= 2, { timeoutMs: 10_000, what: "parked red journaled" });
 		assert.deepEqual(observations().map((entry) => [entry.event, entry.head_sha]), [["ci_green", live.head], ["ci_failed", next]], "parked terminal transitions are journaled once for their own head");
 		assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge");
 		assert.equal(s.post.manager.get(live.jobId), undefined, "native CI does not revive the released author");
