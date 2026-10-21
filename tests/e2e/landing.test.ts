@@ -12,13 +12,18 @@ import { basename, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "../../src/ci-access.ts";
 import { CommandPost } from "../../src/command-post.ts";
-import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { CI_EVIDENCE_KEEP, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { drainFile } from "../../src/drain.ts";
 import type { ForgeConfig } from "../../src/forge-url.ts";
+import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { formatMerge, readMergeReceipt } from "../../src/merges.ts";
 import { formatStatusTable } from "../../src/status.ts";
+import { createViewer } from "../../src/viewer/server.ts";
+import type { AddressInfo } from "node:net";
 import {
+	COMMAND_POST_EXTENSION,
+	startPiChild,
 	advanceBase,
 	createAgentDir,
 	createScratchHome,
@@ -48,8 +53,11 @@ interface RunRow {
 	status: string | number | null;
 	conclusion: string | null;
 	name: string;
+	event?: string;
+	triggering_actor?: { login: string };
 }
 interface Reply {
+	untilFile?: string;
 	code?: number | "signal";
 	stdout?: string;
 	stderr?: string;
@@ -182,6 +190,7 @@ if (args[0] === "run" && args[1] === "rerun") {
 }
 const state = JSON.parse(readFileSync(${JSON.stringify(stateFile)}, "utf8"));
 const reply = (r) => {
+  while (r.untilFile && !existsSync(r.untilFile)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
   if (r.code === "signal") process.kill(process.pid, "SIGKILL");
   if (r.stdout) process.stdout.write(r.stdout);
   if (r.stderr) process.stderr.write(r.stderr);
@@ -245,8 +254,8 @@ process.exit(1);
 	chmodSync(join(bin, "gh"), 0o755);
 }
 
-/** Real CommandPost over a registered scratch project; no held-PR continuation, so every cp_integrate is the test's. */
-async function startStack(t: TestContext, options: { project?: boolean; env?: Record<string, string> } = {}) {
+/** Real CommandPost, workers and optional held continuation over a registered scratch project. */
+async function startStack(t: TestContext, options: { project?: boolean; env?: Record<string, string>; continuation?: boolean } = {}) {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", "src/a.ts": "a1\n", "src/b.ts": "b1\n" } });
 	const provider = await MockProvider.start();
@@ -273,7 +282,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 	const saved = { PATH: process.env.PATH, CP_CI_WATCH_SECONDS: process.env.CP_CI_WATCH_SECONDS };
 	process.env.PATH = `${bin}:${saved.PATH ?? ""}`;
 	process.env.CP_CI_WATCH_SECONDS = "1";
-	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agentDir.env }, holdsParentLock: () => true });
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agentDir.env }, holdsParentLock: () => true, continuation: options.continuation });
 	t.after(async () => {
 		process.env.PATH = saved.PATH;
 		if (saved.CP_CI_WATCH_SECONDS === undefined) delete process.env.CP_CI_WATCH_SECONDS;
@@ -302,7 +311,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 	const remoteHead = (branch: string) =>
 		execFileSync("git", ["ls-remote", repo.remote as string, `refs/heads/${branch}`], { encoding: "utf8" }).split("\t")[0]?.trim() ?? "";
 	/** A fresh job whose implementer runs `command` (default: commit and push), reports and stands by; resolves once held. */
-	const held = async (title: string, number: number, over: { delivery?: "local"; command?: (branch: string) => string } = {}) => {
+	const held = async (title: string, number: number, over: { delivery?: "local"; command?: (branch: string) => string; repair?: boolean } = {}) => {
 		const job = await post.ledger().create({ title, project: "demo", delivery: over.delivery ?? "pr", kind: "ship" });
 		const prUrl = `https://github.com/example/demo/pull/${number}`;
 		const pr = over.delivery ? {} : { pr_url: prUrl };
@@ -317,6 +326,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 			{ kind: "tool_calls", calls: [{ name: "bash", args: { command } }] },
 			report,
 			{ kind: "text", text: "standing by" },
+			...(over.repair ? [{ kind: "tool_calls" as const, calls: [{ name: "bash", args: { command: `git commit --quiet --allow-empty -m repair && git push --quiet origin ${job.id}` } }] }] : []),
 			report,
 			{ kind: "text", text: "standing by" },
 		];
@@ -367,7 +377,33 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 		});
 		return { jobId: job.id, prUrl: prUrl || undefined, branch: over.branch ?? job.id };
 	};
-	return { home: home.path, remote: repo.remote as string, repo, post, gh, setGh, held, seed, project, ghCalls, integrate, tick };
+	let parentSeq = 0;
+	const parent = async (prompt: string, steps: ScriptStep[], settled?: () => Promise<void>) => {
+		const script = `landing-parent-${++parentSeq}`;
+		const model = provider.addScript(script, steps, { onExhausted: "repeat" });
+		// Recovery notices can request a turn before the operator's quote arrives.
+		const startup = provider.addScript(`${script}-startup`, [{ kind: "text", text: "Startup notices observed." }], { onExhausted: "repeat" });
+		agentDir.writeModels(provider);
+		const child = startPiChild({ cwd: home.path, model: startup, env: { ...agentDir.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+		try {
+			await child.prompt(prompt);
+			await waitFor(() => provider.requests(`${script}-startup`).some((request) => JSON.stringify(request.body.messages).includes(prompt.split("\n")[0]!)), Boolean, { timeoutMs: 90_000, what: "operator request reaches parent context" });
+			await child.waitForSettled(90_000);
+			const [providerId, modelId] = model.split("/");
+			child.send({ id: script, type: "set_model", provider: providerId, modelId });
+			const switched = await child.waitFor((event) => event.type === "response" && event.id === script);
+			assert.equal(switched.success, true, JSON.stringify(switched));
+			await child.prompt("Continue the operator request already in context.");
+			await waitFor(() => provider.remaining(script), (remaining) => remaining === 0, { timeoutMs: 90_000, what: "operator script consumed" });
+			await child.waitForSettled(90_000);
+			assert.equal(provider.remaining(script), 0);
+			await settled?.();
+			return child.eventsOfType("tool_execution_end");
+		} finally {
+			await child.close();
+		}
+	};
+	return { home: home.path, remote: repo.remote as string, repo, post, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent };
 }
 
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
@@ -914,10 +950,22 @@ test(
 			return down.landing as NonNullable<typeof down.landing>;
 		};
 
+		const unpushed = async (jobId: string, label: string) => {
+			const down = await s.post.tearDown(jobId);
+			assert.deepEqual([down.torn_down, down.failure?.code], [false, "unpushed"], `${label}: ${JSON.stringify(down)}`);
+			assert.match(down.failure?.message ?? "", /survives here only as a stale remote-tracking ref .* and origin\/main does not contain its content/, label);
+		};
+
 		// An ordinary merge commit keeps the head an ancestor of the base.
 		const merged = await local("merge commit", (b) => push(b, "printf 'm1\\n' > src/merge.ts"));
 		mergeAndDeleteHead(s.repo, merged.jobId);
 		await landed(merged.jobId, "ancestry");
+
+		const extra = await local("post-squash extra commit", (b) => push(b,
+			"printf 'first\\n' > src/post-squash.ts && git add -A && git commit -q -m first && printf 'extra\\n' > src/post-squash-extra.ts"));
+		landOnOrigin(s.repo, "printf 'first\\n' > src/post-squash.ts", "only the earlier commit landed");
+		git(s.remote, "branch", "-D", extra.jobId);
+		await unpushed(extra.jobId, "post-squash extra commit remains unlanded");
 
 		// Two commits squashed into one new sha between unrelated base commits, then a later edit of a touched file:
 		// an older base commit at or after the squash is the witness, every changed path (a deletion too) is compared.
@@ -955,11 +1003,6 @@ test(
 		assert.equal(git(stale.worktree, "rev-parse", "refs/remotes/origin/main"), staleSquash, "the worktree's tracking ref holds the squash");
 		git(s.remote, "update-ref", "refs/heads/main", `${staleSquash}^`);
 		advanceBase(s.repo, "docs/elsewhere.md", "# moved elsewhere\n");
-		const unpushed = async (jobId: string, label: string) => {
-			const down = await s.post.tearDown(jobId);
-			assert.deepEqual([down.torn_down, down.failure?.code], [false, "unpushed"], `${label}: ${JSON.stringify(down)}`);
-			assert.match(down.failure?.message ?? "", /survives here only as a stale remote-tracking ref .* and origin\/main does not contain its content/, label);
-		};
 		await unpushed(stale.jobId, "stale tracking ref");
 
 		// One near miss at a time on origin (whitespace, a binary byte, the mode, a symlink, an unlanded delete, half
@@ -982,3 +1025,358 @@ test(
 		assert.equal((await landed(near.jobId, "path_tree")).paths, 6);
 	},
 );
+
+
+test("landing: CI watch persists arrival and attempt identity, follows pushed heads and prunes finished deliveries", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("watch attempts and heads", 101);
+	const observe = async (rows: RunRow[]) => {
+		s.setGh({ runs: rows });
+		return s.tick(live.jobId);
+	};
+	const pending = await observe([run(101, live.head, "in_progress", null)]);
+	assert.deepEqual(pending.observations, [], "pending is not a verdict");
+	const first = await observe([run(101, live.head, "completed", "failure")]);
+	const failed = first.observations.find((fact) => fact.event === "ci_failed");
+	assert.ok(failed, "the failed current head is observed");
+	assert.equal(failed.run_id, 101);
+	assert.deepEqual(s.post.confirmCi([failed.key]), [failed.key]);
+	assert.deepEqual(s.post.confirmCi([failed.key]), [], "arrival is idempotent");
+	assert.deepEqual((await observe([run(101, live.head, "completed", "failure")])).observations, [], "an arrived attempt is not announced again");
+	assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "ci_observed").length, 1, "one journal event per completed attempt");
+	assert.deepEqual((await observe([run(101, live.head, "in_progress", null, { run_attempt: 2 })])).observations, [], "a running rerun is not terminal");
+	const retry = await observe([run(101, live.head, "completed", "failure", { run_attempt: 2 })]);
+	const retried = retry.observations.find((fact) => fact.event === "ci_failed");
+	assert.ok(retried, "a new attempt is a new failure even on the same head");
+	assert.notEqual(retried.key, failed.key);
+	s.post.confirmCi([retried.key]);
+	assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "ci_observed").length, 2);
+	const green = await observe([run(101, live.head, "completed", "success", { run_attempt: 3 })]);
+	const passed = green.observations.find((fact) => fact.event === "ci_green");
+	assert.ok(passed, "a green rerun follows a failed attempt");
+	s.post.confirmCi([passed.key]);
+	assert.deepEqual((await observe([run(101, live.head, "completed", "success", { run_attempt: 3 })])).observations, [], "an arrived green attempt is not announced again");
+	execFileSync("git", ["-C", live.worktree, "commit", "--quiet", "--allow-empty", "-m", "new head"]);
+	execFileSync("git", ["-C", live.worktree, "push", "--quiet", "origin", live.jobId]);
+	const head = git(live.worktree, "rev-parse", "HEAD");
+	assert.notEqual(head, live.head);
+	assert.deepEqual((await observe([run(101, live.head, "completed", "success")])).observations, [], "old green does not bless a pushed head");
+	assert.equal(s.post.ciHead(live.jobId), head);
+	const moved = await observe([run(102, head, "completed", "success")]);
+	const current = moved.observations.find((fact) => fact.event === "ci_green");
+	assert.ok(current, "the pushed head gets its own verdict");
+	assert.equal(current.head_sha, head);
+	assert.notEqual(current.key, passed.key);
+	assert.equal(s.post.ciWatch.store.job(live.jobId)?.last_ci, "green");
+	assert.ok(readRunEvents(s.home, live.jobId).some((event) => event.type === "ci_observed"));
+	assert.deepEqual(mergedCalls(s.ghCalls()), [], "observing CI does not merge");
+	await s.post.fleet.patch(live.jobId, { phase: "done" });
+	await s.post.ciTick();
+	assert.equal(s.post.ciWatch.store.job(live.jobId), undefined, "finished deliveries leave the watch");
+});
+
+
+test("landing: operator-forwarded CI requires a quoted current head and never substitutes for native CI", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("forwarded evidence", 103);
+	s.setGh({ runs: [run(103, live.head, "in_progress", null)] });
+	await s.tick(live.jobId);
+	const quote = "CI is green on this head; I checked the Actions tab.";
+	const params = { job_id: live.jobId, action: "record_ci", result: "success", head_sha: live.head, operator_quote: quote };
+	const calls = [
+		{ ...params, operator_quote: "Trust me, it passed." },
+		{ ...params, head_sha: "b".repeat(40) },
+		{ ...params, url: "https://github.com/example/demo/actions?token=1" },
+		params,
+		params,
+	];
+	const results = await s.parent(quote, [
+		...calls.map((args): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "cp_integrate", args }] })),
+		{ kind: "text", text: "Evidence recorded." },
+	]);
+	const text = results.map((event) => JSON.stringify(event));
+	assert.match(text[0]!, /quote not found/);
+	assert.match(text[1]!, /superseded head/);
+	assert.match(text[2]!, /plain https url/);
+	assert.match(text[3]!, /display only, native CI still gates/);
+	const evidence = JSON.parse(readFileSync(join(s.home, paths.ciEvidenceFile(live.jobId)), "utf8"));
+	assert.equal(evidence.observations.length, 1, "an identical forwarded result is stored once");
+	assert.deepEqual([evidence.observations[0].head_sha, evidence.observations[0].source, evidence.observations[0].operator_quote], [live.head, "forwarded", quote]);
+	const advance = await s.integrate(live.jobId);
+	assert.equal(advance.record.next, "wait", advance.text);
+	assert.deepEqual(mergedCalls(s.ghCalls()), [], "forwarded success cannot merge pending native CI");
+	const file = join(s.home, paths.ciEvidenceFile(live.jobId));
+	assert.equal(evidence.repo, "example/demo");
+	assert.match(evidence.observations[0].observed_at, /^\d{4}-\d{2}-\d{2}T/);
+	const unknown = await s.held("forwarded CI without an observed head", 112);
+	s.setGh({ runs: [], routes: [{ match: "pulls/112", replies: [{ code: 1, stderr: "PR read unavailable" }] }] });
+	const token = "ghp_" + "x".repeat(36);
+	const secretQuote = `CI passed, token ${token}.`;
+	const guardCalls = [
+		{ ...params, job_id: unknown.jobId, head_sha: unknown.head },
+		{ ...params, head_sha: "abc1234" },
+		{ ...params, operator_quote: secretQuote },
+		{ ...params, url: `https://x:${token}@github.com/example/demo` },
+	];
+	const guards = await s.parent(`${quote}\n${secretQuote}`, [
+		...guardCalls.map((args): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "cp_integrate", args }] })),
+		{ kind: "text", text: "Validation observed." },
+	]);
+	for (const [index, pattern] of [/no known current head/, /full 40-hex/, /github token/, /plain https url/].entries()) {
+		assert.match(JSON.stringify(guards[index]), pattern, "forwarded evidence rejects invalid input through the tool");
+	}
+	assert.ok(!JSON.stringify(guards[2]).includes(token), "a secret rejection never echoes the credential");
+	assert.ok(!existsSync(join(s.home, paths.ciEvidenceFile(unknown.jobId))), "an unknown head writes no evidence");
+	assert.equal(JSON.parse(readFileSync(file, "utf8")).observations.length, 1, "refused observations never append");
+	writeFileSync(file, JSON.stringify({ ...evidence, repo: "other/repository" }));
+	const repositoryQuote = "CI passed for repository validation.";
+	const mismatch = await s.parent(repositoryQuote, [
+		{ kind: "tool_calls", calls: [{ name: "cp_integrate", args: { ...params, operator_quote: repositoryQuote } }] },
+		{ kind: "text", text: "Repository mismatch observed." },
+	]);
+	assert.match(JSON.stringify(mismatch), /is for other\/repository/, "evidence cannot be rebound to another repository");
+	writeFileSync(file, JSON.stringify(evidence));
+	const quotes = Array.from({ length: CI_EVIDENCE_KEEP + 1 }, (_, index) => `CI result number ${index}.`);
+	const bounded = await s.parent(quotes.join("\n"), [
+		...quotes.map((operator_quote): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "cp_integrate", args: { ...params, operator_quote, url: "https://github.com/example/demo/actions/runs/103" } }] })),
+		{ kind: "tool_calls", calls: [{ name: "cp_integrate", args: { ...params, result: "failure", operator_quote: quotes.at(-1) } }] },
+		{ kind: "text", text: "Bounded observations recorded." },
+	]);
+	assert.ok(bounded.every((event) => /display only/.test(JSON.stringify(event))), "every bounded forwarded write succeeds");
+	const history = JSON.parse(readFileSync(file, "utf8")).observations;
+	assert.equal(history.length, CI_EVIDENCE_KEEP, "forwarded history is bounded");
+	assert.equal(history[0].operator_quote, quotes[2], "oldest observations are discarded");
+	assert.deepEqual(history.slice(-2).map((entry: { result: string }) => entry.result), ["success", "failure"], "a changed result is a new observation");
+	assert.equal(history.at(-2).url, "https://github.com/example/demo/actions/runs/103");
+	const a = live.head;
+	const b = "b".repeat(40);
+	writeFileSync(file, JSON.stringify({ ...evidence, observations: [
+		{ head_sha: a, result: "failure", source: "forwarded", observed_at: "2026-10-15T11:00:00Z", operator_quote: "red." },
+		{ head_sha: a, result: "pending", source: "forwarded", observed_at: "2026-10-15T12:00:00Z", operator_quote: "running.", url: "https://x?y" },
+		{ head_sha: a, result: "success", source: "actions", observed_at: "2026-10-15T13:00:00Z" },
+		{ head_sha: b, result: "success", source: "forwarded", observed_at: "2026-10-15T14:00:00Z", operator_quote: "green." },
+	] }));
+	const view = async (head: string | null) => {
+		const watchFile = join(s.home, LAYOUT.ciWatchFile);
+		const watch = JSON.parse(readFileSync(watchFile, "utf8"));
+		for (const row of watch.jobs) if (row.job_id === live.jobId) row.head_sha = head;
+		writeFileSync(watchFile, JSON.stringify(watch));
+		const envelopeFile = join(s.home, paths.envelopeFile(live.jobId));
+		const envelope = JSON.parse(readFileSync(envelopeFile, "utf8"));
+		envelope.envelope.head_sha = head;
+		writeFileSync(envelopeFile, JSON.stringify(envelope));
+		const server = createViewer({ home: s.home, stateDir: join(s.home, LAYOUT.state), host: "127.0.0.1", port: 0, log: () => {} });
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		try {
+			const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/jobs`);
+			assert.equal(response.status, 200);
+			const body = await response.json() as { jobs: Array<{ id: string; ci_forwarded: unknown }> };
+			return body.jobs.find((job) => job.id === live.jobId)?.ci_forwarded;
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
+	};
+	assert.deepEqual(await view(a), { ci: "in_progress", observed_at: "2026-10-15T12:00:00Z", url: null }, "viewer ignores native and other-head evidence and strips unsafe URLs");
+	assert.deepEqual(await view(b), { ci: "green", observed_at: "2026-10-15T14:00:00Z", url: null });
+	assert.equal(await view("c".repeat(40)), null, "an unseen head has no forwarded evidence");
+	assert.equal(await view(null), null, "an unknown head has no forwarded evidence");
+	rmSync(file);
+	assert.equal(await view(a), null, "a missing file has no forwarded evidence");
+});
+
+
+test("landing: foreign CI stays read-only, follows the base repo's current head and stops after merge", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	await s.post.registry.update("demo", { clone_url: "https://github.com/example/demo" });
+	const prUrl = "https://github.com/example/demo/pull/104";
+	const job = await s.post.ledger().create({ title: "review foreign PR", project: "demo", delivery: "local", kind: "research", externalRef: prUrl, labels: ["schedule:sch-e2e"] });
+	const head = "a".repeat(40);
+	const next = "b".repeat(40);
+	const state = (sha: string, rows: RunRow[], terminal = false) => s.setGh({ runs: rows, routes: [{ match: "pulls/104", replies: [json({ number: 104, html_url: prUrl, state: terminal ? "closed" : "open", merged: terminal, merge_commit_sha: terminal ? MERGE : null, head: { sha, ref: "foreign" } })] }] });
+	const tick = async () => {
+		for (const deadline = Date.now() + 30_000; Date.now() < deadline;) {
+			const result = await s.post.foreignCiTick();
+			if (result.checked.includes(job.id)) return result;
+			await new Promise((resolve) => setTimeout(resolve, 200));
+		}
+		return assert.fail("foreign PR watch never became due");
+	};
+	await assert.rejects(s.post.dispatch({ jobId: job.id, task: "review", fetch: false }), /waits for CI/);
+	state(head, [run(104, head, "in_progress", null)]);
+	assert.deepEqual((await tick()).observations, []);
+	state(head, [run(104, head, "completed", "success")]);
+	assert.deepEqual((await tick()).observations.map((fact) => fact.event), ["ci_green"]);
+	assert.deepEqual((await tick()).observations, [], "foreign facts are reported once");
+	state(next, [run(105, next, "in_progress", null)]);
+	await assert.rejects(s.post.dispatch({ jobId: job.id, task: "review", fetch: false }), /PR head is now/);
+	assert.deepEqual((await tick()).observations.map((fact) => fact.event), ["head_moved"]);
+	state(next, [run(105, next, "completed", "failure")]);
+	assert.deepEqual((await tick()).observations.map((fact) => [fact.event, fact.head_sha]), [["ci_failed", next]]);
+	state(next, [], true);
+	assert.deepEqual((await tick()).observations.map((fact) => fact.event), ["pr_merged"]);
+	assert.deepEqual((await s.post.foreignCiTick()).checked, [], "terminal PR is no longer queried");
+	assert.ok(s.ghCalls().some((call) => call.includes(`repos/example/demo/actions/runs?head_sha=${next}`)), "CI is read from the base repository by head");
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+	assert.equal(s.post.fleet.get(job.id), undefined, "waiting reviewer never spawned");
+});
+
+
+test("landing: a real parent's timer latches only its mandated main runs and clears only current-tip green", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const tip = git(s.remote, "rev-parse", "main");
+	const routes: Route[] = [
+		{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] },
+		{ match: "run view 106 --log-failed", replies: [{ stdout: "test\t✖ main regression" }] },
+	];
+	const own = (head: string, conclusion: string, login = "e2e", event = "push") => run(login !== "e2e" ? 107 : event === "dynamic" ? 108 : 106, head, "completed", conclusion, { triggering_actor: { login }, event });
+	const file = join(s.home, LAYOUT.state, "main-ci.json");
+	const rows = (): Array<{ red_since_sha: string; login: string }> => existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).projects : [];
+	s.setGh({ routes, runs: [own(tip, "failure")] });
+	await s.parent("Observe the CI timer.", [{ kind: "text", text: "Observing." }], async () => {
+		s.post.mandates.issue({ projects: ["demo"], objective: "main CI e2e", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 10 });
+		await waitFor(rows, (value) => value.length === 1, { timeoutMs: 30_000, what: "main red latch" });
+		assert.deepEqual(rows().map((row) => [row.red_since_sha, row.login]), [[tip, "e2e"]]);
+		const latched = readFileSync(file, "utf8");
+		s.setGh({ routes, runs: [own("c".repeat(40), "success")] });
+		await waitFor(() => s.ghCalls().filter((call) => call.includes(`head_sha=${tip}`)).length, (count) => count >= 3, { timeoutMs: 30_000, what: "stale green checked" });
+		assert.equal(readFileSync(file, "utf8"), latched, "stale green never clears main red");
+		s.setGh({ routes, runs: [own(tip, "success"), own(tip, "failure", "someone-else"), own(tip, "failure", "e2e", "dynamic")] });
+		await waitFor(rows, (value) => value.length === 0, { timeoutMs: 30_000, what: "own current-tip green clears latch" });
+	});
+	assert.deepEqual(mergedCalls(s.ghCalls()), [], "the main CI timer never merges");
+});
+
+
+test("landing: parked PR timer stores native CI for each observed head without reviving its released worker", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("parked CI", 109);
+	await s.post.registry.setMergePolicy("demo", "human_handoff");
+	const parked = await s.post.awaitingMerge.park(live.jobId, { pr_url: live.prUrl, repo: "example/demo", head_sha: live.head, base: "main", handed_at: isoTimestamp() });
+	assert.equal(parked.parked, true, JSON.stringify(parked));
+	const page = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
+	const state = (head: string, runs: RunRow[], response?: Reply, status = "OPEN") => s.setGh({ runs, routes: [
+		{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] },
+		{ match: "api graphql", replies: [json({ data: { rateLimit: { remaining: 5000 }, p0: { pullRequest: { url: live.prUrl, number: 109, state: status, headRefOid: head, headRefName: live.jobId, baseRefName: "main", mergedAt: status === "MERGED" ? isoTimestamp() : null, mergeCommit: status === "MERGED" ? { oid: MERGE } : null, latestOpinionatedReviews: { nodes: [] }, comments: page, reviews: page }, stacked: { nodes: [] } } } })] },
+		...(response ? [{ match: "actions/runs?head_sha=", replies: [response] }] : []),
+	] });
+	const queries = (head: string) => s.ghCalls().filter((call) => call.includes(`actions/runs?head_sha=${head}`)).length;
+	const observations = () => readRunEvents(s.home, live.jobId).filter((event) => event.type === "ci_observed").map((event) => event.payload as { event: string; head_sha: string });
+	const watchFile = join(s.home, LAYOUT.awaitingMergeWatchFile);
+	state(live.head, [run(109, live.head, "completed", "success")]);
+	await s.parent("Observe parked PR CI.", [{ kind: "text", text: "Observing parked CI." }], async () => {
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.last_ci === "green", { timeoutMs: 30_000, what: "parked green through extension timer" });
+		await waitFor(() => existsSync(watchFile) && JSON.parse(readFileSync(watchFile, "utf8")).prs.some((row: { head_sha: string }) => row.head_sha === live.head), Boolean, { timeoutMs: 10_000, what: "green sweep finishes" });
+		const greenReads = queries(live.head);
+		const greenSweep = readFileSync(watchFile, "utf8");
+		await waitFor(() => readFileSync(watchFile, "utf8"), (body) => body !== greenSweep, { timeoutMs: 10_000, what: "another parked sweep before the idle interval" });
+		assert.equal(queries(live.head), greenReads, "a settled head is not re-read before the idle interval");
+		state(live.head, [], { code: 1, stderr: "gh: Resource not accessible by integration (HTTP 403)" });
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.last_error?.includes("HTTP 403") === true, { timeoutMs: 30_000, what: "parked denied CI after green" });
+		assert.equal(s.post.ciWatch.store.job(live.jobId)?.last_ci, "unreadable", "permission denial replaces prior green");
+		assert.equal(s.post.ciWatch.store.job(live.jobId)?.consecutive_failures, 1);
+		const faultHead = "c".repeat(40);
+		state(faultHead, [], { code: 1, stderr: "upstream gateway failure (HTTP 502)" });
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.head_sha === faultHead, { timeoutMs: 30_000, what: "parked transient fault" });
+		assert.equal(s.post.ciWatch.store.job(live.jobId)?.last_ci, "unknown", "a transient fault is unknown");
+		assert.equal(s.post.ciWatch.store.job(live.jobId)?.consecutive_failures, 2, "the observed head is stored before the fault");
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId)?.consecutive_failures, (count) => count === 3, { timeoutMs: 30_000, what: "another real transport fault grows the error interval" });
+		await waitFor(() => JSON.parse(readFileSync(watchFile, "utf8")).prs.some((row: { head_sha: string }) => row.head_sha === faultHead), Boolean, { timeoutMs: 10_000, what: "fault sweep finishes" });
+		const failedReads = queries(faultHead);
+		const failedChecked = Date.parse(s.post.ciWatch.store.job(live.jobId)!.last_checked_at!);
+		await waitFor(() => JSON.parse(readFileSync(watchFile, "utf8")).last_sweep_at as string, (at) => Date.parse(at) >= failedChecked + 1_250, { timeoutMs: 10_000, what: "parked sweeps exceed the base interval but remain inside error backoff" });
+		assert.equal(queries(faultHead), failedReads, "a failing head backs off instead of re-reading every sweep");
+		assert.deepEqual(observations().map((entry) => [entry.event, entry.head_sha]), [["ci_green", live.head]], "a fault journals nothing");
+		const next = "b".repeat(40);
+		state(next, [run(110, next, "in_progress", null)]);
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.head_sha === next && row.last_ci === "in_progress", { timeoutMs: 30_000, what: "moved parked head pending" });
+		state(next, [run(110, next, "completed", "failure")]);
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.last_ci === "failed", { timeoutMs: 30_000, what: "parked red" });
+		assert.deepEqual(observations().map((entry) => [entry.event, entry.head_sha]), [["ci_green", live.head], ["ci_failed", next]], "parked terminal transitions are journaled once for their own head");
+		assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge");
+		assert.equal(s.post.manager.get(live.jobId), undefined, "native CI does not revive the released author");
+		for (const [index, repark] of [false, true].entries()) {
+			const staleHead = (repark ? "e" : "d").repeat(40);
+			const id = 113 + index;
+			const untilFile = join(s.home, `release-ci-${id}`);
+			const oldReads = queries(staleHead);
+			state(staleHead, [run(id, staleHead, "completed", "success")], { ...json({ total_count: 1, workflow_runs: [run(id, staleHead, "completed", "success")] }), untilFile });
+			s.setGh({ jobs: { [id]: [{ id: id * 10, name: "test", status: "completed", conclusion: "success", steps: [{ name: "npm test", status: "completed", conclusion: "success" }] }] } });
+			await waitFor(() => queries(staleHead), (count) => count > oldReads, { timeoutMs: 30_000, what: "parked CI read reaches external barrier" });
+			const beforeSweep = readFileSync(watchFile, "utf8");
+			const legacyHandoff = s.post.fleet.require(live.jobId).awaiting_merge!;
+			await s.post.awaitingMerge.resume(live.jobId);
+			if (!repark) {
+				const fleetFile = join(s.home, LAYOUT.fleetFile);
+				const original = readFileSync(fleetFile, "utf8");
+				const legacy = JSON.parse(original);
+				legacy.jobs.find((job: { job_id: string }) => job.job_id === live.jobId).awaiting_merge = legacyHandoff;
+				try {
+					writeFileSync(fleetFile, JSON.stringify(legacy));
+					const rejected = await s.post.awaitingMerge.sweep();
+					assert.equal(rejected.observed, 0);
+					assert.match(rejected.errors.join("\n"), /violates the fleet contract/, "the public sweep rejects a legacy held parking record before observing CI");
+				} finally {
+					writeFileSync(fleetFile, original);
+				}
+			}
+			const park = async () => {
+				const result = await s.post.awaitingMerge.park(live.jobId, { pr_url: live.prUrl, repo: "example/demo", head_sha: live.head, base: "main", handed_at: isoTimestamp() });
+				assert.equal(result.parked, true, JSON.stringify(result));
+			};
+			if (repark) await park();
+			state(live.head, [run(109, live.head, "in_progress", null)]);
+			writeFileSync(untilFile, "release");
+			await waitFor(() => readFileSync(watchFile, "utf8"), (body) => body !== beforeSweep, { timeoutMs: 30_000, what: "parked sweep completes its delayed observation" });
+			assert.ok(!observations().some((entry) => entry.head_sha === staleHead), "resume or re-park drops the old cycle's terminal observation");
+			assert.notEqual(s.post.ciWatch.store.job(live.jobId)?.head_sha, staleHead, "a delayed old-cycle read cannot overwrite current CI");
+			if (!repark) {
+				const heldHead = "f".repeat(40);
+				state(heldHead, [run(115, heldHead, "completed", "success")]);
+				const heldSweep = readFileSync(watchFile, "utf8");
+				await waitFor(() => readFileSync(watchFile, "utf8"), (body) => body !== heldSweep, { timeoutMs: 10_000, what: "parked timer skips a held job" });
+				assert.equal(queries(heldHead), 0, "a held job is not read by the parked CI timer");
+				await park();
+			}
+		}
+		for (const status of ["CLOSED", "MERGED"]) {
+			const head = (status === "CLOSED" ? "1" : "2").repeat(40);
+			state(head, [run(116, head, "completed", "success")], undefined, status);
+			await waitFor(() => JSON.parse(readFileSync(watchFile, "utf8")).prs, (rows) => rows.some((row: { head_sha: string }) => row.head_sha === head), { timeoutMs: 30_000, what: `parked ${status} snapshot observed` });
+			assert.equal(queries(head), 0, "merged and closed snapshots do not read native CI");
+		}
+	});
+	assert.equal(s.post.fleet.require(live.jobId).phase, "done", "the final external merge is observed after CI lifecycle checks");
+	assert.equal(s.post.manager.get(live.jobId), undefined, "native CI does not revive the released author");
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+	assert.ok(readRunEvents(s.home, live.jobId).some((event) => event.type === "ci_observed"));
+});
+
+
+test("landing: held CI repairs the same real worker once while preserving an integration hold", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t, { continuation: true });
+	const live = await s.held("held CI repair", 111, { repair: true });
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	const identity = s.post.fleet.require(live.jobId);
+	const holds = new IntegrationHolds(s.home);
+	holds.hold(live.jobId, "QA in progress");
+	s.setGh({ runs: [run(111, live.head, "completed", "failure")] });
+	await s.tick(live.jobId);
+	const repaired = await waitFor(() => s.post.fleet.get(live.jobId), (record) => record?.phase === "held" && (record.supersessions ?? 0) === 1, { timeoutMs: 60_000, what: "same worker repair and second envelope" });
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.deepEqual([repaired?.worker.pid, repaired?.worker.session_id, repaired?.branch, repaired?.worktree], [identity.worker.pid, identity.worker.session_id, identity.branch, identity.worktree]);
+	assert.equal(holds.get(live.jobId)?.reason, "QA in progress");
+	assert.equal(s.post.integrator.get(live.jobId)?.resolve_attempts, 1);
+	const head = git(live.worktree, "rev-parse", "HEAD");
+	assert.notEqual(head, live.head, "the repaired report carries a newly pushed head");
+	s.setGh({ runs: [run(112, head, "completed", "success")] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.equal(s.post.integrator.get(live.jobId)?.next, "wait", "green CI preserves the QA hold");
+	assert.equal(s.post.integrator.get(live.jobId)?.resolve_attempts, 1);
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+	s.setGh({ runs: [run(112, head, "completed", "failure", { run_attempt: 2 })] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.equal(s.post.integrator.get(live.jobId)?.next, "surface", "a second red result exhausts the repair allowance");
+	assert.equal(s.post.fleet.require(live.jobId).supersessions, 1, "no second promotion");
+});

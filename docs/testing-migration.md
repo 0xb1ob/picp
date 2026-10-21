@@ -63,6 +63,7 @@ ask-0088e0332d00, 2026-10-21.
 | P2e (cp-e2e-migration-p2e-fmi5) | behavior 02, last slice: a pipeline's mandate-decided plan checkpoint (02-15), cp_mandate and cp_escalate through a real parent (02-16), and in-flight continuation under expired, revoked, serial and capped grants (02-17); the P2d review's three findings. No behavior-02 file remains; send-first-gate belongs to P4. | 1 (`tests/mandate.test.ts`) | 384 → 383 | 4,346 → 4,295 |
 | P3 (cp-e2e-migration-p3-rhym) | behavior 05, first slice: the Actions CI read behind cp_integrate, the CI watch and `/status` (05-1), the no-CI workflows question (05-2), `/doctor` `ci.<project>` (05-3) and the one infra-only rerun (05-4) in `tests/e2e/landing.test.ts`; the P2e review's three findings. The other 26 behavior-05 files stay `convert`, for P3b (a job the main session creates). | 4 (`tests/actions-ci.test.ts`, `tests/ci-access.test.ts`, `tests/ci-configured.test.ts`, `tests/ci-infra-rerun.test.ts`) | 385 → 382 | 4,300 → 4,287 |
 | P3b (cp-e2e-migration-p3b-stth) | behavior 05, second slice: merge receipts and landing proof in `tests/e2e/landing.test.ts`: cp_merged through `gh` with the after-merge deploy job (05-5), cp_merged against a local https GitLab (05-6), and cp_teardown's git-only landing proof (05-7). The other 23 behavior-05 files stay `convert` (owner P3), for P3c (a job the main session cuts). | 3 (`tests/after-merge.test.ts`, `tests/landing-proof.test.ts`, `tests/merges.test.ts`) | 382 → 379 | 4,287 → 4,272 |
+| P3c (cp-e2e-migration-p3c-l5fc) | Approved partial delivery (ask-c77a4f32b23b). [Per-file accounting](testing-migration-p3c-declarations.md): 13/143 declarations mapped, 2 retained, 128 pending. Five unfinished files are convert-owned by P3c-rest for follow-on slices. | 2 files deleted (ci-evidence, parked-ci); 8 declarations removed; timer rename earns zero deletion credit | 379 + 1 incoming → 378 | 4,272 + 4 incoming → 4,274 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -161,7 +162,7 @@ verbatim: the landing proof's injected-failure, timeout and recheck units to `te
 total receipt reader, the throwing after-merge port and the ledger refusal to `tests/forge-observers.test.ts`; both
 files stay `convert` for P3c. The P2e review's three findings were already folded in by P3. P3b folds in the P3
 review's two lows: the seven units P3 retained in the P1 exception `tests/actions-ci-policy.test.ts` move verbatim
-to the convert-owned `tests/main-ci.test.ts`, so P3c reconsiders them, and the two "run by hand" sub-asserts (the
+to the convert-owned `tests/main-ci.test.ts`, and the two "run by hand" sub-asserts (the
 upper-case head, the missing-gh ENOENT) now name the exact patch, command and failing assertion.
 
 ## Conversion PRs
@@ -182,6 +183,8 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P2e | 02 | `tests/e2e/authority.test.ts` | adds 02-15 to 02-17 |
 | P3 | 05 | `tests/e2e/landing.test.ts` | 4 (05-1 to 05-4) |
 | P3b | 05 | `tests/e2e/landing.test.ts` | adds 05-5 to 05-7 |
+| P3c | 05 | `tests/e2e/landing.test.ts` | partial delivery: 05-8–05-13 provide consumer coverage; ci-evidence and parked-ci retired; five unfinished files continue under P3c-rest |
+| P3c-rest | 05 | `tests/e2e/landing.test.ts` | follow-on slices: 128 pending declarations and two retained timer cases across five unfinished files |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -309,6 +312,12 @@ moves first.
 | 05-5 | `tests/e2e/landing.test.ts` | landing: cp_merged records only a merge gh observed for this job's branch, marks its PR merged once, and an opted-in deploy branch gets one blocked ops:deploy job |
 | 05-6 | `tests/e2e/landing.test.ts` | landing: cp_merged reads a GitLab MR only from the project's own GitLab with its token; a squash, or a fast-forward git sees on the target, is recorded and anything else records nothing |
 | 05-7 | `tests/e2e/landing.test.ts` | landing: cp_teardown passes a deleted branch as landed_by_git when origin's base holds its content (merge, squash, rebase, a later edit, literal odd paths) and keeps the lease when it does not |
+| 05-8 | `tests/e2e/landing.test.ts` | landing: CI watch persists arrival and attempt identity, follows pushed heads and prunes finished deliveries |
+| 05-9 | `tests/e2e/landing.test.ts` | landing: operator-forwarded CI requires a quoted current head and never substitutes for native CI |
+| 05-10 | `tests/e2e/landing.test.ts` | landing: foreign CI stays read-only, follows the base repo's current head and stops after merge |
+| 05-11 | `tests/e2e/landing.test.ts` | landing: a real parent's timer latches only its mandated main runs and clears only current-tip green |
+| 05-12 | `tests/e2e/landing.test.ts` | landing: parked PR timer stores native CI for each observed head without reviving its released worker |
+| 05-13 | `tests/e2e/landing.test.ts` | landing: held CI repairs the same real worker once while preserving an integration hold |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -516,8 +525,8 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/mandate.test.ts` | resolveMandateObjectiveRef: PR prose never calls verifyRef, creates nothing, raises nothing | 02-16 | mapped | thirteen prose objectives leave gh's log, the ledger and the open asks unchanged |
 | `tests/mandate.test.ts` | schedlater S3: covers matrix — a schedule grant covers only its own schedule's jobs, any other grant no scheduled job | 02-12 | mapped | schedule-only grants leave the project-wide grant selected; a scheduled job speaks only through its schedule's grant |
 | `tests/mandate.test.ts` | S3 (T3.1): issue takes a code-only id and schedule_fire; a taken or unsafe id is refused; cp_mandate exposes neither | 02-16 | redundant-unreachable | no caller passes an id or schedule_fire: no fire mints a grant (`tests/schedule-grant.test.ts`, "PR4: no fire mints a grant"), and cp_mandate has no such parameter. 02-16 pins cp_mandate issue minting its own md- id. Standing rule 3 (ask-0088e0332d00) |
-| `tests/actions-ci.test.ts` | paths: exact head, explicit repo or gh placeholders, attempt-bound jobs; malformed ids refused | 05-1 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): cp_integrate hands the read a validated 40-hex head and a job-id branch, so no entry point feeds it a malformed id. 05-1 pins the exact head, gh's placeholders and the attempt-bound, paged jobs path ("the exact head, gh's placeholders") |
-| `tests/actions-ci.test.ts` | readActionsCi: normalizes runs with identity, event, actor and their attempt's jobs and steps | 05-4 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): event and triggering actor feed only main CI's own-run counting, which no landing case drives. 05-4 pins the attempt-2 jobs path ("the run's own attempt") |
+| `tests/actions-ci.test.ts` | paths: exact head, explicit repo or gh placeholders, attempt-bound jobs; malformed ids refused | 05-1 | retained | verbatim in `tests/main-ci.test.ts`: malformed ids do not reach the validated consumer; 05-1 pins the exact-head path |
+| `tests/actions-ci.test.ts` | readActionsCi: normalizes runs with identity, event, actor and their attempt's jobs and steps | 05-4 | retained | verbatim in `tests/main-ci.test.ts`, convert owner P3c-rest. Missing entry point: inspect the full normalized run/job/step records through a public parent tool; 05-11 exposes filtering outcomes rather than these raw records. |
 | `tests/actions-ci.test.ts` | readActionsCi: zero runs is an observation; two runs with one workflow name both survive | 05-1 | mapped | 05-1's 101 runs all share the workflow name `ci`; collapsing them by name loses run 101 and "ci: failed … (run 101 …)" fails. Zero runs: 05-2 asks for workflows only after an empty runs read |
 | `tests/actions-ci.test.ts` | readActionsCi: a null run status is unfinished, never success | 05-1 | mapped | a null-status run on the head: `doesNotMatch(/ci: green/)` fails if null reads as success |
 | `tests/actions-ci.test.ts` | pagination: runs and jobs pages are followed to the short page; a boundary duplicate counts once | 05-1 | mapped | two runs pages with the boundary run repeated, and run 1's 101 jobs: stopping at page one fails "ci: failed … (run 101 …)", counting the duplicate twice fails it as incomplete |
@@ -528,12 +537,12 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/actions-ci.test.ts` | errors: denial stays classifiable as unreadable CI; rate limit does not; raw output never carried | 05-1 | mapped | the runs 403 asserts the Actions-only label after one call, the rate limit asserts no label, and no record carries `canary`; each fails if its rule is dropped |
 | `tests/actions-ci.test.ts` | retry: a truncated body recovers on retry; a persisting one is one malformed fault with status and preview | 05-1 | mapped | "ci: green" after exactly two runs calls fails without the retry; the HTML 200 asserts "not JSON; gh exit 0; body … [redacted] …; 3 attempts" |
 | `tests/actions-ci.test.ts` | retry: an HTML 403 is a transport fault with its status and body, never a token denial; JSON 403 is denied | 05-1 | mapped | NC-24: the HTML 403 reads as denied and its `read transport … status 403` match fails |
-| `tests/actions-ci.test.ts` | retry: never past the budget, and a structurally wrong JSON page is not retried | 05-1 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): the budget half needs an injected clock no entry point exposes. 05-1 pins the other half: "no total_count" asserts one runs call |
-| `tests/actions-ci.test.ts` | budget: one total deadline across pages, each request gets only what remains | 05-1 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): the 15 s deadline and each request's remaining budget need an injected clock no entry point exposes |
+| `tests/actions-ci.test.ts` | retry: never past the budget, and a structurally wrong JSON page is not retried | 05-1 | retained | verbatim in `tests/main-ci.test.ts`: exact budget requires the injected clock; 05-1 pins one malformed read without retry |
+| `tests/actions-ci.test.ts` | budget: one total deadline across pages, each request gets only what remains | 05-1 | retained | verbatim in `tests/main-ci.test.ts`: exact remaining deadlines require the injected clock |
 | `tests/actions-ci.test.ts` | readActionsJobs: one attempt's jobs, all pages, through the same validation | 05-4 | mapped | the rerun's own jobs read: a denied, short, empty or unparseable listing asserts "run 41 jobs unreadable" and no rerun or claim; skipping the validation reruns and fails `[reruns(), claims()]` |
-| `tests/actions-ci.test.ts` | statusRunner: forwards each request's remaining budget as timeoutMs; a non-zero status throws | 05-1 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): the per-request timeout reaches no consumer. 05-1 pins a non-zero gh exit as a failed read (`next: retry`) |
-| `tests/ci-access.test.ts` | ciReadDenied: only a permission refusal of a CI read counts | 05-1 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): check-runs and commit-status paths are never read (that file's own rule), and the PR-read and `gh run` forms no longer reach it. 05-1 pins the Actions denial and a rate limit that is not one |
-| `tests/ci-access.test.ts` | the browser mirrors the backend's Actions-only label and advice, keeping its needs prefix | 05-1 | retained | moved verbatim to `tests/main-ci.test.ts` (P3; P3b moved it out of the P1 exception `tests/actions-ci-policy.test.ts`): source parity with `viewer-app/components/JobSignals.tsx`, which no case renders. 05-1 pins the label and advice in cp_integrate's reason |
+| `tests/actions-ci.test.ts` | statusRunner: forwards each request's remaining budget as timeoutMs; a non-zero status throws | 05-1 | retained | verbatim in `tests/main-ci.test.ts`: per-request timeout forwarding lacks consumer sensitivity proof; 05-1 pins nonzero read failure |
+| `tests/ci-access.test.ts` | ciReadDenied: only a permission refusal of a CI read counts | 05-1 | retained | verbatim in `tests/main-ci.test.ts`: check-runs, commit-status, PR-read and gh-run classifier inputs remain protected; 05-1 pins Actions denial |
+| `tests/ci-access.test.ts` | the browser mirrors the backend's Actions-only label and advice, keeping its needs prefix | 05-1 | retained | verbatim in `tests/main-ci.test.ts`: source parity with the viewer is not exercised by landing; 05-1 pins the integrate label |
 | `tests/ci-access.test.ts` | a held job whose CI read was refused names the token as its wait reason, before any head is known | 05-1 | mapped | after the CI watch tick writes `last_ci: unreadable`, the `/status` table's "waiting on: CI unreadable (token)" fails without the unreadable branch in `waitReason` |
 | `tests/ci-access.test.ts` | doctor ci.<project>: workflows, then the newest run and its attempt jobs; each outcome is distinct and gh output is never echoed | 05-3 | mapped | the exact gh call sequence (`o/denied` registered as an https `.git` URL, `o/bare` as an ssh URL), each project's severity and text, and no `sentinel-credential-value` in the report; a denied jobs read read as unknown fails the `locked` row. No gh on PATH: a second `/doctor` asserts no `ci.*` finding ("no gh: host.gh says so"); dropping the ENOENT check (`&& false` on the `gh_missing` return, `src/ci-access-doctor.ts:70`) fails `deepEqual(…, [], "no gh: host.gh says so")` with an extra `ci.denied` warn "CI state unknown for o/denied: the Actions read failed (command_failed)" (run by P3b: `npm run test:one -- --test-name-pattern="doctor ci" tests/e2e/landing.test.ts`, 0 pass, 1 fail) |
 | `tests/ci-access.test.ts` | doctor ci.<project>: a jobs list shorter than its total_count is unknown, never readable | 05-3 | mapped | NC-26: `o/short` reads ok and its [warn, "the Actions read failed (incomplete)"] assertion fails |
@@ -542,9 +551,9 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/ci-configured.test.ts` | every way of not getting an answer is unreadable, and each is its own cause | 05-2 | mapped | NC-25: the truncated page reads `none` and its `[step, next]` = `[authorize, surface]` fails; the other nine assert their own cause |
 | `tests/ci-configured.test.ts` | the workflows question is one gh call, with gh's own owner/repo placeholders | 05-2 | mapped | every advance asserts exactly one `api repos/{owner}/{repo}/actions/workflows` |
 | `tests/ci-configured.test.ts` | ghCiConfigured maps a throwing runner onto the same rule, 403 included | 05-2 | retained | moved verbatim to `tests/merge-ask.test.ts` (P3b): the throwing runner is the merge-ask awaiting row's `ciConfigured`, which no landing case renders. 05-2 pins the same rule, 403 included, through cp_integrate's status runner |
-| `tests/ci-infra-rerun.test.ts` | classifyInfraFailure: setup steps are infra; the suite and a cancel are not | 05-4 | retained | moved verbatim to `tests/main-ci.test.ts` (P3b): 05-4 drives Install treehouse and Checkout as infra, and the suite, eval, cancelled, timed-out, build-tool, mixed and step-less jobs as not; Set up job, Set up Node and Install dependencies would each need a fresh job, so the fixture table stays |
+| `tests/ci-infra-rerun.test.ts` | classifyInfraFailure: setup steps are infra; the suite and a cancel are not | 05-4 | retained | verbatim in `tests/main-ci.test.ts`: Set up job, Set up Node and Install dependencies still lack separate failure evidence |
 | `tests/ci-infra-rerun.test.ts` | an infra-only failure is claimed first, then rerun once; the same job+head never again | 05-4 | mapped | the claim is on disk when `gh run rerun` runs ("the claim was on disk before gh run rerun ran"), then "was spent at" and no second rerun; claiming after the rerun fails the first |
-| `tests/ci-infra-rerun.test.ts` | attempt 2, a test failure, a cancel, no run id, a green head and a drain all leave it to the parent | 05-4 | retained | moved verbatim to `tests/main-ci.test.ts` (P3b): a green head or an id-less run never reaches the rerun (cp_integrate calls it only on failed CI, and 05-1 refuses an id-less run as malformed), and only the main CI watch reaches the drain guard, since cp_integrate reads no CI while draining (05-4: "ci: not read — the parent is draining"). 05-4 pins attempt 2 (NC-27), the test failure, the cancel and the timeout |
+| `tests/ci-infra-rerun.test.ts` | attempt 2, a test failure, a cancel, no run id, a green head and a drain all leave it to the parent | 05-4 | retained | verbatim in `tests/main-ci.test.ts`, convert owner P3c-rest. Missing entry point: send a green head or a run without an id into the infra-rerun policy through cp_integrate; earlier CI evaluation and Actions validation handle these inputs. 05-4 pins the reachable attempt-2, suite, cancel, timeout and drain outcomes. |
 | `tests/ci-infra-rerun.test.ts` | fail closed: an unreadable claim file or jobs listing reruns nothing; a refused rerun keeps its claim | 05-4 | mapped | the corrupt claim file asserts "unparseable"; the denied, short, empty and unparseable listings assert "run 41 jobs unreadable" with no rerun or claim; gh's refusal asserts "claimed … but gh refused" and one claim, then "was spent at" |
 | `tests/after-merge.test.ts` | a merge into the deploy branch creates one blocked ops:deploy job with a frozen task file, never dispatched | 05-5 | mapped | cp_merged on a merged PR asserts exactly one deploy job with every label, `blocked_by` the merged job, `open`, its task file note and facts, the created line, the `created` record, one `after_merge_deploy` event and no fleet record; `previewDispatch` asserts profile `ops` and risk `high`, and the project-wide grant's preview asserts "would ask: risk:high". Dropping the hook fails "exactly one deploy job" |
 | `tests/after-merge.test.ts` | re-recording and a crash before the record write resume onto the same single job | 05-5 | mapped | a second cp_merged asserts no `after_merge` line; with the record removed it asserts "after-merge deploy <same id> created"; after the deploy job is dropped it asserts one deploy job ("a closed deploy job still holds the key"). Creating a second job fails that count |
@@ -553,24 +562,389 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/after-merge.test.ts` | a ledger refusal throws and writes no record, so the merge store names it and a retry can still create | 05-5 | retained | moved verbatim to `tests/forge-observers.test.ts` (P3b): no entry point makes the real ledger refuse a deploy job for a registered, opted-in project. 05-5 pins the retry path: a removed record resumes onto the same job |
 | `tests/landing-proof.test.ts` | landed: merge, multi-commit squash, rebase onto an advanced base and a later edit, all with the branch deleted | 05-7 | mapped | cp_teardown on held local jobs asserts `landed_by_git` with `ancestry` for the merge commit, `path_tree` with 3 paths, origin's own base sha and a witness reachable at or after the squash for the two-commit squash and later edit, and the replayed commit as the rebase's witness; one `teardown_landing_proven` event each. The worktree never fetched the squash, so a proof that does not fetch the base by sha reads unknown and fails `landed_by_git`. The read-only runner guard runs with the units in `tests/forge-runtime.test.ts` |
 | `tests/landing-proof.test.ts` | landed: path names with spaces, newlines and pathspec magic are compared literally | 05-7 | mapped | NC-30: without `:(literal)` the glob `star*[ab].txt` also compares origin's own `starXa.txt`, and the odd-paths job fails `landed_by_git` as `unpushed` |
-| `tests/landing-proof.test.ts` | not proven: partial, near-miss and extra content never pass | 05-7 | mapped | one held job (an edit, a binary file, a 755 script, a symlink, a delete and a rename) against six origin commits that each miss one path (whitespace, a binary byte, the mode, a symlink as a file, the delete, half the rename): each asserts `unpushed`, and only the exact landing asserts `path_tree` with 6 paths. Ignoring any one difference passes its near miss and fails its labelled assertion. The extra-commit case is a near miss of one path |
+| `tests/landing-proof.test.ts` | not proven: partial, near-miss and extra content never pass | 05-7 | mapped | six labelled path near misses assert unpushed. The added post-squash extra commit remains unlanded assertion compares [false,unpushed]; control L1 derives paths through HEAD^ (ignoring the final commit) and fails it with [true,undefined], reason landed_by_git. Exact patch and command below; fixed case passes |
 | `tests/landing-proof.test.ts` | not proven: a stale tracking ref that held the squash is not the base origin advertises | 05-7 | mapped | the worktree's `origin/main` holds the squash while origin's main was reset past it: teardown asserts `unpushed` with "survives here only as a stale remote-tracking ref". A proof based on the tracking ref finds the squash and passes it |
 | `tests/landing-proof.test.ts` | unknown: missing inputs, broken commands, odd history and every budget keep the lease | 05-7 | retained | moved verbatim to `tests/forge-runtime.test.ts` (P3b): each case bends one git answer (unreachable origin, failed fetch, shallow clone, two merge bases, a hung command) or injects a limit or clock, and no entry point exposes those seams. 05-7 pins the reachable outcomes: landed or `unpushed` |
 | `tests/landing-proof.test.ts` | defaultGit kills a git that outlives its timeout and answers status null | 05-7 | retained | moved verbatim to `tests/forge-runtime.test.ts` (P3b): a git that hangs past its timeout needs an injected alias no entry point runs |
 | `tests/landing-proof.test.ts` | the pre-release recheck refuses a proof whose HEAD moved or whose tree went dirty | 05-7 | retained | moved verbatim to `tests/forge-runtime.test.ts` (P3b): the window between the proof and the lease release is inside one teardown call, which no entry point can interleave a write into |
-| `tests/merges.test.ts` | a merged PR is recorded from what gh reports, and the pr receipt becomes merged | 05-5 | mapped | the receipt's merge commit, head, `head_branch_deleted` (the branch is deleted on origin), strategy, no `bound`, the "can now pass without force" line, `pr_url` on disk, the PR receipt `merged` once, one `merge_recorded` event, and a second call's `recorded: false` with the same commit; teardown then passes as `merged` |
+| `tests/merges.test.ts` | a merged PR is recorded from what gh reports, and the pr receipt becomes merged | 05-5 | mapped | P3c control M1 flips head_branch_deleted: the receipt tuple at landing.test.ts:760 fails, actual false versus expected true. Reproduce with the M1 patch and command in P3b review controls below; fixed case passes |
 | `tests/merges.test.ts` | picp-d0p: a bound job's receipt names the PR head branch and is marked bound | 05-5 | mapped | a seeded fleet record with `bound_pr` and branch `cp-b55w` asserts `head_branch` `cp-b55w` and `bound: true` in the result and on disk. Comparing the job id instead of the bound branch fails it as "not this job's delivery" |
 | `tests/merges.test.ts` | nothing is recorded for a PR gh does not call merged | 05-5 | mapped | NC-28: an open PR is not refused, and its "as open, not MERGED" match fails. The no-merge-commit and other-branch answers assert their refusals, no receipt and the PR receipt still `open` |
-| `tests/merges.test.ts` | an unreachable gh refuses and names force as the honest exit | 05-5 | mapped | a failing `gh pr view` asserts "could not read PR", `cp_teardown <job> force`, git evidence named before force, and no receipt |
-| `tests/merges.test.ts` | a job with no PR receipt must be told which PR, and an unknown job is refused | 05-5 | mapped | a seeded record with no PR receipt asserts "carries no PR receipt", then records with `pr: "77"` and adds a `merged` receipt; `cp-unknown` asserts "no fleet record" |
+| `tests/merges.test.ts` | an unreachable gh refuses and names force as the honest exit | 05-5 | mapped | P3c control M2 removes force fallback advice: assertion force stays the exit for the unprovable case fails, expected /cp_teardown <job> force/. Exact patch and command below; fixed case passes |
+| `tests/merges.test.ts` | a job with no PR receipt must be told which PR, and an unknown job is refused | 05-5 | mapped | P3c control M3 defaults a missing PR to 77: /carries no PR receipt/ fails, actual could not read PR 77. Exact patch and command below; fixed case passes |
 | `tests/merges.test.ts` | an unreadable receipt is no receipt, never an exception out of a gate | 05-5 | retained | moved verbatim to `tests/forge-observers.test.ts` (P3b): `readMergeReceipt` on a missing or `../escape` id; job ids reach it only after fleet validation, so no entry point feeds it an unsafe id |
-| `tests/merges.test.ts` | forge PR 2: a GitLab squash MR is recorded with its squash commit, provider and project, never through gh | 05-6 | mapped | the fake GitLab's MR 7 asserts the squash commit, `squash`, `pr_number` 7, the normalised `merged_at`, `gitlab api`, the forge block, one `merge_recorded` event with provider `gitlab`, one GET with the token in PRIVATE-TOKEN, and no `gh pr view` |
+| `tests/merges.test.ts` | forge PR 2: a GitLab squash MR is recorded with its squash commit, provider and project, never through gh | 05-6 | mapped | P3c control M4 drops squash strategy inference: MR 7 receipt tuple fails, actual unknown versus expected squash. Exact patch and command below; fixed case passes |
 | `tests/merges.test.ts` | forge PR 3: a GitLab normal merge records its merge commit, never infers a strategy, and asks git nothing about reachability | 05-6 | mapped | MR 10 (merge and squash commits) asserts the merge commit, the source head, base `main` and `squash`; MR 11 (merge commit only) asserts strategy `unknown`. Both merge commits are absent from origin, so asking git for reachability would refuse them |
 | `tests/merges.test.ts` | forge PR 2: a GitLab fast-forward MR records its head only when git sees it on the target | 05-6 | mapped | NC-29: MR 9's head is not on origin and must be refused ("names no merge commit"); once origin's main is that head it records it with strategy `unknown` and the PR receipt `merged` |
-| `tests/merges.test.ts` | forge PR 2: a stored receipt for another job or branch is refused, and a crash before the fleet patch is repaired | 05-6 | mapped | the PR receipt patched back to `open` asserts `recorded: false`, `receipt_status_updated: true`, `merged` and one event; the branch patched to `cp-other` asserts "discharges nothing here" |
-| `tests/merges.test.ts` | forge PR 2: a mismatched observation records nothing, and a legacy receipt with no forge block still reads | 05-6 | mapped | MR 8 answering another project's `web_url` asserts "(mismatch: " and no receipt, without the token in the message; 05-5 rewrites its receipt without the forge block and asserts it still reads its head |
+| `tests/merges.test.ts` | forge PR 2: a stored receipt for another job or branch is refused, and a crash before the fleet patch is repaired | 05-6 | mapped | P3c control M5 skips repairing an existing receipt: actual [false,false,open,1], expected [false,true,merged,1]. Exact patch and command below; fixed case passes |
+| `tests/merges.test.ts` | forge PR 2: a mismatched observation records nothing, and a legacy receipt with no forge block still reads | 05-6 | mapped | P3c control M6 drops the GitLab web_url repository check: /could not read PR .*\(mismatch: / fails, actual merged but names no merge commit. Exact patch and command below; fixed case passes |
 | `tests/merges.test.ts` | #326: afterRecorded runs on new and existing receipts; a throwing port leaves the receipt and names the failure | 05-5 | retained | moved verbatim to `tests/forge-observers.test.ts` (P3b): the throwing port needs a ledger that refuses (see the after-merge ledger refusal). 05-5 pins the port on new and existing receipts and the quiet result with no opt-in |
+| `tests/ci-watch.test.ts` | rerunwake-12z: a re-run that fails again on the same head wakes again | 05-8 | mapped | the second attempt must emit `ci_failed` under a different key; replacing actual attempts with `.1` fails `a new attempt is a new failure even on the same head` (P3c control 05-8) |
+| `tests/ci-watch.test.ts` | rerunwake-12z: a green re-run after a red attempt wakes | 05-8 | mapped | NC-39 suppresses ci_green; command below exits 1 at `a green rerun follows a failed attempt`, actual undefined, expected true |
+| `tests/ci-watch.test.ts` | rerunwake-12z: the same completed attempt polled twice wakes once | 05-8 | mapped | NC-40 disables red arrival deduplication; command below exits 1 at `an arrived attempt is not announced again`, actual ci_failed observation, expected [] |
+| `tests/ci-watch.test.ts` | two ticks with identical facts and an observed arrival wake once | 05-8 | mapped | NC-41 disables green arrival deduplication; command below exits 1 at `an arrived green attempt is not announced again`, actual ci_green observation, expected [] |
+| `tests/ci-watch.test.ts` | confirming the same key twice is a no-op | 05-8 | mapped | NC-42 disables confirmation deduplication; command below exits 1 at `arrival is idempotent`, actual repeated key, expected [] |
+| `tests/ci-evidence.test.ts` | recordForwardedCi: stores source forwarded with its quote; an identical repeat appends nothing | 05-9 | mapped | tool writes verify head, repo, source, quote, ISO timestamp, URL, duplicate suppression and changed-result append; NC-43 fails `an identical forwarded result is stored once`, actual 2 expected 1 |
+| `tests/ci-evidence.test.ts` | recordForwardedCi: refuses a short or moved head, a credential-shaped quote or url, and another repo | 05-9 | mapped | real cp_integrate rejects short/stale heads, secret quote, credential/query URLs and mismatched persisted repo, with no refused writes; NC-33, NC-44 and NC-46 fail the superseded-head, invalid-input and repository-binding assertions |
+| `tests/ci-evidence.test.ts` | recordForwardedCi: keeps the newest CI_EVIDENCE_KEEP observations | 05-9 | mapped | 52 real tool writes assert the bound and oldest retained quote; NC-47 fails `every bounded forwarded write succeeds`, actual false expected true, because unsliced history exceeds the schema bound |
+| `tests/ci-evidence.test.ts` | forwardedCi (viewer): the newest forwarded result for the head only; native rows and other heads are not forwarded | 05-9 | mapped | real /api/jobs over seeded legacy data asserts pending A, green B, unseen/unknown heads and missing file, with unsafe URL stripped; NC-48 fails `viewer ignores native and other-head evidence and strips unsafe URLs`, actual green expected in_progress |
+| `tests/ci-evidence.test.ts` | cp_integrate record_ci: needs a verbatim operator quote and the job's current head; stores display-only evidence | 05-9 | mapped | real parent verifies absent head, fabricated quote, superseded head, stored source/quote/repo and native gate; NC-45 fails `forwarded evidence rejects invalid input through the tool`, expected /no known current head/, actual recorded success |
+| `tests/parked-ci.test.ts` | parked CI: head A green, then the moved head B pending, then red — each stored for its own head, journaled once | 05-12 | mapped | real parent timer asserts A green, completed idle sweep without another Actions read, B pending then red, and exact head-tagged journal; NC-36 and NC-49 fail green arrival and idle-read assertions |
+| `tests/parked-ci.test.ts` | parked CI: a permission denial is loud even after a green; a transient fault is unknown; both back off | 05-12 | mapped | same-head denial replaces green with unreadable/1, moved-head transport fault stores unknown/2; completed sweeps exceed the base interval without re-reading, and faults journal nothing; NC-50–NC-52 and NC-55 fail counter, classification and backoff assertions |
+| `tests/parked-ci.test.ts` | parked CI: a resume or re-park during the read drops the observation; merged/closed or a held job reads nothing | 05-12 | mapped | external forge barriers hold real reads across public resume and re-park; no old-cycle row or journal survives; valid held jobs issue no parked read, a seeded held-with-handoff legacy record is refused by the public sweep, and CLOSED/MERGED snapshots issue no CI read; NC-53 and NC-54 fail stale-observation and terminal-read assertions |
+| `tests/awaiting-merge-tick.test.ts` | a lock taken after session_start still sweeps on the next interval | — | retained | verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest). Missing entry point: transfer ownership to an already-started parent session. Acquisition occurs only at session_start, before timer registration; release only at session_shutdown. The startup-guard probe passes 05-12 and is not a failing consumer control. |
+| `tests/awaiting-merge-tick.test.ts` | session_shutdown clears the startup catch-up and the interval | — | retained | verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest). Missing entry point: observe timer callbacks after shutdown while ownership remains held, including before the startup timer fires. Shutdown releases the lock and exits; removing both clears passes 05-12 but fails the retained unit. |
 <!-- /manifest:assertions -->
+
+P3c is an approved partial delivery (ask-c77a4f32b23b): two files deleted, thirteen declarations mapped,
+two retained and 128 pending. The five unfinished files are convert-owned by P3c-rest. Reachable gaps need
+real-entry assertions and failing controls before retirement; retained cases must name a missing entry point.
+A moved unit is `retained`, never removed coverage. Other behavior-05 files remain outside this partial slice.
+
+V2 forwarded-evidence controls NC-43–NC-48 were each applied alone, then restored. Each command
+`npm run test:one -- --test-name-pattern='operator-forwarded CI' tests/e2e/landing.test.ts` exited 1 at the
+assertion named in its regression row; the restored scenario passes. Logs: `NC-43.log` through `NC-48.log`.
+
+<!-- patch:NC-43 -->
+```diff
+diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
+--- a/src/ci-evidence.ts
++++ b/src/ci-evidence.ts
+@@ -69,1 +69,1 @@
+-	if (last && last.result === observation.result && last.operator_quote === observation.operator_quote && last.url === observation.url) return last;
++	if (false && last && last.result === observation.result && last.operator_quote === observation.operator_quote && last.url === observation.url) return last;
+```
+<!-- /patch:NC-43 -->
+
+<!-- patch:NC-44 -->
+```diff
+diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
+--- a/src/ci-evidence.ts
++++ b/src/ci-evidence.ts
+@@ -59,1 +59,1 @@
+-		const hit = SECRET_PATTERNS.find((pattern) => pattern.re.test(text));
++		const hit = undefined;
+```
+<!-- /patch:NC-44 -->
+
+<!-- patch:NC-45 -->
+```diff
+diff --git a/extensions/command-post/tools-integrate.ts b/extensions/command-post/tools-integrate.ts
+--- a/extensions/command-post/tools-integrate.ts
++++ b/extensions/command-post/tools-integrate.ts
+@@ -178,1 +178,1 @@
+-				if (!currentHead) throw new Error(`cp_integrate record_ci: ${params.job_id} has no known current head; wait for the CI watch to observe one`);
++				if (false && !currentHead) throw new Error(`cp_integrate record_ci: ${params.job_id} has no known current head; wait for the CI watch to observe one`);
+```
+<!-- /patch:NC-45 -->
+
+<!-- patch:NC-46 -->
+```diff
+diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
+--- a/src/ci-evidence.ts
++++ b/src/ci-evidence.ts
+@@ -67,1 +67,1 @@
+-	if (prior && prior.repo !== input.repo) throw new CiEvidenceError(`${input.jobId}'s CI evidence is for ${prior.repo}, not ${input.repo}`);
++	if (false && prior && prior.repo !== input.repo) throw new CiEvidenceError(`${input.jobId}'s CI evidence is for ${prior.repo}, not ${input.repo}`);
+```
+<!-- /patch:NC-46 -->
+
+<!-- patch:NC-47 -->
+```diff
+diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
+--- a/src/ci-evidence.ts
++++ b/src/ci-evidence.ts
+@@ -72,1 +72,1 @@
+-		observations: [...(prior?.observations ?? []), observation].slice(-CI_EVIDENCE_KEEP),
++		observations: [...(prior?.observations ?? []), observation],
+```
+<!-- /patch:NC-47 -->
+
+<!-- patch:NC-48 -->
+```diff
+diff --git a/src/viewer/overview-jobs.ts b/src/viewer/overview-jobs.ts
+--- a/src/viewer/overview-jobs.ts
++++ b/src/viewer/overview-jobs.ts
+@@ -59,1 +59,1 @@
+- const latest = (Array.isArray(list) ? list.map(obj) : []).filter((o): o is Json => o?.source === "forwarded" && str(o.head_sha)?.toLowerCase() === head?.toLowerCase() && Object.hasOwn(FORWARDED_VIEW, str(o.result) ?? "") && timestamp(o.observed_at))
++ const latest = (Array.isArray(list) ? list.map(obj) : []).filter((o): o is Json => o?.source === "forwarded" && Object.hasOwn(FORWARDED_VIEW, str(o.result) ?? "") && timestamp(o.observed_at))
+```
+<!-- /patch:NC-48 -->
+
+V2 parked-CI controls NC-49–NC-55 use
+`npm run test:one -- --test-name-pattern='parked PR timer' tests/e2e/landing.test.ts`.
+Each exited 1 at the assertion in its regression row and was restored. NC-54 removes both open-snapshot gates:
+the public watch ordinarily excludes terminal snapshots before the observer's defensive guard can see them.
+The old direct held-with-handoff helper call is redundant-unreachable: normal watch candidates must be awaiting_merge,
+and legacy held parking records violate the fleet schema before observation. Scenario 05-12 pins both outcomes:
+`a held job is not read by the parked CI timer` and `the public sweep rejects a legacy held parking record before observing CI`.
+These assertions exercise valid lifecycle state and raw legacy disk data; no internal ports are mocked.
+
+<!-- patch:NC-49 -->
+```diff
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -42,1 +42,1 @@
+-		if (prior?.head_sha === head && Number.isFinite(checked) && now().getTime() < checked + wait) return;
++		if (false && prior?.head_sha === head && Number.isFinite(checked) && now().getTime() < checked + wait) return;
+```
+<!-- /patch:NC-49 -->
+
+<!-- patch:NC-50 -->
+```diff
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -56,1 +56,1 @@
+-			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: ciReadDenied(error ?? "") ? CI_UNREADABLE : "unknown" });
++			store.record(jobId, { ...observed, consecutive_failures: 0, last_error: error, last_ci: ciReadDenied(error ?? "") ? CI_UNREADABLE : "unknown" });
+```
+<!-- /patch:NC-50 -->
+
+<!-- patch:NC-51 -->
+```diff
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -56,1 +56,1 @@
+-			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: ciReadDenied(error ?? "") ? CI_UNREADABLE : "unknown" });
++			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: "unknown" });
+```
+<!-- /patch:NC-51 -->
+
+<!-- patch:NC-52 -->
+```diff
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -56,1 +56,1 @@
+-			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: ciReadDenied(error ?? "") ? CI_UNREADABLE : "unknown" });
++			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: CI_UNREADABLE });
+```
+<!-- /patch:NC-52 -->
+
+<!-- patch:NC-53 -->
+```diff
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -52,1 +52,1 @@
+-		if (current?.phase !== "awaiting_merge" || current.awaiting_merge?.cycle !== cycle) return;
++		if (false && (current?.phase !== "awaiting_merge" || current.awaiting_merge?.cycle !== cycle)) return;
+```
+<!-- /patch:NC-53 -->
+
+<!-- patch:NC-54 -->
+```diff
+diff --git a/src/awaiting-merge-watch.ts b/src/awaiting-merge-watch.ts
+--- a/src/awaiting-merge-watch.ts
++++ b/src/awaiting-merge-watch.ts
+@@ -154,1 +154,1 @@
+-				if (read.snap.state === "open") {
++				if (true) {
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -35,1 +35,1 @@
+-		if (snap.state !== "open" || record.phase !== "awaiting_merge" || cycle === undefined) return;
++		if (record.phase !== "awaiting_merge" || cycle === undefined) return;
+```
+<!-- /patch:NC-54 -->
+
+<!-- patch:NC-55 -->
+```diff
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -40,1 +40,1 @@
+-		const wait = nextDueMs(cadence, { failures, settled: SETTLED.has(prior?.last_ci ?? "") });
++		const wait = nextDueMs(cadence, { failures: 0, settled: SETTLED.has(prior?.last_ci ?? "") });
+```
+<!-- /patch:NC-55 -->
+
+NC-39 through NC-42 each use their own patch below and this command:
+`npm run test:one -- --test-name-pattern='CI watch persists arrival' tests/e2e/landing.test.ts`.
+Each command exited 1 at the named assertion; production mutations were restored. Logs are `NC-39.log` through
+`NC-42.log` in this job's artifact directory. The restored 05-8 scenario passes all four assertions.
+
+<!-- patch:NC-39 -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -289,1 +289,1 @@
+-		return [at("ci_green", { reason: verdict.reason, conclusion: "success" }, identity)];
++		return [];
+```
+<!-- /patch:NC-39 -->
+
+<!-- patch:NC-40 -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -719,1 +719,1 @@
+-			if (announced.has(observation.key)) continue;
++			if (observation.event !== "ci_failed" && announced.has(observation.key)) continue;
+```
+<!-- /patch:NC-40 -->
+
+<!-- patch:NC-41 -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -719,1 +719,1 @@
+-			if (announced.has(observation.key)) continue;
++			if (observation.event !== "ci_green" && announced.has(observation.key)) continue;
+```
+<!-- /patch:NC-41 -->
+
+<!-- patch:NC-42 -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -463,1 +463,1 @@
+-				if (existing.announced.includes(key)) continue;
++				if (false && existing.announced.includes(key)) continue;
+```
+<!-- /patch:NC-42 -->
+
+<!-- patch:NC-32-attempt-identity -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -322,1 +322,1 @@
+-		.map((run) => `${run.databaseId}.${run.attempt ?? 1}`)
++		.map((run) => `${run.databaseId}.1`)
+```
+
+<!-- patch:NC-33 -->
+```diff
+diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
+--- a/src/ci-evidence.ts
++++ b/src/ci-evidence.ts
+@@ -53,1 +53,1 @@
+-	if (input.currentHead && input.currentHead.toLowerCase() !== head) {
++	if (false && input.currentHead && input.currentHead.toLowerCase() !== head) {
+```
+<!-- patch:NC-34 -->
+```diff
+diff --git a/src/foreign-ci-watch.ts b/src/foreign-ci-watch.ts
+--- a/src/foreign-ci-watch.ts
++++ b/src/foreign-ci-watch.ts
+@@ -282,1 +282,1 @@
+-		if (head && entry.head_sha && entry.head_sha !== head) {
++		if (false && head && entry.head_sha && entry.head_sha !== head) {
+```
+<!-- patch:NC-35 -->
+```diff
+diff --git a/src/main-ci.ts b/src/main-ci.ts
+--- a/src/main-ci.ts
++++ b/src/main-ci.ts
+@@ -154,1 +154,1 @@
+-	return runs.filter((run) => run.event !== "dynamic" && run.triggeringActor !== undefined && sameLogin(run.triggeringActor, login));
++	return [...runs];
+```
+<!-- patch:NC-36 -->
+```diff
+diff --git a/src/awaiting-merge.ts b/src/awaiting-merge.ts
+--- a/src/awaiting-merge.ts
++++ b/src/awaiting-merge.ts
+@@ -98,1 +98,0 @@
+-			observeCi: parkedCiObserver({ home: host.home, fleet: host.fleet, runs: host.runs, read: (record, sha) => readParkedActionsCi(host, record, sha) }),
+```
+<!-- patch:NC-37 -->
+```diff
+diff --git a/src/integrate.ts b/src/integrate.ts
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1302,1 +1302,1 @@
+-		const prior = input.step === "conflict" && !!input.headSha && priorRec?.head_sha !== input.headSha ? 0 : (priorRec?.resolve_attempts ?? 0);
++		const prior = 0;
+```
+
+### P3b review controls reproduced by P3c
+
+Each control was applied alone and restored immediately after its failing run. M1–M3 use
+`npm run test:one -- --test-name-pattern='cp_merged records only' tests/e2e/landing.test.ts`;
+M4–M6 use `npm run test:one -- --test-name-pattern='cp_merged reads a GitLab' tests/e2e/landing.test.ts`;
+L1 uses `npm run test:one -- --test-name-pattern='cp_teardown passes a deleted branch' tests/e2e/landing.test.ts`.
+Every run exited 1 with one failing case and no skips; failures below are observed output, not predictions.
+
+| Control | Observed failure |
+|---|---|
+| M1 | receipt tuple: actual `head_branch_deleted: false`, expected `true` |
+| M2 | `AssertionError: force stays the exit for the unprovable case`; expected `/cp_teardown <job> force/` |
+| M3 | expected `/carries no PR receipt/`, actual `could not read PR 77` |
+| M4 | MR 7 receipt tuple: actual `unknown`, expected `squash` |
+| M5 | receipt repair tuple: actual `[false,false,'open',1]`, expected `[false,true,'merged',1]` |
+| M6 | expected `/could not read PR .*\(mismatch: /`, actual `merged but names no merge commit` |
+| L1 | `post-squash extra commit remains unlanded`: actual `[true,undefined]` (`landed_by_git`), expected `[false,'unpushed']` |
+
+M1 (`src/merges.ts`):
+```diff
+@@ -279,1 +279,1 @@
+-			...(onRemote === undefined ? {} : { head_branch_deleted: !onRemote }),
++			...(onRemote === undefined ? {} : { head_branch_deleted: onRemote }),
+```
+M2 (`src/merges.ts`):
+```diff
+@@ -208,1 +208,1 @@
+-					`cp_teardown ${jobId} can still pass on git evidence when the work is in the base's history; only if neither can prove it, cp_teardown ${jobId} force — which proves nothing, and records that.`,
++					`cp_teardown ${jobId} can still pass on git evidence when the work is in the base's history.`,
+```
+M3 (`src/merges.ts`):
+```diff
+@@ -193,1 +193,1 @@
+-		const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts);
++		const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts) || "77";
+```
+M4 (`src/merges.ts`):
+```diff
+@@ -268,1 +268,1 @@
+-		const strategy = request.strategy ?? (view.provider === "gitlab" ? (view.squash_commit_sha ? "squash" : "unknown") : undefined);
++		const strategy = request.strategy ?? (view.provider === "gitlab" ? "unknown" : undefined);
+```
+M5 (`src/merges.ts`):
+```diff
+@@ -190,1 +190,1 @@
+-			return { receipt: existing, recorded: false, receipt_status_updated: await this.#markReceiptMerged(jobId, existing) };
++			return { receipt: existing, recorded: false, receipt_status_updated: false };
+```
+M6 (`src/forges/gitlab.ts`):
+```diff
+@@ -148,1 +148,1 @@
+-	if (!web || web.number !== iid || !changeRequestBelongsTo(web, repository)) return refuse("mismatch", "response web_url is not this project's merge request");
++	if (false && (!web || web.number !== iid || !changeRequestBelongsTo(web, repository))) return refuse("mismatch", "response web_url is not this project's merge request");
+```
+L1 (`src/landing-proof.ts`):
+```diff
+@@ -147,1 +147,1 @@
+-		const paths = (await run(["diff", "--name-only", "-z", ...DIFF, fork, head])).stdout.split("\0").filter(Boolean);
++		const paths = (await run(["diff", "--name-only", "-z", ...DIFF, fork, `${head}^`])).stdout.split("\0").filter(Boolean);
+```
+
+### P3c CI-watch negative controls
+
+Each command uses `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing.test.ts`.
+Only the stated semantic mutation was present during its failing run; it was restored immediately afterward.
+The fixed file passed all 13 cases without skips before these controls. No production mutation is committed.
+
+| Scenario | Pattern | Semantic mutation | Observed failing assertion |
+|---|---|---|---|
+| 05-8 | CI watch persists arrival | `src/ci-watch.ts`: completed-run identity uses `${run.databaseId}.1` instead of the actual attempt | `a new attempt is a new failure even on the same head`: actual `undefined`, expected truthy |
+| 05-9 | operator-forwarded CI | `src/ci-evidence.ts`: disable the current-head mismatch guard | `/superseded head/` fails: tool records forwarded success on `bbbbbbbbbbbb` instead |
+| 05-10 | foreign CI stays | `src/foreign-ci-watch.ts`: suppress the moved-head notification guard (NC-34) | tick observation assertion: actual `[]`, expected `['head_moved']`; supersedes the earlier downstream model-selection failure |
+| 05-11 | real parent's timer | `src/main-ci.ts`: count all runs without actor or dynamic-event filtering | `own current-tip green clears latch` times out with the red row still present |
+| 05-12 | parked PR timer | `src/awaiting-merge.ts`: remove the parked watch's `observeCi` wiring | `parked green through extension timer` times out with no CI row |
+| 05-13 | held CI repairs | `src/integrate.ts`: set cumulative prior repair count to zero | `a second red result exhausts the repair allowance`: actual `resolve`, expected `surface` |
+
+These controls prove the named consumer scenarios. The P3c ledger and declaration assessment report the current
+mapped, retained and removed counts; proof of a behavior alone does not count a moved unit as deleted.
 
 ## Negative controls
 
@@ -617,6 +991,30 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-29 | `tests/merges.test.ts` | 3a27fd9a3c099512e779b3cf36e670efa71c7587 | 05-6 | NC-29-unseen-ff | d1140a88d18614739af2d16a773504d4784ed99314da8cd54762c08e060c9b4d | a fast-forward MR whose head origin's main lacks is recorded: "Missing expected rejection" | pass |
 | NC-30 | `tests/landing-proof.test.ts` | 3a27fd9a3c099512e779b3cf36e670efa71c7587 | 05-7 | NC-30-glob-paths | a7c56cdf50d4977e9ffaa5bace6e4d3cead67e685514bea31ae8a86046cba079 | the odd-paths job keeps its lease as `unpushed`, expected `landed_by_git` with `path_tree` | pass |
 | NC-31 | `tests/after-merge.test.ts` | 8532dda3b36d59141ef007d6996595ff2f825cbc | 05-5 | NC-31-pre-opt-in | bbd4b95f011b7fc8b6d9eea04c66a1ce7c3d169f9a7cd34abe807a103d40aa12 | a merge from before the opt-in creates a deploy job: "before opt-in" fails | pass |
+| NC-32 | `tests/ci-watch.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-8 | NC-32-attempt-identity | 31b8070cb5bf5755fe50f02b99ec4d0c69af3829ff01b31d1ab3dc1df4807bd8 | `a new attempt is a new failure even on the same head`: actual undefined, expected truthy | pass |
+| NC-33 | `tests/ci-evidence.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-9 | NC-33 | f3376f3e6c9824b272c272b574d5dba2f16bf53e3c8bf1536134ef052b5ee267 | expected /superseded head/, instead forwarded success recorded on bbbbbbbbbbbb | pass |
+| NC-34 | `tests/foreign-ci-watch.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-10 | NC-34 | 6404b4e7cc8ee8fd7bb6d253758e0727c482bcc8001b938351d9fe9c525e3cca | tick observations: actual [], expected [head_moved] | pass |
+| NC-35 | `tests/main-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-11 | NC-35 | f1a2e028adf4e9dcc42aa3f5fb68a4bce417edf303edcd23c081bc12d39f4b0e | timed out waiting for own current-tip green clears latch | pass |
+| NC-36 | `tests/parked-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-12 | NC-36 | 160bf6227e64578fad081ed6325566424cfc0a28ad79d50f6538fefc07dca69b | timed out waiting for parked green through extension timer | pass |
+| NC-37 | `tests/integrate-held-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-13 | NC-37 | 08885fb069f9156f222db16be799935bbede6b4804a0cdc7344c5bee0bdb6fa1 | a second red result exhausts the repair allowance: actual resolve, expected surface | pass |
+| NC-38 | `tests/awaiting-merge-tick.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-12 | NC-36 | 160bf6227e64578fad081ed6325566424cfc0a28ad79d50f6538fefc07dca69b | RENAME BOOKKEEPING ONLY: NC-36 fails the parked observer-wiring assertion; this is no control for either retained timer unit and earns no retirement credit | pass |
+| NC-39 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-39 | 3b171a4343a649cf97b5484d8436b270652f31a73e48043823d6d88cac71728b | a green rerun follows a failed attempt: actual undefined, expected true; exit 1 | pass |
+| NC-40 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-40 | 89140ecdb7e179ded4475bbae1fdd8503bc7d6e1c498391bc5373e5cff3175a6 | an arrived attempt is not announced again: actual ci_failed observation, expected []; exit 1 | pass |
+| NC-41 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-41 | 3247052c5ba325182bb6bc40b10310d9ba19c3efca12adaaaf82021ae65325e8 | an arrived green attempt is not announced again: actual ci_green observation, expected []; exit 1 | pass |
+| NC-42 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-42 | bdf24d76db79fa3de72985fd27fdf823b0e03b824e3f2f3c8b6198f67ffe563b | arrival is idempotent: actual repeated key, expected []; exit 1 | pass |
+| NC-43 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-43 | 1ab00c25fcb6f6beec90067b887e04cb604986b936ec84e87529fd74a6acc728 | an identical forwarded result is stored once: actual 2 expected 1; exit 1 | pass |
+| NC-44 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-44 | 1e23c1f307c54d5f011114b4e2867c81398446c93168b3e83de3008348700d0c | forwarded evidence rejects invalid input through the tool: expected /github token/, actual recorded success; exit 1 | pass |
+| NC-45 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-45 | b56732d87fd1e902de3998d8330d4e596c903c69dfd9a3e538e0289d4c5e4dbc | forwarded evidence rejects invalid input through the tool: expected /no known current head/, actual recorded success; exit 1 | pass |
+| NC-46 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-46 | b167ba1c73842346b33fbc3f5a82cba32174d8b356baa6b3abd16cd1cdeb694f | evidence cannot be rebound to another repository: expected `/is for other\/repository/`, actual recorded success; exit 1 | pass |
+| NC-47 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-47 | 603dd9661e1e596f888b39eb14b9bdc66078a98709fe8f022402c4b203a7b84c | every bounded forwarded write succeeds: actual false expected true; exit 1 | pass |
+| NC-48 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-48 | 97c3cb3752d2333372ea71e943083cde0d1183a0616689ebe15372ff4800bacc | viewer ignores native and other-head evidence and strips unsafe URLs: actual green expected in_progress; exit 1 | pass |
+| NC-49 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-49 | a74f29820429a3edc569e921ad1c59514c3c7a83c52afbee81efe57fcf3d8923 | a settled head is not re-read before the idle interval: actual 2 expected 1; exit 1 | pass |
+| NC-50 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-50 | 6b130b6e821c69c5f3300f337dd072c514254db98d8fef7f40783e99db0d1b08 | consecutive_failures assertion: actual 0 expected 1; exit 1 | pass |
+| NC-51 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-51 | 377f7f3b0591d09e03c7e9fee7017df96c330e6e449996c2ef3c998e6e8e5210 | permission denial replaces prior green: actual unknown expected unreadable; exit 1 | pass |
+| NC-52 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-52 | 5acaec2af379bcfc1e81071685ef44c9dea8e31e54077554cf7a9d8dcbcfe2e8 | a transient fault is unknown: actual unreadable expected unknown; exit 1 | pass |
+| NC-53 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-53 | 38f8d8e9b4ee45085a53a7b0ab3bf727bcb6dff132a7f9ccaf91b7725964834d | resume or re-park drops the old cycle's terminal observation: actual false expected true; exit 1 | pass |
+| NC-54 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-54 | c659006b3d4f625d0f3ca065766b8a331cfec0d460cefd0b52d73c491be85d74 | merged and closed snapshots do not read native CI: actual 1 expected 0; exit 1 | pass |
+| NC-55 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-55 | b982458f1edafa0ef99eb6f9a6e601c82067dbbdffe56318cd15ebc5303b5b13 | a failing head backs off instead of re-reading every sweep: actual 12 expected 6; exit 1 | pass |
 <!-- /manifest:regressions -->
 
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:
@@ -1340,6 +1738,8 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/e2e/viewer-endpoints-speed.test.ts` | #395 | e2e landed on main after the baseline (viewer dashboard endpoint caching); recorded by P2e so the check stays at 0 findings, disposition left to its behavior's PR |
 | `tests/e2e/landing.test.ts` | P3 | behavior 05, scenarios 05-1 to 05-4; P3b adds 05-5 to 05-7 |
 | `tests/e2e/installer.test.ts` | #375 | installer sandbox: real bootstrap/cp-install/cp-daemon/doctor in Docker with the mock provider; opt-in `CP_INSTALL_E2E=1` (CI's install sandbox job) |
+| `tests/entry-guard.test.ts` | main 5e8106b | unit landed upstream after the baseline; convert, owner P24 (entry-module/runtime compatibility), outside P3c; recorded when plain-merging main |
+| `tests/awaiting-merge-tick-retained.test.ts` | P3c-rest | convert, owner P3c-rest; two declarations retained verbatim from tests/awaiting-merge-tick.test.ts; no public entry point transfers a running session's lock or observes dormant timers after shutdown |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -1397,7 +1797,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | File | Disposition | Owner | Evidence |
 |---|---|---|---|
 | `tests/actions-ci-policy.test.ts` | exception | P1 | contract: disallowed forge read surface; operator ask-0088e0332d00 (Exceptions) |
-| `tests/actions-ci.test.ts` | deleted | P3 | 16 declarations: scenarios 05-1 and 05-4 (Assertion map); five units retained in `tests/main-ci.test.ts` (moved there by P3b); NC-24 |
+| `tests/actions-ci.test.ts` | deleted | P3 | 16 declarations: scenarios 05-1 and 05-4 (Assertion map); five units retained in `tests/main-ci.test.ts`; NC-24 |
 | `tests/after-merge.test.ts` | deleted | P3b | 5 declarations: scenario 05-5 (Assertion map); one unit retained in `tests/forge-observers.test.ts`; NC-31 |
 | `tests/answer-card.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/answer-delivery.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
@@ -1409,7 +1809,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/awaiting-merge-lifecycle.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge-park.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge-resume.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs); also listed under 23, owned here only |
-| `tests/awaiting-merge-tick.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/awaiting-merge-tick.test.ts` | deleted | P3c-rest | original path renamed only to tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest); both declarations retained, zero removed-declaration and deleted-file credit; follow-on needs ownership-transfer and post-shutdown observation entry points |
 | `tests/awaiting-merge-viewer.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge-watch.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
@@ -1423,14 +1823,14 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/budgets.test.ts` | deleted | P2 | 6 assertions mapped to 02-4; negative control NC-04 |
 | `tests/capacity.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-14 or redundant-unreachable (Assertion map); negative control NC-19 |
 | `tests/checkpoint-root.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
-| `tests/ci-access.test.ts` | deleted | P3 | 5 declarations: scenarios 05-1 and 05-3 (Assertion map); two units retained in `tests/main-ci.test.ts` (moved there by P3b); NC-26 |
+| `tests/ci-access.test.ts` | deleted | P3 | 5 declarations: scenarios 05-1 and 05-3 (Assertion map); two units retained in `tests/main-ci.test.ts`; NC-26 |
 | `tests/ci-configured.test.ts` | deleted | P3 | 5 declarations: scenario 05-2 (Assertion map); one unit retained in `tests/merge-ask.test.ts`; NC-25 |
-| `tests/ci-evidence.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/ci-evidence.test.ts` | deleted | P3c | all five declarations mapped to real tool and viewer consumers in 05-9; NC-33 and NC-43–NC-48 record failing assertions; no units moved or retained |
 | `tests/ci-host-tools.test.ts` | exception | P1 | guard: CI never silently skips treehouse acceptance; operator ask-0088e0332d00 (Exceptions) |
 | `tests/ci-infra-rerun.test.ts` | deleted | P3 | 4 declarations: scenario 05-4 (Assertion map); two units retained in `tests/main-ci.test.ts`; NC-27 |
 | `tests/ci-run-ref.test.ts` | deleted | P0 | 10 assertions mapped, 4 redundant-unreachable; negative controls NC-01..NC-03 |
 | `tests/ci-wait.test.ts` | exception | P1 | contract: worker report-and-stop policy and guard; operator ask-0088e0332d00 (Exceptions) |
-| `tests/ci-watch.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/ci-watch.test.ts` | convert | P3c-rest | behavior 05 follow-on; 80 declarations, five already mapped to 05-8 with controls, 75 pending |
 | `tests/contract-injection.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
 | `tests/contract.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
 | `tests/contracts-anchors.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
@@ -1499,7 +1899,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/failures.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/fake-parent-tracker.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/fleet.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
-| `tests/foreign-ci-watch.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/foreign-ci-watch.test.ts` | convert | P3c-rest | behavior 05 follow-on; eleven declarations pending conversion |
 | `tests/forge-observers.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/forge-runtime.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/forge-url.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
@@ -1515,7 +1915,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/install-tools.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
 | `tests/intake-settle-atomicity.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/intake.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
-| `tests/integrate-held-ci.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/integrate-held-ci.test.ts` | convert | P3c-rest | behavior 05 follow-on; three repair declarations pending conversion |
 | `tests/integrate.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/job-skills.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/jobs-tool.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
@@ -1527,7 +1927,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/ledger-import.test.ts` | deleted-with-feature | #379 | tested `src/ledger-import.ts` |
 | `tests/ledger.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/live-harness.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
-| `tests/main-ci.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/main-ci.test.ts` | convert | P3c-rest | behavior 05 follow-on; 39 declarations pending conversion, including inherited P3/P3b coverage |
 | `tests/mandate-defaults.test.ts` | deleted | P2c | behavior 02: every assertion mapped to 02-8 or redundant-unreachable (Assertion map); negative control NC-12 |
 | `tests/mandate-selection.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-12 (Assertion map); negative control NC-16 |
 | `tests/mandate-supplement.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-12 (Assertion map); negative control NC-17 |
@@ -1568,7 +1968,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/parent-outbox.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/parent-routing-evals.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/parent-session.test.ts` | exception | P1 | contract: assembled parent session; operator ask-0088e0332d00 (Exceptions) |
-| `tests/parked-ci.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/parked-ci.test.ts` | deleted | P3c | behavior 05; all three declarations mapped to 05-12, NC-36 and NC-49–NC-55; no moved or retained units |
 | `tests/pi-hashline-compaction.test.ts` | convert | P5 | behavior 07 (Compaction) |
 | `tests/pi-lens-headless.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
 | `tests/pi-server-dependency.test.ts` | exception | P1 | contract: package boundary constraints; operator ask-0088e0332d00 (Exceptions) |
