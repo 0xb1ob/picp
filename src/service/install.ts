@@ -36,11 +36,12 @@
  *
  * P2i adds, after the required tools: gh login, the pi-lens host tools, the pi
  * packages workers load (`ROLE_PACKAGES`), and the
- * optional tmux/push checks. Prompts read /dev/tty, so
+ * optional tmux check; push is `--push-origin` only. Prompts read /dev/tty, so
  * `curl | sh` still asks; with no terminal every prompt takes its default.
  * Before those, provider login (#375): no model pi can use as cp-daemon's parent sees them exits 4, nothing started.
  *
- * Every step prints `ok|changed|skip|fail: <step>: <detail>`; exit 1 on any fail, 4 for a missing login.
+ * Every step prints `ok|changed|skip|fail: <step>: <detail>`; exit 1 on any fail, 4 for a missing login. Long waits
+ * print `… <step>:` progress lines; a real run ends with one `ready:` or `incomplete:` summary (#375 PR4).
  */
 import { spawnSync } from "node:child_process";
 import { accessSync, chmodSync, closeSync, constants, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
@@ -58,14 +59,16 @@ import { currentHost, ParentHostClient, parentHostPaths } from "../parent-host.t
 import { ghLoggedIn } from "./health.ts";
 import { herdrPiIntegrated, onPath } from "../viewer/launchers.ts";
 import { DAEMON_UNIT, installTargets, OPERATOR_RESUME_UNIT, OPERATOR_UNIT, OPERATOR_WRAPPER, PARENT_UNIT, renderDaemonUnit, renderOperatorWrapper, renderTunnelWrapper, renderUnits, TUNNEL_WRAPPER, type UnitInput, unitParentModel, unitPath, unitViewerHost, VIEW_UNIT, wrapperModels, wrapperViewerHost } from "./units.ts";
-import { activate, type BackendContext, deactivate, detectBackend, legacyPreflight, legacyPresent, linger } from "./daemon-backend.ts";
-import { type DaemonConfig, daemonPaths, validateDaemonConfig } from "./daemon-files.ts";
+import { activate, type BackendContext, deactivate, detectBackend, legacyPreflight, legacyPresent, linger, READY_WAIT_MS } from "./daemon-backend.ts";
+import { type DaemonConfig, daemonPaths, rebootCommand, validateDaemonConfig } from "./daemon-files.ts";
 import { chooseModels, parseModelList, serviceListEnv } from "./models.ts";
 import { gatewayStep } from "./gateway.ts";
 import { sameLock } from "../worktree-deps.ts";
 import { gatewayKeyFile } from "../gateway-key.ts";
 import { bindHostRefusal, type HostCandidate, type LocalAddress, localAddresses, parseTailscaleIp, sameAddress, viewerHostCandidates } from "../viewer/bind-host.ts";
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
+import { realpathSync as entryRealpath } from "node:fs";
+import { fileURLToPath as entryPath } from "node:url";
 
 export type StepStatus = "ok" | "changed" | "skip" | "fail";
 export interface RunResult { status: number; stdout: string; stderr: string }
@@ -146,8 +149,11 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	const force = flags.force === true;
 	const noStart = flags["no-start"] === true;
 	let failed = false;
+	// The final summary's one block of what is left to the user (#375 P5).
+	const later: string[] = [];
 	const step = (status: StepStatus, name: string, detail: string): void => {
 		if (status === "fail") failed = true;
+		if (status === "skip") later.push(`${name}: ${detail}`);
 		ports.log(`${status}: ${name}: ${detail}${dry && status === "changed" ? " (dry-run)" : ""}`);
 	};
 	const ok = (result: RunResult) => result.status === 0;
@@ -361,34 +367,62 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	// systemd; `cp-daemon start` and the reboot command when detached. Either waits until the daemon is ready.
 	// Only after every earlier step succeeded: a failed install never leaves a runtime running.
 	if (failed) return 1;
-	await activate(ctx);
+	const starting = !dry && !noStart;
+	if (starting) ports.log(`… daemon: starting cp-daemon; waiting up to ${READY_WAIT_MS / 1000}s for the parent supervisor and the viewer`);
+	await progress(ports, starting, "daemon", () => activate(ctx));
 
-	// 10. Web Push, once: --push-origin, or an origin typed at the prompt.
+	// 10. Web Push, once, and only with --push-origin (#375 PR4: never a prompt; the summary names the flag).
 	const pushSetUp = ports.exists(join(dataDir, "push/config.json"));
-	const pushOrigin = flags["push-origin"] ?? (pushSetUp ? undefined : answer("Web push origin for the dashboard (https://..., empty to skip): ") || undefined);
+	const pushOrigin = flags["push-origin"];
 	if (pushSetUp) step("ok", "push", "already set up");
 	else if (!pushOrigin) step("skip", "push", "not set up; rerun with --push-origin URL to enable it");
 	else if (dry) step("changed", "push", `would run push-init --origin ${pushOrigin}`);
 	else if (ok(ports.run(ports.node.path, [join(app, "scripts/push-init.ts"), "--origin", pushOrigin, "--home", home], app))) step("changed", "push", `push set up for ${pushOrigin}`);
 	else step("fail", "push", "scripts/push-init.ts failed; rerun it by hand to read why");
+	// No systemd: nothing starts cp-daemon at boot unless --crontab added the @reboot line (#375 P3).
+	if (!systemd && !flags.crontab) later.push(`reboot: no systemd here, so cp-daemon does not start at boot; rerun with --crontab to add an @reboot line, or after a reboot run: ${rebootCommand(ctx.config)}`);
 
 	// 11. Doctor, on either backend once started.
-	if (!dry && !noStart) {
+	let doctorOk = false;
+	if (starting) {
 		try {
-			const doctor = await ports.doctor(home, 90_000);
+			ports.log("… doctor: waiting for the parent, then its /doctor (up to 90s)");
+			const doctor = await progress(ports, true, "doctor", () => ports.doctor(home, 90_000));
 			// --force accepted an incompatible pi: that one finding, by its check id, cannot undo it; any other error fails.
 			const errors = doctorErrorChecks(doctor.text);
 			const forced = force && doctor.level === "error" && errors.length > 0 && errors.every((check) => check === PI_COMPAT_CHECK);
-			step(doctor.level === "error" && !forced ? "fail" : "ok", "doctor", forced ? `--force accepted the incompatible pi; ${PI_COMPAT_CHECK} is the only error:\n${doctor.text}` : doctor.text);
+			doctorOk = doctor.level !== "error" || forced;
+			step(doctorOk ? "ok" : "fail", "doctor", forced ? `--force accepted the incompatible pi; ${PI_COMPAT_CHECK} is the only error:\n${doctor.text}` : doctor.text);
 		} catch (error) {
 			step("fail", "doctor", `${(error as Error).message}; see cp-daemon log`);
 		}
 		ports.log(ports.run(ports.node.path, [join(app, "src/service/daemon.ts"), "status", "--home", home], home).stdout);
 	} else step("skip", "doctor", dry ? "dry-run" : "--no-start");
+	if (!dry) summary(ports, { ready: starting && doctorOk && !failed, noStart, host: ctx.config.viewer_host, port, later, rerun: rerunCommand(app, home, flags) });
 	return failed ? 1 : 0;
 }
 
 type Step = (status: StepStatus, name: string, detail: string) => void;
+
+/** `… <name>: still waiting (Ns)` every 5 s while `work` runs (#375 P2): a long wait is never silent. */
+async function progress<T>(ports: InstallPorts, on: boolean, name: string, work: () => Promise<T>): Promise<T> {
+	const start = Date.now();
+	const tick = on ? setInterval(() => ports.log(`… ${name}: still waiting (${Math.round((Date.now() - start) / 1000)}s)`), 5_000) : undefined;
+	try {
+		return await work();
+	} finally {
+		clearInterval(tick);
+	}
+}
+
+/** The last lines of a real run: `ready:` only after cp-daemon's readiness and a passing /doctor, else `incomplete:`. */
+function summary(ports: InstallPorts, o: { ready: boolean; noStart: boolean; host: string | undefined; port: number; later: readonly string[]; rerun: string }): void {
+	const url = o.host === undefined ? undefined : `http://${o.host.includes(":") ? `[${o.host}]` : o.host}:${o.port}/`;
+	if (o.ready) ports.log(`ready: cp-daemon runs and /doctor passed; ${url ? `the dashboard: ${url}` : "the dashboard has no address yet (viewer-host below)"}; the operator session: cp-operator`);
+	else if (o.noStart) ports.log("incomplete: cp-daemon was not started (--no-start), so readiness and /doctor were not checked; rerun without --no-start");
+	else ports.log(`incomplete: the fail: lines above say what stopped; fix them, then rerun: ${o.rerun}`);
+	if (o.later.length > 0) ports.log([`optional steps left (${o.later.length}):`, ...o.later.map((line) => `  - ${line}`)].join("\n"));
+}
 
 /** The host a previous install pinned: data/daemon.json's, else a legacy cp-view.service's, else the wrapper's; `generated` when cp-install wrote it. */
 interface PreviousHost { generated: boolean; host: string | undefined; from: string }
@@ -628,7 +662,8 @@ export function productionPorts(): InstallPorts {
 	};
 }
 
-if (import.meta.main) {
+// Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
+if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
 	const code = await install(parseInstallArgs(process.argv.slice(2)), productionPorts());
 	process.exit(code);
 }

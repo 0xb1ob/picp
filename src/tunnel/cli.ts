@@ -31,6 +31,8 @@ import { readPushConfig } from "../viewer/push-files.ts";
 import { type CfFetch, defaultCfFetch, setupNamedTunnel, tunnelNameFor } from "./cloudflare-api.ts";
 import { cloudflaredBinDir, defaultProvisionPorts, type Provisioned, provisionCloudflared } from "./cloudflared.ts";
 import { type ShowResult, showPairingOnTty } from "./qr.ts";
+import { realpathSync as entryRealpath } from "node:fs";
+import { fileURLToPath as entryPath } from "node:url";
 
 export const DEFAULT_REMOTE_PORT = 8767;
 /** Quick registration plus the daemon's 5 s tick and the viewer's 2 s check. */
@@ -339,7 +341,8 @@ async function down(home: string, paths: Paths, control: Control, ports: TunnelC
 	return 0;
 }
 
-if (import.meta.main) {
+// Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
+if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
 	const ports: TunnelCliPorts = {
 		env: process.env,
 		out: (line) => void process.stdout.write(`${line}\n`),

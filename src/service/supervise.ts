@@ -32,6 +32,8 @@ import { attachParentHost, currentHost, type HostRecord, ParentHostClient, paren
 import { parentModelSetting } from "../parent-context.ts";
 import { headCommit } from "../viewer/loaded-commit.ts";
 import { daemonPaths, psArgs, readDaemonRuntime, readJson, roleScript, sameProcess } from "./daemon-files.ts";
+import { realpathSync as entryRealpath } from "node:fs";
+import { fileURLToPath as entryPath } from "node:url";
 
 export const EXIT_NO_MODEL = 78;
 export const FOREIGN_LOCK_RETRY_MS = 60_000;
@@ -206,7 +208,8 @@ export function hostPorts(home: string, overrides: Partial<SupervisePorts> = {})
 	};
 }
 
-if (import.meta.main) {
+// Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
+if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
 	const home = resolveHome();
 	let active: HostClient | undefined;
 	const track = (client: HostClient): HostClient => (active = client);

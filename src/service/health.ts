@@ -36,6 +36,8 @@ import { daemonPaths } from "./daemon-files.ts";
 import { EscalationStore } from "../escalation.ts";
 import { OPERATOR_RELAY_OUTBOX_CAP, OperatorRelayAcks, OperatorRelayOutbox, oldestUnacked, operatorRelayAcksFile, operatorRelayOutboxFile, pendingRelays } from "../operator-outbox.ts";
 import { OperatorAsks } from "../operator-asks.ts";
+import { realpathSync as entryRealpath } from "node:fs";
+import { fileURLToPath as entryPath } from "node:url";
 import { classifyPi, readPiCompat } from "../pi-compat.ts";
 import { piDriftFinding, readDriftFacts } from "../pi-qualify.ts";
 
@@ -336,7 +338,8 @@ function readJson(file: string): Record<string, unknown> | undefined {
 	}
 }
 
-if (import.meta.main) {
+// Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
+if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
 	const home = resolveHome();
 	configureLayout("multi", home);
 	const layout = layoutForHome("multi", home);

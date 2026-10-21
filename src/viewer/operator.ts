@@ -25,6 +25,8 @@ import { relaunchFileFor, superviseOperatorPi } from "../operator-relaunch.ts";
 import { PACKAGE_ROOT } from "../home.ts";
 import { listenPlan, viewerAddress } from "./cli.ts";
 import { hostHeaderFor } from "./server.ts";
+import { realpathSync as entryRealpath } from "node:fs";
+import { fileURLToPath as entryPath } from "node:url";
 
 export const OPERATOR_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
@@ -202,6 +204,7 @@ function targetHome(): string | undefined {
 	try { return resolveOperatorTarget().home; } catch { return undefined; }
 }
 
-if (import.meta.main) {
+// Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
+if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
 	runOperator(process.argv.slice(2)).then((code) => process.exit(code));
 }
