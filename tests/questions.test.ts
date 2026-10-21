@@ -33,7 +33,7 @@ import {
 } from "../src/questions.ts";
 import { createScratchHome } from "./harness/index.ts";
 
-const BR = "cp-ask1";
+const JOB_ID = "cp-ask1";
 
 function request(overrides: Record<string, unknown> = {}): {
 	id: string;
@@ -202,13 +202,13 @@ test("the journal is append-only, validated, and survives a torn line", (t) => {
 	t.after(() => home.cleanup());
 	const store = new QuestionStore(home.path);
 
-	assert.deepEqual(store.list(BR), [], "no file is not an error");
-	assert.equal(store.count(BR), 0);
-	assert.equal(store.open(BR), undefined);
+	assert.deepEqual(store.list(JOB_ID), [], "no file is not an error");
+	assert.equal(store.count(JOB_ID), 0);
+	assert.equal(store.open(JOB_ID), undefined);
 
 	const asked = store.append({
 		schema_version: SCHEMA_VERSION,
-		job_id: BR,
+		job_id: JOB_ID,
 		seq: 1,
 		dialog_id: "dlg-1",
 		role: "planner",
@@ -219,7 +219,7 @@ test("the journal is append-only, validated, and survives a torn line", (t) => {
 		outcome: "timeout",
 	});
 	assert.equal(asked.seq, 1);
-	assert.equal(store.open(BR)?.dialog_id, "dlg-1", "an unclosed exchange is the open one");
+	assert.equal(store.open(JOB_ID)?.dialog_id, "dlg-1", "an unclosed exchange is the open one");
 
 	store.append({
 		...asked,
@@ -228,19 +228,19 @@ test("the journal is append-only, validated, and survives a torn line", (t) => {
 		answer: "Postgres",
 		answered_by: "operator dialog (tui)",
 	});
-	assert.equal(store.list(BR).length, 2, "closing a question appends; it never rewrites");
-	assert.equal(store.list(BR).at(-1)?.answer, "Postgres");
+	assert.equal(store.list(JOB_ID).length, 2, "closing a question appends; it never rewrites");
+	assert.equal(store.list(JOB_ID).at(-1)?.answer, "Postgres");
 	// One exchange, two lines: the cap counts exchanges or it halves itself, and
 	// an answered exchange is no longer open.
-	assert.equal(store.count(BR), 1);
-	assert.equal(store.open(BR), undefined);
+	assert.equal(store.count(JOB_ID), 1);
+	assert.equal(store.open(JOB_ID), undefined);
 
 	// A half-written last line (a crash mid-append) must not break a job.
-	writeFileSync(store.file(BR), `${readFileSync(store.file(BR), "utf8")}{"job_id":"cp-ask1","seq"`);
-	assert.equal(store.list(BR).length, 2, "a torn line is skipped, not thrown");
+	writeFileSync(store.file(JOB_ID), `${readFileSync(store.file(JOB_ID), "utf8")}{"job_id":"cp-ask1","seq"`);
+	assert.equal(store.list(JOB_ID).length, 2, "a torn line is skipped, not thrown");
 
 	// Garbage in is refused at the door.
-	assert.throws(() => store.append({ job_id: BR } as never), QuestionError);
+	assert.throws(() => store.append({ job_id: JOB_ID } as never), QuestionError);
 });
 
 // ---------------------------------------------------------------------------
@@ -271,22 +271,22 @@ test("an answered question reaches the worker and lands in the journal", async (
 		onEvent: (jobId, kind) => events.push([jobId, kind]),
 	});
 
-	const result = await relay.handle({ jobId: BR, role: "planner", request: request() });
+	const result = await relay.handle({ jobId: JOB_ID, role: "planner", request: request() });
 	assert.deepEqual(result.answer, { value: "Postgres" }, "the worker gets the operator's words verbatim");
 	assert.equal(result.outcome, "answered");
 	assert.equal(seen[0]?.question, "Postgres or SQLite?");
 	assert.ok(seen[0]?.timeout_ms > 0, "the asker is given the deadline; it does not invent one");
 
 	// Both halves are on the record: asked, then closed.
-	const journal = relay.store.list(BR);
+	const journal = relay.store.list(JOB_ID);
 	assert.equal(journal.length, 2);
 	assert.equal(journal[0]?.closed_at, undefined);
 	assert.equal(journal[1]?.outcome, "answered");
 	assert.equal(journal[1]?.answered_by, "operator dialog (tui)");
 	// And the run log carries the exchange, because /watch is not the parent's context.
 	assert.deepEqual(events, [
-		[BR, "question_asked"],
-		[BR, "question_closed"],
+		[JOB_ID, "question_asked"],
+		[JOB_ID, "question_closed"],
 	]);
 });
 
@@ -379,9 +379,9 @@ test("the journal lives in the run dir", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const relay = relayWith(home.path, { async ask() { return { answer: "SQLite", by: "operator dialog (tui)" }; } });
-	await relay.handle({ jobId: BR, role: "planner", request: request() });
+	await relay.handle({ jobId: JOB_ID, role: "planner", request: request() });
 
-	assert.ok(relay.store.file(BR).endsWith(paths.questionsFile(BR)), "questions.jsonl belongs to the job's run dir");
+	assert.ok(relay.store.file(JOB_ID).endsWith(paths.questionsFile(JOB_ID)), "questions.jsonl belongs to the job's run dir");
 });
 
 // ---------------------------------------------------------------------------
