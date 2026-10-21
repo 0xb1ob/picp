@@ -428,7 +428,19 @@ test("S15: reviewers receive bounded whole-file snapshots with resolved task pat
 	s.repo.git("checkout", "--quiet", s.repo.branch);
 	mkdirSync(join(s.home, paths.runDir(job)), { recursive: true });
 	writeFileSync(join(s.home, paths.originalTaskFile(job)), "Remove docs/legacy.md. Read unique.ts, util.ts, nothing.ts, tests/fixtures/big.json and lib/core.py. Ignore /etc/hosts.md, ~/x.ts and /abs/x.ts.\n");
+	const bin = mkdtempSync(join(tmpdir(), "cp-s15-audit-"));
+	const git = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+	const audit = join(bin, "calls");
+	const oldPath = process.env.PATH;
+	t.after(() => { process.env.PATH = oldPath; rmSync(bin, { recursive: true, force: true }); });
+	writeFileSync(join(bin, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${audit}'\nexec '${git}' "$@"\n`);
+	chmodSync(join(bin, "git"), 0o700);
+	process.env.PATH = `${bin}:${oldPath}`;
 	const result = await s.review(job);
+	process.env.PATH = oldPath;
+	const calls = readFileSync(audit, "utf8");
+	assert.doesNotMatch(calls, /^cat-file .*:(?:etc\/hosts\.md|x\.ts)$/m);
+	assert.doesNotMatch(calls, /^grep .*core\.test\.ts/m);
 	assert.equal(result.verdict.verdict, "pass");
 	const manifest = JSON.parse(readFileSync(join(result.scratch, "context-manifest.json"), "utf8"));
 	const entries = manifest.entries as Array<{ path: string; side: string; reason: string; state: string; bytes?: number; sha256?: string; candidates?: string[] }>;
@@ -460,12 +472,19 @@ test("S15: reviewers receive bounded whole-file snapshots with resolved task pat
 	assert.match(context, /S15_FORK_ONLY/);
 	assert.doesNotMatch(context, /binary_marker|S15_ABSOLUTE|S15_HOME|ffff/);
 	assert.equal(context.match(/^### /gm)?.length, entries.filter((e) => e.state === "included").length);
+	assert.equal(manifest.used_bytes, entries.filter((e) => e.state === "included").reduce((sum, e) => sum + e.bytes!, 0));
 	assert.ok(context.includes("r".repeat(99)));
 	const brief = readFileSync(join(result.run, "brief.md"), "utf8");
 	assert.ok(brief.includes(`Fork point ${manifest.fork_point.slice(0, 12)}, head ${manifest.head_sha.slice(0, 12)}.`));
 	assert.match(brief, /read context-manifest\.json first, then only the context\.md sections you need/);
 	assert.match(brief, /`absent` means git confirmed the path does not exist at that sha/);
 	assert.match(brief, /never treat them as absent/);
+	rmSync(join(s.home, paths.reviewFile(job, 1)));
+	rmSync(result.scratch, { recursive: true });
+	const repeated = await s.review(job);
+	assert.ok(repeated.requests.length > 0);
+	assert.deepEqual(JSON.parse(readFileSync(join(repeated.scratch, "context-manifest.json"), "utf8")), manifest);
+	assert.equal(readFileSync(join(repeated.scratch, "context.md"), "utf8"), context);
 });
 
 

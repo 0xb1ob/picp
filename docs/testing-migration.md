@@ -69,7 +69,7 @@ ask-0088e0332d00, 2026-10-21.
 | S04 (cp-e2e-slice-s04-vep1) | behavior 05; original `tests/diff-review.test.ts` declarations 1–40. [Declaration accounting](testing-migration-s04-declarations.md): 38 mapped, 2 retained, 0 pending in S04; S05 owns 41–55 and whole-file retirement. | 0; baseline intentionally kept whole | +1 incoming e2e file | 55 source declarations unchanged; +13 e2e scenarios |
 | S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
-| S15 (cp-e2e-slice-s15-764h) | behavior 05; whole-file review-context, review-merge-window, review-runs and review-tool; [declaration accounting](testing-migration-s15.md); context, handback, RPC payload, transport, orphan and filesystem consumer assertions; 21 executed production controls; whole-file retirement pending | 0 so far | +0 test files | +7 e2e declarations (10 extra executed cases including three write subcases) |
+| S15 (cp-e2e-slice-s15-764h) | behavior 05; whole-file review-context, review-merge-window, review-runs and review-tool; [declaration accounting](testing-migration-s15.md); context: 10 mapped, 0 retained; other 28 dispositions pending; 21 executed production controls, context patch/hash records complete | 1 | -1 test file | -10 source declarations, +7 e2e declarations |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -376,6 +376,8 @@ moves first.
 | 05-S07 | `tests/e2e/landing.test.ts` | landing: held CI repair checks Sender authority before restoring a worker |
 | S06-5 | `tests/e2e/landing.test.ts` | landing: forge observation failures refuse merge receipts without leaking external replies |
 | S06-6 | `tests/e2e/landing.test.ts` | landing: spawn pressure releases the oldest held author and a journal refusal leaves room retryable |
+| 05-S15-C | `tests/e2e/diff-review.test.ts` | S15: reviewers receive bounded whole-file snapshots with resolved task paths and capped consumers |
+| 05-S15-F | `tests/e2e/diff-review.test.ts` | S15: a git object read failure is named in reviewer context without fabricating absence |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -732,6 +734,16 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/held-release.test.ts` | 4B1-T3(b): a shutdown that rejects leaks no reservation and leaves nothing stopping | S06-6 | retained | tests/held-release-retained.test.ts preserves injected shutdown rejection; the real RPC shutdown cannot be made to throw the supplied fake error through a public request. |
 | `tests/held-release.test.ts` | 4B1-T3(c): busy flips between selection and re-check — refused, nothing shut down or journaled | S06-6 | retained | tests/held-release-retained.test.ts preserves the getter that flips busy on its second read; production has no await between selection and recheck, so an external request cannot inject that getter race. |
 | `tests/held-release.test.ts` | wasReleased: the last lifecycle marker decides | S06-6 | mapped | cp_send restores the released author and records worker_revived; another send reaches that revived process with unchanged pid, while ordinary workers do not need restoration. review-lifecycle returning false fails sending to the released author. |
+| `tests/review-context.test.ts` | (1) deleted task file: fork body, head absence, changed precedence, exact SHAs and persisted manifest | 05-S15-C | mapped | C01; both packet and brief inspected through diffReview |
+| `tests/review-context.test.ts` | (2) unique basename resolves; duplicate candidates sorted; missing basename unresolved | 05-S15-C | mapped | C02; manifest entries preserve reason and state |
+| `tests/review-context.test.ts` | (3) absolute and home paths neither read nor emitted | 05-S15-C | mapped | C03; real git audit excludes cat-file reads; private marker bodies absent |
+| `tests/review-context.test.ts` | (4) budget omits entire blob with byte count, used-byte sum and one section per included file | 05-S15-C | mapped | C04; same public fixed-budget boundary with 300000-byte task fixture |
+| `tests/review-context.test.ts` | (5) failed blob is unreadable with error; failed merge-base has unavailable manifest, no packet, named pointer | 05-S15-F | mapped | C05; real git process fails at OS boundary |
+| `tests/review-context.test.ts` | (6) NUL-containing blob has binary state and byte length; body omitted | 05-S15-C | mapped | C06; same 18-byte fixture |
+| `tests/review-context.test.ts` | (7) exact sorted order, sha256 and identical regenerated manifest/body | 05-S15-C | mapped | C07; same head regenerated by real reviewer after packet loss |
+| `tests/review-context.test.ts` | (8) sorted consumers capped at five; no grep for changed test file | 05-S15-C | mapped | C08; real git audit checks test-file query exclusion |
+| `tests/review-context.test.ts` | (9) brief names SHAs, manifest-first reading and absent-versus-unknown semantics | 05-S15-C | mapped | C09; actual reviewer brief inspected |
+| `tests/review-context.test.ts` | (10) cp-c1ur N11: changed sources precede large fixtures; unchanged fork dedup; absent invariants excluded | 05-S15-C | mapped | C10 and C04; known regression preserved through public packet |
 <!-- /manifest:assertions -->
 
 S06's [declaration control ledger](testing-migration-s06-controls.md) maps each of its 24 mapped declarations to
@@ -1280,7 +1292,17 @@ diff --git a/src/held-release.ts b/src/held-release.ts
 | S06-conflict | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-5 | S06-conflict | 78c301aba9e55b637f3e1af9acda02c4846effe5c065b7adec47d8f5f83c104b | Missing expected rejection for conflicting heads; exit 1 | pass |
 | S06-deploy | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-2 | S06-deploy | 9c2bb5361529d74f70a4713044b66f3ea497e4e615d75ee95cf1a29c078a065a | corrupt ledger exception escapes recordMerge instead of preserving named retry outcome; exit 1 | pass |
 | S06-reservation | `tests/held-release.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-6 | S06-reservation | 0a723cad1b905543dda1bcffc250f7677cf6bb8451580d5e5779c674cd65f16d | queue capacity counts a releasable author as free after journal recovery: expected worker, got undefined; leaked reservation prevents retry; exit 1 | pass |
+| S15-C10 | `tests/review-context.test.ts` | 66c803bd47a3638e228a4183edd14aa34c647e8a | 05-S15-C | S15-C10 | bda2cbe060162587fea753d9651f19d0201685595492b7edb9a63672159582e5 | unchanged lib/core.py fork unexpectedly included | pass |
 <!-- /manifest:regressions -->
+
+<!-- patch:S15-C10 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -154 +154 @@
+-	for (const path of named) add(path, "head", "task-named");
++	for (const path of named) { add(path, "head", "task-named"); add(path, "fork", "task-named"); }
+```
 
 S02 controls run with `npm run test:one -- --test-name-pattern='landing S02: <scenario prefix>' tests/e2e/landing.test.ts`.
 Each patch below was applied alone and restored; each exited 1 on the observable assertion above.
@@ -2691,7 +2713,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/repo-map.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/restart-intake.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
 | `tests/review-approval.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
-| `tests/review-context.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/review-context.test.ts` | deleted | P3 | S15: all ten declarations mapped to 05-S15-C/F; ten executed controls with patches/hashes in testing-migration-s15.md; known cp-c1ur N11 regression pinned by S15-C10 |
 | `tests/review-merge-window.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/review-runs.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/review-tool.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
