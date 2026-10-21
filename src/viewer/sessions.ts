@@ -9,7 +9,7 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import type { ContextUsage } from "./api-types.ts";
-import { fileCache } from "./file-cache.ts";
+import { fileCache, scopedRealpath } from "./file-cache.ts";
 
 export const PARENT_ID = "cp-parent";
 export const RECENT_LIMIT = 10;
@@ -99,6 +99,20 @@ export interface ViewerState {
 export function fleetJobs(state: ViewerState): Json[] {
 	const jobs = readObject(join(state.stateDir, "fleet.json"))?.jobs;
 	return Array.isArray(jobs) ? jobs.map(obj).filter((job): job is Json => job !== undefined) : [];
+}
+
+const fleetIndexes = new WeakMap<unknown[], Map<unknown, Json>>();
+/** `fleetJobs(state).find(job => job.job_id === id)`, indexed once per cached fleet.json read. */
+function fleetJob(state: ViewerState, id: string): Json | undefined {
+	const jobs = readObject(join(state.stateDir, "fleet.json"))?.jobs;
+	if (!Array.isArray(jobs)) return undefined;
+	let index = fleetIndexes.get(jobs);
+	if (!index) {
+		index = new Map();
+		for (const job of jobs.map(obj)) if (job && !index.has(job.job_id)) index.set(job.job_id, job);
+		fleetIndexes.set(jobs, index);
+	}
+	return index.get(id);
 }
 
 /** The ledger (`<runtime root>/jobs.json`, same place in both modes): title and status by job id. */
@@ -226,14 +240,14 @@ export function sessionRoots(state: ViewerState): string[] {
 function realInside(file: string, roots: readonly string[]): string | undefined {
 	let real: string;
 	try {
-		real = realpathSync(file);
+		real = realpathSync.native(file);
 	} catch {
 		return undefined;
 	}
 	for (const root of roots) {
 		let realRoot: string;
 		try {
-			realRoot = realpathSync(root);
+			realRoot = scopedRealpath(root);
 		} catch {
 			continue;
 		}
@@ -253,7 +267,7 @@ export function resolveSessionFile(state: ViewerState, id: string): string | und
 	let file: string | undefined;
 	if (id === PARENT_ID) file = parentFile(state);
 	else {
-		const job = fleetJobs(state).find((candidate) => candidate.job_id === id);
+		const job = fleetJob(state, id);
 		if (!job || job.executor === "script") return undefined;
 		file = str(readStatus(state, id)?.session_file) ?? str(obj(job.worker)?.session_file);
 	}

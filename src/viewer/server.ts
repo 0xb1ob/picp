@@ -27,6 +27,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { resolve } from "node:path";
 import { boardView, jobsView, jobView, jobEvents } from "./jobs-view.ts";
 import { statsView } from "./stats-view.ts";
+import { statScope } from "./file-cache.ts";
 import { reportsView } from "./reports-view.ts";
 import { jobReport, reportImage } from "./job-report.ts";
 import { schedulesView } from "./schedules-view.ts";
@@ -352,39 +353,39 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			return;
   }
 		case "/api/stats": {
-			const out = statsView(options, url.searchParams, Date.now());
+			const out = statScope(() => statsView(options, url.searchParams, Date.now()));
 			if (out.status === 200) sendView(req, res, out.body); else sendJson(res, out.status, out.body);
 			return;
 		}
 		case "/api/jobs":
-			sendView(req, res, jobsView(options));
+			sendView(req, res, statScope(() => jobsView(options)));
 			return;
 		case "/api/board":
-			sendView(req, res, boardView(options));
+			sendView(req, res, statScope(() => boardView(options)));
 			return;
 		case "/api/reports":
 			sendView(req, res, reportsView(options, warn));
 			return;
 		case "/api/schedules":
-			sendView(req, res, schedulesView(options, warn));
+			sendView(req, res, statScope(() => schedulesView(options, warn)));
 			return;
 		case "/api/overview":
-			sendView(req, res, overview(options));
+			sendView(req, res, statScope(() => overview(options)));
 			return;
 		case "/api/map":
-			sendView(req, res, dependencyMap(options));
+			sendView(req, res, statScope(() => dependencyMap(options)));
 			return;
 		case "/api/dashboard":
-			sendJson(res, 200, dashboard(options));
+			sendJson(res, 200, statScope(() => dashboard(options)));
 			return;
 		case "/api/awaiting":
-			sendView(req, res, awaitingScreen(options));
+			sendView(req, res, statScope(() => awaitingScreen(options)));
 			return;
 		case "/api/decided":
-			sendView(req, res, decidedScreen(options));
+			sendView(req, res, statScope(() => decidedScreen(options)));
 			return;
 		case "/api/decisions":
-			sendView(req, res, decisionsScreen(options));
+			sendView(req, res, statScope(() => decisionsScreen(options)));
 			return;
 		case "/api/job": {
 			const job = jobDetail(options, url.searchParams.get("id") ?? "");
