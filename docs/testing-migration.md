@@ -67,6 +67,7 @@ ask-0088e0332d00, 2026-10-21.
 | S02 (cp-e2e-slice-s02-l7ph) | behavior 05; `tests/ci-watch.test.ts` declarations 1–40: 36 mapped, 4 mixed/unreachable and kept in place; five added e2e declarations, 05-8 extended. S03 owns 41–80 and whole-file retirement. | 0 (split-file bookkeeping: all units stay) | 378 → 378 | 4,274 → 4,279 |
 | S07 (cp-e2e-slice-s07-eaux) | P3c-rest behavior 05: only integrate-held-ci; 3 mapped, 0 retained, 1 deleted file; extends 05-13 and adds 05-S07; all other slices retain their ownership | 1 (`tests/integrate-held-ci.test.ts`) | 378 → 377 | 4,274 → 4,272 (3 removed, 1 added) |
 | S04 (cp-e2e-slice-s04-vep1) | behavior 05; original `tests/diff-review.test.ts` declarations 1–40. [Declaration accounting](testing-migration-s04-declarations.md): 38 mapped, 2 retained, 0 pending in S04; S05 owns 41–55 and whole-file retirement. | 0; baseline intentionally kept whole | +1 incoming e2e file | 55 source declarations unchanged; +13 e2e scenarios |
+| S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
 
 S02 follows the operator's split-file amendment: a range slice adds consumer evidence without removing or moving any
 unit declaration. `tests/ci-watch.test.ts` remains 80 static declarations / 89 executed cases. No checker or contract
@@ -198,6 +199,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P3b | 05 | `tests/e2e/landing.test.ts` | adds 05-5 to 05-7 |
 | P3c | 05 | `tests/e2e/landing.test.ts` | partial delivery: 05-8–05-13 provide consumer coverage; ci-evidence and parked-ci retired; five unfinished files continue under P3c-rest |
 | P3c-rest | 05 | `tests/e2e/landing.test.ts` | follow-on slices: 128 pending declarations and two retained timer cases across five unfinished files |
+| S08 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 1–40: 38 mapped, 2 retained (5%), 0 deleted files; nine scenarios added and 05-13 extended; [range ledger](testing-migration-s08.md); original unit file kept whole |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -331,6 +333,15 @@ moves first.
 | 05-11 | `tests/e2e/landing.test.ts` | landing: a real parent's timer latches only its mandated main runs and clears only current-tip green |
 | 05-12 | `tests/e2e/landing.test.ts` | landing: parked PR timer stores native CI for each observed head without reviving its released worker |
 | 05-13 | `tests/e2e/landing.test.ts` | landing: held CI repairs the same real worker once while preserving an integration hold |
+| 05-S08-1 | `tests/e2e/landing.test.ts` | landing: held repair rejects invalid PR identity, CI, holds, drains and worktree hazards |
+| 05-S08-2 | `tests/e2e/landing.test.ts` | landing: held CI revalidates local state after each external read |
+| 05-S08-3 | `tests/e2e/landing.test.ts` | landing: a reviewed green head merges once, records, tears down and closes from forge facts |
+| 05-S08-4 | `tests/e2e/landing.test.ts` | landing: the review deadline resumes once and rechecks current gates |
+| 05-S08-5 | `tests/e2e/landing.test.ts` | landing: main red gates only the mandated login and permits a green fix-forward |
+| 05-S08-6 | `tests/e2e/landing.test.ts` | landing: repository and fallback merges bind the approved head at the forge |
+| 05-S08-7 | `tests/e2e/landing.test.ts` | landing: stale bases update only for BEHIND or an authoritative strict rule |
+| 05-S08-8 | `tests/e2e/landing.test.ts` | landing: the operator bridge persists a hold without a parent and a restarted parent reads and releases it |
+| 05-S08-9 | `tests/e2e/landing.test.ts` | landing: a hold arriving during green CI stops both merge authority paths |
 | 05-S02-1 | `tests/e2e/landing.test.ts` | landing S02: only reported held PR deliveries are queried |
 | 05-S02-2 | `tests/e2e/landing.test.ts` | landing S02: aggregate CI and terminal PR facts preserve the current head |
 | 05-S02-3 | `tests/e2e/landing.test.ts` | landing S02: watch delivery, restart and query cadence survive real forge failures |
