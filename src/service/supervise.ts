@@ -32,7 +32,7 @@ import { attachParentHost, currentHost, type HostRecord, ParentHostClient, paren
 import { parentModelSetting } from "../parent-context.ts";
 import { headCommit } from "../viewer/loaded-commit.ts";
 import { daemonPaths, psArgs, readDaemonRuntime, readJson, roleScript, sameProcess } from "./daemon-files.ts";
-import { realpathSync as entryRealpath } from "node:fs";
+import { entryRealpath } from "../entry-guard.ts";
 import { fileURLToPath as entryPath } from "node:url";
 
 export const EXIT_NO_MODEL = 78;

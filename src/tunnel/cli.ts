@@ -31,7 +31,7 @@ import { readPushConfig } from "../viewer/push-files.ts";
 import { type CfFetch, defaultCfFetch, setupNamedTunnel, tunnelNameFor } from "./cloudflare-api.ts";
 import { cloudflaredBinDir, defaultProvisionPorts, type Provisioned, provisionCloudflared } from "./cloudflared.ts";
 import { type ShowResult, showPairingOnTty } from "./qr.ts";
-import { realpathSync as entryRealpath } from "node:fs";
+import { entryRealpath } from "../entry-guard.ts";
 import { fileURLToPath as entryPath } from "node:url";
 
 export const DEFAULT_REMOTE_PORT = 8767;

@@ -36,7 +36,7 @@ import { daemonPaths } from "./daemon-files.ts";
 import { EscalationStore } from "../escalation.ts";
 import { OPERATOR_RELAY_OUTBOX_CAP, OperatorRelayAcks, OperatorRelayOutbox, oldestUnacked, operatorRelayAcksFile, operatorRelayOutboxFile, pendingRelays } from "../operator-outbox.ts";
 import { OperatorAsks } from "../operator-asks.ts";
-import { realpathSync as entryRealpath } from "node:fs";
+import { entryRealpath } from "../entry-guard.ts";
 import { fileURLToPath as entryPath } from "node:url";
 import { classifyPi, readPiCompat } from "../pi-compat.ts";
 import { piDriftFinding, readDriftFacts } from "../pi-qualify.ts";

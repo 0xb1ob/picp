@@ -48,7 +48,7 @@ import { readStatusFile } from "../run-artifacts.ts";
 import { UPDATE_FAILURES, viewerDown } from "./health.ts";
 import { type DaemonControl, daemonControl } from "./daemon-control.ts";
 import type { RunResult } from "./install.ts";
-import { realpathSync as entryRealpath } from "node:fs";
+import { entryRealpath } from "../entry-guard.ts";
 import { fileURLToPath as entryPath } from "node:url";
 
 export type UpdateResult = "updated" | "up_to_date" | "skipped_disabled" | "skipped_dirty" | "skipped_branch" | "skipped_ahead" | "skipped_bad_sha" | "skipped_busy" | "skipped_settling" | "fetch_failed" | "failed" | "drain_timeout" | "rolled_back" | "rollback_failed" | "config_invalid" | "migration_required";

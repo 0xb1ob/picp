@@ -23,7 +23,7 @@ import { resolveStateDir } from "./sessions.ts";
 import { remoteOnly, remoteRuntime } from "./remote-runtime.ts";
 import { REMOTE_HOST } from "./remote-server.ts";
 import { createViewer, hostHeaderFor, type ViewerOptions } from "./server.ts";
-import { realpathSync as entryRealpath } from "node:fs";
+import { entryRealpath } from "../entry-guard.ts";
 import { fileURLToPath as entryPath } from "node:url";
 
 export const DEFAULT_PORT = 8766;

@@ -40,7 +40,7 @@ import {
 	sameProcess,
 } from "./daemon-files.ts";
 import { type OuterPorts, runOuter } from "./daemon-outer.ts";
-import { realpathSync as entryRealpath } from "node:fs";
+import { entryRealpath } from "../entry-guard.ts";
 import { fileURLToPath as entryPath } from "node:url";
 
 export const START_WAIT_MS = 30_000;

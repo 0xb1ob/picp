@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { daemonPaths, EXIT_CONFIG, pidAlive, psArgs, sameProcess } from "../service/daemon-files.ts";
 import { readTunnelBinding } from "../service/daemon-tunnel-files.ts";
 import { DEVICE_NOTIFY_INTERVAL_MS, runDeviceNotifySweep } from "./device-notifications.ts";
-import { realpathSync as entryRealpath } from "node:fs";
+import { entryRealpath } from "../entry-guard.ts";
 import { fileURLToPath as entryPath } from "node:url";
 
 /** The `ps` needle that tells this sender from a reused pid. */

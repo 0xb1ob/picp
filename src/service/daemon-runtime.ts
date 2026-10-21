@@ -51,7 +51,7 @@ import {
 } from "./daemon-files.ts";
 import { type TunnelIo, tunnelController, tunnelIo } from "./daemon-tunnel.ts";
 import { remoteFeatureConfigured } from "./daemon-tunnel-files.ts";
-import { realpathSync as entryRealpath } from "node:fs";
+import { entryRealpath } from "../entry-guard.ts";
 import { fileURLToPath as entryPath } from "node:url";
 
 export const TICK_MS = 5_000;

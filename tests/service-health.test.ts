@@ -412,7 +412,8 @@ test("the health run logs a host.pi.drift warning for an unqualified newer pi an
 	const warn = (prs: { status: number; stdout: string }) => () => piDriftWarning(process.cwd(), sh(prs), now);
 	const probes = Object.fromEntries(HEALTH_CHECKS.map((name) => [name, () => OK])) as unknown as HealthProbes;
 	const record = await runHealth({
-		stateDir: b.stateDir, probes, now: () => now, log: (line) => b.lines.push(line), warn: warn({ status: 0, stdout: "[]" }),
+		stateDir: b.stateDir, probes, now: () => now, log: (line) => b.lines.push(line),
+		warn: warn({ status: 0, stdout: "[]" }),
 	});
 	const line = b.lines.find((l) => l.startsWith("warn host.pi.drift: "));
 	assert.ok(line?.includes("qualify pi 1.9.9"), b.lines.join("\n"));

@@ -25,7 +25,7 @@ import { relaunchFileFor, superviseOperatorPi } from "../operator-relaunch.ts";
 import { PACKAGE_ROOT } from "../home.ts";
 import { listenPlan, viewerAddress } from "./cli.ts";
 import { hostHeaderFor } from "./server.ts";
-import { realpathSync as entryRealpath } from "node:fs";
+import { entryRealpath } from "../entry-guard.ts";
 import { fileURLToPath as entryPath } from "node:url";
 
 export const OPERATOR_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;

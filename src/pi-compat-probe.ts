@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PiProbe } from "./pi-compat.ts";
-import { realpathSync as entryRealpath } from "node:fs";
+import { entryRealpath } from "./entry-guard.ts";
 import { fileURLToPath as entryPath } from "node:url";
 
 export const PROBE_VERSION_MS = 5_000;
@@ -37,7 +37,7 @@ export async function probePi(pi: string, packageRoot: string, extensionMs = PRO
 
 const loads = new Map<string, PiProbe["extension"]>();
 
-/** /doctor's probe: async, DOCTOR_PROBE_MS; `--version` every time, a passed extension load reused per pi path + mtime. */
+/** /doctor's probe: async, DOCTOR_PROBE_MS; `--version` every time, a passed extension load reused per pi path+mtime. */
 export async function probePiCached(pi: string, packageRoot: string): Promise<PiProbe> {
 	let key: string | undefined;
 	try {

@@ -67,7 +67,7 @@ import { sameLock } from "../worktree-deps.ts";
 import { gatewayKeyFile } from "../gateway-key.ts";
 import { bindHostRefusal, type HostCandidate, type LocalAddress, localAddresses, parseTailscaleIp, sameAddress, viewerHostCandidates } from "../viewer/bind-host.ts";
 import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
-import { realpathSync as entryRealpath } from "node:fs";
+import { entryRealpath } from "../entry-guard.ts";
 import { fileURLToPath as entryPath } from "node:url";
 
 export type StepStatus = "ok" | "changed" | "skip" | "fail";

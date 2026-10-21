@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { classifyPi } from "../../src/pi-compat.ts";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
-import { realpathSync as entryRealpath } from "node:fs";
+import { entryRealpath } from "../../src/entry-guard.ts";
 import { fileURLToPath as entryPath } from "node:url";
 
 export const SCENARIOS = ["fresh", "prerequisites", "rerun", "login", "recovery", "root", "compat", "onboarding", "prompt", "node-floor"] as const;
