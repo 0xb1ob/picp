@@ -12,6 +12,8 @@ import { basename, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "../../src/ci-access.ts";
 import { CommandPost } from "../../src/command-post.ts";
+import { AwaitingStore } from "../../src/awaiting.ts";
+import { CheckpointStore } from "../../src/checkpoint.ts";
 import { CI_EVIDENCE_KEEP, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { drainFile } from "../../src/drain.ts";
 import type { ForgeConfig } from "../../src/forge-url.ts";
@@ -206,6 +208,7 @@ for (const [index, route] of (state.routes || []).entries()) {
   counts[index] = n + 1;
   writeFileSync(${JSON.stringify(countsFile)}, JSON.stringify(counts));
   const answer = route.replies[Math.min(n, route.replies.length - 1)];
+  while (answer.untilFile && !existsSync(answer.untilFile)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
   if (answer.pass) break;
   reply(answer);
 }
@@ -403,7 +406,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 			await child.close();
 		}
 	};
-	return { home: home.path, remote: repo.remote as string, repo, post, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent };
+	return { home: home.path, remote: repo.remote as string, repo, post, provider, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent };
 }
 
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
@@ -1355,17 +1358,40 @@ test("landing: parked PR timer stores native CI for each observed head without r
 test("landing: held CI repairs the same real worker once while preserving an integration hold", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t, { continuation: true });
 	const live = await s.held("held CI repair", 111, { repair: true });
+	const peer = await s.held("held CI peer in same project", 113, { command: (branch) => `printf peer > peer.txt && git add peer.txt && git commit -q -m peer && git push -q -u origin ${branch}` });
+	await s.post.continuation.serialize(peer.jobId, async () => {});
 	await s.post.continuation.serialize(live.jobId, async () => {});
 	const identity = s.post.fleet.require(live.jobId);
 	const holds = new IntegrationHolds(s.home);
 	holds.hold(live.jobId, "QA in progress");
+	holds.hold(peer.jobId, "peer QA");
 	s.setGh({ runs: [run(111, live.head, "completed", "failure")] });
-	await s.tick(live.jobId);
+	const gate = join(s.home, "held-ci-probe-release");
+	s.setGh({ routes: [{ match: `pr view ${live.prUrl}`, replies: [{ pass: true }, { untilFile: gate, pass: true }, { pass: true }] }] });
+	const beforeCalls = s.ghCalls().length;
+	const ticking = s.tick(live.jobId);
+	await waitFor(() => s.ghCalls().slice(beforeCalls).filter((call) => call.startsWith(`pr view ${live.prUrl}`)).length >= 2, Boolean, { timeoutMs: 30_000, what: "held CI confirmation reaches forge barrier" });
+	const manual = s.post.integrate({ jobId: live.jobId });
+	const peerAdvance = s.post.integrate({ jobId: peer.jobId });
+	try {
+		assert.equal(await Promise.race([peerAdvance.then(() => "advanced"), new Promise<string>((resolve) => setTimeout(() => resolve("queued"), 5_000))]), "queued", "another job in the project waits behind the CI repair");
+	} finally {
+		writeFileSync(gate, "release");
+	}
+	assert.equal((await peerAdvance).next, "wait");
+	await ticking;
+	await manual;
+	s.setGh({ routes: [] });
 	const repaired = await waitFor(() => s.post.fleet.get(live.jobId), (record) => record?.phase === "held" && (record.supersessions ?? 0) === 1, { timeoutMs: 60_000, what: "same worker repair and second envelope" });
 	await s.post.continuation.serialize(live.jobId, async () => {});
 	assert.deepEqual([repaired?.worker.pid, repaired?.worker.session_id, repaired?.branch, repaired?.worktree], [identity.worker.pid, identity.worker.session_id, identity.branch, identity.worktree]);
 	assert.equal(holds.get(live.jobId)?.reason, "QA in progress");
 	assert.equal(s.post.integrator.get(live.jobId)?.resolve_attempts, 1);
+	const requests = JSON.stringify(s.provider.requests(`landing-${live.jobId}`).map((request) => request.body.messages));
+	assert.match(requests, /run 111/);
+	assert.match(requests, /integration hold remains active/);
+	assert.equal(existsSync(join(s.home, paths.envelopeFile(live.jobId))), true, "repair submits a fresh envelope");
+	assert.equal(existsSync(join(s.home, paths.supersededEnvelopeFile(live.jobId, 1))), true, "initial report is archived");
 	const head = git(live.worktree, "rev-parse", "HEAD");
 	assert.notEqual(head, live.head, "the repaired report carries a newly pushed head");
 	s.setGh({ runs: [run(112, head, "completed", "success")] });
@@ -1373,10 +1399,51 @@ test("landing: held CI repairs the same real worker once while preserving an int
 	await s.post.continuation.serialize(live.jobId, async () => {});
 	assert.equal(s.post.integrator.get(live.jobId)?.next, "wait", "green CI preserves the QA hold");
 	assert.equal(s.post.integrator.get(live.jobId)?.resolve_attempts, 1);
+	await s.parent("Inspect held repair after restarting the parent.", [{ kind: "text", text: "Startup observed." }]);
+	assert.equal(s.post.integrator.get(live.jobId)?.next, "wait", "startup preserves green held repair");
+	assert.equal(s.post.integrator.get(live.jobId)?.resolve_attempts, 1, "startup preserves cumulative allowance");
 	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+	assert.equal(new CheckpointStore(s.home, { kind: "merge" }).list().length, 0);
+	assert.equal(new AwaitingStore({ home: s.home }).list().length, 0);
+	holds.release(live.jobId);
+	assert.equal((await s.post.integrate({ jobId: live.jobId })).next, "review", "release still requires review of the repaired head");
+	holds.hold(live.jobId, "QA in progress");
 	s.setGh({ runs: [run(112, head, "completed", "failure", { run_attempt: 2 })] });
+	await s.parent("Inspect the repaired head's failing CI after restart.", [{ kind: "tool_calls", calls: [{ name: "cp_integrate", args: { job_id: live.jobId, action: "advance" } }] }, { kind: "text", text: "Restarted parent checked CI." }]);
+	assert.match(s.post.integrator.get(live.jobId)?.reason ?? "", /already asked once/, "restarted parent reads the spent allowance before looking for a local worker");
 	await s.tick(live.jobId);
 	await s.post.continuation.serialize(live.jobId, async () => {});
 	assert.equal(s.post.integrator.get(live.jobId)?.next, "surface", "a second red result exhausts the repair allowance");
 	assert.equal(s.post.fleet.require(live.jobId).supersessions, 1, "no second promotion");
+});
+
+test("landing: held CI repair checks Sender authority before restoring a worker", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const mode of ["revoked", "capped", "expired", "expired-released", "missing", "dead"]) {
+		const permitted = mode.startsWith("expired");
+		const s = await startStack(t);
+		const live = await s.held(`held permission ${mode}`, 121, { repair: true });
+		const identity = s.post.fleet.require(live.jobId);
+		if (mode === "revoked" || mode === "capped" || mode === "expired-released") {
+			writeFileSync(join(s.home, LAYOUT.budgetsFile), JSON.stringify({ ...s.post.budgets(), spawn_cap: 1 }));
+			await s.held(`occupy released slot ${mode}`, 122);
+			assert.equal(s.post.heldRelease.wasReleased(live.jobId), true, "a real dispatch releases the idle held worker");
+		}
+		const grant = s.post.mandates.issue({ projects: ["demo"], objective: "repair held CI", expiry: isoTimestamp(new Date(Date.now() - 1_000)), at: isoTimestamp(new Date(Date.parse(identity.dispatched_at) - 60_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10 });
+		if (mode === "revoked") s.post.mandates.revoke(grant.id);
+		if (mode === "capped") s.post.mandates.save({ ...s.post.mandates.require(grant.id), status: "paused", pause_reason: "spend_cap", paused_at: isoTimestamp() });
+		new IntegrationHolds(s.home).hold(live.jobId, "permission probe");
+		if (!permitted) await s.post.manager.shutdownAll();
+		s.setGh({ runs: [run(121, live.head, "completed", "failure")] });
+		const result = await s.post.integrate({ jobId: live.jobId });
+		assert.equal(result.next, permitted ? "resolve" : "surface", mode);
+		assert.equal(result.record.resolve_attempts, permitted ? 1 : 0, mode);
+		if (!permitted) {
+			assert.match(result.resolve_error ?? "", mode === "revoked" ? /is revoked/ : mode === "capped" ? /is paused \(spend_cap\)/ : /no live worker/, mode);
+			assert.equal(s.post.fleet.require(live.jobId).phase, "held", mode);
+			assert.equal(JSON.parse(readFileSync(join(s.home, paths.envelopeFile(live.jobId)), "utf8")).envelope.head_sha, live.head, mode);
+			assert.equal(s.post.fleet.require(live.jobId).worker.pid, identity.worker.pid, "refusal never revives a worker");
+		}
+		assert.equal(new IntegrationHolds(s.home).get(live.jobId)?.reason, "permission probe");
+		assert.deepEqual(mergedCalls(s.ghCalls()), []);
+	}
 });
