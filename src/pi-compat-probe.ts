@@ -37,7 +37,7 @@ export async function probePi(pi: string, packageRoot: string, extensionMs = PRO
 
 const loads = new Map<string, PiProbe["extension"]>();
 
-/** /doctor's probe: async, DOCTOR_PROBE_MS; `--version` every time, a passed extension load reused per pi path+mtime. */
+/** /doctor's probe: async, DOCTOR_PROBE_MS; `--version` every time, a passed extension load reused per path+mtime. */
 export async function probePiCached(pi: string, packageRoot: string): Promise<PiProbe> {
 	let key: string | undefined;
 	try {
