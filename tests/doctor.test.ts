@@ -1816,3 +1816,21 @@ test("doctor warns host.pi.drift for an unqualified newer pi, not once a qualify
 	const open = find(await doctor(JSON.stringify([{ title: "qualify pi 1.9.9", url: "https://example.test/pull/1" }])), "host.pi.drift");
 	assert.equal(open.length, 0);
 });
+
+// A throwing probe is an incompatible pi, never "piCompat is unreadable"; the control reads a broken package.json.
+test("doctor reports a throwing pi probe as incompatible, not as unreadable piCompat", async (t) => {
+	const home = fixture(t);
+	const doctor = (packageRoot: string, piProbe: () => never) =>
+		new Doctor({ home: home.home.path, packageRoot, fleet: new FleetStore({ home: home.home.path }), run: healthyRunner(), which: ALL_PRESENT, env: {}, now: () => NOW, piProbe }).run();
+	const boom = (): never => {
+		throw new Error("spawn exploded");
+	};
+	const [thrown] = find(await doctor(REPO_ROOT, boom), "host.pi.compat");
+	assert.equal(thrown?.severity, "error");
+	assert.match(thrown?.what ?? "", /probe failed: spawn exploded/);
+	assert.doesNotMatch(thrown?.what ?? "", /unreadable/);
+	const empty = mkdtempSync(join(tmpdir(), "cp-nopkg-"));
+	t.after(() => rmSync(empty, { recursive: true, force: true }));
+	const [control] = find(await doctor(empty, boom), "host.pi.compat");
+	assert.match(control?.what ?? "", /unreadable/);
+});
