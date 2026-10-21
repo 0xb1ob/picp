@@ -100,6 +100,8 @@ why). It then runs `node <app>/src/service/install.ts`, which prints one
    a downgrade. A newer major than `testedMax`, or a failed probe: refused naming the range, unless `--force`
    (a warning; the final doctor then accepts `host.pi.compat` as its only error). Newer within `testedMax`'s
    major with the probe passing: a warning only. Then:
+   A newer pi released over 7 days ago with no open `qualify pi <version>` PR adds a `host.pi.drift` warning
+   (`src/pi-qualify.ts`; never an error). The daily pi-version-watch recipe is `prompts/schedules/pi-version-watch.md`.
    - `gh auth status --active` (only the active account; else `gh api user`); logged out → prints `gh auth login` for you (never run);
    - the pi-lens host tools (`PI_LENS_TOOLS`, shared with `/doctor`) with `npm i -g`; a global
      prefix that needs sudo is a `fail` naming the fix, and nothing is run;
