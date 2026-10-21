@@ -448,6 +448,45 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
 
+test("landing S14: repository permission reports the allowlist and each blocked cause", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const checks = [{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "test" }] } }];
+	const reviews = [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }];
+	const rows: Array<{ status?: string; decision?: string; mergeable?: string; rules?: unknown; expected: RegExp }> = [
+		{ status: "BLOCKED", decision: "REVIEW_REQUIRED", rules: reviews, expected: /permission: pending \(reviews\).*1 approving review/ },
+		{ status: "BLOCKED", decision: "CHANGES_REQUESTED", expected: /permission: pending \(reviews\)/ },
+		{ status: "BLOCKED", rules: checks, expected: /permission: pending \(checks\).*test/ },
+		{ status: "BLOCKED", expected: /permission: pending \(unknown_block\).*cannot read why/ },
+		{ status: "UNSTABLE", expected: /permission: pending \(unstable\).*403/ },
+		{ status: "UNKNOWN", expected: /permission: retry/ },
+		{ status: "CLEAN", mergeable: "UNKNOWN", expected: /permission: retry/ },
+		{ expected: /permission: unreadable/ },
+		{ status: "", expected: /permission: unreadable/ },
+		{ status: "SOME_NEW_VALUE_GH_INVENTED", expected: /permission: unreadable/ },
+	];
+	for (const row of rows) await t.test(JSON.stringify(row), async (t) => {
+		const s = await startStack(t);
+		const live = await s.held("repository permission matrix", 141);
+		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+		const view = { number: 141, url: live.prUrl, state: "OPEN", headRefName: live.jobId, headRefOid: live.head, baseRefName: "main", isDraft: false, mergeable: row.mergeable ?? "MERGEABLE", mergeStateStatus: row.status, reviewDecision: row.decision ?? "" };
+		s.setGh({ integration: true, runs: [run(141, live.head, "completed", "success")], routes: [
+			{ match: "pr view", replies: [json(view)] },
+			{ match: "/rules/branches/", replies: row.rules ? [json(row.rules)] : [{ code: 1, stderr: "HTTP 403" }] },
+		] });
+		const result = await s.integrate(live.jobId);
+		assert.match(result.text, row.expected, JSON.stringify(row));
+		assert.deepEqual(mergedCalls(result.calls), [], JSON.stringify(row));
+	});
+	for (const status of ["HAS_HOOKS", "CLEAN"]) await t.test(status, async (t) => {
+		const a = await startStack(t);
+		const allowed = await a.held(`permitted ${status}`, status === "CLEAN" ? 143 : 142);
+		writeWindowPass(a.home, allowed.jobId, allowed.head, "2026-01-01T00:00:00Z");
+		a.setGh({ integration: true, permission: status, routes: [], runs: [run(142, allowed.head, "completed", "success")] });
+		const result = await a.integrate(allowed.jobId);
+		assert.match(result.text, /permission: permitted/);
+		assert.equal(mergedCalls(result.calls).length, 1);
+	});
+});
+
 test(
 	"landing: a denied, rate-limited, malformed, partial or capped Actions read never merges and names its cause; a full paged read finds page two's failure",
 	{ skip: SKIP, timeout: 600_000 },

@@ -68,6 +68,7 @@ ask-0088e0332d00, 2026-10-21.
 | S07 (cp-e2e-slice-s07-eaux) | P3c-rest behavior 05: only integrate-held-ci; 3 mapped, 0 retained, 1 deleted file; extends 05-13 and adds 05-S07; all other slices retain their ownership | 1 (`tests/integrate-held-ci.test.ts`) | 378 → 377 | 4,274 → 4,272 (3 removed, 1 added) |
 | S04 (cp-e2e-slice-s04-vep1) | behavior 05; original `tests/diff-review.test.ts` declarations 1–40. [Declaration accounting](testing-migration-s04-declarations.md): 38 mapped, 2 retained, 0 pending in S04; S05 owns 41–55 and whole-file retirement. | 0; baseline intentionally kept whole | +1 incoming e2e file | 55 source declarations unchanged; +13 e2e scenarios |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
+| S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting](testing-migration-s14.md): first batch 8 mapped, 0 retained, 25 pending; all four original files stay whole pending completion | 0 | +0 files | +1 e2e declaration |
 
 S02 follows the operator's split-file amendment: a range slice adds consumer evidence without removing or moving any
 unit declaration. `tests/ci-watch.test.ts` remains 80 static declarations / 89 executed cases. No checker or contract
