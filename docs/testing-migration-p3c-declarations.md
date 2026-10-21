@@ -39,3 +39,12 @@ the absent baseline path: NC-36 proves parked observation wiring, not either ret
 
 Both mutations were restored. Neither passing consumer probe is a negative control. No P1 exception is
 introduced. A future ownership-transfer API or observable post-shutdown lifecycle is needed to map these cases.
+
+## S02 follow-on (cp-e2e-slice-s02-l7ph)
+
+S02 owns only `tests/ci-watch.test.ts` declarations 1–40. It adds five scenarios and extends 05-8:
+36 declarations are mapped; declarations 6, 8, 32 and 33 have unreachable sub-assertions and remain intact.
+All original declarations stay in place under the operator's split-file amendment; no deletion credit is claimed.
+S03 owns declarations 41–80 and the final file retirement. The assertion map in testing-migration.md names
+the unreachable inputs and requires their preservation at that retirement. The 13/143 summary above records
+P3c's historical partial delivery, before these follow-on mappings.
