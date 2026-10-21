@@ -408,7 +408,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 			await child.close();
 		}
 	};
-	return { home: home.path, remote: repo.remote as string, repo, post, provider, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent };
+	return { home: home.path, remote: repo.remote as string, repo, post, provider, agentDir, gh, setGh, held, seed, project, ghCalls, integrate, tick, parent };
 }
 
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
@@ -1086,7 +1086,7 @@ test("landing S03: actual parent CI notices carry facts and integration advice",
 });
 
 test("landing S03: a durable review deadline resumes once and respects changed facts", { skip: SKIP, timeout: 600_000 }, async (t) => {
-	for (const guard of ["none", "head", "generation", "drain", "stop"]) {
+	for (const guard of ["none", "head", "generation", "drain", "stop"]) await t.test(guard, async (t) => {
 		const s = await startStack(t, { continuation: true });
 		const live = await s.held(`review deadline ${guard}`, 310);
 		await s.post.continuation.serialize(live.jobId, async () => {});
@@ -1116,14 +1116,17 @@ test("landing S03: a durable review deadline resumes once and respects changed f
 			assert.equal(outcome.steps, guard === "none" ? 1 : 0, "changed facts prevent an integration step");
 			assert.deepEqual(mergedCalls(s.ghCalls()), [], "deadline rechecks the hold and never merges");
 		}
-	}
+	});
 });
 
 test("landing S03: facts changed during a forge read prevent stale review spending", { skip: SKIP, timeout: 600_000 }, async (t) => {
-	for (const changed of ["generation", "phase", "observed", "remote"]) {
+	for (const changed of ["generation", "phase", "observed", "remote"]) await t.test(changed, async (t) => {
 		const s = await startStack(t, { continuation: true });
 		const live = await s.held(`stale review ${changed}`, 320);
 		await s.post.continuation.serialize(live.jobId, async () => {});
+		const reviewer = s.provider.addScript(`stale-review-${changed}`, [{ kind: "hang" }]);
+		s.agentDir.writeModels(s.provider);
+		writeFileSync(join(s.home, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*"], rubric: [{ id: "gate-reviewer", role: "gate-reviewer", model: reviewer }] }));
 		const gate = join(s.home, "release-stale-read");
 		const before = s.ghCalls().length;
 		const notices = s.post.durableWakeups.pending().map((entry) => entry.id);
@@ -1150,8 +1153,32 @@ test("landing S03: facts changed during a forge read prevent stale review spendi
 		assert.equal(outcome.action, changed === "phase" ? "stopped" : "stale", `${changed}: ${outcome.reason}`);
 		assert.equal(outcome.steps, 1, "the running read finishes but starts no second step");
 		assert.equal(existsSync(join(s.home, paths.reviewFile(live.jobId, 1))), false, "stale facts start no review");
+		assert.equal(s.provider.requests(`stale-review-${changed}`).length, 0, "no model request on stale facts");
 		if (changed !== "phase") assert.deepEqual(s.post.durableWakeups.pending().map((entry) => entry.id), notices, "stale facts create no actionable stop notice");
-	}
+	});
+});
+
+test("landing S03: new CI attempts never duplicate a pending real reviewer", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t, { continuation: true });
+	const reviewer = s.provider.addScript("s03-pending-review", [{ kind: "hang" }]);
+	writeFileSync(join(s.home, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*"], rubric: [{ id: "gate-reviewer", role: "gate-reviewer", model: reviewer }] }));
+	const live = await s.held("review pending and wait rearm", 330);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	s.setGh({ runs: [run(330, live.head, "in_progress", null)] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	s.setGh({ runs: [run(330, live.head, "completed", "success")] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	await waitFor(() => s.provider.requests("s03-pending-review").length, (count) => count === 1, { timeoutMs: 10_000, what: "real reviewer receives its request" });
+	const observations = () => readRunEvents(s.home, live.jobId).filter((event) => event.type === "continuation").map((event) => event.payload as { action: string; event: string });
+	assert.ok(observations().some((outcome) => outcome.action === "review_started"), "the envelope starts the real reviewer");
+	s.setGh({ runs: [run(330, live.head, "completed", "success", { run_attempt: 2 })] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.equal(observations().at(-1)?.action, "review_pending", "a new fact reaches the already-pending review gate");
+	assert.equal(s.provider.requests("s03-pending-review").length, 1, "one model request while review is pending");
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
 });
 
 test("landing S02: only reported held PR deliveries are queried", { skip: SKIP, timeout: 600_000 }, async (t) => {
@@ -1166,7 +1193,7 @@ test("landing S02: only reported held PR deliveries are queried", { skip: SKIP, 
 		{ receipts: [{ kind: "artifact" as const, status: "written", title: "report" }] },
 		...["merged", "landed", "MERGED", " merged "].map((status) => ({ receipts: original.receipts!.map((receipt) => ({ ...receipt, status })) })),
 	];
-	for (const patch of variants) {
+	for (const patch of variants) await t.test(JSON.stringify(patch), async () => {
 		const file = join(s.home, LAYOUT.fleetFile);
 		const fleet = JSON.parse(readFileSync(file, "utf8"));
 		fleet.jobs = fleet.jobs.map((entry: { job_id: string }) => entry.job_id === live.jobId ? { ...original, ...patch } : entry);
@@ -1176,10 +1203,10 @@ test("landing S02: only reported held PR deliveries are queried", { skip: SKIP, 
 		assert.ok(!tick.checked.includes(live.jobId), JSON.stringify(patch));
 		assert.ok(!tick.skipped.includes(live.jobId), JSON.stringify(patch));
 		assert.equal(s.ghCalls().length, before, "excluded deliveries make no forge request");
-	}
+	});
 	await s.post.fleet.patch(live.jobId, original);
 	s.setGh({ runs: [run(201, live.head, "completed", "success")] });
-	const tick = await s.tick(live.jobId);
+	const tick = await s.post.ciTick();
 	assert.equal(tick.observations[0]?.event, "ci_green", "the eligible delivery is queried");
 	await s.post.registry.setMergePolicy("demo", "human_handoff");
 	const parked = await s.post.awaitingMerge.park(live.jobId, { pr_url: live.prUrl, repo: "example/demo", head_sha: live.head, base: "main", handed_at: isoTimestamp() });
@@ -1768,7 +1795,11 @@ test("landing: held CI repairs the same real worker once while preserving an int
 	assert.equal((await s.post.integrate({ jobId: live.jobId })).next, "review", "release still requires review of the repaired head");
 	holds.hold(live.jobId, "QA in progress");
 	s.setGh({ runs: [run(112, head, "completed", "failure", { run_attempt: 2 })] });
-	await s.parent("Inspect the repaired head's failing CI after restart.", [{ kind: "tool_calls", calls: [{ name: "cp_integrate", args: { job_id: live.jobId, action: "advance" } }] }, { kind: "text", text: "Restarted parent checked CI." }]);
+	const beforeAllowanceStartup = s.post.integrator.get(live.jobId)!.updated_at;
+	await s.parent("Inspect the repaired head's failing CI after restart.", [{ kind: "text", text: "Startup inspected the red repaired head." }], async () => {
+		await waitFor(() => s.post.integrator.get(live.jobId)?.updated_at, (at) => at !== beforeAllowanceStartup, { timeoutMs: 30_000, what: "startup recomputes the spent repair allowance" });
+	});
+	assert.notEqual(s.post.integrator.get(live.jobId)?.updated_at, beforeAllowanceStartup, "startup recomputes the allowance record without a manual integrate call");
 	assert.match(s.post.integrator.get(live.jobId)?.reason ?? "", /already asked once/, "restarted parent reads the spent allowance before looking for a local worker");
 	await s.tick(live.jobId);
 	await s.post.continuation.serialize(live.jobId, async () => {});

@@ -9,12 +9,12 @@ The original slice has 143 static declarations (152 parameterized runtime cases)
 
 | Original file | Declarations | Delivery and follow-on status |
 |---|---:|---|
-| tests/ci-watch.test.ts | 80 | convert, owner P3c-rest; five declarations mapped by 05-8 with NC-32 and NC-39–NC-42; 75 pending |
+| tests/ci-watch.test.ts | 80 | convert, owner P3c-rest; 42 mapped: S02's 36 plus S03 declarations 43, 44, 46–49 (44 also had prior 05-8 evidence); 38 pending; original file stays intact until the final map, retained exceptions and controls are complete |
 | tests/main-ci.test.ts | 39 | convert, owner P3c-rest; 39 pending, including inherited P3/P3b assertions |
 | tests/foreign-ci-watch.test.ts | 11 | convert, owner P3c-rest; eleven pending, including dispatch release and legacy state |
 | tests/parked-ci.test.ts | 3 | All three mapped to 05-12 and deleted; real timer, forge barriers, resume/re-park and legacy held state; NC-36 and NC-49–NC-55 |
 | tests/ci-evidence.test.ts | 5 | All five mapped to 05-9 and deleted; NC-33 and NC-43–NC-48 fail their tool/storage/viewer assertions |
-| tests/integrate-held-ci.test.ts | 3 | S07: all three mapped to 05-13 and 05-S07 and deleted; NC-37 and S07-NC-1; restart reason distinguishes spent allowance from missing worker |
+| tests/integrate-held-ci.test.ts | 3 | S07: all three mapped to 05-13 and 05-S07 and deleted; NC-37 and S07-NC-1..3; S03 proves real startup recomputation without a manual integrate call, kills only the held worker PID, and asserts the queued forge-barrier result |
 | tests/awaiting-merge-tick.test.ts | 2 | Retained verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest); missing lifecycle entry points below; no deletion credit |
 
 Delivered counts: **13/143 declarations mapped (9.09%), 2 retained (1.40%), 128 pending; 8 declarations
