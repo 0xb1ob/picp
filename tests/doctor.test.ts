@@ -68,6 +68,8 @@ function healthyRunner(overrides: Record<string, CommandResultLike> = {}): Comma
 			if (key.includes(pattern)) return { status: 0, stdout: "", stderr: "", ...result };
 		}
 		if (args[0] === "--version") return { status: 0, stdout: `${basename(command)} 1.2.3\n`, stderr: "" };
+		if (command === "npm" && args[0] === "view") return { status: 0, stdout: "{}", stderr: "" };
+		if (command === "gh" && args[0] === "pr") return { status: 0, stdout: "[]", stderr: "" };
 		return { status: 0, stdout: "", stderr: "" };
 	};
 }
@@ -1817,6 +1819,37 @@ test("doctor warns host.pi.drift for an unqualified newer pi, not once a qualify
 	assert.equal(open.length, 0);
 });
 
+// An unreadable drift fact (npm prints non-JSON) is a named warn; the control with valid output has no such finding.
+test("doctor names an unreadable drift read as a warn finding carrying the error", async (t) => {
+	const home = fixture(t);
+	const doctor = (npmOut: string) =>
+		new Doctor({
+			home: home.home.path,
+			packageRoot: REPO_ROOT,
+			fleet: new FleetStore({ home: home.home.path }),
+			run: (command, args, cwd) => {
+				if (command === "npm") return { status: 0, stdout: npmOut, stderr: "" };
+				if (command === "gh") return { status: 0, stdout: "[]", stderr: "" };
+				return healthyRunner()(command, args, cwd);
+			},
+			which: ALL_PRESENT,
+			env: {},
+			now: () => NOW,
+			piProbe: () => ({ version: "1.9.9", extension: { ok: true, detail: "" } }),
+		}).run();
+	for (const answer of ["npm warn rate limited", ""]) {
+		const found = find(await doctor(answer), "host.pi.drift");
+		assert.equal(found.length, 1);
+		assert.equal(found[0]?.severity, "warn");
+		assert.match(found[0]?.detail ?? "", /^npm view .*time --json: /);
+	}
+	const released = new Date(NOW.getTime() - 20 * 86_400_000).toISOString();
+	const ok = find(await doctor(JSON.stringify({ "1.9.9": released })), "host.pi.drift");
+	assert.equal(ok.length, 1);
+	assert.match(ok[0]?.what ?? "", /above the tested/);
+	assert.equal(ok[0]?.detail, undefined);
+});
+
 // A throwing probe is an incompatible pi, never "piCompat is unreadable"; the control reads a broken package.json.
 test("doctor reports a throwing pi probe as incompatible, not as unreadable piCompat", async (t) => {
 	const home = fixture(t);
@@ -1827,6 +1860,7 @@ test("doctor reports a throwing pi probe as incompatible, not as unreadable piCo
 	};
 	const [thrown] = find(await doctor(REPO_ROOT, boom), "host.pi.compat");
 	assert.equal(thrown?.severity, "error");
+	assert.match(thrown?.fix ?? "", /install a pi in the supported range/); // the incompatible state's fix, not old's
 	assert.match(thrown?.what ?? "", /probe failed: spawn exploded/);
 	assert.doesNotMatch(thrown?.what ?? "", /unreadable/);
 	const empty = mkdtempSync(join(tmpdir(), "cp-nopkg-"));
