@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -305,7 +305,7 @@ process.exit(1);
 }
 
 /** Real CommandPost, workers and optional held continuation over a registered scratch project. */
-async function startStack(t: TestContext, options: { project?: boolean; env?: Record<string, string>; continuation?: boolean; github?: boolean } = {}) {
+async function startStack(t: TestContext, options: { project?: boolean; env?: Record<string, string>; continuation?: boolean; packageRoot?: string; github?: boolean } = {}) {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", "src/a.ts": "a1\n", "src/b.ts": "b1\n" } });
 	const provider = await MockProvider.start();
@@ -332,7 +332,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 	const saved = { PATH: process.env.PATH, CP_CI_WATCH_SECONDS: process.env.CP_CI_WATCH_SECONDS };
 	process.env.PATH = `${bin}:${saved.PATH ?? ""}`;
 	process.env.CP_CI_WATCH_SECONDS = "1";
-	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agentDir.env }, holdsParentLock: () => true, continuation: options.continuation });
+	const post = new CommandPost({ home: home.path, packageRoot: options.packageRoot ?? REPO_ROOT, parentEnv: { ...process.env, ...agentDir.env }, holdsParentLock: () => true, continuation: options.continuation });
 	t.after(async () => {
 		process.env.PATH = saved.PATH;
 		if (saved.CP_CI_WATCH_SECONDS === undefined) delete process.env.CP_CI_WATCH_SECONDS;
@@ -1759,11 +1759,13 @@ test("landing S02: unavailable gh disables GitHub queries while GitLab remains o
 
 test("landing S02: watcher queries stay nonblocking while workers refuse CI waits", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t);
-	const live = await s.held("watch nonblocking policy", 205, { before: ["gh run watch 12345 --exit-status", "sleep 60; gh run list --branch example --limit 3"] });
+	const live = await s.held("watch nonblocking policy", 205, { before: ["gh run watch 12345 --exit-status", "gh pr checks 61 --watch", "sleep 60; gh run list --branch example --limit 3"] });
 	const messages = JSON.stringify(s.provider.requests(`landing-${live.jobId}`).map((request) => request.body.messages));
 	assert.match(messages, /A worker never waits for CI/);
 	assert.match(messages, /sleep_then_poll/);
 	assert.match(messages, /blocking_watch/);
+	const replies = s.provider.requests(`landing-${live.jobId}`).at(-1)?.body.messages ?? [];
+	assert.equal(replies.filter((message) => message.role === "tool" && JSON.stringify(message.content).includes("blocking_watch")).length, 2);
 	s.setGh({ runs: [run(205, live.head, "in_progress", null)] });
 	await s.tick(live.jobId);
 	assert.ok(s.ghCalls().some((command) => command.includes("/pulls/205")));
@@ -2624,6 +2626,7 @@ test("landing S09: repository refusals and draft transitions preserve head autho
 			s.setGh({ routes: [] });
 			const merged = await s.integrate(live.jobId);
 			assert.equal(merged.record.next, "advance", merged.text);
+			assert.equal(mergedCalls(merged.calls).length, 1);
 			assert.equal(s.ghCalls().filter((call) => call.startsWith("pr ready")).length, 1);
 		}
 		if (mode === "ready-moved") {
@@ -2639,7 +2642,9 @@ test("landing S09: repository refusals and draft transitions preserve head autho
 			await s.integrate(live.jobId);
 			assert.equal(new AwaitingStore({ home: s.home }).list().length, 1);
 			s.setGh({ routes: [] });
-			assert.equal((await s.integrate(live.jobId)).record.next, "advance");
+			const merged = await s.integrate(live.jobId);
+			assert.equal(merged.record.next, "advance", merged.text);
+			assert.equal(mergedCalls(merged.calls).length, 1);
 			assert.equal(new AwaitingStore({ home: s.home }).list()[0]?.state, "withdrawn");
 		}
 	});
@@ -3090,6 +3095,212 @@ test("landing: a reviewed green head merges once, records, tears down and closes
 	});
 });
 
+test("landing S10: synchronization preserves local work and proves origin before resetting", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const mode of ["behind", "stale", "dirty", "unpushed", "absorbed", "divergence", "branch-denied", "branch-empty", "base-denied", "base-empty", "merge-base", "diff", "patch-id", "empty-id", "empty-diff", "salvage"]) await t.test(mode, async (t) => {
+		const s = await startStack(t);
+		const live = await s.held(`S10 sync ${mode}`, 910);
+		const clone = s.post.registry.pathOf("demo");
+		git(clone, "fetch", "origin", live.jobId);
+		git(clone, "checkout", "--detach", `origin/${live.jobId}`);
+		writeFileSync(join(clone, "change.txt"), "remote update\n");
+		git(clone, "commit", "-am", "remote update");
+		git(clone, "push", "origin", `HEAD:${live.jobId}`);
+		git(clone, "checkout", "main");
+		const head = git(clone, "ls-remote", "--heads", "origin", live.jobId).split("\t")[0]!;
+		writeWindowPass(s.home, live.jobId, head, "2026-01-01T00:00:00Z");
+		s.setGh({ integration: true, runs: [run(910, head, "completed", "success")] });
+		assert.equal((await s.integrate(live.jobId)).record.next, "advance");
+		if (!["behind", "stale", "dirty", "divergence", "branch-denied", "branch-empty"].includes(mode)) {
+			writeFileSync(join(live.worktree, "change.txt"), mode === "unpushed" ? "unique local work\n" : "remote update\n");
+			git(live.worktree, "commit", "-am", "local version");
+		}
+		if (mode === "dirty") writeFileSync(join(live.worktree, "change.txt"), "precious uncommitted content\n");
+		const local = git(live.worktree, "rev-parse", "HEAD");
+		const commonDir = git(live.worktree, "rev-parse", "--path-format=absolute", "--git-common-dir");
+		const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+		const log = join(s.home, "sync-git.jsonl");
+		const fault = mode === "divergence" ? "rev-list" : mode === "merge-base" ? "merge-base" : mode === "diff" || mode === "empty-diff" ? "diff" : mode === "patch-id" || mode === "empty-id" ? "patch-id" : mode === "salvage" ? "update-ref" : "";
+		const wrapper = join(s.home, "bin", "git");
+		writeFileSync(wrapper, `#!/usr/bin/env node\nconst {spawnSync}=require("node:child_process");const fs=require("node:fs");const a=process.argv.slice(2);\nif(process.cwd()===${JSON.stringify(live.worktree)}) {\nfs.appendFileSync(${JSON.stringify(log)},JSON.stringify(a)+"\\n");\nif(a[0]===${JSON.stringify(fault)}) {process.stderr.write("injected git refusal\\n");process.exit(${mode.startsWith("empty") ? 0 : 128});}\nif(a[0]==="ls-remote" && a.at(-1)===${JSON.stringify(mode.startsWith("base-") ? "main" : live.jobId)} && ${JSON.stringify(["branch-denied", "branch-empty", "base-denied", "base-empty"].includes(mode))}) process.exit(${mode.endsWith("empty") ? 0 : 128});\nif(${JSON.stringify(mode === "stale")} && a[0]==="fetch") {const r=spawnSync(${JSON.stringify(realGit)},a,{stdio:"inherit"});spawnSync(${JSON.stringify(realGit)},["update-ref","-d",${JSON.stringify(`refs/remotes/origin/${live.jobId}`)}]);process.exit(r.status??1);}\n}\nconst r=spawnSync(${JSON.stringify(realGit)},a,{stdio:"inherit"});process.exit(r.status??1);\n`);
+		chmodSync(wrapper, 0o755);
+		const result = await s.integrate(live.jobId);
+		const calls: string[][] = readFileSync(log, "utf8").trim().split("\n").map((row) => JSON.parse(row));
+		const resets = calls.filter((args) => args[0] === "reset");
+		const success = ["behind", "stale", "absorbed"].includes(mode);
+		assert.deepEqual(resets, success ? [["reset", "--hard", head]] : [], `${mode}: reset requires proof`);
+		if (success) {
+			assert.equal(result.record.next, "done", result.text);
+			assert.match(result.text, /worktree reset to/);
+			if (mode === "absorbed") {
+				assert.match(result.text, /pre-rebase commit\(s\) were discarded/);
+				assert.match(result.text, /kept at refs\/cp-salvage\//);
+				const rescue = calls.findIndex((a) => a[0] === "update-ref" && a[1] !== "-d");
+				assert.ok(rescue >= 0 && rescue < calls.findIndex((a) => a[0] === "reset"));
+				assert.equal(execFileSync(realGit, ["--git-dir", commonDir, "rev-parse", calls[rescue]![1]!], { encoding: "utf8" }).trim(), local);
+			} else assert.equal(calls.filter((a) => a[0] === "patch-id" || (a[0] === "update-ref" && a[1] !== "-d")).length, 0);
+		} else {
+			assert.equal(git(live.worktree, "rev-parse", "HEAD"), local);
+			if (mode === "dirty") assert.equal(readFileSync(join(live.worktree, "change.txt"), "utf8"), "precious uncommitted content\n");
+			assert.equal(result.record.next, "surface", result.text);
+			const reasons: Record<string, RegExp> = { dirty: /worktree is dirty/, unpushed: /could not be proven/, divergence: /could not tell whether/, "base-denied": /origin did not name a tip/, "base-empty": /origin did not name a tip/, "merge-base": /no readable merge base/, diff: /could not be read/, "patch-id": /gave no id/, "empty-id": /gave no id/, "empty-diff": /empty cumulative diff/, salvage: /rescue ref first/ };
+			if (reasons[mode]) assert.match(result.text, reasons[mode]!);
+			if (mode.startsWith("branch-")) assert.match(result.text, /teardown refused.*unpushed/s);
+		}
+	});
+});
+test("landing S10: rescue retention proves reachability and bounds cleanup", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const mode of ["mixed", "origin-denied", "origin-empty", "listing", "ancestry", "delete", "fetch", "bound", "empty", "outside"]) await t.test(mode, async (t) => {
+		const s = await startStack(t);
+		const live = await s.held(`S10 rescue ${mode}`, 911);
+		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+		s.setGh({ integration: true, runs: [run(911, live.head, "completed", "success")] });
+		assert.equal((await s.integrate(live.jobId)).record.next, "advance");
+		const clone = s.post.registry.pathOf("demo");
+		const base = git(clone, "rev-parse", "HEAD");
+		const reachable = "refs/cp-salvage/cp-old/001";
+		const orphan = "refs/cp-salvage/cp-old/999";
+		if (mode !== "empty") git(clone, "update-ref", reachable, base);
+		if (mode === "mixed") git(clone, "update-ref", orphan, live.head);
+		if (mode === "bound") for (let index = 2; index <= 101; index++) git(clone, "update-ref", `refs/cp-salvage/cp-old/${String(index).padStart(3, "0")}`, base);
+		const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+		const wrapper = join(s.home, "bin", "git");
+		writeFileSync(wrapper, `#!/usr/bin/env node\nconst {spawnSync}=require("node:child_process");const a=process.argv.slice(2);\nif(process.cwd()===${JSON.stringify(clone)}) {\nconst m=${JSON.stringify(mode)};if((m==="origin-denied"||m==="origin-empty")&&a[0]==="ls-remote"&&a.at(-1)==="main")process.exit(m==="origin-empty"?0:128);\nif((m==="listing"&&a[0]==="for-each-ref")||(m==="ancestry"&&a[0]==="merge-base"&&a[1]==="--is-ancestor")||(m==="delete"&&a[0]==="update-ref"&&a[1]==="-d")||(m==="fetch"&&a[0]==="fetch"&&a.at(-1)==="main")){process.stderr.write("injected rescue refusal\\n");process.exit(128);}\n}\nconst r=spawnSync(${JSON.stringify(realGit)},a,{stdio:"inherit"});process.exit(r.status??1);\n`);
+		if (mode === "outside") writeFileSync(wrapper, `#!/usr/bin/env node\nconst {spawnSync}=require("node:child_process");const a=process.argv.slice(2);\nif(a[0]==="for-each-ref"&&a.includes("refs/cp-salvage/")){console.log(${JSON.stringify([`refs/heads/main ${base}`, `refs/remotes/origin/main ${base}`, `refs/cp-salvage-old/x ${base}`, `refs/cp-salvage/ ${base}`, `refs/cp-salvage/../heads/main ${base}`, `${reachable} ${base}`].join("\n"))});process.exit(0);}\nconst r=spawnSync(${JSON.stringify(realGit)},a,{stdio:"inherit"});process.exit(r.status??1);\n`);
+		chmodSync(wrapper, 0o755);
+		const result = await s.integrate(live.jobId);
+		assert.equal(result.record.next, "done", result.text);
+		const refs = execFileSync(realGit, ["for-each-ref", "--format=%(refname)", "refs/cp-salvage/"], { cwd: clone, encoding: "utf8" }).trim().split("\n").filter(Boolean);
+		if (mode === "outside") {
+			const main = spawnSync(realGit, ["rev-parse", "refs/heads/main"], { cwd: clone, encoding: "utf8" });
+			assert.deepEqual([main.status, main.stdout.trim()], [0, base], "cleanup must preserve main");
+			assert.deepEqual(refs, []);
+			return;
+		}
+		if (mode === "mixed") {
+			assert.deepEqual(refs, [orphan]);
+			assert.match(result.text, /1 rescue ref\(s\) pruned/);
+			assert.match(result.text, /not reachable from main/);
+		} else if (mode === "bound") {
+			assert.deepEqual(refs, ["refs/cp-salvage/cp-old/101"]);
+			assert.match(result.text, /1 further rescue ref\(s\) were not examined/);
+		} else if (mode === "empty") {
+			assert.deepEqual(refs, []);
+			assert.doesNotMatch(result.text, /rescue ref/);
+		} else {
+			assert.deepEqual(refs, [reachable]);
+			assert.match(result.text, mode.startsWith("origin-") ? /origin did not name a tip/ : mode === "listing" ? /could not be listed/ : mode === "ancestry" ? /reachability could not be read/ : mode === "delete" ? /could not be deleted/ : /could not be fetched/);
+		}
+	});
+});
+test("landing S10: review evidence authorizes only the reviewed complete head", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const mode of ["missing", "pass", "equivalent", "moved", "revise", "flagged", "approved", "truncated", "truncated-flag", "moved-flag", "fallback"]) await t.test(mode, async (t) => {
+		const s = await startStack(t);
+		const live = await s.held(`S10 review ${mode}`, 912);
+		const old = "b".repeat(40);
+		if (!["missing", "fallback"].includes(mode)) {
+			writeWindowPass(s.home, live.jobId, ["moved", "moved-flag"].includes(mode) ? old : live.head, "2026-01-01T00:00:00Z");
+			const file = join(s.home, paths.reviewFile(live.jobId, 1));
+			const verdict = JSON.parse(readFileSync(file, "utf8"));
+			if (mode === "revise") Object.assign(verdict, { verdict: "revise", cause: "policy" });
+			if (["flagged", "approved", "moved-flag", "truncated-flag"].includes(mode)) Object.assign(verdict, { verdict: "escalate", cause: "flagged" });
+			if (mode.startsWith("truncated")) verdict.diff_stat.truncated = true;
+			writeFileSync(file, JSON.stringify(verdict));
+			if (mode === "equivalent") {
+				verdict.equivalent_to = { head_sha: old, attempt: 1 };
+				writeFileSync(join(s.home, paths.reviewEquivalenceFile(live.jobId, live.head)), JSON.stringify(verdict));
+				rmSync(file);
+			}
+		}
+		if (["approved", "moved-flag", "truncated-flag"].includes(mode)) {
+			const checkpoint = new CheckpointStore(s.home, { kind: "diff" });
+			checkpoint.request({ jobId: live.jobId, question: "Accept flagged diff?" });
+			checkpoint.decide(live.jobId, true, { by: "operator command" });
+		}
+		if (mode === "fallback") {
+			const checkpoint = new CheckpointStore(s.home, { kind: "merge" });
+			checkpoint.request({ jobId: live.jobId, scope: live.head.slice(0, 12), question: "Merge this head?" });
+			checkpoint.decide(live.jobId, true, { by: "operator command", scope: live.head.slice(0, 12) });
+		}
+		s.setGh({ integration: true, permission: mode === "fallback" ? null : "CLEAN", runs: [run(912, live.head, "completed", "success")] });
+		const result = await s.integrate(live.jobId);
+		const permitted = ["pass", "equivalent", "approved"].includes(mode);
+		assert.equal(result.record.next, permitted ? "advance" : "review", result.text);
+		assert.equal(mergedCalls(result.calls).length, permitted ? 1 : 0);
+		assert.equal(result.record.head_sha, live.head);
+		assert.equal(result.calls.filter((call) => call.startsWith("pr update-branch")).length, 0);
+	});
+});
+test("landing S10: unreadable forge and Actions evidence names the cause and makes no mutation", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const mode of ["rate", "permission", "jobs-denied", "jobs-partial", "jobs-malformed", "missing-gh"]) await t.test(mode, async (t) => {
+		const s = await startStack(t);
+		const live = await s.held(`S10 evidence ${mode}`, 913);
+		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+		const failure: Reply = mode === "jobs-partial" ? json({ total_count: 2, jobs: [] }) : mode === "jobs-malformed" ? { stdout: "<html>502</html>" } : { code: mode === "missing-gh" ? 127 : 1, stderr: mode === "rate" ? "API rate limit exceeded" : mode === "missing-gh" ? "spawn gh ENOENT" : "HTTP 403: Resource not accessible by personal access token" };
+		s.setGh({ integration: true, runs: [run(913, live.head, "completed", "success")], routes: [{ match: mode === "missing-gh" ? "pr view" : mode.startsWith("jobs-") ? "/jobs" : "actions/runs?head_sha=", replies: [failure] }] });
+		const result = await s.integrate(live.jobId);
+		assert.equal(result.record.next, mode === "missing-gh" ? "surface" : "retry", result.text);
+		assert.equal(mergedCalls(result.calls).length, 0);
+		assert.equal(result.calls.filter((call) => call.startsWith("pr ready")).length, 0);
+		assert.match(result.text, mode === "rate" ? /rate_limited/ : mode === "permission" || mode === "jobs-denied" ? /token lacks Actions read/ : mode === "missing-gh" ? /gh is not available.*proves nothing/ : /could not read CI/);
+		if (mode === "rate") assert.doesNotMatch(result.text, /token lacks/);
+	});
+});
+test("landing S10: cleanup failures preserve landed effects and resume", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const mode of ["delete", "close", "rebase"]) await t.test(mode, async (t) => {
+		const s = await startStack(t, { continuation: mode !== "rebase" });
+		const live = await s.held(`S10 cleanup ${mode}`, 914);
+		await s.post.continuation.serialize(live.jobId, async () => {});
+		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+		s.setGh({ integration: true, runs: [run(914, live.head, "completed", "success")] });
+		if (mode === "rebase") {
+			const gitDir = git(live.worktree, "rev-parse", "--absolute-git-dir");
+			mkdirSync(join(gitDir, "rebase-merge"));
+			const result = await s.integrate(live.jobId);
+			assert.equal(result.record.next, "surface", result.text);
+			assert.match(result.text, /rebase is in progress/);
+			assert.equal(mergedCalls(result.calls).length, 0);
+			rmSync(join(gitDir, "rebase-merge"), { recursive: true });
+			return;
+		}
+		assert.equal((await s.integrate(live.jobId)).record.next, "advance");
+		const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+		const wrapper = join(s.home, "bin", "git");
+		const jobsFile = join(s.home, LAYOUT.jobsFile);
+		const jobs = readFileSync(jobsFile, "utf8");
+		writeFileSync(wrapper, `#!/usr/bin/env node\nconst {spawnSync}=require("node:child_process");const fs=require("node:fs");const a=process.argv.slice(2);\nif(a[0]==="push"&&a.includes("--delete")) {if(${JSON.stringify(mode === "delete")}){process.stderr.write("protected branch\\n");process.exit(1);}const r=spawnSync(${JSON.stringify(realGit)},a,{stdio:"inherit"});fs.writeFileSync(${JSON.stringify(jobsFile)},"{");process.exit(r.status??1);}\nconst r=spawnSync(${JSON.stringify(realGit)},a,{stdio:"inherit"});process.exit(r.status??1);\n`);
+		chmodSync(wrapper, 0o755);
+		const outcome = await s.post.continuation.trigger({ jobId: live.jobId, event: "startup" });
+		assert.equal(outcome.next, "retry", JSON.stringify(outcome));
+		const notices = readFileSync(join(s.home, LAYOUT.wakeupsFile), "utf8");
+		assert.match(notices, /HELD PR STOPPED/);
+		assert.match(notices, mode === "delete" ? /merged and torn down/ : /still open/);
+		assert.doesNotMatch(notices, /nothing was mutated/i);
+		assert.ok(readMergeReceipt(s.home, live.jobId));
+		writeFileSync(jobsFile, jobs);
+		rmSync(wrapper);
+		const done = await s.integrate(live.jobId);
+		assert.equal(done.record.next, "done", done.text);
+		assert.equal(s.post.ledger().read().jobs.find((job) => job.id === live.jobId)?.status, "closed");
+		assert.equal(mergedCalls(s.ghCalls()).length, 1);
+	});
+});
+
+test("landing S10: dispatch rejects profiles granting parent integration tools", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	for (const tool of ["cp_integrate", "cp_merged"]) await t.test(tool, async (t) => {
+		const packageRoot = mkdtempSync(join(tmpdir(), "cp-profile-package-"));
+		t.after(() => rmSync(packageRoot, { recursive: true, force: true }));
+		for (const name of ["profiles", "prompts"]) cpSync(join(REPO_ROOT, name), join(packageRoot, name), { recursive: true });
+		for (const name of ["extensions", "src"]) symlinkSync(join(REPO_ROOT, name), join(packageRoot, name), "dir");
+		const profile = join(packageRoot, "profiles", "implementer.md");
+		writeFileSync(profile, readFileSync(profile, "utf8").replace("tools: [", `tools: [${tool}, `));
+		const s = await startStack(t, { packageRoot });
+		const job = await s.post.ledger().create({ title: `S10 forbidden ${tool}`, project: "demo", delivery: "pr", kind: "ship" });
+		const model = s.provider.addScript(`forbidden-${tool}`, [{ kind: "text", text: "done" }], { onExhausted: "repeat" });
+		s.agentDir.writeModels(s.provider);
+		await assert.rejects(s.post.dispatch({ jobId: job.id, task: "Make a change.", model, fetch: false }), new RegExp(`${tool}.*parent-only tool`));
+		assert.equal(s.post.fleet.list().some((entry) => entry.job_id === job.id), false);
+	});
+});
 
 test("landing: the review deadline resumes once and rechecks current gates", { skip: SKIP, timeout: 900_000 }, async (t) => {
 	for (const fallback of [false, true]) {

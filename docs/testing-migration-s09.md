@@ -1,5 +1,7 @@
 # S09 declaration evidence
 
+S10 carry-in completion (main session carry-in): declaration 59 has independently executed reminder-dedupe and reminder-withdraw controls; 63 has completed-repair exhaustion in addition to its active guard; 70 has a new-head handoff control in addition to first conflict and exhaustion. Exact patches, blob SHAs and failing assertions are in [S10 controls](testing-migration-s10.md#executed-production-controls). S09-2 ready/reminder follow-ups now require an actual merge command. All declarations 41–80 also have canonical assertion-map rows in testing-migration.md.
+
 Ownership: the remaining behavior-05 files are owned by P3c-rest and re-sliced by operator decision ask-c77a4f32b23b (Raise cap to ~$2,700 on Sol); slice list operator/scratch/e2e-migration-slices.md; rule v2 applies.
 
 S09 owns only static declarations 41–80 of `tests/integrate.test.ts`, counted in source order (a loop containing a test call is one declaration). S08 owns 1–40. This range adds consumer evidence and leaves the unit file byte-for-byte whole; the final range owns reconciliation and retirement. Accounting: 34 mapped, 6 retained mixed/internal declarations (15%), 0 redundant-unreachable, 0 deleted files, 0 pending. Retained assertions stay in the original file under the range amendment. No production change is shipped.
