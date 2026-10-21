@@ -77,6 +77,8 @@ export interface InstallerOptions {
 	/** Executes one step for real. Throws on failure. Never called when `dryRun`. */
 	run?: (step: InstallStep) => void;
 	env?: NodeJS.ProcessEnv;
+	/** npm's global prefix and whether this user may write it; read only when an `npm -g` step is needed. */
+	npmPrefix?: () => { path: string; writable: boolean } | undefined;
 }
 
 /** `PI_SESSION_ID`/`PI_CODING_AGENT` are set on every live worker's own env — not guessed. */
@@ -155,8 +157,19 @@ export function planOrInstall(options: InstallerOptions): InstallReport {
 			outcomes.push({ tool, kind: "manual", detail: step.summary, step });
 			continue;
 		}
+		const prefix = step.kind === "npm" && step.flags?.includes("-g") ? options.npmPrefix?.() : undefined;
+		if (prefix && !prefix.writable) {
+			outcomes.push({
+				tool,
+				kind: "manual",
+				detail: `missing, and npm's global prefix ${prefix.path} is not writable by this user, so ${describeStep(step)} was not run (never sudo); fix: npm config set prefix "$HOME/.local", put $HOME/.local/bin on PATH, then rerun`,
+				step,
+			});
+			continue;
+		}
+		const into = prefix ? ` (into npm's global prefix ${prefix.path})` : "";
 		if (options.dryRun) {
-			outcomes.push({ tool, kind: "planned", detail: `missing — would run: ${describeStep(step)}`, step });
+			outcomes.push({ tool, kind: "planned", detail: `missing — would run: ${describeStep(step)}${into}`, step });
 			continue;
 		}
 		try {
@@ -167,14 +180,14 @@ export function planOrInstall(options: InstallerOptions): InstallReport {
 				outcomes.push({
 					tool,
 					kind: "failed",
-					detail: `ran ${describeStep(step)} but ${tool} is still not on PATH — check your shell's PATH`,
+					detail: `ran ${describeStep(step)}${into} but ${tool} is still not on PATH — check your shell's PATH`,
 					step,
 				});
 			} else {
 				outcomes.push({ tool, kind: "installed", detail: `${describeStep(step)} -> ${after[0]}`, step });
 			}
 		} catch (error) {
-			outcomes.push({ tool, kind: "failed", detail: `${describeStep(step)} failed: ${(error as Error).message}`, step });
+			outcomes.push({ tool, kind: "failed", detail: `${describeStep(step)}${into} failed: ${(error as Error).message.split("\n")[0]}; its own output above says why (network, proxy, cache)`, step });
 		}
 	}
 

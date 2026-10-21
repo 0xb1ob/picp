@@ -118,6 +118,8 @@ export interface ModelContext {
 	step: (status: StepStatus, name: string, detail: string) => void;
 	/** What the generated unit/wrapper already pin. */
 	kept: Models;
+	/** Step 3a's `pi --list-models` result, when it already ran with the service env: not listed again. */
+	listing?: { status: number; stdout: string };
 }
 
 /**
@@ -137,7 +139,7 @@ export function chooseModels(ctx: ModelContext): Models | "fail" {
 	let listed: string[] | undefined;
 	if (!ctx.dry && (open.length > 0 || explicit.parent !== undefined || explicit.operator !== undefined)) {
 		// cp-daemon runs the parent with the unit-style env on either backend: list the models as it sees them.
-		const result = ports.run("pi", ["--no-extensions", "--list-models"], ports.exists(ctx.home) ? ctx.home : undefined, serviceListEnv(ports.env, ports.node.path));
+		const result = ctx.listing ?? ports.run("pi", ["--no-extensions", "--list-models"], ports.exists(ctx.home) ? ctx.home : undefined, serviceListEnv(ports.env, ports.node.path));
 		listed = result.status === 0 ? parseModelList(result.stdout) : undefined;
 	}
 	const models: Models = {};

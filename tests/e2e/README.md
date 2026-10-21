@@ -22,7 +22,7 @@ fails the run if the install did not land on `PATH`.
 
 ## Installer sandbox (#375)
 
-`npm run e2e:install -- --scenario fresh` (or `prerequisites`, `rerun`, `all`; `--verbose` prints the whole
+`npm run e2e:install -- --scenario fresh` (or `prerequisites`, `rerun`, `login`, `recovery`, `root`, `all`; `--verbose` prints the whole
 timestamped container output) installs this checkout for real in a disposable Docker container:
 `curl … | sh` of `bin/cp-bootstrap` → `scripts/install.sh` → `src/service/install.ts` → install-tools →
 cp-daemon (detached) → the parent host's `/doctor`, then `cp-daemon status` and the viewer's `/healthz`.
@@ -32,8 +32,11 @@ it and fails when Docker is missing, while `npm test` collects the file and skip
 | Scenario | Asserts |
 |---|---|
 | fresh | `--dry-run` writes no home; a full install exits 0 with `ok: doctor`, one cp-daemon, viewer `200 ok` |
-| prerequisites | bootstrap refuses no node and node 22 before cloning; `bin/cp-install` with either exits non-zero and writes no `data/daemon.json` (it still clones first: recorded, fixed in a later PR) |
+| prerequisites | bootstrap and `bin/cp-install` both refuse no node and node 22 before cloning, naming node (not npm); no `data/daemon.json` |
 | rerun | same-home rerun prints no `changed:` line; an upgrade fast-forwards and keeps the parent pin; an edited wrapper is refused without `--force` and replaced with it |
+| login | no usable provider (no `models.json`): exit 4 before any write or start, exactly one `run \`pi\`, then /login, then re-run: <cmd>` line, no cp-daemon, no doctor; that printed command then installs fully |
+| recovery | unreachable remote: a named `git clone` failure with its rerun; that rerun with an empty offline npm cache: a named `npm ci` failure; its rerun with pi absent and a root-owned npm prefix: npm ci lands, install-tools refuses pi (never sudo) and the install prints its rerun; install-tools installs an absent pi into a per-user prefix from npm's cache; the printed install rerun then installs fully; a dirty, ahead or other-origin checkout is refused or left as is |
+| root | a full install as the container's uid 0 (`HOME=/root`) succeeds and changes no `/etc`, `/usr`, `/opt` or `/var` path |
 
 **Isolation.** Nothing on the host is written or mounted: the driver streams a tar of the tracked and
 untracked-unignored files (your edits; never `.git` or `node_modules`) into `docker run -i --rm --network none`,
@@ -44,7 +47,8 @@ credential exists anywhere). The container is removed by its own name in a `fina
 
 **Cache.** `tests/fixtures/install/Dockerfile` (image `picp-install-sandbox:local`) installs what a fresh user
 brings — git, gh, node 24, treehouse, pi at the lockfile's version — and only *caches* what cp-install installs
-itself (the app's `npm ci`, the pi-lens tools, the worker pi packages), so those real install paths run offline.
+itself (the app's `npm ci`, the pi-lens tools, the worker pi packages, and the unpinned pi a missing-pi install
+resolves), so those real install paths run offline.
 Building needs the network; the lockfile layer is last, so a lockfile change rebuilds only that layer. Remove
 the image with `docker image rm picp-install-sandbox:local`.
 
@@ -52,7 +56,8 @@ the image with `docker image rm picp-install-sandbox:local`.
 
 **Measured** (Linux, Docker 29.9, warm image, 2026-10): cold image build 73 s, warm 2 s; fresh 33 s
 (full install 29.6 s: npm ci 4.1 s, worker pi packages 6.1 s, daemon start to ready 5.8 s, parent doctor 7.0 s);
-prerequisites 3 s; rerun 53 s (an idempotent rerun 3.9 s, `--force` 8.3 s for its npm ci).
+prerequisites 3 s; rerun 53 s (an idempotent rerun 3.9 s, `--force` 8.3 s for its npm ci); login 36 s (the refusal
+7.6 s); recovery 46 s (clone failure 0.08 s, npm ci failure 1.0 s, prefix refusal 7.0 s, pi from cache 5.9 s); root 33 s.
 
 ## E2E is the default for behavioral acceptance
 

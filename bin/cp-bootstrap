@@ -14,11 +14,11 @@ for arg in "$@"; do
 	case "$arg" in --app=*) APP=${arg#--app=} ;; --dry-run) DRY=1 ;; esac
 	prev=$arg
 done
+ARGS=
+for arg in "$@"; do ARGS="$ARGS '$(printf '%s' "$arg" | sed "s/'/'\\\\''/g")'"; done
+RERUN="curl -fsSL https://raw.githubusercontent.com/0xb1ob/picp/main/bin/cp-bootstrap | sh -s --$ARGS"
 say() { printf '%s: bootstrap: %s\n' "$1" "$2"; }
-die() {
-	say fail "$1"
-	exit 1
-}
+die() { say fail "$1"; exit 1; }
 command -v git >/dev/null 2>&1 || die "git is not on PATH; install it (e.g. sudo apt-get install -y git, or xcode-select --install), then rerun"
 command -v node >/dev/null 2>&1 || die "node is not on PATH; install node 24 or newer (nodejs.org, fnm or nvm), then rerun"
 major=$(node -p 'process.versions.node.split(".")[0]')
@@ -30,20 +30,20 @@ if [ ! -e "$APP/.git" ]; then
 		exit 0
 	fi
 	mkdir -p "$(dirname -- "$APP")"
-	git clone --quiet --branch main "$URL" "$APP"
+	git clone --quiet --branch main "$URL" "$APP" || die "git clone --branch main $URL $APP failed (its error is above); fix the network or URL, then rerun: $RERUN"
 	say changed "cloned $URL into $APP"
 else
 	[ -z "$(git -C "$APP" status --porcelain)" ] || die "$APP has uncommitted changes; commit or stash them, then rerun"
 	[ "$(git -C "$APP" rev-parse --abbrev-ref HEAD)" = main ] || die "$APP is not on main; check out main, then rerun"
 	# git fetch writes refs and objects: a dry run never fetches and compares with the local origin/main
-	[ "$DRY" = 1 ] || git -C "$APP" fetch --quiet origin main || die "git fetch origin main failed in $APP"
+	[ "$DRY" = 1 ] || git -C "$APP" fetch --quiet origin main || die "git fetch origin main failed in $APP (its error is above); fix the network, then rerun: $RERUN"
 	[ "$(git -C "$APP" rev-list --count origin/main..HEAD)" = 0 ] || die "$APP has commits not on origin/main; push or drop them, then rerun"
 	if [ "$DRY" = 1 ]; then
 		say changed "would fetch origin main and fast-forward $APP when behind (dry-run: nothing fetched; not ahead of the local origin/main)"
 	elif [ "$(git -C "$APP" rev-parse HEAD)" = "$(git -C "$APP" rev-parse origin/main)" ]; then
 		say ok "$APP is at origin/main"
 	else
-		git -C "$APP" merge --quiet --ff-only origin/main
+		git -C "$APP" merge --quiet --ff-only origin/main || die "git merge --ff-only origin/main failed in $APP; fix that, then rerun: $RERUN"
 		say changed "fast-forwarded $APP to origin/main"
 	fi
 fi
@@ -52,7 +52,7 @@ if [ -f "$APP/node_modules/.package-lock.json" ]; then
 elif [ "$DRY" = 1 ]; then
 	say changed "would run npm ci in $APP (dry-run)"
 else
-	(cd "$APP" && npm ci --no-audit --no-fund --loglevel=error) || die "npm ci failed in $APP; run it there and read its error"
+	(cd "$APP" && npm ci --no-audit --no-fund --loglevel=error) || die "npm ci failed in $APP (its error is above); fix that (network, npm cache), then rerun: $RERUN"
 	say changed "npm ci in $APP"
 fi
 exec sh "$APP/bin/cp-install" --app "$APP" "$@"

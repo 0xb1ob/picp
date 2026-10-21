@@ -16,6 +16,8 @@ ENV HOME=/home/node \
 	PATH=/home/node/.local/bin:/home/node/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
 ARG PI_VERSION
 RUN test -n "$PI_VERSION" && npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@$PI_VERSION"
+# Cached only: the unpinned pi install-tools runs when pi is absent (the recovery scenario), offline.
+RUN npm install -g --prefix /tmp/warm-pi --ignore-scripts @earendil-works/pi-coding-agent && rm -rf /tmp/warm-pi
 # treehouse's own installer picks ~/.local/bin when it is first on PATH (as CI does), never sudo.
 RUN mkdir -p .local/bin && curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh && treehouse --version
 ARG LENS_PACKAGES

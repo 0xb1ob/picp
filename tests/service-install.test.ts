@@ -874,7 +874,7 @@ test("install.sh: a checkout with no node_modules runs npm ci before install.ts 
 
 	const again = spawnSync("sh", [join(REPO_ROOT, "scripts/install.sh"), "--no-start"], { env, encoding: "utf8" });
 	assert.equal(again.status, 0, again.stdout + again.stderr);
-	assert.match(again.stdout, /ok: code: .*node_modules is current/);
+	assert.match(again.stdout, /ok: code: .*node_modules matches package-lock\.json/);
 	assert.equal(npmCalls().length, 1, "a current node_modules is not reinstalled");
 });
 
@@ -1110,14 +1110,15 @@ test("install --parent-model / --operator-model win; each sets only its own targ
 	assert.equal(configText(unlisted), "");
 
 	const empty = modelFake(scratch(t), { [LIST_CALL]: { stdout: "No models available. Use /login or set an API key environment variable.\n" } });
-	assert.equal(await install(flags(empty.ports.env.HOME!, { "parent-model": "x/y" }), empty.ports), 0, empty.lines.join("\n"));
+	// --no-start: a starting install stops at the login gate (#375 P1) before any model is written.
+	assert.equal(await install(flags(empty.ports.env.HOME!, { "parent-model": "x/y", "no-start": true }), empty.ports), 0, empty.lines.join("\n"));
 	assert.ok(empty.lines.includes("skip: model: parent x/y (--parent-model) written unchecked: pi's model list is empty"), empty.lines.join("\n"));
 	assert.ok(pinsParent(empty, "x/y"));
 });
 
-test("install: no usable model says run pi then /login and pins nothing; the login step is unchanged", async (t) => {
+test("install --no-start: no usable model says run pi then /login and pins nothing; the login step is unchanged", async (t) => {
 	const f = modelFake(scratch(t), { [LIST_CALL]: { stdout: "No models available. Use /login or set an API key environment variable.\n" } });
-	assert.equal(await install(flags(f.ports.env.HOME!), f.ports), 0, f.lines.join("\n"));
+	assert.equal(await install(flags(f.ports.env.HOME!, { "no-start": true }), f.ports), 0, f.lines.join("\n"));
 	const line = f.lines.find((l) => l.startsWith("skip: model: no model pi can use as the service sees it (")) ?? "";
 	assert.match(line, /auth\.json.*run `pi`, then \/login, then /, f.lines.join("\n"));
 	assert.deepEqual(modelQuestions(f), []);
@@ -1125,12 +1126,12 @@ test("install: no usable model says run pi then /login and pins nothing; the log
 	assert.ok(f.lines.some((l) => l.startsWith("skip: login: no provider")));
 });
 
-test("install: the post-login continuation keeps --home/--app, needs --force, names its effects and promises no model", async (t) => {
+test("install --no-start: the post-login continuation keeps --home/--app, needs --force, names its effects and promises no model", async (t) => {
 	const user = scratch(t);
 	const home = join(user, "custom-home");
 	const app = join(user, ".pi-command-post/app");
 	const f = modelFake(user, { [LIST_CALL]: { stdout: "No models available. Use /login or set an API key environment variable.\n" } });
-	assert.equal(await install(flags(user, { home }), f.ports), 0, f.lines.join("\n"));
+	assert.equal(await install(flags(user, { home, "no-start": true }), f.ports), 0, f.lines.join("\n"));
 	const line = f.lines.find((l) => l.startsWith("skip: model: no model pi can use")) ?? "";
 	assert.ok(line.includes(`then ${app}/bin/cp-install --home ${home} --app ${app} --force (without --force a rerun keeps this unpinned;`), line);
 	assert.match(line, /--force also reruns npm ci and replaces data\/daemon\.json, a unit or the wrapper that differs/);
@@ -1159,7 +1160,7 @@ test("install: a rerun keeps every pin unasked and byte-identical; --force re-op
 	assert.deepEqual(f.lines.filter((line) => line.includes(": model:")), ["ok: model: parent openai/gpt-6.1-sol kept", "ok: model: operator openai/gpt-6.1-sol kept"]);
 	assert.deepEqual(notOk(f), [], f.lines.join("\n"));
 	assert.deepEqual(snapshot(f), before);
-	assert.ok(!f.calls.includes(LIST_CALL), "nothing to choose: no listing");
+	assert.deepEqual(f.calls.filter((call) => call === LIST_CALL), [LIST_CALL], "nothing to choose: only the login check lists (#375 P1)");
 	assert.equal(await install(flags(user, { force: true, yes: true }), f.ports), 0);
 	assert.deepEqual(snapshot(f), before, "--force never re-asks a pinned choice");
 

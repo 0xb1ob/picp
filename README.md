@@ -123,15 +123,13 @@ your terminal even through `curl | sh`; `--yes` takes every default.
 
 The usual sequence on a new machine:
 
-1. Run the command above. It installs `pi` if needed and tells you when no
-   model login exists yet.
+1. Run the command above. It installs `pi` if needed. With no model login yet it stops before
+   writing or starting anything (exit 4) and prints one line: run `pi`, then /login, then re-run
+   the exact command it names.
 2. Run `pi`, type `/login`, pick your provider, then quit pi.
-3. Run the installer again with `--force` so it can offer the models your login gives:
-   `~/.pi-command-post/app/bin/cp-install --force`, plus the same `--home`/`--app` if you
-   passed them (the installer prints the exact command). Without `--force` a rerun keeps
-   the unpinned choice and offers nothing; `--force` also reruns `npm ci` and replaces a
-   generated file that differs from what this install renders. The rerun lists models as
-   the service sees them, so a login that does not reach the service still pins nothing.
+3. Run that printed command (`~/.pi-command-post/app/bin/cp-install` with your flags). It lists
+   models as the service sees them, so a login that does not reach the service stops it again.
+   `--no-start` installs without a login and starts nothing.
 
 Pass flags after `sh -s --` (bootstrap) or straight to `bin/cp-install`:
 
