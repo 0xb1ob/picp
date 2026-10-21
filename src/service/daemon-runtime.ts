@@ -51,6 +51,7 @@ import {
 } from "./daemon-files.ts";
 import { type TunnelIo, tunnelController, tunnelIo } from "./daemon-tunnel.ts";
 import { remoteFeatureConfigured } from "./daemon-tunnel-files.ts";
+import { isEntry } from "../entry.ts";
 
 export const TICK_MS = 5_000;
 export const READY_AFTER_MS = 5_000;
@@ -402,7 +403,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 	return { done, handle, stop };
 }
 
-if (import.meta.main) {
+if (isEntry(import.meta.url)) {
 	const log = (line: string): void => void process.stderr.write(`${new Date().toISOString()} cp-daemon inner[${process.pid}]: ${line}\n`);
 	const refuse = (why: string): never => {
 		log(`${why}; exiting ${EXIT_CONFIG}`);

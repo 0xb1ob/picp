@@ -531,11 +531,11 @@ test("install: no external tracker CLI is probed, offered or flagged, even with 
 	assert.deepEqual(probed.filter((tool) => !surviving.includes(tool!)), [], "only surviving tools are probed");
 });
 
-test("install: no terminal takes every default; --yes asks nothing; a typed answer wins", async (t) => {
+test("install: no terminal takes every default; --yes asks nothing; push is flag-only, never a typed answer", async (t) => {
 	const user = scratch(t);
 	const noTty = fake(user);
 	assert.equal(await install(flags(user), noTty.ports), 0);
-	assert.ok(noTty.questions.length > 0, "asked, and undefined (no tty) meant the default");
+	assert.deepEqual(noTty.questions, [], "complete flags ask nothing (#375 PR4: the push prompt is gone)");
 	assert.ok(!noTty.calls.some((call) => call.startsWith("pi install") && !call.includes("npm:")), "no self package");
 	assert.ok(noTty.lines.includes("skip: push: not set up; rerun with --push-origin URL to enable it"));
 
@@ -544,11 +544,15 @@ test("install: no terminal takes every default; --yes asks nothing; a typed answ
 	assert.deepEqual(quiet.questions, []);
 	assert.ok(!quiet.calls.some((call) => call.startsWith("pi install") && !call.includes("npm:")));
 
+	// #375 PR4: push is flag-only; a typed answer never enables it, --push-origin does.
 	const typed = fake(scratch(t));
 	typed.replies.push("https://cp.example");
 	assert.equal(await install(flags(typed.ports.env.HOME!), typed.ports), 0);
-	assert.ok(!typed.questions.some((q) => q.includes("pi package")), "no self-package prompt");
-	assert.ok(typed.calls.some((call) => call.includes("push-init.ts --origin https://cp.example")), typed.calls.join("\n"));
+	assert.ok(!typed.questions.some((q) => q.includes("pi package") || /push/i.test(q)), "no self-package or push prompt");
+	assert.ok(!typed.calls.some((call) => call.includes("push-init.ts")), typed.calls.join("\n"));
+	const flagged = fake(scratch(t));
+	assert.equal(await install(flags(flagged.ports.env.HOME!, { "push-origin": "https://cp.example" }), flagged.ports), 0);
+	assert.ok(flagged.calls.some((call) => call.includes("push-init.ts --origin https://cp.example")), flagged.calls.join("\n"));
 });
 
 test("install: tmux missing, gh logged out and no provider login are reported, never fatal", async (t) => {

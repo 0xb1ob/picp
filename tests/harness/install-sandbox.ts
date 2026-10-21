@@ -11,8 +11,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
+import { isEntry } from "../../src/entry.ts";
 
-export const SCENARIOS = ["fresh", "prerequisites", "rerun", "login", "recovery", "root", "compat"] as const;
+export const SCENARIOS = ["fresh", "prerequisites", "rerun", "login", "recovery", "root", "compat", "onboarding", "prompt", "node-floor"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 export const IMAGE = "picp-install-sandbox:local";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -168,19 +169,41 @@ function rerun(ctx: Ctx, phase: string, line: string, env: NodeJS.ProcessEnv = p
 	return timed(ctx, phase, ["-c", line.replace(`curl -fsSL ${RAW_BOOTSTRAP}`, `cat ${join(SRC, "bin/cp-bootstrap")}`)], env, "");
 }
 
-async function timed(ctx: Ctx, phase: string, shArgs: readonly string[], env: NodeJS.ProcessEnv, stdin: string): Promise<{ status: number | null; out: string }> {
+// install.ts's shellWord; that module is not imported here because the container's /tmp/src has no node_modules.
+const shellWord = (word: string): string => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
+
+/**
+ * `curl … | sh -s -- FLAGS` with a terminal (`script` gives it a pty, so /dev/tty prompts render) and no --yes. Each
+ * `answers` entry is typed once its `after` text has been printed; stdin stays open, so an unexpected prompt hangs.
+ */
+function bootstrapTty(ctx: Ctx, phase: string, flags: readonly string[], env: NodeJS.ProcessEnv, answers: ReadonlyArray<{ after: string; type: string }> = []): Promise<{ status: number | null; out: string }> {
+	const line = `cat ${shellWord(join(SRC, "bin/cp-bootstrap"))} | sh -s -- ${flags.map(shellWord).join(" ")}`;
+	return timed(ctx, phase, ["-c", line], env, "", answers);
+}
+
+async function timed(ctx: Ctx, phase: string, shArgs: readonly string[], env: NodeJS.ProcessEnv, stdin: string, answers?: ReadonlyArray<{ after: string; type: string }>): Promise<{ status: number | null; out: string }> {
 	const start = performance.now();
-	const child = spawn("sh", [...shArgs], { env: { ...env, CP_REPO_URL: env.CP_REPO_URL ?? ctx.remote }, stdio: ["pipe", "pipe", "pipe"] });
+	const [command, args] = answers ? ["script", ["-qec", ["sh", ...shArgs].map(shellWord).join(" "), "/dev/null"]] : ["sh", [...shArgs]];
+	const child = spawn(command, args, { env: { ...env, CP_REPO_URL: env.CP_REPO_URL ?? ctx.remote }, stdio: ["pipe", "pipe", "pipe"] });
 	const lines: Array<{ at: number; text: string }> = [];
 	let partial = "";
+	let seen = "";
+	const pending = [...(answers ?? [])];
 	const take = (chunk: Buffer): void => {
-		const parts = (partial + chunk.toString("utf8")).split("\n");
+		const text = chunk.toString("utf8").replaceAll("\r", "");
+		const parts = (partial + text).split("\n");
 		partial = parts.pop() ?? "";
-		for (const text of parts) lines.push({ at: since(start), text });
+		for (const line of parts) lines.push({ at: since(start), text: line });
+		seen += text;
+		while (pending[0] && seen.includes(pending[0].after)) {
+			seen = seen.slice(seen.indexOf(pending[0].after) + pending[0].after.length);
+			child.stdin.write(pending.shift()?.type);
+		}
 	};
 	child.stdout.on("data", take);
 	child.stderr.on("data", take);
-	child.stdin.end(stdin);
+	if (answers) child.stdin.write(stdin);
+	else child.stdin.end(stdin);
 	const timer = setTimeout(() => child.kill("SIGKILL"), PHASE_TIMEOUT_MS);
 	const status = await new Promise<number | null>((done) => child.on("close", (code) => done(code)));
 	clearTimeout(timer);
@@ -373,6 +396,46 @@ const scenarios: Record<Scenario, (ctx: Ctx) => Promise<void>> = {
 		const old = await verify(ctx, "old pi, --yes", await bootstrap(ctx, "old pi, --yes", [], stub("0.99.0", { updateTo: "1.0.4" })));
 		check(ctx, updates() === "update --self" && /^ok: pi: updated 0\.99\.0 -> 1\.0\.4 /m.test(old), `old, --yes: expected one \`pi update --self\` and an updated line, got "${updates()}"`);
 	},
+	async onboarding(ctx) {
+		// #375 PR4 (P2, P3, P5): a fresh install is never silent while it waits and ends in one summary block.
+		const out = await install(ctx, "fresh install, summary");
+		const lines = out.split("\n");
+		check(ctx, lines.some((line) => line.startsWith("… daemon: starting cp-daemon; waiting up to ")), "progress: no `… daemon:` line before the readiness wait");
+		check(ctx, lines.some((line) => line.startsWith("… doctor: waiting ")), "progress: no `… doctor:` line before the doctor wait");
+		check(ctx, !out.includes("health.json is absent or unreadable"), "fresh install: the expected not-yet-run watchdog was reported as a warning");
+		check(ctx, out.includes("the watchdog has not finished its first run yet"), "fresh install: doctor did not say the first watchdog run is still due");
+		check(ctx, lines.filter((line) => /^(ready|incomplete): /.test(line)).length === 1 && /^ready: cp-daemon runs and \/doctor passed; the dashboard: http:\/\/127\.0\.0\.1:\d+\//m.test(out), "summary: expected exactly one `ready:` line with the dashboard URL");
+		const head = lines.findIndex((line) => /^optional steps left \(\d+\):$/.test(line));
+		const items = head < 0 ? [] : lines.slice(head + 1).filter((line, n, rest) => rest.slice(0, n + 1).every((item) => item.startsWith("  - ")));
+		check(ctx, items.some((line) => line.includes("push: ") && line.includes("--push-origin")), `summary: no optional push step naming --push-origin in ${JSON.stringify(items)}`);
+		check(ctx, items.some((line) => line.includes("reboot: no systemd here") && line.includes("--crontab")), `summary: no reboot step offering --crontab in ${JSON.stringify(items)}`);
+	},
+	async prompt(ctx) {
+		// #375 PR4: through a terminal with complete flags and no --yes, the one prompt is the below-min pi update.
+		const restore = makePiStub();
+		writeFileSync(join(PI_STUB, "version"), "0.99.0\n");
+		writeFileSync(join(PI_STUB, "update-to"), "1.0.4\n");
+		const env = { ...process.env, PATH: `${PI_STUB}:${process.env.PATH ?? ""}` };
+		const flags = ["--home", CP_HOME, "--app", APP, "--parent-model", ctx.model, "--viewer-host", "127.0.0.1", "--no-update"];
+		const ask = "update --self now? [y/N] ";
+		const run = await verify(ctx, "curl | sh with a terminal, pi below min", await bootstrapTty(ctx, "curl | sh with a terminal, pi below min", flags, env, [{ after: ask, type: "y\n" }]));
+		const updates = existsSync(join(PI_STUB, "updates")) ? readFileSync(join(PI_STUB, "updates"), "utf8").trim() : "";
+		restore();
+		check(ctx, run.includes(`pi 0.99.0 is older than 1.0.1 (pi >= 1.0.1, tested up to 1.0.4, major 1). Run "${PI_STUB}/pi" ${ask.trim()}`), "prompt: the below-min question did not render on the terminal");
+		check(ctx, updates === "update --self" && /^ok: pi: updated 0\.99\.0 -> 1\.0\.4 /m.test(run), `prompt: the typed y did not run one \`pi update --self\` (got "${updates}")`);
+		check(ctx, run.split("\n").filter((line) => line.includes("[y/N]") || /\(empty .*\): $/.test(line)).length === 1, "prompt: complete flags asked more than the one pi question");
+	},
+	async "node-floor"(ctx) {
+		// #404 review: the entry points never rely on import.meta.main (node 24.2+); the whole install runs on 24.0.0.
+		const env = { ...process.env, PATH: `/opt/node24.0/bin:${process.env.PATH ?? ""}` };
+		const version = exec("node", ["--version"], { env }).out.trim();
+		check(ctx, version === "v24.0.0", `node-floor: node on PATH is ${version}, expected v24.0.0`);
+		const probe = exec("node", [join(SRC, "src/pi-compat-probe.ts"), join(HOME, ".npm-global/bin/pi"), SRC], { env });
+		check(ctx, probe.status === 0 && /"extension":\{"ok":true/.test(probe.out), `node-floor: the pi probe helper printed no passing result: ${probe.out.trim().slice(0, 300)}`);
+		await verify(ctx, "fresh install on node 24.0.0", await bootstrap(ctx, "fresh install on node 24.0.0", [], env));
+		const pinned = (JSON.parse(readFileSync(daemonPaths(CP_HOME).config, "utf8")) as { node?: string }).node;
+		check(ctx, pinned === "/opt/node24.0/bin/node", `node-floor: data/daemon.json pins node ${pinned}`);
+	},
 };
 
 /** The rerun command a failure line printed (`… rerun: CMD` or `… rerun the install: CMD`). */
@@ -433,7 +496,7 @@ async function inside(scenario: Scenario): Promise<number> {
 
 // ---- CLI: npm run e2e:install -- [--scenario fresh|prerequisites|rerun|all] [--verbose] ----------------------
 
-if (import.meta.main) {
+if (isEntry(import.meta.url)) {
 	const { values } = parseArgs({ options: { scenario: { type: "string", default: "all" }, inside: { type: "boolean" }, verbose: { type: "boolean" } } });
 	const wanted = values.scenario === "all" ? [...SCENARIOS] : [values.scenario];
 	const unknown = wanted.filter((name) => !(SCENARIOS as readonly string[]).includes(name ?? ""));

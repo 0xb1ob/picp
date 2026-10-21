@@ -48,6 +48,7 @@ import { readStatusFile } from "../run-artifacts.ts";
 import { UPDATE_FAILURES, viewerDown } from "./health.ts";
 import { type DaemonControl, daemonControl } from "./daemon-control.ts";
 import type { RunResult } from "./install.ts";
+import { isEntry } from "../entry.ts";
 
 export type UpdateResult = "updated" | "up_to_date" | "skipped_disabled" | "skipped_dirty" | "skipped_branch" | "skipped_ahead" | "skipped_bad_sha" | "skipped_busy" | "skipped_settling" | "fetch_failed" | "failed" | "drain_timeout" | "rolled_back" | "rollback_failed" | "config_invalid" | "migration_required";
 export type UpdatePhase = "idle" | "draining" | "updating" | "verifying" | "rolling_back";
@@ -525,7 +526,7 @@ export function hostUpdatePorts(home: string, env: NodeJS.ProcessEnv = process.e
 	};
 }
 
-if (import.meta.main) {
+if (isEntry(import.meta.url)) {
 	const { values } = parseArgs({ options: { "dry-run": { type: "boolean" } } });
 	const home = resolveHome();
 	configureLayout("multi", home);

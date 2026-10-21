@@ -32,6 +32,7 @@ import { attachParentHost, currentHost, type HostRecord, ParentHostClient, paren
 import { parentModelSetting } from "../parent-context.ts";
 import { headCommit } from "../viewer/loaded-commit.ts";
 import { daemonPaths, psArgs, readDaemonRuntime, readJson, roleScript, sameProcess } from "./daemon-files.ts";
+import { isEntry } from "../entry.ts";
 
 export const EXIT_NO_MODEL = 78;
 export const FOREIGN_LOCK_RETRY_MS = 60_000;
@@ -206,7 +207,7 @@ export function hostPorts(home: string, overrides: Partial<SupervisePorts> = {})
 	};
 }
 
-if (import.meta.main) {
+if (isEntry(import.meta.url)) {
 	const home = resolveHome();
 	let active: HostClient | undefined;
 	const track = (client: HostClient): HostClient => (active = client);

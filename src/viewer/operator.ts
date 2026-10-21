@@ -25,6 +25,7 @@ import { relaunchFileFor, superviseOperatorPi } from "../operator-relaunch.ts";
 import { PACKAGE_ROOT } from "../home.ts";
 import { listenPlan, viewerAddress } from "./cli.ts";
 import { hostHeaderFor } from "./server.ts";
+import { isEntry } from "../entry.ts";
 
 export const OPERATOR_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
@@ -202,6 +203,6 @@ function targetHome(): string | undefined {
 	try { return resolveOperatorTarget().home; } catch { return undefined; }
 }
 
-if (import.meta.main) {
+if (isEntry(import.meta.url)) {
 	runOperator(process.argv.slice(2)).then((code) => process.exit(code));
 }

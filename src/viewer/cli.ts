@@ -23,6 +23,7 @@ import { resolveStateDir } from "./sessions.ts";
 import { remoteOnly, remoteRuntime } from "./remote-runtime.ts";
 import { REMOTE_HOST } from "./remote-server.ts";
 import { createViewer, hostHeaderFor, type ViewerOptions } from "./server.ts";
+import { isEntry } from "../entry.ts";
 
 export const DEFAULT_PORT = 8766;
 
@@ -109,4 +110,4 @@ export async function main(argv: readonly string[]): Promise<void> {
 	});
 }
 
-if (import.meta.main) await main(process.argv.slice(2));
+if (isEntry(import.meta.url)) await main(process.argv.slice(2));

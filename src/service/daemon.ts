@@ -40,6 +40,7 @@ import {
 	sameProcess,
 } from "./daemon-files.ts";
 import { type OuterPorts, runOuter } from "./daemon-outer.ts";
+import { isEntry } from "../entry.ts";
 
 export const START_WAIT_MS = 30_000;
 export const STOP_WAIT_MS = 30_000;
@@ -266,7 +267,7 @@ function status(paths: DaemonPaths, config: DaemonConfig | undefined, ports: Cli
 	return 0;
 }
 
-if (import.meta.main) {
+if (isEntry(import.meta.url)) {
 	const ports: CliPorts = {
 		env: process.env,
 		out: (line) => void process.stdout.write(`${line}\n`),

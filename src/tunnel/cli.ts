@@ -31,6 +31,7 @@ import { readPushConfig } from "../viewer/push-files.ts";
 import { type CfFetch, defaultCfFetch, setupNamedTunnel, tunnelNameFor } from "./cloudflare-api.ts";
 import { cloudflaredBinDir, defaultProvisionPorts, type Provisioned, provisionCloudflared } from "./cloudflared.ts";
 import { type ShowResult, showPairingOnTty } from "./qr.ts";
+import { isEntry } from "../entry.ts";
 
 export const DEFAULT_REMOTE_PORT = 8767;
 /** Quick registration plus the daemon's 5 s tick and the viewer's 2 s check. */
@@ -339,7 +340,7 @@ async function down(home: string, paths: Paths, control: Control, ports: TunnelC
 	return 0;
 }
 
-if (import.meta.main) {
+if (isEntry(import.meta.url)) {
 	const ports: TunnelCliPorts = {
 		env: process.env,
 		out: (line) => void process.stdout.write(`${line}\n`),

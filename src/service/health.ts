@@ -34,6 +34,7 @@ import { daemonPaths } from "./daemon-files.ts";
 import { EscalationStore } from "../escalation.ts";
 import { OPERATOR_RELAY_OUTBOX_CAP, OperatorRelayAcks, OperatorRelayOutbox, oldestUnacked, operatorRelayAcksFile, operatorRelayOutboxFile, pendingRelays } from "../operator-outbox.ts";
 import { OperatorAsks } from "../operator-asks.ts";
+import { isEntry } from "../entry.ts";
 
 export const HEALTH_CHECKS = ["parent", "viewer", "supervisor", "disk", "git", "gh", "update", "relay"] as const;
 export type HealthCheck = (typeof HEALTH_CHECKS)[number];
@@ -294,7 +295,7 @@ function readJson(file: string): Record<string, unknown> | undefined {
 	}
 }
 
-if (import.meta.main) {
+if (isEntry(import.meta.url)) {
 	const home = resolveHome();
 	configureLayout("multi", home);
 	const layout = layoutForHome("multi", home);
