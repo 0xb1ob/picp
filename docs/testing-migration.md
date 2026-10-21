@@ -65,6 +65,18 @@ ask-0088e0332d00, 2026-10-21.
 | P3b (cp-e2e-migration-p3b-stth) | behavior 05, second slice: merge receipts and landing proof in `tests/e2e/landing.test.ts`: cp_merged through `gh` with the after-merge deploy job (05-5), cp_merged against a local https GitLab (05-6), and cp_teardown's git-only landing proof (05-7). The other 23 behavior-05 files stay `convert` (owner P3), for P3c (a job the main session cuts). | 3 (`tests/after-merge.test.ts`, `tests/landing-proof.test.ts`, `tests/merges.test.ts`) | 382 → 379 | 4,287 → 4,272 |
 | P3c (cp-e2e-migration-p3c-l5fc) | Approved partial delivery (ask-c77a4f32b23b). [Per-file accounting](testing-migration-p3c-declarations.md): 13/143 declarations mapped, 2 retained, 128 pending. Five unfinished files are convert-owned by P3c-rest for follow-on slices. | 2 files deleted (ci-evidence, parked-ci); 8 declarations removed; timer rename earns zero deletion credit | 379 + 1 incoming → 378 | 4,272 + 4 incoming → 4,274 |
 | S04 (cp-e2e-slice-s04-vep1) | behavior 05; original `tests/diff-review.test.ts` declarations 1–40. [Declaration accounting](testing-migration-s04-declarations.md): 38 mapped, 2 retained, 0 pending in S04; S05 owns 41–55 and whole-file retirement. | 0; baseline intentionally kept whole | +1 incoming e2e file | 55 source declarations unchanged; +13 e2e scenarios |
+| S06 (cp-e2e-slice-s06-15yh) | behavior 05 slice S06; foreign-ci-watch complete (10 mapped, 1 static retained); forge observers/runtime and held release pending. Two new consumer cases in landing. | 1 | 379 → 379 | 4,287 → 4,279 |
+
+S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
+V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
+`src/foreign-ci-watch.ts`, with no gained or lost lines (source SHA-256
+`2ccacd9909526f0cf24520f979996baf78f6ccfc560a31700ffdbcd050200276`). Captures and the comparison command
+live in the S06 artifact directory. Comparing the direct unit capture to e2e gives nine apparent lost lines,
+373–381, all in `formatForeignCiNotice`: pi transforms extension imports, so raw child V8 offsets alone do not
+prove source-mapped coverage of that formatter. S06-1 instead pins its actual operator RPC/UI notice: the foreign
+PR URL, green head, and evidence-only disclaimer. The retained test covers static import/port inspection.
+S06-timeout and S06-moved are semantic mutations run against the real entry-point scenarios; both fail their
+named assertions and the fixed 15-case file passes without skips before and after deleting the source file.
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -186,6 +198,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P3b | 05 | `tests/e2e/landing.test.ts` | adds 05-5 to 05-7 |
 | P3c | 05 | `tests/e2e/landing.test.ts` | partial delivery: 05-8–05-13 provide consumer coverage; ci-evidence and parked-ci retired; five unfinished files continue under P3c-rest |
 | P3c-rest | 05 | `tests/e2e/landing.test.ts` | follow-on slices: 128 pending declarations and two retained timer cases across five unfinished files |
+| S06 | 05 | `tests/e2e/landing.test.ts` | foreign CI, forge observers/runtime and held release; file-by-file conversion |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -319,6 +332,9 @@ moves first.
 | 05-11 | `tests/e2e/landing.test.ts` | landing: a real parent's timer latches only its mandated main runs and clears only current-tip green |
 | 05-12 | `tests/e2e/landing.test.ts` | landing: parked PR timer stores native CI for each observed head without reviving its released worker |
 | 05-13 | `tests/e2e/landing.test.ts` | landing: held CI repairs the same real worker once while preserving an integration hold |
+| S06-1 | `tests/e2e/landing.test.ts` | landing: foreign CI selection, failed reads, corrupt memory and reviewer timeout remain visible at dispatch |
+| S06-2 | `tests/e2e/landing.test.ts` | landing: a deploy ledger failure preserves the merge receipt and retries through cp_merged |
+
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -596,6 +612,17 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/parked-ci.test.ts` | parked CI: a held job reads nothing | 05-12 | redundant-unreachable | The direct held-with-handoff helper input cannot reach the observer: watch candidates must be awaiting_merge, and the fleet schema refuses legacy held parking records before observation. 05-12 pins both boundaries with `a held job is not read by the parked CI timer` and `the public sweep rejects a legacy held parking record before observing CI`; this is not a claimed failing phase-guard control. |
 | `tests/awaiting-merge-tick.test.ts` | a lock taken after session_start still sweeps on the next interval | — | retained | verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest). Missing entry point: transfer ownership to an already-started parent session. Acquisition occurs only at session_start, before timer registration; release only at session_shutdown. The startup-guard probe passes 05-12 and is not a failing consumer control. |
 | `tests/awaiting-merge-tick.test.ts` | session_shutdown clears the startup catch-up and the interval | — | retained | verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest). Missing entry point: observe timer callbacks after shutdown while ownership remains held, including before the startup timer fires. Shutdown releases the lock and exits; removing both clears passes 05-12 but fails the retained unit. |
+| `tests/foreign-ci-watch.test.ts` | selection: an open job naming a PR in its project's repo, never a closed job, another repo, or a PR this home shipped | S06-1 | mapped | checked is exactly the selected job; deferred remains selected; other repo, issue, closed and own PR are excluded. Removing closed filtering fails checked (S06 selection control). |
+| `tests/foreign-ci-watch.test.ts` | green runs on the head give one ci_green, and the next tick gives nothing; runs are asked of the URL's base repo by head sha | 05-10 | mapped | exact ci_green then empty replay; base-repo head query; S06-1 observes operator notice text through real parent RPC/UI output. |
+| `tests/foreign-ci-watch.test.ts` | a moved head gives head_moved once, then CI is re-derived for the new head | 05-10 | mapped | head_moved assertion fails under S06 moved-head control; next-head ci_failed carries the new sha. |
+| `tests/foreign-ci-watch.test.ts` | a merged PR gives pr_merged and is never queried again; an unreadable PR is reported once and dropped | S06-1 | mapped | 05-10 asserts pr_merged and no later query; S06-1 asserts stopped length 1 for HTTP 404 and subsequent checked empty. |
+| `tests/foreign-ci-watch.test.ts` | a failing query backs off and names a cause once; the per-tick cap defers the rest | S06-1 | mapped | HTTP 502 yields one named error, immediate tick checks nothing, forced-due repeat yields no duplicate error; default cap checks 20 and defers job 21. |
+| `tests/foreign-ci-watch.test.ts` | the store is a total read: a corrupt file is no memory, and the next write is valid | S06-1 | mapped | corrupt JSON is replaced by the selected job's valid memory, then dispatch reads it and refuses in_progress. |
+| `tests/foreign-ci-watch.test.ts` | evidence only: the ports are read-only, the module reaches no merge or wake path, and its query never waits | S06-1 | retained | Static source-import and injected port-key inspection has no runtime product entry point. Unit preserved verbatim in tests/foreign-ci-watch-retained.test.ts; S06-1 pins real no-merge behavior and actual operator evidence notice. |
+| `tests/foreign-ci-watch.test.ts` | ghForeignRuns reads Actions runs and attempt jobs on the PR's base repo; an unreadable read never becomes [] | S06-1 | mapped | 05-10 asserts base-repo sha query; S06-1 reaches Actions through real gh, rejects malformed head and HTTP 403 instead of empty runs. |
+| `tests/foreign-ci-watch.test.ts` | the reviewer gate waits for CI, then carries its state into the brief; past the timeout it goes ahead with CI unknown | S06-1 | mapped | real worker request contains timed-out CI unknown; disabling timeout fails accepted dispatch (S06 timeout control). Armed real worker gets green; gh ENOENT yields watch-off text; non-reviewers reach ordinary preflight. |
+| `tests/foreign-ci-watch.test.ts` | binding (c) holds for the head the reviewer reads: a success recorded for an old head never releases once the PR moved | S06-1 | mapped | 05-10 rejects moved-head dispatch; S06-1 rejects unreadable current head and carries that reason after timeout. |
+| `tests/foreign-ci-watch.test.ts` | CommandPost.dispatch arms a waiting reviewer; the armed release (no blockers) re-runs the gate every pass and starts it only once CI completed | S06-1 | mapped | real cp_dispatch writes armed state without fleet or provider request; real scheduler release starts one worker after green and its actual request carries the head's CI. |
 <!-- /manifest:assertions -->
 
 P3c is an approved partial delivery (ask-c77a4f32b23b): two files deleted, thirteen declarations mapped,
@@ -959,6 +986,26 @@ What `--verify-regressions` checks: only that each recorded patch block hashes t
 exists in this repository. It does not apply the patch, and it does not rerun the e2e. The failing and fixed runs
 quoted below were run by hand when each control was recorded, and they are evidence only to that extent.
 
+<!-- patch:S06-moved -->
+```diff
+diff --git a/src/foreign-ci-watch.ts b/src/foreign-ci-watch.ts
+--- a/src/foreign-ci-watch.ts
++++ b/src/foreign-ci-watch.ts
+@@ -282 +282 @@
+-		if (head && entry.head_sha && entry.head_sha !== head) {
++		if (false && head && entry.head_sha && entry.head_sha !== head) {
+```
+
+<!-- patch:S06-timeout -->
+```diff
+diff --git a/src/foreign-ci-watch.ts b/src/foreign-ci-watch.ts
+--- a/src/foreign-ci-watch.ts
++++ b/src/foreign-ci-watch.ts
+@@ -334 +334 @@
+-		if (!(now.getTime() < deadline)) return { line: `${target.url}: CI unknown — not completed within ${Math.round(timeout / 60_000)} min of ${job.created_at} (last seen: ${seen}).` };
++		if (false) return { line: `${target.url}: CI unknown — not completed within ${Math.round(timeout / 60_000)} min of ${job.created_at} (last seen: ${seen}).` };
+```
+
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
@@ -1017,6 +1064,8 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-53 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-53 | 38f8d8e9b4ee45085a53a7b0ab3bf727bcb6dff132a7f9ccaf91b7725964834d | resume or re-park drops the old cycle's terminal observation: actual false expected true; exit 1 | pass |
 | NC-54 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-54 | c659006b3d4f625d0f3ca065766b8a331cfec0d460cefd0b52d73c491be85d74 | merged and closed snapshots do not read native CI: actual 1 expected 0; exit 1 | pass |
 | NC-55 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-55 | b982458f1edafa0ef99eb6f9a6e601c82067dbbdffe56318cd15ebc5303b5b13 | a failing head backs off instead of re-reading every sweep: actual 12 expected 6; exit 1 | pass |
+| S06-moved | `tests/foreign-ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-10 | S06-moved | 56e133c0e8de4fce2a1efba54419ec2b83ee25d9051291cb54f50420abb87f15 | head_moved observation is empty instead of one moved-head fact | pass |
+| S06-timeout | `tests/foreign-ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | S06-1 | S06-timeout | 1869d77ee9e6ea51f37ebd3cff7afbbd562b01a4a7b30e6e81f0afb850d92503 | timed-out reviewer dispatch rejects instead of returning receipt accepted | pass |
 <!-- /manifest:regressions -->
 
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:
@@ -1743,6 +1792,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/entry-guard.test.ts` | main 5e8106b | unit landed upstream after the baseline; convert, owner P24 (entry-module/runtime compatibility), outside P3c; recorded when plain-merging main |
 | `tests/awaiting-merge-tick-retained.test.ts` | P3c-rest | convert, owner P3c-rest; two declarations retained verbatim from tests/awaiting-merge-tick.test.ts; no public entry point transfers a running session's lock or observes dormant timers after shutdown |
 | `tests/e2e/diff-review.test.ts` | S04 (cp-e2e-slice-s04-vep1), behavior 05 public review conversion |
+| `tests/foreign-ci-watch-retained.test.ts` | S06 | one retained static source/port inspection; no runtime entry point exposes implementation imports or injected dependency key enumeration |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -1902,7 +1952,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/failures.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/fake-parent-tracker.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/fleet.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
-| `tests/foreign-ci-watch.test.ts` | convert | P3c-rest | behavior 05 follow-on; eleven declarations pending conversion |
+| `tests/foreign-ci-watch.test.ts` | deleted | S06 | 11 declarations: 10 mapped (05-10, S06-1), 1 static inspection retained in tests/foreign-ci-watch-retained.test.ts; S06-moved and S06-timeout controls |
 | `tests/forge-observers.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/forge-runtime.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/forge-url.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |

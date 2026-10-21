@@ -11,7 +11,7 @@ The original slice has 143 static declarations (152 parameterized runtime cases)
 |---|---:|---|
 | tests/ci-watch.test.ts | 80 | convert, owner P3c-rest; five declarations mapped by 05-8 with NC-32 and NC-39–NC-42; 75 pending |
 | tests/main-ci.test.ts | 39 | convert, owner P3c-rest; 39 pending, including inherited P3/P3b assertions |
-| tests/foreign-ci-watch.test.ts | 11 | convert, owner P3c-rest; eleven pending, including dispatch release and legacy state |
+| tests/foreign-ci-watch.test.ts | 11 | S06 completed: 10 mapped to 05-10/S06-1 in tests/e2e/landing.test.ts, one static declaration in tests/foreign-ci-watch-retained.test.ts; supersedes the P3c-rest pending snapshot |
 | tests/parked-ci.test.ts | 3 | All three mapped to 05-12 and deleted; real timer, forge barriers, resume/re-park and legacy held state; NC-36 and NC-49–NC-55 |
 | tests/ci-evidence.test.ts | 5 | All five mapped to 05-9 and deleted; NC-33 and NC-43–NC-48 fail their tool/storage/viewer assertions |
 | tests/integrate-held-ci.test.ts | 3 | convert, owner P3c-rest; three pending, including restart and permission paths |

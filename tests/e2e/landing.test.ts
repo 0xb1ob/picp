@@ -380,7 +380,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 		return { jobId: job.id, prUrl: prUrl || undefined, branch: over.branch ?? job.id };
 	};
 	let parentSeq = 0;
-	const parent = async (prompt: string, steps: ScriptStep[], settled?: (events: unknown[]) => Promise<void>) => {
+	const parent = async (prompt: string, steps: ScriptStep[], settled?: (events: unknown[], stderr: () => string) => Promise<void>) => {
 		const script = `landing-parent-${++parentSeq}`;
 		const model = provider.addScript(script, steps, { onExhausted: "repeat" });
 		// Recovery notices can request a turn before the operator's quote arrives.
@@ -399,7 +399,7 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 			await waitFor(() => provider.remaining(script), (remaining) => remaining === 0, { timeoutMs: 90_000, what: "operator script consumed" });
 			await child.waitForSettled(90_000);
 			assert.equal(provider.remaining(script), 0);
-			await settled?.(child.eventsOfType("tool_execution_end"));
+			await settled?.(child.eventsOfType("tool_execution_end"), () => `${child.stderr()}\n${JSON.stringify(child.records())}`);
 			return child.eventsOfType("tool_execution_end");
 		} finally {
 			await child.close();
@@ -1273,7 +1273,27 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 	state(pr(), [run(204, head, "in_progress", null)]);
 	assert.deepEqual((await s.post.foreignCiTick()).checked, [job.id], "only the open foreign PR in this project's repo is selected");
 	assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).jobs.map((row: { job_id: string }) => row.job_id), [job.id], "corrupt memory is replaced with valid selected jobs");
+	await s.post.ledger().update(job.id, { status: "deferred" });
+	due();
+	assert.deepEqual((await s.post.foreignCiTick()).checked, [job.id], "deferred foreign jobs remain selected");
+	await s.post.ledger().update(job.id, { status: "open" });
+	const bypassModel = s.provider.addScript("foreign-bypass", [{ kind: "text", text: "Unused." }]);
+	s.agentDir.writeModels(s.provider);
+	for (const bypass of [
+		await create("ordinary research", url, []),
+		await s.post.ledger().create({ title: "ship is not a foreign reviewer", project: "demo", kind: "ship", delivery: "pr", externalRef: url, labels: ["schedule:sch-e2e"] }),
+		await create("review another repo", "https://github.com/example/other/pull/299"),
+	]) {
+		await assert.rejects(s.post.dispatch({ jobId: bypass.id, task: "review", model: bypassModel, fetch: false }), /origin_mismatch/, "non-reviewers pass the foreign gate and reach normal preflight");
+		await s.post.ledger().close(bypass.id, "dropped: gate bypass fixture complete");
+	}
 	await assert.rejects(s.post.dispatch({ jobId: job.id, task: "review", fetch: false }), /in_progress on aaaaaaaaaaaa/);
+	state(pr("HEAD;rm"));
+	due();
+	assert.ok((await s.post.foreignCiTick()).errors.some((error) => /malformed head sha/.test(error.message)), "malformed forge head is refused at the Actions boundary");
+	s.setGh({ routes: [{ match: "pulls/204", replies: [pr()] }, { match: "actions/runs?head_sha=", replies: [{ code: 1, stderr: "gh: Resource not accessible by integration (HTTP 403)" }] }] });
+	due();
+	assert.ok((await s.post.foreignCiTick()).errors.some((error) => /Actions CI read denied/.test(error.message)), "unreadable Actions is never an empty run list");
 	state({ code: 1, stderr: "gh api failed: HTTP 502" });
 	due();
 	const failed = await s.post.foreignCiTick();
@@ -1282,7 +1302,7 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 	assert.deepEqual((await s.post.foreignCiTick()).checked, [], "a failed read backs off");
 	due();
 	assert.deepEqual((await s.post.foreignCiTick()).errors, [], "a repeated cause is announced once");
-	assert.equal(JSON.parse(readFileSync(file, "utf8")).jobs[0].failures, 2);
+	assert.equal(JSON.parse(readFileSync(file, "utf8")).jobs[0].failures, 4);
 	state(pr(), [run(204, head, "completed", "success")]);
 	due();
 	const green = await s.post.foreignCiTick();
@@ -1327,7 +1347,7 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 	await s.parent("Dispatch the foreign reviewer when its CI completes.", [
 		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: armed.id, task: "Review the foreign PR.", model: armedModel } }] },
 		{ kind: "text", text: "Waiting for foreign CI." },
-	], async (events) => {
+	], async (events, stderr) => {
 		assert.ok(existsSync(join(s.home, LAYOUT.armedDispatchFile)), JSON.stringify({ events, job: await s.post.ledger().show(armed.id) }));
 		assert.equal(s.post.fleet.get(armed.id), undefined, "the public dispatch tool arms without spawning while CI runs");
 		assert.equal(s.provider.requests("foreign-armed").length, 0);
@@ -1336,6 +1356,8 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 		assert.equal((await s.post.ledger().show(armed.id)).status, "in_progress", JSON.stringify(await s.post.ledger().show(armed.id)));
 		assert.match(JSON.stringify(s.provider.requests("foreign-armed")[0]!.body), /CI green on aaaaaaaaaaaa/);
 		assert.equal(readRunEvents(s.home, armed.id).filter((event) => event.type === "spawned").length, 1, "one armed dispatch starts once");
+		await waitFor(stderr, (text) => text.includes(`foreign PR ${armed.external_ref} CI green on aaaaaaaaaaaa`), { timeoutMs: 10_000, what: "foreign CI notice reaches operator stderr" });
+		assert.match(stderr(), /nothing was merged, commented, re-run or woken/);
 	});
 	await s.post.ledger().close(armed.id, "dropped: armed reviewer fixture complete");
 	const batch = [];
@@ -1344,6 +1366,16 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 	const capped = await s.post.foreignCiTick();
 	assert.deepEqual(capped.checked, batch.slice(0, 20).map((row) => row.id));
 	assert.deepEqual(capped.deferred, [batch[20]!.id], "the real default per-tick cap defers the twenty-first PR");
+	const offJob = await create("foreign reviewer while gh is unavailable", "https://github.com/example/demo/pull/399");
+	s.setGh({ routes: [{ match: "pulls/208", replies: [{ code: 1, stderr: "spawn gh ENOENT" }] }] });
+	rmSync(join(s.home, LAYOUT.ciWatchFile), { force: true });
+	const disabled = await s.post.ciTick();
+	assert.match(s.post.ciWatch.disabled ?? "", /gh is not available/, JSON.stringify(disabled));
+	const offModel = s.provider.addScript("foreign-off", [{ kind: "text", text: "Reviewing without CI." }], { onExhausted: "repeat" });
+	s.agentDir.writeModels(s.provider);
+	assert.equal((await s.post.dispatch({ jobId: offJob.id, task: "review", model: offModel, fetch: false })).receipt, "accepted");
+	await waitFor(() => s.provider.requests("foreign-off"), (requests) => requests.length > 0, { timeoutMs: 60_000, what: "reviewer sees disabled watch" });
+	assert.match(JSON.stringify(s.provider.requests("foreign-off")[0]!.body), /CI unknown — the CI watch is off/);
 	assert.deepEqual(mergedCalls(s.ghCalls()), []);
 });
 
