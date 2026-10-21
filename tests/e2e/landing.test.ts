@@ -1,27 +1,38 @@
 /**
- * Behavior 05, first slice (docs/testing-migration.md): what a held PR's CI read, CI configuration, infra rerun and
- * /doctor make of each Actions answer. Real CommandPost, implementer workers and reporter, scratch git; scripted `gh`.
+ * Behavior 05 (docs/testing-migration.md): what a held PR's CI read, CI configuration, infra rerun, /doctor, cp_merged
+ * and cp_teardown's git landing proof make of each answer. Real CommandPost, implementer workers and reporter, scratch
+ * git; scripted `gh`, and a local https GitLab (REST plus git http-backend) for the GitLab cases.
  */
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:https";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "../../src/ci-access.ts";
 import { CommandPost } from "../../src/command-post.ts";
-import { LAYOUT, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { drainFile } from "../../src/drain.ts";
+import type { ForgeConfig } from "../../src/forge-url.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
+import { formatMerge, readMergeReceipt } from "../../src/merges.ts";
 import { formatStatusTable } from "../../src/status.ts";
 import {
+	advanceBase,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
 	enableTreehouse,
+	git,
 	MockProvider,
 	readFleet,
+	readRunEvents,
+	rebaseMergeAndDeleteHead,
 	REPO_ROOT,
+	type ScratchRepo,
 	type ScriptStep,
+	squashMergeAndDeleteHead,
 	treehouseAvailable,
 	waitFor,
 } from "../harness/index.ts";
@@ -71,6 +82,89 @@ const setupJob = (failedStep: string, conclusion = "failure") => {
 	const steps = names.map((name, index) => ({ name, status: "completed", conclusion: index < at ? "success" : index === at ? "failure" : "skipped" }));
 	return { id: 1, name: "suite", status: "completed", conclusion, steps };
 };
+
+/** Merge `branch` on origin with a merge commit, then delete it, as a forge's "create a merge commit" does. */
+function mergeAndDeleteHead(repo: ScratchRepo, branch: string): string {
+	const clone = mkdtempSync(join(tmpdir(), "cp-merge-"));
+	try {
+		git(clone, "clone", "--quiet", repo.remote as string, "work");
+		const work = join(clone, "work");
+		git(work, "merge", "--no-ff", "--quiet", "-m", `merge ${branch}`, `origin/${branch}`);
+		git(work, "push", "--quiet", "origin", "main");
+		git(work, "push", "--quiet", "origin", "--delete", branch);
+		return git(work, "rev-parse", "HEAD");
+	} finally {
+		rmSync(clone, { recursive: true, force: true });
+	}
+}
+
+interface GitlabReply {
+	status?: number;
+	body: unknown;
+}
+/**
+ * A local https GitLab: `/api/v4/.../merge_requests/<iid>` answers `mrs[iid]` and logs its PRIVATE-TOKEN; every other
+ * path is `git http-backend` over `remote`, served as `/o/lab.git`. Git and fetch skip verification of its throwaway cert.
+ */
+async function startFakeGitlab(t: TestContext, remote: string) {
+	const dir = mkdtempSync(join(tmpdir(), "cp-gitlab-"));
+	execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", join(dir, "key"), "-out", join(dir, "cert"), "-days", "1", "-subj", "/CN=127.0.0.1"], { stdio: "ignore" });
+	const mrs: Record<number, GitlabReply> = {};
+	const asked: Array<{ path: string; token?: string }> = [];
+	const server = createServer({ key: readFileSync(join(dir, "key")), cert: readFileSync(join(dir, "cert")) }, (req, res) => {
+		const url = new URL(req.url ?? "/", "https://gitlab.test");
+		const iid = /^\/api\/v4\/projects\/[^/]+\/merge_requests\/(\d+)$/.exec(url.pathname)?.[1];
+		if (url.pathname.startsWith("/api/")) {
+			asked.push({ path: url.pathname, ...(req.headers["private-token"] ? { token: String(req.headers["private-token"]) } : {}) });
+			const reply = iid ? mrs[Number(iid)] : undefined;
+			res.writeHead(reply?.status ?? (reply ? 200 : 404), { "content-type": "application/json" });
+			res.end(JSON.stringify(reply?.body ?? { message: "404 Not found" }));
+			return;
+		}
+		const cgi = spawn("git", ["http-backend"], {
+			env: {
+				...process.env, GIT_PROJECT_ROOT: dirname(remote), GIT_HTTP_EXPORT_ALL: "1", REMOTE_USER: "e2e", REMOTE_ADDR: "127.0.0.1",
+				PATH_INFO: url.pathname.replace(/^\/o\/lab\.git/, `/${basename(remote)}`), QUERY_STRING: url.search.slice(1), REQUEST_METHOD: req.method ?? "GET",
+				CONTENT_TYPE: req.headers["content-type"] ?? "", HTTP_CONTENT_ENCODING: req.headers["content-encoding"] ?? "", GIT_PROTOCOL: String(req.headers["git-protocol"] ?? ""),
+			},
+		});
+		req.pipe(cgi.stdin);
+		const chunks: Buffer[] = [];
+		cgi.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+		cgi.on("close", () => {
+			const out = Buffer.concat(chunks);
+			const split = out.indexOf("\r\n\r\n");
+			const headers = Object.fromEntries(out.subarray(0, split).toString().split("\r\n").map((line) => [line.slice(0, line.indexOf(":")).toLowerCase(), line.slice(line.indexOf(":") + 1).trim()]));
+			const status = Number(/^\d+/.exec(headers.status ?? "200")?.[0]);
+			delete headers.status;
+			res.writeHead(status, headers);
+			res.end(out.subarray(split + 4));
+		});
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	t.after(() => {
+		server.closeAllConnections();
+		server.close();
+		rmSync(dir, { recursive: true, force: true });
+	});
+	return { web: `https://127.0.0.1:${(server.address() as { port: number }).port}`, mrs, asked };
+}
+
+/** Commit what `script` does to a fresh clone of origin's main, and push it there, as another job or a human would. */
+function landOnOrigin(repo: ScratchRepo, script: string, message: string): string {
+	const clone = mkdtempSync(join(tmpdir(), "cp-land-"));
+	try {
+		git(clone, "clone", "--quiet", repo.remote as string, "work");
+		const work = join(clone, "work");
+		execFileSync("bash", ["-c", script], { cwd: work });
+		git(work, "add", "-A");
+		git(work, "commit", "--quiet", "-m", message);
+		git(work, "push", "--quiet", "origin", "main");
+		return git(work, "rev-parse", "HEAD");
+	} finally {
+		rmSync(clone, { recursive: true, force: true });
+	}
+}
 
 /** A `gh` answering routes first, then PR views, paged Actions runs and jobs, workflows and reruns; else exit 1. */
 function writeFakeGh(bin: string, stateFile: string, countsFile: string, logFile: string, claimsFile: string): void {
@@ -152,9 +246,9 @@ process.exit(1);
 }
 
 /** Real CommandPost over a registered scratch project; no held-PR continuation, so every cp_integrate is the test's. */
-async function startStack(t: TestContext, options: { project?: boolean } = {}) {
+async function startStack(t: TestContext, options: { project?: boolean; trees?: number; env?: (home: string, remote: string) => Record<string, string> } = {}) {
 	const home = createScratchHome();
-	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n" } });
+	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", "src/a.ts": "a1\n", "src/b.ts": "b1\n" } });
 	const provider = await MockProvider.start();
 	const agentDir = createAgentDir({ provider });
 	initJobsDocument(home.path, "cp");
@@ -171,6 +265,9 @@ async function startStack(t: TestContext, options: { project?: boolean } = {}) {
 		rmSync(countsFile, { force: true });
 	};
 	setGh({});
+	const extraEnv = options.env?.(home.path, repo.remote as string) ?? {};
+	const savedEnv = Object.fromEntries(Object.keys(extraEnv).map((key) => [key, process.env[key]]));
+	Object.assign(process.env, extraEnv);
 	const bin = join(home.path, "bin");
 	writeFakeGh(bin, stateFile, countsFile, logFile, join(home.path, LAYOUT.ciRerunsFile));
 	const saved = { PATH: process.env.PATH, CP_CI_WATCH_SECONDS: process.env.CP_CI_WATCH_SECONDS };
@@ -181,33 +278,43 @@ async function startStack(t: TestContext, options: { project?: boolean } = {}) {
 		process.env.PATH = saved.PATH;
 		if (saved.CP_CI_WATCH_SECONDS === undefined) delete process.env.CP_CI_WATCH_SECONDS;
 		else process.env.CP_CI_WATCH_SECONDS = saved.CP_CI_WATCH_SECONDS;
+		for (const [key, value] of Object.entries(savedEnv)) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
 		await post.shutdown();
 		await provider.stop();
 		agentDir.cleanup();
 		repo.cleanup();
 		home.cleanup();
 	});
-	if (options.project !== false) {
-		await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "pr" });
-		const clone = post.registry.pathOf("demo");
+	/** Register `name` with its own clone of the scratch remote; `cloneUrl` becomes the clone's origin when given. */
+	const project = async (name: string, over: { cloneUrl?: string; forge?: ForgeConfig } = {}) => {
+		await post.registry.register({ name, clone_url: over.cloneUrl ?? (repo.remote as string), delivery: "pr", ...(over.forge ? { forge: over.forge } : {}) });
+		const clone = post.registry.pathOf(name);
 		execFileSync("git", ["clone", "--quiet", repo.remote as string, clone]);
-		const pool = enableTreehouse(clone, { maxTrees: 4 });
+		if (over.cloneUrl) execFileSync("git", ["-C", clone, "remote", "set-url", "origin", over.cloneUrl]);
+		const pool = enableTreehouse(clone, { maxTrees: options.trees ?? 4 });
 		t.after(() => pool.cleanup());
-	}
+	};
+	if (options.project !== false) await project("demo");
 
 	const remoteHead = (branch: string) =>
 		execFileSync("git", ["ls-remote", repo.remote as string, `refs/heads/${branch}`], { encoding: "utf8" }).split("\t")[0]?.trim() ?? "";
-	/** A fresh ledger job whose implementer pushes, reports a PR and stands by; resolves once it is held. */
-	const held = async (title: string, number: number) => {
-		const job = await post.ledger().create({ title, project: "demo", delivery: "pr", kind: "ship" });
-		const prUrl = `https://github.com/example/demo/pull/${number}`;
+	/** A fresh ledger job whose implementer runs `command` (default: commit and push), reports a PR and stands by; resolves once held. */
+	const held = async (title: string, number: number, over: { project?: string; prUrl?: string; delivery?: "local"; command?: (branch: string) => string } = {}) => {
+		const job = await post.ledger().create({ title, project: over.project ?? "demo", delivery: over.delivery ?? "pr", kind: "ship" });
+		const prUrl = over.prUrl ?? `https://github.com/example/demo/pull/${number}`;
+		const pr = over.delivery ? {} : { pr_url: prUrl };
 		const report: ScriptStep = {
 			kind: "tool_calls",
-			calls: [{ name: "report_result", args: () => ({ job_id: job.id, kind: "ship", status: "done", summary: "Opened a PR.", branch: job.id, pr_url: prUrl, head_sha: remoteHead(job.id) }) }],
+			calls: [{ name: "report_result", args: () => ({ job_id: job.id, kind: "ship", status: "done", summary: "Opened a PR.", branch: job.id, ...pr, head_sha: remoteHead(job.id) }) }],
 		};
+		const push = `git add -A && git commit -q -m v1 && git push -q -u origin ${job.id}`;
+		const command = over.command?.(job.id) ?? `printf 'v1\\n' > change.txt && ${push}`;
 		// A red head promotes the implementer once; it re-reports the same head, so the job is held again.
 		const steps: ScriptStep[] = [
-			{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `printf 'v1\\n' > change.txt && git add -A && git commit -q -m v1 && git push -q -u origin ${job.id}` } }] },
+			{ kind: "tool_calls", calls: [{ name: "bash", args: { command } }] },
 			report,
 			{ kind: "text", text: "standing by" },
 			report,
@@ -219,11 +326,11 @@ async function startStack(t: TestContext, options: { project?: boolean } = {}) {
 		setGh({});
 		const dispatched = await post.dispatch({ jobId: job.id, task: "Change change.txt and open a PR.", model, fetch: false });
 		assert.equal(dispatched.receipt, "accepted");
-		await waitFor(() => readFleet(home.path).jobs.find((entry) => entry.job_id === job.id), (entry) => entry?.phase === "held" && entry.reported_at !== undefined, {
+		const record = await waitFor(() => readFleet(home.path).jobs.find((entry) => entry.job_id === job.id), (entry) => entry?.phase === "held" && entry.reported_at !== undefined, {
 			timeoutMs: 90_000,
 			what: `${job.id} held after its envelope`,
 		});
-		return { jobId: job.id, head: remoteHead(job.id), prUrl };
+		return { jobId: job.id, head: remoteHead(job.id), prUrl, worktree: record?.worktree as string };
 	};
 	const ghCalls = () => (existsSync(logFile) ? readFileSync(logFile, "utf8").trim().split("\n").filter(Boolean).map((row) => (JSON.parse(row) as string[]).join(" ")) : []);
 	/** One cp_integrate advance, re-asked while a promoted implementer re-reports; its gh calls containing `match`. */
@@ -246,7 +353,21 @@ async function startStack(t: TestContext, options: { project?: boolean } = {}) {
 		}
 		return assert.fail(`the CI watch never checked ${jobId}`);
 	};
-	return { home: home.path, post, gh, setGh, held, ghCalls, integrate, tick };
+	/** A held fleet record with no worker or worktree (seeded legacy data): cp_merged reads only the record and the clone. */
+	const seed = async (title: string, over: { project?: string; prUrl?: string | false; branch?: string; bound?: boolean } = {}) => {
+		const job = await post.ledger().create({ title, project: over.project ?? "demo", delivery: "pr", kind: "ship" });
+		const prUrl = over.prUrl ?? `https://github.com/example/demo/pull/${50 + post.ledger().read().jobs.length}`;
+		const now = isoTimestamp();
+		await post.fleet.add({
+			job_id: job.id, project: over.project ?? "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "held", reported_at: now, dispatched_at: now, usage: EMPTY_USAGE,
+			worker: { pid: process.pid, session_id: "s", session_file: join(home.path, "s.jsonl"), profile: "implementer", role: "implementer", model: "mock/model", started_at: now },
+			worktree: join(home.path, "gone", job.id), branch: over.branch ?? job.id,
+			...(prUrl ? { receipts: [{ kind: "pr" as const, status: "open", title: `PR for ${job.id}`, url: prUrl }] } : {}),
+			...(over.bound && prUrl ? { bound_pr: { number: Number(prUrl.split("/").pop()), url: prUrl, base: "main" } } : {}),
+		});
+		return { jobId: job.id, prUrl: prUrl || undefined, branch: over.branch ?? job.id };
+	};
+	return { home: home.path, remote: repo.remote as string, repo, post, gh, setGh, held, seed, project, ghCalls, integrate, tick };
 }
 
 const mergedCalls = (calls: string[]) => calls.filter((call) => call.startsWith("pr merge"));
@@ -570,5 +691,294 @@ test(
 		assert.equal(claims().filter((entry) => entry.job_id === b.jobId).length, 1);
 		assert.match((await advance(b.jobId, refusedRun, [setupJob("Checkout")])).fact, /was spent at/);
 		assert.deepEqual(reruns(), ["run rerun 41 --failed", "run rerun 51 --failed"]);
+	},
+);
+
+const MERGE = "b59fc3a1".repeat(5);
+const deployJobs = (post: CommandPost, merged: string) => post.ledger().read().jobs.filter((job) => job.labels.includes(`after-merge:${merged}`));
+const afterMergeRecord = (home: string, merged: string) => JSON.parse(readFileSync(join(home, paths.afterMergeFile(merged)), "utf8"));
+
+test(
+	"landing: cp_merged records only a merge gh observed for this job's branch, marks its PR merged once, and an opted-in deploy branch gets one blocked ops:deploy job",
+	{ skip: SKIP, timeout: 600_000 },
+	async (t) => {
+		const s = await startStack(t);
+		await s.post.registry.setAfterMergeDeploy("demo", { branch: "main", task: "copy dist to host-a and restart", resources: ["host-a", "db"] });
+		const mergedAt = new Date().toISOString();
+		/** What `gh pr view <ref>` answers for `jobId`'s PR: merged into main by default. */
+		const answer = (ref: string, branch: string, over: Record<string, unknown> = {}, head = "a".repeat(40)) =>
+			s.setGh({ routes: [{ match: `pr view ${ref}`, replies: [json({ number: Number(ref.split("/").pop()), url: ref.startsWith("https://") ? ref : `https://github.com/example/demo/pull/${ref}`,
+				state: "MERGED", mergedAt, mergeCommit: { oid: MERGE }, headRefName: branch, headRefOid: head, baseRefName: "main", ...over })] }] });
+		const nothing = (jobId: string) => assert.equal(existsSync(join(s.home, paths.mergeFile(jobId))), false, `${jobId} has no receipt`);
+		const live = await s.held("merge receipt", 91);
+		const prStatus = () => s.post.fleet.get(live.jobId)?.receipts?.filter((receipt) => receipt.kind === "pr").map((receipt) => receipt.status);
+
+		// Not merged, merged with no merge commit, another branch's PR, or gh unreachable: nothing is written or changed.
+		answer(live.prUrl, live.jobId, { state: "OPEN", mergeCommit: null }, live.head);
+		await assert.rejects(s.post.recordMerge({ jobId: live.jobId }), /reports .* as open, not MERGED — nothing is recorded/);
+		answer(live.prUrl, live.jobId, { mergeCommit: null }, live.head);
+		await assert.rejects(s.post.recordMerge({ jobId: live.jobId }), /merged but names no merge commit/);
+		answer(live.prUrl, "someone-elses-branch", {}, live.head);
+		await assert.rejects(s.post.recordMerge({ jobId: live.jobId }), /is not this job's delivery/);
+		s.setGh({ routes: [{ match: "pr view", replies: [{ code: 1, stderr: "gh: command not found" }] }] });
+		await assert.rejects(s.post.recordMerge({ jobId: live.jobId }), (error: Error) => {
+			assert.match(error.message, /could not read PR/);
+			assert.match(error.message, new RegExp(`cp_teardown ${live.jobId} force`), "force stays the exit for the unprovable case");
+			assert.ok(error.message.indexOf("git evidence") < error.message.indexOf("force"), "git evidence is offered first, force last");
+			return true;
+		});
+		nothing(live.jobId);
+		assert.deepEqual(prStatus(), ["open"], "a refusal changes nothing");
+
+		// Merged and its head branch deleted: the receipt, the PR marked merged once, one journal event, one deploy job.
+		execFileSync("git", ["-C", s.remote, "branch", "-D", live.jobId], { stdio: "ignore" });
+		answer(live.prUrl, live.jobId, {}, live.head);
+		const result = await s.post.recordMerge({ jobId: live.jobId, strategy: "squash" });
+		assert.equal(result.recorded, true);
+		assert.deepEqual([result.receipt.merge_commit_sha, result.receipt.head_sha, result.receipt.head_branch_deleted, result.receipt.strategy, result.receipt.bound], [MERGE, live.head, true, "squash", undefined]);
+		assert.match(formatMerge(result), new RegExp(`cp_teardown ${live.jobId} can now pass without force`));
+		assert.equal(readMergeReceipt(s.home, live.jobId)?.pr_url, live.prUrl);
+		assert.deepEqual(prStatus(), ["merged"], "the PR receipt is updated, never duplicated");
+		assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "merge_recorded").length, 1);
+		const [deploy, ...extra] = deployJobs(s.post, live.jobId);
+		assert.ok(deploy && extra.length === 0, "exactly one deploy job");
+		for (const label of ["ops:deploy", "resource:host-a", "resource:db", "risk:high", "kind:research", "delivery:local", "project:demo"]) assert.ok(deploy.labels.includes(label), label);
+		assert.deepEqual([deploy.blocked_by, deploy.status], [[live.jobId], "open"]);
+		const taskFile = join(s.home, paths.afterMergeTaskFile(live.jobId));
+		assert.equal(deploy.notes, `task_file: ${taskFile}`);
+		const text = readFileSync(taskFile, "utf8");
+		for (const fact of [MERGE, live.prUrl, "branch: main", "copy dist to host-a and restart", `deployed ${MERGE.slice(0, 12)}`, "rolled back:"]) assert.ok(text.includes(fact), fact);
+		assert.match(result.after_merge ?? "", new RegExp(`after-merge deploy ${deploy.id} created \\(blocked until ${live.jobId} closes; no covering grant — dispatch needs a grant\\): cp_dispatch ${deploy.id} task_file=.* base=main`));
+		assert.deepEqual({ ...afterMergeRecord(s.home, live.jobId), recorded_at: undefined }, {
+			schema_version: 1, job_id: live.jobId, merge_commit_sha: MERGE, base_branch: "main", status: "created", deploy_job_id: deploy.id, coverage: "none", task_file: taskFile, recorded_at: undefined,
+		});
+		assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "after_merge_deploy").length, 1);
+		assert.equal(s.post.fleet.get(deploy.id), undefined, "created, never dispatched");
+		const preview = await s.post.previewDispatch({ jobId: deploy.id, task: "Deploy it." });
+		assert.deepEqual([preview.profile, "routing" in preview ? preview.routing.risk : undefined], ["ops", "high"], "a deploy is ops and risk:high, never exempt");
+
+		// Idempotent: a second call reads the receipt back; a pre-forge receipt with no forge block still reads.
+		const again = await s.post.recordMerge({ jobId: live.jobId });
+		assert.deepEqual([again.recorded, again.receipt.merge_commit_sha, "after_merge" in again], [false, MERGE, false]);
+		assert.equal(result.receipt.forge?.provider, "github");
+		const { forge: _forge, ...legacy } = result.receipt;
+		writeFileSync(join(s.home, paths.mergeFile(live.jobId)), JSON.stringify(legacy));
+		assert.equal((await s.post.recordMerge({ jobId: live.jobId })).receipt.head_sha, live.head, "a pre-forge receipt is still valid");
+		// A crash before the after-merge record resumes onto the same job; a dropped deploy job still holds the key.
+		rmSync(join(s.home, paths.afterMergeFile(live.jobId)));
+		assert.match((await s.post.recordMerge({ jobId: live.jobId })).after_merge ?? "", new RegExp(`after-merge deploy ${deploy.id} created`));
+		await s.post.ledger().drop(deploy.id, "operator dropped it");
+		rmSync(join(s.home, paths.afterMergeFile(live.jobId)));
+		await s.post.recordMerge({ jobId: live.jobId });
+		assert.equal(deployJobs(s.post, live.jobId).length, 1, "a closed deploy job still holds the key");
+		const down = await s.post.tearDown(live.jobId);
+		assert.deepEqual([down.torn_down, down.reason], [true, "merged"], JSON.stringify(down.failure));
+
+		// A bound job's receipt names the PR's head branch; a job with no PR receipt must be told which PR.
+		const bound = await s.seed("bound job", { branch: "cp-b55w", bound: true });
+		answer(bound.prUrl as string, "cp-b55w");
+		const boundResult = await s.post.recordMerge({ jobId: bound.jobId });
+		assert.deepEqual([boundResult.receipt.head_branch, boundResult.receipt.bound, readMergeReceipt(s.home, bound.jobId)?.bound], ["cp-b55w", true, true]);
+		const bare = await s.seed("no pr receipt", { prUrl: false });
+		await assert.rejects(s.post.recordMerge({ jobId: bare.jobId }), /carries no PR receipt/);
+		answer("77", bare.jobId);
+		assert.equal((await s.post.recordMerge({ jobId: bare.jobId, pr: "77" })).recorded, true);
+		assert.equal(s.post.fleet.get(bare.jobId)?.receipts?.[0]?.status, "merged", "with no prior receipt there is one to add");
+		await assert.rejects(s.post.recordMerge({ jobId: "cp-unknown" }), /no fleet record/);
+
+		// Skipped: another base, no base, a merge before the opt-in; a project with no opt-in is silent.
+		for (const [title, over, reason] of [
+			["into develop", { baseRefName: "develop" }, /merged into develop, not the deploy branch main/],
+			["no base", { baseRefName: undefined }, /names no base branch/],
+			["before opt-in", { mergedAt: "2020-01-01T00:00:00Z" }, /before after_merge_deploy was enabled/],
+		] as const) {
+			const job = await s.seed(title);
+			answer(job.prUrl as string, job.branch, over);
+			assert.match((await s.post.recordMerge({ jobId: job.jobId })).after_merge ?? "", reason, title);
+			assert.deepEqual([afterMergeRecord(s.home, job.jobId).status, deployJobs(s.post, job.jobId).length], ["skipped", 0], title);
+			assert.match(afterMergeRecord(s.home, job.jobId).reason, reason);
+		}
+		await s.post.registry.register({ name: "plain", clone_url: "https://github.com/example/plain", delivery: "pr" });
+		const plain = await s.seed("no opt-in", { project: "plain" });
+		answer(plain.prUrl as string, plain.branch);
+		assert.equal("after_merge" in (await s.post.recordMerge({ jobId: plain.jobId })), false);
+		assert.equal(existsSync(join(s.home, paths.afterMergeFile(plain.jobId))), false);
+
+		// Coverage is cp_dispatch's own grant selection: a grant naming the merged job enrolls, its cap refuses,
+		// a project-wide grant covers, and one that excludes research does not.
+		const issue = (extra: { job_ids?: string[]; job_cap?: number; ask_on?: "risk:high"[]; exclusions?: { job_kinds: "research"[] } } = {}) =>
+			s.post.mandates.issue({ projects: ["demo"], objective: "ship and deploy", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: extra.job_cap ?? 10, ...extra });
+		const covered = async (title: string, grant: (jobId: string) => { id: string }, line: (grantId: string) => RegExp) => {
+			const job = await s.seed(title);
+			const issued = grant(job.jobId);
+			answer(job.prUrl as string, job.branch);
+			assert.match((await s.post.recordMerge({ jobId: job.jobId })).after_merge ?? "", line(issued.id), title);
+			const deployId = deployJobs(s.post, job.jobId)[0]?.id as string;
+			return { job: job.jobId, grant: issued.id, deployId, record: afterMergeRecord(s.home, job.jobId) };
+		};
+		const named = await covered("named grant", (jobId) => issue({ job_ids: [jobId] }), (id) => new RegExp(`enrolled in ${id}`));
+		assert.deepEqual([s.post.mandates.require(named.grant).job_ids, named.record.coverage, named.record.mandate_id], [[named.job, named.deployId], "enrolled", named.grant]);
+		s.post.mandates.revoke(named.grant);
+		const capped = await covered("capped grant", (jobId) => issue({ job_ids: [jobId], job_cap: 1 }), () => /no covering grant — dispatch needs a grant \(cannot enroll .*job cap 1 reached\)/);
+		assert.deepEqual([capped.record.coverage, s.post.mandates.require(capped.grant).job_ids], ["none", [capped.job]]);
+		s.post.mandates.revoke(capped.grant);
+		const wide = await covered("project-wide grant", () => issue({ ask_on: ["risk:high"] }), (id) => new RegExp(`covered by project-wide ${id}`));
+		assert.equal(wide.record.coverage, "project_wide");
+		assert.equal((await s.post.previewDispatch({ jobId: wide.deployId, task: "Deploy it." })).mandate_gate, "would ask: risk:high", "the deploy's dispatch stays risk:high-gated");
+		s.post.mandates.revoke(wide.grant);
+		const excluded = await covered("research excluded", () => issue({ exclusions: { job_kinds: ["research"] } }), () => /no covering grant — dispatch needs a grant/);
+		assert.equal(excluded.record.coverage, "none");
+	},
+);
+
+test(
+	"landing: cp_merged reads a GitLab MR only from the project's own GitLab with its token; a squash, or a fast-forward git sees on the target, is recorded and anything else records nothing",
+	{ skip: SKIP, timeout: 600_000 },
+	async (t) => {
+		const token = "glpat-canary-0123456789";
+		const s = await startStack(t, { env: () => ({ NODE_TLS_REJECT_UNAUTHORIZED: "0", GIT_SSL_NO_VERIFY: "1", CP_E2E_GITLAB_TOKEN: token }) });
+		const lab = await startFakeGitlab(t, s.remote);
+		await s.project("lab", { cloneUrl: `${lab.web}/o/lab.git`, forge: { kind: "gitlab", web_base_url: lab.web, token_env: "CP_E2E_GITLAB_TOKEN" } });
+		const mrUrl = (iid: number, path = "o/lab") => `${lab.web}/${path}/-/merge_requests/${iid}`;
+		/** The MR the fake GitLab answers for `iid`: merged into main from `branch`, no landing commit unless `over` names one. */
+		const mr = (iid: number, branch: string, over: Record<string, unknown> = {}) => {
+			const head = (over.sha as string | undefined) ?? "e".repeat(40);
+			lab.mrs[iid] = { body: { id: 9000 + iid, iid, project_id: 42, source_project_id: 42, target_project_id: 42, state: "merged", source_branch: branch, target_branch: "main", sha: head,
+				diff_refs: { head_sha: head, base_sha: "d".repeat(40), start_sha: "d".repeat(40) }, merge_commit_sha: null, squash_commit_sha: null, merged_at: "2026-08-31T15:55:07.123Z", web_url: mrUrl(iid), ...over } };
+		};
+		const refused = async (jobId: string, pattern: RegExp) => {
+			await assert.rejects(s.post.recordMerge({ jobId }), (error: Error) => (assert.match(error.message, pattern), assert.doesNotMatch(error.message, new RegExp(token)), true));
+			assert.equal(readMergeReceipt(s.home, jobId), undefined, `${jobId} has no receipt`);
+		};
+
+		// A squash MR: its squash commit, provider and project; the MR IID is the number; milliseconds are normalised.
+		const squash = await s.seed("gitlab squash", { project: "lab", prUrl: mrUrl(7) });
+		mr(7, squash.branch, { squash_commit_sha: "f".repeat(40), squash: true });
+		const recorded = (await s.post.recordMerge({ jobId: squash.jobId })).receipt;
+		assert.deepEqual(
+			[recorded.merge_commit_sha, recorded.strategy, recorded.pr_number, recorded.merged_at, recorded.recorded_by, recorded.forge, recorded.head_branch_deleted],
+			["f".repeat(40), "squash", 7, "2026-08-31T15:55:07Z", "gitlab api", { provider: "gitlab", project_url: `${lab.web}/o/lab` }, true],
+		);
+		const recordedEvents = () => readRunEvents(s.home, squash.jobId).filter((event) => event.type === "merge_recorded");
+		assert.equal((recordedEvents()[0]?.payload as { provider?: string } | undefined)?.provider, "gitlab");
+		assert.deepEqual(lab.asked, [{ path: "/api/v4/projects/o%2Flab/merge_requests/7", token }], "one GET of the project's own MR, its token in PRIVATE-TOKEN");
+		assert.deepEqual(s.ghCalls().filter((call) => call.startsWith("pr view")), [], "GitLab is never asked through gh");
+
+		// A crash before the fleet patch is repaired with no second event; a stored receipt for another branch is refused.
+		await s.post.fleet.patch(squash.jobId, { receipts: [{ kind: "pr", status: "open", title: "PR", url: mrUrl(7) }] });
+		const repaired = await s.post.recordMerge({ jobId: squash.jobId });
+		assert.deepEqual([repaired.recorded, repaired.receipt_status_updated, s.post.fleet.get(squash.jobId)?.receipts?.[0]?.status, recordedEvents().length], [false, true, "merged", 1]);
+		await s.post.fleet.patch(squash.jobId, { branch: "cp-other" });
+		await assert.rejects(s.post.recordMerge({ jobId: squash.jobId }), /discharges nothing here/);
+
+		// A merge commit wins over a squash commit and is taken as named (no reachability asked); alone it infers no strategy.
+		const both = await s.seed("gitlab merge and squash", { project: "lab", prUrl: mrUrl(10) });
+		mr(10, both.branch, { merge_commit_sha: "a".repeat(40), squash_commit_sha: "f".repeat(40) });
+		const viaMerge = (await s.post.recordMerge({ jobId: both.jobId })).receipt;
+		assert.deepEqual([viaMerge.merge_commit_sha, viaMerge.head_sha, viaMerge.base_branch, viaMerge.strategy], ["a".repeat(40), "e".repeat(40), "main", "squash"]);
+		const plainMerge = await s.seed("gitlab merge commit", { project: "lab", prUrl: mrUrl(11) });
+		mr(11, plainMerge.branch, { merge_commit_sha: "a".repeat(40) });
+		const viaPlain = (await s.post.recordMerge({ jobId: plainMerge.jobId })).receipt;
+		assert.deepEqual([viaPlain.merge_commit_sha, viaPlain.strategy], ["a".repeat(40), "unknown"]);
+
+		// A fast-forward MR names no landing commit: its head counts only once git sees it on origin's target.
+		const ff = await s.seed("gitlab fast-forward", { project: "lab", prUrl: mrUrl(9) });
+		mr(9, ff.branch, { sha: "1".repeat(40) });
+		await refused(ff.jobId, /merged but names no merge commit/);
+		const tip = advanceBase(s.repo, "docs/ff.md", "# fast-forwarded\n");
+		mr(9, ff.branch, { sha: tip });
+		const fastForward = await s.post.recordMerge({ jobId: ff.jobId });
+		assert.deepEqual([fastForward.receipt.merge_commit_sha, fastForward.receipt.strategy, s.post.fleet.get(ff.jobId)?.receipts?.[0]?.status], [tip, "unknown", "merged"]);
+
+		// An answer naming another project's MR is a mismatch, and nothing is recorded.
+		const other = await s.seed("gitlab mismatch", { project: "lab", prUrl: mrUrl(8) });
+		mr(8, other.branch, { web_url: mrUrl(8, "o/other") });
+		await refused(other.jobId, /could not read PR .*\(mismatch: /);
+		assert.ok(lab.asked.every((request) => request.token === token));
+	},
+);
+
+test(
+	"landing: cp_teardown passes a deleted branch as landed_by_git when origin's base holds its content (merge, squash, rebase, a later edit, literal odd paths) and keeps the lease when it does not",
+	{ skip: SKIP, timeout: 600_000 },
+	async (t) => {
+		const s = await startStack(t);
+		const push = (branch: string, work: string) => `${work} && git add -A && git commit -q -m work && git push -q -u origin ${branch}`;
+		const local = (title: string, work: (branch: string) => string) => s.held(title, 0, { delivery: "local", command: work });
+		const mainTip = () => git(s.remote, "rev-parse", "refs/heads/main");
+		const ancestor = (a: string, b: string) => spawnSync("git", ["-C", s.remote, "merge-base", "--is-ancestor", a, b]).status === 0;
+		const landed = async (jobId: string, method: string) => {
+			const down = await s.post.tearDown(jobId);
+			assert.deepEqual([down.torn_down, down.reason, down.landing?.method], [true, "landed_by_git", method], JSON.stringify(down.failure));
+			assert.equal(readRunEvents(s.home, jobId).filter((event) => event.type === "teardown_landing_proven").length, 1);
+			return down.landing as NonNullable<typeof down.landing>;
+		};
+
+		// An ordinary merge commit keeps the head an ancestor of the base.
+		const merged = await local("merge commit", (b) => push(b, "printf 'm1\\n' > src/merge.ts"));
+		mergeAndDeleteHead(s.repo, merged.jobId);
+		await landed(merged.jobId, "ancestry");
+
+		// Two commits squashed into one new sha between unrelated base commits, then a later edit of a touched file:
+		// an older base commit at or after the squash is the witness, every changed path (a deletion too) is compared.
+		const squashed = await local("multi-commit squash", (b) =>
+			push(b, "printf 'b2\\n' > src/b.ts && git commit -qam one && printf 'n1\\n' > src/new.ts && git rm -q src/a.ts"));
+		advanceBase(s.repo, "docs/before.md", "# before\n");
+		const squash = squashMergeAndDeleteHead(s.repo, squashed.jobId);
+		advanceBase(s.repo, "docs/after.md", "# after\n");
+		advanceBase(s.repo, "src/b.ts", "b3\n");
+		const viaSquash = await landed(squashed.jobId, "path_tree");
+		assert.deepEqual([viaSquash.paths, viaSquash.base_sha], [3, mainTip()], "every changed path; the base sha is origin's own");
+		assert.notEqual(viaSquash.witness, viaSquash.base_sha);
+		assert.ok(ancestor(squash, viaSquash.witness) && ancestor(viaSquash.witness, viaSquash.base_sha), "a reachable witness at or after the squash");
+
+		// A rebase onto a base that moved first replays the head as a new sha.
+		const rebased = await local("rebase", (b) => push(b, "printf 'c1\\n' > src/c.ts"));
+		advanceBase(s.repo, "docs/first.md", "# first\n");
+		const replayed = rebaseMergeAndDeleteHead(s.repo, rebased.jobId);
+		assert.notEqual(replayed, rebased.head);
+		assert.equal((await landed(rebased.jobId, "path_tree")).witness, replayed);
+
+		// Path names with spaces, newlines and pathspec magic are compared literally: `star*[ab].txt` must not also
+		// compare the base's own `starXa.txt`, which the head never had.
+		const odd = await local("odd paths", (b) =>
+			push(b, "mkdir -p 'dir with space' && printf 'x\\n' > $'dir with space/new\\nline.txt' && printf 'y\\n' > 'star*[ab].txt' && printf 'z\\n' > ':(glob)lead.txt'"));
+		advanceBase(s.repo, "starXa.txt", "base only\n");
+		squashMergeAndDeleteHead(s.repo, odd.jobId);
+		advanceBase(s.repo, "docs/odd.md", "# odd\n");
+		assert.equal((await landed(odd.jobId, "path_tree")).paths, 3);
+
+		// A stale tracking ref that held the squash is not the base origin advertises: it keeps the lease.
+		const stale = await local("stale tracking ref", (b) => push(b, "printf 's1\\n' > src/stale.ts"));
+		const staleSquash = squashMergeAndDeleteHead(s.repo, stale.jobId);
+		git(stale.worktree, "fetch", "--quiet", "origin");
+		assert.equal(git(stale.worktree, "rev-parse", "refs/remotes/origin/main"), staleSquash, "the worktree's tracking ref holds the squash");
+		git(s.remote, "update-ref", "refs/heads/main", `${staleSquash}^`);
+		advanceBase(s.repo, "docs/elsewhere.md", "# moved elsewhere\n");
+		const unpushed = async (jobId: string, label: string) => {
+			const down = await s.post.tearDown(jobId);
+			assert.deepEqual([down.torn_down, down.failure?.code], [false, "unpushed"], `${label}: ${JSON.stringify(down)}`);
+			assert.match(down.failure?.message ?? "", /survives here only as a stale remote-tracking ref .* and origin\/main does not contain its content/, label);
+		};
+		await unpushed(stale.jobId, "stale tracking ref");
+
+		// One near miss at a time on origin (whitespace, a binary byte, the mode, a symlink, an unlanded delete, half
+		// a rename) keeps the lease; only the base that carries every path exactly as HEAD has it lands.
+		const exact = "printf 'x = 1;\\n' > src/a.ts && printf '\\000\\001\\002' > img.bin && printf 'echo hi\\n' > run.sh && chmod 755 run.sh && ln -sfn src/a.ts link && rm -f src/b.ts && printf 'b1\\n' > src/moved.ts";
+		const near = await local("near misses", (b) => push(b, exact));
+		git(s.remote, "branch", "-D", near.jobId);
+		for (const [label, miss] of [
+			["whitespace", "printf 'x =  1;\\n' > src/a.ts"],
+			["binary byte", "printf '\\000\\001\\003' > img.bin"],
+			["mode", "chmod 644 run.sh"],
+			["symlink as a file", "rm link && printf 'src/a.ts' > link"],
+			["delete not landed", "printf 'b1\\n' > src/b.ts"],
+			["half a rename", "rm src/moved.ts"],
+		] as const) {
+			landOnOrigin(s.repo, `${exact} && ${miss}`, label);
+			await unpushed(near.jobId, label);
+		}
+		landOnOrigin(s.repo, `${exact} && printf 'u\\n' > unrelated.md`, "exact, beside an unrelated file");
+		assert.equal((await landed(near.jobId, "path_tree")).paths, 6);
 	},
 );
