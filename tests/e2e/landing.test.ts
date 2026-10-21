@@ -2021,7 +2021,7 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 		assert.equal(s.provider.requests("foreign-armed").length, 0);
 		armState("success");
 		await waitFor(() => ({ requests: s.provider.requests("foreign-armed"), job: s.post.ledger().read().jobs.find((row) => row.id === armed.id)! }), (value) => value.requests.length === 1 || value.job.status === "closed", { timeoutMs: 60_000, what: "armed reviewer released by real CI timer" });
-		assert.equal((await s.post.ledger().show(armed.id)).status, "in_progress", JSON.stringify(await s.post.ledger().show(armed.id)));
+		await waitFor(() => s.post.ledger().read().jobs.find((row) => row.id === armed.id)!, (row) => row.status === "in_progress", { timeoutMs: 10_000, what: "armed start journals in_progress" });
 		assert.match(JSON.stringify(s.provider.requests("foreign-armed")[0]!.body), /CI green on aaaaaaaaaaaa/);
 		assert.equal(readRunEvents(s.home, armed.id).filter((event) => event.type === "spawned").length, 1, "one armed dispatch starts once");
 		await waitFor(stderr, (text) => text.includes(`foreign PR ${armed.external_ref} CI green on aaaaaaaaaaaa`), { timeoutMs: 10_000, what: "foreign CI notice reaches operator stderr" });
