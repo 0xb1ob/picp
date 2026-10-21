@@ -1434,7 +1434,7 @@ export class Integrator {
 		const remoteRun = await this.#run(worktree, "git", ["ls-remote", "--heads", "origin", branch]);
 		let bad = unread(localRun, "could not read the worktree HEAD (git rev-parse)", true) ??
 			unread(remoteRun, `origin did not name a tip for ${branch} (git ls-remote)`, false);
-		if (bad) return bad; // nonzero exit is "cannot tell", whatever stdout holds
+		if (bad) return bad; // nonzero = "cannot tell"; ls-remote stays failed:false (pinned: tests/integrate.test.ts:2442)
 		const local = localRun.stdout.trim(), remote = remoteRun.stdout.trim().split(/\s+/)[0] ?? "";
 		if (remote.length === 0) {
 			// Origin could not be asked, or does not have the branch. That is a

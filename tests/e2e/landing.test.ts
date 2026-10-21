@@ -3150,7 +3150,7 @@ test("landing: unreadable worktree status preserves uncommitted content", { skip
 		chmodSync(wrapper, 0o755);
 		const out = await s.integrate(live.jobId);
 		assert.match(JSON.stringify(out.record), fault.detail);
-		if (fault.cmd === "ls-remote") assert.doesNotMatch(JSON.stringify(out.record), /sync/, "an unreachable origin is left alone, never a sync failure");
+		if (fault.cmd === "ls-remote") assert.equal(out.record.step, "teardown", "an unreachable origin is left alone, never a sync failure");
 		assert.equal(readFileSync(join(live.worktree, "change.txt"), "utf8"), "precious uncommitted content\n", `unreadable ${fault.cmd} must never authorize destruction of uncommitted work`);
 	});
 });
