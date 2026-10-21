@@ -13,7 +13,7 @@
 	},
 	"piCompat": {
 		"min": "1.0.1",
-		"testedMax": "1.0.4"
+		"testedMax": "1.3.0"
 	},
 	"pi": {
 		"extensions": [
