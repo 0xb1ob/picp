@@ -20,6 +20,40 @@ m1 always runs. m2, m3 and the `tests/pipeline.test.ts` lease tests self-skip
 unless `treehouse` is on `PATH`; CI installs it, and `tests/ci-host-tools.test.ts`
 fails the run if the install did not land on `PATH`.
 
+## Installer sandbox (#375)
+
+`npm run e2e:install -- --scenario fresh` (or `prerequisites`, `rerun`, `all`; `--verbose` prints the whole
+timestamped container output) installs this checkout for real in a disposable Docker container:
+`curl … | sh` of `bin/cp-bootstrap` → `scripts/install.sh` → `src/service/install.ts` → install-tools →
+cp-daemon (detached) → the parent host's `/doctor`, then `cp-daemon status` and the viewer's `/healthz`.
+`tests/e2e/installer.test.ts` runs the same scenarios when `CP_INSTALL_E2E=1`; CI's `install sandbox` job sets
+it and fails when Docker is missing, while `npm test` collects the file and skips it.
+
+| Scenario | Asserts |
+|---|---|
+| fresh | `--dry-run` writes no home; a full install exits 0 with `ok: doctor`, one cp-daemon, viewer `200 ok` |
+| prerequisites | bootstrap refuses no node and node 22 before cloning; `bin/cp-install` with either exits non-zero and writes no `data/daemon.json` (it still clones first: recorded, fixed in a later PR) |
+| rerun | same-home rerun prints no `changed:` line; an upgrade fast-forwards and keeps the parent pin; an edited wrapper is refused without `--force` and replaced with it |
+
+**Isolation.** Nothing on the host is written or mounted: the driver streams a tar of the tracked and
+untracked-unignored files (your edits; never `.git` or `node_modules`) into `docker run -i --rm --network none`,
+and the container commits them to a local bare remote that `CP_REPO_URL` points at, so bootstrap clones your code.
+The container's own `HOME` is the disposable home; `~/.pi/agent/models.json` registers the mock provider and
+stand-ins for every model the routing defaults and profiles name (the sandbox's equivalent of `pi /login`; no
+credential exists anywhere). The container is removed by its own name in a `finally`, timeout included.
+
+**Cache.** `tests/fixtures/install/Dockerfile` (image `picp-install-sandbox:local`) installs what a fresh user
+brings — git, gh, node 24, treehouse, pi at the lockfile's version — and only *caches* what cp-install installs
+itself (the app's `npm ci`, the pi-lens tools, the worker pi packages), so those real install paths run offline.
+Building needs the network; the lockfile layer is last, so a lockfile change rebuilds only that layer. Remove
+the image with `docker image rm picp-install-sandbox:local`.
+
+**Host requirements.** A Docker daemon the user can reach (no sudo), node 24 and this checkout's `npm ci`.
+
+**Measured** (Linux, Docker 29.9, warm image, 2026-10): cold image build 73 s, warm 2 s; fresh 33 s
+(full install 29.6 s: npm ci 4.1 s, worker pi packages 6.1 s, daemon start to ready 5.8 s, parent doctor 7.0 s);
+prerequisites 3 s; rerun 53 s (an idempotent rerun 3.9 s, `--force` 8.3 s for its npm ci).
+
 ## E2E is the default for behavioral acceptance
 
 New behavioral acceptance (from the brief or a human, or a reproducing regression for a reported bug) lands here, through
