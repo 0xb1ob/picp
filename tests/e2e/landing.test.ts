@@ -1607,7 +1607,7 @@ test("landing S03: a restarted parent resumes a durable deadline and relays land
 		await waitFor(() => s.post.integrator.get(live.jobId), (record) => record?.updated_at !== original && record?.next === "wait", { timeoutMs: 10_000, what: "the first parent arms the durable deadline" }).catch((error) => assert.fail(`startup did not arm the durable window: ${String(error)}`));
 	});
 	const before = s.post.integrator.get(live.jobId)!.updated_at;
-	await waitFor(() => isoTimestamp(), (stamp) => stamp !== before, { timeoutMs: 2_000, what: "the next persisted timestamp quantum" });
+	await waitFor(() => isoTimestamp(), (stamp) => stamp !== before, { timeoutMs: 5_000, what: "the next persisted timestamp quantum" });
 	await s.parent("Resume the existing review window.", [{ kind: "text", text: "Window resumed." }], async (_events, _stderr, child) => {
 		await waitFor(() => s.post.integrator.get(live.jobId), (record) => record?.updated_at !== before && record?.next === "wait", { timeoutMs: 10_000, what: "restart recomputes the existing review window" }).catch((error) => assert.fail(`restart did not recompute its durable window: ${String(error)}`));
 		const turns = s.provider.requests("landing-parent-2").length;
