@@ -72,7 +72,14 @@ ask-0088e0332d00, 2026-10-21.
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
 | S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting and executed controls](testing-migration-s14.md): 30 mapped, 3 retained verbatim with unreachable-input evidence, 0 pending | 4 original paths retired (3 mixed moved/split) | +3 retained files | +6 e2e declarations |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
-| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 16 mapped, 3 retained, 18 pending across five whole files; eight static e2e declarations including six review variants | 4 originals retired, retained replacements earn no deletion credit | -4 originals, +2 retained, +3 e2e files = +1 net test file | -14 original, +3 retained, +8 static e2e = -3 net; conversion in progress |
+| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 16 mapped, 3 retained, 18 pending across five whole files; eight static e2e declarations including six review variants | 4 original paths removed; 3 declarations retained in 2 replacements earn no deletion credit | 378 → 379 (origin/main eb8a973f → S19 HEAD) | 4,224 → 4,221 static declarations; conversion in progress |
+
+S19 carry-in (main session carry-in, S14 review 1): baseline `deleted` labels describe absent original paths.
+The checker requires this even when declarations move: `scripts/test-migration-check.ts` rejects an absent
+baseline path marked `retained` and has no `moved` disposition. The three moved declarations remain explicitly
+`retained` in the assertion map and their two existing replacement files are incoming retained evidence;
+they earn no declaration deletion credit. All 17 S19 controls have a regression row, SHA-256, patch and matching
+closing marker. The totals above count all tracked test files/static declarations at the named base and HEAD.
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -1508,6 +1515,7 @@ index 2dcc135..008c3bd 100644
 -		ports.sent.add(escalation.id);
 +		// S19 negative control: forget the attempted delivery.
 ```
+<!-- /patch:S19-NC-2 -->
 
 <!-- patch:S19-NC-3 -->
 ```diff
@@ -1517,6 +1525,7 @@ index 2dcc135..008c3bd 100644
 -		.filter((item) => !inOutbox(ids, item.id));
 +		.filter(() => true);
 ```
+<!-- /patch:S19-NC-3 -->
 
 <!-- patch:S19-NC-4 -->
 ```diff
@@ -1526,6 +1535,7 @@ index 2dcc135..008c3bd 100644
 -	return escalationRelay(home, escalation, `${escalation.id} (${escalation.kind}) — ${escalation.question}`);
 +	return escalationRelay(home, escalation, "S19 mutation removed the decision text");
 ```
+<!-- /patch:S19-NC-4 -->
 
 <!-- patch:S19-NC-5 -->
 ```diff
@@ -1553,6 +1563,7 @@ index 2dcc135..008c3bd 100644
 +		return due.map((item) => item.id);
 +	} catch { return []; }
 ```
+<!-- /patch:S19-NC-5 -->
 | S19-1 | `tests/cp-bridge-reattach.test.ts` | 6aef97e30fffc725656181ccda94e2a83732c96e | S19-1 | S19-NC-1 | 3d33e3f2ca7b40c98fb267e59d6c89d0a6a28465303a890559c1f49288e3f7ea | timeout waiting for bridge reattaches to replacement host | pass |
 
 <!-- patch:S19-NC-1 -->
@@ -1563,6 +1574,7 @@ index 2dcc135..008c3bd 100644
 -			reattach.schedule();
 +			// S19 negative control: skip reconnect after host closure.
 ```
+<!-- /patch:S19-NC-1 -->
 | S19-6 | `tests/bridge-reattach.test.ts` | c41dc291d93f7c1759b3c79db8d07bbf7805208a | S19-3 | S19-NC-6 | 144b1e6d4522172d680a1093af116c565ff6dce64257af08f3ff11e6fdde97b1 | retry delay must cap at 30 seconds: 64009 | pass |
 | S19-7 | `tests/bridge-reattach.test.ts` | c41dc291d93f7c1759b3c79db8d07bbf7805208a | S19-3 | S19-NC-7 | dc7f844a16a4c94e976114e44dec581e28cdaafd4e90a992ec296acf9c0f9fe6 | timeout waiting for silent established host is probed and detached | pass |
 | S19-8 | `tests/deferred-recheck.test.ts` | 534cd14d952af040f2385fd92f3ee968a810ee62 | S19-4 | S19-NC-8 | 6560446f04e528f94725566c2e0a40f2f36c64a0b4e88481ccc51050387437fc | decision must already be open when verdict reaches parent | pass |
@@ -1583,6 +1595,7 @@ index 4c2760a..de45ec3 100644
  			}, delay);
  			timer.unref();
 ```
+<!-- /patch:S19-NC-6 -->
 <!-- patch:S19-NC-7 -->
 ```diff
 diff --git a/src/bridge-reattach.ts b/src/bridge-reattach.ts
@@ -1599,6 +1612,7 @@ index 4c2760a..e1a68ae 100644
  			return currentPid() === client.hostPid;
  		} catch {
 ```
+<!-- /patch:S19-NC-7 -->
 <!-- patch:S19-NC-8 -->
 ```diff
 diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
@@ -1615,6 +1629,7 @@ index 3e07e24..25fa177 100644
  
  /**
 ```
+<!-- /patch:S19-NC-8 -->
 | S19-9 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-5 | S19-NC-9 | 829276d0477bbe6c34928c5e7da097c8579e361e3cb8298f3fdf9f34e89967e6 | custom markers must not preserve a wake behind pi's cleared queue: actual 3, expected 2 | pass |
 | S19-10 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-6 | S19-NC-10 | 5a32eeffd70d0d397889d0254c1b06e654f311bd33382bac3f68aae9a4b03111 | clean reply releases held wakes despite earlier queue clear: timeout | pass |
 | S19-11 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-6 | S19-NC-11 | eb08f11877bf5a77b76d299494c69f2e701481ad443ffd9c4107b3a601488d3b | clean reply releases held wakes despite earlier queue clear: timeout | pass |
@@ -1634,6 +1649,7 @@ index d9d0955..596a1c2 100644
 @@ -34 +33,0 @@ export class SendFirstGate<Wake> {
 -		if (role !== "user") return;
 ```
+<!-- /patch:S19-NC-9 -->
 <!-- patch:S19-NC-10 -->
 ```diff
 diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
@@ -1644,6 +1660,7 @@ index d9d0955..1f1ef4b 100644
 -		if (kind === "answered" || this.#unanswered.size === 0) return "send";
 +		return "send";
 ```
+<!-- /patch:S19-NC-10 -->
 <!-- patch:S19-NC-11 -->
 ```diff
 diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
@@ -1654,6 +1671,7 @@ index d9d0955..24e80a8 100644
 -		if (cleanSegmentEnd(event)) this.#unanswered.clear();
 +		this.#unanswered.clear();
 ```
+<!-- /patch:S19-NC-11 -->
 <!-- patch:S19-NC-12 -->
 ```diff
 diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
@@ -1664,6 +1682,7 @@ index d9d0955..fd03475 100644
 -		if (kind === "answered" || this.#unanswered.size === 0) return "send";
 +		if (this.#unanswered.size === 0) return "send";
 ```
+<!-- /patch:S19-NC-12 -->
 <!-- patch:S19-NC-13 -->
 ```diff
 diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
@@ -1673,6 +1692,7 @@ index d9d0955..5e7d39b 100644
 @@ -45 +44,0 @@ export class SendFirstGate<Wake> {
 -		this.#unanswered.clear();
 ```
+<!-- /patch:S19-NC-13 -->
 <!-- patch:S19-NC-14 -->
 ```diff
 diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
@@ -1683,6 +1703,7 @@ index d9d0955..53e294e 100644
 -		if (this.#held.length === 0) this.#since = this.#now();
 +		this.#since = this.#now();
 ```
+<!-- /patch:S19-NC-14 -->
 <!-- patch:S19-NC-15 -->
 ```diff
 diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
@@ -1693,6 +1714,7 @@ index d9d0955..cf93fd7 100644
 -		const released = this.#held;
 +		const released = this.#held.reverse();
 ```
+<!-- /patch:S19-NC-15 -->
 <!-- patch:S19-NC-16 -->
 ```diff
 diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
@@ -1703,6 +1725,7 @@ index 3e07e24..a39cd2e 100644
 -	return outcome.raised;
 +	return [];
 ```
+<!-- /patch:S19-NC-16 -->
 <!-- patch:S19-NC-17 -->
 ```diff
 diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
@@ -1713,6 +1736,7 @@ index 3e07e24..f98af0a 100644
 -	return `${head}: ${decisions} — answer with cp_decide`.slice(0, 300);
 +	return `${head}: S19 unnamed decision — answer with cp_decide`;
 ```
+<!-- /patch:S19-NC-17 -->
 <!-- /manifest:regressions -->
 
 S02 controls run with `npm run test:one -- --test-name-pattern='landing S02: <scenario prefix>' tests/e2e/landing.test.ts`.
