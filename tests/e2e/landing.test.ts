@@ -57,6 +57,7 @@ interface RunRow {
 	triggering_actor?: { login: string };
 }
 interface Reply {
+	untilFile?: string;
 	code?: number | "signal";
 	stdout?: string;
 	stderr?: string;
@@ -189,6 +190,7 @@ if (args[0] === "run" && args[1] === "rerun") {
 }
 const state = JSON.parse(readFileSync(${JSON.stringify(stateFile)}, "utf8"));
 const reply = (r) => {
+  while (r.untilFile && !existsSync(r.untilFile)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
   if (r.code === "signal") process.kill(process.pid, "SIGKILL");
   if (r.stdout) process.stdout.write(r.stdout);
   if (r.stderr) process.stderr.write(r.stderr);
@@ -1252,23 +1254,98 @@ test("landing: parked PR timer stores native CI for each observed head without r
 	const parked = await s.post.awaitingMerge.park(live.jobId, { pr_url: live.prUrl, repo: "example/demo", head_sha: live.head, base: "main", handed_at: isoTimestamp() });
 	assert.equal(parked.parked, true, JSON.stringify(parked));
 	const page = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
-	const state = (head: string, runs: RunRow[], error?: Reply) => s.setGh({ runs, routes: [
+	const state = (head: string, runs: RunRow[], response?: Reply, status = "OPEN") => s.setGh({ runs, routes: [
 		{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] },
-		{ match: "api graphql", replies: [json({ data: { rateLimit: { remaining: 5000 }, p0: { pullRequest: { url: live.prUrl, number: 109, state: "OPEN", headRefOid: head, headRefName: live.jobId, baseRefName: "main", mergedAt: null, mergeCommit: null, latestOpinionatedReviews: { nodes: [] }, comments: page, reviews: page }, stacked: { nodes: [] } } } })] },
-		...(error ? [{ match: "actions/runs?head_sha=", replies: [error] }] : []),
+		{ match: "api graphql", replies: [json({ data: { rateLimit: { remaining: 5000 }, p0: { pullRequest: { url: live.prUrl, number: 109, state: status, headRefOid: head, headRefName: live.jobId, baseRefName: "main", mergedAt: status === "MERGED" ? isoTimestamp() : null, mergeCommit: status === "MERGED" ? { oid: MERGE } : null, latestOpinionatedReviews: { nodes: [] }, comments: page, reviews: page }, stacked: { nodes: [] } } } })] },
+		...(response ? [{ match: "actions/runs?head_sha=", replies: [response] }] : []),
 	] });
+	const queries = (head: string) => s.ghCalls().filter((call) => call.includes(`actions/runs?head_sha=${head}`)).length;
+	const observations = () => readRunEvents(s.home, live.jobId).filter((event) => event.type === "ci_observed").map((event) => event.payload as { event: string; head_sha: string });
+	const watchFile = join(s.home, LAYOUT.awaitingMergeWatchFile);
 	state(live.head, [run(109, live.head, "completed", "success")]);
 	await s.parent("Observe parked PR CI.", [{ kind: "text", text: "Observing parked CI." }], async () => {
 		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.last_ci === "green", { timeoutMs: 30_000, what: "parked green through extension timer" });
+		await waitFor(() => existsSync(watchFile) && JSON.parse(readFileSync(watchFile, "utf8")).prs.some((row: { head_sha: string }) => row.head_sha === live.head), Boolean, { timeoutMs: 10_000, what: "green sweep finishes" });
+		const greenReads = queries(live.head);
+		const greenSweep = readFileSync(watchFile, "utf8");
+		await waitFor(() => readFileSync(watchFile, "utf8"), (body) => body !== greenSweep, { timeoutMs: 10_000, what: "another parked sweep before the idle interval" });
+		assert.equal(queries(live.head), greenReads, "a settled head is not re-read before the idle interval");
+		state(live.head, [], { code: 1, stderr: "gh: Resource not accessible by integration (HTTP 403)" });
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.last_error?.includes("HTTP 403") === true, { timeoutMs: 30_000, what: "parked denied CI after green" });
+		assert.equal(s.post.ciWatch.store.job(live.jobId)?.last_ci, "unreadable", "permission denial replaces prior green");
+		assert.equal(s.post.ciWatch.store.job(live.jobId)?.consecutive_failures, 1);
+		const faultHead = "c".repeat(40);
+		state(faultHead, [], { code: 1, stderr: "upstream gateway failure (HTTP 502)" });
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.head_sha === faultHead, { timeoutMs: 30_000, what: "parked transient fault" });
+		assert.equal(s.post.ciWatch.store.job(live.jobId)?.last_ci, "unknown", "a transient fault is unknown");
+		assert.equal(s.post.ciWatch.store.job(live.jobId)?.consecutive_failures, 2, "the observed head is stored before the fault");
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId)?.consecutive_failures, (count) => count === 3, { timeoutMs: 30_000, what: "another real transport fault grows the error interval" });
+		await waitFor(() => JSON.parse(readFileSync(watchFile, "utf8")).prs.some((row: { head_sha: string }) => row.head_sha === faultHead), Boolean, { timeoutMs: 10_000, what: "fault sweep finishes" });
+		const failedReads = queries(faultHead);
+		const failedChecked = Date.parse(s.post.ciWatch.store.job(live.jobId)!.last_checked_at!);
+		await waitFor(() => JSON.parse(readFileSync(watchFile, "utf8")).last_sweep_at as string, (at) => Date.parse(at) >= failedChecked + 1_250, { timeoutMs: 10_000, what: "parked sweeps exceed the base interval but remain inside error backoff" });
+		assert.equal(queries(faultHead), failedReads, "a failing head backs off instead of re-reading every sweep");
+		assert.deepEqual(observations().map((entry) => [entry.event, entry.head_sha]), [["ci_green", live.head]], "a fault journals nothing");
 		const next = "b".repeat(40);
 		state(next, [run(110, next, "in_progress", null)]);
 		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.head_sha === next && row.last_ci === "in_progress", { timeoutMs: 30_000, what: "moved parked head pending" });
 		state(next, [run(110, next, "completed", "failure")]);
 		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.last_ci === "failed", { timeoutMs: 30_000, what: "parked red" });
-		state("c".repeat(40), [], { code: 1, stderr: "gh: Resource not accessible by integration (HTTP 403)" });
-		await waitFor(() => s.post.ciWatch.store.job(live.jobId), (row) => row?.last_ci === "unreadable", { timeoutMs: 30_000, what: "parked denied CI" });
+		assert.deepEqual(observations().map((entry) => [entry.event, entry.head_sha]), [["ci_green", live.head], ["ci_failed", next]], "parked terminal transitions are journaled once for their own head");
+		assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge");
+		assert.equal(s.post.manager.get(live.jobId), undefined, "native CI does not revive the released author");
+		for (const [index, repark] of [false, true].entries()) {
+			const staleHead = (repark ? "e" : "d").repeat(40);
+			const id = 113 + index;
+			const untilFile = join(s.home, `release-ci-${id}`);
+			const oldReads = queries(staleHead);
+			state(staleHead, [run(id, staleHead, "completed", "success")], { ...json({ total_count: 1, workflow_runs: [run(id, staleHead, "completed", "success")] }), untilFile });
+			s.setGh({ jobs: { [id]: [{ id: id * 10, name: "test", status: "completed", conclusion: "success", steps: [{ name: "npm test", status: "completed", conclusion: "success" }] }] } });
+			await waitFor(() => queries(staleHead), (count) => count > oldReads, { timeoutMs: 30_000, what: "parked CI read reaches external barrier" });
+			const beforeSweep = readFileSync(watchFile, "utf8");
+			const legacyHandoff = s.post.fleet.require(live.jobId).awaiting_merge!;
+			await s.post.awaitingMerge.resume(live.jobId);
+			if (!repark) {
+				const fleetFile = join(s.home, LAYOUT.fleetFile);
+				const original = readFileSync(fleetFile, "utf8");
+				const legacy = JSON.parse(original);
+				legacy.jobs.find((job: { job_id: string }) => job.job_id === live.jobId).awaiting_merge = legacyHandoff;
+				try {
+					writeFileSync(fleetFile, JSON.stringify(legacy));
+					const rejected = await s.post.awaitingMerge.sweep();
+					assert.equal(rejected.observed, 0);
+					assert.match(rejected.errors.join("\n"), /violates the fleet contract/, "the public sweep rejects a legacy held parking record before observing CI");
+				} finally {
+					writeFileSync(fleetFile, original);
+				}
+			}
+			const park = async () => {
+				const result = await s.post.awaitingMerge.park(live.jobId, { pr_url: live.prUrl, repo: "example/demo", head_sha: live.head, base: "main", handed_at: isoTimestamp() });
+				assert.equal(result.parked, true, JSON.stringify(result));
+			};
+			if (repark) await park();
+			state(live.head, [run(109, live.head, "in_progress", null)]);
+			writeFileSync(untilFile, "release");
+			await waitFor(() => readFileSync(watchFile, "utf8"), (body) => body !== beforeSweep, { timeoutMs: 30_000, what: "parked sweep completes its delayed observation" });
+			assert.ok(!observations().some((entry) => entry.head_sha === staleHead), "resume or re-park drops the old cycle's terminal observation");
+			assert.notEqual(s.post.ciWatch.store.job(live.jobId)?.head_sha, staleHead, "a delayed old-cycle read cannot overwrite current CI");
+			if (!repark) {
+				const heldHead = "f".repeat(40);
+				state(heldHead, [run(115, heldHead, "completed", "success")]);
+				const heldSweep = readFileSync(watchFile, "utf8");
+				await waitFor(() => readFileSync(watchFile, "utf8"), (body) => body !== heldSweep, { timeoutMs: 10_000, what: "parked timer skips a held job" });
+				assert.equal(queries(heldHead), 0, "a held job is not read by the parked CI timer");
+				await park();
+			}
+		}
+		for (const status of ["CLOSED", "MERGED"]) {
+			const head = (status === "CLOSED" ? "1" : "2").repeat(40);
+			state(head, [run(116, head, "completed", "success")], undefined, status);
+			await waitFor(() => JSON.parse(readFileSync(watchFile, "utf8")).prs, (rows) => rows.some((row: { head_sha: string }) => row.head_sha === head), { timeoutMs: 30_000, what: `parked ${status} snapshot observed` });
+			assert.equal(queries(head), 0, "merged and closed snapshots do not read native CI");
+		}
 	});
-	assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge");
+	assert.equal(s.post.fleet.require(live.jobId).phase, "done", "the final external merge is observed after CI lifecycle checks");
 	assert.equal(s.post.manager.get(live.jobId), undefined, "native CI does not revive the released author");
 	assert.deepEqual(mergedCalls(s.ghCalls()), []);
 	assert.ok(readRunEvents(s.home, live.jobId).some((event) => event.type === "ci_observed"));

@@ -63,7 +63,7 @@ ask-0088e0332d00, 2026-10-21.
 | P2e (cp-e2e-migration-p2e-fmi5) | behavior 02, last slice: a pipeline's mandate-decided plan checkpoint (02-15), cp_mandate and cp_escalate through a real parent (02-16), and in-flight continuation under expired, revoked, serial and capped grants (02-17); the P2d review's three findings. No behavior-02 file remains; send-first-gate belongs to P4. | 1 (`tests/mandate.test.ts`) | 384 → 383 | 4,346 → 4,295 |
 | P3 (cp-e2e-migration-p3-rhym) | behavior 05, first slice: the Actions CI read behind cp_integrate, the CI watch and `/status` (05-1), the no-CI workflows question (05-2), `/doctor` `ci.<project>` (05-3) and the one infra-only rerun (05-4) in `tests/e2e/landing.test.ts`; the P2e review's three findings. The other 26 behavior-05 files stay `convert`, for P3b (a job the main session creates). | 4 (`tests/actions-ci.test.ts`, `tests/ci-access.test.ts`, `tests/ci-configured.test.ts`, `tests/ci-infra-rerun.test.ts`) | 385 → 382 | 4,300 → 4,287 |
 | P3b (cp-e2e-migration-p3b-stth) | behavior 05, second slice: merge receipts and landing proof in `tests/e2e/landing.test.ts`: cp_merged through `gh` with the after-merge deploy job (05-5), cp_merged against a local https GitLab (05-6), and cp_teardown's git-only landing proof (05-7). The other 23 behavior-05 files stay `convert` (owner P3), for P3c (a job the main session cuts). | 3 (`tests/after-merge.test.ts`, `tests/landing-proof.test.ts`, `tests/merges.test.ts`) | 382 → 379 | 4,287 → 4,272 |
-| P3c (cp-e2e-migration-p3c-l5fc) | Operator V2: all seven CI-watch files owned here; P3d owns only the other 16. [Per-file progress](testing-migration-p3c-declarations.md): 10/143 declarations mapped (6.99%), 0 retained, 133 pending reachable-gap closure. First completed file: all five ci-evidence declarations covered through the real tool and viewer. | 1 file retired; 5 declarations removed so far | 379 → 378 | 4,272 + 2 incoming → 4,275 |
+| P3c (cp-e2e-migration-p3c-l5fc) | Operator V2: all seven CI-watch files owned here; P3d owns only the other 16. [Per-file progress](testing-migration-p3c-declarations.md): 13/143 declarations mapped (9.09%), 0 retained, 130 pending reachable-gap closure. Completed: five ci-evidence and three parked-ci declarations through the real tool, viewer and parent timer. | 2 files retired; 8 declarations removed so far | 379 → 377 | 4,272 + 2 incoming → 4,272 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -588,6 +588,9 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/ci-evidence.test.ts` | recordForwardedCi: keeps the newest CI_EVIDENCE_KEEP observations | 05-9 | mapped | 52 real tool writes assert the bound and oldest retained quote; NC-47 fails `every bounded forwarded write succeeds`, actual false expected true, because unsliced history exceeds the schema bound |
 | `tests/ci-evidence.test.ts` | forwardedCi (viewer): the newest forwarded result for the head only; native rows and other heads are not forwarded | 05-9 | mapped | real /api/jobs over seeded legacy data asserts pending A, green B, unseen/unknown heads and missing file, with unsafe URL stripped; NC-48 fails `viewer ignores native and other-head evidence and strips unsafe URLs`, actual green expected in_progress |
 | `tests/ci-evidence.test.ts` | cp_integrate record_ci: needs a verbatim operator quote and the job's current head; stores display-only evidence | 05-9 | mapped | real parent verifies absent head, fabricated quote, superseded head, stored source/quote/repo and native gate; NC-45 fails `forwarded evidence rejects invalid input through the tool`, expected /no known current head/, actual recorded success |
+| `tests/parked-ci.test.ts` | parked CI: head A green, then the moved head B pending, then red — each stored for its own head, journaled once | 05-12 | mapped | real parent timer asserts A green, completed idle sweep without another Actions read, B pending then red, and exact head-tagged journal; NC-36 and NC-49 fail green arrival and idle-read assertions |
+| `tests/parked-ci.test.ts` | parked CI: a permission denial is loud even after a green; a transient fault is unknown; both back off | 05-12 | mapped | same-head denial replaces green with unreadable/1, moved-head transport fault stores unknown/2; completed sweeps exceed the base interval without re-reading, and faults journal nothing; NC-50–NC-52 and NC-55 fail counter, classification and backoff assertions |
+| `tests/parked-ci.test.ts` | parked CI: a resume or re-park during the read drops the observation; merged/closed or a held job reads nothing | 05-12 | mapped | external forge barriers hold real reads across public resume and re-park; no old-cycle row or journal survives; valid held jobs issue no parked read, a seeded held-with-handoff legacy record is refused by the public sweep, and CLOSED/MERGED snapshots issue no CI read; NC-53 and NC-54 fail stale-observation and terminal-read assertions |
 <!-- /manifest:assertions -->
 
 P3c's operator V2 brief owns all seven CI-watch files in this slice. Reachable gaps must be added to real-entry
@@ -664,6 +667,98 @@ diff --git a/src/viewer/overview-jobs.ts b/src/viewer/overview-jobs.ts
 + const latest = (Array.isArray(list) ? list.map(obj) : []).filter((o): o is Json => o?.source === "forwarded" && Object.hasOwn(FORWARDED_VIEW, str(o.result) ?? "") && timestamp(o.observed_at))
 ```
 <!-- /patch:NC-48 -->
+
+V2 parked-CI controls NC-49–NC-55 use
+`npm run test:one -- --test-name-pattern='parked PR timer' tests/e2e/landing.test.ts`.
+Each exited 1 at the assertion in its regression row and was restored. NC-54 removes both open-snapshot gates:
+the public watch ordinarily excludes terminal snapshots before the observer's defensive guard can see them.
+The old direct held-with-handoff helper call is redundant-unreachable: normal watch candidates must be awaiting_merge,
+and legacy held parking records violate the fleet schema before observation. Scenario 05-12 pins both outcomes:
+`a held job is not read by the parked CI timer` and `the public sweep rejects a legacy held parking record before observing CI`.
+These assertions exercise valid lifecycle state and raw legacy disk data; no internal ports are mocked.
+
+<!-- patch:NC-49 -->
+```diff
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -42,1 +42,1 @@
+-		if (prior?.head_sha === head && Number.isFinite(checked) && now().getTime() < checked + wait) return;
++		if (false && prior?.head_sha === head && Number.isFinite(checked) && now().getTime() < checked + wait) return;
+```
+<!-- /patch:NC-49 -->
+
+<!-- patch:NC-50 -->
+```diff
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -56,1 +56,1 @@
+-			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: ciReadDenied(error ?? "") ? CI_UNREADABLE : "unknown" });
++			store.record(jobId, { ...observed, consecutive_failures: 0, last_error: error, last_ci: ciReadDenied(error ?? "") ? CI_UNREADABLE : "unknown" });
+```
+<!-- /patch:NC-50 -->
+
+<!-- patch:NC-51 -->
+```diff
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -56,1 +56,1 @@
+-			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: ciReadDenied(error ?? "") ? CI_UNREADABLE : "unknown" });
++			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: "unknown" });
+```
+<!-- /patch:NC-51 -->
+
+<!-- patch:NC-52 -->
+```diff
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -56,1 +56,1 @@
+-			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: ciReadDenied(error ?? "") ? CI_UNREADABLE : "unknown" });
++			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: CI_UNREADABLE });
+```
+<!-- /patch:NC-52 -->
+
+<!-- patch:NC-53 -->
+```diff
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -52,1 +52,1 @@
+-		if (current?.phase !== "awaiting_merge" || current.awaiting_merge?.cycle !== cycle) return;
++		if (false && (current?.phase !== "awaiting_merge" || current.awaiting_merge?.cycle !== cycle)) return;
+```
+<!-- /patch:NC-53 -->
+
+<!-- patch:NC-54 -->
+```diff
+diff --git a/src/awaiting-merge-watch.ts b/src/awaiting-merge-watch.ts
+--- a/src/awaiting-merge-watch.ts
++++ b/src/awaiting-merge-watch.ts
+@@ -154,1 +154,1 @@
+-				if (read.snap.state === "open") {
++				if (true) {
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -35,1 +35,1 @@
+-		if (snap.state !== "open" || record.phase !== "awaiting_merge" || cycle === undefined) return;
++		if (record.phase !== "awaiting_merge" || cycle === undefined) return;
+```
+<!-- /patch:NC-54 -->
+
+<!-- patch:NC-55 -->
+```diff
+diff --git a/src/parked-ci.ts b/src/parked-ci.ts
+--- a/src/parked-ci.ts
++++ b/src/parked-ci.ts
+@@ -40,1 +40,1 @@
+-		const wait = nextDueMs(cadence, { failures, settled: SETTLED.has(prior?.last_ci ?? "") });
++		const wait = nextDueMs(cadence, { failures: 0, settled: SETTLED.has(prior?.last_ci ?? "") });
+```
+<!-- /patch:NC-55 -->
 
 NC-39 through NC-42 each use their own patch below and this command:
 `npm run test:one -- --test-name-pattern='CI watch persists arrival' tests/e2e/landing.test.ts`.
@@ -910,6 +1005,13 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-46 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-46 | b167ba1c73842346b33fbc3f5a82cba32174d8b356baa6b3abd16cd1cdeb694f | evidence cannot be rebound to another repository: expected `/is for other\/repository/`, actual recorded success; exit 1 | pass |
 | NC-47 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-47 | 603dd9661e1e596f888b39eb14b9bdc66078a98709fe8f022402c4b203a7b84c | every bounded forwarded write succeeds: actual false expected true; exit 1 | pass |
 | NC-48 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-48 | 97c3cb3752d2333372ea71e943083cde0d1183a0616689ebe15372ff4800bacc | viewer ignores native and other-head evidence and strips unsafe URLs: actual green expected in_progress; exit 1 | pass |
+| NC-49 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-49 | a74f29820429a3edc569e921ad1c59514c3c7a83c52afbee81efe57fcf3d8923 | a settled head is not re-read before the idle interval: actual 2 expected 1; exit 1 | pass |
+| NC-50 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-50 | 6b130b6e821c69c5f3300f337dd072c514254db98d8fef7f40783e99db0d1b08 | consecutive_failures assertion: actual 0 expected 1; exit 1 | pass |
+| NC-51 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-51 | 377f7f3b0591d09e03c7e9fee7017df96c330e6e449996c2ef3c998e6e8e5210 | permission denial replaces prior green: actual unknown expected unreadable; exit 1 | pass |
+| NC-52 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-52 | 5acaec2af379bcfc1e81071685ef44c9dea8e31e54077554cf7a9d8dcbcfe2e8 | a transient fault is unknown: actual unreadable expected unknown; exit 1 | pass |
+| NC-53 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-53 | 38f8d8e9b4ee45085a53a7b0ab3bf727bcb6dff132a7f9ccaf91b7725964834d | resume or re-park drops the old cycle's terminal observation: actual false expected true; exit 1 | pass |
+| NC-54 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-54 | c659006b3d4f625d0f3ca065766b8a331cfec0d460cefd0b52d73c491be85d74 | merged and closed snapshots do not read native CI: actual 1 expected 0; exit 1 | pass |
+| NC-55 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-55 | b982458f1edafa0ef99eb6f9a6e601c82067dbbdffe56318cd15ebc5303b5b13 | a failing head backs off instead of re-reading every sweep: actual 12 expected 6; exit 1 | pass |
 <!-- /manifest:regressions -->
 
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:
@@ -1861,7 +1963,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/parent-outbox.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/parent-routing-evals.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/parent-session.test.ts` | exception | P1 | contract: assembled parent session; operator ask-0088e0332d00 (Exceptions) |
-| `tests/parked-ci.test.ts` | convert | P3c | behavior 05; operator V2 assigns all three native parked-CI declarations to P3c |
+| `tests/parked-ci.test.ts` | deleted | P3c | behavior 05; all three declarations mapped to 05-12, NC-36 and NC-49–NC-55; no moved or retained units |
 | `tests/pi-hashline-compaction.test.ts` | convert | P5 | behavior 07 (Compaction) |
 | `tests/pi-lens-headless.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
 | `tests/pi-server-dependency.test.ts` | exception | P1 | contract: package boundary constraints; operator ask-0088e0332d00 (Exceptions) |
