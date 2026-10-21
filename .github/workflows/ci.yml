@@ -71,9 +71,8 @@ jobs:
         run: npm run eval:check
         timeout-minutes: 5
 
-  # Real installs (bootstrap → cp-install → cp-daemon → parent doctor) in a disposable --network none
-  # Docker sandbox with the mock provider (#375; tests/e2e/README.md "Installer sandbox"). npm test
-  # collects tests/e2e/installer.test.ts and skips it; this job opts in, and fails when Docker is missing.
+  # Real installs in a disposable Docker sandbox (#375; tests/e2e/README.md "Installer sandbox"): npm test
+  # skips tests/e2e/installer.test.ts; this job opts in and fails when Docker is missing.
   install-sandbox:
     name: install sandbox
     runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted","nomad"]') || 'ubuntu-latest' }}

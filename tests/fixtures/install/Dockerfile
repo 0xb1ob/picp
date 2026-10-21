@@ -1,7 +1,5 @@
-# Disposable installer sandbox (#375; tests/harness/install-sandbox.ts builds it, tests/e2e/README.md).
-# Provisioning may use the network; scenarios run with --network none from the caches warmed here.
-# Prerequisites a fresh user brings (git, gh, node 24, treehouse, pi) are installed; everything cp-install
-# installs itself (npm ci, pi-lens tools, worker pi packages) is only cached, so the real install path runs.
+# Installer sandbox image (#375; see tests/e2e/README.md "Installer sandbox"): fresh-user prerequisites
+# installed, everything cp-install installs only cached, so scenarios run the real paths with --network none.
 FROM node:22-bookworm-slim AS node22
 FROM node:24-bookworm-slim
 RUN apt-get update \
