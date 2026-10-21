@@ -3,8 +3,7 @@
  *
  * Every test here is hermetic — `gh` and `git` are an injected function, the
  * teardown gate and the ledger are injected objects, and nothing shells out.
- * That is the same discipline `tests/merges.test.ts` uses, and for the same
- * reason: the subject is *what was observed*, never what a caller claimed.
+ * The subject is *what was observed*, never what a caller claimed.
  *
  * The invariants under test, in one list:
  *
