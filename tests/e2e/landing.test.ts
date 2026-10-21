@@ -2905,6 +2905,7 @@ test("landing: unreadable worktree status preserves uncommitted content", { skip
 	const wrapper = join(s.home, "bin", "git");
 	writeFileSync(wrapper, `#!/usr/bin/env node\nconst {spawnSync}=require("node:child_process");\nconst args=process.argv.slice(2);\nif(process.cwd()===${JSON.stringify(live.worktree)} && args[0]==="status") {process.stderr.write("fatal: status unavailable\\n");process.exit(128);}\nconst r=spawnSync(${JSON.stringify(realGit)},args,{stdio:"inherit"});process.exit(r.status??1);\n`);
 	chmodSync(wrapper, 0o755);
-	await s.integrate(live.jobId);
+	const out = await s.integrate(live.jobId);
+	assert.match(JSON.stringify(out.record), /git status exited 128/);
 	assert.equal(readFileSync(join(live.worktree, "change.txt"), "utf8"), "precious uncommitted content\n", "unreadable status must never authorize destruction of uncommitted work");
 });

@@ -1428,8 +1428,17 @@ export class Integrator {
 		if (fetched.status !== 0) {
 			return { acted: false, failed: false, detail: `could not fetch origin/${branch} in the worktree` };
 		}
-		const local = (await this.#run(worktree, "git", ["rev-parse", "HEAD"])).stdout.trim();
-		const remote = (await this.#run(worktree, "git", ["ls-remote", "--heads", "origin", branch])).stdout.trim().split(/\s+/)[0] ?? "";
+		const localRun = await this.#run(worktree, "git", ["rev-parse", "HEAD"]);
+		if (localRun.status !== 0) {
+			return { acted: false, failed: true, detail: `could not read the worktree HEAD (git rev-parse exited ${localRun.status}), so it was not reset` };
+		}
+		const local = localRun.stdout.trim();
+		const remoteRun = await this.#run(worktree, "git", ["ls-remote", "--heads", "origin", branch]);
+		if (remoteRun.status !== 0) {
+			// Not failed: an unreachable origin is a pinned refusal that leaves the worktree alone, as an empty answer does.
+			return { acted: false, failed: false, detail: `origin did not name a tip for ${branch} (git ls-remote exited ${remoteRun.status}), so the worktree was left alone` };
+		}
+		const remote = remoteRun.stdout.trim().split(/\s+/)[0] ?? "";
 		if (remote.length === 0) {
 			// Origin could not be asked, or does not have the branch. That is a
 			// refusal, not an invitation to reach for `refs/remotes/origin/<branch>`
