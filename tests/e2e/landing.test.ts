@@ -113,6 +113,8 @@ function mergeAndDeleteHead(repo: ScratchRepo, branch: string): string {
 interface GitlabReply {
 	status?: number;
 	body: unknown;
+	raw?: string;
+	headers?: Record<string, string>;
 }
 /**
  * A local https GitLab: `/api/v4/.../merge_requests/<iid>` answers `mrs[iid]` and logs its PRIVATE-TOKEN; every other
@@ -129,8 +131,8 @@ async function startFakeGitlab(t: TestContext, remote: string) {
 		if (url.pathname.startsWith("/api/")) {
 			asked.push({ path: url.pathname, ...(req.headers["private-token"] ? { token: String(req.headers["private-token"]) } : {}) });
 			const reply = iid ? mrs[Number(iid)] : undefined;
-			res.writeHead(reply?.status ?? (reply ? 200 : 404), { "content-type": "application/json" });
-			res.end(JSON.stringify(reply?.body ?? { message: "404 Not found" }));
+			res.writeHead(reply?.status ?? (reply ? 200 : 404), { "content-type": "application/json", ...reply?.headers });
+			res.end(reply?.raw ?? JSON.stringify(reply?.body ?? { message: "404 Not found" }));
 			return;
 		}
 		const cgi = spawn("git", ["http-backend"], {
@@ -439,6 +441,75 @@ test("landing: teardown proves landing on the project's configured trunk instead
 	await s.post.registry.update("demo", { base_branch: "trunk" });
 	const result = await s.post.tearDown(live.jobId);
 	assert.deepEqual([result.torn_down, result.reason, result.landing?.base_branch], [true, "landed_by_git", "trunk"]);
+});
+
+test("landing: forge observation failures refuse merge receipts without leaking external replies", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const token = "glpat-s06-canary";
+	const s = await startStack(t, { env: { NODE_TLS_REJECT_UNAUTHORIZED: "0", GIT_SSL_NO_VERIFY: "1", CP_E2E_GITLAB_TOKEN: token } });
+	const gh = await s.seed("GitHub observation failures");
+	const missing = json({ state: "OPEN" });
+	for (const [reply, cause] of [
+		[{ code: 1, stderr: "gh: not logged in\nprivate second line" }, /unavailable: .*not logged in/],
+		[{ stdout: `<html>${token}</html>` }, /invalid:/],
+		[missing, /invalid:/],
+		[json({ number: 7, url: gh.prUrl, state: "OPEN" }), /as open, not MERGED/],
+	] as Array<[Reply, RegExp]>) {
+		s.setGh({ routes: [{ match: "pr view", replies: [reply] }] });
+		await assert.rejects(s.post.recordMerge({ jobId: gh.jobId, pr: reply === missing ? gh.prUrl!.split("/").pop() : undefined }), (error: Error) => {
+			assert.match(error.message, cause);
+			assert.doesNotMatch(error.message, /private second line|glpat-s06-canary|<html>/);
+			return true;
+		});
+		assert.equal(readMergeReceipt(s.home, gh.jobId), undefined);
+	}
+	const lab = await startFakeGitlab(t, s.remote);
+	await s.project("lab", { cloneUrl: `${lab.web}/o/lab.git`, forge: { kind: "gitlab", web_base_url: lab.web, token_env: "CP_E2E_GITLAB_TOKEN" } });
+	const url = `${lab.web}/o/lab/-/merge_requests/7`;
+	const gl = await s.seed("GitLab observation failures", { project: "lab", prUrl: url });
+	const head = "a".repeat(40);
+	const body = { id: 9001, iid: 7, source_project_id: 42, target_project_id: 42, state: "merged", source_branch: gl.branch, target_branch: "main", sha: head, diff_refs: { head_sha: head }, merge_commit_sha: "b".repeat(40), merged_at: isoTimestamp(), web_url: url };
+	const refused = async (reply: GitlabReply, cause: RegExp) => {
+		lab.mrs[7] = reply;
+		const before = lab.asked.length;
+		await assert.rejects(s.post.recordMerge({ jobId: gl.jobId }), (error: Error) => {
+			assert.match(error.message, cause);
+			assert.doesNotMatch(error.message, /glpat-s06-canary|login|rejected|redirect-destination/);
+			return true;
+		});
+		assert.equal(lab.asked.length, before + 1, "one bounded GET; a refused answer is never retried or redirected");
+		assert.equal(readMergeReceipt(s.home, gl.jobId), undefined);
+	};
+	for (const over of [
+		{ diff_refs: { head_sha: "e".repeat(40) } }, { merge_commit_sha: "not-a-sha" }, { sha: null, diff_refs: null },
+		{ source_branch: "" }, { target_branch: undefined }, { merged_at: "yesterday" },
+	]) await refused({ body: { ...body, ...over } }, /invalid:/);
+	await refused({ body: [body] }, /invalid:/);
+	for (const over of [
+		{ iid: 8 }, { iid: "7" }, { web_url: `${lab.web}/o/other/-/merge_requests/7` },
+		{ web_url: "https://evil.example.com/o/lab/-/merge_requests/7" }, { web_url: null },
+	]) await refused({ body: { ...body, ...over } }, /mismatch:/);
+	for (const over of [{ source_project_id: 43 }, { source_project_id: undefined, target_project_id: undefined }]) {
+		await refused({ body: { ...body, ...over } }, /unsupported:/);
+	}
+	await refused({ body: null, raw: `<html>login ${token}</html>` }, /invalid:/);
+	for (const status of [401, 403, 404, 429, 500]) await refused({ status, body: { message: `token ${token} rejected` } }, new RegExp(`unavailable: .*HTTP ${status}`));
+	await refused({ status: 302, body: null, headers: { location: `${lab.web}/api/v4/projects/redirect-destination/merge_requests/99` } }, /HTTP 302 redirect refused/);
+	for (const [state, expected] of [["opened", "open"], ["closed", "closed"], ["locked", "unknown"], ["weird", "unknown"]]) {
+		await refused({ body: { ...body, state, merged_at: null, merge_commit_sha: null } }, new RegExp(`as ${expected}, not MERGED`));
+	}
+	for (const ref of ["https://evil.example.com/o/lab/-/merge_requests/7", `${lab.web}/o/other/-/merge_requests/7`, "https://github.com/o/lab/pull/7", "0", "7; rm -rf /"]) {
+		const before = lab.asked.length;
+		await assert.rejects(s.post.recordMerge({ jobId: gl.jobId, pr: ref }));
+		assert.equal(lab.asked.length, before, "a foreign or malformed reference sends no token or request");
+	}
+	for (const flags of [{ sha: null }, { should_remove_source_branch: true, force_remove_source_branch: true }]) {
+		const job = await s.seed("GitLab fallback head and deleted source", { project: "lab", prUrl: url });
+		lab.mrs[7] = { body: { ...body, source_branch: job.branch, ...flags } };
+		const receipt = (await s.post.recordMerge({ jobId: job.jobId })).receipt;
+		assert.deepEqual([receipt.head_sha, receipt.head_branch], [head, job.branch]);
+	}
+	await assert.rejects(s.post.recordMerge({ jobId: "../escape" }), /no fleet record/);
+	assert.ok(lab.asked.every((request) => request.token === token));
 });
 
 test("landing: a deploy ledger failure preserves the merge receipt and retries through cp_merged", { skip: SKIP, timeout: 600_000 }, async (t) => {
