@@ -1,0 +1,21 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..ace2823 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -294,10 +294 @@ async function deltaBaselineHolds(git: GitRunner, cwd: string, base: string, bra
+-	if (!SHA.test(previousHead)) return false;
+-	const head = `refs/remotes/origin/${branch}`;
+-	if ((await git(cwd, ["merge-base", "--is-ancestor", previousHead, head])).status !== 0) return false;
+-	const forkPoint = async (rev: string): Promise<string | undefined> => {
+-		const result = await git(cwd, ["merge-base", "--all", `refs/remotes/origin/${base}`, rev]);
+-		const shas = result.stdout.split("\n").map((line) => line.trim()).filter((line) => line.length > 0).sort();
+-		return result.status === 0 && shas.length > 0 && shas.every((sha) => SHA.test(sha)) ? shas.join(" ") : undefined;
+-	};
+-	const before = await forkPoint(previousHead);
+-	return before !== undefined && before === (await forkPoint(head));
++	return true;
+@@ -562 +553 @@ export class DiffReview {
+-		if (priorPass) {
++		if (false && priorPass) {
+@@ -578 +568,0 @@ export class DiffReview {
+-		if (this.#options.mandates) assertReviewAllowed(this.#options.mandates, { jobId, project: record.project, kind: record.kind }, this.#options.fleet?.read().jobs ?? []);

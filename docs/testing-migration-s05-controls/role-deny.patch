@@ -1,0 +1,7 @@
+diff --git a/src/routing.ts b/src/routing.ts
+index 2c1fd1d..88fc517 100644
+--- a/src/routing.ts
++++ b/src/routing.ts
+@@ -393 +393 @@ export function deniedFor(config: RoutingConfig, role: Role, model: string): str
+-	return config.deny_by_role?.[role]?.find((pattern) => matchesPattern(pattern, model));
++	return undefined;

@@ -1,0 +1,20 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..5f80048 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -778 +778 @@ export class DiffReview {
+-			head_sha: headSha,
++			head_sha: "0".repeat(40),
+@@ -1048 +1048 @@ export class DiffReview {
+-				message: diffReviseMessage(result.verdict, rawPaths),
++				message: result.verdict.revisions?.join("\n") ?? "revise",
+diff --git a/src/gate.ts b/src/gate.ts
+index 8cafd9b..124b917 100644
+--- a/src/gate.ts
++++ b/src/gate.ts
+@@ -278 +278 @@ export function reviewCapExhausted(decisions: readonly GateVerdict[]): boolean {
+-	return decisions.length + 1 >= REVIEW_MAX_ATTEMPTS;
++	return false;
+@@ -390 +390 @@ export function decideGate(
+-			cause: persistent ? "operational_persistent" : "operational",
++			cause: "operational",

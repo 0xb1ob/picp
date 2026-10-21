@@ -1,0 +1,7 @@
+diff --git a/src/reviewer-model.ts b/src/reviewer-model.ts
+index 9a8a190..9cee827 100644
+--- a/src/reviewer-model.ts
++++ b/src/reviewer-model.ts
+@@ -48 +48 @@ export function selectReviewerModel(input: {
+-	const model = input.registry?.get(record.project)?.reviewer_model;
++	const model: string | undefined = undefined;
