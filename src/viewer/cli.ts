@@ -112,4 +112,4 @@ export async function main(argv: readonly string[]): Promise<void> {
 }
 
 // Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
-if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) await main(process.argv.slice(2));
+if (process.argv[1] !== undefined && (() => { try { return entryRealpath(process.argv[1]) === entryPath(import.meta.url); } catch { return false; } })()) await main(process.argv.slice(2));

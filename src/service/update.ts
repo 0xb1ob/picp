@@ -528,7 +528,7 @@ export function hostUpdatePorts(home: string, env: NodeJS.ProcessEnv = process.e
 }
 
 // Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
-if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
+if (process.argv[1] !== undefined && (() => { try { return entryRealpath(process.argv[1]) === entryPath(import.meta.url); } catch { return false; } })()) {
 	const { values } = parseArgs({ options: { "dry-run": { type: "boolean" } } });
 	const home = resolveHome();
 	configureLayout("multi", home);

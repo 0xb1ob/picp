@@ -342,7 +342,7 @@ async function down(home: string, paths: Paths, control: Control, ports: TunnelC
 }
 
 // Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
-if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
+if (process.argv[1] !== undefined && (() => { try { return entryRealpath(process.argv[1]) === entryPath(import.meta.url); } catch { return false; } })()) {
 	const ports: TunnelCliPorts = {
 		env: process.env,
 		out: (line) => void process.stdout.write(`${line}\n`),

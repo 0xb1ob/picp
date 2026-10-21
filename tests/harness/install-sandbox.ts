@@ -519,7 +519,7 @@ async function inside(scenario: Scenario): Promise<number> {
 // ---- CLI: npm run e2e:install -- [--scenario fresh|prerequisites|rerun|all] [--verbose] ----------------------
 
 // Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
-if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
+if (process.argv[1] !== undefined && (() => { try { return entryRealpath(process.argv[1]) === entryPath(import.meta.url); } catch { return false; } })()) {
 	const { values } = parseArgs({ options: { scenario: { type: "string", default: "all" }, inside: { type: "boolean" }, verbose: { type: "boolean" } } });
 	const wanted = values.scenario === "all" ? [...SCENARIOS] : [values.scenario];
 	const unknown = wanted.filter((name) => !(SCENARIOS as readonly string[]).includes(name ?? ""));

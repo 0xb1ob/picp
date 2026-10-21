@@ -37,7 +37,7 @@ export async function probePi(pi: string, packageRoot: string, extensionMs = PRO
 
 const loads = new Map<string, PiProbe["extension"]>();
 
-/** /doctor's probe: async, DOCTOR_PROBE_MS; `--version` every time, a passed extension load reused per pi path + mtime. */
+/** /doctor's probe: async, DOCTOR_PROBE_MS; `--version` every time, a passed extension load reused per path+mtime. */
 export async function probePiCached(pi: string, packageRoot: string): Promise<PiProbe> {
 	let key: string | undefined;
 	try {
@@ -113,7 +113,7 @@ export function probePiSync(pi: string, packageRoot: string): PiProbe {
 }
 
 // Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
-if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
+if (process.argv[1] !== undefined && (() => { try { return entryRealpath(process.argv[1]) === entryPath(import.meta.url); } catch { return false; } })()) {
 	process.stdout.write(`${JSON.stringify(await probePi(process.argv[2] ?? "pi", process.argv[3] ?? process.cwd()))}\n`);
 	process.exit(0);
 }
