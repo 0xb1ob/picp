@@ -79,7 +79,8 @@ sh scripts/install.sh [flags]
 `~/.pi-command-post/app`), refuses a dirty, off-`main` or ahead checkout, runs
 `npm ci` there and execs `bin/cp-install --app <app>` with every flag.
 
-`scripts/install.sh` places the code at `~/.pi-command-post/app` (or `--app DIR`):
+`scripts/install.sh` first refuses a missing git, or node missing or older than 24, before cloning anything (the
+same checks as bootstrap). It places the code at `~/.pi-command-post/app` (or `--app DIR`):
 it clones `main` when absent (URL: `CP_REPO_URL`, else the running checkout's
 `origin`), refuses an existing checkout whose `origin` differs, and fast-forwards
 only a clean `main` that is not ahead of `origin/main` (otherwise `skip`, naming
@@ -99,7 +100,11 @@ why). It then runs `node <app>/src/service/install.ts`, which prints one
      `~/.pi/agent/settings.json` → `pi install npm:<name>` (pins kept; your other packages and
      their order untouched; settings.json is never edited here). `--no-pi-packages` skips;
    - `tmux` is reported, never required;
-   - no provider in `~/.pi/agent/auth.json` → prints "run `pi`, then /login" (credentials never handled);
+3a. provider login, before those extras and before anything is written: `pi --no-extensions --list-models` with
+   cp-daemon's env. No usable model → exit 4 with one `fail: login:` line ending "run `pi`, then /login, then
+   re-run: <the exact cp-install command>"; nothing is written or started. A dry run, `--no-start` or an
+   unreadable listing reports `~/.pi/agent/auth.json`'s providers instead (credentials never handled).
+   A failed clone, `npm ci` or tools step likewise names its exact rerun;
 3b. the viewer host (`CP_VIEWER_HOST`, see below);
 3c. the models (`CP_PARENT_MODEL`, `CP_OPERATOR_MODEL`, see below);
 4. the home (default `~/.pi-command-post`, 0700); systemd's `WorkingDirectory=` takes no quotes, so a home
@@ -204,8 +209,9 @@ first match wins:
    else fails and writes nothing. `--yes`, `--no-prompt` or no terminal take the
    recommendation for both (`changed: model: parent <m> (recommended: …; --parent-model overrides)`).
 
-No listed model prints "run `pi`, then /login, then rerun cp-install" and pins
-nothing; after the login the rerun must be `cp-install --force` (a plain rerun keeps
+No listed model stops a starting install at step 3a (above); with `--no-start` it prints
+"run `pi`, then /login, then rerun cp-install" and pins nothing, and after the login the rerun
+must be `cp-install --force` (a plain rerun keeps
 the unpinned choice and lists nothing; `--force` also runs `npm ci` and replaces generated files that differ). Changing a pin needs the flag and `--force`; it applies at the next
 session and host start. `settings.json` is never edited.
 

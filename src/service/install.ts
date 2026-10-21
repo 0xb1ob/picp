@@ -35,10 +35,11 @@
  *
  * P2i adds, after the required tools: gh login, the pi-lens host tools, the pi
  * packages workers load (`ROLE_PACKAGES`), and the
- * optional tmux/push/provider-login checks. Prompts read /dev/tty, so
+ * optional tmux/push checks. Prompts read /dev/tty, so
  * `curl | sh` still asks; with no terminal every prompt takes its default.
+ * Before those, provider login (#375): no model pi can use as cp-daemon's parent sees them exits 4, nothing started.
  *
- * Every step prints `ok|changed|skip|fail: <step>: <detail>`; exit 1 on any fail.
+ * Every step prints `ok|changed|skip|fail: <step>: <detail>`; exit 1 on any fail, 4 for a missing login.
  */
 import { spawnSync } from "node:child_process";
 import { accessSync, chmodSync, closeSync, constants, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
@@ -56,7 +57,7 @@ import { herdrPiIntegrated, onPath } from "../viewer/launchers.ts";
 import { DAEMON_UNIT, installTargets, OPERATOR_RESUME_UNIT, OPERATOR_UNIT, OPERATOR_WRAPPER, PARENT_UNIT, renderDaemonUnit, renderOperatorWrapper, renderTunnelWrapper, renderUnits, TUNNEL_WRAPPER, type UnitInput, unitParentModel, unitPath, unitViewerHost, VIEW_UNIT, wrapperModels, wrapperViewerHost } from "./units.ts";
 import { activate, type BackendContext, deactivate, detectBackend, legacyPreflight, legacyPresent, linger } from "./daemon-backend.ts";
 import { type DaemonConfig, daemonPaths, validateDaemonConfig } from "./daemon-files.ts";
-import { chooseModels } from "./models.ts";
+import { chooseModels, parseModelList, serviceListEnv } from "./models.ts";
 import { gatewayStep } from "./gateway.ts";
 import { sameLock } from "../worktree-deps.ts";
 import { gatewayKeyFile } from "../gateway-key.ts";
@@ -225,7 +226,7 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	else if (!force && installed !== undefined && sameLock(lock, installed)) step("ok", "npm", "node_modules matches package-lock.json");
 	else if (dry) step("changed", "npm", `would run npm ci in ${app}`);
 	else if (ok(ports.run("npm", ["ci"], app))) step("changed", "npm", `npm ci in ${app}`);
-	else step("fail", "npm", `npm ci failed in ${app}; run it there and read its error`);
+	else step("fail", "npm", `npm ci failed in ${app}; run it there and read its error, then rerun: ${rerunCommand(app, home, flags)}`);
 	if (failed) return 1;
 
 	// 3. Tools.
@@ -233,11 +234,21 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	// A dry run goes on past tools a real run would install, so the rest of the plan still prints.
 	if (dry && tools.status === DRY_RUN_PLANNED_EXIT) step("changed", "tools", `a real run installs the missing required tools first:\n${tools.stdout}`);
 	else if (!ok(tools)) {
-		step("fail", "tools", `scripts/install-tools.ts exited ${tools.status}:\n${tools.stdout}${tools.stderr}`);
+		step("fail", "tools", `scripts/install-tools.ts exited ${tools.status}:\n${tools.stdout}${tools.stderr}\nfix the above, then rerun the install: ${rerunCommand(app, home, flags)}`);
 		return 1;
 	} else step("ok", "tools", `required tools on PATH: ${REQUIRED_TOOLS.map((tool) => (tool === "treehouse" ? "treehouse (required, not optional: every dispatch leases a treehouse worktree)" : tool)).join(", ")}`);
 	const prompting = !dry && flags.yes !== true && flags["no-prompt"] !== true;
 	const answer = (question: string): string => (prompting ? ports.ask(question)?.trim() ?? "" : "");
+	// 3a. Provider login (#375 P1), as cp-daemon's parent will see it: none usable writes and starts nothing.
+	const agentDir = ports.env.PI_CODING_AGENT_DIR ?? join(ports.env.HOME ?? "", ".pi/agent");
+	const listing = dry ? undefined : ports.run("pi", ["--no-extensions", "--list-models"], ports.exists(home) ? home : undefined, serviceListEnv(ports.env, ports.node.path));
+	const usable = listing?.status === 0 ? parseModelList(listing.stdout) : undefined;
+	if (usable !== undefined && usable.length > 0) step("ok", "login", `${usable.length} model(s) pi can use as cp-daemon's parent sees them`);
+	else if (usable === undefined || noStart) authLogin(ports, agentDir, step);
+	else {
+		step("fail", "login", `no model pi can use as cp-daemon's parent sees them (${join(agentDir, "auth.json")} and ambient credentials), so nothing was written or started; run \`pi\`, then /login, then re-run: ${rerunCommand(app, home, flags)}`);
+		return NEEDS_LOGIN_EXIT;
+	}
 	extras(flags, ports, app, step);
 	// 7b's refusals before anything is written; a failed prerequisite or a refused gateway writes and starts nothing.
 	const dataDir = join(home, layoutForHome("multi", home).data);
@@ -259,8 +270,7 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	const unitModel = unitParentModel(ports.read(join(unitDir, PARENT_UNIT)));
 	const wrapped = wrapperModels(wrapperText);
 	const kept = { parent: previousConfig ? previousConfig.parent_model : unitModel.generated ? unitModel.model : wrapped.parent, operator: wrapped.operator };
-	const agentDir = ports.env.PI_CODING_AGENT_DIR ?? join(ports.env.HOME ?? "", ".pi/agent");
-	const models = chooseModels({ flags, ports, home, app, agentDir, fresh: !previousConfig && !unitModel.generated && !wrapped.generated, force, dry, prompting, answer, step, kept });
+	const models = chooseModels({ flags, ports, home, app, agentDir, fresh: !previousConfig && !unitModel.generated && !wrapped.generated, force, dry, prompting, answer, step, kept, ...(listing ? { listing } : {}) });
 	if (models === "fail") return 1;
 	// A kept parent pin leaves the wrapper's own export as it was (an older wrapper carries none): byte-identical.
 	const wrapperParent = models.parent === kept.parent ? wrapped.parent : models.parent;
@@ -450,7 +460,7 @@ function configuredSources(text: string | undefined): string[] | undefined {
 	}
 }
 
-/** Step 3a (P2i): gh login, pi-lens host tools, worker pi packages, this checkout as a package, optional tools, provider login. */
+/** Step 3a (P2i): gh login, pi-lens host tools, worker pi packages, this checkout as a package, optional tools. */
 function extras(flags: InstallFlags, ports: InstallPorts, app: string, step: Step): void {
 	const ok = (command: string, ...args: string[]) => ports.run(command, args).status === 0;
 	const run = (name: string, command: string, args: string[]): void => {
@@ -490,7 +500,10 @@ function extras(flags: InstallFlags, ports: InstallPorts, app: string, step: Ste
 	const { tmux } = OPTIONAL_TOOL_INFO;
 	if (ok("tmux", "-V")) step("ok", "tmux", "on PATH (optional)");
 	else step("skip", "tmux", `not on PATH (optional: ${tmux.why}); ${tmux.install}`);
+}
 
+/** Step 3a when pi's listing cannot answer (a dry run, no table) or nothing starts: auth.json's providers. */
+function authLogin(ports: InstallPorts, agentDir: string, step: Step): void {
 	const auth = ports.read(join(agentDir, "auth.json"));
 	let providers = 0;
 	try {
@@ -500,6 +513,18 @@ function extras(flags: InstallFlags, ports: InstallPorts, app: string, step: Ste
 	}
 	if (providers > 0) step("ok", "login", `${providers} provider(s) in ${join(agentDir, "auth.json")}`);
 	else step("skip", "login", `no provider in ${join(agentDir, "auth.json")}${auth === undefined ? "" : " (empty or unreadable)"}: run \`pi\`, then /login (credentials are never handled here)`);
+}
+
+/** The exit when no provider login lets cp-daemon's parent run: nothing was written or started (#375 P1). */
+export const NEEDS_LOGIN_EXIT = 4;
+
+const shellWord = (word: string): string => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
+
+/** The exact `bin/cp-install` command that reruns this install with the same flags, shell-quoted. */
+export function rerunCommand(app: string, home: string, flags: InstallFlags): string {
+	const rest = Object.entries(flags).filter(([name, value]) => name !== "home" && name !== "app" && value !== undefined && value !== false);
+	const words = rest.flatMap(([name, value]) => (value === true ? [`--${name}`] : [`--${name}`, String(value)]));
+	return [join(app, "bin/cp-install"), "--home", home, "--app", app, ...words].map(shellWord).join(" ");
 }
 
 /** Step 11: wait for this home's host to run a parent, then return its `/doctor` (host `doctor` op). */
