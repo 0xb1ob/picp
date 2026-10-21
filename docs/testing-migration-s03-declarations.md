@@ -102,4 +102,14 @@ Expected: one durable CI/PR WATCH TICK FAILED entry for the malformed fleet, par
 Observed: no entries after 15 seconds and child FleetError crash. The intentionally failing fragment was removed
 from the pushed suite. Declaration 71 stays pending; the original unit file remains whole.
 
+## S03b current declaration ledger
+
+| Declaration | Disposition | Evidence |
+|---|---|---|
+| 54–56, 64–68, 78 | mapped | Main assertion ledger and docs/testing-migration-s03b-controls.md; nine newly mapped declarations |
+| 71 | pending-fix | Real parent must emit a durable watch-failure notice without crashing; reproducer: /home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s03b-pntl/watch-failure-reproducer.ts, outside pushed suite |
+
+`pending-fix` is recorded here because the assertion-map parser rejects that status; it is not represented as retained.
+The unit file stays whole while 71 is pending. Remaining work in this continuation: 45, 58, 60, 70 and S02 6/8/32/33.
+
 An exploratory timer-health case was also removed: two different malformed fleet shapes both surfaced as unsafe job id "-" rather than supplying the two distinct failure causes needed by declaration 71. That failed conversion attempt is not counted as mapping or negative-control evidence.

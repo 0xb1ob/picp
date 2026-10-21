@@ -20,6 +20,7 @@ import { CI_EVIDENCE_KEEP, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, pa
 import { drainFile } from "../../src/drain.ts";
 import type { ForgeConfig } from "../../src/forge-url.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
+import { lastFiledEnvelopeFile } from "../../src/supersede.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { MainCiStore } from "../../src/main-ci.ts";
 import { formatMerge, readMergeReceipt } from "../../src/merges.ts";
@@ -1556,6 +1557,120 @@ test("landing S03: changes during a branch update stop before the next integrati
 		assert.equal(s.ghCalls().filter((call) => call.startsWith("pr update-branch")).length, 1, "no repeated update after changed facts");
 		assert.deepEqual(mergedCalls(s.ghCalls()), []);
 	});
+});
+
+test("landing S03: startup snapshots queued held heads and generations before the lane opens", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	for (const changed of ["generation", "head"]) await t.test(changed, async (t) => {
+		const s = await startStack(t);
+		const first = await s.held("startup lane owner", 316);
+		const second = await s.held("startup queued identity", 317);
+		await s.post.manager.shutdown(first.jobId);
+		await s.post.manager.shutdown(second.jobId);
+		const gate = join(s.home, "startup-lane-release");
+		s.setGh({ runs: [run(316, first.head, "completed", "success"), run(317, second.head, "completed", "success")], routes: [{ match: `pr view ${first.prUrl}`, replies: [{ pass: true, untilFile: gate }] }] });
+		await s.parent("Observe queued startup identities.", [{ kind: "text", text: "Observed." }], async () => {
+			await waitFor(() => s.ghCalls().some((call) => call.startsWith(`pr view ${first.prUrl}`)), Boolean, { timeoutMs: 10_000, what: "first startup holds the project lane" });
+			try {
+				if (changed === "generation") await s.post.fleet.patch(second.jobId, { supersessions: 1 });
+				else {
+					const file = lastFiledEnvelopeFile(s.home, s.post.fleet.get(second.jobId)!)!;
+					const record = JSON.parse(readFileSync(file, "utf8"));
+					record.envelope.head_sha = "a".repeat(40);
+					writeFileSync(file, JSON.stringify(record));
+				}
+			} finally { writeFileSync(gate, "release"); }
+			const outcome = await waitFor(() => readRunEvents(s.home, second.jobId).filter((event) => event.type === "continuation").at(-1)?.payload as { action: string; key: string; reason: string } | undefined, (entry) => entry !== undefined, { timeoutMs: 15_000, what: "queued startup records its outcome" });
+			assert.equal(outcome!.action, "stale", "queued startup cannot adopt a reopened identity");
+			assert.ok(outcome!.key.includes(second.head) && outcome!.key.endsWith("startup@1"), "startup identity preserves the observed head and generation");
+			assert.match(outcome!.reason, changed === "generation" ? /generation 1 to 2/ : /moved from/);
+			assert.ok(!s.ghCalls().some((call) => call.startsWith(`pr view ${second.prUrl}`)), "stale queued startup reaches no forge read");
+		});
+	});
+});
+
+test("landing S03: expired review passes advance immediately and deadline faults never rearm", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	for (const mode of ["expired", "retry"]) await t.test(mode, async (t) => {
+		const s = await startStack(t);
+		const live = await s.held(`restart window ${mode}`, 318);
+		await s.post.manager.shutdown(live.jobId);
+		writeWindowPass(s.home, live.jobId, live.head, isoTimestamp(new Date(Date.now() - (mode === "expired" ? 60_000 : 0))));
+		s.setGh({ integration: true, runs: [run(318, live.head, "completed", "success")], routes: mode === "retry" ? [{ match: "pr merge", replies: [{ code: 1, stderr: "network unavailable" }] }] : [] });
+		await s.parent("Resume the review window.", [{ kind: "text", text: "Observing." }], async () => {
+			await waitFor(() => s.post.integrator.get(live.jobId), (record) => record?.next === (mode === "expired" ? "done" : "retry"), { timeoutMs: mode === "expired" ? 15_000 : 45_000, what: `${mode} startup reaches terminal result` });
+			const records = () => readRunEvents(s.home, live.jobId).filter((event) => event.type === "continuation" && (event.payload as { event: string }).event === "startup");
+			if (mode === "retry") await waitFor(records, (events) => events.some((event) => (event.payload as { next: string }).next === "retry"), { timeoutMs: 45_000, what: "startup deadline itself records retry" });
+			if (mode === "expired") assert.equal(s.post.durableWakeups.read().pending.filter((entry) => entry.content.includes("HELD PR WAITING")).length, 0, "expired pass creates no new deadline");
+			else {
+				const count = records().length;
+				await new Promise((resolve) => setTimeout(resolve, 32_000));
+				assert.equal(records().length, count, "operational retry never rearms its deadline");
+				assert.ok(records().some((event) => (event.payload as { next: string }).next === "retry"), "the deadline fault remains an operational retry");
+			}
+		});
+	});
+});
+
+test("landing S03: unreadable drain blocks a deadline and leaves its fact actionable", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t, { continuation: true });
+	const live = await s.held("unreadable drain recovery", 319);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	writeWindowPass(s.home, live.jobId, live.head, isoTimestamp());
+	s.setGh({ integration: true, runs: [run(319, live.head, "completed", "success")] });
+	const original = await s.tick(live.jobId);
+	s.post.confirmCi(original.observations.map((entry) => entry.key));
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	writeFileSync(drainFile(s.home), "{ invalid json");
+	const before = readRunEvents(s.home, live.jobId).filter((event) => event.type === "continuation").length;
+	const entries = await waitFor(() => readRunEvents(s.home, live.jobId).filter((event) => event.type === "continuation"), (entries) => entries.length > before, { timeoutMs: 45_000, what: "deadline encounters unreadable drain" });
+	const outcome = entries.at(-1)!.payload as { action: string; steps: number };
+	assert.equal(outcome.action, "draining", "unreadable drain fails closed at the real deadline");
+	assert.equal(outcome.steps, 0);
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+	rmSync(drainFile(s.home));
+	rmSync(join(s.home, LAYOUT.ciWatchFile));
+	const replay = await s.post.ciTick();
+	assert.equal(replay.observations[0]?.key, original.observations[0]?.key, "drain recovery replays the identical CI fact");
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.equal(s.post.integrator.get(live.jobId)?.next, "done", "the same CI fact remains actionable after drain recovery");
+});
+
+test("landing S03: patch-equivalent review waits synchronously on its new durable pass", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t, { continuation: true });
+	const live = await s.held("equivalent review window", 321);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	await s.post.manager.shutdown(live.jobId);
+	const patchId = execFileSync("git", ["patch-id", "--stable"], { input: git(live.worktree, "diff", "origin/main...HEAD"), encoding: "utf8" }).split(" ")[0]!;
+	const originalPassAt = isoTimestamp();
+	writeWindowPass(s.home, live.jobId, live.head, originalPassAt, { patch_id: patchId });
+	s.setGh({ integration: true, runs: [run(321, live.head, "completed", "success")] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	await new Promise((resolve) => setTimeout(resolve, 2_000));
+	advanceBase(s.repo, "base-window.txt", "base advances\n");
+	git(live.worktree, "fetch", "origin");
+	git(live.worktree, "merge", "--no-edit", "origin/main");
+	git(live.worktree, "push", "origin", live.jobId);
+	const head = git(live.worktree, "rev-parse", "HEAD");
+	s.setGh({ integration: true, runs: [run(321, head, "completed", "success")] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	const equivalent = JSON.parse(readFileSync(join(s.home, paths.reviewEquivalenceFile(live.jobId, head)), "utf8"));
+	assert.equal(equivalent.equivalent_to.head_sha, live.head);
+	const outcome = readRunEvents(s.home, live.jobId).filter((event) => event.type === "continuation").at(-1)!.payload as { action: string; steps: number };
+	assert.equal(outcome.action, "wait");
+	assert.equal(outcome.steps, 1, "synchronous equivalence arms the window without another integration step");
+	assert.equal(s.post.durableWakeups.pending().filter((entry) => entry.content.includes("HELD PR WAITING")).length, 2, "a changed head replaces the original deadline");
+	await s.post.fleet.patch(live.jobId, { supersessions: 1 });
+	s.setGh({ runs: [run(321, head, "completed", "success", { run_attempt: 2 })] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.equal(s.post.durableWakeups.pending().filter((entry) => entry.content.includes("HELD PR WAITING")).length, 3, "a valid new generation replaces its deadline");
+	await waitFor(() => Date.now(), (now) => now > Date.parse(originalPassAt) + 30_300, { timeoutMs: 40_000, what: "the canceled original deadline passes" });
+	assert.equal(mergedCalls(s.ghCalls()).length, 0, "replaced deadlines never merge early");
+	await s.post.integrate({ jobId: live.jobId });
+	assert.equal(s.post.integrator.get(live.jobId)?.next, "wait", "the waiting review releases the manual integration lane");
+	await waitFor(() => s.post.integrator.get(live.jobId)?.next, (next) => next === "done", { timeoutMs: 45_000, what: "equivalent pass deadline lands" });
+	assert.equal(mergedCalls(s.ghCalls()).length, 1);
 });
 
 test("landing S03: a real parent that loses its lock cannot execute a pending review deadline", { skip: SKIP, timeout: 600_000 }, async (t) => {
