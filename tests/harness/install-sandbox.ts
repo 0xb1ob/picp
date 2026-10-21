@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { classifyPi } from "../../src/pi-compat.ts";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
 
 export const SCENARIOS = ["fresh", "prerequisites", "rerun", "login", "recovery", "root", "compat"] as const;
@@ -360,7 +361,9 @@ const scenarios: Record<Scenario, (ctx: Ctx) => Promise<void>> = {
 		const major = maj;
 		const nextMajor = `${maj + 1}.0.0`;
 		const newerSame = max.replace(/\d+$/, String(pat + 1));
-		const older = minPat > 0 ? `${minMaj}.${minMin}.${minPat - 1}` : `${minMaj - 1}.99.0`;
+		// Below min by the patch, else the previous minor's x.0 (min's patch is 0), else the previous major's x.0.0.
+		const older = minPat > 0 ? `${minMaj}.${minMin}.${minPat - 1}` : minMin > 0 ? `${minMaj}.${minMin - 1}.0` : `${minMaj - 1}.0.0`;
+		check(ctx, minMaj + minMin + minPat > 0 && classifyPi({ min, testedMax: max }, { version: older, extension: { ok: true, detail: "" } }).state === "old", `derived older pi ${older} does not classify below min ${min}`);
 		const esc = (text: string): string => text.replace(/\./g, "\\.");
 		const updates = (): string => (existsSync(join(PI_STUB, "updates")) ? readFileSync(join(PI_STUB, "updates"), "utf8").trim() : "");
 		const range = `pi >= ${min}, tested up to ${max}, major ${major}`;
