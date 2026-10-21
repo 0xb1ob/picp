@@ -1494,7 +1494,8 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		const latched = readFileSync(file, "utf8");
 		await observe([own(tip, "failure")]);
 		assert.equal(readFileSync(file, "utf8"), latched, "repeat red preserves the original latch bytes");
-		await waitFor(s.parentMessages, (body) => body.includes("MAIN IS RED"), { timeoutMs: 30_000, what: "main red wake reaches parent provider" });
+		const redBody = await waitFor(s.parentMessages, (body) => body.includes("MAIN IS RED"), { timeoutMs: 30_000, what: "main red wake reaches parent provider" }).catch(() => s.parentMessages());
+		assert.ok(redBody.includes("MAIN IS RED"), "main red wake reaches parent provider");
 		assert.equal(s.parentMessages().split("MAIN IS RED").length - 1, 1, "repeat red emits one parent wake");
 		assert.ok(s.parentMessages().includes(`MAIN IS RED — demo: CI failed on ${tip.slice(0, 12)} (ci) — failing: main regression`));
 		assert.ok(s.parentMessages().includes("cp_integrate returns wait for every demo PR except one based on the current main with green CI"));
@@ -1510,7 +1511,8 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		assert.equal(readFileSync(file, "utf8"), latched, "pending current-tip workflow prevents clearing");
 		await observe([], { routes: [...routes, { match: "actions/runs?", replies: [{ stdout: "not json" }] }] });
 		assert.equal(readFileSync(file, "utf8"), latched, "malformed CI never clears the latch");
-		await waitFor(s.parentMessages, (body) => body.includes("main CI (demo)") && body.includes("malformed"), { timeoutMs: 30_000, what: "malformed main CI read names project and cause" });
+		const malformedBody = await waitFor(s.parentMessages, (body) => body.includes("main CI (demo)") && body.includes("malformed"), { timeoutMs: 30_000, what: "malformed main CI read names project and cause" }).catch(() => s.parentMessages());
+		assert.ok(malformedBody.includes("main CI (demo)") && malformedBody.includes("malformed"), "malformed main CI read names project and cause");
 		await observe([], { routes: [...routes, { match: "actions/runs?", replies: [{ code: 1, stderr: "HTTP 403: forbidden" }] }] });
 		assert.equal(readFileSync(file, "utf8"), latched, "denied CI never clears the latch");
 		await observe([own(tip, "success"), own(tip, "failure", "someone-else"), own(tip, "failure", "e2e", "dynamic")]);
@@ -1524,13 +1526,16 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		writeFileSync(file, JSON.stringify(legacyRow));
 		await observe([run(109, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" } })]);
 		assert.deepEqual(rows(), [], "legacy latch releases even while main CI is inconclusive");
-		await waitFor(s.parentMessages, (body) => body.includes("MAIN CI LATCH RELEASED"), { timeoutMs: 30_000, what: "legacy release reaches parent" });
+		const legacyBody = await waitFor(s.parentMessages, (body) => body.includes("MAIN CI LATCH RELEASED"), { timeoutMs: 30_000, what: "legacy release reaches parent" }).catch(() => s.parentMessages());
+		assert.ok(legacyBody.includes("MAIN CI LATCH RELEASED"), "legacy release reaches parent");
 		const foreign = JSON.parse(cleared);
 		foreign.projects = [{ project: "demo", red_since_sha: oldTip, red_since_at: isoTimestamp(), login: "other" }];
 		writeFileSync(file, JSON.stringify(foreign));
 		await observe([run(109, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" } })]);
 		assert.deepEqual(rows(), [], "foreign latch releases on inconclusive main CI");
-		await waitFor(s.parentMessages, (body) => body.includes(`MAIN CI LATCH RELEASED — demo: red since ${oldTip.slice(0, 12)} no longer counts (latched for other, this machine is e2e). Call cp_integrate for held demo PRs.`), { timeoutMs: 30_000, what: "foreign release notice reaches parent" });
+		const releasedNotice = `MAIN CI LATCH RELEASED — demo: red since ${oldTip.slice(0, 12)} no longer counts (latched for other, this machine is e2e). Call cp_integrate for held demo PRs.`;
+		const releasedBody = await waitFor(s.parentMessages, (body) => body.includes(releasedNotice), { timeoutMs: 30_000, what: "foreign release notice reaches parent" }).catch(() => s.parentMessages());
+		assert.ok(releasedBody.includes(releasedNotice), "foreign release notice reaches parent");
 		writeFileSync(file, JSON.stringify(foreign));
 		await observe([own(tip, "failure")], { routes: [routes[0]!, { match: "run view 106 --log-failed", replies: [{ stdout: "nothing useful" }] }], jobs: { 106: [{ id: 1060, name: "structure checks", status: "completed", conclusion: "failure", steps: [] }] } });
 		assert.equal(rows()[0]?.failing, "structure checks", "missing failure log falls back to the failed job");
@@ -1547,9 +1552,11 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		assert.deepEqual(rows().map((row) => row.project), ["other"], "clearing demo preserves another project's latch");
 		s.setGh({ routes, runs: [own(tip, "failure")], jobs: { 106: [setupJob("Install treehouse")] } });
 		await waitFor(s.ghCalls, (calls) => calls.some((call) => call === "run rerun 106 --failed"), { timeoutMs: 30_000, what: "main infra failure reruns once" });
+		await observe([run(106, tip, "in_progress", null, { event: "push", triggering_actor: { login: "e2e" }, run_attempt: 2 })]);
 		assert.deepEqual(rows().map((row) => row.project), ["other"], "infra rerun does not latch demo");
 		await observe([{ ...own(tip, "failure"), run_attempt: 2 }], { jobs: { 106: [setupJob("Install treehouse")] } });
 		assert.equal(rows().find((row) => row.project === "demo")?.red_since_sha, tip, "second infra failure latches main");
+		assert.ok(rows().some((row) => row.project === "other"), "latching demo preserves another project's latch");
 		assert.equal(s.ghCalls().filter((call) => call === "run rerun 106 --failed").length, 1, "attempt two never reruns again");
 		assert.ok(s.ghCalls().includes("api repos/{owner}/{repo}/actions/runs/106/attempts/2/jobs?per_page=100&page=1"));
 		const claimAtRerun = s.ghCalls().find((call) => call.startsWith("claims-at-rerun")) ?? "";
@@ -1687,7 +1694,7 @@ test("landing: main CI scope skips inactive grants and login faults preserve lat
 	const beforeFault = loginCalls();
 	s.setGh({ routes: [{ match: "api user --jq .login", replies: [{ code: 1, stderr: "gh: not logged in" }] }], runs: [] });
 	await s.parent("Observe an unreadable main CI login.", [{ kind: "text", text: "Observing login." }], async () => {
-		await waitFor(loginCalls, (count) => count >= beforeFault + 2, { timeoutMs: 30_000, what: "failed login is retried by next tick" });
+		await waitFor(() => loginCalls() >= beforeFault + 2 || s.ghCalls().some((call) => call.includes("actions/runs")), Boolean, { timeoutMs: 30_000, what: "login fault either retries or improperly reads CI" });
 		assert.equal(readFileSync(file, "utf8"), saved, "unreadable login preserves latch bytes");
 		assert.ok(!s.ghCalls().some((call) => call.includes("actions/runs")), "failed login reads no CI");
 	}, true);
