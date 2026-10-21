@@ -59,8 +59,8 @@ export function readLines(file: string, offset: number, maxBytes = MAX_READ_BYTE
 		const buf = Buffer.alloc(length);
 		const read = readSync(fd, buf, 0, length, start);
 		let lineStart = 0;
-		for (let i = 0; i < read; i++) {
-			if (buf[i] !== 0x0a) continue;
+		// Native newline search: a byte-by-byte JS loop dominated cold reads of many large session tails.
+		for (let i = buf.indexOf(0x0a, 0); i !== -1 && i < read; i = buf.indexOf(0x0a, i + 1)) {
 			const text = buf.subarray(lineStart, i).toString("utf8");
 			if (text.trim().length > 0) lines.push({ id: start + i + 1, text });
 			lineStart = i + 1;

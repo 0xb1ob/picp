@@ -30,6 +30,9 @@ function readUncached(file: string, max: number): string {
  } finally { closeSync(fd); }
 }
 const cachedText = fileCache((file: string) => readUncached(file, 16 * 1024 * 1024));
+const cachedJson = fileCache((file: string) => parseObject(readUncached(file, 16 * 1024 * 1024)));
+/** `parseObject(readBounded(file))`, parsed once per file identity; the object is shared, so never mutate it. */
+export const readJson = (file: string): Json | undefined => cachedJson(file);
 export function readBounded(file: string, max = 16 * 1024 * 1024): string {
  return max === 16 * 1024 * 1024 ? cachedText(file) : readUncached(file,max);
 }
@@ -42,8 +45,15 @@ export function parseObject(text: string): Json | undefined {
 }
 export function objectList(file: string, key: string, valid: (item: Json) => boolean): Source<Json[]> {
  return source(() => {
-  const value = parseObject(readBounded(file))?.[key];
+  const value = cachedJson(file)?.[key];
   if (!Array.isArray(value) || value.some(item => !obj(item) || !valid(item))) throw new Error("invalid source");
-  return value as Json[];
+  // A copy: the parsed file is shared across requests, so a caller's sort must not reorder it.
+  return [...value] as Json[];
  }, []);
+}
+/** `items` by `item[key]`, first occurrence winning like `Array.find`, so per-job lookups stay O(1). */
+export function firstById(items: readonly Json[], key: string): Map<unknown, Json> {
+ const out = new Map<unknown, Json>();
+ for (const item of items) if (!out.has(item[key])) out.set(item[key], item);
+ return out;
 }

@@ -3,13 +3,13 @@ import { join } from "node:path";
 import type { MandatesResponse, MapResponse, MapNode } from "./api-types.ts";
 import { jobRow, mandateSpend, spendJobs } from "./fleet-view.ts";
 import { grantFor } from "./overview-jobs.ts";
-import { LEDGER_STATUSES, nonnegative, objectList, parseObject, readBounded, source, strings, text, timestamp, today } from "./overview-read.ts";
+import { firstById, LEDGER_STATUSES, nonnegative, objectList, readJson, source, strings, text, timestamp, today } from "./overview-read.ts";
 import { isSafeId, obj, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 import { modelWindows, workerContext } from "./context-usage.ts";
 
 function sources(state: ViewerState) {
  const grants = source<Json[]>(() => readdirSync(join(state.stateDir,"mandates")).filter(n => /^md-[A-Za-z0-9_-]+\.json$/.test(n)).map(name => {
-  const m = parseObject(readBounded(join(state.stateDir,"mandates",name)));
+  const m = readJson(join(state.stateDir,"mandates",name));
   if (!m || !text(m.id) || !isSafeId(m.id) || !["active","paused","revoked","expired"].includes(str(m.status) ?? "") || !timestamp(m.expiry) || !timestamp(m.issued_at) || !Array.isArray(m.projects) || !m.projects.every(text) || !obj(m.spend_cap)) throw new Error("invalid mandate");
   return m;
  }).sort((a,b) => String(a.issued_at).localeCompare(String(b.issued_at)) || String(a.id).localeCompare(String(b.id))), []);
@@ -24,8 +24,10 @@ export function mandateEscalations(state: ViewerState) {
  * A mandate's display status, the one rule Map and Board share (audit P2 #11): a grant whose named jobs are all
  * closed today shows "closed". Display completion only: no grant authority is changed, and broad grants cannot imply mission end.
  */
+const ledgerIndexes=new WeakMap<Json[],Map<unknown,Json>>();
 export function mandateDisplay(m: Json, ledger: Json[], escalations: Json[], now: number): {status: string; closed_at?: string} {
- const named=strings(m.job_ids).map(id=>ledger.find(j=>j.id===id));
+ let byId=ledgerIndexes.get(ledger); if(!byId) ledgerIndexes.set(ledger,byId=firstById(ledger,"id"));
+ const named=strings(m.job_ids).map(id=>byId.get(id));
  const completed=named.length>0 && named.every(j=>j?.status==="closed" && timestamp(j.closed_at) && Date.parse(j.closed_at)<=now);
  const lastClose=completed ? named.map(j=>String(j!.closed_at)).sort((a,b)=>Date.parse(a)-Date.parse(b)).at(-1) : undefined;
  const missionClosed=m.status==="revoked" && today(m.revoked_at,now) && Date.parse(String(m.revoked_at))<=now && escalations.some(e=>
@@ -37,14 +39,15 @@ export function mandateDisplay(m: Json, ledger: Json[], escalations: Json[], now
 function project(job: Json): string { return strings(job.labels).find(l => l.startsWith("project:"))?.slice(8) ?? str(job.project) ?? "Unknown project"; }
 function projectMandates(state: ViewerState, input: ReturnType<typeof sources>, now: number, usage = input.fleet.availability === "unavailable" ? [] : spendJobs(state,input.grants.value)): MandatesResponse {
  const {grants,ledger,fleet,escalations}=input;
- const assignments = new Map(ledger.value.map(j => [j,grantFor(j,grants.value,now)?.id]));
+ const assigned = new Map<unknown, string[]>();
+ for (const j of ledger.value) { const id = grantFor(j,grants.value,now)?.id; const list = assigned.get(id) ?? []; list.push(String(j.id)); assigned.set(id, list); }
  const items = grants.value.map(m => {
   return {
   id:String(m.id), ...mandateDisplay(m,ledger.value,escalations.value,now),
   projects:strings(m.projects), objective:str(m.objective) ?? "", expiry:String(m.expiry), pause_reason:str(m.pause_reason) ?? null,
   ask_on:strings(m.ask_on), spend_cap:{usd:nonnegative(obj(m.spend_cap)?.usd),tokens:nonnegative(obj(m.spend_cap)?.tokens)},job_cap:nonnegative(m.job_cap),dispatch_parallelism:nonnegative(m.dispatch_parallelism),
   spend:fleet.availability === "unavailable" ? null : mandateSpend(m,usage),
-  job_ids:ledger.value.filter(j => assignments.get(j) === m.id).map(j => String(j.id)),
+  job_ids:assigned.get(m.id) ?? [],
  }; });
  const count=(status:string) => grants.availability === "unavailable" ? null : items.filter(m=>m.status===status).length;
  return {generated_at:new Date(now).toISOString(),availability:{mandates:grants.availability,fleet:fleet.availability,ledger:ledger.availability,escalations:escalations.availability},items,active_count:count("active"),paused_count:count("paused"),revoked_count:count("revoked")};
@@ -56,21 +59,23 @@ export function dependencyMap(state: ViewerState, now=Date.now()): MapResponse {
  const rows=new Map(usage.map(entry=>[entry.job_id,jobRow(state,entry,undefined)]));
  const watched=objectList(join(state.stateDir,"ci-watch.json"),"jobs",j=>text(j.job_id)); const windows=modelWindows(state.stateDir);
  const ids=new Set([...ledger.value.map(j=>String(j.id)),...fleet.value.map(j=>String(j.job_id)),...ledger.value.flatMap(j=>strings(j.blocked_by))]);
+ const ledgerById=firstById(ledger.value,"id"), fleetById=firstById(fleet.value,"job_id"), watchById=firstById(watched.value,"job_id");
  const nodes:MapNode[]=[...ids].sort().map(id=>{
-  const job=ledger.value.find(j=>j.id===id); const entry=fleet.value.find(j=>j.job_id===id);
+  const job=ledgerById.get(id); const entry=fleetById.get(id);
   const detail=rows.get(id);
   const p=job ? project(job) : str(entry?.project) ?? "Unknown project";
   const grant=grantFor(job ?? {id,labels:[`project:${p}`,`kind:${str(entry?.kind) ?? ""}`]},grants.value,now);
   const phase=entry ? entry.phase === "waiting" ? detail?.run_phase === "starting" ? "launching" : detail?.run_phase ?? "waiting" : String(entry.phase) : fleet.availability === "unavailable" ? "unknown" : job?.status === "closed" ? "done" : "not dispatched";
-  return {id,title:str(job?.title) ?? id,project:p,mandate_id:grant ? String(grant.id) : null,phase,ledger_status:str(job?.status) ?? null,model:detail?.model ?? null,cost_usd:detail ? detail.cost_usd+detail.reviewer_cost_usd : entry || fleet.availability === "unavailable" ? null : 0,pr_url:detail?.pr_url ?? null,...(detail?.pr_status ? {pr_status:detail.pr_status} : {}),ci:str(watched.value.find(w=>w.job_id===id)?.last_ci) ?? null,context:entry ? workerContext(state,id,detail?.model,windows) : null};
+  return {id,title:str(job?.title) ?? id,project:p,mandate_id:grant ? String(grant.id) : null,phase,ledger_status:str(job?.status) ?? null,model:detail?.model ?? null,cost_usd:detail ? detail.cost_usd+detail.reviewer_cost_usd : entry || fleet.availability === "unavailable" ? null : 0,pr_url:detail?.pr_url ?? null,...(detail?.pr_status ? {pr_status:detail.pr_status} : {}),ci:str(watchById.get(id)?.last_ci) ?? null,context:entry ? workerContext(state,id,detail?.model,windows) : null};
  });
  const available=ledger.availability !== "unavailable" && grants.availability !== "unavailable";
+ const nodeById=new Map(nodes.map(n=>[n.id,n])), grantById=firstById(grants.value,"id");
  const edges:MapResponse["edges"]=ledger.value.flatMap(j=>strings(j.blocked_by).map(from=>{
-  const blocker=ledger.value.find(b=>b.id===from);
+  const blocker=ledgerById.get(from);
   const dropped=blocker?.status === "closed" && (str(blocker.close_reason) ?? "").startsWith("dropped:");
-  const m=grants.value.find(m=>m.id===nodes.find(n=>n.id===from)?.mandate_id);
+  const m=grantById.get(nodeById.get(from)?.mandate_id);
   const kind=blocker?.status === "closed" && !dropped ? "satisfied" : !available ? "unknown" : !blocker || dropped || m?.status !== "active" || Date.parse(String(m.expiry))<=now ? "stranded" : "open";
   return {from,to:String(j.id),kind};
  }));
- return {...data,nodes,edges,stranded_count:available ? edges.filter(e=>e.kind==="stranded" && nodes.find(n=>n.id===e.to)?.ledger_status !== "closed").length : null};
+ return {...data,nodes,edges,stranded_count:available ? edges.filter(e=>e.kind==="stranded" && nodeById.get(e.to)?.ledger_status !== "closed").length : null};
 }

@@ -10,12 +10,14 @@
  * `tests/viewer-workbench.test.ts` pins them to the real functions on the same home.
  */
 
-import { type Dirent, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { worktreeRoot } from "./explorer.ts";
 import { readScheduleFile } from "./schedule-core.ts";
 import { SHA } from "./git-read.ts";
 import { fleetJobs, isSafeId, type Json, num, obj, readLedger, readObject, readStatus, str, type ViewerState } from "./sessions.ts";
+import { fileCache, scoped } from "./file-cache.ts";
+import { grantCandidates } from "./overview-jobs.ts";
 // The only PR/MR URL shape that reaches the page; everything else is dropped server-side.
 import { isSafeChangeRequestUrl } from "../forge-url.ts";
 
@@ -68,20 +70,20 @@ export function readMandates(state: ViewerState): Json[] {
 		.sort((a, b) => String(a.issued_at).localeCompare(String(b.issued_at)));
 }
 
+const reviewerDirs = fileCache((dir: string) => readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() && REVIEWER_RUN_DIR.test(e.name)).map((e) => e.name), (names) => names.length * 64);
 /** Summed usage of every gate/review/quality run under `runs/<jobId>/`. */
 export function reviewerUsage(state: ViewerState, jobId: string): Usage | undefined {
 	if (!isSafeId(jobId)) return undefined;
 	const dir = join(state.stateDir, "runs", jobId);
-	let entries: Dirent[];
+	let names: string[];
 	try {
-		entries = readdirSync(dir, { withFileTypes: true });
+		names = reviewerDirs(dir);
 	} catch {
 		return undefined;
 	}
 	let total: Usage | undefined;
-	for (const entry of entries) {
-		if (!entry.isDirectory() || !REVIEWER_RUN_DIR.test(entry.name)) continue;
-		const u = usage(readObject(join(dir, entry.name, "status.json"))?.usage);
+	for (const name of names) {
+		const u = usage(readObject(join(dir, name, "status.json"))?.usage);
 		if (!u) continue;
 		total = {
 			cost_usd: (total?.cost_usd ?? 0) + u.cost_usd,
@@ -128,6 +130,25 @@ function covers(m: Json, job: UsageJob): boolean {
 	return true;
 }
 
+const coverIndexes = new WeakMap<readonly UsageJob[], { byProject: Map<string, number[]>; byId: Map<string, number[]> }>();
+/** The jobs `m` could cover, in `jobs` order: its named jobs, else its projects' jobs. `covers` still decides. */
+function coverCandidates(m: Json, jobs: readonly UsageJob[]): UsageJob[] {
+	let index = coverIndexes.get(jobs);
+	if (!index) {
+		index = { byProject: new Map(), byId: new Map() };
+		for (const [i, job] of jobs.entries()) {
+			for (const [map, key] of [[index.byProject, job.project], [index.byId, job.job_id]] as const) {
+				const slot = map.get(key) ?? [];
+				slot.push(i); map.set(key, slot);
+			}
+		}
+		coverIndexes.set(jobs, index);
+	}
+	const ids = strings(m.job_ids);
+	const slots = ids.length > 0 ? ids.map((id) => index.byId.get(id) ?? []) : strings(m.projects).map((p) => index.byProject.get(p) ?? []);
+	return [...new Set(slots.flat())].sort((a, b) => a - b).map((i) => jobs[i]!);
+}
+
 const mandateTokens = (u?: Usage): number => Math.max(0, (u?.total_tokens ?? 0) - (u?.cache_read ?? 0));
 const isLive = (m: Json): boolean => m.status === "active" || m.status === "paused";
 
@@ -153,7 +174,7 @@ function baselineOf(m: Json): Map<string, Baseline> {
 const past = (now: number, then = 0): number => Math.max(0, now - then);
 
 export function mandateSpend(m: Json, jobs: readonly UsageJob[]): { usd: number; tokens: number; jobs: number; inFlight: number } {
-	const matched = jobs.filter((job) => covers(m, job));
+	const matched = coverCandidates(m, jobs).filter((job) => covers(m, job));
 	const baseline = baselineOf(m);
 	const named = strings(m.job_ids).length > 0;
 	let usd = 0;
@@ -231,7 +252,7 @@ const finished = (row: JobRow): boolean => row.phase === "done" || row.phase ===
 /** Usage jobs with reviewer spend added where a live (active/paused) mandate covers them. */
 export function spendJobs(state: ViewerState, live: readonly Json[]): UsageJob[] {
 	return usageJobs(state).map((job) => {
-		if (!live.some((m) => covers(m, job))) return job;
+		if (!grantCandidates(live as Json[], job.project, job.job_id).some((m) => covers(m, job))) return job;
 		const reviewers = reviewerUsage(state, job.job_id);
 		return reviewers ? { ...job, reviewer_usage: reviewers } : job;
 	});
@@ -277,7 +298,12 @@ export function jobDetail(state: ViewerState, id: string) {
 	};
 }
 
-export function dashboard(state: ViewerState, now = Date.now(), finishedLimit = FINISHED_SHOWN) {
+/** Overview and the Jobs list both read every finished row; within one `statScope` they share one computation. */
+export function dashboard(state: ViewerState, now = Date.now(), finishedLimit = FINISHED_SHOWN): ReturnType<typeof readDashboard> {
+	return scoped(`dashboard|${state.home}|${state.stateDir}|${now}|${finishedLimit}`, () => readDashboard(state, now, finishedLimit));
+}
+
+function readDashboard(state: ViewerState, now: number, finishedLimit: number) {
 	const mandates = readMandates(state);
 	const live = mandates.filter(isLive);
 	const jobs = spendJobs(state, live);

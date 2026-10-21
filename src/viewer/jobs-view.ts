@@ -1,4 +1,5 @@
 import { realpathSync, statSync } from "node:fs";
+import { scopedRealpath } from "./file-cache.ts";
 import { join, relative, basename } from "node:path";
 import type { BoardResponse, JobResponse, JobsResponse, ViewerJob, JobPhase } from "./api-types.ts";
 import { dashboard, readMandates } from "./fleet-view.ts";
@@ -9,11 +10,11 @@ import { decisions } from "./overview-decisions.ts";
 import { SHA } from "./git-read.ts";
 import { recordedEvents, routingFacts, routingText } from "./overview-health.ts";
 import { mandateDisplay, mandateEscalations } from "./mandates-map-view.ts";
-import { LEDGER_STATUSES, objectList, strings, text, timestamp, today, parseObject, source, nonnegative, readBounded } from "./overview-read.ts";
+import { LEDGER_STATUSES, objectList, strings, text, timestamp, today, parseObject, source, nonnegative, readBounded, firstById } from "./overview-read.ts";
 import { isSafeId, obj, readObject, readStatus, runtimeRoot, str, type Json, type ViewerState } from "./sessions.ts";
 import { modelWindows, workerContext } from "./context-usage.ts";
 import { readLines, startOffset } from "./tail.ts";
-import { forwardedCi, headCi, parkedHead, parkedSeconds, quiescent, recordedReview } from "./overview-jobs.ts";
+import { forwardedCi, grantCandidates, headCi, parkedHead, parkedSeconds, quiescent, recordedReview } from "./overview-jobs.ts";
 import { boardReports } from "./reports-view.ts";
 import { reportFile } from "./job-report.ts";
 import { deployView } from "./deploy-view.ts";
@@ -27,20 +28,28 @@ function dispatchMandate(state:ViewerState,id:string,entry:Json | undefined,stat
  const valid=(value:unknown)=>typeof value==="string" && /^md-[A-Za-z0-9_-]+$/.test(value) ? value : null;
  const saved=valid(entry?.mandate_id) ?? valid(status?.mandate_id);
  if(saved) return saved;
- const file=jobEventsFile(state,id); if(!file) return null;
  for(const event of recordedEvents(state,id)) {
   if(!["spawned","routing_resolved"].includes(str(event.type) ?? "") || (event.job_id!==undefined && event.job_id!==id)) continue;
-  const mandate=valid(obj(event.payload)?.mandate_id); if(mandate) return mandate;
+  // The file check (two realpaths and a stat) only gates a hit; a run with no recorded mandate skips it.
+  const mandate=valid(obj(event.payload)?.mandate_id); if(mandate) return jobEventsFile(state,id) ? mandate : null;
  }
  return null;
 }
+const grantTimes=new WeakMap<Json,{issued:number;expiry:number;revoked:number}>();
+/** A grant's instants, NaN when not a timestamp; parsed once per cached grant object. */
+function times(m:Json) {
+ let t=grantTimes.get(m);
+ if(!t) grantTimes.set(m,t={issued:timestamp(m.issued_at) ? Date.parse(m.issued_at) : NaN,expiry:timestamp(m.expiry) ? Date.parse(m.expiry) : NaN,revoked:timestamp(m.revoked_at) ? Date.parse(m.revoked_at) : NaN});
+ return t;
+}
 function covering(job:Json, project:string, grants:Json[], kind:string | undefined, now:number, dispatchedAt:unknown):Json | undefined {
  // Legacy coverage is inference, never proof of dispatch authorization.
- const at=timestamp(dispatchedAt) ? Date.parse(dispatchedAt) : now;
- const matches=grants.filter(m=>{
-  if(!timestamp(m.expiry) || !timestamp(m.issued_at) || Date.parse(m.issued_at)>at || !strings(m.projects).includes(project) || (strings(m.job_ids).length && !strings(m.job_ids).includes(String(job.id ?? job.job_id))) || (kind && strings(obj(m.exclusions)?.job_kinds).includes(kind))) return false;
-  const live=["active","paused"].includes(String(m.status)) && Date.parse(m.expiry)>now;
-  const historical=timestamp(dispatchedAt) && strings(m.job_ids).length>0 && Date.parse(m.expiry)>at && (m.status!=="revoked" || timestamp(m.revoked_at) && Date.parse(m.revoked_at)>at);
+ const dispatched=timestamp(dispatchedAt); const at=dispatched ? Date.parse(dispatchedAt) : now;
+ const matches=grantCandidates(grants,project,String(job.id ?? job.job_id)).filter(m=>{
+  const t=times(m);
+  if(Number.isNaN(t.expiry) || Number.isNaN(t.issued) || t.issued>at || !strings(m.projects).includes(project) || (strings(m.job_ids).length && !strings(m.job_ids).includes(String(job.id ?? job.job_id))) || (kind && strings(obj(m.exclusions)?.job_kinds).includes(kind))) return false;
+  const live=["active","paused"].includes(String(m.status)) && t.expiry>now;
+  const historical=dispatched && strings(m.job_ids).length>0 && t.expiry>at && (m.status!=="revoked" || t.revoked>at);
   return live || historical;
  });
  return matches.findLast(m=>strings(m.job_ids).length>0) ?? matches.at(-1);
@@ -51,8 +60,9 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
  const watched=readObject(join(state.stateDir,"ci-watch.json"))?.jobs;
  const ciRows=Array.isArray(watched) ? watched.map(obj) : [];
  const ids=[...new Set([...ledger.map(j=>String(j.id)),...fleet.map(j=>String(j.job_id))])];
+ const fleetById=firstById(fleet,"job_id"); const ledgerById=firstById(ledger,"id");
  const jobs:ViewerJob[]=ids.map(id=>{
-  const entry=fleet.find(j=>j.job_id===id); const job=ledger.find(j=>j.id===id);
+  const entry=fleetById.get(id); const job=ledgerById.get(id);
   const detail=rows.get(id); const live=base.in_flight.find(j=>j.id===id);
   const ci=ciRows.find(j=>j?.job_id===id); const envelope=obj(readObject(join(state.stateDir,"runs",id,"envelope.json"))?.envelope);
   const head=parkedHead(entry) ?? [ci?.head_sha,envelope?.head_sha].find(v=>typeof v==="string" && SHA.test(v)) as string | undefined;
@@ -112,8 +122,8 @@ const eventLabels:Record<string,string>={spawned:"Spawned",envelope_received:"Re
 export function jobEventsFile(state:ViewerState,id:string):string | undefined {
  if(!isSafeId(id)) return undefined;
  try {
-  const file=join(realpathSync(join(state.stateDir,"runs")),id,"events.jsonl");
-  return realpathSync(file)===file && statSync(file).isFile() ? file : undefined;
+  const file=join(scopedRealpath(join(state.stateDir,"runs")),id,"events.jsonl");
+  return realpathSync.native(file)===file && statSync(file).isFile() ? file : undefined;
  } catch { return undefined; }
 }
 export function jobEvents(state:ViewerState,id:string):string | undefined {

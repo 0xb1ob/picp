@@ -29,7 +29,7 @@ export function pidAlive(pid: number): boolean {
 }
 
 const cachedEvents = fileCache((path: string) => readLines(path, 0, 256 * 1024).lines
- .map(l => parseObject(l.text)).filter((e): e is Json => !!e && e.source === "cp" && ["spawned","routing_resolved"].includes(String(e.type)) && timestamp(e.ts) && !!obj(e.payload)),
+ .filter(l => /"(?:spawned|routing_resolved)"/.test(l.text)).map(l => parseObject(l.text)).filter((e): e is Json => !!e && e.source === "cp" && ["spawned","routing_resolved"].includes(String(e.type)) && timestamp(e.ts) && !!obj(e.payload)),
  events => Buffer.byteLength(JSON.stringify(events)));
 export function recordedEvents(state: ViewerState, id: string): Json[] {
  if (!isSafeId(id)) return [];
