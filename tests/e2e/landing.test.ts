@@ -3123,3 +3123,22 @@ test("landing: held CI repair checks Sender authority before restoring a worker"
 		assert.deepEqual(mergedCalls(s.ghCalls()), []);
 	}
 });
+
+// A malformed fleet.json while the real parent watches a held PR must journal one watch failure, not crash it.
+test("landing S03: the real parent journals a watch failure on a malformed fleet without crashing", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("watch error journal", 305);
+	s.setGh({ runs: [run(305, live.head, "in_progress", null)] });
+	const file = s.post.fleet.file;
+	const original = readFileSync(file, "utf8");
+	await s.parent("Observe watch recovery.", [{ kind: "text", text: "Observing." }], async (_events, stderr) => {
+		try {
+			writeFileSync(file, "{ invalid json");
+			await waitFor(stderr, (text) => /WATCH (TICK )?FAILED/.test(text), { timeoutMs: 40_000, what: "watch journals malformed fleet" });
+			await new Promise((resolve) => setTimeout(resolve, 2_500));
+			assert.doesNotMatch(stderr(), /Node\.js v\d|FleetError: .*\n\s+at /, "the parent survives the unreadable fleet");
+		} finally {
+			writeFileSync(file, original);
+		}
+	});
+});

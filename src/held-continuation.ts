@@ -182,7 +182,7 @@ export class HeldContinuation {
 
 	/** Run `fn` after every earlier step on the same project's lane. */
 	serialize<T>(jobId: string, fn: () => Promise<T>): Promise<T> {
-		const lane = this.#deps.fleet.get(jobId)?.project ?? jobId;
+		const lane = this.#readRecord(jobId)?.project ?? jobId;
 		const run = (this.#lanes.get(lane) ?? Promise.resolve()).then(fn);
 		const tail = run.then(
 			() => undefined,
@@ -195,15 +195,32 @@ export class HeldContinuation {
 		return run;
 	}
 
+	/** A fleet read before the step's try must not reject the trigger; `#drive` re-reads inside its catch. */
+	#readRecord(jobId: string): ReturnType<FleetStore["get"]> {
+		try {
+			return this.#deps.fleet.get(jobId);
+		} catch {
+			return undefined;
+		}
+	}
+
 	/**
 	 * Every trigger is snapshotted when observed: the generation, and the head its owning
 	 * source holds (unless the event carries its own). Both are its identity and are
 	 * required to still match before each step.
 	 */
 	async trigger(observed: ContinuationTrigger): Promise<ContinuationOutcome> {
-		const record = this.#deps.fleet.get(observed.jobId);
+		const record = this.#readRecord(observed.jobId);
 		const generation = observed.generation ?? (record ? (record.supersessions ?? 0) + 1 : undefined);
-		const head = observed.head ?? this.#deps.head(observed.jobId, headOwner(observed.event));
+		let head = observed.head;
+		try {
+			head ??= this.#deps.head(observed.jobId, headOwner(observed.event));
+		} catch (error) {
+			// Fail closed: a head that cannot be read confirms nothing; the next fact re-triggers.
+			const reason = `${observed.jobId}: head read failed: ${(error as Error).message.split("\n")[0]}`;
+			this.#notice(observed.jobId, `head:${observed.event}`, "retry", reason);
+			return { job_id: observed.jobId, key: continuationKey({ ...observed, ...(generation !== undefined ? { generation } : {}) }), action: "error", steps: 0, reason, next: "retry" };
+		}
 		const trigger: ContinuationTrigger = { ...observed, ...(generation !== undefined ? { generation } : {}), ...(head ? { head } : {}) };
 		const key = continuationKey(trigger);
 		const skip = (action: ContinuationAction, reason: string): ContinuationOutcome => ({ job_id: trigger.jobId, key, action, steps: 0, reason });
@@ -435,8 +452,8 @@ export class HeldContinuation {
 
 	#parked(jobId: string, result: IntegrateResult, outcome: ContinuationOutcome): ContinuationOutcome {
 		const deliver = this.#deps.relay ?? ((notice: { content: string }) => operatorNotify(undefined, notice.content));
-		const cycle = this.#deps.fleet.get(jobId)?.awaiting_merge?.cycle ?? 0;
 		try {
+			const cycle = this.#deps.fleet.get(jobId)?.awaiting_merge?.cycle ?? 0;
 			const lines = [`HELD PR PARKED — ${jobId} (with the team, awaiting_merge cycle ${cycle})`, `  ${result.reason}`, ...(result.pr_url ? [`  ${result.pr_url}`] : [])];
 			deliver({ id: boundedWakeupId(`continuation:parked:${jobId}:${cycle}`), job_id: jobId, content: lines.join("\n") });
 		} catch {
@@ -454,8 +471,13 @@ export class HeldContinuation {
 	}
 
 	#notice(jobId: string, tag: string, next: string, reason: string, prUrl?: string): void {
-		const generation = (this.#deps.fleet.get(jobId)?.supersessions ?? 0) + 1;
 		try {
+			let generation = 1;
+			try {
+				generation = (this.#deps.fleet.get(jobId)?.supersessions ?? 0) + 1;
+			} catch {
+				// An unreadable fleet must not swallow the notice that reports it.
+			}
 			const deliver = next === "done" ? (this.#deps.relay ?? ((notice) => operatorNotify(undefined, notice.content))) : this.#deps.notify;
 			deliver({
 				id: boundedWakeupId(next === "done" ? `continuation:done:${jobId}:${generation}` : `continuation:${jobId}:${generation}:${tag}`),
