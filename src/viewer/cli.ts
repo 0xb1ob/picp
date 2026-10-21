@@ -23,7 +23,7 @@ import { resolveStateDir } from "./sessions.ts";
 import { remoteOnly, remoteRuntime } from "./remote-runtime.ts";
 import { REMOTE_HOST } from "./remote-server.ts";
 import { createViewer, hostHeaderFor, type ViewerOptions } from "./server.ts";
-import { entryRealpath } from "../entry-guard.ts";
+import { realpathSync as entryRealpath } from "node:fs";
 import { fileURLToPath as entryPath } from "node:url";
 
 export const DEFAULT_PORT = 8766;
@@ -112,4 +112,4 @@ export async function main(argv: readonly string[]): Promise<void> {
 }
 
 // Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
-if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) await main(process.argv.slice(2));
+if (process.argv[1] !== undefined && (() => { try { return entryRealpath(process.argv[1]) === entryPath(import.meta.url); } catch { return false; } })()) await main(process.argv.slice(2));

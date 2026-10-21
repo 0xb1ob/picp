@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { daemonPaths, EXIT_CONFIG, pidAlive, psArgs, sameProcess } from "../service/daemon-files.ts";
 import { readTunnelBinding } from "../service/daemon-tunnel-files.ts";
 import { DEVICE_NOTIFY_INTERVAL_MS, runDeviceNotifySweep } from "./device-notifications.ts";
-import { entryRealpath } from "../entry-guard.ts";
+import { realpathSync as entryRealpath } from "node:fs";
 import { fileURLToPath as entryPath } from "node:url";
 
 /** The `ps` needle that tells this sender from a reused pid. */
@@ -84,7 +84,7 @@ export function startDeviceNotifyLoop(sweep: () => Promise<unknown>, intervalMs 
 }
 
 // Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
-if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
+if (process.argv[1] !== undefined && (() => { try { return entryRealpath(process.argv[1]) === entryPath(import.meta.url); } catch { return false; } })()) {
 	let last = "";
 	// The same failure every five seconds is one log line, not a full daemon log.
 	const log = (line: string): void => {

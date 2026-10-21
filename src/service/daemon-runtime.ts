@@ -51,7 +51,7 @@ import {
 } from "./daemon-files.ts";
 import { type TunnelIo, tunnelController, tunnelIo } from "./daemon-tunnel.ts";
 import { remoteFeatureConfigured } from "./daemon-tunnel-files.ts";
-import { entryRealpath } from "../entry-guard.ts";
+import { realpathSync as entryRealpath } from "node:fs";
 import { fileURLToPath as entryPath } from "node:url";
 
 export const TICK_MS = 5_000;
@@ -405,7 +405,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 }
 
 // Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
-if (process.argv[1] !== undefined && entryRealpath(process.argv[1]) === entryPath(import.meta.url)) {
+if (process.argv[1] !== undefined && (() => { try { return entryRealpath(process.argv[1]) === entryPath(import.meta.url); } catch { return false; } })()) {
 	const log = (line: string): void => void process.stderr.write(`${new Date().toISOString()} cp-daemon inner[${process.pid}]: ${line}\n`);
 	const refuse = (why: string): never => {
 		log(`${why}; exiting ${EXIT_CONFIG}`);
