@@ -63,7 +63,7 @@ ask-0088e0332d00, 2026-10-21.
 | P2e (cp-e2e-migration-p2e-fmi5) | behavior 02, last slice: a pipeline's mandate-decided plan checkpoint (02-15), cp_mandate and cp_escalate through a real parent (02-16), and in-flight continuation under expired, revoked, serial and capped grants (02-17); the P2d review's three findings. No behavior-02 file remains; send-first-gate belongs to P4. | 1 (`tests/mandate.test.ts`) | 384 → 383 | 4,346 → 4,295 |
 | P3 (cp-e2e-migration-p3-rhym) | behavior 05, first slice: the Actions CI read behind cp_integrate, the CI watch and `/status` (05-1), the no-CI workflows question (05-2), `/doctor` `ci.<project>` (05-3) and the one infra-only rerun (05-4) in `tests/e2e/landing.test.ts`; the P2e review's three findings. The other 26 behavior-05 files stay `convert`, for P3b (a job the main session creates). | 4 (`tests/actions-ci.test.ts`, `tests/ci-access.test.ts`, `tests/ci-configured.test.ts`, `tests/ci-infra-rerun.test.ts`) | 385 → 382 | 4,300 → 4,287 |
 | P3b (cp-e2e-migration-p3b-stth) | behavior 05, second slice: merge receipts and landing proof in `tests/e2e/landing.test.ts`: cp_merged through `gh` with the after-merge deploy job (05-5), cp_merged against a local https GitLab (05-6), and cp_teardown's git-only landing proof (05-7). The other 23 behavior-05 files stay `convert` (owner P3), for P3c (a job the main session cuts). | 3 (`tests/after-merge.test.ts`, `tests/landing-proof.test.ts`, `tests/merges.test.ts`) | 382 → 379 | 4,287 → 4,272 |
-| P3c (cp-e2e-migration-p3c-l5fc) | behavior 05 fixed CI-watch slice, scenarios 05-8 to 05-13. [143 declaration assessments](testing-migration-p3c-declarations.md): 5 mapped, 138 retained (96.50%), 0 redundant. All seven partial files restored to baseline paths, convert owner P3c2. P3d owns only the other 16 files; 23 behavior-05 files remain convert in total. | 0 files retired; 0 declarations removed | 379 → 379 | 4,272 → 4,278 |
+| P3c (cp-e2e-migration-p3c-l5fc) | Operator V2: all seven CI-watch files owned here; P3d owns only the other 16. [Per-file progress](testing-migration-p3c-declarations.md): 10/143 declarations mapped (6.99%), 0 retained, 133 pending reachable-gap closure. First completed file: all five ci-evidence declarations covered through the real tool and viewer. | 1 file retired; 5 declarations removed so far | 379 → 378 | 4,272 + 2 incoming → 4,275 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -183,8 +183,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P2e | 02 | `tests/e2e/authority.test.ts` | adds 02-15 to 02-17 |
 | P3 | 05 | `tests/e2e/landing.test.ts` | 4 (05-1 to 05-4) |
 | P3b | 05 | `tests/e2e/landing.test.ts` | adds 05-5 to 05-7 |
-| P3c | 05 | `tests/e2e/landing.test.ts` | adds 05-8 to 05-13; seven partial files remain convert under P3c2 |
-| P3c2 | 05 | `tests/e2e/landing.test.ts` | future owner of the seven partial CI-watch files; 138 retained declarations remain |
+| P3c | 05 | `tests/e2e/landing.test.ts` | operator V2: close all reachable gaps in the seven CI-watch files; extend 05-8 to 05-13 |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -584,13 +583,87 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/ci-watch.test.ts` | rerunwake-12z: the same completed attempt polled twice wakes once | 05-8 | mapped | NC-40 disables red arrival deduplication; command below exits 1 at `an arrived attempt is not announced again`, actual ci_failed observation, expected [] |
 | `tests/ci-watch.test.ts` | two ticks with identical facts and an observed arrival wake once | 05-8 | mapped | NC-41 disables green arrival deduplication; command below exits 1 at `an arrived green attempt is not announced again`, actual ci_green observation, expected [] |
 | `tests/ci-watch.test.ts` | confirming the same key twice is a no-op | 05-8 | mapped | NC-42 disables confirmation deduplication; command below exits 1 at `arrival is idempotent`, actual repeated key, expected [] |
+| `tests/ci-evidence.test.ts` | recordForwardedCi: stores source forwarded with its quote; an identical repeat appends nothing | 05-9 | mapped | tool writes verify head, repo, source, quote, ISO timestamp, URL, duplicate suppression and changed-result append; NC-43 fails `an identical forwarded result is stored once`, actual 2 expected 1 |
+| `tests/ci-evidence.test.ts` | recordForwardedCi: refuses a short or moved head, a credential-shaped quote or url, and another repo | 05-9 | mapped | real cp_integrate rejects short/stale heads, secret quote, credential/query URLs and mismatched persisted repo, with no refused writes; NC-33, NC-44 and NC-46 fail the superseded-head, invalid-input and repository-binding assertions |
+| `tests/ci-evidence.test.ts` | recordForwardedCi: keeps the newest CI_EVIDENCE_KEEP observations | 05-9 | mapped | 52 real tool writes assert the bound and oldest retained quote; NC-47 fails `every bounded forwarded write succeeds`, actual false expected true, because unsliced history exceeds the schema bound |
+| `tests/ci-evidence.test.ts` | forwardedCi (viewer): the newest forwarded result for the head only; native rows and other heads are not forwarded | 05-9 | mapped | real /api/jobs over seeded legacy data asserts pending A, green B, unseen/unknown heads and missing file, with unsafe URL stripped; NC-48 fails `viewer ignores native and other-head evidence and strips unsafe URLs`, actual green expected in_progress |
+| `tests/ci-evidence.test.ts` | cp_integrate record_ci: needs a verbatim operator quote and the job's current head; stores display-only evidence | 05-9 | mapped | real parent verifies absent head, fabricated quote, superseded head, stored source/quote/repo and native gate; NC-45 fails `forwarded evidence rejects invalid input through the tool`, expected /no known current head/, actual recorded success |
 <!-- /manifest:assertions -->
 
-The [P3c declaration assessment](testing-migration-p3c-declarations.md) covers all 143 declarations in the seven
-partial files, retained at their original paths with `convert` owner P3c2. Five are mapped, 138 retained with
-individual reasons, none redundant-unreachable. Other consumer assertions in 05-9–05-13 remain useful coverage,
-but do not claim whole original declarations retired. All 23 remaining behavior-05 files stay convert: seven
-owned by P3c2, the other 16 reserved for the main session's P3d.
+P3c's operator V2 brief owns all seven CI-watch files in this slice. Reachable gaps must be added to real-entry
+scenarios and proved before their units are removed; a control may cover a group asserting the same behavior.
+Only behavior with a named missing entry point may remain in a convert-owned retained file. A moved unit is
+`retained`, never `deleted`. The other sixteen behavior-05 files remain reserved for the main session's P3d.
+
+V2 forwarded-evidence controls NC-43–NC-48 were each applied alone, then restored. Each command
+`npm run test:one -- --test-name-pattern='operator-forwarded CI' tests/e2e/landing.test.ts` exited 1 at the
+assertion named in its regression row; the restored scenario passes. Logs: `NC-43.log` through `NC-48.log`.
+
+<!-- patch:NC-43 -->
+```diff
+diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
+--- a/src/ci-evidence.ts
++++ b/src/ci-evidence.ts
+@@ -69,1 +69,1 @@
+-	if (last && last.result === observation.result && last.operator_quote === observation.operator_quote && last.url === observation.url) return last;
++	if (false && last && last.result === observation.result && last.operator_quote === observation.operator_quote && last.url === observation.url) return last;
+```
+<!-- /patch:NC-43 -->
+
+<!-- patch:NC-44 -->
+```diff
+diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
+--- a/src/ci-evidence.ts
++++ b/src/ci-evidence.ts
+@@ -59,1 +59,1 @@
+-		const hit = SECRET_PATTERNS.find((pattern) => pattern.re.test(text));
++		const hit = undefined;
+```
+<!-- /patch:NC-44 -->
+
+<!-- patch:NC-45 -->
+```diff
+diff --git a/extensions/command-post/tools-integrate.ts b/extensions/command-post/tools-integrate.ts
+--- a/extensions/command-post/tools-integrate.ts
++++ b/extensions/command-post/tools-integrate.ts
+@@ -178,1 +178,1 @@
+-				if (!currentHead) throw new Error(`cp_integrate record_ci: ${params.job_id} has no known current head; wait for the CI watch to observe one`);
++				if (false && !currentHead) throw new Error(`cp_integrate record_ci: ${params.job_id} has no known current head; wait for the CI watch to observe one`);
+```
+<!-- /patch:NC-45 -->
+
+<!-- patch:NC-46 -->
+```diff
+diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
+--- a/src/ci-evidence.ts
++++ b/src/ci-evidence.ts
+@@ -67,1 +67,1 @@
+-	if (prior && prior.repo !== input.repo) throw new CiEvidenceError(`${input.jobId}'s CI evidence is for ${prior.repo}, not ${input.repo}`);
++	if (false && prior && prior.repo !== input.repo) throw new CiEvidenceError(`${input.jobId}'s CI evidence is for ${prior.repo}, not ${input.repo}`);
+```
+<!-- /patch:NC-46 -->
+
+<!-- patch:NC-47 -->
+```diff
+diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
+--- a/src/ci-evidence.ts
++++ b/src/ci-evidence.ts
+@@ -72,1 +72,1 @@
+-		observations: [...(prior?.observations ?? []), observation].slice(-CI_EVIDENCE_KEEP),
++		observations: [...(prior?.observations ?? []), observation],
+```
+<!-- /patch:NC-47 -->
+
+<!-- patch:NC-48 -->
+```diff
+diff --git a/src/viewer/overview-jobs.ts b/src/viewer/overview-jobs.ts
+--- a/src/viewer/overview-jobs.ts
++++ b/src/viewer/overview-jobs.ts
+@@ -59,1 +59,1 @@
+- const latest = (Array.isArray(list) ? list.map(obj) : []).filter((o): o is Json => o?.source === "forwarded" && str(o.head_sha)?.toLowerCase() === head?.toLowerCase() && Object.hasOwn(FORWARDED_VIEW, str(o.result) ?? "") && timestamp(o.observed_at))
++ const latest = (Array.isArray(list) ? list.map(obj) : []).filter((o): o is Json => o?.source === "forwarded" && Object.hasOwn(FORWARDED_VIEW, str(o.result) ?? "") && timestamp(o.observed_at))
+```
+<!-- /patch:NC-48 -->
 
 NC-39 through NC-42 each use their own patch below and this command:
 `npm run test:one -- --test-name-pattern='CI watch persists arrival' tests/e2e/landing.test.ts`.
@@ -772,8 +845,8 @@ The fixed file passed all 13 cases without skips before these controls. No produ
 | 05-12 | parked PR timer | `src/awaiting-merge.ts`: remove the parked watch's `observeCi` wiring | `parked green through extension timer` times out with no CI row |
 | 05-13 | held CI repairs | `src/integrate.ts`: set cumulative prior repair count to zero | `a second red result exhausts the repair allowance`: actual `resolve`, expected `surface` |
 
-These controls prove the named consumer scenarios. Only four CI-watch declarations are retired; every other
-original assertion is preserved verbatim in the convert-owned retained files named in the assertion map.
+These controls prove the named consumer scenarios. The P3c ledger and declaration assessment report the current
+mapped, retained and removed counts; proof of a behavior alone does not count a moved unit as deleted.
 
 ## Negative controls
 
@@ -831,6 +904,12 @@ quoted below were run by hand when each control was recorded, and they are evide
 | NC-40 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-40 | 89140ecdb7e179ded4475bbae1fdd8503bc7d6e1c498391bc5373e5cff3175a6 | an arrived attempt is not announced again: actual ci_failed observation, expected []; exit 1 | pass |
 | NC-41 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-41 | 3247052c5ba325182bb6bc40b10310d9ba19c3efca12adaaaf82021ae65325e8 | an arrived green attempt is not announced again: actual ci_green observation, expected []; exit 1 | pass |
 | NC-42 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-42 | bdf24d76db79fa3de72985fd27fdf823b0e03b824e3f2f3c8b6198f67ffe563b | arrival is idempotent: actual repeated key, expected []; exit 1 | pass |
+| NC-43 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-43 | 1ab00c25fcb6f6beec90067b887e04cb604986b936ec84e87529fd74a6acc728 | an identical forwarded result is stored once: actual 2 expected 1; exit 1 | pass |
+| NC-44 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-44 | 1e23c1f307c54d5f011114b4e2867c81398446c93168b3e83de3008348700d0c | forwarded evidence rejects invalid input through the tool: expected /github token/, actual recorded success; exit 1 | pass |
+| NC-45 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-45 | b56732d87fd1e902de3998d8330d4e596c903c69dfd9a3e538e0289d4c5e4dbc | forwarded evidence rejects invalid input through the tool: expected /no known current head/, actual recorded success; exit 1 | pass |
+| NC-46 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-46 | b167ba1c73842346b33fbc3f5a82cba32174d8b356baa6b3abd16cd1cdeb694f | evidence cannot be rebound to another repository: expected `/is for other\/repository/`, actual recorded success; exit 1 | pass |
+| NC-47 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-47 | 603dd9661e1e596f888b39eb14b9bdc66078a98709fe8f022402c4b203a7b84c | every bounded forwarded write succeeds: actual false expected true; exit 1 | pass |
+| NC-48 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-48 | 97c3cb3752d2333372ea71e943083cde0d1183a0616689ebe15372ff4800bacc | viewer ignores native and other-head evidence and strips unsafe URLs: actual green expected in_progress; exit 1 | pass |
 <!-- /manifest:regressions -->
 
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:
@@ -1623,7 +1702,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/awaiting-merge-lifecycle.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge-park.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge-resume.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs); also listed under 23, owned here only |
-| `tests/awaiting-merge-tick.test.ts` | convert | P3c2 | behavior 05; both declarations retained with individual reasons in testing-migration-p3c-declarations.md; original path restored |
+| `tests/awaiting-merge-tick.test.ts` | convert | P3c | behavior 05; operator V2 assigns both timer declarations to P3c |
 | `tests/awaiting-merge-viewer.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge-watch.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/awaiting-merge.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
@@ -1639,12 +1718,12 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/checkpoint-root.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/ci-access.test.ts` | deleted | P3 | 5 declarations: scenarios 05-1 and 05-3 (Assertion map); two units retained in `tests/main-ci.test.ts`; NC-26 |
 | `tests/ci-configured.test.ts` | deleted | P3 | 5 declarations: scenario 05-2 (Assertion map); one unit retained in `tests/merge-ask.test.ts`; NC-25 |
-| `tests/ci-evidence.test.ts` | convert | P3c2 | behavior 05; five declarations retained with individual reasons in testing-migration-p3c-declarations.md; original path restored |
+| `tests/ci-evidence.test.ts` | deleted | P3c | all five declarations mapped to real tool and viewer consumers in 05-9; NC-33 and NC-43–NC-48 record failing assertions; no units moved or retained |
 | `tests/ci-host-tools.test.ts` | exception | P1 | guard: CI never silently skips treehouse acceptance; operator ask-0088e0332d00 (Exceptions) |
 | `tests/ci-infra-rerun.test.ts` | deleted | P3 | 4 declarations: scenario 05-4 (Assertion map); two units retained in `tests/main-ci.test.ts`; NC-27 |
 | `tests/ci-run-ref.test.ts` | deleted | P0 | 10 assertions mapped, 4 redundant-unreachable; negative controls NC-01..NC-03 |
 | `tests/ci-wait.test.ts` | exception | P1 | contract: worker report-and-stop policy and guard; operator ask-0088e0332d00 (Exceptions) |
-| `tests/ci-watch.test.ts` | convert | P3c2 | behavior 05; 5 declarations mapped to 05-8 with individual controls, 75 retained; all 80 stay in this partial file; testing-migration-p3c-declarations.md |
+| `tests/ci-watch.test.ts` | convert | P3c | behavior 05; operator V2 assigns all 80 declarations to P3c; five already have 05-8 behavior controls |
 | `tests/contract-injection.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
 | `tests/contract.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
 | `tests/contracts-anchors.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
@@ -1713,7 +1792,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/failures.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/fake-parent-tracker.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/fleet.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
-| `tests/foreign-ci-watch.test.ts` | convert | P3c2 | behavior 05; eleven declarations retained with individual reasons in testing-migration-p3c-declarations.md; original path restored |
+| `tests/foreign-ci-watch.test.ts` | convert | P3c | behavior 05; operator V2 assigns all eleven declarations to P3c, including dispatch release and legacy state |
 | `tests/forge-observers.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/forge-runtime.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/forge-url.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
@@ -1729,7 +1808,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/install-tools.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
 | `tests/intake-settle-atomicity.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/intake.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
-| `tests/integrate-held-ci.test.ts` | convert | P3c2 | behavior 05; three declarations retained with individual reasons in testing-migration-p3c-declarations.md; original path restored |
+| `tests/integrate-held-ci.test.ts` | convert | P3c | behavior 05; operator V2 assigns all three repair declarations to P3c |
 | `tests/integrate.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/job-skills.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/jobs-tool.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
@@ -1741,7 +1820,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/ledger-import.test.ts` | deleted-with-feature | #379 | tested `src/ledger-import.ts` |
 | `tests/ledger.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/live-harness.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
-| `tests/main-ci.test.ts` | convert | P3c2 | behavior 05; all 39 declarations retained, including P3/P3b inheritances; individual reasons in testing-migration-p3c-declarations.md |
+| `tests/main-ci.test.ts` | convert | P3c | behavior 05; operator V2 assigns all 39 declarations to P3c, including inherited P3/P3b coverage |
 | `tests/mandate-defaults.test.ts` | deleted | P2c | behavior 02: every assertion mapped to 02-8 or redundant-unreachable (Assertion map); negative control NC-12 |
 | `tests/mandate-selection.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-12 (Assertion map); negative control NC-16 |
 | `tests/mandate-supplement.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-12 (Assertion map); negative control NC-17 |
@@ -1782,7 +1861,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/parent-outbox.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/parent-routing-evals.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/parent-session.test.ts` | exception | P1 | contract: assembled parent session; operator ask-0088e0332d00 (Exceptions) |
-| `tests/parked-ci.test.ts` | convert | P3c2 | behavior 05; three declarations retained with individual reasons in testing-migration-p3c-declarations.md; original path restored |
+| `tests/parked-ci.test.ts` | convert | P3c | behavior 05; operator V2 assigns all three native parked-CI declarations to P3c |
 | `tests/pi-hashline-compaction.test.ts` | convert | P5 | behavior 07 (Compaction) |
 | `tests/pi-lens-headless.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
 | `tests/pi-server-dependency.test.ts` | exception | P1 | contract: package boundary constraints; operator ask-0088e0332d00 (Exceptions) |

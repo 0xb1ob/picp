@@ -12,13 +12,15 @@ import { basename, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "../../src/ci-access.ts";
 import { CommandPost } from "../../src/command-post.ts";
-import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { CI_EVIDENCE_KEEP, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { drainFile } from "../../src/drain.ts";
 import type { ForgeConfig } from "../../src/forge-url.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { formatMerge, readMergeReceipt } from "../../src/merges.ts";
 import { formatStatusTable } from "../../src/status.ts";
+import { createViewer } from "../../src/viewer/server.ts";
+import type { AddressInfo } from "node:net";
 import {
 	COMMAND_POST_EXTENSION,
 	startPiChild,
@@ -377,10 +379,20 @@ async function startStack(t: TestContext, options: { project?: boolean; env?: Re
 	const parent = async (prompt: string, steps: ScriptStep[], settled?: () => Promise<void>) => {
 		const script = `landing-parent-${++parentSeq}`;
 		const model = provider.addScript(script, steps, { onExhausted: "repeat" });
+		// Recovery notices can request a turn before the operator's quote arrives.
+		const startup = provider.addScript(`${script}-startup`, [{ kind: "text", text: "Startup notices observed." }], { onExhausted: "repeat" });
 		agentDir.writeModels(provider);
-		const child = startPiChild({ cwd: home.path, model, env: { ...agentDir.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+		const child = startPiChild({ cwd: home.path, model: startup, env: { ...agentDir.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
 		try {
 			await child.prompt(prompt);
+			await waitFor(() => provider.requests(`${script}-startup`).some((request) => JSON.stringify(request.body.messages).includes(prompt.split("\n")[0]!)), Boolean, { timeoutMs: 90_000, what: "operator request reaches parent context" });
+			await child.waitForSettled(90_000);
+			const [providerId, modelId] = model.split("/");
+			child.send({ id: script, type: "set_model", provider: providerId, modelId });
+			const switched = await child.waitFor((event) => event.type === "response" && event.id === script);
+			assert.equal(switched.success, true, JSON.stringify(switched));
+			await child.prompt("Continue the operator request already in context.");
+			await waitFor(() => provider.remaining(script), (remaining) => remaining === 0, { timeoutMs: 90_000, what: "operator script consumed" });
 			await child.waitForSettled(90_000);
 			assert.equal(provider.remaining(script), 0);
 			await settled?.();
@@ -1091,6 +1103,83 @@ test("landing: operator-forwarded CI requires a quoted current head and never su
 	const advance = await s.integrate(live.jobId);
 	assert.equal(advance.record.next, "wait", advance.text);
 	assert.deepEqual(mergedCalls(s.ghCalls()), [], "forwarded success cannot merge pending native CI");
+	const file = join(s.home, paths.ciEvidenceFile(live.jobId));
+	assert.equal(evidence.repo, "example/demo");
+	assert.match(evidence.observations[0].observed_at, /^\d{4}-\d{2}-\d{2}T/);
+	const unknown = await s.held("forwarded CI without an observed head", 112);
+	s.setGh({ runs: [], routes: [{ match: "pulls/112", replies: [{ code: 1, stderr: "PR read unavailable" }] }] });
+	const token = "ghp_" + "x".repeat(36);
+	const secretQuote = `CI passed, token ${token}.`;
+	const guardCalls = [
+		{ ...params, job_id: unknown.jobId, head_sha: unknown.head },
+		{ ...params, head_sha: "abc1234" },
+		{ ...params, operator_quote: secretQuote },
+		{ ...params, url: `https://x:${token}@github.com/example/demo` },
+	];
+	const guards = await s.parent(`${quote}\n${secretQuote}`, [
+		...guardCalls.map((args): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "cp_integrate", args }] })),
+		{ kind: "text", text: "Validation observed." },
+	]);
+	for (const [index, pattern] of [/no known current head/, /full 40-hex/, /github token/, /plain https url/].entries()) {
+		assert.match(JSON.stringify(guards[index]), pattern, "forwarded evidence rejects invalid input through the tool");
+	}
+	assert.ok(!JSON.stringify(guards[2]).includes(token), "a secret rejection never echoes the credential");
+	assert.ok(!existsSync(join(s.home, paths.ciEvidenceFile(unknown.jobId))), "an unknown head writes no evidence");
+	assert.equal(JSON.parse(readFileSync(file, "utf8")).observations.length, 1, "refused observations never append");
+	writeFileSync(file, JSON.stringify({ ...evidence, repo: "other/repository" }));
+	const repositoryQuote = "CI passed for repository validation.";
+	const mismatch = await s.parent(repositoryQuote, [
+		{ kind: "tool_calls", calls: [{ name: "cp_integrate", args: { ...params, operator_quote: repositoryQuote } }] },
+		{ kind: "text", text: "Repository mismatch observed." },
+	]);
+	assert.match(JSON.stringify(mismatch), /is for other\/repository/, "evidence cannot be rebound to another repository");
+	writeFileSync(file, JSON.stringify(evidence));
+	const quotes = Array.from({ length: CI_EVIDENCE_KEEP + 1 }, (_, index) => `CI result number ${index}.`);
+	const bounded = await s.parent(quotes.join("\n"), [
+		...quotes.map((operator_quote): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "cp_integrate", args: { ...params, operator_quote, url: "https://github.com/example/demo/actions/runs/103" } }] })),
+		{ kind: "tool_calls", calls: [{ name: "cp_integrate", args: { ...params, result: "failure", operator_quote: quotes.at(-1) } }] },
+		{ kind: "text", text: "Bounded observations recorded." },
+	]);
+	assert.ok(bounded.every((event) => /display only/.test(JSON.stringify(event))), "every bounded forwarded write succeeds");
+	const history = JSON.parse(readFileSync(file, "utf8")).observations;
+	assert.equal(history.length, CI_EVIDENCE_KEEP, "forwarded history is bounded");
+	assert.equal(history[0].operator_quote, quotes[2], "oldest observations are discarded");
+	assert.deepEqual(history.slice(-2).map((entry: { result: string }) => entry.result), ["success", "failure"], "a changed result is a new observation");
+	assert.equal(history.at(-2).url, "https://github.com/example/demo/actions/runs/103");
+	const a = live.head;
+	const b = "b".repeat(40);
+	writeFileSync(file, JSON.stringify({ ...evidence, observations: [
+		{ head_sha: a, result: "failure", source: "forwarded", observed_at: "2026-10-15T11:00:00Z", operator_quote: "red." },
+		{ head_sha: a, result: "pending", source: "forwarded", observed_at: "2026-10-15T12:00:00Z", operator_quote: "running.", url: "https://x?y" },
+		{ head_sha: a, result: "success", source: "actions", observed_at: "2026-10-15T13:00:00Z" },
+		{ head_sha: b, result: "success", source: "forwarded", observed_at: "2026-10-15T14:00:00Z", operator_quote: "green." },
+	] }));
+	const view = async (head: string | null) => {
+		const watchFile = join(s.home, LAYOUT.ciWatchFile);
+		const watch = JSON.parse(readFileSync(watchFile, "utf8"));
+		for (const row of watch.jobs) if (row.job_id === live.jobId) row.head_sha = head;
+		writeFileSync(watchFile, JSON.stringify(watch));
+		const envelopeFile = join(s.home, paths.envelopeFile(live.jobId));
+		const envelope = JSON.parse(readFileSync(envelopeFile, "utf8"));
+		envelope.envelope.head_sha = head;
+		writeFileSync(envelopeFile, JSON.stringify(envelope));
+		const server = createViewer({ home: s.home, stateDir: join(s.home, LAYOUT.state), host: "127.0.0.1", port: 0, log: () => {} });
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		try {
+			const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/jobs`);
+			assert.equal(response.status, 200);
+			const body = await response.json() as { jobs: Array<{ id: string; ci_forwarded: unknown }> };
+			return body.jobs.find((job) => job.id === live.jobId)?.ci_forwarded;
+		} finally {
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
+	};
+	assert.deepEqual(await view(a), { ci: "in_progress", observed_at: "2026-10-15T12:00:00Z", url: null }, "viewer ignores native and other-head evidence and strips unsafe URLs");
+	assert.deepEqual(await view(b), { ci: "green", observed_at: "2026-10-15T14:00:00Z", url: null });
+	assert.equal(await view("c".repeat(40)), null, "an unseen head has no forwarded evidence");
+	assert.equal(await view(null), null, "an unknown head has no forwarded evidence");
+	rmSync(file);
+	assert.equal(await view(a), null, "a missing file has no forwarded evidence");
 });
 
 
