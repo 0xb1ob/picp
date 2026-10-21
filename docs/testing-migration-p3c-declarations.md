@@ -9,7 +9,7 @@ The original slice has 143 static declarations (152 parameterized runtime cases)
 
 | Original file | Declarations | Delivery and follow-on status |
 |---|---:|---|
-| tests/ci-watch.test.ts | 80 | convert, owner P3c-rest; 62 mapped: S02's 36 plus S03 declarations 41–44, 46–53, 57, 59, 61–63, 69, 72–77 and 79–80; 18 pending; S03 blocked by declaration 64's real parked notice waking the parent model; original file stays intact until the final map, retained exceptions and controls are complete |
+| tests/ci-watch.test.ts | 80 | S03b: 75 mapped (S02 36 + S03 39), four redundant-unreachable with named public consumer cases (S02 6/8/32/33), one pending-fix (S03 71). Declaration 64 maps after #429 with real parked producer and executed quiet-wakeup control. Source stays whole while 71 awaits a separate product repair; no retained/deleted file is claimed. Controls and base SHAs: docs/testing-migration-s03b-controls.md. |
 | tests/main-ci.test.ts | 39 | convert, owner P3c-rest; 39 pending, including inherited P3/P3b assertions |
 | tests/foreign-ci-watch.test.ts | 11 | S06 completed: 10 mapped to 05-10/S06-1 in tests/e2e/landing.test.ts, one static declaration in tests/foreign-ci-watch-retained.test.ts; supersedes the P3c-rest pending snapshot |
 | tests/parked-ci.test.ts | 3 | All three mapped to 05-12 and deleted; real timer, forge barriers, resume/re-park and legacy held state; NC-36 and NC-49–NC-55 |
@@ -51,6 +51,7 @@ introduced. A future ownership-transfer API or observable post-shutdown lifecycl
 S02 owns only `tests/ci-watch.test.ts` declarations 1–40. It adds five scenarios and extends 05-8:
 36 declarations are mapped; declarations 6, 8, 32 and 33 have unreachable sub-assertions and remain intact.
 All original declarations stay in place under the operator's split-file amendment; no deletion credit is claimed.
-S03 owns declarations 41–80 and the final file retirement. The assertion map in testing-migration.md names
-the unreachable inputs and requires their preservation at that retirement. The 13/143 summary above records
-P3c's historical partial delivery, before these follow-on mappings.
+S03 owns declarations 41–80 and the final file retirement.
+S03b resolves the four S02 sub-assertions as redundant-unreachable with named e2e consumer outcomes and executed
+controls; see docs/testing-migration-s03b-controls.md. The source remains whole while declaration 71 is pending-fix.
+The 13/143 summary above records P3c's historical partial delivery, before these follow-on mappings.

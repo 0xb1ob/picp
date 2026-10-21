@@ -106,10 +106,12 @@ from the pushed suite. Declaration 71 stays pending; the original unit file rema
 
 | Declaration | Disposition | Evidence |
 |---|---|---|
-| 54–56, 64–68, 78 | mapped | Main assertion ledger and docs/testing-migration-s03b-controls.md; nine newly mapped declarations |
+| 45, 54–56, 58, 60, 64–68, 70, 78 | mapped | Main assertion ledger and docs/testing-migration-s03b-controls.md; thirteen newly mapped declarations |
+| S02 6/8/32/33 | redundant-unreachable | Named public consumer cases pin fleet refusal, invalid Actions-run refusal, continued GitLab reads and same-key restart; reachable portions remain mapped in the notes. |
 | 71 | pending-fix | Real parent must emit a durable watch-failure notice without crashing; reproducer: /home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s03b-pntl/watch-failure-reproducer.ts, outside pushed suite |
 
 `pending-fix` is recorded here because the assertion-map parser rejects that status; it is not represented as retained.
-The unit file stays whole while 71 is pending. Remaining work in this continuation: 45, 58, 60, 70 and S02 6/8/32/33.
+The unit file stays whole while 71 is pending. S03 is 39 mapped / 1 pending-fix; S02 is 36 mapped / 4 redundant-unreachable.
+This continuation closes all requested dispositions except the explicitly parked 71; declaration 64 is mapped after #429.
 
 An exploratory timer-health case was also removed: two different malformed fleet shapes both surfaced as unsafe job id "-" rather than supplying the two distinct failure causes needed by declaration 71. That failed conversion attempt is not counted as mapping or negative-control evidence.

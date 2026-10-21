@@ -116,3 +116,75 @@ Executed replacement-head mutation, first in #arm:
 ```
 
 Exit 1: `a changed head replaces the original deadline`, actual 1 notice, expected 2.
+
+## S03b second batch: 45, 58, 60, 70 and S02 6/8/32/33
+
+All controls below ran at base d35117d136da6e2441ada5dacb158484a5b2741a and were restored immediately.
+Commands used `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing.test.ts`.
+Every listed mutation exited 1. No production mutation remains in the patch.
+
+| Control / declaration | Pattern | Production mutation | Failing assertion |
+|---|---|---|---|
+| S03b-legacy / 45 | landing S03: actual parent arrival | src/ci-watch.ts: string entries in ciKeysFromMessage use continue instead of keys.add(entry) | both legacy and object arrivals are confirmed on their owning job times out |
+| S03b-arrival-type / 45 | landing S03: actual parent arrival | src/ci-watch.ts: delete if (record.customType !== CI_MESSAGE_TYPE) return [] | only cp-ci messages confirm CI arrival |
+| S03b-stop / 58 | landing S03: actionable surface | src/held-continuation.ts: first in #notice add if (next !== "done") return | surface/retry stop wakes the actual parent times out |
+| S03b-revise / 60 | landing S03: a real revise verdict | src/held-continuation.ts: onVerdict guard becomes only if (wakeup.surface !== "review") return | revise handback never schedules integration: 1 versus 0 |
+| S03b-gate / 60 | landing S03: a real passing research | src/held-continuation.ts: onVerdict guard becomes only if ((wakeup.details as { next?: unknown }).next !== "proceed") return | a gate pass schedules no PR integration: 1 versus 0 |
+| S03b-landed-hook / 70 | landing S03: armed-release | src/held-continuation.ts: delete this.#deps.onLanded?.(jobId) | the real landed hook reports its consumer failure times out |
+| S03b-stop-hook / 70 | landing S03: armed-release | src/held-continuation.ts: first in #notice add if (next !== "done") this.#landed(jobId) | a stopped continuation never releases armed dependents: 1 versus 0 |
+| S03b-fleet-stamp / S02 6 | landing S02: only reported | src/contracts/fleet.ts: delete errors.push for held without reported_at | the fleet boundary rejects an unreported held slot before watcher eligibility |
+| S03b-actions-id / S02 8 | landing S02: Actions refuses | src/actions-ci.ts: destructure id = 1 instead of id in parseRuns | malformed run must not become a fact / run without id or run_attempt |
+| S03b-disable / S02 32 | landing S02: unavailable gh | src/ci-watch.ts: delete this.#disabled = reason in #disable | first.disabled must name gh is not available |
+| S03b-gitlab / S02 33 | landing S02: unavailable gh | src/ci-watch.ts: disabled guard becomes if (this.#disabled) continue | same tick must check both GitHub and GitLab jobs |
+
+The onDisabled callback in S02 32/33 has no production caller: CommandPost supplies none.
+The named unavailable-gh case pins its visible counterpart: disabled state, no further GitHub reads,
+continued local HTTPS GitLab reads, terminal payloads, confirmed merge deduplication, and the same
+unconfirmed merge key after a fresh CommandPost is constructed from the same state.
+
+S02 6's held-without-reported_at shape is rejected by FleetStore validation before isWatched.
+Removing the predicate guard alone left the e2e green (executed twice); removing fleet validation failed.
+The named only-reported case now pins the actual refusal, including its reported_at diagnostic.
+
+S02 8's helper-only no-id event cannot come from Actions: the named Actions-refuses case pins the
+public malformed-run refusal. Attempt identities remain pinned by 05-8 / NC-32. Legacy messages
+already on disk still reach the parent and confirm correctly in the new actual-parent-arrival case.
+These four mixed declarations are classified redundant-unreachable, with their reachable behavior pinned.
+
+For 70, CommandPost's only onLanded callback returns void while starting ArmedDispatches.release.
+A synchronous injected throwing callback cannot reach that consumer; the named armed-release case
+instead corrupts the real armed file and pins a durable ARMED DISPATCH RELEASE FAILED notice,
+preserved input, and a completed landing. The existing mission armed-dependant case pins once-only
+release after a landing and no spawn on replay; no fake callback was introduced.
+
+Exact independent second-batch patches (apply one control at a time, never together):
+
+```diff
+--- src/ci-watch.ts (S03b-legacy)
+- if (typeof entry === "string" && entry.length > 0) keys.add(entry);
++ if (typeof entry === "string" && entry.length > 0) continue;
+--- src/ci-watch.ts (S03b-arrival-type)
+- if (record.customType !== CI_MESSAGE_TYPE) return [];
+--- src/held-continuation.ts (S03b-stop, first in #notice)
++ if (next !== "done") return;
+--- src/held-continuation.ts (S03b-revise, onVerdict)
+- if (wakeup.surface !== "review" || (wakeup.details as { next?: unknown }).next !== "proceed") return;
++ if (wakeup.surface !== "review") return;
+--- src/held-continuation.ts (S03b-gate, onVerdict)
+- if (wakeup.surface !== "review" || (wakeup.details as { next?: unknown }).next !== "proceed") return;
++ if ((wakeup.details as { next?: unknown }).next !== "proceed") return;
+--- src/held-continuation.ts (S03b-landed-hook, #landed)
+- this.#deps.onLanded?.(jobId);
+--- src/held-continuation.ts (S03b-stop-hook, first in #notice)
++ if (next !== "done") this.#landed(jobId);
+--- src/contracts/fleet.ts (S03b-fleet-stamp)
+- errors.push(`/jobs/${job.job_id}: phase "held" requires reported_at (a hold follows an envelope)`);
+--- src/actions-ci.ts (S03b-actions-id, parseRuns)
+- const { id, run_attempt: attempt, head_sha: headSha } = row;
++ const { id = 1, run_attempt: attempt, head_sha: headSha } = row;
+--- src/ci-watch.ts (S03b-disable, #disable)
+- this.#disabled = reason;
+--- src/ci-watch.ts (S03b-gitlab, #run)
+- if (this.#disabled && !gitlab) continue;
++ if (this.#disabled) continue;
+```

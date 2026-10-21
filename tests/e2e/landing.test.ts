@@ -1381,6 +1381,8 @@ test("landing S03: a restarted parent resumes a durable deadline and relays land
 		const notifications = child.records().filter((event) => event.type === "extension_ui_request" && event.method === "notify" && String(event.message).includes("HELD PR LANDED"));
 		assert.equal(notifications.length, 1, "one landed relay for this head and generation");
 		assert.doesNotMatch(String(notifications[0]!.message), /tracker|write-back|receipt note/i);
+		assert.ok(String(notifications[0]!.message).includes(live.prUrl), "the landed relay carries the full PR URL");
+		assert.doesNotMatch(String(notifications[0]!.message), /then cp_next|relay the PR URL/);
 		// The UI notification precedes any follow-up turn the runtime might queue.
 		await new Promise((resolve) => setTimeout(resolve, 500));
 		await child.getState();
@@ -1559,6 +1561,32 @@ test("landing S03: changes during a branch update stop before the next integrati
 	});
 });
 
+test("landing S03: actual parent arrival accepts legacy CI keys and rejects unrelated messages", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("legacy CI arrival", 322);
+	new IntegrationHolds(s.home).hold(live.jobId, "arrival probe");
+	s.setGh({ runs: [run(322, live.head, "in_progress", null)] });
+	const legacy = `${live.jobId}|${live.head}|ci_green`;
+	const current = `${live.jobId}|${live.head}|ci_failed|arrival`;
+	const unrelated = `${live.jobId}|${live.head}|pr_closed`;
+	const file = join(s.home, "arrival-messages.json");
+	writeFileSync(file, JSON.stringify([
+		{ customType: "cp-ci", content: "Legacy arrival", display: true, details: { ci: [legacy] } },
+		{ customType: "cp-ci", content: "Object arrival", display: true, details: { ci: [{ key: current }] } },
+		{ customType: "cp-envelope", content: "Unrelated arrival", display: true, details: { ci: [unrelated] } },
+		{ customType: "cp-ci", content: "Missing details", display: true },
+	]));
+	const model = s.provider.addScript("arrival-parent", [{ kind: "text", text: "Arrivals observed." }], { onExhausted: "repeat" });
+	s.agentDir.writeModels(s.provider);
+	const child = startPiChild({ cwd: s.home, model, env: { ...s.agentDir.env, CP_HOME: s.home, CP_S03_ARRIVAL_FILE: file }, extensions: [COMMAND_POST_EXTENSION, join(REPO_ROOT, "tests/fixtures/ci-arrival-extension.ts")] });
+	try {
+		await child.prompt("Observe the restored CI messages.");
+		await child.waitForSettled(60_000);
+		await waitFor(() => s.post.ciWatch.store.job(live.jobId)?.announced, (keys) => Boolean(keys?.includes(legacy) && keys.includes(current)), { timeoutMs: 10_000, what: "both legacy and object arrivals are confirmed on their owning job" });
+		assert.ok(!s.post.ciWatch.store.job(live.jobId)!.announced.includes(unrelated), "only cp-ci messages confirm CI arrival");
+	} finally { await child.close(); }
+});
+
 test("landing S03: startup snapshots queued held heads and generations before the lane opens", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	for (const changed of ["generation", "head"]) await t.test(changed, async (t) => {
 		const s = await startStack(t);
@@ -1673,6 +1701,49 @@ test("landing S03: patch-equivalent review waits synchronously on its new durabl
 	assert.equal(mergedCalls(s.ghCalls()).length, 1);
 });
 
+test("landing S03: actionable surface and retry stops reach the real parent once", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	for (const next of ["surface", "retry"]) await t.test(next, async (t) => {
+		const s = await startStack(t);
+		const live = await s.held(`actionable stop ${next}`, 323);
+		await s.post.manager.shutdown(live.jobId);
+		writeWindowPass(s.home, live.jobId, live.head, isoTimestamp(new Date(Date.now() - 60_000)));
+		s.setGh({ integration: true, runs: [run(323, live.head, "in_progress", null)] });
+		await s.parent("Observe this PR's actionable stop.", [{ kind: "text", text: "Observing." }], async () => {
+			const before = s.provider.requests("landing-parent-1").length;
+			s.setGh({ permission: next === "surface" ? "BLOCKED" : "CLEAN", runs: [run(323, live.head, "completed", "success")], routes: next === "retry" ? [{ match: "pr merge", replies: [{ code: 1, stderr: "network unavailable" }] }] : [] });
+			await waitFor(() => s.provider.requests("landing-parent-1").slice(before).filter((request) => JSON.stringify((request.body.messages as unknown[]).at(-1)).includes("HELD PR STOPPED")), (requests) => requests.length > 0, { timeoutMs: 20_000, what: `${next} stop wakes the actual parent` });
+			const box = s.post.durableWakeups.read();
+			const stops = [...box.pending, ...box.delivered].filter((entry) => entry.id.startsWith(`continuation:${live.jobId}:`) && entry.id.endsWith(`:${next}`));
+			assert.equal(stops.length, 1, "one durable actionable stop");
+			assert.ok(s.provider.requests("landing-parent-1").slice(before).some((request) => JSON.stringify(request.body.messages).includes(`next: ${next}`)));
+		});
+	});
+});
+
+test("landing S03: armed-release failure stays visible after landing and a stop never releases", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t, { continuation: true });
+	const live = await s.held("landing callback consumer", 325);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	await s.post.manager.shutdown(live.jobId);
+	writeWindowPass(s.home, live.jobId, live.head, isoTimestamp(new Date(Date.now() - 60_000)));
+	const file = join(s.home, LAYOUT.armedDispatchFile);
+	writeFileSync(file, "{ invalid json");
+	const failures = () => s.post.durableWakeups.pending().filter((entry) => entry.content.includes("ARMED DISPATCH RELEASE FAILED"));
+	s.setGh({ integration: true, permission: "BLOCKED", runs: [run(325, live.head, "completed", "success")] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.equal(s.post.integrator.get(live.jobId)?.next, "surface");
+	assert.equal(failures().length, 0, "a stopped continuation never releases armed dependents");
+	s.setGh({ permission: "CLEAN", runs: [run(325, live.head, "completed", "success", { run_attempt: 2 })] });
+	await s.tick(live.jobId);
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	await waitFor(failures, (entries) => entries.length === 1, { timeoutMs: 10_000, what: "the real landed hook reports its consumer failure" });
+	assert.equal(s.post.integrator.get(live.jobId)?.next, "done", "armed-release failure cannot undo the landing");
+	assert.equal(readFileSync(file, "utf8"), "{ invalid json", "failed release preserves its input");
+	await s.post.ciTick();
+	assert.equal(mergedCalls(s.ghCalls()).length, 1);
+});
+
 test("landing S03: a real parent that loses its lock cannot execute a pending review deadline", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t);
 	const live = await s.held("deadline lock loss", 315);
@@ -1782,6 +1853,45 @@ test("landing S03: a real review verdict samples hold state in its one waiting n
 	});
 });
 
+test("landing S03: a real revise verdict belongs to its implementer and starts no continuation", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t, { continuation: true });
+	const repairGate = join(s.home, "revise-author-release");
+	const live = await s.held("revise handback", 324, { repairGate });
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	const reviewer = s.provider.addScript("s03-revise-review", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: live.jobId, verdict: "revise", reasons: ["[severity: high] [confidence: high] missing behavior"], revisions: ["S03 repair this behavior"], flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false } } }] }, { kind: "hang" }]);
+	s.agentDir.writeModels(s.provider);
+	writeFileSync(join(s.home, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*"], rubric: [{ id: "gate-reviewer", role: "gate-reviewer", model: reviewer }] }));
+	s.setGh({ runs: [run(324, live.head, "completed", "success")] });
+	await s.tick(live.jobId);
+	await waitFor(() => s.provider.requests(`landing-${live.jobId}`), (requests) => requests.some((request) => JSON.stringify(request.body.messages).includes("S03 repair this behavior")), { timeoutMs: 20_000, what: "revision reaches this job's implementer" });
+	await s.post.continuation.serialize(live.jobId, async () => {});
+	assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "continuation" && (event.payload as { event: string }).event === "verdict").length, 0, "revise handback never schedules integration");
+	assert.equal(s.provider.requests("s03-revise-review").length, 1, "no second reviewer");
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+});
+
+test("landing S03: a real passing research gate starts no held-PR continuation", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t, { continuation: true });
+	const job = await s.post.ledger().create({ title: "gate is not diff review", project: "demo", delivery: "answer", kind: "research" });
+	const planner = s.provider.addScript("s03-gate-planner", [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: 'printf "# Plan\\nInspect the existing implementation.\\n" > "$CP_ARTIFACT_PATH"' } }] },
+		{ kind: "tool_calls", calls: [{ name: "report_result", args: { job_id: job.id, kind: "research", status: "done", summary: "Inspection plan.", artifact_path: join(s.home, paths.artifactFile(job.id)), plan_summary: { goal: "Inspect", approach: ["Read implementation"], touched: ["src/ci-watch.ts"], acceptance: ["Report findings"], risk: "Read only" } } }] },
+		{ kind: "hang" },
+	]);
+	const reviewer = s.provider.addScript("s03-gate-reviewer", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job.id, verdict: "pass", reasons: ["Plan is complete"], flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false } } }] }, { kind: "hang" }]);
+	s.agentDir.writeModels(s.provider);
+	writeFileSync(join(s.home, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*"], rubric: [{ id: "gate-reviewer", role: "gate-reviewer", model: reviewer }] }));
+	await s.post.dispatch({ jobId: job.id, task: "Read and report a short inspection plan.", model: planner, fetch: false });
+	await waitFor(() => s.post.fleet.get(job.id)?.reported_at, Boolean, { timeoutMs: 20_000, what: "planner report" });
+	const gate = await s.post.gate({ jobId: job.id });
+	assert.equal(gate.next, "wait");
+	assert.ok("key" in gate);
+	await s.post.reviewRuns.settled(gate.key);
+	assert.equal(JSON.parse(readFileSync(join(s.home, paths.gateFile(job.id, gate.attempt)), "utf8")).verdict, "pass", "the real gate passes");
+	assert.equal(readRunEvents(s.home, job.id).filter((event) => event.type === "continuation").length, 0, "a gate pass schedules no PR integration");
+	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+});
+
 test("landing S03: new CI attempts never duplicate a pending real reviewer", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t, { continuation: true });
 	const reviewer = s.provider.addScript("s03-pending-review", [{ kind: "hang" }]);
@@ -1839,6 +1949,14 @@ test("landing S02: only reported held PR deliveries are queried", { skip: SKIP, 
 	assert.deepEqual((await s.post.ciTick()).checked, [], "parked jobs are never ticked by the held watch");
 	assert.equal(s.post.ciWatch.head(live.jobId), live.head, "parked rows survive held-watch pruning");
 	assert.equal(s.ghCalls().length, before);
+	const legacy = await s.seed("legacy slot without an envelope", { prUrl: "https://github.com/example/demo/pull/327" });
+	const fleetFile = join(s.home, LAYOUT.fleetFile);
+	const fleet = JSON.parse(readFileSync(fleetFile, "utf8"));
+	delete fleet.jobs.find((entry: { job_id: string }) => entry.job_id === legacy.jobId).reported_at;
+	writeFileSync(fleetFile, JSON.stringify(fleet));
+	const unreported = await s.post.ciTick();
+	assert.ok(!unreported.checked.includes(legacy.jobId), "a held legacy slot without an envelope stamp is not watched");
+	assert.match(unreported.errors[0]?.message ?? "", /reported_at/, "the fleet boundary rejects an unreported held slot before watcher eligibility");
 });
 
 test("landing S02: aggregate CI and terminal PR facts preserve the current head", { skip: SKIP, timeout: 600_000 }, async (t) => {
@@ -1875,6 +1993,17 @@ test("landing S02: aggregate CI and terminal PR facts preserve the current head"
 	assert.equal(closed.length, 1);
 	assert.equal(closed[0]?.event, "pr_closed");
 	assert.equal(closed[0]?.closed_at, mergedAt);
+});
+
+test("landing S02: Actions refuses historical runs without a database id", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("legacy Actions identity", 326);
+	const row = run(326, live.head, "completed", "failure");
+	delete row.id;
+	s.setGh({ runs: [row], routes: [{ match: "actions/runs?", replies: [runsBody([row])] }] });
+	const result = await s.post.ciTick();
+	assert.deepEqual(result.observations, [], "a malformed Actions run never becomes a legacy event");
+	assert.match(result.errors[0]?.message ?? "", /run without id or run_attempt/);
 });
 
 test("landing S02: watch delivery, restart and query cadence survive real forge failures", { skip: SKIP, timeout: 600_000 }, async (t) => {
@@ -2006,10 +2135,17 @@ test("landing S02: unavailable gh disables GitHub queries while GitLab remains o
 	assert.equal(merged.observations[0]?.event, "pr_merged");
 	assert.equal(merged.observations[0]?.merge_commit_sha, "b".repeat(40));
 	assert.equal(merged.observations[0]?.pr_url, mrUrl);
+	assert.equal(s.ghCalls().length, calls, "disabled GitHub stops querying during all subsequent GitLab reads");
+	const restarted = new CommandPost({ home: s.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...s.agentDir.env }, holdsParentLock: () => true });
+	t.after(() => restarted.shutdown());
+	t.mock.timers.tick(900_000);
+	const replay = await restarted.ciTick();
+	assert.equal(replay.observations[0]?.key, merged.observations[0]?.key, "a fresh public command post re-derives the same unconfirmed GitLab merge identity");
+	const afterRestart = s.ghCalls().length;
 	s.post.confirmCi(merged.observations.map((fact) => fact.key));
 	t.mock.timers.tick(900_000);
 	assert.deepEqual((await s.post.ciTick()).observations, [], "GitLab merge arrival wakes once");
-	assert.equal(s.ghCalls().length, calls, "disabled GitHub is never queried again, including for GitLab");
+	assert.equal(s.ghCalls().length, afterRestart, "the disabled watcher still makes no GitHub query after the separate restart");
 	t.mock.timers.reset();
 });
 
