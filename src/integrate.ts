@@ -1440,6 +1440,13 @@ export class Integrator {
 			return { acted: false, failed: false, detail: "worktree already matches origin" };
 		}
 		const dirty = await this.#run(worktree, "git", ["status", "--porcelain"]);
+		if (dirty.status !== 0) {
+			return {
+				acted: false,
+				failed: true,
+				detail: `could not read the worktree status (git status exited ${dirty.status}), so it was not reset`,
+			};
+		}
 		if (dirty.stdout.trim().length > 0) {
 			return {
 				acted: false,

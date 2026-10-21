@@ -2885,3 +2885,26 @@ test("landing: held CI repair checks Sender authority before restoring a worker"
 		assert.deepEqual(mergedCalls(s.ghCalls()), []);
 	}
 });
+
+test("landing: unreadable worktree status preserves uncommitted content", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("preserve unreadable dirty tree", 910);
+	const clone = s.post.registry.pathOf("demo");
+	git(clone, "fetch", "origin", live.jobId);
+	git(clone, "checkout", "--detach", `origin/${live.jobId}`);
+	writeFileSync(join(clone, "change.txt"), "remote update\n");
+	git(clone, "commit", "-am", "remote update");
+	git(clone, "push", "origin", `HEAD:${live.jobId}`);
+	git(clone, "checkout", "main");
+	const head = git(clone, "ls-remote", "--heads", "origin", live.jobId).split("\t")[0]!;
+	writeWindowPass(s.home, live.jobId, head, "2026-01-01T00:00:00Z");
+	s.setGh({ integration: true, runs: [run(910, head, "completed", "success")] });
+	assert.equal((await s.integrate(live.jobId)).record.next, "advance");
+	writeFileSync(join(live.worktree, "change.txt"), "precious uncommitted content\n");
+	const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+	const wrapper = join(s.home, "bin", "git");
+	writeFileSync(wrapper, `#!/usr/bin/env node\nconst {spawnSync}=require("node:child_process");\nconst args=process.argv.slice(2);\nif(process.cwd()===${JSON.stringify(live.worktree)} && args[0]==="status") {process.stderr.write("fatal: status unavailable\\n");process.exit(128);}\nconst r=spawnSync(${JSON.stringify(realGit)},args,{stdio:"inherit"});process.exit(r.status??1);\n`);
+	chmodSync(wrapper, 0o755);
+	await s.integrate(live.jobId);
+	assert.equal(readFileSync(join(live.worktree, "change.txt"), "utf8"), "precious uncommitted content\n", "unreadable status must never authorize destruction of uncommitted work");
+});
