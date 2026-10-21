@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
@@ -399,4 +401,95 @@ test("S04: complete deltas remain reviewable when supplemental branch history ex
 	assert.match(readFileSync(join(result.scratch, "diff.md"), "utf8"), /src\/fix\.ts/);
 	assert.match(readFileSync(join(result.scratch, "full-diff.md"), "utf8"), /## Omitted/);
 	assert.ok(existsSync(join(result.scratch, "prior-verdict.json")));
+});
+
+
+test("S15: reviewers receive bounded whole-file snapshots with resolved task paths and capped consumers", { timeout: 120_000 }, async (t) => {
+	const s = await stack(t);
+	const base = {
+		"docs/legacy.md": "S15_FORK_ONLY\n", "lib/unique.ts": "unique\n",
+		"src/one/util.ts": "one\n", "src/two/util.ts": "two\n",
+		"etc/hosts.md": "S15_ABSOLUTE\n", "x.ts": "S15_HOME\n",
+		"tests/fixtures/big.json": "f".repeat(299_999) + "\n",
+		"lib/core.py": "core = 1\n", "src/core.ts": "export const core = 1;\n",
+	};
+	for (const [path, body] of Object.entries(base)) s.repo.write(path, body);
+	for (let n = 1; n <= 7; n++) s.repo.write(`src/use-${n}.ts`, 'import { core } from "./core.ts";\n');
+	s.repo.commitAll("context base");
+	s.repo.git("push", "--quiet", "origin", s.repo.branch);
+	const job = await s.seed({ "src/core.ts": "export const core = 2;\n", "src/run.py": "r".repeat(99) + "\n", "img.bin": "PNG\0\x01binary_marker", "tests/core.test.ts": "test marker\n" });
+	s.repo.git("checkout", "--quiet", job);
+	s.repo.git("rm", "--quiet", "docs/legacy.md");
+	s.repo.commitAll("remove legacy");
+	s.repo.git("push", "--quiet", "origin", job);
+	s.repo.git("checkout", "--quiet", s.repo.branch);
+	mkdirSync(join(s.home, paths.runDir(job)), { recursive: true });
+	writeFileSync(join(s.home, paths.originalTaskFile(job)), "Remove docs/legacy.md. Read unique.ts, util.ts, nothing.ts, tests/fixtures/big.json and lib/core.py. Ignore /etc/hosts.md, ~/x.ts and /abs/x.ts.\n");
+	const result = await s.review(job);
+	assert.equal(result.verdict.verdict, "pass");
+	const manifest = JSON.parse(readFileSync(join(result.scratch, "context-manifest.json"), "utf8"));
+	const entries = manifest.entries as Array<{ path: string; side: string; reason: string; state: string; bytes?: number; sha256?: string; candidates?: string[] }>;
+	const entry = (path: string, side = "head") => entries.find((e) => e.path === path && e.side === side);
+	assert.equal(manifest.status, "ok");
+	assert.equal(manifest.fork_point, s.repo.head(s.repo.branch));
+	assert.equal(manifest.head_sha, s.repo.head(job));
+	assert.equal(entry("docs/legacy.md", "fork")?.state, "included");
+	assert.equal(entry("docs/legacy.md")?.state, "absent");
+	assert.equal(entry("docs/legacy.md", "fork")?.reason, "changed");
+	assert.equal(entry("lib/unique.ts")?.state, "included");
+	assert.equal(entry("lib/unique.ts")?.reason, "task-named");
+	assert.deepEqual(entry("util.ts")?.candidates, ["src/one/util.ts", "src/two/util.ts"]);
+	assert.equal(entry("util.ts")?.state, "ambiguous");
+	assert.equal(entry("nothing.ts")?.state, "unresolved");
+	for (const path of ["etc/hosts.md", "x.ts"]) assert.equal(entry(path), undefined, path);
+	assert.equal(entry("tests/fixtures/big.json")?.state, "omitted-budget");
+	assert.equal(entry("tests/fixtures/big.json")?.bytes, 300_000);
+	assert.equal(entry("src/run.py")?.state, "included");
+	assert.equal(entry("lib/core.py")?.state, "included");
+	assert.equal(entry("lib/core.py", "fork"), undefined);
+	assert.equal(entries.some((e) => e.reason === "invariant" && e.state === "absent"), false);
+	assert.equal(entry("img.bin")?.state, "binary");
+	assert.equal(entry("img.bin")?.bytes, 18);
+	assert.deepEqual(entries.filter((e) => e.reason === "consumer").map((e) => e.path), [1, 2, 3, 4, 5].map((n) => `src/use-${n}.ts`));
+	assert.match(entry("src/run.py")?.sha256 ?? "", /^[0-9a-f]{64}$/);
+	assert.deepEqual(entries.filter((e) => e.reason === "changed").map((e) => `${e.side}:${e.path}`), ["head", "fork"].flatMap((side) => ["docs/legacy.md", "img.bin", "src/core.ts", "src/run.py", "tests/core.test.ts"].map((path) => `${side}:${path}`)));
+	const context = readFileSync(join(result.scratch, "context.md"), "utf8");
+	assert.match(context, /S15_FORK_ONLY/);
+	assert.doesNotMatch(context, /binary_marker|S15_ABSOLUTE|S15_HOME|ffff/);
+	assert.equal(context.match(/^### /gm)?.length, entries.filter((e) => e.state === "included").length);
+	assert.ok(context.includes("r".repeat(99)));
+	const brief = readFileSync(join(result.run, "brief.md"), "utf8");
+	assert.ok(brief.includes(`Fork point ${manifest.fork_point.slice(0, 12)}, head ${manifest.head_sha.slice(0, 12)}.`));
+	assert.match(brief, /read context-manifest\.json first, then only the context\.md sections you need/);
+	assert.match(brief, /`absent` means git confirmed the path does not exist at that sha/);
+	assert.match(brief, /never treat them as absent/);
+});
+
+
+test("S15: a git object read failure is named in reviewer context without fabricating absence", { timeout: 120_000 }, async (t) => {
+	const s = await stack(t);
+	const bin = mkdtempSync(join(tmpdir(), "cp-s15-git-"));
+	const git = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+	const oldPath = process.env.PATH;
+	t.after(() => { process.env.PATH = oldPath; rmSync(bin, { recursive: true, force: true }); });
+	for (const command of ["cat-file", "merge-base"]) {
+		const job = await s.seed({ "src/fault.ts": "export const fault = 1;\n" });
+		const wrapper = join(bin, "git");
+		writeFileSync(wrapper, `#!/bin/sh\nif [ "$1" = '${command}' ]${command === "cat-file" ? ' && [ "$2" = blob ]' : ""}; then\n echo 'fatal: S15 object read failed' >&2\n exit 128\nfi\nexec '${git}' "$@"\n`);
+		chmodSync(wrapper, 0o700);
+		process.env.PATH = `${bin}:${oldPath}`;
+		const result = await s.review(job);
+		process.env.PATH = oldPath;
+		assert.equal(result.verdict.verdict, "pass");
+		const manifest = JSON.parse(readFileSync(join(result.scratch, "context-manifest.json"), "utf8"));
+		if (command === "cat-file") {
+			assert.equal(manifest.status, "ok");
+			assert.ok(manifest.entries.some((e: { path: string; state: string; error?: string }) => e.path === "src/fault.ts" && e.state === "unreadable" && e.error === "fatal: S15 object read failed"));
+		} else {
+			assert.equal(manifest.status, "unavailable");
+			assert.deepEqual(manifest.entries, []);
+			assert.equal(existsSync(join(result.scratch, "context.md")), false);
+			assert.match(readFileSync(join(result.run, "brief.md"), "utf8"), /Repository context unavailable: .*S15 object read failed\. Judge from the diff and task only, and report the limit\./);
+		}
+	}
 });
