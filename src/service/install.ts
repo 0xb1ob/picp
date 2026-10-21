@@ -22,14 +22,15 @@
  *                       private-LAN or loopback address of this machine; default: the previous install's,
  *                       else asked (Tailscale recommended), else the Tailscale address when there is one
  *   --push-origin URL   run push-init once when push is not set up
- *   --force             replace changed files; always npm ci
+ *   --force             replace changed files; always npm ci; proceed past an incompatible pi (a warning, #375)
+ *   --no-pi-upgrade     a pi below package.json piCompat.min is refused, never updated (wins over --yes)
  *   --no-start          enable (systemd) or configure (detached), do not start; a legacy home is not migrated
  *   --no-update         data/update.json enabled:false
  *   --crontab           detached: add one marked `@reboot` line that starts cp-daemon (only when crontab -l works)
  *   --uninstall         stop cp-daemon (never the parent host), remove its unit, the operator files and
  *                       data/daemon.json (home and app untouched)
  *   --dry-run           probe and print; change nothing (never prompts)
- *   --yes, --no-prompt  take every default without asking
+ *   --yes, --no-prompt  take every default without asking (--yes also consents to `pi update --self` below min)
  *   --no-pi-packages    do not `pi install` the worker packages
  *   --no-self-package   accepted, no effect (single-project mode was removed)
  *
@@ -47,7 +48,9 @@ import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { layoutForHome } from "../contracts.ts";
 import { PACKAGE_ROOT, standardHome } from "../home.ts";
+import { doctorErrorChecks } from "../doctor.ts";
 import { DRY_RUN_PLANNED_EXIT } from "../install-tools.ts";
+import { PI_COMPAT_CHECK } from "../pi-compat.ts";
 import { OPTIONAL_TOOL_INFO, PI_LENS_TOOLS, REQUIRED_TOOLS } from "../tool-manifest.ts";
 import { DEFAULT_PORT } from "../viewer/cli.ts";
 import { ROLE_PACKAGES } from "../worker-packages.ts";
@@ -115,6 +118,7 @@ export interface InstallFlags {
 	yes?: boolean;
 	"no-prompt"?: boolean;
 	"no-pi-packages"?: boolean;
+	"no-pi-upgrade"?: boolean;
 	"no-self-package"?: boolean;
 }
 
@@ -125,7 +129,7 @@ export function parseInstallArgs(argv: readonly string[], warn: (line: string) =
 	const text = { type: "string" } as const;
 	const flag = { type: "boolean" } as const;
 	const retired = Object.fromEntries(RETIRED_INSTALL_FLAGS.map((name) => [name, flag])) as Record<(typeof RETIRED_INSTALL_FLAGS)[number], typeof flag>;
-	const values: InstallFlags & Partial<Record<(typeof RETIRED_INSTALL_FLAGS)[number], boolean>> = parseArgs({ args: [...argv], options: { home: text, app: text, port: text, "parent-model": text, "operator-model": text, "gateway-url": text, "gateway-key-file": text, "viewer-host": text, "push-origin": text, force: flag, "no-start": flag, "no-update": flag, crontab: flag, uninstall: flag, "dry-run": flag, yes: flag, "no-prompt": flag, "no-pi-packages": flag, "no-self-package": flag, ...retired } }).values;
+	const values: InstallFlags & Partial<Record<(typeof RETIRED_INSTALL_FLAGS)[number], boolean>> = parseArgs({ args: [...argv], options: { home: text, app: text, port: text, "parent-model": text, "operator-model": text, "gateway-url": text, "gateway-key-file": text, "viewer-host": text, "push-origin": text, force: flag, "no-start": flag, "no-update": flag, crontab: flag, uninstall: flag, "dry-run": flag, yes: flag, "no-prompt": flag, "no-pi-packages": flag, "no-pi-upgrade": flag, "no-self-package": flag, ...retired } }).values;
 	for (const name of RETIRED_INSTALL_FLAGS) {
 		if (values[name] === undefined) continue;
 		warn(`--${name} is deprecated and ignored: the optional tracker step was removed`);
@@ -230,13 +234,17 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	if (failed) return 1;
 
 	// 3. Tools.
-	const tools = ports.run(ports.node.path, [join(app, "scripts/install-tools.ts"), ...(dry ? ["--dry-run"] : [])], app);
+	// pi's compatibility (#375) is install-tools' to decide and ask about, once: its switches go through as given.
+	const piFlags = dry ? [] : [...(flags.yes ? ["--yes"] : []), ...(flags["no-prompt"] ? ["--no-prompt"] : []), ...(flags["no-pi-upgrade"] ? ["--no-pi-upgrade"] : []), ...(force ? ["--force"] : [])];
+	const tools = ports.run(ports.node.path, [join(app, "scripts/install-tools.ts"), ...(dry ? ["--dry-run"] : []), ...piFlags], app);
 	// A dry run goes on past tools a real run would install, so the rest of the plan still prints.
 	if (dry && tools.status === DRY_RUN_PLANNED_EXIT) step("changed", "tools", `a real run installs the missing required tools first:\n${tools.stdout}`);
 	else if (!ok(tools)) {
 		step("fail", "tools", `scripts/install-tools.ts exited ${tools.status}:\n${tools.stdout}${tools.stderr}\nfix the above, then rerun the install: ${rerunCommand(app, home, flags)}`);
 		return 1;
 	} else step("ok", "tools", `required tools on PATH: ${REQUIRED_TOOLS.map((tool) => (tool === "treehouse" ? "treehouse (required, not optional: every dispatch leases a treehouse worktree)" : tool)).join(", ")}`);
+	// install-tools' pi lines (supported, updated, or a warning: newer than tested, or --force past incompatible).
+	for (const line of tools.stdout.split("\n").filter((text) => /^(✓ pi: (pi \d|updated )|! pi: )/.test(text))) step(line.startsWith("!") ? "skip" : "ok", "pi", line.slice(6));
 	const prompting = !dry && flags.yes !== true && flags["no-prompt"] !== true;
 	const answer = (question: string): string => (prompting ? ports.ask(question)?.trim() ?? "" : "");
 	// 3a. Provider login (#375 P1), as cp-daemon's parent will see it: none usable writes and starts nothing.
@@ -244,9 +252,11 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	const listing = dry ? undefined : ports.run("pi", ["--no-extensions", "--list-models"], ports.exists(home) ? home : undefined, serviceListEnv(ports.env, ports.node.path));
 	const usable = listing?.status === 0 ? parseModelList(listing.stdout) : undefined;
 	if (usable !== undefined && usable.length > 0) step("ok", "login", `${usable.length} model(s) pi can use as cp-daemon's parent sees them`);
-	else if (usable === undefined || noStart) authLogin(ports, agentDir, step);
+	// A failed listing falls back to auth.json's providers; with none either, it is no login too (#402 review).
+	else if (noStart || listing === undefined || (usable === undefined && (listing.status === 0 || authProviders(ports, agentDir) > 0))) authLogin(ports, agentDir, step);
 	else {
-		step("fail", "login", `no model pi can use as cp-daemon's parent sees them (${join(agentDir, "auth.json")} and ambient credentials), so nothing was written or started; run \`pi\`, then /login, then re-run: ${rerunCommand(app, home, flags)}`);
+		const why = usable === undefined ? `\`pi --list-models\` exited ${listing.status} and no provider is in ${join(agentDir, "auth.json")}` : `no model pi can use as cp-daemon's parent sees them (${join(agentDir, "auth.json")} and ambient credentials)`;
+		step("fail", "login", `${why}, so nothing was written or started; run \`pi\`, then /login, then re-run: ${rerunCommand(app, home, flags)}`);
 		return NEEDS_LOGIN_EXIT;
 	}
 	extras(flags, ports, app, step);
@@ -366,7 +376,10 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	if (!dry && !noStart) {
 		try {
 			const doctor = await ports.doctor(home, 90_000);
-			step(doctor.level === "error" ? "fail" : "ok", "doctor", doctor.text);
+			// --force accepted an incompatible pi: that one finding, by its check id, cannot undo it; any other error fails.
+			const errors = doctorErrorChecks(doctor.text);
+			const forced = force && doctor.level === "error" && errors.length > 0 && errors.every((check) => check === PI_COMPAT_CHECK);
+			step(doctor.level === "error" && !forced ? "fail" : "ok", "doctor", forced ? `--force accepted the incompatible pi; ${PI_COMPAT_CHECK} is the only error:\n${doctor.text}` : doctor.text);
 		} catch (error) {
 			step("fail", "doctor", `${(error as Error).message}; see cp-daemon log`);
 		}
@@ -502,15 +515,19 @@ function extras(flags: InstallFlags, ports: InstallPorts, app: string, step: Ste
 	else step("skip", "tmux", `not on PATH (optional: ${tmux.why}); ${tmux.install}`);
 }
 
+/** Providers in auth.json; unreadable reads as none. */
+function authProviders(ports: InstallPorts, agentDir: string): number {
+	try {
+		return Object.keys(JSON.parse(ports.read(join(agentDir, "auth.json")) ?? "{}") as object).length;
+	} catch {
+		return 0; // unreadable reads as no provider; authLogin says so
+	}
+}
+
 /** Step 3a when pi's listing cannot answer (a dry run, no table) or nothing starts: auth.json's providers. */
 function authLogin(ports: InstallPorts, agentDir: string, step: Step): void {
 	const auth = ports.read(join(agentDir, "auth.json"));
-	let providers = 0;
-	try {
-		providers = Object.keys(JSON.parse(auth ?? "{}") as object).length;
-	} catch {
-		providers = 0; // unreadable reads as no provider, and says so below
-	}
+	const providers = authProviders(ports, agentDir);
 	if (providers > 0) step("ok", "login", `${providers} provider(s) in ${join(agentDir, "auth.json")}`);
 	else step("skip", "login", `no provider in ${join(agentDir, "auth.json")}${auth === undefined ? "" : " (empty or unreadable)"}: run \`pi\`, then /login (credentials are never handled here)`);
 }
@@ -518,7 +535,7 @@ function authLogin(ports: InstallPorts, agentDir: string, step: Step): void {
 /** The exit when no provider login lets cp-daemon's parent run: nothing was written or started (#375 P1). */
 export const NEEDS_LOGIN_EXIT = 4;
 
-const shellWord = (word: string): string => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
+export const shellWord = (word: string): string => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
 
 /** The exact `bin/cp-install` command that reruns this install with the same flags, shell-quoted. */
 export function rerunCommand(app: string, home: string, flags: InstallFlags): string {

@@ -181,6 +181,7 @@ Writers name files, not line numbers, so this table does not rot on every edit.
 | `$TMPDIR/cp-hermetic-pi-home-*` | `tests/harness/hermetic-env.ts` (removed on exit) | scratch `PI_HOME` per test process | T | tests |
 | `$TMPDIR/cp-hermetic-uploads-*` | `tests/harness/hermetic-env.ts` (removed on exit) | `CP_UPLOAD_ROOT` per test process, so no test reaches `/tmp/cp-dashboard-uploads` | T | tests |
 | `$TMPDIR/cp-home-*`, `cp-wt-*`, `cp-bridge-*`, … | `tests/harness/state.ts`; `mkdtempSync(join(tmpdir(), …))` in test files | test homes, repos, worktrees | T | tests |
+| `$TMPDIR/cp-pi-probe-*` (0700) | `src/pi-compat-probe.ts` (removed when the probe ends) | the scratch pi home, `CP_HOME` and `TMPDIR` of pi's capability probe (#375: `pi --version`, then the extension load), so the probe never reads or writes the real ones | T | install-tools, doctor, `cp_project add` |
 | `cat > "${artifact_path}" <<'EOF'` | `brief-research.md`, `brief-qa.md` (recognized by `src/watch.ts`) | the sanctioned planner/QA write | — | worker |
 | commit / PR body file | `brief-ship.md`: written with the `write` tool for `git commit -F` / `gh pr create --body-file`, location not stated | ship worker scratch | — | worker (see Known gaps) |
 
