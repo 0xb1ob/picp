@@ -4,60 +4,62 @@ Ownership: the remaining behavior-05 files are owned by P3c-rest and re-sliced b
 
 S15 owns the whole of review-context, review-merge-window, review-runs and review-tool. Other slices own all other conversions.
 
-## Context replacement evidence
+## Dispositions
 
-Entry point: `CommandPost.diffReview`, using the existing S04 stack, a real reviewer child and mocked model responses.
+Context: 10 mapped, whole source file deleted. Window: 2 mapped, whole source file deleted. Tool: 4 mapped and 3 retained in `tests/review-tool-retained.test.ts`. Review-runs accounting is still in progress; its original file remains intact.
 
-Scenario C: `S15: reviewers receive bounded whole-file snapshots with resolved task paths and capped consumers` in `tests/e2e/diff-review.test.ts`.
-Scenario F: `S15: a git object read failure is named in reviewer context without fabricating absence` in that file.
+All product entry points use real product code and mocked models. Temporary agent directories, git shims and invalid profile configuration live outside the checkout and are removed by test cleanup. Filesystem fault cases alter the OS rename boundary and restore it in `finally`.
 
-| Original review-context declaration | Scenario | Executed production mutation | Failing assertion |
+## Window equivalence
+
+`landing S15: durable review evidence owns the merge window across parent restarts` exercises `CommandPost.integrate` and a fresh real RPC parent's `cp_integrate`. It checks missing, incomplete, malformed and wrong-head evidence; exact persisted 30-second deadline before and after restart; unchanged verdict bytes; and fresh/elapsed equivalent passes. The existing `landing: the review deadline resumes once and rechecks current gates` crosses the real deadline.
+
+The deleted source blob is `60d780038feccabb53e53af161910110b242e5f1`. W01 removes the deadline's 30000ms interval: the fresh pass advances instead of waiting. W02 removes the evidence/head match: mismatched equivalence incorrectly gets `review_resume_at`. Both mutations failed the real-entry scenario and were restored; the restored scenario passed. SHA-256: W01 `76fe8e4aee8fad87cbd5a6f9f100ede181f1bbbd6aab1beced777a94cdf5ca00`; W02 `9da9ff314d8357cb81cd17f232f7ccc8b0bc2a2a5783b19b7a275bba22e92d14`.
+
+V8 captures `/tmp/cp-s15-window-before-Zj7vN0` and `/tmp/cp-s15-window-final-GJoDIs` each contain two window module records and the same six positive named-function tuples. Anonymous wrapper offsets change when files are loaded through the real parent; they are excluded from the named-function comparison.
+
+## Tool assertion accounting
+
+Source blob: `9a39a3adc4f91eb48e99b19f43c198a852b9b2cf`. Scenario T is `S15: the real cp_review tool relays bounded verdicts and policy refusals without review bodies`; P is `S15: dispatch preview rejects parent tools in external worker profile configuration`, both in `tests/e2e/diff-review.test.ts`.
+
+| Original declaration | Disposition | Assertion coverage and executed control |
+|---|---|---|
+| 1 registers beside gate; dispatch refusal | mapped T | Actual parent tool schemas and descriptions, dispatch-specific error, no decision; T00 fails the cp_dispatch repair assertion. |
+| 2 parent-only review and gate | mapped P | Public dispatch preview reads external invalid profiles for both tools; T05 fails the cp_review rejection assertion. Real reviewer requests also contain neither parent tool. |
+| 3 round-trip and closed schema | retained | T pins real RPC schema validity, head, separate next and verdict-file equality (T01). The remaining closed-schema assertion supplies an extra next property directly to validate: cp_review has no argument permitting a caller-supplied DiffVerdict; DiffReview validates persisted decisions and removes next before returning. Keep the original declaration verbatim for this schema contract. |
+| 4 medium finding still proceeds | mapped T | The complete medium reason reaches RPC content and next remains proceed; T02 removes formatted content and fails the reason assertion. |
+| 5 malformed negative file count | retained | cp_review cannot return a negative diff_stat.files: git output is counted, persisted prior verdicts are validated, and finish validates before writing. No tool argument supplies a verdict. Keep the helper's defensive validator assertion verbatim. |
+| 6 uncapped observation and raw subject | retained | T now covers real materialized subjects: a drain starts after preflight but before spawn, producing a bounded operational verdict with subject counts and no diff path (T03 fails). The original combined input additionally contains a raw review observation, a revise receipt and materialized diff together. cp_review cannot return that combination: its live reviewer returns wait and the observation finishes asynchronously; cached and policy results have no raw observation, and synchronous spawn failure has no reviewer observation. Keep the original declaration verbatim for that unreachable helper input. |
+| 7 model-free stat overflow | mapped T | Wide and oversized real branches return validated policy verdicts, no model/subject and no reviewer; T04 fabricates a model and fails the model-free assertion. |
+
+The retained source keeps every original assertion for declarations 3, 5 and 6; unused imports and explanatory comments were removed. Four mapped declarations are removed only after the replacement scenarios and their controls pass/fail as recorded. Direct typed-helper invalid inputs remain protected; they are not invented through mocks of product functions.
+
+## Executed additional controls
+
+Every path below is under `testing-migration-s15-controls/`. Hashes include the trailing newline. Apply one patch, run its named scenario through `node --import ./tests/harness/hermetic-env.ts --test --test-name-pattern='<prefix>' --test-force-exit tests/e2e/diff-review.test.ts`, then restore production source. All listed mutations were individually executed and restored with the anchor editor. `git apply --check` verifies reproducibility.
+
+| Patch | Scenario prefix | SHA-256 | Observed failing assertion |
 |---|---|---|---|
-| 1 deleted task path | C | collect queues only head-side changed paths | docs/legacy.md fork state is undefined, expected included |
-| 2 basename resolution | C | omit named paths from candidates | lib/unique.ts state is undefined, expected included |
-| 3 absolute and home paths | C | remove TASK_PATH negative lookbehind | etc/hosts.md unexpectedly included |
-| 4 whole-file budget | C | bypass remaining-byte guard | big.json included, expected omitted-budget |
-| 5 git failures | F | turn failed blob reads into absent entries | no unreadable src/fault.ts entry with the named error |
-| 6 binary | C | bypass NUL rejection | img.bin included, expected binary |
-| 7 stable hashes/order | C | omit sha256 from included manifest entries | empty sha256 fails 64-hex assertion |
-| 8 consumer cap | C | remove users.slice(0, MAX_CONSUMERS) | extra use-6.ts and use-7.ts entries |
-| 9 pointer semantics | C | replace absent/unknown pointer explanation | reviewer brief lacks confirmed-absence explanation |
-| 10 unchanged fork deduplication | C | queue fork as well as head for every named path | lib/core.py fork is included, expected undefined |
+| R01.patch | S15: real reviewer attempts | 899c6086f4bd3f39577c6c75956ee9a6cfff610be4aec3300dbb562948f8d4d2 | initial pending handed_back true instead of false |
+| R02.patch | S15: real reviewer attempts | d9dfbb7f767ef596ff5b66865e1cfc92888f6052f8d15d77c82852f368a2f5cf | one wake before handback instead of zero |
+| R03.patch | S15: real reviewer attempts | 714bc20b471e994fda3791c4e197596c9b8945aa05edd129e2081f1485aa2b79 | zero wakes after handback instead of one |
+| R04.patch | S15: a failed verdict transport | d22b74a9d41e404fcc65d77b1210b159fd983565156ea7e8f019b7bb7d31d72a | pending.json still exists after failed transport |
+| R05.patch | S15: orphan reconciliation | 1d4c2b0885909c14992e3d704dc6f1d6a44878c2b37cb616e72d201906a10c7d | untold legacy attempt unexpectedly wakes |
+| R06.patch | S15: orphan reconciliation | 3ff2a82d67c87ee6ddc6844593f23a2730545e77cedff631f73c8bc5ac7221c1 | later healthy job absent from finished report |
+| R07.patch | S15: orphan reconciliation | ba3fbd8ae793eadba1e99c9a538e0791e2808b676eabbabd24eecc36549af7ee | malformed pending files never stop the orphan sweep: unwanted rejection |
+| R08.patch | S15: real review decision writes | e3783e5959745f709d3afaaded56e416c5f09a3ce7b913e4e1091b273113a8a6 | partial-write pass overwritten by escalate |
+| R09.patch | S15: real review decision writes | 89942e2ab53cbb3a965f2ae9047b1ca18e6055b1dcad4f9fc60b5bb7e3b331fe | transient failure emits an unwanted notice; persistent failure has one write instead of two |
+| R10.patch | S15: real review decision writes | 6d7e1ea926cbc94b248d7f434c0beeacb82657e7ba01571c093a0404859f37c2 | failing durable-notice transport rejects reviewer settlement |
+| Q01.patch | S15: a real quality waiter | 94227b5928c6bf246ed9cb60385e74f1365dbf8e3fc83047cdffcd3b473ed626 | wake says undefined quality pass instead of quality panel failed / reviewer wait failed |
+| B01.patch | S15: a lost caller handback | 2d5f38c287afebf30c45a08f2b9e0d5b758ab485acef2e2428211ebcf42da738 | zero wakes after the production 60-second bound, expected one |
+| T00.patch | S15: the real cp_review | 8c54f9510b953f4bb97c19d2aa056d8c6e7a137dcb751908ed187f9e2a794ca9 | unknown-job refusal names cp_pipeline instead of cp_dispatch |
+| T01.patch | S15: the real cp_review | 3ce3adefc11135ef1816683ab0aa39d06ad12e3010295a1131e2268240ed3f93 | every successful RPC result carries a valid verdict: false instead of true |
+| T02.patch | S15: the real cp_review | f4381def5a721bfe49c39912c4fb880b973fafd678a509bdf733f29074325f08 | RPC content lacks retry can stay stale |
+| T03.patch | S15: the real cp_review | 42d921a45441fe1134ecbc41d03d5044cbde10401e5cdd3ac5ed18159efaeb48 | actual operational RPC details contain review/diff.md |
+| T04.patch | S15: the real cp_review | dc4a2875dac6dc9c910a6492171a14e268f98d298586a1df3275ffe3ac9861df | fabricated policy model instead of undefined |
+| T05.patch | S15: dispatch preview | 96f894ad8f6d5e6615375c7a4900dfa1155c973c18905dfba652195611ffe5c0 | missing expected rejection for a worker profile containing cp_review |
 
-All ten production mutations above were executed individually and restored with undo_last_change. Each run used:
-
-```
-node --import ./tests/harness/hermetic-env.ts --test --test-name-pattern='S15:' --test-timeout=300000 --test-force-exit tests/e2e/diff-review.test.ts
-```
-
-The original file remains pending complete whole-file retirement bookkeeping and assertion-equivalence review. These rows record the executed declaration controls; they do not license an unproved assertion deletion. Restored full focused run: 15 passed, zero skipped; typecheck passed. Contract eval and export golden regeneration left tracked output unchanged; the normal golden check passed.
-
-## Remaining files
-
-review-merge-window (2), review-runs (19), review-tool (7) still need declaration accounting and conversion. No retained disposition is claimed at this stage.
-
-## Second checkpoint
-
-Added `S15: real reviewer attempts persist before waiting, reject duplicates and announce only after handback` through CommandPost.diffReview with real reviewer processes. Executed three individual src/review-runs.ts mutations, restoring each: initialize handed_back=true (fails initial false flag assertion); remove the wakeup handback await (fails zero pre-handback wakes); remove #send (fails one post-handback wake). These support declarations 1, 3 and 4; the duplicate preflight assertion is also exercised, but the separate registry-slot case still requires accounting.
-
-Added `S15: the real cp_review tool relays bounded verdicts and policy refusals without review bodies`: a real pi RPC parent runs unknown-job, cached pass, wide-subject and oversized-subject cp_review calls. It checks medium reasons, persisted verdict equality, policy/model-free results and absence of raw diff bodies and paths. Production controls for this scenario remain pending; no migration credit is claimed for it yet.
-
-Executed helper payload controls: replacing details.verdict with {} fails DiffVerdictSchema validation in the real RPC scenario; stripping formatted reasons fails the medium reason text assertion. A separate exploratory diff_path: result.diff?.path mutation PASSED this scenario: current cached and policy tool results carry no materialized diff. It was restored and earns no control credit. The original direct-helper raw diff/path injection assertion must therefore stay until a reachable consumer case is established or its unreachable input is traced and retained explicitly.
-
-## Third checkpoint
-
-Additional real-entry scenarios cover failed transport, legacy orphan reconciliation (including an unwritable decision directory), and real review decision writes with filesystem-boundary faults. The write scenario injects one failed atomic rename, a rename that succeeds then reports failure, and persistent rename failures; original fs bindings are restored in finally. No production function is replaced.
-
-Executed and restored controls:
-
-- Remove #clear from the normal reviewer finally: the failed-transport scenario finds pending.json still present.
-- Remove pending.handed_back from the orphan wake condition: the untold legacy attempt unexpectedly wakes.
-- Return from orphan sweep after a failed decision write: the later healthy job is not finished.
-- Bypass orphan live-PID protection: the expected live-reviewer skip is missing.
-- Remove the fallback finish call: the transient fault leaves no operational decision, and the persistent-fault subcase sees one write instead of two. Both subcase assertions failed in the recorded run.
-- Bypass decisionExists after a partial finish: the persisted pass is overwritten by escalate; the partial-write subcase fails.
-
-These add executable evidence for review-runs declarations 5, 8, 9, 10 (filesystem-failure portion), 12, 13, and the live-PID portion of 14. Exact complete declaration dispositions, remaining controls, patch hashes, whole-file retirements and reference repairs remain unfinished. No deletion or retained credit is claimed for those incomplete declarations.
+An earlier cached-result-only path-leak probe passed and earns no credit. T03 now reaches the actual materialized-subject path. Moving the afterWakeup hook ahead of send also passed the real landing outcome: the production continuation schedules asynchronous work, while the old unit injects synchronous work. This exploratory mutation was restored and earns no credit for exact callback order.
 
 ## Context retirement proof (10 declarations)
 

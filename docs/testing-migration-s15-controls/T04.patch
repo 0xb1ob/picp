@@ -1,0 +1,8 @@
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -462,3 +462,3 @@
+ 		review_file: result.path,
+-		...(result.model ? { model: result.model } : {}),
++		...(result.model ? { model: result.model } : { model: "fabricated" }),
+ 		...(result.diff

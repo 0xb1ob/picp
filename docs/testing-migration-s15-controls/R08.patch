@@ -1,0 +1,8 @@
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -386,3 +386,3 @@
+ 				});
+-				if (decisionExists(this.#options.home, pending)) {
++				if (false) {
+ 					// A partial finish: the decision is on disk, something after it threw.

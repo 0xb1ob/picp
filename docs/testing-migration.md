@@ -69,7 +69,7 @@ ask-0088e0332d00, 2026-10-21.
 | S04 (cp-e2e-slice-s04-vep1) | behavior 05; original `tests/diff-review.test.ts` declarations 1–40. [Declaration accounting](testing-migration-s04-declarations.md): 38 mapped, 2 retained, 0 pending in S04; S05 owns 41–55 and whole-file retirement. | 0; baseline intentionally kept whole | +1 incoming e2e file | 55 source declarations unchanged; +13 e2e scenarios |
 | S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
-| S15 (cp-e2e-slice-s15-764h) | behavior 05; whole-file review-context, review-merge-window, review-runs and review-tool; [declaration accounting](testing-migration-s15.md); context: 10 mapped, 0 retained; other 28 dispositions pending; 21 executed production controls, context patch/hash records complete | 1 | -1 test file | -10 source declarations, +7 e2e declarations |
+| S15 (cp-e2e-slice-s15-764h) | behavior 05; whole-file review-context, review-merge-window, review-runs and review-tool; [declaration accounting](testing-migration-s15.md); 16 mapped, 3 retained; review-runs 19 pending | 3 | -2 test files | -16 source declarations; real reviewer and RPC cases added |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -378,6 +378,9 @@ moves first.
 | S06-6 | `tests/e2e/landing.test.ts` | landing: spawn pressure releases the oldest held author and a journal refusal leaves room retryable |
 | 05-S15-C | `tests/e2e/diff-review.test.ts` | S15: reviewers receive bounded whole-file snapshots with resolved task paths and capped consumers |
 | 05-S15-F | `tests/e2e/diff-review.test.ts` | S15: a git object read failure is named in reviewer context without fabricating absence |
+| 05-S15-W | `tests/e2e/landing.test.ts` | landing S15: durable review evidence owns the merge window across parent restarts |
+| 05-S15-T | `tests/e2e/diff-review.test.ts` | S15: the real cp_review tool relays bounded verdicts and policy refusals without review bodies |
+| 05-S15-P | `tests/e2e/diff-review.test.ts` | S15: dispatch preview rejects parent tools in external worker profile configuration |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -744,6 +747,15 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/review-context.test.ts` | (8) sorted consumers capped at five; no grep for changed test file | 05-S15-C | mapped | C08; real git audit checks test-file query exclusion |
 | `tests/review-context.test.ts` | (9) brief names SHAs, manifest-first reading and absent-versus-unknown semantics | 05-S15-C | mapped | C09; actual reviewer brief inspected |
 | `tests/review-context.test.ts` | (10) cp-c1ur N11: changed sources precede large fixtures; unchanged fork dedup; absent invariants excluded | 05-S15-C | mapped | C10 and C04; known regression preserved through public packet |
+| `tests/review-merge-window.test.ts` | complete pass: fixed durable deadline, before/elapsed boundary, replay, restart, head change and equivalent pass | 05-S15-W | mapped | W01; fresh parent reads original deadline without rewriting pass; expired equivalent pass advances; existing real deadline scenario also waits across the boundary |
+| `tests/review-merge-window.test.ts` | incomplete/malformed pass and wrong-head equivalence cannot arm a window | 05-S15-W | mapped | W02; actual cp_integrate returns no review_resume_at on all invalid inputs |
+| `tests/review-tool.test.ts` | (1) distinct tool names and schemas; retry description; dispatch precondition/error fix; no decided file | 05-S15-T | mapped | T00; actual RPC schemas, refusal and filesystem assertions |
+| `tests/review-tool.test.ts` | (2) review/gate are parent-only | 05-S15-P | mapped | T05; external profile read by public dispatch preview; missing expected rejection if review deny is removed |
+| `tests/review-tool.test.ts` | (3) valid round-trip plus closed schema rejects injected next | — | retained | tests/review-tool-retained.test.ts; cp_review accepts no caller-supplied DiffVerdict; defensive closed-schema contract; real round-trip also pinned by T01 |
+| `tests/review-tool.test.ts` | (4) medium reason reaches relay while next proceeds | 05-S15-T | mapped | T02; actual RPC content lacks medium reason under control |
+| `tests/review-tool.test.ts` | (5) helper refuses injected negative file count | — | retained | tests/review-tool-retained.test.ts; cp_review validates stored and generated counts before payload construction; no verdict-input argument |
+| `tests/review-tool.test.ts` | (6) combined raw observation, revise receipt and materialized diff input | — | retained | tests/review-tool-retained.test.ts; live cp_review returns wait, then finishes asynchronously; cached and spawn-failure helper paths have no observation; T03 additionally pins reachable materialized subject leakage |
+| `tests/review-tool.test.ts` | (7) model-free stat overflow remains valid and has no subject/model | 05-S15-T | mapped | T04; real wide/large branches; fabricated model fails policy assertion |
 <!-- /manifest:assertions -->
 
 S06's [declaration control ledger](testing-migration-s06-controls.md) maps each of its 24 mapped declarations to
@@ -1293,7 +1305,29 @@ diff --git a/src/held-release.ts b/src/held-release.ts
 | S06-deploy | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-2 | S06-deploy | 9c2bb5361529d74f70a4713044b66f3ea497e4e615d75ee95cf1a29c078a065a | corrupt ledger exception escapes recordMerge instead of preserving named retry outcome; exit 1 | pass |
 | S06-reservation | `tests/held-release.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-6 | S06-reservation | 0a723cad1b905543dda1bcffc250f7677cf6bb8451580d5e5779c674cd65f16d | queue capacity counts a releasable author as free after journal recovery: expected worker, got undefined; leaked reservation prevents retry; exit 1 | pass |
 | S15-C10 | `tests/review-context.test.ts` | 66c803bd47a3638e228a4183edd14aa34c647e8a | 05-S15-C | S15-C10 | bda2cbe060162587fea753d9651f19d0201685595492b7edb9a63672159582e5 | unchanged lib/core.py fork unexpectedly included | pass |
+| S15-W01 | `tests/review-merge-window.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-W | S15-W01 | 76fe8e4aee8fad87cbd5a6f9f100ede181f1bbbd6aab1beced777a94cdf5ca00 | fresh pass advances rather than waiting for its window | pass |
+| S15-T05 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-P | S15-T05 | 96f894ad8f6d5e6615375c7a4900dfa1155c973c18905dfba652195611ffe5c0 | missing expected rejection for a worker profile containing cp_review | pass |
 <!-- /manifest:regressions -->
+
+<!-- patch:S15-T05 -->
+```diff
+diff --git a/src/contracts/workers.ts b/src/contracts/workers.ts
+--- a/src/contracts/workers.ts
++++ b/src/contracts/workers.ts
+@@ -84,3 +84,2 @@
+ 	 */
+-	"cp_review",
+ 	"cp_artifact",
+```
+
+<!-- patch:S15-W01 -->
+```diff
+--- a/src/review-merge-window.ts
++++ b/src/review-merge-window.ts
+@@ -15 +15 @@
+-	const deadline = Date.parse(pass.decided_at) + REVIEW_MERGE_WINDOW_MS;
++	const deadline = Date.parse(pass.decided_at);
+```
 
 <!-- patch:S15-C10 -->
 ```diff
@@ -2452,6 +2486,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/forge-runtime-retained.test.ts` | S06 | three verbatim landing proof regressions: injected runner budgets, direct runner timeout and proof/release recheck |
 | `tests/forge-observers-retained.test.ts` | S06 | eight preserved structural, security and direct-reader boundary declarations; reasons in assertion map |
 | `tests/held-release-retained.test.ts` | S06 | eight preserved private-state, schema-defense and injected-race declarations; reasons in assertion map |
+| `tests/review-tool-retained.test.ts` | S15 | convert-owned; three verbatim declarations retained from tests/review-tool.test.ts for unreachable closed-schema, invalid-verdict and combined raw-observation helper inputs; see testing-migration-s15.md |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -2714,9 +2749,9 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/restart-intake.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
 | `tests/review-approval.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/review-context.test.ts` | deleted | P3 | S15: all ten declarations mapped to 05-S15-C/F; ten executed controls with patches/hashes in testing-migration-s15.md; known cp-c1ur N11 regression pinned by S15-C10 |
-| `tests/review-merge-window.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/review-merge-window.test.ts` | deleted | P3 | S15: both declarations mapped to 05-S15-W through cp_integrate and a fresh parent; executed W01/W02 patches and hashes in testing-migration-s15.md |
 | `tests/review-runs.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
-| `tests/review-tool.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/review-tool.test.ts` | deleted | P3 | S15: four mapped declarations in 05-S15-T/P; three declarations ledgered retained and moved verbatim to tests/review-tool-retained.test.ts; typed-helper/schema entry-point traces and T00–T05 controls in testing-migration-s15.md |
 | `tests/reviewer-model.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/revive.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/risk-batch.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-11 or redundant-unreachable (Assertion map); negative control NC-15 |

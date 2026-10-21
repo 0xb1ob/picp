@@ -2,7 +2,7 @@
  * Routing T5: the `cp_dispatch dry_run` tool boundary.
  *
  * The preview's own resolution is proven in `tests/dispatch.test.ts`; this is
- * the surface, in the style of `tests/review-tool.test.ts` — a real `pi --mode
+ * the surface, in the style of `tests/e2e/diff-review.test.ts` — a real `pi --mode
  * rpc` parent with the command-post extension loaded and the scriptable mock
  * provider as its model, so "the parameter exists" means pi actually offered it
  * to a model and actually ran the call.
