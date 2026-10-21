@@ -502,8 +502,10 @@ export class Doctor {
 		if (result.state !== "newer" || !result.version) return [finding];
 		try {
 			const sh = (command: string, args: string[]) => this.#run(command, args, this.#options.packageRoot);
-			const drift = piDriftFinding(result, compat.testedMax, readDriftFacts(result.version, sh), this.#now());
-			return drift ? [finding, drift] : [finding];
+			const facts = readDriftFacts(result.version, sh);
+			const drift = piDriftFinding(result, compat.testedMax, facts, this.#now());
+			const unknown: DoctorFinding[] = facts.unreadable ? [{ check: PI_DRIFT_CHECK, severity: "warn", what: "host.pi.drift facts are unknown", detail: facts.unreadable, fix: "check `npm view` and `gh auth status` work from the package root" }] : [];
+			return drift ? [finding, drift, ...unknown] : [finding, ...unknown];
 		} catch (error) {
 			return [finding, { check: PI_DRIFT_CHECK, severity: "warn", what: "host.pi.drift could not be read", detail: (error as Error).message, fix: "check `npm view` and `gh auth status` work from the package root" }];
 		}

@@ -13,20 +13,33 @@ export const PI_DRIFT_CHECK = "host.pi.drift";
 export const qualifyTitle = (version: string): string => `qualify pi ${version}`;
 
 /** `prListed` is false when gh could not say: an unknown PR state is never reported as "no PR". */
-export interface PiDriftFacts { releasedAt?: Date; qualifyPr?: string; prListed?: boolean }
+export interface PiDriftFacts { releasedAt?: Date; qualifyPr?: string; prListed?: boolean; unreadable?: string }
 export type Sh = (command: string, args: string[]) => { status: number | null; stdout: string };
 
-/** Release time of `version` (npm `time`) and the open qualify PR; a failed command leaves a fact undefined, unparsable output throws. */
+/** Release time of `version` (npm `time`) and the open qualify PR. Never throws: a failed or non-JSON answer sets `unreadable`. */
 export function readDriftFacts(version: string, sh: Sh): PiDriftFacts {
 	const facts: PiDriftFacts = {};
-	// a throwing runner or unparsable output propagates: callers surface it, never read it as "no drift"
-	const time = sh("npm", ["view", PI_PACKAGE, "time", "--json"]);
-	const at = time.status === 0 ? (JSON.parse(time.stdout) as Record<string, string>)[version] : undefined;
+	const read = (command: string, args: string[]): unknown => {
+		let out = "";
+		try {
+			const r = sh(command, args);
+			out = r.stdout ?? "";
+			if (r.status === 0) return JSON.parse(out);
+		} catch (error) {
+			out = `${(error as Error).message} ${out}`;
+		}
+		facts.unreadable ??= `${[command, ...args].join(" ")}: ${out.slice(0, 200) || "no output"}`;
+		return undefined;
+	};
+	const time = read("npm", ["view", PI_PACKAGE, "time", "--json"]) as Record<string, string> | undefined;
+	const at = time?.[version];
 	if (at && !Number.isNaN(Date.parse(at))) facts.releasedAt = new Date(at);
-	const prs = sh("gh", ["pr", "list", "--state", "open", "--search", `"${qualifyTitle(version)}" in:title`, "--json", "title,url"]);
-	const hit = prs.status === 0 ? (JSON.parse(prs.stdout) as Array<{ title: string; url: string }>).find((pr) => pr.title.startsWith(qualifyTitle(version))) : undefined;
-	if (prs.status === 0) facts.prListed = true;
-	if (hit) facts.qualifyPr = hit.url;
+	const prs = read("gh", ["pr", "list", "--state", "open", "--search", `"${qualifyTitle(version)}" in:title`, "--json", "title,url"]);
+	if (Array.isArray(prs)) {
+		facts.prListed = true;
+		const hit = (prs as Array<{ title: string; url: string }>).find((pr) => pr.title?.startsWith(qualifyTitle(version)));
+		if (hit) facts.qualifyPr = hit.url;
+	}
 	return facts;
 }
 
