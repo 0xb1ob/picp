@@ -14,21 +14,27 @@ export const qualifyTitle = (version: string): string => `qualify pi ${version}`
 
 /** `prListed` is false when gh could not say: an unknown PR state is never reported as "no PR". */
 export interface PiDriftFacts { releasedAt?: Date; qualifyPr?: string; prListed?: boolean; unreadable?: string }
-export type Sh = (command: string, args: string[]) => { status: number | null; stdout: string };
+export type Sh = (command: string, args: string[]) => { status: number | null; stdout: string; stderr?: string };
 
-/** Release time of `version` (npm `time`) and the open qualify PR. Never throws: a failed or non-JSON answer sets `unreadable`. */
+/** Release time of `version` (npm `time`) and the open qualify PR. Never throws: a failed or non-JSON answer sets
+ * `unreadable`. */
 export function readDriftFacts(version: string, sh: Sh): PiDriftFacts {
 	const facts: PiDriftFacts = {};
 	const read = (command: string, args: string[]): unknown => {
 		let out = "";
+		let err = "";
+		let status: number | null | undefined;
 		try {
 			const r = sh(command, args);
 			out = r.stdout ?? "";
+			err = r.stderr ?? "";
+			status = r.status;
 			if (r.status === 0) return JSON.parse(out);
 		} catch (error) {
-			out = `${(error as Error).message} ${out}`;
+			err = `${(error as Error).message} ${err}`;
 		}
-		facts.unreadable ??= `${[command, ...args].join(" ")}: ${out.slice(0, 200) || "no output"}`;
+		const say = (s: string) => s.trim().slice(0, 200) || "(empty)";
+		facts.unreadable ??= `${[command, ...args].join(" ")}: exit ${status ?? "unknown"}; stdout: ${say(out)}; stderr: ${say(err)}`;
 		return undefined;
 	};
 	const time = read("npm", ["view", PI_PACKAGE, "time", "--json"]) as Record<string, string> | undefined;
@@ -43,7 +49,7 @@ export function readDriftFacts(version: string, sh: Sh): PiDriftFacts {
 	return facts;
 }
 
-/** A warn only for a newer host pi released more than `days` ago with no qualify PR; absent otherwise or when the age is unknown. */
+/** A warn only for a newer host pi released over `days` ago with no qualify PR; absent otherwise or when age is unknown. */
 export function piDriftFinding(result: PiCompatResult, testedMax: string, facts: PiDriftFacts, now: Date, days = DRIFT_DAYS): DoctorFinding | undefined {
 	if (result.state !== "newer" || !result.version || !facts.releasedAt || !facts.prListed || facts.qualifyPr) return undefined;
 	const age = Math.floor((now.getTime() - facts.releasedAt.getTime()) / 86_400_000);

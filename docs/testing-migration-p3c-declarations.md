@@ -9,8 +9,8 @@ The original slice has 143 static declarations (152 parameterized runtime cases)
 
 | Original file | Declarations | Delivery and follow-on status |
 |---|---:|---|
-| tests/ci-watch.test.ts | 80 | S03b: 75 mapped (S02 36 + S03 39), four redundant-unreachable with named public consumer cases (S02 6/8/32/33), one pending-fix (S03 71). Declaration 64 maps after #429 with real parked producer and executed quiet-wakeup control. Source stays whole while 71 awaits a separate product repair; no retained/deleted file is claimed. Controls and base SHAs: docs/testing-migration-s03b-controls.md. |
-| tests/main-ci.test.ts | 39 | convert, owner P3c-rest; 39 pending, including inherited P3/P3b assertions |
+| tests/ci-watch.test.ts | 80 | S03b: 75 mapped (S02 36 + S03 39), four redundant-unreachable with named public consumer cases (S02 6/8/32/33), one pending-fix (S03 71). Declaration 64 maps after #429 with real parked producer and executed quiet-wakeup control. Source stays whole; a follow-up slice maps 71 and retires the file. No retained/deleted file is claimed. Controls and base SHAs: docs/testing-migration-s03b-controls.md. |
+| tests/main-ci.test.ts | 39 | Follow-on #416: 32 mapped, 7 retained (mixed tests narrowed) in tests/main-ci-retained.test.ts, 0 pending; whole original retired. Full titles and controls: [main-CI accounting](testing-migration-main-ci-declarations.md). |
 | tests/foreign-ci-watch.test.ts | 11 | S06 completed: 10 mapped to 05-10/S06-1 in tests/e2e/landing.test.ts, one static declaration in tests/foreign-ci-watch-retained.test.ts; supersedes the P3c-rest pending snapshot |
 | tests/parked-ci.test.ts | 3 | All three mapped to 05-12 and deleted; real timer, forge barriers, resume/re-park and legacy held state; NC-36 and NC-49–NC-55 |
 | tests/ci-evidence.test.ts | 5 | All five mapped to 05-9 and deleted; NC-33 and NC-43–NC-48 fail their tool/storage/viewer assertions |
