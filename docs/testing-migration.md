@@ -164,7 +164,8 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P2c | 02 | `tests/e2e/authority.test.ts` | adds 02-7 and 02-8 |
 | P2d | 02 | `tests/e2e/authority.test.ts` | adds 02-9 to 02-14 |
 | P2e | 02 | `tests/e2e/authority.test.ts` | adds 02-15 to 02-17 |
-| P3 | 05 | `tests/e2e/landing.test.ts` | 4 |
+| P3 | 05 | `tests/e2e/landing.test.ts` | 4 (05-1 to 05-4) |
+| P3b | 05 | `tests/e2e/landing.test.ts` | the rest of the plan's 6 |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -187,6 +188,10 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P23 | 23 | `tests/e2e/memory.test.ts` | 3 |
 | P24 | 24 | `tests/e2e/host-compatibility.test.ts` | 3 |
 <!-- /manifest:prs -->
+
+The plan proposed 6 cases for all of behavior 05. P3 is a first slice of 4 cases over 4 files. P3b
+(cp-e2e-migration-p3b-stth) owns the other 26 behavior-05 files and takes about 250 KB of diff by behavior; a P3c
+follows if files remain.
 
 <!-- census -->
 Census snapshot, printed by the checker on `03ed8749a76085c9938517b6f149bb49ebe7a8fd`; the checker's live output wins over this table.
@@ -499,7 +504,7 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/actions-ci.test.ts` | pagination: runs and jobs pages are followed to the short page; a boundary duplicate counts once | 05-1 | mapped | two runs pages with the boundary run repeated, and run 1's 101 jobs: stopping at page one fails "ci: failed … (run 101 …)", counting the duplicate twice fails it as incomplete |
 | `tests/actions-ci.test.ts` | fail closed: a short read, conflicting duplicate, page cap or API ceiling is incomplete, never a subset | 05-1 | mapped | each case asserts `next: retry` and its own "read incomplete" cause; a subset taken as complete fails `next: retry` |
 | `tests/actions-ci.test.ts` | fail closed: malformed bodies, missing identity and a mixed head are malformed | 05-1 | mapped | the seven runs bodies each assert `read malformed` and `next: retry`; skipping the bad row fails `next: retry` |
-| `tests/actions-ci.test.ts` | parseJobsPage: a job from another run, attempt or head is malformed | 05-1 | mapped | the three job pages assert "not of the run", "not of attempt 1" and "requested head"; accepting the foreign job fails `next: retry` |
+| `tests/actions-ci.test.ts` | parseJobsPage: a job from another run, attempt or head is malformed | 05-1 | mapped | the three job pages assert "not of the run", "not of attempt 1" and "requested head"; accepting the foreign job fails `next: retry`. The upper-case head: a run whose `head_sha` gh returns in upper case asserts "ci: green"; a case-sensitive compare reads it as a mixed head and fails it (run by hand) |
 | `tests/actions-ci.test.ts` | jobs read failure fails the whole observation: no run-only green | 05-1 | mapped | a jobs 502, 404 or rate limit beside a green run asserts `next: retry`; a run-only green fails it |
 | `tests/actions-ci.test.ts` | errors: denial stays classifiable as unreadable CI; rate limit does not; raw output never carried | 05-1 | mapped | the runs 403 asserts the Actions-only label after one call, the rate limit asserts no label, and no record carries `canary`; each fails if its rule is dropped |
 | `tests/actions-ci.test.ts` | retry: a truncated body recovers on retry; a persisting one is one malformed fault with status and preview | 05-1 | mapped | "ci: green" after exactly two runs calls fails without the retry; the HTML 200 asserts "not JSON; gh exit 0; body … [redacted] …; 3 attempts" |
@@ -511,7 +516,7 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/ci-access.test.ts` | ciReadDenied: only a permission refusal of a CI read counts | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): check-runs and commit-status paths are never read (that file's own rule), and the PR-read and `gh run` forms no longer reach it. 05-1 pins the Actions denial and a rate limit that is not one |
 | `tests/ci-access.test.ts` | the browser mirrors the backend's Actions-only label and advice, keeping its needs prefix | 05-1 | retained | moved verbatim to `tests/actions-ci-policy.test.ts` (an exception, P1): source parity with `viewer-app/components/JobSignals.tsx`, which no case renders. 05-1 pins the label and advice in cp_integrate's reason |
 | `tests/ci-access.test.ts` | a held job whose CI read was refused names the token as its wait reason, before any head is known | 05-1 | mapped | after the CI watch tick writes `last_ci: unreadable`, the `/status` table's "waiting on: CI unreadable (token)" fails without the unreadable branch in `waitReason` |
-| `tests/ci-access.test.ts` | doctor ci.<project>: workflows, then the newest run and its attempt jobs; each outcome is distinct and gh output is never echoed | 05-3 | mapped | the exact gh call sequence, each project's severity and text, and no `sentinel-credential-value` in the report; a denied jobs read read as unknown fails the `locked` row |
+| `tests/ci-access.test.ts` | doctor ci.<project>: workflows, then the newest run and its attempt jobs; each outcome is distinct and gh output is never echoed | 05-3 | mapped | the exact gh call sequence (`o/denied` registered as an https `.git` URL, `o/bare` as an ssh URL), each project's severity and text, and no `sentinel-credential-value` in the report; a denied jobs read read as unknown fails the `locked` row. No gh on PATH: a second `/doctor` asserts no `ci.*` finding ("no gh: host.gh says so"); dropping the ENOENT check fails it (run by hand) |
 | `tests/ci-access.test.ts` | doctor ci.<project>: a jobs list shorter than its total_count is unknown, never readable | 05-3 | mapped | NC-26: `o/short` reads ok and its [warn, "the Actions read failed (incomplete)"] assertion fails |
 | `tests/ci-configured.test.ts` | only an authoritative empty workflow list is 'no CI configured' | 05-2 | mapped | the empty list asserts `none (authoritative_empty)`, "reports 0 Actions workflows" and the permission read; reading it as unreadable fails `permission: permitted` |
 | `tests/ci-configured.test.ts` | a repository that has workflows is 'present', however few runs it has produced | 05-2 | mapped | one workflow with no runs asserts "present (workflows_present) — the repository has 1 Actions workflow(s)" and the human checkpoint |

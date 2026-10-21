@@ -131,7 +131,7 @@ if (args[0] === "api" && /\\/pulls\\/\\d+$/.test(path)) {
   if (hit) out({ number, html_url: hit[1].url, state: "open", merged: false, head: { sha: heads()[hit[0]], ref: hit[0] } });
 }
 if (args[0] === "api" && path.includes("/actions/runs?head_sha=")) {
-  const runs = all.filter((row) => row.head_sha === query("head_sha"));
+  const runs = all.filter((row) => row.head_sha.toLowerCase() === query("head_sha"));
   out({ total_count: runs.length, workflow_runs: slice(runs) });
 }
 if (args[0] === "api" && path.includes("/actions/runs?branch=")) out({ total_count: 0, workflow_runs: [] });
@@ -355,6 +355,10 @@ test(
 		const recovered = await s.integrate(jobId);
 		assert.match(recovered.text, /ci: green/, recovered.text);
 		assert.equal(recovered.calls.filter((call) => call.includes(runsAt)).length, 2);
+		// GitHub's head_sha in upper case is still the pushed head.
+		s.setGh({ runs: [run(1, head.toUpperCase(), "completed", "success")], routes: [] });
+		const upper = await s.integrate(jobId);
+		assert.match(upper.text, /ci: green/, upper.text);
 
 		// 101 runs of one workflow name over two pages, the boundary run repeated, and 101 jobs on run 1: run 101 fails.
 		const many = Array.from({ length: 101 }, (_, i) => run(i + 1, head, "completed", i === 100 ? "failure" : "success"));
@@ -421,7 +425,9 @@ test(
 	async (t) => {
 		const s = await startStack(t, { project: false });
 		const names = ["denied", "bare", "ci", "idle", "locked", "garbled", "flaky", "short"];
-		for (const name of names) await s.post.registry.register({ name, clone_url: `https://github.com/o/${name}`, delivery: "pr" });
+		// An https `.git` URL and an ssh URL name the same GitHub repository as a bare https one.
+		const urls: Record<string, string> = { denied: "https://github.com/o/denied.git", bare: "git@github.com:o/bare.git" };
+		for (const name of names) await s.post.registry.register({ name, clone_url: urls[name] ?? `https://github.com/o/${name}`, delivery: "pr" });
 		await s.post.registry.register({ name: "lab", clone_url: "https://gitlab.com/o/lab.git", delivery: "pr" });
 		const secret = "sentinel-credential-value";
 		const sha = "a".repeat(40);
@@ -468,12 +474,20 @@ test(
 		assert.deepEqual([by["ci.ci"]?.severity, by["ci.ci"]?.what], ["ok", "CI readable for o/ci (2 workflow(s); latest run and its 1 job(s) read)"]);
 		assert.equal(by["ci.idle"]?.severity, "ok");
 		assert.match(by["ci.idle"]?.what ?? "", /no runs yet, so run and job access is untested/, "workflows alone never claim jobs access");
+		assert.doesNotMatch(by["ci.idle"]?.what ?? "", /^CI readable/);
 		assert.deepEqual([by["ci.garbled"]?.severity, by["ci.garbled"]?.what], ["warn", "CI state unknown for o/garbled: the Actions read failed (malformed)"]);
 		assert.equal(by["ci.flaky"]?.severity, "warn");
 		assert.match(by["ci.flaky"]?.what ?? "", /CI state unknown/);
 		assert.deepEqual([by["ci.short"]?.severity, by["ci.short"]?.what], ["warn", "CI state unknown for o/short: the Actions read failed (incomplete)"]);
 		assert.equal(by["ci.lab"], undefined, "a non-GitHub project is not asked");
 		assert.doesNotMatch(JSON.stringify(report), new RegExp(secret), "never prints what gh printed");
+		// No gh on PATH at all: host.gh says so, and no project gets a ci.* finding.
+		const withGh = process.env.PATH;
+		process.env.PATH = join(s.home, "empty-bin");
+		const blind = await s.post.doctor().finally(() => {
+			process.env.PATH = withGh;
+		});
+		assert.deepEqual(blind.findings.filter((f) => f.check.startsWith("ci.")), [], "no gh: host.gh says so");
 	},
 );
 
