@@ -212,7 +212,15 @@ export class HeldContinuation {
 	async trigger(observed: ContinuationTrigger): Promise<ContinuationOutcome> {
 		const record = this.#readRecord(observed.jobId);
 		const generation = observed.generation ?? (record ? (record.supersessions ?? 0) + 1 : undefined);
-		const head = observed.head ?? this.#deps.head(observed.jobId, headOwner(observed.event));
+		let head = observed.head;
+		try {
+			head ??= this.#deps.head(observed.jobId, headOwner(observed.event));
+		} catch (error) {
+			// Fail closed: a head that cannot be read confirms nothing; the next fact re-triggers.
+			const reason = `${observed.jobId}: head read failed: ${(error as Error).message.split("\n")[0]}`;
+			this.#notice(observed.jobId, `head:${observed.event}`, "retry", reason);
+			return { job_id: observed.jobId, key: continuationKey({ ...observed, ...(generation !== undefined ? { generation } : {}) }), action: "error", steps: 0, reason, next: "retry" };
+		}
 		const trigger: ContinuationTrigger = { ...observed, ...(generation !== undefined ? { generation } : {}), ...(head ? { head } : {}) };
 		const key = continuationKey(trigger);
 		const skip = (action: ContinuationAction, reason: string): ContinuationOutcome => ({ job_id: trigger.jobId, key, action, steps: 0, reason });
