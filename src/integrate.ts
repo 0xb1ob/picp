@@ -1428,8 +1428,14 @@ export class Integrator {
 		if (fetched.status !== 0) {
 			return { acted: false, failed: false, detail: `could not fetch origin/${branch} in the worktree` };
 		}
-		const local = (await this.#run(worktree, "git", ["rev-parse", "HEAD"])).stdout.trim();
-		const remote = (await this.#run(worktree, "git", ["ls-remote", "--heads", "origin", branch])).stdout.trim().split(/\s+/)[0] ?? "";
+		const unread = (r: { status: number | null }, what: string, failed: boolean) =>
+			r.status === 0 ? null : { acted: false, failed, detail: `${what} (exit ${r.status}), so the worktree was not reset` };
+		const localRun = await this.#run(worktree, "git", ["rev-parse", "HEAD"]);
+		const remoteRun = await this.#run(worktree, "git", ["ls-remote", "--heads", "origin", branch]);
+		let bad = unread(localRun, "could not read the worktree HEAD (git rev-parse)", true) ??
+			unread(remoteRun, `origin did not name a tip for ${branch} (git ls-remote)`, false);
+		if (bad) return bad; // nonzero = "cannot tell"; ls-remote stays failed:false (pinned: tests/integrate.test.ts:2442)
+		const local = localRun.stdout.trim(), remote = remoteRun.stdout.trim().split(/\s+/)[0] ?? "";
 		if (remote.length === 0) {
 			// Origin could not be asked, or does not have the branch. That is a
 			// refusal, not an invitation to reach for `refs/remotes/origin/<branch>`
@@ -1440,6 +1446,7 @@ export class Integrator {
 			return { acted: false, failed: false, detail: "worktree already matches origin" };
 		}
 		const dirty = await this.#run(worktree, "git", ["status", "--porcelain"]);
+		if ((bad = unread(dirty, "could not read the worktree status (git status)", true))) return bad;
 		if (dirty.stdout.trim().length > 0) {
 			return {
 				acted: false,
