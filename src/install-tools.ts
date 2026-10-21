@@ -225,7 +225,7 @@ export interface PiCompatGateOptions {
 	retry: string;
 }
 
-/** #375's pi policy after the tools step: 0 go on (maybe with a warning), 1 refused with its retry. Never downgrades. */
+/** #375's pi policy after the tools step: 0 go on (maybe warning), 1 refused with its retry. Never downgrades. */
 export function piCompatGate(o: PiCompatGateOptions): number {
 	const pi = o.which("pi")[0];
 	if (!pi) return 0; // planOrInstall already reported a missing pi

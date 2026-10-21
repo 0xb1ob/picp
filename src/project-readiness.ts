@@ -7,7 +7,7 @@ import { resolveForgeRepository } from "./forge-url.ts";
 import type { EnsureCloneResult } from "./projects.ts";
 import { classifyPi, type PiProbe, readPiCompat } from "./pi-compat.ts";
 
-/** The host pi against package.json piCompat (#375), doctor's `host.pi.compat` classification; advisory, never throws. */
+/** The host pi against package.json piCompat (#375), as doctor's `host.pi.compat` classifies it; never throws. */
 export function piReadiness(packageRoot: string, which: (command: string) => string[], probe: (pi: string) => PiProbe): string {
 	try {
 		const pi = which("pi")[0];
