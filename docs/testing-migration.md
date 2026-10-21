@@ -58,7 +58,7 @@ ask-0088e0332d00, 2026-10-21.
 | P1 (cp-e2e-migration-p1-policy-census-gtep) | policy texts; every baseline disposition; per-PR census | 0 | 400 → 400 | 4,497 → 4,497 |
 | P2 (cp-e2e-migration-p2-tyir) | behavior 02, first slice: `tests/e2e/authority.test.ts`. P2 is a first slice; the remaining 12 behavior-02 files belong to P2b (cp-e2e-migration-p2b-3e1w); send-first-gate moves to behavior 06 / P4. | 1 (`tests/budgets.test.ts`) | 398 → 398 | 4,464 → 4,466 |
 | P2b (cp-e2e-migration-p2b-3e1w) | behavior 02, second slice: held-job cap counting and ops jobs (02-5, 02-6) in `tests/e2e/authority.test.ts`. The other 11 behavior-02 files move to P2c (job to be created by the main session). | 1 (`tests/ops-jobs.test.ts`) | 398 → 397 | 4,467 → 4,465 |
-| P2c (cp-e2e-migration-p2c-wtsd) | behavior 02, third slice: keyword risk inference (02-7), mandate defaults and the issue ladder (02-8), and the P2b review's two lows (NC-11; 02-5 raises through `cp_mandate raise_tokens`). The other 9 behavior-02 files move to P2d. | 2 (`tests/risk-negation.test.ts`, `tests/mandate-defaults.test.ts`) | 394 → 392 | 4,413 → 4,391 |
+| P2c (cp-e2e-migration-p2c-wtsd) | behavior 02, third slice: keyword risk inference (02-7), mandate defaults and the issue ladder (02-8), and the P2b review's two lows (NC-11; 02-5 raises through `cp_mandate raise_tokens`). The other 9 behavior-02 files move to P2d (8) and P2e (`tests/mandate.test.ts`). | 2 (`tests/risk-negation.test.ts`, `tests/mandate-defaults.test.ts`) | 394 → 392 | 4,413 → 4,391 |
 
 P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-evidence.test.ts` (2). Ten of the
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
@@ -95,9 +95,10 @@ P2c (cp-e2e-migration-p2c-wtsd) adds 02-7 (keyword risk inference, replacing `te
 in the P2b review's two lows: NC-11 drops a held job from the job count alone, and 02-5 raises the paused grant's token
 cap through `cp_mandate raise_tokens` in the parent. 02-6 still spends the recovery attempt with a direct
 `recordRecoveryAttempt`: only a real worker death spends it, and that death would revive the worker the scenario needs
-dead. The other 9 behavior-02 files move to P2d. All 11 cannot fit one PR: their deletions alone are 201 KB of diff
-before any scenario or map row, against the 250 KB slice. `tests/risk-batch.test.ts` pins a failing withdraw that no
-entry point can produce, and `tests/risk-warning.test.ts` pins schedule-fire grants that need a scheduler scenario.
+dead. The other 9 behavior-02 files were re-cut on measured sizes (main-session decision of 2026-10-20 19:41Z,
+confirmed ps-20261021013902-85977f1f): P2d (cp-e2e-migration-p2d-k5to) owns capacity, mandate-selection,
+mandate-supplement, mandate-usage, quota, risk-batch, risk-preapproval and risk-warning; P2e
+(cp-e2e-migration-p2e-fmi5) owns `tests/mandate.test.ts`.
 
 ## Conversion PRs
 
@@ -114,6 +115,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P2b | 02 | `tests/e2e/authority.test.ts` | adds 02-5 and 02-6 |
 | P2c | 02 | `tests/e2e/authority.test.ts` | adds 02-7 and 02-8 |
 | P2d | 02 | `tests/e2e/authority.test.ts` | extends 02-1 to 02-8 |
+| P2e | 02 | `tests/e2e/authority.test.ts` | extends 02-1 to 02-8 |
 | P3 | 05 | `tests/e2e/landing.test.ts` | 6 |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
@@ -300,7 +302,7 @@ outcome of that path instead (see Method). `unreachable`, with no pinning scenar
 | `tests/mandate-defaults.test.ts` | expiry comes from expiry_hours when no explicit expiry is given | 02-8 | mapped | a bare issue expires issued_at + 8 h with provenance home |
 | `tests/mandate-defaults.test.ts` | an explicit expiry wins over a project expiry_hours | 02-8 | mapped | `dated` keeps 2030-01-01 with provenance explicit under a project expiry_hours 1 |
 | `tests/mandate-defaults.test.ts` | 'fix example-infra #17' resolves into one complete grant; show names every field's source | 02-8 | mapped | issue with projects and objective only: every provenance is home; cp_mandate show prints field sources and expiry_hours:home |
-| `tests/mandate-defaults.test.ts` | identical project overrides agree regardless of key order; a differing one falls through | 02-8 | mapped | agreeing overrides in a different key order apply; job_cap 6 on one project falls through to home; negative control NC-12 |
+| `tests/mandate-defaults.test.ts` | identical project overrides agree regardless of key order; a differing one falls through | 02-8 | mapped | agreeing overrides in a different key order apply; job_cap 6 on one project falls through to home; an override beside a project with none falls through to home; negative control NC-12 |
 <!-- /manifest:assertions -->
 
 ## Negative controls
@@ -810,7 +812,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/mandate-selection.test.ts` | convert | P2d | behavior 02 (Mandate, budgets and authority); left by P2c (cp-e2e-migration-p2c-wtsd) to P2d |
 | `tests/mandate-supplement.test.ts` | convert | P2d | behavior 02 (Mandate, budgets and authority); left by P2c (cp-e2e-migration-p2c-wtsd) to P2d |
 | `tests/mandate-usage.test.ts` | convert | P2d | behavior 02 (Mandate, budgets and authority); left by P2c (cp-e2e-migration-p2c-wtsd) to P2d |
-| `tests/mandate.test.ts` | convert | P2d | behavior 02 (Mandate, budgets and authority); left by P2c (cp-e2e-migration-p2c-wtsd) to P2d |
+| `tests/mandate.test.ts` | convert | P2e | behavior 02 (Mandate, budgets and authority); left by P2c (cp-e2e-migration-p2c-wtsd) to P2e |
 | `tests/mcp-access.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
 | `tests/memory.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
 | `tests/merge-ask.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |

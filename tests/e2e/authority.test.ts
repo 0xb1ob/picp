@@ -570,7 +570,7 @@ test("authority: cp_mandate issue needs only projects and an objective; every ot
 	assert.deepEqual([after?.job_cap, after?.dispatch_parallelism, after?.ask_on, after?.provenance?.dispatch_parallelism], [9, 1, ["merge", "risk:high"], "home"]);
 
 	// Project overrides apply only when every named project agrees, whatever their key order; explicit beats both.
-	const overrides = (demo: Args, rest: Args) => {
+	const overrides = (demo: Args, rest?: Args) => {
 		const path = join(s.home, LAYOUT.projectsFile);
 		const doc = JSON.parse(readFileSync(path, "utf8"));
 		for (const project of doc.projects) project.mandate = project.name === "demo" ? demo : rest;
@@ -597,6 +597,12 @@ test("authority: cp_mandate issue needs only projects and an objective; every ot
 	assert.deepEqual([split?.job_cap, split?.spend_cap.usd, split?.provenance?.job_cap], [9, 42, "home"], "disagreement falls through to home");
 	const dated = grant("dated");
 	assert.deepEqual([dated?.expiry, dated?.provenance?.expiry_hours], ["2030-01-01T00:00:00Z", "explicit"], "an explicit expiry beats expiry_hours");
+	// One project with an override and one without do not agree either: the grant falls through to home.
+	overrides(demo);
+	await prompt("Issue a grant over both projects again.", [step(issue("mixed", "mixed overrides", ["demo", "other"]))]);
+	ok("mixed");
+	const mixed = grant("mixed overrides");
+	assert.deepEqual([mixed?.job_cap, mixed?.spend_cap.usd, mixed?.provenance?.job_cap], [9, 42, "home"], "an override beside none falls through");
 
 	// An invalid defaults file is refused, never guessed; an unreadable one leaves nothing parent-raisable.
 	writeFileSync(file, JSON.stringify({ ...edited, job_cap: 0 }));
