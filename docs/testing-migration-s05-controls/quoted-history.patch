@@ -1,0 +1,12 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..fa5ff07 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -212 +212 @@ export async function materializeDiff(request: MaterializeDiffRequest): Promise<
+-			omitted.push(path);
++			if (hunk !== undefined) omitted.push(path);
+@@ -292,0 +293 @@ const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
++import { GateVerdictSchema } from "./contracts.ts";
+@@ -541 +542 @@ export class DiffReview {
+-		const prior = readPriorAttempts(home, jobId, paths.reviewFile, DiffVerdictSchema, {
++		const prior = readPriorAttempts(home, jobId, paths.gateFile, GateVerdictSchema, {

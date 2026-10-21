@@ -1989,6 +1989,11 @@ test("a durable landed notice retries failed sends without repeating the UI noti
 	surface.surfaceDurableWakeups();
 	assert.equal(sent.at(-1)?.options.triggerTurn, false);
 	assert.equal(notices.length, 2);
+	// A parked handoff is relayed to the operator and never starts a parent turn.
+	post.durableWakeups.enqueue({ id: "continuation:parked:cp-land:1", kind: "recovery", job_id: "cp-land", content: "HELD PR PARKED — cp-land (with the team, awaiting_merge cycle 1)" });
+	surface.surfaceDurableWakeups();
+	assert.equal(sent.at(-1)?.options.triggerTurn, false);
+	assert.equal(notices.length, 3);
 	assert.equal(isQuietWakeup("continuation:cp-land:1:stop:x"), false, "a stop still wakes the parent");
 });
 

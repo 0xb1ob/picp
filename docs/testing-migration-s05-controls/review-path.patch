@@ -1,0 +1,7 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..179f98c 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -995 +995 @@ export class DiffReview {
+-		const path = join(home, input.equivalence ? paths.reviewEquivalenceFile(jobId, verdict.head_sha) : paths.reviewFile(jobId, attempt));
++		const path = join(home, input.equivalence ? paths.reviewEquivalenceFile(jobId, verdict.head_sha) : paths.gateFile(jobId, attempt));

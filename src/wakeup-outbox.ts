@@ -43,9 +43,9 @@ export function boundedCauseId(prefix: string, cause: string): string {
 	return `${prefix}${cause.slice(0, 30)}…${cause.slice(-70)}:${createHash("sha256").update(raw).digest("hex").slice(0, 12)}`;
 }
 
-/** A completed held-PR continuation is operator news, never a parent turn. */
+/** A completed or parked held-PR continuation is operator news, never a parent turn. */
 export function isLandedContinuation(id: string): boolean {
-	return id.startsWith("continuation:done:") || (id.startsWith("continuation:") && id.endsWith(":done"));
+	return id.startsWith("continuation:done:") || id.startsWith("continuation:parked:") || (id.startsWith("continuation:") && id.endsWith(":done"));
 }
 
 /** N9: a landing or a merge-window WAITING notice rides along with the next turn; neither starts one. */
