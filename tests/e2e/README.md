@@ -22,7 +22,8 @@ fails the run if the install did not land on `PATH`.
 
 ## Installer sandbox (#375)
 
-`npm run e2e:install -- --scenario fresh` (or `prerequisites`, `rerun`, `login`, `recovery`, `root`, `compat`, `all`; `--verbose` prints the whole
+`npm run e2e:install -- --scenario fresh` (or `prerequisites`, `rerun`, `login`, `recovery`, `root`, `compat`, `onboarding`, `prompt`,
+`node-floor`, `all`; `--verbose` prints the whole
 timestamped container output) installs this checkout for real in a disposable Docker container:
 `curl … | sh` of `bin/cp-bootstrap` → `scripts/install.sh` → `src/service/install.ts` → install-tools →
 cp-daemon (detached) → the parent host's `/doctor`, then `cp-daemon status` and the viewer's `/healthz`.
@@ -38,6 +39,9 @@ it and fails when Docker is missing, while `npm test` collects the file and skip
 | recovery | unreachable remote: a named `git clone` failure with its rerun; that rerun with an empty offline npm cache: a named `npm ci` failure; its rerun with pi absent and a root-owned npm prefix: npm ci lands, install-tools refuses pi (never sudo) and the install prints its rerun; install-tools installs an absent pi into a per-user prefix from npm's cache; the printed install rerun then installs fully; a dirty, ahead or other-origin checkout is refused or left as is |
 | root | a full install as the container's uid 0 (`HOME=/root`) succeeds, prints no `changed:` `/etc`, `/usr`, `/opt` or `/var` path, and a before/after listing (path, size, mtime) of those trees is identical |
 | compat | package.json `piCompat` with a stub as the only pi: below min with `--no-pi-upgrade`, a next major, and a pi failing the capability probe each exit 1 naming the range, update nothing, start nothing; the next major with `--force` installs with a warning (doctor's `host.pi.compat` the only, accepted error); a newer minor installs with a warning and no update; below min with `--yes` runs `pi update --self` once, then installs |
+| onboarding | a full install prints `… daemon:` and `… doctor:` before its waits; the not-yet-run watchdog is no `health.json is absent` warning; exactly one `ready:` line with the dashboard URL; one `optional steps left` block naming `--push-origin` and, with no systemd, `--crontab` |
+| prompt | `curl … \| sh` under a pty (`script`), complete flags, no `--yes`, pi below min: the one prompt is pi's `update --self now? [y/N]`; a typed `y` updates once, then installs fully |
+| node-floor | node 24.0.0 first on PATH (no `import.meta.main`): the pi probe helper passes and a full install pins that node |
 
 **Isolation.** Nothing on the host is written or mounted: the driver streams a tar of the tracked and
 untracked-unignored files (your edits; never `.git` or `node_modules`) into `docker run -i --rm --network none`,
@@ -61,6 +65,8 @@ prerequisites 3 s; rerun 53 s (an idempotent rerun 3.9 s, `--force` 8.3 s for it
 7.6 s); recovery 46 s (clone failure 0.08 s, npm ci failure 1.0 s, prefix refusal 7.0 s, pi from cache 5.9 s); root 33 s.
 PR3 (Docker 29.9, warm): login 48 s (list failure 4.0 s); root 40 s; compat 66–72 s (refusals 17.7 s with the first
 npm ci, then 4.3 s and 3.0 s; `--force` install 32 s; newer 6.1 s; update then install 7.3 s; each probe about 1.3 s).
+PR4 (Docker 29.9, warm): onboarding 47 s (install 42.8 s); prompt 40 s (install 36.2 s); node-floor 67 s (install 49.8 s).
+Docker is shared: a parallel checkout rebuilding `picp-install-sandbox:local` mid-run fails scenarios with npm `EAI_AGAIN`.
 
 ## E2E is the default for behavioral acceptance
 

@@ -26,7 +26,7 @@ import { legacyManagedHome } from "../home.ts";
 import { HEALTH_CHECKS, readHealth, UPDATE_FAILURES } from "./health.ts";
 import { herdrServerArgv, herdrServerRunning, onPath, operatorWrapperPath, tmuxLaunch } from "../viewer/launchers.ts";
 import { daemonFindings, LEGACY_UNITS, viewerExpected as backendViewerExpected } from "./daemon-backend.ts";
-import { daemonPaths, readDaemonConfig } from "./daemon-files.ts";
+import { daemonPaths, type OneshotUnit, readDaemonConfig, readDaemonRuntime } from "./daemon-files.ts";
 import { HEALTH_TIMER, installTargets, OPERATOR_UNIT } from "./units.ts";
 import { readUpdateState, updateStateFile } from "./update.ts";
 /** A skip that has lasted this long with origin/main ahead is worth a look. */
@@ -59,7 +59,7 @@ export function serviceFindings(run: CommandRunner, cwd: string, env: NodeJS.Pro
 	const findings: DoctorFinding[] = daemonFindings(run, cwd, unitDir);
 	if (daemon || legacyUnits.length > 0) findings.push(nodeFinding(cwd, unitDir, daemon ? [] : [...legacyUnits, ...(operator ? [OPERATOR_UNIT] : [])]));
 	if (daemon || legacyUnits.length > 0 || operator) findings.push(launchersFinding(run, cwd, env, daemon));
-	const health = stateDir ? healthFinding(stateDir, daemon || legacyUnits.includes(HEALTH_TIMER), now) : undefined;
+	const health = stateDir ? healthFinding(stateDir, daemon || legacyUnits.includes(HEALTH_TIMER), now, cwd) : undefined;
 	if (health) findings.push(health);
 	const update = stateDir ? updateFinding(stateDir, daemon || legacyUnits.length > 0, now) : undefined;
 	if (update) findings.push(update);
@@ -104,8 +104,11 @@ function launchersFinding(run: CommandRunner, cwd: string, env: NodeJS.ProcessEn
 }
 
 /** `service.health`: the watchdog's last run and what it finds failing; no line when it is neither installed nor ever ran. */
-function healthFinding(stateDir: string, timerInstalled: boolean, now: number): DoctorFinding | undefined {
+function healthFinding(stateDir: string, timerInstalled: boolean, now: number, home: string): DoctorFinding | undefined {
 	const record = readHealth(stateDir);
+	// A fresh cp-daemon runs its first watchdog 3 min after start (#375 P2): not yet due is expected, never a warning.
+	const first = record ? undefined : firstHealthRun(home);
+	if (first && !first.last_exit && (first.pid !== undefined || Date.parse(first.next_due ?? "") > now)) return { check: "service.health", severity: "ok", what: `the watchdog has not finished its first run yet (${first.pid !== undefined ? "running now" : `due at ${first.next_due}`}); expected right after cp-daemon starts` };
 	if (!record) return timerInstalled ? { check: "service.health", severity: "warn", what: `the watchdog is installed but ${join(stateDir, "health.json")} is absent or unreadable`, fix: "cp-daemon health runs it now; cp-daemon log says why it fails" } : undefined;
 	const age = Math.max(0, Math.round((now - Date.parse(record.last_run_at)) / 60_000));
 	const failing = HEALTH_CHECKS.filter((name) => record.checks[name]?.status === "fail").map((name) => `${name} (${record.checks[name]!.detail})`);
@@ -113,6 +116,15 @@ function healthFinding(stateDir: string, timerInstalled: boolean, now: number): 
 	const what = `health last ran ${age} min ago: ${failing.length ? `failing: ${failing.join("; ")}` : "all ok"}`;
 	if (stale) return { check: "service.health", severity: "warn", what, fix: "the watchdog is not running every 5 min: cp-daemon status (start it if it is down), then cp-daemon log" };
 	return failing.length ? { check: "service.health", severity: "warn", what, fix: "each failing check names its cause; the watchdog pushed once and pushes again on recovery" } : { check: "service.health", severity: "ok", what };
+}
+
+/** cp-daemon's record of its health oneshot; undefined when absent or unreadable (the daemon line reports that). */
+function firstHealthRun(home: string): OneshotUnit | undefined {
+	try {
+		return readDaemonRuntime(daemonPaths(home))?.units?.health;
+	} catch {
+		return undefined;
+	}
 }
 
 /** `service.update` (P4): on/off and the last result; never an error (the updater's own verify reads /doctor). */

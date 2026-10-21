@@ -247,7 +247,7 @@ export interface DoctorOptions {
 	/** pi's own version, when the caller already knows it (the extension does). */
 	piVersion?: string;
 	/** pi's capability probe (src/pi-compat-probe.ts); absent means not probed here and no `host.pi.compat` line. */
-	piProbe?: (pi: string) => PiProbe;
+	piProbe?: (pi: string) => PiProbe | Promise<PiProbe>;
 	/** Injected in tests: the environment the home was resolved from. */
 	env?: NodeJS.ProcessEnv;
 	/** Injected in tests: where the `service.*` lines find the cp-* units (HOME/XDG_CONFIG_HOME) and the legacy home (PI_HOME). Default process.env. */
@@ -295,7 +295,7 @@ export class Doctor {
 		const checkout = homeCheckoutFinding(this.#options.home, this.#options.packageRoot, this.#run);
 		const raw: DoctorFinding[] = [
 			...(checkout ? [checkout] : []),
-			...this.#hostTools(),
+			...(await this.#hostTools()),
 			...this.#piLensTools(),
 			...(await webAccessFindings({ packageRoot: this.#options.packageRoot, ...(this.#options.env ? { env: this.#options.env } : {}) })),
 			...mcpFindings({ packageRoot: this.#options.packageRoot, run: this.#run, ...(this.#options.env ? { env: this.#options.env } : {}) }),
@@ -363,7 +363,7 @@ export class Doctor {
 
 	// -- host tools ---------------------------------------------------------
 
-	#hostTools(): DoctorFinding[] {
+	async #hostTools(): Promise<DoctorFinding[]> {
 		const findings: DoctorFinding[] = [];
 		for (const tool of REQUIRED_TOOLS) {
 			const matches = this.#which(tool);
@@ -379,7 +379,7 @@ export class Doctor {
 				detail: matches.length > 1 ? `${matches[0]} (+${matches.length - 1} more on PATH)` : matches[0],
 			});
 			findings.push(...this.#conflictingVersions(tool, matches));
-			if (tool === "pi" && this.#options.piProbe) findings.push(...this.#piCompat(matches[0] as string, this.#options.piProbe));
+			if (tool === "pi" && this.#options.piProbe) findings.push(...(await this.#piCompat(matches[0] as string, this.#options.piProbe)));
 		}
 		for (const tool of OPTIONAL_TOOLS) {
 			const found = this.#which(tool)[0];
@@ -485,10 +485,10 @@ export class Doctor {
 	}
 
 	/** #375: the installer's classification of the pi on PATH (package.json piCompat), read-only. */
-	#piCompat(pi: string, probe: (pi: string) => PiProbe): DoctorFinding[] {
+	async #piCompat(pi: string, probe: (pi: string) => PiProbe | Promise<PiProbe>): Promise<DoctorFinding[]> {
 		try {
 			const compat = readPiCompat(this.#options.packageRoot);
-			const result = classifyPi(compat, probe(pi));
+			const result = classifyPi(compat, await probe(pi));
 			const finding = piCompatFinding(result, pi);
 			if (result.state !== "newer" || !result.version) return [finding];
 			const sh = (command: string, args: string[]) => this.#run(command, args, this.#options.packageRoot);

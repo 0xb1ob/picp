@@ -1,12 +1,15 @@
 # Installer sandbox image (#375; see tests/e2e/README.md "Installer sandbox"): fresh-user prerequisites
 # installed, everything cp-install installs only cached, so scenarios run the real paths with --network none.
 FROM node:22-bookworm-slim AS node22
+FROM node:24.0.0-bookworm-slim AS node24floor
 FROM node:24-bookworm-slim
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends git gh curl ca-certificates procps \
 	&& rm -rf /var/lib/apt/lists/*
-# The prerequisites scenario runs the entry points with node 22 first on PATH.
+# The prerequisites scenario runs the entry points with node 22 first on PATH; node-floor with node 24.0.0 (no
+# import.meta.main, which landed in 24.2).
 COPY --from=node22 /usr/local/bin/node /opt/node22/bin/node
+COPY --from=node24floor /usr/local/bin/node /opt/node24.0/bin/node
 USER node
 WORKDIR /home/node
 ENV HOME=/home/node \

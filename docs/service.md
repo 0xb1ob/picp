@@ -135,8 +135,12 @@ why). It then runs `node <app>/src/service/install.ts`, which prints one
    (and, with `--crontab`, its `@reboot` line). Either way cp-daemon must be ready within 60 s — the outer
    running, the inner `ready`, the parent and viewer roles `running` — else
    `fail: enable: <why> after 60s; see cp-daemon log` with the log tail;
-10. `--push-origin URL` (or an origin typed at the prompt) with no `data/push/config.json` → `scripts/push-init.ts`;
-11. waits ≤ 90 s for the host's parent and prints its `/doctor`, then `cp-daemon status`.
+10. `--push-origin URL` (flag only, never a prompt) with no `data/push/config.json` → `scripts/push-init.ts`;
+11. waits ≤ 90 s for the host's parent and prints its `/doctor`, then `cp-daemon status`. Both waits print a
+   `… <step>:` line first and `still waiting (Ns)` every 5 s. A fresh home's not-yet-run watchdog is an `ok`
+   `service.health` line, not a warning.
+12. one summary: `ready:` (cp-daemon ready and `/doctor` passed, with the dashboard URL) or `incomplete:` (with the
+   rerun), then `optional steps left (N):` listing every `skip:` step, plus `--crontab` on a host without systemd.
 
 Flags: `--home --app --port --parent-model --operator-model --viewer-host --gateway-url --gateway-key-file --push-origin --force --no-start
 --crontab --no-update --uninstall --dry-run --yes --no-prompt
@@ -532,7 +536,8 @@ never mid-update), the viewer (`/api/identity` for this home within 3 s; 2 runs)
 the supervisor (the parent role `failed` / `start-limit-hit` in `state/daemon-runtime.json`; skipped on a
 legacy home), disk (< 5 GiB or < 10 % free),
 `git ls-remote origin` and `gh auth status` (hourly) and the updater's last
-result. Hourly it also logs a warn-only `health: warn host.pi.drift` line (never a check, a failure or an escalation) when the host pi is
+result. Hourly (a persisted `warn_checked_at` stamp in `state/health.json`) it also logs a warn-only
+`health: warn host.pi.drift: …` line (never a check, a failure or an escalation) when the host pi is
 above `piCompat.testedMax` for over 7 days with no open `qualify pi <version>` PR. It records each check (failing, its key, since when, recovered) in `state/health.json` and pushes nothing:
 the Overview `health failing` line shows a failure at once, and the parent raises a `service_health` escalation
 for it on the dashboard (`docs/contracts.md` §Escalation, §Web Push).

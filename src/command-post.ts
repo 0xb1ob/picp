@@ -60,7 +60,7 @@ import { ReviewApprovalStore } from "./review-approval.ts";
 import { Dispatcher, type DispatchPreview, type DispatchRequest, type DispatchResult } from "./dispatch.ts";
 import type { ScriptDispatchResult, ScriptPreview } from "./script-dispatch.ts";
 import { Doctor, type DoctorOptions } from "./doctor.ts";
-import { probePiSync } from "./pi-compat-probe.ts";
+import { probePiCached } from "./pi-compat-probe.ts";
 import type { RecordedSessionTool } from "./session-tools.ts";
 import { FleetStore, type ReconcileOptions, type ReconcileReport } from "./fleet.ts";
 import { boundContinueNext, HardBoundsWatch } from "./bounds.ts";
@@ -1554,7 +1554,8 @@ export class CommandPost {
 			...(this.#options.runtime ? { runtime: this.#options.runtime } : {}),
 			...(this.#registry() ? { probe: this.probe() } : {}),
 			...(options.piVersion ? { piVersion: options.piVersion } : {}),
-			piProbe: (pi) => probePiSync(pi, this.packageRoot),
+			// Async and cached, so /doctor never blocks the extension host; a test's CP_PARENT_PI_BIN fake pi is never probed.
+			...(process.env.CP_PARENT_PI_BIN ? {} : { piProbe: (pi: string) => probePiCached(pi, this.packageRoot) }),
 			...(options.sessionTools ? { sessionTools: options.sessionTools } : {}),
 		};
 		return new Doctor(doctorOptions).run();

@@ -31,14 +31,15 @@ function machine(overrides: {
 	};
 }
 
-test("a mismatch warns, naming both versions, package.json and npm install", () => {
+test("a mismatch warns, naming both versions, the piCompat range and the devDependency as CI's tested pin", () => {
 	const nudge = computePiVersionNudge(machine({}));
 	assert.ok(nudge, "expected a warning when 0.84.4 is installed and 0.85.0 is running");
 	assert.match(nudge as string, /0\.84\.4/, "the installed version");
 	assert.match(nudge as string, /0\.85\.0/, "the running host version");
-	assert.match(nudge as string, /package\.json/, "the file to change");
-	assert.match(nudge as string, /npm install/, "the command to run");
-	assert.match(nudge as string, /@earendil-works\/pi-coding-agent/, "the dependency to change");
+	assert.match(nudge as string, /package\.json piCompat/, "where the supported range lives (#375)");
+	assert.match(nudge as string, /pi update --self/, "how a host pi below min updates");
+	assert.match(nudge as string, /"@earendil-works\/pi-coding-agent" is CI's tested pin/, "the devDependency is CI's pin, not the host's");
+	assert.match(nudge as string, /piCompat\.testedMax together, then `npm install`/, "the pin moves only with testedMax");
 	// Never the package name: other notifications (`/cp-version`, the scaffold
 	// announce) are told apart from unrelated notify traffic by that substring.
 	assert.doesNotMatch(nudge as string, /pi-command-post/);
