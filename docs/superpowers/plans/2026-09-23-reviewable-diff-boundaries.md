@@ -1,5 +1,7 @@
 # Reviewable Diff Boundaries Implementation Plan
 
+Migration note (S05): references below to the retired `tests/diff-review.test.ts` describe the historical implementation. Current truncation/delta evidence and focused checks are in [the public review scenarios](../../../tests/e2e/diff-review.test.ts).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Refuse unscorable diff reviews before spawning a reviewer, with precise file/byte evidence and a bounded staging route for first-project and generated-results PRs.

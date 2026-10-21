@@ -1,0 +1,7 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+index 2dcc135..f99114c 100644
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -186 +186 @@ export async function materializeDiff(request: MaterializeDiffRequest): Promise<
+-	if (files.length > maxStatFiles) {
++	if (false && files.length > maxStatFiles) {

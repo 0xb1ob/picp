@@ -1,5 +1,7 @@
 # Asynchronous reviewers: gate, diff review and quality panel return `wait` — design
 
+Migration note (S05): references below to the retired `tests/diff-review.test.ts` describe the historical design. Current async/head/cap evidence and focused checks are in [the public review scenarios](../../../tests/e2e/diff-review.test.ts).
+
 Date: 2026-09-05. Status: approved in conversation, pending spec review.
 Item 4, after the three-item sequence of 2026-09-04. Assumes items 1 and 2
 (the in-house job ledger, [`docs/contracts.md` §Ledger](../../contracts.md#ledger)) have landed: ids are
