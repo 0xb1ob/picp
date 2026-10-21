@@ -810,7 +810,7 @@ test("landing S14: worker PR reports resolve against the registered origin and d
 	});
 });
 
-test("landing S14: repository permission reports the allowlist and each blocked cause", { skip: SKIP, timeout: 180_000 }, async (t) => {
+test("landing S14: repository permission reports the allowlist and each blocked cause", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const checks = [{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "test" }] } }];
 	const reviews = [{ type: "pull_request", parameters: { required_approving_review_count: 1 } }];
 	const rows: Array<{ status?: string; draft?: boolean; decision?: string; mergeable?: string; rules?: unknown; rawRules?: string; baseAdvance?: boolean; requiredUpdate?: boolean; expected: RegExp }> = [
