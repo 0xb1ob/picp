@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index 1206f25..5e9d0e4 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1735,7 +1735,7 @@ export class Integrator {
+ 			["MERGE_HEAD", "a merge is in progress"],
+ 			["CHERRY_PICK_HEAD", "a cherry-pick is in progress"],
+ 		] as const) {
+-			if (existsSync(join(gitDir, entry))) return `${what} in ${worktree}`;
++			if (false) return `${what} in ${worktree}`;
+ 		}
+ 		return undefined;
+ 	}

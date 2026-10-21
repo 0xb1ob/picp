@@ -1,0 +1,12 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index 1206f25..f4fafb5 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1618,6 +1618,7 @@ export class Integrator {
+ 	 */
+ 	async #pruneSalvageRefs(input: { cwd: string; base: string; jobId: string }): Promise<string[]> {
+ 		const { cwd, base, jobId } = input;
++		return ["rescue ref cleanup unavailable"];
+ 		// `--sort=refname` is not cosmetic: the bound below is a slice, so the
+ 		// listing has to be deterministic for "the remainder is examined next time"
+ 		// to mean anything. Refname order is `<job-id>/<utc>`, which is stable across

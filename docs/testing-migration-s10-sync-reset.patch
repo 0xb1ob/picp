@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index 1206f25..3db75f0 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1503,7 +1503,7 @@ export class Integrator {
+ 		// (`remote.sha === head`, src/teardown.ts) is the same fact. Resetting to the
+ 		// ref would also fail outright in a clone whose refspec does not fetch this
+ 		// branch (`--single-branch`, `--depth`), where `ls-remote` answers fine.
+-		const reset = await this.#run(worktree, "git", ["reset", "--hard", remote]);
++		const reset = await this.#run(worktree, "git", ["status", "--porcelain"]);
+ 		if (reset.status !== 0) {
+ 			return { acted: false, failed: true, detail: firstLine(reset) };
+ 		}
