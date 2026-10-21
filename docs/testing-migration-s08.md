@@ -100,6 +100,8 @@ A trial removing the `alreadyClosed` optimization did not fail: the real ledger 
 
 S09 separately executed these production mutations against 05-S08-4. Each run exited 1 at the merge-count assertion after the real review deadline; source was restored after each run.
 
+S10 freshly re-executed all three rechecks on source base aea915131f8e521d2dc1ae9caf02c82ba1009421. Each run again failed at merge count 1, expected 0, after the unchanged real review deadline. The replayable `s08-head`, `s08-ci` and `s08-permission` patches, full blob SHAs and failures are recorded in [S10 controls](testing-migration-s10.md#executed-production-controls); production source was restored after every run.
+
 | Recheck | Executed mutation | Failing assertion |
 |---|---|---|
 | Head | In `src/integrate.ts`, obtain `head` from the accepted envelope's `head_sha` instead of the observed PR, and set `permHead = head`. | repository/head: merge command count 1, expected 0 (`false/head`). |

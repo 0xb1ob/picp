@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index 1206f25..edccc47 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1440,7 +1440,7 @@ export class Integrator {
+ 			return { acted: false, failed: false, detail: "worktree already matches origin" };
+ 		}
+ 		const dirty = await this.#run(worktree, "git", ["status", "--porcelain"]);
+-		if (dirty.stdout.trim().length > 0) {
++		if (false) {
+ 			return {
+ 				acted: false,
+ 				failed: true,

@@ -1,0 +1,12 @@
+diff --git a/src/contracts/workers.ts b/src/contracts/workers.ts
+index 51819d0..2ac9640 100644
+--- a/src/contracts/workers.ts
++++ b/src/contracts/workers.ts
+@@ -109,7 +109,6 @@ export const WORKER_FORBIDDEN_TOOLS: readonly string[] = Object.freeze([
+ 	 * would also be a second writer to a branch whose implementer is still live
+ 	 * and promotable.
+ 	 */
+-	"cp_integrate",
+ 	/**
+ 	 * Same rule: recording a merge moves the job's `pr` receipt to `merged`,
+ 	 * which is exactly the point at which `decideReopen` stops the implementer
