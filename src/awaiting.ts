@@ -33,7 +33,7 @@
  * surfaced (`escalated`) or was reanchored (`superseded_by`) is ineligible
  * (`researchApprovalIneligibleReason`) — still held, but not a ship question.
  *
- * Skip records nothing, anywhere — not a file write, not a br write, not a
+ * Skip records nothing, anywhere — not a file write, not a ledger write, not a
  * run-log event. An item that is skipped simply stays `state: "open"` and
  * reappears next time the set is rendered or answered.
  *
@@ -1052,8 +1052,8 @@ export function deriveFromHeldResearch(jobs: readonly StatusJob[]): ResolvedAwai
 			job_id: job.job_id,
 			options: ["ship", "drop", "follow-up"],
 			opened_at: job.timestamp,
-			// Already in hand from the status snapshot's own StatusJob — no extra br
-			// call, no br show. Only populated when present (a title may be null).
+			// Already in hand from the status snapshot's own StatusJob — no extra
+			// ledger call. Only populated when present (a title may be null).
 			...(job.title ? { title: job.title } : {}),
 			project: job.project,
 			kind: job.kind,
@@ -1080,7 +1080,7 @@ export function deriveFromHeldResearch(jobs: readonly StatusJob[]): ResolvedAwai
  *  - no job with that id in the snapshot — untouched. A missing record is
  *    ignorance, and silently dropping a still-meaningful decision is worse than
  *    the bug this fixes.
- *  - the job is `done`, or its br issue is closed, or it carries a merged PR
+ *  - the job is `done`, or closed in the ledger, or it carries a merged PR
  *    receipt — obsolete. The decision the row asks for has been taken by the
  *    world.
  *

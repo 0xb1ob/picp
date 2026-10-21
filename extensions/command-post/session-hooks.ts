@@ -544,7 +544,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 	});
 
 	// Context safety is a guard, not a good intention: the parent cannot read an
-	// artifact body, cannot `br show` an artifact-bearing issue, and cannot stage
+	// artifact body and cannot stage
 	// runtime state. Blocking (rather than terminating) leaves the model free to
 	// take the sanctioned path named in the reason.
 	pi.on("tool_call", async (event, ctx) => {

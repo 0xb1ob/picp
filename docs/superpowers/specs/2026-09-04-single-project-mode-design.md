@@ -1,9 +1,9 @@
 # Single-project mode — design
 
 Date: 2026-09-04. Status: approved in conversation, pending spec review.
-Item 3 of a three-item sequence; assumes item 1
-(`2026-09-04-drop-br-ledger-design.md`, both PRs) has landed: the ledger is
-`<home>/.pi-command-post/jobs.json`, ids are `job_id`, and `br` is gone. Item 2
+Item 3 of a three-item sequence; assumes item 1 (the in-house job ledger,
+[`docs/contracts.md` §Ledger](../../contracts.md#ledger)) has landed: the ledger is
+`<home>/.pi-command-post/jobs.json` and ids are `job_id`. Item 2
 (`2026-09-04-package-audit.md`) decided nothing else is replaced.
 
 ## Problem
@@ -143,7 +143,7 @@ exists; `default_branch` is resolved as today (`origin/HEAD`, else `main`).
 | `projects` | `projects` | `.pi-command-post/projects` (never created) |
 | every derived entry (`runs`, `artifacts`, `pipelines`, `checkpoints`, `fleetFile`, `awaitingFile`, …, `routingFile`, `learningsFile`, …) | as today | the same relative name under the single `data`/`state` |
 | `migrationsDir` | `state/.migrations` | `.pi-command-post/state/.migrations` |
-| `NEVER_COMMIT_PATHS` | `data/ state/ projects/ .beads/ .pi-command-post/` | `.pi-command-post/` |
+| `NEVER_COMMIT_PATHS` | `data/ state/ projects/` plus a retired tracker directory, and `.pi-command-post/` | `.pi-command-post/` |
 
 `LAYOUT`, `paths` and `NEVER_COMMIT_PATHS` keep their names and are still
 imported everywhere. Before `configureLayout` runs they hold the multi values

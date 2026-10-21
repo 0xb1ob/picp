@@ -224,7 +224,7 @@ export const INTEGRATION_STEPS = [
 	"teardown",
 	/** The remote head branch was deleted — only ever after teardown. */
 	"delete_head",
-	/** The br issue was closed with a reason. */
+	/** The job was closed with a reason. */
 	"close",
 	/** Everything above holds. */
 	"done",

@@ -1375,7 +1375,7 @@ export class CommandPost {
 		});
 	}
 
-	/** `/status`: files plus a br join for titles (degrades if br is missing). */
+	/** `/status`: files plus a ledger join for titles (degrades if the ledger is unreadable). */
 	async status(query: StatusQuery = {}): Promise<StatusSnapshot> {
 		return this.statusReporter().snapshot(query);
 	}

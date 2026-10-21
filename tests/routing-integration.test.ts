@@ -69,7 +69,7 @@ import {
 
 const PROFILES_DIR = join(REPO_ROOT, "profiles");
 const BRIEFS_DIR = join(REPO_ROOT, "prompts/briefs");
-const SKIP = treehouseAvailable() ? false : "br and treehouse are required for the integrated routing tests";
+const SKIP = treehouseAvailable() ? false : "treehouse is required for the integrated routing tests";
 
 // ---------------------------------------------------------------------------
 // 1 + 2: one dispatch, from the words of the job to the argv of the worker

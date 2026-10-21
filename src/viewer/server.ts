@@ -121,20 +121,23 @@ const REMOTE_NO_STORE = { "cache-control": "no-store" };
 
 const COMPRESSIBLE = /^(application\/json|text\/javascript|text\/css|text\/html|text\/plain|application\/manifest\+json)\b/;
 
-/** `br` or `gzip` when the client offers it (q > 0) for a 200 body worth compressing; `undefined` sends identity. */
-function encodingFor(res: ServerResponse, status: number, type: string, size: number): "br" | "gzip" | undefined {
+/** The HTTP content-coding token for Brotli (RFC 7932). */
+const BROTLI = "br" as const;
+
+/** Brotli or gzip when the client offers it (q > 0) for a 200 body worth compressing; `undefined` sends identity. */
+function encodingFor(res: ServerResponse, status: number, type: string, size: number): typeof BROTLI | "gzip" | undefined {
 	if (status !== 200 || size < 1024 || res.req?.method === "HEAD" || !COMPRESSIBLE.test(type)) return undefined;
 	const offered = new Set(String(res.req?.headers["accept-encoding"] ?? "").split(",").flatMap((part) => {
 		const [name = "", ...params] = part.split(";").map((s) => s.trim().toLowerCase());
 		const q = params.find((p) => p.startsWith("q="));
 		return q && Number(q.slice(2)) === 0 ? [] : [name];
 	}));
-	return offered.has("br") ? "br" : offered.has("gzip") ? "gzip" : undefined;
+	return offered.has(BROTLI) ? BROTLI : offered.has("gzip") ? "gzip" : undefined;
 }
 
 export function send(res: ServerResponse, status: number, type: string, body: string | Buffer, extra: Record<string, string> = {}): void {
 	const encoding = encodingFor(res, status, type, Buffer.byteLength(body));
-	const encoded = encoding === "br" ? brotliCompressSync(body, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 4 } })
+	const encoded = encoding === BROTLI ? brotliCompressSync(body, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 4 } })
 		: encoding === "gzip" ? gzipSync(body, { level: 6 }) : body;
 	const negotiated = encoding ? { "content-encoding": encoding, vary: "accept-encoding" } : {};
 	res.writeHead(status, { ...SECURITY_HEADERS, "content-type": type, ...extra, ...negotiated, ...(accessOf(res.req).kind === "remote" ? REMOTE_NO_STORE : {}) });

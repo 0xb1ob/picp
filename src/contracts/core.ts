@@ -36,11 +36,11 @@ export function isSafeJobId(value: string): boolean {
 }
 
 /**
- * br ledger prefix for the ids a home mints (`cp-a1b`). It is also the first
+ * Ledger prefix for the ids a home mints (`cp-a1b`). It is also the first
  * component of every job id, and a job id **is** a git branch name, so it is
  * constrained harder than the id it prefixes: lowercase, alphanumeric, short.
  *
- * Why it is configurable at all (cp-b8el, cp-epy2 §4.2): br mints ids per
+ * Why it is configurable at all (cp-b8el, cp-epy2 §4.2): each home mints ids per
  * database with no knowledge of another database's, so two homes both minting
  * `cp-…` against the same remote can mint the same branch name for two
  * different jobs. One home per surface is the topology; a per-home prefix is
@@ -186,10 +186,10 @@ export const EMPTY_USAGE: Usage = {
 // ---------------------------------------------------------------------------
 
 /**
- * Project name = directory name under `projects/`, br label value, and fleet
+ * Project name = directory name under `projects/`, job label value, and fleet
  * record key. It is NARROWER than command-post's `^[A-Za-z0-9._-]+$` on
- * purpose: br labels accept only alphanumerics, hyphen and underscore, so a
- * dotted name would produce a `project:` label br refuses. One name, three
+ * purpose: job labels accept only alphanumerics, hyphen and underscore, so a
+ * dotted name would produce a `project:` label the ledger refuses. One name, three
  * uses, one pattern.
  */
 export const PROJECT_NAME_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$";

@@ -1,0 +1,387 @@
+[
+	{
+		"path": ".gitignore",
+		"sha256": "aace287b2c0340c3f6da7cf43116050543e21927e6f1dc463cdbac253c6bedd9",
+		"count": 1,
+		"category": "legacy-compat",
+		"reason": "operator-approved legacy compatibility (send ps-20261020191643-1862088f): inert ignore line or ignored install flag"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "c91b2fb48beff959b142a56bb5f3bee049b31cbe0fd7b440849be83c8b959c14",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "0ba17e886bb6dc4993b671bf23b6288714ac404e045736e5ea1c49aa9b46c0f5",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "c05f6992c05972e9167ed9d87afb2c3b1014d79aba367fcfcf4e1491bd4e34b4",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "8f39088fa56e3c3c109443d93c2cd1c28c4b7cdb3068aa6bb0287b260e1284de",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "4a81629cfacc2a01b4fb7fe0c640c452e7c97e1ec851b6650b63ecdbf3b1c79f",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "c31b1de128518f1e0784383a08216a50d4d78b6d3c295e4baa97e438bfe255c0",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "f12e2b68185d87abbf5218989d59361b11937b573cfc362f4b6fd52663d1277b",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "8b51e0f968ab2f1d02fc73c6c58da7f4be839b653c3c32b48da184a80be2b75b",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "eba9b0fbe5a431e4cf3a05b1ee7788e0535c1091df7b9919eff4ad511747f724",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "b0ba7a198698f73c967fb3f0d820098bb89dd1ff4bfc1e6f93650914db046394",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "1deb1c452686cbe6b9dd41564a49fff935b01a13d6e72e9bec3d7e1ff15b6a12",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "71d137d61afc2e0f2bc48d63ffd107cd15bb88120b6e1a9be9f70c3459a97653",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "f79a1d58bf4cdf9f867493df2b71f081214de86121cb045b90a4232d20793a39",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "ea33e27535c1b7b03bddd4e5972babbe0751c44ea9b3954d5df697be3d0438ad",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "CHANGELOG.md",
+		"sha256": "64f5c8a9c48a63a90f1db04aebfb8a6a120ca626739276d2bcc47bdd555ab5af",
+		"count": 1,
+		"category": "frozen-history",
+		"reason": "released changelog history, frozen; new entries say retired external integration"
+	},
+	{
+		"path": "docs/superpowers/plans/2026-09-05-handoff-async-reviewers.md",
+		"sha256": "ba6141737873b558a1315f10f6c601ee34adbb13a536b3bee61beaa2b3e45e2a",
+		"count": 1,
+		"category": "retired-doc-pointer",
+		"reason": "operator-approved plain-text pointer (send ps-20261021011618-2983cf82) to a design doc deleted with the tracker removal"
+	},
+	{
+		"path": "docs/superpowers/plans/2026-09-05-handoff-async-reviewers.md",
+		"sha256": "6721e0a10af16abebbc8f30ed175b09f1ca420c4f4e8916ac9986fb623e715d4",
+		"count": 1,
+		"category": "retired-doc-pointer",
+		"reason": "operator-approved plain-text pointer (send ps-20261021011618-2983cf82) to a design doc deleted with the tracker removal"
+	},
+	{
+		"path": "docs/superpowers/specs/2026-09-04-package-audit.md",
+		"sha256": "fb483737459585b400dbecb2d5771b209977a8fa9066d6a55761fbface6c7fb0",
+		"count": 1,
+		"category": "retired-doc-pointer",
+		"reason": "operator-approved plain-text pointer (send ps-20261021011618-2983cf82) to a design doc deleted with the tracker removal"
+	},
+	{
+		"path": "docs/superpowers/specs/2026-09-04-package-audit.md",
+		"sha256": "c62b5c155800ae6e3702804af4328e052ab87cae48b7ad8a314afe64ba4e9713",
+		"count": 1,
+		"category": "retired-doc-pointer",
+		"reason": "operator-approved plain-text pointer (send ps-20261021011618-2983cf82) to a design doc deleted with the tracker removal"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "5c2e88459188b43f9b1a8d8eae53b0b7c87bcf09087d537df6fe994ff313d0b1",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "9cd76df105df074da5df47e180e49ad4f72ecb3964d142496598d7c73465b2ae",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "8e06fb4cce7c0d58198ff73e33f84d7a3f91988ff2470a8cba9798b9c2c6cfcb",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "236d88445002164da809d7597a9c834bc22df1ac90de6b4fb6a62d1cdb69a392",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "8cfa71e6251c8c10c44932b13bff2aadc048a6609192564896ac0b64d9c47865",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "139bfa8601e483c64625b612b90f26555a0191c7a0ad8f29a747b4401a04c474",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "1ed492c42777dd1d11165a68c552a938e436362a099d64484a032dd03df5de27",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "4e73c305cc670aeb1e21819153c4b5d0b006e57375468d52b9d106333d84d9ae",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "5fd18bf1ad67c42df1663e7a304a101918a1b42208896e00b610356e1169a329",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "841a5475f76542b477ededf4c563d4bf112bd88fe7daad34ab315ea17e7167a6",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "f91bebd3632e89cab2cc1fdef59742641acc3cebffd4323948852875751b80c2",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "4d63de87cab31abc26c8ed6bbbb19352224ca217fe522eb7d3e6e516eba106fa",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "233152278a81fee98cace95ce0bbc73506950c1d5c89d5effa536170391958dc",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "df9362abb519f0d9b5d8bbb6ae27e8f8e0875d01eda6a19afeb3783721fa28b3",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "1de08639fff688b42b6425505dc180c4b64abf735ceea9de1ab0cfee55d0e675",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "34d1b15a860783d9781d2f5b4851c315742bf4b4ca1ec04da8e2c9446b0d23b7",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "877af2781c9425c0145b0c7c87c1a6b707d940366a523ae025d4022c5cc55e8a",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "9a2b28c99d8fcfd5488d726897b01251b49db5256323f49c56942f0fff1868c0",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "fd6f307c418dcc6845e17177cd36300fc82f5b632417605c1b23bc3fe75891bc",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "8e9018add50db7623cd58697f3981ce6e3c5a6a797bd4b005d89354c243a64ee",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "b29c9efb4dae88358e5b3a2f3a61fe64a6eb59229e1f1ad2c0a4571c719fabf6",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "77c02a3e797efe3c7b844076033665ab35e57a2063a64dd1e9f530f1b51872c9",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "29d3c907c1be4819a7cf690f9428e201e59b2a8cac41d728e54bcd37c58bee66",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "c1c4984e9ca32f51a050bad025a387d8bbfe6d7500a31fba34d14c5d644a77c8",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "0ea780e7e5a8e4981f0da213e7f3f1da2d2549452df699d4eaf912b450b5daa6",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "51a091dc6049676bba75bec096869ab2a7141ffbaeeee3df208845bcf2f8cc1f",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "1715f118cab892601b82730c43d90baa75217be9f0259d0932e28d89f105567c",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "b59b89107c528fa69f2c78f48b6f78aabfb07120c436077b1d44464f820e23f1",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "976d8a4151632e0136d29ae0e12b5278c6b6908f564b333ae3e9b5e808f6eba4",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "5d7404199f5ec7e55c54591ba2da1b43d9104b19932ae0c0d6cf29746558da53",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "docs/testing-migration.md",
+		"sha256": "4c8a3b68c4dc910820f85e31bf5b6348e2da5b3400c9e9dfdc965b6b5a762f39",
+		"count": 1,
+		"category": "deleted-feature-record",
+		"reason": "test-programme record of a test removed with the retired feature; the checker needs the exact baseline title or path"
+	},
+	{
+		"path": "scripts/check-retired-integration.ts",
+		"sha256": "164ad97831e31a89f4d9bc64a11aae7b112ee719c1ba7ff9b22a84bff5296596",
+		"count": 1,
+		"category": "self-pattern",
+		"reason": "the guard's own pattern declaration"
+	},
+	{
+		"path": "src/service/install.ts",
+		"sha256": "5dc542004f7f28f44ce3d0bb65971942850a670545336d61e323e2e913716577",
+		"count": 1,
+		"category": "legacy-compat",
+		"reason": "operator-approved legacy compatibility (send ps-20261020191643-1862088f): inert ignore line or ignored install flag"
+	},
+	{
+		"path": "src/viewer/server.ts",
+		"sha256": "e82574c4ebb768a6a08cb1cdde95dd9d59f6bf38d8dce69a34679cbc3c51ee87",
+		"count": 1,
+		"category": "protocol",
+		"reason": "HTTP Brotli content-coding token (RFC 7932), unrelated to the retired tracker"
+	},
+	{
+		"path": "tests/viewer-compression-http.test.ts",
+		"sha256": "e223b53aa99248c5b37daef0a4887e059c9a6914efbf4c2fb8731dbef9ed30f9",
+		"count": 1,
+		"category": "protocol",
+		"reason": "HTTP Brotli content-coding token (RFC 7932), unrelated to the retired tracker"
+	}
+]

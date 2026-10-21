@@ -1295,7 +1295,7 @@ test("advance after a finished integration is a no-op: no second merge, no secon
 	const again = await b.integrator({ pr: mergedPr(), branchOnRemote: false }).advance({ jobId: JOB_ID });
 	assert.equal(again.next, "done");
 	assert.equal(again.merge?.recorded, false, "the receipt already existed");
-	assert.equal(b.closed.length, 1, "the br issue is closed once");
+	assert.equal(b.closed.length, 1, "the job is closed once");
 	assert.equal(b.teardowns.length, 1, "teardown ran once");
 	assert.equal(b.calls.filter((line) => line.startsWith("gh pr merge")).length, 1);
 });
@@ -2930,7 +2930,7 @@ test("a head branch that cannot be deleted keeps everything else, and says so", 
 	// The merge and the teardown already happened and must not be re-attempted.
 	assert.equal(result.merge?.recorded, true);
 	assert.equal(b.teardowns.length, 1);
-	assert.equal(b.closed.length, 0, "the br issue is closed only after the head is gone");
+	assert.equal(b.closed.length, 0, "the job is closed only after the head is gone");
 	assert.match(result.reason, /merged and torn down/);
 
 	// And it resumes: the next call re-reads the facts and finishes.
@@ -2950,7 +2950,7 @@ test("a job close that fails leaves a merged, torn-down job in a retryable state
 			{
 				ledger: {
 					async close() {
-						throw new Error("br: database is locked");
+						throw new Error("ledger: database is locked");
 					},
 				},
 			},

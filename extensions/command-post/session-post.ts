@@ -139,7 +139,7 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 	};
 
 	/**
-	 * Redraw the fleet widget from files only (`statusNow`): no br, no probe of
+	 * Redraw the fleet widget from files only (`statusNow`): no probe of
 	 * anything but pids, no tokens. Identical lines are not re-sent — in RPC mode
 	 * every `setWidget` is a protocol message, and a widget that repaints itself
 	 * five times a second with the same content is noise on somebody's socket.
@@ -346,15 +346,15 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 
 	/**
 	 * The Q&A path, in one place (cp-u3o4), so `/cp-ask` and `cp_ask` cannot
-	 * drift: one br issue, three labels, one read-only worker, and the answer
+	 * drift: one job, three labels, one read-only worker, and the answer
 	 * lands as a card.
 	 *
-	 * **The br issue stays**, deliberately: every dispatch precondition keys on a
+	 * **The job stays**, deliberately: every dispatch precondition keys on a
 	 * job id — `ledger.show`, the claim, `branch = job id`, the run directory, the
 	 * artifact directory, the lease holder, the fleet record — and so does the
 	 * whole observation stack (settle recovery, revive, `/watch`, wake-up
-	 * staleness). A "lighter id" would fork all of that to save one `br create`
-	 * and one `br close`.
+	 * staleness). A "lighter id" would fork all of that to save one create
+	 * and one close.
 	 *
 	 * Labels: `project:<name>`, `delivery:answer`, `kind:research`. Title is the
 	 * question. Lifecycle is an ordinary research job's: open → claimed at

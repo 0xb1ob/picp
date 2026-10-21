@@ -251,7 +251,7 @@ export const AwaitingItemSchema = Type.Object(
 		...DelegationProvenanceFields,
 		basis: Type.Optional(DecisionBasisSchema),
 		answered_at: Type.Optional(IsoTimestampSchema),
-		/** Set once the answer landed as a br comment. Absent = not yet audited. */
+		/** Set once the answer landed as a job comment. Absent = not yet audited. */
 		audit_ref: Type.Optional(Type.String({ maxLength: 200 })),
 		/**
 		 * cp-gmy: why this row is `deferred` — the CI state that made the ask

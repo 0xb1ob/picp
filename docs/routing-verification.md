@@ -18,8 +18,8 @@ The skipped live-model tests (`tests/e2e/live*.test.ts`, `live-smoke`) are gated
 on `CP_LIVE_TESTS=1` and operator-run because they spend real money.
 
 Nothing in the routing epic is covered only by a skipped test. These counts are
-from a developer machine that has `br` and `treehouse` on `PATH`; a host without
-them (GitHub's runner) additionally self-skips every suite that leases a real
+from a developer machine that has `treehouse` on `PATH`; a host without
+it (GitHub's runner) additionally self-skips every suite that leases a real
 worktree, which is why the local run is the one quoted here. No inference API
 was called by this verification: every worker in it is a `pi --mode rpc` child on
 the mock provider.

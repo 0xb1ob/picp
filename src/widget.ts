@@ -14,7 +14,7 @@
  *
  * Membership is `jobState()` (`status-render.ts`), computed from facts already
  * on `StatusJob`. Nothing new is read: the widget stays **files-only** because
- * it refreshes on a timer, and a 5-second `br`/`gh` call is not a widget.
+ * it refreshes on a timer, and a 5-second `gh` call is not a widget.
  *
  * Three properties this module owes the operator, each pinned by a test:
  *
@@ -607,7 +607,7 @@ export function renderFleetWidget(snapshot: StatusSnapshot, options: RenderFleet
 		else if (state.section === "attention") attention.push(attentionRow(job, state.kind, state.word, now, charset));
 		else running.push(runningRow(job, state.kind, state.word, unit, now, charset));
 	}
-	// `unclaimed` is not a job (br says in_progress, this fleet has no record),
+	// `unclaimed` is not a job (the ledger says in_progress, this fleet has no record),
 	// but it is exactly the kind of thing ATTENTION exists for, and it must not
 	// be the line that silently falls off the bottom.
 	if (snapshot.unclaimed.length > 0) {

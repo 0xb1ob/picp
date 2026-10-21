@@ -51,7 +51,8 @@ and names the parent to use instead.
   `*File`) and `paths.*`, configured per process by `configureLayout(mode, home)`.
   A flat root is `layoutFor("multi", "")`.
 - `.gitignore` has exactly one runtime entry, `.pi-command-post/`.
-  `NEVER_COMMIT_PATHS` is `[".pi-command-post/"]`.
+  `NEVER_COMMIT_PATHS` is `[".pi-command-post/"]`. The retired tracker's directory line after it
+  is legacy, inert since the tracker removal, and kept only so old clones don't stage that directory.
 - A project's clone path is never stored: `paths.projectDir(name)` derives it,
   and a `data/projects.json` record carrying `path` is refused.
 - The shipped routing template has one location, the tracked

@@ -145,7 +145,7 @@ test(
 			? "set CP_LIVE_TESTS=1 to run live smokes"
 			: treehouseAvailable()
 				? false
-				: "br and treehouse must be installed",
+				: "treehouse must be installed",
 	},
 	async (t) => {
 		// The full parent path against a real model: intake -> dispatch -> the
@@ -219,7 +219,7 @@ test(
 			? "set CP_LIVE_TESTS=1 to run live smokes"
 			: treehouseAvailable()
 				? false
-				: "br and treehouse must be installed",
+				: "treehouse must be installed",
 	},
 	async (t) => {
 		// research -> artifact -> gate (a real reviewer, a real verdict with a

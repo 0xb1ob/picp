@@ -45,7 +45,7 @@ returns the existing ids (create dedupes on project + title).
 |---|---|---|---|
 | L1 | Review parent session errors | `state/sessions/cp-parent*.jsonl` (archives) and the live session: the `sessionFile` named in `state/sessions/cp-parent-control.json`, a worker-style `<iso>_<uuid>.jsonl` name, read when its interval overlaps the window | protocol errors, self-resolved gates, wrong relays, long turns, duplicate relays; context growth per turn, compactions and rotations (when, tokens before/after, duration, failures/timeouts like 'timeout waiting for response to compact'), what fills the context (relays, wake bodies, tool output, duplicated sends), turns started near/over `compactAtTokens` |
 | L2 | Review main-session delivery and operator asks | operator session files listed in `state/sessions/operator-sessions.jsonl` (pi session dir for the home cwd), `state/operator/dashboard.jsonl`, `state/operator/asks.jsonl` | missed or late messages, chat-only questions, hung turns, wrong delegations; operator-session context size, compactions and `self_compact` handoffs, what filled it (duplicate relays, long reports) |
-| L3-L5 | Review worker session failures, slice 1/2/3 | `state/sessions/<iso>_<uuid>.jsonl` worker transcripts in the slice, `state/runs/<id>/` | tool errors, waste, CI, treehouse, wrong repo (including bare `br`), rebase, caps, cost outliers; per-job peak context and compactions, jobs that compacted mid-task or hit the window, tool outputs that bloat context (large reads, logs, diffs) |
+| L3-L5 | Review worker session failures, slice 1/2/3 | `state/sessions/<iso>_<uuid>.jsonl` worker transcripts in the slice, `state/runs/<id>/` | tool errors, waste, CI, treehouse, wrong repo, rebase, caps, cost outliers; per-job peak context and compactions, jobs that compacted mid-task or hit the window, tool outputs that bloat context (large reads, logs, diffs) |
 | L6 | Review daemon health and delivery failures | `state/daemon.log`, `daemon.prev.log`, `escalations.json`, `wakeups.json`, `answered.json`, `update.json` (+ `update-before-reset-*.json`), `health.json`, `runs/*/events.jsonl` | updater rollbacks, missing alerts, stale held rows; compaction/rotation events in daemon/bridge logs and `state/sessions/cp-parent-control.json` history |
 | S1 | Synthesize self-review against current work | the six L reports; the dedupe sources below | merge, prioritize, classify; publish the static web report (board) |
 
@@ -95,8 +95,8 @@ Prioritize NEW first. Classify each finding:
 - PARTIALLY COVERED, naming what is missing.
 
 Dedupe against (all read-only): active and paused mandates (`state/mandates/*.json`), open PRs
-(`gh pr list --state open --json number,title,url,headRefName` in the project's canonical clone), beads
-(`br --db <absolute beads.db> list --json`, never bare `br`), `data/learnings.md`, and non-closed ledger jobs
+(`gh pr list --state open --json number,title,url,headRefName` in the project's canonical clone),
+`data/learnings.md`, and non-closed ledger jobs
 (`jobs.json`). Respect the current statuses over any older list. Keep the finding shape, the redaction, the report-only
 and the no-builds rules.
 
