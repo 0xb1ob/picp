@@ -71,4 +71,33 @@ Each mutation was applied alone, its named scenario exited 1 with the assertion 
 
 Additional controls: bypassing both worktree-hazard guards promotes a rebase-in-progress (`resolve`, expected `surface`); charging `bumpResolve: true` on sender refusal records one attempt instead of zero. Removing the main-CI login guard blocks a foreign login (`wait`, expected `review`); selecting the first project's row blocks another project (`wait`, expected `review`); returning a hold for an unreadable main-CI store blocks corruption (`wait`, expected `review`).
 
+## Review 1: behavior-specific controls
+
+Addendum 2 supersedes the older one-control-per-scenario rule. The following additional production mutations were each executed alone and restored. These controls break the listed declaration's own behavior, rather than another assertion in its scenario. Every run exited 1 with the assertion below; none relies on a timeout or compilation error.
+
+| Declaration | Scenario | Executed production mutation | Observed failing assertion |
+|---|---|---|---|
+| 2 | 05-S08-4, repository/hold | In `Integrator.#readHold`, replace the durable `.get(jobId)` result with undefined. Leave the review duration intact. | Initial review still waits, but at the real deadline the new hold is ignored: merge count 1, expected 0 (`false/hold`). |
+| 14 | 05-S08-1 | In `Integrator.#readHold`'s catch, return undefined instead of an unreadable-hold result. | The malformed `{` hold reaches `review`, expected `wait`. |
+| 15 | 05-S08-8 | Remove `IntegrationHolds.#validateJob`'s delivery:pr ship-job guard. | Public cp_integrate accepts the local-delivery hold: `isError` false, expected true. |
+| 18 | 05-S08-5 | Remove `MainCiStore.setRed`'s same-login early return. | `setting the same login twice preserves its first red head` is false instead of true. |
+| 21 | 05-S08-3 | In cp_integrate's final text, append `tracker write-back required` when next is done and the ledger job has legacy tracker metadata. | `assert.doesNotMatch(JSON.stringify(events), /tracker\|write-back/)` fails for the legacy-linked job beside malformed tracker config. |
+| 22 | 05-S08-8 | Set cp_integrate's `inFlight` lookup to undefined. | The second public result lacks `/review already in flight/` for persisted attempt 2. |
+| 24 | 05-S08-3 | Change the after-merge fact append to `facts.push(merge.after_merge, merge.after_merge)`. | Opted-in after-merge fact count is 2, expected 1. |
+| 27 | 05-S08-3 | In `MergeRecorder`'s existing-receipt return, change `recorded: false` to true. | Repeated integration reports `again.record.merge?.recorded` true, expected false, in both branch variants. |
+| 28 | 05-S08-3 | Disable Integrator's `state === "MERGED"` jump to `#finish`. | After shutdown and new CommandPost construction, resume returns `surface`, expected `done`, in both branch variants. |
+| 29 missing | 05-S08-6, fallback | Replace a missing checkpoint lookup with a requested checkpoint copied with `decision: "approved"`. | Missing approval merges: actual `advance`, expected `surface`. |
+| 29 pending | 05-S08-6, fallback | Change the nonapproved guard to refuse only `decision === "declined"`. | Pending approval merges; the result lacks `/awaiting a human/`. |
+| 29 declined | 05-S08-6, fallback | Change the nonapproved guard to refuse only `decision === "pending"`. | Declined approval merges; the result lacks `/declined/`. |
+| 39 | 05-S08-7, unknown | In `evaluateMergePermission`'s UNKNOWN branch, change `permission: "retry"` to pending. | UNKNOWN returns `surface`, expected `retry`. |
+| 40 | 05-S08-7, superseded | In `evaluateMergeAskCi`, replace the current-head filtered `forHead` list with all input runs. | Superseded green merges: actual `advance`, expected `wait`. |
+
+Replay the exact scenario command above with each mutation. The deadline control used `--test-skip-pattern='repository/(unreadable-hold|head|ci|permission|none)|fallback/'` to run repository/hold while preserving the real 30-second timer. UNKNOWN and superseded controls skipped the other named subtests with anchored skip patterns; all unselected modes were explicitly skipped. The three fallback mutations are separate executions so that missing, pending and declined each reach and fail their own assertion. The source changes are temporary; none is included in the delivered diff.
+
+A trial removing the `alreadyClosed` optimization did not fail: the real ledger close is idempotent. It earns no proof credit. The executed existing-receipt mutation above supplies declaration 27's idempotency evidence instead.
+
+The harness's `setGh` uses `Object.assign(gh, patch)` before writing the complete state file (`tests/e2e/landing.test.ts`, startStack). Therefore partial permission/runs updates retain `integration` and other omitted fields. No harness change is required for that review uncertainty.
+
+Measured accounting for the PR ledger: the migration checker reports 378 tree test files and 4,299 static declarations. S08 keeps the file count unchanged and adds exactly nine test declarations to the 4,290-declaration merged base; no unit declaration is removed. The PR body supplies the Scope block, verbatim Ownership, counts, diff size, isolation details and validation evidence.
+
 Negative controls and final validation are recorded in the job report and the PR validation notes. The final range must rerun the controls before removing any unit declarations; this range provides no permission to delete unconverted assertions.
