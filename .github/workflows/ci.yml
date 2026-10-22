@@ -29,7 +29,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: bash scripts/ci-as-user.sh npm ci
 
       # The retired external tracker stays out of every tracked file and file name,
       # outside the exact lines scripts/retired-integration-allowlist.json freezes.
@@ -44,22 +44,24 @@ jobs:
       # pin is supported), so the version is printed into the job log.
       - name: Install treehouse
         run: |
-          mkdir -p "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          # Root runners install under the unprivileged user's home (scripts/ci-as-user.sh).
+          [ "$(id -u)" = 0 ] && bin=/home/cpci/.local/bin || bin="$HOME/.local/bin"
+          mkdir -p "$bin"
+          echo "$bin" >> "$GITHUB_PATH"
           # ponytail: the upstream script asks api.github.com anonymously for the
           # latest tag, and a shared runner IP can get a 403 (rate limit). Up to
           # 3 tries, 30s then 60s apart. Still fails the step after that. Upgrade
           # path: a pinned or authenticated release download in install-tools.
           for attempt in 1 2 3; do
-            PATH="$HOME/.local/bin:$PATH" node scripts/install-tools.ts treehouse && break
+            PATH="$bin:$PATH" bash scripts/ci-as-user.sh node scripts/install-tools.ts treehouse && break
             [ "$attempt" = 3 ] && exit 1
             echo "treehouse install attempt $attempt failed; retrying in $((attempt * 30))s"
             sleep $((attempt * 30))
           done
-          PATH="$HOME/.local/bin:$PATH" treehouse --version
+          PATH="$bin:$PATH" treehouse --version
 
       - name: Run suite (typecheck + tests)
-        run: npm test
+        run: bash scripts/ci-as-user.sh npm test
         env:
           # Never set CP_LIVE_TESTS here: the live suites hit real models,
           # cost money and need credentials. They self-skip without it.
@@ -68,7 +70,7 @@ jobs:
       # Offline contract eval: fails when evals/results/contract.json is stale.
       # Never set CP_EVAL_LIVE here; --live is not passed.
       - name: Eval contract check
-        run: npm run eval:check
+        run: bash scripts/ci-as-user.sh npm run eval:check
         timeout-minutes: 5
 
   # Real installs in a disposable Docker sandbox (#375; tests/e2e/README.md "Installer sandbox"): npm test
@@ -88,9 +90,9 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: bash scripts/ci-as-user.sh npm ci
 
       - name: Installer sandbox (Docker)
-        run: npm run test:one -- tests/e2e/installer.test.ts
+        run: bash scripts/ci-as-user.sh npm run test:one -- tests/e2e/installer.test.ts
         env:
           CP_INSTALL_E2E: "1"
