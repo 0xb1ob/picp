@@ -615,28 +615,25 @@ test("landing: spawn pressure releases the oldest held author and a journal refu
 	const older = await s.held("oldest idle author", 301);
 	const newer = await s.held("newer idle author", 302);
 	const idle = (id: string) => { const m = s.post.manager.get(id); return s.post.fleet.get(id)?.phase === "held" && m?.worker.alive === true && !m.worker.busy; };
-	await waitFor(() => idle(older.jobId) && idle(newer.jobId), Boolean, { timeoutMs: 10_000, what: "both held authors idle and registered" });
+	// makeRoom picks the oldest idle author (src/held-release.ts releasable); a send/drive in flight excludes one, so gate on it.
+	await waitFor(() => idle(older.jobId) && idle(newer.jobId) && s.post.heldRelease.releasable().join() === [older.jobId, newer.jobId].join(), Boolean, { timeoutMs: 10_000, what: "both held authors releasable, oldest first" });
 	const releases = (id: string) => readRunEvents(s.home, id).filter((event) => event.type === "held_released");
 	assert.equal(releases(older.jobId).length + releases(newer.jobId).length, 0, "below cap no author is stopped");
 	const original = s.post.fleet.get(older.jobId)!;
 	const job = await s.post.ledger().create({ title: "fresh work under spawn pressure", project: "demo", kind: "ship", delivery: "local" });
 	const model = s.provider.addScript("spawn-pressure", [{ kind: "text", text: "Fresh worker running." }], { onExhausted: "repeat" });
 	s.agentDir.writeModels(s.provider);
-	// Both authors' journals refuse: a transient busy older author must not let the dispatch pick newer and succeed.
-	const journals = [older.jobId, newer.jobId].map((id) => ({ file: join(s.home, paths.runDir(id), "events.jsonl"), content: readFileSync(join(s.home, paths.runDir(id), "events.jsonl"), "utf8") }));
-	for (const { file } of journals) {
-		rmSync(file);
-		mkdirSync(file);
-	}
+	const eventsFile = join(s.home, paths.runDir(older.jobId), "events.jsonl");
+	const journal = readFileSync(eventsFile, "utf8");
+	rmSync(eventsFile);
+	mkdirSync(eventsFile);
 	try {
 		await assert.rejects(s.post.dispatch({ jobId: job.id, task: "Do the fresh work.", model, fetch: false }), /EISDIR/);
 		assert.equal(s.provider.requests("spawn-pressure").length, 0, "journal failure never starts the caller");
 		assert.equal(s.post.fleet.get(older.jobId)?.worker.pid, original.worker.pid);
 	} finally {
-		for (const { file, content } of journals) {
-			rmSync(file, { recursive: true });
-			writeFileSync(file, content);
-		}
+		rmSync(eventsFile, { recursive: true });
+		writeFileSync(eventsFile, journal);
 	}
 	s.post.dispatchQueue.enqueue(job.id, { task: "Do the fresh work.", model });
 	await s.post.dispatchQueue.drain();
