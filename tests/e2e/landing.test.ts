@@ -3945,6 +3945,10 @@ test("landing S10: review evidence authorizes only the reviewed complete head", 
 		const result = await s.integrate(live.jobId);
 		const permitted = ["pass", "equivalent", "approved"].includes(mode);
 		assert.equal(result.record.next, permitted ? "advance" : "review", result.text);
+		if (["missing", "fallback"].includes(mode)) {
+			assert.match(result.text, /cp_review/);
+			assert.match(result.text, /unchanged/);
+		}
 		assert.equal(mergedCalls(result.calls).length, permitted ? 1 : 0);
 		assert.equal(result.record.head_sha, live.head);
 		assert.equal(result.calls.filter((call) => call.startsWith("pr update-branch")).length, 0);
@@ -3995,6 +3999,7 @@ test("landing S10: cleanup failures preserve landed effects and resume", { skip:
 		assert.match(notices, /HELD PR STOPPED/);
 		assert.match(notices, mode === "delete" ? /merged and torn down/ : /still open/);
 		assert.doesNotMatch(notices, /nothing was mutated/i);
+		assert.match(notices, /resumes, never starting over/);
 		assert.ok(readMergeReceipt(s.home, live.jobId));
 		writeFileSync(jobsFile, jobs);
 		rmSync(wrapper);
