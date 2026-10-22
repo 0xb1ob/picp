@@ -74,7 +74,7 @@ ask-0088e0332d00, 2026-10-21.
 | S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting and executed controls](testing-migration-s14.md): 30 mapped, 3 retained verbatim with unreachable-input evidence, 0 pending | 4 original paths retired (3 mixed moved/split) | +3 retained files | +6 e2e declarations |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
 | S10 (cp-e2e-slice-s10-4dzb) | behavior 05; integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92); [range ledger and executed patch controls](testing-migration-s10.md); S09 carry-ins reconciled | 0; original unit file stays whole | unchanged | +6 e2e declarations |
-| S20 (cp-e2e-slice-s20-8nn3) | behavior 06; checkpoint: shipped-seen 10 mapped, 1 retained structural declaration; other three whole files remain pending; controls S20-repeat/disk/heal/scope/writer/mirror/id-bound/session-bound executed | 1 original path retired, 1 retained replacement (not deletion credit) | +1 e2e file, net 0 source/retained files | -11 original +1 retained +2 e2e = -8 net declarations at checkpoint |
+| S20 (cp-e2e-slice-s20-8nn3) | behavior 06; checkpoint: shipped-seen 10 mapped/1 retained, stale context 5 mapped; wake-rules and head sources pending; 22 controls executed | 2 original paths retired, 1 retained structural replacement (not deletion credit) | +1 e2e file, net -1 source/retained files | -16 original +1 retained +5 e2e = -10 net declarations at checkpoint |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -431,6 +431,9 @@ moves first.
 | 05-S14-approval | `tests/e2e/phase3.test.ts` | pipeline S14: only a pin for the current artifact bypasses the operator checkpoint |
 | 06-S20-shipped | `tests/e2e/wake-delivery.test.ts` | S20: shipped rows collapse through cp_status_block and survive a resumed parent |
 | 06-S20-context | `tests/e2e/wake-delivery.test.ts` | S20: persisted stale notices are filtered at the actual provider boundary |
+| 06-S20-busy | `tests/e2e/wake-delivery.test.ts` | S20: busy durable wakes wait for an operator answer and late notices receive one nudge |
+| 06-S20-abort | `tests/e2e/wake-delivery.test.ts` | S20: abort strands no autonomous turn and the next prompt carries the notices |
+| 06-S20-tool | `tests/e2e/wake-delivery.test.ts` | S20: tool turns do not answer operator sends and an errored run releases held wakes |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -1005,6 +1008,11 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/shipped-seen.test.ts` | a second writer on the same home does not drop the first session's entry | 06-S20-shipped | mapped | S20-writer: persisted sessions count/preserved original entry assertion fails after a different parent session writes |
 | `tests/shipped-seen.test.ts` | the store bounds itself: sessions and ids per session | 06-S20-shipped | mapped | S20-id-bound fails recent-ID tail equality; S20-session-bound fails newest-session identity after cap+1 sessions |
 | `tests/shipped-seen.test.ts` | a write that fails cannot un-report a row this process already printed | 06-S20-shipped | mapped | S20-mirror: fourth tool result repeats rows after corrupt memory instead of none-new count; warning is asserted |
+| `tests/stale-notice-context.test.ts` | qra: stale and replayed notices stay journaled, not in the parent's model context | 06-S20-context | mapped | S20-filter fails obsolete/duplicate body exclusion; S20-recovery-replay/gone fail recovery exclusions; S20-context-journal fails suppression journal assertions; persisted history and reload asserted |
+| `tests/stale-notice-context.test.ts` | N9: a withheld tail wake never leaves the context ending on assistant | 06-S20-context | mapped | S20-tail fails exact neutral user-tail text after an assistant response; obsolete body absent and persisted history preserved |
+| `tests/stale-notice-context.test.ts` | N2: a withheld verdict with findings reaches the model as its findings stand-in | 06-S20-context | mapped | S20-findings fails medium finding presence at provider boundary; cp_integrate instructions absent |
+| `tests/stale-notice-context.test.ts` | cp-vy73: busy wake-ups ride along non-triggering, and agent_settled nudges once for a stranded one | 06-S20-busy | mapped | S20-busy fails carried W2/W3; S20-answered-busy fails no-nudge assertion for carried answer; S20-nudge fails fourth request; 06-S20-abort with S20-abort fails absence of a stranded-notice nudge after abort and next prompt; idle wake asserted |
+| `tests/stale-notice-context.test.ts` | unload-parent PR3: wakes wait while a landed operator send is unanswered; answered never waits | 06-S20-busy | mapped | S20-send-first fails held session exclusion; S20-answered-hold fails answer in first follow-up; 06-S20-tool with S20-tool-answer fails held notice absence during tool continuation; S20-settled-release times out waiting for recovered held notice after provider error |
 <!-- /manifest:assertions -->
 
 ### Pending-fix declarations (operator-parked; no deletion credit)
@@ -1656,6 +1664,258 @@ index 31282e3..0a5d1f5 100644
  				updated_at: isoTimestamp(this.#now()),
 ```
 <!-- /patch:S20-session-bound -->
+
+<!-- patch:S20-filter -->
+```diff
+diff --git a/extensions/command-post/session-hooks.ts b/extensions/command-post/session-hooks.ts
+index 616c450..bef3e70 100644
+--- a/extensions/command-post/session-hooks.ts
++++ b/extensions/command-post/session-hooks.ts
+@@ -525,7 +525,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
+ 		const fresh = reviewed.filter((message, index) => message === messages[index] || isWithheldFindings(message));
+ 		// N9: a withheld tail must not leave the context ending on assistant (provider 400, no prefill).
+ 		// SAFETY: retained messages are unchanged members of event.messages; the one stand-in is a custom message.
+-		return { messages: keepUserTail(messages as WakeupCarrier[], fresh) as unknown as typeof event.messages };
++		return { messages: messages as unknown as typeof event.messages };
+ 	});
+ 
+ 	// The parent never leaves orphaned children behind.
+```
+<!-- /patch:S20-filter -->
+
+<!-- patch:S20-findings -->
+```diff
+diff --git a/extensions/command-post/session-hooks.ts b/extensions/command-post/session-hooks.ts
+index 616c450..9d141f3 100644
+--- a/extensions/command-post/session-hooks.ts
++++ b/extensions/command-post/session-hooks.ts
+@@ -522,7 +522,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
+ 		const reviewed = reviewWakeupsInContext(messages as WakeupCarrier[]);
+ 		if (!reviewed) return;
+ 		// Review preserves order and fresh object identities; withheld entries drop, verdict findings stay (N2).
+-		const fresh = reviewed.filter((message, index) => message === messages[index] || isWithheldFindings(message));
++		const fresh = reviewed.filter((message, index) => message === messages[index]);
+ 		// N9: a withheld tail must not leave the context ending on assistant (provider 400, no prefill).
+ 		// SAFETY: retained messages are unchanged members of event.messages; the one stand-in is a custom message.
+ 		return { messages: keepUserTail(messages as WakeupCarrier[], fresh) as unknown as typeof event.messages };
+```
+<!-- /patch:S20-findings -->
+
+<!-- patch:S20-tail -->
+```diff
+diff --git a/extensions/command-post/session-hooks.ts b/extensions/command-post/session-hooks.ts
+index 616c450..e461deb 100644
+--- a/extensions/command-post/session-hooks.ts
++++ b/extensions/command-post/session-hooks.ts
+@@ -525,7 +525,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
+ 		const fresh = reviewed.filter((message, index) => message === messages[index] || isWithheldFindings(message));
+ 		// N9: a withheld tail must not leave the context ending on assistant (provider 400, no prefill).
+ 		// SAFETY: retained messages are unchanged members of event.messages; the one stand-in is a custom message.
+-		return { messages: keepUserTail(messages as WakeupCarrier[], fresh) as unknown as typeof event.messages };
++		return { messages: fresh as unknown as typeof event.messages };
+ 	});
+ 
+ 	// The parent never leaves orphaned children behind.
+```
+<!-- /patch:S20-tail -->
+
+<!-- patch:S20-recovery-replay -->
+```diff
+diff --git a/src/wakeups.ts b/src/wakeups.ts
+index 3c65ed9..9112cef 100644
+--- a/src/wakeups.ts
++++ b/src/wakeups.ts
+@@ -1118,7 +1118,7 @@ export function reviewWakeups<T extends WakeupCarrier>(
+ 			// on the identity `job_id|head` would confuse them under.
+ 			// Durable wake-ups (death/bound/recovery) replay on `durable_id`: the outbox re-sends
+ 			// after its retry window while pi still holds the first copy (cp-ze1t).
+-			const ids = durable ? durableIdsFromMessage(message).map((id) => `durable:${id}`) : stamp.kind === "ci" ? ciKeysFromMessage(message) : verdictKeysFromMessage(message);
++			const ids = durable ? [] : stamp.kind === "ci" ? ciKeysFromMessage(message) : verdictKeysFromMessage(message);
+ 			if (ids.length > 0) {
+ 				// The delivery is the context entry, not the stamp: a redelivered copy with an
+ 				// identical stamp is still a new entry (its own `timestamp`), so still a replay.
+```
+<!-- /patch:S20-recovery-replay -->
+
+<!-- patch:S20-recovery-gone -->
+```diff
+diff --git a/src/wakeups.ts b/src/wakeups.ts
+index 3c65ed9..6b86ce8 100644
+--- a/src/wakeups.ts
++++ b/src/wakeups.ts
+@@ -461,7 +461,7 @@ export function checkWakeup(stamp: WakeupStamp, facts: WakeupFacts, now: Date =
+ 			const candidate = facts.job(id);
+ 			return candidate !== undefined && candidate.phase !== "done";
+ 		});
+-		if (!still) return stale("every candidate it listed has been torn down");
++		if (false) return stale("every candidate it listed has been torn down");
+ 		return fresh;
+ 	}
+ 	if (!stamp.job_id) return fresh;
+```
+<!-- /patch:S20-recovery-gone -->
+
+<!-- patch:S20-context-journal -->
+```diff
+diff --git a/extensions/command-post/wakeup-surfaces.ts b/extensions/command-post/wakeup-surfaces.ts
+index 7fb97bd..e2188a2 100644
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -171,7 +171,7 @@ export function createWakeupSurfaces(
+ 		for (const jobId of targets) {
+ 			try {
+ 				if (!existsSync(join(currentRuntime().home, paths.runDir(jobId)))) continue;
+-				commandPost().runs.open(jobId).cp("wakeup_suppressed", {
++				if (false) commandPost().runs.open(jobId).cp("wakeup_suppressed", {
+ 					kind: stamp.kind,
+ 					...(stamp.generation !== undefined ? { generation: stamp.generation } : {}),
+ 					issued_at: stamp.issued_at,
+```
+<!-- /patch:S20-context-journal -->
+
+<!-- patch:S20-busy -->
+```diff
+diff --git a/extensions/command-post/wakeup-surfaces.ts b/extensions/command-post/wakeup-surfaces.ts
+index 7fb97bd..4baebd1 100644
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -268,7 +268,7 @@ export function createWakeupSurfaces(
+ 			facts: wakeupFactsNow(),
+ 			send: (message: WakeupMessage) => {
+ 				const deliver = (): void => {
+-					const quiet = !triggerTurn || (gate.busy && gate.triggered && stamp.kind !== "answered");
++					const quiet = !triggerTurn;
+ 					pi.sendMessage(
+ 						{
+ 							customType: message.customType,
+```
+<!-- /patch:S20-busy -->
+
+<!-- patch:S20-send-first -->
+```diff
+diff --git a/extensions/command-post/wakeup-surfaces.ts b/extensions/command-post/wakeup-surfaces.ts
+index 7fb97bd..f70f9a8 100644
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -285,7 +285,7 @@ export function createWakeupSurfaces(
+ 				// unload-parent PR3: an unanswered operator send goes first; held wakes count as sent (not acked).
+ 				releaseHeld();
+ 				const gated = (): void => { if (compactHold.offer(deliver) === "send") deliver(); };
+-				if (sendFirst.offer(stamp.kind, gated) === "send") gated();
++				gated();
+ 			},
+ 			onSuppressed: (suppressed, verdict) => recordStaleWakeup(suppressed, verdict, "send"),
+ 			projectOf: projectOf(),
+```
+<!-- /patch:S20-send-first -->
+
+<!-- patch:S20-nudge -->
+```diff
+diff --git a/extensions/command-post/wakeup-surfaces.ts b/extensions/command-post/wakeup-surfaces.ts
+index 7fb97bd..7eb03c5 100644
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -254,7 +254,7 @@ export function createWakeupSurfaces(
+ 				{ customType: WAKEUP_NUDGE_TYPE, content: `${unseen} fleet notice(s) arrived while you were busy; they are above.`, display: true },
+ 				{ deliverAs: "followUp", triggerTurn: true },
+ 			);
+-			if (compactHold.offer(nudge) === "send") nudge();
++			if (false) nudge();
+ 		},
+ 	};
+ 	const quietPending = new Set<string>();
+```
+<!-- /patch:S20-nudge -->
+
+<!-- patch:S20-abort -->
+```diff
+diff --git a/extensions/command-post/wakeup-surfaces.ts b/extensions/command-post/wakeup-surfaces.ts
+index 7fb97bd..80a7784 100644
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -249,7 +249,7 @@ export function createWakeupSurfaces(
+ 			if (!gate.aborted) releaseHeld();
+ 			const unseen = gate.nonTriggeringSent - gate.seenUpTo;
+ 			gate.seenUpTo = gate.nonTriggeringSent;
+-			if (unseen <= 0 || gate.aborted) return;
++			if (unseen <= 0) return;
+ 			const nudge = () => pi.sendMessage(
+ 				{ customType: WAKEUP_NUDGE_TYPE, content: `${unseen} fleet notice(s) arrived while you were busy; they are above.`, display: true },
+ 				{ deliverAs: "followUp", triggerTurn: true },
+```
+<!-- /patch:S20-abort -->
+
+<!-- patch:S20-answered-hold -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..fd03475 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -47,7 +47,7 @@ export class SendFirstGate<Wake> {
+ 
+ 	/** `send` now, or `hold` (kept until `flush`). `answered` always goes. */
+ 	offer(kind: string, wake: Wake): "send" | "hold" {
+-		if (kind === "answered" || this.#unanswered.size === 0) return "send";
++		if (this.#unanswered.size === 0) return "send";
+ 		if (this.#held.length === 0) this.#since = this.#now();
+ 		this.#held.push(wake);
+ 		return "hold";
+```
+<!-- /patch:S20-answered-hold -->
+
+<!-- patch:S20-answered-busy -->
+```diff
+diff --git a/extensions/command-post/wakeup-surfaces.ts b/extensions/command-post/wakeup-surfaces.ts
+index 7fb97bd..c7928a5 100644
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -268,7 +268,7 @@ export function createWakeupSurfaces(
+ 			facts: wakeupFactsNow(),
+ 			send: (message: WakeupMessage) => {
+ 				const deliver = (): void => {
+-					const quiet = !triggerTurn || (gate.busy && gate.triggered && stamp.kind !== "answered");
++					const quiet = !triggerTurn || (gate.busy && gate.triggered);
+ 					pi.sendMessage(
+ 						{
+ 							customType: message.customType,
+```
+<!-- /patch:S20-answered-busy -->
+
+<!-- patch:S20-tool-answer -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..24e80a8 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -37,7 +37,7 @@ export class SendFirstGate<Wake> {
+ 
+ 	/** A clean `turn_end` (the bridge's segment end) answered every send that landed before it. */
+ 	turnEnd(event: { type: string; [key: string]: unknown }): void {
+-		if (cleanSegmentEnd(event)) this.#unanswered.clear();
++		this.#unanswered.clear();
+ 	}
+ 
+ 	/** The run settled: whatever it did not answer, the bridge has already settled or failed. */
+```
+<!-- /patch:S20-tool-answer -->
+
+<!-- patch:S20-settled-release -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..68ee6ff 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -42,7 +42,7 @@ export class SendFirstGate<Wake> {
+ 
+ 	/** The run settled: whatever it did not answer, the bridge has already settled or failed. */
+ 	settled(): void {
+-		this.#unanswered.clear();
++		return;
+ 	}
+ 
+ 	/** `send` now, or `hold` (kept until `flush`). `answered` always goes. */
+```
+<!-- /patch:S20-settled-release -->
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
@@ -1773,6 +2033,20 @@ index 2dcc135..008c3bd 100644
 | S20-mirror | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-mirror | 0abb5ceefb9923ddbfc8b94c8a7629dd5fe7814da10cb654eb8651cbaa1871be | corrupt memory replays already printed rows in fourth tool result | pass |
 | S20-id-bound | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-id-bound | 902f1f03b8a886f392418aa3e6f60437307e95e253fa8d3a6f28c980b0351c9f | persisted ID tail loses newly reported jobs | pass |
 | S20-session-bound | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-session-bound | aef63e5edaa170bfb1baa3c3159a3bd52f5ff450277bfde5115a5471e77ab809 | cap+1 writer is absent from newest session position | pass |
+| S20-filter | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-context | S20-filter | 14db3817c5581d52c2ccf56ec34de10fad5eb2cf6fd69a5b220ef4f5ccaeab8d | obsolete body exclusion fails | pass |
+| S20-findings | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-context | S20-findings | fa99feec45af268d962ea958bfccf37edc5a258fab05cf15a12376230c7a76df | medium finding presence fails | pass |
+| S20-tail | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-context | S20-tail | bd009e0d7deae7ca260dcbac0b46be8b9a3b96ed37fe3a0d2202b817bbcebec1 | exact neutral tail text absent | pass |
+| S20-recovery-replay | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-context | S20-recovery-replay | 489ab96e7035f3100627cb0aa4c6544919a086a6ee9774e3705f26c6aaabea9d | duplicate landing body exclusion fails | pass |
+| S20-recovery-gone | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-context | S20-recovery-gone | 1c262e06a68009716aa8ad3325cd0e3534cf325311161fabd959ffb08acece4b | jobless gone body exclusion fails | pass |
+| S20-context-journal | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-context | S20-context-journal | 4ef20e8fe22d3ea60a790ee501ac50f9e0f66e4777f41272875eec90a290c2f3 | suppression journal assertion fails | pass |
+| S20-busy | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-busy | S20-busy | 41d32cf8ce215819a012372aeda2d5d501cb5f5b80b038edbe3c67deb0cd5625 | W2/W3 not carried in first follow-up | pass |
+| S20-send-first | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-busy | S20-send-first | ec43e840813d1220b9715ad02e59fc1b9392064d475b91f429c20fef914fe94e | held session body exclusion fails | pass |
+| S20-nudge | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-busy | S20-nudge | b0788e221f06ad29a1fe087331a6c24d57f8a2b9f108d66ea42c7a0766c9a808 | timeout waiting for stranded-notice request | pass |
+| S20-abort | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-abort | S20-abort | b8cc6126c20b0047c1b1439c39eb8dd0a385c96b4ecf28d551b7f1db7924a93b | nudge absent assertion fails on resumed context | pass |
+| S20-answered-hold | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-busy | S20-answered-hold | 2d96953f09d83477bf9f9ec54a20094ad0e08c18c326d36913e6a1de3d104942 | first follow-up lacks bypass answer | pass |
+| S20-answered-busy | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-busy | S20-answered-busy | ad7d87d70993beb29b4201640cc39c1a27257acffa5a8868619767b63f115561 | carried-answer request unexpectedly includes nudge | pass |
+| S20-tool-answer | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-tool | S20-tool-answer | 13033311aabc217f60082571c8d3c8cc0f3f5f3e39e486d6f2c86a3b456fe960 | held second body leaked into tool continuation | pass |
+| S20-settled-release | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-tool | S20-settled-release | 0a8f08320a58c36fb00977a3ec3025fe41f099c72b0b0c8dbf4b4cf3dd027e63 | timeout waiting for held notice after provider error | pass |
 <!-- /manifest:regressions -->
 
 <!-- patch:NC-main-corrupt -->
@@ -3262,7 +3536,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/settle.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/shipped-seen.test.ts` | deleted | S20 | 10 mapped to 06-S20-shipped with eight executed controls; 1 structural declaration retained in tests/shipped-seen-retained.test.ts; original path retired, retained declaration is not deletion credit |
 | `tests/skill-catalog.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
-| `tests/stale-notice-context.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/stale-notice-context.test.ts` | deleted | S20 | all 5 declarations mapped to real RPC wake-delivery scenarios with 14 executed production controls |
 | `tests/state-migrations.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/stats-view.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
 | `tests/stats-wakeup-drift.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |

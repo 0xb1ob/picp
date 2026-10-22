@@ -4,10 +4,16 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { FleetStore } from "../../src/fleet.ts";
 import {
-	DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, SCHEMA_VERSION,
+	DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION,
 	SHIPPED_SEEN_KEEP_SESSIONS, SHIPPED_SEEN_MAX_IDS,
 } from "../../src/contracts.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, startPiChild } from "../harness/index.ts";
+import { CommandPost } from "../../src/command-post.ts";
+import { initJobsDocument } from "../../src/ledger.ts";
+import { AnsweredOutbox } from "../../src/answered.ts";
+import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
+import { frameBatch } from "../../src/parent-outbox.ts";
+import { REPO_ROOT, readRunEvents, waitFor } from "../harness/index.ts";
 
 test("S20: shipped rows collapse through cp_status_block and survive a resumed parent", { timeout: 120_000 }, async (t) => {
 	const home = createScratchHome();
@@ -144,9 +150,11 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 	const model = provider.addScript("s20-context", [
 		{ kind: "text", text: "Context checked." },
 		{ kind: "text", text: "Tail checked." },
+		{ kind: "text", text: "Reload checked." },
 	]);
 	const agent = createAgentDir({ provider });
 	const session = join(home.path, "legacy.jsonl");
+	mkdirSync(join(home.path, paths.runDir("cp-gone")), { recursive: true });
 	const stamp = (kind: string, extra = {}) => ({ kind, job_id: "cp-gone", issued_at: "2026-09-26T08:00:00Z", ...extra });
 	const messages = [
 		{ role: "user", content: "Keep this ordinary user message" },
@@ -194,6 +202,16 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 	assert.match(request, /FRESH-ANSWER/);
 	assert.match(request, /medium: preserve these findings/);
 	assert.doesNotMatch(request, /OBSOLETE-INTEGRATE/);
+	assert.match(request, /LANDED-FIRST/);
+	assert.doesNotMatch(request, /LANDED-DUPLICATE|JOBLESS-GONE/);
+	const suppressed = readRunEvents(home.path, "cp-gone").filter((e) => e.type === "wakeup_suppressed");
+	const payloads = suppressed.map((e) => e.payload as { kind: string; stage: string; reason: string; keys?: string[] });
+	for (const kind of ["envelope", "ci", "verdict", "answered", "recovery"]) {
+		assert.ok(payloads.some((p) => p.kind === kind && p.stage === "delivery" && p.reason.length > 0));
+	}
+	assert.ok(payloads.some((p) => p.kind === "answered" && p.keys?.includes("aw-new")));
+	assert.ok(payloads.some((p) => p.keys?.includes("cp-gone") && /every candidate/.test(p.reason)));
+	assert.doesNotMatch(JSON.stringify(suppressed), /OBSOLETE-|FRESH-ANSWER|LANDED-FIRST/);
 	assert.match(readFileSync(session, "utf8"), /OBSOLETE-envelope/, "filtering must not mutate persisted history");
 	const offset = child.records().length;
 	await child.prompt("/s20tail");
@@ -201,5 +219,145 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 	const tailRequest = JSON.stringify(provider.requests("s20-context")[1]?.body.messages);
 	assert.doesNotMatch(tailRequest, /OBSOLETE-TAIL/);
 	assert.match(tailRequest, /A fleet notice queued for this turn was withdrawn before delivery/);
+	await child.close();
+	const resumed = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
+		extensions: [COMMAND_POST_EXTENSION], sessionFile: session });
+	t.after(() => resumed.close());
+	await resumed.prompt("Recheck the persisted notices after reload.");
+	await resumed.waitForSettled(60_000);
+	const reloaded = JSON.stringify(provider.requests("s20-context")[2]?.body.messages);
+	assert.match(reloaded, /FRESH-ANSWER/);
+	assert.match(reloaded, /LANDED-FIRST/);
+	assert.doesNotMatch(reloaded, /OBSOLETE-|DUPLICATE-ANSWER|LANDED-DUPLICATE|JOBLESS-GONE/);
+	await resumed.close();
 	assert.equal(provider.remaining("s20-context"), 0);
+});
+
+test("S20: busy durable wakes wait for an operator answer and late notices receive one nudge", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	initJobsDocument(home.path, "cp");
+	const seed = new CommandPost({ home: home.path, packageRoot: REPO_ROOT });
+	await seed.registry.register({ name: "demo", clone_url: home.path, delivery: "local" });
+	const ready = await seed.ledger().create({ title: "S20 ready work", project: "demo", delivery: "local", kind: "ship" });
+	seed.mandates.issue({ projects: ["demo"], objective: "S20 wake authority", job_ids: [ready.id],
+		expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [] });
+	await seed.shutdown();
+	const model = provider.addScript("s20-busy", [
+		{ kind: "hang", ms: 16_000 }, { kind: "hang", ms: 16_000 },
+		{ kind: "hang", ms: 8_000 }, { kind: "text", text: "Notices handled." },
+	]);
+	const agent = createAgentDir({ provider });
+	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
+		extensions: [COMMAND_POST_EXTENSION], sessionDir: join(home.path, "sessions") });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	const box = new DurableWakeupOutbox({ home: home.path });
+	const queue = (id: string) => box.enqueue({ id, kind: "recovery", content: `S20-BUSY-${id}` });
+	const requests = () => provider.requests("s20-busy");
+	await child.prompt(frameBatch([{ id: "ps-20300101000000-0000000a", text: "S20 operator question" }]));
+	await waitFor(requests, (r) => r.length === 1, { timeoutMs: 30_000, what: "first busy request" });
+	queue("w1"); queue("w2"); queue("w3");
+	await waitFor(() => box.read().sends ?? [], (sends) => sends.length === 3, {
+		timeoutMs: 30_000, what: "durable notices offered to the parent",
+	});
+	assert.equal(requests().length, 1, "an unanswered operator send cannot start a notice turn");
+	const state = await child.getState();
+	assert.doesNotMatch(readFileSync(state.sessionFile as string, "utf8"), /S20-BUSY-w[123]/,
+		"held notices must not enter the session before the operator answer");
+	const answers = new AnsweredOutbox({ home: home.path });
+	answers.enqueue({ id: "aw-s20-held", type: "approval", decision: "S20 answer bypasses hold",
+		answer: "continue", answered_by: "operator dialog (tui)" });
+	await waitFor(() => answers.read().sends ?? [], (sends) => sends.length > 0, {
+		timeoutMs: 30_000, what: "answer offered while operator question is unanswered",
+	});
+	await waitFor(requests, (r) => r.length === 2, { timeoutMs: 30_000, what: "notice request after operator answer" });
+	const carried = JSON.stringify(requests()[1]?.body.messages);
+	for (const id of ["w1", "w2", "w3"]) assert.match(carried, new RegExp(`S20-BUSY-${id}`));
+	assert.ok(carried.indexOf("S20 answer bypasses hold") >= 0);
+	queue("w4");
+	await waitFor(() => box.read().sends ?? [], (sends) => sends.some((s) => s.id === "w4"), {
+		timeoutMs: 30_000, what: "late non-triggering notice offered",
+	});
+	new AnsweredOutbox({ home: home.path }).enqueue({ id: "aw-s20-busy", type: "approval",
+		decision: "S20 actionable decision", answer: "continue", answered_by: "operator dialog (tui)" });
+	await waitFor(requests, (r) => r.length === 3, { timeoutMs: 30_000, what: "actionable answer bypasses busy gate" });
+	const answered = JSON.stringify(requests()[2]?.body.messages);
+	assert.match(answered, /S20 actionable decision/);
+	assert.match(answered, /S20-BUSY-w4/);
+	assert.doesNotMatch(answered, /fleet notice\(s\) arrived while you were busy/);
+	queue("w5");
+	await waitFor(() => box.pending(), (pending) => pending.length === 0, {
+		timeoutMs: 30_000, what: "late non-triggering notice accepted",
+	});
+	await waitFor(requests, (r) => r.length === 4, { timeoutMs: 30_000, what: "one stranded-notice nudge" });
+	const nudged = JSON.stringify(requests()[3]?.body.messages);
+	assert.match(nudged, /S20-BUSY-w5/);
+	assert.match(nudged, /1 fleet notice\(s\) arrived while you were busy/);
+	await child.waitFor((r) => r.type === "message_end" && JSON.stringify(r).includes("Notices handled."), 60_000);
+	assert.equal(requests().length, 4);
+	assert.equal(provider.remaining("s20-busy"), 0);
+});
+
+test("S20: abort strands no autonomous turn and the next prompt carries the notices", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s20-abort", [
+		{ kind: "hang" }, { kind: "text", text: "Resumed notices handled." },
+		{ kind: "text", text: "Idle notice handled." },
+	], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
+		extensions: [COMMAND_POST_EXTENSION] });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	const box = new DurableWakeupOutbox({ home: home.path });
+	const requests = () => provider.requests("s20-abort");
+	await child.prompt("S20 ordinary busy turn");
+	await waitFor(requests, (r) => r.length === 1, { timeoutMs: 30_000, what: "aborted request" });
+	for (const id of ["abort-first", "abort-late"]) box.enqueue({ id, kind: "recovery", content: `S20-${id}` });
+	await waitFor(() => box.read().sends ?? [], (sends) => sends.length === 2, {
+		timeoutMs: 30_000, what: "busy notices offered before abort",
+	});
+	child.send({ id: "abort-s20", type: "abort" });
+	await child.waitForSettled(60_000);
+	await child.getState();
+	assert.equal(requests().length, 1, "abort must not start a stranded-notice turn");
+	await child.prompt("S20 resume after abort");
+	await child.waitFor((r) => r.type === "message_end" && JSON.stringify(r).includes("Resumed notices handled."), 60_000);
+	const resumed = JSON.stringify(requests()[1]?.body.messages);
+	assert.match(resumed, /S20-abort-late/);
+	assert.doesNotMatch(resumed, /fleet notice\(s\) arrived while you were busy/);
+	box.enqueue({ id: "after-abort-idle", kind: "recovery", content: "S20 idle wake" });
+	await waitFor(requests, (rows) => rows.some((r) => JSON.stringify(r.body.messages).includes("S20 idle wake")), {
+		timeoutMs: 30_000, what: "idle notice reaches a model request",
+	});
+	assert.doesNotMatch(JSON.stringify(requests().map((r) => r.body.messages)), /fleet notice\(s\) arrived while you were busy/);
+	assert.equal(provider.remaining("s20-abort"), 0);
+});
+
+test("S20: tool turns do not answer operator sends and an errored run releases held wakes", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s20-error-release", [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "node -e 'setTimeout(() => {}, 10000)'" } }] },
+		{ kind: "error", status: 400, message: "S20 provider rejected request" },
+		{ kind: "text", text: "Held notice recovered." },
+	]);
+	const agent = createAgentDir({ provider, settings: { retry: { enabled: false, maxRetries: 0 } } });
+	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
+		extensions: [COMMAND_POST_EXTENSION] });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	const requests = () => provider.requests("s20-error-release");
+	await child.prompt(frameBatch([{ id: "ps-20300101000000-0000000b", text: "S20 unanswered operator question" }]));
+	await child.waitFor((r) => r.type === "tool_execution_start" && r.toolName === "bash", 30_000);
+	const box = new DurableWakeupOutbox({ home: home.path });
+	box.enqueue({ id: "s20-tool-held", kind: "recovery", content: "S20 held through tool turn" });
+	box.enqueue({ id: "s20-tool-held-2", kind: "recovery", content: "S20 held through tool turn second" });
+	await waitFor(() => box.read().sends ?? [], (sends) => sends.length > 0, {
+		timeoutMs: 30_000, what: "notice offered during tool execution",
+	});
+	await child.waitFor((r) => r.type === "message_end" && JSON.stringify(r).includes("Held notice recovered."), 30_000);
+	assert.equal(requests().length, 3);
+	assert.doesNotMatch(JSON.stringify(requests()[1]?.body.messages), /S20 held through tool turn/);
+	assert.match(JSON.stringify(requests()[2]?.body.messages), /S20 held through tool turn/);
+	assert.equal(provider.remaining("s20-error-release"), 0);
 });

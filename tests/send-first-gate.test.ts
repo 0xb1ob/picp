@@ -1,6 +1,6 @@
 /**
  * unload-parent PR3: the send-first wake hold (src/send-first-gate.ts), pure state.
- * The hook wiring is covered in tests/stale-notice-context.test.ts.
+ * The hook wiring is covered in tests/e2e/wake-delivery.test.ts.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
