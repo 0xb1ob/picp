@@ -1,0 +1,13 @@
+diff --git a/src/command-post.ts b/src/command-post.ts
+index 159b47b..850d4de 100644
+--- a/src/command-post.ts
++++ b/src/command-post.ts
+@@ -703,7 +703,7 @@ export class CommandPost {
+ 				});
+ 			}
+ 		}
+-		this.#journalRecovery(report);
++		// Recovery journal deliberately omitted for the S21 negative control.
+ 		await this.teardown.retryLedgerCloses();
+ 		await this.awaitingMerge.recover(); // a park cut by the restart continues from its stage; refusals land in the run log
+ 		return { report, intake: results };
