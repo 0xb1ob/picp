@@ -63,7 +63,7 @@ function ledgerFiles(manifest: string): string[] {
 const PATCH_RE = /<!-- patch:([\w-]+) -->\n```diff\n([\s\S]*?)\n```/g;
 const LEDGER_TABLES = ["prs", "scenarios", "assertions", "regressions", "incoming", "feature-removed", "baseline"];
 
-/** Rows and patch blocks of the `before` docs each appear once, byte-identical, in the `after` docs. */
+/** Rows, patch blocks and every prose/log line of the `before` docs each appear once, byte-identical, in `after`. */
 export function preservationFindings(before: readonly string[], after: readonly string[]): string[] {
 	const findings: string[] = [];
 	const compare = (label: string, was: string[], now: string[]) => {
@@ -78,6 +78,8 @@ export function preservationFindings(before: readonly string[], after: readonly 
 	}
 	const patches = (doc: string) => [...doc.matchAll(PATCH_RE)].map((match) => match[0]);
 	compare("patch blocks", before.flatMap(patches), after.flatMap(patches));
+	const prose = (doc: string) => doc.replace(PATCH_RE, "").split("\n").filter((line) => line.trim() && !/^(\||# Ledger rows:|<!-- \/?(manifest|patch):)/.test(line));
+	compare("prose lines", before.flatMap(prose), after.flatMap(prose));
 	return findings;
 }
 

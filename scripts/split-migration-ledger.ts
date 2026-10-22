@@ -104,7 +104,8 @@ function main(): void {
 		const file = `${DIR}/${key}.md`;
 		const old = existsSync(file) ? readFileSync(file, "utf8") : "";
 		const parts = [`# Ledger rows: ${key}\n`];
-		let tail = [...patches(old).values()];
+		// Prose and patches already in the slice file stay where they are; only tables are rebuilt.
+		const rest = old.replace(/^# Ledger rows:[^\n]*\n/, "").replace(/<!-- manifest:[\w-]+ -->\n[\s\S]*?<!-- \/manifest:[\w-]+ -->\n/g, "").replace(/^\n+/, "");
 		for (const name of NAMES) {
 			const before = table(old, name);
 			const rows = [...before.rows, ...(perSlice.get(name) ?? [])];
@@ -112,12 +113,16 @@ function main(): void {
 			const header = before.header.length ? before.header : table(mono, name).header;
 			parts.push(`<!-- manifest:${name} -->\n${[...header, ...rows].join("\n")}\n<!-- /manifest:${name} -->\n`);
 		}
-		tail = [...tail, ...(movedPatches.get(key) ?? []).map((id) => allPatches.get(id) as string)];
+		if (rest) parts.push(rest.replace(/\n*$/, "\n"));
+		const tail = (movedPatches.get(key) ?? []).map((id) => allPatches.get(id) as string);
 		writeFileSync(file, [...parts, ...tail].join("\n"));
 		console.log(`${file}: ${[...perSlice].map(([name, rows]) => `${name} ${rows.length}`).join(", ")}`);
 	}
-	out = moveProse(out, `${DIR}/s02.md`, /S02 controls run with [\s\S]*?S02 worker artifact directory\.\n\n?/);
-	out = movePatches(out, `${DIR}/s02.md`, ["NC-S02-key", "NC-S02-history", "NC-S02-prune"]);
+	if (slices.has("b02")) out = moveControls(out, `${DIR}/b02.md`);
+	if (slices.has("b05") || slices.has("s02")) {
+		out = moveProse(out, `${DIR}/s02.md`, /S02 controls run with [\s\S]*?S02 worker artifact directory\.\n\n?/);
+		out = movePatches(out, `${DIR}/s02.md`, ["NC-S02-key", "NC-S02-history", "NC-S02-prune"]);
+	}
 	writeFileSync(MONOLITH, out);
 	writeFileSync(ALLOWLIST_FILE, `${JSON.stringify(allowlist, null, "\t")}\n`);
 }
@@ -145,6 +150,31 @@ function movePatches(text: string, file: string, ids: string[]): string {
 		out = out.slice(0, out[at - 1] === "\n" && out[at - 2] === "\n" ? at - 1 : at) + out.slice(at + block.length);
 	}
 	return out;
+}
+
+const CONTROL_RUN = /^NC-(?:0[4-9]|1\d|2[0-3])\b[\s\S]*?(?=^NC-(?!(?:0[4-9]|1\d|2[0-3])\b)\d\d\b)/m;
+
+/** Moves NC-04..NC-23's intro prose and failure logs beside their patch blocks in b02.md; no-op when absent. */
+function moveControls(text: string, file: string): string {
+	const run = CONTROL_RUN.exec(text);
+	if (!run || !existsSync(file)) return text;
+	const units = new Map<string, string[]>();
+	for (const unit of run[0].split(/(?<=\n\n)(?=NC-\d\d)/)) {
+		const key = /^NC-(\d\d)/.exec(unit)?.[1] as string;
+		units.set(key, [...(units.get(key) ?? []), unit]);
+	}
+	let slice = readFileSync(file, "utf8");
+	for (const [key, group] of units) {
+		const id = new RegExp(`<!-- patch:(NC-${key}-[\\w-]+) -->`).exec(slice)?.[1];
+		const block = id ? patches(slice).get(id) : undefined;
+		if (!block) throw new Error(`${file} has no patch block for NC-${key}`);
+		const split = group.map((unit) => { const at = unit.search(/^```$/m); return at < 0 ? [unit, ""] : [unit.slice(0, at), unit.slice(at)]; });
+		const log = split.map(([, tail]) => tail).join("").replace(/\n+$/, "\n");
+		const next = `${split.map(([head]) => head).join("")}${block}${log ? `\n${log}` : ""}`;
+		slice = slice.replace(block, () => next);
+	}
+	writeFileSync(file, slice);
+	return text.replace(run[0], () => "");
 }
 
 const PATCH_SPLIT = /(<!-- patch:[\w-]+ -->\n```diff\n[\s\S]*?\n```\n(?:<!-- \/patch:[\w-]+ -->\n)?)/;
