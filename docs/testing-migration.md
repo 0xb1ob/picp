@@ -71,7 +71,7 @@ ask-0088e0332d00, 2026-10-21.
 | S05 (cp-e2e-slice-s05-mzpm) | behavior 05; declarations 41–55 and final retirement of `tests/diff-review.test.ts`. [S05 accounting and controls](testing-migration-s05-declarations.md): 15 mapped; whole file 53 mapped, 2 retained declarations plus the split unknown-job guard. | 1 original file retired; retained replacement is not deletion credit | +1 retained file (convert-owned P3c-rest), 3 tests; +7 e2e scenarios | -55 original declarations, +3 retained, +7 e2e = -45 net declarations |
 | S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
 | S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
-| S15 (cp-e2e-slice-s15-764h) | behavior 05; whole-file review-context, review-merge-window, review-runs and review-tool; [declaration accounting](testing-migration-s15.md); all 38 closed: 32 mapped, 6 retained (15.8%); 2 files deleted and 2 replaced by retained subsets | 4 original paths retired | -2 test files | -32 source declarations, +13 consumer declarations; net -19 |
+| S15 (cp-e2e-slice-s15-764h) | behavior 05; whole-file review-context, review-merge-window, review-runs and review-tool; [declaration accounting](testing-migration-s15.md); 38 closed: 32 mapped, 6 retained (15.8%); 2 whole files deleted, 2 moved to retained subsets | 2 deleted; 2 moved-retained (no deletion credit) | 378 → 376 (on merged base); slice sources 4 → 2 | 4,204 → 4,185; slice 38 → 6 retained + 13 added consumer declarations |
 | S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting and executed controls](testing-migration-s14.md): 30 mapped, 3 retained verbatim with unreachable-input evidence, 0 pending | 4 original paths retired (3 mixed moved/split) | +3 retained files | +6 e2e declarations |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
 | S10 (cp-e2e-slice-s10-4dzb) | behavior 05; integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92); [range ledger and executed patch controls](testing-migration-s10.md); S09 carry-ins reconciled | 0; original unit file stays whole | unchanged | +6 e2e declarations |
@@ -1551,6 +1551,7 @@ diff --git a/src/pr-bind.ts b/src/pr-bind.ts
 @@ -136,1 +136,0 @@
 -		await run(["update-ref", salvaged, local.stdout.trim()], `keeping the diverged local ${head} at ${salvaged}`);
 ```
+<!-- /patch:S14-NC5 -->
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
@@ -1649,6 +1650,36 @@ diff --git a/src/pr-bind.ts b/src/pr-bind.ts
 | S15-W01 | `tests/review-merge-window.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-W | S15-W01 | 76fe8e4aee8fad87cbd5a6f9f100ede181f1bbbd6aab1beced777a94cdf5ca00 | fresh pass advances rather than waiting for its window | pass |
 | S15-T05 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-P | S15-T05 | 96f894ad8f6d5e6615375c7a4900dfa1155c973c18905dfba652195611ffe5c0 | missing expected rejection for a worker profile containing cp_review | pass |
 | S15-R16 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-D | S15-R16 | 04123a105db6ec2a9770f04e6a604696e9c3da3be64fa41b36525bd46ed211dc | withheld copies preserve resend eligibility rejects: only two actual attempts, never a third withheld copy | pass |
+| S15-C01 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C01 | f52327695217aaa30fafb6aee0476b80323ecd0fec927e954bae69d0dae11471 | deleted fork state undefined instead of included | pass |
+| S15-C02 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C02 | 99dbf09f3fcdf5fe08a0383e092ede0d4d92dde5e1a4345d8c4c61fb77108192 | unique task state undefined instead of included | pass |
+| S15-C03 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C03 | f0b3ff5963d1df369bd79125ca8ee7090f6cea6d45706c8f8d8c1bf15b4f7c4d | forbidden object reads in git audit | pass |
+| S15-C04 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C04 | c09a354a2839af9c97afa80ffd5cb4be24392d1e3c5ddb26c34c563e694476c7 | big.json included instead of omitted-budget | pass |
+| S15-C05 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-F | S15-C05 | f27f6ab1597b3b24b1c66a390ab85e9ac814d2ffea3d37f341e5ee65a9d9ab17 | unreadable fault entry absent | pass |
+| S15-C06 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C06 | 02062e2e70d8d2859d8dc8c07d0f262e3b1e7d254f86ce813c854bf6deabc9d4 | img.bin included instead of binary | pass |
+| S15-C07 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C07 | c2f7c332edd61bcd26a1346cd4d351adcfffe6a617f478d2f167bb0b1723609d | src/run.py sha256 absent | pass |
+| S15-C08 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C08 | 5d3594d2302a95f53a0086c871cc0fa5232e55729d573ca45d893b8efb2d89cf | consumer array exceeds five | pass |
+| S15-C09 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C09 | efdc68fd7e5d2bdc56283b598d2aa9b15a3cbc27d96e9197419a334f7c2da728 | brief lacks confirmed-absence explanation | pass |
+| S15-W02 | `tests/review-merge-window.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-W | S15-W02 | 9da9ff314d8357cb81cd17f232f7ccc8b0bc2a2a5783b19b7a275bba22e92d14 | mismatched equivalence arms review_resume_at | pass |
+| S15-R01 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-A | S15-R01 | 899c6086f4bd3f39577c6c75956ee9a6cfff610be4aec3300dbb562948f8d4d2 | initial handed_back true | pass |
+| S15-R02 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-A | S15-R02 | d9dfbb7f767ef596ff5b66865e1cfc92888f6052f8d15d77c82852f368a2f5cf | one wake before handback | pass |
+| S15-R03 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-A | S15-R03 | 714bc20b471e994fda3791c4e197596c9b8945aa05edd129e2081f1485aa2b79 | zero wakes after handback | pass |
+| S15-R04 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-X | S15-R04 | d22b74a9d41e404fcc65d77b1210b159fd983565156ea7e8f019b7bb7d31d72a | pending.json survives transport failure | pass |
+| S15-R05 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-O | S15-R05 | 1d4c2b0885909c14992e3d704dc6f1d6a44878c2b37cb616e72d201906a10c7d | untold legacy attempt wakes | pass |
+| S15-R06 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-O | S15-R06 | 3ff2a82d67c87ee6ddc6844593f23a2730545e77cedff631f73c8bc5ac7221c1 | healthy later job absent | pass |
+| S15-R07 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-O | S15-R07 | ba3fbd8ae793eadba1e99c9a538e0791e2808b676eabbabd24eecc36549af7ee | malformed marker rejects sweep | pass |
+| S15-R08 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-S | S15-R08 | e3783e5959745f709d3afaaded56e416c5f09a3ce7b913e4e1091b273113a8a6 | partial pass overwritten | pass |
+| S15-R09 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-S | S15-R09 | 89942e2ab53cbb3a965f2ae9047b1ca18e6055b1dcad4f9fc60b5bb7e3b331fe | fallback second write absent | pass |
+| S15-R10 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-S | S15-R10 | 6d7e1ea926cbc94b248d7f434c0beeacb82657e7ba01571c093a0404859f37c2 | notice failure rejects settlement | pass |
+| S15-R11 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-A | S15-R11 | 85332e44a50011652c5976890d38b3201adcead115b653f5d047433404e8f2aa | quality collides with review slot | pass |
+| S15-R15 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-D | S15-R15 | 16c3e2fe2a7bb7d23276199c851708cf6ce668c9f358cbdd0d37c4dc2f54689f | arrival confirms twice | pass |
+| S15-R17 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-D | S15-R17 | 48c15985255254ac0c74a54d2f563afbdc6b76f6b60ac24c2245bb558ed537d1 | suppression expires before production window | pass |
+| S15-Q01 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-Q | S15-Q01 | 94227b5928c6bf246ed9cb60385e74f1365dbf8e3fc83047cdffcd3b473ed626 | undefined quality pass instead of operational failure | pass |
+| S15-B01 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-B | S15-B01 | 2d5f38c287afebf30c45a08f2b9e0d5b758ab485acef2e2428211ebcf42da738 | zero wakes after handback bound | pass |
+| S15-T00 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-T | S15-T00 | 8c54f9510b953f4bb97c19d2aa056d8c6e7a137dcb751908ed187f9e2a794ca9 | refusal names cp_pipeline | pass |
+| S15-T01 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-T | S15-T01 | 3ce3adefc11135ef1816683ab0aa39d06ad12e3010295a1131e2268240ed3f93 | RPC verdict invalid | pass |
+| S15-T02 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-T | S15-T02 | f4381def5a721bfe49c39912c4fb880b973fafd678a509bdf733f29074325f08 | medium reason absent | pass |
+| S15-T03 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-T | S15-T03 | 42d921a45441fe1134ecbc41d03d5044cbde10401e5cdd3ac5ed18159efaeb48 | diff path leaked | pass |
+| S15-T04 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-T | S15-T04 | dc4a2875dac6dc9c910a6492171a14e268f98d298586a1df3275ffe3ac9861df | policy result fabricates model | pass |
 | S14-NC5 | `tests/pr-bind.test.ts` | 580289b5c0f709bdc9ae28a50bf55dd12c38d04a | 05-S14-bind | S14-NC5 | 9528dbecb15617a52ca1f3a3a8469bcbdf44786705fff13c9f076e8ca262188e | diverged: salvage object id actual empty, expected preserved local commit | pass |
 | S14-NC11 | `tests/pr-resolve.test.ts` | 580289b5c0f709bdc9ae28a50bf55dd12c38d04a | 05-S14-bind | S14-NC11 | 9c6e119c7d7f1806e2ad1e6ce98caa7ba9dcea6385d189c95a8b203056263d8b | wrong-url/moved-report: correction reason empty instead of expected refusal, real reports wrongly held | pass |
 | S14-NC13 | `tests/review-approval.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-S14-approval | S14-NC13 | 0f326239caf9365c6450c310b5f5e6aa5f31e9ef6daea45ad71a8b92070027d1 | edited artifact checkpoint actual approved instead of pending | pass |
@@ -1666,6 +1697,329 @@ index 2dcc135..008c3bd 100644
 ```
 <!-- /manifest:regressions -->
 
+<!-- patch:S15-C01 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -153 +153 @@
+-	for (const side of ["head", "fork"] as const) for (const path of changed) add(path, side, "changed");
++	for (const side of ["head"] as const) for (const path of changed) add(path, side, "changed");
+```
+<!-- /patch:S15-C01 -->
+<!-- patch:S15-C02 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -154 +154 @@
+-	for (const path of named) add(path, "head", "task-named");
++	for (const path of [] as string[]) add(path, "head", "task-named");
+```
+<!-- /patch:S15-C02 -->
+<!-- patch:S15-C03 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -26 +26 @@
+-const TASK_PATH = /(?<![\w./~-])(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z0-9]{1,8}\b/g;
++const TASK_PATH = /(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z0-9]{1,8}\b/g;
+```
+<!-- /patch:S15-C03 -->
+<!-- patch:S15-C04 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -172 +172 @@
+-		if (bytes > result.budget_bytes - result.used_bytes) {
++		if (false) {
+```
+<!-- /patch:S15-C04 -->
+<!-- patch:S15-C05 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -178 +178 @@
+-			result.entries.push({ ...candidate, state: "unreadable", error: blob.error });
++			result.entries.push({ ...candidate, state: "absent" });
+```
+<!-- /patch:S15-C05 -->
+<!-- patch:S15-C06 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -181 +181 @@
+-		if (blob.out.includes("\0")) {
++		if (false) {
+```
+<!-- /patch:S15-C06 -->
+<!-- patch:S15-C07 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -187 +187 @@
+-		result.entries.push({ ...candidate, state: "included", bytes, sha256 });
++		result.entries.push({ ...candidate, state: "included", bytes });
+```
+<!-- /patch:S15-C07 -->
+<!-- patch:S15-C08 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -165 +165 @@
+-		for (const user of users.slice(0, MAX_CONSUMERS)) add(user, "head", "consumer");
++		for (const user of users) add(user, "head", "consumer");
+```
+<!-- /patch:S15-C08 -->
+<!-- patch:S15-C09 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -239 +239 @@
+-		"`absent` means git confirmed the path does not exist at that sha; `omitted-budget`/`unreadable`/`unresolved` mean unknown — never treat them as absent."
++		"All missing context is absent."
+```
+<!-- /patch:S15-C09 -->
+<!-- patch:S15-W02 -->
+```diff
+--- a/src/review-merge-window.ts
++++ b/src/review-merge-window.ts
+@@ -14 +14 @@
+-	if (!pass || !shaMatches(pass.head_sha, head)) return undefined;
++	if (!pass) return undefined;
+```
+<!-- /patch:S15-W02 -->
+<!-- patch:S15-R01 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -331,3 +331,3 @@
+ 			deadline: attempt.deadline,
+-			handed_back: false,
++			handed_back: true,
+ 			...(attempt.subject ? { subject: attempt.subject } : {}),
+```
+<!-- /patch:S15-R01 -->
+<!-- patch:S15-R02 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -420,3 +420,2 @@
+ 		// — but bounded, so a caller that never hands back cannot swallow it.
+-		await this.#awaitHandback(handedBack);
+ 		// cp-runtime-deferred-recheck: everything that must be true *before* the
+```
+<!-- /patch:S15-R02 -->
+<!-- patch:S15-R03 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -425,3 +425,2 @@
+ 		await this.#runHook("beforeWakeup", wakeup);
+-		this.#send(wakeup);
+ 		this.#slots.delete(key);
+```
+<!-- /patch:S15-R03 -->
+<!-- patch:S15-R04 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -406,3 +406,2 @@
+ 			// in which case the next start/advance finds no decision and retries).
+-			this.#clear(pending);
+ 		}
+```
+<!-- /patch:S15-R04 -->
+<!-- patch:S15-R05 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -650,3 +650,3 @@
+ 				report.finished.push(pending);
+-				if (wakeup && pending.handed_back) this.#send(wakeup);
++				if (wakeup) this.#send(wakeup);
+ 			}
+```
+<!-- /patch:S15-R05 -->
+<!-- patch:S15-R06 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -639,3 +639,3 @@
+ 					report.skipped.push({ pending, reason });
+-					continue;
++					return report;
+ 				}
+```
+<!-- /patch:S15-R06 -->
+<!-- patch:S15-R07 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -192,3 +192,3 @@
+ 	} catch {
+-		return undefined;
++		throw new Error("S15 malformed pending JSON stopped the sweep");
+ 	}
+```
+<!-- /patch:S15-R07 -->
+<!-- patch:S15-R08 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -386,3 +386,3 @@
+ 				});
+-				if (decisionExists(this.#options.home, pending)) {
++				if (false) {
+ 					// A partial finish: the decision is on disk, something after it threw.
+```
+<!-- /patch:S15-R08 -->
+<!-- patch:S15-R09 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -397,3 +397,3 @@
+ 					try {
+-						wakeup = await attempt.finish({ operational: reason } as unknown as T);
++						wakeup = undefined;
+ 						if (!wakeup) finishFailure = `${reason}; the operational fallback produced no wake-up`;
+```
+<!-- /patch:S15-R09 -->
+<!-- patch:S15-R10 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -478,3 +478,3 @@
+ 		} catch {
+-			// Reporting a failure must not become one.
++			throw new Error("S15 notice transport failure escaped the review registry");
+ 		}
+```
+<!-- /patch:S15-R10 -->
+<!-- patch:S15-R11 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -313,3 +313,3 @@
+ 	start<T>(attempt: ReviewAttempt<T>): ReviewWait {
+-		const existing = this.pending(attempt.jobId, attempt.surface);
++		const existing = this.pending(attempt.jobId, "review");
+ 		if (existing) {
+```
+<!-- /patch:S15-R11 -->
+<!-- patch:S15-R15 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -544,3 +544,3 @@
+ 		for (const key of keys) {
+-			if (this.#inFlight.delete(key)) fresh.push(key);
++			if (this.#inFlight.has(key)) fresh.push(key);
+ 		}
+```
+<!-- /patch:S15-R15 -->
+<!-- patch:S15-R17 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -567,3 +567,3 @@
+ 		for (const [key, entry] of this.#inFlight) {
+-			if (entry.resent || now.getTime() - entry.firstSentAt >= VERDICT_SUPPRESSED_RETRY_MAX_SECONDS * 1000) {
++			if (entry.resent || now.getTime() - entry.firstSentAt >= 0) {
+ 				this.#inFlight.delete(key);
+```
+<!-- /patch:S15-R17 -->
+<!-- patch:S15-Q01 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -371,3 +371,3 @@
+ 				// carry `operational` — SAFETY: that is the cast's invariant, the seam's one concession.
+-				outcome = { operational: `reviewer wait failed: ${(error as Error).message}` } as unknown as T;
++				outcome = {} as T;
+ 			}
+```
+<!-- /patch:S15-Q01 -->
+<!-- patch:S15-B01 -->
+```diff
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -114 +114 @@
+-export const HANDBACK_MAX_WAIT_MS = 60_000;
++export const HANDBACK_MAX_WAIT_MS = 120_000;
+```
+<!-- /patch:S15-B01 -->
+<!-- patch:S15-T00 -->
+```diff
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -499,3 +499,3 @@
+ 				`no dispatch record for ${jobId} — cannot review. A diff review reads the job's project, branch and kind ` +
+-					`from its fleet record; dispatch the job first (cp_dispatch), then review the branch it pushed.`,
++					`from its fleet record; dispatch the job first (cp_pipeline), then review the branch it pushed.`,
+ 			);
+```
+<!-- /patch:S15-T00 -->
+<!-- patch:S15-T01 -->
+```diff
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -457,3 +457,3 @@
+ 	const details: Record<string, unknown> = {
+-		verdict,
++		verdict: {},
+ 		next: result.next,
+```
+<!-- /patch:S15-T01 -->
+<!-- patch:S15-T02 -->
+```diff
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -477,3 +477,3 @@
+ 	};
+-	return { content: [{ type: "text", text: formatDiffReview(result) }], details };
++	return { content: [{ type: "text", text: "review complete" }], details };
+ }
+```
+<!-- /patch:S15-T02 -->
+<!-- patch:S15-T03 -->
+```diff
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -459,2 +459,3 @@
+ 		next: result.next,
++		diff_path: result.diff?.path,
+ 		/** `state/runs/<job-id>/review-<n>.json` — the decision, never the diff. */
+```
+<!-- /patch:S15-T03 -->
+<!-- patch:S15-T04 -->
+```diff
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -462,3 +462,3 @@
+ 		review_file: result.path,
+-		...(result.model ? { model: result.model } : {}),
++		...(result.model ? { model: result.model } : { model: "fabricated" }),
+ 		...(result.diff
+```
+<!-- /patch:S15-T04 -->
 <!-- patch:S15-T05 -->
 ```diff
 diff --git a/src/contracts/workers.ts b/src/contracts/workers.ts
@@ -1676,6 +2030,7 @@ diff --git a/src/contracts/workers.ts b/src/contracts/workers.ts
 -	"cp_review",
  	"cp_artifact",
 ```
+<!-- /patch:S15-T05 -->
 
 <!-- patch:S15-R16 -->
 ```diff
@@ -1688,6 +2043,7 @@ diff --git a/src/review-runs.ts b/src/review-runs.ts
 +			resent: resend || existing?.resent === true,
  		});
 ```
+<!-- /patch:S15-R16 -->
 
 <!-- patch:S15-W01 -->
 ```diff
@@ -1697,6 +2053,7 @@ diff --git a/src/review-runs.ts b/src/review-runs.ts
 -	const deadline = Date.parse(pass.decided_at) + REVIEW_MERGE_WINDOW_MS;
 +	const deadline = Date.parse(pass.decided_at);
 ```
+<!-- /patch:S15-W01 -->
 
 <!-- patch:S15-C10 -->
 ```diff

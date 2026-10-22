@@ -8,6 +8,9 @@ S15 owns the whole of review-context, review-merge-window, review-runs and revie
 
 All 38 declarations are closed: 32 mapped and 6 retained (15.8%), with none pending and no whole declarations discarded as redundant. Context: 10 mapped, source file deleted. Window: 2 mapped, source file deleted. Tool: 4 mapped and 3 retained in `tests/review-tool-retained.test.ts`. Review-runs: 16 mapped and 3 retained in `tests/review-runs-retained.test.ts`. Thus two files are wholly deleted and two are replaced by retained subsets; four original paths retire, two retained paths are added, net two fewer test files. Thirteen consumer declarations replace the 32 removed source declarations, net 19 fewer declarations.
 
+The baseline inventory requires `deleted` for a missing original path (`GONE` in `scripts/test-migration-check.ts`); it has no moved disposition. That mechanical path label gives no whole-file deletion credit for review-runs or review-tool. Their six assertion rows and two incoming replacement files are retained under P3c-rest. The ledger counts only context and merge-window as whole-file deletions. On the merged base, measured tree totals are 378 → 376 files and 4,204 → 4,185 declarations; the isolated S15 change is 4 → 2 source files and 38 → 6 retained declarations, plus 13 declarations in existing consumer files.
+
+All 34 executed controls now have canonical regression rows and inline patch blocks with matching SHA-256 values; S14-NC5 and every S15 block have closing markers. Execution evidence remains the individual failing assertions below, inherited from the first S15 run; this continuation does not claim to have rerun the mutations.
 All product entry points use real product code and mocked models. Temporary agent directories, git shims and invalid profile configuration live outside the checkout and are removed by test cleanup. Filesystem fault cases alter the OS rename boundary and restore it in `finally`.
 
 ## Window equivalence
