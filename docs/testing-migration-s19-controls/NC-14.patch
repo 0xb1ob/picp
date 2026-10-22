@@ -1,0 +1,7 @@
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..53e294e 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -51 +51 @@ export class SendFirstGate<Wake> {
+-		if (this.#held.length === 0) this.#since = this.#now();
++		this.#since = this.#now();

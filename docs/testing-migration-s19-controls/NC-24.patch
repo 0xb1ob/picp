@@ -1,0 +1,13 @@
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..2010bfd 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -196,7 +196,7 @@ export async function recheckDeferredBounded(
+ 		// Exactly one continuation, attached exactly once, on a promise that cannot
+ 		// reject: a late result is either announced or dropped, never thrown.
+ 		void attempt.then((late) => {
+-			if ("reason" in late && late.reason) return;
++			if ("reason" in late && late.reason) { report(options.onFailure, late.reason); return; }
+ 			if (late.raised.length === 0) return;
+ 			try {
+ 				options.onLate?.(late.raised);

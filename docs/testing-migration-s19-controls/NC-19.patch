@@ -1,0 +1,13 @@
+diff --git a/extensions/command-post/wakeup-surfaces.ts b/extensions/command-post/wakeup-surfaces.ts
+index 7fb97bd..aedc7ba 100644
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -614,7 +614,7 @@ export function createWakeupSurfaces(
+ 				// same observation rather than by a tool call the parent might not make.
+ 				// Bounded (`recheckDeferredBounded`), so a slow or wedged re-gate delays
+ 				// the notice and the wake-up below by at most one bound, never forever.
+-				await recheckDeferredRows({ kind: "ci" });
++				void recheckDeferredRows({ kind: "ci" });
+ 				const text = formatCiNotice(observations, projectOf());
+ 				const ruled = await wakeRules.ciGreen(observations);
+ 				operatorNotify(s.live, ruled.suppress ? ruled.relay : text, "info");

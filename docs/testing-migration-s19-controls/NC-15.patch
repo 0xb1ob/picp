@@ -1,0 +1,7 @@
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..cf93fd7 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -60 +60 @@ export class SendFirstGate<Wake> {
+-		const released = this.#held;
++		const released = this.#held.reverse();

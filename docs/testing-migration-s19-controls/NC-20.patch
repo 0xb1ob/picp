@@ -1,0 +1,13 @@
+diff --git a/src/awaiting.ts b/src/awaiting.ts
+index 1e48c0d..f81fe76 100644
+--- a/src/awaiting.ts
++++ b/src/awaiting.ts
+@@ -690,7 +690,7 @@ export class AwaitingStore {
+ 				// Only a row this review actually gated, and only one still deferred: an
+ 				// answered row, a withdrawn row and an authorization-derived projection
+ 				// (which has no row here at all) are never touched by this pass.
+-				if (!gate || item.state !== "deferred") continue;
++				if (!gate) continue;
+ 				// cp-to39: the job is gone. Neither raise (an unanswerable ask) nor drop
+ 				// (a lost question): keep the row deferred with a reason that names the
+ 				// job, so `list("deferred")` still hands it to the renderer and the

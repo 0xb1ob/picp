@@ -3,24 +3,12 @@
  * with no TUI; a mid-turn wake-up is queued, never dropped.
  */
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { AwaitingStore } from "../../src/awaiting.ts";
-import {
-	DEFAULT_ORIGIN,
-	DiffVerdictSchema,
-	EMPTY_USAGE,
-	isoTimestamp,
-	LAYOUT,
-	paths,
-	SCHEMA_VERSION,
-	validate,
-	validatePendingReview,
-	type DiffVerdict,
-	type FleetRecord,
-} from "../../src/contracts.ts";
+import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import { CiWatchStore } from "../../src/ci-watch.ts";
 import { formatContinuationNotice } from "../../src/held-continuation.ts";
 import { listPendingReviews } from "../../src/review-runs.ts";
@@ -29,14 +17,11 @@ import { controlJournalFile, readControlRecord } from "../../src/viewer/control-
 import { readPendingSends } from "../../src/viewer/control-pending.ts";
 import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
 import { FleetStore } from "../../src/fleet.ts";
-import { createMergeAskProbe } from "../../src/merge-ask.ts";
-import { ProjectRegistry } from "../../src/projects.ts";
 import {
 	COMMAND_POST_EXTENSION,
 	CP_BRIDGE_EXTENSION,
 	createAgentDir,
 	createScratchHome,
-	createScratchRepo,
 	MockProvider,
 	readRunEvents,
 	REPO_ROOT,
@@ -45,183 +30,22 @@ import {
 	waitFor,
 } from "../harness/index.ts";
 
-const JOB = "cp-held";
-const PR = "https://github.com/example/demo/pull/58";
-
-function writeReviewPass(home: string, headSha: string): void {
-	const verdict = {
-		schema_version: SCHEMA_VERSION,
-		job_id: JOB,
-		attempt: 1,
-		verdict: "pass",
-		cause: null,
-		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },
-		reasons: ["the diff does what the brief asked"],
-		decided_at: "2026-09-05T10:30:21Z",
-		head_sha: headSha,
-		diff_stat: { files: 1, truncated: false },
-	};
-	const checked = validate<DiffVerdict>(DiffVerdictSchema, verdict);
-	assert.ok(checked.ok, checked.ok ? "" : checked.errors.join("; "));
-	const file = join(home, paths.reviewFile(JOB, 1));
-	mkdirSync(dirname(file), { recursive: true });
-	writeFileSync(file, `${JSON.stringify(verdict)}\n`);
-}
-
-/** `prView` answers `gh pr view` (open, clean) so the continuation reaches its review step; every call is logged. */
-function writeFakeGh(bin: string, headFile: string, stateFile: string, logFile: string, prView: boolean): void {
-	mkdirSync(bin, { recursive: true });
-	const gh = join(bin, "gh");
-	writeFileSync(
-		gh,
-		`#!/usr/bin/env node
-const { appendFileSync, readFileSync } = require("fs");
-const head = readFileSync(${JSON.stringify(headFile)}, "utf8").trim();
-const args = process.argv.slice(2);
-appendFileSync(${JSON.stringify(logFile)}, args.join(" ") + "\\n");
-if (args[0] === "api" && (args[1] || "").includes("/actions/runs?head_sha=")) {
-  const state = readFileSync(${JSON.stringify(stateFile)}, "utf8").trim();
-  const run = state === "green"
-    ? { id: 7, run_attempt: 1, conclusion: "success", status: "completed", head_sha: head, name: "ci" }
-    : { id: 7, run_attempt: 1, conclusion: null, status: "in_progress", head_sha: head, name: "ci" };
-  process.stdout.write(JSON.stringify({ total_count: args[1].includes(head) ? 1 : 0, workflow_runs: args[1].includes(head) ? [run] : [] }));
-  process.exit(0);
-}
-if (args[0] === "api" && (args[1] || "").includes("/actions/runs/7/attempts/1/jobs?")) {
-  process.stdout.write(JSON.stringify({ total_count: 0, jobs: [] }));
-  process.exit(0);
-}
-if (${prView} && args[0] === "pr" && args[1] === "view") {
-  process.stdout.write(JSON.stringify({
-    number: 58, url: ${JSON.stringify(PR)}, state: "OPEN", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN",
-    headRefName: "cp-held", headRefOid: head, baseRefName: "main", isDraft: false, autoMergeRequest: null,
-  }));
-  process.exit(0);
-}
-if (args[0] === "api") {
-  process.stdout.write(JSON.stringify({
-    number: 58,
-    html_url: ${JSON.stringify(PR)},
-    state: "open",
-    merged: false,
-    head: { sha: head, ref: "cp-held" },
-  }));
-  process.exit(0);
-}
-process.stderr.write("unexpected gh " + args.join(" ") + "\\n");
-process.exit(1);
-`,
-	);
-	chmodSync(gh, 0o755);
-}
-
-/** An in-flight attempt-1 review of `headSha` whose reviewer (this test process) is alive, so no sweep reaps it. */
-function writeReviewPending(home: string, headSha: string): void {
-	const pending = {
-		schema_version: SCHEMA_VERSION,
-		job_id: JOB,
-		surface: "review",
-		attempt: 1,
-		model: "mock/mock-model",
-		pid: process.pid,
-		started_at: isoTimestamp(),
-		deadline: isoTimestamp(new Date(Date.now() + 3_600_000)),
-		handed_back: true,
-		subject: { head_sha: headSha, branch: JOB, files: 1, truncated: false },
-	};
-	const checked = validatePendingReview(pending);
-	assert.ok(checked.ok, checked.ok ? "" : checked.errors.join("; "));
-	const file = join(home, paths.pendingReviewFile(JOB, "review", 1));
-	mkdirSync(dirname(file), { recursive: true });
-	writeFileSync(file, `${JSON.stringify(pending)}\n`);
-}
-
-async function seedHeldHome(options: { ciState: "green" | "in_progress"; review?: "pass" | "pending" }) {
-	const home = createScratchHome();
-	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n" } });
-	repo.git("checkout", "-b", "cp-held");
-	repo.write("held.txt", "held\n");
-	const headSha = repo.commitAll("held work");
-	repo.git("push", "--quiet", "-u", "origin", "cp-held");
-
-	const registry = new ProjectRegistry({ home: home.path });
-	await registry.register({ name: "demo", clone_url: repo.remote!, delivery: "pr" });
-	const clone = join(home.path, LAYOUT.projects, "demo");
-	execFileSync("git", ["clone", "--quiet", repo.remote!, clone]);
-
-	const fleet = new FleetStore({ home: home.path });
-	const record: FleetRecord = {
-		job_id: JOB,
-		project: "demo",
-		kind: "ship",
-		delivery: "pr",
-		origin: DEFAULT_ORIGIN,
-		phase: "held",
-		worker: {
-			pid: process.pid,
-			session_id: "sess-held",
-			session_file: "/nonexistent/sess-held.jsonl",
-			profile: "implementer",
-			role: "implementer",
-			model: "mock/mock-model",
-			started_at: isoTimestamp(),
-		},
-		worktree: "/tmp/worktrees/demo-held",
-		branch: JOB,
-		dispatched_at: isoTimestamp(),
-		reported_at: isoTimestamp(),
-		usage: EMPTY_USAGE,
-		receipts: [{ kind: "pr", status: "open", title: "PR for cp-held", url: PR }],
-	};
-	await fleet.add(record);
-	if (options.review === "pending") {
-		writeReviewPending(home.path, headSha);
-		// The seeded worker is an unreachable orphan to the child; its restart notice was already relayed.
-		const outbox = new DurableWakeupOutbox({ home: home.path });
-		outbox.enqueue({ id: `recovery:${JOB}`, kind: "recovery", job_id: JOB, content: "RESTART RECOVERY — relayed by the previous parent", keys: [JOB] });
-		outbox.confirmDelivered([`recovery:${JOB}`]);
-	} else writeReviewPass(home.path, headSha);
-
-	const store = new AwaitingStore({
-		home: home.path,
-		mergeAsk: createMergeAskProbe({
-			head: async () => ({ sha: headSha }),
-			runs: async () =>
-				options.ciState === "green"
-					? [{ status: "completed", conclusion: "success", headSha, workflowName: "ci" }]
-					: [{ status: "in_progress", conclusion: null, headSha, workflowName: "ci" }],
-			reviewedHeads: () => [headSha],
-		}),
-	});
-	const declared = await store.declareGated({
-		type: "approval",
-		decision: "Ship cp-held (PR 58), drop it, or open a follow-up?",
-		why: "the change is verified",
-		blocks: "cp-held delivery",
-		job_id: JOB,
-	});
-
-	const bin = join(home.path, "bin");
-	const stateFile = join(home.path, "gh-state");
-	const headFile = join(home.path, "gh-head");
-	const ghLog = join(home.path, "gh-calls.log");
-	writeFileSync(stateFile, `${options.ciState}\n`);
-	writeFileSync(headFile, `${headSha}\n`);
-	writeFileSync(ghLog, "");
-	writeFakeGh(bin, headFile, stateFile, ghLog, options.review === "pending");
-
-	return { home, repo, headSha, declared, bin, stateFile, headFile, ghLog };
-}
+import { JOB, PR, seedHeldHome, writeReviewPass } from "../harness/held-home.ts";
 
 test("/doctor under rpc names the mode and running timers", { timeout: 60_000 }, async (t) => {
 	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s19-doctor", [{ kind: "text", text: "Ready." }]);
+	const agent = createAgentDir({ provider });
 	const rpc = startRpc({
 		cwd: REPO_ROOT,
-		args: ["--no-session", "-e", COMMAND_POST_EXTENSION],
-		env: { CP_HOME: home.path },
+		args: ["--no-session", "--model", model, "-e", COMMAND_POST_EXTENSION],
+		env: { ...agent.env, CP_HOME: home.path },
 	});
 	t.after(async () => {
 		await rpc.close();
+		agent.cleanup();
+		await provider.stop();
 		home.cleanup();
 	});
 	rpc.send({ id: "doc", type: "prompt", message: "/doctor" });
@@ -660,3 +484,103 @@ test("rpc bridge: a queued message whose handoff is dropped twice ends failed, n
 	assert.equal(run.dropped(), 2);
 	assert.equal(run.consumed().length, 0);
 });
+
+
+for (const [mode, name] of [
+	["ready", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: ready"],
+	["revise", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: revise"],
+	["red", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: red"],
+	["running", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: running"],
+	["late", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: late"],
+	["late-failure", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: late-failure"],
+] as const) {
+test(name, { timeout: 120_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "in_progress", review: "none" });
+	const late = mode === "late" || mode === "late-failure";
+	if (late) for (const suffix of ["second", "third"]) await held.store.declareGated({ type: "approval",
+		decision: `Ship cp-held (PR 58), ${suffix}?`, subject: `s19-${suffix}`, why: "S19 bounded recheck", blocks: "delivery", job_id: JOB });
+	const provider = await MockProvider.start();
+	const reviewer = provider.addScript("s19-deferred-reviewer", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: {
+		job_id: JOB, verdict: mode === "revise" ? "revise" : "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },
+		reasons: mode === "revise" ? ["[severity: high] [confidence: high] missing coverage"] : ["Reviewed the current diff"],
+		...(mode === "revise" ? { revisions: ["Add the missing coverage"] } : {}),
+	} }] }]);
+	const diskSnapshot = () => ({ queries: readFileSync(held.ghLog, "utf8").split("\n").filter((line) => line.includes("/actions/runs?head_sha=")).length,
+		awaiting: readFileSync(held.store.file, "utf8") });
+	const snapshots: Array<{ state?: string; request: string; queries: number; awaiting: string }> = [];
+	const capture = (request: { body: unknown }) => {
+		snapshots.push({ ...diskSnapshot(), state: new AwaitingStore({ home: held.home.path }).list("open")[0]?.state,
+			request: JSON.stringify((request.body as { messages: unknown[] }).messages.slice(-2)) });
+		return { action: "list" };
+	};
+	const model = provider.addScript("s19-deferred-parent", [
+		{ kind: "tool_calls", calls: [{ name: "cp_review", args: () => {
+			snapshots.push({ ...diskSnapshot(), state: new AwaitingStore({ home: held.home.path }).list("deferred")[0]?.state, request: "before review" });
+			return { job_id: JOB, model: reviewer };
+		} }] },
+		{ kind: "text", text: "Review started." },
+		{ kind: "tool_calls", calls: [{ name: "cp_awaiting", args: capture },
+			...(mode === "ready" ? [{ name: "cp_status_block", args: {} }] : [])] },
+		{ kind: "text", text: "The reviewed decision is ready." },
+	]);
+	const agent = createAgentDir({ provider });
+	const recovery = new DurableWakeupOutbox({ home: held.home.path });
+	recovery.enqueue({ id: `recovery:${JOB}`, kind: "recovery", job_id: JOB, content: "Previously delivered recovery", keys: [JOB] });
+	recovery.confirmDelivered([`recovery:${JOB}`]);
+	new IntegrationHolds(held.home.path).hold(JOB, "S19 isolates verdict delivery before integration");
+	writeReviewPass(held.home.path, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
+		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "3600" }, extensions: [COMMAND_POST_EXTENSION] });
+	const awaitingDir = dirname(new AwaitingStore({ home: held.home.path }).file);
+	t.after(async () => { chmodSync(awaitingDir, 0o700); await child.close(); agent.cleanup(); await provider.stop(); held.repo.cleanup(); held.home.cleanup(); });
+	await waitFor(() => new CiWatchStore({ home: held.home.path }).job(JOB)?.last_checked_at, (at) => !!at,
+		{ timeoutMs: 30_000, what: "initial running-CI catch-up completes" });
+	writeFileSync(held.stateFile, mode === "red" ? "red\n" : mode === "running" ? "in_progress\n" : late ? "green:12000\n" : "green\n");
+	await child.prompt("Review the held job and handle its verdict.");
+	if (mode === "late-failure") {
+		await waitFor(() => existsSync(join(held.home.path, paths.reviewFile(JOB, 2))), (written) => written,
+			{ timeoutMs: 30_000, what: "review verdict persists before refusing the later awaiting write" });
+		chmodSync(awaitingDir, 0o500);
+	}
+	await waitFor(() => snapshots.length, (count) => count === 2, { timeoutMs: 120_000, what: "actual reviewer verdict reaches parent model" });
+	assert.equal(snapshots[0]?.state, "deferred", "stale review must leave current green head deferred");
+	assert.equal(snapshots[1]?.state, mode === "ready" ? "open" : undefined,
+		`row state when actual verdict reaches parent: ${JSON.stringify(new AwaitingStore({ home: held.home.path }).read().items.map(({ state, deferred_reason }) => ({ state, deferred_reason })))}`);
+	assert.match(snapshots[1]?.request ?? "", new RegExp(`diff review attempt 2: ${mode === "revise" ? "revise" : "pass"}`));
+	if (mode === "revise") {
+		assert.equal(snapshots[1]!.queries, snapshots[0]!.queries, "a revise verdict must not read the CI gate");
+		assert.equal(snapshots[1]!.awaiting, snapshots[0]!.awaiting, "a revise verdict must leave awaiting bytes unchanged");
+	}
+	if (mode === "late") {
+		const readyNotices = () => child.records().filter((record) => record.type === "extension_ui_request" && String(record.message).includes("3 decisions are now ready"));
+		await waitFor(readyNotices, (records) => records.length === 1, { timeoutMs: 60_000, what: "late gate announces actual opened decisions" });
+		assert.equal(new AwaitingStore({ home: held.home.path }).list("open").length, 3);
+		const notice = String(readyNotices()[0]!.message);
+		assert.ok(notice.length <= 320 && !notice.includes("\n"), "late notice stays one bounded line");
+	}
+	assert.equal(new AwaitingStore({ home: held.home.path }).read().items.length, late ? 3 : 1, "recheck preserves decision identity");
+	await waitFor(() => provider.remaining("s19-deferred-parent"), (remaining) => remaining === 0, { timeoutMs: 90_000, what: "parent consumes the decision reply" });
+	if (mode === "late-failure") {
+		assert.equal(new AwaitingStore({ home: held.home.path }).list("deferred").length, 3, "failed late write opens nothing");
+		const failures = child.records().filter((record) => record.type === "extension_ui_request" && String(record.message).includes("deferred rows not re-gated"));
+		assert.equal(failures.length, 1, "late failure must not report a second warning");
+		assert.ok(!child.records().some((record) => String(record.message).includes("decisions are now ready")));
+		chmodSync(awaitingDir, 0o700);
+	}
+	if (mode === "revise" || mode === "red" || mode === "running") {
+		assert.equal(new AwaitingStore({ home: held.home.path }).list("deferred").length, 1);
+		assert.equal(child.records().filter((record) => record.type === "extension_ui_request" && String(record.message).includes("decision is now ready")).length, 0);
+	}
+	assert.equal(provider.remaining("s19-deferred-reviewer"), 0);
+	if (mode === "ready") {
+		await new Promise((done) => setTimeout(done, 250));
+		assert.equal(provider.requests("s19-deferred-parent").length, 4, "in-bound completion must not trigger a second late turn");
+		const notices = child.records().filter((record) => record.type === "extension_ui_request" && String(record.message).includes("decision is now ready"));
+		assert.equal(notices.length, 1, "one opening produces one operator notice");
+		const notice = String(notices[0]!.message);
+		assert.match(notice, /Ship cp-held \(PR 58\)/);
+		assert.match(notice, /cp_decide/);
+		assert.ok(notice.length <= 300 && !notice.includes("\n"));
+	}
+});
+}
