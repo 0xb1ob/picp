@@ -2,7 +2,7 @@
 
 Ownership: the remaining behavior-05 files are owned by P3c-rest and re-sliced by operator decision ask-c77a4f32b23b (Raise cap to ~$2,700 on Sol); slice list operator/scratch/e2e-migration-slices.md; rule v2 applies.
 
-S10 owns static declarations 81–120 of tests/integrate.test.ts. The original file stays whole. Declarations 121–144 and final retirement belong to the later range. No production edit is shipped. S10 adds six scenarios in tests/e2e/landing.test.ts and extends 05-S02-5, using real CommandPost integration/continuation/dispatch, mock-provider worker/report, scratch git and external gh/git faults. Temporary agent directories come from createAgentDir and are removed by fixture cleanup. The profile-validation fixture copies only product profiles/prompts and links source/extensions from this worktree into a fresh temporary package directory.
+S10 owns static declarations 81–120 of tests/integrate.test.ts. The original file stays whole. Declarations 121–144 and final retirement belong to the later range. No production edit is shipped. S10 adds six scenarios in tests/e2e/landing-merge.test.ts and extends 05-S02-5, using real CommandPost integration/continuation/dispatch, mock-provider worker/report, scratch git and external gh/git faults. Temporary agent directories come from createAgentDir and are removed by fixture cleanup. The profile-validation fixture copies only product profiles/prompts and links source/extensions from this worktree into a fresh temporary package directory.
 
 Current range counts after S10b: 39 mapped, 1 retained mixed declaration, 0 pending, 0 redundant-unreachable, 0 deleted files, +6 e2e declarations. Retained share: 2.5%. No integrate unit is moved or deleted.
 
