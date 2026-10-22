@@ -9,14 +9,19 @@
  * caller (extensions/command-post/wakeup-surfaces.ts) owns the transport.
  */
 import { isHeadlessParent } from "./parent-session.ts";
+import { knobMs } from "./timer-knobs.ts";
 import { effectiveContextTokens, lastValidAssistant, parentSettings } from "./parent-context.ts";
 
 /** No compaction start this long after an over-threshold settle: release (the bridge did not compact). */
 export const PARENT_COMPACT_START_MS = 15_000;
 /** The bridge's compact RPC timeout when no explicit `requestTimeoutMs` is set; successful compactions run close to 120 s. */
 export const PARENT_COMPACT_TIMEOUT_MS = 240_000;
-/** Longer than the bridge's 240 s compact RPC timeout. */
+/** Longer than the bridge's 240 s compact RPC timeout. Overridable per home with CP_PARENT_COMPACT_HOLD_SECONDS. */
 export const PARENT_COMPACT_HOLD_MS = 270_000;
+/** `CP_PARENT_COMPACT_HOLD_SECONDS` (default 270): the hold's cap expiry. */
+export function parentCompactHoldMs(env: NodeJS.ProcessEnv = process.env): number {
+	return knobMs("CP_PARENT_COMPACT_HOLD_SECONDS", PARENT_COMPACT_HOLD_MS, env);
+}
 export const PARENT_COMPACT_MAX_FAILURES = 3;
 
 export interface ContextReading {
@@ -155,7 +160,7 @@ export class ParentCompactHold {
 		this.#cancelStart = undefined;
 		this.#phase = "compacting";
 		this.#cancelCap?.();
-		this.#cancelCap = this.#timer(() => this.#release("cap_timeout", true), PARENT_COMPACT_HOLD_MS);
+		this.#cancelCap = this.#timer(() => this.#release("cap_timeout", true), parentCompactHoldMs());
 	}
 
 	/** `session_compact`, any reason. */

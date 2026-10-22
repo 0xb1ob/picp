@@ -1,0 +1,17 @@
+diff --git a/src/recovery-notice.ts b/src/recovery-notice.ts
+index 9ba8c60..298d34b 100644
+--- a/src/recovery-notice.ts
++++ b/src/recovery-notice.ts
+@@ -25,11 +25,5 @@ export function formatRecoveryNotice(candidates: readonly RecoveryCandidate[], p
+ 		lines.push(`  next: ${next.join(" or ") || "cp_teardown the listed jobs"}.`);
+ 		return lines.join("\n");
+ 	};
+-	let shown = candidates.length;
+-	let text = render(candidates);
+-	while (text.length > RECOVERY_NOTICE_MAX_CHARS && shown > 1) {
+-		shown = Math.max(1, Math.min(shown - 1, Math.floor(shown * (RECOVERY_NOTICE_MAX_CHARS / text.length))));
+-		text = render(candidates.slice(0, shown));
+-	}
+-	return text.slice(0, RECOVERY_NOTICE_MAX_CHARS);
++	return render(candidates);
+ }
