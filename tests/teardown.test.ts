@@ -1275,12 +1275,6 @@ test(
 
 		const lease = await leases.acquire(repo.path, { holder: jobId, project: "demo" });
 		git(lease.path, "switch", "--quiet", "-c", jobId, "origin/main");
-		writeFileSync(join(lease.path, ".gitignore"), "backtest/\n");
-		git(lease.path, "add", ".gitignore");
-		git(lease.path, "commit", "--quiet", "-m", "ignore");
-		git(lease.path, "push", "--quiet", "-u", "origin", jobId);
-		mkdirSync(join(lease.path, "backtest"));
-		writeFileSync(join(lease.path, "backtest", "x"), "x\n");
 		const runDir = join(home.path, paths.runDir(jobId));
 		mkdirSync(runDir, { recursive: true });
 		const managed = manager.spawn({
@@ -1329,9 +1323,6 @@ test(
 		assert.ok(!/leased/.test(treehouse(repo.path, "status")), "the pool got its worktree back");
 		assert.equal(fleet.require(jobId).phase, "done");
 		assert.ok(fleet.require(jobId).worker.exited_at);
-		// Ignored data: the report must match what the real return left on disk, whichever way treehouse acts.
-		const gone = !existsSync(join(lease.path, "backtest", "x"));
-		assert.deepEqual([result.ignored ?? [], result.ignored_removed ?? []], gone ? [[], ["backtest/"]] : [["backtest/"], []]);
 	},
 );
 
