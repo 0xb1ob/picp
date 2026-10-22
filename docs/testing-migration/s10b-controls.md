@@ -40,6 +40,8 @@ The status and jobless controls have canonical regression rows and reproducible 
 The 24 `NC-S02-*` patches are embedded in [S02](s02.md). Every control exited 1 at its selected consumer assertion.
 The first GitLab command used an obsolete selector and selected no case; it earned no evidence credit.
 The corrected `landing S02: unavailable gh` replay failed the GitLab query-set deepEqual assertion.
+Run this section with
+`npm run test:one -- --test-name-pattern='landing S02:' tests/e2e/landing-ci-watch.test.ts`.
 
 | Control suffix | Observed failed assertion |
 |---|---|
@@ -135,6 +137,7 @@ The headless in-flight case retains its separate file and selector.
 | S03b-retry | rearm a deadline after operational retry | operational retry never rearms its deadline |
 
 Inherited CI-repair controls also replayed with exit 1:
+`npm run test:one -- --test-name-pattern='landing: held CI repair' tests/e2e/landing.test.ts tests/e2e/landing-ci-watch.test.ts`.
 
 | Control | Mutation | Observed failed assertion |
 |---|---|---|
@@ -149,6 +152,7 @@ synchronous throwing-onLanded assertion.
 
 The five patches embedded in [B05](b05.md) replayed independently against
 `landing: CI watch persists`. Each exited 1; all mutations were restored.
+`npm run test:one -- --test-name-pattern='landing: CI watch persists' tests/e2e/landing-ci-watch.test.ts`.
 
 | Control | Observed failed assertion |
 |---|---|
