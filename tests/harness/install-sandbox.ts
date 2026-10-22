@@ -12,7 +12,6 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { classifyPi } from "../../src/pi-compat.ts";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
-import { TOOL_INSTALL } from "../../src/tool-manifest.ts";
 import { realpathSync as entryRealpath } from "node:fs";
 import { fileURLToPath as entryPath } from "node:url";
 
@@ -72,9 +71,7 @@ export async function buildImage(): Promise<number> {
 	// The context is only the Dockerfile and the lockfile pair, streamed as a tar: nothing is written on the host.
 	const context = spawnSync("tar", ["-c", "-C", ROOT, "--transform", "s|^tests/fixtures/install/||", "tests/fixtures/install/Dockerfile", "package.json", "package-lock.json"], { maxBuffer: 64 << 20 });
 	if (context.status !== 0) throw new Error(`tar of the build context failed: ${context.stderr}`);
-	const treehouse = TOOL_INSTALL.treehouse.linux;
-	if (treehouse.kind !== "release") throw new Error("treehouse is expected to be a pinned release step");
-	const args = ["build", "-q", "-t", IMAGE, "--build-arg", `PI_VERSION=${pi}`, "--build-arg", `TREEHOUSE_VERSION=${treehouse.version}`, "--build-arg", `LENS_PACKAGES=${PI_LENS_TOOLS.packages.join(" ")}`, "--build-arg", `WORKER_PACKAGES=${workerPackageSpecs().join(" ")}`, "-"];
+	const args = ["build", "-q", "-t", IMAGE, "--build-arg", `PI_VERSION=${pi}`, "--build-arg", `LENS_PACKAGES=${PI_LENS_TOOLS.packages.join(" ")}`, "--build-arg", `WORKER_PACKAGES=${workerPackageSpecs().join(" ")}`, "-"];
 	const built = spawnSync("docker", args, { input: context.stdout, encoding: "utf8", timeout: 1_800_000, maxBuffer: 64 << 20 });
 	if (built.status !== 0) throw new Error(`docker build failed (exit ${built.status}): ${tail(`${built.stdout}${built.stderr}${built.error?.message ?? ""}`, 40)}`);
 	return since(start);
