@@ -39,7 +39,7 @@ The retained source keeps every original assertion for declarations 3, 5 and 6; 
 
 ## Executed additional controls
 
-To reproduce a control, apply its patch with `git apply --unidiff-zero`, run the named scenario through `npm run test:one -- --test-name-pattern='<prefix>' tests/e2e/diff-review.test.ts`, then restore source. R15–R17 use `landing S15 retry:` in `tests/e2e/landing.test.ts`; W01 uses both `landing S15 order:` and `landing S15: durable review evidence`. Review 1 re-executed these four patches individually, restoring each with reverse application; `git apply --check --unidiff-zero` passed for all four.
+To reproduce a control, apply its patch with `git apply --unidiff-zero`, run the named scenario through `npm run test:one -- --test-name-pattern='<prefix>' tests/e2e/diff-review.test.ts`, then restore source. R15–R17 use `landing S15 retry:` in `tests/e2e/landing-*.test.ts`; W01 uses both `landing S15 order:` and `landing S15: durable review evidence`. Review 1 re-executed these four patches individually, restoring each with reverse application; `git apply --check --unidiff-zero` passed for all four.
 
 | Patch | Scenario prefix | SHA-256 | Observed failing assertion |
 |---|---|---|---|
@@ -72,7 +72,7 @@ An exploratory mutation omitting the required pending surface matched no slot an
 
 ## Review-runs assertion accounting
 
-Source blob: `09fb2d8fed9057ba48e9a762cba1448dfbf8601c`. All 19 original declarations passed before retirement. Current D uses a 1-second delivery retry and 32-second suppression lifetime with a 100-second test timeout; current L uses a 5-second merge window. After final controls were restored, D passed in 68,067 ms and L in 16,867 ms; restart used 20 seconds and passed in 9,062 ms; the twelve-variant matrix used 3 seconds and passed in 90,653 ms with a 119-second timeout. A = `S15: real reviewer attempts persist before waiting, reject duplicates and announce only after handback`; FS = `S15: real review decision writes recover once before persistence and preserve partial decisions`; O = `S15: orphan reconciliation consumes durable legacy markers and isolates a failed decision write`, all in `tests/e2e/diff-review.test.ts`. D = `landing S15 retry: real parent delivery confirms, retries withheld verdicts and expires permanent suppression`; L = `landing S15 order: a real verdict wakes the parent before its deadline continuation merges` in `tests/e2e/landing.test.ts`.
+Source blob: `09fb2d8fed9057ba48e9a762cba1448dfbf8601c`. All 19 original declarations passed before retirement. Current D uses a 1-second delivery retry and 32-second suppression lifetime with a 100-second test timeout; current L uses a 5-second merge window. After final controls were restored, D passed in 68,067 ms and L in 16,867 ms; restart used 20 seconds and passed in 9,062 ms; the twelve-variant matrix used 3 seconds and passed in 90,653 ms with a 119-second timeout. A = `S15: real reviewer attempts persist before waiting, reject duplicates and announce only after handback`; FS = `S15: real review decision writes recover once before persistence and preserve partial decisions`; O = `S15: orphan reconciliation consumes durable legacy markers and isolates a failed decision write`, all in `tests/e2e/diff-review.test.ts`. D = `landing S15 retry: real parent delivery confirms, retries withheld verdicts and expires permanent suppression`; L = `landing S15 order: a real verdict wakes the parent before its deadline continuation merges` in `tests/e2e/landing-review-window.test.ts`.
 
 | Original declaration | Disposition | Assertion equivalence and executed control |
 |---|---|---|
@@ -133,7 +133,7 @@ The final combined focused run passed all 16 runner cases with zero skips: retry
 
 (main session carry-in) "three real failures from this slice's own changes, not flakes. Repair all three:"
 
-- "tests/timeout-floor.test.ts:55 fails on tests/e2e/landing.test.ts:3326 (\"timeout option of 15 ms is under 5000 ms\"). Wait on the event, not a short clock."
+- "tests/timeout-floor.test.ts:55 fails on tests/e2e/landing-s09.test.ts:74 (\"timeout option of 15 ms is under 5000 ms\"). Wait on the event, not a short clock."
 - "tests/e2e/diff-review.test.ts:502: assertion falsy at :577."
 - "tests/e2e/diff-review.test.ts:612: the FIFO release `sh -c exec 3>\"$1\"; rm \"$1\"; printf release ...` failed on /tmp/cp-s15-slots-*/reviewer-read. This is an open/rm ordering race on the FIFO; make the release robust, not a blind retry. Put its scratch dir under the test's own temp root."
 

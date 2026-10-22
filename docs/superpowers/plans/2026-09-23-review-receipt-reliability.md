@@ -37,7 +37,7 @@ Migration note (S21): the wakeup-journal source referenced below is also retired
 | `src/diff-review.ts` | Strip gate-only output fields from diff decision. |
 | `tests/diff-review.test.ts` | End-to-end regression for `decision_summary`, persisted verdict, and wake-up. |
 | `src/review-runs.ts` | Convert finish failures to one persisted operational decision where safe. |
-| `tests/e2e/diff-review.test.ts` | Real finish-failure and partial-write recovery; delivery retries also run through a real parent in `tests/e2e/landing.test.ts` (S15). |
+| `tests/e2e/diff-review.test.ts` | Real finish-failure and partial-write recovery; delivery retries also run through a real parent in `tests/e2e/landing-*.test.ts` (S15). |
 | `src/command-post.ts`, `tests/wakeup-journal.test.ts` | Journal durable recovery notice for a finisher failure with no safe verdict wake-up. |
 | `docs/contracts.md` | Document finish-failure behavior after changing it. |
 

@@ -45,7 +45,7 @@ another declaration's unrelated failing assertion.
 
 ## Commands
 
-All commands use `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing.test.ts`.
+All commands use `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing-*.test.ts`.
 
 | Artifact stems | Pattern |
 |---|---|

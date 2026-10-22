@@ -321,9 +321,9 @@ A moved unit is `retained`, never removed coverage. Other behavior-05 files rema
 ### P3b review controls reproduced by P3c
 
 Each control was applied alone and restored immediately after its failing run. M1–M3 use
-`npm run test:one -- --test-name-pattern='cp_merged records only' tests/e2e/landing.test.ts`;
-M4–M6 use `npm run test:one -- --test-name-pattern='cp_merged reads a GitLab' tests/e2e/landing.test.ts`;
-L1 uses `npm run test:one -- --test-name-pattern='cp_teardown passes a deleted branch' tests/e2e/landing.test.ts`.
+`npm run test:one -- --test-name-pattern='cp_merged records only' tests/e2e/landing-forge-ci.test.ts`;
+M4–M6 use `npm run test:one -- --test-name-pattern='cp_merged reads a GitLab' tests/e2e/landing-forge-ci.test.ts`;
+L1 uses `npm run test:one -- --test-name-pattern='cp_teardown passes a deleted branch' tests/e2e/landing-forge-ci.test.ts`.
 Every run exited 1 with one failing case and no skips; failures below are observed output, not predictions.
 
 | Control | Observed failure |
@@ -381,7 +381,7 @@ L1 (`src/landing-proof.ts`):
 
 ### P3c CI-watch negative controls
 
-Each command uses `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing.test.ts`.
+Each command uses `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing-*.test.ts`.
 Only the stated semantic mutation was present during its failing run; it was restored immediately afterward.
 The fixed file passed all 13 cases without skips before these controls. No production mutation is committed.
 

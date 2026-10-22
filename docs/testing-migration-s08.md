@@ -53,7 +53,7 @@ All scenario IDs below resolve to exact names in `docs/testing-migration.md`; al
 
 ## Negative-control evidence
 
-Each mutation was applied alone, its named scenario exited 1 with the assertion below, and production source was restored. All nine new scenarios have a control; 05-13 also has fresh allowance and repair-context controls. The complete unmutated landing file passed 52 tests before the main merge. Replays use `node --import ./tests/harness/hermetic-env.ts --test --test-force-exit --test-name-pattern='<exact scenario name>' tests/e2e/landing.test.ts`.
+Each mutation was applied alone, its named scenario exited 1 with the assertion below, and production source was restored. All nine new scenarios have a control; 05-13 also has fresh allowance and repair-context controls. The complete unmutated landing file passed 52 tests before the main merge. Replays use `node --import ./tests/harness/hermetic-env.ts --test --test-force-exit --test-name-pattern='<exact scenario name>' tests/e2e/landing-*.test.ts`.
 
 | Scenario | Temporary production mutation | Observed failing assertion |
 |---|---|---|
@@ -108,7 +108,7 @@ S10 freshly re-executed all three rechecks on source base aea915131f8e521d2dc1ae
 | CI | In `src/integrate.ts`, replace `if (ci.ci !== "green")` with `if (false)`. | repository/ci: merge command count 1, expected 0 (`false/ci`). |
 | Permission | In `src/merge-permission.ts`, add `BLOCKED` to `PERMITTED_MERGE_STATES`. | repository/permission: merge command count 1, expected 0 (`false/permission`). |
 
-Replay each with `node --import ./tests/harness/hermetic-env.ts --test --test-force-exit --test-name-pattern='landing: the review deadline' --test-skip-pattern='^(repository/(hold|unreadable-hold|ci|permission|none)|fallback/.*)$' tests/e2e/landing.test.ts` for head; exchange `head` for the selected recheck in that skip expression for CI/permission. The original duration remains intact. The head mutation models trusting the previously reported head; the fake forge still refuses its stale bound merge, and the assertion detects the forbidden attempt.
+Replay each with `node --import ./tests/harness/hermetic-env.ts --test --test-force-exit --test-name-pattern='landing: the review deadline' --test-skip-pattern='^(repository/(hold|unreadable-hold|ci|permission|none)|fallback/.*)$' tests/e2e/landing-review-window.test.ts` for head; exchange `head` for the selected recheck in that skip expression for CI/permission. The original duration remains intact. The head mutation models trusting the previously reported head; the fake forge still refuses its stale bound merge, and the assertion detects the forbidden attempt.
 
 The harness's `setGh` uses `Object.assign(gh, patch)` before writing the complete state file (`tests/e2e/landing.test.ts`, startStack). Therefore partial permission/runs updates retain `integration` and other omitted fields. No harness change is required for that review uncertainty.
 

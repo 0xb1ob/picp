@@ -72,7 +72,7 @@ The source-order numbers below count static test calls, not loop expansions. Eve
 
 Patch paths are `docs/testing-migration-s10-<name>.patch`. SHA is the Git blob SHA of the exact patch (`git hash-object`), not an invented historical bug commit. Patches were generated from the actual temporarily mutated production tree, executed, then restored. Logs are outside the suite at `/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s10-4dzb/<name>-control.log`. These are semantic mutations, not live-model calls. Every listed run exits 1 at the stated consumer assertion; syntax/startup failures earn no credit.
 
-Run with `node --import ./tests/harness/hermetic-env.ts --test --test-force-exit --test-name-pattern='<scenario prefix>' tests/e2e/landing.test.ts`. Use anchored `--test-skip-pattern` to select the table's subcases (skip the other leaf names, never the parent). Apply a patch with `git apply <path>`, run the selected scenario, restore with `git apply -R <path>`. All source edits remain temporary.
+Run with `node --import ./tests/harness/hermetic-env.ts --test --test-force-exit --test-name-pattern='<scenario prefix>' tests/e2e/landing-*.test.ts`. Use anchored `--test-skip-pattern` to select the table's subcases (skip the other leaf names, never the parent). Apply a patch with `git apply <path>`, run the selected scenario, restore with `git apply -R <path>`. All source edits remain temporary.
 
 | Name | Patch blob SHA | Executed mutation and failure |
 |---|---|---|

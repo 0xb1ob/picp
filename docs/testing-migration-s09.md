@@ -72,7 +72,7 @@ Every mapped row names an assertion observed failing under its executed control.
 
 All mutations were applied temporarily and restored. Each run exited 1 at an assertion, not a schema failure. `NC-N` below means S09-NC-N. Invalid trial mutations earn no credit.
 
-Use `node --import ./tests/harness/hermetic-env.ts --test --test-force-exit --test-name-pattern='<title prefix>' tests/e2e/landing.test.ts`. Subcases can be selected with anchored `--test-skip-pattern`; anchoring matters because skipping the parent title skips the entire case.
+Use `node --import ./tests/harness/hermetic-env.ts --test --test-force-exit --test-name-pattern='<title prefix>' tests/e2e/landing-*.test.ts`. Subcases can be selected with anchored `--test-skip-pattern`; anchoring matters because skipping the parent title skips the entire case.
 
 | Control | Production mutation | Executed scenario and failing assertion |
 |---|---|---|

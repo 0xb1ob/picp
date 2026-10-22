@@ -15,7 +15,7 @@ Final disposition: **30 mapped, 3 retained verbatim, 0 pending**, four source fi
 
 ## Batch 1
 
-Scenario 05-S14-permission: `tests/e2e/landing.test.ts`, `landing S14: repository permission reports the allowlist and each blocked cause`. Real CommandPost, real reporter/implementer, isolated mock-provider agent directory, real scratch git, scripted external gh. Each permission row has its own stack and real held report; success rows execute a forge merge.
+Scenario 05-S14-permission: `tests/e2e/landing-forge-ci.test.ts`, `landing S14: repository permission reports the allowlist and each blocked cause`. Real CommandPost, real reporter/implementer, isolated mock-provider agent directory, real scratch git, scripted external gh. Each permission row has its own stack and real held report; success rows execute a forge merge.
 
 | Source declaration in tests/merge-permission.test.ts | Status | Failing assertion under control |
 |---|---|---|
@@ -37,7 +37,7 @@ Other files: pr-bind 9 pending; pr-resolve 10 pending; review-approval 1 pending
 
 ## Executed controls
 
-Command for both: `node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=1 --test-timeout=300000 --test-force-exit --test-name-pattern='landing S14:' tests/e2e/landing.test.ts`.
+Command for both: `node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=1 --test-timeout=300000 --test-force-exit --test-name-pattern='landing S14:' tests/e2e/landing-forge-ci.test.ts`.
 
 - S14-NC1: in `src/merge-permission.ts`, replace status normalization with `const status = "BROKEN";`. Executed: eight independently named subcases fail their permission/cause assertions (review required, changes requested, checks, unknown block, unstable, unknown status, HAS_HOOKS, CLEAN). Four unaffected subcases pass. This models losing the forge merge-state field. Production source restored.
 - S14-NC2: in the same source, remove `|| mergeable === "UNKNOWN"` from the retry guard and change the final fallback permission from `unreadable` to `pending`. Executed: CLEAN/UNKNOWN fails retry assertion with an actual merge; absent, empty and novel states each fail unreadable assertion, actually pending. Eight unaffected subcases pass. Both production changes restored.
@@ -47,7 +47,7 @@ All controls failed observable assertions after real workers reported; none fail
 
 ## Batch 2
 
-Scenario 05-S14-resolution: `landing S14: worker PR reports resolve against the registered origin and drive the CI watch` in `tests/e2e/landing.test.ts`. Real worker report_result calls are resolved by the real CommandPost intake; corrected receipts feed a real CI-watch tick. The external git shim preserves GitHub origin identity while routing repository transport to scratch git.
+Scenario 05-S14-resolution: `landing S14: worker PR reports resolve against the registered origin and drive the CI watch` in `tests/e2e/landing-forge-ci.test.ts`. Real worker report_result calls are resolved by the real CommandPost intake; corrected receipts feed a real CI-watch tick. The external git shim preserves GitHub origin identity while routing repository transport to scratch git.
 
 | Source | Declaration | Status | Control and failing assertion |
 |---|---|---|---|

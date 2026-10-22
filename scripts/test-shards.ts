@@ -60,7 +60,13 @@ if (import.meta.main) {
 		console.log(list.join("\n"));
 	} else if (cmd === "check") {
 		const all = discover();
-		const shards = assignShards(all, loadTable());
+		const table = loadTable();
+		const missing = all.filter((f) => !(f in table));
+		if (missing.length > 0) {
+			console.error(`timing table has no entry for: ${missing.join(", ")}; run \`test-shards.ts gen <spec-log>\``);
+			process.exit(1);
+		}
+		const shards = assignShards(all, table);
 		const flat = shards.flat();
 		const bad = all.filter((f) => flat.filter((g) => g === f).length !== 1);
 		if (all.length === 0 || bad.length > 0 || flat.length !== all.length || shards.some((s) => s.length === 0)) {

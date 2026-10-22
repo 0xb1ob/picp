@@ -137,7 +137,7 @@ The headless in-flight case retains its separate file and selector.
 | S03b-retry | rearm a deadline after operational retry | operational retry never rearms its deadline |
 
 Inherited CI-repair controls also replayed with exit 1:
-`npm run test:one -- --test-name-pattern='landing: held CI repair' tests/e2e/landing.test.ts tests/e2e/landing-ci-watch.test.ts`.
+`npm run test:one -- --test-name-pattern='landing: held CI repair' tests/e2e/landing-ci-watch.test.ts tests/e2e/landing-merge.test.ts tests/e2e/landing-ci-watch.test.ts`.
 
 | Control | Mutation | Observed failed assertion |
 |---|---|---|
