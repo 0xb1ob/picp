@@ -1,0 +1,13 @@
+diff --git a/src/wakeup-outbox.ts b/src/wakeup-outbox.ts
+index 89e6466..602138a 100644
+--- a/src/wakeup-outbox.ts
++++ b/src/wakeup-outbox.ts
+@@ -83,7 +83,7 @@ export class DurableWakeupOutbox {
+ 
+ 	#reserved(entry: AnsweredSend | undefined, now: number): boolean {
+ 		if (!entry) return false;
+-		if (entry.owner !== this.#owner) return false;
++		if (entry.owner !== this.#owner) return true;
+ 		const at = Date.parse(entry.sent_at);
+ 		return Number.isFinite(at) && now - at < this.#retryMs;
+ 	}
