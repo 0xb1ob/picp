@@ -21,8 +21,11 @@ ARG PI_VERSION
 RUN test -n "$PI_VERSION" && npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@$PI_VERSION"
 # Cached only: the unpinned pi install-tools runs when pi is absent (the recovery scenario), offline.
 RUN npm install -g --prefix /tmp/warm-pi --ignore-scripts @earendil-works/pi-coding-agent && rm -rf /tmp/warm-pi
-# treehouse's own installer picks ~/.local/bin when it is first on PATH (as CI does), never sudo.
-RUN mkdir -p .local/bin && curl -fsSL https://kunchenguid.github.io/treehouse/install.sh | sh && treehouse --version
+# The pinned release asset, as install-tools downloads it: no "latest" API call (#428).
+ARG TREEHOUSE_VERSION
+RUN test -n "$TREEHOUSE_VERSION" && mkdir -p .local/bin \
+	&& curl -fsSL "https://github.com/kunchenguid/treehouse/releases/download/v${TREEHOUSE_VERSION}/treehouse-v${TREEHOUSE_VERSION}-linux-$(dpkg --print-architecture).tar.gz" | tar xz -C .local/bin treehouse \
+	&& treehouse --version
 ARG LENS_PACKAGES
 RUN npm install -g --prefix /tmp/warm-lens $LENS_PACKAGES && rm -rf /tmp/warm-lens
 ARG WORKER_PACKAGES
