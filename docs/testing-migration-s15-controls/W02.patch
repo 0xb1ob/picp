@@ -1,0 +1,5 @@
+--- a/src/review-merge-window.ts
++++ b/src/review-merge-window.ts
+@@ -14 +14 @@
+-	if (!pass || !shaMatches(pass.head_sha, head)) return undefined;
++	if (!pass) return undefined;

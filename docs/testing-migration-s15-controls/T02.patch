@@ -1,0 +1,8 @@
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -477,3 +477,3 @@
+ 	};
+-	return { content: [{ type: "text", text: formatDiffReview(result) }], details };
++	return { content: [{ type: "text", text: "review complete" }], details };
+ }

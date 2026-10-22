@@ -1,0 +1,8 @@
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -313,3 +313,3 @@
+ 	start<T>(attempt: ReviewAttempt<T>): ReviewWait {
+-		const existing = this.pending(attempt.jobId, attempt.surface);
++		const existing = this.pending(attempt.jobId, "review");
+ 		if (existing) {

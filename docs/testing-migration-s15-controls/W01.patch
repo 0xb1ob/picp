@@ -1,0 +1,5 @@
+--- a/src/review-merge-window.ts
++++ b/src/review-merge-window.ts
+@@ -15 +15 @@
+-	const deadline = Date.parse(pass.decided_at) + reviewMergeWindowMs();
++	const deadline = Date.parse(pass.decided_at);
