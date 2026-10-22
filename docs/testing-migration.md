@@ -1657,9 +1657,9 @@ diff --git a/src/pr-bind.ts b/src/pr-bind.ts
 | S06-deploy | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-2 | S06-deploy | 9c2bb5361529d74f70a4713044b66f3ea497e4e615d75ee95cf1a29c078a065a | corrupt ledger exception escapes recordMerge instead of preserving named retry outcome; exit 1 | pass |
 | S06-reservation | `tests/held-release.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-6 | S06-reservation | 0a723cad1b905543dda1bcffc250f7677cf6bb8451580d5e5779c674cd65f16d | queue capacity counts a releasable author as free after journal recovery: expected worker, got undefined; leaked reservation prevents retry; exit 1 | pass |
 | S15-C10 | `tests/review-context.test.ts` | 66c803bd47a3638e228a4183edd14aa34c647e8a | 05-S15-C | S15-C10 | bda2cbe060162587fea753d9651f19d0201685595492b7edb9a63672159582e5 | unchanged lib/core.py fork unexpectedly included | pass |
-| S15-W01 | `tests/review-merge-window.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-W | S15-W01 | 76fe8e4aee8fad87cbd5a6f9f100ede181f1bbbd6aab1beced777a94cdf5ca00 | fresh pass advances rather than waiting for its window | pass |
+| S15-W01 | `tests/review-merge-window.test.ts` | ec71236764b351fc40c92b9e35496dc10600bb2e | 05-S15-W | S15-W01 | 9ccbadd7cdbaa6da240439ba3a0e6a86e045470cea89ec2a2f15c66f45052d41 | assert.ok(Date.now() >= Date.parse(verdict.decided_at) + 5_000); restart: 'advance' !== 'wait' | pass |
 | S15-T05 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-P | S15-T05 | 96f894ad8f6d5e6615375c7a4900dfa1155c973c18905dfba652195611ffe5c0 | missing expected rejection for a worker profile containing cp_review | pass |
-| S15-R16 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-D | S15-R16 | 04123a105db6ec2a9770f04e6a604696e9c3da3be64fa41b36525bd46ed211dc | withheld copies preserve resend eligibility rejects: only two actual attempts, never a third withheld copy | pass |
+| S15-R16 | `tests/review-runs.test.ts` | ec71236764b351fc40c92b9e35496dc10600bb2e | 05-S15-D | S15-R16 | 04123a105db6ec2a9770f04e6a604696e9c3da3be64fa41b36525bd46ed211dc | Got unwanted rejection: withheld copies preserve resend eligibility; last = 2 | pass |
 | S15-C01 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C01 | f52327695217aaa30fafb6aee0476b80323ecd0fec927e954bae69d0dae11471 | deleted fork state undefined instead of included | pass |
 | S15-C02 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C02 | 99dbf09f3fcdf5fe08a0383e092ede0d4d92dde5e1a4345d8c4c61fb77108192 | unique task state undefined instead of included | pass |
 | S15-C03 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C03 | f0b3ff5963d1df369bd79125ca8ee7090f6cea6d45706c8f8d8c1bf15b4f7c4d | forbidden object reads in git audit | pass |
@@ -1681,8 +1681,8 @@ diff --git a/src/pr-bind.ts b/src/pr-bind.ts
 | S15-R09 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-S | S15-R09 | 89942e2ab53cbb3a965f2ae9047b1ca18e6055b1dcad4f9fc60b5bb7e3b331fe | fallback second write absent | pass |
 | S15-R10 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-S | S15-R10 | 6d7e1ea926cbc94b248d7f434c0beeacb82657e7ba01571c093a0404859f37c2 | notice failure rejects settlement | pass |
 | S15-R11 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-A | S15-R11 | 85332e44a50011652c5976890d38b3201adcead115b653f5d047433404e8f2aa | quality collides with review slot | pass |
-| S15-R15 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-D | S15-R15 | 16c3e2fe2a7bb7d23276199c851708cf6ce668c9f358cbdd0d37c4dc2f54689f | arrival confirms twice | pass |
-| S15-R17 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-D | S15-R17 | 48c15985255254ac0c74a54d2f563afbdc6b76f6b60ac24c2245bb558ed537d1 | suppression expires before production window | pass |
+| S15-R15 | `tests/review-runs.test.ts` | ec71236764b351fc40c92b9e35496dc10600bb2e | 05-S15-D | S15-R15 | 16c3e2fe2a7bb7d23276199c851708cf6ce668c9f358cbdd0d37c4dc2f54689f | one arrival confirms a verdict only once: actual 2, expected 1 | pass |
+| S15-R17 | `tests/review-runs.test.ts` | ec71236764b351fc40c92b9e35496dc10600bb2e | 05-S15-D | S15-R17 | 71b11a23d0a1547b3b737f039bb4e0774c015bef2284b8a9915e9fe2ebf982e1 | Got unwanted rejection: suppression remains eligible for its configured retry window; last = 1 | pass |
 | S15-Q01 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-Q | S15-Q01 | 94227b5928c6bf246ed9cb60385e74f1365dbf8e3fc83047cdffcd3b473ed626 | undefined quality pass instead of operational failure | pass |
 | S15-B01 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-B | S15-B01 | 2d5f38c287afebf30c45a08f2b9e0d5b758ab485acef2e2428211ebcf42da738 | zero wakes after handback bound | pass |
 | S15-T00 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-T | S15-T00 | 8c54f9510b953f4bb97c19d2aa056d8c6e7a137dcb751908ed187f9e2a794ca9 | refusal names cp_pipeline | pass |
@@ -1945,7 +1945,7 @@ diff --git a/src/review-runs.ts b/src/review-runs.ts
 +++ b/src/review-runs.ts
 @@ -567,3 +567,3 @@
  		for (const [key, entry] of this.#inFlight) {
--			if (entry.resent || now.getTime() - entry.firstSentAt >= VERDICT_SUPPRESSED_RETRY_MAX_SECONDS * 1000) {
+-			if (entry.resent || now.getTime() - entry.firstSentAt >= reviewSuppressionMs()) {
 +			if (entry.resent || now.getTime() - entry.firstSentAt >= 0) {
  				this.#inFlight.delete(key);
 ```
@@ -2060,7 +2060,7 @@ diff --git a/src/review-runs.ts b/src/review-runs.ts
 --- a/src/review-merge-window.ts
 +++ b/src/review-merge-window.ts
 @@ -15 +15 @@
--	const deadline = Date.parse(pass.decided_at) + REVIEW_MERGE_WINDOW_MS;
+-	const deadline = Date.parse(pass.decided_at) + reviewMergeWindowMs();
 +	const deadline = Date.parse(pass.decided_at);
 ```
 <!-- /patch:S15-W01 -->
@@ -3567,7 +3567,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/review-approval.test.ts` | deleted | S14 | moved verbatim to tests/review-approval-retained.test.ts; mixed unreachable matches(missing) and seq-2/3 write inputs; reachable hash authorization covered by 05-S14-approval and S14-NC13 |
 | `tests/review-context.test.ts` | deleted | P3 | S15: all ten declarations mapped to 05-S15-C/F; ten executed controls with patches/hashes in testing-migration-s15.md; known cp-c1ur N11 regression pinned by S15-C10 |
 | `tests/review-merge-window.test.ts` | deleted | P3 | S15: both declarations mapped to 05-S15-W through cp_integrate and a fresh parent; executed W01/W02 patches and hashes in testing-migration-s15.md |
-| `tests/review-runs.test.ts` | deleted | P3 | S15: source path replaced by tests/review-runs-retained.test.ts; 16 mapped declarations in 05-S15-A/X/Q/S/B/O/D/L, 3 retained verbatim; production 60/120/1200-second timers and R01–R11/R15–R17/Q01/B01/W01 controls; assertion dispositions remain mapped/retained |
+| `tests/review-runs.test.ts` | deleted | P3 | S15: source path replaced by tests/review-runs-retained.test.ts; 16 mapped declarations in 05-S15-A/X/Q/S/B/O/D/L, 3 retained verbatim; 60-second handback, configured 1-second retry/32-second suppression/5-second merge window; R01–R11/R15–R17/Q01/B01/W01 controls; assertion dispositions remain mapped/retained |
 | `tests/review-tool.test.ts` | deleted | P3 | S15: four mapped declarations in 05-S15-T/P; three declarations ledgered retained and moved verbatim to tests/review-tool-retained.test.ts; typed-helper/schema entry-point traces and T00–T05 controls in testing-migration-s15.md |
 | `tests/reviewer-model.test.ts` | deleted | S16 | 3 mapped, 0 retained; scenarios S16-model and S16-auto; controls S16-NC1–3; [accounting](testing-migration-s16.md) |
 | `tests/revive.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
