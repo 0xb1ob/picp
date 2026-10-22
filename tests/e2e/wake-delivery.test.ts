@@ -245,9 +245,15 @@ test("S20: busy durable wakes wait for an operator answer and late notices recei
 	seed.mandates.issue({ projects: ["demo"], objective: "S20 wake authority", job_ids: [ready.id],
 		expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [] });
 	await seed.shutdown();
+	// A timed reply can settle and erase send records before the test observes the busy state.
+	const holds = Array.from({ length: 3 }, () => {
+		let release!: () => void;
+		const until = new Promise<void>((resolve) => { release = resolve; });
+		return { until, release };
+	});
 	const model = provider.addScript("s20-busy", [
-		{ kind: "hang", ms: 16_000 }, { kind: "hang", ms: 16_000 },
-		{ kind: "hang", ms: 8_000 }, { kind: "text", text: "Notices handled." },
+		{ kind: "hang", until: holds[0]!.until }, { kind: "hang", until: holds[1]!.until },
+		{ kind: "hang", until: holds[2]!.until }, { kind: "text", text: "Notices handled." },
 	]);
 	const agent = createAgentDir({ provider });
 	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
@@ -259,8 +265,8 @@ test("S20: busy durable wakes wait for an operator answer and late notices recei
 	await child.prompt(frameBatch([{ id: "ps-20300101000000-0000000a", text: "S20 operator question" }]));
 	await waitFor(requests, (r) => r.length === 1, { timeoutMs: 30_000, what: "first busy request" });
 	queue("w1"); queue("w2"); queue("w3");
-	await waitFor(() => box.read().sends ?? [], (sends) => sends.length === 3, {
-		timeoutMs: 30_000, what: "durable notices offered to the parent",
+	await waitFor(() => ({ outbox: box.read(), requests: requests().length }), (state) => (state.outbox.sends ?? []).length === 3, {
+		timeoutMs: 30_000, what: "durable notices offered to the parent (outbox and request count)",
 	});
 	assert.equal(requests().length, 1, "an unanswered operator send cannot start a notice turn");
 	const state = await child.getState();
@@ -272,6 +278,7 @@ test("S20: busy durable wakes wait for an operator answer and late notices recei
 	await waitFor(() => answers.read().sends ?? [], (sends) => sends.length > 0, {
 		timeoutMs: 30_000, what: "answer offered while operator question is unanswered",
 	});
+	holds[0]!.release();
 	await waitFor(requests, (r) => r.length === 2, { timeoutMs: 30_000, what: "notice request after operator answer" });
 	const carried = JSON.stringify(requests()[1]?.body.messages);
 	for (const id of ["w1", "w2", "w3"]) assert.match(carried, new RegExp(`S20-BUSY-${id}`));
@@ -282,16 +289,24 @@ test("S20: busy durable wakes wait for an operator answer and late notices recei
 	});
 	new AnsweredOutbox({ home: home.path }).enqueue({ id: "aw-s20-busy", type: "approval",
 		decision: "S20 actionable decision", answer: "continue", answered_by: "operator dialog (tui)" });
+	await waitFor(() => answers.read(), (state) => [...(state.sends ?? []), ...state.delivered].some((row) => row.id === "aw-s20-busy"), {
+		timeoutMs: 30_000, what: "second answer offered while the parent remains busy",
+	});
+	holds[1]!.release();
 	await waitFor(requests, (r) => r.length === 3, { timeoutMs: 30_000, what: "actionable answer bypasses busy gate" });
 	const answered = JSON.stringify(requests()[2]?.body.messages);
 	assert.match(answered, /S20 actionable decision/);
 	assert.match(answered, /S20-BUSY-w4/);
 	assert.doesNotMatch(answered, /fleet notice\(s\) arrived while you were busy/);
 	queue("w5");
-	await waitFor(() => box.pending(), (pending) => pending.length === 0, {
-		timeoutMs: 30_000, what: "late non-triggering notice accepted",
+	await waitFor(() => box.read(), (state) => (state.sends ?? []).some((row) => row.id === "w5"), {
+		timeoutMs: 30_000, what: "late non-triggering notice offered while parent remains busy",
 	});
+	holds[2]!.release();
 	await waitFor(requests, (r) => r.length === 4, { timeoutMs: 30_000, what: "one stranded-notice nudge" });
+	await waitFor(() => box.pending(), (pending) => pending.length === 0, {
+		timeoutMs: 30_000, what: "late non-triggering notice accepted after the busy turn",
+	});
 	const nudged = JSON.stringify(requests()[3]?.body.messages);
 	assert.match(nudged, /S20-BUSY-w5/);
 	assert.match(nudged, /1 fleet notice\(s\) arrived while you were busy/);
