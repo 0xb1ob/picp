@@ -9,16 +9,17 @@ The authoritative declaration, scenario, regression, patch and inventory rows re
 | dashboard-compaction | 3 | 3 | 0 | 0 | wholly deleted |
 | operator-compact | 22 | 20 | 2 | 0 | original retired; retained replacement |
 | operator-context | 3 | 2 | 1 | 0 | original retired; retained replacement |
-| parent-compact-hold | 7 | 7 | 0 | 0 | wholly deleted |
-| Original S24 total | 35 | 32 | 3 | 0 | four original paths retired; two wholly deleted-file credits |
+| parent-compact-hold | 7 | 4 | 3 | 0 | original retired; retained replacement |
+| Original S24 total | 35 | 29 | 6 | 0 | four original paths retired; one wholly deleted-file credit |
 | Incoming #447 parent knob declaration | 1 | 1 | 0 | 0 | mapped with its parent file |
-| Total including incoming declaration | 36 | 33 | 3 | 0 | 8.33% retained (8.57% of original slice) |
+| Total including incoming declaration | 36 | 30 | 6 | 0 | 16.67% retained (17.14% of original slice) |
 
 ## Retained declarations
 
 - `tests/operator-context-retained.test.ts`: the empty-home builder declaration stays verbatim. Real bridge startup creates control state before loading context; no public consumer can call just the builder against a nonexistent home. S24-empty also pins absent preference files and zero custom context through the bridge.
 - `tests/operator-compact-retained.test.ts`: the whole S1 benign-skip declaration stays verbatim because it includes synchronous `ctx.compact` throws, unavailable through the SDK's asynchronous wrapper. The reachable benign skip is additionally covered by S24-op-spent.
 - The same retained compact file preserves the whole classifier declaration, including undefined/malformed input and arbitrary role/stopReason combinations unavailable through the SDK event schema. Public rejection, overload, user, abort and custom relay behavior is covered by S24-op-streak, S24-op-explicit and S24-op-nudge. Neither declaration is labelled redundant-unreachable.
+- `tests/parent-compact-hold-retained.test.ts`: T3(b), T3(f) and T3(g)/(h) remain whole and byte-identical under the round-2 decision. The public entry limitations are listed below; the retained T3(f) also pins the 270,000 ms default. These three declarations earn retained credit only.
 
 An assert-based comparison against the original unit file verified both retained compact declarations byte for byte before retirement. No original regression assertion was silently deleted.
 
@@ -28,9 +29,9 @@ Parent cases use a scratch home, real Command Post extension, actual parent RPC/
 
 The incoming `tests/timer-knobs.test.ts` case `CP_PARENT_COMPACT_HOLD_SECONDS: default, override, garbage` pins the unchanged 270,000 ms default and invalid-input fallback. The expiry scenario closes only its undispatched schedule-run fixtures between phases so they can fire again; no public worker-completion event exists for these deliberately undispatched runs. Those setup closures are not behavior assertions.
 
-Review 1 identified two remaining proof gaps in the mapped parent declarations: mixed fleet/envelope/answered/schedule offer ordering and an already-engaged hold surviving threshold cancellation. The current schedule-only and unheld-length cases do not prove those portions. Retirement of those declarations is not fully verified until additional public-consumer cases and controls close these gaps.
+The round-2 decision retains T3(b), T3(f) and T3(g)/(h) whole and verbatim in `tests/parent-compact-hold-retained.test.ts`. The public parent CLI/RPC has no entry to inject jobless mixed-kind wakes at individual hold offers, advance the hold clock independently through the default cap, or combine an injected threshold-cancel failure with an independent OVER reading. T3(f) preserves the explicit `PARENT_COMPACT_HOLD_MS === 270_000` assertion. Reachable schedule, busy, CI and expiry outcomes remain additionally covered by the existing e2e cases and controls; these three declarations receive retained status, not mapped credit.
 
-The inventory's `deleted` entries describe absent original paths, not retained declarations or wholly deleted-file credit: the checker currently rejects absent baseline paths with any other disposition. Declaration rows above remain `retained` for the three preserved declarations, and wholly deleted-file credit remains two. Changing that checker vocabulary needs reconciliation with the carry-in's retained/moved file wording.
+The inventory follows the existing S03b/S19 convention: absent original paths use the checker's `deleted` disposition with explicit moved wording and retained destinations; retained declarations earn no deletion credit. Only dashboard-compaction is wholly deleted. All six retained declarations are named individually in the assertion map.
 
 The ordered case steers a framed operator question through RPC during a busy hold, exercising send-first release before schedule wake delivery. Schedule notices arrive A/B/C only after manual compaction. A separate existing CI watcher fixture proves an actual fleet CI wake stays held across settlement until manual compaction; there is exactly one cp-ci arrival. Non-headless JSON print, disabled control and low context deliver without engaging a hold. Real provider length stops cancel threshold compaction repeatedly without disabling later manual and normal compaction.
 

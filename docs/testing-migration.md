@@ -1255,12 +1255,12 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/operator-compact.test.ts` | 21 queued self_compact lets tool-result reply finish before compacting real Pi run | S24-op-queued | mapped | S24-compact-early fails settlement ordering; S24-compact-own also fails own-instructions enrichment exclusion/exact summarizer count |
 | `tests/operator-compact.test.ts` | 22 fresh-home state operator directory and configured handoffs_dir | S24-op-manual | mapped | S24-compact-enrich loses configured latest handoff path/input; both default state directory and custom directory checked |
 | `tests/parent-compact-hold.test.ts` | T3(a): pure hold — settle, timers, failures, busy phase, runStarted, not_over | S24-parent-expiry | mapped | S24-parent-cap loses five-second cap release; failure, 15-second start timeout, cap, disable after three, reenable and not_over exercised through parent CLI |
-| `tests/parent-compact-hold.test.ts` | T3(b): threshold settle holds fleet and schedule wakes in offer order until session_compact | S24-parent-order | mapped | S24-parent-order reverses actual A/B/C arrival; S24-parent-ci additionally pins fleet wake hold until manual compact |
+| `tests/parent-compact-hold.test.ts` | T3(b): threshold settle holds fleet and schedule wakes in offer order until session_compact | — | retained | Moved verbatim to tests/parent-compact-hold-retained.test.ts. No public parent CLI/RPC entry injects the fixture's jobless CI/envelope/answered wakes between individual schedule offers; retain the exact mixed-kind ordering contract per round-2 decision. |
 | `tests/parent-compact-hold.test.ts` | T3(c)/(d): below threshold or off headless parent nothing holds | S24-parent-immediate | mapped | S24-parent-context fails low, disabled and non-headless JSON print consumers |
 | `tests/parent-compact-hold.test.ts` | T3(e): N6 length stop cancels threshold compaction and never holds | S24-parent-length | mapped | S24-parent-length loses threshold cancellation; three real provider length stops never disable later manual/normal compaction |
-| `tests/parent-compact-hold.test.ts` | T3(f): busy run holds all wakes including schedule and send-first release until compaction | S24-parent-order | mapped | S24-parent-busy loses engagement; framed RPC operator question exercises send-first release; S24-parent-ci additionally pins fleet delivery |
+| `tests/parent-compact-hold.test.ts` | T3(f): busy run holds all wakes including schedule and send-first release until compaction | — | retained | Moved verbatim to tests/parent-compact-hold-retained.test.ts, including PARENT_COMPACT_HOLD_MS === 270_000. No public parent CLI/RPC entry advances the hold's clock independently through the default cap and injected mixed wakes; round-2 decision retains the whole declaration. Reachable busy/schedule/CI behavior also has S24-parent-order and S24-parent-ci controls. |
 | `tests/parent-compact-hold.test.ts` | incoming #447: cap timer reads CP_PARENT_COMPACT_HOLD_SECONDS | S24-parent-expiry | mapped | S24-parent-cap restores hardcoded 270000 and fails ten-second wait for five-second expiry; knob set in parent environment |
-| `tests/parent-compact-hold.test.ts` | T3(g)/(h): failure, start timeout and cap release; three disable; agent_start never releases | S24-parent-expiry | mapped | S24-parent-cap fails cap release; subsequent agent start preserves hold, three distinct failures disable, successful compact reenables |
+| `tests/parent-compact-hold.test.ts` | T3(g)/(h): failure, start timeout and cap release; three disable; agent_start never releases | — | retained | Moved verbatim to tests/parent-compact-hold-retained.test.ts. No public parent CLI/RPC entry injects the cancelled-threshold failure while keeping the fixture's independent OVER reading and engaged hold; retain the whole declaration per round-2 decision. Public failure/expiry portions also have S24-parent-cap coverage. |
 | `tests/parent-compact-hold.test.ts` | below-threshold settle releases schedule wakes; disabled control delivers immediately | S24-parent-immediate | mapped | S24-parent-context fails disabled/low consumers; S24-parent-expiry additionally changes public settings and pins held-batch not_over release |
 <!-- /manifest:assertions -->
 
@@ -4336,11 +4336,13 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/operator-context-retained.test.ts` | S24 | 1 retained verbatim declaration: no public entry calls only the context builder without first creating control state |
 | `tests/operator-compact-retained.test.ts` | S24 | Two verbatim declarations: synchronous compact skip callback and malformed classifier inputs unavailable through public SDK events. |
 | `tests/e2e/operator-compact.test.ts` | S24 | Fourteen real bridge scenarios, 20 original declarations mapped; canonical controls and declaration accounting above. |
-| `tests/e2e/parent-compaction.test.ts` | S24 | Four parent CLI scenarios plus CI fleet coverage in headless-lifecycle; 8 declarations mapped using public CP_PARENT_COMPACT_HOLD_SECONDS=5; original unit file retired after executed controls. |
+| `tests/e2e/parent-compaction.test.ts` | S24 | Four parent CLI scenarios plus CI fleet coverage in headless-lifecycle; 4 original declarations plus incoming #447 mapped with controls; 3 original declarations moved verbatim to tests/parent-compact-hold-retained.test.ts. |
 | `tests/e2e/reviewer-model.test.ts` | S16 | behavior 05, public gate reviewer selection and persisted schedule scope; scenario S16-model |
 | `tests/e2e/ci-watch-jobless.test.ts` | #443 | incoming public RPC regression: distinct job-less CI watch errors retain distinct durable notice causes; preserved unchanged when merging main; behavior 06. S10b owns declaration-71 mapping and original-file retirement under the main-session decision. |
 | `tests/recovery-notice-bound.test.ts` | #442 | incoming UTF-8 bound and hostile-control-byte regression: forty failed recovery candidates journal exactly one bounded notice; preserved unchanged; convert owner P4, behavior 06. No exception or deletion credit claimed. |
 | `tests/timer-knobs.test.ts` | #439 | incoming timer configuration contract: defaults, positive overrides and invalid-input fallback; landed with the public knobs consumed by S15 Addendum 2; preserved unchanged; convert owner P16, outside S03b. No exception or deletion credit claimed. |
+| `tests/parent-compact-hold-retained.test.ts` | S24 | Three declarations moved verbatim: T3(b), T3(f), T3(g)/(h); retained under the round-2 decision, with missing public entry points named in the assertion map; no deletion credit. |
+| `tests/e2e-hermetic-gh.test.ts` | PR #454 (hermetic e2e gh) | retained, no conversion |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -4545,8 +4547,8 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/operator-answers.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/operator-asks.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/operator-cache-warming.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
-| `tests/operator-compact.test.ts` | deleted | S24 | 22 declarations: 20 mapped, 2 retained verbatim in tests/operator-compact-retained.test.ts; original path retired, no wholly deleted-file credit; 14 real bridge scenarios and executed controls S24-compact-* |
-| `tests/operator-context.test.ts` | deleted | S24 | 2 mapped, 1 retained verbatim in tests/operator-context-retained.test.ts; S24-context, S24-empty; executed controls S24-oldest, S24-empty, S24-resume |
+| `tests/operator-compact.test.ts` | deleted | S24 | Original path removed; 20 mapped, 2 declarations moved verbatim to tests/operator-compact-retained.test.ts; no deletion credit for retained/moved declarations; 14 real bridge scenarios and executed S24-compact-* controls |
+| `tests/operator-context.test.ts` | deleted | S24 | Original path removed; 2 mapped, 1 declaration moved verbatim to tests/operator-context-retained.test.ts; no deletion credit for retained/moved declarations; S24-context, S24-empty and executed S24-oldest/S24-empty/S24-resume controls |
 | `tests/operator-decide-vs-ask-evals.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/operator-delivery.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/operator-note.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
@@ -4560,7 +4562,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/operator-tool-guard.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
 | `tests/ops-jobs.test.ts` | deleted | P2b | behavior 02: every assertion mapped to 02-6 or redundant-unreachable (Assertion map); negative controls NC-07 to NC-09 |
 | `tests/output.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
-| `tests/parent-compact-hold.test.ts` | deleted | S24 | 7 original plus incoming #447 knob declaration: all 8 mapped, 0 retained/pending; public parent schedule/CI flows, five-second cap knob, executed S24-parent-* controls; 1 wholly deleted file |
+| `tests/parent-compact-hold.test.ts` | deleted | S24 | Original path removed; 4 original plus incoming #447 declaration mapped, 3 declarations moved verbatim to tests/parent-compact-hold-retained.test.ts; no deletion credit for retained/moved declarations; executed S24-parent-* controls cover mapped declarations |
 | `tests/parent-context.test.ts` | convert | P5 | behavior 07 (Compaction) |
 | `tests/parent-control.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/parent-delivery.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
