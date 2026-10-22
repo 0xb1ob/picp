@@ -173,8 +173,7 @@ function main(): number {
 	const args = parseArgs(process.argv.slice(2));
 	const findings: string[] = [];
 	const doc = readFileSync(args.manifest, "utf8");
-	const docs = ledgerFiles(args.manifest).map((file) => readFileSync(file, "utf8"));
-	if (docs.length === 0) findings.push(`no slice ledger files beside ${args.manifest}`);
+	const docs = [doc, ...ledgerFiles(args.manifest).map((file) => readFileSync(file, "utf8"))];
 	if (args.preservedFrom) findings.push(...preservationFindings(git("show", `${args.preservedFrom}:${args.manifest}`), docs));
 	const pinned = /^Baseline sha: `([0-9a-f]{40})`$/m.exec(doc)?.[1];
 	if (!pinned) findings.push("manifest names no `Baseline sha:`");

@@ -6,7 +6,7 @@ This range covers static `test(...)` declarations 1–40 of `tests/integrate.tes
 
 The disposition is 38 mapped declarations, two retained declarations (8 and 19), zero redundant-unreachable declarations and zero deleted files. The retained share is 5%. A retained declaration can contain mapped consumer checks alongside an injection-only check; its unmatched assertion remains in the original file. The file-level manifest remains `convert`, rather than claiming that this range retires the whole file.
 
-All scenario IDs below resolve to exact names in `docs/testing-migration/*.md`; all execute through `CommandPost`, the real tool extension, or the bridge extension, with mock-provider workers and scratch git/forge state. Production source is unchanged.
+All scenario IDs below resolve to exact names in `docs/testing-migration.md`; all execute through `CommandPost`, the real tool extension, or the bridge extension, with mock-provider workers and scratch git/forge state. Production source is unchanged.
 
 | Declaration | Original behavior | Disposition | Scenario | Consumer assertion that detects the regression |
 |---|---|---|---|---|
