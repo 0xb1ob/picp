@@ -1,0 +1,6 @@
+diff --git a/extensions/cp-bridge/index.ts b/extensions/cp-bridge/index.ts
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -524 +524 @@
+-			if (!ctx.sessionManager.getEntries().some((entry) => entry.type === "message")) {
++			if (true) {

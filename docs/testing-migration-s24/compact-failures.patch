@@ -1,0 +1,6 @@
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -13 +13 @@
+-const MAX_AUTO_FAILURES = 3;
++const MAX_AUTO_FAILURES = 1;

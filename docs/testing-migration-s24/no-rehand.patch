@@ -1,0 +1,6 @@
+diff --git a/src/dashboard-control.ts b/src/dashboard-control.ts
+--- a/src/dashboard-control.ts
++++ b/src/dashboard-control.ts
+@@ -401 +401 @@
+-			if (tries < 2) { give(entry, tries + 1); return true; }
++			if (tries < 1) { give(entry, tries + 1); return true; }

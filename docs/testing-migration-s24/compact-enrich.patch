@@ -1,0 +1,5 @@
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -232 +231,0 @@
+-		event.preparation.messagesToSummarize.push({ role: "user", content: instructions, timestamp: Date.now() });

@@ -1,0 +1,6 @@
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -174 +174 @@
+-	pi.on("agent_settled", (_event, ctx) => {
++	pi.on("turn_end", (_event, ctx) => {
