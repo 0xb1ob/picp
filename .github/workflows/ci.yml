@@ -43,6 +43,9 @@ jobs:
         run: bash scripts/ci-as-user.sh node scripts/test-migration-check.ts
         timeout-minutes: 5
 
+      - name: Shard assignment covers every test file once
+        run: bash scripts/ci-as-user.sh npm run check:shards
+
       - name: Typecheck
         run: bash scripts/ci-as-user.sh npm run typecheck
 
@@ -98,10 +101,10 @@ jobs:
           done
           PATH="$bin:$PATH" treehouse --version
 
-      - name: Run suite shard ${{ matrix.shard }}/4
+      - name: Run suite shard ${{ matrix.shard }}/4 (scripts/test-timings.json)
         run: bash scripts/ci-as-user.sh npm run test:shard
         env:
-          CP_TEST_SHARD: ${{ matrix.shard }}/4
+          CP_TEST_SHARD: ${{ matrix.shard }}
           # Never set CP_LIVE_TESTS here: the live suites hit real models,
           # cost money and need credentials. They self-skip without it.
           CP_LIVE_TESTS: ""

@@ -72,16 +72,19 @@ export function filesProducingNothing(discovered: readonly string[], reported: R
 		.sort();
 }
 
+/** Explicit test files the runner was started with (a shard's list); none means a glob run. Read from argv, not env. */
+export function explicitFilesFromArgv(argv: readonly string[] = process.argv.slice(1)): string[] {
+	return argv.filter((arg) => arg.endsWith(".test.ts") && !/[*?[{]/.test(arg));
+}
+
 export default class TestFileGuard extends Transform {
 	readonly #reported = new Set<string>();
-	readonly #seen = new Set<string>();
 	constructor(options?: TransformOptions) {
 		super({ ...options, writableObjectMode: true });
 	}
 
 	override _transform(event: TestEvent, _encoding: BufferEncoding, callback: TransformCallback): void {
 		const data = event.data;
-		if (event.type === "test:complete" && data?.file !== undefined) this.#seen.add(resolve(data.file));
 		if (event.type === "test:complete" && data?.file !== undefined && !isFileRoot(data) && reportedAsTestOrSkip(data)) {
 			this.#reported.add(resolve(data.file));
 		}
@@ -93,9 +96,8 @@ export default class TestFileGuard extends Transform {
 		// ends the process without awaiting async reporter work, so a flush that
 		// awaited its glob could be cut off — and the guard would pass by default.
 		try {
-			// A shard runs a slice of the glob; judge only the files its runner loaded.
-			const all = globSync(TEST_FILE_GLOB);
-			const discovered = process.env.CP_TEST_SHARD ? all.filter((file) => this.#seen.has(resolve(file))) : all;
+			const explicit = explicitFilesFromArgv();
+			const discovered = explicit.length > 0 ? explicit : globSync(TEST_FILE_GLOB);
 			const missing = filesProducingNothing(discovered, this.#reported);
 			if (discovered.length === 0) {
 				process.stderr.write(
