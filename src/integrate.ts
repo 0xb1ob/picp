@@ -78,7 +78,7 @@ import { parseChangeRequestUrl } from "./forge-url.ts";
 import type { ForgeObserver } from "./forges/adapter.ts";
 import { type HandoffPort, reviewThenHandoff } from "./human-handoff.ts";
 import { type CiRun, ghCiRuns, readCiForHead, readReviewPassVerdict, shaMatches } from "./merge-ask.ts";
-import { readOlderBranchRuns, statusRunner } from "./actions-ci.ts";
+import { ActionsCiError, readOlderBranchRuns, statusRunner } from "./actions-ci.ts";
 import { ciRunRef, formatRunRef } from "./ci-run-ref.ts";
 import { readDrain } from "./drain.ts";
 import { type MainCiScope, mainRedHold } from "./main-ci.ts";
@@ -465,7 +465,11 @@ export class Integrator {
 		// CI, for the head that would merge: every Actions run and attempt job on exactly that sha.
 		let runsParsed: CiRun[];
 		try {
-			runsParsed = await readRuns();
+			runsParsed = await readRuns().catch((error: unknown) => {
+				if (!(error instanceof ActionsCiError) || !/transient read/.test(error.detail)) throw error;
+				observed = undefined; // an empty or non-JSON 200 is retried once, on a fresh observation
+				return readRuns();
+			});
 		} catch (error) {
 			const detail = (error as Error).message.slice(0, 300);
 			return this.#write({

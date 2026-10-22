@@ -12,6 +12,8 @@ export const ACTIONS_PER_PAGE = 100;
 export const ACTIONS_MAX_PAGES = 10;
 /** GitHub returns at most this many runs for a filtered list; a total at or past it cannot be proven complete. */
 export const ACTIONS_FILTERED_RUN_CEILING = 1000;
+/** Runs whose jobs are read at once; keeps one observation inside its budget without hammering the API. */
+export const ACTIONS_JOBS_CONCURRENCY = 4;
 
 export interface ActionsStep {
 	name: string;
@@ -265,7 +267,8 @@ async function attempt(options: ActionsReadOptions, endpoint: string, timeoutMs:
 		return { fault: new ActionsCiError("transport", endpoint, evidence(code ? `status ${code}` : "no HTTP status", body)), retry: true };
 	}
 	if (isJson(stdout)) return stdout;
-	return { fault: new ActionsCiError("malformed", endpoint, `not JSON; ${evidence("gh exit 0", stdout)}`), retry: true };
+	const run = /\/runs\/(\d+)\//.exec(endpoint)?.[1];
+	return { fault: new ActionsCiError("malformed", endpoint, `transient read${run ? ` run ${run}` : ""}: not JSON; ${evidence("gh exit 0", stdout)}`), retry: true };
 }
 
 /** A non-JSON body, HTML error page or transport fault retries with backoff in the budget; the last fault throws. */
@@ -342,9 +345,12 @@ export async function readActionsCi(options: ActionsReadOptions & { sha: string;
 		(stdout, endpoint) => parseRunsPage(stdout, options.sha, endpoint),
 		(run) => run.databaseId,
 	);
+	// Jobs pages are read in small parallel batches: serial reads of every run spent the one budget (#420).
 	const observed: ActionsRun[] = [];
-	for (const run of runs) {
-		observed.push({ ...run, jobs: await jobsWithin(options, budget, { runId: run.databaseId, attempt: run.attempt, sha: options.sha }) });
+	for (let at = 0; at < runs.length; at += ACTIONS_JOBS_CONCURRENCY) {
+		const batch = runs.slice(at, at + ACTIONS_JOBS_CONCURRENCY);
+		const jobs = await Promise.all(batch.map((run) => jobsWithin(options, budget, { runId: run.databaseId, attempt: run.attempt, sha: options.sha })));
+		batch.forEach((run, index) => observed.push({ ...run, jobs: jobs[index] as ActionsJob[] }));
 	}
 	return observed;
 }
