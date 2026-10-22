@@ -74,7 +74,7 @@ ask-0088e0332d00, 2026-10-21.
 | S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting and executed controls](testing-migration-s14.md): 30 mapped, 3 retained verbatim with unreachable-input evidence, 0 pending | 4 original paths retired (3 mixed moved/split) | +3 retained files | +6 e2e declarations |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
 | S10 (cp-e2e-slice-s10-4dzb) | behavior 05; integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92); [range ledger and executed patch controls](testing-migration-s10.md); S09 carry-ins reconciled | 0; original unit file stays whole | unchanged | +6 e2e declarations |
-| S21 (cp-e2e-slice-s21-5gtl) | behavior 06; [declaration inventory and executed controls](testing-migration-s21.md): 0 mapped, 0 retained/moved, 22 pending; one new RPC scenario. Blocked on production recovery notices exceeding the durable content bound. Original file stays whole. | 0 | +1 e2e file | +1 e2e declaration |
+| S21 (cp-e2e-slice-s21-5gtl) | behavior 06; [declaration map and executed controls](testing-migration-s21.md): 14 mapped, 7 retained in place, 1 pending-fix (long recovery-set notice); original file stays whole by operator instruction | 0 | +1 e2e file | +8 e2e declarations |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -2782,7 +2782,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/pr-resolve-retained.test.ts` | S14 | mixed original declaration 9 verbatim: validateEnvelope refuses missing pr_url before intake resolver; all reachable variants also covered through real reporter |
 | `tests/review-approval-retained.test.ts` | S14 | original declaration verbatim: pipeline artifacts.info fails before missing matches; only production write passes seq 1; no public entry reaches seq-2/3 overwrite |
 | `tests/held-continuation-fleet-read.test.ts` | #433 (ac50447082b15959140ec40b04080102eadbaf87) | incoming known-regression coverage for unreadable fleet during continuation failure notice; unit landed upstream after the baseline and is preserved unchanged; convert, owner P3c-rest (held continuation); recorded when plain-merging main |
-| `tests/e2e/wake-delivery.test.ts` | S21 | one RPC restart/arrival/stale-discard scenario; original unit file stays pending; docs/testing-migration-s21.md |
+| `tests/e2e/wake-delivery.test.ts` | S21 | two RPC restart/arrival/stale-discard and host-event scenarios; original unit file stays whole; docs/testing-migration-s21.md |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

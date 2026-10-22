@@ -1,0 +1,28 @@
+diff --git a/src/drain.ts b/src/drain.ts
+index 56bb24d..f9f1fee 100644
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -153,16 +153,13 @@ export function sweepDurableWakeups(
+ ): string[] {
+ 	if (!ownsHome()) return [];
+ 	const drop: Array<{ id: string; reason: string }> = [];
+-	try {
+-		store.drain((entry) => {
+-			const result = send(entry);
+-			if (result !== true) {
+-				drop.push({ id: entry.id, reason: typeof result === "string" && result.length > 0 ? result : "stale" });
+-			}
+-		});
+-	} finally {
+-		if (drop.length > 0) store.discard(drop);
+-	}
++	store.drain((entry) => {
++		const result = send(entry);
++		if (result !== true) {
++			drop.push({ id: entry.id, reason: typeof result === "string" && result.length > 0 ? result : "stale" });
++		}
++	});
++	if (drop.length > 0) store.discard(drop);
+ 	return drop.map((item) => item.id);
+ }
+ 
