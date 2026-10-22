@@ -1,0 +1,22 @@
+diff --git a/src/run-artifacts.ts b/src/run-artifacts.ts
+index 203b970..ec66b4b 100644
+--- a/src/run-artifacts.ts
++++ b/src/run-artifacts.ts
+@@ -193,7 +193,7 @@ export function applyEvent(state: ProjectionState, event: RunEvent): ProjectionS
+ 	let currentUsage = state.currentUsage;
+ 	const payload = (event.payload ?? {}) as Record<string, unknown>;
+ 	// Read from the state we came in with: this event may be the exit itself.
+-	const afterExit = hasExited(state.status);
++	const afterExit = false;
+ 
+ 	if (event.source === "cp") {
+ 		switch (event.type as CpEventKind) {
+@@ -342,7 +342,7 @@ export function applyEvent(state: ProjectionState, event: RunEvent): ProjectionS
+ 	// the close. A projection that cannot be written is a run that can be
+ 	// neither revived nor torn down (cp-0wq7), so no event type — including one
+ 	// added later — is allowed to produce that state.
+-	if (status.exited_at !== undefined && status.phase !== "exited") {
++	if (false && status.exited_at !== undefined && status.phase !== "exited") {
+ 		status.phase = "exited";
+ 		status.current_tool = null;
+ 	}

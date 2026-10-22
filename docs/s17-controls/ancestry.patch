@@ -1,0 +1,13 @@
+diff --git a/src/landing-proof.ts b/src/landing-proof.ts
+index 228ba6a..5b27244 100644
+--- a/src/landing-proof.ts
++++ b/src/landing-proof.ts
+@@ -135,7 +135,7 @@ export async function readLandingProof(git: GitRun, worktree: string, head: stri
+ 			evidence: { method, head, base_branch: base, base_sha: baseSha, witness, ...extra, observed_at: (options.now ?? (() => new Date()))().toISOString() },
+ 		});
+ 
+-		if ((await run(["merge-base", "--is-ancestor", head, baseSha], [0, 1])).status === 0) return landed("ancestry", baseSha);
++		if ((await run(["merge-base", "--is-ancestor", head, baseSha], [0, 1])).status === 99) return landed("ancestry", baseSha);
+ 		if ((await run(["diff", "--name-only", "-z", ...DIFF, head, baseSha])).stdout.length === 0) return landed("tree", baseSha);
+ 
+ 		if ((await run(["rev-parse", "--is-shallow-repository"])).stdout.trim() === "true") {

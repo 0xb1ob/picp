@@ -1,0 +1,13 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+index f7705ce..10eafc7 100644
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -390,7 +390,7 @@ export function acceptedHeadFailure(home: string, record: FleetRecord, head: str
+ 		job_id: jobId, kind: record.kind, delivery: record.delivery, worktree: record.worktree,
+ 	}).ok && envelope.kind === "ship" && envelope.status === "done" &&
+ 		envelope.branch === record.branch && envelope.head_sha === head) ||
+-		(receipt?.job_id === jobId && receipt.head_branch === record.branch && receipt.head_sha === head)) {
++		(false && receipt?.job_id === jobId && receipt.head_branch === record.branch && receipt.head_sha === head)) {
+ 		return undefined;
+ 	}
+ 	return {

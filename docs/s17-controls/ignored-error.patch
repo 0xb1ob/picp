@@ -1,0 +1,13 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+index f7705ce..68d774c 100644
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -80,7 +80,7 @@ const KEPT_IGNORED = new Set(["node_modules", ".venv", "venv", "__pycache__"]);
+  */
+ export async function ignoredEntries(git: GitRun, worktree: string): Promise<{ entries: string[] } | { error: string }> {
+ 	const status = await git(worktree, ["status", "--ignored", "--porcelain", "-z"]);
+-	if (status.status !== 0) return { error: `git status --ignored failed: ${firstLine(status.stderr || `exit ${status.status}`)}` };
++	if (status.status !== 0) return { entries: [] };
+ 	const entries = status.stdout.split("\0").filter((record) => record.startsWith("!! ")).map((record) => record.slice(3))
+ 		.filter((path) => !path.replace(/\/$/, "").split("/").some((segment) => KEPT_IGNORED.has(segment)));
+ 	return { entries: entries.sort() };

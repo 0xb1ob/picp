@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..4ab9df5 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -384,7 +384,7 @@ export class Teardown {
+ 			};
+ 		}
+ 		const dirty = await this.#git(worktree, ["status", "--porcelain"]);
+-		if (dirty.stdout.trim().length > 0) {
++		if (false && dirty.stdout.trim().length > 0) {
+ 			return {
+ 				ok: false,
+ 				failure: {

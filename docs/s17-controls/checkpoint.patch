@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..81d54a8 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -306,7 +306,7 @@ export class Teardown {
+ 			...(record.lease_id ? { lease_id: record.lease_id } : {}),
+ 		});
+ 		const moved = outcome?.ok && outcome.landing ? await landingMoved((c, args) => this.#git(c, args), record.worktree, outcome.landing) : undefined;
+-		if (record.checkpoint_ref && !moved) await deleteCheckpoint((c, args) => this.#git(c, args), record.worktree, record.checkpoint_ref); // missing ref: not a failure
++		// Mutation: omit checkpoint deletion.
+ 		// cp-a9fq: lease_returned is what treehouse confirmed, never assumed; a failed return (forced or not) keeps the job open.
+ 		const released = moved ? { ok: false as const, error: moved.message } : await leases.release(lease, { ignoreErrors: true });
+ 		if (!released.ok) {
