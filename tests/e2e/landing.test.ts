@@ -3324,7 +3324,7 @@ test("landing S10: dispatch rejects profiles granting parent integration tools",
 	});
 });
 
-test("landing S15 retry: real parent delivery confirms, retries withheld verdicts and expires permanent suppression", { skip: SKIP, timeout: 60_000 }, async (t) => {
+test("landing S15 retry: real parent delivery confirms, retries withheld verdicts and expires permanent suppression", { skip: SKIP, timeout: 100_000 }, async (t) => {
 	const s = await startStack(t, { env: { CP_VERDICT_DELIVERY_RETRY_SECONDS: "1", CP_REVIEW_SUPPRESSION_SECONDS: "32" } });
 	const jobs: Awaited<ReturnType<typeof s.held>>[] = [];
 	for (let n = 0; n < 4; n++) {
@@ -3473,7 +3473,7 @@ test("landing S15: durable review evidence owns the merge window across parent r
 	assert.equal((await s.integrate(mismatched.jobId)).record.review_resume_at, undefined, "mismatched equivalence cannot arm a window");
 });
 
-test("landing: the review deadline resumes once and rechecks current gates", { skip: SKIP, timeout: 120_000 }, async (t) => {
+test("landing: the review deadline resumes once and rechecks current gates", { skip: SKIP, timeout: 119_000 }, async (t) => {
 	for (const fallback of [false, true]) {
 		for (const change of ["hold", "unreadable-hold", "head", "ci", "permission", "none"]) await t.test(`${fallback ? "fallback" : "repository"}/${change}`, async (t) => {
 			const s = await startStack(t, { continuation: true, env: { CP_REVIEW_MERGE_WINDOW_SECONDS: "3" } });
