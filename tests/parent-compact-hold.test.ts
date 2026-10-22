@@ -238,6 +238,24 @@ test("T3(f): an over-threshold run holds every wake, including schedule and send
 	assert.equal(count(/hold released reason=compacted/), 1);
 });
 
+test("the cap timer reads CP_PARENT_COMPACT_HOLD_SECONDS", async (t) => {
+	// A cap that bypassed the knob would still hold at 5 s and fail the release assertion.
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	process.env.CP_PARENT_COMPACT_HOLD_SECONDS = "5";
+	t.after(() => delete process.env.CP_PARENT_COMPACT_HOLD_SECONDS);
+	const count = mark();
+	const p = open();
+	p.fire("agent_start");
+	p.fire("turn_end", { type: "turn_end", message: { role: "assistant", stopReason: "stop" }, toolResults: [] }, OVER);
+	await p.schedule("K1");
+	p.fire("agent_settled", {}, OVER);
+	p.fire("session_before_compact", { reason: "manual" });
+	t.mock.timers.tick(4999);
+	assert.equal(count(/hold released reason=cap_timeout /), 0);
+	t.mock.timers.tick(1);
+	assert.equal(count(/hold released reason=cap_timeout /), 1);
+});
+
 test("T3(g)/(h): failure, start timeout and cap release; three disable; agent_start never releases", async (t) => {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const count = mark();

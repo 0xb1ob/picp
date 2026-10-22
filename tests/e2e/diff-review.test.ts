@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -1053,4 +1053,41 @@ test("S05: only a complete fifth review asking for revisions on a bound PR creat
 			assert.equal(new CheckpointStore(s.home, { kind: "final_fix" }).get(job, { scope: s.repo.head(job).slice(0, 12) }), undefined);
 		});
 	}
+});
+
+
+test("S21: a reviewer decision followed by a run-log failure owes one durable recovery notice", { timeout: 110_000 }, async (t) => {
+	const s = await stack(t);
+	const job = await s.seed({ "app.ts": "export const app = 1;\n" });
+	const script = "s21-finish-failure";
+	const model = s.provider.addScript(script, [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 1" } }] },
+		{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["reviewed"] } }] },
+	]);
+	s.agent.writeModels(s.provider);
+	const started = await s.post.diffReview({ jobId: job, model });
+	assert.ok(isDiffReviewWait(started));
+	await waitFor(() => s.provider.requests(script).length, (n) => n > 0, { timeoutMs: 15_000, what: "reviewer reaching provider" });
+	const events = join(s.home, paths.eventsFile(job));
+	mkdirSync(join(events, ".."), { recursive: true });
+	if (existsSync(events)) renameSync(events, `${events}.saved`);
+	mkdirSync(events);
+	s.post.reviewRuns.handBack(started.key);
+	await s.post.reviewRuns.settled(started.key);
+	assert.equal(existsSync(join(s.home, paths.reviewFile(job, 1))), true, "decision persisted before log failure");
+	assert.equal(s.wakes.length, 0, "no safe cp-verdict after partial finish");
+	const again = new CommandPost({ home: s.home, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	t.after(() => again.shutdown());
+	const delivered = again.drainDurableWakeups(() => {});
+	assert.equal(delivered.length, 1);
+	assert.equal(delivered[0]?.kind, "recovery");
+	assert.equal(delivered[0]?.job_id, job);
+	assert.deepEqual(delivered[0]?.keys, [job]);
+	assert.match(delivered[0]?.id ?? "", new RegExp(`^review-finish:${job}:review:1:`));
+	assert.match(delivered[0]?.content ?? "", /a decision was already written/);
+	assert.match(delivered[0]?.content ?? "", /action:status/);
+	assert.match(delivered[0]?.content ?? "", /never merge on this notice/);
+	assert.doesNotMatch(delivered[0]?.content ?? "", /poll/i);
+	again.confirmDurableWakeups(delivered.map((entry) => entry.id));
+	assert.deepEqual(again.drainDurableWakeups(() => assert.fail("confirmed finish failure replayed")), []);
 });

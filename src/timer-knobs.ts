@@ -7,7 +7,7 @@ import {
 } from "./contracts.ts";
 
 /** A positive finite number of seconds, else the default: a typo must not zero a timer. */
-function knobMs(name: string, defaultMs: number, env: NodeJS.ProcessEnv): number {
+export function knobMs(name: string, defaultMs: number, env: NodeJS.ProcessEnv): number {
 	const raw = env[name];
 	if (raw === undefined || raw.trim() === "") return defaultMs;
 	const parsed = Number(raw);
