@@ -2,12 +2,12 @@
 
 Ownership: the remaining behavior-05 files are owned by P3c-rest and re-sliced by operator decision ask-c77a4f32b23b (Raise cap to ~$2,700 on Sol); slice list operator/scratch/e2e-migration-slices.md; rule v2 applies.
 
-Main-session carry-in: cap-expiry declarations stay pending-fix and their original file stays whole. The missing public control is `PARENT_COMPACT_HOLD_MS = 270_000` in `src/parent-compact-hold.ts`; `compactionStarted()` arms it unconditionally. No test-only hooks or duration exception.
+PR #447 supplied `CP_PARENT_COMPACT_HOLD_SECONDS`. Parent e2e cases now use `5` in the parent home environment. Cap expiry and failure recovery pass below two minutes per case; reverting the knob consumer fails the cap-release wait. Whole compact unit files remain until declaration mapping and all control replays finish.
 
 | Original declaration | Status | Evidence |
 |---|---|---|
-| parent-compact-hold: T3(a) | pending-fix | Includes cap expiry; hardcoded 270,000 ms exceeds two-minute case limit |
-| parent-compact-hold: T3(g)/(h) | pending-fix | Includes cap expiry; same missing public timer control |
+| parent-compact-hold: T3(a) | mapping in progress | Public cap-expiry flow and parent-cap.patch control implemented; original stays whole pending accounting/replay |
+| parent-compact-hold: T3(g)/(h) | mapping in progress | Public failure/start-timeout/cap-release/reenable flow and controls implemented; original stays whole pending accounting/replay |
 | operator-context: fresh main session | mapped | S24-context; S24-oldest fails newest-path assertion |
 | operator-context: empty home | retained verbatim | tests/operator-context-retained.test.ts: bridge startup creates control state before context loading; no public entry point calls only the builder on a nonexistent home. S24-empty additionally pins absent preference files and no custom context |
 | operator-context: fresh/resumed bridge | mapped | S24-context; S24-resume fails SHOULD NOT RELOAD assertion |
@@ -24,4 +24,4 @@ Context file: 3 original declarations = 2 mapped + 1 retained (33.33%); 1 origin
 
 Dashboard file: all 3 declarations mapped, 0 retained, 1 wholly deleted file. Scenarios S24-dashboard-hold/rehand/terminal use the real bridge's automatic compact-request ordering, actual RPC compaction events and a boundary input dropper. The hold case edits the queued message during compaction and requires exactly one later injection/consumption. Removing the macrotask deferral (historical df24d7e) fails queue_edit with 409 already sent. Removing the idle callback fails eventual delivery with request,queued. Removing the second handoff fails delivered with actual failed; permitting a third handoff fails terminal failed with actual delivered. Fixed three bridge cases pass in 15 seconds. Controls and hashes are in the main manifest; logs remain under `.pi-command-post/s24-evidence/`. Inspected historical production diffs df24d7e and 7ff5861 before retirement.
 
-Completed-file totals so far: 6 original declarations = 5 mapped + 1 retained (16.67%); 1 wholly deleted file, 1 mixed original retired with retained replacement. Two parent cap declarations are pending-fix; other owned declarations remain in their whole original files until mapped.
+Completed-file totals so far: 6 original declarations = 5 mapped + 1 retained (16.67%); 1 wholly deleted file, 1 mixed original retired with retained replacement. Both parent cap declarations now have public proof using the knob; compact unit files stay whole until declaration accounting/control replay. Checkpoint full files pass: parent compaction 7 cases, operator compaction 24 cases, plus typecheck; all individual cases below two minutes.

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CP_BRIDGE_EXTENSION, MockProvider, createAgentDir, createScratchHome, startRpc } from "../harness/index.ts";
@@ -50,7 +50,7 @@ test("S24 compact: queued handoff survives tool replies and reaches one summariz
 		} }] },
 		{ kind: "text", text: "S24 tool-result reply completed." },
 		{ kind: "text", text: "S24 summary." },
-	]);
+	], { onExhausted: "repeat" });
 	const agent = createAgentDir({ provider, settings: { compaction: { enabled: false, keepRecentTokens: 1 } } });
 	const rpc = startRpc({ cwd: home.path, env: { ...agent.env, PI_HOME: home.path, CP_HOME: home.path },
 		args: ["--no-extensions", "-e", CP_BRIDGE_EXTENSION, "--no-session", "--model", model] });
@@ -75,6 +75,7 @@ test("S24 compact: queued handoff survives tool replies and reaches one summariz
 	assert.ok(summarizer.includes(instructions));
 	assert.ok(summarizer.includes(handoff));
 	assert.doesNotMatch(summarizer, /Latest operator handoff directory:/);
+	assert.equal(provider.requests("s24-queued").length, 4);
 	assert.equal(provider.remaining("s24-queued"), 0);
 });
 
@@ -219,6 +220,7 @@ test("S24 compact: skipped and failed summarizers spend the rejection streak onc
 
 test("S24 compact: held relays remain unacked for health, then enter context once after compaction", { timeout: 90_000 }, async (t) => {
 	for (const cancelled of [false, true]) {
+		await t.test(cancelled ? "cancelled compaction" : "completed compaction", async (t) => {
 	const home = createScratchHome();
 	const provider = await MockProvider.start();
 	const settings = join(home.path, LAYOUT.data, "operator.json");
@@ -266,6 +268,7 @@ test("S24 compact: held relays remain unacked for health, then enter context onc
 	assert.equal(lines.filter((line) => line.type === "emit" && line.id === id).length, 1);
 	assert.equal(lines.filter((line) => line.type === "ack" && line.id === id).length, 1);
 	await rpc.close();
+		});
 	}
 });
 
@@ -273,6 +276,7 @@ test("S24 compact: held relays remain unacked for health, then enter context onc
 test("S24 compact: manual summarizers receive the latest handoff and read failures preserve the fallback", { timeout: 110_000 }, async (t) => {
 	for (const keepRecentTokens of [1, 200]) {
 		for (const broken of [false, true]) {
+			await t.test(`${keepRecentTokens}/${broken}`, async (t) => {
 			const home = createScratchHome();
 			const provider = await MockProvider.start();
 			const directory = join(home.path, LAYOUT.state, "operator");
@@ -324,6 +328,7 @@ test("S24 compact: manual summarizers receive the latest handoff and read failur
 				assert.equal(rpc.records().filter((r) => r.type === "message_start" && (r.message as { customType?: string })?.customType === "operator-compact-request").length, 0);
 			}
 			await rpc.close();
+			});
 		}
 	}
 });
@@ -477,4 +482,72 @@ test("S24 compact: an ignored threshold request compacts automatically and a low
 	assert.equal(rpc.records().filter((r) => r.type === "message_start" && (r.message as { customType?: string })?.customType === "operator-compact-request").length, 2);
 	assert.match(JSON.stringify(provider.requests("s24-backstop")), /standing mandate/);
 	assert.equal(provider.remaining("s24-backstop"), 0);
+});
+
+
+test("S24 compact: SDK threshold and overflow summarizers receive handoff enrichment", { timeout: 90_000 }, async (t) => {
+	for (const reason of ["threshold", "overflow"] as const) {
+		await t.test(reason, async (t) => {
+			const home = createScratchHome();
+			const directory = join(home.path, LAYOUT.state, "operator");
+			mkdirSync(directory, { recursive: true });
+			const handoff = join(directory, "compact-2026-09-26T00:00:00.000Z.md");
+			writeFileSync(handoff, instructions);
+			const provider = await MockProvider.start();
+			const model = provider.addScript("s24-sdk-enrich", [
+				{ kind: "text", text: "S24 seed work." },
+				reason === "threshold" ? { kind: "text", text: "S24 threshold work.", usage: { prompt_tokens: 199000, completion_tokens: 1 } }
+					: { kind: "error", status: 400, message: "maximum context length is 200000 tokens. You requested 250000 tokens." },
+				{ kind: "text", text: "S24 SDK summary." }, { kind: "text", text: "S24 SDK turn-prefix summary." },
+				{ kind: "text", text: "S24 SDK retry answered." },
+			], { onExhausted: "repeat" });
+			const agent = createAgentDir({ provider, settings: { compaction: { enabled: true, keepRecentTokens: 1 }, retry: { enabled: false } } });
+			const rpc = startRpc({ cwd: home.path, env: { ...agent.env, PI_HOME: home.path, CP_HOME: home.path },
+				args: ["--no-extensions", "-e", CP_BRIDGE_EXTENSION, "--no-session", "--model", model] });
+			t.after(async () => { await rpc.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+			rpc.send({ type: "prompt", id: "seed", message: "S24 seed compactable work." });
+			await rpc.waitFor((r) => r.type === "agent_settled", 30_000);
+			const from = rpc.records().length;
+			rpc.send({ type: "prompt", id: "compact", message: "S24 exercise the SDK compaction path." });
+			await rpc.waitFor((r) => r.type === "agent_settled" && rpc.records().indexOf(r) >= from, 30_000);
+			const compact = rpc.records().find((r) => r.type === "compaction_start");
+			assert.ok(compact, JSON.stringify(rpc.records().map((r) => r.type)));
+			assert.equal(compact.reason, reason, JSON.stringify(compact));
+			const input = JSON.stringify(provider.requests("s24-sdk-enrich").slice(2).map((request) => request.body));
+			assert.match(input, /standing mandate/);
+			assert.ok(input.includes(instructions));
+			assert.ok(input.includes(handoff));
+		});
+	}
+});
+
+
+test("S24 compact: a failed handoff write refuses the tool and never leaves compaction pending", { timeout: 90_000 }, async (t) => {
+	const home = createScratchHome();
+	const directory = join(home.path, LAYOUT.state, "operator");
+	const settings = join(home.path, LAYOUT.data, "operator.json");
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(settings, JSON.stringify({ compact_at_tokens: 1 }));
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s24-write-failed", [
+		{ kind: "tool_calls", calls: [{ name: "self_compact", args: () => {
+			rmSync(directory, { recursive: true, force: true });
+			writeFileSync(directory, "not a directory");
+			return { instructions };
+		} }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: () => {
+			writeFileSync(settings, JSON.stringify({ compact_at_tokens: 100_000_000 }));
+			return { command: "true" };
+		} }] },
+		{ kind: "text", text: "S24 write refusal answered." },
+	], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider, settings: { compaction: { enabled: false } } });
+	const rpc = startRpc({ cwd: home.path, env: { ...agent.env, PI_HOME: home.path, CP_HOME: home.path },
+		args: ["--no-extensions", "-e", CP_BRIDGE_EXTENSION, "--no-session", "--model", model] });
+	t.after(async () => { await rpc.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	rpc.send({ type: "prompt", id: "write", message: "S24 attempt a handoff while the state directory is unavailable." });
+	await rpc.waitFor((r) => r.type === "agent_settled", 30_000);
+	assert.match(JSON.stringify(provider.requests("s24-write-failed")[1]?.body), /handoff write failed/);
+	assert.equal(rpc.records().filter((r) => r.type === "compaction_start").length, 0);
+	assert.equal(readFileSync(directory, "utf8"), "not a directory");
 });

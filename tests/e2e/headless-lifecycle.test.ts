@@ -683,3 +683,38 @@ test("rpc bridge: a queued message whose handoff is dropped twice ends failed, n
 	assert.equal(run.dropped(), 2);
 	assert.equal(run.consumed().length, 0);
 });
+
+
+test("rpc parent S24: a CI fleet wake stays held across settlement until manual compaction", { timeout: 90_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "in_progress" });
+	const provider = await MockProvider.start();
+	mkdirSync(join(held.home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(held.home.path, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 500 }));
+	const model = provider.addScript("s24-parent-ci", [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "true" } }], usage: { prompt_tokens: 1000, completion_tokens: 1 } },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "node -e 'setTimeout(() => {}, 4000)'" } }], usage: { prompt_tokens: 1000, completion_tokens: 1 } },
+		{ kind: "text", text: "S24 CI parent settled.", usage: { prompt_tokens: 1000, completion_tokens: 1 } },
+		{ kind: "text", text: "S24 CI parent summary.", usage: { prompt_tokens: 1000, completion_tokens: 1 } },
+		{ kind: "text", text: "S24 CI wake answered.", usage: { prompt_tokens: 1000, completion_tokens: 1 } },
+	], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider, settings: { compaction: { enabled: false, keepRecentTokens: 1 } } });
+	const child = startPiChild({ cwd: held.home.path, model, extensions: [COMMAND_POST_EXTENSION],
+		env: { ...agent.env, CP_HOME: held.home.path, PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "1", CP_PARENT_COMPACT_HOLD_SECONDS: "5" } });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); held.home.cleanup(); held.repo.cleanup(); });
+	child.send({ type: "prompt", id: "busy", message: "S24 finish this run before answering the CI wake." });
+	await waitFor(() => provider.requests("s24-parent-ci").length, (n) => n >= 2, { timeoutMs: 30_000, what: "over-threshold tool round" });
+	writeFileSync(held.stateFile, "green\n");
+	await notified(child, /CI\/PR OBSERVED/);
+	await child.waitFor((r) => r.type === "agent_settled", 30_000);
+	const ciWakes = () => child.records().filter((r) => r.type === "message_start" && (r.message as { customType?: string })?.customType === "cp-ci");
+	assert.equal(ciWakes().length, 0);
+	const log = join(held.home.path, LAYOUT.state, "daemon.log");
+	assert.match(readFileSync(log, "utf8"), /hold engaged phase=busy/);
+	child.send({ type: "compact", id: "compact-ci" });
+	const compact = await child.waitFor((r) => r.type === "response" && r.id === "compact-ci", 30_000);
+	assert.equal(compact.success, true, JSON.stringify(compact));
+	await child.waitFor((r) => r.type === "message_start" && ciWakes().length >= 1, 30_000);
+	assert.equal(ciWakes().length, 1);
+	assert.match(JSON.stringify(ciWakes()), /cp-held/);
+	assert.ok(child.records().findIndex((r) => r.type === "compaction_end") < child.records().indexOf(ciWakes()[0]!), JSON.stringify(child.records().map((r, index) => ({ index, type: r.type, id: r.id, customType: (r.message as { customType?: string })?.customType })).filter((r) => r.customType || r.type.includes("compaction") || r.type === "agent_settled" || r.type === "response")));
+});

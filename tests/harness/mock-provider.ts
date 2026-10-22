@@ -41,8 +41,8 @@ export interface MockToolCall {
 }
 
 export type ScriptStep =
-	/** Assistant text, `finish_reason: "stop"`. */
-	| { kind: "text"; text: string; usage?: MockUsage }
+	/** Includes length stops for effective-context compaction checks. */
+	| { kind: "text"; text: string; usage?: MockUsage; finishReason?: "stop" | "length" }
 	/** Assistant tool calls, `finish_reason: "tool_calls"`. */
 	| { kind: "tool_calls"; calls: MockToolCall[]; text?: string; usage?: MockUsage }
 	/** Settles with no content at all — drives `agent_empty_output`. */
@@ -303,7 +303,7 @@ export class MockProvider {
 	private nonStreamBody(modelId: string, step: ScriptStep, request: RecordedRequest): unknown {
 		const id = nextId("chatcmpl");
 		const message: Record<string, unknown> = { role: "assistant", content: null };
-		let finish = "stop";
+		let finish: string = step.kind === "text" ? (step.finishReason ?? "stop") : "stop";
 		if (step.kind === "text") {
 			message.content = step.text;
 		} else if (step.kind === "tool_calls") {
@@ -349,7 +349,7 @@ export class MockProvider {
 
 		send(frame({ delta: { role: "assistant" }, finish_reason: null }));
 
-		let finish = "stop";
+		let finish: string = step.kind === "text" ? (step.finishReason ?? "stop") : "stop";
 		if (step.kind === "text") {
 			for (const piece of splitForStreaming(step.text)) {
 				send(frame({ delta: { content: piece }, finish_reason: null }));
