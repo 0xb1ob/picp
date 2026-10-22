@@ -1,0 +1,21 @@
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..bebcd5d 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -182,15 +182,7 @@ export async function recheckDeferredBounded(
+ 		(error: unknown) => ({ raised: [] as AwaitingItem[], reason: `deferred rows not re-gated: ${(error as Error).message}` }),
+ 	);
+ 	let timedOut = false;
+-	const outcome = await withDeadline(attempt, ms, () => {
+-		// Only the timeout branch reaches this: `attempt` never rejects, and
+-		// `withDeadline` calls `onTimeout` for a rejection too.
+-		timedOut = true;
+-		return {
+-			raised: [] as AwaitingItem[],
+-			reason: `deferred rows not re-gated: the re-gate did not finish within ${ms}ms`,
+-		};
+-	});
++	const outcome = await attempt;
+ 	if ("reason" in outcome && outcome.reason) report(options.onFailure, outcome.reason);
+ 	if (timedOut) {
+ 		// Exactly one continuation, attached exactly once, on a promise that cannot

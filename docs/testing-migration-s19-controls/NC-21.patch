@@ -1,0 +1,13 @@
+diff --git a/src/awaiting.ts b/src/awaiting.ts
+index 1e48c0d..98a792d 100644
+--- a/src/awaiting.ts
++++ b/src/awaiting.ts
+@@ -715,7 +715,7 @@ export class AwaitingStore {
+ 				applyGate(item, !promote, gate, at);
+ 				(promote ? raised : stillDeferred).push(item);
+ 			}
+-			return items;
++			return items.filter((item) => verdicts.has(item.id));
+ 		});
+ 		return { raised, stillDeferred, orphaned, resolved, verdicts };
+ 	}

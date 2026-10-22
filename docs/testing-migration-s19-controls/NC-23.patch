@@ -1,0 +1,12 @@
+diff --git a/extensions/command-post/wakeup-surfaces.ts b/extensions/command-post/wakeup-surfaces.ts
+index 7fb97bd..88c58e4 100644
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -516,7 +516,6 @@ export function createWakeupSurfaces(
+ 				onFailure: (reason) => {
+ 					operatorNotify(s.live, `pi-command-post: ${reason}`, "warning");
+ 				},
+-				onLate: announceRaised,
+ 			}),
+ 		);
+ 	};

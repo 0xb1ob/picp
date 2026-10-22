@@ -1,0 +1,7 @@
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..24e80a8 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -40 +40 @@ export class SendFirstGate<Wake> {
+-		if (cleanSegmentEnd(event)) this.#unanswered.clear();
++		this.#unanswered.clear();
