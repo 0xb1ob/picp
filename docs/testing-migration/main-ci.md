@@ -9,9 +9,9 @@
 <!-- manifest:scenarios -->
 | ID | E2E file | Test name |
 |---|---|---|
-| 05-main-red | `tests/e2e/landing.test.ts` | landing: main-red integration holds stale heads and permits only a current green fix-forward under its own mandate |
-| 05-main-scope | `tests/e2e/landing.test.ts` | landing: main CI scope skips inactive grants and login faults preserve latches until the next successful login |
-| 05-main-corrupt | `tests/e2e/landing.test.ts` | landing: main latch writes refuse corruption introduced during an Actions read |
+| 05-main-red | `tests/e2e/landing-ci-watch.test.ts` | landing: main-red integration holds stale heads and permits only a current green fix-forward under its own mandate |
+| 05-main-scope | `tests/e2e/landing-ci-watch.test.ts` | landing: main CI scope skips inactive grants and login faults preserve latches until the next successful login |
+| 05-main-corrupt | `tests/e2e/landing-ci-watch.test.ts` | landing: main latch writes refuse corruption introduced during an Actions read |
 | 05-main-deadlines | `tests/e2e/landing.test.ts` | landing: Actions deadlines stop a hung request and share the budget across pages |
 <!-- /manifest:scenarios -->
 
