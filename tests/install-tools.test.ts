@@ -211,7 +211,7 @@ test("describeStep renders a runnable command for every non-manual step kind", (
 		describeStep({ kind: "npm", pkg: "@scope/pkg", flags: ["-g"] }),
 		"npm install -g @scope/pkg",
 	);
-	assert.equal(describeStep({ kind: "curl", url: "https://example.com/install.sh" }), 'curl -fsSL "https://example.com/install.sh" | sh');
+	assert.equal(describeStep({ kind: "release", repo: "o/tool", version: "1.2.3" }), "download o/tool v1.2.3 from its GitHub release");
 	assert.equal(describeStep({ kind: "manual", summary: "do it by hand" }), "do it by hand");
 });
 
