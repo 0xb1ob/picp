@@ -42,14 +42,17 @@ if (readFileSync(${JSON.stringify(stateFile)}, "utf8").trim() === "offline") {
   process.exit(1);
 }
 if (args[0] === "api" && (args[1] || "").includes("/actions/runs?head_sha=")) {
-  const state = readFileSync(${JSON.stringify(stateFile)}, "utf8").trim();
-  const run = state === "green" || state === "red"
-    ? { id: 7, run_attempt: 1, conclusion: state === "red" ? "failure" : "success", status: "completed", head_sha: head, name: "ci" }
-    : { id: 7, run_attempt: 1, conclusion: null, status: "in_progress", head_sha: head, name: "ci" };
+  const [state, delay] = readFileSync(${JSON.stringify(stateFile)}, "utf8").trim().split(":");
+  appendFileSync(${JSON.stringify(`${logFile}.states`)}, JSON.stringify({ state, at: Date.now() }) + "\\n");
+  if (Number(delay)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(delay));
+  if (state === "broken") { process.stderr.write("gh: 403\\n"); process.exit(1); }
+  const run = ["green", "green2", "wrong-head"].includes(state)
+    ? { id: state === "green2" ? 8 : 7, run_attempt: 1, conclusion: "success", status: "completed", head_sha: state === "wrong-head" ? "a".repeat(40) : head, name: "ci" }
+    : { id: 7, run_attempt: 1, conclusion: state === "red" ? "failure" : null, status: state === "red" ? "completed" : "in_progress", head_sha: head, name: "ci" };
   process.stdout.write(JSON.stringify({ total_count: args[1].includes(head) ? 1 : 0, workflow_runs: args[1].includes(head) ? [run] : [] }));
   process.exit(0);
 }
-if (args[0] === "api" && (args[1] || "").includes("/actions/runs/7/attempts/1/jobs?")) {
+if (args[0] === "api" && (args[1] || "").includes("/jobs?")) {
   process.stdout.write(JSON.stringify({ total_count: 0, jobs: [] }));
   process.exit(0);
 }
@@ -90,7 +93,7 @@ function writeReviewPending(home: string, headSha: string): void {
 	writeFileSync(file, `${JSON.stringify(pending)}\n`);
 }
 
-export async function seedHeldHome(options: { ciState: "green" | "red" | "in_progress"; review?: "pass" | "pending" }) {
+export async function seedHeldHome(options: { ciState: "green" | "red" | "in_progress"; review?: "pass" | "pending" | "none" }) {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n" } });
 	repo.git("checkout", "-b", "cp-held");
@@ -116,7 +119,7 @@ export async function seedHeldHome(options: { ciState: "green" | "red" | "in_pro
 		const outbox = new DurableWakeupOutbox({ home: home.path });
 		outbox.enqueue({ id: `recovery:${JOB}`, kind: "recovery", job_id: JOB, content: "RESTART RECOVERY — relayed by the previous parent", keys: [JOB] });
 		outbox.confirmDelivered([`recovery:${JOB}`]);
-	} else writeReviewPass(home.path, headSha);
+	} else if (options.review !== "none") writeReviewPass(home.path, headSha);
 	const store = new AwaitingStore({ home: home.path, mergeAsk: createMergeAskProbe({
 		head: async () => ({ sha: headSha }),
 		runs: async () => options.ciState === "green"
@@ -133,6 +136,6 @@ export async function seedHeldHome(options: { ciState: "green" | "red" | "in_pro
 	writeFileSync(stateFile, `${options.ciState}\n`);
 	writeFileSync(headFile, `${headSha}\n`);
 	writeFileSync(ghLog, "");
-	writeFakeGh(bin, headFile, stateFile, ghLog, options.review === "pending");
-	return { home, repo, headSha, declared, bin, stateFile, headFile, ghLog };
+	writeFakeGh(bin, headFile, stateFile, ghLog, options.review === "pending" || options.review === "none");
+	return { home, repo, headSha, declared, store, bin, stateFile, headFile, ghLog };
 }

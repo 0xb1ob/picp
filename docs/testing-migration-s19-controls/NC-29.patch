@@ -1,0 +1,13 @@
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+index c6cf685..303e9b4 100644
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -123,7 +123,7 @@ export const HANDBACK_MAX_WAIT_MS = 60_000;
+  * wait is bounded and the wake-up is delivered when the bound is spent — the
+  * hook orders work *before* delivery, it never gets a veto over it.
+  */
+-export const BEFORE_WAKEUP_MAX_WAIT_MS = 30_000;
++export const BEFORE_WAKEUP_MAX_WAIT_MS = 0;
+ 
+ export class ReviewRunsError extends Error {
+ 	readonly pending: PendingReview;

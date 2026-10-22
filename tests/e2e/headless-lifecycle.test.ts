@@ -3,9 +3,10 @@
  * with no TUI; a mid-turn wake-up is queued, never dropped.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { AwaitingStore } from "../../src/awaiting.ts";
 import { isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { CiWatchStore } from "../../src/ci-watch.ts";
@@ -34,13 +35,18 @@ import { JOB, PR, seedHeldHome, writeReviewPass } from "../harness/held-home.ts"
 
 test("/doctor under rpc names the mode and running timers", { timeout: 60_000 }, async (t) => {
 	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s19-doctor", [{ kind: "text", text: "Ready." }]);
+	const agent = createAgentDir({ provider });
 	const rpc = startRpc({
 		cwd: REPO_ROOT,
-		args: ["--no-session", "-e", COMMAND_POST_EXTENSION],
-		env: { CP_HOME: home.path },
+		args: ["--no-session", "--model", model, "-e", COMMAND_POST_EXTENSION],
+		env: { ...agent.env, CP_HOME: home.path },
 	});
 	t.after(async () => {
 		await rpc.close();
+		agent.cleanup();
+		await provider.stop();
 		home.cleanup();
 	});
 	rpc.send({ id: "doc", type: "prompt", message: "/doctor" });
@@ -611,3 +617,102 @@ test("S20: overlapping green sweeps leave one owner for a delayed continuation r
 	assert.equal(listPendingReviews(held.home.path, JOB).length, 1);
 	await parent.close();
 });
+
+for (const [mode, name] of [
+	["ready", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: ready"],
+	["revise", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: revise"],
+	["red", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: red"],
+	["running", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: running"],
+	["late", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: late"],
+	["late-failure", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: late-failure"],
+] as const) {
+test(name, { timeout: 120_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "in_progress", review: "none" });
+	const late = mode === "late" || mode === "late-failure";
+	if (late) for (const suffix of ["second", "third"]) await held.store.declareGated({ type: "approval",
+		decision: `Ship cp-held (PR 58), ${suffix}?`, subject: `s19-${suffix}`, why: "S19 bounded recheck", blocks: "delivery", job_id: JOB });
+	const provider = await MockProvider.start();
+	const reviewer = provider.addScript("s19-deferred-reviewer", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: {
+		job_id: JOB, verdict: mode === "revise" ? "revise" : "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },
+		reasons: mode === "revise" ? ["[severity: high] [confidence: high] missing coverage"] : ["Reviewed the current diff"],
+		...(mode === "revise" ? { revisions: ["Add the missing coverage"] } : {}),
+	} }] }]);
+	const diskSnapshot = () => ({ queries: readFileSync(held.ghLog, "utf8").split("\n").filter((line) => line.includes("/actions/runs?head_sha=")).length,
+		awaiting: readFileSync(held.store.file, "utf8") });
+	const snapshots: Array<{ state?: string; request: string; queries: number; awaiting: string }> = [];
+	const capture = (request: { body: unknown }) => {
+		snapshots.push({ ...diskSnapshot(), state: new AwaitingStore({ home: held.home.path }).list("open")[0]?.state,
+			request: JSON.stringify((request.body as { messages: unknown[] }).messages.slice(-2)) });
+		return { action: "list" };
+	};
+	const model = provider.addScript("s19-deferred-parent", [
+		{ kind: "tool_calls", calls: [{ name: "cp_review", args: () => {
+			snapshots.push({ ...diskSnapshot(), state: new AwaitingStore({ home: held.home.path }).list("deferred")[0]?.state, request: "before review" });
+			return { job_id: JOB, model: reviewer };
+		} }] },
+		{ kind: "text", text: "Review started." },
+		{ kind: "tool_calls", calls: [{ name: "cp_awaiting", args: capture },
+			...(mode === "ready" ? [{ name: "cp_status_block", args: {} }] : [])] },
+		{ kind: "text", text: "The reviewed decision is ready." },
+	]);
+	const agent = createAgentDir({ provider });
+	const recovery = new DurableWakeupOutbox({ home: held.home.path });
+	recovery.enqueue({ id: `recovery:${JOB}`, kind: "recovery", job_id: JOB, content: "Previously delivered recovery", keys: [JOB] });
+	recovery.confirmDelivered([`recovery:${JOB}`]);
+	new IntegrationHolds(held.home.path).hold(JOB, "S19 isolates verdict delivery before integration");
+	writeReviewPass(held.home.path, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
+		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "3600" }, extensions: [COMMAND_POST_EXTENSION] });
+	const awaitingDir = dirname(new AwaitingStore({ home: held.home.path }).file);
+	t.after(async () => { chmodSync(awaitingDir, 0o700); await child.close(); agent.cleanup(); await provider.stop(); held.repo.cleanup(); held.home.cleanup(); });
+	await waitFor(() => new CiWatchStore({ home: held.home.path }).job(JOB)?.last_checked_at, (at) => !!at,
+		{ timeoutMs: 30_000, what: "initial running-CI catch-up completes" });
+	writeFileSync(held.stateFile, mode === "red" ? "red\n" : mode === "running" ? "in_progress\n" : late ? "green:12000\n" : "green\n");
+	await child.prompt("Review the held job and handle its verdict.");
+	if (mode === "late-failure") {
+		await waitFor(() => existsSync(join(held.home.path, paths.reviewFile(JOB, 2))), (written) => written,
+			{ timeoutMs: 30_000, what: "review verdict persists before refusing the later awaiting write" });
+		chmodSync(awaitingDir, 0o500);
+	}
+	await waitFor(() => snapshots.length, (count) => count === 2, { timeoutMs: 120_000, what: "actual reviewer verdict reaches parent model" });
+	assert.equal(snapshots[0]?.state, "deferred", "stale review must leave current green head deferred");
+	assert.equal(snapshots[1]?.state, mode === "ready" ? "open" : undefined,
+		`row state when actual verdict reaches parent: ${JSON.stringify(new AwaitingStore({ home: held.home.path }).read().items.map(({ state, deferred_reason }) => ({ state, deferred_reason })))}`);
+	assert.match(snapshots[1]?.request ?? "", new RegExp(`diff review attempt 2: ${mode === "revise" ? "revise" : "pass"}`));
+	if (mode === "revise") {
+		assert.equal(snapshots[1]!.queries, snapshots[0]!.queries, "a revise verdict must not read the CI gate");
+		assert.equal(snapshots[1]!.awaiting, snapshots[0]!.awaiting, "a revise verdict must leave awaiting bytes unchanged");
+	}
+	if (mode === "late") {
+		const readyNotices = () => child.records().filter((record) => record.type === "extension_ui_request" && String(record.message).includes("3 decisions are now ready"));
+		await waitFor(readyNotices, (records) => records.length === 1, { timeoutMs: 60_000, what: "late gate announces actual opened decisions" });
+		assert.equal(new AwaitingStore({ home: held.home.path }).list("open").length, 3);
+		const notice = String(readyNotices()[0]!.message);
+		assert.ok(notice.length <= 320 && !notice.includes("\n"), "late notice stays one bounded line");
+	}
+	assert.equal(new AwaitingStore({ home: held.home.path }).read().items.length, late ? 3 : 1, "recheck preserves decision identity");
+	await waitFor(() => provider.remaining("s19-deferred-parent"), (remaining) => remaining === 0, { timeoutMs: 90_000, what: "parent consumes the decision reply" });
+	if (mode === "late-failure") {
+		assert.equal(new AwaitingStore({ home: held.home.path }).list("deferred").length, 3, "failed late write opens nothing");
+		const failures = child.records().filter((record) => record.type === "extension_ui_request" && String(record.message).includes("deferred rows not re-gated"));
+		assert.equal(failures.length, 1, "late failure must not report a second warning");
+		assert.ok(!child.records().some((record) => String(record.message).includes("decisions are now ready")));
+		chmodSync(awaitingDir, 0o700);
+	}
+	if (mode === "revise" || mode === "red" || mode === "running") {
+		assert.equal(new AwaitingStore({ home: held.home.path }).list("deferred").length, 1);
+		assert.equal(child.records().filter((record) => record.type === "extension_ui_request" && String(record.message).includes("decision is now ready")).length, 0);
+	}
+	assert.equal(provider.remaining("s19-deferred-reviewer"), 0);
+	if (mode === "ready") {
+		await new Promise((done) => setTimeout(done, 250));
+		assert.equal(provider.requests("s19-deferred-parent").length, 4, "in-bound completion must not trigger a second late turn");
+		const notices = child.records().filter((record) => record.type === "extension_ui_request" && String(record.message).includes("decision is now ready"));
+		assert.equal(notices.length, 1, "one opening produces one operator notice");
+		const notice = String(notices[0]!.message);
+		assert.match(notice, /Ship cp-held \(PR 58\)/);
+		assert.match(notice, /cp_decide/);
+		assert.ok(notice.length <= 300 && !notice.includes("\n"));
+	}
+});
+}

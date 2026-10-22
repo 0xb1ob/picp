@@ -1,0 +1,5 @@
+--- a/src/escalation-relay-watch.ts
++++ b/src/escalation-relay-watch.ts
+@@ -36 +36 @@
+-		.filter((item) => !inOutbox(ids, item.id));
++		.filter(() => true);
