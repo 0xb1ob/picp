@@ -10,7 +10,7 @@ import { HeldRelease } from "../src/held-release.ts";
 import { readEventLog } from "../src/run-artifacts.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { SpawnSafetyError } from "../src/worker-manager.ts";
-import { createScratchHome, type FakeFleet, fakeWorker, fakeWorkerManager } from "./harness/index.ts";
+import { createScratchHome, type FakeFleet, fakeWorker, fakeWorkerManager, waitFor } from "./harness/index.ts";
 
 function held(jobId: string, overrides: Partial<FleetRecord> = {}): FleetRecord {
 	return {
@@ -131,7 +131,8 @@ test("4B1-T2: releasable keeps only live, idle, not-stopping held ship/pr author
 test("4B1: authors reported in the same second are released in fleet order, not id order", async (t) => {
 	const b = await bench(t, 20, [held("cp-z-first"), held("cp-a-second")]);
 	for (const id of ["cp-z-first", "cp-a-second"]) b.workers.spawn(id);
-	assert.deepEqual(b.release.releasable(), ["cp-z-first", "cp-a-second"]);
+	// The e2e wait of landing "spawn pressure": a tie order never changes, so on the old code this timed out.
+	await waitFor(() => b.release.releasable().join(), (order) => order === "cp-z-first,cp-a-second", { timeoutMs: 300 });
 });
 
 test("4B1-T2: a script record is never releasable, even one shaped as a held ship/pr author", (t) => {
