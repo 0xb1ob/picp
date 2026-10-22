@@ -27,6 +27,7 @@
  */
 
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { assertNoHostGh } from "./gh-stub.ts";
 
 /** Grace per shutdown step: stdin EOF, then SIGTERM, then SIGKILL. */
 const CLOSE_STEP_MS = 5_000;
@@ -77,10 +78,16 @@ export interface StartRpcOptions {
 	env?: NodeJS.ProcessEnv;
 }
 
+function spawnEnv(extra: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
+	const env = { ...process.env, ...extra };
+	assertNoHostGh(env.PATH);
+	return env;
+}
+
 export function startRpc(options: StartRpcOptions): RpcSession {
 	const child: ChildProcessWithoutNullStreams = spawn("pi", ["--mode", "rpc", ...(options.args ?? [])], {
 		cwd: options.cwd,
-		env: { ...process.env, ...options.env },
+		env: spawnEnv(options.env),
 		stdio: ["pipe", "pipe", "pipe"],
 	}) as ChildProcessWithoutNullStreams;
 
