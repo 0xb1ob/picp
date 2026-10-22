@@ -7586,7 +7586,7 @@ and it is why the fix moves the state rather than the reset.
 The other branch is pinned by a test rather than assumed away: if a rebind ever
 *did* produce a new id, the contract for a new session applies — the set is
 reported once, nothing throws, and the previous session's entry survives
-untouched in the file (`tests/shipped-seen.test.ts`).
+untouched in the file (`tests/e2e/wake-delivery.test.ts`, S20 shipped scenario).
 
 **A corrupt file is degraded for one render, not forever.** `read()` throws on
 an invalid document, and `record()` reads before it writes — so without care one
@@ -7605,7 +7605,7 @@ rename) — the mechanism cp-nqj established for every whole-file write here (§
 write ever truncates a memory file), because `writeFileSync` opens `O_TRUNC` and
 a kill between the open and the write leaves nothing; `durableAppend` is the
 wrong half of that precedent for a document that is rewritten rather than added
-to. A structural test in `tests/shipped-seen.test.ts` keeps this store on that
+to. A structural test in `tests/shipped-seen-retained.test.ts` keeps this store on that
 path, exactly as `tests/memory.test.ts` does for the memory files. So a reader
 never sees a torn document and two parents on one home cannot corrupt it. They
 can interleave: each writer re-reads, replaces its own

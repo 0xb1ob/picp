@@ -74,6 +74,7 @@ ask-0088e0332d00, 2026-10-21.
 | S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting and executed controls](testing-migration-s14.md): 30 mapped, 3 retained verbatim with unreachable-input evidence, 0 pending | 4 original paths retired (3 mixed moved/split) | +3 retained files | +6 e2e declarations |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
 | S10 (cp-e2e-slice-s10-4dzb) | behavior 05; integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92); [range ledger and executed patch controls](testing-migration-s10.md); S09 carry-ins reconciled | 0; original unit file stays whole | unchanged | +6 e2e declarations |
+| S20 (cp-e2e-slice-s20-8nn3) | behavior 06; checkpoint: shipped-seen 10 mapped, 1 retained structural declaration; other three whole files remain pending; controls S20-repeat/disk/heal/scope/writer/mirror/id-bound/session-bound executed | 1 original path retired, 1 retained replacement (not deletion credit) | +1 e2e file, net 0 source/retained files | -11 original +1 retained +2 e2e = -8 net declarations at checkpoint |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -428,6 +429,8 @@ moves first.
 | 05-S14-permission | `tests/e2e/landing.test.ts` | landing S14: repository permission reports the allowlist and each blocked cause |
 | 05-S14-gitlab | `tests/e2e/landing.test.ts` | landing S14: GitLab worker reports hold only on the project's MR and preserve named refusals |
 | 05-S14-approval | `tests/e2e/phase3.test.ts` | pipeline S14: only a pin for the current artifact bypasses the operator checkpoint |
+| 06-S20-shipped | `tests/e2e/wake-delivery.test.ts` | S20: shipped rows collapse through cp_status_block and survive a resumed parent |
+| 06-S20-context | `tests/e2e/wake-delivery.test.ts` | S20: persisted stale notices are filtered at the actual provider boundary |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -991,6 +994,17 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/pr-resolve.test.ts` | 9 GitLab mixed verified refused unverified | 05-S14-gitlab | retained | tests/pr-resolve-retained.test.ts; validateEnvelope rejects missing pr_url before intake resolver, including no-given bound MR fallback; all reachable variants additionally exercised through real reporter |
 | `tests/pr-resolve.test.ts` | 10 GitLab intake hold and refusal | 05-S14-gitlab | mapped | S14-NC12: wrong branch wrongly held and expected correction reason empty |
 | `tests/review-approval.test.ts` | 1 approval rounds hash identity missing file | 05-S14-approval | retained | tests/review-approval-retained.test.ts; pipeline artifacts.info fails before missing-file matches; only production write uses seq 1; no public entry for seq 2/3 overwrite. S14-NC13 independently proves reachable edited-plan checkpoint stays pending |
+| `tests/shipped-seen.test.ts` | a second render in the same session collapses Shipped to the count, not the rows | 06-S20-shipped | mapped | S20-repeat: second tool result fails none-new count; old PR row repeats |
+| `tests/shipped-seen.test.ts` | the collapse holds when the render also changes the awaiting set and supplies new labels | 06-S20-shipped | mapped | S20-repeat: second call with changed label and awaiting fails none-new count; decision still asserted |
+| `tests/shipped-seen.test.ts` | REGRESSION (cp-b5eg): a reloaded extension in the same session still collapses Shipped | 06-S20-shipped | mapped | S20-disk: resumed parent tool result repeats both rows instead of none-new count |
+| `tests/shipped-seen.test.ts` | a job shipped between two renders appears exactly once, in the second | 06-S20-shipped | mapped | S20-repeat breaks old-row absence alongside new PR; third tool result pins new PR and absence of old PR |
+| `tests/shipped-seen.test.ts` | a genuinely new session starts empty — the memory is keyed by session id | 06-S20-shipped | mapped | S20-scope: fresh session does not show pull/20, because another session has reported it |
+| `tests/shipped-seen.test.ts` | a corrupt memory names the file and the remedy, is rebuilt, and recovers on the next render | 06-S20-shipped | mapped | S20-heal: warning/recovery assertions fail; first corrupt memory renders rows, warns with remedy, then resumed parent collapses |
+| `tests/shipped-seen.test.ts` | a rebind that DOES change the session id replays once, and neither throws nor corrupts the store | 06-S20-shipped | mapped | S20-scope fails fresh PR row; S20-writer fails other-session preservation assertion |
+| `tests/shipped-seen.test.ts` | the Shipped memory is written the way cp-nqj established: tmp -> fsync -> rename, never a truncating call | 06-S20-shipped | retained | tests/shipped-seen-retained.test.ts; cp_status_block never exposes import tokens or syscall sequence; structural trust guard preserved |
+| `tests/shipped-seen.test.ts` | a second writer on the same home does not drop the first session's entry | 06-S20-shipped | mapped | S20-writer: persisted sessions count/preserved original entry assertion fails after a different parent session writes |
+| `tests/shipped-seen.test.ts` | the store bounds itself: sessions and ids per session | 06-S20-shipped | mapped | S20-id-bound fails recent-ID tail equality; S20-session-bound fails newest-session identity after cap+1 sessions |
+| `tests/shipped-seen.test.ts` | a write that fails cannot un-report a row this process already printed | 06-S20-shipped | mapped | S20-mirror: fourth tool result repeats rows after corrupt memory instead of none-new count; warning is asserted |
 <!-- /manifest:assertions -->
 
 ### Pending-fix declarations (operator-parked; no deletion credit)
@@ -1499,6 +1513,149 @@ diff --git a/src/pr-bind.ts b/src/pr-bind.ts
 @@ -136,1 +136,0 @@
 -		await run(["update-ref", salvaged, local.stdout.trim()], `keeping the diverged local ${head} at ${salvaged}`);
 ```
+<!-- patch:S20-repeat -->
+```diff
+diff --git a/src/shipped-seen.ts b/src/shipped-seen.ts
+index 31282e3..19fb66b 100644
+--- a/src/shipped-seen.ts
++++ b/src/shipped-seen.ts
+@@ -252,7 +252,7 @@ export function renderSessionStatusBlock(args: {
+ 	const result = assembleStatusBlock(
+ 		args.snapshot,
+ 		args.input ?? {},
+-		{ shownShipped: shown.ids, ...(args.width ? { width: args.width } : {}) },
++		{ shownShipped: new Set(), ...(args.width ? { width: args.width } : {}) },
+ 	);
+ 	const written = args.store.record(args.sessionId, result.shippedIds);
+ 	if (written.healed) {
+```
+<!-- /patch:S20-repeat -->
+
+<!-- patch:S20-disk -->
+```diff
+diff --git a/src/shipped-seen.ts b/src/shipped-seen.ts
+index 31282e3..66ad574 100644
+--- a/src/shipped-seen.ts
++++ b/src/shipped-seen.ts
+@@ -164,7 +164,7 @@ export class ShippedSeenStore {
+ 		const mirrored = this.#mirror.get(sessionId) ?? new Set<string>();
+ 		try {
+ 			const stored = this.read().sessions.find((session) => session.session_id === sessionId);
+-			return { ids: new Set([...mirrored, ...(stored?.shipped_ids ?? [])]) };
++			return { ids: new Set(mirrored) };
+ 		} catch (error) {
+ 			// A corrupt or unreadable memory must not take the status block down with
+ 			// it: the worst case is one replayed section, and the operator is told —
+```
+<!-- /patch:S20-disk -->
+
+<!-- patch:S20-heal -->
+```diff
+diff --git a/src/shipped-seen.ts b/src/shipped-seen.ts
+index 31282e3..40ad917 100644
+--- a/src/shipped-seen.ts
++++ b/src/shipped-seen.ts
+@@ -190,7 +190,7 @@ export class ShippedSeenStore {
+ 			current = this.read();
+ 		} catch (error) {
+ 			current = EMPTY_SHIPPED_SEEN_FILE;
+-			healed = `rebuilt ${this.file} from scratch (it was unreadable: ${(error as Error).message}); other sessions' Shipped memories in it are gone`;
++			return { persisted: false, error: "unreadable memory was not rebuilt" };
+ 		}
+ 		try {
+ 			const others = current.sessions.filter((session) => session.session_id !== sessionId);
+```
+<!-- /patch:S20-heal -->
+
+<!-- patch:S20-scope -->
+```diff
+diff --git a/src/shipped-seen.ts b/src/shipped-seen.ts
+index 31282e3..84d4336 100644
+--- a/src/shipped-seen.ts
++++ b/src/shipped-seen.ts
+@@ -164,7 +164,7 @@ export class ShippedSeenStore {
+ 		const mirrored = this.#mirror.get(sessionId) ?? new Set<string>();
+ 		try {
+ 			const stored = this.read().sessions.find((session) => session.session_id === sessionId);
+-			return { ids: new Set([...mirrored, ...(stored?.shipped_ids ?? [])]) };
++			return { ids: new Set([...mirrored, ...this.read().sessions.flatMap((session) => session.shipped_ids)]) };
+ 		} catch (error) {
+ 			// A corrupt or unreadable memory must not take the status block down with
+ 			// it: the worst case is one replayed section, and the operator is told —
+```
+<!-- /patch:S20-scope -->
+
+<!-- patch:S20-writer -->
+```diff
+diff --git a/src/shipped-seen.ts b/src/shipped-seen.ts
+index 31282e3..d90f7ac 100644
+--- a/src/shipped-seen.ts
++++ b/src/shipped-seen.ts
+@@ -193,7 +193,7 @@ export class ShippedSeenStore {
+ 			healed = `rebuilt ${this.file} from scratch (it was unreadable: ${(error as Error).message}); other sessions' Shipped memories in it are gone`;
+ 		}
+ 		try {
+-			const others = current.sessions.filter((session) => session.session_id !== sessionId);
++			const others: ShippedSeenSession[] = [];
+ 			const previous = current.sessions.find((session) => session.session_id === sessionId);
+ 			const merged: string[] = [];
+ 			for (const id of [...(previous?.shipped_ids ?? []), ...ids]) {
+```
+<!-- /patch:S20-writer -->
+
+<!-- patch:S20-mirror -->
+```diff
+diff --git a/src/shipped-seen.ts b/src/shipped-seen.ts
+index 31282e3..34acf2f 100644
+--- a/src/shipped-seen.ts
++++ b/src/shipped-seen.ts
+@@ -170,7 +170,7 @@ export class ShippedSeenStore {
+ 			// it: the worst case is one replayed section, and the operator is told —
+ 			// with the file named and the remediation stated, because "unreadable" on
+ 			// its own is a fact nobody can act on.
+-			return { ids: new Set(mirrored), error: `${(error as Error).message}; ${shippedSeenRemedy(this.file)}` };
++			return { ids: new Set(), error: `${(error as Error).message}; ${shippedSeenRemedy(this.file)}` };
+ 		}
+ 	}
+ 
+```
+<!-- /patch:S20-mirror -->
+
+<!-- patch:S20-id-bound -->
+```diff
+diff --git a/src/shipped-seen.ts b/src/shipped-seen.ts
+index 31282e3..bf205ba 100644
+--- a/src/shipped-seen.ts
++++ b/src/shipped-seen.ts
+@@ -203,7 +203,7 @@ export class ShippedSeenStore {
+ 				session_id: sessionId,
+ 				// Oldest first, so an over-long history drops the ids least likely to
+ 				// still be in any snapshot.
+-				shipped_ids: merged.slice(Math.max(0, merged.length - SHIPPED_SEEN_MAX_IDS)),
++				shipped_ids: merged.slice(0, SHIPPED_SEEN_MAX_IDS),
+ 				updated_at: isoTimestamp(this.#now()),
+ 			};
+ 			// Newest last: the tail is what a bound keeps.
+```
+<!-- /patch:S20-id-bound -->
+
+<!-- patch:S20-session-bound -->
+```diff
+diff --git a/src/shipped-seen.ts b/src/shipped-seen.ts
+index 31282e3..0a5d1f5 100644
+--- a/src/shipped-seen.ts
++++ b/src/shipped-seen.ts
+@@ -207,7 +207,7 @@ export class ShippedSeenStore {
+ 				updated_at: isoTimestamp(this.#now()),
+ 			};
+ 			// Newest last: the tail is what a bound keeps.
+-			const sessions = [...others, session].slice(-SHIPPED_SEEN_KEEP_SESSIONS);
++			const sessions = [...others, session].slice(0, SHIPPED_SEEN_KEEP_SESSIONS);
+ 			const next: ShippedSeenFile = {
+ 				schema_version: SCHEMA_VERSION,
+ 				updated_at: isoTimestamp(this.#now()),
+```
+<!-- /patch:S20-session-bound -->
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
@@ -1608,6 +1765,14 @@ index 2dcc135..008c3bd 100644
 -		const { raw, rubric: _rubric, decision_summary: _summary, ...decided } = decideGate({
 +		const { raw, rubric: _rubric, ...decided } = decideGate({
 ```
+| S20-repeat | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-repeat | 28b2c86b9aa7dc48af8d5d37caf338ed8d035e8c0e1786785fcc5f42e2fd573d | second status call repeats PR instead of none-new count | pass |
+| S20-disk | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-disk | 25781adcb27a8bb791bb3666bd619a232376ec9482c4d20e73bf185b7d1aa012 | resumed parent repeats PR instead of none-new count | pass |
+| S20-heal | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-heal | 1ff2fd042a02a26d310884f7b0b7e36e18c1073b4d098386ef741271ec2944bc | unreadable memory is not healed and resumed status replays rows | pass |
+| S20-scope | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-scope | 1979c64bd0ff0d757ab8a03e58f70e7887ae2fc9881ec0df4283a870f9d1410a | fresh session suppresses PR that belongs to another session | pass |
+| S20-writer | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-writer | 9d5a5a464821a70233d363057c4d734159e49c7f5a82231135ce2c93579987c5 | writing a second session drops others; persisted session count is wrong | pass |
+| S20-mirror | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-mirror | 0abb5ceefb9923ddbfc8b94c8a7629dd5fe7814da10cb654eb8651cbaa1871be | corrupt memory replays already printed rows in fourth tool result | pass |
+| S20-id-bound | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-id-bound | 902f1f03b8a886f392418aa3e6f60437307e95e253fa8d3a6f28c980b0351c9f | persisted ID tail loses newly reported jobs | pass |
+| S20-session-bound | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-session-bound | aef63e5edaa170bfb1baa3c3159a3bd52f5ff450277bfde5115a5471e77ab809 | cap+1 writer is absent from newest session position | pass |
 <!-- /manifest:regressions -->
 
 <!-- patch:NC-main-corrupt -->
@@ -2782,6 +2947,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/review-approval-retained.test.ts` | S14 | original declaration verbatim: pipeline artifacts.info fails before missing matches; only production write passes seq 1; no public entry reaches seq-2/3 overwrite |
 | `tests/held-continuation-fleet-read.test.ts` | #433 (ac50447082b15959140ec40b04080102eadbaf87) | incoming known-regression coverage for unreadable fleet during continuation failure notice; unit landed upstream after the baseline and is preserved unchanged; convert, owner P3c-rest (held continuation); recorded when plain-merging main |
 | `tests/e2e/wake-delivery.test.ts` | S20 (cp-e2e-slice-s20-8nn3) | initial shipped-memory RPC scenario; no source tests retired; remaining slice acceptance pending |
+| `tests/shipped-seen-retained.test.ts` | S20 | retained structural atomic-write assertion; cp_status_block cannot expose import tokens or syscall ordering |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -3094,7 +3260,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/settings.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/settle-recovery.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/settle.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
-| `tests/shipped-seen.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/shipped-seen.test.ts` | deleted | S20 | 10 mapped to 06-S20-shipped with eight executed controls; 1 structural declaration retained in tests/shipped-seen-retained.test.ts; original path retired, retained declaration is not deletion credit |
 | `tests/skill-catalog.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/stale-notice-context.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
 | `tests/state-migrations.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
