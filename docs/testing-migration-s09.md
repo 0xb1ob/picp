@@ -8,7 +8,7 @@ S09 owns only static declarations 41–80 of `tests/integrate.test.ts`, counted 
 
 ## Public scenarios
 
-All cases are in `tests/e2e/landing.test.ts`, through real CommandPost integration, worker prompts/reporting, scratch git, scripted gh and the existing local HTTPS GitLab fixture. No internal method is mocked.
+All cases are in `tests/e2e/landing-*.test.ts`, through real CommandPost integration, worker prompts/reporting, scratch git, scripted gh and the existing local HTTPS GitLab fixture. No internal method is mocked.
 
 | ID | Test title after `landing S09: ` |
 |---|---|

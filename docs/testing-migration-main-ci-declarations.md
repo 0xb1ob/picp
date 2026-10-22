@@ -9,7 +9,7 @@ Mapped declarations retire together. Seven retained tests remain in `tests/main-
 The retained share is 17.95%. Mixed declarations 8, 12 and 32 retain only their unreachable portions;
 their reachable assertions are mapped and controlled below. New e2e declarations: 4, including the Actions deadline scenario.
 
-Scenario names below are exact titles in `tests/e2e/landing.test.ts`:
+Scenario names below are exact titles in `tests/e2e/landing-*.test.ts`:
 
 - T / 05-11: `landing: a real parent's timer latches only its mandated main runs and clears only current-tip green`.
 - I / 05-main-red: `landing: main-red integration holds stale heads and permits only a current green fix-forward under its own mandate`.
@@ -73,7 +73,7 @@ Existing NC-35 remains the manifest's original main-CI regression record; the ne
 
 The following table is the per-declaration control gate (addendum ps-20261021170156-5a482970).
 Each basename identifies an executed `nc-<name>.patch` and `nc-<name>.log` in the job artifact directory.
-Each command used `node --import ./tests/harness/hermetic-env.ts --test --test-timeout=300000 --test-force-exit --test-name-pattern=<scenario title substring> tests/e2e/landing.test.ts`.
+Each command used `node --import ./tests/harness/hermetic-env.ts --test --test-timeout=300000 --test-force-exit --test-name-pattern=<scenario title substring> tests/e2e/landing-*.test.ts`.
 Every listed e2e run exited 1 with an AssertionError on the named consumer outcome; startup failures and timeout-only probes do not count.
 
 | Declaration # | Control basename | Production mutation | Failing consumer assertion |

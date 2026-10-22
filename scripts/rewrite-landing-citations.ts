@@ -4,6 +4,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import { isHistoryRow } from "./landing-history-rows.ts";
 import ts from "typescript";
 
 const OLD = "tests/e2e/landing.test.ts";
@@ -38,48 +39,60 @@ const before = declarations(OLD, execFileSync("git", ["show", `${ref}:${OLD}`], 
 const after = new Map(NEW_FILES.flatMap((file) => declarations(file, readFileSync(file, "utf8"))).map((d) => [d.title, d]));
 const unresolved: string[] = [];
 
+// Exact doc placeholders that name no test; anything else matching a pattern is looked up by title.
+const TEMPLATES = new Set(["<pattern>", "<selector>", "<title prefix>", "<scenario prefix>", "<scenario title substring>"]);
+// Stale line numbers cannot be mapped by position (the docs cite several historical file versions): map by title.
+const LINE_HINTS: Record<string, string> = {
+	"landing.test.ts:2991": "S21b: verdict delivery precedes the merge-window notice",
+	"landing.test.ts:314": "landing: cp_merged records only a merge gh observed for this job's branch, marks its PR merged once, and an opted-in deploy branch gets one blocked ops:deploy job",
+};
+const FILE_TOKEN = "tests\\/e2e\\/landing[\\w*-]*\\.test\\.ts";
+
 function rewrite(line: string): string {
-	let out = line.replace(/`tests\/e2e\/landing\.test\.ts` \| ([^|]+?) \|/g, (whole, title: string) => {
+	let out = line.replace(/(?<![\w/.-])landing\.test\.ts(?!:\d)/g, OLD);
+	out = out.replace(/`tests\/e2e\/landing\.test\.ts` \| ([^|]+?) \|/g, (whole, title: string) => {
 		const found = after.get(title);
 		return found ? `\`${found.file}\` | ${title} |` : whole;
 	});
-	out = out.replace(/--test-name-pattern='([^']*)'([^\n]*?)tests\/e2e\/landing\.test\.ts/g, (whole, pattern: string, mid: string) => {
-		// The doc template `--test-name-pattern='<pattern>' tests/e2e/landing.test.ts` names no test: point it at every landing file.
-		if (/^<[^>]+>$/.test(pattern)) return `--test-name-pattern='${pattern}'${mid}tests/e2e/landing-*.test.ts`;
+	out = out.replace(/(--test-name-pattern=(?:'([^']*)'|"([^"]*)"|(<[^>]+>)))([^\n]*?)tests\/e2e\/landing\.test\.ts/g, (whole, head: string, a?: string, b?: string, c?: string, mid = "") => {
+		const pattern = a ?? b ?? c ?? "";
+		if (TEMPLATES.has(pattern)) return `${head}${mid}tests/e2e/landing-*.test.ts`;
 		const needle = pattern.split("<")[0] ?? "";
 		const files = [...new Set([...after.values()].filter((d) => needle && d.title.includes(needle)).map((d) => d.file))];
 		if (files.length === 0) {
 			unresolved.push(`pattern '${pattern}'`);
 			return whole;
 		}
-		return `--test-name-pattern='${pattern}'${mid}${files.join(" ")}`;
+		return `${head}${mid}${files.join(" ")}`;
 	});
 	// A prose citation that quotes a moved test's exact title in the same line follows that title.
 	if (out.includes("tests/e2e/landing.test.ts")) {
 		const files = new Set([...after.values()].filter((d) => out.includes(d.title)).map((d) => d.file));
 		if (files.size === 1) out = out.replaceAll("tests/e2e/landing.test.ts", [...files][0]!);
 	}
-	out = out.replace(/landing\.test\.ts:(\d+)/g, (whole, n: string) => {
-		const start = [...before].reverse().find((d) => d.line <= Number(n));
+	out = out.replace(/landing\.test\.ts:(\d+)/g, (whole) => {
+		const hint = LINE_HINTS[whole];
+		const hinted = hint && after.get(hint);
+		if (hinted) return `${hinted.file.replace(/^tests\/e2e\//, "")}:${hinted.line}`;
+		const n = Number(whole.split(":")[1]);
+		const start = [...before].reverse().find((d) => d.line <= n);
 		const moved = start && after.get(start.title);
 		if (!moved) {
 			unresolved.push(`line ${n}`);
 			return whole;
 		}
-		return `${moved.file.replace(/^tests\/e2e\//, "")}:${moved.line + Number(n) - start.line}`;
+		return `${moved.file.replace(/^tests\/e2e\//, "")}:${moved.line + n - start.line}`;
 	});
-	return out;
+	out = out.replaceAll("tests/e2e/landing.test.ts", "tests/e2e/landing-*.test.ts");
+	// A run of the same file twice (the old name replaced beside a file already listed) collapses to one.
+	return out.replace(new RegExp(`(${FILE_TOKEN})((?: ${FILE_TOKEN})+)`, "g"), (_whole, first: string, rest: string) =>
+		[...new Set([first, ...rest.trim().split(" ")])].join(" "));
 }
 
 const docs = execFileSync("git", ["ls-files", "*.md"], { encoding: "utf8" }).split("\n").filter(Boolean);
 for (const doc of docs) {
 	const text = readFileSync(doc, "utf8");
-	// docs/testing-migration* is history (PR target rows name the file as it was); every other doc must name a live file.
-	const live = !doc.startsWith("docs/testing-migration");
-	const next = text.split("\n").map((line) => {
-		const done = line.includes("landing.test.ts") ? rewrite(line) : line;
-		return live ? done.replaceAll("tests/e2e/landing.test.ts", "tests/e2e/landing-*.test.ts") : done;
-	}).join("\n");
+	const next = text.split("\n").map((line) => (line.includes("landing.test.ts") && !isHistoryRow(line) ? rewrite(line) : line)).join("\n");
 	if (next !== text) writeFileSync(doc, next);
 }
 if (unresolved.length) process.exitCode = 1;
