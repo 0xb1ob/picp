@@ -74,7 +74,7 @@ ask-0088e0332d00, 2026-10-21.
 | S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting and executed controls](testing-migration-s14.md): 30 mapped, 3 retained verbatim with unreachable-input evidence, 0 pending | 4 original paths retired (3 mixed moved/split) | +3 retained files | +6 e2e declarations |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
 | S10 (cp-e2e-slice-s10-4dzb) | behavior 05; integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92); [range ledger and executed patch controls](testing-migration-s10.md); S09 carry-ins reconciled | 0; original unit file stays whole | unchanged | +6 e2e declarations |
-| S21 (cp-e2e-slice-s21-5gtl) | behavior 06; [declaration map and executed controls](testing-migration-s21.md): 14 mapped, 7 retained in place, 1 pending-fix (long recovery-set notice); original file stays whole by operator instruction | 0 | +1 e2e file | +8 e2e declarations |
+| S21 (cp-e2e-slice-s21-5gtl) | behavior 06; [declaration map and replayed controls](testing-migration-s21.md): 15 mapped, 7 retained/moved verbatim, 0 pending | 1 original path retired; mixed retained replacement is not deletion credit | +1 net file: +1 e2e, +1 retained, -1 source | -22 source, +7 retained, +9 e2e = -6 net declarations |
 | S16 (cp-e2e-slice-s16-koqy) | behavior 05; reviewer-model whole file: 3 mapped, 0 retained, 1 deleted file; [declaration accounting](testing-migration-s16.md); other slices retain their ownership | 1 | 378 → 378 | 4,204 → 4,203 (3 removed, 2 added) |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
@@ -233,6 +233,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | S09 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 41–80: 34 mapped, 6 retained (15%), 0 deleted files; eight scenarios added; [range ledger](testing-migration-s09.md); original unit file kept whole |
 | S10 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92), 0 deleted files; six added scenarios and 05-S02-5 extended; [range ledger](testing-migration-s10.md); original unit file kept whole |
 | S16 | 05 | `tests/e2e/reviewer-model.test.ts` | 2 added declarations: S16-model here and S16-auto in landing; 3 units mapped, 0 retained, 1 deleted file |
+| S21 | 06 | `tests/e2e/wake-delivery.test.ts` | 15 mapped, 7 retained/moved, zero pending; nine added e2e declarations across wake-delivery, bounds and diff-review; original path retired with a retained replacement |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -433,6 +434,8 @@ moves first.
 | 05-S14-approval | `tests/e2e/phase3.test.ts` | pipeline S14: only a pin for the current artifact bypasses the operator checkpoint |
 | S16-model | `tests/e2e/reviewer-model.test.ts` | S16: public plan gates select reviewer preferences from current and legacy authority |
 | S16-auto | `tests/e2e/landing.test.ts` | landing S16: automatic green CI reviews use the current mandate reviewer |
+| S21-long | `tests/e2e/wake-delivery.test.ts` | S21: forty failed reconcile candidates retain distinct bounded notices through RPC restart |
+| S21-restart | `tests/e2e/wake-delivery.test.ts` | S21: restart delivers an unobserved death once and discards obsolete fleet notices |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -999,6 +1002,9 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/pr-resolve.test.ts` | 9 GitLab mixed verified refused unverified | 05-S14-gitlab | retained | tests/pr-resolve-retained.test.ts; validateEnvelope rejects missing pr_url before intake resolver, including no-given bound MR fallback; all reachable variants additionally exercised through real reporter |
 | `tests/pr-resolve.test.ts` | 10 GitLab intake hold and refusal | 05-S14-gitlab | mapped | S14-NC12: wrong branch wrongly held and expected correction reason empty |
 | `tests/review-approval.test.ts` | 1 approval rounds hash identity missing file | 05-S14-approval | retained | tests/review-approval-retained.test.ts; pipeline artifacts.info fails before missing-file matches; only production write uses seq 1; no public entry for seq 2/3 overwrite. S14-NC13 independently proves reachable edited-plan checkpoint stays pending |
+| `tests/wakeup-journal.test.ts` | declaration 4: forty-candidate recovery rendering and distinct long IDs | S21-long | mapped | long-recovery control fails real reconciliation inventory assertions; forty failures, bounded RPC arrival and distinct IDs |
+| `tests/wakeup-journal.test.ts` | runtime declarations 5, 9–15, 17–22 | S21-restart | mapped | Individual scenarios and all executed controls are enumerated by declaration in testing-migration-s21.md; includes real worker/reviewer emitters and host event APIs |
+| `tests/wakeup-journal.test.ts` | structural/documentation declarations 1–3, 6–8, 16 | — | retained | tests/wakeup-journal-retained.test.ts preserves these seven declarations verbatim; missing runtime entry points are listed per declaration in testing-migration-s21.md |
 <!-- /manifest:assertions -->
 
 ### Pending-fix declarations (operator-parked; no deletion credit)
@@ -1510,6 +1516,7 @@ diff --git a/src/pr-bind.ts b/src/pr-bind.ts
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
+| S21-NC-long | `tests/wakeup-journal.test.ts` | 636ec3990273 | S21-long | S21-long | 9fd54412bc0b81731730dcf3493cda8c271fc7aae8430edf11ba1e2a81a17ab0 | real forty-failure reconcile fallback has undefined candidate keys instead of 40 | pass |
 | S16-NC1 | `tests/reviewer-model.test.ts` | fb70938e2e94680d9f6df1a76de53c5c633a6c8a | S16-model | S16-explicit | 5aaa41c24b9012ee897a1ceda1b5e4455095d382793c03fd294f0bd13c8f8c9d | explicit: selection source undefined instead of explicit | pass |
 | S16-NC2 | `tests/reviewer-model.test.ts` | fb70938e2e94680d9f6df1a76de53c5c633a6c8a | S16-model | S16-schedule | c74f53c7ecd37c0f80bf1a4222610ee15b105bdd81900d3a6667f294036f0c18 | schedule actual: chosen reviewer receives plan is false | pass |
 | S16-NC3 | `tests/reviewer-model.test.ts` | fb70938e2e94680d9f6df1a76de53c5c633a6c8a | S16-auto | S16-automatic | 283f1915f714569675e037df7b56da370e426f38715f8adb5a9d65464117e85b | automatic review reaches the mandated model is false | pass |
@@ -1620,6 +1627,28 @@ index 2dcc135..008c3bd 100644
 +		const { raw, rubric: _rubric, ...decided } = decideGate({
 ```
 <!-- /manifest:regressions -->
+
+<!-- patch:S21-long -->
+```diff
+diff --git a/src/recovery-notice.ts b/src/recovery-notice.ts
+index 9ba8c60..298d34b 100644
+--- a/src/recovery-notice.ts
++++ b/src/recovery-notice.ts
+@@ -25,11 +25,5 @@ export function formatRecoveryNotice(candidates: readonly RecoveryCandidate[], p
+ 		lines.push(`  next: ${next.join(" or ") || "cp_teardown the listed jobs"}.`);
+ 		return lines.join("\n");
+ 	};
+-	let shown = candidates.length;
+-	let text = render(candidates);
+-	while (text.length > RECOVERY_NOTICE_MAX_CHARS && shown > 1) {
+-		shown = Math.max(1, Math.min(shown - 1, Math.floor(shown * (RECOVERY_NOTICE_MAX_CHARS / text.length))));
+-		text = render(candidates.slice(0, shown));
+-	}
+-	return text.slice(0, RECOVERY_NOTICE_MAX_CHARS);
++	return render(candidates);
+ }
+```
+<!-- /patch:S21-long -->
 
 <!-- patch:S16-explicit -->
 ```diff
@@ -2845,7 +2874,8 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/pr-resolve-retained.test.ts` | S14 | mixed original declaration 9 verbatim: validateEnvelope refuses missing pr_url before intake resolver; all reachable variants also covered through real reporter |
 | `tests/review-approval-retained.test.ts` | S14 | original declaration verbatim: pipeline artifacts.info fails before missing matches; only production write passes seq 1; no public entry reaches seq-2/3 overwrite |
 | `tests/held-continuation-fleet-read.test.ts` | #433 (ac50447082b15959140ec40b04080102eadbaf87) | incoming known-regression coverage for unreadable fleet during continuation failure notice; unit landed upstream after the baseline and is preserved unchanged; convert, owner P3c-rest (held continuation); recorded when plain-merging main |
-| `tests/e2e/wake-delivery.test.ts` | S21 | two RPC restart/arrival/stale-discard and host-event scenarios; original unit file stays whole; docs/testing-migration-s21.md |
+| `tests/e2e/wake-delivery.test.ts` | S21 | three RPC scenarios, including forty-candidate reconciliation and bounded distinct recovery IDs; docs/testing-migration-s21.md |
+| `tests/wakeup-journal-retained.test.ts` | S21 | seven verbatim structural/documentation declarations, convert-owned P4; original declarations 1–3, 6–8, 16 |
 | `tests/e2e/reviewer-model.test.ts` | S16 | behavior 05, public gate reviewer selection and persisted schedule scope; scenario S16-model |
 | `tests/e2e/ci-watch-jobless.test.ts` | #443 | incoming job-less CI-watch cause regression, preserved unchanged; behavior 06 |
 | `tests/recovery-notice-bound.test.ts` | #442 | incoming recovery notice bound regression, preserved unchanged; convert owner P4, behavior 06 |
@@ -3284,7 +3314,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/viewer.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
 | `tests/wake-rules.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
 | `tests/wakeup-head-sources.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
-| `tests/wakeup-journal.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/wakeup-journal.test.ts` | deleted | S21 | cp-e2e-slice-s21-5gtl: 15 mapped and 7 moved verbatim to tests/wakeup-journal-retained.test.ts; declaration map testing-migration-s21.md; fifteen replayed controls |
 | `tests/wakeups.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
 | `tests/watch.test.ts` | exception | P1 | golden: watch TUI; operator ask-0088e0332d00 (Exceptions) |
 | `tests/web-access.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |

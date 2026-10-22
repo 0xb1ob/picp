@@ -1,23 +1,24 @@
 # S21: wakeup-journal declaration accounting
 
-Owner: cp-e2e-slice-s21-5gtl. Source: `tests/wakeup-journal.test.ts`, unchanged and whole by operator instruction.
-22 declarations: **14 mapped, 7 retained in place, 1 pending-fix, 0 deleted files**. Retained share: 31.8%.
-These are declaration dispositions, not retirement credit: all 22 original declarations still execute.
+Owner: cp-e2e-slice-s21-5gtl. Original source: `tests/wakeup-journal.test.ts`, now retired.
+22 declarations: **15 mapped, 7 retained/moved verbatim, 0 pending, 1 original path retired**.
+Retained share: 31.8%. The mixed retained replacement is not deletion credit: net file count is unchanged.
+The seven structural/documentation declarations live in `tests/wakeup-journal-retained.test.ts`.
 
-## Pending production fix
+## Long recovery-set proof
 
-Declaration 4 is `pending-fix`. Existing reproduction and full command are in the job artifact
-`cp-e2e-slice-s21-5gtl/report.md` and worktree log `node_modules/.s21-runs/recovery.log`.
-On base 547f8bd941519fe0b068ed735c9bc28c34fb2dd3, 40 valid waiting records with dead PID 2147483647,
-missing sessions and IDs `cp-recovery-00-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` produce a 9,654-character
-recovery notice. The durable schema allows 4,000 characters. `src/command-post.ts:913` formats the
-whole set through `src/wakeups.ts:927`; `src/command-post.ts:873` silently swallows the rejection:
-40 failed candidates, zero pending notices. The one-record control succeeds. No product fix is included.
-The operator owns the decision about a separate product job; this row does not block the other rows.
-The final plain merge includes the separate fix #442 (636ec39) and timer knobs #439. Row 4 remains
-parked as instructed: its reproduction describes the earlier base, and no long-set RPC migration credit
-is claimed here. The product fix is preserved unchanged. Newly incoming tests from #439/#442/#443
-are registered in the manifest rather than absorbed into this slice.
+Fix #442 (636ec3990273) is included from main. The new scenario “S21: forty failed reconcile
+candidates retain distinct bounded notices through RPC restart” seeds two real forty-worker fleets
+sharing their first 39 candidates, with dead PID 2147483647 and absent sessions. Each actual reconcile
+returns 40 failed candidates and persists a bounded recovery notice with all 40 keys and “...and N more”.
+Two real RPC parents consume and confirm those notices. Their capped IDs differ despite sharing a long
+prefix. It passes locally in about nine seconds, with a 110-second deadline.
+
+`long-recovery.patch` restores unbounded rendering in the production formatter. Actual reconciliation
+still observes all 40 failures, but its fallback notice fails the expected recovery-inventory assertions.
+The prior 9,654-character reproduction remains in the job artifact as historical evidence. No product
+fix is authored here. All fifteen saved controls were replayed against the merged base; logs are in
+`node_modules/.s21-runs/replay-*.log` and the per-control exit summary.
 
 ## Consumer scenarios and entry points
 
@@ -41,7 +42,7 @@ Each mapped row names an executed mutation and the assertion that fails. Origina
 | 1 | announced transitions and docs table | retained: developer documentation/table consistency has no runtime entry that can inspect the markdown table |
 | 2 | exhaustive failure-class durable-kind table | retained: compile-time enum/table exhaustiveness has no runtime entry for adding a new enum member; Host failures additionally checks current values |
 | 3 | markFailed callers | retained: source call-graph restriction has no runtime entry exposing all call sites |
-| 4 | distinct long recovery-set IDs | pending-fix: 9,654-character reconciliation notice is rejected by the 4,000-character bound; reproduction above |
+| 4 | distinct long recovery-set IDs | mapped: Forty candidates scenario; long-recovery restores unbounded formatting, so the fallback has undefined keys instead of 40; long-id restores prefix truncation and makes the two actual reconcile IDs equal; positive checks forty failures/keys, bounded RPC content and distinct capped IDs |
 | 5 | N7 long CI cause tails | mapped: Host failures; ci-cause control collapses pending count from 16 to 15; distinct-ID and HTTP-tail assertions pin the result |
 | 6 | AGENTS death/recovery guidance | retained: no product entry reads the parent's instruction prose as a verifiable runtime result |
 | 7 | spent-bound guidance and phrase | retained: mixed prose/format contract; no entry can verify that AGENTS contains the required instruction; Bound additionally pins emitted outcome wording |
@@ -82,6 +83,8 @@ file, with `--test-name-pattern='S21: …'` for focused controls. No live provid
 | review-finish.patch | d13e4abd5dad1eab26a4b6c3a36fdfcf210e8baaed86fd0adf550d3712d20433 | zero notices instead of one |
 | transport-discard.patch | 0b34330a10eb9bd9fdf3ea7a3c6c154810ac8ddeb820fb175c3047beec2fb3dc | pending-ID assertion still contains gone job |
 | unreported.patch | 68162e6da50f5c762b18f7da4ef4389f60e7bb9b994f073dd38f7f9d9fc6f888 | recorded unreported callback wait times out |
+| long-recovery.patch | 9fd54412bc0b81731730dcf3493cda8c271fc7aae8430edf11ba1e2a81a17ab0 | forty failures reconcile, but fallback candidate keys are undefined rather than 40 |
+| long-id.patch | f0f80e6aaead687779285ba0845e03da141ebb89f6d3eb8e2eb7b45237ca9e7b | two sets sharing 39 candidates collapse to the same durable ID |
 
 ## Timers and cleanup
 
@@ -90,4 +93,4 @@ The separate knob job owns fixed timer findings: 120 seconds at `src/contracts/w
 Successor ownership and legacy timestamps avoid waiting for those timers; no test-only timer hooks were added.
 Agent fixtures use mode-0700 temp directories outside the worktree, containing only mock models/settings.
 Cleanup closes owned children before removing agents/homes/providers; worker kills target only PIDs started by that case.
-No production code, original unit declarations or credentials are changed by S21. Full-suite and live-model runs are deliberately skipped; row 4 remains parked without migration credit, with its separate product fix now included from main.
+No production code or credentials are changed by S21. Full-suite and live-model runs are deliberately skipped. Fifteen runtime declarations are retired only after their consumer scenarios and recorded controls; seven structural/documentation declarations are preserved verbatim in the retained replacement.

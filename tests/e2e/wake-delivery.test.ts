@@ -169,3 +169,47 @@ test("S21: host failure events survive restart with distinct CI causes and one a
 	await waitFor(() => provider.requests(script).length, (n) => n > before, { timeoutMs: 15_000, what: "second host inspection" });
 	assert.doesNotMatch(JSON.stringify(provider.requests(script).slice(before).map((r) => r.body.messages)), /S21_FAILURE_/);
 });
+
+
+test("S21: forty failed reconcile candidates retain distinct bounded notices through RPC restart", { timeout: 110_000 }, async (t) => {
+	const provider = await MockProvider.start();
+	const script = "s21-long-recovery";
+	const model = provider.addScript(script, [{ kind: "text", text: "Recovery inventory received." }], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	const ids: string[] = [];
+	const cleanup: Array<() => Promise<void>> = [];
+	t.after(async () => { for (const close of cleanup) await close(); agent.cleanup(); await provider.stop(); });
+	for (const variant of ["a", "b"]) {
+		const home = createScratchHome();
+		const post = new CommandPost({ home: home.path, packageRoot: process.cwd(), holdsParentLock: () => true });
+		let child: ReturnType<typeof startPiChild> | undefined;
+		cleanup.push(async () => { await child?.close(); await post.shutdown(); home.cleanup(); });
+		for (let i = 0; i < 40; i++) {
+			const jobId = `cp-recovery-${String(i).padStart(2, "0")}-${"x".repeat(35)}${i === 39 ? variant : ""}`;
+			await post.fleet.add({ job_id: jobId, project: "demo", kind: "ship", delivery: "local", origin: "terminal", phase: "waiting",
+				branch: jobId, worktree: join(home.path, jobId), dispatched_at: isoTimestamp(), usage: EMPTY_USAGE,
+				worker: { pid: 2147483647, session_id: "legacy", session_file: join(home.path, "missing.jsonl"), profile: "implementer", role: "implementer", model, started_at: isoTimestamp() } });
+		}
+		const { report } = await post.reconcile();
+		assert.equal(report.entries.filter((entry) => entry.outcome === "failed").length, 40);
+		assert.equal(post.fleet.list().filter((record) => record.phase === "failed").length, 40);
+		const pending = post.durableWakeups.pending();
+		assert.equal(pending.length, 1);
+		assert.equal(pending[0]?.kind, "recovery");
+		assert.equal(pending[0]?.keys?.length, 40);
+		assert.ok((pending[0]?.id.length ?? Infinity) <= 160);
+		assert.ok((pending[0]?.content.length ?? Infinity) <= 4000);
+		assert.match(pending[0]?.content ?? "", /RESTART RECOVERY — 40 candidate/);
+		assert.match(pending[0]?.content ?? "", /\.\.\.and \d+ more/);
+		ids.push(pending[0]?.id ?? "");
+		await post.shutdown();
+		const before = provider.requests(script).length;
+		child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+		await waitFor(() => JSON.stringify(provider.requests(script).slice(before).map((request) => request.body.messages)).includes("RESTART RECOVERY — 40 candidate"), Boolean,
+			{ timeoutMs: 20_000, what: "bounded forty-candidate notice reaching the real parent" });
+		await waitFor(() => post.durableWakeups.read().delivered.some((entry) => entry.id === pending[0]?.id), Boolean,
+			{ timeoutMs: 15_000, what: "long recovery arrival confirmation" });
+		await child.close();
+	}
+	assert.notEqual(ids[0], ids[1], "sets sharing their first 39 candidates retain distinct durable IDs");
+});
