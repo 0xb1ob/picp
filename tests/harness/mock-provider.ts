@@ -49,8 +49,8 @@ export type ScriptStep =
 	| { kind: "empty"; usage?: MockUsage }
 	/** HTTP error injection (429/500/...); `repeat` consumes N requests. */
 	| { kind: "error"; status: number; message?: string; type?: string; repeat?: number }
-	/** Never answers (or answers after `ms`) — drives timeout handling. */
-	| { kind: "hang"; ms?: number };
+	/** Never answers, or completes after `ms` or an explicit `until` release. */
+	| { kind: "hang"; ms?: number; until?: Promise<void> };
 
 export interface ScriptOptions {
 	/**
@@ -275,6 +275,11 @@ export class MockProvider {
 		if (step.kind === "hang") {
 			this.#openConnections.add(res);
 			res.on("close", () => this.#openConnections.delete(res));
+			if (step.until) {
+				void step.until.then(() => {
+					if (!res.destroyed && !res.writableEnded) this.streamSteps(res, modelId, { kind: "text", text: "late" }, request);
+				}, (error: unknown) => res.destroy(error instanceof Error ? error : new Error(String(error))));
+			}
 			if (step.ms !== undefined) {
 				setTimeout(() => {
 					if (!res.writableEnded) {

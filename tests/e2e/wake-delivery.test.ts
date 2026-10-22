@@ -1,19 +1,390 @@
 import assert from "node:assert/strict";
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { FleetStore } from "../../src/fleet.ts";
+import {
+	DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION,
+	SHIPPED_SEEN_KEEP_SESSIONS, SHIPPED_SEEN_MAX_IDS,
+} from "../../src/contracts.ts";
+import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, startPiChild } from "../harness/index.ts";
+import { CommandPost } from "../../src/command-post.ts";
+import { initJobsDocument } from "../../src/ledger.ts";
+import { AnsweredOutbox } from "../../src/answered.ts";
+import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
+import { frameBatch } from "../../src/parent-outbox.ts";
+import { REPO_ROOT, readRunEvents, waitFor } from "../harness/index.ts";
+import { FAILURE_CLASSES, type FleetRecord } from "../../src/contracts.ts";
+import { checkWakeup, wakeupFacts } from "../../src/wakeups.ts";
 import { dirname } from "node:path";
 import { EscalationRelayLedger, escalationRelayLedgerFile } from "../../src/escalation-backstop.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
-import { EMPTY_USAGE, FAILURE_CLASSES, isoTimestamp, LAYOUT, type FleetRecord } from "../../src/contracts.ts";
-import { join } from "node:path";
-import { test } from "node:test";
 import { attachParentHost, currentHost, parentHostPaths, type ParentHostClient } from "../../src/parent-host.ts";
 import { EscalationStore } from "../../src/escalation.ts";
 import { OperatorRelayOutbox, operatorRelayOutboxFile } from "../../src/operator-outbox.ts";
-import { COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
-import { FleetStore } from "../../src/fleet.ts";
-import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
-import { CommandPost } from "../../src/command-post.ts";
-import { checkWakeup, wakeupFacts } from "../../src/wakeups.ts";
+import { CP_BRIDGE_EXTENSION } from "../harness/index.ts";
+
+test("S20: shipped rows collapse through cp_status_block and survive a resumed parent", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s20-status", [
+		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: {} }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: {
+			labels: [{ job_id: "cp-s20-shipped", label: "changed label" }],
+			awaiting: [{ type: "approval", decision: "S20 decision", why: "research finished", blocks: "follow-up" }],
+		} }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: () => {
+			const file = join(home.path, LAYOUT.fleetFile);
+			const data = JSON.parse(readFileSync(file, "utf8"));
+			data.jobs.push({ ...data.jobs[0], job_id: "cp-s20-new", branch: "cp-s20-new",
+				receipts: [{ kind: "pr", status: "merged", title: "New", url: "https://github.com/example/demo/pull/21" }] });
+			writeFileSync(file, JSON.stringify(data));
+			return {};
+		} }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: () => {
+			writeFileSync(join(home.path, LAYOUT.shippedSeenFile), "{corrupt");
+			return {};
+		} }] },
+		{ kind: "text", text: "Status reported." },
+	]);
+	const resumedModel = provider.addScript("s20-resumed", [
+		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: {} }] },
+		{ kind: "text", text: "Status still reported." },
+	]);
+	const freshModel = provider.addScript("s20-fresh", [
+		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: {} }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: {} }] },
+		{ kind: "text", text: "Fresh session checked." },
+	]);
+	const newestModel = provider.addScript("s20-newest", [
+		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: {} }] },
+		{ kind: "text", text: "Session bound checked." },
+	]);
+	const agent = createAgentDir({ provider });
+	const children: ReturnType<typeof startPiChild>[] = [];
+	t.after(async () => {
+		for (const child of children) await child.close();
+		agent.cleanup();
+		await provider.stop();
+		home.cleanup();
+	});
+	const now = isoTimestamp();
+	await new FleetStore({ home: home.path }).add({
+		job_id: "cp-s20-shipped", project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN,
+		phase: "done", worktree: join(home.path, "wt"), branch: "cp-s20-shipped", dispatched_at: now,
+		reported_at: now, closed_at: now, closed_reason: "gated", usage: EMPTY_USAGE,
+		receipts: [{ kind: "pr", status: "merged", title: "Shipped", url: "https://github.com/example/demo/pull/20" }],
+		worker: { pid: 4242, session_id: "s20-worker", session_file: join(home.path, "worker.jsonl"),
+			profile: "implementer", role: "implementer", model, started_at: now, exited_at: now, exit_code: 0 },
+	});
+	const env = { ...agent.env, CP_HOME: home.path };
+	const first = startPiChild({
+		cwd: home.path, model, env, extensions: [COMMAND_POST_EXTENSION], sessionDir: join(home.path, "sessions"),
+	});
+	children.push(first);
+	writeFileSync(join(home.path, LAYOUT.shippedSeenFile), "{initial-corruption");
+	await first.prompt("Render the status twice.");
+	await first.waitForSettled(60_000);
+	const results = first.eventsOfType("tool_execution_end").filter((r) => r.toolName === "cp_status_block");
+	assert.equal(results.length, 4);
+	assert.match(JSON.stringify(results[0]), /pull\/20/);
+	assert.match(JSON.stringify(results[1]), /none new \(1 already reported\)/);
+	assert.match(JSON.stringify(results[1]), /S20 decision/);
+	assert.match(JSON.stringify(results[2]), /pull\/21/);
+	assert.doesNotMatch(JSON.stringify(results[2]), /pull\/20/);
+	assert.match(JSON.stringify(results[3]), /none new \(2 already reported\)/);
+	const warnings = JSON.stringify(first.records().filter((r) => r.type === "extension_ui_request"));
+	assert.match(warnings, /Shipped memory unreadable/);
+	assert.match(warnings, /safe to delete/);
+	assert.match(warnings, /rebuilt/);
+	const state = await first.getState();
+	assert.equal(typeof state.sessionFile, "string");
+	await first.close();
+	const resumed = startPiChild({
+		cwd: home.path, model: resumedModel, env, extensions: [COMMAND_POST_EXTENSION],
+		sessionFile: state.sessionFile as string,
+	});
+	children.push(resumed);
+	await resumed.prompt("Render status after resuming.");
+	await resumed.waitForSettled(60_000);
+	const result = resumed.eventsOfType("tool_execution_end").find((r) => r.toolName === "cp_status_block");
+	assert.match(JSON.stringify(result), /none new \(2 already reported\)/);
+	assert.doesNotMatch(JSON.stringify(result), /pull\/20/);
+	await resumed.close();
+	const fresh = startPiChild({ cwd: home.path, model: freshModel, env, extensions: [COMMAND_POST_EXTENSION] });
+	children.push(fresh);
+	const freshState = await fresh.getState();
+	assert.equal(typeof freshState.sessionId, "string");
+	const memory = JSON.parse(readFileSync(join(home.path, LAYOUT.shippedSeenFile), "utf8"));
+	const originalSession = memory.sessions[0];
+	const sessions = [originalSession, ...Array.from({ length: SHIPPED_SEEN_KEEP_SESSIONS - 2 }, (_, i) => ({
+		session_id: `seed-${i}`, shipped_ids: [`cp-seed-${i}`], updated_at: now,
+	})), { session_id: freshState.sessionId, updated_at: now,
+		shipped_ids: Array.from({ length: SHIPPED_SEEN_MAX_IDS }, (_, i) => `cp-old-${i}`) }];
+	writeFileSync(join(home.path, LAYOUT.shippedSeenFile), JSON.stringify({ schema_version: SCHEMA_VERSION,
+		updated_at: now, sessions }));
+	await fresh.prompt("Render fresh session twice.");
+	await fresh.waitForSettled(60_000);
+	const freshResults = fresh.eventsOfType("tool_execution_end").filter((r) => r.toolName === "cp_status_block");
+	assert.match(JSON.stringify(freshResults[0]), /pull\/20/);
+	assert.match(JSON.stringify(freshResults[0]), /pull\/21/);
+	assert.match(JSON.stringify(freshResults[1]), /none new \(2 already reported\)/);
+	const bounded = JSON.parse(readFileSync(join(home.path, LAYOUT.shippedSeenFile), "utf8"));
+	assert.equal(bounded.sessions.length, SHIPPED_SEEN_KEEP_SESSIONS);
+	assert.deepEqual(bounded.sessions.find((s: { session_id: string }) => s.session_id === originalSession.session_id),
+		originalSession, "another writer must preserve the original session");
+	const current = bounded.sessions.at(-1);
+	assert.equal(current.session_id, freshState.sessionId);
+	assert.equal(current.shipped_ids.length, SHIPPED_SEEN_MAX_IDS);
+	assert.deepEqual(current.shipped_ids.slice(-2), ["cp-s20-new", "cp-s20-shipped"]);
+	await fresh.close();
+	const newest = startPiChild({ cwd: home.path, model: newestModel, env, extensions: [COMMAND_POST_EXTENSION] });
+	children.push(newest);
+	const newestState = await newest.getState();
+	await newest.prompt("Render one more session.");
+	await newest.waitForSettled(60_000);
+	const trimmed = JSON.parse(readFileSync(join(home.path, LAYOUT.shippedSeenFile), "utf8"));
+	assert.equal(trimmed.sessions.length, SHIPPED_SEEN_KEEP_SESSIONS);
+	assert.equal(trimmed.sessions.at(-1).session_id, newestState.sessionId);
+	assert.ok(!trimmed.sessions.some((s: { session_id: string }) => s.session_id === originalSession.session_id));
+	assert.equal(provider.remaining("s20-newest"), 0);
+	assert.equal(provider.remaining("s20-fresh"), 0);
+	assert.equal(provider.remaining("s20-status"), 0);
+	assert.equal(provider.remaining("s20-resumed"), 0);
+});
+
+ test("S20: persisted stale notices are filtered at the actual provider boundary", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s20-context", [
+		{ kind: "text", text: "Context checked." },
+		{ kind: "text", text: "Tail checked." },
+		{ kind: "text", text: "Reload checked." },
+	]);
+	const agent = createAgentDir({ provider });
+	const session = join(home.path, "legacy.jsonl");
+	mkdirSync(join(home.path, paths.runDir("cp-gone")), { recursive: true });
+	const stamp = (kind: string, extra = {}) => ({ kind, job_id: "cp-gone", issued_at: "2026-09-26T08:00:00Z", ...extra });
+	const messages = [
+		{ role: "user", content: "Keep this ordinary user message" },
+		...["envelope", "ci", "verdict"].map((kind) => ({ role: "custom", customType: `cp-${kind}`,
+			content: `OBSOLETE-${kind}`, display: true, details: { cp_wakeup: stamp(kind) } })),
+		{ role: "custom", customType: "cp-answered", content: "FRESH-ANSWER", display: true,
+			details: { cp_wakeup: stamp("answered", { keys: ["aw-new"] }) } },
+		{ role: "custom", customType: "cp-answered", content: "DUPLICATE-ANSWER", display: true,
+			details: { cp_wakeup: stamp("answered", { keys: ["aw-new"] }) } },
+		{ role: "custom", customType: "cp-verdict", content: "OBSOLETE-INTEGRATE", display: true,
+			details: { cp_wakeup: stamp("verdict"), verdict: { reasons: ["medium: preserve these findings"] } } },
+		{ role: "custom", customType: "cp-recovery", content: "LANDED-FIRST", display: true,
+			details: { durable_id: "continuation:cp-gone:1:done", cp_wakeup: stamp("recovery") } },
+		{ role: "custom", customType: "cp-recovery", content: "LANDED-DUPLICATE", display: true,
+			details: { durable_id: "continuation:cp-gone:1:done", cp_wakeup: stamp("recovery", {
+				issued_at: "2026-09-26T08:04:00Z",
+			}) } },
+		{ role: "custom", customType: "cp-recovery", content: "JOBLESS-GONE", display: true,
+			details: { cp_wakeup: { kind: "recovery", keys: ["cp-gone"], issued_at: "2026-09-26T08:05:00Z" } } },
+	];
+	const timestamp = new Date().toISOString();
+	let parentId: string | null = null;
+	const rows: unknown[] = [{ type: "session", version: 3, id: "s20-context-session", timestamp, cwd: home.path }];
+	for (const [index, message] of messages.entries()) {
+		const id = `message-${index}`;
+		rows.push({ type: "message", id, parentId, timestamp, message: { ...message, timestamp: Date.now() } });
+		parentId = id;
+	}
+	writeFileSync(session, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+	const injector = join(home.path, "notice-injector.ts");
+	writeFileSync(injector, `export default function(pi) {
+		pi.registerCommand("s20tail", { description: "Replay a legacy stale tail", handler: async () => {
+			pi.sendMessage({ customType: "cp-verdict", content: "OBSOLETE-TAIL", display: true,
+				details: { cp_wakeup: ${JSON.stringify(stamp("verdict"))} } }, { triggerTurn: true });
+		} });
+	}`);
+	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
+		extensions: [COMMAND_POST_EXTENSION, injector], sessionFile: session });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	await child.prompt("Inspect the carried context.");
+	await child.waitForSettled(60_000);
+	const request = JSON.stringify(provider.requests("s20-context").map((r) => r.body.messages));
+	assert.match(request, /Keep this ordinary user message/);
+	assert.doesNotMatch(request, /OBSOLETE-|DUPLICATE-ANSWER/);
+	assert.match(request, /FRESH-ANSWER/);
+	assert.match(request, /medium: preserve these findings/);
+	assert.doesNotMatch(request, /OBSOLETE-INTEGRATE/);
+	assert.match(request, /LANDED-FIRST/);
+	assert.doesNotMatch(request, /LANDED-DUPLICATE|JOBLESS-GONE/);
+	const suppressed = readRunEvents(home.path, "cp-gone").filter((e) => e.type === "wakeup_suppressed");
+	const payloads = suppressed.map((e) => e.payload as { kind: string; stage: string; reason: string; keys?: string[] });
+	for (const kind of ["envelope", "ci", "verdict", "answered", "recovery"]) {
+		assert.ok(payloads.some((p) => p.kind === kind && p.stage === "delivery" && p.reason.length > 0));
+	}
+	assert.ok(payloads.some((p) => p.kind === "answered" && p.keys?.includes("aw-new")));
+	assert.ok(payloads.some((p) => p.keys?.includes("cp-gone") && /every candidate/.test(p.reason)));
+	assert.doesNotMatch(JSON.stringify(suppressed), /OBSOLETE-|FRESH-ANSWER|LANDED-FIRST/);
+	assert.match(readFileSync(session, "utf8"), /OBSOLETE-envelope/, "filtering must not mutate persisted history");
+	const offset = child.records().length;
+	await child.prompt("/s20tail");
+	await child.waitFor((r) => r.type === "agent_settled" && child.records().indexOf(r) >= offset, 60_000);
+	const tailRequest = JSON.stringify(provider.requests("s20-context")[1]?.body.messages);
+	assert.doesNotMatch(tailRequest, /OBSOLETE-TAIL/);
+	assert.match(tailRequest, /A fleet notice queued for this turn was withdrawn before delivery/);
+	await child.close();
+	const resumed = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
+		extensions: [COMMAND_POST_EXTENSION], sessionFile: session });
+	t.after(() => resumed.close());
+	await resumed.prompt("Recheck the persisted notices after reload.");
+	await resumed.waitForSettled(60_000);
+	const reloaded = JSON.stringify(provider.requests("s20-context")[2]?.body.messages);
+	assert.match(reloaded, /FRESH-ANSWER/);
+	assert.match(reloaded, /LANDED-FIRST/);
+	assert.doesNotMatch(reloaded, /OBSOLETE-|DUPLICATE-ANSWER|LANDED-DUPLICATE|JOBLESS-GONE/);
+	await resumed.close();
+	assert.equal(provider.remaining("s20-context"), 0);
+});
+
+test("S20: busy durable wakes wait for an operator answer and late notices receive one nudge", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	initJobsDocument(home.path, "cp");
+	const seed = new CommandPost({ home: home.path, packageRoot: REPO_ROOT });
+	await seed.registry.register({ name: "demo", clone_url: home.path, delivery: "local" });
+	const ready = await seed.ledger().create({ title: "S20 ready work", project: "demo", delivery: "local", kind: "ship" });
+	seed.mandates.issue({ projects: ["demo"], objective: "S20 wake authority", job_ids: [ready.id],
+		expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [] });
+	await seed.shutdown();
+	// A timed reply can settle and erase send records before the test observes the busy state.
+	const holds = Array.from({ length: 3 }, () => {
+		let release!: () => void;
+		const until = new Promise<void>((resolve) => { release = resolve; });
+		return { until, release };
+	});
+	const model = provider.addScript("s20-busy", [
+		{ kind: "hang", until: holds[0]!.until }, { kind: "hang", until: holds[1]!.until },
+		{ kind: "hang", until: holds[2]!.until }, { kind: "text", text: "Notices handled." },
+	]);
+	const agent = createAgentDir({ provider });
+	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
+		extensions: [COMMAND_POST_EXTENSION], sessionDir: join(home.path, "sessions") });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	const box = new DurableWakeupOutbox({ home: home.path });
+	const queue = (id: string) => box.enqueue({ id, kind: "recovery", content: `S20-BUSY-${id}` });
+	const requests = () => provider.requests("s20-busy");
+	await child.prompt(frameBatch([{ id: "ps-20300101000000-0000000a", text: "S20 operator question" }]));
+	await waitFor(requests, (r) => r.length === 1, { timeoutMs: 30_000, what: "first busy request" });
+	queue("w1"); queue("w2"); queue("w3");
+	await waitFor(() => ({ outbox: box.read(), requests: requests().length }), (state) => (state.outbox.sends ?? []).length === 3, {
+		timeoutMs: 30_000, what: "durable notices offered to the parent (outbox and request count)",
+	});
+	assert.equal(requests().length, 1, "an unanswered operator send cannot start a notice turn");
+	const state = await child.getState();
+	assert.doesNotMatch(readFileSync(state.sessionFile as string, "utf8"), /S20-BUSY-w[123]/,
+		"held notices must not enter the session before the operator answer");
+	const answers = new AnsweredOutbox({ home: home.path });
+	answers.enqueue({ id: "aw-s20-held", type: "approval", decision: "S20 answer bypasses hold",
+		answer: "continue", answered_by: "operator dialog (tui)" });
+	await waitFor(() => answers.read().sends ?? [], (sends) => sends.length > 0, {
+		timeoutMs: 30_000, what: "answer offered while operator question is unanswered",
+	});
+	holds[0]!.release();
+	await waitFor(requests, (r) => r.length === 2, { timeoutMs: 30_000, what: "notice request after operator answer" });
+	const carried = JSON.stringify(requests()[1]?.body.messages);
+	for (const id of ["w1", "w2", "w3"]) assert.match(carried, new RegExp(`S20-BUSY-${id}`));
+	assert.ok(carried.indexOf("S20 answer bypasses hold") >= 0);
+	queue("w4");
+	await waitFor(() => box.read().sends ?? [], (sends) => sends.some((s) => s.id === "w4"), {
+		timeoutMs: 30_000, what: "late non-triggering notice offered",
+	});
+	new AnsweredOutbox({ home: home.path }).enqueue({ id: "aw-s20-busy", type: "approval",
+		decision: "S20 actionable decision", answer: "continue", answered_by: "operator dialog (tui)" });
+	await waitFor(() => answers.read(), (state) => [...(state.sends ?? []), ...state.delivered].some((row) => row.id === "aw-s20-busy"), {
+		timeoutMs: 30_000, what: "second answer offered while the parent remains busy",
+	});
+	holds[1]!.release();
+	await waitFor(requests, (r) => r.length === 3, { timeoutMs: 30_000, what: "actionable answer bypasses busy gate" });
+	const answered = JSON.stringify(requests()[2]?.body.messages);
+	assert.match(answered, /S20 actionable decision/);
+	assert.match(answered, /S20-BUSY-w4/);
+	assert.doesNotMatch(answered, /fleet notice\(s\) arrived while you were busy/);
+	queue("w5");
+	await waitFor(() => box.read(), (state) => (state.sends ?? []).some((row) => row.id === "w5"), {
+		timeoutMs: 30_000, what: "late non-triggering notice offered while parent remains busy",
+	});
+	holds[2]!.release();
+	await waitFor(requests, (r) => r.length === 4, { timeoutMs: 30_000, what: "one stranded-notice nudge" });
+	await waitFor(() => box.pending(), (pending) => pending.length === 0, {
+		timeoutMs: 30_000, what: "late non-triggering notice accepted after the busy turn",
+	});
+	const nudged = JSON.stringify(requests()[3]?.body.messages);
+	assert.match(nudged, /S20-BUSY-w5/);
+	assert.match(nudged, /1 fleet notice\(s\) arrived while you were busy/);
+	await child.waitFor((r) => r.type === "message_end" && JSON.stringify(r).includes("Notices handled."), 60_000);
+	assert.equal(requests().length, 4);
+	assert.equal(provider.remaining("s20-busy"), 0);
+});
+
+test("S20: abort strands no autonomous turn and the next prompt carries the notices", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s20-abort", [
+		{ kind: "hang" }, { kind: "text", text: "Resumed notices handled." },
+		{ kind: "text", text: "Idle notice handled." },
+	], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
+		extensions: [COMMAND_POST_EXTENSION] });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	const box = new DurableWakeupOutbox({ home: home.path });
+	const requests = () => provider.requests("s20-abort");
+	await child.prompt("S20 ordinary busy turn");
+	await waitFor(requests, (r) => r.length === 1, { timeoutMs: 30_000, what: "aborted request" });
+	for (const id of ["abort-first", "abort-late"]) box.enqueue({ id, kind: "recovery", content: `S20-${id}` });
+	await waitFor(() => box.read().sends ?? [], (sends) => sends.length === 2, {
+		timeoutMs: 30_000, what: "busy notices offered before abort",
+	});
+	child.send({ id: "abort-s20", type: "abort" });
+	await child.waitForSettled(60_000);
+	await child.getState();
+	assert.equal(requests().length, 1, "abort must not start a stranded-notice turn");
+	await child.prompt("S20 resume after abort");
+	await child.waitFor((r) => r.type === "message_end" && JSON.stringify(r).includes("Resumed notices handled."), 60_000);
+	const resumed = JSON.stringify(requests()[1]?.body.messages);
+	assert.match(resumed, /S20-abort-late/);
+	assert.doesNotMatch(resumed, /fleet notice\(s\) arrived while you were busy/);
+	box.enqueue({ id: "after-abort-idle", kind: "recovery", content: "S20 idle wake" });
+	await waitFor(requests, (rows) => rows.some((r) => JSON.stringify(r.body.messages).includes("S20 idle wake")), {
+		timeoutMs: 30_000, what: "idle notice reaches a model request",
+	});
+	assert.doesNotMatch(JSON.stringify(requests().map((r) => r.body.messages)), /fleet notice\(s\) arrived while you were busy/);
+	assert.equal(provider.remaining("s20-abort"), 0);
+});
+
+test("S20: tool turns do not answer operator sends and an errored run releases held wakes", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s20-error-release", [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "node -e 'setTimeout(() => {}, 10000)'" } }] },
+		{ kind: "error", status: 400, message: "S20 provider rejected request" },
+		{ kind: "text", text: "Held notice recovered." },
+	]);
+	const agent = createAgentDir({ provider, settings: { retry: { enabled: false, maxRetries: 0 } } });
+	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
+		extensions: [COMMAND_POST_EXTENSION] });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	const requests = () => provider.requests("s20-error-release");
+	await child.prompt(frameBatch([{ id: "ps-20300101000000-0000000b", text: "S20 unanswered operator question" }]));
+	await child.waitFor((r) => r.type === "tool_execution_start" && r.toolName === "bash", 30_000);
+	const box = new DurableWakeupOutbox({ home: home.path });
+	box.enqueue({ id: "s20-tool-held", kind: "recovery", content: "S20 held through tool turn" });
+	box.enqueue({ id: "s20-tool-held-2", kind: "recovery", content: "S20 held through tool turn second" });
+	await waitFor(() => box.read().sends ?? [], (sends) => sends.length > 0, {
+		timeoutMs: 30_000, what: "notice offered during tool execution",
+	});
+	await child.waitFor((r) => r.type === "message_end" && JSON.stringify(r).includes("Held notice recovered."), 30_000);
+	assert.equal(requests().length, 3);
+	assert.doesNotMatch(JSON.stringify(requests()[1]?.body.messages), /S20 held through tool turn/);
+	assert.match(JSON.stringify(requests()[2]?.body.messages), /S20 held through tool turn/);
+	assert.equal(provider.remaining("s20-error-release"), 0);
+});
 
 test("wake S19: a real operator reconnects read-only and delivers a gap escalation once", { timeout: 180_000 }, async (t) => {
 	const home = createScratchHome();

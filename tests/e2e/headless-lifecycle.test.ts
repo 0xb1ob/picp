@@ -3,12 +3,12 @@
  * with no TUI; a mid-turn wake-up is queued, never dropped.
  */
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { AwaitingStore } from "../../src/awaiting.ts";
-import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
+import { isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { CiWatchStore } from "../../src/ci-watch.ts";
 import { formatContinuationNotice } from "../../src/held-continuation.ts";
 import { listPendingReviews } from "../../src/review-runs.ts";
@@ -17,6 +17,7 @@ import { controlJournalFile, readControlRecord } from "../../src/viewer/control-
 import { readPendingSends } from "../../src/viewer/control-pending.ts";
 import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
 import { FleetStore } from "../../src/fleet.ts";
+import { ProjectRegistry } from "../../src/projects.ts";
 import {
 	COMMAND_POST_EXTENSION,
 	CP_BRIDGE_EXTENSION,
@@ -180,14 +181,16 @@ test("rpc: a wake-up arriving mid-turn is delivered after the turn", { timeout: 
 type Held = Awaited<ReturnType<typeof seedHeldHome>>;
 
 /** One headless parent on `held`'s home; `turns()` counts its model requests, i.e. parent turns. */
-async function startParent(t: { after(fn: () => unknown): void }, held: Held, script: string) {
+async function startParent(t: { after(fn: () => unknown): void }, held: Held, script: string, retrySeconds?: string, busy = false) {
 	const provider = await MockProvider.start();
-	const model = provider.addScript(script, [{ kind: "text", text: "acknowledged" }], { onExhausted: "repeat" });
+	const model = provider.addScript(script, busy ? [{ kind: "hang", ms: 15_000 }, { kind: "text", text: "acknowledged" }]
+		: [{ kind: "text", text: "acknowledged" }], { onExhausted: "repeat" });
 	const agentDir = createAgentDir({ provider });
 	const child = startPiChild({
 		cwd: held.home.path,
 		model,
-		env: { ...agentDir.env, CP_HOME: held.home.path, PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "1" },
+		env: { ...agentDir.env, CP_HOME: held.home.path, PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "1",
+			...(retrySeconds ? { CP_CI_WATCH_DELIVERY_RETRY_SECONDS: retrySeconds } : {}) },
 		extensions: [COMMAND_POST_EXTENSION],
 	});
 	let closed: Promise<void> | undefined;
@@ -235,7 +238,8 @@ test("rpc: one CI-green key whose review is in flight is relayed without a paren
 		held.repo.cleanup();
 	});
 	const first = await startParent(t, held, "headless-green");
-	const relay = await notified(first.child, /CI GREEN — .* handled in code, no parent turn\./);
+	const relay = await notified(first.child, /CI GREEN|CI\/PR OBSERVED/);
+	assert.match(String(relay.message), /handled in code, no parent turn\./);
 	assert.match(String(relay.message), /cp-held/);
 	assert.match(String(relay.message), /pull\/58/);
 	await waitFor(() => wakeRuleEvents(held.home.path, "ci_green"), (events) => events.length > 0, { timeoutMs: 30_000, what: "the ci_green journal line" });
@@ -296,16 +300,21 @@ test("rpc: a restart on the same green head replays nothing for the confirmed ci
 });
 
 test("rpc: with the wake-rules switch off, the same CI-green fact wakes the parent and journals why", { timeout: 180_000 }, async (t) => {
-	const held = await seedHeldHome({ ciState: "green", review: "pending" });
+	const held = await seedHeldHome({ ciState: "in_progress", review: "pending" });
 	t.after(() => {
 		held.home.cleanup();
 		held.repo.cleanup();
 	});
 	mkdirSync(join(held.home.path, LAYOUT.data), { recursive: true });
 	writeFileSync(join(held.home.path, LAYOUT.data, "wake-rules.json"), '{"enabled":false}\n');
-	const parent = await startParent(t, held, "headless-green-off");
-	await notified(parent.child, /CI\/PR OBSERVED/);
-	await waitFor(() => parent.turns(), (n) => n >= 1, { timeoutMs: 60_000, what: "the parent turn the switch restores" });
+	const parent = await startParent(t, held, "headless-green-off", "1", true);
+	await parent.child.prompt("Keep working while the watch runs.");
+	await waitFor(parent.turns, (n) => n === 1, { timeoutMs: 30_000, what: "the operator's in-flight turn" });
+	writeFileSync(held.stateFile, "green\n");
+	await waitFor(() => parent.child.records().filter((r) => r.type === "extension_ui_request" && /CI\/PR OBSERVED/.test(String(r.message))).length,
+		(n) => n >= 2, { timeoutMs: 30_000, what: "the unconfirmed key's bounded resend" });
+	await waitFor(parent.turns, (n) => n >= 2, { timeoutMs: 30_000, what: "the queued watch fact reaches the provider" });
+	assert.match(parent.requestText(), /CI\/PR OBSERVED/);
 	assert.deepEqual(wakeRuleEvents(held.home.path, "ci_green").map((e) => [e.decision, e.reason]), [["woke", "kill switch"]]);
 });
 
@@ -508,6 +517,129 @@ test("rpc bridge: a queued message whose handoff is dropped twice ends failed, n
 	assert.equal(run.consumed().length, 0);
 });
 
+test("S20: reported envelope heads survive failed watch queries until a newer remote observation supersedes the verdict", { timeout: 120_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "in_progress", review: "pending" });
+	writeReviewPass(held.home.path, held.headSha);
+	const store = new CiWatchStore({ home: held.home.path });
+	const oldAt = "2026-08-31T12:40:00Z";
+	const envelopeAt = "2026-08-31T12:45:43Z";
+	const staleHead = "3d3355f0c4d2".padEnd(40, "0");
+	mkdirSync(join(held.home.path, paths.runDir(JOB)), { recursive: true });
+	writeFileSync(join(held.home.path, paths.envelopeFile(JOB)), JSON.stringify({
+		schema_version: SCHEMA_VERSION, job_id: JOB, received_at: envelopeAt, attempt: 1,
+		envelope: { job_id: JOB, kind: "ship", status: "done", summary: "S20", head_sha: held.headSha },
+	}));
+	store.record(JOB, { head_sha: staleHead, head_observed_at: oldAt, last_checked_at: oldAt });
+	writeFileSync(held.stateFile, "offline\n");
+	const injector = join(held.home.path, "s20-verdict.ts");
+	writeFileSync(injector, `export default function(pi) {
+		let sequence = 0;
+		pi.registerCommand("s20head", { description: "Replay a persisted verdict", handler: async () => {
+			pi.sendMessage({ customType: "cp-verdict", content: "S20 authoritative verdict " + (++sequence), display: true,
+				details: { cp_wakeup: { kind: "verdict", job_id: ${JSON.stringify(JOB)}, keys: ["review", String(sequence), ${JSON.stringify(held.headSha)}],
+				issued_at: new Date().toISOString() } } }, { triggerTurn: true });
+		} });
+	}`);
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s20-head", [{ kind: "text", text: "Head checked." }], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
+		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "1" },
+		extensions: [COMMAND_POST_EXTENSION, injector] });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); held.home.cleanup(); held.repo.cleanup(); });
+	await waitFor(() => store.job(JOB), (job) => (job?.consecutive_failures ?? 0) > 0, {
+		timeoutMs: 30_000, what: "failed production CI watch query",
+	});
+	assert.equal(store.job(JOB)?.head_observed_at, oldAt, "failed queries must not freshen a stale head");
+	await child.prompt("/s20head");
+	await child.waitForSettled(60_000);
+	assert.match(JSON.stringify(provider.requests("s20-head").at(-1)?.body.messages), /S20 authoritative verdict/);
+	const moved = "cc55dd66ee77".padEnd(40, "0");
+	writeFileSync(held.headFile, moved + "\n");
+	writeFileSync(held.stateFile, "in_progress\n");
+	store.record(JOB, { next_due_at: oldAt });
+	await waitFor(() => store.job(JOB), (job) => job?.head_sha === moved, {
+		timeoutMs: 30_000, what: "a genuine newer remote head",
+	});
+	const decision = JSON.parse(readFileSync(join(held.home.path, paths.reviewFile(JOB, 1)), "utf8"));
+	for (const attempt of [2, 3]) {
+		writeFileSync(join(held.home.path, paths.reviewFile(JOB, attempt)), JSON.stringify({ ...decision, attempt }));
+		const before = provider.requests("s20-head").length;
+		await child.prompt("/s20head");
+		await waitFor(() => provider.requests("s20-head"), (rows) => rows.length > before, {
+			timeoutMs: 30_000, what: "superseded verdict at the provider boundary",
+		});
+		assert.doesNotMatch(JSON.stringify(provider.requests("s20-head").at(-1)?.body.messages), new RegExp(`S20 authoritative verdict ${attempt}`));
+		await child.waitForSettled(60_000);
+	}
+	assert.equal(provider.remaining("s20-head"), 0);
+});
+
+test("S20: a green watch fact starts a real mock reviewer and relays without a parent request", { timeout: 120_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "in_progress", review: "pending" });
+	unlinkSync(join(held.home.path, paths.pendingReviewFile(JOB, "review", 1)));
+	const provider = await MockProvider.start();
+	const reviewer = provider.addScript("s20-started-review", [{ kind: "hang" }]);
+	const model = provider.addScript("s20-started-parent", [{ kind: "text", text: "Unexpected parent wake." }]);
+	await new ProjectRegistry({ home: held.home.path }).setReviewerModel("demo", reviewer);
+	const agent = createAgentDir({ provider });
+	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
+		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "1" }, extensions: [COMMAND_POST_EXTENSION] });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); held.home.cleanup(); held.repo.cleanup(); });
+	await ciTicks(held, 2);
+	writeFileSync(held.stateFile, "green\n");
+	const relay = await notified(child, /CI GREEN|CI\/PR OBSERVED/);
+	assert.match(String(relay.message), /handled in code, no parent turn\./);
+	await waitFor(() => provider.requests("s20-started-review"), (rows) => rows.length === 1, {
+		timeoutMs: 30_000, what: "the continuation's actual reviewer reaches the mock provider",
+	});
+	assert.deepEqual(wakeRuleEvents(held.home.path, "ci_green").map((e) => [e.decision, e.action, e.next_kind]), [["suppressed", "review_started", "no_mandate"]]);
+	assert.equal(provider.requests("s20-started-parent").length, 0);
+	assert.equal(listPendingReviews(held.home.path, JOB).length, 1);
+});
+
+test("S20: multi-fact green batches and a single red fact wake without a single-green ruling", { timeout: 120_000 }, async (t) => {
+	for (const ciState of ["green", "red"] as const) {
+		const held = await seedHeldHome({ ciState, review: "pending" });
+		if (ciState === "green") {
+			const fleet = new FleetStore({ home: held.home.path });
+			await fleet.add({ ...fleet.get(JOB)!, job_id: "cp-second", branch: "cp-second" });
+			const pending = JSON.parse(readFileSync(join(held.home.path, paths.pendingReviewFile(JOB, "review", 1)), "utf8"));
+			mkdirSync(dirname(join(held.home.path, paths.pendingReviewFile("cp-second", "review", 1))), { recursive: true });
+			writeFileSync(join(held.home.path, paths.pendingReviewFile("cp-second", "review", 1)), JSON.stringify({ ...pending, job_id: "cp-second" }));
+			const box = new DurableWakeupOutbox({ home: held.home.path });
+			box.enqueue({ id: "recovery:cp-second", kind: "recovery", job_id: "cp-second", content: "already relayed" });
+			box.confirmDelivered(["recovery:cp-second"]);
+		}
+		const parent = await startParent(t, held, `s20-green-batch-${ciState}`);
+		t.after(() => { held.home.cleanup(); held.repo.cleanup(); });
+		const count = ciState === "green" ? 2 : 1;
+		await waitFor(parent.requestText, (text) => text.includes(`CI/PR OBSERVED — ${count} new fact`), { timeoutMs: 30_000, what: "the watch facts reach the parent" });
+		assert.match(parent.requestText(), /cp-held/);
+		if (ciState === "green") assert.match(parent.requestText(), /cp-second/);
+		await ciTicks(held, 2);
+		assert.deepEqual(wakeRuleEvents(held.home.path, "ci_green"), []);
+		await parent.close();
+	}
+});
+
+test("S20: overlapping green sweeps leave one owner for a delayed continuation ruling", { timeout: 120_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "in_progress", review: "pending" });
+	const parent = await startParent(t, held, "s20-green-overlap", "1");
+	t.after(() => { held.home.cleanup(); held.repo.cleanup(); });
+	await ciTicks(held, 3);
+	writeFileSync(`${held.headFile}.delay`, "delay the public gh pr view call");
+	writeFileSync(held.stateFile, "green\n");
+	const duplicate = await notified(parent.child, /CI GREEN — /);
+	assert.match(String(duplicate.message), /already being handled in code\./);
+	unlinkSync(`${held.headFile}.delay`);
+	await notified(parent.child, /CI GREEN — .* handled in code, no parent turn\./);
+	await ciTicks(held, 2);
+	assert.deepEqual(wakeRuleEvents(held.home.path, "ci_green").map((e) => [e.decision, e.action]), [["suppressed", "review_pending"]]);
+	assert.equal(parent.turns(), 0);
+	assert.equal(listPendingReviews(held.home.path, JOB).length, 1);
+	await parent.close();
+});
 
 test("rpc parent S24: a CI fleet wake stays held across settlement until manual compaction", { timeout: 90_000 }, async (t) => {
 	const held = await seedHeldHome({ ciState: "in_progress" });
