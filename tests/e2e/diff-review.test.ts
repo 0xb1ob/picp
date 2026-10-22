@@ -572,7 +572,7 @@ test("S15: reviewers receive bounded whole-file snapshots with resolved task pat
 	assert.match(brief, /`absent` means git confirmed the path does not exist at that sha/);
 	assert.match(brief, /never treat them as absent/);
 	rmSync(join(s.home, paths.reviewFile(job, 1)));
-	rmSync(result.scratch, { recursive: true });
+	rmSync(result.run, { recursive: true });
 	const repeated = await s.review(job);
 	assert.ok(repeated.requests.length > 0);
 	assert.deepEqual(JSON.parse(readFileSync(join(repeated.scratch, "context-manifest.json"), "utf8")), manifest);
@@ -610,11 +610,11 @@ test("S15: a git object read failure is named in reviewer context without fabric
 
 
 test("S15: real reviewer attempts persist before waiting, reject duplicates and announce only after handback", { timeout: 120_000 }, async (t) => {
-	const dir = mkdtempSync(join(tmpdir(), "cp-s15-slots-"));
+	const s = await stack(t);
+	const dir = join(s.home, "review-barrier");
+	mkdirSync(dir);
 	const fifo = join(dir, "reviewer-read");
 	execFileSync("mkfifo", [fifo]);
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const s = await stack(t);
 	const job = await s.seed({ "src/run.ts": "export const run = 1;\n" });
 	const model = s.provider.addScript("s15-barrier", [
 		{ kind: "tool_calls", calls: [{ name: "read", args: { path: fifo } }] },
@@ -647,7 +647,7 @@ test("S15: real reviewer attempts persist before waiting, reject duplicates and 
 	}, "a different review surface uses its own slot");
 	assert.deepEqual(listPendingReviews(s.home, job).map((pending) => pending.surface).sort(), ["quality", "review"]);
 	// The reader sniffs MIME before reading the body; release it only after the path becomes a regular file.
-	await new Promise<void>((resolve, reject) => execFile("sh", ["-c", 'exec 3>"$1"; rm "$1"; printf release > "$1"; printf release >&3', "s15-fifo", fifo], { timeout: 30_000 }, (error) => error ? reject(error) : resolve()));
+	await new Promise<void>((resolve, reject) => execFile("sh", ["-c", 'exec 3>"$1"; rm "$1"; printf release > "$1"', "s15-fifo", fifo], { timeout: 30_000 }, (error) => error ? reject(error) : resolve()));
 	await waitFor(() => existsSync(join(s.home, paths.reviewFile(job, 1))), Boolean, { timeoutMs: 30_000, what: "durable review decision" });
 	assert.equal(existsSync(pendingFile), false);
 	assert.equal(s.wakes.length, 0);

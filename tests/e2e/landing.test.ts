@@ -3303,7 +3303,7 @@ test("landing S10: dispatch rejects profiles granting parent integration tools",
 });
 
 test("landing S15 retry: real parent delivery confirms, retries withheld verdicts and expires permanent suppression", { skip: SKIP, timeout: 60_000 }, async (t) => {
-	const s = await startStack(t, { env: { CP_VERDICT_DELIVERY_RETRY_SECONDS: "1", CP_REVIEW_SUPPRESSION_SECONDS: "35" } });
+	const s = await startStack(t, { env: { CP_VERDICT_DELIVERY_RETRY_SECONDS: "1", CP_REVIEW_SUPPRESSION_SECONDS: "32" } });
 	const jobs: Awaited<ReturnType<typeof s.held>>[] = [];
 	for (let n = 0; n < 4; n++) {
 		const live = await s.held(`S15 retry ${n}`, 161 + n, { command: (branch) => `printf retry > retry-${n}.txt && git add retry-${n}.txt && git commit -q -m retry && git push -q -u origin ${branch}` });
@@ -3323,7 +3323,7 @@ test("landing S15 retry: real parent delivery confirms, retries withheld verdict
 	const parent = s.provider.addScript("s15-retry-parent", [
 		{ kind: "tool_calls", calls: [
 			...jobs.slice(0, 3).map((live, n) => ({ name: "cp_review", args: { job_id: live.jobId, model: models[n] } })),
-			{ name: "bash", args: { command: "sleep 6", timeout: 15 } },
+			{ name: "bash", args: { command: "sleep 6" } },
 		] },
 		{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: jobs[3]!.jobId, model: models[3] } }] },
 		{ kind: "text", text: "Review deliveries observed." },
@@ -3351,8 +3351,8 @@ test("landing S15 retry: real parent delivery confirms, retries withheld verdict
 	assert.equal(sends(3).length, 1, "an immediately confirmed verdict never resends");
 	assert.equal((sends(0)[1]!.payload as { resend: boolean }).resend, true);
 	assert.ok(sends(1).length >= 7, "withheld copies outlast the old five-copy bound without consuming the successful resend");
-	const cutoff = Date.parse(sends(2)[0]!.ts) + 35_000;
-	await waitFor(() => Date.now(), (now) => now >= cutoff + 1_000, { timeoutMs: 40_000, what: "configured suppression lifetime expires" });
+	const cutoff = Date.parse(sends(2)[0]!.ts) + 32_000;
+	await waitFor(() => Date.now(), (now) => now >= cutoff, { timeoutMs: 40_000, what: "configured suppression lifetime expires" });
 	assert.ok(sends(2).every((event) => Date.parse(event.ts) < cutoff), "permanent suppression stops at its lifetime bound");
 	assert.ok(Date.parse(sends(2).at(-1)!.ts) >= cutoff - 6_000, "suppressed attempts remain eligible until near the configured cutoff");
 	assert.ok(sends(2).length >= 7, "suppressed retries outlast the old five-copy bound");

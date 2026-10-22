@@ -126,3 +126,19 @@ After #439, these scenarios use `startStack`'s existing per-home `env` option: r
 The retry case still requires at least seven attempts across withheld delivery, confirms one arrival exactly once, permits exactly one successful resend, checks attempts near the configured suppression cutoff, and verifies expired verdicts stay dropped after facts recover. Wall-clock expectations now follow the configured durations. The default 15-minute watcher-backoff/20-minute suppression relationship is protected separately by the existing timer-knobs default checks; this accelerated scenario proves configured delivery behavior rather than waiting through the default cadence.
 
 The final combined focused run passed all 16 runner cases with zero skips: retry 55,956 ms, ordering 10,093 ms, restart 10,452 ms, deadline matrix 88,611 ms. Timings are logged under `node_modules/.cache/s15/addendum2-final.log`, inside the leased worktree. A subsequent focused window run passed ordering in 9,713 ms and restart in 8,890 ms. The initial expiry-wait budget was too short; it was corrected and the retry and combined runs both passed.
+
+## Addendum 3: CI run 39706266193 repairs
+
+(main session carry-in) "three real failures from this slice's own changes, not flakes. Repair all three:"
+
+- "tests/timeout-floor.test.ts:55 fails on tests/e2e/landing.test.ts:3326 (\"timeout option of 15 ms is under 5000 ms\"). Wait on the event, not a short clock."
+- "tests/e2e/diff-review.test.ts:502: assertion falsy at :577."
+- "tests/e2e/diff-review.test.ts:612: the FIFO release `sh -c exec 3>\"$1\"; rm \"$1\"; printf release ...` failed on /tmp/cp-s15-slots-*/reviewer-read. This is an open/rm ordering race on the FIFO; make the release robust, not a blind retry. Put its scratch dir under the test's own temp root."
+
+Packet regeneration now clears the complete prior reviewer run, including `verdict.json`, before reusing attempt 1; deleting just the scratch packet left a stale verdict that the waiter could consume before a new provider request. The FIFO barrier lives under this scenario's scratch home. Its writer holds the FIFO open until the regular release file is published, then closes it without writing to the MIME reader's pipe: CI showed SIGPIPE when that reader had already closed. No retry is added. The scripted bash call uses its default timeout rather than the unnecessary explicit `15` that triggered the floor scanner; event-based assertions remain unchanged.
+
+A concurrent validation run hit the retry's 60-second bound. The public suppression setting is now 32 seconds and expiry is observed at its actual cutoff, without an extra second. Seven withheld attempts, confirmation and terminal-expiry checks remain. Final retry passed in 57,111 ms; ordering passed in 9,750 ms, restart in 10,326 ms and the deadline matrix in 108,596 ms. Logs: `node_modules/.cache/s15/ci-retry-final2.log` and `ci-landing-fixed.log` (the latter also preserves the pre-adjustment timeout).
+
+Final full reviewer file: 53/53, including both reported failures; `ci-review-final.log`. Timeout-floor: 2/2. Final typecheck: exit 0 (`ci-typecheck-final.log`). Migration regression verification, contract eval 22/22 and normal golden check passed; regeneration changed no golden. An earlier typecheck invocation reached the tool's wall-clock limit; the final standalone invocation completed successfully.
+
+Skipped: full local suite and CI polling. Risk: measured retry margin is about three seconds under load; the scenario retains its 60-second bound.
