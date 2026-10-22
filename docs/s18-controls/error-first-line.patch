@@ -1,0 +1,13 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+index f7705ce..afd5be8 100644
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -130,7 +130,7 @@ export interface LedgerCloseOutcome {
+ 
+ function firstLine(error: unknown): string {
+ 	const text = error instanceof Error ? error.message : String(error);
+-	return (text.trim().split("\n")[0] ?? "").slice(0, 300) || "unknown error";
++	return text.trim().slice(0, 300) || "unknown error";
+ }
+ 
+ /**

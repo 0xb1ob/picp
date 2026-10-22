@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { EMPTY_USAGE, LAYOUT, isoTimestamp, paths, SCHEMA_VERSION, type DiffVerdict } from "../../src/contracts.ts";
@@ -92,32 +93,46 @@ for (const delivery of ["answer", "pipeline"] as const) {
    received_at: isoTimestamp(), attempt: 1, envelope: { job_id: live.jobId, kind: "research", status: "done", summary: "Findings ready", artifact_path: artifact } }));
   const file = s.post.ledger().file;
   const dir = dirname(file);
-  chmodSync(dir, 0o555);
+  const original = readFileSync(file, "utf8");
+  if (delivery === "answer") chmodSync(dir, 0o555);
+  else writeFileSync(file, JSON.stringify({ ...JSON.parse(original), unexpected: true }));
   let first;
   try { first = await s.post.tearDown(live.jobId); }
-  finally { chmodSync(dir, 0o755); }
+  finally {
+   chmodSync(dir, 0o755);
+   if (delivery === "pipeline") writeFileSync(file, original);
+  }
   assert.equal(first.torn_down, true);
   assert.equal(first.lease_returned, true);
   assert.ok(first.ledger_close_error, "ledger write failure is visible");
+  assert.doesNotMatch(first.ledger_close_error, /\n/);
+  if (delivery === "pipeline") assert.equal(first.ledger_close_error, `${file} violates the jobs contract:`);
   assert.match(formatTeardown(first), /re-run cp_teardown/);
-  const wakeups = JSON.parse(readFileSync(join(s.home, LAYOUT.wakeupsFile), "utf8"));
-  const failures = [...wakeups.pending, ...wakeups.delivered].filter((r) => r.id === `ledger-close-failed:${live.jobId}`);
-  assert.equal(failures.length, 1);
-  assert.deepEqual([failures[0].kind, failures[0].job_id], ["recovery", live.jobId]);
+  const failures = () => {
+   const wakeups = JSON.parse(readFileSync(join(s.home, LAYOUT.wakeupsFile), "utf8"));
+   return [...wakeups.pending, ...wakeups.delivered].filter((r) => r.id === `ledger-close-failed:${live.jobId}`);
+  };
+  assert.equal(failures().length, 1);
+  assert.deepEqual([failures()[0].kind, failures()[0].job_id], ["recovery", live.jobId]);
   assert.notEqual((await s.post.ledger().show(live.jobId)).status, "closed");
   const second = await s.post.tearDown(live.jobId);
   assert.deepEqual([second.torn_down, second.lease_returned, second.ledger_closed], [false, false, true]);
+  assert.match(formatTeardown(second), /ledger close was retried/);
+  assert.equal(failures().length, 1, "retry adds no recovery notification");
   const closed = await s.post.ledger().show(live.jobId);
   assert.equal(closed.close_reason, delivery === "answer" ? "answered: Findings ready" : `researched: ${artifact}`);
   assert.equal((await s.post.ledger().ready()).some((r) => r.id === live.jobId), false);
   assert.equal((await s.post.tearDown(live.jobId)).ledger_closed, undefined);
+  assert.equal(failures().length, 1, "third call adds no recovery notification");
  });
 }
 
 test("S18: done research ledger retry respects report, envelope, edit and ship guards", { skip: SKIP, timeout: 120_000 }, async (t) => {
  const s = await startStack(t);
+ const rows = new Map<string, string>();
  for (const mode of ["eligible", "startup", "unreported", "no-envelope", "edited", "ship"]) {
   const live = await s.seed(`S18 ${mode}`);
+  rows.set(mode, live.jobId);
   await s.post.fleet.mutate((jobs) => {
    const r = jobs.find((r) => r.job_id === live.jobId)!;
    r.kind = mode === "ship" ? "ship" : "research";
@@ -130,13 +145,23 @@ test("S18: done research ledger retry respects report, envelope, edit and ship g
    schema_version: SCHEMA_VERSION, job_id: live.jobId, received_at: isoTimestamp(), attempt: 1,
    envelope: { job_id: live.jobId, kind: mode === "ship" ? "ship" : "research", status: "done", summary: mode },
   }));
-  if (mode === "startup") {
-   await s.post.reconcile();
-   assert.equal((await s.post.ledger().show(live.jobId)).status, "closed", "startup retries an eligible ledger close");
-   continue;
-  }
-  const result = await s.post.tearDown(live.jobId);
-  assert.deepEqual([result.torn_down, result.lease_returned, result.ledger_closed], [false, false, mode === "eligible" ? true : undefined], mode);
-  assert.equal((await s.post.ledger().show(live.jobId)).status === "closed", mode === "eligible", mode);
+ }
+ const eligible = await s.post.tearDown(rows.get("eligible")!);
+ assert.deepEqual([eligible.torn_down, eligible.lease_returned, eligible.ledger_closed], [false, false, true]);
+ const wakeups = () => existsSync(join(s.home, LAYOUT.wakeupsFile)) ? readFileSync(join(s.home, LAYOUT.wakeupsFile), "utf8") : "";
+ const before = wakeups();
+ const calls = join(s.home, "startup-treehouse-calls");
+ const real = execFileSync("which", ["treehouse"], { encoding: "utf8" }).trim();
+ const shim = join(s.home, "bin", "treehouse");
+ writeFileSync(shim, `#!/usr/bin/env node\nconst {appendFileSync}=require('node:fs');const {spawnSync}=require('node:child_process');appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');const r=spawnSync(${JSON.stringify(real)},process.argv.slice(2),{stdio:'inherit'});process.exit(r.status??1);\n`);
+ chmodSync(shim, 0o755);
+ try { await s.post.reconcile(); }
+ finally { rmSync(shim); }
+ assert.equal(existsSync(calls), false, "startup ledger retry never touches a lease");
+ assert.equal(wakeups(), before, "successful startup retry adds no recovery notification");
+ for (const [mode, id] of rows) {
+  assert.equal((await s.post.ledger().show(id)).status === "closed", mode === "eligible" || mode === "startup", mode);
+  const result = await s.post.tearDown(id);
+  assert.deepEqual([result.torn_down, result.lease_returned, result.ledger_closed], [false, false, undefined], mode);
  }
 });
