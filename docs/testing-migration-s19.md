@@ -176,3 +176,25 @@ Operator-supplied findings under the standing delegation:
 > “Every control needs a regression-table patch/SHA-256 row.” (main session carry-in)
 
 Confirmed against the current checker: its six dispositions include no `moved`, and an absent baseline path must use `deleted` or `deleted-with-feature`. The five absent original paths use `deleted`; the nine moved bodies remain `retained` and the three replacements are incoming retained evidence. No retained declaration earns deletion credit. The shared S19 row records measured totals; all 30 controls have matching closing markers, regression rows and verified patch hashes.
+
+
+## Addendum 2 — operator CI-cost rule
+
+> “No new e2e case may take over 2 minutes locally. Drive timers through public config, env or home settings; if none exists, report it rather than add a test-only hook.” (main session carry-in)
+
+Delegation: ask-c77a4f32b23b; operator addendum dated 2026-10-22T00:34:41Z, send ps-20261021163053-5f2bb38c.
+
+This new acceptance is **blocked** on the existing local measurements:
+
+| New top-level test | Measured duration | Limit assessment |
+|---|---:|---|
+| S19-2 host escalation watch | 122,952.9 ms | exceeds 120,000 ms |
+| S19-3 bridge retry/probe | 304,571.5 ms | exceeds 120,000 ms |
+| S19-4 review group | 148,794.7 ms | aggregate exceeds limit; individual variants are below it |
+| S19-9 CI/review race group | 173,772.7 ms | aggregate exceeds limit; individual variants are below it |
+
+Evidence: final `ship-*.log` files in worktree-local `node_modules/.cache/s19/`. No slow e2e rerun was needed for this audit.
+
+Supported public env settings include `CP_CI_WATCH_SECONDS` and the delivery/suppression/merge-window settings in `src/timer-knobs.ts`. They do not configure the fixed host escalation tick (`HOST_ESCALATION_TICK_MS = 10000` in `src/parent-host.ts`) or the cp-bridge retry/probe timers. `extensions/cp-bridge/index.ts` calls `reattachLoop` with its default 1000/30000-ms delays and uses `HOST_PROBE_MS`; its public entry point exposes no override. Passing the helper's optional timing arguments from a test would bypass that entry point.
+
+Per the addendum, these unavailable public timer controls are reported rather than replaced with test-only hooks. Conversion dispositions remain 28 mapped / 9 retained / 0 pending, but delivery no longer satisfies every acceptance condition. Group-to-suite restructuring can address aggregate test wrappers; it does not supply the missing public timer settings for S19-2/3.
