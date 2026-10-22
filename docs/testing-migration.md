@@ -74,13 +74,13 @@ ask-0088e0332d00, 2026-10-21.
 | S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting and executed controls](testing-migration-s14.md): 30 mapped, 3 retained verbatim with unreachable-input evidence, 0 pending | 4 original paths retired (3 mixed moved/split) | +3 retained files | +6 e2e declarations |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
 | S10 (cp-e2e-slice-s10-4dzb) | behavior 05; integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92); [range ledger and executed patch controls](testing-migration-s10.md); S09 carry-ins reconciled | 0; original unit file stays whole | unchanged | +6 e2e declarations |
-| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 16 mapped, 3 retained, 18 pending across five whole files; eight static e2e declarations including six review variants | 4 original paths removed; 3 declarations retained in 2 replacements earn no deletion credit | 378 → 379 (origin/main eb8a973f → S19 HEAD) | 4,224 → 4,221 static declarations; conversion in progress |
+| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 28 mapped, 9 retained, 0 pending across all 37 declarations in five original files; 11 static e2e declarations | 5 original paths removed; 9 declarations retained/moved verbatim in 3 replacements earn no deletion credit | 378 → 380 (origin/main 547f8bd9 → S19 HEAD) | 4,204 → 4,187 static declarations |
 
 S19 carry-in (main session carry-in, S14 review 1): baseline `deleted` labels describe absent original paths.
 The checker requires this even when declarations move: `scripts/test-migration-check.ts` rejects an absent
-baseline path marked `retained` and has no `moved` disposition. The three moved declarations remain explicitly
-`retained` in the assertion map and their two existing replacement files are incoming retained evidence;
-they earn no declaration deletion credit. All 17 S19 controls have a regression row, SHA-256, patch and matching
+baseline path marked `retained` and has no `moved` disposition. The nine moved declarations remain explicitly
+`retained` in the assertion map and their three replacement files are incoming retained/moved evidence;
+they earn no declaration deletion credit. All 30 S19 controls have a regression row, SHA-256, patch and matching
 closing marker. The totals above count all tracked test files/static declarations at the named base and HEAD.
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
@@ -259,7 +259,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P22 | 22 | `tests/e2e/reports-push.test.ts` | 4 |
 | P23 | 23 | `tests/e2e/memory.test.ts` | 3 |
 | P24 | 24 | `tests/e2e/host-compatibility.test.ts` | 3 |
-| S19 | 06 | `tests/e2e/wake-delivery.test.ts` | whole-file slice of 37 original declarations; conversion in progress |
+| S19 | 06 | `tests/e2e/wake-delivery.test.ts` | 11 |
 <!-- /manifest:prs -->
 
 The plan proposed 6 cases for all of behavior 05. P3 is a first slice of 4 cases over 4 files. P3b
@@ -439,6 +439,9 @@ moves first.
 | S19-6 | `tests/e2e/wake-send-first.test.ts` | wake S19: user sends hold wakes through tools, answered decisions bypass and clean replies release once |
 | S19-7 | `tests/e2e/wake-send-first.test.ts` | wake S19: an aborted send releases held wakes before another clean answer |
 | S19-8 | `tests/e2e/wake-send-first.test.ts` | wake S19: the oldest held wake reaches pi's queue within 120 seconds while its send still streams |
+| S19-9 | `tests/e2e/wake-deferred.test.ts` | wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates |
+| S19-10 | `tests/e2e/wake-deferred.test.ts` | wake S19: a real CI event cannot open an unreviewed, superseded or unpushed head |
+| S19-11 | `tests/e2e/wake-deferred.test.ts` | wake S19: a native plan-gate verdict leaves the held merge gate and awaiting bytes untouched |
 | 05-S14-bind | `tests/e2e/landing.test.ts` | landing S14: binding an existing PR checks forge facts and preserves checkout history |
 | 05-S14-unsafe | `tests/e2e/landing.test.ts` | landing S14: unsafe existing PRs refuse before leasing or contacting a worker |
 | 05-S14-resolution | `tests/e2e/landing.test.ts` | landing S14: worker PR reports resolve against the registered origin and drive the CI watch |
@@ -911,6 +914,24 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/deferred-recheck.test.ts` | CommandPost plumbs beforeWakeup into the reviewer delivery path | S19-4 | mapped | real command-post extension, cp_review and report_verdict process path; NC S19-8 removes review-triggered release and fails the consumer snapshot. |
 | `tests/deferred-recheck.test.ts` | a re-gate that finishes inside the bound never takes the late path | S19-4 | mapped | ready mode receives the open row and one bounded notice in the original review wake; NC S19-16 drops the in-bound raised rows and fails one opening produces one operator notice. |
 | `tests/deferred-recheck.test.ts` | the notice is one bounded line naming the decision, never a table | S19-4 | mapped | ready mode checks decision name, cp_decide, one line and at most 300 characters; NC S19-17 removes the name and fails Ship cp-held (PR 58). |
+| `tests/deferred-recheck.test.ts` | a real passing diff-review wake-up releases; a real revise does not | S19-4 | mapped | S19-NC-18 fails a revise verdict must not read the CI gate; real revise also leaves awaiting bytes unchanged; S19-NC-8 fails open-at-passing-verdict receipt. |
+| `tests/deferred-recheck.test.ts` | a malformed, absent or foreign payload never throws and never releases | S19-11 | retained | verbatim in tests/deferred-recheck-retained.test.ts: report_verdict and pending-review recovery validate/build native wake-ups; no public entry accepts primitive or contradictory ReviewWakeup payloads. Native gate/revise branches run through S19-11/4. |
+| `tests/deferred-recheck.test.ts` | a row deferred on running CI is opened by the cp-ci event, exactly once, with no render | S19-9 | mapped | S19-NC-19 fails the actual CI consumer's open-state snapshot; S19-NC-20 produces two promotion notices. |
+| `tests/deferred-recheck.test.ts` | a hook that throws costs the row, never the wake-up | S19-4 | retained | verbatim in tests/deferred-recheck-retained.test.ts: CommandPost supplies an async before wrapper around a bounded failure-absorbing recheck; no public tool/parent option injects this synchronous throwing hook. |
+| `tests/deferred-recheck.test.ts` | afterWakeup runs after the wake-up is sent, and a throwing one is reported, not fatal | S19-4 | retained | known-regression declaration verbatim in tests/deferred-recheck-retained.test.ts: native afterWakeup calls async HeldContinuation.onVerdict, so the injected synchronous afterWakeup-threw branch has no public callback replacement entry; ordering assertions remain intact with no deletion credit. |
+| `tests/deferred-recheck.test.ts` | a cp-ci tick and a passing review racing the same file raise one row, once | S19-9 | mapped | S19-NC-20 fails one promotion notice (two); S19-NC-21 loses the unrelated concurrent writer. Real CLI timestamps prove overlap, actual RPC delivery and durable IDs are checked. |
+| `tests/deferred-recheck.test.ts` | when both racers fail to read CI the row stays deferred, and a later event still raises it once | S19-9 | mapped | S19-NC-25 fails failed racers must keep the same deferred decision; a later actual CI run opens the original ID once without losing the unrelated writer. |
+| `tests/deferred-recheck.test.ts` | the bounds are real durations, and the tests inject their own | S19-4 | mapped | S19-NC-28 and S19-NC-29 independently zero each default budget and fail the open-at-verdict parent snapshot; production remains at 30000ms. |
+| `tests/deferred-recheck.test.ts` | a beforeWakeup that never settles still delivers the verdict and releases the slot | S19-4 | retained | verbatim in tests/deferred-recheck-retained.test.ts: no public RPC/tool exposes beforeWakeupTimeoutMs or an unbounded callback replacement; the native callback supplies its own bounded recheck. Its slot and known-regression assertions stay. |
+| `tests/deferred-recheck.test.ts` | a beforeWakeup that throws synchronously is reported and the verdict still goes | S19-4 | retained | verbatim in tests/deferred-recheck-retained.test.ts: the public CommandPost before wrapper is async, so real storage/probe errors cannot synchronously throw at hook invocation; no public callback override entry. |
+| `tests/deferred-recheck.test.ts` | a cp-ci re-gate that never settles lets the tick's notice and wake-up continue | S19-9 | mapped | S19-NC-22 removes the bound and fails bounded CI delivery must precede the slow gate's writes; the positive actual deadline emits one bounded warning and opens nothing. |
+| `tests/deferred-recheck.test.ts` | a bounded re-gate that fails reports once, opens nothing, and never throws | S19-9 | mapped | S19-NC-25 fails preservation of the failed racers' deferred decision; fail-closed probes emit no failed-recheck warning. S19-NC-18 fails irrelevant revise query-count; malformed guards also remain in retained declaration 2. |
+| `tests/deferred-recheck.test.ts` | a cp-ci re-gate that lands after the deadline opens and announces exactly once | S19-9 | mapped | S19-NC-23 removes the real late continuation and fails one promotion notice after three original decisions open. |
+| `tests/deferred-recheck.test.ts` | a review re-gate that lands after the wake-up still opens and announces exactly once | S19-4 | mapped | S19-NC-23 times out waiting for late gate announces actual opened decisions; actual review receipt precedes the late store write. |
+| `tests/deferred-recheck.test.ts` | a re-gate that fails after the deadline opens nothing, says nothing twice, and leaks no rejection | S19-4 | mapped | S19-NC-24 causes two warnings and fails late failure must not report a second warning; the real parent continues and no row opens. |
+| `tests/deferred-recheck.test.ts` | an unrelated event neither reads the gate nor touches the file | S19-11 | retained | mixed declaration verbatim in tests/deferred-recheck-retained.test.ts: native gate is proved by S19-11/NC-30 and native revise by S19-4/NC-18; no native/recovered entry admits surface future or quality details.next proceed (closed ReviewSurfaceSchema and additionalProperties-false QualityReportSchema). No declaration deletion credit. |
+| `tests/deferred-recheck.test.ts` | red, still-running and unreviewed heads stay deferred through both events | S19-10 | mapped | S19-NC-26 bypasses the review precondition and fails unreviewed must not open a merge decision; S19-10 covers superseded/unpushed CI facts, S19-4 covers red/running review facts. |
+| `tests/deferred-recheck.test.ts` | wiring lint: the cp-ci path awaits the recheck before it sends, and the verdict path is not fire-and-forget | S19-9 | mapped | S19-NC-19 fails CI receipt order, S19-NC-8 review receipt order, S19-NC-23 late announcements and S19-NC-27 the actual model fallback guideline. Syntax-only closure/order/path checks are redundant-unreachable behind these named consumer outcomes, without additional declaration credit. |
 | `tests/send-first-gate.test.ts` | nothing is held while no operator send is unanswered | S19-5 | mapped | NC S19-9 makes the custom marker hold a wake behind pi's publicly cleared queue: expected 2 model requests, actual 3. Assistant streaming message_start has no completed marker; the actual custom marker exercises the role boundary. |
 | `tests/send-first-gate.test.ts` | a landed send holds every wake but answered until a clean turn_end answers it | S19-6 | mapped | NC S19-10/11 lose ordinary wakes on public clear_queue, so clean reply releases held wakes times out; NC S19-12 wrongly preserves the answered decision; NC S19-15 reverses consumer offer order. Each ordinary marker arrives exactly once. |
 | `tests/send-first-gate.test.ts` | a settled run releases held wakes even without a clean answer | S19-7 | mapped | NC S19-13 preserves the wake behind pi's cleared queue until the resumed reply: expected 2 model requests, actual 3. |
@@ -1781,6 +1802,19 @@ index 3e07e24..25fa177 100644
 | S19-15 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-6 | S19-NC-15 | dacd98bb09cda64b676a8dde47024687a3a9e3d48964df23df8bd7211426deae | held wakes arrive in offer order | pass |
 | S19-16 | `tests/deferred-recheck.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-4 | S19-NC-16 | b4c56d9b0819625f79888b5336cc0fc69bb53a59d67129788e1804cc2e0de530 | one opening produces one operator notice: actual 0, expected 1 | pass |
 | S19-17 | `tests/deferred-recheck.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-4 | S19-NC-17 | 725c509f2cb0094989e69bd03aee4328095b9f01eb2a30b1f555c3a19f5d16a9 | ready notice must match Ship cp-held (PR 58) | pass |
+| S19-18 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4 | S19-NC-18 | 8ca85d25ccbd99762cff508bbe5816800357b99367149fcc48a8f889ded3cad1 | a revise verdict must not read the CI gate | pass |
+| S19-19 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-19 | ee7dcb337ee1e7285d2cd5282959b016c7c2d058b8bc8f37a94438474f6a6880 | the CI wake must reach its consumer after the raced gate completes | pass |
+| S19-20 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-20 | b871b500ed174f787fbb401326fd634affc3ff4f8ff4383e11c8eb34fe663dcb | one decision promotion must produce one notice: actual 2, expected 1 | pass |
+| S19-21 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-21 | df6294c2ec381f827ae935f5ffca1d970c2ba593def37c05fe0d7a567dad0369 | the concurrent unrelated writer must survive both rechecks | pass |
+| S19-22 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-22 | 50607cfafda3d24ede436e4326f76356567e2ace1686a1133b82aeb7053535e8 | bounded CI delivery must precede the slow gate's writes | pass |
+| S19-23 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-23 | 7195e71a55cf6cd5f9cca87e3f2f0623486d5b2a9c2e2946ad850c438f1ab254 | CI late receives 0 promotion notices; review late times out waiting for actual opened-decisions notice | pass |
+| S19-24 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4 | S19-NC-24 | 0cd3d5fe11f894346da8b1e704c1749e00c5016b8b38699ac8d112fbf00306a8 | late failure must not report a second warning | pass |
+| S19-25 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-25 | 5f1eb59cc899f92f1d1597cb7e51a8cf9398abee57195670dc47ca50786166f1 | failed racers must keep the same deferred decision | pass |
+| S19-26 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-10 | S19-NC-26 | e821197675861a113e9d3976864cf5a0b0239dec773e5097b6dc9e19fd76a3ce | unreviewed must not open a merge decision | pass |
+| S19-27 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-27 | de0b5c6bb6707d2e3c615b9cf34e52b831deec31bb633f2b21a1f10f1a16abc2 | actual parent model context lacks the unknown-CI manual fallback | pass |
+| S19-28 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4 | S19-NC-28 | 51889a6bdf4b64c29796c1c87e783530a18465420e53e95bdffefdd58a27e8cf | zero inner budget leaves the actual verdict snapshot deferred | pass |
+| S19-29 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4 | S19-NC-29 | e1499900506bc3b6f66a3365ddb5d066df30f59449b9adeae0240e891c4cd7ca | zero outer budget leaves the actual verdict snapshot deferred | pass |
+| S19-30 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-11 | S19-NC-30 | 6ff37e5c2e33f19fe238e1a1b2529ce2ce5093b15a078845c8ab046b0b9afa3a | a native plan gate must not probe the held merge gate | pass |
 
 <!-- patch:S19-NC-9 -->
 ```diff
@@ -1879,6 +1913,246 @@ index 3e07e24..f98af0a 100644
 +	return `${head}: S19 unnamed decision — answer with cp_decide`;
 ```
 <!-- /patch:S19-NC-17 -->
+
+
+<!-- patch:S19-NC-18 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..279f21e 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -111,7 +111,7 @@ export function isPassingDiffReview(wakeup: unknown): boolean {
+ 
+ /** Does this event change a fact a deferred merge ask is waiting on? */
+ export function releasesDeferredAsks(trigger: DeferredRecheckTrigger): boolean {
+-	return trigger.kind === "ci" ? true : isPassingDiffReview(trigger.wakeup);
++	return true;
+ }
+ 
+ /**
+```
+<!-- /patch:S19-NC-18 -->
+
+<!-- patch:S19-NC-19 -->
+```diff
+diff --git a/extensions/command-post/wakeup-surfaces.ts b/extensions/command-post/wakeup-surfaces.ts
+index 7fb97bd..aedc7ba 100644
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -614,7 +614,7 @@ export function createWakeupSurfaces(
+ 				// same observation rather than by a tool call the parent might not make.
+ 				// Bounded (`recheckDeferredBounded`), so a slow or wedged re-gate delays
+ 				// the notice and the wake-up below by at most one bound, never forever.
+-				await recheckDeferredRows({ kind: "ci" });
++				void recheckDeferredRows({ kind: "ci" });
+ 				const text = formatCiNotice(observations, projectOf());
+ 				const ruled = await wakeRules.ciGreen(observations);
+ 				operatorNotify(s.live, ruled.suppress ? ruled.relay : text, "info");
+```
+<!-- /patch:S19-NC-19 -->
+
+<!-- patch:S19-NC-20 -->
+```diff
+diff --git a/src/awaiting.ts b/src/awaiting.ts
+index 1e48c0d..f81fe76 100644
+--- a/src/awaiting.ts
++++ b/src/awaiting.ts
+@@ -690,7 +690,7 @@ export class AwaitingStore {
+ 				// Only a row this review actually gated, and only one still deferred: an
+ 				// answered row, a withdrawn row and an authorization-derived projection
+ 				// (which has no row here at all) are never touched by this pass.
+-				if (!gate || item.state !== "deferred") continue;
++				if (!gate) continue;
+ 				// cp-to39: the job is gone. Neither raise (an unanswerable ask) nor drop
+ 				// (a lost question): keep the row deferred with a reason that names the
+ 				// job, so `list("deferred")` still hands it to the renderer and the
+```
+<!-- /patch:S19-NC-20 -->
+
+<!-- patch:S19-NC-21 -->
+```diff
+diff --git a/src/awaiting.ts b/src/awaiting.ts
+index 1e48c0d..98a792d 100644
+--- a/src/awaiting.ts
++++ b/src/awaiting.ts
+@@ -715,7 +715,7 @@ export class AwaitingStore {
+ 				applyGate(item, !promote, gate, at);
+ 				(promote ? raised : stillDeferred).push(item);
+ 			}
+-			return items;
++			return items.filter((item) => verdicts.has(item.id));
+ 		});
+ 		return { raised, stillDeferred, orphaned, resolved, verdicts };
+ 	}
+```
+<!-- /patch:S19-NC-21 -->
+
+<!-- patch:S19-NC-22 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..bebcd5d 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -182,15 +182,7 @@ export async function recheckDeferredBounded(
+ 		(error: unknown) => ({ raised: [] as AwaitingItem[], reason: `deferred rows not re-gated: ${(error as Error).message}` }),
+ 	);
+ 	let timedOut = false;
+-	const outcome = await withDeadline(attempt, ms, () => {
+-		// Only the timeout branch reaches this: `attempt` never rejects, and
+-		// `withDeadline` calls `onTimeout` for a rejection too.
+-		timedOut = true;
+-		return {
+-			raised: [] as AwaitingItem[],
+-			reason: `deferred rows not re-gated: the re-gate did not finish within ${ms}ms`,
+-		};
+-	});
++	const outcome = await attempt;
+ 	if ("reason" in outcome && outcome.reason) report(options.onFailure, outcome.reason);
+ 	if (timedOut) {
+ 		// Exactly one continuation, attached exactly once, on a promise that cannot
+```
+<!-- /patch:S19-NC-22 -->
+
+<!-- patch:S19-NC-23 -->
+```diff
+diff --git a/extensions/command-post/wakeup-surfaces.ts b/extensions/command-post/wakeup-surfaces.ts
+index 7fb97bd..88c58e4 100644
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -516,7 +516,6 @@ export function createWakeupSurfaces(
+ 				onFailure: (reason) => {
+ 					operatorNotify(s.live, `pi-command-post: ${reason}`, "warning");
+ 				},
+-				onLate: announceRaised,
+ 			}),
+ 		);
+ 	};
+```
+<!-- /patch:S19-NC-23 -->
+
+<!-- patch:S19-NC-24 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..2010bfd 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -196,7 +196,7 @@ export async function recheckDeferredBounded(
+ 		// Exactly one continuation, attached exactly once, on a promise that cannot
+ 		// reject: a late result is either announced or dropped, never thrown.
+ 		void attempt.then((late) => {
+-			if ("reason" in late && late.reason) return;
++			if ("reason" in late && late.reason) { report(options.onFailure, late.reason); return; }
+ 			if (late.raised.length === 0) return;
+ 			try {
+ 				options.onLate?.(late.raised);
+```
+<!-- /patch:S19-NC-24 -->
+
+<!-- patch:S19-NC-25 -->
+```diff
+diff --git a/src/merge-ask.ts b/src/merge-ask.ts
+index d2ce0b3..ec47832 100644
+--- a/src/merge-ask.ts
++++ b/src/merge-ask.ts
+@@ -629,7 +629,7 @@ export function createMergeAskProbe(deps: MergeAskProbeDeps): MergeAskProbe {
+ 				});
+ 			}
+ 			return verdict({
+-				action: "defer",
++				action: "raise",
+ 				ci: "unknown",
+ 				reason: `CI state unavailable for ${branch}: ${(error as Error).message}`,
+ 			});
+```
+<!-- /patch:S19-NC-25 -->
+
+<!-- patch:S19-NC-26 -->
+```diff
+diff --git a/src/merge-ask.ts b/src/merge-ask.ts
+index d2ce0b3..2a6d059 100644
+--- a/src/merge-ask.ts
++++ b/src/merge-ask.ts
+@@ -424,7 +424,7 @@ export function evaluateMergeAskCi(input: {
+ 	// raised only once the diff has a passing review on *this* head, because a
+ 	// revise moves the head and a review of a superseded diff says nothing about
+ 	// the commit that would merge — the same rule the CI check above applies.
+-	if (input.reviewedHeads && !input.reviewedHeads.some((sha) => shaMatches(sha, head))) {
++	if (false) {
+ 		return verdict({
+ 			action: "defer",
+ 			ci: "unreviewed",
+```
+<!-- /patch:S19-NC-26 -->
+
+<!-- patch:S19-NC-27 -->
+```diff
+diff --git a/extensions/command-post/tools-send-status.ts b/extensions/command-post/tools-send-status.ts
+index 0de9bfb..2251c50 100644
+--- a/extensions/command-post/tools-send-status.ts
++++ b/extensions/command-post/tools-send-status.ts
+@@ -181,7 +181,6 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps):
+ 		promptGuidelines: [
+ 			"cp_status_block is opt-in: ordinary turns do not call it (the status line already shows the fleet); call it once when the operator asks for a status summary or a turn needs the full picture, instead of typing STATUS BLOCK tables by hand.",
+ 			"A row deferred on CI or on a missing review raises itself: the extension re-gates every deferred row when CI completes on the held head (the cp-ci watch) and when a cp_review passes on it, so no render is needed to release one.",
+-			"A row deferred on an unknown CI state may become readable with no event at all: invoke cp_status_block manually when you think observability came back \u2014 the render re-gates the row, and never bypasses the gate.",
+ 			"Only supply a label when the job title would not read plainly to the operator; an omitted label falls back to the title.",
+ 			"Awaiting you is the one table this tool cannot derive: give type (approval|design|authorization|escalation), decision, why and blocks for every open human decision. Open escalations are merged from the store.",
+ 			"Blocked rows name a real dependency, CI check, gate or worker — never a human decision; a human decision belongs in awaiting instead.",
+```
+<!-- /patch:S19-NC-27 -->
+
+<!-- patch:S19-NC-28 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..ae626f5 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -59,7 +59,7 @@ import { withDeadline } from "./suggest.ts";
+  * so neither may wait on this indefinitely: what is at stake is the operator's
+  * notice, the parent's wake-up and, on the reviewer path, the attempt's slot.
+  */
+-export const DEFERRED_RECHECK_MAX_WAIT_MS = 30_000;
++export const DEFERRED_RECHECK_MAX_WAIT_MS = 0;
+ 
+ /**
+  * What happened. `ci` is one or more `cp-ci` observations for a held PR (a run
+```
+<!-- /patch:S19-NC-28 -->
+
+<!-- patch:S19-NC-29 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+index c6cf685..303e9b4 100644
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -123,7 +123,7 @@ export const HANDBACK_MAX_WAIT_MS = 60_000;
+  * wait is bounded and the wake-up is delivered when the bound is spent — the
+  * hook orders work *before* delivery, it never gets a veto over it.
+  */
+-export const BEFORE_WAKEUP_MAX_WAIT_MS = 30_000;
++export const BEFORE_WAKEUP_MAX_WAIT_MS = 0;
+ 
+ export class ReviewRunsError extends Error {
+ 	readonly pending: PendingReview;
+```
+<!-- /patch:S19-NC-29 -->
+
+<!-- patch:S19-NC-30 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..1435d3d 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -96,7 +96,6 @@ export function isPassingDiffReview(wakeup: unknown): boolean {
+ 	if (typeof wakeup !== "object" || wakeup === null) return false;
+ 	const { surface, details } = wakeup as { surface?: unknown; details?: unknown };
+ 	// The plan gate and the quality panel say nothing about a head's reviewedness.
+-	if (surface !== "review") return false;
+ 	if (typeof details !== "object" || details === null) return false;
+ 	const { next, verdict } = details as { next?: unknown; verdict?: unknown };
+ 	// A `revise` moves the head rather than clearing it; `retry`/`surface` are not
+```
+<!-- /patch:S19-NC-30 -->
 <!-- /manifest:regressions -->
 
 <!-- patch:NC-main-corrupt -->
@@ -3053,6 +3327,8 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/e2e/wake-reattach.test.ts` | S19 | real bridge transport faults, default backoff cap and established-host probe behavior |
 | `tests/e2e/wake-send-first.test.ts` | S19 | real parent send-first holds, public queue clearing, answered bypass, abort release and oldest deadline |
 | `tests/bridge-reattach-retained.test.ts` | S19 | retained, convert-owned S19; shutdown-only cancellation and an injected synchronous in-attempt schedule have no continuing public operator entry point |
+| `tests/e2e/wake-deferred.test.ts` | S19 | real parent CI/review races, failed CI readers and recovery, actual late CI deadline, invalid merge prerequisites and native plan-gate no-op |
+| `tests/deferred-recheck-retained.test.ts` | S19 | retained/moved verbatim, convert-owned S19; six declarations require arbitrary invalid/future wake-ups or injected synchronous/unbounded hook callbacks unavailable through public tools; entry-point evidence in testing-migration-s19.md; no deletion credit |
 | `tests/merge-permission-retained.test.ts` | S14 | structural safety: no public consumer composes ghBranchRulesArgs and detectCiWait; original declaration 13 verbatim |
 | `tests/pr-resolve-retained.test.ts` | S14 | mixed original declaration 9 verbatim: validateEnvelope refuses missing pr_url before intake resolver; all reachable variants also covered through real reporter |
 | `tests/review-approval-retained.test.ts` | S14 | original declaration verbatim: pipeline artifacts.info fails before missing matches; only production write passes seq 1; no public entry reaches seq-2/3 overwrite |
@@ -3173,7 +3449,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/decide-listing.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/decide.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/decision-context.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
-| `tests/deferred-recheck.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/deferred-recheck.test.ts` | deleted | S19 | all 23 declarations disposed: 17 mapped, 6 retained/moved verbatim in tests/deferred-recheck-retained.test.ts with no declaration deletion credit; deleted is the checker's required absent-path label |
 | `tests/dependency-dispatch.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/device-notifications.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
 | `tests/device-notify.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |

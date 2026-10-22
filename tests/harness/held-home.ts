@@ -37,14 +37,16 @@ const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(logFile)}, args.join(" ") + "\\n");
 if (args[0] === "api" && (args[1] || "").includes("/actions/runs?head_sha=")) {
   const [state, delay] = readFileSync(${JSON.stringify(stateFile)}, "utf8").trim().split(":");
+  appendFileSync(${JSON.stringify(`${logFile}.states`)}, JSON.stringify({ state, at: Date.now() }) + "\\n");
   if (Number(delay)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(delay));
-  const run = state === "green"
-    ? { id: 7, run_attempt: 1, conclusion: "success", status: "completed", head_sha: head, name: "ci" }
+  if (state === "broken") { process.stderr.write("gh: 403\\n"); process.exit(1); }
+  const run = ["green", "green2", "wrong-head"].includes(state)
+    ? { id: state === "green2" ? 8 : 7, run_attempt: 1, conclusion: "success", status: "completed", head_sha: state === "wrong-head" ? "a".repeat(40) : head, name: "ci" }
     : { id: 7, run_attempt: 1, conclusion: state === "red" ? "failure" : null, status: state === "red" ? "completed" : "in_progress", head_sha: head, name: "ci" };
   process.stdout.write(JSON.stringify({ total_count: args[1].includes(head) ? 1 : 0, workflow_runs: args[1].includes(head) ? [run] : [] }));
   process.exit(0);
 }
-if (args[0] === "api" && (args[1] || "").includes("/actions/runs/7/attempts/1/jobs?")) {
+if (args[0] === "api" && (args[1] || "").includes("/jobs?")) {
   process.stdout.write(JSON.stringify({ total_count: 0, jobs: [] }));
   process.exit(0);
 }

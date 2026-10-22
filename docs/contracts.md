@@ -5681,13 +5681,12 @@ Four more properties, and each is a refusal of an obvious alternative:
   (`queued`, `src/json-store.ts`) and re-reads the file there. So two overlapping
   rechecks that both read the row as `deferred` and both compute `raise` still
   produce one promotion, one notice and one durable row: the loser's mutator
-  sees the row already `open` and skips it. This is pinned by a barrier-driven
-  regression (`tests/deferred-recheck.test.ts`) that holds a `cp-ci` recheck and
-  a `beforeWakeup` recheck inside their CI query until both are past the read,
-  releases them together with a third unrelated writer on the same file, and
-  asserts one raise, one notice, no lost row and a file that still parses and
-  validates. Deciding `raised` from the pre-mutation snapshot instead fails that
-  test, which is what makes it evidence rather than decoration.
+  sees the row already `open` and skips it. S19-9 in
+  `tests/e2e/wake-deferred.test.ts` delays real CLI probes and verifies timestamped
+  overlap between the `cp-ci` and actual review rechecks while a third writer
+  adds an unrelated decision. It asserts one promotion notice, preserved IDs
+  and the unrelated row. S19-NC-20/21 independently break these assertions by
+  removing the still-deferred guard or discarding ungated rows.
   Under a concurrent read failure (`gh` down in both racers) nothing is raised
   at all and both rows survive intact — the fail-closed direction — and the next
   event raises the row once.

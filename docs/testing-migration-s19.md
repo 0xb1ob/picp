@@ -1,11 +1,14 @@
-# S19 declaration conversion evidence (in progress)
+# S19 declaration conversion evidence
 
 Scope: only bridge-reattach, cp-bridge-reattach, deferred-recheck, escalation-relay-watch and send-first-gate.
-Current accounting: 16 mapped, 3 retained, 18 pending; four original files retired with two retained replacements.
-The deferred-recheck original remains intact. No pending declaration earns deletion credit.
+Final accounting: 28 mapped, 9 retained, 0 pending across 37 declarations in five original files.
+All five original paths are retired; nine declarations remain verbatim in three retained replacements.
+Retained declarations earn no deletion credit. The checker-required absent-path exception is documented in the manifest.
 
 Entry points: real `pi --mode rpc` operator with cp-bridge, real parent-host Unix socket and real parent pi;
-all models are served by MockProvider. Agent settings/models use `/tmp/cp-agent-*`, removed in test teardown.
+all models are served by MockProvider. Agent settings/models use isolated `cp-agent-*` directories under TMPDIR,
+removed in teardown. The resumed run uses the worktree-local `.t` root with a CommonJS package boundary for fake CLIs;
+its logs and run setup remain in `node_modules/.cache/s19/`, and temporary fixture directories are removed.
 
 ## Declaration accounting
 
@@ -33,12 +36,47 @@ The other retained declaration synchronously invokes schedule inside the attempt
 await between track/afterAttach and returning, so socket-close I/O cannot enter that synchronous window.
 The real entry point's ordinary later close is exercised by S19-3 instead.
 
-Deferred-recheck declarations 4, 5, 8, 19 and 22 map to S19-4 ready mode under NC-8/16/17, but stay in the
-original until all of that file is disposed. At the model request carrying the actual passing review, the disk
-row is already open. A stale pass on a different head leaves it deferred before review. A public status render
-then repeats the gate without another decision or operator notice. NC-16 drops the returned in-bound rows and
-fails the one-notice assertion; NC-17 removes the decision name and fails the consumer notice regex. The full
-six-mode matrix passes, including late and late-failure, but remaining declarations earn no extra credit yet.
+Original deferred-recheck blob: `4c18990f86b4d0e0261238dcea0a18e29905352b` at
+`534cd14d952af040f2385fd92f3ee968a810ee62`. Its 23 declarations are fully disposed below: 17 mapped, 6 retained.
+All six retained declarations are byte-for-byte copies of the original declaration bodies, checked with the TypeScript AST.
+
+S19-4 observes the actual review verdict at the parent model request, before another tool can recheck the gate.
+S19-9 runs actual CI/review races, CI read failures followed by a new successful run, and a three-row late CI gate.
+The supported wake-rule switch exposes CI facts to the parent; `cp_project list` records receipt without re-gating awaiting rows.
+Real CLI query timestamps prove both rechecks overlap, and another real store writer adds an unrelated decision in flight.
+S19-10 delivers real CI facts before checking unreviewed, superseded and unpushed heads; S19-4 covers red/running review facts.
+S19-11 starts a real plan reviewer with `cp_gate` and observes its native verdict without any CI query or awaiting-file change.
+
+| Deferred ordinal / declaration | Disposition | Consumer proof / failing control assertion |
+|---|---|---|
+| 1 real passing/revise wake-up | mapped S19-4 | NC-8 leaves the decision deferred at verdict receipt; NC-18 makes a revise read the CI gate and fails the query-count assertion; awaiting bytes also remain unchanged in the positive revise case. |
+| 2 malformed/absent/foreign payload | retained | `report_verdict`, pending-review recovery and native finish functions validate/build the wake-up; no public parent/tool entry accepts an arbitrary primitive or contradictory `ReviewWakeup`. The full mixed declaration remains in deferred-recheck-retained; valid native gate/revise variants also run in S19-11/4. |
+| 3 running-CI row opens once without render | mapped S19-9 race | NC-19 makes the actual CI consumer see a deferred row instead of open; NC-20 produces two promotion notices. No status render is used. |
+| 4 green but unreviewed, stale head and repeat | mapped S19-4 ready | NC-8 fails the open-at-verdict snapshot; stale review leaves the initial row deferred, and a later public render repeats neither the decision nor notice. |
+| 5 ReviewRuns awaits before send | mapped S19-4 ready | NC-8 leaves the real parent verdict snapshot deferred instead of open. |
+| 6 throwing before hook | retained | The public extension supplies CommandPost's `async` before hook, whose bounded recheck absorbs storage/probe failure. There is no public entry to inject the synchronous throwing callback used here; its whole declaration stays verbatim. |
+| 7 after-hook ordering and synchronous throw | retained | Public `afterWakeup` calls `HeldContinuation.onVerdict`, an async method; it cannot produce this injected synchronous `afterWakeup threw` branch. No parent/tool option replaces that callback. The known-regression ordering and fault assertions stay together verbatim. |
+| 8 CommandPost before-hook wiring | mapped S19-4 ready | NC-8 removes the actual extension hook and fails the open-at-verdict parent snapshot. |
+| 9 concurrent CI/review, one promotion and third writer | mapped S19-9 race | NC-20 fails one-notice (two notices); NC-21 fails preservation of the unrelated concurrent decision. Actual persisted IDs remain unique. |
+| 10 both CI readers fail, later recovery | mapped S19-9 failure | NC-25 opens the failed racers' decision and fails the one-deferred-row assertion. A real later CI run opens that same ID once and preserves the concurrent writer. |
+| 11 real default budgets | mapped S19-4 ready | NC-28 zeroes the recheck budget and NC-29 zeroes the outer review budget; each fails the open-at-verdict parent snapshot. Production budgets remain 30 seconds; zero exists only in the recorded deliberate defects. |
+| 12 unbounded before hook and injected deadline | retained | No public RPC/tool setting supplies `beforeWakeupTimeoutMs` or replaces the native callback with an unbounded promise. The native callback has its own 30-second bounded recheck; the injected outer-hook branch and slot assertions stay verbatim. |
+| 13 synchronous before-hook throw | retained | CommandPost wraps the configured before hook in an async function, so even real filesystem failure cannot synchronously throw at ReviewRuns' hook invocation. There is no public callback replacement entry; the specific branch stays verbatim. |
+| 14 CI gate exceeds deadline | mapped S19-9 late | NC-22 removes the bound and fails the deferred-at-CI-delivery assertion. The positive consumer spends the actual deadline, sees nothing opened at timeout and receives one bounded warning. |
+| 15 probe failure and irrelevant no-op | mapped S19-9 failure / S19-4 revise | NC-25 fails the same-deferred-decision assertion; NC-18 makes an irrelevant revise probe CI. A probe's fail-closed result emits no failed-recheck warning; malformed input guards also remain in retained declaration 2. |
+| 16 late CI completion | mapped S19-9 late | NC-23 removes the real late continuation and fails the one-promotion-notice assertion after the three original rows open. |
+| 17 late review completion | mapped S19-4 late | NC-23 times out waiting for the real late gate's operator notice. Three original IDs survive and open without an additional status render. |
+| 18 late failure reports once | mapped S19-4 late-failure | NC-24 reports the failed late continuation again and fails `late failure must not report a second warning` (two instead of one); no decision opens and the process continues. |
+| 19 in-bound never takes late path | mapped S19-4 ready | NC-16 removes the returned in-bound rows and fails the one-opening/one-notice assertion. The positive real parent has no second late turn. |
+| 20 foreign/unknown no-op matrix | retained | S19-11/NC-30 pins the native plan-gate no-op and S19-4/NC-18 pins native revise. The mixed declaration also injects `surface: future` and quality `details.next: proceed`: REVIEW_SURFACES rejects the former and QualityReportSchema has no `next` field (additional properties forbidden). No native/recovered quality or tool entry constructs those wake-ups; the full original stays verbatim without deletion credit. |
+| 21 red/running/unreviewed/superseded/missing heads | mapped S19-4 red/running / S19-10 | NC-26 bypasses the review precondition and fails `unreviewed must not open a merge decision`. All five real variants preserve the deferred ID and emit no ready notice. |
+| 22 notice format | mapped S19-4 ready | NC-17 removes the decision name and fails the actual operator notice regex. One line, cp_decide and the 300-character bound are asserted. |
+| 23 wiring lint and guidance | mapped S19-9 / S19-4 | NC-19 fails CI receipt ordering; NC-8 fails review receipt ordering; NC-23 fails late notice delivery; NC-27 removes the manual unknown-CI fallback and fails its actual model-context regex. Syntax-only closure-count/order and path-spelling assertions are redundant-unreachable behind these named consumer outcomes, with no separate declaration credit. |
+
+The retained rows name unavailable product entry points. Their source evidence is
+`CommandPost`'s async before wrapper, `HeldContinuation.onVerdict`'s async signature, the closed `ReviewSurfaceSchema`,
+and `QualityReportSchema`/`QualityPanel.start`'s constructed details. The valid native branches run through actual reviewers.
+All retained declaration bodies, including known-regression assertions, remain intact.
 
 Original send-first-gate blob: `a5e4866f76f5e8db5320cac602994bc5b88a52e4` at
 `22a6ead8bfbc9c5087cca4ac02e5873923b324d6`. All four declarations map to S19-5/6/7/8 and the file is retired.
@@ -91,3 +129,50 @@ restart-frame assertion. A separate eligibility timing failure during developmen
 
 No coverage-runner claim is made: it is explicitly optional in the slice brief. Runtime positive and negative
 consumer assertions are the retirement evidence. No production behavior is changed by this slice.
+
+
+## Deferred completion controls
+
+NC-18 through NC-30 use source commit `1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3`.
+Each patch ran alone against production and was restored before the next control. Both NC-23 consumers ran with the same patch.
+The default-budget zero values in NC-28/29 are deliberate defects only; shipped test timeouts retain the 5-second floor.
+All 30 controls have patch/hash regression rows and balanced inline patch markers in the shared manifest.
+
+| Control / patch | SHA-256 | Scenario and observed consumer failure |
+|---|---|---|
+| [NC-18](testing-migration-s19-controls/NC-18.patch) | 8ca85d25ccbd99762cff508bbe5816800357b99367149fcc48a8f889ded3cad1 | S19-4 revise: a revise verdict must not read the CI gate |
+| [NC-19](testing-migration-s19-controls/NC-19.patch) | ee7dcb337ee1e7285d2cd5282959b016c7c2d058b8bc8f37a94438474f6a6880 | S19-9 race: the CI wake must reach its consumer after the raced gate completes |
+| [NC-20](testing-migration-s19-controls/NC-20.patch) | b871b500ed174f787fbb401326fd634affc3ff4f8ff4383e11c8eb34fe663dcb | S19-9 race: one decision promotion must produce one notice (two received) |
+| [NC-21](testing-migration-s19-controls/NC-21.patch) | df6294c2ec381f827ae935f5ffca1d970c2ba593def37c05fe0d7a567dad0369 | S19-9 race: the concurrent unrelated writer must survive both rechecks |
+| [NC-22](testing-migration-s19-controls/NC-22.patch) | 50607cfafda3d24ede436e4326f76356567e2ace1686a1133b82aeb7053535e8 | S19-9 late: bounded CI delivery must precede the slow gate's writes |
+| [NC-23](testing-migration-s19-controls/NC-23.patch) | 7195e71a55cf6cd5f9cca87e3f2f0623486d5b2a9c2e2946ad850c438f1ab254 | S19-9 late: one promotion notice (zero received); S19-4 late: timeout waiting for late gate announces actual opened decisions |
+| [NC-24](testing-migration-s19-controls/NC-24.patch) | 0cd3d5fe11f894346da8b1e704c1749e00c5016b8b38699ac8d112fbf00306a8 | S19-4 late-failure: late failure must not report a second warning |
+| [NC-25](testing-migration-s19-controls/NC-25.patch) | 5f1eb59cc899f92f1d1597cb7e51a8cf9398abee57195670dc47ca50786166f1 | S19-9 failure: failed racers must keep the same deferred decision |
+| [NC-26](testing-migration-s19-controls/NC-26.patch) | e821197675861a113e9d3976864cf5a0b0239dec773e5097b6dc9e19fd76a3ce | S19-10 unreviewed: unreviewed must not open a merge decision |
+| [NC-27](testing-migration-s19-controls/NC-27.patch) | de0b5c6bb6707d2e3c615b9cf34e52b831deec31bb633f2b21a1f10f1a16abc2 | S19-9 race: actual model context fails unknown-CI manual-fallback regex |
+| [NC-28](testing-migration-s19-controls/NC-28.patch) | 51889a6bdf4b64c29796c1c87e783530a18465420e53e95bdffefdd58a27e8cf | S19-4 ready: row state when actual verdict reaches parent is deferred instead of open |
+| [NC-29](testing-migration-s19-controls/NC-29.patch) | e1499900506bc3b6f66a3365ddb5d066df30f59449b9adeae0240e891c4cd7ca | S19-4 ready: row state when actual verdict reaches parent is deferred instead of open |
+| [NC-30](testing-migration-s19-controls/NC-30.patch) | 6ff37e5c2e33f19fe238e1a1b2529ce2ce5093b15a078845c8ab046b0b9afa3a | S19-11: a native plan gate must not probe the held merge gate |
+
+Focused commands use `npm run test:one --` with `tests/e2e/wake-deferred.test.ts` for S19-9/10/11 and
+`tests/e2e/headless-lifecycle.test.ts` for S19-4; `--test-name-pattern` selects the root and `--test-skip-pattern`
+selects the named variants. Exact executions and failures are in worktree-local `node_modules/.cache/s19/NC-*.log`.
+
+The initial CI-await mutation passed a post-delivery state check: another reader could already have opened the row.
+The case now snapshots state at the actual model request and uses the supported wake-rule switch to expose the CI turn.
+The same production patch then fails the receipt assertion. Its early passing attempt earns no retirement credit.
+
+
+## Addendum 1 — frozen S14 review 1 carry-ins
+
+Operator-supplied findings under the standing delegation:
+
+> “Retained/moved evidence must not claim deletion credit. Checker-required absent-path `deleted` exception must be confirmed/explained.” (main session carry-in)
+>
+> “Every `patch:<NC>` block requires matching closing marker and checker zero findings.” (main session carry-in)
+>
+> “Slice ledger must give measured file/declaration counts before → after.” (main session carry-in)
+>
+> “Every control needs a regression-table patch/SHA-256 row.” (main session carry-in)
+
+Confirmed against the current checker: its six dispositions include no `moved`, and an absent baseline path must use `deleted` or `deleted-with-feature`. The five absent original paths use `deleted`; the nine moved bodies remain `retained` and the three replacements are incoming retained evidence. No retained declaration earns deletion credit. The shared S19 row records measured totals; all 30 controls have matching closing markers, regression rows and verified patch hashes.

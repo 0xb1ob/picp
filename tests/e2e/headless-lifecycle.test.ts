@@ -499,15 +499,17 @@ await t.test(mode, { timeout: 180_000 }, async (t) => {
 		reasons: mode === "revise" ? ["[severity: high] [confidence: high] missing coverage"] : ["Reviewed the current diff"],
 		...(mode === "revise" ? { revisions: ["Add the missing coverage"] } : {}),
 	} }] }]);
-	const snapshots: Array<{ state?: string; request: string }> = [];
+	const diskSnapshot = () => ({ queries: readFileSync(held.ghLog, "utf8").split("\n").filter((line) => line.includes("/actions/runs?head_sha=")).length,
+		awaiting: readFileSync(held.store.file, "utf8") });
+	const snapshots: Array<{ state?: string; request: string; queries: number; awaiting: string }> = [];
 	const capture = (request: { body: unknown }) => {
-		snapshots.push({ state: new AwaitingStore({ home: held.home.path }).list("open")[0]?.state,
+		snapshots.push({ ...diskSnapshot(), state: new AwaitingStore({ home: held.home.path }).list("open")[0]?.state,
 			request: JSON.stringify((request.body as { messages: unknown[] }).messages.slice(-2)) });
 		return { action: "list" };
 	};
 	const model = provider.addScript("s19-deferred-parent", [
 		{ kind: "tool_calls", calls: [{ name: "cp_review", args: () => {
-			snapshots.push({ state: new AwaitingStore({ home: held.home.path }).list("deferred")[0]?.state, request: "before review" });
+			snapshots.push({ ...diskSnapshot(), state: new AwaitingStore({ home: held.home.path }).list("deferred")[0]?.state, request: "before review" });
 			return { job_id: JOB, model: reviewer };
 		} }] },
 		{ kind: "text", text: "Review started." },
@@ -536,8 +538,13 @@ await t.test(mode, { timeout: 180_000 }, async (t) => {
 	}
 	await waitFor(() => snapshots.length, (count) => count === 2, { timeoutMs: 120_000, what: "actual reviewer verdict reaches parent model" });
 	assert.equal(snapshots[0]?.state, "deferred", "stale review must leave current green head deferred");
-	assert.equal(snapshots[1]?.state, mode === "ready" ? "open" : undefined, "row state when actual verdict reaches parent");
+	assert.equal(snapshots[1]?.state, mode === "ready" ? "open" : undefined,
+		`row state when actual verdict reaches parent: ${JSON.stringify(new AwaitingStore({ home: held.home.path }).read().items.map(({ state, deferred_reason }) => ({ state, deferred_reason })))}`);
 	assert.match(snapshots[1]?.request ?? "", new RegExp(`diff review attempt 2: ${mode === "revise" ? "revise" : "pass"}`));
+	if (mode === "revise") {
+		assert.equal(snapshots[1]!.queries, snapshots[0]!.queries, "a revise verdict must not read the CI gate");
+		assert.equal(snapshots[1]!.awaiting, snapshots[0]!.awaiting, "a revise verdict must leave awaiting bytes unchanged");
+	}
 	if (mode === "late") {
 		const readyNotices = () => child.records().filter((record) => record.type === "extension_ui_request" && String(record.message).includes("3 decisions are now ready"));
 		await waitFor(readyNotices, (records) => records.length === 1, { timeoutMs: 60_000, what: "late gate announces actual opened decisions" });
@@ -553,6 +560,10 @@ await t.test(mode, { timeout: 180_000 }, async (t) => {
 		assert.equal(failures.length, 1, "late failure must not report a second warning");
 		assert.ok(!child.records().some((record) => String(record.message).includes("decisions are now ready")));
 		chmodSync(awaitingDir, 0o700);
+	}
+	if (mode === "revise" || mode === "red" || mode === "running") {
+		assert.equal(new AwaitingStore({ home: held.home.path }).list("deferred").length, 1);
+		assert.equal(child.records().filter((record) => record.type === "extension_ui_request" && String(record.message).includes("decision is now ready")).length, 0);
 	}
 	assert.equal(provider.remaining("s19-deferred-reviewer"), 0);
 	if (mode === "ready") {

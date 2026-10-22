@@ -1,0 +1,13 @@
+diff --git a/src/merge-ask.ts b/src/merge-ask.ts
+index d2ce0b3..2a6d059 100644
+--- a/src/merge-ask.ts
++++ b/src/merge-ask.ts
+@@ -424,7 +424,7 @@ export function evaluateMergeAskCi(input: {
+ 	// raised only once the diff has a passing review on *this* head, because a
+ 	// revise moves the head and a review of a superseded diff says nothing about
+ 	// the commit that would merge — the same rule the CI check above applies.
+-	if (input.reviewedHeads && !input.reviewedHeads.some((sha) => shaMatches(sha, head))) {
++	if (false) {
+ 		return verdict({
+ 			action: "defer",
+ 			ci: "unreviewed",
