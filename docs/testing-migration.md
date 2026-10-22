@@ -3393,6 +3393,8 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/e2e/wake-deferred.test.ts` | S19 | real parent CI/review races, failed CI readers and recovery, actual late CI deadline, invalid merge prerequisites and native plan-gate no-op |
 | `tests/deferred-recheck-retained.test.ts` | S19 | retained/moved verbatim, convert-owned S19; six declarations require arbitrary invalid/future wake-ups or injected synchronous/unbounded hook callbacks unavailable through public tools; entry-point evidence in testing-migration-s19.md; no deletion credit |
 | `tests/timer-knobs.test.ts` | #439 | convert-owned #439; incoming timer/environment parser coverage introduced by merged #439, outside S19 conversion scope |
+| `tests/e2e/ci-watch-jobless.test.ts` | #443 | incoming #443-owned consumer coverage for job-less CI watch errors, outside S19 conversion scope |
+| `tests/recovery-notice-bound.test.ts` | #442 | convert-owned #442; incoming recovery-notice bounds and rejected-write coverage, outside S19 conversion scope |
 | `tests/merge-permission-retained.test.ts` | S14 | structural safety: no public consumer composes ghBranchRulesArgs and detectCiWait; original declaration 13 verbatim |
 | `tests/pr-resolve-retained.test.ts` | S14 | mixed original declaration 9 verbatim: validateEnvelope refuses missing pr_url before intake resolver; all reachable variants also covered through real reporter |
 | `tests/review-approval-retained.test.ts` | S14 | original declaration verbatim: pipeline artifacts.info fails before missing matches; only production write passes seq 1; no public entry reaches seq-2/3 overwrite |
