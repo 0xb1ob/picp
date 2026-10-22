@@ -4,13 +4,15 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, paths, type FleetRecord } from "../../src/contracts.ts";
 import { FleetStore } from "../../src/fleet.ts";
+import { initialStatus } from "../../src/run-artifacts.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, startPiChild } from "../harness/index.ts";
 
 const issued = "2026-08-31T12:45:43Z";
 const head = "a".repeat(40);
 type Notice = { kind: string; job?: string; body: string; stamp?: Record<string, unknown>; details?: Record<string, unknown> };
 
-async function carried(t: TestContext, records: Array<Partial<FleetRecord> & { job_id: string }>, notices: Notice[]) {
+async function carried(t: TestContext, records: Array<Partial<FleetRecord> & { job_id: string }>, notices: Notice[],
+	seed?: (home: string) => string | void) {
 	const home = createScratchHome();
 	const provider = await MockProvider.start();
 	const model = provider.addScript("s22-context", [{ kind: "text", text: "S22 context received." }]);
@@ -40,8 +42,9 @@ async function carried(t: TestContext, records: Array<Partial<FleetRecord> & { j
 		parentId = id;
 	}
 	writeFileSync(session, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+	const fixture = seed?.(home.path);
 	child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
-		extensions: [COMMAND_POST_EXTENSION], sessionFile: session });
+		extensions: [COMMAND_POST_EXTENSION, ...(fixture ? [fixture] : [])], sessionFile: session });
 	await child.prompt("Inspect the S22 carried notices.");
 	await child.waitForSettled(60_000);
 	assert.equal(provider.remaining("s22-context"), 0);
@@ -51,6 +54,7 @@ async function carried(t: TestContext, records: Array<Partial<FleetRecord> & { j
 test("S22: envelope generations and terminal phases filter carried reports before the provider", { timeout: 110_000 }, async (t) => {
 	const text = await carried(t, [
 		{ job_id: "cp-promoted", phase: "waiting", supersessions: 1 },
+		{ job_id: "cp-archived", phase: "waiting" },
 		{ job_id: "cp-done", phase: "done", reported_at: issued },
 		{ job_id: "cp-live", reported_at: issued },
 		{ job_id: "cp-next", supersessions: 1, reported_at: issued },
@@ -61,7 +65,8 @@ test("S22: envelope generations and terminal phases filter carried reports befor
 		{ job_id: "cp-model", phase: "failed", reported_at: issued,
 			failure: { class: "model_call_failed", message: "legacy model failed", at: issued } },
 	], [
-		{ kind: "envelope", job: "cp-promoted", body: "S22_ARCHIVED_REPORT", stamp: { generation: 1, reported_at: issued } },
+		{ kind: "envelope", job: "cp-promoted", body: "S22_PROMOTED_REPORT", stamp: { generation: 1, reported_at: issued } },
+		{ kind: "envelope", job: "cp-archived", body: "S22_ARCHIVED_REPORT", stamp: { generation: 1, reported_at: issued } },
 		{ kind: "envelope", job: "cp-done", body: "S22_CLOSED_REPORT", stamp: { generation: 1, reported_at: issued } },
 		{ kind: "envelope", job: "cp-live", body: "S22_CURRENT_REPORT", stamp: { generation: 1, reported_at: issued } },
 		{ kind: "envelope", job: "cp-next", body: "S22_OLD_GENERATION", stamp: { generation: 1, reported_at: issued } },
@@ -73,7 +78,7 @@ test("S22: envelope generations and terminal phases filter carried reports befor
 		{ kind: "envelope", job: "cp-script", body: "S22_SCRIPT_FAILURE", stamp: { reported_at: issued } },
 		{ kind: "envelope", job: "cp-model", body: "S22_MODEL_FAILURE", stamp: { reported_at: issued } },
 	]);
-	assert.deepEqual(["ARCHIVED_REPORT", "CLOSED_REPORT", "OLD_GENERATION", "FABRICATED_REPORT", "OBSOLETE_SETTLE",
+	assert.deepEqual(["PROMOTED_REPORT", "ARCHIVED_REPORT", "CLOSED_REPORT", "OLD_GENERATION", "FABRICATED_REPORT", "OBSOLETE_SETTLE",
 		"CLOSED_WEDGE", "CLOSED_SETTLE", "MODEL_FAILURE"].filter((body) => text.includes(`S22_${body}`)), []);
 	assert.deepEqual(["CURRENT_REPORT", "NEXT_REPORT", "SCRIPT_FAILURE"].filter((body) => text.includes(`S22_${body}`)),
 		["CURRENT_REPORT", "NEXT_REPORT", "SCRIPT_FAILURE"]);
@@ -113,4 +118,33 @@ test("S22: answer replay preserves coalesced unseen decisions and text-only lega
 	]);
 	for (const body of ["ANSWER_FIRST", "ANSWER_MIXED", "TEXT_FIRST", "ANSWER_MISSING"]) assert.ok(text.includes(`S22_${body}`), body);
 	for (const body of ["ANSWER_COPY", "TEXT_COPY"]) assert.ok(!text.includes(`S22_${body}`), body);
+});
+
+
+test("S22: carried wedges and settles use the persisted run phase and open call", { timeout: 110_000 }, async (t) => {
+	const variants = ["working", "next", "idle", "reported", "unknown", "dead"];
+	const records = variants.map((v) => ({ job_id: `cp-${v}`, ...(v === "reported" ? { reported_at: issued } : {}) }));
+	const notices = variants.flatMap((v) => [
+		{ kind: "wedged", job: `cp-${v}`, body: `S22_WEDGE_${v}`, stamp: { keys: [`cp-${v}#9`] } },
+		{ kind: "unreported", job: `cp-${v}`, body: `S22_SETTLE_${v}`, stamp: { generation: 1 } },
+	]);
+	const text = await carried(t, records, notices, (home) => {
+		for (const v of variants.filter((v) => v !== "unknown")) {
+			const status = { ...initialStatus(`cp-${v}`, { pid: v === "dead" ? 2147483647 : process.pid }),
+				phase: v === "idle" ? "idle" : "working", tool_calls: v === "next" ? 10 : 9,
+				current_tool: { name: "bash", tool_call_id: "call-9", started_at: isoTimestamp() } };
+			writeFileSync(join(home, paths.statusFile(`cp-${v}`)), JSON.stringify(status));
+		}
+		const fixture = join(home, "dead-reading.ts");
+		writeFileSync(fixture, `import { readFileSync, writeFileSync } from "node:fs";
+export default function(pi) { pi.on("input", () => {
+ const file = ${JSON.stringify(join(home, ".pi-command-post/state/fleet.json"))};
+ const fleet = JSON.parse(readFileSync(file, "utf8"));
+ fleet.jobs.find((job) => job.job_id === "cp-dead").worker.pid = 2147483647;
+ writeFileSync(file, JSON.stringify(fleet));
+}); }`);
+		return fixture;
+	});
+	assert.deepEqual(variants.filter((v) => text.includes(`S22_WEDGE_${v}`)), ["working"]);
+	assert.deepEqual(variants.filter((v) => text.includes(`S22_SETTLE_${v}`)), ["idle", "unknown"]);
 });
