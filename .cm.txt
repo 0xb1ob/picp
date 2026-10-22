@@ -1,1 +1,0 @@
-docs: ledger split stage 4b: s19, s20, s24 slices; NC prose move tightened, patch parse throws
