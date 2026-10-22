@@ -5511,7 +5511,7 @@ against `DiffVerdictSchema` and writes it to `paths.reviewFile(jobId, attempt)`
 schema, taking `head_sha` from every verdict whose `verdict` is `pass`. Sharing
 the schema is what makes a field rename impossible to get half-done: the writer
 refuses to write a verdict the schema does not accept, the reader refuses to
-count one, and `tests/merge-ask.test.ts` round-trips a schema-validated verdict
+count one, and `tests/e2e/merge-ask.test.ts` exercises schema-validated persisted verdicts
 through the same path function so a mismatch fails a test rather than silently
 deferring every merge ask. The reader looks at **every** attempt slot up to
 `REVIEW_MAX_ATTEMPTS` rather than stopping at the first missing file: it is
