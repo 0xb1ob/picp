@@ -281,7 +281,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P22 | 22 | `tests/e2e/reports-push.test.ts` | 4 |
 | P23 | 23 | `tests/e2e/memory.test.ts` | 3 |
 | P24 | 24 | `tests/e2e/host-compatibility.test.ts` | 3 |
-| S24 | 07 | `tests/e2e/operator-compact.test.ts` | 35 original declarations: 32 mapped, 3 retained verbatim, 0 pending; incoming #447 adds 1 mapped (36 total: 33 mapped, 3 retained); 4 original paths retired, 2 wholly deleted files; 26 executed/replayed controls; [accounting](testing-migration-s24.md) |
+| S24 | 07 | `tests/e2e/operator-compact.test.ts` | 35 |
 | S19 | 06 | `tests/e2e/wake-delivery.test.ts` | 11 |
 <!-- /manifest:prs -->
 
@@ -1950,22 +1950,24 @@ index 2dcc135..008c3bd 100644
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 --- a/src/operator-compact.ts
 +++ b/src/operator-compact.ts
-@@ -100,5 +99,0 @@
+@@ -100,5 +100,0 @@
 -			if (!instructions) throw new Error("self_compact refused: empty instructions");
 -			if (instructions.length < 200) throw new Error("self_compact refused: instructions must be at least 200 characters");
 -			if (!/(?:^|[\s`("'\[])(?:~\/|\/|\.{1,2}\/)?(?:[\w.-]+\/)+[\w.:-]+\.[\w-]+(?=$|[\s`"')\].,;:])/.test(instructions)) {
 -				throw new Error("self_compact refused: instructions must mention a handoff file path");
 -			}
 ```
+<!-- /patch:S24-compact-validation -->
 <!-- patch:S24-compact-under -->
 ```diff
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 --- a/src/operator-compact.ts
 +++ b/src/operator-compact.ts
-@@ -109 +109 @@
+@@ -111 +111 @@
 -			if (typeof tokens === "number" && tokens < limit) {
 +			if (false) {
 ```
+<!-- /patch:S24-compact-under -->
 <!-- patch:S24-compact-early -->
 ```diff
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
@@ -1975,6 +1977,7 @@ diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 -	pi.on("agent_settled", (_event, ctx) => {
 +	pi.on("turn_end", (_event, ctx) => {
 ```
+<!-- /patch:S24-compact-early -->
 <!-- patch:S24-compact-default -->
 ```diff
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
@@ -1984,6 +1987,7 @@ diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 -export const OPERATOR_COMPACT_DEFAULT_TOKENS = 200000;
 +export const OPERATOR_COMPACT_DEFAULT_TOKENS = 500;
 ```
+<!-- /patch:S24-compact-default -->
 <!-- patch:S24-compact-failures -->
 ```diff
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
@@ -1993,6 +1997,7 @@ diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 -const MAX_AUTO_FAILURES = 3;
 +const MAX_AUTO_FAILURES = 1;
 ```
+<!-- /patch:S24-compact-failures -->
 <!-- patch:S24-compact-spent -->
 ```diff
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
@@ -2001,6 +2006,7 @@ diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 @@ -139 +138,0 @@
 -		if (streak) streak.compacted = true; // any compaction during a streak is the streak's one
 ```
+<!-- /patch:S24-compact-spent -->
 <!-- patch:S24-compact-abort -->
 ```diff
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
@@ -2010,6 +2016,7 @@ diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 -		if (role === "assistant" && stopReason !== "error" && stopReason !== "aborted") {
 +		if (role === "assistant" && stopReason !== "error") {
 ```
+<!-- /patch:S24-compact-abort -->
 <!-- patch:S24-compact-callback -->
 ```diff
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
@@ -2019,6 +2026,7 @@ diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 -		for (const fn of deferred.splice(0)) fn();
 +		deferred.splice(0);
 ```
+<!-- /patch:S24-compact-callback -->
 <!-- patch:S24-compact-relay-gate -->
 ```diff
 diff --git a/extensions/cp-bridge/index.ts b/extensions/cp-bridge/index.ts
@@ -2028,6 +2036,7 @@ diff --git a/extensions/cp-bridge/index.ts b/extensions/cp-bridge/index.ts
 -			if (!compaction.compacting()) return false;
 +			if (true) return false;
 ```
+<!-- /patch:S24-compact-relay-gate -->
 <!-- patch:S24-compact-streak-cap -->
 ```diff
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
@@ -2037,6 +2046,7 @@ diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 -const MAX_STREAK_COMPACTIONS = 3;
 +const MAX_STREAK_COMPACTIONS = 2;
 ```
+<!-- /patch:S24-compact-streak-cap -->
 <!-- patch:S24-compact-nudge -->
 ```diff
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
@@ -2046,6 +2056,7 @@ diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 -				const relays = unanswered.slice();
 +				const relays: string[] = [];
 ```
+<!-- /patch:S24-compact-nudge -->
 <!-- patch:S24-compact-enrich -->
 ```diff
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
@@ -2054,6 +2065,7 @@ diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 @@ -232 +231,0 @@
 -		event.preparation.messagesToSummarize.push({ role: "user", content: instructions, timestamp: Date.now() });
 ```
+<!-- /patch:S24-compact-enrich -->
 <!-- patch:S24-compact-own -->
 ```diff
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
@@ -2062,6 +2074,7 @@ diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 @@ -214 +213,0 @@
 -		if (running && event.customInstructions === running) return;
 ```
+<!-- /patch:S24-compact-own -->
 <!-- patch:S24-compact-write -->
 ```diff
 diff --git a/src/operator-compact.ts b/src/operator-compact.ts
@@ -2071,6 +2084,7 @@ diff --git a/src/operator-compact.ts b/src/operator-compact.ts
 -			catch (error) { throw new Error(`self_compact handoff write failed: ${handoff}: ${String(error)}`); }
 +			catch {}
 ```
+<!-- /patch:S24-compact-write -->
 <!-- patch:S24-parent-busy -->
 ```diff
 diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
@@ -2079,6 +2093,7 @@ diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
 @@ -119 +118,0 @@
 -		if (reading.over && !this.holding) this.#engage("busy", reading);
 ```
+<!-- /patch:S24-parent-busy -->
 <!-- patch:S24-parent-cap -->
 ```diff
 diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
@@ -2088,6 +2103,7 @@ diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
 -		this.#cancelCap = this.#timer(() => this.#release("cap_timeout", true), parentCompactHoldMs());
 +		this.#cancelCap = this.#timer(() => this.#release("cap_timeout", true), PARENT_COMPACT_HOLD_MS);
 ```
+<!-- /patch:S24-parent-cap -->
 <!-- patch:S24-parent-context -->
 ```diff
 diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
@@ -2100,6 +2116,7 @@ diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
 -		const threshold = parentSettings(home()).compact_at_tokens;
 +		const threshold = 1;
 ```
+<!-- /patch:S24-parent-context -->
 <!-- patch:S24-parent-length -->
 ```diff
 diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
@@ -2109,6 +2126,7 @@ diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
 -	if (event.reason !== "threshold") return undefined;
 +	if (true) return undefined;
 ```
+<!-- /patch:S24-parent-length -->
 <!-- patch:S24-parent-order -->
 ```diff
 diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
@@ -2118,6 +2136,7 @@ diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
 -		for (const fn of held) fn();
 +		for (const fn of held.reverse()) fn();
 ```
+<!-- /patch:S24-parent-order -->
 | S19-2 | `tests/escalation-relay-watch.test.ts` | 44a729762f1221d74a5a3237f38b7e8436237896 | S19-2 | S19-NC-2 | 7c4d57a6682275a28ab9bd00eb9a94346ba4f7c1efb68302d50f61e55d2754ba | failed outbox write must not reframe each tick: actual 2, expected 1 | pass |
 | S19-3 | `tests/escalation-relay-watch.test.ts` | 44a729762f1221d74a5a3237f38b7e8436237896 | S19-2 | S19-NC-3 | 9f4653b93f70f3d463920b80ee4fdd299763b868bcc97db2081a11752d4e494d | restart must not reframe an existing outbox relay: actual true, expected false | pass |
 | S19-4 | `tests/escalation-relay-watch.test.ts` | 44a729762f1221d74a5a3237f38b7e8436237896 | S19-2 | S19-NC-4 | db39261155d548331f55a6ed40fbb26aa610ec643dae1a60a32dc98dee0ff344 | actual host relay text fails project-tagged decision regex | pass |
