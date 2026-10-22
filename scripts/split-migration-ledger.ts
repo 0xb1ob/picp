@@ -118,7 +118,7 @@ function main(): void {
 		writeFileSync(file, [...parts, ...tail].join("\n"));
 		console.log(`${file}: ${[...perSlice].map(([name, rows]) => `${name} ${rows.length}`).join(", ")}`);
 	}
-	if (slices.has("b02")) out = moveControls(out, `${DIR}/b02.md`);
+	out = moveControls(out);
 	if (slices.has("b05") || slices.has("s02")) {
 		out = moveProse(out, `${DIR}/s02.md`, /S02 controls run with [\s\S]*?S02 worker artifact directory\.\n\n?/);
 		out = movePatches(out, `${DIR}/s02.md`, ["NC-S02-key", "NC-S02-history", "NC-S02-prune"]);
@@ -152,29 +152,41 @@ function movePatches(text: string, file: string, ids: string[]): string {
 	return out;
 }
 
-const CONTROL_RUN = /^NC-(?:0[4-9]|1\d|2[0-3])\b[\s\S]*?(?=^NC-(?!(?:0[4-9]|1\d|2[0-3])\b)\d\d\b)/m;
-
-/** Moves NC-04..NC-23's intro prose and failure logs beside their patch blocks in b02.md; no-op when absent. */
-function moveControls(text: string, file: string): string {
-	const run = CONTROL_RUN.exec(text);
-	if (!run || !existsSync(file)) return text;
-	const units = new Map<string, string[]>();
-	for (const unit of run[0].split(/(?<=\n\n)(?=NC-\d\d)/)) {
-		const key = /^NC-(\d\d)/.exec(unit)?.[1] as string;
-		units.set(key, [...(units.get(key) ?? []), unit]);
+/** Moves each `NC-nn` prose paragraph, with its failure log, beside the patch block it describes; no-op when absent. */
+function moveControls(text: string): string {
+	const lines = text.split("\n");
+	const at = lines.indexOf("## Assertion map");
+	const files = sliceFiles();
+	const drop: [number, number][] = [];
+	for (let i = Math.max(at, 0); i < lines.length; i++) {
+		if ((lines[i] as string).startsWith("```")) {
+			while (!/^```$/.test(lines[++i] ?? "```")) continue;
+			continue;
+		}
+		if (!lines[i] || /^(\||<!--|#)/.test(lines[i] as string)) continue;
+		let end = i;
+		while (end < lines.length && lines[end] && !/^(\||<!--)/.test(lines[end] as string)) end++;
+		const head = lines.slice(i, end).join("\n");
+		const key = /\bNC-(\d\d)\b/.exec(head)?.[1];
+		let next = end;
+		while (lines[next] === "") next++;
+		const log = key && /^```(?!diff)/.test(lines[next] ?? "") ? next : -1;
+		const close = log < 0 ? -1 : lines.indexOf("```", log + 1);
+		const file = key ? files.find((name) => new RegExp(`<!-- patch:NC-${key}(?:-[\\w-]+)? -->`).test(readFileSync(name, "utf8"))) : undefined;
+		if (file) {
+			let slice = readFileSync(file, "utf8");
+			const block = patches(slice).get(new RegExp(`<!-- patch:(NC-${key}(?:-[\\w-]+)?) -->`).exec(slice)?.[1] as string) as string;
+			const tail = close < 0 ? "" : `\n${lines.slice(log, close + 1).join("\n")}\n`;
+			slice = slice.replace(block, () => `${head}\n\n${block}${tail}`);
+			writeFileSync(file, slice);
+			const last = close < 0 ? end : close + 1;
+			drop.push([i, lines[last] === "" ? last + 1 : last]);
+			end = last;
+		}
+		i = end;
 	}
-	let slice = readFileSync(file, "utf8");
-	for (const [key, group] of units) {
-		const id = new RegExp(`<!-- patch:(NC-${key}-[\\w-]+) -->`).exec(slice)?.[1];
-		const block = id ? patches(slice).get(id) : undefined;
-		if (!block) throw new Error(`${file} has no patch block for NC-${key}`);
-		const split = group.map((unit) => { const at = unit.search(/^```$/m); return at < 0 ? [unit, ""] : [unit.slice(0, at), unit.slice(at)]; });
-		const log = split.map(([, tail]) => tail).join("").replace(/\n+$/, "\n");
-		const next = `${split.map(([head]) => head).join("")}${block}${log ? `\n${log}` : ""}`;
-		slice = slice.replace(block, () => next);
-	}
-	writeFileSync(file, slice);
-	return text.replace(run[0], () => "");
+	for (const [from, to] of drop.reverse()) lines.splice(from, to - from);
+	return lines.join("\n");
 }
 
 const PATCH_SPLIT = /(<!-- patch:[\w-]+ -->\n```diff\n[\s\S]*?\n```\n(?:<!-- \/patch:[\w-]+ -->\n)?)/;
