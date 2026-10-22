@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..9d5b38e 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -264,7 +264,7 @@ export class Teardown {
+ 		// reports no pass reason (nothing was proven), and it exists only because
+ 		// a job whose worktree vanished must still be closable.
+ 		let outcome: GateOutcome | undefined;
+-		if (!options.force) {
++		if (true) {
+ 			outcome = await this.checkGates(record.worktree, record.branch, record.kind, record.job_id);
+ 			if (outcome.ok && record.kind === "ship" && !isScriptFleetRecord(record) &&
+ 				(record.phase === "failed" || record.phase === "waiting")) {

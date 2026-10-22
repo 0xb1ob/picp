@@ -1,0 +1,13 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+index f7705ce..247a657 100644
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -143,7 +143,7 @@ export async function closeResearchLedgers(home: string, records: readonly Fleet
+ 	getLedger: (() => TeardownLedger) | undefined, journal?: (input: DurableWakeupInput) => void): Promise<LedgerCloseOutcome> {
+ 	const outcome: LedgerCloseOutcome = { closed: [], failed: [] };
+ 	const due = records.filter((r) => r.kind === "research" && !isScriptFleetRecord(r) && r.phase === "done" &&
+-		r.reported_at !== undefined && r.closed_at !== undefined);
++		r.closed_at !== undefined);
+ 	if (due.length === 0 || !getLedger) return outcome;
+ 	let ledger: TeardownLedger | undefined;
+ 	let rows = new Map<string, { updated_at: string }>();
