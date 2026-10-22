@@ -37,7 +37,7 @@ Migration note (S21): the wakeup-journal source referenced below is also retired
 | `src/diff-review.ts` | Strip gate-only output fields from diff decision. |
 | `tests/diff-review.test.ts` | End-to-end regression for `decision_summary`, persisted verdict, and wake-up. |
 | `src/review-runs.ts` | Convert finish failures to one persisted operational decision where safe. |
-| `tests/review-runs.test.ts` | Finish failure, partial-write, and retry registry cases. |
+| `tests/e2e/diff-review.test.ts` | Real finish-failure and partial-write recovery; delivery retries also run through a real parent in `tests/e2e/landing.test.ts` (S15). |
 | `src/command-post.ts`, `tests/wakeup-journal.test.ts` | Journal durable recovery notice for a finisher failure with no safe verdict wake-up. |
 | `docs/contracts.md` | Document finish-failure behavior after changing it. |
 
@@ -63,14 +63,14 @@ Migration note (S21): the wakeup-journal source referenced below is also retired
 
 ### Task 2: Surface Finish Failures as Operational Decisions
 
-**Files:** Modify `src/review-runs.ts` (`#run` finish catch), `src/command-post.ts` (ReviewRuns options and existing `#journalDurable`); test `tests/review-runs.test.ts`, `tests/wakeup-journal.test.ts`; document in `docs/contracts.md` async review section.
+**Files:** Modify `src/review-runs.ts` (`#run` finish catch), `src/command-post.ts` (ReviewRuns options and existing `#journalDurable`); test `tests/e2e/diff-review.test.ts`, `tests/wakeup-journal.test.ts`; document in `docs/contracts.md` async review section.
 
 **Interfaces:** `ReviewAttempt<T>.finish(outcome: T): Promise<ReviewWakeup | undefined>` stays unchanged. Reuse its `{ operational: string }` convention, already used when `wait()` throws. Add optional `ReviewRunsOptions.onFinishFailure(pending: PendingReview, reason: string): void` for cases where no safe verdict wake-up can be constructed. `decisionExists(home, pending)` guards a partial success.
 
 - [ ] **Step 1: Write failing registry tests.** Build a `ReviewAttempt<{ operational?: string }>` with a manually released `wait`, a `finish` that throws once and persists an operational decision on second call. Hand back and settle; assert one `review_orphaned` event, persisted operational decision, exactly one wake-up naming the fault, and next attempt number 2. Add a case whose first `finish` writes `paths.gateFile(jobId, 1)` then throws: assert fallback does not overwrite decision, no fabricated `cp-verdict`, and one `onFinishFailure` callback; add a case where both finishes throw and callback fires once. Exercise callback through CommandPost's durable outbox in `tests/wakeup-journal.test.ts` and assert one `recovery` row survives restart with job/attempt/surface details.
-- [ ] **Step 2: Run red.** `node --test tests/review-runs.test.ts tests/wakeup-journal.test.ts`; pre-fix registry logs but neither persists an operational decision nor notifies parent.
+- [ ] **Step 2: Run red.** `node --test tests/e2e/diff-review.test.ts tests/wakeup-journal.test.ts`; pre-fix registry logs but neither persists an operational decision nor notifies parent.
 - [ ] **Step 3: Implement bounded recovery.** In `#run`, on `finish` throw, record `review_orphaned`. If `decisionExists(home, pending)` is false, invoke `attempt.finish({ operational: `reviewer finish failed: ${message}` } as T)` once, using returned wake-up through ordinary handback/send path. If decision already exists or fallback throws, invoke `onFinishFailure` once after cleanup with bounded reason; do not send `cp-verdict` without a valid decision. In `CommandPost`, pass a callback that calls existing `#journalDurable` with `kind: "recovery"`, stable `boundedWakeupId` keyed by job/surface/attempt, `keys: [jobId]`, and content telling parent to inspect `cp_review` status and `/watch` rather than merge or retry stale scratch. Guard callback errors so cleanup still runs. On operational outcome, persisted verdict must be `escalate` with `cause: operational` (or `operational_persistent` on later attempts), not `pass`.
-- [ ] **Step 4: Run green.** `node --test tests/review-runs.test.ts tests/wakeup-journal.test.ts tests/diff-review.test.ts tests/gate.test.ts`; `npm run typecheck`. Verify fallback's second same-head review uses attempt 2 and standard bounded operational ladder.
+- [ ] **Step 4: Run green.** `node --test tests/e2e/diff-review.test.ts tests/wakeup-journal.test.ts tests/gate.test.ts`; `npm run typecheck`. Verify fallback's second same-head review uses attempt 2 and standard bounded operational ladder.
 - [ ] **Step 5: Document and commit.** Update `docs/contracts.md` async-review failure paragraph with operational fallback, partial write, durable-notice behavior. Run `npm test`, then commit source/tests/doc.
 
 ### Task 3: Roll Out and Prove Receipt Recovery

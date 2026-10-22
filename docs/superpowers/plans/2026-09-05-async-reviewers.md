@@ -33,7 +33,7 @@ Migration note (S05): references below to the retired `tests/diff-review.test.ts
 |---|---|
 | `src/contracts.ts` | `REVIEW_SURFACES`, `PendingReviewSchema`, `QUALITY_PANEL_SLOT`, `PENDING_REVIEW_FILE`, `VERDICT_MESSAGE_TYPE`, `VERDICT_DELIVERY_RETRY_SECONDS`, `paths.pendingReviewFile`, `paths.reviewAttemptDir`, three event kinds, `StatusJobSchema.pending_review`. |
 | `src/review-runs.ts` (new) | `ReviewRuns`: the pending map, `pending.json` lifecycle, handback, the `wait → finish → wakeup` chain, orphan sweep. Pure over fs; knows nothing about verdicts. |
-| `tests/review-runs.test.ts` (new) | every registry rule, with fake waiters. |
+| `tests/e2e/diff-review.test.ts`, `tests/review-runs-retained.test.ts` | Real lifecycle behavior and the remaining unreachable registry contracts (S15). |
 | `src/gate.ts` | `GATE_NEXT` gains `wait`; `Gate.gate()` becomes `start()`/`finish()`/`status()`/`orphan()`; `formatGate` handles a waiting result. |
 | `src/diff-review.ts` | same split; stat overflow stays synchronous. |
 | `src/quality.ts` | `run()` becomes `start()`/`finish()`/`orphan()`; private waiter deleted. |
@@ -276,7 +276,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `src/review-runs.ts`
-- Create: `tests/review-runs.test.ts`
+- Current coverage: `tests/e2e/diff-review.test.ts` and `tests/review-runs-retained.test.ts` (S15 replaces the historical registry fixture).
 
 **Interfaces:**
 - Consumes: `PendingReview`, `validatePendingReview`, `paths`, `REVIEW_SURFACES`, `isoTimestamp`, `SCHEMA_VERSION`, `type CpEventKind` from `src/contracts.ts`; `atomicWriteJson` from `src/json-store.ts`; `isPidAlive` from `src/fleet.ts`; `type RunRegistry` from `src/runs.ts`.
@@ -321,7 +321,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `tests/review-runs.test.ts`:
+Historical registry fixture, now split between `tests/e2e/diff-review.test.ts` and `tests/review-runs-retained.test.ts`:
 
 ```ts
 /**
@@ -638,7 +638,7 @@ test("a pending.json that does not validate is skipped and reported, never throw
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `node --test tests/review-runs.test.ts`
+Current checks: `npm run test:one -- tests/e2e/diff-review.test.ts` and `npm run test:one -- tests/review-runs-retained.test.ts`.
 Expected: FAIL — cannot find module `../src/review-runs.ts`.
 
 - [ ] **Step 3: Write the registry**
@@ -1089,13 +1089,13 @@ export const SURFACES: readonly ReviewSurface[] = REVIEW_SURFACES;
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `npm run typecheck && node --test tests/review-runs.test.ts`
+Run: `npm run typecheck && npm run test:one -- tests/e2e/diff-review.test.ts && npm run test:one -- tests/review-runs-retained.test.ts`
 Expected: PASS (11 tests). The resend test's `resent` entries are dropped on the *next* `resendDue` after their resend, which is why the third call returns `[]` and sends nothing.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/review-runs.ts tests/review-runs.test.ts
+git add src/review-runs.ts tests/e2e/diff-review.test.ts tests/review-runs-retained.test.ts
 git commit -m "review-runs: the registry of pending reviewer attempts
 
 pending.json before the waiter, decision before the wake-up, wake-up after
@@ -2577,7 +2577,7 @@ In `src/command-post.ts`:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `npm run typecheck && node --test tests/pipeline.test.ts tests/review-runs.test.ts`
+Run: `npm run typecheck && node --test tests/pipeline.test.ts tests/e2e/diff-review.test.ts tests/review-runs-retained.test.ts`
 Expected: PASS (the e2e pipeline tests self-skip without treehouse; run them where it is installed).
 
 - [ ] **Step 5: Commit**

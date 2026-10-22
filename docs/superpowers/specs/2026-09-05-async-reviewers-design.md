@@ -360,7 +360,7 @@ pendingReviewFile(jobId: string, surface: ReviewSurface, attempt: number): strin
 
 ## Testing
 
-Pure, in `tests/review-runs.test.ts` (new):
+Current S15 consumer evidence is in `tests/e2e/diff-review.test.ts` and `tests/e2e/landing.test.ts`; unreachable registry contracts stay in `tests/review-runs-retained.test.ts`. Historical fixture checklist:
 
 - one pending per `(job, surface)`: second `start` returns the first record;
 - handback barrier: `finish` resolving before handback does not send; sending

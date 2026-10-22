@@ -1,0 +1,8 @@
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -544,3 +544,3 @@
+ 		for (const key of keys) {
+-			if (this.#inFlight.delete(key)) fresh.push(key);
++			if (this.#inFlight.has(key)) fresh.push(key);
+ 		}

@@ -1,22 +1,4 @@
-/**
- * Routing T5: the `cp_dispatch dry_run` tool boundary.
- *
- * The preview's own resolution is proven in `tests/dispatch.test.ts`; this is
- * the surface, in the style of `tests/review-tool.test.ts` — a real `pi --mode
- * rpc` parent with the command-post extension loaded and the scriptable mock
- * provider as its model, so "the parameter exists" means pi actually offered it
- * to a model and actually ran the call.
- *
- * Three properties, each of which the design can lose while the code still
- * looks right:
- *
- *  1. `dry_run` is an optional parameter on `cp_dispatch` itself, not a second
- *     tool and not a second subsystem (issue §Implementation 3).
- *  2. It answers with the route: effective inputs and provenance, source/rule,
- *     model and effort, and what the probe knows about the model.
- *  3. It takes nothing. No lease, no branch, no worker, no fleet record, no run
- *     directory, no brief, no session, and no ledger claim (§Implementation 4).
- */
+/** Routing T5: prove dry-run through real RPC, following tests/e2e/diff-review.test.ts. */
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";

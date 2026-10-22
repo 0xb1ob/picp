@@ -1,0 +1,5 @@
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -114 +114 @@
+-export const HANDBACK_MAX_WAIT_MS = 60_000;
++export const HANDBACK_MAX_WAIT_MS = 120_000;
