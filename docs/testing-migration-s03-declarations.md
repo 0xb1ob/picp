@@ -4,29 +4,29 @@ Ownership: the remaining behavior-05 files are owned by P3c-rest and re-sliced b
 
 Scope: tests/ci-watch.test.ts declarations 41–80, last range; S02 and S07 carry-ins. No source unit has been deleted yet. Mapping remains in progress; the passing scenarios alone do not authorize retirement.
 
-## Operator amendments and review 1 response
+## Latest operator ruling and declaration-71 blocker
 
-The later operator instructions supersede the original last-range retirement requirement:
+The operator superseded the earlier parked-71 ruling: S03b now owns mapping 71, replaying all controls,
+and retiring the original file. S10b does not own CI-watch. The prior review response is superseded.
 
-> Keep decl 71 parked and tests/ci-watch.test.ts whole (operator ruling: a follow-up slice maps decl 71 and retires the file).
+On merged source HEAD 0ed75a6ed0f5bcf28e600c84275678cc6336f4ac, the strengthened real-parent case
+fails: malformed JSON and invalid fleet schema produce only one durable notice, both keyed by
+`unsafe job id "-"`, instead of two notices for distinct causes. The parent survives the first error.
+The test took 60.45 seconds. Exact reproducer (replace the existing watch-failure case in landing.test.ts):
+`/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s03b-pntl/watch-failure-per-cause-reproducer.ts`.
+Log: `s03b-71-positive.log`; assertion `different malformed fleet causes must remain distinct`, actual 1,
+expected 2. This is an unmodified-product failure, not an executed negative control.
 
-The operator repeated this after the next parent restart:
+Root cause: CiWatch.tick returns jobs-read errors with job_id "-"; surfaceCi passes that sentinel to
+paths.runDir before journaling the original error. Its catch journals the replacement unsafe-id exception.
+#433 fixed the parent crash but does not preserve these distinct causes. A product fix must safely journal
+job-less watch errors before this migration can map 71, execute its control and retire the source file.
+The failed fragment stays outside the pushed suite; no production change or deletion is claimed.
 
-> keep decl 71 parked and tests/ci-watch.test.ts whole.
-
-Review 1's premise that this ruling does not exist is incorrect. Neither #433 nor the inherited upstream
-watch-failure case authorizes this slice to take the deferred mapping/retirement. No credit is claimed for 71.
-The follow-up must prove the durable per-cause entry and execute its control before retirement.
-
-The four S02 declarations are retained verbatim in tests/ci-watch-retained.test.ts, with missing entry points
-named in the assertion map. Removing an unreachable predicate staying green does not replace its unit.
-The originals remain whole by operator ruling; the follow-up removes the temporary duplication at retirement.
-
-The table below is the inherited S03 execution log, not a complete patch/SHA catalog or a retirement gate.
-Its missing historical patch provenance remains a limitation; it must not be inferred or fabricated.
-The newly mapped S03b declarations have executed patches, full base SHAs and failing assertions in
-[the S03b control catalog](testing-migration-s03b-controls.md). Final replay and patch provenance for the
-inherited controls remain part of the explicitly deferred whole-file retirement audit.
+Four S02 declarations remain retained verbatim in tests/ci-watch-retained.test.ts. The original file is
+still whole because declaration 71 fails the required consumer assertion; retirement will remove duplication.
+The inherited S03 table below lacks historical exact patch provenance; its full catalog and replay are
+still required for retirement. New S03b controls already record executed patches, SHAs and assertions.
 
 ## Executed controls (restored immediately)
 
@@ -132,10 +132,10 @@ from the pushed suite. Declaration 71 stays pending; the original unit file rema
 |---|---|---|
 | 45, 54–56, 58, 60, 64–68, 70, 78 | mapped | Main assertion ledger and docs/testing-migration-s03b-controls.md; thirteen newly mapped declarations |
 | S02 6/8/32/33 | retained | Verbatim copies in tests/ci-watch-retained.test.ts; originals stay whole by operator ruling. Missing entry points: FleetStore refuses the unreported slot before isWatched; Actions refuses the id-less run before derivation; CommandPost supplies no onDisabled callback. Boundary controls do not replace those helper assertions. |
-| 71 | pending-fix | Expected: durable watch-failure notice without a crash. Upstream #433 is now merged; the operator explicitly parked this e2e conversion for follow-up. Historical reproducer remains outside the pushed suite: /home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s03b-pntl/watch-failure-reproducer.ts |
+| 71 | pending-fix | Latest ruling assigns mapping and retirement to S03b. The real-parent per-cause assertion still fails after #433: distinct malformed fleet causes collapse to one unsafe-job-id notice. See the current blocker and saved per-cause reproducer above. |
 
 `pending-fix` is recorded here because the assertion-map parser rejects that status; it is not represented as retained.
 The unit file stays whole while 71 is pending. S03 is 39 mapped / 1 pending-fix; S02 is 36 mapped / 4 retained in place.
-This continuation closes all requested dispositions except the explicitly parked 71; declaration 64 is mapped after #429.
+S03b owns declaration 71 and retirement under the latest ruling; both remain blocked by the per-cause product failure above. Declaration 64 is mapped after #429.
 
 An exploratory timer-health case was also removed: two different malformed fleet shapes both surfaced as unsafe job id "-" rather than supplying the two distinct failure causes needed by declaration 71. That failed conversion attempt is not counted as mapping or negative-control evidence.
