@@ -17,7 +17,7 @@ import { type ExtensionAPI, type ExtensionContext, resizeImage } from "@earendil
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { attachParentHost, currentHost, parentHostPaths, ParentHostClient } from "../../src/parent-host.ts";
-import { HOST_PROBE_MS, probeHost, reattachLoop } from "../../src/bridge-reattach.ts";
+import { hostProbeMs, probeHost, reattachLoop } from "../../src/bridge-reattach.ts";
 import { type BridgeRelay, CpBridgeError, requireAvailableParentModel, resolveParentModel } from "../../src/cp-bridge.ts";
 import { agentDirFor, relaySkillLines, skillRoots } from "../../src/viewer/skill-catalog.ts";
 import { OperatorRelayConsumer, RELAY_TICK_MS, recheckRelay } from "../../src/operator-delivery.ts";
@@ -539,7 +539,7 @@ export default function (pi: ExtensionAPI): void {
 		relayTicks = 0;
 		relayTimer = setInterval(() => {
 			consumer.poke(); // delivery from disk keeps working while the socket is down
-			if (++relayTicks % Math.round(HOST_PROBE_MS / RELAY_TICK_MS) === 0) void probe().catch(() => undefined);
+			if (++relayTicks % Math.max(1, Math.round(hostProbeMs() / RELAY_TICK_MS)) === 0) void probe().catch(() => undefined);
 		}, RELAY_TICK_MS);
 		relayTimer.unref();
 		clearInterval(backstopTimer);

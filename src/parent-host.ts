@@ -47,6 +47,7 @@ import { deliverableRelay } from "./relay-scope.ts";
 import type { ParentSendDelegation } from "./parent-outbox.ts";
 import { readParentLock } from "./parent-lock.ts";
 import { LOADED_COMMIT } from "./viewer/loaded-commit.ts";
+import { knobMs } from "./timer-knobs.ts";
 
 export const PARENT_HOST_PROTOCOL = 1;
 const HOST_SCRIPT = fileURLToPath(import.meta.url);
@@ -57,6 +58,10 @@ const MAX_FRAME_CHARS = 1_000_000;
 export const HOST_RELAY_TICK_MS = 60_000;
 /** Direct relay of code-raised escalations (`escalation-relay-watch.ts`): 10 s grace + this tick ≤ ~20 s. */
 export const HOST_ESCALATION_TICK_MS = 10_000;
+/** `CP_HOST_ESCALATION_TICK_SECONDS` (default 10). */
+export function hostEscalationTickMs(env: NodeJS.ProcessEnv = process.env): number {
+	return knobMs("CP_HOST_ESCALATION_TICK_SECONDS", HOST_ESCALATION_TICK_MS, env);
+}
 /** A host relay frame; `relayId` is absent from a host older than the relay outbox. */
 export type HostRelayListener = (relay: BridgeRelay, relayId?: string) => void;
 /** Linux `sun_path` is 108 bytes including the NUL. */
@@ -279,7 +284,7 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 		} catch (error) {
 			console.error(`parent host ${process.pid}: escalation relay watch failed: ${(error as Error).message}`);
 		}
-	}, HOST_ESCALATION_TICK_MS);
+	}, hostEscalationTickMs());
 	escalationTick.unref();
 	const confirmed = new Set<string>();
 	const relayTick = setInterval(() => {
