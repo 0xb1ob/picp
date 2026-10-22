@@ -131,8 +131,8 @@ test("4B1-T2: releasable keeps only live, idle, not-stopping held ship/pr author
 test("4B1: authors reported in the same second are released in fleet order, not id order", async (t) => {
 	const b = await bench(t, 20, [held("cp-z-first"), held("cp-a-second")]);
 	for (const id of ["cp-z-first", "cp-a-second"]) b.workers.spawn(id);
-	// The e2e wait of landing "spawn pressure": a tie order never changes, so on the old code this timed out.
-	await waitFor(() => b.release.releasable().join(), (order) => order === "cp-z-first,cp-a-second", { timeoutMs: 300 });
+	// The e2e wait of landing "spawn pressure": a tie order never changes, so on the old code this timed out (5 s floor).
+	await waitFor(() => b.release.releasable().join(), (order) => order === "cp-z-first,cp-a-second", { timeoutMs: 5000 });
 });
 
 test("4B1-T2: a script record is never releasable, even one shaped as a held ship/pr author", (t) => {
