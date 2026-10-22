@@ -917,25 +917,7 @@ export function formatDeathNotice(jobId: string, failure: Failure, work: Unrepor
 	].join("\n");
 }
 
-export interface RecoveryCandidate {
-	job_id: string;
-	outcome: string;
-	detail: string;
-	resumable: boolean;
-}
-
-export function formatRecoveryNotice(candidates: readonly RecoveryCandidate[], projectOf?: ProjectOf): string {
-	const lines = [`RESTART RECOVERY — ${candidates.length} candidate(s)`];
-	const row = (candidate: RecoveryCandidate) => `  ${candidate.job_id} ${candidate.outcome}${candidate.resumable ? " (resumable)" : ""}: ${candidate.detail}`;
-	lines.push(...projectGroupedLines(candidates, projectOf && ((candidate) => projectOf(candidate.job_id)), row));
-	const revive = candidates.filter((candidate) => candidate.resumable).map((candidate) => candidate.job_id);
-	const tear = candidates.filter((candidate) => !candidate.resumable).map((candidate) => candidate.job_id);
-	const next: string[] = [];
-	if (revive.length > 0) next.push(`cp_revive ${revive.join(", ")}`);
-	if (tear.length > 0) next.push(`cp_teardown ${tear.join(", ")}`);
-	lines.push(`  next: ${next.join(" or ") || "cp_teardown the listed jobs"}.`);
-	return lines.join("\n");
-}
+export { formatRecoveryNotice, type RecoveryCandidate } from "./recovery-notice.ts";
 
 /** The message a notifier hands to the transport. Content is always a string. */
 export interface WakeupMessage {
