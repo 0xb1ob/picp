@@ -1,0 +1,5 @@
+--- a/src/intake.ts
++++ b/src/intake.ts
+@@ -200 +200 @@
+-			if (existsSync(rejectedFile) && record.phase !== "failed") {
++			if (existsSync(rejectedFile)) {

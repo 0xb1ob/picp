@@ -653,6 +653,14 @@ test("S21: restart delivers an unobserved death once and discards obsolete fleet
 	await waitFor(() => receivedText().includes("RESTART RECOVERY"), Boolean,
 		{ timeoutMs: 15_000, what: "reconciliation reaching the mock model" });
 	const text = receivedText();
+	const recoveryNotices = provider.requests(script).flatMap((request) =>
+		(request.body.messages as Array<{ role: string; content: unknown }>).filter((message) => message.role === "user")
+			.flatMap((message) => Array.isArray(message.content) ? message.content : [])
+			.filter((part: { text?: string }) => part.text?.includes("RESTART RECOVERY —"))
+			.map((part: { text: string }) => part.text)).join("\n");
+	assert.match(recoveryNotices, /cp_revive cp-revivable/, "the recovery notice names the resumable job's next tool");
+	assert.match(recoveryNotices, /cp_teardown cp-unsalvageable/, "the recovery notice names the failed job's next tool");
+	assert.doesNotMatch(recoveryNotices, /poll/i);
 	assert.match(text, /S21_LIVE_DEATH/);
 	assert.match(text, /S21_MIXED_RECOVERY/);
 	assert.match(text, /RESTART RECOVERY/);

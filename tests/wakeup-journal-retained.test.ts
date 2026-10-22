@@ -6,6 +6,7 @@ import { DURABLE_WAKEUP_KINDS, FAILURE_CLASSES, type FailureClass, LAYOUT, STATE
 import { BOUND_SPENT_PHRASE } from "../src/failure-announcer.ts";
 import { FAILURE_CLASS_WAKEUP, WAKEUP_CUSTOM_TYPES } from "../src/wakeups.ts";
 import { REPO_ROOT } from "./harness/index.ts";
+import { FAILURE_RECOVERABLE } from "../src/contracts.ts";
 
 const DOCS = readFileSync(join(REPO_ROOT, "docs/contracts.md"), "utf8");
 const AGENTS = readFileSync(join(REPO_ROOT, "AGENTS.md"), "utf8");
@@ -30,6 +31,34 @@ test("every failure class maps to a durable wake-up kind", () => {
 		const kind = FAILURE_CLASS_WAKEUP[cls as FailureClass];
 		assert.ok((DURABLE_WAKEUP_KINDS as readonly string[]).includes(kind), `${cls} maps to non-durable ${kind}`);
 		assert.notEqual(kind, "none");
+	}
+});
+
+test("every failed announcement and terminal class names an emitter scenario", () => {
+	const classes: Record<string, string> = {
+		tool_loop: "S21-intake", budget_exceeded: "S21-budget", settled_without_report: "S21-unreported",
+		model_call_failed: "S21-budget", wall_clock_exceeded: "S21-clock", tool_call_cap_exceeded: "S21-bound",
+		spawn_failed: "S21-host", script_exit: "script_exit", script_signal: "script_signal",
+	};
+	const registry = readFileSync(join(REPO_ROOT, "docs/testing-migration/s21.md"), "utf8");
+	const scripts = readFileSync(join(REPO_ROOT, "tests/script-jobs.test.ts"), "utf8");
+	const events: Record<string, string> = {
+		worker_death: "S21-intake", hard_bound: "S21-bound", envelope_invalid: "S21-intake",
+		budget_exceeded: "S21-budget", model_call_failed: "S21-budget", reconcile_unsalvageable: "S21-restart",
+	};
+	for (const cls of FAILURE_CLASSES) {
+		if (FAILURE_RECOVERABLE[cls]) continue;
+		const scenario = classes[cls];
+		assert.ok(scenario, `${cls} needs an exercised emitter scenario in S21`);
+		assert.ok(scenario.startsWith("S21-") ? registry.includes(`| ${scenario} |`) : scripts.includes(scenario),
+			`${cls} emitter evidence is missing`);
+		assert.notEqual(FAILURE_CLASS_WAKEUP[cls], "none");
+	}
+	for (const row of STATE_WAKEUP_ANNOUNCEMENTS) {
+		if (!("to" in row) || row.to !== "failed") continue;
+		assert.notEqual(row.wakeup, "none");
+		assert.ok(events[row.event] && registry.includes(`| ${events[row.event]} |`),
+			`${row.event} needs an exercised emitter scenario in S21`);
 	}
 });
 

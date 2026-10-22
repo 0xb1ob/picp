@@ -1,0 +1,5 @@
+--- a/src/wakeups.ts
++++ b/src/wakeups.ts
+@@ -916 +916 @@
+-		`  next: cp_teardown ${jobId} or cp_revive ${jobId}.`,
++		`  next: cp_teardown ${jobId} or cp_revive ${jobId}; poll for progress.`,
