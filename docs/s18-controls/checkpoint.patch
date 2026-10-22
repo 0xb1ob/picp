@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..aec7025 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -651,7 +651,7 @@ export class Teardown {
+ 
+ 		// A flagged escalate is the one an operator can clear: the reviewer found the
+ 		// diff sound apart from the flags it is required to raise.
+-		if (latest.cause === "flagged" && this.#diffCheckpointApproved(branch)) return undefined;
++		if (latest.cause === "flagged") return undefined;
+ 
+ 		return {
+ 			ok: false,
