@@ -1,8 +1,4 @@
-/**
- * Read-only validator for the per-slice ledger (docs/testing-migration/*.md) and the rules doc docs/testing-migration.md
- * against the git tree at its pinned baseline; prints static `test(` counts (TypeScript AST) apart from runner totals and
- * exits 1 on any finding. Imports no production code.
- */
+/** Read-only ledger validator: slice files and rules doc vs the git baseline; `test(` counts; exit 1 on findings. */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -308,6 +304,7 @@ function main(): number {
 	}
 	console.log(`  total: ${census.files} files, ${census.base} baseline / ${census.tree} tree declarations`);
 	if (args.runnerLog) console.log(`runner-executed (${args.runnerLog}): ${Object.entries(runnerTotals(readFileSync(args.runnerLog, "utf8"))).map(([k, n]) => `${k} ${n}`).join(", ")}`);
+	if (args.preservedFrom) console.log(`preservation ref: ${args.preservedFrom} (${execFileSync("git", ["rev-parse", args.preservedFrom], { encoding: "utf8" }).trim()})`);
 	for (const finding of findings) console.error(`FAIL ${finding}`);
 	console.log(findings.length ? `${findings.length} finding(s)` : `manifest ok (${docs.length - 1} slice files${args.preservedFrom ? `, rows preserved from ${args.preservedFrom}` : ""})`);
 	return findings.length ? 1 : 0;

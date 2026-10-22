@@ -38,7 +38,7 @@ function keyOf(name: string, line: string, baseOwner: ReadonlyMap<string, string
 	const [c0 = "", c1 = "", c2 = "", c3 = ""] = c;
 	if (name === "prs") return ownerKey(c0);
 	if (name === "scenarios") return scenarioKey(c0);
-	if (name === "assertions") return c2 && c2 !== "—" ? scenarioKey(c2) : baseOwner.get(c0) ?? "unowned";
+	if (name === "assertions") return /-retained\.test\.ts/.test(cells(line)[4] ?? "") && c2 === "—" && /^tests\/review-(tool|runs)\.test\.ts$/.test(c0) ? "s15" : c2 && c2 !== "—" ? scenarioKey(c2) : baseOwner.get(c0) ?? "unowned";
 	if (name === "regressions") return scenarioKey(c3);
 	if (name === "incoming") return ownerKey(c1);
 	if (name === "feature-removed") return baseOwner.get(c0) ?? "unowned";
@@ -116,8 +116,20 @@ function main(): void {
 		writeFileSync(file, [...parts, ...tail].join("\n"));
 		console.log(`${file}: ${[...perSlice].map(([name, rows]) => `${name} ${rows.length}`).join(", ")}`);
 	}
+	out = moveProse(out, `${DIR}/s02.md`, /S02 controls run with [\s\S]*?S02 worker artifact directory\.\n\n?/);
 	writeFileSync(MONOLITH, out);
 	writeFileSync(ALLOWLIST_FILE, `${JSON.stringify(allowlist, null, "\t")}\n`);
+}
+
+/** Moves a prose paragraph out of the monolith into a slice file, ahead of its patch blocks; no-op when absent. */
+function moveProse(text: string, file: string, paragraph: RegExp): string {
+	const found = paragraph.exec(text);
+	if (!found || !existsSync(file)) return text;
+	const slice = readFileSync(file, "utf8");
+	const at = slice.indexOf("<!-- patch:");
+	const prose = found[0].replace(/\n*$/, "\n\n");
+	writeFileSync(file, at < 0 ? `${slice.replace(/\n*$/, "\n\n")}${prose}` : `${slice.slice(0, at)}${prose}${slice.slice(at)}`);
+	return text.replace(found[0], () => "");
 }
 
 const PATCH_SPLIT = /(<!-- patch:[\w-]+ -->\n```diff\n[\s\S]*?\n```\n(?:<!-- \/patch:[\w-]+ -->\n)?)/;

@@ -341,23 +341,6 @@ moves first.
 |---|---|---|
 | 01-1 | `tests/e2e/ci-evidence.test.ts` | ci evidence: wake, cp_integrate and the promote name only the current head's failing run, and none once it is gone |
 | 01-2 | `tests/e2e/ci-evidence.test.ts` | ci evidence: absent head, absent run id, a branch-name PR ref and an enterprise host never fabricate an Actions link |
-| 02-1 | `tests/e2e/authority.test.ts` | authority: a scoped mandate dispatches the job it names under its id; an unnamed job is not its to speak for |
-| 02-2 | `tests/e2e/authority.test.ts` | authority: a paused or revoked mandate stops speaking; an expired or job-capped one refuses new paid work |
-| 02-3 | `tests/e2e/authority.test.ts` | authority: a risk:high answer authorizes only the job it names; a replacing grant supersedes the open ask |
-| 02-4 | `tests/e2e/authority.test.ts` | authority: token raises stay inside the ceiling, the USD cap never moves, and budgets.json is re-read live |
-| 02-5 | `tests/e2e/authority.test.ts` | authority: a held PR job counts toward the job and spend caps but never holds a dispatch slot |
-| 02-6 | `tests/e2e/authority.test.ts` | authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource |
-| 02-7 | `tests/e2e/authority.test.ts` | authority: keyword risk inference skips negated, excluded and benign senses; the risk:high ask names every word it matched |
-| 02-8 | `tests/e2e/authority.test.ts` | authority: cp_mandate issue needs only projects and an objective; every other field resolves explicit > project > home and says which |
-| 02-9 | `tests/e2e/authority.test.ts` | authority: a recorded or declared low turns a keyword-only high into a warning; a recorded, supplied or planner high still gates |
-| 02-10 | `tests/e2e/authority.test.ts` | authority: an operator-quoted risk:high pre-approval lets covered dispatches and promotions proceed with an audit row; anything else still asks |
-| 02-11 | `tests/e2e/authority.test.ts` | authority: cp_escalate batch_risk_high files one approve/drop record for jobs one asking grant gates; every refusal writes nothing |
-| 02-12 | `tests/e2e/authority.test.ts` | authority: dispatch picks the named, earliest-issued, lowest-id grant that speaks; a full named grant yields only to an eligible supplement |
-| 02-13 | `tests/e2e/authority.test.ts` | authority: live usage crosses each cap line once while the worker runs; cache reads and pre-grant usage never count; a USD cap or the ceiling is the operator's |
-| 02-14 | `tests/e2e/authority.test.ts` | authority: the gateway's admin capacity and quota windows steer and annotate routing; every failure falls back and never leaks the key |
-| 02-15 | `tests/e2e/authority.test.ts` | authority: a pipeline's plan checkpoint is mandate-decided and journaled; task-text exclusions, gate flags, an unnamed high and a denied project leave it pending |
-| 02-16 | `tests/e2e/authority.test.ts` | authority: cp_mandate through a real parent sets the reviewer model, names this turn's jobs, filters show, refuses every bad issue before writing, and a revoke or expiry closes its asks |
-| 02-17 | `tests/e2e/authority.test.ts` | authority: an expired, revoked, serial or job-capped grant stops fresh starts while its own in-flight workers keep promotion and repair |
 | 05-1 | `tests/e2e/landing.test.ts` | landing: a denied, rate-limited, malformed, partial or capped Actions read never merges and names its cause; a full paged read finds page two's failure |
 | 05-2 | `tests/e2e/landing.test.ts` | landing: only an authoritative empty workflow list is no CI; every unanswered workflows read keeps its own cause and never reads as none |
 | 05-3 | `tests/e2e/landing.test.ts` | landing: /doctor ci.<project> reads workflows, then the newest run and its attempt jobs; a refused read is loud and gh output never echoes |
@@ -522,181 +505,6 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/ci-run-ref.test.ts` | formatRunRef of an id alone is " (run N)" | 01-2 | mapped | (run 16) and (run 17) at the end of the ci fact |
 | `tests/ci-run-ref.test.ts` | ciRunRef of a legacy run without databaseId is {} | 01-2 | redundant-unreachable | readActionsCi refuses an id-less row, so no consumer sees one; 01-2 pins "could not read CI" with no reference; approved by main session under ask-0088e0332d00, 2026-10-20 |
 | `tests/ci-run-ref.test.ts` | formatRunRef of {} is "" | 01-1 | mapped | held facts for superseded, in_progress and green heads carry no reference |
-| `tests/budgets.test.ts` | with no data/budgets.json, per_job_tokens and spawn_cap are the fleet defaults | 02-4 | mapped | with no budgets file on disk, the spender's record carries DEFAULT_BUDGET_CONFIG's per_job_tokens and per_job_cost_usd, and an eleventh dispatch is refused "spawn cap reached (10/10 workers)" |
-| `tests/budgets.test.ts` | a raise written after the parent started reaches per_job_tokens on the live manager | 02-4 | mapped | `overflow` dispatches with budget.tokens 1,000 from a file written after the CommandPost was built; negative control NC-04 |
-| `tests/budgets.test.ts` | the raised per_job_cost_usd reaches the live manager | 02-4 | mapped | `overflow` and `next` dispatch with budget.cost_usd 3 |
-| `tests/budgets.test.ts` | spawn_cap is not stale independently of the rest of the budget config | 02-4 | mapped | spawn_cap 11, written after start, admits `overflow` that the default 10 refused; negative control NC-04 |
-| `tests/budgets.test.ts` | CommandPost.budgets() sees the raise without reconstruction | 02-4 | mapped | dispatch reads the budget through budgets(); `overflow`'s record shows the raise |
-| `tests/budgets.test.ts` | a second raise on the same live CommandPost also takes effect | 02-4 | mapped | the second write (2,000 tokens, spawn_cap 12) dispatches `next` with 2,000 as an eleventh live worker |
-| `tests/ops-jobs.test.ts` | opsClass is undefined for a job with no ops: label | 02-6 | mapped | `plain research` previews with its own planner profile; an unlabelled job with profile ops is refused |
-| `tests/ops-jobs.test.ts` | opsClass reads one known ops:<class> label | 02-6 | mapped | ops:deploy, ops:process and ops:pull each preview with profile ops |
-| `tests/ops-jobs.test.ts` | opsClass refuses two ops: labels | 02-6 | mapped | ops:pull + ops:deploy: "exactly one ops:<pull\|deploy\|process> label" from the dispatch preview |
-| `tests/ops-jobs.test.ts` | opsClass refuses an unknown class | 02-6 | mapped | ops:reboot: "found ops:reboot" from the dispatch preview |
-| `tests/ops-jobs.test.ts` | opsRequest: a deploy is high and runs the ops profile whatever risk the caller names | 02-6 | mapped | preview with risk low gives [ops, high]; negative control NC-08 |
-| `tests/ops-jobs.test.ts` | opsRequest: a process job is always high | 02-6 | mapped | preview routing risk high |
-| `tests/ops-jobs.test.ts` | opsRequest: a pull defaults low | 02-6 | mapped | preview routing risk low |
-| `tests/ops-jobs.test.ts` | opsRequest: a recorded risk:high still wins on a pull | 02-6 | mapped | `risky pull` (ledger risk high) previews high |
-| `tests/ops-jobs.test.ts` | opsRequest returns a non-ops request untouched | 02-6 | mapped | profile planner kept on `plain research` |
-| `tests/ops-jobs.test.ts` | opsRequest refuses the ops profile without an ops: label | 02-6 | mapped | "the ops profile needs an ops:<pull\|deploy\|process> label" |
-| `tests/ops-jobs.test.ts` | opsRequest refuses another profile on an ops job | 02-6 | mapped | "an ops:pull job runs the ops profile, not planner" |
-| `tests/ops-jobs.test.ts` | opsRequest refuses an ops job that is not kind:research delivery:local | 02-6 | mapped | ship/pr job with ops:pull: "an ops job is kind:research delivery:local" |
-| `tests/ops-jobs.test.ts` | riskGateExempt exempts read-only research | 02-6 | mapped | risk:high read-only planner job under ask_on risk:high: no mandate_gate in the preview |
-| `tests/ops-jobs.test.ts` | riskGateExempt never exempts an ops job, even with a read-only profile | 02-6 | mapped | `risky pull` (ops profile, readOnly) previews "would ask: risk:high"; negative control NC-07 |
-| `tests/ops-jobs.test.ts` | a resource:<name> label is leased while its holder is live | 02-6 | mapped | `wanting` refused "resource:tg-session is leased by live job <holder>" with no fleet record or model request; negative control NC-09 |
-| `tests/ops-jobs.test.ts` | the resource is free once its holder is torn down (phase done) | 02-6 | mapped | after the holder's forced teardown `wanting` dispatches |
-| `tests/ops-jobs.test.ts` | a job's own failed record is not a resource conflict | 02-6 | redundant-unreachable | preflight refuses a failed job's re-dispatch on its own leftover branch (`branch_exists`) before assertResourcesFree runs, and the operator path tears the record down (phase done) first; 02-6 pins a killed, failed `wanting` re-dispatch refused by branch_exists, never "leased by live job"; standing rule 3 (ask-0088e0332d00) |
-| `tests/ops-jobs.test.ts` | a different resource label is free while another is leased | 02-6 | mapped | `other` (resource:mt5-2) dispatches while the holder of resource:tg-session is live |
-| `tests/risk-negation.test.ts` | safety constraints (no migration, never expose secrets or tokens, …) infer no risk and name no word | 02-7 | mapped | each text previews risk low, provenance defaulted, no mandate_gate. The empty `riskKeywords` result reaches no consumer by itself: dispatch reads the same `acceptedRiskMatches` path (`inferScopeAndRisk`, `src/pipeline.ts`) for routing.risk, and the risk:high ask names `riskKeywords` words only when that path matched; negative control NC-10 breaks that path |
-| `tests/risk-negation.test.ts` | brief negations with up to three intervening words infer nothing; the affirmative half of a mixed text stays high with its word | 02-7 | mapped | negated texts preview low; mixed texts are refused under the bridge grant and the ask names exactly the expected words |
-| `tests/risk-negation.test.ts` | a modified destructive action after `or` stays high; a negated modifier does not | 02-7 | mapped | delete/destroy/truncate/purge/backfill/drop the table/migrate each named alone; the two negated texts preview low |
-| `tests/risk-negation.test.ts` | cp-ukqv: a list after a negated destructive verb shares the negation; a positive action still trips high | 02-7 | mapped | ten shared-negation texts preview low; fifteen positive texts name their words in the ask |
-| `tests/risk-negation.test.ts` | independent credential and access actions after `or` stay high; negated ones infer nothing | 02-7 | mapped | credentials/secrets/permissions/authentication/secrets, tokens named; five negated texts preview low |
-| `tests/risk-negation.test.ts` | Constraints/Non-goals sections end at the next peer or parent heading | 02-7 | mapped | the section alone previews low; a following ## or # Implementation, or a leading line, names credentials |
-| `tests/risk-negation.test.ts` | fenced headings cannot open or close excluded sections | 02-7 | mapped | four fences × two headings name credentials, production; fenced-only and false-close texts as in the unit file |
-| `tests/risk-negation.test.ts` | positive evidence survives safety wording | 02-7 | mapped | credentials; billing, production; delete; "Expose secrets or tokens" is high |
-| `tests/risk-negation.test.ts` | a supplied risk (explicit or assessed, low or high) wins over excluded-section words and keeps its provenance | 02-7 | mapped | previewDispatch with risk and inputsFrom returns [risk, provenance] as supplied |
-| `tests/risk-negation.test.ts` | riskkw-f10: the four refused jobs' keyword senses infer no risk; approval-sense authorization stays evidence | 02-7 | mapped | eleven texts preview low; the cp_gate authorization text names authorization |
-| `tests/risk-negation.test.ts` | riskkw-f10: real risk wording stays high | 02-7 | mapped | eighteen texts are refused under the bridge grant, each ask naming at least one word |
-| `tests/risk-negation.test.ts` | cp-wkv1: no-migration notes, plan evidence sections, spend tokens and audit remedies infer no risk | 02-7 | mapped | eleven texts preview low |
-| `tests/risk-negation.test.ts` | cp-wkv1: real operational risk stays high next to the new benign senses | 02-7 | mapped | eighteen texts named with their exact words in the ask |
-| `tests/risk-negation.test.ts` | cp-wkv1: an excluded section at the end of the task or an excluded-heading title never swallows the job description | 02-7 | mapped | description "Delete the production database" names delete, production under a Self-assessment-ended task and under seven excluded-heading titles; "Render it." previews low |
-| `tests/mandate-defaults.test.ts` | loadMandateDefaults falls back to the scaffold values when the file does not exist | 02-8 | redundant-unreachable | every reader runs in a pi session, and session start scaffolds the file with exactly these values first; 02-8 asserts the scaffolded values and a bare issue resolved from them |
-| `tests/mandate-defaults.test.ts` | scaffold writes data/mandate-defaults.json once with the conservative values; an operator edit survives | 02-8 | mapped | the first parent session creates the file (values, notes, actions, ask_on, exclude_paths); spend_usd 42 shows after the next session |
-| `tests/mandate-defaults.test.ts` | an existing home's dispatch_parallelism 1 survives scaffold and resolves as is | 02-8 | mapped | defaults_show shows 1 after the next session; the next bare issue has dispatch_parallelism 1 from home |
-| `tests/mandate-defaults.test.ts` | an invalid file is refused rather than guessed | 02-8 | mapped | job_cap 0 makes cp_mandate defaults_show an error naming job_cap |
-| `tests/mandate-defaults.test.ts` | defaults_set writes, rejects an unknown key or a non-number; token_ceiling binds; an unreadable file fails closed | 02-8 | mapped | cp_mandate defaults_set job_cap/ask_on/token_ceiling; bogus and not-a-number error; raise_tokens past 50000000 and under "{ not json" (ceiling 0) are refused |
-| `tests/mandate-defaults.test.ts` | formatMandateDefaults prints every field and its note | 02-8 | mapped | defaults_show text carries expiry_hours, spend_usd and the conservative note |
-| `tests/mandate-defaults.test.ts` | the ladder: explicit wins over project, project over home | 02-8 | mapped | spend_usd 99 explicit, job_cap and allowed_actions from the project, spend_tokens from home, each with its provenance |
-| `tests/mandate-defaults.test.ts` | expiry comes from expiry_hours when no explicit expiry is given | 02-8 | mapped | a bare issue expires issued_at + 8 h with provenance home |
-| `tests/mandate-defaults.test.ts` | an explicit expiry wins over a project expiry_hours | 02-8 | mapped | `dated` keeps 2030-01-01 with provenance explicit under a project expiry_hours 1 |
-| `tests/mandate-defaults.test.ts` | 'fix example-infra #17' resolves into one complete grant; show names every field's source | 02-8 | mapped | issue with projects and objective only: every provenance is home; cp_mandate show prints field sources and expiry_hours:home |
-| `tests/mandate-defaults.test.ts` | identical project overrides agree regardless of key order; a differing one falls through | 02-8 | mapped | agreeing overrides in a different key order apply; job_cap 6 on one project falls through to home; an override beside a project with none falls through to home; negative control NC-12 |
-| `tests/risk-warning.test.ts` | declaredRisk reads a clause-start risk in the header only; a named gate declares nothing | 02-9 | mapped | six declared-low headers preview no mandate_gate; eight named-gate, later-section, fenced and look-alike headers preview "would ask: risk:high"; negative control NC-13 |
-| `tests/risk-warning.test.ts` | recordedRisk: any high first, then the caller's, then the job's own low | 02-9 | mapped | a risk:high label beats an explicit low; an explicit high beats a risk:low label; a header high beats a planner low; a high label beats a defaulted pipeline low |
-| `tests/risk-warning.test.ts` | a pipeline risk is a record only when it was explicit or assessed, and says which half recorded it | 02-9 | mapped | defaulted and inferred pipeline lows still gate; explicit and planner-assessed lows warn "recorded by the pipeline" and "assessed by the planner" |
-| `tests/risk-warning.test.ts` | riskField routes a recorded high only, never a low, and never overrides the caller | 02-9 | mapped | preview routing: risk:high label and header high route [high, explicit]; risk:low label routes [low, defaulted]; the caller's explicit low wins the route |
-| `tests/risk-warning.test.ts` | inferredRiskGate: a recorded high gates, a recorded low warns on inferred-only, explicit/assessed highs gate | 02-9 | mapped | each recorded low's warning names its source (label, planner, pipeline, description header, task header, dispatch) and a cp_send promotion's names "recorded at dispatch"; each gated ask names its risk source |
-| `tests/risk-warning.test.ts` | #321: a classify-sourced high on an operator-chat grant warns with its word; bridge, schedule, ops, hard stops and recorded highs gate | 02-9 | mapped | the operator-chat grant warns "word: delete, migration"; explicit, planner and label highs and three hard stops gate under it; the bridge grant gates every undeclared text. Ops: 02-6 pins an ops job never exempt from the gate. The schedule half is the next row |
-| `tests/risk-warning.test.ts` | #321 (schedule half): a schedule fire grant, or a schedule run with no selected grant, still gates a keyword-only high | 02-9 | retained | No entry point creates either state any more: a native fire mints no grant, and a run with an `ask_on` snapshot is a legacy run still draining. Kept as a unit on real stores in `tests/schedule-authority.test.ts` ("#321: a legacy schedule fire grant or schedule run …", owned by P13). Dropping `!grant.schedule_fire`, or a schedule-run job's selection, fails it. 02-9 pins the operator-chat warning it contrasts with. Relabelled from redundant-unreachable by P2e (P2d review finding) |
-| `tests/risk-warning.test.ts` | riskkw-qno: audit tags and an unapproved named item do not warn; the gate and inference are unchanged | 02-9 | mapped | the three qno texts still gate with no recorded low and warn nothing under a risk:low label |
-| `tests/risk-warning.test.ts` | deleting a named source/doc file or dead code does not warn; a bare or data deletion still does | 02-9 | mapped | named-file, doc-file and dead-code deletions warn nothing; seven bare or data deletions warn "keywords only (delete"; `gh auth status` routes low |
-| `tests/risk-preapproval.test.ts` | hardStops: affirmative force push, publishing, deletion and credential acts stop; negated mentions do not | 02-10 | mapped | the noisy task names (credential handling, data deletion, force push, external publishing); "no force-push and never npm publish" dispatches; 02-9 pins rm -rf, auth.json and force push as hard stops; negative control NC-14 |
-| `tests/risk-preapproval.test.ts` | preapprovalCovers: named_jobs names ids; mandate_jobs covers the grant's ids or jobs created at/after issue in its projects | 02-10 | mapped | named ids proceed and `other` asks; the pre-approval written at issue covers `late`, created after it, and not `other`, created before |
-| `tests/risk-preapproval.test.ts` | a quote not found in operator messages is refused; a found one records who decided | 02-10 | mapped | cp_mandate preapprove_risk with an absent quote errors and writes nothing; the found one records the quote and its job ids |
-| `tests/risk-preapproval.test.ts` | a covered risk:high dispatch and promotion raise no escalation and append one audit row each, shown by cp_mandate show | 02-10 | mapped | `covered` dispatches and is promoted with no new question; rows [dispatch, promote] operator-delegated with quoteSha, never the quote; show prints both |
-| `tests/risk-preapproval.test.ts` | uncovered jobs, scripts and hard-stop text escalate exactly as without a pre-approval | 02-10 | mapped | `other` asks with no hard-stop evidence; a named script job is refused; `pushing` names "hard stop force push"; the noisy refusal carries categories only, no raw text or secret |
-| `tests/risk-preapproval.test.ts` | the selected serial grant still caps a pre-approved job, and a refusal writes no audit row | 02-10 | mapped | `serial` refuses its own pre-approved job "dispatch-parallelism 1 is full" and has no risk_preapproved rows |
-| `tests/risk-preapproval.test.ts` | a nonselected full serial grant cannot veto a pre-approved dispatch | 02-10 | mapped | the later project-wide serial grant is not selected; `negated` dispatches under the pre-approved grant |
-| `tests/risk-preapproval.test.ts` | a pre-approval never widens or outlives a grant, and issue writes it with the grant | 02-10 | mapped | a repeated pre-approval leaves `pushing` refused; `narrow` refuses "does not cover" an outside job; a revoked grant refuses; issue writes the quote |
-| `tests/risk-preapproval.test.ts` | a pre-approval never reaches a merge or a checkpoint | 02-10 | redundant-unreachable | `evaluateAuthority` (merge and checkpoint decisions) never reads risk_preapproval, so no consumer can hand it one; only the dispatch and promotion gates call `riskPreapproval`. 02-10 pins that the pre-approval reaches only dispatch and promote audit rows and that the result and show say "never merge". cp_decide passes no job risk to a checkpoint (`lookupJob`, `extensions/command-post/tools-mandate.ts`), so the unit's risk:high checkpoint refusal has no consumer; reported to the main session as a finding. Standing rule 3 (ask-0088e0332d00) |
-| `tests/risk-preapproval.test.ts` | cp_mandate preapprove_risk verifies the quote against operator messages before writing; show prints it | 02-10 | mapped | absent quote refused with nothing written; show prints "build all except N12" |
-| `tests/risk-preapproval.test.ts` | N3 (b): cp_mandate preapprove_risk accepts an operator quote with no es- id while a risk_high escalation is open | 02-10 | mapped | `covered`'s open ask, then the N3 quote pre-approves it |
-| `tests/risk-batch.test.ts` | tv8: overlapping askers use one selected grant; selected nonasking and requested-ID mismatch write nothing | 02-11 | mapped | overlap names the selected grant; md-000000 is refused as not the asking mandate; a selected grant that stops asking lends nothing; escalations.json stays byte-identical |
-| `tests/risk-batch.test.ts` | batchRiskHigh: every refusal writes nothing; a valid batch is one sorted approve/drop record and the per-job rows withdrawn | 02-11 | mapped | nine cp_escalate refusals (count, duplicates, unknown, ungated, named, overlap, mixed, approved) leave the file byte-identical; the valid batch is sorted, approve/drop, recommended drop, withdrew 2 rows, carries each row's evidence; approve dispatches; negative control NC-15 |
-| `tests/risk-batch.test.ts` | batchRiskHigh: mixed asking mandates and an already-approved job are refused with nothing written | 02-11 | mapped | "one asking mandate must cover every job"; "already approved: <job>" |
-| `tests/risk-batch.test.ts` | batchRiskHigh: the batch is raised before any withdraw, so a failing withdraw leaves it open | 02-11 | redundant-unreachable | a failing withdraw needs an injected EscalationStore; no consumer can make withdraw fail on demand. 02-11 pins the ordering's outcome: the batch is open and both per-job rows withdrawn, and only the batches and the unbatched ask stay open. Standing rule 3 (ask-0088e0332d00) |
-| `tests/mandate-selection.test.ts` | active selection is named-first, earliest-issued, then code-point ID, in every permutation | 02-12 | mapped | `first` previews and dispatches under md-a994c5 over md-b994c5 (same second) and md-000001 (later); an unnamed job takes the project-wide md-000000; negative control NC-16 |
-| `tests/mandate-selection.test.ts` | coverage and standing precede precedence, including schedule-only grants | 02-12 | mapped | six earlier grants that do not cover, are paused, expired or schedule-only leave the project-wide grant selected; a scheduled job speaks only through its schedule's grant |
-| `tests/mandate-selection.test.ts` | latest-speaking fallback keeps input-order ties; silent/none never acquire authority | 02-12 | mapped | same-second refusing grants: the later in file order is named and refuses; a paused and an other-project grant give no mandate |
-| `tests/mandate-supplement.test.ts` | full named grant yields to supplement for dispatch, advice and implement in either order | 02-12 | mapped | the preview (advice) and the dispatch select md-supp01 once md-older1 is full; cp_decide reads the supplement's allowed_actions; negative control NC-17 |
-| `tests/mandate-supplement.test.ts` | cpNext partitions the incident job under the same supplement in either order | 02-12 | mapped | cp_next through the parent: the supplement's view recommends dispatching `target`, and no other grant's view lists it ready |
-| `tests/mandate-supplement.test.ts` | ineligible supplement leaves the original job-cap refusal in every order | 02-12 | mapped | nine ineligible variants (both full, project-wide, kind excluded, operator/cap paused, revoked, expired, schedule-only, other job) leave md-older1 refusing "job cap 3 reached" |
-| `tests/mandate-supplement.test.ts` | under-cap original, omitted jobs, and first eligible supplement preserve deterministic order | 02-12 | mapped | room under md-older1 keeps three dispatches; md-supp02 before md-supp03; a full supplement is skipped for md-supp05 |
-| `tests/mandate-supplement.test.ts` | cap-paused original does not shadow active supplement in either order | 02-12 | mapped | `shadowed` previews under md-supp06 |
-| `tests/mandate-supplement.test.ts` | current job is excluded from selection headroom; accounting and continuations stay stable after re-dispatch | 02-12 | mapped | the cap-1 supplement dispatches its own job, keeps it for the cp_send promotion, and shows "job cap: 1 / 1"; an operator cap raise returns selection to the original |
-| `tests/mandate-supplement.test.ts` | selected supplement owns risk approval and audit (approved=false/true) in either order | 02-12 | mapped | md-supp08's ask names it, not md-older1; md-supp09's pre-approval dispatches with its own audit row and none on md-older1; a hard stop still asks |
-| `tests/mandate-supplement.test.ts` | selected supplement denial cannot fall back to weaker policy in any permutation | 02-12 | mapped | parallelism, allowed_actions and plan_approval: md-supp10's full slot refuses `weak` despite md-weak01, and cp_decide refuses under its allowed_actions and ask_on, leaving the checkpoint pending. The other three causes are the next two rows |
-| `tests/mandate-supplement.test.ts` | selected supplement denial (path and subsystem exclusion) cannot fall back to weaker policy | 02-15 | mapped | A pipeline's auto-decided plan checkpoint carries the task text that exclusions read. 02-15 issues a strict named grant (earliest) and a later weak grant naming the same ship: src/legacy (path), billing (subsystem) and services/api/.env (scaffold exclusion) each leave the checkpoint pending, and the weak grant decides nothing. P2e replaced P2d's unit in `tests/decide.test.ts` with this (P2d review finding) |
-| `tests/mandate-supplement.test.ts` | selected supplement denial (spend cap) cannot fall back to weaker policy | 02-12 | redundant-unreachable | Every consumer sweeps first: cp_decide, auto-decide and dispatch. The sweep cap-pauses the supplement, so "spend cap reached" never reaches a judgement, and the later grant then decides. That outcome is the cap-paused-yields rule 02-12 pins (`shadowed` under md-supp06). Reported to the main session as a finding. Standing rule 3 (ask-0088e0332d00) |
-| `tests/mandate-usage.test.ts` | tokens: one 80% warning, one cap-pause notice, never repeated across re-observation or a revived worker | 02-13 | mapped | warn-tokens then token-cap; paused once with one escalation; the worker is still waiting. After the cap, a bounded-recovery relaunch and a cp_revive relaunch each send a message that adds no notice or escalation. With the project-wide grant revoked, a cp_send promotion of the idle worker is refused with "paused (token_cap) … raise it yourself: cp_mandate raise_tokens" (02-4 pins the dispatch's) |
-| `tests/mandate-usage.test.ts` | cache reads never count toward the token cap; the notice totals are non-cached | 02-13 | mapped | a 50M-cache-read turn shows 7000 non-cached and notices nothing; the cap notice reads "used 10100 / 10000 non-cached tokens"; negative control NC-18 |
-| `tests/mandate-usage.test.ts` | the parent raises a token cap itself: the grant resumes, the job continues, and the next round notices afresh | 02-13 | mapped | cp_mandate raise_tokens in a real parent: active again with its reason; warn-tokens@20000 and token-cap@20000 follow once each |
-| `tests/mandate-usage.test.ts` | at the token ceiling, the cap is the operator's: budget_exhausted is raised once | 02-13 | mapped | token_ceiling 1000 set through cp_mandate defaults_set; the cap notice says TOKEN CEILING and a second budget_exhausted ask is raised; 02-4 pins the raise past the ceiling refused |
-| `tests/mandate-usage.test.ts` | a USD cap is always the operator's, even with tokens to spare | 02-13 | mapped | priced mock model: $1 cap pauses spend_cap with one budget_exhausted ask |
-| `tests/mandate-usage.test.ts` | usd crosses independently of tokens | 02-13 | mapped | warn-usd at $0.85, then cap at $1.05, with tokens far under their cap |
-| `tests/mandate-usage.test.ts` | an old grant the parent already capped says nothing; the replacement grant's notices are its own and survive teardown | 02-13 | mapped | the capped grant's later turns add nothing; a project-wide grant over the job has no notices of its own; notices carry no job keys and survive the forced teardown |
-| `tests/mandate-usage.test.ts` | a project-wide grant issued over history and an in-flight job counts only what accrues after issue, live | 02-13 | mapped | issued on the live view mid-run: usage_baseline 10100 for the in-flight job, then "10001 / 30000 non-cached tokens" and "job cap: 1 / 10" |
-| `tests/mandate-usage.test.ts` | cp_mandate and cp_decide read the live view, so the baseline and every cap check see the same usage | 02-13 | redundant-unreachable | a source scan; the e2e parent is its own process and owns no live run, so no e2e parent can show it. Kept verbatim in `tests/structure.test.ts`; 02-13 pins the outcome on the live view the tool passes (baseline 10100, show 10001). Standing rule 3 (ask-0088e0332d00) |
-| `tests/mandate-usage.test.ts` | every CommandPost spawn path (dispatch, revive, bounded recovery) shares one observer set | 02-13 | mapped | notices fire from the dispatched worker, the bounded-recovery relaunch (worker_revived) and the cp_revive relaunch, each counted once |
-| `tests/capacity.test.ts` | admin capacity is numeric per provider, uses only admin key and redacts source | 02-14 | mapped | "capacity=admin:mock=6,other=0"; every gateway call is a GET with x-api-key and no Authorization; no preview carries the key |
-| `tests/capacity.test.ts` | malformed, missing provider, disabled and timeout use fleet counts; no key preserves order | 02-14 | mapped | six malformed snapshots fall back with "reason=capacity response unreadable"; a timeout falls back; with no key there are no capacity scores and mock/a stays first |
-| `tests/capacity.test.ts` | 401 uses fleet counts and names the rejected admin credential | 02-14 | mapped | "capacity=fleet:mock=-2,other=0 reason=capacity auth rejected" and other/b; negative control NC-19 |
-| `tests/capacity.test.ts` | unreadable or missing fleet means unknown, never a fabricated zero | 02-14 | redundant-unreachable | CommandPost always builds the reader with its own fleet store, and the unit's no-key reader returns unknown before any fleet read. 02-14 pins the no-key outcome: no capacity scores and the rubric order stands. Standing rule 3 (ask-0088e0332d00) |
-| `tests/quota.test.ts` | loadCapacityConfig reads <home>/.pi-command-post/data/capacity.json, never a top-level data/ (cp-u3i2) | 02-14 | mapped | a legacy top-level data/capacity.json alone reaches no gateway and reads "quota unavailable: unreadable" |
-| `tests/quota.test.ts` | quota filters accounts, selects the lowest maximum, and coalesces cached reads | 02-14 | mapped | of nine accounts only 1, 5 and 6 are read; mock's 7d 86 is tight and steers to other/b; two concurrent routes share one snapshot |
-| `tests/quota.test.ts` | an unreported 5h window keeps the account on 7d alone; a real 0/0 stays real | 02-14 | mapped | "5h=n/a,7d=11" and "5h=0,7d=0" |
-| `tests/quota.test.ts` | quota accepts a confirmed full page and refuses incomplete or uncertain lists | 02-14 | mapped | nine count/total pairs; uncertain lists read no account usage |
-| `tests/quota.test.ts` | unsupported shapes and API key accounts are unknown, custom thresholds apply | 02-14 | mapped | 95/90 thresholds leave 7d 86 untight; an apikey account and a tokens-only reply are unknown |
-| `tests/quota.test.ts` | quota thresholds include their boundary and invalid percentages stay unknown | 02-14 | mapped | 90 (5h) and 85 (7d) are tight, 89/84 are not, 101 is unknown; negative control NC-20 |
-| `tests/quota.test.ts` | quota names failures without secrets and makes no call without a key | 02-14 | mapped | "auth rejected", "unreadable", "timeout" with the key in every reply body and never in a preview; no key: "quota=off:no admin key" and no request |
-| `tests/quota.test.ts` | quota refreshes after 60 seconds and rejects malformed configuration before fetching | 02-14 | mapped | 4 calls at 59.999 s, 8 at 60 s; ten malformed configs reach no gateway |
-| `tests/quota.test.ts` | quota has a total timeout even when fetch ignores the abort signal | 02-14 | mapped | an accounts reply that never settles and ignores abort gives "quota unavailable: timeout" |
-| `tests/mandate.test.ts` | tv8: selected named grant alone binds risk, job cap and parallelism; overlapping coverage still counts | 02-12 | mapped | the named md-a994c5 is selected over the project-wide grant; md-supp10's full slot refuses `weak` (parallelism_full) despite md-weak01; md-supp08's risk ask names it, not md-older1; md-supp09's pre-approval is audited on it alone; a job counts toward every grant covering it ("job cap: 1 / 1"); negative control NC-16 |
-| `tests/mandate.test.ts` | tv8: selected checkpoint denial is final in either input order | 02-12 | mapped | allowed_actions, plan_approval and parallelism through cp_decide under md-supp10 (02-12); path and subsystem exclusions under the strict grant, with a later weak grant lending nothing, through a pipeline's checkpoint (02-15); an unnamed risk:high stays pending (02-15) |
-| `tests/mandate.test.ts` | reviewer preference round-trips and changes only the setting, including expired grants | 02-16 | mapped | cp_mandate reviewer_model sets mock/b and clears it ("reviewer model: unset"); an expired grant takes mock/b and stays expired |
-| `tests/mandate.test.ts` | cp_mandate forwards issue reviewer preference and set/clear; null on issue refuses | 02-16 | mapped | issue with reviewer_model mock/a stores it; reviewer_model null on issue is refused "null only clears an existing grant"; reviewer_model with no value is refused |
-| `tests/mandate.test.ts` | cp_mandate is parent-only | 02-16 | redundant-unreachable | no worker can hold cp_mandate: profile validation refuses every `WORKER_FORBIDDEN_TOOLS` entry (`tests/contracts.test.ts`, `tests/profiles.test.ts` and the contracts-exports golden, all exceptions). 02-16 pins the parent surface that holds it. Standing rule 3 (ask-0088e0332d00) |
-| `tests/mandate.test.ts` | resolveMandateJobIds expands all jobs created in this turn | 02-16 | mapped | two cp_job creates, then issue with the sentinel: job_ids are both ids; the sentinel beside an id is refused "cannot mix with job ids"; negative control NC-22 |
-| `tests/mandate.test.ts` | cp_mandate issue stores expanded this-turn job ids | 02-16 | mapped | the stored grant's job_ids equal the turn's created ids; negative control NC-22 |
-| `tests/mandate.test.ts` | evaluateAuthority: permitted / not-permitted matrix | 02-15 | mapped | permitted with clause "allowed_actions includes implement for project demo", path exclusion, gate flags and an unnamed risk:high (02-15); an unnamed job (02-1); expired and paused grants (02-2); spend cap (02-13, the USD cap pause); ask_on plan_approval (02-12, cp_decide refused) |
-| `tests/mandate.test.ts` | auto-decision journals the clause; revoke leaves pending pending | 02-15 | mapped | decided_by mandate:<id>, the clause as note, decisions [ship]; a revoked grant speaks for nothing (02-2) and cp_decide under a revoked grant is refused "no active mandate covers" (02-17) |
-| `tests/mandate.test.ts` | cp-7re9: autoDecideCheckpoint in a denied project leaves the checkpoint pending and journals nothing; the grant keeps its standing | 02-15 | mapped | deny_projects demo: pending, no decision journaled, the grant active; with the key removed the next advance decides it; negative control NC-21 |
-| `tests/mandate.test.ts` | cp-7re9: issue honours deny_projects and scope_policy, and a malformed mandate-defaults.json refuses naming the file | 02-16 | mapped | cp_mandate issue under deny_projects, scope_policy named_jobs_only and "{ not json" is refused each time; the existing grant stays active |
-| `tests/mandate.test.ts` | no-id cp_mandate show lists active and paused only; statuses lists revoked and expired; show(id) still returns a revoked grant | 02-16 | mapped | show lists the active and the paused grant, not the revoked one; statuses [revoked] lists only it; show by id prints "<id>: revoked" |
-| `tests/mandate.test.ts` | a raised gate flag is never mandate-decided | 02-15 | mapped | a gate verdict with destructive_scope or blocking_unknowns raised leaves the checkpoint pending with nothing journaled |
-| `tests/mandate.test.ts` | hitting the spend cap pauses, refuses a new dispatch, and escalates once | 02-13 | mapped | priced mock model: the $1 cap pauses the grant spend_cap with one budget_exhausted ask; a cap-paused grant refuses the next dispatch with its raise hint (02-4) |
-| `tests/mandate.test.ts` | MandateStore writes every instant it is handed at second precision (2026-10-06T00:05Z) | 02-16 | retained | moved verbatim to `tests/decide.test.ts` (owned by P10): cp_mandate and the sweeps hand the store no millisecond instant, so restoring the old handed-instant bug cannot fail an e2e. 02-16 pins whole-second issued_at |
-| `tests/mandate.test.ts` | MandateStore.sweep refuses an invalid timestamp | 02-16 | retained | the last assertion of the second-precision unit, moved verbatim to `tests/decide.test.ts` (owned by P10): every caller hands the sweep an isoTimestamp or nothing. 02-16 pins the sweep that expires a grant and closes its ask |
-| `tests/mandate.test.ts` | a new grant counts only usage accrued after issue; only a zero cap is refused, and nothing is written | 02-13 | mapped | a grant issued over an in-flight job records usage_baseline 10100 and counts only later usage; a zero USD cap is refused with no grant written (02-16) |
-| `tests/mandate.test.ts` | a grant with no usage_baseline keeps the lifetime rule | 02-13 | retained | moved verbatim to `tests/decide.test.ts` (owned by P10): a legacy grant shape that only an old on-disk file carries; 02-13 pins the baselined count beside it |
-| `tests/mandate.test.ts` | a project-wide grant: history never fills the job cap; new dispatches and pre-existing jobs that spend under it do | 02-13 | mapped | issued mid-run over history: "job cap: 1 / 10" counts only the job spending after issue; held jobs count (02-5); a named grant counts every job it names ("job cap: 1 / 1", 02-12) |
-| `tests/mandate.test.ts` | projectWideCapWarning: a project-wide grant is warned that its job cap counts other mandates' jobs; a named grant is not | 02-16 | mapped | the project-wide issue says "warning: md-… is project-wide, so its job cap 3 counts every job"; the named issue carries no warning |
-| `tests/mandate.test.ts` | a shrinking reading on one baselined job never funds another job's growth | 02-13 | retained | moved verbatim to `tests/decide.test.ts` (owned by P10): no scenario lowers a baselined job's usage reading; 02-13 pins the baselined count |
-| `tests/mandate.test.ts` | worker accrual is never masked by a reviewer baseline | 02-13 | retained | moved verbatim to `tests/decide.test.ts` (owned by P10): no scenario runs a reviewer before a grant and a worker after it; 02-13 pins worker usage and 02-15 gate spend in show |
-| `tests/mandate.test.ts` | the job cap limits new dispatches only: at 3/3 the grant stays active and its covered jobs keep review, repair and merge | 02-17 | mapped | cap 1: `extra` is refused "job cap 1 reached — no new dispatch", the grant stays active, and `capped` keeps its promotion, repair and a cp_decide diff decision |
-| `tests/mandate.test.ts` | a grant paused on job_cap before this rule resumes on the next save | 02-17 | retained | moved verbatim to `tests/decide.test.ts` (owned by P10): a legacy pause that only an old on-disk file carries, since nothing writes pause_reason job_cap any more; 02-17 pins that a full job cap never pauses the grant |
-| `tests/mandate.test.ts` | save itself refuses a token cap above the home's token_ceiling, naming defaults_set as the fix; USD never moves | 02-4 | mapped | cp_mandate raise_tokens past the ceiling is refused naming defaults_set; the USD cap never moves |
-| `tests/mandate.test.ts` | an operator issue above token_ceiling is refused, naming defaults_set; it succeeds once the operator raises the ceiling | 02-16 | mapped | spend_tokens 200000000 is refused naming "cp_mandate defaults_set token_ceiling 200000000"; after that defaults_set the same issue is active |
-| `tests/mandate.test.ts` | revoke, a replacing grant and supersede_stale close a mandate's open escalations as superseded, with no answer | 02-16 | mapped | revoke supersedes its own ask ("<id> was revoked", no answer); supersede_stale closes a title-only legacy ask; a new budget question files its own record; the replacing grant: 02-3 |
-| `tests/mandate.test.ts` | cp_awaiting list output drops an escalation once its mandate is revoked | 02-16 | mapped | cp_awaiting list names the ask, then omits it after cp_mandate revoke |
-| `tests/mandate.test.ts` | expiry supersedes the grant's open escalations on the sweep that expires it | 02-16 | mapped | an expired grant's ask reads "<id> expired" after the sweep |
-| `tests/mandate.test.ts` | gate, diff-review and quality-panel reviewer spend counts toward the covering grant's USD and token caps, non-cached | 02-15 | retained | moved verbatim to `tests/decide.test.ts` (owned by P10): no scenario starts a diff-review or quality-panel run, so reviewer spend alone crossing the USD cap (spend_cap, a refused diff) is pinned there. 02-15 pins the gate reviewer's tokens against the grant ("1230xx / 10000000 non-cached tokens"); cache reads: 02-13, NC-18 |
-| `tests/mandate.test.ts` | assertDispatchAllowed: serial limits fresh dispatches by working jobs; a same-worker promotion never takes the slot | 02-17 | mapped | serial grant: a working `first` refuses `second`, and `first`'s promotion proceeds; a held job holds no slot (02-5, NC-05) |
-| `tests/mandate.test.ts` | 4B2-T0: the parallelism refusal carries code parallelism_full on a real MandateError; a job-cap refusal has no code | 02-17 | mapped | the dispatch refusal has code parallelism_full; the job-cap refusal has none |
-| `tests/mandate.test.ts` | a revoked grant predating dispatch has no standing for review, repair or merge; revocation after dispatch still refuses | 02-17 | mapped | a grant revoked before `before` dispatched is silent and its repair proceeds; one revoked after `after` dispatched refuses the repair ("is revoked … no repair") and its diff decision |
-| `tests/mandate.test.ts` | grantStanding: the complete status x use x in-flight matrix | 02-17 | retained | moved verbatim to `tests/decide.test.ts` (owned by P10): 216 cells; 02-2 and 02-17 drive representative cells through dispatch, cp_send and cp_decide |
-| `tests/mandate.test.ts` | after expiry: in-flight review, repair, same-kind promotion and failed-job continuation go on; fresh dispatch and kind changes never | 02-17 | mapped | after expiry `fresh` and the risk:high `risky` are refused with no risk ask; `old`'s promotion and repair continue; a newer active grant speaks for `fresh`; negative control NC-23. Kind changes and the failed column: the retained matrix |
-| `tests/mandate.test.ts` | after expiry: risk:high still gates the continuation; a newer expired grant without repair refuses it; a revoked-only project never refuses dispatch | 02-17 | retained | moved verbatim by P3 (P2e review) to `tests/decide.test.ts` (owned by P10), test of the same name: no scenario promotes a risk:high job under an expired grant, stacks two expired grants, or dispatches beside only a revoked grant |
-| `tests/mandate.test.ts` | a reviewer start keeps its pre-rule path under an expired grant: no fleet record, review not allowed, cap reached all pass; paused and revoked still refuse | 02-17 | retained | moved verbatim to `tests/decide.test.ts` (owned by P10): a cp_review start needs a pushed PR head no authority scenario has; 02-17 pins the expired grant's repair and diff decision |
-| `tests/mandate.test.ts` | an expired grant decides diff and merge for an in-flight job, never a ship; every other rule still binds | 02-17 | mapped | cp_decide approves `old`'s diff under the expired grant ("expired grant continues in-flight") and refuses its ship "has expired"; 02-17 fails on either if the expiry rule is reverted. Merge and the other rules: the retained row below |
-| `tests/mandate.test.ts` | an expired grant decides diff and merge for an in-flight job: merge, risk:high, caps, ask_on merge, exclusions, allowed actions and multi-grant ordering | 02-17 | retained | moved verbatim by P3 (P2e review) to `tests/decide.test.ts` (owned by P10), test "an expired grant decides diff and merge for an in-flight job, never a ship; every other rule still binds": no scenario stacks grants on an expired continuation |
-| `tests/mandate.test.ts` | a project-wide grant covers follow-on jobs in the project; explicit job_ids still narrow it | 02-1 | mapped | a scoped grant speaks only for the jobs it names; an unnamed job takes the project-wide grant (02-12) |
-| `tests/mandate.test.ts` | cp_escalate caps option text and preserves the original consequence | 02-16 | mapped | a 300-character consequence is stored as 200 ending "…", the original kept, and the result names "trimmed fields: options[0].consequence" |
-| `tests/mandate.test.ts` | cp_mandate objective ref is verified into a job but never pins the grant; explicit job_ids and sentinel still narrow | 02-16 | mapped | "fix issue #17" mints a job noted 'issue open "real bug"' and the grant has no job_ids; the sentinel grant keeps its ids |
-| `tests/mandate.test.ts` | cp_mandate issue: an objective issue ref that gh reports as a PR refuses before any grant is written | 02-16 | mapped | "fix issue #18" (an open PR) is refused "is a pr, open" with one conflicting_acceptance ask; only the two good issues wrote a grant |
-| `tests/mandate.test.ts` | cp_mandate issue refuses an archived project before any grant is written | 02-16 | mapped | an archived `attic` is refused "archived project(s) attic" with no grant written |
-| `tests/mandate.test.ts` | a revoked grant that was cap-paused never refuses dispatch; the newer active grant covering the job decides | 02-17 | mapped | `shadow`'s spend-capped, revoked grant keeps pause_reason spend_cap and the newer grant dispatches it |
-| `tests/mandate.test.ts` | token caps count non-cached tokens only, past the issue-time baseline, in evaluation and in show | 02-13 | mapped | 50M cache reads count nothing; show reads "10001 / 30000 non-cached tokens" past baseline 10100; negative control NC-18 |
-| `tests/mandate.test.ts` | a token cap is the parent's to raise within the ceiling; the USD cap never is | 02-4 | mapped | raise_tokens resumes the grant inside the ceiling and is refused past it; the USD cap never moves (02-4, 02-13) |
-| `tests/mandate.test.ts` | path and subsystem exclusions match original-task text | 02-15 | mapped | tasks naming src/legacy, billing and services/api/.env leave the checkpoint pending under the selected grant |
-| `tests/mandate.test.ts` | high risk is permitted only when ask_on omits it and the objective names the job | 02-15 | mapped | risk:high with ask_on [merge] and an objective that does not name the ship stays pending; once the objective names it, it is decided "risk high named in objective" |
-| `tests/mandate.test.ts` | assertDispatchAllowed: risk:high under ask_on refuses a direct dispatch and raises one escalation; an operator-quoted decide then lets it proceed | 02-3 | mapped | each job gets its own ask; the approved one dispatches, the other stays refused |
-| `tests/mandate.test.ts` | assertDispatchAllowed: risk:high answered 'drop' stays refused — drop is not authorization | 02-3 | mapped | `dropped`'s ask answered drop; its next dispatch is still refused under ask_on |
-| `tests/mandate.test.ts` | assertDispatchAllowed (6B-T3): one approved batch authorizes every listed job, promotion included; drop refuses them all; an open batch is named, never duplicated | 02-11 | mapped | an approved batch dispatches its jobs; an already-batched job is refused naming the open batch; drop: 02-3 pins a dropped answer staying refused |
-| `tests/mandate.test.ts` | assertDispatchAllowed: risk:low and a mandate without risk:high in ask_on dispatch untouched | 02-9 | mapped | a recorded low previews no mandate_gate; a grant with ask_on [] dispatches its job (02-1) |
-| `tests/mandate.test.ts` | wouldAskRiskHigh: dry-run predicate matches the gate without raising anything | 02-9 | mapped | the dispatch preview says "would ask: risk:high" where the dispatch asks, and raises nothing |
-| `tests/mandate.test.ts` | risk:high gate: read-only planning is exempt; ship, writing profiles, promotions and scripts still ask | 02-6 | mapped | a read-only planner job under ask_on risk:high previews no mandate_gate, and an ops job never is exempt; scripts and promotions still ask (02-10) |
-| `tests/mandate.test.ts` | evaluateAuthority: the scaffolded **/.env* exclusion actually refuses .env paths | 02-15 | mapped | a task naming services/api/.env stays pending under the scaffolded exclude_paths; the clean task, with no .env path, is decided |
-| `tests/mandate.test.ts` | resolveMandateObjectiveRef: an open issue named as a bare #N mints one job with the full url | 02-16 | mapped | "fix issue #17" mints https://github.com/o/infra/issues/17, "#33" mints issues/33, and "fix #17 again" reuses the #17 job |
-| `tests/mandate.test.ts` | resolveMandateObjectiveRef: a merged PR named as #N refuses and escalates once | 02-16 | mapped | "fix #19" (a merged PR) is refused "is a pr, merged" twice; one conflicting_acceptance ask names it |
-| `tests/mandate.test.ts` | resolveMandateObjectiveRef: no bare ref, more than one project, or a non-GitHub remote is quietly undefined | 02-16 | mapped | "fix #17" over two projects and on demo's local remote issue grants, call no gh and mint nothing |
-| `tests/mandate.test.ts` | extractBareIssueRef: a PR-labelled #N is prose, never issue intake; a real bare ref beside it still resolves | 02-16 | mapped | the eight PR-labelled texts and the two APR texts call no gh; "fix #36 despite PR #7" and "despite PR #7, fix #37" verify #36 and #37, never #7; "see o/infra#21" mints issues/21 |
-| `tests/mandate.test.ts` | extractBareIssueRef: only explicit issue-task contexts count; incidental status numbers do not (b-qbi.2) | 02-16 | mapped | the three incidental texts (#220, "cp-jxqp #3 of 5") call no gh; each of the eight explicit forms verifies its own number once, and "after #220 merged, fix #35" verifies #35 |
-| `tests/mandate.test.ts` | resolveMandateObjectiveRef: incidental #N never verifies; fix issue #N verifies exactly once | 02-16 | mapped | gh's log has no call for prose and exactly one per new ref; an existing issue job is reused unverified |
-| `tests/mandate.test.ts` | resolveMandateObjectiveRef: an explicit issue context naming a PR still refuses as wrong kind | 02-16 | mapped | "fix issue #18" is refused "is a pr, open" |
-| `tests/mandate.test.ts` | resolveMandateObjectiveRef: PR prose never calls verifyRef, creates nothing, raises nothing | 02-16 | mapped | thirteen prose objectives leave gh's log, the ledger and the open asks unchanged |
-| `tests/mandate.test.ts` | schedlater S3: covers matrix — a schedule grant covers only its own schedule's jobs, any other grant no scheduled job | 02-12 | mapped | schedule-only grants leave the project-wide grant selected; a scheduled job speaks only through its schedule's grant |
-| `tests/mandate.test.ts` | S3 (T3.1): issue takes a code-only id and schedule_fire; a taken or unsafe id is refused; cp_mandate exposes neither | 02-16 | redundant-unreachable | no caller passes an id or schedule_fire: no fire mints a grant (`tests/schedule-grant.test.ts`, "PR4: no fire mints a grant"), and cp_mandate has no such parameter. 02-16 pins cp_mandate issue minting its own md- id. Standing rule 3 (ask-0088e0332d00) |
 | `tests/actions-ci.test.ts` | paths: exact head, explicit repo or gh placeholders, attempt-bound jobs; malformed ids refused | 05-1 | retained | verbatim in `tests/main-ci-retained.test.ts`: malformed ids do not reach cp_integrate's validated Actions consumer; 05-1 pins the exact-head path |
 | `tests/actions-ci.test.ts` | readActionsCi: normalizes runs with identity, event, actor and their attempt's jobs and steps | 05-11 | mapped | nc-normalization: normalized actor, identity, jobs and steps produce the own red latch |
 | `tests/actions-ci.test.ts` | readActionsCi: zero runs is an observation; two runs with one workflow name both survive | 05-1 | mapped | 05-1's 101 runs all share the workflow name `ci`; collapsing them by name loses run 101 and "ci: failed … (run 101 …)" fails. Zero runs: 05-2 asks for workflows only after an empty runs read |
@@ -945,12 +753,6 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/held-release.test.ts` | 4B1-T3(b): a shutdown that rejects leaks no reservation and leaves nothing stopping | S06-6 | retained | tests/held-release-retained.test.ts preserves injected shutdown rejection; the real RPC shutdown cannot be made to throw the supplied fake error through a public request. |
 | `tests/held-release.test.ts` | 4B1-T3(c): busy flips between selection and re-check — refused, nothing shut down or journaled | S06-6 | retained | tests/held-release-retained.test.ts preserves the getter that flips busy on its second read; production has no await between selection and recheck, so an external request cannot inject that getter race. |
 | `tests/held-release.test.ts` | wasReleased: the last lifecycle marker decides | S06-6 | mapped | cp_send restores the released author and records worker_revived; another send reaches that revived process with unchanged pid, while ordinary workers do not need restoration. review-lifecycle returning false fails sending to the released author. |
-| `tests/review-tool.test.ts` | (3) valid round-trip plus closed schema rejects injected next | — | retained | tests/review-tool-retained.test.ts; cp_review accepts no caller-supplied DiffVerdict; defensive closed-schema contract; real round-trip also pinned by T01 |
-| `tests/review-tool.test.ts` | (5) helper refuses injected negative file count | — | retained | tests/review-tool-retained.test.ts; cp_review validates stored and generated counts before payload construction; no verdict-input argument |
-| `tests/review-tool.test.ts` | (6) combined raw observation, revise receipt and materialized diff input | — | retained | tests/review-tool-retained.test.ts; live cp_review returns wait, then finishes asynchronously; cached and spawn-failure helper paths have no observation; T03 additionally pins reachable materialized subject leakage |
-| `tests/review-runs.test.ts` | (2) duplicate registry start throws with record; independent surfaces coexist | — | retained | tests/review-runs-retained.test.ts; cp_review preflight rejects before ReviewRuns.start; gate/quality reuse pending waits, so no product entry exposes ReviewRunsError.pending; public duplicate refusal/coexistence also pinned by A/R11 |
-| `tests/review-runs.test.ts` | (7) successful finish returns undefined wake and clears slot | — | retained | tests/review-runs-retained.test.ts; CommandPost.diffReview, gate and quality supply concrete wake-returning finishers; no product entry accepts a custom ReviewAttempt.finish returning undefined on success |
-| `tests/review-runs.test.ts` | (14) live pid, existing decision and absent finisher leave markers alone | — | retained | tests/review-runs-retained.test.ts; CommandPost.sweepOrphanReviews always supplies review/gate/quality finishers; unknown legacy surfaces fail validation, so no entry accepts an incomplete finisher map; O also pins public live/decided skips |
 | `tests/integrate.test.ts` | S09 declaration 41: pending head | 05-S09-1 | mapped | NC-2: advance != wait; S09 ledger. |
 | `tests/integrate.test.ts` | S09 declaration 42: workflows present | 05-S09-1 | mapped | NC-2: advance != surface. |
 | `tests/integrate.test.ts` | S09 declaration 43: older branch run | 05-S09-1 | mapped | NC-1: surface != wait. |
@@ -1621,26 +1423,6 @@ diff --git a/src/pr-bind.ts b/src/pr-bind.ts
 | NC-01 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-1 | NC-01-green | e5cc55b97d22e820228a709e858fbe2f7294fcc8dce00aa980f63982c09660f3 | wake observation names run 2 (skipped), not run 6 | pass |
 | NC-02 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-1 | NC-02-integrate | 0a2c3b3942c839731d201a0a07d8ddf2c6bf6ea2d6163d5a00430568bb3d6e86 | the ci fact does not end with (run 6 …/actions/runs/6) | pass |
 | NC-03 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-2 | NC-03-host | 0bb48b55ddc16d72b68109e136da58d310bb118ebbe641f411e9ba7980ef6ac0 | the enterprise ci fact links ghe.example.com/…/actions/runs/16 | pass |
-| NC-04 | `tests/budgets.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-4 | NC-04-budgets | b8262869069a8a4a19ff794bf37b176539f3574d54373523f6e0b03804229851 | spawn_cap 11 written after start does not admit `overflow` (spawn cap reached (10/10 workers)) | pass |
-| NC-05 | `tests/mandate.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-5 | NC-05-held-slot | 8727a7604f0ea2e0dfd10cdb6ba3cc800ea166fac472807ab43590eb6423fec3 | `second` refused "dispatch-parallelism 1 is full" while the only other job is held | pass |
-| NC-06 | `tests/mandate.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-5 | NC-06-held-spend | 6443d0c2c2740f69963160711b17d5578e859d4476d0900a5133f5426bbd8720 | the grant never pauses on token_cap: held + second spend is not counted | pass |
-| NC-07 | `tests/ops-jobs.test.ts` | de411ad5bffa75690f8f546a2d8ea50e0354910d | 02-6 | NC-07-ops-gate | d6f1dd6c5c61ba81bbd501bd8a93a96226fef5f00a69e5780ac3e21444ac8ff7 | `risky pull` previews no mandate_gate, expected "would ask: risk:high" | pass |
-| NC-08 | `tests/ops-jobs.test.ts` | de411ad5bffa75690f8f546a2d8ea50e0354910d | 02-6 | NC-08-ops-risk | 46a5538a435ffea34d00a22229d29079c987fbe4c764f0f1970ff7dd8092baa7 | a deploy previewed with risk low routes [ops, low], expected [ops, high] | pass |
-| NC-09 | `tests/ops-jobs.test.ts` | de411ad5bffa75690f8f546a2d8ea50e0354910d | 02-6 | NC-09-ops-lease | 693734ac1563a6fca17c1fe9be919aabf92cbe8719238a7ba2de1c4651df0e62 | `wanting` dispatches beside a live holder of resource:tg-session (missing expected rejection) | pass |
-| NC-10 | `tests/risk-negation.test.ts` | b63fe8457e763e7e4a2b5c31b1be6c12cc235fe7 | 02-7 | NC-10-negation | ce33b2293ec4566920d332b54dccf06d83a2f713f86fb698718f758befca78bb | "no migration" names the risk word migration, expected none | pass |
-| NC-11 | `tests/mandate.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-5 | NC-11-held-jobs | b0cd9e923ba17aa39b1e02d55a94369572668e0fcab68794f9371a5b27dad546 | `third` passes the job cap 2 with the held job uncounted and is refused only by dispatch-parallelism | pass |
-| NC-12 | `tests/mandate-defaults.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-8 | NC-12-override-order | 330071f2749a42ddfd58350bdaf005f9e7e34e5063a20f1e71428b56e74366a0 | two agreeing overrides in a different key order fall through to home: job_cap 9, home allowed_actions | pass |
-| NC-13 | `tests/risk-warning.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-9 | NC-13-low-warning | 0fd26f8d54064ac457da570839006c37ca82a3601f2f033b7dcd39ccb4f09d6b | "Scope M each, risk low." previews would ask: risk:high, expected no mandate_gate | pass |
-| NC-14 | `tests/risk-preapproval.test.ts` | 7edb8447adfdbd6032fdd518cac20f70f3bc0ddf | 02-10 | NC-14-hard-stop | e121778390e471657fd0cf50e815e231c1664f6bc9931644106edd16324586a2 | `pushing` ("force push to main", pre-approved) dispatches: missing expected rejection | pass |
-| NC-15 | `tests/risk-batch.test.ts` | 0dd627e1af848a754fae094363bc679bd1334b21 | 02-11 | NC-15-batch-duplicates | ba25ec085ebfdd42c570125e4db60a986161a2947fd8191a08d259ef26ad1536 | batch_risk_high with one job id twice files es-… for 2 jobs (cp-…, cp-…) instead of refusing | pass |
-| NC-16 | `tests/mandate-selection.test.ts` | 182d661df39ae976d40c0ffe39da603a51762465 | 02-12 | NC-16-issue-order | df65e10f0187be25616ddda1f083fba62776ac831cecc44fd3375400ec1c3b3b | `first` previews under md-000001 (issued later), expected md-a994c5 | pass |
-| NC-17 | `tests/mandate-supplement.test.ts` | f4b5ba870f1b53cc5aa03b608443be8f453cfdd0 | 02-12 | NC-17-supplement | 5da1c2239f05459f067ec55ff86387caea4ebe5941c4bc5fd1611ef05036c6cb | `target` previews under the full md-older1, expected the supplement md-supp01 | pass |
-| NC-18 | `tests/mandate-usage.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-13 | NC-18-cache-reads | 043260b1680570db9a085e8b5a7971d13dfc39745029ade7fb16443312026225 | 50M cache reads on the first turn pause the grant: notices [token-cap], expected [] | pass |
-| NC-19 | `tests/capacity.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-14 | NC-19-capacity-auth | dde6d244107712dfd4cf198267181686bb04111d15c4422569160713c16fc373 | a 401 from the gateway falls back with no `reason=capacity auth rejected` | pass |
-| NC-20 | `tests/quota.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-14 | NC-20-quota-tight | f45a2895b0d9c81b69f7f8740c57fc2af3d108e6718475376ed44cb4348787f7 | a 5h window at the 90 threshold is not tight ("90/0") | pass |
-| NC-21 | `tests/mandate.test.ts` | 9cba8aa2fe960ac975cd7266e6bc79ffb57d97f0 | 02-15 | NC-21-denied-project | 066c4517d1bbb7a4108205f50dc3d2ac52584324ec11bd40fd61dbaae36729ee | a denied project's plan checkpoint is auto-decided, so the implementer's preflight refuses "project_denied" | pass |
-| NC-22 | `tests/mandate.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-16 | NC-22-this-turn-jobs | 9e9711d04c7bea1a95154480de37a9d12f3376c3ce215219e35d9df5a21db086 | the sentinel grant names only the last job created this turn | pass |
-| NC-23 | `tests/mandate.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 02-17 | NC-23-expired-repair | e9c69c9bfa7ed2457df70ccb635fc085a15259a9a43611c6865241e17a4d112c | an expired grant refuses its in-flight job's repair: "no first authorization under it" | pass |
 | NC-24 | `tests/actions-ci.test.ts` | 2404bb71d2c653c78cb751879d269948be1ffb59 | 05-1 | NC-24-html-403 | e72132413fc99cd02b4f925f8b2c27cb86970f5fd3a97564948945fed2d947d4 | an HTML 403 proxy page reads as the token's denial, not `read transport … status 403` | pass |
 | NC-25 | `tests/ci-configured.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-2 | NC-25-truncated-empty | 9136f6c7b38762eb24ae90db95957b08018ad14b9ce7ec99a8b64d04f10627ab | a truncated workflows page (total_count 3, no rows) reads `none (authoritative_empty)` | pass |
 | NC-26 | `tests/ci-access.test.ts` | 3701ebcf12e77e5f3bac90c498efdd56f0016c19 | 05-3 | NC-26-short-jobs | 8af5a117fa4f3344232b10a82f44e378f4c55de8632e1902025ec529063c119f | `ci.short` with 1 of 4 jobs reads ok "CI readable", expected warn "the Actions read failed (incomplete)" | pass |
@@ -2092,17 +1874,6 @@ index 6fa8248..eed3141 100644
  
 ```
 
-S02 controls run with `npm run test:one -- --test-name-pattern='landing S02: <scenario prefix>' tests/e2e/landing.test.ts`.
-Each patch below was applied alone and restored; each exited 1 on the observable assertion above.
-The restored S02 scenarios pass. Existing NC-32 and NC-39–NC-42 continue to cover shared scenario 05-8.
-
-Review-1 controls below were each applied alone to source revision b744b908413b97d7fb9a39ae6056179ec3f8ae07,
-run with `node --import ./tests/harness/hermetic-env.ts --test --test-name-pattern='landing S02: watch delivery' tests/e2e/landing.test.ts`,
-then restored. For aggregate/empty/red/closed/superseded use `landing S02: aggregate`; for key/history/prune use
-`landing: CI watch persists`; for parked use `landing S02: only reported`. Each command exited 1 at the regression
-assertion recorded above. The superseded case returns raw Actions rows so fake gh cannot filter away the stale input.
-All sixteen logs and patches are also retained in the S02 worker artifact directory.
-
 <!-- patch:NC-S02-key -->
 ```diff
 diff --git a/src/ci-watch.ts b/src/ci-watch.ts
@@ -2225,17 +1996,6 @@ NC-04 puts back the cp-sr5 defect `tests/budgets.test.ts` guarded: the manager's
 when the CommandPost is built, so a `data/budgets.json` written later never reaches a dispatch. The file has no
 separate fix commit in this repository's history; the bug commit column names the release that carries the getter.
 
-<!-- patch:NC-04-budgets -->
-```diff
---- a/src/command-post.ts
-+++ b/src/command-post.ts
-@@ -384,3 +384,3 @@
- 			workerReporterPath: join(options.packageRoot, "extensions/worker-reporter/index.ts"),
--			budget: () => this.budgets(),
-+			budget: ((snapshot) => () => snapshot)(this.budgets()),
- 			questions: this.questions,
-```
-
 ```
 ✔ authority: a scoped mandate dispatches the job it names under its id; an unnamed job is not its to speak for
 ✔ authority: a paused or revoked mandate stops speaking; an expired or job-capped one refuses new paid work
@@ -2252,17 +2012,6 @@ rule, because it has no separate fix commit. NC-07 to NC-09 name #284, which add
 
 NC-05 lets a held job hold a dispatch slot:
 
-<!-- patch:NC-05-held-slot -->
-```diff
---- a/src/mandate-accounting.ts
-+++ b/src/mandate-accounting.ts
-@@ -138,3 +138,3 @@ export function mandateSpend(
- 		// delivery (a promote moves it back to `waiting`). Held jobs still count toward spend and jobs.
--		if (job.phase === "waiting" || job.phase === "launching") inFlight += 1;
-+		if (job.phase === "waiting" || job.phase === "launching" || job.phase === "held") inFlight += 1;
- 	}
-```
-
 ```
 ✖ authority: a held PR job counts toward the job and spend caps but never holds a dispatch slot
   Error: cp-g1so: mandate md-68b4c8 dispatch-parallelism 1 is full
@@ -2272,17 +2021,6 @@ NC-05 lets a held job hold a dispatch slot:
 
 NC-06 stops counting a held job toward the grant's spend and job count:
 
-<!-- patch:NC-06-held-spend -->
-```diff
---- a/src/mandate-accounting.ts
-+++ b/src/mandate-accounting.ts
-@@ -121,3 +121,3 @@ export function mandateSpend(
- ): { usd: number; tokens: number; jobs: number; inFlight: number } {
--	const matched = matchingJobs(mandate, jobs);
-+	const matched = matchingJobs(mandate, jobs).filter((job) => job.phase !== "held");
- 	const baseline = new Map((mandate.usage_baseline ?? []).map((entry) => [entry.job_id, entry]));
-```
-
 ```
 ✖ authority: a held PR job counts toward the job and spend caps but never holds a dispatch slot
   Error: timed out after 60000ms waiting for held + second spend to reach the token cap; last = error: undefined
@@ -2291,17 +2029,6 @@ NC-06 stops counting a held job toward the grant's spend and job count:
 ```
 
 NC-07 lets a read-only ops profile exempt its job from the risk:high gate:
-
-<!-- patch:NC-07-ops-gate -->
-```diff
---- a/src/dispatch-authority.ts
-+++ b/src/dispatch-authority.ts
-@@ -19,3 +19,3 @@ export interface DispatchAuthorityJob {
- export const riskGateExempt = (job: Pick<DispatchAuthorityJob, "kind" | "readOnly" | "promotion" | "script" | "ops">): boolean =>
--	job.kind === "research" && job.readOnly === true && !job.promotion && !job.script && !job.ops;
-+	job.kind === "research" && job.readOnly === true && !job.promotion && !job.script;
- export async function assertDispatchAllowed(store: MandateStore, job: DispatchAuthorityJob, jobs: readonly MandateUsageJob[] = []): Promise<GrantPermission> {
-```
 
 ```
 ✖ authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource
@@ -2314,17 +2041,6 @@ NC-07 lets a read-only ops profile exempt its job from the risk:high gate:
 
 NC-08 lets the caller's risk override a deploy's fixed high:
 
-<!-- patch:NC-08-ops-risk -->
-```diff
---- a/src/ops-jobs.ts
-+++ b/src/ops-jobs.ts
-@@ -37,3 +37,3 @@ export function opsRequest<R extends { profile?: string; risk?: Risk }>(request:
- 	if (request.profile !== undefined && request.profile !== OPS_PROFILE_NAME) throw new DispatchError(`${job.id}: an ops:${cls} job runs the ops profile, not ${request.profile} — drop profile`);
--	return { ...request, profile: OPS_PROFILE_NAME, risk: cls === "pull" ? (request.risk ?? parseJobLabels(job.labels).risk ?? "low") : "high" };
-+	return { ...request, profile: OPS_PROFILE_NAME, risk: cls === "pull" ? (request.risk ?? parseJobLabels(job.labels).risk ?? "low") : (request.risk ?? "high") };
- }
-```
-
 ```
 ✖ authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource
   AssertionError [ERR_ASSERTION]: a deploy is high whatever the caller says
@@ -2335,17 +2051,6 @@ NC-08 lets the caller's risk override a deploy's fixed high:
 ```
 
 NC-09 leases a resource only to a reported (held) holder, not a working one:
-
-<!-- patch:NC-09-ops-lease -->
-```diff
---- a/src/ops-jobs.ts
-+++ b/src/ops-jobs.ts
-@@ -44,3 +44,3 @@ export function assertResourcesFree(job: Pick<Job, "id" | "labels">, fleet: read
- 	if (wanted.length === 0) return;
--	const live = new Set(fleet.filter((record) => record.job_id !== job.id && record.phase !== "done").map((record) => record.job_id));
-+	const live = new Set(fleet.filter((record) => record.job_id !== job.id && record.phase === "held").map((record) => record.job_id));
- 	for (const other of jobs) {
-```
 
 ```
 ✖ authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource
@@ -2362,17 +2067,6 @@ NC-12 names that release too: the key-order fix (cur.2.6) has no separate commit
 
 NC-10 stops skipping negated risk words:
 
-<!-- patch:NC-10-negation -->
-```diff
---- a/src/pipeline.ts
-+++ b/src/pipeline.ts
-@@ -284,3 +284,3 @@ export function acceptedRiskMatches(text: string, alsoBenign?: (text: string, in
- 	}
--	return found.filter((match) => !negated.has(match) && !benignSenseAt(text, match.at, match.word) && !alsoBenign?.(text, match.at, match.word)).map(({ word, why }) => ({ word, why }));
-+	return found.filter((match) => !benignSenseAt(text, match.at, match.word) && !alsoBenign?.(text, match.at, match.word)).map(({ word, why }) => ({ word, why }));
- }
-```
-
 ```
 ✖ authority: keyword risk inference skips negated, excluded and benign senses; the risk:high ask names every word it matched
   AssertionError [ERR_ASSERTION]: no migration
@@ -2387,17 +2081,6 @@ NC-10 stops skipping negated risk words:
 
 NC-11 stops counting a held job toward the grant's job count, and nothing else:
 
-<!-- patch:NC-11-held-jobs -->
-```diff
---- a/src/mandate-accounting.ts
-+++ b/src/mandate-accounting.ts
-@@ -135,3 +135,3 @@ export function mandateSpend(
- 		// pre-existing jobs once they spend under it, so a project's history never fills its job cap.
--		if (named || !base || spent.usd > 0 || spent.tokens > 0) counted += 1;
-+		if ((named || !base || spent.usd > 0 || spent.tokens > 0) && job.phase !== "held") counted += 1;
- 		// A working worker holds a parallelism slot; a `held` job has reported and waits on its
-```
-
 ```
 ✖ authority: a held PR job counts toward the job and spend caps but never holds a dispatch slot
   AssertionError [ERR_ASSERTION]: The validation function is expected to return "true". Received false
@@ -2407,17 +2090,6 @@ NC-11 stops counting a held job toward the grant's job count, and nothing else:
 ```
 
 NC-12 brings back the key-order-sensitive override comparison (cur.2.6), so agreeing overrides fall through to home:
-
-<!-- patch:NC-12-override-order -->
-```diff
---- a/src/mandate-defaults.ts
-+++ b/src/mandate-defaults.ts
-@@ -310,3 +310,3 @@ export function resolveMandateGrant(
- export function sameProjectMandateOverride(a: ProjectMandateOverride | undefined, b: ProjectMandateOverride | undefined): boolean {
--	return canonicalJson(a) === canonicalJson(b);
-+	return JSON.stringify(a) === JSON.stringify(b);
- }
-```
 
 ```
 ✖ authority: cp_mandate issue needs only projects and an objective; every other field resolves explicit > project > home and says which
@@ -2434,17 +2106,6 @@ Four bug commits are the initial release (`ea631794e9de`), which carries those r
 
 NC-13 lets a recorded low stand down only a high that routing never recorded either, so every keyword-only high gates:
 
-<!-- patch:NC-13-low-warning -->
-```diff
---- a/src/risk-warning.ts
-+++ b/src/risk-warning.ts
-@@ -155,3 +155,3 @@ export function inferredRiskGate(input: {
- 	}
--	if (recorded !== "low" || (routed === "high" && recordedProvenance(routedFrom))) {
-+	if (recorded !== "low" || routed === "high") {
- 		if (routed !== "high") return { risk: routed };
-```
-
 ```
 ✖ authority: a recorded or declared low turns a keyword-only high into a warning; a recorded, supplied or planner high still gates
   AssertionError [ERR_ASSERTION]: Scope M each, risk low.
@@ -2456,17 +2117,6 @@ NC-13 lets a recorded low stand down only a high that routing never recorded eit
 
 NC-14 lets a pre-approval cover a hard stop:
 
-<!-- patch:NC-14-hard-stop -->
-```diff
---- a/src/risk-preapproval.ts
-+++ b/src/risk-preapproval.ts
-@@ -55,3 +55,3 @@ export function riskPreapproval(
- 	const named = asking.length > 0 && asking.every((grant) => preapprovalCovers(grant, job, createdAt));
--	return { covered: named && !job.script && stops.length === 0, stops: named ? stops : [] };
-+	return { covered: named && !job.script, stops: named ? stops : [] };
- }
-```
-
 ```
 ✖ authority: an operator-quoted risk:high pre-approval lets covered dispatches and promotions proceed with an audit row; anything else still asks
   AssertionError [ERR_ASSERTION]: Missing expected rejection.
@@ -2476,17 +2126,6 @@ NC-14 lets a pre-approval cover a hard stop:
 
 NC-15 refuses a duplicate only when two different ids repeat:
 
-<!-- patch:NC-15-batch-duplicates -->
-```diff
---- a/src/risk-batch.ts
-+++ b/src/risk-batch.ts
-@@ -32,3 +32,3 @@ export async function batchRiskHigh(
- 	const duplicates = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
--	if (duplicates.length > 0) refuse(`duplicate job ids: ${duplicates.join(", ")}`);
-+	if (duplicates.length > 1) refuse(`duplicate job ids: ${duplicates.join(", ")}`);
- 
-```
-
 ```
 ✖ authority: cp_escalate batch_risk_high files one approve/drop record for jobs one asking grant gates; every refusal writes nothing
   AssertionError [ERR_ASSERTION]: twice: {"content":[{"type":"text","text":"es-87f890 batch risk:high: 2 jobs (cp-utjq, cp-utjq); …
@@ -2495,17 +2134,6 @@ NC-15 refuses a duplicate only when two different ids repeat:
 ```
 
 NC-16 prefers the latest-issued grant:
-
-<!-- patch:NC-16-issue-order -->
-```diff
---- a/src/grant-order.ts
-+++ b/src/grant-order.ts
-@@ -3,3 +3,3 @@ export function compareActiveGrants(a: { id: string; issued_at: string; job_ids?
- 	return Number(Boolean(b.job_ids?.length)) - Number(Boolean(a.job_ids?.length))
--		|| (a.issued_at < b.issued_at ? -1 : a.issued_at > b.issued_at ? 1 : 0)
-+		|| (a.issued_at > b.issued_at ? -1 : a.issued_at < b.issued_at ? 1 : 0)
- 		|| (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-```
 
 ```
 ✖ authority: dispatch picks the named, earliest-issued, lowest-id grant that speaks; a full named grant yields only to an eligible supplement
@@ -2517,17 +2145,6 @@ NC-16 prefers the latest-issued grant:
 
 NC-17 brings back the full named grant shadowing its eligible supplement (#184):
 
-<!-- patch:NC-17-supplement -->
-```diff
---- a/src/mandate-permission.ts
-+++ b/src/mandate-permission.ts
-@@ -103,3 +103,3 @@ export function selectGrant(grants: readonly Mandate[], use: GrantUse, job: Gran
- 	if (jobs && first && named(first.grant) && jobCapFullWithout(first.grant, job.jobId, jobs)) {
--		return active.slice(1).find(({ grant }) => named(grant) && !jobCapFullWithout(grant, job.jobId, jobs)) ?? first;
-+		return first;
- 	}
-```
-
 ```
 ✖ authority: dispatch picks the named, earliest-issued, lowest-id grant that speaks; a full named grant yields only to an eligible supplement
   + 'md-older1'
@@ -2537,17 +2154,6 @@ NC-17 brings back the full named grant shadowing its eligible supplement (#184):
 ```
 
 NC-18 counts cache reads toward the token cap:
-
-<!-- patch:NC-18-cache-reads -->
-```diff
---- a/src/mandate-accounting.ts
-+++ b/src/mandate-accounting.ts
-@@ -92,3 +92,3 @@ export function matchingJobs(mandate: Mandate, jobs: readonly MandateUsageJob[])
- /** What a token cap counts: non-cached tokens, input + output + cache_write = total minus cache_read (as `billableTokens`, src/failures.ts). */
--export const mandateTokens = (usage?: { total_tokens: number; cache_read?: number }): number => Math.max(0, (usage?.total_tokens ?? 0) - (usage?.cache_read ?? 0));
-+export const mandateTokens = (usage?: { total_tokens: number; cache_read?: number }): number => Math.max(0, usage?.total_tokens ?? 0);
- 
-```
 
 ```
 ✖ authority: live usage crosses each cap line once while the worker runs; cache reads and pre-grant usage never count; a USD cap or the ceiling is the operator's
@@ -2561,17 +2167,6 @@ NC-18 counts cache reads toward the token cap:
 
 NC-19 stops naming a 401 as a rejected admin credential:
 
-<!-- patch:NC-19-capacity-auth -->
-```diff
---- a/src/capacity.ts
-+++ b/src/capacity.ts
-@@ -42,3 +42,3 @@ export class CapacityReader {
- 			if (!response.ok) {
--				if (response.status === 401 || response.status === 403) reason = "capacity auth rejected";
-+				if (response.status === 403) reason = "capacity auth rejected";
- 				throw new Error("capacity unavailable");
-```
-
 ```
 ✖ authority: the gateway's admin capacity and quota windows steer and annotate routing; every failure falls back and never leaks the key
   AssertionError [ERR_ASSERTION]: source=rubric model=other/b rule=implementer thinking=medium quota unavailable: auth rejected capacity=fleet:mock=-2,other=0
@@ -2580,17 +2175,6 @@ NC-19 stops naming a 401 as a rejected admin credential:
 ```
 
 NC-20 drops the 5h threshold's own boundary:
-
-<!-- patch:NC-20-quota-tight -->
-```diff
---- a/src/quota.ts
-+++ b/src/quota.ts
-@@ -100,3 +100,3 @@ export class QuotaReader {
- 					const best = known[0];
--					return best ? { ...best, tight: (best.five_hour !== undefined && best.five_hour >= config.quota.five_hour) || best.seven_day! >= config.quota.seven_day } : { provider, tight: false };
-+					return best ? { ...best, tight: (best.five_hour !== undefined && best.five_hour > config.quota.five_hour) || best.seven_day! >= config.quota.seven_day } : { provider, tight: false };
- 				}) };
-```
 
 ```
 ✖ authority: the gateway's admin capacity and quota windows steer and annotate routing; every failure falls back and never leaks the key
@@ -2601,18 +2185,6 @@ NC-20 drops the 5h threshold's own boundary:
 
 NC-21 drops the cp-7re9 deny_projects check from the mandate's auto-decision:
 
-<!-- patch:NC-21-denied-project -->
-```diff
---- a/src/mandate-autodecide.ts
-+++ b/src/mandate-autodecide.ts
-@@ -16,5 +16,4 @@ export function autoDecideCheckpoint(
- ): Checkpoint {
- 	if (checkpoint.decision !== "pending") return checkpoint;
--	if (projectDenial(mandates.home, subject.project)) return checkpoint;
- 	const now = subject.now ?? isoTimestamp();
- 	const source = runAuthority(mandates.runContext(), subject.jobId).source;
-```
-
 ```
 ✖ authority: a pipeline's plan checkpoint is mandate-decided and journaled; task-text exclusions, gate flags, an unnamed high and a denied project leave it pending
   Error: preflight refused cp-s1yq: ... [fail] project_denied: settings: project demo is denied ...
@@ -2622,19 +2194,6 @@ NC-21 drops the cp-7re9 deny_projects check from the mandate's auto-decision:
 
 NC-22 keeps only the last job created this turn when the sentinel expands:
 
-<!-- patch:NC-22-this-turn-jobs -->
-```diff
---- a/src/mandate.ts
-+++ b/src/mandate.ts
-@@ -73,5 +73,5 @@ export function resolveMandateJobIds(
- 		throw new MandateError("cp_mandate issue: no jobs created in this turn");
- 	}
--	return [...createdThisTurn];
-+	return [...createdThisTurn].slice(-1);
- }
- 
-```
-
 ```
 ✖ authority: cp_mandate through a real parent sets the reviewer model, names this turn's jobs, filters show, refuses every bad issue before writing, and a revoke or expiry closes its asks
   AssertionError [ERR_ASSERTION]: Expected values to be deeply equal: [ 'cp-ovpy' ] vs [ 'cp-ovpy', 'cp-vyp7' ]
@@ -2643,19 +2202,6 @@ NC-22 keeps only the last job created this turn when the sentinel expands:
 ```
 
 NC-23 takes repair off an expired grant's in-flight continuations:
-
-<!-- patch:NC-23-expired-repair -->
-```diff
---- a/src/mandate-permission.ts
-+++ b/src/mandate-permission.ts
-@@ -86,5 +86,5 @@ export function grantStanding(grant: Mandate, use: GrantUse, job: GrantJob, now:
- function expiredCell(grant: Mandate, use: GrantUse, job: GrantJob): { standing: GrantCell; cause: "expired"; detail?: string } {
- 	const refuse = (detail: string) => ({ standing: R as GrantCell, cause: "expired" as const, detail });
--	const action = CONTINUATION_ACTION[use];
-+	const action = use === "repair" ? undefined : CONTINUATION_ACTION[use];
- 	if (!action) return refuse("no first authorization under it; only a job already in flight under it continues");
- 	if (!job.inFlight) return refuse(`${job.jobId} has no fleet record of that kind, so it is a fresh start or a kind change, never a continuation`);
-```
 
 ```
 ✖ authority: an expired, revoked, serial or job-capped grant stops fresh starts while its own in-flight workers keep promotion and repair
