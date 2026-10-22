@@ -13,7 +13,8 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { TEST_FILE_GLOB } from "../scripts/test-file-guard.ts";
@@ -24,7 +25,7 @@ const FIXTURES = "tests/fixtures/test-file-guard";
 /** Wall-clock ceiling for a fixture run; the point is that it ends. */
 const FIXTURE_BUDGET_MS = 60_000;
 
-function runGuard(pattern: string, guardGlob = pattern) {
+function runGuard(pattern: string | string[], guardGlob = [pattern].flat()[0] as string) {
 	// `NODE_TEST_CONTEXT` is set by the runner that is running *this* file. Left
 	// in place it makes the nested runner report to a parent that is not
 	// listening: it exits 0 with no output, and the fixture silently never runs.
@@ -39,7 +40,7 @@ function runGuard(pattern: string, guardGlob = pattern) {
 			"--test-reporter-destination=stdout",
 			"--test-reporter=./scripts/test-file-guard.ts",
 			"--test-reporter-destination=stdout",
-			pattern,
+			...[pattern].flat(),
 		],
 		{ cwd: REPO_ROOT, encoding: "utf8", env: { ...env, CP_TEST_FILE_GLOB: guardGlob }, timeout: FIXTURE_BUDGET_MS },
 	);
@@ -80,6 +81,29 @@ test("a guard pattern that matches nothing fails instead of passing quietly", ()
 
 	assert.notEqual(result.status, 0, `an empty discovery set is silence, not a pass:\n${result.stdout}\n${result.stderr}`);
 	assert.match(result.stderr, /found no test files/, `the broken pattern must be named:\n${result.stderr}`);
+});
+
+// A shard hands the runner an explicit file list. A 1-file list (the landing shard) once
+// dropped its only file from argv, so the guard fell back to the whole glob and failed.
+test("the guard judges exactly the explicit file list, for one file and for a few", () => {
+	const dir = mkdtempSync(join(tmpdir(), "guard-list-"));
+	try {
+		const ok = (name: string) => writeFileSync(join(dir, name), "import { test } from 'node:test';\ntest('x', () => {});\n");
+		ok("a.test.ts");
+		ok("b.test.ts");
+		writeFileSync(join(dir, "silent.test.ts"), "");
+		const glob = join(dir, "*.test.ts");
+		const one = runGuard([join(dir, "a.test.ts")], glob);
+		assert.equal(one.status, 0, `a 1-file list must not expect the rest of the glob:\n${one.stdout}\n${one.stderr}`);
+		const few = runGuard([join(dir, "a.test.ts"), join(dir, "b.test.ts")], glob);
+		assert.equal(few.status, 0, `a few-file list must not expect the rest of the glob:\n${few.stdout}\n${few.stderr}`);
+		const red = runGuard([join(dir, "silent.test.ts")], glob);
+		assert.notEqual(red.status, 0, "an assigned file that registers nothing must red the shard");
+		assert.match(red.stderr, /silent\.test\.ts/);
+		assert.doesNotMatch(red.stderr, /a\.test\.ts|b\.test\.ts/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 test("the guard checks exactly the pattern npm test gives the runner", () => {

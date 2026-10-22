@@ -73,7 +73,7 @@ export function filesProducingNothing(discovered: readonly string[], reported: R
 }
 
 /** Explicit test files the runner was started with (a shard's list); none means a glob run. Read from argv, not env. */
-export function explicitFilesFromArgv(argv: readonly string[] = process.argv.slice(2)): string[] {
+export function explicitFilesFromArgv(argv: readonly string[] = process.argv.slice(1)): string[] {
 	return argv.filter((arg) => arg.endsWith(".test.ts") && !/[*?[{]/.test(arg));
 }
 
