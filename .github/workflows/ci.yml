@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the migration ledger check reads the pinned baseline commit
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -35,6 +37,10 @@ jobs:
       # outside the exact lines scripts/retired-integration-allowlist.json freezes.
       - name: Retired integration guard
         run: bash scripts/ci-as-user.sh npm run check:retired-integration
+
+      - name: Migration ledger check
+        run: bash scripts/ci-as-user.sh node scripts/test-migration-check.ts
+        timeout-minutes: 5
 
       # The m2/m3/pipeline lease suites need a real treehouse on PATH and
       # self-skip without it; tests/ci-host-tools.test.ts fails the run if it

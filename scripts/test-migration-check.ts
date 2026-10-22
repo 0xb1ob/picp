@@ -1,10 +1,11 @@
 /**
- * Read-only validator for docs/testing-migration.md against the git tree at its pinned baseline; prints static `test(`
- * counts (TypeScript AST) apart from runner totals and exits 1 on any finding. Imports no production code.
+ * Read-only validator for the per-slice ledger (docs/testing-migration/*.md) and the rules doc docs/testing-migration.md
+ * against the git tree at its pinned baseline; prints static `test(` counts (TypeScript AST) apart from runner totals and
+ * exits 1 on any finding. Imports no production code.
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
@@ -18,6 +19,7 @@ interface Args {
 	manifest: string;
 	runnerLog?: string;
 	verifyRegressions: boolean;
+	preservedFrom?: string;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -33,25 +35,61 @@ function parseArgs(argv: readonly string[]): Args {
 		else if (flag === "--manifest") args.manifest = value();
 		else if (flag === "--runner-log") args.runnerLog = value();
 		else if (flag === "--verify-regressions") args.verifyRegressions = true;
+		else if (flag === "--preserved-from") args.preservedFrom = value();
 		else throw new Error(`unknown argument ${flag}`);
 	}
 	return args;
 }
 
-/** The body of `<!-- manifest:<name> -->` … `<!-- /manifest:<name> -->`; a missing section is a finding. */
-function section(doc: string, name: string, findings: string[]): string {
-	const match = new RegExp(`<!-- manifest:${name} -->\\n([\\s\\S]*?)<!-- /manifest:${name} -->`).exec(doc);
-	if (!match) findings.push(`manifest has no ${name} section`);
-	return match?.[1] ?? "";
+/** The bodies of `<!-- manifest:<name> -->` … `<!-- /manifest:<name> -->` in each doc; none at all is a finding. */
+function section(docs: readonly string[], name: string, findings: string[]): string[] {
+	const bodies = docs.flatMap((doc) => new RegExp(`<!-- manifest:${name} -->\\n([\\s\\S]*?)<!-- /manifest:${name} -->`).exec(doc)?.[1] ?? []);
+	if (bodies.length === 0) findings.push(`manifest has no ${name} section`);
+	return bodies;
 }
 
-/** Table rows of a section as trimmed cells, header and separator rows dropped; backticks are stripped. */
-function rows(body: string): string[][] {
-	return body
-		.split("\n")
-		.filter((line) => line.startsWith("|") && !/^\|\s*-/.test(line))
-		.slice(1)
-		.map((line) => line.slice(1, line.endsWith("|") ? -1 : undefined).split(" | ").map((cell) => cell.trim().replace(/^`|`$/g, "")));
+/** Table rows of each section body as trimmed cells, header and separator dropped; backticks are stripped. */
+function rows(bodies: readonly string[]): string[][] {
+	return bodies.flatMap((body) => tableLines(body).map((line) => line.slice(1, line.endsWith("|") ? -1 : undefined).split(" | ").map((cell) => cell.trim().replace(/^`|`$/g, ""))));
+}
+
+/** Raw data rows of a table body: header and separator dropped. */
+function tableLines(body: string): string[] {
+	return body.split("\n").filter((line) => line.startsWith("|") && !/^\|\s*-/.test(line)).slice(1);
+}
+
+/** Every slice file in the ledger directory beside the manifest (`docs/testing-migration/*.md`). */
+function ledgerFiles(manifest: string): string[] {
+	const dir = manifest.replace(/\.md$/, "");
+	return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".md")).sort().map((name) => `${dir}/${name}`) : [];
+}
+
+const PATCH_RE = /<!-- patch:([\w-]+) -->\n```diff\n([\s\S]*?)\n```/g;
+const LEDGER_TABLES = ["prs", "scenarios", "assertions", "regressions", "incoming", "feature-removed", "baseline"];
+
+/** Rows and patch blocks of the `before` docs each appear once, byte-identical, in the `after` docs. */
+export function preservationFindings(before: readonly string[], after: readonly string[]): string[] {
+	const findings: string[] = [];
+	const compare = (label: string, was: string[], now: string[]) => {
+		if (was.length !== now.length) findings.push(`preservation: ${label} has ${was.length} before, ${now.length} after`);
+		const left = [...was].sort();
+		const right = [...now].sort();
+		if (left.some((line, i) => line !== right[i])) findings.push(`preservation: ${label} content differs`);
+	};
+	for (const name of LEDGER_TABLES) {
+		const bodies = (doc: string) => (new RegExp(`<!-- manifest:${name} -->\\n([\\s\\S]*?)<!-- /manifest:${name} -->`).exec(doc)?.[1] ?? "").replace(PATCH_RE, "");
+		compare(`${name} rows`, before.flatMap((doc) => tableLines(bodies(doc))), after.flatMap((doc) => tableLines(bodies(doc))));
+	}
+	const patches = (doc: string) => [...doc.matchAll(PATCH_RE)].map((match) => match[0]);
+	compare("patch blocks", before.flatMap(patches), after.flatMap(patches));
+	return findings;
+}
+
+/** The manifest and every slice file as committed at `ref`. */
+function docsAt(ref: string, manifest: string): string[] {
+	const dir = manifest.replace(/\.md$/, "");
+	const files = git("ls-tree", "--name-only", ref, `${dir}/`).split("\n").filter((file) => file.endsWith(".md"));
+	return [manifest, ...files].map((file) => git("show", `${ref}:${file}`));
 }
 
 function git(...args: string[]): string {
@@ -142,6 +180,8 @@ function main(): number {
 	const args = parseArgs(process.argv.slice(2));
 	const findings: string[] = [];
 	const doc = readFileSync(args.manifest, "utf8");
+	const docs = [doc, ...ledgerFiles(args.manifest).map((file) => readFileSync(file, "utf8"))];
+	if (args.preservedFrom) findings.push(...preservationFindings(docsAt(args.preservedFrom, args.manifest), docs));
 	const pinned = /^Baseline sha: `([0-9a-f]{40})`$/m.exec(doc)?.[1];
 	if (!pinned) findings.push("manifest names no `Baseline sha:`");
 	if (args.base && pinned && args.base !== pinned) findings.push(`--base ${args.base} is not the manifest's baseline ${pinned}`);
@@ -153,14 +193,14 @@ function main(): number {
 	const currentSet = new Set(current);
 
 	const prs = new Map<string, { behavior: string; target: string; cases: string }>();
-	for (const [pr = "", behavior = "", target = "", cases = ""] of rows(section(doc, "prs", findings))) {
+	for (const [pr = "", behavior = "", target = "", cases = ""] of rows(section(docs, "prs", findings))) {
 		if (prs.has(pr)) findings.push(`${pr}: more than one conversion PR row`);
 		if (!/^\d\d$/.test(behavior) || !target.startsWith("tests/e2e/")) findings.push(`${pr}: needs a behavior id and a tests/e2e/ target`);
 		prs.set(pr, { behavior, target, cases });
 	}
 
 	const disposition = new Map<string, { kind: string; owner: string; evidence: string }>();
-	for (const [path = "", kind = "", owner = "", evidence = ""] of rows(section(doc, "baseline", findings))) {
+	for (const [path = "", kind = "", owner = "", evidence = ""] of rows(section(docs, "baseline", findings))) {
 		if (disposition.has(path)) findings.push(`${path}: more than one baseline disposition`);
 		if (!baseSet.has(path)) findings.push(`${path}: listed in the baseline but not a test file at ${base.slice(0, 12)}`);
 		if (!DISPOSITIONS.has(kind)) findings.push(`${path}: unknown disposition "${kind}"`);
@@ -177,7 +217,7 @@ function main(): number {
 	for (const path of baseFiles) if (!disposition.has(path)) findings.push(`${path}: baseline file with no disposition`);
 
 	const incoming = new Set<string>();
-	for (const [path = "", owner = ""] of rows(section(doc, "incoming", findings))) {
+	for (const [path = "", owner = ""] of rows(section(docs, "incoming", findings))) {
 		if (baseSet.has(path)) findings.push(`${path}: incoming but already in the baseline`);
 		if (!owner) findings.push(`${path}: incoming without an owning PR`);
 		incoming.add(path);
@@ -185,7 +225,7 @@ function main(): number {
 	for (const path of current) if (!baseSet.has(path) && !incoming.has(path)) findings.push(`${path}: test file in neither the baseline nor incoming`);
 
 	const scenarios = new Map<string, string>();
-	for (const [id = "", path = "", name = ""] of rows(section(doc, "scenarios", findings))) {
+	for (const [id = "", path = "", name = ""] of rows(section(docs, "scenarios", findings))) {
 		if (scenarios.has(id)) findings.push(`scenario ${id}: duplicate id`);
 		scenarios.set(id, path);
 		if (!existsSync(path)) findings.push(`scenario ${id}: ${path} does not exist`);
@@ -193,7 +233,7 @@ function main(): number {
 	}
 
 	const unmapped = new Map<string, number>();
-	for (const [path = "", assertion = "", scenario = "", status = "", note = ""] of rows(section(doc, "assertions", findings))) {
+	for (const [path = "", assertion = "", scenario = "", status = "", note = ""] of rows(section(docs, "assertions", findings))) {
 		if (!disposition.has(path)) findings.push(`assertion map names ${path}, which is not a baseline file`);
 		const pinned = status === "mapped" || status === "redundant-unreachable";
 		if (pinned && !scenarios.has(scenario)) findings.push(`${path}: "${assertion}" is ${status} but names no known e2e scenario (got "${scenario}")`);
@@ -206,9 +246,9 @@ function main(): number {
 		} else if (!pinned) findings.push(`${path}: "${assertion}" has unknown disposition "${status}"`);
 	}
 
-	const patches = new Map([...doc.matchAll(/<!-- patch:([\w-]+) -->\n```diff\n([\s\S]*?)\n```/g)].map((m) => [m[1] as string, `${m[2]}\n`]));
+	const patches = new Map([...docs.join("\n").matchAll(PATCH_RE)].map((m) => [m[1] as string, `${m[2]}\n`]));
 	const proven = new Set<string>();
-	for (const [id = "", path = "", commit = "", scenario = "", patch = "", sha = "", failing = "", fixed = ""] of rows(section(doc, "regressions", findings))) {
+	for (const [id = "", path = "", commit = "", scenario = "", patch = "", sha = "", failing = "", fixed = ""] of rows(section(docs, "regressions", findings))) {
 		if (!scenarios.has(scenario)) findings.push(`regression ${id}: unknown scenario ${scenario}`);
 		if (!failing || fixed !== "pass") findings.push(`regression ${id}: needs a failing assertion and a fixed "pass"`);
 		if (!args.verifyRegressions) {
@@ -239,7 +279,7 @@ function main(): number {
 		const after = currentSet.has(path) ? decls([path]) : 0;
 		if (after < before && !GONE.has(disposition.get(path)?.kind ?? "")) lost.set(path, { before, after });
 	}
-	findings.push(...featureRemovedFindings(rows(section(doc, "feature-removed", findings)), lost, (path) => ({
+	findings.push(...featureRemovedFindings(rows(section(docs, "feature-removed", findings)), lost, (path) => ({
 		base: baseFiles.includes(path) ? declarationTitles(path, git("show", `${base}:${path}`)) : [],
 		tree: currentSet.has(path) ? declarationTitles(path, readFileSync(path, "utf8")) : [],
 	})));
@@ -257,7 +297,7 @@ function main(): number {
 	for (const [owner, counts] of byOwner) console.log(`  ${owner || "(no owner)"}: ${Object.entries(counts).map(([k, n]) => `${k} ${n}`).join(", ")}`);
 	console.log("conversion PRs (owned baseline files; static declarations at the baseline and in the tree):");
 	const census = { files: 0, base: 0, tree: 0 };
-	for (const [pr, { behavior, target, cases }] of prs) {
+	for (const [pr, { behavior, target, cases }] of [...prs].sort(([a], [b]) => a.localeCompare(b, "en", { numeric: true }))) {
 		const owned = [...disposition].filter(([, entry]) => entry.owner === pr).map(([path]) => path);
 		const atBase = owned.reduce((sum, path) => sum + (baseCounts.get(path) ?? 0), 0);
 		const inTree = decls(owned.filter((path) => currentSet.has(path)));
@@ -269,7 +309,7 @@ function main(): number {
 	console.log(`  total: ${census.files} files, ${census.base} baseline / ${census.tree} tree declarations`);
 	if (args.runnerLog) console.log(`runner-executed (${args.runnerLog}): ${Object.entries(runnerTotals(readFileSync(args.runnerLog, "utf8"))).map(([k, n]) => `${k} ${n}`).join(", ")}`);
 	for (const finding of findings) console.error(`FAIL ${finding}`);
-	console.log(findings.length ? `${findings.length} finding(s)` : "manifest ok");
+	console.log(findings.length ? `${findings.length} finding(s)` : `manifest ok (${docs.length - 1} slice files${args.preservedFrom ? `, rows preserved from ${args.preservedFrom}` : ""})`);
 	return findings.length ? 1 : 0;
 }
 
