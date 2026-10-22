@@ -256,7 +256,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P22 | 22 | `tests/e2e/reports-push.test.ts` | 4 |
 | P23 | 23 | `tests/e2e/memory.test.ts` | 3 |
 | P24 | 24 | `tests/e2e/host-compatibility.test.ts` | 3 |
-| S24 | 07 | `tests/e2e/operator-context.test.ts`, `tests/e2e/operator-compact.test.ts`, `tests/e2e/parent-compaction.test.ts` | [declaration accounting](testing-migration-s24.md); parent cap cases now use the public five-second knob; original compact unit files stay whole until mapping and replay finish |
+| S24 | 07 | `tests/e2e/operator-compact.test.ts` | 35 original declarations: 32 mapped, 3 retained verbatim, 0 pending; incoming #447 adds 1 mapped (36 total: 33 mapped, 3 retained); 4 original paths retired, 2 wholly deleted files; 26 executed/replayed controls; [accounting](testing-migration-s24.md) |
 <!-- /manifest:prs -->
 
 The plan proposed 6 cases for all of behavior 05. P3 is a first slice of 4 cases over 4 files. P3b
@@ -3675,8 +3675,8 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/e2e/operator-context.test.ts` | S24 | real bridge context startup and resume; 2 scenarios |
 | `tests/operator-context-retained.test.ts` | S24 | 1 retained verbatim declaration: no public entry calls only the context builder without first creating control state |
 | `tests/operator-compact-retained.test.ts` | S24 | Two verbatim declarations: synchronous compact skip callback and malformed classifier inputs unavailable through public SDK events. |
-| `tests/e2e/operator-compact.test.ts` | S24 | Real bridge compaction scenarios; conversion controls in progress, original unit file remains whole |
-| `tests/e2e/parent-compaction.test.ts` | S24 | Public parent schedule wakes, cap expiry using CP_PARENT_COMPACT_HOLD_SECONDS=5, failure recovery and length stops; mapping/control replay in progress, original unit file stays whole. |
+| `tests/e2e/operator-compact.test.ts` | S24 | Fourteen real bridge scenarios, 20 original declarations mapped; canonical controls and declaration accounting above. |
+| `tests/e2e/parent-compaction.test.ts` | S24 | Four parent CLI scenarios plus CI fleet coverage in headless-lifecycle; 8 declarations mapped using public CP_PARENT_COMPACT_HOLD_SECONDS=5; original unit file retired after executed controls. |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -3881,7 +3881,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/operator-answers.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/operator-asks.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/operator-cache-warming.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
-| `tests/operator-compact.test.ts` | convert | P5 | behavior 07 (Compaction) |
+| `tests/operator-compact.test.ts` | deleted | S24 | 22 declarations: 20 mapped, 2 retained verbatim in tests/operator-compact-retained.test.ts; original path retired, no wholly deleted-file credit; 14 real bridge scenarios and executed controls S24-compact-* |
 | `tests/operator-context.test.ts` | deleted | S24 | 2 mapped, 1 retained verbatim in tests/operator-context-retained.test.ts; S24-context, S24-empty; executed controls S24-oldest, S24-empty, S24-resume |
 | `tests/operator-decide-vs-ask-evals.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/operator-delivery.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
@@ -3896,7 +3896,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/operator-tool-guard.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
 | `tests/ops-jobs.test.ts` | deleted | P2b | behavior 02: every assertion mapped to 02-6 or redundant-unreachable (Assertion map); negative controls NC-07 to NC-09 |
 | `tests/output.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
-| `tests/parent-compact-hold.test.ts` | convert | P5 | behavior 07 (Compaction) |
+| `tests/parent-compact-hold.test.ts` | deleted | S24 | 7 original plus incoming #447 knob declaration: all 8 mapped, 0 retained/pending; public parent schedule/CI flows, five-second cap knob, executed S24-parent-* controls; 1 wholly deleted file |
 | `tests/parent-context.test.ts` | convert | P5 | behavior 07 (Compaction) |
 | `tests/parent-control.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/parent-delivery.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
