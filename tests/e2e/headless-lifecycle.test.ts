@@ -394,20 +394,25 @@ const COMPACT_INSTRUCTIONS =
  * A real bridge under rpc self-compacts while a dashboard message is queued during the turn before it. The
  * message is held through the compaction and handed after it; `drops` of those handoffs are lost at pi's input.
  */
-async function queuedThroughCompaction(t: { after(fn: () => unknown): void }, script: string, drops: number) {
+async function queuedThroughCompaction(t: { after(fn: () => unknown): void }, script: string, drops: number, automatic = false) {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const settings = join(home.path, LAYOUT.data, "operator.json");
 	mkdirSync(dirname(settings), { recursive: true });
-	writeFileSync(settings, JSON.stringify({ compact_at_tokens: 1 }));
+	writeFileSync(settings, JSON.stringify({ compact_at_tokens: automatic ? 100_000_000 : 1 }));
 	const dropper = join(home.path, "dashboard-drop.ts");
 	const dropLog = join(home.path, "dashboard-drops.log");
 	writeFileSync(dropper, DASHBOARD_DROP);
 	writeFileSync(dropLog, "");
 	const provider = await MockProvider.start();
 	const model = provider.addScript(script, [
-		{ kind: "tool_calls", calls: [{ name: "self_compact", args: { instructions: COMPACT_INSTRUCTIONS } }] },
-		{ kind: "hang", ms: 3000 }, // the tool-result reply: the turn the dashboard message is queued behind
+		{ kind: "tool_calls", calls: [automatic ? { name: "bash", args: { command: "true" } } : { name: "self_compact", args: { instructions: COMPACT_INSTRUCTIONS } }] },
+		{ kind: "hang", ms: 3000 },
+		...(automatic ? [
+			{ kind: "tool_calls" as const, calls: [{ name: "self_compact", args: { instructions: COMPACT_INSTRUCTIONS } }] },
+			{ kind: "text" as const, text: "Finishing the compact-request turn." },
+		] : []),
+		{ kind: "hang", ms: 500 },
 		{ kind: "text", text: "acknowledged" },
 	], { onExhausted: "repeat" });
 	const agentDir = createAgentDir({ provider, settings: { compaction: { enabled: false, keepRecentTokens: 1 } } });
@@ -427,12 +432,18 @@ async function queuedThroughCompaction(t: { after(fn: () => unknown): void }, sc
 
 	rpc.send({ type: "prompt", id: "run", message: "Queue compaction, then finish your reply." });
 	await waitFor(() => provider.requests(script).length, (n) => n >= 2, { timeoutMs: 30_000, what: "the reply turn to be in flight" });
-	// self_compact already queued under the 1-token trigger; raised before the reply turn settles, no later settle
-	// can ask for a second compaction.
-	writeFileSync(settings, JSON.stringify({ compact_at_tokens: 100_000_000 }));
+	// Rearm only the automatic-request variant; a queued self_compact needs the trigger raised before settlement.
+	writeFileSync(settings, JSON.stringify({ compact_at_tokens: automatic ? 1 : 100_000_000 }));
 	const sent = await controlRequest(control, "send", { kind: "message", text: "list the validator owner wallets" });
 	assert.ok(sent.ok && (sent.result as { state: string }).state === "queued", JSON.stringify(sent));
 	const id = (sent.result as { id: string }).id;
+	if (automatic) {
+		await waitFor(() => provider.requests(script).length, (n) => n >= 4, { timeoutMs: 30_000, what: "compact-request tool reply" });
+		writeFileSync(settings, JSON.stringify({ compact_at_tokens: 100_000_000 }));
+	}
+	await rpc.waitFor((r) => r.type === "compaction_start", 30_000);
+	const edited = await controlRequest(control, "queue_edit", { id, text: "list the validator owner wallets" });
+	assert.ok(edited.ok && (edited.result as { editable?: boolean }).editable, `held while compacting: ${JSON.stringify(edited)}`);
 	await rpc.waitFor((r) => r.type === "extension_ui_request" && r.message === "self_compact completed", 60_000);
 
 	const journal = () => {
@@ -476,6 +487,18 @@ test("rpc bridge: a message queued before a self-compaction is held through it a
 	assert.ok(records.findIndex((r) => r.type === "compaction_end") < records.indexOf(consumed[0]!), "held through the compaction");
 	assert.equal(run.pending(), "delivered", "acknowledged to the dashboard");
 	assert.equal(run.dropped(), 1);
+});
+
+
+test("rpc bridge S24: a queued message survives compaction without a dropped handoff", { timeout: 110_000 }, async (t) => {
+	const run = await queuedThroughCompaction(t, "dashboard-compact-no-drop", 0, true);
+	await waitFor(() => run.states(), (s) => s.at(-1) === "delivered", { timeoutMs: 30_000, what: "queued dashboard delivery" });
+	assert.deepEqual(run.states(), ["request", "queued", "injected", "delivered"]);
+	const consumed = await waitFor(() => run.consumed(), (c) => c.length === 1, { timeoutMs: 30_000, what: "one consumed message" });
+	const records = run.rpc.records();
+	assert.ok(records.findIndex((r) => r.type === "compaction_end") < records.indexOf(consumed[0]!), "held through compaction");
+	assert.equal(run.pending(), "delivered");
+	assert.equal(run.dropped(), 0);
 });
 
 test("rpc bridge: a queued message whose handoff is dropped twice ends failed, never re-injected again", { timeout: 180_000 }, async (t) => {
@@ -616,6 +639,40 @@ test("S20: overlapping green sweeps leave one owner for a delayed continuation r
 	assert.equal(parent.turns(), 0);
 	assert.equal(listPendingReviews(held.home.path, JOB).length, 1);
 	await parent.close();
+});
+
+test("rpc parent S24: a CI fleet wake stays held across settlement until manual compaction", { timeout: 90_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "in_progress" });
+	const provider = await MockProvider.start();
+	mkdirSync(join(held.home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(held.home.path, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 500 }));
+	const model = provider.addScript("s24-parent-ci", [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "true" } }], usage: { prompt_tokens: 1000, completion_tokens: 1 } },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "node -e 'setTimeout(() => {}, 4000)'" } }], usage: { prompt_tokens: 1000, completion_tokens: 1 } },
+		{ kind: "text", text: "S24 CI parent settled.", usage: { prompt_tokens: 1000, completion_tokens: 1 } },
+		{ kind: "text", text: "S24 CI parent summary.", usage: { prompt_tokens: 1000, completion_tokens: 1 } },
+		{ kind: "text", text: "S24 CI wake answered.", usage: { prompt_tokens: 1000, completion_tokens: 1 } },
+	], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider, settings: { compaction: { enabled: false, keepRecentTokens: 1 } } });
+	const child = startPiChild({ cwd: held.home.path, model, extensions: [COMMAND_POST_EXTENSION],
+		env: { ...agent.env, CP_HOME: held.home.path, PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "1", CP_PARENT_COMPACT_HOLD_SECONDS: "5" } });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); held.home.cleanup(); held.repo.cleanup(); });
+	child.send({ type: "prompt", id: "busy", message: "S24 finish this run before answering the CI wake." });
+	await waitFor(() => provider.requests("s24-parent-ci").length, (n) => n >= 2, { timeoutMs: 30_000, what: "over-threshold tool round" });
+	writeFileSync(held.stateFile, "green\n");
+	await notified(child, /CI\/PR OBSERVED/);
+	await child.waitFor((r) => r.type === "agent_settled", 30_000);
+	const ciWakes = () => child.records().filter((r) => r.type === "message_start" && (r.message as { customType?: string })?.customType === "cp-ci");
+	assert.equal(ciWakes().length, 0);
+	const log = join(held.home.path, LAYOUT.state, "daemon.log");
+	assert.match(readFileSync(log, "utf8"), /hold engaged phase=busy/);
+	child.send({ type: "compact", id: "compact-ci" });
+	const compact = await child.waitFor((r) => r.type === "response" && r.id === "compact-ci", 30_000);
+	assert.equal(compact.success, true, JSON.stringify(compact));
+	await child.waitFor((r) => r.type === "message_start" && ciWakes().length >= 1, 30_000);
+	assert.equal(ciWakes().length, 1);
+	assert.match(JSON.stringify(ciWakes()), /cp-held/);
+	assert.ok(child.records().findIndex((r) => r.type === "compaction_end") < child.records().indexOf(ciWakes()[0]!), JSON.stringify(child.records().map((r, index) => ({ index, type: r.type, id: r.id, customType: (r.message as { customType?: string })?.customType })).filter((r) => r.customType || r.type.includes("compaction") || r.type === "agent_settled" || r.type === "response")));
 });
 
 for (const [mode, name] of [

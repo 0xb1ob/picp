@@ -33,7 +33,7 @@ function fakePorts(prepare: ControlPorts["prepareImage"] | null = async (bytes, 
 		inject: (text, _deliverAs, images) => { state.injected.push({ text, ...(images ? { images } : {}) }); },
 		abort: () => {},
 		isIdle: () => true,
-		hasPendingMessages: () => true, // holds each handoff unseen: no re-hand (dashboard-compaction.test.ts)
+		hasPendingMessages: () => true, // Holds each handoff unseen; re-hand evidence: e2e/headless-lifecycle.test.ts.
 		sessionFile: () => "/tmp/operator-session.jsonl",
 		...(prepare ? { prepareImage: (bytes: Uint8Array, mime: string, limits: { maxEdge: number; maxBytes: number }) => { state.limits.push(limits); return prepare(bytes, mime, limits); } } : {}),
 	};

@@ -57,7 +57,8 @@ export class HeldRelease {
 			if (resolve?.next === "resolve" && resolve.updated_at > record.reported_at) continue;
 			out.push({ id, at: record.reported_at });
 		}
-		return out.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)).map((entry) => entry.id);
+		// reported_at has second precision: equal stamps keep fleet (dispatch) order, never an arbitrary id order.
+		return out.sort((a, b) => a.at.localeCompare(b.at)).map((entry) => entry.id);
 	}
 
 	/** Could a non-reviewer spawn start now, counting releasable authors as free? */

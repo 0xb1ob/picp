@@ -1,0 +1,5 @@
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -214 +213,0 @@
+-		if (running && event.customInstructions === running) return;

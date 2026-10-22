@@ -1,0 +1,5 @@
+diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
+--- a/src/parent-compact-hold.ts
++++ b/src/parent-compact-hold.ts
+@@ -119 +118,0 @@
+-		if (reading.over && !this.holding) this.#engage("busy", reading);

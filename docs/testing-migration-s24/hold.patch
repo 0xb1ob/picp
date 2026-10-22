@@ -1,0 +1,6 @@
+diff --git a/extensions/cp-bridge/index.ts b/extensions/cp-bridge/index.ts
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -356 +356 @@
+-		setImmediate(() => compaction.whenIdle(() => control?.settled()));
++		setImmediate(() => control?.settled());

@@ -1,0 +1,6 @@
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -15 +15 @@
+-const MAX_STREAK_COMPACTIONS = 3;
++const MAX_STREAK_COMPACTIONS = 2;

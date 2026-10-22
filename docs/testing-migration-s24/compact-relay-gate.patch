@@ -1,0 +1,6 @@
+diff --git a/extensions/cp-bridge/index.ts b/extensions/cp-bridge/index.ts
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -309 +309 @@
+-			if (!compaction.compacting()) return false;
++			if (true) return false;
