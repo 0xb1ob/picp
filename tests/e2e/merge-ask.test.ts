@@ -33,6 +33,11 @@ test("S12: status tool gates merge decisions on current CI and review evidence",
 			assert.equal(s.post.awaiting.read().items.length, 1, "rewording a deferred subject does not mint another row");
 		}
 		assert.ok(s.ghCalls().some((call) => call.includes(`head_sha=${head}`)), "CI query is scoped to the pushed head");
+		assert.ok(s.ghCalls().every((call) => !call.includes("run list")), "merge decisions never query a branch run list");
+		if (mode === "running") {
+			assert.match(JSON.stringify(events), /Awaiting you: none/);
+			assert.match(JSON.stringify(events), /Not asked yet — not ready to merge/);
+		}
 		assert.ok(s.ghCalls().some((call) => call.includes("runs/1200/attempts/2/jobs")), "CI query reads the actual attempt jobs");
 	}
 	const identity = s.post.awaiting.read().items[0]!.id;
@@ -170,4 +175,20 @@ test("S12: missing clone failures stay distinct from a gone job", { skip: SKIP, 
 		assert.equal(s.post.awaiting.list("deferred").length, 1);
 		assert.doesNotMatch(s.post.awaiting.list("deferred")[0]!.deferred_reason ?? "", /is gone/);
 	} finally { renameSync(`${clone}.missing`, clone); }
+});
+
+
+test("S13: legacy jobless deferred decisions name the missing job", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.seed("S13 legacy jobless");
+	await render(s, "Merge PR #51?", live.jobId);
+	const file = join(s.home, LAYOUT.awaitingFile);
+	const legacy = JSON.parse(readFileSync(file, "utf8"));
+	delete legacy.items[0].job_id;
+	writeFileSync(file, JSON.stringify(legacy));
+	const text = await render(s);
+	assert.match(text, /this row names no job/);
+	assert.equal(s.post.awaiting.list("deferred").length, 1);
+	assert.equal(s.post.awaiting.list("open").length, 0);
+	assert.equal(s.ghCalls().filter((call) => call.includes("actions/")).length, 0);
 });
