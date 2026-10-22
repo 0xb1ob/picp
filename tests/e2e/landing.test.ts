@@ -3970,7 +3970,7 @@ test("landing S10: unreadable forge and Actions evidence names the cause and mak
 	});
 });
 test("landing S10: cleanup failures preserve landed effects and resume", { skip: SKIP, timeout: 600_000 }, async (t) => {
-	for (const mode of ["delete", "close", "rebase"]) await t.test(mode, async (t) => {
+	for (const mode of ["delete", "close", "rebase", "merge-unknown"]) await t.test(mode, async (t) => {
 		const s = await startStack(t, { continuation: mode !== "rebase" });
 		const live = await s.held(`S10 cleanup ${mode}`, 914);
 		await s.post.continuation.serialize(live.jobId, async () => {});
@@ -3984,6 +3984,17 @@ test("landing S10: cleanup failures preserve landed effects and resume", { skip:
 			assert.match(result.text, /rebase is in progress/);
 			assert.equal(mergedCalls(result.calls).length, 0);
 			rmSync(join(gitDir, "rebase-merge"), { recursive: true });
+			return;
+		}
+		if (mode === "merge-unknown") {
+			s.setGh({ integration: true, runs: [run(914, live.head, "completed", "success")], routes: [{ match: "pr merge", replies: [{ code: 1, stderr: "connection reset by peer" }] }] });
+			const outcome = await s.post.continuation.trigger({ jobId: live.jobId, event: "startup" });
+			assert.equal(outcome.next, "retry", JSON.stringify(outcome));
+			const notices = readFileSync(join(s.home, LAYOUT.wakeupsFile), "utf8");
+			assert.match(notices, /connection reset by peer/);
+			assert.doesNotMatch(notices, /nothing was mutated/i);
+			assert.match(notices, /resumes, never starting over/);
+			assert.equal(readMergeReceipt(s.home, live.jobId), undefined);
 			return;
 		}
 		assert.equal((await s.integrate(live.jobId)).record.next, "advance");
