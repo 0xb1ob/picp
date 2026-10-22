@@ -128,6 +128,12 @@ test("4B1-T2: releasable keeps only live, idle, not-stopping held ship/pr author
 	await stopping;
 });
 
+test("4B1: authors reported in the same second are released in fleet order, not id order", async (t) => {
+	const b = await bench(t, 20, [held("cp-z-first"), held("cp-a-second")]);
+	for (const id of ["cp-z-first", "cp-a-second"]) b.workers.spawn(id);
+	assert.deepEqual(b.release.releasable(), ["cp-z-first", "cp-a-second"]);
+});
+
 test("4B1-T2: a script record is never releasable, even one shaped as a held ship/pr author", (t) => {
 	// The fleet schema refuses this shape, so a stub fleet feeds it: the filter must not depend on that.
 	const home = createScratchHome();
