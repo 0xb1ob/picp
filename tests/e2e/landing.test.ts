@@ -32,6 +32,8 @@ import { createViewer } from "../../src/viewer/server.ts";
 import type { AddressInfo } from "node:net";
 import {
 	COMMAND_POST_EXTENSION,
+ argOf,
+ captureSpawns,
 	CP_BRIDGE_EXTENSION,
 	startPiChild,
 	advanceBase,
@@ -306,6 +308,26 @@ process.exit(1);
 	chmodSync(join(bin, "gh"), 0o755);
 }
 
+test("landing S16: automatic green CI reviews use the current mandate reviewer", { skip: SKIP, timeout: 180_000 }, async (t) => {
+ const s = await startStack(t, { continuation: true });
+ const live = await s.held("S16 automatic reviewer", 916);
+ await s.post.continuation.serialize(live.jobId, async () => {});
+ const spawns = captureSpawns(s.post.manager);
+ const script = "s16-auto-review";
+ const model = s.provider.addScript(script, [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: live.jobId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["current reviewer"] } }] }]);
+ s.agentDir.writeModels(s.provider);
+ s.post.mandates.issue({ projects: ["demo"], job_ids: [live.jobId], objective: "review", reviewer_model: model, expiry: isoTimestamp(new Date(Date.now() + 86400000)), spend_cap: { usd: 10, tokens: 1000000 }, job_cap: 10 });
+ s.setGh({ integration: true, runs: [run(916, live.head, "completed", "success")] });
+ await s.tick(live.jobId);
+ await s.post.continuation.serialize(live.jobId, async () => {});
+ await s.post.reviewRuns.settled(`${live.jobId}#review-1`);
+ assert.ok(s.provider.requests(script).length > 0, "automatic review reaches the mandated model");
+ assert.equal(argOf(spawns.at(-1)?.args ?? [], "--model"), model);
+ assert.equal(argOf(spawns.at(-1)?.args ?? [], "--thinking"), "high");
+ assert.equal(JSON.parse(readFileSync(join(s.home, paths.reviewFile(live.jobId, 1)), "utf8")).verdict, "pass");
+ const events = readFileSync(join(s.home, paths.reviewRunDir(live.jobId, 1), "events.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+ assert.deepEqual(events.find((event) => event.type === "reviewer_model_selected")?.payload.source, "mandate");
+});
 /** Real CommandPost, workers and optional held continuation over a registered scratch project. */
 async function startStack(t: TestContext, options: { project?: boolean; env?: Record<string, string>; continuation?: boolean; packageRoot?: string; github?: boolean } = {}) {
 	const home = createScratchHome();

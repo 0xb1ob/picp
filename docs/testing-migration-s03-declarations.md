@@ -6,9 +6,10 @@ Scope: tests/ci-watch.test.ts declarations 41–80, last range; S02 and S07 carr
 
 ## Latest operator ruling and declaration-71 blocker
 
-The latest main-session decision parks declaration 71 as pending-fix for S03b. A product-fix job is running;
-S10b owns mapping 71 and retiring tests/ci-watch.test.ts after that fix merges. S03b keeps the file whole
-and adds no declaration-71 e2e case. This supersedes the prior S03b retirement assignment.
+The latest main-session decision parks declaration 71 as pending-fix for S03b. S10b owns mapping 71
+and retiring tests/ci-watch.test.ts after the product fix. Main now includes the job-less watch fix and
+its incoming regression; 71 remains parked by decision until S10b records the mapping and retirement.
+S03b keeps the file whole and adds no declaration-71 case. This supersedes the prior S03b assignment.
 
 On merged source HEAD 0ed75a6ed0f5bcf28e600c84275678cc6336f4ac, the strengthened real-parent case
 fails: malformed JSON and invalid fleet schema produce only one durable notice, both keyed by
