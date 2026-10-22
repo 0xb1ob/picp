@@ -622,17 +622,21 @@ test("landing: spawn pressure releases the oldest held author and a journal refu
 	const job = await s.post.ledger().create({ title: "fresh work under spawn pressure", project: "demo", kind: "ship", delivery: "local" });
 	const model = s.provider.addScript("spawn-pressure", [{ kind: "text", text: "Fresh worker running." }], { onExhausted: "repeat" });
 	s.agentDir.writeModels(s.provider);
-	const eventsFile = join(s.home, paths.runDir(older.jobId), "events.jsonl");
-	const journal = readFileSync(eventsFile, "utf8");
-	rmSync(eventsFile);
-	mkdirSync(eventsFile);
+	// Both authors' journals refuse: a transient busy older author must not let the dispatch pick newer and succeed.
+	const journals = [older.jobId, newer.jobId].map((id) => ({ file: join(s.home, paths.runDir(id), "events.jsonl"), content: readFileSync(join(s.home, paths.runDir(id), "events.jsonl"), "utf8") }));
+	for (const { file } of journals) {
+		rmSync(file);
+		mkdirSync(file);
+	}
 	try {
 		await assert.rejects(s.post.dispatch({ jobId: job.id, task: "Do the fresh work.", model, fetch: false }), /EISDIR/);
 		assert.equal(s.provider.requests("spawn-pressure").length, 0, "journal failure never starts the caller");
 		assert.equal(s.post.fleet.get(older.jobId)?.worker.pid, original.worker.pid);
 	} finally {
-		rmSync(eventsFile, { recursive: true });
-		writeFileSync(eventsFile, journal);
+		for (const { file, content } of journals) {
+			rmSync(file, { recursive: true });
+			writeFileSync(file, content);
+		}
 	}
 	s.post.dispatchQueue.enqueue(job.id, { task: "Do the fresh work.", model });
 	await s.post.dispatchQueue.drain();
