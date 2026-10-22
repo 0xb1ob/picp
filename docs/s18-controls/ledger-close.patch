@@ -1,0 +1,13 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+index f7705ce..61e8188 100644
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -159,7 +159,7 @@ export async function closeResearchLedgers(home: string, records: readonly Fleet
+ 		const envelope = readFiledEnvelope(home, r.job_id);
+ 		if (!envelope) continue;
+ 		try {
+-			await ledger?.close(r.job_id, derivedCloseReason(r, envelope, latestGateVerdict(home, r.job_id)).slice(0, 900));
++			// Negative control: omit the ledger close.
+ 			outcome.closed.push(r.job_id);
+ 		} catch (error) {
+ 			outcome.failed.push({ job_id: r.job_id, error: firstLine(error) });

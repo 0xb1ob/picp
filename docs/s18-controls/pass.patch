@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..0460f4e 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -623,7 +623,7 @@ export class Teardown {
+ 		if (latest.diff_stat.truncated) {
+ 			return { ok: false, failure: { code: "review_escalated", message: `${branch}: diff review attempt ${latest.attempt} has a truncated subject — omitted hunks are never review evidence`, fix: "keep the lease; stage smaller PRs and cp_review each head, then retry teardown" } };
+ 		}
+-		if (latest.verdict === "pass") return undefined;
++		if (latest.verdict === "pass") return { ok: false, failure: { code: "review_pending", message: "pass ignored", fix: "keep the lease" } };
+ 
+ 		if (latest.verdict === "revise") {
+ 			return {

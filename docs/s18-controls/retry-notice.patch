@@ -1,0 +1,13 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+index f7705ce..b3feb3b 100644
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -120,7 +120,7 @@ export function formatTeardown(result: TeardownResult): string {
+ 	if (result.failure) {
+ 		return `${result.job_id} kept: ${result.failure.code} — ${result.failure.message}\n  fix: ${result.failure.fix}`;
+ 	}
+-	return `${result.job_id}: already torn down${result.ledger_closed ? "; its ledger close was retried and the job is now closed" : ""}${result.ledger_close_error ? `; ledger close still failing (${result.ledger_close_error})` : ""}`;
++	return `${result.job_id}: already torn down${result.ledger_close_error ? `; ledger close still failing (${result.ledger_close_error})` : ""}`;
+ }
+ 
+ export interface LedgerCloseOutcome {

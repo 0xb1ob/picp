@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..e75b8df 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -397,7 +397,7 @@ export class Teardown {
+ 		const base = await this.#defaultBase(worktree);
+ 		const outcome =
+ 			kind === "research" ? await this.#researchGate(worktree, branch, base) : await this.#shipGate(worktree, branch, base, jobId);
+-		if (!outcome.ok || kind !== "ship") return outcome;
++		if (!outcome.ok) return outcome;
+ 		// The git facts hold. Only now, and only for a job that opted in, is there a
+ 		// second question: has the diff a human will merge actually been reviewed?
+ 		// It is a separate step on purpose — `#shipGate` stays a question about git.
