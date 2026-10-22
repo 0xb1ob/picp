@@ -231,6 +231,12 @@ test("S21: a rejected envelope and an observed worker loop emit durable deaths",
 			(rows) => rows.some((entry) => entry.keys?.includes(cls)), { timeoutMs: 10_000, what: `${cls} durable death` }).catch((error) => {
 				throw new Error(`${error.message}; fleet=${JSON.stringify(f.post.fleet.require(jobId))}`);
 			});
+		if (cls === "envelope_invalid") {
+			const again = await f.post.intake.intake(jobId);
+			assert.equal(again.failure, undefined, "second intake must not fail the rejected generation again");
+			assert.deepEqual(f.post.durableWakeups.pending().filter((entry) => entry.job_id === jobId), entries,
+				"a later intake must not enqueue another death");
+		}
 		assert.equal(f.post.fleet.require(jobId).failure?.class, cls);
 		assert.equal(entries.length, 1);
 		assert.equal(entries[0]?.kind, "death");
@@ -247,7 +253,22 @@ test("S21: parent shutdown preserves the interrupted worker without a death or s
 	const model = f.script("shutdown-owned", [{ kind: "hang" }]);
 	await f.post.dispatch({ jobId, task: "Wait for the parent.", model, fetch: false, toolCallCap: 100, wallClockSeconds: 90 });
 	await waitFor(() => f.provider.requests("shutdown-owned").length, (n) => n > 0, { timeoutMs: 15_000, what: "worker request before shutdown" });
-	await f.post.shutdown();
+	const worker = f.post.manager.get(jobId)!.worker;
+	const pid = worker.pid;
+	assert.ok(pid);
+	process.kill(pid, "SIGSTOP");
+	const off = f.post.bounds.watch(jobId, worker, { wall_clock_seconds: 1, tool_call_cap: 100 });
+	const stopping = f.post.shutdown();
+	try {
+		await new Promise((resolve) => setTimeout(resolve, 1_200));
+		assert.equal(f.post.manager.closing, true);
+		assert.equal(f.post.fleet.require(jobId).phase, "waiting", "shutdown owns a concurrent wall-clock breach");
+		assert.deepEqual(f.bounds, [], "shutdown must suppress the bound emitter");
+	} finally {
+		process.kill(pid, "SIGCONT");
+		off();
+		await stopping;
+	}
 	await f.post.failures.evaluate(jobId);
 	assert.equal(readFleet(f.home).jobs[0]?.phase, "waiting");
 	assert.deepEqual(f.post.durableWakeups.pending(), []);

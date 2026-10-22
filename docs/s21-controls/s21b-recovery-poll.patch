@@ -1,0 +1,5 @@
+--- a/src/recovery-notice.ts
++++ b/src/recovery-notice.ts
+@@ -24 +24 @@
+-		lines.push(`  next: ${next.join(" or ") || "cp_teardown the listed jobs"}.`);
++		lines.push(`  next: ${next.join(" or ") || "cp_teardown the listed jobs"}; poll for progress.`);
