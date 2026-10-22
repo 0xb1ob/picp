@@ -41,14 +41,14 @@ function parseArgs(argv: readonly string[]): Args {
 	return args;
 }
 
-/** The bodies of `<!-- manifest:<name> -->` … `<!-- /manifest:<name> -->` in each slice file; none at all is a finding. */
+/** The bodies of `<!-- manifest:<name> -->` … `<!-- /manifest:<name> -->` in each doc; none at all is a finding. */
 function section(docs: readonly string[], name: string, findings: string[]): string[] {
 	const bodies = docs.flatMap((doc) => new RegExp(`<!-- manifest:${name} -->\\n([\\s\\S]*?)<!-- /manifest:${name} -->`).exec(doc)?.[1] ?? []);
 	if (bodies.length === 0) findings.push(`manifest has no ${name} section`);
 	return bodies;
 }
 
-/** Table rows of each section body as trimmed cells, header and separator rows dropped; backticks are stripped. */
+/** Table rows of each section body as trimmed cells, header and separator dropped; backticks are stripped. */
 function rows(bodies: readonly string[]): string[][] {
 	return bodies.flatMap((body) => tableLines(body).map((line) => line.slice(1, line.endsWith("|") ? -1 : undefined).split(" | ").map((cell) => cell.trim().replace(/^`|`$/g, ""))));
 }
@@ -58,7 +58,7 @@ function tableLines(body: string): string[] {
 	return body.split("\n").filter((line) => line.startsWith("|") && !/^\|\s*-/.test(line)).slice(1);
 }
 
-/** Every slice file under the ledger directory that sits beside the manifest (`docs/testing-migration/*.md`). */
+/** Every slice file in the ledger directory beside the manifest (`docs/testing-migration/*.md`). */
 function ledgerFiles(manifest: string): string[] {
 	const dir = manifest.replace(/\.md$/, "");
 	return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".md")).sort().map((name) => `${dir}/${name}`) : [];
@@ -67,22 +67,29 @@ function ledgerFiles(manifest: string): string[] {
 const PATCH_RE = /<!-- patch:([\w-]+) -->\n```diff\n([\s\S]*?)\n```/g;
 const LEDGER_TABLES = ["prs", "scenarios", "assertions", "regressions", "incoming", "feature-removed", "baseline"];
 
-/** Preservation: the old manifest's table rows and patch blocks each appear exactly once, byte-identical, in the slice files. */
-export function preservationFindings(oldDoc: string, docs: readonly string[]): string[] {
+/** Rows and patch blocks of the `before` docs each appear once, byte-identical, in the `after` docs. */
+export function preservationFindings(before: readonly string[], after: readonly string[]): string[] {
 	const findings: string[] = [];
-	const compare = (label: string, before: string[], after: string[]) => {
-		if (before.length !== after.length) findings.push(`preservation: ${label} has ${before.length} before, ${after.length} after`);
-		const left = [...before].sort();
-		const right = [...after].sort();
+	const compare = (label: string, was: string[], now: string[]) => {
+		if (was.length !== now.length) findings.push(`preservation: ${label} has ${was.length} before, ${now.length} after`);
+		const left = [...was].sort();
+		const right = [...now].sort();
 		if (left.some((line, i) => line !== right[i])) findings.push(`preservation: ${label} content differs`);
 	};
 	for (const name of LEDGER_TABLES) {
 		const bodies = (doc: string) => (new RegExp(`<!-- manifest:${name} -->\\n([\\s\\S]*?)<!-- /manifest:${name} -->`).exec(doc)?.[1] ?? "").replace(PATCH_RE, "");
-		compare(`${name} rows`, tableLines(bodies(oldDoc)), docs.flatMap((doc) => tableLines(bodies(doc))));
+		compare(`${name} rows`, before.flatMap((doc) => tableLines(bodies(doc))), after.flatMap((doc) => tableLines(bodies(doc))));
 	}
 	const patches = (doc: string) => [...doc.matchAll(PATCH_RE)].map((match) => match[0]);
-	compare("patch blocks", patches(oldDoc), docs.flatMap(patches));
+	compare("patch blocks", before.flatMap(patches), after.flatMap(patches));
 	return findings;
+}
+
+/** The manifest and every slice file as committed at `ref`. */
+function docsAt(ref: string, manifest: string): string[] {
+	const dir = manifest.replace(/\.md$/, "");
+	const files = git("ls-tree", "--name-only", ref, `${dir}/`).split("\n").filter((file) => file.endsWith(".md"));
+	return [manifest, ...files].map((file) => git("show", `${ref}:${file}`));
 }
 
 function git(...args: string[]): string {
@@ -174,7 +181,7 @@ function main(): number {
 	const findings: string[] = [];
 	const doc = readFileSync(args.manifest, "utf8");
 	const docs = [doc, ...ledgerFiles(args.manifest).map((file) => readFileSync(file, "utf8"))];
-	if (args.preservedFrom) findings.push(...preservationFindings(git("show", `${args.preservedFrom}:${args.manifest}`), docs));
+	if (args.preservedFrom) findings.push(...preservationFindings(docsAt(args.preservedFrom, args.manifest), docs));
 	const pinned = /^Baseline sha: `([0-9a-f]{40})`$/m.exec(doc)?.[1];
 	if (!pinned) findings.push("manifest names no `Baseline sha:`");
 	if (args.base && pinned && args.base !== pinned) findings.push(`--base ${args.base} is not the manifest's baseline ${pinned}`);

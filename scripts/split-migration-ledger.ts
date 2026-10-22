@@ -94,10 +94,11 @@ function main(): void {
 				return false;
 			}).join("\n");
 		});
-		out = out.replace(m[0], m[0].replace(body, kept.join("")));
+		out = out.replace(m[0], () => m[0].replace(body, () => kept.join("")));
 	}
 	const gone = new Set([...movedPatches.values()].flat());
-	out = out.replace(PATCH, (block, id: string) => (gone.has(id) ? "" : block)).replace(/\n{3,}/g, "\n\n");
+	const dropped = new RegExp(`(?:(?<=\\n)\\n)?${PATCH.source}`, "g");
+	out = out.replace(dropped, (block, id: string) => (gone.has(id) ? "" : block));
 	mkdirSync(DIR, { recursive: true });
 	for (const [key, perSlice] of moved) {
 		const file = `${DIR}/${key}.md`;

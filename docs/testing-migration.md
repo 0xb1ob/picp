@@ -287,6 +287,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P22 | 22 | `tests/e2e/reports-push.test.ts` | 4 |
 | P23 | 23 | `tests/e2e/memory.test.ts` | 3 |
 | P24 | 24 | `tests/e2e/host-compatibility.test.ts` | 3 |
+| S19 | 06 | `tests/e2e/wake-delivery.test.ts` | 11 |
 <!-- /manifest:prs -->
 
 The plan proposed 6 cases for all of behavior 05. P3 is a first slice of 4 cases over 4 files. P3b
@@ -397,6 +398,11 @@ moves first.
 | 05-S09-6 | `tests/e2e/landing.test.ts` | landing S09: public promotion before or during integration waits for a fresh report |
 | 05-S09-7 | `tests/e2e/landing.test.ts` | landing S09: infra reruns once while second attempts and test failures promote |
 | 05-S09-8 | `tests/e2e/landing.test.ts` | landing S09: a missing implementer surfaces without spending the same-head repair |
+| 05-S02-1 | `tests/e2e/landing.test.ts` | landing S02: only reported held PR deliveries are queried |
+| 05-S02-2 | `tests/e2e/landing.test.ts` | landing S02: aggregate CI and terminal PR facts preserve the current head |
+| 05-S02-3 | `tests/e2e/landing.test.ts` | landing S02: watch delivery, restart and query cadence survive real forge failures |
+| 05-S02-4 | `tests/e2e/landing.test.ts` | landing S02: unavailable gh disables GitHub queries while GitLab remains observable |
+| 05-S02-5 | `tests/e2e/landing.test.ts` | landing S02: watcher queries stay nonblocking while workers refuse CI waits |
 | 05-S03-memory | `tests/e2e/landing.test.ts` | landing S03: corrupt CI memory recovers and arrival preserves fleet and decisions |
 | 05-S03-notice | `tests/e2e/landing.test.ts` | landing S03: actual parent CI notices carry facts and integration advice |
 | 05-S03-deadline | `tests/e2e/landing.test.ts` | landing S03: a durable review deadline resumes once and respects changed facts |
@@ -449,6 +455,37 @@ moves first.
 | DR-20 | `tests/e2e/diff-review.test.ts` | S05: only a complete fifth review asking for revisions on a bound PR creates a final-fix decision |
 | S06-5 | `tests/e2e/landing.test.ts` | landing: forge observation failures refuse merge receipts without leaking external replies |
 | S06-6 | `tests/e2e/landing.test.ts` | landing: spawn pressure releases the oldest held author and a journal refusal leaves room retryable |
+| S19-1 | `tests/e2e/wake-delivery.test.ts` | wake S19: a real operator reconnects read-only and delivers a gap escalation once |
+| S19-2 | `tests/e2e/wake-delivery.test.ts` | wake S19: host escalation watch suppresses represented decisions, retries read failures and bounds write failures |
+| S19-3 | `tests/e2e/wake-reattach.test.ts` | wake S19: real bridge retries its host transport with capped backoff and probes silent or superseded hosts |
+| S19-4 | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict: ready |
+| S19-4-revise | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict: revise |
+| S19-4-red | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict: red |
+| S19-4-running | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict: running |
+| S19-4-late | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict: late |
+| S19-4-late-failure | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict: late-failure |
+| S19-5 | `tests/e2e/wake-send-first.test.ts` | wake S19: assistant and custom send markers do not hold ordinary parent wakes |
+| S19-6 | `tests/e2e/wake-send-first.test.ts` | wake S19: user sends hold wakes through tools, answered decisions bypass and clean replies release once |
+| S19-7 | `tests/e2e/wake-send-first.test.ts` | wake S19: an aborted send releases held wakes before another clean answer |
+| S19-8 | `tests/e2e/wake-send-first.test.ts` | wake S19: the oldest held wake reaches pi's queue within 120 seconds while its send still streams |
+| S19-9 | `tests/e2e/wake-deferred.test.ts` | wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: race |
+| S19-9-failure | `tests/e2e/wake-deferred.test.ts` | wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: failure |
+| S19-9-late | `tests/e2e/wake-deferred.test.ts` | wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: late |
+| S19-10 | `tests/e2e/wake-deferred.test.ts` | wake S19: a real CI event cannot open an unreviewed, superseded or unpushed head |
+| S19-11 | `tests/e2e/wake-deferred.test.ts` | wake S19: a native plan-gate verdict leaves the held merge gate and awaiting bytes untouched |
+| 05-S15-C | `tests/e2e/diff-review.test.ts` | S15: reviewers receive bounded whole-file snapshots with resolved task paths and capped consumers |
+| 05-S15-F | `tests/e2e/diff-review.test.ts` | S15: a git object read failure is named in reviewer context without fabricating absence |
+| 05-S15-W | `tests/e2e/landing.test.ts` | landing S15: durable review evidence owns the merge window across parent restarts |
+| 05-S15-T | `tests/e2e/diff-review.test.ts` | S15: the real cp_review tool relays bounded verdicts and policy refusals without review bodies |
+| 05-S15-P | `tests/e2e/diff-review.test.ts` | S15: dispatch preview rejects parent tools in external worker profile configuration |
+| 05-S15-A | `tests/e2e/diff-review.test.ts` | S15: real reviewer attempts persist before waiting, reject duplicates and announce only after handback |
+| 05-S15-X | `tests/e2e/diff-review.test.ts` | S15: a failed verdict transport never resurrects a real review's pending slot |
+| 05-S15-O | `tests/e2e/diff-review.test.ts` | S15: orphan reconciliation consumes durable legacy markers and isolates a failed decision write |
+| 05-S15-S | `tests/e2e/diff-review.test.ts` | S15: real review decision writes recover once before persistence and preserve partial decisions |
+| 05-S15-B | `tests/e2e/diff-review.test.ts` | S15: a lost caller handback cannot swallow a real review verdict or pin its slot |
+| 05-S15-Q | `tests/e2e/diff-review.test.ts` | S15: a real quality waiter filesystem failure becomes an operational wakeup |
+| 05-S15-D | `tests/e2e/landing.test.ts` | landing S15 retry: real parent delivery confirms, retries withheld verdicts and expires permanent suppression |
+| 05-S15-L | `tests/e2e/landing.test.ts` | landing S15 order: a real verdict wakes the parent before its deadline continuation merges |
 | 05-S14-bind | `tests/e2e/landing.test.ts` | landing S14: binding an existing PR checks forge facts and preserves checkout history |
 | 05-S14-unsafe | `tests/e2e/landing.test.ts` | landing S14: unsafe existing PRs refuse before leasing or contacting a worker |
 | 05-S14-resolution | `tests/e2e/landing.test.ts` | landing S14: worker PR reports resolve against the registered origin and drive the CI watch |
@@ -726,15 +763,46 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/merges.test.ts` | forge PR 2: a stored receipt for another job or branch is refused, and a crash before the fleet patch is repaired | 05-6 | mapped | P3c control M5 skips repairing an existing receipt: actual [false,false,open,1], expected [false,true,merged,1]. Exact patch and command below; fixed case passes |
 | `tests/merges.test.ts` | forge PR 2: a mismatched observation records nothing, and a legacy receipt with no forge block still reads | 05-6 | mapped | P3c control M6 drops the GitLab web_url repository check: /could not read PR .*\(mismatch: / fails, actual merged but names no merge commit. Exact patch and command below; fixed case passes |
 | `tests/merges.test.ts` | #326: afterRecorded runs on new and existing receipts; a throwing port leaves the receipt and names the failure | S06-2 | mapped | real ledger corruption preserves receipt, names deploy failure and retry, then quiet idempotent replay; 05-5 covers no opt-in. S06-deploy mutation fails the actual call. |
+| `tests/ci-watch.test.ts` | a held delivery:pr job with an open PR receipt is watched | 05-S02-1 | mapped | S02 declaration 1; rerun S03-eligible makes isWatched false and fails the eligible delivery is queried (undefined instead of ci_green). |
+| `tests/ci-watch.test.ts` | waiting, done and failed jobs are not watched | 05-S02-1 | mapped | S02 declaration 2; rerun S03-exclusions makes isWatched true; all three independent phase subtests fail checked exclusion. |
+| `tests/ci-watch.test.ts` | delivery local and pipeline are not watched | 05-S02-1 | mapped | S02 declaration 3; replayed S03-delivery removes only the delivery guard and both independent local/pipeline subtests fail. S03-exclusions separately fails all eleven exclusions. Exact patches and bases: docs/testing-migration-s03-replayed-controls.md. |
+| `tests/ci-watch.test.ts` | a held job with no PR receipt is not watched | 05-S02-1 | mapped | S02 declaration 4; replayed S03-receipt makes only absent PR receipts eligible, and independent empty/artifact-only receipt subtests fail. S03-exclusions separately covers both. Exact patches and bases: docs/testing-migration-s03-replayed-controls.md. |
+| `tests/ci-watch.test.ts` | the set drains itself: a merged or landed PR receipt is not watched | 05-S02-1 | mapped | S02 declaration 5; replayed S03-landed compares only exact merged status; independent landed/MERGED/padded-merged subtests fail. S03-exclusions separately fails all four merged/landed variants. Exact patches and bases: docs/testing-migration-s03-replayed-controls.md. |
+| `tests/ci-watch.test.ts` | a job whose envelope slot was reopened by a promote is not watched | 05-S02-1 | retained | S02 declaration 6 retained verbatim in tests/ci-watch-retained.test.ts. FleetStore rejects held without reported_at before isWatched; no CommandPost entry reaches the predicate with that slot. Removing the predicate stays green in the only-reported e2e, so it does not replace this unit. |
+| `tests/ci-watch.test.ts` | all runs completed green on the current head derives exactly one ci_green | 05-S02-2 | mapped | S02 declaration 7; success plus skipped emits one current-head green; NC-39 suppressing green fails the green event assertion. |
 | `tests/ci-watch.test.ts` | rerunwake-12z: the derived key carries the attempt, and stays historical without a run id | 05-S02b-legacy | retained | S02 declaration 8 retained verbatim in tests/ci-watch-retained.test.ts. Actions rejects id-less runs before derivation; no CommandPost entry supplies that helper-only run. Attempt identities remain covered by 05-8 / NC-32; consumer refusal and legacy-arrival controls do not replace this helper assertion. |
+| `tests/ci-watch.test.ts` | one unfinished run on the head emits nothing — the aggregate rule | 05-S02-2 | mapped | S02 declaration 9; NC-S02-aggregate fails one unfinished workflow defers the aggregate. |
+| `tests/ci-watch.test.ts` | a green run on a superseded sha with none on the current head emits nothing | 05-S02-2 | mapped | S02 declaration 10; NC-S02-superseded relabels a stale raw Actions response and fails a superseded green is no verdict. |
+| `tests/ci-watch.test.ts` | a completed non-green run on the current head derives ci_failed, never ci_green | 05-S02-2 | mapped | S02 declaration 11; NC-S02-red suppresses red and fails its observation count, actual 0 versus expected 1. |
+| `tests/ci-watch.test.ts` | a merged PR derives pr_merged carrying the merge commit, and no CI event | 05-S02-2 | mapped | S02 declaration 12; NC-S02-terminal fails pr_merged equality with actual pr_closed. |
+| `tests/ci-watch.test.ts` | a closed unmerged PR derives pr_closed | 05-S02-2 | mapped | S02 declaration 13; NC-S02-closed fails closed fact count, actual 0 versus expected 1. |
+| `tests/ci-watch.test.ts` | zero runs for the branch emits nothing and is not an error | 05-S02-2 | mapped | S02 declaration 14; NC-S02-empty fabricates green and fails no runs is no verdict. |
 | `tests/ci-watch.test.ts` | two ticks with identical facts and an observed arrival wake once | 05-8 | mapped | S02 declaration 15; confirmed green is absent on repeat; NC-41 fails an arrived green attempt is not announced again. |
+| `tests/ci-watch.test.ts` | sent is not delivered: an unconfirmed fact is sent again after the retry window | 05-S02-3 | mapped | S02 declaration 16; first send, retry-window suppression, same-key resend and one journal event; NC-S02-retry fails one resend preserves identity. |
+| `tests/ci-watch.test.ts` | pi-command-post-jua: an unconfirmed fact gets one resend, never a third send | 05-S02-3 | mapped | S02 declaration 17; NC-S02-resend removes resent guard and fails never a third send. |
+| `tests/ci-watch.test.ts` | a restart over the same state file does not re-announce a confirmed fact | 05-S02-3 | mapped | S02 declaration 18; NC-S02-restart fails confirmed arrival survives reconstruction. |
 | `tests/ci-watch.test.ts` | rerunwake-12z: a re-run that fails again on the same head wakes again | 05-8 | mapped | S02 declaration 19; NC-32 forces attempt 1 identity and fails a new attempt is a new failure even on the same head. |
 | `tests/ci-watch.test.ts` | rerunwake-12z: a green re-run after a red attempt wakes | 05-8 | mapped | S02 declaration 20; NC-39 suppresses green and fails a green rerun follows a failed attempt. |
 | `tests/ci-watch.test.ts` | rerunwake-12z: a re-run of an already-announced green head is a new fact | 05-8 | mapped | S02 declaration 21; NC-32 forces attempt 1 identity and fails a new attempt is a new failure even on the same head; the same scenario also checks green attempt 4 after confirmed attempt 3. |
 | `tests/ci-watch.test.ts` | rerunwake-12z: the same completed attempt polled twice wakes once | 05-8 | mapped | S02 declaration 22; NC-40 removes red arrival deduplication and fails an arrived attempt is not announced again. |
+| `tests/ci-watch.test.ts` | rerunwake-12z: a restart over the same run identity does not re-announce | 05-S02-3 | mapped | S02 declaration 23; NC-S02-restart fails confirmed arrival survives reconstruction. |
 | `tests/ci-watch.test.ts` | a force-push makes the new head a new key, and does not retract the old one | 05-8 | mapped | S02 declaration 24; NC-S02-key fails pushed-head key includes its current head; NC-S02-history pins historical red facts. |
 | `tests/ci-watch.test.ts` | ci_failed, then a force-push, then green: the failure is neither repeated nor retracted | 05-8 | mapped | S02 declaration 25; NC-S02-history fails one journal event per completed attempt before reaching the pushed-green historical count; NC-S02-key pins current-head identity. |
 | `tests/ci-watch.test.ts` | a job that leaves the watch set is pruned from the state file | 05-8 | mapped | S02 declaration 26; NC-S02-prune fails finished deliveries leave the watch. |
+| `tests/ci-watch.test.ts` | a parked job's row survives the prune but is never ticked; isWatched still excludes it; done rows still prune | 05-S02-1 | mapped | S02 declaration 27; NC-S02-parked fails parked rows survive held-watch pruning; NC-S02-prune pins done pruning and NC-S02-eligibility pins shared exclusion. |
+| `tests/ci-watch.test.ts` | every command the watcher builds passes detectCiWait | 05-S02-5 | mapped | S02 declaration 28; detectCiWait checks every actual watcher command; S03-blocking changes ghPrRest to run watch 12345 and fails watcher command run watch 12345 (blocking_watch instead of undefined); existing NC-S02-policy separately checks the real worker refusal. |
+| `tests/ci-watch.test.ts` | a query error backs off exponentially and a success resets it | 05-S02-3 | mapped | S02 declaration 29; twelve real failed reads, exact exponential delays through cap, then success resets count; NC-S02-cap fails errors back off exponentially and cap. |
+| `tests/ci-watch.test.ts` | a CI read refused for permission records last_ci unreadable until a read succeeds; a network error is unknown | 05-S02-3 | mapped | S02 declaration 30; NC-S02-permission fails last_ci equality, actual unknown versus expected unreadable. |
+| `tests/ci-watch.test.ts` | a query that learned nothing does not age the head it did not read (pi-command-post-8ok) | 05-S02-3 | mapped | S02 declaration 31; twelve failed reads keep old observedAt, legacy unresolved head keeps it too; NC-S02-age advances failed-query age and fails failed queries never refresh an unread head. |
+| `tests/ci-watch.test.ts` | a missing gh disables the watch, says so once, and emits nothing | 05-S02-4 | retained | S02 declaration 32 retained verbatim in tests/ci-watch-retained.test.ts. CommandPost installs no onDisabled callback; its entry points cannot reach the injected callback-count assertion. The unavailable-gh e2e and S03b-disable cover the reachable disabled state without replacing this unit. |
+| `tests/ci-watch.test.ts` | forge PR 3: missing gh stops only the GitHub job; a GitLab MR is still observed, claims no CI while open and wakes once on merge | 05-S02-4 | retained | S02 declaration 33 retained verbatim in tests/ci-watch-retained.test.ts. No CommandPost entry installs onDisabled, so it cannot reach the callback-count assertion. The unavailable-gh e2e and S03b-gitlab cover reachable GitLab outcomes and same-key restart without replacing this unit. |
+| `tests/ci-watch.test.ts` | forge PR 3: a GitLab MR maps onto the watch's terminal shape, a failed read is that job's error, and GitHub urls never reach the observer | 05-S02-4 | mapped | S02 declaration 34; NC-S02-gitlab fails the checked list after gh disablement; the scenario also asserts scoped 503 and exact closed/merge payloads. |
+| `tests/ci-watch.test.ts` | an announced verdict on an open PR is re-checked at the idle multiplier | 05-S02-3 | mapped | S02 declaration 35; NC-S02-idle fails settled heads use idle cadence. |
+| `tests/ci-watch.test.ts` | a job with no verdict yet is re-checked at the base interval | 05-S02-3 | mapped | S02 declaration 36; NC-S02-base fails unfinished heads use base cadence. |
+| `tests/ci-watch.test.ts` | a tick that is not due yet is skipped, not queried | 05-S02-3 | mapped | S02 declaration 37; NC-S02-due fails skipped includes job. |
+| `tests/ci-watch.test.ts` | an overlapping tick returns the first one's promise: no double query | 05-S02-3 | mapped | S02 declaration 38; NC-S02-overlap fails overlapping ticks query once. |
+| `tests/ci-watch.test.ts` | nextDueMs: base, idle multiplier, exponential backoff, capped | 05-S02-3 | mapped | S02 declaration 39; NC-S02-base, NC-S02-idle and NC-S02-cap fail the corresponding public scheduling assertions. |
+| `tests/ci-watch.test.ts` | a malformed CP_CI_WATCH_SECONDS falls back to the default, never to off | 05-S02-3 | mapped | S02 declaration 40; NC-S02-env fails watch interval "nope", actual 0 versus expected 60000. |
 | `tests/ci-watch.test.ts` | the watcher writes only its own state file: no awaiting rows, no receipts | 05-S03-memory | mapped | S03 declaration 41; S03-fleet-write adds a fleet receipt write to the watch-store mutation and fails a watch tick writes no receipts or fleet state. Positive case also confirms arrival persistence, unchanged fleet and zero awaiting/checkpoint rows. |
 | `tests/ci-watch.test.ts` | state/ci-watch.json round-trips and refuses an invalid shape | 05-S03-memory | mapped | S03 declaration 42; real corrupt on-disk JSON/schema/missing metadata/null jobs recover to schema-versioned arrival state; S03-schema bypasses the read validator and fails corrupt memory is forgotten, not a failed read (1 instead of 0). |
 | `tests/ci-watch.test.ts` | an unreadable state file degrades to no memory instead of throwing out of a tick | 05-S03-memory | mapped | S03 declaration 43; S03-corrupt throws from the JSON catch and fails corrupt memory is forgotten, not a failed read (1 error instead of 0); docs/testing-migration-s03-declarations.md records the executed control. |
@@ -920,12 +988,81 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/held-release.test.ts` | 4B1-T3(b): a shutdown that rejects leaks no reservation and leaves nothing stopping | S06-6 | retained | tests/held-release-retained.test.ts preserves injected shutdown rejection; the real RPC shutdown cannot be made to throw the supplied fake error through a public request. |
 | `tests/held-release.test.ts` | 4B1-T3(c): busy flips between selection and re-check — refused, nothing shut down or journaled | S06-6 | retained | tests/held-release-retained.test.ts preserves the getter that flips busy on its second read; production has no await between selection and recheck, so an external request cannot inject that getter race. |
 | `tests/held-release.test.ts` | wasReleased: the last lifecycle marker decides | S06-6 | mapped | cp_send restores the released author and records worker_revived; another send reaches that revived process with unchanged pid, while ordinary workers do not need restoration. review-lifecycle returning false fails sending to the released author. |
+| `tests/escalation-relay-watch.test.ts` | dueDirect: open past the 10 s grace; each existing relay path suppresses it | S19-2 | retained | tests/escalation-relay-watch-retained.test.ts preserves the declaration verbatim: parent-host's public socket watch always calls EscalationStore.open(), so an answered record cannot reach dueDirect even when legacy disk data is seeded. Reachable grace, asks, ledger and outbox cases also run through S19-2. |
+| `tests/escalation-relay-watch.test.ts` | host watch: a code-raised escalation lands once as esc:<id> in the outbox; restart, ticks and acks add nothing; backstop still fires if undelivered | S19-2 | mapped | NC S19-3 fails restart must not reframe an existing outbox relay; actual subscriber frames, durable ids and a real operator's overdue backstop are checked. |
+| `tests/escalation-relay-watch.test.ts` | a failing outbox write is reported by the caller and is not re-framed by this process each tick | S19-2 | mapped | NC S19-2 fails failed outbox write must not reframe each tick (2 versus 1); real filesystem write refusal, host log and socket frames. |
+| `tests/escalation-relay-watch.test.ts` | a store, ledger or outbox read failure propagates (the host logs it; never a silent skip) | S19-2 | mapped | NC S19-5 fails visible read failure; three real corrupt files are repaired and pending delivery recovers. |
+| `tests/escalation-relay-watch.test.ts` | directRelay: project-tagged, escalation kind, id and question in the text | S19-2 | mapped | NC S19-4 fails project-tagged decision text regex; actual host outbox relay also pins kind, escalationId and jobId. |
+| `tests/cp-bridge-reattach.test.ts` | a killed and restarted host is re-attached read-only: relays resume with no cp_parent call, the gap escalation once | S19-1 | mapped | S19-NC-1 fails replacement-host reattachment; real parent sends settle both before operator attach and live, real host stops/restarts, pre-gap and gap escalations reach actual operator model once, generation stays unchanged during absence and advances only once when explicitly started. No fake parent or fake operator extension context. |
+| `tests/bridge-reattach.test.ts` | the loop retries with doubling delay up to the cap, one loop at a time, until an attempt succeeds | S19-3 | mapped | NC S19-6 fails the measured cap assertion at 64009 ms; real forwarding transport records attempts, no overlap, success quiescence and fresh reconnect after a later loss. |
+| `tests/bridge-reattach.test.ts` | cancel stops the loop, including an attempt already in flight | S19-3 | retained | tests/bridge-reattach-retained.test.ts preserves the declaration: cp-bridge session_shutdown is the only public cancel caller; the operator process then exits, so a callback resuming after cancel cannot be observed through a continuing public session. |
+| `tests/bridge-reattach.test.ts` | a close during the attempt that just succeeded schedules one more attempt | S19-3 | retained | tests/bridge-reattach-retained.test.ts preserves the declaration: cp-bridge reattachOnce has no await after track(attached), so its public socket-close callback cannot call schedule synchronously inside the successful attempt as this injected callback does. |
+| `tests/bridge-reattach.test.ts` | probeHost: an answering current host is live; a silent, failing or superseded one is not | S19-3 | mapped | NC S19-7 fails waiting for silent established host detachment; real hello forwarding, withheld replies, close during hello, superseded PID and unreadable generation directory cover the branches. |
+| `tests/deferred-recheck.test.ts` | a 'green but unreviewed' row is opened by the real passing verdict, and only once | S19-4 | mapped | ready mode drives cp_review through a real reviewer process; stale pass leaves current head deferred; NC S19-8 leaves the decision deferred at verdict delivery. |
+| `tests/deferred-recheck.test.ts` | ReviewRuns awaits the recheck before it sends the wake-up | S19-4 | mapped | ready mode snapshots disk at the first parent request carrying the actual passing review; NC S19-8 fails its open-state assertion. |
+| `tests/deferred-recheck.test.ts` | CommandPost plumbs beforeWakeup into the reviewer delivery path | S19-4 | mapped | real command-post extension, cp_review and report_verdict process path; NC S19-8 removes review-triggered release and fails the consumer snapshot. |
+| `tests/deferred-recheck.test.ts` | a re-gate that finishes inside the bound never takes the late path | S19-4 | mapped | ready mode receives the open row and one bounded notice in the original review wake; NC S19-16 drops the in-bound raised rows and fails one opening produces one operator notice. |
+| `tests/deferred-recheck.test.ts` | the notice is one bounded line naming the decision, never a table | S19-4 | mapped | ready mode checks decision name, cp_decide, one line and at most 300 characters; NC S19-17 removes the name and fails Ship cp-held (PR 58). |
+| `tests/deferred-recheck.test.ts` | a real passing diff-review wake-up releases; a real revise does not | S19-4 | mapped | S19-NC-18 fails a revise verdict must not read the CI gate; real revise also leaves awaiting bytes unchanged; S19-NC-8 fails open-at-passing-verdict receipt. |
+| `tests/deferred-recheck.test.ts` | a malformed, absent or foreign payload never throws and never releases | S19-11 | retained | verbatim in tests/deferred-recheck-retained.test.ts: report_verdict and pending-review recovery validate/build native wake-ups; no public entry accepts primitive or contradictory ReviewWakeup payloads. Native gate/revise branches run through S19-11/4. |
+| `tests/deferred-recheck.test.ts` | a row deferred on running CI is opened by the cp-ci event, exactly once, with no render | S19-9 | mapped | S19-NC-19 fails the actual CI consumer's open-state snapshot; S19-NC-20 produces two promotion notices. |
+| `tests/deferred-recheck.test.ts` | a hook that throws costs the row, never the wake-up | S19-4 | retained | verbatim in tests/deferred-recheck-retained.test.ts: CommandPost supplies an async before wrapper around a bounded failure-absorbing recheck; no public tool/parent option injects this synchronous throwing hook. |
+| `tests/deferred-recheck.test.ts` | afterWakeup runs after the wake-up is sent, and a throwing one is reported, not fatal | S19-4 | retained | known-regression declaration verbatim in tests/deferred-recheck-retained.test.ts: native afterWakeup calls async HeldContinuation.onVerdict, so the injected synchronous afterWakeup-threw branch has no public callback replacement entry; ordering assertions remain intact with no deletion credit. |
+| `tests/deferred-recheck.test.ts` | a cp-ci tick and a passing review racing the same file raise one row, once | S19-9 | mapped | S19-NC-20 fails one promotion notice (two); S19-NC-21 loses the unrelated concurrent writer. Real CLI timestamps prove overlap, actual RPC delivery and durable IDs are checked. |
+| `tests/deferred-recheck.test.ts` | when both racers fail to read CI the row stays deferred, and a later event still raises it once | S19-9-failure | mapped | S19-NC-25 fails failed racers must keep the same deferred decision; a later actual CI run opens the original ID once without losing the unrelated writer. |
+| `tests/deferred-recheck.test.ts` | the bounds are real durations, and the tests inject their own | S19-4 | mapped | S19-NC-28 and S19-NC-29 independently zero each default budget and fail the open-at-verdict parent snapshot; production remains at 30000ms. |
+| `tests/deferred-recheck.test.ts` | a beforeWakeup that never settles still delivers the verdict and releases the slot | S19-4 | retained | verbatim in tests/deferred-recheck-retained.test.ts: no public RPC/tool exposes beforeWakeupTimeoutMs or an unbounded callback replacement; the native callback supplies its own bounded recheck. Its slot and known-regression assertions stay. |
+| `tests/deferred-recheck.test.ts` | a beforeWakeup that throws synchronously is reported and the verdict still goes | S19-4 | retained | verbatim in tests/deferred-recheck-retained.test.ts: the public CommandPost before wrapper is async, so real storage/probe errors cannot synchronously throw at hook invocation; no public callback override entry. |
+| `tests/deferred-recheck.test.ts` | a cp-ci re-gate that never settles lets the tick's notice and wake-up continue | S19-9-late | mapped | S19-NC-22 removes the bound and fails bounded CI delivery must precede the slow gate's writes; the positive actual deadline emits one bounded warning and opens nothing. |
+| `tests/deferred-recheck.test.ts` | a bounded re-gate that fails reports once, opens nothing, and never throws | S19-9-failure | mapped | S19-NC-25 fails preservation of the failed racers' deferred decision; fail-closed probes emit no failed-recheck warning. S19-4-revise/NC-18 fails irrelevant revise query-count; malformed guards also remain in retained declaration 2. |
+| `tests/deferred-recheck.test.ts` | a cp-ci re-gate that lands after the deadline opens and announces exactly once | S19-9-late | mapped | S19-NC-23 removes the real late continuation and fails one promotion notice after three original decisions open. |
+| `tests/deferred-recheck.test.ts` | a review re-gate that lands after the wake-up still opens and announces exactly once | S19-4-late | mapped | S19-NC-23 times out waiting for late gate announces actual opened decisions; actual review receipt precedes the late store write. |
+| `tests/deferred-recheck.test.ts` | a re-gate that fails after the deadline opens nothing, says nothing twice, and leaks no rejection | S19-4-late-failure | mapped | S19-NC-24 causes two warnings and fails late failure must not report a second warning; the real parent continues and no row opens. |
+| `tests/deferred-recheck.test.ts` | an unrelated event neither reads the gate nor touches the file | S19-11 | retained | mixed declaration verbatim in tests/deferred-recheck-retained.test.ts: native gate is proved by S19-11/NC-30 and native revise by S19-4/NC-18; no native/recovered entry admits surface future or quality details.next proceed (closed ReviewSurfaceSchema and additionalProperties-false QualityReportSchema). No declaration deletion credit. |
+| `tests/deferred-recheck.test.ts` | red, still-running and unreviewed heads stay deferred through both events | S19-10 | mapped | S19-NC-26 bypasses the review precondition and fails unreviewed must not open a merge decision; S19-10 covers superseded/unpushed CI facts, S19-4 covers red/running review facts. |
+| `tests/deferred-recheck.test.ts` | wiring lint: the cp-ci path awaits the recheck before it sends, and the verdict path is not fire-and-forget | S19-9 | mapped | S19-NC-19 fails CI receipt order, S19-NC-8 review receipt order, S19-NC-23 late announcements and S19-NC-27 the actual model fallback guideline. Syntax-only closure/order/path checks are redundant-unreachable behind these named consumer outcomes, without additional declaration credit. |
+| `tests/send-first-gate.test.ts` | nothing is held while no operator send is unanswered | S19-5 | mapped | NC S19-9 makes the custom marker hold a wake behind pi's publicly cleared queue: expected 2 model requests, actual 3. Assistant streaming message_start has no completed marker; the actual custom marker exercises the role boundary. |
+| `tests/send-first-gate.test.ts` | a landed send holds every wake but answered until a clean turn_end answers it | S19-6 | mapped | NC S19-10/11 lose ordinary wakes on public clear_queue, so clean reply releases held wakes times out; NC S19-12 wrongly preserves the answered decision; NC S19-15 reverses consumer offer order. Each ordinary marker arrives exactly once. |
+| `tests/send-first-gate.test.ts` | a settled run releases held wakes even without a clean answer | S19-7 | mapped | NC S19-13 preserves the wake behind pi's cleared queue until the resumed reply: expected 2 model requests, actual 3. |
+| `tests/send-first-gate.test.ts` | held wakes go out after SEND_FIRST_HOLD_MS even while the send is still unanswered | S19-8 | mapped | NC S19-14 resets the oldest deadline and leaves S19_EXPIRY_ONE in the model request despite clear_queue before settle. Middle and fresh wakes arrive once in the later model context. |
+| `tests/review-context.test.ts` | (1) deleted task file: fork body, head absence, changed precedence, exact SHAs and persisted manifest | 05-S15-C | mapped | C01; both packet and brief inspected through diffReview |
+| `tests/review-context.test.ts` | (2) unique basename resolves; duplicate candidates sorted; missing basename unresolved | 05-S15-C | mapped | C02; manifest entries preserve reason and state |
+| `tests/review-context.test.ts` | (3) absolute and home paths neither read nor emitted | 05-S15-C | mapped | C03; real git audit excludes cat-file reads; private marker bodies absent |
+| `tests/review-context.test.ts` | (4) budget omits entire blob with byte count, used-byte sum and one section per included file | 05-S15-C | mapped | C04; same public fixed-budget boundary with 300000-byte task fixture |
+| `tests/review-context.test.ts` | (5) failed blob is unreadable with error; failed merge-base has unavailable manifest, no packet, named pointer | 05-S15-F | mapped | C05; real git process fails at OS boundary |
+| `tests/review-context.test.ts` | (6) NUL-containing blob has binary state and byte length; body omitted | 05-S15-C | mapped | C06; same 18-byte fixture |
+| `tests/review-context.test.ts` | (7) exact sorted order, sha256 and identical regenerated manifest/body | 05-S15-C | mapped | C07; same head regenerated by real reviewer after packet loss |
+| `tests/review-context.test.ts` | (8) sorted consumers capped at five; no grep for changed test file | 05-S15-C | mapped | C08; real git audit checks test-file query exclusion |
+| `tests/review-context.test.ts` | (9) brief names SHAs, manifest-first reading and absent-versus-unknown semantics | 05-S15-C | mapped | C09; actual reviewer brief inspected |
+| `tests/review-context.test.ts` | (10) cp-c1ur N11: changed sources precede large fixtures; unchanged fork dedup; absent invariants excluded | 05-S15-C | mapped | C10 and C04; known regression preserved through public packet |
+| `tests/review-merge-window.test.ts` | complete pass: fixed durable deadline, before/elapsed boundary, replay, restart, head change and equivalent pass | 05-S15-W | mapped | W01; fresh parent reads original deadline without rewriting pass; expired equivalent pass advances; existing real deadline scenario also waits across the boundary |
+| `tests/review-merge-window.test.ts` | incomplete/malformed pass and wrong-head equivalence cannot arm a window | 05-S15-W | mapped | W02; actual cp_integrate returns no review_resume_at on all invalid inputs |
+| `tests/review-tool.test.ts` | (1) distinct tool names and schemas; retry description; dispatch precondition/error fix; no decided file | 05-S15-T | mapped | T00; actual RPC schemas, refusal and filesystem assertions |
+| `tests/review-tool.test.ts` | (2) review/gate are parent-only | 05-S15-P | mapped | T05; external profile read by public dispatch preview; missing expected rejection if review deny is removed |
 | `tests/review-tool.test.ts` | (3) valid round-trip plus closed schema rejects injected next | — | retained | tests/review-tool-retained.test.ts; cp_review accepts no caller-supplied DiffVerdict; defensive closed-schema contract; real round-trip also pinned by T01 |
+| `tests/review-tool.test.ts` | (4) medium reason reaches relay while next proceeds | 05-S15-T | mapped | T02; actual RPC content lacks medium reason under control |
 | `tests/review-tool.test.ts` | (5) helper refuses injected negative file count | — | retained | tests/review-tool-retained.test.ts; cp_review validates stored and generated counts before payload construction; no verdict-input argument |
 | `tests/review-tool.test.ts` | (6) combined raw observation, revise receipt and materialized diff input | — | retained | tests/review-tool-retained.test.ts; live cp_review returns wait, then finishes asynchronously; cached and spawn-failure helper paths have no observation; T03 additionally pins reachable materialized subject leakage |
+| `tests/review-tool.test.ts` | (7) model-free stat overflow remains valid and has no subject/model | 05-S15-T | mapped | T04; real wide/large branches; fabricated model fails policy assertion |
+| `tests/review-runs.test.ts` | (1) start persists pending before wait and returns exact wait metadata | 05-S15-A | mapped | R01; real pending handed_back is true instead of false under mutation; pid, timestamps/model, persisted versus in-memory pending and start event are observed; A consumes returned key for real handback, replacing redundant helper-key equality |
 | `tests/review-runs.test.ts` | (2) duplicate registry start throws with record; independent surfaces coexist | — | retained | tests/review-runs-retained.test.ts; cp_review preflight rejects before ReviewRuns.start; gate/quality reuse pending waits, so no product entry exposes ReviewRunsError.pending; public duplicate refusal/coexistence also pinned by A/R11 |
+| `tests/review-runs.test.ts` | (3) finish persists before wake and late handback sends only once | 05-S15-A | mapped | R02; real parent wake appears before handback; decision/marker checks and repeated handback assertions stay |
+| `tests/review-runs.test.ts` | (4) early handback is ordinary order and sends once | 05-S15-A | mapped | R03; ordinary real reviewer produces zero wakes instead of one |
+| `tests/review-runs.test.ts` | (5) transport throws after durable decision and cleared pending | 05-S15-X | mapped | R04; real review pending marker remains after transport failure |
+| `tests/review-runs.test.ts` | (6) waiter throws and finishes operationally without pending | 05-S15-Q | mapped | Q01; actual quality waiter file write failure loses its operational reason and emits undefined quality pass |
 | `tests/review-runs.test.ts` | (7) successful finish returns undefined wake and clears slot | — | retained | tests/review-runs-retained.test.ts; CommandPost.diffReview, gate and quality supply concrete wake-returning finishers; no product entry accepts a custom ReviewAttempt.finish returning undefined on success |
+| `tests/review-runs.test.ts` | (8) pre-write finish failure falls back once, normalizes reason and spends attempt | 05-S15-S | mapped | R09; second atomic decision write is missing; FS/once also pins one orphan event, normalized persisted reason, one wake/no notice, cleanup and real attempt 2 |
+| `tests/review-runs.test.ts` | (9) partial pass survives with no fabricated verdict and one notice | 05-S15-S | mapped | R08; partial pass is overwritten with escalate; FS/partial checks attempt-specific durable notice and cleanup |
+| `tests/review-runs.test.ts` | (10) persistent fallback failure reports once even when reporter throws | 05-S15-S | mapped | R09 loses second write; R10 makes throwing public durable-notice callback escape settlement; FS/always pins no decision/verdict, one durable notice and cleared marker |
+| `tests/review-runs.test.ts` | (11) lost handback cannot swallow verdict or pin next attempt | 05-S15-B | mapped | B01; zero wakes after real production 60-second bound instead of one; durable pass, cleanup and actual attempt 2 asserted |
+| `tests/review-runs.test.ts` | (12) dead orphan with no decision finishes legacy markers; only handed-back wakes | 05-S15-O | mapped | R05; untold legacy marker emits a wake; durable decisions/cleanup and inert replay pinned |
+| `tests/review-runs.test.ts` | (13) throwing orphan finisher is reported once and later jobs continue | 05-S15-O | mapped | R06; later healthy orphan is absent from finished; failed marker clears and its finish-failed skip is reported |
 | `tests/review-runs.test.ts` | (14) live pid, existing decision and absent finisher leave markers alone | — | retained | tests/review-runs-retained.test.ts; CommandPost.sweepOrphanReviews always supplies review/gate/quality finishers; unknown legacy surfaces fail validation, so no entry accepts an incomplete finisher map; O also pins public live/decided skips |
+| `tests/review-runs.test.ts` | (15) unconfirmed wake resends once; confirmation removes delivery key | 05-S15-D | mapped | R15; one arrival confirms a verdict only once fails actual 2 versus expected 1; actual 120-second resend, confirmed no-resend and no stream also asserted |
+| `tests/review-runs.test.ts` | (16) withheld copies keep eligibility beyond the watcher's worst backoff | 05-S15-D | mapped | R16; withheld copies preserve resend eligibility fails because only two real attempts occur; later recovery, at least seven sends and backoff-outlasting permanent suppression asserted |
+| `tests/review-runs.test.ts` | (17) permanently withheld wake terminates at finite production lifetime | 05-S15-D | mapped | R17; suppression remains eligible for its production retry window fails at one attempt; D also pins near-cutoff eligibility, no sends after cutoff and no resurrection after facts recover |
+| `tests/review-runs.test.ts` | (18) invalid pending contract never throws or invents sweep records | 05-S15-O | mapped | R07; malformed input rejects sweep; invalid contract shape and the original invalid JSON both remain byte-for-byte with no report entries |
+| `tests/review-runs.test.ts` | (19) passing durable verdict reaches parent before completed deadline integration | 05-S15-L | mapped | W01; actual merge occurs before decided_at plus 30000ms; L pins raw parent-context receipt before deadline, durable verdict/no pending, exactly one completed merge and no second reviewer; exact injected synchronous callback/fake-clock map assertions are redundant-unreachable under named case L |
 | `tests/integrate.test.ts` | S09 declaration 41: pending head | 05-S09-1 | mapped | NC-2: advance != wait; S09 ledger. |
 | `tests/integrate.test.ts` | S09 declaration 42: workflows present | 05-S09-1 | mapped | NC-2: advance != surface. |
 | `tests/integrate.test.ts` | S09 declaration 43: older branch run | 05-S09-1 | mapped | NC-1: surface != wait. |
@@ -994,6 +1131,7 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/integrate.test.ts` | S10 declaration 107: close refusal | 05-S10-5 | mapped | cleanup-retry: wait != retry. |
 | `tests/integrate.test.ts` | S10 declaration 108: honest retry notice | 05-S10-5 | mapped | retry-notice: forbidden nothing-was-mutated in durable notice. |
 | `tests/integrate.test.ts` | S10 declaration 109: forbidden-tool constant | 05-S10-6 | mapped | forbid-integrate/forbid-merged: each corresponding profile is accepted instead of rejected at dispatch. |
+| `tests/integrate.test.ts` | S10 declaration 110: watch design shape | 05-S02-5 | mapped | watch-shape: worker loses blocking_watch refusal token; both watch commands drive worker bash. |
 | `tests/integrate.test.ts` | S10 declaration 111: unreviewed | 05-S10-3 | mapped | review-gate: advance != review. |
 | `tests/integrate.test.ts` | S10 declaration 112: pass | 05-S10-3 | mapped | review-pass: review != advance. |
 | `tests/integrate.test.ts` | S10 declaration 113: equivalent pass | 05-S10-3 | mapped | review-pass: review != advance with equivalence alone. |
@@ -1619,14 +1757,69 @@ diff --git a/src/pr-bind.ts b/src/pr-bind.ts
 | S06-timeout | `tests/foreign-ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | S06-1 | S06-timeout | 1869d77ee9e6ea51f37ebd3cff7afbbd562b01a4a7b30e6e81f0afb850d92503 | timed-out reviewer dispatch rejects instead of returning receipt accepted | pass |
 | S06-legacy | `tests/forge-runtime.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | S06-3 | S06-legacy | b8d4b63cfb4605d74cd3b15b213e7f7e4df925c3ebb8a2a537ec02997a38b309 | legacy GitHub recordMerge rejects unsupported instead of recording a receipt | pass |
 | S06-trunk | `tests/forge-runtime.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | S06-4 | S06-trunk | 786335f44ee49a7b6f0394a0f69f7c497a146c81b7ca221fcd18dcfed9e424b1 | configured trunk teardown refuses rather than landed_by_git on trunk | pass |
+| NC-S02-eligibility | `tests/ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S02-1 | NC-S02-eligibility | cba3486781d72c3cca30f9264d17af40f63ab3a47c2efab8e09416c8847025ce | checked excludes waiting: actual true, expected false; exit 1 | pass |
+| NC-S02-terminal | `tests/ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S02-2 | NC-S02-terminal | 29dc07af1d1ab16d4f6886ceaaf483fb20b4aa2f06f90db68d6b381aea34850d | merged event: actual pr_closed, expected pr_merged; exit 1 | pass |
+| NC-S02-retry | `tests/ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S02-3 | NC-S02-retry | 81f9556674f6127b1151cfbbf5ad25b882f5a05f5cf9bb991f014ab4dfca8e70 | one resend preserves identity: actual [], expected first key; exit 1 | pass |
+| NC-S02-resend | `tests/ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S02-3 | NC-S02-resend | ea57dd2d42611a0e0a168eae3ec4cf5aa3a1ec528e4948d37bd664e7b4d6c535 | never a third send: actual ci_green, expected []; exit 1 | pass |
+| NC-S02-age | `tests/ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S02-3 | NC-S02-age | 2b44580427f1d46396495a3412b0e7006ab65b86af9b7321fd8326328187b851 | failed queries never refresh an unread head: actual advanced time, expected prior time; exit 1 | pass |
+| NC-S02-cap | `tests/ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S02-3 | NC-S02-cap | 26a3f8333daafd2ae8b0f0ebdb46b86714e5133453a2803f04de74af53898f8d | errors back off exponentially and cap: actual 1024000, expected 900000; exit 1 | pass |
+| NC-S02-gitlab | `tests/ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S02-4 | NC-S02-gitlab | 243b8e9764b768dd710c258168e7a3a8d6162b54d8b167698710b985446f67cb | first checked list omits GitLab; exit 1 | pass |
+| NC-S02-policy | `tests/ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S02-5 | NC-S02-policy | 8007cb6e4ee2f41fcc853e37340d0573097ea3e87fdba165f0d2b3911c2c8551 | model request lacks blocking_watch refusal; exit 1 | pass |
+| NC-S02-restart | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-restart | 2f627246d2e68af424584bd914671e0720e8accd775c1bd0440e0360593d548e | confirmed arrival survives reconstruction: actual repeated green, expected []; exit 1 | pass |
+| NC-S02-permission | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-permission | c72f4c390f8cb285b3c27ca4cb05c4bee2201579432d6fa946dafc0caa117a43 | last_ci: actual unknown, expected unreadable; exit 1 | pass |
+| NC-S02-idle | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-idle | 62c2effa84c81f6dde53a4139a73d3909a8f1d69b9e942233fcee6287888d395 | settled heads use idle cadence: actual 1000, expected 5000; exit 1 | pass |
+| NC-S02-base | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-base | dd476f83e0321681ccb7755264c4ae5054a969deacd15cbb16a6bd623212a959 | unfinished heads use base cadence: actual 5000, expected 1000; exit 1 | pass |
+| NC-S02-due | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-due | cde265ae1b61d50448fa8fe1c8f0c9db4bc0307ff96c40f99f7c1a90e34f4779 | assert.ok(skipped.skipped.includes(live.jobId)): actual false; exit 1 | pass |
+| NC-S02-overlap | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-overlap | 69fab3003604be320366327f74f921c001279a0b71adece13adaa0b69e480d2b | overlapping ticks query once: actual 2, expected 1; exit 1 | pass |
+| NC-S02-env | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-3 | NC-S02-env | 860f168bf79282b1ff9a0286e6856f91742e5db80668b1386f1df9765752ede5 | watch interval nope: actual 0, expected 60000; exit 1 | pass |
+| NC-S02-aggregate | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-2 | NC-S02-aggregate | 24c30b1dd9ea6b8326382a9b1941dd7b93b385aaa7b5f7fc549d42ce9efc5d99 | one unfinished workflow defers the aggregate: actual green, expected []; exit 1 | pass |
+| NC-S02-superseded | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-2 | NC-S02-superseded | 572fd908ccfd5b8634c69451c2d52332dd88652e7940170c8491992060ad1259 | a superseded green is no verdict: actual green, expected []; exit 1 | pass |
+| NC-S02-empty | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-2 | NC-S02-empty | f9ec1ce89ac3a46ce69c5fc60d0fb5a724546d44772172f1d0f76f5653c38a8c | no runs is no verdict: actual green, expected []; exit 1 | pass |
+| NC-S02-red | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-2 | NC-S02-red | 5b475ee8fadb9041e50bc177d463b3b18877050d18fd2e7911e9c0292747601b | red observation count: actual 0, expected 1; exit 1 | pass |
+| NC-S02-closed | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-2 | NC-S02-closed | 0de66d27f209c0dc36244274c69324d6860e6955d36ceb921197be982a47197e | closed fact count: actual 0, expected 1; exit 1 | pass |
 | NC-S02-key | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-8 | NC-S02-key | 0b06ee0819dc98ec73d55c1ae42ff477a48d5520b6fcd4bbad8ce38c1cd6a51d | pushed-head key includes its current head: actual false; exit 1 | pass |
 | NC-S02-history | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-8 | NC-S02-history | 0d48c887d1af2446f53577b1f9f6eda249166df3551a841f89b67113726f1214 | one journal event per completed attempt: actual 0, expected 1; exit 1 | pass |
 | NC-S02-prune | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-8 | NC-S02-prune | befd614a3c744cb5d70cf0d5506088c7b91e9ec800fa072e9d3e0180f0d4ee92 | finished deliveries leave the watch: actual row, expected undefined; exit 1 | pass |
+| NC-S02-parked | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-S02-1 | NC-S02-parked | 880cf412abeebff72c830b94956bde9fbcea6d2df6625ec90c2de8a93f7134f9 | parked rows survive held-watch pruning: actual undefined, expected head; exit 1 | pass |
 | NC-main-corrupt | `tests/main-ci.test.ts` | 8a41e6c50b89e4de21c159a104f3633de32a3a82 | 05-main-corrupt | NC-main-corrupt | 4609cbb374efaa4b725a8029ae2dfd1d8efd04b889f42e408d109f6cd7f3cb6f | in-flight latch mutation preserves corrupt bytes | pass |
 | NC-S05-SUMMARY | `tests/diff-review.test.ts` | `0b2e4d774bfc00b3c07e8669370e568f816ea141` | DR-03 | NC-S05-SUMMARY | 30e455a860495861e80131b51fc0fc3fde089e30f79c58c080831925e60a9695 | real summary-bearing review must persist as pass; restored gate-only field fails schema validation | pass |
 | S06-conflict | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-5 | S06-conflict | 78c301aba9e55b637f3e1af9acda02c4846effe5c065b7adec47d8f5f83c104b | Missing expected rejection for conflicting heads; exit 1 | pass |
 | S06-deploy | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-2 | S06-deploy | 9c2bb5361529d74f70a4713044b66f3ea497e4e615d75ee95cf1a29c078a065a | corrupt ledger exception escapes recordMerge instead of preserving named retry outcome; exit 1 | pass |
 | S06-reservation | `tests/held-release.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-6 | S06-reservation | 0a723cad1b905543dda1bcffc250f7677cf6bb8451580d5e5779c674cd65f16d | queue capacity counts a releasable author as free after journal recovery: expected worker, got undefined; leaked reservation prevents retry; exit 1 | pass |
+| S15-C10 | `tests/review-context.test.ts` | 66c803bd47a3638e228a4183edd14aa34c647e8a | 05-S15-C | S15-C10 | bda2cbe060162587fea753d9651f19d0201685595492b7edb9a63672159582e5 | unchanged lib/core.py fork unexpectedly included | pass |
+| S15-W01 | `tests/review-merge-window.test.ts` | 74c636e2e3f2f48ce377efd1a94a4cf7a3c56f5e | 05-S15-W | S15-W01 | 9ccbadd7cdbaa6da240439ba3a0e6a86e045470cea89ec2a2f15c66f45052d41 | assert.ok(Date.now() >= Date.parse(verdict.decided_at) + 5_000); restart: 'advance' !== 'wait' | pass |
+| S15-T05 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-P | S15-T05 | 96f894ad8f6d5e6615375c7a4900dfa1155c973c18905dfba652195611ffe5c0 | missing expected rejection for a worker profile containing cp_review | pass |
+| S15-R16 | `tests/review-runs.test.ts` | 74c636e2e3f2f48ce377efd1a94a4cf7a3c56f5e | 05-S15-D | S15-R16 | 04123a105db6ec2a9770f04e6a604696e9c3da3be64fa41b36525bd46ed211dc | Got unwanted rejection: withheld copies preserve resend eligibility; last = 2 | pass |
+| S15-C01 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C01 | f52327695217aaa30fafb6aee0476b80323ecd0fec927e954bae69d0dae11471 | deleted fork state undefined instead of included | pass |
+| S15-C02 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C02 | 99dbf09f3fcdf5fe08a0383e092ede0d4d92dde5e1a4345d8c4c61fb77108192 | unique task state undefined instead of included | pass |
+| S15-C03 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C03 | f0b3ff5963d1df369bd79125ca8ee7090f6cea6d45706c8f8d8c1bf15b4f7c4d | forbidden object reads in git audit | pass |
+| S15-C04 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C04 | c09a354a2839af9c97afa80ffd5cb4be24392d1e3c5ddb26c34c563e694476c7 | big.json included instead of omitted-budget | pass |
+| S15-C05 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-F | S15-C05 | f27f6ab1597b3b24b1c66a390ab85e9ac814d2ffea3d37f341e5ee65a9d9ab17 | unreadable fault entry absent | pass |
+| S15-C06 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C06 | 02062e2e70d8d2859d8dc8c07d0f262e3b1e7d254f86ce813c854bf6deabc9d4 | img.bin included instead of binary | pass |
+| S15-C07 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C07 | c2f7c332edd61bcd26a1346cd4d351adcfffe6a617f478d2f167bb0b1723609d | src/run.py sha256 absent | pass |
+| S15-C08 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C08 | 5d3594d2302a95f53a0086c871cc0fa5232e55729d573ca45d893b8efb2d89cf | consumer array exceeds five | pass |
+| S15-C09 | `tests/review-context.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-C | S15-C09 | efdc68fd7e5d2bdc56283b598d2aa9b15a3cbc27d96e9197419a334f7c2da728 | brief lacks confirmed-absence explanation | pass |
+| S15-W02 | `tests/review-merge-window.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-W | S15-W02 | 9da9ff314d8357cb81cd17f232f7ccc8b0bc2a2a5783b19b7a275bba22e92d14 | mismatched equivalence arms review_resume_at | pass |
+| S15-R01 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-A | S15-R01 | 899c6086f4bd3f39577c6c75956ee9a6cfff610be4aec3300dbb562948f8d4d2 | initial handed_back true | pass |
+| S15-R02 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-A | S15-R02 | d9dfbb7f767ef596ff5b66865e1cfc92888f6052f8d15d77c82852f368a2f5cf | one wake before handback | pass |
+| S15-R03 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-A | S15-R03 | 714bc20b471e994fda3791c4e197596c9b8945aa05edd129e2081f1485aa2b79 | zero wakes after handback | pass |
+| S15-R04 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-X | S15-R04 | d22b74a9d41e404fcc65d77b1210b159fd983565156ea7e8f019b7bb7d31d72a | pending.json survives transport failure | pass |
+| S15-R05 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-O | S15-R05 | 1d4c2b0885909c14992e3d704dc6f1d6a44878c2b37cb616e72d201906a10c7d | untold legacy attempt wakes | pass |
+| S15-R06 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-O | S15-R06 | 3ff2a82d67c87ee6ddc6844593f23a2730545e77cedff631f73c8bc5ac7221c1 | healthy later job absent | pass |
+| S15-R07 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-O | S15-R07 | ba3fbd8ae793eadba1e99c9a538e0791e2808b676eabbabd24eecc36549af7ee | malformed marker rejects sweep | pass |
+| S15-R08 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-S | S15-R08 | e3783e5959745f709d3afaaded56e416c5f09a3ce7b913e4e1091b273113a8a6 | partial pass overwritten | pass |
+| S15-R09 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-S | S15-R09 | 89942e2ab53cbb3a965f2ae9047b1ca18e6055b1dcad4f9fc60b5bb7e3b331fe | fallback second write absent | pass |
+| S15-R10 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-S | S15-R10 | 6d7e1ea926cbc94b248d7f434c0beeacb82657e7ba01571c093a0404859f37c2 | notice failure rejects settlement | pass |
+| S15-R11 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-A | S15-R11 | 85332e44a50011652c5976890d38b3201adcead115b653f5d047433404e8f2aa | quality collides with review slot | pass |
+| S15-R15 | `tests/review-runs.test.ts` | 74c636e2e3f2f48ce377efd1a94a4cf7a3c56f5e | 05-S15-D | S15-R15 | 16c3e2fe2a7bb7d23276199c851708cf6ce668c9f358cbdd0d37c4dc2f54689f | one arrival confirms a verdict only once: actual 2, expected 1 | pass |
+| S15-R17 | `tests/review-runs.test.ts` | 74c636e2e3f2f48ce377efd1a94a4cf7a3c56f5e | 05-S15-D | S15-R17 | 71b11a23d0a1547b3b737f039bb4e0774c015bef2284b8a9915e9fe2ebf982e1 | timed out after 30000ms waiting for the busy parent leaves its first verdict unconfirmed through one resend; last = 1 | pass |
+| S15-Q01 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-Q | S15-Q01 | 94227b5928c6bf246ed9cb60385e74f1365dbf8e3fc83047cdffcd3b473ed626 | undefined quality pass instead of operational failure | pass |
+| S15-B01 | `tests/review-runs.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-B | S15-B01 | 2d5f38c287afebf30c45a08f2b9e0d5b758ab485acef2e2428211ebcf42da738 | zero wakes after handback bound | pass |
+| S15-T00 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-T | S15-T00 | 8c54f9510b953f4bb97c19d2aa056d8c6e7a137dcb751908ed187f9e2a794ca9 | refusal names cp_pipeline | pass |
+| S15-T01 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-T | S15-T01 | 3ce3adefc11135ef1816683ab0aa39d06ad12e3010295a1131e2268240ed3f93 | RPC verdict invalid | pass |
+| S15-T02 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-T | S15-T02 | f4381def5a721bfe49c39912c4fb880b973fafd678a509bdf733f29074325f08 | medium reason absent | pass |
+| S15-T03 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-T | S15-T03 | 42d921a45441fe1134ecbc41d03d5044cbde10401e5cdd3ac5ed18159efaeb48 | diff path leaked | pass |
+| S15-T04 | `tests/review-tool.test.ts` | 53d55fb0d144cee0109e0086ad98add0a196e056 | 05-S15-T | S15-T04 | dc4a2875dac6dc9c910a6492171a14e268f98d298586a1df3275ffe3ac9861df | policy result fabricates model | pass |
 | S14-NC5 | `tests/pr-bind.test.ts` | 580289b5c0f709bdc9ae28a50bf55dd12c38d04a | 05-S14-bind | S14-NC5 | 9528dbecb15617a52ca1f3a3a8469bcbdf44786705fff13c9f076e8ca262188e | diverged: salvage object id actual empty, expected preserved local commit | pass |
 | S14-NC11 | `tests/pr-resolve.test.ts` | 580289b5c0f709bdc9ae28a50bf55dd12c38d04a | 05-S14-bind | S14-NC11 | 9c6e119c7d7f1806e2ad1e6ce98caa7ba9dcea6385d189c95a8b203056263d8b | wrong-url/moved-report: correction reason empty instead of expected refusal, real reports wrongly held | pass |
 | S14-NC13 | `tests/review-approval.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-S14-approval | S14-NC13 | 0f326239caf9365c6450c310b5f5e6aa5f31e9ef6daea45ad71a8b92070027d1 | edited artifact checkpoint actual approved instead of pending | pass |
@@ -1642,9 +1835,863 @@ index 2dcc135..008c3bd 100644
 -		const { raw, rubric: _rubric, decision_summary: _summary, ...decided } = decideGate({
 +		const { raw, rubric: _rubric, ...decided } = decideGate({
 ```
+| S19-2 | `tests/escalation-relay-watch.test.ts` | 44a729762f1221d74a5a3237f38b7e8436237896 | S19-2 | S19-NC-2 | 7c4d57a6682275a28ab9bd00eb9a94346ba4f7c1efb68302d50f61e55d2754ba | failed outbox write must not reframe each tick: actual 2, expected 1 | pass |
+| S19-3 | `tests/escalation-relay-watch.test.ts` | 44a729762f1221d74a5a3237f38b7e8436237896 | S19-2 | S19-NC-3 | 9f4653b93f70f3d463920b80ee4fdd299763b868bcc97db2081a11752d4e494d | restart must not reframe an existing outbox relay: actual true, expected false | pass |
+| S19-4 | `tests/escalation-relay-watch.test.ts` | 44a729762f1221d74a5a3237f38b7e8436237896 | S19-2 | S19-NC-4 | db39261155d548331f55a6ed40fbb26aa610ec643dae1a60a32dc98dee0ff344 | actual host relay text fails project-tagged decision regex | pass |
+| S19-5 | `tests/escalation-relay-watch.test.ts` | 44a729762f1221d74a5a3237f38b7e8436237896 | S19-2 | S19-NC-5 | 8e9fa61a9a799f3cf28781cf192a971c6897e0315b86bd8a138479924cfbb869 | timeout waiting for visible read failure in parent-host log | pass |
 
+<!-- patch:S19-NC-2 -->
+```diff
+--- a/src/escalation-relay-watch.ts
++++ b/src/escalation-relay-watch.ts
+@@ -64 +64 @@
+-		ports.sent.add(escalation.id);
++		// S19 negative control: forget the attempted delivery.
+```
+<!-- /patch:S19-NC-2 -->
+
+<!-- patch:S19-NC-3 -->
+```diff
+--- a/src/escalation-relay-watch.ts
++++ b/src/escalation-relay-watch.ts
+@@ -36 +36 @@
+-		.filter((item) => !inOutbox(ids, item.id));
++		.filter(() => true);
+```
+<!-- /patch:S19-NC-3 -->
+
+<!-- patch:S19-NC-4 -->
+```diff
+--- a/src/escalation-relay-watch.ts
++++ b/src/escalation-relay-watch.ts
+@@ -40 +40 @@
+-	return escalationRelay(home, escalation, `${escalation.id} (${escalation.kind}) — ${escalation.question}`);
++	return escalationRelay(home, escalation, "S19 mutation removed the decision text");
+```
+<!-- /patch:S19-NC-4 -->
+
+<!-- patch:S19-NC-5 -->
+```diff
+--- a/src/escalation-relay-watch.ts
++++ b/src/escalation-relay-watch.ts
+@@ -59,9 +59,11 @@
+-	const due = dueDirect({
+-		open: ports.open(), asks: ports.asks(), ledger: ports.ledgerIds(), outboxIds: ports.outboxIds(), now: ports.now?.() ?? new Date(),
+-		...(ports.graceSeconds !== undefined ? { graceSeconds: ports.graceSeconds } : {}),
+-	}).filter((item) => !ports.sent.has(item.id));
+-	for (const escalation of due) {
+-		ports.sent.add(escalation.id);
+-		ports.publish(directRelay(ports.home, escalation));
+-	}
+-	return due.map((item) => item.id);
++	try {
++		const due = dueDirect({
++			open: ports.open(), asks: ports.asks(), ledger: ports.ledgerIds(), outboxIds: ports.outboxIds(), now: ports.now?.() ?? new Date(),
++			...(ports.graceSeconds !== undefined ? { graceSeconds: ports.graceSeconds } : {}),
++		}).filter((item) => !ports.sent.has(item.id));
++		for (const escalation of due) {
++			ports.sent.add(escalation.id);
++			ports.publish(directRelay(ports.home, escalation));
++		}
++		return due.map((item) => item.id);
++	} catch { return []; }
+```
+<!-- /patch:S19-NC-5 -->
+| S19-1 | `tests/cp-bridge-reattach.test.ts` | 6aef97e30fffc725656181ccda94e2a83732c96e | S19-1 | S19-NC-1 | 3d33e3f2ca7b40c98fb267e59d6c89d0a6a28465303a890559c1f49288e3f7ea | timeout waiting for bridge reattaches to replacement host | pass |
+
+<!-- patch:S19-NC-1 -->
+```diff
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -410 +410 @@
+-			reattach.schedule();
++			// S19 negative control: skip reconnect after host closure.
+```
+<!-- /patch:S19-NC-1 -->
+| S19-6 | `tests/bridge-reattach.test.ts` | c41dc291d93f7c1759b3c79db8d07bbf7805208a | S19-3 | S19-NC-6 | 144b1e6d4522172d680a1093af116c565ff6dce64257af08f3ff11e6fdde97b1 | retry delay must cap at 30 seconds: 64009 | pass |
+| S19-7 | `tests/bridge-reattach.test.ts` | c41dc291d93f7c1759b3c79db8d07bbf7805208a | S19-3 | S19-NC-7 | dc7f844a16a4c94e976114e44dec581e28cdaafd4e90a992ec296acf9c0f9fe6 | timeout waiting for silent established host is probed and detached | pass |
+| S19-8 | `tests/deferred-recheck.test.ts` | 534cd14d952af040f2385fd92f3ee968a810ee62 | S19-4 | S19-NC-8 | 6560446f04e528f94725566c2e0a40f2f36c64a0b4e88481ccc51050387437fc | decision must already be open when verdict reaches parent | pass |
+
+<!-- patch:S19-NC-6 -->
+```diff
+diff --git a/src/bridge-reattach.ts b/src/bridge-reattach.ts
+index 4c2760a..de45ec3 100644
+--- a/src/bridge-reattach.ts
++++ b/src/bridge-reattach.ts
+@@ -31,7 +31,7 @@ export function reattachLoop(attempt: () => Promise<void>, firstMs = REATTACH_FI
+ 						running = false;
+ 						if (again) { again = false; schedule(); }
+ 					},
+-					() => { if (mine === epoch) step(Math.min(delay * 2, maxMs)); },
++					() => { if (mine === epoch) step(delay * 2); },
+ 				);
+ 			}, delay);
+ 			timer.unref();
+```
+<!-- /patch:S19-NC-6 -->
+<!-- patch:S19-NC-7 -->
+```diff
+diff --git a/src/bridge-reattach.ts b/src/bridge-reattach.ts
+index 4c2760a..e1a68ae 100644
+--- a/src/bridge-reattach.ts
++++ b/src/bridge-reattach.ts
+@@ -64,7 +64,7 @@ export async function probeHost(client: { request(op: string): Promise<unknown>;
+ 	const expired = new Promise<false>((done) => { timer = setTimeout(() => done(false), timeoutMs); });
+ 	try {
+ 		const answered = await Promise.race([client.request("hello").then(() => true, () => false), expired]);
+-		if (!answered) return false;
++		if (!answered) return true;
+ 		try {
+ 			return currentPid() === client.hostPid;
+ 		} catch {
+```
+<!-- /patch:S19-NC-7 -->
+<!-- patch:S19-NC-8 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..25fa177 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -111,7 +111,7 @@ export function isPassingDiffReview(wakeup: unknown): boolean {
+ 
+ /** Does this event change a fact a deferred merge ask is waiting on? */
+ export function releasesDeferredAsks(trigger: DeferredRecheckTrigger): boolean {
+-	return trigger.kind === "ci" ? true : isPassingDiffReview(trigger.wakeup);
++	return trigger.kind === "ci";
+ }
+ 
+ /**
+```
+<!-- /patch:S19-NC-8 -->
+| S19-9 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-5 | S19-NC-9 | 829276d0477bbe6c34928c5e7da097c8579e361e3cb8298f3fdf9f34e89967e6 | custom markers must not preserve a wake behind pi's cleared queue: actual 3, expected 2 | pass |
+| S19-10 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-6 | S19-NC-10 | 5a32eeffd70d0d397889d0254c1b06e654f311bd33382bac3f68aae9a4b03111 | clean reply releases held wakes despite earlier queue clear: timeout | pass |
+| S19-11 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-6 | S19-NC-11 | eb08f11877bf5a77b76d299494c69f2e701481ad443ffd9c4107b3a601488d3b | clean reply releases held wakes despite earlier queue clear: timeout | pass |
+| S19-12 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-6 | S19-NC-12 | b5c210bd35c195021bd545f6280258240e190a887ff01e321fdd1a3bd0900233 | answered decision reached pi's queue before clear, while ordinary wakes stayed held | pass |
+| S19-13 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-7 | S19-NC-13 | 1961eebbf922efc7d1e4b8a129942723cc2a4c684457f33f9ff8e18480f6582f | settled hold must be removable from pi's queue before another clean answer: actual 3, expected 2 | pass |
+| S19-14 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-8 | S19-NC-14 | 98b8db08abf361f4c87ac7f3877027874f85c720cc35a4f05eaf6b0f0e9ffab4 | oldest wake was already queued and removable before its send settled | pass |
+| S19-15 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-6 | S19-NC-15 | dacd98bb09cda64b676a8dde47024687a3a9e3d48964df23df8bd7211426deae | held wakes arrive in offer order | pass |
+| S19-16 | `tests/deferred-recheck.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-4 | S19-NC-16 | b4c56d9b0819625f79888b5336cc0fc69bb53a59d67129788e1804cc2e0de530 | one opening produces one operator notice: actual 0, expected 1 | pass |
+| S19-17 | `tests/deferred-recheck.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-4 | S19-NC-17 | 725c509f2cb0094989e69bd03aee4328095b9f01eb2a30b1f555c3a19f5d16a9 | ready notice must match Ship cp-held (PR 58) | pass |
+| S19-18 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4-revise | S19-NC-18 | 8ca85d25ccbd99762cff508bbe5816800357b99367149fcc48a8f889ded3cad1 | a revise verdict must not read the CI gate | pass |
+| S19-19 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-19 | ee7dcb337ee1e7285d2cd5282959b016c7c2d058b8bc8f37a94438474f6a6880 | the CI wake must reach its consumer after the raced gate completes | pass |
+| S19-20 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-20 | b871b500ed174f787fbb401326fd634affc3ff4f8ff4383e11c8eb34fe663dcb | one decision promotion must produce one notice: actual 2, expected 1 | pass |
+| S19-21 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-21 | df6294c2ec381f827ae935f5ffca1d970c2ba593def37c05fe0d7a567dad0369 | the concurrent unrelated writer must survive both rechecks | pass |
+| S19-22 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9-late | S19-NC-22 | 50607cfafda3d24ede436e4326f76356567e2ace1686a1133b82aeb7053535e8 | bounded CI delivery must precede the slow gate's writes | pass |
+| S19-23 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9-late | S19-NC-23 | 7195e71a55cf6cd5f9cca87e3f2f0623486d5b2a9c2e2946ad850c438f1ab254 | CI late receives 0 promotion notices; S19-4-late review times out waiting for actual opened-decisions notice | pass |
+| S19-24 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4-late-failure | S19-NC-24 | 0cd3d5fe11f894346da8b1e704c1749e00c5016b8b38699ac8d112fbf00306a8 | late failure must not report a second warning | pass |
+| S19-25 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9-failure | S19-NC-25 | 5f1eb59cc899f92f1d1597cb7e51a8cf9398abee57195670dc47ca50786166f1 | failed racers must keep the same deferred decision | pass |
+| S19-26 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-10 | S19-NC-26 | e821197675861a113e9d3976864cf5a0b0239dec773e5097b6dc9e19fd76a3ce | unreviewed must not open a merge decision | pass |
+| S19-27 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-27 | de0b5c6bb6707d2e3c615b9cf34e52b831deec31bb633f2b21a1f10f1a16abc2 | actual parent model context lacks the unknown-CI manual fallback | pass |
+| S19-28 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4 | S19-NC-28 | 51889a6bdf4b64c29796c1c87e783530a18465420e53e95bdffefdd58a27e8cf | zero inner budget leaves the actual verdict snapshot deferred | pass |
+| S19-29 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4 | S19-NC-29 | e1499900506bc3b6f66a3365ddb5d066df30f59449b9adeae0240e891c4cd7ca | zero outer budget leaves the actual verdict snapshot deferred | pass |
+| S19-30 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-11 | S19-NC-30 | 6ff37e5c2e33f19fe238e1a1b2529ce2ce5093b15a078845c8ab046b0b9afa3a | a native plan gate must not probe the held merge gate | pass |
+
+<!-- patch:S19-NC-9 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..596a1c2 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -34 +33,0 @@ export class SendFirstGate<Wake> {
+-		if (role !== "user") return;
+```
+<!-- /patch:S19-NC-9 -->
+<!-- patch:S19-NC-10 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..1f1ef4b 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -50 +50 @@ export class SendFirstGate<Wake> {
+-		if (kind === "answered" || this.#unanswered.size === 0) return "send";
++		return "send";
+```
+<!-- /patch:S19-NC-10 -->
+<!-- patch:S19-NC-11 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..24e80a8 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -40 +40 @@ export class SendFirstGate<Wake> {
+-		if (cleanSegmentEnd(event)) this.#unanswered.clear();
++		this.#unanswered.clear();
+```
+<!-- /patch:S19-NC-11 -->
+<!-- patch:S19-NC-12 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..fd03475 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -50 +50 @@ export class SendFirstGate<Wake> {
+-		if (kind === "answered" || this.#unanswered.size === 0) return "send";
++		if (this.#unanswered.size === 0) return "send";
+```
+<!-- /patch:S19-NC-12 -->
+<!-- patch:S19-NC-13 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..5e7d39b 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -45 +44,0 @@ export class SendFirstGate<Wake> {
+-		this.#unanswered.clear();
+```
+<!-- /patch:S19-NC-13 -->
+<!-- patch:S19-NC-14 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..53e294e 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -51 +51 @@ export class SendFirstGate<Wake> {
+-		if (this.#held.length === 0) this.#since = this.#now();
++		this.#since = this.#now();
+```
+<!-- /patch:S19-NC-14 -->
+<!-- patch:S19-NC-15 -->
+```diff
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..cf93fd7 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -60 +60 @@ export class SendFirstGate<Wake> {
+-		const released = this.#held;
++		const released = this.#held.reverse();
+```
+<!-- /patch:S19-NC-15 -->
+<!-- patch:S19-NC-16 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..a39cd2e 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -208 +208 @@ export async function recheckDeferredBounded(
+-	return outcome.raised;
++	return [];
+```
+<!-- /patch:S19-NC-16 -->
+<!-- patch:S19-NC-17 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..f98af0a 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -224 +224 @@ export function formatRaisedNotice(raised: readonly AwaitingItem[]): string {
+-	return `${head}: ${decisions} — answer with cp_decide`.slice(0, 300);
++	return `${head}: S19 unnamed decision — answer with cp_decide`;
+```
+<!-- /patch:S19-NC-17 -->
+
+
+<!-- patch:S19-NC-18 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..279f21e 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -111,7 +111,7 @@ export function isPassingDiffReview(wakeup: unknown): boolean {
+ 
+ /** Does this event change a fact a deferred merge ask is waiting on? */
+ export function releasesDeferredAsks(trigger: DeferredRecheckTrigger): boolean {
+-	return trigger.kind === "ci" ? true : isPassingDiffReview(trigger.wakeup);
++	return true;
+ }
+ 
+ /**
+```
+<!-- /patch:S19-NC-18 -->
+
+<!-- patch:S19-NC-19 -->
+```diff
+diff --git a/extensions/command-post/wakeup-surfaces.ts b/extensions/command-post/wakeup-surfaces.ts
+index 7fb97bd..aedc7ba 100644
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -614,7 +614,7 @@ export function createWakeupSurfaces(
+ 				// same observation rather than by a tool call the parent might not make.
+ 				// Bounded (`recheckDeferredBounded`), so a slow or wedged re-gate delays
+ 				// the notice and the wake-up below by at most one bound, never forever.
+-				await recheckDeferredRows({ kind: "ci" });
++				void recheckDeferredRows({ kind: "ci" });
+ 				const text = formatCiNotice(observations, projectOf());
+ 				const ruled = await wakeRules.ciGreen(observations);
+ 				operatorNotify(s.live, ruled.suppress ? ruled.relay : text, "info");
+```
+<!-- /patch:S19-NC-19 -->
+
+<!-- patch:S19-NC-20 -->
+```diff
+diff --git a/src/awaiting.ts b/src/awaiting.ts
+index 1e48c0d..f81fe76 100644
+--- a/src/awaiting.ts
++++ b/src/awaiting.ts
+@@ -690,7 +690,7 @@ export class AwaitingStore {
+ 				// Only a row this review actually gated, and only one still deferred: an
+ 				// answered row, a withdrawn row and an authorization-derived projection
+ 				// (which has no row here at all) are never touched by this pass.
+-				if (!gate || item.state !== "deferred") continue;
++				if (!gate) continue;
+ 				// cp-to39: the job is gone. Neither raise (an unanswerable ask) nor drop
+ 				// (a lost question): keep the row deferred with a reason that names the
+ 				// job, so `list("deferred")` still hands it to the renderer and the
+```
+<!-- /patch:S19-NC-20 -->
+
+<!-- patch:S19-NC-21 -->
+```diff
+diff --git a/src/awaiting.ts b/src/awaiting.ts
+index 1e48c0d..98a792d 100644
+--- a/src/awaiting.ts
++++ b/src/awaiting.ts
+@@ -715,7 +715,7 @@ export class AwaitingStore {
+ 				applyGate(item, !promote, gate, at);
+ 				(promote ? raised : stillDeferred).push(item);
+ 			}
+-			return items;
++			return items.filter((item) => verdicts.has(item.id));
+ 		});
+ 		return { raised, stillDeferred, orphaned, resolved, verdicts };
+ 	}
+```
+<!-- /patch:S19-NC-21 -->
+
+<!-- patch:S19-NC-22 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..bebcd5d 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -182,15 +182,7 @@ export async function recheckDeferredBounded(
+ 		(error: unknown) => ({ raised: [] as AwaitingItem[], reason: `deferred rows not re-gated: ${(error as Error).message}` }),
+ 	);
+ 	let timedOut = false;
+-	const outcome = await withDeadline(attempt, ms, () => {
+-		// Only the timeout branch reaches this: `attempt` never rejects, and
+-		// `withDeadline` calls `onTimeout` for a rejection too.
+-		timedOut = true;
+-		return {
+-			raised: [] as AwaitingItem[],
+-			reason: `deferred rows not re-gated: the re-gate did not finish within ${ms}ms`,
+-		};
+-	});
++	const outcome = await attempt;
+ 	if ("reason" in outcome && outcome.reason) report(options.onFailure, outcome.reason);
+ 	if (timedOut) {
+ 		// Exactly one continuation, attached exactly once, on a promise that cannot
+```
+<!-- /patch:S19-NC-22 -->
+
+<!-- patch:S19-NC-23 -->
+```diff
+diff --git a/extensions/command-post/wakeup-surfaces.ts b/extensions/command-post/wakeup-surfaces.ts
+index 7fb97bd..88c58e4 100644
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -516,7 +516,6 @@ export function createWakeupSurfaces(
+ 				onFailure: (reason) => {
+ 					operatorNotify(s.live, `pi-command-post: ${reason}`, "warning");
+ 				},
+-				onLate: announceRaised,
+ 			}),
+ 		);
+ 	};
+```
+<!-- /patch:S19-NC-23 -->
+
+<!-- patch:S19-NC-24 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..2010bfd 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -196,7 +196,7 @@ export async function recheckDeferredBounded(
+ 		// Exactly one continuation, attached exactly once, on a promise that cannot
+ 		// reject: a late result is either announced or dropped, never thrown.
+ 		void attempt.then((late) => {
+-			if ("reason" in late && late.reason) return;
++			if ("reason" in late && late.reason) { report(options.onFailure, late.reason); return; }
+ 			if (late.raised.length === 0) return;
+ 			try {
+ 				options.onLate?.(late.raised);
+```
+<!-- /patch:S19-NC-24 -->
+
+<!-- patch:S19-NC-25 -->
+```diff
+diff --git a/src/merge-ask.ts b/src/merge-ask.ts
+index d2ce0b3..ec47832 100644
+--- a/src/merge-ask.ts
++++ b/src/merge-ask.ts
+@@ -629,7 +629,7 @@ export function createMergeAskProbe(deps: MergeAskProbeDeps): MergeAskProbe {
+ 				});
+ 			}
+ 			return verdict({
+-				action: "defer",
++				action: "raise",
+ 				ci: "unknown",
+ 				reason: `CI state unavailable for ${branch}: ${(error as Error).message}`,
+ 			});
+```
+<!-- /patch:S19-NC-25 -->
+
+<!-- patch:S19-NC-26 -->
+```diff
+diff --git a/src/merge-ask.ts b/src/merge-ask.ts
+index d2ce0b3..2a6d059 100644
+--- a/src/merge-ask.ts
++++ b/src/merge-ask.ts
+@@ -424,7 +424,7 @@ export function evaluateMergeAskCi(input: {
+ 	// raised only once the diff has a passing review on *this* head, because a
+ 	// revise moves the head and a review of a superseded diff says nothing about
+ 	// the commit that would merge — the same rule the CI check above applies.
+-	if (input.reviewedHeads && !input.reviewedHeads.some((sha) => shaMatches(sha, head))) {
++	if (false) {
+ 		return verdict({
+ 			action: "defer",
+ 			ci: "unreviewed",
+```
+<!-- /patch:S19-NC-26 -->
+
+<!-- patch:S19-NC-27 -->
+```diff
+diff --git a/extensions/command-post/tools-send-status.ts b/extensions/command-post/tools-send-status.ts
+index 0de9bfb..2251c50 100644
+--- a/extensions/command-post/tools-send-status.ts
++++ b/extensions/command-post/tools-send-status.ts
+@@ -181,7 +181,6 @@ export function registerSendStatusTools(pi: ExtensionAPI, deps: ExtensionDeps):
+ 		promptGuidelines: [
+ 			"cp_status_block is opt-in: ordinary turns do not call it (the status line already shows the fleet); call it once when the operator asks for a status summary or a turn needs the full picture, instead of typing STATUS BLOCK tables by hand.",
+ 			"A row deferred on CI or on a missing review raises itself: the extension re-gates every deferred row when CI completes on the held head (the cp-ci watch) and when a cp_review passes on it, so no render is needed to release one.",
+-			"A row deferred on an unknown CI state may become readable with no event at all: invoke cp_status_block manually when you think observability came back \u2014 the render re-gates the row, and never bypasses the gate.",
+ 			"Only supply a label when the job title would not read plainly to the operator; an omitted label falls back to the title.",
+ 			"Awaiting you is the one table this tool cannot derive: give type (approval|design|authorization|escalation), decision, why and blocks for every open human decision. Open escalations are merged from the store.",
+ 			"Blocked rows name a real dependency, CI check, gate or worker — never a human decision; a human decision belongs in awaiting instead.",
+```
+<!-- /patch:S19-NC-27 -->
+
+<!-- patch:S19-NC-28 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..ae626f5 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -59,7 +59,7 @@ import { withDeadline } from "./suggest.ts";
+  * so neither may wait on this indefinitely: what is at stake is the operator's
+  * notice, the parent's wake-up and, on the reviewer path, the attempt's slot.
+  */
+-export const DEFERRED_RECHECK_MAX_WAIT_MS = 30_000;
++export const DEFERRED_RECHECK_MAX_WAIT_MS = 0;
+ 
+ /**
+  * What happened. `ci` is one or more `cp-ci` observations for a held PR (a run
+```
+<!-- /patch:S19-NC-28 -->
+
+<!-- patch:S19-NC-29 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+index c6cf685..303e9b4 100644
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -123,7 +123,7 @@ export const HANDBACK_MAX_WAIT_MS = 60_000;
+  * wait is bounded and the wake-up is delivered when the bound is spent — the
+  * hook orders work *before* delivery, it never gets a veto over it.
+  */
+-export const BEFORE_WAKEUP_MAX_WAIT_MS = 30_000;
++export const BEFORE_WAKEUP_MAX_WAIT_MS = 0;
+ 
+ export class ReviewRunsError extends Error {
+ 	readonly pending: PendingReview;
+```
+<!-- /patch:S19-NC-29 -->
+
+<!-- patch:S19-NC-30 -->
+```diff
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..1435d3d 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -96,7 +96,6 @@ export function isPassingDiffReview(wakeup: unknown): boolean {
+ 	if (typeof wakeup !== "object" || wakeup === null) return false;
+ 	const { surface, details } = wakeup as { surface?: unknown; details?: unknown };
+ 	// The plan gate and the quality panel say nothing about a head's reviewedness.
+-	if (surface !== "review") return false;
+ 	if (typeof details !== "object" || details === null) return false;
+ 	const { next, verdict } = details as { next?: unknown; verdict?: unknown };
+ 	// A `revise` moves the head rather than clearing it; `retry`/`surface` are not
+```
+<!-- /patch:S19-NC-30 -->
 <!-- /manifest:regressions -->
 
+<!-- patch:S15-C01 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -153 +153 @@
+-	for (const side of ["head", "fork"] as const) for (const path of changed) add(path, side, "changed");
++	for (const side of ["head"] as const) for (const path of changed) add(path, side, "changed");
+```
+<!-- /patch:S15-C01 -->
+<!-- patch:S15-C02 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -154 +154 @@
+-	for (const path of named) add(path, "head", "task-named");
++	for (const path of [] as string[]) add(path, "head", "task-named");
+```
+<!-- /patch:S15-C02 -->
+<!-- patch:S15-C03 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -26 +26 @@
+-const TASK_PATH = /(?<![\w./~-])(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z0-9]{1,8}\b/g;
++const TASK_PATH = /(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z0-9]{1,8}\b/g;
+```
+<!-- /patch:S15-C03 -->
+<!-- patch:S15-C04 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -172 +172 @@
+-		if (bytes > result.budget_bytes - result.used_bytes) {
++		if (false) {
+```
+<!-- /patch:S15-C04 -->
+<!-- patch:S15-C05 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -178 +178 @@
+-			result.entries.push({ ...candidate, state: "unreadable", error: blob.error });
++			result.entries.push({ ...candidate, state: "absent" });
+```
+<!-- /patch:S15-C05 -->
+<!-- patch:S15-C06 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -181 +181 @@
+-		if (blob.out.includes("\0")) {
++		if (false) {
+```
+<!-- /patch:S15-C06 -->
+<!-- patch:S15-C07 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -187 +187 @@
+-		result.entries.push({ ...candidate, state: "included", bytes, sha256 });
++		result.entries.push({ ...candidate, state: "included", bytes });
+```
+<!-- /patch:S15-C07 -->
+<!-- patch:S15-C08 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -165 +165 @@
+-		for (const user of users.slice(0, MAX_CONSUMERS)) add(user, "head", "consumer");
++		for (const user of users) add(user, "head", "consumer");
+```
+<!-- /patch:S15-C08 -->
+<!-- patch:S15-C09 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -239 +239 @@
+-		"`absent` means git confirmed the path does not exist at that sha; `omitted-budget`/`unreadable`/`unresolved` mean unknown — never treat them as absent."
++		"All missing context is absent."
+```
+<!-- /patch:S15-C09 -->
+<!-- patch:S15-W02 -->
+```diff
+--- a/src/review-merge-window.ts
++++ b/src/review-merge-window.ts
+@@ -14 +14 @@
+-	if (!pass || !shaMatches(pass.head_sha, head)) return undefined;
++	if (!pass) return undefined;
+```
+<!-- /patch:S15-W02 -->
+<!-- patch:S15-R01 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -331,3 +331,3 @@
+ 			deadline: attempt.deadline,
+-			handed_back: false,
++			handed_back: true,
+ 			...(attempt.subject ? { subject: attempt.subject } : {}),
+```
+<!-- /patch:S15-R01 -->
+<!-- patch:S15-R02 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -420,3 +420,2 @@
+ 		// — but bounded, so a caller that never hands back cannot swallow it.
+-		await this.#awaitHandback(handedBack);
+ 		// cp-runtime-deferred-recheck: everything that must be true *before* the
+```
+<!-- /patch:S15-R02 -->
+<!-- patch:S15-R03 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -425,3 +425,2 @@
+ 		await this.#runHook("beforeWakeup", wakeup);
+-		this.#send(wakeup);
+ 		this.#slots.delete(key);
+```
+<!-- /patch:S15-R03 -->
+<!-- patch:S15-R04 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -406,3 +406,2 @@
+ 			// in which case the next start/advance finds no decision and retries).
+-			this.#clear(pending);
+ 		}
+```
+<!-- /patch:S15-R04 -->
+<!-- patch:S15-R05 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -650,3 +650,3 @@
+ 				report.finished.push(pending);
+-				if (wakeup && pending.handed_back) this.#send(wakeup);
++				if (wakeup) this.#send(wakeup);
+ 			}
+```
+<!-- /patch:S15-R05 -->
+<!-- patch:S15-R06 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -639,3 +639,3 @@
+ 					report.skipped.push({ pending, reason });
+-					continue;
++					return report;
+ 				}
+```
+<!-- /patch:S15-R06 -->
+<!-- patch:S15-R07 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -192,3 +192,3 @@
+ 	} catch {
+-		return undefined;
++		throw new Error("S15 malformed pending JSON stopped the sweep");
+ 	}
+```
+<!-- /patch:S15-R07 -->
+<!-- patch:S15-R08 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -386,3 +386,3 @@
+ 				});
+-				if (decisionExists(this.#options.home, pending)) {
++				if (false) {
+ 					// A partial finish: the decision is on disk, something after it threw.
+```
+<!-- /patch:S15-R08 -->
+<!-- patch:S15-R09 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -397,3 +397,3 @@
+ 					try {
+-						wakeup = await attempt.finish({ operational: reason } as unknown as T);
++						wakeup = undefined;
+ 						if (!wakeup) finishFailure = `${reason}; the operational fallback produced no wake-up`;
+```
+<!-- /patch:S15-R09 -->
+<!-- patch:S15-R10 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -478,3 +478,3 @@
+ 		} catch {
+-			// Reporting a failure must not become one.
++			throw new Error("S15 notice transport failure escaped the review registry");
+ 		}
+```
+<!-- /patch:S15-R10 -->
+<!-- patch:S15-R11 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -313,3 +313,3 @@
+ 	start<T>(attempt: ReviewAttempt<T>): ReviewWait {
+-		const existing = this.pending(attempt.jobId, attempt.surface);
++		const existing = this.pending(attempt.jobId, "review");
+ 		if (existing) {
+```
+<!-- /patch:S15-R11 -->
+<!-- patch:S15-R15 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -544,3 +544,3 @@
+ 		for (const key of keys) {
+-			if (this.#inFlight.delete(key)) fresh.push(key);
++			if (this.#inFlight.has(key)) fresh.push(key);
+ 		}
+```
+<!-- /patch:S15-R15 -->
+<!-- patch:S15-R17 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -567,3 +567,3 @@
+ 		for (const [key, entry] of this.#inFlight) {
+-			if (entry.resent || now.getTime() - entry.firstSentAt >= reviewSuppressionMs()) {
++			if (entry.resent || now.getTime() - entry.firstSentAt >= 0) {
+ 				this.#inFlight.delete(key);
+```
+<!-- /patch:S15-R17 -->
+<!-- patch:S15-Q01 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -371,3 +371,3 @@
+ 				// carry `operational` — SAFETY: that is the cast's invariant, the seam's one concession.
+-				outcome = { operational: `reviewer wait failed: ${(error as Error).message}` } as unknown as T;
++				outcome = {} as T;
+ 			}
+```
+<!-- /patch:S15-Q01 -->
+<!-- patch:S15-B01 -->
+```diff
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -114 +114 @@
+-export const HANDBACK_MAX_WAIT_MS = 60_000;
++export const HANDBACK_MAX_WAIT_MS = 120_000;
+```
+<!-- /patch:S15-B01 -->
+<!-- patch:S15-T00 -->
+```diff
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -499,3 +499,3 @@
+ 				`no dispatch record for ${jobId} — cannot review. A diff review reads the job's project, branch and kind ` +
+-					`from its fleet record; dispatch the job first (cp_dispatch), then review the branch it pushed.`,
++					`from its fleet record; dispatch the job first (cp_pipeline), then review the branch it pushed.`,
+ 			);
+```
+<!-- /patch:S15-T00 -->
+<!-- patch:S15-T01 -->
+```diff
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -457,3 +457,3 @@
+ 	const details: Record<string, unknown> = {
+-		verdict,
++		verdict: {},
+ 		next: result.next,
+```
+<!-- /patch:S15-T01 -->
+<!-- patch:S15-T02 -->
+```diff
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -477,3 +477,3 @@
+ 	};
+-	return { content: [{ type: "text", text: formatDiffReview(result) }], details };
++	return { content: [{ type: "text", text: "review complete" }], details };
+ }
+```
+<!-- /patch:S15-T02 -->
+<!-- patch:S15-T03 -->
+```diff
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -459,2 +459,3 @@
+ 		next: result.next,
++		diff_path: result.diff?.path,
+ 		/** `state/runs/<job-id>/review-<n>.json` — the decision, never the diff. */
+```
+<!-- /patch:S15-T03 -->
+<!-- patch:S15-T04 -->
+```diff
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -462,3 +462,3 @@
+ 		review_file: result.path,
+-		...(result.model ? { model: result.model } : {}),
++		...(result.model ? { model: result.model } : { model: "fabricated" }),
+ 		...(result.diff
+```
+<!-- /patch:S15-T04 -->
+<!-- patch:S15-T05 -->
+```diff
+diff --git a/src/contracts/workers.ts b/src/contracts/workers.ts
+--- a/src/contracts/workers.ts
++++ b/src/contracts/workers.ts
+@@ -84,3 +84,2 @@
+ 	 */
+-	"cp_review",
+ 	"cp_artifact",
+```
+<!-- /patch:S15-T05 -->
+
+<!-- patch:S15-R16 -->
+```diff
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -536,3 +536,3 @@
+ 			firstSentAt: existing?.firstSentAt ?? at,
+-			resent: (resend && sent) || existing?.resent === true,
++			resent: resend || existing?.resent === true,
+ 		});
+```
+<!-- /patch:S15-R16 -->
+
+<!-- patch:S15-W01 -->
+```diff
+--- a/src/review-merge-window.ts
++++ b/src/review-merge-window.ts
+@@ -15 +15 @@
+-	const deadline = Date.parse(pass.decided_at) + reviewMergeWindowMs();
++	const deadline = Date.parse(pass.decided_at);
+```
+<!-- /patch:S15-W01 -->
+
+<!-- patch:S15-C10 -->
+```diff
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -154 +154 @@
+-	for (const path of named) add(path, "head", "task-named");
++	for (const path of named) { add(path, "head", "task-named"); add(path, "fork", "task-named"); }
+```
+<!-- /patch:S15-C10 -->
 <!-- patch:S21-long -->
 ```diff
 diff --git a/src/recovery-notice.ts b/src/recovery-notice.ts
@@ -1741,12 +2788,354 @@ S02 controls run with `npm run test:one -- --test-name-pattern='landing S02: <sc
 Each patch below was applied alone and restored; each exited 1 on the observable assertion above.
 The restored S02 scenarios pass. Existing NC-32 and NC-39–NC-42 continue to cover shared scenario 05-8.
 
+<!-- patch:NC-S02-eligibility -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..152e949 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -155,12 +155,7 @@ export function prReceiptOf(record: WatchableRecord): Receipt | undefined {
+  * `delivery:pr` job keeps its worker alive by design, and this must not care.
+  */
+ export function isWatched(record: WatchableRecord): boolean {
+-	if (record.delivery !== "pr") return false;
+-	if (record.phase !== "held") return false;
+-	if (record.reported_at === undefined) return false;
+-	const receipt = prReceiptOf(record);
+-	if (!receipt) return false;
+-	return !LANDED_RECEIPT_STATUSES.includes(receipt.status.trim().toLowerCase());
++	return true;
+ }
+ 
+ // ---------------------------------------------------------------------------
+```
+
+<!-- patch:NC-S02-terminal -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..d5d5e64 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -261,7 +261,7 @@ export function deriveCiEvents(facts: CiFacts): CiObservation[] {
+ 		...rest,
+ 	});
+ 
+-	if (facts.pr?.merged) {
++	if (false && facts.pr?.merged) {
+ 		const commit = facts.pr.merge_commit_sha?.trim();
+ 		return [
+ 			at("pr_merged", {
+```
+
+<!-- patch:NC-S02-retry -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..72c010e 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -723,7 +723,7 @@ export class CiWatch {
+ 			// defect this bound exists to close, and confirmation (or the job leaving
+ 			// the watch set) is what clears it, never a third send.
+ 			if (existing?.resent) continue;
+-			if (existing !== undefined && millis - existing.sentAt < this.#retryMs) continue;
++			if (existing !== undefined) continue;
+ 			const isResend = existing !== undefined;
+ 			this.#inFlight.set(observation.key, { sentAt: millis, resent: isResend });
+ 			due.push(observation);
+```
+
+<!-- patch:NC-S02-resend -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..b099b5d 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -722,7 +722,7 @@ export class CiWatch {
+ 			// left alone from here on — resending it again on every future tick is the
+ 			// defect this bound exists to close, and confirmation (or the job leaving
+ 			// the watch set) is what clears it, never a third send.
+-			if (existing?.resent) continue;
++			if (false && existing?.resent) continue;
+ 			if (existing !== undefined && millis - existing.sentAt < this.#retryMs) continue;
+ 			const isResend = existing !== undefined;
+ 			this.#inFlight.set(observation.key, { sentAt: millis, resent: isResend });
+```
+
+<!-- patch:NC-S02-age -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..3094349 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -779,6 +779,7 @@ export class CiWatch {
+ 		}
+ 		this.#save(jobId, {
+ 			last_checked_at: isoTimestamp(now),
++			head_observed_at: isoTimestamp(now),
+ 			next_due_at: isoTimestamp(new Date(now.getTime() + nextDueMs(this.#cadence, { failures, settled: false }))),
+ 			consecutive_failures: failures,
+ 			last_error: message.slice(0, 300),
+```
+
+<!-- patch:NC-S02-cap -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..4ee7970 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -364,7 +364,7 @@ export function ciWatchIntervalMs(env: NodeJS.ProcessEnv = process.env): number
+ export function nextDueMs(cadence: CiWatchCadence, state: { failures: number; settled: boolean }): number {
+ 	if (state.failures > 0) {
+ 		const grown = cadence.intervalMs * 2 ** Math.max(0, state.failures - 1);
+-		return Math.min(grown, cadence.maxBackoffMs);
++		return grown;
+ 	}
+ 	return state.settled ? cadence.intervalMs * cadence.idleMultiplier : cadence.intervalMs;
+ }
+```
+
+<!-- patch:NC-S02-gitlab -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..e246b2b 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -674,7 +674,7 @@ export class CiWatch {
+ 		const now = this.#now();
+ 		for (const record of watched) {
+ 			const gitlab = parseChangeRequestUrl(prReceiptOf(record)?.url ?? "")?.kind === "gitlab";
+-			if (this.#disabled && !gitlab) continue;
++			if (this.#disabled) continue;
+ 			if (!this.#due(record.job_id, now)) {
+ 				result.skipped.push(record.job_id);
+ 				continue;
+```
+
+<!-- patch:NC-S02-policy -->
+```diff
+diff --git a/src/ci-wait.ts b/src/ci-wait.ts
+index 1cb3d19..d4b1e1c 100644
+--- a/src/ci-wait.ts
++++ b/src/ci-wait.ts
+@@ -115,7 +115,7 @@ export function detectCiWait(command: string): CiWaitFinding | undefined {
+ 	if (typeof command !== "string" || command.trim().length === 0) return undefined;
+ 
+ 	const watch = firstMatch(command, BLOCKING_WATCH_RES);
+-	if (watch) {
++	if (false && watch) {
+ 		return {
+ 			shape: "blocking_watch",
+ 			matched: bound(watch),
+```
+
 Review-1 controls below were each applied alone to source revision b744b908413b97d7fb9a39ae6056179ec3f8ae07,
 run with `node --import ./tests/harness/hermetic-env.ts --test --test-name-pattern='landing S02: watch delivery' tests/e2e/landing.test.ts`,
 then restored. For aggregate/empty/red/closed/superseded use `landing S02: aggregate`; for key/history/prune use
 `landing: CI watch persists`; for parked use `landing S02: only reported`. Each command exited 1 at the regression
 assertion recorded above. The superseded case returns raw Actions rows so fake gh cannot filter away the stale input.
 All sixteen logs and patches are also retained in the S02 worker artifact directory.
+
+<!-- patch:NC-S02-restart -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..b68731d 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -415,7 +415,7 @@ export class CiWatchStore {
+ 	}
+ 
+ 	announced(jobId: string): Set<string> {
+-		return new Set(this.job(jobId)?.announced ?? []);
++		return new Set();
+ 	}
+ 
+ 	#mutate(mutator: (file: CiWatchFile) => CiWatchFile): CiWatchFile {
+```
+
+<!-- patch:NC-S02-permission -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..da6a089 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -782,7 +782,7 @@ export class CiWatch {
+ 			next_due_at: isoTimestamp(new Date(now.getTime() + nextDueMs(this.#cadence, { failures, settled: false }))),
+ 			consecutive_failures: failures,
+ 			last_error: message.slice(0, 300),
+-			last_ci: ciReadDenied(message) ? CI_UNREADABLE : "unknown", // loud when refused; never a stale green either way
++			last_ci: "unknown",
+ 		});
+ 	}
+ 
+```
+
+<!-- patch:NC-S02-idle -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..a91929f 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -366,7 +366,7 @@ export function nextDueMs(cadence: CiWatchCadence, state: { failures: number; se
+ 		const grown = cadence.intervalMs * 2 ** Math.max(0, state.failures - 1);
+ 		return Math.min(grown, cadence.maxBackoffMs);
+ 	}
+-	return state.settled ? cadence.intervalMs * cadence.idleMultiplier : cadence.intervalMs;
++	return cadence.intervalMs;
+ }
+ 
+ // ---------------------------------------------------------------------------
+```
+
+<!-- patch:NC-S02-base -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..0d57078 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -366,7 +366,7 @@ export function nextDueMs(cadence: CiWatchCadence, state: { failures: number; se
+ 		const grown = cadence.intervalMs * 2 ** Math.max(0, state.failures - 1);
+ 		return Math.min(grown, cadence.maxBackoffMs);
+ 	}
+-	return state.settled ? cadence.intervalMs * cadence.idleMultiplier : cadence.intervalMs;
++	return cadence.intervalMs * cadence.idleMultiplier;
+ }
+ 
+ // ---------------------------------------------------------------------------
+```
+
+<!-- patch:NC-S02-due -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..455899a 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -675,7 +675,7 @@ export class CiWatch {
+ 		for (const record of watched) {
+ 			const gitlab = parseChangeRequestUrl(prReceiptOf(record)?.url ?? "")?.kind === "gitlab";
+ 			if (this.#disabled && !gitlab) continue;
+-			if (!this.#due(record.job_id, now)) {
++			if (false) {
+ 				result.skipped.push(record.job_id);
+ 				continue;
+ 			}
+```
+
+<!-- patch:NC-S02-overlap -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..fcfe197 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -647,7 +647,6 @@ export class CiWatch {
+ 	 * so a slow `gh` cannot stack queries on the next timer beat.
+ 	 */
+ 	async tick(): Promise<CiWatchTick> {
+-		if (this.#tick) return this.#tick;
+ 		const promise = this.#run().finally(() => {
+ 			this.#tick = undefined;
+ 		});
+```
+
+<!-- patch:NC-S02-env -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..b7a1b8d 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -352,7 +352,7 @@ export function ciWatchIntervalMs(env: NodeJS.ProcessEnv = process.env): number
+ 	const raw = env.CP_CI_WATCH_SECONDS;
+ 	if (raw === undefined || raw.trim() === "") return CI_WATCH_INTERVAL_MS;
+ 	const parsed = Number(raw);
+-	if (!Number.isFinite(parsed) || parsed <= 0) return CI_WATCH_INTERVAL_MS;
++	if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+ 	return Math.floor(parsed * 1000);
+ }
+ 
+```
+
+<!-- patch:NC-S02-aggregate -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..b1cc303 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -284,7 +284,7 @@ export function deriveCiEvents(facts: CiFacts): CiObservation[] {
+ 	// cp-gmy's evaluator, unforked: a completed run counts only when its headSha
+ 	// is the branch's current pushed head, and one unfinished run on that head
+ 	// defers the whole aggregate.
+-	const verdict = evaluateMergeAskCi({ branch: facts.branch, head: { sha: head }, runs: facts.runs });
++	const verdict = evaluateMergeAskCi({ branch: facts.branch, head: { sha: head }, runs: facts.runs.filter((r) => r.status === "completed") });
+ 	if (verdict.ci === "green") {
+ 		return [at("ci_green", { reason: verdict.reason, conclusion: "success" }, identity)];
+ 	}
+```
+
+<!-- patch:NC-S02-superseded -->
+```diff
+diff --git a/src/actions-ci.ts b/src/actions-ci.ts
+index 06e38d4..a1b4fe6 100644
+--- a/src/actions-ci.ts
++++ b/src/actions-ci.ts
+@@ -149,7 +149,7 @@ type RunRow = Omit<ActionsRun, "jobs">;
+ export function parseRunsPage(stdout: string, sha: string | undefined, endpoint = "actions/runs"): Page<RunRow> {
+ 	const page = pageOf(stdout, endpoint, "workflow_runs");
+ 	const items = page.items.map((row): RunRow => {
+-		const { id, run_attempt: attempt, head_sha: headSha } = row;
++		const { id, run_attempt: attempt, head_sha: headSha } = { ...row, head_sha: sha ?? row.head_sha };
+ 		const status = nullableString(row.status);
+ 		const conclusion = nullableString(row.conclusion);
+ 		if (typeof id !== "number" || !positive(id) || typeof attempt !== "number" || !positive(attempt)) {
+```
+
+<!-- patch:NC-S02-empty -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..66ac2e9 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -284,6 +284,7 @@ export function deriveCiEvents(facts: CiFacts): CiObservation[] {
+ 	// cp-gmy's evaluator, unforked: a completed run counts only when its headSha
+ 	// is the branch's current pushed head, and one unfinished run on that head
+ 	// defers the whole aggregate.
++	if (facts.runs.length === 0) return [at("ci_green", { reason: "no runs", conclusion: "success" }, identity)];
+ 	const verdict = evaluateMergeAskCi({ branch: facts.branch, head: { sha: head }, runs: facts.runs });
+ 	if (verdict.ci === "green") {
+ 		return [at("ci_green", { reason: verdict.reason, conclusion: "success" }, identity)];
+```
+
+<!-- patch:NC-S02-red -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..ebbb99a 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -288,7 +288,7 @@ export function deriveCiEvents(facts: CiFacts): CiObservation[] {
+ 	if (verdict.ci === "green") {
+ 		return [at("ci_green", { reason: verdict.reason, conclusion: "success" }, identity)];
+ 	}
+-	if (verdict.ci === "failed") {
++	if (false) {
+ 		const failing = failedRunOn(facts.runs, head);
+ 		return [
+ 			at("ci_failed", {
+```
+
+<!-- patch:NC-S02-closed -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..bd5b0f2 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -271,7 +271,7 @@ export function deriveCiEvents(facts: CiFacts): CiObservation[] {
+ 			}),
+ 		];
+ 	}
+-	if (facts.pr && (facts.pr.state ?? "").trim().toLowerCase() === "closed") {
++	if (false) {
+ 		return [
+ 			at("pr_closed", {
+ 				reason: `PR closed without merging${facts.pr.closed_at ? ` at ${facts.pr.closed_at}` : ""}`,
+```
 
 <!-- patch:NC-S02-key -->
 ```diff
@@ -1793,6 +3182,23 @@ index 25eb6e0..8a38105 100644
  		}
  		try {
 -			this.store.prune(new Set([...watched, ...this.#deps.jobs().filter((r) => r.phase === "awaiting_merge")].map((r) => r.job_id)));
+ 		} catch {
+ 			// Pruning is housekeeping; a failure here must not skip the tick.
+ 		}
+```
+
+<!-- patch:NC-S02-parked -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..5a07606 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -667,7 +667,7 @@ export class CiWatch {
+ 			return result;
+ 		}
+ 		try {
+-			this.store.prune(new Set([...watched, ...this.#deps.jobs().filter((r) => r.phase === "awaiting_merge")].map((r) => r.job_id)));
++			this.store.prune(new Set(watched.map((r) => r.job_id)));
  		} catch {
  			// Pruning is housekeeping; a failure here must not skip the tick.
  		}
@@ -2528,10 +3934,19 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/forge-runtime-retained.test.ts` | S06 | three verbatim landing proof regressions: injected runner budgets, direct runner timeout and proof/release recheck |
 | `tests/forge-observers-retained.test.ts` | S06 | eight preserved structural, security and direct-reader boundary declarations; reasons in assertion map |
 | `tests/held-release-retained.test.ts` | S06 | eight preserved private-state, schema-defense and injected-race declarations; reasons in assertion map |
+| `tests/e2e/wake-delivery.test.ts` | S19 | two real-host/operator consumer scenarios, conversion evidence |
+| `tests/escalation-relay-watch-retained.test.ts` | S19 | retained, convert-owned S19; answered input cannot reach dueDirect from parent-host's EscalationStore.open() even with legacy disk data |
+| `tests/e2e/wake-reattach.test.ts` | S19 | real bridge transport faults, default backoff cap and established-host probe behavior |
+| `tests/e2e/wake-send-first.test.ts` | S19 | real parent send-first holds, public queue clearing, answered bypass, abort release and oldest deadline |
+| `tests/bridge-reattach-retained.test.ts` | S19 | retained, convert-owned S19; shutdown-only cancellation and an injected synchronous in-attempt schedule have no continuing public operator entry point |
+| `tests/e2e/wake-deferred.test.ts` | S19 | real parent CI/review races, failed CI readers and recovery, actual late CI deadline, invalid merge prerequisites and native plan-gate no-op |
+| `tests/deferred-recheck-retained.test.ts` | S19 | retained/moved verbatim, convert-owned S19; six declarations require arbitrary invalid/future wake-ups or injected synchronous/unbounded hook callbacks unavailable through public tools; entry-point evidence in testing-migration-s19.md; no deletion credit |
 | `tests/timer-knobs.test.ts` | #439 | convert-owned #439; incoming timer/environment parser coverage introduced by merged #439, outside S19 conversion scope |
 | `tests/bridge-reattach-knobs.test.ts` | #447 | incoming #447 default-knob regression moved verbatim from the retired original path; four older declarations retain their S19 mapped/retained dispositions |
 | `tests/e2e/ci-watch-jobless.test.ts` | #443 | incoming #443-owned consumer coverage for job-less CI watch errors, outside S19 conversion scope |
 | `tests/recovery-notice-bound.test.ts` | #442 | convert-owned #442; incoming recovery-notice bounds and rejected-write coverage, outside S19 conversion scope |
+| `tests/review-tool-retained.test.ts` | S15 | convert-owned; three verbatim declarations retained from tests/review-tool.test.ts for unreachable closed-schema, invalid-verdict and combined raw-observation helper inputs; see testing-migration-s15.md |
+| `tests/review-runs-retained.test.ts` | S15 | convert-owned; three verbatim direct-registry declarations from tests/review-runs.test.ts: duplicate ReviewRunsError, undefined successful finish wake, and missing surface finisher; public entry-point traces in testing-migration-s15.md |
 | `tests/merge-permission-retained.test.ts` | S14 | structural safety: no public consumer composes ghBranchRulesArgs and detectCiWait; original declaration 13 verbatim |
 | `tests/pr-resolve-retained.test.ts` | S14 | mixed original declaration 9 verbatim: validateEnvelope refuses missing pr_url before intake resolver; all reachable variants also covered through real reporter |
 | `tests/review-approval-retained.test.ts` | S14 | original declaration verbatim: pipeline artifacts.info fails before missing matches; only production write passes seq 1; no public entry reaches seq-2/3 overwrite |
@@ -2544,6 +3959,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/recovery-notice-bound.test.ts` | #442 | incoming UTF-8 bound and hostile-control-byte regression: forty failed recovery candidates journal exactly one bounded notice; preserved unchanged; convert owner P4, behavior 06. No exception or deletion credit claimed. |
 | `tests/timer-knobs.test.ts` | #439 | incoming timer configuration contract: defaults, positive overrides and invalid-input fallback; landed with the public knobs consumed by S15 Addendum 2; preserved unchanged; convert owner P16, outside S03b. No exception or deletion credit claimed. |
 | `tests/e2e-hermetic-gh.test.ts` | #454 | incoming e2e harness hermetic-gh regression; no conversion owner, no exception or deletion credit claimed |
+| `tests/split-migration-ledger.test.ts` | cp-ledger-split-gewy | incoming regression for the ledger split script (a `$&` in a kept row); no conversion owner, no exception or deletion credit claimed |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -2623,6 +4039,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/awaiting-ui.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/awaiting.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/bounds.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
+| `tests/bridge-reattach.test.ts` | deleted | S19 | S19-3; two declarations mapped under S19-NC-6/7, two verbatim declarations retained in tests/bridge-reattach-retained.test.ts |
 | `tests/budgets.test.ts` | deleted | P2 | 6 assertions mapped to 02-4; negative control NC-04 |
 | `tests/capacity.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-14 or redundant-unreachable (Assertion map); negative control NC-19 |
 | `tests/checkpoint-root.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
@@ -2640,6 +4057,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/contracts-exports.test.ts` | exception | P1 | golden: export compatibility; operator ask-0088e0332d00 (Exceptions) |
 | `tests/contracts.test.ts` | exception | P1 | contract: schema/prompt/export consistency; operator ask-0088e0332d00 (Exceptions) |
 | `tests/control-pending.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
+| `tests/cp-bridge-reattach.test.ts` | deleted | S19 | S19-1 real operator/parent/host lifecycle; S19-NC-1 |
 | `tests/cp-bridge-restart.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
 | `tests/cp-bridge.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/curation.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
@@ -2658,6 +4076,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/decide-listing.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/decide.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/decision-context.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/deferred-recheck.test.ts` | deleted | S19 | all 23 declarations disposed: 17 mapped, 6 retained/moved verbatim in tests/deferred-recheck-retained.test.ts with no declaration deletion credit; deleted is the checker's required absent-path label |
 | `tests/dependency-dispatch.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/device-notifications.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
 | `tests/device-notify.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
@@ -2691,6 +4110,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/e2e/worker-mcp.test.ts` | e2e | P1 | existing e2e acceptance file |
 | `tests/envelope-correction.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/escalation-backstop.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
+| `tests/escalation-relay-watch.test.ts` | deleted | S19 | S19-2; four mapped declarations under S19-2/3/4/5 controls, one verbatim retained in tests/escalation-relay-watch-retained.test.ts |
 | `tests/escalation.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/evals.test.ts` | exception | P1 | contract: offline assembled prompt corpus; operator ask-0088e0332d00 (Exceptions) |
 | `tests/extension-deps.test.ts` | exception | P1 | contract: package boundary constraints; operator ask-0088e0332d00 (Exceptions) |
@@ -2835,6 +4255,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/schedule-wake.test.ts` | convert | P13 | behavior 12 (Schedules) |
 | `tests/scheduler.test.ts` | convert | P13 | behavior 12 (Schedules) |
 | `tests/script-jobs.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery); P1 amendment, in no plan row |
+| `tests/send-first-gate.test.ts` | deleted | S19 | S19-5/6/7/8; four declarations mapped under S19-NC-9 through S19-NC-15, real parent RPC queue clearing and model contexts |
 | `tests/send.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/service-alerts.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
 | `tests/service-health.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
