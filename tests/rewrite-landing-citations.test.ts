@@ -12,9 +12,9 @@ function runIn(citation: string): { status: number | null; out: string } {
 	try {
 		mkdirSync(join(dir, "tests/e2e"), { recursive: true });
 		mkdirSync(join(dir, "docs/testing-migration"), { recursive: true });
-		for (const f of ["landing", "landing-s03", "landing-ci-watch", "landing-s09"]) {
-			writeFileSync(join(dir, `tests/e2e/${f}.test.ts`), f === "landing" ? 'test("a", () => {});\n' : "");
-		}
+		const moved = ["landing-s03", "landing-ci-watch", "landing-s09", "landing-forge-ci", "landing-merge", "landing-review-window"];
+		for (const f of moved) writeFileSync(join(dir, `tests/e2e/${f}.test.ts`), f === "landing-s03" ? 'test("a", () => {});\n' : "");
+		writeFileSync(join(dir, "tests/e2e/landing.test.ts"), 'test("a", () => {});\n');
 		writeFileSync(join(dir, "docs/testing-migration.md"), `${citation}\n`);
 		execFileSync("git", ["init", "-q"], { cwd: dir });
 		execFileSync("git", ["add", "-A"], { cwd: dir });

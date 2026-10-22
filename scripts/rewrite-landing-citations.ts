@@ -7,7 +7,14 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import ts from "typescript";
 
 const OLD = "tests/e2e/landing.test.ts";
-const NEW_FILES = [OLD, "tests/e2e/landing-s03.test.ts", "tests/e2e/landing-ci-watch.test.ts", "tests/e2e/landing-s09.test.ts"];
+const NEW_FILES = [
+	"tests/e2e/landing-s03.test.ts",
+	"tests/e2e/landing-ci-watch.test.ts",
+	"tests/e2e/landing-s09.test.ts",
+	"tests/e2e/landing-forge-ci.test.ts",
+	"tests/e2e/landing-merge.test.ts",
+	"tests/e2e/landing-review-window.test.ts",
+];
 
 interface Decl { title: string; line: number; file: string }
 
@@ -37,7 +44,8 @@ function rewrite(line: string): string {
 		return found ? `\`${found.file}\` | ${title} |` : whole;
 	});
 	out = out.replace(/--test-name-pattern='([^']*)'([^\n]*?)tests\/e2e\/landing\.test\.ts/g, (whole, pattern: string, mid: string) => {
-		if (pattern === "<pattern>") return whole; // generic usage template, not a citation
+		// The doc template `--test-name-pattern='<pattern>' tests/e2e/landing.test.ts` names no test: point it at every landing file.
+		if (pattern === "<pattern>" && mid === " ") return `--test-name-pattern='<pattern>' tests/e2e/landing-*.test.ts`;
 		const needle = pattern.split("<")[0] ?? "";
 		const files = [...new Set([...after.values()].filter((d) => needle && d.title.includes(needle)).map((d) => d.file))];
 		if (files.length === 0) {
@@ -65,4 +73,4 @@ for (const doc of docs) {
 	if (next !== text) writeFileSync(doc, next);
 }
 if (unresolved.length) process.exitCode = 1;
-console.log(unresolved.length ? `unresolved (left pointing at ${OLD}): ${unresolved.join("; ")}` : "all citations resolved");
+console.log(unresolved.length ? `unresolved (left pointing at the old file): ${unresolved.join("; ")}` : "all citations resolved");
