@@ -1,0 +1,13 @@
+diff --git a/src/bridge-reattach.ts b/src/bridge-reattach.ts
+index 4c2760a..de45ec3 100644
+--- a/src/bridge-reattach.ts
++++ b/src/bridge-reattach.ts
+@@ -31,7 +31,7 @@ export function reattachLoop(attempt: () => Promise<void>, firstMs = REATTACH_FI
+ 						running = false;
+ 						if (again) { again = false; schedule(); }
+ 					},
+-					() => { if (mine === epoch) step(Math.min(delay * 2, maxMs)); },
++					() => { if (mine === epoch) step(delay * 2); },
+ 				);
+ 			}, delay);
+ 			timer.unref();

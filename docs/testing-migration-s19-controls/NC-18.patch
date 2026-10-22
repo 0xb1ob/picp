@@ -1,0 +1,13 @@
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..279f21e 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -111,7 +111,7 @@ export function isPassingDiffReview(wakeup: unknown): boolean {
+ 
+ /** Does this event change a fact a deferred merge ask is waiting on? */
+ export function releasesDeferredAsks(trigger: DeferredRecheckTrigger): boolean {
+-	return trigger.kind === "ci" ? true : isPassingDiffReview(trigger.wakeup);
++	return true;
+ }
+ 
+ /**

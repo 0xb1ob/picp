@@ -1,0 +1,13 @@
+diff --git a/src/merge-ask.ts b/src/merge-ask.ts
+index d2ce0b3..ec47832 100644
+--- a/src/merge-ask.ts
++++ b/src/merge-ask.ts
+@@ -629,7 +629,7 @@ export function createMergeAskProbe(deps: MergeAskProbeDeps): MergeAskProbe {
+ 				});
+ 			}
+ 			return verdict({
+-				action: "defer",
++				action: "raise",
+ 				ci: "unknown",
+ 				reason: `CI state unavailable for ${branch}: ${(error as Error).message}`,
+ 			});
