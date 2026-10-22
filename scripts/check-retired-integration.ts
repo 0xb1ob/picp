@@ -11,12 +11,12 @@ import { pathToFileURL } from "node:url";
 export const RETIRED_PATTERN = /\bbr\b|beads/i;
 export const ALLOWLIST_FILE = "scripts/retired-integration-allowlist.json";
 
-/** Each category may only exempt lines in these files; anything else is a finding. */
+/** Each category may only exempt lines in these files; a trailing `/` names a directory. */
 export const CATEGORY_PATHS: Readonly<Record<string, readonly string[]>> = {
 	"frozen-history": ["CHANGELOG.md"],
 	protocol: ["src/viewer/server.ts", "tests/viewer-compression-http.test.ts"],
 	"self-pattern": ["scripts/check-retired-integration.ts"],
-	"deleted-feature-record": ["docs/testing-migration.md"],
+	"deleted-feature-record": ["docs/testing-migration.md", "docs/testing-migration/"],
 	"legacy-compat": [".gitignore", "src/service/install.ts"],
 };
 
@@ -47,7 +47,7 @@ export function check(paths: readonly string[], matches: readonly Match[], entri
 	for (const entry of entries) {
 		const key = `${entry.path}\0${entry.sha256}`;
 		if (allowed.has(key)) findings.push(`${entry.path}: duplicate allowlist entry ${entry.sha256.slice(0, 12)}`);
-		if (!CATEGORY_PATHS[entry.category]?.includes(entry.path)) findings.push(`${entry.path}: category "${entry.category}" cannot exempt this file`);
+		if (!CATEGORY_PATHS[entry.category]?.some((allowedPath) => allowedPath.endsWith("/") ? entry.path.startsWith(allowedPath) : entry.path === allowedPath)) findings.push(`${entry.path}: category "${entry.category}" cannot exempt this file`);
 		if (!entry.reason.trim()) findings.push(`${entry.path}: allowlist entry ${entry.sha256.slice(0, 12)} has no reason`);
 		if (!tracked.has(entry.path)) findings.push(`${entry.path}: allowlisted file is not tracked`);
 		allowed.set(key, entry);

@@ -1,6 +1,6 @@
 # S09 declaration evidence
 
-S10 carry-in completion (main session carry-in): declaration 59 has independently executed reminder-dedupe and reminder-withdraw controls; 63 has completed-repair exhaustion in addition to its active guard; 70 has a new-head handoff control in addition to first conflict and exhaustion. Exact patches, blob SHAs and failing assertions are in [S10 controls](testing-migration-s10.md#executed-production-controls). S09-2 ready/reminder follow-ups now require an actual merge command. All declarations 41–80 also have canonical assertion-map rows in testing-migration.md.
+S10 carry-in completion (main session carry-in): declaration 59 has independently executed reminder-dedupe and reminder-withdraw controls; 63 has completed-repair exhaustion in addition to its active guard; 70 has a new-head handoff control in addition to first conflict and exhaustion. Exact patches, blob SHAs and failing assertions are in [S10 controls](testing-migration-s10.md#executed-production-controls). S09-2 ready/reminder follow-ups now require an actual merge command. All declarations 41–80 also have canonical assertion-map rows under docs/testing-migration/.
 
 Ownership: the remaining behavior-05 files are owned by P3c-rest and re-sliced by operator decision ask-c77a4f32b23b (Raise cap to ~$2,700 on Sol); slice list operator/scratch/e2e-migration-slices.md; rule v2 applies.
 
