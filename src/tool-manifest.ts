@@ -20,7 +20,8 @@ export type RequiredTool = (typeof REQUIRED_TOOLS)[number];
 export type InstallStep =
 	| { kind: "brew"; formula: string }
 	| { kind: "npm"; pkg: string; flags?: readonly string[] }
-	| { kind: "curl"; url: string }
+	/** Pinned GitHub release tarball `<name>-v<version>-<os>-<arch>.tar.gz` holding one binary named `<name>`. */
+	| { kind: "release"; repo: string; version: string }
 	/** No automated path here (usually: needs sudo, or the platform varies too much to guess). */
 	| { kind: "manual"; summary: string };
 
@@ -31,10 +32,12 @@ export interface ToolInstallSpec {
 	linux: InstallStep;
 }
 
+const TREEHOUSE_RELEASE: InstallStep = { kind: "release", repo: "kunchenguid/treehouse", version: "3.1.2" };
+
 /**
  * One source per tool, taken from each project's own published quick-install
- * (not guessed): treehouse ships a `curl | sh` one-liner that detects the
- * platform itself; pi is `npm install -g`, matching this repo's own README
+ * (not guessed): treehouse is a pinned release download (its `install.sh` asks the
+ * rate-limited API for "latest", #428); pi is `npm install -g`, matching this repo's own README
  * requirement. git is the one case with no single cross-distro command —
  * Homebrew on macOS, and "not automated" on Linux, because every route there
  * needs sudo and this script does not run sudo silently.
@@ -52,8 +55,8 @@ export const TOOL_INSTALL: Readonly<Record<RequiredTool, ToolInstallSpec>> = Obj
 	},
 	treehouse: {
 		tool: "treehouse",
-		macos: { kind: "curl", url: "https://kunchenguid.github.io/treehouse/install.sh" },
-		linux: { kind: "curl", url: "https://kunchenguid.github.io/treehouse/install.sh" },
+		macos: TREEHOUSE_RELEASE,
+		linux: TREEHOUSE_RELEASE,
 	},
 	pi: {
 		tool: "pi",

@@ -22,8 +22,8 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync } from "node:fs";
-import { platform } from "node:os";
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { arch, homedir, platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { whichAll } from "../src/doctor.ts";
@@ -44,6 +44,37 @@ function detectOS(): InstallerOS {
 	}
 }
 
+/** Direct release-asset download (no "latest" API call), authenticated when GITHUB_TOKEN/GH_TOKEN is set (#428). */
+function installRelease(repo: string, version: string): void {
+	const name = repo.split("/")[1] ?? repo;
+	const goArch = arch() === "arm64" ? "arm64" : "amd64";
+	const file = `${name}-v${version}-${platform()}-${goArch}.tar.gz`;
+	const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+	const dir = mkdtempSync(join(tmpdir(), "cp-release-"));
+	try {
+		const auth = token ? ["-H", `Authorization: Bearer ${token}`] : [];
+		const url = `https://github.com/${repo}/releases/download/v${version}/${file}`;
+		execFileSync("curl", ["-fsSL", ...auth, url, "-o", join(dir, file)], { stdio: "inherit" });
+		execFileSync("tar", ["xzf", join(dir, file), "-C", dir], { stdio: "inherit" });
+		const local = join(homedir(), ".local/bin");
+		const dest = (process.env.PATH ?? "").split(":").includes(local) ? local : "/usr/local/bin";
+		const sudo = (cmd: string, args: string[]) => {
+			let writable = true;
+			try {
+				mkdirSync(dest, { recursive: true });
+				accessSync(dest, constants.W_OK);
+			} catch {
+				writable = false;
+			}
+			execFileSync(writable ? cmd : "sudo", writable ? args : [cmd, ...args], { stdio: "inherit" });
+		};
+		sudo("mv", [join(dir, name), join(dest, name)]);
+		console.log(`${name} v${version} installed to ${join(dest, name)}`);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 function realRun(step: InstallStep): void {
 	switch (step.kind) {
 		case "brew":
@@ -52,10 +83,8 @@ function realRun(step: InstallStep): void {
 		case "npm":
 			execFileSync("npm", ["install", ...(step.flags ?? []), step.pkg], { stdio: "inherit" });
 			return;
-		case "curl":
-			// The tool's own published quick-install (see src/tool-manifest.ts):
-			// treehouse ships a self-detecting `curl | sh` one-liner.
-			execFileSync("/bin/sh", ["-c", `curl -fsSL "${step.url}" | sh`], { stdio: "inherit" });
+		case "release":
+			installRelease(step.repo, step.version);
 			return;
 		case "manual":
 			throw new Error(step.summary);
