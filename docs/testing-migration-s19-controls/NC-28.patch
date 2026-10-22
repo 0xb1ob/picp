@@ -1,0 +1,13 @@
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..ae626f5 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -59,7 +59,7 @@ import { withDeadline } from "./suggest.ts";
+  * so neither may wait on this indefinitely: what is at stake is the operator's
+  * notice, the parent's wake-up and, on the reviewer path, the attempt's slot.
+  */
+-export const DEFERRED_RECHECK_MAX_WAIT_MS = 30_000;
++export const DEFERRED_RECHECK_MAX_WAIT_MS = 0;
+ 
+ /**
+  * What happened. `ci` is one or more `cp-ci` observations for a held PR (a run

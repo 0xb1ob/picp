@@ -1,0 +1,7 @@
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..f98af0a 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -224 +224 @@ export function formatRaisedNotice(raised: readonly AwaitingItem[]): string {
+-	return `${head}: ${decisions} — answer with cp_decide`.slice(0, 300);
++	return `${head}: S19 unnamed decision — answer with cp_decide`;

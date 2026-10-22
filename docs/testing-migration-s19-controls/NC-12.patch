@@ -1,0 +1,7 @@
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..fd03475 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -50 +50 @@ export class SendFirstGate<Wake> {
+-		if (kind === "answered" || this.#unanswered.size === 0) return "send";
++		if (this.#unanswered.size === 0) return "send";
