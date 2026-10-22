@@ -79,7 +79,6 @@
  */
 
 import {
-	CI_WATCH_DELIVERY_RETRY_SECONDS,
 	CI_WATCH_IDLE_MULTIPLIER,
 	CI_WATCH_INTERVAL_MS,
 	CI_WATCH_KEEP_ANNOUNCED,
@@ -113,6 +112,7 @@ import {
 } from "./merge-ask.ts";
 import { type ProjectOf, projectGroupedLines } from "./project-report.ts";
 import { LANDED_RECEIPT_STATUSES } from "./supersede.ts";
+import { ciWatchDeliveryRetryMs } from "./timer-knobs.ts";
 
 export class CiWatchError extends Error {}
 
@@ -584,7 +584,7 @@ export class CiWatch {
 			idleMultiplier: deps.idleMultiplier ?? CI_WATCH_IDLE_MULTIPLIER,
 			maxBackoffMs: deps.maxBackoffMs ?? CI_WATCH_MAX_BACKOFF_MS,
 		};
-		this.#retryMs = (deps.retrySeconds ?? CI_WATCH_DELIVERY_RETRY_SECONDS) * 1000;
+		this.#retryMs = deps.retrySeconds !== undefined ? deps.retrySeconds * 1000 : ciWatchDeliveryRetryMs();
 	}
 
 	get cadence(): CiWatchCadence {

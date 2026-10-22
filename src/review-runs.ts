@@ -41,10 +41,9 @@ import {
 	type ReviewSurface,
 	SCHEMA_VERSION,
 	validatePendingReview,
-	VERDICT_DELIVERY_RETRY_SECONDS,
-	VERDICT_SUPPRESSED_RETRY_MAX_SECONDS,
 } from "./contracts.ts";
 import { isPidAlive } from "./fleet.ts";
+import { reviewSuppressionMs, verdictDeliveryRetryMs } from "./timer-knobs.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { withDeadline } from "./suggest.ts";
 import type { RunRegistry } from "./runs.ts";
@@ -565,11 +564,11 @@ export class ReviewRuns {
 	resendDue(now: Date = this.#now()): string[] {
 		const resent: string[] = [];
 		for (const [key, entry] of this.#inFlight) {
-			if (entry.resent || now.getTime() - entry.firstSentAt >= VERDICT_SUPPRESSED_RETRY_MAX_SECONDS * 1000) {
+			if (entry.resent || now.getTime() - entry.firstSentAt >= reviewSuppressionMs()) {
 				this.#inFlight.delete(key);
 				continue;
 			}
-			if (now.getTime() - entry.sentAt < VERDICT_DELIVERY_RETRY_SECONDS * 1000) continue;
+			if (now.getTime() - entry.sentAt < verdictDeliveryRetryMs()) continue;
 			this.#send(entry.wakeup, true);
 			resent.push(key);
 		}
