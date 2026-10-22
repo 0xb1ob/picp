@@ -1,0 +1,7 @@
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..a39cd2e 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -208 +208 @@ export async function recheckDeferredBounded(
+-	return outcome.raised;
++	return [];

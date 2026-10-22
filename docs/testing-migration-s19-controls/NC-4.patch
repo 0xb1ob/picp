@@ -1,0 +1,5 @@
+--- a/src/escalation-relay-watch.ts
++++ b/src/escalation-relay-watch.ts
+@@ -40 +40 @@
+-	return escalationRelay(home, escalation, `${escalation.id} (${escalation.kind}) — ${escalation.question}`);
++	return escalationRelay(home, escalation, "S19 mutation removed the decision text");

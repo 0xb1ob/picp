@@ -1,0 +1,5 @@
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -410 +410 @@
+-			reattach.schedule();
++			// S19 negative control: skip reconnect after host closure.
