@@ -2,14 +2,16 @@
 
 Ownership: the remaining behavior-05 files are owned by P3c-rest and re-sliced by operator decision ask-c77a4f32b23b (Raise cap to ~$2,700 on Sol); slice list operator/scratch/e2e-migration-slices.md; rule v2 applies.
 
-Scope: tests/ci-watch.test.ts declarations 41–80, last range; S02 and S07 carry-ins. No source unit has been deleted yet. Mapping remains in progress; the passing scenarios alone do not authorize retirement.
+Scope: tests/ci-watch.test.ts declarations 41–80, plus S02 and S07 carry-ins. No source unit is deleted here. Frozen Addendum 1 assigns declaration 71 and final retirement to S10b; the other 39 S03 declarations are mapped.
 
 ## Latest operator ruling and declaration-71 blocker
 
-The latest main-session decision parks declaration 71 as pending-fix for S03b. S10b owns mapping 71
-and retiring tests/ci-watch.test.ts after the product fix. Main now includes the job-less watch fix and
-its incoming regression; 71 remains parked by decision until S10b records the mapping and retirement.
-S03b keeps the file whole and adds no declaration-71 case. This supersedes the prior S03b assignment.
+Frozen Addendum 1 (operator-delegated, 2026-10-22T04:17:17Z; send `ps-20261022012038-2316a19c`):
+> decl 71 is parked pending-fix in S03b by main-session decision, and S10b maps it and retires tests/ci-watch.test.ts.
+
+Product fix #443 and `tests/e2e/ci-watch-jobless.test.ts` are already on main: the product blocker is gone.
+The `pending-fix` ledger label now records the operator's sequencing decision to stop S03b's conflict rounds,
+not a pending product fix. S10b owns mapping 71 and retirement; S03b keeps the original whole and adds no case.
 
 On merged source HEAD 0ed75a6ed0f5bcf28e600c84275678cc6336f4ac, the strengthened real-parent case
 fails: malformed JSON and invalid fleet schema produce only one durable notice, both keyed by
@@ -19,69 +21,81 @@ The test took 60.45 seconds. Exact reproducer (replace the existing watch-failur
 Log: `s03b-71-positive.log`; assertion `different malformed fleet causes must remain distinct`, actual 1,
 expected 2. This is an unmodified-product failure, not an executed negative control.
 
-Root cause: CiWatch.tick returns jobs-read errors with job_id "-"; surfaceCi passes that sentinel to
-paths.runDir before journaling the original error. Its catch journals the replacement unsafe-id exception.
-#433 fixed the parent crash but does not preserve these distinct causes. A product fix must safely journal
-job-less watch errors before this migration can map 71, execute its control and retire the source file.
+Historical root cause at that HEAD: CiWatch.tick returned job-less errors with job_id "-"; surfaceCi passed
+the sentinel to paths.runDir before journaling, replacing distinct causes with the unsafe-ID exception.
+#433 fixed the crash; #443 subsequently fixed cause preservation. The blocker described here is resolved.
 The failed fragment stays outside the pushed suite; no production change or deletion is claimed.
 
 Four S02 declarations remain retained verbatim in tests/ci-watch-retained.test.ts. The original file is
-still whole because declaration 71 fails the required consumer assertion; retirement will remove duplication.
-The inherited S03 table below lacks historical exact patch provenance; its full catalog and replay are
-still required for retirement. New S03b controls already record executed patches, SHAs and assertions.
+still whole by the frozen sequencing decision above; S10b's retirement will remove duplication.
+Review 2 replaces the incomplete inherited provenance with the new replay catalog linked below. Its exact
+production patches, full base SHAs, commands and observed failing assertions supersede the historical prose.
 
 ## Executed controls (restored immediately)
 
 Commands use `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing.test.ts`.
 
-| ID | Production mutation | Pattern | Observed assertion failure |
-|---|---|---|---|
-| S03-authority | src/ci-watch.ts: replace the green evidence/authorization/Awaiting row/merged disclaimer with `CI finished.` | landing S03: actual parent | /evidence, not authorization/i fails on the actual CI message, excluding the system prompt |
-| S03-confirm | src/ci-watch.ts: remove `if (existing.announced.includes(key)) continue;` | landing S03: corrupt | duplicate arrival changes nothing: actual [key], expected [] |
-| S03-corrupt | src/ci-watch.ts: read() JSON catch throws CiWatchError instead of returning EMPTY_CI_WATCH_FILE | landing S03: corrupt | corrupt memory is forgotten, not a failed read: actual 1, expected 0 errors |
-| S03-delivery | src/ci-watch.ts: remove delivery !== pr guard | landing S02: only reported | checked exclusion fails for delivery local |
-| S03-receipt | src/ci-watch.ts: absent receipt returns true | landing S02: only reported | checked exclusion fails for receipts [] |
-| S03-landed | src/ci-watch.ts: status comparison becomes status !== merged | landing S02: only reported | checked exclusion fails for landed receipt |
-| S03-blocking | src/ci-watch.ts: ghPrRest invokes gh run watch 12345 instead of gh api pulls | landing S02: watcher queries | watcher command run watch 12345: detectCiWait returns blocking_watch, expected undefined |
-| S03-exclusions | src/ci-watch.ts: isWatched returns true; variants are independent subtests | landing S02: only reported | all 11 exclusions fail individually (waiting/done/failed, local/pipeline, empty/artifact receipts, merged/landed/MERGED/trim); no variant is masked by an earlier failure |
-| S03-eligible | src/ci-watch.ts: isWatched returns false | landing S02: only reported | the eligible delivery is queried: actual undefined, expected ci_green |
-| S03-advice | src/ci-watch.ts: replace two green integration-advice strings with Verify CI yourself and check ancestry with gh pr view | landing S03: actual parent | /cp_integrate/ fails on actual delivered CI message |
-| S03-red | src/ci-watch.ts: replace red policy strings with Ask whether to merge the failing run | landing S03: actual parent | /Merging red is forbidden/ fails on actual delivered red notice |
-| S03-failed-run | src/ci-run-ref.ts: failedRunOn returns runs[0] | landing S03: actual parent | only the failing run is named: actual false (skipped run 300 replaces failing run 302) |
-| S03-generation | src/held-continuation.ts: remove generation mismatch guard | landing S03: facts changed | generation subcase returns review_started instead of stale; repeated with configured mock reviewer, exit 1 |
-| S03-pending | src/held-continuation.ts: replace pending-review guard with false | landing S03: new CI | a new fact reaches the already-pending review gate: actual stopped, expected review_pending |
-| S07-NC-3 / NC-37 rerun | src/integrate.ts: replace cumulative prior allowance with 0 | landing: held CI repairs the same | restarted parent reads the spent allowance before looking for a local worker: expected /already asked once/, actual no live worker; assertion follows observed startup timestamp change, with no manual integrate call |
-| S03-sampled | src/held-continuation.ts: sampledHold returns Hold not sampled | landing S03: a real review verdict | all three independent hold variants fail their sampled-state regex assertions; no fixture setup or model selection failure |
-| S03-observed-head | src/held-continuation.ts: remove shaMatches current-head mismatch guard | landing S03: facts changed | observed subcase returns review_started instead of stale, exit 1 |
-| S03-remote-head | src/held-continuation.ts: post-read reviewing mismatch uses false instead of comparing remote head | landing S03: facts changed | remote subcase returns review_started instead of stale, exit 1 |
-| S03-fleet-write | src/ci-watch.ts: after own-state write, read fleet JSON, clear first job receipts and atomicWriteJson the fleet file | landing S03: corrupt | a watch tick writes no receipts or fleet state fails with receipts [] versus original open PR/CI receipts |
-| S03-schema | src/ci-watch.ts: read returns JSON.parse without validateCiWatchFile | landing S03: corrupt | corrupt memory is forgotten, not a failed read: 1 error instead of 0 |
-| S03-rest-merged | src/ci-watch.ts: parsePrRest merged becomes false | landing S03: REST | REST merged flag reaches the public observation: pr_closed instead of pr_merged |
-| S03-deadline | src/held-continuation.ts: timer callback no longer calls trigger | landing S03: a durable; skip guards other than none | deadline resumes through none fails after 45000ms; only the original envelope stop and pre-deadline CI wait are recorded |
-| S03-owner | src/command-post.ts: continuation enabled ignores ownsHome | landing S03: a real parent that loses | disabled ownership cannot advance beyond the review wait fails: surface instead of wait |
-| S03-each-step | src/held-continuation.ts: delete loop stale check | landing S03: changes during | generation, phase and head subcases each fail stopped versus stale; head/generation perform repeated branch updates |
-| S03-mid-drain | src/held-continuation.ts: draining returns false | landing S03: changes during | drain subcase fails wait versus draining after entering the next integration step |
-| S03-missing-head | src/held-continuation.ts: current owner head falls back to trigger.head | landing S03: facts changed | missing subcase fails review_started versus wait |
-| S03-coalesce | src/held-continuation.ts: delete seen-key coalescing guard | landing S03: lost watch | an in-flight replay starts no additional integration read: 3 versus 2 |
-| S03-rearm | src/held-continuation.ts: delete removal of settled wait/draining keys | landing S03: lost watch | the same identity can read again after settling on wait: 2 versus 3 |
-| S03-red-coalesce | src/held-continuation.ts: delete seen-key coalescing guard | landing S03: a stopped red | a completed red replay starts no integration step: 3 versus 2 |
-| S03-run-key | src/held-continuation.ts: continuationKey run becomes empty | landing S03: a stopped red | a new attempt reaches integration once: 2 versus 3 |
-| S03-generation-key | src/held-continuation.ts: continuationKey generation becomes empty | landing S03: a stopped red | a reopened generation is a new continuation identity: 3 versus 4 |
-| S07-NC-2 rerun | src/held-continuation.ts: serialize lane becomes jobId | landing: held CI repairs the same | another job in the project waits behind the CI repair: advanced versus queued |
-| S07-NC-1 rerun | src/send.ts: remove repair assertPermitted call | landing: held CI repair checks Sender | revoked: expected /is revoked/, actual no live worker/shutting down restore refusal |
-| S03-outcome | src/held-continuation.ts: ciOutcome returns undefined | rpc: one CI-green key whose review is in flight (tests/e2e/headless-lifecycle.test.ts) | the handled-in-code/no-parent-turn notification never arrives; the RPC trace instead contains agent_start/turn_start. Completed negative run exits 1 after 90 seconds; restored case passes in 19 seconds. A first 60-second command was terminated by tool timeout and is not counted as evidence. |
-| S03-driving | src/held-continuation.ts: driving returns false | landing S03: a driving worker | spawn-cap assert.rejects: Missing expected rejection |
-| S03-driving-finally | src/held-continuation.ts: delete finally's driving.delete | landing S03: a driving worker | the throwing step clears its busy fence: Got unwanted rejection, spawn cap reached |
-| S03-resume | src/held-continuation.ts: resume returns [] immediately | landing S03: a restarted parent resumes | startup did not arm the durable window (assert.fail after a bounded 10-second wait) |
-| S03-landed-turn | extensions/command-post/wakeup-surfaces.ts: always send triggerTurn true | landing S03: a restarted parent resumes | landing is relayed without waking the parent model: 2 versus 1 |
-| S03-tracker | src/held-continuation.ts: append tracker sync pending to NEXT_HINT.done | landing S03: a restarted parent resumes | landed notice doesNotMatch tracker sync / tracker update / receipt note fails; final assertion also rejects every tracker or write-back suffix |
-| S03-stop-head | src/held-continuation.ts: stop notice id uses next instead of the head-bearing tag | landing S03: a stopped red | a changed handed-off head gets one more durable stop: 2 versus 3 |
+The [replay catalog](testing-migration-s03-replayed-controls.md) records the exact production diff and
+observed failing assertion for every control below. These are new executions, not reconstructed history.
+Base SHA for every row except exclusions: `f30d532f5eed302ec17661dafad2cdf56b3d1d42`.
+Exclusions ran on `7266e5df1d469ee861abb20f2b5559d3d5144fce` before the required plain merge.
+Each row's ID names its catalog section; grouped aliases share one independently executed production mutation.
+
+| Control IDs | Command pattern | Exact patch and failing assertion |
+|---|---|---|
+| S03-authority | landing S03: actual parent CI notices | [Catalog](testing-migration-s03-replayed-controls.md#s03-authority) |
+| S03-confirm | landing S03: corrupt | [Catalog](testing-migration-s03-replayed-controls.md#s03-confirm) |
+| S03-corrupt | landing S03: corrupt | [Catalog](testing-migration-s03-replayed-controls.md#s03-corrupt) |
+| S03-exclusions | landing S02: only reported | [Catalog](testing-migration-s03-replayed-controls.md#s03-exclusions); eleven independently failing exclusion subtests |
+| S03-delivery | landing S02: only reported | [Catalog](testing-migration-s03-replayed-controls.md#s03-delivery); local and pipeline independently fail |
+| S03-receipt | landing S02: only reported | [Catalog](testing-migration-s03-replayed-controls.md#s03-receipt); empty and artifact-only receipts independently fail |
+| S03-landed | landing S02: only reported | [Catalog](testing-migration-s03-replayed-controls.md#s03-landed); landed/uppercase/padded statuses independently fail |
+| S03-blocking | landing S02: watcher queries | [Catalog](testing-migration-s03-replayed-controls.md#s03-blocking) |
+| S03-eligible | landing S02: only reported | [Catalog](testing-migration-s03-replayed-controls.md#s03-eligible) |
+| S03-advice | landing S03: actual parent CI notices | [Catalog](testing-migration-s03-replayed-controls.md#s03-advice) |
+| S03-red | landing S03: actual parent CI notices | [Catalog](testing-migration-s03-replayed-controls.md#s03-red) |
+| S03-failed-run | landing S03: actual parent CI notices | [Catalog](testing-migration-s03-replayed-controls.md#s03-failed-run) |
+| S03-generation / S03-observed-head / S03-missing-head | landing S03: facts changed | [Catalog](testing-migration-s03-replayed-controls.md); independent generation/observed/missing failures |
+| S03-pending | landing S03: new CI | [Catalog](testing-migration-s03-replayed-controls.md#s03-pending) |
+| S07-NC-3 / NC-37 rerun | landing: held CI repairs the same | [Catalog](testing-migration-s03-replayed-controls.md) |
+| S03-sampled | landing S03: a real review verdict samples | [Catalog](testing-migration-s03-replayed-controls.md#s03-sampled) |
+| S03-remote-head | landing S03: facts changed | [Catalog](testing-migration-s03-replayed-controls.md#s03-remote-head) |
+| S03-fleet-write | landing S03: corrupt | [Catalog](testing-migration-s03-replayed-controls.md#s03-fleet-write) |
+| S03-schema | landing S03: corrupt | [Catalog](testing-migration-s03-replayed-controls.md#s03-schema) |
+| S03-rest-merged | landing S03: REST | [Catalog](testing-migration-s03-replayed-controls.md#s03-rest-merged) |
+| S03-deadline | landing S03: a restarted parent | [Catalog](testing-migration-s03-replayed-controls.md#s03-deadline) |
+| S03-owner | landing S03: a real parent that loses | [Catalog](testing-migration-s03-replayed-controls.md#s03-owner) |
+| S03-each-step | landing S03: changes during | [Catalog](testing-migration-s03-replayed-controls.md#s03-each-step) |
+| S03-mid-drain | landing S03: changes during | [Catalog](testing-migration-s03-replayed-controls.md#s03-mid-drain) |
+| S03-coalesce / S03-red-coalesce | landing S03: lost watch\|landing S03: a stopped red | [Catalog](testing-migration-s03-replayed-controls.md); both assertions fail independently |
+| S03-rearm | landing S03: lost watch | [Catalog](testing-migration-s03-replayed-controls.md#s03-rearm) |
+| S03-run-key | landing S03: a stopped red | [Catalog](testing-migration-s03-replayed-controls.md#s03-run-key) |
+| S03-generation-key | landing S03: a stopped red | [Catalog](testing-migration-s03-replayed-controls.md#s03-generation-key) |
+| S07-NC-2 rerun | landing: held CI repairs the same | [Catalog](testing-migration-s03-replayed-controls.md) |
+| S07-NC-1 rerun | landing: held CI repair checks Sender | [Catalog](testing-migration-s03-replayed-controls.md) |
+| S03-outcome | rpc: one CI-green key whose review is in flight (headless-lifecycle.test.ts) | [Catalog](testing-migration-s03-replayed-controls.md#s03-outcome) |
+| S03-driving | landing S03: a driving worker | [Catalog](testing-migration-s03-replayed-controls.md#s03-driving) |
+| S03-driving-finally | landing S03: a driving worker | [Catalog](testing-migration-s03-replayed-controls.md#s03-driving-finally) |
+| S03-resume | landing S03: a restarted parent | [Catalog](testing-migration-s03-replayed-controls.md#s03-resume) |
+| S03-landed-turn | landing S03: a restarted parent | [Catalog](testing-migration-s03-replayed-controls.md) |
+| S03-tracker | landing S03: a restarted parent | [Catalog](testing-migration-s03-replayed-controls.md#s03-tracker) |
+| S03-stop-head | landing S03: a stopped red | [Catalog](testing-migration-s03-replayed-controls.md#s03-stop-head) |
 
 Removing only the landed branch of isQuietWakeup, and then also removing its isRelayOnlyNotice text classification, did not break the parent case. Neither attempt is counted as evidence. Forcing triggerTurn at the actual sendMessage boundary did break the model-turn assertion; the final test allows the queued follow-up 500 ms and takes a fresh RPC state snapshot before counting requests.
 
 ## Positive verification
 
 The initial full landing run passed 23 cases. The expanded checkpoint passed 61 cases with zero failures/skips in 717 seconds, but overlapped other control experiments and is not the final retirement gate. A subsequent restored deadline/busy-fence run passed all 11 cases in 308 seconds. The headless outcome case passed separately in 19 seconds. Typecheck, migration checker, contract eval (22/22 scored, 28 skipped), and the regenerated contracts export golden passed; generated artifacts had no diff. Declaration-specific controls, final non-overlapping checks and retirement bookkeeping remain to be completed.
+
+Review 2 restored verification on merged base `f30d532f5eed302ec17661dafad2cdf56b3d1d42`: all 66 selected
+S03/S02/S07 landing tests and subtests passed in 836.11 seconds; the headless CI-outcome case passed in
+21.00 seconds. Typecheck and six focused unit files passed (CI-watch 89, retained CI-watch 4, bridge
+reattach 5, compact hold 8, review runs 20, timer knobs 9), as did the migration checker with zero findings.
+After the three final eligibility controls, typecheck, the restored only-reported scenario and checker
+passed again. Logs: `s03b-review2-positive.log` (exit 0), `s03b-review2-final-predicate.log`,
+`s03b-review2-final-migration.log`. The [catalog](testing-migration-s03-replayed-controls.md) records **37**
+new independent production mutations covering all inherited table entries. Every mutation is restored;
+no production or test change is committed in this revision.
 
 The existing harness creates an isolated throwaway agent directory through createAgentDir, configures only the mock provider, and removes it in t.after. No operator credentials or installed agent configuration are used.
 
@@ -134,10 +148,10 @@ from the pushed suite. Declaration 71 stays pending; the original unit file rema
 |---|---|---|
 | 45, 54–56, 58, 60, 64–68, 70, 78 | mapped | Main assertion ledger and docs/testing-migration-s03b-controls.md; thirteen newly mapped declarations |
 | S02 6/8/32/33 | retained | Verbatim copies in tests/ci-watch-retained.test.ts; originals stay whole by operator ruling. Missing entry points: FleetStore refuses the unreported slot before isWatched; Actions refuses the id-less run before derivation; CommandPost supplies no onDisabled callback. Boundary controls do not replace those helper assertions. |
-| 71 | pending-fix | Parked by latest main-session decision; S10b maps and retires the original file after the running product fix merges. extensions/command-post/wakeup-surfaces.ts:608 passes job-less sentinel '-' to paths.runDir, collapsing distinct fleet errors into one unsafe-ID cause. Saved per-cause reproducer and failure evidence remain above. |
+| 71 | pending-fix | Deferred to S10b by frozen Addendum 1; S10b maps it and retires the original. #443 and tests/e2e/ci-watch-jobless.test.ts are already on main; the product blocker is gone. Saved historical reproducer evidence remains above. |
 
 `pending-fix` is recorded here because the assertion-map parser rejects that status; it is not represented as retained.
 The unit file stays whole by main-session decision while 71 is pending-fix. S03 is 39 mapped / 1 pending-fix; S02 is 36 mapped / 4 retained. Total: 75 mapped / 4 retained / 1 pending-fix; one retained file, zero deleted files.
-S03b's authorized slice is complete with 71 parked as pending-fix by main-session decision. S10b owns its mapping and whole-file retirement after the product fix; declaration 64 is mapped after #429.
+S03b's authorized slice is complete with 71 deferred by frozen Addendum 1. #443 is already on main; S10b owns formal mapping 71 and whole-file retirement. Declaration 64 is mapped after #429.
 
 An exploratory timer-health case was also removed: two different malformed fleet shapes both surfaced as unsafe job id "-" rather than supplying the two distinct failure causes needed by declaration 71. That failed conversion attempt is not counted as mapping or negative-control evidence.

@@ -198,6 +198,6 @@ After plain-merging origin/main through ac50447082b15959140ec40b04080102eadbaf87
 the 16 changed/reused S03/S02 scenarios passed again: 38/38 including subtests, zero failures/skips,
 406.03 seconds. The separate mission armed-dependant case also passed (43.79 seconds).
 Root typecheck, migration checker, offline contract eval (22/22), and normal regenerated contracts golden pass.
-The late #433 unit stays preserved as incoming conversion work. Latest main-session decision parks 71
-as pending-fix here; S10b maps it and retires the whole original after the running product fix merges.
-The saved real-parent per-cause failure and cause-collapse defect remain in docs/testing-migration-s03-declarations.md.
+The late #433 unit stays preserved as incoming conversion work. Frozen Addendum 1 parks 71 as pending-fix
+in this slice; S10b owns mapping and retirement. #443 and tests/e2e/ci-watch-jobless.test.ts are already on
+main, so the blocker is gone; the deferral is the sequencing decision, not a pending product fix.
