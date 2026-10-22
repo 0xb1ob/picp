@@ -1,0 +1,8 @@
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -397,3 +397,3 @@
+ 					try {
+-						wakeup = await attempt.finish({ operational: reason } as unknown as T);
++						wakeup = undefined;
+ 						if (!wakeup) finishFailure = `${reason}; the operational fallback produced no wake-up`;

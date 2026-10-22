@@ -1,0 +1,7 @@
+diff --git a/src/contracts/workers.ts b/src/contracts/workers.ts
+--- a/src/contracts/workers.ts
++++ b/src/contracts/workers.ts
+@@ -84,3 +84,2 @@
+ 	 */
+-	"cp_review",
+ 	"cp_artifact",

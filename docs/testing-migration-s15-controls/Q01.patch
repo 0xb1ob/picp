@@ -1,0 +1,8 @@
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -371,3 +371,3 @@
+ 				// carry `operational` — SAFETY: that is the cast's invariant, the seam's one concession.
+-				outcome = { operational: `reviewer wait failed: ${(error as Error).message}` } as unknown as T;
++				outcome = {} as T;
+ 			}

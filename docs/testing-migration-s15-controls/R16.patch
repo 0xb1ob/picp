@@ -1,0 +1,8 @@
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -536,3 +536,3 @@
+ 			firstSentAt: existing?.firstSentAt ?? at,
+-			resent: (resend && sent) || existing?.resent === true,
++			resent: resend || existing?.resent === true,
+ 		});

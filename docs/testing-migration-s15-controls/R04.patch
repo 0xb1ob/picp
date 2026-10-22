@@ -1,0 +1,7 @@
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -406,3 +406,2 @@
+ 			// in which case the next start/advance finds no decision and retries).
+-			this.#clear(pending);
+ 		}

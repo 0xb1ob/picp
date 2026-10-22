@@ -1,0 +1,7 @@
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -425,3 +425,2 @@
+ 		await this.#runHook("beforeWakeup", wakeup);
+-		this.#send(wakeup);
+ 		this.#slots.delete(key);

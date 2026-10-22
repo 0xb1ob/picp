@@ -1,0 +1,8 @@
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -192,3 +192,3 @@
+ 	} catch {
+-		return undefined;
++		throw new Error("S15 malformed pending JSON stopped the sweep");
+ 	}
