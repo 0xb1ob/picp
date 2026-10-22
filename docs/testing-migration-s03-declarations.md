@@ -6,8 +6,9 @@ Scope: tests/ci-watch.test.ts declarations 41–80, last range; S02 and S07 carr
 
 ## Latest operator ruling and declaration-71 blocker
 
-The operator superseded the earlier parked-71 ruling: S03b now owns mapping 71, replaying all controls,
-and retiring the original file. S10b does not own CI-watch. The prior review response is superseded.
+The latest main-session decision parks declaration 71 as pending-fix for S03b. A product-fix job is running;
+S10b owns mapping 71 and retiring tests/ci-watch.test.ts after that fix merges. S03b keeps the file whole
+and adds no declaration-71 e2e case. This supersedes the prior S03b retirement assignment.
 
 On merged source HEAD 0ed75a6ed0f5bcf28e600c84275678cc6336f4ac, the strengthened real-parent case
 fails: malformed JSON and invalid fleet schema produce only one durable notice, both keyed by
@@ -132,10 +133,10 @@ from the pushed suite. Declaration 71 stays pending; the original unit file rema
 |---|---|---|
 | 45, 54–56, 58, 60, 64–68, 70, 78 | mapped | Main assertion ledger and docs/testing-migration-s03b-controls.md; thirteen newly mapped declarations |
 | S02 6/8/32/33 | retained | Verbatim copies in tests/ci-watch-retained.test.ts; originals stay whole by operator ruling. Missing entry points: FleetStore refuses the unreported slot before isWatched; Actions refuses the id-less run before derivation; CommandPost supplies no onDisabled callback. Boundary controls do not replace those helper assertions. |
-| 71 | pending-fix | Latest ruling assigns mapping and retirement to S03b. The real-parent per-cause assertion still fails after #433: distinct malformed fleet causes collapse to one unsafe-job-id notice. See the current blocker and saved per-cause reproducer above. |
+| 71 | pending-fix | Parked by latest main-session decision; S10b maps and retires the original file after the running product fix merges. extensions/command-post/wakeup-surfaces.ts:608 passes job-less sentinel '-' to paths.runDir, collapsing distinct fleet errors into one unsafe-ID cause. Saved per-cause reproducer and failure evidence remain above. |
 
 `pending-fix` is recorded here because the assertion-map parser rejects that status; it is not represented as retained.
-The unit file stays whole while 71 is pending. S03 is 39 mapped / 1 pending-fix; S02 is 36 mapped / 4 retained in place.
-S03b owns declaration 71 and retirement under the latest ruling; both remain blocked by the per-cause product failure above. Declaration 64 is mapped after #429.
+The unit file stays whole by main-session decision while 71 is pending-fix. S03 is 39 mapped / 1 pending-fix; S02 is 36 mapped / 4 retained. Total: 75 mapped / 4 retained / 1 pending-fix; one retained file, zero deleted files.
+S03b's authorized slice is complete with 71 parked as pending-fix by main-session decision. S10b owns its mapping and whole-file retirement after the product fix; declaration 64 is mapped after #429.
 
 An exploratory timer-health case was also removed: two different malformed fleet shapes both surfaced as unsafe job id "-" rather than supplying the two distinct failure causes needed by declaration 71. That failed conversion attempt is not counted as mapping or negative-control evidence.
