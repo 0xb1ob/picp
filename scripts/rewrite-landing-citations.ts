@@ -7,7 +7,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import ts from "typescript";
 
 const OLD = "tests/e2e/landing.test.ts";
-const NEW_FILES = [OLD, "tests/e2e/landing-s03.test.ts", "tests/e2e/landing-ci.test.ts"];
+const NEW_FILES = [OLD, "tests/e2e/landing-s03.test.ts"];
 
 interface Decl { title: string; line: number; file: string }
 
