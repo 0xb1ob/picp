@@ -1,3 +1,5 @@
+import { knobMs } from "./timer-knobs.ts";
+
 /**
  * The operator session's reattach loop (cp-bridge-auto-reattach). When the host connection closes
  * (cp-daemon reload, host restart) `schedule` retries `attempt` after 1 s, doubling up to 30 s, for
@@ -13,7 +15,16 @@ export interface Reattach {
 	cancel(): void;
 }
 
-export function reattachLoop(attempt: () => Promise<void>, firstMs = REATTACH_FIRST_MS, maxMs = REATTACH_MAX_MS): Reattach {
+/** `CP_BRIDGE_REATTACH_FIRST_SECONDS` (default 1). */
+export function reattachFirstMs(env: NodeJS.ProcessEnv = process.env): number {
+	return knobMs("CP_BRIDGE_REATTACH_FIRST_SECONDS", REATTACH_FIRST_MS, env);
+}
+/** `CP_BRIDGE_REATTACH_MAX_SECONDS` (default 30). */
+export function reattachMaxMs(env: NodeJS.ProcessEnv = process.env): number {
+	return knobMs("CP_BRIDGE_REATTACH_MAX_SECONDS", REATTACH_MAX_MS, env);
+}
+
+export function reattachLoop(attempt: () => Promise<void>, firstMs = reattachFirstMs(), maxMs = reattachMaxMs()): Reattach {
 	let timer: NodeJS.Timeout | undefined;
 	let running = false;
 	let again = false; // a close landed while an attempt was still finishing
@@ -52,6 +63,10 @@ export function reattachLoop(attempt: () => Promise<void>, firstMs = REATTACH_FI
 
 /** cp-6fyl A5: an open but silent host socket is probed every 60 s with a 5 s `hello`. */
 export const HOST_PROBE_MS = 60_000;
+/** `CP_HOST_PROBE_SECONDS` (default 60). */
+export function hostProbeMs(env: NodeJS.ProcessEnv = process.env): number {
+	return knobMs("CP_HOST_PROBE_SECONDS", HOST_PROBE_MS, env);
+}
 export const HOST_PROBE_TIMEOUT_MS = 5_000;
 
 /**

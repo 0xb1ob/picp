@@ -439,7 +439,10 @@ export const PENDING_REVIEW_FILE = "pending.json";
 export const QUALITY_PANEL_SLOT = "panel";
 /** The sixth unasked wake-up: a reviewer's verdict landed (D6). */
 export const VERDICT_MESSAGE_TYPE = "cp-verdict";
-/** An unconfirmed `cp-verdict` is re-derived from disk and sent once more after this. */
+/**
+ * An unconfirmed `cp-verdict` is re-derived from disk and sent once more after this.
+ * Overridable per home with CP_VERDICT_DELIVERY_RETRY_SECONDS.
+ */
 export const VERDICT_DELIVERY_RETRY_SECONDS = 120;
 /**
  * How long a `cp-verdict` the staleness check keeps withholding stays eligible
@@ -453,6 +456,7 @@ export const VERDICT_DELIVERY_RETRY_SECONDS = 120;
  * be as much as `CI_WATCH_MAX_BACKOFF_MS` (15 minutes) away when the watcher
  * is backing off, plus a few ticks of slack. A count-based bound at the
  * delivery interval expired before the watcher had even looked again.
+ * Overridable per home with CP_REVIEW_SUPPRESSION_SECONDS.
  */
 export const VERDICT_SUPPRESSED_RETRY_MAX_SECONDS = CI_WATCH_MAX_BACKOFF_MS / 1000 + 300;
 
