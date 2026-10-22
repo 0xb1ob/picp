@@ -253,6 +253,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P22 | 22 | `tests/e2e/reports-push.test.ts` | 4 |
 | P23 | 23 | `tests/e2e/memory.test.ts` | 3 |
 | P24 | 24 | `tests/e2e/host-compatibility.test.ts` | 3 |
+| S24 | 07 | `tests/e2e/operator-context.test.ts` | context retirement and compaction conversion; [declaration accounting](testing-migration-s24.md); parent cap-expiry declarations pending-fix, original file stays whole |
 <!-- /manifest:prs -->
 
 The plan proposed 6 cases for all of behavior 05. P3 is a first slice of 4 cases over 4 files. P3b
@@ -432,6 +433,8 @@ moves first.
 | 05-S14-approval | `tests/e2e/phase3.test.ts` | pipeline S14: only a pin for the current artifact bypasses the operator checkpoint |
 | S16-model | `tests/e2e/reviewer-model.test.ts` | S16: public plan gates select reviewer preferences from current and legacy authority |
 | S16-auto | `tests/e2e/landing.test.ts` | landing S16: automatic green CI reviews use the current mandate reviewer |
+| S24-context | `tests/e2e/operator-context.test.ts` | S24 context: fresh bridge loads orders, parsed learnings and newest handoff into the provider request |
+| S24-empty | `tests/e2e/operator-context.test.ts` | S24 context: an empty home adds no operator context or preference files |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -998,6 +1001,9 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/pr-resolve.test.ts` | 9 GitLab mixed verified refused unverified | 05-S14-gitlab | retained | tests/pr-resolve-retained.test.ts; validateEnvelope rejects missing pr_url before intake resolver, including no-given bound MR fallback; all reachable variants additionally exercised through real reporter |
 | `tests/pr-resolve.test.ts` | 10 GitLab intake hold and refusal | 05-S14-gitlab | mapped | S14-NC12: wrong branch wrongly held and expected correction reason empty |
 | `tests/review-approval.test.ts` | 1 approval rounds hash identity missing file | 05-S14-approval | retained | tests/review-approval-retained.test.ts; pipeline artifacts.info fails before missing-file matches; only production write uses seq 1; no public entry for seq 2/3 overwrite. S14-NC13 independently proves reachable edited-plan checkpoint stays pending |
+| `tests/operator-context.test.ts` | a fresh main session gets the orders, the learnings and the newest handoff by mtime | S24-context | mapped | S24-oldest fails newest handoff assertion; real bridge provider request pins orders, parsed learnings and policy |
+| `tests/operator-context.test.ts` | an empty home has no start context and building it creates no file | S24-empty | retained | Verbatim in tests/operator-context-retained.test.ts: bridge session_start creates its control state before context loading, so no public entry point can observe an entirely nonexistent home after calling only the context builder |
+| `tests/operator-context.test.ts` | the bridge sends one hidden cp-operator-context to a fresh session and none to a resumed one | S24-context | mapped | S24-resume fails SHOULD NOT RELOAD exclusion in actual resumed provider request; get_messages pins one hidden context |
 <!-- /manifest:assertions -->
 
 ### Pending-fix declarations (operator-parked; no deletion credit)
@@ -1005,6 +1011,8 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | File | Declaration | Status | Evidence and expected outcome |
 |---|---|---|---|
 | `tests/integrate.test.ts` | 92 dirty worktree | pending-fix | [S10 reproducer location](testing-migration-s10.md#pending-fix-declaration-92); unreadable status must preserve original bytes and issue no reset. Original file stays whole. |
+| `tests/parent-compact-hold.test.ts` | T3(a) pure hold | pending-fix | src/parent-compact-hold.ts hardcodes PARENT_COMPACT_HOLD_MS = 270_000; cap-expiry proof exceeds the two-minute case limit. Public knob job pending; original file stays whole. |
+| `tests/parent-compact-hold.test.ts` | T3(g)/(h) failure, start timeout and cap release | pending-fix | Same hardcoded 270,000 ms cap; no public timer override. Main-session carry-in parks this declaration; original file stays whole. |
 
 The checker does not accept `pending-fix` inside its assertion section. This separate ledger records the operator's parked item without relabelling it retained or changing the checker; the original file and its declaration count remain intact.
 
@@ -1618,7 +1626,43 @@ index 2dcc135..008c3bd 100644
 -		const { raw, rubric: _rubric, decision_summary: _summary, ...decided } = decideGate({
 +		const { raw, rubric: _rubric, ...decided } = decideGate({
 ```
+| S24-oldest | `tests/operator-context.test.ts` | 2f9613010dabcfb43a97733e3d320ce85a97209d | S24-context | S24-oldest | 846e30e759797d70e7938e9b158f37e8690539b8b7a0fd425c25738bb502f5bd | newest handoff regex missing in provider request | pass |
+| S24-empty | `tests/operator-context.test.ts` | 2f9613010dabcfb43a97733e3d320ce85a97209d | S24-empty | S24-empty | 5774bcca5420abe9c0ff0493b33738ae1d0c2e1fb4deb7158b3e4bb216989eb5 | context count 1 instead of 0 | pass |
+| S24-resume | `tests/operator-context.test.ts` | 2f9613010dabcfb43a97733e3d320ce85a97209d | S24-context | S24-resume | 18b964ca774a4867cec756874c63e78de547505864cb67212ba36364333afd73 | SHOULD NOT RELOAD present in resumed provider request | pass |
 <!-- /manifest:regressions -->
+
+<!-- patch:S24-oldest -->
+```diff
+diff --git a/src/operator-context.ts b/src/operator-context.ts
+--- a/src/operator-context.ts
++++ b/src/operator-context.ts
+@@ -17 +17 @@
+-	return stamped.sort((a, b) => b.at - a.at)[0]?.file;
++	return stamped.sort((a, b) => a.at - b.at)[0]?.file;
+```
+<!-- /patch:S24-oldest -->
+
+<!-- patch:S24-empty -->
+```diff
+diff --git a/src/operator-context.ts b/src/operator-context.ts
+--- a/src/operator-context.ts
++++ b/src/operator-context.ts
+@@ -35 +35 @@
+-	if (parts.length === 0) return undefined;
++	if (parts.length === 0) return "unexpected empty context";
+```
+<!-- /patch:S24-empty -->
+
+<!-- patch:S24-resume -->
+```diff
+diff --git a/extensions/cp-bridge/index.ts b/extensions/cp-bridge/index.ts
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -524 +524 @@
+-			if (!ctx.sessionManager.getEntries().some((entry) => entry.type === "message")) {
++			if (true) {
+```
+<!-- /patch:S24-resume -->
 
 <!-- patch:S16-explicit -->
 ```diff
@@ -2845,6 +2889,11 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/review-approval-retained.test.ts` | S14 | original declaration verbatim: pipeline artifacts.info fails before missing matches; only production write passes seq 1; no public entry reaches seq-2/3 overwrite |
 | `tests/held-continuation-fleet-read.test.ts` | #433 (ac50447082b15959140ec40b04080102eadbaf87) | incoming known-regression coverage for unreadable fleet during continuation failure notice; unit landed upstream after the baseline and is preserved unchanged; convert, owner P3c-rest (held continuation); recorded when plain-merging main |
 | `tests/e2e/reviewer-model.test.ts` | S16 | behavior 05, public gate reviewer selection and persisted schedule scope; scenario S16-model |
+| `tests/e2e/operator-context.test.ts` | S24 | real bridge context startup and resume; 2 scenarios |
+| `tests/operator-context-retained.test.ts` | S24 | 1 retained verbatim declaration: no public entry calls only the context builder without first creating control state |
+| `tests/e2e/ci-watch-jobless.test.ts` | main #443 | Existing incoming CI watch cause regression; inventory bookkeeping only |
+| `tests/recovery-notice-bound.test.ts` | main | Existing incoming recovery notice regression; inventory bookkeeping only |
+| `tests/timer-knobs.test.ts` | main #439 | Existing incoming public timer override checks; inventory bookkeeping only |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -3050,7 +3099,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/operator-asks.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/operator-cache-warming.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/operator-compact.test.ts` | convert | P5 | behavior 07 (Compaction) |
-| `tests/operator-context.test.ts` | convert | P5 | behavior 07 (Compaction) |
+| `tests/operator-context.test.ts` | deleted | S24 | 2 mapped, 1 retained verbatim in tests/operator-context-retained.test.ts; S24-context, S24-empty; executed controls S24-oldest, S24-empty, S24-resume |
 | `tests/operator-decide-vs-ask-evals.test.ts` | convert | P10 | behavior 09 (Escalations, asks and answers) |
 | `tests/operator-delivery.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/operator-note.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |

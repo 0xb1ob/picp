@@ -645,6 +645,18 @@ test("rpc bridge: a message queued before a self-compaction is held through it a
 	assert.equal(run.dropped(), 1);
 });
 
+
+test("rpc bridge S24: a queued message survives compaction without a dropped handoff", { timeout: 110_000 }, async (t) => {
+	const run = await queuedThroughCompaction(t, "dashboard-compact-no-drop", 0);
+	await waitFor(() => run.states(), (s) => s.at(-1) === "delivered", { timeoutMs: 30_000, what: "queued dashboard delivery" });
+	assert.deepEqual(run.states(), ["request", "queued", "injected", "delivered"]);
+	const consumed = await waitFor(() => run.consumed(), (c) => c.length === 1, { timeoutMs: 30_000, what: "one consumed message" });
+	const records = run.rpc.records();
+	assert.ok(records.findIndex((r) => r.type === "compaction_end") < records.indexOf(consumed[0]!), "held through compaction");
+	assert.equal(run.pending(), "delivered");
+	assert.equal(run.dropped(), 0);
+});
+
 test("rpc bridge: a queued message whose handoff is dropped twice ends failed, never re-injected again", { timeout: 180_000 }, async (t) => {
 	const run = await queuedThroughCompaction(t, "dashboard-compact-twice", 2);
 	await waitFor(() => run.dropped(), (n) => n === 1, { timeoutMs: 30_000, what: "the first handoff to be dropped" });
