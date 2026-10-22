@@ -4,7 +4,7 @@ Ownership: the remaining behavior-05 files are owned by P3c-rest and re-sliced b
 
 S10 owns static declarations 81–120 of tests/integrate.test.ts. The original file stays whole. Declarations 121–144 and final retirement belong to the later range. No production edit is shipped. S10 adds six scenarios in tests/e2e/landing.test.ts and extends 05-S02-5, using real CommandPost integration/continuation/dispatch, mock-provider worker/report, scratch git and external gh/git faults. Temporary agent directories come from createAgentDir and are removed by fixture cleanup. The profile-validation fixture copies only product profiles/prompts and links source/extensions from this worktree into a fresh temporary package directory.
 
-Counts: 38 mapped, 1 retained mixed declaration, 1 pending-fix, 0 redundant-unreachable, 0 deleted files, +6 e2e declarations. Retained share: 2.5%. No unit is moved or deleted.
+Current range counts after S10b: 39 mapped, 1 retained mixed declaration, 0 pending, 0 redundant-unreachable, 0 deleted files, +6 e2e declarations. Retained share: 2.5%. No integrate unit is moved or deleted.
 
 On base `aea915131f8e521d2dc1ae9caf02c82ba1009421`, the checker reports 378 test files and 4,251 static declarations after S10 (4,245 before; +6). Patch SHA columns below identify patch blobs; production mutation source revision is that full base SHA. Pending-fix is kept in a separate canonical ledger because the checker rejects that status inside its parsed assertion section; no checker change or retained relabelling is used.
 
@@ -38,7 +38,7 @@ The source-order numbers below count static test calls, not loop expansions. Eve
 | 89 absent branch ref | mapped | 1/branch-empty, sync-guards: unchecked reset != no reset. |
 | 90 unpushed unique work | mapped | 1/unpushed, sync-guards: reset != no reset. |
 | 91 unreadable divergence | mapped | 1/divergence, sync-guards: reset != no reset. |
-| 92 dirty worktree | pending-fix | 1/dirty passes and dirty control fails no-reset assertion, but unreadable status can destroy dirty content. See pending-fix below. |
+| 92 dirty worktree | mapped by S10b | Dirty and unreadable-status public cases preserve content and refuse reset; [canonical mapping and executed status control](testing-migration/s10b.md). |
 | 93 absorbed pre-rebase content | mapped | 1/absorbed, sync-reset: no reset != reset to observed SHA; rescue-target: actual rescue SHA differs from discarded local SHA. Positive case requires rescue creation before reset and proof detail. |
 | 94 dangerous inverse | mapped | 1/unpushed, sync-guards: reset != no reset. |
 | 95 proof refusals | mapped | 1/base-denied, base-empty, merge-base, diff, patch-id, empty-id, empty-diff, salvage, sync-guards: each reset != no reset. Positive checks pin each specific cause. |
@@ -50,7 +50,7 @@ The source-order numbers below count static test calls, not loop expansions. Eve
 | 101 sorted bound | mapped | 2/bound, prune-safety: actual [] instead of retained /101; prune: 101 refs remain instead of only /101. |
 | 102 namespace boundary | mapped | 2/outside, ref-scope: cleanup must preserve main assertion fails, exit 128 instead of 0. |
 | 103 empty namespace | mapped | 2/empty, prune: unexpected rescue-ref fact. |
-| 104 isSalvageRef contract | retained | Mixed structural assertions: literal exported prefix/max constants and direct helper booleans. `cp_integrate` accepts a job id, not a raw ref argument, and real git rejects bare namespace/space-containing ref names before listing; it cannot expose those direct boolean inputs/results. Reachable namespace protection maps to 2/outside and ref-scope; reachable bound maps to 2/bound. Keep the mixed declaration unchanged. |
+| 104 isSalvageRef contract | retained | Unit-only assertions are the literal prefix/max constants and helper results for git-invalid refs: trailing-slash refs/cp-salvage/, refs/cp-salvage/../heads/main and space-containing names. Valid outside-namespace refs map to 2/outside and ref-scope; the pruning bound maps to 2/bound. [S10b's canonical rationale](testing-migration/s10b.md) supersedes the broader helper-input rationale. Keep the mixed declaration for S11. |
 | 105 unfinished rebase | mapped | 5/rebase, rebase: advance != surface. |
 | 106 refused branch deletion | mapped | 5/delete, cleanup-retry: wait != retry. Positive case preserves receipt, landed-effect notice, then resumes without another merge. |
 | 107 refused ledger close | mapped | 5/close, cleanup-retry: wait != retry. Positive case corrupts on-disk ledger after actual branch deletion, restores it and resumes. |
@@ -76,7 +76,7 @@ Run with `node --import ./tests/harness/hermetic-env.ts --test --test-force-exit
 
 | Name | Patch blob SHA | Executed mutation and failure |
 |---|---|---|
-| dirty | 9d5e0e0451cb63c91c877e13f1cd444583afad1e | Disable dirty guard: 1/dirty reset array nonempty, expected empty. Supplemental evidence only; declaration 92 remains pending-fix. |
+| dirty | 9d5e0e0451cb63c91c877e13f1cd444583afad1e | Disable dirty guard: 1/dirty reset array nonempty, expected empty. S10b adds the unreadable-status control and resolves declaration 92's mapping. |
 | sync-guards | 802c238d3950a66015d0319852aec72b456d2e38 | Reset directly from ls-remote before guards: all thirteen negative 1 subcases fail reset-requires-proof (reset attempted, expected none). |
 | sync-reset | a45bdc56823175f0dcd171502c7083bc0bbe0362 | Replace reset with status: behind/stale/absorbed each lack expected reset command. |
 | prune | c0234b96b4e605d8951d42866d46f8f1b849d580 | Return generic rescue cleanup fact before pruning: mixed and bound retain extra refs; origin-denied/origin-empty/listing/ancestry/delete/fetch lose named causes; empty emits spurious rescue fact. |
@@ -110,6 +110,10 @@ S09 declarations 59, 63 and 70 now have separate executed dedupe, withdrawal, co
 
 S08 declaration 2's head, CI and permission rechecks were freshly re-executed independently in S10 with the three s08-* patches above, after the real 31-second review deadline. Each failed the merge-count assertion (one instead of zero); each production edit was restored. Its original hold control and earlier S09 evidence remain in docs/testing-migration-s08.md. No review duration was shortened.
 
-## Pending-fix: declaration 92
+## Declaration 92: historical pending-fix, resolved in S10b
 
-The operator explicitly parked the product defect instead of blocking S10. Unreadable `git status --porcelain` (exit 128, empty stdout) currently permits reset and destroys tracked uncommitted content. The exact reproducer and fail/pass causal experiment remain outside the pushed suite at `/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s10-4dzb/report.md` (initial investigation report). Expected result: no reset and original tracked bytes preserved. No failing test is committed, no production fix is shipped, and the unit file must remain whole while this item is pending-fix.
+S10 parked the unreadable-status defect: exit 128 with empty stdout could permit a reset and destroy
+uncommitted content. The saved reproducer remains in that slice's investigation report. The fix is now
+on main. S10b maps the dirty and unreadable-status outcomes and executes the guard-removal control;
+[its canonical mapping](testing-migration/s10b.md) supersedes the pending status above.
+The integrate unit file remains whole for S11's remaining declarations.
