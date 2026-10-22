@@ -1,0 +1,6 @@
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -72 +72 @@
+-		for (const fn of deferred.splice(0)) fn();
++		deferred.splice(0);

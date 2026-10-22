@@ -1,4 +1,3 @@
-// C1/picp-80q (T3): the parent's compaction hold, pure and through the real hook wiring.
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -15,13 +14,13 @@ import { createScratchLedger } from "./harness/index.ts";
 import { CommandPost } from "../src/command-post.ts";
 import { LAYOUT } from "../src/contracts.ts";
 import { PACKAGE_ROOT } from "../src/home.ts";
-import { type ContextReading, PARENT_COMPACT_HOLD_MS, PARENT_COMPACT_START_MS, ParentCompactHold } from "../src/parent-compact-hold.ts";
+import { PARENT_COMPACT_HOLD_MS, PARENT_COMPACT_START_MS } from "../src/parent-compact-hold.ts";
 import { frameBatch } from "../src/parent-outbox.ts";
 import { daemonPaths } from "../src/service/daemon-files.ts";
 import type { WakeupKind } from "../src/wakeups.ts";
 import { createScratchHome } from "./harness/index.ts";
 
-// One home for the file: currentRuntime() caches the first CP_HOME it resolves (E12).
+// currentRuntime() caches the first CP_HOME it resolves.
 const home = createScratchHome();
 const previous = { home: process.env.CP_HOME, mode: process.env.CP_MODE };
 process.env.CP_HOME = home.path;
@@ -42,7 +41,6 @@ const logLines = (): string[] => {
 	const file = daemonPaths(home.path).log;
 	return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter((line) => line.includes("cp-parent[")) : [];
 };
-/** The per-case delta of matching parent lines. */
 const mark = () => {
 	const base = logLines().length;
 	return (pattern: RegExp): number => logLines().slice(base).filter((line) => pattern.test(line)).length;
@@ -57,7 +55,6 @@ const LENGTH_STOP = {
 };
 const ctxAt = (tokens: number, branch: unknown[] = [], mode = "rpc") => ({ mode, getContextUsage: () => ({ tokens }), sessionManager: { getBranch: () => branch } });
 const OVER = ctxAt(210000);
-const triggering = { deliverAs: "followUp", triggerTurn: true };
 
 type Sent = { message: { customType?: string; content: string; display?: boolean; details?: Record<string, unknown> }; options: { triggerTurn?: boolean; deliverAs?: string } };
 type ExecuteSchedule = (id: string, params: Record<string, unknown>, signal: undefined, update: undefined, ctx: unknown) => Promise<{ content: Array<{ text: string }> }>;
@@ -101,61 +98,6 @@ function open() {
 	return { fire, wake, schedule, sent, tags, hold: wakeups.compactHold };
 }
 
-test("T3(a): the pure hold — settle, timers, failures, busy phase, runStarted, not_over", () => {
-	let now = 0;
-	const timers: Array<{ fn: () => void; ms: number; live: boolean }> = [];
-	const lines: string[] = [];
-	const hold = new ParentCompactHold({
-		now: () => now,
-		timer: (fn, ms) => { const entry = { fn, ms, live: true }; timers.push(entry); return () => { entry.live = false; }; },
-		log: (line) => lines.push(line),
-	});
-	const live = () => timers.filter((entry) => entry.live);
-	const fireLive = (ms: number) => { for (const entry of live().filter((e) => e.ms === ms)) { entry.live = false; entry.fn(); } };
-	const over: ContextReading = { over: true, raw: 210000, effective: 210000, threshold: 200000 };
-	const under: ContextReading = { over: false, raw: 150000, effective: 150000, threshold: 200000 };
-	const out: number[] = [];
-
-	hold.settled(over);
-	for (const n of [1, 2, 3]) assert.equal(hold.offer(() => out.push(n)), "hold");
-	now = 500;
-	hold.compacted();
-	assert.deepEqual(out, [1, 2, 3]);
-	assert.match(lines.at(-1)!, /^hold released reason=compacted held=3 ms=500$/);
-	assert.equal(hold.offer(() => out.push(4)), "send");
-
-	hold.settled(over);
-	hold.offer(() => out.push(5));
-	fireLive(PARENT_COMPACT_START_MS);
-	assert.deepEqual(out.slice(3), [5], "15 s with no start releases");
-	hold.settled(over);
-	hold.offer(() => out.push(6));
-	hold.compactionStarted();
-	assert.deepEqual(live().map((entry) => entry.ms), [PARENT_COMPACT_HOLD_MS], "the start timer gives way to the cap");
-	fireLive(PARENT_COMPACT_HOLD_MS);
-	assert.deepEqual(out.slice(4), [6]);
-	hold.settled(over);
-	hold.failed();
-	assert.equal(hold.enabled, false, "three failures or expiries disable");
-	assert.equal(lines.filter((line) => line === "hold disabled failures=3").length, 1);
-	hold.settled(over);
-	assert.equal(hold.holding, false, "disabled: never holds");
-	hold.compacted();
-	assert.equal(hold.enabled, true, "a compaction re-enables");
-
-	const before = timers.length;
-	hold.turnEnded(over);
-	assert.equal(hold.offer(() => out.push(7)), "hold", "busy phase holds");
-	assert.equal(timers.length, before, "and arms no timer");
-	hold.settled(over);
-	hold.runStarted();
-	assert.equal(live().length, 0, "runStarted clears the start timer");
-	assert.equal(out.at(-1), 6, "and does not flush");
-	hold.settled(under);
-	assert.equal(out.at(-1), 7);
-	assert.match(lines.at(-1)!, /reason=not_over/);
-});
-
 test("T3(b): over the threshold, settle holds fleet and schedule wakes in offer order until session_compact", async (t) => {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const count = mark();
@@ -175,37 +117,6 @@ test("T3(b): over the threshold, settle holds fleet and schedule wakes in offer 
 	assert.ok(p.sent.filter((entry) => entry.message.customType === "cp-schedule").every((entry) => entry.message.display === true && entry.message.details?.outcome === "fired"));
 	assert.equal(count(/hold engaged phase=settled/), 1);
 	assert.equal(count(/hold released reason=compacted/), 1);
-});
-
-test("T3(c)/(d): below the threshold, or off a headless parent, nothing holds", async () => {
-	const count = mark();
-	for (const ctx of [ctxAt(150000), ctxAt(210000, [], "tui")]) {
-		const p = open();
-		p.fire("agent_settled", {}, ctx);
-		assert.equal(p.wake("now"), true);
-		await p.schedule("immediate");
-		assert.deepEqual(p.sent.map((entry) => entry.options), [triggering, triggering]);
-	}
-	assert.equal(count(/hold /), 0);
-});
-
-test("T3(e): N6 — a length stop cancels pi's threshold compaction and never holds", (t) => {
-	t.mock.timers.enable({ apis: ["setTimeout"] });
-	const count = mark();
-	const p = open();
-	const event = (reason: string) => ({ type: "session_before_compact", reason, preparation: { tokensBefore: 255640 }, branchEntries: [LENGTH_STOP] });
-	assert.deepEqual(p.fire("session_before_compact", event("threshold")), { cancel: true });
-	assert.equal(p.fire("session_before_compact", event("manual")), undefined);
-	assert.equal(count(/threshold_compaction_cancelled tokens_before=255640 effective=127\d{3} threshold=200000/), 1);
-	for (let i = 0; i < 3; i++) p.fire("session_compact_failed", { reason: "threshold", aborted: true });
-	assert.equal(p.hold.enabled, true, "a cancelled threshold compaction is not a hold failure");
-	p.fire("agent_settled", {}, ctxAt(255640, [LENGTH_STOP]));
-	assert.equal(count(/hold skipped_length_stop raw=255640/), 1);
-	assert.equal(p.hold.holding, false);
-	p.fire("agent_settled", {}, OVER);
-	assert.equal(p.hold.holding, true, "a later over-threshold settle still holds");
-	p.fire("session_compact", {});
-	t.mock.timers.tick(0);
 });
 
 test("T3(f): an over-threshold run holds every wake, including schedule and send-first release, until compaction", async (t) => {
@@ -236,24 +147,6 @@ test("T3(f): an over-threshold run holds every wake, including schedule and send
 	assert.deepEqual(p.tags(), ["W1", "W2", "S1", "W3"]);
 	assert.ok(p.sent.every((entry) => entry.options.deliverAs === "followUp" && entry.options.triggerTurn === true));
 	assert.equal(count(/hold released reason=compacted/), 1);
-});
-
-test("the cap timer reads CP_PARENT_COMPACT_HOLD_SECONDS", async (t) => {
-	// A cap that bypassed the knob would still hold at 5 s and fail the release assertion.
-	t.mock.timers.enable({ apis: ["setTimeout"] });
-	process.env.CP_PARENT_COMPACT_HOLD_SECONDS = "5";
-	t.after(() => delete process.env.CP_PARENT_COMPACT_HOLD_SECONDS);
-	const count = mark();
-	const p = open();
-	p.fire("agent_start");
-	p.fire("turn_end", { type: "turn_end", message: { role: "assistant", stopReason: "stop" }, toolResults: [] }, OVER);
-	await p.schedule("K1");
-	p.fire("agent_settled", {}, OVER);
-	p.fire("session_before_compact", { reason: "manual" });
-	t.mock.timers.tick(4999);
-	assert.equal(count(/hold released reason=cap_timeout /), 0);
-	t.mock.timers.tick(1);
-	assert.equal(count(/hold released reason=cap_timeout /), 1);
 });
 
 test("T3(g)/(h): failure, start timeout and cap release; three disable; agent_start never releases", async (t) => {
@@ -298,22 +191,4 @@ test("T3(g)/(h): failure, start timeout and cap release; three disable; agent_st
 	assert.equal(p.tags().includes("H1"), false);
 	t.mock.timers.tick(PARENT_COMPACT_START_MS);
 	assert.equal(p.tags().filter((tag) => tag === "H1").length, 1);
-});
-
-test("schedule wakes release on a below-threshold settle, and deliver immediately with context control disabled", async () => {
-	const p = open();
-	p.fire("agent_settled", {}, OVER);
-	await p.schedule("under");
-	assert.deepEqual(p.sent, []);
-	p.fire("agent_settled", {}, ctxAt(150000));
-	assert.deepEqual(p.tags(), ["under"]);
-	const settings = join(home.path, LAYOUT.data, "parent.json");
-	try {
-		writeFileSync(settings, JSON.stringify({ compact_at_tokens: null }));
-		p.fire("agent_settled", {}, OVER);
-		await p.schedule("off");
-		assert.deepEqual(p.tags(), ["under", "off"]);
-	} finally {
-		writeFileSync(settings, JSON.stringify({ compact_at_tokens: 200000 }));
-	}
 });

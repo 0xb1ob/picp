@@ -1,0 +1,6 @@
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -119 +119 @@
+-			catch (error) { throw new Error(`self_compact handoff write failed: ${handoff}: ${String(error)}`); }
++			catch {}

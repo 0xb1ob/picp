@@ -1,0 +1,6 @@
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -132 +132 @@
+-		if (role === "assistant" && stopReason !== "error" && stopReason !== "aborted") {
++		if (role === "assistant" && stopReason !== "error") {

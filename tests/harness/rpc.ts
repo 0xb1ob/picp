@@ -74,6 +74,8 @@ export interface RpcSession {
 
 export interface StartRpcOptions {
 	cwd: string;
+	/** JSON print consumers share the event stream but do not run the RPC command loop. */
+	mode?: "rpc" | "json";
 	args?: string[];
 	env?: NodeJS.ProcessEnv;
 }
@@ -85,7 +87,7 @@ function spawnEnv(extra: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
 }
 
 export function startRpc(options: StartRpcOptions): RpcSession {
-	const child: ChildProcessWithoutNullStreams = spawn("pi", ["--mode", "rpc", ...(options.args ?? [])], {
+	const child: ChildProcessWithoutNullStreams = spawn("pi", ["--mode", options.mode ?? "rpc", ...(options.args ?? [])], {
 		cwd: options.cwd,
 		env: spawnEnv(options.env),
 		stdio: ["pipe", "pipe", "pipe"],

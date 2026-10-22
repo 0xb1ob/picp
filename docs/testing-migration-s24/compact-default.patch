@@ -1,0 +1,6 @@
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -9 +9 @@
+-export const OPERATOR_COMPACT_DEFAULT_TOKENS = 200000;
++export const OPERATOR_COMPACT_DEFAULT_TOKENS = 500;

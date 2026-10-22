@@ -1,0 +1,6 @@
+diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
+--- a/src/parent-compact-hold.ts
++++ b/src/parent-compact-hold.ts
+@@ -68 +68 @@
+-	if (event.reason !== "threshold") return undefined;
++	if (true) return undefined;

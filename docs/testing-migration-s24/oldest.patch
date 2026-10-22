@@ -1,0 +1,6 @@
+diff --git a/src/operator-context.ts b/src/operator-context.ts
+--- a/src/operator-context.ts
++++ b/src/operator-context.ts
+@@ -17 +17 @@
+-	return stamped.sort((a, b) => b.at - a.at)[0]?.file;
++	return stamped.sort((a, b) => a.at - b.at)[0]?.file;

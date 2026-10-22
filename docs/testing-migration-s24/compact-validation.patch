@@ -1,0 +1,9 @@
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -100,5 +100,0 @@
+-			if (!instructions) throw new Error("self_compact refused: empty instructions");
+-			if (instructions.length < 200) throw new Error("self_compact refused: instructions must be at least 200 characters");
+-			if (!/(?:^|[\s`("'\[])(?:~\/|\/|\.{1,2}\/)?(?:[\w.-]+\/)+[\w.:-]+\.[\w-]+(?=$|[\s`"')\].,;:])/.test(instructions)) {
+-				throw new Error("self_compact refused: instructions must mention a handoff file path");
+-			}
