@@ -615,7 +615,8 @@ test("landing: spawn pressure releases the oldest held author and a journal refu
 	const older = await s.held("oldest idle author", 301);
 	const newer = await s.held("newer idle author", 302);
 	const idle = (id: string) => { const m = s.post.manager.get(id); return s.post.fleet.get(id)?.phase === "held" && m?.worker.alive === true && !m.worker.busy; };
-	await waitFor(() => idle(older.jobId) && idle(newer.jobId), Boolean, { timeoutMs: 10_000, what: "both held authors idle and registered" });
+	// makeRoom picks the oldest idle author (src/held-release.ts releasable); a send/drive in flight excludes one, so gate on it.
+	await waitFor(() => idle(older.jobId) && idle(newer.jobId) && s.post.heldRelease.releasable().join() === [older.jobId, newer.jobId].join(), Boolean, { timeoutMs: 10_000, what: "both held authors releasable, oldest first" });
 	const releases = (id: string) => readRunEvents(s.home, id).filter((event) => event.type === "held_released");
 	assert.equal(releases(older.jobId).length + releases(newer.jobId).length, 0, "below cap no author is stopped");
 	const original = s.post.fleet.get(older.jobId)!;
