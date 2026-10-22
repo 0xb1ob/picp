@@ -36,14 +36,20 @@ for (const delivery of ["pr", "local"] as const) {
   writeFileSync(join(live.worktree, "change.txt"), "second version\n");
   git(live.worktree, "add", "change.txt");
   git(live.worktree, "commit", "--quiet", "-m", "unpublished work");
+  const mismatch = await s.post.tearDown(live.jobId);
+  assert.equal(mismatch.failure?.code, "unpushed");
+  assert.ok(mismatch.failure?.message.includes(`!= origin/${live.jobId}`));
   git(s.remote, "branch", "-D", live.jobId);
   git(live.worktree, "branch", "--unset-upstream");
+  git(live.worktree, "update-ref", "-d", `refs/remotes/origin/${live.jobId}`);
   const unpushed = await s.post.tearDown(live.jobId);
   assert.deepEqual([unpushed.torn_down, unpushed.lease_returned, unpushed.failure?.code], [false, false, "unpushed"]);
+  assert.match(unpushed.failure?.message ?? "", /no upstream, is not on origin/);
   assert.ok(existsSync(join(live.worktree, "change.txt")), "refusal preserves the worktree");
   git(live.worktree, "push", "--quiet", "origin", live.jobId);
   const pushed = await s.post.tearDown(live.jobId);
   assert.deepEqual([pushed.torn_down, pushed.lease_returned, pushed.reason], [true, true, "pushed"]);
+  assert.equal(pushed.exit_code, 0);
   assert.deepEqual([pushed.artifacts_removed, readFileSync(artifact, "utf8")], [false, "operator evidence\n"]);
   assert.equal(worker.worker.alive, false, "the managed worker close is observed");
   assert.equal(s.post.manager.get(live.jobId), undefined);
@@ -86,6 +92,7 @@ test("S17: a detached head keeps its lease even when its commit is on origin", {
  });
  const committed = await s.post.tearDown(live.jobId);
  assert.deepEqual([committed.torn_down, committed.lease_returned, committed.failure?.code], [false, false, "research_commits"]);
+ assert.match(committed.failure?.fix ?? "", /research changes nothing/);
  git(live.worktree, "reset", "--soft", "origin/main");
  git(live.worktree, "restore", "--staged", ".");
  git(live.worktree, "clean", "-fd");
@@ -348,6 +355,22 @@ for (const forced of [false, true]) {
  assert.equal(s.post.fleet.require(live.jobId).closed_reason, "gated");
  assert.equal(existsSync(join(s.home, paths.mergeFile(live.jobId))), false);
  });
+
+test("S17: an empty PR ship proves ancestry after origin advances without claiming a merge", { skip: SKIP, timeout: 120_000 }, async (t) => {
+ const s = await startStack(t);
+ const live = await s.held("S17 empty PR ancestry", 933, { command: (b) => `git push -qu origin ${b}` });
+ assert.equal(s.post.fleet.require(live.jobId).delivery, "pr");
+ advanceBase(s.repo, "docs/advanced.md", "later base\n");
+ git(s.remote, "branch", "-D", live.jobId);
+ git(live.worktree, "branch", "--unset-upstream");
+ const result = await s.post.tearDown(live.jobId);
+ assert.deepEqual([result.torn_down, result.lease_returned, result.reason], [true, true, "landed_by_git"]);
+ assert.equal(result.landing?.method, "ancestry");
+ assert.equal(result.landing?.head, live.head);
+ assert.ok(readRunEvents(s.home, live.jobId).some((event) => event.type === "teardown_landing_proven" && (event.payload as { head?: string }).head === result.landing?.head));
+ assert.match(formatTeardown(result), /no PR\/MR merge is claimed/i);
+ assert.equal(existsSync(join(s.home, paths.mergeFile(live.jobId))), false);
+});
 
 test("S17: an empty PR ship still needs publication when origin no longer has its base", { skip: SKIP, timeout: 120_000 }, async (t) => {
  const s = await startStack(t);
