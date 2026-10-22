@@ -719,7 +719,10 @@ test("S15: the real cp_review tool relays bounded verdicts and policy refusals w
 	assert.match(JSON.stringify(ends()[0]?.result), /no dispatch record.*cp_dispatch/);
 	assert.doesNotMatch(JSON.stringify(ends()[0]?.result), /pipeline/i);
 	await waitFor(() => ends().length, (count) => count >= 5, { timeoutMs: 60_000, what: "five RPC results" });
-	for (const end of ends().filter((end) => !end.isError)) assert.equal(validate(DiffVerdictSchema, end.result?.details?.verdict).ok, true, "every successful RPC result carries a valid verdict");
+	for (const end of ends().filter((end) => !end.isError)) {
+		const checked = validate(DiffVerdictSchema, end.result?.details?.verdict);
+		assert.equal(checked.ok, true, `every successful RPC result carries a valid verdict: ${JSON.stringify({ details: end.result?.details, errors: checked.ok ? undefined : checked })}`);
+	}
 	const blocked = ends().find((end) => (end.result?.details?.verdict as DiffVerdict | undefined)?.job_id === drained)?.result;
 	assert.equal((blocked?.details?.verdict as DiffVerdict)?.cause, "operational", JSON.stringify(blocked));
 	assert.equal((blocked?.details?.subject as { files: number })?.files, 1, "spawn refusal preserves the materialized subject counts");

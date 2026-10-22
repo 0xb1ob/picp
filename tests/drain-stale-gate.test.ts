@@ -56,6 +56,17 @@ test("the gate clears a drained auto-update record whose target is the running v
 	assert.equal(existsSync(drainFile(home.path)), false);
 });
 
+// A drain finished in the second this process started is second-truncated below its start; it is live, not spent.
+test("the gate keeps a foreign drained record finished in the same second this process started", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	post(t, home.path);
+	const started = new Date(Date.now() - process.uptime() * 1000);
+	writeDrain(home.path, { finished_at: `${started.toISOString().slice(0, 19)}Z` });
+	assert.throws(() => assertNotDraining(home.path, "dispatch"), DrainError);
+	assert.equal(existsSync(drainFile(home.path)), true);
+});
+
 test("the gate never clears a record this process wrote, nor a draining one", (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());

@@ -368,7 +368,8 @@ export class DrainControl {
 	healStale(record: DrainRecord): boolean {
 		if (record.state !== "drained" || this.#owned || this.#deps.owns?.() === false || created.has(createdKey(this.#deps.home, record))) return false;
 		const target = record.cause?.target_sha;
-		const spent = record.finished_at !== undefined && Date.parse(record.finished_at) < PROCESS_STARTED_MS
+		// finished_at is second-precision: only a record a whole second older than this process is provably pre-start.
+		const spent = record.finished_at !== undefined && Date.parse(record.finished_at) + 1000 <= PROCESS_STARTED_MS
 			? `it finished ${record.finished_at}, before this parent started`
 			: target && runningSha && (runningSha.startsWith(target) || target.startsWith(runningSha)) ? `its auto-update target ${target.slice(0, 12)} is the running version` : undefined;
 		return spent !== undefined && this.#clear(`at a start gate (${spent})`) !== undefined;
