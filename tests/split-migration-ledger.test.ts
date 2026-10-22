@@ -53,3 +53,18 @@ test("split-migration-ledger moves an NC intro and log beside the owning slice's
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+// A patch-id match that cannot be parsed must fail the split loudly; dropping the queued NC prose would lose it.
+test("split-migration-ledger throws when an NC patch block cannot be parsed", () => {
+	const dir = mkdtempSync(join(tmpdir(), "ledger-split-"));
+	try {
+		mkdirSync(join(dir, "docs/testing-migration"), { recursive: true });
+		mkdirSync(join(dir, "scripts"));
+		writeFileSync(join(dir, "docs/testing-migration.md"), "# Rules\n\n## Assertion map\n\nNC-24 breaks it:\n");
+		writeFileSync(join(dir, "docs/testing-migration/b05.md"), "# Ledger rows: b05\n\n<!-- patch:NC-24-x -->\n");
+		writeFileSync(join(dir, "scripts/retired-integration-allowlist.json"), "[]\n");
+		assert.throws(() => execFileSync("node", [resolve("scripts/split-migration-ledger.ts"), "b05"], { cwd: dir, stdio: "pipe" }), /cannot parse the NC-24 patch block/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});

@@ -123,6 +123,8 @@ function main(): void {
 		out = moveProse(out, `${DIR}/s02.md`, /S02 controls run with [\s\S]*?S02 worker artifact directory\.\n\n?/);
 		out = movePatches(out, `${DIR}/s02.md`, ["NC-S02-key", "NC-S02-history", "NC-S02-prune"]);
 	}
+	if (slices.has("s19")) out = moveProse(out, `${DIR}/s19.md`, /S19 carry-in \(main session[\s\S]*?split-deferred\.log`\.\n\n?/);
+	if (slices.has("s20")) out = moveProse(out, `${DIR}/s20.md`, /S20 wake-rule controls cover[^\n]*\n[^\n]*\n\n?/);
 	writeFileSync(MONOLITH, out);
 	writeFileSync(ALLOWLIST_FILE, `${JSON.stringify(allowlist, null, "\t")}\n`);
 }
@@ -167,7 +169,7 @@ function moveControls(text: string): string {
 		let end = i;
 		while (end < lines.length && lines[end] && !/^(\||<!--)/.test(lines[end] as string)) end++;
 		const head = lines.slice(i, end).join("\n");
-		const key = /\bNC-(\d\d)\b/.exec(head)?.[1];
+		const key = /^(?:#+\s*|\*\*)?NC-(\d\d)\b/.exec(head)?.[1];
 		let next = end;
 		while (lines[next] === "") next++;
 		const log = key && /^```(?!diff)/.test(lines[next] ?? "") ? next : -1;
@@ -175,7 +177,9 @@ function moveControls(text: string): string {
 		const file = key ? files.find((name) => new RegExp(`<!-- patch:NC-${key}(?:-[\\w-]+)? -->`).test(readFileSync(name, "utf8"))) : undefined;
 		if (file) {
 			let slice = readFileSync(file, "utf8");
-			const block = patches(slice).get(new RegExp(`<!-- patch:(NC-${key}(?:-[\\w-]+)?) -->`).exec(slice)?.[1] as string) as string;
+			const id = new RegExp(`<!-- patch:(NC-${key}(?:-[\\w-]+)?) -->`).exec(slice)?.[1];
+			const block = id ? patches(slice).get(id) : undefined;
+			if (!block) throw new Error(`${file}: cannot parse the NC-${key} patch block; its prose would be dropped`);
 			const tail = close < 0 ? "" : `\n${lines.slice(log, close + 1).join("\n")}\n`;
 			slice = slice.replace(block, () => `${head}\n\n${block}${tail}`);
 			writeFileSync(file, slice);
