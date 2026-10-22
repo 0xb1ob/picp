@@ -149,7 +149,9 @@ The named only-reported case now pins the actual refusal, including its reported
 S02 8's helper-only no-id event cannot come from Actions: the named Actions-refuses case pins the
 public malformed-run refusal. Attempt identities remain pinned by 05-8 / NC-32. Legacy messages
 already on disk still reach the parent and confirm correctly in the new actual-parent-arrival case.
-These four mixed declarations are classified redundant-unreachable, with their reachable behavior pinned.
+Review 1 correction: these four mixed declarations are retained verbatim in tests/ci-watch-retained.test.ts.
+The public boundary controls above prove their reachable outcomes, rather than replacing helper-only assertions.
+The original file stays whole by operator ruling; the retirement follow-up removes the temporary duplicates.
 
 For 70, CommandPost's only onLanded callback returns void while starting ArmedDispatches.release.
 A synchronous injected throwing callback cannot reach that consumer; the named armed-release case

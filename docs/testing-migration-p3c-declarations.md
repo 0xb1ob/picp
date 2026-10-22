@@ -9,7 +9,7 @@ The original slice has 143 static declarations (152 parameterized runtime cases)
 
 | Original file | Declarations | Delivery and follow-on status |
 |---|---:|---|
-| tests/ci-watch.test.ts | 80 | S03b: 75 mapped (S02 36 + S03 39), four redundant-unreachable with named public consumer cases (S02 6/8/32/33), one pending-fix (S03 71). Declaration 64 maps after #429 with real parked producer and executed quiet-wakeup control. Source stays whole; a follow-up slice maps 71 and retires the file. No retained/deleted file is claimed. Controls and base SHAs: docs/testing-migration-s03b-controls.md. |
+| tests/ci-watch.test.ts | 80 | S03b: 75 mapped (S02 36 + S03 39), four retained verbatim in tests/ci-watch-retained.test.ts (S02 6/8/32/33; missing entry points in assertion map), one pending-fix (S03 71). Declaration 64 maps after #429. Source stays whole; the follow-up maps 71 and retires the file. One retained file, zero deleted files; original declarations unchanged. Controls and base SHAs: docs/testing-migration-s03b-controls.md. |
 | tests/main-ci.test.ts | 39 | Follow-on #416: 32 mapped, 7 retained (mixed tests narrowed) in tests/main-ci-retained.test.ts, 0 pending; whole original retired. Full titles and controls: [main-CI accounting](testing-migration-main-ci-declarations.md). |
 | tests/foreign-ci-watch.test.ts | 11 | S06 completed: 10 mapped to 05-10/S06-1 in tests/e2e/landing.test.ts, one static declaration in tests/foreign-ci-watch-retained.test.ts; supersedes the P3c-rest pending snapshot |
 | tests/parked-ci.test.ts | 3 | All three mapped to 05-12 and deleted; real timer, forge barriers, resume/re-park and legacy held state; NC-36 and NC-49–NC-55 |
@@ -26,11 +26,12 @@ S07 subsequently maps three more declarations and deletes `tests/integrate-held-
 16/143 mapped, 2 retained, 125 pending, 11 declarations removed and 3/7 files deleted. It adds one e2e
 declaration and extends 05-13; no other slice's ownership changes. The counts above describe P3c's original delivery.
 
-After S02, S06 and this blocked S03 delivery, the current snapshot is **83/143 mapped, 3 retained,
-57 pending**. Of those mappings, 21 declarations have been removed; three original files are fully
-deleted, while foreign-ci-watch is converted with one retained declaration. CI-watch's 62 mapped
-declarations remain in its original file. S03 cannot retire that file until the parked-notice product
-blocker and the 18 pending declarations above are resolved.
+Current follow-on snapshot (including S03b and #416): **128/143 mapped, 14 retained, 1 pending-fix**.
+The retained declarations are four CI-watch helper-only declarations, seven main-CI declarations,
+one foreign-CI declaration and two timer declarations. The sole pending conversion is CI-watch 71.
+Five of seven original paths are absent: 53 declarations mapped and eight relocated to retained files.
+CI-watch's 80 declarations stay whole by operator ruling; its four retained declarations stay verbatim
+in that convert-owned file until the follow-up slice maps 71 and retires or splits the file.
 
 No pending declaration is counted as retained, redundant-unreachable or removed. The timer file is a 100%
 rename, not retired coverage. Its two assertion rows remain `retained`; the baseline-file table's `deleted`
@@ -52,6 +53,7 @@ S02 owns only `tests/ci-watch.test.ts` declarations 1–40. It adds five scenari
 36 declarations are mapped; declarations 6, 8, 32 and 33 have unreachable sub-assertions and remain intact.
 All original declarations stay in place under the operator's split-file amendment; no deletion credit is claimed.
 S03 owns declarations 41–80 and the final file retirement.
-S03b resolves the four S02 sub-assertions as redundant-unreachable with named e2e consumer outcomes and executed
-controls; see docs/testing-migration-s03b-controls.md. The source remains whole while declaration 71 is pending-fix.
+S03b retains four verbatim S02 declarations in tests/ci-watch-retained.test.ts. Their missing entry points
+are named in the assertion map; public consumer controls do not replace those helper assertions.
+The copies temporarily duplicate originals because the operator requires the original file to stay whole.
 The 13/143 summary above records P3c's historical partial delivery, before these follow-on mappings.

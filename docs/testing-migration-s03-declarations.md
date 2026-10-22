@@ -4,6 +4,30 @@ Ownership: the remaining behavior-05 files are owned by P3c-rest and re-sliced b
 
 Scope: tests/ci-watch.test.ts declarations 41–80, last range; S02 and S07 carry-ins. No source unit has been deleted yet. Mapping remains in progress; the passing scenarios alone do not authorize retirement.
 
+## Operator amendments and review 1 response
+
+The later operator instructions supersede the original last-range retirement requirement:
+
+> Keep decl 71 parked and tests/ci-watch.test.ts whole (operator ruling: a follow-up slice maps decl 71 and retires the file).
+
+The operator repeated this after the next parent restart:
+
+> keep decl 71 parked and tests/ci-watch.test.ts whole.
+
+Review 1's premise that this ruling does not exist is incorrect. Neither #433 nor the inherited upstream
+watch-failure case authorizes this slice to take the deferred mapping/retirement. No credit is claimed for 71.
+The follow-up must prove the durable per-cause entry and execute its control before retirement.
+
+The four S02 declarations are retained verbatim in tests/ci-watch-retained.test.ts, with missing entry points
+named in the assertion map. Removing an unreachable predicate staying green does not replace its unit.
+The originals remain whole by operator ruling; the follow-up removes the temporary duplication at retirement.
+
+The table below is the inherited S03 execution log, not a complete patch/SHA catalog or a retirement gate.
+Its missing historical patch provenance remains a limitation; it must not be inferred or fabricated.
+The newly mapped S03b declarations have executed patches, full base SHAs and failing assertions in
+[the S03b control catalog](testing-migration-s03b-controls.md). Final replay and patch provenance for the
+inherited controls remain part of the explicitly deferred whole-file retirement audit.
+
 ## Executed controls (restored immediately)
 
 Commands use `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing.test.ts`.
@@ -73,7 +97,7 @@ The reproducible fragment is in the job artifact directory as parked-reproducer.
 
 Routing explains the result: HeldContinuation.#parked uses relay; CommandPost wires relay and notify to the same recovery journal. isQuietWakeup covers landed/window ids, and isRelayOnlyNotice covers landed/resolve/handled-green text; neither recognizes parked notices. The real wakeup surface therefore sends the parked recovery notice with triggerTurn true. A separate product fix and a green reproducer are needed before continuing declaration 64.
 
-Current accounting is 26/40 S03 declarations mapped, plus S02's 36/40: 62/80 total. Still pending in S03: 45, 54–56, 58, 60, 64–68, 70–71, 78. S02's 6, 8, 32, 33 still require their retained-file disposition. Declaration 54's fresh-parent deadline path is covered, but its expired-pass/retry clauses are not all proved, so its earlier mapped row was removed. No unit file was deleted or moved, no retained file was invented, and no product mutation remains. Final retirement controls remain outstanding.
+Historical pre-S03b checkpoint: 26/40 S03 plus 36/40 S02 declarations were mapped (62/80); the remaining S03 declarations were 45, 54–56, 58, 60, 64–68, 70–71 and 78. This snapshot is superseded by the current declaration ledger below.
 
 ## S03b parked-path verification
 
@@ -107,11 +131,11 @@ from the pushed suite. Declaration 71 stays pending; the original unit file rema
 | Declaration | Disposition | Evidence |
 |---|---|---|
 | 45, 54–56, 58, 60, 64–68, 70, 78 | mapped | Main assertion ledger and docs/testing-migration-s03b-controls.md; thirteen newly mapped declarations |
-| S02 6/8/32/33 | redundant-unreachable | Named public consumer cases pin fleet refusal, invalid Actions-run refusal, continued GitLab reads and same-key restart; reachable portions remain mapped in the notes. |
+| S02 6/8/32/33 | retained | Verbatim copies in tests/ci-watch-retained.test.ts; originals stay whole by operator ruling. Missing entry points: FleetStore refuses the unreported slot before isWatched; Actions refuses the id-less run before derivation; CommandPost supplies no onDisabled callback. Boundary controls do not replace those helper assertions. |
 | 71 | pending-fix | Expected: durable watch-failure notice without a crash. Upstream #433 is now merged; the operator explicitly parked this e2e conversion for follow-up. Historical reproducer remains outside the pushed suite: /home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s03b-pntl/watch-failure-reproducer.ts |
 
 `pending-fix` is recorded here because the assertion-map parser rejects that status; it is not represented as retained.
-The unit file stays whole while 71 is pending. S03 is 39 mapped / 1 pending-fix; S02 is 36 mapped / 4 redundant-unreachable.
+The unit file stays whole while 71 is pending. S03 is 39 mapped / 1 pending-fix; S02 is 36 mapped / 4 retained in place.
 This continuation closes all requested dispositions except the explicitly parked 71; declaration 64 is mapped after #429.
 
 An exploratory timer-health case was also removed: two different malformed fleet shapes both surfaced as unsafe job id "-" rather than supplying the two distinct failure causes needed by declaration 71. That failed conversion attempt is not counted as mapping or negative-control evidence.
