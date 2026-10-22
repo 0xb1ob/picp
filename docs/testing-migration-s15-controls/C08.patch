@@ -1,0 +1,5 @@
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -165 +165 @@
+-		for (const user of users.slice(0, MAX_CONSUMERS)) add(user, "head", "consumer");
++		for (const user of users) add(user, "head", "consumer");

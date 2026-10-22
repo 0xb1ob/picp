@@ -1,0 +1,7 @@
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -459,2 +459,3 @@
+ 		next: result.next,
++		diff_path: result.diff?.path,
+ 		/** `state/runs/<job-id>/review-<n>.json` — the decision, never the diff. */

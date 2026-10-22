@@ -1,0 +1,5 @@
+--- a/src/review-context.ts
++++ b/src/review-context.ts
+@@ -26 +26 @@
+-const TASK_PATH = /(?<![\w./~-])(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z0-9]{1,8}\b/g;
++const TASK_PATH = /(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z0-9]{1,8}\b/g;

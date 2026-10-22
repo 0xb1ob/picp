@@ -1,0 +1,8 @@
+diff --git a/src/diff-review.ts b/src/diff-review.ts
+--- a/src/diff-review.ts
++++ b/src/diff-review.ts
+@@ -499,3 +499,3 @@
+ 				`no dispatch record for ${jobId} — cannot review. A diff review reads the job's project, branch and kind ` +
+-					`from its fleet record; dispatch the job first (cp_dispatch), then review the branch it pushed.`,
++					`from its fleet record; dispatch the job first (cp_pipeline), then review the branch it pushed.`,
+ 			);

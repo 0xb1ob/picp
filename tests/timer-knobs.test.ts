@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { CI_WATCH_MAX_BACKOFF_MS } from "../src/contracts.ts";
 import { hostProbeMs, reattachFirstMs, reattachMaxMs } from "../src/bridge-reattach.ts";
 import { hostEscalationTickMs } from "../src/parent-host.ts";
 import { parentCompactHoldMs } from "../src/parent-compact-hold.ts";
@@ -25,6 +26,7 @@ const knobs = [
 for (const [name, read, dflt] of knobs) {
 	test(`${name}: default, override, garbage`, () => {
 		assert.equal(read({}), dflt);
+		if (name === "CP_REVIEW_SUPPRESSION_SECONDS") assert.ok(read({}) > CI_WATCH_MAX_BACKOFF_MS, "default suppression outlasts watcher backoff");
 		assert.equal(read({ [name]: "2" }), 2000);
 		for (const bad of ["nope", "0", "-5", "", "Infinity"]) assert.equal(read({ [name]: bad }), dflt);
 	});

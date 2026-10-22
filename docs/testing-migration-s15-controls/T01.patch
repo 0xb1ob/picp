@@ -1,0 +1,8 @@
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -457,3 +457,3 @@
+ 	const details: Record<string, unknown> = {
+-		verdict,
++		verdict: {},
+ 		next: result.next,
