@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 export const SHARDS = 4;
 const TABLE = fileURLToPath(new URL("./test-timings.json", import.meta.url));
+const CI_YML = fileURLToPath(new URL("../.github/workflows/ci.yml", import.meta.url));
 const GLOB = "tests/**/*.test.ts";
 
 export function median(values: number[]): number {
@@ -17,7 +18,7 @@ export function median(values: number[]): number {
 
 /** Unknown or new files weigh the table's median; ties break by name so the split is deterministic. */
 export function assignShards(files: readonly string[], timings: Record<string, number>, n = SHARDS): string[][] {
-	const med = median(Object.values(timings));
+	const med = median(Object.values(timings).filter((v) => v > 0));
 	const weight = (f: string) => timings[f] ?? med;
 	const shards = Array.from({ length: n }, () => ({ load: 0, files: [] as string[] }));
 	for (const f of [...files].sort((a, b) => weight(b) - weight(a) || a.localeCompare(b))) {
@@ -54,7 +55,9 @@ if (import.meta.main) {
 	if (cmd === "files") {
 		const i = Number(arg);
 		if (!Number.isInteger(i) || i < 1 || i > SHARDS) throw new Error(`shard must be 1..${SHARDS}, got ${arg}`);
-		console.log(assignShards(discover(), loadTable())[i - 1]!.join("\n"));
+		const list = assignShards(discover(), loadTable())[i - 1]!;
+		if (list.length === 0) throw new Error(`shard ${i} is empty`);
+		console.log(list.join("\n"));
 	} else if (cmd === "check") {
 		const all = discover();
 		const shards = assignShards(all, loadTable());
@@ -64,13 +67,20 @@ if (import.meta.main) {
 			console.error(`shard assignment is not a partition of ${GLOB}; offenders: ${bad.join(", ") || "(empty shard)"}`);
 			process.exit(1);
 		}
+		const matrix = /matrix:\s*\n\s*shard:\s*\[([^\]]*)\]/.exec(readFileSync(CI_YML, "utf8"))?.[1]?.split(",").map((x) => Number(x.trim()));
+		const want = shards.map((_, k) => k + 1);
+		if (!matrix || matrix.join() !== want.join()) {
+			console.error(`ci.yml test-shard matrix is [${matrix?.join(", ") ?? "missing"}]; the script assigns shards [${want.join(", ")}]`);
+			process.exit(1);
+		}
 		console.log(`${all.length} files in ${shards.length} shards: ${shards.map((s) => s.length).join("/")}`);
 	} else if (cmd === "gen" && arg) {
 		const files = discover();
 		const sources = Object.fromEntries(files.map((f) => [f, readFileSync(f, "utf8")]));
 		const t = timingsFromSpecLog(readFileSync(arg, "utf8"), sources);
 		const med = median(Object.values(t).filter((v) => v > 0));
-		for (const f of files) if (!t[f]) t[f] = Math.round(med);
+		const prior = loadTable();
+		for (const f of files) if (!t[f]) t[f] = prior[f] === 0 ? 0 : Math.round(med);
 		writeFileSync(TABLE, `${JSON.stringify(Object.fromEntries(Object.entries(t).sort()), null, "\t")}\n`);
 	} else {
 		console.error("usage: test-shards.ts files <1..4> | check | gen <spec-log>");
