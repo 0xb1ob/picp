@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..9043e91 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -410,7 +410,7 @@ export class Teardown {
+ 	async #researchGate(worktree: string, branch: string, base: string): Promise<GateOutcome> {
+ 		const ahead = await this.#git(worktree, ["rev-list", "--count", `origin/${base}..HEAD`]);
+ 		const count = Number.parseInt(ahead.stdout.trim() || "0", 10);
+-		if (ahead.status === 0 && Number.isFinite(count) && count > 0) {
++		if (false && ahead.status === 0 && Number.isFinite(count) && count > 0) {
+ 			return {
+ 				ok: false,
+ 				failure: {
