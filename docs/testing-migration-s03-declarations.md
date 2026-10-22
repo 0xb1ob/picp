@@ -16,7 +16,7 @@ not a pending product fix. S10b owns mapping 71 and retirement; S03b keeps the o
 On merged source HEAD 0ed75a6ed0f5bcf28e600c84275678cc6336f4ac, the strengthened real-parent case
 fails: malformed JSON and invalid fleet schema produce only one durable notice, both keyed by
 `unsafe job id "-"`, instead of two notices for distinct causes. The parent survives the first error.
-The test took 60.45 seconds. Exact reproducer (replace the existing watch-failure case in landing.test.ts):
+The test took 60.45 seconds. Exact reproducer (replace the existing watch-failure case in tests/e2e/landing-s03.test.ts):
 `/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s03b-pntl/watch-failure-per-cause-reproducer.ts`.
 Log: `s03b-71-positive.log`; assertion `different malformed fleet causes must remain distinct`, actual 1,
 expected 2. This is an unmodified-product failure, not an executed negative control.
@@ -109,7 +109,7 @@ The continuation send arrived immediately before this worker's 10,800-second wal
 
 A real parent parks a reviewed green PR under human_handoff, then starts a new model turn whose final input is HELD PR PARKED. The focused reproducer isolates that turn from an unrelated RESTART RECOVERY turn and fails parking is relayed without waking the parent model (actual 1, expected 0). The original declaration explicitly requires no parent wake. The migration brief prohibits product changes, so this blocks retirement rather than authorizing a routing fix.
 
-The reproducible fragment is in the job artifact directory as parked-reproducer.ts. Insert it before the busy-fence case in tests/e2e/landing.test.ts and run npm run test:one -- --test-name-pattern='landing S03: a real parent relays a newly parked' tests/e2e/landing-s03.test.ts. The unmodified product failed this assertion twice, including the isolated check in 6.09 seconds. It uses the real parent, real held worker/session, real park/lease release, scratch git, and mock forge/model boundaries.
+The reproducible fragment is in the job artifact directory as parked-reproducer.ts. Insert it before the busy-fence case in tests/e2e/landing-s03.test.ts and run npm run test:one -- --test-name-pattern='landing S03: a real parent relays a newly parked' tests/e2e/landing-s03.test.ts. The unmodified product failed this assertion twice, including the isolated check in 6.09 seconds. It uses the real parent, real held worker/session, real park/lease release, scratch git, and mock forge/model boundaries.
 
 Routing explains the result: HeldContinuation.#parked uses relay; CommandPost wires relay and notify to the same recovery journal. isQuietWakeup covers landed/window ids, and isRelayOnlyNotice covers landed/resolve/handled-green text; neither recognizes parked notices. The real wakeup surface therefore sends the parked recovery notice with triggerTurn true. A separate product fix and a green reproducer are needed before continuing declaration 64.
 
@@ -137,7 +137,7 @@ read failure escapes the continuation promise and terminates Node. This is a pro
 
 The exact real-process reproducer is preserved at
 `/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s03b-pntl/watch-failure-reproducer.ts`.
-Insert it in landing.test.ts and run the case pattern `landing S03: the real parent journals`.
+Insert it in tests/e2e/landing-s03.test.ts and run the case pattern `landing S03: the real parent journals`.
 Expected: one durable CI/PR WATCH TICK FAILED entry for the malformed fleet, parent remains alive.
 Observed: no entries after 15 seconds and child FleetError crash. The intentionally failing fragment was removed
 from the pushed suite. At that stage declaration 71 stayed pending and the original file remained whole;
