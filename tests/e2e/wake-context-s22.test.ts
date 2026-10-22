@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, paths, type FleetRecord } from "../../src/contracts.ts";
@@ -15,7 +15,7 @@ const head = "a".repeat(40);
 type Notice = { kind: string; job?: string; body: string; stamp?: Record<string, unknown>; details?: Record<string, unknown> };
 
 async function carried(t: TestContext, records: Array<Partial<FleetRecord> & { job_id: string }>, notices: Notice[],
-	seed?: (home: string) => string | void) {
+	seed?: (home: string) => string | void, revisit?: (home: string, child: ReturnType<typeof startPiChild>) => void) {
 	const home = createScratchHome();
 	const provider = await MockProvider.start();
 	const model = provider.addScript("s22-context", [{ kind: "text", text: "S22 context received." }], { onExhausted: "repeat" });
@@ -50,6 +50,13 @@ async function carried(t: TestContext, records: Array<Partial<FleetRecord> & { j
 		extensions: [COMMAND_POST_EXTENSION, ...(fixture ? [fixture] : [])], sessionFile: session });
 	await child.prompt("Inspect the S22 carried notices.");
 	await child.waitForSettled(60_000);
+	if (revisit) {
+		revisit(home.path, child);
+		await child.prompt("Inspect the S23 notices again.");
+		await waitFor(() => provider.requests("s22-context").length, (count) => count >= 2,
+			{ timeoutMs: 15_000, what: "second S23 provider request" });
+		await child.waitForSettled(60_000);
+	}
 	assert.equal(provider.remaining("s22-context"), 0);
 	const text = JSON.stringify(provider.requests("s22-context").flatMap((request) =>
 		(request.body.messages as Array<{ role: string }>).filter((m) => m.role !== "system")));
@@ -301,4 +308,148 @@ export default function(pi) { pi.on("input", () => {
 	assert.doesNotMatch(text, /S22_PROMOTION_COPY_/);
 	for (const v of ["promoted", "green", "pruned", "noted"]) assert.equal(text.split(note(`cp-${v}`)).length - 1, 1, v);
 	assert.doesNotMatch(text, /cp-held was promoted after this CI fact/);
+});
+
+
+test("S23: decided verdicts reach the provider only for current attempts and live jobs", { timeout: 110_000 }, async (t) => {
+	const variants = ["fresh", "missing", "newer", "pending", "done"];
+	const text = await carried(t, variants.map((v) => ({ job_id: `cp-v-${v}`,
+		...(v === "done" ? { phase: "done" as const } : {}) })), variants.map((v) => ({
+		kind: "verdict", job: `cp-v-${v}`, body: `S23_VERDICT_${v}`, stamp: { keys: ["gate", "1"] },
+	})), (home) => {
+		for (const v of variants.filter((v) => v !== "missing")) {
+			for (const attempt of v === "newer" ? [1, 2] : [1]) {
+				writeFileSync(join(home, paths.gateFile(`cp-v-${v}`, attempt)), JSON.stringify({
+					schema_version: 1, job_id: `cp-v-${v}`, attempt, verdict: "pass", cause: "policy",
+					flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },
+					reasons: [], revisions: [], model: "mock/one", decided_at: issued,
+				}));
+			}
+		}
+		const pending = join(home, paths.pendingReviewFile("cp-v-pending", "gate", 2));
+		mkdirSync(join(pending, ".."), { recursive: true });
+		writeFileSync(pending, JSON.stringify({ schema_version: 1, job_id: "cp-v-pending", surface: "gate",
+			attempt: 2, model: "mock/one", pid: process.pid, started_at: issued,
+			deadline: "2999-01-01T00:00:00Z", handed_back: true }));
+	});
+	assert.deepEqual(variants.filter((v) => text.includes(`S23_VERDICT_${v}`)), ["fresh"]);
+});
+
+
+test("S23: review heads use dated observations and preserve current fleet verdicts", { timeout: 110_000 }, async (t) => {
+	const variants = ["lagging", "moved", "absent-dated", "absent-undated", "same", "fleet-only"];
+	const text = await carried(t, variants.map((v) => ({ job_id: `cp-head-${v}` })), variants.map((v) => ({
+		kind: "verdict", job: `cp-head-${v}`, body: `S23_HEAD_${v}`, stamp: { keys: ["review", "1", head] },
+	})), (home) => {
+		for (const v of variants) {
+			writeFileSync(join(home, paths.reviewFile(`cp-head-${v}`, 1)), JSON.stringify({ schema_version: 1,
+				job_id: `cp-head-${v}`, attempt: 1, verdict: "pass", cause: "policy",
+				flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: [],
+				head_sha: head, diff_stat: { files: 1, truncated: false }, decided_at: issued }));
+			if (!v.startsWith("absent")) writeFileSync(join(home, paths.envelopeFile(`cp-head-${v}`)),
+				JSON.stringify({ received_at: issued, envelope: { head_sha: v === "fleet-only" ? "b".repeat(40) : head } }));
+		}
+		const fixture = join(home, "s23-heads.ts");
+		writeFileSync(fixture, `import { CiWatchStore } from ${JSON.stringify(join(process.cwd(), "src/ci-watch.ts"))};
+export default function(pi) { pi.on("input", () => {
+ const watch = new CiWatchStore({ home: ${JSON.stringify(home)} });
+ for (const v of ${JSON.stringify(variants.filter((v) => v !== "fleet-only"))}) watch.record("cp-head-" + v, {
+ head_sha: v === "same" ? "${head}" : "${"b".repeat(40)}",
+ ...(v === "absent-undated" ? {} : { head_observed_at: v === "lagging" ? "2026-08-31T12:40:00Z" : "2026-08-31T12:50:00Z" }) });
+}); }`);
+		return fixture;
+	});
+	assert.deepEqual(variants.filter((v) => text.includes(`S23_HEAD_${v}`)), ["lagging", "absent-undated", "same"]);
+});
+
+
+test("S23: persisted replay tokens suppress redeliveries while new verdict attempts remain news", { timeout: 110_000 }, async (t) => {
+	const text = await carried(t, [{ job_id: "cp-replay" }], [
+		{ kind: "ci", job: "cp-replay", body: "S23_CI_COPY", stamp: { keys: [head] },
+			details: { ci: [{ key: `cp-replay|${head}|ci_green` }] } },
+		{ kind: "verdict", job: "cp-replay", body: "S23_VERDICT_COPY", stamp: { keys: ["gate", "1"] } },
+		{ kind: "verdict", job: "cp-replay", body: "S23_VERDICT_NEW", stamp: { keys: ["gate", "2"] } },
+		{ kind: "unreported", job: "cp-replay", body: "S23_WITHHELD_BODY", stamp: { generation: 1 } },
+	], (home) => {
+		for (const attempt of [1, 2]) writeFileSync(join(home, paths.gateFile("cp-replay", attempt)), JSON.stringify({
+			schema_version: 1, job_id: "cp-replay", attempt, verdict: "pass", cause: "policy",
+			flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: [], decided_at: issued,
+		}));
+		const identity = JSON.stringify(["unreported", "cp-replay", 1, null, null, issued]);
+		writeFileSync(join(home, ".pi-command-post/state/wakeup-replay.json"), JSON.stringify([
+			[`cp-replay|${head}|ci_green`, `${issued}#900`], ["cp-replay|gate|1", `${issued}#901`],
+			[`withheld:${identity}`, "the original run was still working"],
+		]));
+	});
+	assert.ok(text.includes("S23_VERDICT_NEW"));
+	assert.doesNotMatch(text, /S23_CI_COPY|S23_VERDICT_COPY|S23_WITHHELD_BODY/);
+});
+
+
+test("S23: a carried report stays in later requests after closure and withheld identities keep their first reason", { timeout: 110_000 }, async (t) => {
+	const text = await carried(t, [{ job_id: "cp-carried", reported_at: issued }, { job_id: "cp-hidden" }], [
+		{ kind: "envelope", job: "cp-carried", body: "S23_ALREADY_READ", stamp: { reported_at: issued } },
+		{ kind: "envelope", job: "cp-hidden", body: "S23_HIDDEN_REPORT" },
+	], undefined, (home) => {
+		const file = join(home, ".pi-command-post/state/fleet.json");
+		const fleet = JSON.parse(readFileSync(file, "utf8"));
+		fleet.jobs.find((job: FleetRecord) => job.job_id === "cp-carried").phase = "done";
+		fleet.jobs.find((job: FleetRecord) => job.job_id === "cp-hidden").reported_at = issued;
+		writeFileSync(file, JSON.stringify(fleet));
+		const memory = readFileSync(join(home, ".pi-command-post/state/wakeup-replay.json"), "utf8");
+		assert.match(memory, /nothing is filed/);
+		assert.doesNotMatch(memory, /S23_ALREADY_READ|S23_HIDDEN_REPORT/);
+	});
+	assert.equal(text.split("S23_ALREADY_READ").length - 1, 2, "the parent already read the original entry");
+	assert.doesNotMatch(text, /S23_HIDDEN_REPORT/);
+});
+
+test("S23: superseded review findings reach the provider without the verdict or directive", { timeout: 110_000 }, async (t) => {
+	const text = await carried(t, [{ job_id: "cp-findings", phase: "done" }], [{
+		kind: "verdict", job: "cp-findings", body: "S23_FORBIDDEN_PASS call cp_integrate", stamp: { keys: ["review", "1", head] },
+		details: { next: "proceed", verdict: { verdict: "pass", reasons: ["medium: S23_RENAME_FLAG", "low: S23_TYPO"] } },
+	}]);
+	assert.match(text, /WITHHELD VERDICT for cp-findings/);
+	assert.match(text, /S23_RENAME_FLAG/);
+	assert.match(text, /S23_TYPO/);
+	assert.doesNotMatch(text, /S23_FORBIDDEN_PASS|call cp_integrate/);
+});
+
+
+test("S23: unreadable replay storage warns without restoring stale report content", { timeout: 110_000 }, async (t) => {
+	const text = await carried(t, [], [{ kind: "envelope", job: "cp-gone", body: "S23_STALE_STORAGE_BODY" }], (home) => {
+		mkdirSync(join(home, ".pi-command-post/state/wakeup-replay.json"), { recursive: true });
+	}, (_home, child) => {
+		const notices = () => JSON.stringify(child.records());
+		assert.match(notices(), /replay memory read failed/);
+		assert.match(notices(), /replay memory write failed/);
+		t.after(() => {
+			assert.equal(notices().split("replay memory read failed").length - 1, 1);
+			assert.equal(notices().split("replay memory write failed").length - 1, 1);
+		});
+	});
+	assert.doesNotMatch(text, /S23_STALE_STORAGE_BODY/);
+});
+
+
+test("S23: replay rollover evicts the oldest identity and keeps recent notices withheld", { timeout: 110_000 }, async (t) => {
+	for (const kind of ["unreported", "ci", "verdict"]) {
+		const identity = JSON.stringify(["unreported", "cp-recent", null, null, null, issued]);
+		const text = await carried(t, [{ job_id: "cp-recent" }], [
+			{ kind, job: "cp-overflow", body: "S23_OVERFLOW", stamp: { keys: kind === "verdict" ? ["gate", "1"] : [head] },
+				details: { ci: [{ key: `cp-overflow|${head}|ci_green` }] } },
+			{ kind: "unreported", job: "cp-recent", body: "S23_RECENT_WITHHELD" },
+		], (home) => {
+			writeFileSync(join(home, ".pi-command-post/state/wakeup-replay.json"), JSON.stringify([
+				...Array.from({ length: 511 }, (_, i) => [`withheld:old-${i}`, "old reason"]),
+				[`withheld:${identity}`, "still withheld"],
+			]));
+		}, (home) => {
+			const entries: [string, string][] = JSON.parse(readFileSync(join(home, ".pi-command-post/state/wakeup-replay.json"), "utf8"));
+			assert.equal(entries.length, 512);
+			assert.ok(!entries.some(([key]) => key === "withheld:old-0"));
+			assert.ok(entries.some(([key]) => key === `withheld:${identity}`));
+		});
+		assert.doesNotMatch(text, /S23_RECENT_WITHHELD|S23_OVERFLOW/);
+	}
 });
