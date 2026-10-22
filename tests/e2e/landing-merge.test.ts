@@ -197,6 +197,10 @@ test("landing S10: review evidence authorizes only the reviewed complete head", 
 		const result = await s.integrate(live.jobId);
 		const permitted = ["pass", "equivalent", "approved"].includes(mode);
 		assert.equal(result.record.next, permitted ? "advance" : "review", result.text);
+		if (["missing", "fallback"].includes(mode)) {
+			assert.match(result.text, /cp_review/);
+			assert.match(result.text, /unchanged/);
+		}
 		assert.equal(mergedCalls(result.calls).length, permitted ? 1 : 0);
 		assert.equal(result.record.head_sha, live.head);
 		assert.equal(result.calls.filter((call) => call.startsWith("pr update-branch")).length, 0);
@@ -218,7 +222,7 @@ test("landing S10: unreadable forge and Actions evidence names the cause and mak
 	});
 });
 test("landing S10: cleanup failures preserve landed effects and resume", { skip: SKIP, timeout: 600_000 }, async (t) => {
-	for (const mode of ["delete", "close", "rebase"]) await t.test(mode, async (t) => {
+	for (const mode of ["delete", "close", "rebase", "merge-unknown"]) await t.test(mode, async (t) => {
 		const s = await startStack(t, { continuation: mode !== "rebase" });
 		const live = await s.held(`S10 cleanup ${mode}`, 914);
 		await s.post.continuation.serialize(live.jobId, async () => {});
@@ -234,6 +238,17 @@ test("landing S10: cleanup failures preserve landed effects and resume", { skip:
 			rmSync(join(gitDir, "rebase-merge"), { recursive: true });
 			return;
 		}
+		if (mode === "merge-unknown") {
+			s.setGh({ integration: true, runs: [run(914, live.head, "completed", "success")], routes: [{ match: "pr merge", replies: [{ code: 1, stderr: "connection reset by peer" }] }] });
+			const outcome = await s.post.continuation.trigger({ jobId: live.jobId, event: "startup" });
+			assert.equal(outcome.next, "retry", JSON.stringify(outcome));
+			const notices = readFileSync(join(s.home, LAYOUT.wakeupsFile), "utf8");
+			assert.match(notices, /connection reset by peer/);
+			assert.doesNotMatch(notices, /nothing was mutated/i);
+			assert.match(notices, /resumes, never starting over/);
+			assert.equal(readMergeReceipt(s.home, live.jobId), undefined);
+			return;
+		}
 		assert.equal((await s.integrate(live.jobId)).record.next, "advance");
 		const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
 		const wrapper = join(s.home, "bin", "git");
@@ -247,6 +262,7 @@ test("landing S10: cleanup failures preserve landed effects and resume", { skip:
 		assert.match(notices, /HELD PR STOPPED/);
 		assert.match(notices, mode === "delete" ? /merged and torn down/ : /still open/);
 		assert.doesNotMatch(notices, /nothing was mutated/i);
+		assert.match(notices, /resumes, never starting over/);
 		assert.ok(readMergeReceipt(s.home, live.jobId));
 		writeFileSync(jobsFile, jobs);
 		rmSync(wrapper);

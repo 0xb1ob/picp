@@ -1,0 +1,6 @@
+--- a/extensions/command-post/wakeup-surfaces.ts
++++ b/extensions/command-post/wakeup-surfaces.ts
+@@ -600,2 +600,1 @@
+-					if (!isSafeJobId(error.job_id)) post.ciWatchFailed(new Error(error.message));
+-					else if (existsSync(join(currentRuntime().home, paths.runDir(error.job_id)))) post.runs.open(error.job_id).cp("ci_watch_failed", { message: error.message.slice(0, 300) });
++					if (existsSync(join(currentRuntime().home, paths.runDir(error.job_id)))) post.runs.open(error.job_id).cp("ci_watch_failed", { message: error.message.slice(0, 300) });

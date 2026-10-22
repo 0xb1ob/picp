@@ -26,7 +26,6 @@
 	"tests/ci-host-tools.test.ts": 7,
 	"tests/ci-wait.test.ts": 39,
 	"tests/ci-watch-retained.test.ts": 40,
-	"tests/ci-watch.test.ts": 360,
 	"tests/contract-injection.test.ts": 42,
 	"tests/contract.test.ts": 65,
 	"tests/contracts-anchors.test.ts": 12,

@@ -140,18 +140,19 @@ The exact real-process reproducer is preserved at
 Insert it in landing.test.ts and run the case pattern `landing S03: the real parent journals`.
 Expected: one durable CI/PR WATCH TICK FAILED entry for the malformed fleet, parent remains alive.
 Observed: no entries after 15 seconds and child FleetError crash. The intentionally failing fragment was removed
-from the pushed suite. Declaration 71 stays pending; the original unit file remains whole.
+from the pushed suite. At that stage declaration 71 stayed pending and the original file remained whole;
+S10b's final mapping and retirement below supersede that snapshot.
 
 ## S03b current declaration ledger
 
 | Declaration | Disposition | Evidence |
 |---|---|---|
-| 45, 54–56, 58, 60, 64–68, 70, 78 | mapped | Main assertion ledger and docs/testing-migration-s03b-controls.md; thirteen newly mapped declarations |
-| S02 6/8/32/33 | retained | Verbatim copies in tests/ci-watch-retained.test.ts; originals stay whole by operator ruling. Missing entry points: FleetStore refuses the unreported slot before isWatched; Actions refuses the id-less run before derivation; CommandPost supplies no onDisabled callback. Boundary controls do not replace those helper assertions. |
-| 71 | pending-fix | Deferred to S10b by frozen Addendum 1; S10b maps it and retires the original. #443 and tests/e2e/ci-watch-jobless.test.ts are already on main; the product blocker is gone. Saved historical reproducer evidence remains above. |
+| 45, 54–56, 58, 60, 64–68, 78 | mapped | Main assertion ledger and docs/testing-migration-s03b-controls.md; S10b retains declaration 70 separately. |
+| S02 6/8/32/33 and S03 70 | retained | Verbatim copies in tests/ci-watch-retained.test.ts; S10b retires the duplicate original. Helper-only inputs and synchronous throwing-onLanded lack public injection seams. |
+| 71 | mapped by S10b | [Canonical two-cause RPC mapping and executed sentinel control](testing-migration/s10b.md); #443 supplies the fixed public path. |
 
-`pending-fix` is recorded here because the assertion-map parser rejects that status; it is not represented as retained.
-The unit file stays whole by main-session decision while 71 is pending-fix. S03 is 39 mapped / 1 pending-fix; S02 is 36 mapped / 4 retained. Total: 75 mapped / 4 retained / 1 pending-fix; one retained file, zero deleted files.
-S03b's authorized slice is complete with 71 deferred by frozen Addendum 1. #443 is already on main; S10b owns formal mapping 71 and whole-file retirement. Declaration 64 is mapped after #429.
+S10b supersedes the historical pending-fix and keep-whole decisions: 75 mapped, five retained, zero pending;
+one original file retired and one retained file preserved. Declaration 64 remains mapped after #429.
+The earlier failed conversion and reproducer notes above remain historical evidence.
 
 An exploratory timer-health case was also removed: two different malformed fleet shapes both surfaced as unsafe job id "-" rather than supplying the two distinct failure causes needed by declaration 71. That failed conversion attempt is not counted as mapping or negative-control evidence.
