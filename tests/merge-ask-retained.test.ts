@@ -35,7 +35,7 @@ const MERGE_ASK = {
 	job_id: "cp-gmy",
 };
 
-// S12 keeps these helper contracts for S13's whole-file retirement; the original stays whole until then.
+// These helper contracts have no consumer entry point; see the S12/S13 retained rows.
 test("declare() throws rather than returning an unraised row — a gated ask fails loudly", async () => {
 	const home = createScratchHome();
 	try {
