@@ -16,7 +16,7 @@ import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "../../src/ci-access.ts";
 import { CommandPost } from "../../src/command-post.ts";
 import { AwaitingStore } from "../../src/awaiting.ts";
 import { CheckpointStore } from "../../src/checkpoint.ts";
-import { CI_EVIDENCE_KEEP, CI_WATCH_MAX_BACKOFF_MS, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION, VERDICT_SUPPRESSED_RETRY_MAX_SECONDS } from "../../src/contracts.ts";
+import { CI_EVIDENCE_KEEP, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { drainFile } from "../../src/drain.ts";
 import type { ForgeConfig } from "../../src/forge-url.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
@@ -3302,8 +3302,8 @@ test("landing S10: dispatch rejects profiles granting parent integration tools",
 	});
 });
 
-test("landing S15 retry: real parent delivery confirms, retries withheld verdicts and expires permanent suppression", { skip: SKIP, timeout: 1_800_000 }, async (t) => {
-	const s = await startStack(t);
+test("landing S15 retry: real parent delivery confirms, retries withheld verdicts and expires permanent suppression", { skip: SKIP, timeout: 60_000 }, async (t) => {
+	const s = await startStack(t, { env: { CP_VERDICT_DELIVERY_RETRY_SECONDS: "1", CP_REVIEW_SUPPRESSION_SECONDS: "35" } });
 	const jobs: Awaited<ReturnType<typeof s.held>>[] = [];
 	for (let n = 0; n < 4; n++) {
 		const live = await s.held(`S15 retry ${n}`, 161 + n, { command: (branch) => `printf retry > retry-${n}.txt && git add retry-${n}.txt && git commit -q -m retry && git push -q -u origin ${branch}` });
@@ -3323,7 +3323,7 @@ test("landing S15 retry: real parent delivery confirms, retries withheld verdict
 	const parent = s.provider.addScript("s15-retry-parent", [
 		{ kind: "tool_calls", calls: [
 			...jobs.slice(0, 3).map((live, n) => ({ name: "cp_review", args: { job_id: live.jobId, model: models[n] } })),
-			{ name: "bash", args: { command: "sleep 140", timeout: 180 } },
+			{ name: "bash", args: { command: "sleep 6", timeout: 15 } },
 		] },
 		{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: jobs[3]!.jobId, model: models[3] } }] },
 		{ kind: "text", text: "Review deliveries observed." },
@@ -3335,38 +3335,38 @@ test("landing S15 retry: real parent delivery confirms, retries withheld verdict
 	const events = (n: number) => readRunEvents(s.home, jobs[n]!.jobId);
 	const sends = (n: number) => events(n).filter((event) => event.type === "verdict_wakeup_sent");
 	const delivered = (n: number) => events(n).filter((event) => event.type === "verdict_wakeup_delivered");
-	await assert.doesNotReject(waitFor(() => sends(1).length, (count) => count >= 2, { timeoutMs: 160_000, what: "real timer retries a withheld verdict" }), "suppression remains eligible for its production retry window");
+	await assert.doesNotReject(waitFor(() => sends(1).length, (count) => count >= 2, { timeoutMs: 10_000, what: "real timer retries a withheld verdict" }), "suppression remains eligible for its configured retry window");
 	assert.equal((sends(1)[0]!.payload as { sent: boolean }).sent, false);
 	assert.equal((sends(1)[1]!.payload as { sent: boolean }).sent, false);
-	await assert.doesNotReject(waitFor(() => sends(1).length, (count) => count >= 3, { timeoutMs: 160_000, what: "a second withheld copy never spends resend eligibility" }), "withheld copies preserve resend eligibility");
-	await waitFor(() => delivered(3).length, (count) => count >= 1, { timeoutMs: 90_000, what: "the idle parent's immediate confirmation" });
+	await assert.doesNotReject(waitFor(() => sends(1).length, (count) => count >= 3, { timeoutMs: 10_000, what: "a second withheld copy never spends resend eligibility" }), "withheld copies preserve resend eligibility");
+	await waitFor(() => delivered(3).length, (count) => count >= 1, { timeoutMs: 10_000, what: "the idle parent's immediate confirmation" });
 	assert.equal(delivered(3).length, 1, "one arrival confirms a verdict only once");
-	await waitFor(() => Date.now(), (now) => now >= Date.parse(sends(3)[0]!.ts) + 130_000, { timeoutMs: 160_000, what: "confirmed verdict's resend deadline passes" });
+	await waitFor(() => Date.now(), (now) => now >= Date.parse(sends(3)[0]!.ts) + 6_000, { timeoutMs: 10_000, what: "confirmed verdict's resend deadline passes" });
 	assert.equal(sends(3).length, 1, "confirmation removes the key before its first resend");
-	await waitFor(() => Date.now(), (now) => now >= Date.parse(sends(1)[0]!.ts) + CI_WATCH_MAX_BACKOFF_MS - 30_000, { timeoutMs: 700_000, what: "lagging facts outlast the old five-copy bound" });
+	await waitFor(() => sends(1).length, (count) => count >= 6, { timeoutMs: 30_000, what: "lagging facts outlast the old five-copy bound" });
 	writeFileSync(join(s.home, paths.envelopeFile(jobs[1]!.jobId)), originals[1]!);
-	await waitFor(() => delivered(1).length, (count) => count === 1, { timeoutMs: 160_000, what: "withheld retry remains eligible until facts catch up" });
+	await waitFor(() => delivered(1).length, (count) => count === 1, { timeoutMs: 10_000, what: "withheld retry remains eligible until facts catch up" });
 	assert.equal(sends(0).length, 2, "a queued unconfirmed verdict is resent exactly once");
 	assert.equal(delivered(3).length, 1);
 	assert.equal(sends(3).length, 1, "an immediately confirmed verdict never resends");
 	assert.equal((sends(0)[1]!.payload as { resend: boolean }).resend, true);
-	assert.ok(sends(1).length >= 7, "withheld copies remain eligible past eight minutes and do not consume the successful resend");
-	const cutoff = Date.parse(sends(2)[0]!.ts) + VERDICT_SUPPRESSED_RETRY_MAX_SECONDS * 1000;
-	await waitFor(() => Date.now(), (now) => now >= cutoff + 150_000, { timeoutMs: 1_300_000, what: "production suppression lifetime expires" });
+	assert.ok(sends(1).length >= 7, "withheld copies outlast the old five-copy bound without consuming the successful resend");
+	const cutoff = Date.parse(sends(2)[0]!.ts) + 35_000;
+	await waitFor(() => Date.now(), (now) => now >= cutoff + 1_000, { timeoutMs: 40_000, what: "configured suppression lifetime expires" });
 	assert.ok(sends(2).every((event) => Date.parse(event.ts) < cutoff), "permanent suppression stops at its lifetime bound");
-	assert.ok(Date.parse(sends(2).at(-1)!.ts) >= cutoff - 180_000, "suppressed attempts remain eligible until near the production cutoff");
-	assert.ok(Date.parse(sends(2).at(-1)!.ts) > Date.parse(sends(2)[0]!.ts) + CI_WATCH_MAX_BACKOFF_MS, "retry eligibility outlasts the watcher's worst backoff");
+	assert.ok(Date.parse(sends(2).at(-1)!.ts) >= cutoff - 6_000, "suppressed attempts remain eligible until near the configured cutoff");
+	assert.ok(sends(2).length >= 7, "suppressed retries outlast the old five-copy bound");
 	const counts = jobs.map((_, n) => sends(n).length);
 	writeFileSync(join(s.home, paths.envelopeFile(jobs[2]!.jobId)), originals[2]!);
 	const restoredAt = Date.now();
-	await waitFor(() => Date.now(), (now) => now >= restoredAt + 130_000, { timeoutMs: 150_000, what: "expired verdict remains dropped after its facts recover" });
+	await waitFor(() => Date.now(), (now) => now >= restoredAt + 6_000, { timeoutMs: 10_000, what: "expired verdict remains dropped after its facts recover" });
 	assert.deepEqual(jobs.map((_, n) => sends(n).length), counts, "confirmed and expired verdicts never resend again");
 	assert.equal(delivered(2).length, 0);
 	assert.deepEqual(mergedCalls(s.ghCalls()), []);
 });
 
-test("landing S15 order: a real verdict wakes the parent before its deadline continuation merges", { skip: SKIP, timeout: 180_000 }, async (t) => {
-	const s = await startStack(t);
+test("landing S15 order: a real verdict wakes the parent before its deadline continuation merges", { skip: SKIP, timeout: 60_000 }, async (t) => {
+	const s = await startStack(t, { env: { CP_REVIEW_MERGE_WINDOW_SECONDS: "5" } });
 	const live = await s.held("S15 verdict ordering", 153);
 	s.setGh({ integration: true, permission: "CLEAN", runs: [run(153, live.head, "completed", "success")] });
 	const reviewer = s.provider.addScript("s15-order-reviewer", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: live.jobId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["S15 scoped pass"] } }] }]);
@@ -3379,11 +3379,11 @@ test("landing S15 order: a real verdict wakes the parent before its deadline con
 		const file = join(s.home, paths.reviewFile(live.jobId, 1));
 		const original = readFileSync(file, "utf8");
 		const verdict = JSON.parse(original);
-		assert.ok(Date.parse(readRunEvents(s.home, live.jobId).find((event) => event.type === "verdict_wakeup_delivered")!.ts) < Date.parse(verdict.decided_at) + 30_000, "the raw verdict reaches parent context before its deadline continuation");
+		assert.ok(Date.parse(readRunEvents(s.home, live.jobId).find((event) => event.type === "verdict_wakeup_delivered")!.ts) < Date.parse(verdict.decided_at) + 5_000, "the raw verdict reaches parent context before its deadline continuation");
 		assert.equal(existsSync(join(s.home, paths.pendingReviewFile(live.jobId, "review", 1))), false);
 		assert.deepEqual(mergedCalls(s.ghCalls()), [], "the verdict arrives while the merge window is open");
 		await waitFor(() => mergedCalls(s.ghCalls()).length, (count) => count === 1, { timeoutMs: 45_000, what: "real deadline continuation merges" });
-		assert.ok(Date.now() >= Date.parse(verdict.decided_at) + 30_000);
+		assert.ok(Date.now() >= Date.parse(verdict.decided_at) + 5_000);
 		assert.equal(readFileSync(file, "utf8"), original);
 		assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "review_started").length, 1);
 		await waitFor(() => JSON.stringify(s.provider.requests("landing-parent-1").map((request) => request.body.messages)).includes("HELD PR LANDED"), Boolean, { timeoutMs: 30_000, what: "completed deadline integration reaches the parent" });
@@ -3395,8 +3395,8 @@ test("landing S15 order: a real verdict wakes the parent before its deadline con
 	assert.ok(context.includes("HELD PR LANDED"), "the parent receives completed deadline integration");
 });
 
-test("landing S15: durable review evidence owns the merge window across parent restarts", { skip: SKIP, timeout: 180_000 }, async (t) => {
-	const s = await startStack(t);
+test("landing S15: durable review evidence owns the merge window across parent restarts", { skip: SKIP, timeout: 60_000 }, async (t) => {
+	const s = await startStack(t, { env: { CP_REVIEW_MERGE_WINDOW_SECONDS: "20" } });
 	const live = await s.held("S15 durable review window", 151);
 	s.setGh({ integration: true, permission: "CLEAN", runs: [run(151, live.head, "completed", "success")] });
 	assert.equal((await s.integrate(live.jobId)).record.next, "review");
@@ -3414,7 +3414,7 @@ test("landing S15: durable review evidence owns the merge window across parent r
 	const fresh = isoTimestamp();
 	writeWindowPass(s.home, live.jobId, live.head, fresh);
 	const original = readFileSync(file, "utf8");
-	const deadline = new Date(Date.parse(fresh) + 30_000).toISOString();
+	const deadline = new Date(Date.parse(fresh) + 20_000).toISOString();
 	for (let replay = 0; replay < 2; replay++) {
 		const result = await s.integrate(live.jobId);
 		assert.equal(result.record.next, "wait", result.text);
@@ -3432,7 +3432,7 @@ test("landing S15: durable review evidence owns the merge window across parent r
 	const equivalentWait = await s.integrate(live.jobId);
 	assert.equal(equivalentWait.record.next, "wait", equivalentWait.text);
 	assert.equal(equivalentWait.record.review_resume_at, deadline);
-	const expired = new Date(Date.now() - 31_000).toISOString();
+	const expired = new Date(Date.now() - 21_000).toISOString();
 	writeWindowPass(s.home, live.jobId, live.head, expired, { equivalent_to: { head_sha: other, attempt: 1 } });
 	const ready = await s.integrate(live.jobId);
 	assert.equal(ready.record.next, "advance", ready.text);
@@ -3444,10 +3444,10 @@ test("landing S15: durable review evidence owns the merge window across parent r
 	assert.equal((await s.integrate(mismatched.jobId)).record.review_resume_at, undefined, "mismatched equivalence cannot arm a window");
 });
 
-test("landing: the review deadline resumes once and rechecks current gates", { skip: SKIP, timeout: 900_000 }, async (t) => {
+test("landing: the review deadline resumes once and rechecks current gates", { skip: SKIP, timeout: 120_000 }, async (t) => {
 	for (const fallback of [false, true]) {
 		for (const change of ["hold", "unreadable-hold", "head", "ci", "permission", "none"]) await t.test(`${fallback ? "fallback" : "repository"}/${change}`, async (t) => {
-			const s = await startStack(t, { continuation: true });
+			const s = await startStack(t, { continuation: true, env: { CP_REVIEW_MERGE_WINDOW_SECONDS: "3" } });
 			const live = await s.held("review deadline gates", 124);
 			await s.post.continuation.serialize(live.jobId, async () => {});
 			const reviewedAt = new Date().toISOString();
@@ -3474,7 +3474,7 @@ test("landing: the review deadline resumes once and rechecks current gates", { s
 			}
 			if (change === "ci") s.setGh({ runs: [run(124, live.head, "in_progress", null)] });
 			if (change === "permission") s.setGh({ permission: "BLOCKED" });
-			await waitFor(() => Date.now(), (now) => now >= Date.parse(reviewedAt) + 31_000, { timeoutMs: 40_000, what: "real review deadline elapses" });
+			await waitFor(() => Date.now(), (now) => now >= Date.parse(reviewedAt) + 4_000, { timeoutMs: 10_000, what: "configured review deadline elapses" });
 			await s.post.continuation.serialize(live.jobId, async () => {});
 			assert.equal(mergedCalls(s.ghCalls()).length, change === "none" ? 1 : 0, `${fallback}/${change}`);
 			if (change === "hold" || change === "unreadable-hold") {

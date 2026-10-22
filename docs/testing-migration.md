@@ -3237,6 +3237,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/pr-resolve-retained.test.ts` | S14 | mixed original declaration 9 verbatim: validateEnvelope refuses missing pr_url before intake resolver; all reachable variants also covered through real reporter |
 | `tests/review-approval-retained.test.ts` | S14 | original declaration verbatim: pipeline artifacts.info fails before missing matches; only production write passes seq 1; no public entry reaches seq-2/3 overwrite |
 | `tests/held-continuation-fleet-read.test.ts` | #433 (ac50447082b15959140ec40b04080102eadbaf87) | incoming known-regression coverage for unreadable fleet during continuation failure notice; unit landed upstream after the baseline and is preserved unchanged; convert, owner P3c-rest (held continuation); recorded when plain-merging main |
+| `tests/timer-knobs.test.ts` | #439 | incoming timer configuration contract: defaults, positive overrides and invalid-input fallback; landed with the public knobs consumed by S15 Addendum 2 |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

@@ -118,3 +118,11 @@ The patches in `testing-migration-s15-controls/` are zero-context unified diffs 
 | C10 | bda2cbe060162587fea753d9651f19d0201685595492b7edb9a63672159582e5 | unchanged lib/core.py fork unexpectedly included |
 
 E2e-only V8 captures before (`/tmp/cp-s15-context-before-rTlKDp`) and after (`/tmp/cp-s15-context-after-8ygSlZ`) deleting the context source test each contain two review-context module records and the same 80 positive function/range tuples: no lost or gained tuple. Both runs executed all 23 cases with zero skips. The captures include the real product host; reviewer children consume its materialized packets. Source blob, ten assertion rows and executed regression control are recorded before retiring the whole file. The migration checker with --verify-regressions passes.
+
+## Addendum 2: public timer configuration
+
+After #439, these scenarios use `startStack`'s existing per-home `env` option: retry delivery uses `CP_VERDICT_DELIVERY_RETRY_SECONDS=1` and `CP_REVIEW_SUPPRESSION_SECONDS=35`; verdict/continuation ordering uses `CP_REVIEW_MERGE_WINDOW_SECONDS=5`; restart/equivalence uses 20; the twelve-variant deadline matrix uses 3. The fixture restores the environment on cleanup and real RPC children inherit it. No test-only hook or production change is added.
+
+The retry case still requires at least seven attempts across withheld delivery, confirms one arrival exactly once, permits exactly one successful resend, checks attempts near the configured suppression cutoff, and verifies expired verdicts stay dropped after facts recover. Wall-clock expectations now follow the configured durations. The default 15-minute watcher-backoff/20-minute suppression relationship is protected separately by the existing timer-knobs default checks; this accelerated scenario proves configured delivery behavior rather than waiting through the default cadence.
+
+The final combined focused run passed all 16 runner cases with zero skips: retry 55,956 ms, ordering 10,093 ms, restart 10,452 ms, deadline matrix 88,611 ms. Timings are logged under `node_modules/.cache/s15/addendum2-final.log`, inside the leased worktree. A subsequent focused window run passed ordering in 9,713 ms and restart in 8,890 ms. The initial expiry-wait budget was too short; it was corrected and the retry and combined runs both passed.
