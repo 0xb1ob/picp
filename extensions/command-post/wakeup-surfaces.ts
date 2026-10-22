@@ -200,7 +200,7 @@ export function createWakeupSurfaces(
 	 * nudge for it (F3: counted against the last provider request) — except
 	 * after an operator abort, where the notices wait for the next prompt.
 	 */
-	const gate = { busy: false, triggered: false, aborted: false, nonTriggeringSent: 0, seenUpTo: 0 };
+	const gate = { busy: false, triggered: false, triggerPending: false, aborted: false, nonTriggeringSent: 0, seenUpTo: 0 };
 	// unload-parent PR3 (src/send-first-gate.ts): wakes held while a landed operator send is unanswered.
 	const sendFirst = new SendFirstGate<() => void>();
 	const releaseHeld = (): void => {
@@ -218,9 +218,11 @@ export function createWakeupSurfaces(
 			gate.busy = true;
 			gate.triggered = false;
 			gate.aborted = false;
+			gate.triggerPending = false;
 		},
 		providerRequest: (): void => {
 			gate.seenUpTo = gate.nonTriggeringSent;
+			gate.triggerPending = false;
 		},
 		/** A message reached the parent: release expired holds, then note any operator send it carries. */
 		messageStart: (message: unknown): void => {
@@ -246,7 +248,9 @@ export function createWakeupSurfaces(
 			compactHold.settled(reading(ctx));
 			// After an abort held wakes wait for the next message or wake, like the nudge below.
 			if (!gate.aborted) releaseHeld();
-			const unseen = gate.nonTriggeringSent - gate.seenUpTo;
+			// A triggering wake queued after the run's last request check is stranded too.
+			const unseen = gate.nonTriggeringSent - gate.seenUpTo + (gate.triggerPending ? 1 : 0);
+			gate.triggerPending = false;
 			gate.seenUpTo = gate.nonTriggeringSent;
 			if (unseen <= 0 || gate.aborted) return;
 			const nudge = () => pi.sendMessage(
@@ -279,7 +283,7 @@ export function createWakeupSurfaces(
 						quiet ? { triggerTurn: false } : { deliverAs: "followUp", triggerTurn: true },
 					);
 					if (quiet && triggerTurn) gate.nonTriggeringSent++;
-					else if (!quiet && gate.busy) gate.triggered = true;
+					else if (!quiet && gate.busy) gate.triggered = gate.triggerPending = true;
 				};
 				// unload-parent PR3: an unanswered operator send goes first; held wakes count as sent (not acked).
 				releaseHeld();
