@@ -1,0 +1,13 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+index f7705ce..74a78cc 100644
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -380,7 +380,7 @@ export function acceptedHeadFailure(home: string, record: FleetRecord, head: str
+ 		try {
+ 			const latest = readEventLog(home, jobId).filter((event) => event.source === "cp" && event.type === "envelope_received").at(-1);
+ 			const payload = latest?.payload as { generation?: number; attempt?: number } | undefined;
+-			accepted = payload?.generation === (record.supersessions ?? 0) + 1 &&
++			accepted = true &&
+ 				payload.attempt === envelopeRecord.attempt;
+ 		} catch {
+ 			// An unreadable run log cannot prove intake accepted this generation.

@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..792cf26 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -338,7 +338,7 @@ export class Teardown {
+ 		if (unreported) this.#options.journal?.(killedUnreportedWakeup(this.#options.home, record, closedAt, options.authorization));
+ 		runs.close(jobId);
+ 		const ledgerClose = await closeResearchLedgers(this.#options.home, [closedRecord], this.#options.ledger, this.#options.journal);
+-		await withdrawHumanReview(this.#options.home, closedRecord, this.#options.journal); // picp-pvo
++		// Mutation: omit the human-review withdrawal.
+ 
+ 		let artifactsRemoved = false;
+ 		if (this.#options.removeArtifacts) {

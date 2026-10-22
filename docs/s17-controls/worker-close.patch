@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..8044a11 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -288,7 +288,7 @@ export class Teardown {
+ 		// --- the worker first: its close must be ours, and observed ----------
+ 		let exitCode: number | null | undefined;
+ 		const managed = manager.get(jobId);
+-		if (managed) {
++		if (false && managed) {
+ 			runs.open(jobId).cp("shutdown_requested", { job_id: jobId, ...(options.acceptUnreported ? { unreported_accepted: options.acceptUnreported } : {}) });
+ 			const exit = await managed.worker.shutdown();
+ 			exitCode = exit.code;

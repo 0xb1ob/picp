@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..c144146 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -327,7 +327,7 @@ export class Teardown {
+ 			// proven about this job's state — an unmerged PR must never render as
+ 			// Shipped on a record closed this way. Every other teardown proved the
+ 			// gate, so it is marked "gated" rather than left ambiguous by absence.
+-			closed_reason: options.force ? "forced" : "gated",
++			closed_reason: options.force ? "forced" : "forced",
+ 			...(isScriptFleetRecord(record) ? {} : { worker: {
+ 				...record.worker,
+ 				exited_at: (!managed && record.worker.exited_at) || (exitCode !== undefined ? closedAt : undefined),

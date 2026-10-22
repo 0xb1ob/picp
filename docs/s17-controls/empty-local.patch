@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..894ba1d 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -491,7 +491,7 @@ export class Teardown {
+ 		const upstreamOutcome = await this.#upstreamGate(worktree, branch, head);
+ 		if (upstreamOutcome) return upstreamOutcome;
+ 
+-		if (await this.#localNothingToPush(worktree, base, jobId)) return { ok: true, reason: "nothing_to_push" };
++		if (false && await this.#localNothingToPush(worktree, base, jobId)) return { ok: true, reason: "nothing_to_push" };
+ 		// Nothing is on origin: an exact merge receipt, then the git landing proof (src/teardown-head.ts landingGate).
+ 		return landing();
+ 	}

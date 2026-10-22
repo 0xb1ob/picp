@@ -25,6 +25,9 @@ for (const delivery of ["pr", "local"] as const) {
   const s = await startStack(t);
   const live = await s.held("S17 durability", 917, delivery === "local" ? { delivery } : {});
   const worker = s.post.manager.get(live.jobId)!;
+  const artifact = join(s.home, paths.artifactDir(live.jobId), "preserved.txt");
+  mkdirSync(join(s.home, paths.artifactDir(live.jobId)), { recursive: true });
+  writeFileSync(artifact, "operator evidence\n");
   writeFileSync(join(live.worktree, "scratch.txt"), "unfinished\n");
   const dirty = await s.post.tearDown(live.jobId);
   assert.deepEqual([dirty.torn_down, dirty.lease_returned, dirty.failure?.code], [false, false, "dirty"]);
@@ -41,6 +44,7 @@ for (const delivery of ["pr", "local"] as const) {
   git(live.worktree, "push", "--quiet", "origin", live.jobId);
   const pushed = await s.post.tearDown(live.jobId);
   assert.deepEqual([pushed.torn_down, pushed.lease_returned, pushed.reason], [true, true, "pushed"]);
+  assert.deepEqual([pushed.artifacts_removed, readFileSync(artifact, "utf8")], [false, "operator evidence\n"]);
   assert.equal(worker.worker.alive, false, "the managed worker close is observed");
   assert.equal(s.post.manager.get(live.jobId), undefined);
   const closed = s.post.fleet.require(live.jobId);
@@ -59,6 +63,7 @@ test("S17: a detached head keeps its lease even when its commit is on origin", {
  const live = await s.held("S17 detached", 918);
  git(live.worktree, "checkout", "--quiet", "--detach");
  git(live.worktree, "commit", "--quiet", "--allow-empty", "-m", "detached work");
+ git(live.worktree, "push", "--quiet", "origin", "HEAD:refs/heads/s17-detached");
  const result = await s.post.tearDown(live.jobId);
  assert.deepEqual([result.torn_down, result.lease_returned, result.failure?.code], [false, false, "unreachable_work"]);
  assert.equal(s.post.fleet.require(live.jobId).phase, "held");
@@ -134,6 +139,11 @@ test("S17: a detached head keeps its lease even when its commit is on origin", {
  });
  const closed = await s.post.tearDown(live.jobId);
  assert.deepEqual([closed.torn_down, closed.reason], [true, "pushed"]);
+ const observed = await s.held("S17 observed orphan", 920);
+ await s.post.manager.shutdown(observed.jobId);
+ await s.post.fleet.mutate((jobs) => { const r = jobs.find((r) => r.job_id === observed.jobId)!; if (!isScriptFleetRecord(r)) { r.worker.pid = process.pid; delete r.worker.exited_at; } });
+ const observedClose = await s.post.tearDown(observed.jobId);
+ assert.deepEqual([observedClose.torn_down, observedClose.reason], [true, "pushed"], "run observation proves the old worker closed");
  });
 
 for (const mode of ["tree", "squash", "rebase", "stale", "unreadable", "receipt", "receipt-extra"] as const) {
@@ -339,6 +349,19 @@ for (const forced of [false, true]) {
  assert.equal(existsSync(join(s.home, paths.mergeFile(live.jobId))), false);
  });
 
+test("S17: an empty PR ship still needs publication when origin no longer has its base", { skip: SKIP, timeout: 120_000 }, async (t) => {
+ const s = await startStack(t);
+ const before = git(s.repo.path, "rev-parse", "HEAD");
+ advanceBase(s.repo, "private-base.txt", "base content\n");
+ const live = await s.held("S17 empty PR", 930, { command: (b) => `git push -qu origin ${b}` });
+ git(s.remote, "branch", "-D", live.jobId);
+ git(live.worktree, "branch", "--unset-upstream");
+ git(s.remote, "update-ref", "refs/heads/main", before);
+ const result = await s.post.tearDown(live.jobId);
+ assert.deepEqual([result.torn_down, result.lease_returned, result.failure?.code], [false, false, "unpushed"]);
+ assert.equal(s.post.fleet.require(live.jobId).phase, "held");
+});
+
  test("S17: opt-in review must exist before a reported pushed ship can tear down", { skip: SKIP, timeout: 120_000 }, async (t) => {
  const s = await startStack(t);
  const live = await s.held("S17 missing review", 929);
@@ -398,7 +421,7 @@ for (const forced of [false, true]) {
  const live = await s.held("S17 concurrent", 931);
  const entered = join(s.home, "return-entered");
  const release = join(s.home, "return-release");
- const restore = gitFault(s.home, "a[0]==='return'", `const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(entered)},'entered');while(!fs.existsSync(${JSON.stringify(release)})) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);const r=spawnSync(${JSON.stringify(execFileSync("which", ["treehouse"], { encoding: "utf8" }).trim())},a,{stdio:'inherit'});process.exit(r.status??1);`, "treehouse");
+ const restore = gitFault(s.home, "a[0]==='return'", `const fs=require('node:fs');if(fs.existsSync(${JSON.stringify(entered)}))process.exit(1);fs.writeFileSync(${JSON.stringify(entered)},'entered');while(!fs.existsSync(${JSON.stringify(release)})) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);const r=spawnSync(${JSON.stringify(execFileSync("which", ["treehouse"], { encoding: "utf8" }).trim())},a,{stdio:'inherit'});process.exit(r.status??1);`, "treehouse");
  const first = s.post.tearDown(live.jobId);
  try {
   await waitFor(() => existsSync(entered), Boolean, { timeoutMs: 30_000, what: "first teardown enters external return" });
