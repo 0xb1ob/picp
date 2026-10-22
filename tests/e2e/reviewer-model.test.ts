@@ -32,9 +32,9 @@ test("S16: public plan gates select reviewer preferences from current and legacy
   const job = await post.ledger().create({ title: label, project: "demo", kind: "research", delivery: "pipeline", ...(schedule === "legacy" ? { labels: ["schedule:sch-aaaaaa"] } : {}) });
   const script = `s16-${++index}`;
   const model = provider.addScript(script, [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job.id, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: [label] } }] }]);
-  const other = provider.addScript(`${script}-wrong`, [{ kind: "text", text: "wrong reviewer" }]);
+  const other = provider.addScript(`${script}-wrong`, [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job.id, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["wrong reviewer selected"] } }] }]);
   agent.writeModels(provider); routing(model);
-  await post.registry.setReviewerModel("demo", project ? model : null);
+  await post.registry.setReviewerModel("demo", project ? source === "mandate" ? other : model : null);
   save(grants(model, other));
   const now = isoTimestamp();
   if (label !== "recordless") await post.fleet.add({ job_id: job.id, project: "demo", kind: "research", delivery: "pipeline", origin: DEFAULT_ORIGIN, phase: "held", reported_at: now, dispatched_at: isoTimestamp(new Date(Date.now() - 3600000)), usage: EMPTY_USAGE, worktree: home.path, branch: job.id,
@@ -69,7 +69,9 @@ test("S16: public plan gates select reviewer preferences from current and legacy
  await check("unset uses routing", () => [], "routing", false, undefined, false);
  await check("recordless", () => [], "routing");
  const scheduleGrant = { ...active(""), schedule_grant: true as const };
- writeFileSync(join(home.path, LAYOUT.state, "schedules.json"), JSON.stringify({ schema_version: 1, schedules: [{ id: "sch-aaaaaa", name: "review", project: "demo", mandate_id: base.id, trigger: { type: "manual" }, job: { title: "review", kind: "research", delivery: "pipeline" }, enabled: true, created_at: isoTimestamp() }] }));
+ const schedules = [["sch-aaaaaa", base.id], ["sch-bbbbbb", "md-othr"]].map(([id, mandate_id]) => ({ id, mandate_id, name: "review", project: "demo", trigger: { type: "manual" }, job: { title: "review", kind: "research", delivery: "pipeline" }, enabled: true, created_at: isoTimestamp() }));
+ writeFileSync(join(home.path, LAYOUT.state, "schedules.json"), JSON.stringify({ schema_version: 1, schedules }));
  assert.equal(post.mandates.scheduleMandates().get("sch-aaaaaa"), base.id, "legacy schedule passes the persisted schema");
- for (const schedule of ["actual", "foreign", "legacy"] as const) await check(`schedule ${schedule}`, (m, wrong) => [{ ...scheduleGrant, reviewer_model: schedule === "foreign" ? wrong : m }], schedule === "foreign" ? "project" : "mandate", false, schedule);
+ assert.equal(post.mandates.scheduleMandates().get("sch-bbbbbb"), "md-othr", "foreign schedule names a different grant");
+ for (const schedule of ["actual", "foreign", "legacy"] as const) await check(`schedule ${schedule}`, (m, wrong) => [{ ...scheduleGrant, reviewer_model: schedule === "foreign" ? wrong : m }], schedule === "foreign" ? "routing" : "mandate", false, schedule, schedule !== "foreign");
 });

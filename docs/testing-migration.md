@@ -231,6 +231,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | S08 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 1–40: 38 mapped, 2 retained (5%), 0 deleted files; nine scenarios added and 05-13 extended; [range ledger](testing-migration-s08.md); original unit file kept whole |
 | S09 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 41–80: 34 mapped, 6 retained (15%), 0 deleted files; eight scenarios added; [range ledger](testing-migration-s09.md); original unit file kept whole |
 | S10 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92), 0 deleted files; six added scenarios and 05-S02-5 extended; [range ledger](testing-migration-s10.md); original unit file kept whole |
+| S16 | 05 | `tests/e2e/reviewer-model.test.ts` | 2 added declarations: S16-model here and S16-auto in landing; 3 units mapped, 0 retained, 1 deleted file |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -450,7 +451,7 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | Unit file | Assertion | Scenario | Disposition | Note |
 |---|---|---|---|---|
 | `tests/reviewer-model.test.ts` | reviewer selection: explicit, newest active (tie by id), expired continuation, project, unset | S16-model | mapped | S16-NC1 fails explicit selection source; matrix drives real plan gates, including excluded grants, fallback and recordless routing |
-| `tests/reviewer-model.test.ts` | scheduled and legacy schedule subjects use only their actual schedule grant | S16-model | mapped | S16-NC2 fails schedule actual selection source; disk schedules and legacy ledger labels feed the real gate |
+| `tests/reviewer-model.test.ts` | scheduled and legacy schedule subjects use only their actual schedule grant | S16-model | mapped | S16-NC2 fails schedule actual chosen reviewer receives plan; disk schedules and legacy ledger labels feed the real gate |
 | `tests/reviewer-model.test.ts` | production factories and automatic ci_green reviews honor current preferences | S16-auto | mapped | S16-NC3 fails automatic review reaches the mandated model; S16-model pins gate rereads, spawned model and high thinking; DR-09 pins public diff review factory preferences |
 | `tests/integrate-held-ci.test.ts` | CI observation repairs without parent notice delivery; duplicates and manual integration share the project lane | 05-13 | mapped | S07: watch-driven repair overlaps manual cp_integrate and a second real job at a forge barrier; S07-NC-2 fails queued-peer assertion. One supersession, same worker/branch/worktree, correct run and hold in model request, archived first envelope and accepted replacement; green holds with no merge ask/checkpoint, release requires review; NC-37 fails spent-allowance outcome |
 | `tests/integrate-held-ci.test.ts` | startup repair and restart preserve the cumulative allowance after repaired green and failing reports | 05-13 | mapped | S07: real parent restart reads green hold and spent allowance; failing head in fresh parent says already asked once, never a missing-worker fallback; NC-37 fails the already-asked reason assertion |
@@ -1509,7 +1510,7 @@ diff --git a/src/pr-bind.ts b/src/pr-bind.ts
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
 | S16-NC1 | `tests/reviewer-model.test.ts` | fb70938e2e94680d9f6df1a76de53c5c633a6c8a | S16-model | S16-explicit | 5aaa41c24b9012ee897a1ceda1b5e4455095d382793c03fd294f0bd13c8f8c9d | explicit: selection source undefined instead of explicit | pass |
-| S16-NC2 | `tests/reviewer-model.test.ts` | fb70938e2e94680d9f6df1a76de53c5c633a6c8a | S16-model | S16-schedule | c74f53c7ecd37c0f80bf1a4222610ee15b105bdd81900d3a6667f294036f0c18 | schedule actual: selection source project instead of mandate | pass |
+| S16-NC2 | `tests/reviewer-model.test.ts` | fb70938e2e94680d9f6df1a76de53c5c633a6c8a | S16-model | S16-schedule | c74f53c7ecd37c0f80bf1a4222610ee15b105bdd81900d3a6667f294036f0c18 | schedule actual: chosen reviewer receives plan is false | pass |
 | S16-NC3 | `tests/reviewer-model.test.ts` | fb70938e2e94680d9f6df1a76de53c5c633a6c8a | S16-auto | S16-automatic | 283f1915f714569675e037df7b56da370e426f38715f8adb5a9d65464117e85b | automatic review reaches the mandated model is false | pass |
 | NC-01 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-1 | NC-01-green | e5cc55b97d22e820228a709e858fbe2f7294fcc8dce00aa980f63982c09660f3 | wake observation names run 2 (skipped), not run 6 | pass |
 | NC-02 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-1 | NC-02-integrate | 0a2c3b3942c839731d201a0a07d8ddf2c6bf6ea2d6163d5a00430568bb3d6e86 | the ci fact does not end with (run 6 …/actions/runs/6) | pass |
@@ -3109,7 +3110,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/review-merge-window.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/review-runs.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
 | `tests/review-tool.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
-| `tests/reviewer-model.test.ts` | deleted | P3 | S16: 3 mapped, 0 retained; scenarios S16-model and S16-auto; controls S16-NC1–3; [accounting](testing-migration-s16.md) |
+| `tests/reviewer-model.test.ts` | deleted | S16 | 3 mapped, 0 retained; scenarios S16-model and S16-auto; controls S16-NC1–3; [accounting](testing-migration-s16.md) |
 | `tests/revive.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/risk-batch.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-11 or redundant-unreachable (Assertion map); negative control NC-15 |
 | `tests/risk-negation.test.ts` | deleted | P2c | behavior 02: every assertion mapped to 02-7 (Assertion map); negative control NC-10 |
