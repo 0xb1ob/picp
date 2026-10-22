@@ -1,0 +1,8 @@
+diff --git a/src/review-runs.ts b/src/review-runs.ts
+--- a/src/review-runs.ts
++++ b/src/review-runs.ts
+@@ -639,3 +639,3 @@
+ 					report.skipped.push({ pending, reason });
+-					continue;
++					return report;
+ 				}

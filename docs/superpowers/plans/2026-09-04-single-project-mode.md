@@ -2088,7 +2088,7 @@ test("single mode: cp_job create without a project lands with the repository's l
 });
 ```
 
-(`createAgentDir({ provider })` and `MockProvider.addScript` are used exactly as `tests/review-tool.test.ts` uses them; `child.eventsOfType` and `child.waitForSettled` likewise. If `startPiChild`'s hermetic default passes `--no-extensions`, that only affects *package* extensions; `-e` files still load, as the review-tool test relies on.)
+(`createAgentDir({ provider })` and `MockProvider.addScript` are used exactly as `tests/e2e/diff-review.test.ts` uses them; `child.eventsOfType` and `child.waitForSettled` likewise. If `startPiChild`'s hermetic default passes `--no-extensions`, that only affects *package* extensions; `-e` files still load, as the review-tool scenario relies on.)
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
