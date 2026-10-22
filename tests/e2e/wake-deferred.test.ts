@@ -41,8 +41,9 @@ for (const mode of ["race", "failure", "late"] as const) await t.test(mode, { ti
 		{ kind: "text", text: "Review started." }, observe, { kind: "text", text: "Wake observed." }, observe, { kind: "text", text: "Wake acknowledged." },
 	], { onExhausted: "repeat" });
 	const agent = createAgentDir({ provider });
+	// Keep the slow gate inside one CI poll.
 	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
-		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "1" }, extensions: [COMMAND_POST_EXTENSION] });
+		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: mode === "late" ? "60" : "1" }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); held.repo.cleanup(); held.home.cleanup(); });
 	const queries = () => existsSync(`${held.ghLog}.states`) ? readFileSync(`${held.ghLog}.states`, "utf8").trim().split("\n")
 		.filter(Boolean).map((line) => JSON.parse(line) as { state: string; at: number }) : [];
@@ -51,7 +52,7 @@ for (const mode of ["race", "failure", "late"] as const) await t.test(mode, { ti
 	const before = queries().length;
 	writeFileSync(held.stateFile, "green:12000\n");
 	await waitFor(queries, (calls) => calls.slice(before).some((call) => call.state === "green"),
-		{ timeoutMs: 10_000, what: "watch captures green before subsequent gate faults" });
+		{ timeoutMs: mode === "late" ? 70_000 : 10_000, what: "watch captures green before subsequent gate faults" });
 	if (mode === "failure") writeFileSync(held.stateFile, "broken:12000\n");
 	if (mode !== "late") {
 		await child.prompt("Review this held diff and handle its actual wake-ups.");
@@ -97,6 +98,8 @@ for (const mode of ["race", "failure", "late"] as const) await t.test(mode, { ti
 	assert.equal(new Set(items.map((item) => item.id)).size, items.length, "the real store remains sound");
 	if (mode !== "late") assert.equal(items.filter((item) => item.job_id === "cp-neighbor" && item.state === "open").length, 1,
 		"the concurrent unrelated writer must survive both rechecks");
+	if (mode !== "late") assert.ok(requests().some((request) => userMessages(request).includes("diff review attempt 2: pass")),
+		"the racing review verdict must reach the real parent");
 	assert.equal(items.length, mode === "late" ? 3 : 2);
 	assert.ok(items.filter((item) => item.job_id === JOB).every((item) => item.deferred_reason === undefined));
 });
