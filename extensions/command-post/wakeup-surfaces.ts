@@ -128,9 +128,8 @@ export function createWakeupSurfaces(
 					return undefined;
 				}
 			},
-			// cp-e2d + pi-command-post-b04: both readings of the branch head, each
-			// with the moment it was taken, wired in one exported unit so the wiring
-			// itself is testable (tests/wakeup-head-sources.test.ts).
+			// Both head readings and their ages drive the RPC cases in tests/e2e/headless-lifecycle.test.ts.
+			// Keep the wiring importable for the retained catch-free source contract.
 			...wakeupHeadSources(post),
 			onSourceFailure: recordSourceFailure,
 		});

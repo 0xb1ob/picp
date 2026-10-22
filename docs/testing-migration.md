@@ -74,7 +74,7 @@ ask-0088e0332d00, 2026-10-21.
 | S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting and executed controls](testing-migration-s14.md): 30 mapped, 3 retained verbatim with unreachable-input evidence, 0 pending | 4 original paths retired (3 mixed moved/split) | +3 retained files | +6 e2e declarations |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
 | S10 (cp-e2e-slice-s10-4dzb) | behavior 05; integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92); [range ledger and executed patch controls](testing-migration-s10.md); S09 carry-ins reconciled | 0; original unit file stays whole | unchanged | +6 e2e declarations |
-| S20 (cp-e2e-slice-s20-8nn3) | behavior 06; checkpoint: shipped-seen 10 mapped/1 retained, stale context 5 mapped; wake-rules and head sources pending; 22 controls executed | 2 original paths retired, 1 retained structural replacement (not deletion credit) | +1 e2e file, net -1 source/retained files | -16 original +1 retained +5 e2e = -10 net declarations at checkpoint |
+| S20 (cp-e2e-slice-s20-8nn3) | behavior 06; checkpoint: 17 mapped/4 retained across shipped memory, stale context and head sources; wake-rules pending; 26 controls executed | 3 original paths retired, 2 retained replacements (not deletion credit) | +1 e2e file, net -1 source/retained files | -21 original +4 retained +6 e2e = -11 net declarations at checkpoint |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -434,6 +434,7 @@ moves first.
 | 06-S20-busy | `tests/e2e/wake-delivery.test.ts` | S20: busy durable wakes wait for an operator answer and late notices receive one nudge |
 | 06-S20-abort | `tests/e2e/wake-delivery.test.ts` | S20: abort strands no autonomous turn and the next prompt carries the notices |
 | 06-S20-tool | `tests/e2e/wake-delivery.test.ts` | S20: tool turns do not answer operator sends and an errored run releases held wakes |
+| 06-S20-head | `tests/e2e/headless-lifecycle.test.ts` | S20: reported envelope heads survive failed watch queries until a newer remote observation supersedes the verdict |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -1013,6 +1014,11 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/stale-notice-context.test.ts` | N2: a withheld verdict with findings reaches the model as its findings stand-in | 06-S20-context | mapped | S20-findings fails medium finding presence at provider boundary; cp_integrate instructions absent |
 | `tests/stale-notice-context.test.ts` | cp-vy73: busy wake-ups ride along non-triggering, and agent_settled nudges once for a stranded one | 06-S20-busy | mapped | S20-busy fails carried W2/W3; S20-answered-busy fails no-nudge assertion for carried answer; S20-nudge fails fourth request; 06-S20-abort with S20-abort fails absence of a stranded-notice nudge after abort and next prompt; idle wake asserted |
 | `tests/stale-notice-context.test.ts` | unload-parent PR3: wakes wait while a landed operator send is unanswered; answered never waits | 06-S20-busy | mapped | S20-send-first fails held session exclusion; S20-answered-hold fails answer in first follow-up; 06-S20-tool with S20-tool-answer fails held notice absence during tool continuation; S20-settled-release times out waiting for recovered held notice after provider error |
+| `tests/wakeup-head-sources.test.ts` | the extension's head sources call the command post accessors, with no catch of their own | 06-S20-head | retained | tests/wakeup-head-sources-retained.test.ts; RPC context exposes neither accessor call names/order nor a HeadSourcePost override throwing on demand; observable head selection mapped below |
+| `tests/wakeup-head-sources.test.ts` | a head source that throws is reported and supersedes nothing, instead of reading as an absent fact | 06-S20-head | retained | tests/wakeup-head-sources-retained.test.ts; RPC context has no throwing source port: CiWatch.head/observedAt catch store errors, reportedHead catches envelope errors, and unreadable fleet is rejected before head lookups |
+| `tests/wakeup-head-sources.test.ts` | CommandPost.reportedHeadSha/reportedHeadAt read the envelope the sources are wired to | 06-S20-head | mapped | S20-head-source fails initial verdict presence if CI replaces the envelope SHA; S20-head-time fails moved-head verdict absence if envelope age is missing; S20-watch-time fails initial presence if attempt age replaces observation age |
+| `tests/wakeup-head-sources.test.ts` | the failure journal is once per (source, job), and its memory is bounded (pi-command-post-8ok) | 06-S20-head | retained | tests/wakeup-head-sources-retained.test.ts; RPC context cannot call the failure recorder: both CI accessors catch read errors, envelope parse errors are caught, and fleet failure prevents source evaluation; no entry point installs a throwing HeadSourcePost or custom journal sink/limit |
+| `tests/wakeup-head-sources.test.ts` | a long-lagging watcher delivers the verdict eventually, and terminates it definitively (pi-command-post-8ok) | 06-S20-head | mapped | S20-watch-failure fails unchanged observation timestamp after real failed gh query; S20-watch-time fails deliverable verdict presence; S20-head-time fails definitive newer-head suppression for successive fresh decisions |
 <!-- /manifest:assertions -->
 
 ### Pending-fix declarations (operator-parked; no deletion credit)
@@ -1916,6 +1922,77 @@ index d9d0955..68ee6ff 100644
  	/** `send` now, or `hold` (kept until `flush`). `answered` always goes. */
 ```
 <!-- /patch:S20-settled-release -->
+
+<!-- patch:S20-head-source -->
+```diff
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+index f5039c6..d043121 100644
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -505,7 +505,7 @@ export function wakeupHeadSources(
+ 	return {
+ 		ciHead: (jobId) => post.ciHead(jobId),
+ 		ciHeadObservedAt: (jobId) => post.ciHeadObservedAt(jobId),
+-		fleetHead: (jobId) => post.reportedHeadSha(jobId),
++		fleetHead: (jobId) => post.ciHead(jobId),
+ 		fleetHeadAt: (jobId) => post.reportedHeadAt(jobId),
+ 	};
+ }
+```
+<!-- /patch:S20-head-source -->
+
+<!-- patch:S20-head-time -->
+```diff
+diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
+index f5039c6..730bf5c 100644
+--- a/extensions/command-post/helpers.ts
++++ b/extensions/command-post/helpers.ts
+@@ -506,7 +506,7 @@ export function wakeupHeadSources(
+ 		ciHead: (jobId) => post.ciHead(jobId),
+ 		ciHeadObservedAt: (jobId) => post.ciHeadObservedAt(jobId),
+ 		fleetHead: (jobId) => post.reportedHeadSha(jobId),
+-		fleetHeadAt: (jobId) => post.reportedHeadAt(jobId),
++		fleetHeadAt: (_jobId) => undefined,
+ 	};
+ }
+ 
+```
+<!-- /patch:S20-head-time -->
+
+<!-- patch:S20-watch-time -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..779778c 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -620,7 +620,7 @@ export class CiWatch {
+ 	 */
+ 	observedAt(jobId: string): string | undefined {
+ 		try {
+-			return this.store.job(jobId)?.head_observed_at;
++			return this.store.job(jobId)?.last_checked_at;
+ 		} catch {
+ 			return undefined;
+ 		}
+```
+<!-- /patch:S20-watch-time -->
+
+<!-- patch:S20-watch-failure -->
+```diff
+diff --git a/src/ci-watch.ts b/src/ci-watch.ts
+index 25eb6e0..3094349 100644
+--- a/src/ci-watch.ts
++++ b/src/ci-watch.ts
+@@ -779,6 +779,7 @@ export class CiWatch {
+ 		}
+ 		this.#save(jobId, {
+ 			last_checked_at: isoTimestamp(now),
++			head_observed_at: isoTimestamp(now),
+ 			next_due_at: isoTimestamp(new Date(now.getTime() + nextDueMs(this.#cadence, { failures, settled: false }))),
+ 			consecutive_failures: failures,
+ 			last_error: message.slice(0, 300),
+```
+<!-- /patch:S20-watch-failure -->
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
@@ -2047,6 +2124,10 @@ index 2dcc135..008c3bd 100644
 | S20-answered-busy | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-busy | S20-answered-busy | ad7d87d70993beb29b4201640cc39c1a27257acffa5a8868619767b63f115561 | carried-answer request unexpectedly includes nudge | pass |
 | S20-tool-answer | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-tool | S20-tool-answer | 13033311aabc217f60082571c8d3c8cc0f3f5f3e39e486d6f2c86a3b456fe960 | held second body leaked into tool continuation | pass |
 | S20-settled-release | `tests/stale-notice-context.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-tool | S20-settled-release | 0a8f08320a58c36fb00977a3ec3025fe41f099c72b0b0c8dbf4b4cf3dd027e63 | timeout waiting for held notice after provider error | pass |
+| S20-head-source | `tests/wakeup-head-sources.test.ts` | c7cf30bd8ace68d33d71bf6539db45a12ffe30b4 | 06-S20-head | S20-head-source | b3a9fbb4afd5d17fdeff125053489ddfa006acffda7a6f017e12d0bf2f0e59b9 | initial authoritative verdict absent | pass |
+| S20-head-time | `tests/wakeup-head-sources.test.ts` | c7cf30bd8ace68d33d71bf6539db45a12ffe30b4 | 06-S20-head | S20-head-time | dc3632783dcd5404031703d0cd2e5b9915855a052e324ab833f0bda1db6a83d4 | newer-head verdict body leaks | pass |
+| S20-watch-time | `tests/wakeup-head-sources.test.ts` | c7cf30bd8ace68d33d71bf6539db45a12ffe30b4 | 06-S20-head | S20-watch-time | 7a71869f5237dd0492d184a6885747dbea2b54ea134a1cfb2b9e573b1864c660 | initial authoritative verdict absent | pass |
+| S20-watch-failure | `tests/wakeup-head-sources.test.ts` | c7cf30bd8ace68d33d71bf6539db45a12ffe30b4 | 06-S20-head | S20-watch-failure | 2b44580427f1d46396495a3412b0e7006ab65b86af9b7321fd8326328187b851 | failed query advances observation timestamp | pass |
 <!-- /manifest:regressions -->
 
 <!-- patch:NC-main-corrupt -->
@@ -3222,6 +3303,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/held-continuation-fleet-read.test.ts` | #433 (ac50447082b15959140ec40b04080102eadbaf87) | incoming known-regression coverage for unreadable fleet during continuation failure notice; unit landed upstream after the baseline and is preserved unchanged; convert, owner P3c-rest (held continuation); recorded when plain-merging main |
 | `tests/e2e/wake-delivery.test.ts` | S20 (cp-e2e-slice-s20-8nn3) | initial shipped-memory RPC scenario; no source tests retired; remaining slice acceptance pending |
 | `tests/shipped-seen-retained.test.ts` | S20 | retained structural atomic-write assertion; cp_status_block cannot expose import tokens or syscall ordering |
+| `tests/wakeup-head-sources-retained.test.ts` | S20 | retained 3 declarations: accessor call contract and throwing-source degradation/journal paths; RPC has no throwing HeadSourcePost port |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -3655,7 +3737,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/viewer-workbench.test.ts` | convert | P19 | behavior 19 (Dashboard conversations/files) |
 | `tests/viewer.test.ts` | convert | P21 | behavior 21 (Dashboard serving/live refresh) |
 | `tests/wake-rules.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
-| `tests/wakeup-head-sources.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
+| `tests/wakeup-head-sources.test.ts` | deleted | S20 | 2 mapped to 06-S20-head with four executed production controls; 3 declarations moved to tests/wakeup-head-sources-retained.test.ts without deletion credit |
 | `tests/wakeup-journal.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
 | `tests/wakeups.test.ts` | convert | P4 | behavior 06 (Wake delivery) |
 | `tests/watch.test.ts` | exception | P1 | golden: watch TUI; operator ask-0088e0332d00 (Exceptions) |

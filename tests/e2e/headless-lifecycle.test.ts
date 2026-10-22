@@ -79,6 +79,10 @@ const { appendFileSync, readFileSync } = require("fs");
 const head = readFileSync(${JSON.stringify(headFile)}, "utf8").trim();
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(logFile)}, args.join(" ") + "\\n");
+if (readFileSync(${JSON.stringify(stateFile)}, "utf8").trim() === "offline") {
+  process.stderr.write("S20 gh api failed: 500\\n");
+  process.exit(1);
+}
 if (args[0] === "api" && (args[1] || "").includes("/actions/runs?head_sha=")) {
   const state = readFileSync(${JSON.stringify(stateFile)}, "utf8").trim();
   const run = state === "green"
@@ -659,4 +663,62 @@ test("rpc bridge: a queued message whose handoff is dropped twice ends failed, n
 	assert.deepEqual(run.states(), ["request", "queued", "injected", "injected", "failed"], "no third handoff");
 	assert.equal(run.dropped(), 2);
 	assert.equal(run.consumed().length, 0);
+});
+
+test("S20: reported envelope heads survive failed watch queries until a newer remote observation supersedes the verdict", { timeout: 120_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "in_progress", review: "pending" });
+	writeReviewPass(held.home.path, held.headSha);
+	const store = new CiWatchStore({ home: held.home.path });
+	const oldAt = "2026-08-31T12:40:00Z";
+	const envelopeAt = "2026-08-31T12:45:43Z";
+	const staleHead = "3d3355f0c4d2".padEnd(40, "0");
+	mkdirSync(join(held.home.path, paths.runDir(JOB)), { recursive: true });
+	writeFileSync(join(held.home.path, paths.envelopeFile(JOB)), JSON.stringify({
+		schema_version: SCHEMA_VERSION, job_id: JOB, received_at: envelopeAt, attempt: 1,
+		envelope: { job_id: JOB, kind: "ship", status: "done", summary: "S20", head_sha: held.headSha },
+	}));
+	store.record(JOB, { head_sha: staleHead, head_observed_at: oldAt, last_checked_at: oldAt });
+	writeFileSync(held.stateFile, "offline\n");
+	const injector = join(held.home.path, "s20-verdict.ts");
+	writeFileSync(injector, `export default function(pi) {
+		let sequence = 0;
+		pi.registerCommand("s20head", { description: "Replay a persisted verdict", handler: async () => {
+			pi.sendMessage({ customType: "cp-verdict", content: "S20 authoritative verdict " + (++sequence), display: true,
+				details: { cp_wakeup: { kind: "verdict", job_id: ${JSON.stringify(JOB)}, keys: ["review", String(sequence), ${JSON.stringify(held.headSha)}],
+				issued_at: new Date().toISOString() } } }, { triggerTurn: true });
+		} });
+	}`);
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s20-head", [{ kind: "text", text: "Head checked." }], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
+		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "1" },
+		extensions: [COMMAND_POST_EXTENSION, injector] });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); held.home.cleanup(); held.repo.cleanup(); });
+	await waitFor(() => store.job(JOB), (job) => (job?.consecutive_failures ?? 0) > 0, {
+		timeoutMs: 30_000, what: "failed production CI watch query",
+	});
+	assert.equal(store.job(JOB)?.head_observed_at, oldAt, "failed queries must not freshen a stale head");
+	await child.prompt("/s20head");
+	await child.waitForSettled(60_000);
+	assert.match(JSON.stringify(provider.requests("s20-head").at(-1)?.body.messages), /S20 authoritative verdict/);
+	const moved = "cc55dd66ee77".padEnd(40, "0");
+	writeFileSync(held.headFile, moved + "\n");
+	writeFileSync(held.stateFile, "in_progress\n");
+	store.record(JOB, { next_due_at: oldAt });
+	await waitFor(() => store.job(JOB), (job) => job?.head_sha === moved, {
+		timeoutMs: 30_000, what: "a genuine newer remote head",
+	});
+	const decision = JSON.parse(readFileSync(join(held.home.path, paths.reviewFile(JOB, 1)), "utf8"));
+	for (const attempt of [2, 3]) {
+		writeFileSync(join(held.home.path, paths.reviewFile(JOB, attempt)), JSON.stringify({ ...decision, attempt }));
+		const before = provider.requests("s20-head").length;
+		await child.prompt("/s20head");
+		await waitFor(() => provider.requests("s20-head"), (rows) => rows.length > before, {
+			timeoutMs: 30_000, what: "superseded verdict at the provider boundary",
+		});
+		assert.doesNotMatch(JSON.stringify(provider.requests("s20-head").at(-1)?.body.messages), new RegExp(`S20 authoritative verdict ${attempt}`));
+		await child.waitForSettled(60_000);
+	}
+	assert.equal(provider.remaining("s20-head"), 0);
 });
