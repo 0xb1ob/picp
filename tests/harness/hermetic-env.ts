@@ -13,8 +13,9 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { STRIPPED_ENV_KEYS } from "../../src/worker-manager.ts";
+import { installGhStub } from "./gh-stub.ts";
 
 const SESSION_ENV_KEYS: readonly string[] = [
 	...STRIPPED_ENV_KEYS,
@@ -64,6 +65,12 @@ process.env.PI_HOME = scratchHome;
 const scratchUploads = mkdtempSync(join(tmpdir(), "cp-hermetic-uploads-"));
 process.env.CP_UPLOAD_ROOT = scratchUploads;
 
+// The host's real gh (and its auth) must never be reachable from a test child: a stub goes first on PATH.
+const ghStub = installGhStub();
+process.env.PATH = `${ghStub}${delimiter}${process.env.PATH ?? ""}`;
+delete process.env.GH_TOKEN;
+delete process.env.GITHUB_TOKEN;
+
 // pi-command-post-6wn: guard the real selector across the whole process, not just one
 // test file — any test process (this file is preloaded into every one of them) that
 // writes to the operator's real ~/.pi/command-post/operator-targets/selected.json is a
@@ -81,6 +88,7 @@ const before = selectorSnapshot();
 
 process.on("exit", () => {
 	rmSync(scratchHome, { recursive: true, force: true });
+	rmSync(ghStub, { recursive: true, force: true });
 	rmSync(scratchUploads, { recursive: true, force: true });
 	const after = selectorSnapshot();
 	const changed = before === undefined ? after !== undefined : after === undefined || after.mtimeMs !== before.mtimeMs || after.hash !== before.hash;

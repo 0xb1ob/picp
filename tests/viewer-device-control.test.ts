@@ -179,13 +179,17 @@ req.end(body);
 `;
 /** One child node process; resolves with its first stdout line, keeps it running until `close`. */
 function child(code: string, env: Record<string, string>) {
-	const proc = spawn(process.execPath, ["--input-type=module", "-e", code], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "inherit"] });
-	const exited = new Promise<void>((done) => proc.once("exit", () => done()));
+	const proc = spawn(process.execPath, ["--input-type=module", "-e", code], { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+	// "close", not "exit": exit can fire before the piped stdout is drained, which lost a child's reply under load.
+	const exited = new Promise<void>((done) => proc.once("close", () => done()));
+	let stderr = "";
+	proc.stderr.setEncoding("utf8");
+	proc.stderr.on("data", (chunk: string) => { stderr += chunk; });
 	const first = new Promise<string>((done) => {
 		let text = "";
 		proc.stdout.setEncoding("utf8");
 		proc.stdout.on("data", (chunk: string) => { text += chunk; if (text.includes("\n")) done(text.split("\n")[0]!); });
-		proc.once("exit", () => done(text.trim() || "exited"));
+		proc.once("close", (exitCode, signal) => done(text.trim() || `exited(code=${exitCode}, signal=${signal}, stderr=${stderr.trim()})`));
 	});
 	return { proc, first, close: () => { proc.stdin.end(); return exited; } };
 }
