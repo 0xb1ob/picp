@@ -2836,56 +2836,6 @@ index 6fa8248..eed3141 100644
  
 ```
 
-<!-- patch:NC-S02-key -->
-```diff
-diff --git a/src/ci-watch.ts b/src/ci-watch.ts
-index 25eb6e0..d0beeb6 100644
---- a/src/ci-watch.ts
-+++ b/src/ci-watch.ts
-@@ -212,7 +212,7 @@ export interface CiObservation {
-  * same head, so a re-run wakes once (pi-command-post-rerunwake-12z).
-  */
- export function ciEventKey(jobId: string, headSha: string, event: CiWatchEvent, runIdentity?: string): string {
--	const key = `${jobId}|${headSha}|${event}`;
-+	const key = `${jobId}|unknown|${event}`;
- 	return runIdentity && runIdentity.length > 0 ? `${key}|${runIdentity}` : key;
- }
- 
-```
-
-<!-- patch:NC-S02-history -->
-```diff
-diff --git a/src/ci-watch.ts b/src/ci-watch.ts
-index 25eb6e0..386e1be 100644
---- a/src/ci-watch.ts
-+++ b/src/ci-watch.ts
-@@ -729,7 +729,7 @@ export class CiWatch {
- 			due.push(observation);
- 			if (!isResend) {
- 				try {
--					this.#deps.onObserved?.(record.job_id, observation);
-+					if (observation.event !== "ci_failed") this.#deps.onObserved?.(record.job_id, observation);
- 				} catch {
- 					// A run log that cannot be written must never swallow a wake-up.
- 				}
-```
-
-<!-- patch:NC-S02-prune -->
-```diff
-diff --git a/src/ci-watch.ts b/src/ci-watch.ts
-index 25eb6e0..8a38105 100644
---- a/src/ci-watch.ts
-+++ b/src/ci-watch.ts
-@@ -667,7 +667,6 @@ export class CiWatch {
- 			return result;
- 		}
- 		try {
--			this.store.prune(new Set([...watched, ...this.#deps.jobs().filter((r) => r.phase === "awaiting_merge")].map((r) => r.job_id)));
- 		} catch {
- 			// Pruning is housekeeping; a failure here must not skip the tick.
- 		}
-```
-
 NC-01 brings back the pre-#131 rule, where any non-success conclusion was the failing run:
 
 <!-- patch:NC-01-green -->

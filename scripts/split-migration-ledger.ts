@@ -117,6 +117,7 @@ function main(): void {
 		console.log(`${file}: ${[...perSlice].map(([name, rows]) => `${name} ${rows.length}`).join(", ")}`);
 	}
 	out = moveProse(out, `${DIR}/s02.md`, /S02 controls run with [\s\S]*?S02 worker artifact directory\.\n\n?/);
+	out = movePatches(out, `${DIR}/s02.md`, ["NC-S02-key", "NC-S02-history", "NC-S02-prune"]);
 	writeFileSync(MONOLITH, out);
 	writeFileSync(ALLOWLIST_FILE, `${JSON.stringify(allowlist, null, "\t")}\n`);
 }
@@ -130,6 +131,20 @@ function moveProse(text: string, file: string, paragraph: RegExp): string {
 	const prose = found[0].replace(/\n*$/, "\n\n");
 	writeFileSync(file, at < 0 ? `${slice.replace(/\n*$/, "\n\n")}${prose}` : `${slice.slice(0, at)}${prose}${slice.slice(at)}`);
 	return text.replace(found[0], () => "");
+}
+
+/** Moves patch blocks by id from the monolith to the end of a slice file; no-op when absent. */
+function movePatches(text: string, file: string, ids: string[]): string {
+	if (!existsSync(file)) return text;
+	let out = text;
+	for (const id of ids) {
+		const block = patches(out).get(id);
+		if (!block) continue;
+		writeFileSync(file, `${readFileSync(file, "utf8").replace(/\n*$/, "\n\n")}${block}`);
+		const at = out.indexOf(block);
+		out = out.slice(0, out[at - 1] === "\n" && out[at - 2] === "\n" ? at - 1 : at) + out.slice(at + block.length);
+	}
+	return out;
 }
 
 const PATCH_SPLIT = /(<!-- patch:[\w-]+ -->\n```diff\n[\s\S]*?\n```\n(?:<!-- \/patch:[\w-]+ -->\n)?)/;
