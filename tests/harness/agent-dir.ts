@@ -52,7 +52,7 @@ export function createAgentDir(options: AgentDirOptions = {}): AgentDir {
 		},
 		writeModels,
 		cleanup() {
-			rmSync(path, { recursive: true, force: true });
+			rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 		},
 	};
 }
