@@ -1,0 +1,12 @@
+diff --git a/src/settle.ts b/src/settle.ts
+index a5bfab7..decac42 100644
+--- a/src/settle.ts
++++ b/src/settle.ts
+@@ -610,7 +610,6 @@ export class SettleWatcher {
+ 			recorder.cp("recovery_exhausted", { settles, attempts: MAX_RECOVERY_PROMPTS, work: work as UnreportedWork, at });
+ 		}
+ 		const outcome: SettleOutcome = { action: "recorded", settles, reason: why, ...(work ? { work } : {}) };
+-		this.#options.onUnreported?.(jobId, outcome);
+ 		return outcome;
+ 	}
+ }

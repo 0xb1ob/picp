@@ -2,6 +2,8 @@
 
 Migration note (S05): references below to the retired `tests/diff-review.test.ts` describe the historical implementation. Current summary/stranded-receipt evidence is in [the public review scenarios](../../../tests/e2e/diff-review.test.ts); the synthetic shutdown regression remains in [the retained tests](../../../tests/diff-review-retained.test.ts). Use those current files for focused checks.
 
+Migration note (S21): the wakeup-journal source referenced below is also retired. Current finish-failure/restart evidence is the S21 case in [public review scenarios](../../../tests/e2e/diff-review.test.ts); durable arrival and reconciliation evidence is in [wake-delivery scenarios](../../../tests/e2e/wake-delivery.test.ts), with structural contracts in [the retained tests](../../../tests/wakeup-journal-retained.test.ts). Commands below describe the historical implementation; run those current files for focused checks.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A valid diff-review observation becomes a schema-valid decision and parent wake-up; a failed finish cannot leave a held PR silently waiting or replay the same invalid scratch verdict forever.
