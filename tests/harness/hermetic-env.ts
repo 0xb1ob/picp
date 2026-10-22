@@ -33,6 +33,16 @@ const SESSION_ENV_KEYS: readonly string[] = [
 
 for (const key of SESSION_ENV_KEYS) delete process.env[key];
 
+// root ignores file modes, so chmod-injected failures silently succeed; fail loudly instead.
+if (process.getuid?.() === 0 && !process.env.CP_ALLOW_ROOT_TESTS) {
+	process.stderr.write(
+		"[hermetic-env] the suite is running as uid 0: chmod-based failure injection does not fail for root, so " +
+			"tests would pass or fail wrongly. Run as an unprivileged user (CI: scripts/ci-as-user.sh), " +
+			"or set CP_ALLOW_ROOT_TESTS=1 to override.\n",
+	);
+	process.exit(1);
+}
+
 // A CI runner has no global git identity, and scripted workers commit in leased
 // worktrees of plain clones. GIT_AUTHOR_*/GIT_COMMITTER_* take precedence over
 // any gitconfig user.name/user.email, so every test child commits as this one
