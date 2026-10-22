@@ -261,7 +261,6 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | P3c | 05 | `tests/e2e/landing.test.ts` | partial delivery: 05-8–05-13 provide consumer coverage; ci-evidence and parked-ci retired; five unfinished files continue under P3c-rest |
 | cp-e2e-slice-main-ci-41d3 (#416) | 05 | `tests/e2e/landing.test.ts` | main-CI: 39 source declarations, 32 mapped with executed controls, 7 retained (mixed tests narrowed), 0 pending; 05-11/05-4/05-1 extended and 4 scenarios added; docs/testing-migration-main-ci-declarations.md |
 | P3c-rest | 05 | `tests/e2e/landing.test.ts` | ci-watch: 75 mapped, 4 retained in tests/ci-watch-retained.test.ts, 1 pending-fix (71) parked by frozen Addendum 1. #443 is on main; S10b owns mapping 71 and retirement by sequencing decision. Main-CI's 39 declarations are accounted in #416. [Evidence](testing-migration-s03-declarations.md), [controls](testing-migration-s03b-controls.md). |
-| S06 | 05 | `tests/e2e/landing.test.ts` | foreign CI, forge observers/runtime and held release; file-by-file conversion |
 | S08 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 1–40: 38 mapped, 2 retained (5%), 0 deleted files; nine scenarios added and 05-13 extended; [range ledger](testing-migration-s08.md); original unit file kept whole |
 | S09 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 41–80: 34 mapped, 6 retained (15%), 0 deleted files; eight scenarios added; [range ledger](testing-migration-s09.md); original unit file kept whole |
 | S10 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92), 0 deleted files; six added scenarios and 05-S02-5 extended; [range ledger](testing-migration-s10.md); original unit file kept whole |
@@ -342,23 +341,6 @@ moves first.
 |---|---|---|
 | 01-1 | `tests/e2e/ci-evidence.test.ts` | ci evidence: wake, cp_integrate and the promote name only the current head's failing run, and none once it is gone |
 | 01-2 | `tests/e2e/ci-evidence.test.ts` | ci evidence: absent head, absent run id, a branch-name PR ref and an enterprise host never fabricate an Actions link |
-| 05-1 | `tests/e2e/landing.test.ts` | landing: a denied, rate-limited, malformed, partial or capped Actions read never merges and names its cause; a full paged read finds page two's failure |
-| 05-2 | `tests/e2e/landing.test.ts` | landing: only an authoritative empty workflow list is no CI; every unanswered workflows read keeps its own cause and never reads as none |
-| 05-3 | `tests/e2e/landing.test.ts` | landing: /doctor ci.<project> reads workflows, then the newest run and its attempt jobs; a refused read is loud and gh output never echoes |
-| 05-4 | `tests/e2e/landing.test.ts` | landing: an infra-only CI failure is claimed, then rerun once per head; a test failure, a cancel, a second attempt, a drain or an unreadable claim or job list goes to the parent |
-| 05-5 | `tests/e2e/landing.test.ts` | landing: cp_merged records only a merge gh observed for this job's branch, marks its PR merged once, and an opted-in deploy branch gets one blocked ops:deploy job |
-| 05-6 | `tests/e2e/landing.test.ts` | landing: cp_merged reads a GitLab MR only from the project's own GitLab with its token; a squash, or a fast-forward git sees on the target, is recorded and anything else records nothing |
-| 05-7 | `tests/e2e/landing.test.ts` | landing: cp_teardown passes a deleted branch as landed_by_git when origin's base holds its content (merge, squash, rebase, a later edit, literal odd paths) and keeps the lease when it does not |
-| 05-8 | `tests/e2e/landing.test.ts` | landing: CI watch persists arrival and attempt identity, follows pushed heads and prunes finished deliveries |
-| 05-9 | `tests/e2e/landing.test.ts` | landing: operator-forwarded CI requires a quoted current head and never substitutes for native CI |
-| 05-10 | `tests/e2e/landing.test.ts` | landing: foreign CI stays read-only, follows the base repo's current head and stops after merge |
-| 05-11 | `tests/e2e/landing.test.ts` | landing: a real parent's timer latches only its mandated main runs and clears only current-tip green |
-| 05-12 | `tests/e2e/landing.test.ts` | landing: parked PR timer stores native CI for each observed head without reviving its released worker |
-| 05-13 | `tests/e2e/landing.test.ts` | landing: held CI repairs the same real worker once while preserving an integration hold |
-| S06-1 | `tests/e2e/landing.test.ts` | landing: foreign CI selection, failed reads, corrupt memory and reviewer timeout remain visible at dispatch |
-| S06-2 | `tests/e2e/landing.test.ts` | landing: a deploy ledger failure preserves the merge receipt and retries through cp_merged |
-| S06-3 | `tests/e2e/landing.test.ts` | landing: legacy unregistered projects retain GitHub observation and refuse a GitLab reference |
-| S06-4 | `tests/e2e/landing.test.ts` | landing: teardown proves landing on the project's configured trunk instead of main |
 | 05-S08-1 | `tests/e2e/landing.test.ts` | landing: held repair rejects invalid PR identity, CI, holds, drains and worktree hazards |
 | 05-S08-2 | `tests/e2e/landing.test.ts` | landing: held CI revalidates local state after each external read |
 | 05-S08-3 | `tests/e2e/landing.test.ts` | landing: a reviewed green head merges once, records, tears down and closes from forge facts |
@@ -382,20 +364,6 @@ moves first.
 | 05-S09-6 | `tests/e2e/landing.test.ts` | landing S09: public promotion before or during integration waits for a fresh report |
 | 05-S09-7 | `tests/e2e/landing.test.ts` | landing S09: infra reruns once while second attempts and test failures promote |
 | 05-S09-8 | `tests/e2e/landing.test.ts` | landing S09: a missing implementer surfaces without spending the same-head repair |
-| 05-S03-memory | `tests/e2e/landing.test.ts` | landing S03: corrupt CI memory recovers and arrival preserves fleet and decisions |
-| 05-S03-notice | `tests/e2e/landing.test.ts` | landing S03: actual parent CI notices carry facts and integration advice |
-| 05-S03-deadline | `tests/e2e/landing.test.ts` | landing S03: a durable review deadline resumes once and respects changed facts |
-| 05-S03-stale | `tests/e2e/landing.test.ts` | landing S03: facts changed during a forge read prevent stale review spending |
-| 05-S03-pending | `tests/e2e/landing.test.ts` | landing S03: new CI attempts never duplicate a pending real reviewer |
-| 05-S03-sampled | `tests/e2e/landing.test.ts` | landing S03: a real review verdict samples hold state in its one waiting notice |
-| 05-S03-rest | `tests/e2e/landing.test.ts` | landing S03: REST PR facts carry parsed fields and malformed inputs produce no fact |
-| 05-S03-between | `tests/e2e/landing.test.ts` | landing S03: changes during a branch update stop before the next integration step |
-| 05-S03-owner | `tests/e2e/landing.test.ts` | landing S03: a real parent that loses its lock cannot execute a pending review deadline |
-| 05-S03-replay | `tests/e2e/landing.test.ts` | landing S03: lost watch memory coalesces in-flight facts and rearms a settled wait |
-| 05-S03-red-replay | `tests/e2e/landing.test.ts` | landing S03: a stopped red fact replays no repair while a new attempt is actionable |
-| 05-S03-outcome | `tests/e2e/headless-lifecycle.test.ts` | rpc: one CI-green key whose review is in flight is relayed without a parent turn; ticks, restart and a moved head repeat nothing |
-| 05-S03-busy | `tests/e2e/landing.test.ts` | landing S03: a driving worker keeps its slot and an integration write fault releases the busy fence |
-| 05-S03-restart | `tests/e2e/landing.test.ts` | landing S03: a restarted parent resumes a durable deadline and relays landing without a model turn |
 | 05-S03b-snapshot | `tests/e2e/landing.test.ts` | landing S03: startup snapshots queued held heads and generations before the lane opens |
 | 05-S03b-parked | `tests/e2e/landing.test.ts` | landing S03: a real parent relays a newly parked handoff without a model turn |
 | 05-S03b-expired | `tests/e2e/landing.test.ts` | landing S03: expired review passes advance immediately and deadline faults never rearm |
@@ -412,34 +380,6 @@ moves first.
 | 05-main-scope | `tests/e2e/landing.test.ts` | landing: main CI scope skips inactive grants and login faults preserve latches until the next successful login |
 | 05-main-corrupt | `tests/e2e/landing.test.ts` | landing: main latch writes refuse corruption introduced during an Actions read |
 | 05-main-deadlines | `tests/e2e/landing.test.ts` | landing: Actions deadlines stop a hung request and share the budget across pages |
-| DR-01 | `tests/e2e/diff-review.test.ts` | S04: cp_review gives the reviewer a complete three-dot subject from the canonical clone |
-| DR-02 | `tests/e2e/diff-review.test.ts` | S04: cp_review stops wide, oversized and unparseable subjects before a model sees them |
-| DR-03 | `tests/e2e/diff-review.test.ts` | S04: review packets preserve frozen scope and context while persisted verdicts exclude gate-only fields |
-| DR-04 | `tests/e2e/diff-review.test.ts` | S04: cp_review refuses absent, research and unpushed subjects with their recovery action |
-| DR-05 | `tests/e2e/diff-review.test.ts` | S04: moved heads use complete deltas and patch-equivalent rebases reuse only complete passes |
-| DR-06 | `tests/e2e/diff-review.test.ts` | S04: review flags remain reported while blocking findings surface when the implementer is gone |
-| DR-07 | `tests/e2e/diff-review.test.ts` | S04: a paused or revoked mandate refuses reviewer spend and replacement authority restores it |
-| DR-08 | `tests/e2e/diff-review.test.ts` | S04: legacy stranded verdicts settle once and oversized frozen tasks state their boundary |
-| DR-09 | `tests/e2e/diff-review.test.ts` | S04: reviewer preferences reread project and mandate settings while preserving the ship route |
-| DR-10 | `tests/e2e/diff-review.test.ts` | S04: configured reviewer denials never fall back, while an unconfigured route uses its authenticated fallback |
-| DR-11 | `tests/e2e/diff-review.test.ts` | S04: pipeline advance holds unresolved and moved heads until a review of the current commit exists |
-| DR-12 | `tests/e2e/diff-review.test.ts` | S04: blocking review promotes the real implementer on the same branch with the remaining review budget |
-| DR-13 | `tests/e2e/diff-review.test.ts` | S04: complete deltas remain reviewable when supplemental branch history exceeds the byte cap |
-| DR-14 | `tests/e2e/diff-review.test.ts` | S05: unknown and malformed legacy review heads never become delta baselines |
-| DR-15 | `tests/e2e/diff-review.test.ts` | S05: integrating an advanced base resets the delta while an unmerged advance preserves it |
-| DR-16 | `tests/e2e/diff-review.test.ts` | S05: a settled reviewer without a verdict retries once with the full subject then surfaces |
-| DR-17 | `tests/e2e/diff-review.test.ts` | S05: pending reviews fence duplicate starts and carry the reviewed head in one wake |
-| DR-18 | `tests/e2e/diff-review.test.ts` | S05: the fifth complete review surfaces findings and binds one final-fix checkpoint; a sixth never starts |
-| DR-19 | `tests/e2e/diff-review.test.ts` | S05: a pass at review three ends the loop and wide subjects finish synchronously without a wake |
-| DR-20 | `tests/e2e/diff-review.test.ts` | S05: only a complete fifth review asking for revisions on a bound PR creates a final-fix decision |
-| S06-5 | `tests/e2e/landing.test.ts` | landing: forge observation failures refuse merge receipts without leaking external replies |
-| S06-6 | `tests/e2e/landing.test.ts` | landing: spawn pressure releases the oldest held author and a journal refusal leaves room retryable |
-| 05-S14-bind | `tests/e2e/landing.test.ts` | landing S14: binding an existing PR checks forge facts and preserves checkout history |
-| 05-S14-unsafe | `tests/e2e/landing.test.ts` | landing S14: unsafe existing PRs refuse before leasing or contacting a worker |
-| 05-S14-resolution | `tests/e2e/landing.test.ts` | landing S14: worker PR reports resolve against the registered origin and drive the CI watch |
-| 05-S14-permission | `tests/e2e/landing.test.ts` | landing S14: repository permission reports the allowlist and each blocked cause |
-| 05-S14-gitlab | `tests/e2e/landing.test.ts` | landing S14: GitLab worker reports hold only on the project's MR and preserve named refusals |
-| 05-S14-approval | `tests/e2e/phase3.test.ts` | pipeline S14: only a pin for the current artifact bypasses the operator checkpoint |
 | 06-S20-shipped | `tests/e2e/wake-delivery.test.ts` | S20: shipped rows collapse through cp_status_block and survive a resumed parent |
 | 06-S20-context | `tests/e2e/wake-delivery.test.ts` | S20: persisted stale notices are filtered at the actual provider boundary |
 | 06-S20-busy | `tests/e2e/wake-delivery.test.ts` | S20: busy durable wakes wait for an operator answer and late notices receive one nudge |
@@ -515,8 +455,6 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/reviewer-model.test.ts` | reviewer selection: explicit, newest active (tie by id), expired continuation, project, unset | S16-model | mapped | S16-NC1 fails explicit selection source; matrix drives real plan gates, including excluded grants, fallback and recordless routing |
 | `tests/reviewer-model.test.ts` | scheduled and legacy schedule subjects use only their actual schedule grant | S16-model | mapped | S16-NC2 fails schedule actual chosen reviewer receives plan; disk schedules and legacy ledger labels feed the real gate |
 | `tests/reviewer-model.test.ts` | production factories and automatic ci_green reviews honor current preferences | S16-auto | mapped | S16-NC3 fails automatic review reaches the mandated model; S16-model pins gate rereads, spawned model and high thinking; DR-09 pins public diff review factory preferences |
-| `tests/integrate-held-ci.test.ts` | CI observation repairs without parent notice delivery; duplicates and manual integration share the project lane | 05-13 | mapped | S07: watch-driven repair overlaps manual cp_integrate and a second real job at a forge barrier; S07-NC-2 fails queued-peer assertion. One supersession, same worker/branch/worktree, correct run and hold in model request, archived first envelope and accepted replacement; green holds with no merge ask/checkpoint, release requires review; NC-37 fails spent-allowance outcome |
-| `tests/integrate-held-ci.test.ts` | startup repair and restart preserve the cumulative allowance after repaired green and failing reports | 05-13 | mapped | S07: real parent restart reads green hold and spent allowance; failing head in fresh parent says already asked once, never a missing-worker fallback; NC-37 fails the already-asked reason assertion |
 | `tests/integrate-held-ci.test.ts` | held repair uses real Sender permission before delivery or revival, including eligible expired grants | 05-S07 | mapped | S07: revoked/capped refuse before missing-worker lookup, expired permits one repair, missing/dead worker refuses; hold and original envelope survive refusal, PID unchanged; S07-NC-1 fails revoked error match |
 | `tests/ci-run-ref.test.ts` | failedRunOn picks the completed failure on HEAD over another head's failure | 01-1 | mapped | wrong-head failure (older sha) never named; run 6 on the pushed head is |
 | `tests/ci-run-ref.test.ts` | failedRunOn skips skipped, neutral and success runs | 01-1 | mapped | runs 2-4 precede run 6; negative control NC-01 |
@@ -532,92 +470,10 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/ci-run-ref.test.ts` | formatRunRef of an id alone is " (run N)" | 01-2 | mapped | (run 16) and (run 17) at the end of the ci fact |
 | `tests/ci-run-ref.test.ts` | ciRunRef of a legacy run without databaseId is {} | 01-2 | redundant-unreachable | readActionsCi refuses an id-less row, so no consumer sees one; 01-2 pins "could not read CI" with no reference; approved by main session under ask-0088e0332d00, 2026-10-20 |
 | `tests/ci-run-ref.test.ts` | formatRunRef of {} is "" | 01-1 | mapped | held facts for superseded, in_progress and green heads carry no reference |
-| `tests/actions-ci.test.ts` | paths: exact head, explicit repo or gh placeholders, attempt-bound jobs; malformed ids refused | 05-1 | retained | verbatim in `tests/main-ci-retained.test.ts`: malformed ids do not reach cp_integrate's validated Actions consumer; 05-1 pins the exact-head path |
-| `tests/actions-ci.test.ts` | readActionsCi: normalizes runs with identity, event, actor and their attempt's jobs and steps | 05-11 | mapped | nc-normalization: normalized actor, identity, jobs and steps produce the own red latch |
-| `tests/actions-ci.test.ts` | readActionsCi: zero runs is an observation; two runs with one workflow name both survive | 05-1 | mapped | 05-1's 101 runs all share the workflow name `ci`; collapsing them by name loses run 101 and "ci: failed … (run 101 …)" fails. Zero runs: 05-2 asks for workflows only after an empty runs read |
-| `tests/actions-ci.test.ts` | readActionsCi: a null run status is unfinished, never success | 05-1 | mapped | a null-status run on the head: `doesNotMatch(/ci: green/)` fails if null reads as success |
-| `tests/actions-ci.test.ts` | pagination: runs and jobs pages are followed to the short page; a boundary duplicate counts once | 05-1 | mapped | two runs pages with the boundary run repeated, and run 1's 101 jobs: stopping at page one fails "ci: failed … (run 101 …)", counting the duplicate twice fails it as incomplete |
-| `tests/actions-ci.test.ts` | fail closed: a short read, conflicting duplicate, page cap or API ceiling is incomplete, never a subset | 05-1 | mapped | each case asserts `next: retry` and its own "read incomplete" cause; a subset taken as complete fails `next: retry` |
-| `tests/actions-ci.test.ts` | fail closed: malformed bodies, missing identity and a mixed head are malformed | 05-1 | mapped | the seven runs bodies each assert `read malformed` and `next: retry`; skipping the bad row fails `next: retry` |
-| `tests/actions-ci.test.ts` | parseJobsPage: a job from another run, attempt or head is malformed | 05-1 | mapped | the three job pages assert "not of the run", "not of attempt 1" and "requested head"; accepting the foreign job fails `next: retry`. The upper-case head: a run whose `head_sha` gh returns in upper case asserts "ci: green"; a case-sensitive compare (`headSha !== sha` in `parseRunsPage`, `src/actions-ci.ts:158`) fails `assert.match(upper.text, /ci: green/)` with "Actions CI read malformed: … (run 1 is not on the requested head) … Nothing was merged" (run by P3b: `npm run test:one -- --test-name-pattern="a denied, rate-limited" tests/e2e/landing.test.ts`, 0 pass, 1 fail) |
-| `tests/actions-ci.test.ts` | jobs read failure fails the whole observation: no run-only green | 05-1 | mapped | a jobs 502, 404 or rate limit beside a green run asserts `next: retry`; a run-only green fails it |
-| `tests/actions-ci.test.ts` | errors: denial stays classifiable as unreadable CI; rate limit does not; raw output never carried | 05-1 | mapped | the runs 403 asserts the Actions-only label after one call, the rate limit asserts no label, and no record carries `canary`; each fails if its rule is dropped |
-| `tests/actions-ci.test.ts` | retry: a truncated body recovers on retry; a persisting one is one malformed fault with status and preview | 05-1 | mapped | "ci: green" after exactly two runs calls fails without the retry; the HTML 200 asserts "not JSON; gh exit 0; body … [redacted] …; 3 attempts" |
-| `tests/actions-ci.test.ts` | retry: an HTML 403 is a transport fault with its status and body, never a token denial; JSON 403 is denied | 05-1 | mapped | NC-24: the HTML 403 reads as denied and its `read transport … status 403` match fails |
 | `tests/actions-ci.test.ts` | retry: never past the budget, and a structurally wrong JSON page is not retried | 05-main-deadlines | mapped | nc-retry-budget: spent retry budget reports the failed request without another attempt; 05-1 pins one structural-error request |
 | `tests/actions-ci.test.ts` | budget: one total deadline across pages, each request gets only what remains | 05-main-deadlines | mapped | nc-page-budget: one total deadline bounds runs plus jobs |
-| `tests/actions-ci.test.ts` | readActionsJobs: one attempt's jobs, all pages, through the same validation | 05-4 | mapped | the rerun's own jobs read: a denied, short, empty or unparseable listing asserts "run 41 jobs unreadable" and no rerun or claim; skipping the validation reruns and fails `[reruns(), claims()]` |
 | `tests/actions-ci.test.ts` | statusRunner: forwards each request's remaining budget as timeoutMs; a non-zero status throws | 05-main-deadlines | mapped | nc-request-timeout: per-request timeout cancels hung gh; 05-1 pins nonzero status failure |
-| `tests/ci-access.test.ts` | ciReadDenied: only a permission refusal of a CI read counts | 05-1 | retained | verbatim in `tests/main-ci-retained.test.ts`: cp_integrate's Actions reader does not submit legacy Checks/status/gh-run classifier strings; 05-1 pins Actions denial |
-| `tests/ci-access.test.ts` | the browser mirrors the backend's Actions-only label and advice, keeping its needs prefix | 05-1 | mapped | nc-viewer-label: rendered label matches the backend denial; rendered needs advice matches backend Actions-only advice |
-| `tests/ci-access.test.ts` | a held job whose CI read was refused names the token as its wait reason, before any head is known | 05-1 | mapped | after the CI watch tick writes `last_ci: unreadable`, the `/status` table's "waiting on: CI unreadable (token)" fails without the unreadable branch in `waitReason` |
-| `tests/ci-access.test.ts` | doctor ci.<project>: workflows, then the newest run and its attempt jobs; each outcome is distinct and gh output is never echoed | 05-3 | mapped | the exact gh call sequence (`o/denied` registered as an https `.git` URL, `o/bare` as an ssh URL), each project's severity and text, and no `sentinel-credential-value` in the report; a denied jobs read read as unknown fails the `locked` row. No gh on PATH: a second `/doctor` asserts no `ci.*` finding ("no gh: host.gh says so"); dropping the ENOENT check (`&& false` on the `gh_missing` return, `src/ci-access-doctor.ts:70`) fails `deepEqual(…, [], "no gh: host.gh says so")` with an extra `ci.denied` warn "CI state unknown for o/denied: the Actions read failed (command_failed)" (run by P3b: `npm run test:one -- --test-name-pattern="doctor ci" tests/e2e/landing.test.ts`, 0 pass, 1 fail) |
-| `tests/ci-access.test.ts` | doctor ci.<project>: a jobs list shorter than its total_count is unknown, never readable | 05-3 | mapped | NC-26: `o/short` reads ok and its [warn, "the Actions read failed (incomplete)"] assertion fails |
-| `tests/ci-configured.test.ts` | only an authoritative empty workflow list is 'no CI configured' | 05-2 | mapped | the empty list asserts `none (authoritative_empty)`, "reports 0 Actions workflows" and the permission read; reading it as unreadable fails `permission: permitted` |
-| `tests/ci-configured.test.ts` | a repository that has workflows is 'present', however few runs it has produced | 05-2 | mapped | one workflow with no runs asserts "present (workflows_present) — the repository has 1 Actions workflow(s)" and the human checkpoint |
-| `tests/ci-configured.test.ts` | every way of not getting an answer is unreadable, and each is its own cause | 05-2 | mapped | NC-25: the truncated page reads `none` and its `[step, next]` = `[authorize, surface]` fails; the other nine assert their own cause |
-| `tests/ci-configured.test.ts` | the workflows question is one gh call, with gh's own owner/repo placeholders | 05-2 | mapped | every advance asserts exactly one `api repos/{owner}/{repo}/actions/workflows` |
-| `tests/ci-configured.test.ts` | ghCiConfigured maps a throwing runner onto the same rule, 403 included | 05-2 | retained | moved verbatim to `tests/merge-ask.test.ts` (P3b): the throwing runner is the merge-ask awaiting row's `ciConfigured`, which no landing case renders. 05-2 pins the same rule, 403 included, through cp_integrate's status runner |
-| `tests/ci-infra-rerun.test.ts` | classifyInfraFailure: setup steps are infra; the suite and a cancel are not | 05-4 | mapped | main-CI declaration map #31: all setup variants run through cp_integrate; nc-setup rejects Set up Node and changes wait/rerun to resolve; nc-suite breaks suite exclusion |
-| `tests/ci-infra-rerun.test.ts` | an infra-only failure is claimed first, then rerun once; the same job+head never again | 05-4 | mapped | the claim is on disk when `gh run rerun` runs ("the claim was on disk before gh run rerun ran"), then "was spent at" and no second rerun; claiming after the rerun fails the first |
-| `tests/ci-infra-rerun.test.ts` | attempt 2, a test failure, a cancel, no run id, a green head and a drain all leave it to the parent | 05-4 | retained | only green/id-less private guard assertions remain in tests/main-ci-retained.test.ts; F maps other guard outcomes and T's suite no-claim assertion fails nc-suite |
-| `tests/ci-infra-rerun.test.ts` | fail closed: an unreadable claim file or jobs listing reruns nothing; a refused rerun keeps its claim | 05-4 | mapped | the corrupt claim file asserts "unparseable"; the denied, short, empty and unparseable listings assert "run 41 jobs unreadable" with no rerun or claim; gh's refusal asserts "claimed … but gh refused" and one claim, then "was spent at" |
-| `tests/after-merge.test.ts` | a merge into the deploy branch creates one blocked ops:deploy job with a frozen task file, never dispatched | 05-5 | mapped | cp_merged on a merged PR asserts exactly one deploy job with every label, `blocked_by` the merged job, `open`, its task file note and facts, the created line, the `created` record, one `after_merge_deploy` event and no fleet record; `previewDispatch` asserts profile `ops` and risk `high`, and the project-wide grant's preview asserts "would ask: risk:high". Dropping the hook fails "exactly one deploy job" |
-| `tests/after-merge.test.ts` | re-recording and a crash before the record write resume onto the same single job | 05-5 | mapped | a second cp_merged asserts no `after_merge` line; with the record removed it asserts "after-merge deploy <same id> created"; after the deploy job is dropped it asserts one deploy job ("a closed deploy job still holds the key"). Creating a second job fails that count |
-| `tests/after-merge.test.ts` | base mismatch, missing base and a pre-opt-in merge write skipped and create nothing; no opt-in is silent | 05-5 | mapped | gh answers base develop, no base and a 2020 `mergedAt`: each asserts its reason line, a `skipped` record and no deploy job (NC-31: dropping the opt-in date rule fails `before opt-in`); the project with no opt-in asserts no `after_merge` and no record file. Creating on a mismatch fails `["skipped", 0]` |
-| `tests/after-merge.test.ts` | coverage: a named grant listing the merged job enrolls the deploy; at its cap it is refused; project-wide covers | 05-5 | mapped | real grants via the mandate store: the named grant asserts "enrolled in", its `job_ids` and `coverage: enrolled`; the capped grant "job cap 1 reached" and `none`; project-wide "covered by project-wide" and `project_wide`; the research exclusion `none`. Enrolling past the cap fails the capped `job_ids` |
-| `tests/after-merge.test.ts` | a ledger refusal throws and writes no record, so the merge store names it and a retry can still create | S06-2 | mapped | real ledger corruption now reaches the failure through recordMerge, leaves no deploy record and retries successfully; S06-deploy mutation fails this consumer. |
-| `tests/landing-proof.test.ts` | landed: merge, multi-commit squash, rebase onto an advanced base and a later edit, all with the branch deleted | 05-7 | mapped | cp_teardown on held local jobs asserts `landed_by_git` with `ancestry` for the merge commit, `path_tree` with 3 paths, origin's own base sha and a witness reachable at or after the squash for the two-commit squash and later edit, and the replayed commit as the rebase's witness; one `teardown_landing_proven` event each. The worktree never fetched the squash, so a proof that does not fetch the base by sha reads unknown and fails `landed_by_git`. The read-only runner guard runs with the units in `tests/forge-runtime-retained.test.ts` |
-| `tests/landing-proof.test.ts` | landed: path names with spaces, newlines and pathspec magic are compared literally | 05-7 | mapped | NC-30: without `:(literal)` the glob `star*[ab].txt` also compares origin's own `starXa.txt`, and the odd-paths job fails `landed_by_git` as `unpushed` |
-| `tests/landing-proof.test.ts` | not proven: partial, near-miss and extra content never pass | 05-7 | mapped | six labelled path near misses assert unpushed. The added post-squash extra commit remains unlanded assertion compares [false,unpushed]; control L1 derives paths through HEAD^ (ignoring the final commit) and fails it with [true,undefined], reason landed_by_git. Exact patch and command below; fixed case passes |
-| `tests/landing-proof.test.ts` | not proven: a stale tracking ref that held the squash is not the base origin advertises | 05-7 | mapped | the worktree's `origin/main` holds the squash while origin's main was reset past it: teardown asserts `unpushed` with "survives here only as a stale remote-tracking ref". A proof based on the tracking ref finds the squash and passes it |
-| `tests/landing-proof.test.ts` | unknown: missing inputs, broken commands, odd history and every budget keep the lease | 05-7 | retained | moved verbatim to `tests/forge-runtime-retained.test.ts` (P3b, relocated S06): each case bends one git answer (unreachable origin, failed fetch, shallow clone, two merge bases, a hung command) or injects a limit or clock, and no entry point exposes those seams. 05-7 pins the reachable outcomes: landed or `unpushed` |
-| `tests/landing-proof.test.ts` | defaultGit kills a git that outlives its timeout and answers status null | 05-7 | retained | moved verbatim to `tests/forge-runtime-retained.test.ts` (P3b, relocated S06): a git that hangs past its timeout needs an injected alias no entry point runs |
-| `tests/landing-proof.test.ts` | the pre-release recheck refuses a proof whose HEAD moved or whose tree went dirty | 05-7 | retained | moved verbatim to `tests/forge-runtime-retained.test.ts` (P3b, relocated S06): the window between the proof and the lease release is inside one teardown call, which no entry point can interleave a write into |
-| `tests/merges.test.ts` | a merged PR is recorded from what gh reports, and the pr receipt becomes merged | 05-5 | mapped | P3c control M1 flips head_branch_deleted: the receipt tuple at landing.test.ts:760 fails, actual false versus expected true. Reproduce with the M1 patch and command in P3b review controls below; fixed case passes |
-| `tests/merges.test.ts` | picp-d0p: a bound job's receipt names the PR head branch and is marked bound | 05-5 | mapped | a seeded fleet record with `bound_pr` and branch `cp-b55w` asserts `head_branch` `cp-b55w` and `bound: true` in the result and on disk. Comparing the job id instead of the bound branch fails it as "not this job's delivery" |
-| `tests/merges.test.ts` | nothing is recorded for a PR gh does not call merged | 05-5 | mapped | NC-28: an open PR is not refused, and its "as open, not MERGED" match fails. The no-merge-commit and other-branch answers assert their refusals, no receipt and the PR receipt still `open` |
-| `tests/merges.test.ts` | an unreachable gh refuses and names force as the honest exit | 05-5 | mapped | P3c control M2 removes force fallback advice: assertion force stays the exit for the unprovable case fails, expected /cp_teardown <job> force/. Exact patch and command below; fixed case passes |
-| `tests/merges.test.ts` | a job with no PR receipt must be told which PR, and an unknown job is refused | 05-5 | mapped | P3c control M3 defaults a missing PR to 77: /carries no PR receipt/ fails, actual could not read PR 77. Exact patch and command below; fixed case passes |
-| `tests/merges.test.ts` | an unreadable receipt is no receipt, never an exception out of a gate | 05-5 | retained | preserved in tests/forge-observers-retained.test.ts: missing and unsafe ids cannot pass fleet validation to the receipt reader. |
-| `tests/merges.test.ts` | forge PR 2: a GitLab squash MR is recorded with its squash commit, provider and project, never through gh | 05-6 | mapped | P3c control M4 drops squash strategy inference: MR 7 receipt tuple fails, actual unknown versus expected squash. Exact patch and command below; fixed case passes |
-| `tests/merges.test.ts` | forge PR 3: a GitLab normal merge records its merge commit, never infers a strategy, and asks git nothing about reachability | 05-6 | mapped | MR 10 (merge and squash commits) asserts the merge commit, the source head, base `main` and `squash`; MR 11 (merge commit only) asserts strategy `unknown`. Both merge commits are absent from origin, so asking git for reachability would refuse them |
-| `tests/merges.test.ts` | forge PR 2: a GitLab fast-forward MR records its head only when git sees it on the target | 05-6 | mapped | NC-29: MR 9's head is not on origin and must be refused ("names no merge commit"); once origin's main is that head it records it with strategy `unknown` and the PR receipt `merged` |
-| `tests/merges.test.ts` | forge PR 2: a stored receipt for another job or branch is refused, and a crash before the fleet patch is repaired | 05-6 | mapped | P3c control M5 skips repairing an existing receipt: actual [false,false,open,1], expected [false,true,merged,1]. Exact patch and command below; fixed case passes |
-| `tests/merges.test.ts` | forge PR 2: a mismatched observation records nothing, and a legacy receipt with no forge block still reads | 05-6 | mapped | P3c control M6 drops the GitLab web_url repository check: /could not read PR .*\(mismatch: / fails, actual merged but names no merge commit. Exact patch and command below; fixed case passes |
-| `tests/merges.test.ts` | #326: afterRecorded runs on new and existing receipts; a throwing port leaves the receipt and names the failure | S06-2 | mapped | real ledger corruption preserves receipt, names deploy failure and retry, then quiet idempotent replay; 05-5 covers no opt-in. S06-deploy mutation fails the actual call. |
 | `tests/ci-watch.test.ts` | rerunwake-12z: the derived key carries the attempt, and stays historical without a run id | 05-S02b-legacy | retained | S02 declaration 8 retained verbatim in tests/ci-watch-retained.test.ts. Actions rejects id-less runs before derivation; no CommandPost entry supplies that helper-only run. Attempt identities remain covered by 05-8 / NC-32; consumer refusal and legacy-arrival controls do not replace this helper assertion. |
-| `tests/ci-watch.test.ts` | two ticks with identical facts and an observed arrival wake once | 05-8 | mapped | S02 declaration 15; confirmed green is absent on repeat; NC-41 fails an arrived green attempt is not announced again. |
-| `tests/ci-watch.test.ts` | rerunwake-12z: a re-run that fails again on the same head wakes again | 05-8 | mapped | S02 declaration 19; NC-32 forces attempt 1 identity and fails a new attempt is a new failure even on the same head. |
-| `tests/ci-watch.test.ts` | rerunwake-12z: a green re-run after a red attempt wakes | 05-8 | mapped | S02 declaration 20; NC-39 suppresses green and fails a green rerun follows a failed attempt. |
-| `tests/ci-watch.test.ts` | rerunwake-12z: a re-run of an already-announced green head is a new fact | 05-8 | mapped | S02 declaration 21; NC-32 forces attempt 1 identity and fails a new attempt is a new failure even on the same head; the same scenario also checks green attempt 4 after confirmed attempt 3. |
-| `tests/ci-watch.test.ts` | rerunwake-12z: the same completed attempt polled twice wakes once | 05-8 | mapped | S02 declaration 22; NC-40 removes red arrival deduplication and fails an arrived attempt is not announced again. |
-| `tests/ci-watch.test.ts` | a force-push makes the new head a new key, and does not retract the old one | 05-8 | mapped | S02 declaration 24; NC-S02-key fails pushed-head key includes its current head; NC-S02-history pins historical red facts. |
-| `tests/ci-watch.test.ts` | ci_failed, then a force-push, then green: the failure is neither repeated nor retracted | 05-8 | mapped | S02 declaration 25; NC-S02-history fails one journal event per completed attempt before reaching the pushed-green historical count; NC-S02-key pins current-head identity. |
-| `tests/ci-watch.test.ts` | a job that leaves the watch set is pruned from the state file | 05-8 | mapped | S02 declaration 26; NC-S02-prune fails finished deliveries leave the watch. |
-| `tests/ci-watch.test.ts` | the watcher writes only its own state file: no awaiting rows, no receipts | 05-S03-memory | mapped | S03 declaration 41; S03-fleet-write adds a fleet receipt write to the watch-store mutation and fails a watch tick writes no receipts or fleet state. Positive case also confirms arrival persistence, unchanged fleet and zero awaiting/checkpoint rows. |
-| `tests/ci-watch.test.ts` | state/ci-watch.json round-trips and refuses an invalid shape | 05-S03-memory | mapped | S03 declaration 42; real corrupt on-disk JSON/schema/missing metadata/null jobs recover to schema-versioned arrival state; S03-schema bypasses the read validator and fails corrupt memory is forgotten, not a failed read (1 instead of 0). |
-| `tests/ci-watch.test.ts` | an unreadable state file degrades to no memory instead of throwing out of a tick | 05-S03-memory | mapped | S03 declaration 43; S03-corrupt throws from the JSON catch and fails corrupt memory is forgotten, not a failed read (1 error instead of 0); docs/testing-migration-s03-declarations.md records the executed control. |
-| `tests/ci-watch.test.ts` | the notice is a headline plus facts, and says green is not authorization | 05-S03-notice | mapped | S03 declaration 46; S03-authority replaces the authorization disclaimer and fails /evidence, not authorization/i on the actual parent message. |
-| `tests/ci-watch.test.ts` | the green notice sends the parent to cp_integrate, never back to gh (cp-3zbp) | 05-S03-notice | mapped | S03 declaration 47; S03-advice replaces the two integration advice strings and fails /cp_integrate/ on the actual parent message. |
-| `tests/ci-watch.test.ts` | a red notice asks no merge question at all | 05-S03-notice | mapped | S03 declaration 48; S03-red replaces the red policy text and fails /Merging red is forbidden/ on the actual red notice. |
-| `tests/ci-watch.test.ts` | picp-wzq: a red notice names the failing run, and only that run, without moving its key | 05-S03-notice | mapped | S03 declaration 49; S03-failed-run selects the skipped first run and fails only the failing run is named. The original remains until the complete declaration map and final controls permit retirement. |
-| `tests/ci-watch.test.ts` | confirming the same key twice is a no-op | 05-S03-memory | mapped | Declaration 44; earlier 05-8/NC-42 fails arrival is idempotent; rerun S03-confirm removes the announced guard and fails duplicate arrival changes nothing (key instead of []). |
-| `tests/ci-watch.test.ts` | HELD PR WAITING names deadline ownership and a ${hold} sampled hold, read once with no extra step | 05-S03-sampled | mapped | S03 declaration 52; actual mocked reviewer reports through report_verdict; absent, long present and unreadable hold variants assert one notice with bounded sampled state and no forge read during handback. S03-sampled replaces the snapshot with Hold not sampled and all three variants fail their respective sampled-state assertions. |
-| `tests/ci-watch.test.ts` | jje.2 review interleaving: a trigger that went stale during the step never starts a review | 05-S03-stale | mapped | S03 declaration 76; the real forge barrier changes generation or observed head during the read. Replayed S03-generation/S03-observed-head share the #stale bypass; both independent subtests fail review_started versus stale. Exact patch and base: docs/testing-migration-s03-replayed-controls.md. |
-| `tests/ci-watch.test.ts` | jje.2 lagged watcher: a step that read a newer remote head never starts a review for the old trigger | 05-S03-stale | mapped | S03 declaration 77; S03-remote-head disables the post-read remote-head mismatch check and fails remote: review_started versus stale; the mock reviewer is configured and no credentials are involved. |
-| `tests/ci-watch.test.ts` | REST parsing: the PR url, the fields, and nothing GraphQL | 05-S03-rest | mapped | S03 declaration 50; raw REST fields reach pr_merged with exact head and merge commit; empty output and unsupported URL yield no PR fact. S03-rest-merged forces parsed merged false and fails REST merged flag reaches the public observation (pr_closed versus pr_merged). |
-| `tests/ci-watch.test.ts` | green: verdict returns promptly, a single deadline resumes merge without a parent turn | 05-S03-restart | mapped | S03 declaration 51; the real parent resumes the persisted review deadline and lands quietly; 05-S03-sampled exercises actual report_verdict handback with no forge read and 05-S03-deadline covers all nine guards. Replayed S03-deadline removes the timer trigger and fails the restarted deadline reaches its terminal gate after 45000ms. Exact patch and base: docs/testing-migration-s03-replayed-controls.md. |
-| `tests/ci-watch.test.ts` | unload-parent PR2 drain: a drain that starts mid-sequence stops before the next step | 05-S03-between | mapped | S03 declaration 69; drain begins while real branch update is blocked; one step completes and no next update starts. S03-mid-drain forces the continuation drain read false and fails wait versus draining after it wrongly enters another integration step. |
-| `tests/ci-watch.test.ts` | jje.2 interleaving: phase, generation and head are re-checked before every step, not once | 05-S03-between | mapped | S03 declaration 74; real server-update barrier changes phase, generation or observed head; S03-each-step deletes the loop stale check and each variant fails stopped versus stale, with repeated server updates for head/generation. |
-| `tests/ci-watch.test.ts` | jje.2 fail closed: a head-bearing CI or verdict trigger whose owning head cannot be read waits, and acts nowhere | 05-S03-stale | mapped | S03 declaration 79; remove the owning head during the real forge read; no reviewer starts and action waits. Replayed S03-missing-head bypasses #stale and the independent missing-head subtest fails review_started versus wait. Exact patch and base: docs/testing-migration-s03-replayed-controls.md. |
-| `tests/ci-watch.test.ts` | jje.2 wait re-arms: the same job\|head\|event can act again once it settled on wait, but never while it is in flight | 05-S03-replay | mapped | S03 declaration 75; loss of watch memory re-emits an identical fact through ciTick; forge barrier pins in-flight coalescing, then repeat acts after wait. S03-coalesce removes seen guard and fails no additional integration read (3 versus 2); S03-rearm removes wait-key deletion and fails same identity can read again after settling on wait (2 versus 3). |
-| `tests/ci-watch.test.ts` | deadline resumes through the ${guard} guard without mutation | 05-S03-deadline | mapped | S03 declaration 53; real deadlines cover changed head, missing head, generation, phase, closed, drain and shutdown; 05-S03-owner covers loss of enabled ownership in a real parent. S03-owner removes ownsHome from enabled and fails disabled ownership cannot advance beyond the review wait (surface versus wait). All nine deadline subcases pass in 296 seconds, and the owner case passes separately. |
-| `tests/ci-watch.test.ts` | jje.2 red: a failed head stops visibly once, and a duplicate event never promotes again | 05-S03-red-replay | mapped | S03 declaration 62; lost watch memory replays a stopped red fact through ciTick with no new integration read or durable notice; revoked authority permits no promotion. S03-red-coalesce removes seen guard and fails a completed red replay starts no integration step (3 versus 2). |
-| `tests/ci-watch.test.ts` | jje.2 generation: a CI fact carries the generation it was observed on — a reopened job is a new identity, an old one is stale | 05-S03-red-replay | mapped | S03 declaration 72; reopening persisted generation allows the same attempt to act again; stale generation during a read is also pinned by 05-S03-stale. S03-generation-key removes generation from continuationKey and fails a reopened generation is a new continuation identity (3 versus 4). |
-| `tests/ci-watch.test.ts` | rerunwake-12z: a new CI attempt is a new continuation fact, the same one is a replay | 05-S03-red-replay | mapped | S03 declaration 73; same red attempt replays no integration, attempt two reaches integration once. S03-run-key drops run identity and fails a new attempt reaches integration once (2 versus 3). |
-| `tests/ci-watch.test.ts` | jje.2 serial: two held PRs in one project never overlap a step, and a manual cp_integrate waits its turn | 05-13 | mapped | S03 declaration 61; S07's real forge barrier queues another job and a manual advance, then asserts the returned spent allowance. Rerun S07-NC-2 changes the lane to jobId and fails another job in the project waits behind the CI repair (advanced versus queued). |
-| `tests/ci-watch.test.ts` | onCi records its outcome per CI key; a pending review starts no second review | 05-S03-outcome | mapped | S03 declaration 80; existing real-parent case asserts suppressed/review_pending, no parent turn and one pending reviewer across replay/restart. S03-outcome makes ciOutcome return undefined and fails receipt of the CI GREEN handled-in-code/no-parent-turn relay (real parent wakes instead); restored case passes in 19 seconds. |
 | `tests/ci-watch.test.ts` | jje.2 snapshot: a startup trigger carries the head and generation it was observed on, and a later change stops it | 05-S03b-snapshot | mapped | Declaration 78; real startup queues two held jobs behind the first forge read, then disk changes the second head or generation. S03b-snapshot-generation fails queued startup cannot adopt a reopened generation; S03b-snapshot-head fails stale queued startup reaches no forge read. Executed patches and base SHA: docs/testing-migration-s03b-controls.md. |
 | `tests/ci-watch.test.ts` | awaiting_merge PR6: a handoff that parked relays once without waking the parent; the parked job is then stale | 05-S03b-parked | mapped | Declaration 64; real handoff parks and emits exactly one durable continuation:parked notice without a model turn; S03b-parked control removing quiet parked recognition fails parking is relayed without waking the parent model (1 versus 0). Shared parked exclusion is covered by 05-S02-1 and NC-S02-eligibility. Patch and SHA: docs/testing-migration-s03b-controls.md. |
 | `tests/ci-watch.test.ts` | restart arms only the remaining interval; expired pass advances and retry never re-arms | 05-S03b-expired | mapped | Declaration 54; 05-S03-restart proves remaining window after process restart; expired startup completes immediately and operational retry produces no new startup deadline. S03b-expiration removes deadline expiry and fails expired startup reaches terminal result; S03b-retry rearms retry and fails operational retry never rearms its deadline. Patches/SHA in docs/testing-migration-s03b-controls.md. |
@@ -631,155 +487,19 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/ci-watch.test.ts` | a landed continuation relays once without waking the parent; actionable stops still wake | 05-S03b-stops | mapped | Declaration 58; real surface/retry stop messages reach the parent model once. 05-S03-restart pins one quiet landed relay, full URL and no parent-work instructions; existing 05-S03-red pins the resolve notice. S03b-stop removes stop notifications and both actual-parent wake assertions time out. Resolve notification remains subject to current held_stop_resolve wake policy. |
 | `tests/ci-watch.test.ts` | jje.2 revise: a revise verdict continues nothing — the fix belongs to the job's own implementer | 05-S03b-revise | mapped | Declaration 60; real revise verdict reaches its author, starts no second reviewer and schedules no continuation; S03b-revise fails verdict-event count. 05-S03b-gate pins real research-gate pass with no PR continuation; S03b-gate fails the event count (1 versus 0). |
 | `tests/ci-watch.test.ts` | unload-parent PR2: a landing calls onLanded once; a stop does not, and a throwing onLanded never undoes the landing | 05-S03b-hook | mapped | Declaration 70; real armed-file failure is journaled after a completed landing, and stop releases nothing. S03b-landed-hook and S03b-stop-hook independently fail these assertions. Existing mission armed-dependant case pins one dispatch and no replay spawn. Synchronous injected callback throw is redundant-unreachable: the sole production callback returns void starting async release; this named e2e pins the consumer's real failure outcome. |
-| `tests/ci-watch.test.ts` | in-flight continuation is busy work for held release and clears even when a step throws | 05-S03-busy | mapped | S03 declaration 57; actual dispatch at a one-worker cap cannot release the integrating author. A filesystem write fault reaches continuation's error catch, after which another real dispatch releases that author. S03-driving and S03-driving-finally fail the spawn-cap rejection and the post-fault doesNotReject assertion respectively. |
-| `tests/ci-watch.test.ts` | a HELD PR LANDED notice carries no tracker advice | 05-S03-restart | mapped | S03 declaration 59; the actual parent UI receives one landed notice without tracker/write-back advice. S03-tracker appends tracker sync pending to the done hint and fails the notice's doesNotMatch assertion. |
-| `tests/ci-watch.test.ts` | human_handoff: one durable notice per handed-off head, none for a repeat, and the human's merge lands | 05-S03-red-replay | mapped | S03 declaration 63; same-head surface stops share their durable identity, a pushed change-request head adds one stop, and an actual human fast-forward merge is observed, recorded and landed once. S03-stop-head drops the head from the stop notice id and fails a changed handed-off head gets one more durable stop (2 versus 3). |
-| `tests/ci-evidence.test.ts` | recordForwardedCi: stores source forwarded with its quote; an identical repeat appends nothing | 05-9 | mapped | tool writes verify head, repo, source, quote, ISO timestamp, URL, duplicate suppression and changed-result append; NC-43 fails `an identical forwarded result is stored once`, actual 2 expected 1 |
-| `tests/ci-evidence.test.ts` | recordForwardedCi: refuses a short or moved head, a credential-shaped quote or url, and another repo | 05-9 | mapped | real cp_integrate rejects short/stale heads, secret quote, credential/query URLs and mismatched persisted repo, with no refused writes; NC-33, NC-44 and NC-46 fail the superseded-head, invalid-input and repository-binding assertions |
-| `tests/ci-evidence.test.ts` | recordForwardedCi: keeps the newest CI_EVIDENCE_KEEP observations | 05-9 | mapped | 52 real tool writes assert the bound and oldest retained quote; NC-47 fails `every bounded forwarded write succeeds`, actual false expected true, because unsliced history exceeds the schema bound |
-| `tests/ci-evidence.test.ts` | forwardedCi (viewer): the newest forwarded result for the head only; native rows and other heads are not forwarded | 05-9 | mapped | real /api/jobs over seeded legacy data asserts pending A, green B, unseen/unknown heads and missing file, with unsafe URL stripped; NC-48 fails `viewer ignores native and other-head evidence and strips unsafe URLs`, actual green expected in_progress |
-| `tests/ci-evidence.test.ts` | cp_integrate record_ci: needs a verbatim operator quote and the job's current head; stores display-only evidence | 05-9 | mapped | real parent verifies absent head, fabricated quote, superseded head, stored source/quote/repo and native gate; NC-45 fails `forwarded evidence rejects invalid input through the tool`, expected /no known current head/, actual recorded success |
-| `tests/parked-ci.test.ts` | parked CI: head A green, then the moved head B pending, then red — each stored for its own head, journaled once | 05-12 | mapped | real parent timer asserts A green, completed idle sweep without another Actions read, B pending then red, and exact head-tagged journal; NC-36 and NC-49 fail green arrival and idle-read assertions |
-| `tests/parked-ci.test.ts` | parked CI: a permission denial is loud even after a green; a transient fault is unknown; both back off | 05-12 | mapped | same-head denial replaces green with unreadable/1, moved-head transport fault stores unknown/2; completed sweeps exceed the base interval without re-reading, and faults journal nothing; NC-50–NC-52 and NC-55 fail counter, classification and backoff assertions |
-| `tests/parked-ci.test.ts` | parked CI: a resume or re-park during the read drops the observation; merged/closed snapshots read nothing | 05-12 | mapped | NC-53 and NC-54 fail stale-observation and terminal-read assertions; external forge barriers span public resume/re-park, and CLOSED/MERGED snapshots issue no native CI read. |
-| `tests/parked-ci.test.ts` | parked CI: a held job reads nothing | 05-12 | redundant-unreachable | The direct held-with-handoff helper input cannot reach the observer: watch candidates must be awaiting_merge, and the fleet schema refuses legacy held parking records before observation. 05-12 pins both boundaries with `a held job is not read by the parked CI timer` and `the public sweep rejects a legacy held parking record before observing CI`; this is not a claimed failing phase-guard control. |
 | `tests/awaiting-merge-tick.test.ts` | a lock taken after session_start still sweeps on the next interval | — | retained | verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest). Missing entry point: transfer ownership to an already-started parent session. Acquisition occurs only at session_start, before timer registration; release only at session_shutdown. The startup-guard probe passes 05-12 and is not a failing consumer control. |
 | `tests/awaiting-merge-tick.test.ts` | session_shutdown clears the startup catch-up and the interval | — | retained | verbatim in tests/awaiting-merge-tick-retained.test.ts (convert, owner P3c-rest). Missing entry point: observe timer callbacks after shutdown while ownership remains held, including before the startup timer fires. Shutdown releases the lock and exits; removing both clears passes 05-12 but fails the retained unit. |
-| `tests/main-ci.test.ts` | #1 failure latches with workflow/failing line | 05-11 | mapped | declaration map #1; nc-red: expected demo red row, got [] |
-| `tests/main-ci.test.ts` | #2 log fallback to failed job | 05-11 | mapped | nc-fallback: missing failure log falls back to the failed job |
-| `tests/main-ci.test.ts` | #3 red while another workflow is pending | 05-11 | mapped | nc-red: expected red row while own pending run exists, got [] |
-| `tests/main-ci.test.ts` | #4 green/pending/absent runs never latch | 05-11 | mapped | nc-empty: green, pending, absent and wrong-head runs never latch |
-| `tests/main-ci.test.ts` | #5 repeat/new-tip red preserves original latch | 05-11 | mapped | nc-repeat: repeat red emits one parent wake |
-| `tests/main-ci.test.ts` | #6 stale green never clears | 05-11 | mapped | nc-unknown-clear: stale green never clears main red |
-| `tests/main-ci.test.ts` | #7 all current-tip runs green clears once | 05-11 | mapped | nc-stale: pending current-tip workflow prevents clearing |
-| `tests/main-ci.test.ts` | #8 git/gh faults and invalid rev-parse output | 05-11 | retained | only non-sha successful git output remains in tests/main-ci-retained.test.ts; real fetch faults map to failed git fetch names project and cause (nc-fetch-fault), gh faults to nc-read-fault |
 | `tests/main-ci.test.ts` | #9 unreadable state never overwritten and reported | 05-main-corrupt | mapped | nc-corruption: in-flight latch mutation preserves corrupt bytes; timer names the corrupt file |
-| `tests/main-ci.test.ts` | #10 project latches independent | 05-11 | mapped | nc-project: latching demo preserves another project's latch |
 | `tests/main-ci.test.ts` | #11 missing clone skipped | 05-main-scope | mapped | nc-missing-clone: missing clone creates no project error |
-| `tests/main-ci.test.ts` | #12 tick wake deduplication and refused send | 05-11 | retained | only synthetic false send remains in tests/main-ci-retained.test.ts; delivered deduplication maps to repeat red emits one parent wake (nc-repeat) |
-| `tests/main-ci.test.ts` | #13 red/green notice wording | 05-11 | mapped | nc-format: main red wake reaches parent provider |
-| `tests/main-ci.test.ts` | #14 classifyMainTip old-head raw inputs | 05-11 | retained | verbatim in tests/main-ci-retained.test.ts; main-CI timer's readActionsCi filters old-head rows before the classifier; 05-11 pins stale-head consumer outcome |
 | `tests/main-ci.test.ts` | #15 main-red hold, ancestry and corrupt state | 05-main-red | mapped | nc-ancestry: cp_integrate.next expected wait, actual review |
-| `tests/main-ci.test.ts` | #16 dynamic runs never count | 05-11 | mapped | nc-dynamic: empty latch assertion fails for own dynamic run |
-| `tests/main-ci.test.ts` | #17 foreign/bot/missing actors, insensitive identity | 05-11 | mapped | nc-actor: empty latch assertion fails for foreign actor; S covers case-insensitive authenticated bot |
-| `tests/main-ci.test.ts` | #18 re-run triggering actor | 05-11 | mapped | nc-rerun-actor: empty latch assertion fails for foreign attempt-two actor |
 | `tests/main-ci.test.ts` | #19 inactive mandate skips even internal login callback | 05-main-scope | retained | verbatim in tests/main-ci-retained.test.ts; timer shares cached login with other watches, so extra main callback invocation has no attributable subprocess effect; ordering probe passes S but fails this unit |
 | `tests/main-ci.test.ts` | #20 unreadable login fails open | 05-main-scope | mapped | nc-login-fault: failed login reads no CI |
-| `tests/main-ci.test.ts` | #21 legacy/foreign release/replacement | 05-11 | mapped | nc-release: legacy latch releases even while main CI is inconclusive |
 | `tests/main-ci.test.ts` | #22 memoized login retries/validation | 05-main-scope | mapped | nc-login-validation: invalid login retries, successful login is cached |
 | `tests/main-ci.test.ts` | #23 own-row hold only under enforced scope | 05-main-red | mapped | nc-hold-scope: expected no active mandate / not blocking fact |
 | `tests/main-ci.test.ts` | #24 scope resolution fails open | 05-main-red | mapped | nc-scope-fault: expected ENOTDIR / not blocking fact |
-| `tests/main-ci.test.ts` | #25 exact Actions query/attempt and counted metadata | 05-11 | mapped | nc-actor fails foreign-actor consumer assertion and original filtered-array expectation (nc-actor-units.log) |
-| `tests/main-ci.test.ts` | #26 unreadable jobs/malformed runs named error | 05-11 | mapped | nc-read-fault: malformed main CI read names project and cause |
-| `tests/main-ci.test.ts` | #27 release notice wording | 05-11 | mapped | nc-format-release: legacy release reaches parent |
-| `tests/main-ci.test.ts` | #28 main infra rerun claim/attempt two | 05-11 | mapped | nc-main-rerun: infra rerun does not latch demo |
-| `tests/main-ci.test.ts` | #29 suite failure never reruns | 05-11 | mapped | nc-suite: suite failure claims no infra rerun |
-| `tests/main-ci.test.ts` | #30 refused rerun latches/keeps claim | 05-11 | mapped | nc-rerun-refusal: refused infra rerun latches main |
-| `tests/main-ci.test.ts` | #31 infra classifier setup/suite/cancel table | 05-4 | mapped | nc-setup: Set up Node expects wait/rerun but resolves; nc-suite also fails original suite exclusion |
-| `tests/main-ci.test.ts` | #32 policy guards including green/id-less runs | 05-4 | retained | only green/id-less guard inputs remain in tests/main-ci-retained.test.ts; attempt-two/cancel/timeout/drain outcomes map to F, suite no-claim to T with nc-suite |
-| `tests/main-ci.test.ts` | #33 path builders malformed fields | 05-1 | retained | verbatim in tests/main-ci-retained.test.ts; timer/cp_integrate obtain real git SHAs and validated project/job/run identities rather than forwarding invalid builder fields |
-| `tests/main-ci.test.ts` | #34 normalization | 05-11 | mapped | nc-normalization: normalized actor, identity, jobs and steps produce the own red latch |
 | `tests/main-ci.test.ts` | #35 retry budget | 05-main-deadlines | mapped | nc-retry-budget: spent retry budget reports the failed request without another attempt; 05-1 asserts structural malformed JSON makes one request |
 | `tests/main-ci.test.ts` | #36 cross-page deadline | 05-main-deadlines | mapped | nc-page-budget: one total deadline bounds runs plus jobs |
 | `tests/main-ci.test.ts` | #37 runner timeout forwarding | 05-main-deadlines | mapped | nc-request-timeout: per-request timeout cancels hung gh; 05-1 pins nonzero read failures |
-| `tests/main-ci.test.ts` | #38 legacy CI denial classifier strings | 05-1 | retained | verbatim in tests/main-ci-retained.test.ts; cp_integrate's Actions-only reader does not submit legacy Checks/status/gh-run strings |
-| `tests/main-ci.test.ts` | #39 browser/backend rendered parity | 05-1 | mapped | nc-viewer-label: rendered CI label matches the backend denial; HTTP viewer job is rendered by real CiSignal, including needs advice |
-| `tests/diff-review.test.ts` | 01 configuration schema | DR-11 | mapped | nc-config: missing expected pipeline contract rejection |
-| `tests/diff-review.test.ts` | 02 parallel verdict schema | DR-03 | mapped | nc-summary: real pass must persist without gate-only fields |
-| `tests/diff-review.test.ts` | 03 checkpoint paths | DR-11 | mapped | nc-checkpoint-path: review question must differ from ship decision |
-| `tests/diff-review.test.ts` | 04 review paths | DR-03 | mapped | nc-review-path: persisted public review verdict path must exist before the fixture reads it; directing persistence to gate-1.json fails this assertion |
-| `tests/diff-review.test.ts` | 05 subject-independent policy | DR-06 | mapped | nc-flags: flagged pass must remain pass |
-| `tests/diff-review.test.ts` | 06 prior attempt isolation | DR-03 | mapped | nc-prior-isolation: assert.doesNotReject fails on consuming plan-gate history as a diff verdict |
-| `tests/diff-review.test.ts` | 07 complete small subject | DR-01 | mapped | nc-three-dot: branch file count must be three |
-| `tests/diff-review.test.ts` | 08 quoted paths | DR-02 | mapped | nc-quoted: quoted input must stop as policy |
-| `tests/diff-review.test.ts` | 09 stat cap | DR-02 | mapped | nc-stat: wide input must stop as policy |
-| `tests/diff-review.test.ts` | 10 byte cap | DR-02 | mapped | nc-incomplete: byte input must stop as policy |
-| `tests/diff-review.test.ts` | 11 three-dot range | DR-01 | mapped | nc-three-dot: excludes base-only file |
-| `tests/diff-review.test.ts` | 12 import and schema identity | DR-18 | retained | `tests/diff-review-retained.test.ts`: cp_review cannot expose source import identity; runtime budget is mapped by DR-18 |
-| `tests/diff-review.test.ts` | 13 configured preferences | DR-09 | mapped | nc-preference: selected project model must receive the request |
-| `tests/diff-review.test.ts` | 14 configured refusals | DR-10 | mapped | nc-preference: configured allowlist must reject without fallback |
-| `tests/diff-review.test.ts` | 15 role denial | DR-10 | mapped | nc-role-deny: ignoring deniedFor must miss the expected role rejection |
-| `tests/diff-review.test.ts` | 16 inherited impact axes | DR-10 | mapped | nc-inherited-route: large-risky model must be selected |
-| `tests/diff-review.test.ts` | 17 authenticated fallback | DR-10 | mapped | nc-fallback: usable spare review must not reject |
-| `tests/diff-review.test.ts` | 18 absent dispatch | DR-04 | mapped | nc-refusal: error must name cp_dispatch |
-| `tests/diff-review.test.ts` | 19 research refusal | DR-04 | mapped | nc-recovery-actions: error must name cp_gate |
-| `tests/diff-review.test.ts` | 20 unpushed refusal | DR-04 | mapped | nc-recovery-actions: error must name git push |
-| `tests/diff-review.test.ts` | 21 canonical current and non-ship heads | DR-11 | mapped | nc-head: ship reaches done; nc-research-head: research must hold |
-| `tests/diff-review.test.ts` | 21 unknown-job headSha sub-probe | DR-11 | retained | `tests/diff-review-retained.test.ts`: PipelineRunner.advance checks fleet.get(ship_id) before the sole headSha caller |
-| `tests/diff-review.test.ts` | 22 persisted pass and privacy | DR-03 | mapped | nc-summary: pass persistence must succeed |
-| `tests/diff-review.test.ts` | 23 gate-only decision summary | DR-03 | mapped | nc-summary: summary-bearing pass must persist |
-| `tests/diff-review.test.ts` | 24 stranded summary replay | DR-08 | mapped | nc-summary: stranded review must settle as pass |
-| `tests/diff-review.test.ts` | 25 synthetic throwing shutdown | DR-16 | retained | `tests/diff-review-retained.test.ts`: cp_review has no entry point that replaces manager.shutdown with a one-shot throwing function |
-| `tests/diff-review.test.ts` | 26 equivalent patch reuse | DR-05 | mapped | nc-equivalence: same patch must reuse prior attempt |
-| `tests/diff-review.test.ts` | 27 reviewer mandate | DR-07 | mapped | nc-mandate: paused authority must reject spend |
-| `tests/diff-review.test.ts` | 28 changed head delta | DR-05 | mapped | nc-no-delta: delta_from must match prior head |
-| `tests/diff-review.test.ts` | 29 frozen task packet | DR-03 | mapped | nc-task-copy: copied task must equal original |
-| `tests/diff-review.test.ts` | 30 unchanged head context | DR-03 | mapped | nc-context: README manifest entry must be included |
-| `tests/diff-review.test.ts` | 31 authorized addenda | DR-03 | mapped | nc-addenda: brief must name task-addenda.md |
-| `tests/diff-review.test.ts` | 32 task boundary | DR-03 | mapped | nc-task-boundary: brief must name source of truth |
-| `tests/diff-review.test.ts` | 33 bounded oversized task | DR-08 | mapped | nc-task-cap: copied task must be bounded |
-| `tests/diff-review.test.ts` | 34 same-branch promotion | DR-12 | mapped | nc-promotion: actual implementer request needs same-branch guidance |
-| `tests/diff-review.test.ts` | 35 missing implementer surfaces | DR-06 | mapped | nc-delivery-error: wake must name no live worker |
-| `tests/diff-review.test.ts` | 36 flags do not veto | DR-06 | mapped | nc-flags: pass must stay pass |
-| `tests/diff-review.test.ts` | 37 stat overflow no reviewer | DR-02 | mapped | nc-stat: wide input must stop before model |
-| `tests/diff-review.test.ts` | 38 omitted code stops | DR-02 | mapped | nc-incomplete: hidden-code subtest must stop as policy |
-| `tests/diff-review.test.ts` | 39 partial pass not reused | DR-05 | mapped | nc-partial-pass: inherited review must be absent |
-| `tests/diff-review.test.ts` | 40 bounded supplemental history | DR-13 | mapped | nc-no-delta: small complete delta must pass |
-| `tests/diff-review.test.ts` | 41 incomplete stop replay | DR-02 | mapped | nc-policy-replay: replay must retain attempt one |
-| `tests/diff-review.test.ts` | 42 rebased upstream | DR-15 | mapped | nc-delta: rebase subtest must pass |
-| `tests/diff-review.test.ts` | 43 merged upstream | DR-15 | mapped | nc-delta: merge subtest must pass |
-| `tests/diff-review.test.ts` | 44 unmerged upstream | DR-15 | mapped | nc-no-delta: none subtest must keep delta_from |
-| `tests/diff-review.test.ts` | 45 unknown and malformed prior heads | DR-14 | mapped | nc-delta: both subtests must not reject |
-| `tests/diff-review.test.ts` | 46 operational ladder | DR-16 | mapped | nc-operational: second cause must be persistent |
-| `tests/diff-review.test.ts` | 47 recycled worktree | DR-01 | mapped | nc-canonical: canonical review must not reject |
-| `tests/diff-review.test.ts` | 48 reviews-per-branch cap | DR-18 | mapped | nc-cap: fifth verdict must escalate |
-| `tests/diff-review.test.ts` | 49 third revise | DR-12 | mapped | nc-promotion: review-three implementer request needs branch guidance |
-| `tests/diff-review.test.ts` | 50 third pass | DR-19 | mapped | nc-third-pass: third verdict must pass |
-| `tests/diff-review.test.ts` | 51 fifth review and sixth refusal | DR-18 | mapped | nc-cap: fifth verdict must escalate |
-| `tests/diff-review.test.ts` | 52 final fix eligibility and findings | DR-12 | mapped | nc-final-fix-eligibility (DR-20) rejects forbidden checkpoints; nc-max-findings (DR-18) pins checkpoint evidence; nc-final-delivery (DR-12) requires all twenty 400-character findings verbatim in the author request after approved public integration |
-| `tests/diff-review.test.ts` | 53 async reviewed head | DR-17 | mapped | nc-start-head pins returned head; nc-wakeup-head removes wake headSha and fails equality to started.head_sha (actual undefined) |
-| `tests/diff-review.test.ts` | 54 pending fence | DR-17 | mapped | nc-pending-head: refusal must name reviewed head |
-| `tests/diff-review.test.ts` | 55 synchronous stat stop | DR-19 | mapped | nc-stat: wide subject must synchronously stop as policy |
-| `tests/foreign-ci-watch.test.ts` | selection: an open job naming a PR in its project's repo, never a closed job, another repo, or a PR this home shipped | S06-1 | mapped | checked is exactly the selected job; deferred remains selected; other repo, issue, closed and own PR are excluded. Removing closed filtering fails checked (S06 selection control). |
-| `tests/foreign-ci-watch.test.ts` | green runs on the head give one ci_green, and the next tick gives nothing; runs are asked of the URL's base repo by head sha | 05-10 | mapped | exact ci_green then empty replay; base-repo head query; S06-1 observes operator notice text through real parent RPC/UI output. |
-| `tests/foreign-ci-watch.test.ts` | a moved head gives head_moved once, then CI is re-derived for the new head | 05-10 | mapped | head_moved assertion fails under S06 moved-head control; next-head ci_failed carries the new sha. |
-| `tests/foreign-ci-watch.test.ts` | a merged PR gives pr_merged and is never queried again; an unreadable PR is reported once and dropped | S06-1 | mapped | 05-10 asserts pr_merged and no later query; S06-1 asserts stopped length 1 for HTTP 404 and subsequent checked empty. |
-| `tests/foreign-ci-watch.test.ts` | a failing query backs off and names a cause once; the per-tick cap defers the rest | S06-1 | mapped | HTTP 502 yields one named error, immediate tick checks nothing, forced-due repeat yields no duplicate error; default cap checks 20 and defers job 21. |
-| `tests/foreign-ci-watch.test.ts` | the store is a total read: a corrupt file is no memory, and the next write is valid | S06-1 | mapped | corrupt JSON is replaced by the selected job's valid memory, then dispatch reads it and refuses in_progress. |
-| `tests/foreign-ci-watch.test.ts` | evidence only: the ports are read-only, the module reaches no merge or wake path, and its query never waits | S06-1 | retained | Static source-import and injected port-key inspection has no runtime product entry point. Unit preserved verbatim in tests/foreign-ci-watch-retained.test.ts; S06-1 pins real no-merge behavior and actual operator evidence notice. |
-| `tests/foreign-ci-watch.test.ts` | ghForeignRuns reads Actions runs and attempt jobs on the PR's base repo; an unreadable read never becomes [] | S06-1 | mapped | 05-10 asserts base-repo sha query; S06-1 reaches Actions through real gh, rejects malformed head and HTTP 403 instead of empty runs. |
-| `tests/foreign-ci-watch.test.ts` | the reviewer gate waits for CI, then carries its state into the brief; past the timeout it goes ahead with CI unknown | S06-1 | mapped | real worker request contains timed-out CI unknown; disabling timeout fails accepted dispatch (S06 timeout control). Armed real worker gets green; gh ENOENT yields watch-off text; non-reviewers reach ordinary preflight. |
-| `tests/foreign-ci-watch.test.ts` | binding (c) holds for the head the reviewer reads: a success recorded for an old head never releases once the PR moved | S06-1 | mapped | 05-10 rejects moved-head dispatch; S06-1 rejects unreadable current head and carries that reason after timeout. |
-| `tests/foreign-ci-watch.test.ts` | CommandPost.dispatch arms a waiting reviewer; the armed release (no blockers) re-runs the gate every pass and starts it only once CI completed | S06-1 | mapped | real cp_dispatch writes armed state without fleet or provider request; real scheduler release starts one worker after green and its actual request carries the head's CI. |
-| `tests/forge-runtime.test.ts` | an unregistered project keeps gh for GitHub refs and names its GitLab MR failure | S06-3 | mapped | legacy GitHub receipt is recorded_by gh pr view with observed main; unsupported GitLab records nothing and runs no gh. 05-5 covers bare PR numbers. Runtime legacy mutation removes fallback and fails recording. |
-| `tests/forge-runtime.test.ts` | a registered GitLab project gets the GitLab observer and its base branch | S06-4 | mapped | 05-6 records the registered GitLab MR through its own API without gh; S06-4's real teardown lands on configured trunk while main lacks the change. Removing projectBaseBranch fails teardown. |
-| `tests/forge-runtime.test.ts` | unknown: missing inputs, broken commands, odd history and every budget keep the lease | 05-7 | retained | Preserved in tests/forge-runtime-retained.test.ts. Custom limits, injected clock, hung runner and command stdout bends are not accepted by cp_teardown. 05-7 pins normal git landing and near misses, but does not expose these runner budgets. |
-| `tests/forge-runtime.test.ts` | defaultGit kills a git that outlives its timeout and answers status null | 05-7 | retained | Preserved in tests/forge-runtime-retained.test.ts. Product teardown uses fixed production timeouts; it cannot supply alias.hang or a 100ms timeout through its entry point. Keep runner timeout regression. |
-| `tests/forge-runtime.test.ts` | the pre-release recheck refuses a proof whose HEAD moved or whose tree went dirty | 05-7 | retained | Preserved in tests/forge-runtime-retained.test.ts. No public barrier between proof generation and the immediate synchronous release recheck; keep dirty/moved proof assertions without mocking internal git. |
-| `tests/forge-observers.test.ts` | github observer runs the same gh pr view command and normalizes its answer | 05-5 | retained | tests/forge-observers-retained.test.ts preserves barrel alias identity and injected command/cwd assertions; a product consumer cannot observe export identity or an injected cwd. |
-| `tests/forge-observers.test.ts` | github observer names gh failures, non-JSON and missing fields | S06-5 | mapped | actual recordMerge refusals preserve unavailable/invalid/open, first-line cause and no receipt; missing-fields uses a bare PR number. |
-| `tests/forge-observers.test.ts` | gitlab observer sends one GET with the token only in PRIVATE-TOKEN, nested path encoded, no redirects followed | 05-6 | retained | tests/forge-observers-retained.test.ts preserves security assertions on RequestInit.signal and exact header keys; server observation cannot inspect the client's AbortSignal. |
-| `tests/forge-observers.test.ts` | gitlab states and landing shas: merge, squash, fast-forward, open, closed, locked | S06-5 | mapped | 05-6 asserts merge/squash priority and git-proved fast-forward; S06-5 asserts all four nonmerged states, diff_refs fallback and deleted source identity through receipts/refusals. |
-| `tests/forge-observers.test.ts` | gitlab malformed or conflicting answers are named, never an empty success | S06-5 | mapped | all 14 malformed/mismatch/unsupported answer variants refuse actual receipts; HTML and token/body text never reach the error. Conflicting-head mutation fails expected refusal. |
-| `tests/forge-observers.test.ts` | gitlab HTTP failures: 401/403/404/429/500 are unavailable with status and static cause only | S06-5 | mapped | Real local HTTP refusals and a registered CP_S06_UNSET_TOKEN credential name assert status, unset-variable diagnostic, no token header and no body/value leakage. review-unset mutation removes that diagnostic and fails its assertion. |
-| `tests/forge-observers.test.ts` | gitlab redirects are refused, not followed, and the token is not forwarded | S06-5 | mapped | local HTTPS redirect is refused with HTTP 302; exactly one request, no destination request, no Location/body/token text exposed. |
-| `tests/forge-observers.test.ts` | gitlab network errors, timeouts and oversize bodies fail closed without echoing the exception | S06-5 | retained | tests/forge-observers-retained.test.ts preserves custom 5ms timeout, 1024-byte limits and ReadableStream cancellation assertions; no product entry accepts these injected transports/limits. |
-| `tests/forge-observers.test.ts` | a foreign or malformed MR reference makes zero requests | S06-5 | retained | Retained verbatim in tests/forge-observers-retained.test.ts for the empty-string guard: CommandPost.recordMerge replaces empty pr with its bound receipt URL before the observer, so cp_merged cannot submit an empty ref to that guard. All nonempty guards, including a registered /gitlab web prefix, now run through recordMerge; review-prefix fails the prefix refusal. |
-| `tests/forge-observers.test.ts` | a gitlab.com project sends GITLAB_TOKEN; with none set it reads unauthenticated | 05-6 | retained | tests/forge-observers-retained.test.ts preserves default gitlab.com token selection with injected transport; local HTTPS fixtures use a configured custom token name, never a live public forge. |
-| `tests/forge-observers.test.ts` | observerFor: unknown hosts are unsupported with no request; known kinds get their observer | S06-5 | mapped | S06-3 records legacy GitHub and refuses a registered unknown host without gh; 05-6 records GitLab through its API; S06-5 rejects a foreign GitLab reference without a request. review-provider disables the GitLab adapter and fails the expected invalid-answer refusal. |
-| `tests/forge-observers.test.ts` | an unreadable receipt is no receipt, never an exception out of a gate | S06-5 | retained | tests/forge-observers-retained.test.ts keeps missing/unsafe receipt-reader inputs; fleet validation rejects unsafe ids before a public caller reaches that helper. |
-| `tests/forge-observers.test.ts` | #326: afterRecorded runs on new and existing receipts; a throwing port leaves the receipt and names the failure | S06-2 | mapped | real corrupt deploy ledger preserves the merge receipt, emits retry text, creates no after-merge record, retries once and then yields no after_merge field. 05-5 pins no opt-in and existing receipt handling. Throwing catch mutation fails actual call. |
-| `tests/forge-observers.test.ts` | a ledger refusal throws and writes no record, so the merge store names it and a retry can still create | S06-2 | mapped | corrupt real ledger reproduces refusal through recordMerge, preserves receipt, leaves no deploy record and creates exactly one deploy on retry. |
-| `tests/held-release.test.ts` | 4B1-T2: releasable keeps only live, idle, not-stopping held ship/pr authors, oldest reported first | S06-6 | retained | Retained verbatim in tests/held-release-retained.test.ts for dead-but-not-reaped selection: CommandPost.dispatch calls manager.reap in makeRoom before releasable, so cp_dispatch cannot present that unit's dead registered worker to the selector. The unit also directly asserts the pre-reap active count and completes an injected shutdown promise; cp_dispatch/cp_send cannot inject a shutdown promise or pause between synchronous selection reads. Public oldest selection and admission are pinned by S06-6. |
-| `tests/held-release.test.ts` | 4B1-T2: a script record is never releasable, even one shaped as a held ship/pr author | S06-6 | retained | tests/held-release-retained.test.ts preserves defense in depth for a fleet shape rejected by the public fleet schema; no internal mocking is added. |
-| `tests/held-release.test.ts` | 4B1-T2: capacityFree counts only releasable authors as free (dead, busy, stopping never) | S06-6 | mapped | Real CommandPost dispatchQueue.drain at spawn_cap starts queued work by releasing an author; after authors are resumed/working, another job remains queued without a worker. review-capacity returning false fails the queued-worker assertion. |
-| `tests/held-release.test.ts` | 4B1-T2: makeRoom — reviewer, below the cap, and nothing releasable all do nothing | S06-6 | retained | Retained verbatim in tests/held-release-retained.test.ts for the gate-reviewer role guard. CommandPost.dispatch with profile gate-reviewer fails assembleBrief with missing original_task before makeRoom; cp_review/cp_gate spawn their reviewer directly, bypassing HeldRelease, and cp_revive requires a fleet record those reviewers do not create. S06-6 pins below-cap author survival and queued refusal when no author is releasable. |
-| `tests/held-release.test.ts` | 4B1-T2: makeRoom at the cap releases the oldest author, journals it, and reserves the slot | S06-6 | mapped | real dispatch journals exact victim/for_job, preserves held phase/lease/branch, starts the caller and successfully resumes the released author. Reservation consumption and shutdown are pinned by actual worker requests and revival, rather than fake call counts. |
-| `tests/held-release.test.ts` | 4B1-T2: two concurrent makeRoom calls with one releasable author — exactly one wins | S06-6 | retained | tests/held-release-retained.test.ts preserves concurrent direct calls and exactly-one reservation; no public barrier exposes the same artificial one-victim selection race deterministically. |
-| `tests/held-release.test.ts` | 4B1-T3(a): a journal failure rejects before any shutdown and leaks no reservation | S06-6 | mapped | an events.jsonl directory makes real journal append fail EISDIR before caller starts; restoring it allows same-job dispatch, exact release event and successful author resume. Removing reservation cleanup makes retry reject duplicate reservation. |
-| `tests/held-release.test.ts` | 4B1-T3(b): a shutdown that rejects leaks no reservation and leaves nothing stopping | S06-6 | retained | tests/held-release-retained.test.ts preserves injected shutdown rejection; the real RPC shutdown cannot be made to throw the supplied fake error through a public request. |
-| `tests/held-release.test.ts` | 4B1-T3(c): busy flips between selection and re-check — refused, nothing shut down or journaled | S06-6 | retained | tests/held-release-retained.test.ts preserves the getter that flips busy on its second read; production has no await between selection and recheck, so an external request cannot inject that getter race. |
-| `tests/held-release.test.ts` | wasReleased: the last lifecycle marker decides | S06-6 | mapped | cp_send restores the released author and records worker_revived; another send reaches that revived process with unchanged pid, while ordinary workers do not need restoration. review-lifecycle returning false fails sending to the released author. |
 | `tests/integrate.test.ts` | S09 declaration 41: pending head | 05-S09-1 | mapped | NC-2: advance != wait; S09 ledger. |
 | `tests/integrate.test.ts` | S09 declaration 42: workflows present | 05-S09-1 | mapped | NC-2: advance != surface. |
 | `tests/integrate.test.ts` | S09 declaration 43: older branch run | 05-S09-1 | mapped | NC-1: surface != wait. |
@@ -858,39 +578,6 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/integrate.test.ts` | S10 declaration 118: truncated review | 05-S10-3 | mapped | review-gate: pass and approved-flag truncation each advance != review. |
 | `tests/integrate.test.ts` | S10 declaration 119: moved flag | 05-S10-3 | mapped | review-gate: advance != review. |
 | `tests/integrate.test.ts` | S10 declaration 120: fallback review | 05-S10-3 | mapped | review-gate: advance != review despite merge approval. |
-| `tests/pr-bind.test.ts` | an open same-repo PR on the default base binds, by number or url | 05-S14-bind | mapped | S14-NC7: dropping draft from forge facts fails the actual worker prompt's bound identity, draft, head and base assertion; real bound reports resolve by number, including case-insensitive URL and #number |
-| `tests/pr-bind.test.ts` | every unsafe PR is refused with a DispatchError naming the cause | 05-S14-unsafe | mapped | S14-NC6: making refuse return undefined produces Missing expected rejection in all eight unsafe forge/ref cases; fixed dispatch writes no fleet record and sends no model request |
-| `tests/pr-bind.test.ts` | assertBranchFree refuses a held or failed holder and allows a done one | 05-S14-bind | mapped | S14-NC9: inverted holder eligibility accepts held/failed peers and rejects done/self failed rows; legacy fleet seeding reaches all four through dispatch |
-| `tests/pr-bind.test.ts` | the bound note forbids history rewrite: merge the base, fast-forward push only | 05-S14-bind | mapped | S14-NC8: permitting history rewrite fails the model request assertion never rewrite or drop existing commits; full bound note clauses asserted |
-| `tests/pr-bind.test.ts` | absent local branch: created tracking origin, HEAD at the PR head | 05-S14-bind | mapped | S14-NC4: bypassed checkout fails leased HEAD=c2; fixed also asserts branch feat and upstream origin/feat |
-| `tests/pr-bind.test.ts` | local branch behind origin: fast-forwarded | 05-S14-bind | mapped | S14-NC4: bypassed checkout fails leased HEAD=c2 |
-| `tests/pr-bind.test.ts` | diverged local branch: kept on a salvage ref, then reset to origin | 05-S14-bind | mapped | S14-NC5: removing update-ref fails salvage object-id equality with local commit; fixed also checks c2 checkout |
-| `tests/pr-bind.test.ts` | a branch checked out in another worktree is refused | 05-S14-bind | mapped | S14-NC4: bypassed checkout produces Missing expected rejection; fixed creates no model request |
-| `tests/pr-bind.test.ts` | HEAD not at the PR's headRefOid is refused | 05-S14-bind | mapped | S14-NC4: bypassed checkout produces Missing expected rejection; fixed creates no model request |
-| `tests/merge-permission.test.ts` | 1 CLEAN and HAS_HOOKS | 05-S14-permission | mapped | S14-NC1: both actual merge cases fail permission permitted |
-| `tests/merge-permission.test.ts` | 2 BLOCKED required review | 05-S14-permission | mapped | S14-NC1: counted approving review assertion fails |
-| `tests/merge-permission.test.ts` | 3 CHANGES_REQUESTED | 05-S14-permission | mapped | S14-NC1: pending reviews assertion fails |
-| `tests/merge-permission.test.ts` | 4 required checks | 05-S14-permission | mapped | S14-NC1: pending checks/test assertion fails |
-| `tests/merge-permission.test.ts` | 5 unreadable rules | 05-S14-permission | mapped | S14-NC1: unknown_block assertion fails |
-| `tests/merge-permission.test.ts` | 6 BEHIND DIRTY DRAFT and isDraft | 05-S14-permission | mapped | S14-NC17: four pending cause assertions fail |
-| `tests/merge-permission.test.ts` | 7 UNSTABLE | 05-S14-permission | mapped | S14-NC1: pending unstable and 403 assertion fails |
-| `tests/merge-permission.test.ts` | 8 UNKNOWN status or mergeability | 05-S14-permission | mapped | S14-NC1/NC2: retry assertions fail; unknown mergeability actually merges |
-| `tests/merge-permission.test.ts` | 9 absent empty or novel status | 05-S14-permission | mapped | S14-NC2: all three unreadable assertions fail |
-| `tests/merge-permission.test.ts` | 10 tolerant rules parser | 05-S14-permission | mapped | S14-NC15: counted review assertions fail; fixed payload/empty/nonJSON/403 variants pass |
-| `tests/merge-permission.test.ts` | 11 strict rule proof | 05-S14-permission | mapped | S14-NC14: all seven stale-base strict/false/string/missing/wrong-type/empty/unreadable variants fail |
-| `tests/merge-permission.test.ts` | 12 endpoint args | 05-S14-permission | mapped | S14-NC16: external endpoint equality fails twice |
-| `tests/merge-permission.test.ts` | 13 blocking CI wait shape | 05-S14-permission | retained | tests/merge-permission-retained.test.ts; cp_integrate executes builder output directly; worker guard receives worker commands, so no public entry composes this builder with detectCiWait |
-| `tests/pr-resolve.test.ts` | 1 typo owner corrected and named | 05-S14-resolution | mapped | S14-NC3: stored receipt URL equality fails |
-| `tests/pr-resolve.test.ts` | 2 missing PR refusal | 05-S14-resolution | mapped | S14-NC3: expected no-PR reason is empty |
-| `tests/pr-resolve.test.ts` | 3 unavailable gh owner mismatch | 05-S14-resolution | mapped | S14-NC3: expected mismatch reason is empty |
-| `tests/pr-resolve.test.ts` | 4 matching owner unverified | 05-S14-resolution | mapped | S14-NC3: unverified event count 0 instead of 1 |
-| `tests/pr-resolve.test.ts` | 5 CI watch corrected URL | 05-S14-resolution | mapped | S14-NC18: actual watch REST repository read assertion fails while corrected intake receipt remains valid |
-| `tests/pr-resolve.test.ts` | 6 bound PR by number never list | 05-S14-bind | mapped | S14-NC10: waiting instead of held; fixed actual view 169 --repo and no-list assertions |
-| `tests/pr-resolve.test.ts` | 7 wrong PR or moved branch refused | 05-S14-bind | mapped | S14-NC11: both expected correction reasons are empty, reports wrongly held |
-| `tests/pr-resolve.test.ts` | 8 bound report accepted held | 05-S14-bind | mapped | S14-NC10: waiting instead of held |
-| `tests/pr-resolve.test.ts` | 9 GitLab mixed verified refused unverified | 05-S14-gitlab | retained | tests/pr-resolve-retained.test.ts; validateEnvelope rejects missing pr_url before intake resolver, including no-given bound MR fallback; all reachable variants additionally exercised through real reporter |
-| `tests/pr-resolve.test.ts` | 10 GitLab intake hold and refusal | 05-S14-gitlab | mapped | S14-NC12: wrong branch wrongly held and expected correction reason empty |
-| `tests/review-approval.test.ts` | 1 approval rounds hash identity missing file | 05-S14-approval | retained | tests/review-approval-retained.test.ts; pipeline artifacts.info fails before missing-file matches; only production write uses seq 1; no public entry for seq 2/3 overwrite. S14-NC13 independently proves reachable edited-plan checkpoint stays pending |
 | `tests/shipped-seen.test.ts` | a second render in the same session collapses Shipped to the count, not the rows | 06-S20-shipped | mapped | S20-repeat: second tool result fails none-new count; old PR row repeats |
 | `tests/shipped-seen.test.ts` | the collapse holds when the render also changes the awaiting set and supplies new labels | 06-S20-shipped | mapped | S20-repeat: second call with changed label and awaiting fails none-new count; decision still asserted |
 | `tests/shipped-seen.test.ts` | REGRESSION (cp-b5eg): a reloaded extension in the same session still collapses Shipped | 06-S20-shipped | mapped | S20-disk: resumed parent tool result repeats both rows instead of none-new count |
@@ -993,72 +680,6 @@ V2 forwarded-evidence controls NC-43–NC-48 were each applied alone, then resto
 `npm run test:one -- --test-name-pattern='operator-forwarded CI' tests/e2e/landing.test.ts` exited 1 at the
 assertion named in its regression row; the restored scenario passes. Logs: `NC-43.log` through `NC-48.log`.
 
-<!-- patch:NC-43 -->
-```diff
-diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
---- a/src/ci-evidence.ts
-+++ b/src/ci-evidence.ts
-@@ -69,1 +69,1 @@
--	if (last && last.result === observation.result && last.operator_quote === observation.operator_quote && last.url === observation.url) return last;
-+	if (false && last && last.result === observation.result && last.operator_quote === observation.operator_quote && last.url === observation.url) return last;
-```
-<!-- /patch:NC-43 -->
-
-<!-- patch:NC-44 -->
-```diff
-diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
---- a/src/ci-evidence.ts
-+++ b/src/ci-evidence.ts
-@@ -59,1 +59,1 @@
--		const hit = SECRET_PATTERNS.find((pattern) => pattern.re.test(text));
-+		const hit = undefined;
-```
-<!-- /patch:NC-44 -->
-
-<!-- patch:NC-45 -->
-```diff
-diff --git a/extensions/command-post/tools-integrate.ts b/extensions/command-post/tools-integrate.ts
---- a/extensions/command-post/tools-integrate.ts
-+++ b/extensions/command-post/tools-integrate.ts
-@@ -178,1 +178,1 @@
--				if (!currentHead) throw new Error(`cp_integrate record_ci: ${params.job_id} has no known current head; wait for the CI watch to observe one`);
-+				if (false && !currentHead) throw new Error(`cp_integrate record_ci: ${params.job_id} has no known current head; wait for the CI watch to observe one`);
-```
-<!-- /patch:NC-45 -->
-
-<!-- patch:NC-46 -->
-```diff
-diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
---- a/src/ci-evidence.ts
-+++ b/src/ci-evidence.ts
-@@ -67,1 +67,1 @@
--	if (prior && prior.repo !== input.repo) throw new CiEvidenceError(`${input.jobId}'s CI evidence is for ${prior.repo}, not ${input.repo}`);
-+	if (false && prior && prior.repo !== input.repo) throw new CiEvidenceError(`${input.jobId}'s CI evidence is for ${prior.repo}, not ${input.repo}`);
-```
-<!-- /patch:NC-46 -->
-
-<!-- patch:NC-47 -->
-```diff
-diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
---- a/src/ci-evidence.ts
-+++ b/src/ci-evidence.ts
-@@ -72,1 +72,1 @@
--		observations: [...(prior?.observations ?? []), observation].slice(-CI_EVIDENCE_KEEP),
-+		observations: [...(prior?.observations ?? []), observation],
-```
-<!-- /patch:NC-47 -->
-
-<!-- patch:NC-48 -->
-```diff
-diff --git a/src/viewer/overview-jobs.ts b/src/viewer/overview-jobs.ts
---- a/src/viewer/overview-jobs.ts
-+++ b/src/viewer/overview-jobs.ts
-@@ -59,1 +59,1 @@
-- const latest = (Array.isArray(list) ? list.map(obj) : []).filter((o): o is Json => o?.source === "forwarded" && str(o.head_sha)?.toLowerCase() === head?.toLowerCase() && Object.hasOwn(FORWARDED_VIEW, str(o.result) ?? "") && timestamp(o.observed_at))
-+ const latest = (Array.isArray(list) ? list.map(obj) : []).filter((o): o is Json => o?.source === "forwarded" && Object.hasOwn(FORWARDED_VIEW, str(o.result) ?? "") && timestamp(o.observed_at))
-```
-<!-- /patch:NC-48 -->
-
 V2 parked-CI controls NC-49–NC-55 use
 `npm run test:one -- --test-name-pattern='parked PR timer' tests/e2e/landing.test.ts`.
 Each exited 1 at the assertion in its regression row and was restored. NC-54 removes both open-snapshot gates:
@@ -1068,192 +689,10 @@ and legacy held parking records violate the fleet schema before observation. Sce
 `a held job is not read by the parked CI timer` and `the public sweep rejects a legacy held parking record before observing CI`.
 These assertions exercise valid lifecycle state and raw legacy disk data; no internal ports are mocked.
 
-<!-- patch:NC-49 -->
-```diff
-diff --git a/src/parked-ci.ts b/src/parked-ci.ts
---- a/src/parked-ci.ts
-+++ b/src/parked-ci.ts
-@@ -42,1 +42,1 @@
--		if (prior?.head_sha === head && Number.isFinite(checked) && now().getTime() < checked + wait) return;
-+		if (false && prior?.head_sha === head && Number.isFinite(checked) && now().getTime() < checked + wait) return;
-```
-<!-- /patch:NC-49 -->
-
-<!-- patch:NC-50 -->
-```diff
-diff --git a/src/parked-ci.ts b/src/parked-ci.ts
---- a/src/parked-ci.ts
-+++ b/src/parked-ci.ts
-@@ -56,1 +56,1 @@
--			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: ciReadDenied(error ?? "") ? CI_UNREADABLE : "unknown" });
-+			store.record(jobId, { ...observed, consecutive_failures: 0, last_error: error, last_ci: ciReadDenied(error ?? "") ? CI_UNREADABLE : "unknown" });
-```
-<!-- /patch:NC-50 -->
-
-<!-- patch:NC-51 -->
-```diff
-diff --git a/src/parked-ci.ts b/src/parked-ci.ts
---- a/src/parked-ci.ts
-+++ b/src/parked-ci.ts
-@@ -56,1 +56,1 @@
--			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: ciReadDenied(error ?? "") ? CI_UNREADABLE : "unknown" });
-+			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: "unknown" });
-```
-<!-- /patch:NC-51 -->
-
-<!-- patch:NC-52 -->
-```diff
-diff --git a/src/parked-ci.ts b/src/parked-ci.ts
---- a/src/parked-ci.ts
-+++ b/src/parked-ci.ts
-@@ -56,1 +56,1 @@
--			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: ciReadDenied(error ?? "") ? CI_UNREADABLE : "unknown" });
-+			store.record(jobId, { ...observed, consecutive_failures: failures + 1, last_error: error, last_ci: CI_UNREADABLE });
-```
-<!-- /patch:NC-52 -->
-
-<!-- patch:NC-53 -->
-```diff
-diff --git a/src/parked-ci.ts b/src/parked-ci.ts
---- a/src/parked-ci.ts
-+++ b/src/parked-ci.ts
-@@ -52,1 +52,1 @@
--		if (current?.phase !== "awaiting_merge" || current.awaiting_merge?.cycle !== cycle) return;
-+		if (false && (current?.phase !== "awaiting_merge" || current.awaiting_merge?.cycle !== cycle)) return;
-```
-<!-- /patch:NC-53 -->
-
-<!-- patch:NC-54 -->
-```diff
-diff --git a/src/awaiting-merge-watch.ts b/src/awaiting-merge-watch.ts
---- a/src/awaiting-merge-watch.ts
-+++ b/src/awaiting-merge-watch.ts
-@@ -154,1 +154,1 @@
--				if (read.snap.state === "open") {
-+				if (true) {
-diff --git a/src/parked-ci.ts b/src/parked-ci.ts
---- a/src/parked-ci.ts
-+++ b/src/parked-ci.ts
-@@ -35,1 +35,1 @@
--		if (snap.state !== "open" || record.phase !== "awaiting_merge" || cycle === undefined) return;
-+		if (record.phase !== "awaiting_merge" || cycle === undefined) return;
-```
-<!-- /patch:NC-54 -->
-
-<!-- patch:NC-55 -->
-```diff
-diff --git a/src/parked-ci.ts b/src/parked-ci.ts
---- a/src/parked-ci.ts
-+++ b/src/parked-ci.ts
-@@ -40,1 +40,1 @@
--		const wait = nextDueMs(cadence, { failures, settled: SETTLED.has(prior?.last_ci ?? "") });
-+		const wait = nextDueMs(cadence, { failures: 0, settled: SETTLED.has(prior?.last_ci ?? "") });
-```
-<!-- /patch:NC-55 -->
-
 NC-39 through NC-42 each use their own patch below and this command:
 `npm run test:one -- --test-name-pattern='CI watch persists arrival' tests/e2e/landing.test.ts`.
 Each command exited 1 at the named assertion; production mutations were restored. Logs are `NC-39.log` through
 `NC-42.log` in this job's artifact directory. The restored 05-8 scenario passes all four assertions.
-
-<!-- patch:NC-39 -->
-```diff
-diff --git a/src/ci-watch.ts b/src/ci-watch.ts
---- a/src/ci-watch.ts
-+++ b/src/ci-watch.ts
-@@ -289,1 +289,1 @@
--		return [at("ci_green", { reason: verdict.reason, conclusion: "success" }, identity)];
-+		return [];
-```
-<!-- /patch:NC-39 -->
-
-<!-- patch:NC-40 -->
-```diff
-diff --git a/src/ci-watch.ts b/src/ci-watch.ts
---- a/src/ci-watch.ts
-+++ b/src/ci-watch.ts
-@@ -719,1 +719,1 @@
--			if (announced.has(observation.key)) continue;
-+			if (observation.event !== "ci_failed" && announced.has(observation.key)) continue;
-```
-<!-- /patch:NC-40 -->
-
-<!-- patch:NC-41 -->
-```diff
-diff --git a/src/ci-watch.ts b/src/ci-watch.ts
---- a/src/ci-watch.ts
-+++ b/src/ci-watch.ts
-@@ -719,1 +719,1 @@
--			if (announced.has(observation.key)) continue;
-+			if (observation.event !== "ci_green" && announced.has(observation.key)) continue;
-```
-<!-- /patch:NC-41 -->
-
-<!-- patch:NC-42 -->
-```diff
-diff --git a/src/ci-watch.ts b/src/ci-watch.ts
---- a/src/ci-watch.ts
-+++ b/src/ci-watch.ts
-@@ -463,1 +463,1 @@
--				if (existing.announced.includes(key)) continue;
-+				if (false && existing.announced.includes(key)) continue;
-```
-<!-- /patch:NC-42 -->
-
-<!-- patch:NC-32-attempt-identity -->
-```diff
-diff --git a/src/ci-watch.ts b/src/ci-watch.ts
---- a/src/ci-watch.ts
-+++ b/src/ci-watch.ts
-@@ -322,1 +322,1 @@
--		.map((run) => `${run.databaseId}.${run.attempt ?? 1}`)
-+		.map((run) => `${run.databaseId}.1`)
-```
-
-<!-- patch:NC-33 -->
-```diff
-diff --git a/src/ci-evidence.ts b/src/ci-evidence.ts
---- a/src/ci-evidence.ts
-+++ b/src/ci-evidence.ts
-@@ -53,1 +53,1 @@
--	if (input.currentHead && input.currentHead.toLowerCase() !== head) {
-+	if (false && input.currentHead && input.currentHead.toLowerCase() !== head) {
-```
-<!-- patch:NC-34 -->
-```diff
-diff --git a/src/foreign-ci-watch.ts b/src/foreign-ci-watch.ts
---- a/src/foreign-ci-watch.ts
-+++ b/src/foreign-ci-watch.ts
-@@ -282,1 +282,1 @@
--		if (head && entry.head_sha && entry.head_sha !== head) {
-+		if (false && head && entry.head_sha && entry.head_sha !== head) {
-```
-<!-- patch:NC-35 -->
-```diff
-diff --git a/src/main-ci.ts b/src/main-ci.ts
---- a/src/main-ci.ts
-+++ b/src/main-ci.ts
-@@ -154,1 +154,1 @@
--	return runs.filter((run) => run.event !== "dynamic" && run.triggeringActor !== undefined && sameLogin(run.triggeringActor, login));
-+	return [...runs];
-```
-<!-- patch:NC-36 -->
-```diff
-diff --git a/src/awaiting-merge.ts b/src/awaiting-merge.ts
---- a/src/awaiting-merge.ts
-+++ b/src/awaiting-merge.ts
-@@ -98,1 +98,0 @@
--			observeCi: parkedCiObserver({ home: host.home, fleet: host.fleet, runs: host.runs, read: (record, sha) => readParkedActionsCi(host, record, sha) }),
-```
-<!-- patch:S07-NC-2 -->
-```diff
-diff --git a/src/held-continuation.ts b/src/held-continuation.ts
---- a/src/held-continuation.ts
-+++ b/src/held-continuation.ts
-@@ -175,1 +175,1 @@
--		const lane = this.#deps.fleet.get(jobId)?.project ?? jobId;
-+		const lane = jobId;
-```
 <!-- patch:S07-NC-1 -->
 ```diff
 diff --git a/src/send.ts b/src/send.ts
@@ -1262,15 +701,6 @@ diff --git a/src/send.ts b/src/send.ts
 @@ -245,1 +245,1 @@
 -				this.#options.mandates.assertPermitted("repair", { jobId: request.jobId, project: record.project, kind: record.kind }, fleet.read().jobs);
 +				// S07 negative control: omit repair authority check.
-```
-<!-- patch:NC-37 -->
-```diff
-diff --git a/src/integrate.ts b/src/integrate.ts
---- a/src/integrate.ts
-+++ b/src/integrate.ts
-@@ -1302,1 +1302,1 @@
--		const prior = input.step === "conflict" && !!input.headSha && priorRec?.head_sha !== input.headSha ? 0 : (priorRec?.resolve_attempts ?? 0);
-+		const prior = 0;
 ```
 
 ### P3b review controls reproduced by P3c
@@ -1362,122 +792,6 @@ reverted; each patch puts back one rule it introduced.
 What `--verify-regressions` checks: only that each recorded patch block hashes to its sha256, and that the bug commit
 exists in this repository. It does not apply the patch, and it does not rerun the e2e. The failing and fixed runs
 quoted below were run by hand when each control was recorded, and they are evidence only to that extent.
-
-<!-- patch:S06-moved -->
-```diff
-diff --git a/src/foreign-ci-watch.ts b/src/foreign-ci-watch.ts
---- a/src/foreign-ci-watch.ts
-+++ b/src/foreign-ci-watch.ts
-@@ -282 +282 @@
--		if (head && entry.head_sha && entry.head_sha !== head) {
-+		if (false && head && entry.head_sha && entry.head_sha !== head) {
-```
-
-<!-- patch:S06-timeout -->
-```diff
-diff --git a/src/foreign-ci-watch.ts b/src/foreign-ci-watch.ts
---- a/src/foreign-ci-watch.ts
-+++ b/src/foreign-ci-watch.ts
-@@ -334 +334 @@
--		if (!(now.getTime() < deadline)) return { line: `${target.url}: CI unknown — not completed within ${Math.round(timeout / 60_000)} min of ${job.created_at} (last seen: ${seen}).` };
-+		if (false) return { line: `${target.url}: CI unknown — not completed within ${Math.round(timeout / 60_000)} min of ${job.created_at} (last seen: ${seen}).` };
-```
-
-<!-- patch:S06-legacy -->
-```diff
-diff --git a/src/forge-runtime.ts b/src/forge-runtime.ts
---- a/src/forge-runtime.ts
-+++ b/src/forge-runtime.ts
-@@ -60 +60 @@
--	if (parseChangeRequestUrl(ref)?.kind !== "gitlab") return githubObserver(ports.run, ports.cwd);
-+	if (false) return githubObserver(ports.run, ports.cwd);
-```
-
-<!-- patch:S06-trunk -->
-```diff
-diff --git a/src/forge-runtime.ts b/src/forge-runtime.ts
---- a/src/forge-runtime.ts
-+++ b/src/forge-runtime.ts
-@@ -30 +30 @@
--	return registryEntry(home, project)?.entry.base_branch;
-+	return undefined;
-```
-
-<!-- patch:S06-conflict -->
-```diff
-diff --git a/src/forges/gitlab.ts b/src/forges/gitlab.ts
---- a/src/forges/gitlab.ts
-+++ b/src/forges/gitlab.ts
-@@ -160 +160 @@
--	if (sha && diffHead && sha !== diffHead) return refuse("invalid", "response head sha and diff_refs head disagree");
-+	if (false) return refuse("invalid", "response head sha and diff_refs head disagree");
-```
-
-<!-- patch:S06-deploy -->
-```diff
-diff --git a/src/merges.ts b/src/merges.ts
---- a/src/merges.ts
-+++ b/src/merges.ts
-@@ -172 +172 @@
--			return { ...result, after_merge: `after-merge deploy NOT created: ${first} — cp_merged ${result.receipt.job_id} retries` };
-+			throw error;
-```
-
-<!-- patch:S06-reservation -->
-```diff
-diff --git a/src/held-release.ts b/src/held-release.ts
---- a/src/held-release.ts
-+++ b/src/held-release.ts
-@@ -93 +93 @@
--			if (!transferred) release();
-+			if (false) release();
-```
-
-<!-- patch:S14-NC11 -->
-```diff
-diff --git a/src/pr-resolve.ts b/src/pr-resolve.ts
---- a/src/pr-resolve.ts
-+++ b/src/pr-resolve.ts
-@@ -218 +218 @@
--	if (target && (target.number !== bound.number || `${target.owner}/${target.repo}`.toLowerCase() !== ownerRepo.toLowerCase())) {
-+	if (false) {
-@@ -239 +239 @@
--	if (row.headRefName !== input.branch) {
-+	if (false) {
-```
-<!-- /patch:S14-NC11 -->
-
-<!-- patch:S14-NC13 -->
-```diff
-diff --git a/src/review-approval.ts b/src/review-approval.ts
---- a/src/review-approval.ts
-+++ b/src/review-approval.ts
-@@ -68 +68 @@
--		return sha256File(artifactPath) === approval.artifact_sha256;
-+		return true;
-```
-<!-- /patch:S14-NC13 -->
-
-<!-- patch:S14-NC15 -->
-```diff
-diff --git a/src/merge-permission.ts b/src/merge-permission.ts
---- a/src/merge-permission.ts
-+++ b/src/merge-permission.ts
-@@ -267 +267 @@
--	return rules;
-+	return [];
-```
-<!-- /patch:S14-NC15 -->
-
-<!-- patch:S14-NC5 -->
-```diff
-diff --git a/src/pr-bind.ts b/src/pr-bind.ts
---- a/src/pr-bind.ts
-+++ b/src/pr-bind.ts
-@@ -136,1 +136,0 @@
--		await run(["update-ref", salvaged, local.stdout.trim()], `keeping the diverged local ${head} at ${salvaged}`);
-```
-<!-- /patch:S14-NC5 -->
 <!-- patch:S20-repeat -->
 ```diff
 diff --git a/src/shipped-seen.ts b/src/shipped-seen.ts
@@ -2334,68 +1648,8 @@ index 25eb6e0..3094349 100644
 | NC-01 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-1 | NC-01-green | e5cc55b97d22e820228a709e858fbe2f7294fcc8dce00aa980f63982c09660f3 | wake observation names run 2 (skipped), not run 6 | pass |
 | NC-02 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-1 | NC-02-integrate | 0a2c3b3942c839731d201a0a07d8ddf2c6bf6ea2d6163d5a00430568bb3d6e86 | the ci fact does not end with (run 6 …/actions/runs/6) | pass |
 | NC-03 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-2 | NC-03-host | 0bb48b55ddc16d72b68109e136da58d310bb118ebbe641f411e9ba7980ef6ac0 | the enterprise ci fact links ghe.example.com/…/actions/runs/16 | pass |
-| NC-24 | `tests/actions-ci.test.ts` | 2404bb71d2c653c78cb751879d269948be1ffb59 | 05-1 | NC-24-html-403 | e72132413fc99cd02b4f925f8b2c27cb86970f5fd3a97564948945fed2d947d4 | an HTML 403 proxy page reads as the token's denial, not `read transport … status 403` | pass |
-| NC-25 | `tests/ci-configured.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-2 | NC-25-truncated-empty | 9136f6c7b38762eb24ae90db95957b08018ad14b9ce7ec99a8b64d04f10627ab | a truncated workflows page (total_count 3, no rows) reads `none (authoritative_empty)` | pass |
-| NC-26 | `tests/ci-access.test.ts` | 3701ebcf12e77e5f3bac90c498efdd56f0016c19 | 05-3 | NC-26-short-jobs | 8af5a117fa4f3344232b10a82f44e378f4c55de8632e1902025ec529063c119f | `ci.short` with 1 of 4 jobs reads ok "CI readable", expected warn "the Actions read failed (incomplete)" | pass |
-| NC-27 | `tests/ci-infra-rerun.test.ts` | 5e1dcaee597b7fb7deb4cbc4a538e104fff214b8 | 05-4 | NC-27-second-attempt | f21876229231409f51b2134f511e2234233fe8acbf75a5f5ae64b03435dcf960 | an infra failure on attempt 2 is rerun, not "a second failure is the parent's" | pass |
-| NC-28 | `tests/merges.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-5 | NC-28-open-pr | 6895859eab22d32f0a13f2a7240fde11f5e1b66e08c91d5ea07c88b48da41877 | an open PR passes the state rule and reads "merged but names no merge commit", not "as open, not MERGED — nothing is recorded" | pass |
-| NC-29 | `tests/merges.test.ts` | 3a27fd9a3c099512e779b3cf36e670efa71c7587 | 05-6 | NC-29-unseen-ff | d1140a88d18614739af2d16a773504d4784ed99314da8cd54762c08e060c9b4d | a fast-forward MR whose head origin's main lacks is recorded: "Missing expected rejection" | pass |
-| NC-30 | `tests/landing-proof.test.ts` | 3a27fd9a3c099512e779b3cf36e670efa71c7587 | 05-7 | NC-30-glob-paths | a7c56cdf50d4977e9ffaa5bace6e4d3cead67e685514bea31ae8a86046cba079 | the odd-paths job keeps its lease as `unpushed`, expected `landed_by_git` with `path_tree` | pass |
-| NC-31 | `tests/after-merge.test.ts` | 8532dda3b36d59141ef007d6996595ff2f825cbc | 05-5 | NC-31-pre-opt-in | bbd4b95f011b7fc8b6d9eea04c66a1ce7c3d169f9a7cd34abe807a103d40aa12 | a merge from before the opt-in creates a deploy job: "before opt-in" fails | pass |
-| NC-32 | `tests/ci-watch.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-8 | NC-32-attempt-identity | 31b8070cb5bf5755fe50f02b99ec4d0c69af3829ff01b31d1ab3dc1df4807bd8 | `a new attempt is a new failure even on the same head`: actual undefined, expected truthy | pass |
-| NC-33 | `tests/ci-evidence.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-9 | NC-33 | f3376f3e6c9824b272c272b574d5dba2f16bf53e3c8bf1536134ef052b5ee267 | expected /superseded head/, instead forwarded success recorded on bbbbbbbbbbbb | pass |
-| NC-34 | `tests/foreign-ci-watch.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-10 | NC-34 | 6404b4e7cc8ee8fd7bb6d253758e0727c482bcc8001b938351d9fe9c525e3cca | tick observations: actual [], expected [head_moved] | pass |
-| NC-35 | `tests/main-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-11 | NC-35 | f1a2e028adf4e9dcc42aa3f5fb68a4bce417edf303edcd23c081bc12d39f4b0e | timed out waiting for own current-tip green clears latch | pass |
-| NC-36 | `tests/parked-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-12 | NC-36 | 160bf6227e64578fad081ed6325566424cfc0a28ad79d50f6538fefc07dca69b | timed out waiting for parked green through extension timer | pass |
-| NC-37 | `tests/integrate-held-ci.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-13 | NC-37 | 08885fb069f9156f222db16be799935bbede6b4804a0cdc7344c5bee0bdb6fa1 | a second red result exhausts the repair allowance: actual resolve, expected surface | pass |
 | S07-NC-1 | `tests/integrate-held-ci.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-S07 | S07-NC-1 | 514a60abe4fb0adfa420e8b12651e3e1641c36ee4446eed0e1bf4e7900347d18 | revoked error expected /is revoked/, actual no live worker; authority must precede worker lookup | pass |
-| S07-NC-2 | `tests/integrate-held-ci.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-13 | S07-NC-2 | 7b765ed1addb1bcc787c7fa4ee3995fc74dbb63856ed7a8be661842a55f0e911 | another job in the project waits behind the CI repair: actual advanced, expected queued | pass |
-| S07-NC-3 | `tests/integrate-held-ci.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-13 | NC-37 | 08885fb069f9156f222db16be799935bbede6b4804a0cdc7344c5bee0bdb6fa1 | restarted parent reads spent allowance: expected /already asked once/, actual no live worker | pass |
-| NC-38 | `tests/awaiting-merge-tick.test.ts` | 8ed23aa09e14395777c9ed86f280e7b9d3478556 | 05-12 | NC-36 | 160bf6227e64578fad081ed6325566424cfc0a28ad79d50f6538fefc07dca69b | RENAME BOOKKEEPING ONLY: NC-36 fails the parked observer-wiring assertion; this is no control for either retained timer unit and earns no retirement credit | pass |
-| NC-39 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-39 | 3b171a4343a649cf97b5484d8436b270652f31a73e48043823d6d88cac71728b | a green rerun follows a failed attempt: actual undefined, expected true; exit 1 | pass |
-| NC-40 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-40 | 89140ecdb7e179ded4475bbae1fdd8503bc7d6e1c498391bc5373e5cff3175a6 | an arrived attempt is not announced again: actual ci_failed observation, expected []; exit 1 | pass |
-| NC-41 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-41 | 3247052c5ba325182bb6bc40b10310d9ba19c3efca12adaaaf82021ae65325e8 | an arrived green attempt is not announced again: actual ci_green observation, expected []; exit 1 | pass |
-| NC-42 | `tests/ci-watch.test.ts` | 7f63e8205c6ee5e573aefd816725c389a1c2bb72 | 05-8 | NC-42 | bdf24d76db79fa3de72985fd27fdf823b0e03b824e3f2f3c8b6198f67ffe563b | arrival is idempotent: actual repeated key, expected []; exit 1 | pass |
-| NC-43 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-43 | 1ab00c25fcb6f6beec90067b887e04cb604986b936ec84e87529fd74a6acc728 | an identical forwarded result is stored once: actual 2 expected 1; exit 1 | pass |
-| NC-44 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-44 | 1e23c1f307c54d5f011114b4e2867c81398446c93168b3e83de3008348700d0c | forwarded evidence rejects invalid input through the tool: expected /github token/, actual recorded success; exit 1 | pass |
-| NC-45 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-45 | b56732d87fd1e902de3998d8330d4e596c903c69dfd9a3e538e0289d4c5e4dbc | forwarded evidence rejects invalid input through the tool: expected /no known current head/, actual recorded success; exit 1 | pass |
-| NC-46 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-46 | b167ba1c73842346b33fbc3f5a82cba32174d8b356baa6b3abd16cd1cdeb694f | evidence cannot be rebound to another repository: expected `/is for other\/repository/`, actual recorded success; exit 1 | pass |
-| NC-47 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-47 | 603dd9661e1e596f888b39eb14b9bdc66078a98709fe8f022402c4b203a7b84c | every bounded forwarded write succeeds: actual false expected true; exit 1 | pass |
-| NC-48 | `tests/ci-evidence.test.ts` | be875d50d00f707cf1574e372ac8031f687273cd | 05-9 | NC-48 | 97c3cb3752d2333372ea71e943083cde0d1183a0616689ebe15372ff4800bacc | viewer ignores native and other-head evidence and strips unsafe URLs: actual green expected in_progress; exit 1 | pass |
-| NC-49 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-49 | a74f29820429a3edc569e921ad1c59514c3c7a83c52afbee81efe57fcf3d8923 | a settled head is not re-read before the idle interval: actual 2 expected 1; exit 1 | pass |
-| NC-50 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-50 | 6b130b6e821c69c5f3300f337dd072c514254db98d8fef7f40783e99db0d1b08 | consecutive_failures assertion: actual 0 expected 1; exit 1 | pass |
-| NC-51 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-51 | 377f7f3b0591d09e03c7e9fee7017df96c330e6e449996c2ef3c998e6e8e5210 | permission denial replaces prior green: actual unknown expected unreadable; exit 1 | pass |
-| NC-52 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-52 | 5acaec2af379bcfc1e81071685ef44c9dea8e31e54077554cf7a9d8dcbcfe2e8 | a transient fault is unknown: actual unreadable expected unknown; exit 1 | pass |
-| NC-53 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-53 | 38f8d8e9b4ee45085a53a7b0ab3bf727bcb6dff132a7f9ccaf91b7725964834d | resume or re-park drops the old cycle's terminal observation: actual false expected true; exit 1 | pass |
-| NC-54 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-54 | c659006b3d4f625d0f3ca065766b8a331cfec0d460cefd0b52d73c491be85d74 | merged and closed snapshots do not read native CI: actual 1 expected 0; exit 1 | pass |
-| NC-55 | `tests/parked-ci.test.ts` | e49eaa5ba75ddb1976bf1b2b4311f1f683b7cc15 | 05-12 | NC-55 | b982458f1edafa0ef99eb6f9a6e601c82067dbbdffe56318cd15ebc5303b5b13 | a failing head backs off instead of re-reading every sweep: actual 12 expected 6; exit 1 | pass |
-| S06-moved | `tests/foreign-ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | 05-10 | S06-moved | 56e133c0e8de4fce2a1efba54419ec2b83ee25d9051291cb54f50420abb87f15 | head_moved observation is empty instead of one moved-head fact | pass |
-| S06-timeout | `tests/foreign-ci-watch.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | S06-1 | S06-timeout | 1869d77ee9e6ea51f37ebd3cff7afbbd562b01a4a7b30e6e81f0afb850d92503 | timed-out reviewer dispatch rejects instead of returning receipt accepted | pass |
-| S06-legacy | `tests/forge-runtime.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | S06-3 | S06-legacy | b8d4b63cfb4605d74cd3b15b213e7f7e4df925c3ebb8a2a537ec02997a38b309 | legacy GitHub recordMerge rejects unsupported instead of recording a receipt | pass |
-| S06-trunk | `tests/forge-runtime.test.ts` | 1648f3c2567c9647b1b4a5e508ac6c211079d4b2 | S06-4 | S06-trunk | 786335f44ee49a7b6f0394a0f69f7c497a146c81b7ca221fcd18dcfed9e424b1 | configured trunk teardown refuses rather than landed_by_git on trunk | pass |
-| NC-S02-key | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-8 | NC-S02-key | 0b06ee0819dc98ec73d55c1ae42ff477a48d5520b6fcd4bbad8ce38c1cd6a51d | pushed-head key includes its current head: actual false; exit 1 | pass |
-| NC-S02-history | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-8 | NC-S02-history | 0d48c887d1af2446f53577b1f9f6eda249166df3551a841f89b67113726f1214 | one journal event per completed attempt: actual 0, expected 1; exit 1 | pass |
-| NC-S02-prune | `tests/ci-watch.test.ts` | b744b908413b97d7fb9a39ae6056179ec3f8ae07 | 05-8 | NC-S02-prune | befd614a3c744cb5d70cf0d5506088c7b91e9ec800fa072e9d3e0180f0d4ee92 | finished deliveries leave the watch: actual row, expected undefined; exit 1 | pass |
 | NC-main-corrupt | `tests/main-ci.test.ts` | 8a41e6c50b89e4de21c159a104f3633de32a3a82 | 05-main-corrupt | NC-main-corrupt | 4609cbb374efaa4b725a8029ae2dfd1d8efd04b889f42e408d109f6cd7f3cb6f | in-flight latch mutation preserves corrupt bytes | pass |
-| NC-S05-SUMMARY | `tests/diff-review.test.ts` | `0b2e4d774bfc00b3c07e8669370e568f816ea141` | DR-03 | NC-S05-SUMMARY | 30e455a860495861e80131b51fc0fc3fde089e30f79c58c080831925e60a9695 | real summary-bearing review must persist as pass; restored gate-only field fails schema validation | pass |
-| S06-conflict | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-5 | S06-conflict | 78c301aba9e55b637f3e1af9acda02c4846effe5c065b7adec47d8f5f83c104b | Missing expected rejection for conflicting heads; exit 1 | pass |
-| S06-deploy | `tests/forge-observers.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-2 | S06-deploy | 9c2bb5361529d74f70a4713044b66f3ea497e4e615d75ee95cf1a29c078a065a | corrupt ledger exception escapes recordMerge instead of preserving named retry outcome; exit 1 | pass |
-| S06-reservation | `tests/held-release.test.ts` | 4157663bc336411bac920a7a7fcd0d8dbad4d49e | S06-6 | S06-reservation | 0a723cad1b905543dda1bcffc250f7677cf6bb8451580d5e5779c674cd65f16d | queue capacity counts a releasable author as free after journal recovery: expected worker, got undefined; leaked reservation prevents retry; exit 1 | pass |
-| S14-NC5 | `tests/pr-bind.test.ts` | 580289b5c0f709bdc9ae28a50bf55dd12c38d04a | 05-S14-bind | S14-NC5 | 9528dbecb15617a52ca1f3a3a8469bcbdf44786705fff13c9f076e8ca262188e | diverged: salvage object id actual empty, expected preserved local commit | pass |
-| S14-NC11 | `tests/pr-resolve.test.ts` | 580289b5c0f709bdc9ae28a50bf55dd12c38d04a | 05-S14-bind | S14-NC11 | 9c6e119c7d7f1806e2ad1e6ce98caa7ba9dcea6385d189c95a8b203056263d8b | wrong-url/moved-report: correction reason empty instead of expected refusal, real reports wrongly held | pass |
-| S14-NC13 | `tests/review-approval.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-S14-approval | S14-NC13 | 0f326239caf9365c6450c310b5f5e6aa5f31e9ef6daea45ad71a8b92070027d1 | edited artifact checkpoint actual approved instead of pending | pass |
-| S14-NC15 | `tests/merge-permission.test.ts` | ea631794e9de7491a65d7f4eb49d100635b5c57f | 05-S14-permission | S14-NC15 | 4f86665bf2f5e9ea272ed26fa77a2a6b5729d9e9435ab856518a8b4a8aeeca67 | one/two approving-review counts absent from actual integration output | pass |
-
-<!-- patch:NC-S05-SUMMARY -->
-```diff
-diff --git a/src/diff-review.ts b/src/diff-review.ts
-index 2dcc135..008c3bd 100644
---- a/src/diff-review.ts
-+++ b/src/diff-review.ts
-@@ -806 +806 @@ export class DiffReview {
--		const { raw, rubric: _rubric, decision_summary: _summary, ...decided } = decideGate({
-+		const { raw, rubric: _rubric, ...decided } = decideGate({
-```
 | S20-repeat | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-repeat | 28b2c86b9aa7dc48af8d5d37caf338ed8d035e8c0e1786785fcc5f42e2fd573d | second status call repeats PR instead of none-new count | pass |
 | S20-disk | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-disk | 25781adcb27a8bb791bb3666bd619a232376ec9482c4d20e73bf185b7d1aa012 | resumed parent repeats PR instead of none-new count | pass |
 | S20-heal | `tests/shipped-seen.test.ts` | f10ff48d2e8914b669ad4601dac3886be8f15f63 | 06-S20-shipped | S20-heal | 1ff2fd042a02a26d310884f7b0b7e36e18c1073b4d098386ef741271ec2944bc | unreadable memory is not healed and resumed status replays rows | pass |
@@ -2904,240 +2158,7 @@ NC-03 derives an Actions link for any host:
 ℹ fail 1
 ```
 
-NC-04 puts back the cp-sr5 defect `tests/budgets.test.ts` guarded: the manager's budget getter is a snapshot taken
-when the CommandPost is built, so a `data/budgets.json` written later never reaches a dispatch. The file has no
-separate fix commit in this repository's history; the bug commit column names the release that carries the getter.
-
-```
-✔ authority: a scoped mandate dispatches the job it names under its id; an unnamed job is not its to speak for
-✔ authority: a paused or revoked mandate stops speaking; an expired or job-capped one refuses new paid work
-✔ authority: a risk:high answer authorizes only the job it names; a replacing grant supersedes the open ask
-✖ authority: token raises stay inside the ceiling, the USD cap never moves, and budgets.json is re-read live
-  Error: spawn cap reached (10/10 workers): cp-0d02, cp-s0e0, cp-2jeu, cp-d91l, cp-i96u, cp-0otr, cp-bkjz, cp-t474, …
-ℹ pass 3
-ℹ fail 1
-```
-
-NC-05 to NC-09 were run the same way on `tests/e2e/authority.test.ts`: each patch applied to `src/`, the file run, the
-patch reversed, and the file run again: 6 pass, 0 fail. NC-05 and NC-06 name the release that carries the held-job
-rule, because it has no separate fix commit. NC-07 to NC-09 name #284, which added ops jobs.
-
-NC-05 lets a held job hold a dispatch slot:
-
-```
-✖ authority: a held PR job counts toward the job and spend caps but never holds a dispatch slot
-  Error: cp-g1so: mandate md-68b4c8 dispatch-parallelism 1 is full
-ℹ pass 5
-ℹ fail 1
-```
-
-NC-06 stops counting a held job toward the grant's spend and job count:
-
-```
-✖ authority: a held PR job counts toward the job and spend caps but never holds a dispatch slot
-  Error: timed out after 60000ms waiting for held + second spend to reach the token cap; last = error: undefined
-ℹ pass 5
-ℹ fail 1
-```
-
-NC-07 lets a read-only ops profile exempt its job from the risk:high gate:
-
-```
-✖ authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource
-  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
-    actual: undefined,
-    expected: 'would ask: risk:high',
-ℹ pass 5
-ℹ fail 1
-```
-
-NC-08 lets the caller's risk override a deploy's fixed high:
-
-```
-✖ authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource
-  AssertionError [ERR_ASSERTION]: a deploy is high whatever the caller says
-    actual: [ 'ops', 'low' ],
-    expected: [ 'ops', 'high' ],
-ℹ pass 5
-ℹ fail 1
-```
-
-NC-09 leases a resource only to a reported (held) holder, not a working one:
-
-```
-✖ authority: an ops label fixes the profile and risk, never exempts the risk gate, and leases its resource
-  AssertionError [ERR_ASSERTION]: Missing expected rejection.
-ℹ pass 5
-ℹ fail 1
-```
-
-NC-10 to NC-12 (P2c) were run the same way, with `--test-name-pattern` on the one scenario each patch breaks; the
-clean run of the whole file afterwards gave 8 pass, 0 fail. NC-10 names `b63fe8457e76` (#66), the commit that put the
-negation filter on the shared risk-match path. NC-11 is the P2b review's job-cap control: it drops a held job from the
-grant's job count only, leaving its spend and slot rules alone, and names the release that carries the rule as NC-05 does.
-NC-12 names that release too: the key-order fix (cur.2.6) has no separate commit.
-
-NC-10 stops skipping negated risk words:
-
-```
-✖ authority: keyword risk inference skips negated, excluded and benign senses; the risk:high ask names every word it matched
-  AssertionError [ERR_ASSERTION]: no migration
-  + actual - expected
-  + [
-  +   'migration'
-  + ]
-  - []
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-11 stops counting a held job toward the grant's job count, and nothing else:
-
-```
-✖ authority: a held PR job counts toward the job and spend caps but never holds a dispatch slot
-  AssertionError [ERR_ASSERTION]: The validation function is expected to return "true". Received false
-  Error: cp-0e9m: mandate md-9fb896 dispatch-parallelism 1 is full
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-12 brings back the key-order-sensitive override comparison (cur.2.6), so agreeing overrides fall through to home:
-
-```
-✖ authority: cp_mandate issue needs only projects and an objective; every other field resolves explicit > project > home and says which
-  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
-    actual: [ { usd: 99, tokens: 10000000 }, 9, [ 'plan', 'implement', 'review', 'repair', 'merge' ] ],
-    expected: [ { usd: 99, tokens: 10000000 }, 5, [ 'implement', 'review' ] ],
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-13 to NC-20 (P2d) were run the same way, one per deleted file, with `--test-name-pattern` on the scenario each
-patch breaks; each patch was reverted with `git checkout -- <file>` and the whole file then gave 14 pass, 0 fail.
-Four bug commits are the initial release (`ea631794e9de`), which carries those rules with no separate commit.
-
-NC-13 lets a recorded low stand down only a high that routing never recorded either, so every keyword-only high gates:
-
-```
-✖ authority: a recorded or declared low turns a keyword-only high into a warning; a recorded, supplied or planner high still gates
-  AssertionError [ERR_ASSERTION]: Scope M each, risk low.
-  + 'would ask: risk:high'
-  - undefined
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-14 lets a pre-approval cover a hard stop:
-
-```
-✖ authority: an operator-quoted risk:high pre-approval lets covered dispatches and promotions proceed with an audit row; anything else still asks
-  AssertionError [ERR_ASSERTION]: Missing expected rejection.
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-15 refuses a duplicate only when two different ids repeat:
-
-```
-✖ authority: cp_escalate batch_risk_high files one approve/drop record for jobs one asking grant gates; every refusal writes nothing
-  AssertionError [ERR_ASSERTION]: twice: {"content":[{"type":"text","text":"es-87f890 batch risk:high: 2 jobs (cp-utjq, cp-utjq); …
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-16 prefers the latest-issued grant:
-
-```
-✖ authority: dispatch picks the named, earliest-issued, lowest-id grant that speaks; a full named grant yields only to an eligible supplement
-  + 'md-000001'
-  - 'md-a994c5'
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-17 brings back the full named grant shadowing its eligible supplement (#184):
-
-```
-✖ authority: dispatch picks the named, earliest-issued, lowest-id grant that speaks; a full named grant yields only to an eligible supplement
-  + 'md-older1'
-  - 'md-supp01'
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-18 counts cache reads toward the token cap:
-
-```
-✖ authority: live usage crosses each cap line once while the worker runs; cache reads and pre-grant usage never count; a USD cap or the ceiling is the operator's
-  AssertionError [ERR_ASSERTION]: cache reads never count; 70% says nothing
-  + [
-  +   'token-cap'
-  + ]
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-19 stops naming a 401 as a rejected admin credential:
-
-```
-✖ authority: the gateway's admin capacity and quota windows steer and annotate routing; every failure falls back and never leaks the key
-  AssertionError [ERR_ASSERTION]: source=rubric model=other/b rule=implementer thinking=medium quota unavailable: auth rejected capacity=fleet:mock=-2,other=0
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-20 drops the 5h threshold's own boundary:
-
-```
-✖ authority: the gateway's admin capacity and quota windows steer and annotate routing; every failure falls back and never leaks the key
-  AssertionError [ERR_ASSERTION]: 90/0
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-21 drops the cp-7re9 deny_projects check from the mandate's auto-decision:
-
-```
-✖ authority: a pipeline's plan checkpoint is mandate-decided and journaled; task-text exclusions, gate flags, an unnamed high and a denied project leave it pending
-  Error: preflight refused cp-s1yq: ... [fail] project_denied: settings: project demo is denied ...
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-22 keeps only the last job created this turn when the sentinel expands:
-
-```
-✖ authority: cp_mandate through a real parent sets the reviewer model, names this turn's jobs, filters show, refuses every bad issue before writing, and a revoke or expiry closes its asks
-  AssertionError [ERR_ASSERTION]: Expected values to be deeply equal: [ 'cp-ovpy' ] vs [ 'cp-ovpy', 'cp-vyp7' ]
-ℹ pass 0
-ℹ fail 1
-```
-
-NC-23 takes repair off an expired grant's in-flight continuations:
-
-```
-✖ authority: an expired, revoked, serial or job-capped grant stops fresh starts while its own in-flight workers keep promotion and repair
-  Error: cp-5ldk: mandate md-8bab6a expired at ... — no first authorization under it; only a job already in flight under it continues. A new job needs a new grant (cp_mandate issue).
-ℹ pass 0
-ℹ fail 1
-```
-
 NC-24 reads any 403 or 404 as the token's denial, HTML proxy pages included (P3; fixed run: 4 pass, 0 fail):
-
-<!-- patch:NC-24-html-403 -->
-```diff
---- a/src/actions-ci.ts
-+++ b/src/actions-ci.ts
-@@ -260,7 +260,7 @@ async function attempt(options: ActionsReadOptions, endpoint: string, timeoutMs:
- 		if (/rate limit/i.test(message)) return { fault: new ActionsCiError("rate_limited", endpoint), retry: false };
- 		// GitHub's own denials are JSON; an HTML 403/404 is a proxy or abuse page, not the token's answer.
- 		const html = body.trim() !== "" && !isJson(body);
--		if ((code === "403" || code === "404") && !html) return { fault: new ActionsCiError("denied", endpoint, `HTTP ${code}`), retry: false };
-+		if (code === "403" || code === "404") return { fault: new ActionsCiError("denied", endpoint, `HTTP ${code}`), retry: false };
- 		// "status", not "HTTP": src/ci-access.ts reads any "HTTP 403" as the token's denial.
- 		return { fault: new ActionsCiError("transport", endpoint, evidence(code ? `status ${code}` : "no HTTP status", body)), retry: true };
- 	}
-```
 
 ```
 ✖ landing: a denied, rate-limited, malformed, partial or capped Actions read never merges and names its cause; a full paged read finds page two's failure
@@ -3148,21 +2169,6 @@ NC-24 reads any 403 or 404 as the token's denial, HTML proxy pages included (P3;
 
 NC-25 takes an empty first workflows page as no CI, whatever total_count says:
 
-<!-- patch:NC-25-truncated-empty -->
-```diff
---- a/src/ci-configured.ts
-+++ b/src/ci-configured.ts
-@@ -152,7 +152,7 @@ export function readCiConfigured(result: { status: number | null; stdout: string
- 	}
- 	// Both fields must agree on zero. A truncated page (`total_count: 3` with an
- 	// empty first page) is not an authoritative empty list.
--	if (total === 0 && workflows.length === 0) {
-+	if (workflows.length === 0) {
- 		return {
- 			state: "none",
- 			cause: "authoritative_empty",
-```
-
 ```
 ✖ landing: only an authoritative empty workflow list is no CI; every unanswered workflows read keeps its own cause and never reads as none
   AssertionError [ERR_ASSERTION]: a truncated page: ci configuration: none (authoritative_empty) — …
@@ -3171,21 +2177,6 @@ NC-25 takes an empty first workflows page as no CI, whatever total_count says:
 ```
 
 NC-26 lets the doctor's jobs probe call a short jobs list readable:
-
-<!-- patch:NC-26-short-jobs -->
-```diff
---- a/src/ci-access-doctor.ts
-+++ b/src/ci-access-doctor.ts
-@@ -36,7 +36,7 @@ function probeLatestRun(run: Run, home: string, repo: string): Failed | { runs:
- 			if (!("stdout" in answer)) return answer;
- 			const parsed = parseJobsPage(answer.stdout, { runId: latest.databaseId, attempt: latest.attempt, sha: latest.headSha }, endpoint);
- 			jobs += parsed.items.length;
--			if (parsed.items.length < ACTIONS_PER_PAGE) return jobs === parsed.total ? { jobs } : { failed: "unknown", cause: "incomplete" };
-+			if (parsed.items.length < ACTIONS_PER_PAGE) return { jobs };
- 		}
- 		return { failed: "unknown", cause: "incomplete" };
- 	} catch (error) {
-```
 
 ```
 ✖ landing: /doctor ci.<project> reads workflows, then the newest run and its attempt jobs; a refused read is loud and gh output never echoes
@@ -3196,21 +2187,6 @@ NC-26 lets the doctor's jobs probe call a short jobs list readable:
 
 NC-27 drops the attempt-2 guard, so a second infra failure is rerun again:
 
-<!-- patch:NC-27-second-attempt -->
-```diff
---- a/src/ci-infra-rerun.ts
-+++ b/src/ci-infra-rerun.ts
-@@ -138,7 +138,7 @@ export async function maybeRerunInfra(input: InfraRerunInput & InfraRerunPorts):
- 	const unidentified = failed.find((run) => run.databaseId === undefined || run.attempt === undefined);
- 	if (unidentified) return skip("a failed run has no id or attempt to rerun by");
- 	const repeated = failed.find((run) => (run.attempt ?? 0) >= 2);
--	if (repeated) return skip(`run ${repeated.databaseId} is on attempt ${repeated.attempt}: a second failure is the parent's`);
-+	if (repeated && false) return skip(`run ${repeated.databaseId} is on attempt ${repeated.attempt}: a second failure is the parent's`);
- 	let claimed: CiRerunEntry | undefined;
- 	try {
- 		claimed = input.store.claimed(input.jobId, input.head);
-```
-
 ```
 ✖ landing: an infra-only CI failure is claimed, then rerun once per head; a test failure, a cancel, a second attempt, a drain or an unreadable claim or job list goes to the parent
   AssertionError [ERR_ASSERTION]: The input did not match the regular expression /run 41 is on attempt 2: a second failure is the parent's/
@@ -3219,21 +2195,6 @@ NC-27 drops the attempt-2 guard, so a second infra failure is rerun again:
 ```
 
 NC-28 lets an open PR past the state rule, as if gh's answer were enough:
-
-<!-- patch:NC-28-open-pr -->
-```diff
---- a/src/merges.ts
-+++ b/src/merges.ts
-@@ -237,7 +237,7 @@ export class MergeStore {
- 		const jobId = record.job_id;
- 		const label = view.provider === "gitlab" ? "GitLab" : "gh";
- 
--		if (view.state !== "merged") {
-+		if (view.state !== "merged" && view.state !== "open") {
- 			throw new MergeError(
- 				`${jobId}: ${label} reports ${view.url} as ${view.state}, not MERGED — nothing is recorded. ` +
- 					"A merge receipt is an observation, never a claim.",
-```
 
 ```
 ✖ landing: cp_merged records only a merge gh observed for this job's branch, marks its PR merged once, and an opted-in deploy branch gets one blocked ops:deploy job
@@ -3245,20 +2206,6 @@ NC-28 lets an open PR past the state rule, as if gh's answer were enough:
 
 NC-29 skips the fast-forward reachability question, so an MR head git cannot see on the target is recorded:
 
-<!-- patch:NC-29-unseen-ff -->
-```diff
---- a/src/merges.ts
-+++ b/src/merges.ts
-@@ -329,6 +329,7 @@ export class MergeStore {
- 	/** Fast-forward evidence: origin's `target` tip has `head` in its history (the tip object fetched by sha if missing). */
- 	async #reachable(cwd: string, head: string, target: string): Promise<boolean> {
- 		const git = (dir: string, args: readonly string[]) => this.#run(dir, "git", args);
-+		return true;
- 		const tip = await remoteTip(git, cwd, target);
- 		if (!tip.ok || !tip.sha || !(await haveCommit(git, cwd, tip.sha))) return false;
- 		return (await git(cwd, ["merge-base", "--is-ancestor", head, tip.sha])).status === 0;
-```
-
 ```
 ✖ landing: cp_merged reads a GitLab MR only from the project's own GitLab with its token; a squash, or a fast-forward git sees on the target, is recorded and anything else records nothing
   AssertionError [ERR_ASSERTION]: Missing expected rejection.
@@ -3267,21 +2214,6 @@ NC-29 skips the fast-forward reachability question, so an MR head git cannot see
 ```
 
 NC-30 drops the literal pathspec magic, so a changed path that is a glob also compares other files:
-
-<!-- patch:NC-30-glob-paths -->
-```diff
---- a/src/landing-proof.ts
-+++ b/src/landing-proof.ts
-@@ -152,7 +152,7 @@ export async function readLandingProof(git: GitRun, worktree: string, head: stri
- 		const truncated = listed.length > limits.candidates;
- 		const candidates = [baseSha, ...listed.filter((sha) => sha !== baseSha)].slice(0, limits.candidates);
- 		// shortcut: every path rides one argv; a job past ~1 MB of path names hits ARG_MAX and reads as unknown, which keeps the lease.
--		const pathspecs = paths.map((path) => `:(literal)${path}`);
-+		const pathspecs = paths.map((path) => path);
- 		for (const candidate of candidates) {
- 			if ((await run(["diff", "--quiet", ...DIFF, head, candidate, "--", ...pathspecs], [0, 1])).status !== 0) continue;
- 			if ((await run(["merge-base", "--is-ancestor", candidate, baseSha], [0, 1])).status !== 0) {
-```
 
 ```
 ✖ landing: cp_teardown passes a deleted branch as landed_by_git when origin's base holds its content (merge, squash, rebase, a later edit, literal odd paths) and keeps the lease when it does not
@@ -3293,21 +2225,6 @@ NC-30 drops the literal pathspec magic, so a changed path that is a glob also co
 ```
 
 NC-31 drops the opt-in date rule, so a merge from before `after_merge_deploy` was enabled still creates a deploy job:
-
-<!-- patch:NC-31-pre-opt-in -->
-```diff
---- a/src/after-merge.ts
-+++ b/src/after-merge.ts
-@@ -73,7 +73,7 @@ export async function afterMergeDeploy(ports: AfterMergePorts, receipt: MergeRec
- 		const mergedAt = receipt.merged_at ?? receipt.recorded_at;
- 		const skip = !receipt.base_branch ? "the merge receipt names no base branch"
- 			: receipt.base_branch !== deploy.branch ? `merged into ${receipt.base_branch}, not the deploy branch ${deploy.branch}`
--			: Date.parse(mergedAt) < Date.parse(deploy.enabled_at) ? `merged ${mergedAt}, before after_merge_deploy was enabled ${deploy.enabled_at}`
-+			: Date.parse(mergedAt) < Date.parse(deploy.enabled_at) && false ? `merged ${mergedAt}, before after_merge_deploy was enabled ${deploy.enabled_at}`
- 			: undefined;
- 		if (skip) {
- 			atomicWriteJson(file, { ...base, status: "skipped", reason: skip, recorded_at: now });
-```
 
 ```
 ✖ landing: cp_merged records only a merge gh observed for this job's branch, marks its PR merged once, and an opted-in deploy branch gets one blocked ops:deploy job
@@ -3334,20 +2251,12 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/e2e/installer.test.ts` | #375 | installer sandbox: real bootstrap/cp-install/cp-daemon/doctor in Docker with the mock provider; opt-in `CP_INSTALL_E2E=1` (CI's install sandbox job) |
 | `tests/entry-guard.test.ts` | main 5e8106b | unit landed upstream after the baseline; convert, owner P24 (entry-module/runtime compatibility), outside P3c; recorded when plain-merging main |
 | `tests/awaiting-merge-tick-retained.test.ts` | P3c-rest | convert, owner P3c-rest; two declarations retained verbatim from tests/awaiting-merge-tick.test.ts; no public entry point transfers a running session's lock or observes dormant timers after shutdown |
-| `tests/e2e/diff-review.test.ts` | S04 + S05, behavior 05 public review conversion; 20 scenarios and executed declaration controls |
 | `tests/main-ci-retained.test.ts` | cp-e2e-slice-main-ci-41d3 (#416): 7 internal-only tests; mixed declarations retain only unreachable portions; concrete entry-point limits in docs/testing-migration-main-ci-declarations.md |
 | `tests/diff-review-retained.test.ts` | retained, convert-owned P3c-rest: structural declaration 12, synthetic shutdown regression 25, unknown-job sub-probe 21; no deletion credit |
-| `tests/foreign-ci-watch-retained.test.ts` | S06 | one retained static source/port inspection; no runtime entry point exposes implementation imports or injected dependency key enumeration |
-| `tests/forge-runtime-retained.test.ts` | S06 | three verbatim landing proof regressions: injected runner budgets, direct runner timeout and proof/release recheck |
-| `tests/forge-observers-retained.test.ts` | S06 | eight preserved structural, security and direct-reader boundary declarations; reasons in assertion map |
-| `tests/held-release-retained.test.ts` | S06 | eight preserved private-state, schema-defense and injected-race declarations; reasons in assertion map |
 | `tests/timer-knobs.test.ts` | #439 | convert-owned #439; incoming timer/environment parser coverage introduced by merged #439, outside S19 conversion scope |
 | `tests/bridge-reattach-knobs.test.ts` | #447 | incoming #447 default-knob regression moved verbatim from the retired original path; four older declarations retain their S19 mapped/retained dispositions |
 | `tests/e2e/ci-watch-jobless.test.ts` | #443 | incoming #443-owned consumer coverage for job-less CI watch errors, outside S19 conversion scope |
 | `tests/recovery-notice-bound.test.ts` | #442 | convert-owned #442; incoming recovery-notice bounds and rejected-write coverage, outside S19 conversion scope |
-| `tests/merge-permission-retained.test.ts` | S14 | structural safety: no public consumer composes ghBranchRulesArgs and detectCiWait; original declaration 13 verbatim |
-| `tests/pr-resolve-retained.test.ts` | S14 | mixed original declaration 9 verbatim: validateEnvelope refuses missing pr_url before intake resolver; all reachable variants also covered through real reporter |
-| `tests/review-approval-retained.test.ts` | S14 | original declaration verbatim: pipeline artifacts.info fails before missing matches; only production write passes seq 1; no public entry reaches seq-2/3 overwrite |
 | `tests/held-continuation-fleet-read.test.ts` | #433 (ac50447082b15959140ec40b04080102eadbaf87) | incoming known-regression coverage for unreadable fleet during continuation failure notice; unit landed upstream after the baseline and is preserved unchanged; convert, owner P3c-rest (held continuation), pending the separately parked declaration-71 e2e conversion. Recorded when plain-merging main; no exception or deletion is claimed. |
 | `tests/ci-watch-retained.test.ts` | S03b review 1 | Four verbatim retained declarations (S02 6/8/32/33); convert, owner P3c-rest. Originals remain whole by operator ruling until the declaration-71 retirement follow-up. |
 | `tests/e2e/wake-delivery.test.ts` | S19 / S20 / S21 | S19 escalation reconnect and send-first consumer cases; S20 shipped memory, stale context and busy/answered/tool/abort/error delivery; three S21 restart/death/failure/reconciliation RPC scenarios, including forty-candidate reconciliation and bounded distinct recovery IDs; declaration maps testing-migration-s19.md, testing-migration-s20.md and testing-migration-s21.md |
@@ -3523,16 +2432,12 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/failures.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/fake-parent-tracker.test.ts` | convert | P15 | behavior 13 (Ledger, projects and trackers) |
 | `tests/fleet.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
-| `tests/foreign-ci-watch.test.ts` | deleted | S06 | 11 declarations: 10 mapped (05-10, S06-1), 1 static inspection retained in tests/foreign-ci-watch-retained.test.ts; S06-moved and S06-timeout controls |
-| `tests/forge-observers.test.ts` | deleted | S06 | 14 declarations: 8 mapped, 6 retained in tests/forge-observers-retained.test.ts; declaration controls in testing-migration-s06-controls.md |
-| `tests/forge-runtime.test.ts` | deleted | S06 | 5 declarations: two mapped to 05-5/05-6/S06-3/S06-4, three retained verbatim in tests/forge-runtime-retained.test.ts; runtime negative controls |
 | `tests/forge-url.test.ts` | exception | P1 | security: exhaustive hostile-input guard; operator ask-0088e0332d00 (Exceptions) |
 | `tests/gate-replacement.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/gate.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/gateway-key.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
 | `tests/guards.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
 | `tests/harness.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
-| `tests/held-release.test.ts` | deleted | S06 | 10 declarations: 4 mapped, 6 retained in tests/held-release-retained.test.ts; declaration controls in testing-migration-s06-controls.md |
 | `tests/home-checkout.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/human-handoff.test.ts` | convert | P18 | behavior 18 (Dashboard navigation and jobs) |
 | `tests/install-nudge.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
@@ -3560,7 +2465,6 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/mcp-access.test.ts` | convert | P24 | behavior 24 (Packaging and host compatibility) |
 | `tests/memory.test.ts` | convert | P23 | behavior 23 (Memory and guidance) |
 | `tests/merge-ask.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
-| `tests/merge-permission.test.ts` | deleted | S14 | 12 mapped to 05-S14-permission; S14-NC1/2/14–17; 1 retained verbatim in tests/merge-permission-retained.test.ts, compositional safety has no public entry; [ledger](testing-migration-s14.md) |
 | `tests/merges.test.ts` | deleted | P3b | 12 declarations: 05-5, 05-6 and S06-2; one receipt guard retained in tests/forge-observers-retained.test.ts; NC-28, NC-29, S06-deploy |
 | `tests/mode.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/model-call-failure-recovery.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery); also listed under 14, owned here only |
@@ -3603,8 +2507,6 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/plan-view.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/plan-viewer.test.ts` | convert | P11 | behavior 10 (Research pipeline/artifacts) |
 | `tests/planner-artifact.test.ts` | exception | P1 | contract: planner artifact; operator ask-0088e0332d00 (Exceptions) |
-| `tests/pr-bind.test.ts` | deleted | S14 | behavior 05; all 9 declarations mapped to 05-S14-bind/unsafe; S14-NC4–NC9 executed; [declaration ledger](testing-migration-s14.md) |
-| `tests/pr-resolve.test.ts` | deleted | S14 | 9 mapped to 05-S14-bind/resolution/gitlab; S14-NC3/10–12/18; 1 retained verbatim in tests/pr-resolve-retained.test.ts, envelope validation excludes missing-URL inputs; [ledger](testing-migration-s14.md) |
 | `tests/preflight.test.ts` | convert | P7 | behavior 03 (Dispatch, dependency and slots) |
 | `tests/profiles.test.ts` | exception | P1 | contract: role profiles and briefs; operator ask-0088e0332d00 (Exceptions) |
 | `tests/project-report.test.ts` | convert | P22 | behavior 22 (Notifications and reports) |
@@ -3624,7 +2526,6 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/relay-scope.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/repo-map.test.ts` | convert | P16 | behavior 14 (Home, routing, settings) |
 | `tests/restart-intake.test.ts` | convert | P6 | behavior 08 (Drain/restart) |
-| `tests/review-approval.test.ts` | deleted | S14 | moved verbatim to tests/review-approval-retained.test.ts; mixed unreachable matches(missing) and seq-2/3 write inputs; reachable hash authorization covered by 05-S14-approval and S14-NC13 |
 | `tests/review-context.test.ts` | deleted | P3 | S15: all ten declarations mapped to 05-S15-C/F; ten executed controls with patches/hashes in testing-migration-s15.md; known cp-c1ur N11 regression pinned by S15-C10 |
 | `tests/review-merge-window.test.ts` | deleted | P3 | S15: both declarations mapped to 05-S15-W through cp_integrate and a fresh parent; executed W01/W02 patches and hashes in testing-migration-s15.md |
 | `tests/review-runs.test.ts` | deleted | P3 | S15: source path replaced by tests/review-runs-retained.test.ts; 16 mapped declarations in 05-S15-A/X/Q/S/B/O/D/L, 3 retained verbatim plus incoming #447 contract; 60-second handback, configured 1-second retry/32-second suppression/5-second merge window; final restored retry 68,067 ms and order 16,867 ms, matrix 90,653 ms at 3 seconds; final timeouts 100/119 seconds; R01–R11/R15–R17/Q01/B01/W01 controls; assertion dispositions remain mapped/retained |

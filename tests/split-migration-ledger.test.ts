@@ -26,3 +26,11 @@ test("split-migration-ledger moves only the named slice and leaves $-sequences i
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+// Control for the prose check: a log line dropped from the after-union is reported, an intact move is not.
+test("preservationFindings catches a dropped prose or log line", async () => {
+	const { preservationFindings } = await import("../scripts/test-migration-check.ts");
+	const before = ["Intro prose.\n\n```\n✖ failure log\n```\n"];
+	assert.deepEqual(preservationFindings(before, ["# Ledger rows: b02\n\nIntro prose.\n\n```\n✖ failure log\n```\n"]), []);
+	assert.deepEqual(preservationFindings(before, ["Intro prose.\n\n```\n```\n"]), ["preservation: prose lines has 4 before, 3 after", "preservation: prose lines content differs"]);
+});
