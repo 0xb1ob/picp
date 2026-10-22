@@ -302,7 +302,7 @@ function main(): number {
 	console.log(`  total: ${census.files} files, ${census.base} baseline / ${census.tree} tree declarations`);
 	if (args.runnerLog) console.log(`runner-executed (${args.runnerLog}): ${Object.entries(runnerTotals(readFileSync(args.runnerLog, "utf8"))).map(([k, n]) => `${k} ${n}`).join(", ")}`);
 	for (const finding of findings) console.error(`FAIL ${finding}`);
-	console.log(findings.length ? `${findings.length} finding(s)` : `manifest ok (${docs.length} slice files${args.preservedFrom ? `, rows preserved from ${args.preservedFrom}` : ""})`);
+	console.log(findings.length ? `${findings.length} finding(s)` : `manifest ok (${docs.length - 1} slice files${args.preservedFrom ? `, rows preserved from ${args.preservedFrom}` : ""})`);
 	return findings.length ? 1 : 0;
 }
 
