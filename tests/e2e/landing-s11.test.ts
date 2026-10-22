@@ -16,6 +16,7 @@ for (const [mode, title] of [
 	test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
 		const s = await startStack(t);
 		const live = await s.held("S11 blocked report", 211);
+		await waitFor(() => s.post.manager.get(live.jobId)?.worker.busy, (busy) => busy === false, { timeoutMs: 30_000, what: "reported worker settles before envelope fault injection" });
 		s.setGh({ integration: true, runs: [run(211, live.head, "completed", "success")] });
 		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
 		const file = join(s.home, paths.envelopeFile(live.jobId));
