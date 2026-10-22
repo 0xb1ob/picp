@@ -3304,6 +3304,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/e2e/wake-delivery.test.ts` | S20 (cp-e2e-slice-s20-8nn3) | initial shipped-memory RPC scenario; no source tests retired; remaining slice acceptance pending |
 | `tests/shipped-seen-retained.test.ts` | S20 | retained structural atomic-write assertion; cp_status_block cannot expose import tokens or syscall ordering |
 | `tests/wakeup-head-sources-retained.test.ts` | S20 | retained 3 declarations: accessor call contract and throwing-source degradation/journal paths; RPC has no throwing HeadSourcePost port |
+| `tests/timer-knobs.test.ts` | #439 (base merge) | existing upstream timer-knob contract checks; registered after plain-merging 695a8528, no S20 conversion credit |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
