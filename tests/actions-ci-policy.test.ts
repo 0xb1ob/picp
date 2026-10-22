@@ -53,6 +53,18 @@ function allowlistedGh(answer: (endpoint: string) => string) {
 	return { exec, calls };
 }
 
+// #420: one observation's jobs pages are read in parallel batches, so many runs do not spend the budget serially.
+test("an observation of six runs fits a budget that six serial jobs reads would spend", async () => {
+	const run = (id: number) => ({ id, run_attempt: 1, head_sha: SHA, status: "completed", conclusion: "success", name: `w${id}` });
+	const exec: CommandRunner = async (_command, args) => {
+		await new Promise((resolve) => setTimeout(resolve, 80));
+		const jobs = /runs\/(\d+)\/attempts/.exec(String(args[1]));
+		return JSON.stringify(jobs ? { total_count: 0, jobs: [] } : { total_count: 6, workflow_runs: [1, 2, 3, 4, 5, 6].map(run) });
+	};
+	const runs = await readActionsCi({ cwd: ".", exec, sha: SHA, timeoutMs: 400 });
+	assert.equal(runs.length, 6);
+});
+
 test("Actions reader issues only runs and attempt-jobs requests and never follows response metadata links", async () => {
 	const api = "https://api.github.com/repos/acme/app";
 	const { exec, calls } = allowlistedGh((endpoint) =>
