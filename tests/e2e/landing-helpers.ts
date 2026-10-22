@@ -1,11 +1,11 @@
 /** Shared fixtures for the landing e2e files: scripted `gh`, a local GitLab, and a real CommandPost stack. */
 import assert from "node:assert/strict";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { type TestContext, test } from "node:test";
+import type { TestContext } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import type { ForgeConfig } from "../../src/forge-url.ts";

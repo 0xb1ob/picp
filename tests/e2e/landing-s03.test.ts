@@ -1,6 +1,6 @@
 /** Behavior 05 landing e2e, part of the split of landing.test.ts; fixtures live in landing-helpers.ts. */
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
