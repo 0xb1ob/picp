@@ -43,6 +43,7 @@ export const CI_WATCH_MAX_BACKOFF_MS = 900_000;
  * **at-least-once**: a duplicate CI notice is idempotent and visible, a lost one
  * is neither — and this whole module exists because a missed wake-up is
  * invisible.
+ * Overridable per home with CP_CI_WATCH_DELIVERY_RETRY_SECONDS.
  */
 export const CI_WATCH_DELIVERY_RETRY_SECONDS = 120;
 
@@ -186,7 +187,10 @@ export type AfterMergeRecord = Replace<
 // Integration (cp-uug) — state/runs/<job-id>/integration.json
 // ---------------------------------------------------------------------------
 
-/** Minimum time from a complete diff-review pass to a Command Post merge. */
+/**
+ * Minimum time from a complete diff-review pass to a Command Post merge.
+ * Overridable per home with CP_REVIEW_MERGE_WINDOW_SECONDS.
+ */
 export const REVIEW_MERGE_WINDOW_MS = 30_000;
 
 /**

@@ -497,6 +497,39 @@ test("an unconfirmed wake-up is resent once after the retry window; a confirmed 
 	assert.equal(events.filter((event) => (event.payload as { resend?: boolean }).resend === true).length, 1);
 });
 
+test("resendDue reads CP_VERDICT_DELIVERY_RETRY_SECONDS and CP_REVIEW_SUPPRESSION_SECONDS", async (t) => {
+	// A call site that bypasses a knob would keep the 120 s / 1200 s defaults and fail here.
+	const b = benchOf(t);
+	let clock = new Date("2026-09-05T10:00:00Z");
+	const registry = new ReviewRuns({ home: b.home, runs: b.runs, wakeup: (wakeup) => (b.sent.push(wakeup), true), now: () => clock });
+	const { attempt, release } = attemptOf(b);
+	const wait = registry.start(attempt);
+	registry.handBack(wait.key);
+	release("pass");
+	await registry.settled(wait.key);
+	process.env.CP_VERDICT_DELIVERY_RETRY_SECONDS = "5";
+	t.after(() => {
+		delete process.env.CP_VERDICT_DELIVERY_RETRY_SECONDS;
+		delete process.env.CP_REVIEW_SUPPRESSION_SECONDS;
+	});
+	clock = new Date("2026-09-05T10:00:10Z");
+	assert.deepEqual(registry.resendDue(clock), ["cp-a|gate|1"], "retry knob shortens the window");
+	assert.equal(b.sent.length, 2);
+
+	const second = attemptOf(b, { attempt: 2 });
+	const wait2 = registry.start({
+		...second.attempt,
+		finish: async () => ({ jobId: "cp-a", surface: "gate", attempt: 2, content: "v", details: {} }),
+	});
+	registry.handBack(wait2.key);
+	second.release("pass");
+	await registry.settled(wait2.key);
+	process.env.CP_REVIEW_SUPPRESSION_SECONDS = "5";
+	clock = new Date("2026-09-05T10:00:20Z");
+	assert.deepEqual(registry.resendDue(clock), [], "suppression knob drops the key past its lifetime");
+	assert.equal(b.sent.length, 3);
+});
+
 test("a wake-up the staleness check withheld keeps its resend eligibility, bounded (pi-command-post-b04)", async (t) => {
 	// cp-cjmu's second half: the pass was suppressed at send time by a lagging CI
 	// observation, the one-shot resend was spent on a copy that also went nowhere,
