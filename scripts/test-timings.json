@@ -1,5 +1,6 @@
 {
 	"tests/e2e/teardown-s17.test.ts": 110000,
+	"tests/e2e/teardown-s18.test.ts": 40000,
 	"tests/actions-ci-policy.test.ts": 37,
 	"tests/answer-card.test.ts": 27,
 	"tests/answer-delivery.test.ts": 297,
