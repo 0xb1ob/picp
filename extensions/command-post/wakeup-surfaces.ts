@@ -596,7 +596,9 @@ export function createWakeupSurfaces(
 				const tick = await post.ciTick();
 				// jje.2: a failed query is journaled on its job, never dropped with the tick.
 				for (const error of tick.errors) {
-					if (existsSync(join(currentRuntime().home, paths.runDir(error.job_id)))) post.runs.open(error.job_id).cp("ci_watch_failed", { message: error.message.slice(0, 300) });
+					// A job-less error ('-') has no run dir: journal it durably under its own cause.
+					if (!isSafeJobId(error.job_id)) post.ciWatchFailed(new Error(error.message));
+					else if (existsSync(join(currentRuntime().home, paths.runDir(error.job_id)))) post.runs.open(error.job_id).cp("ci_watch_failed", { message: error.message.slice(0, 300) });
 				}
 				if (tick.disabled && !s.ciWatchDisabledShown) {
 					s.ciWatchDisabledShown = true;
