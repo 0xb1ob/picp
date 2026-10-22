@@ -30,7 +30,7 @@ The re-read lets the queued job reach the forge before the remote mismatch stops
 ## S03b-parked (declaration 64)
 
 Base: 86b4cec9ba0a4cef74c0d6b1014648d670f6bdae (#429).
-Command pattern: `landing S03: a real parent relays a newly parked` in landing.test.ts.
+Command pattern: `landing S03: a real parent relays a newly parked` in tests/e2e/landing-s03.test.ts.
 Executed patch in src/wakeup-outbox.ts:
 
 ```diff

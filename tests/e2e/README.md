@@ -11,7 +11,7 @@ network, no operator credentials (`PI_CODING_AGENT_DIR` is a temp dir).
 | m3 | `npm run e2e:phase3` | pipeline: research → artifact → envelope → every gate verdict/cause branch (pass, revise + promote, capped second revise, flag-forced escalate, unparseable → operational → operational_persistent on a different model) → journaled checkpoint → implementer dispatched with the artifact as its task file → parent context-safety guards asserted |
 
 `npm test` runs every gate plus the unit suites: its glob is
-`tests/**/*.test.ts`, so every file above (including `tests/e2e/attach.test.ts`)
+`tests/**/*.test.ts`, so every file above (including `tests/e2e/phase1.test.ts`)
 is picked up by that one invocation and the per-gate scripts exist only to run
 one of them alone. It also *collects* the live suites and skips them (they print
 their skip reason), so `npm test` stays free.

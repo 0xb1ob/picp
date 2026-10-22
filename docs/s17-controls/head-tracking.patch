@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..3d1fb73 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -463,7 +463,7 @@ export class Teardown {
+ 		// worktree is its own clone, its remote-tracking refs go stale on their own,
+ 		// and a ref left behind by a branch GitHub already deleted is what made two
+ 		// jobs tear down as "(pushed)" with nothing on origin at all.
+-		const remote = await remoteTip((c, args) => this.#git(c, args), worktree, branch);
++		const remote = { ok: true as const, sha: (await this.#git(worktree, ["rev-parse", `refs/remotes/origin/${branch}`])).stdout.trim() };
+ 		if (!remote.ok) {
+ 			return {
+ 				ok: false,

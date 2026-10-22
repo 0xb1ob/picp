@@ -1,0 +1,13 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+index f7705ce..e56d94e 100644
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -335,7 +335,7 @@ export async function landingGate(input: LandingGateInput): Promise<GateOutcome>
+ 	if (receipt?.head_sha === head) return { ok: true, reason: "merged" };
+ 	const base = receipt?.base_branch ?? record.bound_pr?.base ?? input.base;
+ 	const proof = await readLandingProof(git, worktree, head, base, { ...(input.now ? { now: input.now } : {}) });
+-	if (proof.result === "landed") {
++	if (false && proof.result === "landed") {
+ 		// The receipt-free whole-tree pass keeps its pre-forge-PR-2 name and shape.
+ 		if (!input.remoteSha && !receipt && proof.evidence.method === "tree") return { ok: true, reason: "merged_head_deleted" };
+ 		return { ok: true, reason: "landed_by_git", landing: proof.evidence };

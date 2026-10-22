@@ -1,0 +1,13 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+index f7705ce..ec97298 100644
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -43,7 +43,7 @@ export interface TeardownLedger {
+ /** cp-t9yr F1: an unowned worker with a live pid — nothing here can observe its close, so no option skips this. */
+ export function unmanagedLiveWorker(home: string, record: FleetRecord, managed: unknown): GateFailure | undefined {
+ 	if (managed !== undefined || isScriptFleetRecord(record) || record.worker.exited_at !== undefined) return undefined;
+-	if (readRunObservation(home, record.job_id)?.closed === true || !isPidAlive(record.worker.pid)) return undefined;
++	if (!isPidAlive(record.worker.pid)) return undefined;
+ 	const { job_id: id, worker: { pid } } = record;
+ 	return {
+ 		code: "unmanaged_live_worker",

@@ -421,6 +421,7 @@ Test files added after the baseline, with the PR that owns them.
 <!-- manifest:incoming -->
 | File | PR | Note |
 |---|---|---|
+| tests/e2e/wake-ci-promoted.test.ts | cp-fix-promoted-ci-notice-dropped-z1n7 (https://github.com/0xb1ob/picp/pull/473) | S22 fix-job regression: a promoted job's CI notice keeps its promotion note at the provider |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

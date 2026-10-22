@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..30fc7a2 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -330,7 +330,7 @@ export class Teardown {
+ 			closed_reason: options.force ? "forced" : "gated",
+ 			...(isScriptFleetRecord(record) ? {} : { worker: {
+ 				...record.worker,
+-				exited_at: (!managed && record.worker.exited_at) || (exitCode !== undefined ? closedAt : undefined),
++				exited_at: closedAt,
+ 				...(exitCode !== undefined ? { exit_code: exitCode } : {}),
+ 			} }),
+ 			...(runStatus ? { usage: runStatus.usage } : {}),

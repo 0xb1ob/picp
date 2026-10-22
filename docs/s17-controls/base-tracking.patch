@@ -1,0 +1,13 @@
+diff --git a/src/landing-proof.ts b/src/landing-proof.ts
+index 228ba6a..c93dec2 100644
+--- a/src/landing-proof.ts
++++ b/src/landing-proof.ts
+@@ -122,7 +122,7 @@ export async function readLandingProof(git: GitRun, worktree: string, head: stri
+ 		return result;
+ 	};
+ 	try {
+-		const tip = await remoteTip(remote, worktree, base);
++		const tip = { ok: true as const, sha: (await remote(worktree, ["rev-parse", `refs/remotes/origin/${base}`])).stdout.trim() };
+ 		if (!tip.ok) return { result: "unknown", detail: `origin could not be asked about ${base} (${tip.error})` };
+ 		if (!tip.sha || !SHA.test(tip.sha)) return { result: "unknown", detail: `origin advertises no ${base} branch to compare with` };
+ 		const baseSha = tip.sha;

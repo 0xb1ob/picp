@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..f644e32 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -309,7 +309,7 @@ export class Teardown {
+ 		if (record.checkpoint_ref && !moved) await deleteCheckpoint((c, args) => this.#git(c, args), record.worktree, record.checkpoint_ref); // missing ref: not a failure
+ 		// cp-a9fq: lease_returned is what treehouse confirmed, never assumed; a failed return (forced or not) keeps the job open.
+ 		const released = moved ? { ok: false as const, error: moved.message } : await leases.release(lease, { ignoreErrors: true });
+-		if (!released.ok) {
++		if (false && !released.ok) {
+ 			const failure = moved ?? leaseReturnFailed(jobId, released.error);
+ 			runs.open(jobId).cp("teardown_refused", { ...failure });
+ 			return { ...base, failure, ...(exitCode !== undefined ? { exit_code: exitCode } : {}) };
