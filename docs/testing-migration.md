@@ -74,7 +74,7 @@ ask-0088e0332d00, 2026-10-21.
 | S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting and executed controls](testing-migration-s14.md): 30 mapped, 3 retained verbatim with unreachable-input evidence, 0 pending | 4 original paths retired (3 mixed moved/split) | +3 retained files | +6 e2e declarations |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
 | S10 (cp-e2e-slice-s10-4dzb) | behavior 05; integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92); [range ledger and executed patch controls](testing-migration-s10.md); S09 carry-ins reconciled | 0; original unit file stays whole | unchanged | +6 e2e declarations |
-| S20 (cp-e2e-slice-s20-8nn3) | behavior 06; checkpoint: 17 mapped/4 retained across shipped memory, stale context and head sources; wake-rules pending; 26 controls executed | 3 original paths retired, 2 retained replacements (not deletion credit) | +1 e2e file, net -1 source/retained files | -21 original +4 retained +6 e2e = -11 net declarations at checkpoint |
+| S20 (cp-e2e-slice-s20-8nn3) | behavior 06; checkpoint: 17 mapped/4 retained across shipped memory, stale context and head sources; all 17 wake-rules declarations stay pending; 41 controls executed | 3 original paths retired, 2 retained replacements (not deletion credit) | +2 e2e files; net +1 file | -21 original +4 retained +14 e2e = -3 net declarations at checkpoint |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -435,6 +435,16 @@ moves first.
 | 06-S20-abort | `tests/e2e/wake-delivery.test.ts` | S20: abort strands no autonomous turn and the next prompt carries the notices |
 | 06-S20-tool | `tests/e2e/wake-delivery.test.ts` | S20: tool turns do not answer operator sends and an errored run releases held wakes |
 | 06-S20-head | `tests/e2e/headless-lifecycle.test.ts` | S20: reported envelope heads survive failed watch queries until a newer remote observation supersedes the verdict |
+| 06-S20-bridge | `tests/e2e/wake-rules.test.ts` | S20: the real parent bridge relays landing, resolve, green and flagged notices once |
+| 06-S20-switch | `tests/e2e/wake-rules.test.ts` | S20: switch files control resolve relays and malformed settings restore a parent turn |
+| 06-S20-identities | `tests/e2e/wake-rules.test.ts` | S20: non-resolve and hashed legacy continuation IDs reach context without a resolve ruling |
+| 06-S20-expiry | `tests/e2e/wake-rules.test.ts` | S20: a resolve cache stays quiet within its minute and refreshes to dispatch after expiry |
+| 06-S20-failure | `tests/e2e/wake-rules.test.ts` | S20: a failed next refresh wakes with a reason and is not retried during its cache minute |
+| 06-S20-review-start | `tests/e2e/headless-lifecycle.test.ts` | S20: a green watch fact starts a real mock reviewer and relays without a parent request |
+| 06-S20-batch | `tests/e2e/headless-lifecycle.test.ts` | S20: multi-fact green batches and a single red fact wake without a single-green ruling |
+| 06-S20-overlap | `tests/e2e/headless-lifecycle.test.ts` | S20: overlapping green sweeps leave one owner for a delayed continuation ruling |
+| 06-S20-review-pending | `tests/e2e/headless-lifecycle.test.ts` | rpc: one CI-green key whose review is in flight is relayed without a parent turn; ticks, restart and a moved head repeat nothing |
+| 06-S20-ci-off | `tests/e2e/headless-lifecycle.test.ts` | rpc: with the wake-rules switch off, the same CI-green fact wakes the parent and journals why |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -1923,6 +1933,278 @@ index d9d0955..68ee6ff 100644
 ```
 <!-- /patch:S20-settled-release -->
 
+S20 wake-rule controls below add coverage without retiring any of the 17 source declarations yet.
+All were executed against the real bridge/parent and restored; positive complete-file runs pass.
+
+<!-- patch:S20-rule-switch -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..0b3081f 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -34,7 +34,7 @@ export function wakeRulesEnabled(home: string | undefined): boolean {
+ 		const value: unknown = JSON.parse(text);
+ 		if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+ 		const enabled = (value as { enabled?: unknown }).enabled;
+-		return enabled === undefined || enabled === true;
++		return enabled !== false;
+ 	} catch {
+ 		return false;
+ 	}
+```
+<!-- /patch:S20-rule-switch -->
+
+<!-- patch:S20-resolve-id -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..a31bd98 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -42,7 +42,7 @@ export function wakeRulesEnabled(home: string | undefined): boolean {
+ 
+ /** A `HELD PR STOPPED … (next: resolve)` durable id; a hashed (over-long) id fails the match and wakes the parent. */
+ export function isResolveStop(id: string): boolean {
+-	return /^continuation:.+:resolve$/.test(id);
++	return id.startsWith("continuation:") && !id.startsWith("continuation:done:") && !id.startsWith("continuation:window:");
+ }
+ 
+ /** Notify text the bridge relays straight to the operator. */
+```
+<!-- /patch:S20-resolve-id -->
+
+<!-- patch:S20-bridge-text -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..30985b8 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -47,7 +47,7 @@ export function isResolveStop(id: string): boolean {
+ 
+ /** Notify text the bridge relays straight to the operator. */
+ export function isRelayOnlyNotice(text: string): boolean {
+-	return /^(?:\[[^\]\n]+\] )?(?:HELD PR LANDED — |HELD PR STOPPED — \S+ \(continuation, next: resolve\)|CI GREEN — .* handled in code, no parent turn\.)/.test(text);
++	return false;
+ }
+ 
+ /** A custom message a wake rule sent with no parent turn; the bridge relays it. */
+```
+<!-- /patch:S20-bridge-text -->
+
+<!-- patch:S20-bridge-flag -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..a064f40 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -53,7 +53,7 @@ export function isRelayOnlyNotice(text: string): boolean {
+ /** A custom message a wake rule sent with no parent turn; the bridge relays it. */
+ export function relayOnlyMessage(message: unknown): boolean {
+ 	const details = (message as { details?: unknown } | undefined)?.details;
+-	return !!details && typeof details === "object" && (details as { relay_only?: unknown }).relay_only === true;
++	return false;
+ }
+ 
+ /** The fleet generation a wake for `jobId` is stamped with; undefined with no id or an unreadable fleet. */
+```
+<!-- /patch:S20-bridge-flag -->
+
+<!-- patch:S20-cache-age -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..27e83f8 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -120,7 +120,7 @@ export class NextCache {
+ 	fresh(now = Date.now()): { kind: NextActionKind } | { reason: string } {
+ 		if (this.#error !== undefined) return { reason: `cp_next unavailable: ${this.#error}` };
+ 		if (this.#kind === undefined || this.#at === undefined) return { reason: "cp_next unavailable: never computed" };
+-		return now - this.#at <= NEXT_CACHE_MAX_AGE_MS ? { kind: this.#kind } : { reason: "cp_next stale" };
++		return { kind: this.#kind };
+ 	}
+ 
+ 	attemptedRecently(now = Date.now()): boolean {
+```
+<!-- /patch:S20-cache-age -->
+
+<!-- patch:S20-cache-fail -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..7809e2c 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -110,7 +110,7 @@ export class NextCache {
+ 	fail(message: string, at = Date.now()): void {
+ 		this.#kind = undefined;
+ 		this.#at = at;
+-		this.#error = message;
++		this.#error = undefined;
+ 	}
+ 
+ 	attempt(at = Date.now()): void {
+```
+<!-- /patch:S20-cache-fail -->
+
+<!-- patch:S20-cache-attempt -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..079d0bb 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -124,7 +124,7 @@ export class NextCache {
+ 	}
+ 
+ 	attemptedRecently(now = Date.now()): boolean {
+-		return this.#attemptAt !== undefined && now - this.#attemptAt < NEXT_CACHE_MAX_AGE_MS;
++		return false;
+ 	}
+ }
+ 
+```
+<!-- /patch:S20-cache-attempt -->
+
+<!-- patch:S20-resolve-defer -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..28c5440 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -183,6 +183,7 @@ export function createWakeRules(deps: WakeRulesDeps) {
+ 		try {
+ 			if (!wakeRulesEnabled(home())) return false;
+ 			if (!deps.post().durableWakeups.pending().some((entry) => isResolveStop(entry.id))) return false;
++			return false;
+ 			const at = now();
+ 			if ("kind" in cache.fresh(at) || cache.attemptedRecently(at)) return false;
+ 			cache.attempt(at);
+```
+<!-- /patch:S20-resolve-defer -->
+
+<!-- patch:S20-resolve-action -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..4f45b00 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -217,7 +217,7 @@ export function createWakeRules(deps: WakeRulesDeps) {
+ 		try {
+ 			if (!wakeRulesEnabled(home())) return false;
+ 			const state = cache.fresh(now());
+-			const quiet = "kind" in state && isQuietKind(state.kind);
++			const quiet = "kind" in state;
+ 			const reason = "kind" in state ? `cp_next ${state.kind}` : state.reason;
+ 			const nextKind = "kind" in state ? { next_kind: state.kind } : {};
+ 			decided.set(entry.id, { wake_rule: "held_stop_resolve", decision: quiet ? "relayed" : "woke", reason, ...nextKind });
+```
+<!-- /patch:S20-resolve-action -->
+
+<!-- patch:S20-ci-pending -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..34d5d43 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -273,7 +273,7 @@ export function createWakeRules(deps: WakeRulesDeps) {
+ 			});
+ 			const outcome: ContinuationOutcome | undefined = await Promise.race([pending, bound]).finally(() => clearTimeout(timer));
+ 			if (!outcome) return woke(`continuation unsettled after ${waitMs}ms`);
+-			const reviewing = outcome.action === "review_started" || outcome.action === "review_pending";
++			const reviewing = outcome.action === "review_started";
+ 			if (outcome.job_id !== only.job_id || !reviewing || outcome.next !== "review") return woke(`outcome ${outcome.action}/${outcome.next ?? "none"}`);
+ 			let kind: NextActionKind;
+ 			try {
+```
+<!-- /patch:S20-ci-pending -->
+
+<!-- patch:S20-ci-started -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..096a14b 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -273,7 +273,7 @@ export function createWakeRules(deps: WakeRulesDeps) {
+ 			});
+ 			const outcome: ContinuationOutcome | undefined = await Promise.race([pending, bound]).finally(() => clearTimeout(timer));
+ 			if (!outcome) return woke(`continuation unsettled after ${waitMs}ms`);
+-			const reviewing = outcome.action === "review_started" || outcome.action === "review_pending";
++			const reviewing = outcome.action === "review_pending";
+ 			if (outcome.job_id !== only.job_id || !reviewing || outcome.next !== "review") return woke(`outcome ${outcome.action}/${outcome.next ?? "none"}`);
+ 			let kind: NextActionKind;
+ 			try {
+```
+<!-- /patch:S20-ci-started -->
+
+<!-- patch:S20-ci-shape -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..b8a4a8e 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -240,7 +240,7 @@ export function createWakeRules(deps: WakeRulesDeps) {
+ 
+ 	/** A single green CI fact the continuation already turned into a review is relayed and confirmed, not a turn. */
+ 	const ciGreen = async (observations: readonly CiObservation[]): Promise<CiRuling> => {
+-		const only = observations.length === 1 ? observations[0] : undefined;
++		const only = observations[0];
+ 		if (!only || only.event !== "ci_green") return { suppress: false };
+ 		// A later tick for a key still waiting on its outcome must not race it; the first pass owns the ruling.
+ 		if (ciInFlight.has(only.key)) return { suppress: true, relay: "CI GREEN — already being handled in code.", keys: [] };
+```
+<!-- /patch:S20-ci-shape -->
+
+<!-- patch:S20-ci-nongreen -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..9b6705a 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -241,7 +241,7 @@ export function createWakeRules(deps: WakeRulesDeps) {
+ 	/** A single green CI fact the continuation already turned into a review is relayed and confirmed, not a turn. */
+ 	const ciGreen = async (observations: readonly CiObservation[]): Promise<CiRuling> => {
+ 		const only = observations.length === 1 ? observations[0] : undefined;
+-		if (!only || only.event !== "ci_green") return { suppress: false };
++		if (!only) return { suppress: false };
+ 		// A later tick for a key still waiting on its outcome must not race it; the first pass owns the ruling.
+ 		if (ciInFlight.has(only.key)) return { suppress: true, relay: "CI GREEN — already being handled in code.", keys: [] };
+ 		ciInFlight.add(only.key);
+```
+<!-- /patch:S20-ci-nongreen -->
+
+<!-- patch:S20-ci-once -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..743a103 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -254,7 +254,7 @@ export function createWakeRules(deps: WakeRulesDeps) {
+ 	const ciGreenRule = async (only: CiObservation): Promise<CiRuling> => {
+ 		const woke = (reason: string, extra: Record<string, unknown> = {}): CiRuling => {
+ 			const once = `ci_green:${only.key}`;
+-			if (!journaled.has(once)) {
++			if (true) {
+ 				journaled.add(once);
+ 				journalWakeRule(runsOf(), only.job_id, { wake_rule: "ci_green", decision: "woke", reason, ...extra });
+ 			}
+```
+<!-- /patch:S20-ci-once -->
+
+<!-- patch:S20-ci-overlap -->
+```diff
+diff --git a/src/wake-rules.ts b/src/wake-rules.ts
+index cac03d6..1089f0e 100644
+--- a/src/wake-rules.ts
++++ b/src/wake-rules.ts
+@@ -243,7 +243,7 @@ export function createWakeRules(deps: WakeRulesDeps) {
+ 		const only = observations.length === 1 ? observations[0] : undefined;
+ 		if (!only || only.event !== "ci_green") return { suppress: false };
+ 		// A later tick for a key still waiting on its outcome must not race it; the first pass owns the ruling.
+-		if (ciInFlight.has(only.key)) return { suppress: true, relay: "CI GREEN — already being handled in code.", keys: [] };
++		if (false) return { suppress: true, relay: "CI GREEN — already being handled in code.", keys: [] };
+ 		ciInFlight.add(only.key);
+ 		try {
+ 			return await ciGreenRule(only);
+```
+<!-- /patch:S20-ci-overlap -->
+
 <!-- patch:S20-head-source -->
 ```diff
 diff --git a/extensions/command-post/helpers.ts b/extensions/command-post/helpers.ts
@@ -2128,6 +2410,21 @@ index 2dcc135..008c3bd 100644
 | S20-head-time | `tests/wakeup-head-sources.test.ts` | c7cf30bd8ace68d33d71bf6539db45a12ffe30b4 | 06-S20-head | S20-head-time | dc3632783dcd5404031703d0cd2e5b9915855a052e324ab833f0bda1db6a83d4 | newer-head verdict body leaks | pass |
 | S20-watch-time | `tests/wakeup-head-sources.test.ts` | c7cf30bd8ace68d33d71bf6539db45a12ffe30b4 | 06-S20-head | S20-watch-time | 7a71869f5237dd0492d184a6885747dbea2b54ea134a1cfb2b9e573b1864c660 | initial authoritative verdict absent | pass |
 | S20-watch-failure | `tests/wakeup-head-sources.test.ts` | c7cf30bd8ace68d33d71bf6539db45a12ffe30b4 | 06-S20-head | S20-watch-failure | 2b44580427f1d46396495a3412b0e7006ab65b86af9b7321fd8326328187b851 | failed query advances observation timestamp | pass |
+| S20-rule-switch | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-switch | S20-rule-switch | a28e341b8b1e6b0b714282e469b4b423819772cf029b29464cab4eeb809f8c3d | malformed enabled string fails to reach provider | pass |
+| S20-resolve-id | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-identities | S20-resolve-id | 368525224456f79a83a81bb5d8452a2ff4bcd47e945a3811202ab13360ca3e17 | non-resolve notices incorrectly acquire resolve journal rulings | pass |
+| S20-bridge-text | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-bridge | S20-bridge-text | 948ecc94fc7d4bd48433b95f7b52613aae00df66f0df8e825298aa7afc52d42e | bridge startup relay notifications never arrive | pass |
+| S20-bridge-flag | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-bridge | S20-bridge-flag | 148f2c1dc068fe0366e6a17bf2e00eb3bf87391b2fb678a7e7ef9a7ae4b9babc | flagged custom message never reaches the bridge consumer | pass |
+| S20-cache-age | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-expiry | S20-cache-age | 4e4bf0f31851b7bf26045e3e547a099b6f2d5facd4344090cb4eb017c90d0c2f | expired cache fails to wake for independent ready work | pass |
+| S20-cache-fail | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-failure | S20-cache-fail | 641536fdce338c2580c914632cdf693d787bba38aafaacd2a94d56ec25092cff | failure reason incorrectly says never computed | pass |
+| S20-cache-attempt | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-failure | S20-cache-attempt | 42624e0d750901a6134ab26a157a0f4df14fda8e15110e67a081217c564ffcf8 | restored ledger is retried early and strands the remembered-failure wake | pass |
+| S20-resolve-defer | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-switch | S20-resolve-defer | 5706f5c35cdf16520ba9bb68e38d6393c9633844137216f121de9e8ffb0ce97e | initial resolve journals woke instead of relayed/no_mandate | pass |
+| S20-resolve-action | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-expiry | S20-resolve-action | 27d66990db6425defc93ab6c9dccd7dff95b5b7e114295b0b498ec814cb97efc | actionable dispatch is incorrectly quiet and never reaches provider | pass |
+| S20-ci-pending | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-review-pending | S20-ci-pending | 10f7337427ba5616f8879b78d38114c5e84104f8af2fbb332048f815a26a9733 | pending-review notice lacks handled-in-code relay wording | pass |
+| S20-ci-started | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-review-start | S20-ci-started | a8391518d6d74b94b8d317fc4aee38fa3bbd68950916c14f8c9ccff41e9f6c73 | newly started review lacks handled-in-code relay wording | pass |
+| S20-ci-shape | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-batch | S20-ci-shape | 519b3abe95bc046323a2d4e16d1e45d17bd0bf5abcd67961aa9aebcd04104ff5 | two-fact CI batch never reaches provider | pass |
+| S20-ci-nongreen | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-batch | S20-ci-nongreen | 93fe86bdc349198d1c807a029cc0f2e2ac60601a84db3f019bf422fcd01df38d | red fact incorrectly produces a ci_green journal ruling | pass |
+| S20-ci-once | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-ci-off | S20-ci-once | 19e4ee2c3eeb76ba7ad6fb84afab10d8e1431d7de75d08c7d1b6efd33785c7ad | bounded resend writes duplicate woke journal rulings | pass |
+| S20-ci-overlap | `tests/wake-rules.test.ts` | 2546252cfaad8a0b8a28a90fe9489fd59087b963 | 06-S20-overlap | S20-ci-overlap | 02e7eefc72d6a6c157fffb939e56ffb522afe4536fbd36777534c5b0d1d1f544 | overlapping sweep receives an owning ruling instead of the no-keys relay | pass |
 <!-- /manifest:regressions -->
 
 <!-- patch:NC-main-corrupt -->
@@ -3305,6 +3602,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/shipped-seen-retained.test.ts` | S20 | retained structural atomic-write assertion; cp_status_block cannot expose import tokens or syscall ordering |
 | `tests/wakeup-head-sources-retained.test.ts` | S20 | retained 3 declarations: accessor call contract and throwing-source degradation/journal paths; RPC has no throwing HeadSourcePost port |
 | `tests/timer-knobs.test.ts` | #439 (base merge) | existing upstream timer-knob contract checks; registered after plain-merging 695a8528, no S20 conversion credit |
+| `tests/e2e/wake-rules.test.ts` | S20 (cp-e2e-slice-s20-8nn3) | real bridge and resolve-cache coverage; original wake-rules file remains whole pending complete retirement accounting |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
