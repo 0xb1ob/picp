@@ -880,8 +880,15 @@ export class CommandPost {
 	}): void {
 		try {
 			if (!this.durableWakeups.enqueue(input)) return;
-		} catch {
-			return;
+		} catch (error) {
+			const reason = (error as Error).message.split("\n")[0] ?? "unknown";
+			console.error(`cp: durable wake-up ${input.id} rejected: ${reason}`);
+			try {
+				const fallback = `DURABLE NOTICE DROPPED — ${input.kind} ${input.id.slice(0, 120)} was rejected (${reason.slice(0, 200)}); see /status`;
+				if (!this.durableWakeups.enqueue({ id: boundedWakeupId(`rejected:${input.id}`), kind: input.kind, content: fallback })) return;
+			} catch {
+				return;
+			}
 		}
 		this.#options.onDurableWakeup?.();
 	}

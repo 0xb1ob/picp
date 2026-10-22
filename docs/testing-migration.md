@@ -75,6 +75,7 @@ ask-0088e0332d00, 2026-10-21.
 | S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting and executed controls](testing-migration-s14.md): 30 mapped, 3 retained verbatim with unreachable-input evidence, 0 pending | 4 original paths retired (3 mixed moved/split) | +3 retained files | +6 e2e declarations |
 | S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
 | S10 (cp-e2e-slice-s10-4dzb) | behavior 05; integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92); [range ledger and executed patch controls](testing-migration-s10.md); S09 carry-ins reconciled | 0; original unit file stays whole | unchanged | +6 e2e declarations |
+| S16 (cp-e2e-slice-s16-koqy) | behavior 05; reviewer-model whole file: 3 mapped, 0 retained, 1 deleted file; [declaration accounting](testing-migration-s16.md); other slices retain their ownership | 1 | 378 → 378 | 4,204 → 4,203 (3 removed, 2 added) |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -231,6 +232,7 @@ the count at that PR's own base. Per the plan, a PR's local count goes from `F` 
 | S08 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 1–40: 38 mapped, 2 retained (5%), 0 deleted files; nine scenarios added and 05-13 extended; [range ledger](testing-migration-s08.md); original unit file kept whole |
 | S09 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 41–80: 34 mapped, 6 retained (15%), 0 deleted files; eight scenarios added; [range ledger](testing-migration-s09.md); original unit file kept whole |
 | S10 | 05 | `tests/e2e/landing.test.ts` | integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92), 0 deleted files; six added scenarios and 05-S02-5 extended; [range ledger](testing-migration-s10.md); original unit file kept whole |
+| S16 | 05 | `tests/e2e/reviewer-model.test.ts` | 2 added declarations: S16-model here and S16-auto in landing; 3 units mapped, 0 retained, 1 deleted file |
 | P4 | 06 | `tests/e2e/wake-delivery.test.ts` | up to 3 |
 | P5 | 07 | `tests/e2e/compaction.test.ts` | up to 4 |
 | P6 | 08 | `tests/e2e/drain-restart.test.ts` | up to 3 |
@@ -442,6 +444,8 @@ moves first.
 | 05-S14-permission | `tests/e2e/landing.test.ts` | landing S14: repository permission reports the allowlist and each blocked cause |
 | 05-S14-gitlab | `tests/e2e/landing.test.ts` | landing S14: GitLab worker reports hold only on the project's MR and preserve named refusals |
 | 05-S14-approval | `tests/e2e/phase3.test.ts` | pipeline S14: only a pin for the current artifact bypasses the operator checkpoint |
+| S16-model | `tests/e2e/reviewer-model.test.ts` | S16: public plan gates select reviewer preferences from current and legacy authority |
+| S16-auto | `tests/e2e/landing.test.ts` | landing S16: automatic green CI reviews use the current mandate reviewer |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -460,6 +464,9 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 <!-- manifest:assertions -->
 | Unit file | Assertion | Scenario | Disposition | Note |
 |---|---|---|---|---|
+| `tests/reviewer-model.test.ts` | reviewer selection: explicit, newest active (tie by id), expired continuation, project, unset | S16-model | mapped | S16-NC1 fails explicit selection source; matrix drives real plan gates, including excluded grants, fallback and recordless routing |
+| `tests/reviewer-model.test.ts` | scheduled and legacy schedule subjects use only their actual schedule grant | S16-model | mapped | S16-NC2 fails schedule actual chosen reviewer receives plan; disk schedules and legacy ledger labels feed the real gate |
+| `tests/reviewer-model.test.ts` | production factories and automatic ci_green reviews honor current preferences | S16-auto | mapped | S16-NC3 fails automatic review reaches the mandated model; S16-model pins gate rereads, spawned model and high thinking; DR-09 pins public diff review factory preferences |
 | `tests/integrate-held-ci.test.ts` | CI observation repairs without parent notice delivery; duplicates and manual integration share the project lane | 05-13 | mapped | S07: watch-driven repair overlaps manual cp_integrate and a second real job at a forge barrier; S07-NC-2 fails queued-peer assertion. One supersession, same worker/branch/worktree, correct run and hold in model request, archived first envelope and accepted replacement; green holds with no merge ask/checkpoint, release requires review; NC-37 fails spent-allowance outcome |
 | `tests/integrate-held-ci.test.ts` | startup repair and restart preserve the cumulative allowance after repaired green and failing reports | 05-13 | mapped | S07: real parent restart reads green hold and spent allowance; failing head in fresh parent says already asked once, never a missing-worker fallback; NC-37 fails the already-asked reason assertion |
 | `tests/integrate-held-ci.test.ts` | held repair uses real Sender permission before delivery or revival, including eligible expired grants | 05-S07 | mapped | S07: revoked/capped refuse before missing-worker lookup, expired permits one repair, missing/dead worker refuses; hold and original envelope survive refusal, PID unchanged; S07-NC-1 fails revoked error match |
@@ -1555,6 +1562,9 @@ diff --git a/src/pr-bind.ts b/src/pr-bind.ts
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
+| S16-NC1 | `tests/reviewer-model.test.ts` | fb70938e2e94680d9f6df1a76de53c5c633a6c8a | S16-model | S16-explicit | 5aaa41c24b9012ee897a1ceda1b5e4455095d382793c03fd294f0bd13c8f8c9d | explicit: selection source undefined instead of explicit | pass |
+| S16-NC2 | `tests/reviewer-model.test.ts` | fb70938e2e94680d9f6df1a76de53c5c633a6c8a | S16-model | S16-schedule | c74f53c7ecd37c0f80bf1a4222610ee15b105bdd81900d3a6667f294036f0c18 | schedule actual: chosen reviewer receives plan is false | pass |
+| S16-NC3 | `tests/reviewer-model.test.ts` | fb70938e2e94680d9f6df1a76de53c5c633a6c8a | S16-auto | S16-automatic | 283f1915f714569675e037df7b56da370e426f38715f8adb5a9d65464117e85b | automatic review reaches the mandated model is false | pass |
 | NC-01 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-1 | NC-01-green | e5cc55b97d22e820228a709e858fbe2f7294fcc8dce00aa980f63982c09660f3 | wake observation names run 2 (skipped), not run 6 | pass |
 | NC-02 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-1 | NC-02-integrate | 0a2c3b3942c839731d201a0a07d8ddf2c6bf6ea2d6163d5a00430568bb3d6e86 | the ci fact does not end with (run 6 …/actions/runs/6) | pass |
 | NC-03 | `tests/ci-run-ref.test.ts` | 90c1f22ba20c416abc9fc96b04addd07e2f58ed3 | 01-2 | NC-03-host | 0bb48b55ddc16d72b68109e136da58d310bb118ebbe641f411e9ba7980ef6ac0 | the enterprise ci fact links ghe.example.com/…/actions/runs/16 | pass |
@@ -2064,6 +2074,59 @@ diff --git a/src/review-runs.ts b/src/review-runs.ts
 +	for (const path of named) { add(path, "head", "task-named"); add(path, "fork", "task-named"); }
 ```
 <!-- /patch:S15-C10 -->
+<!-- patch:S16-explicit -->
+```diff
+diff --git a/src/reviewer-model.ts b/src/reviewer-model.ts
+index 9a8a190..d43a740 100644
+--- a/src/reviewer-model.ts
++++ b/src/reviewer-model.ts
+@@ -29,7 +29,7 @@ export function selectReviewerModel(input: {
+ 	const runModel = run && runModelFor(run, "reviewer"), thinking = run?.execution?.effective.thinking as ThinkingLevel | undefined;
+ 	const chosenModel = runModel ?? input.model;
+ 	if (run && (runModel || thinking)) return { ...(chosenModel ? { model: chosenModel } : {}), source: "schedule-run", run_id: run.id, ...(thinking ? { thinking } : {}) };
+-	if (input.model !== undefined) return { model: input.model, source: "explicit" };
++ if (input.model !== undefined) return undefined;
+ 	if (!record) return undefined;
+ 	if (mandates) {
+ 		const subject = {
+```
+<!-- /patch:S16-explicit -->
+
+<!-- patch:S16-schedule -->
+```diff
+diff --git a/src/reviewer-model.ts b/src/reviewer-model.ts
+index 9a8a190..5f2e317 100644
+--- a/src/reviewer-model.ts
++++ b/src/reviewer-model.ts
+@@ -35,7 +35,7 @@ export function selectReviewerModel(input: {
+ 		const subject = {
+ 			jobId: record.job_id, project: record.project, jobKind: record.kind,
+ 			startedAt: record.dispatched_at, inFlight: true,
+-			...(record.schedule_id ? scheduleScope(record.schedule_id, mandates.scheduleMandates()) : mandates.scheduleOf(record.job_id)),
++   ...(record.schedule_id ? {} : mandates.scheduleOf(record.job_id)),
+ 		};
+ 		const eligible = mandates.list().filter((grant) => grant.reviewer_model !== undefined && grant.status !== "paused" && grant.status !== "revoked")
+ 			.map((grant) => ({ grant, at: grantStanding(grant, "review", subject, isoTimestamp(input.now)) }))
+```
+<!-- /patch:S16-schedule -->
+
+<!-- patch:S16-automatic -->
+```diff
+diff --git a/src/reviewer-model.ts b/src/reviewer-model.ts
+index 9a8a190..058b9e2 100644
+--- a/src/reviewer-model.ts
++++ b/src/reviewer-model.ts
+@@ -31,6 +31,7 @@ export function selectReviewerModel(input: {
+ 	if (run && (runModel || thinking)) return { ...(chosenModel ? { model: chosenModel } : {}), source: "schedule-run", run_id: run.id, ...(thinking ? { thinking } : {}) };
+ 	if (input.model !== undefined) return { model: input.model, source: "explicit" };
+ 	if (!record) return undefined;
++ if (record.kind === "ship") return undefined;
+ 	if (mandates) {
+ 		const subject = {
+ 			jobId: record.job_id, project: record.project, jobKind: record.kind,
+```
+<!-- /patch:S16-automatic -->
+
 <!-- patch:NC-main-corrupt -->
 ```diff
 diff --git a/src/main-ci.ts b/src/main-ci.ts
@@ -3238,6 +3301,9 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/review-approval-retained.test.ts` | S14 | original declaration verbatim: pipeline artifacts.info fails before missing matches; only production write passes seq 1; no public entry reaches seq-2/3 overwrite |
 | `tests/held-continuation-fleet-read.test.ts` | #433 (ac50447082b15959140ec40b04080102eadbaf87) | incoming known-regression coverage for unreadable fleet during continuation failure notice; unit landed upstream after the baseline and is preserved unchanged; convert, owner P3c-rest (held continuation); recorded when plain-merging main |
 | `tests/timer-knobs.test.ts` | #439 | incoming timer configuration contract: defaults, positive overrides and invalid-input fallback; landed with the public knobs consumed by S15 Addendum 2 |
+| `tests/e2e/reviewer-model.test.ts` | S16 | behavior 05, public gate reviewer selection and persisted schedule scope; scenario S16-model |
+| `tests/e2e/ci-watch-jobless.test.ts` | #443 | incoming public RPC regression: distinct job-less CI watch errors retain distinct durable notice causes; preserved unchanged when merging main |
+| `tests/recovery-notice-bound.test.ts` | #442 | incoming known regression: forty failed recovery candidates journal exactly one bounded notice; preserved unchanged when merging main |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
@@ -3503,7 +3569,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/review-merge-window.test.ts` | deleted | P3 | S15: both declarations mapped to 05-S15-W through cp_integrate and a fresh parent; executed W01/W02 patches and hashes in testing-migration-s15.md |
 | `tests/review-runs.test.ts` | deleted | P3 | S15: source path replaced by tests/review-runs-retained.test.ts; 16 mapped declarations in 05-S15-A/X/Q/S/B/O/D/L, 3 retained verbatim; production 60/120/1200-second timers and R01–R11/R15–R17/Q01/B01/W01 controls; assertion dispositions remain mapped/retained |
 | `tests/review-tool.test.ts` | deleted | P3 | S15: four mapped declarations in 05-S15-T/P; three declarations ledgered retained and moved verbatim to tests/review-tool-retained.test.ts; typed-helper/schema entry-point traces and T00–T05 controls in testing-migration-s15.md |
-| `tests/reviewer-model.test.ts` | convert | P3 | behavior 05 (Review, CI and merge) |
+| `tests/reviewer-model.test.ts` | deleted | S16 | 3 mapped, 0 retained; scenarios S16-model and S16-auto; controls S16-NC1–3; [accounting](testing-migration-s16.md) |
 | `tests/revive.test.ts` | convert | P8 | behavior 04 (Worker lifecycle and recovery) |
 | `tests/risk-batch.test.ts` | deleted | P2d | behavior 02: every assertion mapped to 02-11 or redundant-unreachable (Assertion map); negative control NC-15 |
 | `tests/risk-negation.test.ts` | deleted | P2c | behavior 02: every assertion mapped to 02-7 (Assertion map); negative control NC-10 |
