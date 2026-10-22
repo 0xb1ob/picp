@@ -545,7 +545,7 @@ test(
 			/read malformed.*not JSON; gh exit 0; body "<!DOCTYPE html> <html>\[redacted\] Unicorn!<\/html>"; 3 attempts/,
 			"HTML 200",
 		);
-		assert.equal(page.calls.filter((call) => call.includes(runsAt)).length, 3);
+		assert.equal(page.calls.filter((call) => call.includes(runsAt)).length, 6, "three attempts, then one fresh observation");
 		// A structurally wrong JSON page is not retried.
 		const wrong = await unreadable([{ match: runsAt, replies: [json({ workflow_runs: [] })] }], /read malformed.*missing total_count/, "no total_count");
 		assert.equal(wrong.calls.filter((call) => call.includes(runsAt)).length, 1);
@@ -592,6 +592,15 @@ test(
 		const recovered = await s.integrate(jobId);
 		assert.match(recovered.text, /ci: green/, recovered.text);
 		assert.equal(recovered.calls.filter((call) => call.includes(runsAt)).length, 2);
+		// #420: empty 200s on a jobs page outlast one read's attempts; the same advance reads once more and goes on.
+		s.setGh({ runs: green, routes: [{ match: jobsOf(1), replies: [{ stdout: "" }, { stdout: "" }, { stdout: "" }, { pass: true }] }] });
+		const emptyOnce = await s.integrate(jobId);
+		assert.match(emptyOnce.text, /ci: green/, emptyOnce.text);
+		assert.equal(emptyOnce.calls.filter((call) => call.includes(jobsOf(1))).length, 4);
+		s.setGh({ runs: green, routes: [{ match: jobsOf(1), replies: [{ stdout: "" }] }] });
+		const stillEmpty = await s.integrate(jobId);
+		assert.equal(stillEmpty.record.next, "retry", stillEmpty.text);
+		assert.match(stillEmpty.text, /transient read run 1: not JSON/, stillEmpty.text);
 		// GitHub's head_sha in upper case is still the pushed head.
 		s.setGh({ runs: [run(1, head.toUpperCase(), "completed", "success")], routes: [] });
 		const upper = await s.integrate(jobId);
