@@ -167,6 +167,8 @@ export interface TeardownResult {
 	ledger_closed?: true;
 	/** cp-c1ur N18: gitignored paths the returned worktree still holds (dependency installs excepted). */
 	ignored?: string[];
+	/** Ignored paths `treehouse return` itself deleted (they were present before the return). */
+	ignored_removed?: string[];
 	/** Why those entries could not be listed. */
 	ignored_error?: string;
 }
@@ -298,7 +300,7 @@ export class Teardown {
 			exitCode = record.worker.exit_code ?? null;
 		}
 
-		const ignored = isDirectory(record.worktree) ? await ignoredEntries((c, args) => this.#git(c, args), record.worktree) : undefined;
+		const ignoredBefore = isDirectory(record.worktree) ? await ignoredEntries((c, args) => this.#git(c, args), record.worktree) : undefined;
 		// --- then the lease: nothing is left inside the worktree to terminate -
 		const lease: Lease = leaseFromRecord({
 			worktree: record.worktree,
@@ -314,6 +316,11 @@ export class Teardown {
 			runs.open(jobId).cp("teardown_refused", { ...failure });
 			return { ...base, failure, ...(exitCode !== undefined ? { exit_code: exitCode } : {}) };
 		}
+		// treehouse return may clean ignored files itself: report what is still there, not what was listed before.
+		const ignored = ignoredBefore && "entries" in ignoredBefore && isDirectory(record.worktree)
+			? await ignoredEntries((c, args) => this.#git(c, args), record.worktree) : ignoredBefore;
+		const ignoredRemoved = ignoredBefore && "entries" in ignoredBefore && ignored && "entries" in ignored
+			? ignoredBefore.entries.filter((e) => !ignored.entries.includes(e)) : [];
 		if (outcome?.ok && outcome.landing) runs.open(jobId).cp("teardown_landing_proven", { job_id: jobId, ...outcome.landing });
 
 		// --- state last -----------------------------------------------------
@@ -358,6 +365,7 @@ export class Teardown {
 			...(ledgerClose.failed[0] ? { ledger_close_error: ledgerClose.failed[0].error } : {}),
 			...(ignored && "error" in ignored ? { ignored_error: ignored.error } : {}),
 			...(ignored && "entries" in ignored && ignored.entries.length ? { ignored: ignored.entries } : {}),
+			...(ignoredRemoved.length ? { ignored_removed: ignoredRemoved } : {}),
 			...(exitCode !== undefined ? { exit_code: exitCode } : {}),
 			lease_returned: true,
 			artifacts_removed: artifactsRemoved,
