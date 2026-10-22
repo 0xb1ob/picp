@@ -38,7 +38,7 @@ import { reconcileRun } from "../../src/schedule-runs.ts";
 import { readSchedulesOrEmpty } from "../../src/schedule-expand.ts";
 import { snapshotSessionTools } from "../../src/session-tools.ts";
 import { formatSweep, sweepJobIdRename } from "../../src/state-migrations.ts";
-import { type WakeupCarrier } from "../../src/wakeups.ts";
+import { isPromotionNoted, type WakeupCarrier } from "../../src/wakeups.ts";
 import { WedgedWatch } from "../../src/wedged.ts";
 import { collapseOutputLines, currentRuntime, deliverUserContext, type OutputEntry, runtimeOrRefusal, WIDGET_REFRESH_MS } from "./helpers.ts";
 import type { SessionPost } from "./session-post.ts";
@@ -522,7 +522,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		const reviewed = reviewWakeupsInContext(messages as WakeupCarrier[]);
 		if (!reviewed) return;
 		// Review preserves order and fresh object identities; withheld entries drop, verdict findings stay (N2).
-		const fresh = reviewed.filter((message, index) => message === messages[index] || isWithheldFindings(message));
+		const fresh = reviewed.filter((message, index) => message === messages[index] || isWithheldFindings(message) || isPromotionNoted(message));
 		// N9: a withheld tail must not leave the context ending on assistant (provider 400, no prefill).
 		// SAFETY: retained messages are unchanged members of event.messages; the one stand-in is a custom message.
 		return { messages: keepUserTail(messages as WakeupCarrier[], fresh) as unknown as typeof event.messages };
