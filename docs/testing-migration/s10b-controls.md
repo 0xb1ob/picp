@@ -75,6 +75,9 @@ The following current-source mutations replay the controls in
 [`testing-migration-s03b-controls.md`](../testing-migration-s03b-controls.md). Aliases separate independent
 branches of older grouped controls. Each completed row below exited 1 at the named assertion or bounded wait.
 The in-flight outcome case uses `tests/e2e/headless-lifecycle.test.ts`; the rest use landing scenarios.
+After the landing split, run this section with
+`npm run test:one -- --test-name-pattern='landing S03:' tests/e2e/landing-s03.test.ts`.
+The headless in-flight case retains its separate file and selector.
 
 | Control | Mutation | Observed failed assertion or bounded wait |
 |---|---|---|
