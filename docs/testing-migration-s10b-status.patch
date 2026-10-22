@@ -1,0 +1,6 @@
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1449,2 +1449,1 @@
+-		if ((bad = unread(dirty, "could not read the worktree status (git status)", true))) return bad;
+-		if (dirty.stdout.trim().length > 0) {
++		if (false) {

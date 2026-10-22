@@ -10,7 +10,7 @@ import { HeldContinuation } from "../src/held-continuation.ts";
 import type { FleetRecord, IntegrationNext } from "../src/contracts.ts";
 import type { IntegrateResult } from "../src/integrate.ts";
 
-// Originals stay whole by operator ruling; the retirement follow-up removes the duplicate source declarations.
+// These helper-only inputs have no public injection seam; keep their original assertions.
 const HEAD = "d48a81d1f4d3c8a1b0d5e6f7a8b9c0d1e2f3a4b5";
 const NEW_HEAD = "aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00";
 const PR = "https://github.com/0xb1ob/pi-command-post/pull/58";

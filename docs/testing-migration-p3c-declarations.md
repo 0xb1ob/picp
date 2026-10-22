@@ -9,7 +9,7 @@ The original slice has 143 static declarations (152 parameterized runtime cases)
 
 | Original file | Declarations | Delivery and follow-on status |
 |---|---:|---|
-| tests/ci-watch.test.ts | 80 | S03b: 75 mapped (S02 36 + S03 39), four retained verbatim in tests/ci-watch-retained.test.ts (S02 6/8/32/33), one pending-fix (71) parked by frozen Addendum 1. #443 and tests/e2e/ci-watch-jobless.test.ts are already on main; the product blocker is gone. S10b owns mapping 71 and whole-file retirement by this sequencing decision, not a pending fix. One retained file, zero deleted files. Evidence: docs/testing-migration-s03-declarations.md. |
+| tests/ci-watch.test.ts | 80 | S10b retires the original: 75 mapped, five retained verbatim in tests/ci-watch-retained.test.ts (S02 6/8/32/33 and S03 70), zero pending. Canonical declaration 71 mapping and executed two-cause control: [S10b](testing-migration/s10b.md). One retained file, one original file retired. |
 | tests/main-ci.test.ts | 39 | Follow-on #416: 32 mapped, 7 retained (mixed tests narrowed) in tests/main-ci-retained.test.ts, 0 pending; whole original retired. Full titles and controls: [main-CI accounting](testing-migration-main-ci-declarations.md). |
 | tests/foreign-ci-watch.test.ts | 11 | S06 completed: 10 mapped to 05-10/S06-1 in tests/e2e/landing.test.ts, one static declaration in tests/foreign-ci-watch-retained.test.ts; supersedes the P3c-rest pending snapshot |
 | tests/parked-ci.test.ts | 3 | All three mapped to 05-12 and deleted; real timer, forge barriers, resume/re-park and legacy held state; NC-36 and NC-49–NC-55 |
@@ -26,13 +26,12 @@ S07 subsequently maps three more declarations and deletes `tests/integrate-held-
 16/143 mapped, 2 retained, 125 pending, 11 declarations removed and 3/7 files deleted. It adds one e2e
 declaration and extends 05-13; no other slice's ownership changes. The counts above describe P3c's original delivery.
 
-Current follow-on snapshot (including S03b and #416): **128/143 mapped, 14 retained, 1 pending-fix**.
-The retained declarations are four CI-watch helper-only declarations, seven main-CI declarations,
-one foreign-CI declaration and two timer declarations. The sole pending conversion is CI-watch 71.
-Five of seven original paths are absent: 53 declarations mapped and eight relocated to retained files.
-CI-watch's 80 declarations stay whole by latest main-session decision; declaration 71 is parked pending-fix.
-#443 and tests/e2e/ci-watch-jobless.test.ts are on main, so the product blocker is gone. Frozen Addendum 1
-defers declaration 71 and retirement to S10b to stop S03b's conflict rounds, not because a fix is pending.
+Current follow-on snapshot after S10b: **128/143 mapped, 15 retained, zero pending**.
+The retained declarations are five CI-watch contracts, seven main-CI declarations,
+one foreign-CI declaration and two timer declarations. S10b maps CI-watch 71 after #443,
+retains the synchronous callback contract (70), and retires the original watcher file.
+[Canonical mapping and final-state controls](testing-migration/s10b.md) supersede the earlier keep-whole
+and pending-fix instructions for CI-watch; the slice history below records those earlier decisions.
 
 No pending declaration is counted as retained, redundant-unreachable or removed. The timer file is a 100%
 rename, not retired coverage. Its two assertion rows remain `retained`; the baseline-file table's `deleted`
