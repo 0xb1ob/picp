@@ -6,10 +6,14 @@ import { isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts
 import { CheckpointStore } from "../../src/checkpoint.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { readRunEvents, waitFor } from "../harness/index.ts";
-import { json, landOnOrigin, mergeAndDeleteHead, run, SKIP, startStack } from "./landing-helpers.ts";
+import { json, landOnOrigin, mergeAndDeleteHead, run, runsBody, SKIP, startStack } from "./landing-helpers.ts";
 
-for (const mode of ["blocked", "conflict", "unreadable"] as const) {
-	test(`S11: ${mode} delivery report stops integration before review, conflict repair or merge`, { skip: SKIP, timeout: 120_000 }, async (t) => {
+for (const [mode, title] of [
+	["blocked", "S11: blocked delivery report stops integration before review, conflict repair or merge"],
+	["conflict", "S11: conflict delivery report stops integration before review, conflict repair or merge"],
+	["unreadable", "S11: unreadable delivery report stops integration before review, conflict repair or merge"],
+] as const) {
+	test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
 		const s = await startStack(t);
 		const live = await s.held("S11 blocked report", 211);
 		s.setGh({ integration: true, runs: [run(211, live.head, "completed", "success")] });
@@ -37,8 +41,11 @@ for (const mode of ["blocked", "conflict", "unreadable"] as const) {
 	});
 }
 
-for (const permission of ["CLEAN", null]) {
-	test(`S11: a report blocked during CI stops the ${permission ?? "fallback"} merge`, { skip: SKIP, timeout: 120_000 }, async (t) => {
+for (const [permission, title] of [
+	["CLEAN", "S11: a report blocked during CI stops the CLEAN merge"],
+	[null, "S11: a report blocked during CI stops the fallback merge"],
+] as const) {
+	test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
 		const s = await startStack(t);
 		const live = await s.held("S11 report race", 212);
 		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
@@ -67,8 +74,23 @@ for (const permission of ["CLEAN", null]) {
 	});
 }
 
-for (const state of ["pending", "declined", "mandate", "truncated", "other-pr", "moved-head", "approved", "approved-red", "approved-push", "approved-report", "approved-pr", "approved-draft", "approved-ask-report", "approved-ask-pr"] as const) {
-	test(`S11: final-fix integration ${state}`, { skip: SKIP, timeout: 120_000 }, async (t) => {
+for (const [state, title] of [
+	["pending", "S11: final-fix integration pending"],
+	["declined", "S11: final-fix integration declined"],
+	["mandate", "S11: final-fix integration mandate"],
+	["truncated", "S11: final-fix integration truncated"],
+	["other-pr", "S11: final-fix integration other-pr"],
+	["moved-head", "S11: final-fix integration moved-head"],
+	["approved", "S11: final-fix integration approved"],
+	["approved-red", "S11: final-fix integration approved-red"],
+	["approved-push", "S11: final-fix integration approved-push"],
+	["approved-report", "S11: final-fix integration approved-report"],
+	["approved-pr", "S11: final-fix integration approved-pr"],
+	["approved-draft", "S11: final-fix integration approved-draft"],
+	["approved-ask-report", "S11: final-fix integration approved-ask-report"],
+	["approved-ask-pr", "S11: final-fix integration approved-ask-pr"],
+] as const) {
+	test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
 		const s = await startStack(t);
 		const fixGate = join(s.home, "final-fix-release");
 		const live = await s.held("S11 final fix", 213, { repair: true, ...(state.startsWith("approved") ? { repairGate: fixGate } : {}) });
@@ -79,11 +101,29 @@ for (const state of ["pending", "declined", "mandate", "truncated", "other-pr", 
 		const scope = live.head.slice(0, 12);
 		decisions.request({ jobId: live.jobId, scope, prUrl: state === "other-pr" ? "https://github.com/example/demo/pull/999" : live.prUrl, question: "One final fix", evidence: ["S11 final finding"] });
 		if (state !== "pending") decisions.decide(live.jobId, state !== "declined", { by: state === "mandate" ? "mandate:md-abcd" : "operator-quote", scope, basis: { operator_quote: "Approve one final fix." } });
+		if (state === "pending") {
+			const target = `aw-checkpoint-${live.jobId}.final-fix-${scope}`;
+			const events = await s.parent("S11 final-fix decisions need operator text.", [
+				{ kind: "tool_calls", calls: [
+					{ name: "cp_decide", args: { target, decision: "approve", basis: { mandate: "md-abcd", clause: "approve final fix" } } },
+					{ name: "cp_decide", args: { target, decision: "approve", basis: { operator_quote: "" } } },
+				] },
+				{ kind: "text", text: "No approval granted." },
+			]);
+			const replies = events.filter((event) => event.toolName === "cp_decide");
+			assert.equal(replies.length, 2);
+			assert.ok(replies.every((event) => event.isError), "neither surface can approve without operator text");
+			assert.ok(JSON.stringify(replies).includes("requires operator text"));
+			assert.equal(decisions.get(live.jobId, { scope })?.decision, "pending");
+		}
 		s.setGh({ integration: true, runs: [run(213, live.head, "completed", "success")], routes: state === "moved-head" ? [{ match: "pr view", replies: [json({ number: 213, url: live.prUrl, state: "OPEN", headRefName: live.jobId, headRefOid: "b".repeat(40), baseRefName: "main", mergeStateStatus: "CLEAN", mergeable: "MERGEABLE", isDraft: false })] }] : [] });
 		const result = await s.post.integrate({ jobId: live.jobId });
 		assert.ok(!s.ghCalls().some((call) => call.startsWith("pr merge")), "no merge before a final fix report");
 		if (!state.startsWith("approved")) {
 			assert.notEqual(result.next, "resolve", state);
+			if (state === "pending") assert.match(result.reason, /awaits a human/);
+			if (state === "other-pr") assert.match(result.reason, /another PR never inherits/);
+			if (state === "moved-head") assert.match(result.reason, /head moved.*before promotion/);
 			assert.equal(s.post.fleet.require(live.jobId).phase, "held", "no repair spawned");
 			return;
 		}
@@ -94,6 +134,8 @@ for (const state of ["pending", "declined", "mandate", "truncated", "other-pr", 
 		await waitFor(() => s.post.fleet.require(live.jobId), (record) => record.phase === "held" && !!record.reported_at, { timeoutMs: 30_000, what: "final fix worker reports" });
 		const head = s.repo.git("ls-remote", "origin", `refs/heads/${live.jobId}`).split("\t")[0]!.trim();
 		assert.notEqual(head, live.head, "real worker pushed its fix");
+		assert.ok(JSON.stringify(s.provider.requests(`landing-${live.jobId}`).at(-1)?.body.messages).includes("S11 final finding"), "the original worker receives the approved findings");
+		assert.ok(!s.provider.requests().some((request) => JSON.stringify(request.body.messages).includes("Review the diff")), "the final fix never starts a sixth reviewer");
 		if (state.startsWith("approved-ask")) {
 			const draft = json({ number: 213, url: live.prUrl, state: "OPEN", headRefName: live.jobId, headRefOid: head, baseRefName: "main", mergeStateStatus: "CLEAN", mergeable: "MERGEABLE", isDraft: true });
 			s.setGh({ runs: [run(214, head, "completed", "success")], routes: [{ match: "pr view", replies: [draft, draft, { pass: true }] }, { match: "pr ready", replies: [{}] }] });
@@ -142,27 +184,74 @@ for (const state of ["pending", "declined", "mandate", "truncated", "other-pr", 
 	});
 }
 
-for (const mode of ["clean", "behind", "reviews", "unknown-block", "no-ci", "checks", "strict", "strict-stale", "strict-pending", "strict-unreviewed", "unknown", "pending", "superseded", "red", "unstable", "unreadable", "unreviewed", "draft", "empty-base", "trimmed-base", "park-dirty"] as const) {
-	test(`S11: human handoff ${mode}`, { skip: SKIP, timeout: 120_000 }, async (t) => {
+for (const [mode, title] of [
+	["repo", "S11: human handoff repo"],
+	["clean", "S11: human handoff clean"],
+	["behind", "S11: human handoff behind"],
+	["reviews", "S11: human handoff reviews"],
+	["unknown-block", "S11: human handoff unknown-block"],
+	["no-ci", "S11: human handoff no-ci"],
+	["checks", "S11: human handoff checks"],
+	["strict", "S11: human handoff strict"],
+	["strict-stale", "S11: human handoff strict-stale"],
+	["strict-pending", "S11: human handoff strict-pending"],
+	["strict-unreviewed", "S11: human handoff strict-unreviewed"],
+	["unknown", "S11: human handoff unknown"],
+	["pending", "S11: human handoff pending"],
+	["superseded", "S11: human handoff superseded"],
+	["red", "S11: human handoff red"],
+	["unstable", "S11: human handoff unstable"],
+	["unreadable", "S11: human handoff unreadable"],
+	["unreadable-permission", "S11: human handoff unreadable-permission"],
+	["unreadable-workflows", "S11: human handoff unreadable-workflows"],
+	["unreviewed", "S11: human handoff unreviewed"],
+	["draft", "S11: human handoff draft"],
+	["empty-base", "S11: human handoff empty-base"],
+	["trimmed-base", "S11: human handoff trimmed-base"],
+	["park-dirty", "S11: human handoff park-dirty"],
+] as const) {
+	test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
 		const s = await startStack(t);
 		const live = await s.held("S11 handoff", 215);
-		await s.post.registry.setMergePolicy("demo", "human_handoff");
+		await s.post.registry.setMergePolicy("demo", mode === "repo" ? "repo" : "human_handoff");
 		const strict = mode.startsWith("strict");
 		const pending = mode === "pending" || mode === "strict-pending";
 		const unreviewed = mode === "unreviewed" || mode === "strict-unreviewed";
 		if (strict && mode !== "strict") landOnOrigin(s.repo, "printf 'main advance\\n' > main-advance.txt", "advance base");
 		if (!unreviewed) writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
-		const pr = { number: 215, url: live.prUrl, state: "OPEN", headRefName: live.jobId, headRefOid: live.head, baseRefName: mode === "empty-base" ? "  " : mode === "trimmed-base" ? " main " : "main", mergeable: "MERGEABLE", mergeStateStatus: mode === "behind" ? "BEHIND" : ["reviews", "unknown-block", "checks"].includes(mode) || strict ? "BLOCKED" : mode === "unknown" ? "UNKNOWN" : mode === "unstable" ? "UNSTABLE" : "CLEAN", reviewDecision: mode === "reviews" ? "REVIEW_REQUIRED" : "", isDraft: mode === "draft" };
+		const pr = { number: 215, url: live.prUrl, state: "OPEN", headRefName: live.jobId, headRefOid: live.head, baseRefName: mode === "empty-base" ? "  " : mode === "trimmed-base" ? " main " : "main", mergeable: "MERGEABLE", mergeStateStatus: mode === "unreadable-permission" ? undefined : mode === "behind" ? "BEHIND" : ["reviews", "unknown-block", "checks"].includes(mode) || strict ? "BLOCKED" : mode === "unknown" ? "UNKNOWN" : mode === "unstable" ? "UNSTABLE" : "CLEAN", reviewDecision: mode === "reviews" ? "REVIEW_REQUIRED" : "", isDraft: mode === "draft" };
 		const rules = [{ type: "required_status_checks", parameters: { strict_required_status_checks_policy: strict, required_status_checks: [{ context: "ci" }] } }];
 		if (mode === "park-dirty") writeFileSync(join(live.worktree, "change.txt"), "uncommitted\n");
-		s.setGh({ integration: true, runs: mode === "no-ci" ? [] : [run(215, mode === "superseded" ? "b".repeat(40) : live.head, pending ? "in_progress" : "completed", mode === "red" ? "failure" : "success")], routes: [
-			{ match: "pr view", replies: mode === "unreadable" ? [{ code: 1, stderr: "HTTP 403" }] : [json(pr)] },
+		const ciRuns = ["no-ci", "unreadable-workflows"].includes(mode) ? [] : [run(215, mode === "superseded" ? "b".repeat(40) : live.head, pending ? "in_progress" : "completed", mode === "red" ? "failure" : "success")];
+		s.setGh({ integration: true, runs: ciRuns, routes: [
+			{ match: "pr view", replies: mode === "unreadable" ? [{ code: 1, stderr: "HTTP 403" }] : mode === "draft" ? [json(pr), json(pr), json({ ...pr, isDraft: false })] : [json(pr)] },
 			{ match: "pr ready", replies: [{}] },
+			...(mode === "superseded" ? [{ match: "actions/runs?branch=", replies: [runsBody(ciRuns)] }] : []),
 			...(mode === "checks" || strict ? [{ match: "/rules/branches/", replies: [json(rules)] }] : []),
-			...(mode === "no-ci" ? [{ match: "actions/workflows", replies: [json({ total_count: 0, workflows: [] })] }] : []),
+			...(mode === "no-ci" ? [{ match: "actions/workflows", replies: [json({ total_count: 0, workflows: [] })] }] : mode === "unreadable-workflows" ? [{ match: "actions/workflows", replies: [{ code: 1, stderr: "HTTP 403" }] }] : []),
 		] });
 		const result = await s.post.integrate({ jobId: live.jobId });
+		if (mode === "repo") {
+			assert.equal(result.step, "merge");
+			const merge = s.ghCalls().find((call) => call.startsWith("pr merge"));
+			assert.ok(merge?.includes(`--match-head-commit ${live.head}`));
+			assert.ok(!s.ghCalls().some((call) => /^(pr ready|pr update-branch)/.test(call)));
+			assert.equal(s.post.awaiting.list().length, 0);
+			return;
+		}
 		assert.ok(!s.ghCalls().some((call) => /^(pr merge|pr update-branch)/.test(call)), "human handoff never merges or updates the branch");
+		assert.equal(new CheckpointStore(s.home, { kind: "merge" }).get(live.jobId, { scope: live.head.slice(0, 12) }), undefined);
+		if (mode === "draft") {
+			assert.equal(result.next, "advance");
+			assert.equal(s.ghCalls().filter((call) => call.startsWith("pr ready")).length, 1);
+			assert.equal(s.post.awaiting.list().length, 0, "draft readiness comes before handoff");
+			s.setGh({ routes: [{ match: "pr view", replies: [json({ ...pr, isDraft: false })] }] });
+			assert.equal((await s.post.integrate({ jobId: live.jobId })).next, "wait");
+			assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge");
+			assert.equal(s.ghCalls().filter((call) => call.startsWith("pr ready")).length, 1);
+			assert.ok(!s.ghCalls().some((call) => /^(pr merge|pr update-branch)/.test(call)));
+			return;
+		}
 		const parked = s.post.fleet.require(live.jobId);
 		if (["clean", "behind", "reviews", "unknown-block", "no-ci", "trimmed-base", "strict-stale"].includes(mode)) {
 			assert.equal(result.next, "wait", JSON.stringify(result));
@@ -175,6 +264,21 @@ for (const mode of ["clean", "behind", "reviews", "unknown-block", "no-ci", "che
 			assert.notEqual(parked.phase, "awaiting_merge", `${mode}: never parked`);
 			if (unreviewed) assert.equal(result.next, "review");
 			if (pending) assert.deepEqual([result.step, result.next], ["ci", "wait"]);
+			if (mode === "superseded") assert.deepEqual([result.step, result.next], ["ci", "wait"]);
+			if (mode === "red") assert.deepEqual([result.step, result.next], ["ci", "resolve"]);
+			if (mode === "unknown") {
+				assert.deepEqual([result.step, result.next], ["permit", "retry"]);
+				assert.equal(s.post.awaiting.list().length, 0);
+			}
+			if (["checks", "unstable"].includes(mode)) {
+				assert.deepEqual([result.step, result.next], ["permit", "surface"]);
+				assert.match(s.post.awaiting.list()[0]?.decision ?? "", /merge pending/);
+			}
+			if (["unreadable-permission", "unreadable-workflows"].includes(mode)) {
+				assert.deepEqual([result.step, result.next], ["permit", "surface"]);
+				assert.ok(result.facts.some((fact) => fact.includes("not handed off, no merge checkpoint")));
+				assert.equal(s.post.awaiting.list().length, 0);
+			}
 			if (mode === "empty-base") assert.match(result.reason, /Not parked.*no base branch/);
 			if (mode === "park-dirty") {
 				assert.match(result.reason, /Not parked/);
@@ -184,29 +288,36 @@ for (const mode of ["clean", "behind", "reviews", "unknown-block", "no-ci", "che
 	});
 }
 
-test("S11: a human merge finishes a blocked delivery without merging it again", { skip: SKIP, timeout: 120_000 }, async (t) => {
-	const s = await startStack(t);
-	const live = await s.held("S11 human merged blocked", 216);
-	await s.post.registry.setMergePolicy("demo", "human_handoff");
-	writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
-	s.setGh({ integration: true, runs: [run(216, live.head, "completed", "success")] });
-	writeFileSync(join(live.worktree, "change.txt"), "dirty\n");
-	assert.equal((await s.post.integrate({ jobId: live.jobId })).next, "surface");
-	assert.equal(s.post.awaiting.list().filter((row) => row.subject?.includes(live.prUrl)).length, 1);
-	s.repo.git("-C", live.worktree, "checkout", "--", "change.txt");
-	const file = join(s.home, paths.envelopeFile(live.jobId));
-	const envelope = JSON.parse(readFileSync(file, "utf8"));
-	Object.assign(envelope.envelope, { status: "blocked", blockers: ["S11 outstanding evidence"] });
-	writeFileSync(file, JSON.stringify(envelope));
-	const commit = mergeAndDeleteHead(s.repo, live.jobId);
-	s.setGh({ integration: true, merged: { [live.jobId]: { head: live.head, commit } } });
-	const result = await s.post.integrate({ jobId: live.jobId });
-	assert.equal(result.next, "done", JSON.stringify(result));
-	assert.equal(result.merge?.recorded, true);
-	assert.equal(s.post.fleet.require(live.jobId).phase, "done");
-	assert.equal((await s.post.awaitingSnapshot()).filter((row) => row.job_id === live.jobId).length, 0, "the handoff row goes obsolete after the human merge");
-	assert.ok(!s.ghCalls().some((call) => call.startsWith("pr merge")), "human merge is never reissued");
-});
+for (const [blocked, title] of [
+	[false, "S11: a human merge finishes a done delivery without merging it again"],
+	[true, "S11: a human merge finishes a blocked delivery without merging it again"],
+] as const) {
+	test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
+		const s = await startStack(t);
+		const live = await s.held("S11 human merged", 216);
+		await s.post.registry.setMergePolicy("demo", "human_handoff");
+		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+		s.setGh({ integration: true, runs: [run(216, live.head, "completed", "success")] });
+		writeFileSync(join(live.worktree, "change.txt"), "dirty\n");
+		assert.equal((await s.post.integrate({ jobId: live.jobId })).next, "surface");
+		assert.equal(s.post.awaiting.list().filter((row) => row.subject?.includes(live.prUrl)).length, 1);
+		s.repo.git("-C", live.worktree, "checkout", "--", "change.txt");
+		if (blocked) {
+			const file = join(s.home, paths.envelopeFile(live.jobId));
+			const envelope = JSON.parse(readFileSync(file, "utf8"));
+			Object.assign(envelope.envelope, { status: "blocked", blockers: ["S11 outstanding evidence"] });
+			writeFileSync(file, JSON.stringify(envelope));
+		}
+		const commit = mergeAndDeleteHead(s.repo, live.jobId);
+		s.setGh({ integration: true, merged: { [live.jobId]: { head: live.head, commit } } });
+		const result = await s.post.integrate({ jobId: live.jobId });
+		assert.equal(result.next, "done", JSON.stringify(result));
+		assert.equal(result.merge?.recorded, true);
+		assert.equal(s.post.fleet.require(live.jobId).phase, "done");
+		assert.equal((await s.post.awaitingSnapshot()).filter((row) => row.job_id === live.jobId).length, 0, "the handoff row goes obsolete after the human merge");
+		assert.ok(!s.ghCalls().some((call) => call.startsWith("pr merge")), "human merge is never reissued");
+	});
+}
 
 test("S11: integration rejects research delivery before forge reads", { skip: SKIP, timeout: 120_000 }, async (t) => {
 	const s = await startStack(t);
@@ -236,11 +347,15 @@ test("S11: ship, diff and two merge-head decisions remain independently answerab
 	assert.ok(ids.includes(`aw-checkpoint-${live.jobId}.merge-${other.slice(0, 12)}`));
 	const quote = "Decline every S11 checkpoint.";
 	const events = await s.parent(quote, [
+		...ids.map((id) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_awaiting", args: { action: "withdraw", id } }] })),
 		...ids.map((target) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_decide", args: { target, decision: "decline", basis: { operator_quote: quote } } }] })),
 		{ kind: "text", text: "All four checkpoints declined." },
 	]);
 	assert.equal(events.filter((event) => event.toolName === "cp_decide").length, 4);
-	assert.ok(events.every((event) => !event.isError), "each derived decision id is answerable through cp_decide");
+	const withdrawals = events.filter((event) => event.toolName === "cp_awaiting");
+	assert.equal(withdrawals.length, 4);
+	assert.ok(withdrawals.every((event) => event.isError && JSON.stringify(event.result).includes("derived authorization item")));
+	assert.ok(events.filter((event) => event.toolName === "cp_decide").every((event) => !event.isError), "each derived decision id is answerable through cp_decide");
 	for (const [kind, scope] of [["ship", undefined], ["diff", undefined], ["merge", live.head.slice(0, 12)], ["merge", other.slice(0, 12)]] as const) {
 		assert.equal(new CheckpointStore(s.home, { kind }).get(live.jobId, { scope })?.decision, "declined");
 	}
