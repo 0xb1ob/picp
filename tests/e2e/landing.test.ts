@@ -1630,7 +1630,7 @@ test("landing S03: actual parent CI notices carry facts and integration advice",
 
 test("landing S03: a durable review deadline resumes once and respects changed facts", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	for (const guard of ["none", "hold", "head", "missing_head", "generation", "phase", "closed", "drain", "stop"]) await t.test(guard, async (t) => {
-		const s = await startStack(t, { continuation: true });
+		const s = await startStack(t, { continuation: true, env: { CP_REVIEW_MERGE_WINDOW_SECONDS: "5" } });
 		const live = await s.held(`review deadline ${guard}`, 310);
 		await s.post.continuation.serialize(live.jobId, async () => {});
 		const passedAt = isoTimestamp();
@@ -1661,7 +1661,7 @@ test("landing S03: a durable review deadline resumes once and respects changed f
 		if (guard === "drain") writeFileSync(drainFile(s.home), JSON.stringify({ state: "draining", started_at: isoTimestamp(), deadline: isoTimestamp(new Date(Date.now() + 60_000)), timeout_s: 60, jobs: [] }));
 		if (guard === "stop") {
 			await s.post.shutdown();
-			await waitFor(() => Date.now(), (now) => now >= Date.parse(passedAt) + 31_000, { timeoutMs: 40_000, what: "the stopped deadline passes in real time" });
+			await waitFor(() => Date.now(), (now) => now >= Date.parse(passedAt) + 6_000, { timeoutMs: 15_000, what: "the stopped deadline passes in real time" });
 			assert.equal(readRunEvents(s.home, live.jobId).filter((event) => event.type === "continuation").length, before, "shutdown cancels deadline activity");
 		}
 		if (guard !== "stop") {

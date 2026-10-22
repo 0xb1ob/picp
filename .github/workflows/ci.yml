@@ -10,14 +10,15 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test:
-    name: test
+  # Runs once: typecheck plus the checks that do not depend on the test run.
+  checks:
+    name: typecheck + checks
     # GitHub-hosted ubuntu-latest, except while this repository is private:
     # then the operator's ephemeral self-hosted runner keeps gating PRs. A
     # public repository never selects the privileged self-hosted runner.
     # See docs/development.md "CI".
     runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted","nomad"]') || 'ubuntu-latest' }}
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,6 +43,38 @@ jobs:
         run: bash scripts/ci-as-user.sh node scripts/test-migration-check.ts
         timeout-minutes: 5
 
+      - name: Typecheck
+        run: bash scripts/ci-as-user.sh npm run typecheck
+
+      # Offline contract eval: fails when evals/results/contract.json is stale.
+      # Never set CP_EVAL_LIVE here; --live is not passed.
+      - name: Eval contract check
+        run: bash scripts/ci-as-user.sh npm run eval:check
+        timeout-minutes: 5
+
+  test-shard:
+    name: test-shard (${{ matrix.shard }})
+    runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted","nomad"]') || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: bash scripts/ci-as-user.sh npm ci
+
       # The m2/m3/pipeline lease suites need a real treehouse on PATH and
       # self-skip without it; tests/ci-host-tools.test.ts fails the run if it
       # is missing. Prepending ~/.local/bin makes the upstream install script
@@ -65,18 +98,28 @@ jobs:
           done
           PATH="$bin:$PATH" treehouse --version
 
-      - name: Run suite (typecheck + tests)
-        run: bash scripts/ci-as-user.sh npm test
+      - name: Run suite shard ${{ matrix.shard }}/4
+        run: bash scripts/ci-as-user.sh npm run test:shard
         env:
+          CP_TEST_SHARD: ${{ matrix.shard }}/4
           # Never set CP_LIVE_TESTS here: the live suites hit real models,
           # cost money and need credentials. They self-skip without it.
           CP_LIVE_TESTS: ""
 
-      # Offline contract eval: fails when evals/results/contract.json is stale.
-      # Never set CP_EVAL_LIVE here; --live is not passed.
-      - name: Eval contract check
-        run: bash scripts/ci-as-user.sh npm run eval:check
-        timeout-minutes: 5
+  # The one required check: fails unless typecheck and every shard succeeded.
+  test:
+    name: test
+    needs: [checks, test-shard]
+    if: always()
+    runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted","nomad"]') || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - name: Require every shard and the checks
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          if echo "$RESULTS" | grep -Eq 'failure|cancelled|skipped'; then exit 1; fi
 
   # Real installs in a disposable Docker sandbox (#375; tests/e2e/README.md "Installer sandbox"): npm test
   # skips tests/e2e/installer.test.ts; this job opts in and fails when Docker is missing.
