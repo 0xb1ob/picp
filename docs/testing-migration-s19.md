@@ -198,3 +198,18 @@ Evidence: final `ship-*.log` files in worktree-local `node_modules/.cache/s19/`.
 Supported public env settings include `CP_CI_WATCH_SECONDS` and the delivery/suppression/merge-window settings in `src/timer-knobs.ts`. They do not configure the fixed host escalation tick (`HOST_ESCALATION_TICK_MS = 10000` in `src/parent-host.ts`) or the cp-bridge retry/probe timers. `extensions/cp-bridge/index.ts` calls `reattachLoop` with its default 1000/30000-ms delays and uses `HOST_PROBE_MS`; its public entry point exposes no override. Passing the helper's optional timing arguments from a test would bypass that entry point.
 
 Per the addendum, these unavailable public timer controls are reported rather than replaced with test-only hooks. Conversion dispositions remain 28 mapped / 9 retained / 0 pending, but delivery no longer satisfies every acceptance condition. Group-to-suite restructuring can address aggregate test wrappers; it does not supply the missing public timer settings for S19-2/3.
+
+
+### Public-knob follow-up after #447
+
+> “#447 merged (a61a117757f6): CP_HOST_ESCALATION_TICK_SECONDS, CP_HOST_PROBE_SECONDS, CP_BRIDGE_REATTACH_FIRST_SECONDS and CP_BRIDGE_REATTACH_MAX_SECONDS now exist (src/timer-knobs.ts and their owning modules).” (main session carry-in)
+
+S19 now uses the public per-home process env: escalation-watch tick 1 s; retry first delay 0.25 s, retry cap 1 s and probe interval 5 s. The escalation duplicate checks observe 2.5 configured ticks instead of 1.2 default ticks. Retry assertions retain doubling, cap, serialization, stop-on-success, read-only reconnection and every probe outcome at the configured scale. Both target cases have a 120,000-ms case timeout; all polling timeout floors remain at least 5,000 ms.
+
+Clean post-control local remeasurement: escalation-watch 44,554.2 ms (previously 122,952.9); retry/probe 65,279.1 ms (previously 304,571.5). Initial configured runs also passed at 54,448.9 and 97,450.6 ms respectively. Neither target case exceeds two minutes. The ten-second escalation grace remains exercised with a timestamp five seconds in the future. No full HOST_RELAY_TICK_MS wait is required; the operator backstop is exercised through its immediate startup pass, without waiting for ESCALATION_BACKSTOP_TICK_MS.
+
+NC-2 through NC-7 were re-executed individually with these settings and restored. Failures: attempted-write duplication; restart reframe; missing decision text; swallowed corrupt-read diagnostics; 16,015-ms retry gap against the configured 1,700-ms cap ceiling; missing silent-host detachment. Exact existing patch recipes and hashes remain unchanged, with the #447 bridge-source line offsets accounted for. Rerun logs are `node_modules/.cache/s19/knobs-NC-{2,3,4,5,6,7}.log`.
+
+The main merge preserves all three S21 wake-delivery journeys unchanged. #447's new first-delay regression is moved verbatim into `tests/bridge-reattach-knobs.test.ts`, owned by #447. Its four older declarations retain the already-proven S19 mapped/retained dispositions; no unique main-side regression is removed.
+
+Requested proposal only — wrappers remain unchanged: hoist each existing variant loop outside its aggregate `test`, registering a separate top-level case per variant. For S19-4, register ready/revise/red/running/late/late-failure (six cases). For S19-9, register race/failure/late (three cases). Keep default sequential scheduling, each variant's current fresh home/provider/cleanup, all assertions and existing production deadlines. Suffix the case names with the variant and update scenario/control selectors accordingly. This removes aggregate test wrappers over 120 s without splitting any individual variant or adding timer hooks. No split is implemented in this follow-up.

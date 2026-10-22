@@ -6,14 +6,15 @@ import { test } from "node:test";
 import { attachParentHost, currentHost, parentHostPaths, type ParentHostClient } from "../../src/parent-host.ts";
 import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
 
-test("wake S19: real bridge retries its host transport with capped backoff and probes silent or superseded hosts", { timeout: 600_000 }, async (t) => {
+test("wake S19: real bridge retries its host transport with capped backoff and probes silent or superseded hosts", { timeout: 120_000 }, async (t) => {
 	const home = createScratchHome();
 	const provider = await MockProvider.start();
 	const parentModel = provider.addScript("s19-proxy-parent", [{ kind: "text", text: "Ready." }]);
 	const operatorModel = provider.addScript("s19-proxy-operator", [{ kind: "text", text: "Ready." }]);
 	const agent = createAgentDir({ provider });
-	const previous = Object.fromEntries(Object.keys(agent.env).map((key) => [key, process.env[key]]));
-	Object.assign(process.env, agent.env);
+	const env = { ...agent.env, CP_HOST_PROBE_SECONDS: "5", CP_BRIDGE_REATTACH_FIRST_SECONDS: "0.25", CP_BRIDGE_REATTACH_MAX_SECONDS: "1" };
+	const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+	Object.assign(process.env, env);
 	let host: ParentHostClient | undefined;
 	let operator: ReturnType<typeof startPiChild> | undefined;
 	const peers = new Set<Socket>();
@@ -73,7 +74,7 @@ test("wake S19: real bridge retries its host transport with capped backoff and p
 	const original = readFileSync(recordFile, "utf8");
 	writeFileSync(recordFile, JSON.stringify({ ...JSON.parse(original), socket: proxySocket }));
 	operator = startPiChild({ cwd: home.path, model: operatorModel,
-		env: { ...agent.env, CP_HOME: home.path, PI_HOME: home.path, CP_MODE: "multi" }, extensions: [CP_BRIDGE_EXTENSION] });
+		env: { ...env, CP_HOME: home.path, PI_HOME: home.path, CP_MODE: "multi" }, extensions: [CP_BRIDGE_EXTENSION] });
 	await operator.prompt("Acknowledge readiness."); await operator.waitForSettled();
 	const status = () => operator!.stderr() + JSON.stringify(operator!.records());
 	await waitFor(status, (text) => text.includes("cp-parent: attached"), { timeoutMs: 30_000, what: "bridge attaches through forwarding transport" });
@@ -83,10 +84,10 @@ test("wake S19: real bridge retries its host transport with capped backoff and p
 	await waitFor(() => attempts.length, (count) => count >= 7, { timeoutMs: 160_000, what: "six real reconnect refusals followed by success" });
 	await waitFor(status, (text) => text.includes("cp-parent: reattached"), { timeoutMs: 10_000, what: "retry loop stops on success" });
 	const gaps = attempts.slice(1).map((at, index) => at - attempts[index]!);
-	for (const [index, minimum] of [1_900, 3_900, 7_900, 15_900, 29_900, 29_900].entries()) {
+	for (const [index, minimum] of [450, 950, 950, 950, 950, 950].entries()) {
 		assert.ok(gaps[index]! >= minimum, `backoff gap ${index}: ${gaps[index]}`);
 	}
-	assert.ok(gaps[5]! < 50_000, `retry delay must cap at 30 seconds: ${gaps[5]}`);
+	assert.ok(gaps[5]! < 1_700, `retry delay must honor the configured one-second cap: ${gaps[5]}`);
 	await new Promise((done) => setTimeout(done, 2_000));
 	assert.equal(attempts.length, 7, "successful attachment stops retrying");
 	assert.equal(maximumConnected, 1, "reconnect attempts never overlap on the transport");

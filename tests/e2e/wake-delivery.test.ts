@@ -3,13 +3,17 @@ import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { EscalationRelayLedger, escalationRelayLedgerFile } from "../../src/escalation-backstop.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
-import { isoTimestamp } from "../../src/contracts.ts";
+import { EMPTY_USAGE, FAILURE_CLASSES, isoTimestamp, LAYOUT, type FleetRecord } from "../../src/contracts.ts";
 import { join } from "node:path";
 import { test } from "node:test";
 import { attachParentHost, currentHost, parentHostPaths, type ParentHostClient } from "../../src/parent-host.ts";
 import { EscalationStore } from "../../src/escalation.ts";
 import { OperatorRelayOutbox, operatorRelayOutboxFile } from "../../src/operator-outbox.ts";
-import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
+import { FleetStore } from "../../src/fleet.ts";
+import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
+import { CommandPost } from "../../src/command-post.ts";
+import { checkWakeup, wakeupFacts } from "../../src/wakeups.ts";
 
 test("wake S19: a real operator reconnects read-only and delivers a gap escalation once", { timeout: 180_000 }, async (t) => {
 	const home = createScratchHome();
@@ -106,13 +110,14 @@ test("wake S19: a real operator reconnects read-only and delivers a gap escalati
 });
 
 
-test("wake S19: host escalation watch suppresses represented decisions, retries read failures and bounds write failures", { timeout: 300_000 }, async (t) => {
+test("wake S19: host escalation watch suppresses represented decisions, retries read failures and bounds write failures", { timeout: 120_000 }, async (t) => {
 	const home = createScratchHome();
 	const provider = await MockProvider.start();
 	const model = provider.addScript("s19-watch-parent", [{ kind: "text", text: "Ready." }]);
 	const agent = createAgentDir({ provider });
-	const previous = Object.fromEntries(Object.keys(agent.env).map((key) => [key, process.env[key]]));
-	Object.assign(process.env, agent.env);
+	const env = { ...agent.env, CP_HOST_ESCALATION_TICK_SECONDS: "1" };
+	const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+	Object.assign(process.env, env);
 	const hosts: ParentHostClient[] = [];
 	let backstopOperator: ReturnType<typeof startPiChild> | undefined;
 	t.after(async () => {
@@ -167,7 +172,7 @@ test("wake S19: host escalation watch suppresses represented decisions, retries 
 	const second = await start();
 	const restartedFrames: string[] = [];
 	await second.onRelay((relay) => { if (relay.escalationId) restartedFrames.push(relay.escalationId); });
-	await new Promise((done) => setTimeout(done, 12_000));
+	await new Promise((done) => setTimeout(done, 2_500));
 	assert.equal(entries().filter((item) => item.relay.escalationId === ordinary.id).length, 1, "restart must not duplicate an outbox relay");
 	assert.equal(entries().filter((item) => item.relay.escalationId === boxed.id).length, 1, "existing outbox id suppresses relay");
 	assert.equal(restartedFrames.includes(ordinary.id), false, "restart must not reframe an existing outbox relay");
@@ -186,7 +191,7 @@ test("wake S19: host escalation watch suppresses represented decisions, retries 
 	await second.onRelay((relay) => { if (relay.escalationId === writeFailed.id) frames.push(relay.text); });
 	chmodSync(dirname(outbox.file), 0o500);
 	await waitFor(() => readFileSync(paths.log, "utf8"), (text) => text.includes("relay outbox write failed"), { timeoutMs: 25_000, what: "visible outbox write failure" });
-	await new Promise((done) => setTimeout(done, 12_000));
+	await new Promise((done) => setTimeout(done, 2_500));
 	assert.equal(frames.length, 1, "failed outbox write must not reframe each tick");
 	chmodSync(dirname(outbox.file), 0o700);
 	await second.request("stop"); await second.closed;
@@ -204,4 +209,205 @@ test("wake S19: host escalation watch suppresses represented decisions, retries 
 	assert.ok(JSON.stringify(provider.requests("s19-backstop-operator")[0]!.body).includes("has been open"));
 	await backstopOperator.waitForSettled();
 	assert.equal(provider.remaining("s19-backstop-operator"), 0);
+});
+test("S21: restart delivers an unobserved death once and discards obsolete fleet notices", { timeout: 110_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const script = "s21-durable";
+	const model = provider.addScript(script, [{ kind: "text", text: "Recovery notice received." }], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	const children: ReturnType<typeof startPiChild>[] = [];
+	t.after(async () => {
+		for (const child of children) await child.close();
+		agent.cleanup();
+		home.cleanup();
+		await provider.stop();
+	});
+	const fleet = new FleetStore({ home: home.path });
+	const record = (jobId: string, phase: "failed" | "done" | "waiting"): FleetRecord => ({
+		job_id: jobId, project: "demo", kind: "ship", delivery: "local", origin: "terminal", phase,
+		branch: jobId, worktree: join(home.path, "missing"), dispatched_at: isoTimestamp(), usage: EMPTY_USAGE,
+		worker: { pid: phase === "waiting" ? process.pid : 1, session_id: "legacy", session_file: join(home.path, "missing.jsonl"), profile: "implementer", role: "implementer", model, started_at: isoTimestamp() },
+		failure: { class: "crash", message: "legacy crash", at: isoTimestamp() },
+	});
+	await fleet.add(record("cp-live", "failed"));
+	await fleet.add(record("cp-finished", "done"));
+	for (const resumable of [false, true]) {
+		const jobId = resumable ? "cp-revivable" : "cp-unsalvageable";
+		const dead = record(jobId, "waiting");
+		dead.worker.pid = 2147483647;
+		if (resumable) {
+			dead.worker.session_file = join(home.path, "surviving-session.jsonl");
+			writeFileSync(dead.worker.session_file, "");
+		}
+		await fleet.add(dead);
+	}
+	const outbox = new DurableWakeupOutbox({ home: home.path, owner: "previous-parent" });
+	outbox.enqueue({ id: "death:cp-gone:1", kind: "death", job_id: "cp-gone", keys: ["crash"], content: "S21_OBSOLETE_DEATH" });
+	outbox.enqueue({ id: "death:cp-live:1", kind: "death", job_id: "cp-live", keys: ["crash"], content: "S21_LIVE_DEATH legacy crash" });
+	const transportOwner = new CommandPost({ home: home.path, packageRoot: process.cwd(), holdsParentLock: () => true });
+	t.after(() => transportOwner.shutdown());
+	const facts = wakeupFacts({ record: (jobId) => fleet.get(jobId) });
+	assert.throws(() => transportOwner.sweepDurableWakeups((entry) => {
+		const verdict = checkWakeup({ kind: entry.kind, job_id: entry.job_id, keys: entry.keys, generation: entry.generation, issued_at: entry.queued_at }, facts);
+		if (verdict.state === "superseded") return verdict.reason ?? "stale";
+		writeFileSync(join(home.path, "absent-transport", "message"), entry.content);
+		return true;
+	}), /ENOENT/);
+	assert.deepEqual(outbox.pending().map((entry) => entry.id), ["death:cp-live:1"]);
+	assert.equal(outbox.read().discarded?.[0]?.id, "death:cp-gone:1");
+	outbox.enqueue({ id: "recovery:finished", kind: "recovery", keys: ["cp-finished", "cp-gone"], content: "S21_OBSOLETE_RECOVERY" });
+	for (const kind of ["death", "bound"] as const) {
+		const jobId = `cp-waiting-${kind}`;
+		await fleet.add(record(jobId, "waiting"));
+		outbox.enqueue({ id: `${kind}:${jobId}:1`, kind, job_id: jobId, generation: 1, keys: [kind === "death" ? "crash" : "tool_call_cap_exceeded"], content: `S21_OBSOLETE_waiting_${kind}` });
+	}
+	outbox.enqueue({ id: "recovery:mixed", kind: "recovery", keys: ["cp-live", "cp-finished"], content: "S21_MIXED_RECOVERY" });
+	assert.equal(outbox.enqueue({ id: "death:cp-live:1", kind: "death", job_id: "cp-live", keys: ["crash"], content: "S21_LIVE_DEATH legacy crash" }), false);
+	outbox.drain(() => {});
+	assert.equal(outbox.pending().length, 5, "transport handoff cannot confirm delivery");
+	const launch = () => {
+		const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+		children.push(child);
+		return child;
+	};
+	const first = launch();
+	await waitFor(() => provider.requests(script).length, (n) => n > 0, { timeoutMs: 10_000, what: "replayed death reaching the model" });
+	await waitFor(() => outbox.read().delivered, (rows) => rows.some((row) => row.id === "death:cp-live:1") && rows.some((row) => row.id === "recovery:mixed"), { timeoutMs: 15_000, what: "observed death and mixed recovery arrivals" });
+	await waitFor(() => outbox.pending().length, (n) => n === 0, { timeoutMs: 15_000, what: "startup reconciliation notice arrival" });
+	const receivedText = () => JSON.stringify(provider.requests(script).map((r) =>
+		(r.body.messages as Array<{ role: string }>).filter((message) => message.role !== "system")));
+	await waitFor(() => receivedText().includes("RESTART RECOVERY"), Boolean,
+		{ timeoutMs: 15_000, what: "reconciliation reaching the mock model" });
+	const text = receivedText();
+	assert.match(text, /S21_LIVE_DEATH/);
+	assert.match(text, /S21_MIXED_RECOVERY/);
+	assert.match(text, /RESTART RECOVERY/);
+	assert.match(text, /cp-unsalvageable/);
+	assert.match(text, /cp-revivable/);
+	assert.match(text, /cp_revive/);
+	assert.match(text, /cp_teardown/);
+	assert.doesNotMatch(text, /poll/i);
+	assert.equal(outbox.read().delivered.filter((row) => row.id.startsWith("recovery:cp-")).length, 1);
+	assert.doesNotMatch(text, /S21_OBSOLETE/);
+	assert.deepEqual(outbox.pending(), []);
+	assert.equal(outbox.read().discarded?.length, 4, "obsolete notices are terminally discarded");
+	await first.close();
+	const before = provider.requests(script).length;
+	const second = launch();
+	second.send({ id: "ready", type: "get_commands" });
+	await second.waitFor((r) => r.type === "response" && r.id === "ready", 30_000);
+	await second.prompt("S21 restart inspection");
+	await waitFor(() => provider.requests(script).length, (n) => n > before, { timeoutMs: 15_000, what: "restart inspection turn" });
+	const restartText = JSON.stringify(provider.requests(script).slice(before).map((r) => r.body.messages));
+	assert.doesNotMatch(restartText, /S21_LIVE_DEATH|S21_OBSOLETE/);
+	assert.equal(JSON.parse(readFileSync(join(home.path, LAYOUT.wakeupsFile), "utf8")).delivered.filter((row: { id: string }) => row.id === "death:cp-live:1").length, 1);
+});
+
+
+test("S21: host failure events survive restart with distinct CI causes and one arrival per class", { timeout: 110_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const script = "s21-host-failures";
+	const model = provider.addScript(script, [{ kind: "text", text: "Failure events received." }], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	const children: ReturnType<typeof startPiChild>[] = [];
+	const post = new CommandPost({ home: home.path, packageRoot: process.cwd(), holdsParentLock: () => true });
+	t.after(async () => {
+		for (const child of children) await child.close();
+		await post.shutdown();
+		agent.cleanup();
+		home.cleanup();
+		await provider.stop();
+	});
+	for (const cls of FAILURE_CLASSES) {
+		const jobId = `cp-${cls.replaceAll("_", "-")}`;
+		await post.fleet.add({ job_id: jobId, project: "demo", kind: "ship", delivery: "local", origin: "terminal", phase: "waiting",
+			branch: jobId, worktree: join(home.path, jobId), dispatched_at: isoTimestamp(), usage: EMPTY_USAGE,
+			worker: { pid: 2147483647, session_id: "legacy", session_file: join(home.path, "missing.jsonl"), profile: "implementer", role: "implementer", model, started_at: isoTimestamp() } });
+		if (cls === "spawn_failed") {
+			// A legacy pre-event exit is replayed through the real close observer's event entry point.
+			post.runs.open(jobId).cp("spawned", {});
+			post.runs.open(jobId).cp("process_exit", { code: 2 });
+			assert.equal((await post.failures.evaluate(jobId))?.class, cls);
+		} else await post.fail(jobId, { class: cls, message: `S21_FAILURE_${cls}`, at: isoTimestamp() });
+	}
+	const prefix = "watch cause ".repeat(20);
+	post.ciWatchFailed(new Error(`${prefix}HTTP 403`));
+	post.ciWatchFailed(new Error(`${prefix}HTTP 502`));
+	const pending = post.durableWakeups.pending();
+	assert.equal(pending.length, FAILURE_CLASSES.length + 2);
+	assert.equal(new Set(pending.map((entry) => entry.id)).size, pending.length);
+	assert.ok(pending.every((entry) => entry.id.length <= 160));
+	assert.ok(pending.some((entry) => entry.id.includes("HTTP 403")));
+	assert.ok(pending.some((entry) => entry.id.includes("HTTP 502")));
+	await post.shutdown();
+	const outbox = new DurableWakeupOutbox({ home: home.path, owner: "observer" });
+	const first = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+	children.push(first);
+	await waitFor(() => outbox.read().delivered.length, (n) => n === pending.length, { timeoutMs: 30_000, what: "every failure event arriving after restart" });
+	await waitFor(() => provider.requests(script).length, (n) => n > 0, { timeoutMs: 15_000, what: "failure consumer request" });
+	const text = JSON.stringify(provider.requests(script).map((r) => (r.body.messages as Array<{ role: string }>).filter((message) => message.role !== "system")));
+	for (const cls of FAILURE_CLASSES) {
+		const queued = pending.find((entry) => entry.job_id === `cp-${cls.replaceAll("_", "-")}`);
+		const row = outbox.read().delivered.find((entry) => entry.id === queued?.id);
+		assert.ok(row, `${cls} has one durable arrival`);
+		assert.equal(queued?.kind, cls === "wall_clock_exceeded" || cls === "tool_call_cap_exceeded" ? "bound" : "death");
+		assert.match(text, new RegExp(cls === "spawn_failed" ? "spawn_failed" : `S21_FAILURE_${cls}`));
+	}
+	assert.match(text, /on disk:/);
+	assert.match(text, /cp_teardown/);
+	assert.doesNotMatch(text, /poll/i);
+	assert.deepEqual(outbox.pending(), []);
+	await first.close();
+	const before = provider.requests(script).length;
+	const second = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+	children.push(second);
+	await second.prompt("Inspect the restarted parent.");
+	await waitFor(() => provider.requests(script).length, (n) => n > before, { timeoutMs: 15_000, what: "second host inspection" });
+	assert.doesNotMatch(JSON.stringify(provider.requests(script).slice(before).map((r) => r.body.messages)), /S21_FAILURE_/);
+});
+
+
+test("S21: forty failed reconcile candidates retain distinct bounded notices through RPC restart", { timeout: 110_000 }, async (t) => {
+	const provider = await MockProvider.start();
+	const script = "s21-long-recovery";
+	const model = provider.addScript(script, [{ kind: "text", text: "Recovery inventory received." }], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	const ids: string[] = [];
+	const cleanup: Array<() => Promise<void>> = [];
+	t.after(async () => { for (const close of cleanup) await close(); agent.cleanup(); await provider.stop(); });
+	for (const variant of ["a", "b"]) {
+		const home = createScratchHome();
+		const post = new CommandPost({ home: home.path, packageRoot: process.cwd(), holdsParentLock: () => true });
+		let child: ReturnType<typeof startPiChild> | undefined;
+		cleanup.push(async () => { await child?.close(); await post.shutdown(); home.cleanup(); });
+		for (let i = 0; i < 40; i++) {
+			const jobId = `cp-recovery-${String(i).padStart(2, "0")}-${"x".repeat(35)}${i === 39 ? variant : ""}`;
+			await post.fleet.add({ job_id: jobId, project: "demo", kind: "ship", delivery: "local", origin: "terminal", phase: "waiting",
+				branch: jobId, worktree: join(home.path, jobId), dispatched_at: isoTimestamp(), usage: EMPTY_USAGE,
+				worker: { pid: 2147483647, session_id: "legacy", session_file: join(home.path, "missing.jsonl"), profile: "implementer", role: "implementer", model, started_at: isoTimestamp() } });
+		}
+		const { report } = await post.reconcile();
+		assert.equal(report.entries.filter((entry) => entry.outcome === "failed").length, 40);
+		assert.equal(post.fleet.list().filter((record) => record.phase === "failed").length, 40);
+		const pending = post.durableWakeups.pending();
+		assert.equal(pending.length, 1);
+		assert.equal(pending[0]?.kind, "recovery");
+		assert.equal(pending[0]?.keys?.length, 40);
+		assert.ok((pending[0]?.id.length ?? Infinity) <= 160);
+		assert.ok((pending[0]?.content.length ?? Infinity) <= 4000);
+		assert.match(pending[0]?.content ?? "", /RESTART RECOVERY — 40 candidate/);
+		assert.match(pending[0]?.content ?? "", /\.\.\.and \d+ more/);
+		ids.push(pending[0]?.id ?? "");
+		await post.shutdown();
+		const before = provider.requests(script).length;
+		child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+		await waitFor(() => JSON.stringify(provider.requests(script).slice(before).map((request) => request.body.messages)).includes("RESTART RECOVERY — 40 candidate"), Boolean,
+			{ timeoutMs: 20_000, what: "bounded forty-candidate notice reaching the real parent" });
+		await waitFor(() => post.durableWakeups.read().delivered.some((entry) => entry.id === pending[0]?.id), Boolean,
+			{ timeoutMs: 15_000, what: "long recovery arrival confirmation" });
+		await child.close();
+	}
+	assert.notEqual(ids[0], ids[1], "sets sharing their first 39 candidates retain distinct durable IDs");
 });

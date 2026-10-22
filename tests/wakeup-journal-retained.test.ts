@@ -1,0 +1,86 @@
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { DURABLE_WAKEUP_KINDS, FAILURE_CLASSES, type FailureClass, LAYOUT, STATE_WAKEUP_ANNOUNCEMENTS } from "../src/contracts.ts";
+import { BOUND_SPENT_PHRASE } from "../src/failure-announcer.ts";
+import { FAILURE_CLASS_WAKEUP, WAKEUP_CUSTOM_TYPES } from "../src/wakeups.ts";
+import { REPO_ROOT } from "./harness/index.ts";
+
+const DOCS = readFileSync(join(REPO_ROOT, "docs/contracts.md"), "utf8");
+const AGENTS = readFileSync(join(REPO_ROOT, "AGENTS.md"), "utf8");
+
+test("every announced transition names a wake-up kind, and the docs table lists it", () => {
+	const kinds = new Set<string>(Object.keys(WAKEUP_CUSTOM_TYPES));
+	const seen = new Set<string>();
+	assert.ok(STATE_WAKEUP_ANNOUNCEMENTS.length > 0);
+	for (const row of STATE_WAKEUP_ANNOUNCEMENTS) {
+		assert.ok(row.event.length > 0, "event name missing");
+		assert.ok(row.wakeup === "none" || kinds.has(row.wakeup), `${row.event} has unknown kind ${row.wakeup}`);
+		assert.match(DOCS, new RegExp(`\\| \`${row.event}\``), `docs/contracts.md table misses ${row.event}`);
+		if (row.wakeup !== "none") seen.add(row.wakeup);
+	}
+	for (const kind of kinds) {
+		assert.ok(seen.has(kind), `wake-up kind ${kind} is never announced`);
+	}
+});
+
+test("every failure class maps to a durable wake-up kind", () => {
+	for (const cls of FAILURE_CLASSES) {
+		const kind = FAILURE_CLASS_WAKEUP[cls as FailureClass];
+		assert.ok((DURABLE_WAKEUP_KINDS as readonly string[]).includes(kind), `${cls} maps to non-durable ${kind}`);
+		assert.notEqual(kind, "none");
+	}
+});
+
+test("markFailed is only called from fleet.ts and the failure announcer", () => {
+	const hits: string[] = [];
+	const walk = (dir: string): void => {
+		for (const entry of readdirSync(dir, { withFileTypes: true })) {
+			if (entry.name === "node_modules" || entry.name === "dist") continue;
+			const path = join(dir, entry.name);
+			if (entry.isDirectory()) {
+				walk(path);
+				continue;
+			}
+			if (!entry.name.endsWith(".ts")) continue;
+			if (readFileSync(path, "utf8").includes("markFailed(")) hits.push(path.slice(REPO_ROOT.length + 1));
+		}
+	};
+	walk(join(REPO_ROOT, "src"));
+	walk(join(REPO_ROOT, "extensions"));
+	hits.sort();
+	assert.deepEqual(hits, ["src/failure-announcer.ts", "src/fleet.ts"]);
+});
+
+test("AGENTS.md tells the parent to act on death and recovery wake-ups", () => {
+	assert.match(AGENTS, /cp-death/);
+	assert.match(AGENTS, /cp-recovery/);
+	assert.match(AGENTS, /act on the wake-up/i);
+	assert.doesNotMatch(AGENTS, /A worker that died: restart the parent to reconcile/);
+});
+
+test("a spent bound's wake-up phrase is unambiguous, and AGENTS.md names it (cur.4.4)", () => {
+	// "not attempted — 0 attempt(s) left" reads as permission to hand-revive;
+	// `BOUND_SPENT_PHRASE` names the actual truth instead — pin the code's own
+	// constant against AGENTS.md's cp-bound bullet, not a copy of the string.
+	assert.match(AGENTS, /bound spent/, "AGENTS.md's cp-bound bullet must name the exhausted phrase");
+	assert.ok(BOUND_SPENT_PHRASE.includes("bound spent"));
+	assert.doesNotMatch(BOUND_SPENT_PHRASE, /^not attempted/, "the exhausted phrase must never read as the ordinary 'not attempted' one");
+	assert.match(
+		DOCS,
+		/one automatic attempt was already made and did not stick/,
+		"docs/contracts.md must quote BOUND_SPENT_PHRASE's own wording, not a stale copy",
+	);
+});
+
+test("no doc or notice claims a previewed attempt 'did not stick' (zh7.4)", () => {
+	assert.doesNotMatch(DOCS, /attempted, did not stick/, "docs/contracts.md still quotes the preview-derived claim");
+	assert.doesNotMatch(AGENTS, /attempted, did not stick/);
+	assert.match(DOCS, /settleBound/, "docs/contracts.md must name the post-outcome bound announcement");
+	assert.match(AGENTS, /cp-bound.{0,400}after (its|the) outcome/s, "AGENTS.md must say the cp-bound wake arrives after the outcome");
+});
+
+test("LAYOUT names the durable wake-up file under state/", () => {
+	assert.equal(LAYOUT.wakeupsFile, ".pi-command-post/state/wakeups.json");
+});
