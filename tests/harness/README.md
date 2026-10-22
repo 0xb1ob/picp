@@ -11,7 +11,7 @@ import from `tests/harness/`.**
 | `rpc.ts` | strict LF JSONL framing + id-correlated waits (never `node:readline`) |
 | `scratch-repo.ts` | git fixture with a bare "remote", dirt/commit helpers, `squashMergeAndDeleteHead()` for the merged-head teardown trap |
 | `golden.ts` | `assertGolden(name, actual)` against `tests/golden/<name>`. `CP_UPDATE_GOLDEN=1` rewrites the file **and fails the test**, so a regenerated golden always lands in a diff and never in a green run. |
-| `attach.ts` | `TestConsole`: the attach console **minus the terminal** — a real `AttachSession` over the real `applyAttachEffects` ports and real worker events (`workerEventToAttachInput`), with `ctx.ui.custom` replaced by a test driving inputs. It re-implements no rule; rendering and key decoding are pinned separately by goldens in `tests/attach-console.test.ts`. |
+| `attach.ts` | `TestConsole`: the attach console **minus the terminal** — a real `AttachSession` over the real `applyAttachEffects` ports and real worker events (`workerEventToAttachInput`), with `ctx.ui.custom` replaced by a test driving inputs. It re-implements no rule; rendering and key decoding are pinned separately by goldens. |
 | `state.ts` | file-only readers (`readFleet`, `readRunStatus`, `readRunEvents`) that validate against `src/contracts.ts`, plus `assertEventSequence` and `waitFor` |
 | `parent-hosts.ts` | `parentHostPids`/`killParentHosts`/`stopParentHosts`: find and kill detached `src/parent-host.ts` processes by their scratch home in argv; `teardownHome(home, ...steps)` runs every step, stops the hosts and removes the home even when one fails; `createScratchHome().cleanup()` kills them first |
 

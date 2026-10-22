@@ -110,7 +110,7 @@ S10 freshly re-executed all three rechecks on source base aea915131f8e521d2dc1ae
 
 Replay each with `node --import ./tests/harness/hermetic-env.ts --test --test-force-exit --test-name-pattern='landing: the review deadline' --test-skip-pattern='^(repository/(hold|unreadable-hold|ci|permission|none)|fallback/.*)$' tests/e2e/landing-review-window.test.ts` for head; exchange `head` for the selected recheck in that skip expression for CI/permission. The original duration remains intact. The head mutation models trusting the previously reported head; the fake forge still refuses its stale bound merge, and the assertion detects the forbidden attempt.
 
-The harness's `setGh` uses `Object.assign(gh, patch)` before writing the complete state file (`tests/e2e/landing.test.ts`, startStack). Therefore partial permission/runs updates retain `integration` and other omitted fields. No harness change is required for that review uncertainty.
+The harness's `setGh` uses `Object.assign(gh, patch)` before writing the complete state file (`tests/e2e/landing-helpers.ts`, startStack). Therefore partial permission/runs updates retain `integration` and other omitted fields. No harness change is required for that review uncertainty.
 
 Measured accounting for the PR ledger: the migration checker reports 378 tree test files and 4,299 static declarations. S08 keeps the file count unchanged and adds exactly nine test declarations to the 4,290-declaration merged base; no unit declaration is removed. The PR body supplies the Scope block, verbatim Ownership, counts, diff size, isolation details and validation evidence.
 

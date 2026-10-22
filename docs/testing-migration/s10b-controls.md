@@ -2,7 +2,7 @@
 
 Controls run independently through the real product scenarios. Each mutation is reversed before the next run.
 The tables record executed assertion failures, not patch applicability. Final restored checks are recorded in
-[S10b](s10b.md). Commands use `npm run test:one -- --test-name-pattern="<selector>" tests/e2e/landing.test.ts`.
+[S10b](s10b.md). Commands use `npm run test:one -- --test-name-pattern="<selector>" tests/e2e/landing-*.test.ts`.
 No live model is used. Existing S02/S03 control definitions remain in their owning manifests and replay notes.
 
 ## Integrate declarations 81–120
@@ -137,7 +137,7 @@ The headless in-flight case retains its separate file and selector.
 | S03b-retry | rearm a deadline after operational retry | operational retry never rearms its deadline |
 
 Inherited CI-repair controls also replayed with exit 1:
-`npm run test:one -- --test-name-pattern='landing: held CI repair' tests/e2e/landing-ci-watch.test.ts tests/e2e/landing-merge.test.ts tests/e2e/landing-ci-watch.test.ts`.
+`npm run test:one -- --test-name-pattern='landing: held CI repair' tests/e2e/landing-ci-watch.test.ts tests/e2e/landing-merge.test.ts`.
 
 | Control | Mutation | Observed failed assertion |
 |---|---|---|
