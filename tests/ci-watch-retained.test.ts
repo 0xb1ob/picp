@@ -6,6 +6,9 @@ import type { CiRun } from "../src/merge-ask.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { isGitlabJob, watchChangeRequest } from "../src/forge-runtime.ts";
 import type { ForgeObserver } from "../src/forges/adapter.ts";
+import { HeldContinuation } from "../src/held-continuation.ts";
+import type { FleetRecord, IntegrationNext } from "../src/contracts.ts";
+import type { IntegrateResult } from "../src/integrate.ts";
 
 // Originals stay whole by operator ruling; the retirement follow-up removes the duplicate source declarations.
 const HEAD = "d48a81d1f4d3c8a1b0d5e6f7a8b9c0d1e2f3a4b5";
@@ -170,4 +173,44 @@ test("forge PR 3: missing gh stops only the GitHub job; a GitLab MR is still obs
 	clock = new Date(clock.getTime() + CI_WATCH_MAX_BACKOFF_MS * 10);
 	const restarted = await watchOf().tick();
 	assert.deepEqual(restarted.observations.map((o) => o.key), second.observations.map((o) => o.key), "a restart re-derives the same event identity");
+});
+
+function continuationBench(options: { onLanded?: (jobId: string) => void } = {}) {
+	const script = new Map<string, IntegrationNext[]>();
+	const records = [{ ...record(), kind: "ship", supersessions: 0 } as unknown as FleetRecord];
+	const continuation = new HeldContinuation({
+		enabled: () => true,
+		fleet: { get: (id) => records.find((entry) => entry.job_id === id), list: () => records },
+		advance: async (jobId) => {
+			await new Promise((resolve) => setImmediate(resolve));
+			const steps = script.get(jobId) ?? ["wait"];
+			const next = steps.length > 1 ? steps.shift()! : steps[0]!;
+			return { job_id: jobId, branch: jobId, step: next === "done" ? "done" : "merge", next, facts: [], reason: `${jobId}: ${next}`, pr_url: PR, head_sha: HEAD } as unknown as IntegrateResult;
+		},
+		review: async () => assert.fail("retained landing case never reviews"),
+		reviews: { pending: () => undefined, handBack: () => {} },
+		head: () => HEAD,
+		notify: () => {},
+		relay: () => {},
+		onLanded: options.onLanded,
+	});
+	return { script, continuation };
+}
+
+test("unload-parent PR2: a landing calls onLanded once; a stop does not, and a throwing onLanded never undoes the landing", async () => {
+	const landed: string[] = [];
+	const b = continuationBench({ onLanded: (jobId) => void landed.push(jobId) });
+	b.script.set("cp-4wz", ["surface"]);
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "ci_green", head: HEAD });
+	assert.deepEqual(landed, []);
+	b.script.set("cp-4wz", ["done"]);
+	await b.continuation.trigger({ jobId: "cp-4wz", event: "pr_merged", head: HEAD });
+	assert.deepEqual(landed, ["cp-4wz"]);
+	const throwing = continuationBench({
+		onLanded: () => {
+			throw new Error("release broke");
+		},
+	});
+	throwing.script.set("cp-4wz", ["done"]);
+	assert.equal((await throwing.continuation.trigger({ jobId: "cp-4wz", event: "pr_merged", head: HEAD })).action, "done");
 });

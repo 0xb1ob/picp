@@ -303,8 +303,8 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 
 | File | Declaration | Status | Evidence and expected outcome |
 |---|---|---|---|
-| `tests/integrate.test.ts` | 92 dirty worktree | pending-fix | [S10 reproducer location](testing-migration-s10.md#pending-fix-declaration-92); unreadable status must preserve original bytes and issue no reset. Original file stays whole. |
-| `tests/ci-watch.test.ts` | 71 distinct watch-failure causes | pending-fix | Parked by frozen Addendum 1; #443 and its real-parent regression are already on main, so the blocker is gone. S10b owns mapping 71 and retirement by sequencing decision. [Decision and historical reproducer](testing-migration-s03-declarations.md#latest-operator-ruling-and-declaration-71-blocker). |
+| `tests/integrate.test.ts` | 92 dirty worktree | mapped by S10b | [Current mapping and executed control](testing-migration/s10b.md); original file stays for S11. |
+| `tests/ci-watch.test.ts` | 71 distinct watch-failure causes | mapped by S10b | [Current mapping and executed control](testing-migration/s10b.md); real-parent two-cause case passes with #443. |
 
 The checker does not accept `pending-fix` inside its assertion section. This separate ledger records parked or product-blocked items without relabelling them retained or changing the checker; original files and declaration counts remain intact until the required consumer behavior passes.
 
