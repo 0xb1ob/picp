@@ -6,17 +6,14 @@ import { test } from "node:test";
 import { isHistoryRow } from "../scripts/landing-history-rows.ts";
 
 const ROOT = join(import.meta.dirname, "..");
-// Docs allowed to name a tests/ path that no longer exists (docs/parity.md is policed in contract.test.ts). A prefix each.
+// Historical records (one prefix each) may name tests that were since retired; live docs may not.
+// docs/parity.md is policed in contract.test.ts. The deleted landing.test.ts is never allowed here, see below.
 const STALE_ALLOWED: { prefix: string; reason: string }[] = [
 	{ prefix: "docs/testing-migration", reason: "the ledger records retired unit files and e2e files as they were when each slice landed" },
 	{ prefix: "docs/superpowers/", reason: "dated plans and specs written before later test renames and deletions" },
 	{ prefix: "docs/tui-verification/", reason: "dated verification records" },
 	{ prefix: "docs/build-history.md", reason: "task-by-task build record" },
 	{ prefix: "CHANGELOG.md", reason: "release notes name tests as they were then" },
-	{ prefix: "docs/development.md", reason: "stale cites that predate the landing split; docs cleanup is a separate job" },
-	{ prefix: "docs/autonomy.md", reason: "stale cites that predate the landing split; docs cleanup is a separate job" },
-	{ prefix: "tests/e2e/README.md", reason: "stale cite that predates the landing split; docs cleanup is a separate job" },
-	{ prefix: "tests/harness/README.md", reason: "stale cite that predates the landing split; docs cleanup is a separate job" },
 ];
 const SPLIT = "tests/e2e/landing.test.ts";
 
@@ -34,7 +31,7 @@ test("no tracked doc cites a tests/ path that does not exist, and none cites the
 		const allowed = STALE_ALLOWED.some((a) => doc.startsWith(a.prefix));
 		readFileSync(join(ROOT, doc), "utf8").split("\n").forEach((line, i) => {
 			for (const [path] of line.matchAll(/tests\/[\w./*-]+\.ts/g)) {
-				if (path === SPLIT ? isHistoryRow(line) : allowed || exists(path)) continue;
+				if (path.includes("**") || (path === SPLIT ? isHistoryRow(line) : allowed || exists(path))) continue;
 				bad.push(`${doc}:${i + 1} ${path}`);
 			}
 		});

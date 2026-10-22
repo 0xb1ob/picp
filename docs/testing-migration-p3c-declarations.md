@@ -11,7 +11,7 @@ The original slice has 143 static declarations (152 parameterized runtime cases)
 |---|---:|---|
 | tests/ci-watch.test.ts | 80 | S10b retires the original: 75 mapped, five retained verbatim in tests/ci-watch-retained.test.ts (S02 6/8/32/33 and S03 70), zero pending. Canonical declaration 71 mapping and executed two-cause control: [S10b](testing-migration/s10b.md). One retained file, one original file retired. |
 | tests/main-ci.test.ts | 39 | Follow-on #416: 32 mapped, 7 retained (mixed tests narrowed) in tests/main-ci-retained.test.ts, 0 pending; whole original retired. Full titles and controls: [main-CI accounting](testing-migration-main-ci-declarations.md). |
-| tests/foreign-ci-watch.test.ts | 11 | S06 completed: 10 mapped to 05-10/S06-1 in tests/e2e/landing-*.test.ts, one static declaration in tests/foreign-ci-watch-retained.test.ts; supersedes the P3c-rest pending snapshot |
+| tests/foreign-ci-watch.test.ts | 11 | S06 completed: 10 mapped to 05-10/S06-1 in tests/e2e/landing-ci-watch.test.ts, one static declaration in tests/foreign-ci-watch-retained.test.ts; supersedes the P3c-rest pending snapshot |
 | tests/parked-ci.test.ts | 3 | All three mapped to 05-12 and deleted; real timer, forge barriers, resume/re-park and legacy held state; NC-36 and NC-49–NC-55 |
 | tests/ci-evidence.test.ts | 5 | All five mapped to 05-9 and deleted; NC-33 and NC-43–NC-48 fail their tool/storage/viewer assertions |
 | tests/integrate-held-ci.test.ts | 3 | S07: all three mapped to 05-13 and 05-S07 and deleted; NC-37 and S07-NC-1..3; S03 proves real startup recomputation without a manual integrate call, kills only the held worker PID, and asserts the queued forge-barrier result |

@@ -69,10 +69,8 @@ CI evidence is GitHub Actions only (runs on the exact head plus each run attempt
 files need no token or network; the policy file's fake `gh` throws on any request outside the Actions allowlist:
 
 ```bash
-npm run test:one -- tests/actions-ci.test.ts            # runs/jobs parsing, pagination, attempts, fail-closed reads
+npm run test:one -- tests/e2e/landing-forge-ci.test.ts   # Actions reads, /doctor ci probe, "no Actions CI" only on a positive empty list
 npm run test:one -- tests/actions-ci-policy.test.ts     # allowlist; no Checks/status/rollup read in any CI reader
-npm run test:one -- tests/ci-access.test.ts             # Actions-only advice; /doctor workflows, runs and jobs probe
-npm run test:one -- tests/ci-configured.test.ts         # only a positive empty workflow list is "no Actions CI"
 npm run test:one -- tests/schedule-org-review.test.ts   # the org-review approval gate reads Actions, never rollup
 ```
 

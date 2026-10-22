@@ -9,7 +9,7 @@ Mapped declarations retire together. Seven retained tests remain in `tests/main-
 The retained share is 17.95%. Mixed declarations 8, 12 and 32 retain only their unreachable portions;
 their reachable assertions are mapped and controlled below. New e2e declarations: 4, including the Actions deadline scenario.
 
-Scenario names below are exact titles in `tests/e2e/landing-*.test.ts`:
+Scenario names below are exact titles in `tests/e2e/landing-ci-watch.test.ts tests/e2e/landing-forge-ci.test.ts`:
 
 - T / 05-11: `landing: a real parent's timer latches only its mandated main runs and clears only current-tip green`.
 - I / 05-main-red: `landing: main-red integration holds stale heads and permits only a current green fix-forward under its own mandate`.
