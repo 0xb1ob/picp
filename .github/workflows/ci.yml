@@ -34,7 +34,7 @@ jobs:
       # The retired external tracker stays out of every tracked file and file name,
       # outside the exact lines scripts/retired-integration-allowlist.json freezes.
       - name: Retired integration guard
-        run: npm run check:retired-integration
+        run: bash scripts/ci-as-user.sh npm run check:retired-integration
 
       # The m2/m3/pipeline lease suites need a real treehouse on PATH and
       # self-skip without it; tests/ci-host-tools.test.ts fails the run if it
