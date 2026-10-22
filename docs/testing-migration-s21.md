@@ -14,6 +14,10 @@ recovery notice. The durable schema allows 4,000 characters. `src/command-post.t
 whole set through `src/wakeups.ts:927`; `src/command-post.ts:873` silently swallows the rejection:
 40 failed candidates, zero pending notices. The one-record control succeeds. No product fix is included.
 The operator owns the decision about a separate product job; this row does not block the other rows.
+The final plain merge includes the separate fix #442 (636ec39) and timer knobs #439. Row 4 remains
+parked as instructed: its reproduction describes the earlier base, and no long-set RPC migration credit
+is claimed here. The product fix is preserved unchanged. Newly incoming tests from #439/#442/#443
+are registered in the manifest rather than absorbed into this slice.
 
 ## Consumer scenarios and entry points
 
@@ -86,4 +90,4 @@ The separate knob job owns fixed timer findings: 120 seconds at `src/contracts/w
 Successor ownership and legacy timestamps avoid waiting for those timers; no test-only timer hooks were added.
 Agent fixtures use mode-0700 temp directories outside the worktree, containing only mock models/settings.
 Cleanup closes owned children before removing agents/homes/providers; worker kills target only PIDs started by that case.
-No production code, original unit declarations or credentials are changed. Full-suite and live-model runs are deliberately skipped; the oversized recovery notice remains a product risk under pending-fix row 4.
+No production code, original unit declarations or credentials are changed by S21. Full-suite and live-model runs are deliberately skipped; row 4 remains parked without migration credit, with its separate product fix now included from main.
