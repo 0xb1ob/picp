@@ -3342,10 +3342,11 @@ test("landing S15 retry: real parent delivery confirms, retries withheld verdict
 		}
 		return { job_id: live.jobId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["S15 retry evidence"] };
 	} }] }]));
+	const releaseParent = join(s.home, "release-retry-parent");
 	const parent = s.provider.addScript("s15-retry-parent", [
 		{ kind: "tool_calls", calls: [
 			...jobs.slice(0, 3).map((live, n) => ({ name: "cp_review", args: { job_id: live.jobId, model: models[n] } })),
-			{ name: "bash", args: { command: "sleep 6" } },
+			{ name: "bash", args: { command: `while [ ! -f '${releaseParent}' ]; do sleep 0.1; done` } },
 		] },
 		{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: jobs[3]!.jobId, model: models[3] } }] },
 		{ kind: "text", text: "Review deliveries observed." },
@@ -3353,10 +3354,16 @@ test("landing S15 retry: real parent delivery confirms, retries withheld verdict
 	s.agentDir.writeModels(s.provider);
 	const child = startPiChild({ cwd: s.home, model: parent, env: { ...s.agentDir.env, CP_HOME: s.home }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(() => child.close());
-	await child.prompt("Review these three branches and wait while their verdict delivery settles.");
+	const prompted = child.prompt("Review these three branches and wait while their verdict delivery settles.");
 	const events = (n: number) => readRunEvents(s.home, jobs[n]!.jobId);
 	const sends = (n: number) => events(n).filter((event) => event.type === "verdict_wakeup_sent");
 	const delivered = (n: number) => events(n).filter((event) => event.type === "verdict_wakeup_delivered");
+	try {
+		await waitFor(() => sends(0).length, (count) => count >= 2, { timeoutMs: 30_000, what: "the busy parent leaves its first verdict unconfirmed through one resend" });
+	} finally {
+		writeFileSync(releaseParent, "release");
+	}
+	await prompted;
 	await assert.doesNotReject(waitFor(() => sends(1).length, (count) => count >= 2, { timeoutMs: 10_000, what: "real timer retries a withheld verdict" }), "suppression remains eligible for its configured retry window");
 	assert.equal((sends(1)[0]!.payload as { sent: boolean }).sent, false);
 	assert.equal((sends(1)[1]!.payload as { sent: boolean }).sent, false);
