@@ -456,6 +456,25 @@ moves first.
 | S24-dashboard-terminal | `tests/e2e/headless-lifecycle.test.ts` | rpc bridge: a queued message whose handoff is dropped twice ends failed, never re-injected again |
 | S21-long | `tests/e2e/wake-delivery.test.ts` | S21: forty failed reconcile candidates retain distinct bounded notices through RPC restart |
 | S21-restart | `tests/e2e/wake-delivery.test.ts` | S21: restart delivers an unobserved death once and discards obsolete fleet notices |
+| S24-op-invalid | `tests/e2e/operator-compact.test.ts` | S24 compact: invalid instructions refuse before writing, and a small context never queues |
+| S24-op-queued | `tests/e2e/operator-compact.test.ts` | S24 compact: queued handoff survives tool replies and reaches one summarizer after settlement |
+| S24-op-settings | `tests/e2e/operator-compact.test.ts` | S24 compact: live operator settings honor positive integer triggers and default every invalid value |
+| S24-op-failures | `tests/e2e/operator-compact.test.ts` | S24 compact: a failed self compact is visible and automatic retries stop after three failures |
+| S24-op-streak | `tests/e2e/operator-compact.test.ts` | S24 compact: provider rejection compacts once per streak and stops at three per process |
+| S24-op-spent | `tests/e2e/operator-compact.test.ts` | S24 compact: skipped and failed summarizers spend the rejection streak once |
+| S24-op-relays | `tests/e2e/operator-compact.test.ts` | S24 compact: held relays remain unacked for health, then enter context once after compaction |
+| S24-op-manual | `tests/e2e/operator-compact.test.ts` | S24 compact: manual summarizers receive the latest handoff and read failures preserve the fallback |
+| S24-op-order | `tests/e2e/operator-compact.test.ts` | S24 compact: a relay handed to the automatic compact-request turn is never handed twice |
+| S24-op-nudge | `tests/e2e/operator-compact.test.ts` | S24 compact: rejection nudges name unanswered relays and a good answer clears them |
+| S24-op-explicit | `tests/e2e/operator-compact.test.ts` | S24 compact: an explicit queued compact spends the provider-rejection streak without a retry nudge |
+| S24-op-backstop | `tests/e2e/operator-compact.test.ts` | S24 compact: an ignored threshold request compacts automatically and a low settle rearms it |
+| S24-op-sdk | `tests/e2e/operator-compact.test.ts` | S24 compact: SDK threshold and overflow summarizers receive handoff enrichment |
+| S24-op-write | `tests/e2e/operator-compact.test.ts` | S24 compact: a failed handoff write refuses the tool and never leaves compaction pending |
+| S24-parent-order | `tests/e2e/parent-compaction.test.ts` | S24 parent: schedule wakes hold in order until manual compaction finishes |
+| S24-parent-expiry | `tests/e2e/parent-compaction.test.ts` | S24 parent: failures and expiries release wakes, three disable, compaction reenables, low context releases |
+| S24-parent-immediate | `tests/e2e/parent-compaction.test.ts` | S24 parent: low, disabled and non-headless contexts deliver schedule wakes immediately |
+| S24-parent-length | `tests/e2e/parent-compaction.test.ts` | S24 parent: length stops cancel threshold compaction without disabling later manual and normal compaction |
+| S24-parent-ci | `tests/e2e/headless-lifecycle.test.ts` | rpc parent S24: a CI fleet wake stays held across settlement until manual compaction |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -1069,6 +1088,36 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/wakeup-journal.test.ts` | declaration 4: forty-candidate recovery rendering and distinct long IDs | S21-long | mapped | long-recovery control fails real reconciliation inventory assertions; forty failures, bounded RPC arrival and distinct IDs |
 | `tests/wakeup-journal.test.ts` | runtime declarations 5, 9–15, 17–22 | S21-restart | mapped | Individual scenarios and all executed controls are enumerated by declaration in testing-migration-s21.md; includes real worker/reviewer emitters and host event APIs |
 | `tests/wakeup-journal.test.ts` | structural/documentation declarations 1–3, 6–8, 16 | — | retained | tests/wakeup-journal-retained.test.ts preserves these seven declarations verbatim; missing runtime entry points are listed per declaration in testing-migration-s21.md |
+| `tests/operator-compact.test.ts` | 1 self_compact refuses empty, short and pathless instructions before writing | S24-op-invalid | mapped | S24-compact-validation: invalid refusal assertions fail before any handoff write |
+| `tests/operator-compact.test.ts` | 2 N13: self_compact under the threshold returns without queueing or writing a handoff | S24-op-invalid | mapped | S24-compact-under: small-context queued=false assertion fails |
+| `tests/operator-compact.test.ts` | 3 self_compact writes instructions and only compacts once after settlement, with visible outcomes | S24-op-queued | mapped | S24-compact-early: settlement ordering fails; real tool result, exact handoff bytes/path, duplicate refusal and one summarizer |
+| `tests/operator-compact.test.ts` | 4 threshold crossing requests once, then compacts automatically if ignored, and rearms below threshold | S24-op-backstop | mapped | S24-compact-early: ignored-request/backstop assertion fails; two threshold crossings with a low settle between |
+| `tests/operator-compact.test.ts` | 5 a failed self_compact is recorded and next settle compacts automatically, up to three failures | S24-op-failures | mapped | S24-compact-failures: three-failure stop assertion fails; actual visible tool/session errors |
+| `tests/operator-compact.test.ts` | 6 S1: benign compact skips never count as failures, release waiters and leave next settle eligible | — | retained | Verbatim in tests/operator-compact-retained.test.ts; includes synchronous ctx.compact throw unavailable through SDK's asynchronous wrapper. Public benign skip additionally pinned by S24-op-spent; declaration retained whole |
+| `tests/operator-compact.test.ts` | 7 S1: a benign skip still spends the provider-rejection streak's one compaction | S24-op-spent | mapped | S24-compact-spent: benign-skip subtest loses already-compacted notice |
+| `tests/operator-compact.test.ts` | 8 bridge wakes arriving during a compaction wait for it to end | S24-op-relays | mapped | S24-compact-callback: both complete/cancel subtests time out waiting for relay ack; exact emit/ack counts and context entry |
+| `tests/operator-compact.test.ts` | 9 picp-75g: relay handed off before compaction is not handed off again after it | S24-op-order | mapped | S24-compact-relay-gate: exact one-emit assertion fails; real automatic compact-request turn and durable outbox |
+| `tests/operator-compact.test.ts` | 10 compaction that never ends holds relays unjournaled so health sees them unacked | S24-op-relays | mapped | S24-compact-relay-gate: pre-release no-emit assertion fails; real health CLI reports aged unacked relay failure |
+| `tests/operator-compact.test.ts` | 11 N5: isToolAdditionRejection matches only assistant error naming tool_addition with a 400 | — | retained | Verbatim in tests/operator-compact-retained.test.ts; malformed/undefined message inputs and arbitrary role/stopReason combinations cannot be emitted through the SDK. Public 400/529 and aborted reply behavior additionally pinned by S24-op-streak/S24-op-nudge/S24-op-explicit |
+| `tests/operator-compact.test.ts` | 12 N5: tool_addition 400 compacts once per failure streak ahead of threshold request | S24-op-streak | mapped | S24-compact-spent: extra compaction per streak; public successful replies reset streaks and nudge uses operator-compact |
+| `tests/operator-compact.test.ts` | 13 N5: other errors, aborts, user and custom messages neither open nor end a streak | S24-op-explicit | mapped | S24-compact-abort: aborted reply resets spent streak; S24-op-nudge additionally pins unrelated 529 and relay custom message tracking |
+| `tests/operator-compact.test.ts` | 14 N5: failed streak compaction is not retried in the streak | S24-op-spent | mapped | S24-compact-spent: failed-summarizer subtest loses already-compacted notice |
+| `tests/operator-compact.test.ts` | 15 N5: streak compactions stop at three per process | S24-op-streak | mapped | S24-compact-streak-cap: actual compaction count is two instead of three; fourth streak refuses |
+| `tests/operator-compact.test.ts` | 16 N5: nudge names relays failed turns never answered | S24-op-nudge | mapped | S24-compact-nudge: unanswered-ID assertion fails; latest twenty of twenty-five IDs, earlier IDs excluded, good answer clears them |
+| `tests/operator-compact.test.ts` | 17 operator settings override trigger; invalid settings use 200000 | S24-op-settings | mapped | S24-compact-default: actual request count wrong; positive 500 plus seven invalid values and malformed JSON tested live |
+| `tests/operator-compact.test.ts` | 18 manual and backstop compaction enrich prepared input with latest handoff without cancelling | S24-op-manual | mapped | S24-compact-enrich: four manual variants and S24-op-sdk threshold/overflow variants lose enrichment |
+| `tests/operator-compact.test.ts` | 19 enrichment reaches actual default summarizer for normal and split compaction | S24-op-manual | mapped | S24-compact-enrich: keepRecentTokens 1/200 variants fail; actual summarizer requests preserve SDK completion |
+| `tests/operator-compact.test.ts` | 20 read failures notify without cancelling backstop; write failures never queue | S24-op-write | mapped | S24-compact-write loses persistent-write error; S24-op-manual additionally pins read-failure fallback, broken by S24-compact-enrich |
+| `tests/operator-compact.test.ts` | 21 queued self_compact lets tool-result reply finish before compacting real Pi run | S24-op-queued | mapped | S24-compact-early fails settlement ordering; S24-compact-own also fails own-instructions enrichment exclusion/exact summarizer count |
+| `tests/operator-compact.test.ts` | 22 fresh-home state operator directory and configured handoffs_dir | S24-op-manual | mapped | S24-compact-enrich loses configured latest handoff path/input; both default state directory and custom directory checked |
+| `tests/parent-compact-hold.test.ts` | T3(a): pure hold — settle, timers, failures, busy phase, runStarted, not_over | S24-parent-expiry | mapped | S24-parent-cap loses five-second cap release; failure, 15-second start timeout, cap, disable after three, reenable and not_over exercised through parent CLI |
+| `tests/parent-compact-hold.test.ts` | T3(b): threshold settle holds fleet and schedule wakes in offer order until session_compact | S24-parent-order | mapped | S24-parent-order reverses actual A/B/C arrival; S24-parent-ci additionally pins fleet wake hold until manual compact |
+| `tests/parent-compact-hold.test.ts` | T3(c)/(d): below threshold or off headless parent nothing holds | S24-parent-immediate | mapped | S24-parent-context fails low, disabled and non-headless JSON print consumers |
+| `tests/parent-compact-hold.test.ts` | T3(e): N6 length stop cancels threshold compaction and never holds | S24-parent-length | mapped | S24-parent-length loses threshold cancellation; three real provider length stops never disable later manual/normal compaction |
+| `tests/parent-compact-hold.test.ts` | T3(f): busy run holds all wakes including schedule and send-first release until compaction | S24-parent-order | mapped | S24-parent-busy loses engagement; framed RPC operator question exercises send-first release; S24-parent-ci additionally pins fleet delivery |
+| `tests/parent-compact-hold.test.ts` | incoming #447: cap timer reads CP_PARENT_COMPACT_HOLD_SECONDS | S24-parent-expiry | mapped | S24-parent-cap restores hardcoded 270000 and fails ten-second wait for five-second expiry; knob set in parent environment |
+| `tests/parent-compact-hold.test.ts` | T3(g)/(h): failure, start timeout and cap release; three disable; agent_start never releases | S24-parent-expiry | mapped | S24-parent-cap fails cap release; subsequent agent start preserves hold, three distinct failures disable, successful compact reenables |
+| `tests/parent-compact-hold.test.ts` | below-threshold settle releases schedule wakes; disabled control delivers immediately | S24-parent-immediate | mapped | S24-parent-context fails disabled/low consumers; S24-parent-expiry additionally changes public settings and pins held-batch not_over release |
 <!-- /manifest:assertions -->
 
 ### Pending-fix declarations (operator-parked; no deletion credit)
@@ -1732,6 +1781,198 @@ index 2dcc135..008c3bd 100644
 | S24-rehand | `tests/dashboard-compaction.test.ts` | 2f9613010dabcfb43a97733e3d320ce85a97209d | S24-dashboard-rehand | S24-rehand | 386112058b6e0075910469d7a5ecb318a976007c8ec9906d779e90f7267ff3a6 | delivery after re-hand remains failed | pass |
 | S24-third | `tests/dashboard-compaction.test.ts` | 2f9613010dabcfb43a97733e3d320ce85a97209d | S24-dashboard-terminal | S24-third | 23c346dfd1f2efb8f7ccb087896536bc5fb58318d577463fac98ef7b03ad4dec | expected failed, actual third injection and delivered | pass |
 | S24-macrotask | `tests/dashboard-compaction.test.ts` | df24d7e506776d2bc72efd583258f413040f9b81 | S24-dashboard-hold | S24-macrotask | 432df65cb3d18d995a048705e158a9f4918527c79790fc6f552e65c6325941c3 | held while compacting: queue_edit returned 409 already sent | pass |
+| S24-compact-validation | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-invalid | S24-compact-validation | 32cb62a57d73c6da388158a9ed6b2c0a186fd28a970b5c07be7802a5158bf155 | refusal assertion fails | pass |
+| S24-compact-under | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-invalid | S24-compact-under | 81f25789e77d8bb452c6965d19d764d7be3ba6fed90ad74e779f8fdb0d36f2d5 | small-context tool queues | pass |
+| S24-compact-early | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-queued | S24-compact-early | 0d32cf3d8b836c51c4badff0298146e81c54dd5f51a40e8a3d9ebdc4d886a08b | settlement ordering and ignored-request backstop fail | pass |
+| S24-compact-default | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-settings | S24-compact-default | 24370e52702ca34311eaa2e21147205c0b023d53db9b33a9b797e5d1dad150a6 | request count wrong for invalid setting | pass |
+| S24-compact-failures | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-failures | S24-compact-failures | 8afef31cb9e6d7ef399d077f3f82cab91b2827bf887a4a5d8dce7ebc6b1e6efb | automatic retries stop before third failure | pass |
+| S24-compact-spent | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-spent | S24-compact-spent | 3a25e20ca600b735f2ef0e72c7a1afa2ec62a34e49e57e81d8e7ec9e9c9e16f5 | benign/failed skip and explicit compact lose spent-streak refusal | pass |
+| S24-compact-abort | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-explicit | S24-compact-abort | badc4eb41b772fd6af372968c0b37a085eb4ec34464b3ffd4d138d321214b7bb | aborted reply clears spent streak | pass |
+| S24-compact-callback | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-relays | S24-compact-callback | aa0bac8dca155b7037c9be416b45e1a20f33d850b481b05f56130ee5f1337df2 | both variants time out awaiting durable relay ack | pass |
+| S24-compact-relay-gate | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-order | S24-compact-relay-gate | 1f828a8374e4999c073a6dca2d7f4750a27493b7516fb0793c939d916e79a7eb | pre-release no-emit and one-handoff counts fail | pass |
+| S24-compact-streak-cap | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-streak | S24-compact-streak-cap | 057321bc702633cb0e6f5c1b980c06f5391425f948247b7cb2550dd9e81ff255 | only two compactions instead of three | pass |
+| S24-compact-nudge | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-nudge | S24-compact-nudge | 43337e880bed8164c842a699514fafd5b12cdc7330efb8bba99e33f9c7dda840 | unanswered relay IDs absent | pass |
+| S24-compact-enrich | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-manual | S24-compact-enrich | 6e501f2944fbc91d41d8484569d27ff3462e6e02e92f9426fd4e39601cc3617c | all four manual and threshold/overflow variants lose enrichment | pass |
+| S24-compact-own | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-queued | S24-compact-own | 169ec45fbc2df437078792d5705a4468326893289ca7bd553902d075461387e4 | own-instructions summarizer enriched twice | pass |
+| S24-compact-write | `tests/operator-compact.test.ts` | f270756f95b469990583ce7e78a1df5c1889c0d0 | S24-op-write | S24-compact-write | fcdcc0c46570235fb9183e2b502f35ded62c444e06b6a2383b535024a8b446aa | handoff-write failure swallowed and queues | pass |
+| S24-parent-busy | `tests/parent-compact-hold.test.ts` | a61a117757f69c6a7ea28d23be8a1ccf80f74d97 | S24-parent-order | S24-parent-busy | 26be9270d4e8788e207d7579e9b6170932a8e5d269ead234f61a6cf6c33b23c4 | busy hold fails before operator question; fleet CI case fails too | pass |
+| S24-parent-cap | `tests/parent-compact-hold.test.ts` | a61a117757f69c6a7ea28d23be8a1ccf80f74d97 | S24-parent-expiry | S24-parent-cap | c28f74e7e0c55ffc55762935e0e5d3ca4cdbd94122a8bd1794d25e80728f0273 | five-second cap never releases within ten-second wait | pass |
+| S24-parent-context | `tests/parent-compact-hold.test.ts` | a61a117757f69c6a7ea28d23be8a1ccf80f74d97 | S24-parent-immediate | S24-parent-context | 20ac331c3e4164b4068acca4f84cd6963b3928269a5647cea211fefec4dfbeb8 | low, disabled and non-headless variants fail | pass |
+| S24-parent-length | `tests/parent-compact-hold.test.ts` | a61a117757f69c6a7ea28d23be8a1ccf80f74d97 | S24-parent-length | S24-parent-length | bebe12afe7dc59b1d975a0d9eba0574ee2bbf07ad635b5e1ae0aea296170172c | no threshold cancellation for length stops | pass |
+| S24-parent-order | `tests/parent-compact-hold.test.ts` | a61a117757f69c6a7ea28d23be8a1ccf80f74d97 | S24-parent-order | S24-parent-order | b82c3848c083d61f935ef90b66e21dbfb29e7ad51fa5efb13ca0042292cdd31a | schedule wakes arrive C/B/A instead of A/B/C | pass |
+<!-- patch:S24-compact-validation -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -100,5 +99,0 @@
+-			if (!instructions) throw new Error("self_compact refused: empty instructions");
+-			if (instructions.length < 200) throw new Error("self_compact refused: instructions must be at least 200 characters");
+-			if (!/(?:^|[\s`("'\[])(?:~\/|\/|\.{1,2}\/)?(?:[\w.-]+\/)+[\w.:-]+\.[\w-]+(?=$|[\s`"')\].,;:])/.test(instructions)) {
+-				throw new Error("self_compact refused: instructions must mention a handoff file path");
+-			}
+```
+<!-- patch:S24-compact-under -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -109 +109 @@
+-			if (typeof tokens === "number" && tokens < limit) {
++			if (false) {
+```
+<!-- patch:S24-compact-early -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -174 +174 @@
+-	pi.on("agent_settled", (_event, ctx) => {
++	pi.on("turn_end", (_event, ctx) => {
+```
+<!-- patch:S24-compact-default -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -9 +9 @@
+-export const OPERATOR_COMPACT_DEFAULT_TOKENS = 200000;
++export const OPERATOR_COMPACT_DEFAULT_TOKENS = 500;
+```
+<!-- patch:S24-compact-failures -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -13 +13 @@
+-const MAX_AUTO_FAILURES = 3;
++const MAX_AUTO_FAILURES = 1;
+```
+<!-- patch:S24-compact-spent -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -139 +138,0 @@
+-		if (streak) streak.compacted = true; // any compaction during a streak is the streak's one
+```
+<!-- patch:S24-compact-abort -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -132 +132 @@
+-		if (role === "assistant" && stopReason !== "error" && stopReason !== "aborted") {
++		if (role === "assistant" && stopReason !== "error") {
+```
+<!-- patch:S24-compact-callback -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -72 +72 @@
+-		for (const fn of deferred.splice(0)) fn();
++		deferred.splice(0);
+```
+<!-- patch:S24-compact-relay-gate -->
+```diff
+diff --git a/extensions/cp-bridge/index.ts b/extensions/cp-bridge/index.ts
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -309 +309 @@
+-			if (!compaction.compacting()) return false;
++			if (true) return false;
+```
+<!-- patch:S24-compact-streak-cap -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -15 +15 @@
+-const MAX_STREAK_COMPACTIONS = 3;
++const MAX_STREAK_COMPACTIONS = 2;
+```
+<!-- patch:S24-compact-nudge -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -188 +188 @@
+-				const relays = unanswered.slice();
++				const relays: string[] = [];
+```
+<!-- patch:S24-compact-enrich -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -232 +231,0 @@
+-		event.preparation.messagesToSummarize.push({ role: "user", content: instructions, timestamp: Date.now() });
+```
+<!-- patch:S24-compact-own -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -214 +213,0 @@
+-		if (running && event.customInstructions === running) return;
+```
+<!-- patch:S24-compact-write -->
+```diff
+diff --git a/src/operator-compact.ts b/src/operator-compact.ts
+--- a/src/operator-compact.ts
++++ b/src/operator-compact.ts
+@@ -119 +119 @@
+-			catch (error) { throw new Error(`self_compact handoff write failed: ${handoff}: ${String(error)}`); }
++			catch {}
+```
+<!-- patch:S24-parent-busy -->
+```diff
+diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
+--- a/src/parent-compact-hold.ts
++++ b/src/parent-compact-hold.ts
+@@ -119 +118,0 @@
+-		if (reading.over && !this.holding) this.#engage("busy", reading);
+```
+<!-- patch:S24-parent-cap -->
+```diff
+diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
+--- a/src/parent-compact-hold.ts
++++ b/src/parent-compact-hold.ts
+@@ -163 +163 @@
+-		this.#cancelCap = this.#timer(() => this.#release("cap_timeout", true), parentCompactHoldMs());
++		this.#cancelCap = this.#timer(() => this.#release("cap_timeout", true), PARENT_COMPACT_HOLD_MS);
+```
+<!-- patch:S24-parent-context -->
+```diff
+diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
+--- a/src/parent-compact-hold.ts
++++ b/src/parent-compact-hold.ts
+@@ -45 +45 @@
+-	if (!ctx || !isHeadlessParent(ctx, env)) return NOT_OVER;
++	if (!ctx) return NOT_OVER;
+@@ -47 +47 @@
+-		const threshold = parentSettings(home()).compact_at_tokens;
++		const threshold = 1;
+```
+<!-- patch:S24-parent-length -->
+```diff
+diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
+--- a/src/parent-compact-hold.ts
++++ b/src/parent-compact-hold.ts
+@@ -68 +68 @@
+-	if (event.reason !== "threshold") return undefined;
++	if (true) return undefined;
+```
+<!-- patch:S24-parent-order -->
+```diff
+diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
+--- a/src/parent-compact-hold.ts
++++ b/src/parent-compact-hold.ts
+@@ -198 +198 @@
+-		for (const fn of held) fn();
++		for (const fn of held.reverse()) fn();
+```
 <!-- /manifest:regressions -->
 
 <!-- patch:S24-macrotask -->
@@ -3433,6 +3674,7 @@ Test files added after the baseline, with the PR that owns them.
 | `tests/wakeup-journal-retained.test.ts` | S21 | seven verbatim structural/documentation declarations, convert-owned P4; original declarations 1–3, 6–8, 16 |
 | `tests/e2e/operator-context.test.ts` | S24 | real bridge context startup and resume; 2 scenarios |
 | `tests/operator-context-retained.test.ts` | S24 | 1 retained verbatim declaration: no public entry calls only the context builder without first creating control state |
+| `tests/operator-compact-retained.test.ts` | S24 | Two verbatim declarations: synchronous compact skip callback and malformed classifier inputs unavailable through public SDK events. |
 | `tests/e2e/operator-compact.test.ts` | S24 | Real bridge compaction scenarios; conversion controls in progress, original unit file remains whole |
 | `tests/e2e/parent-compaction.test.ts` | S24 | Public parent schedule wakes, cap expiry using CP_PARENT_COMPACT_HOLD_SECONDS=5, failure recovery and length stops; mapping/control replay in progress, original unit file stays whole. |
 <!-- /manifest:incoming -->

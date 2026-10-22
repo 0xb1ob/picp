@@ -1,9 +1,9 @@
 diff --git a/src/parent-compact-hold.ts b/src/parent-compact-hold.ts
 --- a/src/parent-compact-hold.ts
 +++ b/src/parent-compact-hold.ts
-@@ -45,3 +45,3 @@
+@@ -45 +45 @@
 -	if (!ctx || !isHeadlessParent(ctx, env)) return NOT_OVER;
 +	if (!ctx) return NOT_OVER;
- 	try {
+@@ -47 +47 @@
 -		const threshold = parentSettings(home()).compact_at_tokens;
 +		const threshold = 1;

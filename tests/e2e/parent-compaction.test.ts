@@ -5,6 +5,7 @@ import { test, type TestContext } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { isoTimestamp, LAYOUT } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
+import { frameBatch } from "../../src/parent-outbox.ts";
 import { buildPiArgs, COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT, startRpc, type ScriptStep, waitFor } from "../harness/index.ts";
 
 const quote = "Add S24 Notice A, S24 Notice B and S24 Notice C schedules.";
@@ -32,6 +33,7 @@ async function openParent(t: TestContext, threshold: number | null, mode: "rpc" 
 			kind: "ship", delivery: "pr", operator_quote: quote, limits: {},
 		} })) },
 		busyRound,
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "node -e 'setTimeout(() => {}, 2000)'" } }], usage: { prompt_tokens: 1000, completion_tokens: 1 } },
 		fireSchedules, settledReply,
 	];
 	const models = tails.map((tail, index) => provider.addScript(`s24-parent-${index}`, [...(index === 0 ? initial : []), ...tail], { onExhausted: "repeat" }));
@@ -48,12 +50,18 @@ async function openParent(t: TestContext, threshold: number | null, mode: "rpc" 
 test("S24 parent: schedule wakes hold in order until manual compaction finishes", { timeout: 90_000 }, async (t) => {
 	const { child, log, wakes } = await openParent(t, 500, "rpc", [{ kind: "text", text: "S24 parent compact summary." }, wakeReply]);
 	child.send({ type: "prompt", id: "schedules", message: quote });
+	await waitFor(() => existsSync(log) ? readFileSync(log, "utf8") : "", (text) => text.includes("hold engaged phase=busy"), { timeoutMs: 20_000, what: "busy parent hold before operator steering" });
+	const operatorQuestion = frameBatch([{ id: "ps-20300101000000-0000000a", text: "S24 operator question: preserve these schedule notices." }]);
+	child.send({ type: "steer", id: "operator-question", message: operatorQuestion });
+	const steered = await child.waitFor((r) => r.type === "response" && r.id === "operator-question", 10_000);
+	assert.equal(steered.success, true, JSON.stringify(steered));
 	await child.waitFor((r) => r.type === "agent_settled", 30_000);
 	const toolEnds = child.records().filter((r) => r.type === "tool_execution_end" && r.toolName === "cp_schedule");
 	assert.equal(toolEnds.length, 6, JSON.stringify(toolEnds));
 	assert.ok(existsSync(log));
 	assert.match(readFileSync(log, "utf8"), /hold engaged phase=busy/);
 	assert.equal(wakes().length, 0);
+	assert.ok(child.records().some((r) => r.type === "message_start" && (r.message as { role?: string })?.role === "user" && JSON.stringify(r.message).includes("S24 operator question:")));
 	child.send({ type: "compact", id: "compact" });
 	const result = await child.waitFor((r) => r.type === "response" && r.id === "compact", 30_000);
 	assert.equal(result.success, true, JSON.stringify(result));
