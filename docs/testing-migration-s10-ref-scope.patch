@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index 1206f25..73c4cd9 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1639,7 +1639,7 @@ export class Integrator {
+ 				const [ref, objectName] = line.split(/\s+/);
+ 				return { ref: ref ?? "", sha: hexSha(objectName) };
+ 			})
+-			.filter((entry): entry is { ref: string; sha: string } => isSalvageRef(entry.ref) && entry.sha !== undefined);
++			.filter((entry): entry is { ref: string; sha: string } => entry.sha !== undefined);
+ 		if (all.length === 0) return [];
+ 		// A bound on the work, never on the retention: the overflow is kept, and
+ 		// because the listing is sorted by refname it is the same remainder the next

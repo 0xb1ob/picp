@@ -1,0 +1,12 @@
+diff --git a/src/contracts/workers.ts b/src/contracts/workers.ts
+index 51819d0..e2e9d34 100644
+--- a/src/contracts/workers.ts
++++ b/src/contracts/workers.ts
+@@ -115,7 +115,6 @@ export const WORKER_FORBIDDEN_TOOLS: readonly string[] = Object.freeze([
+ 	 * which is exactly the point at which `decideReopen` stops the implementer
+ 	 * being promotable. A worker must not be able to close its own write window.
+ 	 */
+-	"cp_merged",
+ 	/**
+ 	 * A worker has no operator to answer an Awaiting-you item, and `list`/
+ 	 * `withdraw` still touch parent-only state; a worker's questions go through
