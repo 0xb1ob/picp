@@ -1041,10 +1041,18 @@ export type WakeupSuperseded = { stamp: WakeupStamp; verdict: WakeupVerdict; rep
 
 const DURABLE_KINDS: ReadonlySet<string> = new Set<string>(DURABLE_WAKEUP_KINDS);
 
+const PROMOTION_NOTED = new WeakSet<object>();
+
+/** True for a CI message `reviewWakeups` rewrote to add the promotion note; the context hook must keep it. */
+export function isPromotionNoted(message: unknown): boolean {
+	return typeof message === "object" && message !== null && PROMOTION_NOTED.has(message);
+}
+
 /**
  * Delivery-time re-check before model delivery; never mutates input or throws on odd shapes. A withheld notice
  * never regains its body (`memory`); a wake an earlier request carried unchanged is never withheld (`seen`, N2).
  */
+
 export function reviewWakeups<T extends WakeupCarrier>(
 	messages: readonly T[],
 	facts: WakeupFacts,
@@ -1149,7 +1157,9 @@ export function reviewWakeups<T extends WakeupCarrier>(
 			const note = stamp.kind === "ci" && verdict.note ? formatAnsweredJobDone(verdict) : undefined;
 			if (note && !message.content.includes(note)) {
 				changed = true;
-				reviewed.push({ ...message, content: `${message.content}\n${note}` });
+				const noted = { ...message, content: `${message.content}\n${note}` };
+				PROMOTION_NOTED.add(noted);
+				reviewed.push(noted);
 			} else {
 				reviewed.push(message);
 				if (seen.size >= WAKEUP_SOURCE_FAILURE_MEMORY) seen.delete(seen.values().next().value!);
