@@ -365,6 +365,14 @@ export async function readOlderBranchRuns(options: ActionsReadOptions & { branch
 	return runs.filter((run) => run.headSha.toLowerCase() !== options.head.toLowerCase());
 }
 
+/** Runs `read`; an empty or non-JSON 200 ("transient read") gets one fresh observation, anything else throws. */
+export async function retryTransientRead<T>(read: () => Promise<T>): Promise<T> {
+	return read().catch((error: unknown) => {
+		if (!(error instanceof ActionsCiError) || !/transient read/.test(error.detail)) throw error;
+		return read();
+	});
+}
+
 /** A `{ status, stdout, stderr }` runner (src/merges.ts) as the throwing `CommandRunner` these readers take. */
 export function statusRunner(run: StatusRunner): CommandRunner {
 	return async (command, args, options) => {
