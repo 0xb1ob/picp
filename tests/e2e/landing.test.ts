@@ -17,6 +17,7 @@ import { detectCiWait } from "../../src/ci-wait.ts";
 import { AwaitingStore } from "../../src/awaiting.ts";
 import { CheckpointStore } from "../../src/checkpoint.ts";
 import { CI_EVIDENCE_KEEP, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { isDiffReviewWait } from "../../src/diff-review.ts";
 import { drainFile } from "../../src/drain.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { MainCiStore } from "../../src/main-ci.ts";
@@ -2985,6 +2986,30 @@ test("landing S15 retry: real parent delivery confirms, retries withheld verdict
 	assert.deepEqual(jobs.map((_, n) => sends(n).length), counts, "confirmed and expired verdicts never resend again");
 	assert.equal(delivered(2).length, 0);
 	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+});
+
+test("S21b: verdict delivery precedes the merge-window notice", { skip: SKIP, timeout: 60_000 }, async (t) => {
+	const s = await startStack(t, { env: { CP_REVIEW_MERGE_WINDOW_SECONDS: "30" } });
+	const live = await s.held("S21b verdict ordering", 154);
+	await s.post.shutdown();
+	const order: string[] = [];
+	const post = new CommandPost({ home: s.home, packageRoot: REPO_ROOT,
+		parentEnv: { ...process.env, ...s.agentDir.env }, holdsParentLock: () => true, continuation: true,
+		sendWakeup: () => { order.push("verdict"); return true; },
+		onDurableWakeup: () => {
+			if (post.durableWakeups.pending().some((entry) => entry.content.includes("HELD PR WAITING"))) order.push("window");
+		},
+	});
+	t.after(() => post.shutdown());
+	const model = s.provider.addScript("s21b-order", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: {
+		job_id: live.jobId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["ordered verdict"],
+	} }] }]);
+	s.agentDir.writeModels(s.provider);
+	const started = await post.diffReview({ jobId: live.jobId, model });
+	assert.ok(isDiffReviewWait(started));
+	post.reviewRuns.handBack(started.key);
+	await post.reviewRuns.settled(started.key);
+	assert.deepEqual(order, ["verdict", "window"], "verdict delivery precedes the window notice");
 });
 
 test("landing S15 order: a real verdict wakes the parent before its deadline continuation merges", { skip: SKIP, timeout: 60_000 }, async (t) => {

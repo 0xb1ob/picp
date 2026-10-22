@@ -1,0 +1,7 @@
+--- a/src/recovery-notice.ts
++++ b/src/recovery-notice.ts
+@@ -22,2 +22,2 @@
+-		if (revive.length > 0) next.push(`cp_revive ${revive.join(", ")}`);
+-		if (tear.length > 0) next.push(`cp_teardown ${tear.join(", ")}`);
++		if (revive.length > 0) next.push(`inspect ${revive.join(", ")}`);
++		if (tear.length > 0) next.push(`inspect ${tear.join(", ")}`);
