@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..25390eb 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -239,7 +239,7 @@ export class Teardown {
+ 			return { ...base, failure };
+ 		}
+ 		const inFlight = holder ? jobInFlight(jobId, holder) : undefined;
+-		if (inFlight) {
++		if (false && inFlight) {
+ 			runs.open(jobId).cp("teardown_refused", { ...inFlight });
+ 			return { ...base, failure: inFlight };
+ 		}

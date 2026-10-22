@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..3042d10 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -209,7 +209,7 @@ export class Teardown {
+ 		const now = this.#options.now ?? (() => new Date());
+ 		const record = fleet.get(jobId);
+ 		if (!record) throw new TeardownError(`no fleet record for ${jobId} — nothing to tear down`);
+-		if (record.phase === "done") {
++		if (false && record.phase === "done") {
+ 			const retry = await closeResearchLedgers(this.#options.home, [record], this.#options.ledger, this.#options.journal);
+ 			return {
+ 				job_id: jobId,

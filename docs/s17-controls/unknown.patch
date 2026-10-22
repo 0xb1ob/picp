@@ -1,0 +1,13 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+index f7705ce..0c49d02 100644
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -341,7 +341,7 @@ export async function landingGate(input: LandingGateInput): Promise<GateOutcome>
+ 		return { ok: true, reason: "landed_by_git", landing: proof.evidence };
+ 	}
+ 	const where = input.remoteSha ? `${worktree} on ${branch}: local tip ${head.slice(0, 12)} != origin/${branch} (${input.remoteSha.slice(0, 12)})` : `${worktree} branch ${branch} is not on origin`;
+-	if (proof.result === "unknown") {
++	if (false && proof.result === "unknown") {
+ 		return { ok: false, failure: { code: "landing_unverified", message: `${where}, and whether HEAD ${head.slice(0, 12)} landed on origin/${base} is unknown: ${proof.detail}`,
+ 			fix: `keep the lease; this is unproven, not unpushed — restore what the proof needs (${proof.detail}) and retry teardown, or record the merge with cp_merged ${jobId} if the forge can observe it` } };
+ 	}

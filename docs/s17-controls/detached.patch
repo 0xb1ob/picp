@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..60acf24 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -552,7 +552,7 @@ export class Teardown {
+ 				},
+ 			};
+ 		}
+-		if (tip !== head) {
++		if (false && tip !== head) {
+ 			return {
+ 				ok: false,
+ 				failure: {
