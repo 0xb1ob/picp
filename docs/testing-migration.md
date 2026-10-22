@@ -435,6 +435,9 @@ moves first.
 | S16-auto | `tests/e2e/landing.test.ts` | landing S16: automatic green CI reviews use the current mandate reviewer |
 | S24-context | `tests/e2e/operator-context.test.ts` | S24 context: fresh bridge loads orders, parsed learnings and newest handoff into the provider request |
 | S24-empty | `tests/e2e/operator-context.test.ts` | S24 context: an empty home adds no operator context or preference files |
+| S24-dashboard-hold | `tests/e2e/headless-lifecycle.test.ts` | rpc bridge S24: a queued message survives compaction without a dropped handoff |
+| S24-dashboard-rehand | `tests/e2e/headless-lifecycle.test.ts` | rpc bridge: a message queued before a self-compaction is held through it and consumed once after one dropped handoff |
+| S24-dashboard-terminal | `tests/e2e/headless-lifecycle.test.ts` | rpc bridge: a queued message whose handoff is dropped twice ends failed, never re-injected again |
 <!-- /manifest:scenarios -->
 
 Both run a real CommandPost with continuation on (the in-process host `tests/e2e/mission.test.ts` uses), real
@@ -1004,6 +1007,9 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/operator-context.test.ts` | a fresh main session gets the orders, the learnings and the newest handoff by mtime | S24-context | mapped | S24-oldest fails newest handoff assertion; real bridge provider request pins orders, parsed learnings and policy |
 | `tests/operator-context.test.ts` | an empty home has no start context and building it creates no file | S24-empty | retained | Verbatim in tests/operator-context-retained.test.ts: bridge session_start creates its control state before context loading, so no public entry point can observe an entirely nonexistent home after calling only the context builder |
 | `tests/operator-context.test.ts` | the bridge sends one hidden cp-operator-context to a fresh session and none to a resumed one | S24-context | mapped | S24-resume fails SHOULD NOT RELOAD exclusion in actual resumed provider request; get_messages pins one hidden context |
+| `tests/dashboard-compaction.test.ts` | order 1: the compact request starts its turn first; the queued message is held through the compaction, then delivered once | S24-dashboard-hold | mapped | S24-hold fails queued delivery; real compaction_start queue_edit remains editable, compaction_end precedes one consumption, exact journal and pending state |
+| `tests/dashboard-compaction.test.ts` | order 2: a handoff pi drops because the compaction's own turn started first is re-handed at that turn's settle, delivered once | S24-dashboard-rehand | mapped | S24-rehand fails delivered state after nudge: actual failed; exact re-hand reason, one consumption and pending delivered |
+| `tests/dashboard-compaction.test.ts` | a handoff pi drops twice is failed with a reason, never left injected | S24-dashboard-terminal | mapped | S24-third fails terminal failed assertion: third injection delivers; scenario also pins exact reason and no third handoff after later settle |
 <!-- /manifest:assertions -->
 
 ### Pending-fix declarations (operator-parked; no deletion credit)
@@ -1629,7 +1635,55 @@ index 2dcc135..008c3bd 100644
 | S24-oldest | `tests/operator-context.test.ts` | 2f9613010dabcfb43a97733e3d320ce85a97209d | S24-context | S24-oldest | 846e30e759797d70e7938e9b158f37e8690539b8b7a0fd425c25738bb502f5bd | newest handoff regex missing in provider request | pass |
 | S24-empty | `tests/operator-context.test.ts` | 2f9613010dabcfb43a97733e3d320ce85a97209d | S24-empty | S24-empty | 5774bcca5420abe9c0ff0493b33738ae1d0c2e1fb4deb7158b3e4bb216989eb5 | context count 1 instead of 0 | pass |
 | S24-resume | `tests/operator-context.test.ts` | 2f9613010dabcfb43a97733e3d320ce85a97209d | S24-context | S24-resume | 18b964ca774a4867cec756874c63e78de547505864cb67212ba36364333afd73 | SHOULD NOT RELOAD present in resumed provider request | pass |
+| S24-hold | `tests/dashboard-compaction.test.ts` | 2f9613010dabcfb43a97733e3d320ce85a97209d | S24-dashboard-hold | S24-hold | 9e7a47bdb0fa37de27b1035fef9db0d4637f57b6254c1335fe33134c04bc74d7 | queued delivery times out with request,queued | pass |
+| S24-rehand | `tests/dashboard-compaction.test.ts` | 2f9613010dabcfb43a97733e3d320ce85a97209d | S24-dashboard-rehand | S24-rehand | 386112058b6e0075910469d7a5ecb318a976007c8ec9906d779e90f7267ff3a6 | delivery after re-hand remains failed | pass |
+| S24-third | `tests/dashboard-compaction.test.ts` | 2f9613010dabcfb43a97733e3d320ce85a97209d | S24-dashboard-terminal | S24-third | 23c346dfd1f2efb8f7ccb087896536bc5fb58318d577463fac98ef7b03ad4dec | expected failed, actual third injection and delivered | pass |
+| S24-macrotask | `tests/dashboard-compaction.test.ts` | df24d7e506776d2bc72efd583258f413040f9b81 | S24-dashboard-hold | S24-macrotask | 432df65cb3d18d995a048705e158a9f4918527c79790fc6f552e65c6325941c3 | held while compacting: queue_edit returned 409 already sent | pass |
 <!-- /manifest:regressions -->
+
+<!-- patch:S24-macrotask -->
+```diff
+diff --git a/extensions/cp-bridge/index.ts b/extensions/cp-bridge/index.ts
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -356 +356 @@
+-		setImmediate(() => compaction.whenIdle(() => control?.settled()));
++		compaction.whenIdle(() => control?.settled());
+```
+<!-- /patch:S24-macrotask -->
+
+<!-- patch:S24-hold -->
+```diff
+diff --git a/extensions/cp-bridge/index.ts b/extensions/cp-bridge/index.ts
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -356 +356 @@
+-		setImmediate(() => compaction.whenIdle(() => control?.settled()));
++		setImmediate(() => control?.settled());
+```
+<!-- /patch:S24-hold -->
+
+<!-- patch:S24-rehand -->
+```diff
+diff --git a/src/dashboard-control.ts b/src/dashboard-control.ts
+--- a/src/dashboard-control.ts
++++ b/src/dashboard-control.ts
+@@ -401 +401 @@
+-			if (tries < 2) { give(entry, tries + 1); return true; }
++			if (tries < 1) { give(entry, tries + 1); return true; }
+```
+<!-- /patch:S24-rehand -->
+
+<!-- patch:S24-third -->
+```diff
+diff --git a/src/dashboard-control.ts b/src/dashboard-control.ts
+--- a/src/dashboard-control.ts
++++ b/src/dashboard-control.ts
+@@ -401 +401 @@
+-			if (tries < 2) { give(entry, tries + 1); return true; }
++			if (tries < 3) { give(entry, tries + 1); return true; }
+```
+<!-- /patch:S24-third -->
 
 <!-- patch:S24-oldest -->
 ```diff
@@ -3002,7 +3056,7 @@ Declarations a kept baseline file lost with a removed production feature (see Me
 | `tests/daemon-runtime.test.ts` | convert | P14 | behavior 15 (Install, service, doctor) |
 | `tests/daemon-tunnel-files.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
 | `tests/daemon-tunnel.test.ts` | convert | P12 | behavior 16 (Tunnel, pairing, remote access) |
-| `tests/dashboard-compaction.test.ts` | convert | P5 | behavior 07 (Compaction) |
+| `tests/dashboard-compaction.test.ts` | deleted | S24 | 3 mapped, 0 retained; S24-dashboard-hold/rehand/terminal; executed controls S24-hold/rehand/third; real pi input loss and compaction lifecycle |
 | `tests/dashboard-control-images.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/dashboard-control-remote.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |
 | `tests/dashboard-control.test.ts` | convert | P9 | behavior 11 (Operator to parent delivery) |

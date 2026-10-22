@@ -38,7 +38,7 @@ function fakePorts(overrides: Partial<ControlPorts> = {}) {
 		},
 		abort: () => { state.aborted += 1; },
 		isIdle: () => state.idle,
-		// `pending: true`: a pi that holds each handoff unseen, so a settle never re-hands it (dashboard-compaction.test.ts).
+		// Pending handoffs stay unseen; re-hand evidence: e2e/headless-lifecycle.test.ts.
 		hasPendingMessages: () => state.pending,
 		sessionFile: () => "/tmp/operator-session.jsonl",
 		...overrides,
