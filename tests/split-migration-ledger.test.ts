@@ -34,3 +34,22 @@ test("preservationFindings catches a dropped prose or log line", async () => {
 	assert.deepEqual(preservationFindings(before, ["# Ledger rows: b02\n\nIntro prose.\n\n```\n✖ failure log\n```\n"]), []);
 	assert.deepEqual(preservationFindings(before, ["Intro prose.\n\n```\n```\n"]), ["preservation: prose lines has 4 before, 3 after", "preservation: prose lines content differs"]);
 });
+
+// An NC-nn intro paragraph and its failure log follow their patch into the slice file, whichever slice owns the patch.
+test("split-migration-ledger moves an NC intro and log beside the owning slice's patch", () => {
+	const dir = mkdtempSync(join(tmpdir(), "ledger-split-"));
+	try {
+		const patch = "<!-- patch:NC-24-x -->\n```diff\n-a\n+b\n```\n";
+		const prose = "## Assertion map\n\nNC-24 breaks it:\n\n```\n✖ log line\n```\n\nShared prose.\n";
+		mkdirSync(join(dir, "docs/testing-migration"), { recursive: true });
+		mkdirSync(join(dir, "scripts"));
+		writeFileSync(join(dir, "docs/testing-migration.md"), `# Rules\n\n${prose}`);
+		writeFileSync(join(dir, "docs/testing-migration/b05.md"), `# Ledger rows: b05\n\n${patch}`);
+		writeFileSync(join(dir, "scripts/retired-integration-allowlist.json"), "[]\n");
+		execFileSync("node", [resolve("scripts/split-migration-ledger.ts"), "b05"], { cwd: dir, stdio: "pipe" });
+		assert.equal(readFileSync(join(dir, "docs/testing-migration.md"), "utf8"), "# Rules\n\n## Assertion map\n\nShared prose.\n");
+		assert.equal(readFileSync(join(dir, "docs/testing-migration/b05.md"), "utf8"), `# Ledger rows: b05\n\nNC-24 breaks it:\n\n${patch}\n\`\`\`\n✖ log line\n\`\`\`\n`);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
