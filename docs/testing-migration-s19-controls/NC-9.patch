@@ -1,0 +1,6 @@
+diff --git a/src/send-first-gate.ts b/src/send-first-gate.ts
+index d9d0955..596a1c2 100644
+--- a/src/send-first-gate.ts
++++ b/src/send-first-gate.ts
+@@ -34 +33,0 @@ export class SendFirstGate<Wake> {
+-		if (role !== "user") return;

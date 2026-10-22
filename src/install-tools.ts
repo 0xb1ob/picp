@@ -95,8 +95,8 @@ export function describeStep(step: InstallStep): string {
 			return `brew install ${step.formula}`;
 		case "npm":
 			return `npm install ${[...(step.flags ?? []), step.pkg].join(" ")}`;
-		case "curl":
-			return `curl -fsSL "${step.url}" | sh`;
+		case "release":
+			return `download ${step.repo} v${step.version} from its GitHub release`;
 		case "manual":
 			return step.summary;
 	}

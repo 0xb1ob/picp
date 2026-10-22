@@ -1,0 +1,5 @@
+--- a/src/escalation-relay-watch.ts
++++ b/src/escalation-relay-watch.ts
+@@ -64 +64 @@
+-		ports.sent.add(escalation.id);
++		// S19 negative control: forget the attempted delivery.

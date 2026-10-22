@@ -170,6 +170,7 @@ const R1_ALLOWED = [
 /** R2: the only sanctioned reads of `$HOME`/`$TMPDIR` in runtime code. */
 const R2_ALLOWED = [
 	"extensions/cp-bridge/index.ts",
+	"scripts/install-tools.ts",
 	"src/home.ts",
 	"src/pi-compat-probe.ts",
 	"src/projects.ts",

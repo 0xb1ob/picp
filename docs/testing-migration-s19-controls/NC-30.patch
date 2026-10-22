@@ -1,0 +1,12 @@
+diff --git a/src/deferred-recheck.ts b/src/deferred-recheck.ts
+index 3e07e24..1435d3d 100644
+--- a/src/deferred-recheck.ts
++++ b/src/deferred-recheck.ts
+@@ -96,7 +96,6 @@ export function isPassingDiffReview(wakeup: unknown): boolean {
+ 	if (typeof wakeup !== "object" || wakeup === null) return false;
+ 	const { surface, details } = wakeup as { surface?: unknown; details?: unknown };
+ 	// The plan gate and the quality panel say nothing about a head's reviewedness.
+-	if (surface !== "review") return false;
+ 	if (typeof details !== "object" || details === null) return false;
+ 	const { next, verdict } = details as { next?: unknown; verdict?: unknown };
+ 	// A `revise` moves the head rather than clearing it; `retry`/`surface` are not

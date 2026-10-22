@@ -1,0 +1,13 @@
+diff --git a/src/bridge-reattach.ts b/src/bridge-reattach.ts
+index 4c2760a..e1a68ae 100644
+--- a/src/bridge-reattach.ts
++++ b/src/bridge-reattach.ts
+@@ -64,7 +64,7 @@ export async function probeHost(client: { request(op: string): Promise<unknown>;
+ 	const expired = new Promise<false>((done) => { timer = setTimeout(() => done(false), timeoutMs); });
+ 	try {
+ 		const answered = await Promise.race([client.request("hello").then(() => true, () => false), expired]);
+-		if (!answered) return false;
++		if (!answered) return true;
+ 		try {
+ 			return currentPid() === client.hostPid;
+ 		} catch {
