@@ -101,7 +101,7 @@
 	"tests/e2e/viewer-endpoints-speed.test.ts": 9515,
 	"tests/e2e/wake-ci-promoted.test.ts": 5000,
 	"tests/e2e/wake-deferred.test.ts": 229356,
-	"tests/e2e/wake-context-s22.test.ts": 7500,
+	"tests/e2e/wake-context-s22.test.ts": 35000,
 	"tests/e2e/wake-delivery.test.ts": 124721,
 	"tests/e2e/wake-reattach.test.ts": 63065,
 	"tests/e2e/wake-rules.test.ts": 231182,
