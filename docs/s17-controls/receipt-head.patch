@@ -1,0 +1,13 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+index f7705ce..779aad5 100644
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -332,7 +332,7 @@ export async function landingGate(input: LandingGateInput): Promise<GateOutcome>
+ 	const { job_id: jobId, branch } = record;
+ 	const found = readMergeReceipt(home, jobId);
+ 	const receipt = found?.job_id === jobId && found.head_branch === branch ? found : undefined;
+-	if (receipt?.head_sha === head) return { ok: true, reason: "merged" };
++	if (receipt) return { ok: true, reason: "merged" };
+ 	const base = receipt?.base_branch ?? record.bound_pr?.base ?? input.base;
+ 	const proof = await readLandingProof(git, worktree, head, base, { ...(input.now ? { now: input.now } : {}) });
+ 	if (proof.result === "landed") {

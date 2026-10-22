@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..ff082b5 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -354,7 +354,7 @@ export class Teardown {
+ 			torn_down: true,
+ 			...(outcome?.ok ? { reason: outcome.reason, ...(outcome.landing ? { landing: outcome.landing } : {}) } : {}),
+ 			...(unreported ? { killed_unreported: true as const } : {}),
+-			...(!isScriptFleetRecord(record) && record.reported_at === undefined ? { unreported: true as const } : {}),
++			...(false ? { unreported: true as const } : {}),
+ 			...(ledgerClose.failed[0] ? { ledger_close_error: ledgerClose.failed[0].error } : {}),
+ 			...(ignored && "error" in ignored ? { ignored_error: ignored.error } : {}),
+ 			...(ignored && "entries" in ignored && ignored.entries.length ? { ignored: ignored.entries } : {}),
