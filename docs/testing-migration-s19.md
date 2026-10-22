@@ -121,7 +121,7 @@ Apply the recorded patches with `git apply --unidiff-zero` against the source ba
 Commands: `npm run test:one -- tests/e2e/wake-delivery.test.ts` for NC-1;
 `node --import ./tests/harness/hermetic-env.ts --test --test-name-pattern 'host escalation watch' --test-force-exit tests/e2e/wake-delivery.test.ts` for NC-2/3/4/5.
 `npm run test:one -- tests/e2e/wake-reattach.test.ts` for NC-6/7;
-`node --import ./tests/harness/hermetic-env.ts --test --test-name-pattern 'rpc S19:' --test-force-exit tests/e2e/headless-lifecycle.test.ts` for NC-8 (before adding the other matrix variants).
+`npm run test:one -- --test-name-pattern 'rpc S19:.*: ready$' tests/e2e/headless-lifecycle.test.ts` is the current per-variant selector for NC-8.
 
 NC-3 initially passed: outbox storage deduplicates a stable id even when the host wrongly reframes it.
 The scenario was extended to observe actual host subscriber frames; rerunning the mutation then failed the
@@ -154,9 +154,7 @@ All 30 controls have patch/hash regression rows and balanced inline patch marker
 | [NC-29](testing-migration-s19-controls/NC-29.patch) | e1499900506bc3b6f66a3365ddb5d066df30f59449b9adeae0240e891c4cd7ca | S19-4 ready: row state when actual verdict reaches parent is deferred instead of open |
 | [NC-30](testing-migration-s19-controls/NC-30.patch) | 6ff37e5c2e33f19fe238e1a1b2529ce2ce5093b15a078845c8ab046b0b9afa3a | S19-11: a native plan gate must not probe the held merge gate |
 
-Focused commands use `npm run test:one --` with `tests/e2e/wake-deferred.test.ts` for S19-9/10/11 and
-`tests/e2e/headless-lifecycle.test.ts` for S19-4; `--test-name-pattern` selects the root and `--test-skip-pattern`
-selects the named variants. Exact executions and failures are in worktree-local `node_modules/.cache/s19/NC-*.log`.
+Focused commands use `npm run test:one -- --test-name-pattern 'rpc S19:.*: <variant>$' tests/e2e/headless-lifecycle.test.ts` for S19-4 and `npm run test:one -- --test-name-pattern 'wake S19: CI and review.*: <variant>$' tests/e2e/wake-deferred.test.ts` for S19-9. Replace `<variant>` with the exact mode (including `late-failure` where applicable); the end anchor prevents `late` selecting `late-failure`. S19-10/11 keep their existing names/selectors. Original executions are in `NC-*.log`; post-split executions are in `split-NC-*.log`, under worktree-local `node_modules/.cache/s19/`.
 
 The initial CI-await mutation passed a post-delivery state check: another reader could already have opened the row.
 The case now snapshots state at the actual model request and uses the supported wake-rule switch to expose the CI turn.
@@ -213,3 +211,16 @@ NC-2 through NC-7 were re-executed individually with these settings and restored
 The main merge preserves all three S21 wake-delivery journeys unchanged. #447's new first-delay regression is moved verbatim into `tests/bridge-reattach-knobs.test.ts`, owned by #447. Its four older declarations retain the already-proven S19 mapped/retained dispositions; no unique main-side regression is removed.
 
 Requested proposal only — wrappers remain unchanged: hoist each existing variant loop outside its aggregate `test`, registering a separate top-level case per variant. For S19-4, register ready/revise/red/running/late/late-failure (six cases). For S19-9, register race/failure/late (three cases). Keep default sequential scheduling, each variant's current fresh home/provider/cleanup, all assertions and existing production deadlines. Suffix the case names with the variant and update scenario/control selectors accordingly. This removes aggregate test wrappers over 120 s without splitting any individual variant or adding timer hooks. No split is implemented in this follow-up.
+
+
+### Operator-approved wrapper split
+
+> “Do the wrapper split exactly as you proposed: hoist the variant loops into one top-level test per variant: six in tests/e2e/headless-lifecycle.test.ts (ready, revise, red, running, late, late-failure) and three in tests/e2e/wake-deferred.test.ts (race, failure, late). Fresh homes per variant, every assertion kept, selectors in docs/scripts updated, each variant measured under 120 s and recorded in the ledger.” (main session carry-in)
+
+The two loops now register nine top-level tests with literal per-variant names and 120,000-ms case timeouts. Every fixture setup, assertion and teardown remains inside its variant callback. An AST comparison against pre-split HEAD confirms both complete callback bodies are verbatim. The other S19-10/11 wrappers are unchanged. There are still eleven static S19 e2e declarations: loop-driven registrations replace the two aggregate registrations without adding declaration-deletion credit.
+
+The scenario index lists all nine exact names. Current control commands select `rpc S19:.*: <variant>$` or `wake S19: CI and review.*: <variant>$`; no tracked script had an old S19 selector. Every control whose failure is in either touched file is re-executed, including NC-26/30 below the changed CI wrapper: NC-8 and NC-16 through NC-30 (NC-23 through both late consumers). Source defects are applied individually, with production restored between runs. Existing patch recipes/hashes are retained; fresh logs use `split-NC-*.log`.
+
+Clean post-control verification passed: typecheck; headless lifecycle's canonical partition (14 cases) and short socket-path partition (2 cases); full wake-deferred file (8 cases including existing nested checks); 22 contract cases; migration checker with regression verification, zero findings. Logs are `split-final-*.log`, and the sequential driver exit is zero. The clean repeat timings are recorded beside initial measurements in the S19 ledger. All nine top-level variants stayed below 120,000 ms in both runs; slowest clean repeat: CI late, 112,223.6 ms. All 17 moved-file control executions caught their intended consumer assertions; both complete variant bodies remain verbatim. The wrapper-only change measures 384 → 384 tracked test files and 4,186 → 4,186 static declarations against `56ca846dce1c3ac470dac06930b14ec72a3eb26f` (`split-counts.log`).
+
+The old proposal-only restriction above is historical and superseded by the quoted operator approval. No aggregate over-two-minute S19 wrapper remains. Full-suite, coverage and live-model runs were skipped per brief; CI is left to the parent. The CI late case's measured local margin to its 120-second limit is 7.8 seconds.

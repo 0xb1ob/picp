@@ -76,7 +76,7 @@ ask-0088e0332d00, 2026-10-21.
 | S10 (cp-e2e-slice-s10-4dzb) | behavior 05; integrate declarations 81–120: 38 mapped, 1 retained mixed, 1 pending-fix (92); [range ledger and executed patch controls](testing-migration-s10.md); S09 carry-ins reconciled | 0; original unit file stays whole | unchanged | +6 e2e declarations |
 | S21 (cp-e2e-slice-s21-5gtl) | behavior 06; [declaration map and replayed controls](testing-migration-s21.md): 15 mapped, 7 retained/moved verbatim, 0 pending | 1 original path retired; mixed retained replacement is not deletion credit | +1 net file: +1 e2e, +1 retained, -1 source | -22 source, +7 retained, +9 e2e = -6 net declarations |
 | S16 (cp-e2e-slice-s16-koqy) | behavior 05; reviewer-model whole file: 3 mapped, 0 retained, 1 deleted file; [declaration accounting](testing-migration-s16.md); other slices retain their ownership | 1 | 378 → 378 | 4,204 → 4,203 (3 removed, 2 added) |
-| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 28 mapped, 9 retained, 0 pending across all 37 declarations in five original files; 11 static e2e declarations | 5 original paths removed; 9 declarations retained/moved verbatim in 3 replacements earn no deletion credit | 379 → 381 (measured origin/main 695a8528 → pre-merge S19 3c6568f) | 4,205 → 4,188 static declarations at those revisions |
+| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 28 mapped, 9 retained, 0 pending across all 37 declarations in five original files; 11 static e2e declarations | 5 original paths removed; 9 declarations retained/moved verbatim in 3 replacements earn no deletion credit | 379 → 381 (original: origin/main 695a8528 → pre-merge S19 3c6568f); 384 → 384 (wrapper split: 56ca846 → split tree) | 4,205 → 4,188 (original); 4,186 → 4,186 (wrapper split; measured static declarations) |
 
 S19 carry-in (main session carry-in, S14 review 1): baseline `deleted` labels describe absent original paths.
 The checker requires this even when declarations move: `scripts/test-migration-check.ts` rejects an absent
@@ -84,6 +84,22 @@ baseline path marked `retained` and has no `moved` disposition. The nine moved d
 `retained` in the assertion map and their three replacement files are incoming retained/moved evidence;
 they earn no declaration deletion credit. All 30 S19 controls have a regression row, SHA-256, patch and matching
 closing marker. The totals above count all tracked test files/static declarations at the named base and HEAD.
+
+S19 operator-approved split measurements (local, milliseconds; each top-level case has a 120,000-ms timeout):
+
+| Scenario | Variant | Initial pass ms | Clean repeat ms |
+|---|---|---:|---:|
+| S19-4 | ready | 3,178.1 | 3,070.6 |
+| S19-4-revise | revise | 2,541.6 | 3,981.3 |
+| S19-4-red | red | 2,617.2 | 4,015.7 |
+| S19-4-running | running | 2,648.8 | 2,643.9 |
+| S19-4-late | late | 68,726.4 | 68,853.8 |
+| S19-4-late-failure | late-failure | 68,819.2 | 68,715.4 |
+| S19-9 | race | 28,446.2 | 28,741.1 |
+| S19-9-failure | failure | 33,522.6 | 34,161.4 |
+| S19-9-late | late | 111,481.6 | 112,223.6 |
+
+These are independent top-level registrations with fresh fixtures, not aggregate durations. Both variant callback bodies are AST-equal to their pre-split bodies. Logs: worktree-local `node_modules/.cache/s19/split-headless.log` and `split-deferred.log`.
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
 V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
@@ -438,12 +454,19 @@ moves first.
 | S19-1 | `tests/e2e/wake-delivery.test.ts` | wake S19: a real operator reconnects read-only and delivers a gap escalation once |
 | S19-2 | `tests/e2e/wake-delivery.test.ts` | wake S19: host escalation watch suppresses represented decisions, retries read failures and bounds write failures |
 | S19-3 | `tests/e2e/wake-reattach.test.ts` | wake S19: real bridge retries its host transport with capped backoff and probes silent or superseded hosts |
-| S19-4 | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict |
+| S19-4 | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict: ready |
+| S19-4-revise | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict: revise |
+| S19-4-red | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict: red |
+| S19-4-running | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict: running |
+| S19-4-late | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict: late |
+| S19-4-late-failure | `tests/e2e/headless-lifecycle.test.ts` | rpc S19: a real review rechecks a deferred decision before delivering its verdict: late-failure |
 | S19-5 | `tests/e2e/wake-send-first.test.ts` | wake S19: assistant and custom send markers do not hold ordinary parent wakes |
 | S19-6 | `tests/e2e/wake-send-first.test.ts` | wake S19: user sends hold wakes through tools, answered decisions bypass and clean replies release once |
 | S19-7 | `tests/e2e/wake-send-first.test.ts` | wake S19: an aborted send releases held wakes before another clean answer |
 | S19-8 | `tests/e2e/wake-send-first.test.ts` | wake S19: the oldest held wake reaches pi's queue within 120 seconds while its send still streams |
-| S19-9 | `tests/e2e/wake-deferred.test.ts` | wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates |
+| S19-9 | `tests/e2e/wake-deferred.test.ts` | wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: race |
+| S19-9-failure | `tests/e2e/wake-deferred.test.ts` | wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: failure |
+| S19-9-late | `tests/e2e/wake-deferred.test.ts` | wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: late |
 | S19-10 | `tests/e2e/wake-deferred.test.ts` | wake S19: a real CI event cannot open an unreviewed, superseded or unpushed head |
 | S19-11 | `tests/e2e/wake-deferred.test.ts` | wake S19: a native plan-gate verdict leaves the held merge gate and awaiting bytes untouched |
 | 05-S14-bind | `tests/e2e/landing.test.ts` | landing S14: binding an existing PR checks forge facts and preserves checkout history |
@@ -931,15 +954,15 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 | `tests/deferred-recheck.test.ts` | a hook that throws costs the row, never the wake-up | S19-4 | retained | verbatim in tests/deferred-recheck-retained.test.ts: CommandPost supplies an async before wrapper around a bounded failure-absorbing recheck; no public tool/parent option injects this synchronous throwing hook. |
 | `tests/deferred-recheck.test.ts` | afterWakeup runs after the wake-up is sent, and a throwing one is reported, not fatal | S19-4 | retained | known-regression declaration verbatim in tests/deferred-recheck-retained.test.ts: native afterWakeup calls async HeldContinuation.onVerdict, so the injected synchronous afterWakeup-threw branch has no public callback replacement entry; ordering assertions remain intact with no deletion credit. |
 | `tests/deferred-recheck.test.ts` | a cp-ci tick and a passing review racing the same file raise one row, once | S19-9 | mapped | S19-NC-20 fails one promotion notice (two); S19-NC-21 loses the unrelated concurrent writer. Real CLI timestamps prove overlap, actual RPC delivery and durable IDs are checked. |
-| `tests/deferred-recheck.test.ts` | when both racers fail to read CI the row stays deferred, and a later event still raises it once | S19-9 | mapped | S19-NC-25 fails failed racers must keep the same deferred decision; a later actual CI run opens the original ID once without losing the unrelated writer. |
+| `tests/deferred-recheck.test.ts` | when both racers fail to read CI the row stays deferred, and a later event still raises it once | S19-9-failure | mapped | S19-NC-25 fails failed racers must keep the same deferred decision; a later actual CI run opens the original ID once without losing the unrelated writer. |
 | `tests/deferred-recheck.test.ts` | the bounds are real durations, and the tests inject their own | S19-4 | mapped | S19-NC-28 and S19-NC-29 independently zero each default budget and fail the open-at-verdict parent snapshot; production remains at 30000ms. |
 | `tests/deferred-recheck.test.ts` | a beforeWakeup that never settles still delivers the verdict and releases the slot | S19-4 | retained | verbatim in tests/deferred-recheck-retained.test.ts: no public RPC/tool exposes beforeWakeupTimeoutMs or an unbounded callback replacement; the native callback supplies its own bounded recheck. Its slot and known-regression assertions stay. |
 | `tests/deferred-recheck.test.ts` | a beforeWakeup that throws synchronously is reported and the verdict still goes | S19-4 | retained | verbatim in tests/deferred-recheck-retained.test.ts: the public CommandPost before wrapper is async, so real storage/probe errors cannot synchronously throw at hook invocation; no public callback override entry. |
-| `tests/deferred-recheck.test.ts` | a cp-ci re-gate that never settles lets the tick's notice and wake-up continue | S19-9 | mapped | S19-NC-22 removes the bound and fails bounded CI delivery must precede the slow gate's writes; the positive actual deadline emits one bounded warning and opens nothing. |
-| `tests/deferred-recheck.test.ts` | a bounded re-gate that fails reports once, opens nothing, and never throws | S19-9 | mapped | S19-NC-25 fails preservation of the failed racers' deferred decision; fail-closed probes emit no failed-recheck warning. S19-NC-18 fails irrelevant revise query-count; malformed guards also remain in retained declaration 2. |
-| `tests/deferred-recheck.test.ts` | a cp-ci re-gate that lands after the deadline opens and announces exactly once | S19-9 | mapped | S19-NC-23 removes the real late continuation and fails one promotion notice after three original decisions open. |
-| `tests/deferred-recheck.test.ts` | a review re-gate that lands after the wake-up still opens and announces exactly once | S19-4 | mapped | S19-NC-23 times out waiting for late gate announces actual opened decisions; actual review receipt precedes the late store write. |
-| `tests/deferred-recheck.test.ts` | a re-gate that fails after the deadline opens nothing, says nothing twice, and leaks no rejection | S19-4 | mapped | S19-NC-24 causes two warnings and fails late failure must not report a second warning; the real parent continues and no row opens. |
+| `tests/deferred-recheck.test.ts` | a cp-ci re-gate that never settles lets the tick's notice and wake-up continue | S19-9-late | mapped | S19-NC-22 removes the bound and fails bounded CI delivery must precede the slow gate's writes; the positive actual deadline emits one bounded warning and opens nothing. |
+| `tests/deferred-recheck.test.ts` | a bounded re-gate that fails reports once, opens nothing, and never throws | S19-9-failure | mapped | S19-NC-25 fails preservation of the failed racers' deferred decision; fail-closed probes emit no failed-recheck warning. S19-4-revise/NC-18 fails irrelevant revise query-count; malformed guards also remain in retained declaration 2. |
+| `tests/deferred-recheck.test.ts` | a cp-ci re-gate that lands after the deadline opens and announces exactly once | S19-9-late | mapped | S19-NC-23 removes the real late continuation and fails one promotion notice after three original decisions open. |
+| `tests/deferred-recheck.test.ts` | a review re-gate that lands after the wake-up still opens and announces exactly once | S19-4-late | mapped | S19-NC-23 times out waiting for late gate announces actual opened decisions; actual review receipt precedes the late store write. |
+| `tests/deferred-recheck.test.ts` | a re-gate that fails after the deadline opens nothing, says nothing twice, and leaks no rejection | S19-4-late-failure | mapped | S19-NC-24 causes two warnings and fails late failure must not report a second warning; the real parent continues and no row opens. |
 | `tests/deferred-recheck.test.ts` | an unrelated event neither reads the gate nor touches the file | S19-11 | retained | mixed declaration verbatim in tests/deferred-recheck-retained.test.ts: native gate is proved by S19-11/NC-30 and native revise by S19-4/NC-18; no native/recovered entry admits surface future or quality details.next proceed (closed ReviewSurfaceSchema and additionalProperties-false QualityReportSchema). No declaration deletion credit. |
 | `tests/deferred-recheck.test.ts` | red, still-running and unreviewed heads stay deferred through both events | S19-10 | mapped | S19-NC-26 bypasses the review precondition and fails unreviewed must not open a merge decision; S19-10 covers superseded/unpushed CI facts, S19-4 covers red/running review facts. |
 | `tests/deferred-recheck.test.ts` | wiring lint: the cp-ci path awaits the recheck before it sends, and the verdict path is not fire-and-forget | S19-9 | mapped | S19-NC-19 fails CI receipt order, S19-NC-8 review receipt order, S19-NC-23 late announcements and S19-NC-27 the actual model fallback guideline. Syntax-only closure/order/path checks are redundant-unreachable behind these named consumer outcomes, without additional declaration credit. |
@@ -1820,14 +1843,14 @@ index 3e07e24..25fa177 100644
 | S19-15 | `tests/send-first-gate.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-6 | S19-NC-15 | dacd98bb09cda64b676a8dde47024687a3a9e3d48964df23df8bd7211426deae | held wakes arrive in offer order | pass |
 | S19-16 | `tests/deferred-recheck.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-4 | S19-NC-16 | b4c56d9b0819625f79888b5336cc0fc69bb53a59d67129788e1804cc2e0de530 | one opening produces one operator notice: actual 0, expected 1 | pass |
 | S19-17 | `tests/deferred-recheck.test.ts` | 22a6ead8bfbc9c5087cca4ac02e5873923b324d6 | S19-4 | S19-NC-17 | 725c509f2cb0094989e69bd03aee4328095b9f01eb2a30b1f555c3a19f5d16a9 | ready notice must match Ship cp-held (PR 58) | pass |
-| S19-18 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4 | S19-NC-18 | 8ca85d25ccbd99762cff508bbe5816800357b99367149fcc48a8f889ded3cad1 | a revise verdict must not read the CI gate | pass |
+| S19-18 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4-revise | S19-NC-18 | 8ca85d25ccbd99762cff508bbe5816800357b99367149fcc48a8f889ded3cad1 | a revise verdict must not read the CI gate | pass |
 | S19-19 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-19 | ee7dcb337ee1e7285d2cd5282959b016c7c2d058b8bc8f37a94438474f6a6880 | the CI wake must reach its consumer after the raced gate completes | pass |
 | S19-20 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-20 | b871b500ed174f787fbb401326fd634affc3ff4f8ff4383e11c8eb34fe663dcb | one decision promotion must produce one notice: actual 2, expected 1 | pass |
 | S19-21 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-21 | df6294c2ec381f827ae935f5ffca1d970c2ba593def37c05fe0d7a567dad0369 | the concurrent unrelated writer must survive both rechecks | pass |
-| S19-22 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-22 | 50607cfafda3d24ede436e4326f76356567e2ace1686a1133b82aeb7053535e8 | bounded CI delivery must precede the slow gate's writes | pass |
-| S19-23 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-23 | 7195e71a55cf6cd5f9cca87e3f2f0623486d5b2a9c2e2946ad850c438f1ab254 | CI late receives 0 promotion notices; review late times out waiting for actual opened-decisions notice | pass |
-| S19-24 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4 | S19-NC-24 | 0cd3d5fe11f894346da8b1e704c1749e00c5016b8b38699ac8d112fbf00306a8 | late failure must not report a second warning | pass |
-| S19-25 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-25 | 5f1eb59cc899f92f1d1597cb7e51a8cf9398abee57195670dc47ca50786166f1 | failed racers must keep the same deferred decision | pass |
+| S19-22 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9-late | S19-NC-22 | 50607cfafda3d24ede436e4326f76356567e2ace1686a1133b82aeb7053535e8 | bounded CI delivery must precede the slow gate's writes | pass |
+| S19-23 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9-late | S19-NC-23 | 7195e71a55cf6cd5f9cca87e3f2f0623486d5b2a9c2e2946ad850c438f1ab254 | CI late receives 0 promotion notices; S19-4-late review times out waiting for actual opened-decisions notice | pass |
+| S19-24 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4-late-failure | S19-NC-24 | 0cd3d5fe11f894346da8b1e704c1749e00c5016b8b38699ac8d112fbf00306a8 | late failure must not report a second warning | pass |
+| S19-25 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9-failure | S19-NC-25 | 5f1eb59cc899f92f1d1597cb7e51a8cf9398abee57195670dc47ca50786166f1 | failed racers must keep the same deferred decision | pass |
 | S19-26 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-10 | S19-NC-26 | e821197675861a113e9d3976864cf5a0b0239dec773e5097b6dc9e19fd76a3ce | unreviewed must not open a merge decision | pass |
 | S19-27 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-9 | S19-NC-27 | de0b5c6bb6707d2e3c615b9cf34e52b831deec31bb633f2b21a1f10f1a16abc2 | actual parent model context lacks the unknown-CI manual fallback | pass |
 | S19-28 | `tests/deferred-recheck.test.ts` | 1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3 | S19-4 | S19-NC-28 | 51889a6bdf4b64c29796c1c87e783530a18465420e53e95bdffefdd58a27e8cf | zero inner budget leaves the actual verdict snapshot deferred | pass |

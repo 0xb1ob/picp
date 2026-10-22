@@ -486,9 +486,15 @@ test("rpc bridge: a queued message whose handoff is dropped twice ends failed, n
 });
 
 
-test("rpc S19: a real review rechecks a deferred decision before delivering its verdict", { timeout: 300_000 }, async (t) => {
-for (const mode of ["ready", "revise", "red", "running", "late", "late-failure"] as const) {
-await t.test(mode, { timeout: 180_000 }, async (t) => {
+for (const [mode, name] of [
+	["ready", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: ready"],
+	["revise", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: revise"],
+	["red", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: red"],
+	["running", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: running"],
+	["late", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: late"],
+	["late-failure", "rpc S19: a real review rechecks a deferred decision before delivering its verdict: late-failure"],
+] as const) {
+test(name, { timeout: 120_000 }, async (t) => {
 	const held = await seedHeldHome({ ciState: "in_progress", review: "none" });
 	const late = mode === "late" || mode === "late-failure";
 	if (late) for (const suffix of ["second", "third"]) await held.store.declareGated({ type: "approval",
@@ -578,4 +584,3 @@ await t.test(mode, { timeout: 180_000 }, async (t) => {
 	}
 });
 }
-});

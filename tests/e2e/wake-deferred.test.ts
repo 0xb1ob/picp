@@ -14,8 +14,12 @@ import { JOB, seedHeldHome, writeReviewPass } from "../harness/held-home.ts";
 
 const userMessages = (request: { body: unknown }) => JSON.stringify(
 	(request.body as { messages: Array<{ role: string }> }).messages.filter((message) => message.role === "user"));
-test("wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates", { timeout: 300_000 }, async (t) => {
-for (const mode of ["race", "failure", "late"] as const) await t.test(mode, { timeout: 150_000 }, async (t) => {
+for (const [mode, name] of [
+	["race", "wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: race"],
+	["failure", "wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: failure"],
+	["late", "wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: late"],
+] as const) {
+test(name, { timeout: 120_000 }, async (t) => {
 	const held = await seedHeldHome({ ciState: "in_progress", review: "none" });
 	writeFileSync(join(held.home.path, LAYOUT.data, "wake-rules.json"), '{"enabled":false}\n');
 	const store = new AwaitingStore({ home: held.home.path });
@@ -103,7 +107,7 @@ for (const mode of ["race", "failure", "late"] as const) await t.test(mode, { ti
 	assert.equal(items.length, mode === "late" ? 3 : 2);
 	assert.ok(items.filter((item) => item.job_id === JOB).every((item) => item.deferred_reason === undefined));
 });
-});
+}
 
 
 test("wake S19: a real CI event cannot open an unreviewed, superseded or unpushed head", { timeout: 180_000 }, async (t) => {
