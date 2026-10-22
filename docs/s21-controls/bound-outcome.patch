@@ -1,0 +1,13 @@
+diff --git a/src/failure-announcer.ts b/src/failure-announcer.ts
+index b262b0f..ec5a3e0 100644
+--- a/src/failure-announcer.ts
++++ b/src/failure-announcer.ts
+@@ -74,7 +74,7 @@ export function recoveryLine(recovery: FailRecoveryFact): string {
+ 		return `failed operationally (${recovery.reason ?? "unknown error"}); outcome unknown, lease and worktree kept \u2014 ${left}`;
+ 	}
+ 	if (recovery.pending) return `attempt in flight \u2014 ${left} after it; a successful revive supersedes this notice`;
+-	if (recovery.attempted) return `attempted, not revived${recovery.reason ? ` (${recovery.reason})` : ""} \u2014 ${left}`;
++	if (recovery.attempted) return `attempted, did not stick — ${left}`;
+ 	if (recovery.attemptsLeft === 0) return BOUND_SPENT_PHRASE;
+ 	return `not attempted \u2014 ${left}`;
+ }

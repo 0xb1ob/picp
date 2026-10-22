@@ -1,0 +1,13 @@
+diff --git a/src/wakeups.ts b/src/wakeups.ts
+index 3c65ed9..67ab28b 100644
+--- a/src/wakeups.ts
++++ b/src/wakeups.ts
+@@ -461,7 +461,7 @@ export function checkWakeup(stamp: WakeupStamp, facts: WakeupFacts, now: Date =
+ 			const candidate = facts.job(id);
+ 			return candidate !== undefined && candidate.phase !== "done";
+ 		});
+-		if (!still) return stale("every candidate it listed has been torn down");
++		if (!still) return fresh;
+ 		return fresh;
+ 	}
+ 	if (!stamp.job_id) return fresh;
