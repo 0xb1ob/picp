@@ -33,7 +33,7 @@ production patches, full base SHAs, commands and observed failing assertions sup
 
 ## Executed controls (restored immediately)
 
-Commands use `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing.test.ts`.
+Commands use `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing-*.test.ts`.
 
 The [replay catalog](testing-migration-s03-replayed-controls.md) records the exact production diff and
 observed failing assertion for every control below. These are new executions, not reconstructed history.
@@ -109,7 +109,7 @@ The continuation send arrived immediately before this worker's 10,800-second wal
 
 A real parent parks a reviewed green PR under human_handoff, then starts a new model turn whose final input is HELD PR PARKED. The focused reproducer isolates that turn from an unrelated RESTART RECOVERY turn and fails parking is relayed without waking the parent model (actual 1, expected 0). The original declaration explicitly requires no parent wake. The migration brief prohibits product changes, so this blocks retirement rather than authorizing a routing fix.
 
-The reproducible fragment is in the job artifact directory as parked-reproducer.ts. Insert it before the busy-fence case in tests/e2e/landing.test.ts and run npm run test:one -- --test-name-pattern='landing S03: a real parent relays a newly parked' tests/e2e/landing.test.ts. The unmodified product failed this assertion twice, including the isolated check in 6.09 seconds. It uses the real parent, real held worker/session, real park/lease release, scratch git, and mock forge/model boundaries.
+The reproducible fragment is in the job artifact directory as parked-reproducer.ts. Insert it before the busy-fence case in tests/e2e/landing.test.ts and run npm run test:one -- --test-name-pattern='landing S03: a real parent relays a newly parked' tests/e2e/landing-s03.test.ts. The unmodified product failed this assertion twice, including the isolated check in 6.09 seconds. It uses the real parent, real held worker/session, real park/lease release, scratch git, and mock forge/model boundaries.
 
 Routing explains the result: HeldContinuation.#parked uses relay; CommandPost wires relay and notify to the same recovery journal. isQuietWakeup covers landed/window ids, and isRelayOnlyNotice covers landed/resolve/handled-green text; neither recognizes parked notices. The real wakeup surface therefore sends the parked recovery notice with triggerTurn true. A separate product fix and a green reproducer are needed before continuing declaration 64.
 
@@ -118,7 +118,7 @@ Historical pre-S03b checkpoint: 26/40 S03 plus 36/40 S02 declarations were mappe
 ## S03b parked-path verification
 
 On merged base `86b4cec` (#429), the real parked reproducer now lives in
-`tests/e2e/landing.test.ts` as `landing S03: a real parent relays a newly parked handoff without a model turn`.
+`tests/e2e/landing-s03.test.ts` as `landing S03: a real parent relays a newly parked handoff without a model turn`.
 It passed (12.68 seconds), asserting exactly one durable id with prefix `continuation:parked:<job>:`
 and zero model requests whose final input contains HELD PR PARKED.
 Removing `|| id.startsWith("continuation:parked:")` from `isLandedContinuation` in

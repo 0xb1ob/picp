@@ -3,7 +3,7 @@
  * repoints each citation (row title, `--test-name-pattern`, `landing.test.ts:N`) at the file now holding that test.
  */
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import ts from "typescript";
 
 const OLD = "tests/e2e/landing.test.ts";
@@ -45,7 +45,7 @@ function rewrite(line: string): string {
 	});
 	out = out.replace(/--test-name-pattern='([^']*)'([^\n]*?)tests\/e2e\/landing\.test\.ts/g, (whole, pattern: string, mid: string) => {
 		// The doc template `--test-name-pattern='<pattern>' tests/e2e/landing.test.ts` names no test: point it at every landing file.
-		if (pattern === "<pattern>" && mid === " ") return `--test-name-pattern='<pattern>' tests/e2e/landing-*.test.ts`;
+		if (/^<[^>]+>$/.test(pattern)) return `--test-name-pattern='${pattern}'${mid}tests/e2e/landing-*.test.ts`;
 		const needle = pattern.split("<")[0] ?? "";
 		const files = [...new Set([...after.values()].filter((d) => needle && d.title.includes(needle)).map((d) => d.file))];
 		if (files.length === 0) {
@@ -54,6 +54,11 @@ function rewrite(line: string): string {
 		}
 		return `--test-name-pattern='${pattern}'${mid}${files.join(" ")}`;
 	});
+	// A prose citation that quotes a moved test's exact title in the same line follows that title.
+	if (out.includes("tests/e2e/landing.test.ts")) {
+		const files = new Set([...after.values()].filter((d) => out.includes(d.title)).map((d) => d.file));
+		if (files.size === 1) out = out.replaceAll("tests/e2e/landing.test.ts", [...files][0]!);
+	}
 	out = out.replace(/landing\.test\.ts:(\d+)/g, (whole, n: string) => {
 		const start = [...before].reverse().find((d) => d.line <= Number(n));
 		const moved = start && after.get(start.title);
@@ -66,10 +71,15 @@ function rewrite(line: string): string {
 	return out;
 }
 
-const docs = ["docs/testing-migration.md", ...readdirSync("docs/testing-migration").filter((f) => f.endsWith(".md")).map((f) => `docs/testing-migration/${f}`)];
+const docs = execFileSync("git", ["ls-files", "*.md"], { encoding: "utf8" }).split("\n").filter(Boolean);
 for (const doc of docs) {
 	const text = readFileSync(doc, "utf8");
-	const next = text.split("\n").map((line) => (line.includes("landing.test.ts") ? rewrite(line) : line)).join("\n");
+	// docs/testing-migration* is history (PR target rows name the file as it was); every other doc must name a live file.
+	const live = !doc.startsWith("docs/testing-migration");
+	const next = text.split("\n").map((line) => {
+		const done = line.includes("landing.test.ts") ? rewrite(line) : line;
+		return live ? done.replaceAll("tests/e2e/landing.test.ts", "tests/e2e/landing-*.test.ts") : done;
+	}).join("\n");
 	if (next !== text) writeFileSync(doc, next);
 }
 if (unresolved.length) process.exitCode = 1;

@@ -1,7 +1,7 @@
 # S03b executed production controls
 
 Base: c8d60449079eb75512470a8702eb83c13f62af83. All mutations restored immediately.
-Command: `npm run test:one -- --test-name-pattern='landing S03: startup snapshots' tests/e2e/landing.test.ts`.
+Command: `npm run test:one -- --test-name-pattern='landing S03: startup snapshots' tests/e2e/landing-s03.test.ts`.
 Fixed run: 3 cases passed, 0 failed/skipped (30.60 seconds).
 
 ## S03b-snapshot-generation (declaration 78)
@@ -120,7 +120,7 @@ Exit 1: `a changed head replaces the original deadline`, actual 1 notice, expect
 ## S03b second batch: 45, 58, 60, 70 and S02 6/8/32/33
 
 All controls below ran at base d35117d136da6e2441ada5dacb158484a5b2741a and were restored immediately.
-Commands used `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing.test.ts`.
+Commands used `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing-*.test.ts`.
 Every listed mutation exited 1. No production mutation remains in the patch.
 
 | Control / declaration | Pattern | Production mutation | Failing assertion |

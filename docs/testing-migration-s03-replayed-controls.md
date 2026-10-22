@@ -1,6 +1,6 @@
 # S03 inherited control replay
 
-These are new executions, not reconstructed historical provenance. Each mutation was applied independently and restored immediately. Unless a record says otherwise, base HEAD is `f30d532f5eed302ec17661dafad2cdf56b3d1d42`, merging main `a61a117757f69c6a7ea28d23be8a1ccf80f74d97`. Commands use `TMPDIR="$PWD/.s03b-review2-runtime" npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing.test.ts`. Only production is mutated; fixtures and assertions stay fixed.
+These are new executions, not reconstructed historical provenance. Each mutation was applied independently and restored immediately. Unless a record says otherwise, base HEAD is `f30d532f5eed302ec17661dafad2cdf56b3d1d42`, merging main `a61a117757f69c6a7ea28d23be8a1ccf80f74d97`. Commands use `TMPDIR="$PWD/.s03b-review2-runtime" npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing-*.test.ts`. Only production is mutated; fixtures and assertions stay fixed.
 
 For a replay, first create `.s03b-review2-runtime/package.json` containing `{"type":"commonjs"}`.
 The local TMPDIR keeps the mock `gh` executable in CommonJS mode under this ES-module repository;
