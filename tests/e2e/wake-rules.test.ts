@@ -253,11 +253,17 @@ test("S20: a legacy unconfirmed green key wakes when its continuation was alread
 	const held = await seedHeldHome({ ciState: "green", review: "pending" });
 	const parent = await startCiParent(t, held, "s20-ci-coalesced");
 	await waitFor(parent.events, (rows) => rows.some((e) => e.decision === "suppressed"), { timeoutMs: 30_000, what: "the first green key is handled" });
+	// "suppressed" is journaled at observation; strip only once the key is confirmed, or confirm re-adds it.
 	const file = new CiWatchStore({ home: held.home.path }).file;
-	const state = JSON.parse(readFileSync(file, "utf8"));
-	for (const job of state.jobs) job.announced = job.announced.filter((key: string) => !key.includes("ci_green"));
-	writeFileSync(file, JSON.stringify(state));
-	await waitFor(parent.requests, (rows) => rows.some((r) => JSON.stringify(r.body.messages).includes("CI/PR OBSERVED")), {
+	await waitFor(() => new CiWatchStore({ home: held.home.path }).announced(CI_JOB), (keys) => [...keys].some((k) => k.includes("ci_green")), { timeoutMs: 30_000, what: "the first green key is confirmed" });
+	// The watcher's own read-modify-write can restore the key; re-strip on every poll until the wake lands.
+	const strip = () => {
+		const state = JSON.parse(readFileSync(file, "utf8"));
+		for (const job of state.jobs) job.announced = job.announced.filter((key: string) => !key.includes("ci_green"));
+		writeFileSync(file, JSON.stringify(state));
+	};
+	strip();
+	await waitFor(() => { if (parent.events().length < 2) strip(); return parent.requests(); }, (rows) => rows.some((r) => JSON.stringify(r.body.messages).includes("CI/PR OBSERVED")), {
 		timeoutMs: 30_000, what: "legacy unconfirmed key wakes for its coalesced outcome",
 	});
 	assert.deepEqual(parent.events().map((e) => [e.decision, e.reason]).slice(1), [["woke", "outcome coalesced/none"]]);
