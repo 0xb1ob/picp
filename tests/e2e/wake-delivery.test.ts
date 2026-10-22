@@ -198,6 +198,8 @@ test("wake S19: host escalation watch suppresses represented decisions, retries 
 	const delivered = JSON.parse(readFileSync(outbox.file, "utf8"));
 	delivered.entries = [];
 	writeFileSync(outbox.file, JSON.stringify(delivered));
+	// Service-health is due at age 0; with the outbox emptied the backstop would send it as a second request.
+	new EscalationRelayLedger(escalationRelayLedgerFile(home.path, "multi")).note(immediate.id, "bridge");
 	const ancient = await freshStore.raise({ ...freshInput, question: "An undelivered decision still needs the backstop", at: isoTimestamp(new Date(Date.now() - 601_000)) });
 	const backstopModel = provider.addScript("s19-backstop-operator", [{ kind: "text", text: "Backstop received." }]);
 	agent.writeModels(provider);
