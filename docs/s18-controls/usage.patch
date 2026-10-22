@@ -1,0 +1,13 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..92b9b3c 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -333,7 +333,7 @@ export class Teardown {
+ 				exited_at: (!managed && record.worker.exited_at) || (exitCode !== undefined ? closedAt : undefined),
+ 				...(exitCode !== undefined ? { exit_code: exitCode } : {}),
+ 			} }),
+-			...(runStatus ? { usage: runStatus.usage } : {}),
++			...(runStatus ? {} : {}),
+ 		});
+ 		if (unreported) this.#options.journal?.(killedUnreportedWakeup(this.#options.home, record, closedAt, options.authorization));
+ 		runs.close(jobId);

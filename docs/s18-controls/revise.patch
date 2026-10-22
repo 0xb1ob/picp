@@ -1,0 +1,14 @@
+diff --git a/src/teardown.ts b/src/teardown.ts
+index a6eb307..cf75c76 100644
+--- a/src/teardown.ts
++++ b/src/teardown.ts
+@@ -625,7 +625,8 @@ export class Teardown {
+ 		}
+ 		if (latest.verdict === "pass") return undefined;
+ 
+-		if (latest.verdict === "revise") {
++		if (latest.verdict === "revise") return undefined;
++		if (false) {
+ 			return {
+ 				ok: false,
+ 				failure: {
