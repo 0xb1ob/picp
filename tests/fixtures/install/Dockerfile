@@ -23,8 +23,10 @@ RUN test -n "$PI_VERSION" && npm install -g --ignore-scripts "@earendil-works/pi
 RUN npm install -g --prefix /tmp/warm-pi --ignore-scripts @earendil-works/pi-coding-agent && rm -rf /tmp/warm-pi
 # The pinned release asset, as install-tools downloads it: no "latest" API call (#428).
 ARG TREEHOUSE_VERSION
-RUN test -n "$TREEHOUSE_VERSION" && mkdir -p .local/bin \
-	&& curl -fsSL "https://github.com/kunchenguid/treehouse/releases/download/v${TREEHOUSE_VERSION}/treehouse-v${TREEHOUSE_VERSION}-linux-$(dpkg --print-architecture).tar.gz" | tar xz -C .local/bin treehouse \
+# The optional gh_token secret (BuildKit) authenticates the download; it is never an ARG, so no layer keeps it.
+RUN --mount=type=secret,id=gh_token test -n "$TREEHOUSE_VERSION" && mkdir -p .local/bin \
+	&& auth="" && if [ -s /run/secrets/gh_token ]; then auth="Authorization: Bearer $(cat /run/secrets/gh_token)"; fi \
+	&& curl -fsSL ${auth:+-H "$auth"} "https://github.com/kunchenguid/treehouse/releases/download/v${TREEHOUSE_VERSION}/treehouse-v${TREEHOUSE_VERSION}-linux-$(dpkg --print-architecture).tar.gz" | tar xz -C .local/bin treehouse \
 	&& treehouse --version
 ARG LENS_PACKAGES
 RUN npm install -g --prefix /tmp/warm-lens $LENS_PACKAGES && rm -rf /tmp/warm-lens
