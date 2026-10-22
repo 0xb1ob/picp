@@ -8,14 +8,14 @@ import { initialStatus } from "../../src/run-artifacts.ts";
 import { CiWatchStore } from "../../src/ci-watch.ts";
 import { AnsweredOutbox } from "../../src/answered.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, startPiChild } from "../harness/index.ts";
-import { waitFor } from "../harness/index.ts";
+import { readRunEvents, waitFor } from "../harness/index.ts";
 
 const issued = "2026-08-31T12:45:43Z";
 const head = "a".repeat(40);
 type Notice = { kind: string; job?: string; body: string; stamp?: Record<string, unknown>; details?: Record<string, unknown> };
 
 async function carried(t: TestContext, records: Array<Partial<FleetRecord> & { job_id: string }>, notices: Notice[],
-	seed?: (home: string) => string | void, revisit?: (home: string, child: ReturnType<typeof startPiChild>) => void) {
+	seed?: (home: string) => string | void, revisit?: (home: string, child: ReturnType<typeof startPiChild>) => void | (() => void)) {
 	const home = createScratchHome();
 	const provider = await MockProvider.start();
 	const model = provider.addScript("s22-context", [{ kind: "text", text: "S22 context received." }], { onExhausted: "repeat" });
@@ -51,11 +51,12 @@ async function carried(t: TestContext, records: Array<Partial<FleetRecord> & { j
 	await child.prompt("Inspect the S22 carried notices.");
 	await child.waitForSettled(60_000);
 	if (revisit) {
-		revisit(home.path, child);
+		const verify = revisit(home.path, child);
 		await child.prompt("Inspect the S23 notices again.");
 		await waitFor(() => provider.requests("s22-context").length, (count) => count >= 2,
 			{ timeoutMs: 15_000, what: "second S23 provider request" });
 		await child.waitForSettled(60_000);
+		verify?.();
 	}
 	assert.equal(provider.remaining("s22-context"), 0);
 	const text = JSON.stringify(provider.requests("s22-context").flatMap((request) =>
@@ -364,20 +365,21 @@ export default function(pi) { pi.on("input", () => {
 
 
 test("S23: persisted replay tokens suppress redeliveries while new verdict attempts remain news", { timeout: 110_000 }, async (t) => {
-	const text = await carried(t, [{ job_id: "cp-replay" }], [
+	const text = await carried(t, [{ job_id: "cp-replay" }, { job_id: "cp-new" }], [
 		{ kind: "ci", job: "cp-replay", body: "S23_CI_COPY", stamp: { keys: [head] },
 			details: { ci: [{ key: `cp-replay|${head}|ci_green` }] } },
 		{ kind: "verdict", job: "cp-replay", body: "S23_VERDICT_COPY", stamp: { keys: ["gate", "1"] } },
-		{ kind: "verdict", job: "cp-replay", body: "S23_VERDICT_NEW", stamp: { keys: ["gate", "2"] } },
+		{ kind: "verdict", job: "cp-new", body: "S23_VERDICT_NEW", stamp: { keys: ["gate", "2"] } },
 		{ kind: "unreported", job: "cp-replay", body: "S23_WITHHELD_BODY", stamp: { generation: 1 } },
 	], (home) => {
-		for (const attempt of [1, 2]) writeFileSync(join(home, paths.gateFile("cp-replay", attempt)), JSON.stringify({
-			schema_version: 1, job_id: "cp-replay", attempt, verdict: "pass", cause: "policy",
+		for (const [job_id, attempt] of [["cp-replay", 1], ["cp-new", 1], ["cp-new", 2]] as const) writeFileSync(join(home, paths.gateFile(job_id, attempt)), JSON.stringify({
+			schema_version: 1, job_id, attempt, verdict: "pass", cause: "policy",
 			flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: [], decided_at: issued,
 		}));
 		const identity = JSON.stringify(["unreported", "cp-replay", 1, null, null, issued]);
 		writeFileSync(join(home, ".pi-command-post/state/wakeup-replay.json"), JSON.stringify([
 			[`cp-replay|${head}|ci_green`, `${issued}#900`], ["cp-replay|gate|1", `${issued}#901`],
+			["cp-new|gate|1", `${issued}#902`],
 			[`withheld:${identity}`, "the original run was still working"],
 		]));
 	});
@@ -389,16 +391,23 @@ test("S23: persisted replay tokens suppress redeliveries while new verdict attem
 test("S23: a carried report stays in later requests after closure and withheld identities keep their first reason", { timeout: 110_000 }, async (t) => {
 	const text = await carried(t, [{ job_id: "cp-carried", reported_at: issued }, { job_id: "cp-hidden" }], [
 		{ kind: "envelope", job: "cp-carried", body: "S23_ALREADY_READ", stamp: { reported_at: issued } },
-		{ kind: "envelope", job: "cp-hidden", body: "S23_HIDDEN_REPORT" },
+		{ kind: "envelope", job: "cp-hidden", body: "S23_HIDDEN_REPORT", stamp: { generation: 1 } },
 	], undefined, (home) => {
 		const file = join(home, ".pi-command-post/state/fleet.json");
 		const fleet = JSON.parse(readFileSync(file, "utf8"));
 		fleet.jobs.find((job: FleetRecord) => job.job_id === "cp-carried").phase = "done";
 		fleet.jobs.find((job: FleetRecord) => job.job_id === "cp-hidden").reported_at = issued;
 		writeFileSync(file, JSON.stringify(fleet));
+		const suppressed = readRunEvents(home, "cp-hidden").filter((event) => event.type === "wakeup_suppressed");
+		assert.equal(suppressed.length, 1, "the delivery suppression is journaled once");
+		assert.equal((suppressed[0]?.payload as Record<string, unknown>).generation, 1);
+		assert.equal((suppressed[0]?.payload as Record<string, unknown>).stage, "delivery");
+		assert.doesNotMatch(JSON.stringify(suppressed), /S23_HIDDEN_REPORT/);
 		const memory = readFileSync(join(home, ".pi-command-post/state/wakeup-replay.json"), "utf8");
 		assert.match(memory, /nothing is filed/);
 		assert.doesNotMatch(memory, /S23_ALREADY_READ|S23_HIDDEN_REPORT/);
+		return () => assert.equal(readFileSync(join(home, ".pi-command-post/state/wakeup-replay.json"), "utf8"), memory,
+			"a second context preserves the first withhold reason and replay identities");
 	});
 	assert.equal(text.split("S23_ALREADY_READ").length - 1, 2, "the parent already read the original entry");
 	assert.doesNotMatch(text, /S23_HIDDEN_REPORT/);
