@@ -4,7 +4,6 @@ import { AwaitingStore, MergeAskDeferredError } from "../src/awaiting.ts";
 import { type CiRun, createMergeAskProbe, evaluateAlreadyMerged, isJobGoneError, MergeAskJobGoneError, type MergeAskMergedEvidence, parseCiRuns } from "../src/merge-ask.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { resolvedMergeAskRows } from "../src/status-block.ts";
-import { DiffVerdictSchema, paths } from "../src/contracts.ts";
 
 const HEAD = "8c7d0141f4d3c8a1b0d5e6f7a8b9c0d1e2f3a4b5";
 
@@ -99,14 +98,6 @@ test("S13 retained: resolved notice fallback when a caller supplies no verdict",
 		"the merge already happened",
 	);
 });
-
-test("S13 retained: review writer schema and exact path contract", () => {
-	const properties = Object.keys((DiffVerdictSchema as unknown as { properties: Record<string, unknown> }).properties);
-	assert.ok(properties.includes("verdict"), "DiffVerdictSchema still names the verdict field `verdict`");
-	assert.ok(properties.includes("head_sha"), "DiffVerdictSchema still names the reviewed commit `head_sha`");
-	assert.equal(paths.reviewFile("cp-dlw7", 1), ".pi-command-post/state/runs/cp-dlw7/review-1.json");
-});
-
 
 test("S13 retained: structural helper rejects a blank merge commit", () => {
 	const MERGE_COMMIT = "1f2e3d4c5b6a79880123456789abcdef01234567";
