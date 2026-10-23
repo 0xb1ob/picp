@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -112 +112 @@
+-	if (timeoutS !== undefined && !(Number.isFinite(timeoutS) && timeoutS >= 0)) return undefined;
++	if (timeoutS !== undefined && !(Number.isFinite(timeoutS) && timeoutS >= 0)) return { timeoutS: 30 };

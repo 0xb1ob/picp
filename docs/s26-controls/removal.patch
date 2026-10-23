@@ -1,0 +1,8 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -85 +85,4 @@
+-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
++		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
++			if ([...created].some((key) => key.startsWith(`${home}\0`))) throw new DrainError("parent is draining: cached own drain");
++			return undefined;
++		}

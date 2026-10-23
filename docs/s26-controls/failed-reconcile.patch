@@ -1,0 +1,10 @@
+--- a/src/command-post.ts
++++ b/src/command-post.ts
+@@ -678 +678 @@
+-			this.drain.startup();
++			void this.drain;
+--- a/extensions/command-post/session-hooks.ts
++++ b/extensions/command-post/session-hooks.ts
+@@ -216 +216 @@
+-			commandPost().drain.startup();
++			void commandPost();

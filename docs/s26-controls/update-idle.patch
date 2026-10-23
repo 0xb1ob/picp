@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -461 +461 @@
+-		} else if (!record.worker.exited_at && isPidAlive(record.worker.pid) && runPhase(record.job_id) !== "idle") working.push(record.job_id);
++		} else if (!record.worker.exited_at && isPidAlive(record.worker.pid)) working.push(record.job_id);

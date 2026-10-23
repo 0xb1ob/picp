@@ -1,0 +1,5 @@
+--- a/src/command-post.ts
++++ b/src/command-post.ts
+@@ -1209 +1209 @@
+-		return this.drain.track(() => this.integrator.advance(request));
++		return this.integrator.advance(request);

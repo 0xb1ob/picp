@@ -1,0 +1,5 @@
+--- a/src/parent-diagnostics.ts
++++ b/src/parent-diagnostics.ts
+@@ -38 +38 @@
+-		unsubscribe();
++		void unsubscribe;

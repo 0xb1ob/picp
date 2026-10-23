@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -444 +444 @@
+-		return IN_FLIGHT.includes(record.phase) && pid !== undefined && isPidAlive(pid);
++		return false;

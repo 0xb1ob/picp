@@ -1,0 +1,6 @@
+diff --git a/src/dashboard-restart.ts b/src/dashboard-restart.ts
+--- a/src/dashboard-restart.ts
++++ b/src/dashboard-restart.ts
+@@ -75,1 +75,1 @@
+-	if (!state.supported) return refuse(409, `unsupported: ${RESTART_UNSUPPORTED}`);
++	if (!state.supported) return refuse(409, "unsupported: broken capability message");

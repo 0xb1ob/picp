@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -293 +293 @@
+-		if (!record || this.#deps.owns?.() === false) return record;
++		if (!record) return record;

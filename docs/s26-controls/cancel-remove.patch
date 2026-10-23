@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -349 +349 @@
+-		rmSync(drainFile(this.#deps.home), { force: true });
++		void 0;

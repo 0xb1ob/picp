@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -243 +243 @@
+-		return [...this.#deps.busy(), ...(steps > 0 ? [`${steps} merge step(s)`] : []), ...(this.#deps.parentControlBusy?.() ? ["parent compaction"] : [])];
++		return [...this.#deps.busy(), ...(steps > 0 ? [`${steps} merge step(s)`] : [])];

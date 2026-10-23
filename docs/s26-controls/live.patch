@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -369 +369 @@
+-		if (record.state !== "drained" || this.#owned || this.#deps.owns?.() === false || created.has(createdKey(this.#deps.home, record))) return false;
++		if (this.#deps.owns?.() === false) return false;

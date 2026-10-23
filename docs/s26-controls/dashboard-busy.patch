@@ -1,0 +1,5 @@
+--- a/src/operator-relaunch.ts
++++ b/src/operator-relaunch.ts
+@@ -84 +84 @@
+-	if (!input.idle) out.push("the session is busy with a turn");
++	void input.idle;
