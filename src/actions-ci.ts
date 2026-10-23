@@ -8,7 +8,7 @@ import type { CommandRunner as StatusRunner } from "./merges.ts";
 
 /** Total budget for one observation (every page of runs and jobs), as `MERGE_ASK_QUERY_TIMEOUT_MS`. */
 export const ACTIONS_CI_TIMEOUT_MS = 15_000;
-/** One `gh` call's own cap: a hung call must not spend the whole budget and leave no room for the retry (#420). */
+/** One jobs-page `gh` call's own cap: a hung call must not spend the whole budget and leave no room to retry (#420). */
 export const ACTIONS_ATTEMPT_TIMEOUT_MS = 6_000;
 export const ACTIONS_PER_PAGE = 100;
 export const ACTIONS_MAX_PAGES = 10;
@@ -279,7 +279,7 @@ async function get(options: ActionsReadOptions, budget: Budget, endpoint: string
 	for (let tries = 0; ; tries++) {
 		const remaining = budget.deadline - budget.now();
 		if (remaining <= 0) throw new ActionsCiError("deadline", endpoint, "observation budget spent");
-		const result = await attempt(options, endpoint, Math.min(remaining, ACTIONS_ATTEMPT_TIMEOUT_MS));
+		const result = await attempt(options, endpoint, /\/attempts\//.test(endpoint) ? Math.min(remaining, ACTIONS_ATTEMPT_TIMEOUT_MS) : remaining);
 		if (typeof result === "string") return result;
 		const delay = ACTIONS_RETRY_DELAYS_MS[tries];
 		const left = budget.deadline - budget.now();
