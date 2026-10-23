@@ -8,6 +8,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { ProjectRegistry } from "../../src/projects.ts";
 import { createScratchRepo, enableTreehouse, git, readFleet, readRunEvents } from "../harness/index.ts";
+import { dispatchS29 } from "../harness/dispatch-s29.ts";
+import { EMPTY_USAGE, isoTimestamp } from "../../src/contracts.ts";
+import { FleetStore } from "../../src/fleet.ts";
+import { MandateStore } from "../../src/mandate.ts";
 
 test("S29: cp_dispatch rejects ambiguous and missing task files without allocating resources", { timeout: 120_000 }, async (t) => {
 	const home = createScratchHome();
@@ -104,3 +108,144 @@ for (const base of ["main", "trunk"]) {
 		assert.equal(provider.remaining("s29-parent"), 0);
 	});
 }
+
+test("S29: public validation refuses unavailable routing, effort, skills and inactive jobs", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const model = b.provider.addScript("worker", [{ kind: "text", text: "must not start" }]);
+	const ordinary = await b.ledger.create({ title: "ordinary", project: "demo", delivery: "local", kind: "ship" });
+	const blocker = await b.ledger.create({ title: "blocker", project: "demo", delivery: "local", kind: "ship" });
+	const blocked = await b.ledger.create({ title: "blocked", project: "demo", delivery: "local", kind: "ship" });
+	await b.ledger.addDep(blocked.id, blocker.id);
+	const closed = await b.ledger.create({ title: "closed", project: "demo", delivery: "local", kind: "ship" });
+	await b.ledger.close(closed.id, "done");
+	const deferred = await b.ledger.create({ title: "deferred", project: "demo", delivery: "local", kind: "ship" });
+	await b.ledger.update(deferred.id, { status: "deferred" });
+	const variants = [
+		{ job_id: ordinary.id, model: "mock/not-installed", expected: /no available model/ },
+		{ job_id: ordinary.id, thinking: "xhigh", expected: /thinking=xhigh/ },
+		{ job_id: ordinary.id, skills: ["not-installed"], expected: /skill not-installed is not installed/ },
+		{ job_id: ordinary.id, skills: ["pi-subagents"], expected: /pi-subagents is never given/ },
+		{ job_id: blocked.id, expected: /is blocked by/ },
+		{ job_id: closed.id, expected: /is closed/ },
+		{ job_id: deferred.id, expected: /is deferred/ },
+	];
+	const ends = await b.run(variants.map(({ expected, ...args }) => ({ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { task: "Bump x.", model, queue: false, when_ready: false, ...args } }] })));
+	assert.equal(ends.length, variants.length);
+	for (let i = 0; i < variants.length; i++) await t.test(String(i), () => {
+		assert.equal(ends[i]!.isError, true);
+		assert.match(JSON.stringify(ends[i]!.result), variants[i]!.expected);
+	});
+	assert.deepEqual(readFleet(b.home).jobs, []);
+	assert.equal(b.provider.remaining("worker"), 1);
+	for (const job of [ordinary, blocked, deferred]) assert.equal(git(b.clone, "branch", "--list", job.id), "");
+});
+
+for (const profile of [undefined, "planner"] as const) {
+	test(`S29: delivery answer selects ${profile ?? "qa"} and declares the artifact`, { timeout: 120_000 }, async (t) => {
+		const b = await dispatchS29(t);
+		if (profile) git(b.clone, "config", "--local", "command-post.repoMap", "false");
+		const job = await b.ledger.create({ title: "Where is retry configured?", project: "demo", delivery: "answer", kind: "research" });
+		const model = b.provider.addScript("worker", [{ kind: "text", text: "received" }]);
+		const ends = await b.run([{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Where is retry configured?", model, ...(profile ? { profile } : {}) } }] }]);
+		assert.notEqual(ends[0]?.isError, true, JSON.stringify(ends));
+		assert.equal(ends[0]?.result.details?.profile, profile ?? "qa");
+		const record = readFleet(b.home).jobs[0]!;
+		assert.equal(record.kind, "research");
+		assert.equal(record.delivery, "answer");
+		assert.equal(record.worker.role, "planner");
+		assert.ok(existsSync(join(b.home, paths.artifactDir(job.id))));
+		const brief = readFileSync(join(b.home, paths.briefFile(job.id)), "utf8");
+		assert.ok(brief.includes(join(b.home, paths.artifactFile(job.id))));
+		if (!profile) {
+			assert.match(brief, /a question about demo \(delivery: answer\)/);
+			assert.match(brief, /under 8 KiB/);
+		} else assert.doesNotMatch(brief, /## Repo map/);
+	});
+}
+
+for (const capped of [true, false]) {
+	test(`S29: selected grant ${capped ? "cap refuses" : "dispatches"} after public preview`, { timeout: 120_000 }, async (t) => {
+		const b = await dispatchS29(t);
+		const model = b.provider.addScript("worker", [{ kind: "text", text: "received" }]);
+		const job = await b.ledger.create({ title: "selected", project: "demo", delivery: "local", kind: "ship" });
+		const mandates = new MandateStore(b.home);
+		const base = { projects: ["demo"], objective: "dispatch", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10 };
+		mandates.issue({ ...base, at: isoTimestamp(new Date(Date.now() - 60_000)) });
+		const selected = mandates.issue({ ...base, job_ids: [job.id, "cp-counted"], job_cap: capped ? 1 : 10 });
+		await new FleetStore({ home: b.home }).add({ job_id: "cp-counted", project: "demo", kind: "ship", delivery: "local", origin: "terminal", phase: "done", branch: "cp-counted", worktree: "/wt", dispatched_at: isoTimestamp(), usage: EMPTY_USAGE, worker: { pid: 4242, session_id: "s", session_file: "/s.jsonl", profile: "implementer", role: "implementer", model, started_at: isoTimestamp() } });
+		const args = { job_id: job.id, task: "Bump x.", model, queue: false, when_ready: false };
+		const ends = await b.run([
+			{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { ...args, dry_run: true } }] },
+			{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args }] },
+		]);
+		assert.equal(ends.length, 2);
+		assert.equal(ends[0]!.result.details?.mandate_id, selected.id);
+		if (capped) {
+			assert.equal(ends[1]!.isError, true);
+			assert.match(JSON.stringify(ends[1]!.result), new RegExp(`mandate ${selected.id} job cap 1 reached`));
+			assert.equal(readFleet(b.home).jobs.some((record) => record.job_id === job.id), false);
+			assert.equal(git(b.clone, "branch", "--list", job.id), "");
+		} else {
+			assert.notEqual(ends[1]!.isError, true, JSON.stringify(ends));
+			assert.equal(ends[1]!.result.details?.mandate_id, selected.id);
+		}
+	});
+}
+
+test("S29: relative artifact handover preserves bytes while inline credentials refuse without echo", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const secret = "sk-ant-" + "abcdefghijklmnopqrstuvwxyz0123456789";
+	const body = `# Plan\n\nExample credential: ${secret}\n`;
+	writeFileSync(join(b.home, "task.md"), body);
+	writeFileSync(join(b.home, "empty.md"), "  \n");
+	const model = b.provider.addScript("worker", [{ kind: "text", text: "received" }]);
+	const job = await b.ledger.create({ title: "artifact", project: "demo", delivery: "local", kind: "ship" });
+	const refused = await b.ledger.create({ title: "inline", project: "demo", delivery: "local", kind: "ship" });
+	const ends = await b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: refused.id, task: `line one\nline two\n${secret}\n`, model } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: refused.id, task_file: "empty.md", model } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task_file: "task.md", model } }] },
+	]);
+	assert.equal(ends[0]!.isError, true);
+	assert.match(JSON.stringify(ends[0]!.result), /anthropic-style key \(line \d+\)/);
+	assert.ok(!JSON.stringify(ends[0]!.result).includes(secret));
+	assert.equal(ends[1]!.isError, true);
+	assert.ok(JSON.stringify(ends[1]!.result).includes(`task file ${join(b.home, "empty.md")} is empty`));
+	assert.notEqual(ends[2]!.isError, true, JSON.stringify(ends));
+	const brief = readFileSync(join(b.home, paths.briefFile(job.id)), "utf8");
+	assert.ok(brief.includes(join(b.home, "task.md")));
+	assert.ok(!brief.includes(secret));
+	assert.equal(readFileSync(join(b.home, paths.originalTaskFile(job.id)), "utf8"), body);
+	assert.equal(readFileSync(join(b.home, "task.md"), "utf8"), body);
+	assert.deepEqual(readFleet(b.home).jobs.map((record) => record.job_id), [job.id]);
+});
+
+test("S29: explicitly named skills reach a real planner worker and script jobs refuse them", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	for (const name of ["writing-plans", "tdd-x"]) {
+		const dir = join(b.agent.path, "skills", name);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: does ${name}\n---\nSkill text.\n`);
+	}
+	const model = b.provider.addScript("worker", [{ kind: "text", text: "received" }]);
+	const job = await b.ledger.create({ title: "plan", project: "demo", delivery: "local", kind: "research" });
+	const script = await b.ledger.create({ title: "script", project: "demo", delivery: "local", kind: "ship", scriptPath: "scripts/run.sh" });
+	const args = { job_id: job.id, task: "Plan x.", model, profile: "planner", skills: ["writing-plans", "tdd-x"] };
+	const ends = await b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { ...args, dry_run: true } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: script.id, skills: ["tdd-x"], dry_run: true } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: script.id, skills: ["tdd-x"] } }] },
+	]);
+	for (const i of [0, 1]) assert.notEqual(ends[i]!.isError, true, JSON.stringify(ends));
+	assert.deepEqual(ends[0]!.result.details?.skills, ["writing-plans", "tdd-x"].map((name) => ({ name, dir: join(b.agent.path, "skills", name) })));
+	assert.deepEqual(ends[1]!.result.details?.skills, ["writing-plans", "tdd-x"]);
+	assert.deepEqual(readFleet(b.home).jobs[0]?.skills, ends[0]!.result.details?.skills);
+	const brief = readFileSync(join(b.home, paths.briefFile(job.id)), "utf8");
+	assert.match(brief, /writing-plans.*was attached by explicit operator mention/);
+	assert.doesNotMatch(brief, /tdd-x.*was attached by explicit operator mention/);
+	for (const i of [2, 3]) {
+		assert.equal(ends[i]!.isError, true);
+		assert.match(JSON.stringify(ends[i]!.result), /skills apply to pi workers/);
+	}
+});
