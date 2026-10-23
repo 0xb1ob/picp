@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createServer, type AddressInfo } from "node:net";
+import { connect, createServer, type AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { LAYOUT } from "../../src/contracts.ts";
+import { LAYOUT, isoTimestamp } from "../../src/contracts.ts";
 import { isPidAlive } from "../../src/fleet.ts";
+import { OperatorAsks } from "../../src/operator-asks.ts";
 import { RESTART_UNSUPPORTED } from "../../src/dashboard-restart.ts";
 import { controlJournalFile, controlRecordFile, controlSocketFile, readControlRecord } from "../../src/viewer/control-files.ts";
 import { pushConfigFile, pushDataDir } from "../../src/viewer/push-files.ts";
@@ -56,7 +57,16 @@ async function setup(t: TestContext) {
 		if (record.state !== "ok") throw new Error("bridge offline");
 		return { csrf: record.record.csrf, marker, rpc, release: () => put(gate, "release") };
 	};
-	return { state, call, restart, bridge };
+	const control = (op: string, args: object = {}) => new Promise<Record<string, any>>((resolve, reject) => {
+		const record = readControlRecord(state);
+		if (record.state !== "ok") return reject(new Error("control offline"));
+		const client = connect(record.record.socket);
+		let response = "";
+		client.on("connect", () => client.write(`${JSON.stringify({ v: 1, id: 1, token: record.record.token, op, args })}\n`));
+		client.on("data", (chunk) => { response += String(chunk); if (response.includes("\n")) { client.end(); resolve(JSON.parse(response.trim())); } });
+		client.on("error", reject);
+	});
+	return { home: home.path, state, call, restart, bridge, control };
 }
 function refused(result: { status: number; body: Record<string, any>; lines: Array<Record<string, unknown>> }, status: number) {
 	assert.equal(result.status, status, JSON.stringify(result.body));
@@ -121,4 +131,29 @@ test("S27 viewer restart: legacy socket refusal maps to unsupported status and o
 	assert.deepEqual([result.status, result.body], [409, { state: "refused", error: `unsupported: ${RESTART_PREDATES}` }]);
 	refused(result, 409);
 	assert.deepEqual((await s.call("/api/operator/control")).body.restart, { supported: false, blockers: [], reason: RESTART_PREDATES });
+});
+
+test("S27 restart blockers: real queued answers and pending parent sends appear in order and malformed outboxes fail closed", { timeout: 60_000 }, async (t) => {
+	const s = await setup(t);
+	const b = await s.bridge(true, true);
+	const asks = new OperatorAsks(join(s.state, "operator", "asks.jsonl"));
+	const ids: string[] = [];
+	for (const question of ["S27 first", "S27 second"]) {
+		const ask = asks.open({ project: "demo", question, options: [{ label: "Hold", consequence: "Wait" }], recommendation: "Hold" });
+		ids.push(ask.id);
+		const reply = await s.control("send", { kind: "answer", ask_id: ask.id, label: "Hold" });
+		assert.equal(reply.ok, true, JSON.stringify(reply));
+	}
+	const outbox = join(s.home, LAYOUT.sessions, "cp-parent.sends.json");
+	const pending = "ps-20260102110000-0123abcd";
+	put(outbox, JSON.stringify({ schema_version: 1, updated_at: isoTimestamp(), entries: [{ schema_version: 1, id: pending, text: "x", queued_at: isoTimestamp(), state: "injected", attempts: 1 }] }));
+	const expected = ["the session is busy with a turn", "messages are queued for the session", "2 dashboard request(s) injected but not seen by the session yet", ...ids.map((id) => `ask ${id} answered from the dashboard but not recorded yet`)];
+	const status = await s.control("status");
+	assert.deepEqual(status.result.restart.blockers, [...expected, `cp_parent send ${pending} pending`]);
+	assert.equal((await s.control("restart")).error, `not now: ${[...expected, `cp_parent send ${pending} pending`].join("; ")}`);
+	put(outbox, "{not json");
+	const malformed = await s.control("status");
+	assert.deepEqual(malformed.result.restart.blockers.slice(0, -1), expected);
+	assert.match(malformed.result.restart.blockers.at(-1), /parent send outbox unreadable:.*not valid JSON/);
+	b.release();
 });
