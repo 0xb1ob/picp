@@ -457,7 +457,7 @@ export class Integrator {
 		}
 		const mainCiScope = async (): Promise<MainCiScope> => (await this.#options.mainCiScope?.(record.project)) ?? { enforce: false, reason: "no main-CI scope wired" };
 		let observed: Promise<CiRun[]> | undefined; // one Actions observation of this head per advance
-		const readRuns = () => (observed ??= retryTransientRead(() => ghCiRuns({ cwd, exec: statusRunner((dir, bin, args, opts) => this.#run(dir, bin, args, opts)) })(head)));
+		const readRuns = () => (observed ??= retryTransientRead((timeoutMs) => ghCiRuns({ cwd, timeoutMs, exec: statusRunner((dir, bin, args, opts) => this.#run(dir, bin, args, opts)) })(head)));
 		const mainRed = await mainRedHold({ home: this.#options.home, project: record.project, branch, head, ancestry: () => this.#ancestry(cwd, branch, "main"), runs: readRuns, scope: mainCiScope });
 		if (mainRed.fact) facts.push(mainRed.fact); // k52: a red origin/main pauses every merge path below, fix-forward excepted
 		if (mainRed.hold) return this.#write({ jobId, branch, step: "merge", next: "wait", facts: [...facts, mainRed.hold], prUrl, headSha: head, reason: `${jobId}: ${mainRed.hold}` });
