@@ -7,6 +7,7 @@ import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
+import { atomicWriteJson } from "../../src/json-store.ts";
 import { formatContinuationNotice } from "../../src/held-continuation.ts";
 import { boundedWakeupId } from "../../src/wakeup-outbox.ts";
 import { REPO_ROOT, readRunEvents, startPiChild } from "../harness/index.ts";
@@ -256,14 +257,11 @@ test("S20: a legacy unconfirmed green key wakes when its continuation was alread
 	// "suppressed" is journaled at observation; strip only once the key is confirmed, or confirm re-adds it.
 	const file = new CiWatchStore({ home: held.home.path }).file;
 	await waitFor(() => new CiWatchStore({ home: held.home.path }).announced(CI_JOB), (keys) => [...keys].some((k) => k.includes("ci_green")), { timeoutMs: 30_000, what: "the first green key is confirmed" });
-	// The watcher's own read-modify-write can restore the key; re-strip on every poll until the wake lands.
-	const strip = () => {
-		const state = JSON.parse(readFileSync(file, "utf8"));
-		for (const job of state.jobs) job.announced = job.announced.filter((key: string) => !key.includes("ci_green"));
-		writeFileSync(file, JSON.stringify(state));
-	};
-	strip();
-	await waitFor(() => { if (parent.events().length < 2) strip(); return parent.requests(); }, (rows) => rows.some((r) => JSON.stringify(r.body.messages).includes("CI/PR OBSERVED")), {
+	// Confirm has landed; one atomic strip (temp+rename) so no torn write can race the watcher's own atomic writes.
+	const state = JSON.parse(readFileSync(file, "utf8"));
+	for (const job of state.jobs) job.announced = job.announced.filter((key: string) => !key.includes("ci_green"));
+	atomicWriteJson(file, state);
+	await waitFor(parent.requests, (rows) => rows.some((r) => JSON.stringify(r.body.messages).includes("CI/PR OBSERVED")), {
 		timeoutMs: 30_000, what: "legacy unconfirmed key wakes for its coalesced outcome",
 	});
 	assert.deepEqual(parent.events().map((e) => [e.decision, e.reason]).slice(1), [["woke", "outcome coalesced/none"]]);
