@@ -270,6 +270,9 @@ contract it holds stay. Also kept, though outside the 400-file count: `scripts/t
   `tests/worker-merge-guard.test.ts`, `tests/worker-role-tools.test.ts`, `tests/worker-session-policy.test.ts`,
   `tests/operator-tool-guard.test.ts`, `tests/forge-url.test.ts`, `tests/web-access.test.ts`,
   `tests/web-egress.test.ts`.
+- 1 host-integration file, added after the 36 above: `tests/pi-hashline-compaction.test.ts`. Reason: host-integration:
+  needs the host-installed pi-hashline-edit-pro; self-skips without it. Decision: main session, es-077c7d. Ledger
+  rows: [`docs/testing-migration/s25.md`](testing-migration/s25.md#operator-approved-non-e2e-exception).
 
 Pairing, remote authorization and MCP access are not exceptions. They convert, and every negative assertion in them
 moves first.
