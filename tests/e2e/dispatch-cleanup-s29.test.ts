@@ -5,6 +5,9 @@ import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { git, readFleet, readRunEvents, treehouse } from "../harness/index.ts";
+import { CommandPost } from "../../src/command-post.ts";
+import { DispatchError } from "../../src/dispatch.ts";
+import { REPO_ROOT } from "../harness/index.ts";
 
 for (const committed of [false, true]) {
 	test(`S29 cleanup: late filesystem fault ${committed ? "preserves committed work" : "removes the empty branch"}`, { timeout: 120_000 }, async (t) => {
@@ -121,4 +124,37 @@ test("S29 cleanup: a ledger claim refused after spawn leaves no fleet record", {
 	assert.equal((await b.ledger.show(job.id)).status, "deferred");
 	assert.equal(git(b.clone, "branch", "--list", job.id), "");
 	assert.ok(!/leased/.test(treehouse(b.clone, "status")));
+});
+
+test("S29 cleanup: public leased-preflight failure preserves its typed payload and committed work", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const job = await b.ledger.create({ title: "leased preflight", project: "demo", delivery: "local", kind: "ship" });
+	const bin = join(b.home, "bin");
+	mkdirSync(bin);
+	writeFileSync(join(bin, "git"), '#!/bin/sh\ncase "$*" in "switch --no-track -c "*)\n/usr/bin/git "$@" || exit $?\n/usr/bin/git -c user.name=fixture -c user.email=fixture@example.test commit --allow-empty -m "work nobody may lose" || exit $?\nprintf dirty > preflight-dirty.txt\nexit 0;;\nesac\nexec /usr/bin/git "$@"\n', { mode: 0o700 });
+	const model = b.provider.addScript("worker", [{ kind: "text", text: "must not start" }]);
+	b.agent.writeModels(b.provider);
+	const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
+	const previousPath = process.env.PATH;
+	let failure: unknown;
+	try {
+		process.env.PATH = `${bin}:${previousPath}`;
+		failure = await post.dispatch({ jobId: job.id, task: "Bump x.", model }).catch((error: unknown) => error);
+	} finally {
+		process.env.PATH = previousPath;
+	}
+	assert.ok(failure instanceof DispatchError);
+	assert.equal(failure.constructor.name, "DispatchError");
+	assert.ok(failure.result, "leased-preflight payload survives cleanup");
+	assert.equal(failure.result.status, "fail");
+	assert.equal(failure.result.project, "demo");
+	assert.equal(failure.result.branch, job.id);
+	assert.ok(failure.result.worktree);
+	assert.ok(failure.result.findings.some((finding) => finding.code === "worktree_dirty" && finding.level === "fail"));
+	const lines = failure.message.split("\n");
+	assert.equal(lines[0], "preflight refused the leased worktree:");
+	assert.match(lines.at(-1) ?? "", /left in place/);
+	assert.equal(git(b.clone, "log", "-1", "--format=%s", job.id), "work nobody may lose");
+	assert.equal(post.fleet.get(job.id), undefined);
+	assert.equal(b.provider.remaining("worker"), 1);
 });
