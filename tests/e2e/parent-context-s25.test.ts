@@ -67,7 +67,9 @@ test("S25 parent: manual compact excludes drain until completion and cancel rema
 	t.after(() => release());
 	await waitFor(() => f.provider.requests("s25-parent").length, (count) => count === 2, { timeoutMs: 10_000, what: "summarizer entered" });
 	for (const seconds of [undefined, 30]) await assert.rejects(f.bridge.drain(seconds), /no drain starts until it settles/);
-	await f.bridge.drainCancel().catch((error: Error) => assert.doesNotMatch(error.message, /no drain starts until it settles/));
+	// With no drain record, a cancel reaching /cp-drain says so; a refused drain that reached the RPC would have left one.
+	const cancelled = await f.bridge.drainCancel();
+	assert.match(cancelled.text, /^DRAIN: .*no drain to cancel/);
 	release();
 	await compact;
 });
@@ -132,7 +134,10 @@ for (const [tag, summary, outcome] of [
 			assert.match(lines[0]!, /^\S+ cp-parent-host\[\d+\]: parent context compacted before=\d+ after=\d+ ms=\d+ raw=\d+ effective=\d+ threshold=200000$/);
 		}
 		if (tag === "timeout") assert.ok(relays.some((text) => /timed out:.*retry the compaction once the parent has settled.*rotation or restart can abort running workers/.test(text)));
-		if (tag === "failure") assert.ok(relays.some((text) => /parent automatic context control failed:/.test(text)));
+		if (tag === "failure") {
+			assert.ok(relays.some((text) => /parent automatic context control failed:/.test(text)));
+			assert.ok(!relays.some((text) => /retry the compaction/.test(text)), "a failure relay carries no retry advice");
+		}
 		if (tag === "timeout") assert.match(readFileSync(log, "utf8"), /timed_out .*error="timeout after 5000ms/);
 		if (tag === "failure") assert.ok(relays.some((text) => text.includes("S25 summarizer rejected")));
 	});
@@ -211,6 +216,9 @@ for (const [tag, reply] of [
 		await waitFor(() => f.bridge.status().sends, (sends) => sends.every((send) => send.state === "settled"), { timeoutMs: 10_000, what: "first send settled" });
 		await f.bridge.send("Continue after the control pass.");
 		assert.equal(f.provider.requests("s25-parent").length, 2, "no intervening summarizer request");
+		const log = (() => { try { return readFileSync(join(f.home, LAYOUT.state, "daemon.log"), "utf8"); } catch { return ""; } })();
+		if (tag === "low") assert.doesNotMatch(log, /parent context/, "below threshold logs nothing");
+		else assert.match(log, /parent context skipped_length_stop raw=2\d{5} effective=1\d{5} threshold=200000/);
 	});
 }
 
@@ -234,3 +242,16 @@ test("S25 parent: startup compaction retains only unsettled durable sends", { ti
 	for (const send of [settled, failed, undeliverable]) assert.ok(!input.includes(send.id), send.id);
 	assert.doesNotMatch(input, /S25 private/);
 });
+
+// A prompt that kept its size but lost its cache inside the TTL logs one line; a warm cache logs none (the control).
+for (const [tag, cached] of [["rebuilt", 1000], ["warm", 8000]] as const) {
+	test("S25 parent: cache rebuild within the TTL reaches the daemon log", { timeout: 60_000 }, async (t) => {
+		t.diagnostic(tag);
+		const usage = (cached_tokens: number) => ({ prompt_tokens: 10000, cached_tokens });
+		const f = await fixture(t, [{ kind: "text", text: "First.", usage: usage(8000) }, { kind: "text", text: "Second.", usage: usage(cached) }], '{}');
+		await f.start(); await f.bridge.send("Begin."); await f.bridge.send("Continue.");
+		const log = (() => { try { return readFileSync(join(f.home, LAYOUT.state, "daemon.log"), "utf8"); } catch { return ""; } })();
+		if (tag === "rebuilt") assert.match(log, /cp-parent-host\[\d+\]: parent context cache_rebuild cr=1000 prev=10000 gap_s=\d+\n/);
+		else assert.doesNotMatch(log, /cache_rebuild/);
+	});
+}
