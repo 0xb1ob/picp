@@ -1,5 +1,7 @@
 {
 	"tests/e2e/drain-restart.test.ts": 7000,
+	"tests/e2e/drain-worker-s26.test.ts": 13000,
+	"tests/drain-stale-gate-retained.test.ts": 2000,
 	"tests/e2e/teardown-s18.test.ts": 40000,
 	"tests/actions-ci-policy.test.ts": 37,
 	"tests/answer-card.test.ts": 27,
@@ -63,7 +65,6 @@
 	"tests/dispatch.test.ts": 37951,
 	"tests/doc-test-cites.test.ts": 40,
 	"tests/doctor.test.ts": 16759,
-	"tests/drain-stale-gate.test.ts": 180,
 	"tests/drain.test.ts": 383,
 	"tests/e2e-hermetic-gh.test.ts": 14,
 	"tests/e2e/authority.test.ts": 315196,

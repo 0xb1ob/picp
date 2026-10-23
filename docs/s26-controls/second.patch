@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -372 +372 @@
+-		const spent = record.finished_at !== undefined && Date.parse(record.finished_at) + 1000 <= PROCESS_STARTED_MS
++		const spent = record.finished_at !== undefined && Date.parse(record.finished_at) <= PROCESS_STARTED_MS

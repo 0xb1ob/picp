@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -375 +375 @@
+-		return spent !== undefined && this.#clear(`at a start gate (${spent})`) !== undefined;
++		return false;
