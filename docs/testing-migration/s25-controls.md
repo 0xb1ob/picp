@@ -167,3 +167,75 @@ index 41fd3d2..bdcf4c2 100644
  			pi.sendMessage(message, options);
 ```
 <!-- /patch:S25-start -->
+
+<!-- patch:S25-below -->
+```diff
+diff --git a/src/parent-context.ts b/src/parent-context.ts
+index 51b2801..d2c6374 100644
+--- a/src/parent-context.ts
++++ b/src/parent-context.ts
+@@ -209,7 +209,7 @@ export async function autoParentContext(home: string, missionEnd: string | undef
+ 	let raw: number | null | undefined;
+ 	try { raw = (await control.status()).contextTokens; } catch (error) { return { ...outcome, event: "failed", error: (error as Error).message }; }
+ 	const threshold = parentSettings(home).compact_at_tokens;
+-	if (!threshold || raw === null || raw === undefined || raw < threshold) return outcome;
++	if (!threshold || raw === null || raw === undefined || false) return outcome;
+ 	const effective = effectiveContextTokens(raw, lastAssistant)!;
+ 	Object.assign(outcome, { raw, effective, threshold });
+ 	if (effective < threshold) return { ...outcome, event: "skipped_length_stop" };
+```
+<!-- /patch:S25-below -->
+
+<!-- patch:S25-length -->
+```diff
+diff --git a/src/parent-context.ts b/src/parent-context.ts
+index 51b2801..72ab65b 100644
+--- a/src/parent-context.ts
++++ b/src/parent-context.ts
+@@ -212,7 +212,7 @@ export async function autoParentContext(home: string, missionEnd: string | undef
+ 	if (!threshold || raw === null || raw === undefined || raw < threshold) return outcome;
+ 	const effective = effectiveContextTokens(raw, lastAssistant)!;
+ 	Object.assign(outcome, { raw, effective, threshold });
+-	if (effective < threshold) return { ...outcome, event: "skipped_length_stop" };
++	if (false) return { ...outcome, event: "skipped_length_stop" };
+ 	const refused = control.unsettled();
+ 	if (refused) return { ...outcome, event: "refused", error: refused };
+ 	const started = Date.now();
+```
+<!-- /patch:S25-length -->
+
+<!-- patch:S25-rebuilt -->
+```diff
+diff --git a/src/parent-auto-control.ts b/src/parent-auto-control.ts
+index b33f031..b3700b4 100644
+--- a/src/parent-auto-control.ts
++++ b/src/parent-auto-control.ts
+@@ -51,7 +51,7 @@ export function cacheRebuildLine(prev: AssistantLike | undefined, next: Assistan
+ 	if (typeof prev?.timestamp !== "number" || typeof next.timestamp !== "number") return undefined;
+ 	const gap = (next.timestamp - prev.timestamp) / 1000, before = prompt(prev), cacheRead = next.usage?.cacheRead ?? 0;
+ 	// A compaction shrinks the prompt itself; only a prompt that kept its size but lost its cache is a rebuild.
+-	if (gap < 0 || gap > PROMPT_CACHE_TTL_SECONDS || cacheRead >= before / 2 || prompt(next) < before / 2) return undefined;
++	if (true) return undefined;
+ 	return `cache_rebuild cr=${cacheRead} prev=${before} gap_s=${Math.round(gap)}`;
+ }
+ 
+```
+<!-- /patch:S25-rebuilt -->
+
+<!-- patch:S25-warm -->
+```diff
+diff --git a/src/parent-auto-control.ts b/src/parent-auto-control.ts
+index b33f031..c5123aa 100644
+--- a/src/parent-auto-control.ts
++++ b/src/parent-auto-control.ts
+@@ -51,7 +51,7 @@ export function cacheRebuildLine(prev: AssistantLike | undefined, next: Assistan
+ 	if (typeof prev?.timestamp !== "number" || typeof next.timestamp !== "number") return undefined;
+ 	const gap = (next.timestamp - prev.timestamp) / 1000, before = prompt(prev), cacheRead = next.usage?.cacheRead ?? 0;
+ 	// A compaction shrinks the prompt itself; only a prompt that kept its size but lost its cache is a rebuild.
+-	if (gap < 0 || gap > PROMPT_CACHE_TTL_SECONDS || cacheRead >= before / 2 || prompt(next) < before / 2) return undefined;
++	if (gap < 0 || gap > PROMPT_CACHE_TTL_SECONDS || prompt(next) < before / 2) return undefined;
+ 	return `cache_rebuild cr=${cacheRead} prev=${before} gap_s=${Math.round(gap)}`;
+ }
+ 
+```
+<!-- /patch:S25-warm -->
