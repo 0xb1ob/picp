@@ -371,7 +371,7 @@ Current S15 consumer evidence is in `tests/e2e/diff-review.test.ts` and `tests/e
   false → no wake-up, true → wake-up; live pid → untouched; decision present
   → untouched.
 
-`tests/wakeups.test.ts`: the six-row staleness table above, one test per row,
+`tests/e2e/wake-context-s22.test.ts`: consumer coverage of the six-row staleness table above,
 plus the `review` head-moved row.
 
 `tests/gate.test.ts`: the thirteen `gate()` calls become `start()` then
