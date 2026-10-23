@@ -97,6 +97,17 @@ test("S25 parent: start, compact and resume deliver current hidden guidance once
 	await f.start();
 	await f.bridge.send("Resume.");
 	for (const text of ["S25 refreshed order.", "S25 refreshed memory.", "Parent only: Put independent tool calls"]) assert.equal(f.input().split(text).length - 1, 1, `resume ${text}`);
+	await waitFor(() => f.bridge.status().sends, (sends) => sends.every((send) => send.state === "settled"), { timeoutMs: 10_000, what: "resumed send settled" });
+	await f.bridge.stop();
+	writeFileSync(memory, "# Learnings\n\n- S25 newer memory. <!--P-->\n");
+	await f.start(); await f.bridge.send("Use changed memory.");
+	assert.equal(f.input().split("S25 newer memory.").length - 1, 1);
+	assert.equal(f.input().split("S25 refreshed order.").length - 1, 2, "changed memory reinjects the pair");
+	await waitFor(() => f.bridge.status().sends, (sends) => sends.every((send) => send.state === "settled"), { timeoutMs: 10_000, what: "changed memory settled" });
+	await f.bridge.stop();
+	writeFileSync(memory, "# Learnings\n\n");
+	await f.start(); await f.bridge.send("Memory is now empty.");
+	assert.equal(f.input().split("S25 refreshed order.").length - 1, 3, "disappeared memory changes the digest set");
 });
 
 
@@ -122,6 +133,8 @@ for (const [tag, summary, outcome] of [
 		}
 		if (tag === "timeout") assert.ok(relays.some((text) => /timed out:.*retry the compaction once the parent has settled.*rotation or restart can abort running workers/.test(text)));
 		if (tag === "failure") assert.ok(relays.some((text) => /parent automatic context control failed:/.test(text)));
+		if (tag === "timeout") assert.match(readFileSync(log, "utf8"), /timed_out .*error="timeout after 5000ms/);
+		if (tag === "failure") assert.ok(relays.some((text) => text.includes("S25 summarizer rejected")));
 	});
 }
 
