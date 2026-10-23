@@ -30,6 +30,7 @@
  *     re-dispatched from the same task file.
  */
 
+import { recoveryTarget } from "./gate-recovery.ts";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { benignSenseAt, listedAfter, negatedAt, negatedHeadAt } from "./risk-negation.ts";
@@ -913,6 +914,7 @@ export class PipelineRunner {
 	 */
 	async advance(researchId: string): Promise<AdvanceResult> {
 		const record = this.store.require(researchId);
+		const recovery = recoveryTarget(this.#options.home, researchId);
 		if (record.superseded_by) {
 			throw new PipelineError(
 				`${researchId} was superseded by ${record.superseded_by} (cp_pipeline reanchor) — its artifact must never reach an ` +
@@ -993,10 +995,13 @@ export class PipelineRunner {
 
 		// --- 2/3. a reviewer already running owns this step ---------------------
 		const running = this.#pendingOn(researchId);
-		if (running) return this.#waitOn(record, "gating", running, hungPlanner ? { hung_planner: true } : {});
+		if (running && !(recovery && existsSync(join(this.#options.home, paths.gateFile(researchId, recovery.attempt + 1))))) {
+			return this.#waitOn(record, "gating", running, hungPlanner ? { hung_planner: true } : {});
+		}
 
 		// --- 2. the optional panel, before the expensive gate -----------------
-		const { report: quality, fresh, wait: qualityWait } = await this.#quality(record);
+		const { report: quality, fresh, wait: qualityWait } = recovery
+			? { report: undefined, fresh: false, wait: undefined } : await this.#quality(record);
 		if (qualityWait) return this.#waitOn(record, "gating", qualityWait, hungPlanner ? { hung_planner: true } : {});
 		const qualityExtra = quality ? { quality } : {};
 		if (quality && fresh && !quality.passed) {
@@ -1037,7 +1042,7 @@ export class PipelineRunner {
 			artifact.modified_at > reviseAt &&
 			(last === undefined || artifact.modified_at > last.decided_at);
 		const needsGate =
-			!last || (last.verdict === "escalate" && last.cause === "operational") || revised || changedAfterRevise;
+			!!recovery || !last || (last.verdict === "escalate" && last.cause === "operational") || revised || changedAfterRevise;
 		if (needsGate) {
 			const started = await this.#options.gate().start({
 				jobId: researchId,
@@ -1055,6 +1060,10 @@ export class PipelineRunner {
 			last = gateResult.verdict;
 		}
 		if (!last) throw new PipelineError(`${researchId}: gate produced no decision`);
+		if (recovery && last.verdict !== "pass") {
+			return this.#step(record, "gating", "surface", `${researchId}: corrected recovery is exhausted; no automatic retry or revision.`,
+				{ ...qualityExtra, ...(gateResult ? { gate: gateResult } : {}) });
+		}
 
 		if (last.verdict === "revise") {
 			this.store.setState(researchId, "gating", this.#now());
