@@ -366,17 +366,23 @@ test("S20: abort strands no autonomous turn and the next prompt carries the noti
 			timeoutMs: 30_000, what: "idle notice reaches a model request",
 		});
 	} catch (error) {
-		const outbox = box.read();
-		const lines = [
-			`wake enqueued at ${new Date(wakeAt).toISOString()}`,
-			`outbox pending=${JSON.stringify(outbox.pending.map((e) => ({ id: e.id, queued_at: e.queued_at })))}`,
-			`outbox sends=${JSON.stringify(outbox.sends ?? [])}`,
-			`outbox delivered=${JSON.stringify(outbox.delivered)} discarded=${JSON.stringify(outbox.discarded ?? [])}`,
-			...requests().map((r, i) => `request#${i} at=${new Date(r.at).toISOString()} last=${JSON.stringify(r.body.messages?.at(-1)).slice(0, 300)}`),
-			"rpc records (first seen by 25ms poll):", ...trail,
-			`stderr: ${child.stderr().slice(-1500)}`,
-		];
-		throw new Error(`${(error as Error).message}\nwake-surface trail:\n${lines.join("\n")}`);
+		let detail: string;
+		try {
+			const outbox = box.read();
+			const at = (r: { at?: number }) => (Number.isFinite(r.at) ? new Date(r.at!).toISOString() : "?");
+			detail = [
+				`wake enqueued at ${new Date(wakeAt).toISOString()}; trail built ${new Date().toISOString()}`,
+				`outbox pending=${JSON.stringify(outbox.pending.map((e) => ({ id: e.id, queued_at: e.queued_at })))}`,
+				`outbox sends=${JSON.stringify(outbox.sends ?? [])}`,
+				`outbox delivered=${JSON.stringify(outbox.delivered)} discarded=${JSON.stringify(outbox.discarded ?? [])}`,
+				...requests().map((r, i) => `request#${i} at=${at(r)} last=${String(JSON.stringify(r.body.messages?.at(-1))).slice(0, 300)}`),
+				"rpc records (first seen by 25ms poll):", ...trail,
+				`stderr: ${child.stderr().slice(-1500)}`,
+			].join("\n");
+		} catch (trailError) {
+			detail = `trail unavailable: ${(trailError as Error).message ?? String(trailError)}`;
+		}
+		throw new Error(`${(error as Error).message}\nwake-surface trail:\n${detail}`);
 	}
 	assert.doesNotMatch(JSON.stringify(requests().map((r) => r.body.messages)), /fleet notice\(s\) arrived while you were busy/);
 	assert.equal(provider.remaining("s20-abort"), 0);
