@@ -72,6 +72,7 @@
 	"tests/e2e/bounds.test.ts": 43172,
 	"tests/e2e/ci-evidence.test.ts": 12790,
 	"tests/e2e/ci-watch-jobless.test.ts": 5078,
+	"tests/e2e/ci-watch-transient.test.ts": 12000,
 	"tests/e2e/decide.test.ts": 1130,
 	"tests/e2e/diff-review.test.ts": 112160,
 	"tests/e2e/headless-lifecycle.test.ts": 274634,

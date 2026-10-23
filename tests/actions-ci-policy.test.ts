@@ -53,16 +53,23 @@ function allowlistedGh(answer: (endpoint: string) => string) {
 	return { exec, calls };
 }
 
-// #420: one observation's jobs pages are read in parallel batches, so many runs do not spend the budget serially.
-test("an observation of six runs fits a budget that six serial jobs reads would spend", async () => {
+// #420: one observation's jobs pages are read in parallel batches (never more than the concurrency), not serially.
+test("an observation of six runs reads its jobs in parallel batches", async () => {
 	const run = (id: number) => ({ id, run_attempt: 1, head_sha: SHA, status: "completed", conclusion: "success", name: `w${id}` });
+	let inFlight = 0;
+	let peak = 0;
 	const exec: CommandRunner = async (_command, args) => {
-		await new Promise((resolve) => setTimeout(resolve, 80));
 		const jobs = /runs\/(\d+)\/attempts/.exec(String(args[1]));
+		if (jobs) {
+			peak = Math.max(peak, ++inFlight);
+			for (let turn = 0; turn < 5; turn++) await Promise.resolve();
+			inFlight--;
+		}
 		return JSON.stringify(jobs ? { total_count: 0, jobs: [] } : { total_count: 6, workflow_runs: [1, 2, 3, 4, 5, 6].map(run) });
 	};
-	const runs = await readActionsCi({ cwd: ".", exec, sha: SHA, timeoutMs: 400 });
+	const runs = await readActionsCi({ cwd: ".", exec, sha: SHA });
 	assert.equal(runs.length, 6);
+	assert.equal(peak, 4, "four jobs reads at once, the other two in the next batch");
 });
 
 test("Actions reader issues only runs and attempt-jobs requests and never follows response metadata links", async () => {
