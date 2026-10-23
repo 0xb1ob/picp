@@ -7,11 +7,12 @@ import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratc
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { ProjectRegistry } from "../../src/projects.ts";
-import { createScratchRepo, enableTreehouse, git, readFleet, readRunEvents } from "../harness/index.ts";
+import { createScratchRepo, enableTreehouse, git, readFleet, readRunEvents, readRunStatus, REPO_ROOT, waitFor } from "../harness/index.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { EMPTY_USAGE, isoTimestamp } from "../../src/contracts.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { MandateStore } from "../../src/mandate.ts";
+import { loadProfile } from "../../src/profiles.ts";
 
 test("S29: cp_dispatch rejects ambiguous and missing task files without allocating resources", { timeout: 120_000 }, async (t) => {
 	const home = createScratchHome();
@@ -54,10 +55,10 @@ for (const base of ["main", "trunk"]) {
 		execFileSync("git", ["clone", "--quiet", repo.remote as string, clone]);
 		const pool = enableTreehouse(clone);
 		const provider = await MockProvider.start();
-		const workerModel = provider.addScript("s29-worker", [{ kind: "text", text: "task received" }]);
-		const job = await scratch.ledger.create({ title: "handover", project: "demo", delivery: "local", kind: "ship" });
+		const workerModel = provider.addScript("s29-worker", [{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "git rev-parse --abbrev-ref HEAD" } }] }, { kind: "text", text: "branch confirmed" }]);
+		const job = await scratch.ledger.create({ title: "handover", project: "demo", delivery: "pr", kind: "ship" });
 		const taskFile = join(home.path, "task.md");
-		const body = "# Plan\n\nBump x to 2 in src/app.ts.\n";
+		const body = "Bump x to 2 in src/app.ts.\n";
 		writeFileSync(taskFile, body);
 		const model = provider.addScript("s29-parent", [
 			{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task_file: taskFile, model: workerModel } }] },
@@ -89,6 +90,22 @@ for (const base of ["main", "trunk"]) {
 		assert.equal(record.worker.model, workerModel);
 		assert.equal(record.worker.pid, first.pid);
 		assert.ok(record.lease_id);
+		assert.equal(first.worker, job.id);
+		assert.ok(first.pid);
+		assert.match(String(first.routing), /source=override model=/);
+		assert.notEqual(record.worktree, clone);
+		assert.equal(record.phase, "waiting");
+		assert.equal(record.project, "demo");
+		assert.equal(record.kind, "ship");
+		assert.equal(record.delivery, "pr");
+		assert.equal(record.branch, job.id);
+		assert.ok(record.worker.session_file.startsWith(join(home.path, LAYOUT.sessions) + "/"));
+		assert.ok(record.budget?.tokens);
+		assert.equal(record.routing?.inferred, false);
+		assert.equal(record.routing?.scope, "S");
+		assert.equal(record.routing?.risk, "low");
+		assert.deepEqual(record.routing?.provenance, { scope: "defaulted", risk: "defaulted" });
+		assert.equal(record.routing?.reasons, undefined);
 		assert.equal(git(record.worktree, "symbolic-ref", "--short", "HEAD"), job.id);
 		assert.equal(git(record.worktree, "rev-parse", "HEAD"), git(clone, "rev-parse", `origin/${base}`));
 		assert.equal(record.checkpoint_ref, `refs/cp-checkpoints/${job.id}`);
@@ -100,9 +117,18 @@ for (const base of ["main", "trunk"]) {
 		assert.ok(brief.includes(`git rev-parse origin/${base}`));
 		if (base === "trunk") assert.ok(!brief.includes("origin/main"));
 		assert.ok(!brief.includes("${"));
+		assert.ok(brief.includes(job.id) && brief.includes(record.worktree));
+		assert.match(brief, /## Repo map/);
+		assert.match(brief, /src\/app\.ts.*1 lines.*x/);
+		assert.ok(existsSync(join(home.path, LAYOUT.state, "repo-map/demo", `${git(clone, "rev-parse", `origin/${base}`)}.md`)));
 		assert.equal(readFileSync(join(home.path, paths.originalTaskFile(job.id)), "utf8"), body);
 		assert.equal(readFileSync(taskFile, "utf8"), body);
 		assert.equal((await scratch.ledger.show(job.id)).status, "in_progress");
+		const status = await waitFor(() => readRunStatus(home.path, job.id), (value) => value.tool_calls >= 1);
+		assert.equal(status.profile, "implementer");
+		assert.equal(status.model, workerModel);
+		const resolved = readRunEvents(home.path, job.id).find((event) => event.type === "routing_resolved");
+		assert.deepEqual((resolved?.payload as { provenance?: unknown })?.provenance, { scope: "defaulted", risk: "defaulted" });
 		const types = readRunEvents(home.path, job.id).map((event) => event.type);
 		for (const type of ["spawned", "prompt_sent", "checkpoint_captured", "original_task_frozen", "routing_resolved"]) assert.ok(types.includes(type), type);
 		assert.equal(provider.remaining("s29-parent"), 0);
@@ -120,6 +146,10 @@ test("S29: public validation refuses unavailable routing, effort, skills and ina
 	await b.ledger.close(closed.id, "done");
 	const deferred = await b.ledger.create({ title: "deferred", project: "demo", delivery: "local", kind: "ship" });
 	await b.ledger.update(deferred.id, { status: "deferred" });
+	const legacy = { id: "cp-unlabelled", title: "unlabelled", status: "open" as const, labels: ["project:demo"], blocked_by: [], comments: [], created_at: "2026-09-04T10:00:00Z", updated_at: "2026-09-04T10:00:00Z" };
+	const doc = b.ledger.read();
+	doc.jobs.push(legacy);
+	writeFileSync(b.ledger.file, JSON.stringify(doc));
 	const variants = [
 		{ job_id: ordinary.id, model: "mock/not-installed", expected: /no available model/ },
 		{ job_id: ordinary.id, thinking: "xhigh", expected: /thinking=xhigh/ },
@@ -128,12 +158,15 @@ test("S29: public validation refuses unavailable routing, effort, skills and ina
 		{ job_id: blocked.id, expected: /is blocked by/ },
 		{ job_id: closed.id, expected: /is closed/ },
 		{ job_id: deferred.id, expected: /is deferred/ },
+		{ job_id: legacy.id, expected: /not dispatchable/ },
 	];
 	const ends = await b.run(variants.map(({ expected, ...args }) => ({ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { task: "Bump x.", model, queue: false, when_ready: false, ...args } }] })));
 	assert.equal(ends.length, variants.length);
 	for (let i = 0; i < variants.length; i++) await t.test(String(i), () => {
 		assert.equal(ends[i]!.isError, true);
 		assert.match(JSON.stringify(ends[i]!.result), variants[i]!.expected);
+		const id = variants[i]!.job_id;
+		if (id !== deferred.id && existsSync(join(b.home, paths.eventsFile(id)))) assert.ok(!readRunEvents(b.home, id).some((event) => event.type === "spawned"), id);
 	});
 	assert.deepEqual(readFleet(b.home).jobs, []);
 	assert.equal(b.provider.remaining("worker"), 1);
@@ -244,8 +277,38 @@ test("S29: explicitly named skills reach a real planner worker and script jobs r
 	const brief = readFileSync(join(b.home, paths.briefFile(job.id)), "utf8");
 	assert.match(brief, /writing-plans.*was attached by explicit operator mention/);
 	assert.doesNotMatch(brief, /tdd-x.*was attached by explicit operator mention/);
+	const requests = await waitFor(() => b.provider.requests("worker"), (seen) => seen.length > 0);
+	for (const name of ["writing-plans", "tdd-x"]) assert.ok(JSON.stringify(requests[0]?.body).includes(join(b.agent.path, "skills", name)), name);
 	for (const i of [2, 3]) {
 		assert.equal(ends[i]!.isError, true);
 		assert.match(JSON.stringify(ends[i]!.result), /skills apply to pi workers/);
 	}
+});
+
+test("S29: failed npm ci is journaled once and warns the accepted worker", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t, { files: { "package-lock.json": "{\"packages\":{}}\n" } });
+	const bin = join(b.home, "bin");
+	mkdirSync(bin);
+	const npm = join(bin, "npm");
+	writeFileSync(npm, "#!/bin/sh\necho EINTEGRITY >&2\nexit 1\n", { mode: 0o700 });
+	const job = await b.ledger.create({ title: "deps", project: "demo", delivery: "local", kind: "ship" });
+	const model = b.provider.addScript("worker", [{ kind: "text", text: "received" }]);
+	const ends = await b.run([{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Bump x.", model, thinking: "off" } }] }], { PATH: `${bin}:${process.env.PATH}` });
+	assert.notEqual(ends[0]?.isError, true, JSON.stringify(ends));
+	assert.equal(ends[0]?.result.details?.receipt, "accepted");
+	const events = readRunEvents(b.home, job.id).filter((event) => event.type === "deps_prepared");
+	assert.equal(events.length, 1);
+	assert.match(JSON.stringify(events[0]?.payload), /failed.*EINTEGRITY/);
+	assert.match(readFileSync(join(b.home, paths.briefFile(job.id)), "utf8"), /Dependencies in this worktree may be stale/);
+	assert.equal(readFleet(b.home).jobs[0]?.routing?.thinking, "off");
+});
+
+test("S29: a model with no serviceable thinking keeps profile effort inert", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t, { emptyThinking: true });
+	const job = await b.ledger.create({ title: "inert effort", project: "demo", delivery: "local", kind: "ship" });
+	const model = b.provider.addScript("worker", [{ kind: "text", text: "received" }]);
+	const ends = await b.run([{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Bump x.", model } }] }]);
+	assert.notEqual(ends[0]?.isError, true, JSON.stringify(ends));
+	assert.equal(ends[0]?.result.details?.state, "dispatched");
+	assert.equal(readFleet(b.home).jobs[0]?.routing?.thinking, loadProfile(join(REPO_ROOT, "profiles"), "implementer").frontmatter.thinking);
 });

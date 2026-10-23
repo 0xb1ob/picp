@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { git, readRunEvents, treehouse } from "../harness/index.ts";
+import { git, readFleet, readRunEvents, treehouse } from "../harness/index.ts";
 
 for (const committed of [false, true]) {
 	test(`S29 cleanup: late filesystem fault ${committed ? "preserves committed work" : "removes the empty branch"}`, { timeout: 120_000 }, async (t) => {
@@ -36,6 +36,14 @@ for (const committed of [false, true]) {
 			assert.equal(payload.reason, undefined);
 			assert.equal(git(b.clone, "branch", "--list", job.id), "");
 			assert.ok(!/leased/.test(treehouse(b.clone, "status")));
+			await b.closeParents();
+			rmSync(fleet, { recursive: true });
+			writeFileSync(npm, "#!/bin/sh\nexit 0\n");
+			const retryModel = b.provider.addScript("retry-worker", [{ kind: "text", text: "retried" }]);
+			const retry = await b.run([{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Retry bump.", model: retryModel } }] }], { PATH: `${bin}:${process.env.PATH}` });
+			assert.notEqual(retry[0]?.isError, true, JSON.stringify(retry));
+			assert.equal(retry[0]?.result.details?.state, "dispatched");
+			assert.equal(git(String(retry[0]?.result.details?.worktree), "symbolic-ref", "--short", "HEAD"), job.id);
 		}
 	});
 }
@@ -80,3 +88,37 @@ for (const fault of ["unreadable", "delete failed"]) {
 		assert.equal(git(b.clone, "rev-parse", job.id), git(b.clone, "rev-parse", "origin/main"));
 	});
 }
+
+test("S29 cleanup: branch creation failure returns its acquired lease", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const job = await b.ledger.create({ title: "switch fault", project: "demo", delivery: "local", kind: "ship" });
+	const bin = join(b.home, "bin");
+	mkdirSync(bin);
+	writeFileSync(join(bin, "git"), '#!/bin/sh\ncase "$*" in "switch --no-track -c "*|"checkout --no-track -b "*) echo "fixture branch creation failed" >&2; exit 1;; esac\nexec /usr/bin/git "$@"\n', { mode: 0o700 });
+	const model = b.provider.addScript("worker", [{ kind: "text", text: "must not start" }]);
+	const ends = await b.run([{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Bump x.", model } }] }], { PATH: `${bin}:${process.env.PATH}` });
+	assert.equal(ends[0]?.isError, true);
+	assert.match(JSON.stringify(ends[0]?.result), /cannot create branch.*fixture branch creation failed/);
+	assert.equal(existsSync(join(b.home, LAYOUT.fleetFile)), false);
+	assert.equal(git(b.clone, "branch", "--list", job.id), "");
+	assert.ok(!/leased/.test(treehouse(b.clone, "status")));
+	assert.equal((await b.ledger.show(job.id)).status, "open");
+	assert.equal(b.provider.remaining("worker"), 1);
+});
+
+test("S29 cleanup: a ledger claim refused after spawn leaves no fleet record", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t, { files: { "package-lock.json": "{\"packages\":{}}\n" } });
+	const job = await b.ledger.create({ title: "claim race", project: "demo", delivery: "local", kind: "ship" });
+	const bin = join(b.home, "bin");
+	mkdirSync(bin);
+	const code = `const fs=require("node:fs");const f=${JSON.stringify(b.ledger.file)};const d=JSON.parse(fs.readFileSync(f,"utf8"));d.jobs.find(j=>j.id===${JSON.stringify(job.id)}).status="deferred";fs.writeFileSync(f,JSON.stringify(d));`;
+	writeFileSync(join(bin, "npm"), `#!/bin/sh\nnode -e '${code.replaceAll("'", "'\\''")}'\n`, { mode: 0o700 });
+	const model = b.provider.addScript("worker", [{ kind: "text", text: "received" }]);
+	const ends = await b.run([{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Bump x.", model } }] }], { PATH: `${bin}:${process.env.PATH}` });
+	assert.equal(ends[0]?.isError, true);
+	assert.match(JSON.stringify(ends[0]?.result), /is deferred/);
+	assert.equal(readFleet(b.home).jobs.some((record) => record.job_id === job.id), false);
+	assert.equal((await b.ledger.show(job.id)).status, "deferred");
+	assert.equal(git(b.clone, "branch", "--list", job.id), "");
+	assert.ok(!/leased/.test(treehouse(b.clone, "status")));
+});
