@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -364 +364 @@
+-		return this.#clear("at startup");
++		return undefined;

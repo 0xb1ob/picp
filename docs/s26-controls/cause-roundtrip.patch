@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -116 +116 @@
+-	return { timeoutS, cause: { reason, ...(sha ? { target_sha: sha } : {}) } };
++	return { timeoutS };

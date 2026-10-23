@@ -128,6 +128,17 @@ test("S26: real bridge restart refuses unsupported sessions and restarts a persi
 	assert.deepEqual(restartStatus.slice(-2).map((line) => [line.type, line.kind ?? line.state, line.peer]), [["request", "restart", "100.64.0.9"], ["outcome", "restarting", "100.64.0.9"]]);
 	assert.equal(saved.id, (reply as { result: { id: string } }).result.id);
 	// RPC pi currently stays alive after ctx.shutdown; shutdown assertions remain pending-fix in the S26 ledger.
+	if (process.env.S26_RESTART_REPRO) {
+		const { isPidAlive } = await import("../../src/fleet.ts");
+		if (process.env.S26_RESTART_REPRO === "terminate") await child.close();
+		let failure: unknown;
+		try { await waitFor(() => isPidAlive(saved.pid), (alive) => !alive, { timeoutMs: 30_000, what: "accepted restart kills the old RPC pi" }); }
+		catch (error) { failure = error; }
+		const socketResponsive = await controlRequest(active, "status", {}).then((result) => result.ok, () => false);
+		console.error(JSON.stringify({ mode: process.env.S26_RESTART_REPRO, pid: saved.pid, pidAlive: isPidAlive(saved.pid), socketExists: existsSync(active.socket), socketResponsive }));
+		if (failure) throw failure;
+		assert.equal(socketResponsive, false, "the old control socket stops serving after process termination");
+	}
 	assert.equal(provider.remaining("s26-restart"), 0);
 });
 

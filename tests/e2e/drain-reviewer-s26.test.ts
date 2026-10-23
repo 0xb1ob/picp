@@ -6,10 +6,19 @@ import { LAYOUT, paths } from "../../src/contracts.ts";
 import { readDrain } from "../../src/drain.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
 import { JOB, seedHeldHome } from "../harness/held-home.ts";
+import { FleetStore } from "../../src/fleet.ts";
 
-for (const timeout of [false, true]) {
-	test(`S26: real diff reviewer ${timeout ? "survives drain timeout" : "settles before drain completes"}`, { timeout: 90_000 }, async (t) => {
+for (const [timeout, name] of [
+	[false, "S26: real diff reviewer settles before drain completes"],
+	[true, "S26: real diff reviewer survives drain timeout"],
+] as const) {
+	test(name, { timeout: 90_000 }, async (t) => {
 		const s = await seedHeldHome({ ciState: "in_progress", review: "none" });
+		const fleet = new FleetStore({ home: s.home.path });
+		await fleet.patch(JOB, { lease_id: "lease-7" });
+		await fleet.add({ ...fleet.get(JOB)!, job_id: "cp-done", branch: "cp-done", phase: "done" });
+		mkdirSync(join(s.home.path, paths.runDir(JOB)), { recursive: true });
+		writeFileSync(join(s.home.path, paths.envelopeFile(JOB)), JSON.stringify({ received_at: "2026-09-27T12:00:00Z", envelope: { head_sha: s.headSha } }));
 		const provider = await MockProvider.start();
 		const agent = createAgentDir({ provider });
 		const siblingModel = provider.addScript("s26-sibling", [{ kind: "text", text: "Acknowledged." }], { onExhausted: "repeat" });
@@ -33,6 +42,7 @@ for (const timeout of [false, true]) {
 		await child.waitFor((r) => r.type === "extension_ui_request" && String(r.message).startsWith("DRAIN:"), 15_000);
 		if (timeout) await waitFor(() => readDrain(s.home.path), (record) => record?.state === "timeout", { timeoutMs: 12_000, what: "timeout tick" });
 		const state = readDrain(s.home.path)!;
+		assert.deepEqual(state.jobs, [{ job_id: JOB, phase: "held", lease: "lease-7", head: s.headSha }]);
 		if (timeout) {
 			assert.equal(state.state, "timeout");
 			assert.deepEqual(state.survivors, ["cp-held#review-1"]);

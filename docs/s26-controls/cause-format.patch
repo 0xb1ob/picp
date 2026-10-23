@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -100 +100 @@
+-	if (cause?.reason === "auto-update") {
++	if (false) {

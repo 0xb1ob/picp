@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { test } from "node:test";
-import { COMMAND_POST_EXTENSION, createAgentDir, MockProvider, startPiChild } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, createAgentDir, MockProvider, REPO_ROOT, startPiChild } from "../harness/index.ts";
 import { drainFile } from "../../src/drain.ts";
+import { CommandPost } from "../../src/command-post.ts";
+import { readDrain, restartNotice } from "../../src/drain.ts";
+import { readFileSync } from "node:fs";
+import { waitFor } from "../harness/index.ts";
 import { JOB, seedHeldHome } from "../harness/held-home.ts";
 
 const calls = [
@@ -33,4 +37,28 @@ test("S26: real tools refuse starts while drain state exists or is malformed", {
 			} finally { await child.close(); agent.cleanup(); await provider.stop(); s.repo.cleanup(); s.home.cleanup(); }
 		});
 	}
+});
+
+
+test("S26: a real integrate step stays tracked through timeout and releases after its forge response", { timeout: 60_000 }, async (t) => {
+	const s = await seedHeldHome({ ciState: "in_progress", review: "none" });
+	const previous = process.env.PATH;
+	process.env.PATH = `${s.bin}:${previous}`;
+	const post = new CommandPost({ home: s.home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	writeFileSync(`${s.headFile}.delay`, "6000");
+	const integration = post.integrate({ jobId: JOB });
+	t.after(async () => { await integration.catch(() => undefined); await post.shutdown(); process.env.PATH = previous; s.repo.cleanup(); s.home.cleanup(); });
+	await waitFor(() => readFileSync(s.ghLog, "utf8"), (text) => text.includes("pr view"), { what: "real forge request enters delayed response" });
+	assert.match(restartNotice(s.home.path, () => post.fleet.list()), /not drained; this kills 1 live worker/);
+	assert.equal(post.drain.start(2).state, "draining");
+	assert.equal(post.drain.check()?.state, "draining", "nothing is reported inside the deadline");
+	assert.equal(post.durableWakeups.pending().filter((entry) => entry.id.endsWith(":timeout")).length, 0);
+	await waitFor(() => post.drain.check()?.state, (state) => state === "timeout", { timeoutMs: 5000, what: "real drain deadline while forge remains busy" });
+	post.drain.check();
+	assert.equal(post.durableWakeups.pending().filter((entry) => entry.id.endsWith(":timeout")).length, 1);
+	assert.deepEqual(readDrain(s.home.path)?.survivors, ["1 merge step(s)"]);
+	assert.match(restartNotice(s.home.path, () => post.fleet.list()), /timed out.*this kills 1 live worker/);
+	const result = await integration;
+	assert.ok(result.next);
+	assert.equal(post.drain.mergeSteps, 0, "the public integrate step releases its drain hold");
 });

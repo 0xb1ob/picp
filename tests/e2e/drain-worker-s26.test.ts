@@ -9,7 +9,12 @@ import { LAYOUT, paths } from "../../src/contracts.ts";
 import { readDrain } from "../../src/drain.ts";
 import { createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, MockProvider, REPO_ROOT, waitFor } from "../harness/index.ts";
 
-for (const timeout of [false, true]) test(`S26: real worker ${timeout ? "times out and cancel retracts its outcome" : "reports while draining and produces one outcome"}`, { timeout: 110_000 }, async (t) => {
+for (const [mode, name] of [
+	["settle", "S26: real worker reports while draining and produces one outcome"],
+	["timeout", "S26: real worker times out and cancel retracts its outcome"],
+	["cancel", "S26: cancelling a running drain leaves its real worker able to report"],
+] as const) test(name, { timeout: 110_000 }, async (t) => {
+	const timeout = mode === "timeout";
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "demo\n" } });
 	const provider = await MockProvider.start();
@@ -35,8 +40,15 @@ for (const timeout of [false, true]) test(`S26: real worker ${timeout ? "times o
 	await waitFor(() => provider.requests(script).length, (n) => n > 0, { timeoutMs: 30_000, what: "real worker enters its model turn" });
 	const started = post.drain.start(timeout ? 0 : 30);
 	assert.equal(started.state, "draining");
+	await post.reconcile();
+	assert.equal(readDrain(home.path)?.state, "draining", "reconcile never clears this process's own drain");
 	await assert.rejects(post.dispatch({ jobId: "cp-refused", task: "No new worker" }), /no dispatch starts/);
 	assert.equal(post.drain.check()?.state, timeout ? "timeout" : "draining");
+	if (mode === "cancel") {
+		assert.match(post.drain.cancel(), /\(draining\) is withdrawn/);
+		assert.equal(readDrain(home.path), undefined);
+		assert.equal(post.durableWakeups.pending().filter((entry) => entry.id.endsWith(":cancelled")).length, 1);
+	}
 	if (timeout) {
 		assert.deepEqual(post.drain.check()?.survivors, [job.id]);
 		assert.match(post.drain.cancel(), /\(timeout\) is withdrawn/);
@@ -46,7 +58,9 @@ for (const timeout of [false, true]) test(`S26: real worker ${timeout ? "times o
 	}
 	await waitFor(() => post.fleet.get(job.id)?.reported_at, Boolean, { timeoutMs: 30_000, what: "report lands despite drain" });
 	await waitFor(() => post.manager.quiesce().busy, (busy) => busy.length === 0, { timeoutMs: 30_000, what: "reporting turn settles" });
-	if (!timeout) {
+	if (mode === "settle") {
+		const legacy = post.fleet.get(job.id)!;
+		await post.fleet.mutate((jobs) => { delete jobs.find((row) => row.job_id === job.id)!.lease_id; });
 		const outboxPath = join(home.path, LAYOUT.wakeupsFile);
 		const saved = existsSync(outboxPath) ? readFileSync(outboxPath, "utf8") : undefined;
 		writeFileSync(outboxPath, "{broken");
@@ -60,6 +74,22 @@ for (const timeout of [false, true]) test(`S26: real worker ${timeout ? "times o
 		assert.match(outcome[0]!.content, /safe to restart/);
 		assert.match(outcome[0]!.content, new RegExp(job.id));
 		assert.throws(() => post.drain.cancel(), /this parent drained/);
+		assert.deepEqual(readDrain(home.path)?.jobs, [{ job_id: job.id, phase: "held", lease: legacy.worktree, head: null }]);
+		assert.equal(post.drain.start().state, "drained", "starting again after settlement answers immediately");
+		assert.equal(post.durableWakeups.pending().filter((entry) => entry.id.endsWith(":drained")).length, 1, "the immediate answer does not enqueue another outcome");
+		await post.shutdown();
+		const next = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+		try {
+			await next.reconcile();
+			assert.equal(readDrain(home.path), undefined, "a fresh parent clears the previous drain");
+			const recovery = () => next.durableWakeups.pending().filter((entry) => entry.content.startsWith("RESTART AFTER DRAIN"));
+			assert.equal(recovery().length, 1);
+			assert.equal(recovery()[0]!.kind, "recovery");
+			assert.ok(recovery()[0]!.content.includes(`${job.id} held, lease `));
+			assert.match(recovery()[0]!.content, /head none/);
+			await next.reconcile();
+			assert.equal(recovery().length, 1, "the fresh parent's recovery is reported once");
+		} finally { await next.shutdown(); }
 	}
 	assert.equal(provider.remaining(script), 0);
 });
