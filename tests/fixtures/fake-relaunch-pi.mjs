@@ -1,10 +1,5 @@
 #!/usr/bin/env node
-/**
- * Stand-in for the operator's `pi` under Restart session (tests/viewer-operator-relaunch.test.ts): appends its argv
- * (after the bridge's `--no-extensions --no-skills -e <bridge>`) to FAKE_RELAUNCH_LOG, then, per FAKE_RELAUNCH_MODE, writes the
- * relaunch marker at CP_OPERATOR_RELAUNCH_FILE the way the bridge does and exits 0 — `once` on the first run only,
- * `always` every run, `other` naming another pid — else exits with the run count.
- */
+/** External pi stand-in for tests/e2e/operator-launcher-s27.test.ts; records argv and emits restart markers. */
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 
 const log = process.env.FAKE_RELAUNCH_LOG;
