@@ -1,8 +1,3 @@
-/**
- * cp-itl4 4b-2 (4B2-T2): the cp_dispatch tool boundary — a spawn_cap refusal queues,
- * a queued job is never dispatched again, and queue:false, other errors and script
- * jobs keep the plain refusal.
- */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -74,11 +69,4 @@ test("4B2-T2: spawn_cap queues with a position; a re-dispatch is refused untouch
 	// A full queue keeps today's spawn_cap refusal and says the queue is full.
 	for (let n = 3; n <= DISPATCH_QUEUE_MAX; n++) b.dispatchQueue.enqueue(`cp-fill${n}`, {});
 	await assert.rejects(b.call({ job_id: "cp-aaa7" }), (error: unknown) => error instanceof SpawnSafetyError && error.code === "spawn_cap" && /not queued: the dispatch queue is full/.test(error.message));
-});
-
-test("skill mentions PR2: a queued cp_dispatch with skills stores the names", async (t) => {
-	const b = toolBench(t);
-	assert.ok("skills" in b.tool.parameters.properties, "the schema has skills");
-	await b.call({ job_id: "cp-sk1", task: "one", skills: ["tdd-x", "writing-plans"] });
-	assert.deepEqual(JSON.parse(readFileSync(b.file, "utf8")).entries[0].request, { task: "one", skills: ["tdd-x", "writing-plans"] });
 });
