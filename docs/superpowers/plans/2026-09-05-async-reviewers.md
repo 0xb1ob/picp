@@ -2130,7 +2130,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `src/wakeups.ts` (`WakeupKind`, `WAKEUP_CUSTOM_TYPES`, `WakeupFacts`, `checkWakeup`, `wakeupFacts`, header comment)
-- Test: `tests/wakeups.test.ts`
+- Consumer evidence (S23 migration): `tests/e2e/wake-context-s22.test.ts`; the unit recipes below are historical.
 
 **Interfaces:**
 - Consumes: `VERDICT_MESSAGE_TYPE`, `type ReviewSurface` from contracts. Nothing from `src/review-runs.ts`: the facts are injected (files are read by the extension's `wakeupFactsNow`, Task 8), so this module stays fs-free like the rest of `wakeups.ts`.
@@ -2146,7 +2146,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/wakeups.test.ts` (extend imports: `verdictKeysFromMessage`, `verdictStamp`, `type ReviewWakeupFacts` from `../src/wakeups.ts`; `VERDICT_MESSAGE_TYPE` from contracts):
+Historical unit recipe (superseded by `tests/e2e/wake-context-s22.test.ts`): extend imports with `verdictKeysFromMessage`, `verdictStamp`, `type ReviewWakeupFacts` from `../src/wakeups.ts`; `VERDICT_MESSAGE_TYPE` from contracts:
 
 ```ts
 // ---------------------------------------------------------------------------
@@ -2220,7 +2220,7 @@ If `FleetStore` has no `update(jobId, fn)` helper, use whatever the bench in thi
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `node --test tests/wakeups.test.ts`
+Run current consumer coverage: `npm run test:one -- tests/e2e/wake-context-s22.test.ts`
 Expected: FAIL — `verdictStamp` not exported.
 
 - [ ] **Step 3: Add the kind**
@@ -2298,13 +2298,13 @@ export function verdictKeysFromMessage(message: unknown): string[] {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `npm run typecheck && node --test tests/wakeups.test.ts`
+Run current checks: `npm run typecheck && npm run test:one -- tests/e2e/wake-context-s22.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/wakeups.ts tests/wakeups.test.ts
+git add src/wakeups.ts tests/e2e/wake-context-s22.test.ts
 git commit -m "wakeups: cp-verdict, the sixth unasked wake-up, with its staleness rules
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
