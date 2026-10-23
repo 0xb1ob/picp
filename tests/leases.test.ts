@@ -113,6 +113,7 @@ test("release passes the lease identity so it cannot return someone else's workt
 		home: "/tmp",
 		cwd: () => "/tmp",
 		runner: async (bin, args) => {
+			if (bin === "git") return { status: 0, stdout: "", stderr: "" };
 			calls.push([bin, ...args]);
 			return { status: 0, stdout: "", stderr: "" };
 		},

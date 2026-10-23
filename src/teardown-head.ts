@@ -113,7 +113,7 @@ export function formatTeardown(result: TeardownResult): string {
 			? ` — git proof: HEAD ${result.landing.head.slice(0, 12)} content found in origin/${result.landing.base_branch} at ${result.landing.witness.slice(0, 12)} (${result.landing.method}); no PR/MR merge is claimed, so close the job with cp_job close ${result.job_id} and that reason`
 			: "";
 		const ignored = result.ignored
-			? ` — gitignored entries stay in the recycled worktree for its next lease: ${result.ignored.join(", ")} (not removed)`
+			? ` — ignored entries observed before return: ${result.ignored.join(", ")}`
 			: result.ignored_error ? ` — ignored entries unknown (${result.ignored_error})` : "";
 		return `${result.job_id} torn down (${why}): lease returned, worker exit ${result.exit_code ?? "n/a"}${landing}${note}${ledger}${ignored}`;
 	}

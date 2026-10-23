@@ -76,7 +76,7 @@ export interface LeaseManagerOptions {
 	 */
 	poolRoot?: string;
 	/** Injected in tests; production execs the real binaries. */
-	runner?: (bin: string, args: readonly string[], cwd: string) => Promise<ExecResult>;
+	runner?: (bin: string, args: readonly string[], cwd: string, input?: string) => Promise<ExecResult>;
 	/** Injected in tests: how we decide the process cwd for the outside check. */
 	cwd?: () => string;
 }
@@ -214,6 +214,39 @@ export class LeaseManager {
 	 */
 	async release(lease: Lease, options: { ignoreErrors?: boolean } = {}): Promise<{ ok: true } | { ok: false; error: string }> {
 		this.#assertOutside(lease.path);
+		if (isDirectory(lease.path)) {
+			const git = (args: readonly string[]) => this.#exec(this.#options.gitBin ?? "git", args, lease.path);
+			const ignored = await git(["ls-files", "--others", "--ignored", "--exclude-standard", "-z"]);
+			if (ignored.status !== 0) throw new LeaseError(`cannot inspect ignored data in ${lease.path}; keep the lease`);
+			if (ignored.stdout.length) {
+				const base = await git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]);
+				const target = base.status === 0 ? base.stdout.trim() : "refs/remotes/origin/main";
+				const changed = await git(["diff", "--name-only", "-z", target, "--", ".gitignore", ":(glob)**/.gitignore"]);
+				if (changed.status !== 0) {
+					const error = `cannot compare ignore rules against ${target} in ${lease.path}; keep the lease`;
+					if (!options.ignoreErrors) throw new LeaseError(error);
+					return { ok: false, error };
+				}
+				const sources = new Set(changed.stdout.split("\0").filter(Boolean));
+				const entries: string[] = [];
+				if (sources.size) {
+					const rules = await this.#exec(this.#options.gitBin ?? "git",
+						["check-ignore", "-v", "-z", "--stdin"], lease.path, false, ignored.stdout);
+					const fields = rules.stdout.split("\0");
+					if (rules.status !== 0 || fields.pop() !== "" || fields.length !== ignored.stdout.split("\0").filter(Boolean).length * 4) {
+						throw new LeaseError(`cannot inspect ignore rules in ${lease.path}; keep the lease`);
+					}
+					for (let i = 0; i < fields.length; i += 4) {
+						if (sources.has(fields[i]!)) entries.push(fields[i + 3]!);
+					}
+				}
+				if (entries.length) {
+					const error = `refusing to return ${lease.path}: ignored data may be deleted: ${entries.map((entry) => JSON.stringify(entry)).join(", ")}. Preserve these paths outside the worktree before retrying; force cannot accept data loss`;
+					if (!options.ignoreErrors) throw new LeaseError(error);
+					return { ok: false, error };
+				}
+			}
+		}
 		const args = ["return", "--force"];
 		if (lease.lease_id) args.push("--if-lease-id", lease.lease_id);
 		// Verbatim: treehouse looks this worktree up by the path it handed out.
@@ -294,15 +327,15 @@ export class LeaseManager {
 		return this.#exec(this.treehouseBin, poolRoot ? ["--root", poolRoot, ...args] : args, cwd, true);
 	}
 
-	async #exec(bin: string, args: readonly string[], cwd: string, isTreehouse = false): Promise<ExecResult> {
+	async #exec(bin: string, args: readonly string[], cwd: string, isTreehouse = false, input?: string): Promise<ExecResult> {
 		const runner = this.#options.runner;
-		if (runner) return runner(bin, args, cwd);
+		if (runner) return runner(bin, args, cwd, input);
 		if (!isDirectory(cwd)) {
 			// ENOENT from exec is ambiguous (missing binary vs missing cwd); say which.
 			throw new LeaseError(`cannot run ${bin} ${args[0] ?? ""}: working directory ${cwd} does not exist`);
 		}
 		return new Promise<ExecResult>((resolvePromise, reject) => {
-			execFile(
+			const child = execFile(
 				bin,
 				[...args],
 				{
@@ -331,6 +364,7 @@ export class LeaseManager {
 					resolvePromise({ status, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
 				},
 			);
+			if (input !== undefined) child.stdin?.end(input);
 		});
 	}
 }

@@ -242,26 +242,33 @@ for (const forced of [false, true]) {
  });
 }
 
- test("S17: teardown reports ignored data, withdraws only its human review and removes checkpoint refs", { skip: "Declaration 30 parked pending-fix: treehouse v3.1.2 removes ignored data; separate fix job required", timeout: 120_000 }, async (t) => {
+for (const force of [false, true]) for (const special of [false, true]) {
+ test(`S17: branch-only ignored data refuses return and survives teardown (force=${force}, special=${special})`, { skip: SKIP, timeout: 120_000 }, async (t) => {
  const s = await startStack(t);
- const live = await s.held("S17 bookkeeping", 923, { command: (b) => `printf 'backtest/\\nnode_modules/\\n*.log\\n' > .gitignore && mkdir -p pkg/sub && printf 'x\\n' > pkg/sub/a.ts && git add -A && git commit -qm ignores && git push -qu origin ${b}` });
- for (const path of ["backtest", "node_modules", "pkg/node_modules"]) { mkdirSync(join(live.worktree, path)); writeFileSync(join(live.worktree, path, "x"), "x\n"); }
- writeFileSync(join(live.worktree, "pkg/sub/out.log"), "log\n");
- const ref = `refs/cp-checkpoints/${live.jobId}`;
- git(live.worktree, "update-ref", ref, "HEAD");
- await s.post.fleet.patch(live.jobId, { checkpoint_ref: ref });
- const row = async (job_id: string, subject: string) => (await s.post.awaiting.declareGated({ type: "approval", subject, decision: "decision", why: "why", blocks: "blocks", job_id })).item;
- const human = await row(live.jobId, "human-review pr https://github.com/example/demo/pull/923");
- const reminder = await row(live.jobId, "merge-pending pr https://github.com/example/demo/pull/923");
- const other = await row("cp-other", "human-review pr https://github.com/example/demo/pull/924");
- const result = await s.post.tearDown(live.jobId);
- assert.equal(result.torn_down, true);
- assert.deepEqual(result.ignored, ["backtest/", "pkg/sub/out.log"]);
- assert.match(formatTeardown(result), /backtest\/.*pkg\/sub\/out.log.*not removed/);
- assert.ok(existsSync(join(live.worktree, "backtest/x")));
- assert.deepEqual([s.post.awaiting.get(human.id)?.state, s.post.awaiting.get(reminder.id)?.state, s.post.awaiting.get(other.id)?.state], ["withdrawn", "open", "open"]);
- assert.equal(git(live.worktree, "for-each-ref", ref), "");
+ const ignores = special
+  ? `mkdir -p 'a:1:b' 'quoted"name' && printf 'data/\\n' > 'a:1:b/.gitignore' && printf 'data/\\n' > 'quoted"name/.gitignore'`
+  : `printf 'backtest/\\nnode_modules/\\n*.log\\n' > .gitignore`;
+ const live = await s.held("S17 ignored data", 923, { command: (b) => `${ignores} && git add -A && git commit -qm ignores && git push -qu origin ${b}` });
+ const seeded = special ? ["a:1:b/data/first", "a:1:b/data/second", 'quoted"name/data/x']
+  : ["backtest/first", "backtest/second", "node_modules/x", "pkg/sub/out.log"];
+ for (const path of seeded) {
+  mkdirSync(join(live.worktree, path, ".."), { recursive: true });
+  writeFileSync(join(live.worktree, path), "only copy\n");
+ }
+ const result = await s.post.tearDown(live.jobId, { force });
+ const survivors = seeded.filter((path) => existsSync(join(live.worktree, path)));
+ assert.deepEqual(survivors, seeded, `data deleted: ${seeded.filter((path) => !survivors.includes(path)).join(", ")}`);
+ assert.deepEqual([result.torn_down, result.lease_returned, result.failure?.code], [false, false, "lease_return_failed"]);
+ for (const path of seeded) assert.ok(formatTeardown(result).includes(JSON.stringify(path)), path);
+ assert.equal(s.post.fleet.require(live.jobId).phase, "held");
+ const { leaseFromRecord } = await import("../../src/leases.ts");
+ await assert.rejects(s.post.leases.release(leaseFromRecord({ worktree: live.worktree })), (error: Error) => {
+  for (const path of seeded) assert.ok(error.message.includes(JSON.stringify(path)), path);
+  return true;
  });
+ for (const path of seeded) assert.equal(readFileSync(join(live.worktree, path), "utf8"), "only copy\n");
+ });
+}
 
  test("S17: unreadable ignored listings are named in the public teardown result", { skip: SKIP, timeout: 120_000 }, async (t) => {
  const s = await startStack(t);
