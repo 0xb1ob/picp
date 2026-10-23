@@ -1,0 +1,9 @@
+diff --git a/tests/e2e/teardown-s18.test.ts b/tests/e2e/teardown-s18.test.ts
+--- a/tests/e2e/teardown-s18.test.ts
++++ b/tests/e2e/teardown-s18.test.ts
+@@ -152,4 +152,4 @@
+  const real = execFileSync("which", ["treehouse"], { encoding: "utf8" }).trim();
+- const shim = join(s.home, "bin", "treehouse");
++ const shim = join(s.home, "bin", "treehouse-off-path");
+  writeFileSync(shim, `#!/usr/bin/env node\nconst {appendFileSync}=require('node:fs');const {spawnSync}=require('node:child_process');appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');const r=spawnSync(${JSON.stringify(real)},process.argv.slice(2),{stdio:'inherit'});process.exit(r.status??1);\n`);
+  chmodSync(shim, 0o755);

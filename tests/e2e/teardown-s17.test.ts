@@ -270,6 +270,25 @@ for (const force of [false, true]) for (const special of [false, true]) {
  });
 }
 
+test("S17: successful return reports base-ignored data and filters dependency installs", { skip: SKIP, timeout: 120_000 }, async (t) => {
+ const s = await startStack(t);
+ advanceBase(s.repo, ".gitignore", "backtest/\nnode_modules/\n*.log\n");
+ const clone = s.post.registry.pathOf("demo");
+ git(clone, "fetch", "--quiet", "origin");
+ git(clone, "merge", "--ff-only", "origin/main");
+ const live = await s.held("S17 safe ignored reporting", 934, { command: (b) =>
+  `mkdir -p pkg/sub && printf 'export {};\\n' > pkg/sub/a.ts && git add pkg && git commit -qm nested && git push -qu origin ${b}` });
+ const entries = ["backtest/x", "pkg/sub/out.log", "node_modules/x", "pkg/node_modules/x"];
+ for (const path of entries) {
+  mkdirSync(join(live.worktree, path, ".."), { recursive: true });
+  writeFileSync(join(live.worktree, path), `${path}\n`);
+ }
+ const result = await s.post.tearDown(live.jobId);
+ assert.deepEqual([result.torn_down, result.lease_returned], [true, true]);
+ assert.deepEqual(result.ignored, ["backtest/", "pkg/sub/out.log"]);
+ assert.match(formatTeardown(result), /ignored entries observed before return: backtest\/, pkg\/sub\/out\.log/);
+ for (const path of entries) assert.equal(readFileSync(join(live.worktree, path), "utf8"), `${path}\n`);
+});
  test("S17: unreadable ignored listings are named in the public teardown result", { skip: SKIP, timeout: 120_000 }, async (t) => {
  const s = await startStack(t);
  const live = await s.held("S17 ignored error", 924);
