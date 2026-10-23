@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
-import { paths } from "../../src/contracts.ts";
+import { LAYOUT, paths } from "../../src/contracts.ts";
+import { readDrain } from "../../src/drain.ts";
 import { createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, MockProvider, REPO_ROOT, waitFor } from "../harness/index.ts";
 
 for (const timeout of [false, true]) test(`S26: real worker ${timeout ? "times out and cancel retracts its outcome" : "reports while draining and produces one outcome"}`, { timeout: 110_000 }, async (t) => {
@@ -46,6 +47,12 @@ for (const timeout of [false, true]) test(`S26: real worker ${timeout ? "times o
 	await waitFor(() => post.fleet.get(job.id)?.reported_at, Boolean, { timeoutMs: 30_000, what: "report lands despite drain" });
 	await waitFor(() => post.manager.quiesce().busy, (busy) => busy.length === 0, { timeoutMs: 30_000, what: "reporting turn settles" });
 	if (!timeout) {
+		const outboxPath = join(home.path, LAYOUT.wakeupsFile);
+		const saved = existsSync(outboxPath) ? readFileSync(outboxPath, "utf8") : undefined;
+		writeFileSync(outboxPath, "{broken");
+		assert.throws(() => post.drain.check(), /JSON|json/);
+		assert.equal(readDrain(home.path)?.reported, false, "a failed journal remains retryable");
+		if (saved === undefined) rmSync(outboxPath); else writeFileSync(outboxPath, saved);
 		assert.equal(post.drain.check()?.state, "drained");
 		post.drain.check();
 		const outcome = post.durableWakeups.pending().filter((entry) => entry.id === `drain:${started.started_at}:drained`);

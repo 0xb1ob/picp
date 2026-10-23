@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -297 +297 @@
+-		this.#deps.journal({ id: outcomeWakeId(record, record.state as "drained" | "timeout"), content: formatDrain(record, this.#deps.home) });
++		void record;

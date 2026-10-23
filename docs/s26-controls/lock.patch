@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -253 +253 @@
+-		if (this.#deps.owns?.() === false) throw new DrainError(`refused: this session does not hold the parent lock for ${this.#deps.home}; run /cp-drain (or cp_parent drain) in the parent that does`);
++		if (false) throw new DrainError(`refused: this session does not hold the parent lock for ${this.#deps.home}; run /cp-drain (or cp_parent drain) in the parent that does`);
