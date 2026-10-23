@@ -10,8 +10,14 @@ import { formatTeardown } from "../../src/teardown.ts";
 import { git, readRunEvents } from "../harness/index.ts";
 import { SKIP, startStack } from "./landing-helpers.ts";
 
-for (const mode of ["pass", "bound", "truncated", "flagged", "policy", "stale", "revise", "force", "none", "silent", "off"] as const) {
- test(`S18: teardown review ${mode}`, { skip: SKIP, timeout: 120_000 }, async (t) => {
+for (const [mode, title] of [
+ ["pass", "S18: teardown review pass"], ["bound", "S18: teardown review bound"],
+ ["truncated", "S18: teardown review truncated"], ["flagged", "S18: teardown review flagged"],
+ ["policy", "S18: teardown review policy"], ["stale", "S18: teardown review stale"],
+ ["revise", "S18: teardown review revise"], ["force", "S18: teardown review force"],
+ ["none", "S18: teardown review none"], ["silent", "S18: teardown review silent"], ["off", "S18: teardown review off"],
+] as const) {
+ test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
   const s = await startStack(t);
   const live = await s.held(`S18 review ${mode}`, 981);
   if (mode === "bound") {
@@ -77,8 +83,11 @@ for (const mode of ["pass", "bound", "truncated", "flagged", "policy", "stale", 
  });
 }
 
-for (const delivery of ["answer", "pipeline"] as const) {
- test(`S18: research ${delivery} ledger closure survives a write failure`, { skip: SKIP, timeout: 120_000 }, async (t) => {
+for (const [delivery, title] of [
+ ["answer", "S18: research answer ledger closure survives a write failure"],
+ ["pipeline", "S18: research pipeline ledger closure survives a write failure"],
+] as const) {
+ test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
   const s = await startStack(t);
   const live = await s.held("S18 legacy research", 982);
   await s.post.manager.shutdown(live.jobId);
@@ -155,7 +164,16 @@ test("S18: done research ledger retry respects report, envelope, edit and ship g
  const shim = join(s.home, "bin", "treehouse");
  writeFileSync(shim, `#!/usr/bin/env node\nconst {appendFileSync}=require('node:fs');const {spawnSync}=require('node:child_process');appendFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2))+'\\n');const r=spawnSync(${JSON.stringify(real)},process.argv.slice(2),{stdio:'inherit'});process.exit(r.status??1);\n`);
  chmodSync(shim, 0o755);
- try { await s.post.reconcile(); }
+ try {
+  const probe = await s.held("S18 PATH observation", 983);
+  const returned = await s.post.tearDown(probe.jobId);
+  assert.equal(returned.lease_returned, true);
+  assert.ok(existsSync(calls), "CommandPost lease return must reach the startup shim");
+  assert.ok(readFileSync(calls, "utf8").split("\n").filter(Boolean).some((line) => JSON.parse(line)[0] === "return"),
+   "CommandPost lease return must be observed through the startup shim");
+  rmSync(calls);
+  await s.post.reconcile();
+ }
  finally { rmSync(shim); }
  assert.equal(existsSync(calls), false, "startup ledger retry never touches a lease");
  assert.equal(wakeups(), before, "successful startup retry adds no recovery notification");

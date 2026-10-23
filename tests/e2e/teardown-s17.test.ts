@@ -20,8 +20,11 @@ function gitFault(home: string, condition: string, response: string, bin = "git"
 import { startFakeGitlab } from "./landing-helpers.ts";
 import { SKIP, startStack } from "./landing-helpers.ts";
 
-for (const delivery of ["pr", "local"] as const) {
- test(`S17: ${delivery} teardown preserves dirty and unpushed work, then returns a reported pushed lease once`, { skip: SKIP, timeout: 120_000 }, async (t) => {
+for (const [delivery, title] of [
+ ["pr", "S17: pr teardown preserves dirty and unpushed work, then returns a reported pushed lease once"],
+ ["local", "S17: local teardown preserves dirty and unpushed work, then returns a reported pushed lease once"],
+] as const) {
+ test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
   const s = await startStack(t);
   const live = await s.held("S17 durability", 917, delivery === "local" ? { delivery } : {});
   const worker = s.post.manager.get(live.jobId)!;
@@ -153,8 +156,16 @@ test("S17: a detached head keeps its lease even when its commit is on origin", {
  assert.deepEqual([observedClose.torn_down, observedClose.reason], [true, "pushed"], "run observation proves the old worker closed");
  });
 
-for (const mode of ["tree", "squash", "rebase", "stale", "unreadable", "receipt", "receipt-extra"] as const) {
- test(`S17: landing evidence ${mode} is checked against origin and the exact head`, { skip: SKIP, timeout: 120_000 }, async (t) => {
+for (const [mode, title] of [
+ ["tree", "S17: landing evidence tree is checked against origin and the exact head"],
+ ["squash", "S17: landing evidence squash is checked against origin and the exact head"],
+ ["rebase", "S17: landing evidence rebase is checked against origin and the exact head"],
+ ["stale", "S17: landing evidence stale is checked against origin and the exact head"],
+ ["unreadable", "S17: landing evidence unreadable is checked against origin and the exact head"],
+ ["receipt", "S17: landing evidence receipt is checked against origin and the exact head"],
+ ["receipt-extra", "S17: landing evidence receipt-extra is checked against origin and the exact head"],
+] as const) {
+ test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
  const s = await startStack(t);
  const live = await s.held(`S17 ${mode}`, 921);
  let merged: string;
@@ -223,8 +234,11 @@ test("S17: force closes a missing legacy worktree without claiming a gate pass",
  assert.ok(readRunEvents(s.home, live.jobId).some((event) => event.type === "shutdown_requested" && (event.payload as { forced?: boolean }).forced));
 });
 
-for (const forced of [false, true]) {
- test(`S17: failed lease return stays open and retries (${forced ? "forced" : "gated"})`, { skip: SKIP, timeout: 120_000 }, async (t) => {
+for (const [forced, title] of [
+ [false, "S17: failed lease return stays open and retries (gated)"],
+ [true, "S17: failed lease return stays open and retries (forced)"],
+] as const) {
+ test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
  const s = await startStack(t);
  const live = await s.held("S17 return failure", 922);
  const restore = gitFault(s.home, "a[0]==='return'", "process.stderr.write('treehouse: worktree is in use by pid 4242'); process.exit(1);", "treehouse");
@@ -270,6 +284,26 @@ for (const force of [false, true]) for (const special of [false, true]) {
  });
 }
 
+test("S17: successful return reports base-ignored data and filters dependency installs", { skip: SKIP, timeout: 120_000 }, async (t) => {
+ const s = await startStack(t);
+ advanceBase(s.repo, ".gitignore", "backtest/\nnode_modules/\n*.log\n");
+ const clone = s.post.registry.pathOf("demo");
+ git(clone, "fetch", "--quiet", "origin");
+ git(clone, "merge", "--ff-only", "origin/main");
+ const live = await s.held("S17 safe ignored reporting", 934, { command: (b) =>
+  `mkdir -p pkg/sub && printf 'export {};\\n' > pkg/sub/a.ts && git add pkg && git commit -qm nested && git push -qu origin ${b}` });
+ const entries = ["backtest/x", "pkg/sub/out.log", "node_modules/x", "pkg/node_modules/x"];
+ for (const path of entries) {
+  mkdirSync(join(live.worktree, path, ".."), { recursive: true });
+  writeFileSync(join(live.worktree, path), `${path}\n`);
+ }
+ const result = await s.post.tearDown(live.jobId);
+ assert.deepEqual([result.torn_down, result.lease_returned], [true, true]);
+ assert.deepEqual(result.ignored, ["backtest/", "pkg/sub/out.log"]);
+ assert.match(formatTeardown(result), /ignored entries observed before return: backtest\/, pkg\/sub\/out\.log/);
+ assert.deepEqual(entries.filter((path) => existsSync(join(live.worktree, path))), entries, "returned lease preserves every ignored entry");
+ for (const path of entries) assert.equal(readFileSync(join(live.worktree, path), "utf8"), `${path}\n`);
+});
  test("S17: unreadable ignored listings are named in the public teardown result", { skip: SKIP, timeout: 120_000 }, async (t) => {
  const s = await startStack(t);
  const live = await s.held("S17 ignored error", 924);

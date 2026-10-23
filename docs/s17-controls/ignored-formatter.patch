@@ -1,0 +1,8 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -136,3 +136,3 @@
+ 		const ignored = result.ignored
+-			? ` — ignored entries observed before return: ${result.ignored.join(", ")}`
++			? ""
+ 			: result.ignored_error ? ` — ignored entries unknown (${result.ignored_error})` : "";
