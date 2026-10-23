@@ -1,0 +1,8 @@
+diff --git a/src/leases.ts b/src/leases.ts
+--- a/src/leases.ts
++++ b/src/leases.ts
+@@ -245,3 +245,3 @@
+ 				}
+-				if (entries.length) {
++				if (false && entries.length) {
+ 					const error = `refusing to return ${lease.path}: ignored data may be deleted: ${entries.map((entry) => JSON.stringify(entry)).join(", ")}. Preserve these paths outside the worktree before retrying; force cannot accept data loss`;

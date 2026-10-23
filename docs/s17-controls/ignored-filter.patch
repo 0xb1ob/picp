@@ -1,0 +1,8 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -97,3 +97,3 @@
+ 	const entries = status.stdout.split("\0").filter((record) => record.startsWith("!! ")).map((record) => record.slice(3))
+-		.filter((path) => !path.replace(/\/$/, "").split("/").some((segment) => KEPT_IGNORED.has(segment)));
++		.filter(() => true);
+ 	return { entries: entries.sort() };

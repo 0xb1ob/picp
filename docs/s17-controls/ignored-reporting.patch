@@ -1,0 +1,8 @@
+diff --git a/src/teardown-head.ts b/src/teardown-head.ts
+--- a/src/teardown-head.ts
++++ b/src/teardown-head.ts
+@@ -98,3 +98,3 @@
+ 		.filter((path) => !path.replace(/\/$/, "").split("/").some((segment) => KEPT_IGNORED.has(segment)));
+-	return { entries: entries.sort() };
++	return { entries: [] };
+ }

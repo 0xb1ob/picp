@@ -10,8 +10,14 @@ import { formatTeardown } from "../../src/teardown.ts";
 import { git, readRunEvents } from "../harness/index.ts";
 import { SKIP, startStack } from "./landing-helpers.ts";
 
-for (const mode of ["pass", "bound", "truncated", "flagged", "policy", "stale", "revise", "force", "none", "silent", "off"] as const) {
- test(`S18: teardown review ${mode}`, { skip: SKIP, timeout: 120_000 }, async (t) => {
+for (const [mode, title] of [
+ ["pass", "S18: teardown review pass"], ["bound", "S18: teardown review bound"],
+ ["truncated", "S18: teardown review truncated"], ["flagged", "S18: teardown review flagged"],
+ ["policy", "S18: teardown review policy"], ["stale", "S18: teardown review stale"],
+ ["revise", "S18: teardown review revise"], ["force", "S18: teardown review force"],
+ ["none", "S18: teardown review none"], ["silent", "S18: teardown review silent"], ["off", "S18: teardown review off"],
+] as const) {
+ test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
   const s = await startStack(t);
   const live = await s.held(`S18 review ${mode}`, 981);
   if (mode === "bound") {
@@ -77,8 +83,11 @@ for (const mode of ["pass", "bound", "truncated", "flagged", "policy", "stale", 
  });
 }
 
-for (const delivery of ["answer", "pipeline"] as const) {
- test(`S18: research ${delivery} ledger closure survives a write failure`, { skip: SKIP, timeout: 120_000 }, async (t) => {
+for (const [delivery, title] of [
+ ["answer", "S18: research answer ledger closure survives a write failure"],
+ ["pipeline", "S18: research pipeline ledger closure survives a write failure"],
+] as const) {
+ test(title, { skip: SKIP, timeout: 120_000 }, async (t) => {
   const s = await startStack(t);
   const live = await s.held("S18 legacy research", 982);
   await s.post.manager.shutdown(live.jobId);

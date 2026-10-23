@@ -1,0 +1,8 @@
+diff --git a/src/leases.ts b/src/leases.ts
+--- a/src/leases.ts
++++ b/src/leases.ts
+@@ -254,3 +254,4 @@
+ 		}
++		await this.#exec(this.#options.gitBin ?? "git", ["clean", "-fdx"], lease.path);
+ 		const args = ["return", "--force"];
+ 		if (lease.lease_id) args.push("--if-lease-id", lease.lease_id);
