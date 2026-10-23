@@ -14,7 +14,7 @@ test("S26: real dashboard restart refuses disabled control, missing session, pen
 	const provider = await MockProvider.start();
 	const model = provider.addScript("s26-dashboard-refusals", [
 		{ kind: "text", text: "Persist this session." },
-		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 10", timeout: 20 } }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 10" } }] },
 		{ kind: "text", text: "Work completed." },
 	], { onExhausted: "repeat" });
 	const agent = createAgentDir({ provider });
