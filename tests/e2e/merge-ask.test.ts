@@ -298,7 +298,7 @@ test("S13: persisted review attempts require a readable complete pass and surviv
 		const file = join(s.home, paths.reviewFile(live.jobId, 1));
 		mkdirSync(dirname(file), { recursive: true });
 		if (mode === "torn") writeFileSync(file, "{ not json");
-		else if (mode === "invalid") writeFileSync(file, JSON.stringify({ verdict: "pass", head_sha: head }));
+		else if (mode === "invalid") writeFileSync(file, JSON.stringify({ verdict: "pass", head_sha: head, diff_stat: { files: 1, truncated: false } }));
 		else if (mode !== "missing") writeWindowPass(s.home, live.jobId, head, "2026-01-01T00:00:00Z", {
 			...(mode === "gap" ? { attempt: 2 } : {}),
 			...(mode === "revise" ? { verdict: "revise", cause: "policy" } : {}),
