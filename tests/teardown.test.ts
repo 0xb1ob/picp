@@ -986,6 +986,7 @@ test("cp-a9fq: a lease treehouse did not return is never reported returned, forc
 		home: b.home,
 		cwd: () => b.home,
 		runner: async (_bin, args) => {
+			if (_bin === "git") return { status: 0, stdout: "", stderr: "" };
 			returns.push(args.join(" "));
 			return { status: 1, stdout: "", stderr: "treehouse: worktree is in use by pid 4242" };
 		},
@@ -1037,6 +1038,7 @@ test("cp-a9fq: after lease_return_failed the lease and job are kept until a re-r
 		home: b.home,
 		cwd: () => b.home,
 		runner: async (_bin, args) => {
+			if (_bin === "git") return { status: 0, stdout: "", stderr: "" };
 			returns.push(String(args.at(-1)));
 			return treehouseReturns-- > 0 ? { status: 1, stdout: "", stderr: "treehouse: worktree is busy" } : { status: 0, stdout: "", stderr: "" };
 		},
@@ -1145,7 +1147,7 @@ test("cp-c1ur N18: teardown names gitignored data the recycled worktree keeps; d
 	assert.equal(result.torn_down, true, formatTeardown(result));
 	// Review 2: a nested install is skipped like a top-level one, and a nested data path is named in full.
 	assert.deepEqual(result.ignored, ["backtest/", "pkg/sub/out.log"]);
-	assert.match(formatTeardown(result), /for its next lease: backtest\/, pkg\/sub\/out\.log \(not removed\)/);
+	assert.match(formatTeardown(result), /ignored entries observed before return: backtest\/, pkg\/sub\/out\.log/);
 	assert.ok(existsSync(join(worktree, "backtest", "x")), "reported, never removed");
 });
 

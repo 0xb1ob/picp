@@ -214,6 +214,36 @@ export class LeaseManager {
 	 */
 	async release(lease: Lease, options: { ignoreErrors?: boolean } = {}): Promise<{ ok: true } | { ok: false; error: string }> {
 		this.#assertOutside(lease.path);
+		if (isDirectory(lease.path)) {
+			const git = (args: readonly string[]) => this.#exec(this.#options.gitBin ?? "git", args, lease.path);
+			const ignored = await git(["ls-files", "--others", "--ignored", "--exclude-standard", "-z"]);
+			if (ignored.status !== 0) throw new LeaseError(`cannot inspect ignored data in ${lease.path}; keep the lease`);
+			if (ignored.stdout.length) {
+				const base = await git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]);
+				const target = base.status === 0 ? base.stdout.trim() : "refs/remotes/origin/main";
+				const changed = await git(["diff", "--name-only", "-z", target, "--", ".gitignore", ":(glob)**/.gitignore"]);
+				if (changed.status !== 0) {
+					const error = `cannot compare ignore rules against ${target} in ${lease.path}; keep the lease`;
+					if (!options.ignoreErrors) throw new LeaseError(error);
+					return { ok: false, error };
+				}
+				const sources = new Set(changed.stdout.split("\0").filter(Boolean));
+				const entries: string[] = [];
+				if (sources.size) {
+					for (const entry of ignored.stdout.split("\0").filter(Boolean)) {
+						const rule = await git(["-c", "core.quotePath=false", "check-ignore", "-v", "--", entry]);
+						if (rule.status !== 0) throw new LeaseError(`cannot inspect ignore rule for ${JSON.stringify(entry)}; keep the lease`);
+						const source = rule.stdout.split(/:\d+:/)[0]!;
+						if (sources.has(source)) entries.push(entry);
+					}
+				}
+				if (entries.length) {
+					const error = `refusing to return ${lease.path}: ignored data may be deleted: ${entries.map((entry) => JSON.stringify(entry)).join(", ")}. Preserve these paths outside the worktree before retrying; force cannot accept data loss`;
+					if (!options.ignoreErrors) throw new LeaseError(error);
+					return { ok: false, error };
+				}
+			}
+		}
 		const args = ["return", "--force"];
 		if (lease.lease_id) args.push("--if-lease-id", lease.lease_id);
 		// Verbatim: treehouse looks this worktree up by the path it handed out.
