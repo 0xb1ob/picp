@@ -337,6 +337,7 @@
 	"tests/viewer-not-found.test.ts": 218,
 	"tests/viewer-operator-composer-images.test.ts": 57,
 	"tests/viewer-operator-composer.test.ts": 48,
+	"tests/e2e/viewer-restart-s27.test.ts": 5000,
 	"tests/viewer-operator-restart.test.ts": 247,
 	"tests/viewer-operator.test.ts": 9889,
 	"tests/viewer-overview.test.ts": 272,
