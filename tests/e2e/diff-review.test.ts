@@ -707,7 +707,7 @@ test("S15: the real cp_review tool relays bounded verdicts and policy refusals w
 	await child.waitForSettled(60_000);
 	const specs = s.provider.requests("s15-tool-parent")[0]!.body.tools as Array<{ function: { name: string; description: string; parameters: { properties: Record<string, unknown> } } }>;
 	assert.deepEqual(Object.keys(specs.find((tool) => tool.function.name === "cp_review")!.function.parameters.properties).sort(), ["action", "deliver_revise", "job_id", "model"]);
-	assert.deepEqual(Object.keys(specs.find((tool) => tool.function.name === "cp_gate")!.function.parameters.properties).sort(), ["action", "deliver_revise", "job_id", "model", "replacement_job_id"]);
+	assert.deepEqual(Object.keys(specs.find((tool) => tool.function.name === "cp_gate")!.function.parameters.properties).sort(), ["action", "deliver_revise", "job_id", "model", "replacement_job_id", "replan_escalation_id"]);
 	assert.doesNotMatch(specs.find((tool) => tool.function.name === "cp_review")!.function.description, /different model is chosen/);
 	assert.equal(existsSync(join(s.home, paths.reviewFile("cp-s15-unknown", 1))), false);
 	const offered = JSON.stringify(s.provider.requests("s15-tool-parent")[0]?.body.tools);
