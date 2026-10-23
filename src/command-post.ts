@@ -642,7 +642,7 @@ export class CommandPost {
 			home: options.home,
 			jobs: () => this.fleet.list() as WatchableRecord[],
 			pr: async (job, prUrl) => watchChangeRequest(options.home, job.project, prUrl, () => ghPrRest({ cwd: this.#clonePath(job.job_id) })(prUrl)),
-			runs: async (job, head) => (isGitlabJob(job) ? [] : ghCiRuns({ cwd: this.#clonePath(job.job_id) })(head)),
+			runs: async (job, head, timeoutMs) => (isGitlabJob(job) ? [] : ghCiRuns({ cwd: this.#clonePath(job.job_id), timeoutMs })(head)),
 			head: async (job) =>
 				gitRemoteHead({ cwd: this.#clonePath(job.job_id), fallback: (id) => this.reportedHeadSha(id) })(
 					job.branch,

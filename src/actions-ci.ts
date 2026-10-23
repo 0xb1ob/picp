@@ -8,6 +8,8 @@ import type { CommandRunner as StatusRunner } from "./merges.ts";
 
 /** Total budget for one observation (every page of runs and jobs), as `MERGE_ASK_QUERY_TIMEOUT_MS`. */
 export const ACTIONS_CI_TIMEOUT_MS = 15_000;
+/** One jobs-page `gh` call's own cap: a hung call must not spend the whole budget and leave no room to retry (#420). */
+export const ACTIONS_ATTEMPT_TIMEOUT_MS = 6_000;
 export const ACTIONS_PER_PAGE = 100;
 export const ACTIONS_MAX_PAGES = 10;
 /** GitHub returns at most this many runs for a filtered list; a total at or past it cannot be proven complete. */
@@ -277,7 +279,7 @@ async function get(options: ActionsReadOptions, budget: Budget, endpoint: string
 	for (let tries = 0; ; tries++) {
 		const remaining = budget.deadline - budget.now();
 		if (remaining <= 0) throw new ActionsCiError("deadline", endpoint, "observation budget spent");
-		const result = await attempt(options, endpoint, remaining);
+		const result = await attempt(options, endpoint, /\/attempts\//.test(endpoint) ? Math.min(remaining, ACTIONS_ATTEMPT_TIMEOUT_MS) : remaining);
 		if (typeof result === "string") return result;
 		const delay = ACTIONS_RETRY_DELAYS_MS[tries];
 		const left = budget.deadline - budget.now();
@@ -366,10 +368,16 @@ export async function readOlderBranchRuns(options: ActionsReadOptions & { branch
 }
 
 /** Runs `read`; an empty or non-JSON 200 ("transient read") gets one fresh observation, anything else throws. */
-export async function retryTransientRead<T>(read: () => Promise<T>): Promise<T> {
-	return read().catch((error: unknown) => {
+/** Runs `read(budgetMs)`; an empty or non-JSON 200 ("transient read") gets one retry inside the ORIGINAL deadline. */
+export async function retryTransientRead<T>(read: (timeoutMs: number) => Promise<T>, options: { timeoutMs?: number; now?: () => number } = {}): Promise<T> {
+	const now = options.now ?? Date.now;
+	const total = options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS;
+	const deadline = now() + total;
+	return read(total).catch((error: unknown) => {
 		if (!(error instanceof ActionsCiError) || !/transient read/.test(error.detail)) throw error;
-		return read();
+		const left = deadline - now();
+		if (left <= 0) throw error;
+		return read(left);
 	});
 }
 
