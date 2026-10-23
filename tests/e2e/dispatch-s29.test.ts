@@ -137,8 +137,13 @@ for (const base of ["main", "trunk"]) {
 
 test("S29: public validation refuses unavailable routing, effort, skills and inactive jobs", { timeout: 120_000 }, async (t) => {
 	const b = await dispatchS29(t);
+	const forbidden = join(b.agent.path, "skills", "pi-subagents");
+	mkdirSync(forbidden, { recursive: true });
+	writeFileSync(join(forbidden, "SKILL.md"), "---\nname: pi-subagents\ndescription: inert refusal fixture\n---\nNo tools or actions.\n");
 	const model = b.provider.addScript("worker", [{ kind: "text", text: "must not start" }]);
 	const ordinary = await b.ledger.create({ title: "ordinary", project: "demo", delivery: "local", kind: "ship" });
+	const unknownSkill = await b.ledger.create({ title: "unknown skill", project: "demo", delivery: "local", kind: "ship" });
+	const forbiddenSkill = await b.ledger.create({ title: "forbidden skill", project: "demo", delivery: "local", kind: "ship" });
 	const blocker = await b.ledger.create({ title: "blocker", project: "demo", delivery: "local", kind: "ship" });
 	const blocked = await b.ledger.create({ title: "blocked", project: "demo", delivery: "local", kind: "ship" });
 	await b.ledger.addDep(blocked.id, blocker.id);
@@ -153,8 +158,8 @@ test("S29: public validation refuses unavailable routing, effort, skills and ina
 	const variants = [
 		{ job_id: ordinary.id, model: "mock/not-installed", expected: /no available model/ },
 		{ job_id: ordinary.id, thinking: "xhigh", expected: /thinking=xhigh/ },
-		{ job_id: ordinary.id, skills: ["not-installed"], expected: /skill not-installed is not installed/ },
-		{ job_id: ordinary.id, skills: ["pi-subagents"], expected: /pi-subagents is never given/ },
+		{ job_id: unknownSkill.id, skills: ["not-installed"], expected: /skill not-installed is not installed/ },
+		{ job_id: forbiddenSkill.id, skills: ["pi-subagents"], expected: /pi-subagents is never given/ },
 		{ job_id: blocked.id, expected: /is blocked by/ },
 		{ job_id: closed.id, expected: /is closed/ },
 		{ job_id: deferred.id, expected: /is deferred/ },
