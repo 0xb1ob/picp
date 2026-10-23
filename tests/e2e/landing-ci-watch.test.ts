@@ -618,8 +618,20 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		await waitFor(() => s.ghCalls().filter((call) => call.includes(`head_sha=${tip}`)).length, (count) => count >= before + 2, { timeoutMs: 30_000, what: "two main CI timer reads" });
 	};
 	s.setGh({ routes, runs: [] });
-	await s.parent("Observe the CI timer.", [{ kind: "text", text: "Observing." }], async () => {
+	await s.parent("Observe the CI timer.", [{ kind: "text", text: "Observing." }], async (_events, _stderr, child) => {
+		const unmandatedAt = Date.now();
+		await waitFor(() => Date.now() - unmandatedAt, (elapsed) => elapsed > 2500,
+			{ timeoutMs: 10_000, what: "unmandated project spans two CI timer ticks" });
+		assert.ok(!s.ghCalls().some((call) => call.includes(`head_sha=${tip}`)), "no main CI reads without a mandate");
 		s.post.mandates.issue({ projects: ["demo"], objective: "main CI e2e", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 10 });
+		await s.post.registry.setArchived("demo", true);
+		const archivedAt = Date.now();
+		const archivedReads = s.ghCalls().filter((call) => call.includes(`head_sha=${tip}`)).length;
+		await waitFor(() => Date.now() - archivedAt, (elapsed) => elapsed > 2500,
+			{ timeoutMs: 10_000, what: "archived project spans two CI timer ticks" });
+		assert.equal(s.ghCalls().filter((call) => call.includes(`head_sha=${tip}`)).length, archivedReads,
+			"an archived mandated project makes no main CI request");
+		await s.post.registry.setArchived("demo", false);
 		for (const runs of [[], [own(tip, "success")], [run(109, tip, "in_progress", null)], [own("c".repeat(40), "failure")], [own(tip, "failure", "someone")], [own(tip, "failure", "dependabot[bot]")], [own(tip, "failure", "e2e", "dynamic")], [run(109, tip, "completed", "failure", { event: "push" })], [{ ...own(tip, "failure", "someone"), run_attempt: 2 }]]) {
 			await observe(runs);
 			assert.deepEqual(rows(), [], "green, pending, absent and wrong-head runs never latch");
@@ -636,6 +648,19 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		assert.equal(readFileSync(file, "utf8"), latched, "repeat red preserves the original latch bytes");
 		const redBody = await waitFor(s.parentMessages, (body) => body.includes("MAIN IS RED"), { timeoutMs: 30_000, what: "main red wake reaches parent provider" }).catch(() => s.parentMessages());
 		assert.ok(redBody.includes("MAIN IS RED"), "main red wake reaches parent provider");
+		let nativeSequence = 0;
+		const nativeNotices = async (event: string) => {
+			const id = `s23-native-${++nativeSequence}`;
+			child.send({ type: "get_messages", id });
+			const response = await child.waitFor((record) => record.type === "response" && record.id === id);
+			const data = response.data as { messages: Array<{ customType?: string; details?: { main_ci?: Record<string, unknown>; cp_wakeup?: Record<string, unknown> } }> };
+			return data.messages.filter((message) => message.customType === "cp-ci" && message.details?.main_ci?.event === event);
+		};
+		const redNotices = await nativeNotices("main_ci_failed");
+		assert.equal(redNotices.length, 1, "one native red notice");
+		assert.equal(redNotices[0]?.details?.cp_wakeup?.kind, "ci");
+		assert.equal(redNotices[0]?.details?.cp_wakeup?.job_id, undefined);
+		assert.equal(redNotices[0]?.details?.main_ci?.sha, tip);
 		assert.equal(s.parentMessages().split("MAIN IS RED").length - 1, 1, "repeat red emits one parent wake");
 		assert.ok(s.parentMessages().includes(`MAIN IS RED — demo: CI failed on ${tip.slice(0, 12)} (ci) — failing: main regression`));
 		assert.ok(s.parentMessages().includes("cp_integrate returns wait for every demo PR except one based on the current main with green CI"));
@@ -670,6 +695,10 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		await observe([own(tip, "success")]);
 		assert.equal(readFileSync(file, "utf8"), cleared, "repeat green does not rewrite state");
 		await waitFor(s.parentMessages, (body) => body.includes(`MAIN IS GREEN AGAIN — demo: CI passed on ${tip.slice(0, 12)}. Call cp_integrate for held demo PRs.`), { timeoutMs: 30_000, what: "green notice reaches parent" });
+		const greenNotices = await nativeNotices("main_ci_green");
+		assert.equal(greenNotices.length, 1, "one native green notice");
+		assert.equal(greenNotices[0]?.details?.cp_wakeup?.kind, "ci");
+		assert.equal(greenNotices[0]?.details?.main_ci?.sha, tip);
 		const legacyRow = JSON.parse(cleared);
 		legacyRow.projects = [{ project: "demo", red_since_sha: oldTip, red_since_at: isoTimestamp() }];
 		writeFileSync(file, JSON.stringify(legacyRow));
