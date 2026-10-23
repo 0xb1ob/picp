@@ -26,3 +26,13 @@ Additional executed commands after `npm run test:one --`:
 Retained controls earn no retirement credit: leaving `released()` owned passes real RPC new_session but fails the
 retained reused-post test. Removing diagnostic unsubscribe or the legacy version prefix passes the real host diagnostic
 consumer but fails the corresponding verbatim declaration in tests/drain-retained.test.ts. All mutations were restored.
+
+Bridge controls used `tests/e2e/bridge-host-s26.test.ts`: `bridge-attach.patch` fails read-only startup attachment;
+`bridge-ledger.patch` fails replay suppression (one instead of zero); `bridge-notifications.patch` fails the attached
+status after actual start. All three hashes and inline patches are in the declaration ledger.
+
+| Retained control | sha256 | Observed result |
+|---|---|---|
+| retained-listener.patch | 262a2c79e02b7c688245f4e132b66290a5a9654430cdbfab86c24589ed2f0fe1 | real host diagnostic passes; verbatim drain diagnostic fails listener count |
+| retained-version.patch | fa36cabd008645bc1ded63b6cdf78c4179f6c01b668ce47784eac44c35ad819d | real host diagnostic passes; verbatim legacy version declaration fails diagnostic output |
+| retained-stopping.patch | b6377b8fd394335aefccc2f02a4aaae1b932acb0bc71de2323d969c47bb58be9 | both real bridge cases pass; both injected stopping variants fail start retried |
