@@ -216,7 +216,7 @@
 	"tests/relay-preflight.test.ts": 1320,
 	"tests/relay-scope.test.ts": 17,
 	"tests/repo-map.test.ts": 891,
-	"tests/restart-intake.test.ts": 146,
+	"tests/e2e/restart-intake-s27.test.ts": 10000,
 	"tests/retired-integration-guard.test.ts": 110,
 	"tests/review-approval-retained.test.ts": 7,
 	"tests/review-runs-retained.test.ts": 41,
