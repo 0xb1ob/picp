@@ -1,4 +1,5 @@
 {
+	"tests/e2e/dashboard-refusals-s26.test.ts": 9000,
 	"tests/e2e/drain-restart.test.ts": 7000,
 	"tests/e2e/drain-worker-s26.test.ts": 32000,
 	"tests/e2e/bridge-host-s26.test.ts": 15000,
