@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
-import { git } from "../harness/index.ts";
+import { git, waitFor } from "../harness/index.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { SKIP, run, startStack } from "./landing-helpers.ts";
 
@@ -318,6 +318,22 @@ test("S13: persisted review attempts require a readable complete pass and surviv
 			assert.equal(s.post.awaiting.read().items.find((item) => item.job_id === live.jobId)?.state, "open", `${mode}: arriving pass recovers the decision`);
 		}
 	});
+	// A verdict written by a real cp_review run must satisfy the merge-ask reader (writer/reader agreement).
+	await t.test("real-writer", async () => {
+		const live = await s.held("S13 real review writer", 1330);
+		s.setGh({ runs: [run(1330, live.head, "completed", "success")] });
+		const reviewer = s.provider.addScript("s13-real-writer", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: {
+			job_id: live.jobId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["S13 writer pass"],
+		} }] }]);
+		s.agentDir.writeModels(s.provider);
+		const file = join(s.home, paths.reviewFile(live.jobId, 1));
+		await s.parent("Review the S13 writer job.", [
+			{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: live.jobId, model: reviewer } }] },
+			{ kind: "text", text: "Review started." },
+		], async () => { await waitFor(() => existsSync(file), Boolean, { timeoutMs: 30_000, what: "real cp_review writes its verdict" }); });
+		await render(s, "Ship PR #1330?", live.jobId);
+		assert.equal(s.post.awaiting.read().items.find((item) => item.job_id === live.jobId)?.state, "open", "the reader accepts the real writer's verdict");
+	});
 });
 
 test("S13: ship decisions wait for current CI and recover from repeated transport failure", { skip: SKIP, timeout: 120_000 }, async (t) => {
@@ -383,5 +399,18 @@ test("S13: workflow command failures never become positive absence of CI", { ski
 		s.setGh({ runs: [], routes: [{ match: "actions/workflows", replies: [mode === "none" ? { stdout: JSON.stringify({ total_count: 0, workflows: [] }) } : { code: 1, stderr: mode === "unauthorized" ? "HTTP 403 Resource not accessible" : "spawn gh ENOENT" }] }] });
 		await render(s, "Merge PR #51?", live.jobId);
 		assert.equal(s.post.awaiting.read().items.find((row) => row.job_id === live.jobId)?.state, mode === "none" ? "open" : "deferred", `${mode}: only positive workflow absence unblocks CI`);
+	});
+	// cp_integrate renders the workflow classification; swapping unauthorized and command_failed must fail here.
+	for (const [n, mode] of (["unauthorized", "command_failed"] as const).entries()) await t.test(`${mode} cause`, async () => {
+		const live = await s.held(`S13 workflows cause ${mode}`, 1340 + n);
+		writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+		s.setGh({ runs: [], routes: [{ match: "actions/workflows", replies: [{ code: 1, stderr: mode === "unauthorized" ? "HTTP 403 Resource not accessible" : "spawn gh ENOENT" }] }] });
+		const events = await s.parent("Check integration readiness.", [
+			{ kind: "tool_calls", calls: [{ name: "cp_integrate", args: { job_id: live.jobId } }] },
+			{ kind: "text", text: "Checked." },
+		], undefined, true);
+		const text = JSON.stringify(events);
+		assert.match(text, new RegExp(`ci configuration: unreadable \\(${mode}\\)`), `${mode}: rendered cause`);
+		assert.match(text, mode === "unauthorized" ? /gh cannot read this repository's workflows/ : /could not ask this repository for its workflows/, `${mode}: rendered reason`);
 	});
 });
