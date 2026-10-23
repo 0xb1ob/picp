@@ -3,6 +3,9 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
+import { ScheduleRunStore } from "../../src/schedule-runs.ts";
+import { readAnswers } from "../../src/viewer/control-files.ts";
+import { policyFromLegacy } from "../../src/viewer/schedule-policy.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
 
 for (const [kind, variant, title] of [
@@ -31,6 +34,16 @@ for (const [kind, variant, title] of [
 			const before = variant === "corrupt" ? "{ not json" : JSON.stringify({ schema_version: 1, entries });
 			writeFileSync(file, before);
 			if (variant === "foreign-owner") writeFileSync(join(home.path, LAYOUT.parentLock), JSON.stringify({ schema_version: 1, pid: process.pid, started_at: at, home: home.path }));
+			if (variant === "scheduler-fault") {
+				const runs = new ScheduleRunStore({ home: home.path });
+				const policy = policyFromLegacy({ id: "sch-123456", name: "S28 result", project: "demo", mandate_id: "md-123456", enabled: true, created_at: at, trigger: { type: "manual" }, job: { title: "S28 result", kind: "research", delivery: "answer" } }, {
+					seed_mandate_id: "md-123456", channel: "operator_chat", objective: "S28 result", expiry_hours: 1, spend_usd: 10, spend_tokens: 1000, job_cap: 6,
+					allowed_actions: ["plan", "review"], ask_on: ["merge", "risk:high"], approval: { operator_quote: "Run the report", decided_by: "operator-quote", approved_at: at },
+				});
+				await runs.createRun({ schema_version: 1, id: "run-20261004150000-abcdef", schedule_id: policy.schedule_id, policy_revision: 1, policy, trigger: { via: "slot", at }, anchor_job_id: null, members: [], phase: "accepted", outcome: null, started_at: at, deadline_at: "2026-10-04T16:00:00Z", risk_preapproved: [], authority_log: [], cap_notices: [],
+					result: { source_key: "s28-pending-result", job_id: null, generation: null, outcome: "completed", headline: "S28 completed before the ledger fault", at, links: [], answer_id: null, delivered_at: null },
+				});
+			}
 			if (variant === "scheduler-fault") writeFileSync(join(home.path, LAYOUT.jobsFile), "{ corrupt ledger");
 			const provider = await MockProvider.start();
 			const model = provider.addScript(`startup-${kind}-${variant}`, [
@@ -61,6 +74,13 @@ for (const [kind, variant, title] of [
 				const after = JSON.parse(readFileSync(file, "utf8"));
 				assert.deepEqual(after.entries.map((entry: { job_id: string }) => entry.job_id), kind === "armed" && variant !== "scheduler-fault" ? [blocked.id] : []);
 				assert.equal((wakes.match(/:dropped:/g) ?? []).length, variant === "scheduler-fault" ? ids.length : 3, "one terminal wake per request");
+			}
+			if (variant === "scheduler-fault") {
+				const cards = await waitFor(() => readAnswers(join(home.path, LAYOUT.state)).answers, (answers) => answers.some((answer) => answer.source?.source_key === "s28-pending-result"), { timeoutMs: 5_000, what: "Answers card delivered despite scheduler ledger fault" });
+				const matching = cards.filter((answer) => answer.source?.source_key === "s28-pending-result");
+				assert.equal(matching.length, 1, "one pending result reaches the Answers consumer");
+				assert.match(matching[0]!.answer, /S28 completed before the ledger fault/);
+				assert.ok(new ScheduleRunStore({ home: home.path }).run("run-20261004150000-abcdef")!.result!.delivered_at);
 			}
 		});
 }
