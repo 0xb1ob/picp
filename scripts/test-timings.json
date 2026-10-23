@@ -72,6 +72,8 @@
 	"tests/device-notify.test.ts": 2163,
 	"tests/diff-review-retained.test.ts": 3259,
 	"tests/e2e/dispatch-preview-s28.test.ts": 3000,
+	"tests/e2e/dispatch-preview-s30.test.ts": 5000,
+	"tests/e2e/dispatch-s30.test.ts": 5000,
 	"tests/e2e/dispatch-s29.test.ts": 27000,
 	"tests/e2e/dispatch-authority-s29.test.ts": 65000,
 	"tests/e2e/dispatch-cleanup-s29.test.ts": 18000,

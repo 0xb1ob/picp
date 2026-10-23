@@ -1,0 +1,51 @@
+import assert from "node:assert/strict";
+import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { CommandPost } from "../../src/command-post.ts";
+import { LAYOUT, paths } from "../../src/contracts.ts";
+import { dispatchS29 } from "../harness/dispatch-s29.ts";
+import { git, REPO_ROOT } from "../harness/index.ts";
+
+test("preview: the same request dispatched afterwards lands on exactly what the preview said", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const job = await b.ledger.create({ title: "migrate the billing tables across every service", project: "demo", delivery: "pr", kind: "ship" });
+	const model = b.provider.addScript("worker", [{ kind: "text", text: "received" }]);
+	b.agent.writeModels(b.provider);
+	const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
+	const request = { jobId: job.id, task: "Migrate the billing tables across every service.", model, fetch: false };
+	const preview = await post.previewDispatch(request);
+	for (const path of [LAYOUT.fleetFile, paths.runDir(job.id), LAYOUT.sessions]) assert.equal(existsSync(join(b.home, path)), false);
+	assert.equal((await b.ledger.show(job.id)).status, "open");
+	const result = await post.dispatch(request);
+	assert.equal(result.state, "dispatched");
+	if (result.state !== "dispatched") return;
+	assert.equal(result.model, preview.decision?.model);
+	assert.equal(result.profile, preview.profile);
+	assert.equal(result.routing, preview.line, "the preview's line IS the line the dispatch printed");
+	assert.deepEqual(post.fleet.get(job.id)?.routing, preview.routing);
+	assert.equal("mandate_id" in result, false, "unmandated dispatch fabricates no grant");
+	assert.equal(git(result.worktree, "symbolic-ref", "--short", "HEAD"), job.id);
+});
+
+test("preview: a task file's body never travels in the result, and config changes belong to the dispatch", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const job = await b.ledger.create({ title: "handover", project: "demo", delivery: "pr", kind: "ship" });
+	const first = b.provider.addScript("first", [{ kind: "text", text: "received" }]);
+	const second = b.provider.addScript("second", [{ kind: "text", text: "received" }]);
+	b.agent.writeModels(b.provider);
+	const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
+	const taskFile = join(b.home, "plan.md");
+	const body = "# Plan\n\nS30 private handover body.\n";
+	writeFileSync(taskFile, body);
+	const policy = (model: string) => writeFileSync(join(b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*"], rubric: [{ id: "small-ship", role: "implementer", scope: ["S"], model }] }));
+	policy(first);
+	const before = await post.previewDispatch({ jobId: job.id, taskFile, scope: "S", risk: "low" });
+	assert.deepEqual(before.task, { source: "task_file", path: taskFile, bytes: Buffer.byteLength(body) });
+	assert.ok(!JSON.stringify(before).includes("S30 private handover body"));
+	assert.ok(!JSON.stringify(before).includes("# Plan"));
+	assert.equal(before.decision?.model, first);
+	policy(second);
+	const after = await post.previewDispatch({ jobId: job.id, taskFile, scope: "S", risk: "low" });
+	assert.equal(after.decision?.model, second, "the live config decides, never a stale preview");
+});
