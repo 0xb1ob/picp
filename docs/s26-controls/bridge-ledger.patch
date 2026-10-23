@@ -1,0 +1,5 @@
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -296 +296 @@
+-				try { const { target } = relayFiles(); noteBridgeRelay(target.home, target.mode, relay); }
++				try { void 0; }

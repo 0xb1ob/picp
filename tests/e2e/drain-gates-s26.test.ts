@@ -8,6 +8,7 @@ import { readDrain, restartNotice } from "../../src/drain.ts";
 import { readFileSync } from "node:fs";
 import { waitFor } from "../harness/index.ts";
 import { JOB, seedHeldHome } from "../harness/held-home.ts";
+import { RunRegistry } from "../../src/runs.ts";
 
 const calls = [
 	{ name: "cp_next", args: {} },
@@ -15,12 +16,14 @@ const calls = [
 	{ name: "cp_integrate", args: { job_id: JOB } },
 	{ name: "cp_review", args: { job_id: JOB } },
 	{ name: "cp_gate", args: { job_id: JOB } },
+	{ name: "cp_send", args: { job_id: JOB, message: "Repair the held PR", purpose: "repair" } },
 ];
 
 test("S26: real tools refuse starts while drain state exists or is malformed", { timeout: 90_000 }, async (t) => {
 	for (const call of [...calls, { name: "cp_dispatch", args: { job_id: "cp-any", task: "malformed" } }]) {
 		await t.test(`${call.name} ${"task" in call.args ? call.args.task : ""}`, async () => {
 			const s = await seedHeldHome({ ciState: "in_progress" });
+			if (call.name === "cp_send") new RunRegistry(s.home.path).open(JOB).cp("held_released", { for_job: "cp-next", reason: "spawn cap" });
 			const provider = await MockProvider.start();
 			const agent = createAgentDir({ provider });
 			const model = provider.addScript("s26-gate", [{ kind: "tool_calls", calls: [call] }, { kind: "text", text: "gate checked" }], { onExhausted: "repeat" });
@@ -61,4 +64,24 @@ test("S26: a real integrate step stays tracked through timeout and releases afte
 	const result = await integration;
 	assert.ok(result.next);
 	assert.equal(post.drain.mergeSteps, 0, "the public integrate step releases its drain hold");
+});
+
+
+test("S26: held continuation refuses a persisted or malformed drain and reopens the same event after removal", { timeout: 60_000 }, async (t) => {
+	const s = await seedHeldHome({ ciState: "in_progress", review: "none" });
+	const previous = process.env.PATH;
+	process.env.PATH = `${s.bin}:${previous}`;
+	const post = new CommandPost({ home: s.home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true, continuation: true });
+	t.after(async () => { await post.shutdown(); process.env.PATH = previous; s.repo.cleanup(); s.home.cleanup(); });
+	post.drain.start();
+	const event = { jobId: JOB, event: "startup" as const };
+	assert.equal((await post.continuation.trigger(event)).action, "draining");
+	writeFileSync(drainFile(s.home.path), "{broken");
+	assert.equal((await post.continuation.trigger(event)).action, "draining");
+	const { rmSync } = await import("node:fs");
+	rmSync(drainFile(s.home.path));
+	const reopened = await post.continuation.trigger(event);
+	assert.equal(reopened.action, "wait", reopened.reason);
+	assert.equal(reopened.steps, 1, "the same event advances an actual integration step after drain removal");
+	assert.match(readFileSync(s.ghLog, "utf8"), /pr view/);
 });

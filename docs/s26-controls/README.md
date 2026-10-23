@@ -1,7 +1,7 @@
 # S26 executed controls
 
-Seven retirement controls are documented with inline patches and declaration mappings in ../testing-migration/s26.md.
-The additional controls below are supplemental; the corresponding original drain declarations remain in place.
+Retirement controls, hashes and declaration mappings are documented in ../testing-migration/s26.md.
+Drain coverage is complete: 21 declarations mapped and two preserved verbatim; bridge/dashboard work continues.
 Apply the patches with `git apply --unidiff-zero` and restore production code after each run.
 
 | Patch | sha256 | Command after `npm run test:one --` | Observed failure |
@@ -12,6 +12,17 @@ Apply the patches with `git apply --unidiff-zero` and restore production code af
 | lock.patch | cc4a68666943872863e64c36e27b95ca2d5444d86baf51c9b281380593010d63 | --test-name-pattern='second real session' tests/e2e/drain-edge-s26.test.ts | Expected lock refusal, actual drained: safe to restart from the second session |
 | unsupported.patch | a7a64795c6862c7e17df567cffba594eded3efaedd8a9be1eecaa2a9e8f3f00f | --test-name-pattern='real bridge restart' tests/e2e/drain-restart.test.ts | Exact unsupported-restart response assertion fails |
 
-Two controls survived and earn no retirement credit: leaving `released()` owned passes RPC new_session but fails the
-retained reused-post test; removing only check()'s owns guard passes the real sibling session scenario. The latter
-scenario proves lock refusal at the command boundary, not direct invocation of check() on a nonowner's empty manager.
+Additional executed commands after `npm run test:one --`:
+
+- `cancel-remove.patch`: drain-worker-s26 and drain-edge-s26 full files fail cancellation file-removal assertions.
+- `outcome-retract.patch`: drain-worker-s26 fails cancellation/startup pending-outcome assertions.
+- `lock-check.patch`: `--test-name-pattern='second real session' tests/e2e/drain-edge-s26.test.ts` fails the non-owner status render (drained instead of draining).
+- `external-delete.patch`: `--test-name-pattern='external delete while actual' tests/e2e/drain-worker-s26.test.ts` fails no-resurrection (timeout instead of undefined).
+- `update-idle.patch`: `--test-name-pattern='production updater dry-run' tests/e2e/drain-worker-s26.test.ts` fails idle update classification (skipped_busy instead of would drain/update).
+- `start-gates.patch`: `--test-name-pattern='dispatch prevents|death during|reports while draining' tests/e2e/drain-worker-s26.test.ts` fails all three; `--test-name-pattern='real tools refuse' tests/e2e/drain-gates-s26.test.ts` fails dispatch/review/gate/released-send refusals.
+- `continuation.patch`: `--test-name-pattern='held continuation' tests/e2e/drain-gates-s26.test.ts` fails expected draining/actual wait.
+- `restart-live.patch`: `--test-name-pattern='production updater dry-run' tests/e2e/drain-worker-s26.test.ts` fails the actual cp_parent stop warning (zero instead of one live idle worker).
+
+Retained controls earn no retirement credit: leaving `released()` owned passes real RPC new_session but fails the
+retained reused-post test. Removing diagnostic unsubscribe or the legacy version prefix passes the real host diagnostic
+consumer but fails the corresponding verbatim declaration in tests/drain-retained.test.ts. All mutations were restored.

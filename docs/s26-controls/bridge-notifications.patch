@@ -1,0 +1,8 @@
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -296 +296 @@
+-				try { const { target } = relayFiles(); noteBridgeRelay(target.home, target.mode, relay); }
++				try { void 0; }
+@@ -730 +730 @@
+-					setStatusLine(ctx ?? sessionCtx, "cp-parent", attachedLine(target.hostPid, target.parentPid));
++					void 0;

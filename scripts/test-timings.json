@@ -1,6 +1,8 @@
 {
 	"tests/e2e/drain-restart.test.ts": 7000,
-	"tests/e2e/drain-worker-s26.test.ts": 19000,
+	"tests/e2e/drain-worker-s26.test.ts": 32000,
+	"tests/e2e/bridge-host-s26.test.ts": 15000,
+	"tests/drain-retained.test.ts": 5000,
 	"tests/e2e/drain-compact-s26.test.ts": 20000,
 	"tests/e2e/drain-recovery-s26.test.ts": 7000,
 	"tests/drain-stale-gate-retained.test.ts": 2000,
@@ -71,7 +73,6 @@
 	"tests/dispatch.test.ts": 37951,
 	"tests/doc-test-cites.test.ts": 40,
 	"tests/doctor.test.ts": 16759,
-	"tests/drain.test.ts": 383,
 	"tests/e2e-hermetic-gh.test.ts": 14,
 	"tests/e2e/authority.test.ts": 315196,
 	"tests/e2e/awaiting-count.test.ts": 117,

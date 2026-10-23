@@ -1,0 +1,5 @@
+--- a/src/parent-diagnostics.ts
++++ b/src/parent-diagnostics.ts
+@@ -18 +18 @@
+-	const prefixes = action === "doctor" ? ["DOCTOR "] : action === "drain" ? ["DRAIN: "] : ["picp ", "pi-command-post "];
++	const prefixes = action === "doctor" ? ["DOCTOR "] : action === "drain" ? ["DRAIN: "] : ["picp "];

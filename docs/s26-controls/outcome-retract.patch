@@ -1,0 +1,8 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -348 +348 @@
+-		this.#deps.discard?.([outcomeWakeId(record, "drained"), outcomeWakeId(record, "timeout")]);
++		void 0;
+@@ -384 +384 @@
+-					this.#deps.discard?.([outcomeWakeId(found, "drained"), outcomeWakeId(found, "timeout")]);
++					void 0;

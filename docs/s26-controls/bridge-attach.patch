@@ -1,0 +1,5 @@
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -536 +536 @@
+-		await attachReadOnly();
++		void 0;

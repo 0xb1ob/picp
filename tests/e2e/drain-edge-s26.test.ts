@@ -35,6 +35,10 @@ test("S26: a second real session cannot clear, cancel or start the lock owner's 
 	assert.match(await s.command(other, "/cp-drain 0"), /does not hold the parent lock/);
 	assert.match(await s.command(other, "/cp-drain cancel"), /does not hold the parent lock/);
 	assert.equal(readFileSync(drainFile(s.home), "utf8"), saved);
+	await owner.close();
+	writeFileSync(drainFile(s.home), JSON.stringify({ state: "draining", started_at: "2026-09-27T12:00:00Z", deadline: "2099-01-01T00:00:00Z", timeout_s: 600, jobs: [] }));
+	await other.prompt("/status");
+	assert.equal(readDrain(s.home)?.state, "draining", "a read-only status render never decides another parent's drain");
 });
 
 test("S26: public drain commands round-trip auto-update and legacy causes and cancel a foreign completed drain", { timeout: 60_000 }, async (t) => {
