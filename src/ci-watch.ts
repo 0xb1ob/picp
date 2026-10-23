@@ -98,6 +98,7 @@ import {
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { retryTransientRead } from "./actions-ci.ts";
 import { CI_UNREADABLE, ciReadDenied } from "./ci-access.ts";
 import { ciRunRef, failedRunOn, formatRunRef } from "./ci-run-ref.ts";
 import { parseChangeRequestUrl } from "./forge-url.ts";
@@ -507,7 +508,7 @@ export interface CiWatchDeps {
 	/** REST facts about the job's PR. `undefined` when the receipt names none. */
 	pr: (job: WatchableRecord, prUrl: string) => Promise<PrObservation | undefined>;
 	/** Every Actions run on the resolved pushed `head`; never asked without one. */
-	runs: (job: WatchableRecord, head: string) => Promise<readonly CiRun[]>;
+	runs: (job: WatchableRecord, head: string, timeoutMs?: number) => Promise<readonly CiRun[]>;
 	/** The branch's pushed head, asked only when the PR did not answer. */
 	head?: (job: WatchableRecord) => Promise<HeadResolution>;
 	now?: () => Date;
@@ -703,7 +704,7 @@ export class CiWatch {
 		if (!head.sha && this.#deps.head) head = await this.#deps.head(record);
 		// The runs query is skipped once the PR's story is over (merged or closed: the REST call already says)
 		// and when no head is known, since Actions runs are read for one exact head.
-		const runs = !head.sha || pr?.merged || (pr?.state ?? "").toLowerCase() === "closed" ? [] : await this.#deps.runs(record, head.sha);
+		const runs = !head.sha || pr?.merged || (pr?.state ?? "").toLowerCase() === "closed" ? [] : await retryTransientRead((timeoutMs) => this.#deps.runs(record, head.sha as string, timeoutMs));
 		const facts: CiFacts = {
 			jobId: record.job_id,
 			branch: record.branch,
