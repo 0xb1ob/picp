@@ -1,0 +1,5 @@
+--- a/extensions/command-post/session-hooks.ts
++++ b/extensions/command-post/session-hooks.ts
+@@ -216 +216 @@
+-			commandPost().drain.startup();
++			void commandPost();

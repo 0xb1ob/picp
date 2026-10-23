@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -355 +355 @@
+-		if (this.#owned) {
++		if (false) {

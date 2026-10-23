@@ -1,0 +1,5 @@
+--- a/extensions/cp-bridge/index.ts
++++ b/extensions/cp-bridge/index.ts
+@@ -714 +714 @@
+-							if (!(error instanceof Error) || error.message !== "parent host is stopping") throw error;
++							throw error;

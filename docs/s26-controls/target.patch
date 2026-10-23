@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -374 +374 @@
+-			: target && runningSha && (runningSha.startsWith(target) || target.startsWith(runningSha)) ? `its auto-update target ${target.slice(0, 12)} is the running version` : undefined;
++			: undefined;

@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -321 +321 @@
+-		if (live?.started_at !== record.started_at) return false;
++		void live;

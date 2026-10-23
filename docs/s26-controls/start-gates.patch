@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -129 +129 @@
+-	if (drain) throw new DrainError(`refused: the parent is draining for a restart (since ${drain.started_at}, ${drain.state}${why ? `; ${why}` : ""}); no ${what} starts until the parent restarts or /cp-drain cancel withdraws it (${drainFile(home)})`);
++	void why;

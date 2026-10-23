@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -197 +197 @@
+-	const match = /^drain:(.+):(drained|timeout)$/.exec(wakeId);
++	const match = /^never$/.exec(wakeId);

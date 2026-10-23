@@ -1,0 +1,5 @@
+--- a/src/drain.ts
++++ b/src/drain.ts
+@@ -256 +256 @@
+-		if (existing?.state !== "draining" && this.#deps.parentControlBusy?.()) throw new DrainError(PARENT_CONTROL_BUSY);
++		if (false) throw new DrainError(PARENT_CONTROL_BUSY);
