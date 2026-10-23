@@ -1,0 +1,141 @@
+import assert from "node:assert/strict";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { CommandPost } from "../../src/command-post.ts";
+import { DispatchError } from "../../src/dispatch.ts";
+import { dispatchS29 } from "../harness/dispatch-s29.ts";
+import { git, readRunEvents, REPO_ROOT, treehouse } from "../harness/index.ts";
+import { paths, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp } from "../../src/contracts.ts";
+import { json, startStack } from "./landing-helpers.ts";
+
+test("a failing branch cleanup never masks the original error", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const job = await b.ledger.create({ title: "masked", project: "demo", delivery: "local", kind: "ship" });
+	const bin = join(b.home, "bin");
+	mkdirSync(bin);
+	const log = join(b.home, "git-calls");
+	writeFileSync(join(bin, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\ncase "$*" in\n"switch --no-track -c "*) /usr/bin/git "$@" || exit $?; printf dirty > dirty.txt; exit 0;;\n"branch -D "*) echo 'fixture delete failure' >&2; exit 1;;\nesac\nexec /usr/bin/git "$@"\n`, { mode: 0o700 });
+	const model = b.provider.addScript("worker", [{ kind: "text", text: "must not start" }]);
+	b.agent.writeModels(b.provider);
+	const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
+	const previousPath = process.env.PATH;
+	let failure: unknown;
+	try {
+		process.env.PATH = `${bin}:${previousPath}`;
+		failure = await post.dispatch({ jobId: job.id, task: "Bump x.", model, fetch: false }).catch((error: unknown) => error);
+	} finally {
+		process.env.PATH = previousPath;
+	}
+	assert.ok(failure instanceof DispatchError);
+	assert.equal(failure.message.split("\n")[0], "preflight refused the leased worktree:");
+	assert.match(failure.message, /left in place/);
+	assert.match(readFileSync(log, "utf8"), new RegExp(`branch -D ${job.id}`));
+	assert.equal(git(b.clone, "rev-parse", job.id), git(b.clone, "rev-parse", "origin/main"));
+	assert.equal(post.fleet.get(job.id), undefined);
+	assert.ok(!/leased/.test(treehouse(b.clone, "status")));
+	assert.equal(b.provider.remaining("worker"), 1);
+});
+
+test("a successful dispatch deletes no branch at all", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const job = await b.ledger.create({ title: "happy", project: "demo", delivery: "local", kind: "ship" });
+	const bin = join(b.home, "bin");
+	mkdirSync(bin);
+	const log = join(b.home, "git-calls");
+	writeFileSync(join(bin, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexec /usr/bin/git "$@"\n`, { mode: 0o700 });
+	const model = b.provider.addScript("worker", [{ kind: "text", text: "received" }]);
+	const ends = await b.run([{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Bump x.", model, queue: false, when_ready: false } }] }], { PATH: `${bin}:${process.env.PATH}` });
+	assert.notEqual(ends[0]?.isError, true, JSON.stringify(ends));
+	const result = ends[0]?.result.details;
+	assert.equal(result?.state, "dispatched");
+	assert.equal("mandate_id" in result!, false);
+	const calls = readFileSync(log, "utf8");
+	assert.doesNotMatch(calls, /branch -D /);
+	assert.doesNotMatch(calls, /switch --detach/);
+	assert.equal(git(String(result?.worktree), "symbolic-ref", "--short", "HEAD"), job.id);
+});
+
+test("picp-d0p: dispatch pr checks out the PR head at its sha, records bound_pr, cuts no job branch, briefs the bound note", { timeout: 120_000 }, async (t) => {
+	const f = await startStack(t, { github: true });
+	git(f.repo.path, "switch", "-c", "cp-b55w");
+	writeFileSync(join(f.repo.path, "contrib.txt"), "outside work\n");
+	git(f.repo.path, "add", "contrib.txt");
+	git(f.repo.path, "commit", "-m", "outside work");
+	git(f.repo.path, "push", "origin", "cp-b55w");
+	const sha = git(f.repo.path, "rev-parse", "HEAD");
+	const url = "https://github.com/example/demo/pull/169";
+	f.setGh({ routes: [{ match: "pr view 169", replies: [json({ number: 169, url, state: "OPEN", isDraft: true, isCrossRepository: false, headRefName: "cp-b55w", headRefOid: sha, baseRefName: "main" })] }] });
+	const job = await f.post.ledger().create({ title: "finish pr", project: "demo", delivery: "pr", kind: "ship" });
+	const model = f.provider.addScript("bound-worker", [{ kind: "text", text: "received" }]);
+	f.agentDir.writeModels(f.provider);
+	const result = await f.post.dispatch({ jobId: job.id, task: "Finish it.", model, pr: "169" });
+	assert.equal(result.state, "dispatched");
+	if (result.state !== "dispatched") return;
+	assert.equal(result.branch, "cp-b55w");
+	assert.equal(git(result.worktree, "symbolic-ref", "--short", "HEAD"), "cp-b55w");
+	assert.equal(git(result.worktree, "rev-parse", "HEAD"), sha);
+	const record = f.post.fleet.get(job.id);
+	assert.equal(record?.branch, "cp-b55w");
+	assert.deepEqual(record?.bound_pr, { number: 169, url, base: "main" });
+	assert.equal(git(f.post.registry.pathOf("demo"), "branch", "--list", job.id), "");
+	const brief = readFileSync(join(f.home, paths.briefFile(job.id)), "utf8");
+	assert.match(brief, /on branch cp-b55w\./);
+	assert.ok(brief.includes(`Bound to ${url} (draft), head cp-b55w`));
+	assert.match(brief, /merging origin\/main into it, never by rebase; push fast-forward only/);
+	assert.ok(readFileSync(join(f.home, paths.originalTaskFile(job.id)), "utf8").includes(`Bound to ${url}`));
+	assert.equal(readRunEvents(f.home, job.id).filter((event) => event.type === "pr_bound").length, 1);
+	assert.ok(f.ghCalls().some((call) => call.startsWith("pr view 169 --repo example/demo --json ")));
+});
+
+test("picp-d0p: pr on a non ship/pr job, a branch another job holds, and a bound re-dispatch without pr are refused before any lease", { timeout: 120_000 }, async (t) => {
+	const f = await startStack(t, { github: true });
+	mkdirSync(join(f.repo.path, "scripts"));
+	writeFileSync(join(f.repo.path, "scripts", "run.sh"), "#!/bin/sh\necho fixture\n", { mode: 0o700 });
+	git(f.repo.path, "add", "scripts/run.sh");
+	git(f.repo.path, "commit", "-m", "script fixture");
+	git(f.repo.path, "push", "origin", "main");
+	git(f.repo.path, "branch", "cp-b55w");
+	git(f.repo.path, "push", "origin", "cp-b55w");
+	const sha = git(f.repo.path, "rev-parse", "cp-b55w");
+	f.setGh({ routes: [{ match: "pr view 169", replies: [json({ number: 169, url: "https://github.com/example/demo/pull/169", state: "OPEN", isDraft: true, isCrossRepository: false, headRefName: "cp-b55w", headRefOid: sha, baseRefName: "main" })] }] });
+	const model = f.provider.addScript("unused", [{ kind: "text", text: "must not start" }]);
+	f.agentDir.writeModels(f.provider);
+	const local = await f.post.ledger().create({ title: "local", project: "demo", delivery: "local", kind: "ship" });
+	await assert.rejects(f.post.dispatch({ jobId: local.id, task: "x", model, pr: "169" }), /pr binds only a kind:ship delivery:pr job/);
+	const script = await f.post.ledger().create({ title: "script", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
+	await assert.rejects(f.post.dispatch({ jobId: script.id, pr: "169" }), /a script job pushes no branch/);
+	const worker = { pid: process.pid, session_id: "s", session_file: join(f.home, "s.jsonl"), profile: "implementer", role: "implementer" as const, model, started_at: isoTimestamp() };
+	const failed = { phase: "failed" as const, failure: { class: "crash" as const, message: "exit 1", at: isoTimestamp() } };
+	await f.post.fleet.add({ job_id: "cp-b55w", project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, ...failed, worker, worktree: "/wt", branch: "cp-b55w", dispatched_at: isoTimestamp(), usage: EMPTY_USAGE });
+	const job = await f.post.ledger().create({ title: "held branch", project: "demo", delivery: "pr", kind: "ship" });
+	await assert.rejects(f.post.dispatch({ jobId: job.id, task: "x", model, pr: "169" }), /job cp-b55w \(failed\) holds it/);
+	await f.post.fleet.remove("cp-b55w");
+	const again = await f.post.ledger().create({ title: "bound again", project: "demo", delivery: "pr", kind: "ship" });
+	await f.post.fleet.add({ job_id: again.id, project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, ...failed, worker, worktree: "/wt2", branch: "other", bound_pr: { number: 170, url: "https://github.com/example/demo/pull/170", base: "main" }, dispatched_at: isoTimestamp(), usage: EMPTY_USAGE });
+	await assert.rejects(f.post.dispatch({ jobId: again.id, task: "x", model }), /was bound to .*pull\/170; re-dispatch it with pr 170/);
+	await assert.rejects(f.post.dispatch({ jobId: again.id, task: "x", model, pr: "169" }), /was bound to .*pull\/170, not .*pull\/169/);
+	assert.ok(!/leased/.test(treehouse(f.post.registry.pathOf("demo"), "status")));
+	assert.equal(f.provider.remaining("unused"), 1);
+});
+
+test("picp-d0p: a failure after the bound checkout only detaches; the bound branch is never deleted", { timeout: 120_000 }, async (t) => {
+	const f = await startStack(t, { github: true });
+	git(f.repo.path, "branch", "cp-b55w");
+	git(f.repo.path, "push", "origin", "cp-b55w");
+	const sha = git(f.repo.path, "rev-parse", "cp-b55w");
+	f.setGh({ routes: [{ match: "pr view 169", replies: [json({ number: 169, url: "https://github.com/example/demo/pull/169", state: "OPEN", isDraft: true, isCrossRepository: false, headRefName: "cp-b55w", headRefOid: sha, baseRefName: "main" })] }] });
+	const log = join(f.home, "bound-git-calls");
+	writeFileSync(join(f.home, "bin", "git"), `#!/usr/bin/env node\nconst {spawnSync}=require('node:child_process'); const fs=require('node:fs'); const args=process.argv.slice(2); fs.appendFileSync(${JSON.stringify(log)},args.join(' ')+'\\n'); const r=spawnSync('/usr/bin/git',[...(args.includes('get-url')?[]:['-c',${JSON.stringify(`url.${f.repo.remote}.insteadOf=https://github.com/example/demo`)}]),...args],{stdio:'inherit'}); if(r.status===0 && args[0]==='switch' && args.includes('cp-b55w')) fs.writeFileSync('dirty.txt','dirty'); process.exit(r.status??1);\n`, { mode: 0o700 });
+	const job = await f.post.ledger().create({ title: "bound fails", project: "demo", delivery: "pr", kind: "ship" });
+	const model = f.provider.addScript("unused", [{ kind: "text", text: "must not start" }]);
+	f.agentDir.writeModels(f.provider);
+	await assert.rejects(f.post.dispatch({ jobId: job.id, task: "x", model, pr: "169" }), /preflight refused the leased worktree/);
+	const calls = readFileSync(log, "utf8");
+	assert.doesNotMatch(calls, /branch -D /);
+	assert.match(calls, /switch --detach/);
+	assert.equal(git(f.post.registry.pathOf("demo"), "rev-parse", "refs/heads/cp-b55w"), sha);
+	assert.deepEqual(f.post.fleet.read().jobs, []);
+	assert.ok(!/leased/.test(treehouse(f.post.registry.pathOf("demo"), "status")));
+	assert.equal(f.provider.remaining("unused"), 1);
+});

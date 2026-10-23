@@ -24,7 +24,7 @@ Zero capabilities are unaccounted for: every row below is one of the five.
 
 | command-post | verdict | new home | evidence |
 |---|---|---|---|
-| `cmdp dispatch --project --job-id --template --task-file --scope --risk` | ported | `cp_dispatch` tool → [`src/dispatch.ts`](../src/dispatch.ts) | `tests/dispatch.test.ts`, `tests/e2e/phase2.test.ts` |
+| `cmdp dispatch --project --job-id --template --task-file --scope --risk` | ported | `cp_dispatch` tool → [`src/dispatch.ts`](../src/dispatch.ts) | `tests/e2e/dispatch-s29.test.ts`, `tests/e2e/dispatch-s30.test.ts`, `tests/dispatch-retained.test.ts`, `tests/e2e/phase2.test.ts` |
 | `cmdp dispatch --name <alias>` | deleted | worker identity **is** the job id (one worker per job); aliases existed to name panes | `WorkerManager.spawn` one-worker-per-job, `tests/worker-manager.test.ts` |
 | `cmdp dispatch --origin` | out of scope | `origin` is still carried on every fleet record and status row, unread | `FleetRecordSchema.origin`, `StatusJobSchema.origin` |
 | `cmdp dispatch -- CMD…` (CLI override) | ported (narrowed) | `model` override on `cp_dispatch`; there is one CLI (pi) by design | `tests/routing.test.ts` |
@@ -52,7 +52,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | command-post / muxa | verdict | replacement | evidence |
 |---|---|---|---|
 | `muxa spawn` / `muxa dispatch` (pane + first brief) | deleted | `WorkerProcess`: spawn `pi --mode rpc`, then an id-correlated `prompt` | `tests/worker-process.test.ts`, `tests/e2e/phase1.test.ts` |
-| Paste broker, free-detection, `pending/` | deleted | RPC request/response; `receipt: "accepted"` means pi answered | `tests/dispatch.test.ts` |
+| Paste broker, free-detection, `pending/` | deleted | RPC request/response; `receipt: "accepted"` means pi answered | `tests/e2e/dispatch-s29.test.ts`, `tests/e2e/dispatch-s30.test.ts` |
 | First-brief **receipt heuristics** (Cursor: tail for `Branch:`; Claude: footer `Context: N%`; `unconfirmed`/`unknown`) | deleted | there is nothing to guess: the response is the receipt | `docs/contracts.md` §Dispatch |
 | `muxa send` (mail, promote) | ported | `cp_send` → prompt/steer/follow_up with `delivered\|queued\|failed` | `tests/send.test.ts` |
 | `muxa who` (roster, idle/busy/ghost) | ported | `fleet.json` + `agent_start`/`agent_settled` + pid probe + observed close | `tests/fleet.test.ts`, `tests/status.test.ts` |
@@ -80,7 +80,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | "Parent never reads artifact bodies" | mechanised | `ContextGuard` blocks `read`/`grep`/`bash`/`edit`/`write`; the ledger holds no bodies | `tests/guards.test.ts`, `tests/e2e/phase3.test.ts` |
 | Hung planner (artifact, no envelope) → gate from the path | ported | `advance()` gates it and reports `hung_planner` | `tests/pipeline.test.ts` |
 | "Never re-run research for an implementation failure" | mechanised | `mayRerunResearch` is asserted, not remembered | `tests/failures.test.ts` |
-| Pre-dispatch path (lease-bind, branch=job-id, check, jobs add) | ported | `cp_dispatch`'s fixed order; probe **before** lease, no orphan branch | `tests/dispatch.test.ts` |
+| Pre-dispatch path (lease-bind, branch=job-id, check, jobs add) | ported | `cp_dispatch`'s fixed order; probe **before** lease, no orphan branch | `tests/e2e/dispatch-s29.test.ts`, `tests/e2e/dispatch-cleanup-s29.test.ts`, `tests/e2e/dispatch-s30.test.ts` |
 | Promote vs new lease (same repo + held worktree + same model) | mechanised | `decideOccupancy`; cross-model role hop refused with the teardown instruction | `tests/preflight.test.ts` |
 | "Research evidence is not authorization to dispatch a second pane" | mechanised | one worker per job, enforced at spawn | `tests/worker-manager.test.ts` |
 | Stale clone / "belongs to another repo" recovery | ported | `assertCanonicalClone`'s five checks; recovery stays an operator decision | `tests/projects.test.ts` |

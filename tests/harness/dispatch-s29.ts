@@ -2,12 +2,12 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
-import { LAYOUT, SCHEMA_VERSION, THINKING_LEVELS } from "../../src/contracts.ts";
+import { LAYOUT, SCHEMA_VERSION, THINKING_LEVELS, type ThinkingLevel } from "../../src/contracts.ts";
 import type { CommandPost } from "../../src/command-post.ts";
 import { ProjectRegistry } from "../../src/projects.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MOCK_PROVIDER_ID, MockProvider, startPiChild, type ScriptStep } from "./index.ts";
 
-export async function dispatchS29(t: TestContext, options: { files?: Record<string, string>; emptyThinking?: boolean } = {}) {
+export async function dispatchS29(t: TestContext, options: { files?: Record<string, string>; emptyThinking?: boolean; supportedThinking?: readonly ThinkingLevel[] } = {}) {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", ...options.files } });
 	const scratch = createScratchLedger({ home: home.path, knownProjects: ["demo"] });
@@ -32,12 +32,12 @@ export async function dispatchS29(t: TestContext, options: { files?: Record<stri
 			const name = `s29-parent-${serial++}`;
 			const model = provider.addScript(name, [...steps, { kind: "text", text: "observed" }]);
 			agent.writeModels(provider);
-			if (options.emptyThinking) {
+			if (options.emptyThinking || options.supportedThinking) {
 				const config = provider.modelsJson();
 				for (const entry of Object.values(config.providers)) {
 					for (const model of (entry as { models: Record<string, unknown>[] }).models) {
 						model.reasoning = true;
-						model.thinkingLevelMap = Object.fromEntries(THINKING_LEVELS.map((level) => [level, null]));
+						model.thinkingLevelMap = Object.fromEntries(THINKING_LEVELS.map((level) => [level, options.supportedThinking?.includes(level) ? level : null]));
 					}
 				}
 				writeFileSync(join(agent.path, "models.json"), JSON.stringify(config));

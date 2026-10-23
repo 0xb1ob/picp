@@ -1,36 +1,6 @@
 /**
- * Routing T7: the epic's behaviour where its parts meet.
- *
- * T1-T6 each proved their own half against its own seam, and green helper tests
- * are not the same claim as "a dispatch does this". Three joins had no test at
- * all, and each of them is a place a regression would be invisible:
- *
- *  1. **inference -> record -> spawn.** A parent that supplies only `scope` for
- *     work whose words name production credentials must route high, record that
- *     it did, and *launch* that model at that effort. `tests/routing.test.ts`
- *     proves the resolver, `tests/dispatch.test.ts` proves a dispatch — nothing
- *     proved the argv agrees with the fleet record on a route nobody named.
- *  2. **preview == dispatch.** The preview is only worth having if it answers
- *     the question a dispatch would answer. It was tested for what it does not
- *     touch, never against the dispatch that followed it.
- *  3. **the shipped default, as an operator meets it.** cp-routing-t4 removed
- *     the planner catch-all so QA and ordinary planning fall through to their
- *     profiles — through `scaffoldHome`'s copy-once, from `loadRoutingConfig`,
- *     into the dispatch path that picks the profile. And a home that already
- *     has a routing.json keeps its own rows, catch-all included: this epic
- *     migrates nobody.
- *
- * Deliberately not re-proved here, because it already is:
- *   - pipeline impact retention, recovery and reanchor — `tests/pipeline.test.ts`
- *     ("routing T2: …", "pipeline: without a human answer nothing is dispatched");
- *   - reviewer inputs and the effort a reviewer actually spawns —
- *     `tests/gate.test.ts`, `tests/e2e/diff-review.test.ts`, `tests/quality.test.ts`
- *     (all assert `argOf(spawn.args, "--thinking")`);
- *   - the lint, the nudge and doctor's routing findings — `tests/routing.test.ts`,
- *     `tests/doctor.test.ts`.
- *
- * No inference API is called and no live config is read: the models are the
- * mock provider's, the homes are scratch dirs.
+ * These joins catch disagreements between inference, fleet records and spawned argv.
+ * Public preview/dispatch parity also runs in tests/e2e/dispatch-preview-s30.test.ts.
  */
 
 import assert from "node:assert/strict";
