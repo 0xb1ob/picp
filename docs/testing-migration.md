@@ -196,7 +196,7 @@ implementers that push and report, a scratch remote and a scripted `gh` on PATH;
 the normalization, budget, runner and rendered viewer parity assertions are mapped to 05-11,
 05-main-deadlines and 05-1; the infra classifier maps to 05-4. Only path-builder boundaries,
 legacy ciReadDenied strings and unreachable rerun guards remain in `tests/main-ci-retained.test.ts`.
-The throwing-runner `ghCiConfigured` stays in `tests/merge-ask.test.ts`. Plan and tree disagree once: the infra rerun's drain
+The throwing-runner `ghCiConfigured` coverage now lives in S13-workflows in `tests/e2e/merge-ask.test.ts` ([retirement ledger](testing-migration/s13.md)). Plan and tree disagree once: the infra rerun's drain
 guard is unreachable from cp_integrate, which reads no CI at all while draining (05-4 pins that); only the main CI
 watch reaches it. It also folds in the P2e review: the expired-grant matrix and the after-expiry sub-asserts are
 `retained` in `tests/decide.test.ts`, and the checker refuses a `retained` row whose note names no kept test file.
