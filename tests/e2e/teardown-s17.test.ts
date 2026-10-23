@@ -242,11 +242,15 @@ for (const forced of [false, true]) {
  });
 }
 
-for (const force of [false, true]) {
- test(`S17: branch-only ignored data refuses return and survives teardown (force=${force})`, { skip: SKIP, timeout: 120_000 }, async (t) => {
+for (const force of [false, true]) for (const special of [false, true]) {
+ test(`S17: branch-only ignored data refuses return and survives teardown (force=${force}, special=${special})`, { skip: SKIP, timeout: 120_000 }, async (t) => {
  const s = await startStack(t);
- const live = await s.held("S17 ignored data", 923, { command: (b) => `printf 'backtest/\\nnode_modules/\\n*.log\\n' > .gitignore && git add .gitignore && git commit -qm ignores && git push -qu origin ${b}` });
- const seeded = ["backtest/first", "backtest/second", "node_modules/x", "pkg/sub/out.log"];
+ const ignores = special
+  ? `mkdir -p 'a:1:b' 'quoted"name' && printf 'data/\\n' > 'a:1:b/.gitignore' && printf 'data/\\n' > 'quoted"name/.gitignore'`
+  : `printf 'backtest/\\nnode_modules/\\n*.log\\n' > .gitignore`;
+ const live = await s.held("S17 ignored data", 923, { command: (b) => `${ignores} && git add -A && git commit -qm ignores && git push -qu origin ${b}` });
+ const seeded = special ? ["a:1:b/data/first", "a:1:b/data/second", 'quoted"name/data/x']
+  : ["backtest/first", "backtest/second", "node_modules/x", "pkg/sub/out.log"];
  for (const path of seeded) {
   mkdirSync(join(live.worktree, path, ".."), { recursive: true });
   writeFileSync(join(live.worktree, path), "only copy\n");
@@ -255,11 +259,11 @@ for (const force of [false, true]) {
  const survivors = seeded.filter((path) => existsSync(join(live.worktree, path)));
  assert.deepEqual(survivors, seeded, `data deleted: ${seeded.filter((path) => !survivors.includes(path)).join(", ")}`);
  assert.deepEqual([result.torn_down, result.lease_returned, result.failure?.code], [false, false, "lease_return_failed"]);
- for (const path of seeded) assert.ok(formatTeardown(result).includes(path), path);
+ for (const path of seeded) assert.ok(formatTeardown(result).includes(JSON.stringify(path)), path);
  assert.equal(s.post.fleet.require(live.jobId).phase, "held");
  const { leaseFromRecord } = await import("../../src/leases.ts");
  await assert.rejects(s.post.leases.release(leaseFromRecord({ worktree: live.worktree })), (error: Error) => {
-  for (const path of seeded) assert.ok(error.message.includes(path), path);
+  for (const path of seeded) assert.ok(error.message.includes(JSON.stringify(path)), path);
   return true;
  });
  for (const path of seeded) assert.equal(readFileSync(join(live.worktree, path), "utf8"), "only copy\n");

@@ -76,7 +76,7 @@ export interface LeaseManagerOptions {
 	 */
 	poolRoot?: string;
 	/** Injected in tests; production execs the real binaries. */
-	runner?: (bin: string, args: readonly string[], cwd: string) => Promise<ExecResult>;
+	runner?: (bin: string, args: readonly string[], cwd: string, input?: string) => Promise<ExecResult>;
 	/** Injected in tests: how we decide the process cwd for the outside check. */
 	cwd?: () => string;
 }
@@ -230,11 +230,14 @@ export class LeaseManager {
 				const sources = new Set(changed.stdout.split("\0").filter(Boolean));
 				const entries: string[] = [];
 				if (sources.size) {
-					for (const entry of ignored.stdout.split("\0").filter(Boolean)) {
-						const rule = await git(["-c", "core.quotePath=false", "check-ignore", "-v", "--", entry]);
-						if (rule.status !== 0) throw new LeaseError(`cannot inspect ignore rule for ${JSON.stringify(entry)}; keep the lease`);
-						const source = rule.stdout.split(/:\d+:/)[0]!;
-						if (sources.has(source)) entries.push(entry);
+					const rules = await this.#exec(this.#options.gitBin ?? "git",
+						["check-ignore", "-v", "-z", "--stdin"], lease.path, false, ignored.stdout);
+					const fields = rules.stdout.split("\0");
+					if (rules.status !== 0 || fields.pop() !== "" || fields.length !== ignored.stdout.split("\0").filter(Boolean).length * 4) {
+						throw new LeaseError(`cannot inspect ignore rules in ${lease.path}; keep the lease`);
+					}
+					for (let i = 0; i < fields.length; i += 4) {
+						if (sources.has(fields[i]!)) entries.push(fields[i + 3]!);
 					}
 				}
 				if (entries.length) {
@@ -324,15 +327,15 @@ export class LeaseManager {
 		return this.#exec(this.treehouseBin, poolRoot ? ["--root", poolRoot, ...args] : args, cwd, true);
 	}
 
-	async #exec(bin: string, args: readonly string[], cwd: string, isTreehouse = false): Promise<ExecResult> {
+	async #exec(bin: string, args: readonly string[], cwd: string, isTreehouse = false, input?: string): Promise<ExecResult> {
 		const runner = this.#options.runner;
-		if (runner) return runner(bin, args, cwd);
+		if (runner) return runner(bin, args, cwd, input);
 		if (!isDirectory(cwd)) {
 			// ENOENT from exec is ambiguous (missing binary vs missing cwd); say which.
 			throw new LeaseError(`cannot run ${bin} ${args[0] ?? ""}: working directory ${cwd} does not exist`);
 		}
 		return new Promise<ExecResult>((resolvePromise, reject) => {
-			execFile(
+			const child = execFile(
 				bin,
 				[...args],
 				{
@@ -361,6 +364,7 @@ export class LeaseManager {
 					resolvePromise({ status, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
 				},
 			);
+			if (input !== undefined) child.stdin?.end(input);
 		});
 	}
 }
