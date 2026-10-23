@@ -8,9 +8,9 @@ import { EscalationStore } from "../../src/escalation.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { MandateStore } from "../../src/mandate.ts";
 import { ParentSendOutbox, parentSendFile } from "../../src/parent-outbox.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, type ScriptStep, waitFor } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, startRpc, type ScriptStep, waitFor } from "../harness/index.ts";
 
-async function fixture(t: TestContext, steps: ScriptStep[], raw?: string, timeout = 30_000) {
+async function fixture(t: TestContext, steps: ScriptStep[], raw?: string, timeout?: number) {
 	const home = createScratchHome();
 	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
 	if (raw !== undefined) writeFileSync(join(home.path, LAYOUT.data, "parent.json"), raw);
@@ -27,20 +27,21 @@ async function fixture(t: TestContext, steps: ScriptStep[], raw?: string, timeou
 		agent.cleanup(); await provider.stop(); home.cleanup();
 	});
 	return { home: home.path, bridge, provider,
-		start: () => bridge.start({ home: home.path, mode: "multi", model, cwd: home.path, commandPostExtension: COMMAND_POST_EXTENSION, requestTimeoutMs: timeout }),
+		start: (extension = COMMAND_POST_EXTENSION) => bridge.start({ home: home.path, mode: "multi", model, cwd: home.path, commandPostExtension: extension, requestTimeoutMs: timeout }),
 		input: () => JSON.stringify(provider.requests("s25-parent").at(-1)?.body),
 	};
 }
 
 for (const [index, raw, expected] of [[0, undefined, 200000], [1, '{"compact_at_tokens":150000}', 150000], [2, '{}', undefined]] as const) {
-	test(`S25 parent: settings ${index} reach bridge status`, { timeout: 60_000 }, async (t) => {
+	test("S25 parent: settings reach bridge status", { timeout: 60_000 }, async (t) => {
+		t.diagnostic(`settings ${index}`);
 		const f = await fixture(t, [{ kind: "text", text: "Ready." }], raw);
 		await f.start();
 		assert.equal(f.bridge.status().compactAtTokens, expected);
 	});
 }
 
-test("S25 parent: compaction carries disk decisions and unsettled sends without operator text", { timeout: 90_000 }, async (t) => {
+test("S25 parent: compaction carries disk decisions alongside caller instructions", { timeout: 90_000 }, async (t) => {
 	const f = await fixture(t, [{ kind: "text", text: "Initial work finished." }, { kind: "text", text: "Summary." }, { kind: "text", text: "Continued." }], '{}');
 	await f.start();
 	await f.bridge.send("Begin work.");
@@ -104,7 +105,8 @@ for (const [tag, summary, outcome] of [
 	["failure", { kind: "error", status: 400, message: "S25 summarizer rejected" }, "failed"],
 	["timeout", { kind: "hang", ms: 7000 }, "timed_out"],
 ] as const) {
-	test(`S25 parent: automatic ${tag} reaches the daemon log and error relay`, { timeout: 60_000 }, async (t) => {
+	test("S25 parent: automatic compaction outcomes reach the daemon log and error relay", { timeout: 60_000 }, async (t) => {
+		t.diagnostic(tag);
 		const f = await fixture(t, [{ kind: "text", text: "S25 finished work.", usage: { prompt_tokens: 205000 } }, summary], '{"compact_at_tokens":200000}', tag === "timeout" ? 5000 : 30000);
 		const relays: string[] = [];
 		f.bridge.onRelay((relay) => relays.push(relay.text));
@@ -113,6 +115,11 @@ for (const [tag, summary, outcome] of [
 		const log = join(f.home, LAYOUT.state, "daemon.log");
 		await waitFor(() => { try { return readFileSync(log, "utf8"); } catch { return ""; } }, (text) => text.includes(`parent context ${outcome}`), { timeoutMs: 15_000, what: `automatic ${outcome}` });
 		assert.match(readFileSync(log, "utf8"), /raw=2050\d+ effective=2050\d+ threshold=200000/);
+		if (tag === "success") {
+			const lines = readFileSync(log, "utf8").split("\n").filter((line) => line.includes("parent context compacted"));
+			assert.equal(lines.length, 1);
+			assert.match(lines[0]!, /^\S+ cp-parent-host\[\d+\]: parent context compacted before=\d+ after=\d+ ms=\d+ raw=\d+ effective=\d+ threshold=200000$/);
+		}
 		if (tag === "timeout") assert.ok(relays.some((text) => /timed out:.*retry the compaction once the parent has settled.*rotation or restart can abort running workers/.test(text)));
 		if (tag === "failure") assert.ok(relays.some((text) => /parent automatic context control failed:/.test(text)));
 	});
@@ -130,4 +137,87 @@ test("S25 parent: revoking the newest mandate rotates once with its true trigger
 	assert.match(readFileSync(log, "utf8"), /trigger="revoked by parent"/);
 	await f.bridge.send("Continue after rotation.");
 	assert.equal(readFileSync(log, "utf8").split(`rotated mission=${grant.id}`).length - 1, 1);
+});
+
+
+test("S25 parent: cancelled mission rotation falls through to threshold compaction", { timeout: 60_000 }, async (t) => {
+	const f = await fixture(t, [{ kind: "text", text: "Finished.", usage: { prompt_tokens: 205000 } }, { kind: "text", text: "Fallback summary." }], '{"compact_at_tokens":200000}');
+	const extension = join(f.home, "cancel-rotation.ts");
+	writeFileSync(extension, `import commandPost from ${JSON.stringify(COMMAND_POST_EXTENSION)};\nexport default function(pi) { commandPost(pi); pi.on("session_before_switch", () => ({ cancel: true })); }\n`);
+	await f.start(extension);
+	const store = new MandateStore(f.home);
+	const grant = store.issue({ projects: ["demo"], objective: "ship", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 1, tokens: 1000 }, job_cap: 1 });
+	store.revoke(grant.id, { by: "parent" });
+	await f.bridge.send("Finish.");
+	const log = join(f.home, LAYOUT.state, "daemon.log");
+	await waitFor(() => { try { return readFileSync(log, "utf8"); } catch { return ""; } }, (text) => text.includes("parent context compacted"), { timeoutMs: 15_000, what: "fallback compaction" });
+	assert.match(readFileSync(log, "utf8"), /rotate_failed.*new_session rejected: cancelled/);
+	assert.ok(f.provider.requests("s25-parent").length >= 2, "fallback reaches summarizer");
+});
+
+
+test("S25 parent: startup guidance is hidden and present before any model request", { timeout: 60_000 }, async (t) => {
+	const f = await fixture(t, [{ kind: "text", text: "Unused." }]);
+	writeFileSync(join(f.home, LAYOUT.data, "standing-orders.md"), "# Standing orders\n\nS25 wake order.\n");
+	writeFileSync(join(f.home, LAYOUT.learningsFile), "# Learnings\n\n- S25 wake memory. <!--P-->\n");
+	const rpc = startRpc({ cwd: f.home, env: { CP_HOME: f.home, CP_MODE: "multi", CP_HEADLESS: "1" }, args: ["--no-extensions", "-e", COMMAND_POST_EXTENSION, "--no-session", "--model", "mock/s25-parent"] });
+	t.after(() => rpc.close());
+	rpc.send({ type: "get_messages", id: "messages" });
+	const response = await rpc.waitFor((record) => record.type === "response" && record.id === "messages", 30_000);
+	const messages = (response.data as { messages: Array<{ customType?: string; content?: string; display?: boolean }> }).messages;
+	for (const type of ["cp-memory", "cp-standing-orders", "cp-parent-guidance"]) {
+		const selected = messages.filter((message) => message.customType === type);
+		assert.equal(selected.length, 1, type);
+		assert.equal(selected[0]!.display, false);
+	}
+	assert.match(JSON.stringify(messages), /S25 wake order/);
+	assert.match(JSON.stringify(messages), /S25 wake memory/);
+	assert.match(JSON.stringify(messages), /15 model rounds/);
+	assert.match(JSON.stringify(messages), /compact or end the turn and report decisions already made/);
+	assert.equal(f.provider.requests("s25-parent").length, 0);
+});
+
+test("S25 parent: default compact deadline exceeds the ordinary thirty-second request budget", { timeout: 60_000 }, async (t) => {
+	const f = await fixture(t, [{ kind: "text", text: "Initial." }, { kind: "hang", ms: 31000 }, { kind: "text", text: "Split summary." }], '{}');
+	await f.start(); await f.bridge.send("Begin.");
+	await waitFor(() => f.bridge.status().sends, (sends) => sends.every((send) => send.state === "settled"), { timeoutMs: 10_000, what: "initial send settled" });
+	await f.bridge.statusWithContext();
+	await f.bridge.compact();
+	assert.ok(f.provider.requests("s25-parent").length >= 2);
+});
+
+
+for (const [tag, reply] of [
+	["low", { kind: "text", text: "Below threshold.", usage: { prompt_tokens: 150000 } }],
+	["length", { kind: "text", text: "Discarded output.", finishReason: "length", usage: { prompt_tokens: 127500, completion_tokens: 128000 } }],
+] as const) {
+	test("S25 parent: low and length-stop context avoid automatic compaction", { timeout: 60_000 }, async (t) => {
+		t.diagnostic(tag);
+		const f = await fixture(t, [reply, { kind: "text", text: "S25 followup." }]);
+		await f.start(); await f.bridge.send("Begin.");
+		await waitFor(() => f.bridge.status().sends, (sends) => sends.every((send) => send.state === "settled"), { timeoutMs: 10_000, what: "first send settled" });
+		await f.bridge.send("Continue after the control pass.");
+		assert.equal(f.provider.requests("s25-parent").length, 2, "no intervening summarizer request");
+	});
+}
+
+
+test("S25 parent: startup compaction retains only unsettled durable sends", { timeout: 60_000 }, async (t) => {
+	const f = await fixture(t, [{ kind: "text", text: "Initial.", usage: { prompt_tokens: 205000 } }, { kind: "text", text: "Startup summary." }, { kind: "text", text: "Recovered send." }], '{}');
+	await f.start(); await f.bridge.send("Begin.");
+	await waitFor(() => f.bridge.status().sends, (sends) => sends.every((send) => send.state === "settled"), { timeoutMs: 10_000, what: "initial send settled" });
+	await f.bridge.statusWithContext(); await f.bridge.stop();
+	const outbox = new ParentSendOutbox({ file: parentSendFile(join(f.home, LAYOUT.sessions, "cp-parent.jsonl")) });
+	const queued = outbox.enqueue("S25 private queued text");
+	const settled = outbox.enqueue("S25 private settled text"); outbox.markLanded([settled.id]); outbox.settle(settled.id, { reply: "Done" });
+	const failed = outbox.enqueue("S25 private failed text"); outbox.markLanded([failed.id]); outbox.settle(failed.id, { error: "Failed" });
+	const undeliverable = outbox.enqueue("S25 private undeliverable text"); outbox.markUndeliverable([undeliverable.id], "Stopped");
+	writeFileSync(join(f.home, LAYOUT.data, "parent.json"), '{"compact_at_tokens":200000}');
+	await f.start();
+	await waitFor(() => f.provider.requests("s25-parent"), (requests) => requests.length >= 2, { timeoutMs: 10_000, what: "startup summarizer" });
+	const input = JSON.stringify(f.provider.requests("s25-parent")[1]!.body);
+	assert.match(input, /Bridge sends not yet settled/);
+	assert.ok(input.includes(queued.id), queued.id);
+	for (const send of [settled, failed, undeliverable]) assert.ok(!input.includes(send.id), send.id);
+	assert.doesNotMatch(input, /S25 private/);
 });
