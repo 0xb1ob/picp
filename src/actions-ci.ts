@@ -367,7 +367,6 @@ export async function readOlderBranchRuns(options: ActionsReadOptions & { branch
 	return runs.filter((run) => run.headSha.toLowerCase() !== options.head.toLowerCase());
 }
 
-/** Runs `read`; an empty or non-JSON 200 ("transient read") gets one fresh observation, anything else throws. */
 /** Runs `read(budgetMs)`; an empty or non-JSON 200 ("transient read") gets one retry inside the ORIGINAL deadline. */
 export async function retryTransientRead<T>(read: (timeoutMs: number) => Promise<T>, options: { timeoutMs?: number; now?: () => number } = {}): Promise<T> {
 	const now = options.now ?? Date.now;

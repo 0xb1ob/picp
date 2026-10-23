@@ -50,7 +50,7 @@ npm run test:one -- tests/forge-url.test.ts         # remotes, nested groups, cu
 npm run test:one -- tests/forge-observers-retained.test.ts   # retained forge security and structural guards
 npm run test:one -- tests/e2e/landing-forge-ci.test.ts # merge receipts (gh, local GitLab) and the git landing proof
 npm run test:one -- tests/teardown.test.ts          # the ship gate with receipts and the git proof
-npm run test:one -- tests/integrate.test.ts         # a merged MR's tail; open/closed MRs run no gh
+npm run test:one -- tests/e2e/landing-s09.test.ts  # merged MR tail; open/closed MRs run no gh
 npm run test:one -- tests/viewer-jobs.test.ts       # GitLab links in the dashboard
 ```
 
