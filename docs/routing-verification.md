@@ -68,7 +68,7 @@ failed differently.
 
 What *is* covered headlessly, and is all that is claimed: `tests/doctor.test.ts`
 over the routing findings (shadowed rows, effort drift, allowlist and
-availability refusals) and `tests/dispatch-preview-tool.test.ts` over the
+availability refusals) and `tests/e2e/dispatch-preview-s28.test.ts` over the
 `cp_dispatch dry_run` payload. The visual pass stays open work for an operator at
 a console; it is not a blocker for the deterministic changes above, and it must
 not be reported as done.

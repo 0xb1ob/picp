@@ -9,7 +9,7 @@
  * `tests/pipeline.test.ts`; what can only be proven here is that pi actually
  * offers the parameter to a model and actually carries it through the call.
  *
- * Style follows `tests/dispatch-preview-tool.test.ts`: a real `pi --mode rpc`
+ * Style follows `tests/e2e/dispatch-preview-s28.test.ts`: a real `pi --mode rpc`
  * parent with the command-post extension loaded and the scriptable mock
  * provider as its model, so "the parameter exists" is a fact about the tool
  * schema pi published, not about a string in the source.
