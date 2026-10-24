@@ -2368,6 +2368,17 @@ Revise, escalate and operational outcomes all surface without automatic promotio
 including pipeline advance and orphan finalization. Source starts and recovery chains refuse.
 `cp_gate action:status` reports recovery state and remaining allowance derived from the claim.
 
+For additive v2 recovery authorities, obsolete whole-audit readiness releases require explicit
+per-edge data in the authenticated human control (or the approved ask context for an answer),
+repeated in the scoped amendment. A declaration is one standalone line:
+`obsolete_whole_audit_readiness_releases=[{"dependent_job_id":"cp-a","blocker_id":"cp-old","reason":"Obsolete whole-audit readiness; bounded PASS only"}]`.
+The edge IDs and reason must match in both sources. Ordinary prose, including instructions to
+retain a named blocker, grants no release. Missing declarations yield no release edges, even for
+the historical root. Closed, foreign-project, non-research, recovery-job and A/B-ordering edges
+remain excluded. Only the PASS status receipt supplies the parent's eligible removal pairs;
+normal reporting, teardown and reasoned dependency controls still apply. A model-authored
+amendment cannot add an edge absent from authenticated human approval.
+
 Rollout belongs to the parent: after exact-head CI, review, privacy checks and merge, wait for the
 automatic updater. Verify both the loaded `/cp-version` revision and the active registered
 `replan_escalation_id` parameter. Where supported schema inspection is unavailable, pair the loaded

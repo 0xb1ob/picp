@@ -95,7 +95,9 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 	}
 	const controls = ["dc-20261024132350-022c499e", "dc-20261024132412-aef10217"];
 	const sends = ["ps-20261024132433-da0e3265", "ps-20261024132620-9b6e1bb4"];
-	const quotes = [`Finish recovery and approved migration; release obsolete readiness blocker ${obsolete.id} on PASS only.`, "Continue that same scope."];
+	const releases = [a.id, b.id].map((id) => ({ dependent_job_id: id, blocker_id: obsolete.id,
+		reason: "Obsolete whole-audit readiness; bounded PASS only, S32–S131 remains outstanding." }));
+	const quotes = [`Finish recovery and approved migration; retain unrelated blocker ${unrelated.id}.\nobsolete_whole_audit_readiness_releases=${JSON.stringify(releases)}\n`, "Continue that same scope."];
 	const at = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 	const texts = quotes.map((quote, i) => `${controls[i]}: ${quote} Existing ${f.target}, A ${a.id} and B ${b.id}; standing authority, unchanged budgets.`);
 	texts[1] += ` Reinforces ${sends[0]}.`;
