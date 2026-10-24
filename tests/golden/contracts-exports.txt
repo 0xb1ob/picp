@@ -262,6 +262,11 @@ GateConfig	type	40f29471d2999cf2	-
 GateConfigSchema	value	3630f64bca7915bb	4d78d7804239827d
 GateFlags	type	77969681203576cb	-
 GateFlagsSchema	value	d40f32266fa7469b	f46dd694654ca55c
+GateRecoveryAnchorSchema	value	94b1ca225f574209	f80910bfba2dde82
+GateRecoveryAttemptClaimSchema	value	58f082e6e8f06493	d34814d513adf19d
+GateRecoveryAttemptSchema	value	435d673a77dbdac9	39325b05d62bbe35
+GateRecoveryAttemptTerminalSchema	value	c263cc6bd8edb7ac	9b93c767c78f7b3d
+GateRecoveryAuthoritySchema	value	c8d0f0a4672907c6	fe580c72b4b4d54a
 GateRecoveryClaimSchema	value	a9fedc1b81961c44	0494611246d0d03c
 GateRecoveryInputSchema	value	b9ba12c10867f6e8	faf59dab29be33be
 GateRecoveryReservationSchema	value	d3e9837840d644a2	6f933437fee7d91c
@@ -469,6 +474,8 @@ RUNTIME_SOURCES	value	20939ef3a6e6f288	2c72d3d2e1bdf1b5
 RUN_PHASES	value	28f828547a52dc15	9816010a2e59f350
 Receipt	type	022a2fd53364c1b1	-
 ReceiptSchema	value	79835b7810b18c89	53a1632b61382e9e
+RecoveryAttempt	type	6099a8dbfa1c29fd	-
+RecoveryAuthority	type	e590592d2421c36a	-
 RecoveryClaim	type	e488f868dfdfa443	-
 RecoveryPolicyAction	type	e7801fed574c6fcb	-
 RecoveryReservation	type	421e9a1b5f99a9d4	-

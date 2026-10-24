@@ -2368,6 +2368,15 @@ Revise, escalate and operational outcomes all surface without automatic promotio
 including pipeline advance and orphan finalization. Source starts and recovery chains refuse.
 `cp_gate action:status` reports recovery state and remaining allowance derived from the claim.
 
+For additive v2 recovery authorities, the approved surrounding context binds scoped A/B
+readiness to the replacement review rather than unfinished later-slice audit completion.
+The immutable legacy source/reservation history identifies the original whole-audit readiness
+root; only existing open edges from the exact approved A/B to that root can enter release_scope.
+Other research blockers cannot become eligible through mentions, retention instructions, titles,
+or model-authored declarations. Closed edges remain recorded. The PASS receipt binds the exact
+eligible pairs and reasons for parent-owned lifecycle and dependency controls; changed graph or
+provenance requires revalidation. Existing human messages need no new format or JSON declaration.
+
 Rollout belongs to the parent: after exact-head CI, review, privacy checks and merge, wait for the
 automatic updater. Verify both the loaded `/cp-version` revision and the active registered
 `replan_escalation_id` parameter. Where supported schema inspection is unavailable, pair the loaded

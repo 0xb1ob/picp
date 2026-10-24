@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -15,8 +15,273 @@ import { isGateWait } from "../../src/gate.ts";
 import { decide } from "../../src/decide.ts";
 import { deriveFromEscalations } from "../../src/awaiting.ts";
 import { CheckpointStore } from "../../src/checkpoint.ts";
+import { createScratchRepo, enableTreehouse, startPiChild } from "../harness/index.ts";
+import { isPidAlive } from "../../src/fleet.ts";
+import { standingQuotes, standingRelays, standingAmendment } from "../fixtures/gate-recovery-provenance.ts";
 
-async function fixture(t: { after(fn: () => void | Promise<void>): void }) {
+for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistered", "spawn-failure", "postdecision", "orphan", "mismatch", "equivalent", "retention"] as const) {
+ test(`standing public recovery: ${mode}`, async (t) => {
+	const continuation = ["corrected", "equivalent", "retention"].includes(mode);
+	const f = await fixture(t, continuation && mode !== "equivalent" ? "dropped: whole-audit readiness remains outstanding" : "completed");
+	await f.post.replacePlanner(f.source, f.target, f.authority);
+	writeFileSync(f.post.artifacts.path(f.target), "legacy candidate\n");
+	const provider = await MockProvider.start();
+	const agent = mkdtempSync(join(tmpdir(), "cp-standing-agent-"));
+	const post = new CommandPost({ home: f.scratch.path, packageRoot: REPO_ROOT,
+		parentEnv: { ...process.env, PI_CODING_AGENT_DIR: agent, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1" } });
+	t.after(async () => { await post.shutdown(); await provider.stop(); rmSync(agent, { recursive: true, force: true }); });
+	const run = async (ordinal: number, verdict: "pass" | "revise", attemptId?: string, frozen?: { task_base64: string; artifact_base64: string }, race = false) => {
+		const model = provider.addScript(`standing-${ordinal}`, [{ kind: "tool_calls", calls: [{ name: "read", args: () => {
+			const scratch = join(f.scratch.path, paths.gateScratchDir(f.target, ordinal));
+			if (frozen) {
+				assert.deepEqual(readFileSync(join(scratch, "original-task.md")), Buffer.from(frozen.task_base64, "base64"));
+				assert.deepEqual(readFileSync(join(scratch, "artifact.md")), Buffer.from(frozen.artifact_base64, "base64"));
+			}
+			return { path: join(scratch, "original-task.md") };
+		} }] }, { kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: f.target, verdict,
+			flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["bounded readiness"],
+			...(verdict === "revise" ? { revisions: ["correct candidate"] } : {}) } }] }]);
+		writeFileSync(join(agent, "models.json"), JSON.stringify(provider.modelsJson()));
+		if (race) {
+			const barrier = join(f.scratch.path, "standing-race");
+			const env = { ...process.env, PI_CODING_AGENT_DIR: agent, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1" };
+			const children = [1, 2].map(() => child([f.scratch.path, f.source, f.target, attemptId!, "", barrier, "standing", model], env));
+			await waitFor(() => readdirSync(f.scratch.path).filter((name) => name.startsWith("standing-race.") && name.endsWith(".ready")).length === 2,
+				(value) => value, { timeoutMs: 15000, what: "both standing claimants" });
+			writeFileSync(`${barrier}.release`, "release");
+			const results = await Promise.all(children);
+			assert.deepEqual(results.map((result) => result.code).sort(), [0, 1]);
+			assert.equal(readFileSync(join(f.scratch.path, "spawn-observations.jsonl"), "utf8").trim().split("\n").length, 1);
+			return;
+		}
+		const result = await post.gate({ jobId: f.target, model, ...(attemptId ? { recoveryAttemptId: attemptId } : {}) });
+		assert.ok(isGateWait(result));
+		post.reviewRuns.handBack(result.key);
+		await post.reviewRuns.settled(result.key);
+		return result;
+	};
+	await run(3, "revise");
+	if (continuation) await post.fleet.patch(f.source, { reported_at: "2026-10-24T13:00:00Z" });
+	if (!continuation) await post.fleet.add({ ...post.fleet.get(f.source)!, job_id: f.target, phase: "held",
+		reported_at: "2026-10-24T13:00:00Z", branch: f.target, worktree: `/wt/${f.target}` });
+	const legacy = readFileSync(recoveryFile(join(f.scratch.path, paths.runDir(f.target)), "claim"));
+	const a = await f.ledger.create({ title: "standing A", project: "demo", kind: "ship", delivery: "local" });
+	const b = await f.ledger.create({ title: "standing B", project: "demo", kind: "ship", delivery: "local" });
+	await f.ledger.addDep(a.id, f.target);
+	await f.ledger.addDep(a.id, f.source);
+	await f.ledger.addDep(b.id, f.target);
+	await f.ledger.addDep(b.id, a.id);
+	const grant = post.mandates.issue({ projects: ["demo"], objective: "bounded migration recovery", expiry: "2099-01-01T00:00:00Z",
+		spend_cap: { usd: 100, tokens: 1000000 }, job_cap: 10, job_ids: [f.target, a.id, b.id] });
+	const toolingGrant = post.mandates.issue({ projects: ["demo"], objective: "separate named tooling scope", expiry: "2099-01-01T00:00:00Z",
+		spend_cap: { usd: 100, tokens: 1000000 }, job_cap: 10, job_ids: [f.source] });
+	const obsolete = { id: f.source };
+	const closed = await f.ledger.create({ title: "completed retained dependency", project: "demo", kind: "research", delivery: "local" });
+	await f.ledger.close(closed.id, "completed");
+	await f.ledger.addDep(a.id, closed.id);
+	if (continuation && mode !== "equivalent") await f.ledger.resolveDroppedDependency(a.id, f.source, "reopen", "fixture-reopen", "fixture");
+	const unrelated = await f.ledger.create({ title: "unrelated hold", project: "demo", kind: "research", delivery: "pipeline" });
+	await f.ledger.addDep(b.id, unrelated.id);
+	await f.ledger.addDep(a.id, obsolete.id);
+	await f.ledger.addDep(b.id, obsolete.id);
+	if (continuation) {
+		const repo = createScratchRepo({ name: "demo", files: { "README.md": "readiness fixture\n" } });
+		await post.registry.register({ name: "demo", clone_url: repo.remote!, delivery: "pr" });
+		const clone = post.registry.pathOf("demo");
+		execFileSync("git", ["clone", "--quiet", repo.remote!, clone]);
+		const pool = enableTreehouse(clone);
+		t.after(async () => { await post.shutdown(); pool.cleanup(); repo.cleanup(); });
+		const model = provider.addScript("reported-research", [{ kind: "tool_calls", calls: [{ name: "report_result", args: {
+			job_id: f.target, kind: "research", status: "done", artifact_path: post.artifacts.file(f.target), summary: "Scoped readiness research delivered.",
+			plan_summary: { goal: "Scoped readiness", approach: ["Review bounded evidence"], touched: ["README.md"], acceptance: ["Preserve later work"], risk: "Read only" },
+			self_assessment: { confidence: "high", scope: "S", blocking_unknowns: false, destructive_scope: false },
+		} }] }]);
+		writeFileSync(join(agent, "models.json"), JSON.stringify(provider.modelsJson()));
+		const dispatched = await post.dispatch({ jobId: f.target, model, taskFile: join(f.scratch.path, paths.runDir(f.target), "revision-task.md") });
+		assert.equal(dispatched.state, "dispatched");
+		await waitFor(() => post.fleet.get(f.target), (record) => record?.phase === "held", { timeoutMs: 30000, what: "research report accepted" });
+		assert.ok(post.fleet.get(f.target)?.reported_at);
+	}
+	const controls = ["dc-20261024132350-022c499e", "dc-20261024132412-aef10217"];
+	const sends = ["ps-20261024132433-da0e3265", "ps-20261024132620-9b6e1bb4"];
+	const remap = (text: string) => text.replaceAll("cp-migration-s11b-stage2-89t1", a.id)
+		.replaceAll("cp-migration-s31-faz4", b.id).replaceAll("md-a0517f", grant.id).replaceAll("md-bff70a", toolingGrant.id);
+	const quotes = [...standingQuotes];
+	if (mode === "retention") quotes[0] += ` Retain unrelated blocker ${unrelated.id}; its mention grants no release.`;
+	const at = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+	const texts = standingRelays.map((text, i) => remap(text).replace(standingQuotes[i]!, quotes[i]!));
+	atomicWriteJson(join(f.scratch.path, ".pi-command-post/state/sessions/cp-parent.sends.json"), { schema_version: 1,
+		updated_at: at, entries: sends.map((id, i) => ({ schema_version: 1, id, text: texts[i], queued_at: at,
+			state: "settled", attempts: 1, landed_at: at, settled_at: at })) });
+	const journal = controls.flatMap((id, i) => [{ type: "request", by: "bridge", id, at, peer: "sanitized", kind: "message",
+		text: quotes[i], ask_id: null, deliver: "followUp", session_started_at: at, session_file: "/scratch/operator.jsonl" },
+		{ type: "outcome", by: "bridge", id, at, peer: "sanitized", state: "delivered", reason: null }]);
+	const { mkdirSync } = await import("node:fs");
+	mkdirSync(join(f.scratch.path, ".pi-command-post/state/operator"), { recursive: true });
+	writeFileSync(join(f.scratch.path, ".pi-command-post/state/operator/asks.jsonl"), [
+		{ type: "open", id: "ask-a8f38b7f4245", project: "demo", created_at: at,
+			question: "Authorize the recovery fix and one fresh migration review, then proceed with S11b stage 2 and S31 if it passes?",
+			context: "The migration package is assembled, but the recovery tool permanently blocks a second explicitly authorized recovery. Existing override controls cannot release this standalone planner. Recommended scope: extend recovery so a NEW operator decision can authorize one new attempt after a spent recovery. Bind each attempt to the exact artifact digest and existing jobs, preserve all history, reject replay/stale authority, and retain normal review gates. Prove with a public regression: failed/spent recovery -> new explicit authority -> exactly one further review; repeat without new authority must refuse. Ship through scoped tests, green CI, review/privacy and merge, then verify loaded runtime. This same approval would authorize ONE migration readiness review for S11b stage 2 and S31 using the complete package; later-slice reconciliation stays outstanding. If it passes, dispatch the existing jobs and continue migration under the existing mandate. Do not bypass review, reset claims, or waive retirement proof. This is a tooling scope expansion plus exhausted-loop decision, reserved for you by the Operator note. One approval covers the complete sequence; routine in-scope repair steps will not ask again.",
+			options: [{ label: "Fix recovery and continue", consequence: "One scoped readiness review, then existing jobs on pass." },
+				{ label: "Keep held", consequence: "Both jobs remain blocked." }], recommendation: "Fix recovery and continue",
+			source_escalation: "es-5445be", job_ids: [f.target, a.id, b.id], evidence_paths: [] },
+		{ type: "answer", id: "ask-a8f38b7f4245", answer: "Fix recovery and continue", answered_at: at },
+	].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+	writeFileSync(join(f.scratch.path, ".pi-command-post/state/operator/dashboard.jsonl"), journal.map((line) => JSON.stringify(line)).join("\n") + "\n");
+	const addenda = join(f.scratch.path, paths.taskAddendaFile(f.target));
+	const amendment = mode === "equivalent" ? remap(standingAmendment)
+		.replace(`SAME A ${a.id} and B ${b.id}`, `approved readiness subjects ${b.id}, ${a.id}`)
+		.replace("standing authority", "standing authorization") : remap(standingAmendment);
+	writeFileSync(addenda, readFileSync(addenda, "utf8") + JSON.stringify({ schema_version: 1, n: 2, added_at: at,
+		text: `Tooling coverage ${toolingGrant.id} remains separate. ` + amendment.replace(standingQuotes[0]!, quotes[0]!) + ` Unrelated hold ${unrelated.id} stays.`,
+		by: "operator-quote", quote: quotes[0], reason: "bounded standing scope" }) + "\n");
+	const selectors = { job_id: f.target, authority_mode: "standing" as const, operator_control_id: controls[0]!,
+		operator_send_id: sends[0]!, reinforcement_control_id: controls[1]!, reinforcement_send_id: sends[1]!, dependent_job_ids: [a.id, b.id] };
+	const context = texts.map((text, i) => `${text}\n\n[cp-send ${sends[i]} — delivery id, not an instruction]`);
+	writeFileSync(f.post.artifacts.file(f.target), "first standing candidate\n");
+	assert.throws(() => post.authorizeRecovery(selectors, []), /operator messages|authenticated session/);
+	assert.throws(() => post.authorizeRecovery({ ...selectors, dependent_job_ids: [a.id, f.source] }, context), /scope|amendment/);
+	const asksPath = join(f.scratch.path, ".pi-command-post/state/operator/asks.jsonl");
+	const asksBytes = readFileSync(asksPath);
+	writeFileSync(asksPath, asksBytes.toString().replace(JSON.stringify([f.target, a.id, b.id]), JSON.stringify([f.target, f.source, b.id])));
+	assert.throws(() => post.authorizeRecovery(selectors, context), /recorded authenticated recovery scope/);
+	writeFileSync(asksPath, asksBytes);
+	const authority = post.authorizeRecovery(selectors, context);
+	assert.deepEqual(post.authorizeRecovery(selectors, context), authority);
+	const grantFile = post.mandates.file(grant.id);
+	const grantBytes = readFileSync(grantFile);
+	for (const changes of [{ status: "revoked" }, { expiry: "2020-01-01T00:00:00Z" }]) {
+		atomicWriteJson(grantFile, { ...JSON.parse(grantBytes.toString()), ...changes });
+		assert.throws(() => post.prepareRecoveryAttempt({ job_id: f.target, recovery_authority_id: authority.authority_id,
+			expected_previous_attempt_id: authority.current_predecessor_id,
+			current_artifact_sha256: authority.candidate.artifact_sha256, dependent_job_ids: [a.id, b.id] }), /active grant|permit/);
+		writeFileSync(grantFile, grantBytes);
+	}
+	const prepare = (predecessor: string) => post.prepareRecoveryAttempt({ job_id: f.target,
+		recovery_authority_id: authority.authority_id, expected_previous_attempt_id: predecessor,
+		current_artifact_sha256: recoveryDigest(readFileSync(post.artifacts.file(f.target))), dependent_job_ids: [a.id, b.id] });
+	const first = prepare(authority.current_predecessor_id);
+	assert.deepEqual(prepare(authority.current_predecessor_id), first);
+	if (!continuation) {
+		const model = provider.addScript("standing-fault", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: {
+			job_id: f.target, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["bounded readiness"],
+		} }] }]);
+		writeFileSync(join(agent, "models.json"), JSON.stringify(provider.modelsJson()));
+		if (mode === "mismatch") {
+			const task = join(f.scratch.path, paths.runDir(f.target), "revision-task.md");
+			const original = readFileSync(task);
+			writeFileSync(task, "changed governing task");
+			await assert.rejects(post.gate({ jobId: f.target, model, recoveryAttemptId: first.attempt_id }), /frozen candidate/);
+			writeFileSync(task, original);
+		} else {
+			const fault = mode === "postclaim" ? "claim.json" : mode === "postdecision" ? "gate-4.json" : mode;
+			const result = await child([f.scratch.path, f.source, f.target, first.attempt_id, fault, "", "standing", model],
+				{ ...process.env, PI_CODING_AGENT_DIR: agent, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1" });
+			assert.equal(result.code, mode === "spawn-failure" ? 0 : 73, result.output);
+			if (mode === "run-directory") assert.equal(existsSync(join(f.scratch.path, paths.gateRunDir(f.target, 4))), true);
+			if (mode === "live-unregistered") {
+				const claimPath = join(f.scratch.path, paths.runDir(f.target), `recovery-attempt-${first.attempt_id}-claim.json`);
+				const claimBytes = readFileSync(claimPath);
+				const pid = Number(readFileSync(join(f.scratch.path, paths.runDir(f.target), `recovery-attempt-${first.attempt_id}-reviewer-pid.json`), "utf8"));
+				t.after(() => { if (isPidAlive(pid)) process.kill(pid, "SIGKILL"); });
+				assert.equal(isPidAlive(pid), true);
+				assert.throws(() => prepare(first.attempt_id), /terminal nonpass/);
+				assert.deepEqual(readFileSync(claimPath), claimBytes);
+				process.kill(pid, "SIGKILL");
+				await waitFor(() => isPidAlive(pid), (alive) => !alive, { timeoutMs: 15000, what: "owned reviewer exit" });
+			}
+			if (mode === "orphan" || mode === "postdecision") {
+				await post.reviewRuns.sweepOrphans({ gate: (pending, reason) => post.gateModule().orphan(pending, reason) }, [f.target]);
+			}
+		}
+		await assert.rejects(post.gate({ jobId: f.target, model, recoveryAttemptId: first.attempt_id }), /claimed|terminal/);
+		if (mode === "postdecision") {
+			assert.throws(() => prepare(first.attempt_id), /terminal nonpass/);
+			assert.equal((post.gateModule().status(f.target).standing_recovery as { eligibility: string }).eligibility, "completed");
+		} else {
+			assert.equal(provider.requests().length, 2);
+			const successor = prepare(first.attempt_id);
+			assert.notEqual(successor.attempt_id, first.attempt_id);
+			const claimPath = join(f.scratch.path, paths.runDir(f.target), `recovery-attempt-${first.attempt_id}-claim.json`);
+			const spentClaim = readFileSync(claimPath);
+			const terminal = JSON.parse(readFileSync(join(f.scratch.path, paths.runDir(f.target), `recovery-attempt-${first.attempt_id}-terminal.json`), "utf8"));
+			assert.equal(terminal.outcome, mode === "mismatch" ? "invalidated" : mode === "spawn-failure" ? "spawn_failure" : "interrupted");
+			assert.equal(successor.authority_id, first.authority_id);
+			await run(5, "pass", successor.attempt_id, successor);
+			assert.deepEqual(readFileSync(claimPath), spentClaim);
+			assert.equal(post.gateModule().status(f.target).decisions.at(-1)?.attempt, 5);
+		}
+		assert.deepEqual(readFileSync(recoveryFile(join(f.scratch.path, paths.runDir(f.target)), "claim")), legacy);
+		return;
+	}
+	await run(4, "revise", first.attempt_id, first, true);
+	const spentRequests = provider.requests().length;
+	await assert.rejects(post.gate({ jobId: f.target, recoveryAttemptId: first.attempt_id }), /already claimed|terminal/);
+	assert.equal(provider.requests().length, spentRequests);
+	assert.equal((await f.ledger.ready()).some((job) => job.id === a.id || job.id === b.id), false);
+	const nonpassStatus = post.gateModule().status(f.target).standing_recovery as { eligibility: string; current_predecessor_id: string; release_scope?: unknown };
+	assert.equal(nonpassStatus.release_scope, undefined);
+	assert.equal(nonpassStatus.current_predecessor_id, first.attempt_id);
+	assert.equal(nonpassStatus.eligibility, "eligible");
+	atomicWriteJson(grantFile, { ...JSON.parse(grantBytes.toString()), spend_cap: { usd: 0.000001, tokens: 1 } });
+	assert.throws(() => prepare(first.attempt_id), /grant|budget|cap|permit/);
+	writeFileSync(grantFile, grantBytes);
+	writeFileSync(post.artifacts.file(f.target), "corrected standing candidate\n");
+	const second = prepare(first.attempt_id);
+	assert.notEqual(second.attempt_id, first.attempt_id);
+	assert.equal(second.authority_id, first.authority_id);
+	await run(5, "pass", second.attempt_id, second);
+	const passStatus = post.gateModule().status(f.target).standing_recovery as { eligibility: string; release_scope: typeof authority.release_scope };
+	assert.deepEqual(passStatus.release_scope, authority.release_scope);
+	assert.deepEqual(passStatus.release_scope.eligible_readiness_edges.map(({ dependent_job_id, blocker_id }) =>
+		({ dependent_job_id, blocker_id })).sort((x, y) => x.dependent_job_id.localeCompare(y.dependent_job_id)),
+		mode === "equivalent" ? [] : [a.id, b.id].sort().map((id) => ({ dependent_job_id: id, blocker_id: obsolete.id })));
+	assert.equal(passStatus.eligibility, "completed");
+	assert.throws(() => prepare(second.attempt_id), /terminal nonpass/);
+	const drift = await f.ledger.create({ title: "graph drift", project: "demo", kind: "research", delivery: "pipeline" });
+	await f.ledger.addDep(a.id, drift.id);
+	assert.equal((post.gateModule().status(f.target).standing_recovery as { eligibility: string }).eligibility, "ineligible");
+	assert.equal((await f.ledger.ready()).some((job) => job.id === a.id || job.id === b.id), false);
+	await f.ledger.removeDep(a.id, drift.id);
+	await f.ledger.comment(a.id, `Actual scoped PASS ${second.attempt_id}; S32–S131 remains outstanding.`);
+	await f.ledger.comment(b.id, `Actual scoped PASS ${second.attempt_id}; preserve A ordering.`);
+	const torn = await post.tearDown(f.target);
+	assert.equal(torn.torn_down, true, JSON.stringify(torn));
+	assert.equal(torn.lease_returned, true);
+	assert.equal(post.fleet.get(f.target)?.phase, "done");
+	assert.equal((await f.ledger.show(f.target)).status, "closed");
+	const reason = `Actual scoped PASS ${second.attempt_id} supersedes ${obsolete.id} for these readiness jobs only; S32–S131 remains outstanding.`;
+	const controlsModel = provider.addScript("scoped-continuation", [
+		...passStatus.release_scope.eligible_readiness_edges.flatMap((edge) => [
+			{ kind: "tool_calls" as const, calls: [{ name: "cp_job", args: { action: "comment", job_id: edge.dependent_job_id, text: `${reason} ${edge.reason}` } }] },
+			{ kind: "tool_calls" as const, calls: [{ name: "cp_job", args: { action: "dep_remove", job_id: edge.dependent_job_id, blocker_id: edge.blocker_id } }] },
+		]), { kind: "text", text: "Scoped continuation recorded." },
+	]);
+	writeFileSync(join(agent, "models.json"), JSON.stringify(provider.modelsJson()));
+	const parent = startPiChild({ cwd: f.scratch.path, model: controlsModel,
+		env: { ...process.env, PI_CODING_AGENT_DIR: agent, CP_HOME: f.scratch.path, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1" },
+		extensions: [join(REPO_ROOT, "extensions/command-post/index.ts")] });
+	t.after(() => parent.close());
+	await parent.prompt(reason);
+	await parent.waitForSettled(30000);
+	const ends = parent.eventsOfType("tool_execution_end") as Array<{ isError?: boolean }>;
+	assert.equal(ends.length, passStatus.release_scope.eligible_readiness_edges.length * 2);
+	assert.equal(ends.some((event) => event.isError), false);
+	assert.equal((await f.ledger.show(obsolete.id)).status, mode === "equivalent" ? "closed" : "open");
+	assert.equal((await f.ledger.show(a.id)).blocked_by.includes(obsolete.id), mode === "equivalent");
+	assert.equal((await f.ledger.show(b.id)).blocked_by.includes(obsolete.id), mode === "equivalent");
+	for (const edge of passStatus.release_scope.eligible_readiness_edges) {
+		assert.equal((await f.ledger.show(edge.dependent_job_id)).comments.some((comment) => comment.text === `${reason} ${edge.reason}`), true);
+	}
+	const ready = await f.ledger.ready();
+	assert.equal(ready.some((job) => job.id === a.id), true);
+	assert.equal(ready.some((job) => job.id === b.id), false);
+	assert.equal((await f.ledger.show(a.id)).blocked_by.includes(closed.id), true);
+	assert.equal((await f.ledger.show(b.id)).blocked_by.includes(unrelated.id), true);
+	assert.deepEqual(readFileSync(recoveryFile(join(f.scratch.path, paths.runDir(f.target)), "claim")), legacy);
+});
+}
+async function fixture(t: { after(fn: () => void | Promise<void>): void }, closeReason = "completed") {
 	const scratch = createScratchHome();
 	const { ledger } = createScratchLedger({ home: scratch.path });
 	const post = new CommandPost({ home: scratch.path, packageRoot: REPO_ROOT });
@@ -26,7 +291,7 @@ async function fixture(t: { after(fn: () => void | Promise<void>): void }) {
 	await post.fleet.add({ job_id: source.id, project: "demo", kind: "research", delivery: "pipeline", origin: "terminal", phase: "done",
 		worker: { pid: 1, session_id: "s", session_file: "/s.jsonl", profile: "planner", role: "planner", model: "mock/test", started_at: "2026-09-04T18:00:00Z" },
 		worktree: `/wt/${source.id}`, branch: source.id, dispatched_at: "2026-09-04T18:00:00Z", usage: EMPTY_USAGE });
-	await ledger.close(source.id, "completed");
+	await ledger.close(source.id, closeReason);
 	const plan = Buffer.alloc(59022, 65);
 	writeFileSync(post.artifacts.path(source.id), plan);
 	atomicWriteJson(join(scratch.path, paths.gateFile(source.id, 1)), {

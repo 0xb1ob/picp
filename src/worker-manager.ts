@@ -352,6 +352,7 @@ export interface SpawnRequest {
 	sessionDir?: string;
 	sessionFile?: string;
 	sessionName?: string;
+	spawnGuard?: WorkerSpawnOptions["spawnGuard"];
 	extensions?: readonly string[];
 	extraArgs?: readonly string[];
 	parentEnv?: NodeJS.ProcessEnv;
@@ -649,6 +650,7 @@ export class WorkerManager {
 			...(request.sessionFile ? { sessionFile: request.sessionFile } : {}),
 			...(request.sessionDir ? { sessionDir: request.sessionDir } : {}),
 			...(request.sessionName ? { sessionName: request.sessionName } : {}),
+			...(request.spawnGuard ? { spawnGuard: request.spawnGuard } : {}),
 			appendSystemPrompt: request.profile.systemPrompt,
 			...(optional.flags || request.extraArgs
 				? { extraArgs: [...(request.extraArgs ?? []), ...(optional.flags ?? [])] }

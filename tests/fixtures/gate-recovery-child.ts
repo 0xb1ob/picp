@@ -6,7 +6,7 @@ const link = fs.linkSync;
 const rename = fs.renameSync;
 function publication(operation: typeof fs.linkSync, from: Parameters<typeof fs.linkSync>[0], to: Parameters<typeof fs.linkSync>[1]) {
 	const destination = String(to);
-	if (destination.endsWith(action === "gate" ? "gate-recovery-claim.json" : "gate-recovery-reservation.json") && barrier) {
+	if ((action === "standing" ? /\/gate-\d+-standing\.json$/.test(destination) : destination.endsWith(action === "gate" ? "gate-recovery-claim.json" : "gate-recovery-reservation.json")) && barrier) {
 		fs.writeFileSync(`${barrier}.${process.pid}.ready`, "ready");
 		const deadline = Date.now() + 15000;
 		while (!fs.existsSync(`${barrier}.release`)) {
@@ -28,7 +28,20 @@ childProcess.default.spawn = ((...args: Parameters<typeof spawn>) => {
 		if (fault === "spawn-failure") throw Object.assign(new Error("spawn EACCES (injected OS boundary failure)"), { code: "EACCES" });
 		fs.appendFileSync(`${home}/spawn-observations.jsonl`, `${process.pid}\n`);
 	}
-	return spawn(...args);
+	if (fault === "run-directory" && Array.isArray(args[1]) && args[1].includes("rpc")) process.exit(73);
+	const started = spawn(...args);
+	if (fault === "live-unregistered" && Array.isArray(args[1]) && args[1].includes("rpc")) {
+		const receipt = args[1].find((arg) => arg.endsWith("-reviewer-pid.json"));
+		if (!receipt || !started.pid) throw new Error("missing guarded reviewer ownership");
+		const deadline = Date.now() + 15000;
+		while (!fs.existsSync(receipt) || !fs.readFileSync(receipt, "utf8").trim()) {
+			if (Date.now() > deadline) throw new Error("reviewer ownership timed out");
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+		}
+		process.kill(started.pid, "SIGSTOP");
+		process.exit(73);
+	}
+	return started;
 }) as typeof spawn;
 syncBuiltinESMExports();
 const { CommandPost } = await import("../../src/command-post.ts");
@@ -54,8 +67,8 @@ if (action === "source-race") {
 	process.exit(process.exitCode ?? 0);
 }
 try {
-	if (action === "gate") {
-		const result = await post.gate({ jobId: target, ...(model ? { model } : {}) });
+	if (action === "gate" || action === "standing") {
+		const result = await post.gate({ jobId: target, ...(model ? { model } : {}), ...(action === "standing" ? { recoveryAttemptId: authority } : {}) });
 		console.log(JSON.stringify(result));
 		if ("key" in result) {
 			if (fault === "orphan") {

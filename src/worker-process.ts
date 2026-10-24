@@ -1,3 +1,4 @@
+import { guardedReviewerCommand } from "./reviewer-spawn-guard.ts";
 /**
  * WorkerProcess — the only way pi-command-post talks to a worker.
  *
@@ -91,6 +92,7 @@ export interface WorkerSpawnOptions {
 	/** Tool allowlist from the profile. Empty array means "no tools". */
 	tools?: readonly string[];
 	thinking?: ThinkingLevel;
+	spawnGuard?: import("./reviewer-spawn-guard.ts").ReviewerSpawnGuard;
 	/** Session persistence: a directory for a new session, or a file to revive. */
 	sessionDir?: string;
 	sessionFile?: string;
@@ -318,14 +320,11 @@ export class WorkerProcess {
 		});
 	}
 
-	/**
-	 * Spawn the child. Returns immediately: readiness is proven by the first
-	 * successful request (usually `get_state` or the dispatch `prompt`), never
-	 * by a sleep.
-	 */
+	/** Return immediately; readiness is proven by an RPC response. */
 	static spawn(options: WorkerSpawnOptions): WorkerProcess {
 		const args = options.argv ? [...options.argv] : buildWorkerArgs(options);
-		const child = spawn(options.piBin ?? "pi", args, {
+		const command = guardedReviewerCommand(options.piBin ?? "pi", args, options.spawnGuard);
+		const child = spawn(command.binary, command.args, {
 			cwd: options.cwd,
 			env: options.replaceEnv ? options.env : { ...process.env, ...options.env },
 			stdio: ["pipe", "pipe", "pipe"],
