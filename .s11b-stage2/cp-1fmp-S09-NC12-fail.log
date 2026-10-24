@@ -1,0 +1,31 @@
+✖ landing S09: a missing implementer surfaces without spending the same-head repair (2591.065175ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4147.977079
+
+✖ failing tests:
+
+test at tests/e2e/landing-s09.test.ts:317:1
+✖ landing S09: a missing implementer surfaces without spending the same-head repair (2591.065175ms)
+  AssertionError [ERR_ASSERTION]: cp-f1th: https://github.com/example/demo/pull/308 conflicts with main The implementer was promoted to fix it on cp-f1th; wait for its report.
+  + actual - expected
+  
+  + 'resolve'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:326:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'resolve',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..d15ec32 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1331,7 +1331,7 @@ export class Integrator {
+ 			this.#resolving.delete(input.jobId);
+ 		}
+ 
+-		if (error || !receipt) {
++		if (false) {
+ 			// No live implementer (or a refused delivery): this is the operator's,
+ 			// and a replacement is never dispatched in its place.
+ 			return this.#write({

@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..4975e7c 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -472,7 +472,7 @@ export class Integrator {
+ 				jobId,
+ 				branch,
+ 				step: "ci",
+-				next: "retry",
++				next: "advance",
+ 				facts: [...facts, detail],
+ 				prUrl,
+ 				headSha: head,

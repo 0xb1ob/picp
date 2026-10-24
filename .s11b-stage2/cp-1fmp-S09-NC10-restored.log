@@ -1,0 +1,27 @@
+▶ landing S09: repository refusals and draft transitions preserve head authority
+  ✔ blocked (2772.681408ms)
+  ✔ approved-blocked (2643.805124ms)
+  ✔ unreadable-rules (2594.012462ms)
+  ✔ unstable (2595.330337ms)
+  ✔ no-ci-blocked (2656.771834ms)
+  ✔ auto (2480.389263ms)
+  ✔ moved (2430.007615ms)
+  ✔ unreviewed-draft (2504.932083ms)
+  ✔ stale-draft (2471.248943ms)
+  ✔ ready (2786.303711ms)
+  ✔ ready-unreadable-ci (2513.592562ms)
+  ✔ ready-moved (2796.565857ms)
+  ✔ ready-undo-refused (2602.423537ms)
+  ✔ ready-refused (2475.012755ms)
+  ✔ reminder (3098.957403ms)
+✔ landing S09: repository refusals and draft transitions preserve head authority (39425.846356ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 40952.36521
+
+command_exit=0
