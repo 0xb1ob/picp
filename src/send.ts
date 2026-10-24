@@ -40,6 +40,7 @@ import { type BudgetCheck, checkBudget } from "./failures.ts";
 import type { FleetStore } from "./fleet.ts";
 import type { MandateStore } from "./mandate.ts";
 import { projectDenial } from "./mandate-defaults.ts";
+import { continueForJob } from "./mandate-continuity.ts";
 import { decidePlanSend, recordPlanRevise, vetoedReviseRefusal } from "./plan-followup.ts";
 import { inferScopeAndRisk } from "./pipeline.ts";
 import { LIVE_PHASES } from "./preflight.ts";
@@ -240,6 +241,12 @@ export class Sender {
 
 		// Mandate permission for a repair comes first: a refused repair never relaunches a released worker.
 		// A parked job's resume takes a lease and a spawn, so it needs the same permission whatever the purpose.
+		if (this.#options.mandates) {
+			await continueForJob(this.#options.mandates, request.jobId, fleet.read().jobs);
+			if (this.#options.mandates.list().some((grant) => grant.continuity && grant.job_ids?.includes(request.jobId))) {
+				this.#options.mandates.assertPermitted("promote", { jobId: request.jobId, project: record.project, kind: record.kind }, fleet.read().jobs);
+			}
+		}
 		if ((parked || (request.purpose === "repair" && request.task === undefined && request.taskFile === undefined)) && this.#options.mandates) {
 			try {
 				this.#options.mandates.assertPermitted("repair", { jobId: request.jobId, project: record.project, kind: record.kind }, fleet.read().jobs);

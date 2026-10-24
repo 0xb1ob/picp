@@ -42,7 +42,7 @@ export function raiseTokenCap(
 		throw new MandateError(`${id}: the parent can never raise the USD cap \u2014 it is the operator's alone; cp_escalate budget_exhausted`);
 	}
 	const existing = store.require(id);
-	if (existing.status === "revoked" || existing.status === "expired") throw new MandateError(`${id} is ${existing.status}; its token cap cannot be raised`);
+	if (existing.status === "revoked" || (existing.status === "expired" && existing.continuity?.phase !== "committed")) throw new MandateError(`${id} is ${existing.status}; its token cap cannot be raised`);
 	const reason = request.reason.trim().slice(0, 400);
 	if (reason.length === 0) throw new MandateError(`${id}: a token-cap raise needs a reason`);
 	const from = existing.spend_cap.tokens;
@@ -93,7 +93,7 @@ export function observeMandateUsage(options: MandateUsageOptions, jobId: string,
 	const jobs = options.mandates.withReviewerSpend(liveUsageJobs(options.fleet, options.runs));
 	const swept = options.mandates.sweep(isoTimestamp((options.now ?? (() => new Date()))()), jobs);
 	for (const mandate of swept) {
-		if (before.get(mandate.id) !== "active") continue;
+		if (before.get(mandate.id) !== "active" && !(before.get(mandate.id) === "expired" && mandate.continuity?.phase === "committed")) continue;
 		if (!matchingJobs(mandate, jobs).some((job) => job.job_id === jobId)) continue;
 		const spend = mandateSpend(mandate, jobs);
 		const totals =
@@ -134,7 +134,7 @@ export function observeMandateUsage(options: MandateUsageOptions, jobId: string,
 			);
 			continue;
 		}
-		if (mandate.status !== "active") continue;
+		if (mandate.status !== "active" && !(mandate.status === "expired" && mandate.continuity?.phase === "committed")) continue;
 		const axes: Array<[string, number, number, number]> = [
 			["tokens", spend.tokens, mandateTokens(current) - mandateTokens(previous), mandate.spend_cap.tokens],
 			["usd", spend.usd, current.cost_usd - previous.cost_usd, mandate.spend_cap.usd],

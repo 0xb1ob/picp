@@ -53,7 +53,7 @@ function sourceFingerprint(source: Mandate): string {
 	return digest(JSON.stringify({
 		id: source.id, issued_by: source.issued_by, issued_at: source.issued_at, expiry: source.expiry,
 		objective: source.objective, projects: source.projects, job_ids: source.job_ids,
-		allowed_actions: source.allowed_actions, exclusions: source.exclusions, admissions: source.admissions,
+		allowed_actions: source.allowed_actions, exclusions: source.exclusions, ask_on: source.ask_on, admissions: source.admissions,
 		provenance: source.provenance, usage_baseline: source.usage_baseline,
 		usd_cap: source.spend_cap.usd, job_cap: source.job_cap,
 	}));
@@ -89,15 +89,22 @@ export async function continueAdmittedWork(
 			const file = join(store.home, paths.originalTaskFile(job.id));
 			const task = existsSync(file) ? readFileSync(file, "utf8") : job.description;
 			if (!task?.trim()) throw new MandateError(`${job.id}: original governing task is missing; continuation not committed`);
-			return { job, task, addenda: readTaskAddenda(store.home, job.id) };
+			return { job, task, task_file: existsSync(file) ? file : undefined, addenda: readTaskAddenda(store.home, job.id) };
 		});
 		const snapshot = `${store.file(sourceId)}.governing-inputs`;
 		const text = previous ? readFileSync(snapshot, "utf8") : JSON.stringify({ authority, inputs });
+		if (previous && (Buffer.byteLength(text) > REVIEW_ORIGINAL_TASK_MAX_BYTES || digest(text) !== previous.governing_input_digest)) {
+			return result("ineligible", "frozen governing snapshot is missing or changed", source.job_ids);
+		}
 		if (previous) {
 			const frozen = JSON.parse(text) as { inputs: typeof inputs };
-			if (frozen.inputs.length !== inputs.length || frozen.inputs.some((entry, index) =>
-				entry.job.id !== inputs[index]!.job.id || entry.task !== inputs[index]!.task ||
-				JSON.stringify(entry.addenda) !== JSON.stringify(inputs[index]!.addenda))) {
+			if (frozen.inputs.length !== inputs.length || frozen.inputs.some((entry, index) => {
+				const original = join(store.home, paths.originalTaskFile(entry.job.id));
+				if (entry.task_file !== undefined && entry.task_file !== original) return true;
+				const task = entry.task_file ? readFileSync(original, "utf8") : inputs[index]!.job.description;
+				return entry.job.id !== inputs[index]!.job.id || entry.task !== task ||
+					JSON.stringify(entry.addenda) !== JSON.stringify(inputs[index]!.addenda);
+			})) {
 				return result("ineligible", "governing inputs changed since preparation", source.job_ids);
 			}
 		}
@@ -123,4 +130,50 @@ export async function continueAdmittedWork(
 		write({ ...current, continuity: { ...continuity, phase: "committed" } });
 		return result("committed", "original admission and accounting root retained", source.job_ids);
 	});
+}
+
+export function continuationProof(home: string, job: Job | undefined, grants: readonly Mandate[]): Record<string, string> {
+	const proof: Record<string, string> = {};
+	if (!job) return proof;
+	for (const grant of grants) {
+		const receipt = grant.continuity;
+		if (receipt?.phase !== "committed" || receipt.source_grant_id !== grant.id || receipt.accounting_root_id !== grant.id ||
+			receipt.admission_expiry !== grant.expiry || receipt.source_fingerprint !== sourceFingerprint(grant) || !admittedWork(grant, job)) continue;
+		const snapshot = `${join(home, paths.mandateFile(grant.id))}.governing-inputs`;
+		if (receipt.governing_input_refs.length !== 1 || receipt.governing_input_refs[0] !== snapshot || !existsSync(snapshot)) continue;
+		const text = readFileSync(snapshot, "utf8");
+		if (Buffer.byteLength(text) > REVIEW_ORIGINAL_TASK_MAX_BYTES || digest(text) !== receipt.governing_input_digest) continue;
+		const frozen = JSON.parse(text) as { inputs: { job: Job; task: string; task_file?: string; addenda: ReturnType<typeof readTaskAddenda> }[] };
+		const entry = frozen.inputs.find((input) => input.job.id === job.id);
+		const original = join(home, paths.originalTaskFile(job.id));
+		if (entry?.task_file !== undefined && entry.task_file !== original) continue;
+		const task = entry?.task_file ? readFileSync(original, "utf8") : job.description;
+		if (!entry || entry.task !== task || JSON.stringify(entry.addenda) !== JSON.stringify(readTaskAddenda(home, job.id))) continue;
+		proof[grant.id] = receipt.governing_input_digest;
+	}
+	return proof;
+}
+
+export async function continueForJob(store: MandateStore, jobId: string, usage: readonly MandateUsageJob[]): Promise<void> {
+	const job = store.runContext().ledgerJob(jobId);
+	if (!job) return;
+	if (scheduleIdOf(job.labels)) return;
+	const labels = parseJobLabels(job.labels);
+	if (!labels.project) return;
+	if (store.selection("dispatch", { jobId, project: labels.project, kind: labels.kind }, usage)?.at.cause === "active") return;
+	for (const source of store.list()) {
+		if (source.job_ids?.includes(jobId) && (source.expiry <= store.authorityNow() || source.coverage_superseded) &&
+			(source.status === "active" || source.status === "expired")) await store.continue(source.id, usage);
+	}
+}
+
+export function continuityInputsBlock(store: MandateStore | undefined, jobId: string): string {
+	const job = store?.runContext().ledgerJob(jobId);
+	if (!store || !job) return "";
+	const labels = parseJobLabels(job.labels);
+	if (!labels.project) return "";
+	const selected = store.selection("review", { jobId, project: labels.project, kind: labels.kind });
+	const receipt = selected?.grant.continuity;
+	if (selected?.at.standing !== "permit" || receipt?.phase !== "committed") return "";
+	return `\n\n## Complete governing continuity input\nRead these frozen mandate, original task and ordered addenda inputs in full:\n${receipt.governing_input_refs.join("\n")}\n`;
 }

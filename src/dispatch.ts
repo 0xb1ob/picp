@@ -614,6 +614,7 @@ export class Dispatcher {
 
 		const readOnly = profile.frontmatter.readOnly === true, ops = request.profile === OPS_PROFILE_NAME;
 		const gate = riskGate(options.mandates, request, issue, task, { jobId: issue.id, project: labels.project, kind, readOnly, ops }, inputs, options.fleet.read().jobs);
+		let continuityNote = "";
 		let mandateId: string | undefined, startedBy: string | undefined;
 		try {
 			const permission = await options.mandates?.assertDispatchAllowed(
@@ -621,6 +622,15 @@ export class Dispatcher {
 				options.fleet.read().jobs,
 			);
 			mandateId = permission?.selected?.id; startedBy = permission?.run?.started_by;
+			const continuation = permission?.selected?.continuity;
+			if (continuation?.phase === "committed") {
+				const file = continuation.governing_input_refs[0]!;
+				const frozen = JSON.parse(readFileSync(file, "utf8")) as { inputs: { job: { id: string }; task: string }[] };
+				if (frozen.inputs.find((entry) => entry.job.id === issue.id)?.task !== task.forInference) {
+					throw new DispatchError(`${issue.id}: continuation task differs from its frozen original scope; supply the original task without added scope`);
+				}
+				continuityNote = `\n\n## Governing continuation input\nRead this complete frozen mandate, original task and ordered addenda in full: ${file}\n`;
+			}
 		} catch (error) {
 			throw (error instanceof MandateError && error.code) || (error instanceof ScheduleAuthorityError && error.code === "parallelism_full") ? error : new DispatchError((error as Error).message); // coded: dispatch queue
 		}
@@ -667,7 +677,7 @@ export class Dispatcher {
 			const references = await referencedMaterial({ task: task.forInference, worktree: lease.path, home: options.home,
 				...(request.foreignCi ? { foreignCi: request.foreignCi } : {}) });
 			const boundNote = bound ? `\n\n> ${boundPrNote(bound)}\n` : "";
-			const originalTask = task.forInference + references + boundNote;
+			const originalTask = task.forInference + references + boundNote + continuityNote;
 			const runDir = join(options.home, paths.runDir(issue.id));
 			mkdirSync(runDir, { recursive: true });
 			const artifactPath = join(options.home, paths.artifactDir(issue.id), delivery === "board" ? "board.json" : "report.md");
@@ -682,14 +692,15 @@ export class Dispatcher {
 					project: labels.project,
 					kind,
 					delivery,
-					task: task.forBrief + references,
+					task: task.forBrief + references + continuityNote,
 					artifact_path: artifactPath,
 				},
 			}) + boundNote + (deps.note ? `\n\n> ${deps.note}\n` : "") + (startedBy ? `\n\n> ${startedBy}\n` : "") + (skills.length ? `\n\n> ${skillsBriefNote(skills, overridden)}\n` : "") + await repoMap({ home: options.home, project: labels.project, worktree: lease.path, git: options.git ?? defaultGit });
 			writeFileSync(join(options.home, paths.briefFile(issue.id)), brief);
 			// Freeze parent input for reviewer coverage, never worker-authored text.
 			// taskFile stays out of the brief; both receive the reference snapshot.
-			writeFileSync(join(options.home, paths.originalTaskFile(issue.id)), originalTask);
+			const originalTaskFile = join(options.home, paths.originalTaskFile(issue.id));
+			if (!continuityNote || !existsSync(originalTaskFile)) writeFileSync(originalTaskFile, originalTask);
 
 			// --- 6. spawn + first prompt ------------------------------------
 			recorder = this.#runs.open(issue.id);

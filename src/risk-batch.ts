@@ -55,8 +55,8 @@ export async function batchRiskHigh(
 		if (!row && parsed.risk !== "high") ungated.push(id);
 		if (records.some((entry) => entry.job_ids.includes(id) && entry.status === "answered" && APPROVE.test((entry.answer ?? "").trim()))) approved.push(id);
 		const job = { jobId: id, project: parsed.project ?? "", ...(parsed.kind ? { jobKind: parsed.kind } : {}), ...deps.mandates.scheduleOf(id) };
-		const selected = selectGrant(grants, "dispatch", { ...job, inFlight: false }, now, deps.jobs);
-		askers.set(id, selected?.at.standing === "permit" && selected.at.cause === "active" && selected.grant.ask_on.includes("risk:high") ? [selected.grant.id] : []);
+		const selected = selectGrant(grants, "dispatch", { ...job, continuationProof: deps.mandates.continuationProof(id), inFlight: false }, now, deps.jobs);
+		askers.set(id, selected?.at.standing === "permit" && (selected.at.cause === "active" || selected.grant.continuity?.phase === "committed") && selected.grant.ask_on.includes("risk:high") ? [selected.grant.id] : []);
 	}
 	if (unknown.length > 0) refuse(`unknown job ids: ${unknown.join(", ")}`);
 	if (approved.length > 0) refuse(`already approved: ${approved.join(", ")}`);

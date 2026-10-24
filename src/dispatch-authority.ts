@@ -6,6 +6,7 @@ import type { GrantPermission } from "./mandate-permission.ts";
 import type { MandateStore } from "./mandate.ts";
 import { HARD_STOP_SIGNALS, riskPreapproval } from "./risk-preapproval.ts";
 import { runStartedBy, scheduleRunVerdict, ScheduleAuthorityError } from "./schedule-authority.ts";
+import { continueForJob } from "./mandate-continuity.ts";
 
 export interface DispatchAuthorityJob {
 	jobId: string; project: string; kind?: "ship" | "research"; pathHints?: string[]; risk?: Risk;
@@ -26,6 +27,7 @@ export async function assertDispatchAllowed(store: MandateStore, job: DispatchAu
 		if (error instanceof ScheduleAuthorityError && error.escalation) await error.escalation;
 		throw error;
 	}
+	await continueForJob(store, job.jobId, jobs);
 	const permission = store.assertPermitted(job.promotion ? "promote" : "dispatch", job, jobs);
 	const { selected, cause } = permission;
 	if (!selected) return permission;
@@ -48,7 +50,7 @@ export async function assertDispatchAllowed(store: MandateStore, job: DispatchAu
 			throw new MandateError(`${job.jobId}: risk:high under ask_on — refused before dispatch; ${raised.id} raised, cp_decide it with an operator quote to authorize it${hard}`);
 		}
 	}
-	if (cause === "active") {
+	if (cause === "active" || selected.continuity?.phase === "committed") {
 		const counted = store.withReviewerSpend(jobs, speaking);
 		if (!job.promotion && jobCapRefuses(selected, job.jobId, counted)) {
 			throw new MandateError(`${job.jobId}: mandate ${selected.id} job cap ${selected.job_cap} reached — no new dispatch; the jobs it already covers continue (review, repair, merge)`);

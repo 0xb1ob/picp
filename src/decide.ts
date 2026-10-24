@@ -26,6 +26,7 @@ import {
 	type MandateUsageJob,
 } from "./mandate.ts";
 import { projectDenial } from "./mandate-defaults.ts";
+import { continueForJob } from "./mandate-continuity.ts";
 import { operatorSendTexts, stripSendMarkers } from "./parent-outbox.ts";
 import { checkpointAuthority, runAuthority } from "./schedule-authority.ts";
 
@@ -307,6 +308,7 @@ export async function decide(input: DecideInput, deps: DecideDeps): Promise<Deci
 						project: deps.lookupJob(resolved.jobId)?.project ?? "unknown",
 				  }
 				: subjectFor(resolved.jobId, resolved.checkpointKind, deps);
+		if ("mandate" in input.basis) await continueForJob(deps.mandates, subject.jobId, deps.usageJobs());
 		if (subject.risk === "high" && "mandate" in input.basis && runAuthority(deps.mandates.runContext(), subject.jobId).source === "mandate") {
 			const jobs = deps.mandates.withReviewerSpend(deps.usageJobs());
 			deps.mandates.sweep(subject.now, jobs);
@@ -349,6 +351,7 @@ export async function decide(input: DecideInput, deps: DecideDeps): Promise<Deci
 	if (!jobId && "mandate" in input.basis) {
 		throw new DecideError("no active mandate covers project (none)");
 	}
+	if ("mandate" in input.basis) await continueForJob(deps.mandates, subject.jobId, deps.usageJobs());
 	const validated = validateBasis(input.basis, subject, deps, "ship");
 	await deps.answerDeclared(resolved.item, input.decision, validated.decidedBy, validated.stored, validated.provenance);
 	return {

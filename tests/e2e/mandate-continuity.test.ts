@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
-import { createScratchHome, REPO_ROOT } from "../harness/index.ts";
+import { createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, MockProvider, REPO_ROOT, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
+import { cpNext } from "../../src/next.ts";
 
 test("named mandate issue captures immutable typed admission without widening project scope", { timeout: 30_000 }, async (t) => {
 	const home = createScratchHome();
@@ -58,6 +62,10 @@ test("typed default admission freezes full governing input after expiry without 
 	const deadline = post.mandates.issue({ projects: ["demo"], objective: "An explicit deadline", job_ids: [job.id],
 		expiry, provenance: { expiry_hours: "explicit" }, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 1, ask_on: [] });
 	await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(expiry) - Date.now() + 20)));
+	const next = await cpNext({ ledger: post.ledger(), fleet: post.fleet, mandates: post.mandates, escalations: post.escalations, packageRoot: REPO_ROOT }, "demo");
+	assert.equal(next.action.kind, "dispatch");
+	assert.equal(next.action.job_id, job.id);
+	assert.equal(next.mandate?.id, grant.id);
 	const result = await post.mandates.continue(grant.id);
 	assert.equal(result.state, "committed");
 	assert.deepEqual(result.job_ids, [job.id]);
@@ -78,4 +86,55 @@ test("typed default admission freezes full governing input after expiry without 
 	assert.equal(post.mandates.get(deadline.id)!.continuity, undefined);
 	post.mandates.pause(grant.id);
 	assert.equal((await post.mandates.continue(grant.id)).state, "ineligible");
+});
+
+test("direct expired dispatch rejects added scope then delivers complete governing bytes to a real mock worker", {
+	timeout: 90_000, skip: treehouseAvailable() ? false : "requires treehouse",
+}, async (t) => {
+	const home = createScratchHome();
+	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n" } });
+	const provider = await MockProvider.start();
+	const agent = createAgentDir({ provider });
+	let snapshot = "";
+	const model = provider.addScript("continuation-worker", [
+		{ kind: "tool_calls", calls: [{ name: "read", args: () => ({ path: snapshot }) }] },
+		{ kind: "text", text: "standing by" },
+	], { onExhausted: "repeat" });
+	agent.writeModels(provider);
+	initJobsDocument(home.path, "cp");
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: SCHEMA_VERSION,
+		allow: ["mock/*"], rubric: [{ id: "planner", role: "planner", model }] }));
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env } });
+	let pool: ReturnType<typeof enableTreehouse> | undefined;
+	t.after(async () => { await post.shutdown(); await provider.stop(); pool?.cleanup(); agent.cleanup(); repo.cleanup(); home.cleanup(); });
+	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
+	const clone = post.registry.pathOf("demo");
+	execFileSync("git", ["clone", "--quiet", repo.remote as string, clone]);
+	pool = enableTreehouse(clone, { maxTrees: 2 });
+	const task = "Research the original scope.\n" + "Preserve the exact governing instructions.\n".repeat(100);
+	const job = await post.ledger().create({ title: "Research the original scope", description: task,
+		project: "demo", kind: "research", delivery: "local" });
+	const expiry = new Date(Date.now() + 5000).toISOString().replace(/\.\d{3}Z$/, "Z");
+	const grant = post.mandates.issue({ projects: ["demo"], objective: "Complete only the admitted research, preserving all instructions",
+		job_ids: [job.id], expiry, provenance: { expiry_hours: "project" },
+		spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 1, ask_on: [] });
+	snapshot = `${join(home.path, paths.mandateFile(grant.id))}.governing-inputs`;
+	await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(expiry) - Date.now() + 20)));
+	await assert.rejects(post.dispatch({ jobId: job.id, task: task + "\nAlso implement an unrelated feature", fetch: false }), /differs from its frozen original scope/);
+	assert.equal(post.fleet.get(job.id), undefined);
+	assert.equal(provider.requests("continuation-worker").length, 0);
+	const accepted = await post.dispatch({ jobId: job.id, task, fetch: false });
+	assert.equal(accepted.receipt, "accepted");
+	assert.equal("mandate_id" in accepted ? accepted.mandate_id : undefined, grant.id);
+	await waitFor(() => provider.requests("continuation-worker"), (requests) => requests.length >= 2,
+		{ timeoutMs: 30_000, what: "worker reading complete continuation input" });
+	const requests = provider.requests("continuation-worker").map((request) => JSON.stringify(request.body));
+	assert.ok(requests[0]!.includes(JSON.stringify(task).slice(1, -1)));
+	assert.ok(requests[0]!.includes(snapshot));
+	assert.ok(requests.some((request) => request.includes(JSON.stringify(readFileSync(snapshot, "utf8")).slice(1, -1))));
+	assert.equal(post.mandates.get(grant.id)!.expiry, expiry);
+	assert.equal(post.mandates.assertPermitted("review", { jobId: job.id, project: "demo", kind: "research" }, post.fleet.read().jobs).selected?.id, grant.id);
+	post.mandates.revoke(grant.id, { by: "parent" });
+	assert.throws(() => post.mandates.assertPermitted("promote", { jobId: job.id, project: "demo", kind: "research" }, post.fleet.read().jobs), /revoked/);
 });

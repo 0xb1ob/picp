@@ -38,6 +38,7 @@ import { readParentExpanded } from "./schedule-expand.ts";
 import { runAuthority, scheduleRunVerdict, withRunReviewerSpend } from "./schedule-authority.ts";
 import { runSpend } from "./schedule-runs.ts";
 import type { ScheduleRun } from "./viewer/schedule-run-core.ts";
+import { continueForJob } from "./mandate-continuity.ts";
 
 export interface NextPorts {
 	packageRoot?: string;
@@ -140,17 +141,18 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	if (drain) return { ...warning, ready: [], action: { kind: "draining", reason: `draining since ${drain.started_at} (${drain.state}): no dispatch, promotion or new merge step until the parent restarts` } };
 	const now = isoTimestamp((ports.now ?? (() => new Date()))());
 	const fleetLive = fleetJobs.filter((job) => job.phase === "waiting" || job.phase === "launching").length;
+	const readyJobs = await ports.ledger.ready(project ? { project } : {});
+	for (const job of readyJobs) await continueForJob(ports.mandates, job.id, fleetJobs);
 	const grants = ports.mandates.sweep(now, fleetJobs);
 	const schedules = ports.mandates.scheduleMandates();
 	const scopeOf = (job: Job) => scheduleScope(scheduleIdOf(job.labels), schedules);
 	const blocked = blockedJobs(ports.ledger, grants, now, project, schedules, openRunOf(ports.mandates.scheduleRuns));
 	await raiseDroppedDependencies(blocked, grants, ports.escalations, now, schedules);
 	const candidates = grants
-		.filter((mandate) => mandate.status === "active" || mandate.status === "paused")
+		.filter((mandate) => mandate.status === "active" || mandate.status === "paused" || (mandate.status === "expired" && mandate.continuity?.phase === "committed"))
 		.filter((mandate) => !project || mandate.projects.includes(project))
 		// An active grant always wins over a paused one, whatever their issue order.
 		.sort((a, b) => Number(b.status === "active") - Number(a.status === "active"));
-	const readyJobs = await ports.ledger.ready(project ? { project } : {});
 	const runResults: NextResult[] = [];
 	const readyAll: Job[] = [];
 	const ctx = ports.mandates.runContext();
@@ -197,7 +199,7 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	const selected = new Map(readyAll.map((job) => {
 		const subject = { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) };
 		const record = inFlightRecord(subject, fleetJobs);
-		return [job.id, selectGrant(grants, "dispatch", { ...subject, startedAt: record?.dispatched_at ?? job.created_at, inFlight: record !== undefined, failed: record?.phase === "failed" }, now, fleetJobs)] as const;
+		return [job.id, selectGrant(grants, "dispatch", { ...subject, continuationProof: ports.mandates.continuationProof(job.id), startedAt: record?.dispatched_at ?? job.created_at, inFlight: record !== undefined, failed: record?.phase === "failed" }, now, fleetJobs)] as const;
 	}));
 	const queued = new Set(ports.queued?.() ?? []);
 	const results: NextResult[] = [...runResults];
@@ -232,7 +234,7 @@ async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: read
 	const covered = readyAll.filter((job) => {
 		const choice = selected.get(job.id);
 		// Runner-owned jobs stay with the runner; each parent candidate belongs to one selected active view.
-		return !runnerOwns(job, expanded) && choice?.grant.id === mandate.id && choice.at.standing === "permit" && choice.at.cause === "active";
+		return !runnerOwns(job, expanded) && choice?.grant.id === mandate.id && choice.at.standing === "permit" && (choice.at.cause === "active" || mandate.continuity?.phase === "committed");
 	});
 	// 4b-2: a queued job is already dispatched as far as the parent is concerned: never ready, and it holds a slot.
 	const ready = covered.filter((job) => !queued.has(job.id));

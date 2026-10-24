@@ -114,6 +114,7 @@ import { requestFinalFix } from "./final-fix.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import type { MandateStore } from "./mandate.ts";
 import { assertReviewAllowed } from "./mandate-usage.ts";
+import { continueForJob, continuityInputsBlock } from "./mandate-continuity.ts";
 import { incompleteSubjectReasons, isCompletePass } from "./review-subject.ts";
 import { assembleBrief, profileForRole, readBriefTemplate } from "./profiles.ts";
 import { ProjectRegistry } from "./projects.ts";
@@ -575,7 +576,10 @@ export class DiffReview {
 		}
 
 		// Past here a reviewer may spawn: a paused or revoked covering grant refuses the spend (the free equivalence pass above stays).
-		if (this.#options.mandates) assertReviewAllowed(this.#options.mandates, { jobId, project: record.project, kind: record.kind }, this.#options.fleet?.read().jobs ?? []);
+		if (this.#options.mandates) {
+			await continueForJob(this.#options.mandates, jobId, this.#options.fleet?.read().jobs ?? []);
+			assertReviewAllowed(this.#options.mandates, { jobId, project: record.project, kind: record.kind }, this.#options.fleet?.read().jobs ?? []);
+		}
 
 		const previous = latestContentReview(home, jobId, prior.decisions);
 		// Delta only along the branch's own history: a rebase or a merge of the base would carry upstream changes.
@@ -640,7 +644,7 @@ export class DiffReview {
 		// the materialized diff, the frozen original task it was dispatched with
 		// (do8.4) and the read-only repository context (R2). All are files; none is inlined.
 		const taskCopy = copyOriginalTask({ home, jobId, scratch });
-		const addenda = taskAddendaBlock({ home, jobId, scratch });
+		const addenda = taskAddendaBlock({ home, jobId, scratch }) + continuityInputsBlock(this.#options.mandates, jobId);
 		const context = await materializeReviewContext({ git, clone, base, branch, headSha, scratch });
 		const profile = profileForRole(this.#options.profilesDir, "gate-reviewer");
 		const selection = selectReviewerModel({ model: request.model, record, registry: this.#options.registry, mandates: this.#options.mandates, now: now() });

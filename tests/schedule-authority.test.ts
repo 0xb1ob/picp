@@ -65,7 +65,7 @@ test("A1: run decide and autodecide persist run attribution and isolate the mand
  assert.equal(result.decided_by,`schedule-run:${run.id}`);
  assert.deepEqual(ship.get("cp-member")?.basis,result.basis);
  const pending = diff.request({jobId:"cp-member",question:"Review work"});
- const auto = autoDecideCheckpoint(diff,pending,{kind:"diff",jobId:"cp-member",project:"demo",jobKind:"ship",risk:"low",now},mandates);
+ const auto = await autoDecideCheckpoint(diff,pending,{kind:"diff",jobId:"cp-member",project:"demo",jobKind:"ship",risk:"low",now},mandates);
  assert.equal(auto.decided_by,`schedule-run:${run.id}`);
  assert.deepEqual(auto.basis,{run:run.id,clause});
  assert.deepEqual(runs.run(run.id)?.authority_log.map(row=>row.use),["implement","review"]);

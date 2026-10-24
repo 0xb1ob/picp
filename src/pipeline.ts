@@ -791,7 +791,7 @@ export class PipelineRunner {
 		}
 	}
 
-	#tryMandate(
+	async #tryMandate(
 		store: CheckpointStore,
 		checkpoint: Checkpoint,
 		record: PipelineRecord,
@@ -799,7 +799,7 @@ export class PipelineRunner {
 		routing: ComposedRouting,
 		/** The ship (plan) checkpoint's gate flags; the diff path is out of Job A's scope. */
 		flags?: GateFlags,
-	): Checkpoint {
+	): Promise<Checkpoint> {
 		if (!this.#options.mandates) return checkpoint;
 		const text = this.#mandateText(record);
 		return autoDecideCheckpoint(
@@ -1416,8 +1416,8 @@ export class PipelineRunner {
 		const job = { jobId: record.ship_id, project: record.project, jobKind: "ship" as const, ...mandates.scheduleOf(record.ship_id) };
 		const jobs = this.#mandateJobs();
 		const flight = inFlightRecord(job, jobs);
-		const selected = selectGrant(mandates.list(), "implement", { ...job, startedAt: flight?.dispatched_at ?? mandates.jobCreatedAt(record.ship_id), inFlight: flight !== undefined }, this.#now(), jobs);
-		if (selected?.at.standing !== "permit" || selected.at.cause !== "active" || !selected.grant.ask_on.includes("plan_approval")) return undefined;
+		const selected = selectGrant(mandates.list(), "implement", { ...job, continuationProof: mandates.continuationProof(record.ship_id), startedAt: flight?.dispatched_at ?? mandates.jobCreatedAt(record.ship_id), inFlight: flight !== undefined }, this.#now(), jobs);
+		if (selected?.at.standing !== "permit" || (selected.at.cause !== "active" && selected.grant.continuity?.phase !== "committed") || !selected.grant.ask_on.includes("plan_approval")) return undefined;
 		const hit = selected.grant;
 		return { mandate_id: hit.id, mandate_clause: `${hit.id}: ask_on includes plan_approval` };
 	}
@@ -1523,7 +1523,7 @@ export class PipelineRunner {
 			});
 		}
 
-		checkpoint = this.#tryMandate(this.checkpoints, checkpoint, record, "ship", routing, verdict.flags);
+		checkpoint = await this.#tryMandate(this.checkpoints, checkpoint, record, "ship", routing, verdict.flags);
 		if (checkpoint.decision !== "pending") {
 			if (checkpoint.decision === "approved" && verdict.verdict === "pass") {
 				this.#pinApproval(record.research_id, artifact.path, checkpoint.decided_by ?? "mandate");
@@ -1789,7 +1789,7 @@ export class PipelineRunner {
 			});
 
 		const routing = this.#composedRouting(record);
-		checkpoint = this.#tryMandate(this.diffCheckpoints, checkpoint, record, "diff", routing);
+		checkpoint = await this.#tryMandate(this.diffCheckpoints, checkpoint, record, "diff", routing);
 		if (checkpoint.decision !== "pending") return checkpoint;
 
 		const authorizer = this.#options.authorizer;

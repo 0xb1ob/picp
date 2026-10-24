@@ -83,6 +83,7 @@ import type { Sender } from "./send.ts";
 import { taskAddendaBlock } from "./task-addenda.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import type { MandateStore } from "./mandate.ts";
+import { continueForJob, continuityInputsBlock } from "./mandate-continuity.ts";
 import type { ProjectRegistry } from "./projects.ts";
 import { type ReviewerModelSelection, selectReviewerModel } from "./reviewer-model.ts";
 
@@ -793,12 +794,7 @@ export function removeGateScratch(options: {
 
 export class Gate {
 	readonly #options: GateOptions;
-	/**
-	 * The last result `finish` produced for an attempt, kept only so the
-	 * blocking test helper can return the object the wake-up described —
-	 * receipts and the reviewer's raw observation included — instead of the
-	 * thinner one a decision file can be rebuilt into.
-	 */
+	/** Keep full finish receipts for blocking helpers; decision files cannot reconstruct raw reviewer observations. */
 	readonly #finished = new Map<number, GateResult>();
 
 	constructor(options: GateOptions) {
@@ -839,6 +835,7 @@ export class Gate {
 			);
 		}
 
+		if (!recovery && !selectedAttempt && this.#options.mandates) await continueForJob(this.#options.mandates, jobId, this.#options.fleet?.read().jobs ?? []);
 		const prior = readPriorAttempts(home, jobId);
 		const last = prior.decisions.at(-1);
 		if (!selectedAttempt && last?.verdict === "pass") {
@@ -885,7 +882,7 @@ export class Gate {
 				job_id: jobId,
 				project: record?.project ?? "unregistered",
 				artifact_path: artifactCopy,
-				original_task: originalTaskBlock(taskCopy) + (recoveryArtifact ? "\nAuthorized addenda in the task are governing scope, not scope growth.\n" : taskAddendaBlock({ home, jobId, scratch })),
+				original_task: originalTaskBlock(taskCopy) + continuityInputsBlock(this.#options.mandates, jobId) + (recoveryArtifact ? "\nAuthorized addenda in the task are governing scope, not scope growth.\n" : taskAddendaBlock({ home, jobId, scratch })),
 			},
 		});
 		writeFileSync(join(gateRunDir, "brief.md"), brief);

@@ -7,16 +7,18 @@ import { type Checkpoint, checkpointAwaitingId, isoTimestamp } from "./contracts
 import { type MandateStore, type MandateSubject } from "./mandate.ts";
 import { projectDenial } from "./mandate-defaults.ts";
 import { checkpointAuthority, runAuthority } from "./schedule-authority.ts";
+import { continueForJob } from "./mandate-continuity.ts";
 
-export function autoDecideCheckpoint(
+export async function autoDecideCheckpoint(
 	store: CheckpointStore,
 	checkpoint: Checkpoint,
 	subject: MandateSubject,
 	mandates: MandateStore,
-): Checkpoint {
+): Promise<Checkpoint> {
 	if (checkpoint.decision !== "pending") return checkpoint;
 	if (projectDenial(mandates.home, subject.project)) return checkpoint;
 	const now = subject.now ?? isoTimestamp();
+	await continueForJob(mandates, subject.jobId, subject.usageJobs ?? []);
 	const source = runAuthority(mandates.runContext(), subject.jobId).source;
 	const jobs = source === "schedule-run" ? [...(subject.usageJobs ?? [])] : mandates.withReviewerSpend(subject.usageJobs ?? []);
 	if (source === "mandate") mandates.sweep(now, jobs);
