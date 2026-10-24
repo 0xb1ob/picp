@@ -2334,6 +2334,47 @@ Policy applied between them (implemented in T20, constants here):
 4. `cause` is `null` on `pass` and `revise`. **Branch on `cause`, never on
    reason prose.**
 
+### One operator-approved corrected review after a cap
+
+`cp_gate action:replace_planner job_id:<closed-source> replacement_job_id:<fresh-research>
+replan_escalation_id:<es-id>` prepares one corrected review. Omitting the optional escalation
+parameter preserves ordinary revise replacement semantics. Preparation never dispatches a planner.
+The normal dispatch, reviewer routing, capacity, grant and budget checks still apply.
+
+The source must be closed with a done fleet record; the first reservation requires an open,
+undispatched replacement with matching project, research kind and delivery. Authority must be an
+answered `loop_exhausted` escalation for the exact latest capped policy decision, with `replan`,
+`answered_by: operator-quote` and an answer timestamp at least as recent as the decision.
+Reservation binds the decision SHA256, complete authority digest and each full input's source path,
+byte length, source SHA256 and materialized SHA256. Changed, withdrawn or superseded authority
+refuses. A named authority grant must remain active and unexpired.
+
+Recovery records live beside gate history. `gate-recovery-reservation.json` permanently binds the
+source to one replacement; `gate-recovery-source.json` binds the replacement back to it. The
+prepared marker is published last. Publication writes a unique mode-0600 sibling, loops over all
+bytes, fsyncs and closes it, then hard-links it to the canonical name without replacement and fsyncs
+the directory. Unsupported hard links refuse with the filesystem error. Existing preparation files
+must match exactly. Partial matching preparation may resume; conflicting bytes or mappings refuse.
+No reservation is reclaimed, deleted or overwritten. Original gate decisions remain untouched.
+
+After routing, capacity and manager readiness, `Gate.start` rechecks authority and publishes the
+immutable `gate-recovery-claim.json` before scratch writes or spawn. Only its successful publisher
+may spawn. Every existing claim spends the allowance, including death before spawn and spawn
+failure. Pending reviews remain pending; a claim without a decision or pending review surfaces
+interruption and records `gate-recovery-interrupted.json`. No PID-based reclamation exists.
+`gate-recovery-finished.json` binds the claimed decision and its digest; a missing finished marker
+can be reconciled from that exact decision. A pass replays only for the claimed artifact bytes.
+Revise, escalate and operational outcomes all surface without automatic promotion or retry,
+including pipeline advance and orphan finalization. Source starts and recovery chains refuse.
+`cp_gate action:status` reports recovery state and remaining allowance derived from the claim.
+
+Rollout belongs to the parent: after exact-head CI, review, privacy checks and merge, wait for the
+automatic updater. Verify both the loaded `/cp-version` revision and the active registered
+`replan_escalation_id` parameter. Where supported schema inspection is unavailable, pair the loaded
+revision and merged schema with a harmless nonexistent-job parameter probe; expect ledger-not-found,
+not unknown-field rejection. If strict parameter evidence is unavailable, hold real recovery for
+supported runtime inspection. Never manually pull/restart or consume real authority in tests.
+
 ### The reviewer scores quality; the parent applies the flags
 
 Rule 1 only works if a reviewer can actually return **`pass` with a flag true**:

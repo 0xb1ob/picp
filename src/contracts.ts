@@ -28,6 +28,7 @@ export * from "./contracts/dispatch-queue.ts";
 export * from "./contracts/cadence.ts";
 export * from "./contracts/reviews.ts";
 export * from "./contracts/escalations.ts";
+export * from "./contracts/gate-recovery.ts";
 export * from "./contracts/mandates.ts";
 export * from "./contracts/pipeline.ts";
 export * from "./contracts/awaiting.ts";

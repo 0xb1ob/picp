@@ -1260,9 +1260,9 @@ export class CommandPost {
 		});
 	}
 
-	async replacePlanner(jobId: string, replacementJobId: string) {
+	async replacePlanner(jobId: string, replacementJobId: string, replanEscalationId?: string) {
 		return prepareGateReplacement({ home: this.home, jobId, replacementJobId, ledger: this.ledger(),
-			fleet: this.fleet, artifacts: this.artifacts });
+			fleet: this.fleet, artifacts: this.artifacts, replanEscalationId, mandates: this.mandates });
 	}
 
 	async gate(request: GateRequest): Promise<GateStart> {

@@ -7,6 +7,9 @@ import type { FleetStore } from "./fleet.ts";
 import { GateError, readPriorAttempts } from "./gate.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { requireJobLabels, type Ledger } from "./ledger.ts";
+import { prepareRecovery } from "./gate-recovery-preparation.ts";
+import type { MandateStore } from "./mandate.ts";
+import { recoveryFile, recoveryTarget } from "./gate-recovery.ts";
 
 /** Prepare files only: dispatch (and its mandate/budget checks) remains the parent's next step. */
 export async function prepareGateReplacement(options: {
@@ -16,8 +19,18 @@ export async function prepareGateReplacement(options: {
 	ledger: Ledger;
 	fleet: FleetStore;
 	artifacts: ArtifactStore;
-}): Promise<{ job_id: string; replacement_job_id: string; task_file: string }> {
+	replanEscalationId?: string;
+	mandates?: MandateStore;
+}): Promise<{ job_id: string; replacement_job_id: string; task_file: string; recovery?: import("./contracts.ts").GateRecoveryStatus }> {
 	const { home, jobId, replacementJobId, ledger, fleet, artifacts } = options;
+	if (options.replanEscalationId) return prepareRecovery({ ...options, replanEscalationId: options.replanEscalationId });
+	for (const id of [jobId, replacementJobId]) {
+		const dir = join(home, paths.runDir(id));
+		if (existsSync(recoveryFile(dir, "source")) || existsSync(recoveryFile(dir, "reservation"))) {
+			throw new GateError(`${id}: recovery binding forbids ordinary replacement or chaining`);
+		}
+		recoveryTarget(home, id);
+	}
 	const old = await ledger.show(jobId);
 	const replacement = await ledger.show(replacementJobId);
 	const oldLabels = requireJobLabels(old);

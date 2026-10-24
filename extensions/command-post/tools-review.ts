@@ -258,6 +258,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 				}),
 			),
 			replacement_job_id: Type.Optional(Type.String({ description: "replace_planner: a fresh research job in the same project and delivery; prepares a task_file for normal cp_dispatch" })),
+			replan_escalation_id: Type.Optional(Type.String({ description: "replace_planner: exact operator-quote replan authority for one corrected capped review" })),
 			model: Type.Optional(Type.String({ description: "Explicit reviewer model override (provider/model-id)" })),
 			deliver_revise: Type.Optional(
 				Type.Boolean({ description: "Promote a revise verdict to the live planner. Default true." }),
@@ -275,7 +276,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			}
 			if (params.action === "replace_planner") {
 				if (!params.replacement_job_id) throw new Error("cp_gate replace_planner needs replacement_job_id");
-				const result = await post.replacePlanner(params.job_id, params.replacement_job_id);
+				const result = await post.replacePlanner(params.job_id, params.replacement_job_id, params.replan_escalation_id);
 				return {
 					content: [{ type: "text" as const, text: `Replacement planner ${result.replacement_job_id} prepared. Dispatch it with task_file: ${result.task_file}. For a pipeline, cp_pipeline reanchor to this replacement before advancing it. The original job stays closed.` }],
 					details: result,
