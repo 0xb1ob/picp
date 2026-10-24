@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..f9bffe4 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1875,7 +1875,7 @@ export class Integrator {
+ 				reason: `${jobId}: ${fact}. The implementer is already working; wait for its report. Nothing was merged and no further promotion was sent.` });
+ 		}
+ 		const report = readLiveReport(this.#options.home, jobId);
+-		if (report.state === "absent" || report.state === "done") return undefined;
++		if (report.state === "absent" || report.state === "done" || report.state === "blocked") return undefined;
+ 		const generation = (record?.supersessions ?? 0) + 1;
+ 		const blockers = report.state === "blocked" ? report.blockers : [];
+ 		const facts = [...input.facts, `envelope generation ${generation}: ${report.state === "blocked" ? "blocked" : `unreadable: ${report.detail}`}`];

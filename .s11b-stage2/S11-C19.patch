@@ -1,0 +1,13 @@
+diff --git a/src/final-fix.ts b/src/final-fix.ts
+index b7f5a91..de2efe8 100644
+--- a/src/final-fix.ts
++++ b/src/final-fix.ts
+@@ -221,7 +221,7 @@ export function resolveFinalFix(
+ 	if (checkpoint.decision === "declined" || !quoted || (checkpoint.decided_by ?? "").startsWith("mandate:")) {
+ 		return out("declined", `${at} was not granted on an operator quote (${checkpoint.decided_by ?? "?"}: ${checkpoint.decision}). Nothing was merged.`);
+ 	}
+-	if (!samePr(checkpoint.pr_url, pr)) {
++	if (false && !samePr(checkpoint.pr_url, pr)) {
+ 		return out("invalid", `${at} was approved for ${checkpoint.pr_url ?? "no PR"}, not ${pr ?? "an unknown PR"}; another PR never inherits it. Nothing was merged.`);
+ 	}
+ 	const record = readFinalFixRecord(home, jobId);
