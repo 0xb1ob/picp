@@ -38,3 +38,29 @@ S11 cases with no skips; W and C baseline invocations also passed 17 and 27 expa
 Existing exact scenario selectors are printed verbatim in each pair of logs. The inherited matrix in the
 readiness package and docs/testing-migration/s11.md gives the original declaration mapping. Other controls
 remain outstanding; this increment alone never permits original-file removal.
+
+## Increment 2
+
+`base-identities-2.txt` and `source-identities-2.txt` pin the next batch (HEAD 5f71217); production is unchanged.
+`SHA256SUMS-2` hashes its exact patches/logs. Each command is printed in the corresponding logs.
+All fifteen isolated mutants exited 1 with the following named AssertionError failures; all restored commands exited 0.
+S10 and S11 already contain S10b supersession pointers for watcher 71 / integrate 92; no pointer edit is needed.
+The contract suite also passed (`contract.log`). No original was removed.
+
+| Control | Required consumer outcome observed under mutation |
+|---|---|
+| S11-C16 | both human-merged done/blocked deliveries surface instead of done |
+| S11-C17 | empty observed base incorrectly parks |
+| S11-C18 | explicit repo policy reaches handoff permit instead of merge |
+| S11-C19 | another PR incorrectly promotes |
+| S11-C20 | pre-promotion moved head incorrectly promotes |
+| S11-C21 | later report generation incorrectly reaches merge |
+| S11-C22 | truncated capped review incorrectly promotes |
+| S11-C23 | pending final-fix decision loses awaits-a-human guidance |
+| S11-C24 | checks and unstable states incorrectly park |
+| S11-C25 | unknown mergeability incorrectly parks |
+| S11-C26 | unreadable permission and workflow states incorrectly mint merge checkpoints |
+| S11-C27 | reviewed draft surfaces instead of proceeding through ready |
+| S11-C28 | changed-head legacy handoff creates two rows instead of one |
+| S11-C29 | independently answerable checkpoint IDs shrink from four to two |
+| S09-NC01 | older branch CI surfaces instead of waiting |

@@ -1,0 +1,52 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=exact head and branch evidence distinguish tests/e2e/landing-s09.test.ts
+
+▶ landing S09: exact head and branch evidence distinguish pending, superseded and absent CI
+  ✔ pending (3018.176681ms)
+  ✖ older (3025.523976ms)
+  ✔ present (3028.42004ms)
+  ✔ none (2833.700296ms)
+  ✔ denied-branch (2606.68337ms)
+  ✔ malformed-branch (3830.439279ms)
+  ✔ invalid-branch (2551.263004ms)
+  ✔ branch-green (2795.093018ms)
+  ✔ denied-workflows (2517.182584ms)
+  ✔ network-workflows (2491.932778ms)
+  ✔ empty-workflows (2605.562658ms)
+  ✔ malformed-workflows (2587.98904ms)
+✖ landing S09: exact head and branch evidence distinguish pending, superseded and absent CI (33895.786903ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 11
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 35771.712456
+
+✖ failing tests:
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ older (3025.523976ms)
+  AssertionError [ERR_ASSERTION]: older: gh: https://github.com/example/demo/pull/301 is OPEN at 6c19c759a03c
+  ci: unknown — no Actions CI runs are observable for cp-xkk1 on 6c19c75 — not asked until one is
+  ci configuration: present (workflows_present) — the repository has 1 Actions workflow(s) configured
+  merge authorization requested for 6c19c759a03c (pending)
+  cp-xkk1: no CI runs are observable for cp-xkk1, so cp_integrate cannot verify green on its own. A merge authorization for 6c19c759a03c is now pending. Only a human answers it (cp_decide, with a mandate or an operator quote) — evidence is not authorization.
+  
+  'surface' !== 'wait'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:35:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'surface',
+    expected: 'wait',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
