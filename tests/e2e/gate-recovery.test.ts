@@ -17,10 +17,12 @@ import { deriveFromEscalations } from "../../src/awaiting.ts";
 import { CheckpointStore } from "../../src/checkpoint.ts";
 import { createScratchRepo, enableTreehouse, startPiChild } from "../harness/index.ts";
 import { isPidAlive } from "../../src/fleet.ts";
+import { standingQuotes, standingRelays, standingAmendment } from "../fixtures/gate-recovery-provenance.ts";
 
-for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistered", "spawn-failure", "postdecision", "orphan", "mismatch", "equivalent"] as const) {
+for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistered", "spawn-failure", "postdecision", "orphan", "mismatch", "equivalent", "retention"] as const) {
  test(`standing public recovery: ${mode}`, async (t) => {
-	const f = await fixture(t);
+	const continuation = ["corrected", "equivalent", "retention"].includes(mode);
+	const f = await fixture(t, continuation && mode !== "equivalent" ? "dropped: whole-audit readiness remains outstanding" : "completed");
 	await f.post.replacePlanner(f.source, f.target, f.authority);
 	writeFileSync(f.post.artifacts.path(f.target), "legacy candidate\n");
 	const provider = await MockProvider.start();
@@ -59,7 +61,8 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 		return result;
 	};
 	await run(3, "revise");
-	if (mode !== "corrected" && mode !== "equivalent") await post.fleet.add({ ...post.fleet.get(f.source)!, job_id: f.target, phase: "held",
+	if (continuation) await post.fleet.patch(f.source, { reported_at: "2026-10-24T13:00:00Z" });
+	if (!continuation) await post.fleet.add({ ...post.fleet.get(f.source)!, job_id: f.target, phase: "held",
 		reported_at: "2026-10-24T13:00:00Z", branch: f.target, worktree: `/wt/${f.target}` });
 	const legacy = readFileSync(recoveryFile(join(f.scratch.path, paths.runDir(f.target)), "claim"));
 	const a = await f.ledger.create({ title: "standing A", project: "demo", kind: "ship", delivery: "local" });
@@ -70,12 +73,18 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 	await f.ledger.addDep(b.id, a.id);
 	const grant = post.mandates.issue({ projects: ["demo"], objective: "bounded migration recovery", expiry: "2099-01-01T00:00:00Z",
 		spend_cap: { usd: 100, tokens: 1000000 }, job_cap: 10, job_ids: [f.target, a.id, b.id] });
-	const obsolete = await f.ledger.create({ title: "whole-program readiness superseded for bounded scope", project: "demo", kind: "research", delivery: "pipeline" });
+	const toolingGrant = post.mandates.issue({ projects: ["demo"], objective: "separate named tooling scope", expiry: "2099-01-01T00:00:00Z",
+		spend_cap: { usd: 100, tokens: 1000000 }, job_cap: 10, job_ids: [f.source] });
+	const obsolete = { id: f.source };
+	const closed = await f.ledger.create({ title: "completed retained dependency", project: "demo", kind: "research", delivery: "local" });
+	await f.ledger.close(closed.id, "completed");
+	await f.ledger.addDep(a.id, closed.id);
+	if (continuation && mode !== "equivalent") await f.ledger.resolveDroppedDependency(a.id, f.source, "reopen", "fixture-reopen", "fixture");
 	const unrelated = await f.ledger.create({ title: "unrelated hold", project: "demo", kind: "research", delivery: "pipeline" });
 	await f.ledger.addDep(b.id, unrelated.id);
 	await f.ledger.addDep(a.id, obsolete.id);
 	await f.ledger.addDep(b.id, obsolete.id);
-	if (mode === "corrected" || mode === "equivalent") {
+	if (continuation) {
 		const repo = createScratchRepo({ name: "demo", files: { "README.md": "readiness fixture\n" } });
 		await post.registry.register({ name: "demo", clone_url: repo.remote!, delivery: "pr" });
 		const clone = post.registry.pathOf("demo");
@@ -95,12 +104,12 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 	}
 	const controls = ["dc-20261024132350-022c499e", "dc-20261024132412-aef10217"];
 	const sends = ["ps-20261024132433-da0e3265", "ps-20261024132620-9b6e1bb4"];
-	const releases = [a.id, b.id].map((id) => ({ dependent_job_id: id, blocker_id: obsolete.id,
-		reason: "Obsolete whole-audit readiness; bounded PASS only, S32–S131 remains outstanding." }));
-	const quotes = [`Finish recovery and approved migration; retain unrelated blocker ${unrelated.id}.\nobsolete_whole_audit_readiness_releases=${JSON.stringify(releases)}\n`, "Continue that same scope."];
+	const remap = (text: string) => text.replaceAll("cp-migration-s11b-stage2-89t1", a.id)
+		.replaceAll("cp-migration-s31-faz4", b.id).replaceAll("md-a0517f", grant.id).replaceAll("md-bff70a", toolingGrant.id);
+	const quotes = [...standingQuotes];
+	if (mode === "retention") quotes[0] += ` Retain unrelated blocker ${unrelated.id}; its mention grants no release.`;
 	const at = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-	const texts = quotes.map((quote, i) => `${controls[i]}: ${quote} Existing ${f.target}, A ${a.id} and B ${b.id}; standing authority, unchanged budgets.`);
-	texts[1] += ` Reinforces ${sends[0]}.`;
+	const texts = standingRelays.map((text, i) => remap(text).replace(standingQuotes[i]!, quotes[i]!));
 	atomicWriteJson(join(f.scratch.path, ".pi-command-post/state/sessions/cp-parent.sends.json"), { schema_version: 1,
 		updated_at: at, entries: sends.map((id, i) => ({ schema_version: 1, id, text: texts[i], queued_at: at,
 			state: "settled", attempts: 1, landed_at: at, settled_at: at })) });
@@ -120,8 +129,11 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 	].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
 	writeFileSync(join(f.scratch.path, ".pi-command-post/state/operator/dashboard.jsonl"), journal.map((line) => JSON.stringify(line)).join("\n") + "\n");
 	const addenda = join(f.scratch.path, paths.taskAddendaFile(f.target));
+	const amendment = mode === "equivalent" ? remap(standingAmendment)
+		.replace(`SAME A ${a.id} and B ${b.id}`, `approved readiness subjects ${b.id}, ${a.id}`)
+		.replace("standing authority", "standing authorization") : remap(standingAmendment);
 	writeFileSync(addenda, readFileSync(addenda, "utf8") + JSON.stringify({ schema_version: 1, n: 2, added_at: at,
-		text: `${controls[0]} / ${sends[0]} grants standing ${mode === "equivalent" ? "authorization" : "authority"} to ${f.target}; ${mode === "equivalent" ? `approved subjects ${b.id}, ${a.id}` : `A ${a.id} and B ${b.id}`}. ${quotes[0]} Unrelated hold ${unrelated.id} stays. S32-S131 outstanding; missing logs stay missing, retain originals, pass only. Retained ${grant.id}.`,
+		text: `Tooling coverage ${toolingGrant.id} remains separate. ` + amendment.replace(standingQuotes[0]!, quotes[0]!) + ` Unrelated hold ${unrelated.id} stays.`,
 		by: "operator-quote", quote: quotes[0], reason: "bounded standing scope" }) + "\n");
 	const selectors = { job_id: f.target, authority_mode: "standing" as const, operator_control_id: controls[0]!,
 		operator_send_id: sends[0]!, reinforcement_control_id: controls[1]!, reinforcement_send_id: sends[1]!, dependent_job_ids: [a.id, b.id] };
@@ -150,7 +162,7 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 		current_artifact_sha256: recoveryDigest(readFileSync(post.artifacts.file(f.target))), dependent_job_ids: [a.id, b.id] });
 	const first = prepare(authority.current_predecessor_id);
 	assert.deepEqual(prepare(authority.current_predecessor_id), first);
-	if (mode !== "corrected" && mode !== "equivalent") {
+	if (!continuation) {
 		const model = provider.addScript("standing-fault", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: {
 			job_id: f.target, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["bounded readiness"],
 		} }] }]);
@@ -223,7 +235,7 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 	assert.deepEqual(passStatus.release_scope, authority.release_scope);
 	assert.deepEqual(passStatus.release_scope.eligible_readiness_edges.map(({ dependent_job_id, blocker_id }) =>
 		({ dependent_job_id, blocker_id })).sort((x, y) => x.dependent_job_id.localeCompare(y.dependent_job_id)),
-		[a.id, b.id].sort().map((id) => ({ dependent_job_id: id, blocker_id: obsolete.id })));
+		mode === "equivalent" ? [] : [a.id, b.id].sort().map((id) => ({ dependent_job_id: id, blocker_id: obsolete.id })));
 	assert.equal(passStatus.eligibility, "completed");
 	assert.throws(() => prepare(second.attempt_id), /terminal nonpass/);
 	const drift = await f.ledger.create({ title: "graph drift", project: "demo", kind: "research", delivery: "pipeline" });
@@ -253,23 +265,23 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 	await parent.prompt(reason);
 	await parent.waitForSettled(30000);
 	const ends = parent.eventsOfType("tool_execution_end") as Array<{ isError?: boolean }>;
-	assert.equal(ends.length, 4);
+	assert.equal(ends.length, passStatus.release_scope.eligible_readiness_edges.length * 2);
 	assert.equal(ends.some((event) => event.isError), false);
-	assert.equal((await f.ledger.show(obsolete.id)).status, "open");
-	assert.equal((await f.ledger.show(a.id)).blocked_by.includes(obsolete.id), false);
-	assert.equal((await f.ledger.show(b.id)).blocked_by.includes(obsolete.id), false);
+	assert.equal((await f.ledger.show(obsolete.id)).status, mode === "equivalent" ? "closed" : "open");
+	assert.equal((await f.ledger.show(a.id)).blocked_by.includes(obsolete.id), mode === "equivalent");
+	assert.equal((await f.ledger.show(b.id)).blocked_by.includes(obsolete.id), mode === "equivalent");
 	for (const edge of passStatus.release_scope.eligible_readiness_edges) {
 		assert.equal((await f.ledger.show(edge.dependent_job_id)).comments.some((comment) => comment.text === `${reason} ${edge.reason}`), true);
 	}
 	const ready = await f.ledger.ready();
 	assert.equal(ready.some((job) => job.id === a.id), true);
 	assert.equal(ready.some((job) => job.id === b.id), false);
-	assert.equal((await f.ledger.show(a.id)).blocked_by.includes(f.source), true);
+	assert.equal((await f.ledger.show(a.id)).blocked_by.includes(closed.id), true);
 	assert.equal((await f.ledger.show(b.id)).blocked_by.includes(unrelated.id), true);
 	assert.deepEqual(readFileSync(recoveryFile(join(f.scratch.path, paths.runDir(f.target)), "claim")), legacy);
 });
 }
-async function fixture(t: { after(fn: () => void | Promise<void>): void }) {
+async function fixture(t: { after(fn: () => void | Promise<void>): void }, closeReason = "completed") {
 	const scratch = createScratchHome();
 	const { ledger } = createScratchLedger({ home: scratch.path });
 	const post = new CommandPost({ home: scratch.path, packageRoot: REPO_ROOT });
@@ -279,7 +291,7 @@ async function fixture(t: { after(fn: () => void | Promise<void>): void }) {
 	await post.fleet.add({ job_id: source.id, project: "demo", kind: "research", delivery: "pipeline", origin: "terminal", phase: "done",
 		worker: { pid: 1, session_id: "s", session_file: "/s.jsonl", profile: "planner", role: "planner", model: "mock/test", started_at: "2026-09-04T18:00:00Z" },
 		worktree: `/wt/${source.id}`, branch: source.id, dispatched_at: "2026-09-04T18:00:00Z", usage: EMPTY_USAGE });
-	await ledger.close(source.id, "completed");
+	await ledger.close(source.id, closeReason);
 	const plan = Buffer.alloc(59022, 65);
 	writeFileSync(post.artifacts.path(source.id), plan);
 	atomicWriteJson(join(scratch.path, paths.gateFile(source.id, 1)), {

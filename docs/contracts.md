@@ -2368,16 +2368,14 @@ Revise, escalate and operational outcomes all surface without automatic promotio
 including pipeline advance and orphan finalization. Source starts and recovery chains refuse.
 `cp_gate action:status` reports recovery state and remaining allowance derived from the claim.
 
-For additive v2 recovery authorities, obsolete whole-audit readiness releases require explicit
-per-edge data in the authenticated human control (or the approved ask context for an answer),
-repeated in the scoped amendment. A declaration is one standalone line:
-`obsolete_whole_audit_readiness_releases=[{"dependent_job_id":"cp-a","blocker_id":"cp-old","reason":"Obsolete whole-audit readiness; bounded PASS only"}]`.
-The edge IDs and reason must match in both sources. Ordinary prose, including instructions to
-retain a named blocker, grants no release. Missing declarations yield no release edges, even for
-the historical root. Closed, foreign-project, non-research, recovery-job and A/B-ordering edges
-remain excluded. Only the PASS status receipt supplies the parent's eligible removal pairs;
-normal reporting, teardown and reasoned dependency controls still apply. A model-authored
-amendment cannot add an edge absent from authenticated human approval.
+For additive v2 recovery authorities, the approved surrounding context binds scoped A/B
+readiness to the replacement review rather than unfinished later-slice audit completion.
+The immutable legacy source/reservation history identifies the original whole-audit readiness
+root; only existing open edges from the exact approved A/B to that root can enter release_scope.
+Other research blockers cannot become eligible through mentions, retention instructions, titles,
+or model-authored declarations. Closed edges remain recorded. The PASS receipt binds the exact
+eligible pairs and reasons for parent-owned lifecycle and dependency controls; changed graph or
+provenance requires revalidation. Existing human messages need no new format or JSON declaration.
 
 Rollout belongs to the parent: after exact-head CI, review, privacy checks and merge, wait for the
 automatic updater. Verify both the loaded `/cp-version` revision and the active registered

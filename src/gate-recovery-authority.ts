@@ -70,18 +70,6 @@ function approvedRecoverySubjects(home: string, selectors: RecoverySelectors) {
 		ask.options.some((option) => option.label === ask.answer) && ask.job_ids?.length === 3 &&
 		[selectors.job_id, ...selectors.dependent_job_ids].every((id) => ask.job_ids!.includes(id)));
 }
-// Release declarations are data approved by the human; prose mentioning a job never grants edge removal.
-function approvedReadinessReleases(text: string): RecoveryAuthority["release_scope"]["eligible_readiness_edges"] {
-	const prefix = "obsolete_whole_audit_readiness_releases=";
-	const records = text.split("\n").map((line) => line.trim()).filter((line) => line.startsWith(prefix));
-	if (!records.length) return [];
-	if (records.length !== 1) throw new Error("ambiguous authenticated readiness releases");
-	const checked = validate<RecoveryAuthority["release_scope"]["eligible_readiness_edges"]>(
-		GateRecoveryAuthoritySchema.properties.release_scope.properties.eligible_readiness_edges,
-		JSON.parse(records[0]!.slice(prefix.length)));
-	if (!checked.ok) throw new Error("invalid authenticated readiness releases");
-	return checked.value.map(({ dependent_job_id, blocker_id, reason }) => ({ dependent_job_id, blocker_id, reason }));
-}
 export function resolveRecoveryAuthority(input: {
 	home: string; selectors: RecoverySelectors; operatorTexts: readonly string[];
 	ledger: Ledger; mandates: MandateStore;
@@ -145,20 +133,18 @@ export function resolveRecoveryAuthority(input: {
 	const subjects = approvedRecoverySubjects(home, s);
 	if (!subjects || subjects.project !== requireJobLabels(job).project) throw new Error("dependent subjects differ from recorded authenticated recovery scope");
 	approval = { decision: approval, subjects };
-	const releases = approvedReadinessReleases(primary.control.kind === "answer" ? subjects.context : primary.control.text);
-	const amendedReleases = approvedReadinessReleases(amendment.text);
-	const approvedReleases = releases.filter((edge) => amendedReleases.some((amended) =>
-		amended.dependent_job_id === edge.dependent_job_id && amended.blocker_id === edge.blocker_id && amended.reason === edge.reason));
 	if (!/S32[–-]S131/.test(amendment.text) || !/outstanding/i.test(amendment.text) ||
 		!/missing/i.test(amendment.text) || !/retai[n]/i.test(amendment.text) || !/pass/i.test(amendment.text)) {
 		throw new Error("bounded readiness safeguards missing from authenticated amendment");
 	}
-	const grantIds = amendment.text.match(/md-[a-f0-9]+/g) ?? [];
-	const grant = grantIds.map((id) => input.mandates.get(id)).find((entry) => entry?.status === "active");
-	if (!grant || grant.expiry <= new Date().toISOString()) throw new Error("recovery requires retained active grant");
+	const grantIds: string[] = `${amendment.text}\n${primary.text}`.match(/md-[a-f0-9]+/g) ?? [];
 	const labels = requireJobLabels(job);
 	const usage = input.mandates.withReviewerSpend(input.usageJobs ?? []);
 	const selection = input.mandates.selection("review", { jobId: job.id, project: labels.project, kind: "research" }, usage);
+	const grant = selection?.grant;
+	if (!grant || !grantIds.includes(grant.id) || grant.status !== "active" || grant.expiry <= new Date().toISOString()) {
+		throw new Error("recovery requires retained active grant for this subject");
+	}
 	if (selection?.grant.id !== grant.id || selection.at.standing !== "permit") {
 		throw new Error("retained recovery grant does not permit this subject and current budget");
 	}
@@ -180,10 +166,11 @@ export function resolveRecoveryAuthority(input: {
 				const dependent = jobs.find((entry) => entry.id === id)!;
 				return dependent.blocked_by.flatMap((blockerId) => {
 					const blocker = jobs.find((entry) => entry.id === blockerId)!;
-					const approved = approvedReleases.find((edge) => edge.dependent_job_id === id && edge.blocker_id === blockerId);
-					if (!approved || blocker.status === "closed" || blockerId === s.job_id || dependents.includes(blockerId) ||
+					// Only the validated original readiness root is superseded by this bounded replacement review.
+					if (blockerId !== initial.root_job_id || blocker.status === "closed" || blockerId === s.job_id || dependents.includes(blockerId) ||
 						requireJobLabels(blocker).project !== labels.project || requireJobLabels(blocker).kind !== "research") return [];
-					return [approved];
+					return [{ dependent_job_id: id, blocker_id: blockerId,
+						reason: "Authenticated scoped readiness supersedes the original whole-audit readiness root; S32–S131 remains outstanding." }];
 				});
 			}) },
 	};
