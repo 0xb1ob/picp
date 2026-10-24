@@ -75,6 +75,16 @@ test("S26: real parent diagnostics and read-only bridge attachment deliver backl
 	assert.ok(JSON.stringify(first.records()).includes(`cp-parent: attached (host pid ${currentHost(paths).record!.pid}`), "session_start reports its read-only attachment without a cp_parent tool call");
 	const relayFile = escalationRelayLedgerFile(home.path, "multi");
 	await first.close();
+	// Stop the live relay producer before simulating a legacy home with deleted relay history.
+	const stoppingHost = await attachParentHost({ home: home.path, mode: "multi", timeoutMs: 30_000 });
+	try {
+		const exit = await stoppingHost.request("stop") as { code: number | null; signal: string | null } | null;
+		assert.ok(exit === null || exit.code === 0 || exit.signal !== null);
+		await stoppingHost.closed;
+		assert.equal(JSON.parse(readFileSync(paths.stopped, "utf8")).gen, generation);
+	} finally {
+		stoppingHost.disconnect();
+	}
 	// Legacy homes have only the bridge ledger, before durable operator relay acknowledgments existed.
 	rmSync(operatorRelayAcksFile(join(home.path, LAYOUT.state)), { force: true });
 	rmSync(operatorRelayOutboxFile(join(home.path, LAYOUT.state)), { force: true });
@@ -90,6 +100,7 @@ test("S26: real parent diagnostics and read-only bridge attachment deliver backl
 	const backstop = third.records().filter((r) => r.type === "message_start" && JSON.stringify(r).includes(`id=${escalation.id}`));
 	assert.equal(backstop.length, 1);
 	assert.match(JSON.stringify(backstop[0]), /never relayed to this session/);
+	assert.ok(JSON.parse(readFileSync(relayFile, "utf8")).items.some((item: { id: string; via: string }) => item.id === escalation.id && item.via === "backstop"));
 });
 
 
