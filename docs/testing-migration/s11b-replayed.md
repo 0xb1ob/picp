@@ -1,5 +1,14 @@
 # S11b replayed S10 controls
 
+## Fresh stage2 proof (PR500)
+
+The new [proof increment](../../.s11b-stage2/README.md) records S11-C01–C15 exact isolated patches,
+SHA256s, named consumer failures and restored passes on HEAD `6d2d9313ea0aa2f7df5140ccf7cc3d77b14a4dbc`
+against main `2ca3ed5f2e31af2cd08763e398bdc9a67ffc7fbd`. It also includes the executable TypeScript AST
+source-slice comparison: all 12 retained calls match original identities byte for byte (144/12 static calls).
+This is fresh proof; the historical patches and missing-log notices below remain unchanged. Remaining matrix
+controls are still required before retirement. The original suite remains intact.
+
 Each patch was executed alone through its existing public consumer scenario, failed with AssertionError, and was restored. Selectors and original declaration mappings are in ../testing-migration-s10.md. These final-base patches account for line shifts and the added unreadable-status guard; the dirty-only control does not replace S10b’s separate unreadable-status control, which remains for the follow-up.
 
 ## S10-dirty

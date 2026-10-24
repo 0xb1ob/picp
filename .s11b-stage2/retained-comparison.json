@@ -1,0 +1,87 @@
+{
+  "original": {
+    "path": "tests/integrate.test.ts",
+    "sha256": "b8881f5b9da6511bc15ab526baff37303351710029a7fcb4abad807b3a1f730d",
+    "count": 144
+  },
+  "retained": {
+    "path": "tests/integrate-retained.test.ts",
+    "sha256": "069a653d73ccf4c7020fcd99a45d519550fb70297ddc0a8d52c3962313a0dfa4",
+    "count": 12
+  },
+  "rows": [
+    {
+      "identity": 8,
+      "title": "\"held repair waits for active, failed, terminal or unreported fleet records\"",
+      "sha256": "70419f97a48cb033788ccc88720987ac3003b32c76c1e46bcf73a157b5e949e1",
+      "bytes": 733
+    },
+    {
+      "identity": 19,
+      "title": "\"k52/cp-oc0m: no active mandate, an unreadable login, a foreign row or no scope port never blocks\"",
+      "sha256": "e70287bbd7845a30efdfa8ca626a30a6f3f117f0d03ea92d5ae426b3078bcb01",
+      "bytes": 1052
+    },
+    {
+      "identity": 64,
+      "title": "`picp-03o: a ${phase} worker blocks the ${permission === \"CLEAN\" ? \"repo-derived\" : \"human-checkpoint\"} merge until it reports`",
+      "sha256": "9885062a636b2388c6e935c512873edd9cecfcfe9b5c5dbd710a22d1ccd8f12a",
+      "bytes": 1420
+    },
+    {
+      "identity": 66,
+      "title": "\"picp-03o: integration cannot merge while its promotion is still in flight\"",
+      "sha256": "bced12d1e47bf02e2cae95038de5ddef932bb9190034fe4e8ab65dded91b9742",
+      "bytes": 1085
+    },
+    {
+      "identity": 68,
+      "title": "\"duplicate red CI does not send again while promotion is in flight\"",
+      "sha256": "de2727205ddf042e9c2404b9180a3d63b57f4ed64198007db90e5f3459c8b05b",
+      "bytes": 941
+    },
+    {
+      "identity": 69,
+      "title": "\"4B1-T4: promoting(job) is true while the repair send is in flight, and HeldRelease never releases it then\"",
+      "sha256": "827ab062c217f8776e45aa025f6aed859a70f32320dc98a4fc46e4eb3f76b6c2",
+      "bytes": 1443
+    },
+    {
+      "identity": 72,
+      "title": "\"with no sender wired at all, a conflict surfaces rather than silently stalling\"",
+      "sha256": "6d417096e3b3875657e16dc11796f4d20b6754af7621c0e9288f1bda1dd8fb01",
+      "bytes": 312
+    },
+    {
+      "identity": 77,
+      "title": "\"forge PR 3: open, closed, foreign, unreadable and held GitLab MRs stop with a named reason and touch nothing\"",
+      "sha256": "a356cb8dfddbc1d4c9446454a2660aee9ed4d6408371bf427f2ee406ca178ea7",
+      "bytes": 2270
+    },
+    {
+      "identity": 104,
+      "title": "\"isSalvageRef admits only names strictly under refs/cp-salvage/\"",
+      "sha256": "06ea871bf1047e76764136cd309c278d03620139e3adaba5f090b7132ed0ecda",
+      "bytes": 653
+    },
+    {
+      "identity": 122,
+      "title": "\"one job's three authorizations are three files, three ids, and never each other\"",
+      "sha256": "476827763f2c98f5e91b46d6d019278e43bb1407b7e0789a3d1a217affb033b6",
+      "bytes": 2536
+    },
+    {
+      "identity": 126,
+      "title": "\"jje.3: approval is bound to its PR and its capped head, and needs an operator quote on every surface\"",
+      "sha256": "af5942074934e3d785279f689f37af49acb3b206db84f960100104e4d65d720d",
+      "bytes": 1052
+    },
+    {
+      "identity": 134,
+      "title": "\"human_handoff: no pass is a review hold, a draft is readied first, and repo policy is argv-identical\"",
+      "sha256": "e3a2df28fddbbaacbda84f95300287e11c5f5406d6e257d3b9c00cc9547586a3",
+      "bytes": 1131
+    }
+  ],
+  "byteIdentity": true
+}

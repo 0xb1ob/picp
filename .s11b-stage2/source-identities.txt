@@ -1,0 +1,5 @@
+100644 blob 7b440fa03270f0b505ae307dadc1ff9a2c00aca1	src/contracts/layout.ts
+100644 blob b7f5a9147e56c8221be63bd85cc1c70eb42d3996	src/final-fix.ts
+100644 blob e81e058df15d9050047cf909d81fabdced8a27e3	src/human-handoff.ts
+100644 blob e63f33abfa61f6c3507510cf625ec2f72da42387	src/integrate.ts
+100644 blob f4a30fa580b7c701a9be96509b0ff6f14004bd87	tests/e2e/landing-s11.test.ts

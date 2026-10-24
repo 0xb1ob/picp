@@ -1,0 +1,13 @@
+diff --git a/src/contracts/layout.ts b/src/contracts/layout.ts
+index 7b440fa..1033317 100644
+--- a/src/contracts/layout.ts
++++ b/src/contracts/layout.ts
+@@ -381,7 +381,7 @@ export const paths = Object.freeze({
+ 			// sha is in the *file name*, not in a field a later head could be compared
+ 			// against and quietly inherit. A force-push after the answer therefore has
+ 			// no authorization at all, rather than a stale one.
+-			return `${LAYOUT.checkpoints}/${id}.merge-${requireCheckpointScope(scope)}.json`;
++			return `${LAYOUT.checkpoints}/${id}.changed-merge-${requireCheckpointScope(scope)}.json`;
+ 		}
+ 		// jje.3: the final fix is bound to the capped head the same way.
+ 		if (kind === "final_fix") return `${LAYOUT.checkpoints}/${id}.final-fix-${requireCheckpointScope(scope)}.json`;
