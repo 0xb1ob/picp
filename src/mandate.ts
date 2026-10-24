@@ -51,6 +51,7 @@ import { describeRefMismatch, describeRefVerification, type RefVerification, ver
 import { assertDispatchAllowed, type DispatchAuthorityJob, riskGateExempt } from "./dispatch-authority.ts";
 import { openScheduleRunStore, type ScheduleRunStore } from "./schedule-runs.ts";
 import { runAuthority, runRiskPreapproval, scheduleRunVerdict, type ScheduleAuthorityContext } from "./schedule-authority.ts";
+import { continueAdmittedWork, issueAdmissions } from "./mandate-continuity.ts";
 
 export * from "./mandate-accounting.ts";
 export * from "./mandate-permission.ts";
@@ -348,6 +349,9 @@ export class MandateStore {
 	}
 
 	authorityNow(): string { return this.#stamp(); }
+	continue(sourceId: string, jobs: readonly MandateUsageJob[] = []) {
+		return continueAdmittedWork(this, sourceId, jobs, (grant) => this.#write(grant));
+	}
 	runContext(): ScheduleAuthorityContext {
 		return { home: this.home, runs: this.scheduleRuns, ledgerJob: (id) => existsSync(join(this.home, LAYOUT.jobsFile)) ? readJobsDocument(this.home).jobs.find((job) => job.id === id) : undefined };
 	}
@@ -534,6 +538,9 @@ export class MandateStore {
 			...(input.provenance ? { provenance: input.provenance } : {}),
 			...(input.schedule_fire ? { schedule_fire: input.schedule_fire } : {}),
 		};
+		if (mandate.job_ids?.length && existsSync(join(this.home, LAYOUT.jobsFile))) {
+			mandate.admissions = issueAdmissions(mandate, readJobsDocument(this.home).jobs);
+		}
 		const counted = this.withReviewerSpend(jobs, [mandate]);
 		const baseline = usageBaseline(mandate, counted);
 		if (baseline.length > 0) mandate.usage_baseline = baseline;
@@ -564,7 +571,7 @@ export class MandateStore {
 
 	pause(id: string, reason = "operator"): Mandate {
 		const existing = this.require(id);
-		if (existing.status === "revoked" || existing.status === "expired") {
+		if (existing.status === "revoked" || (existing.status === "expired" && !existing.continuity)) {
 			throw new MandateError(`${id} is ${existing.status}; it cannot be paused`);
 		}
 		if (existing.status === "paused") return existing;
@@ -631,7 +638,12 @@ export class MandateStore {
 		const counted = this.withReviewerSpend(jobs, [mandate]);
 		const refusal = batchRefusal(mandate, id, job, counted, this.#stamp()) ?? (enrollCapacity(mandate, counted, open) < 1 ? `${id} job cap ${mandate.job_cap} reached` : undefined);
 		if (refusal) throw new MandateError(`cannot enroll ${job.jobId}: ${refusal}`);
-		return this.#write({ ...mandate, job_ids: [...(mandate.job_ids ?? []), job.jobId] });
+		const next = { ...mandate, job_ids: [...(mandate.job_ids ?? []), job.jobId] };
+		if (existsSync(join(this.home, LAYOUT.jobsFile))) {
+			const record = readJobsDocument(this.home).jobs.find((entry) => entry.id === job.jobId);
+			if (record) next.admissions = [...(mandate.admissions ?? []), ...issueAdmissions(next, [record], this.#stamp())];
+		}
+		return this.#write(next);
 	}
 
 	/**
