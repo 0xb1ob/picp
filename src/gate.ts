@@ -907,6 +907,7 @@ export class Gate {
 			if (JSON.stringify(recoveryTarget(home, jobId)) !== JSON.stringify(recovery)) throw new GateError(`${jobId}: recovery binding changed before spawn`);
 			if (recovery) validateRecoveryAuthority(home, recovery, this.#options.mandates);
 		}
+		await manager.ready();
 		try {
 			managed = manager.spawn({
 				key,
