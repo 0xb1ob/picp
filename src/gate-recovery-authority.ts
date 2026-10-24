@@ -162,9 +162,16 @@ export function resolveRecoveryAuthority(input: {
 		release_scope: { recovery_job_id: s.job_id, dependent_job_ids: dependents,
 			eligible_readiness_edges: dependents.flatMap((id) => {
 				const dependent = jobs.find((entry) => entry.id === id)!;
-				return dependent.blocked_by.includes(initial.root_job_id) ? [{ dependent_job_id: id,
-					blocker_id: initial.root_job_id, reason: "Authenticated bounded A/B readiness supersedes whole-program readiness; S32–S131 remains outstanding." }] : [];
-			}) }, 
+				return dependent.blocked_by.flatMap((blockerId) => {
+					const blocker = jobs.find((entry) => entry.id === blockerId)!;
+					const named = new RegExp(`(^|[^a-z0-9-])${blockerId}($|[^a-z0-9-])`);
+					if (blocker.status === "closed" || blockerId === s.job_id || dependents.includes(blockerId) ||
+						requireJobLabels(blocker).project !== labels.project || requireJobLabels(blocker).kind !== "research" ||
+						!(blockerId === initial.root_job_id || (named.test(primary.control.text) && named.test(amendment.text)))) return [];
+					return [{ dependent_job_id: id, blocker_id: blockerId,
+						reason: "Authenticated bounded A/B readiness supersedes whole-program readiness; S32–S131 remains outstanding." }];
+				});
+			}) },
 	};
 	return value;
 }

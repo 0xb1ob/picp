@@ -95,7 +95,7 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 	}
 	const controls = ["dc-20261024132350-022c499e", "dc-20261024132412-aef10217"];
 	const sends = ["ps-20261024132433-da0e3265", "ps-20261024132620-9b6e1bb4"];
-	const quotes = ["Finish recovery and approved migration.", "Continue that same scope."];
+	const quotes = [`Finish recovery and approved migration; release obsolete readiness blocker ${obsolete.id} on PASS only.`, "Continue that same scope."];
 	const at = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 	const texts = quotes.map((quote, i) => `${controls[i]}: ${quote} Existing ${f.target}, A ${a.id} and B ${b.id}; standing authority, unchanged budgets.`);
 	texts[1] += ` Reinforces ${sends[0]}.`;
@@ -119,7 +119,7 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 	writeFileSync(join(f.scratch.path, ".pi-command-post/state/operator/dashboard.jsonl"), journal.map((line) => JSON.stringify(line)).join("\n") + "\n");
 	const addenda = join(f.scratch.path, paths.taskAddendaFile(f.target));
 	writeFileSync(addenda, readFileSync(addenda, "utf8") + JSON.stringify({ schema_version: 1, n: 2, added_at: at,
-		text: `${controls[0]} / ${sends[0]} grants standing ${mode === "equivalent" ? "authorization" : "authority"} to ${f.target}; ${mode === "equivalent" ? `approved subjects ${b.id}, ${a.id}` : `A ${a.id} and B ${b.id}`}. S32-S131 outstanding; missing logs stay missing, retain originals, pass only. Retained ${grant.id}.`,
+		text: `${controls[0]} / ${sends[0]} grants standing ${mode === "equivalent" ? "authorization" : "authority"} to ${f.target}; ${mode === "equivalent" ? `approved subjects ${b.id}, ${a.id}` : `A ${a.id} and B ${b.id}`}. ${quotes[0]} Unrelated hold ${unrelated.id} stays. S32-S131 outstanding; missing logs stay missing, retain originals, pass only. Retained ${grant.id}.`,
 		by: "operator-quote", quote: quotes[0], reason: "bounded standing scope" }) + "\n");
 	const selectors = { job_id: f.target, authority_mode: "standing" as const, operator_control_id: controls[0]!,
 		operator_send_id: sends[0]!, reinforcement_control_id: controls[1]!, reinforcement_send_id: sends[1]!, dependent_job_ids: [a.id, b.id] };
@@ -205,7 +205,8 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 	await assert.rejects(post.gate({ jobId: f.target, recoveryAttemptId: first.attempt_id }), /already claimed|terminal/);
 	assert.equal(provider.requests().length, spentRequests);
 	assert.equal((await f.ledger.ready()).some((job) => job.id === a.id || job.id === b.id), false);
-	const nonpassStatus = post.gateModule().status(f.target).standing_recovery as { eligibility: string; current_predecessor_id: string };
+	const nonpassStatus = post.gateModule().status(f.target).standing_recovery as { eligibility: string; current_predecessor_id: string; release_scope?: unknown };
+	assert.equal(nonpassStatus.release_scope, undefined);
 	assert.equal(nonpassStatus.current_predecessor_id, first.attempt_id);
 	assert.equal(nonpassStatus.eligibility, "eligible");
 	atomicWriteJson(grantFile, { ...JSON.parse(grantBytes.toString()), spend_cap: { usd: 0.000001, tokens: 1 } });
@@ -216,7 +217,11 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 	assert.notEqual(second.attempt_id, first.attempt_id);
 	assert.equal(second.authority_id, first.authority_id);
 	await run(5, "pass", second.attempt_id, second);
-	const passStatus = post.gateModule().status(f.target).standing_recovery as { eligibility: string };
+	const passStatus = post.gateModule().status(f.target).standing_recovery as { eligibility: string; release_scope: typeof authority.release_scope };
+	assert.deepEqual(passStatus.release_scope, authority.release_scope);
+	assert.deepEqual(passStatus.release_scope.eligible_readiness_edges.map(({ dependent_job_id, blocker_id }) =>
+		({ dependent_job_id, blocker_id })).sort((x, y) => x.dependent_job_id.localeCompare(y.dependent_job_id)),
+		[a.id, b.id].sort().map((id) => ({ dependent_job_id: id, blocker_id: obsolete.id })));
 	assert.equal(passStatus.eligibility, "completed");
 	assert.throws(() => prepare(second.attempt_id), /terminal nonpass/);
 	const drift = await f.ledger.create({ title: "graph drift", project: "demo", kind: "research", delivery: "pipeline" });
@@ -233,9 +238,9 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 	assert.equal((await f.ledger.show(f.target)).status, "closed");
 	const reason = `Actual scoped PASS ${second.attempt_id} supersedes ${obsolete.id} for these readiness jobs only; S32–S131 remains outstanding.`;
 	const controlsModel = provider.addScript("scoped-continuation", [
-		...[a.id, b.id].flatMap((id) => [
-			{ kind: "tool_calls" as const, calls: [{ name: "cp_job", args: { action: "comment", job_id: id, text: reason } }] },
-			{ kind: "tool_calls" as const, calls: [{ name: "cp_job", args: { action: "dep_remove", job_id: id, blocker_id: obsolete.id } }] },
+		...passStatus.release_scope.eligible_readiness_edges.flatMap((edge) => [
+			{ kind: "tool_calls" as const, calls: [{ name: "cp_job", args: { action: "comment", job_id: edge.dependent_job_id, text: `${reason} ${edge.reason}` } }] },
+			{ kind: "tool_calls" as const, calls: [{ name: "cp_job", args: { action: "dep_remove", job_id: edge.dependent_job_id, blocker_id: edge.blocker_id } }] },
 		]), { kind: "text", text: "Scoped continuation recorded." },
 	]);
 	writeFileSync(join(agent, "models.json"), JSON.stringify(provider.modelsJson()));
@@ -251,7 +256,9 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 	assert.equal((await f.ledger.show(obsolete.id)).status, "open");
 	assert.equal((await f.ledger.show(a.id)).blocked_by.includes(obsolete.id), false);
 	assert.equal((await f.ledger.show(b.id)).blocked_by.includes(obsolete.id), false);
-	for (const id of [a.id, b.id]) assert.equal((await f.ledger.show(id)).comments.some((comment) => comment.text === reason), true);
+	for (const edge of passStatus.release_scope.eligible_readiness_edges) {
+		assert.equal((await f.ledger.show(edge.dependent_job_id)).comments.some((comment) => comment.text === `${reason} ${edge.reason}`), true);
+	}
 	const ready = await f.ledger.ready();
 	assert.equal(ready.some((job) => job.id === a.id), true);
 	assert.equal(ready.some((job) => job.id === b.id), false);
