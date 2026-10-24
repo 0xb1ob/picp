@@ -1,0 +1,12 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..bc56c27 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -837,6 +837,7 @@ export class Integrator {
+ 
+ 	/** jje.5: the reviewed head of a draft → `gh pr ready` once, then re-read; an unconfirmed head goes back to draft (`--undo`), or surfaces. */
+ 	async #ready(input: { jobId: string; branch: string; facts: string[]; prUrl: string; head: string; cwd: string }): Promise<IntegrateResult> {
++		return this.#write({ jobId: input.jobId, branch: input.branch, step: "permit", next: "surface", facts: input.facts, prUrl: input.prUrl, headSha: input.head, reason: "draft readiness unavailable" });
+ 		const { jobId, prUrl, head } = input, ready = await this.#run(input.cwd, "gh", ["pr", "ready", prUrl]);
+ 		const view = ready.status === 0 ? await this.#viewPr(input.cwd, prUrl) : undefined;
+ 		const now = view?.ok ? hexSha(view.value.headRefOid) : undefined;

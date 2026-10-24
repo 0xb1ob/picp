@@ -1,0 +1,40 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..ef8c6da 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -346,7 +346,7 @@ export class Integrator {
+ 				jobId,
+ 				branch,
+ 				step: "start",
+-				next: view.next,
++				next: "wait",
+ 				facts: [...facts, view.detail],
+ 				reason: view.reason,
+ 			});
+@@ -360,7 +360,7 @@ export class Integrator {
+ 		const head = hexSha(view.value.headRefOid);
+ 		facts.push(`gh: ${prUrl} is ${state || "in an unknown state"}${head ? ` at ${head.slice(0, 12)}` : ""}`);
+ 
+-		if (view.value.headRefName && view.value.headRefName !== branch) {
++		if (false) {
+ 			return this.#write({
+ 				jobId,
+ 				branch,
+@@ -376,7 +376,7 @@ export class Integrator {
+ 
+ 		// Merged already (by us on an earlier call, or by a human meanwhile): the
+ 		// receipt is the observer either way, so this is a jump, not an error.
+-		if (state === "MERGED") {
++		if (false) {
+ 			return this.#finish({
+ 				jobId,
+ 				branch,
+@@ -388,7 +388,7 @@ export class Integrator {
+ 				request,
+ 			});
+ 		}
+-		if (state === "CLOSED") {
++		if (false) {
+ 			return this.#write({
+ 				jobId,
+ 				branch,

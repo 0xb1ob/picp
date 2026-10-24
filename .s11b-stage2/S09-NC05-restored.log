@@ -1,0 +1,22 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=real repair stays single|public promotion before tests/e2e/landing-s09.test.ts
+
+▶ landing S09: a real repair stays single while active and conflict handoffs follow heads
+  ✔ red (3287.823338ms)
+  ✔ conflict (3125.687575ms)
+✔ landing S09: a real repair stays single while active and conflict handoffs follow heads (6415.115832ms)
+▶ landing S09: public promotion before or during integration waits for a fresh report
+  ✔ repository/waiting/before integration (3197.801474ms)
+  ✔ repository/waiting/during permission (3377.202034ms)
+  ✔ checkpoint/waiting/before integration (3170.016276ms)
+  ✔ checkpoint/waiting/during permission (3443.956171ms)
+✔ landing S09: public promotion before or during integration waits for a fresh report (13190.429979ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21146.633816

@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..a70f2a1 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -504,7 +504,7 @@ export class Integrator {
+ 				reason: `${jobId}: ${ci.reason}. No merge, and no merge authorization was requested.`,
+ 			});
+ 		}
+-		if (ci.ci !== "green") {
++		if (false) {
+ 			// cp-e0c/C7 and cp-no-ci-repo-derived: zero observable runs for this branch
+ 			// is not a transient `retry`, and it is not one condition either. Ask the
+ 			// repository what workflows it *has*, because "no runs" is what an

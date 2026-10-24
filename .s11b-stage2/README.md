@@ -64,3 +64,14 @@ The contract suite also passed (`contract.log`). No original was removed.
 | S11-C28 | changed-head legacy handoff creates two rows instead of one |
 | S11-C29 | independently answerable checkpoint IDs shrink from four to two |
 | S09-NC01 | older branch CI surfaces instead of waiting |
+
+## Increment 3: size boundary
+
+`base-identities-3.txt` pins execution HEAD 31be46a. S09-NC02–06, NC09 and NC13 each exited 1 under its
+exact ledger mutation and 0 after restoration; logs print commands and named failures. NC03 includes
+approved-blocked, NC04 includes all readiness variants, NC05 covers active repair and all four waiting races,
+and NC09 includes unknown. The separate guard-probe is additional evidence, not NC05 credit.
+The full restored S09 suite passed. Production and original coverage are unchanged.
+At 277,907 bytes before this metadata, the 280,000-byte limit requires the brief's evidence/retirement split.
+No retirement credit: remaining S08, S09 NC07/08/10/11/12, S10 and independent S10b controls are outstanding.
+The report artifact preserves batch hashes and final checks; historical missing logs remain missing.
