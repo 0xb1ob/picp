@@ -864,8 +864,6 @@ export class Gate {
 		const artifactCopy = join(scratch, "artifact.md");
 		if (recoveryArtifact) writeFileSync(artifactCopy, recoveryArtifact);
 		else artifacts.get(jobId, artifactCopy);
-		// The bounded review input: the frozen original task beside the candidate
-		// artifact, both as files in a directory that contains nothing else (do8.3).
 		const taskCopy = recovery ? copyRecoveryTask(home, recovery, scratch) : copyOriginalTask({ home, jobId, scratch });
 
 		const brief = assembleBrief({
@@ -892,6 +890,9 @@ export class Gate {
 		const deliverRevise = request.deliverRevise ?? true;
 
 		let managed: ReturnType<WorkerManager["spawn"]>;
+		await manager.ready();
+		if (JSON.stringify(recoveryTarget(home, jobId)) !== JSON.stringify(recovery)) throw new GateError(`${jobId}: recovery binding changed before spawn`);
+		if (recovery) validateRecoveryAuthority(home, recovery, this.#options.mandates);
 		try {
 			managed = manager.spawn({
 				key,
