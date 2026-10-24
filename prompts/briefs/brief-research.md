@@ -107,12 +107,14 @@ not apply; the board is the artifact.
 One canonical example of the level of detail required (File list + Test plan):
 
     ### File list
-    - `src/leases.ts` — in `LeaseStore.release()` (L120), delete the lease file
-      before returning the worktree, so a crash cannot leave a claimed lease.
+    - `src/leases.ts` — in `LeaseManager.release()`, preserve the printed path
+      and pass the lease identity to treehouse, so a stale holder cannot return
+      a worktree that another holder has since leased.
 
     ### Test plan
-    - cwd `<worktree>`; `npm test -- tests/leases.test.ts`; expect pass —
-      proves release removes the lease file even when teardown throws.
+    - cwd `<worktree>`; `npm run test:one -- tests/e2e/dispatch-s31.test.ts`;
+      expect pass — proves stale teardown cannot return a recycled slot held
+      under a new lease identity.
 
 Every entry in every section is that concrete. Do not pad the artifact with
 edge-case warnings: one exact instruction beats three hedges.
