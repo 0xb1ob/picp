@@ -1,5 +1,5 @@
 {
-	"tests/e2e/dispatch-s31.test.ts": 28000,
+	"tests/e2e/dispatch-s31.test.ts": 96000,
 	"tests/e2e/preflight-s31.test.ts": 44000,
 	"tests/e2e/dashboard-refusals-s26.test.ts": 9000,
 	"tests/e2e/drain-restart.test.ts": 7000,
