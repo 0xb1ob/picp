@@ -13,6 +13,7 @@
 import { isoTimestamp, type JobKind, type Mandate, type Usage } from "./contracts.ts";
 import type { FleetStore } from "./fleet.ts";
 import { MandateError, type MandateStore, type MandateUsageJob, mandateSpend, mandateTokens, matchingJobs } from "./mandate.ts";
+import { continueForJob } from "./mandate-continuity.ts";
 import type { RunRegistry } from "./runs.ts";
 import { boundedWakeupId, type DurableWakeupInput } from "./wakeup-outbox.ts";
 
@@ -70,8 +71,13 @@ export function raiseTokenCap(
 }
 
 /** New reviewer spend (`cp_review` spawning a reviewer): the `review` use of the one permission rule (src/mandate-permission.ts). */
-export function assertReviewAllowed(store: MandateStore, job: { jobId: string; project: string; kind?: JobKind }, jobs: readonly MandateUsageJob[] = []): void {
-	store.assertPermitted("review", job, jobs);
+export async function assertReviewAllowed(store: MandateStore, job: { jobId: string; project: string; kind?: JobKind }, jobs: readonly MandateUsageJob[] = []): Promise<void> {
+	const continuation = await continueForJob(store, job.jobId, jobs);
+	try { store.assertPermitted("review", job, jobs); }
+	catch (error) {
+		if (continuation?.escalation_id) throw new MandateError(`${(error as Error).message}; confirm original admission with cp_decide ${continuation.escalation_id}, then retry cp_mandate continue`);
+		throw error;
+	}
 }
 
 /** Fleet usage with each job's live run total laid over it, whichever is further along. */

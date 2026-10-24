@@ -159,7 +159,7 @@ export function scheduleRunVerdict(ctx: ScheduleAuthorityContext, use: GrantUse,
 export function checkpointAuthority(ctx: ScheduleAuthorityContext, subject: MandateSubject, mandates: readonly import("./contracts.ts").Mandate[]): AuthorityDecision {
 	try {
 		const result = scheduleRunVerdict(ctx, actionForKind(subject.kind) as GrantUse, { ...subject, kind: subject.jobKind, checkpoint: subject.kind }, subject.usageJobs ?? [], subject.now);
-		if (result.source === "mandate") return evaluateAuthority({ ...subject, continuationProof: continuationProof(ctx.home, ctx.ledgerJob(subject.jobId), mandates) }, mandates);
+		if (result.source === "mandate") return evaluateAuthority({ ...subject, continuationProof: continuationProof(ctx.home, ctx.ledgerJob(subject.jobId), mandates, subject.now) }, mandates);
 		return { permitted: true, runId: result.run.id, clause: `schedule-run ${result.run.id} (policy rev ${result.run.policy_revision})` };
 	} catch (error) {
 		if (!(error instanceof ScheduleAuthorityError)) throw error;

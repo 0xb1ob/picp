@@ -174,11 +174,12 @@ const ContinuityIdSchema = Type.String({ pattern: "^[a-z0-9_-]{1,100}$" });
 
 export const MandateAdmissionSchema = Type.Object({
 	job_id: JobIdSchema,
-	admitted_at: IsoTimestampSchema,
+	admitted_at: Type.Optional(IsoTimestampSchema),
+	confirmation_escalation_id: Type.Optional(Type.String({ pattern: "^es-[a-z0-9]{4,16}$" })),
 	project: Type.String({ minLength: 1, maxLength: 80 }),
 	kind: JobKindSchema,
 	scope_digest: ContinuityDigestSchema,
-}, { additionalProperties: false });
+}, { additionalProperties: false, oneOf: [{ required: ["admitted_at"] }, { required: ["confirmation_escalation_id"] }] });
 
 export const MandateContinuitySchema = Type.Object({
 	version: Type.Literal(1),

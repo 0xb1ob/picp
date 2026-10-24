@@ -226,7 +226,7 @@ export function hitsNeedle(value: string, needle: string): boolean {
 	return new RegExp(`(?:^|/)${pattern}$`).test(value);
 }
 
-function pathExcluded(mandate: Mandate, pathHints: string[] | undefined, text?: string): string | undefined {
+export function pathExcluded(mandate: Mandate, pathHints: string[] | undefined, text?: string): string | undefined {
 	const excluded = mandate.exclusions?.paths;
 	if (!excluded) return undefined;
 	for (const path of pathHints ?? []) {
@@ -242,7 +242,7 @@ function pathExcluded(mandate: Mandate, pathHints: string[] | undefined, text?: 
 	return undefined;
 }
 
-function subsystemExcluded(mandate: Mandate, subsystem: string | undefined, text?: string): string | undefined {
+export function subsystemExcluded(mandate: Mandate, subsystem: string | undefined, text?: string): string | undefined {
 	const excluded = mandate.exclusions?.subsystems;
 	if (!excluded) return undefined;
 	if (subsystem && excluded.includes(subsystem)) return subsystem;
@@ -350,12 +350,12 @@ export class MandateStore {
 	}
 
 	authorityNow(): string { return this.#stamp(); }
-	continue(sourceId: string, jobs: readonly MandateUsageJob[] = []) {
-		return continueAdmittedWork(this, sourceId, jobs, (grant) => this.#write(grant));
+	continue(sourceId: string, jobs: readonly MandateUsageJob[] = [], options: Parameters<typeof continueAdmittedWork>[4] = {}) {
+		return continueAdmittedWork(this, sourceId, jobs, (grant) => this.#write(grant), options);
 	}
 	continuationProof(jobId: string) {
 		const job = this.runContext().ledgerJob(jobId);
-		return continuationProof(this.home, job, this.list());
+		return continuationProof(this.home, job, this.list(), this.#stamp());
 	}
 	runContext(): ScheduleAuthorityContext {
 		return { home: this.home, runs: this.scheduleRuns, ledgerJob: (id) => existsSync(join(this.home, LAYOUT.jobsFile)) ? readJobsDocument(this.home).jobs.find((job) => job.id === id) : undefined };
@@ -640,6 +640,7 @@ export class MandateStore {
 	enroll(id: string, job: { jobId: string; project: string; kind: JobKind }, jobs: readonly MandateUsageJob[], open: ReadonlySet<string>): Mandate {
 		const mandate = this.require(id);
 		if (mandate.job_ids?.includes(job.jobId)) return mandate;
+		if (mandate.continuity || mandate.coverage_superseded) throw new MandateError(`${id}: admission is frozen; continuation cannot enroll new work`);
 		const counted = this.withReviewerSpend(jobs, [mandate]);
 		const refusal = batchRefusal(mandate, id, job, counted, this.#stamp()) ?? (enrollCapacity(mandate, counted, open) < 1 ? `${id} job cap ${mandate.job_cap} reached` : undefined);
 		if (refusal) throw new MandateError(`cannot enroll ${job.jobId}: ${refusal}`);

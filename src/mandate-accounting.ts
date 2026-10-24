@@ -246,7 +246,7 @@ export function supersedeReason(item: Escalation, all: readonly Mandate[], jobs:
 	const mandate = all.find((candidate) => candidate.id === escalationMandateId(item));
 	if (!mandate) return undefined;
 	if (mandate.status === "revoked") return `${mandate.id} was revoked`;
-	if (mandate.status === "expired" || mandate.expiry <= now) return `${mandate.id} expired`;
+	if ((mandate.status === "expired" || mandate.expiry <= now) && !(item.kind === "product_ambiguity" && item.continuity_scope_digest)) return `${mandate.id} expired`;
 	if (mandate.status !== "paused") return undefined;
 	const jobId = item.job_ids[0] as string;
 	const record = jobs.find((job) => job.job_id === jobId);

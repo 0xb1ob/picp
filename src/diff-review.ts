@@ -114,7 +114,7 @@ import { requestFinalFix } from "./final-fix.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import type { MandateStore } from "./mandate.ts";
 import { assertReviewAllowed } from "./mandate-usage.ts";
-import { continueForJob, continuityInputsBlock } from "./mandate-continuity.ts";
+import { continuityInputsBlock } from "./mandate-continuity.ts";
 import { incompleteSubjectReasons, isCompletePass } from "./review-subject.ts";
 import { assembleBrief, profileForRole, readBriefTemplate } from "./profiles.ts";
 import { ProjectRegistry } from "./projects.ts";
@@ -576,10 +576,7 @@ export class DiffReview {
 		}
 
 		// Past here a reviewer may spawn: a paused or revoked covering grant refuses the spend (the free equivalence pass above stays).
-		if (this.#options.mandates) {
-			await continueForJob(this.#options.mandates, jobId, this.#options.fleet?.read().jobs ?? []);
-			assertReviewAllowed(this.#options.mandates, { jobId, project: record.project, kind: record.kind }, this.#options.fleet?.read().jobs ?? []);
-		}
+		if (this.#options.mandates) await assertReviewAllowed(this.#options.mandates, { jobId, project: record.project, kind: record.kind }, this.#options.fleet?.read().jobs ?? []);
 
 		const previous = latestContentReview(home, jobId, prior.decisions);
 		// Delta only along the branch's own history: a rebase or a merge of the base would carry upstream changes.

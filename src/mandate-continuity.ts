@@ -1,12 +1,18 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Job, type Mandate, paths, REVIEW_ORIGINAL_TASK_MAX_BYTES } from "./contracts.ts";
+import { type Job, type Mandate, isoTimestamp, paths, REVIEW_ORIGINAL_TASK_MAX_BYTES } from "./contracts.ts";
 import { parseJobLabels, readJobsDocument } from "./ledger.ts";
 import { atomicWriteText, queued } from "./json-store.ts";
 import { MandateError, capReached, covers, scheduleIdOf, type MandateUsageJob } from "./mandate-accounting.ts";
 import { readTaskAddenda } from "./task-addenda.ts";
-import type { MandateStore } from "./mandate.ts";
+import { pathExcluded, subsystemExcluded, type MandateStore } from "./mandate.ts";
+import { admissionEvidence, confirmedAdmission } from "./mandate-continuity-confirmation.ts";
+import { readPriorAttempts } from "./gate.ts";
+
+export function workUnfinished(home: string, job: Job): boolean {
+	return job.status !== "closed" || (parseJobLabels(job.labels).kind === "research" && readPriorAttempts(home, job.id).decisions.at(-1)?.verdict === "revise");
+}
 
 export function originalScopeDigest(job: Job): string {
 	return createHash("sha256").update(JSON.stringify({
@@ -29,11 +35,13 @@ export function issueAdmissions(grant: Mandate, jobs: readonly Job[], at = grant
 	});
 }
 
-export function admittedWork(grant: Mandate, job: Job): boolean {
+export function admittedWork(grant: Mandate, job: Job, confirmationId?: string): boolean {
 	const proof = grant.admissions?.find((entry) => entry.job_id === job.id);
 	const labels = parseJobLabels(job.labels);
-	return proof !== undefined && proof.admitted_at >= grant.issued_at && proof.admitted_at < grant.expiry &&
-		job.created_at <= proof.admitted_at && proof.project === labels.project && proof.kind === labels.kind &&
+	const timed = proof?.admitted_at !== undefined && proof.admitted_at >= grant.issued_at &&
+		proof.admitted_at < grant.expiry && job.created_at <= proof.admitted_at;
+	return proof !== undefined && (timed || (confirmationId !== undefined && proof.confirmation_escalation_id === confirmationId && job.created_at < grant.expiry)) &&
+		proof.project === labels.project && proof.kind === labels.kind &&
 		proof.scope_digest === originalScopeDigest(job) && grant.job_ids?.includes(job.id) === true &&
 		labels.project !== undefined && covers(grant, { jobId: job.id, project: labels.project,
 			jobKind: labels.kind, scheduleId: scheduleIdOf(job.labels) });
@@ -43,13 +51,14 @@ export interface ContinuationResult {
 	source_id: string;
 	state: "committed" | "ineligible" | "confirmation_required";
 	reason?: string;
+	escalation_id?: string;
 	job_ids: string[];
 	receipt_id: string;
 }
 
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 
-function sourceFingerprint(source: Mandate): string {
+export function sourceFingerprint(source: Mandate): string {
 	return digest(JSON.stringify({
 		id: source.id, issued_by: source.issued_by, issued_at: source.issued_at, expiry: source.expiry,
 		objective: source.objective, projects: source.projects, job_ids: source.job_ids,
@@ -58,39 +67,60 @@ function sourceFingerprint(source: Mandate): string {
 		usd_cap: source.spend_cap.usd, job_cap: source.job_cap,
 	}));
 }
+
+export function governingInputs(home: string, jobs: readonly Job[]) {
+	return jobs.map((job) => {
+		const file = join(home, paths.originalTaskFile(job.id));
+		const task = existsSync(file) ? readFileSync(file, "utf8") : job.description;
+		if (!task?.trim()) throw new MandateError(`${job.id}: original governing task is missing; continuation not committed`);
+		return { job, task, task_file: existsSync(file) ? file : undefined, addenda: readTaskAddenda(home, job.id) };
+	});
+}
 export async function continueAdmittedWork(
 	store: MandateStore, sourceId: string, usage: readonly MandateUsageJob[], write: (grant: Mandate) => Mandate,
+	options: { confirmation_escalation_id?: string; replacement_id?: string } = {},
 ): Promise<ContinuationResult> {
 	return queued(store.file(sourceId), async () => {
-		const source = store.sweep(undefined, usage).find((grant) => grant.id === sourceId);
+		let source = store.sweep(undefined, usage).find((grant) => grant.id === sourceId);
 		const receipt_id = `continuity-${digest(sourceId).slice(0, 32)}`;
 		const result = (state: ContinuationResult["state"], reason: string, job_ids: string[] = []): ContinuationResult =>
 			({ source_id: sourceId, receipt_id, state, reason, job_ids });
 		if (!source) return result("ineligible", "source mandate does not exist");
 		if (source.status !== "active" && source.status !== "expired") return result("ineligible", `source is ${source.status}`);
 		if (source.schedule_grant || source.schedule_fire) return result("ineligible", "schedule grants use schedule authority");
-		if (!["home", "project"].includes(source.provenance?.expiry_hours ?? "")) {
-			return result("ineligible", "explicit or unproven expiry cannot become completion authority");
-		}
+		if (options.replacement_id && source.coverage_superseded?.replacement_id !== options.replacement_id) return result("ineligible", "replacement has no authenticated typed coverage mapping");
+		if (source.provenance?.expiry_hours === "explicit" && source.expiry <= store.authorityNow()) return result("ineligible", "explicit completion deadline remains binding");
 		if (source.expiry > store.authorityNow() && !source.coverage_superseded) return result("ineligible", "admission remains open");
 		if (capReached(source, store.withReviewerSpend(usage, [source]))) return result("ineligible", "original budget exhausted");
 		if (!source.job_ids?.length) return result("ineligible", "continuation requires named original work");
 		const all = readJobsDocument(store.home).jobs;
 		const named = source.job_ids.map((id) => all.find((job) => job.id === id));
-		if (named.some((job) => !job)) return result("confirmation_required", "original named job evidence is missing", source.job_ids);
+		if (named.some((job) => !job)) return result("ineligible", "original named job evidence is missing; full scope cannot be frozen", source.job_ids);
 		const jobs = named as Job[];
-		if (jobs.every((job) => job.status === "closed")) return result("ineligible", "original named work is fulfilled");
-		if (jobs.some((job) => !admittedWork(source, job))) {
-			return result("confirmation_required", "original admission or unchanged scope requires bounded confirmation", source.job_ids);
-		}
+		if (jobs.some((job) => {
+			const labels = parseJobLabels(job.labels);
+			return !labels.project || !labels.kind || !covers(source!, { jobId: job.id, project: labels.project, jobKind: labels.kind, scheduleId: scheduleIdOf(job.labels) });
+		})) return result("ineligible", "original project, kind or exclusions do not cover this work");
+		if (jobs.every((job) => !workUnfinished(store.home, job))) return result("ineligible", "original named work is fulfilled");
+		const initialSource = source;
+		if (jobs.some((job) => {
+			const proof = initialSource.admissions?.find((entry) => entry.job_id === job.id);
+			const at = proof?.admitted_at;
+			return job.created_at >= initialSource.expiry || (proof !== undefined && proof.scope_digest !== originalScopeDigest(job)) ||
+				(at !== undefined && (at < initialSource.issued_at || at >= initialSource.expiry || job.created_at > at));
+		})) return result("ineligible", "original scope changed or admission was outside the original window");
+		if (jobs.some((job) => readTaskAddenda(store.home, job.id).some((entry) => entry.added_at >= initialSource.expiry))) return result("ineligible", "scope additions after admission closed require independent authority");
+		const scopeText = governingInputs(store.home, jobs).map(({ task, job, addenda }) => [task, job.description ?? "", job.notes ?? "", ...addenda.map((entry) => entry.text)].join("\n")).join("\n");
+		if (pathExcluded(source, undefined, scopeText) || subsystemExcluded(source, undefined, scopeText)) return result("ineligible", "original exclusions remain binding");
+		const originalFingerprint = sourceFingerprint(initialSource);
+		const evidence = await admissionEvidence(store, source, jobs, options.confirmation_escalation_id);
+		if (!evidence.admissions) return { ...result(evidence.confirmation_required ? "confirmation_required" : "ineligible", evidence.reason ?? "original admission is unproven", source.job_ids), escalation_id: evidence.escalation_id };
+		const currentSource = store.require(sourceId);
+		if (sourceFingerprint(currentSource) !== originalFingerprint || !["active", "expired"].includes(currentSource.status)) return result("ineligible", "source changed while checking admission");
+		source = { ...currentSource, admissions: evidence.admissions };
 		const { continuity: previous, ...authority } = source;
 		const fingerprint = sourceFingerprint(source);
-		const inputs = jobs.map((job) => {
-			const file = join(store.home, paths.originalTaskFile(job.id));
-			const task = existsSync(file) ? readFileSync(file, "utf8") : job.description;
-			if (!task?.trim()) throw new MandateError(`${job.id}: original governing task is missing; continuation not committed`);
-			return { job, task, task_file: existsSync(file) ? file : undefined, addenda: readTaskAddenda(store.home, job.id) };
-		});
+		const inputs = governingInputs(store.home, jobs);
 		const snapshot = `${store.file(sourceId)}.governing-inputs`;
 		const text = previous ? readFileSync(snapshot, "utf8") : JSON.stringify({ authority, inputs });
 		if (previous && (Buffer.byteLength(text) > REVIEW_ORIGINAL_TASK_MAX_BYTES || digest(text) !== previous.governing_input_digest)) {
@@ -121,7 +151,7 @@ export async function continueAdmittedWork(
 			version: 1, receipt_id, source_grant_id: source.id, accounting_root_id: source.id,
 			source_fingerprint: fingerprint, admission_expiry: source.expiry, admissions: source.admissions!,
 			governing_input_digest: inputDigest, governing_input_refs: [snapshot], phase: "prepared",
-			authority_reference: `${source.id}:typed-admission`,
+			authority_reference: evidence.authority_reference!,
 		};
 		atomicWriteText(snapshot, text, { mode: 0o600, syncDir: true });
 		write({ ...source, continuity });
@@ -132,13 +162,25 @@ export async function continueAdmittedWork(
 	});
 }
 
-export function continuationProof(home: string, job: Job | undefined, grants: readonly Mandate[]): Record<string, string> {
+export function assertContinuationTask(grant: Mandate | undefined, jobId: string, text: string): void {
+	if (grant?.continuity?.phase !== "committed") return;
+	const frozen = JSON.parse(readFileSync(grant.continuity.governing_input_refs[0]!, "utf8")) as { inputs: { job: { id: string }; task: string }[] };
+	if (frozen.inputs.find((entry) => entry.job.id === jobId)?.task !== text) throw new MandateError(`${jobId}: continuation task differs from its frozen original scope; supply the original task without added scope`);
+}
+
+export function continuationProof(home: string, job: Job | undefined, grants: readonly Mandate[], now = isoTimestamp()): Record<string, string> {
 	const proof: Record<string, string> = {};
 	if (!job) return proof;
 	for (const grant of grants) {
 		const receipt = grant.continuity;
-		if (receipt?.phase !== "committed" || receipt.source_grant_id !== grant.id || receipt.accounting_root_id !== grant.id ||
-			receipt.admission_expiry !== grant.expiry || receipt.source_fingerprint !== sourceFingerprint(grant) || !admittedWork(grant, job)) continue;
+		if (receipt?.phase !== "committed" || receipt.source_grant_id !== grant.id || receipt.accounting_root_id !== grant.id) continue;
+		const records = readJobsDocument(home).jobs;
+		const originalJobs = grant.job_ids?.map((id) => records.find((entry) => entry.id === id));
+		if (!originalJobs?.length || originalJobs.some((entry) => !entry)) continue;
+		const confirmationId = confirmedAdmission(home, grant, originalJobs as Job[]);
+		if (receipt.authority_reference.startsWith("confirmation:") && !confirmationId) continue;
+		if (grant.expiry <= now && !["home", "project"].includes(grant.provenance?.expiry_hours ?? "") && !confirmationId) continue;
+		if (receipt.admission_expiry !== grant.expiry || receipt.source_fingerprint !== sourceFingerprint(grant) || !admittedWork(grant, job, confirmationId)) continue;
 		const snapshot = `${join(home, paths.mandateFile(grant.id))}.governing-inputs`;
 		if (receipt.governing_input_refs.length !== 1 || receipt.governing_input_refs[0] !== snapshot || !existsSync(snapshot)) continue;
 		const text = readFileSync(snapshot, "utf8");
@@ -154,17 +196,26 @@ export function continuationProof(home: string, job: Job | undefined, grants: re
 	return proof;
 }
 
-export async function continueForJob(store: MandateStore, jobId: string, usage: readonly MandateUsageJob[]): Promise<void> {
+export async function continueForJob(store: MandateStore, jobId: string, usage: readonly MandateUsageJob[]): Promise<ContinuationResult | undefined> {
 	const job = store.runContext().ledgerJob(jobId);
-	if (!job) return;
-	if (scheduleIdOf(job.labels)) return;
+	if (!job || scheduleIdOf(job.labels)) return;
 	const labels = parseJobLabels(job.labels);
 	if (!labels.project) return;
-	if (store.selection("dispatch", { jobId, project: labels.project, kind: labels.kind }, usage)?.at.cause === "active") return;
+	const subject = { jobId, project: labels.project, kind: labels.kind };
+	if (store.selection("dispatch", subject, usage)?.at.cause === "active") return;
+	const refused = new Map<string, ContinuationResult>();
+	let pending: ContinuationResult | undefined;
 	for (const source of store.list()) {
-		if (source.job_ids?.includes(jobId) && (source.expiry <= store.authorityNow() || source.coverage_superseded) &&
-			(source.status === "active" || source.status === "expired")) await store.continue(source.id, usage);
+		if (!source.job_ids?.includes(jobId) || (source.expiry > store.authorityNow() && !source.coverage_superseded) ||
+			!["active", "expired"].includes(source.status)) continue;
+		const result = await store.continue(source.id, usage);
+		if (result.state === "confirmation_required") pending = result;
+		if (result.state === "ineligible") refused.set(source.id, result);
 	}
+	const selected = store.selection("dispatch", subject, usage);
+	const refusal = selected ? refused.get(selected.grant.id) : refused.values().next().value;
+	if (refusal) throw new MandateError(`${refusal.source_id}: ${refusal.reason}`);
+	return pending;
 }
 
 export function continuityInputsBlock(store: MandateStore | undefined, jobId: string): string {

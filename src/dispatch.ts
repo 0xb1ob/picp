@@ -63,6 +63,7 @@ import type { WorkerManager } from "./worker-manager.ts";
 import type { WorkerProcess } from "./worker-process.ts";
 import { type DepsPorts, prepareNodeDeps } from "./worktree-deps.ts";
 import type { MandateStore } from "./mandate.ts";
+import { assertContinuationTask } from "./mandate-continuity.ts";
 import { MandateError, scheduleRecord } from "./mandate-accounting.ts";
 import { watchOuterProviderRetry } from "./provider-retry.ts";
 import type { PipelineRecordedRisk } from "./risk-warning.ts";
@@ -625,10 +626,7 @@ export class Dispatcher {
 			const continuation = permission?.selected?.continuity;
 			if (continuation?.phase === "committed") {
 				const file = continuation.governing_input_refs[0]!;
-				const frozen = JSON.parse(readFileSync(file, "utf8")) as { inputs: { job: { id: string }; task: string }[] };
-				if (frozen.inputs.find((entry) => entry.job.id === issue.id)?.task !== task.forInference) {
-					throw new DispatchError(`${issue.id}: continuation task differs from its frozen original scope; supply the original task without added scope`);
-				}
+				assertContinuationTask(permission?.selected, issue.id, task.forInference);
 				continuityNote = `\n\n## Governing continuation input\nRead this complete frozen mandate, original task and ordered addenda in full: ${file}\n`;
 			}
 		} catch (error) {

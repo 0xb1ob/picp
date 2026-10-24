@@ -40,7 +40,7 @@ import { type BudgetCheck, checkBudget } from "./failures.ts";
 import type { FleetStore } from "./fleet.ts";
 import type { MandateStore } from "./mandate.ts";
 import { projectDenial } from "./mandate-defaults.ts";
-import { continueForJob } from "./mandate-continuity.ts";
+import { assertContinuationTask, continueForJob } from "./mandate-continuity.ts";
 import { decidePlanSend, recordPlanRevise, vetoedReviseRefusal } from "./plan-followup.ts";
 import { inferScopeAndRisk } from "./pipeline.ts";
 import { LIVE_PHASES } from "./preflight.ts";
@@ -350,6 +350,10 @@ export class Sender {
 			resolvedTask = readTask({ jobId: request.jobId, task: request.task, taskFile: request.taskFile });
 		}
 
+		if (resolvedTask && this.#options.mandates) {
+			const selected = this.#options.mandates.selection("promote", { jobId: request.jobId, project: record.project, kind: record.kind }, fleet.read().jobs);
+			assertContinuationTask(selected?.grant, request.jobId, resolvedTask.forInference);
+		}
 		// risk:high gates this promotion exactly like a direct dispatch
 		// (pi-command-post-autonomy-programme-cur.2.4): a promoted ship brief is a
 		// fresh implementer brief, and a caller must not be able to bypass the

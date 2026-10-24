@@ -79,7 +79,14 @@ export function grantStanding(grant: Mandate, use: GrantUse, job: GrantJob, now:
 	const cause: Exclude<GrantCause, "expired"> =
 		grant.status === "revoked" ? "revoked" : grant.status !== "paused" ? "active" : ["spend_cap", "token_cap"].includes(grant.pause_reason ?? "") ? "cap_paused" : "paused";
 	const stored = { standing: GRANT_MATRIX[cause][use], cause };
-	if (grant.continuity && cause !== "active") return { standing: R, cause };
+	if (grant.continuity) {
+		if (cause !== "active") return { standing: R, cause };
+		if (grant.continuity.phase !== "committed") return { standing: R, cause: "expired", detail: "continuation preparation is not committed" };
+		if (grant.provenance?.expiry_hours === "explicit" && isExpired(grant, now)) return { standing: R, cause: "expired", detail: "explicit completion deadline remains binding" };
+		return expiredCell(grant, use, job);
+	}
+	if (cause !== "revoked" && isExpired(grant, now) && grant.provenance?.expiry_hours === "explicit") return { standing: R, cause: "expired", detail: "explicit completion deadline remains binding" };
+	if (cause !== "revoked" && isExpired(grant, now) && grant.admissions !== undefined && ["home", "project"].includes(grant.provenance?.expiry_hours ?? "")) return { standing: R, cause: "expired", detail: "committed original-admission proof is required" };
 	if (cause === "revoked" || !isExpired(grant, now)) return stored;
 	const lapsed = expiredCell(grant, use, job);
 	return cause === "active" || RANK[lapsed.standing] > RANK[stored.standing] ? lapsed : stored;
@@ -142,10 +149,9 @@ export function assertGrantsPermit(
 	if (!selected) return {};
 	const { grant, at } = selected;
 	if (at.standing === P && at.cause === "active") return { selected: grant, cause: at.cause };
-	// A reviewer start (`cp_review`, the only `assertGrantsPermit("review")` caller) keeps its pre-rule path: an expired
-	// grant neither refuses it (no fleet record, review not allowed, cap reached) nor speaks for it. Paused and revoked
-	// still refuse. The expired row still binds a diff checkpoint, which `evaluateAuthority` reads through grantStanding.
-	if (use === "review" && at.cause === "expired" && grant.continuity?.phase !== "committed") return {};
+	// Unknown legacy expiry keeps the existing review path; it grants no completion authority.
+	// Known deadlines and committed continuations retain their own stops and budgets.
+	if (use === "review" && at.cause === "expired" && !grant.continuity && !grant.provenance?.expiry_hours) return {};
 	if (at.standing === P) {
 		const cap = capReached(grant, store.withReviewerSpend(jobs, [grant]));
 		if (cap) throw new MandateError(`${job.jobId}: expired mandate ${grant.id} ${cap} cap reached \u2014 no ${use} under it`);

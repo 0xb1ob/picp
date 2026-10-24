@@ -38,7 +38,7 @@ import { readParentExpanded } from "./schedule-expand.ts";
 import { runAuthority, scheduleRunVerdict, withRunReviewerSpend } from "./schedule-authority.ts";
 import { runSpend } from "./schedule-runs.ts";
 import type { ScheduleRun } from "./viewer/schedule-run-core.ts";
-import { continueForJob } from "./mandate-continuity.ts";
+import { continueForJob, workUnfinished } from "./mandate-continuity.ts";
 
 export interface NextPorts {
 	packageRoot?: string;
@@ -142,7 +142,11 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 	const now = isoTimestamp((ports.now ?? (() => new Date()))());
 	const fleetLive = fleetJobs.filter((job) => job.phase === "waiting" || job.phase === "launching").length;
 	const readyJobs = await ports.ledger.ready(project ? { project } : {});
-	for (const job of readyJobs) await continueForJob(ports.mandates, job.id, fleetJobs);
+	const continuationProblems: string[] = [];
+	for (const job of readyJobs) {
+		try { await continueForJob(ports.mandates, job.id, fleetJobs); }
+		catch (error) { continuationProblems.push((error as Error).message); }
+	}
 	const grants = ports.mandates.sweep(now, fleetJobs);
 	const schedules = ports.mandates.scheduleMandates();
 	const scopeOf = (job: Job) => scheduleScope(scheduleIdOf(job.labels), schedules);
@@ -193,8 +197,9 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 			if (result.action.kind === "wait" && result.ready.length === 0) result.action.reason = `run ${run.id}: ${blockedReason(result.blocked)}`;
 		} catch (error) { runResults.push({ready: [], action: { kind: "wait", reason: (error as Error).message }}); }
 	}
+	const confirmation = continuationProblems.length ? undefined : ports.escalations.open().find((item) => item.kind === "product_ambiguity" && item.continuity_scope_digest && item.job_ids.some((id) => readyJobs.some((job) => job.id === id)));
 	if (candidates.length === 0 && runResults.length === 0) {
-		return { ...warning, fleet_live_workers: fleetLive, ready: [], blocked, lined_up: { jobs: readyJobs, queued: ports.queued?.() ?? [] }, action: { kind: "no_mandate", reason: `no active mandate covers this project${blocked.length ? `; ${blockedReason(blocked)}` : ""}` } };
+		return { ...warning, fleet_live_workers: fleetLive, ready: [], blocked, lined_up: { jobs: readyJobs, queued: ports.queued?.() ?? [] }, ...(confirmation ? { escalation_id: confirmation.id } : {}), action: { kind: confirmation ? "wait" : "no_mandate", reason: confirmation ? `Confirm original admission with cp_decide ${confirmation.id}, then retry cp_mandate continue` : continuationProblems.join("; ") || `no active mandate covers this project${blocked.length ? `; ${blockedReason(blocked)}` : ""}` } };
 	}
 	const selected = new Map(readyAll.map((job) => {
 		const subject = { jobId: job.id, project: jobProject(job) ?? "", jobKind: jobKind(job), ...scopeOf(job) };
@@ -225,6 +230,10 @@ export async function cpNext(ports: NextPorts, project?: string): Promise<NextRe
 		}
 	}
 	const primary = results.find((result) => result.action.kind === "dispatch" || result.action.kind === "pipeline") ?? results[0]!;
+	if (primary.action.kind === "wait" && confirmation) {
+		primary.escalation_id = confirmation.id;
+		primary.action.reason += `; confirm original admission with cp_decide ${confirmation.id}`;
+	}
 	primary.blocked = [...(primary.blocked ?? []), ...uncovered];
 	const others = results.filter((result) => result !== primary);
 	return { ...primary, ...warning, fleet_live_workers: fleetLive, ...(others.length > 0 ? { others } : {}), lined_up: { jobs: readyJobs, queued: [...queued] } };
@@ -276,7 +285,7 @@ async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: read
 	if (mandate.job_ids && mandate.job_ids.length > 0) {
 		const allJobs = await ports.ledger.list({ all: true });
 		const named = mandate.job_ids.map((id) => allJobs.find((job) => job.id === id)).filter((job): job is Job => job !== undefined);
-		if (named.length === mandate.job_ids.length && named.every((job) => job.status === "closed")) {
+		if (named.length === mandate.job_ids.length && named.every((job) => !workUnfinished(ports.mandates.home, job))) {
 			const dropped = named.filter(wasDropped).length;
 			const failed = named.filter((job) => fleetJobs.some((record) => record.job_id === job.id && record.phase === "failed")).length;
 			const summary = `landed ${named.length - dropped}, dropped ${dropped}${failed ? `, failed ${failed}` : ""}, cost $${spend.usd.toFixed(2)}`;

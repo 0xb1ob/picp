@@ -27,8 +27,13 @@ export async function assertDispatchAllowed(store: MandateStore, job: DispatchAu
 		if (error instanceof ScheduleAuthorityError && error.escalation) await error.escalation;
 		throw error;
 	}
-	await continueForJob(store, job.jobId, jobs);
-	const permission = store.assertPermitted(job.promotion ? "promote" : "dispatch", job, jobs);
+	const continuation = await continueForJob(store, job.jobId, jobs);
+	let permission: GrantPermission;
+	try { permission = store.assertPermitted(job.promotion ? "promote" : "dispatch", job, jobs); }
+	catch (error) {
+		if (continuation?.escalation_id) throw new MandateError(`${(error as Error).message}; confirm original admission with cp_decide ${continuation.escalation_id}, then retry cp_mandate continue`);
+		throw error;
+	}
 	const { selected, cause } = permission;
 	if (!selected) return permission;
 	const speaking = [selected];
