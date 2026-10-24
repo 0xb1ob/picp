@@ -59,6 +59,7 @@ export type RecoveryAttempt = Static<typeof GateRecoveryAttemptSchema>;
 export const GateRecoveryAttemptClaimSchema = Type.Object({
 	attempt_id: Identity, authority_id: Identity, attempt_sha256: Digest,
 	gate_attempt: Type.Integer({ minimum: 1 }), owner_pid: Type.Integer({ minimum: 1 }),
+	spawn_guard: Type.Optional(Type.Literal(true)),
 }, { additionalProperties: false });
 export const GateRecoveryAttemptTerminalSchema = Type.Object({
 	attempt_id: Identity, claim_sha256: Type.Optional(Digest),

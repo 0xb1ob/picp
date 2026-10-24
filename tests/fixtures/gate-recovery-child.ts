@@ -28,7 +28,20 @@ childProcess.default.spawn = ((...args: Parameters<typeof spawn>) => {
 		if (fault === "spawn-failure") throw Object.assign(new Error("spawn EACCES (injected OS boundary failure)"), { code: "EACCES" });
 		fs.appendFileSync(`${home}/spawn-observations.jsonl`, `${process.pid}\n`);
 	}
-	return spawn(...args);
+	if (fault === "run-directory" && Array.isArray(args[1]) && args[1].includes("rpc")) process.exit(73);
+	const started = spawn(...args);
+	if (fault === "live-unregistered" && Array.isArray(args[1]) && args[1].includes("rpc")) {
+		const receipt = args[1].find((arg) => arg.endsWith("-reviewer-pid.json"));
+		if (!receipt || !started.pid) throw new Error("missing guarded reviewer ownership");
+		const deadline = Date.now() + 15000;
+		while (!fs.existsSync(receipt) || !fs.readFileSync(receipt, "utf8").trim()) {
+			if (Date.now() > deadline) throw new Error("reviewer ownership timed out");
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+		}
+		process.kill(started.pid, "SIGSTOP");
+		process.exit(73);
+	}
+	return started;
 }) as typeof spawn;
 syncBuiltinESMExports();
 const { CommandPost } = await import("../../src/command-post.ts");

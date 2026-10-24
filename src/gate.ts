@@ -33,7 +33,7 @@
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { claimRecovery, copyRecoveryTask, publishRecoveryFile, recoveryRecord, recoveryDigest, recoveryFile, recoveryJson, recoveryReplay, recoveryTarget, recoveryStatus, validateRecoveryAuthority } from "./gate-recovery.ts";
-import { claimRecoveryAttempt, finishRecoveryAttempt, recoveryAttemptState, gateRecoveryStatus, validateGateRecoveryFinalization, nextRecoveryGateOrdinal, recoverStandingFinalization } from "./gate-recovery-authority.ts";
+import { claimRecoveryAttempt, finishRecoveryAttempt, recoveryAttemptState, gateRecoveryStatus, validateGateRecoveryFinalization, nextRecoveryGateOrdinal, recoverStandingFinalization, recoverySpawnGuard } from "./gate-recovery-authority.ts";
 import type { CapacityReader } from "./capacity.ts";
 import { basename, join, resolve, sep } from "node:path";
 import { ArtifactStore } from "./artifacts.ts";
@@ -910,7 +910,7 @@ export class Gate {
 		await manager.ready();
 		try {
 			managed = manager.spawn({
-				key,
+				key, ...(selectedAttempt ? { spawnGuard: recoverySpawnGuard(home, jobId, selectedAttempt) } : {}),
 				identity: {
 					jobId,
 					kind: "research",

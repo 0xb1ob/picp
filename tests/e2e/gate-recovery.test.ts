@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -15,8 +15,10 @@ import { isGateWait } from "../../src/gate.ts";
 import { decide } from "../../src/decide.ts";
 import { deriveFromEscalations } from "../../src/awaiting.ts";
 import { CheckpointStore } from "../../src/checkpoint.ts";
+import { createScratchRepo, enableTreehouse, startPiChild } from "../harness/index.ts";
+import { isPidAlive } from "../../src/fleet.ts";
 
-for (const mode of ["corrected", "postclaim", "spawn-failure", "postdecision", "orphan", "mismatch"] as const) {
+for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistered", "spawn-failure", "postdecision", "orphan", "mismatch", "equivalent"] as const) {
  test(`standing public recovery: ${mode}`, async (t) => {
 	const f = await fixture(t);
 	await f.post.replacePlanner(f.source, f.target, f.authority);
@@ -57,7 +59,7 @@ for (const mode of ["corrected", "postclaim", "spawn-failure", "postdecision", "
 		return result;
 	};
 	await run(3, "revise");
-	await post.fleet.add({ ...post.fleet.get(f.source)!, job_id: f.target, phase: "held",
+	if (mode !== "corrected" && mode !== "equivalent") await post.fleet.add({ ...post.fleet.get(f.source)!, job_id: f.target, phase: "held",
 		reported_at: "2026-10-24T13:00:00Z", branch: f.target, worktree: `/wt/${f.target}` });
 	const legacy = readFileSync(recoveryFile(join(f.scratch.path, paths.runDir(f.target)), "claim"));
 	const a = await f.ledger.create({ title: "standing A", project: "demo", kind: "ship", delivery: "local" });
@@ -68,6 +70,29 @@ for (const mode of ["corrected", "postclaim", "spawn-failure", "postdecision", "
 	await f.ledger.addDep(b.id, a.id);
 	const grant = post.mandates.issue({ projects: ["demo"], objective: "bounded migration recovery", expiry: "2099-01-01T00:00:00Z",
 		spend_cap: { usd: 100, tokens: 1000000 }, job_cap: 10, job_ids: [f.target, a.id, b.id] });
+	const obsolete = await f.ledger.create({ title: "whole-program readiness superseded for bounded scope", project: "demo", kind: "research", delivery: "pipeline" });
+	const unrelated = await f.ledger.create({ title: "unrelated hold", project: "demo", kind: "research", delivery: "pipeline" });
+	await f.ledger.addDep(b.id, unrelated.id);
+	await f.ledger.addDep(a.id, obsolete.id);
+	await f.ledger.addDep(b.id, obsolete.id);
+	if (mode === "corrected" || mode === "equivalent") {
+		const repo = createScratchRepo({ name: "demo", files: { "README.md": "readiness fixture\n" } });
+		await post.registry.register({ name: "demo", clone_url: repo.remote!, delivery: "pr" });
+		const clone = post.registry.pathOf("demo");
+		execFileSync("git", ["clone", "--quiet", repo.remote!, clone]);
+		const pool = enableTreehouse(clone);
+		t.after(async () => { await post.shutdown(); pool.cleanup(); repo.cleanup(); });
+		const model = provider.addScript("reported-research", [{ kind: "tool_calls", calls: [{ name: "report_result", args: {
+			job_id: f.target, kind: "research", status: "done", artifact_path: post.artifacts.file(f.target), summary: "Scoped readiness research delivered.",
+			plan_summary: { goal: "Scoped readiness", approach: ["Review bounded evidence"], touched: ["README.md"], acceptance: ["Preserve later work"], risk: "Read only" },
+			self_assessment: { confidence: "high", scope: "S", blocking_unknowns: false, destructive_scope: false },
+		} }] }]);
+		writeFileSync(join(agent, "models.json"), JSON.stringify(provider.modelsJson()));
+		const dispatched = await post.dispatch({ jobId: f.target, model, taskFile: join(f.scratch.path, paths.runDir(f.target), "revision-task.md") });
+		assert.equal(dispatched.state, "dispatched");
+		await waitFor(() => post.fleet.get(f.target), (record) => record?.phase === "held", { timeoutMs: 30000, what: "research report accepted" });
+		assert.ok(post.fleet.get(f.target)?.reported_at);
+	}
 	const controls = ["dc-20261024132350-022c499e", "dc-20261024132412-aef10217"];
 	const sends = ["ps-20261024132433-da0e3265", "ps-20261024132620-9b6e1bb4"];
 	const quotes = ["Finish recovery and approved migration.", "Continue that same scope."];
@@ -82,10 +107,19 @@ for (const mode of ["corrected", "postclaim", "spawn-failure", "postdecision", "
 		{ type: "outcome", by: "bridge", id, at, peer: "sanitized", state: "delivered", reason: null }]);
 	const { mkdirSync } = await import("node:fs");
 	mkdirSync(join(f.scratch.path, ".pi-command-post/state/operator"), { recursive: true });
+	writeFileSync(join(f.scratch.path, ".pi-command-post/state/operator/asks.jsonl"), [
+		{ type: "open", id: "ask-a8f38b7f4245", project: "demo", created_at: at,
+			question: "Authorize the recovery fix and one fresh migration review, then proceed with S11b stage 2 and S31 if it passes?",
+			context: "The migration package is assembled, but the recovery tool permanently blocks a second explicitly authorized recovery. Existing override controls cannot release this standalone planner. Recommended scope: extend recovery so a NEW operator decision can authorize one new attempt after a spent recovery. Bind each attempt to the exact artifact digest and existing jobs, preserve all history, reject replay/stale authority, and retain normal review gates. Prove with a public regression: failed/spent recovery -> new explicit authority -> exactly one further review; repeat without new authority must refuse. Ship through scoped tests, green CI, review/privacy and merge, then verify loaded runtime. This same approval would authorize ONE migration readiness review for S11b stage 2 and S31 using the complete package; later-slice reconciliation stays outstanding. If it passes, dispatch the existing jobs and continue migration under the existing mandate. Do not bypass review, reset claims, or waive retirement proof. This is a tooling scope expansion plus exhausted-loop decision, reserved for you by the Operator note. One approval covers the complete sequence; routine in-scope repair steps will not ask again.",
+			options: [{ label: "Fix recovery and continue", consequence: "One scoped readiness review, then existing jobs on pass." },
+				{ label: "Keep held", consequence: "Both jobs remain blocked." }], recommendation: "Fix recovery and continue",
+			source_escalation: "es-5445be", job_ids: [f.target, a.id, b.id], evidence_paths: [] },
+		{ type: "answer", id: "ask-a8f38b7f4245", answer: "Fix recovery and continue", answered_at: at },
+	].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
 	writeFileSync(join(f.scratch.path, ".pi-command-post/state/operator/dashboard.jsonl"), journal.map((line) => JSON.stringify(line)).join("\n") + "\n");
 	const addenda = join(f.scratch.path, paths.taskAddendaFile(f.target));
 	writeFileSync(addenda, readFileSync(addenda, "utf8") + JSON.stringify({ schema_version: 1, n: 2, added_at: at,
-		text: `${controls[0]} / ${sends[0]} grants standing authority to ${f.target}, A ${a.id} and B ${b.id}. S32-S131 outstanding; missing logs stay missing, retain originals, pass only. Retained ${grant.id}.`,
+		text: `${controls[0]} / ${sends[0]} grants standing ${mode === "equivalent" ? "authorization" : "authority"} to ${f.target}; ${mode === "equivalent" ? `approved subjects ${b.id}, ${a.id}` : `A ${a.id} and B ${b.id}`}. S32-S131 outstanding; missing logs stay missing, retain originals, pass only. Retained ${grant.id}.`,
 		by: "operator-quote", quote: quotes[0], reason: "bounded standing scope" }) + "\n");
 	const selectors = { job_id: f.target, authority_mode: "standing" as const, operator_control_id: controls[0]!,
 		operator_send_id: sends[0]!, reinforcement_control_id: controls[1]!, reinforcement_send_id: sends[1]!, dependent_job_ids: [a.id, b.id] };
@@ -93,6 +127,11 @@ for (const mode of ["corrected", "postclaim", "spawn-failure", "postdecision", "
 	writeFileSync(f.post.artifacts.file(f.target), "first standing candidate\n");
 	assert.throws(() => post.authorizeRecovery(selectors, []), /operator messages|authenticated session/);
 	assert.throws(() => post.authorizeRecovery({ ...selectors, dependent_job_ids: [a.id, f.source] }, context), /scope|amendment/);
+	const asksPath = join(f.scratch.path, ".pi-command-post/state/operator/asks.jsonl");
+	const asksBytes = readFileSync(asksPath);
+	writeFileSync(asksPath, asksBytes.toString().replace(JSON.stringify([f.target, a.id, b.id]), JSON.stringify([f.target, f.source, b.id])));
+	assert.throws(() => post.authorizeRecovery(selectors, context), /recorded authenticated recovery scope/);
+	writeFileSync(asksPath, asksBytes);
 	const authority = post.authorizeRecovery(selectors, context);
 	assert.deepEqual(post.authorizeRecovery(selectors, context), authority);
 	const grantFile = post.mandates.file(grant.id);
@@ -109,7 +148,7 @@ for (const mode of ["corrected", "postclaim", "spawn-failure", "postdecision", "
 		current_artifact_sha256: recoveryDigest(readFileSync(post.artifacts.file(f.target))), dependent_job_ids: [a.id, b.id] });
 	const first = prepare(authority.current_predecessor_id);
 	assert.deepEqual(prepare(authority.current_predecessor_id), first);
-	if (mode !== "corrected") {
+	if (mode !== "corrected" && mode !== "equivalent") {
 		const model = provider.addScript("standing-fault", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: {
 			job_id: f.target, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["bounded readiness"],
 		} }] }]);
@@ -125,6 +164,18 @@ for (const mode of ["corrected", "postclaim", "spawn-failure", "postdecision", "
 			const result = await child([f.scratch.path, f.source, f.target, first.attempt_id, fault, "", "standing", model],
 				{ ...process.env, PI_CODING_AGENT_DIR: agent, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1" });
 			assert.equal(result.code, mode === "spawn-failure" ? 0 : 73, result.output);
+			if (mode === "run-directory") assert.equal(existsSync(join(f.scratch.path, paths.gateRunDir(f.target, 4))), true);
+			if (mode === "live-unregistered") {
+				const claimPath = join(f.scratch.path, paths.runDir(f.target), `recovery-attempt-${first.attempt_id}-claim.json`);
+				const claimBytes = readFileSync(claimPath);
+				const pid = Number(readFileSync(join(f.scratch.path, paths.runDir(f.target), `recovery-attempt-${first.attempt_id}-reviewer-pid.json`), "utf8"));
+				t.after(() => { if (isPidAlive(pid)) process.kill(pid, "SIGKILL"); });
+				assert.equal(isPidAlive(pid), true);
+				assert.throws(() => prepare(first.attempt_id), /terminal nonpass/);
+				assert.deepEqual(readFileSync(claimPath), claimBytes);
+				process.kill(pid, "SIGKILL");
+				await waitFor(() => isPidAlive(pid), (alive) => !alive, { timeoutMs: 15000, what: "owned reviewer exit" });
+			}
 			if (mode === "orphan" || mode === "postdecision") {
 				await post.reviewRuns.sweepOrphans({ gate: (pending, reason) => post.gateModule().orphan(pending, reason) }, [f.target]);
 			}
@@ -136,10 +187,14 @@ for (const mode of ["corrected", "postclaim", "spawn-failure", "postdecision", "
 		} else {
 			assert.equal(provider.requests().length, 2);
 			const successor = prepare(first.attempt_id);
+			assert.notEqual(successor.attempt_id, first.attempt_id);
+			const claimPath = join(f.scratch.path, paths.runDir(f.target), `recovery-attempt-${first.attempt_id}-claim.json`);
+			const spentClaim = readFileSync(claimPath);
 			const terminal = JSON.parse(readFileSync(join(f.scratch.path, paths.runDir(f.target), `recovery-attempt-${first.attempt_id}-terminal.json`), "utf8"));
 			assert.equal(terminal.outcome, mode === "mismatch" ? "invalidated" : mode === "spawn-failure" ? "spawn_failure" : "interrupted");
 			assert.equal(successor.authority_id, first.authority_id);
 			await run(5, "pass", successor.attempt_id, successor);
+			assert.deepEqual(readFileSync(claimPath), spentClaim);
 			assert.equal(post.gateModule().status(f.target).decisions.at(-1)?.attempt, 5);
 		}
 		assert.deepEqual(readFileSync(recoveryFile(join(f.scratch.path, paths.runDir(f.target)), "claim")), legacy);
@@ -164,17 +219,44 @@ for (const mode of ["corrected", "postclaim", "spawn-failure", "postdecision", "
 	const passStatus = post.gateModule().status(f.target).standing_recovery as { eligibility: string };
 	assert.equal(passStatus.eligibility, "completed");
 	assert.throws(() => prepare(second.attempt_id), /terminal nonpass/);
-	const unrelated = await f.ledger.create({ title: "unrelated hold", project: "demo", kind: "research", delivery: "pipeline" });
-	await f.ledger.addDep(b.id, unrelated.id);
+	const drift = await f.ledger.create({ title: "graph drift", project: "demo", kind: "research", delivery: "pipeline" });
+	await f.ledger.addDep(a.id, drift.id);
 	assert.equal((post.gateModule().status(f.target).standing_recovery as { eligibility: string }).eligibility, "ineligible");
-	await f.ledger.removeDep(b.id, unrelated.id);
+	assert.equal((await f.ledger.ready()).some((job) => job.id === a.id || job.id === b.id), false);
+	await f.ledger.removeDep(a.id, drift.id);
 	await f.ledger.comment(a.id, `Actual scoped PASS ${second.attempt_id}; S32–S131 remains outstanding.`);
 	await f.ledger.comment(b.id, `Actual scoped PASS ${second.attempt_id}; preserve A ordering.`);
-	await f.ledger.close(f.target, "completed scoped readiness research");
+	const torn = await post.tearDown(f.target);
+	assert.equal(torn.torn_down, true, JSON.stringify(torn));
+	assert.equal(torn.lease_returned, true);
+	assert.equal(post.fleet.get(f.target)?.phase, "done");
+	assert.equal((await f.ledger.show(f.target)).status, "closed");
+	const reason = `Actual scoped PASS ${second.attempt_id} supersedes ${obsolete.id} for these readiness jobs only; S32–S131 remains outstanding.`;
+	const controlsModel = provider.addScript("scoped-continuation", [
+		...[a.id, b.id].flatMap((id) => [
+			{ kind: "tool_calls" as const, calls: [{ name: "cp_job", args: { action: "comment", job_id: id, text: reason } }] },
+			{ kind: "tool_calls" as const, calls: [{ name: "cp_job", args: { action: "dep_remove", job_id: id, blocker_id: obsolete.id } }] },
+		]), { kind: "text", text: "Scoped continuation recorded." },
+	]);
+	writeFileSync(join(agent, "models.json"), JSON.stringify(provider.modelsJson()));
+	const parent = startPiChild({ cwd: f.scratch.path, model: controlsModel,
+		env: { ...process.env, PI_CODING_AGENT_DIR: agent, CP_HOME: f.scratch.path, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1" },
+		extensions: [join(REPO_ROOT, "extensions/command-post/index.ts")] });
+	t.after(() => parent.close());
+	await parent.prompt(reason);
+	await parent.waitForSettled(30000);
+	const ends = parent.eventsOfType("tool_execution_end") as Array<{ isError?: boolean }>;
+	assert.equal(ends.length, 4);
+	assert.equal(ends.some((event) => event.isError), false);
+	assert.equal((await f.ledger.show(obsolete.id)).status, "open");
+	assert.equal((await f.ledger.show(a.id)).blocked_by.includes(obsolete.id), false);
+	assert.equal((await f.ledger.show(b.id)).blocked_by.includes(obsolete.id), false);
+	for (const id of [a.id, b.id]) assert.equal((await f.ledger.show(id)).comments.some((comment) => comment.text === reason), true);
 	const ready = await f.ledger.ready();
 	assert.equal(ready.some((job) => job.id === a.id), true);
 	assert.equal(ready.some((job) => job.id === b.id), false);
 	assert.equal((await f.ledger.show(a.id)).blocked_by.includes(f.source), true);
+	assert.equal((await f.ledger.show(b.id)).blocked_by.includes(unrelated.id), true);
 	assert.deepEqual(readFileSync(recoveryFile(join(f.scratch.path, paths.runDir(f.target)), "claim")), legacy);
 });
 }
