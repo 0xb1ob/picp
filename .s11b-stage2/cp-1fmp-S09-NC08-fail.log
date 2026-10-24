@@ -1,0 +1,36 @@
+▶ landing S09: a real repair stays single while active and conflict handoffs follow heads
+  ✔ red (3248.244137ms)
+  ✖ conflict (2480.281874ms)
+✖ landing S09: a real repair stays single while active and conflict handoffs follow heads (5730.742812ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7267.897684
+
+✖ failing tests:
+
+test at tests/e2e/landing-s09.test.ts:190:48
+✖ conflict (2480.281874ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  'ci' !== 'conflict'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:198:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:190:40)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'ci',
+    expected: 'conflict',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+command_exit=1

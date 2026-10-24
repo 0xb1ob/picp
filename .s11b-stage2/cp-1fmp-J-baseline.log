@@ -1,0 +1,66 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit tests/e2e/landing-s11.test.ts
+
+✔ S11: blocked delivery report stops integration before review, conflict repair or merge (2802.56026ms)
+✔ S11: conflict delivery report stops integration before review, conflict repair or merge (2645.729337ms)
+✔ S11: unreadable delivery report stops integration before review, conflict repair or merge (2684.235093ms)
+✔ S11: a report blocked during CI stops the CLEAN merge (2517.752059ms)
+✔ S11: a report blocked during CI stops the fallback merge (2595.759373ms)
+✔ S11: final-fix integration pending (3843.912272ms)
+✔ S11: final-fix integration declined (2456.351841ms)
+✔ S11: final-fix integration mandate (2469.431548ms)
+✔ S11: final-fix integration truncated (2511.230987ms)
+✔ S11: final-fix integration other-pr (2507.78875ms)
+✔ S11: final-fix integration moved-head (2485.370652ms)
+✔ S11: final-fix integration approved (3160.853438ms)
+✔ S11: final-fix integration approved-red (3008.704406ms)
+To /tmp/cp-repo-hYVn0l/demo.git
+   badc908..5a6ef40  cp-xou8 -> cp-xou8
+✔ S11: final-fix integration approved-push (3319.237619ms)
+✔ S11: final-fix integration approved-report (2998.552011ms)
+✔ S11: final-fix integration approved-pr (3281.536056ms)
+✔ S11: final-fix integration approved-draft (3577.433995ms)
+✔ S11: final-fix integration approved-ask-report (3396.323572ms)
+✔ S11: final-fix integration approved-ask-pr (3704.329774ms)
+✔ S11: human handoff repo (2658.539125ms)
+✔ S11: human handoff clean (2739.984677ms)
+✔ S11: human handoff behind (2681.482445ms)
+✔ S11: human handoff reviews (2780.018205ms)
+✔ S11: human handoff unknown-block (2721.930676ms)
+✔ S11: human handoff no-ci (2788.413012ms)
+✔ S11: human handoff checks (2620.413708ms)
+✔ S11: human handoff strict (2637.29007ms)
+✔ S11: human handoff strict-stale (2723.305719ms)
+✔ S11: human handoff strict-pending (2472.877617ms)
+✔ S11: human handoff strict-unreviewed (2678.187971ms)
+✔ S11: human handoff unknown (2516.925635ms)
+✔ S11: human handoff pending (2511.906722ms)
+✔ S11: human handoff superseded (2482.026062ms)
+✔ S11: human handoff red (2496.896945ms)
+✔ S11: human handoff unstable (2592.818435ms)
+✔ S11: human handoff unreadable (2345.700091ms)
+✔ S11: human handoff unreadable-permission (2457.534483ms)
+✔ S11: human handoff unreadable-workflows (2499.476181ms)
+✔ S11: human handoff unreviewed (2487.536955ms)
+✔ S11: human handoff draft (2876.970005ms)
+✔ S11: human handoff empty-base (2555.58236ms)
+✔ S11: human handoff trimmed-base (2682.229605ms)
+✔ S11: human handoff park-dirty (2495.956807ms)
+✔ S11: a human merge finishes a done delivery without merging it again (2843.47771ms)
+✔ S11: a human merge finishes a blocked delivery without merging it again (2798.923052ms)
+✔ S11: integration rejects research delivery before forge reads (134.238938ms)
+✔ S11: ship, diff and two merge-head decisions remain independently answerable (4246.879094ms)
+✔ S11: conflict promotion delivers the generated merge instructions to the original worker (2583.991477ms)
+✔ S11: CI green on a legacy blocked report emits a stopped notice without starting review (401.747389ms)
+✔ S11: a changed head needs review before updating the same legacy handoff row (3482.946357ms)
+ℹ tests 50
+ℹ suites 0
+ℹ pass 50
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 136476.335646
+
+command_exit=0

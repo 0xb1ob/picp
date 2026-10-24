@@ -1,0 +1,18 @@
+▶ landing S10: unreadable forge and Actions evidence names the cause and makes no mutation
+  ✔ rate (2491.478257ms)
+  ✔ permission (2383.080812ms)
+  ✔ jobs-denied (2401.243992ms)
+  ✔ jobs-partial (2401.571795ms)
+  ✔ jobs-malformed (4733.233175ms)
+  ✔ missing-gh (2353.068443ms)
+✔ landing S10: unreadable forge and Actions evidence names the cause and makes no mutation (16765.99394ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 18310.550527
+
+command_exit=0
