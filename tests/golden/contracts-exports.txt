@@ -262,6 +262,8 @@ GateConfig	type	40f29471d2999cf2	-
 GateConfigSchema	value	3630f64bca7915bb	4d78d7804239827d
 GateFlags	type	77969681203576cb	-
 GateFlagsSchema	value	d40f32266fa7469b	f46dd694654ca55c
+GateHandoff	type	6ea1dbe3500c48f0	-
+GateHandoffSchema	value	6bcc0e45e43eabe2	70c319c90be5089c
 GateRecoveryAnchorSchema	value	94b1ca225f574209	f80910bfba2dde82
 GateRecoveryAttemptClaimSchema	value	58f082e6e8f06493	d34814d513adf19d
 GateRecoveryAttemptSchema	value	435d673a77dbdac9	39325b05d62bbe35
@@ -338,10 +340,13 @@ MODE_SETTINGS	value	a09441fb2fcfe5f9	c9b1a20166e4ce59
 Mandate	type	36f40420851d2648	-
 MandateAction	type	a5670930f3415fa2	-
 MandateActionSchema	value	da9c9c8a5d81337f	1756035535c14214
+MandateAdmissionSchema	value	e54c4f670dcef62b	35cf73152098c9ff
 MandateAskOn	type	b3ce7197b7ec18cf	-
 MandateAskOnSchema	value	d7f937892a60da61	2eceee3a288c793d
 MandateChannel	type	94a5868ebdef3748	-
 MandateChannelSchema	value	67315ce4de204a31	b0334d67cf02a618
+MandateContinuity	type	4c11c94007ad1d8b	-
+MandateContinuitySchema	value	a9be4e9c1d793559	a1d954eb1dbcb5c4
 MandateDecisionRecord	type	bda9734b6209885c	-
 MandateDecisionRecordSchema	value	d5ae9f379d399c41	74a314c5f55bbc1e
 MandateDefaultableField	type	066b993e666de65b	-
@@ -355,7 +360,7 @@ MandateIdSchema	value	1d5becbe159e38b3	2b839068d3ec6157
 MandatePolicySchema	value	287571ca3a575413	7e2399a0a1ee09c2
 MandateProvenance	type	483039dec428e70a	-
 MandateRevokedBy	type	72adc3133e08ada6	-
-MandateSchema	value	9fa57d9bd0a33333	90a7404920978c0c
+MandateSchema	value	97f36b66cd47926e	ade2d96da9232cb9
 MandateStatus	type	499e338227619f96	-
 MandateStatusSchema	value	9f4f11e032e35765	1ad0a168ea5f24f0
 MergeAuthority	type	02b381902047206c	-
@@ -556,6 +561,8 @@ SUGGEST_MAX_OUTPUT_TOKENS	value	eb6c3fdb81fad6ce	51e8ea280b44e169
 SUGGEST_PROMPT_MAX_CHARS	value	a9389e6a963d0b01	15197cf7214b58e6
 SUMMARY_MAX_CHARS	value	72183bdaed455972	284b7e6d788f363f
 SUMMARY_MAX_LINES	value	44c99cee12d3fb05	4e07408562bedb8b
+SameWorkReplacement	type	32384d6d08d3a88e	-
+SameWorkReplacementSchema	value	876c1db8a5702ad7	8eba9dccee165d14
 ScheduleFire	type	a41d836c324e5654	-
 ScheduleFireSchema	value	aedddeaa9f1a0f56	54ace5123a16ad9b
 Scope	type	9fbf012ba5215f97	-
