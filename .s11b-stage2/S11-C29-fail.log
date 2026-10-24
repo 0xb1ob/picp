@@ -1,0 +1,32 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=independently answerable tests/e2e/landing-s11.test.ts
+
+✖ S11: ship, diff and two merge-head decisions remain independently answerable (3773.549956ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5758.514655
+
+✖ failing tests:
+
+test at tests/e2e/landing-s11.test.ts:332:1
+✖ S11: ship, diff and two merge-head decisions remain independently answerable (3773.549956ms)
+  AssertionError [ERR_ASSERTION]: [{"id":"aw-checkpoint-cp-xdch","type":"authorization","decision":"authorize cp-xdch?","why":"S11 ship ","blocks":"cp-xdch implementation","job_id":"cp-xdch","options":["approve","decline"],"opened_at":"2026-10-24T19:31:35Z","checkpoint_kind":"ship"},{"id":"aw-checkpoint-cp-xdch.diff","type":"authorization","decision":"accept the diff cp-xdch pushed?","why":"S11 diff ","blocks":"cp-xdch completion","job_id":"cp-xdch","options":["approve","decline"],"opened_at":"2026-10-24T19:31:35Z","checkpoint_kind":"diff"},{"id":"aw-checkpoint-cp-xdch.diff","type":"authorization","decision":"merge cp-xdch at 923dd8a3f82a?","why":"S11 merge 923dd8a3f82a","blocks":"cp-xdch merge, teardown and close","job_id":"cp-xdch","options":["approve","decline"],"opened_at":"2026-10-24T19:31:35Z","checkpoint_kind":"merge","checkpoint_scope":"923dd8a3f82a"},{"id":"aw-checkpoint-cp-xdch.diff","type":"authorization","decision":"merge cp-xdch at bbbbbbbbbbbb?","why":"S11 merge bbbbbbbbbbbb","blocks":"cp-xdch merge, teardown and close","job_id":"cp-xdch","options":["approve","decline"],"opened_at":"2026-10-24T19:31:35Z","checkpoint_kind":"merge","checkpoint_scope":"bbbbbbbbbbbb"}]
+  
+  2 !== 4
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s11.test.ts:344:9)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 4,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

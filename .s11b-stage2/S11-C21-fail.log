@@ -1,0 +1,30 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=integration approved-report$ tests/e2e/landing-s11.test.ts
+
+✖ S11: final-fix integration approved-report (3515.606801ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5129.107496
+
+✖ failing tests:
+
+test at tests/e2e/landing-s11.test.ts:94:2
+✖ S11: final-fix integration approved-report (3515.606801ms)
+  AssertionError [ERR_ASSERTION]: {"job_id":"cp-ob51","branch":"cp-ob51","step":"merge","next":"advance","facts":["gh: https://github.com/example/demo/pull/213 is OPEN at 1008f706803c","ci: green — CI green on 1008f70","permission: permitted — GitHub reports mergeStateStatus=CLEAN at 1008f706803c — the merge is unforced","review: operator-approved final fix at 1008f706803c (generation 2, capped 6217cdfb054e, operator-quote) — not a reviewer pass","merged https://github.com/example/demo/pull/213 (squash, head branch kept for teardown)"],"reason":"cp-ob51: https://github.com/example/demo/pull/213 merged. Call cp_integrate again to record the receipt, tear down and close.","record":{"schema_version":1,"job_id":"cp-ob51","branch":"cp-ob51","step":"merge","next":"advance","pr_url":"https://github.com/example/demo/pull/213","head_sha":"1008f706803c71c9e19d1e6af86df65641f50e68","merge_authority":{"kind":"repo_derived","head_sha":"1008f706803c71c9e19d1e6af86df65641f50e68","merge_state_status":"CLEAN","decided_at":"2026-10-24T19:26:42Z"},"resolve_attempts":0,"facts":["gh: https://github.com/example/demo/pull/213 is OPEN at 1008f706803c","ci: green — CI green on 1008f70","permission: permitted — GitHub reports mergeStateStatus=CLEAN at 1008f706803c — the merge is unforced","review: operator-approved final fix at 1008f706803c (generation 2, capped 6217cdfb054e, operator-quote) — not a reviewer pass","merged https://github.com/example/demo/pull/213 (squash, head branch kept for teardown)"],"reason":"cp-ob51: https://github.com/example/demo/pull/213 merged. Call cp_integrate again to record the receipt, tear down and close.","started_at":"2026-10-24T19:26:41Z","updated_at":"2026-10-24T19:26:42Z"},"pr_url":"https://github.com/example/demo/pull/213","head_sha":"1008f706803c71c9e19d1e6af86df65641f50e68"}
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s11.test.ts:165:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'merge',
+    expected: 'merge',
+    operator: 'notStrictEqual',
+    diff: 'simple'
+  }

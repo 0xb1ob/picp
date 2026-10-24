@@ -1,0 +1,50 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=human handoff (clean|park-dirty)$ tests/e2e/landing-s11.test.ts
+
+✖ S11: human handoff clean (2879.719795ms)
+✖ S11: human handoff park-dirty (2642.707094ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7143.624962
+
+✖ failing tests:
+
+test at tests/e2e/landing-s11.test.ts:214:2
+✖ S11: human handoff clean (2879.719795ms)
+  AssertionError [ERR_ASSERTION]: {"job_id":"cp-jsjo","branch":"cp-jsjo","step":"permit","next":"surface","facts":["gh: https://github.com/example/demo/pull/215 is OPEN at 6d876b76dadf","ci: green — CI green on 6d876b7","permission: permitted — GitHub reports mergeStateStatus=CLEAN at 6d876b76dadf — the merge is unforced","human_handoff: handed to a human at 6d876b76dadf (cp_review passed, CI green or none configured) — nothing merged"],"reason":"cp-jsjo: https://github.com/example/demo/pull/215 at 6d876b76dadf passed cp_review and CI and is handed to a human to review and merge on GitHub (merge_policy human_handoff). The command post never merges it; a change request is a cp_send to cp-jsjo.","record":{"schema_version":1,"job_id":"cp-jsjo","branch":"cp-jsjo","step":"permit","next":"surface","pr_url":"https://github.com/example/demo/pull/215","head_sha":"6d876b76dadf4db7e24d6a46eb360a5948b181fb","resolve_attempts":0,"facts":["gh: https://github.com/example/demo/pull/215 is OPEN at 6d876b76dadf","ci: green — CI green on 6d876b7","permission: permitted — GitHub reports mergeStateStatus=CLEAN at 6d876b76dadf — the merge is unforced","human_handoff: handed to a human at 6d876b76dadf (cp_review passed, CI green or none configured) — nothing merged"],"reason":"cp-jsjo: https://github.com/example/demo/pull/215 at 6d876b76dadf passed cp_review and CI and is handed to a human to review and merge on GitHub (merge_policy human_handoff). The command post never merges it; a change request is a cp_send to cp-jsjo.","started_at":"2026-10-24T19:18:01Z","updated_at":"2026-10-24T19:18:01Z"},"pr_url":"https://github.com/example/demo/pull/215","head_sha":"6d876b76dadf4db7e24d6a46eb360a5948b181fb"}
+  
+  'surface' !== 'wait'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s11.test.ts:258:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'surface',
+    expected: 'wait',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s11.test.ts:214:2
+✖ S11: human handoff park-dirty (2642.707094ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /Not parked/. Input:
+  
+  'cp-2l3a: https://github.com/example/demo/pull/215 at 01fd18e487a8 passed cp_review and CI and is handed to a human to review and merge on GitHub (merge_policy human_handoff). The command post never merges it; a change request is a cp_send to cp-2l3a.'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s11.test.ts:285:12)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'cp-2l3a: https://github.com/example/demo/pull/215 at 01fd18e487a8 passed cp_review and CI and is handed to a human to review and merge on GitHub (merge_policy human_handoff). The command post never merges it; a change request is a cp_send to cp-2l3a.',
+    expected: /Not parked/,
+    operator: 'match',
+    diff: 'simple'
+  }

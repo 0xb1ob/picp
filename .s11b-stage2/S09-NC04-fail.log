@@ -1,0 +1,150 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=repository refusals and draft transitions tests/e2e/landing-s09.test.ts
+
+▶ landing S09: repository refusals and draft transitions preserve head authority
+  ✔ blocked (2894.470306ms)
+  ✔ approved-blocked (2774.933324ms)
+  ✔ unreadable-rules (2837.143278ms)
+  ✔ unstable (2665.757279ms)
+  ✔ no-ci-blocked (2763.41339ms)
+  ✔ auto (2712.419305ms)
+  ✔ moved (2677.790459ms)
+  ✔ unreviewed-draft (2641.302869ms)
+  ✔ stale-draft (2585.588286ms)
+  ✖ ready (2577.935532ms)
+  ✖ ready-unreadable-ci (2611.98323ms)
+  ✖ ready-moved (2569.305975ms)
+  ✖ ready-undo-refused (2491.639322ms)
+  ✖ ready-refused (2657.353773ms)
+  ✔ reminder (3229.429871ms)
+✖ landing S09: repository refusals and draft transitions preserve head authority (40694.670649ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 10
+ℹ fail 6
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 42305.335291
+
+✖ failing tests:
+
+test at tests/e2e/landing-s09.test.ts:62:261
+✖ ready (2577.935532ms)
+  AssertionError [ERR_ASSERTION]: ready: gh: https://github.com/example/demo/pull/302 is OPEN at a88f7c2ede4f
+  ci: green — CI green on a88f7c2
+  permission: pending (draft) — cp-90wt is a draft PR and is never merged
+  draft readiness unavailable
+  + actual - expected
+  
+  + 'surface'
+  - 'advance'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:83:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:62:253)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'surface',
+    expected: 'advance',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:62:261
+✖ ready-unreadable-ci (2611.98323ms)
+  AssertionError [ERR_ASSERTION]: ready-unreadable-ci: gh: https://github.com/example/demo/pull/302 is OPEN at 76bd4e04cd33
+  ci: unknown — no Actions CI runs are observable for cp-wgrw on 76bd4e0 — not asked until one is
+  ci configuration: unreadable (unauthorized) — gh cannot read this repository's workflows (HTTP 403) — CI state is unknown, not absent
+  draft readiness unavailable
+  + actual - expected
+  
+  + 'surface'
+  - 'advance'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:83:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:62:253)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'surface',
+    expected: 'advance',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:62:261
+✖ ready-moved (2569.305975ms)
+  AssertionError [ERR_ASSERTION]: ready-moved: gh: https://github.com/example/demo/pull/302 is OPEN at 626d9a5a69e6
+  ci: green — CI green on 626d9a5
+  permission: pending (draft) — cp-8ged is a draft PR and is never merged
+  draft readiness unavailable
+  
+  'surface' !== 'wait'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:83:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:62:253)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'surface',
+    expected: 'wait',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:62:261
+✖ ready-undo-refused (2491.639322ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /undo refused/. Input:
+  
+  'gh: https://github.com/example/demo/pull/302 is OPEN at 14fe7af055a1\n' +
+    'ci: green — CI green on 14fe7af\n' +
+    'permission: pending (draft) — cp-khri is a draft PR and is never merged\n' +
+    'draft readiness unavailable'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:107:45)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:62:253)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'gh: https://github.com/example/demo/pull/302 is OPEN at 14fe7af055a1\nci: green — CI green on 14fe7af\npermission: pending (draft) — cp-khri is a draft PR and is never merged\ndraft readiness unavailable',
+    expected: /undo refused/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:62:261
+✖ ready-refused (2657.353773ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /ready refused: GraphQL: forbidden/. Input:
+  
+  'gh: https://github.com/example/demo/pull/302 is OPEN at 6ce8e70467a3\n' +
+    'ci: green — CI green on 6ce8e70\n' +
+    'permission: pending (draft) — cp-e6rb is a draft PR and is never merged\n' +
+    'draft readiness unavailable'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:108:40)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:62:253)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'gh: https://github.com/example/demo/pull/302 is OPEN at 6ce8e70467a3\nci: green — CI green on 6ce8e70\npermission: pending (draft) — cp-e6rb is a draft PR and is never merged\ndraft readiness unavailable',
+    expected: /ready refused: GraphQL: forbidden/,
+    operator: 'match',
+    diff: 'simple'
+  }

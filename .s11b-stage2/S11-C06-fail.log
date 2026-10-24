@@ -1,0 +1,32 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=final-fix integration approved-push$ tests/e2e/landing-s11.test.ts
+
+To /tmp/cp-repo-qU3ERi/demo.git
+   7a381c6..69a606a  cp-zs45 -> cp-zs45
+✖ S11: final-fix integration approved-push (3394.399859ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4946.720115
+
+✖ failing tests:
+
+test at tests/e2e/landing-s11.test.ts:94:2
+✖ S11: final-fix integration approved-push (3394.399859ms)
+  AssertionError [ERR_ASSERTION]: {"job_id":"cp-zs45","branch":"cp-zs45","step":"merge","next":"advance","facts":["gh: https://github.com/example/demo/pull/213 is OPEN at 69a606ae0d85","ci: green — CI green on 69a606a","permission: permitted — GitHub reports mergeStateStatus=CLEAN at 69a606ae0d85 — the merge is unforced","review: operator-approved final fix at 69a606ae0d85 (generation 2, capped 1aa26fe6720c, operator-quote) — not a reviewer pass","merged https://github.com/example/demo/pull/213 (squash, head branch kept for teardown)"],"reason":"cp-zs45: https://github.com/example/demo/pull/213 merged. Call cp_integrate again to record the receipt, tear down and close.","record":{"schema_version":1,"job_id":"cp-zs45","branch":"cp-zs45","step":"merge","next":"advance","pr_url":"https://github.com/example/demo/pull/213","head_sha":"69a606ae0d857ef8c7c6b83ecabf9c0f3e4a6cc2","merge_authority":{"kind":"repo_derived","head_sha":"69a606ae0d857ef8c7c6b83ecabf9c0f3e4a6cc2","merge_state_status":"CLEAN","decided_at":"2026-10-24T19:12:48Z"},"resolve_attempts":0,"facts":["gh: https://github.com/example/demo/pull/213 is OPEN at 69a606ae0d85","ci: green — CI green on 69a606a","permission: permitted — GitHub reports mergeStateStatus=CLEAN at 69a606ae0d85 — the merge is unforced","review: operator-approved final fix at 69a606ae0d85 (generation 2, capped 1aa26fe6720c, operator-quote) — not a reviewer pass","merged https://github.com/example/demo/pull/213 (squash, head branch kept for teardown)"],"reason":"cp-zs45: https://github.com/example/demo/pull/213 merged. Call cp_integrate again to record the receipt, tear down and close.","started_at":"2026-10-24T19:12:47Z","updated_at":"2026-10-24T19:12:48Z"},"pr_url":"https://github.com/example/demo/pull/213","head_sha":"69a606ae0d857ef8c7c6b83ecabf9c0f3e4a6cc2"}
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s11.test.ts:165:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'merge',
+    expected: 'merge',
+    operator: 'notStrictEqual',
+    diff: 'simple'
+  }

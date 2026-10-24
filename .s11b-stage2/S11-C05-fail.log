@@ -1,0 +1,54 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=final-fix integration (approved|approved-draft)$ tests/e2e/landing-s11.test.ts
+
+✖ S11: final-fix integration approved (3698.898678ms)
+✖ S11: final-fix integration approved-draft (3179.468673ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9026.226932
+
+✖ failing tests:
+
+test at tests/e2e/landing-s11.test.ts:94:2
+✖ S11: final-fix integration approved (3698.898678ms)
+  AssertionError [ERR_ASSERTION]: {"job_id":"cp-q98o","branch":"cp-q98o","step":"review","next":"resolve","facts":["gh: https://github.com/example/demo/pull/213 is OPEN at c1b99fd876fa","ci: green — CI green on c1b99fd","permission: permitted — GitHub reports mergeStateStatus=CLEAN at c1b99fd876fa — the merge is unforced","review: promoted final fix"],"reason":"review: operator-approved final fix at c1b99fd876fa (generation 2, capped 6875cda04eaf, operator-quote) — not a reviewer pass","record":{"schema_version":1,"job_id":"cp-q98o","branch":"cp-q98o","step":"review","next":"resolve","pr_url":"https://github.com/example/demo/pull/213","head_sha":"c1b99fd876fa6a824cd3ffd37031a2bde25be2a9","resolve_attempts":0,"facts":["gh: https://github.com/example/demo/pull/213 is OPEN at c1b99fd876fa","ci: green — CI green on c1b99fd","permission: permitted — GitHub reports mergeStateStatus=CLEAN at c1b99fd876fa — the merge is unforced","review: promoted final fix"],"reason":"review: operator-approved final fix at c1b99fd876fa (generation 2, capped 6875cda04eaf, operator-quote) — not a reviewer pass","started_at":"2026-10-24T19:12:03Z","updated_at":"2026-10-24T19:12:03Z"},"pr_url":"https://github.com/example/demo/pull/213","head_sha":"c1b99fd876fa6a824cd3ffd37031a2bde25be2a9"}
+  
+  'review' !== 'merge'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s11.test.ts:183:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'review',
+    expected: 'merge',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s11.test.ts:94:2
+✖ S11: final-fix integration approved-draft (3179.468673ms)
+  AssertionError [ERR_ASSERTION]: {"job_id":"cp-87zl","branch":"cp-87zl","step":"review","next":"resolve","facts":["gh: https://github.com/example/demo/pull/213 is OPEN at 8de47942a627","ci: green — CI green on 8de4794","permission: pending (draft) — cp-87zl is a draft PR and is never merged","review: promoted final fix"],"reason":"review: operator-approved final fix at 8de47942a627 (generation 2, capped 30dc75d2488b, operator-quote) — not a reviewer pass","record":{"schema_version":1,"job_id":"cp-87zl","branch":"cp-87zl","step":"review","next":"resolve","pr_url":"https://github.com/example/demo/pull/213","head_sha":"8de47942a6272312038c006480670cdc0950f0f8","resolve_attempts":0,"facts":["gh: https://github.com/example/demo/pull/213 is OPEN at 8de47942a627","ci: green — CI green on 8de4794","permission: pending (draft) — cp-87zl is a draft PR and is never merged","review: promoted final fix"],"reason":"review: operator-approved final fix at 8de47942a627 (generation 2, capped 30dc75d2488b, operator-quote) — not a reviewer pass","started_at":"2026-10-24T19:12:06Z","updated_at":"2026-10-24T19:12:07Z"},"pr_url":"https://github.com/example/demo/pull/213","head_sha":"8de47942a6272312038c006480670cdc0950f0f8"}
+  + actual - expected
+  
+  + 'resolve'
+  - 'advance'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s11.test.ts:176:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'resolve',
+    expected: 'advance',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,30 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=integration other-pr$ tests/e2e/landing-s11.test.ts
+
+✖ S11: final-fix integration other-pr (2697.342216ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4240.878611
+
+✖ failing tests:
+
+test at tests/e2e/landing-s11.test.ts:94:2
+✖ S11: final-fix integration other-pr (2697.342216ms)
+  AssertionError [ERR_ASSERTION]: other-pr
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s11.test.ts:124:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'resolve',
+    expected: 'resolve',
+    operator: 'notStrictEqual',
+    diff: 'simple'
+  }

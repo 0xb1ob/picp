@@ -1,0 +1,17 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=integration approved-red$|human handoff (pending|superseded|red|strict-pending)$ tests/e2e/landing-s11.test.ts
+
+✔ S11: final-fix integration approved-red (6224.621142ms)
+✔ S11: human handoff strict-pending (2600.602892ms)
+✔ S11: human handoff pending (2652.622306ms)
+✔ S11: human handoff superseded (2649.446757ms)
+✔ S11: human handoff red (2716.447283ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19509.614193

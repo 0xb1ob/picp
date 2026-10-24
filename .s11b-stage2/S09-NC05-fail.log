@@ -1,0 +1,152 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=real repair stays single|public promotion before tests/e2e/landing-s09.test.ts
+
+▶ landing S09: a real repair stays single while active and conflict handoffs follow heads
+  ✖ red (3005.910478ms)
+  ✖ conflict (2657.929899ms)
+✖ landing S09: a real repair stays single while active and conflict handoffs follow heads (5665.5635ms)
+▶ landing S09: public promotion before or during integration waits for a fresh report
+  ✖ repository/waiting/before integration (2790.237077ms)
+  ✖ repository/waiting/during permission (3000.97933ms)
+  ✖ checkpoint/waiting/before integration (2797.647777ms)
+  ✖ checkpoint/waiting/during permission (2746.535362ms)
+✖ landing S09: public promotion before or during integration waits for a fresh report (11337.257834ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 0
+ℹ fail 8
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 18603.682916
+
+✖ failing tests:
+
+test at tests/e2e/landing-s09.test.ts:190:48
+✖ red (3005.910478ms)
+  AssertionError [ERR_ASSERTION]: cp-ijmj: CI is in_progress on 93cfa2b (ci). Nothing was merged; call cp_integrate again once CI finishes on 93cfa2ba0c36.
+  
+  'wait' !== 'resolve'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:210:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:190:40)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'wait',
+    expected: 'resolve',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:190:48
+✖ conflict (2657.929899ms)
+  AssertionError [ERR_ASSERTION]: cp-odft: https://github.com/example/demo/pull/305 conflicts with main The implementer was already asked once; this is the operator's call now.
+  + actual - expected
+  
+  + 'surface'
+  - 'resolve'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:210:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:190:40)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'surface',
+    expected: 'resolve',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:255:84
+✖ repository/waiting/before integration (2790.237077ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:279:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:255:76)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:255:84
+✖ repository/waiting/during permission (3000.97933ms)
+  AssertionError [ERR_ASSERTION]: cp-021g: https://github.com/example/demo/pull/306 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'resolve'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:278:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:255:76)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'resolve',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:255:84
+✖ checkpoint/waiting/before integration (2797.647777ms)
+  AssertionError [ERR_ASSERTION]: cp-q3ea: https://github.com/example/demo/pull/306 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'resolve'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:278:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:255:76)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'resolve',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:255:84
+✖ checkpoint/waiting/during permission (2746.535362ms)
+  AssertionError [ERR_ASSERTION]: cp-p431: https://github.com/example/demo/pull/306 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'resolve'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:278:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:255:76)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'resolve',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

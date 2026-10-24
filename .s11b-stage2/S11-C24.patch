@@ -1,0 +1,13 @@
+diff --git a/src/human-handoff.ts b/src/human-handoff.ts
+index e81e058..e48e9aa 100644
+--- a/src/human-handoff.ts
++++ b/src/human-handoff.ts
+@@ -25,7 +25,7 @@ import type { MergePermissionVerdict } from "./merge-permission.ts";
+ import type { RunRegistry } from "./runs.ts";
+ 
+ /** Pending causes that are a human's to settle on GitHub, so they hand off. */
+-export const HANDOFF_PENDING_CAUSES: readonly string[] = Object.freeze(["reviews", "behind", "unknown_block"]);
++export const HANDOFF_PENDING_CAUSES: readonly string[] = Object.freeze(["reviews", "behind", "unknown_block", "checks", "unstable"]);
+ 
+ /** The registry read this module needs; `get` may throw on an unreadable registry. */
+ export interface MergePolicyRegistry {
