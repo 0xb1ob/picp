@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
@@ -7,7 +7,7 @@ import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT } f
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { createScratchRepo, git, REPO_ROOT } from "../harness/index.ts";
 
-for (const state of ["clean", "unregistered", "archived", "denied", "corrupt", "branch", "base", "detached", "dirty-primary", "dirty-target", "foreign", "primary", "missing", "origin", "retry", "contention", "unreachable"] as const) {
+for (const state of ["clean", "unregistered", "archived", "denied", "corrupt", "branch", "base", "detached", "off-base", "dirty-primary", "dirty-target", "foreign", "primary", "missing", "origin", "retry", "contention", "unreachable"] as const) {
 	test(`S31 cp_check: ${state}`, { timeout: 120_000 }, async (t) => {
 		const b = await dispatchS29(t);
 		const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
@@ -23,6 +23,7 @@ for (const state of ["clean", "unregistered", "archived", "denied", "corrupt", "
 			case "branch": git(b.clone, "branch", "cp-new"); code = "branch_exists"; break;
 			case "base": args.base = "nope"; code = "base_missing"; break;
 			case "detached": git(b.clone, "checkout", "--quiet", "--detach", "HEAD"); code = "primary_detached"; break;
+			case "off-base": git(b.clone, "checkout", "--quiet", "-b", "side"); code = "primary_off_base"; break;
 			case "dirty-primary": writeFileSync(join(b.clone, "dirty"), "x"); status = "ok"; code = "primary_dirty"; break;
 			case "dirty-target": {
 				const worktree = join(b.home, "dirty-target");
@@ -37,7 +38,7 @@ for (const state of ["clean", "unregistered", "archived", "denied", "corrupt", "
 			}
 			case "primary": args.worktree = b.clone; code = "worktree_is_primary"; break;
 			case "missing": args.worktree = join(b.home, "absent"); code = "worktree_missing"; break;
-			case "origin": git(b.clone, "remote", "set-url", "origin", join(b.home, "absent.git")); code = "origin_mismatch"; break;
+			case "origin": git(b.clone, "remote", "set-url", "origin", join(b.home, "absent.git")); args.fetch = true; code = "origin_mismatch"; break;
 			case "retry":
 			case "contention":
 			case "unreachable": args.fetch = true; code = state === "retry" ? undefined : state === "contention" ? "fetch_contention" : "fetch_failed"; if (state === "retry") status = "ok"; break;
@@ -45,7 +46,7 @@ for (const state of ["clean", "unregistered", "archived", "denied", "corrupt", "
 		const bin = join(b.home, "bin"); mkdirSync(bin);
 		if (["retry", "contention", "unreachable"].includes(state)) {
 			const count = join(b.home, "fetch-count");
-			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = fetch ]; then\n${state === "retry" ? `if [ -f '${count}' ]; then exec /usr/bin/git "$@"; fi; touch '${count}'` : ":"}\necho '${state === "unreachable" ? "fatal: could not read from remote repository." : "error: cannot lock ref refs/remotes/origin/main: unable to update local ref"}' >&2\nexit 1\nfi\nexec /usr/bin/git "$@"\n`, { mode: 0o700 });
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = fetch ]; then\necho fetch >> '${count}'\n${state === "retry" ? `attempt=$(wc -l < '${count}'); if [ "$attempt" -gt 2 ]; then exec /usr/bin/git "$@"; fi; if [ "$attempt" -eq 1 ]; then echo 'unable to update local ref' >&2; else echo 'cannot lock ref refs/remotes/origin/main: is at bad but expected good' >&2; fi` : `echo '${state === "unreachable" ? "fatal: could not read from remote repository." : "failed to lock ref refs/remotes/origin/main"}' >&2`}\nexit 1\nfi\nexec /usr/bin/git "$@"\n`, { mode: 0o700 });
 		}
 		const ends = await b.run([{ kind: "tool_calls", calls: [{ name: "cp_check", args }] }], { PATH: `${bin}:${process.env.PATH}` });
 		const result = ends[0]?.result.details;
@@ -53,8 +54,19 @@ for (const state of ["clean", "unregistered", "archived", "denied", "corrupt", "
 		const findings = result?.findings as Array<{ code: string; fix: string }>;
 		if (code) assert.ok(findings.some((finding) => finding.code === code), `${state}: ${JSON.stringify(findings)}`);
 		else assert.deepEqual(findings, []);
+		if (["retry", "contention", "unreachable"].includes(state)) {
+			assert.equal(readFileSync(join(b.home, "fetch-count"), "utf8").trim().split("\n").length, state === "unreachable" ? 1 : 3, `fetch attempts for ${state}`);
+		}
 		if (state === "contention") assert.doesNotMatch(findings.find((finding) => finding.code === code)?.fix ?? "", /reachable origin remote/);
 		if (state === "unreachable") assert.match(findings.find((finding) => finding.code === code)?.fix ?? "", /reachable origin remote/);
+		if (state === "clean") { assert.equal(result?.clone, b.clone); assert.equal(result?.base, "main"); }
+		if (state === "origin") assert.ok(findings.some((finding) => finding.code === "fetch_failed"), "mismatched unreachable origin also fails fetch");
+		if (state === "archived" || state === "denied") {
+			if (state === "archived") await post.registry.setArchived("demo", false);
+			else writeFileSync(join(b.home, LAYOUT.mandateDefaultsFile), "{}");
+			const recovered = await b.run([{ kind: "tool_calls", calls: [{ name: "cp_check", args }] }]);
+			assert.equal(recovered[0]?.result.details?.status, "ok", "removing the refusal restores eligibility");
+		}
 	});
 }
 
