@@ -7,7 +7,7 @@ import { requireJobLabels, type Ledger } from "./ledger.ts";
 import type { MandateStore } from "./mandate.ts";
 import { EscalationStore } from "./escalation.ts";
 import { readPriorAttempts } from "./gate.ts";
-import { publishRecoveryFile, recoveryDigest, recoveryFile, recoveryJson, recoveryRecord, recoveryTarget, recoveryStatus, validateRecoveryAuthority, type RecoveryReservation } from "./gate-recovery.ts";
+import { recoveryTask, publishRecoveryFile, recoveryDigest, recoveryFile, recoveryJson, recoveryRecord, recoveryTarget, recoveryStatus, validateRecoveryAuthority, type RecoveryReservation } from "./gate-recovery.ts";
 
 export async function prepareRecovery(options: {
 	home: string; jobId: string; replacementJobId: string; replanEscalationId: string;
@@ -65,19 +65,14 @@ export async function prepareRecovery(options: {
 		inputs: files.map((file) => ({ source: file.source, target: file.target, bytes: file.bytes.length,
 			sha256: recoveryDigest(file.bytes), source_sha256: recoveryDigest(readFileSync(file.source)) })),
 	};
+	const task = recoveryTask(reservation, files.map((file) => file.bytes), artifacts.file(replacementJobId));
 	validateRecoveryAuthority(home, reservation, options.mandates);
 	publishRecoveryFile(canonical, recoveryJson(reservation));
 	const binding = { source_job: jobId, reservation_sha256: recoveryDigest(recoveryJson(reservation)) };
 	publishRecoveryFile(recoveryFile(target, "source"), recoveryJson(binding));
 	for (const file of files) publishRecoveryFile(file.target, file.bytes);
 	const task_file = join(target, "revision-task.md");
-	publishRecoveryFile(task_file, Buffer.from([
-		`# Correct the plan from ${jobId}`,
-		`You are a replacement read-only planner for ${replacementJobId}. Do not implement code.`,
-		...files.filter((file) => !/gate-\d+\.json$/.test(file.target)).map((file) => `Read in full: ${file.target}`),
-		`Write the corrected plan to ${artifacts.file(replacementJobId)} and report_result.`,
-		"Exactly one corrected review is available. No automatic revision or retry follows it.",
-	].join("\n") + "\n"));
+	publishRecoveryFile(task_file, task);
 	const result = { job_id: jobId, replacement_job_id: replacementJobId, task_file };
 	publishRecoveryFile(join(dir, "gate-replacement.json"), recoveryJson(result));
 	publishRecoveryFile(recoveryFile(target, "prepared"), recoveryJson(binding));

@@ -9,7 +9,10 @@ import type { Ledger } from "./ledger.ts";
 export function readTaskAddenda(home: string, jobId: string): TaskAddendum[] {
 	const file = join(home, paths.taskAddendaFile(jobId));
 	if (!existsSync(file)) return [];
-	const body = readFileSync(file, "utf8");
+	return parseTaskAddenda(readFileSync(file, "utf8"), file);
+}
+
+export function parseTaskAddenda(body: string, file: string): TaskAddendum[] {
 	if (Buffer.byteLength(body, "utf8") > REVIEW_ORIGINAL_TASK_MAX_BYTES) throw new Error(`${file}: task addenda exceed the byte cap`);
 	if (!body.endsWith("\n")) throw new Error(`${file}: incomplete task addendum record`);
 	return body.slice(0, -1).split("\n").map((line, index) => {

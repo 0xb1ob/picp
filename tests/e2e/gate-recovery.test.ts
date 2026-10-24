@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
@@ -38,7 +38,7 @@ async function fixture(t: { after(fn: () => void | Promise<void>): void }) {
 		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["revision max cap"], decided_at: "2026-09-04T18:01:00Z",
 	};
 	atomicWriteJson(join(scratch.path, paths.gateFile(source.id, 2)), decision);
-	writeFileSync(join(scratch.path, paths.originalTaskFile(source.id)), "full original scope\n");
+	writeFileSync(join(scratch.path, paths.originalTaskFile(source.id)), `full original scope\nWrite report to ${post.artifacts.file(source.id)}.\nEvidence pointer: ${join(scratch.path, "external-evidence.md")}\n`);
 	writeFileSync(join(scratch.path, paths.taskAddendaFile(source.id)), JSON.stringify({ schema_version: SCHEMA_VERSION, n: 1,
 		added_at: "2026-09-04T18:00:00Z", text: "Preserve the complete migration scope.\n".repeat(1000),
 		by: "operator-quote", quote: "Keep the original scope.", reason: "corrected review" }) + "\n");
@@ -236,27 +236,99 @@ test("immutable preparation refuses changed input, history and malformed reserva
 	await assert.rejects(f.post.replacePlanner(f.source, f.target, f.authority), /unreadable recovery record/);
 });
 
+
+test("absent addenda preparation is deterministic and rejects newly added scope", async (t) => {
+	const f = await fixture(t);
+	const addenda = readFileSync(join(f.scratch.path, paths.taskAddendaFile(f.source)));
+	unlinkSync(join(f.scratch.path, paths.taskAddendaFile(f.source)));
+	const prepared = await f.post.replacePlanner(f.source, f.target, f.authority);
+	const task = readFileSync(prepared.task_file, "utf8");
+	assert.ok(task.startsWith("full original scope\n"));
+	assert.ok(!task.includes("## Authorized task addenda"));
+	assert.deepEqual(await f.post.replacePlanner(f.source, f.target, f.authority), prepared);
+	writeFileSync(join(f.scratch.path, paths.taskAddendaFile(f.source)), addenda);
+	await assert.rejects(f.post.replacePlanner(f.source, f.target, f.authority), /immutable recovery file differs|addenda mismatch/);
+	assert.equal(existsSync(recoveryFile(join(f.scratch.path, paths.runDir(f.target)), "claim")), false);
+});
+for (const change of ["task", "addenda", "legacy"] as const) {
+	test(`preclaim ${change} mismatch preserves the unused claim`, async (t) => {
+		const f = await fixture(t);
+		const prepared = await f.post.replacePlanner(f.source, f.target, f.authority);
+		writeFileSync(f.post.artifacts.path(f.target), "corrected plan\n");
+		const target = join(f.scratch.path, paths.runDir(f.target));
+		writeFileSync(change === "addenda" ? join(target, "task-addenda.jsonl") : prepared.task_file,
+			change === "legacy" ? "Read previous-original-task.md\n" : "tampered\n");
+		const agent = mkdtempSync(join(tmpdir(), "cp-recovery-agent-"));
+		writeFileSync(join(agent, "models.json"), JSON.stringify({ providers: {} }));
+		t.after(() => rmSync(agent, { recursive: true, force: true }));
+		const result = await child([f.scratch.path, f.source, f.target, f.authority, "", "", "gate", "mock/test"],
+			{ ...process.env, PI_CODING_AGENT_DIR: agent, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1" });
+		assert.equal(result.code, 1, result.output);
+		assert.match(result.output, /prepared recovery input changed|legacy handoff mismatch/);
+		assert.equal(existsSync(recoveryFile(target, "claim")), false);
+		assert.equal(existsSync(join(f.scratch.path, "spawn-observations.jsonl")), false);
+		assert.equal(f.post.gateModule().status(f.target).recovery?.remaining, 1);
+	});
+}
+test("postcapture task mutation cannot change frozen reviewer bytes", async (t) => {
+	const f = await fixture(t);
+	const prepared = await f.post.replacePlanner(f.source, f.target, f.authority);
+	const frozen = readFileSync(prepared.task_file);
+	writeFileSync(f.post.artifacts.path(f.target), "corrected plan\n");
+	const provider = await MockProvider.start();
+	const model = provider.addScript("frozen", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: {
+		job_id: f.target, verdict: "revise", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },
+		reasons: ["reviewed"], revisions: ["fix proof"],
+	} }] }]);
+	const agent = mkdtempSync(join(tmpdir(), "cp-recovery-agent-"));
+	writeFileSync(join(agent, "models.json"), JSON.stringify(provider.modelsJson()));
+	t.after(async () => { rmSync(agent, { recursive: true, force: true }); await provider.stop(); });
+	const barrier = join(f.scratch.path, "frozen-barrier");
+	const pending = child([f.scratch.path, f.source, f.target, f.authority, "", barrier, "gate", model],
+		{ ...process.env, PI_CODING_AGENT_DIR: agent, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1" });
+	await waitFor(() => readdirSync(f.scratch.path).some((name) => name.endsWith(".ready")), Boolean, { timeoutMs: 15000 });
+	writeFileSync(prepared.task_file, "changed after capture\n");
+	writeFileSync(`${barrier}.release`, "release");
+	const result = await pending;
+	assert.equal(result.code, 0, result.output);
+	assert.deepEqual(readFileSync(join(f.scratch.path, paths.gateScratchDir(f.target, 3), "original-task.md")), frozen);
+	assert.equal(f.post.gateModule().status(f.target).recovery?.remaining, 0);
+});
+
 for (const outcome of ["pass", "revise", "escalate", "operational"] as const) {
-	test(`corrected ${outcome} is durably terminal through CommandPost`, async (t) => {
+	test(outcome === "pass" ? "recovery handoff uses home default reviewer" : `corrected ${outcome} is durably terminal through CommandPost`, async (t) => {
 		const f = await fixture(t);
 		await f.post.replacePlanner(f.source, f.target, f.authority);
 		writeFileSync(f.post.artifacts.path(f.target), "# Corrected plan\n");
 		writeFileSync(join(f.scratch.path, paths.originalTaskFile(f.target)), "replacement dispatch task pointer\n");
+		writeFileSync(join(f.scratch.path, "external-evidence.md"), "EXTERNAL-ONLY-SECRET-MARKER\n");
 		const provider = await MockProvider.start();
 		const agent = mkdtempSync(join(tmpdir(), "cp-recovery-agent-"));
-		const model = provider.addScript("recovery", outcome === "operational" ? [{ kind: "text", text: "no verdict" }] : [{
-			kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: f.target, verdict: outcome,
+		const model = provider.addScript("recovery", [{ kind: "tool_calls", calls: [{ name: "read", args: {
+			path: join(f.scratch.path, paths.gateScratchDir(f.target, 3), "original-task.md"),
+		} }] }, ...(outcome === "operational" ? [{ kind: "text" as const, text: "no verdict" }] : [{
+			kind: "tool_calls" as const, calls: [{ name: "report_verdict", args: { job_id: f.target, verdict: outcome,
 				flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["corrected review"],
 				...(outcome === "revise" ? { revisions: ["still missing proof"] } : {}) } }],
-		}]);
+		}])]);
 		writeFileSync(join(agent, "models.json"), JSON.stringify(provider.modelsJson()));
+		if (outcome === "pass") atomicWriteJson(join(f.scratch.path, ".pi-command-post/data/routing.json"), {
+			schema_version: SCHEMA_VERSION, allow: ["mock/*"], rubric: [{ id: "gate-reviewer", role: "gate-reviewer", model }],
+		});
 		const post = new CommandPost({ home: f.scratch.path, packageRoot: REPO_ROOT,
 			parentEnv: { ...process.env, PI_CODING_AGENT_DIR: agent, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1" } });
 		t.after(async () => { await post.shutdown(); rmSync(agent, { recursive: true, force: true }); await provider.stop(); });
-		const started = await post.gate({ jobId: f.target, model });
+		const governing = readFileSync(join(f.scratch.path, paths.runDir(f.target), "revision-task.md"), "utf8");
+		assert.ok(governing.startsWith("full original scope\n"));
+		assert.ok(governing.includes("Preserve the complete migration scope.\n".repeat(1000)));
+		assert.ok(governing.includes(`Write the complete corrected plan to ${post.artifacts.file(f.target)}`));
+		const started = await post.gate({ jobId: f.target, ...(outcome === "pass" ? {} : { model }) });
 		assert.ok(isGateWait(started));
 		post.reviewRuns.handBack(started.key);
 		await post.reviewRuns.settled(started.key);
+		if (outcome !== "pass") assert.equal(readFileSync(join(f.scratch.path, paths.gateScratchDir(f.target, 3), "original-task.md"), "utf8"), governing);
+		assert.ok(JSON.stringify(provider.requests()).includes("full original scope"));
+		assert.ok(!JSON.stringify(provider.requests()).includes("EXTERNAL-ONLY-SECRET-MARKER"));
 		const count = provider.requests().length;
 		const replay = await post.gate({ jobId: f.target, model });
 		assert.ok(!isGateWait(replay));
@@ -264,7 +336,7 @@ for (const outcome of ["pass", "revise", "escalate", "operational"] as const) {
 		assert.equal(provider.requests().length, count);
 		if (outcome !== "pass") {
 			assert.deepEqual(readFileSync(join(f.scratch.path, paths.gateScratchDir(f.target, 3), "original-task.md")),
-				readFileSync(join(f.scratch.path, paths.originalTaskFile(f.source))));
+				readFileSync(join(f.scratch.path, paths.runDir(f.target), "revision-task.md")));
 			const ship = await f.ledger.create({ title: "ship after correction", project: "demo", kind: "ship", delivery: "local" });
 			post.pipeline().store.write({ schema_version: SCHEMA_VERSION, research_id: f.target, ship_id: ship.id,
 				project: "demo", delivery: "local", state: "gating", created_at: "2026-09-04T18:00:00Z", updated_at: "2026-09-04T18:00:00Z" });
@@ -272,6 +344,7 @@ for (const outcome of ["pass", "revise", "escalate", "operational"] as const) {
 			assert.equal((await post.advancePipeline(f.target)).next, "surface");
 			assert.equal(provider.requests().length, count);
 		}
+		writeFileSync(join(f.scratch.path, paths.runDir(f.target), "revision-task.md"), "legacy pointer after spent claim\n");
 		const restarted = new CommandPost({ home: f.scratch.path, packageRoot: REPO_ROOT });
 		try {
 			assert.deepEqual(await restarted.gate({ jobId: f.target }), replay);
