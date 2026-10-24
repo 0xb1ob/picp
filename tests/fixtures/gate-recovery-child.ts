@@ -33,6 +33,26 @@ childProcess.default.spawn = ((...args: Parameters<typeof spawn>) => {
 syncBuiltinESMExports();
 const { CommandPost } = await import("../../src/command-post.ts");
 const post = new CommandPost({ home, packageRoot: process.cwd(), parentEnv: process.env });
+if (action === "source-race") {
+	const registry = {
+		find(provider: string, id: string) {
+			fs.writeFileSync(`${barrier}.ready`, "ready");
+			const deadline = Date.now() + 15000;
+			while (!fs.existsSync(`${barrier}.release`)) {
+				if (Date.now() > deadline) throw new Error("routing barrier timed out");
+				Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+			}
+			return { provider, id };
+		},
+		hasConfiguredAuth: () => true,
+	};
+	await post.shutdown();
+	const routed = new CommandPost({ home, packageRoot: process.cwd(), parentEnv: process.env, modelRegistry: () => registry });
+	try { await routed.gate({ jobId: source, model: model ?? "mock/test" }); }
+	catch (error) { console.error(String(error)); process.exitCode = 1; }
+	finally { await routed.shutdown(); }
+	process.exit(process.exitCode ?? 0);
+}
 try {
 	if (action === "gate") {
 		const result = await post.gate({ jobId: target, ...(model ? { model } : {}) });

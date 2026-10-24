@@ -56,9 +56,16 @@ export function validateRecoveryAuthority(home: string, reservation: RecoveryRes
 	}
 }
 
+function readReservation(path: string): RecoveryReservation | undefined {
+	const value = recoveryRecord<unknown>(path);
+	if (value === undefined) return undefined;
+	const parsed = validate<RecoveryReservation>(GateRecoveryReservationSchema, value);
+	if (!parsed.ok) throw new Error(`${path}: invalid recovery reservation: ${parsed.errors.join("; ")}`);
+	return parsed.value;
+}
 export function recoveryTarget(home: string, jobId: string): RecoveryReservation | undefined {
 	const dir = join(home, paths.runDir(jobId));
-	const source = recoveryRecord<RecoveryReservation>(recoveryFile(dir, "reservation"));
+	const source = readReservation(recoveryFile(dir, "reservation"));
 	if (source) throw new Error(`${jobId}: recovery reserved for ${source.replacement_job}`);
 	const backlink = recoveryRecord<{ source_job: string; reservation_sha256: string }>(recoveryFile(dir, "source"));
 	if (!backlink) {
@@ -66,13 +73,13 @@ export function recoveryTarget(home: string, jobId: string): RecoveryReservation
 		if (existsSync(runs)) for (const entry of readdirSync(runs, { withFileTypes: true })) {
 			if (!entry.isDirectory()) continue;
 			const file = recoveryFile(join(runs, entry.name), "reservation");
-			const reserved = recoveryRecord<RecoveryReservation>(file);
+			const reserved = readReservation(file);
 			if (reserved?.replacement_job === jobId) throw new Error(`${jobId}: recovery reservation exists; preparation incomplete`);
 		}
 		return undefined;
 	}
 	const file = recoveryFile(join(home, paths.runDir(backlink.source_job)), "reservation");
-	const reservation = recoveryRecord<RecoveryReservation>(file);
+	const reservation = readReservation(file);
 	if (!reservation || reservation.schema_version !== 1 || reservation.replacement_job !== jobId ||
 		reservation.source_job !== backlink.source_job || recoveryDigest(readFileSync(file)) !== backlink.reservation_sha256 ||
 		!Array.isArray(reservation.inputs)) throw new Error(`${file}: invalid recovery binding`);
@@ -109,9 +116,9 @@ export function recoveryReplay(home: string, jobId: string, artifact: Buffer): G
 
 export function recoveryStatus(home: string, jobId: string): GateRecoveryStatus | undefined {
 	const dir = join(home, paths.runDir(jobId));
-	const source = recoveryRecord<RecoveryReservation>(recoveryFile(dir, "reservation"));
+	const source = readReservation(recoveryFile(dir, "reservation"));
 	const backlink = recoveryRecord<{ source_job: string }>(recoveryFile(dir, "source"));
-	const target = source ?? (backlink ? recoveryRecord<RecoveryReservation>(
+	const target = source ?? (backlink ? readReservation(
 		recoveryFile(join(home, paths.runDir(backlink.source_job)), "reservation")) : undefined);
 	if (!target) return undefined;
 	const parsed = validate<RecoveryReservation>(GateRecoveryReservationSchema, target);
@@ -129,6 +136,10 @@ export async function claimRecovery(input: {
 }): Promise<Buffer> {
 	const { home, jobId, reservation, attempt } = input;
 	await input.ready();
+	const current = recoveryTarget(home, jobId);
+	if (!current || recoveryDigest(recoveryJson(current)) !== recoveryDigest(recoveryJson(reservation))) {
+		throw new Error(`${jobId}: recovery binding changed during preflight`);
+	}
 	if (attempt !== reservation.attempt + 1) throw new Error(`${jobId}: recovery history changed`);
 	for (const file of reservation.inputs) {
 		const bytes = readFileSync(file.target);

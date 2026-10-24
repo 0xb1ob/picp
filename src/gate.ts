@@ -830,9 +830,6 @@ export class Gate {
 		}
 
 		const prior = readPriorAttempts(home, jobId);
-		// A passed artifact is not re-gated: the decision stands until the artifact
-		// moves, so a second `start` returns it instead of spawning a second
-		// reviewer. A revise or an escalate is an open loop the caller may re-run.
 		const last = prior.decisions.at(-1);
 		if (last?.verdict === "pass") {
 			const info = artifacts.info(jobId);
@@ -853,11 +850,14 @@ export class Gate {
 		const route = await this.#route(profile, jobId, record, selection?.model, selection?.thinking);
 		const model = route.decision.model;
 
+		if (!recovery) {
+			await manager.ready();
+			if (recoveryTarget(home, jobId)) throw new GateError(`${jobId}: recovery binding changed during preflight`);
+		}
 		const recoveryArtifact = recovery ? await claimRecovery({ home, jobId, reservation: recovery, attempt,
 			artifactPath: artifacts.file(jobId), ready: () => manager.ready(), mandates: this.#options.mandates,
 			permit: () => { if (record) this.#options.mandates?.assertPermitted("review", { jobId, project: record.project, kind: "research" }); },
 		}) : undefined;
-		// The reviewer sees one file, in a directory that contains nothing else.
 		const gateRunDir = join(home, paths.gateRunDir(jobId, attempt));
 		const scratch = join(home, paths.gateScratchDir(jobId, attempt));
 		mkdirSync(scratch, { recursive: true });
@@ -891,7 +891,6 @@ export class Gate {
 		const deadline = isoTimestamp(new Date(now().getTime() + timeoutMs));
 		const deliverRevise = request.deliverRevise ?? true;
 
-		if (!recovery) await manager.ready();
 		let managed: ReturnType<WorkerManager["spawn"]>;
 		try {
 			managed = manager.spawn({

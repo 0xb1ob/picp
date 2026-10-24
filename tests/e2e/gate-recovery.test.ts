@@ -89,6 +89,39 @@ test("recovery public preparation preserves full input/history and binds an idem
 	await assert.rejects(f.post.replacePlanner(f.source, f.target), /recovery binding/);
 });
 
+test("source routing paused before concurrent preparation refuses dispatch", async (t) => {
+	const f = await fixture(t);
+	const barrier = join(f.scratch.path, "source-preflight");
+	const agent = mkdtempSync(join(tmpdir(), "cp-recovery-agent-"));
+	writeFileSync(join(agent, "models.json"), JSON.stringify({ providers: {} }));
+	t.after(() => rmSync(agent, { recursive: true, force: true }));
+	const pending = child([f.scratch.path, f.source, f.target, f.authority, "", barrier, "source-race"],
+		{ ...process.env, PI_CODING_AGENT_DIR: agent, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1" });
+	await waitFor(() => existsSync(`${barrier}.ready`), Boolean, { timeoutMs: 15000 });
+	await f.post.replacePlanner(f.source, f.target, f.authority);
+	writeFileSync(`${barrier}.release`, "release");
+	const result = await pending;
+	assert.equal(result.code, 1, result.output);
+	assert.match(result.output, /recovery reserved/);
+	assert.equal(existsSync(join(f.scratch.path, "spawn-observations.jsonl")), false);
+	assert.equal(existsSync(join(f.scratch.path, paths.gateScratchDir(f.source, 3))), false);
+});
+
+for (const value of [null, false, 0, "invalid", {}, { schema_version: 1 }]) {
+	test(`source refuses schema-invalid canonical reservation ${JSON.stringify(value)}`, async (t) => {
+		const f = await fixture(t);
+		writeFileSync(recoveryFile(join(f.scratch.path, paths.runDir(f.source)), "reservation"), JSON.stringify(value));
+		const agent = mkdtempSync(join(tmpdir(), "cp-recovery-agent-"));
+		writeFileSync(join(agent, "models.json"), JSON.stringify({ providers: {} }));
+		t.after(() => rmSync(agent, { recursive: true, force: true }));
+		const result = await child([f.scratch.path, f.source, f.source, f.authority, "", "", "gate", "mock/test"],
+			{ ...process.env, PI_CODING_AGENT_DIR: agent, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1" });
+		assert.equal(result.code, 1, result.output);
+		assert.match(result.output, /invalid recovery reservation/);
+		assert.equal(existsSync(join(f.scratch.path, "spawn-observations.jsonl")), false);
+		assert.equal(existsSync(join(f.scratch.path, paths.gateScratchDir(f.source, 3))), false);
+	});
+}
 test("independent processes choose one immutable replacement before publishing target inputs", async (t) => {
 	const f = await fixture(t);
 	const alternate = await f.ledger.create({ title: "alternate", project: "demo", kind: "research", delivery: "pipeline" });
