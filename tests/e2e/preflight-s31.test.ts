@@ -8,7 +8,7 @@ import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { createScratchRepo, git, REPO_ROOT } from "../harness/index.ts";
 
 for (const state of ["clean", "unregistered", "archived", "denied", "corrupt", "branch", "base", "detached", "off-base", "dirty-primary", "dirty-target", "foreign", "primary", "missing", "origin", "retry", "contention", "unreachable"] as const) {
-	test(`S31 cp_check: ${state}`, { timeout: 120_000 }, async (t) => {
+	test(state === "clean" ? "S31 cp_check: clean" : `S31 cp_check: ${state}`, { timeout: 120_000 }, async (t) => {
 		const b = await dispatchS29(t);
 		const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
 		const args: Record<string, unknown> = { project: "demo", job_id: "cp-new", fetch: false };
@@ -59,6 +59,16 @@ for (const state of ["clean", "unregistered", "archived", "denied", "corrupt", "
 		}
 		if (state === "contention") assert.doesNotMatch(findings.find((finding) => finding.code === code)?.fix ?? "", /reachable origin remote/);
 		if (state === "unreachable") assert.match(findings.find((finding) => finding.code === code)?.fix ?? "", /reachable origin remote/);
+		const rendered = JSON.stringify(ends[0]?.result.content);
+		if (state === "unreachable") assert.match(rendered, /reachable origin remote/);
+		if (state === "unregistered") { assert.deepEqual(findings.map((f) => f.code), [code]); assert.match(rendered, /fix: register the project/); }
+		if (state === "archived") { assert.deepEqual(findings.map((f) => f.code), [code]); assert.match(rendered, /fix: cp_project unarchive demo/); }
+		if (state === "denied") { assert.deepEqual(findings.map((f) => f.code), [code]); assert.match(rendered, /project demo is denied/); assert.match(rendered, /fix: the operator removes demo from deny_projects/); }
+		if (state === "corrupt") { assert.deepEqual(findings.map((f) => f.code), [code]); assert.ok(rendered.includes(join(b.home, LAYOUT.mandateDefaultsFile))); assert.match(rendered, /is not valid JSON/); }
+		if (state === "dirty-primary") assert.deepEqual(findings.map((f) => f.code), [code]);
+		if (state === "foreign") assert.match(rendered, /treehouse return --force/);
+		if (state === "contention") { assert.ok(!findings.some((f) => f.code === "fetch_failed")); assert.match(rendered, /contention|retry/i); }
+		if (state === "unreachable") assert.ok(!findings.some((f) => f.code === "fetch_contention"));
 		if (state === "clean") { assert.equal(result?.clone, b.clone); assert.equal(result?.base, "main"); }
 		if (state === "origin") assert.ok(findings.some((finding) => finding.code === "fetch_failed"), "mismatched unreachable origin also fails fetch");
 		if (state === "archived" || state === "denied") {
@@ -70,7 +80,7 @@ for (const state of ["clean", "unregistered", "archived", "denied", "corrupt", "
 	});
 }
 
-for (const state of ["same", "cross", "unknown-model", "own", "own-other-tree", "own-cross", "script-own", "script-other", "independent", "done"] as const) {
+for (const state of ["same", "cross", "unknown-model", "own", "own-other-tree", "own-cross", "script-own", "script-other", "independent", "no-target", "done"] as const) {
 	test(`S31 occupancy: ${state}`, { timeout: 120_000 }, async (t) => {
 		const b = await dispatchS29(t);
 		const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
@@ -80,7 +90,7 @@ for (const state of ["same", "cross", "unknown-model", "own", "own-other-tree", 
 		const own = state.startsWith("own") || state === "script-own";
 		const args: Record<string, unknown> = { project: "demo", job_id: own ? "cp-held" : "cp-next", model: state === "cross" || state === "own-cross" ? "mock/small" : "mock/big", fetch: false, worktree };
 		if (state === "unknown-model") delete args.model;
-		if (state === "own") delete args.worktree;
+		if (state === "own" || state === "no-target") delete args.worktree;
 		if (state === "own-other-tree" || state === "independent") {
 			const other = join(b.home, "other-worktree"); git(b.clone, "worktree", "add", "--quiet", other, "-b", "cp-other"); args.worktree = other;
 		}
@@ -92,9 +102,23 @@ for (const state of ["same", "cross", "unknown-model", "own", "own-other-tree", 
 		}
 		const ends = await b.run([{ kind: "tool_calls", calls: [{ name: "cp_check", args }] }]);
 		const result = ends[0]?.result.details;
-		const expected = state === "same" || state === "own" ? "promote" : state === "done" || state === "independent" ? "ok" : "fail";
+		const expected = state === "same" || state === "own" ? "promote" : ["done", "independent", "no-target"].includes(state) ? "ok" : "fail";
 		assert.equal(result?.status, expected, JSON.stringify(ends));
 		if (expected === "promote") assert.match(JSON.stringify(result?.promote), /cp_send cp-held/);
 		if (expected === "fail") assert.match(JSON.stringify(result?.findings), /occupied_refuse/);
+		const rendered = JSON.stringify(ends[0]?.result.content);
+		if (expected === "promote") assert.match(rendered, /cp_send cp-held/);
+		if (expected === "promote") {
+			assert.match(JSON.stringify(result?.findings), /occupied_promote/);
+			const promoted = result?.promote as { job_id?: string; model?: string; instruction?: string };
+			assert.equal(promoted.job_id, "cp-held"); assert.equal(promoted.model, "mock/big");
+			assert.match(promoted.instruction ?? "", state === "own" ? /Do not dispatch, do not take a second lease/ : /Do not dispatch, do not treehouse get --lease/);
+		}
+		if (expected === "fail") assert.equal(result?.promote, undefined);
+		if (state === "cross") assert.match(rendered, /new lease|tear/);
+		if (state === "own") assert.match(rendered, /already has a live/);
+		if (state === "own-other-tree") assert.match(rendered, /never holds two worktrees/);
+		if (state === "own-cross") assert.match(rendered, /cp_teardown cp-held/);
+		if (state === "script-own") assert.match(rendered, /tear.*down/);
 	});
 }

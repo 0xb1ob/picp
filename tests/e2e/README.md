@@ -190,7 +190,7 @@ tests as well, so they cannot come back:
 
 | the suite believed | the system actually | pinned in |
 |---|---|---|
-| a returned lease deletes its worktree | `treehouse return` **recycles** it: cleaned, reset, `status: available` | `tests/leases.test.ts` |
+| a returned lease deletes its worktree | `treehouse return` **recycles** it: cleaned, reset, `status: available` | `tests/e2e/dispatch-s31.test.ts` |
 | `advance()` answers `revise` / `retry` | those are **cp_gate's** words; advance says `wait`/`authorize`/`surface`/`done` | `tests/pipeline.test.ts` |
 | the pipeline reaches `done` by itself | only the next `advance()` writes it — and without that guard a second advance dispatched a **second implementer** | `tests/pipeline.test.ts` |
 | the ladder returns `redispatch` | it returns `retry_same`, and the re-dispatch is refused until the leftover branch is removed | `tests/e2e/phase2.test.ts` (m2) |

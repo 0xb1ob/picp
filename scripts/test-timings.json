@@ -1,6 +1,6 @@
 {
-	"tests/e2e/dispatch-s31.test.ts": 146951,
-	"tests/e2e/preflight-s31.test.ts": 63508,
+	"tests/e2e/dispatch-s31.test.ts": 150173,
+	"tests/e2e/preflight-s31.test.ts": 51387,
 	"tests/e2e/dashboard-refusals-s26.test.ts": 9000,
 	"tests/e2e/drain-restart.test.ts": 7000,
 	"tests/e2e/drain-worker-s26.test.ts": 32000,
@@ -170,12 +170,11 @@
 	"tests/intake.test.ts": 1130,
 	"tests/integrate-retained.test.ts": 3183,
 	"tests/integrate.test.ts": 5093,
-	"tests/job-skills.test.ts": 11,
+	"tests/job-skills-retained.test.ts": 1285,
 	"tests/jobs-tool.test.ts": 174,
 	"tests/json-store.test.ts": 13,
 	"tests/layout-capture.test.ts": 406,
 	"tests/layout-flat.test.ts": 37,
-	"tests/leases.test.ts": 1727,
 	"tests/ledger.test.ts": 174,
 	"tests/live-harness.test.ts": 215,
 	"tests/main-ci-retained.test.ts": 17,
@@ -222,7 +221,6 @@
 	"tests/plan-viewer.test.ts": 21,
 	"tests/planner-artifact.test.ts": 6,
 	"tests/pr-resolve-retained.test.ts": 6,
-	"tests/preflight.test.ts": 2393,
 	"tests/profiles.test.ts": 942,
 	"tests/project-report.test.ts": 5,
 	"tests/projects.test.ts": 16453,
@@ -424,6 +422,5 @@
 	"tests/worker-reporter.test.ts": 8275,
 	"tests/worker-role-tools.test.ts": 17,
 	"tests/worker-session-policy.test.ts": 115,
-	"tests/worker-spawn-reserve.test.ts": 169,
-	"tests/worktree-deps.test.ts": 2
+	"tests/worker-spawn-reserve.test.ts": 169
 }

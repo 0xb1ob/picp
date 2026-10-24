@@ -6,10 +6,10 @@ import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, paths } from "../../src/contracts.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { COMMAND_POST_EXTENSION, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, git, readFleet, readRunEvents, REPO_ROOT, type ScriptStep, startPiChild, waitFor } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, git, leaseState, readFleet, readRunEvents, REPO_ROOT, type ScriptStep, startPiChild, waitFor } from "../harness/index.ts";
 
 for (const state of ["stale", "missing", "current", "no-lock", "failed"] as const) {
-	test(`S31 dependencies: ${state} reaches a worker with its persisted outcome`, { timeout: 120_000 }, async (t) => {
+	test(state === "stale" ? "S31 dependencies: stale reaches a worker with its persisted outcome" : `S31 dependencies: ${state} reaches a worker with its persisted outcome`, { timeout: 120_000 }, async (t) => {
 		const lock = JSON.stringify({ packages: { "": {}, "node_modules/x": { version: "2.0.0" } } });
 		const b = await dispatchS29(t, { files: { ".gitignore": "node_modules/\n", ...(state === "no-lock" ? {} : { "package-lock.json": lock }) } });
 		const bin = join(b.home, "bin");
@@ -36,13 +36,14 @@ for (const state of ["stale", "missing", "current", "no-lock", "failed"] as cons
 		const brief = readFileSync(join(b.home, paths.briefFile(job.id)), "utf8");
 		if (state === "failed") {
 			assert.match(brief, /Dependencies in this worktree may be stale/);
+			assert.match(brief, /stale.*npm ci/);
 			assert.match(brief, /EINTEGRITY/);
 		} else assert.doesNotMatch(brief, /Dependencies in this worktree may be stale/);
 	});
 }
 
 for (const skill of ["empty", "planner", "implementer", "pi-subagents", "pi-goal-x", "rpiv-ask-user-question", "unknown", "ambiguous"] as const) {
-	test(`S31 skills: ${skill}`, { timeout: 120_000 }, async (t) => {
+	test(skill === "planner" ? "S31 skills: planner" : `S31 skills: ${skill}`, { timeout: 120_000 }, async (t) => {
 		const b = await dispatchS29(t);
 		for (const root of [b.agent.path, b.home]) {
 			const dir = join(root, "skills", "dup"); mkdirSync(dir, { recursive: true });
@@ -58,7 +59,7 @@ for (const skill of ["empty", "planner", "implementer", "pi-subagents", "pi-goal
 		const ends = await b.run([{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Inspect fixture.", model, ...(names.length ? { skills: names } : {}), queue: false, when_ready: false } }] }]);
 		if (["empty", "planner", "implementer"].includes(skill)) {
 			assert.equal(ends[0]?.result.details?.receipt, "accepted", JSON.stringify(ends));
-			assert.deepEqual(readFleet(b.home).jobs[0]?.skills?.map((entry) => entry.name) ?? [], names, "resolved skills persist in fleet");
+			assert.deepEqual(readFleet(b.home).jobs[0]?.skills ?? [], names.map((name) => ({ name, dir: join(b.agent.path, "skills", name) })), "resolved skill names and paths persist in fleet");
 			const brief = readFileSync(join(b.home, paths.briefFile(job.id)), "utf8");
 			for (const name of names) assert.ok(brief.includes(join(b.agent.path, "skills", name, "SKILL.md")), name);
 			const requests = await waitFor(() => b.provider.requests(`skill-${skill}`), (requests) => requests.length > 0);
@@ -74,12 +75,12 @@ for (const skill of ["empty", "planner", "implementer", "pi-subagents", "pi-goal
 			}
 		} else {
 			assert.equal(ends[0]?.isError, true, JSON.stringify(ends));
-			assert.match(JSON.stringify(ends[0]?.result), skill === "ambiguous" ? /ambiguous/ : skill === "unknown" ? /not installed/ : skill === "rpiv-ask-user-question" ? /hangs a headless worker/ : /recursion guard/);
+			assert.match(JSON.stringify(ends[0]?.result), skill === "ambiguous" ? /skill dup: .*ambiguous/ : skill === "unknown" ? /skill unknown is not installed/ : skill === "rpiv-ask-user-question" ? /hangs a headless worker/ : /recursion guard/);
 		}
 	});
 }
 
-for (const state of ["json", "path-only", "alias", "malformed", "nopath", "foreign", "missing-executable"] as const) {
+for (const state of ["json", "path-only", "rooted", "alias", "malformed", "nopath", "foreign", "missing-executable"] as const) {
 	test(`S31 leases: ${state} through dispatch and teardown`, { timeout: 120_000 }, async (t) => {
 		const b = await dispatchS29(t);
 		const worktree = join(b.home, "external-lease");
@@ -90,7 +91,9 @@ for (const state of ["json", "path-only", "alias", "malformed", "nopath", "forei
 		const bin = join(b.home, "bin"); mkdirSync(bin);
 		const log = join(b.home, "treehouse-calls");
 		const output = state === "path-only" ? printed : state === "malformed" ? "{ not json }" : state === "nopath" ? "no path here" : JSON.stringify({ path: printed, lease_id: "identity-31" });
-		writeFileSync(join(bin, "treehouse"), state === "missing-executable" ? "#!/cp-missing-interpreter\n" : `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\ncase "$1" in\nget) printf '%s\\n' '${output}';;\nreturn) exit 0;;\nesac\n`, { mode: 0o700 });
+		writeFileSync(join(bin, "treehouse"), state === "missing-executable" ? "#!/cp-missing-interpreter\n" : `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nif [ "$1" = --root ]; then shift 2; fi\ncase "$1" in\nget) printf '%s\\n' '${output}';;\nreturn) exit 0;;\nesac\n`, { mode: 0o700 });
+		// Let the argv assertion catch a leaked flag before real git rejects it.
+		if (state !== "missing-executable") writeFileSync(join(bin, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}-git'\nif [ "$1" = --root ]; then shift 2; fi\nexec /usr/bin/git "$@"\n`, { mode: 0o700 });
 		if (state === "missing-executable") {
 			symlinkSync(process.execPath, join(bin, "node"));
 			symlinkSync("/usr/bin/git", join(bin, "git"));
@@ -100,17 +103,22 @@ for (const state of ["json", "path-only", "alias", "malformed", "nopath", "forei
 		const model = b.provider.addScript(`lease-${state}`, [{ kind: "text", text: "received" }]);
 		const quote = `Force teardown ${job.id} and discard its unreported result.`;
 		const calls: ScriptStep[] = [{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Inspect fixture.", model, queue: false, when_ready: false } }] }];
-		if (["json", "path-only", "alias"].includes(state)) calls.push({ kind: "tool_calls", calls: [{ name: "cp_teardown", args: { job_id: job.id, force: true, operator_quote: quote } }] });
-		const ends = await b.run(calls, { PATH: state === "missing-executable" ? bin : `${bin}:${process.env.PATH}` }, quote);
-		if (!["json", "path-only", "alias"].includes(state)) {
+		if (["json", "path-only", "rooted", "alias"].includes(state)) calls.push({ kind: "tool_calls", calls: [{ name: "cp_teardown", args: { job_id: job.id, force: true, operator_quote: quote } }] });
+		const poolRoot = join(b.home, "recorded-root");
+		const prefix = state === "rooted" ? `--root ${poolRoot} ` : "";
+		const ends = await b.run(calls, { CP_TREEHOUSE_ROOT: state === "rooted" ? poolRoot : "", PATH: state === "missing-executable" ? bin : `${bin}:${process.env.PATH}` }, quote);
+		if (state !== "missing-executable") assert.equal(readFileSync(log, "utf8").split("\n")[0], `${prefix}get --lease --json --lease-holder ${job.id}`, "exact acquire argv reaches the external executable");
+		if (!["json", "path-only", "rooted", "alias"].includes(state)) {
 			assert.equal(ends[0]?.isError, true, JSON.stringify(ends));
 			assert.match(JSON.stringify(ends[0]?.result), state === "foreign" ? /belongs to another repo/ : state === "missing-executable" ? /not on PATH.*no fallback/is : /printed no path/);
+			if (state === "missing-executable") assert.match(JSON.stringify(ends[0]?.result), /git worktree add/);
 			if (state === "foreign") assert.ok(readFileSync(log, "utf8").includes(`return --force --if-lease-id identity-31 ${printed}`));
 		} else {
 			assert.equal(ends[0]?.result.details?.receipt, "accepted", JSON.stringify(ends));
 			assert.equal(ends[0]?.result.details?.worktree, printed);
 			assert.notEqual(ends[1]?.isError, true, JSON.stringify(ends));
-			assert.ok(readFileSync(log, "utf8").includes(`return --force ${state !== "path-only" ? "--if-lease-id identity-31 " : ""}${printed}`));
+			assert.equal(readFileSync(log, "utf8").trim().split("\n")[1], `${prefix}return --force ${state !== "path-only" ? "--if-lease-id identity-31 " : ""}${printed}`, "exact return argv preserves the printed path and identity");
+			assert.doesNotMatch(readFileSync(`${log}-git`, "utf8"), /--root/, "git never receives a treehouse flag");
 			if (state === "alias") assert.notEqual(printed, realpathSync(printed), "fixture distinguishes printed path from realpath");
 		}
 	});
@@ -153,15 +161,27 @@ for (const path of ["relative", "home", "cwd"] as const) {
 		if (path === "cwd") mkdirSync(worktree);
 		const at = isoTimestamp();
 		await post.fleet.add({ job_id: job.id, project: "demo", kind: "ship", delivery: "local", origin: DEFAULT_ORIGIN, phase: "failed", failure: { class: "crash", message: "legacy exit", at }, worktree, branch: job.id, dispatched_at: at, usage: EMPTY_USAGE, worker: { pid: 2147483647, session_id: "legacy", session_file: join(b.home, "legacy.jsonl"), profile: "implementer", role: "implementer", model: "mock/legacy", started_at: at, exited_at: at, exit_code: 1 } });
-		if (path === "cwd") {
-			const model = b.provider.addScript("legacy-cwd-parent", [{ kind: "tool_calls", calls: [{ name: "cp_teardown", args: { job_id: job.id, force: true, operator_quote: "Force close this legacy fixture." } }] }, { kind: "text", text: "observed" }]);
-			b.agent.writeModels(b.provider);
-			const child = startPiChild({ cwd: worktree, model, env: { ...b.agent.env, CP_HOME: b.home }, extensions: [COMMAND_POST_EXTENSION] });
-			t.after(() => child.close());
-			await child.prompt("Force close this legacy fixture."); await child.waitForSettled(60_000);
-			assert.match(JSON.stringify(child.eventsOfType("tool_execution_end")), /current directory .* is inside it/);
-		} else {
-			await assert.rejects(post.tearDown(job.id, { force: true }), path === "relative" ? /lease path must be absolute/ : /command post home .* is inside it/);
+		const bin = join(b.home, "guard-bin"); mkdirSync(bin);
+		const log = join(b.home, "return-executed");
+		writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = ls-files ]; then echo invoked >> '${log}'; fi\nexec /usr/bin/git "$@"\n`, { mode: 0o700 });
+		const previous = process.env.PATH;
+		process.env.PATH = `${bin}:${previous}`;
+		try {
+			if (path === "cwd") {
+				const model = b.provider.addScript("legacy-cwd-parent", [{ kind: "tool_calls", calls: [{ name: "cp_teardown", args: { job_id: job.id, force: true, operator_quote: "Force close this legacy fixture." } }] }, { kind: "text", text: "observed" }]);
+				b.agent.writeModels(b.provider);
+				const child = startPiChild({ cwd: worktree, model, env: { ...b.agent.env, PATH: process.env.PATH, CP_HOME: b.home }, extensions: [COMMAND_POST_EXTENSION] });
+				t.after(() => child.close());
+				await child.prompt("Force close this legacy fixture."); await child.waitForSettled(60_000);
+				assert.equal(existsSync(log), false, "cwd guard executes no return command");
+				assert.match(JSON.stringify(child.eventsOfType("tool_execution_end")), /current directory .* is inside it/);
+			} else {
+				const error = await post.tearDown(job.id, { force: true }).then(() => undefined, (error: unknown) => error);
+				assert.equal(existsSync(log), false, "home/absolute guard executes no return command");
+				assert.match(String(error), path === "relative" ? /lease path must be absolute/ : /command post home .* is inside it/);
+			}
+		} finally {
+			if (previous === undefined) delete process.env.PATH; else process.env.PATH = previous;
 		}
 	});
 }
@@ -174,20 +194,45 @@ test("S31 stale lease identity cannot return a recycled slot", { timeout: 120_00
 	const result = await post.dispatch({ jobId: job.id, task: "Inspect fixture.", model, fetch: false });
 	assert.equal(result.state, "dispatched"); if (result.state !== "dispatched") return;
 	const old = post.fleet.get(job.id)!;
+	assert.ok(old.lease_id, "modern treehouse persists a lease identity");
+	assert.equal(old.project, "demo");
+	assert.notEqual(result.worktree, b.clone, "a worker receives a linked worktree");
+	assert.equal(realpathSync(git(result.worktree, "rev-parse", "--git-common-dir")), realpathSync(join(b.clone, ".git")));
 	await post.manager.shutdown(job.id);
 	execFileSync("treehouse", ["return", "--force", "--if-lease-id", old.lease_id!, result.worktree], { cwd: b.home });
+	assert.equal(leaseState(b.clone, result.worktree), "available", "returned lease is available");
+	assert.ok(existsSync(join(result.worktree, "README.md")), "returned slot keeps repository content");
 	const fresh = JSON.parse(execFileSync("treehouse", ["get", "--lease", "--json", "--lease-holder", "cp-new-holder"], { cwd: b.clone, encoding: "utf8" })) as { path: string; lease_id: string };
 	try {
-	assert.equal(fresh.path, result.worktree, "fixture reuses the same slot");
-	assert.notEqual(fresh.lease_id, old.lease_id);
-	const refused = await post.tearDown(job.id, { force: true });
-	assert.equal(refused.torn_down, false);
-	assert.equal(refused.lease_returned, false);
-	assert.equal(refused.failure?.code, "lease_return_failed");
-	assert.match(execFileSync("treehouse", ["status"], { cwd: b.clone, encoding: "utf8" }), /leased/);
+		assert.equal(fresh.path, result.worktree, "fixture reuses the same slot");
+		assert.notEqual(fresh.lease_id, old.lease_id);
+		const refused = await post.tearDown(job.id, { force: true });
+		assert.equal(refused.torn_down, false);
+		assert.equal(refused.lease_returned, false);
+		assert.equal(refused.failure?.code, "lease_return_failed");
+		assert.equal(leaseState(b.clone, fresh.path), "leased", "new holder keeps the slot");
 	} finally {
-		execFileSync("treehouse", ["return", "--force", "--if-lease-id", fresh.lease_id, fresh.path], { cwd: b.home });
+		if (leaseState(b.clone, fresh.path) === "leased") execFileSync("treehouse", ["return", "--force", "--if-lease-id", fresh.lease_id, fresh.path], { cwd: b.home });
 	}
+});
+
+test("S31 live dispatch promotes without a second lease", { timeout: 120_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const bin = join(b.home, "count-bin"); mkdirSync(bin);
+	const executable = execFileSync("which", ["treehouse"], { encoding: "utf8" }).trim();
+	const log = join(b.home, "lease-commands");
+	writeFileSync(join(bin, "treehouse"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexec '${executable}' "$@"\n`, { mode: 0o700 });
+	const job = await b.ledger.create({ title: "promote", project: "demo", delivery: "local", kind: "ship" });
+	const model = b.provider.addScript("promoted-worker", [{ kind: "text", text: "received" }]);
+	const args = { job_id: job.id, task: "Inspect fixture.", model, queue: false, when_ready: false };
+	const ends = await b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args }] },
+	], { PATH: `${bin}:${process.env.PATH}` });
+	assert.equal(ends[0]?.result.details?.receipt, "accepted");
+	assert.equal(ends[1]?.result.details?.state, "promote", "same model promotes the existing live job");
+	assert.equal(readFileSync(log, "utf8").trim().split("\n").filter((line) => line.startsWith("get ")).length, 1, "promotion takes no second lease");
+	assert.equal(readFleet(b.home).jobs.length, 1);
 });
 
 for (const isolation of ["shared", "distinct"] as const) {
@@ -197,6 +242,8 @@ for (const isolation of ["shared", "distinct"] as const) {
 		const ledger = createScratchLedger({ home: other.path, knownProjects: ["demo"] });
 		const a = join(b.home, "pool-a"); const z = join(b.home, "pool-b"); mkdirSync(a); mkdirSync(z);
 		const previous = process.env.CP_TREEHOUSE_ROOT;
+		const previousAmbient = process.env.TREEHOUSE_ROOT;
+		process.env.TREEHOUSE_ROOT = a;
 		let first: CommandPost | undefined; let second: CommandPost | undefined;
 		let pool: ReturnType<typeof enableTreehouse> | undefined;
 		try {
@@ -215,6 +262,8 @@ for (const isolation of ["shared", "distinct"] as const) {
 			const r2 = await second.dispatch({ jobId: j2.id, task: "Inspect.", model: m2, fetch: false });
 			assert.equal(r1.state, "dispatched"); assert.equal(r2.state, "dispatched");
 			if (r1.state !== "dispatched" || r2.state !== "dispatched") return;
+			assert.notEqual(r1.worktree, r2.worktree, "a held slot cannot be handed out twice");
+			assert.match(execFileSync("treehouse", ["--root", a, "status"], { cwd: b.clone, encoding: "utf8" }), /leased/);
 			const p1 = dirname(dirname(realpathSync(r1.worktree))); const p2 = dirname(dirname(realpathSync(r2.worktree)));
 			if (isolation === "shared") assert.equal(p1, p2, "same remote and basename share one pool");
 			else {
@@ -225,6 +274,7 @@ for (const isolation of ["shared", "distinct"] as const) {
 			}
 		} finally {
 			if (previous === undefined) delete process.env.CP_TREEHOUSE_ROOT; else process.env.CP_TREEHOUSE_ROOT = previous;
+			if (previousAmbient === undefined) delete process.env.TREEHOUSE_ROOT; else process.env.TREEHOUSE_ROOT = previousAmbient;
 			await second?.shutdown(); pool?.cleanup(); ledger.cleanup(); other.cleanup();
 		}
 	});

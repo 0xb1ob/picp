@@ -496,7 +496,7 @@ test("cp_check is exposed, and refuses an unregistered project fail-closed", asy
 test("the composition root reads CP_TREEHOUSE_ROOT, and omits it when unset", (t) => {
 	// cp-epy2 §4.2: `src/command-post.ts` is the only `new LeaseManager(...)`
 	// call site, so this is where "unset means today's behaviour" is decided for
-	// the whole home. The argv-level proof lives in tests/leases.test.ts; this
+	// the whole home. The argv-level proof lives in tests/e2e/dispatch-s31.test.ts; this
 	// pins the wiring that feeds it.
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
