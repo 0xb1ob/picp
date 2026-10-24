@@ -13,6 +13,7 @@ import { classifyIntake, formatAdvance } from "../../src/pipeline.ts";
 import { formatDispatchResult } from "../../src/dispatch.ts";
 import { formatGate, formatGateStatus, formatGateWait, isGateWait } from "../../src/gate.ts";
 import { ReviewRuns } from "../../src/review-runs.ts";
+import { operatorTextsFromEntries } from "../../src/decide.ts";
 import { currentRuntime, diffReviewToolPayload, awaitingListText } from "./helpers.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
@@ -252,13 +253,19 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 		parameters: Type.Object({
 			job_id: Type.String({ description: "The research job whose artifact is reviewed" }),
 			action: Type.Optional(
-				StringEnum(["start", "status", "replace_planner"], {
+				StringEnum(["start", "status", "replace_planner", "authorize_recovery", "prepare_attempt"], {
 					description:
 						"start (default): spawn a NEW reviewer attempt (spend) and return wait, or the decision if this attempt is already decided. status: read pending and decided attempts. replace_planner: prepare a fresh research job with the old plan and gate feedback after planner teardown; dispatch separately using the returned task_file.",
 				}),
 			),
 			replacement_job_id: Type.Optional(Type.String({ description: "replace_planner: a fresh research job in the same project and delivery; prepares a task_file for normal cp_dispatch" })),
 			replan_escalation_id: Type.Optional(Type.String({ description: "replace_planner: exact operator-quote replan authority for one corrected capped review" })),
+			authority_mode: Type.Optional(StringEnum(["single_use", "standing"])),
+			operator_control_id: Type.Optional(Type.String()), operator_send_id: Type.Optional(Type.String()),
+			operator_ask_id: Type.Optional(Type.String()), reinforcement_control_id: Type.Optional(Type.String()),
+			reinforcement_send_id: Type.Optional(Type.String()), dependent_job_ids: Type.Optional(Type.Array(Type.String())),
+			recovery_authority_id: Type.Optional(Type.String()), expected_previous_attempt_id: Type.Optional(Type.String()),
+			current_artifact_sha256: Type.Optional(Type.String()), recovery_attempt_id: Type.Optional(Type.String()),
 			model: Type.Optional(Type.String({ description: "Explicit reviewer model override (provider/model-id)" })),
 			deliver_revise: Type.Optional(
 				Type.Boolean({ description: "Promote a revise verdict to the live planner. Default true." }),
@@ -267,6 +274,24 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
 			const post = commandPost(ctx.modelRegistry);
+			if (params.action === "authorize_recovery") {
+				if (!params.authority_mode || !params.operator_control_id || !params.operator_send_id || !params.dependent_job_ids) {
+					throw new Error("authorize_recovery needs authority_mode, operator control/send and dependent_job_ids");
+				}
+				const result = post.authorizeRecovery({ ...params, authority_mode: params.authority_mode === "standing" ? "standing" : "single_use",
+					operator_control_id: params.operator_control_id, operator_send_id: params.operator_send_id,
+					dependent_job_ids: params.dependent_job_ids }, operatorTextsFromEntries(ctx.sessionManager.getEntries()));
+				return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
+			}
+			if (params.action === "prepare_attempt") {
+				if (!params.recovery_authority_id || !params.expected_previous_attempt_id || !params.current_artifact_sha256 || !params.dependent_job_ids) {
+					throw new Error("prepare_attempt needs authority, predecessor, candidate digest and dependents");
+				}
+				const result = post.prepareRecoveryAttempt({ job_id: params.job_id, recovery_authority_id: params.recovery_authority_id,
+					expected_previous_attempt_id: params.expected_previous_attempt_id,
+					current_artifact_sha256: params.current_artifact_sha256, dependent_job_ids: params.dependent_job_ids });
+				return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
+			}
 			if (params.action === "status") {
 				const status = post.gateModule().status(params.job_id);
 				return {
@@ -284,6 +309,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			}
 			const result = await post.gate({
 				jobId: params.job_id,
+				...(params.recovery_attempt_id ? { recoveryAttemptId: params.recovery_attempt_id } : {}),
 				...(params.model ? { model: params.model } : {}),
 				...(params.deliver_revise === undefined ? {} : { deliverRevise: params.deliver_revise }),
 			});

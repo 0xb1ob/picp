@@ -14,7 +14,7 @@ test("recovery v2 anchor and attempt records reject incomplete or extra fields",
 	assert.equal(validateRecovery(GateRecoveryAnchorSchema, anchor).ok, true);
 	assert.equal(validateRecovery(GateRecoveryAnchorSchema, { ...anchor, legacy_claim_sha256: "" }).ok, false);
 	assert.equal(validateRecovery(GateRecoveryAnchorSchema, { ...anchor, remaining: 1 }).ok, false);
-	const claim = { attempt_id: digest, authority_id: digest, attempt_sha256: digest, gate_attempt: 4 };
+	const claim = { attempt_id: digest, authority_id: digest, attempt_sha256: digest, gate_attempt: 4, owner_pid: 42 };
 	assert.equal(validateRecovery(GateRecoveryAttemptClaimSchema, claim).ok, true);
 	assert.equal(validateRecovery(GateRecoveryAttemptClaimSchema, { ...claim, gate_attempt: 0 }).ok, false);
 	assert.equal(validateRecovery(GateRecoveryAttemptTerminalSchema, { attempt_id: digest, outcome: "spawn_failure" }).ok, true);

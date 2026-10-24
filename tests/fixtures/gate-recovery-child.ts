@@ -6,7 +6,7 @@ const link = fs.linkSync;
 const rename = fs.renameSync;
 function publication(operation: typeof fs.linkSync, from: Parameters<typeof fs.linkSync>[0], to: Parameters<typeof fs.linkSync>[1]) {
 	const destination = String(to);
-	if (destination.endsWith(action === "gate" ? "gate-recovery-claim.json" : "gate-recovery-reservation.json") && barrier) {
+	if ((action === "standing" ? /\/gate-\d+-standing\.json$/.test(destination) : destination.endsWith(action === "gate" ? "gate-recovery-claim.json" : "gate-recovery-reservation.json")) && barrier) {
 		fs.writeFileSync(`${barrier}.${process.pid}.ready`, "ready");
 		const deadline = Date.now() + 15000;
 		while (!fs.existsSync(`${barrier}.release`)) {
@@ -54,8 +54,8 @@ if (action === "source-race") {
 	process.exit(process.exitCode ?? 0);
 }
 try {
-	if (action === "gate") {
-		const result = await post.gate({ jobId: target, ...(model ? { model } : {}) });
+	if (action === "gate" || action === "standing") {
+		const result = await post.gate({ jobId: target, ...(model ? { model } : {}), ...(action === "standing" ? { recoveryAttemptId: authority } : {}) });
 		console.log(JSON.stringify(result));
 		if ("key" in result) {
 			if (fault === "orphan") {

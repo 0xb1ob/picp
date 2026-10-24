@@ -33,6 +33,7 @@
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { claimRecovery, copyRecoveryTask, publishRecoveryFile, recoveryRecord, recoveryDigest, recoveryFile, recoveryJson, recoveryReplay, recoveryTarget, recoveryStatus, validateRecoveryAuthority } from "./gate-recovery.ts";
+import { claimRecoveryAttempt, finishRecoveryAttempt, recoveryAttemptState, gateRecoveryStatus, validateGateRecoveryFinalization, nextRecoveryGateOrdinal, recoverStandingFinalization } from "./gate-recovery-authority.ts";
 import type { CapacityReader } from "./capacity.ts";
 import { basename, join, resolve, sep } from "node:path";
 import { ArtifactStore } from "./artifacts.ts";
@@ -206,10 +207,13 @@ export interface GateOptions {
 	reviews?: ReviewRuns;
 	/** When set, escalate/policy writes an escalation record (parent relays, does not compose). */
 	escalations?: EscalationStore;
+	standingRecoveryStatus?: (jobId: string) => unknown;
 }
 
 export interface GateRequest {
 	jobId: string;
+	recoveryAttemptId?: string;
+	revalidateRecovery?: (attempt: import("./contracts.ts").RecoveryAttempt) => void;
 	/** Caller-named reviewer model (authorization; still allowlisted). */
 	model?: string;
 	/** Deliver a `revise` to the live planner. Default true when a sender exists. */
@@ -513,7 +517,7 @@ export function formatGateWait(wait: GateWait): string {
 /** What `cp_gate action:status` prints: pending attempt plus every decision. */
 export function formatGateStatus(
 	jobId: string,
-	status: { pending?: PendingReview; decisions: GateVerdict[]; recovery?: import("./contracts.ts").GateRecoveryStatus },
+	status: { pending?: PendingReview; decisions: GateVerdict[]; recovery?: import("./contracts.ts").GateRecoveryStatus; standing_recovery?: unknown },
 ): string {
 	const lines = [
 		`${jobId} gate: ${status.decisions.length} decided attempt(s)${
@@ -524,6 +528,7 @@ export function formatGateStatus(
 		lines.push(`  ${decision.attempt}: ${decision.verdict}${decision.cause ? ` (${decision.cause})` : ""} at ${decision.decided_at}`);
 	}
 	if (status.recovery) lines.push(`  recovery ${status.recovery.state}: remaining=${status.recovery.remaining}; replacement=${status.recovery.replacement_job}`);
+	if (status.standing_recovery) lines.push(`  authorized recovery: ${JSON.stringify(status.standing_recovery)}`);
 	return lines.join("\n");
 }
 
@@ -807,7 +812,12 @@ export class Gate {
 		const jobId = request.jobId;
 		const directive = request.directive ?? "act on next";
 
-		const recovery = recoveryTarget(home, jobId);
+		const selectedAttempt = request.recoveryAttemptId;
+		if (selectedAttempt && !request.revalidateRecovery) throw new GateError("standing recovery needs authenticated preflight");
+		if (selectedAttempt && !recoveryAttemptState(home, jobId, selectedAttempt).claim_available) {
+			throw new GateError("recovery attempt already claimed or terminal; no spawn");
+		}
+		const recovery = selectedAttempt ? undefined : recoveryTarget(home, jobId);
 		if (recovery) validateRecoveryAuthority(home, recovery, this.#options.mandates);
 		if (!artifacts.has(jobId)) {
 			throw new GateError(
@@ -831,7 +841,7 @@ export class Gate {
 
 		const prior = readPriorAttempts(home, jobId);
 		const last = prior.decisions.at(-1);
-		if (last?.verdict === "pass") {
+		if (!selectedAttempt && last?.verdict === "pass") {
 			const info = artifacts.info(jobId);
 			const moved = info.modified_at !== undefined && info.modified_at > last.decided_at;
 			if (!moved) {
@@ -843,18 +853,20 @@ export class Gate {
 				};
 			}
 		}
-		const attempt = prior.attempt;
+		const attempt = selectedAttempt ? nextRecoveryGateOrdinal(home, jobId, prior.attempt) : prior.attempt;
 		const profile = profileForRole(this.#options.profilesDir, "gate-reviewer");
 		const record = this.#options.fleet?.get(jobId);
 		const selection = selectReviewerModel({ model: request.model, record, registry: this.#options.registry, mandates: this.#options.mandates, now: now() });
 		const route = await this.#route(profile, jobId, record, selection?.model, selection?.thinking);
 		const model = route.decision.model;
 
-		if (!recovery) {
+		if (!recovery && !selectedAttempt) {
 			await manager.ready();
 			if (recoveryTarget(home, jobId)) throw new GateError(`${jobId}: recovery binding changed during preflight`);
 		}
-		const recoveryArtifact = recovery ? await claimRecovery({ home, jobId, reservation: recovery, attempt,
+		const recoveryArtifact = selectedAttempt ? await claimRecoveryAttempt({ home, jobId, attemptId: selectedAttempt,
+			gateAttempt: attempt, ready: () => manager.ready(), revalidate: request.revalidateRecovery! }) :
+			recovery ? await claimRecovery({ home, jobId, reservation: recovery, attempt,
 			artifactPath: artifacts.file(jobId), ready: () => manager.ready(), mandates: this.#options.mandates,
 			permit: () => { if (record) this.#options.mandates?.assertPermitted("review", { jobId, project: record.project, kind: "research" }); },
 		}) : undefined;
@@ -873,7 +885,7 @@ export class Gate {
 				job_id: jobId,
 				project: record?.project ?? "unregistered",
 				artifact_path: artifactCopy,
-				original_task: originalTaskBlock(taskCopy) + (recovery ? "\nAuthorized addenda in the task are governing scope, not scope growth.\n" : taskAddendaBlock({ home, jobId, scratch })),
+				original_task: originalTaskBlock(taskCopy) + (recoveryArtifact ? "\nAuthorized addenda in the task are governing scope, not scope growth.\n" : taskAddendaBlock({ home, jobId, scratch })),
 			},
 		});
 		writeFileSync(join(gateRunDir, "brief.md"), brief);
@@ -890,9 +902,11 @@ export class Gate {
 		const deliverRevise = request.deliverRevise ?? true;
 
 		let managed: ReturnType<WorkerManager["spawn"]>;
-		await manager.ready();
-		if (JSON.stringify(recoveryTarget(home, jobId)) !== JSON.stringify(recovery)) throw new GateError(`${jobId}: recovery binding changed before spawn`);
-		if (recovery) validateRecoveryAuthority(home, recovery, this.#options.mandates);
+		if (!selectedAttempt) {
+			await manager.ready();
+			if (JSON.stringify(recoveryTarget(home, jobId)) !== JSON.stringify(recovery)) throw new GateError(`${jobId}: recovery binding changed before spawn`);
+			if (recovery) validateRecoveryAuthority(home, recovery, this.#options.mandates);
+		}
 		try {
 			managed = manager.spawn({
 				key,
@@ -924,6 +938,7 @@ export class Gate {
 				model,
 				prior,
 				outcome: { operational: `reviewer could not run: ${(error as Error).message}` },
+				spawnFailure: true,
 				deliverRevise,
 				directive,
 			});
@@ -991,6 +1006,7 @@ export class Gate {
 		model: string;
 		prior: PriorAttempts;
 		outcome: { review?: GateReview; operational?: string };
+		spawnFailure?: boolean;
 		deliverRevise: boolean;
 		directive: string;
 		managedKey?: string;
@@ -1000,13 +1016,7 @@ export class Gate {
 		const now = this.#options.now ?? (() => new Date());
 		const { jobId, attempt, model, prior } = input;
 		const { review, operational } = input.outcome;
-		const recovery = recoveryTarget(home, jobId);
-		if (recovery) {
-			const claim = recoveryRecord<import("./contracts.ts").RecoveryClaim>(recoveryFile(join(home, paths.runDir(jobId)), "claim"));
-			if (!claim || claim.attempt !== attempt || claim.reservation_sha256 !== recoveryDigest(recoveryJson(recovery))) {
-				throw new GateError(`${jobId}: refusing unclaimed recovery finalization`);
-			}
-		}
+		const { standing, recovery } = validateGateRecoveryFinalization(home, jobId, attempt);
 
 		// One-shot: the reviewer never survives its own verdict.
 		if (input.managedKey) await manager.shutdown(input.managedKey);
@@ -1026,7 +1036,7 @@ export class Gate {
 			throw new GateError(`gate decision for ${jobId} violates the contract:\n  ${validated.errors.join("\n  ")}`);
 		}
 		const path = join(home, paths.gateFile(jobId, attempt));
-		if (recovery) publishRecoveryFile(path, recoveryJson(verdict));
+		if (recovery || standing) publishRecoveryFile(path, recoveryJson(verdict));
 		else atomicWriteJson(path, verdict);
 		// Something was too big for the schema and got capped above: the operator
 		// can see THAT from the note in `reasons`, but the full pre-cap decision
@@ -1034,16 +1044,12 @@ export class Gate {
 		if (raw) {
 			const rawPath = join(home, paths.gateFileRaw(jobId, attempt));
 			const payload = { ...verdict, reasons: raw.reasons, ...(raw.revisions ? { revisions: raw.revisions } : {}) };
-			if (recovery) publishRecoveryFile(rawPath, recoveryJson(payload));
+			if (recovery || standing) publishRecoveryFile(rawPath, recoveryJson(payload));
 			else atomicWriteJson(rawPath, payload);
 		}
 
-		// The reviewer's scratch cwd is spent once the attempt passed: the copy it
-		// read is byte-identical to the store's, which is untouched. An escalate or
-		// a revise keeps it, because after a revise the store has moved on and this
-		// copy is the only record of what that attempt was judging (cp-yi73).
-		// `manager.shutdown(key)` has already resolved, so no live process is
-		// standing in the directory being removed.
+		// Keep nonpass scratch as the immutable evidence of what the reviewer judged.
+		// Shutdown has completed before any scratch directory is removed.
 		if (verdict.verdict === "pass") {
 			try {
 				const removal = removeGateScratch({
@@ -1066,13 +1072,15 @@ export class Gate {
 
 		const result: GateResult = {
 			verdict,
-			next: recovery ? (verdict.verdict === "pass" ? "proceed" : "surface") : nextAction(verdict),
+			next: recovery || standing ? (verdict.verdict === "pass" ? "proceed" : "surface") : nextAction(verdict),
 			path,
 			model,
 			...(review ? { review } : {}),
 		};
 
 		if (recovery) recoveryReplay(home, jobId, readFileSync(this.#options.artifacts.file(jobId)));
+		if (standing) finishRecoveryAttempt({ home, jobId, attemptId: standing.attempt_id,
+			outcome: verdict.verdict === "pass" ? "pass" : input.spawnFailure ? "spawn_failure" : operational ? "interrupted" : "nonpass", decisionPath: path });
 		// The job's own run log learns the outcome; the gate run keeps the detail.
 		runs?.open(jobId).cp("gate_decided", {
 			attempt,
@@ -1105,21 +1113,12 @@ export class Gate {
 	}
 
 	/** What is on disk for this job's gate: the pending attempt, if any, and every decision. */
-	status(jobId: string): { pending?: PendingReview; decisions: GateVerdict[]; recovery?: import("./contracts.ts").GateRecoveryStatus } {
-		const pending = this.#options.reviews?.pending(jobId, "gate");
-		const recovery = recoveryStatus(this.#options.home, jobId);
-		return { ...(pending ? { pending } : {}), decisions: readPriorAttempts(this.#options.home, jobId).decisions,
-			...(recovery ? { recovery } : {}) };
-	}
+	status(jobId: string) { return gateRecoveryStatus(this.#options, jobId); }
 
-	/**
-	 * Finish an attempt whose reviewer died with a previous parent (D4): no
-	 * worker, an operational outcome, the ordinary ladder. The registry decides
-	 * whether the wake-up is sent (only when the parent had been handed `wait`).
-	 */
+	/** Reconcile an observed dead reviewer without replacing its persisted decision. */
 	async orphan(pending: PendingReview, reason: string): Promise<ReviewWakeup | undefined> {
 		const prior = readPriorAttempts(this.#options.home, pending.job_id);
-		if (prior.attempt !== pending.attempt) return undefined; // decided meanwhile
+		if (recoverStandingFinalization(this.#options.home, pending.job_id, pending.attempt) !== "pending" && prior.attempt !== pending.attempt) return undefined;
 		return (
 			await this.finish({
 				jobId: pending.job_id,
