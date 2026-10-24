@@ -135,47 +135,27 @@ interface World {
 	worktreeAhead?: number;
 	/** That count could not be read at all. */
 	worktreeAheadFails?: string;
-	/**
-	 * What `git ls-remote --heads origin <branch>` answers **inside the lease**
-	 * (the sync step's own question, asked in the worktree rather than in the
-	 * clone). Defaults to `HEAD_A`; `""` is "origin has no such ref".
-	 */
+	/** Lease-local ls-remote answer; defaults to HEAD_A, with an empty string meaning no remote ref. */
 	syncRemoteSha?: string;
 	/** That question could not be answered at all: origin unreachable. */
 	syncLsRemoteFails?: string;
-	/**
-	 * The losslessness proof's questions (cp-8vf6), asked only when the worktree
-	 * holds commits origin does not: what origin names for the **base**, where
-	 * the two heads fork from it, and what each head's cumulative diff is.
-	 */
+	/** Losslessness proof inputs, queried only when the worktree holds commits absent from origin. */
 	syncBaseSha?: string;
 	syncBaseLsRemoteFails?: string;
 	mergeBaseSha?: string;
 	mergeBaseFails?: string;
-	/**
-	 * Cumulative diff text per revision. The default gives each head a *different*
-	 * diff, so the proof fails and the refusal is the one this module always made
-	 * — a test that wants the reset has to say the diffs match.
-	 */
+	/** Defaults to different diffs per head so reset requires explicit proof of matching content. */
 	cumulativeDiff?: Record<string, string>;
 	diffFails?: string;
 	patchIdFails?: string;
 	/** `git patch-id` answered, but with nothing usable. */
 	patchIdEmpty?: boolean;
 	updateRefFails?: string;
-	/**
-	 * The rescue refs `git for-each-ref refs/cp-salvage/` reports in the clone,
-	 * as `[ref, sha]` pairs — the input to the retention policy (cp-wcy5).
-	 * Defaults to none, so every pre-existing test sees no prune work at all.
-	 */
+	/** Rescue ref/sha pairs; defaults to none so unrelated tests perform no pruning. */
 	salvageRefs?: Array<[string, string]>;
 	/** That listing could not be read. */
 	forEachRefFails?: string;
-	/**
-	 * `git fetch origin <base>` in the **clone** — the prune's own fetch, the one
-	 * that makes the base tip's objects present for `merge-base`. Kept separate
-	 * from every other fetch in this module so a test can fail exactly it.
-	 */
+	/** Clone-local base fetch failure, isolated from other fetches to test pruning safety. */
 	baseFetchFails?: string;
 	/** What origin answers for the *base* in the clone: the prune's own base tip. */
 	pruneBaseSha?: string;
@@ -186,34 +166,15 @@ interface World {
 	ancestorUnreadable?: string[];
 	/** `git update-ref -d` refuses. */
 	deleteRefFails?: string;
-	/**
-	 * `refs/remotes/origin/<branch>` does not resolve in the lease — the
-	 * `--single-branch` / `--depth` clone, and the reason the reset must name a
-	 * sha. Any `git reset --hard <rev>` whose rev is not a 40-hex sha fails, the
-	 * way real git fails with "ambiguous argument".
-	 */
+	/** Simulates shallow/single-branch leases: reset rejects remote-tracking refs and requires a full SHA. */
 	trackingRefUnresolvable?: boolean;
-	/**
-	 * When set, the SECOND `gh pr view` call (the cp-e0c permission re-read)
-	 * reports this head instead of `world.pr.headRefOid` — simulating a
-	 * force-push landing between CI verification and the permission check.
-	 */
+	/** Overrides the permission re-read's head to simulate a push after CI verification. */
 	permHead?: string;
-	/**
-	 * The head the *server* has when `gh pr merge` runs — a force-push that
-	 * landed after the permission read or after a human answered the
-	 * authorization. When it differs from the argv's `--match-head-commit`
-	 * value, the mock refuses the merge the way real `gh` does (cp-n1a).
-	 */
+	/** Server head at merge time; a mismatch with --match-head-commit makes the mock refuse the merge. */
 	remoteHeadAtMerge?: string;
 	/** rules endpoint response for `gh api .../rules/branches/<base>`, or a failure. */
 	rules?: unknown[] | GhFail;
-	/**
-	 * What `gh api repos/{owner}/{repo}/actions/workflows` answers
-	 * (cp-no-ci-repo-derived): an object (serialised), a raw stdout string, or a
-	 * `GhFail`. The default is a repository that **has** a workflow, so every test
-	 * written before this probe existed sees the behaviour it was written against.
-	 */
+	/** Workflow probe response or failure; defaults to a configured workflow to preserve earlier scenarios. */
 	workflows?: unknown;
 	/** `gh pr ready` refuses with this stderr (jje.5). */
 	readyFails?: string;
@@ -555,12 +516,7 @@ async function benchOf(
 		worktree,
 		mergeCheckpoints: () => new CheckpointStore(home.path, { kind: "merge" }),
 		awaiting: () => new AwaitingStore({ home: home.path }),
-		/**
-		 * A human answered the merge authorization for this head. The question is
-		 * seeded first because that is the real sequence: `cp_integrate` asks (the
-		 * record is written `pending` before anyone is asked), and only
-		 * `CheckpointStore.decide` — a human channel — ever answers it.
-		 */
+		/** Seed pending before answering, matching the real integration authorization sequence. */
 		approve(head: string) {
 			const store = new CheckpointStore(home.path, { kind: "merge" });
 			const scope = head.slice(0, 12);

@@ -1,0 +1,188 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=repository refusals and draft transitions tests/e2e/landing-s09.test.ts
+
+▶ landing S09: repository refusals and draft transitions preserve head authority
+  ✖ blocked (2795.552977ms)
+  ✖ approved-blocked (2711.25806ms)
+  ✖ unreadable-rules (2697.778191ms)
+  ✖ unstable (2648.219657ms)
+  ✖ no-ci-blocked (2929.963011ms)
+  ✔ auto (2692.636552ms)
+  ✔ moved (2803.139338ms)
+  ✔ unreviewed-draft (2645.78376ms)
+  ✔ stale-draft (2643.388672ms)
+  ✔ ready (2963.730645ms)
+  ✔ ready-unreadable-ci (2661.576478ms)
+  ✔ ready-moved (2810.325275ms)
+  ✔ ready-undo-refused (2739.521508ms)
+  ✔ ready-refused (2632.40067ms)
+  ✖ reminder (2763.648785ms)
+✖ landing S09: repository refusals and draft transitions preserve head authority (41143.541478ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 9
+ℹ fail 7
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 42665.447834
+
+✖ failing tests:
+
+test at tests/e2e/landing-s09.test.ts:62:261
+✖ blocked (2795.552977ms)
+  AssertionError [ERR_ASSERTION]: blocked: gh: https://github.com/example/demo/pull/302 is OPEN at 56084c73434e
+  ci: green — CI green on 56084c7
+  permission: permitted — GitHub reports mergeStateStatus=BLOCKED at 56084c73434e — the merge is unforced
+  merged https://github.com/example/demo/pull/302 (squash, head branch kept for teardown)
+  cp-67j6: https://github.com/example/demo/pull/302 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:83:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:62:253)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:62:261
+✖ approved-blocked (2711.25806ms)
+  AssertionError [ERR_ASSERTION]: approved-blocked: gh: https://github.com/example/demo/pull/302 is OPEN at 0f3eff46b4a8
+  ci: green — CI green on 0f3eff4
+  permission: permitted — GitHub reports mergeStateStatus=BLOCKED at 0f3eff46b4a8 — the merge is unforced
+  merged https://github.com/example/demo/pull/302 (squash, head branch kept for teardown)
+  cp-n0qx: https://github.com/example/demo/pull/302 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:83:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:62:253)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:62:261
+✖ unreadable-rules (2697.778191ms)
+  AssertionError [ERR_ASSERTION]: unreadable-rules: gh: https://github.com/example/demo/pull/302 is OPEN at f5213754254d
+  ci: green — CI green on f521375
+  permission: permitted — GitHub reports mergeStateStatus=BLOCKED at f5213754254d — the merge is unforced
+  merged https://github.com/example/demo/pull/302 (squash, head branch kept for teardown)
+  cp-rp0u: https://github.com/example/demo/pull/302 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:83:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:62:253)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:62:261
+✖ unstable (2648.219657ms)
+  AssertionError [ERR_ASSERTION]: unstable: gh: https://github.com/example/demo/pull/302 is OPEN at d417bbc6248a
+  ci: green — CI green on d417bbc
+  permission: permitted — GitHub reports mergeStateStatus=UNSTABLE at d417bbc6248a — the merge is unforced
+  merged https://github.com/example/demo/pull/302 (squash, head branch kept for teardown)
+  cp-lrdk: https://github.com/example/demo/pull/302 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:83:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:62:253)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:62:261
+✖ no-ci-blocked (2929.963011ms)
+  AssertionError [ERR_ASSERTION]: no-ci-blocked: gh: https://github.com/example/demo/pull/302 is OPEN at af6137a6cc00
+  ci: unknown — no Actions CI runs are observable for cp-yhkp on af6137a — not asked until one is
+  ci configuration: none (authoritative_empty) — the repository's own workflows endpoint reports 0 Actions workflows — no Actions CI will ever run on any head
+  permission: permitted — GitHub reports mergeStateStatus=BLOCKED at af6137a6cc00 — the merge is unforced
+  merged https://github.com/example/demo/pull/302 (squash, head branch kept for teardown)
+  cp-yhkp: https://github.com/example/demo/pull/302 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:83:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:62:253)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:62:261
+✖ reminder (2763.648785ms)
+  AssertionError [ERR_ASSERTION]: reminder: gh: https://github.com/example/demo/pull/302 is OPEN at 45ba94bbde9d
+  ci: green — CI green on 45ba94b
+  permission: permitted — GitHub reports mergeStateStatus=BLOCKED at 45ba94bbde9d — the merge is unforced
+  merged https://github.com/example/demo/pull/302 (squash, head branch kept for teardown)
+  cp-odsn: https://github.com/example/demo/pull/302 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:83:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:62:253)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

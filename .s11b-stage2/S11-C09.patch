@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..0dd97a6 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -292,7 +292,7 @@ export class Integrator {
+ 		if (!record) {
+ 			throw new IntegrateError(`no fleet record for ${jobId} — integration is a step in a job this home dispatched`);
+ 		}
+-		if (record.kind !== "ship" || record.delivery !== "pr") {
++		if (false && (record.kind !== "ship" || record.delivery !== "pr")) {
+ 			throw new IntegrateError(
+ 				`${jobId} is ${record.kind}/${record.delivery}; cp_integrate merges a delivery:pr ship job's PR and nothing else`,
+ 			);

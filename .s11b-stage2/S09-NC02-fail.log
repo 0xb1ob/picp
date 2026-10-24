@@ -1,0 +1,333 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=exact head and branch evidence distinguish tests/e2e/landing-s09.test.ts
+
+▶ landing S09: exact head and branch evidence distinguish pending, superseded and absent CI
+  ✖ pending (2838.878522ms)
+  ✖ older (2706.417262ms)
+  ✖ present (2675.841445ms)
+  ✖ none (2705.780097ms)
+  ✖ denied-branch (2685.0242ms)
+  ✖ malformed-branch (3765.081881ms)
+  ✖ invalid-branch (2682.051108ms)
+  ✖ branch-green (2679.131562ms)
+  ✖ denied-workflows (2679.719115ms)
+  ✖ network-workflows (2641.443791ms)
+  ✖ empty-workflows (2663.706145ms)
+  ✖ malformed-workflows (2688.981857ms)
+✖ landing S09: exact head and branch evidence distinguish pending, superseded and absent CI (33415.969229ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 0
+ℹ fail 13
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 35000.071768
+
+✖ failing tests:
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ pending (2838.878522ms)
+  AssertionError [ERR_ASSERTION]: pending: gh: https://github.com/example/demo/pull/301 is OPEN at f1226c55b9b0
+  ci: in_progress — CI is in_progress on f1226c5 (ci)
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at f1226c55b9b0 — the merge is unforced
+  merged https://github.com/example/demo/pull/301 (squash, head branch kept for teardown)
+  cp-6k23: https://github.com/example/demo/pull/301 merged. Call cp_integrate again to record the receipt, tear down and close.
+  
+  'advance' !== 'wait'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:35:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'wait',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ older (2706.417262ms)
+  AssertionError [ERR_ASSERTION]: older: gh: https://github.com/example/demo/pull/301 is OPEN at fc139fc74156
+  ci: superseded — no CI run has started on fc139fc yet (latest run is on bbbbbbb)
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at fc139fc74156 — the merge is unforced
+  merged https://github.com/example/demo/pull/301 (squash, head branch kept for teardown)
+  cp-anbu: https://github.com/example/demo/pull/301 merged. Call cp_integrate again to record the receipt, tear down and close.
+  
+  'advance' !== 'wait'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:35:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'wait',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ present (2675.841445ms)
+  AssertionError [ERR_ASSERTION]: present: gh: https://github.com/example/demo/pull/301 is OPEN at 1e92bb20eb24
+  ci: unknown — no Actions CI runs are observable for cp-qaaw on 1e92bb2 — not asked until one is
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at 1e92bb20eb24 — the merge is unforced
+  merged https://github.com/example/demo/pull/301 (squash, head branch kept for teardown)
+  cp-qaaw: https://github.com/example/demo/pull/301 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:35:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ none (2705.780097ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(result.record.facts.some((fact) => fact.startsWith("ci configuration: none (authoritative_empty)")))
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:43:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ denied-branch (2685.0242ms)
+  AssertionError [ERR_ASSERTION]: denied-branch: gh: https://github.com/example/demo/pull/301 is OPEN at 006a41f5cdf3
+  ci: branch runs unreadable — Actions CI read denied: gh api repos/{owner}/{repo}/actions/runs?branch=cp-h0op&per_page=100&page=1 (HTTP 403)
+  ci: unknown — no Actions CI runs are observable for cp-h0op on 006a41f — not asked until one is
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at 006a41f5cdf3 — the merge is unforced
+  merged https://github.com/example/demo/pull/301 (squash, head branch kept for teardown)
+  cp-h0op: https://github.com/example/demo/pull/301 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:35:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ malformed-branch (3765.081881ms)
+  AssertionError [ERR_ASSERTION]: malformed-branch: gh: https://github.com/example/demo/pull/301 is OPEN at f50ee8c594ef
+  ci: branch runs unreadable — Actions CI read malformed: gh api repos/{owner}/{repo}/actions/runs?branch=cp-7n6y&per_page=100&page=1 (transient read: not JSON; gh exit 0; body "<html>502</html>"; 3 attempts)
+  ci: unknown — no Actions CI runs are observable for cp-7n6y on f50ee8c — not asked until one is
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at f50ee8c594ef — the merge is unforced
+  merged https://github.com/example/demo/pull/301 (squash, head branch kept for teardown)
+  cp-7n6y: https://github.com/example/demo/pull/301 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:35:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ invalid-branch (2682.051108ms)
+  AssertionError [ERR_ASSERTION]: invalid-branch: gh: https://github.com/example/demo/pull/301 is OPEN at f60ca86f402f
+  ci: branch runs unreadable — Actions CI read malformed: gh api repos/{owner}/{repo}/actions/runs?branch=cp-rc61&per_page=100&page=1 (run 301 is not on the requested head)
+  ci: unknown — no Actions CI runs are observable for cp-rc61 on f60ca86 — not asked until one is
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at f60ca86f402f — the merge is unforced
+  merged https://github.com/example/demo/pull/301 (squash, head branch kept for teardown)
+  cp-rc61: https://github.com/example/demo/pull/301 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:35:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ branch-green (2679.131562ms)
+  AssertionError [ERR_ASSERTION]: branch-green: gh: https://github.com/example/demo/pull/301 is OPEN at a3ea14db38f2
+  ci: unknown — no Actions CI runs are observable for cp-f3ac on a3ea14d — not asked until one is
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at a3ea14db38f2 — the merge is unforced
+  merged https://github.com/example/demo/pull/301 (squash, head branch kept for teardown)
+  cp-f3ac: https://github.com/example/demo/pull/301 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:35:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ denied-workflows (2679.719115ms)
+  AssertionError [ERR_ASSERTION]: denied-workflows: gh: https://github.com/example/demo/pull/301 is OPEN at c2c57021d12f
+  ci: unknown — no Actions CI runs are observable for cp-iq4z on c2c5702 — not asked until one is
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at c2c57021d12f — the merge is unforced
+  merged https://github.com/example/demo/pull/301 (squash, head branch kept for teardown)
+  cp-iq4z: https://github.com/example/demo/pull/301 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:35:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ network-workflows (2641.443791ms)
+  AssertionError [ERR_ASSERTION]: network-workflows: gh: https://github.com/example/demo/pull/301 is OPEN at ee72f764479e
+  ci: unknown — no Actions CI runs are observable for cp-rnf8 on ee72f76 — not asked until one is
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at ee72f764479e — the merge is unforced
+  merged https://github.com/example/demo/pull/301 (squash, head branch kept for teardown)
+  cp-rnf8: https://github.com/example/demo/pull/301 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:35:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ empty-workflows (2663.706145ms)
+  AssertionError [ERR_ASSERTION]: empty-workflows: gh: https://github.com/example/demo/pull/301 is OPEN at 90893f0ee8b0
+  ci: unknown — no Actions CI runs are observable for cp-qfa6 on 90893f0 — not asked until one is
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at 90893f0ee8b0 — the merge is unforced
+  merged https://github.com/example/demo/pull/301 (squash, head branch kept for teardown)
+  cp-qfa6: https://github.com/example/demo/pull/301 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:35:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:18:224
+✖ malformed-workflows (2688.981857ms)
+  AssertionError [ERR_ASSERTION]: malformed-workflows: gh: https://github.com/example/demo/pull/301 is OPEN at 1c6e8995b978
+  ci: unknown — no Actions CI runs are observable for cp-y8w4 on 1c6e899 — not asked until one is
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at 1c6e8995b978 — the merge is unforced
+  merged https://github.com/example/demo/pull/301 (squash, head branch kept for teardown)
+  cp-y8w4: https://github.com/example/demo/pull/301 merged. Call cp_integrate again to record the receipt, tear down and close.
+  + actual - expected
+  
+  + 'advance'
+  - 'surface'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:35:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:18:216)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'surface',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

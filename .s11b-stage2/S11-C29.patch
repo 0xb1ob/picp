@@ -1,0 +1,13 @@
+diff --git a/src/contracts/escalations.ts b/src/contracts/escalations.ts
+index 883dbdd..4c7f6f5 100644
+--- a/src/contracts/escalations.ts
++++ b/src/contracts/escalations.ts
+@@ -281,7 +281,7 @@ export function validateEscalationFile(value: unknown): ValidationResult<Escalat
+  */
+ export function checkpointAwaitingId(jobId: string, kind: CheckpointKind = "ship", scope?: string): string {
+ 	if (kind === "diff") return `aw-checkpoint-${jobId}.diff`;
+-	if (kind === "merge") return `aw-checkpoint-${jobId}.merge-${(scope ?? "unscoped").slice(0, 40)}`;
++	if (kind === "merge") return `aw-checkpoint-${jobId}.diff`;
+ 	if (kind === "final_fix") return `aw-checkpoint-${jobId}.final-fix-${(scope ?? "unscoped").slice(0, 40)}`;
+ 	return `aw-checkpoint-${jobId}`;
+ }
