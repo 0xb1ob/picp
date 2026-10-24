@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -373,4 +373,89 @@ test("post-expiry replacement uses a committed original-root link, full findings
 	assert.match(JSON.stringify(final[0]!.result), /job cap: 1 \/ 1/);
 	assert.match(JSON.stringify(final[0]!.result), /103300/);
 	assert.match(JSON.stringify(final[0]!.result), /10\.95/);
+});
+
+test("pipeline reanchor resumes an interrupted exact edge projection and still requires fresh quality and authorization", { skip: !treehouseAvailable(), timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n" } });
+	const provider = await MockProvider.start();
+	const agent = createAgentDir({ provider });
+	initJobsDocument(home.path, "cp");
+	let post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env } });
+	const parent = parentCommands(home.path, provider, agent);
+	let pool: ReturnType<typeof enableTreehouse> | undefined;
+	t.after(async () => { await post.shutdown(); await provider.stop(); pool?.cleanup(); agent.cleanup(); repo.cleanup(); home.cleanup(); });
+	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
+	const clone = post.registry.pathOf("demo");
+	execFileSync("git", ["clone", "--quiet", repo.remote as string, clone]);
+	pool = enableTreehouse(clone, { maxTrees: 3 });
+	let originalId = "";
+	let replacementId = "";
+	const worker = (name: string, id: () => string, twice = false) => {
+		const steps: ScriptStep[] = [
+			{ kind: "tool_calls", calls: [{ name: "bash", args: () => ({ command: `printf '%s' '# Original bounded plan' > ${shellArg(post.artifacts.file(id()))}` }) }] },
+			{ kind: "tool_calls", calls: [{ name: "report_result", args: () => ({ job_id: id(), kind: "research", status: "done", artifact_path: post.artifacts.file(id()), summary: "Bounded plan ready.",
+				plan_summary: { goal: "Research the bounded README change", approach: ["Read README.md"], touched: ["README.md"], acceptance: ["Keep the bounded scope"], risk: "Read only" },
+				self_assessment: { confidence: "high", scope: "S", blocking_unknowns: false, destructive_scope: false } }) }] },
+		];
+		return provider.addScript(name, twice ? [...steps, ...steps] : steps);
+	};
+	const originalModel = worker("reanchor-original", () => originalId || post.pipeline().store.list()[0]!.research_id, true);
+	const replacementModel = worker("reanchor-replacement", () => replacementId);
+	const gate = (name: string, id: () => string, verdict: "revise" | "pass") => provider.addScript(name, [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: () => ({ job_id: id(), verdict,
+		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["Bounded README acceptance"], ...(verdict === "revise" ? { revisions: ["Clarify the bounded acceptance"] } : {}) }) }] }]);
+	const originalGate = gate("reanchor-original-gate", () => originalId, "revise");
+	const replacementGate = gate("reanchor-replacement-gate", () => replacementId, "pass");
+	agent.writeModels(provider);
+	const started = await post.startPipeline({ title: "Bounded README research", project: "demo", task: "Research a bounded README change.", delivery: "local", model: originalModel });
+	originalId = started.research_id;
+	await waitFor(() => post.fleet.get(originalId)?.phase, (phase) => phase === "held", { timeoutMs: 30_000 });
+	const first = await post.gate({ jobId: originalId, model: originalGate });
+	assert.ok(isGateWait(first));
+	post.reviewRuns.handBack(first.key);
+	await post.reviewRuns.settled(first.key);
+	await waitFor(() => provider.remaining("reanchor-original") === 0 && post.manager.get(originalId)?.worker.busy === false, (settled) => settled, { timeoutMs: 30_000 });
+	assert.equal((await post.tearDown(originalId)).torn_down, true);
+	const replacement = await post.ledger().create({ title: "Replacement README research", description: "Research a bounded README change.", project: "demo", kind: "research", delivery: "pipeline" });
+	replacementId = replacement.id;
+	const prepared = await parent("Prepare the independent replacement planner.", [{ kind: "tool_calls", calls: [{ name: "cp_gate", args: { action: "replace_planner", job_id: originalId, replacement_job_id: replacementId } }] }]);
+	assert.notEqual(prepared[0]!.isError, true, JSON.stringify(prepared[0]!.result));
+	const hold = await post.ledger().create({ title: "Separate substantive hold", project: "demo", kind: "research", delivery: "local" });
+	await post.ledger().addDep(started.ship_id, hold.id);
+	const ledgerFile = post.ledger().file;
+	renameSync(ledgerFile, `${ledgerFile}.saved`);
+	mkdirSync(ledgerFile);
+	try {
+		await assert.rejects(() => post.reanchorPipeline(originalId, replacementId), /reanchor prepared; dependency projection failed/);
+	} finally { rmdirSync(ledgerFile); renameSync(`${ledgerFile}.saved`, ledgerFile); }
+	assert.deepEqual((await post.ledger().show(started.ship_id)).blocked_by, [originalId, hold.id]);
+	assert.equal(post.pipeline().store.require(replacementId).reanchor?.phase, "prepared");
+	await post.shutdown();
+	post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env } });
+	await assert.rejects(() => post.advancePipeline(replacementId), /reanchor prepared/);
+	await assert.rejects(() => post.dispatch({ jobId: started.ship_id, task: "Research a bounded README change.", model: replacementModel, fetch: false }), /reanchor prepared/);
+	const projection = await post.reanchorPipeline(originalId, replacementId);
+	assert.equal(projection.reanchor?.phase, "committed");
+	assert.deepEqual((await post.ledger().show(started.ship_id)).blocked_by, [replacementId, hold.id]);
+	assert.deepEqual(await post.reanchorPipeline(originalId, replacementId), projection);
+	await assert.rejects(() => post.advancePipeline(originalId), /superseded/);
+	assert.equal(readPriorAttempts(home.path, replacementId).decisions.at(-1)?.verdict, "revise");
+	await post.dispatch({ jobId: replacementId, taskFile: join(home.path, paths.runDir(replacementId), "revision-task.md"), model: replacementModel, fetch: false });
+	await waitFor(() => post.fleet.get(replacementId)?.phase, (phase) => phase === "held", { timeoutMs: 30_000 });
+	const reviewed = await post.gate({ jobId: replacementId, model: replacementGate });
+	assert.ok(isGateWait(reviewed));
+	post.reviewRuns.handBack(reviewed.key);
+	await post.reviewRuns.settled(reviewed.key);
+	assert.equal(readPriorAttempts(home.path, replacementId).decisions.at(-1)?.attempt, 2);
+	assert.equal(readPriorAttempts(home.path, replacementId).decisions.at(-1)?.verdict, "pass");
+	assert.equal((await post.tearDown(replacementId)).torn_down, true);
+	const pending = await post.advancePipeline(replacementId);
+	assert.equal(pending.next, "authorize");
+	assert.equal(post.fleet.get(started.ship_id), undefined);
+	await assert.rejects(() => post.reanchorPipeline(originalId, replacementId), /human decision is pending/);
+	const deny = "Decline this implementation checkpoint and retain its substantive hold.";
+	const declined = await parent(deny, [{ kind: "tool_calls", calls: [{ name: "cp_decide", args: { target: `aw-checkpoint-${started.ship_id}`, decision: "decline", basis: { operator_quote: deny } } }] }]);
+	assert.notEqual(declined[0]!.isError, true, JSON.stringify(declined[0]!.result));
+	await assert.rejects(() => post.reanchorPipeline(originalId, replacementId), /checkpoint was declined/);
+	assert.deepEqual((await post.ledger().show(started.ship_id)).blocked_by, [replacementId, hold.id]);
 });

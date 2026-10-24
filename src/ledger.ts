@@ -669,6 +669,25 @@ export class Ledger {
 		});
 	}
 
+	/** Retarget only the named edges, atomically; a completed projection is safe to replay. */
+	async retargetDeps(edges: readonly { dependent_job_id: string; original_blocker_id: string; replacement_blocker_id: string }[]): Promise<void> {
+		await this.#mutate((doc) => {
+			for (const edge of edges) {
+				const job = this.#require(doc, edge.dependent_job_id);
+				if (job.status !== "open") throw new LedgerError(`${job.id}: dependency projection requires an open job`);
+				this.#require(doc, edge.replacement_blocker_id);
+				if (!job.blocked_by.includes(edge.original_blocker_id)) {
+					if (job.blocked_by.includes(edge.replacement_blocker_id)) continue;
+					throw new LedgerError(`${job.id}: dependency ${edge.original_blocker_id} changed; no edge retargeted`);
+				}
+				job.blocked_by = [...new Set(job.blocked_by.map((id) => id === edge.original_blocker_id ? edge.replacement_blocker_id : id))];
+				job.updated_at = isoTimestamp(this.#now());
+			}
+			const cycle = findDependencyCycle(doc.jobs);
+			if (cycle) throw new LedgerError(`refusing dependency retarget: dependency cycle ${cycle.join(" -> ")}`);
+		});
+	}
+
 	// -- import -------------------------------------------------------------
 
 	/** Append pre-built records. A duplicate id refuses the whole batch. */

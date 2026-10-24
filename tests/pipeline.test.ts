@@ -2135,6 +2135,7 @@ function handoffBench(
 			close: async () => undefined,
 			addDep: async () => undefined,
 			removeDep: async () => undefined,
+			retargetDeps: async () => undefined,
 			update: async (jobId: string, patch: { addLabels?: string[]; removeLabels?: string[] }) => (riskLabels.push({ jobId, added: patch.addLabels ?? [], removed: patch.removeLabels ?? [] }), { id: jobId, labels: patch.addLabels ?? [], status: "open" }),
 		},
 		teardown: { teardown: async () => ({ job_id: researchId, torn_down: true }) },

@@ -417,6 +417,9 @@ export const paths = Object.freeze({
 	originalTaskFile(jobId: string): string {
 		return `${LAYOUT.runs}/${requireJobId(jobId)}/original-task.md`;
 	},
+	pipelineReanchorFile(jobId: string): string {
+		return `${LAYOUT.runs}/${requireJobId(jobId)}/pipeline-reanchor.json`;
+	},
 	/**
 	 * A previous frozen-task generation, archived when a valid promotion
 	 * (`cp_send` with `task`/`taskFile`, mode `prompt`) replaced it

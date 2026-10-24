@@ -106,6 +106,10 @@ export const PipelineRecordSchema = Type.Object(
 		 * implementer again. `advance` refuses a superseded record outright.
 		 */
 		superseded_by: Type.Optional(JobIdSchema),
+		reanchor: Type.Optional(Type.Object({
+			source_job_id: JobIdSchema,
+			phase: StringEnum(["prepared", "committed"]),
+		}, { additionalProperties: false })),
 		/**
 		 * When the pipeline acted on the quality report (promoted fixes, or went on
 		 * to the gate) — spec 2026-09-05. The report is written in the background,
