@@ -1,9 +1,32 @@
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, copyFileSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { ESCALATION_NO_MANDATE, GateRecoveryReservationSchema, GateRecoveryClaimSchema, GateVerdictSchema, validate, paths, type GateVerdict, type RecoveryReservation, type RecoveryClaim, type GateRecoveryStatus } from "./contracts.ts";
 import { EscalationStore, kindForGate } from "./escalation.ts";
 import { MandateStore } from "./mandate.ts";
+import { parseTaskAddenda, taskAddendaText } from "./task-addenda.ts";
+
+export function recoveryTask(reservation: RecoveryReservation, buffers: readonly Buffer[], artifactPath: string): Buffer {
+	const original = reservation.inputs.findIndex((file) => file.target.endsWith("/previous-original-task.md"));
+	const addenda = reservation.inputs.findIndex((file) => file.target.endsWith("/task-addenda.jsonl"));
+	if (original < 0) throw new Error("missing recovery scope input");
+	return Buffer.concat([buffers[original]!, Buffer.from([
+		addenda < 0 ? "" : taskAddendaText(parseTaskAddenda(buffers[addenda]!.toString("utf8"), reservation.inputs[addenda]!.target)),
+		"\n\n## Recovery output override",
+		`Source job: ${reservation.source_job}; replacement job: ${reservation.replacement_job}.`,
+		`Source artifact: ${reservation.inputs[0]!.source}; replacement artifact: ${artifactPath}.`,
+		`Reservation SHA256: ${recoveryDigest(recoveryJson(reservation))}; authority: ${reservation.escalation_id}.`,
+		"Only source output/reporting destination instructions are superseded for this replacement.",
+		"All substantive acceptance and authorized addenda remain governing scope, not scope growth.",
+		`Write the complete corrected plan to ${artifactPath} and report_result.`,
+		"Exactly one corrected review is available. No automatic revision or retry follows it.",
+		"The candidate must contain full evidence; reviewers must not recursively load references.",
+		"\n## Planner supporting inputs (planner only; not reviewer inputs)",
+		"Replacement planner: remain read-only; do not implement code.",
+		...reservation.inputs.filter((file) => !/gate-\d+\.json$/.test(file.target)).map((file) => `Read in full: ${file.target}`),
+		"",
+	].join("\n"))]);
+}
 
 export type { RecoveryReservation } from "./contracts.ts";
 
@@ -42,6 +65,10 @@ export function validateRecoveryAuthority(home: string, reservation: RecoveryRes
 		!authority.evidence_paths.includes(paths.gateFile(reservation.source_job, reservation.attempt)) ||
 		recoveryDigest(recoveryJson(authority)) !== reservation.authority_sha256) {
 		throw new Error(`${reservation.escalation_id}: missing, stale, withdrawn or mismatched recovery authority`);
+	}
+	const sourceAddenda = join(home, paths.taskAddendaFile(reservation.source_job));
+	if (existsSync(sourceAddenda) !== reservation.inputs.some((file) => file.source === sourceAddenda)) {
+		throw new Error(`${sourceAddenda}: recovery addenda mismatch`);
 	}
 	for (const input of reservation.inputs) {
 		if (recoveryDigest(readFileSync(input.source)) !== input.source_sha256) {
@@ -133,7 +160,7 @@ export function recoveryStatus(home: string, jobId: string): GateRecoveryStatus 
 export async function claimRecovery(input: {
 	home: string; jobId: string; reservation: RecoveryReservation; attempt: number; artifactPath: string;
 	ready: () => Promise<void>; mandates?: MandateStore; permit: () => void;
-}): Promise<Buffer> {
+}): Promise<{ artifact: Buffer; task: Buffer }> {
 	const { home, jobId, reservation, attempt } = input;
 	await input.ready();
 	const current = recoveryTarget(home, jobId);
@@ -141,11 +168,21 @@ export async function claimRecovery(input: {
 		throw new Error(`${jobId}: recovery binding changed during preflight`);
 	}
 	if (attempt !== reservation.attempt + 1) throw new Error(`${jobId}: recovery history changed`);
-	for (const file of reservation.inputs) {
+	const buffers = reservation.inputs.map((file) => {
 		const bytes = readFileSync(file.target);
 		if (bytes.length !== file.bytes || recoveryDigest(bytes) !== file.sha256) {
 			throw new Error(`${file.target}: prepared recovery input changed`);
 		}
+		return bytes;
+	});
+	const dir = join(home, paths.runDir(jobId));
+	const addenda = join(home, paths.taskAddendaFile(jobId));
+	if (existsSync(addenda) !== reservation.inputs.some((file) => file.target === addenda)) {
+		throw new Error(`${addenda}: recovery addenda mismatch`);
+	}
+	const task = readFileSync(join(dir, "revision-task.md"));
+	if (!task.equals(recoveryTask(reservation, buffers, input.artifactPath))) {
+		throw new Error(`${jobId}: legacy handoff mismatch; prepared recovery task changed`);
 	}
 	validateRecoveryAuthority(home, reservation, input.mandates);
 	input.permit();
@@ -155,12 +192,12 @@ export async function claimRecovery(input: {
 		artifact_sha256: recoveryDigest(artifact), artifact_bytes: artifact.length,
 	}));
 	if (!claimed) throw new Error(`${jobId}: recovery already claimed; remaining=0; no spawn`);
-	return artifact;
+	return { artifact, task };
 }
 
-export function copyRecoveryTask(home: string, reservation: RecoveryReservation, scratch: string): string {
+export function copyRecoveryTask(task: Buffer, scratch: string): string {
 	const out = join(scratch, "original-task.md");
-	copyFileSync(join(home, paths.originalTaskFile(reservation.source_job)), out);
+	writeFileSync(out, task);
 	return out;
 }
 

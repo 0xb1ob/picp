@@ -862,9 +862,9 @@ export class Gate {
 		const scratch = join(home, paths.gateScratchDir(jobId, attempt));
 		mkdirSync(scratch, { recursive: true });
 		const artifactCopy = join(scratch, "artifact.md");
-		if (recoveryArtifact) writeFileSync(artifactCopy, recoveryArtifact);
+		if (recoveryArtifact) writeFileSync(artifactCopy, recoveryArtifact.artifact);
 		else artifacts.get(jobId, artifactCopy);
-		const taskCopy = recovery ? copyRecoveryTask(home, recovery, scratch) : copyOriginalTask({ home, jobId, scratch });
+		const taskCopy = recoveryArtifact ? copyRecoveryTask(recoveryArtifact.task, scratch) : copyOriginalTask({ home, jobId, scratch });
 
 		const brief = assembleBrief({
 			profile,
@@ -873,7 +873,7 @@ export class Gate {
 				job_id: jobId,
 				project: record?.project ?? "unregistered",
 				artifact_path: artifactCopy,
-				original_task: originalTaskBlock(taskCopy) + taskAddendaBlock({ home, jobId, scratch }),
+				original_task: originalTaskBlock(taskCopy) + (recovery ? "\nAuthorized addenda in the task are governing scope, not scope growth.\n" : taskAddendaBlock({ home, jobId, scratch })),
 			},
 		});
 		writeFileSync(join(gateRunDir, "brief.md"), brief);
