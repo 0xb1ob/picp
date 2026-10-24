@@ -352,7 +352,7 @@ export class Sender {
 
 		if (resolvedTask && this.#options.mandates) {
 			const selected = this.#options.mandates.selection("promote", { jobId: request.jobId, project: record.project, kind: record.kind }, fleet.read().jobs);
-			assertContinuationTask(selected?.grant, request.jobId, resolvedTask.forInference);
+			assertContinuationTask(selected?.grant, request.jobId, resolvedTask.forInference, home);
 		}
 		// risk:high gates this promotion exactly like a direct dispatch
 		// (pi-command-post-autonomy-programme-cur.2.4): a promoted ship brief is a

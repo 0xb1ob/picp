@@ -4,14 +4,26 @@ import { join } from "node:path";
 import { type Job, type Mandate, isoTimestamp, paths, REVIEW_ORIGINAL_TASK_MAX_BYTES } from "./contracts.ts";
 import { parseJobLabels, readJobsDocument } from "./ledger.ts";
 import { atomicWriteText, queued } from "./json-store.ts";
-import { MandateError, capReached, covers, scheduleIdOf, type MandateUsageJob } from "./mandate-accounting.ts";
-import { readTaskAddenda } from "./task-addenda.ts";
+import { MandateError, capReached, covers, scheduleIdOf, workIdentity, type MandateUsageJob } from "./mandate-accounting.ts";
+import { replacementTaskFile, validReplacement } from "./mandate-replacement.ts";
+import { readTaskAddenda, taskAddendaBlock } from "./task-addenda.ts";
 import { pathExcluded, subsystemExcluded, type MandateStore } from "./mandate.ts";
 import { admissionEvidence, confirmedAdmission } from "./mandate-continuity-confirmation.ts";
 import { readPriorAttempts } from "./gate.ts";
 
-export function workUnfinished(home: string, job: Job): boolean {
-	return job.status !== "closed" || (parseJobLabels(job.labels).kind === "research" && readPriorAttempts(home, job.id).decisions.at(-1)?.verdict === "revise");
+export function workUnfinished(home: string, job: Job, grant?: Mandate): boolean {
+	let current = job;
+	const seen = new Set<string>();
+	for (;;) {
+		const link = grant?.same_work_replacements?.find((entry) => entry.original_job_id === current.id && entry.phase === "committed");
+		if (!link) break;
+		const jobs = readJobsDocument(home).jobs;
+		const replacement = jobs.find((entry) => entry.id === link.replacement_job_id);
+		if (seen.has(current.id) || !replacement || !validReplacement(home, grant!, replacement, jobs)) return true;
+		seen.add(current.id);
+		current = replacement;
+	}
+	return current.status !== "closed" || (parseJobLabels(current.labels).kind === "research" && readPriorAttempts(home, current.id).decisions.at(-1)?.verdict === "revise");
 }
 
 export function originalScopeDigest(job: Job): string {
@@ -101,7 +113,7 @@ export async function continueAdmittedWork(
 			const labels = parseJobLabels(job.labels);
 			return !labels.project || !labels.kind || !covers(source!, { jobId: job.id, project: labels.project, jobKind: labels.kind, scheduleId: scheduleIdOf(job.labels) });
 		})) return result("ineligible", "original project, kind or exclusions do not cover this work");
-		if (jobs.every((job) => !workUnfinished(store.home, job))) return result("ineligible", "original named work is fulfilled");
+		if (jobs.every((job) => !workUnfinished(store.home, job, source))) return result("ineligible", "original named work is fulfilled");
 		const initialSource = source;
 		if (jobs.some((job) => {
 			const proof = initialSource.admissions?.find((entry) => entry.job_id === job.id);
@@ -162,10 +174,11 @@ export async function continueAdmittedWork(
 	});
 }
 
-export function assertContinuationTask(grant: Mandate | undefined, jobId: string, text: string): void {
+export function assertContinuationTask(grant: Mandate | undefined, jobId: string, text: string, home: string): void {
 	if (grant?.continuity?.phase !== "committed") return;
 	const frozen = JSON.parse(readFileSync(grant.continuity.governing_input_refs[0]!, "utf8")) as { inputs: { job: { id: string }; task: string }[] };
-	if (frozen.inputs.find((entry) => entry.job.id === jobId)?.task !== text) throw new MandateError(`${jobId}: continuation task differs from its frozen original scope; supply the original task without added scope`);
+	const expected = workIdentity(grant, jobId) === jobId ? frozen.inputs.find((entry) => entry.job.id === jobId)?.task : readFileSync(replacementTaskFile(home, jobId), "utf8");
+	if (expected !== text) throw new MandateError(`${jobId}: continuation task differs from its frozen original scope; supply the original task without added scope`);
 }
 
 export function continuationProof(home: string, job: Job | undefined, grants: readonly Mandate[], now = isoTimestamp()): Record<string, string> {
@@ -180,17 +193,19 @@ export function continuationProof(home: string, job: Job | undefined, grants: re
 		const confirmationId = confirmedAdmission(home, grant, originalJobs as Job[]);
 		if (receipt.authority_reference.startsWith("confirmation:") && !confirmationId) continue;
 		if (grant.expiry <= now && !["home", "project"].includes(grant.provenance?.expiry_hours ?? "") && !confirmationId) continue;
-		if (receipt.admission_expiry !== grant.expiry || receipt.source_fingerprint !== sourceFingerprint(grant) || !admittedWork(grant, job, confirmationId)) continue;
+		const admitted = records.find((entry) => entry.id === workIdentity(grant, job.id));
+		if (!admitted || (admitted.id !== job.id && !validReplacement(home, grant, job, records))) continue;
+		if (receipt.admission_expiry !== grant.expiry || receipt.source_fingerprint !== sourceFingerprint(grant) || !admittedWork(grant, admitted, confirmationId)) continue;
 		const snapshot = `${join(home, paths.mandateFile(grant.id))}.governing-inputs`;
 		if (receipt.governing_input_refs.length !== 1 || receipt.governing_input_refs[0] !== snapshot || !existsSync(snapshot)) continue;
 		const text = readFileSync(snapshot, "utf8");
 		if (Buffer.byteLength(text) > REVIEW_ORIGINAL_TASK_MAX_BYTES || digest(text) !== receipt.governing_input_digest) continue;
 		const frozen = JSON.parse(text) as { inputs: { job: Job; task: string; task_file?: string; addenda: ReturnType<typeof readTaskAddenda> }[] };
-		const entry = frozen.inputs.find((input) => input.job.id === job.id);
-		const original = join(home, paths.originalTaskFile(job.id));
+		const entry = frozen.inputs.find((input) => input.job.id === admitted.id);
+		const original = join(home, paths.originalTaskFile(admitted.id));
 		if (entry?.task_file !== undefined && entry.task_file !== original) continue;
-		const task = entry?.task_file ? readFileSync(original, "utf8") : job.description;
-		if (!entry || entry.task !== task || JSON.stringify(entry.addenda) !== JSON.stringify(readTaskAddenda(home, job.id))) continue;
+		const task = entry?.task_file ? readFileSync(original, "utf8") : admitted.description;
+		if (!entry || entry.task !== task || JSON.stringify(entry.addenda) !== JSON.stringify(readTaskAddenda(home, admitted.id))) continue;
 		proof[grant.id] = receipt.governing_input_digest;
 	}
 	return proof;
@@ -199,6 +214,12 @@ export function continuationProof(home: string, job: Job | undefined, grants: re
 export async function continueForJob(store: MandateStore, jobId: string, usage: readonly MandateUsageJob[]): Promise<ContinuationResult | undefined> {
 	const job = store.runContext().ledgerJob(jobId);
 	if (!job || scheduleIdOf(job.labels)) return;
+	for (const grant of store.list()) {
+		const replaced = grant.same_work_replacements?.find((entry) => entry.original_job_id === jobId);
+		if (replaced) throw new MandateError(`${jobId}: same work is bound to ${replaced.replacement_job_id}; original history cannot be rerun`);
+		const pending = grant.same_work_replacements?.find((entry) => entry.replacement_job_id === jobId && entry.phase === "prepared");
+		if (pending) throw new MandateError(`${jobId}: same-work link ${pending.link_id} is not committed; retry cp_mandate replace_work for ${pending.original_job_id}`);
+	}
 	const labels = parseJobLabels(job.labels);
 	if (!labels.project) return;
 	const subject = { jobId, project: labels.project, kind: labels.kind };
@@ -206,7 +227,7 @@ export async function continueForJob(store: MandateStore, jobId: string, usage: 
 	const refused = new Map<string, ContinuationResult>();
 	let pending: ContinuationResult | undefined;
 	for (const source of store.list()) {
-		if (!source.job_ids?.includes(jobId) || (source.expiry > store.authorityNow() && !source.coverage_superseded) ||
+		if (!source.job_ids?.includes(workIdentity(source, jobId)) || (source.expiry > store.authorityNow() && !source.coverage_superseded) ||
 			!["active", "expired"].includes(source.status)) continue;
 		const result = await store.continue(source.id, usage);
 		if (result.state === "confirmation_required") pending = result;
@@ -218,13 +239,17 @@ export async function continueForJob(store: MandateStore, jobId: string, usage: 
 	return pending;
 }
 
-export function continuityInputsBlock(store: MandateStore | undefined, jobId: string): string {
+export function continuityInputsBlock(store: MandateStore | undefined, jobId: string, grant?: Mandate): string {
 	const job = store?.runContext().ledgerJob(jobId);
 	if (!store || !job) return "";
 	const labels = parseJobLabels(job.labels);
 	if (!labels.project) return "";
-	const selected = store.selection("review", { jobId, project: labels.project, kind: labels.kind });
+	const selected = grant ? { grant, at: { standing: "permit" } } : store.selection("review", { jobId, project: labels.project, kind: labels.kind });
 	const receipt = selected?.grant.continuity;
 	if (selected?.at.standing !== "permit" || receipt?.phase !== "committed") return "";
-	return `\n\n## Complete governing continuity input\nRead these frozen mandate, original task and ordered addenda inputs in full:\n${receipt.governing_input_refs.join("\n")}\n`;
+	const original = workIdentity(selected.grant, jobId);
+	const addenda = original === jobId ? "" : taskAddendaBlock({ home: store.home, jobId: original, scratch: join(store.home, paths.runDir(jobId)) });
+	const findings = selected.grant.same_work_replacements?.find((entry) => entry.replacement_job_id === jobId && entry.phase === "committed")?.prior_findings_refs ?? [];
+	const refs = [...new Set([...receipt.governing_input_refs, ...findings])];
+	return `\n\n## Complete governing continuity input\nRead these frozen mandate, original task, ordered addenda and actual prior findings in full:\n${refs.join("\n")}\n${addenda}`;
 }

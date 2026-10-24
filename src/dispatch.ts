@@ -63,7 +63,8 @@ import type { WorkerManager } from "./worker-manager.ts";
 import type { WorkerProcess } from "./worker-process.ts";
 import { type DepsPorts, prepareNodeDeps } from "./worktree-deps.ts";
 import type { MandateStore } from "./mandate.ts";
-import { assertContinuationTask } from "./mandate-continuity.ts";
+import { assertContinuationTask, continuityInputsBlock } from "./mandate-continuity.ts";
+import { continuationBudget } from "./mandate-usage.ts";
 import { MandateError, scheduleRecord } from "./mandate-accounting.ts";
 import { watchOuterProviderRetry } from "./provider-retry.ts";
 import type { PipelineRecordedRisk } from "./risk-warning.ts";
@@ -625,9 +626,8 @@ export class Dispatcher {
 			mandateId = permission?.selected?.id; startedBy = permission?.run?.started_by;
 			const continuation = permission?.selected?.continuity;
 			if (continuation?.phase === "committed") {
-				const file = continuation.governing_input_refs[0]!;
-				assertContinuationTask(permission?.selected, issue.id, task.forInference);
-				continuityNote = `\n\n## Governing continuation input\nRead this complete frozen mandate, original task and ordered addenda in full: ${file}\n`;
+				assertContinuationTask(permission?.selected, issue.id, task.forInference, this.#options.home);
+				continuityNote = continuityInputsBlock(this.#options.mandates, issue.id, permission?.selected);
 			}
 		} catch (error) {
 			throw (error instanceof MandateError && error.code) || (error instanceof ScheduleAuthorityError && error.code === "parallelism_full") ? error : new DispatchError((error as Error).message); // coded: dispatch queue
@@ -706,6 +706,7 @@ export class Dispatcher {
 			reservation = await options.makeRoom?.(issue.id, profile.frontmatter.role);
 			await options.manager.ready();
 			const managed = options.manager.spawn({
+				budgetLimit: continuationBudget(options.mandates, issue.id, options.fleet.read().jobs, "dispatch"),
 				identity: {
 					jobId: issue.id, kind, delivery,
 					runDir,

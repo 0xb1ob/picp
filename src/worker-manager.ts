@@ -340,6 +340,7 @@ export interface SpawnRequest {
 	 */
 	key?: string;
 	profile: WorkerProfile;
+	budgetLimit?: JobBudget;
 	/** Resolved model id (`provider/model-id`) from routing. */
 	model: string;
 	/**
@@ -534,6 +535,10 @@ export class WorkerManager {
 		}
 		const budgetConfig = this.budgetConfig;
 		const budget = resolveJobBudget(request.profile, budgetConfig);
+		if (request.budgetLimit) {
+			budget.tokens = Math.min(budget.tokens, request.budgetLimit.tokens);
+			budget.cost_usd = Math.min(budget.cost_usd, request.budgetLimit.cost_usd);
+		}
 		const budgetClamp = detectBudgetClamp(request.profile, budgetConfig);
 		// Role always comes from the profile: the caller cannot mislabel a worker.
 		const role = request.profile.frontmatter.role;

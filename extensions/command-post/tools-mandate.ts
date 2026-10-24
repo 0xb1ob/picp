@@ -19,6 +19,7 @@ import {
 	type EscalationKind,
 } from "../../src/contracts.ts";
 import { MandateError, MANDATE_JOBS_THIS_TURN, projectWideCapWarning, resolveMandateJobIds, resolveMandateObjectiveRef } from "../../src/mandate.ts";
+import { replaceAdmittedWork } from "../../src/mandate-replacement.ts";
 import { formatMandateDefaults, loadMandateDefaults, MANDATE_HOME_ONLY_FIELDS, resolveMandateGrant, sameProjectMandateOverride, setMandateDefault } from "../../src/mandate-defaults.ts";
 import { liveUsageJobs, raiseTokenCap } from "../../src/mandate-usage.ts";
 import { cpNext, dedupeNext, formatNext, writeNextSnapshot } from "../../src/next.ts";
@@ -52,6 +53,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 				"expiry, spend/job caps, allowed actions and ask_on all resolve from data/mandate-defaults.json (and a project override); " +
 				"never ask the human for them, never invent numbers. Pass an explicit field only when the human named one.",
 			"Proven default expiry continues only already admitted named work automatically. cp_mandate continue source_id replays it; ambiguity returns one scope-bound cp_decide confirmation. Explicit deadlines, stops, exclusions and original budgets remain binding; never issue fresh funding just to bypass default expiry.",
+			"replace_work source_id original_job_id replacement_job_id binds a fresh research job to the original admitted scope after actual revise and normal closure/teardown. Dispatch only its returned task_file after commit; it shares the original budget, job identity and consumed gate credit. Pending links authorize neither job, and a competing successor refuses.",
 			`After intake in this turn, job_ids may be ["${MANDATE_JOBS_THIS_TURN}"] instead of retyping ids.`,
 			"Without job_ids a grant is project-wide: an issue named in the objective is verified and minted as a job but never pins the grant, so follow-on PRs stay covered. The objective is the operator's mission scope: record follow-ons only within it, escalate growth beyond it (scope expansion).",
 			"A schedule runs only under a schedule_grant:true grant, which covers nothing but that one schedule's jobs; a project-wide grant never covers a scheduled job.",
@@ -63,10 +65,12 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			"Revoke, expiry and a replacing grant close that grant's open escalations as superseded, no answer needed; cp_mandate supersede_stale does the same on demand for records left open before this rule.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["issue", "continue", "pause", "resume", "revoke", "show", "raise_tokens", "preapprove_risk", "supersede_stale", "defaults_show", "defaults_set", "reviewer_model"], {
+			action: StringEnum(["issue", "continue", "replace_work", "pause", "resume", "revoke", "show", "raise_tokens", "preapprove_risk", "supersede_stale", "defaults_show", "defaults_set", "reviewer_model"], {
 				description: "issue a grant; pause/resume/revoke it; show it; raise_tokens lifts its token cap (never USD) up to token_ceiling; preapprove_risk records an operator quote pre-approving risk:high dispatch/promotion under it; supersede_stale closes open escalations of revoked/expired/replaced grants; defaults_show|defaults_set read/write data/mandate-defaults.json; reviewer_model sets or clears only a grant's reviewer preference",
 			}),
 			source_id: Type.Optional(Type.String({ description: "continue: original mandate id; retains its admission deadline, original scope and remaining budget" })),
+			original_job_id: Type.Optional(Type.String({ description: "replace_work: closed, torn-down original research job with actual latest revise" })),
+			replacement_job_id: Type.Optional(Type.String({ description: "replace_work: fresh same-project research job; inherits only the original scope and remaining limits" })),
 			confirmation_escalation_id: Type.Optional(Type.String({ description: "continue: exact scope-bound original-admission confirmation answered through cp_decide" })),
 			replacement_id: Type.Optional(Type.String({ description: "continue: existing authenticated typed coverage replacement id" })),
 			mandate_id: Type.Optional(Type.String({ description: "pause/resume/revoke/show/raise_tokens/preapprove_risk/reviewer_model: the mandate id (md-…). show with an id returns that grant at any status" })),
@@ -129,6 +133,13 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			const post = commandPost(ctx.modelRegistry);
 			const jobs = liveUsageJobs(post.fleet, post.runs);
 			try {
+				if (params.action === "replace_work") {
+					const extra = Object.entries(params).filter(([key, value]) => value !== undefined && !["action", "source_id", "original_job_id", "replacement_job_id", "confirmation_escalation_id"].includes(key));
+					if (!params.source_id || !params.original_job_id || !params.replacement_job_id || extra.length) throw new MandateError("replace_work needs source_id, original_job_id and replacement_job_id; only confirmation_escalation_id may accompany them");
+					const result = await replaceAdmittedWork({ store: post.mandates, ledger: post.ledger(), fleet: post.fleet, artifacts: post.artifacts, sourceId: params.source_id, originalJobId: params.original_job_id, replacementJobId: params.replacement_job_id, usage: () => liveUsageJobs(post.fleet, post.runs), confirmationId: params.confirmation_escalation_id });
+					refreshWidget(ctx);
+					return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: { ...result } };
+				}
 				if (params.action === "continue") {
 					const extra = Object.entries(params).filter(([key, value]) => value !== undefined && !["action", "source_id", "confirmation_escalation_id", "replacement_id"].includes(key));
 					if (!params.source_id || extra.length) throw new MandateError("cp_mandate continue needs source_id and accepts only confirmation_escalation_id and replacement_id; no authority or budget overrides");

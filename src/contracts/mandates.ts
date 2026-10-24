@@ -204,7 +204,8 @@ export const SameWorkReplacementSchema = Type.Object({
 	work_id: JobIdSchema,
 	original_job_id: JobIdSchema,
 	replacement_job_id: JobIdSchema,
-	admitted_at: IsoTimestampSchema,
+	admitted_at: Type.Optional(IsoTimestampSchema),
+	confirmation_escalation_id: Type.Optional(Type.String({ pattern: "^es-[a-z0-9]{4,16}$" })),
 	admission_expiry: IsoTimestampSchema,
 	original_scope_digest: ContinuityDigestSchema,
 	governing_input_digest: ContinuityDigestSchema,
@@ -212,7 +213,7 @@ export const SameWorkReplacementSchema = Type.Object({
 	inherited_gate_history_digest: ContinuityDigestSchema,
 	phase: StringEnum(["prepared", "committed"]),
 	authority_reference: Type.String({ minLength: 1, maxLength: 4000 }),
-}, { additionalProperties: false });
+}, { additionalProperties: false, oneOf: [{ required: ["admitted_at"] }, { required: ["confirmation_escalation_id"] }] });
 export type SameWorkReplacement = Static<typeof SameWorkReplacementSchema>;
 
 export const MandateSchema = Type.Object(

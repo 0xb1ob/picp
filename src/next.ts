@@ -285,7 +285,7 @@ async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: read
 	if (mandate.job_ids && mandate.job_ids.length > 0) {
 		const allJobs = await ports.ledger.list({ all: true });
 		const named = mandate.job_ids.map((id) => allJobs.find((job) => job.id === id)).filter((job): job is Job => job !== undefined);
-		if (named.length === mandate.job_ids.length && named.every((job) => !workUnfinished(ports.mandates.home, job))) {
+		if (named.length === mandate.job_ids.length && named.every((job) => !workUnfinished(ports.mandates.home, job, mandate))) {
 			const dropped = named.filter(wasDropped).length;
 			const failed = named.filter((job) => fleetJobs.some((record) => record.job_id === job.id && record.phase === "failed")).length;
 			const summary = `landed ${named.length - dropped}, dropped ${dropped}${failed ? `, failed ${failed}` : ""}, cost $${spend.usd.toFixed(2)}`;

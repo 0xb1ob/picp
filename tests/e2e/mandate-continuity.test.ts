@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -8,7 +8,24 @@ import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratc
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { cpNext } from "../../src/next.ts";
+import { isGateWait, readPriorAttempts } from "../../src/gate.ts";
 
+const shellArg = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+function parentCommands(home: string, provider: MockProvider, agent: ReturnType<typeof createAgentDir>) {
+	let ordinal = 0;
+	return async (prompt: string, steps: ScriptStep[]) => {
+		const script = `continuity-parent-${++ordinal}`;
+		const model = provider.addScript(script, [...steps, { kind: "text", text: "done" }]);
+		agent.writeModels(provider);
+		const child = startPiChild({ cwd: home, model, env: { ...agent.env, CP_HOME: home }, extensions: [COMMAND_POST_EXTENSION] });
+		try {
+			await child.prompt(prompt);
+			await child.waitForSettled(30_000);
+			assert.equal(provider.remaining(script), 0);
+			return child.eventsOfType("tool_execution_end");
+		} finally { await child.close(); }
+	};
+}
 test("named mandate issue captures immutable typed admission without widening project scope", { timeout: 30_000 }, async (t) => {
 	const home = createScratchHome();
 	initJobsDocument(home.path, "cp");
@@ -98,10 +115,14 @@ test("direct expired dispatch rejects added scope then delivers complete governi
 	const provider = await MockProvider.start();
 	const agent = createAgentDir({ provider });
 	let snapshot = "";
+	let workerJobId = "", workerArtifact = "";
 	const model = provider.addScript("continuation-worker", [
 		{ kind: "tool_calls", calls: [{ name: "read", args: () => ({ path: snapshot }) }] },
-		{ kind: "text", text: "standing by" },
-	], { onExhausted: "repeat" });
+		{ kind: "tool_calls", calls: [{ name: "bash", args: () => ({ command: `printf '%s' 'Original bounded research report' > ${shellArg(workerArtifact)}` }) }] },
+		{ kind: "tool_calls", calls: [{ name: "report_result", args: () => ({ job_id: workerJobId, kind: "research", status: "done", artifact_path: workerArtifact, summary: "Original research delivered.",
+			plan_summary: { goal: "Original research", approach: ["Read complete original scope"], touched: ["README.md"], acceptance: ["Preserve scope"], risk: "Read only" },
+			self_assessment: { confidence: "high", scope: "S", blocking_unknowns: false, destructive_scope: false } }) }] },
+	]);
 	agent.writeModels(provider);
 	initJobsDocument(home.path, "cp");
 	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
@@ -117,6 +138,8 @@ test("direct expired dispatch rejects added scope then delivers complete governi
 	const task = "Research the original scope.\n" + "Preserve the exact governing instructions.\n".repeat(100);
 	const job = await post.ledger().create({ title: "Research the original scope", description: task,
 		project: "demo", kind: "research", delivery: "local" });
+	workerJobId = job.id;
+	workerArtifact = post.artifacts.file(job.id);
 	const expiry = new Date(Date.now() + 5000).toISOString().replace(/\.\d{3}Z$/, "Z");
 	const grant = post.mandates.issue({ projects: ["demo"], objective: "Complete only the admitted research, preserving all instructions",
 		job_ids: [job.id], expiry, provenance: { expiry_hours: "project" },
@@ -137,6 +160,7 @@ test("direct expired dispatch rejects added scope then delivers complete governi
 	assert.ok(requests.some((request) => request.includes(JSON.stringify(readFileSync(snapshot, "utf8")).slice(1, -1))));
 	assert.equal(post.mandates.get(grant.id)!.expiry, expiry);
 	assert.equal(post.mandates.assertPermitted("review", { jobId: job.id, project: "demo", kind: "research" }, post.fleet.read().jobs).selected?.id, grant.id);
+	await waitFor(() => post.fleet.get(job.id)?.phase, (phase) => phase === "held", { timeoutMs: 30_000, what: "accepted original research report" });
 	await waitFor(() => post.manager.get(job.id)?.worker.busy, (busy) => busy === false, { timeoutMs: 30_000, what: "original research worker settling" });
 	const originalTaskFile = join(home.path, paths.originalTaskFile(job.id));
 	const originalBytes = readFileSync(originalTaskFile, "utf8");
@@ -164,19 +188,7 @@ test("legacy continuation exposes one actionable scope-bound confirmation and ac
 		return post.mandates.save({ ...grant, admissions: undefined, provenance: undefined });
 	});
 	await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(expiry) - Date.now() + 20)));
-	let ordinal = 0;
-	const parent = async (prompt: string, steps: ScriptStep[]) => {
-		const script = `continuity-parent-${++ordinal}`;
-		const model = provider.addScript(script, [...steps, { kind: "text", text: "done" }]);
-		agent.writeModels(provider);
-		const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
-		try {
-			await child.prompt(prompt);
-			await child.waitForSettled(30_000);
-			assert.equal(provider.remaining(script), 0);
-			return child.eventsOfType("tool_execution_end");
-		} finally { await child.close(); }
-	};
+	const parent = parentCommands(home.path, provider, agent);
 	const escalation = (index: number) => post.escalations.list().find((item) => item.mandate_id === grants[index]!.id)!;
 	const before = await parent("Inspect original admission; do not authorize any continuation.", [
 		{ kind: "tool_calls", calls: [{ id: "next", name: "cp_next", args: { project: "demo" } }] },
@@ -214,4 +226,151 @@ test("legacy continuation exposes one actionable scope-bound confirmation and ac
 	assert.equal(post.mandates.list().length, 2);
 	assert.deepEqual(post.mandates.get(grants[0]!.id)!.spend_cap, grants[0]!.spend_cap);
 	assert.equal(post.mandates.get(grants[0]!.id)!.expiry, expiry);
+});
+
+test("post-expiry replacement uses a committed original-root link, full findings and one logical budget", { skip: !treehouseAvailable(), timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n" } });
+	const provider = await MockProvider.start();
+	const agent = createAgentDir({ provider });
+	initJobsDocument(home.path, "cp");
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env } });
+	const parent = parentCommands(home.path, provider, agent);
+	let pool: ReturnType<typeof enableTreehouse> | undefined;
+	t.after(async () => { await post.shutdown(); await provider.stop(); pool?.cleanup(); agent.cleanup(); repo.cleanup(); home.cleanup(); });
+	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
+	const clone = post.registry.pathOf("demo");
+	execFileSync("git", ["clone", "--quiet", repo.remote as string, clone]);
+	pool = enableTreehouse(clone, { maxTrees: 3 });
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.data, "budgets.json"), JSON.stringify({ schema_version: 1, per_job_tokens: 10_000_000, per_job_cost_usd: 100, warn_ratio: 0.9, spawn_cap: 3 }));
+	const task = "Research the original bounded work.\n" + "Keep every original acceptance detail unchanged.\n".repeat(200);
+	const original = await post.ledger().create({ title: "Original bounded research", description: task, project: "demo", kind: "research", delivery: "local" });
+	const addendum = "Additional original acceptance, in order.\n" + "Keep the original evidence and constraints complete.\n".repeat(200);
+	const amended = await parent(`Authorize this original scope addition: ${addendum}`, [{ kind: "tool_calls", calls: [{ name: "cp_job", args: { action: "amend", job_id: original.id, text: addendum, quote: "Authorize this original scope addition", reason: "Original acceptance before admission" } }] }]);
+	assert.notEqual(amended[0]!.isError, true, JSON.stringify(amended[0]!.result));
+	const expiry = new Date(Date.now() + 5000).toISOString().replace(/\.\d{3}Z$/, "Z");
+	const grant = post.mandates.issue({ projects: ["demo"], objective: "Complete only this original research", job_ids: [original.id], expiry,
+		provenance: { expiry_hours: "home" }, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 1, ask_on: [] });
+	const plan = "Complete original plan and findings.\n" + "Preserve the original research evidence.\n".repeat(200);
+	let replacementId = "";
+	const worker = (name: string, id: () => string, counted: boolean) => {
+		const steps: ScriptStep[] = [
+		{ kind: "tool_calls", usage: { prompt_tokens: counted ? 90_000 : 0, completion_tokens: counted ? 3200 : 0 }, calls: [
+			{ name: "read", args: () => ({ path: counted ? post.mandates.get(grant.id)!.continuity!.governing_input_refs[0]! : join(home.path, paths.runDir(id()), "previous-plan.md") }) },
+			...(!counted ? [
+				{ name: "read", args: () => ({ path: join(home.path, paths.runDir(id()), "task-addenda.md") }) },
+				{ name: "read", args: () => ({ path: join(home.path, paths.runDir(id()), "gate-1-raw.json") }) },
+			] : []),
+		] },
+		{ kind: "tool_calls", usage: { prompt_tokens: 0, completion_tokens: 0 }, calls: [{ name: "bash", args: () => ({ command: `printf '%s' ${shellArg(plan)} > ${shellArg(post.artifacts.file(id()))}` }) }] },
+		{ kind: "tool_calls", usage: { prompt_tokens: 0, completion_tokens: 0 }, calls: [{ name: "report_result", args: () => ({ job_id: id(), kind: "research", status: "done", artifact_path: post.artifacts.file(id()), summary: "Bounded original research delivered.",
+			plan_summary: { goal: "Complete original research", approach: ["Read full original evidence"], touched: ["README.md"], acceptance: ["Preserve original scope"], risk: "Read only" },
+			self_assessment: { confidence: "high", scope: "S", blocking_unknowns: false, destructive_scope: false } }) }] },
+		];
+		return provider.addScript(name, counted ? [...steps, ...steps.map((step) => ({ ...step, usage: { prompt_tokens: 0, completion_tokens: 0 } }))] : steps);
+	};
+	const originalModel = worker("original-research", () => original.id, true);
+	const replacementModel = worker("replacement-research", () => replacementId, false);
+	const gateModel = provider.addScript("original-gate", [
+		{ kind: "tool_calls", usage: { prompt_tokens: 10_000, completion_tokens: 0 }, calls: [{ name: "read", args: () => ({ path: join(home.path, paths.gateScratchDir(original.id, 1), "original-task.md") }) }] },
+		{ kind: "tool_calls", usage: { prompt_tokens: 0, completion_tokens: 0 }, calls: [{ name: "report_verdict", args: { job_id: original.id, verdict: "revise", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["Clarify one bounded acceptance detail"], revisions: ["Clarify the original acceptance without expanding scope"] } }] },
+	]);
+	const replacementGateModel = provider.addScript("replacement-gate", [
+		{ kind: "tool_calls", usage: { prompt_tokens: 0, completion_tokens: 0 }, calls: [
+			{ name: "read", args: () => ({ path: join(home.path, paths.gateScratchDir(replacementId, 2), "original-task.md") }) },
+			{ name: "read", args: () => ({ path: join(home.path, paths.runDir(replacementId), "task-addenda.md") }) },
+			{ name: "read", args: () => ({ path: join(home.path, paths.runDir(replacementId), "previous-plan.md") }) },
+			{ name: "read", args: () => ({ path: join(home.path, paths.runDir(replacementId), "gate-1-raw.json") }) },
+		] },
+		{ kind: "tool_calls", usage: { prompt_tokens: 0, completion_tokens: 0 }, calls: [{ name: "report_verdict", args: () => ({ job_id: replacementId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["Original bounded acceptance satisfied"] }) }] },
+	]);
+	const models = provider.modelsJson();
+	for (const settings of Object.values(models.providers)) {
+		for (const model of (settings as { models: { id: string; cost: { input: number } }[] }).models) {
+			if (model.id === provider.modelId("original-research")) model.cost.input = 9.94 / 0.09;
+			if (model.id === provider.modelId("original-gate")) model.cost.input = 1;
+		}
+	}
+	writeFileSync(join(agent.path, "models.json"), JSON.stringify(models));
+	writeFileSync(join(home.path, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*"], rubric: [{ id: "planner", role: "planner", model: originalModel }] }));
+	await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(expiry) - Date.now() + 20)));
+	assert.equal((await post.dispatch({ jobId: original.id, task, model: originalModel, fetch: false })).receipt, "accepted");
+	await waitFor(() => post.fleet.get(original.id)?.phase, (phase) => phase === "held", { timeoutMs: 30_000, what: "original public research report" });
+	const reviewed = await post.gate({ jobId: original.id, model: gateModel });
+	assert.ok(isGateWait(reviewed));
+	post.reviewRuns.handBack(reviewed.key);
+	await post.reviewRuns.settled(reviewed.key);
+	assert.equal(readPriorAttempts(home.path, original.id).decisions.at(-1)?.verdict, "revise");
+	await waitFor(() => post.fleet.get(original.id)?.phase, (phase) => phase === "held", { timeoutMs: 30_000, what: "automatic bounded revision report" });
+	await waitFor(() => post.manager.get(original.id)?.worker.busy, (busy) => busy === false, { timeoutMs: 30_000 });
+	const torn = await post.teardown.teardown(original.id);
+	assert.equal(post.fleet.get(original.id)?.phase, "done", JSON.stringify(torn));
+	assert.equal((await post.ledger().show(original.id)).status, "closed");
+	const replacement = await post.ledger().create({ title: "Fresh successor identity", project: "demo", kind: "research", delivery: "local" });
+	replacementId = replacement.id;
+	assert.ok(replacement.created_at >= expiry);
+	const competing = await post.ledger().create({ title: "Competing successor identity", project: "demo", kind: "research", delivery: "local" });
+	const replacementArgs = { action: "replace_work", source_id: grant.id, original_job_id: original.id, replacement_job_id: replacement.id };
+	const blockedFile = join(home.path, paths.runDir(replacement.id), "revision-task.md");
+	mkdirSync(blockedFile, { recursive: true });
+	await parent("Prepare the original-work replacement.", [{ kind: "tool_calls", calls: [{ name: "cp_mandate", args: replacementArgs }] }]);
+	assert.equal(post.mandates.get(grant.id)!.same_work_replacements?.[0]?.phase, "prepared");
+	assert.equal(post.fleet.get(replacement.id), undefined);
+	await assert.rejects(post.dispatch({ jobId: replacement.id, task: "Continue the unchanged original work", model: replacementModel, fetch: false }), /not committed/);
+	await assert.rejects(post.gate({ jobId: original.id, model: gateModel }), /same work is bound/);
+	rmdirSync(blockedFile);
+	await Promise.all([
+		parent("Resume the same original-work replacement.", [{ kind: "tool_calls", calls: [{ name: "cp_mandate", args: replacementArgs }] }]),
+		parent("Try the competing replacement identity.", [{ kind: "tool_calls", calls: [{ name: "cp_mandate", args: { ...replacementArgs, replacement_job_id: competing.id } }] }]),
+	]);
+	assert.equal(post.mandates.get(grant.id)!.same_work_replacements?.length, 1);
+	assert.equal(post.mandates.get(grant.id)!.same_work_replacements?.[0]?.replacement_job_id, replacement.id);
+	const linked = await parent("Continue the unchanged admitted research under its original remaining budget.", [
+		{ kind: "tool_calls", calls: [{ id: "link", name: "cp_mandate", args: { action: "replace_work", source_id: grant.id, original_job_id: original.id, replacement_job_id: replacement.id } }] },
+		{ kind: "tool_calls", calls: [{ id: "replay", name: "cp_mandate", args: { action: "replace_work", source_id: grant.id, original_job_id: original.id, replacement_job_id: replacement.id } }] },
+		{ kind: "tool_calls", calls: [{ id: "show", name: "cp_mandate", args: { action: "show", mandate_id: grant.id } }] },
+		{ kind: "tool_calls", calls: [{ id: "ready", name: "cp_next", args: { project: "demo", full: true } }] },
+	]);
+	for (const event of linked) assert.notEqual(event.isError, true, JSON.stringify(event.result));
+	assert.match(JSON.stringify(linked.find((event) => event.toolCallId === "link")!.result), /committed/);
+	const saved = post.mandates.get(grant.id)!;
+	assert.equal(saved.same_work_replacements?.length, 1);
+	assert.equal(saved.same_work_replacements![0]!.work_id, original.id);
+	assert.equal(saved.same_work_replacements![0]!.accounting_root_id, grant.id);
+	assert.equal(saved.expiry, expiry);
+	assert.deepEqual(saved.spend_cap, grant.spend_cap);
+	assert.match(JSON.stringify(linked.find((event) => event.toolCallId === "show")!.result), /9\.95/);
+	assert.match(JSON.stringify(linked.find((event) => event.toolCallId === "show")!.result), /103200/);
+	assert.match(JSON.stringify(linked.find((event) => event.toolCallId === "ready")!.result), new RegExp(replacement.id));
+	const taskFile = join(home.path, paths.runDir(replacement.id), "revision-task.md");
+	assert.equal(readFileSync(join(home.path, paths.runDir(replacement.id), "previous-plan.md"), "utf8"), plan);
+	assert.ok(readFileSync(join(home.path, paths.originalTaskFile(replacement.id)), "utf8").includes(task));
+	assert.equal((await post.dispatch({ jobId: replacement.id, taskFile, model: replacementModel, fetch: false })).receipt, "accepted");
+	await waitFor(() => post.fleet.get(replacement.id)?.phase, (phase) => phase === "held", { timeoutMs: 30_000, what: "replacement public report" });
+	assert.ok(Math.abs(post.fleet.get(replacement.id)!.budget!.cost_usd - 90.05) < 1e-8);
+	assert.equal(post.fleet.get(replacement.id)!.budget!.tokens, 9_896_800);
+	assert.equal(post.mandates.list().length, 1);
+	const passed = await post.gate({ jobId: replacement.id, model: replacementGateModel });
+	assert.ok(isGateWait(passed));
+	post.reviewRuns.handBack(passed.key);
+	await post.reviewRuns.settled(passed.key);
+	assert.equal(readPriorAttempts(home.path, replacement.id).decisions.length, 2);
+	assert.equal(readPriorAttempts(home.path, replacement.id).decisions.at(-1)?.verdict, "pass");
+	const received = (script: string, text: string) => provider.requests(script).some((request) => request.body.messages?.some((message) => typeof message.content === "string" && message.content.includes(text)));
+	assert.ok(received("original-research", JSON.stringify(task).slice(1, -1)));
+	for (const script of ["replacement-research", "replacement-gate"]) {
+		assert.ok(received(script, plan), `${script}: complete prior plan`);
+		assert.ok(received(script, addendum), `${script}: complete ordered original addendum`);
+		assert.ok(received(script, "Clarify the original acceptance without expanding scope"), `${script}: actual prior findings`);
+		assert.ok(JSON.stringify(provider.requests(script)[0]).includes(join(home.path, paths.runDir(replacement.id), "task-addenda.md")));
+	}
+	assert.ok(received("replacement-gate", task));
+	// A delayed billing update arrives after the original worker has closed.
+	const late = post.fleet.get(original.id)!.usage;
+	post.fleet.patch(original.id, { usage: { ...late, input: late.input + 100, total_tokens: late.total_tokens + 100, cost_usd: late.cost_usd + 1 } });
+	const final = await parent("Show the shared original budget after successor delivery.", [{ kind: "tool_calls", calls: [{ id: "shared", name: "cp_mandate", args: { action: "show", mandate_id: grant.id } }] }]);
+	assert.match(JSON.stringify(final[0]!.result), /job cap: 1 \/ 1/);
+	assert.match(JSON.stringify(final[0]!.result), /103300/);
+	assert.match(JSON.stringify(final[0]!.result), /10\.95/);
 });

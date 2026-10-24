@@ -11,6 +11,25 @@ import { prepareRecovery } from "./gate-recovery-preparation.ts";
 import type { MandateStore } from "./mandate.ts";
 import { recoveryFile, recoveryTarget } from "./gate-recovery.ts";
 
+export async function assertOrdinaryReplacement(options: Parameters<typeof prepareGateReplacement>[0]) {
+	const { home, jobId, replacementJobId, ledger, fleet } = options;
+	for (const id of [jobId, replacementJobId]) {
+		const dir = join(home, paths.runDir(id));
+		if (existsSync(recoveryFile(dir, "source")) || existsSync(recoveryFile(dir, "reservation"))) throw new GateError(`${id}: recovery binding forbids ordinary replacement or chaining`);
+		recoveryTarget(home, id);
+	}
+	const old = await ledger.show(jobId);
+	const replacement = await ledger.show(replacementJobId);
+	const oldLabels = requireJobLabels(old);
+	const labels = requireJobLabels(replacement);
+	if (jobId === replacementJobId || old.status !== "closed" || fleet.get(jobId)?.phase !== "done" || oldLabels.kind !== "research") throw new GateError(`${jobId}: replacement requires a torn-down, closed research planner`);
+	if (replacement.status !== "open" || fleet.get(replacementJobId) || labels.kind !== "research" || labels.project !== oldLabels.project || labels.delivery !== oldLabels.delivery) throw new GateError(`${replacementJobId}: use a fresh, undispatched research job with the same project and delivery`);
+	const prior = readPriorAttempts(home, jobId);
+	const verdict = prior.decisions.at(-1);
+	if (verdict?.verdict !== "revise") throw new GateError(`${jobId}: the latest gate must say revise`);
+	return { prior, verdict };
+}
+
 /** Prepare files only: dispatch (and its mandate/budget checks) remains the parent's next step. */
 export async function prepareGateReplacement(options: {
 	home: string;
@@ -22,29 +41,9 @@ export async function prepareGateReplacement(options: {
 	replanEscalationId?: string;
 	mandates?: MandateStore;
 }): Promise<{ job_id: string; replacement_job_id: string; task_file: string; recovery?: import("./contracts.ts").GateRecoveryStatus }> {
-	const { home, jobId, replacementJobId, ledger, fleet, artifacts } = options;
+	const { home, jobId, replacementJobId, artifacts } = options;
 	if (options.replanEscalationId) return prepareRecovery({ ...options, replanEscalationId: options.replanEscalationId });
-	for (const id of [jobId, replacementJobId]) {
-		const dir = join(home, paths.runDir(id));
-		if (existsSync(recoveryFile(dir, "source")) || existsSync(recoveryFile(dir, "reservation"))) {
-			throw new GateError(`${id}: recovery binding forbids ordinary replacement or chaining`);
-		}
-		recoveryTarget(home, id);
-	}
-	const old = await ledger.show(jobId);
-	const replacement = await ledger.show(replacementJobId);
-	const oldLabels = requireJobLabels(old);
-	const labels = requireJobLabels(replacement);
-	if (jobId === replacementJobId || old.status !== "closed" || fleet.get(jobId)?.phase !== "done" || oldLabels.kind !== "research") {
-		throw new GateError(`${jobId}: replacement requires a torn-down, closed research planner`);
-	}
-	if (replacement.status !== "open" || fleet.get(replacementJobId) || labels.kind !== "research" ||
-		labels.project !== oldLabels.project || labels.delivery !== oldLabels.delivery) {
-		throw new GateError(`${replacementJobId}: use a fresh, undispatched research job with the same project and delivery`);
-	}
-	const prior = readPriorAttempts(home, jobId);
-	const verdict = prior.decisions.at(-1);
-	if (verdict?.verdict !== "revise") throw new GateError(`${jobId}: the latest gate must say revise`);
+	const { prior, verdict } = await assertOrdinaryReplacement(options);
 	const link = join(home, paths.runDir(jobId), "gate-replacement.json");
 	if (existsSync(link)) {
 		let saved: { replacement_job_id: string; task_file: string };

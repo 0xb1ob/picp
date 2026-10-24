@@ -360,7 +360,7 @@ MandateIdSchema	value	1d5becbe159e38b3	2b839068d3ec6157
 MandatePolicySchema	value	287571ca3a575413	7e2399a0a1ee09c2
 MandateProvenance	type	483039dec428e70a	-
 MandateRevokedBy	type	72adc3133e08ada6	-
-MandateSchema	value	97f36b66cd47926e	af20214ffe518a88
+MandateSchema	value	97f36b66cd47926e	9d2920a65e5f6b5b
 MandateStatus	type	499e338227619f96	-
 MandateStatusSchema	value	9f4f11e032e35765	1ad0a168ea5f24f0
 MergeAuthority	type	02b381902047206c	-
@@ -562,7 +562,7 @@ SUGGEST_PROMPT_MAX_CHARS	value	a9389e6a963d0b01	15197cf7214b58e6
 SUMMARY_MAX_CHARS	value	72183bdaed455972	284b7e6d788f363f
 SUMMARY_MAX_LINES	value	44c99cee12d3fb05	4e07408562bedb8b
 SameWorkReplacement	type	32384d6d08d3a88e	-
-SameWorkReplacementSchema	value	876c1db8a5702ad7	8eba9dccee165d14
+SameWorkReplacementSchema	value	dfff389a3d428046	908faf915d87f600
 ScheduleFire	type	a41d836c324e5654	-
 ScheduleFireSchema	value	aedddeaa9f1a0f56	54ace5123a16ad9b
 Scope	type	9fbf012ba5215f97	-

@@ -69,15 +69,21 @@ export function covers(mandate: Mandate, job: {
 	if (!mandate.projects.includes(job.project)) return false;
 	// A schedule grant covers only the jobs of the one schedule naming it; any other grant covers no scheduled job.
 	if (mandate.schedule_grant ? !job.scheduleId || job.scheduleMandate !== mandate.id : job.scheduleId !== undefined) return false;
-	if (mandate.job_ids && mandate.job_ids.length > 0 && !mandate.job_ids.includes(job.jobId)) return false;
+	if (mandate.job_ids && mandate.job_ids.length > 0 && !mandate.job_ids.includes(workIdentity(mandate, job.jobId))) return false;
 	const exclusions = mandate.exclusions;
 	if (exclusions?.job_kinds && job.jobKind && exclusions.job_kinds.includes(job.jobKind)) return false;
 	return true;
 }
 
+export function workIdentity(mandate: Mandate, jobId: string): string {
+	const link = mandate.same_work_replacements?.find((entry) => entry.phase === "committed" && entry.replacement_job_id === jobId &&
+		entry.source_grant_id === mandate.id && entry.accounting_root_id === mandate.id && entry.admission_expiry === mandate.expiry &&
+		mandate.job_ids?.includes(entry.work_id) && mandate.admissions?.some((proof) => proof.job_id === entry.work_id && proof.scope_digest === entry.original_scope_digest));
+	return mandate.continuity?.phase === "committed" ? link?.work_id ?? jobId : jobId;
+}
 export function matchingJobs(mandate: Mandate, jobs: readonly MandateUsageJob[]): MandateUsageJob[] {
 	return jobs.filter((job) =>
-		covers(mandate, {
+		(mandate.continuity?.phase === "committed" && (mandate.job_ids?.includes(job.job_id) || workIdentity(mandate, job.job_id) !== job.job_id)) || covers(mandate, {
 			jobId: job.job_id,
 			project: job.project,
 			jobKind: job.kind,
@@ -124,7 +130,7 @@ export function mandateSpend(
 	const named = (mandate.job_ids?.length ?? 0) > 0;
 	let usd = 0;
 	let tokens = 0;
-	let counted = 0;
+	const counted = new Set<string>();
 	let inFlight = 0;
 	for (const job of matched) {
 		const base = baseline.get(job.job_id);
@@ -133,12 +139,12 @@ export function mandateSpend(
 		tokens += spent.tokens;
 		// A named grant counts every job it names; a project-wide one counts jobs dispatched after issue and
 		// pre-existing jobs once they spend under it, so a project's history never fills its job cap.
-		if (named || !base || spent.usd > 0 || spent.tokens > 0) counted += 1;
+		if (named || !base || spent.usd > 0 || spent.tokens > 0) counted.add(workIdentity(mandate, job.job_id));
 		// A working worker holds a parallelism slot; a `held` job has reported and waits on its
 		// delivery (a promote moves it back to `waiting`). Held jobs still count toward spend and jobs.
 		if (job.phase === "waiting" || job.phase === "launching") inFlight += 1;
 	}
-	return { usd, tokens, jobs: counted, inFlight };
+	return { usd, tokens, jobs: counted.size, inFlight };
 }
 
 /** The caps that pause a grant: money and tokens. The job cap never pauses (see `jobCapRefuses`). */
@@ -161,12 +167,12 @@ export function isActive(mandate: Mandate, now: string): boolean {
  */
 export function jobCapRefuses(mandate: Mandate, jobId: string, jobs: readonly MandateUsageJob[]): boolean {
 	const matched = matchingJobs(mandate, jobs);
-	return mandateSpend(mandate, matched).jobs >= mandate.job_cap && !matched.some((job) => job.job_id === jobId);
+	return mandateSpend(mandate, matched).jobs >= mandate.job_cap && !matched.some((job) => workIdentity(mandate, job.job_id) === workIdentity(mandate, jobId));
 }
 
 /** Selection headroom excludes this job, so an already-counted continuation keeps its grant. */
 export function jobCapFullWithout(mandate: Mandate, jobId: string, jobs: readonly MandateUsageJob[]): boolean {
-	return mandateSpend(mandate, jobs.filter((job) => job.job_id !== jobId)).jobs >= mandate.job_cap;
+	return mandateSpend(mandate, jobs.filter((job) => workIdentity(mandate, job.job_id) !== workIdentity(mandate, jobId))).jobs >= mandate.job_cap;
 }
 
 /**
@@ -199,7 +205,7 @@ const MANDATE_JOB_IDS_MAX = 64;
  * to dispatch (`open`: ids of non-closed ledger jobs), and never past the 64 `job_ids` a grant holds.
  */
 export function enrollCapacity(mandate: Mandate, jobs: readonly MandateUsageJob[], open: ReadonlySet<string>): number {
-	const dispatched = new Set(matchingJobs(mandate, jobs).map((job) => job.job_id));
+	const dispatched = new Set(matchingJobs(mandate, jobs).map((job) => workIdentity(mandate, job.job_id)));
 	const ids = mandate.job_ids ?? [];
 	const waiting = ids.filter((id) => !dispatched.has(id) && open.has(id)).length;
 	return Math.max(0, Math.min(mandate.job_cap - dispatched.size - waiting, MANDATE_JOB_IDS_MAX - ids.length));

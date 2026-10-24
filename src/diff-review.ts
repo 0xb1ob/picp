@@ -113,7 +113,7 @@ import {
 import { requestFinalFix } from "./final-fix.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import type { MandateStore } from "./mandate.ts";
-import { assertReviewAllowed } from "./mandate-usage.ts";
+import { assertReviewAllowed, continuationBudget } from "./mandate-usage.ts";
 import { continuityInputsBlock } from "./mandate-continuity.ts";
 import { incompleteSubjectReasons, isCompletePass } from "./review-subject.ts";
 import { assembleBrief, profileForRole, readBriefTemplate } from "./profiles.ts";
@@ -679,6 +679,7 @@ export class DiffReview {
 		let managed: ReturnType<WorkerManager["spawn"]>;
 		try {
 			managed = manager.spawn({
+				budgetLimit: continuationBudget(this.#options.mandates, jobId, this.#options.fleet?.read().jobs ?? []),
 				key,
 				identity: {
 					jobId,

@@ -14,6 +14,7 @@ import { isoTimestamp, type JobKind, type Mandate, type Usage } from "./contract
 import type { FleetStore } from "./fleet.ts";
 import { MandateError, type MandateStore, type MandateUsageJob, mandateSpend, mandateTokens, matchingJobs } from "./mandate.ts";
 import { continueForJob } from "./mandate-continuity.ts";
+import { parseJobLabels } from "./ledger.ts";
 import type { RunRegistry } from "./runs.ts";
 import { boundedWakeupId, type DurableWakeupInput } from "./wakeup-outbox.ts";
 
@@ -78,6 +79,21 @@ export async function assertReviewAllowed(store: MandateStore, job: { jobId: str
 		if (continuation?.escalation_id) throw new MandateError(`${(error as Error).message}; confirm original admission with cp_decide ${continuation.escalation_id}, then retry cp_mandate continue`);
 		throw error;
 	}
+}
+
+export function continuationBudget(store: MandateStore | undefined, jobId: string, jobs: readonly MandateUsageJob[], use: "dispatch" | "review" = "review") {
+	const job = store?.runContext().ledgerJob(jobId);
+	if (!store || !job) return undefined;
+	const labels = parseJobLabels(job.labels);
+	if (!labels.project) return undefined;
+	const subject = { jobId, project: labels.project, kind: labels.kind };
+	if (!store.selection(use, subject, jobs)?.grant.continuity) return undefined;
+	const grant = store.assertPermitted(use, subject, jobs).selected;
+	if (!grant?.continuity) return undefined;
+	const spent = mandateSpend(grant, store.withReviewerSpend(jobs, [grant]));
+	const budget = { tokens: grant.spend_cap.tokens - spent.tokens, cost_usd: grant.spend_cap.usd - spent.usd };
+	if (budget.tokens <= 0 || budget.cost_usd <= 0) throw new MandateError(`${jobId}: original shared budget exhausted`);
+	return budget;
 }
 
 /** Fleet usage with each job's live run total laid over it, whichever is further along. */

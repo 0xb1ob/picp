@@ -75,7 +75,9 @@ export function isExpired(grant: Mandate, now: string): boolean {
 /** Pure: grant x use x job x now. A paused grant past its expiry takes the stricter of its two cells. */
 export function grantStanding(grant: Mandate, use: GrantUse, job: GrantJob, now: string): GrantStanding {
 	if (!covers(grant, job)) return { standing: "none" };
-	if (grant.status === "revoked" && grant.revoked_at && job.startedAt && grant.revoked_at < job.startedAt) return { standing: "none" };
+	if (!grant.continuity && grant.status === "revoked" && grant.revoked_at && job.startedAt && grant.revoked_at < job.startedAt) return { standing: "none" };
+	const replacement = grant.same_work_replacements?.find((entry) => entry.original_job_id === job.jobId);
+	if (replacement) return { standing: R, cause: "expired", detail: `same work continues as ${replacement.replacement_job_id}; original history cannot be rerun` };
 	const cause: Exclude<GrantCause, "expired"> =
 		grant.status === "revoked" ? "revoked" : grant.status !== "paused" ? "active" : ["spend_cap", "token_cap"].includes(grant.pause_reason ?? "") ? "cap_paused" : "paused";
 	const stored = { standing: GRANT_MATRIX[cause][use], cause };
@@ -110,8 +112,11 @@ function expiredCell(grant: Mandate, use: GrantUse, job: GrantJob): { standing: 
 
 /** Pure selection: standing, deterministic active precedence, then named headroom without this job. */
 export function selectGrant(grants: readonly Mandate[], use: GrantUse, job: GrantJob, now: string, jobs?: readonly MandateUsageJob[]) {
-	const judged = grants.map((grant) => ({ grant, at: grantStanding(grant, use, job, now) }))
+	const bound = grants.filter((grant) => grant.same_work_replacements?.some((entry) => entry.replacement_job_id === job.jobId || entry.original_job_id === job.jobId));
+	if (bound.length > 1) return { grant: bound[0]!, at: { standing: R, cause: "expired" as const, detail: "conflicting immutable accounting roots" } };
+	const judged = (bound.length ? bound : grants).map((grant) => ({ grant, at: grantStanding(grant, use, job, now) }))
 		.filter((entry): entry is { grant: Mandate; at: Exclude<GrantStanding, { standing: "none" }> } => entry.at.standing !== "none");
+	if (bound.length && !judged.length) return { grant: bound[0]!, at: { standing: R, cause: "expired" as const, detail: "immutable work root no longer proves this alias" } };
 	const active = judged.filter(({ at }) => at.standing === P && at.cause === "active").sort((a, b) => compareActiveGrants(a.grant, b.grant));
 	const first = active[0];
 	const named = (grant: Mandate) => (grant.job_ids?.length ?? 0) > 0 && !grant.schedule_grant;

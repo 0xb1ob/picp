@@ -83,8 +83,8 @@ import type { Sender } from "./send.ts";
 import { taskAddendaBlock } from "./task-addenda.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import type { MandateStore } from "./mandate.ts";
-import { continuityInputsBlock } from "./mandate-continuity.ts";
-import { assertReviewAllowed } from "./mandate-usage.ts";
+import { continueForJob, continuityInputsBlock } from "./mandate-continuity.ts";
+import { assertReviewAllowed, continuationBudget } from "./mandate-usage.ts";
 import type { ProjectRegistry } from "./projects.ts";
 import { type ReviewerModelSelection, selectReviewerModel } from "./reviewer-model.ts";
 
@@ -854,6 +854,7 @@ export class Gate {
 		const profile = profileForRole(this.#options.profilesDir, "gate-reviewer");
 		const record = this.#options.fleet?.get(jobId);
 		if (!recovery && !selectedAttempt && record && this.#options.mandates) await assertReviewAllowed(this.#options.mandates, { jobId, project: record.project, kind: record.kind }, this.#options.fleet?.read().jobs ?? []);
+		if (!recovery && !selectedAttempt && !record && this.#options.mandates) await continueForJob(this.#options.mandates, jobId, this.#options.fleet?.read().jobs ?? []);
 		const selection = selectReviewerModel({ model: request.model, record, registry: this.#options.registry, mandates: this.#options.mandates, now: now() });
 		const route = await this.#route(profile, jobId, record, selection?.model, selection?.thinking);
 		const model = route.decision.model;
@@ -908,6 +909,7 @@ export class Gate {
 		await manager.ready();
 		try {
 			managed = manager.spawn({
+				budgetLimit: continuationBudget(this.#options.mandates, jobId, this.#options.fleet?.read().jobs ?? []),
 				key, ...(selectedAttempt ? { spawnGuard: recoverySpawnGuard(home, jobId, selectedAttempt) } : {}),
 				identity: {
 					jobId,
