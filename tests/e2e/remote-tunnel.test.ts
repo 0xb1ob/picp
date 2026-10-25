@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer as httpServer } from "node:http";
 import { createServer, type Server } from "node:net";
 import { dirname, join } from "node:path";
@@ -36,6 +36,7 @@ case "$*" in
   "tunnel run --help") echo "  --token-file value"; exit 0 ;;
 esac
 if [ -e "$F/stubborn" ]; then trap '' TERM; else trap 'exit 0' TERM; fi
+if [ -e "$F/early" ]; then echo "ERR exits before any connection" >&2; exit 1; fi
 echo 'ERR failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel": dial tcp' >&2
 echo "INF see https://evil.trycloudflare.com.example.net/" >&2
 for u in http://abc.trycloudflare.com https://a.b.trycloudflare.com https://-abc.trycloudflare.com https://ABC.trycloudflare.com/x; do echo "INF $u" >&2; done
@@ -184,7 +185,7 @@ test("P12b-lifecycle: cp-daemon runs the quick, then the named cloudflared for c
 	await s.settled("running", 2);
 	assert.deepEqual([s.runs().length, s.runtime()?.pid], [1, pid]);
 
-	// Named: the token travels as a 0600 file path only; a new command line replaces the child, a new origin bumps generation.
+	// Named: the token goes as a 0600 file path; a new command line replaces the child, a new origin bumps generation.
 	initPush({ dataDir: s.paths.dataDir, origin: "https://old.example.com" });
 	const pushBytes = readFileSync(pushConfigFile(s.paths.dataDir)), keyBytes = readFileSync(vapidKeyFile(s.paths.dataDir));
 	writeFileSync(join(s.home, "given-token"), `${TOKEN}\n`);
@@ -392,7 +393,7 @@ test("P12b-ready: up fails once its bound passes while the viewer cannot open th
 	assert.match((await s.tunnel("devices")).stdout, /^0 unclaimed pairing code\(s\)$/m, "no pairing code is issued");
 });
 
-test("P12b-fail-closed: an unreadable runtime record starts nothing until fixed; an unreadable config stops the child and says why", async (t) => {
+test("P12b-fail-closed: an unreadable runtime record starts nothing until fixed, then its live child stops first; an unreadable config stops the child", async (t) => {
 	const s = await rig(t);
 	writeFileSync(tunnelConfigFile(s.paths.dataDir), JSON.stringify({ schema_version: 1, enabled: true, mode: "quick", port: s.remotePort, binary: `${s.fake}/cloudflared`, revision: 1 }));
 	writeFileSync(tunnelRuntimeFile(s.paths.stateDir), "{torn");
@@ -401,9 +402,17 @@ test("P12b-fail-closed: an unreadable runtime record starts nothing until fixed;
 	await new Promise((done) => setTimeout(done, 6_000));
 	assert.deepEqual(s.runs(), [], "nothing starts across ticks");
 	assert.equal(readFileSync(tunnelRuntimeFile(s.paths.stateDir), "utf8"), "{torn", "the record is never reset");
-	writeFileSync(tunnelRuntimeFile(s.paths.stateDir), JSON.stringify({ schema_version: 1, origin: "https://a.trycloudflare.com", generation: 3, revision: 1, state: "stopped", updated_at: "x" }));
-	const running = await s.settled("running", 1);
+	// The fixed record names a live stand-in this test started: it is stopped by its command line before any spawn.
+	const argv = quickArgv(s.remotePort).split(" ");
+	const live = spawn(join(s.fake, "cloudflared"), argv, { stdio: "ignore" });
+	t.after(() => void (alive(live.pid!) && process.kill(live.pid!, "SIGKILL")));
+	await until(s.runs, (runs) => runs.length === 1, "the test's own stand-in");
+	writeFileSync(tunnelRuntimeFile(s.paths.stateDir), JSON.stringify({ schema_version: 1, origin: "https://a.trycloudflare.com", generation: 3, revision: 1, state: "running", mode: "quick", port: s.remotePort, pid: live.pid, binary: `${s.fake}/cloudflared`, argv, updated_at: "x" }));
+	await until(s.log, (text) => text.includes(`tunnel: stopping cloudflared pid ${live.pid} of a previous runtime`), "the live recorded child stopped first");
+	const running = await until(s.runtime, (r) => r?.state === "running" && r.pid !== live.pid, "a fresh child", 60_000);
+	await until(() => alive(live.pid!), (on) => !on, "the recorded child gone");
 	assert.match(s.log(), /the runtime record is readable again/);
+	assert.ok(s.log().indexOf(`stopping cloudflared pid ${live.pid}`) < s.log().indexOf("tunnel: cloudflared started pid"), "stopped before the spawn");
 	assert.equal(running?.generation, 4, "the re-read generation is kept, so older sessions stay ended");
 
 	const pid = running?.pid as number;
@@ -413,15 +422,21 @@ test("P12b-fail-closed: an unreadable runtime record starts nothing until fixed;
 	assert.equal(alive(pid), false, "the child is stopped");
 	await new Promise((done) => setTimeout(done, 6_000));
 	assert.equal(s.runtime()?.updated_at, failed?.updated_at, "an unchanged refusal is not rewritten every tick");
-	assert.equal(s.runs().length, 1);
+	assert.equal(s.runs().length, 2, "the test's stand-in and the daemon's one child");
 });
 
-test("P12b-orphan: a crashed inner's cloudflared is stopped by its exact command line before a fresh one starts; a stubborn child gets SIGKILL", async (t) => {
+test("P12b-orphan: a recorded pid is signalled only while it shows the exact cloudflared command line; a stubborn child gets SIGKILL", async (t) => {
 	const s = await rig(t);
 	s.touch("stubborn");
 	writeFileSync(tunnelConfigFile(s.paths.dataDir), JSON.stringify({ schema_version: 1, enabled: true, mode: "quick", port: s.remotePort, binary: `${s.fake}/cloudflared`, revision: 1 }));
+	// A reused pid: the record names a live process of this test running something else; it is left alone and dropped.
+	const reused = spawn("sleep", ["600"], { stdio: "ignore" });
+	t.after(() => void reused.kill("SIGKILL"));
+	writeFileSync(tunnelRuntimeFile(s.paths.stateDir), JSON.stringify({ schema_version: 1, origin: QUICK, generation: 1, revision: 1, state: "running", mode: "quick", port: s.remotePort, pid: reused.pid, binary: `${s.fake}/cloudflared`, argv: quickArgv(s.remotePort).split(" "), updated_at: "x" }));
 	assert.equal((await s.cli("cp-daemon", ["start"])).code, 0, s.log());
-	const first = await s.settled("running", 1);
+	const first = await until(s.runtime, (r) => r?.state === "running" && r.pid !== reused.pid, "a child of its own", 60_000);
+	assert.equal(alive(reused.pid!), true, "a reused pid is never signalled");
+	assert.doesNotMatch(s.log(), new RegExp(`pid ${reused.pid} `));
 	const orphan = first?.pid as number;
 	t.after(() => void (alive(orphan) && process.kill(orphan, "SIGKILL"))); // a stubborn orphan outlives a failed run
 	const inner = Number(/^inner: ready pid (\d+)/m.exec((await s.cli("cp-daemon", ["status"])).stdout)?.[1]);
@@ -441,6 +456,26 @@ test("P12b-orphan: a crashed inner's cloudflared is stopped by its exact command
 	assert.equal(s.runs().length, 2, "nothing restarts a disabled tunnel");
 });
 
+test("P12b-backoff: crashes before registering back off 5 s then 11.34 s, a registered run resets it, a missing binary backs off too", async (t) => {
+	const s = await rig(t);
+	s.touch("early");
+	writeFileSync(tunnelConfigFile(s.paths.dataDir), JSON.stringify({ schema_version: 1, enabled: true, mode: "quick", port: s.remotePort, binary: `${s.fake}/cloudflared`, revision: 1 }));
+	assert.equal((await s.cli("cp-daemon", ["start"])).code, 0, s.log());
+	await until(s.log, (text) => /tunnel: cloudflared pid \d+ exited \(1\); restart 2 in 11\.34s/.test(text), "the second backoff step", 40_000);
+	assert.match(s.log(), /tunnel: cloudflared pid \d+ exited \(1\); restart 1 in 5s/);
+	assert.match(String(s.runtime()?.detail), /restart 2 in 11\.34s$/);
+	rmSync(join(s.fake, "early"));
+	const up = await until(s.runtime, (r) => r?.state === "running", "a registered run", 40_000);
+	s.touch("crash");
+	await until(s.log, (text) => text.includes(`tunnel: cloudflared pid ${up?.pid} exited (1); restart 1 in 5s`), "the reset backoff");
+	renameSync(join(s.fake, "cloudflared"), join(s.fake, "cloudflared.off"));
+	const spawnFail = new RegExp(`tunnel: cloudflared ${s.fake}/cloudflared did not spawn; restart 2 in 11\\.34s`);
+	await until(s.log, (text) => spawnFail.test(text), "a failed spawn backs off", 30_000);
+	renameSync(join(s.fake, "cloudflared.off"), join(s.fake, "cloudflared"));
+	await until(s.runtime, (r) => r?.state === "running" && r.pid !== up?.pid, "running again", 40_000);
+	assert.equal(s.runs().length, 4, "two early exits, the registered run and the one after the failed spawn");
+});
+
 const API_TOKEN = "cfapi-SECRET-api-token-0123456789";
 const RUN_TOKEN = "eyJhIjoicnVuLXRva2VuIn0";
 const ZONE = "023e105f4ecef8ad9ca31a8372d0c353";
@@ -451,7 +486,7 @@ type CfItem = Record<string, unknown>;
 
 /** api.cloudflare.com and the GitHub release host behind tests/harness/fake-fetch.ts: one zone, scripted refusals. */
 async function fakeRemote(t: TestContext) {
-	const fresh = () => ({ records: [] as CfItem[], tunnels: [] as CfItem[], calls: [] as Array<{ call: string; body?: CfItem }>, auth: new Set<string>(), downloads: [] as string[], refuse: undefined as undefined | ((call: string) => [number, unknown] | undefined) });
+	const fresh = () => ({ records: [] as CfItem[], tunnels: [] as CfItem[], calls: [] as Array<{ call: string; body?: CfItem }>, auth: new Set<string>(), downloads: [] as string[], redirect: "store" as "store" | "http" | "loop" | "missing", refuse: undefined as undefined | ((call: string) => [number, unknown] | undefined) });
 	const state = fresh();
 	const server = httpServer((req, res) => {
 		let text = "";
@@ -459,7 +494,14 @@ async function fakeRemote(t: TestContext) {
 		req.on("end", () => {
 			const send = (status: number, body: unknown) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(body));
 			const url = new URL(req.url ?? "/", "http://fake");
-			if (url.pathname.startsWith("/github.com/")) return void (state.downloads.push(url.pathname), res.writeHead(200).end("not cloudflared"));
+			if (url.pathname.startsWith("/objects.githubusercontent.com/")) return void (state.downloads.push(url.pathname), res.writeHead(200).end("not cloudflared"));
+			if (url.pathname.startsWith("/github.com/")) {
+				state.downloads.push(url.pathname);
+				if (state.redirect === "missing") return void res.writeHead(404).end("Not Found");
+				const asset = url.pathname.slice("/github.com".length);
+				const location = { store: `https://objects.githubusercontent.com${asset}`, http: `http://objects.githubusercontent.com${asset}`, loop: `https://github.com${asset}` }[state.redirect];
+				return void res.writeHead(302, { location }).end();
+			}
 			const path = url.pathname.slice("/api.cloudflare.com/client/v4".length), q = url.searchParams;
 			const call = `${req.method} ${path}${url.search}`;
 			const body = text ? (JSON.parse(text) as CfItem) : undefined;
@@ -569,7 +611,7 @@ test("P12b-api: --api-token-file creates the named tunnel through the Cloudflare
 	partial.clean(half, rerun);
 });
 
-test("P12b-download: with no usable cloudflared the pinned download is verified first, so a mismatch writes no config or token", async (t) => {
+test("P12b-download: with no usable cloudflared the pinned download follows only https GitHub redirects and is verified first; nothing is written", async (t) => {
 	const cf = await fakeRemote(t);
 	const s = await rig(t, { cloudflared: false });
 	writeFileSync(join(s.home, "given-token"), TOKEN);
@@ -578,7 +620,16 @@ test("P12b-download: with no usable cloudflared the pinned download is verified 
 		assert.equal(run.code, 1, argv.join(" "));
 		assert.match(run.stderr, /no usable cloudflared: .*checksum mismatch for cloudflared-/, argv.join(" "));
 	}
-	assert.equal(cf.state.downloads.length, 2);
+	assert.equal(cf.state.downloads.length, 4, "the release URL, then the object store it redirects to, per run");
 	assert.match(cf.state.downloads[0]!, /^\/github\.com\/cloudflare\/cloudflared\/releases\/download\//);
+	assert.equal(cf.state.downloads[1], `/objects.githubusercontent.com${cf.state.downloads[0]!.slice("/github.com".length)}`);
+	for (const [redirect, why] of [["http", /refusing to download from http:\/\/objects\.githubusercontent\.com: only https on github\.com/], ["loop", /more than 5 redirects/], ["missing", /HTTP 404 from github\.com/]] as const) {
+		cf.state.redirect = redirect;
+		cf.state.downloads.length = 0;
+		const run = await s.cli("cp-tunnel", ["up"], { env: cf.env });
+		assert.equal(run.code, 1, redirect);
+		assert.match(run.stderr, why, redirect);
+		assert.equal(cf.state.downloads.length, { http: 1, loop: 6, missing: 1 }[redirect], `${redirect}: nothing past a refused hop`);
+	}
 	assert.deepEqual([s.config(), existsSync(join(s.paths.dataDir, "tunnel", "token")), existsSync(join(dirname(s.paths.dataDir), "bin", "cloudflared"))], [undefined, false, false], "nothing published or written");
 });

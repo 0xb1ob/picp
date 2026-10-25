@@ -1,18 +1,19 @@
 /**
- * Retained from tests/daemon-tunnel.test.ts (P12b): the controller statements no entry point can time or provoke —
- * backoff steps, a pending restart on stop, a reused or re-read orphan pid, a lost exit report. Fake clock, processes.
+ * Retained (P12b): from tests/daemon-tunnel.test.ts the busy/idle stop protocol and a lost exit report, which no entry
+ * point observes or provokes; from tests/daemon-tunnel-files.test.ts the binding reader, whose consumers are p12c's.
  */
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { LAYOUT } from "../src/contracts.ts";
 import { type TunnelPorts, tunnelController } from "../src/service/daemon-tunnel.ts";
-import type { TunnelConfig, TunnelConfigRead, TunnelRuntime } from "../src/service/daemon-tunnel-files.ts";
+import { readTunnelBinding, type TunnelConfig, type TunnelConfigRead, type TunnelRuntime, tunnelRuntimeFile } from "../src/service/daemon-tunnel-files.ts";
+import { createScratchHome } from "./harness/index.ts";
 
 const T0 = Date.parse("2026-10-01T00:00:00.000Z");
 const BIN = "/opt/cf/cloudflared";
 const QUICK: TunnelConfig = { schema_version: 1, enabled: true, mode: "quick", port: 8767, binary: BIN, revision: 1 };
-const QUICK_ARGS = `${BIN} tunnel --no-autoupdate --url http://127.0.0.1:8767 --http-host-header 127.0.0.1:8767`;
-const BANNER = "INF |  https://amber-otter-lake-sun.trycloudflare.com                                   |";
-const REGISTERED = "INF Registered tunnel connection connIndex=0 connection=0f0e protocol=quic";
 
 type Proc = { args: string; alive: boolean; stubborn?: boolean; onOutput?: (chunk: string) => void; onExit?: (code: number | null, signal: string | null) => void };
 
@@ -82,52 +83,6 @@ function bench(options: BenchOptions = {}) {
 	return { controller, state, advance, exit, say, live, kills, writes, lines, spawns, procs, last: () => writes.at(-1), idle: () => idle };
 }
 
-test("an unexpected exit restarts on the supervisor's backoff, reset once a run registers; a failed spawn backs off too", () => {
-	const b = bench();
-	b.controller.reconcile();
-	b.exit(b.live() as number, 1);
-	assert.match(b.last()?.detail ?? "", /exited \(1\); restart 1 in 5s/);
-	b.advance(4_999);
-	b.controller.reconcile();
-	assert.equal(b.spawns.length, 1, "a tick during the backoff does not start early");
-	b.advance(1);
-	assert.equal(b.spawns.length, 2);
-	b.exit(b.live() as number, 1);
-	assert.match(b.last()?.detail ?? "", /restart 2 in 11\.\d+s/);
-	b.advance(12_000);
-	b.say(BANNER);
-	b.say(REGISTERED);
-	b.exit(b.live() as number, 1);
-	assert.match(b.last()?.detail ?? "", /restart 1 in 5s/, "a registered run resets the backoff");
-	const failing = bench({ failSpawn: true });
-	failing.controller.reconcile();
-	assert.equal(failing.last()?.state, "restarting");
-	assert.match(failing.last()?.detail ?? "", /did not spawn/);
-	assert.equal(failing.controller.busy(), false);
-});
-
-test("recovery: a recorded child still showing its exact command line is stopped before anything starts; a reused pid is never signalled", () => {
-	const recorded: TunnelRuntime = { schema_version: 1, origin: "https://a.trycloudflare.com", generation: 2, revision: 1, state: "running", mode: "quick", port: 8767, pid: 900, binary: BIN, argv: QUICK_ARGS.split(" ").slice(1), updated_at: "" };
-	const b = bench({ runtime: recorded, foreign: { 900: QUICK_ARGS }, stubborn: true });
-	assert.deepEqual(b.kills, [[900, "SIGTERM"]]);
-	b.controller.reconcile();
-	assert.deepEqual(b.spawns, [], "nothing new while the orphan lives");
-	assert.equal(b.controller.busy(), true);
-	b.advance(10_000);
-	assert.deepEqual(b.kills, [[900, "SIGTERM"], [900, "SIGKILL"]]);
-	assert.equal(b.spawns.length, 1, "started once the orphan is gone");
-	b.say(BANNER);
-	b.say(REGISTERED);
-	assert.equal(b.last()?.generation, 3, "a new quick origin after recovery is a new generation");
-
-	for (const args of ["/usr/bin/cloudflared tunnel --url http://127.0.0.1:8767", "bash"]) {
-		const reused = bench({ runtime: recorded, foreign: { 900: args } });
-		assert.deepEqual(reused.kills, [], args);
-		assert.equal(reused.last()?.pid, undefined, "the stale pid is dropped from the record");
-		reused.controller.reconcile();
-		assert.equal(reused.spawns.length, 1);
-	}
-});
 
 test("stop (daemon stop, reload, update hold): no restart, busy until the exit, then idle; reconcile resumes", () => {
 	const b = bench();
@@ -147,15 +102,6 @@ test("stop (daemon stop, reload, update hold): no restart, busy until the exit, 
 	assert.equal(b.spawns.length, 3);
 });
 
-test("a re-read record naming a live recorded child stops that child first", () => {
-	const recorded: TunnelRuntime = { schema_version: 1, origin: "https://a.trycloudflare.com", generation: 2, revision: 1, state: "running", mode: "quick", port: 8767, pid: 900, binary: BIN, argv: QUICK_ARGS.split(" ").slice(1), updated_at: "" };
-	const options: BenchOptions = { runtime: { ok: false, reason: "state/tunnel-runtime.json: EACCES" }, foreign: { 900: QUICK_ARGS } };
-	const b = bench(options);
-	options.runtime = recorded;
-	b.controller.reconcile();
-	assert.deepEqual(b.kills, [[900, "SIGTERM"]]);
-	assert.deepEqual(b.spawns, [], "nothing new while the recorded child lives");
-});
 
 test("stop settles even when a SIGKILLed child never reports its exit: logged, then no longer tracked", () => {
 	const b = bench({ deaf: true });
@@ -173,4 +119,22 @@ test("stop settles even when a SIGKILLed child never reports its exit: logged, t
 	assert.deepEqual([b.last()?.state, b.last()?.pid], ["stopped", undefined]);
 	assert.match(b.lines.join("\n"), new RegExp(`cloudflared pid ${pid} did not report its exit 10s after SIGKILL`));
 	assert.equal(b.kills.length, 2, "no further signal");
+});
+
+// From tests/daemon-tunnel-files.test.ts: the binding's consumers (device-notify, the push sweep) are p12c's files.
+test("the binding: none published is null, the last published origin and generation whatever the state, anything malformed refused", (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const stateDir = join(home.path, LAYOUT.state);
+	mkdirSync(stateDir, { recursive: true });
+	assert.deepEqual(readTunnelBinding(stateDir), { ok: true, binding: null });
+	const write = (value: unknown) => writeFileSync(tunnelRuntimeFile(stateDir), typeof value === "string" ? value : JSON.stringify(value));
+	write({ schema_version: 1, generation: 3, origin: "https://abc.trycloudflare.com", state: "stopped" });
+	assert.deepEqual(readTunnelBinding(stateDir), { ok: true, binding: { origin: "https://abc.trycloudflare.com", generation: 3 } });
+	write({ schema_version: 1, generation: 0, origin: null });
+	assert.deepEqual(readTunnelBinding(stateDir), { ok: true, binding: null }, "starting, no origin yet");
+	for (const bad of ["{torn", { schema_version: 2, generation: 1, origin: null }, { schema_version: 1, generation: -1, origin: null }, { schema_version: 1, generation: 1.5, origin: null }, { schema_version: 1, generation: 1, origin: "http://abc.trycloudflare.com" }, { schema_version: 1, generation: 1 }, []]) {
+		write(bad);
+		assert.equal(readTunnelBinding(stateDir).ok, false, JSON.stringify(bad));
+	}
 });
