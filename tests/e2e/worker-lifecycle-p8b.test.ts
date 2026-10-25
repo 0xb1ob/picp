@@ -1,7 +1,7 @@
 /**
  * P8b (behavior 04): worker hard bounds, read-only MCP and wedged-call notices through a real CommandPost (or parent
  * pi), real pi workers on a treehouse pool and the mock provider. Outcomes are read from the fleet record, the worker's
- * run log, onHardBound and the parent's notices, never from internals.
+ * run log, onHardBound and the parent's notices and /status, never from internals.
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -369,4 +369,49 @@ test("P8b wedged: two workers silent in one tick are one notice naming both", { 
 	for (const job of jobs) assert.match(notices[0] ?? "", new RegExp(`  ${job.id}: bash open \\d+s, silent \\d+s`));
 	assert.match(notices[0] ?? "", /Observed, not concluded: .*\nNothing was killed and no phase changed.*\/watch.*\n.*operator decision/);
 	assert.ok(!/stalled/.test(notices[0] ?? ""), "never the retired phase word");
+});
+
+test("P8b wedged: at the default threshold a 31-minute silent call is news and a /status row; a talking or closed call is neither", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const jobs = await Promise.all(["silent", "talking", "closed"].map((title) => b.ledger.create({ title, project: "demo", delivery: "local", kind: "ship" })));
+	const [silent, talking, closed] = jobs.map((job) => job.id) as [string, string, string];
+	const quick = { kind: "tool_calls", calls: [1, 2, 3].map(() => ({ name: "bash", args: { command: "true" } })) } as ScriptStep;
+	const scripts: ScriptStep[][] = [[bash("sleep 600"), { kind: "hang" }], [bash("sleep 600"), { kind: "hang" }], [quick, { kind: "hang" }]];
+	const models = scripts.map((steps, i) => b.provider.addScript(`p8b-default-${i}`, steps));
+	// A typo in the threshold env falls back to the 30-minute default instead of disabling detection.
+	const ends = await b.run([{ kind: "tool_calls", calls: jobs.map((job, i) => ({ name: "cp_dispatch", args: { job_id: job.id, task: "Run the checks.", model: models[i] } })) }],
+		{ CP_WEDGED_TOOL_CALL_SECONDS: "nonsense" });
+	assert.deepEqual(ends.map((end) => end.isError), [false, false, false], JSON.stringify(ends.map((end) => end.result)));
+	await waitFor(() => started(b.home, silent) && started(b.home, talking) && toolEnds(b.home, closed).length >= 3, Boolean, { timeoutMs: 60_000, what: "calls opened" });
+	await waitFor(() => b.provider.requests("p8b-default-2").length, (n) => n >= 2, { timeoutMs: 30_000, what: "closed worker back on the model" });
+	// Seed the on-disk run projections the parent reads: legacy shape (no last_progress_at) for the silent call.
+	const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+	const seed = (jobId: string, startedAgo: number, progressAgo?: number) => {
+		const file = join(b.home, paths.statusFile(jobId));
+		const run = JSON.parse(readFileSync(file, "utf8")) as { current_tool: Record<string, unknown> | null };
+		if (!run.current_tool) return;
+		run.current_tool.started_at = ago(startedAgo);
+		if (progressAgo === undefined) delete run.current_tool.last_progress_at;
+		else run.current_tool.last_progress_at = ago(progressAgo);
+		writeFileSync(file, JSON.stringify(run));
+	};
+	seed(silent, 31 * 60);
+	seed(talking, 3600, 60);
+	seed(closed, 15 * 3600);
+	await new Promise((resolve) => setTimeout(resolve, 7_000));
+	const parent = b.parents[0];
+	assert.ok(parent);
+	const notices = parent.records().filter((r) => r.type === "extension_ui_request" && r.method === "notify" && String(r.message).startsWith("WEDGED"))
+		.map((r) => String(r.message));
+	assert.equal(notices.length, 1, `the 31-minute silence only: ${JSON.stringify(notices)}`);
+	assert.match(notices[0] ?? "", new RegExp(`^WEDGED TOOL CALL — 1 worker .*\\n  ${silent}: bash open 31m, silent 31m`));
+	assert.match(notices[0] ?? "", /quiet past 30m/);
+	const before = parent.records().length;
+	await parent.prompt("/status");
+	const status = await waitFor(() => parent.records().slice(before).map((r) => JSON.stringify(r)).join("\n"), (text) => text.includes(talking), {
+		timeoutMs: 20_000, what: "/status output" });
+	assert.match(status, new RegExp(`no progress from bash for 31m \\(possibly wedged -- /watch ${silent}`));
+	assert.match(status, /long-running tool call: bash for 1h/);
+	for (const id of [talking, closed]) assert.doesNotMatch(status, new RegExp(`possibly wedged -- /watch ${id}`));
+	assert.doesNotMatch(status, /(?<!not )stalled/, "a wedged call is an observation, never a phase");
 });

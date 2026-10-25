@@ -3,19 +3,19 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P8b (cp-e2e-migration-p8b-dbbn) | behavior 04, second slice: hard bounds, read-only worker MCP and wedged-call notices (04-6..04-12) in `tests/e2e/worker-lifecycle-p8b.test.ts`; 15 mapped (9 + 4 + 2), 24 retained verbatim in three `*-retained.test.ts` files with per-declaration reasons; stopped at the worker wall clock, the other behavior-04 files belong to P8c and P8d | 3 (`tests/bounds.test.ts`, `tests/worker-mcp.test.ts`, `tests/wedged.test.ts`) |
+| P8b (cp-e2e-migration-p8b-dbbn) | behavior 04, second slice: hard bounds, read-only worker MCP and wedged-call notices (04-6..04-12, 04-18) in `tests/e2e/worker-lifecycle-p8b.test.ts`; 22 mapped (9 + 4 + 9), 17 retained verbatim in three `*-retained.test.ts` files with per-declaration reasons; 9 behavior-04 files stay `convert` in p8.md | 3 (`tests/bounds.test.ts`, `tests/worker-mcp.test.ts`, `tests/wedged.test.ts`) |
 <!-- /manifest:ledger -->
 
 P8b (job `cp-e2e-migration-p8b-dbbn`) converts three behavior-04 files: `tests/bounds.test.ts`,
-`tests/worker-mcp.test.ts` and `tests/wedged.test.ts`. It runs seven cases in `tests/e2e/worker-lifecycle-p8b.test.ts`.
-The job stopped at the worker's wall clock with a branch diff of about 79 KB. The other 13 P8-owned behavior-04 files
-went to the follow-up jobs P8c and P8d ([p8c.md](p8c.md)).
+`tests/worker-mcp.test.ts` and `tests/wedged.test.ts`. It runs eight cases in `tests/e2e/worker-lifecycle-p8b.test.ts`.
+Scope: 3 of the 16 P8-owned behavior-04 files. `git diff origin/main...HEAD | wc -c` measures 92291 bytes for this
+slice. P8c has since deleted four more ([p8c.md](p8c.md)); the other 9 stay `convert` in [p8.md](p8.md).
 Each control below changed one guard, ran only the named case, failed as stated, and was restored.
 
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
-| P8b | 04 | tests/e2e/worker-lifecycle-p8b.test.ts | 7 |
+| P8b | 04 | tests/e2e/worker-lifecycle-p8b.test.ts | 8 |
 <!-- /manifest:prs -->
 
 <!-- manifest:scenarios -->
@@ -28,6 +28,7 @@ Each control below changed one guard, ran only the named case, failed as stated,
 | 04-10 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b MCP: dispatched read-only workers reach enabled servers through mcp_call; writers and disabled homes get none |
 | 04-11 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b wedged: the parent announces a silent open tool call once, never a progressing one, and a new silent call again |
 | 04-12 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b wedged: two workers silent in one tick are one notice naming both |
+| 04-18 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b wedged: at the default threshold a 31-minute silent call is news and a /status row; a talking or closed call is neither |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -48,26 +49,26 @@ Each control below changed one guard, ran only the named case, failed as stated,
 | tests/worker-mcp.test.ts | readUserMcpServers: missing is none, invalid is an error without the content | 04-10 | mapped | A missing, disabled-only or invalid mcp.json gives no gateway. /doctor names each case and never quotes the file. |
 | tests/worker-mcp.test.ts | workerMcpConfig keeps every server, credentials and all, and makes non-hidden tools direct | — | retained | Verbatim in tests/worker-mcp-retained.test.ts. URL servers (oauth, headers) need a network endpoint, and pi resolves `!pass` credentials itself. The hidden/direct half is 04-10 (NC-P8b-mcp-hidden). |
 | tests/worker-mcp.test.ts | mcpReadOnlyRefusal fails closed: only readOnlyHint true and not destructive passes | 04-10 | mapped | Planner and qa get read_thing; plain and delete_thing refuse with their reasons and never reach a server. |
-| tests/worker-mcp.test.ts | withWorkerMcp: read-only profiles only, and only when the agent dir has an enabled server | 04-10 | mapped | Implementer, disabled-only and invalid mcp.json dispatches get no mcp_call; gate-reviewer shares the readOnly flag. |
+| tests/worker-mcp.test.ts | withWorkerMcp: read-only profiles only, and only when the agent dir has an enabled server | 04-10 | mapped | Planner and qa get mcp_call; implementer, disabled-only and invalid mcp.json dispatches do not. The gate-reviewer profile is not dispatched in 04-10. |
 | tests/worker-mcp.test.ts | a planner's spawn plan carries the gateway next to report_result; an implementer's does not | 04-10 | mapped | Dispatched planner calls mcp_call and report_result; the implementer's mcp_call is not found. |
 | tests/wedged.test.ts | a wedged call is announced once, and again only if it is a different call | 04-11 | mapped | Parent notices: one per silent call across ticks, none for the loud call, again after a resumed call re-silences. |
 | tests/wedged.test.ts | two wedged workers are one notice naming both | 04-12 | mapped | Two barrier calls fall silent together: one "2 workers" notice names both jobs, says nothing was killed, and points at /watch. |
-| tests/wedged.test.ts | an unmatched tool_execution_start older than the threshold is surfaced | — | retained | Verbatim in tests/wedged-retained.test.ts. Its /status "possibly wedged" row uses the fixed 30-minute WEDGED_TOOL_CALL_SECONDS (src/status.ts), never the env value. Its notice half is 04-11. |
-| tests/wedged.test.ts | a matched start/end pair is not surfaced, however long ago it ran | — | retained | Verbatim in tests/wedged-retained.test.ts. At the consumer, announce-once masks a closed call: its key was already news, so no entry point tells the two apart. |
-| tests/wedged.test.ts | a long-but-progressing tool call is never surfaced | — | retained | Verbatim in tests/wedged-retained.test.ts. Its /status long-call row needs the fixed 1-hour LONG_TOOL_CALL_SECONDS. Its notice half is 04-11 (NC-P8b-wedged-idle). |
-| tests/wedged.test.ts | the threshold is configurable, and its default is 30 minutes | — | retained | Verbatim in tests/wedged-retained.test.ts. The default needs a 30-minute silence. The env half is 04-11 (NC-P8b-wedged-env). |
+| tests/wedged.test.ts | an unmatched tool_execution_start older than the threshold is surfaced | 04-18 | mapped | An open bash call seeded 31 min old is one WEDGED notice and a /status "possibly wedged" row, and no phase says stalled. |
+| tests/wedged.test.ts | a matched start/end pair is not surfaced, however long ago it ran | 04-18 | mapped | A worker ends three quick bash calls, then hangs: no notice, no row (NC-P8b-end-clears). |
+| tests/wedged.test.ts | a long-but-progressing tool call is never surfaced | 04-18 | mapped | A call open 1 h with progress 60 s ago gets the long-running row, no notice and no wedged row (NC-P8b-long-row, NC-P8b-default-idle). |
+| tests/wedged.test.ts | the threshold is configurable, and its default is 30 minutes | 04-18 | mapped | A typo env falls back to the 30-min default: 31 min silent is news (NC-P8b-default-threshold, NC-P8b-env-fallback). Env half: 04-11. |
 | tests/wedged.test.ts | a dead worker's open call is not a wedged call | — | retained | Verbatim in tests/wedged-retained.test.ts. Bounded recovery relaunches a killed worker on a fresh run before any tick. A SIGKILL control never reached this guard, so no entry point shows a dead worker with an open call. |
 | tests/wedged.test.ts | a job that is not working is not surfaced | — | retained | Verbatim in tests/wedged-retained.test.ts. Same reason: a dead or settled worker never keeps an open call in the live projection. |
-| tests/wedged.test.ts | a run projection written before last_progress_at existed still works | — | retained | Verbatim in tests/wedged-retained.test.ts. Legacy on-disk shape; current runs always write last_progress_at. |
+| tests/wedged.test.ts | a run projection written before last_progress_at existed still works | 04-18 | mapped | The silent job's status.json is seeded without last_progress_at; idle falls back to the start (NC-P8b-legacy-progress). |
 | tests/wedged.test.ts | an assembled snapshot with no idle measurement is never wedged | — | retained | Verbatim in tests/wedged-retained.test.ts. Older snapshot shape; current assembly always measures idle time. |
 | tests/wedged.test.ts | an open ask_operator call is never a wedged call, however long the human takes | — | retained | Verbatim in tests/wedged-retained.test.ts. Workers no longer get ask_operator (cur.3.1; tests/e2e/questions.test.ts skips it), so no live call opens one. |
 | tests/wedged.test.ts | review: an open report_result held for review is never a wedged call | — | retained | Verbatim in tests/wedged-retained.test.ts. The planner console review that held report_result open left the planner path in cur.3.1. |
-| tests/wedged.test.ts | a bash call silent for 31 minutes is still a notice | — | retained | Verbatim in tests/wedged-retained.test.ts. Its /status row uses the fixed 30-minute threshold. Its bash-notice half is 04-11. |
+| tests/wedged.test.ts | a bash call silent for 31 minutes is still a notice | 04-18 | mapped | Notice "bash open 31m, silent 31m" and the 31m /status row (NC-P8b-status-row). |
 | tests/wedged.test.ts | the exclusion is the tool name from the projection, not a feature flag | — | retained | Verbatim in tests/wedged-retained.test.ts. It needs an open ask_operator call, which no worker can make (cur.3.1). |
 | tests/wedged.test.ts | a completed auto-retry is not a wedged tool call | — | retained | Verbatim in tests/wedged-retained.test.ts. pi retries a model call between turns, never inside an open tool call; only a fabricated projection pairs them. |
 | tests/wedged.test.ts | an in-flight auto-retry is not a wedged tool call | — | retained | Verbatim in tests/wedged-retained.test.ts. Same reason: a live retry never overlaps an open tool call. |
 | tests/wedged.test.ts | an unmatched agent_start is not evidence of a wedged tool call | — | retained | Verbatim in tests/wedged-retained.test.ts. Projection-level: agent_start reaches the notice only through current_tool. No single mutation separates it at the consumer. |
-| tests/wedged.test.ts | a healthy job with matched tool counts and recent activity is never flagged | — | retained | Verbatim in tests/wedged-retained.test.ts. Matched pairs are masked by announce-once at the consumer, as for the matched start/end case. |
+| tests/wedged.test.ts | a healthy job with matched tool counts and recent activity is never flagged | 04-18 | mapped | The closed worker's matched calls and fresh activity raise no notice and no row. |
 | tests/wedged.test.ts | a retry across an open tool call restarts the silence clock | — | retained | Verbatim in tests/wedged-retained.test.ts. A live retry never overlaps an open tool call. |
 | tests/wedged.test.ts | the retrying exclusion is belt and braces with the progress mark | — | retained | Verbatim in tests/wedged-retained.test.ts. Same reason: no live entry point combines retrying with an open call. |
 | tests/wedged.test.ts | tool_execution_update refreshes progress for its own call, and only its own | — | retained | Verbatim in tests/wedged-retained.test.ts. The "only its own" half needs an update for a closed call id, which live pi never emits. Own-call refresh is 04-11 (NC-P8b-wedged-idle). |
@@ -99,15 +100,22 @@ Each control below changed one guard, ran only the named case, failed as stated,
 | NC-P8b-mcp-agentdir | tests/worker-mcp.test.ts | src/worker-mcp.ts agentDirOf | 04-10 | ignore PI_CODING_AGENT_DIR | — | ro-missing /doctor finding | pass |
 | NC-P8b-mcp-missing | tests/worker-mcp.test.ts | src/worker-mcp.ts readUserMcpServers | 04-10 | treat a missing mcp.json as invalid | — | ro-missing /doctor finding | pass |
 | NC-P8b-mcp-quote | tests/worker-mcp.test.ts | src/mcp-access.ts mcpFindings | 04-10 | put the parse error in the finding detail | — | ro-invalid: the finding never quotes the file | pass |
+| NC-P8b-default-threshold | tests/wedged.test.ts | src/contracts/limits.ts WEDGED_TOOL_CALL_SECONDS | 04-18 | default threshold one hour | — | the 31-minute silence only: no notice | pass |
+| NC-P8b-env-fallback | tests/wedged.test.ts | src/wedged.ts wedgedToolCallSeconds | 04-18 | a non-numeric env value becomes the threshold | — | the 31-minute silence only: no notice | pass |
+| NC-P8b-status-row | tests/wedged.test.ts | src/status.ts possibly-wedged row | 04-18 | never render the wedged /status row | — | /status lacks "no progress from bash for 31m" | pass |
+| NC-P8b-long-row | tests/wedged.test.ts | src/status-render.ts isLongToolCall | 04-18 | long-call threshold past a day | — | /status lacks "long-running tool call: bash for 1h" | pass |
+| NC-P8b-end-clears | tests/wedged.test.ts | src/run-artifacts.ts tool_execution_end | 04-18 | keep current_tool after its end | — | notice is not the "1 worker" notice | pass |
+| NC-P8b-legacy-progress | tests/wedged.test.ts | src/status.ts current_tool_idle_seconds | 04-18 | a missing last_progress_at reads as no silence | — | the 31-minute silence only: no notice | pass |
+| NC-P8b-default-idle | tests/wedged.test.ts | src/status-render.ts isWedgedToolCall | 04-18 | measure open time, not silence | — | notice is not the "1 worker" notice | pass |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->
 | File | PR | Note |
 |---|---|---|
-| tests/e2e/worker-lifecycle-p8b.test.ts | P8b | behavior 04 bounds, MCP and wedged notices; 7 runtime cases |
+| tests/e2e/worker-lifecycle-p8b.test.ts | P8b | behavior 04 bounds, MCP and wedged notices; 8 runtime cases |
 | tests/bounds-retained.test.ts | P8b | 2 declarations retained/moved verbatim; timer skew and open-tool age |
 | tests/worker-mcp-retained.test.ts | P8b | 2 declarations retained/moved verbatim; HOME agent dir and URL/credential shaping |
-| tests/wedged-retained.test.ts | P8b | 20 declarations retained/moved verbatim; per-declaration reasons above |
+| tests/wedged-retained.test.ts | P8b | 13 declarations retained/moved verbatim; per-declaration reasons above |
 <!-- /manifest:incoming -->
 
 <!-- manifest:baseline -->
@@ -115,5 +123,5 @@ Each control below changed one guard, ran only the named case, failed as stated,
 |---|---|---|---|
 | `tests/bounds.test.ts` | deleted | P8b | behavior 04: 9 assertions mapped to 04-6..04-9, 2 retained in tests/bounds-retained.test.ts |
 | `tests/worker-mcp.test.ts` | deleted | P8b | behavior 04: 4 assertions mapped to 04-10, 2 retained in tests/worker-mcp-retained.test.ts |
-| `tests/wedged.test.ts` | deleted | P8b | behavior 04: 2 assertions mapped to 04-11 and 04-12, 20 retained in tests/wedged-retained.test.ts |
+| `tests/wedged.test.ts` | deleted | P8b | behavior 04: 9 assertions mapped to 04-11, 04-12 and 04-18, 13 retained in tests/wedged-retained.test.ts |
 <!-- /manifest:baseline -->
