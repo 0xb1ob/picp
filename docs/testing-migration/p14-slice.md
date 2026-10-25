@@ -3,7 +3,7 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P14 (cp-e2e-migration-p14-0w42) | behavior 15: session-start nudges through a real parent (P14-nudges), cp-health alerts raised, withdrawn, acknowledged and relayed through a parent and a cp-bridge operator (P14-alerts), cp-install's model, gateway-key and retired-flag steps on a pty (P14-install, P14-install-models), and the parent host's gateway key hand-off (P14-gateway-key); 25 declarations from 5 files: 25 mapped, 0 retained; the PR3c `--with-br`/`--no-br` assertions in `tests/service-install.test.ts` moved to P14-install | 5 |
+| P14 (cp-e2e-migration-p14-0w42) | behavior 15: session-start nudges through a real parent (P14-nudges), cp-health alerts raised, withdrawn, acknowledged and relayed through a parent and a cp-bridge operator (P14-alerts), cp-install's model, gateway-key and retired-flag steps on a pty (P14-install, P14-install-models), the parent host's gateway key hand-off (P14-gateway-key), and the version view through cp-view, a hosted parent, the cp-bridge footer and /cp-version (P14-version-badge, -running, -live, -lock); 42 declarations from 7 files: 40 mapped, 2 retained verbatim in `tests/version-view-retained.test.ts`; the PR3c `--with-br`/`--no-br` assertions in `tests/service-install.test.ts` moved to P14-install | 7 |
 <!-- /manifest:ledger -->
 
 P14 converts behavior 15 file by file in one PR; the files still marked `convert` in `p14.md` are its remainder.
@@ -20,6 +20,10 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | P14-install | tests/e2e/service.test.ts | P14-install: cp-install lists models as the service sees them, asks once per target, and keeps the gateway key 0600 |
 | P14-install-models | tests/e2e/service.test.ts | P14-install-models: cp-install's model step on an empty, unreadable or long listing, and a parent that picks off-list or none |
 | P14-gateway-key | tests/e2e/service.test.ts | P14-gateway-key: the parent host hands a 0600 gateway.env key only to a gateway home's parent, never echoing it |
+| P14-version-badge | tests/e2e/version.test.ts | P14-version-badge: /api/version reads each process's record and the updater's run against the checkout, never a token |
+| P14-version-running | tests/e2e/version.test.ts | P14-version-running: /api/job/<id> keeps the checkout's ancestry and each process's started-on commit apart |
+| P14-version-live | tests/e2e/version.test.ts | P14-version-live: a hosted parent and its host record the commit they loaded; the footer and /cp-version compare it |
+| P14-version-lock | tests/e2e/version.test.ts | P14-version-lock: a live holder's lock without a commit, or with a malformed one, is still a lock |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -50,12 +54,31 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | tests/gateway-key.test.ts | validGatewayKey: printable ASCII without whitespace, quotes or backslash, 1-4096 chars; the reason never quotes the key | P14-install | mapped | NC-gk-valid, NC-gk-echo |
 | tests/gateway-key.test.ts | readGatewayKey: the rendered key back; a 0644 file is refused naming chmod 600, without the key; absent is neither | P14-gateway-key | mapped | NC-gk-loose, NC-gk-keyline, NC-gk-absent, NC-gk-stderr, NC-gk-logecho; the rendered file: NC-gk-render |
 | tests/gateway-key.test.ts | parentGatewayKey: only for a home with data/capacity.json | P14-gateway-key | mapped | NC-gk-capacity, NC-gk-envwins |
+| tests/version-records.test.ts | parent.lock: a valid commit round-trips; a malformed one and a pre-cp-kz20 lock without one still parse | P14-version-lock | mapped | NC-pl-commit, NC-pl-legacy; the written commit: NC-pl-write (P14-version-live) |
+| tests/version-records.test.ts | parent-host.<gen>.json: the host writes the commit it loaded | P14-version-live | mapped | NC-ph-write |
+| tests/version-view.test.ts | green: every process on HEAD, HEAD at a freshly fetched origin/main → ok, latest | P14-version-badge | mapped | NC-vv-gen, NC-vv-fresh |
+| tests/version-view.test.ts | amber: origin/main moved on and the updater skipped while busy → warn, N behind (skipped_busy) | P14-version-badge | mapped | NC-vv-quiet |
+| tests/version-view.test.ts | #325: the updater's phase and result read as a clocked sentence from state/update.json | P14-version-badge | mapped | NC-vv-settle, NC-vv-phase, NC-vv-retry, NC-vv-dirty, NC-vv-applied |
+| tests/version-view.test.ts | #325: the sentence's drain wait, retry factor and defaults match the updater's own constants | — | retained | verbatim in tests/version-view-retained.test.ts; no entry point exposes the updater's own drain wait or retry factor (update.json records neither), so the viewer's mirror can drift unseen |
+| tests/version-view.test.ts | ahead and diverged are neutral; a stale host is amber with its restart | P14-version-badge | mapped | NC-vv-ahead, NC-vv-fix |
+| tests/version-view.test.ts | red: the operator session is stale, or the update failed, or the fetch keeps failing | P14-version-badge | mapped | NC-vv-session, NC-vv-failures |
+| tests/version-view.test.ts | grey: no update.json and legacy records without a commit → unknown, never green; dead pids are down, not unknown | P14-version-badge | mapped | NC-vv-legacy, NC-vv-legacy-green, NC-vv-alive |
+| tests/version-view.test.ts | no origin/main: upstream unknown with git's reason, never a throw | P14-version-badge | mapped | NC-vv-noref |
+| tests/version-view.test.ts | the git read is cached per repository for 10 s on the injected clock | P14-version-badge | mapped | NC-vv-cache0, NC-vv-cache30 |
+| tests/version-view.test.ts | formatTerminal: this session's own loaded commit decides the operator layer | P14-version-live | mapped | NC-ft-own |
+| tests/version-view.test.ts | version line: refresh = readVersion then formatTerminal into setStatus; nothing without a UI; cleared on stop | P14-version-live | mapped | NC-ft-key, NC-ft-tick, NC-ft-clear |
+| tests/version-view.test.ts | badge: an outdated page lifts ok/unknown to amber with a reload; alert stays red; loading and errors are grey | — | retained | verbatim in tests/version-view-retained.test.ts; badgeView renders only in the viewer page's browser bundle, and the e2e harness has no browser entry point |
+| tests/version-view.test.ts | #324: merged vs running here — checkout ancestry and each process's started-on commit stay separate | P14-version-running | mapped | NC-vr-ancestry, NC-vr-from, NC-vr-after, NC-vr-procs |
+| tests/version-view.test.ts | GET /api/version: a VersionResponse with no token, csrf or socket from the records it read | P14-version-badge | mapped | NC-vv-leak, NC-vv-detail, NC-vv-fetched |
+| tests/version-view.test.ts | #324 GET /api/job/<id>: a merged job carries `running`; a merge this checkout lacks is unknown, never not-running | P14-version-running | mapped | NC-vr-unknown; /cp-version: NC-cv-state, NC-cv-unchecked (P14-version-live) |
 <!-- /manifest:assertions -->
 
 <!-- manifest:incoming -->
 | File | PR | Note |
 |---|---|---|
 | tests/e2e/service.test.ts | cp-e2e-migration-p14-0w42 | P14 behavior 15: nudges, service alerts and cp-install through real entry points |
+| tests/e2e/version.test.ts | cp-e2e-migration-p14-0w42 | P14 behavior 15: the version view through cp-view, a hosted parent, the cp-bridge footer and /cp-version |
+| tests/version-view-retained.test.ts | cp-e2e-migration-p14-0w42 | two verbatim version-view declarations no entry point reaches (browser badge, updater-constant mirror) |
 <!-- /manifest:incoming -->
 
 <!-- manifest:regressions -->
@@ -113,4 +136,40 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | P14-NC-gk-logecho | tests/gateway-key.test.ts | P14-gateway-key | gateway-key.ts appends the file's text to the chmod refusal | the host log never holds the key |
 | P14-NC-gk-capacity | tests/gateway-key.test.ts | P14-gateway-key | gateway-key.ts skips the capacity.json gate | no capacity.json: another home keeps quota off |
 | P14-NC-gk-envwins | tests/gateway-key.test.ts | P14-gateway-key | cp-bridge.ts never sets the loaded key on the parent env | a gateway home's parent gets the key |
+| P14-NC-pl-commit | tests/version-records.test.ts | P14-version-lock | parent-lock.ts refuses to parse a lock with a malformed commit | a live holder's lock is refused, naming its pid |
+| P14-NC-pl-legacy | tests/version-records.test.ts | P14-version-lock | parent-lock.ts refuses to parse a lock without a commit | a live holder's lock is refused, naming its pid |
+| P14-NC-pl-write | tests/version-records.test.ts | P14-version-live | parent-lock.ts drops the commit when it writes the lock | the parent's lock carries the commit it loaded |
+| P14-NC-ph-write | tests/version-records.test.ts | P14-version-live | parent-host.ts drops the commit from its record | and so does its host's record |
+| P14-NC-vv-gen | tests/version-view.test.ts | P14-version-badge | version-view.ts reads the lowest parent-host generation | the host layer is current, not down |
+| P14-NC-vv-leak | tests/version-view.test.ts | P14-version-badge | version-view.ts spreads the raw records into the response | the response never holds the token |
+| P14-NC-vv-fresh | tests/version-view.test.ts | P14-version-badge | UPSTREAM_FRESH_MS = 60 min | an old fetch proves nothing |
+| P14-NC-vv-cache0 | tests/version-view.test.ts | P14-version-badge | GIT_CACHE_MS = 0 | reused for 10 s |
+| P14-NC-vv-cache30 | tests/version-view.test.ts | P14-version-badge | GIT_CACHE_MS = 30 s | behind 2 after the cache expires |
+| P14-NC-vv-quiet | tests/version-view.test.ts | P14-version-badge | version-view.ts treats every run as quiet | 2 behind (skipped_busy) |
+| P14-NC-vv-settle | tests/version-view.test.ts | P14-version-badge | version-view.ts ignores update.json quiet_min | first_seen_at + quiet_min |
+| P14-NC-vv-phase | tests/version-view.test.ts | P14-version-badge | version-view.ts never reads the draining phase | phase beats the prior result |
+| P14-NC-vv-retry | tests/version-view.test.ts | P14-version-badge | version-view.ts retries after 3× interval | 4× interval_min |
+| P14-NC-vv-dirty | tests/version-view.test.ts | P14-version-badge | version-view.ts drops the skipped_dirty sentence | 1 behind (local changes) |
+| P14-NC-vv-applied | tests/version-view.test.ts | P14-version-badge | version-view.ts labels an updated run | an applied update adds nothing to the label |
+| P14-NC-vv-alive | tests/version-view.test.ts | P14-version-badge | version-view.ts treats every pid as alive | dead pids are down |
+| P14-NC-vv-legacy | tests/version-view.test.ts | P14-version-badge | version-view.ts never compares a legacy record to the last update | started before the last update |
+| P14-NC-vv-legacy-green | tests/version-view.test.ts | P14-version-badge | version-view.ts reads a legacy record as current | legacy records are unknown, never green |
+| P14-NC-vv-detail | tests/version-view.test.ts | P14-version-badge | DETAIL_MAX = 600 | detail is capped |
+| P14-NC-vv-fetched | tests/version-view.test.ts | P14-version-badge | version-view.ts counts rolled_back as a fetch | a rollback proves no fetch |
+| P14-NC-vv-failures | tests/version-view.test.ts | P14-version-badge | version-view.ts alerts only from 4 fetch failures | fetch failing ×3 |
+| P14-NC-vv-session | tests/version-view.test.ts | P14-version-badge | version-view.ts never raises session stale | session stale — restart |
+| P14-NC-vv-fix | tests/version-view.test.ts | P14-version-badge | version-view.ts drops the host's restart hint | restart the parent host |
+| P14-NC-vv-noref | tests/version-view.test.ts | P14-version-badge | version-view.ts reads a missing origin/main as 0/0 | upstream unknown |
+| P14-NC-vv-ahead | tests/version-view.test.ts | P14-version-badge | version-view.ts reads ahead as behind | ahead is neutral |
+| P14-NC-vr-unknown | tests/version-view.test.ts | P14-version-running | version-view.ts reads an unknown merge as not_included | a merge this checkout lacks is unknown |
+| P14-NC-vr-ancestry | tests/version-view.test.ts | P14-version-running | version-view.ts treats every merge as an ancestor | not_included |
+| P14-NC-vr-from | tests/version-view.test.ts | P14-version-running | version-view.ts dates an update whose from already had the merge | since null |
+| P14-NC-vr-after | tests/version-view.test.ts | P14-version-running | version-view.ts dates an update recorded before the merge | since null |
+| P14-NC-vr-procs | tests/version-view.test.ts | P14-version-running | version-view.ts reads every process as loaded | not_loaded |
+| P14-NC-ft-own | tests/version-view.test.ts | P14-version-live | version-view.ts reads this session as current always | this session stale … restart |
+| P14-NC-ft-tick | tests/version-view.test.ts | P14-version-live | version-line.ts refreshes only on the 60 s period | the stale line within one 10 s tick |
+| P14-NC-ft-key | tests/version-view.test.ts | P14-version-live | version-line.ts writes under another status key | version: latest |
+| P14-NC-ft-clear | tests/version-view.test.ts | P14-version-live | version-line.ts leaves the line on stop | the line is cleared when the session stops |
+| P14-NC-cv-state | tests/version-view.test.ts | P14-version-live | helpers.ts reads the deployed commit as current | deployed … (stale — rotate at a quiet point …) |
+| P14-NC-cv-unchecked | tests/version-view.test.ts | P14-version-live | helpers.ts drops the (unchecked) mark | upstream current (unchecked) |
 <!-- /manifest:regressions -->
