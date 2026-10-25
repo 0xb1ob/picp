@@ -14,6 +14,7 @@ import { isGateWait } from "../../src/gate.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { formatSettleOutcome, REPORT_NUDGE_TEXT, type SettleOutcome } from "../../src/settle.ts";
 import { formatStatusTable } from "../../src/status.ts";
+import { assembleStatusBlock } from "../../src/status-block.ts";
 import { jobState } from "../../src/status-render.ts";
 import { renderFleetWidget } from "../../src/widget.ts";
 import {
@@ -244,7 +245,7 @@ test("P8c unreported: a silent settle with work on disk gets two recovery prompt
 	await waitFor(() => f.events(unpushed, "recovery_prompted").length, (n) => n === 1, { timeoutMs: 30_000, what: "the unpushed recovery" });
 	const kept = f.post.fleet.require(unpushed).unreported_work;
 	assert.deepEqual([kept?.state, kept?.file_count, kept?.commits_ahead, kept?.branch_on_origin], ["unpushed", 0, 1, false]);
-	assert.ok(f.prompts("unpushed").at(-1)?.includes(`origin does NOT have ${unpushed}`));
+	await waitFor(() => f.prompts("unpushed").at(-1) ?? "", (text) => text.includes(`origin does NOT have ${unpushed}`), { timeoutMs: 30_000, what: "the unpushed prompt" });
 
 	await waitFor(() => f.events(clean, "settled_without_report").length, (n) => n === 1, { timeoutMs: 30_000, what: "the clean job's record" });
 	assert.deepEqual(f.prompts("clean").slice(1), [REPORT_NUDGE_TEXT], "one plain nudge, never a recovery");
@@ -255,7 +256,7 @@ test("P8c unreported: a silent settle with work on disk gets two recovery prompt
 	const unknown = f.post.fleet.require(gone).unreported_work;
 	assert.equal(unknown?.state, "unknown", "an observation that failed is never work");
 	assert.match(unknown?.reason ?? "", /does not exist/);
-	assert.equal(f.prompts("gone").at(-1), REPORT_NUDGE_TEXT);
+	await waitFor(() => f.prompts("gone").at(-1), (text) => text === REPORT_NUDGE_TEXT, { timeoutMs: 30_000, what: "the plain nudge's request" });
 });
 
 test("P8c unreported: a job that reported, or whose delivery merged, is never prompted after it settles", { skip: SKIP, timeout: 120_000 }, async (t) => {
@@ -286,7 +287,52 @@ test("P8c unreported: a job that reported, or whose delivery merged, is never pr
 	await new Promise((resolve) => setTimeout(resolve, 2_000));
 	assert.equal(f.provider.requests("reported").length, 2, "no prompt after the report");
 	assert.equal(f.events(reported, "report_nudged").length, 1);
+	assert.equal(f.prompts("reported")[1], REPORT_NUDGE_TEXT, "the report followed the one plain nudge");
+	const held = f.post.fleet.require(reported);
+	assert.ok(held.reported_at, "the report after the nudge is accepted");
+	assert.equal(held.unreported_settles, undefined, "and clears the unreported count");
 	assert.equal(f.provider.requests("merged").length, 1, "a landed delivery is never prompted");
 	assert.equal(f.post.fleet.require(merged).unreported_settles, undefined, "and is not an unreported settle");
 	assert.deepEqual(f.settles.map((entry) => entry.jobId), [reported], "only the pre-report settle reached the parent");
+});
+
+test("P8c settle: a silent worker is nudged once per brief and then recorded, a run that did work is nudged despite a model error, and a dead-on-arrival worker is failed closed unprompted", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const f = await bench(t);
+	const [quiet, ran, doa] = [await f.job("quiet"), await f.job("ran"), await f.job("doa")];
+	await f.dispatch(quiet, f.script("quiet", [DONE, DONE, DONE, DONE, { kind: "hang" }]));
+	const rejected: ScriptStep = { kind: "error", status: 400, message: "the request was rejected", type: "invalid_request_error" };
+	await f.dispatch(ran, f.script("ran", [bash("echo did-work"), rejected, DONE, { kind: "hang" }]));
+
+	await waitFor(() => f.events(quiet, "settled_without_report").length, (n) => n === 1, { timeoutMs: 30_000, what: "the quiet job's record" });
+	assert.deepEqual(f.prompts("quiet").slice(1), [REPORT_NUDGE_TEXT], "the nudge fires once, from the worker's own settle");
+	assert.deepEqual(f.settles.filter((entry) => entry.jobId === quiet).map((entry) => entry.outcome.action), ["nudged", "recorded"]);
+	const record = f.post.fleet.require(quiet);
+	assert.deepEqual([record.phase, record.failure, record.unreported_settles], ["waiting", undefined, 2], "finished work is never failed");
+	const line = formatSettleOutcome(quiet, f.settles.filter((entry) => entry.jobId === quiet).at(-1)!.outcome) ?? "";
+	assert.match(line, new RegExp(`cp_send ${quiet}`));
+	assert.ok(line.split("\n").length <= 3, "an operator line, never a body");
+
+	await waitFor(() => f.events(ran, "report_nudged").length, (n) => n === 1, { timeoutMs: 30_000, what: "the nudge after a model error" });
+	assert.deepEqual([f.post.fleet.require(ran).phase, f.post.fleet.require(ran).failure], ["waiting", undefined], "a run that did work is never failed by the boundary");
+
+	const snapshot = await f.post.status({});
+	assert.equal(snapshot.jobs.find((job) => job.job_id === quiet)?.unreported_settles, 2, "/status carries the fact");
+	const block = assembleStatusBlock(snapshot).text;
+	assert.match(block, /unreported/);
+	assert.doesNotMatch(block, /failed/);
+	assert.match(formatStatusTable(snapshot), /settled without filing an envelope/);
+	assert.ok(renderFleetWidget(snapshot, { width: 100 }).some((entry) => entry.text.includes("no envelope filed")), "the widget says what is missing");
+
+	await f.post.send({ jobId: quiet, message: "One more pass, then report." });
+	await waitFor(() => f.events(quiet, "report_nudged").length, (n) => n === 2, { timeoutMs: 30_000, what: "the promoted brief's own nudge" });
+
+	await f.dispatch(doa, f.script("doa", [{ kind: "error", status: 401, message: "401 Invalid API key", repeat: 20 }]));
+	const failed = await waitFor(() => f.post.fleet.require(doa), (job) => job.phase === "failed", { timeoutMs: 30_000, what: "the dead-on-arrival failure" });
+	assert.equal(failed.failure?.class, "model_call_failed");
+	assert.match(failed.failure?.message ?? "", /401 Invalid API key/);
+	assert.equal(failed.unreported_settles, undefined, "a worker that never ran is not an unreported settle");
+	assert.deepEqual([f.events(doa, "report_nudged").length, f.events(doa, "recovery_prompted").length], [0, 0], "never prompted");
+	const doaOutcome = await waitFor(() => f.settles.find((entry) => entry.jobId === doa)?.outcome, Boolean, { timeoutMs: 10_000, what: "the outcome line" });
+	const doaLine = formatSettleOutcome(doa, doaOutcome!) ?? "";
+	for (const pattern of [/dead on arrival/, /401 Invalid API key/, /re-dispatch/]) assert.match(doaLine, pattern);
 });
