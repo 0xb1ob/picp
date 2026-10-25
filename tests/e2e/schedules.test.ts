@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
@@ -114,7 +114,7 @@ function dashboard(stateDir: string) {
 		const entry = await answered(request(op, scheduleId, extra));
 		return [entry?.state, entry?.reason ?? ""] as const;
 	};
-	const types = (requestId: string) => readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { id: string; type: string }).filter((line) => line.id === requestId).map((line) => line.type);
+	const types = (requestId: string, from = file) => readFileSync(from, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { id: string; type: string }).filter((line) => line.id === requestId).map((line) => line.type);
 	return { file, request, state, answered, ask, types };
 }
 
@@ -245,16 +245,22 @@ test("P13 runner-owned fires: answer, board and local runs are dispatched in cod
 	const recipes = { "answer-run": ["research", "answer"], "board-run": ["research", "board"], "local-run": ["ship", "local"], "research-run": ["research", "pipeline"], "blocked-run": ["research", "pipeline"] } as const;
 	const names = Object.keys(recipes) as Array<keyof typeof recipes>;
 	const pipelines = join(h.home, LAYOUT.pipelines);
-	t.after(() => { if (existsSync(pipelines)) chmodSync(pipelines, 0o755); });
+	const stash = `${pipelines}.stash`;
+	// A file where the pipelines directory belongs fails the store's mkdir even as root; the stash keeps earlier records.
+	const block = () => { renameSync(pipelines, stash); writeFileSync(pipelines, ""); };
+	const unblock = () => { if (!existsSync(stash)) return; rmSync(pipelines, { force: true }); renameSync(stash, pipelines); };
+	t.after(unblock);
 	const parent = await h.parent(`P13: ${names.map((name) => `Add the ${name} schedule.`).join(" ")}`, [
 		{ kind: "tool_calls", calls: names.map((name) => schedule(`add-${name}`, {
 			action: "add", name, project: "demo", manual: true, title: `${name} task`, kind: recipes[name][0], delivery: recipes[name][1], operator_quote: `Add the ${name} schedule.`,
 		})) },
 		{ kind: "tool_calls", calls: names.filter((name) => name !== "blocked-run").map((name) => schedule(`run-${name}`, () => ({ action: "run_now", id: h.idOf(name), overrides: { model: worker } }))) },
-		// The pipeline store turns read-only before the last fire: its start fails after the run and anchor exist.
-		{ kind: "tool_calls", calls: [schedule("run-blocked-run", () => { chmodSync(pipelines, 0o555); return { action: "run_now", id: h.idOf("blocked-run"), overrides: { model: worker } }; })] },
+		// The pipeline store turns unwritable before the last fire: its start fails after the run and anchor exist.
+		{ kind: "tool_calls", calls: [schedule("run-blocked-run", () => { block(); return { action: "run_now", id: h.idOf("blocked-run"), overrides: { model: worker } }; })] },
 	]);
 	const results = ends(parent);
+	await waitFor(() => wakes(parent).some((wake) => /could not start its pipeline/.test(JSON.stringify(wake.message))), Boolean, { timeoutMs: 20_000, what: "the failed pipeline start's wake" });
+	unblock();
 	for (const name of names) checkCall(results, `add-${name}`, "ok", /added sch-/);
 	for (const name of names) checkCall(results, `run-${name}`, "ok", /fired: created cp-/);
 	const anchor = (name: string) => h.runs().runs().find((run) => run.schedule_id === h.idOf(name))?.anchor_job_id as string;
@@ -276,7 +282,6 @@ test("P13 runner-owned fires: answer, board and local runs are dispatched in cod
 	assert.equal(readFleet(h.home).jobs.filter((job) => job.job_id === research).length, 1, "the planner was dispatched once");
 
 	const blocked = h.idOf("blocked-run");
-	await waitFor(() => wakes(parent).length, (count) => count > 0, { timeoutMs: 20_000, what: "the failed pipeline start's wake" });
 	assert.equal(wakes(parent).length, 1, "only the failed pipeline start wakes the parent");
 	assert.match(JSON.stringify(wakes(parent)[0]!.message), new RegExp(`schedule blocked-run \\(${blocked}\\) could not start its pipeline on ${anchor("blocked-run")}`));
 	assert.equal(existsSync(join(h.home, paths.pipelineFile(anchor("blocked-run")))), false);
@@ -363,10 +368,15 @@ test("P13 dashboard schedule control: a live parent claims each journaled reques
 	assert.match((await answered(old))?.reason ?? "", /within 120 s/);
 	assert.deepEqual([(await answered(foreign))?.state, /parent pid 999999/.test(state(foreign)?.reason ?? "")], ["interrupted", true]);
 	const unjournaled = request("disable", id);
-	chmodSync(file, 0o444);
+	// A directory where the journal belongs fails the parent's read and claim even as root; the stash keeps the request.
+	const stash = `${file}.stash`;
+	renameSync(file, stash);
+	mkdirSync(file);
+	t.after(() => { if (existsSync(stash)) { rmSync(file, { recursive: true, force: true }); renameSync(stash, file); } });
 	await new Promise((resolve) => setTimeout(resolve, 4_500));
-	assert.deepEqual([state(unjournaled)?.state, types(unjournaled), enabled(id)], ["queued", ["request"], true], "no claim, no act");
-	chmodSync(file, 0o644);
+	assert.deepEqual([types(unjournaled, stash), enabled(id)], [["request"], true], "no claim, no act");
+	rmSync(file, { recursive: true });
+	renameSync(stash, file);
 	assert.equal((await answered(unjournaled))?.state, "done", "the parent applies it once it can claim it");
 	writeFileSync(controlConfigFile(h.stateDir), '{"enabled": false}');
 	const optedOut = request("enable", id);
