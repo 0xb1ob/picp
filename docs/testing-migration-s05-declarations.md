@@ -1,12 +1,12 @@
 # S05 declaration migration and retirement controls
 
-Owner: cp-e2e-slice-s05-mzpm. S05 owns declarations 41–55 of `tests/diff-review.test.ts`; S04 owns 1–40. Original blob: `4c2662fffc918138acaef068b62a557c95634e88`.
+Owner: cp-e2e-slice-s05-mzpm. S05 owns declarations 41–55 of `tests/diff-review.test.ts`; S04 owns 1–40.
 
 S05: 15 mapped, 0 retained, 0 redundant-unreachable. Whole-file accounting: 53 mapped declarations, 2 retained declarations, plus the unknown-job sub-probe split from mapped declaration 21. Retained tests live in `tests/diff-review-retained.test.ts`. S04's declarations and these 15 cover the complete 55-declaration file.
 
 ## S05 behavior map
 
-All scenarios are in `tests/e2e/diff-review.test.ts`. Controls below are executed production mutations, restored immediately after each run. Failure logs live beside the job report at `/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s05-mzpm/`.
+All scenarios are in `tests/e2e/diff-review.test.ts`. Controls below are executed production mutations, restored immediately after each run.
 
 Review-1 replay evidence, exact production patches and failing consumer assertions are committed in [the control index](testing-migration-s05-controls/README.md). Shared patches below are credited only to the independently observed assertions that index names.
 
@@ -71,24 +71,24 @@ This index supplements `testing-migration-s04-declarations.md`; a scenario-level
 
 ## Final retirement reruns
 
-The final 20-scenario file passes 40 tests including subtests, with no skips. All 39 named production controls were rerun before the original unit file was removed. Grouped runs combine independent defects and check each listed failing assertion; the earlier single-control logs establish the individual mutation. Every mutation was restored before the passing rerun.
+The final 20-scenario file passes 40 tests including subtests, with no skips. All 39 named production controls were rerun before the original unit file was removed. Grouped runs combine independent defects and check each listed failing assertion; the earlier single-control runs establish the individual mutation. Every mutation was restored before the passing rerun.
 
-| Final failing log | Controls rerun |
+| Final failing run | Controls rerun |
 |---|---|
-| final-controls-1.log | stat, promotion (all three reviews fail independently), operational, start-head |
-| final-controls-2.log | delta (both invalid heads and both integrated-base modes fail independently), equivalence, mandate |
-| final-controls-3.log | refusal, recovery-actions (research and unpushed each fail), config, cap |
-| final-controls-4.log | three-dot, context, partial-pass, delivery-error, task-cap, pending-head |
-| final-controls-5.log | task-copy, flags, inherited-route, checkpoint-path, no-delta (history and unmerged base), max-findings |
-| final-controls-6.log | policy-replay (all four variants fail independently), addenda, head, third-pass |
-| final-controls-7.log | incomplete (bytes, quoted, hidden-code each fail), task-boundary, fallback |
-| final-controls-8.log | quoted, prior-isolation |
-| final-controls-9.log | review-path, final-fix-eligibility |
-| nc-summary.log | summary, packet and stranded-receipt cases each fail |
-| nc-canonical.log | canonical |
-| nc-preference.log | preference, configured preference and configured refusal each fail |
-| nc-role-deny.log | role-deny, Missing expected rejection |
-| nc-research-head.log | research-head, actual done must not be done |
-| nc-no-delta-final.log | additional direct delta_from assertion for S04 declaration 28 |
+| grouped run 1 | stat, promotion (all three reviews fail independently), operational, start-head |
+| grouped run 2 | delta (both invalid heads and both integrated-base modes fail independently), equivalence, mandate |
+| grouped run 3 | refusal, recovery-actions (research and unpushed each fail), config, cap |
+| grouped run 4 | three-dot, context, partial-pass, delivery-error, task-cap, pending-head |
+| grouped run 5 | task-copy, flags, inherited-route, checkpoint-path, no-delta (history and unmerged base), max-findings |
+| grouped run 6 | policy-replay (all four variants fail independently), addenda, head, third-pass |
+| grouped run 7 | incomplete (bytes, quoted, hidden-code each fail), task-boundary, fallback |
+| grouped run 8 | quoted, prior-isolation |
+| grouped run 9 | review-path, final-fix-eligibility |
+| nc-summary | summary, packet and stranded-receipt cases each fail |
+| nc-canonical | canonical |
+| nc-preference | preference, configured preference and configured refusal each fail |
+| nc-role-deny | role-deny, Missing expected rejection |
+| nc-research-head | research-head, actual done must not be done |
+| nc-no-delta-final | additional direct delta_from assertion for S04 declaration 28 |
 
 All external agent configurations use createAgentDir and t.after cleanup; no live credentials or live model calls are used. No production mutation is retained in the branch.

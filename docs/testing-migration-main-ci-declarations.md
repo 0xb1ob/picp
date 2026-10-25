@@ -72,7 +72,7 @@ The inactive-login ordering probe passes S but fails the retained unit, demonstr
 Existing NC-35 remains the manifest's original main-CI regression record; the new corruption race has its own patch record.
 
 The following table is the per-declaration control gate (addendum ps-20261021170156-5a482970).
-Each basename identifies an executed `nc-<name>.patch` and `nc-<name>.log` in the job artifact directory.
+Each basename names an executed control; its mutation is described in the table.
 Each command used `node --import ./tests/harness/hermetic-env.ts --test --test-timeout=300000 --test-force-exit --test-name-pattern=<scenario title substring> tests/e2e/landing-*.test.ts`.
 Every listed e2e run exited 1 with an AssertionError on the named consumer outcome; startup failures and timeout-only probes do not count.
 
@@ -112,22 +112,11 @@ Every listed e2e run exited 1 with an AssertionError on the named consumer outco
 | 37 | request-timeout | Drop statusRunner timeout forwarding | per-request timeout cancels hung gh |
 | 39 | viewer-label | Change browser CI label independently | rendered CI label matches the backend denial |
 
-Review-1 controls were executed against production at `573756ed385a5b8582ae4ded7ccb80b6512ef6f2`.
+Review-1 controls were executed against production.
 Each exited 1 with the named AssertionError above; all production mutations were then restored.
-The exact patches and logs are `nc-<basename>.patch` / `.log` under
-`/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-main-ci-41d3/`.
 
-| Basename | Patch SHA-256 |
-|---|---|
-| fetch-fault | 6c7a4570c05c020763e7c80f986c86f25d472b169428440c215a752a46f81316 |
-| normalization | 6112d0c2ed362334adc724930c0f9a519972b7af7b24dcecfe9cefe04f31a2e8 |
-| page-budget | 83830c65a841388a993602663ec5edfacbba20bdabe3fd41521dbc9328d14124 |
-| request-timeout | eacb569608fc58e3b74b01d11f8dab644249143f237af66c4611967c08e8a58b |
-| retry-budget | ffa9f8d119aa222f42dabb10be93a11e8bf2c8cf007409544892d9f208e94764 |
-| viewer-label | ff37addf1889ef4c64bcd527e8cbb47338da0c0ed0c50df53439542674f3660c |
-
-The shared red mutation also fails both original declarations 1 and 3 (`nc-red-units.log`).
-The shared actor mutation also fails original declarations 17 and 25 (`nc-actor-units.log`),
+The shared red mutation also fails both original declarations 1 and 3.
+The shared actor mutation also fails original declarations 17 and 25,
 including the filtered normalized-array expectation, rather than merely another case in the scenario.
 Additional unit sensitivity probes for unknown-clear, format, login-fault and suite are recorded separately;
 the table still assigns a consumer control to each mapped declaration.

@@ -8,11 +8,11 @@ Retained declarations earn no deletion credit. The checker-required absent-path 
 Entry points: real `pi --mode rpc` operator with cp-bridge, real parent-host Unix socket and real parent pi;
 all models are served by MockProvider. Agent settings/models use isolated `cp-agent-*` directories under TMPDIR,
 removed in teardown. The resumed run uses the worktree-local `.t` root with a CommonJS package boundary for fake CLIs;
-its logs and run setup remain in `node_modules/.cache/s19/`, and temporary fixture directories are removed.
+temporary fixture directories are removed.
 
 ## Declaration accounting
 
-Original escalation-relay-watch blob: `f3e85481871b4137bbf4a60168a78f9c2964d8ee`.
+Original escalation-relay-watch:
 
 | Original declaration | Disposition | Consumer proof / failing control assertion |
 |---|---|---|
@@ -22,22 +22,19 @@ Original escalation-relay-watch blob: `f3e85481871b4137bbf4a60168a78f9c2964d8ee`
 | 4 read failures propagate visibly | mapped S19-2 | NC-5: timeout waiting for visible read failure in parent-host log. |
 | 5 direct relay formatting and identity | mapped S19-2 | NC-4: actual host text fails project-tagged decision regex; kind, escalationId and jobId also pinned. |
 
-Original cp-bridge-reattach blob: `089f0e15737bcb406265a1613cd122a693681e53`.
-Its one declaration maps to S19-1 under NC-1, rerun after adding real parent send outcomes.
+Original cp-bridge-reattach: its one declaration maps to S19-1 under NC-1, rerun after adding real parent send outcomes.
 The real host is killed by its owned PID; its owned parent is stopped, then the replacement starts explicitly.
 The operator model receives unseen/live sends and pre-gap/gap escalations in four distinct turns; no extra
 request occurs after replay. The generation stays unchanged while absent, then advances once.
 
-Original bridge-reattach blob: `0faa9ec985ee517e81c437d8fdc79d02b07a16e6`.
-Declarations 1 and 4 map to S19-3 under NC-6 and NC-7. Declarations 2 and 3 are preserved verbatim in
+Original bridge-reattach: declarations 1 and 4 map to S19-3 under NC-6 and NC-7. Declarations 2 and 3 are preserved verbatim in
 `tests/bridge-reattach-retained.test.ts`. The public cancel caller is operator `session_shutdown`, after which
 that process exits; there is no continuing operator entry point to inspect the resumed injected callback.
 The other retained declaration synchronously invokes schedule inside the attempt; real `reattachOnce` has no
 await between track/afterAttach and returning, so socket-close I/O cannot enter that synchronous window.
 The real entry point's ordinary later close is exercised by S19-3 instead.
 
-Original deferred-recheck blob: `4c18990f86b4d0e0261238dcea0a18e29905352b` at
-`534cd14d952af040f2385fd92f3ee968a810ee62`. Its 23 declarations are fully disposed below: 17 mapped, 6 retained.
+Original deferred-recheck: its 23 declarations are fully disposed below: 17 mapped, 6 retained.
 All six retained declarations are byte-for-byte copies of the original declaration bodies, checked with the TypeScript AST.
 
 S19-4 observes the actual review verdict at the parent model request, before another tool can recheck the gate.
@@ -78,8 +75,7 @@ The retained rows name unavailable product entry points. Their source evidence i
 and `QualityReportSchema`/`QualityPanel.start`'s constructed details. The valid native branches run through actual reviewers.
 All retained declaration bodies, including known-regression assertions, remain intact.
 
-Original send-first-gate blob: `a5e4866f76f5e8db5320cac602994bc5b88a52e4` at
-`22a6ead8bfbc9c5087cca4ac02e5873923b324d6`. All four declarations map to S19-5/6/7/8 and the file is retired.
+Original send-first-gate: all four declarations map to S19-5/6/7/8 and the file is retired.
 The real parent receives framed user/custom sends and durable notices. Public RPC `clear_queue` distinguishes
 notices still held by SendFirstGate from notices already passed to pi: held notices survive the clear and later
 reach the model; passed notices are removed. This is necessary because RPC pendingMessageCount counts user
@@ -97,26 +93,24 @@ queue strings, while extension custom messages enter the agent queue directly. N
   and receives middle/fresh notices once. Exact private offer return values are not exposed by parent RPC.
 
 The shared held-home fixture is extracted from headless-lifecycle; the complete existing file passes after the
-extraction. All temporary production mutations are restored. Patch files NC-9 through NC-17 and their exact
-hashes, source commit and failing assertions are recorded in the shared manifest regression table.
+extraction. All temporary production mutations are restored. Patch files NC-9 through NC-17 and their
+failing assertions are recorded in the shared manifest regression table.
 ## Executed controls
 
-Control source base: `53d55fb0d144cee0109e0086ad98add0a196e056`.
 Each patch was applied alone to production, the focused scenario executed, and production restored.
 The full focused file passed before retirement; the extended host-watch case including the real operator backstop
 also passed before retirement. Post-retirement focused checks are recorded with the next delivery commit.
-Apply the recorded patches with `git apply --unidiff-zero` against the source base.
 
-| Control / recorded patch | SHA-256 | Scenario and observed failure |
+| Control / recorded patch | Mutation | Scenario and observed failure |
 |---|---|---|
-| [NC-1](testing-migration-s19-controls/NC-1.patch) | 3d33e3f2ca7b40c98fb267e59d6c89d0a6a28465303a890559c1f49288e3f7ea | S19-1; timeout waiting for bridge reattaches to replacement host after 45 seconds; rerun on the extended real-send scenario |
-| [NC-2](testing-migration-s19-controls/NC-2.patch) | 7c4d57a6682275a28ab9bd00eb9a94346ba4f7c1efb68302d50f61e55d2754ba | S19-2; failed outbox write must not reframe each tick: actual 2, expected 1 |
-| [NC-3](testing-migration-s19-controls/NC-3.patch) | 9f4653b93f70f3d463920b80ee4fdd299763b868bcc97db2081a11752d4e494d | S19-2; restart must not reframe an existing outbox relay: actual true, expected false |
-| [NC-4](testing-migration-s19-controls/NC-4.patch) | db39261155d548331f55a6ed40fbb26aa610ec643dae1a60a32dc98dee0ff344 | S19-2; actual relay text is `[project unknown] S19 mutation removed the decision text`, fails the decision regex |
-| [NC-5](testing-migration-s19-controls/NC-5.patch) | 8e9fa61a9a799f3cf28781cf192a971c6897e0315b86bd8a138479924cfbb869 | S19-2; timeout waiting for visible read failure for escalations.json in host log |
-| [NC-6](testing-migration-s19-controls/NC-6.patch) | 144b1e6d4522172d680a1093af116c565ff6dce64257af08f3ff11e6fdde97b1 | S19-3; retry delay must cap at 30 seconds: 64009 |
-| [NC-7](testing-migration-s19-controls/NC-7.patch) | dc7f844a16a4c94e976114e44dec581e28cdaafd4e90a992ec296acf9c0f9fe6 | S19-3; timeout waiting for silent established host is probed and detached |
-| [NC-8](testing-migration-s19-controls/NC-8.patch) | 6560446f04e528f94725566c2e0a40f2f36c64a0b4e88481ccc51050387437fc | S19-4 ready; decision must already be open when verdict reaches parent |
+| [NC-1](testing-migration-s19-controls/NC-1.patch) | cp-bridge skips reconnect scheduling after host closure | S19-1; timeout waiting for bridge reattaches to replacement host after 45 seconds; rerun on the extended real-send scenario |
+| [NC-2](testing-migration-s19-controls/NC-2.patch) | the escalation watch forgets an attempted delivery | S19-2; failed outbox write must not reframe each tick: actual 2, expected 1 |
+| [NC-3](testing-migration-s19-controls/NC-3.patch) | the escalation watch no longer filters ids already in the outbox | S19-2; restart must not reframe an existing outbox relay: actual true, expected false |
+| [NC-4](testing-migration-s19-controls/NC-4.patch) | the direct relay text drops the decision text | S19-2; actual relay text is `[project unknown] S19 mutation removed the decision text`, fails the decision regex |
+| [NC-5](testing-migration-s19-controls/NC-5.patch) | the escalation watch's due-relay pass is removed | S19-2; timeout waiting for visible read failure for escalations.json in host log |
+| [NC-6](testing-migration-s19-controls/NC-6.patch) | the reattach retry delay is no longer capped | S19-3; retry delay must cap at 30 seconds: 64009 |
+| [NC-7](testing-migration-s19-controls/NC-7.patch) | an unanswered probe counts as alive | S19-3; timeout waiting for silent established host is probed and detached |
+| [NC-8](testing-migration-s19-controls/NC-8.patch) | a passing review no longer triggers the deferred recheck | S19-4 ready; decision must already be open when verdict reaches parent |
 
 Commands: `npm run test:one -- tests/e2e/wake-delivery.test.ts` for NC-1;
 `node --import ./tests/harness/hermetic-env.ts --test --test-name-pattern 'host escalation watch' --test-force-exit tests/e2e/wake-delivery.test.ts` for NC-2/3/4/5.
@@ -133,28 +127,27 @@ consumer assertions are the retirement evidence. No production behavior is chang
 
 ## Deferred completion controls
 
-NC-18 through NC-30 use source commit `1a0861bed9caec7a2ceaef4dccd3e0b2925ea7b3`.
 Each patch ran alone against production and was restored before the next control. Both NC-23 consumers ran with the same patch.
 The default-budget zero values in NC-28/29 are deliberate defects only; shipped test timeouts retain the 5-second floor.
-All 30 controls have patch/hash regression rows and balanced inline patch markers in the shared manifest.
+All 30 controls have regression rows in the shared manifest.
 
-| Control / patch | SHA-256 | Scenario and observed consumer failure |
+| Control / patch | Mutation | Scenario and observed consumer failure |
 |---|---|---|
-| [NC-18](testing-migration-s19-controls/NC-18.patch) | 8ca85d25ccbd99762cff508bbe5816800357b99367149fcc48a8f889ded3cad1 | S19-4 revise: a revise verdict must not read the CI gate |
-| [NC-19](testing-migration-s19-controls/NC-19.patch) | ee7dcb337ee1e7285d2cd5282959b016c7c2d058b8bc8f37a94438474f6a6880 | S19-9 race: the CI wake must reach its consumer after the raced gate completes |
-| [NC-20](testing-migration-s19-controls/NC-20.patch) | b871b500ed174f787fbb401326fd634affc3ff4f8ff4383e11c8eb34fe663dcb | S19-9 race: one decision promotion must produce one notice (two received) |
-| [NC-21](testing-migration-s19-controls/NC-21.patch) | df6294c2ec381f827ae935f5ffca1d970c2ba593def37c05fe0d7a567dad0369 | S19-9 race: the concurrent unrelated writer must survive both rechecks |
-| [NC-22](testing-migration-s19-controls/NC-22.patch) | 50607cfafda3d24ede436e4326f76356567e2ace1686a1133b82aeb7053535e8 | S19-9 late: bounded CI delivery must precede the slow gate's writes |
-| [NC-23](testing-migration-s19-controls/NC-23.patch) | 7195e71a55cf6cd5f9cca87e3f2f0623486d5b2a9c2e2946ad850c438f1ab254 | S19-9 late: one promotion notice (zero received); S19-4 late: timeout waiting for late gate announces actual opened decisions |
-| [NC-24](testing-migration-s19-controls/NC-24.patch) | 0cd3d5fe11f894346da8b1e704c1749e00c5016b8b38699ac8d112fbf00306a8 | S19-4 late-failure: late failure must not report a second warning |
-| [NC-25](testing-migration-s19-controls/NC-25.patch) | 5f1eb59cc899f92f1d1597cb7e51a8cf9398abee57195670dc47ca50786166f1 | S19-9 failure: failed racers must keep the same deferred decision |
-| [NC-26](testing-migration-s19-controls/NC-26.patch) | e821197675861a113e9d3976864cf5a0b0239dec773e5097b6dc9e19fd76a3ce | S19-10 unreviewed: unreviewed must not open a merge decision |
-| [NC-27](testing-migration-s19-controls/NC-27.patch) | de0b5c6bb6707d2e3c615b9cf34e52b831deec31bb633f2b21a1f10f1a16abc2 | S19-9 race: actual model context fails unknown-CI manual-fallback regex |
-| [NC-28](testing-migration-s19-controls/NC-28.patch) | 51889a6bdf4b64c29796c1c87e783530a18465420e53e95bdffefdd58a27e8cf | S19-4 ready: row state when actual verdict reaches parent is deferred instead of open |
-| [NC-29](testing-migration-s19-controls/NC-29.patch) | e1499900506bc3b6f66a3365ddb5d066df30f59449b9adeae0240e891c4cd7ca | S19-4 ready: row state when actual verdict reaches parent is deferred instead of open |
-| [NC-30](testing-migration-s19-controls/NC-30.patch) | 6ff37e5c2e33f19fe238e1a1b2529ce2ce5093b15a078845c8ab046b0b9afa3a | S19-11: a native plan gate must not probe the held merge gate |
+| [NC-18](testing-migration-s19-controls/NC-18.patch) | every review wake-up, including revise, triggers the deferred recheck | S19-4 revise: a revise verdict must not read the CI gate |
+| [NC-19](testing-migration-s19-controls/NC-19.patch) | the CI wake no longer awaits the deferred recheck | S19-9 race: the CI wake must reach its consumer after the raced gate completes |
+| [NC-20](testing-migration-s19-controls/NC-20.patch) | promotion no longer requires the row to be deferred | S19-9 race: one decision promotion must produce one notice (two received) |
+| [NC-21](testing-migration-s19-controls/NC-21.patch) | the awaiting write keeps only rows with verdicts, dropping concurrent rows | S19-9 race: the concurrent unrelated writer must survive both rechecks |
+| [NC-22](testing-migration-s19-controls/NC-22.patch) | the deferred recheck loses its deadline bound | S19-9 late: bounded CI delivery must precede the slow gate's writes |
+| [NC-23](testing-migration-s19-controls/NC-23.patch) | the late-continuation announcement hook is removed | S19-9 late: one promotion notice (zero received); S19-4 late: timeout waiting for late gate announces actual opened decisions |
+| [NC-24](testing-migration-s19-controls/NC-24.patch) | a failed late continuation reports its failure again | S19-4 late-failure: late failure must not report a second warning |
+| [NC-25](testing-migration-s19-controls/NC-25.patch) | a failed recheck raises the merge decision instead of deferring it | S19-9 failure: failed racers must keep the same deferred decision |
+| [NC-26](testing-migration-s19-controls/NC-26.patch) | the merge ask skips its reviewed-head precondition | S19-10 unreviewed: unreviewed must not open a merge decision |
+| [NC-27](testing-migration-s19-controls/NC-27.patch) | the manual unknown-CI fallback guidance is removed | S19-9 race: actual model context fails unknown-CI manual-fallback regex |
+| [NC-28](testing-migration-s19-controls/NC-28.patch) | the deferred-recheck budget is zero | S19-4 ready: row state when actual verdict reaches parent is deferred instead of open |
+| [NC-29](testing-migration-s19-controls/NC-29.patch) | the outer before-wakeup budget is zero | S19-4 ready: row state when actual verdict reaches parent is deferred instead of open |
+| [NC-30](testing-migration-s19-controls/NC-30.patch) | the recheck no longer ignores non-review surfaces | S19-11: a native plan gate must not probe the held merge gate |
 
-Focused commands use `npm run test:one -- --test-name-pattern 'rpc S19:.*: <variant>$' tests/e2e/headless-lifecycle.test.ts` for S19-4 and `npm run test:one -- --test-name-pattern 'wake S19: CI and review.*: <variant>$' tests/e2e/wake-deferred.test.ts` for S19-9. Replace `<variant>` with the exact mode (including `late-failure` where applicable); the end anchor prevents `late` selecting `late-failure`. S19-10/11 keep their existing names/selectors. Original executions are in `NC-*.log`; post-split executions are in `split-NC-*.log`, under worktree-local `node_modules/.cache/s19/`.
+Focused commands use `npm run test:one -- --test-name-pattern 'rpc S19:.*: <variant>$' tests/e2e/headless-lifecycle.test.ts` for S19-4 and `npm run test:one -- --test-name-pattern 'wake S19: CI and review.*: <variant>$' tests/e2e/wake-deferred.test.ts` for S19-9. Replace `<variant>` with the exact mode (including `late-failure` where applicable); the end anchor prevents `late` selecting `late-failure`. S19-10/11 keep their existing names/selectors.
 
 The initial CI-await mutation passed a post-delivery state check: another reader could already have opened the row.
 The case now snapshots state at the actual model request and uses the supported wake-rule switch to expose the CI turn.
@@ -173,7 +166,7 @@ Operator-supplied findings under the standing delegation:
 >
 > “Every control needs a regression-table patch/SHA-256 row.” (main session carry-in)
 
-Confirmed against the current checker: its six dispositions include no `moved`, and an absent baseline path must use `deleted` or `deleted-with-feature`. The five absent original paths use `deleted`; the nine moved bodies remain `retained` and the three replacements are incoming retained evidence. No retained declaration earns deletion credit. The shared S19 row records measured totals; all 30 controls have matching closing markers, regression rows and verified patch hashes.
+Confirmed against the current checker: its six dispositions include no `moved`, and an absent baseline path must use `deleted` or `deleted-with-feature`. The five absent original paths use `deleted`; the nine moved bodies remain `retained` and the three replacements are incoming retained evidence. No retained declaration earns deletion credit. The shared S19 row records measured totals; all 30 controls have regression rows.
 
 
 ## Addendum 2 — operator CI-cost rule
@@ -191,7 +184,7 @@ This new acceptance is **blocked** on the existing local measurements:
 | S19-4 review group | 148,794.7 ms | aggregate exceeds limit; individual variants are below it |
 | S19-9 CI/review race group | 173,772.7 ms | aggregate exceeds limit; individual variants are below it |
 
-Evidence: final `ship-*.log` files in worktree-local `node_modules/.cache/s19/`. No slow e2e rerun was needed for this audit.
+No slow e2e rerun was needed for this audit.
 
 Supported public env settings include `CP_CI_WATCH_SECONDS` and the delivery/suppression/merge-window settings in `src/timer-knobs.ts`. They do not configure the fixed host escalation tick (`HOST_ESCALATION_TICK_MS = 10000` in `src/parent-host.ts`) or the cp-bridge retry/probe timers. `extensions/cp-bridge/index.ts` calls `reattachLoop` with its default 1000/30000-ms delays and uses `HOST_PROBE_MS`; its public entry point exposes no override. Passing the helper's optional timing arguments from a test would bypass that entry point.
 
@@ -200,13 +193,13 @@ Per the addendum, these unavailable public timer controls are reported rather th
 
 ### Public-knob follow-up after #447
 
-> “#447 merged (a61a117757f6): CP_HOST_ESCALATION_TICK_SECONDS, CP_HOST_PROBE_SECONDS, CP_BRIDGE_REATTACH_FIRST_SECONDS and CP_BRIDGE_REATTACH_MAX_SECONDS now exist (src/timer-knobs.ts and their owning modules).” (main session carry-in)
+> “#447 merged: CP_HOST_ESCALATION_TICK_SECONDS, CP_HOST_PROBE_SECONDS, CP_BRIDGE_REATTACH_FIRST_SECONDS and CP_BRIDGE_REATTACH_MAX_SECONDS now exist (src/timer-knobs.ts and their owning modules).” (main session carry-in)
 
 S19 now uses the public per-home process env: escalation-watch tick 1 s; retry first delay 0.25 s, retry cap 1 s and probe interval 5 s. The escalation duplicate checks observe 2.5 configured ticks instead of 1.2 default ticks. Retry assertions retain doubling, cap, serialization, stop-on-success, read-only reconnection and every probe outcome at the configured scale. Both target cases have a 120,000-ms case timeout; all polling timeout floors remain at least 5,000 ms.
 
 Clean post-control local remeasurement: escalation-watch 44,554.2 ms (previously 122,952.9); retry/probe 65,279.1 ms (previously 304,571.5). Initial configured runs also passed at 54,448.9 and 97,450.6 ms respectively. Neither target case exceeds two minutes. The ten-second escalation grace remains exercised with a timestamp five seconds in the future. No full HOST_RELAY_TICK_MS wait is required; the operator backstop is exercised through its immediate startup pass, without waiting for ESCALATION_BACKSTOP_TICK_MS.
 
-NC-2 through NC-7 were re-executed individually with these settings and restored. Failures: attempted-write duplication; restart reframe; missing decision text; swallowed corrupt-read diagnostics; 16,015-ms retry gap against the configured 1,700-ms cap ceiling; missing silent-host detachment. Exact existing patch recipes and hashes remain unchanged, with the #447 bridge-source line offsets accounted for. Rerun logs are `node_modules/.cache/s19/knobs-NC-{2,3,4,5,6,7}.log`.
+NC-2 through NC-7 were re-executed individually with these settings and restored. Failures: attempted-write duplication; restart reframe; missing decision text; swallowed corrupt-read diagnostics; 16,015-ms retry gap against the configured 1,700-ms cap ceiling; missing silent-host detachment. The existing patch recipes remain unchanged, with the #447 bridge-source line offsets accounted for.
 
 The main merge preserves all three S21 wake-delivery journeys unchanged. #447's new first-delay regression is moved verbatim into `tests/bridge-reattach-knobs.test.ts`, owned by #447. Its four older declarations retain the already-proven S19 mapped/retained dispositions; no unique main-side regression is removed.
 
@@ -219,8 +212,8 @@ Requested proposal only — wrappers remain unchanged: hoist each existing varia
 
 The two loops now register nine top-level tests with literal per-variant names and 120,000-ms case timeouts. Every fixture setup, assertion and teardown remains inside its variant callback. An AST comparison against pre-split HEAD confirms both complete callback bodies are verbatim. The other S19-10/11 wrappers are unchanged. There are still eleven static S19 e2e declarations: loop-driven registrations replace the two aggregate registrations without adding declaration-deletion credit.
 
-The scenario index lists all nine exact names. Current control commands select `rpc S19:.*: <variant>$` or `wake S19: CI and review.*: <variant>$`; no tracked script had an old S19 selector. Every control whose failure is in either touched file is re-executed, including NC-26/30 below the changed CI wrapper: NC-8 and NC-16 through NC-30 (NC-23 through both late consumers). Source defects are applied individually, with production restored between runs. Existing patch recipes/hashes are retained; fresh logs use `split-NC-*.log`.
+The scenario index lists all nine exact names. Current control commands select `rpc S19:.*: <variant>$` or `wake S19: CI and review.*: <variant>$`; no tracked script had an old S19 selector. Every control whose failure is in either touched file is re-executed, including NC-26/30 below the changed CI wrapper: NC-8 and NC-16 through NC-30 (NC-23 through both late consumers). Source defects are applied individually, with production restored between runs. Existing patch recipes are retained.
 
-Clean post-control verification passed: typecheck; headless lifecycle's canonical partition (14 cases) and short socket-path partition (2 cases); full wake-deferred file (8 cases including existing nested checks); 22 contract cases; migration checker with regression verification, zero findings. Logs are `split-final-*.log`, and the sequential driver exit is zero. The clean repeat timings are recorded beside initial measurements in the S19 ledger. All nine top-level variants stayed below 120,000 ms in both runs; slowest clean repeat: CI late, 112,223.6 ms. All 17 moved-file control executions caught their intended consumer assertions; both complete variant bodies remain verbatim. The wrapper-only change measures 384 → 384 tracked test files and 4,186 → 4,186 static declarations against `56ca846dce1c3ac470dac06930b14ec72a3eb26f` (`split-counts.log`).
+Clean post-control verification passed: typecheck; headless lifecycle's canonical partition (14 cases) and short socket-path partition (2 cases); full wake-deferred file (8 cases including existing nested checks); 22 contract cases; migration checker with regression verification, zero findings. The sequential driver exit is zero. The clean repeat timings are recorded beside initial measurements in the S19 ledger. All nine top-level variants stayed below 120,000 ms in both runs; slowest clean repeat: CI late, 112,223.6 ms. All 17 moved-file control executions caught their intended consumer assertions; both complete variant bodies remain verbatim. The wrapper-only change measures 384 → 384 tracked test files and 4,186 → 4,186 static declarations against the then-current main.
 
 The old proposal-only restriction above is historical and superseded by the quoted operator approval. No aggregate over-two-minute S19 wrapper remains. Full-suite, coverage and live-model runs were skipped per brief; CI is left to the parent. The CI late case's measured local margin to its 120-second limit is 7.8 seconds.

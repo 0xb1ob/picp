@@ -13,12 +13,12 @@ Product fix #443 and `tests/e2e/ci-watch-jobless.test.ts` are already on main: t
 The `pending-fix` ledger label now records the operator's sequencing decision to stop S03b's conflict rounds,
 not a pending product fix. S10b owns mapping 71 and retirement; S03b keeps the original whole and adds no case.
 
-On merged source HEAD 0ed75a6ed0f5bcf28e600c84275678cc6336f4ac, the strengthened real-parent case
+On the merged source HEAD of that time, the strengthened real-parent case
 fails: malformed JSON and invalid fleet schema produce only one durable notice, both keyed by
 `unsafe job id "-"`, instead of two notices for distinct causes. The parent survives the first error.
 The test took 60.45 seconds. Exact reproducer (replace the existing watch-failure case in tests/e2e/landing-s03.test.ts):
 `/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s03b-pntl/watch-failure-per-cause-reproducer.ts`.
-Log: `s03b-71-positive.log`; assertion `different malformed fleet causes must remain distinct`, actual 1,
+Assertion `different malformed fleet causes must remain distinct`, actual 1,
 expected 2. This is an unmodified-product failure, not an executed negative control.
 
 Historical root cause at that HEAD: CiWatch.tick returned job-less errors with job_id "-"; surfaceCi passed
@@ -28,20 +28,19 @@ The failed fragment stays outside the pushed suite; no production change or dele
 
 Four S02 declarations remain retained verbatim in tests/ci-watch-retained.test.ts. The original file is
 still whole by the frozen sequencing decision above; S10b's retirement will remove duplication.
-Review 2 replaces the incomplete inherited provenance with the new replay catalog linked below. Its exact
-production patches, full base SHAs, commands and observed failing assertions supersede the historical prose.
+Review 2 replaces the incomplete inherited provenance with the new replay catalog linked below. Its controls
+in words, commands and observed failing assertions supersede the historical prose.
 
 ## Executed controls (restored immediately)
 
 Commands use `npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing-*.test.ts`.
 
-The [replay catalog](testing-migration-s03-replayed-controls.md) records the exact production diff and
+The [replay catalog](testing-migration-s03-replayed-controls.md) records the bug patched back, in words, and the
 observed failing assertion for every control below. These are new executions, not reconstructed history.
-Base SHA for every row except exclusions: `f30d532f5eed302ec17661dafad2cdf56b3d1d42`.
-Exclusions ran on `7266e5df1d469ee861abb20f2b5559d3d5144fce` before the required plain merge.
+Every row except exclusions ran on the merged base; exclusions ran before the required plain merge.
 Each row's ID names its catalog section; grouped aliases share one independently executed production mutation.
 
-| Control IDs | Command pattern | Exact patch and failing assertion |
+| Control IDs | Command pattern | Control and failing assertion |
 |---|---|---|
 | S03-authority | landing S03: actual parent CI notices | [Catalog](testing-migration-s03-replayed-controls.md#s03-authority) |
 | S03-confirm | landing S03: corrupt | [Catalog](testing-migration-s03-replayed-controls.md#s03-confirm) |
@@ -87,13 +86,12 @@ Removing only the landed branch of isQuietWakeup, and then also removing its isR
 
 The initial full landing run passed 23 cases. The expanded checkpoint passed 61 cases with zero failures/skips in 717 seconds, but overlapped other control experiments and is not the final retirement gate. A subsequent restored deadline/busy-fence run passed all 11 cases in 308 seconds. The headless outcome case passed separately in 19 seconds. Typecheck, migration checker, contract eval (22/22 scored, 28 skipped), and the regenerated contracts export golden passed; generated artifacts had no diff. Declaration-specific controls, final non-overlapping checks and retirement bookkeeping remain to be completed.
 
-Review 2 restored verification on merged base `f30d532f5eed302ec17661dafad2cdf56b3d1d42`: all 66 selected
+Review 2 restored verification on the merged base: all 66 selected
 S03/S02/S07 landing tests and subtests passed in 836.11 seconds; the headless CI-outcome case passed in
 21.00 seconds. Typecheck and six focused unit files passed (CI-watch 89, retained CI-watch 4, bridge
 reattach 5, compact hold 8, review runs 20, timer knobs 9), as did the migration checker with zero findings.
 After the three final eligibility controls, typecheck, the restored only-reported scenario and checker
-passed again. Logs: `s03b-review2-positive.log` (exit 0), `s03b-review2-final-predicate.log`,
-`s03b-review2-final-migration.log`. The [catalog](testing-migration-s03-replayed-controls.md) records **37**
+passed again (positive run exit 0). The [catalog](testing-migration-s03-replayed-controls.md) records **37**
 new independent production mutations covering all inherited table entries. Every mutation is restored;
 no production or test change is committed in this revision.
 
@@ -117,7 +115,7 @@ Historical pre-S03b checkpoint: 26/40 S03 plus 36/40 S02 declarations were mappe
 
 ## S03b parked-path verification
 
-On merged base `86b4cec` (#429), the real parked reproducer now lives in
+On the merged base with #429, the real parked reproducer now lives in
 `tests/e2e/landing-s03.test.ts` as `landing S03: a real parent relays a newly parked handoff without a model turn`.
 It passed (12.68 seconds), asserting exactly one durable id with prefix `continuation:parked:<job>:`
 and zero model requests whose final input contains HELD PR PARKED.
@@ -128,7 +126,7 @@ Other pending declarations and final retirement controls remain unfinished; ci-w
 
 ## S03b continuation: declaration 71 product failure
 
-On `512d3395db0bf78902ef9e0685a1edfd92d86338`, a real parent crashes when the fleet becomes malformed
+On that continuation's base, a real parent crashes when the fleet becomes malformed
 while it is watching a held PR. The new conversion attempt failed twice before receiving any durable watch-failure
 notice. The second run captured the child stack: `FleetStore.read` → `FleetStore.get` →
 `HeldContinuation.#notice` (held-continuation.ts:457) → the trigger error handler (line 227).
