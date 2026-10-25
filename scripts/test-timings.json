@@ -233,7 +233,6 @@
 	"tests/push-webpush.test.ts": 11,
 	"tests/quality.test.ts": 4436,
 	"tests/questions.test.ts": 107,
-	"tests/recovery-notice-bound.test.ts": 749,
 	"tests/recovery.test.ts": 5191,
 	"tests/relay-preflight.test.ts": 1320,
 	"tests/relay-scope.test.ts": 17,

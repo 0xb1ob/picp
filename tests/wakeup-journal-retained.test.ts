@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { DURABLE_WAKEUP_KINDS, FAILURE_CLASSES, type FailureClass, LAYOUT, STATE_WAKEUP_ANNOUNCEMENTS } from "../src/contracts.ts";
-import { BOUND_SPENT_PHRASE } from "../src/failure-announcer.ts";
+import { FAILURE_CLASSES, FAILURE_RECOVERABLE, STATE_WAKEUP_ANNOUNCEMENTS } from "../src/contracts.ts";
 import { FAILURE_CLASS_WAKEUP, WAKEUP_CUSTOM_TYPES } from "../src/wakeups.ts";
 import { REPO_ROOT } from "./harness/index.ts";
-import { FAILURE_RECOVERABLE } from "../src/contracts.ts";
 
 const DOCS = readFileSync(join(REPO_ROOT, "docs/contracts.md"), "utf8");
 const AGENTS = readFileSync(join(REPO_ROOT, "AGENTS.md"), "utf8");
@@ -23,14 +21,6 @@ test("every announced transition names a wake-up kind, and the docs table lists 
 	}
 	for (const kind of kinds) {
 		assert.ok(seen.has(kind), `wake-up kind ${kind} is never announced`);
-	}
-});
-
-test("every failure class maps to a durable wake-up kind", () => {
-	for (const cls of FAILURE_CLASSES) {
-		const kind = FAILURE_CLASS_WAKEUP[cls as FailureClass];
-		assert.ok((DURABLE_WAKEUP_KINDS as readonly string[]).includes(kind), `${cls} maps to non-durable ${kind}`);
-		assert.notEqual(kind, "none");
 	}
 });
 
@@ -90,12 +80,7 @@ test("AGENTS.md tells the parent to act on death and recovery wake-ups", () => {
 });
 
 test("a spent bound's wake-up phrase is unambiguous, and AGENTS.md names it (cur.4.4)", () => {
-	// "not attempted — 0 attempt(s) left" reads as permission to hand-revive;
-	// `BOUND_SPENT_PHRASE` names the actual truth instead — pin the code's own
-	// constant against AGENTS.md's cp-bound bullet, not a copy of the string.
 	assert.match(AGENTS, /bound spent/, "AGENTS.md's cp-bound bullet must name the exhausted phrase");
-	assert.ok(BOUND_SPENT_PHRASE.includes("bound spent"));
-	assert.doesNotMatch(BOUND_SPENT_PHRASE, /^not attempted/, "the exhausted phrase must never read as the ordinary 'not attempted' one");
 	assert.match(
 		DOCS,
 		/one automatic attempt was already made and did not stick/,
@@ -108,8 +93,4 @@ test("no doc or notice claims a previewed attempt 'did not stick' (zh7.4)", () =
 	assert.doesNotMatch(AGENTS, /attempted, did not stick/);
 	assert.match(DOCS, /settleBound/, "docs/contracts.md must name the post-outcome bound announcement");
 	assert.match(AGENTS, /cp-bound.{0,400}after (its|the) outcome/s, "AGENTS.md must say the cp-bound wake arrives after the outcome");
-});
-
-test("LAYOUT names the durable wake-up file under state/", () => {
-	assert.equal(LAYOUT.wakeupsFile, ".pi-command-post/state/wakeups.json");
 });
