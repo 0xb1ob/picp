@@ -1,5 +1,7 @@
 /**
- * cp-wedged-tool-call acceptance: a tool call that never returns is detectable.
+ * cp-wedged-tool-call acceptance: a tool call that never returns is detectable. P8b moved this verbatim from
+ * tests/wedged.test.ts; announce-once, the default threshold, matched, progressing and legacy calls are pinned by
+ * tests/e2e/worker-lifecycle-p8b.test.ts (ledger: p8b.md).
  *
  * The incident: two workers each stopped with `tool_execution_update` as their
  * final event and sat for fifteen hours. `/status` said `working` the whole
@@ -27,17 +29,15 @@ import {
 	DEFAULT_ORIGIN,
 	EMPTY_USAGE,
 	type FleetRecord,
-	LONG_TOOL_CALL_SECONDS,
 	type RunEvent,
 	type RunStatus,
 	type StatusSnapshot,
 	type Usage,
-	WEDGED_TOOL_CALL_SECONDS,
 	type WorkerHandle,
 } from "../src/contracts.ts";
 import { applyEvent, initialProjection, initialStatus, projectEvents } from "../src/run-artifacts.ts";
 import { assembleStatus, formatStatusTable, isWedgedToolCall, type StatusFacts } from "../src/status.ts";
-import { detectWedgedToolCalls, formatWedgedNotice, WedgedWatch, wedgedToolCallSeconds } from "../src/wedged.ts";
+import { detectWedgedToolCalls, WedgedWatch } from "../src/wedged.ts";
 
 const NOW = "2026-08-31T09:00:00Z";
 const HOME = "/home/operator/pi-command-post";
@@ -122,111 +122,7 @@ function snapshotFromLog(jobId: string, events: readonly RunEvent[]): StatusSnap
 	});
 }
 
-const HOUR_AGO = "2026-08-31T08:00:00Z"; // NOW - 1h
 const FIFTEEN_HOURS_AGO = "2026-08-30T18:04:53Z"; // the real incident's last event
-const A_MINUTE_AGO = "2026-08-31T08:59:00Z"; // NOW - 1m
-
-// ---------------------------------------------------------------------------
-// The four acceptance cases
-// ---------------------------------------------------------------------------
-
-test("an unmatched tool_execution_start older than the threshold is surfaced", () => {
-	// Exactly the shape of the incident: a bash call opened, one update at the
-	// same second, then silence. The projection still says `working`.
-	const snapshot = snapshotWith("cp-verify-rubric-tests-7zz", {
-		name: "bash",
-		tool_call_id: "toolu_01UYnnwDMc4YqAgX3zMfBueK",
-		started_at: FIFTEEN_HOURS_AGO,
-		last_progress_at: FIFTEEN_HOURS_AGO,
-	});
-
-	const wedged = detectWedgedToolCalls(snapshot, { thresholdSeconds: 1800 });
-	assert.equal(wedged.length, 1);
-	const call = wedged[0] as (typeof wedged)[number];
-	assert.equal(call.job_id, "cp-verify-rubric-tests-7zz");
-	assert.equal(call.tool, "bash");
-	assert.equal(call.idle_seconds, 15 * 3600 - 4 * 60 - 53);
-	assert.equal(call.running_seconds, call.idle_seconds, "no progress since the start, so both clocks agree");
-	assert.equal(call.threshold_seconds, 1800);
-	assert.equal(call.branch, "cp-verify-rubric-tests-7zz");
-
-	// Nothing became a phase. `stalled` stays retired; the job is still
-	// `waiting`/`working`, which is what the run log actually observed.
-	const job = snapshot.jobs[0] as StatusSnapshot["jobs"][number];
-	assert.equal(job.phase, "waiting");
-	assert.equal(job.run_phase, "working");
-	assert.ok(!JSON.stringify(snapshot).includes("stalled"));
-
-	// And it is surfaced where the operator already looks.
-	const table = formatStatusTable(snapshot);
-	assert.match(table, /no progress from bash for \d+h \(possibly wedged/);
-});
-
-test("a matched start/end pair is not surfaced, however long ago it ran", () => {
-	// `tool_execution_end` clears `current_tool`, so there is no unmatched pair
-	// and therefore no fact to report — regardless of the job's own age.
-	const snapshot = snapshotWith("cp-done-tool", null, { phase: "working" });
-	assert.deepEqual(detectWedgedToolCalls(snapshot, { thresholdSeconds: 1 }), []);
-	assert.equal((snapshot.jobs[0] as StatusSnapshot["jobs"][number]).current_tool_idle_seconds, null);
-	assert.ok(!formatStatusTable(snapshot).includes("possibly wedged"));
-
-	// The end event really is what clears it, projected from the log.
-	const events: RunEvent[] = [
-		event(1, "2026-08-31T08:00:00Z", "tool_execution_start", { toolName: "bash", toolCallId: "c1" }),
-		event(2, "2026-08-31T08:59:00Z", "tool_execution_end", { toolCallId: "c1" }),
-	];
-	assert.equal(projectEvents("cp-done-tool", events).current_tool, null);
-});
-
-test("a long-but-progressing tool call is never surfaced", () => {
-	// The ML backtest case: over an hour inside one call, still emitting.
-	// Legitimate work, and it stays legitimate however long it runs.
-	const snapshot = snapshotWith("cp-backtest", {
-		name: "bash",
-		tool_call_id: "c-backtest",
-		started_at: HOUR_AGO,
-		last_progress_at: A_MINUTE_AGO,
-	});
-	const job = snapshot.jobs[0] as StatusSnapshot["jobs"][number];
-
-	// It IS long — the existing measured-fact marker still fires, as it should.
-	assert.equal(job.current_tool_seconds, 3600);
-	assert.ok((job.current_tool_seconds as number) >= LONG_TOOL_CALL_SECONDS);
-	assert.match(formatStatusTable(snapshot), /long-running tool call: bash for 1h/);
-
-	// It is NOT wedged: only silence accumulates, and it has been silent 60s.
-	assert.equal(job.current_tool_idle_seconds, 60);
-	assert.equal(isWedgedToolCall(job, 1800), false);
-	assert.deepEqual(detectWedgedToolCalls(snapshot, { thresholdSeconds: 1800 }), []);
-	assert.ok(!formatStatusTable(snapshot).includes("possibly wedged"));
-
-	// Even at a one-second threshold it is not wedged, because 60s of silence
-	// is what is measured — not the hour the call has been open. This is the
-	// distinction the whole design rests on.
-	assert.deepEqual(detectWedgedToolCalls(snapshot, { thresholdSeconds: 61 }), []);
-	assert.equal(detectWedgedToolCalls(snapshot, { thresholdSeconds: 60 }).length, 1);
-});
-
-test("the threshold is configurable, and its default is 30 minutes", () => {
-	assert.equal(WEDGED_TOOL_CALL_SECONDS, 1800, "the documented default (docs/contracts.md)");
-	assert.ok(WEDGED_TOOL_CALL_SECONDS > LONG_TOOL_CALL_SECONDS, "wedged is strictly past 'worth a glance'");
-
-	// Env override, injected — never read from the ambient process here.
-	assert.equal(wedgedToolCallSeconds({}), WEDGED_TOOL_CALL_SECONDS);
-	assert.equal(wedgedToolCallSeconds({ CP_WEDGED_TOOL_CALL_SECONDS: "" }), WEDGED_TOOL_CALL_SECONDS);
-	assert.equal(wedgedToolCallSeconds({ CP_WEDGED_TOOL_CALL_SECONDS: "120" }), 120);
-	assert.equal(wedgedToolCallSeconds({ CP_WEDGED_TOOL_CALL_SECONDS: "90.7" }), 90);
-	// A typo must not silently disable detection — that is the exact failure
-	// mode this module exists to remove, so it falls back to the default.
-	for (const bad of ["nonsense", "0", "-1", "NaN", "Infinity"]) {
-		assert.equal(wedgedToolCallSeconds({ CP_WEDGED_TOOL_CALL_SECONDS: bad }), WEDGED_TOOL_CALL_SECONDS, bad);
-	}
-
-	// And the threshold actually decides.
-	const snapshot = snapshotWith("cp-slow", { name: "bash", tool_call_id: "c", started_at: "2026-08-31T08:50:00Z" });
-	assert.equal(detectWedgedToolCalls(snapshot, { thresholdSeconds: 600 }).length, 1);
-	assert.deepEqual(detectWedgedToolCalls(snapshot, { thresholdSeconds: 601 }), []);
-});
 
 // ---------------------------------------------------------------------------
 // What must NOT be surfaced
@@ -255,14 +151,6 @@ test("a job that is not working is not surfaced", () => {
 	}
 });
 
-test("a run projection written before last_progress_at existed still works", () => {
-	// Back-compat: the field is optional, and its absence means "the start is
-	// the last thing we know", which is exactly the conservative reading.
-	const snapshot = snapshotWith("cp-legacy", { name: "bash", tool_call_id: "c", started_at: HOUR_AGO });
-	const job = snapshot.jobs[0] as StatusSnapshot["jobs"][number];
-	assert.equal(job.current_tool_idle_seconds, 3600);
-	assert.equal(detectWedgedToolCalls(snapshot, { thresholdSeconds: 1800 }).length, 1);
-});
 
 test("an assembled snapshot with no idle measurement is never wedged", () => {
 	// `current_tool_idle_seconds` is optional on the contract, so a snapshot
@@ -322,25 +210,6 @@ test("review: an open report_result held for review is never a wedged call", () 
 	assert.equal(isWedgedToolCall(silent, 1800), true, "the same call with no held exchange is still a wedge");
 });
 
-test("a bash call silent for 31 minutes is still a notice", () => {
-	// The other half of the same rule, on the same threshold: the exclusion is
-	// keyed on the ONE tool whose silence belongs to a human, and nothing else.
-	const snapshot = snapshotWith("cp-implementer-quiet", {
-		name: "bash",
-		tool_call_id: "call-1",
-		started_at: "2026-08-31T08:29:00Z", // NOW - 31m
-		last_progress_at: "2026-08-31T08:29:00Z",
-	});
-	const job = snapshot.jobs[0] as StatusSnapshot["jobs"][number];
-	assert.equal(job.current_tool_idle_seconds, 31 * 60);
-	assert.equal(isWedgedToolCall(job, 1800), true);
-
-	const wedged = detectWedgedToolCalls(snapshot, { thresholdSeconds: 1800 });
-	assert.equal(wedged.length, 1);
-	assert.equal((wedged[0] as (typeof wedged)[number]).tool, "bash");
-	assert.match(formatWedgedNotice(wedged), /cp-implementer-quiet: bash open 31m, silent 31m/);
-	assert.match(formatStatusTable(snapshot), /no progress from bash for 31m \(possibly wedged/);
-});
 
 test("the exclusion is the tool name from the projection, not a feature flag", () => {
 	// Keyed on `current_tool` so it holds in dialog mode (T31) and in hold mode
@@ -442,19 +311,6 @@ test("an unmatched agent_start is not evidence of a wedged tool call", () => {
 	assert.deepEqual(detectWedgedToolCalls(snapshot, { thresholdSeconds: 1 }), []);
 });
 
-test("a healthy job with matched tool counts and recent activity is never flagged", () => {
-	// 54 starts, 54 ends, last activity seconds ago -- the shape every healthy
-	// worker has, and the exact opposite of the two casualties.
-	const events: RunEvent[] = [event(1, "2026-08-31T08:00:00Z", "agent_start")];
-	for (let index = 0; index < 54; index += 1) {
-		events.push(event(events.length + 1, "2026-08-31T08:59:58Z", "tool_execution_start", { toolName: "read", toolCallId: `c${index}` }));
-		events.push(event(events.length + 1, "2026-08-31T08:59:59Z", "tool_execution_end", { toolCallId: `c${index}` }));
-	}
-	const status = projectEvents("cp-proj", events);
-	assert.equal(status.tool_calls, 54);
-	assert.equal(status.current_tool, null);
-	assert.deepEqual(detectWedgedToolCalls(snapshotFromLog("cp-proj", events), { thresholdSeconds: 1 }), []);
-});
 
 test("a retry across an open tool call restarts the silence clock", () => {
 	// If a call is open when the loop restarts, the retry events prove the loop
@@ -539,88 +395,4 @@ test("a new tool call starts with a clean progress mark", () => {
 	assert.equal(status.current_tool?.tool_call_id, "c2");
 	assert.equal(status.current_tool?.last_progress_at, undefined);
 	assert.equal(status.tool_calls, 2);
-});
-
-// ---------------------------------------------------------------------------
-// Surfacing: news once, not every tick
-// ---------------------------------------------------------------------------
-
-test("a wedged call is announced once, and again only if it is a different call", () => {
-	const watch = new WedgedWatch({ thresholdSeconds: 1800 });
-	const wedgedSnapshot = snapshotWith(
-		"cp-wedged",
-		{ name: "bash", tool_call_id: "c1", started_at: FIFTEEN_HOURS_AGO },
-		{ tool_calls: 7 },
-	);
-
-	assert.equal(watch.observe(wedgedSnapshot).length, 1, "news the first time");
-	assert.equal(watch.observe(wedgedSnapshot).length, 0, "not news five seconds later");
-	assert.equal(watch.observe(wedgedSnapshot).length, 0);
-	assert.equal(watch.announcedCount, 1);
-
-	// The call returned and a new one opened, which also wedged: news again.
-	const nextCall = snapshotWith(
-		"cp-wedged",
-		{ name: "bash", tool_call_id: "c2", started_at: FIFTEEN_HOURS_AGO },
-		{ tool_calls: 8 },
-	);
-	assert.equal(watch.observe(nextCall).length, 1, "a different call is a different fact");
-	assert.equal(watch.observe(nextCall).length, 0);
-
-	// It unwedges (output resumed): forgotten, so a later wedge is news again.
-	const progressing = snapshotWith(
-		"cp-wedged",
-		{ name: "bash", tool_call_id: "c2", started_at: FIFTEEN_HOURS_AGO, last_progress_at: A_MINUTE_AGO },
-		{ tool_calls: 8 },
-	);
-	assert.deepEqual(watch.observe(progressing), []);
-	assert.equal(watch.announcedCount, 0);
-	assert.equal(watch.observe(nextCall).length, 1, "silence returned, so it is news again");
-});
-
-test("two wedged workers are one notice naming both", () => {
-	const facts: StatusFacts = {
-		home: HOME,
-		generated_at: NOW,
-		include: "active",
-		records: [record({ job_id: "cp-verify-rubric-tests-7zz" }), record({ job_id: "cp-pipeline-handoff-framing-dz9" })],
-		runs: new Map([
-			[
-				"cp-verify-rubric-tests-7zz",
-				run("cp-verify-rubric-tests-7zz", {
-					phase: "working",
-					current_tool: { name: "bash", tool_call_id: "a", started_at: FIFTEEN_HOURS_AGO },
-				}),
-			],
-			[
-				"cp-pipeline-handoff-framing-dz9",
-				run("cp-pipeline-handoff-framing-dz9", {
-					phase: "working",
-					current_tool: { name: "bash", tool_call_id: "b", started_at: "2026-08-30T18:05:03Z" },
-				}),
-			],
-		]),
-		alive: new Map([
-			["cp-verify-rubric-tests-7zz", true],
-			["cp-pipeline-handoff-framing-dz9", true],
-		]),
-		ledger: { ok: false, queried: false },
-		issues: [],
-	};
-	const wedged = detectWedgedToolCalls(assembleStatus(facts), { thresholdSeconds: 1800 });
-	assert.equal(wedged.length, 2);
-
-	const notice = formatWedgedNotice(wedged);
-	assert.match(notice, /WEDGED TOOL CALLS — 2 workers/);
-	assert.match(notice, /cp-verify-rubric-tests-7zz: bash open \d+h, silent \d+h/);
-	assert.match(notice, /cp-pipeline-handoff-framing-dz9: bash open \d+h/);
-	assert.match(notice, /Observed, not concluded/);
-	// Surfacing, never killing: the notice says so, and it never reaches for the
-	// retired phase word to describe what it saw.
-	assert.match(notice, /Nothing was killed and no phase changed/);
-	assert.ok(!/stalled/.test(notice), notice);
-	assert.match(notice, /operator decision/);
-	assert.match(notice, /\/watch/);
-
-	assert.equal(formatWedgedNotice([]), "", "no calls, no notice");
 });
