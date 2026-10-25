@@ -220,7 +220,7 @@ export interface ActionsReadOptions {
 	now?: () => number;
 	/** The pause between retries; tests pass a no-op. */
 	sleep?: (ms: number) => Promise<void>;
-	/** Where a failed observation's call trace goes; stderr by default. */
+	/** Where a failed (or slow) observation's call trace goes; stderr by default. */
 	log?: (line: string) => void;
 }
 
@@ -228,28 +228,37 @@ interface Budget {
 	start: number;
 	deadline: number;
 	now: () => number;
-	/** One entry per gh call: start offset, endpoint, wall and monotonic duration, cap and exit status. */
+	/** One entry per settled gh call: start offset, endpoint, wall and monotonic duration, cap and exit status. */
 	calls: string[];
+	/** Calls not settled yet, so a failure also names the parallel or hung ones. */
+	pending: Set<string>;
 }
 
 function budgetOf(options: ActionsReadOptions): Budget {
 	const now = options.now ?? Date.now;
 	const start = now();
-	return { start, deadline: start + (options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS), now, calls: [] };
+	return { start, deadline: start + (options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS), now, calls: [], pending: new Set() };
 }
 
-/** One observation; a failure logs every gh call it made and the budget left, then rethrows. */
+/** One observation; a failure, or a success that spent over half the budget, logs every gh call and the budget left. */
 async function observe<T>(options: ActionsReadOptions, read: (budget: Budget) => Promise<T>): Promise<T> {
 	const budget = budgetOf(options);
+	const trace = (outcome: string) => {
+		const calls = [...budget.calls, ...budget.pending].join("; ").slice(0, 4000) || "none";
+		(options.log ?? console.error)(`actions-ci: observation ${outcome} with ${budget.deadline - budget.now()}ms of budget left; calls: ${calls}`);
+	};
 	try {
-		return await read(budget);
+		const result = await read(budget);
+		if (budget.now() - budget.start > (budget.deadline - budget.start) / 2) trace("slow");
+		return result;
 	} catch (error) {
-		const left = budget.deadline - budget.now();
-		const calls = budget.calls.join("; ").slice(0, 4000) || "none";
-		(options.log ?? console.error)(`actions-ci: observation failed with ${left}ms of budget left: ${(error as Error).message.slice(0, 300)}; calls: ${calls}`);
+		trace(`failed (${(error as Error).message.slice(0, 300)})`);
 		throw error;
 	}
 }
+
+/** How long past its cap a gh call may stay unsettled before the read stops waiting for it. */
+export const ACTIONS_OVERRUN_GRACE_MS = 1_000;
 
 /** Pauses before each retry of a transient read; the sum stays well inside one tick's budget. */
 export const ACTIONS_RETRY_DELAYS_MS = [250, 750];
@@ -302,7 +311,19 @@ async function get(options: ActionsReadOptions, budget: Budget, endpoint: string
 		if (remaining <= 0) throw new ActionsCiError("deadline", endpoint, "observation budget spent");
 		const cap = /\/attempts\//.test(endpoint) ? Math.min(remaining, ACTIONS_ATTEMPT_TIMEOUT_MS) : remaining;
 		const [started, mono] = [budget.now(), performance.now()];
-		const result = await attempt(options, endpoint, cap);
+		const inFlight = `+${started - budget.start}ms ${endpoint} cap ${cap}ms in flight`;
+		budget.pending.add(inFlight);
+		let overrun: ReturnType<typeof setTimeout> | undefined;
+		// A runner whose call never settles (a child that outlives its kill) must not hang the observation.
+		const result = await Promise.race([
+			attempt(options, endpoint, cap),
+			new Promise<{ fault: ActionsCiError; retry: boolean; exit: string }>((resolve) => {
+				overrun = setTimeout(() => resolve({ fault: new ActionsCiError("transport", endpoint, `gh call unsettled ${ACTIONS_OVERRUN_GRACE_MS}ms past its ${cap}ms cap`), retry: true, exit: "unsettled" }), cap + ACTIONS_OVERRUN_GRACE_MS);
+			}),
+		]).finally(() => {
+			clearTimeout(overrun);
+			budget.pending.delete(inFlight);
+		});
 		// Wall vs monotonic time tells a late callback (event-loop stall) from a wall-clock step.
 		const took = `${budget.now() - started}ms (monotonic ${Math.round(performance.now() - mono)}ms)`;
 		budget.calls.push(`+${started - budget.start}ms ${endpoint} ${took} cap ${cap}ms ${typeof result === "string" ? "exit 0" : `${result.exit} ${result.fault.category}`}`);

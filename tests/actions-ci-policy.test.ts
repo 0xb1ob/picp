@@ -83,7 +83,27 @@ test("a spent observation budget logs every gh call and the budget left", async 
 	};
 	await assert.rejects(readActionsCi({ cwd: ".", exec, sha: SHA, now: () => clock, log: (line) => lines.push(line) }), /Actions CI read deadline: .*\/runs\/7\/attempts\/1\/jobs/);
 	assert.equal(lines.length, 1);
-	assert.match(lines[0] ?? "", /^actions-ci: observation failed with -1000ms of budget left: .*calls: \+0ms repos\/\{owner\}\/\{repo\}\/actions\/runs\?head_sha=\S+ 31000ms \(monotonic \d+ms\) cap 30000ms exit 0$/);
+	assert.match(lines[0] ?? "", /^actions-ci: observation failed \(.*\) with -1000ms of budget left; calls: \+0ms repos\/\{owner\}\/\{repo\}\/actions\/runs\?head_sha=\S+ 31000ms \(monotonic \d+ms\) cap 30000ms exit 0$/);
+});
+
+// A gh call whose runner never settles (a child outliving its kill) hung the whole observation with no deadline at
+// all. Now it ends as a bounded transport fault, and a failing sibling's log names the hung call still in flight.
+test("a gh call that never settles ends the observation inside its budget and shows in the trace", { timeout: 10_000 }, async () => {
+	const runs = JSON.stringify({ total_count: 2, workflow_runs: [7, 8].map((id) => ({ id, run_attempt: 1, head_sha: SHA, status: "completed", conclusion: "success" })) });
+	const hang: CommandRunner = async (_command, args) => (String(args[1]).includes("/jobs") ? new Promise<string>(() => {}) : runs);
+	const lines: string[] = [];
+	const started = Date.now();
+	await assert.rejects(readActionsCi({ cwd: ".", exec: hang, sha: SHA, timeoutMs: 1_000, log: (line) => lines.push(line) }), /Actions CI read transport: .*\/jobs.*unsettled/);
+	assert.ok(Date.now() - started < 1_000 + 2_000, "bounded by the budget plus the overrun grace");
+	assert.match(lines[0] ?? "", /\/runs\/7\/attempts\/1\/jobs\S+ \d+ms \(monotonic \d+ms\) cap \d+ms unsettled transport/);
+	const sibling: CommandRunner = async (_command, args) => {
+		if (String(args[1]).includes("/runs/7/")) return new Promise<string>(() => {});
+		if (String(args[1]).includes("/runs/8/")) throw new Error("gh: HTTP 403");
+		return runs;
+	};
+	lines.length = 0;
+	await assert.rejects(readActionsCi({ cwd: ".", exec: sibling, sha: SHA, timeoutMs: 1_000, log: (line) => lines.push(line) }), /Actions CI read denied/);
+	assert.match(lines[0] ?? "", /\/runs\/7\/attempts\/1\/jobs\S+ cap \d+ms in flight/);
 });
 
 test("Actions reader issues only runs and attempt-jobs requests and never follows response metadata links", async () => {
