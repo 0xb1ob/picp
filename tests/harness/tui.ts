@@ -43,8 +43,15 @@ export function startTui(t: TestContext, cwd: string, env: NodeJS.ProcessEnv, ar
 	child.stderr?.on("data", onData);
 	const exited = new Promise<void>((done) => child.once("exit", () => done()));
 	t.after(async () => {
+		if (child.exitCode !== null || child.signalCode !== null) return;
 		child.kill("SIGTERM");
-		await exited;
+		let timer: NodeJS.Timeout | undefined;
+		const late = new Promise<boolean>((done) => { timer = setTimeout(() => done(true), 5_000); });
+		if (await Promise.race([exited.then(() => false), late])) {
+			child.kill("SIGKILL");
+			await exited;
+		}
+		clearTimeout(timer);
 	});
 	const screen = () => stripTerminal(raw);
 	const press = async (keys: string, until: (drawn: string) => boolean, what: string) => {

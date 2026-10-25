@@ -23,7 +23,7 @@ checkout is refused as a home (single-project mode was removed).
 ```bash
 npm run typecheck
 npm test                                        # everything, mock-backed: no tokens, no network
-npm run test:one -- tests/answer-card-retained.test.ts   # one file, same hermetic preload
+npm run test:one -- tests/run-artifacts-retained.test.ts   # one file, same hermetic preload
 npm run e2e:phase1                              # worker lifecycle
 npm run e2e:phase2                              # dispatch → envelope → promote → teardown
 npm run e2e:phase3                              # pipeline: research → gate → checkpoint → implement
