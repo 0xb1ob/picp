@@ -201,7 +201,6 @@
 	"tests/push-sweep.test.ts": 405,
 	"tests/push-tick.test.ts": 184,
 	"tests/push-webpush.test.ts": 11,
-	"tests/quality.test.ts": 4436,
 	"tests/questions.test.ts": 107,
 	"tests/relay-preflight.test.ts": 1320,
 	"tests/repo-map.test.ts": 891,
