@@ -54,11 +54,12 @@ test(name, { timeout: 300_000 }, async (t) => {
 	await waitFor(() => new CiWatchStore({ home: held.home.path }).job(JOB)?.last_checked_at, Boolean,
 		{ timeoutMs: 30_000, what: "initial running-CI observation finishes" });
 	const before = queries().length;
-	// late: three 24 s gate reads outlast the 60 s recheck bound, yet each fits the 30 s Actions CI budget.
-	writeFileSync(held.stateFile, mode === "late" ? "green:24000\n" : "green:12000\n");
+	// late: three gate reads of 2 x 11 s (runs + jobs, each under the 12 s per-call cap) outlast the 60 s recheck
+	// bound, yet each fits the 30 s Actions CI budget.
+	writeFileSync(held.stateFile, mode === "late" ? "green:11000\n" : "green:6000\n");
 	await waitFor(queries, (calls) => calls.slice(before).some((call) => call.state === "green"),
 		{ timeoutMs: mode === "late" ? 70_000 : 10_000, what: "watch captures green before subsequent gate faults" });
-	if (mode === "failure") writeFileSync(held.stateFile, "broken:12000\n");
+	if (mode === "failure") writeFileSync(held.stateFile, "broken:6000\n");
 	if (mode !== "late") {
 		await child.prompt("Review this held diff and handle its actual wake-ups.");
 		await waitFor(queries, (calls) => calls.length >= before + 3,
@@ -128,7 +129,7 @@ for (const mode of ["unreviewed", "wrong-head", "missing-head"] as const) await 
 	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); held.repo.cleanup(); held.home.cleanup(); });
 	await waitFor(() => new CiWatchStore({ home: held.home.path }).job(JOB)?.last_checked_at, Boolean,
 		{ timeoutMs: 30_000, what: "initial CI observation completes" });
-	writeFileSync(held.stateFile, "green:12000\n");
+	writeFileSync(held.stateFile, "green:6000\n");
 	await waitFor(() => readFileSync(`${held.ghLog}.states`, "utf8"), (states) => states.includes('"state":"green"'),
 		{ timeoutMs: 10_000, what: "watch captures a real green fact before the branch or runs change" });
 	if (mode === "wrong-head") writeFileSync(held.stateFile, "wrong-head\n");

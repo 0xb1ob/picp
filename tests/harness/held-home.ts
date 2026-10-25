@@ -53,6 +53,8 @@ if (args[0] === "api" && (args[1] || "").includes("/actions/runs?head_sha=")) {
   process.exit(0);
 }
 if (args[0] === "api" && (args[1] || "").includes("/jobs?")) {
+  const delay = Number(readFileSync(${JSON.stringify(stateFile)}, "utf8").trim().split(":")[1]);
+  if (delay) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
   process.stdout.write(JSON.stringify({ total_count: 0, jobs: [] }));
   process.exit(0);
 }

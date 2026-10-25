@@ -8,7 +8,7 @@ import type { CommandRunner as StatusRunner } from "./merges.ts";
 
 /** Total budget for one observation (every page of runs and jobs); a time budget, not a GitHub call quota. */
 export const ACTIONS_CI_TIMEOUT_MS = 30_000;
-/** One jobs-page `gh` call's own cap: a hung call must not spend the whole budget and leave no room to retry (#420). */
+/** Every `gh` call's own cap (runs and jobs): a hung call must not spend the whole budget and leave no retry (#420). */
 export const ACTIONS_ATTEMPT_TIMEOUT_MS = 12_000;
 export const ACTIONS_PER_PAGE = 100;
 export const ACTIONS_MAX_PAGES = 10;
@@ -252,6 +252,9 @@ async function observe<T>(options: ActionsReadOptions, read: (budget: Budget) =>
 	}
 }
 
+/** How long past its cap a gh call may stay unsettled before the read stops waiting and the child is SIGKILLed. */
+export const ACTIONS_OVERRUN_GRACE_MS = 1_000;
+
 /** Pauses before each retry of a transient read; the sum stays well inside one tick's budget. */
 export const ACTIONS_RETRY_DELAYS_MS = [250, 750];
 
@@ -301,11 +304,21 @@ async function get(options: ActionsReadOptions, budget: Budget, endpoint: string
 	for (let tries = 0; ; tries++) {
 		const remaining = budget.deadline - budget.now();
 		if (remaining <= 0) throw new ActionsCiError("deadline", endpoint, "observation budget spent");
-		const cap = /\/attempts\//.test(endpoint) ? Math.min(remaining, ACTIONS_ATTEMPT_TIMEOUT_MS) : remaining;
+		const cap = Math.min(remaining, ACTIONS_ATTEMPT_TIMEOUT_MS);
 		const [started, mono] = [budget.now(), performance.now()];
 		const inFlight = `+${started - budget.start}ms ${endpoint} cap ${cap}ms in flight`;
 		budget.pending.add(inFlight);
-		const result = await attempt(options, endpoint, cap).finally(() => budget.pending.delete(inFlight));
+		let overrun: ReturnType<typeof setTimeout> | undefined;
+		// A runner whose call never settles (a child that outlives its kill) must not hang the observation.
+		const result = await Promise.race([
+			attempt(options, endpoint, cap),
+			new Promise<{ fault: ActionsCiError; retry: boolean; exit: string }>((resolve) => {
+				overrun = setTimeout(() => resolve({ fault: new ActionsCiError("transport", endpoint, `gh call unsettled ${ACTIONS_OVERRUN_GRACE_MS}ms past its ${cap}ms cap`), retry: true, exit: "unsettled" }), cap + ACTIONS_OVERRUN_GRACE_MS);
+			}),
+		]).finally(() => {
+			clearTimeout(overrun);
+			budget.pending.delete(inFlight);
+		});
 		// Wall vs monotonic time tells a late callback (event-loop stall) from a wall-clock step.
 		const took = `${budget.now() - started}ms (monotonic ${Math.round(performance.now() - mono)}ms)`;
 		budget.calls.push(`+${started - budget.start}ms ${endpoint} ${took} cap ${cap}ms ${typeof result === "string" ? "exit 0" : `${result.exit} ${result.fault.category}`}`);

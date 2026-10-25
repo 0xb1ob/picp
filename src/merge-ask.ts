@@ -104,7 +104,7 @@
 import { execFile } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ACTIONS_CI_TIMEOUT_MS, readActionsCi } from "./actions-ci.ts";
+import { ACTIONS_CI_TIMEOUT_MS, ACTIONS_OVERRUN_GRACE_MS, readActionsCi } from "./actions-ci.ts";
 import type { CiConfiguredState } from "./ci-configured.ts";
 import {
 	AWAITING_DECISION_MAX_CHARS,
@@ -649,11 +649,12 @@ export type CommandRunner = (
 
 export const runCommand: CommandRunner = (command, args, options) =>
 	new Promise<string>((resolve, reject) => {
-		execFile(
+		const child = execFile(
 			command,
 			[...args],
 			{ cwd: options.cwd, timeout: options.timeoutMs, maxBuffer: 4 * 1024 * 1024 },
 			(error, stdout, stderr) => {
+				clearTimeout(hardKill);
 				if (error) {
 					// stdout rides along so a CI read can name the body it got (src/actions-ci.ts bounds and redacts it).
 					const message = `${command} ${args.join(" ")} failed: ${(stderr || (error as Error).message).trim().slice(0, 200)}`;
@@ -664,6 +665,8 @@ export const runCommand: CommandRunner = (command, args, options) =>
 				resolve(stdout.toString());
 			},
 		);
+		// A child that ignores the SIGTERM sent at its timeout is SIGKILLed one grace later.
+		const hardKill = options.timeoutMs > 0 ? setTimeout(() => child.kill("SIGKILL"), options.timeoutMs + ACTIONS_OVERRUN_GRACE_MS) : undefined;
 	});
 
 /** Default timeout for the one CI query. A gate must never hang a render. */
