@@ -17,11 +17,14 @@ test("P9-session-log: cp_parent records only absolute .jsonl operator files, onc
 	const provider = await MockProvider.start();
 	const parentModel = provider.addScript("p9-record-parent", [{ kind: "text", text: "Ready." }], { onExhausted: "repeat" });
 	const agent = createAgentDir({ provider });
+	t.after(async () => { await stopParentHosts(home.path); agent.cleanup(); await provider.stop(); home.cleanup(); });
 	const previous = process.env.PI_HOME;
 	process.env.PI_HOME = agent.path;
-	saveOperatorTarget({ home: home.path, mode: "multi", hostPid: 0, parentPid: 0 });
-	if (previous === undefined) delete process.env.PI_HOME; else process.env.PI_HOME = previous;
-	t.after(async () => { await stopParentHosts(home.path); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	try {
+		saveOperatorTarget({ home: home.path, mode: "multi", hostPid: 0, parentPid: 0 });
+	} finally {
+		if (previous === undefined) delete process.env.PI_HOME; else process.env.PI_HOME = previous;
+	}
 	const state = join(home.path, LAYOUT.state);
 	const record = operatorSessionsFile(join(state, "sessions"));
 	const lines = () => readFileSync(record, "utf8").split("\n").filter(Boolean);
