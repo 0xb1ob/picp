@@ -58,7 +58,7 @@ function ledgerFiles(manifest: string): string[] {
 }
 
 const PATCH_RE = /<!-- patch:([\w-]+) -->\n```diff\n([\s\S]*?)\n```/g;
-const LEDGER_TABLES = ["prs", "scenarios", "assertions", "regressions", "incoming", "feature-removed", "baseline"];
+const LEDGER_TABLES = ["ledger", "prs", "scenarios", "assertions", "regressions", "incoming", "feature-removed", "baseline"];
 
 /** Rows and prose/log lines of the `before` docs each appear once, byte-identical, in `after`; patch blocks may go. */
 export function preservationFindings(before: readonly string[], after: readonly string[]): string[] {
@@ -142,6 +142,19 @@ export function retainedFindings(path: string, assertion: string, note: string, 
 	return [`${path}: "${assertion}" is retained but its note names no kept test file in the tree (got ${kept.join(", ") || "none"})`];
 }
 
+/** PR ledger rows: only in slice files, one per PR, `PR | Scope | Baseline files deleted` or a legacy 5-cell row. */
+export function ledgerFindings(manifestRows: readonly string[][], sliceRows: readonly string[][]): string[] {
+	const findings = manifestRows.map(([pr = ""]) => `PR ledger ${pr}: belongs in its own slice file, not the shared manifest`);
+	const seen = new Set<string>();
+	for (const cells of [...manifestRows, ...sliceRows]) {
+		const [pr = ""] = cells;
+		if (seen.has(pr)) findings.push(`PR ledger ${pr}: more than one row`);
+		seen.add(pr);
+		if (!pr || (cells.length !== 3 && cells.length !== 5)) findings.push(`PR ledger ${pr}: ${cells.length} cells, expected PR | Scope | Baseline files deleted`);
+	}
+	return findings;
+}
+
 /**
  * Lost declarations in kept files: each `feature-removed` row names a title present at the baseline, absent from the
  * tree, and the removing PR/job; a file's net loss must be covered by that many rows.
@@ -207,6 +220,7 @@ function main(): number {
 		if (!/^\d\d$/.test(behavior) || !target.startsWith("tests/e2e/")) findings.push(`${pr}: needs a behavior id and a tests/e2e/ target`);
 		prs.set(pr, { behavior, target, cases });
 	}
+	findings.push(...ledgerFindings(rows(section([doc], "ledger", findings)), rows(section(docs.slice(1), "ledger", findings))));
 
 	const disposition = new Map<string, { kind: string; owner: string; evidence: string }>();
 	for (const [path = "", kind = "", owner = "", evidence = ""] of rows(section(docs, "baseline", findings))) {
