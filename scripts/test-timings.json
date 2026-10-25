@@ -238,7 +238,6 @@
 	"tests/schedule-self-review.test.ts": 529,
 	"tests/schedule-wake.test.ts": 181,
 	"tests/scheduler.test.ts": 440,
-	"tests/send.test.ts": 19093,
 	"tests/service-alerts.test.ts": 45,
 	"tests/service-health.test.ts": 180,
 	"tests/service-install.test.ts": 4505,

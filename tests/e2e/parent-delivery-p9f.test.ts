@@ -12,6 +12,7 @@ import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider
 
 type Row = Record<string, unknown>;
 const RESUME = /previous turn failed/;
+const envSnapshots = new WeakMap<TestContext, NodeJS.ProcessEnv>();
 
 async function fixture(t: TestContext, steps: ScriptStep[], name: string, settings: Record<string, unknown> = {}) {
 	const home = createScratchHome();
@@ -19,7 +20,8 @@ async function fixture(t: TestContext, steps: ScriptStep[], name: string, settin
 	const provider = await MockProvider.start();
 	const model = provider.addScript(name, steps, { onExhausted: "repeat" });
 	const agent = createAgentDir({ provider, settings: { compaction: { enabled: false }, retry: { enabled: false }, ...settings } });
-	const previous = { ...process.env };
+	// One snapshot per test: a second fixture in the same test must not capture the first one's agent env.
+	const previous = envSnapshots.get(t) ?? envSnapshots.set(t, { ...process.env }).get(t)!;
 	Object.assign(process.env, agent.env);
 	const bridges: CpBridge[] = [];
 	const relays: BridgeRelay[] = [];
