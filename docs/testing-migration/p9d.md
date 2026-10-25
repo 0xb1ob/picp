@@ -1,5 +1,11 @@
 # Ledger rows: p9d
 
+<!-- manifest:ledger -->
+| PR | Scope | Baseline files deleted |
+|---|---|---|
+| P9d (cp-e2e-migration-p9d-ke34) | behavior 11, fourth slice: dashboard sends through the real cp-bridge (paired-device provenance, image and file attachments), the viewer's pending sends and operator threads in `tests/e2e/operator-dashboard.test.ts`; 30 mapped, 1 redundant-unreachable, 4 retained verbatim plus three guard halves in two `*-retained.test.ts` files; [ledger and controls](testing-migration/p9d.md). Behavior-11 files outside #510, #515, #519 and this slice stay `convert` / P9 | 5 (`tests/control-pending.test.ts`, `tests/dashboard-control-remote.test.ts`, `tests/dashboard-control-images.test.ts`, `tests/operator-threads-bridge.test.ts`, `tests/operator-threads-journal.test.ts`) |
+<!-- /manifest:ledger -->
+
 Behavior 11, fourth slice: the dashboard's sends as the real cp-bridge hands them to a mock-model operator session
 (paired-device provenance, attachments), the viewer's pending-send projection, and operator threads (cp_parent filing,
 the viewer's thread list). Each control was applied alone to `src/` or `extensions/`, failed on the named assertion, and

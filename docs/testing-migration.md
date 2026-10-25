@@ -6,7 +6,7 @@ negative control (the old defect patched back fails the e2e, the fix passes it).
 validates this file and the per-slice ledger against git; it imports no production code.
 
 The ledger rows are moving out of this file, one file per slice, into `docs/testing-migration/<slice>.md`: that
-slice's rows of the seven `manifest:*` tables. The checker reads this file and every
+slice's rows of the eight `manifest:*` tables. The checker reads this file and every
 slice file as one union, so duplicate ids and the baseline counts are checked across both. A new slice adds its own
 file. `node scripts/split-migration-ledger.ts --list | <slice...>` moves rows mechanically; never hand-move them.
 
@@ -57,61 +57,31 @@ ask-0088e0332d00, 2026-10-21.
 
 ## PR ledger
 
-| PR | Scope | Baseline files deleted | Files (tree) | Static declarations (tree) |
-|---|---|---|---|---|
-| P0 (cp-e2e-migration-p0-pilot-xp6x) | behavior 01; this manifest; the check script | 1 (`tests/ci-run-ref.test.ts`) | 400 → 400 | 4,488 → 4,487 |
-| P1 (cp-e2e-migration-p1-policy-census-gtep) | policy texts; every baseline disposition; per-PR census | 0 | 400 → 400 | 4,497 → 4,497 |
-| P2 (cp-e2e-migration-p2-tyir) | behavior 02, first slice: `tests/e2e/authority.test.ts`. P2 is a first slice; the remaining 12 behavior-02 files belong to P2b (cp-e2e-migration-p2b-3e1w); send-first-gate moves to behavior 06 / P4. | 1 (`tests/budgets.test.ts`) | 398 → 398 | 4,464 → 4,466 |
-| P2b (cp-e2e-migration-p2b-3e1w) | behavior 02, second slice: held-job cap counting and ops jobs (02-5, 02-6) in `tests/e2e/authority.test.ts`. The other 11 behavior-02 files move to P2c (job to be created by the main session). | 1 (`tests/ops-jobs.test.ts`) | 398 → 397 | 4,467 → 4,465 |
-| P2c (cp-e2e-migration-p2c-wtsd) | behavior 02, third slice: keyword risk inference (02-7), mandate defaults and the issue ladder (02-8), and the P2b review's two lows (NC-11; 02-5 raises through `cp_mandate raise_tokens`). The other 9 behavior-02 files move to P2d (8) and P2e (`tests/mandate.test.ts`). | 2 (`tests/risk-negation.test.ts`, `tests/mandate-defaults.test.ts`) | 394 → 392 | 4,415 → 4,393 |
-| P2d (cp-e2e-migration-p2d-k5to) | behavior 02, fourth slice: the risk warning (02-9), risk:high pre-approval (02-10), batch risk:high (02-11), grant selection and supplements (02-12), live mandate usage (02-13) and the gateway's capacity and quota (02-14), and the P2c review's two lows. `tests/mandate.test.ts` stays with P2e. | 8 (`tests/capacity.test.ts`, `tests/mandate-selection.test.ts`, `tests/mandate-supplement.test.ts`, `tests/mandate-usage.test.ts`, `tests/quota.test.ts`, `tests/risk-batch.test.ts`, `tests/risk-preapproval.test.ts`, `tests/risk-warning.test.ts`) | 392 → 384 | 4,393 → 4,346 |
-| P2e (cp-e2e-migration-p2e-fmi5) | behavior 02, last slice: a pipeline's mandate-decided plan checkpoint (02-15), cp_mandate and cp_escalate through a real parent (02-16), and in-flight continuation under expired, revoked, serial and capped grants (02-17); the P2d review's three findings. No behavior-02 file remains; send-first-gate belongs to P4. | 1 (`tests/mandate.test.ts`) | 384 → 383 | 4,346 → 4,295 |
-| P3 (cp-e2e-migration-p3-rhym) | behavior 05, first slice: the Actions CI read behind cp_integrate, the CI watch and `/status` (05-1), the no-CI workflows question (05-2), `/doctor` `ci.<project>` (05-3) and the one infra-only rerun (05-4) in `tests/e2e/landing.test.ts`; the P2e review's three findings. The other 26 behavior-05 files stay `convert`, for P3b (a job the main session creates). | 4 (`tests/actions-ci.test.ts`, `tests/ci-access.test.ts`, `tests/ci-configured.test.ts`, `tests/ci-infra-rerun.test.ts`) | 385 → 382 | 4,300 → 4,287 |
-| P3b (cp-e2e-migration-p3b-stth) | behavior 05, second slice: merge receipts and landing proof in `tests/e2e/landing.test.ts`: cp_merged through `gh` with the after-merge deploy job (05-5), cp_merged against a local https GitLab (05-6), and cp_teardown's git-only landing proof (05-7). The other 23 behavior-05 files stay `convert` (owner P3), for P3c (a job the main session cuts). | 3 (`tests/after-merge.test.ts`, `tests/landing-proof.test.ts`, `tests/merges.test.ts`) | 382 → 379 | 4,287 → 4,272 |
-| P3c (cp-e2e-migration-p3c-l5fc) | Approved partial delivery (ask-c77a4f32b23b). [Per-file accounting](testing-migration-p3c-declarations.md): 13/143 declarations mapped, 2 retained, 128 pending. Five unfinished files are convert-owned by P3c-rest for follow-on slices. | 2 files deleted (ci-evidence, parked-ci); 8 declarations removed; timer rename earns zero deletion credit | 379 + 1 incoming → 378 | 4,272 + 4 incoming → 4,274 |
-| P3c-rest main-ci (cp-e2e-slice-main-ci-41d3) | Whole-file retirement: 39 = 32 mapped + 7 retained (17.95%), 0 pending; mixed declarations retain only unreachable assertions. Controls and entry-point map: docs/testing-migration-main-ci-declarations.md. Collector waived. | 1 (`tests/main-ci.test.ts`) | 378 → 378 (one retained replacement) | 4,281 → 4,253 (32 units removed, 4 e2e declarations added) |
-| S02 (cp-e2e-slice-s02-l7ph) | behavior 05; `tests/ci-watch.test.ts` declarations 1–40: 36 mapped, 4 mixed/unreachable and kept in place; five added e2e declarations, 05-8 extended. S03 owns 41–80 and whole-file retirement. | 0 (split-file bookkeeping: all units stay) | 378 → 378 | 4,274 → 4,279 |
-| S03 / S03b (cp-e2e-slice-s03-r5f7 / cp-e2e-slice-s03b-pntl) | Historical split delivery; declaration 71 was deferred to S10b. S10b now maps 71, retains synchronous callback contract 70, and retires the original. [Decision/evidence](testing-migration-s03-declarations.md), [controls](testing-migration-s03b-controls.md). | At slice delivery: 1 retained file, 0 originals retired | retained copies added 4 declarations | superseded by S10b retirement below |
-| S07 (cp-e2e-slice-s07-eaux) | P3c-rest behavior 05: only integrate-held-ci; 3 mapped, 0 retained, 1 deleted file; extends 05-13 and adds 05-S07; all other slices retain their ownership | 1 (`tests/integrate-held-ci.test.ts`) | 378 → 377 | 4,274 → 4,272 (3 removed, 1 added) |
-| S04 (cp-e2e-slice-s04-vep1) | behavior 05; original `tests/diff-review.test.ts` declarations 1–40. [Declaration accounting](testing-migration-s04-declarations.md): 38 mapped, 2 retained, 0 pending in S04; S05 owns 41–55 and whole-file retirement. | 0; baseline intentionally kept whole | +1 incoming e2e file | 55 source declarations unchanged; +13 e2e scenarios |
-| S05 (cp-e2e-slice-s05-mzpm) | behavior 05; declarations 41–55 and final retirement of `tests/diff-review.test.ts`. [S05 accounting and controls](testing-migration-s05-declarations.md): 15 mapped; whole file 53 mapped, 2 retained declarations plus the split unknown-job guard. | 1 original file retired; retained replacement is not deletion credit | +1 retained file (convert-owned P3c-rest), 3 tests; +7 e2e scenarios | -55 original declarations, +3 retained, +7 e2e = -45 net declarations |
-| S06 (cp-e2e-slice-s06-15yh) | All four whole files accounted for: 40 declarations, 24 mapped and 16 retained; six new landing consumer cases. | 4 | unchanged (four source files replaced by four retained files) | 40 source declarations → 16 retained + 6 new e2e cases |
-| S08 (cp-e2e-slice-s08-9p6d) | behavior 05; `tests/integrate.test.ts` static declarations 1–40: 38 mapped, 2 retained mixed declarations; [range accounting](testing-migration-s08.md); nine added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,290 → 4,299 (+9 e2e) |
-| S15 (cp-e2e-slice-s15-764h) | behavior 05; whole-file review-context, review-merge-window, review-runs and review-tool; [declaration accounting](testing-migration-s15.md); 38 closed: 32 mapped, 6 retained (15.8%); 2 whole files deleted, 2 moved to retained subsets | 2 deleted; 2 moved-retained (no deletion credit) | 378 → 376 (on merged base); slice sources 4 → 2 | 4,204 → 4,185; slice 38 → 6 retained + 13 added consumer declarations |
-| S14 (cp-e2e-slice-s14-zm4e) | behavior 05; [declaration accounting and executed controls](testing-migration-s14.md): 30 mapped, 3 retained verbatim with unreachable-input evidence, 0 pending | 4 original paths retired (3 mixed moved/split) | +3 retained files | +6 e2e declarations |
-| S09 (cp-e2e-slice-s09-wznx) | behavior 05; `tests/integrate.test.ts` static declarations 41–80: 34 mapped, 6 retained mixed/internal declarations; [range accounting](testing-migration-s09.md); eight added landing declarations; later ranges keep their ownership | 0; the entire unit file stays unchanged | 378 → 378 | 4,282 → 4,290 (+8 e2e, after S06 merge) |
-| S10 (cp-e2e-slice-s10-4dzb) | behavior 05; integrate 81–120: S10b resolves 92, yielding 39 mapped and 1 retained mixed declaration; [range ledger](testing-migration-s10.md) | 0; original stays for S11 | unchanged | +6 e2e declarations |
-| S10b (cp-e2e-slice-s10b-ti6s) | [Final mapping and controls](testing-migration/s10b.md): watcher 75 mapped/5 retained/0 pending; integrate 92 mapped, 104 narrowed; S24 retained contracts assessed. Integrate remains for S11. | 1 original retired: tests/ci-watch.test.ts | -1; existing retained file preserved | 80 original declarations removed; five contracts preserved in retained file; no integrate declarations removed |
-| S20 (cp-e2e-slice-s20-8nn3) | behavior 06; complete: 25 mapped/13 retained/0 pending across all 38 declarations; [final assertion accounting](testing-migration-s20.md); 47 executed production controls | 1 fully mapped file deleted; 3 mixed paths replaced by retained files, without deletion credit | 3 e2e consumer files; delivery shared with S19/S21 and lifecycle shared with S19; net 0 test files against merged base; existing held-home fixture shared with S19 | -38 original +13 retained +22 static e2e = -3 net declarations (24 e2e runtime cases) |
-| S21 (cp-e2e-slice-s21-5gtl) | behavior 06; [declaration map and replayed controls](testing-migration-s21.md): 15 mapped, 7 retained/moved verbatim, 0 pending | 1 original path retired; mixed retained replacement is not deletion credit | +1 net file: +1 e2e, +1 retained, -1 source | -22 source, +7 retained, +9 e2e = -6 net declarations |
-| S16 (cp-e2e-slice-s16-koqy) | behavior 05; reviewer-model whole file: 3 mapped, 0 retained, 1 deleted file; [declaration accounting](testing-migration-s16.md); other slices retain their ownership | 1 | 378 → 378 | 4,204 → 4,203 (3 removed, 2 added) |
-| S19 (cp-e2e-slice-s19-jiwz) | behavior 06; [declaration evidence](testing-migration-s19.md); 28 mapped, 9 retained, 0 pending across all 37 declarations in five original files; 11 static e2e declarations | 5 original paths removed; 9 declarations retained/moved verbatim in 3 replacements earn no deletion credit | 379 → 381 (original: origin/main 695a8528 → pre-merge S19 3c6568f); 384 → 384 (wrapper split: 56ca846 → split tree) | 4,205 → 4,188 (original); 4,186 → 4,186 (wrapper split; measured static declarations) |
-| S30 (cp-migration-s30-dispatch-retirement-2w3m) | [Dispatch retirement evidence](testing-migration/s30.md); S29 1–40 plus S30 41–53: 49 mapped/4 retained/0 pending; 107 pre-retirement control pairs | 1 original path retired; 0 fully-deleted-file credit (mixed retained replacement) | +3 incoming, −1 original = +2 files | −53 original +12 static consumer +4 verbatim retained = −37 static declarations; 21 new focused runtime results |
-| P4 (cp-e2e-migration-p4-4mk3) | behavior 06, closing: S19–S23 had already retired its baseline files; P4 converts its two convert-owned incoming files. 4 mapped (recovery-notice-bound 1; wakeup-journal-retained declarations 2, 16 and 7's phrase), 0 retained added; [ledger and controls](testing-migration/p4.md) | 0 baseline; 1 incoming (`tests/recovery-notice-bound.test.ts`) | 425 → 424 | 3,985 → 3,982 (S21-restart and m2 extended in place, no new declarations) |
-| S11b (cp-xwu0) | behavior 05; retires `tests/integrate.test.ts`: all 144 declarations accounted for, 132 mapped to the S08–S11 landing consumers and 12 retained verbatim in the existing `tests/integrate-retained.test.ts`; [S11b ledger](testing-migration/s11b.md) | 1 (`tests/integrate.test.ts`) | −1 | −144 |
-| S27 follow-up (cp-migration-followups-5700) | behavior 08; after #509 the S27 restart route maps to S27-viewer-route (control S27-rpc-shutdown); relaunchPorts stays retained (no entry reaches its whenIdle deferral); both S27 `*-retained.test.ts` files keep only their retained declarations; [S27 ledger](testing-migration/s27.md) | 0 | 0 | −8 (retained copies of five mapped relaunch and three mapped viewer declarations removed) |
-| P8 (cp-e2e-migration-p8-g896) | behavior 04, first slice: outer provider retry, model-call failure, continue_failed and repeated bound wake-ups (04-1..04-5) in `tests/e2e/worker-recovery.test.ts`; [ledger and controls](testing-migration/p8.md): 11 mapped, 2 retained verbatim in two `*-retained.test.ts` files; the other 16 behavior-04 files belong to cp-e2e-migration-p8b-dbbn | 3 (`tests/provider-retry.test.ts`, `tests/model-call-failure-recovery.test.ts`, `tests/failure-announcer.test.ts`) | 422 → 422 | 3,822 → 3,817 (12 removed, 5 e2e + 2 retained added) |
-| P10c (cp-e2e-migration-p10c-u1pm) | behavior 09, third slice: cp_status_block's Awaiting-you rows (P10c-rows) and the inherited answered decision (answered-restart moved under tests/e2e/). 10 mapped, 1 retained verbatim, operator-decide-vs-ask-evals `retained` (no production caller); [ledger and controls](testing-migration/p10c.md). The 7 behavior-09 files outside #511, #514 and this slice stay `convert` / P10 | 2 (`tests/answered-restart.test.ts`, `tests/awaiting-rows.test.ts`) | 422 → 423 | 3,817 → 3,810 |
-| P9c (cp-e2e-migration-p9c-bqj7) | behavior 11, command output and operator session record slice: `tests/output.test.ts` through a real pi TUI on a pty, RPC and `pi -p` (P9-output-tui, P9-output-headless); `tests/operator-session-log.test.ts` through real cp-bridge `cp_parent` calls and the viewer (P9-session-log). 14 assertions mapped, 0 retained; [ledger and controls](testing-migration/p9.md) NC-P9c-01..17 | 2 (`tests/output.test.ts`, `tests/operator-session-log.test.ts`) | 423 → 423 | 3,812 → 3,808 (base: P10c's 3,810 plus #517's two checker tests; 7 removed, 3 e2e added) |
-| P9d (cp-e2e-migration-p9d-ke34) | behavior 11, fourth slice: dashboard sends through the real cp-bridge (paired-device provenance, image and file attachments), the viewer's pending sends and operator threads in `tests/e2e/operator-dashboard.test.ts`; 30 mapped, 1 redundant-unreachable, 4 retained verbatim plus three guard halves in two `*-retained.test.ts` files; [ledger and controls](testing-migration/p9d.md). Behavior-11 files outside #510, #515, #519 and this slice stay `convert` / P9 | 5 (`tests/control-pending.test.ts`, `tests/dashboard-control-remote.test.ts`, `tests/dashboard-control-images.test.ts`, `tests/operator-threads-bridge.test.ts`, `tests/operator-threads-journal.test.ts`) | −2 | −22 (36 removed; 7 e2e and 7 retained added) |
+Each PR's ledger row lives only in its own slice file, `docs/testing-migration/<slice>.md`, under this section's
+header; the checker refuses a row here and a second row for the same PR. Record no running totals: the checker computes
+and prints the baseline's and the live tree's file and declaration counts on every run. Older rows keep their recorded
+`Files (tree)` and `Static declarations (tree)` cells as history. A new e2e file needs no `scripts/test-timings.json`
+entry: `npm run check:shards` weighs an untimed file at the table's median.
 
-S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
-V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
-`src/foreign-ci-watch.ts`, with no gained or lost lines (source SHA-256
-`2ccacd9909526f0cf24520f979996baf78f6ccfc560a31700ffdbcd050200276`). Captures and the comparison command
-live in the S06 artifact directory. Comparing the direct unit capture to e2e gives nine apparent lost lines,
+<!-- manifest:ledger -->
+| PR | Scope | Baseline files deleted |
+|---|---|---|
+<!-- /manifest:ledger -->
+
+S06 foreign-watch proof: V8 e2e-only captures on both sides of deletion each include nine product processes and
+cover 338 lines of `src/foreign-ci-watch.ts`, with no gained or lost lines. Comparing the direct unit capture to e2e
+gives nine apparent lost lines,
 373–381, all in `formatForeignCiNotice`: pi transforms extension imports, so raw child V8 offsets alone do not
 prove source-mapped coverage of that formatter. S06-1 instead pins its actual operator RPC/UI notice: the foreign
 PR URL, green head, and evidence-only disclaimer. The retained test covers static import/port inspection.
 S06-timeout and S06-moved are semantic mutations run against the real entry-point scenarios; both fail their
 named assertions and the fixed 15-case file passes without skips before and after deleting the source file.
 
-S06 forge-runtime proof: original blob `042537e3e52c67ad40c2feaa63f0a5f1c4ebcdac`; the three retained
-regression bodies are unchanged. E2e-only V8 captures before/after retirement each include nine product
-processes and cover 94 lines of `src/forge-runtime.ts`, with no lost or gained lines (SHA-256
-`f7025eb885c798fb40b3f815ba62583213ca8209585f10d236ea9b4a53030017`). The fixed landing file passes
+S06 forge-runtime proof: the three retained regression bodies are unchanged. E2e-only V8 captures before/after
+retirement each include nine product processes and cover 94 lines of `src/forge-runtime.ts`, with no lost or gained
+lines. The fixed landing file passes
 17/17 without skips; the retained file passes 3/3. Legacy-fallback and configured-trunk controls fail the
-actual merge recording and teardown outcome, respectively. Patch blocks use zero context (`git apply --unidiff-zero`).
+actual merge recording and teardown outcome, respectively.
 
 S02 follows the operator's split-file amendment: a range slice adds consumer evidence without removing or moving any
 unit declaration. At S02 delivery, `tests/ci-watch.test.ts` remained 80 static declarations / 89 executed cases.
@@ -336,58 +306,15 @@ M4–M6 use `npm run test:one -- --test-name-pattern='cp_merged reads a GitLab' 
 L1 uses `npm run test:one -- --test-name-pattern='cp_teardown passes a deleted branch' tests/e2e/landing-forge-ci.test.ts`.
 Every run exited 1 with one failing case and no skips; failures below are observed output, not predictions.
 
-| Control | Observed failure |
-|---|---|
-| M1 | receipt tuple: actual `head_branch_deleted: false`, expected `true` |
-| M2 | `AssertionError: force stays the exit for the unprovable case`; expected `/cp_teardown <job> force/` |
-| M3 | expected `/carries no PR receipt/`, actual `could not read PR 77` |
-| M4 | MR 7 receipt tuple: actual `unknown`, expected `squash` |
-| M5 | receipt repair tuple: actual `[false,false,'open',1]`, expected `[false,true,'merged',1]` |
-| M6 | expected `/could not read PR .*\(mismatch: /`, actual `merged but names no merge commit` |
-| L1 | `post-squash extra commit remains unlanded`: actual `[true,undefined]` (`landed_by_git`), expected `[false,'unpushed']` |
-
-M1 (`src/merges.ts`):
-```diff
-@@ -279,1 +279,1 @@
--			...(onRemote === undefined ? {} : { head_branch_deleted: !onRemote }),
-+			...(onRemote === undefined ? {} : { head_branch_deleted: onRemote }),
-```
-M2 (`src/merges.ts`):
-```diff
-@@ -208,1 +208,1 @@
--					`cp_teardown ${jobId} can still pass on git evidence when the work is in the base's history; only if neither can prove it, cp_teardown ${jobId} force — which proves nothing, and records that.`,
-+					`cp_teardown ${jobId} can still pass on git evidence when the work is in the base's history.`,
-```
-M3 (`src/merges.ts`):
-```diff
-@@ -193,1 +193,1 @@
--		const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts);
-+		const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts) || "77";
-```
-M4 (`src/merges.ts`):
-```diff
-@@ -268,1 +268,1 @@
--		const strategy = request.strategy ?? (view.provider === "gitlab" ? (view.squash_commit_sha ? "squash" : "unknown") : undefined);
-+		const strategy = request.strategy ?? (view.provider === "gitlab" ? "unknown" : undefined);
-```
-M5 (`src/merges.ts`):
-```diff
-@@ -190,1 +190,1 @@
--			return { receipt: existing, recorded: false, receipt_status_updated: await this.#markReceiptMerged(jobId, existing) };
-+			return { receipt: existing, recorded: false, receipt_status_updated: false };
-```
-M6 (`src/forges/gitlab.ts`):
-```diff
-@@ -148,1 +148,1 @@
--	if (!web || web.number !== iid || !changeRequestBelongsTo(web, repository)) return refuse("mismatch", "response web_url is not this project's merge request");
-+	if (false && (!web || web.number !== iid || !changeRequestBelongsTo(web, repository))) return refuse("mismatch", "response web_url is not this project's merge request");
-```
-L1 (`src/landing-proof.ts`):
-```diff
-@@ -147,1 +147,1 @@
--		const paths = (await run(["diff", "--name-only", "-z", ...DIFF, fork, head])).stdout.split("\0").filter(Boolean);
-+		const paths = (await run(["diff", "--name-only", "-z", ...DIFF, fork, `${head}^`])).stdout.split("\0").filter(Boolean);
-```
+| Control | Bug patched back | Observed failure |
+|---|---|---|
+| M1 | `src/merges.ts` records `head_branch_deleted` as the remote branch's presence, not its absence | receipt tuple: actual `head_branch_deleted: false`, expected `true` |
+| M2 | `src/merges.ts` drops the `cp_teardown <job> force` fallback advice from the unprovable refusal | `AssertionError: force stays the exit for the unprovable case`; expected `/cp_teardown <job> force/` |
+| M3 | `src/merges.ts`: a missing PR defaults to 77 | expected `/carries no PR receipt/`, actual `could not read PR 77` |
+| M4 | `src/merges.ts` records every GitLab merge strategy as unknown, never inferring squash | MR 7 receipt tuple: actual `unknown`, expected `squash` |
+| M5 | `src/merges.ts` never marks an existing receipt merged when repairing it | receipt repair tuple: actual `[false,false,'open',1]`, expected `[false,true,'merged',1]` |
+| M6 | `src/forges/gitlab.ts` skips the web_url same-project merge request check | expected `/could not read PR .*\(mismatch: /`, actual `merged but names no merge commit` |
+| L1 | `src/landing-proof.ts` derives changed paths through `HEAD^`, ignoring the final commit | `post-squash extra commit remains unlanded`: actual `[true,undefined]` (`landed_by_git`), expected `[false,'unpushed']` |
 
 ### P3c CI-watch negative controls
 
@@ -409,14 +336,13 @@ mapped, retained and removed counts; proof of a behavior alone does not count a 
 
 ## Negative controls
 
-Each patch was applied to this worktree's `src/` (no other checkout), `npm run test:one -- tests/e2e/ci-evidence.test.ts`
-run, the patch reversed, and the same command run again: 2 pass, 0 fail, 0 skipped. The bug commit is
-`90c1f22ba20c416abc9fc96b04addd07e2f58ed3` (#131), which added `src/ci-run-ref.ts`. Its whole diff is not
-reverted; each patch puts back one rule it introduced.
+A negative control is proven by running it: put the bug back in `src/`, run the scenario's e2e file with
+`npm run test:one`, see the named assertion fail, remove the bug and see it pass again. Nothing of that run is committed.
 
 A negative-control row needs only the scenario, the control (the bug patched back, in words) and the failing
 assertion: `| ID | Unit file | Scenario | Control | Failing assertion |`. Record no patch, commit sha or hash; the
-checker reads older 8-cell rows' patch id as their control and verifies none of their other cells.
+checker reads an older 8-cell row's Patch cell (a patch id or the control in words) as its control, fails it when
+empty, and verifies none of the row's other cells.
 
 <!-- manifest:regressions -->
 | ID | Unit file | Scenario | Control | Failing assertion |
