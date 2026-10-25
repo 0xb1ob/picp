@@ -1,6 +1,6 @@
-/**
- * T5 (remote dashboard PR 2): the cloudflared provisioner. Every download is a fake fetch and every probe a fake
- * runner or a local shell-script stand-in; nothing here reaches Cloudflare or GitHub.
+/** Retained (P12c): the cloudflared provisioner units of tests/tunnel-cloudflared.test.ts that no entry point reaches.
+ * A published or extracted binary needs a body matching the pinned SHA256 (the real release); the pin table and A11 are
+ * structural; the runner probes a real executable. PATH, refusals and redirects are in tests/e2e/remote-tunnel.test.ts.
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -105,18 +105,6 @@ test("A11: no sudo, shell or package manager anywhere in the provisioner", () =>
 	assert.doesNotMatch(code, /\bsudo\b|\bshell:\s*true|\bexecSync\b|\bspawnSync\b|\b(?:apt|brew|dnf|yum)\b/);
 });
 
-test("A10: a compatible cloudflared on PATH wins and nothing is downloaded; relative PATH entries are never searched", async (t) => {
-	const b = bench(t);
-	const onPath = b.place(b.pathDir);
-	b.place(join(b.home, "relative-dir"));
-	const seen: string[] = [];
-	const calls: string[][] = [];
-	const result = await provisionCloudflared(b.binDir, { platform: "linux", arch: "x64", pathEnv: `relative-dir:${b.pathDir}`, fetch: fakeFetch({}, seen), run: fakeRun({ [onPath]: "2025.4.0" }, calls) }, linuxRelease(BINARY));
-	assert.deepEqual(result, { ok: true, path: onPath, source: "path", version: "2025.4.0" });
-	assert.deepEqual(seen, []);
-	assert.deepEqual(b.listBin(), []);
-	assert.ok(calls.every(([file]) => file === onPath));
-});
 
 test("A10: an old or flag-less PATH binary is rejected and the verified pinned download is published atomically under <home>/bin", async (t) => {
 	const b = bench(t);
@@ -143,53 +131,6 @@ test("A10: an old or flag-less PATH binary is rejected and the verified pinned d
 	assert.deepEqual(probe, { ok: false, reason: `${flagless} (cloudflared 2026.10.0) lacks --token-file in \`tunnel run --help\`` });
 });
 
-test("A10: a checksum mismatch, an unrunnable download, an HTTP error or an unsupported platform publishes nothing", async (t) => {
-	const b = bench(t);
-	const ports = (routes: Record<string, Route>, versions: Record<string, string> = { ".cloudflared.": "2026.10.0" }): ProvisionPorts => ({ platform: "linux", arch: "x64", pathEnv: "", fetch: fakeFetch(routes), run: fakeRun(versions) });
-	const tampered = await provisionCloudflared(b.binDir, ports({ [URL_LINUX]: { status: 200, body: Buffer.from("tampered") } }), linuxRelease(BINARY));
-	assert.equal(tampered.ok, false);
-	assert.match(tampered.ok ? "" : tampered.reason, /checksum mismatch for cloudflared-linux-amd64/);
-	assert.deepEqual(b.listBin(), [], "no executable before the checksum");
-
-	const wrongArch = await provisionCloudflared(b.binDir, ports({ [URL_LINUX]: { status: 200, body: BINARY } }, {}), linuxRelease(BINARY));
-	assert.match(wrongArch.ok ? "" : wrongArch.reason, /the verified download does not run here/);
-	assert.deepEqual(b.listBin(), [], "the temp file is removed");
-
-	const missing = await provisionCloudflared(b.binDir, ports({ [URL_LINUX]: { status: 404 } }), linuxRelease(BINARY));
-	assert.match(missing.ok ? "" : missing.reason, /HTTP 404 from github\.com/);
-
-	const huge = await provisionCloudflared(b.binDir, ports({ [URL_LINUX]: { status: 200, body: BINARY, length: String(1024 * 1024 * 1024) } }), linuxRelease(BINARY));
-	assert.match(huge.ok ? "" : huge.reason, /over the \d+-byte cap/);
-
-	const windows = await provisionCloudflared(b.binDir, { ...ports({}), platform: "win32", arch: "x64" });
-	assert.deepEqual(windows, { ok: false, reason: "no compatible cloudflared on PATH, and no pinned download for win32-x64: install cloudflared 2025.4.0 or later on PATH" });
-	assert.deepEqual(b.listBin(), []);
-});
-
-test("A10: redirects are followed only over https to the GitHub release hosts, at most five times", async (t) => {
-	const b = bench(t);
-	const objects = "https://objects.githubusercontent.com/asset?sig=1";
-	const seen: string[] = [];
-	const run = fakeRun({ ".cloudflared.": "2026.10.0" });
-	const follow = await provisionCloudflared(b.binDir, { platform: "linux", arch: "x64", pathEnv: "", fetch: fakeFetch({ [URL_LINUX]: { status: 302, location: objects }, [objects]: { status: 200, body: BINARY } }, seen), run }, linuxRelease(BINARY));
-	assert.equal(follow.ok, true);
-	assert.deepEqual(seen, [URL_LINUX, objects]);
-
-	const refused = async (location: string): Promise<string> => {
-		const result = await provisionCloudflared(join(b.home, "other-bin"), { platform: "linux", arch: "x64", pathEnv: "", fetch: fakeFetch({ [URL_LINUX]: { status: 302, location }, [location]: { status: 200, body: BINARY } }), run }, linuxRelease(BINARY));
-		assert.equal(result.ok, false);
-		return result.ok ? "" : result.reason;
-	};
-	assert.match(await refused("http://objects.githubusercontent.com/asset"), /refusing to download from http:\/\/objects\.githubusercontent\.com/);
-	assert.match(await refused("https://evil.example/cloudflared"), /refusing to download from https:\/\/evil\.example/);
-	assert.match(await refused("https://user:pw@github.com/x"), /refusing to download/);
-	assert.match(await refused("https://github.com:8443/x"), /refusing to download/);
-	const loop: Record<string, Route> = {};
-	for (let hop = 0; hop < 7; hop += 1) loop[hop === 0 ? URL_LINUX : `https://github.com/hop/${hop}`] = { status: 302, location: `https://github.com/hop/${hop + 1}` };
-	const looped = await provisionCloudflared(join(b.home, "loop-bin"), { platform: "linux", arch: "x64", pathEnv: "", fetch: fakeFetch(loop), run }, linuxRelease(BINARY));
-	assert.match(looped.ok ? "" : looped.reason, /more than 5 redirects/);
-	assert.deepEqual(readdirSync(b.home).filter((entry) => entry.endsWith("-bin") && entry !== "path-bin" && entry !== "other-bin" && entry !== "loop-bin"), []);
-});
 
 /** One ustar entry (the parser reads name, size, type, magic and prefix; the checksum is the SHA256's job). */
 function tarEntry(name: string, body: Buffer, type = "0", size?: Buffer): Buffer {
