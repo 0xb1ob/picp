@@ -67,7 +67,7 @@ const OPERATOR_NOTE_MAX_LINES = 60;
  * scanned — they are allowed to keep talking about what used to exist.
  */
 // Fresh grant per fire (docs/contracts.md *Fresh grant per fire*): the S3 opt-in and a shared, reused schedule grant
-// are gone for good; tests/schedule-grant.test.ts also pins the fire path itself.
+// are gone for good; tests/schedule-grant-retained.test.ts also pins the fire path itself.
 const BANNED_IDENTIFIERS = ["attachconsole", "attach-console", "attach_console", "refire", "approval_quote", "mandate: shared"];
 
 // ---------------------------------------------------------------------------
