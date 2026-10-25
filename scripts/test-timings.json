@@ -186,7 +186,6 @@
 	"tests/operator-tool-guard.test.ts": 9,
 	"tests/parent-compact-hold-retained.test.ts": 182,
 	"tests/parent-context-retained.test.ts": 250,
-	"tests/parent-delivery.test.ts": 374,
 	"tests/parent-hosts-harness.test.ts": 65,
 	"tests/parent-routing-evals.test.ts": 15,
 	"tests/parent-session.test.ts": 3,

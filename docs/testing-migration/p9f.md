@@ -3,16 +3,18 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P9f (cp-e2e-migration-p9f-4ylo) | behavior 11, sixth slice: the operator's relay consumer (`tests/operator-delivery.test.ts`) through a real cp-bridge in an RPC operator over a seeded home, in `tests/e2e/operator-relay-p9f.test.ts` (24 declarations: 16 mapped, 8 retained verbatim in `tests/operator-delivery-retained.test.ts`; controls P9f-R1..R15, P9f-T1..T4); the parent send outbox (`tests/parent-outbox.test.ts`) through the in-process CpBridge, a real parent host process and the dashboard restart preflight, in `tests/e2e/parent-send-p9f.test.ts` and S26-dashboard-refusals (20 declarations: 18 mapped, 2 retained verbatim in `tests/parent-outbox-retained.test.ts`; controls P9f-S1..S21); envelope intake (`tests/intake.test.ts`) through the real parent's startup intake over a seeded home, in `tests/e2e/intake-p9f.test.ts` (20 declarations: 18 mapped, 2 retained verbatim in `tests/board-publish-retained.test.ts`; controls P9f-I1..I12). Also aligns p9.md's P9b assertion notes with their `P9b-NC*` ids (#523 review low) and maps `relayIdsOfMessage` through a seeded legacy session (P9f-relay-legacy-ids, #515 review low) | 3 (mixed moves: no fully-deleted-file credit) |
+| P9f (cp-e2e-migration-p9f-4ylo) | behavior 11, sixth slice: the operator's relay consumer (`tests/operator-delivery.test.ts`) through a real cp-bridge in an RPC operator over a seeded home, in `tests/e2e/operator-relay-p9f.test.ts` (24 declarations: 16 mapped, 8 retained verbatim in `tests/operator-delivery-retained.test.ts`; controls P9f-R1..R15, P9f-T1..T4); the parent send outbox (`tests/parent-outbox.test.ts`) through the in-process CpBridge, a real parent host process and the dashboard restart preflight, in `tests/e2e/parent-send-p9f.test.ts` and S26-dashboard-refusals (20 declarations: 18 mapped, 2 retained verbatim in `tests/parent-outbox-retained.test.ts`; controls P9f-S1..S21); envelope intake (`tests/intake.test.ts`) through the real parent's startup intake over a seeded home, in `tests/e2e/intake-p9f.test.ts` (20 declarations: 18 mapped, 2 retained verbatim in `tests/board-publish-retained.test.ts`; controls P9f-I1..I12); parent delivery (`tests/parent-delivery.test.ts`) through a real CpBridge and parent pi in `tests/e2e/parent-delivery-p9f.test.ts` (31 declarations: 21 mapped, 10 retained verbatim in `tests/parent-delivery-retained.test.ts`; controls P9f-D1..D14, two reported). Also aligns p9.md's P9b assertion notes with their `P9b-NC*` ids (#523 review low) and maps `relayIdsOfMessage` through a seeded legacy session (P9f-relay-legacy-ids, #515 review low) | 4 (mixed moves: no fully-deleted-file credit) |
 <!-- /manifest:ledger -->
 
-Behavior 11, sixth slice. P9f-relay-recheck seeds the relay outbox and ack journal, escalations, the fleet, a drain record and
-parent sends on a scratch home, then starts the real cp-bridge in an RPC pi three times: the first start delivers and
-retires, the second (store corrupted, drain gone) hands over only the new relays, and the third (acks unreadable) delivers
-nothing. P9f-relay-turn holds the operator's turn on a hanging mock step and enqueues relays around it.
+Behavior 11, sixth slice. P9f-relay-recheck seeds the relay outbox and ack journal, escalations, the fleet, a drain
+record and parent sends on a scratch home, then starts the real cp-bridge in an RPC pi three times: the first start
+delivers and retires, the second (store corrupted, drain gone) hands over only the new relays, and the third (acks
+unreadable) delivers nothing. P9f-relay-turn holds the operator's turn on a hanging mock step and enqueues relays
+around it.
 
-The two other #523 review lows were already closed by P9e: `userMessageContent` is mapped by control I6 (p9d.md, relabelled
-by P9e), and the exact-ms 24 h TTL and 7-day lost-send boundaries are kept in `tests/control-pending-retained.test.ts`.
+The two other #523 review lows were already closed by P9e: `userMessageContent` is mapped by control I6 (p9d.md,
+relabelled by P9e), and the exact-ms 24 h TTL and 7-day lost-send boundaries are kept in
+`tests/control-pending-retained.test.ts`.
 
 Not reachable: mutating the consumer's per-session reclaim skip passes both P9f scenarios and `operator-compact`; a real
 pi never hands a relay off without it reaching context, so (d)..(d4) stay retained.
@@ -29,10 +31,16 @@ RPC pi: its startup intake takes each envelope and the cp-envelope wakes carry t
 the parent's startup when its refusal is removed (P9f-I10). A refused no-tailnet board still leaves
 `state/boards/<id>` behind; the unit never asserted otherwise, so it is reported, not pinned.
 
+P9f-delivery-* drive a real CpBridge with `outerRetrySleep` held or instant. A startup envelope wake is the turn no send
+owns; `bash sleep 2` tool calls hold a span open so a second send steers in. Two controls pass and are reported rather
+than claimed: P9f-D9 (relay_failed journaled once per send id) because `relaysDue` runs once per start, so a second
+failing pass inside one delivery has no entry point and that declaration is retained; P9f-D13 (the settled-mark skip in
+`settle`) because the outbox's own settle is idempotent, so a second finish relays nothing a consumer could see.
+
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
-| P9f | 11 | `tests/e2e/operator-relay-p9f.test.ts`, `tests/e2e/parent-send-p9f.test.ts`, `tests/e2e/intake-p9f.test.ts` | 9 |
+| P9f | 11 | `tests/e2e/operator-relay-p9f.test.ts`, `tests/e2e/parent-send-p9f.test.ts`, `tests/e2e/intake-p9f.test.ts`, `tests/e2e/parent-delivery-p9f.test.ts` | 16 |
 <!-- /manifest:prs -->
 
 <!-- manifest:scenarios -->
@@ -47,6 +55,13 @@ the parent's startup when its refusal is removed (P9f-I10). A refused no-tailnet
 | P9f-send-ladder | `tests/e2e/parent-send-p9f.test.ts` | P9f-send-ladder: a transient failure retries the same send id up to the ladder's cap, counted per send and kept on disk |
 | P9f-intake-policy | `tests/e2e/intake-p9f.test.ts` | P9f-intake-policy: a restart takes each settled envelope once, by delivery, and never carries an artifact body |
 | P9f-intake-board | `tests/e2e/intake-p9f.test.ts` | P9f-intake-board: a board envelope publishes its site at the viewer's address, and bad boards are refused with a reason |
+| P9f-delivery-wake | `tests/e2e/parent-delivery-p9f.test.ts` | P9f-delivery-wake: a wake turn that ends on a transient error is nudged on the send ladder, then relays once when exhausted |
+| P9f-delivery-wake-paths | `tests/e2e/parent-delivery-p9f.test.ts` | P9f-delivery-wake-paths: a never-retried error relays at once, a recovered wake relays nothing, a clean turn cancels a pending nudge |
+| P9f-delivery-span | `tests/e2e/parent-delivery-p9f.test.ts` | P9f-delivery-span: a send answered only by tool calls takes the next finished answer with its own commentary; a later error fails both |
+| P9f-delivery-relay | `tests/e2e/parent-delivery-p9f.test.ts` | P9f-delivery-relay: a relay that throws is journaled, never stops the rest, and lands on the next pass |
+| P9f-delivery-restart | `tests/e2e/parent-delivery-p9f.test.ts` | P9f-delivery-restart: the ladder's budget survives a death mid-sleep, and a reservation that cannot be written fails the send |
+| P9f-delivery-resume | `tests/e2e/parent-delivery-p9f.test.ts` | P9f-delivery-resume: a restart nudges each landed, unanswered send once, never a settled one or one already nudged |
+| P9f-delivery-cap | `tests/e2e/parent-delivery-p9f.test.ts` | P9f-delivery-cap: failed turns count toward the relaunch cap when their outcome is pending, then the bridge stops |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -116,6 +131,37 @@ the parent's startup when its refusal is removed (P9f-I10). A refused no-tailnet
 | tests/intake.test.ts | an exhausted worker (envelope-rejected.json) is an envelope_invalid failure | 04-4 | mapped | a real worker's rejection file fails the job envelope_invalid and the job stays failed |
 | tests/intake.test.ts | nothing on disk yet is not an error | P9f-intake-policy | mapped | cp-quiet stays waiting and unstamped; the parent only intakes fleet records, so the unknown-id refusal has no caller |
 | tests/intake.test.ts | intake fires from the worker's own event stream | P9e-settle | mapped | a real worker's report_result is stamped by the settle watcher |
+| tests/parent-delivery.test.ts | every parent injection is one prompt with streamingBehavior steer, busy or idle | P9f-delivery-span | mapped | a send made mid-turn steers into the open span; control P9f-D1 |
+| tests/parent-delivery.test.ts | segmentEnd settles each landed send at its own clean turn_end: own reply, counted once, never relayed again | P9f-send-batch | mapped | own reply per span and one relay per pending send; the settled-mark skip is shadowed (P9f-D13, reported) |
+| tests/parent-delivery.test.ts | a send answered only by tool calls is not settled empty by a later send's answer | P9f-delivery-span | mapped | C's reply is D's finished answer, D points at C; control P9f-D2 |
+| tests/parent-delivery.test.ts | an interleaved send's reply keeps its own commentary and shares the next finished answer | P9f-delivery-span | mapped | A's reply is its commentary plus the answer, B points at A; control P9f-D2 |
+| tests/parent-delivery.test.ts | unload-parent PR3: 12 sends absorbed into one span get one full reply and 11 pointers, each settled once | P9f-send-batch | mapped | sends absorbed into one span: one full reply, pointers for the rest, each relayed once |
+| tests/parent-delivery.test.ts | an interleaved send gets the run's error when no answer finished | P9f-delivery-span | mapped | E and G both turn_failed with the run's error, nothing journaled; control P9f-D6 |
+| tests/parent-delivery.test.ts | cleanSegmentEnd: only a text-only turn_end that did not fail or get cut off | — | retained | kept verbatim in tests/parent-delivery-retained.test.ts; tool turns are pinned by P9f-D2, but no consumer tells a length, aborted or missing stop from settling at agent_settled |
+| tests/parent-delivery.test.ts | a send injected or landed while the restart reconcile reads the transcript is never requeued nor nudged | — | retained | kept verbatim in tests/parent-delivery-retained.test.ts; needs a send to land between afterReady's get_entries request and its answer |
+| tests/parent-delivery.test.ts | a superseded afterReady neither reconciles nor RPCs the old process | — | retained | kept verbatim in tests/parent-delivery-retained.test.ts; needs the live process replaced while its get_entries is in flight |
+| tests/parent-delivery.test.ts | a superseded afterReady that fails leaves no stale reconcile flag | — | retained | kept verbatim in tests/parent-delivery-retained.test.ts; needs the live process replaced while its get_entries is in flight |
+| tests/parent-delivery.test.ts | a failed turn counts toward the relaunch cap when its outcome is pending or relayed, not only synchronous | P9f-delivery-cap | mapped | three pending failures stop the bridge with the relaunch relay; control P9f-D12 |
+| tests/parent-delivery.test.ts | H3c: a usage-limit or auth error never enters the outer ladder — zero retries | P9f-delivery-span | mapped | usage limit fails at once with an empty journal (P9f-D6); a wake's 401 in P9f-delivery-wake-paths (P9f-D3) |
+| tests/parent-delivery.test.ts | H3c: a settled (never relayed) send is not nudged as 'reached you before the restart' after a relaunch | P9f-delivery-resume | mapped | a settled landed send is absent from the restart's nudge |
+| tests/parent-delivery.test.ts | N5: a successor whose transcript already holds an id's resume line does not nudge it again; an empty transcript still nudges once | P9f-delivery-resume | mapped | done is skipped while its resume line is in the transcript and nudged once over an empty one; control P9f-D11 |
+| tests/parent-delivery.test.ts | N5: a landed-only resume whose transcript read fails still nudges once and drains | — | retained | kept verbatim in tests/parent-delivery-retained.test.ts; a live pi's get_entries cannot be made to fail |
+| tests/parent-delivery.test.ts | H3c: a relay that throws is journaled, never aborts the rest of the replay loop, and is retried until it lands | P9f-delivery-relay | mapped | an onRelay listener throws for one send: the other relays, one relay_failed row, the next start relays it once; control P9f-D10 |
+| tests/parent-delivery.test.ts | H3c: a relay that keeps throwing for the same send id journals relay_failed only once | — | retained | kept verbatim in tests/parent-delivery-retained.test.ts; relaysDue runs once per start, so a second failing pass in one delivery has no entry point (P9f-D9) |
+| tests/parent-delivery.test.ts | the transient retry budget is on disk: a restarted delivery continues at the next ordinal and delay | P9f-delivery-restart | mapped | the second start sleeps the second delay and reserves attempt 2; control P9f-D14 |
+| tests/parent-delivery.test.ts | a death mid-sleep keeps the reservation spent; the stale timer sends nothing and the next failure takes the next ordinal | P9f-delivery-restart | mapped | a stop mid-sleep sends nothing on release; the next failure takes ordinal 2 |
+| tests/parent-delivery.test.ts | a second failure while a timer is pending schedules no second timer and spends nothing | — | retained | kept verbatim in tests/parent-delivery-retained.test.ts; the same send id cannot fail in a second turn while its own timer is pending |
+| tests/parent-delivery.test.ts | a spent budget fails the send once: final receipt, no timer, exhausted journaled | P9f-send-ladder | mapped | the doomed send fails once at the cap with its count kept |
+| tests/parent-delivery.test.ts | a success after retries journals the persisted count | P9f-delivery-restart | mapped | outer_retry_succeeded with afterAttempts 2 across the restart; control P9f-D7 |
+| tests/parent-delivery.test.ts | a reservation that cannot be written is named, schedules no retry and fails the send | P9f-delivery-restart | mapped | a corrupt outbox mid-turn: reservation_failed journaled, no rung, the send names the file; control P9f-D8 |
+| tests/parent-delivery.test.ts | sweep with no live parent expires a 25 h queued send and relays it undeliverable | P9f-delivery-cap | mapped | the self-stopped bridge's sweep expires a 25 h queued send as not delivered |
+| tests/parent-delivery.test.ts | a send open past 600 s gets exactly one notice, persisted as pending_notice_at | P9f-delivery-cap | mapped | two sweeps with no parent: one 'parent not running' notice, stamped on disk |
+| tests/parent-delivery.test.ts | a landed send with no reply 24 h after landing ends undeliverable; stop retires a landed send | P9f-send-reconcile | mapped | the silent send ends with no reply within 24 h; the stop half is P9f-send-batch's stuck send |
+| tests/parent-delivery.test.ts | a wake turn that ends on a transient error is nudged on the send ladder, then relays once when exhausted | P9f-delivery-wake | mapped | five nudges on the send delays, no send marker, exhausted once, one error relay; control P9f-D4 |
+| tests/parent-delivery.test.ts | a wake turn that recovers resets the ladder; stale, non-transient and send-owned turns are never nudged | — | retained | kept verbatim in tests/parent-delivery-retained.test.ts; the reset and the stale case need a second wake turn; the reachable non-transient case is P9f-D3 |
+| tests/parent-delivery.test.ts | a clean turn while a wake nudge is pending cancels it | P9f-delivery-wake-paths | mapped | an operator send's clean turn during the held sleep: no nudge on release; control P9f-D5 |
+| tests/parent-delivery.test.ts | a send-owned clean turn does not reset the wake budget | — | retained | kept verbatim in tests/parent-delivery-retained.test.ts; needs a second wake turn after the send to observe the kept budget |
+| tests/parent-delivery.test.ts | a wake nudge that cannot be sent gives the error relay back to the caller | — | retained | kept verbatim in tests/parent-delivery-retained.test.ts; no entry point makes a real pi refuse an RPC prompt write |
 <!-- /manifest:assertions -->
 
 <!-- manifest:regressions -->
@@ -175,6 +221,20 @@ the parent's startup when its refusal is removed (P9f-I10). A refused no-tailnet
 | P9f-I10 | tests/intake.test.ts | P9f-intake-board | a non-regular site entry is skipped, not refused | the parent's startup times out on the FIFO |
 | P9f-I11 | tests/intake.test.ts | P9f-intake-board | the board slug check is removed | timed out waiting for every bad board refused with its reason |
 | P9f-I12 | tests/intake.test.ts | P9f-intake-board | the wake drops the board line | the `board: http://127.0.0.2:9911/boards/cp-board/` match |
+| P9f-D1 | tests/parent-delivery.test.ts | P9f-delivery-span | every injection is followUp, not steer | `one answer, one copy: B points at A` |
+| P9f-D2 | tests/parent-delivery.test.ts | P9f-delivery-span | a tool-use turn_end counts as a clean segment end | `A keeps its commentary and shares the finished answer` |
+| P9f-D3 | tests/parent-delivery.test.ts | P9f-delivery-wake-paths | a non-transient wake error is nudged | `never nudged, never journaled, relayed once` |
+| P9f-D4 | tests/parent-delivery.test.ts | P9f-delivery-wake | the wake ladder runs one rung past the cap | the journal's attempt and exhausted rows |
+| P9f-D5 | tests/parent-delivery.test.ts | P9f-delivery-wake-paths | a clean turn no longer clears the pending wake timer | `no stale nudge after a clean turn` |
+| P9f-D6 | tests/parent-delivery.test.ts | P9f-delivery-span | any send failure enters the outer ladder | `a non-transient error never enters the outer ladder` |
+| P9f-D7 | tests/parent-delivery.test.ts | P9f-delivery-restart | success after retries is not journaled | timed out waiting for the recovery |
+| P9f-D8 | tests/parent-delivery.test.ts | P9f-delivery-restart | a failed reservation is not journaled | `named, never silent` |
+| P9f-D9 | tests/parent-delivery.test.ts | P9f-delivery-relay | relay_failed is journaled on every failing pass | passes (reported): one pass per start; the declaration is retained |
+| P9f-D10 | tests/parent-delivery.test.ts | P9f-delivery-relay | a failed relay is still stamped relayed | `left due, so the next pass retries it` |
+| P9f-D11 | tests/parent-delivery.test.ts | P9f-delivery-resume | a resume line in the transcript is ignored | `a resume line already in the transcript is not repeated` |
+| P9f-D12 | tests/parent-delivery.test.ts | P9f-delivery-cap | a final outcome never counts toward the relaunch cap | timed out waiting for the cap |
+| P9f-D13 | tests/parent-delivery.test.ts | P9f-send-batch | settle no longer skips a send segmentEnd settled | passes (reported): the outbox settle is idempotent |
+| P9f-D14 | tests/parent-delivery.test.ts | P9f-delivery-restart | the reservation is never written before the sleep | `reserved before the sleep` |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->
@@ -186,4 +246,6 @@ the parent's startup when its refusal is removed (P9f-I10). A refused no-tailnet
 | tests/parent-outbox-retained.test.ts | cp-e2e-migration-p9f-4ylo | two verbatim declarations: a refused RPC write's rollback and the reserveOuterRetry read/write race |
 | tests/e2e/intake-p9f.test.ts | cp-e2e-migration-p9f-4ylo | P9f-intake-policy, P9f-intake-board through the real parent's startup intake |
 | tests/board-publish-retained.test.ts | cp-e2e-migration-p9f-4ylo | two verbatim declarations: symlink swaps during board publication |
+| tests/e2e/parent-delivery-p9f.test.ts | cp-e2e-migration-p9f-4ylo | P9f-delivery-* through a real CpBridge and parent pi |
+| tests/parent-delivery-retained.test.ts | cp-e2e-migration-p9f-4ylo | ten verbatim declarations: interleaves with no entry point |
 <!-- /manifest:incoming -->
