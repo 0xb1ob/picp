@@ -248,7 +248,8 @@ test("landing: Actions deadlines stop a hung request and share the budget across
 		assert.ok(result, acrossPages ? "one total deadline bounds runs plus jobs" : "per-request timeout cancels hung gh");
 		assert.equal(result.record.next, "retry", "a deadline never grants merge authority");
 		assert.match(result.text, /read transport/, "spent retry budget reports the failed request without another attempt");
-		assert.equal(result.calls.filter((call) => call.includes(acrossPages ? "attempts/1/jobs" : runsAt)).length, 1, "spent retry budget starts no further gh request");
+		// A hung runs-list call is capped per call like a jobs call (12 s), so it retries twice inside the 30 s budget.
+		assert.equal(result.calls.filter((call) => call.includes(acrossPages ? "attempts/1/jobs" : runsAt)).length, acrossPages ? 1 : 3, "spent retry budget starts no further gh request");
 		assert.deepEqual(mergedCalls(result.calls), []);
 	}
 });
