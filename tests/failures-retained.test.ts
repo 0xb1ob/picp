@@ -1,6 +1,6 @@
 /**
  * The failure classifier and recovery ladder declarations with no e2e entry point, kept verbatim from
- * tests/failures.test.ts; docs/testing-migration/p8d.md maps the rest to 04-17..04-25.
+ * tests/failures.test.ts; docs/testing-migration/p8d.md maps the rest to 04-17..04-26.
  */
 
 import assert from "node:assert/strict";

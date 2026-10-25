@@ -1,6 +1,6 @@
 /** cp-0dhw declarations no e2e entry point reaches: the product inspector never throws, a settle cannot race a new
  * tool call on demand, teardown closes a worker before its job is done, and every call site passes read-only git.
- * The rest converted to tests/e2e/worker-lifecycle-p8c.test.ts (P8c, 04-15/04-16) and P8d's 04-22. */
+ * The rest converted to tests/e2e/worker-lifecycle-p8c.test.ts (P8c, 04-15/04-16) and P8d's 04-23. */
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

@@ -15,7 +15,7 @@ for cp-e2e-migration-p8d; P8b (#518) owns bounds, worker-mcp and wedged.
 
 NC-P8c-reported is a combined control: it removes both the reported_at check and the envelope-on-disk check, because
 either alone keeps the job quiet; there is no single-guard control. P8d (#528 review) moved the throwing-inspector
-declaration into tests/settle-recovery-retained.test.ts as retained, and mapped the restart-budget one to its 04-22.
+declaration into tests/settle-recovery-retained.test.ts as retained, and mapped the restart-budget one to its 04-23.
 
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
@@ -54,7 +54,7 @@ declaration into tests/settle-recovery-retained.test.ts as retained, and mapped 
 | tests/settle-recovery.test.ts | an inspector that throws degrades to `unknown` instead of losing the settle | — | retained | Verbatim in tests/settle-recovery-retained.test.ts (moved by P8d per the #528 review). Missing entry point: the product inspector returns unknown and never throws; 04-15's deleted-worktree job pins only the unknown outcome. |
 | tests/settle-recovery.test.ts | the recovery prompt fires automatically, carries the file evidence, and never asks for a redo | 04-15 | mapped | the first prompt names the worktree, the files, origin and "Do NOT redo it", with recovery_prompted 1 of 2; control NC-P8c-bound |
 | tests/settle-recovery.test.ts | the automatic recovery is bounded: prompts stop permanently once the bound is spent | 04-15 | mapped | two prompts, then recovery_exhausted, the job left waiting and the 3-line operator line; control NC-P8c-bound |
-| tests/settle-recovery.test.ts | the bound is on disk: a restarted parent inherits the spent budget, not a fresh one | 04-22 | mapped | Mapped by P8d: a spent count written to the fleet file by a second store is the budget a live settle reads (recovery_exhausted, no prompt); control NC-P8d-disk-bound |
+| tests/settle-recovery.test.ts | the bound is on disk: a restarted parent inherits the spent budget, not a fresh one | 04-23 | mapped | Mapped by P8d: a spent count written to the fleet file by a second store is the budget a live settle reads (recovery_exhausted, no prompt); control NC-P8d-disk-bound |
 | tests/settle-recovery.test.ts | a promote reopens the budget and clears the observation with it | 04-15 | mapped | cp_send clears the count and the observation, and the next settle is attempt 1 again; control NC-P8c-clear |
 | tests/settle-recovery.test.ts | a job that has reported is never prompted, even with a stale unreported flag on the record | 04-16 | mapped | a reported job settles with no further prompt; control NC-P8c-reported |
 | tests/settle-recovery.test.ts | a job whose PR has merged is never prompted | 04-16 | mapped | a merge receipt on disk stops the prompt; the record's merged receipt is only ever written after that file (src/merges.ts); control NC-P8c-landed |
@@ -129,6 +129,6 @@ declaration into tests/settle-recovery-retained.test.ts as retained, and mapped 
 |---|---|---|---|
 | `tests/live-harness.test.ts` | deleted | P8c | behavior 04: 1 mapped (04-13), 6 retained in tests/live-harness-retained.test.ts; controls NC-P8c-gate-dir, NC-P8c-gate-reader |
 | `tests/worker-spawn-reserve.test.ts` | deleted | P8c | behavior 04: 5 assertions mapped (04-14), 1 retained with its declaration in tests/worker-spawn-reserve-retained.test.ts; controls NC-P8c-reserve-off, NC-P8c-reserve-size, NC-P8c-author-reserve, NC-P8c-close |
-| `tests/settle-recovery.test.ts` | deleted | P8c | behavior 04: 11 mapped (04-15, 04-16; 04-22 by P8d), 4 retained in tests/settle-recovery-retained.test.ts; controls NC-P8c-bound, NC-P8c-unknown-work, NC-P8c-clear, NC-P8c-status, NC-P8c-reported, NC-P8c-landed, NC-P8d-disk-bound |
+| `tests/settle-recovery.test.ts` | deleted | P8c | behavior 04: 11 mapped (04-15, 04-16; 04-23 by P8d), 4 retained in tests/settle-recovery-retained.test.ts; controls NC-P8c-bound, NC-P8c-unknown-work, NC-P8c-clear, NC-P8c-status, NC-P8c-reported, NC-P8c-landed, NC-P8d-disk-bound |
 | `tests/settle.test.ts` | deleted | P8c | behavior 04: 10 mapped (04-16, 04-17), 16 retained in tests/settle-retained.test.ts; controls NC-P8c-wiring, NC-P8c-nudges, NC-P8c-report-clear, NC-P8c-doa, NC-P8c-ran, NC-P8c-clear, NC-P8c-status |
 <!-- /manifest:baseline -->
