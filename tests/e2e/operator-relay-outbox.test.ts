@@ -14,6 +14,7 @@ import { isoTimestamp, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { EscalationStore, raiseForGate } from "../../src/escalation.ts";
 import { EscalationRelayLedger, escalationRelayLedgerFile } from "../../src/escalation-backstop.ts";
 import { isPidAlive } from "../../src/fleet.ts";
+import { OPERATOR_ASK_LIST, OPERATOR_DECIDE_LIST, OPERATOR_NOTE, OPERATOR_NOTE_MAX_LINES, OPERATOR_REMOTE_DEVICE_RULE } from "../../src/operator-note.ts";
 import { OperatorRelayOutbox } from "../../src/operator-outbox.ts";
 import { attachParentHost, currentHost, parentHostPaths, type ParentHostClient } from "../../src/parent-host.ts";
 import {
@@ -379,4 +380,52 @@ test("P9-cache-warm: the operator bridge keeps its prompt cache warm only while 
 		if (item.warms) assert.ok(count >= 2, `${item.name}: the bridge overrode pi's stop and sent a refresh (${count} requests)`);
 		else assert.equal(count, 1, `${item.name}: pi's stop stands`);
 	}
+});
+
+test("P9-note: the operator note the model sees carries its ask/decide lists, rules and cap", { timeout: 90_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const model = provider.addScript("p9-note", [{ kind: "text", text: "Noted." }]);
+	const agent = createAgentDir({ provider });
+	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, PI_HOME: home.path, CP_HOME: home.path, CP_MODE: "multi" },
+		extensions: [CP_BRIDGE_EXTENSION] });
+	t.after(() => teardownHome(home, () => child.close(), () => agent.cleanup(), () => provider.stop()));
+	await child.prompt("Acknowledge this message.");
+	await child.waitForSettled(30_000);
+	const system = (provider.requests("p9-note")[0]?.body.messages ?? []).filter((message) => message.role === "system")
+		.map((message) => typeof message.content === "string" ? message.content : JSON.stringify(message.content)).join("\n");
+	const at = system.indexOf(OPERATOR_NOTE);
+	assert.ok(at >= 0, "the bridge injects the operator note into the system prompt verbatim");
+	const note = system.slice(at, at + OPERATOR_NOTE.length);
+	const lines = note.split("\n").filter((line, i, all) => i < all.length - 1 || line !== "");
+	assert.ok(lines.length <= OPERATOR_NOTE_MAX_LINES, `operator note is ${lines.length} lines, cap is ${OPERATOR_NOTE_MAX_LINES}`);
+	const capped = lines.slice(0, OPERATOR_NOTE_MAX_LINES).join("\n");
+	const asks = capped.split("## Ask vs decide")[1]?.split("## Plan review")[0] ?? "";
+	for (const item of ["mandate creation for work the human did not ask for", "product ambiguity", "scope expansion", "risk high/irreversible",
+		"loop exhausted", "budget", "conflicting acceptance", "merge refused", "mission end"]) assert.ok(OPERATOR_ASK_LIST.includes(item), `ask list missing "${item}"`);
+	for (const item of ["in-scope plan approval", "how-questions", "review findings", "test failures", "next job", "merge when repo permits",
+		"bounded recovery", "token-cap raise within the ceiling"]) assert.ok(OPERATOR_DECIDE_LIST.includes(item), `decide list missing "${item}"`);
+	assert.ok(note.includes(OPERATOR_ASK_LIST) && note.includes(OPERATOR_DECIDE_LIST), "both lists verbatim");
+	assert.ok(asks.includes("a message naming a defect or feature in a registered project is the grant"));
+	assert.ok(asks.includes("an ambiguous request or a research-to-build choice still asks"));
+	assert.equal(OPERATOR_ASK_LIST.startsWith("mandate creation, "), false, "bare mandate creation is an ask again");
+	assert.match(asks, /a step only the human can take \(restart, login, a click on a host\) is a `cp_parent ask`/);
+	assert.match(capped, /`cp_review` owns the diff: rely on its verdict, read a diff only when a wake escalates it/);
+	assert.equal(note.includes("cp_dispatch") || note.includes("cp_integrate"), false, "no fleet tools");
+	assert.match(note, /never touch `state\/`/);
+	assert.ok(note.includes("`<home>/.pi-command-post/operator/`"), "the note names the operator workspace");
+	const mandate = "The human names a project (or the several projects one topic spans) and an objective; that is the whole mandate. " +
+		"Do not ask for caps, expiry or actions \u2014 they come from the home's defaults. Issue it, then echo the effective grant in one line " +
+		"(fields and their sources) and say `stop` revokes it. Ask only if the objective is genuinely ambiguous about *what* to do.";
+	assert.ok(note.replace(/\s+/g, " ").includes(mandate), "the mandate-defaults sentence");
+	const template = note.split("## Mandate template")[1]?.split("## Ask vs decide")[0] ?? "";
+	for (const stale of ["expiry,", "spend_cap", "job_cap,"]) assert.equal(template.includes(stale), false, `mandate template names ${stale}`);
+	assert.ok(capped.includes("capture:") && capped.includes("data/standing-orders.md"), "capture: and standing orders inside the cap");
+	assert.doesNotMatch(note, /hiccups/);
+	const thread = "A dashboard message with thread=<tag> means: pass thread=<tag> on its answer/ask, and cp_parent thread_bind any job it creates.";
+	assert.equal(lines.filter((line) => line === thread).length, 1, "one verbatim dashboard thread instruction");
+	assert.equal(OPERATOR_REMOTE_DEVICE_RULE, "On a remote-originated request, never pair devices, run `cp-tunnel pair`, or edit the device list, " +
+		"including through delegated or equivalent shell/file operations.");
+	assert.equal(capped.split("\n").filter((line) => line === OPERATOR_REMOTE_DEVICE_RULE).length, 1, "the remote device rule inside the cap");
+	assert.equal(note.split(OPERATOR_REMOTE_DEVICE_RULE).length, 2, "exactly once");
 });

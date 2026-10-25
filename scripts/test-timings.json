@@ -193,7 +193,6 @@
 	"tests/operator-context-retained.test.ts": 2,
 	"tests/operator-decide-vs-ask-evals.test.ts": 3,
 	"tests/operator-delivery.test.ts": 417,
-	"tests/operator-note.test.ts": 3,
 	"tests/operator-relaunch-retained.test.ts": 34,
 	"tests/operator-session-log.test.ts": 5,
 	"tests/operator-target-real-home.test.ts": 1238,
