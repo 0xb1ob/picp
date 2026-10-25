@@ -1123,7 +1123,7 @@ test("conversation question: delivered as a blocked-envelope ask, not refused", 
 // 4b-1 (4B1-T5): restore on send — fake workers, no child process
 // ---------------------------------------------------------------------------
 
-async function releaseBench(t: { after(fn: () => void | Promise<void>): void }, options: { reviveFails?: boolean; mandates?: unknown } = {}) {
+async function releaseBench(t: { after(fn: () => void | Promise<void>): void }, options: { reviveFails?: boolean; mandates?: (home: string) => MandateStore } = {}) {
 	const home = createScratchHome();
 	const runs = new RunRegistry(home.path);
 	const fleet = new FleetStore({ home: home.path });
@@ -1137,14 +1137,14 @@ async function releaseBench(t: { after(fn: () => void | Promise<void>): void }, 
 	await fleet.add({
 		job_id: jobId, project: "example-app", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "held",
 		worker: { pid: 4242, session_id: "s", session_file: join(home.path, "s.jsonl"), profile: "implementer", role: "implementer", model: "mock/unused", started_at: isoTimestamp() },
-		worktree: home.path, branch: jobId, dispatched_at: isoTimestamp(), reported_at: isoTimestamp(), usage: EMPTY_USAGE,
+		worktree: home.path, branch: jobId, dispatched_at: isoTimestamp(new Date(Date.now() - 30_000)), reported_at: isoTimestamp(), usage: EMPTY_USAGE,
 	});
 	const released = new Set<string>();
 	const revived: string[] = [];
 	let restored: FakeWorker | undefined;
 	const sender = new Sender({
 		fleet, manager: workers.manager, runs, home: home.path,
-		...(options.mandates ? { mandates: options.mandates as never } : {}),
+		...(options.mandates ? { mandates: options.mandates(home.path) } : {}),
 		released: (id) => released.has(id),
 		revive: async (id) => {
 			revived.push(id);
@@ -1193,9 +1193,16 @@ test("4B1-T5: a dead job that was not released keeps today's cp_revive refusal; 
 });
 
 test("4B1-T5: a repair refusal comes before any revive; a revive refusal is surfaced", async (t) => {
-	const refused = await releaseBench(t, { mandates: { assertPermitted: () => { throw new Error("mandate refuses repair"); } } });
+	const refused = await releaseBench(t, { mandates: (home) => {
+		const store = new MandateStore(home);
+		const grant = store.issue({ projects: ["example-app"], objective: "Repair original work",
+			expiry: isoTimestamp(new Date(Date.now() - 2_000)), at: isoTimestamp(new Date(Date.now() - 60_000)),
+			spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 1, ask_on: [] });
+		store.pause(grant.id, "spend_cap");
+		return store;
+	} });
 	refused.released.add(refused.jobId);
-	await assert.rejects(refused.sender.send({ jobId: refused.jobId, message: "fix CI", purpose: "repair" }), /mandate refuses repair/);
+	await assert.rejects(refused.sender.send({ jobId: refused.jobId, message: "fix CI", purpose: "repair" }), /paused/);
 	assert.deepEqual(refused.revived, []);
 
 	const failing = await releaseBench(t, { reviveFails: true });

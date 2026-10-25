@@ -32,6 +32,8 @@ expiry, `allowed_actions` (plan, implement, review, repair, merge),
 (e.g. `plan_approval`, `merge`, `risk:high`). Authorization is delegated only
 through the mandate store (`src/mandate.ts`), never by free prose.
 
+Default expiry closes new admission. Proven unfinished named work retains its original scope and remaining budget, automatically through `cp_next` and direct preflight. Ambiguous legacy admission and obsolete coverage use authenticated exact-scope confirmation. Post-expiry successors keep the same accounting root and inherited review credit; dependency handoff requires actual current PASS and normal closure. Stops, explicit deadlines, exclusions and caps remain binding. Expiry alone no longer requires recovery; see [mandate continuity](mandate-continuity.md).
+
 `cp_decide` grants authorization only by citing the mandate clause it falls
 under, or an operator quote in the conversation. `cp_next` refuses to
 dispatch under a paused or revoked mandate but lets in-flight jobs finish.

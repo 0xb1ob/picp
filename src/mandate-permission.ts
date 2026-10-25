@@ -40,6 +40,7 @@ export interface GrantJob extends ScheduleScope {
 	inFlight: boolean;
 	/** That record's worker failed: a re-dispatch continues it. */
 	failed?: boolean;
+	continuationProof?: Readonly<Record<string, string>>;
 }
 
 export type GrantStanding = { standing: "none" } | { standing: GrantCell; cause: GrantCause; detail?: string };
@@ -74,10 +75,21 @@ export function isExpired(grant: Mandate, now: string): boolean {
 /** Pure: grant x use x job x now. A paused grant past its expiry takes the stricter of its two cells. */
 export function grantStanding(grant: Mandate, use: GrantUse, job: GrantJob, now: string): GrantStanding {
 	if (!covers(grant, job)) return { standing: "none" };
-	if (grant.status === "revoked" && grant.revoked_at && job.startedAt && grant.revoked_at < job.startedAt) return { standing: "none" };
+	if (!grant.continuity && grant.status === "revoked" && grant.revoked_at && job.startedAt && grant.revoked_at < job.startedAt) return { standing: "none" };
+	const replacement = grant.same_work_replacements?.find((entry) => entry.original_job_id === job.jobId);
+	if (replacement) return { standing: R, cause: "expired", detail: `same work continues as ${replacement.replacement_job_id}; original history cannot be rerun` };
 	const cause: Exclude<GrantCause, "expired"> =
 		grant.status === "revoked" ? "revoked" : grant.status !== "paused" ? "active" : ["spend_cap", "token_cap"].includes(grant.pause_reason ?? "") ? "cap_paused" : "paused";
 	const stored = { standing: GRANT_MATRIX[cause][use], cause };
+	if (grant.coverage_superseded && !grant.continuity) return { standing: R, cause: cause === "active" ? "expired" : cause, detail: "obsolete coverage requires committed original-work continuation" };
+	if (grant.continuity) {
+		if (cause !== "active") return { standing: R, cause };
+		if (grant.continuity.phase !== "committed") return { standing: R, cause: "expired", detail: "continuation preparation is not committed" };
+		if (grant.provenance?.expiry_hours === "explicit" && isExpired(grant, now)) return { standing: R, cause: "expired", detail: "explicit completion deadline remains binding" };
+		return expiredCell(grant, use, job);
+	}
+	if (cause !== "revoked" && isExpired(grant, now) && grant.provenance?.expiry_hours === "explicit") return { standing: R, cause: "expired", detail: "explicit completion deadline remains binding" };
+	if (cause !== "revoked" && isExpired(grant, now) && grant.admissions !== undefined && ["home", "project"].includes(grant.provenance?.expiry_hours ?? "")) return { standing: R, cause: "expired", detail: "committed original-admission proof is required" };
 	if (cause === "revoked" || !isExpired(grant, now)) return stored;
 	const lapsed = expiredCell(grant, use, job);
 	return cause === "active" || RANK[lapsed.standing] > RANK[stored.standing] ? lapsed : stored;
@@ -85,6 +97,12 @@ export function grantStanding(grant: Mandate, use: GrantUse, job: GrantJob, now:
 
 function expiredCell(grant: Mandate, use: GrantUse, job: GrantJob): { standing: GrantCell; cause: "expired"; detail?: string } {
 	const refuse = (detail: string) => ({ standing: R as GrantCell, cause: "expired" as const, detail });
+	if (grant.continuity?.phase === "committed") {
+		if (job.continuationProof?.[grant.id] !== grant.continuity.governing_input_digest) return refuse("committed continuation governing proof is missing or changed");
+		const completionAction = use === "dispatch" ? (job.jobKind === "research" ? "plan" : "implement") : use === "implement" ? "implement" : CONTINUATION_ACTION[use];
+		if (!completionAction || !grant.allowed_actions.includes(completionAction)) return refuse(`${completionAction ?? use} is not an allowed action`);
+		return { standing: P, cause: "expired" };
+	}
 	const action = CONTINUATION_ACTION[use];
 	if (!action) return refuse("no first authorization under it; only a job already in flight under it continues");
 	if (!job.inFlight) return refuse(`${job.jobId} has no fleet record of that kind, so it is a fresh start or a kind change, never a continuation`);
@@ -95,15 +113,20 @@ function expiredCell(grant: Mandate, use: GrantUse, job: GrantJob): { standing: 
 
 /** Pure selection: standing, deterministic active precedence, then named headroom without this job. */
 export function selectGrant(grants: readonly Mandate[], use: GrantUse, job: GrantJob, now: string, jobs?: readonly MandateUsageJob[]) {
-	const judged = grants.map((grant) => ({ grant, at: grantStanding(grant, use, job, now) }))
+	const aliases = grants.filter((grant) => grant.same_work_replacements?.some((entry) => entry.replacement_job_id === job.jobId || entry.original_job_id === job.jobId));
+	const bound = aliases.length ? aliases : grants.filter((grant) => grant.continuity?.admissions.some((entry) => entry.job_id === job.jobId && entry.continuation_work !== false));
+	if (bound.length > 1) return { grant: bound[0]!, at: { standing: R, cause: "expired" as const, detail: "conflicting immutable accounting roots" } };
+	const judged = (bound.length ? bound : grants).map((grant) => ({ grant, at: grantStanding(grant, use, job, now) }))
 		.filter((entry): entry is { grant: Mandate; at: Exclude<GrantStanding, { standing: "none" }> } => entry.at.standing !== "none");
+	if (bound.length && !judged.length) return { grant: bound[0]!, at: { standing: R, cause: "expired" as const, detail: "immutable work root no longer proves this alias" } };
 	const active = judged.filter(({ at }) => at.standing === P && at.cause === "active").sort((a, b) => compareActiveGrants(a.grant, b.grant));
 	const first = active[0];
 	const named = (grant: Mandate) => (grant.job_ids?.length ?? 0) > 0 && !grant.schedule_grant;
 	if (jobs && first && named(first.grant) && jobCapFullWithout(first.grant, job.jobId, jobs)) {
 		return active.slice(1).find(({ grant }) => named(grant) && !jobCapFullWithout(grant, job.jobId, jobs)) ?? first;
 	}
-	return first ?? judged.filter(({ at }) => at.standing === P || at.standing === R).at(-1);
+	const completion = judged.filter(({ grant, at }) => at.standing === P && grant.continuity?.phase === "committed").at(-1);
+	return first ?? completion ?? judged.filter(({ at }) => at.standing === P || at.standing === R).at(-1);
 }
 
 export interface GrantStore {
@@ -133,10 +156,9 @@ export function assertGrantsPermit(
 	if (!selected) return {};
 	const { grant, at } = selected;
 	if (at.standing === P && at.cause === "active") return { selected: grant, cause: at.cause };
-	// A reviewer start (`cp_review`, the only `assertGrantsPermit("review")` caller) keeps its pre-rule path: an expired
-	// grant neither refuses it (no fleet record, review not allowed, cap reached) nor speaks for it. Paused and revoked
-	// still refuse. The expired row still binds a diff checkpoint, which `evaluateAuthority` reads through grantStanding.
-	if (use === "review" && at.cause === "expired") return {};
+	// Unknown legacy expiry keeps the existing review path; it grants no completion authority.
+	// Known deadlines and committed continuations retain their own stops and budgets.
+	if (use === "review" && at.cause === "expired" && !grant.continuity && !grant.provenance?.expiry_hours) return {};
 	if (at.standing === P) {
 		const cap = capReached(grant, store.withReviewerSpend(jobs, [grant]));
 		if (cap) throw new MandateError(`${job.jobId}: expired mandate ${grant.id} ${cap} cap reached \u2014 no ${use} under it`);

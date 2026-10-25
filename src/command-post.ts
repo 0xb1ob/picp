@@ -76,6 +76,7 @@ import { memoLogin, resolveMainCiScope } from "./main-ci.ts";
 import { EscalationStore } from "./escalation.ts";
 import { Gate, type GateRequest, type GateStart } from "./gate.ts";
 import { prepareGateReplacement } from "./gate-replacement.ts";
+import { handoffGate } from "./gate-handoff.ts";
 import { authorizeRecoveryControl, prepareAttemptControl, standingRecoveryStatus, recoveryGateRequest, type RecoverySelectors, type PrepareAttemptRequest } from "./gate-recovery-authority.ts";
 import { ContextGuard, type GuardDecision, type GuardRequest } from "./guards.ts";
 import {
@@ -1261,12 +1262,11 @@ export class CommandPost {
 			...(this.#options.parentEnv ? { parentEnv: this.#options.parentEnv } : {}),
 		});
 	}
-
+	handoffGate = (request: Parameters<typeof handoffGate>[1]) => handoffGate(this, request);
 	async replacePlanner(jobId: string, replacementJobId: string, replanEscalationId?: string) {
 		return prepareGateReplacement({ home: this.home, jobId, replacementJobId, ledger: this.ledger(),
 			fleet: this.fleet, artifacts: this.artifacts, replanEscalationId, mandates: this.mandates });
 	}
-
 	authorizeRecovery = (selectors: RecoverySelectors, operatorTexts: readonly string[]) => authorizeRecoveryControl(this, selectors, operatorTexts);
 	prepareRecoveryAttempt = (input: PrepareAttemptRequest) => prepareAttemptControl(this, input);
 

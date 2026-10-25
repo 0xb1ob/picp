@@ -51,6 +51,7 @@ import { describeRefMismatch, describeRefVerification, type RefVerification, ver
 import { assertDispatchAllowed, type DispatchAuthorityJob, riskGateExempt } from "./dispatch-authority.ts";
 import { openScheduleRunStore, type ScheduleRunStore } from "./schedule-runs.ts";
 import { runAuthority, runRiskPreapproval, scheduleRunVerdict, type ScheduleAuthorityContext } from "./schedule-authority.ts";
+import { continuationProof, continueAdmittedWork, issueAdmissions } from "./mandate-continuity.ts";
 
 export * from "./mandate-accounting.ts";
 export * from "./mandate-permission.ts";
@@ -167,6 +168,7 @@ export interface MandateSubject extends ScheduleScope {
 	now?: string;
 	usageJobs?: readonly MandateUsageJob[];
 	createdAt?: string;
+	continuationProof?: Readonly<Record<string, string>>;
 }
 
 export type AuthorityDecision =
@@ -224,7 +226,7 @@ export function hitsNeedle(value: string, needle: string): boolean {
 	return new RegExp(`(?:^|/)${pattern}$`).test(value);
 }
 
-function pathExcluded(mandate: Mandate, pathHints: string[] | undefined, text?: string): string | undefined {
+export function pathExcluded(mandate: Mandate, pathHints: string[] | undefined, text?: string): string | undefined {
 	const excluded = mandate.exclusions?.paths;
 	if (!excluded) return undefined;
 	for (const path of pathHints ?? []) {
@@ -240,7 +242,7 @@ function pathExcluded(mandate: Mandate, pathHints: string[] | undefined, text?: 
 	return undefined;
 }
 
-function subsystemExcluded(mandate: Mandate, subsystem: string | undefined, text?: string): string | undefined {
+export function subsystemExcluded(mandate: Mandate, subsystem: string | undefined, text?: string): string | undefined {
 	const excluded = mandate.exclusions?.subsystems;
 	if (!excluded) return undefined;
 	if (subsystem && excluded.includes(subsystem)) return subsystem;
@@ -266,7 +268,7 @@ export function evaluateAuthority(subject: MandateSubject, mandates: readonly Ma
 	if (subject.kind === "final_fix") return { permitted: false, reason: "a final fix at the review cap requires operator text" };
 	const now = subject.now ?? isoTimestamp();
 	const jobs = subject.usageJobs ?? [];
-	const job = { ...subjectAsJob(subject), startedAt: inFlightRecord(subject, jobs)?.dispatched_at ?? subject.createdAt, inFlight: isInFlight(subject, jobs) };
+	const job = { ...subjectAsJob(subject), continuationProof: subject.continuationProof, startedAt: inFlightRecord(subject, jobs)?.dispatched_at ?? subject.createdAt, inFlight: isInFlight(subject, jobs) };
 	const selected = selectGrant(mandates, actionForKind(subject.kind) as GrantUse, job, now, jobs);
 	if (selected?.at.standing === "permit") {
 		const verdict = judgeCovered(selected.grant, subject, jobs);
@@ -348,6 +350,13 @@ export class MandateStore {
 	}
 
 	authorityNow(): string { return this.#stamp(); }
+	continue(sourceId: string, jobs: readonly MandateUsageJob[] = [], options: Parameters<typeof continueAdmittedWork>[4] = {}) {
+		return continueAdmittedWork(this, sourceId, jobs, (grant) => this.#write(grant), options);
+	}
+	continuationProof(jobId: string) {
+		const job = this.runContext().ledgerJob(jobId);
+		return continuationProof(this.home, job, this.list(), this.#stamp());
+	}
 	runContext(): ScheduleAuthorityContext {
 		return { home: this.home, runs: this.scheduleRuns, ledgerJob: (id) => existsSync(join(this.home, LAYOUT.jobsFile)) ? readJobsDocument(this.home).jobs.find((job) => job.id === id) : undefined };
 	}
@@ -409,7 +418,7 @@ export class MandateStore {
 	 */
 	withReviewerSpend(jobs: readonly MandateUsageJob[], grants?: readonly Mandate[]): MandateUsageJob[] {
 		// ponytail: one readdir per covered job per sweep; cache per run dir mtime if sweeps get hot.
-		const live = grants ?? this.list().filter((mandate) => mandate.status === "active" || mandate.status === "paused");
+		const live = grants ?? this.list().filter((mandate) => mandate.status === "active" || mandate.status === "paused" || mandate.continuity !== undefined);
 		const schedules = this.scheduleMandates();
 		return jobs.filter((record) => !this.scheduleRuns.runOfJob(record.job_id)).map((record) => {
 			// A scheduled record carries the grant its schedule names, so that schedule grant (and only it) counts it.
@@ -456,7 +465,7 @@ export class MandateStore {
 			});
 			this.supersedeEscalations(jobs);
 		}
-		if (next.status === "active") {
+		if (next.status === "active" || (next.status === "expired" && next.continuity?.phase === "committed")) {
 			const cap = capReached(next, jobs);
 			if (cap) {
 				// A token cap under the home's ceiling is the parent's to raise (raiseTokenCap), never a human ask.
@@ -534,6 +543,9 @@ export class MandateStore {
 			...(input.provenance ? { provenance: input.provenance } : {}),
 			...(input.schedule_fire ? { schedule_fire: input.schedule_fire } : {}),
 		};
+		if (mandate.job_ids?.length && existsSync(join(this.home, LAYOUT.jobsFile))) {
+			mandate.admissions = issueAdmissions(mandate, readJobsDocument(this.home).jobs);
+		}
 		const counted = this.withReviewerSpend(jobs, [mandate]);
 		const baseline = usageBaseline(mandate, counted);
 		if (baseline.length > 0) mandate.usage_baseline = baseline;
@@ -564,7 +576,7 @@ export class MandateStore {
 
 	pause(id: string, reason = "operator"): Mandate {
 		const existing = this.require(id);
-		if (existing.status === "revoked" || existing.status === "expired") {
+		if (existing.status === "revoked" || (existing.status === "expired" && !existing.continuity)) {
 			throw new MandateError(`${id} is ${existing.status}; it cannot be paused`);
 		}
 		if (existing.status === "paused") return existing;
@@ -628,10 +640,16 @@ export class MandateStore {
 	enroll(id: string, job: { jobId: string; project: string; kind: JobKind }, jobs: readonly MandateUsageJob[], open: ReadonlySet<string>): Mandate {
 		const mandate = this.require(id);
 		if (mandate.job_ids?.includes(job.jobId)) return mandate;
+		if (mandate.continuity || mandate.coverage_superseded) throw new MandateError(`${id}: admission is frozen; continuation cannot enroll new work`);
 		const counted = this.withReviewerSpend(jobs, [mandate]);
 		const refusal = batchRefusal(mandate, id, job, counted, this.#stamp()) ?? (enrollCapacity(mandate, counted, open) < 1 ? `${id} job cap ${mandate.job_cap} reached` : undefined);
 		if (refusal) throw new MandateError(`cannot enroll ${job.jobId}: ${refusal}`);
-		return this.#write({ ...mandate, job_ids: [...(mandate.job_ids ?? []), job.jobId] });
+		const next = { ...mandate, job_ids: [...(mandate.job_ids ?? []), job.jobId] };
+		if (existsSync(join(this.home, LAYOUT.jobsFile))) {
+			const record = readJobsDocument(this.home).jobs.find((entry) => entry.id === job.jobId);
+			if (record) next.admissions = [...(mandate.admissions ?? []), ...issueAdmissions(next, [record], this.#stamp())];
+		}
+		return this.#write(next);
 	}
 
 	/**
@@ -664,14 +682,14 @@ export class MandateStore {
 		const run = scheduleRunVerdict(this.runContext(), use, job, jobs, this.#stamp());
 		if (run.source === "schedule-run") return { run: { id: run.run.id, schedule_id: run.run.schedule_id } };
 		const startedAt = jobs.find((record) => record.job_id === job.jobId && record.project === job.project)?.dispatched_at ?? this.jobCreatedAt(job.jobId);
-		return assertGrantsPermit(this, use, { jobId: job.jobId, project: job.project, startedAt, ...(job.kind ? { jobKind: job.kind } : {}), ...(job.pathHints ? { pathHints: job.pathHints } : {}), ...this.scheduleOf(job.jobId) }, jobs, this.#stamp());
+		return assertGrantsPermit(this, use, { jobId: job.jobId, project: job.project, startedAt, continuationProof: this.continuationProof(job.jobId), ...(job.kind ? { jobKind: job.kind } : {}), ...(job.pathHints ? { pathHints: job.pathHints } : {}), ...this.scheduleOf(job.jobId) }, jobs, this.#stamp());
 	}
 
 	/** Read-only advice: no sweep, permission, reservation or usage write. */
 	selection(use: GrantUse, job: { jobId: string; project: string; kind?: JobKind; pathHints?: string[] }, jobs: readonly MandateUsageJob[] = []) {
 		if (runAuthority(this.runContext(), job.jobId).source === "schedule-run") return undefined;
 		const record = inFlightRecord({ ...job, jobKind: job.kind }, jobs);
-		return selectGrant(this.list(), use, { ...job, jobKind: job.kind, ...this.scheduleOf(job.jobId), startedAt: record?.dispatched_at ?? this.jobCreatedAt(job.jobId), inFlight: record !== undefined, failed: record?.phase === "failed" }, this.#stamp(), jobs);
+		return selectGrant(this.list(), use, { ...job, jobKind: job.kind, continuationProof: this.continuationProof(job.jobId), ...this.scheduleOf(job.jobId), startedAt: record?.dispatched_at ?? this.jobCreatedAt(job.jobId), inFlight: record !== undefined, failed: record?.phase === "failed" }, this.#stamp(), jobs);
 	}
 
 	jobCreatedAt(jobId: string): string | undefined {
@@ -688,7 +706,7 @@ export class MandateStore {
 		if (riskGateExempt(job)) return false;
 		if (run.source === "schedule-run") return "ask_on" in run.snapshot && run.snapshot.ask_on.includes("risk:high") && !runRiskPreapproval(run.run, job, this.jobCreatedAt(job.jobId));
 		const selected = this.selection("dispatch", job, jobs);
-		const asking = selected?.at.standing === "permit" && selected.at.cause === "active" && selected.grant.ask_on.includes("risk:high") ? [selected.grant] : [];
+		const asking = selected?.at.standing === "permit" && (selected.at.cause === "active" || selected.grant.continuity?.phase === "committed") && selected.grant.ask_on.includes("risk:high") ? [selected.grant] : [];
 		return asking.length > 0 && !riskPreapproval(asking, job, this.jobCreatedAt(job.jobId)).covered;
 	}
 

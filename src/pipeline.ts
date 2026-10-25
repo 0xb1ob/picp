@@ -31,8 +31,9 @@
  */
 
 import { recoveryTarget } from "./gate-recovery.ts";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { assertHandoffProjectionReady } from "./gate-handoff-store.ts";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { benignSenseAt, listedAfter, negatedAt, negatedHeadAt } from "./risk-negation.ts";
 import { recordAssessedRisk } from "./ledger-filter.ts";
 import type { ArtifactStore } from "./artifacts.ts";
@@ -545,7 +546,7 @@ export class PipelineStore {
 	 * this is off the hot path.
 	 */
 	findByShipId(shipId: string): PipelineRecord | undefined {
-		return this.list().find((record) => record.ship_id === shipId);
+		return this.list().find((record) => record.ship_id === shipId && !record.superseded_by);
 	}
 
 	/**
@@ -571,6 +572,19 @@ export class PipelineStore {
 			}
 		}
 		return records;
+	}
+}
+
+/** Partial reanchors cannot advance either the old plan or its implementer. */
+export function assertPipelineProjectionReady(home: string, shipId: string): void {
+	assertHandoffProjectionReady(home, shipId);
+	const store = new PipelineStore(home);
+	for (const record of store.list().filter((item) => item.ship_id === shipId)) {
+		if (record.reanchor?.phase === "prepared") throw new PipelineError(`${shipId}: reanchor prepared; resume its dependency projection`);
+		if (!existsSync(join(home, paths.pipelineReanchorFile(record.research_id)))) continue;
+		if (!record.superseded_by || store.get(record.superseded_by)?.reanchor?.phase !== "committed") {
+			throw new PipelineError(`${shipId}: reanchor prepared; retry cp_pipeline reanchor with its original IDs before advancing`);
+		}
 	}
 }
 
@@ -791,7 +805,7 @@ export class PipelineRunner {
 		}
 	}
 
-	#tryMandate(
+	async #tryMandate(
 		store: CheckpointStore,
 		checkpoint: Checkpoint,
 		record: PipelineRecord,
@@ -799,7 +813,7 @@ export class PipelineRunner {
 		routing: ComposedRouting,
 		/** The ship (plan) checkpoint's gate flags; the diff path is out of Job A's scope. */
 		flags?: GateFlags,
-	): Checkpoint {
+	): Promise<Checkpoint> {
 		if (!this.#options.mandates) return checkpoint;
 		const text = this.#mandateText(record);
 		return autoDecideCheckpoint(
@@ -914,6 +928,7 @@ export class PipelineRunner {
 	 */
 	async advance(researchId: string): Promise<AdvanceResult> {
 		const record = this.store.require(researchId);
+		assertPipelineProjectionReady(this.#options.home, record.ship_id);
 		const recovery = recoveryTarget(this.#options.home, researchId);
 		if (record.superseded_by) {
 			throw new PipelineError(
@@ -1216,55 +1231,42 @@ export class PipelineRunner {
 		return this.checkpoints.decide(shipId, approved, { ...options, at: this.#now() });
 	}
 
-	/**
-	 * Re-anchor a pipeline to a replacement research job (cp-n10), without
-	 * hand-editing state/. A superseded research job's plan must never reach an
-	 * implementer, and the replacement must be re-gated from scratch — both are
-	 * true here for free: the old record is marked `superseded_by` (and `advance`
-	 * on it now refuses outright), and the new record is a fresh one keyed by
-	 * `replacementResearchId`, so it carries no gate history and `advance` gates
-	 * it as if for the first time.
-	 *
-	 * Only sound while researching, gating or escalated. A checkpoint
-	 * (`awaiting_authorization`, pending or declined) or a dispatch
-	 * (`implementing` / `done`) already rests on the old plan; swapping research
-	 * then is a new pipeline (`cp_pipeline start`), not a re-anchor. Decline does
-	 * not unlock this: the ship job's authorization is write-once and keyed by
-	 * ship id, so `#authorize` would inherit the spent decision.
-	 */
-	async reanchor(researchId: string, replacementResearchId: string): Promise<PipelineRecord> {
-		if (replacementResearchId === researchId) {
-			throw new PipelineError(`reanchor needs a research job different from ${researchId}`);
-		}
+	/** Reanchor before authorization; interrupted edge projection resumes with the same identities. */
+	async reanchor(researchId: string, replacementResearchId: string, assertCurrent?: () => void): Promise<PipelineRecord> {
+		assertCurrent?.();
+		if (replacementResearchId === researchId) throw new PipelineError(`reanchor needs a research job different from ${researchId}`);
 		const old = this.store.require(researchId);
-		if (old.superseded_by) {
+		if (old.superseded_by && old.superseded_by !== replacementResearchId) {
 			throw new PipelineError(`${researchId} is already superseded by ${old.superseded_by} — reanchor that one instead`);
 		}
-		if (old.state === "awaiting_authorization" || old.state === "implementing" || old.state === "done") {
-			const decision = old.state === "awaiting_authorization" ? this.checkpoints.get(old.ship_id)?.decision : undefined;
-			if (decision === "declined") {
-				throw new PipelineError(
-					`${researchId} is already awaiting_authorization — the checkpoint was declined. ` +
-						"A replacement plan is a new pipeline (cp_pipeline start), not a reanchor.",
-				);
-			}
-			if (old.state === "awaiting_authorization") {
-				throw new PipelineError(
-					`${researchId} is already awaiting_authorization — a human decision is pending. ` +
-						"Reanchor cannot pre-empt it; decline stops the pipeline, it does not unlock reanchor.",
-				);
-			}
-			throw new PipelineError(
-				`${researchId} is already ${old.state} — reanchor only applies while a pipeline is still researching, gating, ` +
-					"or escalated. A dispatch already rests on the old plan; start a new pipeline (cp_pipeline start).",
-			);
+		const existing = this.store.get(replacementResearchId);
+		const checkpoint = this.checkpoints.get(old.ship_id);
+		if (checkpoint || [old.state, existing?.state].some((state) => state === "awaiting_authorization" || state === "implementing" || state === "done")) {
+			throw new PipelineError(checkpoint?.decision === "declined"
+				? `${researchId}: checkpoint was declined; start a new pipeline (cp_pipeline start)`
+				: `${researchId}: authorization or implementation already started; a human decision is pending or spent; decline does not unlock reanchor`);
 		}
-		if (this.store.get(replacementResearchId)) {
+		if (existing && (!old.superseded_by || existing.ship_id !== old.ship_id || existing.project !== old.project || existing.delivery !== old.delivery || (existing.reanchor && existing.reanchor.source_job_id !== researchId))) {
 			throw new PipelineError(`${replacementResearchId} already has a pipeline record — it cannot also replace ${researchId}`);
 		}
-
+		const intentFile = join(this.#options.home, paths.pipelineReanchorFile(researchId));
+		const intent = JSON.stringify([researchId, replacementResearchId, old.ship_id]);
+		mkdirSync(dirname(intentFile), { recursive: true });
+		try { writeFileSync(intentFile, intent, { flag: "wx" }); }
+		catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			if (readFileSync(intentFile, "utf8") !== intent) throw new PipelineError(`${researchId}: another reanchor is already prepared`);
+		}
+		if (existing?.reanchor?.phase === "committed") {
+			const ship = await this.#options.ledger.show(old.ship_id);
+			if (!ship.blocked_by.includes(replacementResearchId) || ship.blocked_by.includes(researchId)) {
+				throw new PipelineError(`${old.ship_id}: the committed dependency projection changed; no edge retargeted`);
+			}
+			return existing;
+		}
 		const at = this.#now();
-		const replacement = this.store.write({
+		this.store.write({ ...old, superseded_by: replacementResearchId, updated_at: at });
+		let replacement = existing ?? this.store.write({
 			schema_version: SCHEMA_VERSION,
 			research_id: replacementResearchId,
 			ship_id: old.ship_id,
@@ -1273,29 +1275,21 @@ export class PipelineRunner {
 			state: "researching",
 			created_at: at,
 			updated_at: at,
+			reanchor: { source_job_id: researchId, phase: "prepared" },
 			...(old.wall_clock_seconds !== undefined ? { wall_clock_seconds: old.wall_clock_seconds } : {}),
 			...(old.quality ? { quality: old.quality } : {}),
 			...(old.review ? { review: old.review } : {}),
-			// routing T2: the ship job is the same ship job, so its task's impact is
-			// the same fact. A reanchor replaces the *plan*, and new planner
-			// measurements are taken from the replacement's own envelope — but the
-			// known impact is not a measurement anybody is redoing here. Changing it
-			// is an explicit rescope, never a side effect of swapping the research.
 			...(old.task_impact ? { task_impact: old.task_impact } : {}),
 			reasons: [...(old.reasons ?? []), `re-anchored from ${researchId} (superseded)`].slice(0, 10),
 		});
-		this.store.write({ ...old, superseded_by: replacementResearchId, updated_at: at });
-
-		// The ledger dep is the operator's view of what blocks the ship job; it
-		// must name the replacement, not a research job nobody will ever advance.
 		try {
-			await this.#options.ledger.removeDep(old.ship_id, researchId);
-		} catch {
-			// Best-effort: the dep may already be gone (the research closed). The
-			// pipeline record is the fact that governs `advance`, not the dep link.
+			await this.#options.ledger.retargetDeps([{
+				dependent_job_id: old.ship_id, original_blocker_id: researchId, replacement_blocker_id: replacementResearchId,
+			}], assertCurrent);
+		} catch (error) {
+			throw new PipelineError(`${researchId}: reanchor prepared; dependency projection failed: ${String(error)}; retry the same reanchor IDs`);
 		}
-		await this.#options.ledger.addDep(old.ship_id, replacementResearchId).catch(() => undefined);
-
+		replacement = this.store.write({ ...replacement, reanchor: { source_job_id: researchId, phase: "committed" }, updated_at: this.#now() });
 		return replacement;
 	}
 
@@ -1416,8 +1410,8 @@ export class PipelineRunner {
 		const job = { jobId: record.ship_id, project: record.project, jobKind: "ship" as const, ...mandates.scheduleOf(record.ship_id) };
 		const jobs = this.#mandateJobs();
 		const flight = inFlightRecord(job, jobs);
-		const selected = selectGrant(mandates.list(), "implement", { ...job, startedAt: flight?.dispatched_at ?? mandates.jobCreatedAt(record.ship_id), inFlight: flight !== undefined }, this.#now(), jobs);
-		if (selected?.at.standing !== "permit" || selected.at.cause !== "active" || !selected.grant.ask_on.includes("plan_approval")) return undefined;
+		const selected = selectGrant(mandates.list(), "implement", { ...job, continuationProof: mandates.continuationProof(record.ship_id), startedAt: flight?.dispatched_at ?? mandates.jobCreatedAt(record.ship_id), inFlight: flight !== undefined }, this.#now(), jobs);
+		if (selected?.at.standing !== "permit" || (selected.at.cause !== "active" && selected.grant.continuity?.phase !== "committed") || !selected.grant.ask_on.includes("plan_approval")) return undefined;
 		const hit = selected.grant;
 		return { mandate_id: hit.id, mandate_clause: `${hit.id}: ask_on includes plan_approval` };
 	}
@@ -1523,7 +1517,7 @@ export class PipelineRunner {
 			});
 		}
 
-		checkpoint = this.#tryMandate(this.checkpoints, checkpoint, record, "ship", routing, verdict.flags);
+		checkpoint = await this.#tryMandate(this.checkpoints, checkpoint, record, "ship", routing, verdict.flags);
 		if (checkpoint.decision !== "pending") {
 			if (checkpoint.decision === "approved" && verdict.verdict === "pass") {
 				this.#pinApproval(record.research_id, artifact.path, checkpoint.decided_by ?? "mandate");
@@ -1789,7 +1783,7 @@ export class PipelineRunner {
 			});
 
 		const routing = this.#composedRouting(record);
-		checkpoint = this.#tryMandate(this.diffCheckpoints, checkpoint, record, "diff", routing);
+		checkpoint = await this.#tryMandate(this.diffCheckpoints, checkpoint, record, "diff", routing);
 		if (checkpoint.decision !== "pending") return checkpoint;
 
 		const authorizer = this.#options.authorizer;

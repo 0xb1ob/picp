@@ -41,6 +41,12 @@ test("S16: public plan gates select reviewer preferences from current and legacy
    ...(schedule && schedule !== "legacy" ? { schedule_id: schedule === "actual" ? "sch-aaaaaa" : "sch-bbbbbb" } : {}),
    worker: { pid: process.pid, session_id: "legacy", session_file: join(home.path, "legacy.jsonl"), profile: "planner", role: "planner", model: "mock/author", started_at: now } });
   writeFileSync(post.artifacts.path(job.id), "# Goal\nReview this plan.\n");
+  if (label.includes('"status":"paused"') || label.includes('"status":"revoked"')) {
+   await assert.rejects(post.gate({ jobId: job.id }), /paused|revoked/);
+   assert.equal(provider.requests(script).length, 0);
+   assert.equal(provider.requests(`${script}-wrong`).length, 0);
+   return;
+  }
   const started = await post.gate({ jobId: job.id, ...(explicit ? { model } : {}) });
   if (!("key" in started)) assert.fail(`${label}: ${JSON.stringify(started)}`);
   if ("key" in started) { post.reviewRuns.handBack(started.key); await post.reviewRuns.settled(started.key); }

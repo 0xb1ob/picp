@@ -4502,6 +4502,10 @@ asks one pure question — grant x use x job x `now` — and gets `none` (the gr
 | `review` | `cp_review` reviewer spend (`assertReviewAllowed`) |
 | `repair` | a fix sent to the job's own implementer: `cp_integrate` conflict or red CI, a diff-review revise (`cp_send` `purpose: repair`) |
 
+**Permanent named-work continuation:** home/project default expiry closes admission, not completion of proven unfinished named work. `cp_next` and direct preflight prepare a fixed continuation; unknown legacy admission and obsolete coverage require authenticated exact-scope confirmation. The original accounting scope, completed members, late charges, baseline, caps and ceilings remain; residual dispatch membership is separate. A post-expiry `replace_work` successor is a committed alias, with full original governing inputs and inherited review credit. `cp_gate handoff` requires actual current PASS and normal closure before projecting exact recorded mechanical edges. Stops, explicit deadlines, fulfillment and exclusions still bind. See [operations and compatibility](mandate-continuity.md).
+
+The following matrix describes fallback standing without a committed continuation. A committed continuation permits only its proven original work and allowed completion actions; explicit expired deadlines always refuse. Expiry alone no longer requires capped recovery, whose other controls and independently authorized uses remain in force.
+
 | grant \ use | dispatch | promote | implement | review | repair | merge |
 |---|---|---|---|---|---|---|
 | active | permit | permit | permit | permit | permit | permit |

@@ -169,6 +169,54 @@ export interface ScheduleFire {
 		| { via: "cp_schedule"; operator_quote: string; decided_by: QuoteDecidedBy; source_sha: string; delegation_rule?: string; send_id?: string };
 }
 
+const ContinuityDigestSchema = Type.String({ pattern: "^[0-9a-f]{64}$" });
+const ContinuityIdSchema = Type.String({ pattern: "^[a-z0-9_-]{1,100}$" });
+
+export const MandateAdmissionSchema = Type.Object({
+	job_id: JobIdSchema,
+	admitted_at: Type.Optional(IsoTimestampSchema),
+	confirmation_escalation_id: Type.Optional(Type.String({ pattern: "^es-[a-z0-9]{4,16}$" })),
+	continuation_work: Type.Optional(Type.Boolean()),
+	project: Type.String({ minLength: 1, maxLength: 80 }),
+	kind: JobKindSchema,
+	scope_digest: ContinuityDigestSchema,
+}, { additionalProperties: false, oneOf: [{ required: ["admitted_at"] }, { required: ["confirmation_escalation_id"] }] });
+
+export const MandateContinuitySchema = Type.Object({
+	version: Type.Literal(1),
+	receipt_id: ContinuityIdSchema,
+	source_grant_id: MandateIdSchema,
+	accounting_root_id: MandateIdSchema,
+	source_fingerprint: ContinuityDigestSchema,
+	admission_expiry: IsoTimestampSchema,
+	admissions: Type.Array(MandateAdmissionSchema, { minItems: 1, maxItems: 64 }),
+	governing_input_digest: ContinuityDigestSchema,
+	governing_input_refs: Type.Array(Type.String({ minLength: 1, maxLength: 4000 }), { minItems: 1, maxItems: 256 }),
+	phase: StringEnum(["prepared", "committed"]),
+	authority_reference: Type.String({ minLength: 1, maxLength: 4000 }),
+}, { additionalProperties: false });
+export type MandateContinuity = Static<typeof MandateContinuitySchema>;
+
+export const SameWorkReplacementSchema = Type.Object({
+	version: Type.Literal(1),
+	link_id: ContinuityIdSchema,
+	source_grant_id: MandateIdSchema,
+	accounting_root_id: MandateIdSchema,
+	work_id: JobIdSchema,
+	original_job_id: JobIdSchema,
+	replacement_job_id: JobIdSchema,
+	admitted_at: Type.Optional(IsoTimestampSchema),
+	confirmation_escalation_id: Type.Optional(Type.String({ pattern: "^es-[a-z0-9]{4,16}$" })),
+	admission_expiry: IsoTimestampSchema,
+	original_scope_digest: ContinuityDigestSchema,
+	governing_input_digest: ContinuityDigestSchema,
+	prior_findings_refs: Type.Array(Type.String({ minLength: 1, maxLength: 4000 }), { minItems: 1, maxItems: 256 }),
+	inherited_gate_history_digest: ContinuityDigestSchema,
+	phase: StringEnum(["prepared", "committed"]),
+	authority_reference: Type.String({ minLength: 1, maxLength: 4000 }),
+}, { additionalProperties: false, oneOf: [{ required: ["admitted_at"] }, { required: ["confirmation_escalation_id"] }] });
+export type SameWorkReplacement = Static<typeof SameWorkReplacementSchema>;
+
 export const MandateSchema = Type.Object(
 	{
 		schema_version: Type.Integer({ minimum: 1 }),
@@ -249,6 +297,15 @@ export const MandateSchema = Type.Object(
 		),
 		/** A schedule's fire grant (one per fire): its schedule, seed, approval and trigger. Absent on every other grant. */
 		schedule_fire: Type.Optional(ScheduleFireSchema),
+		admissions: Type.Optional(Type.Array(MandateAdmissionSchema, { maxItems: 64 })),
+		continuity: Type.Optional(MandateContinuitySchema),
+		same_work_replacements: Type.Optional(Type.Array(SameWorkReplacementSchema, { maxItems: 64 })),
+		coverage_superseded: Type.Optional(Type.Object({
+			replacement_id: MandateIdSchema,
+			at: IsoTimestampSchema,
+			authority_reference: Type.String({ pattern: "^es-[a-z0-9]{4,16}$" }),
+			scope_digest: ContinuityDigestSchema,
+		}, { additionalProperties: false })),
 	},
 	{ additionalProperties: false },
 );

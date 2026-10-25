@@ -6,6 +6,7 @@ import { scheduleIdOf, reviewerUsage, type MandateUsageJob } from "./mandate-acc
 import { inFlightRecord, type GrantUse } from "./mandate-permission.ts";
 import { riskGateExempt } from "./dispatch-authority.ts";
 import { actionForKind, evaluateAuthority, hitsNeedle, type AuthorityDecision, type MandateSubject } from "./mandate.ts";
+import { continuationProof } from "./mandate-continuity.ts";
 import { hardStops, preapprovalRecordCovers, quoteSha } from "./risk-preapproval.ts";
 import { runSpend, type ScheduleRunStore } from "./schedule-runs.ts";
 import type { ScheduleRun } from "./viewer/schedule-run-core.ts";
@@ -158,7 +159,7 @@ export function scheduleRunVerdict(ctx: ScheduleAuthorityContext, use: GrantUse,
 export function checkpointAuthority(ctx: ScheduleAuthorityContext, subject: MandateSubject, mandates: readonly import("./contracts.ts").Mandate[]): AuthorityDecision {
 	try {
 		const result = scheduleRunVerdict(ctx, actionForKind(subject.kind) as GrantUse, { ...subject, kind: subject.jobKind, checkpoint: subject.kind }, subject.usageJobs ?? [], subject.now);
-		if (result.source === "mandate") return evaluateAuthority(subject, mandates);
+		if (result.source === "mandate") return evaluateAuthority({ ...subject, continuationProof: continuationProof(ctx.home, ctx.ledgerJob(subject.jobId), mandates, subject.now) }, mandates);
 		return { permitted: true, runId: result.run.id, clause: `schedule-run ${result.run.id} (policy rev ${result.run.policy_revision})` };
 	} catch (error) {
 		if (!(error instanceof ScheduleAuthorityError)) throw error;

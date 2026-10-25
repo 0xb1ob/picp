@@ -40,6 +40,8 @@ import { type BudgetCheck, checkBudget } from "./failures.ts";
 import type { FleetStore } from "./fleet.ts";
 import type { MandateStore } from "./mandate.ts";
 import { projectDenial } from "./mandate-defaults.ts";
+import { assertContinuationTask, continueForJob } from "./mandate-continuity.ts";
+import { workIdentity } from "./mandate-accounting.ts";
 import { decidePlanSend, recordPlanRevise, vetoedReviseRefusal } from "./plan-followup.ts";
 import { inferScopeAndRisk } from "./pipeline.ts";
 import { LIVE_PHASES } from "./preflight.ts";
@@ -240,6 +242,10 @@ export class Sender {
 
 		// Mandate permission for a repair comes first: a refused repair never relaunches a released worker.
 		// A parked job's resume takes a lease and a spawn, so it needs the same permission whatever the purpose.
+		if (this.#options.mandates) {
+			await continueForJob(this.#options.mandates, request.jobId, fleet.read().jobs, "promote");
+			this.#assertContinuationPermission(request.jobId);
+		}
 		if ((parked || (request.purpose === "repair" && request.task === undefined && request.taskFile === undefined)) && this.#options.mandates) {
 			try {
 				this.#options.mandates.assertPermitted("repair", { jobId: request.jobId, project: record.project, kind: record.kind }, fleet.read().jobs);
@@ -343,6 +349,10 @@ export class Sender {
 			resolvedTask = readTask({ jobId: request.jobId, task: request.task, taskFile: request.taskFile });
 		}
 
+		if (resolvedTask && this.#options.mandates) {
+			const selected = this.#options.mandates.selection("promote", { jobId: request.jobId, project: record.project, kind: record.kind }, fleet.read().jobs);
+			assertContinuationTask(selected?.grant, request.jobId, resolvedTask.forInference, home);
+		}
 		// risk:high gates this promotion exactly like a direct dispatch
 		// (pi-command-post-autonomy-programme-cur.2.4): a promoted ship brief is a
 		// fresh implementer brief, and a caller must not be able to bypass the
@@ -420,6 +430,7 @@ export class Sender {
 		// this one — the bound is per brief, never per job lifetime.
 		await fleet.clearUnreportedSettles(request.jobId);
 
+		this.#assertContinuationPermission(request.jobId);
 		const outcome = await managed.worker.send(message, mode);
 
 		// Same delivered-only rule as the task-replacement below: a revise that was never
@@ -477,6 +488,14 @@ export class Sender {
 			...(taskUpdate ? { task_updated: taskUpdate } : {}),
 			...(riskWarning ? { risk_warning: riskWarning } : {}),
 		};
+	}
+
+	#assertContinuationPermission(jobId: string): void {
+		const store = this.#options.mandates;
+		if (!store?.list().some((grant) => workIdentity(grant, jobId) !== jobId || (grant.continuity && grant.job_ids?.includes(jobId)))) return;
+		const record = this.#options.fleet.get(jobId);
+		if (!record) throw new SendError(`${jobId}: continuation worker record is missing`);
+		store.assertPermitted("promote", { jobId, project: record.project, kind: record.kind }, this.#options.fleet.read().jobs);
 	}
 
 	/** Usage comes from the run projection; limits from the job's record. */

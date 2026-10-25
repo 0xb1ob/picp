@@ -3,9 +3,46 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { MandateSchema, ProjectSchema, ReviewerModelSchema } from "../src/contracts.ts";
+import { GateHandoffSchema, MandateContinuitySchema, SameWorkReplacementSchema, MandateSchema, ProjectSchema, ReviewerModelSchema } from "../src/contracts.ts";
 import { GateRecoveryAnchorSchema, GateRecoveryAttemptClaimSchema, GateRecoveryAttemptTerminalSchema } from "../src/contracts/gate-recovery.ts";
 import { validate as validateRecovery } from "../src/contracts.ts";
+
+test("continuity records require bounded typed admission, roots and handoff evidence", () => {
+	const digest = "a".repeat(64);
+	const at = "2026-10-24T00:00:00Z";
+	const continuity = {
+		version: 1, receipt_id: "continuity-1", source_grant_id: "md-abcd", accounting_root_id: "md-abcd",
+		source_fingerprint: digest, admission_expiry: at,
+		admissions: [{ job_id: "cp-original", admitted_at: at, project: "picp", kind: "research", scope_digest: digest }],
+		governing_input_digest: digest, governing_input_refs: ["original-task.md"], phase: "prepared",
+		authority_reference: "issued-membership",
+	};
+	assert.equal(validateRecovery(MandateContinuitySchema, continuity).ok, true);
+	for (const change of [{ accounting_root_id: "" }, { admissions: [] }, { phase: "active" }, { spend_cap: 100 }]) {
+		assert.equal(validateRecovery(MandateContinuitySchema, { ...continuity, ...change }).ok, false);
+	}
+	const replacement = {
+		version: 1, link_id: "link-1", source_grant_id: "md-abcd", accounting_root_id: "md-abcd",
+		work_id: "cp-original", original_job_id: "cp-original", replacement_job_id: "cp-replacement",
+		admitted_at: at, admission_expiry: at, original_scope_digest: digest, governing_input_digest: digest,
+		prior_findings_refs: ["gate-1-raw.json"], inherited_gate_history_digest: digest,
+		phase: "committed", authority_reference: "continuity-1",
+	};
+	assert.equal(validateRecovery(SameWorkReplacementSchema, replacement).ok, true);
+	assert.equal(validateRecovery(SameWorkReplacementSchema, { ...replacement, accounting_root_id: "cp-other" }).ok, false);
+	assert.equal(validateRecovery(SameWorkReplacementSchema, { ...replacement, prior_findings_refs: [] }).ok, false);
+	assert.equal(validateRecovery(SameWorkReplacementSchema, { ...replacement, remaining_budget: 100 }).ok, false);
+	const handoff = {
+		version: 1, handoff_id: digest, source_job_id: "cp-original", replacement_job_id: "cp-replacement",
+		link_id: "link-1", input_digest: digest, created_at: at, phase: "waiting_review",
+		edges: [{ dependent_job_id: "cp-ship", original_blocker_id: "cp-original",
+			replacement_blocker_id: "cp-replacement", provenance_reference: "unknown" }],
+	};
+	assert.equal(validateRecovery(GateHandoffSchema, handoff).ok, true);
+	assert.equal(validateRecovery(GateHandoffSchema, { ...handoff, edges: [] }).ok, false);
+	assert.equal(validateRecovery(GateHandoffSchema, { ...handoff, pass_digest: "PASS" }).ok, false);
+	assert.equal(validateRecovery(GateHandoffSchema, { ...handoff, reset_attempts: true }).ok, false);
+});
 
 test("recovery v2 anchor and attempt records reject incomplete or extra fields", () => {
 	const digest = "a".repeat(64);

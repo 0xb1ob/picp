@@ -53,7 +53,7 @@ import { formatPreflight, type Preflight, type PreflightResult } from "./preflig
 // (`inferScopeAndRisk`) in pipeline.ts, because the pipeline needs it too and a
 // value import in both directions would be a runtime cycle. It is re-exported
 // below so `src/dispatch.ts` stays the import path every caller already uses.
-import { routingRecord, type SuppliedBy } from "./pipeline.ts";
+import { assertPipelineProjectionReady, routingRecord, type SuppliedBy } from "./pipeline.ts";
 import { assembleBrief, loadProfile, profileForRole, readBriefTemplate } from "./profiles.ts";
 import type { ProjectRegistry } from "./projects.ts";
 import { formatRoutingDecision, type ModelProbe, resolveWithCapacity, RoutingError } from "./routing.ts";
@@ -63,6 +63,8 @@ import type { WorkerManager } from "./worker-manager.ts";
 import type { WorkerProcess } from "./worker-process.ts";
 import { type DepsPorts, prepareNodeDeps } from "./worktree-deps.ts";
 import type { MandateStore } from "./mandate.ts";
+import { assertContinuationTask, continuityInputsBlock } from "./mandate-continuity.ts";
+import { continuationBudget } from "./mandate-usage.ts";
 import { MandateError, scheduleRecord } from "./mandate-accounting.ts";
 import { watchOuterProviderRetry } from "./provider-retry.ts";
 import type { PipelineRecordedRisk } from "./risk-warning.ts";
@@ -454,6 +456,7 @@ export class Dispatcher {
 	async preview(request: DispatchRequest): Promise<DispatchPreview> {
 		const options = this.#options;
 		const issue = await options.ledger.show(request.jobId);
+		assertPipelineProjectionReady(options.home, issue.id);
 		if (issue.script) throw new DispatchError(`${issue.id}: script jobs use CommandPost.previewDispatch`);
 		const task = readTask(request);
 		assertDispatchable(issue);
@@ -524,9 +527,9 @@ export class Dispatcher {
 		const options = this.#options;
 		const now = options.now ?? (() => new Date());
 		const issue = await options.ledger.show(request.jobId);
+		assertPipelineProjectionReady(options.home, issue.id);
 		if (issue.script) throw new DispatchError(`${issue.id}: script jobs use CommandPost.dispatch`);
 		const task = readTask(request);
-
 		// --- 1. the ledger decides what this job is -------------------------
 		assertDispatchable(issue);
 		const labels = requireJobLabels(issue);
@@ -614,6 +617,7 @@ export class Dispatcher {
 
 		const readOnly = profile.frontmatter.readOnly === true, ops = request.profile === OPS_PROFILE_NAME;
 		const gate = riskGate(options.mandates, request, issue, task, { jobId: issue.id, project: labels.project, kind, readOnly, ops }, inputs, options.fleet.read().jobs);
+		let continuityNote = "";
 		let mandateId: string | undefined, startedBy: string | undefined;
 		try {
 			const permission = await options.mandates?.assertDispatchAllowed(
@@ -621,6 +625,11 @@ export class Dispatcher {
 				options.fleet.read().jobs,
 			);
 			mandateId = permission?.selected?.id; startedBy = permission?.run?.started_by;
+			const continuation = permission?.selected?.continuity;
+			if (continuation?.phase === "committed") {
+				assertContinuationTask(permission?.selected, issue.id, task.forInference, this.#options.home);
+				continuityNote = continuityInputsBlock(this.#options.mandates, issue.id, permission?.selected);
+			}
 		} catch (error) {
 			throw (error instanceof MandateError && error.code) || (error instanceof ScheduleAuthorityError && error.code === "parallelism_full") ? error : new DispatchError((error as Error).message); // coded: dispatch queue
 		}
@@ -667,7 +676,7 @@ export class Dispatcher {
 			const references = await referencedMaterial({ task: task.forInference, worktree: lease.path, home: options.home,
 				...(request.foreignCi ? { foreignCi: request.foreignCi } : {}) });
 			const boundNote = bound ? `\n\n> ${boundPrNote(bound)}\n` : "";
-			const originalTask = task.forInference + references + boundNote;
+			const originalTask = task.forInference + references + boundNote + continuityNote;
 			const runDir = join(options.home, paths.runDir(issue.id));
 			mkdirSync(runDir, { recursive: true });
 			const artifactPath = join(options.home, paths.artifactDir(issue.id), delivery === "board" ? "board.json" : "report.md");
@@ -682,21 +691,24 @@ export class Dispatcher {
 					project: labels.project,
 					kind,
 					delivery,
-					task: task.forBrief + references,
+					task: task.forBrief + references + continuityNote,
 					artifact_path: artifactPath,
 				},
 			}) + boundNote + (deps.note ? `\n\n> ${deps.note}\n` : "") + (startedBy ? `\n\n> ${startedBy}\n` : "") + (skills.length ? `\n\n> ${skillsBriefNote(skills, overridden)}\n` : "") + await repoMap({ home: options.home, project: labels.project, worktree: lease.path, git: options.git ?? defaultGit });
 			writeFileSync(join(options.home, paths.briefFile(issue.id)), brief);
 			// Freeze parent input for reviewer coverage, never worker-authored text.
 			// taskFile stays out of the brief; both receive the reference snapshot.
-			writeFileSync(join(options.home, paths.originalTaskFile(issue.id)), originalTask);
+			const originalTaskFile = join(options.home, paths.originalTaskFile(issue.id));
+			if (!continuityNote || !existsSync(originalTaskFile)) writeFileSync(originalTaskFile, originalTask);
 
 			// --- 6. spawn + first prompt ------------------------------------
 			recorder = this.#runs.open(issue.id);
 			if (kind === "research") mkdirSync(join(options.home, paths.artifactDir(issue.id)), { recursive: true });
 			reservation = await options.makeRoom?.(issue.id, profile.frontmatter.role);
 			await options.manager.ready();
+			assertPipelineProjectionReady(options.home, issue.id);
 			const managed = options.manager.spawn({
+				budgetLimit: continuationBudget(options.mandates, issue.id, options.fleet.read().jobs, "dispatch"),
 				identity: {
 					jobId: issue.id, kind, delivery,
 					runDir,

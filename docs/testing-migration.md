@@ -426,6 +426,7 @@ Test files added after the baseline, with the PR that owns them.
 | File | PR | Note |
 |---|---|---|
 | tests/e2e/wake-ci-promoted.test.ts | cp-fix-promoted-ci-notice-dropped-z1n7 (https://github.com/0xb1ob/picp/pull/473) | S22 fix-job regression: a promoted job's CI notice keeps its promotion note at the provider |
+| tests/e2e/mandate-continuity.test.ts | cp-iojy (https://github.com/0xb1ob/picp/pull/504) | Original admission, authenticated confirmation, shared-root successors and PASS-bound handoff |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

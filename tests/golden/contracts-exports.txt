@@ -215,13 +215,13 @@ EnvelopeSchema	value	fc4dae5f6e493adc	0067dbc481765b3a
 EnvelopeStatus	type	f6c907afd7458777	-
 Escalation	type	5dd49c0b7a062912	-
 EscalationFile	type	2ecfbb10398526f2	-
-EscalationFileSchema	value	a6e3b6d91cacc0e3	b6913697b598a6e9
+EscalationFileSchema	value	a6e3b6d91cacc0e3	dc3912f782fcf799
 EscalationIdSchema	value	bf167b364884522c	83b36b824047205b
 EscalationKind	type	c601588e3da8eab0	-
 EscalationKindSchema	value	96538a3de0f36513	58915083e393ef55
 EscalationOption	type	53eddd102b7c99b2	-
 EscalationOptionSchema	value	577499ef31926f2a	c6b471a6b1c5ef87
-EscalationSchema	value	f79585fc2921a1df	c8be2ff30b0a20a6
+EscalationSchema	value	a1f77cf7b35c493c	e88daa7f9002ca83
 EscalationStatus	type	a7c0c341e7582574	-
 EscalationStatusSchema	value	bd1293e1b774ad5b	e3317a5f179af8d4
 FAILURE_CLASSES	value	8ef3b7a86454b6df	a793e5c61b256770
@@ -262,6 +262,8 @@ GateConfig	type	40f29471d2999cf2	-
 GateConfigSchema	value	3630f64bca7915bb	4d78d7804239827d
 GateFlags	type	77969681203576cb	-
 GateFlagsSchema	value	d40f32266fa7469b	f46dd694654ca55c
+GateHandoff	type	6ea1dbe3500c48f0	-
+GateHandoffSchema	value	c383f06d9912e196	3f5d12c64e121b29
 GateRecoveryAnchorSchema	value	94b1ca225f574209	f80910bfba2dde82
 GateRecoveryAttemptClaimSchema	value	58f082e6e8f06493	d34814d513adf19d
 GateRecoveryAttemptSchema	value	435d673a77dbdac9	39325b05d62bbe35
@@ -338,10 +340,13 @@ MODE_SETTINGS	value	a09441fb2fcfe5f9	c9b1a20166e4ce59
 Mandate	type	36f40420851d2648	-
 MandateAction	type	a5670930f3415fa2	-
 MandateActionSchema	value	da9c9c8a5d81337f	1756035535c14214
+MandateAdmissionSchema	value	3cb6cb1d703efed4	a74e7804cc71627f
 MandateAskOn	type	b3ce7197b7ec18cf	-
 MandateAskOnSchema	value	d7f937892a60da61	2eceee3a288c793d
 MandateChannel	type	94a5868ebdef3748	-
 MandateChannelSchema	value	67315ce4de204a31	b0334d67cf02a618
+MandateContinuity	type	4c11c94007ad1d8b	-
+MandateContinuitySchema	value	a9be4e9c1d793559	3045c96b53ae3545
 MandateDecisionRecord	type	bda9734b6209885c	-
 MandateDecisionRecordSchema	value	d5ae9f379d399c41	74a314c5f55bbc1e
 MandateDefaultableField	type	066b993e666de65b	-
@@ -355,7 +360,7 @@ MandateIdSchema	value	1d5becbe159e38b3	2b839068d3ec6157
 MandatePolicySchema	value	287571ca3a575413	7e2399a0a1ee09c2
 MandateProvenance	type	483039dec428e70a	-
 MandateRevokedBy	type	72adc3133e08ada6	-
-MandateSchema	value	9fa57d9bd0a33333	90a7404920978c0c
+MandateSchema	value	46b4445456a3e8d3	fc184b40ca3af536
 MandateStatus	type	499e338227619f96	-
 MandateStatusSchema	value	9f4f11e032e35765	1ad0a168ea5f24f0
 MergeAuthority	type	02b381902047206c	-
@@ -412,7 +417,7 @@ ParkedPrWatchSchema	value	c2224cc4553aaf0d	6425dc89972233a6
 PendingReview	type	1d2b70901354f318	-
 PendingReviewSchema	value	df67b2e223b15182	e5a6c18bf4aa0986
 PipelineRecord	type	7aa9b3723668ecd5	-
-PipelineRecordSchema	value	1ebe073a4d90612e	e83e04d514b24d34
+PipelineRecordSchema	value	0dfc6d88b5074875	c46c498bdd40ee81
 PipelineState	type	65f9560fd757dad3	-
 PipelineStateSchema	value	802041ac1043c7e8	62d38d82ad9f7d17
 PlanSummary	type	b350845c8f18fb63	-
@@ -556,6 +561,8 @@ SUGGEST_MAX_OUTPUT_TOKENS	value	eb6c3fdb81fad6ce	51e8ea280b44e169
 SUGGEST_PROMPT_MAX_CHARS	value	a9389e6a963d0b01	15197cf7214b58e6
 SUMMARY_MAX_CHARS	value	72183bdaed455972	284b7e6d788f363f
 SUMMARY_MAX_LINES	value	44c99cee12d3fb05	4e07408562bedb8b
+SameWorkReplacement	type	32384d6d08d3a88e	-
+SameWorkReplacementSchema	value	dfff389a3d428046	908faf915d87f600
 ScheduleFire	type	a41d836c324e5654	-
 ScheduleFireSchema	value	aedddeaa9f1a0f56	54ace5123a16ad9b
 Scope	type	9fbf012ba5215f97	-
@@ -689,7 +696,7 @@ neverCommitFor	value	f26264cc47ebc8f5	1080a2a38c3665e6
 normalizeLegacyRoles	value	1ab16b55d306df9c	ca1e9f09ba9ac2b1
 parseCheckpointAwaitingId	value	7cb36ab1c05fe202	49477f7f3c577cb7
 parseCheckpointFileName	value	80a0472e39bfbed2	6b6eb72177de157a
-paths	value	d772c172fe483d36	65f0bad281e79d59
+paths	value	acf48b86d0c21e55	f888f9fc545cb64d
 planSummaryErrors	value	813cff175b953b5d	82dd7d8bde478008
 plannerBlockedRoundAction	value	f1df9ec96df23256	fe4583526a990d23
 runtimeDirFor	value	9c6283c46ec843ec	65500d2fc48056d8

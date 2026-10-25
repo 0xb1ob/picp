@@ -20,7 +20,7 @@ export function selectReviewerModel(input: {
 	model?: string;
 	record?: FleetRecord;
 	registry?: Pick<ProjectRegistry, "get">;
-	mandates?: Pick<MandateStore, "list" | "scheduleOf" | "scheduleMandates"> & { scheduleRuns?: ScheduleRunStore };
+	mandates?: Pick<MandateStore, "list" | "scheduleOf" | "scheduleMandates"> & Partial<Pick<MandateStore, "continuationProof">> & { scheduleRuns?: ScheduleRunStore };
 	now?: Date;
 }): ReviewerModelSelection | undefined {
 	const { record, mandates } = input;
@@ -35,6 +35,7 @@ export function selectReviewerModel(input: {
 		const subject = {
 			jobId: record.job_id, project: record.project, jobKind: record.kind,
 			startedAt: record.dispatched_at, inFlight: true,
+			continuationProof: mandates.continuationProof?.(record.job_id),
 			...(record.schedule_id ? scheduleScope(record.schedule_id, mandates.scheduleMandates()) : mandates.scheduleOf(record.job_id)),
 		};
 		const eligible = mandates.list().filter((grant) => grant.reviewer_model !== undefined && grant.status !== "paused" && grant.status !== "revoked")

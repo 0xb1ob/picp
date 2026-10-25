@@ -374,7 +374,7 @@ test("grantStanding: the complete status x use x in-flight matrix", () => {
 	assert.equal(isInFlight({ jobId: "cp-a", project: "other", jobKind: "research" }, fleet), false);
 });
 
-test("a reviewer start keeps its pre-rule path under an expired grant: no fleet record, review not allowed, cap reached all pass; paused and revoked still refuse", (t) => {
+test("a reviewer start keeps its pre-rule path under an expired grant: no fleet record, review not allowed, cap reached all pass; paused and revoked still refuse", async (t) => {
 	const job = { jobId: "cp-old", project: "demo", kind: "ship" as const };
 	const held = [{ job_id: "cp-old", project: "demo", kind: "ship" as const, phase: "held" }];
 	// label, grant overrides, then-status, fleet, reviewer start refused?, repair (the expiry policy, unchanged) refused?
@@ -394,9 +394,9 @@ test("a reviewer start keeps its pre-rule path under an expired grant: no fleet 
 		const grant = issueGrant(store, { expiry: status ? later() : earlier(1_000), at: earlier(), ...over });
 		if (status === "paused") store.pause(grant.id);
 		if (status === "revoked") store.revoke(grant.id);
-		if (refused) assert.throws(() => assertReviewAllowed(store, job, jobs), refused, label);
+		if (refused) await assert.rejects(() => assertReviewAllowed(store, job, jobs), refused, label);
 		else {
-			assert.doesNotThrow(() => assertReviewAllowed(store, job, jobs), label);
+			await assert.doesNotReject(() => assertReviewAllowed(store, job, jobs), label);
 			assert.deepEqual(store.assertPermitted("review", job, jobs), {}, `${label}: the expired grant does not speak`);
 		}
 		if (repairRefused) assert.throws(() => store.assertPermitted("repair", job, jobs), repairRefused, `${label}: repair keeps its policy`);

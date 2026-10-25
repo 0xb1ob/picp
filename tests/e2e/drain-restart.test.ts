@@ -152,8 +152,10 @@ test("S26: public dispatch gates heal only spent foreign drains and reopen after
 	]).flat()];
 	const model = provider.addScript("s26-gates", steps);
 	const agent = createAgentDir({ provider });
-	const spawnedAt = Date.now();
-	const child = startPiChild({ cwd: home.path, model, extensions: [COMMAND_POST_EXTENSION], env: { ...agent.env, CP_HOME: home.path } });
+	const clockFile = join(home.path, "process-start.txt");
+	const clockExtension = join(home.path, "process-clock.ts");
+	writeFileSync(clockExtension, `import { writeFileSync } from "node:fs"; export default function () { writeFileSync(${JSON.stringify(clockFile)}, String(Date.now() - process.uptime() * 1000)); }`);
+	const child = startPiChild({ cwd: home.path, model, extensions: [clockExtension, COMMAND_POST_EXTENSION], env: { ...agent.env, CP_HOME: home.path } });
 	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
 	await child.prompt("Ready.");
 	await child.waitForSettled(30_000);
@@ -188,6 +190,7 @@ test("S26: public dispatch gates heal only spent foreign drains and reopen after
 	assert.match(recovery, /recovery:drain:2020-01-01T00:00:00Z/);
 	assert.equal(child.records().filter((r) => r.type === "message_start" && JSON.stringify(r).includes("RESTART AFTER DRAIN")).length, 1, "one recovery reaches the actual session");
 	await probe();
+	const spawnedAt = Number(readFileSync(clockFile, "utf8"));
 	writeFileSync(file, JSON.stringify({ ...base, finished_at: new Date(spawnedAt).toISOString().slice(0, 19) + "Z" }));
 	assert.match(await probe(), /parent is draining/, "a drain finished in the process-start second is not proven spent");
 	rmSync(file);
