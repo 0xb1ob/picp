@@ -24,5 +24,5 @@
 |---|---|---|---|
 | `tests/awaiting-merge-tick.test.ts` | deleted | P3c-rest | RENAME ONLY, not retired coverage: tests/awaiting-merge-tick-retained.test.ts keeps both declarations (convert, owner P3c-rest). The checker requires `deleted` for an absent baseline path; it rejects `retained` unless that original path exists. Both assertion dispositions remain retained, with zero removed-declaration or deleted-file credit. |
 | `tests/ci-watch.test.ts` | deleted | S10b | 80 declarations: 75 mapped, five retained verbatim in tests/ci-watch-retained.test.ts (S02 6/8/32/33 and S03 70), zero pending. S10b maps 71 with the executed two-cause RPC control and replays the inherited controls; canonical evidence in testing-migration/s10b.md. |
-| `tests/integrate-held-ci.test.ts` | deleted | P3c-rest | S07: three declarations mapped to 05-13 and 05-S07; NC-37 and S07-NC-1..3; S03 strengthens startup recomputation, actual worker death and queued integrate assertions; original blob 367d199760c7c5927e5cc1fe268aa97d862bc4e5 |
+| `tests/integrate-held-ci.test.ts` | deleted | P3c-rest | S07: three declarations mapped to 05-13 and 05-S07; NC-37 and S07-NC-1..3; S03 strengthens startup recomputation, actual worker death and queued integrate assertions |
 <!-- /manifest:baseline -->
