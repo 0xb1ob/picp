@@ -3,7 +3,7 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P9f (cp-e2e-migration-p9f-4ylo) | behavior 11, sixth slice: the operator's relay consumer (`tests/operator-delivery.test.ts`) through a real cp-bridge in an RPC operator over a seeded home, in `tests/e2e/operator-relay-p9f.test.ts` (24 declarations: 16 mapped, 8 retained verbatim in `tests/operator-delivery-retained.test.ts`; controls P9f-R1..R15, P9f-T1..T4); the parent send outbox (`tests/parent-outbox.test.ts`) through the in-process CpBridge, a real parent host process and the dashboard restart preflight, in `tests/e2e/parent-send-p9f.test.ts` and S26-dashboard-refusals (20 declarations: 18 mapped, 2 retained verbatim in `tests/parent-outbox-retained.test.ts`; controls P9f-S1..S21). Also aligns p9.md's P9b assertion notes with their `P9b-NC*` ids (#523 review low) and maps `relayIdsOfMessage` through a seeded legacy session (P9f-relay-legacy-ids, #515 review low) | 2 (mixed moves: no fully-deleted-file credit) |
+| P9f (cp-e2e-migration-p9f-4ylo) | behavior 11, sixth slice: the operator's relay consumer (`tests/operator-delivery.test.ts`) through a real cp-bridge in an RPC operator over a seeded home, in `tests/e2e/operator-relay-p9f.test.ts` (24 declarations: 16 mapped, 8 retained verbatim in `tests/operator-delivery-retained.test.ts`; controls P9f-R1..R15, P9f-T1..T4); the parent send outbox (`tests/parent-outbox.test.ts`) through the in-process CpBridge, a real parent host process and the dashboard restart preflight, in `tests/e2e/parent-send-p9f.test.ts` and S26-dashboard-refusals (20 declarations: 18 mapped, 2 retained verbatim in `tests/parent-outbox-retained.test.ts`; controls P9f-S1..S21); envelope intake (`tests/intake.test.ts`) through the real parent's startup intake over a seeded home, in `tests/e2e/intake-p9f.test.ts` (20 declarations: 18 mapped, 2 retained verbatim in `tests/board-publish-retained.test.ts`; controls P9f-I1..I12). Also aligns p9.md's P9b assertion notes with their `P9b-NC*` ids (#523 review low) and maps `relayIdsOfMessage` through a seeded legacy session (P9f-relay-legacy-ids, #515 review low) | 3 (mixed moves: no fully-deleted-file credit) |
 <!-- /manifest:ledger -->
 
 Behavior 11, sixth slice. P9f-relay-recheck seeds the relay outbox and ack journal, escalations, the fleet, a drain record and
@@ -24,10 +24,15 @@ tolerant read's one consumer. Not reachable: the notice-once guards in `overdue`
 alone (P9f-S16 removes both); `reserveOuterRetry`'s invalid-limit refusal takes the only caller's constant, whose cap
 P9f-send-ladder pins.
 
+P9f-intake-* seed fleet records, envelopes, artifacts and board sites on a scratch home and start the real parent in
+RPC pi: its startup intake takes each envelope and the cp-envelope wakes carry the card. A FIFO under a board site hangs
+the parent's startup when its refusal is removed (P9f-I10). A refused no-tailnet board still leaves
+`state/boards/<id>` behind; the unit never asserted otherwise, so it is reported, not pinned.
+
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
-| P9f | 11 | `tests/e2e/operator-relay-p9f.test.ts`, `tests/e2e/parent-send-p9f.test.ts` | 7 |
+| P9f | 11 | `tests/e2e/operator-relay-p9f.test.ts`, `tests/e2e/parent-send-p9f.test.ts`, `tests/e2e/intake-p9f.test.ts` | 9 |
 <!-- /manifest:prs -->
 
 <!-- manifest:scenarios -->
@@ -40,6 +45,8 @@ P9f-send-ladder pins.
 | P9f-send-batch | `tests/e2e/parent-send-p9f.test.ts` | P9f-send-batch: sends landing in one span share one reply, a stop names what reached the parent, and a new owner relays the unobserved |
 | P9f-send-reconcile | `tests/e2e/parent-send-p9f.test.ts` | P9f-send-reconcile: a restart lands, requeues or names each injected send, expires the stale one and trims observed history |
 | P9f-send-ladder | `tests/e2e/parent-send-p9f.test.ts` | P9f-send-ladder: a transient failure retries the same send id up to the ladder's cap, counted per send and kept on disk |
+| P9f-intake-policy | `tests/e2e/intake-p9f.test.ts` | P9f-intake-policy: a restart takes each settled envelope once, by delivery, and never carries an artifact body |
+| P9f-intake-board | `tests/e2e/intake-p9f.test.ts` | P9f-intake-board: a board envelope publishes its site at the viewer's address, and bad boards are refused with a reason |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -89,6 +96,26 @@ P9f-send-ladder pins.
 | tests/parent-outbox.test.ts | reserveOuterRetry returns no ordinal when nothing was persisted | — | retained | kept verbatim in tests/parent-outbox-retained.test.ts; a state change between the read and the write needs an interleave no entry point injects |
 | tests/parent-outbox.test.ts | pending_notice_at round-trips the schema; markPendingNotice writes once and never on a terminal send | P9f-send-reconcile | mapped | two sweeps, one notice, stamped on disk; control P9f-S16 |
 | tests/parent-outbox.test.ts | unload-parent PR3: sends sharing a span end share one reply; separate spans and failed marks keep their own | P9f-send-batch | mapped | three sends in one span: one reply and two pointers, the earlier span's own reply; control P9f-S6 |
+| tests/intake.test.ts | board delivery publishes a static site and relays its URL | P9f-intake-board | mapped | the board receipt, the wake's board line and the copied site; controls P9f-I7, P9f-I12 |
+| tests/intake.test.ts | production intake uses the viewer's configured address | P9f-intake-board | mapped | CP_VIEWER_HOST/CP_VIEWER_PORT in the parent's env name the url |
+| tests/intake.test.ts | board delivery with no configured viewer host resolves the tailnet address the viewer binds under --require-tailnet, never a default (pi-command-post-1jz) | P9f-intake-board | mapped | a fake `tailscale ip -4` on the parent's PATH; control P9f-I9 |
+| tests/intake.test.ts | board delivery with no configured viewer host and no tailnet is refused, never silently defaulted (pi-command-post-1jz) | P9f-intake-board | mapped | a failing `tailscale`: the refusal names require-tailnet and nothing is stamped |
+| tests/intake.test.ts | board publication refuses a site file swapped to an external symlink after validation | — | retained | kept verbatim in tests/board-publish-retained.test.ts; the swap needs publishBoard's test-only hook between validation and copy |
+| tests/intake.test.ts | board publication rejects a directory swapped to a symlink while staging | — | retained | kept verbatim in tests/board-publish-retained.test.ts; the swap needs publishBoard's test-only hook while staging |
+| tests/intake.test.ts | board publication refuses a FIFO under site without blocking | P9f-intake-board | mapped | a FIFO under site is refused with its reason; control P9f-I10 hangs the parent's startup |
+| tests/intake.test.ts | bad board metadata, slug and external symlinks refuse the envelope with a reason | P9f-intake-board | mapped | json, date, slug, link and traverse refused with their reasons, nothing published; controls P9f-I8, P9f-I11 |
+| tests/intake.test.ts | delivery:pr holds; delivery:local is ready for teardown | P9f-intake-policy | mapped | the hold and teardown wakes, PR receipt and line; control P9f-I1 |
+| tests/intake.test.ts | a ship envelope with no CI claim is accepted, and its pushed head sha becomes a receipt (cp-kzc) | P9f-intake-policy | mapped | the unverified ci receipt titled with the head; control P9f-I2 |
+| tests/intake.test.ts | cp-u3o4: a delivery:answer envelope is teardown-next, and onReported carries a pointer only | P9f-intake-policy | mapped | the answer wake is teardown-next and carries no body; control P9f-I1 |
+| tests/intake.test.ts | a research artifact is registered by stat and move, never read | P9f-intake-policy | mapped | the stored artifact and receipt; no body in any wake or the fleet; control P9f-I3 |
+| tests/intake.test.ts | re-reporting is idempotent; the second intake writes nothing | P9f-intake-policy | mapped | a second start: no wake, no restamp, one envelope_received per job |
+| tests/intake.test.ts | a blocked envelope is accepted, with its blockers | P9f-intake-policy | mapped | the wake's blockers line; control P9f-I4 |
+| tests/intake.test.ts | a blocked planner envelope waits, and the wake-up carries the questions not the body | P9f-intake-policy | mapped | waiting, round 1, both questions and no body or path; control P9f-I5 |
+| tests/intake.test.ts | the third blocked planner round escalates instead of asking the parent | P9f-intake-policy | mapped | an es- id and do-not-answer in the wake; control P9f-I6 |
+| tests/intake.test.ts | an envelope that contradicts the dispatch record is refused, then fails the job when it is repeated | S27-intake-invalid | mapped | cp-conflict is quarantined, then fails envelope_invalid on repeat |
+| tests/intake.test.ts | an exhausted worker (envelope-rejected.json) is an envelope_invalid failure | 04-4 | mapped | a real worker's rejection file fails the job envelope_invalid and the job stays failed |
+| tests/intake.test.ts | nothing on disk yet is not an error | P9f-intake-policy | mapped | cp-quiet stays waiting and unstamped; the parent only intakes fleet records, so the unknown-id refusal has no caller |
+| tests/intake.test.ts | intake fires from the worker's own event stream | P9e-settle | mapped | a real worker's report_result is stamped by the settle watcher |
 <!-- /manifest:assertions -->
 
 <!-- manifest:regressions -->
@@ -136,6 +163,18 @@ P9f-send-ladder pins.
 | P9f-S19 | tests/parent-outbox.test.ts | P9f-send-reconcile | a landed send never ages out | the silent send's `no reply within 24 h of landing` |
 | P9f-S20 | tests/parent-outbox.test.ts | S26-dashboard-refusals | the restart read keeps unknown fields | the refusal never names `cp_parent send <id> pending` |
 | P9f-S21 | tests/parent-outbox.test.ts | P9f-send-batch | sendIdOfMessage reads any custom message type | `a foreign message observes nothing` |
+| P9f-I1 | tests/intake.test.ts | P9f-intake-policy | every delivery but local holds | `only pr holds; an answer needs no PR` |
+| P9f-I2 | tests/intake.test.ts | P9f-intake-policy | the ci receipt drops the head sha | `silence about CI is accepted; the parent verifies the pushed head itself` |
+| P9f-I3 | tests/intake.test.ts | P9f-intake-policy | no artifact receipt is stored | the cp-question artifact receipt's `stored` status |
+| P9f-I4 | tests/intake.test.ts | P9f-intake-policy | the wake drops the blockers line | the `blockers: migration needs owner sign-off` match |
+| P9f-I5 | tests/intake.test.ts | P9f-intake-policy | the planner round is never counted | `a blocked planner waits for an answer` |
+| P9f-I6 | tests/intake.test.ts | P9f-intake-policy | every planner round asks the parent | `the third round escalates` |
+| P9f-I7 | tests/intake.test.ts | P9f-intake-board | the board receipt is never stored | `the board url survives as a durable receipt, not only the one-time wake text` |
+| P9f-I8 | tests/intake.test.ts | P9f-intake-board | the artifact_path check is removed | timed out waiting for every bad board refused with its reason |
+| P9f-I9 | tests/intake.test.ts | P9f-intake-board | an unconfigured host is loopback | `never the loopback default` |
+| P9f-I10 | tests/intake.test.ts | P9f-intake-board | a non-regular site entry is skipped, not refused | the parent's startup times out on the FIFO |
+| P9f-I11 | tests/intake.test.ts | P9f-intake-board | the board slug check is removed | timed out waiting for every bad board refused with its reason |
+| P9f-I12 | tests/intake.test.ts | P9f-intake-board | the wake drops the board line | the `board: http://127.0.0.2:9911/boards/cp-board/` match |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->
@@ -145,4 +184,6 @@ P9f-send-ladder pins.
 | tests/operator-delivery-retained.test.ts | cp-e2e-migration-p9f-4ylo | eight verbatim declarations: reclaim, emit_failed and the answered backstop recheck no real pi reaches |
 | tests/e2e/parent-send-p9f.test.ts | cp-e2e-migration-p9f-4ylo | P9f-send-receipts, -batch, -reconcile, -ladder through CpBridge and a real parent host |
 | tests/parent-outbox-retained.test.ts | cp-e2e-migration-p9f-4ylo | two verbatim declarations: a refused RPC write's rollback and the reserveOuterRetry read/write race |
+| tests/e2e/intake-p9f.test.ts | cp-e2e-migration-p9f-4ylo | P9f-intake-policy, P9f-intake-board through the real parent's startup intake |
+| tests/board-publish-retained.test.ts | cp-e2e-migration-p9f-4ylo | two verbatim declarations: symlink swaps during board publication |
 <!-- /manifest:incoming -->

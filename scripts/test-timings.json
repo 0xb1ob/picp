@@ -161,7 +161,6 @@
 	"tests/human-handoff.test.ts": 40,
 	"tests/install-nudge.test.ts": 1,
 	"tests/install-tools.test.ts": 3288,
-	"tests/intake.test.ts": 1130,
 	"tests/integrate-retained.test.ts": 3183,
 	"tests/job-skills-retained.test.ts": 1285,
 	"tests/parent-control-retained.test.ts": 12,
