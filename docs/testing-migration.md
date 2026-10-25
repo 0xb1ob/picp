@@ -6,13 +6,12 @@ negative control (the old defect patched back fails the e2e, the fix passes it).
 validates this file and the per-slice ledger against git; it imports no production code.
 
 The ledger rows are moving out of this file, one file per slice, into `docs/testing-migration/<slice>.md`: that
-slice's rows of the seven `manifest:*` tables and its regression patch blocks. The checker reads this file and every
+slice's rows of the seven `manifest:*` tables. The checker reads this file and every
 slice file as one union, so duplicate ids and the baseline counts are checked across both. A new slice adds its own
 file. `node scripts/split-migration-ledger.ts --list | <slice...>` moves rows mechanically; never hand-move them.
 
 ```
 node scripts/test-migration-check.ts --base 0a4a8944dd7292e458dbd2ec4afbf6d2b89d197e --manifest docs/testing-migration.md
-node scripts/test-migration-check.ts --manifest docs/testing-migration.md --verify-regressions
 node scripts/test-migration-check.ts --manifest docs/testing-migration.md --runner-log <saved test:one output>
 node scripts/test-migration-check.ts --manifest docs/testing-migration.md --preserved-from <ref before a split>
 ```
@@ -412,13 +411,13 @@ run, the patch reversed, and the same command run again: 2 pass, 0 fail, 0 skipp
 `90c1f22ba20c416abc9fc96b04addd07e2f58ed3` (#131), which added `src/ci-run-ref.ts`. Its whole diff is not
 reverted; each patch puts back one rule it introduced.
 
-What `--verify-regressions` checks: only that each recorded patch block hashes to its sha256, and that the bug commit
-exists in this repository. It does not apply the patch, and it does not rerun the e2e. The failing and fixed runs
-quoted below were run by hand when each control was recorded, and they are evidence only to that extent.
+A negative-control row needs only the scenario, the control (the bug patched back, in words) and the failing
+assertion: `| ID | Unit file | Scenario | Control | Failing assertion |`. Record no patch, commit sha or hash; the
+checker reads older 8-cell rows' patch id as their control and verifies none of their other cells.
 
 <!-- manifest:regressions -->
-| ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
-|---|---|---|---|---|---|---|---|
+| ID | Unit file | Scenario | Control | Failing assertion |
+|---|---|---|---|---|
 
 <!-- /manifest:regressions -->
 
