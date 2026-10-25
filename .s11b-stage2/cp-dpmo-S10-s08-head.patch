@@ -1,0 +1,22 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..85d399d 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -357,7 +357,7 @@ export class Integrator {
+ 		// checkpoint's file name, the record's `head_sha`) is schema-bound to hex, and
+ 		// a surprising value from gh must degrade to "no head" rather than throw out
+ 		// of the middle of a merge.
+-		const head = hexSha(view.value.headRefOid);
++		const head = hexSha(JSON.parse(readFileSync(join(this.#options.home, paths.envelopeFile(jobId)), "utf8")).envelope?.head_sha);
+ 		facts.push(`gh: ${prUrl} is ${state || "in an unknown state"}${head ? ` at ${head.slice(0, 12)}` : ""}`);
+ 
+ 		if (view.value.headRefName && view.value.headRefName !== branch) {
+@@ -572,7 +572,7 @@ export class Integrator {
+ 				reason: permView.reason,
+ 			});
+ 		}
+-		const permHead = hexSha(permView.value.headRefOid);
++		const permHead = head;
+ 		if (!permHead || !shaMatches(permHead, head)) {
+ 			return this.#write({
+ 				jobId,

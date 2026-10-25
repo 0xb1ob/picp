@@ -1,0 +1,13 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S02: watcher queries tests/e2e/landing-ci-watch.test.ts
+
+✔ landing S02: watcher queries stay nonblocking while workers refuse CI waits (2793.525842ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4332.313649

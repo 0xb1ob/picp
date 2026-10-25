@@ -1,0 +1,20 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S10:.*unreadable forge tests/e2e/landing-merge.test.ts
+
+▶ landing S10: unreadable forge and Actions evidence names the cause and makes no mutation
+  ✔ rate (2525.919989ms)
+  ✔ permission (2509.135046ms)
+  ✔ jobs-denied (2621.196089ms)
+  ✔ jobs-partial (2435.324255ms)
+  ✔ jobs-malformed (4757.691678ms)
+  ✔ missing-gh (2522.162266ms)
+✔ landing S10: unreadable forge and Actions evidence names the cause and makes no mutation (17374.668998ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 18979.795917

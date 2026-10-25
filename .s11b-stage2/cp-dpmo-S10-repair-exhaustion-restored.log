@@ -1,0 +1,16 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S09:.*real repair tests/e2e/landing-s09.test.ts
+
+▶ landing S09: a real repair stays single while active and conflict handoffs follow heads
+  ✔ red (3136.093451ms)
+  ✔ conflict (3209.832292ms)
+✔ landing S09: a real repair stays single while active and conflict handoffs follow heads (6347.611996ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7880.295449

@@ -1,0 +1,59 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S10:.*cleanup failures tests/e2e/landing-merge.test.ts
+
+▶ landing S10: cleanup failures preserve landed effects and resume
+  ✖ delete (4655.829794ms)
+  ✖ close (4726.647208ms)
+  ✔ rebase (2567.927842ms)
+  ✔ merge-unknown (2874.09658ms)
+✖ landing S10: cleanup failures preserve landed effects and resume (14826.601318ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 2
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16404.524509
+
+✖ failing tests:
+
+test at tests/e2e/landing-merge.test.ts:225:77
+✖ delete (4655.829794ms)
+  AssertionError [ERR_ASSERTION]: {"job_id":"cp-3l79","key":"cp-3l79|04e293461e95cfa72efe0c37218b348073b0d66d|startup@1","action":"wait","steps":1,"reason":"cp-3l79: merged and torn down, but origin/cp-3l79 could not be deleted (protected branch). Everything else stands; retry, or delete it on GitHub.","next":"wait"}
+  
+  'wait' !== 'retry'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:260:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:225:69)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'wait',
+    expected: 'retry',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:225:77
+✖ close (4726.647208ms)
+  AssertionError [ERR_ASSERTION]: {"job_id":"cp-530h","key":"cp-530h|cda351af4cf265bfd479d6908e34c9ccd41aed25|startup@1","action":"wait","steps":1,"reason":"cp-530h: merged, torn down and the head deleted, but the job is still open (/tmp/cp-home-6hUNMn/.pi-command-post/jobs.json is not JSON: Expected property name or '}' in JSON at position 1 (line 1 column 2)). Retry, or close it by hand with a reason.","next":"wait"}
+  
+  'wait' !== 'retry'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:260:10)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:225:69)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'wait',
+    expected: 'retry',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

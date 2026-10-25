@@ -1,0 +1,13 @@
+diff --git a/src/merge-permission.ts b/src/merge-permission.ts
+index 0935c95..32d560b 100644
+--- a/src/merge-permission.ts
++++ b/src/merge-permission.ts
+@@ -69,7 +69,7 @@ export interface BranchRule {
+ 	parameters?: Record<string, unknown>;
+ }
+ 
+-const PERMITTED_MERGE_STATES = new Set(["CLEAN", "HAS_HOOKS"]);
++const PERMITTED_MERGE_STATES = new Set(["CLEAN", "HAS_HOOKS", "BLOCKED"]);
+ const REVIEW_BLOCKING = new Set(["REVIEW_REQUIRED", "CHANGES_REQUESTED"]);
+ const REASON_MAX_CHARS = 500;
+ 

@@ -1,0 +1,30 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit tests/e2e/landing-review-window.test.ts
+
+✔ landing S15 retry: real parent delivery confirms, retries withheld verdicts and expires permanent suppression (49076.784585ms)
+✔ S21b: verdict delivery precedes the merge-window notice (3350.511492ms)
+✔ landing S15 order: a real verdict wakes the parent before its deadline continuation merges (8806.140039ms)
+✔ landing S15: durable review evidence owns the merge window across parent restarts (8354.462939ms)
+▶ landing: the review deadline resumes once and rechecks current gates
+  ✔ repository/hold (6937.56956ms)
+  ✔ repository/unreadable-hold (6858.917647ms)
+  ✔ repository/head (6635.589997ms)
+  ✔ repository/ci (6571.589127ms)
+  ✔ repository/permission (6661.654566ms)
+  ✔ repository/none (6670.358571ms)
+  ✔ fallback/hold (7036.135759ms)
+  ✔ fallback/unreadable-hold (6916.325221ms)
+  ✔ fallback/head (6664.992578ms)
+  ✔ fallback/ci (6664.213551ms)
+  ✔ fallback/permission (6614.497272ms)
+  ✔ fallback/none (6555.208995ms)
+✔ landing: the review deadline resumes once and rechecks current gates (80790.577227ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 151946.578037

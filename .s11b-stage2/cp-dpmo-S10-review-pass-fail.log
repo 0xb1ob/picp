@@ -1,0 +1,105 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S10:.*review evidence tests/e2e/landing-merge.test.ts
+
+▶ landing S10: review evidence authorizes only the reviewed complete head
+  ✔ missing (2602.41693ms)
+  ✖ pass (2634.766693ms)
+  ✖ equivalent (2498.012764ms)
+  ✔ moved (2573.818316ms)
+  ✔ revise (2552.323882ms)
+  ✔ flagged (2523.804841ms)
+  ✖ approved (2498.249292ms)
+  ✔ truncated (2491.825542ms)
+  ✔ truncated-flag (2540.565573ms)
+  ✔ moved-flag (2498.379613ms)
+  ✔ fallback (2500.357562ms)
+✖ landing S10: review evidence authorizes only the reviewed complete head (27918.244853ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 8
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 29479.803364
+
+✖ failing tests:
+
+test at tests/e2e/landing-merge.test.ts:168:163
+✖ pass (2634.766693ms)
+  AssertionError [ERR_ASSERTION]: gh: https://github.com/example/demo/pull/912 is OPEN at 0de770e06a29
+  ci: green — CI green on 0de770e
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at 0de770e06a29 — the merge is unforced
+  review: no pass on 0de770e06a29
+  cp-f8m8: no passing cp_review on 0de770e06a29. Run cp_review on that head, or authorize a flagged escalate via the diff checkpoint; never re-review an unchanged one. Nothing was merged.
+  + actual - expected
+  
+  + 'review'
+  - 'advance'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:199:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:168:155)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'review',
+    expected: 'advance',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:168:163
+✖ equivalent (2498.012764ms)
+  AssertionError [ERR_ASSERTION]: gh: https://github.com/example/demo/pull/912 is OPEN at f4e7c14a8ea5
+  ci: green — CI green on f4e7c14
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at f4e7c14a8ea5 — the merge is unforced
+  review: no pass on f4e7c14a8ea5
+  cp-se5q: no passing cp_review on f4e7c14a8ea5. Run cp_review on that head, or authorize a flagged escalate via the diff checkpoint; never re-review an unchanged one. Nothing was merged.
+  + actual - expected
+  
+  + 'review'
+  - 'advance'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:199:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:168:155)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'review',
+    expected: 'advance',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:168:163
+✖ approved (2498.249292ms)
+  AssertionError [ERR_ASSERTION]: gh: https://github.com/example/demo/pull/912 is OPEN at 96848a66f8c9
+  ci: green — CI green on 96848a6
+  permission: permitted — GitHub reports mergeStateStatus=CLEAN at 96848a66f8c9 — the merge is unforced
+  review: no pass on 96848a66f8c9
+  cp-shf0: no passing cp_review on 96848a66f8c9. Run cp_review on that head, or authorize a flagged escalate via the diff checkpoint; never re-review an unchanged one. Nothing was merged.
+  + actual - expected
+  
+  + 'review'
+  - 'advance'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:199:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:168:155)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'review',
+    expected: 'advance',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

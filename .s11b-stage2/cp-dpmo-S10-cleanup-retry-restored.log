@@ -1,0 +1,18 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S10:.*cleanup failures tests/e2e/landing-merge.test.ts
+
+▶ landing S10: cleanup failures preserve landed effects and resume
+  ✔ delete (4808.318942ms)
+  ✔ close (4465.082196ms)
+  ✔ rebase (2417.263461ms)
+  ✔ merge-unknown (2786.488343ms)
+✔ landing S10: cleanup failures preserve landed effects and resume (14479.130154ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16126.594852

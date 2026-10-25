@@ -1,0 +1,132 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S10:.*unreadable forge tests/e2e/landing-merge.test.ts
+
+▶ landing S10: unreadable forge and Actions evidence names the cause and makes no mutation
+  ✖ rate (2597.795436ms)
+  ✖ permission (2586.797987ms)
+  ✖ jobs-denied (2581.498011ms)
+  ✖ jobs-partial (2477.18476ms)
+  ✖ jobs-malformed (4776.07985ms)
+  ✔ missing-gh (2517.04013ms)
+✖ landing S10: unreadable forge and Actions evidence names the cause and makes no mutation (17538.71813ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 1
+ℹ fail 6
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19098.251422
+
+✖ failing tests:
+
+test at tests/e2e/landing-merge.test.ts:210:116
+✖ rate (2597.795436ms)
+  AssertionError [ERR_ASSERTION]: gh: https://github.com/example/demo/pull/913 is OPEN at 7a30cd29ee6e
+  Actions CI read rate_limited: gh api repos/{owner}/{repo}/actions/runs?head_sha=7a30cd29ee6ea2a1e2a9702ac09bd568464b0658&per_page=100&page=1
+  cp-a82h: could not read CI for cp-a82h (Actions CI read rate_limited: gh api repos/{owner}/{repo}/actions/runs?head_sha=7a30cd29ee6ea2a1e2a9702ac09bd568464b0658&per_page=100&page=1). Nothing was merged.
+  
+  'advance' !== 'retry'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:217:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:210:108)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'retry',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:210:116
+✖ permission (2586.797987ms)
+  AssertionError [ERR_ASSERTION]: gh: https://github.com/example/demo/pull/913 is OPEN at 1082c345d675
+  Actions CI read denied: gh api repos/{owner}/{repo}/actions/runs?head_sha=1082c345d6758a46e6a5b040de34fe3112f9bad8&per_page=100&page=1 (HTTP 403)
+  cp-rtbg: could not read CI for cp-rtbg (CI unreadable — token lacks Actions read; needs fine-grained PAT: Actions read + Contents read + Metadata read + Pull requests read; classic: repo). Nothing was merged.
+  
+  'advance' !== 'retry'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:217:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:210:108)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'retry',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:210:116
+✖ jobs-denied (2581.498011ms)
+  AssertionError [ERR_ASSERTION]: gh: https://github.com/example/demo/pull/913 is OPEN at e3b7ae57c93c
+  Actions CI read denied: gh api repos/{owner}/{repo}/actions/runs/913/attempts/1/jobs?per_page=100&page=1 (HTTP 403)
+  cp-vn5j: could not read CI for cp-vn5j (CI unreadable — token lacks Actions read; needs fine-grained PAT: Actions read + Contents read + Metadata read + Pull requests read; classic: repo). Nothing was merged.
+  
+  'advance' !== 'retry'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:217:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:210:108)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'retry',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:210:116
+✖ jobs-partial (2477.18476ms)
+  AssertionError [ERR_ASSERTION]: gh: https://github.com/example/demo/pull/913 is OPEN at 7afc9885e9a0
+  Actions CI read incomplete: gh api repos/{owner}/{repo}/actions/runs/913/attempts/1/jobs?per_page=100&page=1 (read 0 of total_count 2)
+  cp-rmzt: could not read CI for cp-rmzt (Actions CI read incomplete: gh api repos/{owner}/{repo}/actions/runs/913/attempts/1/jobs?per_page=100&page=1 (read 0 of total_count 2)). Nothing was merged.
+  
+  'advance' !== 'retry'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:217:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:210:108)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'retry',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:210:116
+✖ jobs-malformed (4776.07985ms)
+  AssertionError [ERR_ASSERTION]: gh: https://github.com/example/demo/pull/913 is OPEN at 4d0b9abdfc8e
+  Actions CI read malformed: gh api repos/{owner}/{repo}/actions/runs/913/attempts/1/jobs?per_page=100&page=1 (transient read run 913: not JSON; gh exit 0; body "<html>502</html>"; 3 attempts)
+  cp-jzge: could not read CI for cp-jzge (Actions CI read malformed: gh api repos/{owner}/{repo}/actions/runs/913/attempts/1/jobs?per_page=100&page=1 (transient read run 913: not JSON; gh exit 0; body "<html>502</html>"; 3 attempts)). Nothing was merged.
+  
+  'advance' !== 'retry'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:217:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:210:108)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'advance',
+    expected: 'retry',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

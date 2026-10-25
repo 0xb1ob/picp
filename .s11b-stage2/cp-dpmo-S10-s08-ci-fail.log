@@ -1,0 +1,70 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit tests/e2e/landing-review-window.test.ts
+
+✔ landing S15 retry: real parent delivery confirms, retries withheld verdicts and expires permanent suppression (49645.632107ms)
+✔ S21b: verdict delivery precedes the merge-window notice (3323.941007ms)
+✔ landing S15 order: a real verdict wakes the parent before its deadline continuation merges (8808.090208ms)
+✔ landing S15: durable review evidence owns the merge window across parent restarts (8428.64259ms)
+▶ landing: the review deadline resumes once and rechecks current gates
+  ✔ repository/hold (6967.276208ms)
+  ✔ repository/unreadable-hold (6939.462498ms)
+  ✔ repository/head (6684.368522ms)
+  ✖ repository/ci (6594.299182ms)
+  ✔ repository/permission (6629.971459ms)
+  ✔ repository/none (6535.098243ms)
+  ✔ fallback/hold (6949.953642ms)
+  ✔ fallback/unreadable-hold (6990.793104ms)
+  ✔ fallback/head (6631.556555ms)
+  ✖ fallback/ci (6550.964776ms)
+  ✔ fallback/permission (6679.223798ms)
+  ✔ fallback/none (6614.869049ms)
+✖ landing: the review deadline resumes once and rechecks current gates (80772.641495ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 14
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 152568.168982
+
+✖ failing tests:
+
+test at tests/e2e/landing-review-window.test.ts:190:97
+✖ repository/ci (6594.299182ms)
+  AssertionError [ERR_ASSERTION]: false/ci
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-review-window.test.ts:220:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-review-window.test.ts:190:89)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-review-window.test.ts:190:97
+✖ fallback/ci (6550.964776ms)
+  AssertionError [ERR_ASSERTION]: true/ci
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-review-window.test.ts:220:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-review-window.test.ts:190:89)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
