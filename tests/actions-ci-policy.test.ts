@@ -72,6 +72,20 @@ test("an observation of six runs reads its jobs in parallel batches", async () =
 	assert.equal(peak, 4, "four jobs reads at once, the other two in the next batch");
 });
 
+// dc-20261025100936: a "deadline" with sub-second gh calls means time passed outside a capped call. The failed
+// observation must log each call's offset, endpoint, duration, cap and exit, and the budget left, to show where.
+test("a spent observation budget logs every gh call and the budget left", async () => {
+	let clock = 0;
+	const lines: string[] = [];
+	const exec: CommandRunner = async () => {
+		clock += 31_000; // a 0.6 s gh call whose callback lands past its cap
+		return JSON.stringify({ total_count: 1, workflow_runs: [{ id: 7, run_attempt: 1, head_sha: SHA, status: "in_progress", conclusion: null }] });
+	};
+	await assert.rejects(readActionsCi({ cwd: ".", exec, sha: SHA, now: () => clock, log: (line) => lines.push(line) }), /Actions CI read deadline: .*\/runs\/7\/attempts\/1\/jobs/);
+	assert.equal(lines.length, 1);
+	assert.match(lines[0] ?? "", /^actions-ci: observation failed with -1000ms of budget left: .*calls: \+0ms repos\/\{owner\}\/\{repo\}\/actions\/runs\?head_sha=\S+ 31000ms \(monotonic \d+ms\) cap 30000ms exit 0$/);
+});
+
 test("Actions reader issues only runs and attempt-jobs requests and never follows response metadata links", async () => {
 	const api = "https://api.github.com/repos/acme/app";
 	const { exec, calls } = allowlistedGh((endpoint) =>

@@ -657,7 +657,8 @@ export const runCommand: CommandRunner = (command, args, options) =>
 				if (error) {
 					// stdout rides along so a CI read can name the body it got (src/actions-ci.ts bounds and redacts it).
 					const message = `${command} ${args.join(" ")} failed: ${(stderr || (error as Error).message).trim().slice(0, 200)}`;
-					reject(Object.assign(new Error(message), { stdout: String(stdout ?? "") }));
+					const { code, signal } = error as { code?: unknown; signal?: unknown };
+					reject(Object.assign(new Error(message), { stdout: String(stdout ?? ""), code, signal }));
 					return;
 				}
 				resolve(stdout.toString());

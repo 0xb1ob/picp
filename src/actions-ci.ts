@@ -220,16 +220,35 @@ export interface ActionsReadOptions {
 	now?: () => number;
 	/** The pause between retries; tests pass a no-op. */
 	sleep?: (ms: number) => Promise<void>;
+	/** Where a failed observation's call trace goes; stderr by default. */
+	log?: (line: string) => void;
 }
 
 interface Budget {
+	start: number;
 	deadline: number;
 	now: () => number;
+	/** One entry per gh call: start offset, endpoint, wall and monotonic duration, cap and exit status. */
+	calls: string[];
 }
 
 function budgetOf(options: ActionsReadOptions): Budget {
 	const now = options.now ?? Date.now;
-	return { deadline: now() + (options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS), now };
+	const start = now();
+	return { start, deadline: start + (options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS), now, calls: [] };
+}
+
+/** One observation; a failure logs every gh call it made and the budget left, then rethrows. */
+async function observe<T>(options: ActionsReadOptions, read: (budget: Budget) => Promise<T>): Promise<T> {
+	const budget = budgetOf(options);
+	try {
+		return await read(budget);
+	} catch (error) {
+		const left = budget.deadline - budget.now();
+		const calls = budget.calls.join("; ").slice(0, 4000) || "none";
+		(options.log ?? console.error)(`actions-ci: observation failed with ${left}ms of budget left: ${(error as Error).message.slice(0, 300)}; calls: ${calls}`);
+		throw error;
+	}
 }
 
 /** Pauses before each retry of a transient read; the sum stays well inside one tick's budget. */
@@ -252,25 +271,27 @@ function isJson(text: string): boolean {
 	}
 }
 
-/** One attempt: the body when it parses as JSON, else a fault and whether a retry may cure it. */
-async function attempt(options: ActionsReadOptions, endpoint: string, timeoutMs: number): Promise<string | { fault: ActionsCiError; retry: boolean }> {
+/** One attempt: the body when it parses as JSON, else a fault, its exit status and whether a retry may cure it. */
+async function attempt(options: ActionsReadOptions, endpoint: string, timeoutMs: number): Promise<string | { fault: ActionsCiError; retry: boolean; exit: string }> {
 	let stdout: string;
 	try {
 		stdout = await options.exec("gh", ["api", endpoint], { cwd: options.cwd, timeoutMs });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		const body = String((error as { stdout?: unknown })?.stdout ?? "");
+		const { code: status, signal } = (error ?? {}) as { code?: unknown; signal?: unknown };
+		const exit = signal ? `signal ${String(signal)}` : `exit ${status ?? "?"}`;
 		const code = /\bHTTP (\d{3})\b/.exec(message)?.[1];
-		if (/rate limit/i.test(message)) return { fault: new ActionsCiError("rate_limited", endpoint), retry: false };
+		if (/rate limit/i.test(message)) return { fault: new ActionsCiError("rate_limited", endpoint), retry: false, exit };
 		// GitHub's own denials are JSON; an HTML 403/404 is a proxy or abuse page, not the token's answer.
 		const html = body.trim() !== "" && !isJson(body);
-		if ((code === "403" || code === "404") && !html) return { fault: new ActionsCiError("denied", endpoint, `HTTP ${code}`), retry: false };
+		if ((code === "403" || code === "404") && !html) return { fault: new ActionsCiError("denied", endpoint, `HTTP ${code}`), retry: false, exit };
 		// "status", not "HTTP": src/ci-access.ts reads any "HTTP 403" as the token's denial.
-		return { fault: new ActionsCiError("transport", endpoint, evidence(code ? `status ${code}` : "no HTTP status", body)), retry: true };
+		return { fault: new ActionsCiError("transport", endpoint, evidence(code ? `status ${code}` : "no HTTP status", body)), retry: true, exit };
 	}
 	if (isJson(stdout)) return stdout;
 	const run = /\/runs\/(\d+)\//.exec(endpoint)?.[1];
-	return { fault: new ActionsCiError("malformed", endpoint, `transient read${run ? ` run ${run}` : ""}: not JSON; ${evidence("gh exit 0", stdout)}`), retry: true };
+	return { fault: new ActionsCiError("malformed", endpoint, `transient read${run ? ` run ${run}` : ""}: not JSON; ${evidence("gh exit 0", stdout)}`), retry: true, exit: "exit 0" };
 }
 
 /** A non-JSON body, HTML error page or transport fault retries with backoff in the budget; the last fault throws. */
@@ -279,7 +300,12 @@ async function get(options: ActionsReadOptions, budget: Budget, endpoint: string
 	for (let tries = 0; ; tries++) {
 		const remaining = budget.deadline - budget.now();
 		if (remaining <= 0) throw new ActionsCiError("deadline", endpoint, "observation budget spent");
-		const result = await attempt(options, endpoint, /\/attempts\//.test(endpoint) ? Math.min(remaining, ACTIONS_ATTEMPT_TIMEOUT_MS) : remaining);
+		const cap = /\/attempts\//.test(endpoint) ? Math.min(remaining, ACTIONS_ATTEMPT_TIMEOUT_MS) : remaining;
+		const [started, mono] = [budget.now(), performance.now()];
+		const result = await attempt(options, endpoint, cap);
+		// Wall vs monotonic time tells a late callback (event-loop stall) from a wall-clock step.
+		const took = `${budget.now() - started}ms (monotonic ${Math.round(performance.now() - mono)}ms)`;
+		budget.calls.push(`+${started - budget.start}ms ${endpoint} ${took} cap ${cap}ms ${typeof result === "string" ? "exit 0" : `${result.exit} ${result.fault.category}`}`);
 		if (typeof result === "string") return result;
 		const delay = ACTIONS_RETRY_DELAYS_MS[tries];
 		const left = budget.deadline - budget.now();
@@ -331,7 +357,7 @@ async function jobsWithin(options: ActionsReadOptions, budget: Budget, run: { ru
 
 /** Every job of one run attempt, all pages; any failed page throws rather than returning a partial list. */
 export async function readActionsJobs(options: ActionsReadOptions, run: { runId: number; attempt: number; sha?: string }): Promise<ActionsJob[]> {
-	return jobsWithin(options, budgetOf(options), run);
+	return observe(options, (budget) => jobsWithin(options, budget, run));
 }
 
 /**
@@ -339,22 +365,23 @@ export async function readActionsJobs(options: ActionsReadOptions, run: { runId:
  * Zero runs is a valid observation; a queued or skipped run may have zero jobs. Never collapses runs by workflow name.
  */
 export async function readActionsCi(options: ActionsReadOptions & { sha: string; branch?: string }): Promise<ActionsRun[]> {
-	const budget = budgetOf(options);
-	const runs = await paged(
-		options,
-		budget,
-		(page) => actionsRunsPath({ repo: options.repo, sha: options.sha, branch: options.branch, page }),
-		(stdout, endpoint) => parseRunsPage(stdout, options.sha, endpoint),
-		(run) => run.databaseId,
-	);
-	// Jobs pages are read in small parallel batches: serial reads of every run spent the one budget (#420).
-	const observed: ActionsRun[] = [];
-	for (let at = 0; at < runs.length; at += ACTIONS_JOBS_CONCURRENCY) {
-		const batch = runs.slice(at, at + ACTIONS_JOBS_CONCURRENCY);
-		const jobs = await Promise.all(batch.map((run) => jobsWithin(options, budget, { runId: run.databaseId, attempt: run.attempt, sha: options.sha })));
-		batch.forEach((run, index) => observed.push({ ...run, jobs: jobs[index] as ActionsJob[] }));
-	}
-	return observed;
+	return observe(options, async (budget) => {
+		const runs = await paged(
+			options,
+			budget,
+			(page) => actionsRunsPath({ repo: options.repo, sha: options.sha, branch: options.branch, page }),
+			(stdout, endpoint) => parseRunsPage(stdout, options.sha, endpoint),
+			(run) => run.databaseId,
+		);
+		// Jobs pages are read in small parallel batches: serial reads of every run spent the one budget (#420).
+		const observed: ActionsRun[] = [];
+		for (let at = 0; at < runs.length; at += ACTIONS_JOBS_CONCURRENCY) {
+			const batch = runs.slice(at, at + ACTIONS_JOBS_CONCURRENCY);
+			const jobs = await Promise.all(batch.map((run) => jobsWithin(options, budget, { runId: run.databaseId, attempt: run.attempt, sha: options.sha })));
+			batch.forEach((run, index) => observed.push({ ...run, jobs: jobs[index] as ActionsJob[] }));
+		}
+		return observed;
+	});
 }
 
 /**
@@ -363,7 +390,7 @@ export async function readActionsCi(options: ActionsReadOptions & { sha: string;
  */
 export async function readOlderBranchRuns(options: ActionsReadOptions & { branch: string; head: string }): Promise<CiRun[]> {
 	const endpoint = actionsBranchRunsPath({ repo: options.repo, branch: options.branch });
-	const runs = parseRunsPage(await get(options, budgetOf(options), endpoint), undefined, endpoint).items;
+	const runs = parseRunsPage(await observe(options, (budget) => get(options, budget, endpoint)), undefined, endpoint).items;
 	return runs.filter((run) => run.headSha.toLowerCase() !== options.head.toLowerCase());
 }
 
@@ -386,7 +413,7 @@ export function statusRunner(run: StatusRunner): CommandRunner {
 		const result = await run(options.cwd, command, args, { timeoutMs: options.timeoutMs });
 		if (result.status !== 0) {
 			const message = `${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim().slice(0, 200)}`;
-			throw Object.assign(new Error(message), { stdout: result.stdout });
+			throw Object.assign(new Error(message), { stdout: result.stdout, code: result.status });
 		}
 		return result.stdout;
 	};
