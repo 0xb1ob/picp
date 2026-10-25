@@ -178,8 +178,9 @@ test("authority: a paused or revoked mandate stops speaking; an expired or job-c
 	assert.equal((await s.accepted(revoked)).mandate_id, undefined, "a revoked grant never speaks for a dispatch");
 
 	const short = s.issue([expired], { expiry: new Date(Date.now() + 3_000).toISOString().replace(/\.\d{3}Z$/, "Z") });
+	s.post.mandates.save({ ...short, provenance: { expiry_hours: "explicit" } });
 	await new Promise((resolve) => setTimeout(resolve, 3_500));
-	await s.refused(expired, new RegExp(`mandate ${short.id} expired at .*A new job needs a new grant \\(cp_mandate issue\\)`));
+	await s.refused(expired, /explicit completion deadline remains binding/);
 
 	const cap = s.issue([first, capped], { job_cap: 1 });
 	assert.equal((await s.accepted(first)).mandate_id, cap.id);
@@ -574,7 +575,7 @@ test("authority: cp_mandate issue needs only projects and an objective; every ot
 	assert.equal(written.notes.dispatch_parallelism, "jobs under the grant that may run at once; set 1 for serial");
 	assert.deepEqual([[...written.allowed_actions].sort(), written.ask_on], [["implement", "merge", "plan", "repair", "review"], ["risk:high"]]);
 	assert.deepEqual(written.exclude_paths, [".github/workflows/", "secrets/", "**/.env*"]);
-	for (const shown of [/expiry_hours: 8/, /spend_usd: 100/, /conservative so a stale mandate/]) assert.match(said("show0"), shown);
+	for (const shown of [/expiry_hours: 8/, /spend_usd: 100/, /default admission window/]) assert.match(said("show0"), shown);
 	ok("issue0");
 	const bare = grant(first);
 	assert.deepEqual(bare?.projects, ["demo"]);
@@ -1608,8 +1609,8 @@ test("authority: an expired, revoked, serial or job-capped grant stops fresh sta
 	s.issue([risky], { expiry: soon(8_000), ask_on: ["risk:high"] });
 	assert.equal((await s.accepted(old)).mandate_id, lapsing.id);
 	await waitFor(() => Date.now(), (now) => now > Date.parse(lapsing.expiry) + 1_000, { timeoutMs: 20_000, what: "the grant to expire" });
-	await s.refused(fresh, /expired at .* no fleet record of that kind, so it is a fresh start or a kind change/);
-	await s.refused(risky, /expired at .* fresh start/);
+	await s.refused(fresh, /original governing task is missing; continuation not committed/);
+	await s.refused(risky, /original governing task is missing; continuation not committed/);
 	assert.deepEqual(s.post.escalations.list().filter((item) => item.job_ids.includes(risky)), [], "a refused start raises no risk ask");
 	await promote(s, old);
 	assert.equal((await repair(old)).receipt !== undefined, true);

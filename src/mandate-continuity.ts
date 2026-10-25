@@ -11,6 +11,7 @@ import { pathExcluded, subsystemExcluded, MandateStore } from "./mandate.ts";
 import { ArtifactStore } from "./artifacts.ts";
 import { normalPassDigest } from "./gate-pass.ts";
 import { admissionEvidence, confirmedAdmission, confirmedDefaultExpiry } from "./mandate-continuity-confirmation.ts";
+import type { GrantUse } from "./mandate-permission.ts";
 import { readPriorAttempts } from "./gate.ts";
 import { pendingHandoffs } from "./gate-handoff-store.ts";
 import { afterAdmissionCutoff, confirmCoverage, validCoverage } from "./mandate-coverage.ts";
@@ -238,7 +239,7 @@ export function continuationProof(home: string, job: Job | undefined, grants: re
 	return proof;
 }
 
-export async function continueForJob(store: MandateStore, jobId: string, usage: readonly MandateUsageJob[]): Promise<ContinuationResult | undefined> {
+export async function continueForJob(store: MandateStore, jobId: string, usage: readonly MandateUsageJob[], use: GrantUse = "dispatch"): Promise<ContinuationResult | undefined> {
 	const job = store.runContext().ledgerJob(jobId);
 	if (!job || scheduleIdOf(job.labels)) return;
 	for (const grant of store.list()) {
@@ -250,7 +251,8 @@ export async function continueForJob(store: MandateStore, jobId: string, usage: 
 	const labels = parseJobLabels(job.labels);
 	if (!labels.project) return;
 	const subject = { jobId, project: labels.project, kind: labels.kind };
-	if (store.selection("dispatch", subject, usage)?.at.cause === "active") return;
+	const standing = store.selection(use, subject, usage)?.at;
+	if (standing?.cause === "active" || (standing?.cause === "expired" && standing.standing === "permit")) return;
 	const refused = new Map<string, ContinuationResult>();
 	let pending: ContinuationResult | undefined;
 	for (const source of store.list()) {
@@ -260,7 +262,7 @@ export async function continueForJob(store: MandateStore, jobId: string, usage: 
 		if (result.state === "confirmation_required") pending = result;
 		if (result.state === "ineligible") refused.set(source.id, result);
 	}
-	const selected = store.selection("dispatch", subject, usage);
+	const selected = store.selection(use, subject, usage);
 	const refusal = selected ? refused.get(selected.grant.id) : refused.values().next().value;
 	if (refusal) throw new MandateError(`${refusal.source_id}: ${refusal.reason}`);
 	return pending;

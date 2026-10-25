@@ -73,7 +73,7 @@ export function raiseTokenCap(
 
 /** New reviewer spend (`cp_review` spawning a reviewer): the `review` use of the one permission rule (src/mandate-permission.ts). */
 export async function assertReviewAllowed(store: MandateStore, job: { jobId: string; project: string; kind?: JobKind }, jobs: readonly MandateUsageJob[] = []): Promise<void> {
-	const continuation = await continueForJob(store, job.jobId, jobs);
+	const continuation = await continueForJob(store, job.jobId, jobs, "review");
 	try { store.assertPermitted("review", job, jobs); }
 	catch (error) {
 		if (continuation?.escalation_id) throw new MandateError(`${(error as Error).message}; confirm original admission with cp_decide ${continuation.escalation_id}, then retry cp_mandate continue`);

@@ -27,7 +27,7 @@ export async function assertDispatchAllowed(store: MandateStore, job: DispatchAu
 		if (error instanceof ScheduleAuthorityError && error.escalation) await error.escalation;
 		throw error;
 	}
-	const continuation = await continueForJob(store, job.jobId, jobs);
+	const continuation = await continueForJob(store, job.jobId, jobs, job.promotion ? "promote" : "dispatch");
 	let permission: GrantPermission;
 	try { permission = store.assertPermitted(job.promotion ? "promote" : "dispatch", job, jobs); }
 	catch (error) {

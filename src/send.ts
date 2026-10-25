@@ -243,7 +243,7 @@ export class Sender {
 		// Mandate permission for a repair comes first: a refused repair never relaunches a released worker.
 		// A parked job's resume takes a lease and a spawn, so it needs the same permission whatever the purpose.
 		if (this.#options.mandates) {
-			await continueForJob(this.#options.mandates, request.jobId, fleet.read().jobs);
+			await continueForJob(this.#options.mandates, request.jobId, fleet.read().jobs, "promote");
 			this.#assertContinuationPermission(request.jobId);
 		}
 		if ((parked || (request.purpose === "repair" && request.task === undefined && request.taskFile === undefined)) && this.#options.mandates) {

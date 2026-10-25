@@ -369,6 +369,19 @@ test("post-expiry replacement uses a committed original-root link, full findings
 	const torn = await post.teardown.teardown(original.id);
 	assert.equal(post.fleet.get(original.id)?.phase, "done", JSON.stringify(torn));
 	assert.equal((await post.ledger().show(original.id)).status, "closed");
+	for (const candidate of [
+		{ title: "Wrong kind", project: "demo", kind: "ship" as const, delivery: "local" as const },
+		{ title: "Wrong project", project: "other", kind: "research" as const, delivery: "local" as const },
+		{ title: "Additional scope", description: "Also implement an unrelated feature", project: "demo", kind: "research" as const, delivery: "local" as const },
+	]) {
+		const wrong = await post.ledger().create(candidate);
+		const refused = await parent("Inspect an ineligible replacement without adding authority.", [{ kind: "tool_calls", calls: [{ name: "cp_mandate", args: {
+			action: "replace_work", source_id: grant.id, original_job_id: original.id, replacement_job_id: wrong.id,
+		} }] }]);
+		assert.match(JSON.stringify(refused[0]!.result), /ineligible/);
+		assert.equal(post.fleet.get(wrong.id), undefined);
+		assert.equal(post.mandates.get(grant.id)!.same_work_replacements, undefined);
+	}
 	const replacement = await post.ledger().create({ title: "Fresh successor identity", project: "demo", kind: "research", delivery: "local" });
 	replacementId = replacement.id;
 	assert.ok(replacement.created_at >= expiry);
@@ -497,6 +510,13 @@ test("post-expiry replacement uses a committed original-root link, full findings
 	assert.match(JSON.stringify(rebound[0]!.result), /original or replacement already belongs to another work link/);
 	assert.equal(post.mandates.get(unrelatedRoot.id)!.same_work_replacements, undefined);
 	assert.equal(post.fleet.get(competing.id), undefined);
+	await parent("Close only the completed original logical mission.", [{ kind: "tool_calls", calls: [{ name: "cp_next", args: { project: "demo", full: true } }] }]);
+	assert.equal(post.mandates.get(grant.id)!.status, "revoked");
+	const fulfilled = await parent("Inspect the fulfilled root without adding budget or work.", [
+		{ kind: "tool_calls", calls: [{ name: "cp_mandate", args: { action: "continue", source_id: grant.id } }] },
+	]);
+	assert.match(JSON.stringify(fulfilled[0]!.result), /ineligible/);
+	assert.equal(post.mandates.get(grant.id)!.same_work_replacements!.length, 1);
 });
 
 test("pipeline reanchor resumes an interrupted exact edge projection and still requires fresh quality and authorization", { skip: !treehouseAvailable(), timeout: 120_000 }, async (t) => {
