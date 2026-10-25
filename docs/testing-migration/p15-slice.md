@@ -3,7 +3,7 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P15 (cp-e2e-migration-p15-18d4) | behavior 13, project tracker: `cp_job`, `/cp-jobs` and `cp_project` through a real parent pi on the mock provider, in `tests/e2e/project-tracker.test.ts` (85 declarations in five files: 75 mapped to P15-jobs-lifecycle, -jobs-refusals, -jobs-refs-scope, -ledger-file and -projects, 10 retained verbatim in three `*-retained.test.ts` files; `tests/fake-parent-tracker.test.ts` retained whole as a harness test; controls P15-C1..C10) | 2 (`tests/trackers-ledger.test.ts`, `tests/verify-external-ref.test.ts`; the other three are mixed moves with no fully-deleted-file credit) |
+| P15 (cp-e2e-migration-p15-18d4) | behavior 13, project tracker: `cp_job`, `/cp-jobs` and `cp_project` through a real parent pi on the mock provider, in `tests/e2e/project-tracker.test.ts` (85 declarations in five files: 76 mapped to P15-jobs-lifecycle, -jobs-refusals, -jobs-refs-scope, -ledger-file and -projects, 9 retained in two `*-retained.test.ts` files, verbatim or as a named subset; `tests/fake-parent-tracker.test.ts` retained whole as a harness test; controls P15-C1..C15) | 2 (`tests/trackers-ledger.test.ts`, `tests/verify-external-ref.test.ts`; the other three are mixed moves with no fully-deleted-file credit) |
 <!-- /manifest:ledger -->
 
 Behavior 13. Each P15 scenario boots one real `pi --mode rpc` parent with the command-post extension on a scratch
@@ -11,11 +11,16 @@ home and scripts its tool calls through the mock provider. The parent runs `cp_j
 `gh` is a scripted stub on its PATH. The scenarios then read the tool results, the slash-command notices, `jobs.json`,
 `projects.json`, the rendered `projects.md`, the escalation store and the stub's call log. No scenario skips.
 
-Retained, not reachable: 10 units call helpers that no tool or command reaches. They are `recordAssessedRisk`,
-seeded `mintJobId` draws, `Ledger.history`, `importJobs`, `ProjectRegistry.update`/`remove`, `assertCanonicalRepo`,
-a nested-clone layout, a throwing CI probe and the `launching`/`awaiting_merge` fleet phases. Each row names what is
-missing. `tests/fake-parent-tracker.test.ts` pins the e2e fixture's own process tracking, as `tests/harness.test.ts`
-does.
+Retained, not reachable: 9 units call helpers that no tool or command reaches. They are `recordAssessedRisk`, seeded
+`mintJobId` draws, `Ledger.history` with a status-array list (a subset: the rest of that unit is mapped),
+`importJobs`, the legacy-strip sweep, `ProjectRegistry.update`/`remove`, `assertCanonicalRepo`, a nested-clone layout
+and a throwing CI probe. Each row names what is missing. `tests/fake-parent-tracker.test.ts` pins the e2e fixture's
+own process tracking, as `tests/harness.test.ts` does.
+
+Exception, in-process: the parent-only-tool refusal in P15-jobs-refusals calls `CommandPost.previewDispatch` in the
+test process, which is the same call `cp_dispatch dry_run` makes (`extensions/command-post/tools-dispatch.ts`).
+Profiles load only from the package root's `profiles/` (`src/command-post.ts`), so driving it through the parent's
+tool would mean writing a fixture profile into the checkout. `tests/e2e/diff-review.test.ts` takes the same path.
 
 <!-- manifest:scenarios -->
 | ID | E2E file | Test name |
@@ -31,7 +36,7 @@ does.
 | Unit file | Assertion | Scenario | Disposition | Note |
 |---|---|---|---|---|
 | tests/jobs-tool.test.ts | cp_job amend freezes authorized scope in order and refuses unverified quotes and closed jobs | P15-jobs-refs-scope | mapped | external_ref through the gh stub, amend, schedule and reviewer caps |
-| tests/jobs-tool.test.ts | cp_job is forbidden to workers and exposes exactly the spec's actions | P15-jobs-refusals | mapped | refused through cp_job or previewDispatch with nothing written |
+| tests/jobs-tool.test.ts | cp_job is forbidden to workers and exposes exactly the spec's actions | P15-jobs-refusals | mapped | the action enum from the parent's tool list; the worker refusal through in-process previewDispatch (the documented exception above) |
 | tests/jobs-tool.test.ts | create -> show -> list -> ready -> claim -> comment -> close through the action runner | P15-jobs-lifecycle | mapped | cp_job and /cp-jobs through a real parent |
 | tests/jobs-tool.test.ts | conflicting and duplicate reserved labels refuse with no write or receipt; normal intake still dedupes | P15-jobs-refusals | mapped | refused through cp_job or previewDispatch with nothing written |
 | tests/jobs-tool.test.ts | list marks legacy label faults and preserves search and narrow repair | P15-jobs-refusals | mapped | refused through cp_job or previewDispatch with nothing written |
@@ -46,7 +51,7 @@ does.
 | tests/jobs-tool.test.ts | issue #2: dep_remove refuses a blocker whose worker never reported, warns on an open one | P15-jobs-refusals | mapped | refused through cp_job or previewDispatch with nothing written |
 | tests/jobs-tool.test.ts | parseJobsArgs: ready by default, list flags, show needs an id | P15-jobs-lifecycle | mapped | cp_job and /cp-jobs through a real parent |
 | tests/jobs-tool.test.ts | formatJobLine is one line: id, status, project, delivery/kind, title | P15-jobs-lifecycle | mapped | cp_job and /cp-jobs through a real parent |
-| tests/jobs-tool.test.ts | portsFor's hasLiveWorker: launching has no worker; waiting/held do, done/failed do not | — | retained | kept verbatim in tests/jobs-tool-retained.test.ts; launching and awaiting_merge fleet records need a script or a parking record no cp_job scenario seeds |
+| tests/jobs-tool.test.ts | portsFor's hasLiveWorker: launching has no worker; waiting/held do, done/failed do not | P15-jobs-refusals | mapped | fleet records seeded in every JOB_PHASES phase (a launching script record, a parked awaiting_merge one); close is refused only for waiting and held; control P15-C14 |
 | tests/jobs-tool.test.ts | registerJobs wires cp_job and /cp-jobs to the same ledger | P15-jobs-lifecycle | mapped | cp_job and /cp-jobs through a real parent |
 | tests/jobs-tool.test.ts | create resolves project through the runtime: required | P15-jobs-refusals | mapped | refused through cp_job or previewDispatch with nothing written |
 | tests/jobs-tool.test.ts | the cp_job schema refuses the retired type and priority arguments, on create and on update | P15-jobs-lifecycle | mapped | cp_job and /cp-jobs through a real parent |
@@ -73,7 +78,7 @@ does.
 | tests/ledger.test.ts | drop closes with a reason and never deletes | P15-jobs-lifecycle | mapped | cp_job and /cp-jobs through a real parent |
 | tests/ledger.test.ts | a dropped close keeps dependents blocked; a landed close alone satisfies them | P15-jobs-lifecycle | mapped | cp_job and /cp-jobs through a real parent |
 | tests/ledger.test.ts | dependencies gate ready, blockersOf is fail-closed, and the graph refuses self, unknown and cycles | P15-jobs-lifecycle | mapped | cp_job and /cp-jobs through a real parent |
-| tests/ledger.test.ts | list filters AND labels and statuses, limit 0 is unlimited, history is newest-closed first | — | retained | kept verbatim in tests/ledger-retained.test.ts; Ledger.history and an injected clock have no tool or command |
+| tests/ledger.test.ts | list filters AND labels and statuses, limit 0 is unlimited, history is newest-closed first | — | retained | subset kept in tests/ledger-retained.test.ts as "history is newest-closed first and list takes a status array": Ledger.history has no caller and the cp_job status filter takes one value; P15-jobs-lifecycle pins the filters, limits, deferred-not-ready, notes and the unlabel refusal |
 | tests/ledger.test.ts | importJobs appends pre-built records and refuses a duplicate id | — | retained | kept verbatim in tests/ledger-retained.test.ts; importJobs has no production caller |
 | tests/ledger.test.ts | a write that cannot land leaves the previous document intact | P15-ledger-file | mapped | jobs.json as the parent boots and cp_job writes it |
 | tests/ledger.test.ts | a document written with type and priority still reads, and the next mutation writes it without them | P15-ledger-file | mapped | jobs.json as the parent boots and cp_job writes it |
@@ -93,10 +98,10 @@ does.
 | tests/projects.test.ts | project names must survive as directories and as job labels | P15-projects | mapped | cp_project through a real parent and the gh stub |
 | tests/projects.test.ts | update and remove keep the registry consistent | — | retained | kept verbatim in tests/projects-retained.test.ts; ProjectRegistry.update/remove have no cp_project action |
 | tests/projects.test.ts | a corrupt or contract-violating registry is refused | P15-projects | mapped | cp_project through a real parent and the gh stub |
-| tests/projects.test.ts | remote urls compare without .git noise | P15-projects | mapped | cp_project through a real parent and the gh stub |
+| tests/projects.test.ts | remote urls compare without .git noise | P15-projects | mapped | a clone already in place matches its origin spelled without .git or with a trailing slash; control P15-C15 |
 | tests/projects.test.ts | clone on demand is idempotent and lands in projects/<name> | P15-projects | mapped | cp_project through a real parent and the gh stub |
 | tests/projects.test.ts | cp_project's path: register from the session, twice, and render it | P15-projects | mapped | cp_project through a real parent and the gh stub |
-| tests/projects.test.ts | a worker can never register a project | P15-jobs-refusals | mapped | refused through cp_job or previewDispatch with nothing written |
+| tests/projects.test.ts | a worker can never register a project | P15-jobs-refusals | mapped | a profile naming cp_project is refused through in-process previewDispatch (the documented exception above) |
 | tests/projects.test.ts | an existing directory with a foreign origin is reported, never adopted | P15-projects | mapped | cp_project through a real parent and the gh stub |
 | tests/projects.test.ts | belongs to another repo: linked worktrees and nested clones are refused | — | retained | kept verbatim in tests/projects-retained.test.ts; a nested clone inside another repo has no cp_project path; P15-projects pins the linked worktree |
 | tests/projects.test.ts | assertCanonicalRepo passes the main worktree and refuses a linked worktree and a nested clone | — | retained | kept verbatim in tests/projects-retained.test.ts; assertCanonicalRepo has no tool or command caller |
@@ -130,13 +135,17 @@ does.
 | P15-C8 | tests/projects.test.ts | P15-projects | the CI denial classifier never matches | `denied` |
 | P15-C9 | tests/projects.test.ts | P15-projects | the canonical-clone check skips its linked-worktree test | `linked` |
 | P15-C10 | tests/ledger.test.ts | P15-ledger-file | `atomicWriteText` swallows a staging write that fails (the squatted temp path) | `read-only should be refused` |
+| P15-C11 | tests/projects.test.ts | P15-projects | `classifyMergeFlow` ignores required reviews | `reviewed` |
+| P15-C12 | tests/projects.test.ts | P15-projects | `classifyMergeFlow` ignores an owner who is not the login | `stranger` |
+| P15-C13 | tests/jobs-tool.test.ts | P15-jobs-refs-scope | `operatorTextsFromEntries` keeps non-user (tool result) messages | `amend-tool-only should be refused` |
+| P15-C14 | tests/jobs-tool.test.ts | P15-jobs-refusals | `hasLiveWorker` counts every unfinished phase as live | `close launching` |
+| P15-C15 | tests/projects.test.ts | P15-projects | `sameRemote` compares the raw strings | `bare` |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->
 | File | PR | Note |
 |---|---|---|
 | tests/e2e/project-tracker.test.ts | cp-e2e-migration-p15-18d4 | P15-* scenarios through a real parent pi on the mock provider |
-| tests/jobs-tool-retained.test.ts | cp-e2e-migration-p15-18d4 | 1 verbatim declaration: portsFor's hasLiveWorker over every fleet phase |
-| tests/ledger-retained.test.ts | cp-e2e-migration-p15-18d4 | 5 verbatim declarations: helpers no tool or command reaches |
+| tests/ledger-retained.test.ts | cp-e2e-migration-p15-18d4 | 5 declarations, 4 verbatim and 1 named subset: helpers no tool or command reaches |
 | tests/projects-retained.test.ts | cp-e2e-migration-p15-18d4 | 4 verbatim declarations: registry and clone helpers no cp_project call reaches |
 <!-- /manifest:incoming -->

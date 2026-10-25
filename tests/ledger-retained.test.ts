@@ -66,7 +66,9 @@ test("mintJobId draws four lowercase base36 characters, redraws on collision and
 	assert.equal(seen.size, 200);
 });
 
-test("list filters AND labels and statuses, limit 0 is unlimited, history is newest-closed first", async (t) => {
+// Retained subset of "list filters AND labels and statuses, limit 0 is unlimited, history is newest-closed first":
+// P15-jobs-lifecycle pins the filters, limits, ready and the unlabel refusal through cp_job; these lines have no tool.
+test("history is newest-closed first and list takes a status array", async (t) => {
 	const scratch = createScratchLedger({ knownProjects: ["a", "b"] });
 	t.after(() => scratch.cleanup());
 	let tick = 0;
@@ -77,22 +79,11 @@ test("list filters AND labels and statuses, limit 0 is unlimited, history is new
 	await ledger.claim(b1.id, b1.id);
 	await ledger.update(a2.id, { status: "deferred", notes: "later", addLabels: ["phase:7"] });
 
-	assert.deepEqual((await ledger.list({ project: "a" })).map((j) => j.title), ["a1", "a2"]);
-	assert.deepEqual((await ledger.list({ project: "a", delivery: "pr" })).map((j) => j.title), ["a1"]);
-	assert.deepEqual((await ledger.list({ kind: "research" })).map((j) => j.title), ["a2"]);
-	assert.deepEqual((await ledger.list({ labels: ["phase:7"] })).map((j) => j.title), ["a2"]);
-	assert.deepEqual((await ledger.list({ status: "in_progress" })).map((j) => j.title), ["b1"]);
 	assert.deepEqual((await ledger.list({ status: ["open", "deferred"] })).map((j) => j.title), ["a1", "a2"]);
-	assert.equal((await ledger.list({ limit: 0 })).length, 3, "limit 0 is unlimited");
-	assert.equal((await ledger.list({ limit: 2 })).length, 2);
-	assert.deepEqual((await ledger.ready({ project: "a" })).map((j) => j.title), ["a1"], "deferred is not ready");
 
 	await ledger.close(a1.id, "first");
 	await ledger.close(b1.id, "second");
 	assert.deepEqual((await ledger.history()).map((j) => j.title), ["b1", "a1"]);
-	assert.deepEqual((await ledger.list({ status: "closed", project: "a" })).map((j) => j.title), ["a1"]);
-	assert.equal((await ledger.show(a2.id)).notes, "later");
-	await assert.rejects(ledger.update(a2.id, { removeLabels: ["project:a"] }), /not dispatchable: missing project:/);
 });
 
 test("importJobs appends pre-built records and refuses a duplicate id", async (t) => {
