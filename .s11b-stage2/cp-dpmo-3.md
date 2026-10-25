@@ -36,6 +36,7 @@ restored full consumer passed (83 cases, zero skips). Exact patch/logs and hashe
 Before this metadata, adding that evidence to the current branch measured **292,594 bytes**, evidence only,
 with no original deletion. Exact candidate is exported as `cp-dpmo/evidence-candidate.patch`, SHA256
 `32b1144d5af6a2cf693ec216afeb540ebea67ec55edee04120abc5fc2c802c1d`.
-The S10-only candidate measured 264,826 bytes before this metadata. Preserve this PR within the 280,000 cap;
-remaining S08/S09/S10b/S11 evidence requires another ordered evidence delivery before cp-xwu0 retirement.
-No missing proof is waived, and no original coverage is removed.
+The S10-only candidate measured 264,826 bytes before this metadata. Parent subsequently froze PR503 to the complete
+25-control S10 evidence slice, scheduled cp-0940 for remaining S08/S09/S10b/S11 evidence, and made cp-xwu0 retirement
+wait for both deliveries. The earlier size blocker is resolved for this narrower delivery. All originals stay intact;
+no full-stage or retirement completion is claimed. Exported S10b status proof stays durable for cp-0940.
