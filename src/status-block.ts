@@ -38,7 +38,7 @@ export const MAX_CELL_CHARS = 100;
  * bound exists to stop an unbounded store error from blowing up the layout, not
  * to trim the guidance. It is set above the longest refusal this system builds
  * (the authorization-wording one, ~311 chars with the longest trigger phrase
- * quoted), and tests/awaiting-rows.test.ts asserts the *rendered* line still
+ * quoted), and tests/e2e/decisions-status.test.ts asserts the *rendered* line still
  * carries both the quoted trigger and the whole suggested rewording — a fix cut
  * in half is the same bug as no fix.
  */
