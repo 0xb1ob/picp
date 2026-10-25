@@ -3,7 +3,7 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P14 (cp-e2e-migration-p14-0w42) | behavior 15: session-start nudges through a real parent (P14-nudges), cp-health alerts raised, withdrawn, acknowledged and relayed through a parent and a cp-bridge operator (P14-alerts), cp-install's model, gateway-key and retired-flag steps on a pty (P14-install, P14-install-models), the parent host's gateway key hand-off (P14-gateway-key), the version view through cp-view, a hosted parent, the cp-bridge footer and /cp-version (P14-version-badge, -running, -live, -lock), and scripts/install-tools.ts on a stub PATH (P14-install-tools, -os); 58 declarations from 8 files: 56 mapped, 2 retained verbatim in `tests/version-view-retained.test.ts`; the PR3c `--with-br`/`--no-br` assertions in `tests/service-install.test.ts` moved to P14-install | 8 |
+| P14 (cp-e2e-migration-p14-0w42) | behavior 15: session-start nudges through a real parent (P14-nudges), cp-health alerts raised, withdrawn, acknowledged and relayed through a parent and a cp-bridge operator (P14-alerts), cp-install's model, gateway-key and retired-flag steps on a pty (P14-install, P14-install-models), the parent host's gateway key hand-off (P14-gateway-key), the version view through cp-view, a hosted parent, the cp-bridge footer and /cp-version (P14-version-badge, -running, -live, -lock), scripts/install-tools.ts on a stub PATH (P14-install-tools, -os), and the parent supervisor as cp-parent.service runs it (P14-supervise); 68 declarations from 9 files: 64 mapped, 4 retained verbatim in `tests/version-view-retained.test.ts` and `tests/service-supervise-retained.test.ts`; the PR3c `--with-br`/`--no-br` assertions in `tests/service-install.test.ts` moved to P14-install | 9 |
 <!-- /manifest:ledger -->
 
 P14 converts behavior 15 file by file in one PR; the files still marked `convert` in `p14.md` are its remainder.
@@ -26,6 +26,7 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | P14-version-lock | tests/e2e/version.test.ts | P14-version-lock: a live holder's lock without a commit, or with a malformed one, is still a lock |
 | P14-install-tools | tests/e2e/install-tools.test.ts | P14-install-tools: install-tools installs only what is missing, once, and never shadows, sudoes or fights pi |
 | P14-install-tools-os | tests/e2e/install-tools.test.ts | P14-install-tools-os: brew installs a missing tool on macOS once; another platform is reported, not guessed |
+| P14-supervise | tests/e2e/supervise.test.ts | P14-supervise: attach-first parent supervisor — model choice, stop and drain holds, newer generations, exits |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -89,6 +90,16 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | tests/install-tools.test.ts | real script: --dry-run mutates nothing and names every required tool | P14-install-tools | mapped | NC-it-dry, NC-it-verdict |
 | tests/install-tools.test.ts | real script: an unknown tool argument is rejected before anything runs | P14-install-tools | mapped | NC-it-unknown |
 | tests/install-tools.test.ts | real script: restricting to one already-present tool exits 0 | P14-install-tools | mapped | NC-it-idem, NC-it-retry |
+| tests/service-supervise.test.ts | no model: a host running no parent and no CP_PARENT_MODEL or saved model exits 78, starting nothing | P14-supervise | mapped | NC-sv-78 |
+| tests/service-supervise.test.ts | start: CP_PARENT_MODEL wins over the saved model; the saved model is the fallback | P14-supervise | mapped | NC-sv-order, NC-sv-logmodel |
+| tests/service-supervise.test.ts | start: a data/parent.json model avoids exit 78 with no env or saved model; the supervisor never sends modelExplicit | P14-supervise | mapped | NC-sv-explicit, NC-sv-logmodel |
+| tests/service-supervise.test.ts | start: a parent already running is logged without a model, since it keeps whatever it runs | — | retained | verbatim in tests/service-supervise-retained.test.ts; the host answers `already` only to a parent started between its hello and the start, a race no entry point can stage |
+| tests/service-supervise.test.ts | a live foreign lock is retried every 60 s and logged once; any other attach failure exits 1 | P14-supervise | mapped | NC-sv-foreign, NC-sv-once, NC-sv-retry, NC-sv-attachfail |
+| tests/service-supervise.test.ts | host lost: a drain file or a stop marker for the watched generation waits without spawning, then joins a newer generation | P14-supervise | mapped | NC-sv-stop, NC-sv-drain, NC-sv-waitonce, NC-sv-newer |
+| tests/service-supervise.test.ts | host lost with a stale drained record and no update in flight: stops waiting when it is old or its target is HEAD | P14-supervise | mapped | NC-sv-age, NC-sv-head |
+| tests/service-supervise.test.ts | host lost: a draining record, an update in flight, or a fresh drained record keeps waiting | P14-supervise | mapped | NC-sv-state, NC-sv-inflight, NC-sv-fresh |
+| tests/service-supervise.test.ts | a blip reconnects to the same live generation | — | retained | verbatim in tests/service-supervise-retained.test.ts; no entry point drops a supervisor's host connection while that host lives |
+| tests/service-supervise.test.ts | real host: spawns when none, a second supervisor adds no generation, a stop writes the marker and nothing respawns, SIGKILL exits 1 | P14-supervise | mapped | NC-sv-stop, NC-sv-gone, NC-sv-sigterm |
 <!-- /manifest:assertions -->
 
 <!-- manifest:incoming -->
@@ -98,6 +109,8 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | tests/e2e/version.test.ts | cp-e2e-migration-p14-0w42 | P14 behavior 15: the version view through cp-view, a hosted parent, the cp-bridge footer and /cp-version |
 | tests/version-view-retained.test.ts | cp-e2e-migration-p14-0w42 | two verbatim version-view declarations no entry point reaches (browser badge, updater-constant mirror) |
 | tests/e2e/install-tools.test.ts | cp-e2e-migration-p14-0w42 | P14 behavior 15: scripts/install-tools.ts on a scratch PATH of logging stubs |
+| tests/e2e/supervise.test.ts | cp-e2e-migration-p14-0w42 | P14 behavior 15: node src/service/supervise.ts on scratch homes with the fake parent |
+| tests/service-supervise-retained.test.ts | cp-e2e-migration-p14-0w42 | two verbatim supervisor declarations no entry point reaches (connection blip, start race) |
 <!-- /manifest:incoming -->
 
 <!-- manifest:regressions -->
@@ -209,4 +222,23 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | P14-NC-it-retry | tests/install-tools.test.ts | P14-install-tools | scripts/install-tools.ts drops the retry line | after fixing the above, retry: … pi |
 | P14-NC-it-unknown | tests/install-tools.test.ts | P14-install-tools | scripts/install-tools.ts exits 1 for an unknown tool | exit 2 |
 | P14-NC-it-asset | tests/install-tools.test.ts | P14-install-tools | scripts/install-tools.ts fetches the latest asset | curl … /releases/download/v<pinned>/<asset> |
+| P14-NC-sv-78 | tests/service-supervise.test.ts | P14-supervise | EXIT_NO_MODEL = 1 | no model: exit 78 |
+| P14-NC-sv-order | tests/service-supervise.test.ts | P14-supervise | supervise.ts prefers the saved model | started parent … (env/m) |
+| P14-NC-sv-explicit | tests/service-supervise.test.ts | P14-supervise | supervise.ts sends modelExplicit | never modelExplicit: the file model reaches the parent |
+| P14-NC-sv-logmodel | tests/service-supervise.test.ts | P14-supervise | supervise.ts logs the env model, not the configured one | started parent … (file/m) |
+| P14-NC-sv-foreign | tests/service-supervise.test.ts | P14-supervise | supervise.ts exits on a foreign lock | a parent already holds …; retrying every 60s |
+| P14-NC-sv-once | tests/service-supervise.test.ts | P14-supervise | supervise.ts logs every retry | logged once across retries |
+| P14-NC-sv-retry | tests/service-supervise.test.ts | P14-supervise | FOREIGN_LOCK_RETRY_MS = 30 s | retrying every 60s |
+| P14-NC-sv-attachfail | tests/service-supervise.test.ts | P14-supervise | supervise.ts exits 78 on another attach failure | attach failed: exit 1 |
+| P14-NC-sv-stop | tests/service-supervise.test.ts | P14-supervise | supervise.ts ignores the stop marker | an operator stop closed generation 1: waiting |
+| P14-NC-sv-drain | tests/service-supervise.test.ts | P14-supervise | supervise.ts ignores state/drain.json | state/drain.json is present: waiting |
+| P14-NC-sv-waitonce | tests/service-supervise.test.ts | P14-supervise | supervise.ts logs the wait on every poll | waiting without spawning, once |
+| P14-NC-sv-newer | tests/service-supervise.test.ts | P14-supervise | supervise.ts rejoins only the watched generation | attached to newer host generation 2 |
+| P14-NC-sv-age | tests/service-supervise.test.ts | P14-supervise | STALE_DRAIN_MS = 60 min | an old timed-out drain holds nothing |
+| P14-NC-sv-head | tests/service-supervise.test.ts | P14-supervise | supervise.ts never matches the drain target to HEAD | a drain spent on HEAD holds nothing |
+| P14-NC-sv-state | tests/service-supervise.test.ts | P14-supervise | supervise.ts lets a draining record go stale | state/drain.json is present: waiting |
+| P14-NC-sv-inflight | tests/service-supervise.test.ts | P14-supervise | supervise.ts never sees update.json mid-run | no "stopped holding" while an update runs |
+| P14-NC-sv-fresh | tests/service-supervise.test.ts | P14-supervise | supervise.ts takes any drained age as stale | no "stopped holding" for a fresh drain |
+| P14-NC-sv-sigterm | tests/service-supervise.test.ts | P14-supervise | supervise.ts exits 1 on SIGTERM | SIGTERM exits 0 |
+| P14-NC-sv-gone | tests/service-supervise.test.ts | P14-supervise | supervise.ts exits 0 on a lost host | a lost host exits 1 |
 <!-- /manifest:regressions -->
