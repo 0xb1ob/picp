@@ -1,0 +1,22 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..26e0438 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1175,7 +1175,7 @@ export class Integrator {
+ 					jobId,
+ 					branch,
+ 					step: "delete_head",
+-					next: "retry",
++					next: "wait",
+ 					facts: [...facts, firstLine(deleted)],
+ 					prUrl: merge.receipt.pr_url,
+ 					headSha: merge.receipt.head_sha,
+@@ -1204,7 +1204,7 @@ export class Integrator {
+ 				jobId,
+ 				branch,
+ 				step: "close",
+-				next: "retry",
++				next: "wait",
+ 				facts: [...facts, (error as Error).message.split("\n")[0] ?? "job close failed"],
+ 				prUrl: merge.receipt.pr_url,
+ 				headSha: merge.receipt.head_sha,

@@ -1,0 +1,12 @@
+diff --git a/src/human-handoff.ts b/src/human-handoff.ts
+index e81e058..0eb8fdf 100644
+--- a/src/human-handoff.ts
++++ b/src/human-handoff.ts
+@@ -93,6 +93,7 @@ export const HUMAN_REVIEW_SUBJECT = "human-review pr ";
+ 
+ export function makeHandoff(deps: { registry: MergePolicyRegistry; awaiting?: () => AwaitingLike | undefined; runs?: RunRegistry } & ParkDeps): HandoffPort {
+ 	return async (input) => {
++		return undefined;
+ 		const { jobId, branch, prUrl, head } = input;
+ 		const head12 = head.slice(0, 12);
+ 		const surface = (fact: string, reason: string) =>

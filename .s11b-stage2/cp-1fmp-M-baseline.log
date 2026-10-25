@@ -1,0 +1,190 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit tests/e2e/landing-merge.test.ts
+
+▶ landing: a reviewed green head merges once, records, tears down and closes from forge facts
+  ✔ job branch (4561.378208ms)
+  ✔ bound branch (4349.320331ms)
+✔ landing: a reviewed green head merges once, records, tears down and closes from forge facts (8912.307361ms)
+From /tmp/cp-repo-omc1GH/demo
+ * branch            cp-6vw2    -> FETCH_HEAD
+HEAD is now at 6ed43ad v1
+To /tmp/cp-repo-omc1GH/demo.git
+   6ed43ad..08b5d04  HEAD -> cp-6vw2
+Previous HEAD position was 08b5d04 remote update
+Switched to branch 'main'
+▶ landing S10: synchronization preserves local work and proves origin before resetting
+  ✔ behind (4481.918507ms)
+From /tmp/cp-repo-3OyndQ/demo
+ * branch            cp-avt3    -> FETCH_HEAD
+HEAD is now at bbac328 v1
+To /tmp/cp-repo-3OyndQ/demo.git
+   bbac328..47c1839  HEAD -> cp-avt3
+Previous HEAD position was 47c1839 remote update
+Switched to branch 'main'
+  ✔ stale (4599.219196ms)
+From /tmp/cp-repo-kU9yiI/demo
+ * branch            cp-5k76    -> FETCH_HEAD
+HEAD is now at 71c6b54 v1
+To /tmp/cp-repo-kU9yiI/demo.git
+   71c6b54..77f4844  HEAD -> cp-5k76
+Previous HEAD position was 77f4844 remote update
+Switched to branch 'main'
+  ✔ dirty (3352.027644ms)
+From /tmp/cp-repo-7apzTi/demo
+ * branch            cp-0w28    -> FETCH_HEAD
+HEAD is now at 0af91d0 v1
+To /tmp/cp-repo-7apzTi/demo.git
+   0af91d0..f4ea3fd  HEAD -> cp-0w28
+Previous HEAD position was f4ea3fd remote update
+Switched to branch 'main'
+  ✔ unpushed (3581.807464ms)
+From /tmp/cp-repo-UcLit7/demo
+ * branch            cp-1w2n    -> FETCH_HEAD
+HEAD is now at a20887f v1
+To /tmp/cp-repo-UcLit7/demo.git
+   a20887f..759dd39  HEAD -> cp-1w2n
+Previous HEAD position was 759dd39 remote update
+Switched to branch 'main'
+  ✔ absorbed (5189.219586ms)
+From /tmp/cp-repo-XyrYmH/demo
+ * branch            cp-h8gf    -> FETCH_HEAD
+HEAD is now at 1a9d813 v1
+To /tmp/cp-repo-XyrYmH/demo.git
+   1a9d813..a267357  HEAD -> cp-h8gf
+Previous HEAD position was a267357 remote update
+Switched to branch 'main'
+  ✔ divergence (3264.385782ms)
+From /tmp/cp-repo-N9Vxe2/demo
+ * branch            cp-zvrb    -> FETCH_HEAD
+HEAD is now at aae6060 v1
+To /tmp/cp-repo-N9Vxe2/demo.git
+   aae6060..18b9bad  HEAD -> cp-zvrb
+Previous HEAD position was 18b9bad remote update
+Switched to branch 'main'
+  ✔ branch-denied (3940.487359ms)
+From /tmp/cp-repo-CAHQsP/demo
+ * branch            cp-2kdd    -> FETCH_HEAD
+HEAD is now at f50f8b2 v1
+To /tmp/cp-repo-CAHQsP/demo.git
+   f50f8b2..9f10312  HEAD -> cp-2kdd
+Previous HEAD position was 9f10312 remote update
+Switched to branch 'main'
+  ✔ branch-empty (3873.831462ms)
+From /tmp/cp-repo-z7Rfdr/demo
+ * branch            cp-ck0j    -> FETCH_HEAD
+HEAD is now at c0d6851 v1
+To /tmp/cp-repo-z7Rfdr/demo.git
+   c0d6851..c8aef7c  HEAD -> cp-ck0j
+Previous HEAD position was c8aef7c remote update
+Switched to branch 'main'
+  ✔ base-denied (3305.867944ms)
+From /tmp/cp-repo-jTpZq8/demo
+ * branch            cp-f053    -> FETCH_HEAD
+HEAD is now at e308a98 v1
+To /tmp/cp-repo-jTpZq8/demo.git
+   e308a98..d542784  HEAD -> cp-f053
+Previous HEAD position was d542784 remote update
+Switched to branch 'main'
+  ✔ base-empty (3348.162522ms)
+From /tmp/cp-repo-6ppjPs/demo
+ * branch            cp-3b27    -> FETCH_HEAD
+HEAD is now at ccfeb95 v1
+To /tmp/cp-repo-6ppjPs/demo.git
+   ccfeb95..4b76705  HEAD -> cp-3b27
+Previous HEAD position was 4b76705 remote update
+Switched to branch 'main'
+  ✔ merge-base (3435.601713ms)
+From /tmp/cp-repo-pVe6uX/demo
+ * branch            cp-qgs5    -> FETCH_HEAD
+HEAD is now at 11f917e v1
+To /tmp/cp-repo-pVe6uX/demo.git
+   11f917e..d051fe2  HEAD -> cp-qgs5
+Previous HEAD position was d051fe2 remote update
+Switched to branch 'main'
+  ✔ diff (3491.272135ms)
+From /tmp/cp-repo-9iMOOB/demo
+ * branch            cp-dx0b    -> FETCH_HEAD
+HEAD is now at 132ae47 v1
+To /tmp/cp-repo-9iMOOB/demo.git
+   132ae47..36d8331  HEAD -> cp-dx0b
+Previous HEAD position was 36d8331 remote update
+Switched to branch 'main'
+  ✔ patch-id (3527.482579ms)
+From /tmp/cp-repo-Ad1HFf/demo
+ * branch            cp-vumn    -> FETCH_HEAD
+HEAD is now at b09c569 v1
+To /tmp/cp-repo-Ad1HFf/demo.git
+   b09c569..865278a  HEAD -> cp-vumn
+Previous HEAD position was 865278a remote update
+Switched to branch 'main'
+  ✔ empty-id (3548.715615ms)
+From /tmp/cp-repo-a8eOYo/demo
+ * branch            cp-qup0    -> FETCH_HEAD
+HEAD is now at 298256b v1
+To /tmp/cp-repo-a8eOYo/demo.git
+   298256b..b8e62aa  HEAD -> cp-qup0
+Previous HEAD position was b8e62aa remote update
+Switched to branch 'main'
+  ✔ empty-diff (3423.260068ms)
+From /tmp/cp-repo-uvJ1Sr/demo
+ * branch            cp-45po    -> FETCH_HEAD
+HEAD is now at 49c3d3c v1
+To /tmp/cp-repo-uvJ1Sr/demo.git
+   49c3d3c..d01f8d8  HEAD -> cp-45po
+Previous HEAD position was d01f8d8 remote update
+Switched to branch 'main'
+  ✔ salvage (3734.663204ms)
+✔ landing S10: synchronization preserves local work and proves origin before resetting (60101.519496ms)
+▶ landing S10: rescue retention proves reachability and bounds cleanup
+  ✔ mixed (4601.498293ms)
+  ✔ origin-denied (4485.076521ms)
+  ✔ origin-empty (4531.282074ms)
+  ✔ listing (4406.593768ms)
+  ✔ ancestry (4572.231544ms)
+  ✔ delete (4668.254839ms)
+  ✔ fetch (4493.014948ms)
+  ✔ bound (14111.090208ms)
+  ✔ empty (4359.52742ms)
+  ✔ outside (4698.041906ms)
+✔ landing S10: rescue retention proves reachability and bounds cleanup (54929.219916ms)
+▶ landing S10: review evidence authorizes only the reviewed complete head
+  ✔ missing (2602.864874ms)
+  ✔ pass (2689.266513ms)
+  ✔ equivalent (2691.573847ms)
+  ✔ moved (2589.626787ms)
+  ✔ revise (2572.360439ms)
+  ✔ flagged (2592.16875ms)
+  ✔ approved (2674.946746ms)
+  ✔ truncated (2851.797161ms)
+  ✔ truncated-flag (2543.089426ms)
+  ✔ moved-flag (2571.224256ms)
+  ✔ fallback (2501.187933ms)
+✔ landing S10: review evidence authorizes only the reviewed complete head (28882.502689ms)
+▶ landing S10: unreadable forge and Actions evidence names the cause and makes no mutation
+  ✔ rate (2518.269308ms)
+  ✔ permission (2419.942542ms)
+  ✔ jobs-denied (2531.736513ms)
+  ✔ jobs-partial (2487.331723ms)
+  ✔ jobs-malformed (4776.892269ms)
+  ✔ missing-gh (2427.85409ms)
+✔ landing S10: unreadable forge and Actions evidence names the cause and makes no mutation (17163.453847ms)
+▶ landing S10: cleanup failures preserve landed effects and resume
+  ✔ delete (4585.685421ms)
+  ✔ close (4664.671761ms)
+  ✔ rebase (2443.075593ms)
+  ✔ merge-unknown (2872.597292ms)
+✔ landing S10: cleanup failures preserve landed effects and resume (14567.125552ms)
+▶ landing S10: dispatch rejects profiles granting parent integration tools
+  ✔ cp_integrate (135.965584ms)
+  ✔ cp_merged (131.993489ms)
+✔ landing S10: dispatch rejects profiles granting parent integration tools (268.671876ms)
+From /tmp/cp-repo-SALswv/demo
+ * branch            main       -> FETCH_HEAD
+To /tmp/cp-repo-SALswv/demo.git
+   32187b2..cd01b3c  cp-c6qu -> cp-c6qu
+✔ landing: main red gates only the mandated login and permits a green fix-forward (4293.83938ms)
+▶ landing: repository and fallback merges bind the approved head at the forge
+  ✔ repository (2828.463589ms)
+  ✔ fallback (3532.024318ms)
+✔ landing: repository and fallback merges bind the approved head at the forge (6361.282719ms)

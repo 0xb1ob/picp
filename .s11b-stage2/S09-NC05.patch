@@ -1,0 +1,22 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..659787a 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1279,7 +1279,7 @@ export class Integrator {
+ 			...(input.prUrl ? { prUrl: input.prUrl } : {}),
+ 			...(input.headSha ? { headSha: input.headSha } : {}),
+ 		};
+-		if (this.#resolving.has(input.jobId) || this.#options.fleet.get(input.jobId)?.phase === "waiting") {
++		if (false) {
+ 			return this.#write({
+ 				...common,
+ 				next: "resolve",
+@@ -1869,7 +1869,7 @@ export class Integrator {
+ 		const record = this.#options.fleet.get(jobId);
+ 		const phase = record?.phase;
+ 		const promoting = this.promoting(jobId);
+-		if (phase === "waiting" || phase === "launching" || promoting) {
++		if (false) {
+ 			const fact = `worker phase ${phase}${promoting ? "; promotion in flight" : ""}`;
+ 			return this.#write({ jobId, branch, step: "start", next: "resolve", facts: [...input.facts, fact], prUrl, ...(head ? { headSha: head } : {}),
+ 				reason: `${jobId}: ${fact}. The implementer is already working; wait for its report. Nothing was merged and no further promotion was sent.` });

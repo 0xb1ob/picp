@@ -1,0 +1,101 @@
+▶ landing S09: a real repair stays single while active and conflict handoffs follow heads
+  ✖ red (2678.184021ms)
+  ✔ conflict (3129.041805ms)
+✖ landing S09: a real repair stays single while active and conflict handoffs follow heads (5808.841641ms)
+▶ landing S09: infra reruns once while second attempts and test failures promote
+  ✖ infra (2400.804599ms)
+  ✖ second (2559.502933ms)
+  ✖ test (2442.57807ms)
+✖ landing S09: infra reruns once while second attempts and test failures promote (7403.992986ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 1
+ℹ fail 6
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 14743.602166
+
+✖ failing tests:
+
+test at tests/e2e/landing-s09.test.ts:190:48
+✖ red (2678.184021ms)
+  AssertionError [ERR_ASSERTION]: cp-zwmr: CI failure on 37372cc (ci) — merging red is forbidden. Nothing was merged; call cp_integrate again once CI finishes on 37372cc25543.
+  
+  'wait' !== 'resolve'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:197:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:190:40)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'wait',
+    expected: 'resolve',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:299:58
+✖ infra (2400.804599ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /reran the failed jobs once/. Input:
+  
+  'cp-t77v: CI failure on c50bacc (ci) — merging red is forbidden. Nothing was merged; call cp_integrate again once CI finishes on c50baccaac95.'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:307:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:299:50)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'cp-t77v: CI failure on c50bacc (ci) — merging red is forbidden. Nothing was merged; call cp_integrate again once CI finishes on c50baccaac95.',
+    expected: /reran the failed jobs once/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:299:58
+✖ second (2559.502933ms)
+  AssertionError [ERR_ASSERTION]: cp-aohg: CI failure on aecacba (ci) — merging red is forbidden. Nothing was merged; call cp_integrate again once CI finishes on aecacba25693.
+  
+  'wait' !== 'resolve'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:305:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:299:50)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'wait',
+    expected: 'resolve',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-s09.test.ts:299:58
+✖ test (2442.57807ms)
+  AssertionError [ERR_ASSERTION]: cp-s6gf: CI failure on cd31370 (ci) — merging red is forbidden. Nothing was merged; call cp_integrate again once CI finishes on cd31370aae14.
+  
+  'wait' !== 'resolve'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:305:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-s09.test.ts:299:50)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:911:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'wait',
+    expected: 'resolve',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+command_exit=1
