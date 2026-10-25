@@ -17,7 +17,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { RISK_CRITERIA, SCOPE_CRITERIA } from "../src/contracts.ts";
+import { RISK_CRITERIA, SCOPE_CRITERIA } from "../../src/contracts.ts";
 import {
 	COMMAND_POST_EXTENSION,
 	createAgentDir,
@@ -25,7 +25,7 @@ import {
 	MOCK_PROVIDER_ID,
 	MockProvider,
 	startPiChild,
-} from "./harness/index.ts";
+} from "../harness/index.ts";
 
 interface ToolSpec {
 	function?: { name?: string; description?: string; parameters?: { properties?: Record<string, { description?: string }> } };

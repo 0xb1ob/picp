@@ -1,12 +1,7 @@
 /**
- * cp-u3o4: the answer card's pure half — the capped read, the collapsed and
- * expanded views, and the degrade line for an answer whose file has moved.
- *
- * Everything here runs without pi and without a terminal, which is the point
- * of `src/answer-card.ts` existing at all: the renderer in the extension is
- * then a few `Text` children over these values. It is NOT sufficient evidence
- * for the TUI behaviour itself (cur-20260901-5) — that has to be reproduced on
- * a real pi TUI, and docs/contracts.md §Q&A answers says how.
+ * Retained verbatim (P11): the answer card's view. Its only consumer is the `cp-answer` entry renderer, which pi
+ * runs in an interactive TUI alone; no pty harness exists, so no entry point reaches it. The notice pointer is
+ * pinned by P11-answer in tests/e2e/research-delivery.test.ts.
  */
 
 import assert from "node:assert/strict";
@@ -18,7 +13,6 @@ import {
 	answerCardView,
 	formatAnswerDegrade,
 	formatAnswerHeader,
-	formatAnswerNotice,
 	readAnswerSource,
 } from "../src/answer-card.ts";
 import { ANSWER_CARD_COLLAPSED_LINES, ANSWER_MAX_BYTES, LAYOUT } from "../src/contracts.ts";
@@ -115,14 +109,6 @@ test("a file over the bound renders capped and says so", (t) => {
 	const view = answerCardView(data, { expanded: true, maxBytes: 2048 });
 	assert.equal(view.truncated, true);
 	assert.ok(Buffer.byteLength(view.body.join("\n")) <= 2048);
-});
-
-test("the non-TUI notice is a pointer, never a body", (t) => {
-	const data = scratchAnswer(t, "Answer\n\nthe secret sauce is in src/config.ts\n");
-	const notice = formatAnswerNotice(data);
-	assert.ok(notice.includes(data.path));
-	assert.ok(notice.includes(data.job_id));
-	assert.ok(!notice.includes("secret sauce"), "the answer body never travels in a notice");
 });
 
 test("a card with no project and no headline still renders a header", (t) => {
