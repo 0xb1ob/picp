@@ -14,6 +14,7 @@ import { ESCALATION_RELAY_LEDGER_KEEP, escalationRelayLedgerFile } from "../../s
 import { EscalationStore, raiseForGate } from "../../src/escalation.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
+import { OperatorRelayOutbox, operatorRelayOutboxFile } from "../../src/operator-outbox.ts";
 import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, type PiChild, type ScriptStep, startPiChild } from "../harness/index.ts";
 
 type Home = ReturnType<typeof createScratchHome>;
@@ -209,6 +210,9 @@ test("decisions: the operator session relays each overdue, unrepresented escalat
 	const bridged = (id: string) => ({ id, relayed_at: at(0), via: "bridge" });
 	writeFileSync(ledgerFile, JSON.stringify({ schema_version: SCHEMA_VERSION, items: [bridged(quiet.pinned.id), bridged(quiet.withdrawn.id), ...settled] }));
 	const ledger = () => JSON.parse(readFileSync(ledgerFile, "utf8")).items as Array<{ id: string; via: string }>;
+	const wake = "[cp-bridge wake] cp-wake-probe finished";
+	new OperatorRelayOutbox(operatorRelayOutboxFile(join(home.path, layoutForHome("multi", home.path).state)))
+		.enqueue({ kind: "wake", stale: false, text: wake, receipt: { level: null, reached: [] }, paths: [], jobId: "cp-wake-probe" }, "test");
 
 	const relays = (pi: PiChild) => pi.records().filter((r) => r.type === "message_start" && JSON.stringify(r).includes("[cp-bridge escalation"));
 	const relayedIds = (pi: PiChild) => relays(pi).flatMap((r) => [...JSON.stringify(r).matchAll(/\[cp-bridge escalation [^\]]*?id=(es-[\w-]+)/g)].map((m) => m[1]));
@@ -217,6 +221,7 @@ test("decisions: the operator session relays each overdue, unrepresented escalat
 	const first = await bridge(t, home, [text("Noted.")], true);
 	await first.pi.waitFor(() => relayedIds(first.pi).length >= expected.length, 30_000);
 	assert.deepEqual(relayedIds(first.pi), expected, "due ids only, oldest first, each once");
+	await first.pi.waitFor((r) => r.type === "message_start" && JSON.stringify(r).includes("cp-wake-probe"), 30_000);
 	const gateRelay = JSON.stringify(relays(first.pi).find((r) => JSON.stringify(r).includes(`id=${gate.id}`)));
 	assert.match(gateRelay, new RegExp(`\\] ${gate.id} \\(conflicting_acceptance\\) has been open \\d+ min and was never relayed to this session`), "project-tagged");
 	assert.ok(gateRelay.includes(paths.gateFile("cp-gjva", 1)), "the gate evidence path is named");
@@ -227,6 +232,7 @@ test("decisions: the operator session relays each overdue, unrepresented escalat
 	assert.ok(items.some((item) => item.id === quiet.pinned.id && item.via === "bridge"), "the open bridge relay is pinned");
 	assert.ok(!items.some((item) => item.id === quiet.withdrawn.id), "a settled bridge relay is pruned under the cap");
 	assert.deepEqual(items.filter((item) => expected.includes(item.id)).map((item) => item.via), expected.map(() => "backstop"));
+	assert.ok(!items.some((item) => String(item.id).includes("cp-wake-probe")), "the relayed wake wrote no ledger item");
 	await first.close();
 
 	const second = await bridge(t, home, [text("Noted.")], true);
@@ -299,10 +305,12 @@ test("decisions: cp_parent answer posts bookkeeping answers to the dashboard jou
 		["no-project", { ...input, project: "" }],
 	];
 	const steps = calls.map(([id, args]): ScriptStep => ({ kind: "tool_calls", calls: [{ id, name: "cp_parent", args }] }));
-	const { pi } = await bridge(t, home, [text("Hello."), ...steps, text("Posted.")]);
+	const { pi } = await bridge(t, home, [text("Hello."), text("Hello again."), ...steps, text("Posted.")]);
 	const stateDir = join(home.path, layoutForHome("multi", home.path).state);
 	const journal = join(stateDir, "operator", "answers.jsonl");
 	await turn(pi, "Hi.");
+	const quiet = snapshot(home.path);
+	await turn(pi, "Again.");
 	const before = snapshot(home.path);
 	await turn(pi, "Post the answers.");
 
@@ -356,7 +364,11 @@ test("decisions: cp_parent answer posts bookkeeping answers to the dashboard jou
 	assert.equal(lines().length, 6, "two posts, three job landings and the max answer; every refusal and duplicate wrote nothing");
 	const after = snapshot(home.path);
 	const relJournal = join(layoutForHome("multi", home.path).state, "operator", "answers.jsonl");
-	assert.deepEqual(Object.keys(after).filter((file) => !(file in before)), [relJournal], "a plain turn's files aside, only the journal is new");
+	const touched = (from: Record<string, string>, to: Record<string, string>) => Object.keys(to).filter((file) => from[file] !== to[file]);
+	const plain = touched(quiet, before);
+	const extra = touched(before, after).filter((file) => file !== relJournal && !plain.includes(file));
+	assert.deepEqual(extra, [], `beyond what a plain turn touches (${plain.join(", ")}), only the journal is written`);
+	assert.ok(!(relJournal in before) && relJournal in after);
 	assert.equal(existsSync(join(stateDir, "operator", "asks.jsonl")), false, "posting an answer creates no ask");
 
 	const other = createScratchHome();
