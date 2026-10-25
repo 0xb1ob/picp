@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -620,7 +620,7 @@ test("P15-ledger-file: the parent creates the ledger once, fails closed on a bro
 	const s = await bench(t, "p15-ledger");
 	await register(s.home, "demo");
 	const file = join(s.home, LAYOUT.jobsFile);
-	const runtime = join(s.home, LAYOUT.runtimeDir);
+	const squats: string[] = [];
 	const archive = legacyArchiveFile(s.home);
 	const seen: Record<string, string> = {};
 	const legacy = (jobs: unknown[]) => writeFileSync(file, JSON.stringify({ schema_version: 1, prefix: "acme", jobs }));
@@ -657,20 +657,24 @@ test("P15-ledger-file: the parent creates the ledger once, fails closed on a bro
 			calls: [job("archive-blocked", { action: "comment", job_id: "acme-a", text: "touch" })],
 		},
 		{
-			prompt: "The disk is read-only now.",
+			prompt: "The ledger write cannot land now.",
 			before: () => {
 				seen.afterBlocked = readFileSync(file, "utf8");
 				rmSync(archive, { recursive: true });
 				legacy([ACME]);
 				seen.readOnly = readFileSync(file, "utf8");
-				chmodSync(runtime, 0o500);
+				// Root ignores chmod, so squat atomicWriteText's staging names with directories instead.
+				// shortcut: its per-process counter is unobservable, so 1..10k are squatted; raise if the parent writes more.
+				const { pid } = JSON.parse(readFileSync(join(s.home, LAYOUT.parentLock), "utf8")) as { pid: number };
+				for (let n = 1; n <= 10_000; n += 1) squats.push(`${file}.${pid}.${n}.tmp`);
+				for (const squat of squats) mkdirSync(squat);
 			},
 			calls: [job("read-only", { action: "create", title: "a", project: "demo", delivery: "pr" })],
 		},
 		{
 			prompt: "Read a corrupt ledger.",
 			before: () => {
-				chmodSync(runtime, 0o700);
+				for (const squat of squats) rmSync(squat, { recursive: true, force: true });
 				seen.afterReadOnly = readFileSync(file, "utf8");
 				writeFileSync(file, "{not json");
 			},
@@ -695,7 +699,7 @@ test("P15-ledger-file: the parent creates the ledger once, fails closed on a bro
 	assert.deepEqual(["type" in cleaned.jobs[0]!, "priority" in cleaned.jobs[0]!, cleaned.jobs[0]!.comments.length], [false, false, 2]);
 	failed(ends, "archive-blocked", /refusing to write .*jobs\.json: the retired job fields \(acme-a\) could not be archived/);
 	assert.equal(seen.afterBlocked, seen.blocked, "failure-closed: the retired values are still on disk, the comment did not land");
-	failed(ends, "read-only", /could not write .*jobs\.json: EACCES/);
+	failed(ends, "read-only", /could not write .*jobs\.json: .*EISDIR/);
 	assert.equal(seen.afterReadOnly, seen.readOnly, "a write that cannot land leaves the previous document intact");
 	failed(ends, "not-json", /is not JSON/);
 	failed(ends, "bad-shape", /violates the jobs contract/);

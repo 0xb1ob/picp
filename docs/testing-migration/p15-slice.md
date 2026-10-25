@@ -3,7 +3,7 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P15 (cp-e2e-migration-p15-18d4) | behavior 13, project tracker: `cp_job`, `/cp-jobs` and `cp_project` through a real parent pi on the mock provider, in `tests/e2e/project-tracker.test.ts` (85 declarations in five files: 75 mapped to P15-jobs-lifecycle, -jobs-refusals, -jobs-refs-scope, -ledger-file and -projects, 10 retained verbatim in three `*-retained.test.ts` files; `tests/fake-parent-tracker.test.ts` retained whole as a harness test; controls P15-C1..C9) | 2 (`tests/trackers-ledger.test.ts`, `tests/verify-external-ref.test.ts`; the other three are mixed moves with no fully-deleted-file credit) |
+| P15 (cp-e2e-migration-p15-18d4) | behavior 13, project tracker: `cp_job`, `/cp-jobs` and `cp_project` through a real parent pi on the mock provider, in `tests/e2e/project-tracker.test.ts` (85 declarations in five files: 75 mapped to P15-jobs-lifecycle, -jobs-refusals, -jobs-refs-scope, -ledger-file and -projects, 10 retained verbatim in three `*-retained.test.ts` files; `tests/fake-parent-tracker.test.ts` retained whole as a harness test; controls P15-C1..C10) | 2 (`tests/trackers-ledger.test.ts`, `tests/verify-external-ref.test.ts`; the other three are mixed moves with no fully-deleted-file credit) |
 <!-- /manifest:ledger -->
 
 Behavior 13. Each P15 scenario boots one real `pi --mode rpc` parent with the command-post extension on a scratch
@@ -129,6 +129,7 @@ does.
 | P15-C7 | tests/projects.test.ts | P15-projects | `classifyMergeFlow` always answers human_handoff | `solo` |
 | P15-C8 | tests/projects.test.ts | P15-projects | the CI denial classifier never matches | `denied` |
 | P15-C9 | tests/projects.test.ts | P15-projects | the canonical-clone check skips its linked-worktree test | `linked` |
+| P15-C10 | tests/ledger.test.ts | P15-ledger-file | `atomicWriteText` swallows a staging write that fails (the squatted temp path) | `read-only should be refused` |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->
