@@ -425,9 +425,9 @@ test("the focused script selects only the requested file with the suite's safety
 	}
 	assert.doesNotMatch(focused, /tests\/\*\*\/\*\.test\.ts/, "focused run must not include the all-files glob");
 	const { NODE_TEST_CONTEXT: _drop, ...env } = process.env;
-	const output = execFileSync("npm", ["run", "test:one", "--", "tests/answer-card.test.ts"], { cwd: REPO_ROOT, encoding: "utf8", env });
-	assert.match(output, /tests 8\b/);
-	assert.match(output, /pass 8\b/);
+	const output = execFileSync("npm", ["run", "test:one", "--", "tests/answer-card-retained.test.ts"], { cwd: REPO_ROOT, encoding: "utf8", env });
+	assert.match(output, /tests 7\b/);
+	assert.match(output, /pass 7\b/);
 });
 
 // ---------------------------------------------------------------------------

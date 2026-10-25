@@ -1,7 +1,7 @@
 /**
- * Crash window in prepareGateReplacement: inherited gate-N.json can land
- * before gate-replacement.json. A retry accepts that history only when it
- * is exactly the inherited decisions; anything else still refuses.
+ * Retained verbatim (P11): prepareGateReplacement's crash-window retry. No entry point reaches it: replace_work
+ * mints the replacement id inside the call, so no public consumer can present a replacement that already holds
+ * gate history or an artifact, nor stop the call between its gate-N.json and gate-replacement.json writes.
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";

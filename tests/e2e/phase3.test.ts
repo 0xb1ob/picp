@@ -26,7 +26,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
@@ -36,6 +36,7 @@ import { initJobsDocument } from "../../src/ledger.ts";
 import type { AdvanceResult, Authorizer } from "../../src/pipeline.ts";
 import { ReviewRuns, type ReviewWakeup } from "../../src/review-runs.ts";
 import {
+	COMMAND_POST_EXTENSION,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -45,6 +46,7 @@ import {
 	type RecordedRequest,
 	REPO_ROOT,
 	type ScriptStep,
+	startRpc,
 	treehouse,
 	treehouseAvailable,
 	waitFor,
@@ -785,6 +787,18 @@ test("m3: a passed gate is not authorization", { skip: SKIP, timeout: 600_000 },
 	assert.equal(waiting.checkpoint?.decision, "pending");
 	assert.equal(waiting.dispatch, undefined);
 	assert.equal(readFleet(f.home).jobs.find((job) => job.job_id === shipId), undefined, "no implementer without a human");
+	// P11: the pending checkpoint sits under .pi-command-post/state/checkpoints and the operator's /cp-awaiting lists it;
+	// the planner's research artifact is a plan, so the session_start drain shows no answer card for it.
+	assert.ok(existsSync(join(f.home, ".pi-command-post/state/checkpoints", `${shipId}.json`)));
+	assert.ok(!readFileSync(join(f.home, paths.originalTaskFile(researchId)), "utf8").includes("## Referenced material"), "a task naming no path gets no snapshot");
+	const operator = startRpc({ cwd: REPO_ROOT, args: ["--no-session", "--no-context-files", "-e", COMMAND_POST_EXTENSION], env: { CP_HOME: f.home } });
+	t.after(() => operator.close().then(() => undefined));
+	operator.send({ id: "awaiting", type: "prompt", message: "/cp-awaiting" });
+	const listing = await operator.waitFor((r) => r.type === "extension_ui_request" && r.method === "notify" && String(r.message).startsWith("Awaiting you"), 60_000);
+	assert.ok(String(listing.message).includes(`aw-checkpoint-${shipId} [authorization]`), String(listing.message));
+	assert.equal(operator.records().some((r) => r.type === "extension_ui_request" && String(r.message).startsWith("answer for ")), false);
+	assert.equal(existsSync(join(f.home, LAYOUT.answerCardsFile)), false, "a pipeline plan mints no answer card");
+	await operator.close();
 
 	// A declined decision stops the pipeline for good.
 	f.post.checkpoints.decide(shipId, false, { by: "operator command", note: "not this quarter" });
