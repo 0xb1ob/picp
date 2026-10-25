@@ -3,7 +3,7 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P14 (cp-e2e-migration-p14-0w42) | behavior 15: session-start nudges through a real parent (P14-nudges), cp-health alerts raised, withdrawn, acknowledged and relayed through a parent and a cp-bridge operator (P14-alerts), cp-install's model, gateway-key and retired-flag steps on a pty (P14-install, P14-install-models), the parent host's gateway key hand-off (P14-gateway-key), the version view through cp-view, a hosted parent, the cp-bridge footer and /cp-version (P14-version-badge, -running, -live, -lock), scripts/install-tools.ts on a stub PATH (P14-install-tools, -os), and the parent supervisor as cp-parent.service runs it (P14-supervise); 68 declarations from 9 files: 64 mapped, 4 retained verbatim in `tests/version-view-retained.test.ts` and `tests/service-supervise-retained.test.ts`; the PR3c `--with-br`/`--no-br` assertions in `tests/service-install.test.ts` moved to P14-install | 9 |
+| P14 (cp-e2e-migration-p14-0w42) | behavior 15: session-start nudges through a real parent (P14-nudges), cp-health alerts raised, withdrawn, acknowledged and relayed through a parent and a cp-bridge operator (P14-alerts), cp-install's model, gateway-key and retired-flag steps on a pty (P14-install, P14-install-models), the parent host's gateway key hand-off (P14-gateway-key), the version view through cp-view, a hosted parent, the cp-bridge footer and /cp-version (P14-version-badge, -running, -live, -lock), scripts/install-tools.ts on a stub PATH (P14-install-tools, -os), and the parent supervisor as cp-parent.service runs it (P14-supervise); 68 declarations from 9 files: 64 mapped, 4 retained verbatim in `tests/version-view-retained.test.ts` and `tests/service-supervise-retained.test.ts`; the PR3c retired install-flag assertions (`RETIRED_INSTALL_FLAGS`) in `tests/service-install.test.ts` moved to P14-install | 9 |
 <!-- /manifest:ledger -->
 
 P14 converts behavior 15 file by file in one PR; the files still marked `convert` in `p14.md` are its remainder.
@@ -152,8 +152,8 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | P14-NC-md-yes | tests/service-models.test.ts | P14-install-models | install.ts prompts under --yes | --yes shows no Choose prompt |
 | P14-NC-md-env | tests/service-models.test.ts | P14-install | models.ts passes the whole shell env to the listing | a shell-only key never reaches the listing |
 | P14-NC-md-dedupe | tests/service-models.test.ts | P14-install | units.ts keeps a duplicate PATH dir | the unit PATH: node's dir first, deduplicated |
-| P14-NC-br-note | tests/service-install.test.ts | P14-install | install.ts drops the retired-flag warning | --with-br is deprecated and ignored |
-| P14-NC-br-parse | tests/service-install.test.ts | P14-install | install.ts stops parsing the retired flags | --with-br is deprecated and ignored |
+| P14-NC-rf-note | tests/service-install.test.ts | P14-install | install.ts drops the retired-flag warning | `--<retired flag> is deprecated and ignored` |
+| P14-NC-rf-parse | tests/service-install.test.ts | P14-install | install.ts stops parsing the retired flags | `--<retired flag> is deprecated and ignored` |
 | P14-NC-gk-xdg | tests/gateway-key.test.ts | P14-install | gateway-key.ts ignores XDG_CONFIG_HOME | the key file under XDG_CONFIG_HOME |
 | P14-NC-gk-home | tests/gateway-key.test.ts | P14-install | gateway-key.ts uses HOME/.cfg | the key file under HOME/.config |
 | P14-NC-gk-valid | tests/gateway-key.test.ts | P14-install | gateway-key.ts accepts whitespace | fail: gateway: --gateway-key-file ...; nothing written |

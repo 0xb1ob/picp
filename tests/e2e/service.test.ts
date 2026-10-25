@@ -13,6 +13,7 @@ import { layoutForHome } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { PI_PACKAGE_PATH } from "../../src/pi-version-nudge.ts";
 import type { CheckRecord, HealthRecord } from "../../src/service/health.ts";
+import { RETIRED_INSTALL_FLAGS } from "../../src/service/install.ts";
 import {
 	COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, REPO_ROOT, type RpcRecord, type ScriptStep, startPiChild,
 } from "../harness/index.ts";
@@ -304,9 +305,9 @@ test("P14-install: cp-install lists models as the service sees them, asks once p
 	const flags = ["--viewer-host", "127.0.0.1", "--gateway-url", "https://gw.example", "--gateway-key-file", keyIn];
 
 	// An out-of-range pick fails before anything is written; the prompt lists the service's view of the models.
-	const bad = await installOnTty(m, [...flags, "--with-br"], ["9"]);
+	const bad = await installOnTty(m, [...flags, `--${RETIRED_INSTALL_FLAGS[0]}`], ["9"]);
 	assert.equal(bad.code, 1, bad.out);
-	assert.match(bad.out, /--with-br is deprecated and ignored: the optional tracker step was removed/);
+	assert.match(bad.out, new RegExp(`--${RETIRED_INSTALL_FLAGS[0]} is deprecated and ignored: the optional tracker step was removed`));
 	assert.match(bad.out, /Model for the parent — .*\(3 available/, "the unsafe id is dropped from the count");
 	assert.match(bad.out, /\n {2}1\) anthropic\/claude-opus-5-5 {2}recommended: in the routing rubric\n/, "the rubric first, the unsafe id dropped");
 	assert.match(bad.out, /\n {2}2\) openai\/gpt-6\.1-sol {9}in the routing rubric\n {2}3\) openai-codex\/gpt-6\.1-sol {3}your pi default\n/);
@@ -321,8 +322,8 @@ test("P14-install: cp-install lists models as the service sees them, asks once p
 	assert.deepEqual(names.sort(), ["HOME", "PATH", "USER"], "HOME, USER (and LOGNAME) and the unit PATH only");
 
 	// An unlisted ref is refused; then 2 for the parent, Enter for the operator takes the parent's pick.
-	const unlisted = await installOnTty(m, [...flags, "--no-br"], ["x/y"]);
-	assert.match(unlisted.out, /--no-br is deprecated and ignored/);
+	const unlisted = await installOnTty(m, [...flags, `--${RETIRED_INSTALL_FLAGS[1]}`], ["x/y"]);
+	assert.match(unlisted.out, new RegExp(`--${RETIRED_INSTALL_FLAGS[1]} is deprecated and ignored`));
 	assert.match(unlisted.out, /fail: model: x\/y is not a model pi can use as the service sees it/);
 	const good = await installOnTty(m, flags, ["2", ""]);
 	assert.equal(good.code, 0, good.out);
