@@ -1,6 +1,6 @@
 /**
- * cp-bridge: mock parent, receipts, one wake, one escalation, relaunch same session.
- * A real pi load proves the main session has no fleet tools.
+ * cp-bridge units no operator entry point reaches; kept verbatim by P9h (docs/testing-migration/p9h.md names each
+ * missing entry point). The reachable behaviour lives in tests/e2e/cp-bridge-p9h.test.ts and the slices it cites.
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { isZombieProcessStat } from "./harness/fake-parent-tracker.ts";
-import { BRIDGE_RECEIPT_LEVELS, LAYOUT, layoutForHome, PARENT_BRIDGE_FLAGS } from "../src/contracts.ts";
+import { LAYOUT, layoutForHome, PARENT_BRIDGE_FLAGS } from "../src/contracts.ts";
 import { workerEnvironment } from "../src/worker-manager.ts";
 import {
 	type BridgeReceipt,
@@ -32,18 +32,17 @@ import { ALWAYS_AVAILABLE, registryProbe } from "../src/routing.ts";
 import { daemonPaths } from "../src/service/daemon-files.ts";
 import { isPidAlive } from "../src/fleet.ts";
 import { EscalationStore, raiseMissionEnd } from "../src/escalation.ts";
-import { initJobsDocument, Ledger } from "../src/ledger.ts";
+import { initJobsDocument } from "../src/ledger.ts";
 import { acquireParentLock } from "../src/parent-lock.ts";
 import { attachParentHost, currentHost, ParentHostClient, parentHostPaths, runParentHost } from "../src/parent-host.ts";
 import { operatorSendTexts, ParentSendOutbox, parentSendFile } from "../src/parent-outbox.ts";
 import type { WorkerExit } from "../src/worker-process.ts";
 import bridgeExtension, { BRIDGE_TOOL, operatorTargetFile, resolveOperatorTarget, saveOperatorTarget, assertOperatorTarget, validateOperatorTarget, clearOperatorTarget, retireStaleOperatorTarget, observedSendStubs } from "../extensions/cp-bridge/index.ts";
 import { deliverStandingOrders, standingOrdersFile } from "../src/parent-context.ts";
-import { parentFile, parentRow } from "../src/viewer/sessions.ts";
 import { PACKAGE_ROOT } from "../src/home.ts";
 import { OPERATOR_BUILTIN_EXTENSIONS } from "../src/viewer/operator.ts";
 import { readOperatorSessions } from "../src/viewer/operator-sessions.ts";
-import { createScratchHome, startRpc } from "./harness/index.ts";
+import { createScratchHome } from "./harness/index.ts";
 
 const FAKE_PARENT = resolve(import.meta.dirname, "fixtures", "fake-parent.mjs");
 
@@ -181,11 +180,6 @@ test("stale operator targets are retired unless their own parent still holds the
 	assert.equal(resolveOperatorTarget(home, "multi", env).hostPid, 0);
 	lock.lock.release();
 });
-test("receipt levels are the five names and not accepted", () => {
-	assert.deepEqual(BRIDGE_RECEIPT_LEVELS, ["injected", "turn_settled", "http_accepted", "owner_observed", "turn_failed"]);
-	assert.equal(BRIDGE_RECEIPT_LEVELS.includes("accepted" as never), false);
-});
-
 test("parent host restart retires dead target after crash and does not replay an observed send", async (t) => {
 	const ctx = hostHome(t);
 	const env = { PI_HOME: scratch() };
@@ -309,50 +303,6 @@ test("cp_parent ask accepts and records the ask's context in state/operator/asks
 	assert.equal(event?.context, context, "the ask's context reaches the journal, not just the tool schema");
 });
 
-test("send returns owner_observed and the reply; http_accepted is not claimed", async (t) => {
-	const home = createScratchHome();
-	const argvFile = join(scratch(), "argv");
-	process.env.FAKE_PARENT_ARGV = argvFile;
-	const bridge = new CpBridge();
-	t.after(async () => {
-		delete process.env.FAKE_PARENT_ARGV;
-		await bridge.stop();
-		home.cleanup();
-	});
-	await bridge.start({
-		home: home.path,
-		mode: "multi",
-		model: "mock/parent",
-		piBin: FAKE_PARENT,
-		requestTimeoutMs: 5_000,
-		settleTimeoutMs: 5_000,
-	});
-	const receipt = await bridge.send("mandate ship the widget");
-	assert.equal(receipt.level, "owner_observed");
-	assert.deepEqual(receipt.reached, ["injected", "turn_settled", "owner_observed"]);
-	assert.equal(receipt.reached.includes("http_accepted"), false);
-	assert.match(receipt.reply ?? "", /mandate ship the widget/);
-	assert.equal(JSON.stringify(receipt).includes("accepted"), false);
-	const status = bridge.status();
-	assert.equal(status.alive, true);
-	assert.equal(typeof status.pid, "number");
-	assert.ok(status.sessionFile?.endsWith("cp-parent.jsonl"));
-	assert.ok(status.lastReplyAt);
-});
-
-test("parent controls compact only when settled and status reports context tokens", async (t) => {
-	const home = createScratchHome();
-	const bridge = new CpBridge();
-	t.after(async () => { await bridge.stop(); home.cleanup(); });
-	await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT });
-	assert.equal((await bridge.statusWithContext()).contextTokens, 42000);
-	assert.equal((await bridge.compact()).tokensBefore, 42000);
-	await bridge.send("HANG x", 50);
-	await assert.rejects(bridge.compact(), /pending send|settled/);
-	await bridge.send("RELEASE");
-	assert.equal((await bridge.statusWithContext()).contextTokens, 5000);
-});
-
 test("automatic compact runs after settlement, never with a pending durable send", async (t) => {
 	const home = createScratchHome();
 	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
@@ -426,25 +376,6 @@ test("C1: ready-time control compacts before a queued send drains", async (t) =>
 	assert.equal(daemonLog(ctx.home, "compacted").length, 1);
 });
 
-test("N6: a length stop is not compacted, and the skip is logged once", async (t) => {
-	const ctx = await controlBridge(t, { FAKE_PARENT_LENGTH_STOP: "1", FAKE_PARENT_STATS_TOKENS: "255640" }, 200000);
-	await ctx.bridge.send("first turn");
-	await until(() => ctx.log("skipped_length_stop").length > 0, "the skip line");
-	assert.equal(ctx.log("skipped_length_stop").length, 1);
-	assert.match(ctx.log("skipped_length_stop")[0]!, /raw=255640 effective=127\d{3} threshold=200000/);
-	assert.equal(ctx.bridge.status().lastCompactAt, undefined);
-});
-
-test("C1: a failed automatic compact is logged and relayed, never silent", async (t) => {
-	const ctx = await controlBridge(t, { FAKE_PARENT_COMPACT_FAIL: "1" }, 40000);
-	await ctx.bridge.send("first turn");
-	await until(() => ctx.log("failed").length > 0 && ctx.errors().length > 0, "the failure line and relay");
-	assert.equal(ctx.log("failed").length, 1);
-	assert.match(ctx.log("failed")[0]!, /fixture compaction failure/);
-	assert.equal(ctx.errors().length, 1);
-	assert.match(ctx.errors()[0]!.text, /parent automatic context control failed: compact rejected: fixture compaction failure/);
-});
-
 test("C1: a refused automatic compact names its reason", async (t) => {
 	const rejections: unknown[] = [];
 	const onRejection = (reason: unknown) => rejections.push(reason);
@@ -457,16 +388,6 @@ test("C1: a refused automatic compact names its reason", async (t) => {
 	assert.match(ctx.log("refused")[0]!, /refused busy raw=42000/);
 	assert.equal(ctx.bridge.status().lastCompactAt, undefined);
 	assert.deepEqual(rejections, []);
-});
-
-test("C1: a timed-out automatic compact is logged once as timed_out", async (t) => {
-	const ctx = await controlBridge(t, { FAKE_PARENT_COMPACT_DELAY_MS: "3000" }, 40000, 1_000);
-	await ctx.bridge.send("first turn");
-	await until(() => ctx.log("timed_out").length > 0, "the timed_out line");
-	assert.equal(ctx.log("timed_out").length, 1);
-	assert.equal(ctx.log("failed").length, 0);
-	assert.equal(ctx.errors().length, 1);
-	assert.match(ctx.errors()[0]!.text, /timed out: timeout after 1000ms waiting for response to compact/);
 });
 
 test("mission-end rotates after settlement without restarting the parent or its worker", async (t) => {
@@ -498,27 +419,6 @@ test("mission-end rotates after settlement without restarting the parent or its 
 	assert.equal(daemonLog(home.path, "rotated").length, 1, "and is logged once");
 });
 
-test("rotate archives old session and relaunches the new file", async (t) => {
-	const home = createScratchHome();
-	const bridge = new CpBridge();
-	t.after(async () => { await bridge.stop(); home.cleanup(); });
-	const started = await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT });
-	const rotated = await bridge.rotate();
-	assert.notEqual(rotated.sessionFile, started.sessionFile);
-	assert.ok(rotated.archivedFile.includes("cp-parent-"));
-	assert.ok(readFileSync(rotated.archivedFile, "utf8").includes('"type":"session"'));
-	const delivered = await bridge.send("after rotation");
-	assert.equal(delivered.reply, "reply: after rotation");
-	assert.equal(bridge.status().sends.find((send) => send.id === delivered.send_id)?.level, "owner_observed");
-	const pid = bridge.status().pid as number;
-	process.kill(pid, "SIGKILL");
-	await until(() => bridge.status().pid !== pid && bridge.status().alive, "rotated session relaunch");
-	assert.equal(bridge.status().sessionFile, rotated.sessionFile);
-	await bridge.stop();
-	const next = new CpBridge();
-	t.after(() => next.stop());
-	assert.equal((await next.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT })).sessionFile, rotated.sessionFile);
-});
 
 test("model changes without restarting the parent or its live worker and persists for next start", async (t) => {
 	const home = createScratchHome();
@@ -542,81 +442,6 @@ test("model changes without restarting the parent or its live worker and persist
 	assert.equal(next.status().model, "mock/other");
 });
 
-test("start model precedence: data/parent.json model beats the saved control model and a resolved model; an explicit start model beats the file", async (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
-	mkdirSync(join(home.path, LAYOUT.sessions), { recursive: true });
-	writeFileSync(join(home.path, LAYOUT.sessions, "cp-parent-control.json"), JSON.stringify({ model: "mock/saved" }));
-	const startWith = async (options: { model: string; modelExplicit?: boolean }) => {
-		const bridge = new CpBridge();
-		t.after(() => bridge.stop());
-		await bridge.start({ home: home.path, mode: "multi", piBin: FAKE_PARENT, ...options });
-		const model = bridge.status().model;
-		await bridge.stop();
-		return model;
-	};
-	assert.equal(await startWith({ model: "mock/env" }), "mock/saved", "absent model key: the saved control model still wins, as before");
-	writeFileSync(join(home.path, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 1000, model: "mock/file" }));
-	assert.equal(await startWith({ model: "mock/env" }), "mock/file", "the file beats the saved control model and the env/session model");
-	assert.equal(await startWith({ model: "mock/explicit", modelExplicit: true }), "mock/saved", "an explicit start model skips the file; the saved control model still beats it, as today");
-	writeFileSync(join(home.path, LAYOUT.data, "parent.json"), JSON.stringify({ model: "not a model" }));
-	assert.equal(await startWith({ model: "mock/env" }), "mock/saved", "an invalid file model is ignored");
-});
-
-test("rotate applies the configured parent model; a set_model rejection keeps the running model, relays one error and still returns", async (t) => {
-	const home = createScratchHome();
-	process.env.FAKE_PARENT_REJECT_MODEL = "mock/bad";
-	const bridge = new CpBridge();
-	t.after(async () => { delete process.env.FAKE_PARENT_REJECT_MODEL; await bridge.stop(); home.cleanup(); });
-	const relays: BridgeRelay[] = [];
-	bridge.onRelay((relay) => relays.push(relay));
-	await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT });
-	const parentFile = join(home.path, LAYOUT.data, "parent.json");
-	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
-	writeFileSync(parentFile, JSON.stringify({ compact_at_tokens: 1000, model: "mock/next" }));
-	const first = await bridge.rotate();
-	assert.equal(bridge.status().model, "mock/next");
-	assert.equal(bridge.status().sessionFile, first.sessionFile);
-	assert.equal(JSON.parse(readFileSync(join(home.path, LAYOUT.sessions, "cp-parent-control.json"), "utf8")).model, "mock/next");
-	assert.deepEqual(relays.filter((relay) => relay.kind === "error"), []);
-
-	writeFileSync(parentFile, JSON.stringify({ compact_at_tokens: 1000, model: "mock/bad" }));
-	const second = await bridge.rotate();
-	assert.notEqual(second.sessionFile, first.sessionFile, "the rotation itself completed");
-	assert.equal(bridge.status().model, "mock/next", "the old model stays");
-	assert.equal(JSON.parse(readFileSync(join(home.path, LAYOUT.sessions, "cp-parent-control.json"), "utf8")).model, "mock/next");
-	const errors = relays.filter((relay) => relay.kind === "error");
-	assert.equal(errors.length, 1);
-	assert.match(errors[0]!.text, /^parent rotate kept mock\/next: set_model mock\/bad rejected: Model not found: mock\/bad$/);
-	assert.equal((await bridge.send("after a refused switch")).reply, "reply: after a refused switch");
-});
-
-test("rotate keeps an explicit start model and a live cp_parent model switch over data/parent.json; absent explicit, the file applies", async (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
-	writeFileSync(join(home.path, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 1000, model: "mock/file" }));
-	const control = () => JSON.parse(readFileSync(join(home.path, LAYOUT.sessions, "cp-parent-control.json"), "utf8")).model;
-
-	const explicit = new CpBridge();
-	t.after(() => explicit.stop());
-	await explicit.start({ home: home.path, mode: "multi", model: "mock/explicit", modelExplicit: true, piBin: FAKE_PARENT });
-	assert.equal(explicit.status().model, "mock/explicit");
-	await explicit.rotate();
-	assert.equal(explicit.status().model, "mock/explicit", "an explicit start model survives rotation");
-	assert.equal(control(), "mock/explicit");
-	await explicit.stop();
-
-	const live = new CpBridge();
-	t.after(() => live.stop());
-	await live.start({ home: home.path, mode: "multi", model: "mock/env", piBin: FAKE_PARENT });
-	assert.equal(live.status().model, "mock/file", "no explicit model: the file wins at start");
-	await live.model("mock/live");
-	await live.rotate();
-	assert.equal(live.status().model, "mock/live", "a live cp_parent model switch survives rotation");
-	assert.equal(control(), "mock/live");
-});
 
 test("standing orders seed once, survive operator edits, and deliver beyond 8000 characters", (t) => {
 	const home = createScratchHome();
@@ -661,37 +486,6 @@ test("fresh home seeds generic operational orders and reloads them after rotatio
 		assert.match(messages[1] ?? "", rule);
 	}
 	assert.doesNotMatch(seeded, /gpt-6-sol|gpt-6.1-sol|wall_clock_seconds|paused project/i);
-});
-
-test("operator-edited standing orders reach a fresh rotated session and viewer follows its file", async (t) => {
-	const home = createScratchHome();
-	const bridge = new CpBridge();
-	t.after(async () => { await bridge.stop(); home.cleanup(); });
-	const messages: Array<{ content: string; customType: string }> = [];
-	const send = (message: { content: string; customType: string }, options: { triggerTurn: false }) => {
-		assert.equal(options.triggerTurn, false);
-		messages.push(message);
-	};
-	const operatorOrders = "# Standing orders\n\n## Relays\n- Prefix relays with the current project.\n";
-	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
-	writeFileSync(standingOrdersFile(home.path), operatorOrders);
-	assert.equal(deliverStandingOrders(send, home.path), true);
-	await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT });
-	const rotated = await bridge.rotate();
-	await bridge.stop();
-	const next = new CpBridge();
-	t.after(() => next.stop());
-	assert.equal((await next.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT })).sessionFile, rotated.sessionFile);
-	assert.equal(deliverStandingOrders(send, home.path), true);
-	assert.deepEqual(messages.map((m) => m.customType), ["cp-standing-orders", "cp-standing-orders"]);
-	for (const message of messages) {
-		assert.equal(message.content.split("\n\n").slice(1).join("\n\n"), operatorOrders.trim());
-	}
-	assert.equal(readFileSync(standingOrdersFile(home.path), "utf8"), operatorOrders);
-	const viewer = { home: home.path, stateDir: join(home.path, LAYOUT.state) };
-	assert.equal(parentFile(viewer), rotated.sessionFile);
-	assert.ok(parentRow(viewer).standing_orders_at);
-	assert.ok(parentRow(viewer).last_rotate_at);
 });
 
 test("a synthetic wake is relayed once, tagged, paths not bodies", async (t) => {
@@ -782,32 +576,6 @@ test("a Running reply keeps the structured wake identity, including legacy IDs",
 			assert.equal(wakes[0]?.jobId, job);
 			assert.ok(wakes[0]?.paths.includes(join(home, LAYOUT.runs, job)));
 			assert.equal(wakes[0]?.paths.some((path) => path.includes("/Running")), false);
-		});
-	}
-});
-
-test("cp-hhuf P1: a cp-schedule fire turn takes its job ids from details.job_id; all-scheduled is not relayed", async (t) => {
-	for (const [name, labelled, env] of [
-		["unscheduled job: relayed with its job ids", false, {}],
-		["scheduled job: not relayed", true, {}],
-		["scheduled plus an unscheduled stamp: relayed", true, { FAKE_PARENT_WAKE_JOB: "cp-plain" }],
-	] as const) {
-		await t.test(name, async (t) => {
-			const home = createScratchHome();
-			initJobsDocument(home.path, "cp");
-			const job = await new Ledger({ home: home.path }).create({ title: "Weather", project: "demo", kind: "research", delivery: "answer", ...(labelled ? { labels: ["schedule:sch-aaaaaa"] } : {}) });
-			Object.assign(process.env, { FAKE_PARENT_WAKE: "1", FAKE_PARENT_WAKE_TEXT: "weather: 29 C", FAKE_PARENT_WAKE_SCHEDULE: job.id, ...env });
-			const bridge = new CpBridge();
-			const wakes: Array<{ jobIds?: string[] }> = [];
-			bridge.onRelay((relay) => { if (relay.kind === "wake") wakes.push({ jobIds: relay.jobIds }); });
-			t.after(async () => {
-				for (const key of ["FAKE_PARENT_WAKE", "FAKE_PARENT_WAKE_TEXT", "FAKE_PARENT_WAKE_SCHEDULE", "FAKE_PARENT_WAKE_JOB"]) delete process.env[key];
-				await bridge.stop();
-				home.cleanup();
-			});
-			await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs: 5_000 });
-			const expected = "FAKE_PARENT_WAKE_JOB" in env ? [["cp-plain", job.id]] : labelled ? [] : [[job.id]];
-			assert.deepEqual(wakes.map((wake) => wake.jobIds), expected, JSON.stringify(wakes));
 		});
 	}
 });
@@ -930,23 +698,6 @@ test("a mission end that cp_next raised itself reaches the relay, once by id", a
 	assert.match(open[0]?.text ?? "", /dropped 1/);
 });
 
-test("a re-raised escalation relays again with its refreshed numbers, under the same id", async (t) => {
-	const home = createScratchHome();
-	const bridge = new CpBridge();
-	const relays: Array<{ id?: string; text: string }> = [];
-	bridge.onRelay((relay) => {
-		if (relay.kind === "escalation") relays.push({ id: relay.escalationId, text: relay.text });
-	});
-	t.after(async () => {
-		await bridge.stop();
-		home.cleanup();
-	});
-	await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs: 5_000, settleTimeoutMs: 5_000 });
-	await bridge.send("REFRESH");
-	assert.deepEqual(relays.map((relay) => relay.id), ["es-0002", "es-0002"]);
-	assert.match(relays[1]?.text ?? "", /cost \$9\.95$/);
-});
-
 test("escalation on the stream is one message; stale headline is marked", async (t) => {
 	const home = createScratchHome();
 	const bridge = new CpBridge();
@@ -984,30 +735,6 @@ test("escalation on the stream is one message; stale headline is marked", async 
 	assert.equal(escalations[0]?.text.includes("# "), false);
 });
 
-test("a refused cp_escalate tool call is an error notice, never keyed by its raw tool call id", async (t) => {
-	const home = createScratchHome();
-	const bridge = new CpBridge();
-	const relays: BridgeRelay[] = [];
-	bridge.onRelay((relay) => relays.push(relay));
-	t.after(async () => { await bridge.stop(); home.cleanup(); });
-	await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs: 5_000, settleTimeoutMs: 5_000 });
-	await bridge.send("REFUSE_ESCALATION");
-	assert.equal(relays.some((relay) => relay.kind === "escalation" || relay.escalationId === "call_raw-id"), false);
-	assert.ok(relays.some((relay) => relay.kind === "error" && relay.text.includes("option consequence exceeds schema cap")));
-});
-
-test("a refused cp_escalate followed by a successful call in the same parent turn relays only the escalation", async (t) => {
-	const home = createScratchHome();
-	const bridge = new CpBridge();
-	const relays: BridgeRelay[] = [];
-	bridge.onRelay((relay) => relays.push(relay));
-	t.after(async () => { await bridge.stop(); home.cleanup(); });
-	await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs: 5_000, settleTimeoutMs: 5_000 });
-	await bridge.send("RETRY_ESCALATION");
-	assert.equal(relays.some((relay) => relay.kind === "error"), false, JSON.stringify(relays));
-	assert.deepEqual(relays.filter((relay) => relay.kind === "escalation").map((relay) => relay.escalationId), ["es-0001"]);
-});
-
 test("a deliberately failing fake-parent test leaves no parent or descendant pid", { skip: process.platform !== "linux" && "cleanup requires Linux procfs identity checks" }, (t) => {
 	const dir = scratch();
 	const pidFile = join(dir, "pids");
@@ -1037,230 +764,6 @@ test("H6: a dispatch or pipeline advance carrying a risk_warning wakes the main 
 	await bridge.send("RISKWARN");
 	assert.deepEqual(wakes.map((wake) => wake.jobId), ["cp-h6", "cp-h6p"], JSON.stringify(wakes));
 	assert.match(wakes[0]?.text ?? "", /cp-h6: warning: risk:high inferred from keywords only \(delete\)/);
-});
-
-test("killing the parent relaunches the same session once and does not replay sends", async (t) => {
-	const home = createScratchHome();
-	const dir = scratch();
-	const argvFile = join(dir, "argv");
-	const promptFile = join(dir, "prompts");
-	process.env.FAKE_PARENT_ARGV = argvFile;
-	process.env.FAKE_PARENT_PROMPTS = promptFile;
-	const bridge = new CpBridge();
-	const notices: string[] = [];
-	bridge.onRelay((relay) => {
-		if (relay.kind === "relaunch") notices.push(relay.text);
-	});
-	t.after(async () => {
-		delete process.env.FAKE_PARENT_ARGV;
-		delete process.env.FAKE_PARENT_PROMPTS;
-		await bridge.stop();
-		home.cleanup();
-	});
-	const started = await bridge.start({
-		home: home.path,
-		mode: "multi",
-		model: "mock/parent",
-		piBin: FAKE_PARENT,
-		requestTimeoutMs: 5_000,
-		settleTimeoutMs: 5_000,
-	});
-	await bridge.send("mandate once");
-	const pid = bridge.status().pid;
-	assert.equal(typeof pid, "number");
-	process.kill(pid as number, "SIGKILL");
-	const deadline = Date.now() + 5_000;
-	while (Date.now() < deadline) {
-		const count = readFileSync(argvFile, "utf8").trim().split("\n").filter(Boolean).length;
-		if (notices.length >= 1 && count >= 2 && bridge.status().alive) break;
-		await new Promise((resolve) => setTimeout(resolve, 20));
-	}
-	assert.equal(notices.length, 1, JSON.stringify(notices));
-	assert.match(notices[0] ?? "", /relaunching same session/);
-	assert.match(notices[0] ?? "", /reconcile/);
-	assert.match(notices[0] ?? "", /not replayed/);
-	const lines = readFileSync(argvFile, "utf8").trim().split("\n");
-	assert.equal(lines.length, 2, lines.join("\n"));
-	const first = JSON.parse(lines[0] ?? "[]") as string[];
-	const second = JSON.parse(lines[1] ?? "[]") as string[];
-	assert.equal(second[second.indexOf("--session") + 1], first[first.indexOf("--session") + 1]);
-	assert.equal(second[second.indexOf("--session") + 1], started.sessionFile);
-	const prompts = readFileSync(promptFile, "utf8").trim().split("\n");
-	assert.deepEqual(prompts, ["mandate once"]);
-	assert.equal(bridge.status().alive, true);
-});
-
-test("stop is an observed close and does not relaunch", async (t) => {
-	const home = createScratchHome();
-	const argvFile = join(scratch(), "argv-stop");
-	process.env.FAKE_PARENT_ARGV = argvFile;
-	const bridge = new CpBridge();
-	const notices: string[] = [];
-	bridge.onRelay((relay) => notices.push(relay.kind));
-	t.after(() => {
-		delete process.env.FAKE_PARENT_ARGV;
-		home.cleanup();
-	});
-	await bridge.start({
-		home: home.path,
-		mode: "multi",
-		model: "mock/parent",
-		piBin: FAKE_PARENT,
-		requestTimeoutMs: 5_000,
-	});
-	const exit = await bridge.stop();
-	assert.equal(exit?.code, 0);
-	assert.equal(bridge.status().alive, false);
-	assert.equal(notices.includes("relaunch"), false);
-	assert.equal(readFileSync(argvFile, "utf8").trim().split("\n").length, 1);
-});
-
-test("start refuses a live lock holder", async (t) => {
-	const home = createScratchHome();
-	const lock = acquireParentLock({ home: home.path });
-	assert.equal(lock.ok, true);
-	t.after(() => {
-		if (lock.ok) lock.lock.release();
-		home.cleanup();
-	});
-	const bridge = new CpBridge();
-	await assert.rejects(
-		bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT }),
-		(error: unknown) => error instanceof CpBridgeError && /already holds/.test((error as Error).message),
-	);
-});
-
-test("status lists open escalations from the store, not bodies", async (t) => {
-	const home = createScratchHome();
-	const bridge = new CpBridge();
-	t.after(async () => {
-		await bridge.stop();
-		home.cleanup();
-	});
-	await bridge.start({
-		home: home.path,
-		mode: "multi",
-		model: "mock/parent",
-		piBin: FAKE_PARENT,
-		requestTimeoutMs: 5_000,
-	});
-	await new EscalationStore({ home: home.path }).raise({
-		job_ids: ["cp-job"],
-		kind: "product_ambiguity",
-		question: "which copy?",
-		options: [
-			{ id: "approve", label: "approve", consequence: "proceed", cost: "none" },
-			{ id: "decline", label: "decline", consequence: "stop", cost: "sunk" },
-		],
-		recommended: "approve",
-		evidence_paths: ["state/runs/cp-job/artifact.md"],
-	});
-	const status = bridge.status();
-	assert.equal(status.openEscalations.length, 1);
-	assert.equal(status.openEscalations[0]?.question, "which copy?");
-	assert.ok(status.paths.some((path) => path.endsWith(`${join("state", "runs", "cp-job", "artifact.md")}`)));
-});
-
-test("main session has no cp_dispatch or cp_integrate", { timeout: 60_000 }, async (t) => {
-	const rpc = startRpc({
-		cwd: scratch(),
-		args: [...operatorPiArgs(PACKAGE_ROOT), "--no-session"],
-	});
-	t.after(() => rpc.close());
-	rpc.send({ id: "cmds", type: "get_commands" });
-	const commands = await rpc.waitFor((record) => record.type === "response" && record.id === "cmds");
-	const names = ((commands.data as { commands?: Array<{ name: string }> } | undefined)?.commands ?? []).map(
-		(command) => command.name,
-	);
-	assert.ok(names.includes("cp-bridge"), names.join(","));
-	assert.equal(names.includes("cp-version"), false);
-	rpc.send({ id: "run", type: "prompt", message: "/cp-bridge" });
-	const notify = await rpc.waitFor(
-		(record) => record.type === "extension_ui_request" && record.method === "notify" && typeof record.message === "string",
-	);
-	const message = String(notify.message);
-	assert.match(message, /cp_parent/);
-	assert.equal(message.includes("cp_dispatch"), false);
-	assert.equal(message.includes("cp_integrate"), false);
-});
-
-test("a turn whose assistant message ends in error yields turn_failed, never owner_observed, reply undefined", async (t) => {
-	const home = createScratchHome();
-	const bridge = new CpBridge();
-	t.after(async () => {
-		await bridge.stop();
-		home.cleanup();
-	});
-	await bridge.start({
-		home: home.path,
-		mode: "multi",
-		model: "mock/parent",
-		piBin: FAKE_PARENT,
-		requestTimeoutMs: 5_000,
-		settleTimeoutMs: 5_000,
-	});
-	const receipt = await bridge.send("trigger ERROR please");
-	assert.equal(receipt.level, "turn_failed");
-	assert.deepEqual(receipt.reached, ["injected", "turn_settled", "turn_failed"]);
-	assert.equal(receipt.reached.includes("owner_observed"), false);
-	assert.equal(receipt.reply, undefined);
-	assert.match(receipt.error ?? "", /404 model not found: gpt-5/);
-});
-
-test("a normal send turn yields owner_observed with only assistant text, never the echoed prompt", async (t) => {
-	const home = createScratchHome();
-	const bridge = new CpBridge();
-	t.after(async () => {
-		await bridge.stop();
-		home.cleanup();
-	});
-	await bridge.start({
-		home: home.path,
-		mode: "multi",
-		model: "mock/parent",
-		piBin: FAKE_PARENT,
-		requestTimeoutMs: 5_000,
-		settleTimeoutMs: 5_000,
-	});
-	const receipt = await bridge.send("ship the widget");
-	assert.equal(receipt.level, "owner_observed");
-	assert.equal(receipt.reply, "reply: ship the widget");
-	assert.equal(receipt.error, undefined);
-});
-
-test("H1: transient provider failure runs the outer ladder and resumes, never re-sending the original text", async (t) => {
-	const home = createScratchHome();
-	const promptLog = join(scratch(), "prompts");
-	process.env.FAKE_PARENT_PROMPTS = promptLog;
-	const bridge = new CpBridge();
-	const delays: number[] = [];
-	t.after(async () => {
-		delete process.env.FAKE_PARENT_PROMPTS;
-		await bridge.stop();
-		home.cleanup();
-	});
-	await bridge.start({
-		home: home.path,
-		mode: "multi",
-		model: "mock/parent",
-		piBin: FAKE_PARENT,
-		requestTimeoutMs: 5_000,
-		settleTimeoutMs: 5_000,
-		outerRetrySleep: async (ms) => {
-			delays.push(ms);
-		},
-	});
-	const receipt = await bridge.send("trigger TRANSIENT please");
-	assert.equal(receipt.level, "owner_observed");
-	assert.match(receipt.reply ?? "", /^reply: /);
-	// One outer-ladder attempt: the fake parent's TRANSIENT branch fails exactly
-	// once, then the resumed prompt (which never contains TRANSIENT) succeeds.
-	assert.deepEqual(delays, [5_000]);
-	const prompts = readFileSync(promptLog, "utf8").trim().split("\n");
-	assert.deepEqual(prompts, [
-		"trigger TRANSIENT please",
-		"The previous turn failed with a transient provider error. Continue where you left off \u2014 do not repeat the original task or brief, and do not redo actions you already completed.",
-	]);
 });
 
 test("H1 review: a persistently transient failure runs the ladder to its full cap of 5, and never trips the 3-consecutive-turn_failed relaunch", async (t) => {
@@ -1319,33 +822,6 @@ test("H1 review: a persistently transient failure runs the ladder to its full ca
 	assert.equal(relaunchesAfter.length, 1, JSON.stringify(relays));
 });
 
-test("three consecutive turn_failed sends stop the parent and emit one relaunch relay", async (t) => {
-	const home = createScratchHome();
-	const bridge = new CpBridge();
-	const relays: string[] = [];
-	bridge.onRelay((relay) => relays.push(`${relay.kind}:${relay.text}`));
-	t.after(async () => {
-		await bridge.stop();
-		home.cleanup();
-	});
-	await bridge.start({
-		home: home.path,
-		mode: "multi",
-		model: "mock/parent",
-		piBin: FAKE_PARENT,
-		requestTimeoutMs: 5_000,
-		settleTimeoutMs: 5_000,
-	});
-	for (let i = 0; i < 3; i += 1) {
-		const receipt = await bridge.send("trigger ERROR please");
-		assert.equal(receipt.level, "turn_failed");
-	}
-	const relaunches = relays.filter((line) => line.startsWith("relaunch:"));
-	assert.equal(relaunches.length, 1, JSON.stringify(relays));
-	assert.match(relaunches[0] ?? "", /3 turns in a row/);
-	assert.match(relaunches[0] ?? "", /404 model not found: gpt-5/);
-});
-
 test("resolveParentModel: env, then session, then refusal naming both options", () => {
 	assert.equal(resolveParentModel({ CP_PARENT_MODEL: "anthropic/claude" }, "openai/gpt"), "anthropic/claude");
 	assert.equal(resolveParentModel({}, "openai/gpt"), "openai/gpt");
@@ -1402,32 +878,6 @@ test("requireAvailableParentModel refuses an unknown model before spawn, naming 
 
 // Durable operator→parent delivery (src/parent-outbox.ts).
 
-test("a send that outlasts the wait returns pending, then relays its reply once by id", async (t) => {
-	const ctx = await outboxBridge(t);
-	const bridge = await ctx.open();
-	const hang = await bridge.send("HANG x", 200);
-	assert.equal(hang.level, "injected");
-	assert.ok(hang.send_id);
-	assert.equal(hang.pending, hang.send_id);
-	assert.equal(hang.error, undefined);
-	const release = await bridge.send("RELEASE");
-	assert.equal(release.level, "owner_observed");
-	assert.equal(release.reply, "reply: RELEASE");
-	const relays = ctx.sendRelays(hang.send_id);
-	assert.equal(relays.length, 1, JSON.stringify(ctx.relays));
-	assert.equal(relays[0]?.text, "reply: HANG x");
-	assert.equal(ctx.relays.filter((relay) => relay.kind === "send").length, 1, "the synchronous RELEASE is its own tool result");
-	assert.equal(ctx.relays.some((relay) => relay.kind === "wake"), false);
-	const id = hang.send_id as string;
-	assert.equal(bridge.sendReceipt(id)?.level, "turn_settled");
-	bridge.observe([{ customType: "cp-ci", details: { send_id: id } }, "junk"]);
-	assert.equal(bridge.sendReceipt(id)?.level, "turn_settled", "only a cp-bridge relay observes a send");
-	bridge.observe([{ customType: "cp-bridge", content: "x", details: { send_id: id } }]);
-	assert.equal(bridge.sendReceipt(id)?.level, "owner_observed");
-	assert.equal(bridge.confirmObserved(id), false, "observing twice is a no-op");
-	assert.equal(bridge.status().sends.find((row) => row.id === id)?.level, "owner_observed");
-});
-
 test("a send is answered at its clean turn_end, before the run settles, and never relayed again", async (t) => {
 	const ctx = await outboxBridge(t);
 	const bridge = await ctx.open();
@@ -1479,30 +929,6 @@ test("a follow-up lost with the parent is delivered once after relaunch", async 
 	assert.deepEqual(lines(ctx.files.prompts), ["NOLAND y"]);
 });
 
-test("a send that landed before death is never re-injected, only nudged", async (t) => {
-	const ctx = await outboxBridge(t);
-	const bridge = await ctx.open();
-	const landed = await bridge.send("HANG z", 200);
-	process.kill(bridge.status().pid as number, "SIGKILL");
-	await until(() => ctx.sendRelays(landed.send_id).length > 0, "the resumed send's relay");
-	const prompts = lines(ctx.files.prompts);
-	assert.equal(prompts.filter((line) => line === "HANG z").length, 1, prompts.join("\n"));
-	assert.ok(prompts.some((line) => line.includes(`[cp-send ${landed.send_id} — resume]`)), prompts.join("\n"));
-	assert.equal(bridge.sendReceipt(landed.send_id as string)?.level, "turn_settled");
-});
-
-test("a new bridge drains another bridge's pending sends", async (t) => {
-	const ctx = await outboxBridge(t);
-	const first = await ctx.open();
-	const pending = await first.send("NOLAND w", 200);
-	assert.equal(pending.pending, pending.send_id);
-	await first.stop();
-	assert.equal(ctx.sendRelays(pending.send_id).length, 0);
-	await ctx.open();
-	await until(() => ctx.sendRelays(pending.send_id).length > 0, "the second bridge's relay");
-	assert.equal(ctx.sendRelays(pending.send_id)[0]?.text, "reply: NOLAND w");
-});
-
 test("cp_parent stop discards never-landed sends with one relay", async (t) => {
 	const ctx = await outboxBridge(t);
 	const bridge = await ctx.open();
@@ -1514,98 +940,6 @@ test("cp_parent stop discards never-landed sends with one relay", async (t) => {
 	assert.match(relays[0]?.text ?? "", /has no confirmed landing \(parent stopped by the operator\)/);
 	assert.equal(bridge.status().sends.find((row) => row.id === pending.send_id)?.state, "undeliverable");
 	await assert.rejects(bridge.send("after stop"), CpBridgeError);
-});
-
-test("a corrupt send outbox refuses the start, naming the file", async (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const file = join(home.path, LAYOUT.sessions, "cp-parent.sends.json");
-	mkdirSync(join(file, ".."), { recursive: true });
-	writeFileSync(file, "{ nope", "utf8");
-	await assert.rejects(
-		new CpBridge().start({ home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT }),
-		(error: unknown) => (error as Error).message.includes(file),
-	);
-});
-
-test("the outer retry ladder runs in the background under the same send id: pending now, one relay later", async (t) => {
-	const ctx = await outboxBridge(t);
-	const bridge = new CpBridge();
-	bridge.onRelay((relay) => ctx.relays.push(relay));
-	const delays: number[] = [];
-	t.after(() => bridge.stop());
-	await bridge.start({
-		home: ctx.home,
-		mode: "multi",
-		model: "mock/parent",
-		piBin: FAKE_PARENT,
-		requestTimeoutMs: 5_000,
-		outerRetrySleep: (ms) => {
-			delays.push(ms);
-			return new Promise((resolve) => setTimeout(resolve, 400));
-		},
-	});
-	const started = Date.now();
-	const receipt = await bridge.send("trigger TRANSIENT please", 150);
-	assert.ok(Date.now() - started < 2_000, "the caller never waits out the ladder");
-	assert.equal(receipt.level, "injected");
-	assert.equal(receipt.pending, receipt.send_id);
-	assert.equal(receipt.error, undefined);
-	await until(() => ctx.sendRelays(receipt.send_id).length > 0, "the resumed send's relay");
-	await new Promise((resolve) => setTimeout(resolve, 200));
-	const relays = ctx.sendRelays(receipt.send_id);
-	assert.equal(relays.length, 1, JSON.stringify(ctx.relays));
-	assert.equal(relays[0]?.receipt.level, "turn_settled");
-	assert.match(relays[0]?.text ?? "", /^reply: The previous turn failed with a transient provider error/);
-	assert.equal(ctx.relays.filter((relay) => relay.kind === "send").length, 1);
-	assert.deepEqual(delays, [5_000]);
-	// Same id both times: the resume nudge carries the original send's marker.
-	assert.deepEqual(lines(ctx.files.ids), [receipt.send_id, receipt.send_id]);
-	assert.equal(lines(ctx.files.prompts)[0], "trigger TRANSIENT please");
-	const journal = lines(join(ctx.home, LAYOUT.state, "bridge-retry.jsonl")).map((line) => JSON.parse(line) as { event: string; send_id?: string });
-	assert.deepEqual(journal.map((line) => [line.event, line.send_id]), [
-		["outer_retry_attempt", receipt.send_id],
-		["outer_retry_succeeded", receipt.send_id],
-	]);
-});
-
-test("a restarted bridge continues a send's persisted transient budget: remaining delays only, then one failed receipt", async (t) => {
-	const home = createScratchHome();
-	process.env.FAKE_PARENT_TRANSIENT_ALWAYS = "1";
-	const bridge = new CpBridge();
-	const relays: BridgeRelay[] = [];
-	bridge.onRelay((relay) => relays.push(relay));
-	const delays: number[] = [];
-	t.after(async () => {
-		delete process.env.FAKE_PARENT_TRANSIENT_ALWAYS;
-		await bridge.stop();
-		home.cleanup();
-	});
-	// Left by a dead bridge: landed, two transient retries already spent.
-	mkdirSync(join(home.path, LAYOUT.sessions), { recursive: true });
-	const box = new ParentSendOutbox({ file: join(home.path, LAYOUT.sessions, "cp-parent.sends.json") });
-	const entry = box.enqueue("seeded before the restart");
-	box.markInjected([entry.id]);
-	box.markLanded([entry.id]);
-	box.reserveOuterRetry(entry.id, 5);
-	box.reserveOuterRetry(entry.id, 5);
-	await bridge.start({
-		home: home.path,
-		mode: "multi",
-		model: "mock/parent",
-		piBin: FAKE_PARENT,
-		requestTimeoutMs: 5_000,
-		settleTimeoutMs: 5_000,
-		outerRetrySleep: async (ms) => {
-			delays.push(ms);
-		},
-	});
-	await until(() => relays.some((relay) => relay.kind === "send" && relay.sendId === entry.id), "the final relay");
-	assert.deepEqual(delays, [20_000, 40_000, 80_000], "attempts 3-5 only: the spent two are not replayed");
-	const final = new ParentSendOutbox({ file: box.file }).get(entry.id);
-	assert.equal(final?.state, "failed");
-	assert.equal(final?.outer_retry_attempts, 5);
-	assert.equal(relays.filter((relay) => relay.kind === "send").length, 1);
 });
 
 // Parent host (src/parent-host.ts): a detached child owns the parent; clients attach over a private socket.
@@ -2046,20 +1380,6 @@ test("parent host: withdrawal suppresses an escalation already queued for reconn
 	const backlog: BridgeRelay[] = [];
 	await next.onRelay((relay) => backlog.push(relay));
 	assert.equal(backlog.filter((relay) => relay.kind === "escalation").length, 0);
-});
-
-test("parent host: a current unobserved wake is delivered on subscribe after reconnect", async (t) => {
-	const ctx = hostHome(t, { FAKE_PARENT_WAKE: "1", FAKE_PARENT_WAKE_JOB: "cp-current", FAKE_PARENT_WAKE_TEXT: "Current worker report received" });
-	const first = await ctx.attach();
-	await ctx.start(first);
-	first.disconnect();
-	await first.closed;
-	const next = await ctx.attach();
-	const backlog: BridgeRelay[] = [];
-	await next.onRelay((relay) => backlog.push(relay));
-	assert.equal(backlog.length, 1);
-	assert.equal(backlog[0]?.stale, false);
-	assert.match(backlog[0]?.text ?? "", /Current worker report received/);
 });
 
 test("parent host: a pending send survives its client's disconnect; stop observes the parent's close", async (t) => {
