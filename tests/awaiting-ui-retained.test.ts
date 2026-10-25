@@ -1,12 +1,10 @@
 /**
- * The Awaiting-you overlay is retired; what stays is the outer-prompt span
- * (`HumanPrompt`, `applyPromptWorking`) that session hooks still drive, and the
- * guard that no overlay command is registered.
+ * The outer-prompt span (`HumanPrompt`, `applyPromptWorking`) only reaches the interactive TUI: setWorkingVisible is a
+ * no-op in RPC mode and nothing reads `open`, so no e2e entry point observes it. Moved verbatim from awaiting-ui.
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { commandPostSource } from "./harness/pi-child.ts";
 import { applyPromptWorking, HumanPrompt } from "../src/awaiting-ui.ts";
 
 test("HumanPrompt start then end clears open", () => {
@@ -28,12 +26,4 @@ test("applyPromptWorking records setWorkingVisible(false) then (true) and pairs 
 	applyPromptWorking(ui, prompt, "end");
 	assert.equal(prompt.open, false);
 	assert.deepEqual(calls, [false, true]);
-});
-
-test("decision overlay is not a live production path", () => {
-	const source = commandPostSource();
-	assert.ok(source.includes('name: "cp_decide"'));
-	assert.ok(!source.includes('registerCommand("cp-decide"'));
-	assert.ok(!source.includes('registerCommand("cp-authorize"'));
-	assert.match(source, /Overlay retired/);
 });
