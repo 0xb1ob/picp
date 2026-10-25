@@ -184,7 +184,6 @@
 	"tests/operator-compact-retained.test.ts": 8,
 	"tests/operator-context-retained.test.ts": 2,
 	"tests/operator-decide-vs-ask-evals.test.ts": 3,
-	"tests/operator-delivery.test.ts": 417,
 	"tests/operator-note.test.ts": 3,
 	"tests/operator-outbox-host.test.ts": 30733,
 	"tests/operator-outbox.test.ts": 783,
