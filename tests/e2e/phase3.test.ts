@@ -709,6 +709,12 @@ test("m3: a reviewer's own escalate with a flag stays policy — never authoriza
 	assert.equal(escalatedVerdict.cause, "policy", "the reviewer's own escalate is a disputed plan, not a flagged-but-sound one");
 	assert.equal(escalated.next, "surface");
 	assert.equal(f.post.checkpoints.get(shipId), undefined, "a policy escalate never reaches a human authorization");
+	// The gate files the escalation itself (P10d): one conflicting_acceptance record, and another advance files no second.
+	const raised = f.post.escalations.list({ jobId: researchId });
+	assert.deepEqual(raised.map((item) => [item.kind, item.status, item.recommended]), [["conflicting_acceptance", "open", "replan"]]);
+	assert.match(raised[0]!.question, /gate attempt 1: escalate \(policy\)\. the plan itself drops the wrong table/);
+	await f.advanceThrough(researchId);
+	assert.deepEqual(f.post.escalations.list({ jobId: researchId }).map((item) => item.id), [raised[0]!.id]);
 });
 
 test("m3: unparseable → operational → operational_persistent, same model, capped", { skip: SKIP, timeout: 600_000 }, async (t) => {

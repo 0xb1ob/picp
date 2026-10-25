@@ -1,53 +1,21 @@
 /**
- * Escalation retained (P10d): queue-timed supersede races, an injected awaiting follow-up failure, the worker deny
- * list, the batch refresh count and raiseForGate's own record; the rest moved to tests/e2e/decisions-p10d.test.ts.
+ * Escalation retained (P10d): queue-timed supersede races and an injected awaiting follow-up failure have no entry
+ * point a mock-model parent reaches; the rest moved to tests/e2e/decisions-p10d.test.ts, phase3 m3 and S15.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CheckpointStore } from "../src/checkpoint.ts";
-import {
-	type GateVerdict,
-	isoTimestamp,
-	SCHEMA_VERSION,
-	WORKER_FORBIDDEN_TOOLS,
-} from "../src/contracts.ts";
-import {
-	EscalationStore,
-	kindForGate,
-	raiseForGate,
-} from "../src/escalation.ts";
+import { EscalationStore } from "../src/escalation.ts";
 import { queued } from "../src/json-store.ts";
 import type { AwaitingStore } from "../src/awaiting.ts";
 import { AnsweredOutbox } from "../src/answered.ts";
 import type { AnsweredDecision } from "../src/contracts.ts";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { ExtensionDeps } from "../extensions/command-post/shared.ts";
-import { registerMandateTools } from "../extensions/command-post/tools-mandate.ts";
-import { createScratchHome, createScratchLedger } from "./harness/index.ts";
-import { MandateStore } from "../src/mandate.ts";
-import { readFileSync } from "node:fs";
+import { createScratchHome } from "./harness/index.ts";
 
 const OPTIONS = [
 	{ id: "approve", label: "approve", consequence: "proceed", cost: "none" },
 	{ id: "decline", label: "decline", consequence: "stop", cost: "sunk" },
 ];
-
-function policyVerdict(jobId = "cp-research1"): GateVerdict {
-	return {
-		schema_version: SCHEMA_VERSION,
-		job_id: jobId,
-		attempt: 1,
-		verdict: "escalate",
-		cause: "policy",
-		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },
-		reasons: ["the plan skips a rollback step"],
-		decided_at: isoTimestamp(),
-	};
-}
-
-test("cp_escalate is parent-only", () => {
-	assert.ok(WORKER_FORBIDDEN_TOOLS.includes("cp_escalate"));
-});
 
 /** Hold the escalation file's queue so a supersede can land while an answer waits on it. */
 async function holdQueue(file: string): Promise<{ held: Promise<void>; release: () => void }> {
@@ -125,67 +93,4 @@ test("a linked awaiting follow-up that failed after the claim is completed by an
 	await assert.rejects(() => store.answer(raised.id, { answer: "decline", by: "operator command" }), /already answered/);
 	assert.equal(calls.length, 2, "a contrary retry never reaches the awaiting row");
 	assert.equal(store.get(raised.id)?.answer, "approve");
-});
-
-test("cp_escalate action batch_risk_high (6B-T2): every refusal writes nothing and refreshes nothing; a valid batch withdraws the per-job rows", async (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const store = new EscalationStore({ home: home.path });
-	const mandates = new MandateStore(home.path);
-	const { ledger } = createScratchLedger({ home: home.path, knownProjects: ["example-app"] });
-	mandates.issue({ projects: ["example-app"], objective: "ship the example change", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
-	const ids: string[] = [];
-	for (const slug of ["aaa1", "aaa2", "aaa3"]) ids.push((await ledger.create({ title: `example ${slug}`, project: "example-app", delivery: "pr", kind: "ship", slug, ...(slug === "aaa1" ? { risk: "high" as const } : {}) })).id);
-	const [a1, a2, a3] = ids as [string, string, string];
-	for (const jobId of [a2, a3]) {
-		await assert.rejects(() => mandates.assertDispatchAllowed({ jobId, project: "example-app", kind: "ship", risk: "high", evidence: ["risk high: production"] }), /risk:high under ask_on/);
-	}
-	const tools = new Map<string, { parameters: unknown; execute: (...args: unknown[]) => Promise<{ content: { text: string }[]; details: Record<string, unknown> }> }>();
-	const pi = { on: () => {}, registerTool: (tool: { name: string; execute: (...args: unknown[]) => Promise<never> }) => tools.set(tool.name, tool as never) };
-	let refreshed = 0;
-	const deps = {
-		commandPost: () => ({ escalations: store, mandates, ledger: () => ledger, fleet: { read: () => ({ jobs: [] }) }, runs: { get: () => undefined } }),
-		setLive: () => {},
-		refreshWidget: () => {
-			refreshed += 1;
-		},
-		projectOf: () => () => undefined,
-		createdThisTurn: [],
-	} as unknown as ExtensionDeps;
-	registerMandateTools(pi as unknown as ExtensionAPI, deps);
-	assert.match(JSON.stringify(tools.get("cp_escalate")!.parameters), /batch_risk_high/);
-	const escalate = (params: Record<string, unknown>) => tools.get("cp_escalate")!.execute("call-1", params, undefined, undefined, {});
-
-	const before = readFileSync(store.file, "utf8");
-	for (const [params, pattern] of [
-		[{ action: "batch_risk_high" }, /needs job_ids/],
-		[{ action: "batch_risk_high", job_ids: [a1] }, /got 1/],
-		[{ action: "batch_risk_high", job_ids: [a1, "cp-zzz9"] }, /unknown job ids/],
-		[{ action: "batch_risk_high", job_ids: [a1, a1] }, /duplicate job ids/],
-	] as const) {
-		await assert.rejects(() => escalate(params), pattern);
-		assert.equal(readFileSync(store.file, "utf8"), before, `${pattern} wrote nothing`);
-	}
-	assert.equal(refreshed, 0);
-
-	const result = await escalate({ action: "batch_risk_high", job_ids: ids });
-	const batch = store.open();
-	assert.equal(batch.length, 1);
-	assert.match(result.content[0]!.text, new RegExp(`^${batch[0]!.id} batch risk:high: 3 jobs .*withdrew 2 per-job rows`));
-	assert.equal(refreshed, 1);
-});
-
-test("a gate escalate/policy verdict produces an escalation without the parent composing one", async (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const store = new EscalationStore({ home: home.path });
-	const verdict = policyVerdict();
-	assert.equal(kindForGate(verdict), "conflicting_acceptance");
-	const first = await raiseForGate(store, verdict);
-	assert.ok(first);
-	assert.equal(first.kind, "conflicting_acceptance");
-	assert.equal(first.job_ids[0], "cp-research1");
-	const again = await raiseForGate(store, verdict);
-	assert.equal(again?.id, first.id);
-	assert.equal(store.list({ jobId: "cp-research1", kind: "conflicting_acceptance" }).length, 1);
 });
