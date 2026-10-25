@@ -3,7 +3,7 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P8e (cp-e2e-migration-p8e-sdwz) | behavior 04, fifth slice: spawn safety through cp_dispatch (04-27), the brief guard (04-28), the model-call look-alike (04-29), the episode-end exit (04-30) and the spawn cap (04-31) in `tests/e2e/worker-lifecycle-p8e.test.ts`: `tests/worker-manager.test.ts` 10 mapped, 15 retained verbatim in `tests/worker-manager-retained.test.ts`; the #531 review lows (S21-budget policy escalation, two budget-gate declarations kept verbatim, p8d rows and docstring) | 1 (`tests/worker-manager.test.ts`) |
+| P8e (cp-e2e-migration-p8e-sdwz) | behavior 04, fifth slice: spawn safety through cp_dispatch (04-27), the brief guard (04-28), the model-call look-alike (04-29), the episode-end exit (04-30), the spawn cap (04-31) and send receipts (04-32) in `tests/e2e/worker-lifecycle-p8e.test.ts`: `tests/worker-manager.test.ts` 10 mapped, 15 retained verbatim in `tests/worker-manager-retained.test.ts`; `tests/worker-process.test.ts` 3 mapped, 14 retained in `tests/worker-process-retained.test.ts`; the #531 review lows (S21-budget policy escalation, two budget-gate declarations kept verbatim, p8d rows and docstring) | 2 (`tests/worker-manager.test.ts`, `tests/worker-process.test.ts`) |
 <!-- /manifest:ledger -->
 
 P8e (job `cp-e2e-migration-p8e-sdwz`) is the fifth behavior-04 slice, on real pi workers through a real CommandPost.
@@ -17,10 +17,15 @@ readOnly, lists ask_operator, names a cost or asks for more than 50M tokens; no 
 cur.3.1; and the manager's bookkeeping (a duplicate refusal behind preflight's promote, a reservation's window, a
 hanging or throwing shutdown, a throwing slot-free listener) has no input a real worker can produce.
 
+`tests/worker-process.test.ts` retains 14 of 17 (82%): a worker loads only the reporter extension (a clone's are
+refused, 04-27), and no caller has set `mayAskOperator` since cur.3.1, so no worker raises a dialog; a prompt with
+`streamingBehavior` and `getEntries` have only the parent bridge as caller; and byte-level framing (a CRLF, a chunk
+split mid-line, a pi older than 0.99.1, a child closing its stdin) cannot be produced through pi's own stdout.
+
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
-| P8e | 04 | tests/e2e/worker-lifecycle-p8e.test.ts | 5 new |
+| P8e | 04 | tests/e2e/worker-lifecycle-p8e.test.ts | 6 new |
 <!-- /manifest:prs -->
 
 <!-- manifest:scenarios -->
@@ -31,6 +36,7 @@ hanging or throwing shutdown, a throwing slot-free listener) has no input a real
 | 04-29 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e look-alike: a worker whose own text reads like a provider error is an ordinary unreported settle, never a model-call failure or an outer retry |
 | 04-30 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e episode end: a drained parent's shutdown leaves no worker alive and its held and waiting jobs revivable on the next start, none failed |
 | 04-31 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e spawn cap: at the cap another job is refused naming the live worker, the same job promotes instead of a second worker, and the slot frees on the observed close |
+| 04-32 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e send receipts: a busy worker queues a follow_up and a steer, refuses a bare prompt with pi's reason, and the steer reaches the model first |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -61,6 +67,23 @@ hanging or throwing shutdown, a throwing slot-free listener) has no input a real
 | tests/worker-manager.test.ts | 4b-1: a reservation holds a slot for its key; spawn consumes it silently, release notifies once | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: only HeldRelease reserves, inside a revive at the cap, and no competing spawn can be timed into that window; 04-24 pins the consumed reservation. |
 | tests/worker-manager.test.ts | 4b-1: a stopping worker is marked from shutdown's first tick until its exit; notify fires once | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: a shutdown that hangs or throws; pi always exits on the shutdown ladder. |
 | tests/worker-manager.test.ts | 4b-1: slot-free fires after an observed close; unsubscribe works; a throwing listener breaks nothing | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: the product's only listener never throws or unsubscribes. |
+| tests/worker-process.test.ts | prompt -> events -> settled -> graceful shutdown against a real pi child | 04-32 | mapped | cp_dispatch's prompt is delivered, the worker's tool call is on the run log, and 04-30 pins the clean shutdown; controls NC-P8e-receipt, NC-P8e-quiesce |
+| tests/worker-process.test.ts | busy worker takes steer and follow_up as queued receipts | 04-32 | mapped | cp_send to a busy worker: follow_up and steer queued, a bare prompt failed with pi's reason and logged; controls NC-P8e-receipt, NC-P8e-refused |
+| tests/worker-process.test.ts | observed close: kill -9 resolves the closed promise with the signal | 04-20 | mapped | a worker killed mid-call is failed as a crash only from its observed close |
+| tests/worker-process.test.ts | buildWorkerArgs applies the trust policy and refuses forbidden flags | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: no caller passes a forbidden extra flag; 04-27 pins the trust flags (NC-P8e-trust) and 04-20 the revive's session. |
+| tests/worker-process.test.ts | busy worker: a prompt+steer reaches the model before an earlier queued prompt+followUp | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: prompt with streamingBehavior has no worker caller (only the parent bridge's delivery); 04-32 pins steer over follow_up through cp_send. |
+| tests/worker-process.test.ts | send(): the receipt is pi's disposition, never the busy flag | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: the pinned pi always sends a disposition, so the pre-0.99.1 fallback has no input; 04-32 pins the disposition half (NC-P8e-receipt). |
+| tests/worker-process.test.ts | dialog requests from a worker extension are auto-cancelled, never blocking | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: a worker loads no extension that raises a dialog (04-27 refuses a clone's). |
+| tests/worker-process.test.ts | a relayed dialog is answered by the relay, and a broken relay still cancels | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: no dialog source, and no caller sets mayAskOperator since cur.3.1. |
+| tests/worker-process.test.ts | LF framing: unicode separators are payload, partial lines are buffered | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: chunk boundaries and CRLF in pi's stdout cannot be chosen from outside. |
+| tests/worker-process.test.ts | cp-xbxz: a dialog in flight when the child dies resolves worker-gone, and answerDialog then lies to nobody | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: no worker dialog source. |
+| tests/worker-process.test.ts | cp-xbxz: a held dialog answered later reaches the worker, its transcript and the model | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: no worker dialog source. |
+| tests/worker-process.test.ts | cp-xbxz: getEntries caps the window and keeps the tail | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: getEntries' only caller is the parent bridge's delivery. |
+| tests/worker-process.test.ts | cp-xbxz: a dialog that arrives when no answer can be written is aborted, not left tracked | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: no worker dialog source. |
+| tests/worker-process.test.ts | cp-xbxz: pi itself honours the dialog signal — an aborted dialog resolves without any response | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: no worker dialog source. |
+| tests/worker-process.test.ts | cp-xbxz: dialogOptions forwards the worker's signal, and omits the key when there is none | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: no worker dialog source. |
+| tests/worker-process.test.ts | decoder: a message_update is a delta, never a cumulative message snapshot | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: run-artifacts never persists message_update, so no worker output shows the decoded delta. |
+| tests/worker-process.test.ts | a request to a worker that closed its stdin rejects; the EPIPE is never an uncaught error | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: pi never closes its own stdin while alive. |
 | tests/failures.test.ts | the soft gate warns before it breaches, and never kills | — | retained | P8e restores it verbatim in tests/failures-retained.test.ts. Missing entry point: the mock provider's cost table is zero, so no run reaches a cost-only breach. |
 | tests/failures.test.ts | cache_read is excluded from the budgeted token total (cp-d7y) | — | retained | P8e restores it verbatim in tests/failures-retained.test.ts. Same: its cost-only breach line needs a non-zero cost. |
 | tests/failures.test.ts | readModelCallError: assistant text that reads like a provider error is not a failed model call | 04-29 | mapped | a worker saying "401 Invalid API key" is nudged as an unreported settle, with no failure and no outer retry; control NC-P8e-look-alike |
@@ -82,6 +105,8 @@ hanging or throwing shutdown, a throwing slot-free listener) has no input a real
 | NC-P8e-quiesce | tests/worker-manager.test.ts | 04-30 | src/worker-manager.ts: quiesce counts every worker busy | timed out waiting for a drained episode |
 | NC-P8e-closing | tests/worker-manager.test.ts | 04-30 | src/failures.ts: the monitor classifies closes during shutdown | the next parent's revivable list misses the waiting job |
 | NC-P8e-cap | tests/worker-manager.test.ts | 04-31 | src/worker-manager.ts: the spawn-cap check never fires | Missing expected rejection |
+| NC-P8e-receipt | tests/worker-process.test.ts | 04-32 | src/worker-process.ts: a queued disposition reads delivered | the follow_up and steer receipts read delivered |
+| NC-P8e-refused | tests/worker-process.test.ts | 04-32 | src/worker-process.ts: a rejected send reads delivered | the bare prompt's receipt reads delivered |
 | NC-P8e-look-alike | tests/failures.test.ts | 04-29 | src/failures.ts: readModelCallError reads a 4xx/5xx in assistant text | timed out waiting for the report nudge |
 | NC-P8e-budget-policy | tests/recovery.test.ts | S21-budget | src/contracts/limits.ts: budget_exceeded revives | timed out waiting for the budget breach's policy escalation |
 | NC-P8e-budget-class | tests/failures.test.ts | S21-budget | src/failures.ts: the budget_exceeded marker is not read | timed out waiting for the budget_exceeded durable emitter |
@@ -92,10 +117,12 @@ hanging or throwing shutdown, a throwing slot-free listener) has no input a real
 |---|---|---|
 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e | behavior 04, spawn safety, the brief guard, the model-call look-alike, the episode-end exit and the spawn cap; scenarios 04-27..04-31 |
 | tests/worker-manager-retained.test.ts | P8e | convert-owned; 15 declarations of tests/worker-manager.test.ts retained verbatim, no e2e entry point |
+| tests/worker-process-retained.test.ts | P8e | convert-owned; 14 declarations of tests/worker-process.test.ts retained verbatim, no e2e entry point |
 <!-- /manifest:incoming -->
 
 <!-- manifest:baseline -->
 | File | Disposition | Owner | Evidence |
 |---|---|---|---|
 | `tests/worker-manager.test.ts` | deleted | P8e | behavior 04: 10 mapped (04-27, 04-28, 04-30), 15 retained in tests/worker-manager-retained.test.ts; controls NC-P8e-min, NC-P8e-clamp, NC-P8e-brief-scan, NC-P8e-brief-echo, NC-P8e-strip, NC-P8e-cp-prefix, NC-P8e-artifact, NC-P8e-noninteractive, NC-P8e-trust, NC-P8e-quiesce, NC-P8e-closing, NC-P8e-cap |
+| `tests/worker-process.test.ts` | deleted | P8e | behavior 04: 3 mapped (04-20, 04-32), 14 retained in tests/worker-process-retained.test.ts; controls NC-P8e-receipt, NC-P8e-refused |
 <!-- /manifest:baseline -->

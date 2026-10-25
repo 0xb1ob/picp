@@ -1,6 +1,6 @@
 /**
- * Behavior 04 (P8e, 04-27..04-30): spawn safety through cp_dispatch (a hostile clone, the worker's environment and
- * budget, the brief guard), the model-call look-alike and the episode-end exit, on real pi workers and a mock model.
+ * Behavior 04 (P8e, 04-27..04-32): spawn safety through cp_dispatch (a hostile clone, the worker's environment and
+ * budget, the brief guard), the model-call look-alike, the episode-end exit, the spawn cap and cp_send's receipts.
  */
 
 import assert from "node:assert/strict";
@@ -255,4 +255,27 @@ test("P8e spawn cap: at the cap another job is refused naming the live worker, t
 	assert.throws(() => process.kill(pid, 0), "the slot frees only once the close is observed");
 	await f.post.dispatch({ jobId: second, task: "Work.", model, fetch: false });
 	assert.ok(f.post.manager.get(second), "the freed slot takes the next job");
+});
+
+test("P8e send receipts: a busy worker queues a follow_up and a steer, refuses a bare prompt with pi's reason, and the steer reaches the model first", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const f = await bench(t);
+	const jobId = await f.job("busy");
+	const model = f.script("busy", [{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 3 && echo slept" } }] },
+		{ kind: "text", text: "first answer" }, { kind: "text", text: "second answer" }, HANG, HANG, HANG]);
+	await f.post.dispatch({ jobId, task: "Work.", model, fetch: false });
+	await waitFor(() => readRunEvents(f.home, jobId).filter((event) => event.source === "pi" && event.type === "tool_execution_start").length,
+		(n) => n === 1, { timeoutMs: 60_000, what: "the slow bash call" });
+
+	const followed = await f.post.send({ jobId, message: "wake one", mode: "follow_up" });
+	const steered = await f.post.send({ jobId, message: "operator now", mode: "steer" });
+	const bare = await f.post.send({ jobId, message: "bare prompt while busy", mode: "prompt" });
+	assert.deepEqual([followed.receipt, steered.receipt, bare.receipt], ["queued", "queued", "failed"]);
+	assert.match(bare.error ?? "", /streaming|behavior|reject/i, "the refusal is pi's own reason, not a lie");
+	assert.equal(f.events(jobId, "prompt_sent").at(-1)?.receipt, "failed", "the refused delivery is still on the run log");
+
+	await waitFor(() => f.prompts("busy").length, (n) => n >= 3, { timeoutMs: 60_000, what: "both queued messages to reach the model" });
+	const bodies = f.provider.requests("busy").map((request) => JSON.stringify(request.body));
+	const firstWith = (text: string) => bodies.findIndex((body) => body.includes(text));
+	assert.ok(firstWith("operator now") >= 0 && firstWith("wake one") > firstWith("operator now"), "steer overtakes the earlier follow_up");
+	assert.equal(firstWith("bare prompt while busy"), -1, "a refused prompt never reaches the model");
 });

@@ -1,11 +1,9 @@
 /**
- * T3 acceptance: WorkerProcess drives a real pi child end-to-end
- * (prompt -> events -> settled -> shutdown), plus the transport invariants:
- * LF framing, id correlation, observed close, dialog auto-cancel.
+ * WorkerProcess transport units with no e2e entry point, kept verbatim from tests/worker-process.test.ts: framing,
+ * dialogs, the transcript window, the pre-0.99.1 receipt fallback. Missing entry points: testing-migration/p8e.md.
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { WORKER_FORBIDDEN_FLAGS } from "../src/contracts.ts";
@@ -52,124 +50,6 @@ test("buildWorkerArgs applies the trust policy and refuses forbidden flags", () 
 			`extraArgs must not smuggle ${flag}`,
 		);
 	}
-});
-
-test("prompt -> events -> settled -> graceful shutdown against a real pi child", { timeout: 90_000 }, async (t) => {
-	const provider = await MockProvider.start();
-	const repo = createScratchRepo({ name: "worker" });
-	const model = provider.addScript("worker-e2e", [
-		{
-			kind: "tool_calls",
-			calls: [{ name: "bash", args: { command: "printf 'worker-ok' > out.txt && echo done" } }],
-			usage: { prompt_tokens: 111, completion_tokens: 22 },
-		},
-		{ kind: "text", text: "Finished the job." },
-	]);
-	const agentDir = createAgentDir({ provider });
-
-	const events: WorkerEvent[] = [];
-	const protocolErrors: string[] = [];
-	const worker = WorkerProcess.spawn({
-		cwd: repo.path,
-		model,
-		tools: ["bash"],
-		env: agentDir.env,
-		extraArgs: ["--no-context-files", "--no-session"],
-		onEvent: (event) => events.push(event),
-		onProtocolError: (line) => protocolErrors.push(line),
-	});
-	t.after(async () => {
-		await worker.shutdown();
-		agentDir.cleanup();
-		repo.cleanup();
-		await provider.stop();
-	});
-
-	// Readiness is proven by a real response, not a sleep.
-	const state = await worker.getState(30_000);
-	assert.equal(state.isStreaming, false);
-	assert.ok(typeof worker.pid === "number");
-	assert.equal(worker.alive, true);
-
-	const receipt = await worker.send("Do the job.");
-	assert.equal(receipt.receipt, "delivered", JSON.stringify(receipt));
-	assert.equal(receipt.disposition, "started");
-
-	await worker.waitForSettled(60_000);
-	assert.equal(worker.busy, false, "busy must clear on agent_settled");
-	assert.equal(worker.settledCount, 1);
-
-	assert.equal(readFileSync(join(repo.path, "out.txt"), "utf8"), "worker-ok");
-	const types = events.map((event) => event.type);
-	for (const expected of ["agent_start", "tool_execution_start", "tool_execution_end", "agent_settled"]) {
-		assert.ok(types.includes(expected), `missing ${expected} in ${types.join(",")}`);
-	}
-	const toolEvent = events.find((event) => event.type === "tool_execution_start");
-	assert.equal(toolEvent?.toolName, "bash");
-	assert.deepEqual(protocolErrors, []);
-	assert.equal(provider.remaining("worker-e2e"), 0);
-
-	// Graceful shutdown: stdin close is enough; the exit is observed.
-	const exit = await worker.shutdown();
-	assert.equal(exit.code, 0, `expected clean exit, got ${JSON.stringify(exit)}\n${worker.stderrTail()}`);
-	assert.equal(worker.alive, false);
-	assert.deepEqual(await worker.closed, exit, "closed resolves with the same observed exit");
-
-	// Post-mortem sends fail loudly instead of hanging.
-	await assert.rejects(worker.getState(), WorkerError);
-});
-
-test("busy worker takes steer and follow_up as queued receipts", { timeout: 90_000 }, async (t) => {
-	const provider = await MockProvider.start();
-	const repo = createScratchRepo({ name: "steer" });
-	// Long-running first turn: sleep gives us a window where the worker is busy.
-	const model = provider.addScript("steer-case", [
-		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 2 && echo slept" } }] },
-		{ kind: "text", text: "acknowledged" },
-		{ kind: "text", text: "and the queued message too" },
-		{ kind: "text", text: "and the follow-up" },
-		{ kind: "text", text: "and the idle follow-up" },
-	]);
-	const agentDir = createAgentDir({ provider });
-	const worker = WorkerProcess.spawn({
-		cwd: repo.path,
-		model,
-		tools: ["bash"],
-		env: agentDir.env,
-		extraArgs: ["--no-context-files", "--no-session"],
-	});
-	t.after(async () => {
-		await worker.shutdown();
-		agentDir.cleanup();
-		repo.cleanup();
-		await provider.stop();
-	});
-
-	await worker.getState(30_000);
-	await worker.prompt("start the slow job");
-	await worker.waitForEvent((event) => event.type === "tool_execution_start", 30_000);
-	assert.equal(worker.busy, true);
-
-	const steered = await worker.send("also do this", "steer");
-	assert.equal(steered.receipt, "queued", JSON.stringify(steered));
-	assert.equal(steered.disposition, "queued");
-	const followed = await worker.send("then this", "prompt", "followUp");
-	assert.equal(followed.receipt, "queued", JSON.stringify(followed));
-	assert.equal(followed.disposition, "queued");
-
-	// A bare prompt while streaming is rejected by pi -> receipt "failed", not a lie.
-	const bare = await worker.send("bare prompt while busy");
-	assert.equal(bare.receipt, "failed");
-	assert.match(bare.error ?? "", /streaming|behavior|reject/i);
-
-	await worker.waitForSettled(60_000);
-	assert.equal(worker.busy, false);
-
-	// Idle: the same prompt+followUp starts a run instead of queueing.
-	const idle = await worker.send("idle follow-up", "prompt", "followUp");
-	assert.equal(idle.receipt, "delivered", JSON.stringify(idle));
-	assert.equal(idle.disposition, "started");
-	await worker.waitForSettled(60_000);
 });
 
 test("busy worker: a prompt+steer reaches the model before an earlier queued prompt+followUp", { timeout: 90_000 }, async (t) => {
@@ -252,31 +132,6 @@ test(
 		}
 	},
 );
-
-test("observed close: kill -9 resolves the closed promise with the signal", { timeout: 60_000 }, async (t) => {
-	const provider = await MockProvider.start();
-	const repo = createScratchRepo({ name: "killed" });
-	const model = provider.addScript("killed", [{ kind: "text", text: "hi" }]);
-	const agentDir = createAgentDir({ provider });
-	const worker = WorkerProcess.spawn({
-		cwd: repo.path,
-		model,
-		env: agentDir.env,
-		extraArgs: ["--no-context-files", "--no-session"],
-	});
-	t.after(async () => {
-		agentDir.cleanup();
-		repo.cleanup();
-		await provider.stop();
-	});
-
-	await worker.getState(30_000);
-	const exit = await worker.kill("SIGKILL");
-	assert.equal(worker.alive, false);
-	assert.ok(exit.signal === "SIGKILL" || exit.code !== 0, `expected violent exit, got ${JSON.stringify(exit)}`);
-	// Nothing infers death: the promise resolved because close was observed.
-	assert.equal((await worker.closed).at, exit.at);
-});
 
 test("dialog requests from a worker extension are auto-cancelled, never blocking", { timeout: 90_000 }, async (t) => {
 	const provider = await MockProvider.start();

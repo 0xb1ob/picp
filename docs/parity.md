@@ -51,7 +51,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 
 | command-post / muxa | verdict | replacement | evidence |
 |---|---|---|---|
-| `muxa spawn` / `muxa dispatch` (pane + first brief) | deleted | `WorkerProcess`: spawn `pi --mode rpc`, then an id-correlated `prompt` | `tests/worker-process.test.ts`, `tests/e2e/phase1.test.ts` |
+| `muxa spawn` / `muxa dispatch` (pane + first brief) | deleted | `WorkerProcess`: spawn `pi --mode rpc`, then an id-correlated `prompt` | `tests/e2e/worker-lifecycle-p8e.test.ts` (P8e send receipts), `tests/e2e/phase1.test.ts` |
 | Paste broker, free-detection, `pending/` | deleted | RPC request/response; `receipt: "accepted"` means pi answered | `tests/e2e/dispatch-s29.test.ts`, `tests/e2e/dispatch-s30.test.ts` |
 | First-brief **receipt heuristics** (Cursor: tail for `Branch:`; Claude: footer `Context: N%`; `unconfirmed`/`unknown`) | deleted | there is nothing to guess: the response is the receipt | `docs/contracts.md` §Dispatch |
 | `muxa send` (mail, promote) | ported | `cp_send` → prompt/steer/follow_up with `delivered\|queued\|failed` | `tests/send.test.ts` |
