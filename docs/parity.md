@@ -61,7 +61,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | `muxa kill NAME\|ID` | ported | teardown's graceful shutdown with an observed close | `tests/e2e/teardown-s17.test.ts` |
 | Broker parent turns (`never ready` / `dispatch refused` / `dispatch unsubmitted` recovery table) | deleted | none of the three states can exist: delivery is acknowledged or it failed | `docs/contracts.md` §Delivery receipts |
 | "Never call `tmux` directly" / muxa boundary rules / the two tests | deleted | one harness, no boundary to police | AGENTS.md (no transport prose; `tests/contract.test.ts` enforces that) |
-| `muxa parent` role check | deleted | a worker is a child process with no dispatch tools; recursion is impossible by construction | `WORKER_FORBIDDEN_TOOLS`, `tests/worker-reporter.test.ts` |
+| `muxa parent` role check | deleted | a worker is a child process with no dispatch tools; recursion is impossible by construction | `WORKER_FORBIDDEN_TOOLS`, `tests/worker-reporter-retained.test.ts` |
 | command-post `scripts/muxa-hook.sh` (pane self-registration) | deleted | no panes to register | — |
 | command-post `share/clis.tsv`, `share/families.tsv` (multi-CLI registry) | out of scope | pi-only by design | README.md |
 
@@ -76,7 +76,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | "Evidence is not authorization" | mechanised | the checkpoint: written `pending` before anyone is asked, answerable only by a human channel | `tests/pipeline.test.ts`, `tests/e2e/phase3.test.ts` |
 | Pipeline: two jobs, dep-linked, three roles | ported | `cp_pipeline start` | `tests/pipeline.test.ts` |
 | Gate verdicts + `cause` ladder (policy / operational / operational_persistent) | mechanised | `decideGate` + `nextAction`; one revise max in code | `tests/gate.test.ts` (every branch), `tests/e2e/phase3.test.ts` |
-| "HARD RULE: workers never mail the findings body" | mechanised | `validateEnvelope`: ≤3 lines, no fences, no headings; a body-shaped summary is rejected in-worker | `tests/worker-reporter.test.ts`, `tests/contracts.test.ts` |
+| "HARD RULE: workers never mail the findings body" | mechanised | `validateEnvelope`: ≤3 lines, no fences, no headings; a body-shaped summary is rejected in-worker | `tests/e2e/worker-reporter-p8f.test.ts`, `tests/contracts.test.ts` |
 | "Parent never reads artifact bodies" | mechanised | `ContextGuard` blocks `read`/`grep`/`bash`/`edit`/`write`; the ledger holds no bodies | `tests/guards.test.ts`, `tests/e2e/phase3.test.ts` |
 | Hung planner (artifact, no envelope) → gate from the path | ported | `advance()` gates it and reports `hung_planner` | `tests/pipeline.test.ts` |
 | "Never re-run research for an implementation failure" | mechanised | `mayRerunResearch` is asserted, not remembered | `tests/failures-retained.test.ts` |

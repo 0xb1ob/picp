@@ -120,7 +120,8 @@ test("P8e script runner: the home cap reaches the record and an override wins, a
  const bad = await job("bad cap", "scripts/out.sh");
  await assert.rejects(post.previewDispatch({ jobId: bad }), /worker-bounds\.json wall_clock_seconds must be a positive integer/);
  await assert.rejects(post.dispatch({ jobId: bad }), /worker-bounds\.json wall_clock_seconds must be a positive integer/);
- assert.equal(post.fleet.get(bad), undefined);
+ const branches = execFileSync("git", ["branch", "--list", bad], { cwd: post.registry.pathOf("demo"), encoding: "utf8" }).trim();
+ assert.deepEqual([post.fleet.get(bad), branches], [undefined, ""], "no record, no branch");
  writeFileSync(configFile, JSON.stringify({ wall_clock_seconds: 1 }));
  const link = await job("link", "scripts/link.sh");
  await assert.rejects(post.dispatch({ jobId: link }), /symlink/);
