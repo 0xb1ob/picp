@@ -1,6 +1,6 @@
 # S04 declaration migration
 
-Owner: cp-e2e-slice-s04-vep1. Original declarations 1–40 of `tests/diff-review.test.ts`, at blob `4c2662fffc918138acaef068b62a557c95634e88`. S05 owns 41–55 and final whole-file retirement. Static declarations include the indented, parameterized configured-refusal declaration (14).
+Owner: cp-e2e-slice-s04-vep1. Original declarations 1–40 of `tests/diff-review.test.ts`. S05 owns 41–55 and final whole-file retirement. Static declarations include the indented, parameterized configured-refusal declaration (14).
 
 The baseline file is intentionally kept whole and unchanged: 55 declarations. Per the split-file ruling, a partly converted file is never counted as removed. Counts: **38 mapped, 2 retained, 0 pending in S04, 0 deleted files, 0 redundant-unreachable**. S05 must preserve the two retained declarations when retiring the file; this PR moves or deletes none.
 
@@ -67,4 +67,4 @@ The table maps behavior rather than reproducing internal assertions. Each mapped
 | 39 truncated historical pass | mapped | delta | Seeded truncated prior pass cannot be inherited: no equivalent_to, no delta_from, attempt 3, real reviewer requests. nc-partial-pass incorrectly inherits the truncated pass. |
 | 40 complete delta / oversized history | mapped | history | Small complete delta passes with prior head and untruncated subject while full-diff.md names omissions. nc-delta stops on full history instead of passing. |
 
-Control `.patch`/`.log` pairs live under `/home/ubuntu/.pi-command-post/state/artifacts/cp-e2e-slice-s04-vep1/`. Every listed control was run against the real consumer and failed; all production mutations were restored. They are semantic patched-back regressions rather than claims about historical commit identities. No removed declaration receives credit: all 55 baseline declarations continue to run until S05 performs whole-file retirement.
+Every listed control was run against the real consumer and failed; all production mutations were restored. They are semantic patched-back regressions rather than claims about historical commit identities. No removed declaration receives credit: all 55 baseline declarations continue to run until S05 performs whole-file retirement.
