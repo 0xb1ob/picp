@@ -318,7 +318,7 @@ function main(): number {
 	}
 	console.log(`  total: ${census.files} files, ${census.base} baseline / ${census.tree} tree declarations`);
 	if (args.runnerLog) console.log(`runner-executed (${args.runnerLog}): ${Object.entries(runnerTotals(readFileSync(args.runnerLog, "utf8"))).map(([k, n]) => `${k} ${n}`).join(", ")}`);
-	if (args.preservedFrom) console.log(`preservation ref: ${args.preservedFrom} (${execFileSync("git", ["rev-parse", args.preservedFrom], { encoding: "utf8" }).trim()})`);
+	if (args.preservedFrom) console.log(`preservation ref: ${args.preservedFrom} (${execFileSync("git", ["rev-parse", args.preservedFrom], { encoding: "utf8" }).trim()}); a ref from before the ledger split into slice files is expected to mismatch`);
 	for (const finding of findings) console.error(`FAIL ${finding}`);
 	console.log(findings.length ? `${findings.length} finding(s)` : `manifest ok (${docs.length - 1} slice files${args.preservedFrom ? `, rows preserved from ${args.preservedFrom}` : ""})`);
 	return findings.length ? 1 : 0;

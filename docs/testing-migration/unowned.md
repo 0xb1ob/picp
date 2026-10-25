@@ -20,6 +20,7 @@
 | `tests/timer-knobs.test.ts` | #439 | incoming timer configuration contract: defaults, positive overrides and invalid-input fallback; landed with the public knobs consumed by S15 Addendum 2; registered by S20 after plain-merging 695a8528, with no S20 conversion credit; preserved unchanged; convert owner P16, outside S03b. No exception or deletion credit claimed. |
 | `tests/e2e-hermetic-gh.test.ts` | PR #454 (hermetic e2e gh) | retained, no conversion |
 | `tests/split-migration-ledger.test.ts` | cp-ledger-split-gewy | incoming regression for the ledger split script (a `$&` in a kept row); no conversion owner, no exception or deletion credit claimed |
+| `tests/test-shards.test.ts` | cp-migration-strip-blocks-3-md22 | exception (verification integrity, like `tests/test-migration-check.test.ts`): tests `scripts/test-shards.ts` itself, a CI sharding script no product entry point reaches; pins an untimed file weighing the timing median |
 <!-- /manifest:incoming -->
 
 <!-- manifest:feature-removed -->
