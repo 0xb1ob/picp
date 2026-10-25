@@ -11,6 +11,7 @@ import { FleetStore } from "../../src/fleet.ts";
 import { controlRequest } from "../../src/viewer/control-api.ts";
 import { appendControlAudit } from "../../src/viewer/control-audit.ts";
 import { controlConfigFile, controlInboxFile, controlJournalFile, controlRecordFile, readControlRecord, REMOTE_PROVENANCE_VERSION } from "../../src/viewer/control-files.ts";
+import { operatorSession } from "../../src/viewer/control-inbox.ts";
 import { operatorSessionsFile, readOperatorSessions } from "../../src/viewer/operator-sessions.ts";
 import { createViewer } from "../../src/viewer/server.ts";
 import { inlineBudget, newUploadId, TEXT_MESSAGE_INLINE_BYTES, uploadFile, writeUpload } from "../../src/viewer/uploads.ts";
@@ -56,13 +57,14 @@ async function scratch(t: TestContext) {
 }
 
 /** The operator's own pi session with the real cp-bridge, not waiting for its dashboard control. */
-async function session(t: TestContext, home: string, name: string, steps: ScriptStep[], env: Record<string, string> = {}) {
+async function session(t: TestContext, home: string, name: string, steps: ScriptStep[], env: Record<string, string> = {}, seed?: (piHome: string) => void) {
 	const provider = await MockProvider.start();
 	const model = provider.addScript(name, steps, { onExhausted: "repeat" });
 	const agent = createAgentDir({ provider });
 	const previous = process.env.PI_HOME;
 	process.env.PI_HOME = agent.path;
 	saveOperatorTarget({ home, mode: "multi", hostPid: 0, parentPid: 0 });
+	seed?.(agent.path);
 	if (previous === undefined) delete process.env.PI_HOME; else process.env.PI_HOME = previous;
 	const state = join(home, LAYOUT.state);
 	const child: PiChild = startPiChild({ cwd: home, model, sessionDir: join(state, "sessions", "operator"), extensions: [CP_BRIDGE_EXTENSION], env: { ...agent.env, PI_HOME: agent.path, CP_HOME: home, CP_MODE: "multi", ...env } });
@@ -73,10 +75,10 @@ async function session(t: TestContext, home: string, name: string, steps: Script
 }
 
 /** The operator's own pi session with the real cp-bridge; its dashboard control is listening when this resolves. */
-async function operator(t: TestContext, home: string, name: string, steps: ScriptStep[], env: Record<string, string> = {}) {
+async function operator(t: TestContext, home: string, name: string, steps: ScriptStep[], env: Record<string, string> = {}, seed?: (piHome: string) => void) {
 	const state = join(home, LAYOUT.state);
 	const before = readControlRecord(state);
-	const { child, close, requests } = await session(t, home, name, steps, env);
+	const { child, close, requests } = await session(t, home, name, steps, env, seed);
 	const found = await waitFor(() => readControlRecord(state), (row) => row.state === "ok" && (before.state !== "ok" || row.record.pid !== before.record.pid), { timeoutMs: 30_000, what: "dashboard control record" });
 	if (found.state !== "ok") throw new Error("no dashboard control");
 	const record = found.record;
@@ -756,6 +758,14 @@ test("P9e-control: the real bridge's dashboard control delivers, holds, steers, 
 	assert.equal(op.requests().some((request) => userTexts(request).some((text) => /^(ask-abcd: (keep|Raise)|ask-bbbb|ask-cccc|ask-ffff|bad)\b/.test(text))), false,
 		"no refusal reached the model");
 
+	const journalFile = controlJournalFile(s.state);
+	const linesBefore = s.journal().length;
+	chmodSync(journalFile, 0o400);
+	const unwritable = await op.send("send", { kind: "message", text: "never journaled" }).finally(() => chmodSync(journalFile, 0o600));
+	assert.deepEqual(unwritable, { ok: false, status: 500, error: `failed: audit journal unwritable (${journalFile}: EACCES)` }, "no request line, no delivery");
+	assert.equal(s.journal().length, linesBefore);
+	assert.equal(op.requests().some((request) => userTexts(request).some((text) => text.includes("never journaled"))), false, "never injected");
+
 	const rival = await session(t, s.home, "p9e-control-rival", [{ kind: "text", text: "ok" }]);
 	await rival.child.prompt("Start a second operator session.");
 	await rival.child.waitFor(() => rival.child.eventsOfType("agent_settled").length >= 1, 30_000);
@@ -837,6 +847,16 @@ test("P9e-control-queue: held messages are edited, cancelled and handed over one
 	assert.equal(outcomes(s.journal(), z).includes("injected"), false);
 });
 
+// P9e-control-target: a PI_HOME selected.json naming a home whose per-home target file is gone must not keep the
+// operator session off the dashboard: control falls back to the CP_HOME runtime and the viewer sees it running.
+test("P9e-control-target: a selected.json naming a missing per-home target still starts dashboard control on the CP_HOME home", { timeout: 90_000 }, async (t) => {
+	const s = await scratch(t);
+	const op = await operator(t, s.home, "p9e-control-target", [{ kind: "text", text: "ok" }], {}, (piHome) => writeFileSync(
+		join(piHome, "command-post", "operator-targets", "selected.json"), JSON.stringify({ home: join(s.home, "gone"), mode: "multi" })));
+	assert.deepEqual(operatorSession(s.state).running, true, "the dashboard's offline check sees a running session");
+	assert.ok((await op.send("status", {})).ok, "the control API answers status");
+});
+
 // P9e-control-inbox (cp-daemon P3): messages typed while no session ran arrive once, oldest first, as one user
 // message with their times, a closed ask marked and >24 h dropped; a held queue message keeps FIFO across the inbox
 // turn and its ask id; a send after the start waits behind both; a second start delivers nothing twice.
@@ -846,7 +866,7 @@ test("P9e-control-inbox: the offline inbox and a reloaded queue hand over in tim
 		writeAsks(s.state);
 		const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
 		// The inbox ranks at its oldest line, a stale one included, so only inbox-first carries the >24 h line.
-		const [heldAt, inboxAt, closedAt, staleAt] = [order === "held-first" ? at(-50) : at(-10), at(-20), at(-30), at(-25 * 60)];
+		const [heldAt, inboxAt, closedAt, staleAt, taggedAt] = [order === "held-first" ? at(-50) : at(-10), at(-20), at(-30), at(-25 * 60), at(-25)];
 		const stale = order === "inbox-first";
 		const id = "dc-20261009114000-0000a5c1";
 		mkdirSync(dirname(controlJournalFile(s.state)), { recursive: true });
@@ -858,6 +878,7 @@ test("P9e-control-inbox: the offline inbox and a reloaded queue hand over in tim
 			{ type: "held", id: "dc-20260928110000-00000002", at: inboxAt, text: "second", ask_id: null },
 			...(stale ? [{ type: "held", id: "dc-20260926100000-00000009", at: staleAt, text: "too old", ask_id: null }] : []),
 			{ type: "held", id: "dc-20260928100000-00000001", at: closedAt, text: "ask-bbbb: Yes", ask_id: "ask-bbbb" },
+			{ type: "held", id: "dc-20260928103000-0000c0de", at: taggedAt, text: "later", ask_id: null, thread: "billing-bug" },
 			{ type: "held", id: "dc-20260928090000-00000000", at: at(-40), text: "delivered earlier", ask_id: null },
 			{ type: "delivered", id: "dc-20260928090000-00000000", at: at(-35) },
 		];
@@ -873,15 +894,17 @@ test("P9e-control-inbox: the offline inbox and a reloaded queue hand over in tim
 		const firstOf = (needle: string) => texts.findIndex((text) => text.includes(needle));
 		assert.deepEqual([firstOf("[cp-dashboard inbox") < firstOf("linked to a card"), firstOf("typed after the start")], [order === "inbox-first", 2],
 			"the older one first, one handoff per settled turn, and a later send waits behind both");
-		assert.equal(inbox.split("\n")[0], "[cp-dashboard inbox — 2 message(s) typed while this session was offline; each line keeps its time; re-check state before acting on them]");
+		assert.equal(inbox.split("\n")[0], "[cp-dashboard inbox — 3 message(s) typed while this session was offline; each line keeps its time; re-check state before acting on them]");
 		assert.deepEqual(inbox.split("\n").slice(1), [
 			`- ${closedAt} (dc-20260928100000-00000001): ask-bbbb: Yes (ask-bbbb is answered, no longer open)`,
+			`- ${taggedAt} (dc-20260928103000-0000c0de): later`,
+			"[cp-dashboard dc-20260928103000-0000c0de — from the dashboard; thread=billing-bug]",
 			`- ${inboxAt} (dc-20260928110000-00000002): second`,
 			...(stale ? [`- dropped, held longer than 24 h: ${staleAt} (dc-20260926100000-00000009)`] : []),
-		], "oldest first, each with its time; the closed ask is marked; the stale one listed as dropped, never injected");
+		], "oldest first, each with its time; the closed ask is marked; a held thread tag keeps its marker, untagged lines get none; the stale one listed as dropped, never injected");
 		const after = readFileSync(controlInboxFile(s.state), "utf8").trim().split("\n").map((row) => JSON.parse(row) as Json).slice(rows.length);
-		assert.deepEqual(after.map((row) => [row.type, row.id]).sort(), [["delivered", "dc-20260928100000-00000001"], ["delivered", "dc-20260928110000-00000002"],
-			...(stale ? [["dropped", "dc-20260926100000-00000009"]] : [])]);
+		assert.deepEqual(after.map((row) => [row.type, row.id]).sort(), [["delivered", "dc-20260928100000-00000001"], ["delivered", "dc-20260928103000-0000c0de"],
+			["delivered", "dc-20260928110000-00000002"], ...(stale ? [["dropped", "dc-20260926100000-00000009"]] : [])]);
 		await op.close();
 		const again = await operator(t, s.home, `p9e-inbox-${order}-again`, [{ kind: "text", text: "ok" }]);
 		await new Promise((done) => setTimeout(done, 1_500));

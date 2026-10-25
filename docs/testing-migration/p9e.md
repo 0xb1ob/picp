@@ -3,7 +3,7 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P9e (cp-e2e-migration-p9e-s8s3) | behavior 11, fifth slice: worker envelope intake through the real parent's startup reconcile, settle watcher and a real worker's reporter in `tests/e2e/envelope-intake-p9e.test.ts`, cp_integrate's worktree sync against real git in `tests/e2e/sync-lossless-p9e.test.ts`, and the operator session's dashboard control through the real cp-bridge in `tests/e2e/operator-dashboard.test.ts`; 34 mapped, 9 retained verbatim in `tests/envelope-correction-retained.test.ts` and `tests/dashboard-control-retained.test.ts`; four harness, eval-corpus and pi-host files `retained` (no command-post entry point); #523 review lows (I6, exact-ms boundaries, NC ids); [ledger and controls](p9e.md). Six behavior-11 files (cp-bridge, intake, operator-delivery, parent-delivery, parent-outbox, send) stay `convert` / P9 for p9f; #515's p9b files are untouched | 4 (`tests/dashboard-control.test.ts`, `tests/envelope-correction.test.ts`, `tests/intake-settle-atomicity.test.ts`, `tests/sync-lossless.test.ts`) |
+| P9e (cp-e2e-migration-p9e-s8s3) | behavior 11, fifth slice: worker envelope intake through the real parent's startup reconcile, settle watcher and a real worker's reporter in `tests/e2e/envelope-intake-p9e.test.ts`, cp_integrate's worktree sync against real git in `tests/e2e/sync-lossless-p9e.test.ts`, and the operator session's dashboard control through the real cp-bridge in `tests/e2e/operator-dashboard.test.ts`; 37 mapped, 7 retained verbatim in `tests/envelope-correction-retained.test.ts` and `tests/dashboard-control-retained.test.ts`; four harness, eval-corpus and pi-host files `retained` (no command-post entry point); #523 review lows (I6, exact-ms boundaries, NC ids); [ledger and controls](p9e.md). Eleven behavior-11 files stay `convert` / P9, owner p9f: cp-bridge, intake, operator-cache-warming, operator-delivery, operator-note, operator-outbox-host, operator-outbox, parent-delivery, parent-outbox, relay-scope, send (operator-cache-warming, operator-note, operator-outbox-host, operator-outbox and relay-scope are also in the open #515, p9b; p9f takes them if it does not land); this PR does not touch them | 4 (`tests/dashboard-control.test.ts`, `tests/envelope-correction.test.ts`, `tests/intake-settle-atomicity.test.ts`, `tests/sync-lossless.test.ts`) |
 <!-- /manifest:ledger -->
 
 Behavior 11, fifth slice. P9e-correction seeds fleet records and envelopes on a scratch home and starts the real
@@ -21,7 +21,7 @@ pins the pinned pi's own hook contract through a probe extension, which no comma
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
-| P9e | 11 | `tests/e2e/envelope-intake-p9e.test.ts`, `tests/e2e/sync-lossless-p9e.test.ts`, `tests/e2e/operator-dashboard.test.ts` | 7 new |
+| P9e | 11 | `tests/e2e/envelope-intake-p9e.test.ts`, `tests/e2e/sync-lossless-p9e.test.ts`, `tests/e2e/operator-dashboard.test.ts` | 8 new |
 <!-- /manifest:prs -->
 
 <!-- manifest:scenarios -->
@@ -33,6 +33,7 @@ pins the pinned pi's own hook contract through a probe extension, which no comma
 | P9e-sync | `tests/e2e/sync-lossless-p9e.test.ts` | P9e-sync: a squash-merged rebased branch resets its lease with a rescue ref, and any unproven work refuses |
 | P9e-control | `tests/e2e/operator-dashboard.test.ts` | P9e-control: the real bridge's dashboard control delivers, holds, steers, aborts and answers, journaling every frame |
 | P9e-control-queue | `tests/e2e/operator-dashboard.test.ts` | P9e-control-queue: held messages are edited, cancelled and handed over one per settled turn, and survive a restart once |
+| P9e-control-target | `tests/e2e/operator-dashboard.test.ts` | P9e-control-target: a selected.json naming a missing per-home target still starts dashboard control on the CP_HOME home |
 | P9e-control-inbox | `tests/e2e/operator-dashboard.test.ts` | P9e-control-inbox: the offline inbox and a reloaded queue hand over in time order, once, across starts |
 <!-- /manifest:scenarios -->
 
@@ -71,11 +72,12 @@ pins the pinned pi's own hook contract through a probe extension, which no comma
 | tests/dashboard-control.test.ts | clicks: verbatim label with the ask id; unknown label 400, settled ask 409, second click 409; asks.jsonl never changes | P9e-control | mapped | refusals table, one request and one refused outcome per frame, no refused text reaches the model; control C12 |
 | tests/dashboard-control.test.ts | threaded sends: normalize the tag in the footer; clicks keep ask=; invalid tags inject nothing | P9e-control | mapped | `thread=billing-bug` on a message and a click; four bad tags refused; control C13 |
 | tests/dashboard-control.test.ts | states: a throwing inject fails with its message; abort refused idle, called busy; off refuses the next frame | — | retained | kept verbatim in tests/dashboard-control-retained.test.ts; missing entry point: a real pi never throws from sendUserMessage; abort and off are pinned by P9e-control (control C10) |
-| tests/dashboard-control.test.ts | audit: an unwritable request line refuses without injecting; appendControlAudit is 0600, clips text, never throws | — | retained | kept verbatim in tests/dashboard-control-retained.test.ts; missing entry point: the journal append is injected as a fake |
+| tests/dashboard-control.test.ts | audit: an unwritable request line refuses without injecting | P9e-control | mapped | control journal made read-only: 500 naming EACCES, no journal line, nothing injected; control C16 |
+| tests/dashboard-control.test.ts | audit: appendControlAudit is 0600, clips text, never throws | — | retained | kept verbatim in tests/dashboard-control-retained.test.ts; missing entry point: this is the viewer's refused-line writer (`src/viewer/control-api.ts`), not the operator session's; the viewer control route's e2e is p9f's operator-delivery slice |
 | tests/dashboard-control.test.ts | cp-bridge wiring: session_start opens the socket, a frame reaches the session as a user message, shutdown closes it; off opens nothing | P9e-control | mapped | the operator-sessions row, the status reply, shutdown and an off start; controls C1, C10 |
-| tests/dashboard-control.test.ts | cp-bridge wiring: selected.json naming a missing per-home target still starts control | — | retained | kept verbatim in tests/dashboard-control-retained.test.ts; missing entry point: the e2e operator always saves its own target |
+| tests/dashboard-control.test.ts | cp-bridge wiring: selected.json naming a missing per-home target still starts control | P9e-control-target | mapped | selected.json seeded under PI_HOME before the session starts; control C15 |
 | tests/dashboard-control.test.ts | inbox: held messages arrive once, oldest first, with times; >24 h dropped and listed; a closed ask is marked; a refused injection keeps them held | — | retained | kept verbatim in tests/dashboard-control-retained.test.ts; missing entry point: a real pi never refuses the injection; the delivered path is pinned by P9e-control-inbox (controls C7, C8, C11) |
-| tests/dashboard-control.test.ts | held thread tags survive replay without changing untagged messages | — | retained | kept verbatim in tests/dashboard-control-retained.test.ts; P9d-remote-inbox replays the marker line through the real bridge for a remote one; the thread-only tail is not driven there |
+| tests/dashboard-control.test.ts | held thread tags survive replay without changing untagged messages | P9e-control-inbox | mapped | a held line tagged billing-bug replays with its `; thread=billing-bug` marker, untagged lines get none, all in the one inbox turn; control C14 |
 | tests/dashboard-control.test.ts | queue: busy messages wait, one per settled turn, oldest first; edit and cancel apply before the handoff | P9e-control-queue | mapped | edit, cancel, empty edit, 404, sent 409, cancelled 409; controls C3, C4 |
 | tests/dashboard-control.test.ts | queue race: edit or cancel while the handoff is in flight; a late failure frees the next turn | — | retained | kept verbatim in tests/dashboard-control-retained.test.ts; missing entry point: holding pi's handoff promise open and rejecting it needs the fake inject |
 | tests/dashboard-control.test.ts | queue restart: a stopped bridge's held messages reload in order with their edits; a handed-over one is never resent | P9e-control-queue | mapped | second and third session starts; controls C3, C5 |
@@ -117,6 +119,9 @@ pins the pinned pi's own hook contract through a probe extension, which no comma
 | C11 | tests/dashboard-control.test.ts | P9e-control-inbox | dashboard-control.ts never marks a closed ask in the inbox | `the closed ask is marked` |
 | C12 | tests/dashboard-control.test.ts | P9e-control | dashboard-control.ts accepts any label | `{"ask_id":"ask-abcd","label":"keep"}`: 409, expected 400 |
 | C13 | tests/dashboard-control.test.ts | P9e-control | dashboard-control.ts accepts any thread value | `-bad`: not refused |
+| C14 | tests/dashboard-control.test.ts | P9e-control-inbox | dashboard-control.ts drops a held line's thread tag on replay | the `; thread=billing-bug` marker line missing |
+| C15 | tests/dashboard-control.test.ts | P9e-control-target | cp-bridge startControl rethrows an unreadable saved target instead of using CP_HOME | timed out waiting for the dashboard control record |
+| C16 | tests/dashboard-control.test.ts | P9e-control | dashboard-control.ts injects although the request line was not journaled | `no request line, no delivery`: ok true |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->

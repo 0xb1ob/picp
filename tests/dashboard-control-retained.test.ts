@@ -1,6 +1,6 @@
 /**
- * Dashboard control, the halves no real session can drive: parsers, fake-port faults and echo timing, the audit
- * journal, a missing per-home target, a refused inbox injection and the handoff race. The rest: P9e-control* in e2e.
+ * Dashboard control, the halves no real session can drive: parsers, fake-port faults and echo timing, the viewer's
+ * audit writer, a refused inbox injection and the handoff race. The rest: P9e-control* in e2e.
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -13,8 +13,7 @@ import { controlRequest } from "../src/viewer/control-api.ts";
 import {
 	CONTROL_TEXT_MAX, controlConfigFile, controlInboxFile, controlJournalFile, controlRecordFile, controlSocketFile, dashboardMarker, parseDashboardText, readControlConfig, readControlRecord,
 } from "../src/viewer/control-files.ts";
-import { operatorSession, readInbox } from "../src/viewer/control-inbox.ts";
-import bridgeExtension from "../extensions/cp-bridge/index.ts";
+import { readInbox } from "../src/viewer/control-inbox.ts";
 import { createScratchHome } from "./harness/index.ts";
 
 const MARKER = /^\[cp-dashboard dc-\d{14}-[0-9a-f]{8} — from the dashboard(?:; ask=ask-[a-f0-9]+)?\]$/;
@@ -186,14 +185,7 @@ test("states: a throwing inject fails with its message (and frees the click); ab
 	assert.match(!off.ok ? off.error : "", /dashboard control is off/);
 });
 
-test("audit: an unwritable request line refuses without injecting; appendControlAudit is 0600, clips text, never throws", async (t) => {
-	const { stateDir } = scratch(t);
-	const fake = fakePorts();
-	const { record } = await listening(t, stateDir, fake.ports, { append: () => ({ ok: false, error: "EACCES" }) });
-	const reply = await controlRequest(record, "send", { kind: "message", text: "hi" });
-	assert.deepEqual(reply, { ok: false, status: 500, error: "failed: audit journal unwritable (EACCES)" });
-	assert.equal(fake.state.injected.length, 0, "never injected");
-
+test("audit: appendControlAudit is 0600, clips text, never throws", (t) => {
 	const other = scratch(t).stateDir;
 	const long = "x".repeat(CONTROL_TEXT_MAX + 50);
 	assert.deepEqual(appendControlAudit(other, { type: "refused", by: "viewer", id: null, at: "2026-09-27T08:00:00.000Z", peer: "100.64.0.9", kind: "message", text: long, ask_id: null, status: 403, reason: "r" }), { ok: true });
@@ -203,35 +195,6 @@ test("audit: an unwritable request line refuses without injecting; appendControl
 	put(join(blocked, "operator"), "a file where the directory should be");
 	const out = appendControlAudit(blocked, { type: "refused", by: "viewer", id: null, at: "x", peer: null, kind: null, text: null, ask_id: null, status: 403, reason: "r" });
 	assert.equal(out.ok, false);
-});
-
-test("cp-bridge wiring: selected.json naming a missing per-home target still starts control on the CP_HOME home; the dashboard does not see the session offline", async (t) => {
-	const { home, stateDir } = scratch(t);
-	const saved = { PI_HOME: process.env.PI_HOME, CP_HOME: process.env.CP_HOME, CP_MODE: process.env.CP_MODE };
-	process.env.PI_HOME = join(home, "pi-home");
-	process.env.CP_HOME = home;
-	process.env.CP_MODE = "multi";
-	t.after(() => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
-	// The selector points at a home whose per-home target file does not exist: resolveOperatorTarget() throws.
-	put(join(home, "pi-home", "command-post", "operator-targets", "selected.json"), JSON.stringify({ home: join(home, "gone"), mode: "multi" }));
-	const handlers = new Map<string, Array<(event: unknown, ctx?: unknown) => unknown>>();
-	const emit = async (event: string, payload: unknown, ctx?: unknown) => { for (const handler of handlers.get(event) ?? []) await handler(payload, ctx); };
-	bridgeExtension({
-		registerTool: () => {},
-		registerCommand: () => {},
-		on: (event: string, handler: (event: unknown, ctx?: unknown) => unknown) => handlers.set(event, [...(handlers.get(event) ?? []), handler]),
-		sendMessage: () => {},
-		sendUserMessage: () => {},
-	} as never);
-	const ctx = { hasUI: false, isIdle: () => true, abort: () => {}, hasPendingMessages: () => false, sessionManager: { getSessionFile: () => join(home, "operator-session.jsonl") } };
-	await emit("session_start", {}, ctx);
-	t.after(() => emit("session_shutdown", {}));
-	assert.equal(existsSync(controlRecordFile(stateDir)), true, "session_start wrote state/operator/dashboard.json");
-	assert.deepEqual(operatorSession(stateDir).running, true, "the dashboard's offline check sees a running session");
-	const record = readControlRecord(stateDir);
-	assert.equal(record.state, "ok");
-	const status = await controlRequest((record as { record: Parameters<typeof controlRequest>[0] }).record, "status", {});
-	assert.ok(status.ok, "the control API answers status");
 });
 
 test("inbox (cp-daemon P3): at listen the held messages arrive once, oldest first, as one user message with their times; >24 h dropped and listed; a closed ask is marked; a refused injection keeps them held", async (t) => {
@@ -274,14 +237,6 @@ test("inbox (cp-daemon P3): at listen the held messages arrive once, oldest firs
 	const again = fakePorts();
 	await listening(t, stateDir, again.ports, { now: () => now }).then(({ control }) => control.stop());
 	assert.equal(again.state.injected.length, 0, "a second session start delivers nothing twice");
-});
-
-test("held thread tags survive replay without changing untagged messages or sharing the replay turn", async (t) => {
-	const { stateDir } = scratch(t);
-	put(controlInboxFile(stateDir), JSON.stringify({ type: "held", id: "dc-20261006080000-89abcdef", at: "2026-10-06T08:00:00Z", text: "later", ask_id: null, thread: "billing-bug" }) + "\n");
-	const fake = fakePorts();
-	await listening(t, stateDir, fake.ports, { now: () => new Date("2026-10-06T08:01:00Z") });
-	assert.equal(fake.state.injected[0]![0], "[cp-dashboard inbox — 1 message(s) typed while this session was offline; each line keeps its time; re-check state before acting on them]\n- 2026-10-06T08:00:00Z (dc-20261006080000-89abcdef): later\n[cp-dashboard dc-20261006080000-89abcdef — from the dashboard; thread=billing-bug]");
 });
 
 // cp-y43c: the dashboard holds busy messages; one handoff per settled turn, FIFO; edit/cancel until the handoff.
