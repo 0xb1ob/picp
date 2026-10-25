@@ -59,7 +59,7 @@ import { withDeadline } from "./suggest.ts";
  * so neither may wait on this indefinitely: what is at stake is the operator's
  * notice, the parent's wake-up and, on the reviewer path, the attempt's slot.
  */
-export const DEFERRED_RECHECK_MAX_WAIT_MS = 30_000;
+export const DEFERRED_RECHECK_MAX_WAIT_MS = 60_000;
 
 /**
  * What happened. `ci` is one or more `cp-ci` observations for a held PR (a run

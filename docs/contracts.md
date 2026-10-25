@@ -5676,7 +5676,7 @@ so each bounds the re-gate with the same helper the suggestion path uses
 
 | bound | value | protects |
 |---|---|---|
-| `DEFERRED_RECHECK_MAX_WAIT_MS` (`src/deferred-recheck.ts`) | 30s | the watch tick: `recheckDeferredBounded` never throws and never outlives it, so the notice and the `cp-ci` wake-up follow either way |
+| `DEFERRED_RECHECK_MAX_WAIT_MS` (`src/deferred-recheck.ts`) | 60s | the watch tick: `recheckDeferredBounded` never throws and never outlives it, so the notice and the `cp-ci` wake-up follow either way; twice the 30 s Actions CI read budget, so one fail-closed read finishes inside it |
 | `BEFORE_WAKEUP_MAX_WAIT_MS` (`src/review-runs.ts`) | 30s | the verdict: a hook that throws, rejects **or never settles** cannot pin the slot or swallow a decision already on disk |
 
 The guarantee is therefore conditional and says so: **when the re-gate finishes
