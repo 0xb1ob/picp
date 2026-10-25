@@ -7,6 +7,8 @@
 	"tests/e2e/bridge-host-s26.test.ts": 15000,
 	"tests/e2e/operator-delivery.test.ts": 25000,
 	"tests/e2e/operator-dashboard.test.ts": 14000,
+	"tests/dashboard-control-images-retained.test.ts": 170,
+	"tests/operator-threads-retained.test.ts": 30,
 	"tests/e2e/command-output.test.ts": 15000,
 	"tests/e2e/operator-session-record.test.ts": 12000,
 	"tests/drain-retained.test.ts": 5000,
