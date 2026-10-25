@@ -155,7 +155,7 @@ export class MockProvider {
 			id: this.modelId(name),
 			name: `mock ${name}`,
 			reasoning: false,
-			input: ["text"],
+			input: ["text", "image"],
 			contextWindow: 200_000,
 			maxTokens: 8_192,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
