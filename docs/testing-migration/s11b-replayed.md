@@ -2,8 +2,8 @@
 
 ## cp-1fmp continuation
 
-[Fresh consumer baselines and S09 controls](../../.s11b-stage2/cp-1fmp-continuation.md) and
-[fresh S10 controls](../../.s11b-stage2/cp-1fmp-S10.md) preserve exact patches, fail/restored logs and hashes.
+Fresh consumer baselines and S09 controls (`cp-1fmp-continuation.md`, since removed) and
+fresh S10 controls (`cp-1fmp-S10.md`, since removed) preserved exact patches, fail/restored logs and hashes.
 Original coverage remains intact; these runs earn preparation credit only. The deletion candidate exceeds
 280,000 bytes before completion of the required proof. The parent approved PR502 as evidence only and
 assigned all remaining proof and retirement acceptance to `cp-dpmo`.
