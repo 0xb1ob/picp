@@ -1,0 +1,172 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S10:.*synchronization tests/e2e/landing-merge.test.ts
+
+From /tmp/cp-repo-KOjFie/demo
+ * branch            cp-4euv    -> FETCH_HEAD
+HEAD is now at ed6aa3b v1
+To /tmp/cp-repo-KOjFie/demo.git
+   ed6aa3b..376b7c2  HEAD -> cp-4euv
+Previous HEAD position was 376b7c2 remote update
+Switched to branch 'main'
+▶ landing S10: synchronization preserves local work and proves origin before resetting
+  ✔ behind (4609.554492ms)
+From /tmp/cp-repo-dAwMjd/demo
+ * branch            cp-226w    -> FETCH_HEAD
+HEAD is now at f501223 v1
+To /tmp/cp-repo-dAwMjd/demo.git
+   f501223..7eb9cec  HEAD -> cp-226w
+Previous HEAD position was 7eb9cec remote update
+Switched to branch 'main'
+  ✔ stale (4420.188567ms)
+From /tmp/cp-repo-ovUnV4/demo
+ * branch            cp-s4tp    -> FETCH_HEAD
+HEAD is now at dee89db v1
+To /tmp/cp-repo-ovUnV4/demo.git
+   dee89db..6bd8253  HEAD -> cp-s4tp
+Previous HEAD position was 6bd8253 remote update
+Switched to branch 'main'
+  ✖ dirty (4421.19418ms)
+From /tmp/cp-repo-9C5Emq/demo
+ * branch            cp-tepr    -> FETCH_HEAD
+HEAD is now at 0f18853 v1
+To /tmp/cp-repo-9C5Emq/demo.git
+   0f18853..ae5bb0f  HEAD -> cp-tepr
+Previous HEAD position was ae5bb0f remote update
+Switched to branch 'main'
+  ✔ unpushed (3576.422452ms)
+From /tmp/cp-repo-znekGC/demo
+ * branch            cp-904i    -> FETCH_HEAD
+HEAD is now at 72edcb1 v1
+To /tmp/cp-repo-znekGC/demo.git
+   72edcb1..31043dd  HEAD -> cp-904i
+Previous HEAD position was 31043dd remote update
+Switched to branch 'main'
+  ✔ absorbed (4992.114651ms)
+From /tmp/cp-repo-ZDgG0q/demo
+ * branch            cp-ob94    -> FETCH_HEAD
+HEAD is now at 9c6b636 v1
+To /tmp/cp-repo-ZDgG0q/demo.git
+   9c6b636..5d2d8a1  HEAD -> cp-ob94
+Previous HEAD position was 5d2d8a1 remote update
+Switched to branch 'main'
+  ✔ divergence (3211.136342ms)
+From /tmp/cp-repo-3IarE4/demo
+ * branch            cp-utof    -> FETCH_HEAD
+HEAD is now at a3ef537 v1
+To /tmp/cp-repo-3IarE4/demo.git
+   a3ef537..4d7c043  HEAD -> cp-utof
+Previous HEAD position was 4d7c043 remote update
+Switched to branch 'main'
+  ✔ branch-denied (3756.938949ms)
+From /tmp/cp-repo-Z627ms/demo
+ * branch            cp-t7gk    -> FETCH_HEAD
+HEAD is now at 2fb6b23 v1
+To /tmp/cp-repo-Z627ms/demo.git
+   2fb6b23..2866c31  HEAD -> cp-t7gk
+Previous HEAD position was 2866c31 remote update
+Switched to branch 'main'
+  ✔ branch-empty (3734.279334ms)
+From /tmp/cp-repo-HKUiIv/demo
+ * branch            cp-s8os    -> FETCH_HEAD
+HEAD is now at 612697a v1
+To /tmp/cp-repo-HKUiIv/demo.git
+   612697a..d67fc4e  HEAD -> cp-s8os
+Previous HEAD position was d67fc4e remote update
+Switched to branch 'main'
+  ✔ base-denied (3211.825792ms)
+From /tmp/cp-repo-qsp7Zf/demo
+ * branch            cp-tloh    -> FETCH_HEAD
+HEAD is now at 7fa6b66 v1
+To /tmp/cp-repo-qsp7Zf/demo.git
+   7fa6b66..a74b080  HEAD -> cp-tloh
+Previous HEAD position was a74b080 remote update
+Switched to branch 'main'
+  ✔ base-empty (3250.42173ms)
+From /tmp/cp-repo-1goyK1/demo
+ * branch            cp-3z3v    -> FETCH_HEAD
+HEAD is now at 7d6f916 v1
+To /tmp/cp-repo-1goyK1/demo.git
+   7d6f916..5d4bcde  HEAD -> cp-3z3v
+Previous HEAD position was 5d4bcde remote update
+Switched to branch 'main'
+  ✔ merge-base (3315.905945ms)
+From /tmp/cp-repo-nxtTDe/demo
+ * branch            cp-pfde    -> FETCH_HEAD
+HEAD is now at 6d02996 v1
+To /tmp/cp-repo-nxtTDe/demo.git
+   6d02996..01df4c0  HEAD -> cp-pfde
+Previous HEAD position was 01df4c0 remote update
+Switched to branch 'main'
+  ✔ diff (3398.63352ms)
+From /tmp/cp-repo-xidnPA/demo
+ * branch            cp-i2w7    -> FETCH_HEAD
+HEAD is now at 0da4daf v1
+To /tmp/cp-repo-xidnPA/demo.git
+   0da4daf..a54bdfc  HEAD -> cp-i2w7
+Previous HEAD position was a54bdfc remote update
+Switched to branch 'main'
+  ✔ patch-id (3427.464281ms)
+From /tmp/cp-repo-lbi5Bj/demo
+ * branch            cp-137s    -> FETCH_HEAD
+HEAD is now at a0f7b7a v1
+To /tmp/cp-repo-lbi5Bj/demo.git
+   a0f7b7a..8fa2d2a  HEAD -> cp-137s
+Previous HEAD position was 8fa2d2a remote update
+Switched to branch 'main'
+  ✔ empty-id (3467.181122ms)
+From /tmp/cp-repo-Q2PTIG/demo
+ * branch            cp-nbn1    -> FETCH_HEAD
+HEAD is now at e09b4c1 v1
+To /tmp/cp-repo-Q2PTIG/demo.git
+   e09b4c1..7fd36ea  HEAD -> cp-nbn1
+Previous HEAD position was 7fd36ea remote update
+Switched to branch 'main'
+  ✔ empty-diff (3398.263738ms)
+From /tmp/cp-repo-EseEjP/demo
+ * branch            cp-n1cd    -> FETCH_HEAD
+HEAD is now at 38592e3 v1
+To /tmp/cp-repo-EseEjP/demo.git
+   38592e3..6de3534  HEAD -> cp-n1cd
+Previous HEAD position was 6de3534 remote update
+Switched to branch 'main'
+  ✔ salvage (3600.686714ms)
+✖ landing S10: synchronization preserves local work and proves origin before resetting (59796.608313ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 15
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 61354.429305
+
+✖ failing tests:
+
+test at tests/e2e/landing-merge.test.ts:71:230
+✖ dirty (4421.19418ms)
+  AssertionError [ERR_ASSERTION]: dirty: reset requires proof
+  + actual - expected
+  
+  + [
+  +   [
+  +     'reset',
+  +     '--hard',
+  +     '6bd8253828bdc6f02ca09e13f31460e872dcedbf'
+  +   ]
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:102:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:71:222)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [ [ 'reset', '--hard', '6bd8253828bdc6f02ca09e13f31460e872dcedbf' ] ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

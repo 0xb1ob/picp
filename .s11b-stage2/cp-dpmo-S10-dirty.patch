@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..367fd64 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1447,7 +1447,7 @@ export class Integrator {
+ 		}
+ 		const dirty = await this.#run(worktree, "git", ["status", "--porcelain"]);
+ 		if ((bad = unread(dirty, "could not read the worktree status (git status)", true))) return bad;
+-		if (dirty.stdout.trim().length > 0) {
++		if (false) {
+ 			return {
+ 				acted: false,
+ 				failed: true,

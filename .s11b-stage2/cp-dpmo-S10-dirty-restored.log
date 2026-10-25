@@ -1,0 +1,142 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S10:.*synchronization tests/e2e/landing-merge.test.ts
+
+From /tmp/cp-repo-baaUQ2/demo
+ * branch            cp-aelf    -> FETCH_HEAD
+HEAD is now at b36f313 v1
+To /tmp/cp-repo-baaUQ2/demo.git
+   b36f313..8ab086b  HEAD -> cp-aelf
+Previous HEAD position was 8ab086b remote update
+Switched to branch 'main'
+▶ landing S10: synchronization preserves local work and proves origin before resetting
+  ✔ behind (4597.821522ms)
+From /tmp/cp-repo-3w7GBN/demo
+ * branch            cp-m9mw    -> FETCH_HEAD
+HEAD is now at 242d895 v1
+To /tmp/cp-repo-3w7GBN/demo.git
+   242d895..38d116d  HEAD -> cp-m9mw
+Previous HEAD position was 38d116d remote update
+Switched to branch 'main'
+  ✔ stale (4510.144542ms)
+From /tmp/cp-repo-oT0wSX/demo
+ * branch            cp-4sy2    -> FETCH_HEAD
+HEAD is now at db5cabf v1
+To /tmp/cp-repo-oT0wSX/demo.git
+   db5cabf..b7a158c  HEAD -> cp-4sy2
+Previous HEAD position was b7a158c remote update
+Switched to branch 'main'
+  ✔ dirty (3081.938122ms)
+From /tmp/cp-repo-lrBqHX/demo
+ * branch            cp-hgbb    -> FETCH_HEAD
+HEAD is now at fdea6aa v1
+To /tmp/cp-repo-lrBqHX/demo.git
+   fdea6aa..310d32b  HEAD -> cp-hgbb
+Previous HEAD position was 310d32b remote update
+Switched to branch 'main'
+  ✔ unpushed (3545.227401ms)
+From /tmp/cp-repo-6LXoq3/demo
+ * branch            cp-xgci    -> FETCH_HEAD
+HEAD is now at 06cfd56 v1
+To /tmp/cp-repo-6LXoq3/demo.git
+   06cfd56..1532a8a  HEAD -> cp-xgci
+Previous HEAD position was 1532a8a remote update
+Switched to branch 'main'
+  ✔ absorbed (4984.119608ms)
+From /tmp/cp-repo-uuU9QV/demo
+ * branch            cp-455t    -> FETCH_HEAD
+HEAD is now at 0bd1ce5 v1
+To /tmp/cp-repo-uuU9QV/demo.git
+   0bd1ce5..00b4406  HEAD -> cp-455t
+Previous HEAD position was 00b4406 remote update
+Switched to branch 'main'
+  ✔ divergence (3160.732549ms)
+From /tmp/cp-repo-f8UDy4/demo
+ * branch            cp-v1xv    -> FETCH_HEAD
+HEAD is now at 032b594 v1
+To /tmp/cp-repo-f8UDy4/demo.git
+   032b594..5f63f42  HEAD -> cp-v1xv
+Previous HEAD position was 5f63f42 remote update
+Switched to branch 'main'
+  ✔ branch-denied (3730.204086ms)
+From /tmp/cp-repo-JYAyiR/demo
+ * branch            cp-luwa    -> FETCH_HEAD
+HEAD is now at 28833ea v1
+To /tmp/cp-repo-JYAyiR/demo.git
+   28833ea..2ba7783  HEAD -> cp-luwa
+Previous HEAD position was 2ba7783 remote update
+Switched to branch 'main'
+  ✔ branch-empty (3686.667837ms)
+From /tmp/cp-repo-zgoa6m/demo
+ * branch            cp-1sht    -> FETCH_HEAD
+HEAD is now at e3d44da v1
+To /tmp/cp-repo-zgoa6m/demo.git
+   e3d44da..9d7a7c0  HEAD -> cp-1sht
+Previous HEAD position was 9d7a7c0 remote update
+Switched to branch 'main'
+  ✔ base-denied (3169.007571ms)
+From /tmp/cp-repo-DscPSQ/demo
+ * branch            cp-y12i    -> FETCH_HEAD
+HEAD is now at 4ad6caa v1
+To /tmp/cp-repo-DscPSQ/demo.git
+   4ad6caa..93310f2  HEAD -> cp-y12i
+Previous HEAD position was 93310f2 remote update
+Switched to branch 'main'
+  ✔ base-empty (3194.954021ms)
+From /tmp/cp-repo-c66RIx/demo
+ * branch            cp-kgm9    -> FETCH_HEAD
+HEAD is now at 7fa84f6 v1
+To /tmp/cp-repo-c66RIx/demo.git
+   7fa84f6..595ebaa  HEAD -> cp-kgm9
+Previous HEAD position was 595ebaa remote update
+Switched to branch 'main'
+  ✔ merge-base (3312.534195ms)
+From /tmp/cp-repo-AOiQXr/demo
+ * branch            cp-vs8z    -> FETCH_HEAD
+HEAD is now at 88ac03a v1
+To /tmp/cp-repo-AOiQXr/demo.git
+   88ac03a..806f915  HEAD -> cp-vs8z
+Previous HEAD position was 806f915 remote update
+Switched to branch 'main'
+  ✔ diff (3335.946566ms)
+From /tmp/cp-repo-Myz0lP/demo
+ * branch            cp-yhsc    -> FETCH_HEAD
+HEAD is now at 26e9f79 v1
+To /tmp/cp-repo-Myz0lP/demo.git
+   26e9f79..70849b5  HEAD -> cp-yhsc
+Previous HEAD position was 70849b5 remote update
+Switched to branch 'main'
+  ✔ patch-id (3470.101651ms)
+From /tmp/cp-repo-qaUscL/demo
+ * branch            cp-31da    -> FETCH_HEAD
+HEAD is now at 8cf2cbc v1
+To /tmp/cp-repo-qaUscL/demo.git
+   8cf2cbc..c38e863  HEAD -> cp-31da
+Previous HEAD position was c38e863 remote update
+Switched to branch 'main'
+  ✔ empty-id (3394.511503ms)
+From /tmp/cp-repo-Sbm6n1/demo
+ * branch            cp-4pu1    -> FETCH_HEAD
+HEAD is now at b075db0 v1
+To /tmp/cp-repo-Sbm6n1/demo.git
+   b075db0..bfd5491  HEAD -> cp-4pu1
+Previous HEAD position was bfd5491 remote update
+Switched to branch 'main'
+  ✔ empty-diff (3355.321973ms)
+From /tmp/cp-repo-YuEugC/demo
+ * branch            cp-w71j    -> FETCH_HEAD
+HEAD is now at cdccc95 v1
+To /tmp/cp-repo-YuEugC/demo.git
+   cdccc95..f8961d2  HEAD -> cp-w71j
+Previous HEAD position was f8961d2 remote update
+Switched to branch 'main'
+  ✔ salvage (3551.473982ms)
+✔ landing S10: synchronization preserves local work and proves origin before resetting (58085.02358ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 59654.712905
