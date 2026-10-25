@@ -247,5 +247,4 @@ approval used to ([`src/curation.ts`](src/curation.ts)).
   while live, `cp-recovery` after a parent crash) — bounded recovery (cur.4.2)
   already tried once; `cp_teardown`/`cp_revive` as the message names, don't
   guess a phase. Restarting the parent kills every live worker; drain first.
-- A rule you cannot find here: it is probably code; `docs/contracts.md` says why,
-  the tool's refusal says how.
+- A rule you cannot find here: it is probably code; `docs/contracts.md` says why, the tool's refusal says how.

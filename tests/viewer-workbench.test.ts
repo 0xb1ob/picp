@@ -81,7 +81,7 @@ async function dashboardHome(t: { after(fn: () => void): void }): Promise<{ home
 	runStatus(home.path, "cp-a2/review-1", "cp-a2", usage(0.75, 500, 100));
 	runStatus(home.path, "cp-b1/gate-1", "cp-b1", usage(0.5, 90));
 	mkdirSync(join(home.path, ".pi-command-post"), { recursive: true });
-	writeFileSync(join(home.path, ".pi-command-post", "jobs.json"), JSON.stringify({ jobs: [{ id: "cp-a1", title: "first job", status: "in_progress" }] }));
+	writeFileSync(join(home.path, ".pi-command-post", "jobs.json"), JSON.stringify({ schema_version: 1, prefix: "cp", jobs: [{ id: "cp-a1", title: "first job", status: "in_progress", labels: ["project:alpha", "kind:ship", "delivery:pr"], blocked_by: [], comments: [], created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z" }] }));
 	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
 	writeFileSync(join(home.path, LAYOUT.data, "projects.json"), JSON.stringify({ projects: [{ name: "gamma" }, { name: "../bad" }] }));
 	const mandates = new MandateStore(home.path);

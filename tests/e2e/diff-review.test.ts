@@ -710,7 +710,7 @@ test("S15: the real cp_review tool relays bounded verdicts and policy refusals w
 	assert.deepEqual(Object.keys(specs.find((tool) => tool.function.name === "cp_gate")!.function.parameters.properties).sort(), [
 		"action", "authority_mode", "current_artifact_sha256", "deliver_revise", "dependent_job_ids", "expected_previous_attempt_id",
 		"job_id", "model", "operator_ask_id", "operator_control_id", "operator_send_id", "recovery_attempt_id", "recovery_authority_id",
-		"reinforcement_control_id", "reinforcement_send_id", "replacement_job_id", "replan_escalation_id",
+		"reinforcement_control_id", "reinforcement_send_id", "replacement_job_id", "replan_escalation_id", "source_job_id",
 	]);
 	assert.doesNotMatch(specs.find((tool) => tool.function.name === "cp_review")!.function.description, /different model is chosen/);
 	assert.equal(existsSync(join(s.home, paths.reviewFile("cp-s15-unknown", 1))), false);

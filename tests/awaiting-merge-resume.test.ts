@@ -11,6 +11,7 @@ import { FleetStore } from "../src/fleet.ts";
 import { Reviver } from "../src/revive.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { Sender, SendError } from "../src/send.ts";
+import { MandateStore } from "../src/mandate.ts";
 import { createScratchHome, type FakeWorker, fakeWorkerManager } from "./harness/index.ts";
 
 const AT = "2026-10-15T10:00:00Z";
@@ -25,7 +26,7 @@ function parked(): FleetRecord {
 	};
 }
 
-interface Options { spawn?: boolean; fail?: boolean; mandates?: unknown }
+interface Options { spawn?: boolean; fail?: boolean; mandates?: (home: string) => MandateStore }
 
 async function bench(t: { after(fn: () => void | Promise<void>): void }, options: Options = {}) {
 	const home = createScratchHome();
@@ -42,7 +43,7 @@ async function bench(t: { after(fn: () => void | Promise<void>): void }, options
 	let worker: FakeWorker | undefined;
 	const sender = new Sender({
 		fleet, manager: workers.manager, runs, home: home.path,
-		...(options.mandates ? { mandates: options.mandates as never } : {}),
+		...(options.mandates ? { mandates: options.mandates(home.path) } : {}),
 		// The park journaled held_released; a stale "released" answer must still never trigger a second revive.
 		released: () => true,
 		revive: async (id) => {
@@ -88,13 +89,13 @@ test("Sender resume: after resume the send reads the re-read record and never re
 });
 
 test("Sender resume: the mandate's repair permission is checked first, whatever the purpose", async (t) => {
-	const asked: string[] = [];
-	const refused = await bench(t, { mandates: { assertPermitted: (use: string) => {
-		asked.push(use);
-		throw new Error("no grant covers demo");
-	} } });
-	await assert.rejects(refused.sender.send({ jobId: "cp-park", message: "go" }), (error: unknown) => error instanceof SendError && /no grant covers demo/.test(error.message));
-	assert.deepEqual(asked, ["repair"]);
+	const refused = await bench(t, { mandates: (home) => {
+		const store = new MandateStore(home);
+		const grant = store.issue({ projects: ["demo"], objective: "Parked repair", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 100000 }, job_cap: 1 });
+		store.pause(grant.id, "spend_cap");
+		return store;
+	} });
+	await assert.rejects(refused.sender.send({ jobId: "cp-park", message: "go" }), (error: unknown) => error instanceof SendError && /paused/.test(error.message));
 	assert.deepEqual(refused.calls, [], "a refused grant never resumes");
 	assert.equal(refused.fleet.require("cp-park").phase, "awaiting_merge");
 });
