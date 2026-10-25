@@ -1,5 +1,11 @@
 # Ledger rows: p8c
 
+<!-- manifest:ledger -->
+| PR | Scope | Baseline files deleted |
+|---|---|---|
+| P8c (cp-e2e-migration-p8c-pew6) | behavior 04, third slice: the reviewer's spend charged to its own run (04-13, m3 extended), the spawn cap's gate-reviewer reserve (04-14), the bounded recovery of a silent settle (04-15, 04-16) and the report nudge (04-17) in `tests/e2e/worker-lifecycle-p8c.test.ts`: 26 mapped, 1 redundant-unreachable, 27 retained verbatim in four `*-retained.test.ts` files; the other 9 behavior-04 files stay `convert` for cp-e2e-migration-p8d | 4 (`tests/live-harness.test.ts`, `tests/worker-spawn-reserve.test.ts`, `tests/settle-recovery.test.ts`, `tests/settle.test.ts`) |
+<!-- /manifest:ledger -->
+
 P8c (job `cp-e2e-migration-p8c-pew6`) is the third behavior-04 slice. It converts `tests/live-harness.test.ts`,
 `tests/worker-spawn-reserve.test.ts`, `tests/settle-recovery.test.ts` and `tests/settle.test.ts`: the reviewer's spend
 charged to its own run (04-13, an extension of the m3 pipeline e2e), the spawn cap's gate-reviewer reserve (04-14), the
