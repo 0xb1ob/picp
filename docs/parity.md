@@ -25,7 +25,7 @@ Zero capabilities are unaccounted for: every row below is one of the five.
 | command-post | verdict | new home | evidence |
 |---|---|---|---|
 | `cmdp dispatch --project --job-id --template --task-file --scope --risk` | ported | `cp_dispatch` tool → [`src/dispatch.ts`](../src/dispatch.ts) | `tests/e2e/dispatch-s29.test.ts`, `tests/e2e/dispatch-s30.test.ts`, `tests/dispatch-retained.test.ts`, `tests/e2e/phase2.test.ts` |
-| `cmdp dispatch --name <alias>` | deleted | worker identity **is** the job id (one worker per job); aliases existed to name panes | `WorkerManager.spawn` one-worker-per-job, `tests/worker-manager.test.ts` |
+| `cmdp dispatch --name <alias>` | deleted | worker identity **is** the job id (one worker per job); aliases existed to name panes | `WorkerManager.spawn` one-worker-per-job, `tests/e2e/worker-lifecycle-p8e.test.ts` (P8e spawn cap) |
 | `cmdp dispatch --origin` | out of scope | `origin` is still carried on every fleet record and status row, unread | `FleetRecordSchema.origin`, `StatusJobSchema.origin` |
 | `cmdp dispatch -- CMD…` (CLI override) | ported (narrowed) | `model` override on `cp_dispatch`; there is one CLI (pi) by design | `tests/routing.test.ts` |
 | `cmdp check --project <worktree> --base` | ported | `cp_check` tool → [`src/preflight.ts`](../src/preflight.ts) | `tests/e2e/preflight-s31.test.ts`, `tests/contract.test.ts` (tool is exposed) |
@@ -82,11 +82,11 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | "Never re-run research for an implementation failure" | mechanised | `mayRerunResearch` is asserted, not remembered | `tests/failures-retained.test.ts` |
 | Pre-dispatch path (lease-bind, branch=job-id, check, jobs add) | ported | `cp_dispatch`'s fixed order; probe **before** lease, no orphan branch | `tests/e2e/dispatch-s29.test.ts`, `tests/e2e/dispatch-cleanup-s29.test.ts`, `tests/e2e/dispatch-s30.test.ts` |
 | Promote vs new lease (same repo + held worktree + same model) | mechanised | `decideOccupancy`; cross-model role hop refused with the teardown instruction | `tests/e2e/preflight-s31.test.ts`, `tests/e2e/dispatch-s31.test.ts` |
-| "Research evidence is not authorization to dispatch a second pane" | mechanised | one worker per job, enforced at spawn | `tests/worker-manager.test.ts` |
+| "Research evidence is not authorization to dispatch a second pane" | mechanised | one worker per job, enforced at spawn | `tests/e2e/worker-lifecycle-p8e.test.ts` (P8e spawn cap) |
 | Stale clone / "belongs to another repo" recovery | ported | `assertCanonicalClone`'s five checks; recovery stays an operator decision | `tests/projects.test.ts` |
 | `git worktree add` allowed only when treehouse is missing | ported (hardened) | **no** fallback at all: a missing treehouse is a hard error | `tests/e2e/dispatch-s31.test.ts` |
 | Project management (clone on demand, registry, one canonical clone) | ported | `data/projects.json` + rendered `projects.md` view | `tests/projects.test.ts` |
-| Worker dispatch: "pass only the CLI and optional `--model`; no trust/yolo/skip-permissions flags" | mechanised | `WORKER_REQUIRED_FLAGS` / `WORKER_FORBIDDEN_FLAGS` + `assertTrustPolicy(argv)` re-checks the final argv | `tests/worker-manager.test.ts`, `tests/contracts.test.ts` |
+| Worker dispatch: "pass only the CLI and optional `--model`; no trust/yolo/skip-permissions flags" | mechanised | `WORKER_REQUIRED_FLAGS` / `WORKER_FORBIDDEN_FLAGS` + `assertTrustPolicy(argv)` re-checks the final argv | `tests/e2e/worker-lifecycle-p8e.test.ts` (P8e spawn), `tests/worker-manager-retained.test.ts`, `tests/contracts.test.ts` |
 | Model routing (order, allowlist, `source=/model=/rule=`) | ported | [`src/routing.ts`](../src/routing.ts); resolution table from `reports/model-routing.md` reproduced | `tests/routing.test.ts` |
 | First brief contract (`templates/`, placeholders, `--brief-file`) | ported | `prompts/briefs/` + `assembleBrief`; unknown placeholder **or** missing value fails closed | `tests/profiles.test.ts` |
 | Workers search with `grep`/`glob`/`read`, not `bash` grep/cat (audit 2026-09-06: ~2173 bash grep/cat/head/tail/ls calls, `glob` called 0 times) | mechanised | the rule is in all three briefs and all three worker profiles (`prompts/briefs/`, `profiles/`), and five contract cases fail the suite if a surface loses the sentence | `tests/evals.test.ts` (`evals/corpus.json` `*-bounded-search-tools`) |

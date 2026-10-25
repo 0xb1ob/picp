@@ -386,7 +386,6 @@
 	"tests/worker-credential-guard.test.ts": 8,
 	"tests/worker-history-guard.test.ts": 6,
 	"tests/worker-host-guard.test.ts": 6,
-	"tests/worker-manager.test.ts": 2376,
 	"tests/worker-mcp-retained.test.ts": 16,
 	"tests/worker-merge-guard.test.ts": 1,
 	"tests/worker-packages.test.ts": 351,

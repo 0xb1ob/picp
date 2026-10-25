@@ -3,20 +3,24 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P8e (cp-e2e-migration-p8e-sdwz) | behavior 04, fifth slice: spawn safety through cp_dispatch (04-27), the brief guard (04-28), the model-call look-alike (04-29) and the episode-end exit (04-30) in `tests/e2e/worker-lifecycle-p8e.test.ts`: 10 of the 25 `tests/worker-manager.test.ts` declarations mapped, the file kept intact as `convert` until p8f settles the other 15; the #531 review lows (S21-budget policy escalation, two budget-gate declarations kept verbatim, p8d rows and docstring); `tests/harness.test.ts`, `tests/script-jobs.test.ts`, `tests/worker-packages.test.ts`, `tests/worker-process.test.ts` and `tests/worker-reporter.test.ts` stay `convert` for p8f | 0 |
+| P8e (cp-e2e-migration-p8e-sdwz) | behavior 04, fifth slice: spawn safety through cp_dispatch (04-27), the brief guard (04-28), the model-call look-alike (04-29), the episode-end exit (04-30) and the spawn cap (04-31) in `tests/e2e/worker-lifecycle-p8e.test.ts`: `tests/worker-manager.test.ts` 10 mapped, 15 retained verbatim in `tests/worker-manager-retained.test.ts`; the #531 review lows (S21-budget policy escalation, two budget-gate declarations kept verbatim, p8d rows and docstring) | 1 (`tests/worker-manager.test.ts`) |
 <!-- /manifest:ledger -->
 
-P8e (job `cp-e2e-migration-p8e-sdwz`) is the fifth behavior-04 slice. It maps ten `tests/worker-manager.test.ts`
-declarations onto four scenarios on real pi workers. The file keeps all 25 declarations as `convert`: its other
-fifteen are not yet settled (mapped or retained with a named missing entry point), and a kept file may not lose
-declarations without a deletion record, so p8f retires it whole. It also closes the #531 review lows: S21-budget now
-pins the policy-cause escalation, the unpinned cost-only breach is kept verbatim in `tests/failures-retained.test.ts`,
-and the p8d rows are corrected. Each control below changed one guard, failed in the named case, and was restored.
+P8e (job `cp-e2e-migration-p8e-sdwz`) is the fifth behavior-04 slice, on real pi workers through a real CommandPost.
+It also closes the #531 review lows: S21-budget now pins the policy-cause escalation, the unpinned cost-only breach is
+kept verbatim in `tests/failures-retained.test.ts`, and the p8d rows are corrected. Each control below changed one
+guard, failed in the named case, and was restored.
+
+`tests/worker-manager.test.ts` retains 15 of 25 (60%): the worker profiles are package files (`CommandPost`'s
+`packageRoot/profiles`), so no home file or seeded data supplies a profile that lacks report_result, lies about
+readOnly, lists ask_operator, names a cost or asks for more than 50M tokens; no caller has set `mayAskOperator` since
+cur.3.1; and the manager's bookkeeping (a duplicate refusal behind preflight's promote, a reservation's window, a
+hanging or throwing shutdown, a throwing slot-free listener) has no input a real worker can produce.
 
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
-| P8e | 04 | tests/e2e/worker-lifecycle-p8e.test.ts | 4 new |
+| P8e | 04 | tests/e2e/worker-lifecycle-p8e.test.ts | 5 new |
 <!-- /manifest:prs -->
 
 <!-- manifest:scenarios -->
@@ -26,6 +30,7 @@ and the p8d rows are corrected. Each control below changed one guard, failed in 
 | 04-28 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e brief guard: a task carrying a credential is refused before any worker starts, naming the pattern and line, never the secret |
 | 04-29 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e look-alike: a worker whose own text reads like a provider error is an ordinary unreported settle, never a model-call failure or an outer retry |
 | 04-30 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e episode end: a drained parent's shutdown leaves no worker alive and its held and waiting jobs revivable on the next start, none failed |
+| 04-31 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e spawn cap: at the cap another job is refused naming the live worker, the same job promotes instead of a second worker, and the slot frees on the observed close |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -41,6 +46,21 @@ and the p8d rows are corrected. Each control below changed one guard, failed in 
 | tests/worker-manager.test.ts | manager plumbs budget, identity and reporter extension into every spawn | 04-27 | mapped | the model sees report_result, the record carries the budget, the environ the identity; controls NC-P8e-min, NC-P8e-artifact |
 | tests/worker-manager.test.ts | quiesce() reports active workers and which of them are mid-turn | 04-30 | mapped | two settled workers drain to active 2, busy none, then 0 after shutdown; control NC-P8e-quiesce |
 | tests/worker-manager.test.ts | the episodic exit invariant: shutdownAll after drain leaves every job revivable | 04-30 | mapped | no worker pid survives and the next parent's reconcile lists both jobs revivable, none failed; control NC-P8e-closing |
+| tests/worker-manager.test.ts | tool allowlist comes from the profile and must include report_result | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: profiles load only from the package's profiles/, so no input supplies one without report_result or with a lying readOnly; 04-27 pins the allowlist half. |
+| tests/worker-manager.test.ts | readOnly refuses pi-lens and hashline writers | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Same: a readOnly profile granting a writer is package data, never a runtime input. |
+| tests/worker-manager.test.ts | ask_operator is granted by the parent per spawn, never by a profile | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: no caller sets mayAskOperator since cur.3.1, and a profile listing the tool is package data. |
+| tests/worker-manager.test.ts | CP_ASK_OPERATOR is set only when the parent granted the ask | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point for the grant half: no caller sets mayAskOperator since cur.3.1; 04-27 pins the never-inherited half (NC-P8e-cp-prefix). |
+| tests/worker-manager.test.ts | a clamp is detectable, not just silently applied (cp-sr5) | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point for the cost-only clamp: no shipped profile names cost_usd; 04-27 pins the token clamp (NC-P8e-clamp). |
+| tests/worker-manager.test.ts | raising only one side of profile/config surfaces the clamp, raising both clears it (cp-sr5) | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: the profile-side raise needs a profile over 50M tokens; none ships. |
+| tests/worker-manager.test.ts | a static (non-function) budget value still works, unchanged (back-compat) | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: CommandPost always hands the manager a live getter; the static form has no product caller. |
+| tests/worker-manager.test.ts | trust policy self-check refuses a tampered argv | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: buildWorkerArgs always prepends the required flags and refuses forbidden extra args, so no input reaches a tampered argv; 04-27 pins the policy (NC-P8e-trust). |
+| tests/worker-manager.test.ts | untrusted project resources in a clone are detected | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: SpawnPlan.refusedResources has no reader in src/; 04-27 pins that those resources never load. |
+| tests/worker-manager.test.ts | spawn cap and one-worker-per-job are enforced | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point for the manager's own duplicate refusal: preflight promotes first (removing that refusal leaves 04-31 green); 04-31 pins the cap (NC-P8e-cap), the promote and the freed slot. |
+| tests/worker-manager.test.ts | shutdownAll leaves no orphans | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: a revive fired by the shutdown's own close cannot be timed from outside, and the monitor's closing gate stops it first; 04-30 pins no orphan (NC-P8e-closing). |
+| tests/worker-manager.test.ts | 4b-1: spawn refusals carry a typed code; the messages are unchanged | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: the duplicate code has no reader and no input (see the cap row); 04-31 pins the cap message. |
+| tests/worker-manager.test.ts | 4b-1: a reservation holds a slot for its key; spawn consumes it silently, release notifies once | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: only HeldRelease reserves, inside a revive at the cap, and no competing spawn can be timed into that window; 04-24 pins the consumed reservation. |
+| tests/worker-manager.test.ts | 4b-1: a stopping worker is marked from shutdown's first tick until its exit; notify fires once | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: a shutdown that hangs or throws; pi always exits on the shutdown ladder. |
+| tests/worker-manager.test.ts | 4b-1: slot-free fires after an observed close; unsubscribe works; a throwing listener breaks nothing | — | retained | Verbatim in tests/worker-manager-retained.test.ts. Missing entry point: the product's only listener never throws or unsubscribes. |
 | tests/failures.test.ts | the soft gate warns before it breaches, and never kills | — | retained | P8e restores it verbatim in tests/failures-retained.test.ts. Missing entry point: the mock provider's cost table is zero, so no run reaches a cost-only breach. |
 | tests/failures.test.ts | cache_read is excluded from the budgeted token total (cp-d7y) | — | retained | P8e restores it verbatim in tests/failures-retained.test.ts. Same: its cost-only breach line needs a non-zero cost. |
 | tests/failures.test.ts | readModelCallError: assistant text that reads like a provider error is not a failed model call | 04-29 | mapped | a worker saying "401 Invalid API key" is nudged as an unreported settle, with no failure and no outer retry; control NC-P8e-look-alike |
@@ -61,6 +81,7 @@ and the p8d rows are corrected. Each control below changed one guard, failed in 
 | NC-P8e-trust | tests/worker-manager.test.ts | 04-27 | src/worker-process.ts and src/worker-manager.ts: --no-approve and --no-extensions dropped, --approve added, the argv self-check off (combined: pi's own trust gate keeps the clone out unless --approve is passed) | a project-local extension never loads |
 | NC-P8e-quiesce | tests/worker-manager.test.ts | 04-30 | src/worker-manager.ts: quiesce counts every worker busy | timed out waiting for a drained episode |
 | NC-P8e-closing | tests/worker-manager.test.ts | 04-30 | src/failures.ts: the monitor classifies closes during shutdown | the next parent's revivable list misses the waiting job |
+| NC-P8e-cap | tests/worker-manager.test.ts | 04-31 | src/worker-manager.ts: the spawn-cap check never fires | Missing expected rejection |
 | NC-P8e-look-alike | tests/failures.test.ts | 04-29 | src/failures.ts: readModelCallError reads a 4xx/5xx in assistant text | timed out waiting for the report nudge |
 | NC-P8e-budget-policy | tests/recovery.test.ts | S21-budget | src/contracts/limits.ts: budget_exceeded revives | timed out waiting for the budget breach's policy escalation |
 | NC-P8e-budget-class | tests/failures.test.ts | S21-budget | src/failures.ts: the budget_exceeded marker is not read | timed out waiting for the budget_exceeded durable emitter |
@@ -69,5 +90,12 @@ and the p8d rows are corrected. Each control below changed one guard, failed in 
 <!-- manifest:incoming -->
 | File | PR | Note |
 |---|---|---|
-| tests/e2e/worker-lifecycle-p8e.test.ts | P8e | behavior 04, spawn safety, the brief guard, the model-call look-alike and the episode-end exit; scenarios 04-27..04-30 |
+| tests/e2e/worker-lifecycle-p8e.test.ts | P8e | behavior 04, spawn safety, the brief guard, the model-call look-alike, the episode-end exit and the spawn cap; scenarios 04-27..04-31 |
+| tests/worker-manager-retained.test.ts | P8e | convert-owned; 15 declarations of tests/worker-manager.test.ts retained verbatim, no e2e entry point |
 <!-- /manifest:incoming -->
+
+<!-- manifest:baseline -->
+| File | Disposition | Owner | Evidence |
+|---|---|---|---|
+| `tests/worker-manager.test.ts` | deleted | P8e | behavior 04: 10 mapped (04-27, 04-28, 04-30), 15 retained in tests/worker-manager-retained.test.ts; controls NC-P8e-min, NC-P8e-clamp, NC-P8e-brief-scan, NC-P8e-brief-echo, NC-P8e-strip, NC-P8e-cp-prefix, NC-P8e-artifact, NC-P8e-noninteractive, NC-P8e-trust, NC-P8e-quiesce, NC-P8e-closing, NC-P8e-cap |
+<!-- /manifest:baseline -->

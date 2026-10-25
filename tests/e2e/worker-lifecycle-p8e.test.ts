@@ -237,3 +237,22 @@ test("P8e episode end: a drained parent's shutdown leaves no worker alive and it
 	assert.deepEqual([...report.revivable].sort(), [held, waiting].sort());
 	for (const jobId of [held, waiting]) assert.equal(next.fleet.require(jobId).failure, undefined, `${jobId} is revivable, not failed`);
 });
+
+test("P8e spawn cap: at the cap another job is refused naming the live worker, the same job promotes instead of a second worker, and the slot frees on the observed close", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const f = await bench(t);
+	writeFileSync(join(f.home, LAYOUT.budgetsFile), JSON.stringify({ ...DEFAULT_BUDGET_CONFIG, spawn_cap: 1 }));
+	const [first, second] = [await f.job("first"), await f.job("second")];
+	const model = f.script("capped", [{ kind: "text", text: "working" }, HANG, HANG]);
+	await f.post.dispatch({ jobId: first, task: "Work.", model, fetch: false });
+	const pid = f.post.fleet.require(first).worker.pid;
+
+	await assert.rejects(f.post.dispatch({ jobId: second, task: "Work.", model, fetch: false }), new RegExp(`spawn cap reached \\(1/1 workers\\): ${first}`));
+	assert.equal(f.post.manager.get(second), undefined, "nothing spawned over the cap");
+	const again = await f.post.dispatch({ jobId: first, task: "Work again.", model, fetch: false });
+	assert.deepEqual([again.state, f.post.fleet.require(first).worker.pid, f.post.manager.active.length], ["promote", pid, 1], "one worker per job");
+
+	await f.post.tearDown(first, { force: true });
+	assert.throws(() => process.kill(pid, 0), "the slot frees only once the close is observed");
+	await f.post.dispatch({ jobId: second, task: "Work.", model, fetch: false });
+	assert.ok(f.post.manager.get(second), "the freed slot takes the next job");
+});
