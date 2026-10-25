@@ -3,14 +3,14 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P9f (cp-e2e-migration-p9f-4ylo) | behavior 11, sixth slice: the operator's relay consumer (`tests/operator-delivery.test.ts`) through a real cp-bridge in an RPC operator over a seeded home, in `tests/e2e/operator-relay-p9f.test.ts` (24 declarations: 16 mapped, 8 retained verbatim in `tests/operator-delivery-retained.test.ts`; controls P9f-R1..R15, P9f-T1..T4); the parent send outbox (`tests/parent-outbox.test.ts`) through the in-process CpBridge, a real parent host process and the dashboard restart preflight, in `tests/e2e/parent-send-p9f.test.ts` and S26-dashboard-refusals (20 declarations: 18 mapped, 2 retained verbatim in `tests/parent-outbox-retained.test.ts`; controls P9f-S1..S21); envelope intake (`tests/intake.test.ts`) through the real parent's startup intake over a seeded home, in `tests/e2e/intake-p9f.test.ts` (20 declarations: 18 mapped, 2 retained verbatim in `tests/board-publish-retained.test.ts`; controls P9f-I1..I12); parent delivery (`tests/parent-delivery.test.ts`) through a real CpBridge and parent pi in `tests/e2e/parent-delivery-p9f.test.ts` (31 declarations: 21 mapped, 10 retained verbatim in `tests/parent-delivery-retained.test.ts`; controls P9f-D1..D14, two reported). Also aligns p9.md's P9b assertion notes with their `P9b-NC*` ids (#523 review low) and maps `relayIdsOfMessage` through a seeded legacy session (P9f-relay-legacy-ids, #515 review low) | 4 (mixed moves: no fully-deleted-file credit) |
+| P9f (cp-e2e-migration-p9f-4ylo) | behavior 11, sixth slice: the operator's relay consumer (`tests/operator-delivery.test.ts`) through a real cp-bridge in an RPC operator over a seeded home, in `tests/e2e/operator-relay-p9f.test.ts` (24 declarations: 16 mapped, 8 retained verbatim in `tests/operator-delivery-retained.test.ts`; controls P9f-R1..R15, P9f-T1..T4); the parent send outbox (`tests/parent-outbox.test.ts`) through the in-process CpBridge, a real parent host process and the dashboard restart preflight, in `tests/e2e/parent-send-p9f.test.ts` and S26-dashboard-refusals (20 declarations: 18 mapped, one split with its invalid-limit case, 2 retained verbatim in `tests/parent-outbox-retained.test.ts`; controls P9f-S1..S22); envelope intake (`tests/intake.test.ts`) through the real parent's startup intake over a seeded home, in `tests/e2e/intake-p9f.test.ts` (20 declarations: 18 mapped, one split with its unknown-id refusal in `tests/intake-retained.test.ts`, 2 retained verbatim in `tests/board-publish-retained.test.ts`; controls P9f-I1..I12); parent delivery (`tests/parent-delivery.test.ts`) through a real CpBridge and parent pi in `tests/e2e/parent-delivery-p9f.test.ts` (31 declarations: 21 mapped, one split, 10 retained; 11 verbatim in `tests/parent-delivery-retained.test.ts`; controls P9f-D1..D14, two reported). Also aligns p9.md's P9b assertion notes with their `P9b-NC*` ids (#523 review low) and maps `relayIdsOfMessage` through a seeded legacy session (P9f-relay-legacy-ids, #515 review low); #533 lows: a malformed dashboard config in S26-dashboard-refusals (P9f-C1, C2), p9e's appendControlAudit row relabelled, P9e-settle's chmod restored in `t.after` | 4 (mixed moves: no fully-deleted-file credit) |
 <!-- /manifest:ledger -->
 
 Behavior 11, sixth slice. P9f-relay-recheck seeds the relay outbox and ack journal, escalations, the fleet, a drain
-record and parent sends on a scratch home, then starts the real cp-bridge in an RPC pi three times: the first start
-delivers and retires, the second (store corrupted, drain gone) hands over only the new relays, and the third (acks
-unreadable) delivers nothing. P9f-relay-turn holds the operator's turn on a hanging mock step and enqueues relays
-around it.
+record and parent sends on a scratch home, then starts the real cp-bridge in an RPC pi four times: the first start
+delivers and retires, the second (fleet.json corrupt) and third (store corrupt, drain gone) hand over only the new
+relays in full, and the fourth (acks unreadable) delivers nothing. P9f-relay-turn holds the operator's turn on a
+hanging mock step and enqueues relays around it.
 
 The two other #523 review lows were already closed by P9e: `userMessageContent` is mapped by control I6 (p9d.md,
 relabelled by P9e), and the exact-ms 24 h TTL and 7-day lost-send boundaries are kept in
@@ -23,8 +23,8 @@ P9f-send-* drive the parent send outbox through `CpBridge.send`/`observe`/`sweep
 seed the outbox and a 420-entry parent transcript for the restart reconcile, and start a second parent host process
 for another owner's relays. S26-dashboard-refusals (restart preflight) gains a newer writer's unknown fields: the
 tolerant read's one consumer. Not reachable: the notice-once guards in `overdue` and in `markPendingNotice` each hold
-alone (P9f-S16 removes both); `reserveOuterRetry`'s invalid-limit refusal takes the only caller's constant, whose cap
-P9f-send-ladder pins.
+alone (P9f-S16 removes both); `reserveOuterRetry`'s invalid-limit refusal is retained, as its only caller passes a
+constant whose cap P9f-send-ladder pins.
 
 P9f-intake-* seed fleet records, envelopes, artifacts and board sites on a scratch home and start the real parent in
 RPC pi: its startup intake takes each envelope and the cp-envelope wakes carry the card. A FIFO under a board site hangs
@@ -88,12 +88,12 @@ failing pass inside one delivery has no entry point and that declaration is reta
 | tests/operator-delivery.test.ts | a send reply that names an escalation queued in the same pass retires it (replied rule before classify) | P9f-relay-recheck | mapped | the send and P9F-SAME queued together; control P9f-R8 |
 | tests/operator-delivery.test.ts | unreadable files are named on the status line, never treated as empty silence | P9f-relay-recheck | mapped | a corrupt escalation store and an acks path that is a directory; controls P9f-R12, P9f-R14 |
 | tests/operator-delivery.test.ts | (k) cp-nbxo incident replay: a wake whose escalation was answered and whose jobs moved on after it was queued is retired, never delivered | P9f-relay-recheck | mapped | P9F-HANDLED with its already-handled reason; controls P9f-R4, P9f-R13 |
-| tests/operator-delivery.test.ts | (k2) cp-nbxo fail-open: no es- id, an undecided, early, withdrawn, unknown or mixed escalation, an unmoved job or an unreadable store delivers the wake in full | P9f-relay-recheck | mapped | OPEN, EARLY, UNKNOWN, FAILED, HELD, GONE, SECOND, WITHDRAWN, MIXED and BADSTORE in full; controls P9f-R3, P9f-R14 |
+| tests/operator-delivery.test.ts | (k2) cp-nbxo fail-open: no es- id, an undecided, early, withdrawn, unknown or mixed escalation, an unmoved job or an unreadable store delivers the wake in full | P9f-relay-recheck | mapped | OPEN, EARLY, UNKNOWN, FAILED, HELD, GONE, SECOND, WITHDRAWN, MIXED, BADSTORE, BADQUEUED (unparseable queued_at) and BADFLEET (corrupt fleet.json) in full; controls P9f-R3, P9f-R14, P9f-R16, P9f-R17 |
 | tests/operator-delivery.test.ts | (k3) cp-nbxo: a fleet job named only in the prose blocks the drop until it moved on | P9f-relay-recheck | mapped | P9F-PROSE names the still-running cp-zzzz and is delivered in full |
 | tests/operator-delivery.test.ts | (k4) cp-nbxo: error, escalation and drain relays keep their own rechecks | P9f-relay-recheck | mapped | P9F-ERROR in full beside the drain notices; controls P9f-R5, P9f-R15 |
 | tests/parent-outbox.test.ts | the outbox file sits beside the session file | P9f-send-receipts | mapped | `the outbox sits beside cp-parent.jsonl` |
 | tests/parent-outbox.test.ts | enqueue is on disk before it returns, with a well-formed id | P9f-send-receipts | mapped | the ps- id and the file after the first send; an empty send writes nothing; control P9f-S3 |
-| tests/parent-outbox.test.ts | restart read drops unknown optional fields; the strict read still rejects them | P9f-send-receipts | mapped | the bridge start refuses unknown fields naming the file; S26-dashboard-refusals' preflight still names the pending send past them; control P9f-S20 |
+| tests/parent-outbox.test.ts | restart read drops unknown optional fields; the strict read still rejects them | P9f-send-receipts | mapped | the bridge start refuses unknown fields naming the file; S26-dashboard-refusals' preflight still names the pending send past them and refuses an entry in state `nope` as unreadable; controls P9f-S20, P9f-S22 |
 | tests/parent-outbox.test.ts | delegation survives reload and batching without changing legacy send records | P9f-send-batch | mapped | default and absent rules in the framed bodies, blank rules refused, a restart rewrites nothing; per-send provenance is P10e-quotes; control P9f-S18 |
 | tests/parent-outbox.test.ts | send rules are trimmed and truncated to 200 characters before persistence and framing | P9f-send-receipts | mapped | the stored and framed rule; control P9f-S2 |
 | tests/parent-outbox.test.ts | truncation preserves Unicode boundaries through accepted send framing | P9f-send-receipts | mapped | an emoji straddling the cut is dropped whole; control P9f-S1 |
@@ -106,7 +106,8 @@ failing pass inside one delivery has no entry point and that declaration is reta
 | tests/parent-outbox.test.ts | trimming keeps every unobserved entry and the newest observed ones | P9f-send-reconcile | mapped | 202 seeded observed entries; controls P9f-S12, P9f-S14 |
 | tests/parent-outbox.test.ts | an invalid file is refused, naming the path | P9f-send-receipts | mapped | status().sendsError and the refused send name the file |
 | tests/parent-outbox.test.ts | frameBatch round-trips through sendIdsInText; relays carry send_id in details | P9f-send-batch | mapped | the framed markers, and observe() marks only a cp-bridge message's own send_id; control P9f-S21 |
-| tests/parent-outbox.test.ts | reserveOuterRetry: landed-only, capped, independent of injections, survives reload and settle | P9f-send-ladder | mapped | five reservations then a terminal failure, per-send counters, attempts separate; the invalid-limit guard is unreachable (constant caller); control P9f-S15 |
+| tests/parent-outbox.test.ts | reserveOuterRetry: landed-only, capped, independent of injections, survives reload and settle | P9f-send-ladder | mapped | split: five reservations then a terminal failure, per-send counters, attempts separate; control P9f-S15 |
+| tests/parent-outbox.test.ts | reserveOuterRetry: landed-only, capped, independent of injections, survives reload and settle | — | retained | split: the invalid-limit refusal is kept verbatim in tests/parent-outbox-retained.test.ts; its only caller passes the MAX_OUTER_RETRIES constant |
 | tests/parent-outbox.test.ts | a record without outer_retry_attempts reads as zero; a negative or fractional one is refused | P9f-send-ladder | mapped | the field absent until a first retry, then 1; -1 and 0.5 refused at start in P9f-send-receipts |
 | tests/parent-outbox.test.ts | reserveOuterRetry returns no ordinal when nothing was persisted | — | retained | kept verbatim in tests/parent-outbox-retained.test.ts; a state change between the read and the write needs an interleave no entry point injects |
 | tests/parent-outbox.test.ts | pending_notice_at round-trips the schema; markPendingNotice writes once and never on a terminal send | P9f-send-reconcile | mapped | two sweeps, one notice, stamped on disk; control P9f-S16 |
@@ -129,10 +130,12 @@ failing pass inside one delivery has no entry point and that declaration is reta
 | tests/intake.test.ts | the third blocked planner round escalates instead of asking the parent | P9f-intake-policy | mapped | an es- id and do-not-answer in the wake; control P9f-I6 |
 | tests/intake.test.ts | an envelope that contradicts the dispatch record is refused, then fails the job when it is repeated | S27-intake-invalid | mapped | cp-conflict is quarantined, then fails envelope_invalid on repeat |
 | tests/intake.test.ts | an exhausted worker (envelope-rejected.json) is an envelope_invalid failure | 04-4 | mapped | a real worker's rejection file fails the job envelope_invalid and the job stays failed |
-| tests/intake.test.ts | nothing on disk yet is not an error | P9f-intake-policy | mapped | cp-quiet stays waiting and unstamped; the parent only intakes fleet records, so the unknown-id refusal has no caller |
+| tests/intake.test.ts | nothing on disk yet is not an error | P9f-intake-policy | mapped | split: cp-quiet stays waiting and unstamped |
+| tests/intake.test.ts | nothing on disk yet is not an error | — | retained | split: the unknown-id refusal is kept verbatim in tests/intake-retained.test.ts; the parent only intakes jobs it holds a fleet record for |
 | tests/intake.test.ts | intake fires from the worker's own event stream | P9e-settle | mapped | a real worker's report_result is stamped by the settle watcher |
 | tests/parent-delivery.test.ts | every parent injection is one prompt with streamingBehavior steer, busy or idle | P9f-delivery-span | mapped | a send made mid-turn steers into the open span; control P9f-D1 |
-| tests/parent-delivery.test.ts | segmentEnd settles each landed send at its own clean turn_end: own reply, counted once, never relayed again | P9f-send-batch | mapped | own reply per span and one relay per pending send; the settled-mark skip is shadowed (P9f-D13, reported) |
+| tests/parent-delivery.test.ts | segmentEnd settles each landed send at its own clean turn_end: own reply, counted once, never relayed again | P9f-send-batch | mapped | split: own reply per span and one relay per pending send; the settled-mark skip is shadowed (P9f-D13, reported) |
+| tests/parent-delivery.test.ts | segmentEnd settles each landed send at its own clean turn_end: own reply, counted once, never relayed again | — | retained | split: the declaration is kept verbatim in tests/parent-delivery-retained.test.ts for wakeSpans' text between two segments; pi lands a queued steer at the next turn, so no parent text falls between |
 | tests/parent-delivery.test.ts | a send answered only by tool calls is not settled empty by a later send's answer | P9f-delivery-span | mapped | C's reply is D's finished answer, D points at C; control P9f-D2 |
 | tests/parent-delivery.test.ts | an interleaved send's reply keeps its own commentary and shares the next finished answer | P9f-delivery-span | mapped | A's reply is its commentary plus the answer, B points at A; control P9f-D2 |
 | tests/parent-delivery.test.ts | unload-parent PR3: 12 sends absorbed into one span get one full reply and 11 pointers, each settled once | P9f-send-batch | mapped | sends absorbed into one span: one full reply, pointers for the rest, each relayed once |
@@ -182,6 +185,8 @@ failing pass inside one delivery has no entry point and that declaration is reta
 | P9f-R13 | tests/operator-delivery.test.ts | P9f-relay-recheck | a handled wake skips to the next escalation id instead of retiring | `one coalesced message, oldest first, the stale wake last` |
 | P9f-R14 | tests/operator-delivery.test.ts | P9f-relay-recheck | an unreadable escalation store retires the wake as answered | `a new owner over the same files hands over only the new relays` |
 | P9f-R15 | tests/operator-delivery.test.ts | P9f-relay-recheck | the stale age is applied to every relay kind, not only wakes | `one coalesced message, oldest first, the stale wake last` |
+| P9f-R16 | tests/operator-delivery.test.ts | P9f-relay-recheck | an unparseable queued_at reads as the epoch, so BADQUEUED is retired | `one coalesced message, oldest first, the stale wake last` |
+| P9f-R17 | tests/operator-delivery.test.ts | P9f-relay-recheck | handledWake retires the wake when the fleet or store read throws | `the wake delivered over a corrupt fleet.json` (times out) |
 | P9f-T1 | tests/operator-delivery.test.ts | P9f-relay-turn | the running-turn guard is removed | `nothing is handed over while the operator's turn runs` |
 | P9f-T2 | tests/operator-delivery.test.ts | P9f-relay-turn | the quiet flag is dropped from informational-only messages | `a message of informational relays only starts no turn` |
 | P9f-T3 | tests/operator-delivery.test.ts | P9f-relay-turn | the coalesce cap is raised by 100 | `a send outcome stays alone; coalescing is capped and the remainder goes on the next pass` |
@@ -209,6 +214,9 @@ failing pass inside one delivery has no entry point and that declaration is reta
 | P9f-S19 | tests/parent-outbox.test.ts | P9f-send-reconcile | a landed send never ages out | the silent send's `no reply within 24 h of landing` |
 | P9f-S20 | tests/parent-outbox.test.ts | S26-dashboard-refusals | the restart read keeps unknown fields | the refusal never names `cp_parent send <id> pending` |
 | P9f-S21 | tests/parent-outbox.test.ts | P9f-send-batch | sendIdOfMessage reads any custom message type | `a foreign message observes nothing` |
+| P9f-S22 | tests/parent-outbox.test.ts | S26-dashboard-refusals | the restart read drops an entry the closed schema refuses | `reply.ok` is false in refused() (the restart proceeds) |
+| P9f-C1 | tests/dashboard-control.test.ts | S26-dashboard-refusals | a non-boolean `enabled` reads as on | `reply.ok` is false in refused() (the restart proceeds) |
+| P9f-C2 | tests/dashboard-control.test.ts | S26-dashboard-refusals | a JSON array passes the object check | `reply.ok` is false in refused() (the restart proceeds) |
 | P9f-I1 | tests/intake.test.ts | P9f-intake-policy | every delivery but local holds | `only pr holds; an answer needs no PR` |
 | P9f-I2 | tests/intake.test.ts | P9f-intake-policy | the ci receipt drops the head sha | `silence about CI is accepted; the parent verifies the pushed head itself` |
 | P9f-I3 | tests/intake.test.ts | P9f-intake-policy | no artifact receipt is stored | the cp-question artifact receipt's `stored` status |
@@ -243,9 +251,10 @@ failing pass inside one delivery has no entry point and that declaration is reta
 | tests/e2e/operator-relay-p9f.test.ts | cp-e2e-migration-p9f-4ylo | P9f-relay-recheck, P9f-relay-turn through a real cp-bridge |
 | tests/operator-delivery-retained.test.ts | cp-e2e-migration-p9f-4ylo | eight verbatim declarations: reclaim, emit_failed and the answered backstop recheck no real pi reaches |
 | tests/e2e/parent-send-p9f.test.ts | cp-e2e-migration-p9f-4ylo | P9f-send-receipts, -batch, -reconcile, -ladder through CpBridge and a real parent host |
-| tests/parent-outbox-retained.test.ts | cp-e2e-migration-p9f-4ylo | two verbatim declarations: a refused RPC write's rollback and the reserveOuterRetry read/write race |
+| tests/parent-outbox-retained.test.ts | cp-e2e-migration-p9f-4ylo | two verbatim declarations (a refused RPC write's rollback, the reserveOuterRetry read/write race) and the verbatim invalid-limit assertion |
+| tests/intake-retained.test.ts | cp-e2e-migration-p9f-4ylo | one verbatim declaration: the unknown-id refusal no parent entry point reaches |
 | tests/e2e/intake-p9f.test.ts | cp-e2e-migration-p9f-4ylo | P9f-intake-policy, P9f-intake-board through the real parent's startup intake |
 | tests/board-publish-retained.test.ts | cp-e2e-migration-p9f-4ylo | two verbatim declarations: symlink swaps during board publication |
 | tests/e2e/parent-delivery-p9f.test.ts | cp-e2e-migration-p9f-4ylo | P9f-delivery-* through a real CpBridge and parent pi |
-| tests/parent-delivery-retained.test.ts | cp-e2e-migration-p9f-4ylo | ten verbatim declarations: interleaves with no entry point |
+| tests/parent-delivery-retained.test.ts | cp-e2e-migration-p9f-4ylo | eleven verbatim declarations: interleaves with no entry point |
 <!-- /manifest:incoming -->

@@ -1,13 +1,13 @@
 /**
- * Parent send outbox, retained: a refused RPC prompt write (rollback) and a state change between reserveOuterRetry's
- * read and its write need a fault no harness entry point injects. The rest is tests/e2e/parent-send-p9f.test.ts.
+ * Parent send outbox, retained (no entry point): a refused RPC write's rollback, a race inside reserveOuterRetry, and
+ * an invalid limit (its one caller passes a constant). The rest is tests/e2e/parent-send-p9f.test.ts.
  */
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parentSendFile, ParentSendOutbox } from "../src/parent-outbox.ts";
+import { parentSendFile, ParentSendOutbox, ParentSendOutboxError } from "../src/parent-outbox.ts";
 
 function outbox(options: { now?: () => Date; owner?: string } = {}): ParentSendOutbox {
 	const dir = mkdtempSync(join(tmpdir(), "parent-outbox-"));
@@ -39,4 +39,13 @@ test("reserveOuterRetry returns no ordinal when nothing was persisted", () => {
 	box.get = () => ({ ...entry, state: "landed" });
 	assert.equal(box.reserveOuterRetry(entry.id, 5), undefined);
 	assert.equal(readFileSync(box.file, "utf8"), before);
+});
+
+test("reserveOuterRetry refuses a limit that is not a positive integer", () => {
+	const box = outbox();
+	const b = box.enqueue("b");
+	box.markInjected([b.id]);
+	box.markLanded([b.id]);
+	const reloaded = new ParentSendOutbox({ file: box.file });
+	for (const limit of [0, -1, 1.5, Number.NaN]) assert.throws(() => reloaded.reserveOuterRetry(b.id, limit), ParentSendOutboxError);
 });

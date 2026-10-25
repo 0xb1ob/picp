@@ -1,13 +1,13 @@
 /**
- * Parent delivery, retained: interleaves inside one RPC read or ladder sleep, pi refusing a prompt write, and stop
- * reasons no consumer tells apart have no entry point. The rest is tests/e2e/parent-delivery-p9f.test.ts.
+ * Parent delivery, retained: interleaves inside one RPC read or ladder sleep, a wake landing between two steered sends,
+ * pi refusing a prompt write, and stop reasons no consumer tells apart. The rest is tests/e2e/parent-delivery-p9f.
  */
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { cleanSegmentEnd } from "../src/bridge-segments.ts";
+import { cleanSegmentEnd, wakeSpans } from "../src/bridge-segments.ts";
 import type { BridgeRelay } from "../src/cp-bridge.ts";
 import { type LandedTurn, ParentDelivery } from "../src/parent-delivery.ts";
 import { frameBatch, parentSendFile, ParentSendOutbox, sendIdsInText } from "../src/parent-outbox.ts";
@@ -296,4 +296,45 @@ test("a wake nudge that cannot be sent gives the error relay back to the caller"
 	ctx.sleeps[0]?.release();
 	await flush();
 	assert.deepEqual(gaveUp, ["relay"]);
+});
+
+test("segmentEnd settles each landed send at its own clean turn_end: own reply, counted once, never relayed again", async () => {
+	const ctx = scripted();
+	const a = ctx.delivery.send("A", 60_000);
+	const b = ctx.delivery.send("B", 60_000);
+	await flush();
+	const turn = ctx.turn();
+	const say = (text: string) => {
+		turn.texts.push(text);
+		turn.assistantCount += 1;
+	};
+	ctx.delivery.landed(ctx.sent[0] as string, turn);
+	say("answer A");
+	ctx.delivery.segmentEnd(turn);
+	const first = await a;
+	assert.equal(first.level, "owner_observed");
+	assert.equal(first.reply, "answer A", "the first waiter gets only its own segment");
+	assert.deepEqual(ctx.counted, [false]);
+	say("parent's own wake text");
+	ctx.delivery.landed(ctx.sent[1] as string, turn);
+	say("answer B");
+	assert.deepEqual(wakeSpans(turn, 0), ["parent's own wake text"], "text between segments belongs to no send");
+	ctx.delivery.settle(turn);
+	assert.equal((await b).reply, "answer B");
+	assert.deepEqual(ctx.counted, [false, false], "countTurn exactly once per send");
+	assert.equal(ctx.box.get(first.send_id as string)?.reply, "answer A");
+
+	// A drained send has no waiter: its relay goes out at the segment end, and not again at the settle.
+	const drained = ctx.box.enqueue("C");
+	ctx.delivery.afterSettle();
+	await flush();
+	const next = ctx.turn();
+	ctx.delivery.landed(ctx.sent[2] as string, next);
+	next.texts.push("answer C");
+	next.assistantCount += 1;
+	ctx.delivery.segmentEnd(next);
+	ctx.delivery.segmentEnd(next);
+	ctx.delivery.settle(next);
+	assert.deepEqual(ctx.relays.map((relay) => [relay.sendId, relay.text]), [[drained.id, "answer C"]]);
+	assert.deepEqual(ctx.counted, [false, false, false]);
 });

@@ -114,6 +114,11 @@ test("P9f-relay-recheck: a seeded outbox is rechecked at delivery, retired with 
 		old: outbox(at(-2 * 3_600)).enqueue(relay({ jobId: "cp-old", text: "P9F-OLD first line\nsecond line with an instruction" }), "h"),
 	};
 	acks.append([{ type: "emit", id: ids.foreign, owner: "4242.deadbeef", session: "/sessions/old.jsonl", at: queued }]);
+	// k2: a queued_at the schema pattern admits but Date.parse rejects; the same wake with a real stamp is retired.
+	const badQueued = box.enqueue(relay({ jobId: "cp-oc0m", jobIds: ["cp-oc0m"], text: `P9F-BADQUEUED ${incident.id} requests approval` }), "h");
+	const onDisk = JSON.parse(readFileSync(box.file, "utf8")) as { entries: Array<{ id: string; queued_at: string }> };
+	onDisk.entries.find((entry) => entry.id === badQueued)!.queued_at = "2030-13-45T99:99:99Z";
+	writeFileSync(box.file, JSON.stringify(onDisk));
 
 	const first = operator(home.path, model, agent.env);
 	rpcs.push(first);
@@ -122,8 +127,8 @@ test("P9f-relay-recheck: a seeded outbox is rechecked at delivery, retired with 
 	const messages = delivered(first.records());
 	assert.deepEqual(messages[0]?.details, { relay_ids: [ids.send], send_id: "ps-20300101000000-abcdef02" }, "a send outcome goes alone with its send_id");
 	const batch = messages[1]!;
-	assert.deepEqual(batch.details.relay_ids, [ids.foreign, ...ids.wakes, ids.old], "one coalesced message, oldest first, the stale wake last");
-	const full = ["FOREIGN", "OPEN", "EARLY", "UNKNOWN", "FAILED", "PROSE", "HELD", "GONE", "SECOND", "WITHDRAWN", "MIXED", "ERROR", "CANCELLED"];
+	assert.deepEqual(batch.details.relay_ids, [ids.foreign, ...ids.wakes, badQueued, ids.old], "one coalesced message, oldest first, the stale wake last");
+	const full = ["FOREIGN", "OPEN", "EARLY", "UNKNOWN", "FAILED", "PROSE", "HELD", "GONE", "SECOND", "WITHDRAWN", "MIXED", "ERROR", "CANCELLED", "BADQUEUED"];
 	for (const tag of [...full.map((each) => `P9F-${each} `), "cp-live-busy"]) {
 		assert.ok(batch.content.includes(tag), `fail-open and live relays are delivered in full: ${tag}`);
 	}
@@ -147,6 +152,19 @@ test("P9f-relay-recheck: a seeded outbox is rechecked at delivery, retired with 
 	await waitFor(() => acks.fold(), (now) => [ids.send, ...batch.details.relay_ids, `esc:${overdue.id}`].every((id) => now.acked.has(id)),
 		{ timeoutMs: 10_000, what: "every delivered relay acked at context entry" });
 	await first.close();
+
+	const fleetText = readFileSync(fleet.file, "utf8");
+	writeFileSync(fleet.file, "{");
+	const badFleet = outbox(queued).enqueue(relay({ jobId: "cp-oc0m", jobIds: ["cp-oc0m"], text: `P9F-BADFLEET ${incident.id} requests approval` }), "h");
+	const fleetRun = operator(home.path, model, agent.env);
+	rpcs.push(fleetRun);
+	await waitFor(() => delivered(fleetRun.records()), (found) => found.length >= 1, { timeoutMs: 30_000, what: "the wake delivered over a corrupt fleet.json" });
+	const overBadFleet = delivered(fleetRun.records());
+	assert.deepEqual(overBadFleet.map((m) => m.details.relay_ids), [[badFleet]]);
+	assert.ok(overBadFleet[0]!.content.includes("P9F-BADFLEET "), "a corrupt fleet.json with a readable store delivers the wake in full");
+	await waitFor(() => acks.fold(), (now) => now.acked.has(badFleet), { timeoutMs: 10_000, what: "the fleet-run relay acked" });
+	await fleetRun.close();
+	writeFileSync(fleet.file, fleetText);
 
 	rmSync(drainFile(home.path));
 	writeFileSync(store.file, "{");
