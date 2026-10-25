@@ -382,7 +382,6 @@
 	"tests/worker-host-guard.test.ts": 6,
 	"tests/worker-mcp-retained.test.ts": 16,
 	"tests/worker-merge-guard.test.ts": 1,
-	"tests/worker-packages.test.ts": 351,
 	"tests/worker-reporter.test.ts": 8275,
 	"tests/worker-role-tools.test.ts": 17,
 	"tests/worker-session-policy.test.ts": 115,
