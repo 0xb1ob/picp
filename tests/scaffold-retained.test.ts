@@ -4,16 +4,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { readPackageIdentity } from "../extensions/command-post/index.ts";
 import { LAYOUT } from "../src/contracts.ts";
 import { scaffoldHome } from "../src/scaffold.ts";
 import { createScratchHome } from "./harness/index.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-test("readPackageIdentity fails closed on a missing manifest", () => {
-	assert.throws(() => readPackageIdentity(join(REPO_ROOT, "does-not-exist")), /cannot read/);
-});
 
 test("pi manifest declares the parent extension and not the worker extension", () => {
 	const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {

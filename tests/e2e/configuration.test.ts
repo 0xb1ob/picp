@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
 	appendFileSync,
-	chmodSync,
 	copyFileSync,
 	cpSync,
 	existsSync,
@@ -24,6 +23,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { type DoctorReport, LAYOUT } from "../../src/contracts.ts";
+import { Ledger } from "../../src/ledger.ts";
+import { MandateStore } from "../../src/mandate.ts";
 import { JOB_ID_MIGRATION_MARKER } from "../../src/state-migrations.ts";
 import { createViewer } from "../../src/viewer/server.ts";
 import { resolveStateDir } from "../../src/viewer/sessions.ts";
@@ -34,6 +35,7 @@ import {
 	createScratchRepo,
 	git,
 	MockProvider,
+	type MockToolCall,
 	type PiChild,
 	REPO_ROOT,
 	type RpcRecord,
@@ -106,6 +108,23 @@ async function command(session: PiChild, message: string, answer: (text: string)
 const version = (session: PiChild) => command(session, "/cp-version", (text) => text.startsWith("picp "));
 const doctor = async (session: PiChild) => JSON.parse(await command(session, "/doctor --json", (text) => text.trimStart().startsWith("{"))) as DoctorReport;
 const finding = (report: DoctorReport, check: string): Finding | undefined => report.findings.find((f) => f.check === check);
+
+/** `turns` model turns that each call cp_next once (the first also calls `extra`), then answer "done". */
+const nextTurns = (turns: number, extra: MockToolCall[] = []): ScriptStep[] =>
+	Array.from({ length: turns }, (_, i): ScriptStep[] => [
+		{ kind: "tool_calls", calls: [{ id: `n${i}`, name: "cp_next", args: {} }, ...(i === 0 ? extra : [])] },
+		{ kind: "text", text: "done" },
+	]).flat();
+
+/** Prompt the next scripted turn and return what its cp_next call answered. */
+async function askNext(session: PiChild): Promise<string> {
+	const from = session.records().length;
+	await session.prompt("what next?");
+	const isNext = (r: RpcRecord) => r.type === "tool_execution_end" && r.toolName === "cp_next";
+	const end = await session.waitFor((r) => session.records().indexOf(r) >= from && isNext(r), 120_000);
+	await session.waitFor((r) => session.records().indexOf(r) >= from && r.type === "agent_end", 120_000);
+	return JSON.stringify(end.result);
+}
 
 /** One parent's whole life: start, /cp-version (startup notices precede it), then close. */
 async function launch(r: Rig, cwd: string, env: NodeJS.ProcessEnv, ext = r.ext): Promise<{ version: string; notes: string[] }> {
@@ -204,6 +223,14 @@ test("P16-scaffold: a first session scaffolds a fresh home once, an operator's o
 	assert.match(bare.notes.find((text) => text.startsWith("command post home")) ?? "", /· routing\.default: skipped — no shipped default at /);
 	assert.equal(existsSync(join(root, "bare", LAYOUT.routingFile)), false);
 	assert.ok(existsSync(join(root, "bare", LAYOUT.jobsFile)), "a skipped default fails nothing else");
+
+	// A package with no manifest fails closed: /cp-version names the file instead of printing an identity.
+	rmSync(join(app, "package.json"));
+	const unnamed = open(r, root, { CP_HOME: join(root, "bare") });
+	unnamed.send({ id: "unnamed", type: "prompt", message: "/cp-version" });
+	const refused = await unnamed.waitFor((record) => JSON.stringify(record).includes("cannot read"), 120_000);
+	assert.match(JSON.stringify(refused), new RegExp(`pi-command-post: cannot read ${join(app, "package.json")}: ENOENT`));
+	assert.ok(!notes(unnamed).some((text) => text.startsWith("picp ")), "no identity is invented");
 });
 
 // P16-mode: mode.test.ts through /cp-version: every source of the mode, every refusal, nothing scaffolded on refusal.
@@ -276,6 +303,13 @@ test("P16-mode: CP_MODE, settings.json, the launch directory and CP_HOME resolve
 	const managed = await launch(r, join(root, "launch"), { HOME: root }, join(installed, "extensions/command-post/index.ts"));
 	assert.match(managed.version, new RegExp(`home ${standard} \\(source: managed; .*resets its clone on update`));
 	assert.equal(existsSync(join(installed, ".pi-command-post")), false);
+	for (const where of [".pi/agent/npm/pkg", "proj/.pi/git/github.com/user/pkg", "proj/.pi/npm/pkg", "lib/node_modules/pkg"]) {
+		const copy = join(root, where);
+		cpSync(installed, copy, { recursive: true });
+		const other = await launch(r, join(root, "launch"), { HOME: root }, join(copy, "extensions/command-post/index.ts"));
+		assert.match(other.version, new RegExp(`home ${standard} \\(source: managed;`), where);
+		assert.equal(existsSync(join(copy, ".pi-command-post")), false, where);
+	}
 	// The source checkout is its own home, even holding state/ and an exclude line like a former single home.
 	mkdirSync(join(app, ".pi-command-post", "state"), { recursive: true });
 	appendFileSync(join(app, ".git", "info", "exclude"), "\n.pi-command-post/\n");
@@ -323,6 +357,14 @@ test("P16-migration: a session sweeps br_id to job_id once, leaves malformed and
 	assert.ok(!notes(again).some((text) => text.startsWith("state migration")), "behind the marker the sweep is a no-op");
 	assert.equal(read(`${LAYOUT.checkpoints}/cp-late.json`), JSON.stringify({ br_id: "cp-late" }));
 	assert.match(JSON.stringify(finding(await doctor(again), "state.job_id_migration")), /"warn".*cp-late\.json/);
+	// The marker is read when doctor runs: without it the same files are an unswept home, an error.
+	const stamp = readFileSync(marker(home));
+	rmSync(marker(home));
+	const unswept = finding(await doctor(again), "state.job_id_migration");
+	assert.equal(unswept?.severity, "error", JSON.stringify(unswept));
+	assert.match(unswept?.what ?? "", /file\(s\) still carry "br_id"/);
+	assert.match(unswept?.fix ?? "", /start a pi session/);
+	writeFileSync(marker(home), stamp);
 	rmSync(join(home, LAYOUT.checkpoints, "cp-late.json"));
 	rmSync(join(home, LAYOUT.runs, "cp-x"), { recursive: true });
 	assert.equal(finding(await doctor(again), "state.job_id_migration")?.severity, "ok", "a swept home is ok");
@@ -362,10 +404,10 @@ test("P16-user-context: USER.md beside the package's AGENTS.md reaches the model
 
 	writeFileSync(user, "  \n\t\n");
 	assert.ok(!(await ask()).bodies[0]?.includes(header), "a whitespace-only USER.md is absent");
-	writeFileSync(user, "secret prefs\n");
-	chmodSync(user, 0o000);
+	rmSync(user);
+	mkdirSync(user); // EISDIR on read, for root too (chmod 000 is a no-op for root)
 	const unreadable = await ask();
-	chmodSync(user, 0o644);
+	rmSync(user, { recursive: true });
 	assert.ok(!unreadable.bodies[0]?.includes(header), "an unreadable USER.md is absent");
 	assert.ok(!unreadable.notes.some((text) => /USER\.md/.test(text)), "and not an error the session hears about");
 
@@ -400,43 +442,73 @@ test("P16-doctor-home: doctor and cp_next warn about a clean checkout home behin
 	git(app, "fetch", "--quiet", "origin");
 	const remote = git(app, "rev-parse", "origin/main");
 	const behind = "home is 2 commits behind origin/main";
-	const calls = [{ id: "n1", name: "cp_next", args: {} }, { id: "c1", name: "cp_check", args: { job_id: "cp-none", project: "  " } }];
-	const next = [{ kind: "tool_calls", calls }, { kind: "text", text: "done" }] satisfies ScriptStep[];
-	const parent = open(r, join(app, "src"), elsewhere, next);
+	const blank: MockToolCall = { id: "c1", name: "cp_check", args: { job_id: "cp-none", project: "  " } };
+	const parent = open(r, join(app, "src"), elsewhere, nextTurns(12, [blank]));
 	const lag = finding(await doctor(parent), "home.checkout");
 	assert.equal(lag?.severity, "warn");
 	assert.equal(lag?.what, behind);
 	assert.match(lag?.fix ?? "", /^git merge --ff-only origin\/main, then restart the parent at a quiet point$/);
-	await parent.prompt("what next?");
-	const end = await parent.waitFor((record) => record.type === "tool_execution_end" && record.toolName === "cp_next", 120_000);
-	assert.match(JSON.stringify(end.result), new RegExp(`${behind}: git merge --ff-only origin/main.*no active mandate`), "a warning, never a new recommendation");
+	assert.match(await askNext(parent), new RegExp(`${behind}: git merge --ff-only origin/main, then restart the parent at a quiet point.*no active mandate`), "a warning, never a new recommendation");
 	const check = await parent.waitFor((record) => record.type === "tool_execution_end" && record.toolName === "cp_check", 120_000);
 	assert.match(JSON.stringify(check.result), /cp_check needs `project` \(a registered project name\)/, "a blank project is refused");
 	assert.equal(git(app, "rev-parse", "HEAD"), original, "no auto-merge");
 	assert.equal(git(app, "rev-parse", "origin/main"), remote, "no fetch, no push");
 	assert.equal(git(app, "status", "--porcelain"), "");
+
+	// Under an active mandate the warning rides along; the recommendation is still the ready job's dispatch.
+	const job = await new Ledger({ home: app, actor: "cp-test", knownProjects: ["demo"] }).create({ title: "next task", project: "demo", delivery: "pr", kind: "ship" });
+	new MandateStore(app).issue({ projects: ["demo"], objective: "ship next task", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 1 });
+	const active = await askNext(parent);
+	assert.match(active, new RegExp(`${behind}: git merge --ff-only origin/main`));
+	assert.match(active, new RegExp(`action: dispatch ${job.id} `));
 	mkdirSync(join(app, LAYOUT.data), { recursive: true });
 	writeFileSync(join(app, LAYOUT.data, "update.json"), JSON.stringify({ enabled: true, interval_min: 15 }));
 	assert.match(finding(await doctor(parent), "home.checkout")?.fix ?? "", /^auto-update is on \(data\/update\.json\): cp-update\.timer applies it once the fleet is idle.*by hand: git merge/);
+	assert.equal(git(app, "status", "--porcelain"), "", "the config lives in the ignored runtime root");
+
+	/** Neither /doctor nor cp_next gives lag advice in this state; `unavailable` is the missing-main warning. */
+	const silent = async (state: string, unavailable = false) => {
+		const unknown = "home checkout comparison with origin/main unavailable";
+		const shown = finding(await doctor(parent), "home.checkout");
+		assert.deepEqual([shown?.severity, shown?.what], unavailable ? ["warn", unknown] : [undefined, undefined], state);
+		const said = await askNext(parent);
+		assert.doesNotMatch(said, /commits behind/, `cp_next, ${state}`);
+		assert.equal(said.includes(unknown), unavailable, `cp_next, ${state}`);
+	};
 	writeFileSync(join(app, "stray.txt"), "mine\n");
-	const dirty = await doctor(parent);
-	assert.equal(finding(dirty, "home.checkout"), undefined, "a dirty checkout gets no lag advice");
-	assert.match(JSON.stringify(finding(dirty, "storage.home")), /"warn".*outside the runtime root \.pi-command-post\/.*stray\.txt/, "a checkout home lists what git leaves untracked");
+	await silent("untracked");
+	assert.match(JSON.stringify(finding(await doctor(parent), "storage.home")), /"warn".*outside the runtime root \.pi-command-post\/.*stray\.txt/, "a checkout home lists what git leaves untracked");
 	rmSync(join(app, "stray.txt"));
-	git(app, "merge", "--ff-only", "--quiet", "origin/main");
-	assert.equal(finding(await doctor(parent), "home.checkout"), undefined, "a current checkout gets no lag advice");
-	const silent = async (state: string) => assert.doesNotMatch(JSON.stringify(finding(await doctor(parent), "home.checkout") ?? {}), /behind/, state);
-	advanceBase(base, "three.txt", "three\n");
-	await silent("unfetched");
+	const readme = readFileSync(join(app, "README.md"), "utf8");
+	writeFileSync(join(app, "README.md"), `${readme}local edit\n`);
+	await silent("modified");
+	writeFileSync(join(app, "README.md"), readme);
 	writeFileSync(join(app, "staged.txt"), "staged\n");
 	git(app, "add", "staged.txt");
 	await silent("staged");
-	git(app, "commit", "-q", "-m", "local");
-	await silent("ahead");
+	git(app, "rm", "-q", "--cached", "staged.txt");
+	rmSync(join(app, "staged.txt"));
+	const index = readFileSync(join(app, ".git", "index"));
+	writeFileSync(join(app, ".git", "index"), "not an index");
+	const broken = await doctor(parent);
+	assert.match(JSON.stringify(finding(broken, "storage.home")), /"warn".*untracked files in the home could not be listed.*git ls-files exited/);
+	writeFileSync(join(app, ".git", "index"), index);
+	assert.equal(finding(await doctor(parent), "home.checkout")?.what, behind, "the restored checkout is behind again");
+
+	git(app, "merge", "--ff-only", "--quiet", "origin/main");
+	await silent("current");
+	advanceBase(base, "three.txt", "three\n");
+	await silent("unfetched");
 	git(app, "fetch", "--quiet", "origin");
+	assert.equal(finding(await doctor(parent), "home.checkout")?.what, "home is 1 commits behind origin/main");
+	writeFileSync(join(app, "local.txt"), "local\n");
+	git(app, "add", "local.txt");
+	git(app, "commit", "-q", "-m", "local change");
 	await silent("diverged");
+	git(app, "merge", "-q", "--no-edit", "origin/main");
+	await silent("ahead");
 	git(app, "update-ref", "-d", "refs/remotes/origin/main");
-	await silent("missing-main");
+	await silent("missing-main", true);
 	await parent.close();
 
 	const home = join(root, "home");
@@ -446,17 +518,20 @@ test("P16-doctor-home: doctor and cp_next warn about a clean checkout home behin
 	assert.deepEqual(clean.findings.filter((f) => f.check.startsWith("storage")).map((f) => [f.check, f.severity, f.what]), [
 		["storage", "ok", "home-local files are under the runtime root, .pi-command-post/ (docs/storage.md)"],
 	]);
-	const leftover = `${home}/state`; // the pre-runtime-root layout, on purpose
+	const leftover = join(home, "state");
 	mkdirSync(leftover);
 	mkdirSync(join(home, ".other-tool"));
 	writeFileSync(join(home, LAYOUT.state, "notes.md"), "mine\n");
-	writeFileSync(join(home, LAYOUT.state, "record.json"), "{}\n");
+	for (const kept of ["record.json", "drain.json", "events.jsonl", "parent.lock", "parent.sock", "parent.log", "write.tmp"]) {
+		writeFileSync(join(home, LAYOUT.state, kept), "{}\n");
+	}
+	mkdirSync(join(home, LAYOUT.runs, "cp-z"), { recursive: true });
 	writeFileSync(join(home, LAYOUT.data, "operator.json"), "{ nope");
 	const stray = await doctor(separate);
 	const of = (check: string) => JSON.stringify(stray.findings.filter((f) => f.check === check));
 	assert.match(of("storage.home"), /"warn".*2 home entries outside the runtime root.*\.other-tool.*state/);
 	assert.match(of("storage.state"), /1 non-record file\(s\) at the top of \.pi-command-post\/state\/.*notes\.md.*\.pi-command-post\/operator/);
-	assert.doesNotMatch(of("storage.state"), /record\.json/);
+	assert.doesNotMatch(of("storage.state"), /record\.json|drain|events|parent\.|write\.tmp|runs/);
 	assert.match(of("storage.handoffs_dir"), /operator\.json is not valid JSON/);
 	assert.ok(existsSync(join(home, ".other-tool")) && existsSync(leftover), "doctor moves and deletes nothing");
 	writeFileSync(join(home, LAYOUT.data, "operator.json"), JSON.stringify({ handoffs_dir: join(root, "outside") }));
@@ -467,7 +542,16 @@ test("P16-doctor-home: doctor and cp_next warn about a clean checkout home behin
 
 	const nested = join(home, ".pi-command-post");
 	const alias = open(r, root, { CP_HOME: nested });
-	assert.match(JSON.stringify(finding(await doctor(alias), "storage.alias")), new RegExp(`another home's runtime root; use ${home} as the home`));
+	const aliased = async () => JSON.stringify(finding(await doctor(alias), "storage.alias") ?? {});
+	assert.match(await aliased(), new RegExp(`another home's runtime root; use ${home} as the home.*\\(\\.gitignore lists`));
+	const ignore = readFileSync(join(home, ".gitignore"), "utf8");
+	writeFileSync(join(home, ".gitignore"), "");
+	assert.equal(await aliased(), "{}", "no evidence, no alias");
+	mkdirSync(join(home, ".git", "info"), { recursive: true });
+	writeFileSync(join(home, ".git", "info", "exclude"), "/.pi-command-post\n");
+	assert.match(await aliased(), new RegExp(`use ${home} as the home.*\\(\\.git/info/exclude lists`));
+	rmSync(join(home, ".git"), { recursive: true });
+	writeFileSync(join(home, ".gitignore"), ignore);
 	await alias.close();
 	// The flat standard home with app/ and settings.json: doctor's scaffold and storage checks pass; the viewer reads it.
 	const standard = join(root, ".pi-command-post");
