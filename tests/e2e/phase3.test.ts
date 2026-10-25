@@ -49,6 +49,7 @@ import {
 	treehouseAvailable,
 	waitFor,
 } from "../harness/index.ts";
+import { recordGateSpend, recordSpend } from "../harness/live.ts";
 
 const SKIP = treehouseAvailable() ? false : "m3 needs treehouse on PATH";
 
@@ -484,6 +485,11 @@ test("m3: research → gate (revise, then pass) → checkpoint → implement", {
 	assert.equal(passVerdict.verdict, "pass");
 	assert.equal(passVerdict.cause, null);
 	assert.equal(passVerdict.attempt, 2);
+	// P8c (behavior 04): each reviewer's spend is its own run's, never the planner's it reviewed; the live suite's
+	// accountant reads exactly that, and an attempt that spawned no reviewer costs nothing.
+	const gateSpend = (attempt: number) => recordGateSpend("m3", f.home, researchId, attempt).tokens;
+	assert.deepEqual([1, 2, 3].map(gateSpend), [950, 950, 0], "one verdict call per reviewer; attempt 3 never ran");
+	assert.equal(recordSpend("m3", f.home, researchId).tokens, 3_100, "the planner's own calls only, no reviewer tokens");
 	assert.equal(pass.state, "implementing");
 	assert.deepEqual(f.asked, [shipId], "the human was asked exactly once");
 
@@ -709,6 +715,12 @@ test("m3: a reviewer's own escalate with a flag stays policy — never authoriza
 	assert.equal(escalatedVerdict.cause, "policy", "the reviewer's own escalate is a disputed plan, not a flagged-but-sound one");
 	assert.equal(escalated.next, "surface");
 	assert.equal(f.post.checkpoints.get(shipId), undefined, "a policy escalate never reaches a human authorization");
+	// The gate files the escalation itself (P10d): one conflicting_acceptance record, and another advance files no second.
+	const raised = f.post.escalations.list({ jobId: researchId });
+	assert.deepEqual(raised.map((item) => [item.kind, item.status, item.recommended]), [["conflicting_acceptance", "open", "replan"]]);
+	assert.match(raised[0]!.question, /gate attempt 1: escalate \(policy\)\. the plan itself drops the wrong table/);
+	await f.advanceThrough(researchId);
+	assert.deepEqual(f.post.escalations.list({ jobId: researchId }).map((item) => item.id), [raised[0]!.id]);
 });
 
 test("m3: unparseable → operational → operational_persistent, same model, capped", { skip: SKIP, timeout: 600_000 }, async (t) => {
