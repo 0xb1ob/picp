@@ -1,6 +1,5 @@
 /** Read-only ledger validator: slice files and rules doc vs the git baseline; `test(` counts; exit 1 on findings. */
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
@@ -14,12 +13,11 @@ interface Args {
 	base?: string;
 	manifest: string;
 	runnerLog?: string;
-	verifyRegressions: boolean;
 	preservedFrom?: string;
 }
 
 function parseArgs(argv: readonly string[]): Args {
-	const args: Args = { manifest: "docs/testing-migration.md", verifyRegressions: false };
+	const args: Args = { manifest: "docs/testing-migration.md" };
 	for (let i = 0; i < argv.length; i += 1) {
 		const flag = argv[i];
 		const value = () => {
@@ -30,7 +28,6 @@ function parseArgs(argv: readonly string[]): Args {
 		if (flag === "--base") args.base = value();
 		else if (flag === "--manifest") args.manifest = value();
 		else if (flag === "--runner-log") args.runnerLog = value();
-		else if (flag === "--verify-regressions") args.verifyRegressions = true;
 		else if (flag === "--preserved-from") args.preservedFrom = value();
 		else throw new Error(`unknown argument ${flag}`);
 	}
@@ -61,9 +58,9 @@ function ledgerFiles(manifest: string): string[] {
 }
 
 const PATCH_RE = /<!-- patch:([\w-]+) -->\n```diff\n([\s\S]*?)\n```/g;
-const LEDGER_TABLES = ["prs", "scenarios", "assertions", "regressions", "incoming", "feature-removed", "baseline"];
+const LEDGER_TABLES = ["ledger", "prs", "scenarios", "assertions", "regressions", "incoming", "feature-removed", "baseline"];
 
-/** Rows, patch blocks and every prose/log line of the `before` docs each appear once, byte-identical, in `after`. */
+/** Rows and prose/log lines of the `before` docs each appear once, byte-identical, in `after`; patch blocks may go. */
 export function preservationFindings(before: readonly string[], after: readonly string[]): string[] {
 	const findings: string[] = [];
 	const compare = (label: string, was: string[], now: string[]) => {
@@ -76,8 +73,6 @@ export function preservationFindings(before: readonly string[], after: readonly 
 		const bodies = (doc: string) => (new RegExp(`<!-- manifest:${name} -->\\n([\\s\\S]*?)<!-- /manifest:${name} -->`).exec(doc)?.[1] ?? "").replace(PATCH_RE, "");
 		compare(`${name} rows`, before.flatMap((doc) => tableLines(bodies(doc))), after.flatMap((doc) => tableLines(bodies(doc))));
 	}
-	const patches = (doc: string) => [...doc.matchAll(PATCH_RE)].map((match) => match[0]);
-	compare("patch blocks", before.flatMap(patches), after.flatMap(patches));
 	const prose = (doc: string) => doc.replace(PATCH_RE, "").split("\n").filter((line) => line.trim() && !/^(\||# Ledger rows:|<!-- \/?(manifest|patch):)/.test(line));
 	compare("prose lines", before.flatMap(prose), after.flatMap(prose));
 	return findings;
@@ -123,12 +118,41 @@ export function deletedWithFeatureFindings(path: string, owner: string, evidence
 	return findings;
 }
 
+/**
+ * A negative-control row: `ID | Unit file | Scenario | Control | Failing assertion`, the control being the bug patched
+ * back in words. A legacy 8-cell row (commit, patch, hash, fixed) reads its Patch cell as the control: a patch id
+ * may give way to the control in words, but a row with neither fails.
+ */
+export function regressionFindings(cells: readonly string[], scenarios: { has(id: string): boolean }): { path: string; findings: string[] } {
+	const legacy = cells.length === 8;
+	const [id = "", path = "", scenario = "", control = "", failing = ""] = legacy ? [0, 1, 3, 4, 6].map((i) => cells[i] ?? "") : cells;
+	const findings: string[] = [];
+	if (cells.length !== 5 && !legacy) findings.push(`regression ${id}: ${cells.length} cells, expected ID | Unit file | Scenario | Control | Failing assertion`);
+	if (!scenarios.has(scenario)) findings.push(`regression ${id}: unknown scenario ${scenario}`);
+	if (!control) findings.push(`regression ${id}: needs the control (the bug patched back, in words)`);
+	if (!failing) findings.push(`regression ${id}: needs a failing assertion`);
+	return { path, findings };
+}
+
 /** A `retained` assertion row: its note names the kept test file, other than the unit itself, that still holds it. */
 export function retainedFindings(path: string, assertion: string, note: string, exists: (path: string) => boolean): string[] {
 	if (!note) return [`${path}: "${assertion}" is retained with no note naming where it is kept`];
 	const kept = [...note.matchAll(/\btests\/[\w./-]+\.test\.ts\b/g)].map((match) => match[0]).filter((file) => file !== path);
 	if (kept.some(exists)) return [];
 	return [`${path}: "${assertion}" is retained but its note names no kept test file in the tree (got ${kept.join(", ") || "none"})`];
+}
+
+/** PR ledger rows: only in slice files, one per PR, `PR | Scope | Baseline files deleted` or a legacy 5-cell row. */
+export function ledgerFindings(manifestRows: readonly string[][], sliceRows: readonly string[][]): string[] {
+	const findings = manifestRows.map(([pr = ""]) => `PR ledger ${pr}: belongs in its own slice file, not the shared manifest`);
+	const seen = new Set<string>();
+	for (const cells of [...manifestRows, ...sliceRows]) {
+		const [pr = ""] = cells;
+		if (seen.has(pr)) findings.push(`PR ledger ${pr}: more than one row`);
+		seen.add(pr);
+		if (!pr || (cells.length !== 3 && cells.length !== 5)) findings.push(`PR ledger ${pr}: ${cells.length} cells, expected PR | Scope | Baseline files deleted`);
+	}
+	return findings;
 }
 
 /**
@@ -196,6 +220,7 @@ function main(): number {
 		if (!/^\d\d$/.test(behavior) || !target.startsWith("tests/e2e/")) findings.push(`${pr}: needs a behavior id and a tests/e2e/ target`);
 		prs.set(pr, { behavior, target, cases });
 	}
+	findings.push(...ledgerFindings(rows(section([doc], "ledger", findings)), rows(section(docs.slice(1), "ledger", findings))));
 
 	const disposition = new Map<string, { kind: string; owner: string; evidence: string }>();
 	for (const [path = "", kind = "", owner = "", evidence = ""] of rows(section(docs, "baseline", findings))) {
@@ -244,24 +269,11 @@ function main(): number {
 		} else if (!pinned) findings.push(`${path}: "${assertion}" has unknown disposition "${status}"`);
 	}
 
-	const patches = new Map([...docs.join("\n").matchAll(PATCH_RE)].map((m) => [m[1] as string, `${m[2]}\n`]));
 	const proven = new Set<string>();
-	for (const [id = "", path = "", commit = "", scenario = "", patch = "", sha = "", failing = "", fixed = ""] of rows(section(docs, "regressions", findings))) {
-		if (!scenarios.has(scenario)) findings.push(`regression ${id}: unknown scenario ${scenario}`);
-		if (!failing || fixed !== "pass") findings.push(`regression ${id}: needs a failing assertion and a fixed "pass"`);
-		if (!args.verifyRegressions) {
-			proven.add(path);
-			continue;
-		}
-		const body = patches.get(patch);
-		if (!body) findings.push(`regression ${id}: no patch block ${patch}`);
-		else if (createHash("sha256").update(body).digest("hex") !== sha) findings.push(`regression ${id}: patch ${patch} does not hash to ${sha}`);
-		try {
-			git("cat-file", "-e", `${commit}^{commit}`);
-			proven.add(path);
-		} catch {
-			findings.push(`regression ${id}: bug commit ${commit} is not in this repository`);
-		}
+	for (const cells of rows(section(docs, "regressions", findings))) {
+		const row = regressionFindings(cells, scenarios);
+		findings.push(...row.findings);
+		proven.add(row.path);
 	}
 	for (const [path, entry] of disposition) {
 		if (entry.kind !== "deleted") continue;

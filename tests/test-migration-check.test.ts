@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { declarationTitles, deletedWithFeatureFindings, featureRemovedFindings, retainedFindings } from "../scripts/test-migration-check.ts";
+import {
+	declarationTitles, deletedWithFeatureFindings, featureRemovedFindings, ledgerFindings, regressionFindings, retainedFindings,
+} from "../scripts/test-migration-check.ts";
 
 const exists = (path: string) => path === "src/kept.ts";
 
@@ -22,6 +24,38 @@ test("retained accepts a note naming a kept test file, and rejects no note, the 
 	assert.match(retainedFindings("tests/x.test.ts", "a", "", kept).join("\n"), /retained with no note naming where it is kept/);
 	assert.match(retainedFindings("tests/x.test.ts", "a", "kept in tests/x.test.ts", kept).join("\n"), /names no kept test file in the tree \(got none\)/);
 	assert.match(retainedFindings("tests/x.test.ts", "a", "moved to tests/gone.test.ts", kept).join("\n"), /\(got tests\/gone\.test\.ts\)/);
+});
+
+test("PR ledger rows live only in slice files, once per PR, in the 3-cell shape or a legacy 5-cell row", () => {
+	assert.deepEqual(ledgerFindings([], [["P1", "scope", "0"], ["P0", "scope", "1", "400 → 400", "4,488 → 4,487"]]), []);
+	const findings = ledgerFindings([["P2", "scope", "0"]], [["P2", "scope", "0"], ["P3", "scope"]]).join("\n");
+	assert.match(findings, /PR ledger P2: belongs in its own slice file/);
+	assert.match(findings, /PR ledger P2: more than one row/);
+	assert.match(findings, /PR ledger P3: 2 cells, expected/);
+});
+
+const known = new Set(["S1"]);
+
+test("a negative-control row needs only scenario, control in words and failing assertion; no patch, sha or hash", () => {
+	const lean = regressionFindings(["NC-1", "tests/x.test.ts", "S1", "drop the head guard in src/x.ts", "expected refusal"], known);
+	assert.deepEqual(lean, { path: "tests/x.test.ts", findings: [] });
+	const legacy = ["NC-2", "tests/y.test.ts", "not-a-sha", "S1", "NC-2", "not-a-hash", "expected refusal", ""];
+	assert.deepEqual(regressionFindings(legacy, known), { path: "tests/y.test.ts", findings: [] });
+	const stripped = ["NC-3", "tests/y.test.ts", "", "S1", "drop the head guard in src/y.ts", "", "expected refusal", "pass"];
+	assert.deepEqual(regressionFindings(stripped, known), { path: "tests/y.test.ts", findings: [] });
+});
+
+test("a legacy row with neither a patch id nor the control in words fails", () => {
+	const empty = ["NC-4", "tests/y.test.ts", "", "S1", "", "", "expected refusal", "pass"];
+	assert.match(regressionFindings(empty, known).findings.join("\n"), /regression NC-4: needs the control/);
+});
+
+test("a negative-control row rejects an unknown scenario, no control, no failing assertion and a wrong cell count", () => {
+	const findings = regressionFindings(["NC-1", "tests/x.test.ts", "S9", "", ""], known).findings.join("\n");
+	assert.match(findings, /unknown scenario S9/);
+	assert.match(findings, /needs the control/);
+	assert.match(findings, /needs a failing assertion/);
+	assert.match(regressionFindings(["NC-1", "tests/x.test.ts", "S1", "c"], known).findings.join("\n"), /4 cells, expected/);
 });
 
 const source = (...titles: string[]) => titles.map((title) => `test(${JSON.stringify(title)}, () => {});`).join("\n");
