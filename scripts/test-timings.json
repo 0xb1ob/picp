@@ -279,7 +279,6 @@
 	"tests/structure.test.ts": 210,
 	"tests/suggest.test.ts": 16,
 	"tests/supersede.test.ts": 119,
-	"tests/task-addenda.test.ts": 51,
 	"tests/teardown-retained.test.ts": 5000,
 	"tests/test-concurrency-bound.test.ts": 6798,
 	"tests/test-file-guard.test.ts": 1136,

@@ -76,6 +76,8 @@ test("S04: cp_review gives the reviewer a complete three-dot subject from the ca
 	const diff = readFileSync(join(result.scratch, "diff.md"), "utf8");
 	for (const text of ["a.txt", "b.txt", "ä.ts", "export const a = 1", "## Stat", "## Hunks"]) assert.ok(diff.includes(text), text);
 	assert.doesNotMatch(diff, /base-only\.txt|## Omitted/);
+	assert.equal(existsSync(join(result.scratch, "task-addenda.md")), false, "no addenda, no addenda file");
+	assert.doesNotMatch(readFileSync(join(result.run, "brief.md"), "utf8"), /Authorized task addenda/, "and no brief change");
 });
 
 test("S04: cp_review stops wide, oversized and unparseable subjects before a model sees them", { timeout: 120_000 }, async (t) => {
@@ -141,7 +143,10 @@ test("S04: review packets preserve frozen scope and context while persisted verd
 	assert.ok(manifest.entries.some((e: { path: string; side: string; state: string }) => e.path === "README.md" && e.side === "head" && e.state === "included"));
 	assert.ok(!manifest.entries.some((e: { path: string; side: string }) => e.path === "README.md" && e.side === "fork"));
 	for (const file of [join(result.run, "events.jsonl"), join(s.home, paths.eventsFile(job))]) assert.doesNotMatch(readFileSync(file, "utf8"), /S04_BODY_CANARY|S04_TASK_CANARY/);
-	assert.match(readFileSync(join(result.scratch, "task-addenda.md"), "utf8"), /S04 extra scope 1\./);
+	assert.match(brief, /Addendum 1 \(operator-quote, [\s\S]*not their presence as scope growth/);
+	const addenda = readFileSync(join(result.scratch, "task-addenda.md"), "utf8");
+	assert.match(addenda, /S04 extra scope 1\.[\s\S]*S04 extra scope 2\./, "bodies keep their order in the copy");
+	assert.match(addenda, /Quote: "approved"\nReason: "coverage"/);
 	assert.equal(s.post.manager.get(`${job}#review-1`), undefined);
 });
 
