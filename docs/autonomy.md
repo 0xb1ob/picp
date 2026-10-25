@@ -79,8 +79,8 @@ fails fast and close to the cause.
 |---|---|---|
 | 1 | Missed wake-up: parent restarted between envelope and turn | `tests/e2e/headless-lifecycle.test.ts`, `tests/e2e/wake-context-s22.test.ts` |
 | 2 | Duplicate wake-up is not replayed after confirm | `tests/e2e/silent-stops.test.ts` |
-| 3 | Worker death, recovered once | `tests/e2e/silent-stops.test.ts`, `tests/recovery.test.ts` |
-| 4 | Parent death: bridge relaunches the same session once; undelivered sends delivered once by id, landed ones never replayed | `tests/cp-bridge.test.ts`, `tests/parent-outbox.test.ts`, `tests/revive.test.ts` |
+| 3 | Worker death, recovered once | `tests/e2e/silent-stops.test.ts`, `tests/e2e/worker-lifecycle-p8d.test.ts` |
+| 4 | Parent death: bridge relaunches the same session once; undelivered sends delivered once by id, landed ones never replayed | `tests/cp-bridge.test.ts`, `tests/parent-outbox.test.ts`, `tests/e2e/worker-lifecycle-p8d.test.ts` |
 | 5 | Moved head after review requires re-review | `tests/pipeline.test.ts` ("a moved head is a new subject"), `tests/e2e/wake-context-s22.test.ts`, `tests/e2e/landing-merge.test.ts` (landing S10: review evidence authorizes only the reviewed complete head) |
 | 6 | Revoked mandate mid-mission: in-flight finishes, no new dispatch | `tests/decide.test.ts` ("stale/revoked mandate refuses"), `tests/e2e/authority.test.ts` ("a paused or revoked mandate stops speaking") |
 | 7 | Spend cap hit: pause, refuse new dispatch, escalate once | `tests/e2e/authority.test.ts` ("live usage crosses each cap line once") |
