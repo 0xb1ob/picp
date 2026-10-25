@@ -25,7 +25,7 @@ export async function dispatchS29(t: TestContext, options: { files?: Record<stri
 	writeFileSync(join(home.path, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: [`${MOCK_PROVIDER_ID}/*`], rubric: [] }));
 	let serial = 0;
 	return {
-		home: home.path, clone, ledger: scratch.ledger, provider, agent,
+		home: home.path, clone, ledger: scratch.ledger, provider, agent, parents: children as readonly ReturnType<typeof startPiChild>[],
 		ownPost(post: CommandPost) { posts.push(post); return post; },
 		async closeParents() { for (const child of children) await child.close(); },
 		async run(steps: ScriptStep[], env: NodeJS.ProcessEnv = {}, prompt = "Execute the supplied dispatch checks.") {
