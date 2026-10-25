@@ -147,7 +147,6 @@
 	"tests/forge-runtime-retained.test.ts": 1214,
 	"tests/forge-url.test.ts": 6,
 	"tests/gate-replacement.test.ts": 68,
-	"tests/gate.test.ts": 36569,
 	"tests/gateway-key.test.ts": 4,
 	"tests/guards.test.ts": 678,
 	"tests/harness.test.ts": 6073,

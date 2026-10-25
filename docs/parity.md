@@ -32,7 +32,7 @@ Zero capabilities are unaccounted for: every row below is one of the five.
 | `cmdp lease --project NAME` | deleted (deliberate) | leasing is a step *inside* dispatch; a lease with no worker is an orphan waiting to happen. `LeaseManager` is still a module | `tests/e2e/dispatch-s31.test.ts` |
 | `cmdp jobs add\|set\|reported\|done\|list` | ported | `state/fleet.json` store (add/update), envelope intake (`reported`), teardown (`done`), `/status` (`list`) | `tests/fleet.test.ts`, `tests/e2e/intake-p9f.test.ts`, `tests/e2e/teardown-s17.test.ts`, `tests/status.test.ts` |
 | `cmdp artifact path\|add\|get` | ported | `cp_artifact` → [`src/artifacts.ts`](../src/artifacts.ts); `get` requires an out file (no inline bodies) | `tests/e2e/research-delivery.test.ts` (P11-artifact), `tests/guards.test.ts` |
-| `cmdp gate [--model]` | ported | `cp_gate` → [`src/gate.ts`](../src/gate.ts); verdict is a schema, not a regex over prose | `tests/gate.test.ts`, `tests/e2e/phase3.test.ts` |
+| `cmdp gate [--model]` | ported | `cp_gate` → [`src/gate.ts`](../src/gate.ts); verdict is a schema, not a regex over prose | `tests/e2e/gate-review.test.ts`, `tests/e2e/phase3.test.ts` |
 | `cmdp teardown <job-id> [--research]` | ported (improved) | `cp_teardown`; the kind comes from the fleet record, so the flag cannot disagree with the job | `tests/e2e/teardown-s17.test.ts`, `tests/e2e/teardown-s18.test.ts` |
 | `cmdp status [--json] [--origin]` | ported | `/status` + widget → [`src/status.ts`](../src/status.ts) | `tests/status.test.ts` + goldens |
 | `cmdp status --html --serve --port --pane` | out of scope | HTML dashboard deferred; `fleet.json` + `runs/` are shaped to feed one later | README.md out-of-scope |
@@ -75,7 +75,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | Classify (kind × delivery, do not blur) | ported | AGENTS.md §Classify; labels are the dispatchability contract | `tests/ledger.test.ts` (`requireJobLabels`) |
 | "Evidence is not authorization" | mechanised | the checkpoint: written `pending` before anyone is asked, answerable only by a human channel | `tests/pipeline.test.ts`, `tests/e2e/phase3.test.ts` |
 | Pipeline: two jobs, dep-linked, three roles | ported | `cp_pipeline start` | `tests/pipeline.test.ts` |
-| Gate verdicts + `cause` ladder (policy / operational / operational_persistent) | mechanised | `decideGate` + `nextAction`; one revise max in code | `tests/gate.test.ts` (every branch), `tests/e2e/phase3.test.ts` |
+| Gate verdicts + `cause` ladder (policy / operational / operational_persistent) | mechanised | `decideGate` + `nextAction`; one revise max in code | `tests/e2e/gate-review.test.ts` (every branch), `tests/e2e/phase3.test.ts` |
 | "HARD RULE: workers never mail the findings body" | mechanised | `validateEnvelope`: ≤3 lines, no fences, no headings; a body-shaped summary is rejected in-worker | `tests/e2e/worker-reporter-p8f.test.ts`, `tests/contracts.test.ts` |
 | "Parent never reads artifact bodies" | mechanised | `ContextGuard` blocks `read`/`grep`/`bash`/`edit`/`write`; the ledger holds no bodies | `tests/guards.test.ts`, `tests/e2e/phase3.test.ts` |
 | Hung planner (artifact, no envelope) → gate from the path | ported | `advance()` gates it and reports `hung_planner` | `tests/pipeline.test.ts` |
