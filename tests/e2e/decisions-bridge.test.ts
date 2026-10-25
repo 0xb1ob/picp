@@ -111,6 +111,16 @@ test("decisions: the ask guard nudges a prose question once per run, cards it fo
 			],
 			nudged: true,
 		},
+		// A refused cp_parent ask and a non-cp_parent tool result do not count as an ask: the prose question still nudges.
+		{
+			prompt: "Try asking.",
+			steps: [
+				{ kind: "tool_calls", calls: [{ id: "ask-bad", name: "cp_parent", args: { action: "ask", ask: { project: "demo-app", question: "A or B?" } } }, { id: "shell", name: "bash", args: { command: "echo ok" } }] },
+				text("Should I proceed with A or B?"),
+				text("NO-ASK"),
+			],
+			nudged: true,
+		},
 	];
 	const { pi, provider, script } = await bridge(t, home, turns.flatMap((entry) => entry.steps));
 	const requests = () => provider.requests(script);
@@ -144,6 +154,8 @@ test("decisions: the ask guard nudges a prose question once per run, cards it fo
 	}
 	assert.equal(provider.remaining(script), 0);
 	assert.deepEqual(real().map((ask) => [ask.state, ask.answer]), [["answered", "A"], ["answered", "B"]], "chat lines never answered a cp_parent ask; ask_answer did");
+	const failed = pi.records().find((r) => r.type === "tool_execution_end" && (r as { toolCallId?: string }).toolCallId === "ask-bad");
+	assert.equal((failed as { isError?: boolean } | undefined)?.isError, true, "the bad ask was refused");
 	const status = pi.stderr() + JSON.stringify(pi.records().filter((r) => r.type === "extension_ui_request"));
 	assert.doesNotMatch(status, /ask guard: [^"]*failed/, "a blank line is skipped, never a failed answer");
 });
@@ -346,4 +358,13 @@ test("decisions: cp_parent answer posts bookkeeping answers to the dashboard jou
 	const relJournal = join(layoutForHome("multi", home.path).state, "operator", "answers.jsonl");
 	assert.deepEqual(Object.keys(after).filter((file) => !(file in before)), [relJournal], "a plain turn's files aside, only the journal is new");
 	assert.equal(existsSync(join(stateDir, "operator", "asks.jsonl")), false, "posting an answer creates no ask");
+
+	const other = createScratchHome();
+	t.after(() => other.cleanup());
+	mkdirSync(join(other.path, layoutForHome("multi", other.path).state, "operator", "answers.jsonl"), { recursive: true });
+	const blocked = await bridge(t, other, [{ kind: "tool_calls", calls: [{ id: "dir", name: "cp_parent", args: input }] }, text("Refused.")]);
+	await turn(blocked.pi, "Post it.");
+	const end = blocked.pi.records().find((r) => r.type === "tool_execution_end") as unknown as End | undefined;
+	assert.equal(end?.isError, true, "a directory at the journal path refuses the post");
+	assert.match(end?.result?.content?.[0]?.text ?? "", /answers journal unreadable/);
 });

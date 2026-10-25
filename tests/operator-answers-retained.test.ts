@@ -1,9 +1,9 @@
 /**
- * Answers-journal units cp_parent answer cannot reach (P10b), moved verbatim from tests/operator-answers.test.ts:
- * the schedule producer's card, the viewer-side fold, and the structural no-push rule. Secrets are built at runtime.
+ * Answers-journal units cp_parent answer cannot reach (P10b), test bodies moved verbatim from
+ * tests/operator-answers.test.ts; bench() drops the unused FleetStore jobs option. Secrets are built at runtime.
  */
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { LAYOUT } from "../src/contracts.ts";
@@ -40,7 +40,7 @@ test("PR1: a schedule result card is keyed by its source, redacted, and read bac
 	assert.equal(readAnswers(b.stateDir).skipped, 1);
 });
 
-test("fold: ack sets acked_at once; unknown acks and garbage count as skipped; a torn last line is ignored; a directory is unreadable", async (t) => {
+test("fold: ack sets acked_at once; unknown acks and garbage count as skipped; a torn last line is ignored", async (t) => {
 	const b = await bench(t);
 	const { answer } = b.answers.post(input);
 	const ack = (id: string, at: string) => appendAnswerLine(b.stateDir, { type: "acked", by: "viewer", id, at, peer: "127.0.0.1" });
@@ -53,11 +53,7 @@ test("fold: ack sets acked_at once; unknown acks and garbage count as skipped; a
 	assert.deepEqual(b.answers.open(), []);
 	appendFileSync(b.file, '{"type":"posted","by":"bridge","id":"ans-0123');
 	assert.deepEqual([readAnswers(b.stateDir).answers.length, readAnswers(b.stateDir).skipped], [1, 2]);
-
-	const dir = await bench(t);
-	mkdirSync(dir.file, { recursive: true });
-	assert.throws(() => dir.answers.post(input), /answers journal unreadable/);
-	assert.deepEqual(readAnswers(join(dir.stateDir, "missing")), { exists: false, answers: [], skipped: 0, error: null });
+	assert.deepEqual(readAnswers(join(b.stateDir, "missing")), { exists: false, answers: [], skipped: 0, error: null });
 });
 
 test("no push: the push sweep never reads the answers journal, and posting creates no ask", async (t) => {
