@@ -150,7 +150,6 @@
 	"tests/extension-deps.test.ts": 3,
 	"tests/extension-load.test.ts": 822,
 	"tests/failure-announcer-retained.test.ts": 51,
-	"tests/failures.test.ts": 4196,
 	"tests/fake-parent-tracker.test.ts": 110,
 	"tests/fleet.test.ts": 1503,
 	"tests/foreign-ci-watch-retained.test.ts": 5,

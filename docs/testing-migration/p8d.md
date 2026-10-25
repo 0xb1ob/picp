@@ -3,22 +3,27 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P8d (cp-e2e-migration-p8d-om9z) | behavior 04, fourth slice: cp_revive's plan and relaunch (04-18, 04-19), bounded recovery after a death or a hard bound (04-20, 04-21), the on-disk settle budget (04-22) and the held-author release on revive (04-23) in `tests/e2e/worker-lifecycle-p8d.test.ts`: 31 mapped, 9 retained verbatim in two `*-retained.test.ts` files; the #528 review fixes in p8c.md; the other 7 P8-owned behavior-04 files stay `convert` for the next slice | 2 (`tests/recovery.test.ts`, `tests/revive.test.ts`) |
+| P8d (cp-e2e-migration-p8d-om9z) | behavior 04, fourth slice: cp_revive's plan and relaunch (04-18, 04-19), bounded recovery after a death or a hard bound (04-20, 04-21), the on-disk settle budget (04-22), the held-author release on revive (04-23), the failure classes a kill is recorded under (04-24) and the budget soft gate (04-25) in `tests/e2e/worker-lifecycle-p8d.test.ts`: 46 mapped plus P8c's restart-budget declaration (04-22), 17 retained verbatim in three `*-retained.test.ts` files; the #528 review fixes in p8c.md; the other 6 P8-owned behavior-04 files stay `convert` for the next slice | 3 (`tests/recovery.test.ts`, `tests/revive.test.ts`, `tests/failures.test.ts`) |
 <!-- /manifest:ledger -->
 
-P8d (job `cp-e2e-migration-p8d-om9z`) is the fourth behavior-04 slice. It converts `tests/revive.test.ts` and
-`tests/recovery.test.ts` on real pi workers: 04-18 drives cp_revive's planner over seeded fleet records, 04-19 kills a
-risk:high worker mid-call and continues it, 04-20 and 04-21 let bounded recovery act on real deaths and real bounds,
-04-22 maps the restart-budget assertion P8c had retained (a count written to the fleet file by a second store reaches
-the live settle), and 04-23 revives at the spawn cap. Each control below changed one guard, failed in the named case,
-and was restored. It stops at two files: `tests/failures.test.ts`, `tests/harness.test.ts`, `tests/script-jobs.test.ts`,
-`tests/worker-manager.test.ts`, `tests/worker-packages.test.ts`, `tests/worker-process.test.ts` and
-`tests/worker-reporter.test.ts` stay `convert` in p8.md for the next slice.
+P8d (job `cp-e2e-migration-p8d-om9z`) is the fourth behavior-04 slice. It converts `tests/revive.test.ts`,
+`tests/recovery.test.ts` and `tests/failures.test.ts` on real pi workers: 04-18 drives cp_revive's planner over seeded
+fleet records, 04-19 kills a risk:high worker mid-call and continues it, 04-20 and 04-21 let bounded recovery act on
+real deaths and real bounds, 04-22 maps the restart-budget assertion P8c had retained (a count written to the fleet
+file by a second store reaches the live settle), 04-23 revives at the spawn cap, 04-24 kills workers in each state the
+live monitor can see, and 04-25 drives the budget gate through cp_send. Each control below changed one guard, failed in
+the named case, and was restored. `tests/harness.test.ts`, `tests/script-jobs.test.ts`, `tests/worker-manager.test.ts`,
+`tests/worker-packages.test.ts`, `tests/worker-process.test.ts` and `tests/worker-reporter.test.ts` stay `convert` in
+p8.md for the next slice.
+
+`FailureMonitor.syncUsage` has no caller in `src/`, so the fleet-usage tail of the old budget-gate declaration is not
+pinned by 04-25; the classifier's unexited classes (`agent_empty_output`, `timeout`) and `decideRecovery` are read only
+by `cp_pipeline recover`, which no e2e drives yet.
 
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
-| P8d | 04 | tests/e2e/worker-lifecycle-p8d.test.ts | 6 new |
+| P8d | 04 | tests/e2e/worker-lifecycle-p8d.test.ts | 8 new |
 <!-- /manifest:prs -->
 
 <!-- manifest:scenarios -->
@@ -30,6 +35,8 @@ and was restored. It stops at two files: `tests/failures.test.ts`, `tests/harnes
 | 04-21 | tests/e2e/worker-lifecycle-p8d.test.ts | P8d recovery refusals: a tool loop escalates without a revive, a policy-blocked session spends its attempt and escalates, and a redispatch whose skill vanished is announced once |
 | 04-22 | tests/e2e/worker-lifecycle-p8d.test.ts | P8d unreported bound: a spent count written to the fleet file by another store is the budget a live settle reads; the same job without it is prompted |
 | 04-23 | tests/e2e/worker-lifecycle-p8d.test.ts | P8d release: a revive at the spawn cap releases the other idle held author, never itself, and spawns into the reserved slot |
+| 04-24 | tests/e2e/worker-lifecycle-p8d.test.ts | P8d failure classes: a kill is classified by what the log shows (settled_without_report, crash mid pi-retry, provider_limit after pi's ladder), and a reported run or a teardown's own close is no failure |
+| 04-25 | tests/e2e/worker-lifecycle-p8d.test.ts | P8d budget gate: a cache-heavy run is warned on its billable tokens, and a steer to a busy worker over its token ceiling is still queued |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -75,6 +82,29 @@ and was restored. It stops at two files: `tests/failures.test.ts`, `tests/harnes
 | tests/revive.test.ts | continueFailed: a spawn that fails keeps the failure and the lease | — | retained | Verbatim in tests/revive-retained.test.ts. Missing entry point: no product input makes pi's spawn fail after the plan passed. |
 | tests/revive.test.ts | 4B1-T7: a revive at the cap releases another idle author (never itself) and spawns into the reserved slot | 04-23 | mapped | the other idle author is released, the reservation consumed, continuation held_release, both phases held; control NC-P8d-release |
 | tests/revive.test.ts | 4B1-T7: a failed revive spawn after makeRoom leaves no reservation | — | retained | Verbatim in tests/revive-retained.test.ts. Same: the failed spawn needs a fake spawn. |
+| tests/failures.test.ts | a reported run is never a failure, whatever else happened | 04-24 | mapped | a worker killed after its accepted envelope records no failure; combined control NC-P8d-reported |
+| tests/failures.test.ts | crash: an observed non-zero close with no envelope | 04-19 | mapped | an exit with no settle is a crash "without reporting"; 04-24's mid-retry kill too; control NC-P8d-crash |
+| tests/failures.test.ts | spawn_failed: the child never emitted a single event | — | retained | Verbatim in tests/failures-retained.test.ts. Missing entry point: pi emits before any input can close it, so no real worker exits silent. |
+| tests/failures.test.ts | a close we asked for is not a failure | 04-24 | mapped | a forced cp_teardown's close records shutdown_requested and no failure; unasked, the silent settle is settled_without_report and 04-19's unsettled exit a crash; control NC-P8d-asked-close |
+| tests/failures.test.ts | provider_limit: the auto-retry ladder gave up | 04-24 | mapped | a kill after pi's ladder gave up records provider_limit with pi's final error; control NC-P8d-provider-limit |
+| tests/failures.test.ts | agent_empty_output: settled with nothing to show | — | retained | Verbatim in tests/failures-retained.test.ts. Missing entry point: the live monitor classifies only after a close, where the exit branch wins; only cp_pipeline recover reads an unexited log. |
+| tests/failures.test.ts | model_call_failed: the worker settled in seconds because the model call errored | 04-17 | mapped | a dead-on-arrival worker is failed closed unprompted (P8c control NC-P8c-doa); S21-budget journals the class; the credential escalation is decideRecovery's, retained below |
+| tests/failures.test.ts | one errored model call in a run that did real work is not dead on arrival | 04-17 | mapped | a run that did work is nudged despite its model error (P8c control NC-P8c-ran) |
+| tests/failures.test.ts | a model error pi is still retrying is a recovery in progress, never dead on arrival | 04-24 | mapped | a kill while pi's ladder is open is a crash, never model_call_failed; a ladder that gave up is provider_limit; controls NC-P8d-retry-open, NC-P8d-provider-limit |
+| tests/failures.test.ts | readModelCallError reads pi's own words, and nothing that merely looks like them | — | retained | Verbatim in tests/failures-retained.test.ts. Missing entry point: the look-alike inputs (assistant text, user message, cp marker) have no outcome of their own beyond 04-17's. |
+| tests/failures.test.ts | tool_loop: the same call, over and over | 04-21 | mapped | six identical calls fail as tool_loop (S21-intake journals it); control NC-P8d-tool-loop |
+| tests/failures.test.ts | timeout: silence past the deadline, and only while unsettled | — | retained | Verbatim in tests/failures-retained.test.ts. Missing entry point: the live monitor classifies with alive:false, so inactivity never applies; only cp_pipeline recover reads it. |
+| tests/failures.test.ts | budget_exceeded and explicit failures win over inference | S21-budget | mapped | a worker killed after a real breach is failed budget_exceeded; S21-intake's rejected envelope is envelope_invalid; no P8d control |
+| tests/failures.test.ts | recovery: recoverable classes retry the same brief, bounded | — | retained | Verbatim in tests/failures-retained.test.ts. Missing entry point: decideRecovery is read only by cp_pipeline recover, which no e2e drives; live recovery uses the policy table (04-20). |
+| tests/failures.test.ts | recovery: unrecoverable classes never retry | — | retained | Verbatim in tests/failures-retained.test.ts. Same: decideRecovery via cp_pipeline recover only. |
+| tests/failures.test.ts | recovery: provider limits retry the same model, then a fallback | — | retained | Verbatim in tests/failures-retained.test.ts. Same: decideRecovery via cp_pipeline recover only. |
+| tests/failures.test.ts | an implementation failure never re-runs the research that preceded it | — | retained | Verbatim in tests/failures-retained.test.ts. Missing entry point: recoverShip asserts mayRerunResearch as an invariant; no input reaches its throw. |
+| tests/failures.test.ts | the soft gate warns before it breaches, and never kills | 04-25 | mapped | a send at 9x% is delivered with state warn and one budget_warning; the over-ceiling worker stays alive; control NC-P8d-warn |
+| tests/failures.test.ts | cache_read is excluded from the budgeted token total (cp-d7y) | 04-25 | mapped | 50000 cache-read tokens leave the run at warn, under 1000 billable; the cost-only breach is not pinned (the mock's cost table is zero); control NC-P8d-cache |
+| tests/failures.test.ts | a killed worker is classified and recorded in the fleet | 04-24 | mapped | the killed silent worker's failure is settled_without_report, naming cp_revive; 04-19 shows the fleet phase failed; control NC-P8d-settled-class |
+| tests/failures.test.ts | a shutdown we asked for is not a failure | 04-24 | mapped | the torn-down job records no failure; control NC-P8d-asked-close |
+| tests/failures.test.ts | the budget gate escalates a breach but still delivers the next send | 04-25 | mapped | an exceeded send is still queued, escalates and logs budget_exceeded; syncUsage has no caller in src/, so its fleet tail is unpinned; control NC-P8d-breach-delivers |
+| tests/failures.test.ts | a steer still reaches a worker over its token ceiling but nowhere near its cost ceiling | 04-25 | mapped | a steer to a busy worker at 5200/1000 tokens and $0/$5 is queued and steer_sent; control NC-P8d-breach-delivers |
 <!-- /manifest:assertions -->
 
 <!-- manifest:regressions -->
@@ -100,6 +130,15 @@ and was restored. It stops at two files: `tests/failures.test.ts`, `tests/harnes
 | NC-P8d-tool-loop | tests/recovery.test.ts | 04-21 | src/contracts/limits.ts: tool_loop revives | timed out waiting for the loop's escalation |
 | NC-P8d-redispatch-skill | tests/recovery.test.ts | 04-21 | src/recovery.ts: the redispatch ignores an unresolved skill | the wake-up does not say "could not redispatch … skill_unresolved" |
 | NC-P8d-disk-bound | tests/settle-recovery.test.ts | 04-22 | src/settle.ts: the settle count ignores the fleet record and starts at 1 | timed out waiting for the spent budget's record |
+| NC-P8d-crash | tests/failures.test.ts | 04-19 | src/failures.ts: an unsettled exit is classed timeout | an exit with no settle is a crash |
+| NC-P8d-asked-close | tests/failures.test.ts | 04-24 | src/failures.ts: shutdown_requested is never noted | a reported run and an asked-for close are no failure |
+| NC-P8d-settled-class | tests/failures.test.ts | 04-24 | src/failures.ts: a settled exit falls through to crash | a settle before the exit is not a crash |
+| NC-P8d-reported | tests/failures.test.ts | 04-24 | src/failures.ts: both the reported check and the monitor's waiting-phase gate removed (combined: either alone keeps it quiet) | a reported run and an asked-for close are no failure |
+| NC-P8d-retry-open | tests/failures.test.ts | 04-24 | src/failures.ts: an open pi retry no longer defers the dead-call verdict | a model error pi is still retrying is not dead on arrival |
+| NC-P8d-provider-limit | tests/failures.test.ts | 04-24 | src/failures.ts: a closed failed ladder is not read | pi's ladder gave up before the kill |
+| NC-P8d-warn | tests/failures.test.ts | 04-25 | src/failures.ts: checkBudget never warns | the warm send's state is ok, not warn |
+| NC-P8d-cache | tests/failures.test.ts | 04-25 | src/failures.ts: billable tokens include cache_read | the warm send's state is exceeded, not warn |
+| NC-P8d-breach-delivers | tests/failures.test.ts | 04-25 | src/send.ts: a breached send throws after its marker | the steer rejects with "over budget" |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->
@@ -108,6 +147,7 @@ and was restored. It stops at two files: `tests/failures.test.ts`, `tests/harnes
 | tests/e2e/worker-lifecycle-p8d.test.ts | P8d | behavior 04, revive, bounded recovery and the on-disk settle budget; scenarios 04-18..04-23 |
 | tests/recovery-retained.test.ts | P8d | convert-owned; 6 declarations of tests/recovery.test.ts retained verbatim, no e2e entry point |
 | tests/revive-retained.test.ts | P8d | convert-owned; 3 declarations of tests/revive.test.ts retained verbatim, no e2e entry point |
+| tests/failures-retained.test.ts | P8d | convert-owned; 8 declarations of tests/failures.test.ts retained verbatim, no e2e entry point |
 <!-- /manifest:incoming -->
 
 <!-- manifest:baseline -->
@@ -115,4 +155,5 @@ and was restored. It stops at two files: `tests/failures.test.ts`, `tests/harnes
 |---|---|---|---|
 | `tests/recovery.test.ts` | deleted | P8d | behavior 04: 17 mapped (04-19..04-21), 6 retained in tests/recovery-retained.test.ts; controls NC-P8d-risk, NC-P8d-attempt-bound, NC-P8d-brief-args, NC-P8d-call-named, NC-P8d-no-call, NC-P8d-evidence, NC-P8d-announce, NC-P8d-tool-loop, NC-P8d-redispatch-skill, NC-P8d-policy-block |
 | `tests/revive.test.ts` | deleted | P8d | behavior 04: 14 mapped (04-18, 04-19, 04-23), 3 retained in tests/revive-retained.test.ts; controls NC-P8d-continue-gate, NC-P8d-envelope, NC-P8d-child, NC-P8d-hazard, NC-P8d-interrupted, NC-P8d-checkpoint, NC-P8d-idle, NC-P8d-skill, NC-P8d-policy-block, NC-P8d-release |
+| `tests/failures.test.ts` | deleted | P8d | behavior 04: 15 mapped (04-17, 04-19, 04-21, 04-24, 04-25, S21-budget), 8 retained in tests/failures-retained.test.ts; controls NC-P8d-crash, NC-P8d-asked-close, NC-P8d-settled-class, NC-P8d-reported, NC-P8d-retry-open, NC-P8d-provider-limit, NC-P8d-warn, NC-P8d-cache, NC-P8d-breach-delivers |
 <!-- /manifest:baseline -->

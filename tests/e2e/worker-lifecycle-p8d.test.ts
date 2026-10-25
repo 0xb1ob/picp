@@ -1,6 +1,6 @@
 /**
- * Behavior 04 (P8d): cp_revive's plan and relaunch, and bounded recovery after a worker death or a hard bound,
- * driven through a real CommandPost, real pi workers on a treehouse pool and the mock provider.
+ * Behavior 04 (P8d, 04-18..04-25): cp_revive's plan and relaunch, bounded recovery after a death or a hard bound, the
+ * failure class a kill is recorded under and the budget gate, through a real CommandPost, pi workers and the mock provider.
  */
 
 import assert from "node:assert/strict";
@@ -484,3 +484,68 @@ test("P8d release: a revive at the spawn cap releases the other idle held author
 	assert.deepEqual([f.post.fleet.require(first).phase, f.post.fleet.require(second).phase], ["held", "held"], "a release keeps each phase");
 	assert.equal(f.events(second, "held_released").at(-1)?.for_job, first);
 });
+
+test("P8d failure classes: a kill is classified by what the log shows (settled_without_report, crash mid pi-retry, provider_limit after pi's ladder), and a reported run or a teardown's own close is no failure", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const f = await bench(t);
+	const [silent, reported, torn, retrying, limited] = [await f.job("silent"), await f.job("reported"), await f.job("torn"), await f.job("retrying"), await f.job("limited")];
+	const overloaded: ScriptStep = { kind: "error", status: 529, message: "529 overloaded", repeat: 20 };
+	await f.dispatch(silent, f.script("silent", [{ kind: "text", text: "done" }, { kind: "text", text: "still done" }]));
+	await f.dispatch(reported, f.script("reported", [{ kind: "tool_calls", calls: [{ name: "report_result", args: {
+		job_id: reported, kind: "ship", status: "blocked", summary: "Waiting on a human.", blockers: ["a human must pick the API"] } }] }, { kind: "text", text: "filed" }]));
+	await f.dispatch(torn, f.script("torn", [{ kind: "text", text: "done" }, { kind: "text", text: "still done" }]));
+	await f.dispatch(retrying, f.script("retrying", [overloaded]));
+	await f.dispatch(limited, f.script("limited", [overloaded]));
+	for (const jobId of [silent, torn]) {
+		await waitFor(() => f.events(jobId, "settled_without_report").length, (n) => n === 1, { timeoutMs: 60_000, what: `${jobId} settled twice, unreported` });
+	}
+	await waitFor(() => f.post.fleet.require(reported).reported_at, Boolean, { timeoutMs: 60_000, what: "the accepted envelope" });
+	const piEvents = (jobId: string, type: string): number => readRunEvents(f.home, jobId).filter((event) => event.source === "pi" && event.type === type).length;
+	await waitFor(() => piEvents(retrying, "auto_retry_start"), (n) => n >= 1, { timeoutMs: 30_000, what: "pi's own retry ladder" });
+	process.kill(f.post.fleet.require(retrying).worker.pid, "SIGKILL");
+	assert.equal(piEvents(retrying, "auto_retry_end"), 0, "killed while pi's ladder was still open");
+	await waitFor(() => f.events(limited, "outer_retry_attempt").length, (n) => n === 1, { timeoutMs: 60_000, what: "pi's ladder giving up" });
+
+	for (const jobId of [silent, reported, limited]) process.kill(f.post.fleet.require(jobId).worker.pid, "SIGKILL");
+	const failure = async (jobId: string): Promise<Record<string, unknown> | undefined> =>
+		(await waitFor(() => f.events(jobId, "failure"), (rows) => rows.length === 1, { timeoutMs: 30_000, what: `${jobId}'s death` }))[0];
+	const [quiet, midRetry, gaveUp] = [await failure(silent), await failure(retrying), await failure(limited)];
+	assert.equal(quiet?.class, "settled_without_report", "a settle before the exit is not a crash");
+	assert.match(String(quiet?.message), /without calling report_result .* cp_revive relaunches this worker/);
+	assert.equal(midRetry?.class, "crash", "a model error pi is still retrying is not dead on arrival");
+	assert.equal(gaveUp?.class, "provider_limit", "pi's ladder gave up before the kill");
+	assert.match(String(gaveUp?.message), /^provider retries exhausted: 529: .*529 overloaded/);
+
+	const down = await f.post.tearDown(torn, { force: true });
+	assert.equal(down.torn_down, true, JSON.stringify(down));
+	await new Promise((resolve) => setTimeout(resolve, 1_500));
+	assert.equal(f.events(torn, "shutdown_requested").length > 0, true);
+	assert.deepEqual([f.events(reported, "failure"), f.events(torn, "failure")], [[], []], "a reported run and an asked-for close are no failure");
+	assert.notEqual(f.post.fleet.get(reported)?.phase, "failed");
+});
+
+test("P8d budget gate: a cache-heavy run is warned on its billable tokens, and a steer to a busy worker over its token ceiling is still queued", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const f = await bench(t);
+	writeFileSync(join(f.home, LAYOUT.budgetsFile), JSON.stringify({ ...DEFAULT_BUDGET_CONFIG, per_job_tokens: 1000, per_job_cost_usd: 5 }));
+	const [warm, steer] = [await f.job("warm"), await f.job("steer")];
+	await f.dispatch(warm, f.script("warm", [{ kind: "text", text: "cached", usage: { prompt_tokens: 50_800, cached_tokens: 50_000, completion_tokens: 50 } },
+		{ kind: "text", text: "nudged" }, { kind: "text", text: "second" }]));
+	await waitFor(() => f.events(warm, "settled_without_report").length, (n) => n === 1, { timeoutMs: 60_000, what: "the warm run's nudge to settle" });
+	const warned = await f.post.send({ jobId: warm, message: "second" });
+	assert.deepEqual([warned.receipt, warned.budget?.state], ["delivered", "warn"], `ratio ${warned.budget?.ratio}`);
+	assert.ok((warned.budget?.tokens.used ?? 0) < 1000, "cache_read is not billed against the token ceiling");
+	assert.match(warned.budget?.message ?? "", /budget at 9\d%: \d+\/1000 billable tokens \(\d+ total, 50000 cache-read\)/);
+	assert.equal(f.events(warm, "budget_warning").length, 1);
+
+	// The mock's cost table is zero: 5200 billable tokens over a 1000 ceiling, $0 of $5 (the cp-n10 shape).
+	await f.dispatch(steer, f.script("steer", [{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 3 && echo slept" } }],
+		usage: { prompt_tokens: 5000, completion_tokens: 200 } }, { kind: "text", text: "acknowledged" }, { kind: "text", text: "and the steer" }]));
+	await waitFor(() => f.toolStarts(steer), (n) => n === 1, { timeoutMs: 60_000, what: "the slow bash call" });
+	const steered = await f.post.send({ jobId: steer, message: "rebase before you open the PR", mode: "steer" });
+	assert.deepEqual([steered.receipt, steered.budget?.state], ["queued", "exceeded"], JSON.stringify(steered.budget));
+	assert.ok(steered.budget && steered.budget.tokens.used > steered.budget.tokens.limit && steered.budget.cost.used < steered.budget.cost.limit / 2);
+	assert.match(steered.budget?.message ?? "", /escalating to the operator/);
+	await waitFor(() => f.events(steer, "steer_sent").length, (n) => n === 1, { timeoutMs: 30_000, what: "the steer to reach the worker" });
+	assert.equal(f.post.manager.get(steer)?.worker.alive, true, "a breach never kills the worker");
+	assert.equal(f.events(steer, "budget_exceeded").length > 0, true);
+});
+
