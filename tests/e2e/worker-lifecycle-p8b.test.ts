@@ -1,0 +1,241 @@
+/**
+ * P8b (behavior 04): worker hard bounds and read-only MCP through a real CommandPost, real pi workers on a
+ * treehouse pool and the mock provider. Bounds are read from the dispatched fleet record and the worker's
+ * actual failure; MCP through a dispatched planner's tool calls and `/doctor`.
+ */
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { CommandPost } from "../../src/command-post.ts";
+import { DEFAULT_JOB_TOOL_CALL_CAP, DEFAULT_JOB_WALL_CLOCK_SECONDS, type Failure, LAYOUT, paths, WEDGED_TOOL_CALL_SECONDS } from "../../src/contracts.ts";
+import { initJobsDocument } from "../../src/ledger.ts";
+import {
+	type AgentDir,
+	createAgentDir,
+	createScratchHome,
+	createScratchRepo,
+	enableTreehouse,
+	MockProvider,
+	readFleet,
+	REPO_ROOT,
+	type ScriptStep,
+	treehouse,
+	treehouseAvailable,
+	waitFor,
+} from "../harness/index.ts";
+
+const SKIP = treehouseAvailable() ? false : "P8b e2e needs treehouse on PATH";
+const ENV_KEYS = ["CP_JOB_WALL_CLOCK_SECONDS", "CP_JOB_TOOL_CALL_CAP"] as const;
+
+interface Fleet {
+	home: string;
+	post: CommandPost;
+	provider: MockProvider;
+	agentDir: AgentDir;
+	bounds: Array<{ jobId: string; failure: Failure; notice: string }>;
+	intake(slug: string, kind?: "ship" | "research"): Promise<string>;
+	script(name: string, steps: ScriptStep[]): string;
+	restart(): Promise<CommandPost>;
+}
+
+type Hooks = { after(fn: () => void | Promise<void>): void };
+
+async function fleet(t: Hooks, options: { maxTrees?: number; agentDir?: (provider: MockProvider) => AgentDir } = {}): Promise<Fleet> {
+	const saved = ENV_KEYS.map((key) => [key, process.env[key]] as const);
+	for (const key of ENV_KEYS) delete process.env[key];
+	const home = createScratchHome();
+	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", "src/app.ts": "export const x = 1;\n" } });
+	const provider = await MockProvider.start();
+	const agentDir = options.agentDir?.(provider) ?? createAgentDir({ provider });
+	initJobsDocument(home.path, "cp");
+	const bounds: Fleet["bounds"] = [];
+	const make = () =>
+		new CommandPost({
+			home: home.path,
+			packageRoot: REPO_ROOT,
+			holdsParentLock: () => true,
+			parentEnv: { ...process.env, ...agentDir.env },
+			onHardBound: (jobId, failure, _work, notice) => void bounds.push({ jobId, failure, notice }),
+		});
+	let post = make();
+	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "pr" });
+	execFileSync("git", ["clone", "--quiet", repo.remote as string, post.registry.pathOf("demo")]);
+	const clone = post.registry.pathOf("demo");
+	const pool = enableTreehouse(clone, { maxTrees: options.maxTrees ?? 3 });
+	t.after(async () => {
+		await post.shutdown();
+		for (const [key, value] of saved) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+		try {
+			treehouse(clone, "prune");
+		} catch {
+			// pool root is removed next
+		}
+		pool.cleanup();
+		agentDir.cleanup();
+		repo.cleanup();
+		home.cleanup();
+		await provider.stop();
+	});
+	const f: Fleet = {
+		home: home.path,
+		post,
+		provider,
+		agentDir,
+		bounds,
+		async intake(slug, kind = "ship") {
+			return (await f.post.ledger().create({ title: slug, project: "demo", delivery: "local", kind, slug })).id;
+		},
+		script(name, steps) {
+			const model = provider.addScript(name, steps);
+			agentDir.writeModels(provider);
+			return model;
+		},
+		async restart() {
+			await post.shutdown();
+			post = make();
+			f.post = post;
+			return post;
+		},
+	};
+	return f;
+}
+
+const bash = (command: string): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "bash", args: { command } }] });
+const failedRecord = (f: Fleet, jobId: string, timeoutMs: number) =>
+	waitFor(() => f.post.fleet.get(jobId), (record) => record?.phase === "failed", { timeoutMs, what: `${jobId} failed` });
+
+test("P8b bounds: dispatch freezes the resolved hard bounds, and a bad worker-bounds.json refuses before any lease", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const f = await fleet(t, { maxTrees: 8 });
+	const model = f.script("p8b-config", Array.from({ length: 8 }, () => ({ kind: "hang" }) as ScriptStep));
+	const file = join(f.home, LAYOUT.workerBoundsFile);
+	mkdirSync(join(f.home, LAYOUT.data), { recursive: true });
+	const setEnv = (wall?: string, cap?: string) => {
+		for (const [key, value] of [["CP_JOB_WALL_CLOCK_SECONDS", wall], ["CP_JOB_TOOL_CALL_CAP", cap]] as const) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	};
+	const dispatched = async (slug: string, override: { wallClockSeconds?: number; toolCallCap?: number } = {}) => {
+		const jobId = await f.intake(slug);
+		const result = await f.post.dispatch({ jobId, task: "Wait.", model, fetch: false, ...override });
+		assert.equal("wall_clock_seconds" in result ? result.wall_clock_seconds : undefined, f.post.fleet.require(jobId).bounds?.wall_clock_seconds);
+		return f.post.fleet.require(jobId).bounds;
+	};
+	const refused = async (slug: string, override: { wallClockSeconds?: number; toolCallCap?: number }, pattern: RegExp) => {
+		const jobId = await f.intake(slug);
+		await assert.rejects(f.post.dispatch({ jobId, task: "Wait.", model, fetch: false, ...override }), (error: Error) => pattern.test(error.message), slug);
+		assert.equal(f.post.fleet.get(jobId), undefined, `${slug}: refused before any fleet record`);
+		return jobId;
+	};
+
+	// Defaults sit past the 30-minute wedge notice; a malformed env value keeps the default.
+	assert.deepEqual(await dispatched("defaults"), { wall_clock_seconds: DEFAULT_JOB_WALL_CLOCK_SECONDS, tool_call_cap: DEFAULT_JOB_TOOL_CALL_CAP });
+	assert.deepEqual([DEFAULT_JOB_WALL_CLOCK_SECONDS, DEFAULT_JOB_TOOL_CALL_CAP], [5400, 900]);
+	assert.ok(DEFAULT_JOB_WALL_CLOCK_SECONDS > WEDGED_TOOL_CALL_SECONDS);
+	setEnv("12", "4");
+	assert.deepEqual(await dispatched("env"), { wall_clock_seconds: 12, tool_call_cap: 4 });
+	setEnv("nope", "0");
+	assert.deepEqual(await dispatched("env-typo"), { wall_clock_seconds: DEFAULT_JOB_WALL_CLOCK_SECONDS, tool_call_cap: DEFAULT_JOB_TOOL_CALL_CAP });
+	setEnv("99", "99");
+	assert.deepEqual(await dispatched("override", { wallClockSeconds: 8, toolCallCap: 3 }), { wall_clock_seconds: 8, tool_call_cap: 3 });
+	// Wall clock: explicit override > home file > env > default; the tool cap never reads the file.
+	writeFileSync(file, JSON.stringify({ wall_clock_seconds: 1800 }));
+	assert.deepEqual(await dispatched("home-file"), { wall_clock_seconds: 1800, tool_call_cap: 99 });
+	assert.equal((await dispatched("home-override", { wallClockSeconds: 8 }))?.wall_clock_seconds, 8);
+
+	// A present file that is wrong refuses, naming the file and the field, even beside an override.
+	const bodies: unknown[] = [{}, { wall_clok_seconds: 1800 }, ...[0, -5, 1.5, "1800", null].map((value) => ({ wall_clock_seconds: value }))];
+	for (const [i, body] of bodies.entries()) {
+		writeFileSync(file, JSON.stringify(body));
+		await refused(`bad-${i}`, {}, new RegExp(`${file.replaceAll("/", "\\/").replaceAll(".", "\\.")} wall_clock_seconds must be a positive integer`));
+	}
+	writeFileSync(file, "{nope");
+	await refused("bad-json", {}, /worker-bounds\.json is not valid JSON/);
+	writeFileSync(file, "[1800]");
+	await refused("bad-array", { wallClockSeconds: 8 }, /worker-bounds\.json must be a JSON object/);
+	writeFileSync(file, JSON.stringify({ wall_clock_seconds: 1800, allow_dispatch_override: "no" }));
+	await refused("bad-flag", {}, /worker-bounds\.json allow_dispatch_override must be true or false, got "no"/);
+
+	// allow_dispatch_override=false enforces the machine value: equal passes, different refuses.
+	setEnv("99", "40");
+	writeFileSync(file, JSON.stringify({ wall_clock_seconds: 1800, allow_dispatch_override: false }));
+	assert.deepEqual(await dispatched("enforced-equal", { wallClockSeconds: 1800, toolCallCap: 40 }), { wall_clock_seconds: 1800, tool_call_cap: 40 });
+	await refused("enforced-wall", { wallClockSeconds: 8 }, /wall_clock_seconds override 8 conflicts with enforced machine value 1800 \(\.pi-command-post\/data\/worker-bounds\.json allow_dispatch_override=false\)/);
+	await refused("enforced-cap", { toolCallCap: 3 }, /tool_call_cap override 3 conflicts with enforced machine value 40/);
+	writeFileSync(file, JSON.stringify({ allow_dispatch_override: false }));
+	await refused("flag-only", { wallClockSeconds: 98 }, /conflicts with enforced machine value 99/);
+	setEnv(undefined, undefined);
+	await refused("flag-only-default", { wallClockSeconds: 98 }, /conflicts with enforced machine value 5400/);
+	assert.equal(readFleet(f.home).jobs.length, 7, "only the seven accepted dispatches hold a record");
+});
+
+test("P8b bounds: a delivered send starts a fresh wall-clock round, and tool starts carry across it", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const f = await fleet(t);
+	const clockJob = await f.intake("clock-round");
+	const clockModel = f.script("p8b-round-clock", [{ kind: "text", text: "Idle." }, { kind: "text", text: "Still idle." }, { kind: "hang" }]);
+	const toolJob = await f.intake("tool-round");
+	const toolModel = f.script("p8b-round-tools", [bash("echo one"), { kind: "text", text: "Idle." }, { kind: "text", text: "Still idle." }, bash("echo two"), { kind: "hang" }]);
+	const spawned = Date.now();
+	await f.post.dispatch({ jobId: clockJob, task: "Idle.", model: clockModel, fetch: false, wallClockSeconds: 10 });
+	await f.post.dispatch({ jobId: toolJob, task: "Idle.", model: toolModel, fetch: false, toolCallCap: 2, wallClockSeconds: 600 });
+	for (const [name, n] of [["p8b-round-clock", 2], ["p8b-round-tools", 3]] as const) {
+		await waitFor(() => f.provider.requests(name).length, (count) => count >= n, { timeoutMs: 20_000, what: `${name} idle after its nudge` });
+	}
+	await new Promise((resolve) => setTimeout(resolve, Math.max(0, spawned + 6_000 - Date.now())));
+	const sent = Date.now();
+	await f.post.send({ jobId: clockJob, message: "Carry on." });
+	await f.post.send({ jobId: toolJob, message: "Carry on." });
+
+	const tools = await failedRecord(f, toolJob, 30_000);
+	assert.equal(tools?.failure?.class, "tool_call_cap_exceeded", "the start before the send still counts");
+	assert.equal(tools?.failure?.message, "tool_call_cap bound 2 starts exceeded (measured 2 starts)");
+	await new Promise((resolve) => setTimeout(resolve, Math.max(0, spawned + 12_000 - Date.now())));
+	assert.equal(f.post.fleet.require(clockJob).phase, "waiting", "the spawn round's 10s passed; the new round has not");
+	const clock = await failedRecord(f, clockJob, 30_000);
+	assert.equal(clock?.failure?.class, "wall_clock_exceeded");
+	assert.equal(clock?.failure?.message, "wall_clock bound 10s exceeded (measured 10s)");
+	assert.ok(Date.parse(clock?.failure?.at ?? "") - sent >= 9_000, "the round is measured from the delivered send");
+});
+
+test("P8b bounds: a bound names the job, bound and work on disk, and the redispatched worker is bounded again", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const f = await fleet(t);
+	const jobId = await f.intake("bounded-twice");
+	const loop = Array.from({ length: 6 }, (_, i) => bash(`echo ${i}`));
+	const model = f.script("p8b-twice", [bash("printf 'keep\\n' > leftover.txt"), ...loop, { kind: "hang" }]);
+	const dispatched = await f.post.dispatch({ jobId, task: "Loop.", model, fetch: false, toolCallCap: 2, wallClockSeconds: 600 });
+	await waitFor(() => f.bounds.length, (n) => n >= 2, { timeoutMs: 60_000, what: "a second bound after bounded recovery" });
+	const [first, second] = f.bounds;
+	assert.equal(first?.failure.message, "tool_call_cap bound 2 starts exceeded (measured 2 starts)");
+	assert.match(first?.notice ?? "", new RegExp(`^HARD BOUND — ${jobId} hit tool_call_cap 2 starts \\(measured 2 starts\\)`));
+	assert.match(first?.notice ?? "", /on disk: .*1 uncommitted file/);
+	assert.match(first?.notice ?? "", /job recorded failed; worktree left untouched/);
+	assert.equal(second?.failure.class, "tool_call_cap_exceeded", "the redispatched worker trips its own cap");
+	assert.match(readFileSync(join(f.home, paths.eventsFile(jobId)), "utf8"), /"recovery_attempted".*"action":"redispatch"/);
+	assert.equal(readFileSync(join(dispatched.worktree, "leftover.txt"), "utf8"), "keep\n");
+});
+
+test("P8b bounds: a legacy record without frozen bounds revives on env bounds, never the home file", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const f = await fleet(t);
+	mkdirSync(join(f.home, LAYOUT.data), { recursive: true });
+	writeFileSync(join(f.home, LAYOUT.workerBoundsFile), JSON.stringify({ wall_clock_seconds: 1800 }));
+	const jobId = await f.intake("legacy-bounds");
+	const model = f.script("p8b-legacy", [{ kind: "hang" }, { kind: "hang" }]);
+	await f.post.dispatch({ jobId, task: "Wait.", model, fetch: false });
+	assert.equal(f.post.fleet.require(jobId).bounds?.wall_clock_seconds, 1800);
+	await waitFor(() => f.provider.requests("p8b-legacy").length, (n) => n >= 1, { timeoutMs: 20_000, what: "first worker request" });
+	await f.post.shutdown();
+	const fleetFile = join(f.home, LAYOUT.fleetFile);
+	const doc = JSON.parse(readFileSync(fleetFile, "utf8")) as { jobs: Array<Record<string, unknown>> };
+	for (const job of doc.jobs) delete job.bounds;
+	writeFileSync(fleetFile, JSON.stringify(doc));
+	process.env.CP_JOB_WALL_CLOCK_SECONDS = "4";
+	const post = await f.restart();
+	await post.revive(jobId);
+	const failed = await failedRecord(f, jobId, 30_000);
+	assert.equal(failed?.failure?.message, "wall_clock bound 4s exceeded (measured 4s)");
+});
