@@ -207,10 +207,9 @@ STUCK-WORKING-PLAN-BODY
 
 - A real terminal emulator's own Kitty negotiation (this was pi's, over an
   `expect` pty); mouse; a resize while an overlay is open.
-- The production `/cp-plan` slash command end to end (this run calls the same
-  `openPlanViewer` the command uses; the command is a thin wrapper pinned by
-  `tests/plan-viewer.test.ts` Guard B). Non-TUI `/cp-plan` is
-  `tests/e2e/plan-view.test.ts`.
+- The production `/cp-plan` slash command end to end: since P11b it runs in a
+  real TUI on a pty in `tests/e2e/plan-view.test.ts` (P11b-plan-tui), which
+  also covers the non-TUI modes.
 - T31 `asker.ask` remaining stacker — documented and out of scope.
 - Colour/theme rendering: the replay strips SGR.
 
@@ -221,6 +220,6 @@ The driver is under `/tmp/cp-stuck-working-verify/` (`ext.ts`, `drive.exp`,
 they poke a real pi and are not part of `npm test` — and everything they prove
 about the *decision* is pinned by `tests/awaiting-ui.test.ts` (`HumanPrompt`,
 `applyPromptWorking`, `promptBusyNotice`, the production `pi.on` handlers and
-busy ORs, no `"plan"` surface) and `tests/plan-viewer.test.ts` (overlay options
-match attach-console, Guards A–C). To repeat the run, rebuild those files from
+busy ORs, no `"plan"` surface) and `tests/e2e/plan-view.test.ts` (the real
+`/cp-plan` overlay in a pty TUI, non-TUI modes, no `plan` tool). To repeat the run, rebuild those files from
 the sketch above and drive pi through an `expect` pty as shown.
