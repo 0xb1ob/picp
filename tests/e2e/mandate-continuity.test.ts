@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, renameSync, rmdirSync, writeFileSync } from "node:fs";
+import fs, { mkdirSync, readFileSync, renameSync, rmdirSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -606,3 +607,89 @@ test("pipeline reanchor resumes an interrupted exact edge projection and still r
 	await assert.rejects(() => post.reanchorPipeline(originalId, replacementId), /checkpoint was declined/);
 	assert.deepEqual((await post.ledger().show(started.ship_id)).blocked_by, [replacementId, hold.id]);
 });
+
+for (const boundary of ["before preparation", "after prepared publication", "before commit", "after commit"] as const) {
+	test(`continuation crash/restart at ${boundary} preserves one receipt and gates dispatch on commit`, { skip: !treehouseAvailable(), timeout: 90_000 }, async (t) => {
+		const home = createScratchHome();
+		const repo = createScratchRepo({ name: "demo", files: { "README.md": "# original\n" } });
+		const provider = await MockProvider.start();
+		const model = provider.addScript("restart-worker", [{ kind: "text", text: "Original research received." }]);
+		const agent = createAgentDir({ provider });
+		const options = { home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env } };
+		let post = new CommandPost(options);
+		let pool: ReturnType<typeof enableTreehouse> | undefined;
+		const nativeRename = fs.renameSync;
+		const restore = () => { fs.renameSync = nativeRename; syncBuiltinESMExports(); };
+		t.after(async () => { restore(); await post.shutdown(); await provider.stop(); pool?.cleanup(); agent.cleanup(); repo.cleanup(); home.cleanup(); });
+		agent.writeModels(provider);
+		initJobsDocument(home.path, "cp");
+		mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+		writeFileSync(join(home.path, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION,
+			allow: ["mock/*"], rubric: [{ id: "planner", role: "planner", model }] }));
+		await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
+		const clone = post.registry.pathOf("demo");
+		execFileSync("git", ["clone", "--quiet", repo.remote as string, clone]);
+		pool = enableTreehouse(clone, { maxTrees: 2 });
+		const task = "Research only the original admitted scope; retain every constraint.";
+		const job = await post.ledger().create({ title: "Original restart research", description: task,
+			project: "demo", kind: "research", delivery: "local" });
+		const expiry = new Date(Date.now() + 2000).toISOString().replace(/\.\d{3}Z$/, "Z");
+		const source = post.mandates.issue({ projects: ["demo"], objective: task, job_ids: [job.id], expiry,
+			provenance: { expiry_hours: "home" }, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 1, ask_on: [] });
+		await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(expiry) - Date.now() + 20)));
+		const file = post.mandates.file(source.id);
+		const snapshot = `${file}.governing-inputs`;
+		let interrupted = false;
+		// Fault only atomic publication; permission selection and dispatch remain real product consumers.
+		fs.renameSync = (from, to) => {
+			const target = String(to);
+			const phase = target === file ? JSON.parse(readFileSync(from, "utf8")).continuity?.phase : undefined;
+			if (interrupted && boundary !== "after commit" && phase === "committed") throw new Error("continuation publication unavailable");
+			const hit = boundary === "before preparation" ? target === snapshot :
+				boundary === "after prepared publication" ? phase === "prepared" : phase === "committed";
+			if (!hit || interrupted) return nativeRename(from, to);
+			interrupted = true;
+			if (boundary === "after prepared publication" || boundary === "after commit") nativeRename(from, to);
+			throw new Error(`interrupted continuation ${boundary}`);
+		};
+		syncBuiltinESMExports();
+		try {
+			await assert.rejects(post.mandates.continue(source.id), /interrupted continuation/);
+			assert.equal(interrupted, true);
+			const saved = post.mandates.require(source.id);
+			assert.equal(saved.continuity?.phase, boundary === "before preparation" ? undefined : boundary === "after commit" ? "committed" : "prepared");
+			if (boundary !== "after commit") {
+				assert.throws(() => post.mandates.assertPermitted("dispatch", { jobId: job.id, project: "demo", kind: "research" }));
+				await assert.rejects(post.dispatch({ jobId: job.id, task, fetch: false }), /publication unavailable|interrupted continuation/);
+				assert.equal(post.fleet.get(job.id), undefined);
+				assert.equal(provider.requests("restart-worker").length, 0);
+			} else {
+				assert.equal(post.mandates.assertPermitted("dispatch", { jobId: job.id, project: "demo", kind: "research" }).selected?.id, source.id);
+			}
+		} finally { restore(); }
+		const preparedReceipt = post.mandates.require(source.id).continuity?.receipt_id;
+		await post.shutdown();
+		post = new CommandPost(options);
+		const receipts = await Promise.all(Array.from({ length: 3 }, () => post.mandates.continue(source.id)));
+		assert.deepEqual(receipts.map((receipt) => receipt.state), ["committed", "committed", "committed"]);
+		assert.equal(new Set(receipts.map((receipt) => receipt.receipt_id)).size, 1);
+		if (preparedReceipt) assert.equal(receipts[0]!.receipt_id, preparedReceipt);
+		const committed = post.mandates.require(source.id);
+		assert.equal(committed.continuity?.receipt_id, receipts[0]!.receipt_id);
+		assert.equal(committed.continuity?.accounting_root_id, source.id);
+		assert.equal(committed.continuity?.admission_expiry, source.expiry);
+		assert.deepEqual(committed.spend_cap, source.spend_cap);
+		assert.deepEqual(committed.usage_baseline, source.usage_baseline);
+		assert.equal(committed.job_cap, source.job_cap);
+		assert.equal(post.mandates.list().length, 1);
+		const frozen = readFileSync(snapshot, "utf8");
+		const accepted = await post.dispatch({ jobId: job.id, task, fetch: false });
+		assert.equal(accepted.receipt, "accepted");
+		assert.equal("mandate_id" in accepted ? accepted.mandate_id : undefined, source.id);
+		await waitFor(() => provider.requests("restart-worker").length, (count) => count === 1,
+			{ timeoutMs: 30_000, what: "committed restarted continuation reaching a real mock worker" });
+		assert.ok(JSON.stringify(provider.requests("restart-worker")[0]!.body).includes(task));
+		assert.equal(readFileSync(snapshot, "utf8"), frozen);
+		assert.equal((await post.mandates.continue(source.id)).receipt_id, receipts[0]!.receipt_id);
+	});
+}

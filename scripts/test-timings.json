@@ -109,7 +109,7 @@
 	"tests/e2e/landing-s11.test.ts": 180000,
 	"tests/e2e/live-smoke.test.ts": 181,
 	"tests/e2e/live.test.ts": 181,
-	"tests/e2e/mandate-continuity.test.ts": 68748,
+	"tests/e2e/mandate-continuity.test.ts": 80299,
 	"tests/e2e/merge-ask.test.ts": 219000,
 	"tests/e2e/mission.test.ts": 67978,
 	"tests/e2e/operator-compact.test.ts": 117261,
