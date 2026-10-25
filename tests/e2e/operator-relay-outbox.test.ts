@@ -248,6 +248,43 @@ test("P9-relay-refresh: a re-raised escalation replaces its pending text, and af
 	assert.equal(provider.remaining("p9-refresh-parent"), 0, "the parent re-raised after the restart");
 });
 
+test("P9-relay-scope: a scheduled-only wake never reaches the outbox; its escalation and a mixed turn do, envelope verbatim", { timeout: 180_000 }, async (t) => {
+	const home = createScratchHome();
+	const ledger = createScratchLedger({ home: home.path, knownProjects: ["demo"] }).ledger;
+	const scheduled = (await ledger.create({ title: "Weather", project: "demo", kind: "research", delivery: "answer", labels: ["schedule:sch-aaaaaa"] })).id;
+	const plain = (await ledger.create({ title: "Other", project: "demo", kind: "research", delivery: "answer" })).id;
+	const restore = withEnv({ PI_HOME: home.path, CP_HOME: home.path, CP_MODE: "multi", CP_HOST_ESCALATION_TICK_SECONDS: "1",
+		FAKE_PARENT_WAKE: "1", FAKE_PARENT_WAKE_JOB: scheduled, FAKE_PARENT_WAKE_TEXT: "P9 scheduled-only wake", FAKE_PARENT_WAKE_ENVELOPE: undefined });
+	const hosts: ParentHostClient[] = [];
+	t.after(() => teardownHome(home, async () => { for (const host of hosts) host.disconnect(); }, restore));
+	const files = relayFiles(home);
+	const startHost = async () => {
+		const host = await attachParentHost({ home: home.path, mode: "multi", timeoutMs: 60_000 });
+		hosts.push(host);
+		await host.request("start", { home: home.path, mode: "multi", model: "mock/parent", piBin: FAKE_PARENT, requestTimeoutMs: 5_000 });
+		return host;
+	};
+	const store = new EscalationStore({ home: home.path, now: () => new Date(Date.now() - 60_000) });
+	const first = await startHost();
+	const raised = (await raiseForGate(store, {
+		schema_version: SCHEMA_VERSION, job_id: scheduled, attempt: 1, verdict: "escalate", cause: "policy",
+		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },
+		reasons: ["conflicting acceptance"], revisions: [], model: "mock/one", decided_at: new Date().toISOString(),
+	}))!;
+	await waitFor(() => files.entries().some((entry) => entry.id === `esc:${raised.id}`), Boolean,
+		{ timeoutMs: 40_000, what: "the scheduled job's escalation relayed" });
+	assert.equal(files.entries().some((entry) => entry.relay.text.includes("P9 scheduled-only wake")), false, "a scheduled-only wake is dropped");
+
+	await first.request("stop").catch(() => undefined);
+	await first.closed;
+	process.env.FAKE_PARENT_WAKE_TEXT = "P9 mixed wake";
+	process.env.FAKE_PARENT_WAKE_ENVELOPE = JSON.stringify({ job_id: plain, status: "done", summary: "npm, Node v24" });
+	await startHost();
+	const [mixed] = await waitFor(() => files.entries().filter((entry) => entry.relay.text.includes("P9 mixed wake")), (items) => items.length === 1,
+		{ timeoutMs: 30_000, what: "the mixed wake relayed" });
+	assert.ok(mixed!.relay.text.endsWith(`\n\nenvelope ${plain} (done), verbatim: npm, Node v24`), mixed!.relay.text);
+});
+
 test("P9-relay-lost-write: a relay the outbox could not hold still reaches a real operator, id-less, in memory", { timeout: 180_000 }, async (t) => {
 	const home = createScratchHome();
 	const provider = await MockProvider.start();
