@@ -3,13 +3,10 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P14 (cp-e2e-migration-p14-0w42) | behavior 15, first PR: session-start nudges through a real parent (P14-nudges), cp-health alerts raised, withdrawn, acknowledged and relayed through a parent and a cp-bridge operator (P14-alerts), and cp-install's model, gateway-key and retired-flag steps on a pty (P14-install, P14-install-models); 21 declarations from 4 files: 21 mapped, 0 retained; 44 controls; the PR3c `--with-br`/`--no-br` assertions in `tests/service-install.test.ts` moved to P14-install; the other 15 files stay `convert`, owned by the P14 follow-on | 4 |
+| P14 (cp-e2e-migration-p14-0w42) | behavior 15: session-start nudges through a real parent (P14-nudges), cp-health alerts raised, withdrawn, acknowledged and relayed through a parent and a cp-bridge operator (P14-alerts), cp-install's model, gateway-key and retired-flag steps on a pty (P14-install, P14-install-models), and the parent host's gateway key hand-off (P14-gateway-key); 25 declarations from 5 files: 25 mapped, 0 retained; the PR3c `--with-br`/`--no-br` assertions in `tests/service-install.test.ts` moved to P14-install | 5 |
 <!-- /manifest:ledger -->
 
-P14 stopped after four of its nineteen files, well below the ~250 KB cap: the limit was this worker's session budget,
-not the size cap or a product blocker. The 15 remaining files stay `convert` for one follow-on job. P14-install
-already pins two of `tests/gateway-key.test.ts`'s four declarations (key path, key validation); its other two
-(`readGatewayKey`, `parentGatewayKey`) are reached only through a parent spawned by the parent host (`parentEnv`).
+P14 converts behavior 15 file by file in one PR; the files still marked `convert` in `p14.md` are its remainder.
 
 Every scenario runs a copy of this checkout's tracked files with stub host tools on a scratch PATH, a scratch HOME
 and a scratch home; cp-install runs on a pty (util-linux `script`) so its /dev/tty prompts are answered. Each
@@ -22,6 +19,7 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | P14-alerts | tests/e2e/service.test.ts | P14-alerts: cp-health failures become one withdrawable command-post escalation each, relayed to the operator |
 | P14-install | tests/e2e/service.test.ts | P14-install: cp-install lists models as the service sees them, asks once per target, and keeps the gateway key 0600 |
 | P14-install-models | tests/e2e/service.test.ts | P14-install-models: cp-install's model step on an empty, unreadable or long listing, and a parent that picks off-list or none |
+| P14-gateway-key | tests/e2e/service.test.ts | P14-gateway-key: the parent host hands a 0600 gateway.env key only to a gateway home's parent, never echoing it |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -48,6 +46,10 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | tests/service-models.test.ts | modelPrompt: one target, numbered, the first marked recommended, default [1]; a fallback shows as its number, its ref or none | P14-install-models | mapped | NC-md-enter, NC-md-inherit, NC-md-enterref, NC-md-none |
 | tests/service-models.test.ts | pickModelReply: empty, a number, a listed ref and none pick; out of range and unlisted refs are errors | P14-install | mapped | NC-md-range, NC-md-unlisted, NC-md-none, NC-md-yes |
 | tests/service-models.test.ts | serviceListEnv: HOME, USER, LOGNAME and the unit PATH only — a shell-only provider key never reaches the listing | P14-install | mapped | NC-md-env, NC-md-dedupe |
+| tests/gateway-key.test.ts | gatewayKeyFile: XDG_CONFIG_HOME, else HOME/.config, else undefined | P14-gateway-key | mapped | NC-gk-xdg, NC-gk-home (P14-install), NC-gk-nohome |
+| tests/gateway-key.test.ts | validGatewayKey: printable ASCII without whitespace, quotes or backslash, 1-4096 chars; the reason never quotes the key | P14-install | mapped | NC-gk-valid, NC-gk-echo |
+| tests/gateway-key.test.ts | readGatewayKey: the rendered key back; a 0644 file is refused naming chmod 600, without the key; absent is neither | P14-gateway-key | mapped | NC-gk-loose, NC-gk-keyline, NC-gk-absent, NC-gk-stderr, NC-gk-logecho; the rendered file: NC-gk-render |
+| tests/gateway-key.test.ts | parentGatewayKey: only for a home with data/capacity.json | P14-gateway-key | mapped | NC-gk-capacity, NC-gk-envwins |
 <!-- /manifest:assertions -->
 
 <!-- manifest:incoming -->
@@ -103,4 +105,12 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | P14-NC-gk-echo | tests/gateway-key.test.ts | P14-install | gateway-key.ts quotes the key in its refusal | the refusal never echoes the key |
 | P14-NC-gk-render | tests/gateway-key.test.ts | P14-install | gateway-key.ts writes KEY= instead of CP_GATEWAY_ADMIN_KEY= | the CP_GATEWAY_ADMIN_KEY= line |
 | P14-NC-gk-mode | tests/gateway-key.test.ts | P14-install | install.ts writes the secret 0644 | the key file is 0600 |
+| P14-NC-gk-nohome | tests/gateway-key.test.ts | P14-gateway-key | gateway-key.ts reads `.config` relative to cwd with no HOME | nowhere to look is no key |
+| P14-NC-gk-loose | tests/gateway-key.test.ts | P14-gateway-key | gateway-key.ts ignores group/other bits | a 0644 key file is refused |
+| P14-NC-gk-keyline | tests/gateway-key.test.ts | P14-gateway-key | gateway-key.ts reads a file with no key line as absent | holds no CP_GATEWAY_ADMIN_KEY= line |
+| P14-NC-gk-absent | tests/gateway-key.test.ts | P14-gateway-key | gateway-key.ts reports an absent file as a problem | an absent key file is neither a key nor a problem |
+| P14-NC-gk-stderr | tests/gateway-key.test.ts | P14-gateway-key | gateway-key.ts drops the host-log line for a refused file | gateway admin key not loaded ... chmod 600 |
+| P14-NC-gk-logecho | tests/gateway-key.test.ts | P14-gateway-key | gateway-key.ts appends the file's text to the chmod refusal | the host log never holds the key |
+| P14-NC-gk-capacity | tests/gateway-key.test.ts | P14-gateway-key | gateway-key.ts skips the capacity.json gate | no capacity.json: another home keeps quota off |
+| P14-NC-gk-envwins | tests/gateway-key.test.ts | P14-gateway-key | cp-bridge.ts never sets the loaded key on the parent env | a gateway home's parent gets the key |
 <!-- /manifest:regressions -->

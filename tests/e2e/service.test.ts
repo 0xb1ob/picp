@@ -16,7 +16,7 @@ import type { CheckRecord, HealthRecord } from "../../src/service/health.ts";
 import {
 	COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, REPO_ROOT, type RpcRecord, type ScriptStep, startPiChild,
 } from "../harness/index.ts";
-import { teardownHome } from "../harness/parent-hosts.ts";
+import { parentHostPids, teardownHome } from "../harness/parent-hosts.ts";
 
 let pkg = "";
 before(() => {
@@ -382,4 +382,80 @@ test("P14-install-models: cp-install's model step on an empty, unreadable or lon
 	const yes = await run("yes", {}, [], ["--yes"]);
 	assert.doesNotMatch(yes, /Choose 1-/);
 	assert.match(yes, /changed: model: parent anthropic\/claude-opus-5-5 \(recommended: in the routing rubric; --parent-model overrides\)/);
+});
+
+/** Pids whose parent is `pid` (Linux /proc). */
+function childrenOf(pid: number): number[] {
+	return readdirSync("/proc").filter((name) => /^\d+$/.test(name)).map(Number).filter((child) => {
+		try {
+			const stat = readFileSync(`/proc/${child}/stat`, "utf8");
+			return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]) === pid;
+		} catch { return false; } // exited while scanning
+	});
+}
+
+/** A cp-bridge session on a fresh home shaped by `setup`: the env its host gave the parent, and the host's log. */
+async function hostedParent(t: TestContext, env: Record<string, string>, setup: (home: string) => void) {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const agentDir = createAgentDir({ provider });
+	t.after(() => teardownHome(home, () => provider.stop(), () => agentDir.cleanup()));
+	setup(home.path);
+	const start = { id: "start", name: "cp_parent", args: { action: "start", home: home.path } };
+	const model = provider.addScript("p14-host", [{ kind: "tool_calls", calls: [start] }, { kind: "text", text: "Started." }], { onExhausted: "repeat" });
+	agentDir.writeModels(provider);
+	const child = startPiChild({ cwd: home.path, model, env: { ...agentDir.env, CP_HOME: home.path, CP_MODE: "multi", ...env }, extensions: [CP_BRIDGE_EXTENSION] });
+	try {
+		await child.prompt("Start the parent.");
+		let environ = "";
+		for (const at = Date.now(); !environ.includes("CP_HOME="); await new Promise((resolve) => setTimeout(resolve, 200))) {
+			if (Date.now() - at > 90_000) throw new Error(`no hosted parent for ${home.path}:\n${child.stderr()}`);
+			const parent = parentHostPids(home.path).flatMap(childrenOf)[0];
+			try { environ = parent ? readFileSync(`/proc/${parent}/environ`, "utf8") : ""; } catch { environ = ""; }
+		}
+		const log = join(home.path, layoutForHome("multi", home.path).state, "parent-host.log");
+		const key = environ.split("\0").find((line) => line.startsWith("CP_GATEWAY_ADMIN_KEY="))?.slice("CP_GATEWAY_ADMIN_KEY=".length);
+		return { key, log: existsSync(log) ? readFileSync(log, "utf8") : "" };
+	} finally {
+		await child.close();
+	}
+}
+
+test("P14-gateway-key: the parent host hands a 0600 gateway.env key only to a gateway home's parent, never echoing it", { timeout: 300_000 }, async (t) => {
+	const capacity = (home: string) => {
+		const data = join(home, layoutForHome("multi", home).data);
+		mkdirSync(data, { recursive: true });
+		writeFileSync(join(data, "capacity.json"), JSON.stringify({ url: "https://gw.example", path: "/api/v1/admin/ops/concurrency" }));
+	};
+	const keyFile = (config: string, text: string, mode = 0o600) => () => {
+		mkdirSync(join(config, "pi-command-post"), { recursive: true, mode: 0o700 });
+		writeFileSync(join(config, "pi-command-post", "gateway.env"), text, { mode });
+	};
+	const scratch = realpathSync(mkdtempSync(join(tmpdir(), "cp-p14-config-")));
+	t.after(() => rmSync(scratch, { recursive: true, force: true }));
+	const xdg = (name: string, text?: string, mode?: number) => {
+		const config = join(scratch, name);
+		if (text !== undefined) keyFile(config, text, mode)();
+		return { XDG_CONFIG_HOME: config };
+	};
+	const KEY = "CP_GATEWAY_ADMIN_KEY=k3y-VALUE\n";
+	const [keyed, plain, loose, blank, absent, homeless] = await Promise.all([
+		hostedParent(t, xdg("keyed", KEY), capacity),
+		hostedParent(t, xdg("plain", KEY), () => {}),
+		hostedParent(t, xdg("loose", KEY, 0o644), capacity),
+		hostedParent(t, xdg("blank", "# nothing\n"), capacity),
+		hostedParent(t, xdg("absent"), capacity),
+		// No XDG_CONFIG_HOME and an empty HOME: no key file at all, not one relative to the host's cwd.
+		hostedParent(t, { HOME: "", XDG_CONFIG_HOME: "" }, (home) => { capacity(home); keyFile(join(home, ".config"), KEY)(); }),
+	]);
+	assert.equal(keyed.key, "k3y-VALUE", "a gateway home's parent gets the key");
+	assert.equal(plain.key, undefined, "no capacity.json: another home keeps quota off");
+	assert.equal(loose.key, undefined, "a 0644 key file is refused");
+	assert.match(loose.log, /cp-bridge: gateway admin key not loaded: \S+gateway\.env is mode 644, readable beyond its owner; chmod 600 /);
+	assert.equal(blank.key, undefined);
+	assert.match(blank.log, /gateway admin key not loaded: \S+gateway\.env holds no CP_GATEWAY_ADMIN_KEY= line/);
+	assert.equal(absent.key, undefined);
+	assert.doesNotMatch(absent.log, /gateway admin key/, "an absent key file is neither a key nor a problem");
+	assert.equal(homeless.key, undefined, "nowhere to look is no key");
+	assert.ok(![keyed, loose, blank].some((run) => run.log.includes("k3y-VALUE")), "the host log never holds the key");
 });
