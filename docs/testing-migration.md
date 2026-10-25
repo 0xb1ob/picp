@@ -96,7 +96,7 @@ P0 deletes `tests/ci-run-ref.test.ts` (3 declarations) and adds `tests/e2e/ci-ev
 unit file's 14 assertions are pinned by a scenario. The other four cannot reach a public consumer and are
 `redundant-unreachable`, as approved by the main session under ask-0088e0332d00 on 2026-10-20. Incoming files
 from the parallel E2E A/B/C jobs are listed under Incoming as they land, not in the baseline. The P0 counts are
-taken on P0's base (`af46cfbf091439d98138f35c80254e74e484ee75`). They start at 4,488, not 4,487, because
+taken on P0's base. They start at 4,488, not 4,487, because
 `tests/e2e/planner-blocked.test.ts` gained one declaration after the pinned baseline. Baseline files keep
 changing on main, so the checker prints the live tree's counts instead of trusting this row.
 
