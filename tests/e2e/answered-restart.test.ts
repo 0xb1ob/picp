@@ -3,7 +3,7 @@
  * started on a home whose answered outbox still holds the previous parent's
  * in-flight reservation.
  *
- * `tests/answered.test.ts` proves the rule inside `AnsweredOutbox`. This file
+ * `tests/answered-retained.test.ts` proves the rule inside `AnsweredOutbox`. This file
  * proves the thing the operator actually experienced, one layer out: the
  * extension's own `session_start` drain, in a pi process, with the wake-up
  * travelling over the real transport and the arrival observer confirming it.
