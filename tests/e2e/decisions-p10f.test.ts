@@ -4,17 +4,20 @@
  * declared by cp_status_block, listed and withdrawn by cp_awaiting and answered by cp_decide.
  */
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { AnsweredOutbox } from "../../src/answered.ts";
 import { AwaitingStore } from "../../src/awaiting.ts";
 import { CheckpointStore } from "../../src/checkpoint.ts";
-import { type AnsweredDecision, type AwaitingItem, DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, LAYOUT, type PipelineRecord, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { type AnsweredDecision, type AwaitingItem, DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, LAYOUT, type PipelineRecord, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { EscalationStore } from "../../src/escalation.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { MandateStore } from "../../src/mandate.ts";
+import { acquireParentLock, releaseParentLock } from "../../src/parent-lock.ts";
 import { PipelineStore } from "../../src/pipeline.ts";
+import { initialStatus } from "../../src/run-artifacts.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MockProvider, type PiChild, startPiChild, waitFor } from "../harness/index.ts";
 
 type Call = { id: string; name: string; args: unknown };
@@ -60,9 +63,10 @@ async function bench(t: TestContext, name: string) {
 			await child.close();
 		}
 	};
-	/** Boots a parent and waits for `until` over its notices, or (with no predicate) for one widget tick. */
-	const idle = async (until?: (notes: string[]) => boolean) => {
+	/** Boots a parent, optionally runs one slash command, then waits for `until` over its notices or one widget tick. */
+	const idle = async (until?: (notes: string[]) => boolean, command?: string) => {
 		const { child, model } = start([{ kind: "text", text: "noted" }]);
+		if (command) await child.prompt(command);
 		try {
 			if (until) await waitFor(() => notesOf(child), until, { timeoutMs: 60_000, what: `${name}: the inherited wake-up` });
 			else await new Promise((resolve) => setTimeout(resolve, 7_000));
@@ -384,6 +388,41 @@ test("P10f-outbox: answers left on disk reach the next parent once, bundled, in 
 	const restarted = await s.idle();
 	assert.deepEqual(answeredNotes(restarted.notes), []);
 	assert.deepEqual(outbox().pending(), []);
+});
+
+test("P10f-lock: a parent refused the home's lock leaves the answered outbox untouched; the next lock holder delivers once and a dead reservation is not work", { timeout: 300_000 }, async (t) => {
+	const s = await bench(t, "p10f-lock");
+	const file = join(s.home, LAYOUT.answeredFile);
+	const decision: AnsweredDecision = {
+		schema_version: SCHEMA_VERSION, id: "aw-checkpoint-cp-dead.merge-f7b8769", type: "authorization", job_id: "cp-dead", decision: "merge?",
+		answer: "approved", answered_by: "operator command", answered_at: "2026-09-06T15:37:49Z",
+	};
+	mkdirSync(dirname(file), { recursive: true });
+	writeFileSync(file, JSON.stringify({ schema_version: SCHEMA_VERSION, updated_at: "2026-09-06T15:37:50Z", pending: [decision], delivered: [] }));
+	const seeded = readFileSync(file, "utf8");
+
+	// This test process holds the home, so the parent it boots is the lock-refused session.
+	const held = acquireParentLock({ home: s.home });
+	assert.ok(held.ok, "the test process takes the home's parent lock");
+	const refused = await s.idle();
+	assert.deepEqual(answeredNotes(refused.notes), [], "a lock-refused parent emits nothing");
+	assert.equal(readFileSync(file, "utf8"), seeded, "and reserves, sends and confirms nothing");
+	assert.ok(releaseParentLock({ home: s.home }));
+
+	// A dead session's reservation and a dead worker whose run still says working: neither is work in progress.
+	const dead = spawnSync("true").pid;
+	await new FleetStore({ home: s.home }).add(job("cp-dead", { worker: { ...job("x").worker!, pid: dead } }));
+	const status = join(s.home, paths.statusFile("cp-dead"));
+	mkdirSync(dirname(status), { recursive: true });
+	writeFileSync(status, JSON.stringify({ ...initialStatus("cp-dead"), phase: "working" }));
+	const sentNow = `${new Date().toISOString().slice(0, 19)}Z`;
+	writeFileSync(file, JSON.stringify({ ...JSON.parse(seeded), sends: [{ id: decision.id, sent_at: sentNow, attempts: 1, owner: "4242.deadbeef" }] }));
+	const counts = (notes: string[]) => notes.filter((note) => note.includes('"counts"')).map((note) => (JSON.parse(note) as { counts: Record<string, number> }).counts)[0];
+	const owner = await s.idle((notes) => counts(notes) !== undefined && new AnsweredOutbox({ home: s.home }).delivered(decision.id), "/status --json");
+	const wakes = answeredNotes(owner.notes);
+	assert.equal(wakes.length, 1, wakes.join("\n---\n"));
+	assert.equal(wakes[0]!.split(`  ${decision.id} [`).length - 1, 1, "the scoped merge id is delivered once");
+	assert.deepEqual([counts(owner.notes)?.working, counts(owner.notes)?.live], [0, 0], "the fleet's working count reads liveness");
 });
 
 test("P10f-mission: cp_next closing a clean mission end wakes nobody; a messy one waits for the operator, whose quote wakes nobody either", { timeout: 300_000 }, async (t) => {

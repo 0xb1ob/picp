@@ -1,21 +1,19 @@
 /**
  * P10f retained, verbatim from tests/answered.test.ts: the answered outbox's send failures, losses, rollbacks,
- * reservations and lock gate. A real parent cannot fail or lose a send on demand; see docs/testing-migration/p10f.md.
+ * reservations and text-only id fallback. No real parent fails or loses a send on demand: docs/testing-migration/p10f.md.
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { AnsweredOutbox, answeredDecision, answeredIdsFromMessage, formatAnsweredNotice } from "../src/answered.ts";
 import type { AwaitingWriters } from "./harness/awaiting-resolve.ts";
 import { CommandPost } from "../src/command-post.ts";
-import { acquireParentLock, holdsParentLock } from "../src/parent-lock.ts";
-import type { AnsweredDecision, FleetRecord, RunStatus } from "../src/contracts.ts";
-import { DEFAULT_ORIGIN, EMPTY_USAGE, LAYOUT, SCHEMA_VERSION } from "../src/contracts.ts";
-import { initialStatus } from "../src/run-artifacts.ts";
-import { assembleStatus } from "../src/status.ts";
+import { acquireParentLock } from "../src/parent-lock.ts";
+import type { AnsweredDecision } from "../src/contracts.ts";
+import { LAYOUT } from "../src/contracts.ts";
 import { createScratchHome } from "./harness/index.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -299,6 +297,28 @@ function mergeAuthorization(): AnsweredDecision {
 	});
 }
 
+test("cp-5mgg: a scoped checkpoint id survives the notice round trip, so it can be confirmed at all", () => {
+	const decisions = [mergeAuthorization()];
+	// The path that broke: a message that reached the parent without its details.
+	// The id was read as `aw-checkpoint-cp-ehsc` — the prefix before the `.` —
+	// which matched nothing pending, so the answer was never confirmed and was
+	// re-emitted every retry window for as long as the session lived.
+	assert.deepEqual(
+		answeredIdsFromMessage({ customType: "cp-answered", content: formatAnsweredNotice(decisions) }),
+		["aw-checkpoint-cp-ehsc.merge-f7b8769f0606"],
+		"the whole id, scope and all",
+	);
+	assert.deepEqual(
+		answeredIdsFromMessage({
+			customType: "cp-answered",
+			content: "DECISION ANSWERED — a human answered aw-checkpoint-cp-x.diff.",
+		}),
+		["aw-checkpoint-cp-x.diff"],
+		"a full stop at the end of a sentence is punctuation, not part of the id",
+	);
+});
+
+
 test("cp-5mgg: the emission is recorded on disk before it is sent, so one session cannot repeat it", () => {
 	const home = createScratchHome();
 	try {
@@ -468,57 +488,8 @@ test("cp-5mgg: in flight means emitted and not yet due again, never merely emitt
 // A dead session's reservation is not this session's (pi-command-post-u9q)
 // ---------------------------------------------------------------------------
 
-/** One fleet record whose worker is gone — the fleet the restarted parent finds. */
-function deadWorkerRecord(jobId: string): FleetRecord {
-	return {
-		job_id: jobId,
-		project: "demo",
-		kind: "ship",
-		delivery: "pr",
-		origin: DEFAULT_ORIGIN,
-		phase: "waiting",
-		worktree: "/tmp/demo",
-		branch: jobId,
-		dispatched_at: "2026-09-06T15:30:00Z",
-		usage: EMPTY_USAGE,
-		worker: {
-			pid: 4242,
-			session_id: "sess-dead",
-			session_file: "/sessions/dead.jsonl",
-			profile: "implementer",
-			role: "implementer",
-			model: "anthropic/claude-sonnet-5",
-			started_at: "2026-09-06T15:30:00Z",
-		},
-	} as FleetRecord;
-}
-
-/** The two sessions this bug is about: one that died, and the one that follows it. */
-const DEAD_SESSION = "4242.deadbeef";
+/** The session that follows a dead one. */
 const NEW_SESSION = "4243.0ff1ce00";
-
-/**
- * The outbox a parent left behind when it died. Written as a file rather than
- * produced by an `AnsweredOutbox` in this process, because that is what a crash
- * leaves: bytes on disk, and no process to ask.
- */
-function crashedOutbox(
-	home: string,
-	contents: { pending?: AnsweredDecision[]; sends?: { id: string; sent_at: string; attempts: number; owner?: string }[]; delivered?: { id: string; delivered_at: string }[] },
-): void {
-	const file = join(home, LAYOUT.answeredFile);
-	mkdirSync(dirname(file), { recursive: true });
-	writeFileSync(
-		file,
-		JSON.stringify({
-			schema_version: SCHEMA_VERSION,
-			updated_at: "2026-09-06T15:37:50Z",
-			pending: contents.pending ?? [],
-			...(contents.sends ? { sends: contents.sends } : {}),
-			delivered: contents.delivered ?? [],
-		}),
-	);
-}
 
 test("u9q: the session that made the send keeps its reservation — no duplicate for a live parent", () => {
 	const home = createScratchHome();
@@ -618,112 +589,6 @@ test("u9q: with no owner injected, two outboxes in one process share it and do n
 	}
 });
 
-test("u9q review: a lock-refused session consumes nothing from the outbox, and the owner still delivers once", async () => {
-	const home = createScratchHome();
-	try {
-		// The attached parent, which took the home at `session_start`.
-		const owner = parentOn(home.path);
-
-		// A second session on the same home: `/cp-decide` in a `pi -p` re-entry, a
-		// second TUI, a headless `/cp-authorize`. Its acquisition is **refused** —
-		// that is the premise, asserted rather than assumed — so it owns nothing and
-		// may consume nothing. It is played by a second pid because in one process a
-		// second acquisition is re-entrant, not a second parent.
-		const SECOND_PID = 999_999;
-		const refused = acquireParentLock({ home: home.path, pid: SECOND_PID, isPidAlive: () => true });
-		assert.equal(refused.ok, false, "the second session must be refused for this test to mean anything");
-		assert.equal(holdsParentLock({ home: home.path, pid: SECOND_PID }), false);
-
-		const strayDrains: Sent[] = [];
-		const secondary = new CommandPost({
-			home: home.path,
-			packageRoot: REPO_ROOT,
-			holdsParentLock: () => holdsParentLock({ home: home.path, pid: SECOND_PID }),
-			// Its own `surfaceAnswered`: the answer trigger, the widget tick and
-			// `session_start` all land here.
-			onAnswered: () => {
-				secondary.drainAnswered((decisions) => strayDrains.push([...decisions]));
-			},
-			mergeAsk: async () => ({ action: "raise", ci: "green", reason: "CI green (test fixture)" }),
-		});
-
-		// The manual surfaces, driven exactly as the slash commands drive them:
-		// `/cp-authorize` (CheckpointStore.decide) and `/cp-decide` on a declared row
-		// (AwaitingStore.answer). Both are single-writer paths and both still record.
-		secondary.checkpoints.request({ jobId: "cp-ship", question: "ship the plan?" });
-		secondary.checkpoints.decide("cp-ship", true, { by: "operator command" });
-		const row = await secondary.awaiting.declare({
-			type: "design",
-			decision: "postgres or sqlite?",
-			why: "schema choice",
-			blocks: "cp-db",
-			job_id: "cp-db",
-		});
-		await secondary.awaiting.answer(row.id, { answer: "sqlite", by: "operator command" });
-
-		// The answers are durable — the gate is on consuming, never on recording,
-		// because a decision a human gave must survive whoever heard it.
-		const queued = secondary.answered.pending().map((decision) => decision.id);
-		assert.equal(queued.length, 2, `both answers are queued: ${JSON.stringify(queued)}`);
-		assert.equal(secondary.checkpoints.get("cp-ship")?.decision, "approved", "and the checkpoint's own record stands");
-
-		// Nothing this session did may have touched the outbox's consumption side.
-		// `updated_at` is stamped by every mutation, so the file's bytes are the
-		// assertion: reserve, emit and acknowledge are all the owner's.
-		const file = join(home.path, LAYOUT.answeredFile);
-		const before = readFileSync(file, "utf8");
-		assert.deepEqual(strayDrains, [], "a lock-refused session emits nothing, on any of its triggers");
-		assert.deepEqual(secondary.drainAnswered(() => assert.fail("a widget tick must not emit either")), []);
-		assert.deepEqual(secondary.confirmAnswered(queued), [], "and it cannot acknowledge an arrival it never had");
-		assert.equal(readFileSync(file, "utf8"), before, "not one byte of the outbox moved");
-		assert.deepEqual(secondary.answered.sends(), [], "no reservation was made");
-		assert.deepEqual(secondary.answered.pending().map((decision) => decision.id), queued, "and nothing was consumed");
-
-		// The owner — same home, same answers — delivers both, exactly once.
-		owner.drain();
-		assert.deepEqual(flat(owner.sent).map((decision) => decision.id).sort(), [...queued].sort());
-		assert.deepEqual(flat(owner.arrived).map((decision) => decision.id).sort(), [...queued].sort());
-		assert.deepEqual(owner.post.answered.pending(), [], "nothing is owed once the owner was observed to receive it");
-		owner.drain();
-		assert.equal(flat(owner.sent).length, 2, "and no later drain repeats it");
-		for (const id of queued) assert.equal(owner.post.answered.delivered(id), true);
-	} finally {
-		home.cleanup();
-	}
-});
-
-test("u9q: a send reservation is not a working parent — the fleet's working count reads liveness", () => {
-	const home = createScratchHome();
-	try {
-		// The other half of the report: the session *looked* busy. Nothing in the
-		// rendered fleet state reads this outbox — `working` is an alive worker with
-		// a `working` run phase, and `StatusFacts` has no outbox in it at all — so a
-		// reservation a dead session left behind can never present as work in
-		// progress. This is the regression test for wiring one in.
-		const decision = mergeAuthorization();
-		crashedOutbox(home.path, {
-			pending: [decision],
-			sends: [{ id: decision.id, sent_at: "2026-09-06T15:37:50Z", attempts: 1, owner: DEAD_SESSION }],
-		});
-		const snapshot = assembleStatus({
-			home: home.path,
-			generated_at: "2026-09-06T15:37:52Z",
-			include: "active",
-			records: [deadWorkerRecord("cp-ship")],
-			runs: new Map([["cp-ship", { ...initialStatus("cp-ship"), phase: "working" } as RunStatus]]),
-			alive: new Map([["cp-ship", false]]),
-			ledger: { ok: true, queried: false },
-		});
-		assert.equal(snapshot.counts.working, 0, "a dead worker is not working, whatever the outbox reserved");
-		assert.equal(snapshot.counts.live, 0);
-
-		const now = new Date("2026-09-06T15:37:52Z");
-		const restarted = new AnsweredOutbox({ home: home.path, now: () => now, retrySeconds: 120, owner: NEW_SESSION });
-		assert.equal(restarted.stats().in_flight, 0, "and the one in-flight number this home computes is per parent");
-	} finally {
-		home.cleanup();
-	}
-});
 
 test("the arrival observer reads ids off the message, and only off a cp-answered one", () => {
 	const decisions = [
