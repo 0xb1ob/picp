@@ -6110,7 +6110,7 @@ only inside the parent's `cp_next` call, whose result already reports "answered 
 open for a human and wakes when answered. The escalation, awaiting and checkpoint
 records (answer, `answered_by`, basis, the revoke) are untouched; a suppressed answer
 queues nothing, so a restart replays nothing, while a queued one is replayed as
-before (`tests/answered.test.ts`).
+before (`tests/e2e/decisions-p10f.test.ts`).
 
 **Skip still writes nothing and wakes nobody.** It never reaches a writer, so
 there is nothing to queue — `state/answered.json` may not even exist afterwards.
