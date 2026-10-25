@@ -790,6 +790,7 @@ test("m3: a passed gate is not authorization", { skip: SKIP, timeout: 600_000 },
 	// P11: the pending checkpoint sits under .pi-command-post/state/checkpoints and the operator's /cp-awaiting lists it;
 	// the planner's research artifact is a plan, so the session_start drain shows no answer card for it.
 	assert.ok(existsSync(join(f.home, ".pi-command-post/state/checkpoints", `${shipId}.json`)));
+	assert.ok(!readFileSync(join(f.home, paths.originalTaskFile(researchId)), "utf8").includes("## Referenced material"), "a task naming no path gets no snapshot");
 	const operator = startRpc({ cwd: REPO_ROOT, args: ["--no-session", "--no-context-files", "-e", COMMAND_POST_EXTENSION], env: { CP_HOME: f.home } });
 	t.after(() => operator.close().then(() => undefined));
 	operator.send({ id: "awaiting", type: "prompt", message: "/cp-awaiting" });

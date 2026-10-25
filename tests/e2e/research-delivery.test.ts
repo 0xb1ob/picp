@@ -5,7 +5,8 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { AnswerCardOutbox } from "../../src/answer-delivery.ts";
@@ -44,6 +45,10 @@ const notices = (pi: { records(): readonly RpcRecord[] }, jobId: string) =>
 	pi.records().filter((r) => r.type === "extension_ui_request" && r.method === "notify" && String(r.message).startsWith(`answer for ${jobId}:`));
 const indexOf = (pi: PiChild, record: RpcRecord | undefined) => (record ? pi.records().indexOf(record) : -1);
 const toolEnd = (pi: PiChild, id: string) => pi.records().find((r) => r.type === "tool_execution_end" && r.toolCallId === id);
+const strings = (value: unknown): string[] =>
+	typeof value === "string" ? [value] : Array.isArray(value) ? value.flatMap(strings) : value && typeof value === "object" ? Object.values(value).flatMap(strings) : [];
+/** Every text the worker's first model request carried: its brief, as the worker read it. */
+const brief = (provider: MockProvider, script: string) => strings(provider.requests(script)[0]?.body.messages).join("\n");
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const jobIds = (home: string) => readJobsDocument(home).jobs.map((job) => job.id);
 const outbox = (home: string) => new AnswerCardOutbox({ home }).read();
@@ -83,6 +88,27 @@ test("P11-answer: an answer queued mid-turn and torn down seconds later reaches 
 	const cards = join(home.path, LAYOUT.answerCardsFile);
 	const queued = join(home.path, "queued-cards.json");
 	const first = () => jobIds(home.path)[0] as string;
+	// Dispatch-time reference snapshots: the answer question names 12 oversized files (byte caps); the blocked one
+	// names external, worktree, state, symlinked, legacy, missing and credential paths plus short files (count cap).
+	// A short root: cp_ask turns the question into the job title, which is capped at 500 characters.
+	const refs = mkdtempSync(join(tmpdir(), "r"));
+	t.after(() => rmSync(refs, { recursive: true, force: true }));
+	mkdirSync(join(home.path, "state"), { recursive: true });
+	mkdirSync(join(home.path, LAYOUT.state), { recursive: true });
+	const big = Array.from({ length: 12 }, (_, i) => join(refs, `b${i}.md`));
+	for (const file of big) writeFileSync(file, "é".repeat(5000));
+	const outside = join(refs, "a b.md"), state = join(home.path, LAYOUT.state, "secret.md");
+	const legacy = join(home.path, "state", "legacy.md"), alias = join(refs, "al.md"), credentials = join(refs, "c.md");
+	writeFileSync(outside, "External requirements\nverbatim.");
+	writeFileSync(state, "STATE-SNAPSHOT-MUST-NOT-LEAK");
+	writeFileSync(legacy, "LEGACY-IS-EXTERNAL");
+	symlinkSync(state, alias);
+	writeFileSync(credentials, `OPENAI_API_KEY=sk-${"a".repeat(48)}`);
+	const short = Array.from({ length: 7 }, (_, i) => join(refs, `s${i}.md`));
+	for (const file of short) writeFileSync(file, "short");
+	const worktreeOf = (id: string) => readFleet(home.path).jobs.find((record) => record.job_id === id)?.worktree as string;
+	const planQuestion = () => `Plan the whole migration? Read \`${outside}\`, ${worktreeOf(first())}/src/config.ts, ${state}, ${alias}, ` +
+		`${legacy}, ${refs}/m.md and ${credentials}; also ${short.join(" ")}.`;
 	const provider = await MockProvider.start();
 	const worker = provider.addScript("p11-answer-worker", answerWorker(home.path, 0), { onExhausted: "repeat" });
 	const blocked = provider.addScript("p11-blocked-worker", [
@@ -95,7 +121,7 @@ test("P11-answer: an answer queued mid-turn and torn down seconds later reaches 
 	const waitCard = (generation: number, copy = "") =>
 		`for i in $(seq 300); do grep -q '"${first()}#${generation}"' "${cards}" 2>/dev/null ${copy}&& break; sleep 0.2; done; sleep 2`;
 	const parent = provider.addScript("p11-answer-parent", [
-		{ kind: "tool_calls", calls: [{ id: "ask", name: "cp_ask", args: { project: "demo", question: QUESTION, model: worker } }] },
+		{ kind: "tool_calls", calls: [{ id: "ask", name: "cp_ask", args: { project: "demo", question: `${QUESTION} See ${big.join(" ")}.`, model: worker } }] },
 		{ kind: "tool_calls", calls: [{ id: "wait", name: "bash", args: () => ({ command: waitCard(1, `&& cp "${cards}" "${queued}" `) }) }] },
 		{ kind: "tool_calls", calls: [{ id: "promote", name: "cp_send", args: () => ({ job_id: first(), message: "Tighten the answer and report again." }) }] },
 		{ kind: "tool_calls", calls: [{ id: "wait-again", name: "bash", args: () => ({ command: waitCard(2) }) }] },
@@ -103,7 +129,7 @@ test("P11-answer: an answer queued mid-turn and torn down seconds later reaches 
 		{ kind: "text", text: "Answered and torn down." },
 	], { onExhausted: "repeat" });
 	const restarted = provider.addScript("p11-answer-restarted", [
-		{ kind: "tool_calls", calls: [{ id: "ask-blocked", name: "cp_ask", args: { project: "demo", question: "Plan the whole migration?", model: blocked } }] },
+		{ kind: "tool_calls", calls: [{ id: "ask-blocked", name: "cp_ask", args: () => ({ project: "demo", question: planQuestion(), model: blocked }) }] },
 		{ kind: "tool_calls", calls: [{ id: "wait-blocked", name: "bash", args: () => ({ command: `for i in $(seq 900); do [ -f "${join(home.path, paths.envelopeFile(jobIds(home.path)[1] as string))}" ] && break; sleep 0.2; done; sleep 2` }) }] },
 		{ kind: "tool_calls", calls: [{ id: "teardown-blocked", name: "cp_teardown", args: () => ({ job_id: jobIds(home.path)[1] }) }] },
 		{ kind: "text", text: "It is blocked." },
@@ -121,6 +147,12 @@ test("P11-answer: an answer queued mid-turn and torn down seconds later reaches 
 	await pi.prompt(`Ask demo: ${QUESTION}`);
 	await pi.waitForSettled(180_000);
 	const job = first();
+	const snapshot = readFileSync(join(home.path, paths.originalTaskFile(job)), "utf8");
+	const section = snapshot.slice(snapshot.indexOf("\n\n## Referenced material"));
+	assert.ok(section.length > 0 && Buffer.byteLength(section) <= 24 * 1024, `the snapshot is byte-capped: ${Buffer.byteLength(section)}`);
+	assert.match(section, /\[truncated: reference byte cap\][\s\S]*\[truncated: total referenced material byte cap\]\n$/);
+	assert.ok(!section.includes("\uFFFD"), "a cap never splits a UTF-8 character");
+	assert.ok(brief(provider, "p11-answer-worker").includes(section.trim().split("\n").slice(0, 4).join("\n")), "the worker's brief carries it");
 	for (const id of ["ask", "wait", "promote", "wait-again", "teardown"]) assert.notEqual(toolEnd(pi, id)?.isError, true, JSON.stringify(toolEnd(pi, id)));
 	assert.equal(readFleet(home.path).jobs.find((record) => record.job_id === job)?.phase, "done", "torn down inside the turn");
 
@@ -159,6 +191,17 @@ test("P11-answer: an answer queued mid-turn and torn down seconds later reaches 
 	await again.prompt("Ask demo for a plan.");
 	await again.waitForSettled(180_000);
 	const plan = jobIds(home.path)[1] as string;
+	assert.equal(worktreeOf(plan), worktreeOf(job), "the pool hands the returned tree out again, so the worktree reference is real");
+	const planBrief = brief(provider, "p11-blocked-worker");
+	assert.match(planBrief, /External requirements\nverbatim\./, "a quoted external path with spaces is inlined");
+	assert.ok(planBrief.includes("LEGACY-IS-EXTERNAL"), "a top-level state/ file is an ordinary external reference");
+	assert.ok(!planBrief.includes("STATE-SNAPSHOT-MUST-NOT-LEAK"), "state paths, symlinked or not, are never snapshotted");
+	assert.ok(!planBrief.includes("export const config"), "worktree paths are never snapshotted");
+	assert.match(planBrief, /m\.md: unavailable: .*ENOENT/);
+	assert.match(planBrief, /appears to contain/, "credential-shaped content is a diagnostic, not a refusal");
+	assert.ok(!planBrief.includes("a".repeat(48)));
+	assert.equal(planBrief.match(/^### \//gm)?.length, 10, "ten snapshots, the eleventh reference omitted");
+	assert.match(planBrief, /\[truncated: 1 references omitted; 10 reference cap\]/);
 	assert.notEqual(toolEnd(again, "ask-blocked")?.isError, true, JSON.stringify(toolEnd(again, "ask-blocked")));
 	await waitFor(() => readFleet(home.path).jobs.find((record) => record.job_id === plan)?.reported_at, Boolean, { timeoutMs: 30_000, what: "the blocked envelope" });
 	assert.equal(readFleet(home.path).jobs.find((record) => record.job_id === plan)?.receipts?.some((receipt) => receipt.kind === "artifact"), true, "the blocked report names an artifact");
