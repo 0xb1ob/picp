@@ -48,7 +48,6 @@
 	"tests/contracts-exports.test.ts": 310,
 	"tests/contracts.test.ts": 104,
 	"tests/cp-bridge-restart-retained.test.ts": 18000,
-	"tests/cp-bridge.test.ts": 50372,
 	"tests/curation.test.ts": 3108,
 	"tests/daemon-backend.test.ts": 20,
 	"tests/daemon-cli.test.ts": 353,

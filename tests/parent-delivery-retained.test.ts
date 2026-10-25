@@ -348,8 +348,8 @@ function swept(proc?: WorkerProcess) {
 	return { box, relays, delivery, advance: (ms: number) => (now = new Date(now.getTime() + ms)), now: () => now };
 }
 
-// #541 review low: P9f-delivery-cap and P9f-send-reconcile sweep at 11 min and 25 h only; the exact edges stay here,
-// verbatim from the deleted unit where it had them (599 s, 24 h + 1 s landed) plus the queued 24 h + 1 s edge.
+// #541 review low: P9f-delivery-cap and P9f-send-reconcile sweep at 11 min and 25 h only; the exact edges stay here:
+// new, pins edges e2e cannot reach (599 s, 24 h + 1 s landed) plus the queued 24 h + 1 s edge.
 test("sweep edges: no overdue notice at 599 s, and a landed or queued send ages out only past 24 h", () => {
 	const ctx = swept();
 	const entry = ctx.box.enqueue("slow");
