@@ -45,17 +45,17 @@
  *     extension, before or after that turn settles, so nothing here can leave a
  *     parent *showing* work it is not doing.
  *
- * `node --test tests/answered-restart.test.ts`
+ * `node --test tests/e2e/answered-restart.test.ts`
  */
 
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { AnsweredOutbox } from "../src/answered.ts";
-import { MandateStore } from "../src/mandate.ts";
-import { createScratchLedger } from "./harness/index.ts";
-import { type AnsweredDecision, LAYOUT, SCHEMA_VERSION, validateAnsweredOutboxFile } from "../src/contracts.ts";
+import { AnsweredOutbox } from "../../src/answered.ts";
+import { MandateStore } from "../../src/mandate.ts";
+import { createScratchLedger } from "../harness/index.ts";
+import { type AnsweredDecision, LAYOUT, SCHEMA_VERSION, validateAnsweredOutboxFile } from "../../src/contracts.ts";
 import {
 	COMMAND_POST_EXTENSION,
 	createAgentDir,
@@ -63,7 +63,7 @@ import {
 	MockProvider,
 	startPiChild,
 	waitFor,
-} from "./harness/index.ts";
+} from "../harness/index.ts";
 
 /** The merge authorization from the incident, answered and never delivered. */
 const ANSWER: AnsweredDecision = {
@@ -166,6 +166,10 @@ test(
 			(delivered) => delivered,
 			{ timeoutMs: 30_000, what: "the answered decision to be stamped delivered" },
 		);
+		// Absence needs a window: a triggered turn starts after the notice, so the first check alone races it.
+		await new Promise((resolve) => setTimeout(resolve, 3_000));
+		assert.equal(provider.requests("u9q-restart-boundary").length, 0, "a no_mandate answer starts no parent turn");
+		assert.equal(child.eventsOfType("agent_start").length, 0, "a no_mandate answer starts no parent turn");
 		const outbox = new AnsweredOutbox({ home: home.path });
 		assert.deepEqual(outbox.pending(), [], "nothing is owed once arrival was observed");
 		assert.deepEqual(outbox.sends(), [], "and the dead session's reservation dies with the entry it described");
