@@ -54,14 +54,14 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | `muxa spawn` / `muxa dispatch` (pane + first brief) | deleted | `WorkerProcess`: spawn `pi --mode rpc`, then an id-correlated `prompt` | `tests/e2e/worker-lifecycle-p8e.test.ts` (P8e send receipts), `tests/e2e/phase1.test.ts` |
 | Paste broker, free-detection, `pending/` | deleted | RPC request/response; `receipt: "accepted"` means pi answered | `tests/e2e/dispatch-s29.test.ts`, `tests/e2e/dispatch-s30.test.ts` |
 | First-brief **receipt heuristics** (Cursor: tail for `Branch:`; Claude: footer `Context: N%`; `unconfirmed`/`unknown`) | deleted | there is nothing to guess: the response is the receipt | `docs/contracts.md` §Dispatch |
-| `muxa send` (mail, promote) | ported | `cp_send` → prompt/steer/follow_up with `delivered\|queued\|failed` | `tests/send.test.ts` |
+| `muxa send` (mail, promote) | ported | `cp_send` → prompt/steer/follow_up with `delivered\|queued\|failed` | `tests/e2e/send-p9g.test.ts` |
 | `muxa who` (roster, idle/busy/ghost) | ported | `fleet.json` + `agent_start`/`agent_settled` + pid probe + observed close | `tests/fleet.test.ts`, `tests/status.test.ts` |
 | `muxa tail NAME` (one-shot read, exit 2 unknown) | ported | `/watch` (bounded, rendered from `events.jsonl`); an unknown run is still refused as `unknown_run`, never shown as idle. A live tail is `tail -f` on the log | `tests/watch.test.ts` |
 | `muxa attach NAME` (attach to a worker's pane and type at it) | **deleted** (cur.3.4) | the attach console is deleted. No decision path runs through a pane or a console. Replacement: a planner question is a blocked envelope answered by `cp_send` or one escalation; plan approval is a mandate decision or one `plan_approval` escalation answered by `cp_decide`. `/watch` and `/cp-plan` stay (inspection). A waiting planner is an ordinary waiting job with the blocker count | `docs/contracts.md` §Attach console deleted; `src/widget.ts` blocker count |
 | `muxa kill NAME\|ID` | ported | teardown's graceful shutdown with an observed close | `tests/e2e/teardown-s17.test.ts` |
 | Broker parent turns (`never ready` / `dispatch refused` / `dispatch unsubmitted` recovery table) | deleted | none of the three states can exist: delivery is acknowledged or it failed | `docs/contracts.md` §Delivery receipts |
 | "Never call `tmux` directly" / muxa boundary rules / the two tests | deleted | one harness, no boundary to police | AGENTS.md (no transport prose; `tests/contract.test.ts` enforces that) |
-| `muxa parent` role check | deleted | a worker is a child process with no dispatch tools; recursion is impossible by construction | `WORKER_FORBIDDEN_TOOLS`, `tests/worker-reporter.test.ts` |
+| `muxa parent` role check | deleted | a worker is a child process with no dispatch tools; recursion is impossible by construction | `WORKER_FORBIDDEN_TOOLS`, `tests/worker-reporter-retained.test.ts` |
 | command-post `scripts/muxa-hook.sh` (pane self-registration) | deleted | no panes to register | — |
 | command-post `share/clis.tsv`, `share/families.tsv` (multi-CLI registry) | out of scope | pi-only by design | README.md |
 
@@ -76,7 +76,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | "Evidence is not authorization" | mechanised | the checkpoint: written `pending` before anyone is asked, answerable only by a human channel | `tests/pipeline.test.ts`, `tests/e2e/phase3.test.ts` |
 | Pipeline: two jobs, dep-linked, three roles | ported | `cp_pipeline start` | `tests/pipeline.test.ts` |
 | Gate verdicts + `cause` ladder (policy / operational / operational_persistent) | mechanised | `decideGate` + `nextAction`; one revise max in code | `tests/gate.test.ts` (every branch), `tests/e2e/phase3.test.ts` |
-| "HARD RULE: workers never mail the findings body" | mechanised | `validateEnvelope`: ≤3 lines, no fences, no headings; a body-shaped summary is rejected in-worker | `tests/worker-reporter.test.ts`, `tests/contracts.test.ts` |
+| "HARD RULE: workers never mail the findings body" | mechanised | `validateEnvelope`: ≤3 lines, no fences, no headings; a body-shaped summary is rejected in-worker | `tests/e2e/worker-reporter-p8f.test.ts`, `tests/contracts.test.ts` |
 | "Parent never reads artifact bodies" | mechanised | `ContextGuard` blocks `read`/`grep`/`bash`/`edit`/`write`; the ledger holds no bodies | `tests/guards.test.ts`, `tests/e2e/phase3.test.ts` |
 | Hung planner (artifact, no envelope) → gate from the path | ported | `advance()` gates it and reports `hung_planner` | `tests/pipeline.test.ts` |
 | "Never re-run research for an implementation failure" | mechanised | `mayRerunResearch` is asserted, not remembered | `tests/failures-retained.test.ts` |

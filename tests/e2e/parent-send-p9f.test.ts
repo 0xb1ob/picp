@@ -234,4 +234,7 @@ test("P9f-send-ladder: a transient failure retries the same send id up to the la
 	const journal = readFileSync(join(f.home, LAYOUT.state, "bridge-retry.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
 	assert.deepEqual(journal.filter((row) => row.event === "outer_retry_attempt" && row.send_id === doomed.send_id).map((row) => row.attempt),
 		Array.from({ length: MAX_OUTER_RETRIES }, (_, i) => i + 1), "each ordinal reserved once, in order");
+	assert.deepEqual(journal.filter((row) => row.event === "outer_retry_exhausted").map((row) => [row.send_id, row.attempts]),
+		[[doomed.send_id, MAX_OUTER_RETRIES]], "exhausted is journaled once, with the spent count");
+	assert.deepEqual(f.relays.filter((relay) => relay.sendId === doomed.send_id), [], "the final outcome went to its waiter, never relayed too");
 });

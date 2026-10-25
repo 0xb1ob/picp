@@ -338,3 +338,41 @@ test("segmentEnd settles each landed send at its own clean turn_end: own reply, 
 	assert.deepEqual(ctx.relays.map((relay) => [relay.sendId, relay.text]), [[drained.id, "answer C"]]);
 	assert.deepEqual(ctx.counted, [false, false, false]);
 });
+
+/** cp-6fyl B1: a delivery on a movable clock whose parent may be dead (`proc` undefined). */
+function swept(proc?: WorkerProcess) {
+	let now = new Date("2030-01-01T00:00:00Z");
+	const box = new ParentSendOutbox({ file: parentSendFile(join(mkdtempSync(join(tmpdir(), "parent-sweep-")), "cp-parent.jsonl")), now: () => now });
+	const relays: BridgeRelay[] = [];
+	const delivery = new ParentDelivery(box, { liveProc: () => proc, emit: (relay) => relays.push(relay), sleep: async () => undefined, journal: () => undefined, countTurn: () => undefined });
+	return { box, relays, delivery, advance: (ms: number) => (now = new Date(now.getTime() + ms)), now: () => now };
+}
+
+// #541 review low: P9f-delivery-cap and P9f-send-reconcile sweep at 11 min and 25 h only; the exact edges stay here,
+// verbatim from the deleted unit where it had them (599 s, 24 h + 1 s landed) plus the queued 24 h + 1 s edge.
+test("sweep edges: no overdue notice at 599 s, and a landed or queued send ages out only past 24 h", () => {
+	const ctx = swept();
+	const entry = ctx.box.enqueue("slow");
+	ctx.advance(599_000);
+	ctx.delivery.sweep(ctx.now());
+	assert.equal(ctx.relays.length, 0, "not yet overdue at 599 s");
+	ctx.advance(2_000);
+	ctx.delivery.sweep(ctx.now());
+	assert.equal(ctx.relays.length, 1);
+	assert.match(ctx.relays[0]?.text ?? "", new RegExp(`send ${entry.id} still queued after 10 min: parent not running`));
+
+	const aged = swept();
+	const queued = aged.box.enqueue("queued");
+	const late = aged.box.enqueue("late");
+	aged.box.markInjected([late.id]);
+	aged.box.markLanded([late.id]);
+	aged.advance(24 * 3_600_000);
+	aged.delivery.sweep(aged.now());
+	assert.deepEqual([aged.box.get(queued.id)?.state, aged.box.get(late.id)?.state], ["queued", "landed"], "exactly 24 h is not stale");
+	aged.advance(1_000);
+	aged.delivery.sweep(aged.now());
+	assert.equal(aged.box.get(late.id)?.state, "undeliverable");
+	assert.match(aged.box.get(late.id)?.error ?? "", /no reply within 24 h of landing/);
+	assert.equal(aged.box.get(queued.id)?.state, "undeliverable");
+	assert.match(aged.box.get(queued.id)?.error ?? "", /^stale: queued /);
+});

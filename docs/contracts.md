@@ -1988,7 +1988,7 @@ present: `-e <entry>` per declared extension and `--skill <dir>` per declared
 skill directory (pi's `docs/skills.md`: `--skill <path>` is "repeatable,
 additive even with `--no-skills`"; the manifest key shape `pi.extensions` /
 `pi.skills` is pi's `docs/packages.md`, and both are pinned by
-`tests/worker-packages.test.ts`).
+`tests/worker-packages-retained.test.ts`).
 `src/worker-packages.ts` detects them under `~/.pi/agent/npm/node_modules`,
 reading each package's own `pi` manifest — no version and no absolute path is
 hardcoded, each package is independent, and a missing, half-installed or
@@ -2108,8 +2108,8 @@ brief and a profile body *do* outrank is a loaded package's guidance — **the
 role contract wins over any package's style or output-length advice**, so a
 three-line envelope summary, a required test and a required check survive
 ponytail (stated in `profiles/implementer.md`, so it reaches the model that
-loads it). `tests/worker-packages.test.ts` asserts the launch argv of every
-profile in `profiles/`: each gets only its configured resources, `--no-extensions`
+loads it). `tests/e2e/worker-packages-p8f.test.ts` asserts the dispatched argv of the implementer, planner and qa
+profiles: each gets only its configured resources, `--no-extensions`
 and `--no-skills` stay on, and no artifact-producing role loads caveman.
 
 **External skills do not reach a worker.** Workers run `--no-skills` and

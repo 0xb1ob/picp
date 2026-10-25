@@ -5,7 +5,7 @@
  * These are the hermetic halves — the policy decision, the slot mechanics and
  * intake's behaviour across a supersession. The live half (a promoted worker
  * that actually files a second envelope through `report_result`) is in
- * tests/send.test.ts, against a real pi child.
+ * tests/e2e/send-p9g.test.ts (P9g-send-held), against a real pi child.
  */
 
 import assert from "node:assert/strict";
