@@ -46,6 +46,14 @@ test("S26: real dashboard restart refuses disabled control, missing session, pen
 	mkdirSync(dirname(controlConfigFile(stateDir)), { recursive: true });
 	writeFileSync(controlConfigFile(stateDir), '{"enabled":false}');
 	await refused(/^dashboard control is off/, 403);
+	// P9f (#533 low): a malformed config is refused as off, naming why; an empty object is on.
+	const configs = [['{"enabled": "no"}', /enabled/], ['{"enabled": false, "origin": "x"}', /unknown key origin/], ["not json", /is unreadable/], ["[]", /is not a JSON object/]] as const;
+	for (const [text, why] of configs) {
+		writeFileSync(controlConfigFile(stateDir), text);
+		await refused(new RegExp(`^dashboard control is off \\(.*${why.source}`), 403);
+	}
+	writeFileSync(controlConfigFile(stateDir), "{}");
+	assert.deepEqual(await status(), { supported: true, blockers: [], reason: null });
 	writeFileSync(controlConfigFile(stateDir), '{"enabled":true}');
 	assert.deepEqual(await status(), { supported: true, blockers: [], reason: null });
 	const session = String((await child.getState()).sessionFile);
@@ -55,7 +63,15 @@ test("S26: real dashboard restart refuses disabled control, missing session, pen
 	writeFileSync(session, saved);
 	const sends = new ParentSendOutbox({ file: parentSendFile(join(home.path, LAYOUT.sessions, "cp-parent.jsonl")) });
 	const pending = sends.enqueue("A legacy parent send awaiting its observed outcome");
+	// P9f: a newer writer's unknown optional fields; the restart preflight's tolerant read still names the pending send.
+	const newer = JSON.parse(readFileSync(sends.file, "utf8")) as { entries: Array<Record<string, unknown>>; future_top?: number };
+	newer.future_top = 1;
+	newer.entries[0]!.future_optional = "later";
+	writeFileSync(sends.file, JSON.stringify(newer));
 	await refused(new RegExp(`cp_parent send ${pending.id} pending`));
+	newer.entries[0]!.state = "nope";
+	writeFileSync(sends.file, JSON.stringify(newer));
+	await refused(/parent send outbox unreadable: .*violates the parent send contract/);
 	rmSync(sends.file);
 	await child.prompt("Begin the busy turn.");
 	await child.waitFor((row) => row.type === "tool_execution_start" && row.toolName === "bash", 20_000);
@@ -79,5 +95,5 @@ test("S26: real dashboard restart refuses disabled control, missing session, pen
 	await refused(/ask ask-abcd answered.*not recorded/);
 	assert.equal((await child.getState()).isStreaming, true, "all refusals leave the busy session running");
 	const requests = readFileSync(controlJournalFile(stateDir), "utf8").trim().split("\n").map((line) => JSON.parse(line)).filter((row) => row.type === "request" && row.kind === "restart");
-	assert.equal(requests.length, 7, "every refusal starts with a journaled request");
+	assert.equal(requests.length, 7 + configs.length + 1, "every refusal starts with a journaled request");
 });

@@ -30,7 +30,7 @@ Zero capabilities are unaccounted for: every row below is one of the five.
 | `cmdp dispatch -- CMD…` (CLI override) | ported (narrowed) | `model` override on `cp_dispatch`; there is one CLI (pi) by design | `tests/routing.test.ts` |
 | `cmdp check --project <worktree> --base` | ported | `cp_check` tool → [`src/preflight.ts`](../src/preflight.ts) | `tests/e2e/preflight-s31.test.ts`, `tests/contract.test.ts` (tool is exposed) |
 | `cmdp lease --project NAME` | deleted (deliberate) | leasing is a step *inside* dispatch; a lease with no worker is an orphan waiting to happen. `LeaseManager` is still a module | `tests/e2e/dispatch-s31.test.ts` |
-| `cmdp jobs add\|set\|reported\|done\|list` | ported | `state/fleet.json` store (add/update), envelope intake (`reported`), teardown (`done`), `/status` (`list`) | `tests/fleet.test.ts`, `tests/intake.test.ts`, `tests/e2e/teardown-s17.test.ts`, `tests/status.test.ts` |
+| `cmdp jobs add\|set\|reported\|done\|list` | ported | `state/fleet.json` store (add/update), envelope intake (`reported`), teardown (`done`), `/status` (`list`) | `tests/fleet.test.ts`, `tests/e2e/intake-p9f.test.ts`, `tests/e2e/teardown-s17.test.ts`, `tests/status.test.ts` |
 | `cmdp artifact path\|add\|get` | ported | `cp_artifact` → [`src/artifacts.ts`](../src/artifacts.ts); `get` requires an out file (no inline bodies) | `tests/e2e/research-delivery.test.ts` (P11-artifact), `tests/guards.test.ts` |
 | `cmdp gate [--model]` | ported | `cp_gate` → [`src/gate.ts`](../src/gate.ts); verdict is a schema, not a regex over prose | `tests/gate.test.ts`, `tests/e2e/phase3.test.ts` |
 | `cmdp teardown <job-id> [--research]` | ported (improved) | `cp_teardown`; the kind comes from the fleet record, so the flag cannot disagree with the job | `tests/e2e/teardown-s17.test.ts`, `tests/e2e/teardown-s18.test.ts` |
@@ -96,8 +96,8 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | Parallel PRs from one base (rebase before the second merge) | ported | AGENTS.md §Fan out (this audit restored it) | `tests/contract.test.ts` |
 | "Freeze scope once validation starts" | ported | AGENTS.md §Fan out (restored) | `tests/contract.test.ts` |
 | "The delivery path owns the rigor; never merge red" | ported | AGENTS.md §Fan out (restored) + PLAN out-of-scope rationale | `tests/contract.test.ts` |
-| Worker envelope: `jobs reported` first, then relay, then teardown | mechanised | intake stamps `reported_at` once and returns `next: hold\|teardown` | `tests/intake.test.ts` |
-| `delivery:pr` hold until CI/review settles | ported | `held` phase + `next: "hold"`; AGENTS.md §Teardown (restored: not at first envelope) | `tests/intake.test.ts`, `tests/contract.test.ts` |
+| Worker envelope: `jobs reported` first, then relay, then teardown | mechanised | intake stamps `reported_at` once and returns `next: hold\|teardown` | `tests/e2e/intake-p9f.test.ts` |
+| `delivery:pr` hold until CI/review settles | ported | `held` phase + `next: "hold"`; AGENTS.md §Teardown (restored: not at first envelope) | `tests/e2e/intake-p9f.test.ts`, `tests/contract.test.ts` |
 | CI arrival/attempt identity, forwarded evidence, foreign/main/parked CI and bounded held repair | ported | real CommandPost and parent/worker processes; native current-head evidence gates delivery | `tests/e2e/landing-ci-watch.test.ts` (05-8–05-13); P3c partial: two files retired, thirteen declarations mapped, two retained; five unfinished files convert-owned by P3c-rest; `docs/testing-migration-p3c-declarations.md` records the remaining scope |
 | `stalled` phase | deleted | structurally impossible: a worker is working, idle or observed-dead | `tests/status.test.ts` ("never invents a phase") |
 | `held` phase | ported | requires `reported_at`, validated | `tests/contracts.test.ts` |
