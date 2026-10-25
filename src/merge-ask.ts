@@ -104,7 +104,7 @@
 import { execFile } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readActionsCi } from "./actions-ci.ts";
+import { ACTIONS_CI_TIMEOUT_MS, readActionsCi } from "./actions-ci.ts";
 import type { CiConfiguredState } from "./ci-configured.ts";
 import {
 	AWAITING_DECISION_MAX_CHARS,
@@ -670,7 +670,7 @@ export const MERGE_ASK_QUERY_TIMEOUT_MS = 15_000;
 
 /** Every Actions run on exactly `head` with its attempt jobs (src/actions-ci.ts); a failed read throws, never `[]`. */
 export function ghCiRuns(options: { cwd: string; exec?: CommandRunner; timeoutMs?: number }): (head: string) => Promise<CiRun[]> {
-	return (head) => readActionsCi({ cwd: options.cwd, exec: options.exec ?? runCommand, sha: head, timeoutMs: options.timeoutMs ?? MERGE_ASK_QUERY_TIMEOUT_MS });
+	return (head) => readActionsCi({ cwd: options.cwd, exec: options.exec ?? runCommand, sha: head, timeoutMs: options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS });
 }
 
 /** Tolerant of gh's field drift: anything without a headSha is not a fact. */

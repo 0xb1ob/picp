@@ -43,8 +43,8 @@ import {
 import { BlockedDispatchError } from "./dispatch.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 import { type Job, parseJobLabels } from "./ledger.ts";
-import { readActionsCi } from "./actions-ci.ts";
-import { type CiRun, type CommandRunner, MERGE_ASK_QUERY_TIMEOUT_MS, runCommand } from "./merge-ask.ts";
+import { ACTIONS_CI_TIMEOUT_MS, readActionsCi } from "./actions-ci.ts";
+import { type CiRun, type CommandRunner, runCommand } from "./merge-ask.ts";
 
 const SCHEDULE_LABEL = "schedule:";
 /** A PR that is gone or private to this token: reported once, then never queried again. */
@@ -108,7 +108,7 @@ export function foreignPrJobs(jobs: readonly ForeignJobRecord[], ownPrUrls: read
 /** Every Actions run on `sha` with its attempt jobs, read on the base repo, where a fork PR's runs are listed. */
 export function ghForeignRuns(options: { cwd: string; exec?: CommandRunner; timeoutMs?: number }) {
 	return (owner: string, repo: string, sha: string): Promise<CiRun[]> =>
-		readActionsCi({ cwd: options.cwd, exec: options.exec ?? runCommand, repo: { owner, repo }, sha, timeoutMs: options.timeoutMs ?? MERGE_ASK_QUERY_TIMEOUT_MS });
+		readActionsCi({ cwd: options.cwd, exec: options.exec ?? runCommand, repo: { owner, repo }, sha, timeoutMs: options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS });
 }
 
 // ---------------------------------------------------------------------------

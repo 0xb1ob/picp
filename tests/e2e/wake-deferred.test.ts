@@ -19,7 +19,7 @@ for (const [mode, name] of [
 	["failure", "wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: failure"],
 	["late", "wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: late"],
 ] as const) {
-test(name, { timeout: 120_000 }, async (t) => {
+test(name, { timeout: 300_000 }, async (t) => {
 	const held = await seedHeldHome({ ciState: "in_progress", review: "none" });
 	writeFileSync(join(held.home.path, LAYOUT.data, "wake-rules.json"), '{"enabled":false}\n');
 	const store = new AwaitingStore({ home: held.home.path });
@@ -54,7 +54,8 @@ test(name, { timeout: 120_000 }, async (t) => {
 	await waitFor(() => new CiWatchStore({ home: held.home.path }).job(JOB)?.last_checked_at, Boolean,
 		{ timeoutMs: 30_000, what: "initial running-CI observation finishes" });
 	const before = queries().length;
-	writeFileSync(held.stateFile, "green:12000\n");
+	// late: three 24 s gate reads outlast the 60 s recheck bound, yet each fits the 30 s Actions CI budget.
+	writeFileSync(held.stateFile, mode === "late" ? "green:24000\n" : "green:12000\n");
 	await waitFor(queries, (calls) => calls.slice(before).some((call) => call.state === "green"),
 		{ timeoutMs: mode === "late" ? 70_000 : 10_000, what: "watch captures green before subsequent gate faults" });
 	if (mode === "failure") writeFileSync(held.stateFile, "broken:12000\n");
@@ -68,7 +69,7 @@ test(name, { timeout: 120_000 }, async (t) => {
 	}
 	const requests = () => provider.requests("s19-race-parent");
 	await waitFor(() => deliveries, (entries) => entries.length > 0,
-		{ timeoutMs: 70_000, what: "real CI observation reaches parent without a status render" });
+		{ timeoutMs: 140_000, what: "real CI observation reaches parent without a status render" });
 	if (mode === "race") assert.deepEqual(deliveries[0]!.states, ["open"],
 		"the CI wake must reach its consumer after the raced gate completes");
 	const context = JSON.stringify(requests()[0]!.body);
@@ -83,13 +84,13 @@ test(name, { timeout: 120_000 }, async (t) => {
 		writeFileSync(held.stateFile, "green2\n");
 	}
 	if (mode === "late") {
-		assert.ok(deliveries[0]!.at - queries()[before + 1]!.at >= 29_000,
+		assert.ok(deliveries[0]!.at - queries()[before + 1]!.at >= 59_000,
 			"the slow CI gate must spend its real deadline before delivering the wake");
 		assert.deepEqual(deliveries[0]!.states, ["deferred", "deferred", "deferred"], "bounded CI delivery must precede the slow gate's writes");
 		assert.equal(store.list("open").length, 0, "the timeout must open nothing");
 		const warnings = child.records().filter((record) => record.type === "extension_ui_request" && String(record.message).includes("deferred rows not re-gated"));
 		assert.equal(warnings.length, 1, "one expired CI recheck produces one operator warning");
-		assert.match(String(warnings[0]!.message), /did not finish within 30000ms/);
+		assert.match(String(warnings[0]!.message), /did not finish within 60000ms/);
 		assert.ok(String(warnings[0]!.message).length <= 320 && !String(warnings[0]!.message).includes("\n"));
 	}
 	await waitFor(() => store.list("open").filter((item) => item.job_id === JOB), (items) => items.length === (mode === "late" ? 3 : 1),
@@ -110,8 +111,8 @@ test(name, { timeout: 120_000 }, async (t) => {
 }
 
 
-test("wake S19: a real CI event cannot open an unreviewed, superseded or unpushed head", { timeout: 180_000 }, async (t) => {
-for (const mode of ["unreviewed", "wrong-head", "missing-head"] as const) await t.test(mode, { timeout: 60_000 }, async (t) => {
+test("wake S19: a real CI event cannot open an unreviewed, superseded or unpushed head", { timeout: 360_000 }, async (t) => {
+for (const mode of ["unreviewed", "wrong-head", "missing-head"] as const) await t.test(mode, { timeout: 120_000 }, async (t) => {
 	const held = await seedHeldHome({ ciState: "in_progress", review: "none" });
 	writeFileSync(join(held.home.path, LAYOUT.data, "wake-rules.json"), '{"enabled":false}\n');
 	if (mode !== "unreviewed") writeReviewPass(held.home.path, held.headSha);
@@ -133,7 +134,7 @@ for (const mode of ["unreviewed", "wrong-head", "missing-head"] as const) await 
 	if (mode === "wrong-head") writeFileSync(held.stateFile, "wrong-head\n");
 	if (mode === "missing-head") held.repo.git("push", "origin", ":cp-held");
 	await waitFor(() => provider.requests("s19-ci-deferred"), (requests) => requests.some((request) => userMessages(request).includes("CI/PR OBSERVED")),
-		{ timeoutMs: 40_000, what: "actual CI wake reaches the parent" });
+		{ timeoutMs: 90_000, what: "actual CI wake reaches the parent" });
 	const store = new AwaitingStore({ home: held.home.path });
 	assert.equal(store.list("open").length, 0, `${mode} must not open a merge decision`);
 	assert.equal(store.list("deferred").length, 1);

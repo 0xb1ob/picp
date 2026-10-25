@@ -233,11 +233,11 @@ test("landing: Actions deadlines stop a hung request and share the budget across
 			? [{ match: runsAt, replies: [{ ...runsBody([run(1, head, "completed", "success")]), untilFile: first }] }, { match: "actions/runs/1/attempts/1/jobs", replies: [{ ...json({ total_count: 0, jobs: [] }), untilFile: last }] }]
 			: [{ match: runsAt, replies: [{ ...runsBody([]), untilFile: last }] }] });
 		const pending = s.integrate(jobId);
-		const release = acrossPages ? setTimeout(() => writeFileSync(first, "release"), 9_000) : undefined;
+		const release = acrossPages ? setTimeout(() => writeFileSync(first, "release"), 18_000) : undefined;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		let result: Awaited<typeof pending> | undefined;
 		try {
-			result = await Promise.race([pending, new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), 22_000); })]);
+			result = await Promise.race([pending, new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), 44_000); })]);
 		} finally {
 			clearTimeout(timer);
 			clearTimeout(release);
