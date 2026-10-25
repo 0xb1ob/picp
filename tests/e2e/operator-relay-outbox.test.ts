@@ -280,11 +280,24 @@ test("P9-relay-scope: a scheduled-only wake never reaches the outbox; its escala
 	await first.request("stop").catch(() => undefined);
 	await first.closed;
 	process.env.FAKE_PARENT_WAKE_TEXT = "P9 mixed wake";
-	process.env.FAKE_PARENT_WAKE_ENVELOPE = JSON.stringify({ job_id: plain, status: "done", summary: "npm, Node v24" });
+	// One turn carries an earlier envelope, a rejected one, a foreign message, a bad id and a blank summary:
+	// only the last accepted, well-formed envelope per job rides on the relay.
+	process.env.FAKE_PARENT_WAKE_ENVELOPE = JSON.stringify([
+		{ job_id: plain, status: "done", summary: "first report" },
+		{ job_id: "cp-rejected", status: "failed", summary: "rejected report", accepted: false },
+		{ job_id: "cp-foreign", status: "done", summary: "recovery text", customType: "cp-recovery" },
+		{ job_id: "../bad id", status: "done", summary: "bad id report" },
+		{ job_id: scheduled, status: "done", summary: "  " },
+		{ job_id: plain, status: "done", summary: "npm, Node v24" },
+	]);
 	await startHost();
 	const [mixed] = await waitFor(() => files.entries().filter((entry) => entry.relay.text.includes("P9 mixed wake")), (items) => items.length === 1,
 		{ timeoutMs: 30_000, what: "the mixed wake relayed" });
 	assert.ok(mixed!.relay.text.endsWith(`\n\nenvelope ${plain} (done), verbatim: npm, Node v24`), mixed!.relay.text);
+	assert.equal(mixed!.relay.text.split("verbatim:").length, 2, "one envelope line: the last accepted, well-formed one");
+	for (const dropped of ["first report", "rejected report", "recovery text", "bad id report"]) {
+		assert.equal(mixed!.relay.text.includes(dropped), false, `${dropped} never rides on the relay`);
+	}
 });
 
 test("P9-relay-lost-write: a relay the outbox could not hold still reaches a real operator, id-less, in memory", { timeout: 180_000 }, async (t) => {

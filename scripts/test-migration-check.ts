@@ -1,6 +1,5 @@
 /** Read-only ledger validator: slice files and rules doc vs the git baseline; `test(` counts; exit 1 on findings. */
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
@@ -14,12 +13,11 @@ interface Args {
 	base?: string;
 	manifest: string;
 	runnerLog?: string;
-	verifyRegressions: boolean;
 	preservedFrom?: string;
 }
 
 function parseArgs(argv: readonly string[]): Args {
-	const args: Args = { manifest: "docs/testing-migration.md", verifyRegressions: false };
+	const args: Args = { manifest: "docs/testing-migration.md" };
 	for (let i = 0; i < argv.length; i += 1) {
 		const flag = argv[i];
 		const value = () => {
@@ -30,7 +28,6 @@ function parseArgs(argv: readonly string[]): Args {
 		if (flag === "--base") args.base = value();
 		else if (flag === "--manifest") args.manifest = value();
 		else if (flag === "--runner-log") args.runnerLog = value();
-		else if (flag === "--verify-regressions") args.verifyRegressions = true;
 		else if (flag === "--preserved-from") args.preservedFrom = value();
 		else throw new Error(`unknown argument ${flag}`);
 	}
@@ -121,6 +118,20 @@ export function deletedWithFeatureFindings(path: string, owner: string, evidence
 	if (sources.length === 0) findings.push(`${path}: deleted-with-feature names no removed source module (src/… or extensions/…)`);
 	for (const source of sources) if (exists(source)) findings.push(`${path}: deleted-with-feature cites ${source}, which still exists`);
 	return findings;
+}
+
+/**
+ * A negative-control row: `ID | Unit file | Scenario | Control | Failing assertion`, the control being the bug patched
+ * back in words. Legacy 8-cell rows (bug commit, patch id, hash, fixed) read their patch id as the control.
+ */
+export function regressionFindings(cells: readonly string[], scenarios: { has(id: string): boolean }): { path: string; findings: string[] } {
+	const [id = "", path = "", scenario = "", control = "", failing = ""] = cells.length === 8 ? [0, 1, 3, 4, 6].map((i) => cells[i] ?? "") : cells;
+	const findings: string[] = [];
+	if (cells.length !== 5 && cells.length !== 8) findings.push(`regression ${id}: ${cells.length} cells, expected ID | Unit file | Scenario | Control | Failing assertion`);
+	if (!scenarios.has(scenario)) findings.push(`regression ${id}: unknown scenario ${scenario}`);
+	if (!control) findings.push(`regression ${id}: needs the control (the bug patched back, in words)`);
+	if (!failing) findings.push(`regression ${id}: needs a failing assertion`);
+	return { path, findings };
 }
 
 /** A `retained` assertion row: its note names the kept test file, other than the unit itself, that still holds it. */
@@ -244,24 +255,11 @@ function main(): number {
 		} else if (!pinned) findings.push(`${path}: "${assertion}" has unknown disposition "${status}"`);
 	}
 
-	const patches = new Map([...docs.join("\n").matchAll(PATCH_RE)].map((m) => [m[1] as string, `${m[2]}\n`]));
 	const proven = new Set<string>();
-	for (const [id = "", path = "", commit = "", scenario = "", patch = "", sha = "", failing = "", fixed = ""] of rows(section(docs, "regressions", findings))) {
-		if (!scenarios.has(scenario)) findings.push(`regression ${id}: unknown scenario ${scenario}`);
-		if (!failing || fixed !== "pass") findings.push(`regression ${id}: needs a failing assertion and a fixed "pass"`);
-		if (!args.verifyRegressions) {
-			proven.add(path);
-			continue;
-		}
-		const body = patches.get(patch);
-		if (!body) findings.push(`regression ${id}: no patch block ${patch}`);
-		else if (createHash("sha256").update(body).digest("hex") !== sha) findings.push(`regression ${id}: patch ${patch} does not hash to ${sha}`);
-		try {
-			git("cat-file", "-e", `${commit}^{commit}`);
-			proven.add(path);
-		} catch {
-			findings.push(`regression ${id}: bug commit ${commit} is not in this repository`);
-		}
+	for (const cells of rows(section(docs, "regressions", findings))) {
+		const row = regressionFindings(cells, scenarios);
+		findings.push(...row.findings);
+		proven.add(row.path);
 	}
 	for (const [path, entry] of disposition) {
 		if (entry.kind !== "deleted") continue;
