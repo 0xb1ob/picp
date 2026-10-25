@@ -66,7 +66,7 @@ export interface PackageBench {
 	post: CommandPost;
 	provider: MockProvider;
 	agentDir: AgentDir;
-	job(slug: string, kind?: "ship" | "research"): Promise<string>;
+	job(slug: string, kind?: "ship" | "research", delivery?: "local" | "pr" | "pipeline" | "answer"): Promise<string>;
 	script(name: string, steps: ScriptStep[]): string;
 	events(jobId: string, type: string): Array<Record<string, unknown>>;
 }
@@ -91,7 +91,7 @@ export async function packageBench(t: { after(fn: () => void | Promise<void>): v
 	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
 	execFileSync("git", ["clone", "--quiet", repo.remote as string, post.registry.pathOf("demo")]);
 	const clone = post.registry.pathOf("demo");
-	const pool = enableTreehouse(clone, { maxTrees: 4 });
+	const pool = enableTreehouse(clone, { maxTrees: 8 });
 	t.after(async () => {
 		await post.shutdown();
 		for (const [key, value] of Object.entries(saved)) {
@@ -114,8 +114,8 @@ export async function packageBench(t: { after(fn: () => void | Promise<void>): v
 		post,
 		provider,
 		agentDir,
-		async job(slug, kind = "ship") {
-			return (await post.ledger().create({ title: slug, project: "demo", delivery: kind === "ship" ? "local" : "pipeline", kind, slug })).id;
+		async job(slug, kind = "ship", delivery) {
+			return (await post.ledger().create({ title: slug, project: "demo", delivery: delivery ?? (kind === "ship" ? "local" : "pipeline"), kind, slug })).id;
 		},
 		script(name, steps) {
 			const model = provider.addScript(name, steps);

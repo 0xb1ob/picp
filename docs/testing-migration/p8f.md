@@ -3,14 +3,13 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P8f (cp-e2e-migration-p8f-skvg) | behavior 04, sixth slice: optional worker packages through cp_dispatch, role activation (04-36) and resolution faults (04-37) in `tests/e2e/worker-packages-p8f.test.ts`: `tests/worker-packages.test.ts` 12 mapped, 22 retained in `tests/worker-packages-retained.test.ts`; the #543 review lows (a control for the kill -9 row, the p8e incoming range, three narrowings noted or pinned, stale citations); `tests/worker-reporter.test.ts` stays `convert` for a follow-on slice | 1 (`tests/worker-packages.test.ts`) |
+| P8f (cp-e2e-migration-p8f-skvg) | behavior 04, sixth slice: optional worker packages through cp_dispatch, role activation (04-36) and resolution faults (04-37) in `tests/e2e/worker-packages-p8f.test.ts`: `tests/worker-packages.test.ts` 12 mapped, 22 retained in `tests/worker-packages-retained.test.ts`; the worker reporter on dispatched and gated workers, envelopes (04-38), plans (04-39), guards (04-40) and verdicts (04-41) in `tests/e2e/worker-reporter-p8f.test.ts`: `tests/worker-reporter.test.ts` 20 mapped, 27 retained in `tests/worker-reporter-retained.test.ts`; the #543 review lows (a control for the kill -9 row, the p8e incoming range, three narrowings noted or pinned, stale citations) | 2 (`tests/worker-packages.test.ts`, `tests/worker-reporter.test.ts`) |
 <!-- /manifest:ledger -->
 
 P8f (job `cp-e2e-migration-p8f-skvg`) is the sixth behavior-04 slice. Fake packages sit in the parent's pi agent dir
 as `pi install` lays them out, and real workers are dispatched through a real CommandPost; argv, environment and the
 model's offered tools are read from the live worker. Each control below changed one guard, failed in the named case,
-and was restored. `tests/worker-reporter.test.ts` (1539 lines) is untouched: one job could not carry both files'
-mapping and controls, so it stays `convert` in p8.md for one follow-on, all or nothing.
+and was restored. The two files close P8's `convert` rows.
 
 `tests/worker-packages.test.ts` retains 22 of 34 (65%). Eleven pin pi's own `DefaultPackageManager` on fixture
 layouts (empty, one or both installed, malformed, glob, unconfigured, symlinked or skills-only, pi-lens absent):
@@ -19,6 +18,14 @@ the machine's real install and skips without it. Two pin frozen defaults and nam
 `packages:` override or a never-list name in a profile (profiles are package data), one drives a spawn racing an
 unsettled resolution, and one scans src/ for spawn sites. The gate-reviewer cannot be cp_dispatched (its brief needs
 the gate's task), so the caveman row naming it stays whole; the per-role and web rows below note that narrowing.
+
+`tests/worker-reporter.test.ts` maps its 20 real-worker cases onto four e2e cases: implementers and planners are
+cp_dispatched and gate reviewers run through cp_gate, so records, repair prompts, caps and refusals are read from the
+run dir, the run log, the fleet failure and the model's requests. It retains 27 of 47 (57%). The 26 pure-helper units
+(job identity, rejection text, edit-failure causes and near-miss lines, the miss counter, abort batches, the
+credential, redaction and silent-bash branches, local checks, head checks, the answer bound, verdict clamping) cover
+branches no dispatched worker is scripted to hit; 04-40 and 04-41 pin one consumer outcome of each family. The
+recursion guard stays because a dispatched worker is never offered a parent-only tool, so nothing can call one.
 
 The #543 lows: the kill -9 row (04-20) gets NC-P8f-kill-close; the p8e incoming row now reads 04-27..04-32; the
 malformed script cap now pins "no branch" in 04-35, and the prompt-to-shutdown and busy-receipt rows note what they
@@ -29,7 +36,7 @@ p8b.md, `scripts/test-shards.ts` and ci.yml cite none of them, and the deleted f
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
-| P8f | 04 | tests/e2e/worker-packages-p8f.test.ts | 2 new |
+| P8f | 04 | tests/e2e/worker-packages-p8f.test.ts`, `tests/e2e/worker-reporter-p8f.test.ts | 6 new |
 <!-- /manifest:prs -->
 
 <!-- manifest:scenarios -->
@@ -37,6 +44,10 @@ p8b.md, `scripts/test-shards.ts` and ci.yml cite none of them, and the deleted f
 |---|---|---|
 | 04-36 | tests/e2e/worker-packages-p8f.test.ts | P8f packages: each dispatched role loads only its installed packages and their tools, never caveman, a skill file or a never-list skill; an operator-named skill reaches its own job |
 | 04-37 | tests/e2e/worker-packages-p8f.test.ts | P8f package faults: a failed resolution spawns the bare argv and says why; an unkeyed web provider withholds pi-web-access until a key arrives; a directory manifest reaches -e as entry files |
+| 04-38 | tests/e2e/worker-reporter-p8f.test.ts | P8f reporter envelopes: a ship report is filed once at the worker, a wrong head or a contract break is repaired in-run, a re-report is a no-op or refused, and past the cap the job fails envelope_invalid |
+| 04-39 | tests/e2e/worker-reporter-p8f.test.ts | P8f reporter plans: a blocked planner report is first-class, a body-shaped blocker and an oversize plan_summary are repaired, and neither a plan nor an answer opens a console hold |
+| 04-40 | tests/e2e/worker-reporter-p8f.test.ts | P8f reporter guards: a CI wait, a credential probe and a state-bearing web call are refused while plain calls run; token output is redacted; silent bash and anchor-edit failures are enriched |
+| 04-41 | tests/e2e/worker-reporter-p8f.test.ts | P8f reporter verdicts: a gate reviewer files one schema-valid verdict, over-long items are clamped with the original kept, a malformed verdict is repaired in-run, and an exhausted repair is an operational gate |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -76,6 +87,52 @@ p8b.md, `scripts/test-shards.ts` and ci.yml cite none of them, and the deleted f
 | tests/worker-packages.test.ts | the never-list is never activated, by any role or any profile override | — | retained | Verbatim in tests/worker-packages-retained.test.ts. Missing entry point for the override half: profiles are package data; 04-36 pins never-list skills staying off (NC-P8f-single). |
 | tests/worker-packages.test.ts | a spawn started before resolution settles waits for it and still gets the role's packages | — | retained | Verbatim in tests/worker-packages-retained.test.ts. Missing entry point: a dispatch cannot be timed ahead of an unsettled resolution. |
 | tests/worker-packages.test.ts | every WorkerManager spawn site in src/ awaits ready() first | — | retained | Verbatim in tests/worker-packages-retained.test.ts. A source scan of src/ with no runtime entry point. |
+| tests/worker-reporter.test.ts | a worker session produces a valid envelope file | 04-38 | mapped | the dispatched implementer's record is the report as sent, attempt 1, with a timestamp and no rejection file, and the call ends the run; controls NC-P8f-noop, NC-P8f-write-once |
+| tests/worker-reporter.test.ts | a head_sha that is not worktree HEAD is repaired in-run | 04-38 | mapped | attempt 2 carries the real head and the repair prompt names it; control NC-P8f-head |
+| tests/worker-reporter.test.ts | an invalid envelope is repaired within the cap | 04-38 | mapped | a wrong job id and a body-shaped summary are repaired to attempt 2 in two model turns; control NC-P8f-repair |
+| tests/worker-reporter.test.ts | a body-shaped planner blocker is rejected with the repair prompt | 04-39 | mapped | the second request carries the rejection, the artifact hint and the fix-these-points line; control NC-P8f-repair |
+| tests/worker-reporter.test.ts | repair is bounded: past the cap the job fails as envelope_invalid | 04-38 | mapped | no envelope, envelope-rejected.json with the cap and the branch and pr_url errors, and the fleet failure is envelope_invalid naming it; controls NC-P8f-repair, NC-P8f-reject-file |
+| tests/worker-reporter.test.ts | blocked reports are first-class | 04-39 | mapped | a blocked planner report is filed with its blockers and reaches intake as a report. No control of its own: it takes the filing path NC-P8f-noop and NC-P8f-write-once break in 04-38 |
+| tests/worker-reporter.test.ts | re-reporting is idempotent, and contradicting a report is refused | 04-38 | mapped | three calls in one turn leave attempt 1; the run log shows the no-op and the refusal; controls NC-P8f-noop, NC-P8f-write-once. Narrowed: one turn, not three prompts |
+| tests/worker-reporter.test.ts | recursion guard: parent-only tools are blocked inside a worker | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Missing entry point: no dispatched worker is offered a parent-only tool to call. |
+| tests/worker-reporter.test.ts | web egress guard: a web call carrying command-post state is refused, a clean one runs (cp-if9x) | 04-40 | mapped | a planner's web_search with a state path never runs, a clean query does; control NC-P8f-web |
+| tests/worker-reporter.test.ts | CI-wait guard: a sleep-then-poll bash call is refused, a real command is not (cp-kzc) | 04-40 | mapped | the poll is refused naming head_sha and never reaches GitHub, echo still runs; control NC-P8f-ci-wait |
+| tests/worker-reporter.test.ts | N2: bash token output is redacted before the session JSONL and the model see it | 04-40 | mapped | the tool end, the worker's session file and the next request carry [REDACTED] and no token; control NC-P8f-redact |
+| tests/worker-reporter.test.ts | a gate-reviewer session produces a schema-valid verdict file | 04-41 | mapped | cp_gate's reviewer files a schema-valid attempt-1 verdict in one turn and the gate reads pass; control NC-P8f-role-tool |
+| tests/worker-reporter.test.ts | an over-long reason is clamped and recorded, not rejected — and the original survives | 04-41 | mapped | clamped to GATE_REVIEW_ITEM_MAX at attempt 1, the raw copy holds both originals and the reviewer is told its path; control NC-P8f-clamp |
+| tests/worker-reporter.test.ts | a malformed verdict is repaired in-run, without re-reading the artifact | 04-41 | mapped | a wrong job id and revise without revisions repair to attempt 2 in two turns; control NC-P8f-repair |
+| tests/worker-reporter.test.ts | verdict repair is bounded, and exhaustion is visible to the parent | 04-41 | mapped | no verdict, verdict-rejected.json with the cap and a revisions error, and the gate reads escalate/operational; controls NC-P8f-repair, NC-P8f-reject-file |
+| tests/worker-reporter.test.ts | a planner envelope files without a console hold | 04-39 | mapped | a dispatched planner's plan files at attempt 1 with no rejection and no console question. No control: no guard of ours opens a question to remove |
+| tests/worker-reporter.test.ts | an oversize plan_summary is repaired, then filed | 04-39 | mapped | attempt 2 carries the short goal; control NC-P8f-repair |
+| tests/worker-reporter.test.ts | review: an answer job never asks for review | 04-39 | mapped | the answer job's report files and opens no console question. No control: an absence with no guard to remove |
+| tests/worker-reporter.test.ts | review: an implementer never asks for review | 04-38 | mapped | the implementer's report opens no console question. No control: an absence with no guard to remove |
+| tests/worker-reporter.test.ts | exactly one terminating tool per role | 04-38 | mapped | the implementer sees report_result only, the gate reviewer report_verdict only (04-41) and its description states both bounds; controls NC-P8f-role-tool, NC-P8f-verdict-prose |
+| tests/worker-reporter.test.ts | job identity comes from the environment and fails closed | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Missing entry point: dispatch always sets a complete CP_* environment. |
+| tests/worker-reporter.test.ts | rejection text names the fixes and the remaining budget | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Pure formatter; 04-38 and 04-39 pin its text in the repair prompt (NC-P8f-repair). |
+| tests/worker-reporter.test.ts | edit failures are diagnosed by cause, not left for the worker to guess | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Pure classifier over every cause; 04-40 pins stale_anchor (NC-P8f-enrich). |
+| tests/worker-reporter.test.ts | a not-found edit points at the nearest real line instead of leaving the worker to re-read blind | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Pure helper over a fixture file; no dispatched worker is scripted against pi's edit tool. |
+| tests/worker-reporter.test.ts | a not-unique edit lists every line it matched, not just the count | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Pure helper over a fixture file. |
+| tests/worker-reporter.test.ts | an overlap failure is passed through unenriched — the built-in message already names both indices | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Pure helper; an absence with no consumer outcome. |
+| tests/worker-reporter.test.ts | an unreadable file still gets the cause and hint, just no near-miss line | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Pure helper over a missing path. |
+| tests/worker-reporter.test.ts | replace/insert failures get a cause and next move, like edit | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Pure helper over every anchor cause; 04-40 pins stale_anchor (NC-P8f-enrich). |
+| tests/worker-reporter.test.ts | miss counter: identical = same scope and cause (not same input); scopes never pool; resets clear runs | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Counter internals; 04-40 pins the third identical miss (NC-P8f-enrich). |
+| tests/worker-reporter.test.ts | credential guards are blocked at tool_call (N1, N2, N5) | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. The bulk-copy, secret-search and allowed halves; 04-40 pins the gh auth probe (NC-P8f-cred). |
+| tests/worker-reporter.test.ts | tool_result handler: bash token shapes are redacted, success or error | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. The error and silent-command halves; 04-40 pins a successful bash (NC-P8f-redact). |
+| tests/worker-reporter.test.ts | tool_result handler: replace/insert are enriched, and the 3rd identical miss on a file appends the re-read line | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. The insert and edit halves; 04-40 pins three replace misses (NC-P8f-enrich). |
+| tests/worker-reporter.test.ts | tool_result handler: misses on different files are not pooled; an input path is preferred | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Counter scoping over handcrafted results; the fake tool cannot vary its path per call. |
+| tests/worker-reporter.test.ts | tool_result handler: a successful read resets the run, including the path-less fallback | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Counter reset over handcrafted results. |
+| tests/worker-reporter.test.ts | tool_result handler: successes and unrelated results are left untouched | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. An absence; 04-40's plain bash and web calls run unchanged. |
+| tests/worker-reporter.test.ts | a replace batch reports the cause once; sibling E_OP_ABORTED lines do not restate it or count as misses | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Missing entry point: a batch abort needs the real hashline tool's batch ids. |
+| tests/worker-reporter.test.ts | an E_OP_ABORTED line with no batch id is never deduped onto another operation | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Same batch-id input. |
+| tests/worker-reporter.test.ts | a successful edit, replace, or insert clears remembered abort batches | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Same batch-id input. |
+| tests/worker-reporter.test.ts | a bash non-zero exit with no output names the command that failed | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. The truncation and unchanged branches; 04-40 pins `Command: false` (NC-P8f-silent). |
+| tests/worker-reporter.test.ts | findEditMatchLines falls back to the first non-blank line, then a short prefix, when there is no exact hit | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Pure helper. |
+| tests/worker-reporter.test.ts | local checks protect the artifact and research porcelain | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Fixture-path branches; P9e-reporter pins the missing-artifact repair end to end. |
+| tests/worker-reporter.test.ts | headShaErrors: ship/done needs the worktree HEAD; others untouched | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. The non-done and unreadable branches; 04-38 pins a wrong head (NC-P8f-head). |
+| tests/worker-reporter.test.ts | localChecks compares a ship report against the real worktree HEAD | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Same check over a scratch repo; 04-38 pins it (NC-P8f-head). |
+| tests/worker-reporter.test.ts | cp-u3o4: an answer over the bound is refused repairably; at the bound it is accepted | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Byte-exact bound pairs; 04-39 files an answer under it. |
+| tests/worker-reporter.test.ts | report_verdict advertises a lenient item bound and keeps every other bound of the contract | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Schema comparison; 04-41 pins the clamp outcome (NC-P8f-clamp). |
+| tests/worker-reporter.test.ts | clampVerdictItems hard-cuts over-long items to the strict cap and leaves the rest alone | — | retained | Verbatim in tests/worker-reporter-retained.test.ts. Pure helper edge cases; 04-41 pins the clamp (NC-P8f-clamp). |
 <!-- /manifest:assertions -->
 
 <!-- manifest:regressions -->
@@ -93,6 +150,20 @@ p8b.md, `scripts/test-shards.ts` and ci.yml cite none of them, and the deleted f
 | NC-P8f-error | tests/worker-packages.test.ts | 04-37 | src/worker-packages.ts: a failed resolution returns no error | pi's own failure leads the run-log line |
 | NC-P8f-dir | tests/worker-packages.test.ts | 04-37 | src/worker-packages.ts: an extension resolves to its directory | worker exited (code=1 signal=null) before responding: Failed to load extension ".../ponytail/extensions" |
 | NC-P8f-kill-close | tests/worker-process.test.ts | 04-20 | src/worker-process.ts: a signalled close never resolves `closed` | timed out after 30000ms waiting for the recorded death |
+| NC-P8f-noop | tests/worker-reporter.test.ts | 04-38 | extensions/worker-reporter/index.ts: an identical re-report is not recognised | an identical re-report is a no-op |
+| NC-P8f-write-once | tests/worker-reporter.test.ts | 04-38 | extensions/worker-reporter/index.ts: an existing record is not checked | neither re-report touches the record |
+| NC-P8f-repair | tests/worker-reporter.test.ts | 04-38 | extensions/worker-reporter/index.ts: no repair attempt is offered | timed out waiting for the accepted envelope; 04-39 and 04-41 fail the same way |
+| NC-P8f-reject-file | tests/worker-reporter.test.ts | 04-38 | extensions/worker-reporter/index.ts: the rejection file is never written | the capped job's failure; 04-41's verdict-rejected.json read fails too |
+| NC-P8f-head | tests/worker-reporter.test.ts | 04-38 | extensions/worker-reporter/head.ts: head_sha is never compared to HEAD | the corrected head is attempt 2 |
+| NC-P8f-ci-wait | tests/worker-reporter.test.ts | 04-40 | extensions/worker-reporter/index.ts: a CI wait is not blocked | timed out after 90000ms waiting for the guard job's 8 tool results |
+| NC-P8f-cred | tests/worker-reporter.test.ts | 04-40 | extensions/worker-reporter/index.ts: a gh auth probe is not blocked | a credential probe is refused with the sanctioned read |
+| NC-P8f-web | tests/worker-reporter.test.ts | 04-40 | extensions/worker-reporter/index.ts: a state-bearing web call is not blocked | a web call carrying command-post state never runs |
+| NC-P8f-redact | tests/worker-reporter.test.ts | 04-40 | extensions/worker-reporter/index.ts: bash output is not redacted | tool_execution_end carries [REDACTED] |
+| NC-P8f-silent | tests/worker-reporter.test.ts | 04-40 | extensions/worker-reporter/index.ts: a silent bash failure is not enriched | a silent non-zero exit names its command |
+| NC-P8f-enrich | tests/worker-reporter.test.ts | 04-40 | extensions/worker-reporter/index.ts: edit failures are not enriched | /cause: stale_anchor/ |
+| NC-P8f-clamp | tests/worker-reporter.test.ts | 04-41 | extensions/worker-reporter/index.ts: clampVerdictItems never clamps | an over-long item is clamped, not rejected |
+| NC-P8f-role-tool | tests/worker-reporter.test.ts | 04-41 | extensions/worker-reporter/index.ts: the gate reviewer is not given report_verdict | a reviewer reports only a verdict |
+| NC-P8f-verdict-prose | tests/worker-reporter.test.ts | 04-41 | extensions/worker-reporter/index.ts: the 400-character cap leaves the description | the reason cap is in the prose the model reads |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->
@@ -101,10 +172,13 @@ p8b.md, `scripts/test-shards.ts` and ci.yml cite none of them, and the deleted f
 | tests/e2e/worker-packages-p8f.test.ts | P8f | behavior 04, optional worker packages through cp_dispatch; scenarios 04-36..04-37 |
 | tests/harness/package-home.ts | P8f | e2e harness: a CommandPost over a pi agent dir with fake installed packages |
 | tests/worker-packages-retained.test.ts | P8f | convert-owned; 22 declarations of tests/worker-packages.test.ts retained verbatim |
+| tests/e2e/worker-reporter-p8f.test.ts | P8f | behavior 04, the worker reporter on dispatched and gated workers; scenarios 04-38..04-41 |
+| tests/worker-reporter-retained.test.ts | P8f | convert-owned; 27 declarations of tests/worker-reporter.test.ts retained verbatim |
 <!-- /manifest:incoming -->
 
 <!-- manifest:baseline -->
 | File | Disposition | Owner | Evidence |
 |---|---|---|---|
 | `tests/worker-packages.test.ts` | deleted | P8f | behavior 04: 12 mapped (04-36, 04-37), 22 retained in tests/worker-packages-retained.test.ts; controls NC-P8f-role, NC-P8f-skill, NC-P8f-single, NC-P8f-lens-flags, NC-P8f-lens-env, NC-P8f-web-tools, NC-P8f-web-enable, NC-P8f-mention, NC-P8f-withhold, NC-P8f-error, NC-P8f-dir |
+| `tests/worker-reporter.test.ts` | deleted | P8f | behavior 04: 20 mapped (04-38..04-41), 27 retained in tests/worker-reporter-retained.test.ts; controls NC-P8f-noop, NC-P8f-write-once, NC-P8f-repair, NC-P8f-reject-file, NC-P8f-head, NC-P8f-ci-wait, NC-P8f-cred, NC-P8f-web, NC-P8f-redact, NC-P8f-silent, NC-P8f-enrich, NC-P8f-clamp, NC-P8f-role-tool, NC-P8f-verdict-prose |
 <!-- /manifest:baseline -->
