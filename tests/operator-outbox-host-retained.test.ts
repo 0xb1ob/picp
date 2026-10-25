@@ -1,7 +1,6 @@
 /**
- * Retained from tests/operator-outbox-host.test.ts (P9b): the window between a relay's handoff and pi's `message_start`.
- * The real bridge hands off only between runs, and pi puts the message in context in the same tick, so no entry point
- * holds that window open; a fake pi does. See testing-migration/p9.md.
+ * Retained from operator-outbox-host.test.ts (P9b): the handoff-to-`message_start` window. The real bridge hands off
+ * between runs and pi enters it in the same tick, so only a fake pi holds that window open (testing-migration/p9.md).
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
