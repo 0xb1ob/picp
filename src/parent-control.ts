@@ -30,7 +30,8 @@ export function recordSpawnedSession(home: string, reported: unknown, model: str
 		return;
 	}
 	const file = parentControlFile(home);
-	// The path repair keeps a saved model: start precedence (tests/cp-bridge.test.ts) treats it as the operator's choice.
+	// The path repair keeps a saved model: start precedence treats it as the operator's choice
+	// (tests/e2e/cp-bridge-p9h.test.ts).
 	let saved: unknown;
 	if (existsSync(file)) {
 		try { saved = (JSON.parse(readFileSync(file, "utf8")) as { model?: unknown }).model; }
