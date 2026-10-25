@@ -5,7 +5,7 @@ import { run, SKIP, startStack } from "./landing-helpers.ts";
 
 const hang = { untilFile: "/nonexistent/never" };
 const cases = [
-	// Hangs past the per-call slot (killed at 6 s); the old code gave it the whole 15 s budget and failed the tick.
+	// Hangs past the per-call slot (killed at 12 s); the old code gave it the whole 30 s budget and failed the tick.
 	["a jobs read that exceeds its slot", [hang, { pass: true }], 411],
 	// Three empty 200s outlast get()'s own backoff, so only retryTransientRead's second read can recover the tick.
 	["empty 200 jobs reads that outlast the in-read backoff", [{ stdout: "" }, { stdout: "" }, { stdout: "" }, { pass: true }], 412],
@@ -22,7 +22,7 @@ for (const [title, replies, number] of cases) {
 	});
 }
 
-// Two 6 s hangs plus backoff spend ~13 of 15 s, then a transient read; the retry gets the ~2 s left, not a fresh 15 s.
+// Two 12 s hangs plus backoff spend ~25 of 30 s, then a transient read; the retry gets the ~5 s left, not a fresh 30 s.
 test("ci watch tick: the transient retry never extends past the original deadline", { skip: SKIP, timeout: 120_000 }, async (t) => {
 	const s = await startStack(t);
 	const live = await s.held("retry within deadline", 413);
@@ -30,6 +30,6 @@ test("ci watch tick: the transient retry never extends past the original deadlin
 	s.setGh({ runs: [run(413, live.head, "completed", "success")], routes: [{ match: "/attempts/", replies }] });
 	const started = Date.now();
 	const tick = await s.post.ciTick();
-	assert.ok(Date.now() - started < 20_000, `tick took ${Date.now() - started} ms`);
+	assert.ok(Date.now() - started < 40_000, `tick took ${Date.now() - started} ms`);
 	assert.equal(tick.errors.length, 1);
 });

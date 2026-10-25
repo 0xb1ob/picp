@@ -561,7 +561,7 @@ test("pipeline reanchor resumes an interrupted exact edge projection and still r
 	assert.ok(isGateWait(first));
 	post.reviewRuns.handBack(first.key);
 	await post.reviewRuns.settled(first.key);
-	await waitFor(() => provider.remaining("reanchor-original") === 0 && post.manager.get(originalId)?.worker.busy === false, (settled) => settled, { timeoutMs: 30_000 });
+	await waitFor(() => provider.remaining("reanchor-original") === 0 && post.fleet.get(originalId)?.phase === "held" && post.manager.get(originalId)?.worker.busy === false, (settled) => settled, { timeoutMs: 30_000 });
 	assert.equal((await post.tearDown(originalId)).torn_down, true);
 	const replacement = await post.ledger().create({ title: "Replacement README research", description: "Research a bounded README change.", project: "demo", kind: "research", delivery: "pipeline" });
 	replacementId = replacement.id;

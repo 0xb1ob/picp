@@ -3719,7 +3719,8 @@ that is the operator's reported deployment, not something this home detects.
 
 **A transient Actions read retries inside the tick** (`ACTIONS_RETRY_DELAYS_MS`, `src/actions-ci.ts`): a body
 that is not JSON on gh exit 0, an HTML 403/404 (a proxy or abuse page — GitHub's own denials are JSON), a 5xx
-or a transport fault is re-read after 250 ms and 750 ms while the observation budget lasts. A JSON 403/404
+or a transport fault is re-read after 250 ms and 750 ms while the observation budget lasts (`ACTIONS_CI_TIMEOUT_MS`,
+30 s per observation; one jobs-page call at most `ACTIONS_ATTEMPT_TIMEOUT_MS`, 12 s). A JSON 403/404
 (`denied`), a rate limit or a structurally wrong JSON page is not retried. A persisting fault is still one
 named `ActionsCiError`: its category, the endpoint, gh's status (`HTTP 403` only for a denial, `status <n>`
 or `gh exit 0` otherwise, so an HTML page never reads as "token lacks Actions read"), a 60-byte body preview
@@ -5675,7 +5676,7 @@ so each bounds the re-gate with the same helper the suggestion path uses
 
 | bound | value | protects |
 |---|---|---|
-| `DEFERRED_RECHECK_MAX_WAIT_MS` (`src/deferred-recheck.ts`) | 30s | the watch tick: `recheckDeferredBounded` never throws and never outlives it, so the notice and the `cp-ci` wake-up follow either way |
+| `DEFERRED_RECHECK_MAX_WAIT_MS` (`src/deferred-recheck.ts`) | 60s | the watch tick: `recheckDeferredBounded` never throws and never outlives it, so the notice and the `cp-ci` wake-up follow either way; twice the 30 s Actions CI read budget, so one fail-closed read finishes inside it |
 | `BEFORE_WAKEUP_MAX_WAIT_MS` (`src/review-runs.ts`) | 30s | the verdict: a hook that throws, rejects **or never settles** cannot pin the slot or swallow a decision already on disk |
 
 The guarantee is therefore conditional and says so: **when the re-gate finishes
