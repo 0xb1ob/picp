@@ -66,6 +66,8 @@ export interface RpcSession {
 	/** First record matching `predicate` (seen ones count), or fail after `timeoutMs` (default 30 s) naming it. */
 	waitFor(predicate: (record: RpcRecord) => boolean, timeoutMs?: number): Promise<RpcRecord>;
 	records(): readonly RpcRecord[];
+	/** The spawned pi's OS pid (`undefined` only when the spawn itself failed). */
+	readonly pid: number | undefined;
 	stderr(): string;
 	/** Close stdin only: pi shuts down on its own, so a test can wait on what shutdown does (H7). */
 	endInput(): void;
@@ -145,6 +147,7 @@ export function startRpc(options: StartRpcOptions): RpcSession {
 	});
 
 	return {
+		pid: child.pid,
 		send(record) {
 			child.stdin.write(`${JSON.stringify(record)}\n`);
 		},
