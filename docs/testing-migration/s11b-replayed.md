@@ -11,7 +11,7 @@ Historical evidence and missing-log notices below remain unchanged.
 
 ## Fresh stage2 proof (PR500)
 
-The new [proof increments](../../.s11b-stage2/README.md) record S11-C01–C29 and S09-NC01 exact isolated patches,
+The new proof increments (`.s11b-stage2/README.md`, since removed) record S11-C01–C29 and S09-NC01 exact isolated patches,
 SHA256s, named consumer failures and restored passes on the recorded execution HEADs
 against main `2ca3ed5f2e31af2cd08763e398bdc9a67ffc7fbd`. It also includes the executable TypeScript AST
 source-slice comparison: all 12 retained calls match original identities byte for byte (144/12 static calls).
