@@ -298,6 +298,15 @@ test("P9-relay-scope: a scheduled-only wake never reaches the outbox; its escala
 	for (const dropped of ["first report", "rejected report", "recovery text", "bad id report"]) {
 		assert.equal(mixed!.relay.text.includes(dropped), false, `${dropped} never rides on the relay`);
 	}
+	// The same wake again: a wake has no stable id, so the second one is a new entry under a fresh uuid.
+	await hosts.at(-1)!.request("stop").catch(() => undefined);
+	await hosts.at(-1)!.closed;
+	await startHost();
+	const twice = await waitFor(() => files.entries().filter((entry) => entry.relay.text.includes("P9 mixed wake")),
+		(items) => items.length === 2,
+		{ timeoutMs: 30_000, what: "the second mixed wake relayed" });
+	assert.match(twice[1]!.id, /^wake:[0-9a-f-]{36}$/);
+	assert.notEqual(twice[0]!.id, twice[1]!.id, "two wakes, two ids");
 });
 
 test("P9-relay-lost-write: a relay the outbox could not hold still reaches a real operator, id-less, in memory", { timeout: 180_000 }, async (t) => {

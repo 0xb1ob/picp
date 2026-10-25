@@ -10,7 +10,7 @@ const relay = (fields: Partial<BridgeRelay>): BridgeRelay => ({ kind: "wake", st
 
 // No producer stamps jobIds on an escalation or error relay (cp-bridge sets them on wakes only), so only this
 // direct call reaches the kind guard in deliverableRelay.
-test("cp-hhuf P1: a wake about scheduled jobs only is not relayed; escalations, errors and mixed turns still are", async (t) => {
+test("cp-hhuf P1: an escalation or error for the same scheduled job still relays", async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	initJobsDocument(home.path, "cp");
