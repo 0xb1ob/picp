@@ -1,5 +1,11 @@
 # Ledger rows: p8b
 
+<!-- manifest:ledger -->
+| PR | Scope | Baseline files deleted |
+|---|---|---|
+| P8b (cp-e2e-migration-p8b-dbbn) | behavior 04, second slice: hard bounds, read-only worker MCP and wedged-call notices (04-6..04-12) in `tests/e2e/worker-lifecycle-p8b.test.ts`; 15 mapped (9 + 4 + 2), 24 retained verbatim in three `*-retained.test.ts` files with per-declaration reasons; stopped at the worker wall clock, the other 13 behavior-04 files belong to cp-e2e-migration-p8c | 3 (`tests/bounds.test.ts`, `tests/worker-mcp.test.ts`, `tests/wedged.test.ts`) |
+<!-- /manifest:ledger -->
+
 P8b (job `cp-e2e-migration-p8b-dbbn`) converts three behavior-04 files: `tests/bounds.test.ts`,
 `tests/worker-mcp.test.ts` and `tests/wedged.test.ts`. It runs seven cases in `tests/e2e/worker-lifecycle-p8b.test.ts`.
 The job stopped at the worker's wall clock with a branch diff of about 79 KB. The other 13 P8-owned behavior-04 files

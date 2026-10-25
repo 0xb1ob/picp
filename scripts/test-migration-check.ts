@@ -58,9 +58,9 @@ function ledgerFiles(manifest: string): string[] {
 }
 
 const PATCH_RE = /<!-- patch:([\w-]+) -->\n```diff\n([\s\S]*?)\n```/g;
-const LEDGER_TABLES = ["prs", "scenarios", "assertions", "regressions", "incoming", "feature-removed", "baseline"];
+const LEDGER_TABLES = ["ledger", "prs", "scenarios", "assertions", "regressions", "incoming", "feature-removed", "baseline"];
 
-/** Rows, patch blocks and every prose/log line of the `before` docs each appear once, byte-identical, in `after`. */
+/** Rows and prose/log lines of the `before` docs each appear once, byte-identical, in `after`; patch blocks may go. */
 export function preservationFindings(before: readonly string[], after: readonly string[]): string[] {
 	const findings: string[] = [];
 	const compare = (label: string, was: string[], now: string[]) => {
@@ -73,8 +73,6 @@ export function preservationFindings(before: readonly string[], after: readonly 
 		const bodies = (doc: string) => (new RegExp(`<!-- manifest:${name} -->\\n([\\s\\S]*?)<!-- /manifest:${name} -->`).exec(doc)?.[1] ?? "").replace(PATCH_RE, "");
 		compare(`${name} rows`, before.flatMap((doc) => tableLines(bodies(doc))), after.flatMap((doc) => tableLines(bodies(doc))));
 	}
-	const patches = (doc: string) => [...doc.matchAll(PATCH_RE)].map((match) => match[0]);
-	compare("patch blocks", before.flatMap(patches), after.flatMap(patches));
 	const prose = (doc: string) => doc.replace(PATCH_RE, "").split("\n").filter((line) => line.trim() && !/^(\||# Ledger rows:|<!-- \/?(manifest|patch):)/.test(line));
 	compare("prose lines", before.flatMap(prose), after.flatMap(prose));
 	return findings;
@@ -122,12 +120,14 @@ export function deletedWithFeatureFindings(path: string, owner: string, evidence
 
 /**
  * A negative-control row: `ID | Unit file | Scenario | Control | Failing assertion`, the control being the bug patched
- * back in words. Legacy 8-cell rows (bug commit, patch id, hash, fixed) read their patch id as the control.
+ * back in words. A legacy 8-cell row (commit, patch, hash, fixed) reads its Patch cell as the control: a patch id
+ * may give way to the control in words, but a row with neither fails.
  */
 export function regressionFindings(cells: readonly string[], scenarios: { has(id: string): boolean }): { path: string; findings: string[] } {
-	const [id = "", path = "", scenario = "", control = "", failing = ""] = cells.length === 8 ? [0, 1, 3, 4, 6].map((i) => cells[i] ?? "") : cells;
+	const legacy = cells.length === 8;
+	const [id = "", path = "", scenario = "", control = "", failing = ""] = legacy ? [0, 1, 3, 4, 6].map((i) => cells[i] ?? "") : cells;
 	const findings: string[] = [];
-	if (cells.length !== 5 && cells.length !== 8) findings.push(`regression ${id}: ${cells.length} cells, expected ID | Unit file | Scenario | Control | Failing assertion`);
+	if (cells.length !== 5 && !legacy) findings.push(`regression ${id}: ${cells.length} cells, expected ID | Unit file | Scenario | Control | Failing assertion`);
 	if (!scenarios.has(scenario)) findings.push(`regression ${id}: unknown scenario ${scenario}`);
 	if (!control) findings.push(`regression ${id}: needs the control (the bug patched back, in words)`);
 	if (!failing) findings.push(`regression ${id}: needs a failing assertion`);
@@ -140,6 +140,19 @@ export function retainedFindings(path: string, assertion: string, note: string, 
 	const kept = [...note.matchAll(/\btests\/[\w./-]+\.test\.ts\b/g)].map((match) => match[0]).filter((file) => file !== path);
 	if (kept.some(exists)) return [];
 	return [`${path}: "${assertion}" is retained but its note names no kept test file in the tree (got ${kept.join(", ") || "none"})`];
+}
+
+/** PR ledger rows: only in slice files, one per PR, `PR | Scope | Baseline files deleted` or a legacy 5-cell row. */
+export function ledgerFindings(manifestRows: readonly string[][], sliceRows: readonly string[][]): string[] {
+	const findings = manifestRows.map(([pr = ""]) => `PR ledger ${pr}: belongs in its own slice file, not the shared manifest`);
+	const seen = new Set<string>();
+	for (const cells of [...manifestRows, ...sliceRows]) {
+		const [pr = ""] = cells;
+		if (seen.has(pr)) findings.push(`PR ledger ${pr}: more than one row`);
+		seen.add(pr);
+		if (!pr || (cells.length !== 3 && cells.length !== 5)) findings.push(`PR ledger ${pr}: ${cells.length} cells, expected PR | Scope | Baseline files deleted`);
+	}
+	return findings;
 }
 
 /**
@@ -207,6 +220,7 @@ function main(): number {
 		if (!/^\d\d$/.test(behavior) || !target.startsWith("tests/e2e/")) findings.push(`${pr}: needs a behavior id and a tests/e2e/ target`);
 		prs.set(pr, { behavior, target, cases });
 	}
+	findings.push(...ledgerFindings(rows(section([doc], "ledger", findings)), rows(section(docs.slice(1), "ledger", findings))));
 
 	const disposition = new Map<string, { kind: string; owner: string; evidence: string }>();
 	for (const [path = "", kind = "", owner = "", evidence = ""] of rows(section(docs, "baseline", findings))) {
