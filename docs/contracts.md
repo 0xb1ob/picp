@@ -7695,7 +7695,7 @@ already printed look new to the very next render.
 where the operator reads a 40-line table, not what the model can see, which is
 nothing either way.
 
-Two exclusions, both asserted in `tests/output.test.ts`:
+Two exclusions, both asserted in `tests/e2e/command-output.test.ts`:
 
 - **`--json` always notifies.** Headless callers (and this repo's own RPC tests)
   read `extension_ui_request`; an entry carries no protocol event, so a JSON
