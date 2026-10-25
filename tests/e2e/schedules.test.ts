@@ -5,22 +5,22 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import type { AddressInfo } from "node:net";
+import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { MandateStore } from "../../src/mandate.ts";
 import { loadMandateDefaults } from "../../src/mandate-defaults.ts";
 import { effectivePolicyBounds } from "../../src/schedule-policy.ts";
-import { schedulePolicyView } from "../../src/viewer/schedule-policy-view.ts";
 import { ProjectRegistry } from "../../src/projects.ts";
 import { openScheduleRunStore } from "../../src/schedule-runs.ts";
 import { appendScheduleControlLine } from "../../src/viewer/control-audit.ts";
-import { controlConfigFile, readScheduleControl, scheduleControlFieldError, scheduleControlFile, type ScheduleControlFields, type ScheduleControlOp } from "../../src/viewer/control-files.ts";
+import { controlConfigFile, readScheduleControl, scheduleControlFile, type ScheduleControlFields, type ScheduleControlOp } from "../../src/viewer/control-files.ts";
 import { isNativePolicy, policyFromLegacy, type NativeSchedulePolicy } from "../../src/viewer/schedule-policy.ts";
 import type { Schedule } from "../../src/viewer/schedule-core.ts";
-import type { ScheduleControlStatusResponse } from "../../src/viewer/api-types.ts";
-import { handleScheduleControlStatus } from "../../src/viewer/control-api.ts";
-import type { IncomingMessage } from "node:http";
+import type { SchedulePolicyResponse, ScheduleControlStatusResponse } from "../../src/viewer/api-types.ts";
+import { pushConfigFile, pushDataDir } from "../../src/viewer/push-files.ts";
+import { createViewer, type ViewerOptions } from "../../src/viewer/server.ts";
 import {
 	COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MOCK_PROVIDER_ID,
 	MockProvider, type MockToolCall, type PiChild, readFleet, type RpcRecord, type ScriptStep, startPiChild, waitFor,
@@ -116,6 +116,25 @@ function dashboard(stateDir: string) {
 	};
 	const types = (requestId: string, from = file) => readFileSync(from, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { id: string; type: string }).filter((line) => line.id === requestId).map((line) => line.type);
 	return { file, request, state, answered, ask, types };
+}
+
+const ORIGIN = "https://cp.example.ts.net";
+
+/** The Schedules page's own viewer on this home (--require-tailnet): GET a JSON route, or POST one with the token. */
+async function viewer(t: TestContext, home: string, stateDir: string) {
+	const push = pushConfigFile(pushDataDir(stateDir));
+	mkdirSync(dirname(push), { recursive: true });
+	writeFileSync(push, JSON.stringify({ origin: ORIGIN, subject: "mailto:op@example.com", public_key: Buffer.alloc(65, 4).toString("base64url"), created_at: "2026-09-27T08:00:00Z" }));
+	const options: ViewerOptions = { home, stateDir, host: "127.0.0.1", port: 0, requireTailnet: true, log: () => {}, operatorStart: { herdr: null } };
+	const server = createViewer(options);
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	options.port = (server.address() as AddressInfo).port;
+	t.after(() => { server.closeAllConnections(); server.close(); });
+	return async (path: string, post?: { token: string; body: unknown }) => {
+		const headers = { "sec-fetch-site": "same-origin", ...(post ? { origin: ORIGIN, "content-type": "application/json", "x-cp-control-token": post.token } : {}) };
+		const response = await fetch(`http://127.0.0.1:${options.port}${path}`, post ? { method: "POST", headers, body: JSON.stringify(post.body) } : { headers });
+		return { status: response.status, body: await response.json() as Record<string, unknown> };
+	};
 }
 
 test("P13 cp_schedule add and run_now: a naming quote saves an active native revision, a run starts once per tool call, refusals create nothing", { timeout: 180_000 }, async (t) => {
@@ -391,7 +410,9 @@ test("P13 dashboard schedule control: a live parent claims each journaled reques
 	assert.deepEqual([(await answered(removed))?.state, state(removed)?.reason, h.schedules().map((entry) => entry.id)], ["done", `removed ${id}`, [dormant]]);
 	assert.ok(parent.stderr().includes(`schedule control ${removed} remove ${id}: done`));
 	assert.equal((await h.ledger.list({ labels: [`schedule:${id}`], all: true })).length, 1, "one run now, one job");
-	const shown = handleScheduleControlStatus({} as IncomingMessage, { home: h.home, stateDir: h.stateDir, host: "127.0.0.1", port: 0, requireTailnet: true }).body as ScheduleControlStatusResponse;
+	const status = await (await viewer(t, h.home, h.stateDir))("/api/schedules/control");
+	assert.equal(status.status, 200, JSON.stringify(status.body));
+	const shown = status.body as unknown as ScheduleControlStatusResponse;
 	const byId = new Map(shown.requests.map((entry) => [entry.id, entry]));
 	assert.deepEqual([stale, off, run, again, old, foreign].map((requestId) => byId.get(requestId)?.state), ["refused", "done", "done", "refused", "expired", "interrupted"]);
 	assert.equal(byId.get(run)?.job_id, job.id, "the dashboard reads the run now's job back");
@@ -429,8 +450,16 @@ test("P13 dashboard policy activation: saves and adopts bind revisions while ope
 	const before = readFileSync(h.runs().policiesFile, "utf8");
 	const approving = structuredClone(h.runs().activePolicy(id)!);
 	approving.effects.push("org_review_approve");
-	// The dashboard refuses it before journaling; a forged line is ignored by the parent.
-	assert.match(scheduleControlFieldError({ op: "save_policy", revision: 2, policy: approving }) ?? "", /invalid schedule policy/);
+	// The dashboard's POST refuses it before journaling; a forged line is ignored by the parent.
+	const v = await viewer(t, h.home, h.stateDir);
+	const token = String((await v("/api/schedules/control")).body.token);
+	const posted = await v("/api/schedules/request", { token, body: { op: "save_policy", schedule_id: id, revision: 2, policy: approving } });
+	assert.deepEqual([posted.status, /invalid schedule policy/.test(String(posted.body.error))], [400, true], JSON.stringify(posted.body));
+	const policyView = async () => {
+		const reply = await v(`/api/schedules/policy?schedule_id=${id}`);
+		assert.equal(reply.status, 200, JSON.stringify(reply.body));
+		return reply.body as unknown as SchedulePolicyResponse;
+	};
 	const forged = d.request("save_policy", id, { revision: 2, policy: approving });
 	const excludes = (length: number, tag: string) => Array.from({ length }, (_, i) => `${tag}-${i}`);
 	writeFileSync(defaultsFile, JSON.stringify({ ...loadMandateDefaults(h.home), exclude_paths: excludes(20, "home") }));
@@ -444,9 +473,9 @@ test("P13 dashboard policy activation: saves and adopts bind revisions while ope
 	await answer("save_policy", { revision: 2, policy: draft }, "refused", /token_ceiling is 0: .*nothing to spend/);
 	assert.equal(d.state(forged), undefined);
 	writeFileSync(defaultsFile, JSON.stringify({ ...loadMandateDefaults(join(h.home, "absent")), exclude_paths: excludes(33, "home") }));
-	assert.match(schedulePolicyView(h.stateDir, id).blocking.join(";"), /32/);
+	assert.match((await policyView()).blocking.join(";"), /32/);
 	writeFileSync(defaultsFile, "{");
-	assert.match(schedulePolicyView(h.stateDir, id).blocking.join(";"), /unreadable/);
+	assert.match((await policyView()).blocking.join(";"), /unreadable/);
 	const defaults = { ...loadMandateDefaults(join(h.home, "absent")), token_ceiling: 500_000, exclude_paths: ["home-private"] };
 	writeFileSync(defaultsFile, JSON.stringify(defaults));
 	// demo's own mandate override narrows the preview and every later save, as it narrows a fire.
@@ -456,7 +485,7 @@ test("P13 dashboard policy activation: saves and adopts bind revisions while ope
 	registry.projects.find((entry) => entry.name === "demo")!.mandate = projectOverride;
 	writeFileSync(projectsFile, JSON.stringify(registry));
 	const policy = h.runs().activePolicy(id)!;
-	const preview = schedulePolicyView(h.stateDir, id).effective;
+	const preview = (await policyView()).effective;
 	assert.deepEqual(preview, effectivePolicyBounds(policy, { defaults, ceiling: defaults.token_ceiling, projectOverride }, "demo", "ship", new Date()));
 	assert.ok(preview?.exclusions.paths?.includes("project-private"), "the preview narrows to the project override");
 	assert.equal(readFileSync(h.runs().policiesFile, "utf8"), before, "no refused save and no preview wrote the policies");
