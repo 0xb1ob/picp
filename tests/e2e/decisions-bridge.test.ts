@@ -3,13 +3,16 @@
  * question once, then cards it for the next chat line; the escalation backstop relays an overdue escalation once.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { DETECTED_ASK_PREFIX } from "../../src/ask-guard.ts";
-import { type GateVerdict, isoTimestamp, layoutForHome, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import {
+	DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, type GateVerdict, isoTimestamp, layoutForHome, paths, SCHEMA_VERSION,
+} from "../../src/contracts.ts";
 import { ESCALATION_RELAY_LEDGER_KEEP, escalationRelayLedgerFile } from "../../src/escalation-backstop.ts";
 import { EscalationStore, raiseForGate } from "../../src/escalation.ts";
+import { FleetStore } from "../../src/fleet.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, type PiChild, type ScriptStep, startPiChild } from "../harness/index.ts";
 
@@ -233,4 +236,114 @@ test("decisions: the operator session relays each overdue, unrepresented escalat
 		assert.equal(readFileSync(ledgerFile, "utf8"), content, "and writes nothing");
 		await broken.close();
 	}
+});
+
+const ghShaped = `gh${"p"}_${"A".repeat(36)}`;
+const keyHeader = `-----BEGIN ${"RSA PRIVATE KEY"}-----`;
+
+/** A held research job of `project` for the answers journal's job_id rule. */
+function fleetJob(home: string, jobId: string, over: Partial<FleetRecord> = {}): FleetRecord {
+	return {
+		job_id: jobId, project: "demo", kind: "research", delivery: "local", origin: DEFAULT_ORIGIN, phase: "held",
+		worker: { pid: process.pid, session_id: "s", session_file: join(home, "s.jsonl"), profile: "planner", role: "planner", model: "mock/model", started_at: isoTimestamp() },
+		worktree: join(home, "wt"), branch: jobId, dispatched_at: isoTimestamp(), usage: EMPTY_USAGE, ...(["held", "done"].includes(over.phase ?? "held") ? { reported_at: isoTimestamp() } : {}),
+		...(over.phase === "failed" ? { failure: { class: "crash" as const, message: "died", at: isoTimestamp() } } : {}), ...over,
+	};
+}
+
+function snapshot(root: string, rel = ""): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const entry of existsSync(join(root, rel)) ? readdirSync(join(root, rel), { withFileTypes: true }) : []) {
+		const path = join(rel, entry.name);
+		if (entry.isDirectory()) Object.assign(out, snapshot(root, path));
+		else if (entry.isFile()) out[path] = readFileSync(join(root, path), "utf8");
+	}
+	return out;
+}
+
+test("decisions: cp_parent answer posts bookkeeping answers to the dashboard journal, redacted, deduplicated per research landing and refused for anything else", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const fleet = new FleetStore({ home: home.path });
+	for (const [id, over] of [
+		["cp-local", {}], ["cp-answer", { delivery: "answer", phase: "done" }], ["cp-board", { delivery: "board" }],
+		["cp-ship", { kind: "ship", delivery: "pr" }], ["cp-other", { project: "elsewhere" }],
+		["cp-waiting", { phase: "waiting" }], ["cp-failed", { phase: "failed" }],
+	] as Array<[string, Partial<FleetRecord>]>) await fleet.add(fleetJob(home.path, id, over));
+	const input = { action: "answer", project: "demo", question: "Does it work?", answer: "Yes." };
+	const calls: Array<[string, Record<string, unknown>]> = [
+		["long", { ...input, question: "q".repeat(600), evidence_paths: ["state/runs/cp-1/artifact.md"] }],
+		["redacted", { ...input, answer: `token ${ghShaped} here` }],
+		["key", { ...input, answer: `${keyHeader}\nMIIE` }],
+		...["cp-local", "cp-answer", "cp-board"].map((id): [string, Record<string, unknown>] => [`job-${id}`, { ...input, job_id: id }]),
+		...["cp-local", "cp-answer", "cp-board"].map((id): [string, Record<string, unknown>] => [`again-${id}`, { ...input, answer: "second", job_id: id }]),
+		...["cp-nope", "cp-ship", "cp-other", "cp-waiting", "cp-failed"].map((id): [string, Record<string, unknown>] => [`refuse-${id}`, { ...input, job_id: id }]),
+		["too-long", { ...input, answer: "a".repeat(8001) }],
+		["too-many", { ...input, evidence_paths: Array.from({ length: 11 }, (_, i) => `p${i}`) }],
+		["max", { ...input, answer: "a".repeat(8000) }],
+		["ask-id", { ...input, id: "ask-abc123" }],
+		["ask-question", { ...input, question: "ask-abc123: Keep" }],
+		["relay", { ...input, question: "[cp-bridge send] wake-up" }],
+		["no-project", { ...input, project: "" }],
+	];
+	const steps = calls.map(([id, args]): ScriptStep => ({ kind: "tool_calls", calls: [{ id, name: "cp_parent", args }] }));
+	const { pi } = await bridge(t, home, [text("Hello."), ...steps, text("Posted.")]);
+	const stateDir = join(home.path, layoutForHome("multi", home.path).state);
+	const journal = join(stateDir, "operator", "answers.jsonl");
+	await turn(pi, "Hi.");
+	const before = snapshot(home.path);
+	await turn(pi, "Post the answers.");
+
+	type End = { toolCallId: string; isError?: boolean; result?: { content?: Array<{ text?: string }>; details?: Record<string, unknown> } };
+	const ends = new Map((pi.records().filter((r) => r.type === "tool_execution_end") as unknown as End[]).map((end) => [end.toolCallId, end]));
+	const ok = (id: string) => {
+		const end = ends.get(id);
+		assert.ok(end && !end.isError, `${id}: ${JSON.stringify(end?.result?.content)}`);
+		return end.result?.details ?? {};
+	};
+	const refused = (id: string, message: RegExp) => {
+		const end = ends.get(id);
+		assert.equal(end?.isError, true, id);
+		assert.match(end?.result?.content?.[0]?.text ?? "", message, id);
+		return end?.result?.content?.[0]?.text ?? "";
+	};
+	const lines = () => readFileSync(journal, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+	const byId = (id: unknown) => lines().find((line) => line.id === id) ?? {};
+
+	const long = ok("long");
+	assert.equal(long.state, "posted");
+	assert.match(String(long.id), /^ans-[a-f0-9]{12}$/);
+	const line = byId(long.id);
+	assert.deepEqual([line.type, line.by, line.job_id, line.evidence_paths], ["posted", "bridge", null, ["state/runs/cp-1/artifact.md"]]);
+	assert.equal(String(line.question).length, 500);
+	assert.ok(String(line.question).endsWith("\u2026"));
+	assert.equal(statSync(journal).mode & 0o777, 0o600);
+	assert.equal(statSync(dirname(journal)).mode & 0o777, 0o700);
+
+	const stored = String(byId(ok("redacted").id).answer);
+	assert.ok(stored.includes("\u2022\u2022\u2022") && !stored.includes(ghShaped));
+	assert.doesNotMatch(refused("key", /secret-shaped text \(private key block\) remains after redaction/), /BEGIN/);
+
+	const first = ["cp-local", "cp-answer", "cp-board"].map((id) => ok(`job-${id}`));
+	assert.deepEqual(first.map((details) => details.state), ["posted", "posted", "posted"]);
+	assert.equal(new Set(first.map((details) => details.id)).size, 3);
+	assert.deepEqual(["cp-local", "cp-answer", "cp-board"].map((id) => [ok(`again-${id}`).state, ok(`again-${id}`).id]), first.map((details) => ["duplicate", details.id]));
+	refused("refuse-cp-nope", /unknown job cp-nope/);
+	refused("refuse-cp-ship", /cp-ship is a ship job \(delivery pr\); answers name kind:research landings only, any delivery/);
+	refused("refuse-cp-other", /cp-other belongs to elsewhere, not demo/);
+	refused("refuse-cp-waiting", /has not landed \(phase waiting\)/);
+	refused("refuse-cp-failed", /has not landed \(phase failed\)/);
+
+	refused("too-long", /invalid operator answer/);
+	refused("too-many", /invalid operator answer/);
+	assert.equal(String(byId(ok("max").id).answer).length, 8000);
+	refused("ask-id", /ask_answer/);
+	for (const id of ["ask-question", "relay"]) refused(id, /the question is a relay or a decision reply/);
+	refused("no-project", /cp_parent answer needs project, question and answer/);
+
+	assert.equal(lines().length, 6, "two posts, three job landings and the max answer; every refusal and duplicate wrote nothing");
+	const after = snapshot(home.path);
+	const relJournal = join(layoutForHome("multi", home.path).state, "operator", "answers.jsonl");
+	assert.deepEqual(Object.keys(after).filter((file) => !(file in before)), [relJournal], "a plain turn's files aside, only the journal is new");
+	assert.equal(existsSync(join(stateDir, "operator", "asks.jsonl")), false, "posting an answer creates no ask");
 });
