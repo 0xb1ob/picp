@@ -1,0 +1,385 @@
+/**
+ * Behavior 15 (P14): install, service and doctor surfaces through a real pi parent with the command-post extension.
+ * The package is a copy of this checkout's tracked files, so its installed pi and PATH are the scenario's own; host
+ * tools are scripts in a scratch bin dir. Nothing here touches the host's services, ~/.pi or its PATH tools.
+ */
+import assert from "node:assert/strict";
+import { execFileSync, spawn } from "node:child_process";
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { after, before, type TestContext, test } from "node:test";
+import { layoutForHome } from "../../src/contracts.ts";
+import { whichAll } from "../../src/doctor.ts";
+import { PI_PACKAGE_PATH } from "../../src/pi-version-nudge.ts";
+import type { CheckRecord, HealthRecord } from "../../src/service/health.ts";
+import {
+	COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, REPO_ROOT, type RpcRecord, type ScriptStep, startPiChild,
+} from "../harness/index.ts";
+import { teardownHome } from "../harness/parent-hosts.ts";
+
+let pkg = "";
+before(() => {
+	pkg = mkdtempSync(join(tmpdir(), "cp-p14-pkg-"));
+	const files = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd: REPO_ROOT, encoding: "utf8" });
+	for (const file of files.split("\0").filter(Boolean)) {
+		mkdirSync(dirname(join(pkg, file)), { recursive: true });
+		copyFileSync(join(REPO_ROOT, file), join(pkg, file));
+	}
+	// The repo's dependencies linked in, but real dirs down to a copied pi package.json (`installed()` rewrites it)
+	// and only the package's own pi on .bin: nudges must skip it as "ours".
+	const mirror = (rel: string, keep: string) => {
+		mkdirSync(join(pkg, rel), { recursive: true });
+		for (const name of readdirSync(join(REPO_ROOT, rel)).filter((entry) => entry !== keep && entry !== ".bin")) {
+			symlinkSync(join(REPO_ROOT, rel, name), join(pkg, rel, name));
+		}
+	};
+	const parts = PI_PACKAGE_PATH.split("/");
+	for (let n = 1; n < parts.length; n += 1) mirror(parts.slice(0, n).join("/"), parts[n]!);
+	copyFileSync(join(REPO_ROOT, PI_PACKAGE_PATH), join(pkg, PI_PACKAGE_PATH));
+	mkdirSync(join(pkg, "node_modules", ".bin"));
+	symlinkSync(realpathSync(join(REPO_ROOT, "node_modules", ".bin", "pi")), join(pkg, "node_modules", ".bin", "pi"));
+});
+after(() => rmSync(pkg, { recursive: true, force: true }));
+
+const notices = (records: readonly RpcRecord[]) =>
+	records.filter((r) => r.type === "extension_ui_request" && r.method === "notify").map((r) => String(r.message));
+
+/** A scratch bin dir: node and git always; `tools` adds the named stubs, `hostPi` a host `pi` that logs each probe. */
+function bin(t: TestContext, tools: string[], hostPi?: string) {
+	const dir = mkdtempSync(join(tmpdir(), "cp-p14-bin-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	symlinkSync(process.execPath, join(dir, "node"));
+	symlinkSync(realpathSync(whichAll("git")[0]!), join(dir, "git"));
+	const log = join(dir, "calls.log");
+	const script = (body: string) => `#!/bin/sh\necho "$0 $*" >> ${log}\n${body}\n`;
+	for (const tool of tools) writeFileSync(join(dir, tool), script("exit 0"), { mode: 0o755 });
+	if (hostPi !== undefined) writeFileSync(join(dir, "pi"), script(hostPi), { mode: 0o755 });
+	return { dir, calls: () => (existsSync(log) ? readFileSync(log, "utf8") : "") };
+}
+
+/** Writes (or with `undefined` removes) the package's installed pi package.json. */
+function installed(text: string | undefined): void {
+	const file = join(pkg, PI_PACKAGE_PATH);
+	rmSync(file, { force: true });
+	if (text === undefined) return;
+	mkdirSync(dirname(file), { recursive: true });
+	writeFileSync(file, text);
+}
+
+/** One parent session start on a fresh home; returns its notices once `/cp-version` has answered. */
+async function sessionStart(t: TestContext, path: string): Promise<string[]> {
+	const home = createScratchHome();
+	const agentDir = createAgentDir();
+	t.after(() => {
+		agentDir.cleanup();
+		home.cleanup();
+	});
+	const child = startPiChild({
+		cwd: home.path,
+		env: { ...agentDir.env, CP_HOME: home.path, CP_MODE: "multi", PATH: `${join(pkg, "node_modules", ".bin")}:${path}` },
+		extensions: [join(pkg, "extensions", "command-post", "index.ts")],
+	});
+	try {
+		await child.prompt("/cp-version");
+		await child.waitFor((r) => r.type === "extension_ui_request" && r.method === "notify" && String(r.message).includes("mode, home"), 90_000);
+		return notices(child.records());
+	} finally {
+		await child.close();
+	}
+}
+
+const INSTALL = "install: missing from PATH";
+const MISMATCH = "pi version mismatch";
+
+test("P14-nudges: session start names missing tools and a host pi drift once, and stays silent on what it cannot tell", { timeout: 300_000 }, async (t) => {
+	// Missing treehouse and gh, host pi 0.85.0 against an installed 0.84.4: both warnings, nothing installed.
+	t.after(() => installed(readFileSync(join(REPO_ROOT, PI_PACKAGE_PATH), "utf8")));
+	installed(`{"version":"0.84.4"}`);
+	const bare = bin(t, ["npm"], `echo "pi 0.85.0"`);
+	const first = await sessionStart(t, bare.dir);
+	const install = first.filter((n) => n.startsWith(INSTALL));
+	assert.equal(install.length, 1, first.join("\n---\n"));
+	assert.match(install[0]!, /^install: missing from PATH: treehouse, gh\n/, "every missing tool, and only those");
+	assert.match(install[0]!, /npm run doctor:install/);
+	assert.doesNotMatch(install[0]!, /sudo\s+npm|sudo\s+node|pi-command-post/);
+	assert.deepEqual(readdirSync(bare.dir).filter((f) => f !== "calls.log").sort(), ["git", "node", "npm", "pi"], "the nudge installed nothing");
+	assert.doesNotMatch(bare.calls(), /npm/, "and ran no installer");
+	const drift = first.filter((n) => n.startsWith(MISMATCH));
+	assert.equal(drift.length, 1, first.join("\n---\n"));
+	assert.match(drift[0]!, new RegExp(`this package installs pi 0\\.84\\.4, the pi running it is 0\\.85\\.0 \\(${bare.dir}/pi\\)`));
+	assert.match(drift[0]!, /package\.json piCompat \(pi >= \d+\.\d+\.\d+, tested up to/, "the supported range (#375)");
+	assert.match(drift[0]!, /pi update --self/);
+	assert.match(drift[0]!, /"@earendil-works\/pi-coding-agent" is CI's tested pin/);
+	assert.match(drift[0]!, /piCompat\.testedMax together, then `npm install`/);
+	assert.doesNotMatch(drift[0]!, /pi-command-post/);
+	assert.match(bare.calls(), /\/pi --version\n/, "the host pi was probed");
+
+	// Every tool present and a noisier spelling of the same version: silence.
+	const full = await sessionStart(t, bin(t, ["treehouse", "gh"], `printf 'pi 0.84.4\\n'`).dir);
+	assert.deepEqual(full.filter((n) => n.startsWith(INSTALL) || n.startsWith(MISMATCH)), [], full.join("\n---\n"));
+
+	// Unknown is not a mismatch: no host pi but ours, an unreadable version, or a failing probe.
+	for (const host of [undefined, `echo "unknown build"`, `echo ""`, `echo "pi 9.9.9"; exit 1`]) {
+		const quiet = await sessionStart(t, bin(t, ["treehouse", "gh"], host).dir);
+		assert.deepEqual(quiet.filter((n) => n.startsWith(MISMATCH)), [], `host pi ${host}: ${quiet.join("\n---\n")}`);
+	}
+
+	// No readable installed version: silent, and the host pi is never spawned.
+	for (const text of [undefined, "{not json", "{}", `{"version":"nightly"}`]) {
+		installed(text);
+		const host = bin(t, ["treehouse", "gh"], `echo "pi 0.85.0"`);
+		const quiet = await sessionStart(t, host.dir);
+		assert.deepEqual(quiet.filter((n) => n.startsWith(MISMATCH)), [], `installed ${text}: ${quiet.join("\n---\n")}`);
+		assert.doesNotMatch(host.calls(), /\/pi /, `installed ${text}: no probe on a machine with nothing to compare`);
+	}
+});
+
+const failing = (key: string, secondsAgo: number, detail = "x"): CheckRecord =>
+	({ status: "fail", key, since: new Date(Date.now() - secondsAgo * 1000).toISOString(), detail, fails: 3, checked_at: new Date().toISOString() });
+const healthy: CheckRecord = { status: "ok", key: null, since: new Date().toISOString(), detail: "ok", fails: 0, checked_at: new Date().toISOString() };
+
+/** A scratch home whose `state/health.json` the test writes, plus real parent and cp-bridge sessions on it. */
+async function serviceHome(t: TestContext) {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const agentDir = createAgentDir({ provider });
+	t.after(() => teardownHome(home, () => provider.stop(), () => agentDir.cleanup()));
+	const env = { ...agentDir.env, PI_HOME: home.path, CP_HOME: home.path, CP_MODE: "multi" };
+	const stateDir = join(home.path, layoutForHome("multi", home.path).state);
+	let scripts = 0;
+	const start = (extension: string, steps: ScriptStep[]) => {
+		const model = provider.addScript(`p14-${(scripts += 1)}`, steps, { onExhausted: "repeat" });
+		agentDir.writeModels(provider);
+		return startPiChild({ cwd: home.path, model, env, extensions: [extension] });
+	};
+	return {
+		stateDir,
+		health(checks: HealthRecord["checks"]) {
+			mkdirSync(stateDir, { recursive: true });
+			writeFileSync(join(stateDir, "health.json"), JSON.stringify({ schema_version: 1, last_run_at: new Date().toISOString(), checks }));
+		},
+		/** One parent session's alert tick: its `raised`/`withdrew` ids from the log line. */
+		async tick() {
+			const child = start(COMMAND_POST_EXTENSION, [{ kind: "text", text: "noted" }]);
+			try {
+				const at = Date.now();
+				while (!/service health: raised/.test(child.stderr())) {
+					if (Date.now() - at > 60_000) throw new Error(`no service health line:\n${child.stderr()}`);
+					await new Promise((resolve) => setTimeout(resolve, 100));
+				}
+				const line = /service health: raised (.*); withdrew (.*)/.exec(child.stderr())!;
+				const ids = (text: string) => (text === "none" ? [] : text.split(", "));
+				return { raised: ids(line[1]!), withdrawn: ids(line[2]!) };
+			} finally {
+				await child.close();
+			}
+		},
+		/** The operator answers `id` through cp_decide in a parent session; returns the tool's result. */
+		async ack(id: string) {
+			const quote = `${id}: ack, I will look`;
+			const call = { id: "ack", name: "cp_decide", args: { target: id, decision: "ack", basis: { operator_quote: quote } } };
+			const child = start(COMMAND_POST_EXTENSION, [{ kind: "tool_calls", calls: [call] }, { kind: "text", text: "noted" }]);
+			try {
+				await child.prompt(quote);
+				await child.waitForSettled(90_000);
+				return child.eventsOfType("tool_execution_end").find((end) => end.toolCallId === "ack");
+			} finally {
+				await child.close();
+			}
+		},
+		/** The service-health relays one operator session posts at start, by escalation id. */
+		async relays(count: number) {
+			const child = start(CP_BRIDGE_EXTENSION, [{ kind: "text", text: "Noted." }]);
+			try {
+				const texts = () => child.records().filter((r) => r.type === "message_start" && JSON.stringify(r).includes("(service_health)")).map((r) => JSON.stringify(r));
+				await child.waitFor(() => texts().length >= count, 60_000);
+				return texts();
+			} finally {
+				await child.close();
+			}
+		},
+	};
+}
+
+test("P14-alerts: cp-health failures become one withdrawable command-post escalation each, relayed to the operator", { timeout: 300_000 }, async (t) => {
+	const h = await serviceHome(t);
+	// A sticky rollback alerts at once; any other check only after 10 minutes failing.
+	h.health({ update: failing("rollback_failed:abc123", 0), disk: failing("low", 540), viewer: failing("down", 660), git: healthy });
+	const a = await h.tick();
+	assert.equal(a.raised.length, 2, "update and viewer, not the 9-minute disk");
+	const [update, viewer] = a.raised;
+
+	// A re-tick with new detail raises nothing again; disk past 10 min raises; a recovered viewer is withdrawn.
+	const record = JSON.parse(readFileSync(join(h.stateDir, "health.json"), "utf8")) as HealthRecord;
+	h.health({ ...record.checks, update: { ...record.checks.update!, detail: "a different detail" }, disk: failing("low", 700), viewer: healthy });
+	const b = await h.tick();
+	assert.equal(b.raised.length, 1, "only the disk alert is new");
+	assert.deepEqual(b.withdrawn, [viewer]);
+	const disk = b.raised[0]!;
+
+	const relayed = await h.relays(2);
+	assert.equal(relayed.length, 2, relayed.join("\n"));
+	const updateRelay = relayed.find((r) => r.includes(`${update} (service_health)`)) ?? "";
+	assert.match(updateRelay, /\[command-post\] es-[\w-]+ \(service_health\) has been open \d+ min/, "the command post's own project");
+	assert.match(updateRelay, /cp-daemon health check \\"update\\" failing since \S+ \(key rollback_failed:abc123\)/);
+	assert.ok(relayed.some((r) => r.includes(`[command-post] ${disk} (service_health)`)), relayed.join("\n"));
+
+	// The operator acknowledges the rollback; the same failure is never raised again, a new key is.
+	const ack = await h.ack(update!);
+	assert.equal(ack?.isError, false, JSON.stringify(ack));
+	h.health({ update: record.checks.update!, disk: healthy });
+	const d1 = await h.tick();
+	assert.deepEqual([d1.raised, d1.withdrawn], [[], [disk]], "the answered alert stays answered");
+	h.health({ update: failing("rollback_failed:def456", 0), disk: healthy });
+	const d2 = await h.tick();
+	assert.equal(d2.raised.length, 1, "a new failure key is a new alert");
+	const last = await h.relays(1);
+	assert.deepEqual(last.map((r) => /\] (es-[\w-]+) \(service_health\)/.exec(r)?.[1]), [d2.raised[0]], "only the new alert is open");
+	assert.match(last[0]!, /key rollback_failed:def456/);
+});
+
+const MODELS = [
+	"provider      model              context  max-out  thinking  images",
+	"anthropic     claude-opus-5-5    1M       128K     yes       yes   ",
+	"openai        gpt-6.1-sol        400K     128K     yes       yes   ",
+	"openai        bad$id             400K     128K     yes       yes   ",
+	"openai-codex  gpt-6.1-sol        400K     128K     yes       no    ",
+].join("\n");
+
+/** A scratch machine for `node <pkg>/src/service/install.ts`: HOME, a stub-only PATH and a pi listing `models.txt`. */
+function machine(t: TestContext) {
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "cp-p14-install-")));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const listing = join(root, "models.txt");
+	const tools = bin(t, ["treehouse", "npm", "typescript-language-server", "ast-grep"], [
+		`case "$*" in`,
+		`  --version) echo "pi 1.4.0" ;;`,
+		`  "--no-extensions --list-models") ${whichAll("env")[0]} > ${join(root, "list-env")}`,
+		`    while IFS= read -r line; do printf '%s\\n' "$line"; done < ${listing} ;;`,
+		`  *) exec ${realpathSync(join(REPO_ROOT, "node_modules", ".bin", "pi"))} "$@" ;;`,
+		`esac`,
+	].join("\n"));
+	writeFileSync(join(tools.dir, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+	// The unit PATH puts node's own dir first: a node binary of its own keeps a host-global pi out of the listing.
+	const node = join(tools.dir, "node");
+	rmSync(node);
+	try { linkSync(process.execPath, node); } catch { copyFileSync(process.execPath, node); chmodSync(node, 0o755); }
+	const base = { HOME: "", USER: "p14", PATH: tools.dir, TERM: "dumb", ANTHROPIC_API_KEY: "sk-shell-only" };
+	/** A user of its own (HOME, cp home, pi settings); the machine's tools and listing are shared. */
+	const user = (name: string, settings: object, env: Record<string, string> = {}) => {
+		const home = join(root, name);
+		mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+		writeFileSync(join(home, ".pi", "agent", "settings.json"), JSON.stringify(settings));
+		return { root, home, tools, node, cpHome: join(root, `${name}-cp`), env: { ...base, HOME: home, ...env } };
+	};
+	return { listing, user };
+}
+
+/** cp-install on a pty (`script`), so its prompts read /dev/tty; `replies` answer them in order. Returns exit and output. */
+type User = ReturnType<ReturnType<typeof machine>["user"]>;
+async function installOnTty(m: User, args: string[], replies: string[]): Promise<{ code: number | null; out: string }> {
+	const argv = [m.node, join(pkg, "src/service/install.ts"), "--home", m.cpHome, "--app", pkg, "--no-start", "--no-pi-packages", ...args];
+	const child = spawn(whichAll("script")[0]!, ["-qfec", argv.map((arg) => `'${arg.replace(/'/g, "'\\''")}'`).join(" "), "/dev/null"], { cwd: m.root, env: m.env });
+	let out = "";
+	let asked = 0;
+	const onData = (chunk: unknown) => {
+		out += String(chunk).replace(/\r/g, "");
+		if (/\]: $/.test(out) && (out.match(/\]: /g)?.length ?? 0) > asked) child.stdin.write(`${replies[asked++] ?? ""}\r`);
+	};
+	child.stdout.on("data", onData);
+	child.stderr.on("data", onData);
+	const kill = setTimeout(() => child.kill("SIGKILL"), 120_000);
+	const code = await new Promise<number | null>((resolve) => child.once("exit", resolve));
+	clearTimeout(kill);
+	return { code, out };
+}
+
+test("P14-install: cp-install lists models as the service sees them, asks once per target, and keeps the gateway key 0600", { timeout: 300_000 }, async (t) => {
+	const box = machine(t);
+	writeFileSync(box.listing, `${MODELS}\n`);
+	const m = box.user("user", { defaultProvider: "openai-codex", defaultModel: "gpt-6.1-sol" }, { PI_CODING_AGENT_DIR: join(box.listing, "..", "user", ".pi", "agent") });
+	const keyIn = join(m.root, "key.txt");
+	writeFileSync(keyIn, "k3y-VALUE_=+/\n", { mode: 0o600 });
+	const flags = ["--viewer-host", "127.0.0.1", "--gateway-url", "https://gw.example", "--gateway-key-file", keyIn];
+
+	// An out-of-range pick fails before anything is written; the prompt lists the service's view of the models.
+	const bad = await installOnTty(m, [...flags, "--with-br"], ["9"]);
+	assert.equal(bad.code, 1, bad.out);
+	assert.match(bad.out, /--with-br is deprecated and ignored: the optional tracker step was removed/);
+	assert.match(bad.out, /Model for the parent — .*\(3 available/, "the unsafe id is dropped from the count");
+	assert.match(bad.out, /\n {2}1\) anthropic\/claude-opus-5-5 {2}recommended: in the routing rubric\n/, "the rubric first, the unsafe id dropped");
+	assert.match(bad.out, /\n {2}2\) openai\/gpt-6\.1-sol {9}in the routing rubric\n {2}3\) openai-codex\/gpt-6\.1-sol {3}your pi default\n/);
+	assert.match(bad.out, /Choose 1-3, type a provider\/model, or none \[1\]: /);
+	assert.match(bad.out, /fail: model: 9 is not one of the choices 1-3; rerun with --parent-model/);
+	const daemonJson = join(m.cpHome, layoutForHome("multi", m.cpHome).data, "daemon.json");
+	assert.equal(existsSync(daemonJson), false, "a failed pick writes nothing");
+	const listEnv = readFileSync(join(m.root, "list-env"), "utf8");
+	assert.doesNotMatch(listEnv, /ANTHROPIC_API_KEY|PI_CODING_AGENT_DIR|TERM=/, "a shell-only key never reaches the listing");
+	assert.match(listEnv, new RegExp(`^PATH=${m.tools.dir}$`, "m"), "the unit PATH: node's dir first, deduplicated");
+	const names = listEnv.split("\n").filter(Boolean).map((line) => line.split("=")[0]).filter((name) => name !== "PWD");
+	assert.deepEqual(names.sort(), ["HOME", "PATH", "USER"], "HOME, USER (and LOGNAME) and the unit PATH only");
+
+	// An unlisted ref is refused; then 2 for the parent, Enter for the operator takes the parent's pick.
+	const unlisted = await installOnTty(m, [...flags, "--no-br"], ["x/y"]);
+	assert.match(unlisted.out, /--no-br is deprecated and ignored/);
+	assert.match(unlisted.out, /fail: model: x\/y is not a model pi can use as the service sees it/);
+	const good = await installOnTty(m, flags, ["2", ""]);
+	assert.equal(good.code, 0, good.out);
+	assert.match(good.out, /Model for the operator session — [^]*or none \[2\]: /);
+	assert.match(good.out, /changed: model: parent openai\/gpt-6\.1-sol \(chosen at the prompt; --parent-model overrides\)/);
+	assert.match(good.out, /changed: model: operator openai\/gpt-6\.1-sol \(chosen at the prompt;/);
+	assert.equal(JSON.parse(readFileSync(daemonJson, "utf8")).parent_model, "openai/gpt-6.1-sol");
+
+	// The key lands in HOME/.config (no XDG_CONFIG_HOME) at 0600 and is never printed; a rerun keeps it.
+	const keyFile = join(m.home, ".config", "pi-command-post", "gateway.env");
+	assert.equal(statSync(keyFile).mode & 0o777, 0o600);
+	assert.match(readFileSync(keyFile, "utf8"), /^CP_GATEWAY_ADMIN_KEY=k3y-VALUE_=\+\/$/m);
+	assert.ok(![bad, unlisted, good].some((run) => run.out.includes("k3y-VALUE")), "the key is never printed");
+	assert.match((await installOnTty(m, flags, [])).out, /ok: gateway-key: .*gateway\.env kept/);
+
+	// XDG_CONFIG_HOME wins; a key with a space is refused without echoing it, before anything is written.
+	const xdg = box.user("xdg-user", {}, { XDG_CONFIG_HOME: join(m.root, "xdg") });
+	writeFileSync(keyIn, "k3y SECRET\n");
+	const spaced = await installOnTty(xdg, [...flags, "--parent-model", "openai/gpt-6.1-sol"], []);
+	assert.match(spaced.out, /fail: gateway: --gateway-key-file \S+: .*; nothing written/);
+	assert.doesNotMatch(spaced.out, /k3y SECRET/);
+	writeFileSync(keyIn, "CP_GATEWAY_ADMIN_KEY=other-key\n");
+	const placed = await installOnTty(xdg, [...flags, "--parent-model", "openai/gpt-6.1-sol"], []);
+	assert.equal(placed.code, 0, placed.out);
+	assert.match(readFileSync(join(m.root, "xdg", "pi-command-post", "gateway.env"), "utf8"), /^CP_GATEWAY_ADMIN_KEY=other-key$/m);
+});
+
+test("P14-install-models: cp-install's model step on an empty, unreadable or long listing, and a parent that picks off-list or none", { timeout: 300_000 }, async (t) => {
+	const box = machine(t);
+	const run = async (name: string, settings: object, replies: string[], args: string[] = []) =>
+		(await installOnTty(box.user(name, settings), ["--viewer-host", "127.0.0.1", ...args], replies)).out;
+
+	// No table and no models are a skip that names the rerun, never a prompt or a pin.
+	writeFileSync(box.listing, "error: unknown flag --list-models\n");
+	assert.match(await run("no-table", {}, []), /skip: model: pi --no-extensions --list-models gave no model table: nothing pinned/);
+	writeFileSync(box.listing, "No models available. Use /login or set an API key environment variable. See docs.\n");
+	const none = await run("no-models", {}, []);
+	assert.match(none, /skip: model: no model pi can use as the service sees it \(.*auth\.json and ambient credentials/);
+	assert.doesNotMatch(none, /Model for the parent/);
+
+	// Thirteen listed, the home's routing.json unreadable (so no rubric) and no full pi default: the first nine, asked.
+	const rows = Array.from({ length: 12 }, (_, n) => `p${n} m${n} 1K`);
+	writeFileSync(box.listing, `${["provider model context", ...rows, "anthropic claude-opus-5-5 1M"].join("\n")}\n`);
+	const long = box.user("long", { defaultModel: "x" });
+	const routing = join(long.cpHome, layoutForHome("multi", long.cpHome).data, "routing.json");
+	mkdirSync(dirname(routing), { recursive: true });
+	writeFileSync(routing, "{");
+	const longOut = (await installOnTty(long, ["--viewer-host", "127.0.0.1"], ["p10/m10", ""])).out;
+	assert.match(longOut, /\(13 available[^]*\n {2}1\) p0\/m0 {2}recommended: listed by pi\n[^]*\n {2}9\) p8\/m8 {2}listed by pi\nChoose 1-9,/);
+	assert.match(longOut, /Model for the operator session — [^]*or none \[p10\/m10\]: /, "an off-list pick is the operator's default by its ref");
+	assert.match(longOut, /changed: model: operator p10\/m10 \(chosen at the prompt;/);
+	const nothing = await run("nothing", {}, ["none", ""]);
+	assert.match(nothing, /Model for the operator session — [^]*or none \[none\]: /);
+	assert.match(nothing, /skip: model: parent: none chosen;[^]*skip: model: operator: none chosen;/);
+
+	// --yes asks nothing and pins the recommendation: with no routing.json, the shipped rubric's listed model.
+	const yes = await run("yes", {}, [], ["--yes"]);
+	assert.doesNotMatch(yes, /Choose 1-/);
+	assert.match(yes, /changed: model: parent anthropic\/claude-opus-5-5 \(recommended: in the routing rubric; --parent-model overrides\)/);
+});
