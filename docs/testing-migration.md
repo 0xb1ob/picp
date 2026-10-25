@@ -6,13 +6,12 @@ negative control (the old defect patched back fails the e2e, the fix passes it).
 validates this file and the per-slice ledger against git; it imports no production code.
 
 The ledger rows are moving out of this file, one file per slice, into `docs/testing-migration/<slice>.md`: that
-slice's rows of the seven `manifest:*` tables and its regression patch blocks. The checker reads this file and every
+slice's rows of the seven `manifest:*` tables. The checker reads this file and every
 slice file as one union, so duplicate ids and the baseline counts are checked across both. A new slice adds its own
 file. `node scripts/split-migration-ledger.ts --list | <slice...>` moves rows mechanically; never hand-move them.
 
 ```
 node scripts/test-migration-check.ts --base 0a4a8944dd7292e458dbd2ec4afbf6d2b89d197e --manifest docs/testing-migration.md
-node scripts/test-migration-check.ts --manifest docs/testing-migration.md --verify-regressions
 node scripts/test-migration-check.ts --manifest docs/testing-migration.md --runner-log <saved test:one output>
 node scripts/test-migration-check.ts --manifest docs/testing-migration.md --preserved-from <ref before a split>
 ```
@@ -91,6 +90,7 @@ ask-0088e0332d00, 2026-10-21.
 | P4 (cp-e2e-migration-p4-4mk3) | behavior 06, closing: S19–S23 had already retired its baseline files; P4 converts its two convert-owned incoming files. 4 mapped (recovery-notice-bound 1; wakeup-journal-retained declarations 2, 16 and 7's phrase), 0 retained added; [ledger and controls](testing-migration/p4.md) | 0 baseline; 1 incoming (`tests/recovery-notice-bound.test.ts`) | 425 → 424 | 3,985 → 3,982 (S21-restart and m2 extended in place, no new declarations) |
 | S11b (cp-xwu0) | behavior 05; retires `tests/integrate.test.ts`: all 144 declarations accounted for, 132 mapped to the S08–S11 landing consumers and 12 retained verbatim in the existing `tests/integrate-retained.test.ts`; [S11b ledger](testing-migration/s11b.md) | 1 (`tests/integrate.test.ts`) | −1 | −144 |
 | S27 follow-up (cp-migration-followups-5700) | behavior 08; after #509 the S27 restart route maps to S27-viewer-route (control S27-rpc-shutdown); relaunchPorts stays retained (no entry reaches its whenIdle deferral); both S27 `*-retained.test.ts` files keep only their retained declarations; [S27 ledger](testing-migration/s27.md) | 0 | 0 | −8 (retained copies of five mapped relaunch and three mapped viewer declarations removed) |
+| P8 (cp-e2e-migration-p8-g896) | behavior 04, first slice: outer provider retry, model-call failure, continue_failed and repeated bound wake-ups (04-1..04-5) in `tests/e2e/worker-recovery.test.ts`; [ledger and controls](testing-migration/p8.md): 11 mapped, 2 retained verbatim in two `*-retained.test.ts` files; the other 16 behavior-04 files belong to cp-e2e-migration-p8b-dbbn | 3 (`tests/provider-retry.test.ts`, `tests/model-call-failure-recovery.test.ts`, `tests/failure-announcer.test.ts`) | 422 → 422 | 3,822 → 3,817 (12 removed, 5 e2e + 2 retained added) |
 | P10d (cp-e2e-migration-p10d-hj6z) | behavior 09, fourth slice: escalation records (P10d-escalate) and one-question Awaiting rows (P10d-one-question) through a real parent in `tests/e2e/decisions-p10d.test.ts`. 26 mapped, 8 retained verbatim in two `*-retained.test.ts` files; 13 controls; [ledger and controls](testing-migration/p10d.md) | 2 (`tests/escalation.test.ts`, `tests/awaiting-one-decision.test.ts`) | +1 (3 added, 2 deleted) | −24 (34 units removed, 8 retained copies and 2 e2e cases added) |
 
 S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
@@ -412,13 +412,13 @@ run, the patch reversed, and the same command run again: 2 pass, 0 fail, 0 skipp
 `90c1f22ba20c416abc9fc96b04addd07e2f58ed3` (#131), which added `src/ci-run-ref.ts`. Its whole diff is not
 reverted; each patch puts back one rule it introduced.
 
-What `--verify-regressions` checks: only that each recorded patch block hashes to its sha256, and that the bug commit
-exists in this repository. It does not apply the patch, and it does not rerun the e2e. The failing and fixed runs
-quoted below were run by hand when each control was recorded, and they are evidence only to that extent.
+A negative-control row needs only the scenario, the control (the bug patched back, in words) and the failing
+assertion: `| ID | Unit file | Scenario | Control | Failing assertion |`. Record no patch, commit sha or hash; the
+checker reads older 8-cell rows' patch id as their control and verifies none of their other cells.
 
 <!-- manifest:regressions -->
-| ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
-|---|---|---|---|---|---|---|---|
+| ID | Unit file | Scenario | Control | Failing assertion |
+|---|---|---|---|---|
 
 <!-- /manifest:regressions -->
 
