@@ -64,7 +64,6 @@
 	"tests/dashboard-control-images.test.ts": 1573,
 	"tests/dashboard-control-remote.test.ts": 154,
 	"tests/dashboard-control.test.ts": 585,
-	"tests/dashboard-restart.test.ts": 549,
 	"tests/decide-listing.test.ts": 1,
 	"tests/decide.test.ts": 476,
 	"tests/decision-context.test.ts": 31,
