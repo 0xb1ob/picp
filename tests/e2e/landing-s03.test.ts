@@ -507,7 +507,11 @@ test("landing S03: a real parent that loses its lock cannot execute a pending re
 	writeWindowPass(s.home, live.jobId, live.head, passedAt);
 	s.setGh({ runs: [run(315, live.head, "completed", "success")] });
 	await s.parent("Observe this held PR's review deadline.", [{ kind: "text", text: "Observed the deadline." }], async () => {
-		await waitFor(() => s.post.durableWakeups.pending().some((entry) => entry.content.includes("HELD PR WAITING")), Boolean, { timeoutMs: 10_000, what: "startup arms its review deadline" });
+		// The parent may deliver the notice before this callback starts polling.
+		await waitFor(() => {
+			const { pending, delivered } = s.post.durableWakeups.read();
+			return [...pending, ...delivered].some((entry) => entry.id.startsWith(`continuation:window:${live.jobId}@`));
+		}, Boolean, { timeoutMs: 10_000, what: "startup arms its review deadline" });
 		rmSync(join(s.home, LAYOUT.parentLock));
 		await waitFor(() => Date.now(), (now) => now >= Date.parse(passedAt) + 31_000, { timeoutMs: 40_000, what: "the unowned parent's deadline passes" });
 		assert.equal(s.post.integrator.get(live.jobId)?.next, "wait", "disabled ownership cannot advance beyond the review wait");
