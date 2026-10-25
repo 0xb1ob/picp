@@ -1,13 +1,10 @@
 import { createHash } from "node:crypto";
 import { type Job, type Mandate, type Escalation } from "./contracts.ts";
 import { EscalationStore, escalationApproves } from "./escalation.ts";
-import { confirmationScope } from "./mandate-continuity-confirmation.ts";
+import { confirmationInputFile, confirmationScope } from "./mandate-continuity-confirmation.ts";
 import { readJobsDocument } from "./ledger.ts";
 import type { MandateStore } from "./mandate.ts";
 
-export function admissionCutoff(source: Mandate): string {
-	return source.coverage_superseded && source.coverage_superseded.at < source.expiry ? source.coverage_superseded.at : source.expiry;
-}
 
 export function afterAdmissionCutoff(source: Mandate, at: string): boolean {
 	return at >= source.expiry || Boolean(source.coverage_superseded && at > source.coverage_superseded.at);
@@ -46,17 +43,19 @@ export async function confirmCoverage(store: MandateStore, source: Mandate, jobs
 	if (confirmationId && (!item || item.coverage_scope_digest !== digest)) return { reason: "coverage confirmation does not match this exact original scope and replacement" };
 	if (!item) item = await escalations.raise({ kind: "product_ambiguity", mandate_id: source.id, job_ids: source.job_ids!, coverage_scope_digest: digest,
 		continuity_scope_digest: confirmationScope(store.home, source, jobs),
-		question: `Confirm that these exact jobs were already admitted under ${source.id} before its admission cutoff, and that only its coverage is obsolete by ${replacement.id}? Scope ${digest}. Complete only the original work with the original remaining budget, baseline, ceilings, expiry, exclusions and stops; grant no new scope or funding.`,
+		...(source.provenance?.expiry_hours === undefined ? { continuity_default_expiry: true as const } : {}),
+		question: `Confirm that these exact jobs were already admitted under ${source.id} before its admission cutoff, and that only its coverage is obsolete by ${replacement.id}${source.provenance?.expiry_hours === undefined ? ", and its expiry was a default admission window rather than an explicit completion deadline" : ""}? Scope ${digest}. Complete only the original work with the original remaining budget, baseline, ceilings, expiry, exclusions and stops; grant no new scope or funding.`,
 		mandate_clause: "Unknown coverage replacement and original admission require an authenticated exact-scope confirmation",
 		options: [{ id: "confirm", label: "Confirm original admission and obsolete coverage", consequence: "Freeze only the admitted original work on its original accounting root", cost: "No new budget or quality credit" },
 			{ id: "deny", label: "Do not continue", consequence: "Leave source coverage and dependencies unchanged", cost: "No spend" }], recommended: "confirm",
-		evidence_paths: [store.file(source.id), store.file(replacement.id)] });
+		evidence_paths: [store.file(source.id), store.file(replacement.id), confirmationInputFile(store, source, jobs, digest)] });
 	if (item.status === "open") return { escalation_id: item.id };
 	if (!authenticated(item) || item.kind !== "product_ambiguity" || item.mandate_id !== source.id || item.coverage_scope_digest !== digest ||
 		JSON.stringify(item.job_ids) !== JSON.stringify(source.job_ids) || !item.answered_at) return { reason: "coverage confirmation denied, withdrawn or unauthenticated" };
 	const latest = store.get(source.id);
 	const latestReplacement = store.get(replacement.id);
-	const currentJobs = readJobsDocument(store.home).jobs.filter((job) => source.job_ids?.includes(job.id));
+	const records = readJobsDocument(store.home).jobs;
+	const currentJobs = source.job_ids!.map((id) => records.find((job) => job.id === id)).filter((job): job is Job => job !== undefined);
 	if (!latest || !latestReplacement || !["active", "expired"].includes(latest.status) || scope(store.home, latest, latestReplacement, currentJobs) !== digest) return { reason: "coverage scope or source stop changed before commit" };
 	return { coverage: { replacement_id: replacement.id, at: item.answered_at, authority_reference: item.id, scope_digest: digest } };
 }

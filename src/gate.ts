@@ -1,34 +1,6 @@
 /**
- * The gate — one fresh-context review of a research artifact, then policy.
- *
- * Ported from `cmdp gate`, with the prose parser deleted. The shape of the
- * thing is unchanged and deliberate:
- *
- *   reviewer OBSERVES  ->  parent DECIDES
- *
- * The reviewer worker (profile `gate-reviewer`, read-only, scratch cwd, never
- * the worktree) reads exactly one file — a copy of the artifact — and calls
- * `report_verdict` with what it saw: verdict, three flags, reasons, revisions.
- * It never decides `cause`, never applies flags-force-escalate, and never
- * counts attempts. That is this module's job, and it is code:
- *
- *  1. a veto flag true               -> escalate (`GATE_VETO_FLAGS`; cause
- *     `flagged` on a reviewer pass, else `policy`). `blocking_unknowns` is
- *     reported, never a veto (cp-unknowns-no-veto)
- *  2. revise when a revise exists    -> escalate, cause `policy` (GATE_MAX_REVISE)
- *  3. no usable verdict              -> escalate, cause `operational`, and
- *     `operational_persistent` when the previous attempt was already
- *     operational (the in-worker repair is already spent as bounded
- *     repair, so the ladder's next rung is a different model, then surface)
- *  4. cause is null on pass and revise; **branch on cause, never on prose**
- *
- * Every attempt leaves `state/runs/<job-id>/gate-<n>.json` (the decision) beside
- * `state/runs/<job-id>/gate-<n>/` (the reviewer's own run: events, status, its
- * write-once `verdict.json`). Prior attempts are read from those files, so the
- * revise cap survives a parent restart.
- *
- * Gate pass is quality, never authorization: shipping still needs the T21
- * checkpoint.
+ * Fresh-context reviewers observe; code applies veto flags, attempt caps and operational escalation.
+ * Persist decisions and raw runs so restart preserves credit; PASS never authorizes shipping.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -84,7 +56,8 @@ import type { Sender } from "./send.ts";
 import { taskAddendaBlock } from "./task-addenda.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import type { MandateStore } from "./mandate.ts";
-import { continueForJob, continuityInputsBlock } from "./mandate-continuity.ts";
+import { continuityInputsBlock } from "./mandate-continuity.ts";
+import { requireJobLabels } from "./ledger.ts";
 import { assertReviewAllowed, continuationBudget } from "./mandate-usage.ts";
 import type { ProjectRegistry } from "./projects.ts";
 import { type ReviewerModelSelection, selectReviewerModel } from "./reviewer-model.ts";
@@ -857,7 +830,15 @@ export class Gate {
 		const profile = profileForRole(this.#options.profilesDir, "gate-reviewer");
 		const record = this.#options.fleet?.get(jobId);
 		if (!recovery && !selectedAttempt && record && this.#options.mandates) await assertReviewAllowed(this.#options.mandates, { jobId, project: record.project, kind: record.kind }, this.#options.fleet?.read().jobs ?? []);
-		if (!recovery && !selectedAttempt && !record && this.#options.mandates) await continueForJob(this.#options.mandates, jobId, this.#options.fleet?.read().jobs ?? []);
+		if (!recovery && !selectedAttempt && !record && this.#options.mandates) {
+			const issue = this.#options.mandates.runContext().ledgerJob(jobId);
+			if (issue) {
+				await assertReviewAllowed(this.#options.mandates, { jobId, ...requireJobLabels(issue) }, this.#options.fleet?.read().jobs ?? []);
+			} else if (this.#options.mandates.list().some((grant) => grant.job_ids?.includes(jobId) ||
+				grant.same_work_replacements?.some((link) => [link.original_job_id, link.replacement_job_id].includes(jobId)))) {
+				throw new GateError(`${jobId}: original ledger job is missing; review permission cannot be proven`);
+			}
+		}
 		const selection = selectReviewerModel({ model: request.model, record, registry: this.#options.registry, mandates: this.#options.mandates, now: now() });
 		const route = await this.#route(profile, jobId, record, selection?.model, selection?.thinking);
 		const model = route.decision.model;

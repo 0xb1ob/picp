@@ -55,6 +55,7 @@ export async function prepareGateReplacement(options: {
 		let saved: { job_id: string; replacement_job_id: string; task_file: string };
 		try {
 			saved = JSON.parse(readFileSync(link, "utf8"));
+			if (saved?.job_id === jobId && saved.replacement_job_id !== replacementJobId) throw new Error("replacement already prepared for another job; use its original IDs");
 			if (saved?.job_id !== jobId || saved.replacement_job_id !== replacementJobId || saved.task_file !== join(dir, "revision-task.md") ||
 				Object.keys(saved).sort().join(",") !== "job_id,replacement_job_id,task_file") throw new Error("replacement binding changed or belongs to another job");
 		} catch (error) {

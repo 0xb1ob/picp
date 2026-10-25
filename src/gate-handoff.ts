@@ -6,6 +6,8 @@ import type { ArtifactStore } from "./artifacts.ts";
 import type { FleetStore } from "./fleet.ts";
 import { GateError } from "./gate.ts";
 import { normalPassDigest } from "./gate-pass.ts";
+import type { CommandPost } from "./command-post.ts";
+import { liveUsageJobs } from "./mandate-usage.ts";
 import { publishRecoveryBytes, publishRecoveryFile, recoveryDigest, recoveryTarget, validateRecoveryAuthority } from "./gate-recovery.ts";
 import { handoffDigest, handoffFiles, readHandoff, readHandoffInputs, type HandoffInputs } from "./gate-handoff-store.ts";
 import { escalationApproves, EscalationStore } from "./escalation.ts";
@@ -96,7 +98,9 @@ async function projectionResult(options: Options, record: GateHandoff) {
 		retained: await Promise.all(record.edges.map(async (edge) => ({ dependent_job_id: edge.dependent_job_id, blocker_ids: (await options.ledger.show(edge.dependent_job_id)).blocked_by }))) };
 }
 
-export async function handoffGate(options: Options, request: { source_job_id: string; job_id: string; dependent_job_ids: string[] }) {
+export async function handoffGate(post: CommandPost, request: { source_job_id: string; job_id: string; dependent_job_ids: string[] }) {
+	const options: Options = { home: post.home, ledger: post.ledger(), fleet: post.fleet, artifacts: post.artifacts,
+		mandates: post.mandates, pipeline: post.pipeline(), reviews: post.reviewRuns, usage: () => liveUsageJobs(post.fleet, post.runs) };
 	const { home, ledger, fleet, pipeline, reviews } = options;
 	const original = request.source_job_id;
 	const replacement = request.job_id;

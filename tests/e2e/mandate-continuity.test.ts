@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
+import { MandateStore } from "../../src/mandate.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, MockProvider, REPO_ROOT, startPiChild, type ScriptStep, treehouseAvailable, waitFor } from "../harness/index.ts";
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
@@ -26,6 +27,65 @@ function parentCommands(home: string, provider: MockProvider, agent: ReturnType<
 		} finally { await child.close(); }
 	};
 }
+test("typed obsolete coverage requires authenticated full-scope confirmation and preserves the original accounting root", { timeout: 90_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const agent = createAgentDir({ provider });
+	initJobsDocument(home.path, "cp");
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT });
+	t.after(async () => { await post.shutdown(); await provider.stop(); agent.cleanup(); home.cleanup(); });
+	await post.registry.register({ name: "demo", clone_url: "https://github.com/example/demo.git", delivery: "local" });
+	const original = await post.ledger().create({ title: "Original scope", description: "Keep every original instruction.\n".repeat(100), project: "demo", kind: "research", delivery: "local" });
+	const source = post.mandates.issue({ projects: ["demo"], objective: "Finish only original admitted work", job_ids: [original.id], expiry: "2099-01-01T00:00:00Z", provenance: { expiry_hours: "home" }, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 1, ask_on: [] });
+	post.mandates.save({ ...source, admissions: undefined, provenance: undefined });
+	const replacement = post.mandates.issue({ projects: ["demo"], objective: "Independent new coverage", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 200, tokens: 10_000_000 }, job_cap: 2, ask_on: [] });
+	const parent = parentCommands(home.path, provider, agent);
+	const args = { action: "continue", source_id: source.id, replacement_id: replacement.id };
+	const before = await parent("Inspect the proposed coverage mapping; do not authorize it.", [
+		{ kind: "tool_calls", calls: [{ name: "cp_mandate", args }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_mandate", args }] },
+	]);
+	assert.ok(before.every((event) => !event.isError), JSON.stringify(before));
+	assert.equal(post.mandates.get(source.id)!.coverage_superseded, undefined);
+	assert.equal(post.mandates.get(source.id)!.continuity, undefined);
+	const questions = post.escalations.open().filter((item) => item.coverage_scope_digest);
+	assert.equal(questions.length, 1);
+	const question = questions[0]!;
+	assert.equal(question.continuity_default_expiry, true);
+	assert.match(question.question, /default admission window rather than an explicit completion deadline/);
+	const evidence = JSON.parse(readFileSync(question.evidence_paths[2]!, "utf8"));
+	assert.equal(evidence.inputs[0].task, original.description);
+	assert.equal(evidence.authority.objective, source.objective);
+	const quote = `${question.id}: approve only the unchanged original admission, default expiry fact and obsolete coverage mapping`;
+	const after = await parent(quote, [
+		{ kind: "tool_calls", calls: [{ name: "cp_decide", args: { target: question.id, decision: "approve", basis: { operator_quote: quote } } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_mandate", args: { ...args, confirmation_escalation_id: question.id } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_mandate", args }] },
+	]);
+	assert.ok(after.every((event) => !event.isError), JSON.stringify(after));
+	assert.match(JSON.stringify(after[1]!.result), /committed/);
+	assert.match(JSON.stringify(after[2]!.result), /committed/);
+	const saved = post.mandates.get(source.id)!;
+	assert.equal(saved.coverage_superseded?.replacement_id, replacement.id);
+	assert.equal(saved.continuity?.accounting_root_id, source.id);
+	assert.equal(saved.expiry, source.expiry);
+	assert.deepEqual(saved.spend_cap, source.spend_cap);
+	assert.deepEqual(saved.usage_baseline, source.usage_baseline);
+	assert.equal(post.mandates.selection("dispatch", { jobId: original.id, project: "demo", kind: "research" })?.grant.id, source.id);
+	const future = new MandateStore(home.path, { now: () => new Date("2100-01-01T00:00:00Z") });
+	assert.equal((await future.continue(source.id)).state, "committed");
+	assert.equal(future.selection("dispatch", { jobId: original.id, project: "demo", kind: "research" })?.grant.id, source.id);
+	post.mandates.pause(source.id);
+	assert.throws(() => post.mandates.assertPermitted("dispatch", { jobId: original.id, project: "demo", kind: "research" }), /paused/);
+	assert.equal((await post.mandates.continue(source.id)).state, "ineligible");
+	writeFileSync(post.artifacts.path(original.id), "# Legacy original plan\n");
+	const stoppedReview = await parent("Inspect the paused legacy research gate without reopening its authority.", [
+		{ kind: "tool_calls", calls: [{ name: "cp_gate", args: { job_id: original.id } }] },
+	]);
+	assert.ok(stoppedReview[0]!.isError);
+	assert.match(JSON.stringify(stoppedReview[0]!.result), /paused/);
+});
+
 test("named mandate issue captures immutable typed admission without widening project scope", { timeout: 30_000 }, async (t) => {
 	const home = createScratchHome();
 	initJobsDocument(home.path, "cp");
@@ -149,6 +209,8 @@ test("direct expired dispatch rejects added scope then delivers complete governi
 	await assert.rejects(post.dispatch({ jobId: job.id, task: task + "\nAlso implement an unrelated feature", fetch: false }), /differs from its frozen original scope/);
 	assert.equal(post.fleet.get(job.id), undefined);
 	assert.equal(provider.requests("continuation-worker").length, 0);
+	post.mandates.issue({ projects: ["demo"], objective: "Independent new project work", expiry: "2099-01-01T00:00:00Z",
+		spend_cap: { usd: 200, tokens: 10_000_000 }, job_cap: 2, ask_on: [] });
 	const accepted = await post.dispatch({ jobId: job.id, task, fetch: false });
 	assert.equal(accepted.receipt, "accepted");
 	assert.equal("mandate_id" in accepted ? accepted.mandate_id : undefined, grant.id);
@@ -348,6 +410,15 @@ test("post-expiry replacement uses a committed original-root link, full findings
 	assert.ok(readFileSync(join(home.path, paths.originalTaskFile(replacement.id)), "utf8").includes(task));
 	assert.equal((await post.dispatch({ jobId: replacement.id, taskFile, model: replacementModel, fetch: false })).receipt, "accepted");
 	await waitFor(() => post.fleet.get(replacement.id)?.phase, (phase) => phase === "held", { timeoutMs: 30_000, what: "replacement public report" });
+	await waitFor(() => post.manager.get(replacement.id)?.worker.busy, (busy) => busy === false, { timeoutMs: 30_000 });
+	post.mandates.pause(grant.id);
+	const stoppedSend = await parent("Inspect the stopped original-root successor without reopening it.", [
+		{ kind: "tool_calls", calls: [{ name: "cp_send", args: { job_id: replacement.id, message: "Continue only the unchanged original research.", task_file: taskFile } }] },
+	]);
+	assert.ok(stoppedSend[0]!.isError);
+	assert.match(JSON.stringify(stoppedSend[0]!.result), /paused/);
+	assert.equal(post.fleet.get(replacement.id)!.phase, "held");
+	post.mandates.resume(grant.id);
 	assert.equal(readFileSync(join(home.path, paths.runDir(replacement.id), "previous-original-task.md"), "utf8"), readFileSync(join(home.path, paths.originalTaskFile(original.id)), "utf8"));
 	assert.ok(readFileSync(join(home.path, paths.runDir(replacement.id), "previous-task-addenda.md"), "utf8").includes(addendum));
 	assert.ok(readFileSync(join(home.path, paths.originalTaskFile(replacement.id)), "utf8").includes(task));

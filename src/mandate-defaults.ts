@@ -58,7 +58,7 @@ export const SCAFFOLD_MANDATE_DEFAULTS: MandateDefaults = {
 	ask_on: ["risk:high"],
 	exclude_paths: [".github/workflows/", "secrets/", "**/.env*"],
 	notes: {
-		expiry_hours: "how long a grant stands before it must be re-issued; conservative so a stale mandate cannot outlive the work it was meant for",
+		expiry_hours: "default admission window for new work; proven unfinished named work retains its original scope and remaining limits; explicit expiry remains a completion deadline",
 		spend_usd: "USD spend cap across every job the grant covers, before it pauses and escalates",
 		spend_tokens: "non-cached token cap (input + output + cache_write; cache reads excluded) across every job the grant covers; at the cap the grant pauses and the parent may raise it itself up to token_ceiling",
 		token_ceiling: "the highest token cap the parent may raise a grant to on its own (journaled with a reason); reaching it, or the USD cap, escalates budget_exhausted to the operator",
@@ -147,6 +147,7 @@ export function formatMandateDefaults(defaults: MandateDefaults): string {
 	if (defaults.notes.token_ceiling) lines.push(`    ${defaults.notes.token_ceiling}`);
 	lines.push(`  scope_policy: ${defaults.scope_policy ?? "project_wide_allowed"} (file-only)`);
 	lines.push(`  deny_projects: ${defaults.deny_projects?.join(", ") || "(none)"} (file-only)`);
+	lines.push("  expiry policy: defaults close new admission; proven original named work keeps its remaining limits; explicit deadlines bind");
 	return lines.join("\n");
 }
 

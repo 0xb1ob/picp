@@ -8,7 +8,7 @@ import { type Ledger, requireJobLabels } from "./ledger.ts";
 import type { LeaseManager } from "./leases.ts";
 import type { MandateStore } from "./mandate.ts";
 import { scheduleRecord } from "./mandate-accounting.ts";
-import { resolveRoutingInputs } from "./pipeline.ts";
+import { assertPipelineProjectionReady, resolveRoutingInputs } from "./pipeline.ts";
 import { riskField } from "./risk-warning.ts";
 import { formatPreflight, type Preflight } from "./preflight.ts";
 import type { RunRegistry } from "./runs.ts";
@@ -75,6 +75,7 @@ export class ScriptDispatcher {
 	constructor(options: ScriptDispatchOptions) { this.options = options; }
 
 	async preview(request: DispatchRequest): Promise<ScriptPreview> {
+		assertPipelineProjectionReady(this.options.home, request.jobId);
 		const issue = await this.options.ledger.show(request.jobId);
 		if (!issue.script) throw new DispatchError(`${issue.id}: no declared script`);
 		if (issue.status !== "open") throw new DispatchError(`${issue.id} is ${issue.status}; script jobs cannot be replayed`);
@@ -110,6 +111,7 @@ export class ScriptDispatcher {
 	}
 
 	async dispatch(request: DispatchRequest): Promise<ScriptDispatchResult> {
+		assertPipelineProjectionReady(this.options.home, request.jobId);
 		const issue = await this.options.ledger.show(request.jobId);
 		if (!issue.script) throw new DispatchError(`${issue.id}: no declared script`);
 		assertScriptRequest(request);
@@ -161,6 +163,7 @@ export class ScriptDispatcher {
 			// A close before the pid write waits for the fleet record to become a launched record.
 			const ready = new Promise<void>((resolve) => { releaseReady = resolve; });
 			const recorder = runs.open(issue.id);
+			assertPipelineProjectionReady(home, issue.id);
 			process = (this.options.run ?? runScript)({
 				home, jobId: issue.id, worktree: lease.path, file, wallClockSeconds,
 				onResult: async (result) => {

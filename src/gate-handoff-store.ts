@@ -6,7 +6,9 @@ import { GateHandoffSchema, JobIdSchema, isInside, paths, runtimeRootFor, valida
 import { readJobsDocument } from "./ledger.ts";
 import { originalScopeDigest } from "./mandate-continuity.ts";
 import { EscalationStore, escalationApproves } from "./escalation.ts";
-import { readPriorAttempts } from "./gate.ts";
+import { normalPassDigest } from "./gate-pass.ts";
+import { ArtifactStore } from "./artifacts.ts";
+import { MandateStore } from "./mandate.ts";
 import { plannerInputFiles } from "./planner-inputs.ts";
 
 export const handoffDigest = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -97,7 +99,7 @@ export function assertHandoffProjectionReady(home: string, jobId: string): void 
 		const stable = inputs.jobs.every((old) => jobs.some((current) => current.id === old.id && originalScopeDigest(current) === old.scope_digest)) &&
 			inputs.refs.every((ref) => existsSync(ref.path) && handoffDigest(readFileSync(ref.path, "utf8")) === ref.digest) &&
 			[record.source_job_id, record.replacement_job_id].every((id) => plannerInputFiles(home, id).every((path) => inputs.refs.some((ref) => ref.path === path)));
-		if (record.phase !== "committed" || !stable || readPriorAttempts(home, record.replacement_job_id).decisions.at(-1)?.verdict !== "pass") {
+		if (record.phase !== "committed" || !stable || normalPassDigest(home, record.replacement_job_id, new ArtifactStore({ home }), new MandateStore(home)) !== record.pass_digest) {
 			throw new Error(`${jobId}: handoff ${record.handoff_id} still needs actual PASS and its recorded dependency projection`);
 		}
 		for (const edge of record.edges.filter((edge) => edge.dependent_job_id === jobId && edge.provenance_reference.startsWith("confirmation:"))) {

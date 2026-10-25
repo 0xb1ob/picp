@@ -62,6 +62,7 @@ export interface RaiseEscalationInput {
 	continuity_scope_digest?: string;
 	gate_handoff_id?: string;
 	coverage_scope_digest?: string;
+	continuity_default_expiry?: true;
 	awaiting_id?: string;
 	plan_summary?: PlanSummary;
 	decision_summary?: DecisionSummary;
@@ -186,6 +187,7 @@ export class EscalationStore {
 				...(input.continuity_scope_digest ? { continuity_scope_digest: input.continuity_scope_digest } : {}),
 				...(input.gate_handoff_id ? { gate_handoff_id: input.gate_handoff_id } : {}),
 				...(input.coverage_scope_digest ? { coverage_scope_digest: input.coverage_scope_digest } : {}),
+				...(input.continuity_default_expiry ? { continuity_default_expiry: true as const } : {}),
 				...(input.awaiting_id ? { awaiting_id: input.awaiting_id } : {}),
 				...(input.plan_summary ? { plan_summary: input.plan_summary } : {}),
 				...(input.decision_summary ? { decision_summary: input.decision_summary } : {}),

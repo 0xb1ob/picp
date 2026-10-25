@@ -92,6 +92,7 @@ export async function replaceAdmittedWork(options: {
 			source_id: sourceId, mandate_id: sourceId, original_job_id: originalJobId, replacement_job_id: replacementJobId,
 			work_id: workId, link_id: linkId, task_file: taskFile, state, ...(reason ? { reason } : {}),
 		});
+		if (store.list().some((grant) => grant.id !== sourceId && grant.same_work_replacements?.some((entry) => [entry.original_job_id, entry.replacement_job_id].some((id) => id === originalJobId || id === replacementJobId)))) return result("ineligible", "original or replacement already belongs to another work link");
 		if (continuation.state !== "committed") return { ...result(continuation.state, continuation.reason), escalation_id: continuation.escalation_id };
 		if (!["active", "expired"].includes(source.status) || !store.continuationProof(originalJobId)[sourceId]) return result("ineligible", "original continuation is stopped or no longer proven");
 		if (capReached(source, store.withReviewerSpend(usage(), [source]))) return result("ineligible", "original budget exhausted");

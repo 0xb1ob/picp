@@ -54,7 +54,6 @@ import { formatPreflight, type Preflight, type PreflightResult } from "./preflig
 // value import in both directions would be a runtime cycle. It is re-exported
 // below so `src/dispatch.ts` stays the import path every caller already uses.
 import { assertPipelineProjectionReady, routingRecord, type SuppliedBy } from "./pipeline.ts";
-import { assertHandoffProjectionReady } from "./gate-handoff-store.ts";
 import { assembleBrief, loadProfile, profileForRole, readBriefTemplate } from "./profiles.ts";
 import type { ProjectRegistry } from "./projects.ts";
 import { formatRoutingDecision, type ModelProbe, resolveWithCapacity, RoutingError } from "./routing.ts";
@@ -458,7 +457,6 @@ export class Dispatcher {
 		const options = this.#options;
 		const issue = await options.ledger.show(request.jobId);
 		assertPipelineProjectionReady(options.home, issue.id);
-		assertHandoffProjectionReady(options.home, issue.id);
 		if (issue.script) throw new DispatchError(`${issue.id}: script jobs use CommandPost.previewDispatch`);
 		const task = readTask(request);
 		assertDispatchable(issue);
@@ -530,10 +528,8 @@ export class Dispatcher {
 		const now = options.now ?? (() => new Date());
 		const issue = await options.ledger.show(request.jobId);
 		assertPipelineProjectionReady(options.home, issue.id);
-		assertHandoffProjectionReady(options.home, issue.id);
 		if (issue.script) throw new DispatchError(`${issue.id}: script jobs use CommandPost.dispatch`);
 		const task = readTask(request);
-
 		// --- 1. the ledger decides what this job is -------------------------
 		assertDispatchable(issue);
 		const labels = requireJobLabels(issue);
@@ -710,6 +706,7 @@ export class Dispatcher {
 			if (kind === "research") mkdirSync(join(options.home, paths.artifactDir(issue.id)), { recursive: true });
 			reservation = await options.makeRoom?.(issue.id, profile.frontmatter.role);
 			await options.manager.ready();
+			assertPipelineProjectionReady(options.home, issue.id);
 			const managed = options.manager.spawn({
 				budgetLimit: continuationBudget(options.mandates, issue.id, options.fleet.read().jobs, "dispatch"),
 				identity: {

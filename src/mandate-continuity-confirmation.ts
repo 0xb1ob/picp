@@ -28,6 +28,16 @@ export function confirmationScope(home: string, source: Mandate, jobs: readonly 
 	})).digest("hex");
 }
 
+export function confirmationInputFile(store: MandateStore, source: Mandate, jobs: readonly Job[], scope: string): string {
+	const inputFile = `${store.file(source.id)}.confirmation-${scope}`;
+	if (!existsSync(inputFile)) {
+		const text = JSON.stringify({ authority: source, inputs: governingInputs(store.home, jobs) });
+		if (Buffer.byteLength(text) > REVIEW_ORIGINAL_TASK_MAX_BYTES) throw new Error("confirmation input exceeds the byte cap; nothing truncated");
+		atomicWriteText(inputFile, text, { mode: 0o600, syncDir: true });
+	}
+	return inputFile;
+}
+
 export function confirmedAdmission(home: string, source: Mandate, jobs: readonly Job[], id?: string): string | undefined {
 	const reference = id ?? source.continuity?.authority_reference.replace(/^confirmation:/, "");
 	if (!reference?.startsWith("es-")) return undefined;
@@ -40,13 +50,19 @@ export function confirmedAdmission(home: string, source: Mandate, jobs: readonly
 	return item.id;
 }
 
+export function confirmedDefaultExpiry(home: string, source: Mandate, jobs: readonly Job[]): boolean {
+	if (source.provenance?.expiry_hours) return ["home", "project"].includes(source.provenance.expiry_hours);
+	return new EscalationStore({ home }).list().some((item) => (item.continuity_default_expiry || !item.coverage_scope_digest) &&
+		item.continuity_scope_digest && confirmedAdmission(home, source, jobs, item.id) === item.id);
+}
+
 export async function admissionEvidence(store: MandateStore, source: Mandate, jobs: readonly Job[], confirmationId?: string): Promise<{
 	admissions?: NonNullable<Mandate["admissions"]>; authority_reference?: string; escalation_id?: string; reason?: string; confirmation_required?: boolean;
 }> {
 	const confirmed = confirmedAdmission(store.home, source, jobs, confirmationId);
 	const admissions = jobs.flatMap((job) => {
 		const old = source.admissions?.find((entry) => entry.job_id === job.id);
-		if (old && admittedWork(source, job, confirmed)) return [old];
+		if (old && admittedWork(source, job, old.confirmation_escalation_id ? confirmedAdmission(store.home, source, jobs, old.confirmation_escalation_id) : confirmed)) return [old];
 		const labels = parseJobLabels(job.labels);
 		if (!labels.project || !labels.kind) return [];
 		const identity = { job_id: job.id, project: labels.project, kind: labels.kind, scope_digest: originalScopeDigest(job) };
@@ -56,24 +72,22 @@ export async function admissionEvidence(store: MandateStore, source: Mandate, jo
 		return confirmed ? [{ ...identity, confirmation_escalation_id: confirmed }] : [];
 	});
 	const defaultExpiry = ["home", "project"].includes(source.provenance?.expiry_hours ?? "");
-	if (admissions.length === jobs.length && (defaultExpiry || source.expiry > store.authorityNow() || confirmed)) {
+	const defaultConfirmed = confirmedDefaultExpiry(store.home, source, jobs);
+	if (admissions.length === jobs.length && (defaultExpiry || source.expiry > store.authorityNow() || defaultConfirmed)) {
 		return { admissions, authority_reference: confirmed ? `confirmation:${confirmed}` : `${source.id}:typed-admission` };
 	}
 	const scope = confirmationScope(store.home, source, jobs);
 	const escalations = new EscalationStore({ home: store.home });
 	if (confirmationId && !confirmed) return { reason: "confirmation is missing, denied, unauthenticated or for different scope" };
-	const existing = escalations.list().find((item) => item.kind === "product_ambiguity" && item.mandate_id === source.id && item.continuity_scope_digest === scope);
+	const existing = escalations.list().find((item) => item.kind === "product_ambiguity" && item.mandate_id === source.id && item.continuity_scope_digest === scope &&
+		(defaultExpiry || source.expiry > store.authorityNow() || item.continuity_default_expiry || !item.coverage_scope_digest));
 	if (existing && existing.status !== "open") return { reason: "original admission confirmation was denied or withdrawn", escalation_id: existing.id };
 	escalations.supersede((item) => item.kind === "product_ambiguity" && item.mandate_id === source.id &&
 		item.continuity_scope_digest && item.continuity_scope_digest !== scope ? "original continuity input changed" : undefined);
-	const inputFile = `${store.file(source.id)}.confirmation-${scope}`;
-	if (!existsSync(inputFile)) {
-		const text = JSON.stringify({ authority: source, inputs: governingInputs(store.home, jobs) });
-		if (Buffer.byteLength(text) > REVIEW_ORIGINAL_TASK_MAX_BYTES) throw new Error("confirmation input exceeds the byte cap; nothing truncated");
-		atomicWriteText(inputFile, text, { mode: 0o600, syncDir: true });
-	}
+	const inputFile = confirmationInputFile(store, source, jobs, scope);
 	const item = existing ?? await escalations.raise({
 		kind: "product_ambiguity", mandate_id: source.id, job_ids: source.job_ids!, continuity_scope_digest: scope,
+		...(source.provenance?.expiry_hours === undefined ? { continuity_default_expiry: true as const } : {}),
 		mandate_clause: `${source.id}: confirm original admission only; original caps, baseline and stops remain binding`,
 		question: `Confirm that ${source.job_ids!.join(", ")} are the complete unchanged original admitted work under ${source.id}${defaultExpiry || source.provenance?.expiry_hours === "explicit" ? "" : ", and its expiry was a default admission window rather than an explicit completion deadline"}? No new work or budget is authorized.`,
 		options: [{ id: "confirm", label: "Confirm original admission", consequence: "Continue only these preserved inputs under the original remaining limits", cost: "No new budget" },

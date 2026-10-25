@@ -31,6 +31,7 @@
  */
 
 import { recoveryTarget } from "./gate-recovery.ts";
+import { assertHandoffProjectionReady } from "./gate-handoff-store.ts";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { benignSenseAt, listedAfter, negatedAt, negatedHeadAt } from "./risk-negation.ts";
@@ -576,6 +577,7 @@ export class PipelineStore {
 
 /** Partial reanchors cannot advance either the old plan or its implementer. */
 export function assertPipelineProjectionReady(home: string, shipId: string): void {
+	assertHandoffProjectionReady(home, shipId);
 	const store = new PipelineStore(home);
 	for (const record of store.list().filter((item) => item.ship_id === shipId)) {
 		if (record.reanchor?.phase === "prepared") throw new PipelineError(`${shipId}: reanchor prepared; resume its dependency projection`);

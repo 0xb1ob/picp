@@ -10,7 +10,7 @@ import { readTaskAddenda, taskAddendaBlock } from "./task-addenda.ts";
 import { pathExcluded, subsystemExcluded, MandateStore } from "./mandate.ts";
 import { ArtifactStore } from "./artifacts.ts";
 import { normalPassDigest } from "./gate-pass.ts";
-import { admissionEvidence, confirmedAdmission } from "./mandate-continuity-confirmation.ts";
+import { admissionEvidence, confirmedAdmission, confirmedDefaultExpiry } from "./mandate-continuity-confirmation.ts";
 import { readPriorAttempts } from "./gate.ts";
 import { pendingHandoffs } from "./gate-handoff-store.ts";
 import { afterAdmissionCutoff, confirmCoverage, validCoverage } from "./mandate-coverage.ts";
@@ -151,7 +151,11 @@ export async function continueAdmittedWork(
 		if (!evidence.admissions) return { ...result(evidence.confirmation_required ? "confirmation_required" : "ineligible", evidence.reason ?? "original admission is unproven", source.job_ids), escalation_id: evidence.escalation_id };
 		const currentSource = store.require(sourceId);
 		if (sourceFingerprint(currentSource) !== originalFingerprint || !["active", "expired"].includes(currentSource.status)) return result("ineligible", "source changed while checking admission");
-		source = { ...currentSource, admissions: currentSource.continuity ? evidence.admissions : evidence.admissions.map((entry) => ({ ...entry, continuation_work: workUnfinished(store.home, jobs.find((job) => job.id === entry.job_id)!, currentSource) })) };
+		const otherRoots = store.list().filter((grant) => grant.id !== sourceId);
+		source = { ...currentSource, admissions: currentSource.continuity ? evidence.admissions : evidence.admissions.map((entry) => ({ ...entry,
+			continuation_work: !otherRoots.some((grant) => grant.continuity?.admissions.some((old) => old.job_id === entry.job_id && old.continuation_work !== false) || grant.same_work_replacements?.some((link) => link.original_job_id === entry.job_id || link.replacement_job_id === entry.job_id)) && workUnfinished(store.home, jobs.find((job) => job.id === entry.job_id)!, currentSource),
+		})) };
+		if (!source.admissions!.some((entry) => entry.continuation_work !== false)) return result("ineligible", "no unfinished original work owned by this accounting root");
 		const { continuity: previous, ...authority } = source;
 		const fingerprint = sourceFingerprint(source);
 		const inputs = governingInputs(store.home, jobs);
@@ -215,7 +219,7 @@ export function continuationProof(home: string, job: Job | undefined, grants: re
 		if (grant.coverage_superseded && !validCoverage(home, grant, originalJobs as Job[], grants, now)) continue;
 		const confirmationId = confirmedAdmission(home, grant, originalJobs as Job[]);
 		if (receipt.authority_reference.startsWith("confirmation:") && !confirmationId) continue;
-		if (grant.expiry <= now && !["home", "project"].includes(grant.provenance?.expiry_hours ?? "") && !confirmationId) continue;
+		if (grant.expiry <= now && !confirmedDefaultExpiry(home, grant, originalJobs as Job[])) continue;
 		const admitted = records.find((entry) => entry.id === workIdentity(grant, job.id));
 		if (!admitted || grant.admissions?.find((entry) => entry.job_id === admitted.id)?.continuation_work === false || (admitted.id !== job.id && !validReplacement(home, grant, job, records))) continue;
 		if (receipt.admission_expiry !== grant.expiry || receipt.source_fingerprint !== sourceFingerprint(grant) || !admittedWork(grant, admitted, confirmationId)) continue;
