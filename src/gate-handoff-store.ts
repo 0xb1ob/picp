@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Type, type Static } from "typebox";
-import { GateHandoffSchema, JobIdSchema, isInside, paths, runtimeRootFor, validate, type GateHandoff } from "./contracts.ts";
+import { GateHandoffSchema, JobIdSchema, LAYOUT, isInside, isSafeJobId, paths, runtimeRootFor, validate, type GateHandoff } from "./contracts.ts";
 import { readJobsDocument } from "./ledger.ts";
 import { originalScopeDigest } from "./mandate-continuity.ts";
 import { EscalationStore, escalationApproves } from "./escalation.ts";
@@ -89,6 +89,11 @@ export function pendingHandoffs(home: string, replacement: string): GateHandoff[
 }
 
 export function assertHandoffProjectionReady(home: string, jobId: string): void {
+	if (!existsSync(join(home, LAYOUT.jobsFile))) {
+		const runs = join(home, LAYOUT.runs);
+		if (!existsSync(runs) || !readdirSync(runs, { withFileTypes: true }).some((entry) =>
+			entry.isDirectory() && isSafeJobId(entry.name) && handoffRecords(home, entry.name).length > 0)) return;
+	}
 	const jobs = readJobsDocument(home).jobs;
 	const dependent = jobs.find((job) => job.id === jobId);
 	if (!dependent) return;

@@ -301,6 +301,7 @@ test("post-expiry replacement uses a committed original-root link, full findings
 	let pool: ReturnType<typeof enableTreehouse> | undefined;
 	t.after(async () => { await post.shutdown(); await provider.stop(); pool?.cleanup(); agent.cleanup(); repo.cleanup(); home.cleanup(); });
 	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
+	await post.registry.register({ name: "other", clone_url: "https://github.com/example/other.git", delivery: "local" });
 	const clone = post.registry.pathOf("demo");
 	execFileSync("git", ["clone", "--quiet", repo.remote as string, clone]);
 	pool = enableTreehouse(clone, { maxTrees: 3 });
