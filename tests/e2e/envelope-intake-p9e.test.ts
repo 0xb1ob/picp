@@ -1,7 +1,7 @@
 /** Behavior 11, P9e: worker envelopes as the real parent's intake, settle watcher and a real worker's reporter see them. */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION, type EnvelopeCorrection, type FleetRecord } from "../../src/contracts.ts";
@@ -161,6 +161,8 @@ test("P9e-reporter: a worker's report naming a missing artifact is refused at th
 test("P9e-settle: the settle watcher stamps an envelope on disk atomically, never nudges it, and refuses a second report", { skip: SKIP, timeout: 200_000 }, async (t) => {
 	const s = await startStack(t);
 	const state = join(s.home, LAYOUT.state);
+	// Runs after startStack's never-throwing cleanup: a run cut off mid-wait leaves state 0o555, so restore it and remove.
+	t.after(() => { if (existsSync(state)) { chmodSync(state, 0o755); rmSync(s.home, { recursive: true, force: true }); } });
 	const events = (id: string, type: string) => readRunEvents(s.home, id).filter((event) => event.type === type);
 
 	const late = await s.post.ledger().create({ title: "P9e settle late", project: "demo", kind: "ship", delivery: "pr" });
