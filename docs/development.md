@@ -96,7 +96,7 @@ Docker-in-Docker runner per job). The choice keys on
 `github.event.repository.private`, so a public repository, and therefore any
 fork PR, never reaches a privileged self-hosted runner.
 
-The m2, m3 and `tests/pipeline.test.ts` lease suites (and the other
+The m2, m3 and `tests/e2e/pipeline-run.test.ts` lease suites (and the other
 lease-backed tests) need a real `treehouse` on `PATH`; without it they
 self-skip and `node --test` still exits 0. So before `npm test` the job prepends
 `$HOME/.local/bin` via `GITHUB_PATH`, installs treehouse with

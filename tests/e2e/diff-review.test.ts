@@ -262,6 +262,8 @@ test("S04: legacy stranded verdicts settle once and oversized frozen tasks state
 	assert.match(copy, /bounded review packet/);
 	assert.ok(copy.includes(`${Buffer.byteLength(huge)} bytes`));
 	assert.ok(copy.startsWith("requirement"));
+	// do8.4: the 100 000-byte cap falls mid-line, so the copy is cut back to the last whole line before its note.
+	assert.ok(copy.split("\n\n[bounded review packet")[0]?.endsWith("requirement requirement requirement\n"), "cut on a line boundary");
 });
 
 

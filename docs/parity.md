@@ -73,12 +73,12 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | "Never do the worker's job / never read project source" | ported | AGENTS.md §The loop (never-list) | — |
 | Session start: read learnings, then `cp_job ready` | mechanised | memory digest is injected at `session_start`; `/status` + `cp_job ready` are step 2–3 | `tests/memory.test.ts` |
 | Classify (kind × delivery, do not blur) | ported | AGENTS.md §Classify; labels are the dispatchability contract | `tests/ledger.test.ts` (`requireJobLabels`) |
-| "Evidence is not authorization" | mechanised | the checkpoint: written `pending` before anyone is asked, answerable only by a human channel | `tests/pipeline.test.ts`, `tests/e2e/phase3.test.ts` |
-| Pipeline: two jobs, dep-linked, three roles | ported | `cp_pipeline start` | `tests/pipeline.test.ts` |
+| "Evidence is not authorization" | mechanised | the checkpoint: written `pending` before anyone is asked, answerable only by a human channel | `tests/e2e/pipeline-run.test.ts`, `tests/pipeline-retained.test.ts`, `tests/e2e/phase3.test.ts` |
+| Pipeline: two jobs, dep-linked, three roles | ported | `cp_pipeline start` | `tests/e2e/pipeline-run.test.ts` |
 | Gate verdicts + `cause` ladder (policy / operational / operational_persistent) | mechanised | `decideGate` + `nextAction`; one revise max in code | `tests/e2e/gate-review.test.ts` (every branch), `tests/e2e/phase3.test.ts` |
 | "HARD RULE: workers never mail the findings body" | mechanised | `validateEnvelope`: ≤3 lines, no fences, no headings; a body-shaped summary is rejected in-worker | `tests/e2e/worker-reporter-p8f.test.ts`, `tests/contracts.test.ts` |
 | "Parent never reads artifact bodies" | mechanised | `ContextGuard` blocks `read`/`grep`/`bash`/`edit`/`write`; the ledger holds no bodies | `tests/guards.test.ts`, `tests/e2e/phase3.test.ts` |
-| Hung planner (artifact, no envelope) → gate from the path | ported | `advance()` gates it and reports `hung_planner` | `tests/pipeline.test.ts` |
+| Hung planner (artifact, no envelope) → gate from the path | ported | `advance()` gates it and reports `hung_planner` | `tests/e2e/pipeline-run.test.ts` |
 | "Never re-run research for an implementation failure" | mechanised | `mayRerunResearch` is asserted, not remembered | `tests/failures-retained.test.ts` |
 | Pre-dispatch path (lease-bind, branch=job-id, check, jobs add) | ported | `cp_dispatch`'s fixed order; probe **before** lease, no orphan branch | `tests/e2e/dispatch-s29.test.ts`, `tests/e2e/dispatch-cleanup-s29.test.ts`, `tests/e2e/dispatch-s30.test.ts` |
 | Promote vs new lease (same repo + held worktree + same model) | mechanised | `decideOccupancy`; cross-model role hop refused with the teardown instruction | `tests/e2e/preflight-s31.test.ts`, `tests/e2e/dispatch-s31.test.ts` |
