@@ -228,9 +228,8 @@ test("a third blocked planner round escalates loop_exhausted once and is not ans
 	assert.equal(after?.planner_blocked_rounds, 3);
 });
 
-// P11b-plan-followup: the operator's "ask the planner" / "revise the plan" sentences through post.send to a live planner:
-// the planner gets the question or revise brief; refusals name the right job, the one open revise, the veto-forced
-// gate until its escalation is answered, and the approved, dispatched implementer.
+// P11b-plan-followup: "ask the planner" / "revise the plan" via post.send reach a live planner as briefs; refusals name
+// the right job, the one open revise, the veto-forced gate until answered, and the dispatched implementer.
 test("P11b-plan-followup: plan follow-ups reach a live planner as briefs, and every refusal names its path", { skip: SKIP, timeout: 300_000 }, async (t) => {
 	const { home, post, provider, jobId, job } = await startPlanner(t, "planner-followup", [
 		writeArtifact,

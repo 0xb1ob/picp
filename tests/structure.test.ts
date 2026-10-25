@@ -67,7 +67,7 @@ const OPERATOR_NOTE_MAX_LINES = 60;
  * scanned — they are allowed to keep talking about what used to exist.
  */
 // Fresh grant per fire (docs/contracts.md *Fresh grant per fire*): the S3 opt-in and a shared, reused schedule grant
-// are gone for good; tests/schedule-grant.test.ts also pins the fire path itself.
+// are gone for good; tests/schedule-grant-retained.test.ts also pins the fire path itself.
 const BANNED_IDENTIFIERS = ["attachconsole", "attach-console", "attach_console", "refire", "approval_quote", "mandate: shared"];
 
 // ---------------------------------------------------------------------------
@@ -162,8 +162,9 @@ const R1_ALLOWED = [
 	"tests/e2e/authority.test.ts",
 	// P11-answer writes a legacy top-level state/ file that the dispatch reference snapshot must treat as external.
 	"tests/e2e/research-delivery.test.ts",
+	// P11c-quality-pipeline writes the legacy top-level data/quality.json that cp-u3i2 must ignore.
+	"tests/e2e/quality-panel.test.ts",
 	"tests/mode.test.ts",
-	"tests/quality.test.ts",
 	"tests/repo-map.test.ts",
 	"tests/storage.test.ts",
 	"tests/viewer.test.ts",
