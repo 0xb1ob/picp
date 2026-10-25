@@ -4,7 +4,7 @@ import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { OperatorRelayAcks, operatorRelayAcksFile, relayIdsOfMessage } from "../src/operator-outbox.ts";
+import { OperatorRelayAcks, operatorRelayAcksFile } from "../src/operator-outbox.ts";
 
 test("the ack fold skips a torn line; emit_failed clears an emit; a later emit wins", () => {
 	const state = mkdtempSync(join(tmpdir(), "operator-outbox-"));
@@ -29,8 +29,3 @@ test("the ack fold skips a torn line; emit_failed clears an emit; a later emit w
 	assert.equal(new OperatorRelayAcks(join(state, "missing.jsonl")).fold().acked.size, 0, "a missing journal folds empty");
 });
 
-test("relayIdsOfMessage drops malformed ids and foreign messages", () => {
-	assert.deepEqual(relayIdsOfMessage({ customType: "cp-bridge", details: { relay_ids: ["a", 3, "", "b"] } }), ["a", "b"]);
-	assert.deepEqual(relayIdsOfMessage({ customType: "other", details: { relay_ids: ["a"] } }), []);
-	assert.deepEqual(relayIdsOfMessage(undefined), []);
-});

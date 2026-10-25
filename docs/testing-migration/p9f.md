@@ -28,6 +28,7 @@ pi never hands a relay off without it reaching context, so (d)..(d4) stay retain
 |---|---|---|
 | P9f-relay-recheck | `tests/e2e/operator-relay-p9f.test.ts` | P9f-relay-recheck: a seeded outbox is rechecked at delivery, retired with reasons, acked at context entry and never handed twice |
 | P9f-relay-turn | `tests/e2e/operator-relay-p9f.test.ts` | P9f-relay-turn: relays wait out the operator's turn, informational ones are quiet, and a batch is capped |
+| P9f-relay-legacy-ids | `tests/e2e/operator-relay-p9f.test.ts` | P9f-relay-legacy-ids: a resumed legacy session acks only its well-formed cp-bridge relay ids |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -81,6 +82,8 @@ pi never hands a relay off without it reaching context, so (d)..(d4) stay retain
 | P9f-T2 | tests/operator-delivery.test.ts | P9f-relay-turn | the quiet flag is dropped from informational-only messages | `a message of informational relays only starts no turn` |
 | P9f-T3 | tests/operator-delivery.test.ts | P9f-relay-turn | the coalesce cap is raised by 100 | `a send outcome stays alone; coalescing is capped and the remainder goes on the next pass` |
 | P9f-T4 | tests/operator-delivery.test.ts | P9f-relay-turn | a send outcome is never split out of the batch | timed out waiting for the send, the capped batch and its remainder |
+| P9f-L1 | tests/operator-outbox.test.ts | P9f-relay-legacy-ids | relayIdsOfMessage keeps every non-null relay id, numbers and empty strings included | `only the well-formed cp-bridge ids are acked, once each` |
+| P9f-L2 | tests/operator-outbox.test.ts | P9f-relay-legacy-ids | relayIdsOfMessage reads relay_ids from any custom message, not only cp-bridge | `only the well-formed cp-bridge ids are acked, once each` |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->

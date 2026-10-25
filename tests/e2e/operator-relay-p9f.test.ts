@@ -1,6 +1,6 @@
 /** P9f: the operator's relay consumer, driven through the real cp-bridge in an RPC operator over a seeded home. */
 import assert from "node:assert/strict";
-import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
@@ -13,7 +13,7 @@ import { atomicWriteJson } from "../../src/json-store.ts";
 import { RELAY_COALESCE_MAX } from "../../src/operator-delivery.ts";
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../../src/operator-outbox.ts";
 import { ParentSendOutbox, parentSendFile } from "../../src/parent-outbox.ts";
-import { CP_BRIDGE_EXTENSION, MockProvider, type RpcRecord, createAgentDir, createScratchHome, startRpc, waitFor } from "../harness/index.ts";
+import { CP_BRIDGE_EXTENSION, MockProvider, type RpcRecord, createAgentDir, createScratchHome, startPiChild, startRpc, waitFor } from "../harness/index.ts";
 
 const receipt = { level: null, reached: [] };
 const relay = (patch: Partial<BridgeRelay>): BridgeRelay => ({ kind: "wake", stale: false, text: "wake", receipt, paths: [], ...patch });
@@ -216,4 +216,34 @@ test("P9f-relay-turn: relays wait out the operator's turn, informational ones ar
 		{ relay_ids: wakes.slice(0, RELAY_COALESCE_MAX) },
 		{ relay_ids: wakes.slice(RELAY_COALESCE_MAX) },
 	], "a send outcome stays alone; coalescing is capped and the remainder goes on the next pass");
+});
+
+// #515 review low: a legacy operator session carries cp-bridge relay ids a current bridge never writes (numeric, empty)
+// and a foreign message's relay_ids; resuming it acks only the well-formed cp-bridge ids at context entry.
+test("P9f-relay-legacy-ids: a resumed legacy session acks only its well-formed cp-bridge relay ids", { timeout: 90_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const model = provider.addScript("p9f-legacy", [{ kind: "text", text: "Read." }], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider, settings: { compaction: { enabled: false } } });
+	saveOperatorTarget({ home: home.path, mode: "multi", hostPid: 0, parentPid: 0 }, { PI_HOME: home.path });
+	const session = join(home.path, "legacy.jsonl");
+	const at = isoTimestamp();
+	const rows = [
+		{ type: "session", version: 3, id: "p9f-legacy", timestamp: at, cwd: home.path },
+		{ type: "message", id: "m1", parentId: null, timestamp: at, message: { role: "custom", customType: "cp-bridge", content: "P9F-LEGACY relays",
+			display: true, timestamp: 1, details: { relay_ids: ["wake:p9f-a", 3, "", null, "wake:p9f-b"] } } },
+		{ type: "message", id: "m2", parentId: "m1", timestamp: at, message: { role: "custom", customType: "cp-other", content: "P9F-FOREIGN",
+			display: true, timestamp: 2, details: { relay_ids: ["wake:p9f-foreign"] } } },
+	];
+	writeFileSync(session, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, PI_HOME: home.path, CP_HOME: home.path },
+		extensions: [CP_BRIDGE_EXTENSION], sessionFile: session });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	await child.prompt("P9F resume the legacy session.");
+	await child.waitForSettled(30_000);
+	assert.ok(JSON.stringify(provider.requests("p9f-legacy")[0]?.body).includes("P9F-LEGACY relays"), "the legacy message is in context");
+	const acks = new OperatorRelayAcks(operatorRelayAcksFile(join(home.path, LAYOUT.state)));
+	const lines = readFileSync(acks.file, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { type: string; id?: unknown })
+		.filter((line) => line.type === "ack");
+	assert.deepEqual(lines.map((line) => line.id), ["wake:p9f-a", "wake:p9f-b"], "only the well-formed cp-bridge ids are acked, once each");
 });
