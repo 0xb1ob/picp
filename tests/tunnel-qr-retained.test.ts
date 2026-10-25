@@ -1,9 +1,6 @@
 /**
- * T5 (remote dashboard PR 2): the vendored MIT QR encoder (src/qr/) and the terminal pairing display (src/tunnel/qr.ts).
- *
- * The vectors were cross-checked when the encoder was vendored: for four texts × four ECC levels × eight forced
- * masks (128 symbols), every module matched an independent encoder (Kazuhiko Arase's qrcode-generator, as npm's
- * bundled qrcode-terminal ships it). The hashes below pin those outputs so a later edit cannot drift silently.
+ * Retained from tests/tunnel-qr.test.ts (P12b): the vendored MIT encoder's upstream-verified vectors, its attribution,
+ * and the A3 display port on a real file handle. The terminal QR itself is pinned by e2e P12b-pair.
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -12,7 +9,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { Ecc, QrCode } from "../src/qr/code.ts";
 import { Mode, QrSegment } from "../src/qr/segments.ts";
-import { QUIET_ZONE, showPairingOnTty, terminalQr } from "../src/tunnel/qr.ts";
+import { showPairingOnTty, terminalQr } from "../src/tunnel/qr.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
 const rows = (code: QrCode): string[] => Array.from({ length: code.size }, (_, y) => Array.from({ length: code.size }, (_, x) => (code.getModule(x, y) ? "1" : "0")).join(""));
@@ -72,31 +69,6 @@ test("vendored encoder: MIT attribution and the cited revision in every file, no
 	}
 	const display = readFileSync(join(REPO_ROOT, "src/tunnel/qr.ts"), "utf8");
 	assert.deepEqual([...display.matchAll(/from "([^"]+)"/g)].map((match) => match[1]), ["node:fs", "../qr/code.ts"], "no network, no online QR service");
-});
-
-test("terminal QR: a four-module quiet zone on every side, two module rows per line, explicit colours", () => {
-	const code = QrCode.encodeText(LINK, Ecc.LOW);
-	const span = code.size + QUIET_ZONE * 2;
-	const lines = terminalQr(LINK);
-	assert.equal(lines.length, Math.ceil(span / 2));
-	const cells = lines.map((line) => {
-		assert.ok(line.startsWith("\x1b[30;47m") && line.endsWith("\x1b[0m"), "black on white, then reset");
-		return [...line.slice("\x1b[30;47m".length, -"\x1b[0m".length)];
-	});
-	for (const row of cells) {
-		assert.equal(row.length, span);
-		assert.deepEqual(row.slice(0, QUIET_ZONE).join("") + row.slice(-QUIET_ZONE).join(""), " ".repeat(QUIET_ZONE * 2));
-	}
-	assert.deepEqual(cells.slice(0, QUIET_ZONE / 2).flat().join("").trim(), "");
-	// Decode the half blocks back into modules: the drawing is the code, module for module.
-	for (let y = 0; y < code.size; y += 1) {
-		for (let x = 0; x < code.size; x += 1) {
-			const cell = cells[Math.floor((y + QUIET_ZONE) / 2)]?.[x + QUIET_ZONE];
-			const top = (y + QUIET_ZONE) % 2 === 0;
-			const dark = cell === "█" || (top ? cell === "▀" : cell === "▄");
-			assert.equal(dark, code.getModule(x, y), `module ${x},${y}`);
-		}
-	}
 });
 
 test("A3: the pairing link and QR go to the controlling terminal only; no terminal is a named refusal that writes nothing", (t) => {
