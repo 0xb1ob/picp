@@ -8,18 +8,16 @@ declarations 2, 16 and 7's phrase asserts and removed them ([P4 ledger](testing-
 
 ## Long recovery-set proof
 
-Fix #442 (636ec3990273) is included from main. The new scenario “S21: forty failed reconcile
+Fix #442 is included from main. The new scenario “S21: forty failed reconcile
 candidates retain distinct bounded notices through RPC restart” seeds two real forty-worker fleets
 sharing their first 39 candidates, with dead PID 2147483647 and absent sessions. Each actual reconcile
 returns 40 failed candidates and persists a bounded recovery notice with all 40 keys and “...and N more”.
 Two real RPC parents consume and confirm those notices. Their capped IDs differ despite sharing a long
 prefix. It passes locally in about nine seconds, with a 110-second deadline.
 
-`long-recovery.patch` restores unbounded rendering in the production formatter. Actual reconciliation
+The long-recovery control restores unbounded rendering in the production formatter. Actual reconciliation
 still observes all 40 failures, but its fallback notice fails the expected recovery-inventory assertions.
-The prior 9,654-character reproduction remains in the job artifact as historical evidence. No product
-fix is authored here. All fifteen saved controls were replayed against the merged base; logs are in
-`node_modules/.s21-runs/replay-*.log` and the per-control exit summary.
+No product fix is authored here. All fifteen controls were replayed against the merged base.
 
 ## Consumer scenarios and entry points
 
@@ -65,27 +63,27 @@ Each mapped row names an executed mutation and the assertion that fails. Origina
 
 ## Executed controls
 
-Patches are complete, independent production mutations and were restored after execution. Logs are in
-`node_modules/.s21-runs/` in this worktree. The runner is `npm run test:one --`; the target is the scenario's
-file, with `--test-name-pattern='S21: …'` for focused controls. No live provider is used.
+Controls are complete, independent production mutations and were restored after execution. The runner is
+`npm run test:one --`; the target is the scenario's file, with `--test-name-pattern='S21: …'` for focused
+controls. No live provider is used.
 
-| Patch under `docs/s21-controls/` | SHA-256 | Failing observation |
-|---|---|---|
-| owner.patch | baf73e91ef201c005ca50bf9c54c9965cc6c60d7f6cca59709a479f4ed290e0e | replay wait has zero requests |
-| missing-job.patch | 8835db102665d7cc832feff995339983d37e42377e3e11316644becdaa517d72 | gone death remains pending |
-| finished-recovery.patch | 50b06b867852afbfe8e97cc49bf775453446e2ff97bb3ff1972db7cf62b2ef43 | obsolete recovery remains pending |
-| bound-occurrence.patch | fa6b0c1233283a902c91602bbbd2627168ff285c723949555e690d1ea71ad3e7 | ID omits occurrence timestamp |
-| bound-outcome.patch | 89629f1152e31523f9dc21fabfaf96c73521e9e370ed80d858ab47e8f9928041 | attempted/not-revived wording absent |
-| ci-cause.patch | e3a4c4856f4c421d6819b3391880f5ca943676148d55688c31f0d8574c9997fd | 15 pending rather than 16 |
-| failure-journal.patch | 24f00a37c8e7797ce7060dad3d000a69d0e1b3753b89130af821918f919db704 | host count 2, emitter waits empty |
-| live-replacement.patch | 9110f7eb29cdcde1c2ee960ac30633331cb7c8545cda8cf9e4b532b7b738a6ec | obsolete replacement text reaches model |
-| own-close.patch | eec378cc45dcc1b1ef9b242fc25778182183503a4eefc98c39a81c7a801ab11e | waiting phase assertion becomes failed |
-| reconcile-journal.patch | 2a3611bec029d49a94816cdcd4673f4cb9861d53476a41b812f0fa9de1ce1c8a | reconciliation model-message wait times out |
-| review-finish.patch | d13e4abd5dad1eab26a4b6c3a36fdfcf210e8baaed86fd0adf550d3712d20433 | zero notices instead of one |
-| transport-discard.patch | 0b34330a10eb9bd9fdf3ea7a3c6c154810ac8ddeb820fb175c3047beec2fb3dc | pending-ID assertion still contains gone job |
-| unreported.patch | 68162e6da50f5c762b18f7da4ef4389f60e7bb9b994f073dd38f7f9d9fc6f888 | recorded unreported callback wait times out |
-| long-recovery.patch | 9fd54412bc0b81731730dcf3493cda8c271fc7aae8430edf11ba1e2a81a17ab0 | forty failures reconcile, but fallback candidate keys are undefined rather than 40 |
-| long-id.patch | f0f80e6aaead687779285ba0845e03da141ebb89f6d3eb8e2eb7b45237ca9e7b | two sets sharing 39 candidates collapse to the same durable ID |
+| Control (bug patched back) | Failing observation |
+|---|---|
+| the durable outbox lets a non-owner claim an entry another process owns | replay wait has zero requests |
+| a wake for a job with no fleet record stays fresh instead of stale | gone death remains pending |
+| a recovery notice whose candidates were all torn down stays fresh | obsolete recovery remains pending |
+| the bound wake-up id drops its occurrence timestamp | ID omits occurrence timestamp |
+| the bound recovery line drops the not-revived reason wording | attempted/not-revived wording absent |
+| the bounded wake-up id truncates long CI causes with no distinguishing digest | 15 pending rather than 16 |
+| the failure announcer never journals a durable death or bound wake-up | host count 2, emitter waits empty |
+| a wake for a job whose replacement worker is waiting or launching is not judged stale | obsolete replacement text reaches model |
+| a close the command post asked for, or one during shutdown, is classified as a failure | waiting phase assertion becomes failed |
+| startup reconciliation no longer journals its recovery notice | reconciliation model-message wait times out |
+| a review finish failure is no longer journaled as a durable recovery notice | zero notices instead of one |
+| a throwing wake transport skips discarding the entries already judged stale | pending-ID assertion still contains gone job |
+| the settle watcher never reports an unreported settle | recorded unreported callback wait times out |
+| the recovery notice renders every candidate with no length cap | forty failures reconcile, but fallback candidate keys are undefined rather than 40 |
+| long wake-up ids are truncated with no digest, so ids sharing a prefix collide | two sets sharing 39 candidates collapse to the same durable ID |
 
 ## Timers and cleanup
 

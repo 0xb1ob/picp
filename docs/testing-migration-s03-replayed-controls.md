@@ -1,6 +1,6 @@
 # S03 inherited control replay
 
-These are new executions, not reconstructed historical provenance. Each mutation was applied independently and restored immediately. Unless a record says otherwise, base HEAD is `f30d532f5eed302ec17661dafad2cdf56b3d1d42`, merging main `a61a117757f69c6a7ea28d23be8a1ccf80f74d97`. Commands use `TMPDIR="$PWD/.s03b-review2-runtime" npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing-*.test.ts`. Only production is mutated; fixtures and assertions stay fixed.
+These are new executions, not reconstructed historical provenance. Each mutation was applied independently and restored immediately. Each section names its control, the bug patched back, in words. Commands use `TMPDIR="$PWD/.s03b-review2-runtime" npm run test:one -- --test-name-pattern='<pattern>' tests/e2e/landing-*.test.ts`. Only production is mutated; fixtures and assertions stay fixed.
 
 For a replay, first create `.s03b-review2-runtime/package.json` containing `{"type":"commonjs"}`.
 The local TMPDIR keeps the mock `gh` executable in CommonJS mode under this ES-module repository;
@@ -8,378 +8,225 @@ remove that directory after the run. Each test still creates and cleans its own 
 
 ## S03-exclusions
 
-Base: `7266e5df1d469ee861abb20f2b5559d3d5144fce`.
-Pattern: `landing S02: only reported`. Exit 1, all eleven independent exclusion subtests fail, including local/pipeline, absent/artifact receipts, merged/landed/uppercase/trimmed statuses and waiting/done/failed phases. Log: `s03b-review2-exclusions.log`.
+Pattern: `landing S02: only reported`. Exit 1, all eleven independent exclusion subtests fail, including local/pipeline, absent/artifact receipts, merged/landed/uppercase/trimmed statuses and waiting/done/failed phases.
 
-```diff
---- src/ci-watch.ts: isWatched
-- if (record.delivery !== "pr") return false;
-- if (record.phase !== "held") return false;
-- if (record.reported_at === undefined) return false;
-- const receipt = prReceiptOf(record);
-- if (!receipt) return false;
-- return !LANDED_RECEIPT_STATUSES.includes(receipt.status.trim().toLowerCase());
-+ return true;
-```
+Control: the CI watch watches every record, dropping all delivery, phase, report and receipt exclusions.
 
 ## S03-authority
 
-Pattern: `landing S03: actual parent CI notices`. Exit 1: `/evidence, not authorization/i` fails on the actual CI message. Log: `s03b-review2-authority.log`.
+Pattern: `landing S03: actual parent CI notices`. Exit 1: `/evidence, not authorization/i` fails on the actual CI message.
 
-```diff
---- src/ci-watch.ts: formatCiNotice
-- "A green run is evidence, not authorization, and this raises no Awaiting-you row. Nothing has been merged.",
-+ "CI finished.",
-```
+Control: the CI notice drops its evidence-not-authorization sentence.
 
 ## S03-advice
 
-Pattern: `landing S03: actual parent CI notices`. Exit 1: `/cp_integrate/` fails on the actual CI message. Log: `s03b-review2-advice.log`.
+Pattern: `landing S03: actual parent CI notices`. Exit 1: `/cp_integrate/` fails on the actual CI message.
 
-```diff
---- src/ci-watch.ts: formatCiNotice
-- "This notice IS the CI read for that head: do not re-query gh to confirm it. Ancestry and whether the",
-- "repository permits the merge are cp_integrate's read — call cp_integrate <job-id> and branch on next.",
-+ "Verify CI yourself and check ancestry with gh pr view.",
-```
+Control: the CI notice tells the parent to verify CI and ancestry with gh instead of calling cp_integrate.
 
 ## S03-red
 
-Pattern: `landing S03: actual parent CI notices`. Exit 1: `/Merging red is forbidden/` fails on the actual red CI message. Log: `s03b-review2-red.log`.
+Pattern: `landing S03: actual parent CI notices`. Exit 1: `/Merging red is forbidden/` fails on the actual red CI message.
 
-```diff
---- src/ci-watch.ts: formatCiNotice
-- "Merging red is forbidden, so there is no merge question here: relay the failure, name the job, the",
-- "workflow and the run, and exercise ordinary judgment (promote the held worker, or re-dispatch).",
-+ "Ask whether to merge the failing run.",
-```
+Control: the red CI notice asks whether to merge instead of forbidding a red merge.
 
 ## S03-confirm
 
-Pattern: `landing S03: corrupt`. Exit 1: `duplicate arrival changes nothing`, actual [key], expected []. Log: `s03b-review2-confirm.log`.
+Pattern: `landing S03: corrupt`. Exit 1: `duplicate arrival changes nothing`, actual [key], expected [].
 
-```diff
---- src/ci-watch.ts: confirm
-- if (existing.announced.includes(key)) continue;
-```
+Control: confirming an arrival no longer skips a key that was already announced.
 
 ## S03-corrupt
 
-Pattern: `landing S03: corrupt`. Exit 1: `corrupt memory is forgotten, not a failed read`, actual 1 error, expected 0. Log: `s03b-review2-corrupt.log`.
+Pattern: `landing S03: corrupt`. Exit 1: `corrupt memory is forgotten, not a failed read`, actual 1 error, expected 0.
 
-```diff
---- src/ci-watch.ts: read catch
-- return EMPTY_CI_WATCH_FILE;
-+ throw new CiWatchError("corrupt watch memory");
-```
+Control: reading corrupt watch memory throws instead of forgetting it.
 
 ## S03-schema
 
-Pattern: `landing S03: corrupt`. Exit 1: `corrupt memory is forgotten, not a failed read`, actual 1 error, expected 0. Log: `s03b-review2-schema.log`.
+Pattern: `landing S03: corrupt`. Exit 1: `corrupt memory is forgotten, not a failed read`, actual 1 error, expected 0.
 
-```diff
---- src/ci-watch.ts: read
-- const result = validateCiWatchFile(JSON.parse(readFileSync(this.file, "utf8")));
-- return result.ok ? result.value : EMPTY_CI_WATCH_FILE;
-+ return JSON.parse(readFileSync(this.file, "utf8"));
-```
+Control: watch memory is read without schema validation.
 
 ## S03-blocking
 
-Pattern: `landing S02: watcher queries`. Exit 1: `watcher command: run watch 12345` (blocking_watch versus undefined). Log: `s03b-review2-blocking.log`.
+Pattern: `landing S02: watcher queries`. Exit 1: `watcher command: run watch 12345` (blocking_watch versus undefined).
 
-```diff
---- src/ci-watch.ts: ghPrRest
-- const stdout = await exec("gh", ["api", `repos/${target.owner}/${target.repo}/pulls/${target.number}`], {
-+ const stdout = await exec("gh", ["run", "watch", "12345"], {
-```
+Control: the PR REST read issues a blocking gh run watch.
 
 ## S03-eligible
 
-Pattern: `landing S02: only reported`. Exit 1: `the eligible delivery is queried`. Log: `s03b-review2-eligible.log`.
+Pattern: `landing S02: only reported`. Exit 1: `the eligible delivery is queried`.
 
-```diff
---- src/ci-watch.ts: isWatched
-- if (record.delivery !== "pr") return false;
-- if (record.phase !== "held") return false;
-- if (record.reported_at === undefined) return false;
-- const receipt = prReceiptOf(record);
-- if (!receipt) return false;
-- return !LANDED_RECEIPT_STATUSES.includes(receipt.status.trim().toLowerCase());
-+ return false;
-```
+Control: the CI watch watches no record at all.
 
 ## S03-rest-merged
 
-Pattern: `landing S03: REST`. Exit 1: `REST merged flag reaches the public observation`. Log: `s03b-review2-rest-merged.log`.
+Pattern: `landing S03: REST`. Exit 1: `REST merged flag reaches the public observation`.
 
-```diff
---- src/ci-watch.ts: parsePrRest
-- const observation: PrObservation = { merged: row.merged === true };
-+ const observation: PrObservation = { merged: false };
-```
+Control: the PR REST observation always reports merged false.
 
 ## S03-failed-run
 
-Pattern: `landing S03: actual parent CI notices`. Exit 1: `only the failing run is named`. Log: `s03b-review2-failed-run.log`.
+Pattern: `landing S03: actual parent CI notices`. Exit 1: `only the failing run is named`.
 
-```diff
---- src/ci-run-ref.ts: failedRunOn
-- return runs.find((run) => shaMatches(run.headSha, head) && run.status === "completed" && !GREEN_CONCLUSIONS.has((run.conclusion ?? "").toLowerCase()));
-+ return runs[0];
-```
+Control: the failed-run lookup returns the first run instead of the failing run on the head.
 
 ## S03-fleet-write
 
-Pattern: `landing S03: corrupt`. Exit 1: `a watch tick writes no receipts or fleet state`. Insert immediately before `return fresh` in confirm. Log: `s03b-review2-fleet-write.log`.
+Pattern: `landing S03: corrupt`. Exit 1: `a watch tick writes no receipts or fleet state`. Insert immediately before `return fresh` in confirm.
 
-```diff
---- src/ci-watch.ts: confirm
-+ const fleetFile = join(this.home, LAYOUT.fleetFile);
-+ const fleet = JSON.parse(readFileSync(fleetFile, "utf8"));
-+ fleet.jobs[0].receipts = [];
-+ atomicWriteJson(fleetFile, fleet);
-```
+Control: confirming an arrival rewrites the fleet file and erases its receipts.
 
 ## S03-generation / S03-observed-head / S03-missing-head
 
-Pattern: `landing S03: facts changed`. Exit 1, generation/observed/missing independently fail with review_started instead of stale/stale/wait; remote stays guarded. Insert first in #stale. Log: `s03b-review2-stale.log`.
+Pattern: `landing S03: facts changed`. Exit 1, generation/observed/missing independently fail with review_started instead of stale/stale/wait; remote stays guarded. Insert first in #stale.
 
-```diff
---- src/held-continuation.ts: #stale
-+ return undefined;
-```
+Control: the continuation stale check always reports fresh.
 
 ## S03-remote-head
 
-Pattern: `landing S03: facts changed`. Exit 1, remote subcase fails with review_started instead of stale. Log: `s03b-review2-remote-head.log`.
+Pattern: `landing S03: facts changed`. Exit 1, remote subcase fails with review_started instead of stale.
 
-```diff
---- src/held-continuation.ts: #drive
-- const reviewing = result.head_sha && trigger.head && !shaMatches(result.head_sha, trigger.head)
-+ const reviewing = false
-```
+Control: the continuation never compares the reviewed head with the triggering head.
 
 ## S03-coalesce / S03-red-coalesce
 
-Pattern: `landing S03: lost watch|landing S03: a stopped red`. Exit 1: `an in-flight replay starts no additional integration read` and `a completed red replay starts no integration step`. Log: `s03b-review2-coalesce.log`.
+Pattern: `landing S03: lost watch|landing S03: a stopped red`. Exit 1: `an in-flight replay starts no additional integration read` and `a completed red replay starts no integration step`.
 
-```diff
---- src/held-continuation.ts: trigger
-- if (this.#seen.has(key)) return skip("coalesced", `${key} was already handled or is queued`);
-```
+Control: the continuation no longer coalesces a key it already handled or queued.
 
 ## S03-rearm
 
-Pattern: `landing S03: lost watch`. Exit 1: `the same identity can read again after settling on wait`. Log: `s03b-review2-rearm.log`.
+Pattern: `landing S03: lost watch`. Exit 1: `the same identity can read again after settling on wait`.
 
-```diff
---- src/held-continuation.ts: trigger
-- if (outcome.action === "wait" || outcome.action === "draining") this.#seen.delete(key);
-```
+Control: a key that settled on wait or draining is never re-armed.
 
 ## S03-run-key
 
-Pattern: `landing S03: a stopped red`. Exit 1: `a new attempt reaches integration once`. Log: `s03b-review2-run-key.log`.
+Pattern: `landing S03: a stopped red`. Exit 1: `a new attempt reaches integration once`.
 
-```diff
---- src/held-continuation.ts: continuationKey
-- const run = trigger.run !== undefined && trigger.run.length > 0 ? `#${trigger.run}` : "";
-+ const run = "";
-```
+Control: the continuation key drops the CI run identity.
 
 ## S03-generation-key
 
-Pattern: `landing S03: a stopped red`. Exit 1: `a reopened generation is a new continuation identity`. Log: `s03b-review2-generation-key.log`.
+Pattern: `landing S03: a stopped red`. Exit 1: `a reopened generation is a new continuation identity`.
 
-```diff
---- src/held-continuation.ts: continuationKey
-- const generation = trigger.generation !== undefined ? `@${trigger.generation}` : "";
-+ const generation = "";
-```
+Control: the continuation key drops the generation identity.
 
 ## S03-driving
 
-Pattern: `landing S03: a driving worker`. Exit 1: spawn-cap `assert.rejects` reports `Missing expected rejection`. Log: `s03b-review2-driving.log`.
+Pattern: `landing S03: a driving worker`. Exit 1: spawn-cap `assert.rejects` reports `Missing expected rejection`.
 
-```diff
---- src/held-continuation.ts: driving
-- return this.#driving.has(jobId);
-+ return false;
-```
+Control: the continuation never reports a job as being driven.
 
 ## S03-driving-finally
 
-Pattern: `landing S03: a driving worker`. Exit 1: `the throwing step clears its busy fence`, unwanted spawn-cap rejection. Log: `s03b-review2-driving-finally.log`.
+Pattern: `landing S03: a driving worker`. Exit 1: `the throwing step clears its busy fence`, unwanted spawn-cap rejection.
 
-```diff
---- src/held-continuation.ts: trigger finally
-- this.#driving.delete(trigger.jobId);
-```
+Control: a throwing continuation step never clears its driving fence.
 
 ## S03-sampled
 
-Pattern: `landing S03: a real review verdict samples`. Exit 1: all three independent sampled-hold regex assertions fail (none recorded, bounded recorded reason, unconfirmed state). Insert first in #sampledHold. Log: `s03b-review2-sampled.log`.
+Pattern: `landing S03: a real review verdict samples`. Exit 1: all three independent sampled-hold regex assertions fail (none recorded, bounded recorded reason, unconfirmed state). Insert first in #sampledHold.
 
-```diff
---- src/held-continuation.ts: #sampledHold
-+ return "Hold not sampled";
-```
+Control: the sampled hold text is always Hold not sampled.
 
 ## S03-each-step
 
-Pattern: `landing S03: changes during`. Exit 1: generation, phase and head subcases return stopped rather than stale; drain remains guarded. Log: `s03b-review2-each-step.log`.
+Pattern: `landing S03: changes during`. Exit 1: generation, phase and head subcases return stopped rather than stale; drain remains guarded.
 
-```diff
---- src/held-continuation.ts: #drive loop
-- const stale = this.#stale(trigger);
-- if (stale) return out(stale.action, step - 1, stale.reason, stale.action === "wait" ? "wait" : undefined);
-```
+Control: the continuation loop skips the stale check between steps.
 
 ## S03-mid-drain
 
-Pattern: `landing S03: changes during`. Exit 1: drain subcase reaches the next integration step and returns wait rather than draining. Insert first in #draining. Log: `s03b-review2-mid-drain.log`.
+Pattern: `landing S03: changes during`. Exit 1: drain subcase reaches the next integration step and returns wait rather than draining. Insert first in #draining.
 
-```diff
---- src/held-continuation.ts: #draining
-+ return false;
-```
+Control: the continuation never sees a drain.
 
 ## S03-pending
 
-Pattern: `landing S03: new CI`. Exit 1: `a new fact reaches the already-pending review gate`. Log: `s03b-review2-pending.log`.
+Pattern: `landing S03: new CI`. Exit 1: `a new fact reaches the already-pending review gate`.
 
-```diff
---- src/held-continuation.ts: #drive
-- if (this.#deps.reviews.pending(jobId, "review")) {
-+ if (false) {
-```
+Control: the continuation skips the pending-review guard.
 
 ## S03-deadline
 
-Pattern: `landing S03: a restarted parent`. Exit 1: `the restarted deadline reaches its terminal gate` times out after 45000ms; the persisted gate remains wait. This replaces the historical slow nine-variant control with the existing real-parent restart consumer, without changing its assertions. Log: `s03b-review2-deadline.log`.
+Pattern: `landing S03: a restarted parent`. Exit 1: `the restarted deadline reaches its terminal gate` times out after 45000ms; the persisted gate remains wait. This replaces the historical slow nine-variant control with the existing real-parent restart consumer, without changing its assertions.
 
-```diff
---- src/held-continuation.ts: #arm timer callback
-- void this.trigger(trigger).catch((error) => this.#notice(trigger.jobId, `timer:${identity}`, "retry", `deadline continuation failed: ${(error as Error).message.split("\n")[0]}`));
-```
+Control: the deadline timer never triggers the continuation.
 
 ## S03-resume
 
-Pattern: `landing S03: a restarted parent`. Exit 1: `startup did not arm the durable window`, no initial wait recomputation within 10000ms. Insert first in resume. Log: `s03b-review2-resume.log`.
+Pattern: `landing S03: a restarted parent`. Exit 1: `startup did not arm the durable window`, no initial wait recomputation within 10000ms. Insert first in resume.
 
-```diff
---- src/held-continuation.ts: resume
-+ return [];
-```
+Control: startup resume returns no outcomes and arms no window.
 
 ## S03-owner
 
-Pattern: `landing S03: a real parent that loses`. Exit 1: `disabled ownership cannot advance beyond the review wait`. Log: `s03b-review2-owner.log`.
+Pattern: `landing S03: a real parent that loses`. Exit 1: `disabled ownership cannot advance beyond the review wait`.
 
-```diff
---- src/command-post.ts: HeldContinuation construction
-- enabled: () => options.continuation === true && this.#ownsHome(),
-+ enabled: () => options.continuation === true,
-```
+Control: the continuation runs even when this parent does not own the home.
 
 ## S03-outcome
 
-Command pattern: `rpc: one CI-green key whose review is in flight` in `tests/e2e/headless-lifecycle.test.ts`. Exit 1 after 91.61 seconds: the handled-in-code notification does not arrive within its 90000ms RPC wait. Log: `s03b-review2-outcome.log`.
+Command pattern: `rpc: one CI-green key whose review is in flight` in `tests/e2e/headless-lifecycle.test.ts`. Exit 1 after 91.61 seconds: the handled-in-code notification does not arrive within its 90000ms RPC wait.
 
-```diff
---- src/held-continuation.ts: ciOutcome
-- return this.#ciOutcomes.get(key);
-+ return undefined;
-```
+Control: the continuation hides its CI outcome.
 
 ## S03-stop-head
 
-Pattern: `landing S03: a stopped red`. Exit 1: `a changed handed-off head gets one more durable stop`. Log: `s03b-review2-stop-head.log`.
+Pattern: `landing S03: a stopped red`. Exit 1: `a changed handed-off head gets one more durable stop`.
 
-```diff
---- src/held-continuation.ts: #drive
-- this.#notice(jobId, result.next === "done" ? "done" : `${tag}:${result.next}`, result.next, result.reason, result.pr_url);
-+ this.#notice(jobId, result.next, result.next, result.reason, result.pr_url);
-```
+Control: the durable stop identity drops its head tag.
 
 ## S03-tracker
 
-Pattern: `landing S03: a restarted parent`. Exit 1: the landed UI relay fails `doesNotMatch(/tracker|write-back|receipt note/i)`. Log: `s03b-review2-tracker.log`.
+Pattern: `landing S03: a restarted parent`. Exit 1: the landed UI relay fails `doesNotMatch(/tracker|write-back|receipt note/i)`.
 
-```diff
---- src/held-continuation.ts: NEXT_HINT
-- done: "merged, torn down and closed without a parent turn.",
-+ done: "merged, torn down and closed without a parent turn. tracker sync pending",
-```
+Control: the landed notice appends a tracker sync chore.
 
 ## S03-landed-turn
 
-Pattern: `landing S03: a restarted parent`. Exit 1: `landing is relayed without waking the parent model`. Log: `s03b-review2-landed-turn.log`.
+Pattern: `landing S03: a restarted parent`. Exit 1: `landing is relayed without waking the parent model`.
 
-```diff
---- extensions/command-post/wakeup-surfaces.ts: pi.sendMessage boundary
-- quiet ? { triggerTurn: false } : { deliverAs: "followUp", triggerTurn: true },
-+ { deliverAs: "followUp", triggerTurn: true },
-```
+Control: a quiet landing notice wakes the parent model.
 
 ## S07-NC-3 / NC-37 rerun
 
-Pattern: `landing: held CI repairs the same`. Exit 1: `restarted parent reads the spent allowance before looking for a local worker`. No manual integrate call is added. Log: `s03b-review2-s07-nc3.log`.
+Pattern: `landing: held CI repairs the same`. Exit 1: `restarted parent reads the spent allowance before looking for a local worker`. No manual integrate call is added.
 
-```diff
---- src/integrate.ts: repair allowance
-- const prior = input.step === "conflict" && !!input.headSha && priorRec?.head_sha !== input.headSha ? 0 : (priorRec?.resolve_attempts ?? 0);
-+ const prior = 0;
-```
+Control: the repair allowance is reset to zero, forgetting spent repairs.
 
 ## S07-NC-2 rerun
 
-Pattern: `landing: held CI repairs the same`. Exit 1: `another job in the project waits behind the CI repair`. Log: `s03b-review2-s07-nc2.log`.
+Pattern: `landing: held CI repairs the same`. Exit 1: `another job in the project waits behind the CI repair`.
 
-```diff
---- src/held-continuation.ts: serialize
-- const lane = this.#readRecord(jobId)?.project ?? jobId;
-+ const lane = jobId;
-```
+Control: CI repairs serialize per job instead of per project.
 
 ## S07-NC-1 rerun
 
-Pattern: `landing: held CI repair checks Sender`. Exit 1: `revoked` assert.match expects the mandate refusal and instead reaches the absent-worker restore refusal. Log: `s03b-review2-s07-nc1.log`.
+Pattern: `landing: held CI repair checks Sender`. Exit 1: `revoked` assert.match expects the mandate refusal and instead reaches the absent-worker restore refusal.
 
-```diff
---- src/send.ts: repair authority check
-- this.#options.mandates.assertPermitted("repair", { jobId: request.jobId, project: record.project, kind: record.kind }, fleet.read().jobs);
-```
+Control: cp_send skips the repair authority check.
 
 ## S03-delivery
 
-Pattern: `landing S02: only reported`. Exit 1: independent local and pipeline exclusions fail. Log: `s03b-review2-delivery.log`.
+Pattern: `landing S02: only reported`. Exit 1: independent local and pipeline exclusions fail.
 
-```diff
---- src/ci-watch.ts: isWatched
-- if (record.delivery !== "pr") return false;
-```
+Control: the CI watch no longer excludes non-PR deliveries.
 
 ## S03-receipt
 
-Pattern: `landing S02: only reported`. Exit 1: independent empty and artifact-only receipt exclusions fail. Log: `s03b-review2-receipt.log`.
+Pattern: `landing S02: only reported`. Exit 1: independent empty and artifact-only receipt exclusions fail.
 
-```diff
---- src/ci-watch.ts: isWatched
-- if (!receipt) return false;
-+ if (!receipt) return true;
-```
+Control: the CI watch watches records that have no PR receipt.
 
 ## S03-landed
 
-Pattern: `landing S02: only reported`. Exit 1: landed, uppercase MERGED and padded-merged exclusions independently fail. Log: `s03b-review2-landed.log`.
+Pattern: `landing S02: only reported`. Exit 1: landed, uppercase MERGED and padded-merged exclusions independently fail.
 
-```diff
---- src/ci-watch.ts: isWatched
-- return !LANDED_RECEIPT_STATUSES.includes(receipt.status.trim().toLowerCase());
-+ return receipt.status !== "merged";
-```
+Control: only the exact merged receipt status counts as landed.
 
 ## Replay total
 
