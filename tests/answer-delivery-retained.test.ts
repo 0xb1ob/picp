@@ -1,23 +1,6 @@
 /**
- * cp-6lg7 acceptance: a Q&A job's answer survives the job.
- *
- * The incident these tests encode: `cp-n9jh` (a `delivery:answer` job) filed
- * its envelope at 17:41:07, the parent tore it down seven seconds later exactly
- * as the loop prescribes, and the operator saw **nothing**. The run log kept
- * the only trace — `wakeup_suppressed { kind: envelope, stage: delivery,
- * delay_seconds: 7, reason: "cp-n9jh is already done: the delivery landed and
- * the job was torn down" }` — while the 4571-byte answer sat unread on disk.
- * `cp-5vl9` lost its answer the same way an hour earlier. For a Q&A job the
- * answer is the whole deliverable, so that is silent total loss, and it fires
- * precisely when the parent is prompt.
- *
- * Everything below is hermetic: `CommandPost` does the queueing (the wiring the
- * parent actually depends on), a sink plays the extension's surface, and
- * teardown is reproduced as the two facts it writes to the record — `done` and
- * `closed_at` — because those are the facts every phase-keyed surface reads.
- *
- * Retained from answer-delivery (P11): the rest moved to tests/e2e/research-delivery.test.ts; see
- * docs/testing-migration/p11.md for why each declaration below stays.
+ * Retained verbatim from answer-delivery (P11); the rest is P11-answer in tests/e2e/research-delivery.test.ts.
+ * Each declaration names its missing entry point in docs/testing-migration/p11.md.
  */
 
 import assert from "node:assert/strict";
@@ -27,6 +10,7 @@ import { test } from "node:test";
 import {
 	answerCardId,
 	AnswerCardError,
+	AnswerCardOutbox,
 	answerCardRecord,
 } from "../src/answer-delivery.ts";
 import { CommandPost } from "../src/command-post.ts";
@@ -149,6 +133,73 @@ function reportAnswer(b: Bench, jobId: string): string {
 	return answer;
 }
 
+
+// ---------------------------------------------------------------------------
+// 2. exactly once
+// ---------------------------------------------------------------------------
+
+test("a card that reached the operator is never shown again, and never resurrected", async (t) => {
+	const b = benchOf(t);
+	await b.post.fleet.add(answerJob(b.home.path, "cp-once"));
+	reportAnswer(b, "cp-once");
+	await b.post.intake.intake("cp-once");
+
+	assert.equal(b.drain().length, 1);
+	assert.equal(b.drain().length, 0, "a second drain shows nothing");
+	assert.equal(b.shown.length, 1);
+
+	// The trigger fires from three places (intake, session_start, widget tick);
+	// none of them may mint a second card.
+	assert.equal(b.drain().length, 0);
+	assert.equal(b.drain({ idle: false }).length, 0);
+
+	// Intake is idempotent, and a re-intake must not re-queue a shown card.
+	const again = await b.post.intake.intake("cp-once");
+	assert.equal(again.already, true);
+	assert.equal(b.post.answerCards.pending().length, 0, "an already-reported envelope queues nothing");
+
+	// A restart reads the same file and knows the card is history.
+	const restarted = new AnswerCardOutbox({ home: b.home.path });
+	assert.equal(restarted.pending().length, 0);
+	assert.equal(restarted.delivered(answerCardId("cp-once", 1)), true);
+	assert.equal(
+		restarted.enqueue({
+			job_id: "cp-once",
+			generation: 1,
+			summary: HEADLINE,
+			path: b.answerPath("cp-once"),
+			bytes: 10,
+			reported_at: isoTimestamp(),
+		}),
+		false,
+		"a delivered card can never be queued again",
+	);
+	assert.equal(restarted.pending().length, 0);
+});
+
+test("queueing twice queues once", async (t) => {
+	const b = benchOf(t);
+	const outbox = b.post.answerCards;
+	const input = {
+		job_id: "cp-dup",
+		generation: 1,
+		summary: HEADLINE,
+		path: b.answerPath("cp-dup"),
+		bytes: 4571,
+		reported_at: isoTimestamp(),
+	};
+	assert.equal(outbox.enqueue(input), true);
+	assert.equal(outbox.enqueue(input), false, "same envelope generation, same id, one card");
+	assert.equal(outbox.pending().length, 1);
+
+	// A promote that reopens the slot mints a new generation, and a new answer.
+	assert.equal(outbox.enqueue({ ...input, generation: 2 }), true);
+	assert.equal(outbox.pending().length, 2);
+	assert.deepEqual(
+		outbox.pending().map((card) => card.id),
+		[answerCardId("cp-dup", 1), answerCardId("cp-dup", 2)],
+	);
+});
 
 // ---------------------------------------------------------------------------
 // 3. delivery is not consumed by a surface that cannot show it

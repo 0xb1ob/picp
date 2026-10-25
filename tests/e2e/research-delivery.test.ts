@@ -90,9 +90,8 @@ test("P11-answer: an answer queued mid-turn and torn down seconds later reaches 
 	const cards = join(home.path, LAYOUT.answerCardsFile);
 	const queued = join(home.path, "queued-cards.json");
 	const first = () => jobIds(home.path)[0] as string;
-	// Dispatch-time reference snapshots: the answer question names 12 oversized files (byte caps); the blocked one
-	// names external, worktree, state, symlinked, legacy, missing and credential paths plus short files (count cap).
-	// A short root: cp_ask turns the question into the job title, which is capped at 500 characters.
+	// Reference snapshots: 12 oversized files (byte caps) for the answer, and every path kind (count cap) for the plan.
+	// A short root, since cp_ask makes the question the job title (500-character cap).
 	const refs = mkdtempSync(join(tmpdir(), "r"));
 	t.after(() => rmSync(refs, { recursive: true, force: true }));
 	mkdirSync(join(home.path, "state"), { recursive: true });
