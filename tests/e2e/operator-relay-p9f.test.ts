@@ -226,8 +226,12 @@ test("P9f-relay-turn: relays wait out the operator's turn, informational ones ar
 	for (const tag of ["P9F-INFO-1", "P9F-INFO-2", "P9F-ACT-1", "P9F-ACT-2"]) assert.ok(body.includes(tag), `the quiet relays are in context: ${tag}`);
 	await rpc.waitFor((r) => r.type === "agent_settled", 20_000);
 
-	const wakes = Array.from({ length: RELAY_COALESCE_MAX + 3 }, (_, index) => outbox.enqueue(relay({ text: `P9F-W${index}` }), "h"));
-	const send = outbox.enqueue(relay({ kind: "send", sendId: "ps-20300101000000-abcdef01", text: "P9F-REPLY" }), "h");
+	// Staged in a copy and renamed in: on CI an idle tick between separate enqueues took five wakes before the send.
+	const staged = new OperatorRelayOutbox(`${outbox.file}.staged`);
+	writeFileSync(staged.file, readFileSync(outbox.file));
+	const wakes = Array.from({ length: RELAY_COALESCE_MAX + 3 }, (_, index) => staged.enqueue(relay({ text: `P9F-W${index}` }), "h"));
+	const send = staged.enqueue(relay({ kind: "send", sendId: "ps-20300101000000-abcdef01", text: "P9F-REPLY" }), "h");
+	renameSync(staged.file, outbox.file);
 	await waitFor(() => delivered(rpc.records()).length, (n) => n === 5, { timeoutMs: 45_000, what: "the send, the capped batch and its remainder" });
 	assert.deepEqual(delivered(rpc.records()).slice(2).map((m) => m.details), [
 		{ relay_ids: [send], send_id: "ps-20300101000000-abcdef01" },
