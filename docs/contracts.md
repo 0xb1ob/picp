@@ -7100,8 +7100,8 @@ rather than assumed:
 3. **`openPlanViewer` never receives `pi: ExtensionAPI`.** Only `ctx` and a
    small `deps` object. `pi.appendEntry` and `pi.sendMessage` are therefore
    unreachable from this file by construction, not by discipline: there is no
-   variable in scope that names them. `tests/plan-viewer.test.ts`'s Guard C
-   asserts the call arity has no such parameter.
+   variable in scope that names them. `tests/e2e/plan-view.test.ts` scans the
+   RPC session file for the artifact body after `/cp-plan`.
 
 **The one model-reachable route, and why it closes here, not at a call site.**
 A model cannot type a slash command, but it can run `bash: pi -p "/cp-plan
@@ -7167,8 +7167,8 @@ Ghostty, Kitty, WezTerm, recent iTerm2, i.e. most of them — a printable key
 arrives as a CSI-u sequence (`\x1b[103;2u` for `G`), so the three raw
 comparisons cp-9c5 shipped (`G`, `/`, `N`) and the search box's `data.length
 === 1` test were dead on exactly the terminals the operator uses.
-`tests/plan-viewer.test.ts` drives the whole key map twice, once legacy and
-once with `setKittyProtocolActive(true)` and CSI-u bytes.
+`tests/e2e/plan-view.test.ts` (P11b-plan-tui) drives the key map in a real
+TUI on a pty, once with Kitty CSI-u bytes and once with legacy bytes.
 
 **The position indicator is chrome, not decoration.** The header always names
 the visible range, the total and where it sits — `line 885-902/902 (bot)`,

@@ -1,6 +1,6 @@
 /**
- * cp-7t7 Stage 1: the pure core of model-generated candidate answers.
- * Hermetic — no pi, no network, no home except a temp dir.
+ * cp-7t7 Stage 1, kept verbatim from tests/suggest.test.ts (P11b): src/suggest.ts has no production consumer
+ * except `withDeadline`, so no entry point reaches these units. withDeadline's value and timeout paths are e2e.
  */
 
 import assert from "node:assert/strict";
@@ -199,16 +199,7 @@ test("SuggestionCache respects its LRU cap", async () => {
 // 9. withDeadline
 // ---------------------------------------------------------------------------
 
-test("withDeadline resolves the value when fast", async () => {
-	const result = await withDeadline(Promise.resolve("fast"), 5_000, () => "fallback");
-	assert.equal(result, "fast");
-});
-
-test("withDeadline resolves the fallback when slow, and clears its timer either way", async () => {
-	const never = new Promise<string>(() => {});
-	const result = await withDeadline(never, 5, () => "fallback");
-	assert.equal(result, "fallback");
-});
+// Both production callers hand withDeadline a promise that never rejects, so no entry point reaches this branch.
 
 test("withDeadline resolves the fallback on a rejection", async () => {
 	const result = await withDeadline(Promise.reject(new Error("boom")), 5_000, () => "fallback");

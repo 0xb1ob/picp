@@ -64,7 +64,7 @@ export interface OpenPlanViewerResult {
  * Open the pager for `target`, or degrade. Fail-closed: the mode/UI check
  * happens before `deps.readSource` is invoked, so a non-TUI caller (RPC,
  * print, json, or a worker that somehow loaded this file) never triggers a
- * read at all — see tests/plan-view.test.ts Guard test A.
+ * read at all — see tests/e2e/plan-view.test.ts (RPC, print and JSON modes).
  */
 export async function openPlanViewer(ctx: PlanViewerCtx, target: PlanTarget, deps: OpenPlanViewerDeps): Promise<OpenPlanViewerResult> {
 	if (target.kind === "absent") {
