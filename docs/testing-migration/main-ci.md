@@ -1,5 +1,11 @@
 # Ledger rows: main-ci
 
+<!-- manifest:ledger -->
+| PR | Scope | Baseline files deleted | Files (tree) | Static declarations (tree) |
+|---|---|---|---|---|
+| P3c-rest main-ci (cp-e2e-slice-main-ci-41d3) | Whole-file retirement: 39 = 32 mapped + 7 retained (17.95%), 0 pending; mixed declarations retain only unreachable assertions. Controls and entry-point map: docs/testing-migration-main-ci-declarations.md. Collector waived. | 1 (`tests/main-ci.test.ts`) | 378 → 378 (one retained replacement) | 4,281 → 4,253 (32 units removed, 4 e2e declarations added) |
+<!-- /manifest:ledger -->
+
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|

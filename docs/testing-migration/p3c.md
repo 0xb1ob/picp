@@ -1,5 +1,11 @@
 # Ledger rows: p3c
 
+<!-- manifest:ledger -->
+| PR | Scope | Baseline files deleted | Files (tree) | Static declarations (tree) |
+|---|---|---|---|---|
+| P3c (cp-e2e-migration-p3c-l5fc) | Approved partial delivery (ask-c77a4f32b23b). [Per-file accounting](testing-migration-p3c-declarations.md): 13/143 declarations mapped, 2 retained, 128 pending. Five unfinished files are convert-owned by P3c-rest for follow-on slices. | 2 files deleted (ci-evidence, parked-ci); 8 declarations removed; timer rename earns zero deletion credit | 379 + 1 incoming → 378 | 4,272 + 4 incoming → 4,274 |
+<!-- /manifest:ledger -->
+
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
