@@ -178,7 +178,7 @@ test(
 		// the worktree — it cleans, resets and keeps the directory for the next job
 		// — so the observable fact is the pool calling it `available`, never a path
 		// that stopped existing (T29 amendment; the same rule as
-		// tests/leases.test.ts).
+		// tests/e2e/dispatch-s31.test.ts).
 		assert.equal(torn.lease_returned, true);
 		assert.equal(leaseState(fixture.clone, dispatched.worktree), "available", "the pool still shows the lease held");
 

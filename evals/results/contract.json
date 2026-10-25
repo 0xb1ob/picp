@@ -14,7 +14,7 @@
       "profiles/qa.md": "sha256:5424ab2137c8c402b3f0edad6d2546e5016a8088600c42a36ce894c49e6e600b",
       "prompts/briefs/brief-ops.md": "sha256:bcdf5f310a27eef18e7fa0069ea6f2b500e8892fdd4755510cc03e7411732f5e",
       "prompts/briefs/brief-qa.md": "sha256:bdeb191091274f5f218b4e9c1b5cf3b368fab137ce3757af2a3eca5e115e5d82",
-      "prompts/briefs/brief-research.md": "sha256:cca5ed64345ff0d9c996248a14fcf4ac055ed4dc9d389bc53dd06ef64204bcec",
+      "prompts/briefs/brief-research.md": "sha256:9c6b6675b11792141f8234fe4cdf773cb43514cd37b01d3d003e2158ee434f72",
       "prompts/briefs/brief-ship.md": "sha256:7a42962dba6344d9196448eac5224ad84b772622c4d7d7375eed46695ac2ff54",
       "prompts/briefs/diff-review-rubric.md": "sha256:c1716628029cdadbf0b211de87ab62a0aa92bdfcf2b353ce38c91849c0d9653d",
       "prompts/briefs/gate-rubric.md": "sha256:908ba286759f2ab16dd55e180be93004bf9be5cc839407141c6d64b16ed33431",
@@ -25,7 +25,7 @@
   "corpus": {
     "version": 1,
     "cases": 50,
-    "sha": "sha256:fb1fdf5f54ba411e1b1663b6d529972fa2771a159fe86f5abdc3b176284dfae2"
+    "sha": "sha256:06f50df638998a42feb3e1e4a501cc1e98716136a98f439d17149bda8b1080c1"
   },
   "metrics": {
     "cases_scored": 22,
@@ -423,7 +423,7 @@
           "ok": true
         },
         {
-          "name": "includes \"npm test -- tests/leases.test.ts\"",
+          "name": "includes \"npm run test:one -- tests/e2e/dispatch-s31.test.ts\"",
           "bucket": "contract",
           "ok": true
         },

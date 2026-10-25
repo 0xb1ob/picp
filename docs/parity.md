@@ -28,8 +28,8 @@ Zero capabilities are unaccounted for: every row below is one of the five.
 | `cmdp dispatch --name <alias>` | deleted | worker identity **is** the job id (one worker per job); aliases existed to name panes | `WorkerManager.spawn` one-worker-per-job, `tests/worker-manager.test.ts` |
 | `cmdp dispatch --origin` | out of scope | `origin` is still carried on every fleet record and status row, unread | `FleetRecordSchema.origin`, `StatusJobSchema.origin` |
 | `cmdp dispatch -- CMD…` (CLI override) | ported (narrowed) | `model` override on `cp_dispatch`; there is one CLI (pi) by design | `tests/routing.test.ts` |
-| `cmdp check --project <worktree> --base` | ported | `cp_check` tool → [`src/preflight.ts`](../src/preflight.ts) | `tests/preflight.test.ts`, `tests/contract.test.ts` (tool is exposed) |
-| `cmdp lease --project NAME` | deleted (deliberate) | leasing is a step *inside* dispatch; a lease with no worker is an orphan waiting to happen. `LeaseManager` is still a module | `tests/leases.test.ts` |
+| `cmdp check --project <worktree> --base` | ported | `cp_check` tool → [`src/preflight.ts`](../src/preflight.ts) | `tests/e2e/preflight-s31.test.ts`, `tests/contract.test.ts` (tool is exposed) |
+| `cmdp lease --project NAME` | deleted (deliberate) | leasing is a step *inside* dispatch; a lease with no worker is an orphan waiting to happen. `LeaseManager` is still a module | `tests/e2e/dispatch-s31.test.ts` |
 | `cmdp jobs add\|set\|reported\|done\|list` | ported | `state/fleet.json` store (add/update), envelope intake (`reported`), teardown (`done`), `/status` (`list`) | `tests/fleet.test.ts`, `tests/intake.test.ts`, `tests/e2e/teardown-s17.test.ts`, `tests/status.test.ts` |
 | `cmdp artifact path\|add\|get` | ported | `cp_artifact` → [`src/artifacts.ts`](../src/artifacts.ts); `get` requires an out file (no inline bodies) | `tests/artifacts.test.ts`, `tests/guards.test.ts` |
 | `cmdp gate [--model]` | ported | `cp_gate` → [`src/gate.ts`](../src/gate.ts); verdict is a schema, not a regex over prose | `tests/gate.test.ts`, `tests/e2e/phase3.test.ts` |
@@ -81,10 +81,10 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | Hung planner (artifact, no envelope) → gate from the path | ported | `advance()` gates it and reports `hung_planner` | `tests/pipeline.test.ts` |
 | "Never re-run research for an implementation failure" | mechanised | `mayRerunResearch` is asserted, not remembered | `tests/failures.test.ts` |
 | Pre-dispatch path (lease-bind, branch=job-id, check, jobs add) | ported | `cp_dispatch`'s fixed order; probe **before** lease, no orphan branch | `tests/e2e/dispatch-s29.test.ts`, `tests/e2e/dispatch-cleanup-s29.test.ts`, `tests/e2e/dispatch-s30.test.ts` |
-| Promote vs new lease (same repo + held worktree + same model) | mechanised | `decideOccupancy`; cross-model role hop refused with the teardown instruction | `tests/preflight.test.ts` |
+| Promote vs new lease (same repo + held worktree + same model) | mechanised | `decideOccupancy`; cross-model role hop refused with the teardown instruction | `tests/e2e/preflight-s31.test.ts`, `tests/e2e/dispatch-s31.test.ts` |
 | "Research evidence is not authorization to dispatch a second pane" | mechanised | one worker per job, enforced at spawn | `tests/worker-manager.test.ts` |
 | Stale clone / "belongs to another repo" recovery | ported | `assertCanonicalClone`'s five checks; recovery stays an operator decision | `tests/projects.test.ts` |
-| `git worktree add` allowed only when treehouse is missing | ported (hardened) | **no** fallback at all: a missing treehouse is a hard error | `tests/leases.test.ts` |
+| `git worktree add` allowed only when treehouse is missing | ported (hardened) | **no** fallback at all: a missing treehouse is a hard error | `tests/e2e/dispatch-s31.test.ts` |
 | Project management (clone on demand, registry, one canonical clone) | ported | `data/projects.json` + rendered `projects.md` view | `tests/projects.test.ts` |
 | Worker dispatch: "pass only the CLI and optional `--model`; no trust/yolo/skip-permissions flags" | mechanised | `WORKER_REQUIRED_FLAGS` / `WORKER_FORBIDDEN_FLAGS` + `assertTrustPolicy(argv)` re-checks the final argv | `tests/worker-manager.test.ts`, `tests/contracts.test.ts` |
 | Model routing (order, allowlist, `source=/model=/rule=`) | ported | [`src/routing.ts`](../src/routing.ts); resolution table from `reports/model-routing.md` reproduced | `tests/routing.test.ts` |

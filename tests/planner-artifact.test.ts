@@ -137,7 +137,7 @@ test("the planner brief demands executable detail and the method that produces i
 	assert.match(brief, /check every requirement of the task/i);
 	// Executable verification: a command, a working directory, an expectation.
 	assert.match(brief, /cwd/);
-	assert.match(brief, /npm test/);
+	assert.match(brief, /npm run test:one -- tests\/e2e\/dispatch-s31\.test\.ts/);
 	assert.match(brief, /expected result/i);
 });
 

@@ -45,7 +45,7 @@
       "expect": {
         "includes": [
           "the behavior each one proves",
-          "npm test -- tests/leases.test.ts",
+          "npm run test:one -- tests/e2e/dispatch-s31.test.ts",
           "Guessing is forbidden. An unknown stays listed as an unknown."
         ]
       }
