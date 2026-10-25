@@ -162,10 +162,8 @@ const R1_ALLOWED = [
 	"tests/e2e/authority.test.ts",
 	// P11-answer writes a legacy top-level state/ file that the dispatch reference snapshot must treat as external.
 	"tests/e2e/research-delivery.test.ts",
-	"tests/mode.test.ts",
 	"tests/quality.test.ts",
 	"tests/repo-map.test.ts",
-	"tests/storage.test.ts",
 	"tests/viewer.test.ts",
 ];
 /** R2: the only sanctioned reads of `$HOME`/`$TMPDIR` in runtime code. */

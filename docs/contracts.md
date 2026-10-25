@@ -174,7 +174,7 @@ and "under the home" are different places. `AGENTS.md` tells every parent that t
 `USER.md` at this repo's root loads itself (never `read` or `ls` it); if the loader read the home's copy instead, the
 sentence a model follows and the file the extension loads would be two different
 files. A `USER.md` in a home directory is therefore not read, and
-`tests/user-context.test.ts` exercises `root !== home` rather than collapsing the
+`tests/e2e/configuration.test.ts` (P16-user-context) exercises `root !== home` rather than collapsing the
 two. The home's guarantees are not needed here in any case: this is context, not
 state, and nothing writes it.
 
