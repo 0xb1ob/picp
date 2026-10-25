@@ -189,7 +189,6 @@
 	"tests/parent-context-retained.test.ts": 250,
 	"tests/parent-delivery.test.ts": 374,
 	"tests/parent-hosts-harness.test.ts": 65,
-	"tests/parent-outbox.test.ts": 97,
 	"tests/parent-routing-evals.test.ts": 15,
 	"tests/parent-session.test.ts": 3,
 	"tests/pi-hashline-compaction.test.ts": 181,

@@ -55,6 +55,11 @@ test("S26: real dashboard restart refuses disabled control, missing session, pen
 	writeFileSync(session, saved);
 	const sends = new ParentSendOutbox({ file: parentSendFile(join(home.path, LAYOUT.sessions, "cp-parent.jsonl")) });
 	const pending = sends.enqueue("A legacy parent send awaiting its observed outcome");
+	// P9f: a newer writer's unknown optional fields; the restart preflight's tolerant read still names the pending send.
+	const newer = JSON.parse(readFileSync(sends.file, "utf8")) as { entries: Array<Record<string, unknown>>; future_top?: number };
+	newer.future_top = 1;
+	newer.entries[0]!.future_optional = "later";
+	writeFileSync(sends.file, JSON.stringify(newer));
 	await refused(new RegExp(`cp_parent send ${pending.id} pending`));
 	rmSync(sends.file);
 	await child.prompt("Begin the busy turn.");
