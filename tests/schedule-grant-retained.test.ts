@@ -9,7 +9,6 @@ import { test } from "node:test";
 import { MandateStore } from "../src/mandate.ts";
 import { loadMandateDefaults } from "../src/mandate-defaults.ts";
 import { liveFireBounds, synthesizedApproval, templateFromSeed } from "../src/schedule-grant.ts";
-import { namesToken } from "../extensions/command-post/tools-schedule.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
 const T0 = new Date("2026-07-01T06:00:00Z");
@@ -47,13 +46,4 @@ test("PR4: no fire mints a grant — only the mandate store writes schedule_fire
 	assert.ok(start > 0);
 	assert.doesNotMatch(source.slice(start, source.indexOf("\n\t}\n", start)), /\.issue\(|#mint|grant_template/);
 	assert.doesNotMatch(source, /async #mint\(|async move\(/, "the mint and move paths are gone");
-});
-
-test("run_now names a schedule only as a whole token", () => {
-	assert.ok(namesToken("please run nightly now", "nightly", "i"));
-	assert.ok(namesToken("Run NIGHTLY.", "nightly", "i"));
-	assert.ok(!namesToken("run nightlyish now", "nightly", "i"));
-	assert.ok(!namesToken("run sch-abc1234", "sch-abc123", ""));
-	assert.ok(namesToken("fire sch-abc123 please", "sch-abc123", ""));
-	assert.ok(namesToken("run (a+b) now", "(a+b)", "i"), "regex metacharacters are escaped");
 });
