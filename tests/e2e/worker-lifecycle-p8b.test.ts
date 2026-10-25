@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
@@ -200,7 +200,8 @@ test("P8b bounds: a delivered send starts a fresh wall-clock round, and tool sta
 	assert.equal(f.post.fleet.require(clockJob).phase, "waiting", "the spawn round's 10s passed; the new round has not");
 	const clock = await failedRecord(f, clockJob, 30_000);
 	assert.equal(clock?.failure?.class, "wall_clock_exceeded");
-	assert.equal(clock?.failure?.message, "wall_clock bound 10s exceeded (measured 10s)");
+	// The timer rounds up, so a loaded runner can measure one second past the bound.
+	assert.match(clock?.failure?.message ?? "", /^wall_clock bound 10s exceeded \(measured 1[01]s\)$/);
 	assert.ok(Date.parse(clock?.failure?.at ?? "") - sent >= 9_000, "the round is measured from the delivered send");
 });
 
@@ -239,7 +240,7 @@ test("P8b bounds: a legacy record without frozen bounds revives on env bounds, n
 	const post = await f.restart();
 	await post.revive(jobId);
 	const failed = await failedRecord(f, jobId, 30_000);
-	assert.equal(failed?.failure?.message, "wall_clock bound 4s exceeded (measured 4s)");
+	assert.match(failed?.failure?.message ?? "", /^wall_clock bound 4s exceeded \(measured [45]s\)$/);
 });
 
 const SERVER = join(REPO_ROOT, "tests/fixtures/mcp-probe-server.mjs");
@@ -295,12 +296,20 @@ test("P8b MCP: dispatched read-only workers reach enabled servers through mcp_ca
 	assert.equal(calls.filter((line) => line === "call probe read_thing").length, 2, "only the allowed call reaches a server");
 	assert.equal(calls.some((line) => / (plain|delete_thing)$/.test(line) || line === "start off"), false);
 
-	// No enabled server, or an unreadable mcp.json: a read-only worker gets no gateway at all.
-	for (const [slug, servers] of [["ro-disabled", { off: server("off", { enabled: false }) }], ["ro-invalid", "{ nope"]] as const) {
-		mcpJson(servers);
+	// No mcp.json, no enabled server, or an unreadable one: no gateway, and /doctor (operator env) says why.
+	process.env.PI_CODING_AGENT_DIR = f.agentDir.path;
+	t.after(() => delete process.env.PI_CODING_AGENT_DIR);
+	const cases = [["ro-missing", null, /MCP: no servers configured/], ["ro-disabled", { off: server("off", { enabled: false }) }, /MCP: 1 configured, none enabled/],
+		["ro-invalid", "secret-nope", /MCP: .*mcp\.json is not valid/]] as const;
+	for (const [slug, servers, doctorSays] of cases) {
+		if (servers === null) rmSync(join(f.agentDir.path, "mcp.json"));
+		else mcpJson(servers);
 		const [none] = await dispatch(slug, "planner", "research", [mcpCall({}), { kind: "hang" }]);
 		assert.equal(none?.isError, true, slug);
 		assert.match(none?.text ?? "", /not found/, slug);
+		const findings = (await f.post.doctor()).findings.filter((finding) => finding.check.startsWith("mcp."));
+		assert.match(findings.map((finding) => finding.what).join("\n"), doctorSays, slug);
+		assert.doesNotMatch(JSON.stringify(findings), /nope/, `${slug}: the finding never quotes the file`);
 	}
 });
 
@@ -330,4 +339,29 @@ test("P8b wedged: the parent announces a silent open tool call once, never a pro
 		assert.match(wake, /Observed, not concluded: .* quiet past 3s\.\nNothing was killed and no phase changed/);
 	}
 	assert.notEqual(readFleet(b.home).jobs.find((record) => record.job_id === job.id)?.phase, "failed", "surfacing never kills");
+});
+
+const started = (home: string, jobId: string): boolean =>
+	existsSync(join(home, paths.eventsFile(jobId))) && readFileSync(join(home, paths.eventsFile(jobId)), "utf8").includes('"tool_execution_start"');
+
+test("P8b wedged: two workers silent in one tick are one notice naming both", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const flag = join(b.home, "go-silent");
+	// Both calls print until the test drops the flag, so they fall silent in the same instant and the same tick.
+	const barrier = `while [ ! -f ${flag} ]; do echo waiting; sleep 0.5; done; sleep 20`;
+	const jobs = await Promise.all(["wedged-a", "wedged-b"].map((title) => b.ledger.create({ title, project: "demo", delivery: "local", kind: "ship" })));
+	const models = jobs.map((_, i) => b.provider.addScript(`p8b-wedged-${i}`, [bash(barrier), { kind: "hang" }]));
+	const ends = await b.run([{ kind: "tool_calls", calls: jobs.map((job, i) => ({ name: "cp_dispatch", args: { job_id: job.id, task: "Run the checks.", model: models[i] } })) }],
+		{ CP_WEDGED_TOOL_CALL_SECONDS: "3" });
+	assert.deepEqual(ends.map((end) => end.isError), [false, false], JSON.stringify(ends.map((end) => end.result)));
+	await waitFor(() => jobs.every((job) => started(b.home, job.id)), Boolean, { timeoutMs: 60_000, what: "both barrier calls opened" });
+	writeFileSync(flag, "");
+	await new Promise((resolve) => setTimeout(resolve, 12_000));
+	const notices = (b.parents[0]?.records() ?? []).filter((r) => r.type === "extension_ui_request" && r.method === "notify" && String(r.message).startsWith("WEDGED"))
+		.map((r) => String(r.message));
+	assert.equal(notices.length, 1, `one notice for both: ${JSON.stringify(notices)}`);
+	assert.match(notices[0] ?? "", /^WEDGED TOOL CALLS — 2 workers have an open tool call with no output\n/);
+	for (const job of jobs) assert.match(notices[0] ?? "", new RegExp(`  ${job.id}: bash open \\d+s, silent \\d+s`));
+	assert.match(notices[0] ?? "", /Observed, not concluded: .*\nNothing was killed and no phase changed.*\/watch.*\n.*operator decision/);
+	assert.ok(!/stalled/.test(notices[0] ?? ""), "never the retired phase word");
 });

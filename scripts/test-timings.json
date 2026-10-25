@@ -139,7 +139,7 @@
 	"tests/e2e/wake-reattach.test.ts": 63065,
 	"tests/e2e/wake-rules.test.ts": 231182,
 	"tests/e2e/wake-send-first.test.ts": 159009,
-	"tests/e2e/worker-lifecycle-p8b.test.ts": 112000,
+	"tests/e2e/worker-lifecycle-p8b.test.ts": 140000,
 	"tests/e2e/worker-mcp.test.ts": 1440,
 	"tests/e2e/worker-recovery.test.ts": 205000,
 	"tests/entry-guard.test.ts": 347,
