@@ -34,7 +34,7 @@ import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, isoTimestamp, LAYOUT, type Mandate, SCHEMA_VERSION, validate } from "./contracts.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 import { isActive } from "./mandate-accounting.ts";
-import { type ActionsRun, readActionsCi } from "./actions-ci.ts";
+import { ACTIONS_CI_TIMEOUT_MS, type ActionsRun, readActionsCi } from "./actions-ci.ts";
 import { type CiRun, type CommandRunner, evaluateMergeAskCi, MERGE_ASK_QUERY_TIMEOUT_MS, readCiForHead, runCommand, shaMatches } from "./merge-ask.ts";
 import type { CommandRunner as StatusRunner } from "./merges.ts";
 import { CiRerunStore, maybeRerunInfra } from "./ci-infra-rerun.ts";
@@ -264,7 +264,7 @@ export async function checkMainCi(options: { project: string; cwd: string; home:
 	const tip = await readMainTip(cwd, exec, timeoutMs);
 	let runs: MainRun[];
 	try {
-		runs = await readActionsCi({ cwd, exec, sha: tip, branch: "main", timeoutMs });
+		runs = await readActionsCi({ cwd, exec, sha: tip, branch: "main", timeoutMs: options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS });
 	} catch (error) {
 		throw new MainCiError(`gh api …/actions/runs unreadable: ${(error as Error).message.slice(0, 200)}`);
 	}

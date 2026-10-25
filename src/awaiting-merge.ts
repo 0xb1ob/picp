@@ -10,7 +10,7 @@ import {
 	type AwaitingMerge, type FleetRecord, FULL_SHA_PATTERN, isoTimestamp, isScriptFleetRecord, type ParkIntent, type ParkStage, paths,
 	validateParkIntent,
 } from "./contracts.ts";
-import { readActionsCi } from "./actions-ci.ts";
+import { ACTIONS_CI_TIMEOUT_MS, readActionsCi } from "./actions-ci.ts";
 import { AwaitingMergeResume } from "./awaiting-merge-resume.ts";
 import type { ExitPorts } from "./awaiting-merge-exits.ts";
 import { AwaitingMergeWatch, type SweepResult } from "./awaiting-merge-watch.ts";
@@ -20,7 +20,7 @@ import type { LedgerLike } from "./integrate.ts";
 import { type JobClaims, withJobClaim } from "./job-claims.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { leaseFromRecord, type LeaseManager } from "./leases.ts";
-import { MERGE_ASK_QUERY_TIMEOUT_MS, runCommand } from "./merge-ask.ts";
+import { runCommand } from "./merge-ask.ts";
 import { parkedCiObserver } from "./parked-ci.ts";
 import { readEventLog, readStatusFile } from "./run-artifacts.ts";
 import type { RunRegistry } from "./runs.ts";
@@ -121,7 +121,7 @@ export function awaitingMergePorts(host: AwaitingMergeHost, claims: JobClaims, j
 function readParkedActionsCi(host: AwaitingMergeHost, record: FleetRecord, sha: string) {
 	const [owner = "", repo = ""] = (record.awaiting_merge?.repo ?? "").split("/");
 	const cwd = host.registry.assertCanonicalClone(record.project);
-	return readActionsCi({ cwd, exec: runCommand, repo: { owner, repo }, sha, timeoutMs: MERGE_ASK_QUERY_TIMEOUT_MS });
+	return readActionsCi({ cwd, exec: runCommand, repo: { owner, repo }, sha, timeoutMs: ACTIONS_CI_TIMEOUT_MS });
 }
 
 export function readParkIntent(home: string, jobId: string): ParkIntent | undefined {

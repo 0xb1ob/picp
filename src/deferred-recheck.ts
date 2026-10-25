@@ -52,8 +52,8 @@ import { withDeadline } from "./suggest.ts";
 /**
  * How long a re-gate may run before its caller stops waiting for it.
  *
- * The gate itself already bounds each `gh`/`git` query it makes
- * (`MERGE_ASK_QUERY_TIMEOUT_MS`, 15s), but a home with several deferred rows
+ * The gate itself already bounds each `gh`/`git` query it makes (`MERGE_ASK_QUERY_TIMEOUT_MS`, 15s;
+ * an Actions CI read `ACTIONS_CI_TIMEOUT_MS`, 30s), but a home with several deferred rows
  * queries once per row, and an `execFile` timeout is not a promise that always
  * settles. The two callers here are a **timer tick** and a **wake-up delivery**,
  * so neither may wait on this indefinitely: what is at stake is the operator's
