@@ -1,7 +1,6 @@
 # Teardown retirement evidence
 
-Production base verified by `git rev-parse 53f8a8820638`:
-`53f8a8820638cc4a4f85ccbe69f665d29583a807` (#492).
+Production base: #492.
 The previous partial delivery is superseded by this final evidence.
 
 54 static original declarations: **51 mapped, 3 retained, 0 pending, 0 redundant**.
@@ -146,11 +145,10 @@ Retained mixed declarations keep their reachable assertions too.
 
 ## Executed final-state controls
 
-All 33 S17 and 18 S18 inherited patches applied unchanged; hashes match their
-canonical [S17](s17.md#executed-control-hashes) and
-[S18](s18.md#executed-controls) inventories. Each was applied individually with
-`git apply --check <patch>` / `git apply <patch>`, executed, reversed using
-`git apply -R <patch>`, then the same selected consumer run passed. No mutation
+All 33 S17 and 18 S18 inherited controls applied unchanged; they are the
+canonical [S17](s17.md#executed-controls) and
+[S18](s18.md#executed-controls) inventories. Each was applied individually,
+executed and reversed, then the same selected consumer run passed. No mutation
 was committed. Production base stayed #492. Late-events removes BOTH guards.
 Usage seeds stale zero fleet usage after actual exit. Startup rows precede
 reconcile. Each error below was a consumer assertion, except late-events,
@@ -161,12 +159,10 @@ Exact runner command for each table row:
 N=17 for S17 and publication; N=18 for other S18 controls. Patch paths are
 `docs/s<N>-controls/<stem>.patch`; publication's patch remains under s18.
 Every mutated command exited 1, every restored command exited 0, no matched
-case skipped. Complete per-run commands/hashes/output are retained in the job
-artifact's `control-logs.tgz` (numbered JSON receipts and mutated/restored logs).
-The archive contains 58 indexed receipts: 51 inherited controls, the startup PATH control, five declaration-30 controls, and a separate GitLab receipt replay. The latter's logs use `17-receipt-gitlab-*` to preserve both receipt runs.
+case skipped. 58 runs were recorded: 51 inherited controls, the startup PATH control, five declaration-30
+controls, and a separate GitLab receipt replay.
 
 Final scoped checks after removal: S17 32/32, S18 14/14, retained 3/3, zero skips; typecheck passes. Measured suite timings were 97,386 / 43,839 / 2,521 ms; retained timing uses the 5,000 ms floor. Ordinary/regression migration and four-shard checks pass. Contract eval scores 22/22 (28 intentionally skipped); golden regeneration produces no content change and its ordinary rerun passes.
-`git diff --check` reports only the two intentional unified-patch context lines in this ledger (a space prefix followed by source tabs). Those bytes preserve the executed patch hash; no source whitespace error is introduced.
 
 Carry-in accounting remains S11b 132 mapped / 12 retained / zero pending, with original 144 intact and no stage-2 credit. S26 remains 32 mapped / 4 retained / 2 pending out of 38 (37 baseline plus same-second regression), three moved paths and zero fully deleted-file credit. Actual child process-start time remains required for its age/same-second controls; parent/pre-spawn/fixture timestamps and fixture termination earn no production shutdown credit. #456 rounding and own/live-drain guards remain outside this change.
 
@@ -231,17 +227,6 @@ Carry-in accounting remains S11b 132 mapped / 12 retained / zero pending, with o
 | 17/ignored-safe-bytes | successful return reports | returned lease preserves every ignored entry (all four missing) |
 | 17/receipt | GitLab squash receipt | merged teardown expected true |
 
-New patch SHA-256:
-
-| Patch | sha256 |
-|---|---|
-| docs/s18-controls/startup-path.patch | b639b254e9d46c6df5c8f9c9001120785d479f1d655838ade0a82fb6e62da7ac |
-| docs/s17-controls/ignored-preservation.patch | 03e6b6b6a150258eb065517cace9488d1dd4729b7d3e9eb18d213e5654d08c3d |
-| docs/s17-controls/ignored-reporting.patch | 664b1305736294afd431c49251bd325cfe1ae6ca7287ba88979bc611f4fb5bcf |
-| docs/s17-controls/ignored-filter.patch | efc1a87cfb5ea93736c5af3b8024b89f04100cb6b2bcb386d7d69f8afcc192cc |
-| docs/s17-controls/ignored-formatter.patch | 386f2f4ed786e633238357573d8464ab939bec962dff75b95ed4f62c2fb701d6 |
-| docs/s17-controls/ignored-safe-bytes.patch | 144de0e2107b07cd9cc3352cbfdf18a43b325cc1bf4f7e37da0d0c7cb7c4be68 |
-
 ## Retained comparison
 
 TypeScript AST verification collected every bare `test(...)` call in source
@@ -267,18 +252,5 @@ stub lease runner needed by those original contracts.
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
-| TR-ignored | tests/teardown.test.ts | 53f8a8820638cc4a4f85ccbe69f665d29583a807 | TR-ignored | TR-ignored | 03e6b6b6a150258eb065517cace9488d1dd4729b7d3e9eb18d213e5654d08c3d | all four unsafe matrix cases lose seeded ignored bytes; restored pass | pass |
+| TR-ignored | tests/teardown.test.ts |  | TR-ignored | a lease return no longer refuses when branch-only ignored data would be deleted |  | all four unsafe matrix cases lose seeded ignored bytes; restored pass | pass |
 <!-- /manifest:regressions -->
-
-<!-- patch:TR-ignored -->
-```diff
-diff --git a/src/leases.ts b/src/leases.ts
---- a/src/leases.ts
-+++ b/src/leases.ts
-@@ -245,3 +245,3 @@
- 				}
--				if (entries.length) {
-+				if (false && entries.length) {
- 					const error = `refusing to return ${lease.path}: ignored data may be deleted: ${entries.map((entry) => JSON.stringify(entry)).join(", ")}. Preserve these paths outside the worktree before retrying; force cannot accept data loss`;
-```
-<!-- /patch:TR-ignored -->
