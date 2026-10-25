@@ -365,7 +365,8 @@ A negative control is proven by running it: put the bug back in `src/`, run the 
 
 A negative-control row needs only the scenario, the control (the bug patched back, in words) and the failing
 assertion: `| ID | Unit file | Scenario | Control | Failing assertion |`. Record no patch, commit sha or hash; the
-checker reads older 8-cell rows' patch id as their control, accepts it empty, and verifies none of their other cells.
+checker reads an older 8-cell row's Patch cell (a patch id or the control in words) as its control, fails it when
+empty, and verifies none of the row's other cells.
 
 <!-- manifest:regressions -->
 | ID | Unit file | Scenario | Control | Failing assertion |

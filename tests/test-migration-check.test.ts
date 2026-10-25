@@ -33,8 +33,13 @@ test("a negative-control row needs only scenario, control in words and failing a
 	assert.deepEqual(lean, { path: "tests/x.test.ts", findings: [] });
 	const legacy = ["NC-2", "tests/y.test.ts", "not-a-sha", "S1", "NC-2", "not-a-hash", "expected refusal", ""];
 	assert.deepEqual(regressionFindings(legacy, known), { path: "tests/y.test.ts", findings: [] });
-	const stripped = ["NC-3", "tests/y.test.ts", "", "S1", "", "", "expected refusal", "pass"];
+	const stripped = ["NC-3", "tests/y.test.ts", "", "S1", "drop the head guard in src/y.ts", "", "expected refusal", "pass"];
 	assert.deepEqual(regressionFindings(stripped, known), { path: "tests/y.test.ts", findings: [] });
+});
+
+test("a legacy row with neither a patch id nor the control in words fails", () => {
+	const empty = ["NC-4", "tests/y.test.ts", "", "S1", "", "", "expected refusal", "pass"];
+	assert.match(regressionFindings(empty, known).findings.join("\n"), /regression NC-4: needs the control/);
 });
 
 test("a negative-control row rejects an unknown scenario, no control, no failing assertion and a wrong cell count", () => {

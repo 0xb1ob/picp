@@ -120,7 +120,8 @@ export function deletedWithFeatureFindings(path: string, owner: string, evidence
 
 /**
  * A negative-control row: `ID | Unit file | Scenario | Control | Failing assertion`, the control being the bug patched
- * back in words. Legacy 8-cell rows (commit, patch id, hash, fixed) read their patch id, empty allowed, as the control.
+ * back in words. A legacy 8-cell row (commit, patch, hash, fixed) reads its Patch cell as the control: a patch id
+ * may give way to the control in words, but a row with neither fails.
  */
 export function regressionFindings(cells: readonly string[], scenarios: { has(id: string): boolean }): { path: string; findings: string[] } {
 	const legacy = cells.length === 8;
@@ -128,7 +129,7 @@ export function regressionFindings(cells: readonly string[], scenarios: { has(id
 	const findings: string[] = [];
 	if (cells.length !== 5 && !legacy) findings.push(`regression ${id}: ${cells.length} cells, expected ID | Unit file | Scenario | Control | Failing assertion`);
 	if (!scenarios.has(scenario)) findings.push(`regression ${id}: unknown scenario ${scenario}`);
-	if (!control && !legacy) findings.push(`regression ${id}: needs the control (the bug patched back, in words)`);
+	if (!control) findings.push(`regression ${id}: needs the control (the bug patched back, in words)`);
 	if (!failing) findings.push(`regression ${id}: needs a failing assertion`);
 	return { path, findings };
 }
