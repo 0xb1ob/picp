@@ -199,7 +199,7 @@
 	"tests/pi-lens-headless.test.ts": 1,
 	"tests/pi-server-dependency.test.ts": 1,
 	"tests/pi-version-nudge.test.ts": 1,
-	"tests/pipeline-classify-tool.test.ts": 1049,
+	"tests/e2e/pipeline-classify-tool.test.ts": 1049,
 	"tests/pipeline.test.ts": 35793,
 	"tests/plan-followup.test.ts": 51,
 	"tests/plan-view.test.ts": 56,
