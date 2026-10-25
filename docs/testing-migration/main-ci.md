@@ -37,7 +37,7 @@
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
-| NC-main-corrupt | `tests/main-ci.test.ts` | 8a41e6c50b89e4de21c159a104f3633de32a3a82 | 05-main-corrupt | NC-main-corrupt | 4609cbb374efaa4b725a8029ae2dfd1d8efd04b889f42e408d109f6cd7f3cb6f | in-flight latch mutation preserves corrupt bytes | pass |
+| NC-main-corrupt | `tests/main-ci.test.ts` |  | 05-main-corrupt | MainCiStore reads a corrupt file as empty instead of refusing to overwrite it |  | in-flight latch mutation preserves corrupt bytes | pass |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->
@@ -52,19 +52,3 @@
 | `tests/main-ci.test.ts` | deleted | cp-e2e-slice-main-ci-41d3 (#416) | 39 declarations: 32 mapped, 7 retained (mixed tests narrowed) in tests/main-ci-retained.test.ts, 0 pending; per-declaration controls in docs/testing-migration-main-ci-declarations.md; NC-35 and NC-main-corrupt |
 <!-- /manifest:baseline -->
 
-<!-- patch:NC-main-corrupt -->
-```diff
-diff --git a/src/main-ci.ts b/src/main-ci.ts
-index 6fa8248..eed3141 100644
---- a/src/main-ci.ts
-+++ b/src/main-ci.ts
-@@ -120,7 +120,7 @@ export class MainCiStore {
- 	/** Never overwrite an unreadable file: that would drop other projects' rows and re-fire their wakes. */
- 	#rows(): MainCiEntry[] {
- 		const read = this.read();
--		if (!read.ok) throw new MainCiError(`${read.error}; not overwritten — fix or delete ${this.file}`);
-+		if (!read.ok) return [];
- 		return read.file.projects;
- 	}
- 
-```
