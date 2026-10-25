@@ -1,15 +1,7 @@
 /**
- * cp-5hui: optional worker packages (caveman / ponytail) are passed through to
- * a worker when this home has them installed, and change nothing when it does
- * not. Nothing here requires either package to be installed on the machine
- * running the test: the pi agent dir is a fixture directory, and detection runs
- * through pi's own `DefaultPackageManager` over its `settings.json` (H4).
- *
- * cp-role-scoped-guidance: availability is not activation. Detection answers
- * what the home has; the ROLE (and a profile's `packages:` override) answers
- * what a worker loads. The launch tests below assert the argv of every real
- * profile in `profiles/`, so a planner or gate-reviewer that started loading
- * caveman would fail here.
+ * Worker-package units kept verbatim from tests/worker-packages.test.ts: pi's own resolution of fixture layouts,
+ * the docs the CLI flags rest on, frozen defaults, profile overrides, the resolution race and the spawn-site scan.
+ * Why each stays: testing-migration/p8f.md; the e2e is tests/e2e/worker-packages-p8f.test.ts.
  */
 
 import assert from "node:assert/strict";
@@ -20,7 +12,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ROLES, type WorkerProfile } from "../src/contracts.ts";
-import { listProfiles, loadProfile } from "../src/profiles.ts";
+import { loadProfile } from "../src/profiles.ts";
 import { assertTrustPolicy, WorkerManager } from "../src/worker-manager.ts";
 import {
 	activePackagesForRole,
@@ -29,10 +21,8 @@ import {
 	NEVER_WORKER_RESOURCES,
 	NO_OPTIONAL_WORKER_PACKAGES,
 	OPTIONAL_WORKER_PACKAGES,
-	PACKAGE_TOOLS,
 	resolveWorkerPackages,
 	ROLE_PACKAGES,
-	tryResolveWorkerPackages,
 	type WorkerPackageResolution,
 } from "../src/worker-packages.ts";
 import { buildWorkerArgs, type WorkerProcess, type WorkerSpawnOptions } from "../src/worker-process.ts";
@@ -261,42 +251,6 @@ test("a malformed or half-installed package is skipped, not fatal", async () => 
 // the directory-style manifest: pi's own documented example
 // ---------------------------------------------------------------------------
 
-test("a directory-style manifest is resolved to entry-point files, never handed to -e as a directory", async () => {
-	// pi docs/packages.md declares resources as DIRECTORIES:
-	//   "pi": { "extensions": ["./extensions"], "skills": ["./skills"] }
-	// while `-e` takes an entry-point file (docs/extensions.md). This is the
-	// case that could otherwise fail a spawn.
-	const root = scratchRoot();
-	const dir = installPackage(root, "pi-caveman", {}, { createFiles: false });
-	writeFileSync(join(dir, "package.json"), JSON.stringify({ version: "1.0.0", pi: { extensions: ["./extensions"], skills: ["./skills"] } }), "utf8");
-	mkdirSync(join(dir, "extensions/nested"), { recursive: true });
-	mkdirSync(join(dir, "extensions/no-entry-point"), { recursive: true });
-	const skill = writeSkill(join(dir, "skills"), "caveman-help");
-	writeFileSync(join(dir, "extensions/caveman.ts"), "export default {};\n", "utf8");
-	writeFileSync(join(dir, "extensions/other.js"), "export default {};\n", "utf8");
-	writeFileSync(join(dir, "extensions/README.md"), "not an extension\n", "utf8");
-	writeFileSync(join(dir, "extensions/nested/index.ts"), "export default {};\n", "utf8");
-	writeFileSync(join(dir, "extensions/no-entry-point/helper.ts"), "export default {};\n", "utf8");
-
-	const detected = await resolveWorkerPackages(root);
-	const found = detected["pi-caveman"] as { extensions: string[]; skills: string[] };
-	assert.deepEqual(found.extensions, [
-		// `*.ts`/`*.js` inside, plus `<sub>/index.ts` one level down; a README
-		// is not an extension and a subdirectory with no index is skipped.
-		join(dir, "extensions/caveman.ts"),
-		join(dir, "extensions/nested/index.ts"),
-		join(dir, "extensions/other.js"),
-	]);
-	// pi resolves a skills directory to its skills; each is passed as its own
-	// directory (`--skill` takes files or directories).
-	assert.deepEqual(found.skills, [skill]);
-	for (const extension of found.extensions) {
-		assert.ok(statSync(extension).isFile(), `${extension} must be a file, not a directory`);
-	}
-	// Activated by an explicit profile override, since no role loads caveman.
-	assertArgvSpawns(argvBothWays(detected, withPackages(implementerProfile(), ["pi-caveman"])));
-});
-
 test("a glob or !exclusion manifest entry is skipped, and the spawn is unaffected", async () => {
 	// docs/packages.md: "Arrays support glob patterns and `!exclusions`". Those
 	// are not paths `-e` accepts, so they are dropped rather than passed on.
@@ -428,26 +382,6 @@ test("neither installed: the worker argv is exactly what it was, no added flags"
 	assertArgvSpawns(args);
 });
 
-test("both installed, implementer: ponytail's flags only \u2014 never caveman, trust flags intact", async () => {
-	const root = scratchRoot();
-	installCaveman(root);
-	const ponytail = installPonytail(root);
-	const args = argvBothWays(await resolveWorkerPackages(root));
-	assert.ok(args.includes("--no-extensions") && args.includes("--no-skills"), "trust policy is untouched");
-	assert.deepEqual(flagValues(args, "-e"), [WORKER_REPORTER_EXTENSION, join(ponytail, "pi-extension/index.js")]);
-	assert.deepEqual(flagValues(args, "--skill"), [], "ponytail's extension carries its mode; its skill file is not listed");
-	assertArgvSpawns(args);
-});
-
-test("only caveman installed: an implementer still gets no added flags", async () => {
-	const root = scratchRoot();
-	installCaveman(root);
-	const args = argvBothWays(await resolveWorkerPackages(root));
-	assert.equal(args.includes("--skill"), false, "caveman ships no skills");
-	assert.deepEqual(flagValues(args, "-e"), [WORKER_REPORTER_EXTENSION], "no role activates caveman");
-	assertArgvSpawns(args);
-});
-
 // ---------------------------------------------------------------------------
 // availability vs activation: role scoping (cp-role-scoped-guidance)
 // ---------------------------------------------------------------------------
@@ -464,27 +398,6 @@ async function homeWithBoth() {
 		ponytailSkills: join(ponytailDir, "skills/ponytail"),
 	};
 }
-
-test("the role table is total, and no role activates caveman", () => {
-	for (const role of ROLES) {
-		const configured = ROLE_PACKAGES[role];
-		assert.ok(Array.isArray(configured), `role ${role} has an activation list`);
-		assert.equal(configured.includes("pi-caveman"), false, `role ${role} must not activate caveman`);
-		for (const name of configured) {
-			assert.ok(
-				OPTIONAL_WORKER_PACKAGES.includes(name),
-				`${role} activates a resource we detect: ${name}`,
-			);
-		}
-	}
-	assert.deepEqual([...ROLE_PACKAGES.planner], ["pi-lens", "pi-web-access"], "a planner gets structural reading and web docs, without compression");
-	assert.deepEqual([...ROLE_PACKAGES["gate-reviewer"]], ["pi-lens"], "a reviewer gets structural reading without minimalism");
-	assert.deepEqual([...ROLE_PACKAGES.implementer], [
-		"@dietrichgebert/ponytail",
-		"pi-lens",
-		"pi-hashline-edit-pro",
-	]);
-});
 
 test("activation is availability \u2229 role: an uninstalled or unknown name resolves to nothing", async () => {
 	const { detected, ponytail } = await homeWithBoth();
@@ -511,26 +424,6 @@ test("profile `packages:` overrides the role default in both directions", async 
 	assert.deepEqual(activePackagesForRole(detected, "planner", ["pi-caveman"]), { extensions: [], skills: [] });
 });
 
-test("every real profile gets only its configured resources, and discovery stays off", async () => {
-	const { detected, caveman, ponytail } = await homeWithBoth();
-	const profiles = listProfiles(PROFILES_DIR);
-	assert.ok(profiles.length >= 4, "the real profiles directory is what we assert against");
-	for (const profile of profiles) {
-		const args = argvBothWays(detected, profile);
-		// Discovery is off for every role; explicit paths are the only way in.
-		assert.ok(args.includes("--no-extensions"), `${profile.frontmatter.name}: --no-extensions`);
-		assert.ok(args.includes("--no-skills"), `${profile.frontmatter.name}: --no-skills`);
-		const wanted = profile.frontmatter.packages ?? ROLE_PACKAGES[profile.frontmatter.role];
-		const expected = [WORKER_REPORTER_EXTENSION];
-		if (wanted.includes("pi-caveman")) expected.push(caveman);
-		if (wanted.includes("@dietrichgebert/ponytail")) expected.push(ponytail);
-		assert.deepEqual(flagValues(args, "-e"), expected, `${profile.frontmatter.name}: extensions`);
-		// skillreads-vqy: a listed skill invites a model to read its SKILL.md at session start.
-		assert.deepEqual(flagValues(args, "--skill"), [], `${profile.frontmatter.name}: no skill file`);
-		assertArgvSpawns(args);
-	}
-});
-
 test("a planner and a gate-reviewer are never caveman-compressed", async () => {
 	const { detected, caveman } = await homeWithBoth();
 	// The artifact-producing roles: a compressed plan or verdict is the defect.
@@ -552,32 +445,6 @@ function writeSkill(dir: string, name: string): string {
 	return skill;
 }
 
-/**
- * A fake pi agent dir (`~/.pi/agent`): two skills in its `skills/`, the rest in
- * a git package configured as `pi install git:github.com/obra/superpowers` would.
- */
-function homeWithSkills(gitSource: string | Record<string, unknown> = "git:github.com/obra/superpowers") {
-	const home = scratchRoot();
-	const agentSkills = join(home, "skills");
-	const repo = join(home, "git/github.com/obra/superpowers");
-	mkdirSync(repo, { recursive: true });
-	writeFileSync(join(repo, "package.json"), JSON.stringify({ pi: { skills: ["./skills"] } }), "utf8");
-	configure(home, gitSource);
-	const paths: Record<string, string> = {
-		"verification-before-completion": writeSkill(agentSkills, "verification-before-completion"),
-		"systematic-debugging": writeSkill(agentSkills, "systematic-debugging"),
-		"test-driven-development": writeSkill(join(repo, "skills"), "test-driven-development"),
-		"receiving-code-review": writeSkill(join(repo, "skills"), "receiving-code-review"),
-	};
-	// Never-list skills sit right beside them and must stay off.
-	for (const name of ["writing-plans", "brainstorming", "requesting-code-review"]) writeSkill(join(repo, "skills"), name);
-	return { home, paths };
-}
-
-test("single skills are not detected: ~/.pi/agent/skills and git package skills stay off (skillreads-vqy)", async () => {
-	const { home } = homeWithSkills();
-	assert.deepEqual(await resolveWorkerPackages(home), {});
-});
 
 test("the package manager is the path: settings decide, the disk alone does not", async () => {
 	// An npm package installed on disk but never configured is not available either.
@@ -595,40 +462,6 @@ test("a skill symlinked into ~/.pi/agent/skills still belongs to its package", a
 	symlinkSync(join(ponytail, "skills/ponytail"), join(root, "skills/ponytail"));
 	const detected = await resolveWorkerPackages(root);
 	assert.deepEqual(detected["@dietrichgebert/ponytail"]?.skills, [join(root, "skills/ponytail")]);
-});
-
-test("per-role activation: implementer gets its packages; readers get pi-lens; nobody gets a skill file", async () => {
-	const { home: root } = homeWithSkills();
-	const ponytail = installPonytail(root);
-	const lens = installPackage(root, "pi-lens", { extensions: ["./dist/index.js"] });
-	installCaveman(root);
-	const web = installPackage(root, "pi-web-access", { extensions: ["./index.ts"] });
-	const detected = await resolveWorkerPackages(root, { env: {}, webConfigPath: join(root, "absent/web-search.json") });
-
-	const implementer = argvBothWays(detected);
-	assert.deepEqual(flagValues(implementer, "-e"), [
-		WORKER_REPORTER_EXTENSION,
-		join(ponytail, "pi-extension/index.js"),
-		join(lens, "dist/index.js"),
-	]);
-	assert.deepEqual(flagValues(implementer, "--skill"), [], "no ponytail, process or ~/.pi/agent/skills skill file");
-	assert.ok(implementer.includes("--no-read-guard"), "pi-lens is only loaded with its read guard off");
-	assert.ok(implementer.includes("--no-lens-context"), "pi-lens never injects one-request findings (N19)");
-	assert.ok(managerWith(detected).plan(spawnRequest()).env.PI_LENS_HOME, "pi-lens logs are pinned out of the worktree");
-	assert.ok(managerWith(detected).plan(spawnRequest(loadProfile(PROFILES_DIR, "planner"))).env.PI_LENS_HOME);
-	assertArgvSpawns(implementer);
-
-	for (const name of ["planner", "qa", "gate-reviewer"]) {
-		const args = argvBothWays(detected, loadProfile(PROFILES_DIR, name));
-		const expected = name === "gate-reviewer"
-			? [WORKER_REPORTER_EXTENSION, join(lens, "dist/index.js")]
-			: [WORKER_REPORTER_EXTENSION, join(lens, "dist/index.js"), join(web, "index.ts")];
-		assert.deepEqual(flagValues(args, "-e"), expected, `${name}: pi-lens, plus pi-web-access for the planner role`);
-		assert.deepEqual(flagValues(args, "--skill"), [], `${name}: no process skills`);
-		assert.equal(args.includes("--no-read-guard"), true, `${name}: pi-lens flag`);
-		assert.equal(args.includes("--no-lazy-tools"), true, `${name}: headless tools stay active`);
-		assert.equal(args.includes("--no-lens-context"), true, `${name}: no one-request lens injection drops signed thinking (N19)`);
-	}
 });
 
 test("a skills-only package cannot supply its extension tools", async () => {
@@ -664,90 +497,6 @@ test("the never-list is never activated, by any role or any profile override", a
 	for (const role of ["planner", "gate-reviewer"] as const) {
 		assert.deepEqual(activePackagesForRole(detected, role, ["pi-caveman"]), { extensions: [], skills: [] }, role);
 	}
-});
-
-test("a per-job operator-named skill dir reaches --skill with --no-skills kept; an unmentioned never-list skill never loads", () => {
-	const dir = mkdtempSync(join(tmpdir(), "cp-jobskill-"));
-	writeFileSync(join(dir, "SKILL.md"), "---\ndescription: x\n---\n");
-	// A detection that carries never-list skills, and a profile naming them: none of them loads; only the mention does.
-	const fake: DetectedWorkerPackages = Object.fromEntries(NEVER_WORKER_RESOURCES.map((name) => [name, { extensions: [], skills: [`/x/${name}`] }]));
-	const profile = withPackages(loadProfile(PROFILES_DIR, "planner"), [...NEVER_WORKER_RESOURCES]);
-	let captured: WorkerSpawnOptions | undefined;
-	const manager = managerWith(fake, (options) => {
-		captured = options;
-		return { pid: 1234, closed: Promise.resolve(0), kill: () => {} } as unknown as WorkerProcess;
-	});
-	const request = { ...spawnRequest(profile), skills: [dir] };
-	const planned = manager.plan(request).args;
-	assertTrustPolicy(planned);
-	assert.deepEqual(flagValues(planned, "--skill"), [dir]);
-	assert.ok(planned.includes("--no-skills"));
-	manager.spawn(request);
-	assert.deepEqual(captured?.skills, [dir], "spawn() merges the same per-job skill");
-	assert.deepEqual(flagValues(managerWith(fake).plan(spawnRequest(profile)).args, "--skill"), [], "no mention, no skill");
-	assert.throws(() => managerWith(NO_DETECTED_WORKER_PACKAGES).plan({ ...spawnRequest(), skills: ["rel/skill"] }), /per-job skill rel\/skill is not an absolute skill directory/);
-	assert.throws(() => managerWith(NO_DETECTED_WORKER_PACKAGES).plan({ ...spawnRequest(), skills: [tmpdir()] }), /is not an absolute skill directory/);
-});
-
-test("planner role pi-web-access: on for planner and qa, never gate-reviewer or implementer; web_enable never allowlisted", async () => {
-	const root = scratchRoot();
-	const web = installPackage(root, "pi-web-access", { extensions: ["./index.ts"] });
-	const detected = await resolveWorkerPackages(root, { env: {}, webConfigPath: join(root, "absent/web-search.json") });
-	const webTools = [...(PACKAGE_TOOLS["pi-web-access"] ?? [])];
-	assert.deepEqual(webTools, ["web_search", "fetch_content", "get_search_content", "source_check"]);
-
-	// Planner role default: extension loaded, the four tools appended to the profile allowlist on both paths.
-	for (const name of ["planner", "qa"]) {
-		const profile = loadProfile(PROFILES_DIR, name);
-		assert.equal(profile.frontmatter.role, "planner");
-		const plan = managerWith(detected).plan(spawnRequest(profile));
-		assert.deepEqual(plan.tools, [...profile.frontmatter.tools, ...webTools], name);
-		assert.equal(plan.tools.includes("web_enable"), false, `${name}: the lazy loader is never allowlisted`);
-		const args = argvBothWays(detected, profile);
-		assert.deepEqual(flagValues(args, "-e"), [WORKER_REPORTER_EXTENSION, join(web, "index.ts")], name);
-		assert.deepEqual(flagValues(args, "--tools"), [[...profile.frontmatter.tools, ...webTools].join(",")], name);
-	}
-
-	// Never for the gate-reviewer or the implementer by default.
-	for (const name of ["gate-reviewer", "implementer"]) {
-		const args = argvBothWays(detected, loadProfile(PROFILES_DIR, name));
-		const tools = flagValues(args, "--tools").join(",").split(",");
-		assert.equal(tools.some((tool) => webTools.includes(tool) || tool === "web_enable"), false, name);
-		assert.deepEqual(flagValues(args, "-e").filter((path) => path.startsWith(web)), [], name);
-	}
-
-	// A profile override still wins, and an absent package is silence.
-	const planner = loadProfile(PROFILES_DIR, "planner");
-	const optedOut = managerWith(detected).plan(spawnRequest(withPackages(planner, [])));
-	assert.equal(optedOut.tools.some((tool) => webTools.includes(tool)), false);
-	const absent = managerWith(NO_DETECTED_WORKER_PACKAGES).plan(spawnRequest(planner));
-	assert.deepEqual(absent.tools, planner.frontmatter.tools);
-});
-
-test("an unavailable provider withholds pi-web-access: no -e, no tools, reason recorded", async () => {
-	const root = scratchRoot();
-	const web = installPackage(root, "pi-web-access", { extensions: ["./index.ts"] });
-	const webConfigPath = join(root, "web-search.json");
-	writeFileSync(webConfigPath, JSON.stringify({ searchProvider: "brave" }), "utf8");
-	const planner = loadProfile(PROFILES_DIR, "planner");
-	const webTools = [...(PACKAGE_TOOLS["pi-web-access"] ?? [])];
-
-	const withheld = await tryResolveWorkerPackages(root, { env: {}, webConfigPath });
-	assert.equal(withheld.packages["pi-web-access"], undefined);
-	assert.equal(withheld.withheld?.["pi-web-access"], "brave configured without a key");
-	assert.equal(withheld.error, undefined, "withholding is not a resolution error");
-	const plan = managerWith(withheld.packages).plan(spawnRequest(planner));
-	assert.equal(plan.tools.some((tool) => webTools.includes(tool)), false);
-	assert.deepEqual(flagValues(plan.args, "-e").filter((path) => path.startsWith(web)), []);
-
-	const keyed = await tryResolveWorkerPackages(root, { env: { BRAVE_API_KEY: "k" }, webConfigPath });
-	assert.ok(keyed.packages["pi-web-access"], "the key restores the package");
-	assert.equal(keyed.withheld, undefined);
-
-	writeFileSync(webConfigPath, "{", "utf8");
-	const broken = await tryResolveWorkerPackages(root, { env: {}, webConfigPath });
-	assert.equal(broken.packages["pi-web-access"], undefined);
-	assert.equal(broken.withheld?.["pi-web-access"], "web-search.json does not parse");
 });
 
 // ---------------------------------------------------------------------------
@@ -792,33 +541,6 @@ test("a spawn started before resolution settles waits for it and still gets the 
 	assert.match(String(events[0]?.payload.error), /replace, insert, anchor_grep, undo_last_change/);
 	// Cached: a later spawn does not wait again.
 	await manager.ready();
-});
-
-test("a failed resolution is recorded on the run log and on the spawn result, never silent", async () => {
-	const { manager, spawned, events } = pendingManager(Promise.resolve({ packages: NO_DETECTED_WORKER_PACKAGES, error: "settings.json: boom" }));
-	await manager.ready();
-	const managed = manager.spawn(spawnRequest());
-	assert.deepEqual(spawned[0]?.extensions, [WORKER_REPORTER_EXTENSION]);
-	assert.equal(managed.plan.packagesError, "settings.json: boom");
-	assert.equal(events.length, 1);
-	assert.equal(events[0]?.kind, "worker_packages_unresolved");
-	assert.equal(events[0]?.payload.key, "cp-opt");
-	assert.match(String(events[0]?.payload.error), /^settings.json: boom;.*replace, insert, anchor_grep, undo_last_change/);
-
-	// A spawn that skipped `ready()` while resolution is pending is reported the same way.
-	const pending = pendingManager(new Promise(() => {}));
-	const racing = pending.manager.spawn(spawnRequest());
-	assert.match(racing.plan.packagesError ?? "", /still resolving/);
-	assert.equal(pending.events[0]?.kind, "worker_packages_unresolved");
-});
-
-test("tryResolveWorkerPackages keeps pi's failure instead of hiding it", async () => {
-	const root = scratchRoot();
-	writeFileSync(join(root, "settings.json"), "{ not json", "utf8");
-	const result = await tryResolveWorkerPackages(root);
-	assert.deepEqual(result.packages, {});
-	assert.ok(result.error, "a malformed settings.json is an error, not an empty home");
-	assert.deepEqual(await tryResolveWorkerPackages(scratchRoot()), { packages: {} }, "an empty home is not an error");
 });
 
 test("every WorkerManager spawn site in src/ awaits ready() first", () => {

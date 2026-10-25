@@ -50,7 +50,7 @@
  *    still load", "Explicit `-e` paths still load"). That is why passing them
  *    alongside the frozen trust flags loads the resource without relaxing discovery.
  *
- * `tests/worker-packages.test.ts` pins it against those docs, and resolves the
+ * `tests/worker-packages-retained.test.ts` pins it against those docs, and resolves the
  * real installed layout when this machine happens to have it.
  *
  * WHEN detection runs: once, started at CommandPost construction (src/command-post.ts).

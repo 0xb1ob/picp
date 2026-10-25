@@ -6,7 +6,7 @@
  *
  * Only session identity is dropped. PI_LENS_HOME stays: a pi child that loads
  * pi-lens without it logs into its cwd (tests that spawn pi assert a clean
- * tree), so tests/worker-packages.test.ts drops it from its own planned env.
+ * tree), so tests/worker-packages-retained.test.ts drops it from its own planned env.
  * Opt-ins a human sets on purpose (CP_LIVE_TESTS, CP_LIVE_MODEL,
  * CP_PARENT_MODEL, …) are left alone.
  */
