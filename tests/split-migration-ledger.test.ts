@@ -33,6 +33,8 @@ test("preservationFindings catches a dropped prose or log line", async () => {
 	const before = ["Intro prose.\n\n```\n✖ failure log\n```\n"];
 	assert.deepEqual(preservationFindings(before, ["# Ledger rows: b02\n\nIntro prose.\n\n```\n✖ failure log\n```\n"]), []);
 	assert.deepEqual(preservationFindings(before, ["Intro prose.\n\n```\n```\n"]), ["preservation: prose lines has 4 before, 3 after", "preservation: prose lines content differs"]);
+	const patched = "Intro prose.\n\n<!-- patch:NC-1-x -->\n```diff\n-a\n+b\n```\n";
+	assert.deepEqual(preservationFindings([patched], ["Intro prose.\n\n"]), []);
 });
 
 // An NC-nn intro paragraph and its failure log follow their patch into the slice file, whichever slice owns the patch.

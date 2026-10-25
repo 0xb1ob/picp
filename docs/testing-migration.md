@@ -406,14 +406,12 @@ mapped, retained and removed counts; proof of a behavior alone does not count a 
 
 ## Negative controls
 
-Each patch was applied to this worktree's `src/` (no other checkout), `npm run test:one -- tests/e2e/ci-evidence.test.ts`
-run, the patch reversed, and the same command run again: 2 pass, 0 fail, 0 skipped. The bug commit is
-`90c1f22ba20c416abc9fc96b04addd07e2f58ed3` (#131), which added `src/ci-run-ref.ts`. Its whole diff is not
-reverted; each patch puts back one rule it introduced.
+A negative control is proven by running it: put the bug back in `src/`, run the scenario's e2e file with
+`npm run test:one`, see the named assertion fail, remove the bug and see it pass again. Nothing of that run is committed.
 
 A negative-control row needs only the scenario, the control (the bug patched back, in words) and the failing
 assertion: `| ID | Unit file | Scenario | Control | Failing assertion |`. Record no patch, commit sha or hash; the
-checker reads older 8-cell rows' patch id as their control and verifies none of their other cells.
+checker reads older 8-cell rows' patch id as their control, accepts it empty, and verifies none of their other cells.
 
 <!-- manifest:regressions -->
 | ID | Unit file | Scenario | Control | Failing assertion |
