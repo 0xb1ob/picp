@@ -82,7 +82,7 @@ fails fast and close to the cause.
 | 3 | Worker death, recovered once | `tests/e2e/silent-stops.test.ts`, `tests/recovery.test.ts` |
 | 4 | Parent death: bridge relaunches the same session once; undelivered sends delivered once by id, landed ones never replayed | `tests/cp-bridge.test.ts`, `tests/parent-outbox.test.ts`, `tests/revive.test.ts` |
 | 5 | Moved head after review requires re-review | `tests/pipeline.test.ts` ("a moved head is a new subject"), `tests/e2e/wake-context-s22.test.ts`, `tests/e2e/landing-merge.test.ts` (landing S10: review evidence authorizes only the reviewed complete head) |
-| 6 | Revoked mandate mid-mission: in-flight finishes, no new dispatch | `tests/decide.test.ts` ("stale/revoked mandate refuses"), `tests/e2e/authority.test.ts` ("a paused or revoked mandate stops speaking") |
+| 6 | Revoked mandate mid-mission: in-flight finishes, no new dispatch | `tests/e2e/decisions-p10e.test.ts` ("P10e-grants", a revoked grant refuses), `tests/e2e/authority.test.ts` ("a paused or revoked mandate stops speaking") |
 | 7 | Spend cap hit: pause, refuse new dispatch, escalate once | `tests/e2e/authority.test.ts` ("live usage crosses each cap line once") |
 | 8 | Out-of-scope planner request escalates | `tests/e2e/planner-blocked.test.ts`, `tests/pipeline.test.ts` (escalate/policy) |
 | 9 | `ask_on: plan_approval` path: escalation with summary and paths | `tests/e2e/planner-blocked.test.ts`, `src/operator-note.ts` (plan review), `tests/operator-note.test.ts` |
