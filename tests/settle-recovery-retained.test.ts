@@ -1,6 +1,6 @@
-/** cp-0dhw declarations no e2e entry point reaches: a restart kills live workers, a settle cannot race a new tool
- * call on demand, teardown closes a worker before its job is done, and every call site passes read-only git.
- * The rest converted to tests/e2e/worker-lifecycle-p8c.test.ts (P8c, 04-15/04-16). */
+/** cp-0dhw declarations no e2e entry point reaches: the product inspector never throws, a settle cannot race a new
+ * tool call on demand, teardown closes a worker before its job is done, and every call site passes read-only git.
+ * The rest converted to tests/e2e/worker-lifecycle-p8c.test.ts (P8c, 04-15/04-16) and P8d's 04-23. */
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -20,7 +20,7 @@ import { FleetStore } from "../src/fleet.ts";
 import { EnvelopeIntake } from "../src/intake.ts";
 import { initialStatus } from "../src/run-artifacts.ts";
 import { RunRegistry } from "../src/runs.ts";
-import { MAX_RECOVERY_PROMPTS, SettleWatcher } from "../src/settle.ts";
+import { SettleWatcher } from "../src/settle.ts";
 import { assertReadOnlyGit, inspectWorktreeWork, WORKTREE_READ_ONLY_GIT } from "../src/worktree-work.ts";
 import type { WorkerEvent } from "../src/worker-process.ts";
 import { createScratchHome, createScratchRepo, type ScratchHome } from "./harness/index.ts";
@@ -145,19 +145,16 @@ async function bench(
 	};
 }
 
-test("the bound is on disk: a restarted parent inherits the spent budget, not a fresh one", async (t) => {
+test("an inspector that throws degrades to `unknown` instead of losing the settle", async (t) => {
 	const b = await bench(t);
-	for (let attempt = 1; attempt <= MAX_RECOVERY_PROMPTS; attempt++) {
-		await b.watcher.settled(JOB_ID, b.worker);
-	}
-	assert.equal(b.worker.sent.length, MAX_RECOVERY_PROMPTS);
-
-	// The parent restarts: new stores, new watcher, same home. The only thing
-	// carrying the budget across is the counter on the fleet record.
-	const restarted = b.watcherOver();
-	const outcome = await restarted.settled(JOB_ID, b.worker);
-	assert.equal(outcome.action, "recorded");
-	assert.equal(b.worker.sent.length, MAX_RECOVERY_PROMPTS, "a restart is not a new budget");
+	const watcher = b.watcherOver(async () => {
+		throw new Error("git exploded");
+	});
+	const outcome = await watcher.settled(JOB_ID, b.worker);
+	assert.equal(outcome.action, "nudged");
+	const work = b.fleet.require(JOB_ID).unreported_work;
+	assert.equal(work?.state, "unknown");
+	assert.match(work?.reason ?? "", /git exploded/);
 });
 
 test("a job mid-tool-call is never classified unreported", async (t) => {

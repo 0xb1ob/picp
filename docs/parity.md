@@ -79,7 +79,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | "HARD RULE: workers never mail the findings body" | mechanised | `validateEnvelope`: ≤3 lines, no fences, no headings; a body-shaped summary is rejected in-worker | `tests/worker-reporter.test.ts`, `tests/contracts.test.ts` |
 | "Parent never reads artifact bodies" | mechanised | `ContextGuard` blocks `read`/`grep`/`bash`/`edit`/`write`; the ledger holds no bodies | `tests/guards.test.ts`, `tests/e2e/phase3.test.ts` |
 | Hung planner (artifact, no envelope) → gate from the path | ported | `advance()` gates it and reports `hung_planner` | `tests/pipeline.test.ts` |
-| "Never re-run research for an implementation failure" | mechanised | `mayRerunResearch` is asserted, not remembered | `tests/failures.test.ts` |
+| "Never re-run research for an implementation failure" | mechanised | `mayRerunResearch` is asserted, not remembered | `tests/failures-retained.test.ts` |
 | Pre-dispatch path (lease-bind, branch=job-id, check, jobs add) | ported | `cp_dispatch`'s fixed order; probe **before** lease, no orphan branch | `tests/e2e/dispatch-s29.test.ts`, `tests/e2e/dispatch-cleanup-s29.test.ts`, `tests/e2e/dispatch-s30.test.ts` |
 | Promote vs new lease (same repo + held worktree + same model) | mechanised | `decideOccupancy`; cross-model role hop refused with the teardown instruction | `tests/e2e/preflight-s31.test.ts`, `tests/e2e/dispatch-s31.test.ts` |
 | "Research evidence is not authorization to dispatch a second pane" | mechanised | one worker per job, enforced at spawn | `tests/worker-manager.test.ts` |
@@ -91,7 +91,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | First brief contract (`templates/`, placeholders, `--brief-file`) | ported | `prompts/briefs/` + `assembleBrief`; unknown placeholder **or** missing value fails closed | `tests/profiles.test.ts` |
 | Workers search with `grep`/`glob`/`read`, not `bash` grep/cat (audit 2026-09-06: ~2173 bash grep/cat/head/tail/ls calls, `glob` called 0 times) | mechanised | the rule is in all three briefs and all three worker profiles (`prompts/briefs/`, `profiles/`), and five contract cases fail the suite if a surface loses the sentence | `tests/evals.test.ts` (`evals/corpus.json` `*-bounded-search-tools`) |
 | Broker parent turns | deleted | see §2 | — |
-| While they run: "never poll", inspect once, no auto-restart | mechanised | the parent wakes on envelopes; `/watch` cannot follow; recovery is bounded by class | `tests/watch.test.ts`, `tests/failures.test.ts` |
+| While they run: "never poll", inspect once, no auto-restart | mechanised | the parent wakes on envelopes; `/watch` cannot follow; recovery is bounded by class | `tests/watch.test.ts`, `tests/failures-retained.test.ts`, `tests/e2e/worker-lifecycle-p8d.test.ts` |
 | Fan out; serialize only for real dependencies | ported | AGENTS.md §Fan out, and where to stop | `tests/contract.test.ts` |
 | Parallel PRs from one base (rebase before the second merge) | ported | AGENTS.md §Fan out (this audit restored it) | `tests/contract.test.ts` |
 | "Freeze scope once validation starts" | ported | AGENTS.md §Fan out (restored) | `tests/contract.test.ts` |

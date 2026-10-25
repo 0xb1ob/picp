@@ -41,7 +41,7 @@ Dashboard cases pin queue editing during compaction, one consumption after a dro
 
 ## Controls and replay
 
-All 26 canonical production mutations were executed, restored and replayed after the plain merge of main. Canonical files are in `docs/testing-migration-s24/`; SHA-256 values and exact patch blocks are in the main regression ledger. Replay logs are under the ignored `.pi-command-post/s24-evidence/replay-*.log` directory. The interrupted no-rehand replay had no verdict, was explicitly recorded as incomplete, and was rerun to the expected failure before retirement.
+All 26 canonical production mutations were executed, restored and replayed after the plain merge of main. Canonical files are in `docs/testing-migration-s24/`; each control is described in words in the main regression ledger. The interrupted no-rehand replay had no verdict, was explicitly recorded as incomplete, and was rerun to the expected failure before retirement.
 
 Use `npm run test:one -- --test-name-pattern='<pattern>' <file>` for the commands below. Each row identifies the canonical patch basename and the expected failing public assertion. Main-ledger IDs prefix these names with S24 (operator patches use S24-compact-*).
 
@@ -74,6 +74,6 @@ Use `npm run test:one -- --test-name-pattern='<pattern>' <file>` for the command
 | parent-context | parent-compaction | non-headless contexts | low, disabled and JSON print consumers fail |
 | parent-length | parent-compaction | length stops cancel | threshold cancellation absent |
 
-Inspected production history includes df24d7e506776d2bc72efd583258f413040f9b81 (macrotask ordering), 7ff5861 (handoff recovery), f270756f95b469990583ce7e78a1df5c1889c0d0 (benign skip handling) and a61a117757f69c6a7ea28d23be8a1ccf80f74d97 (#447 cap knob). Production `src/` and `extensions/` are byte-identical to main after controls are restored.
+Inspected production history includes macrotask ordering, handoff recovery, benign skip handling and the #447 cap knob. Production `src/` and `extensions/` are byte-identical to main after controls are restored.
 
 No duration exception, live-model gate or full local suite was used. Individual new cases stay below two minutes; final focused validation and measured diff size are recorded in the job artifact and PR description. CI remains the integration gate.
