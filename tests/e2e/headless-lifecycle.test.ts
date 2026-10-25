@@ -724,7 +724,7 @@ test(name, { timeout: 120_000 }, async (t) => {
 	t.after(async () => { chmodSync(awaitingDir, 0o700); await child.close(); agent.cleanup(); await provider.stop(); held.repo.cleanup(); held.home.cleanup(); });
 	await waitFor(() => new CiWatchStore({ home: held.home.path }).job(JOB)?.last_checked_at, (at) => !!at,
 		{ timeoutMs: 30_000, what: "initial running-CI catch-up completes" });
-	writeFileSync(held.stateFile, mode === "red" ? "red\n" : mode === "running" ? "in_progress\n" : late ? "green:12000\n" : "green\n");
+	writeFileSync(held.stateFile, mode === "red" ? "red\n" : mode === "running" ? "in_progress\n" : late ? "green:6000\n" : "green\n");
 	await child.prompt("Review the held job and handle its verdict.");
 	if (mode === "late-failure") {
 		await waitFor(() => existsSync(join(held.home.path, paths.reviewFile(JOB, 2))), (written) => written,
