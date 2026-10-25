@@ -73,7 +73,7 @@ function refused(result: { status: number; body: Record<string, any>; lines: Arr
 	assert.deepEqual(result.lines.map((line) => [line.type, line.by, line.kind, line.status, line.reason]), [["refused", "viewer", "restart", status, result.body.error]]);
 }
 
-test("S27 viewer restart: HTTP validation, real busy bridge, accepted restart and rate limit preserve audit order", { timeout: 90_000, todo: "S27 pending-fix: accepted external restart leaves idle pi alive" }, async (t) => {
+test("S27 viewer restart: HTTP validation, real busy bridge, accepted restart and rate limit preserve audit order", { timeout: 90_000 }, async (t) => {
 	const s = await setup(t);
 	const offline = await s.restart("x".repeat(64));
 	refused(offline, 409);
@@ -103,8 +103,8 @@ test("S27 viewer restart: HTTP validation, real busy bridge, accepted restart an
 	await waitFor(() => existsSync(b.marker), Boolean, { what: "restart marker" });
 	assert.equal(JSON.parse(readFileSync(b.marker, "utf8")).id, accepted.body.id);
 	const pid = JSON.parse(readFileSync(b.marker, "utf8")).pid as number;
-	b.rpc.send({ type: "get_state", id: "shutdown-flush" });
-	await waitFor(() => isPidAlive(pid), (alive) => !alive, { what: "accepted restart shuts down its pi" });
+	assert.equal(pid, b.rpc.pid, "the marker names the bridge's own pi");
+	await waitFor(() => isPidAlive(pid), (alive) => !alive, { timeoutMs: 30_000, what: "accepted restart shuts down its idle RPC pi" });
 });
 
 test("S27 viewer restart: plain bridge reports unsupported through HTTP status and restart", { timeout: 60_000 }, async (t) => {
