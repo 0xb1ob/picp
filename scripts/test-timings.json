@@ -170,7 +170,6 @@
 	"tests/intake-settle-atomicity.test.ts": 102,
 	"tests/intake.test.ts": 1130,
 	"tests/integrate-retained.test.ts": 3183,
-	"tests/integrate.test.ts": 5093,
 	"tests/job-skills-retained.test.ts": 1285,
 	"tests/jobs-tool.test.ts": 174,
 	"tests/json-store.test.ts": 13,
