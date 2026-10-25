@@ -1,7 +1,7 @@
 /**
- * P8b (behavior 04): worker hard bounds and read-only MCP through a real CommandPost, real pi workers on a
- * treehouse pool and the mock provider. Bounds are read from the dispatched fleet record and the worker's
- * actual failure; MCP through a dispatched planner's tool calls and `/doctor`.
+ * P8b (behavior 04): worker hard bounds, read-only MCP and wedged-call notices through a real CommandPost (or parent
+ * pi), real pi workers on a treehouse pool and the mock provider. Outcomes are read from the fleet record, the worker's
+ * run log, onHardBound and the parent's notices, never from internals.
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -12,6 +12,7 @@ import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_JOB_TOOL_CALL_CAP, DEFAULT_JOB_WALL_CLOCK_SECONDS, type Failure, LAYOUT, paths, WEDGED_TOOL_CALL_SECONDS } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { MCP_CALL_TOOL } from "../../src/worker-mcp.ts";
+import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import {
 	type AgentDir,
 	createAgentDir,
@@ -301,4 +302,32 @@ test("P8b MCP: dispatched read-only workers reach enabled servers through mcp_ca
 		assert.equal(none?.isError, true, slug);
 		assert.match(none?.text ?? "", /not found/, slug);
 	}
+});
+
+test("P8b wedged: the parent announces a silent open tool call once, never a progressing one, and a new silent call again", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const job = await b.ledger.create({ title: "wedged", project: "demo", delivery: "local", kind: "ship" });
+	const loud = "for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo tick $i; sleep 1; done";
+	// Third call: silent past a tick, loud past a tick, then silent again — the same call is news twice.
+	const resumes = "sleep 9; for i in 1 2 3 4 5 6 7; do echo again $i; sleep 1; done; sleep 9";
+	const worker = b.provider.addScript("p8b-wedged-worker", [bash("sleep 14"), bash(loud), bash(resumes), { kind: "hang" }]);
+	const ends = await b.run([{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Run the checks.", model: worker } }] }],
+		{ CP_WEDGED_TOOL_CALL_SECONDS: "3" });
+	assert.equal(ends[0]?.isError, false, JSON.stringify(ends[0]?.result));
+	await waitFor(() => toolEnds(b.home, job.id).length, (n) => n >= 3, { timeoutMs: 120_000, what: "all three bash calls returned" });
+	await new Promise((resolve) => setTimeout(resolve, 6_000));
+	const records = b.parents[0]?.records() ?? [];
+	const wakes = records.filter((r) => r.type === "message_start").map((r) => r.message as { customType?: string; content?: unknown })
+		.filter((m) => m.customType === "cp-wedged").map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)));
+	const notices = records.filter((r) => r.type === "extension_ui_request" && r.method === "notify" && String(r.message).startsWith("WEDGED"));
+	// Silent windows are 6 s or longer against 5 s widget ticks, so each is seen; a repeat tick is not news.
+	assert.equal(notices.length, 3, `first call once, third call before and after its output: ${JSON.stringify(notices)}`);
+	const silences = notices.map((n) => Number(/silent (\d+)s/.exec(String(n.message))?.[1]));
+	assert.ok(silences.every((s) => s >= 3), `every notice is a silence past the threshold, never the loud call: ${silences}`);
+	assert.ok(wakes.length >= 1, "the notice also wakes the parent");
+	for (const wake of wakes) {
+		assert.match(wake, new RegExp(`^\\[demo\\] WEDGED TOOL CALL — 1 worker has an open tool call with no output\\n  ${job.id}: bash open \\d+s, silent \\d+s`));
+		assert.match(wake, /Observed, not concluded: .* quiet past 3s\.\nNothing was killed and no phase changed/);
+	}
+	assert.notEqual(readFleet(b.home).jobs.find((record) => record.job_id === job.id)?.phase, "failed", "surfacing never kills");
 });

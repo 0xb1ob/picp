@@ -3,7 +3,7 @@
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
-| P8b | 04 | tests/e2e/worker-lifecycle-p8b.test.ts | 5 |
+| P8b | 04 | tests/e2e/worker-lifecycle-p8b.test.ts | 6 |
 <!-- /manifest:prs -->
 
 <!-- manifest:scenarios -->
@@ -14,6 +14,7 @@
 | 04-8 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b bounds: a bound names the job, bound and work on disk, and the redispatched worker is bounded again |
 | 04-9 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b bounds: a legacy record without frozen bounds revives on env bounds, never the home file |
 | 04-10 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b MCP: dispatched read-only workers reach enabled servers through mcp_call; writers and disabled homes get none |
+| 04-11 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b wedged: the parent announces a silent open tool call once, never a progressing one, and a new silent call again |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -36,6 +37,8 @@
 | tests/worker-mcp.test.ts | mcpReadOnlyRefusal fails closed: only readOnlyHint true and not destructive passes | 04-10 | mapped | Planner and qa get read_thing; plain and delete_thing refuse with their reasons and never reach a server. |
 | tests/worker-mcp.test.ts | withWorkerMcp: read-only profiles only, and only when the agent dir has an enabled server | 04-10 | mapped | Implementer, disabled-only and invalid mcp.json dispatches get no mcp_call; gate-reviewer shares the readOnly flag. |
 | tests/worker-mcp.test.ts | a planner's spawn plan carries the gateway next to report_result; an implementer's does not | 04-10 | mapped | Dispatched planner calls mcp_call and report_result; the implementer's mcp_call is not found. |
+| tests/wedged.test.ts | a wedged call is announced once, and again only if it is a different call | 04-11 | mapped | Parent notices: one per silent call across ticks, none for the loud call, again after a resumed call re-silences. |
+| tests/wedged.test.ts | the other 21 declarations (detection, exclusions, projection, /status rows, two-worker notice) | — | retained | Verbatim in tests/wedged-retained.test.ts: hours-old silences, retries and the /status 30-minute rows need fabricated projections. |
 <!-- /manifest:assertions -->
 
 <!-- manifest:regressions -->
@@ -55,6 +58,10 @@
 | NC-P8b-mcp-profile | tests/worker-mcp.test.ts | src/worker-mcp.ts withWorkerMcp | 04-10 | give writing profiles the gateway | — | implementer mcp_call deepEqual | pass |
 | NC-P8b-mcp-enabled | tests/worker-mcp.test.ts | src/worker-mcp.ts enabledServers | 04-10 | count disabled servers as enabled | — | ro-disabled mcp_call isError | pass |
 | NC-P8b-mcp-hidden | tests/worker-mcp.test.ts | src/worker-mcp.ts workerMcpConfig | 04-10 | make hidden servers direct | — | planner list includes mcp__hidden__ | pass |
+| NC-P8b-wedged-once | tests/wedged.test.ts | src/wedged.ts WedgedWatch.observe | 04-11 | announce on every tick | — | three notices expected, more observed | pass |
+| NC-P8b-wedged-forget | tests/wedged.test.ts | src/wedged.ts WedgedWatch.observe | 04-11 | never forget an unwedged call | — | three notices expected, two observed | pass |
+| NC-P8b-wedged-idle | tests/wedged.test.ts | src/status-render.ts isWedgedToolCall | 04-11 | measure open time, not silence | — | every notice is a silence past the threshold | pass |
+| NC-P8b-wedged-env | tests/wedged.test.ts | src/wedged.ts wedgedToolCallSeconds | 04-11 | ignore CP_WEDGED_TOOL_CALL_SECONDS | — | three notices expected, none observed | pass |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->
@@ -63,6 +70,7 @@
 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b | behavior 04 hard bounds; 4 runtime cases |
 | tests/bounds-retained.test.ts | P8b | 2 declarations retained/moved verbatim; mocked-clock boundaries |
 | tests/worker-mcp-retained.test.ts | P8b | 3 declarations retained/moved verbatim; agent-dir and config shaping |
+| tests/wedged-retained.test.ts | P8b | 21 declarations retained/moved verbatim; fabricated projections and /status rows |
 <!-- /manifest:incoming -->
 
 <!-- manifest:baseline -->
@@ -70,4 +78,5 @@
 |---|---|---|---|
 | `tests/bounds.test.ts` | deleted | P8b | behavior 04: 9 assertions mapped to 04-6..04-9, 2 retained in tests/bounds-retained.test.ts |
 | `tests/worker-mcp.test.ts` | deleted | P8b | behavior 04: 3 assertions mapped to 04-10, 3 retained in tests/worker-mcp-retained.test.ts |
+| `tests/wedged.test.ts` | deleted | P8b | behavior 04: 1 assertion mapped to 04-11, 21 retained in tests/wedged-retained.test.ts |
 <!-- /manifest:baseline -->

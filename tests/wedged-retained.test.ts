@@ -1,5 +1,6 @@
 /**
- * cp-wedged-tool-call acceptance: a tool call that never returns is detectable.
+ * cp-wedged-tool-call acceptance: a tool call that never returns is detectable. P8b moved this verbatim from
+ * tests/wedged.test.ts; announce-once is pinned by tests/e2e/worker-lifecycle-p8b.test.ts (ledger: p8b.md).
  *
  * The incident: two workers each stopped with `tool_execution_update` as their
  * final event and sat for fifteen hours. `/status` said `working` the whole
@@ -545,38 +546,6 @@ test("a new tool call starts with a clean progress mark", () => {
 // Surfacing: news once, not every tick
 // ---------------------------------------------------------------------------
 
-test("a wedged call is announced once, and again only if it is a different call", () => {
-	const watch = new WedgedWatch({ thresholdSeconds: 1800 });
-	const wedgedSnapshot = snapshotWith(
-		"cp-wedged",
-		{ name: "bash", tool_call_id: "c1", started_at: FIFTEEN_HOURS_AGO },
-		{ tool_calls: 7 },
-	);
-
-	assert.equal(watch.observe(wedgedSnapshot).length, 1, "news the first time");
-	assert.equal(watch.observe(wedgedSnapshot).length, 0, "not news five seconds later");
-	assert.equal(watch.observe(wedgedSnapshot).length, 0);
-	assert.equal(watch.announcedCount, 1);
-
-	// The call returned and a new one opened, which also wedged: news again.
-	const nextCall = snapshotWith(
-		"cp-wedged",
-		{ name: "bash", tool_call_id: "c2", started_at: FIFTEEN_HOURS_AGO },
-		{ tool_calls: 8 },
-	);
-	assert.equal(watch.observe(nextCall).length, 1, "a different call is a different fact");
-	assert.equal(watch.observe(nextCall).length, 0);
-
-	// It unwedges (output resumed): forgotten, so a later wedge is news again.
-	const progressing = snapshotWith(
-		"cp-wedged",
-		{ name: "bash", tool_call_id: "c2", started_at: FIFTEEN_HOURS_AGO, last_progress_at: A_MINUTE_AGO },
-		{ tool_calls: 8 },
-	);
-	assert.deepEqual(watch.observe(progressing), []);
-	assert.equal(watch.announcedCount, 0);
-	assert.equal(watch.observe(nextCall).length, 1, "silence returned, so it is news again");
-});
 
 test("two wedged workers are one notice naming both", () => {
 	const facts: StatusFacts = {
