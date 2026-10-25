@@ -73,7 +73,8 @@ test("start: a data/parent.json model avoids exit 78 with no env or saved model;
 		const p = ports({ attach: async () => client, savedModel: () => saved, configuredModel: () => "file/m" });
 		const run = supervise({ home: "/h", ...(model ? { model } : {}) }, p);
 		await new Promise((done) => setImmediate(done));
-		// No modelExplicit key: CP_PARENT_MODEL is env, so bridge.start lets the file model beat it (tests/cp-bridge.test.ts).
+		// No modelExplicit key: CP_PARENT_MODEL is env, so bridge.start lets the file model beat it
+		// (tests/e2e/cp-bridge-p9h.test.ts).
 		assert.deepEqual(client.requests, [["start", { home: "/h", mode: "multi", model: expected }]]);
 		assert.ok(p.lines.some((line) => line.endsWith("(file/m)")), p.lines.join("\n"));
 		client.close();
