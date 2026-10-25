@@ -119,12 +119,14 @@ rl.on("line", (line) => {
 				...(process.env.FAKE_PARENT_WAKE_SCHEDULE
 					? [{ type: "message_end", message: { role: "custom", customType: "cp-schedule", content: "schedule fired", details: { outcome: "fired", job_id: process.env.FAKE_PARENT_WAKE_SCHEDULE } } }]
 					: []),
-				// FAKE_PARENT_WAKE_ENVELOPE (JSON {job_id, status, summary}): an accepted cp-envelope wake-up (issue #2).
+				// FAKE_PARENT_WAKE_ENVELOPE (JSON {job_id, status, summary}, or an array of them): accepted cp-envelope wake-ups
+				// (issue #2); an item may override `accepted` or `customType` to stand in for a rejected or foreign message.
 				...(process.env.FAKE_PARENT_WAKE_ENVELOPE
-					? (() => {
-						const env = JSON.parse(process.env.FAKE_PARENT_WAKE_ENVELOPE);
-						return [{ type: "message_end", message: { role: "custom", customType: "cp-envelope", content: `${env.job_id}: ${env.summary}`, details: { ...env, accepted: true, cp_wakeup: { kind: "envelope", job_id: env.job_id, issued_at: "2026-09-24T00:00:00Z" } } } }];
-					})()
+					? [JSON.parse(process.env.FAKE_PARENT_WAKE_ENVELOPE)].flat().map(({ customType = "cp-envelope", ...env }) => ({
+						type: "message_end",
+						message: { role: "custom", customType, content: `${env.job_id}: ${env.summary}`,
+							details: { accepted: true, ...env, cp_wakeup: { kind: "envelope", job_id: env.job_id, issued_at: "2026-09-24T00:00:00Z" } } },
+					}))
 					: []),
 				// FAKE_PARENT_WAKE_DURABLE (JSON {id, content}): a durable cp-recovery wake-up.
 				...(process.env.FAKE_PARENT_WAKE_DURABLE
