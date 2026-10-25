@@ -11,6 +11,7 @@ import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_JOB_TOOL_CALL_CAP, DEFAULT_JOB_WALL_CLOCK_SECONDS, type Failure, LAYOUT, paths, WEDGED_TOOL_CALL_SECONDS } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
+import { MCP_CALL_TOOL } from "../../src/worker-mcp.ts";
 import {
 	type AgentDir,
 	createAgentDir,
@@ -238,4 +239,66 @@ test("P8b bounds: a legacy record without frozen bounds revives on env bounds, n
 	await post.revive(jobId);
 	const failed = await failedRecord(f, jobId, 30_000);
 	assert.equal(failed?.failure?.message, "wall_clock bound 4s exceeded (measured 4s)");
+});
+
+const SERVER = join(REPO_ROOT, "tests/fixtures/mcp-probe-server.mjs");
+const mcpCall = (args: Record<string, unknown>): ScriptStep => ({ kind: "tool_calls", calls: [{ name: MCP_CALL_TOOL, args }] });
+/** Each finished tool call of a dispatched worker, from its run log. */
+function toolEnds(home: string, jobId: string): Array<{ tool: string; isError: boolean; text: string }> {
+	return readFileSync(join(home, paths.eventsFile(jobId)), "utf8").trim().split("\n").map((line) => JSON.parse(line) as { payload?: Record<string, unknown> })
+		.filter((event) => event.payload?.type === "tool_execution_end")
+		.map(({ payload = {} }) => ({ tool: String(payload.toolName), isError: payload.isError === true, text: JSON.stringify(payload.result ?? {}) }));
+}
+
+test("P8b MCP: dispatched read-only workers reach enabled servers through mcp_call; writers and disabled homes get none", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const f = await fleet(t, { maxTrees: 6 });
+	const log = join(f.agentDir.path, "calls.log");
+	const server = (label: string, extra: Record<string, unknown> = {}) => ({ command: process.execPath, args: [SERVER, label, log], ...extra });
+	const mcpJson = (servers: Record<string, unknown> | string) =>
+		writeFileSync(join(f.agentDir.path, "mcp.json"), typeof servers === "string" ? servers : JSON.stringify({ mcpServers: servers }));
+	mcpJson({
+		probe: server("probe", { exposure: "deferred", toolExposure: { "read_*": "codemode" } }),
+		other: server("other"),
+		hidden: server("hidden", { exposure: "hidden" }),
+		off: server("off", { enabled: false }),
+		broken: { args: [] },
+	});
+	const readOnly = [mcpCall({}), mcpCall({ tool: "mcp__probe__read_thing" }), mcpCall({ tool: "mcp__probe__plain" }),
+		mcpCall({ tool: "mcp__probe__delete_thing" }), mcpCall({ tool: "mcp__hidden__read_thing" }),
+		{ kind: "tool_calls", calls: [{ name: "report_result", args: {} }] } as ScriptStep, { kind: "hang" } as ScriptStep];
+	const dispatch = async (slug: string, profile: string, kind: "ship" | "research", steps: ScriptStep[]) => {
+		const jobId = await f.intake(slug, kind);
+		await f.post.dispatch({ jobId, task: "Use MCP.", model: f.script(`p8b-mcp-${slug}`, steps), profile, fetch: false });
+		await waitFor(() => toolEnds(f.home, jobId).length, (n) => n >= steps.length - 1, { timeoutMs: 60_000, what: `${slug} tool calls` });
+		return toolEnds(f.home, jobId);
+	};
+
+	for (const profile of ["planner", "qa"]) {
+		const ends = await dispatch(`ro-${profile}`, profile, "research", readOnly);
+		const [list, read, plain, destructive, hidden, report] = ends;
+		assert.equal(list?.isError, false, profile);
+		assert.match(list?.text ?? "", /mcp__probe__read_thing.*mcp__other__read_thing|mcp__other__read_thing.*mcp__probe__read_thing/, profile);
+		assert.doesNotMatch(list?.text ?? "", /plain|delete_thing|mcp__hidden__/, profile);
+		assert.match(read?.text ?? "", /ok:read_thing/, profile);
+		assert.equal(plain?.isError, true, profile);
+		assert.match(plain?.text ?? "", /not declared read-only by its MCP server \(readOnlyHint\)/, profile);
+		assert.match(destructive?.text ?? "", /declared destructive \(destructiveHint\)/, profile);
+		assert.match(hidden?.text ?? "", /not a connected MCP tool/, profile);
+		assert.equal(report?.tool, "report_result", profile);
+		assert.doesNotMatch(report?.text ?? "", /not found/, `${profile}: report_result stays beside mcp_call`);
+	}
+	const writer = await dispatch("rw-implementer", "implementer", "ship", [mcpCall({}), { kind: "hang" }]);
+	assert.deepEqual(writer.map(({ tool, isError }) => ({ tool, isError })), [{ tool: MCP_CALL_TOOL, isError: true }]);
+	assert.match(writer[0]?.text ?? "", /not found/);
+	const calls = readFileSync(log, "utf8").split("\n");
+	assert.equal(calls.filter((line) => line === "call probe read_thing").length, 2, "only the allowed call reaches a server");
+	assert.equal(calls.some((line) => / (plain|delete_thing)$/.test(line) || line === "start off"), false);
+
+	// No enabled server, or an unreadable mcp.json: a read-only worker gets no gateway at all.
+	for (const [slug, servers] of [["ro-disabled", { off: server("off", { enabled: false }) }], ["ro-invalid", "{ nope"]] as const) {
+		mcpJson(servers);
+		const [none] = await dispatch(slug, "planner", "research", [mcpCall({}), { kind: "hang" }]);
+		assert.equal(none?.isError, true, slug);
+		assert.match(none?.text ?? "", /not found/, slug);
+	}
 });
