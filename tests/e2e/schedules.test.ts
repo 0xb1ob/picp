@@ -313,20 +313,25 @@ test("P13 held parent: a pr fire's job and run exist before the held wake is rel
 	const h = await schedulesHome(t, { held: true });
 	const worker = h.model("worker", [{ kind: "text", text: "P13 worker received." }]);
 	const usage = { prompt_tokens: 1000, completion_tokens: 1 };
-	const add = (name: string, kind: string, delivery: string) => schedule(`add-${name}`, { action: "add", name, project: "demo", manual: true, title: `${name} task`, kind, delivery, operator_quote: `Add the ${name} schedule.` });
-	const parent = await h.parent("P13: Add the pr-run schedule. Add the answer-run schedule.", [
-		{ kind: "tool_calls", calls: [add("pr-run", "ship", "pr"), add("answer-run", "research", "answer")] },
+	const add = (name: string, kind: string, delivery: string, extra: Record<string, unknown> = {}) => schedule(`add-${name}`, { action: "add", name, project: "demo", manual: true, title: `${name} task`, kind, delivery, operator_quote: `Add the ${name} schedule.`, ...extra });
+	const parent = await h.parent("P13: Add the pr-run schedule. Add the answer-run schedule. Add the review-run schedule.", [
+		{ kind: "tool_calls", calls: [
+			add("pr-run", "ship", "pr"), add("answer-run", "research", "answer"),
+			add("review-run", "research", "local", { skill: "cp-org-pr-review", description: "org: acme" }),
+		] },
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "true" } }], usage },
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "node -e 'setTimeout(() => {}, 2000)'" } }], usage },
 		{ kind: "tool_calls", usage, calls: [
 			schedule("pr", () => ({ action: "run_now", id: h.idOf("pr-run") })),
 			schedule("answer", () => ({ action: "run_now", id: h.idOf("answer-run"), overrides: { model: worker } })),
+			schedule("review", () => ({ action: "run_now", id: h.idOf("review-run") })),
 		] },
 		{ kind: "tool_calls", usage, calls: [schedule("again", () => ({ action: "run_now", id: h.idOf("pr-run") }))] },
 	], { kind: "text", text: "P13 held parent settled.", usage });
 	const results = ends(parent);
 	const fired = checkCall(results, "pr", "ok", /fired: created cp-/);
 	checkCall(results, "again", "ok", /already_running/);
+	checkCall(results, "review", "ok", /fired: created cp-/);
 	assert.match(readFileSync(join(h.stateDir, "daemon.log"), "utf8"), /hold engaged/);
 	const [job] = await h.ledger.list({ labels: [`schedule:${h.idOf("pr-run")}`], all: true });
 	assert.ok(job && h.runs().openRun(h.idOf("pr-run")), "the job and its run exist while the wake is held");
@@ -336,11 +341,12 @@ test("P13 held parent: a pr fire's job and run exist before the held wake is rel
 
 	parent.send({ type: "compact", id: "compact" });
 	assert.equal((await parent.waitFor((r) => r.type === "response" && r.id === "compact", 30_000)).success, true);
-	await parent.waitFor(() => wakes(parent).length === 1, 30_000);
-	const message = wakes(parent)[0]!.message as { content?: unknown; details?: { job_id?: string } };
-	assert.deepEqual([message.content, message.details?.job_id], [fired, job.id]);
+	await parent.waitFor(() => wakes(parent).length === 2, 30_000);
+	const released = wakes(parent).map((wake) => wake.message as { content?: unknown; details?: { job_id?: string; skill?: string } });
+	const [anchor] = await h.ledger.list({ labels: [`schedule:${h.idOf("review-run")}`], all: true });
+	assert.deepEqual(released.map((message) => [message.content === fired, message.details?.job_id, message.details?.skill]), [[true, job.id, undefined], [false, anchor?.id, "cp-org-pr-review"]]);
 	await parent.waitForSettled(30_000);
-	assert.equal(wakes(parent).length, 1, "a released wake is delivered once");
+	assert.equal(wakes(parent).length, 2, "each released wake, the skill's included, is delivered once");
 	assert.deepEqual(h.grants(), [], "release mints no grant");
 });
 
