@@ -288,7 +288,6 @@
 	"tests/structure.test.ts": 210,
 	"tests/suggest.test.ts": 16,
 	"tests/supersede.test.ts": 119,
-	"tests/sync-lossless.test.ts": 3533,
 	"tests/task-addenda.test.ts": 51,
 	"tests/task-references.test.ts": 11,
 	"tests/teardown-retained.test.ts": 5000,

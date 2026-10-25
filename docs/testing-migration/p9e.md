@@ -3,12 +3,13 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P9e (cp-e2e-migration-p9e-s8s3) | behavior 11, fifth slice: worker envelope intake through the real parent's startup reconcile, settle watcher and a real worker's reporter in `tests/e2e/envelope-intake-p9e.test.ts`; 17 mapped, 1 retained verbatim in `tests/envelope-correction-retained.test.ts`; four harness, eval-corpus and pi-host files `retained` (no command-post entry point); #523 review lows (I6, exact-ms boundaries, NC ids); [ledger and controls](testing-migration/p9e.md). Eight behavior-11 files (cp-bridge, dashboard-control, intake, operator-delivery, parent-delivery, parent-outbox, send, sync-lossless) stay `convert` / P9 for p9f; #515's p9b files are untouched | 2 (`tests/envelope-correction.test.ts`, `tests/intake-settle-atomicity.test.ts`) |
+| P9e (cp-e2e-migration-p9e-s8s3) | behavior 11, fifth slice: worker envelope intake through the real parent's startup reconcile, settle watcher and a real worker's reporter in `tests/e2e/envelope-intake-p9e.test.ts`, and cp_integrate's worktree sync against real git in `tests/e2e/sync-lossless-p9e.test.ts`; 25 mapped, 1 retained verbatim in `tests/envelope-correction-retained.test.ts`; four harness, eval-corpus and pi-host files `retained` (no command-post entry point); #523 review lows (I6, exact-ms boundaries, NC ids); [ledger and controls](testing-migration/p9e.md). Seven behavior-11 files (cp-bridge, dashboard-control, intake, operator-delivery, parent-delivery, parent-outbox, send) stay `convert` / P9 for p9f; #515's p9b files are untouched | 3 (`tests/envelope-correction.test.ts`, `tests/intake-settle-atomicity.test.ts`, `tests/sync-lossless.test.ts`) |
 <!-- /manifest:ledger -->
 
 Behavior 11, fifth slice. P9e-correction seeds fleet records and envelopes on a scratch home and starts the real
-command-post extension in RPC pi four times; P9e-reporter and P9e-settle dispatch real mock-model workers on a treehouse
-pool. Each control was applied alone to `src/` or `extensions/`, failed on the named assertion, and passed once restored.
+command-post extension in RPC pi four times; P9e-reporter, P9e-settle and P9e-sync dispatch real mock-model workers on a
+treehouse pool (P9e-sync then lands through `cp_integrate` with a fake `gh` and real git). Each control was applied alone
+to `src/` or `extensions/`, failed on the named assertion, and passed once restored.
 
 Retained whole files (no command-post entry point reaches what they assert):
 `tests/operator-target-real-home.test.ts` and `tests/parent-hosts-harness.test.ts` assert the test harness itself (the
@@ -19,7 +20,7 @@ pins the pinned pi's own hook contract through a probe extension, which no comma
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
-| P9e | 11 | `tests/e2e/envelope-intake-p9e.test.ts` | 3 new |
+| P9e | 11 | `tests/e2e/envelope-intake-p9e.test.ts`, `tests/e2e/sync-lossless-p9e.test.ts` | 4 new |
 <!-- /manifest:prs -->
 
 <!-- manifest:scenarios -->
@@ -28,6 +29,7 @@ pins the pinned pi's own hook contract through a probe extension, which no comma
 | P9e-correction | `tests/e2e/envelope-intake-p9e.test.ts` | P9e-correction: a refused envelope is quarantined once per generation and its one corrected report is the delivery |
 | P9e-reporter | `tests/e2e/envelope-intake-p9e.test.ts` | P9e-reporter: a worker's report naming a missing artifact is refused at the worker and files nothing |
 | P9e-settle | `tests/e2e/envelope-intake-p9e.test.ts` | P9e-settle: the settle watcher stamps an envelope on disk atomically, never nudges it, and refuses a second report |
+| P9e-sync | `tests/e2e/sync-lossless-p9e.test.ts` | P9e-sync: a squash-merged rebased branch resets its lease with a rescue ref, and any unproven work refuses |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -51,6 +53,14 @@ pins the pinned pi's own hook contract through a probe extension, which no comma
 | tests/intake-settle-atomicity.test.ts | concurrent settle calls are serialized and both see the same result | P9e-settle | mapped | the stream's and the settle watcher's intakes race on the late job; control S6 |
 | tests/intake-settle-atomicity.test.ts | settle after a previously nudged worker writes its envelope is accepted | P9e-settle | mapped | late job: nudge, envelope by bash, settle stamps; control S1 |
 | tests/intake-settle-atomicity.test.ts | settle watcher records (not nudges) when fleet.mutate fails and envelope is on disk | P9e-settle | mapped | broken job: settled_without_report, two requests; control S2 |
+| tests/sync-lossless.test.ts | the 7 refusals of 2026-09-01, replayed against real git: the reset now proceeds | P9e-sync | mapped | absorbed: done, reset to the rebased sha, rescue ref on the discarded head, discard fact; controls Y1, Y3 |
+| tests/sync-lossless.test.ts | the dangerous inverse: a commit whose content the base does not carry still refuses, and the work survives | P9e-sync | mapped | unpushed: surface at sync, head and file unchanged, no rescue ref; control Y2 |
+| tests/sync-lossless.test.ts | a binary-only unpushed change is not invisible to the proof: it refuses too | P9e-sync | mapped | binary; control Y2 (dropping --binary still refuses: patch-id differs on the binary stanza) |
+| tests/sync-lossless.test.ts | a rebase whose conflict was resolved by hand changed the content, so it refuses | P9e-sync | mapped | conflict; control Y2 |
+| tests/sync-lossless.test.ts | a base origin does not have proves nothing, and is never looked up as a tracking ref | 05-S10-1 | mapped | existing base-denied and base-empty modes; control Y4 |
+| tests/sync-lossless.test.ts | a rescue ref whose commit the base carries is pruned; one it does not carry survives, object and all | 05-S10-2 | mapped | existing mixed and outside modes; control Y5 |
+| tests/sync-lossless.test.ts | an origin that cannot be asked keeps every rescue ref, and it is the ls-remote answer that decided | 05-S10-2 | mapped | existing origin-denied mode; control Y6 |
+| tests/sync-lossless.test.ts | a base origin does not have prunes nothing at all | 05-S10-2 | mapped | existing origin-empty mode; control Y6 |
 <!-- /manifest:assertions -->
 
 <!-- manifest:regressions -->
@@ -67,12 +77,19 @@ pins the pinned pi's own hook contract through a probe extension, which no comma
 | S4 | tests/intake-settle-atomicity.test.ts | P9e-settle | worker-reporter restores the old "already accepted with different content" text | timed out waiting for the duplicate refusal |
 | S5 | tests/intake-settle-atomicity.test.ts | S27-intake-settle | settle.ts never applies the prompt bound | `one correction prompt, no retry loop` |
 | S6 | tests/intake-settle-atomicity.test.ts | P9e-settle | intake.ts drops its in-flight dedupe | `the racing settle and stream intakes journal one delivery`: 2 |
+| Y1 | tests/sync-lossless.test.ts | P9e-sync | integrate.ts identifies the cumulative diff by its raw text (hash-object) instead of patch-id | absorbed: next surface, expected done |
+| Y2 | tests/sync-lossless.test.ts | P9e-sync | integrate.ts never compares the two patch-ids | unpushed, binary, conflict: next done (reset), expected surface |
+| Y3 | tests/sync-lossless.test.ts | P9e-sync | integrate.ts resets without writing the rescue ref | `the discarded head is kept in the shared clone` |
+| Y4 | tests/sync-lossless.test.ts | 05-S10-1 | integrate.ts reads the proof's base tip from `origin/<base>` instead of ls-remote | base-denied: `reset requires proof`; base-empty fails too |
+| Y5 | tests/sync-lossless.test.ts | 05-S10-2 | integrate.ts treats every rescue ref as reachable | mixed: refs [], expected the orphan kept |
+| Y6 | tests/sync-lossless.test.ts | 05-S10-2 | integrate.ts reads the prune's base tip from `origin/<base>` instead of ls-remote | origin-denied and origin-empty: refs [], expected the reachable ref kept |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->
 | File | PR | Note |
 |---|---|---|
 | tests/e2e/envelope-intake-p9e.test.ts | cp-e2e-migration-p9e-s8s3 | P9e behavior 11: envelope correction, reporter refusal and settle intake |
+| tests/e2e/sync-lossless-p9e.test.ts | cp-e2e-migration-p9e-s8s3 | P9e behavior 11: cp_integrate worktree sync against real git |
 | tests/envelope-correction-retained.test.ts | cp-e2e-migration-p9e-s8s3 | P9e: the stamped-envelope unit no entry point reaches |
 | tests/control-pending-retained.test.ts | cp-e2e-migration-p9e-s8s3 | #523 review low: exact-ms 24 h TTL and 7-day lost-send boundaries the wall-clock e2e pins only to the minute |
 <!-- /manifest:incoming -->
