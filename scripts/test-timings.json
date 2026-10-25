@@ -142,6 +142,7 @@
 	"tests/e2e/wake-send-first.test.ts": 159009,
 	"tests/e2e/worker-mcp.test.ts": 1440,
 	"tests/e2e/worker-recovery.test.ts": 205000,
+	"tests/e2e/worker-lifecycle-p8c.test.ts": 8000,
 	"tests/entry-guard.test.ts": 347,
 	"tests/envelope-correction.test.ts": 121,
 	"tests/escalation-backstop.test.ts": 11308,
@@ -179,7 +180,7 @@
 	"tests/layout-capture.test.ts": 406,
 	"tests/layout-flat.test.ts": 37,
 	"tests/ledger.test.ts": 174,
-	"tests/live-harness.test.ts": 215,
+	"tests/live-harness-retained.test.ts": 215,
 	"tests/main-ci-retained.test.ts": 17,
 	"tests/mcp-access.test.ts": 14,
 	"tests/memory.test.ts": 4101,
@@ -421,5 +422,5 @@
 	"tests/worker-reporter.test.ts": 8275,
 	"tests/worker-role-tools.test.ts": 17,
 	"tests/worker-session-policy.test.ts": 115,
-	"tests/worker-spawn-reserve.test.ts": 169
+	"tests/worker-spawn-reserve-retained.test.ts": 169
 }
