@@ -6043,7 +6043,7 @@ exactly rather than assuming.
   `setWorkingIndicator` / `setStatus`. The row still follows pi's turn; this
   write only hides it while pi reports `reason: "ui_prompt"`. A session that
   never opens a prompt still issues no `setWorking*` request — asserted at the
-  production boundary in `tests/answered-restart.test.ts`. It reads
+  production boundary in `tests/e2e/answered-restart.test.ts`. It reads
   `ctx.isIdle()` in exactly one place (deferring an answer card until the parent
   is not streaming), which is a read and never a write.
 - **Nothing rendered reads this outbox.** `/status` and the widget derive

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { declarationTitles, deletedWithFeatureFindings, featureRemovedFindings, retainedFindings } from "../scripts/test-migration-check.ts";
+import {
+	declarationTitles, deletedWithFeatureFindings, featureRemovedFindings, regressionFindings, retainedFindings,
+} from "../scripts/test-migration-check.ts";
 
 const exists = (path: string) => path === "src/kept.ts";
 
@@ -22,6 +24,23 @@ test("retained accepts a note naming a kept test file, and rejects no note, the 
 	assert.match(retainedFindings("tests/x.test.ts", "a", "", kept).join("\n"), /retained with no note naming where it is kept/);
 	assert.match(retainedFindings("tests/x.test.ts", "a", "kept in tests/x.test.ts", kept).join("\n"), /names no kept test file in the tree \(got none\)/);
 	assert.match(retainedFindings("tests/x.test.ts", "a", "moved to tests/gone.test.ts", kept).join("\n"), /\(got tests\/gone\.test\.ts\)/);
+});
+
+const known = new Set(["S1"]);
+
+test("a negative-control row needs only scenario, control in words and failing assertion; no patch, sha or hash", () => {
+	const lean = regressionFindings(["NC-1", "tests/x.test.ts", "S1", "drop the head guard in src/x.ts", "expected refusal"], known);
+	assert.deepEqual(lean, { path: "tests/x.test.ts", findings: [] });
+	const legacy = ["NC-2", "tests/y.test.ts", "not-a-sha", "S1", "NC-2", "not-a-hash", "expected refusal", ""];
+	assert.deepEqual(regressionFindings(legacy, known), { path: "tests/y.test.ts", findings: [] });
+});
+
+test("a negative-control row rejects an unknown scenario, no control, no failing assertion and a wrong cell count", () => {
+	const findings = regressionFindings(["NC-1", "tests/x.test.ts", "S9", "", ""], known).findings.join("\n");
+	assert.match(findings, /unknown scenario S9/);
+	assert.match(findings, /needs the control/);
+	assert.match(findings, /needs a failing assertion/);
+	assert.match(regressionFindings(["NC-1", "tests/x.test.ts", "S1", "c"], known).findings.join("\n"), /4 cells, expected/);
 });
 
 const source = (...titles: string[]) => titles.map((title) => `test(${JSON.stringify(title)}, () => {});`).join("\n");
