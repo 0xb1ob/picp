@@ -297,8 +297,12 @@ test("P8b MCP: dispatched read-only workers reach enabled servers through mcp_ca
 	assert.equal(calls.some((line) => / (plain|delete_thing)$/.test(line) || line === "start off"), false);
 
 	// No mcp.json, no enabled server, or an unreadable one: no gateway, and /doctor (operator env) says why.
+	const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
 	process.env.PI_CODING_AGENT_DIR = f.agentDir.path;
-	t.after(() => delete process.env.PI_CODING_AGENT_DIR);
+	t.after(() => {
+		if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
+	});
 	const cases = [["ro-missing", null, /MCP: no servers configured/], ["ro-disabled", { off: server("off", { enabled: false }) }, /MCP: 1 configured, none enabled/],
 		["ro-invalid", "secret-nope", /MCP: .*mcp\.json is not valid/]] as const;
 	for (const [slug, servers, doctorSays] of cases) {
@@ -346,16 +350,17 @@ const started = (home: string, jobId: string): boolean =>
 
 test("P8b wedged: two workers silent in one tick are one notice naming both", { skip: SKIP, timeout: 240_000 }, async (t) => {
 	const b = await dispatchS29(t);
-	const flag = join(b.home, "go-silent");
-	// Both calls print until the test drops the flag, so they fall silent in the same instant and the same tick.
-	const barrier = `while [ ! -f ${flag} ]; do echo waiting; sleep 0.5; done; sleep 20`;
+	const fifo = join(b.home, "go-silent");
+	execFileSync("mkfifo", [fifo]);
+	// Both calls print until one write to a shared FIFO releases them, then echo once: one last-output instant.
+	const barrier = `exec 3<>${fifo}; (while :; do echo waiting; sleep 0.5; done) & p=$!; read -r _ <&3; kill $p; echo silent-now; sleep 20`;
 	const jobs = await Promise.all(["wedged-a", "wedged-b"].map((title) => b.ledger.create({ title, project: "demo", delivery: "local", kind: "ship" })));
 	const models = jobs.map((_, i) => b.provider.addScript(`p8b-wedged-${i}`, [bash(barrier), { kind: "hang" }]));
 	const ends = await b.run([{ kind: "tool_calls", calls: jobs.map((job, i) => ({ name: "cp_dispatch", args: { job_id: job.id, task: "Run the checks.", model: models[i] } })) }],
 		{ CP_WEDGED_TOOL_CALL_SECONDS: "3" });
 	assert.deepEqual(ends.map((end) => end.isError), [false, false], JSON.stringify(ends.map((end) => end.result)));
 	await waitFor(() => jobs.every((job) => started(b.home, job.id)), Boolean, { timeoutMs: 60_000, what: "both barrier calls opened" });
-	writeFileSync(flag, "");
+	writeFileSync(fifo, "go\ngo\n");
 	await new Promise((resolve) => setTimeout(resolve, 12_000));
 	const notices = (b.parents[0]?.records() ?? []).filter((r) => r.type === "extension_ui_request" && r.method === "notify" && String(r.message).startsWith("WEDGED"))
 		.map((r) => String(r.message));
