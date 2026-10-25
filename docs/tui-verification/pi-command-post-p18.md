@@ -232,6 +232,6 @@ The driver is three small files under `/tmp/cp-p18-verify/` (`ext.ts`,
 poke a real pi and are not part of `npm test` — and everything they prove about
 the *decision* is pinned by `tests/awaiting-ui.test.ts` (the holder, the
 refusal, `askCheckpointUnderLatch`, and both production call sites) and
-`tests/awaiting-one-decision.test.ts` (why a refused ask loses nothing), which
+`tests/e2e/decisions-p10d.test.ts` (why a refused ask loses nothing), which
 do run in CI. To repeat the run, rebuild the three files from the sketch above
 and drive pi through an `expect` pty as shown.

@@ -1,13 +1,6 @@
 /**
- * The live suite's scaffolding, tested for free.
- *
- * `tests/e2e/live.test.ts` only runs when an operator sets `CP_LIVE_TESTS=1` and
- * pays for it, so a bug in its *fixture* would be discovered at the worst
- * possible moment: after the money was spent. Everything in
- * `tests/harness/live.ts` that does not need a model is therefore exercised
- * here, in the normal (mock-only, free) suite.
- *
- * No model is called anywhere in this file.
+ * Retained by P8c (behavior 04): the paid live suite's own scaffolding. Its only consumer is
+ * `tests/e2e/live.test.ts` under `CP_LIVE_TESTS=1`; the gate-spend case moved to the m3 e2e.
  */
 
 import assert from "node:assert/strict";
@@ -24,7 +17,6 @@ import {
 	LIVE_MODEL,
 	LIVE_TOTAL_BUDGET,
 	liveSkip,
-	recordGateSpend,
 	recordSpend,
 	remoteHas,
 	spendReport,
@@ -145,30 +137,4 @@ test("spend accounting reads the run projection and enforces both budgets", (t) 
 	// Over the per-job budget: the scenario fails instead of the wallet.
 	write(LIVE_JOB_BUDGET + 1);
 	assert.throws(() => recordSpend("harness/test", home.path, jobId), /exceeded the per-job budget/);
-});
-
-test("a gate attempt is charged to the reviewer's own run, not to the job it reviews", (t) => {
-	// The bug this pins (found by the first live (b) run): the gate shares the
-	// research job's job id, so reading the *job's* status.json for a gate charged
-	// the planner's tokens a second time and never showed the reviewer's.
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const jobId = "cp-gate-fixture";
-	const status = (tokens: number) => ({
-		...initialStatus(jobId, {}, "2026-08-27T12:00:00Z"),
-		turns: 1,
-		tool_calls: 1,
-		usage: { input: tokens, output: 0, cache_read: 0, cache_write: 0, total_tokens: tokens, cost_usd: 0.002 },
-	});
-	mkdirSync(join(home.path, paths.runDir(jobId)), { recursive: true });
-	writeFileSync(join(home.path, paths.statusFile(jobId)), JSON.stringify(status(5_000)));
-	mkdirSync(join(home.path, paths.gateRunDir(jobId, 1)), { recursive: true });
-	writeFileSync(join(home.path, paths.gateRunDir(jobId, 1), "status.json"), JSON.stringify(status(700)));
-
-	const gate = recordGateSpend("harness/gate", home.path, jobId, 1);
-	assert.equal(gate.tokens, 700, "the gate's spend is the reviewer's run, not the research job's");
-
-	// A gate attempt that never spawned a reviewer reports zero rather than
-	// borrowing the job's number.
-	assert.equal(recordGateSpend("harness/gate-2", home.path, jobId, 2).tokens, 0);
 });

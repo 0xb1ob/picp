@@ -5247,11 +5247,11 @@ remove a duplicate question — never mint, answer or withdraw one.
   the checkpoint stays `pending`, and the question reappears next render — still
   once.
 
-`tests/awaiting-one-decision.test.ts` pins the observed shape against the real
-stores over a scratch home, including the production wiring: `CommandPost`'s
-`awaitingSnapshot` and `awaitingSnapshotSync` read the same split ship
-checkpoints and the same pipeline links, and the test asserts the two agree so
-the call sites cannot drift. The pipeline link is best-effort by construction —
+`tests/e2e/decisions-p10d.test.ts` (P10d-one-question) pins the observed shape through a real
+parent: `cp_awaiting list` (`awaitingSnapshot`) and the widget's files-only
+render (`awaitingSnapshotSync`) read the same split ship checkpoints and the
+same pipeline links, and the test asserts the two agree so the call sites
+cannot drift. The pipeline link is best-effort by construction —
 an absent or unreadable `state/pipelines` costs the *secondary* half of the link
 and never the listing, because `Checkpoint.research_id` still carries it.
 
