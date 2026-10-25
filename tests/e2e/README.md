@@ -195,7 +195,7 @@ tests as well, so they cannot come back:
 | the pipeline reaches `done` by itself | only the next `advance()` writes it — and without that guard a second advance dispatched a **second implementer** | `tests/pipeline.test.ts` |
 | the ladder returns `redispatch` | it returns `retry_same`, and the re-dispatch is refused until the leftover branch is removed | `tests/e2e/phase2.test.ts` (m2) |
 | `process.kill(pid, 0) === undefined` proves liveness | it returns **true**; the probe is `isPidAlive` (one of the two checks was literally `\|\| true`) | `src/fleet.ts` |
-| a gate's spend is the job's `status.json` | the reviewer has its own run dir; reading the job's charged the planner twice | `tests/live-harness.test.ts` |
+| a gate's spend is the job's `status.json` | the reviewer has its own run dir; reading the job's charged the planner twice | `tests/e2e/phase3.test.ts` (m3) |
 
 Two were product bugs, not test bugs: the unreachable `done` state (with its
 second-implementer hole) and a revise message that told the planner to call
@@ -209,7 +209,7 @@ moment it reports**, so "wait for idle" after a promote is a wait that is alread
 over. Wait for the fact you actually need — for a revise, the artifact's mtime.
 
 The suite's own scaffolding (fixture, budget ledger, PR-url helper, skip gate) is
-tested **for free** in `tests/live-harness.test.ts`, so a broken fixture is found
+tested **for free** in `tests/live-harness-retained.test.ts`, so a broken fixture is found
 in CI rather than after you have paid for a run.
 
 ## Live smokes (operator-run)

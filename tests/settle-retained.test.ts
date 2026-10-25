@@ -1,26 +1,14 @@
-/**
- * cp-settle-without-report acceptance.
- *
- * The incident: five workers finished their work — four pushed green,
- * merge-ready PRs, one wrote a complete artifact — and every one of them ended
- * `agent_end -> agent_settled` without calling `report_result`. The parent
- * sleeps on envelopes, so it slept for fourteen hours, and every finished job
- * was recorded as `failed`.
- *
- * These are hermetic: the worker is a stub with the two methods `SettleWatcher`
- * actually uses (`alive`, `send`, `onEvent`), so the settle boundary is tested
- * without a child process, a provider or a clock.
- */
+/** cp-settle-without-report declarations no e2e entry point reaches: watch/detach and retry-guard internals, a stdin
+ * that refuses an alive worker, a settle racing a close or a done record, a settle-then-exit, the log-read cost
+ * bound, and pure wedged/unreported projections. The rest is tests/e2e/worker-lifecycle-p8c.test.ts (P8c, 04-17). */
 
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
 	DEFAULT_ORIGIN,
 	EMPTY_USAGE,
-	type Envelope,
-	type EnvelopeRecord,
 	type FleetRecord,
 	isoTimestamp,
 	paths,
@@ -31,20 +19,16 @@ import {
 	StatusSnapshotSchema,
 	validate,
 } from "../src/contracts.ts";
-import { attachWorkerObservers } from "../src/dispatch.ts";
 import { classifyRun, decideRecovery } from "../src/failures.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { EnvelopeIntake } from "../src/intake.ts";
 import { initialStatus } from "../src/run-artifacts.ts";
 import { RunRegistry } from "../src/runs.ts";
-import { mayBeDeadOnArrival, REPORT_NUDGE_TEXT, SettleWatcher, formatSettleOutcome } from "../src/settle.ts";
-import { assembleStatus, formatStatusTable } from "../src/status.ts";
-import { assembleStatusBlock } from "../src/status-block.ts";
+import { mayBeDeadOnArrival, SettleWatcher } from "../src/settle.ts";
+import { formatStatusTable } from "../src/status.ts";
 import { isWedgedToolCall, jobState, settledWithoutReport } from "../src/status-render.ts";
 import { detectWedgedToolCalls } from "../src/wedged.ts";
-import { renderFleetWidget } from "../src/widget.ts";
-import type { RunRecorder } from "../src/run-artifacts.ts";
-import type { WorkerEvent, WorkerProcess } from "../src/worker-process.ts";
+import type { WorkerEvent } from "../src/worker-process.ts";
 import { createScratchHome, readRunEvents, type ScratchHome, waitFor } from "./harness/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -127,28 +111,6 @@ async function bench(t: { after(fn: () => void | Promise<void>): void }): Promis
 		home.cleanup();
 	});
 	return { home, fleet, runs, intake, watcher, worker: new StubWorker(), outcomes };
-}
-
-/** Write the envelope the worker-reporter would have written. */
-function fileEnvelope(home: string, jobId: string, envelope: Partial<Envelope> = {}): void {
-	const dir = join(home, paths.runDir(jobId));
-	mkdirSync(dir, { recursive: true });
-	const record: EnvelopeRecord = {
-		schema_version: SCHEMA_VERSION,
-		job_id: jobId,
-		received_at: isoTimestamp(),
-		attempt: 1,
-		envelope: {
-			job_id: jobId,
-			kind: "ship",
-			status: "done",
-			summary: "shipped it",
-			branch: jobId,
-			pr_url: "https://github.com/demo/demo/pull/29",
-			...envelope,
-		} as Envelope,
-	};
-	writeFileSync(join(home, paths.envelopeFile(jobId)), `${JSON.stringify(record, null, 2)}\n`);
 }
 
 function statusJob(overrides: Partial<StatusJob> = {}): StatusJob {
@@ -277,101 +239,6 @@ test("detaching an earlier watch leaves a later watch's retry guard for the same
 	assert.equal(outcome.action, "ignored");
 });
 
-test("dispatch wires the settle watcher onto every worker it observes", () => {
-	const watched: string[] = [];
-	const order: string[] = [];
-	attachWorkerObservers({
-		recorder: { attach: () => () => {} } as unknown as RunRecorder,
-		worker: new StubWorker() as unknown as WorkerProcess,
-		jobId: JOB_ID,
-		intake: { watch: () => { order.push("intake"); return () => {}; } } as unknown as EnvelopeIntake,
-		settle: {
-			watch: (jobId: string) => {
-				order.push("settle");
-				watched.push(jobId);
-				return () => {};
-			},
-		} as unknown as SettleWatcher,
-	});
-	assert.deepEqual(watched, [JOB_ID]);
-	// Intake first: the nudge must never fire at a worker whose envelope is on disk.
-	assert.deepEqual(order, ["intake", "settle"]);
-});
-
-test("a worker that settles without an envelope is prompted exactly once", async (t) => {
-	const b = await bench(t);
-	b.watcher.watch(JOB_ID, b.worker);
-
-	const first = await b.watcher.settled(JOB_ID, b.worker);
-	assert.equal(first.action, "nudged");
-	assert.equal(b.worker.sent.length, 1);
-	assert.equal(b.worker.sent[0], REPORT_NUDGE_TEXT);
-	assert.match(b.worker.sent[0] as string, /report_result/);
-
-	// The fact is on the record and in the log, and the job is NOT failed: its
-	// worker is idle, alive and promotable, with an open envelope slot.
-	const record = b.fleet.require(JOB_ID);
-	assert.equal(record.unreported_settles, 1);
-	assert.equal(record.phase, "waiting");
-	assert.equal(record.failure, undefined);
-	const nudges = readRunEvents(b.home.path, JOB_ID).filter((event) => event.type === "report_nudged");
-	assert.equal(nudges.length, 1);
-});
-
-test("the report that follows a nudge is accepted, and clears the unreported fact", async (t) => {
-	const b = await bench(t);
-	const nudged = await b.watcher.settled(JOB_ID, b.worker);
-	assert.equal(nudged.action, "nudged");
-
-	// The worker answers the nudge the way the tool would: envelope on disk,
-	// then the run settles again.
-	fileEnvelope(b.home.path, JOB_ID);
-	const second = await b.watcher.settled(JOB_ID, b.worker);
-
-	assert.equal(second.action, "reported");
-	// Only the nudge was ever sent: a reported settle prompts nothing.
-	assert.equal(b.worker.sent.length, 1);
-	const record = b.fleet.require(JOB_ID);
-	assert.equal(record.phase, "held");
-	assert.ok(record.reported_at);
-	assert.equal(record.unreported_settles, undefined, "an accepted envelope clears the settle counter");
-	assert.equal(settledWithoutReport(statusJob({ phase: "held", reported_at: record.reported_at })), false);
-});
-
-test("an envelope already on disk at settle time is never nudged", async (t) => {
-	const b = await bench(t);
-	fileEnvelope(b.home.path, JOB_ID);
-	const outcome = await b.watcher.settled(JOB_ID, b.worker);
-	assert.equal(outcome.action, "reported");
-	assert.equal(b.worker.sent.length, 0);
-});
-
-// ---------------------------------------------------------------------------
-// 2. The bound: settling twice is recorded honestly, not prompted forever
-// ---------------------------------------------------------------------------
-
-test("a worker that settles twice with no report is recorded, not prompted again", async (t) => {
-	const b = await bench(t);
-	assert.equal((await b.watcher.settled(JOB_ID, b.worker)).action, "nudged");
-
-	const second = await b.watcher.settled(JOB_ID, b.worker);
-	assert.equal(second.action, "recorded");
-	assert.equal(b.worker.sent.length, 1, "the nudge is spent, not repeated");
-
-	// A third settle changes nothing about the prompt.
-	const third = await b.watcher.settled(JOB_ID, b.worker);
-	assert.equal(third.action, "recorded");
-	assert.equal(b.worker.sent.length, 1);
-
-	const events = readRunEvents(b.home.path, JOB_ID);
-	assert.equal(events.filter((event) => event.type === "report_nudged").length, 1);
-	assert.ok(events.filter((event) => event.type === "settled_without_report").length >= 1);
-	assert.deepEqual(
-		b.outcomes.map((entry) => entry.action),
-		["nudged", "recorded", "recorded"],
-	);
-});
-
 test("an undeliverable nudge is recorded rather than retried", async (t) => {
 	const b = await bench(t);
 	b.worker.receipt = "failed";
@@ -405,22 +272,6 @@ test("a job that is not this watcher's business is left alone", async (t) => {
 	assert.equal(unknown.action, "ignored");
 	assert.equal(b.worker.sent.length, 0);
 });
-
-test("a promote resets the nudge budget: a new brief is a new chance to report", async (t) => {
-	const b = await bench(t);
-	await b.watcher.settled(JOB_ID, b.worker);
-	assert.equal(b.fleet.require(JOB_ID).unreported_settles, 1);
-
-	// What `cp_send` does before it delivers a new brief.
-	await b.fleet.clearUnreportedSettles(JOB_ID);
-	const afterPromote = await b.watcher.settled(JOB_ID, b.worker);
-	assert.equal(afterPromote.action, "nudged");
-	assert.equal(b.worker.sent.length, 2, "one nudge per brief, never one per job lifetime");
-});
-
-// ---------------------------------------------------------------------------
-// 4. Settled-without-report is not a plain failure
-// ---------------------------------------------------------------------------
 
 test("a run that settled and exited without reporting is not classified as a crash", () => {
 	const at = isoTimestamp();
@@ -466,54 +317,6 @@ function failedModelCall(errorMessage = "401 Invalid API key"): Record<string, u
 	};
 }
 
-/** Write the run log a dead-on-arrival worker leaves behind. */
-function recordDeadOnArrival(b: Bench): void {
-	const recorder = b.runs.open(JOB_ID);
-	recorder.cp("spawned", { pid: 1, model: "anthropic/claude-opus-5", profile: "implementer" });
-	recorder.cp("prompt_sent", { receipt: "delivered", bytes: 8716 });
-	recorder.record("pi", "agent_start", {});
-	recorder.record("pi", "turn_start", {});
-	recorder.record("pi", "message_end", { message: { role: "user", content: [{ type: "text", text: "the brief" }] } });
-	recorder.record("pi", "message_end", failedModelCall());
-	recorder.record("pi", "turn_end", failedModelCall());
-	recorder.record("pi", "agent_end", { willRetry: false });
-}
-
-test("a worker whose model call failed is failed closed, never nudged", async (t) => {
-	const b = await bench(t);
-	recordDeadOnArrival(b);
-
-	const outcome = await b.watcher.settled(JOB_ID, b.worker);
-
-	// Not one prompt: another one would only repeat the failed call.
-	assert.equal(b.worker.sent.length, 0);
-	assert.equal(outcome.action, "recorded");
-	assert.equal(outcome.action === "recorded" ? outcome.failure?.class : undefined, "model_call_failed");
-
-	// The job fails closed, with the provider's own words as the cause — not
-	// "unreported", which said the fleet was still owed an envelope.
-	const record = b.fleet.require(JOB_ID);
-	assert.equal(record.phase, "failed");
-	assert.equal(record.failure?.class, "model_call_failed");
-	assert.match(record.failure?.message ?? "", /401 Invalid API key/);
-	assert.equal(record.unreported_settles, undefined, "a worker that never ran is not an unreported settle");
-
-	const events = readRunEvents(b.home.path, JOB_ID);
-	assert.equal(events.filter((event) => event.type === "report_nudged").length, 0);
-	assert.equal(events.filter((event) => event.type === "recovery_prompted").length, 0);
-	assert.equal(events.filter((event) => event.type === "failure").length, 1);
-
-	// A second settle changes nothing and still sends nothing.
-	const again = await b.watcher.settled(JOB_ID, b.worker);
-	assert.equal(again.action, "ignored", "a failed job is no longer this watcher's business");
-	assert.equal(b.worker.sent.length, 0);
-
-	const line = formatSettleOutcome(JOB_ID, outcome);
-	assert.match(line ?? "", /dead on arrival/);
-	assert.match(line ?? "", /401 Invalid API key/);
-	assert.match(line ?? "", /re-dispatch/);
-});
-
 test("the dead-on-arrival check reads the log only for a run that produced nothing", async (t) => {
 	// The cost bound (cp-0wq7): `detectDeadModelCall` parses the whole of
 	// events.jsonl, and a long job's log is megabytes. The projection this
@@ -544,23 +347,6 @@ test("the dead-on-arrival check reads the log only for a run that produced nothi
 	const outcome = await b.watcher.settled(JOB_ID, b.worker);
 	assert.equal(outcome.action, "nudged");
 	assert.equal(b.worker.sent.length, 1);
-});
-
-test("a run that actually ran is still nudged, model errors or not", async (t) => {
-	const b = await bench(t);
-	const recorder = b.runs.open(JOB_ID);
-	recorder.cp("spawned", { pid: 1, model: "anthropic/claude-opus-5", profile: "implementer" });
-	recorder.record("pi", "agent_start", {});
-	// One provider hiccup mid-run, then real work: the ordinary boundary applies.
-	recorder.record("pi", "message_end", failedModelCall("529 overloaded"));
-	recorder.record("pi", "tool_execution_start", { toolName: "bash", toolCallId: "c1" });
-	recorder.record("pi", "tool_execution_end", { toolCallId: "c1" });
-	recorder.record("pi", "message_end", { message: { role: "assistant", content: [{ type: "text", text: "pushed" }] } });
-
-	const outcome = await b.watcher.settled(JOB_ID, b.worker);
-	assert.equal(outcome.action, "nudged");
-	assert.equal(b.worker.sent.length, 1);
-	assert.equal(b.fleet.require(JOB_ID).phase, "waiting", "a run that did work is never failed by the boundary");
 });
 
 test("the recovery ladder never re-runs a brief whose delivery may already exist", () => {
@@ -600,47 +386,6 @@ test("a settled-without-report job renders as unreported, not as a failure", () 
 
 	// And an ordinary idle worker is still just idle.
 	assert.equal(jobState(statusJob()).kind, "idle");
-});
-
-test("a settled-without-report job with a pushed branch is not shown as a failure", async (t) => {
-	const b = await bench(t);
-	// The incident, exactly: the worker pushed and opened a green PR, then settled
-	// without filing an envelope. Its one nudge is spent and the fact is recorded.
-	await b.fleet.patch(JOB_ID, {
-		receipts: [{ kind: "pr", status: "open", title: `PR for ${JOB_ID}`, url: "https://github.com/demo/demo/pull/29" }],
-	});
-	await b.watcher.settled(JOB_ID, b.worker);
-	await b.watcher.settled(JOB_ID, b.worker);
-
-	const record = b.fleet.require(JOB_ID);
-	assert.equal(record.phase, "waiting", "finished work is never marked failed");
-	assert.equal(record.failure, undefined);
-	assert.equal(record.unreported_settles, 2);
-
-	const snapshot = assembleStatus({
-		home: b.home.path,
-		generated_at: isoTimestamp(),
-		include: "all",
-		records: [record],
-		runs: new Map([[JOB_ID, { ...initialStatus(JOB_ID), phase: "idle" as const }]]),
-		alive: new Map([[JOB_ID, true]]),
-		ledger: { ok: false, queried: false },
-	});
-	const job = snapshot.jobs[0];
-	assert.ok(job);
-	assert.equal(job.unreported_settles, 2, "/status carries the fact, it does not re-derive it");
-	assert.equal(jobState(job).word, "unreported");
-
-	// The two operator-facing surfaces say the same word, from the same call.
-	const block = assembleStatusBlock(snapshot);
-	assert.match(block.text, /unreported/);
-	assert.doesNotMatch(block.text, /failed/);
-	const widget = renderFleetWidget(snapshot, { width: 100 }).map((line) => line.text);
-	assert.ok(widget.some((line) => line.includes("unreported")), "the widget names it too");
-	assert.ok(
-		widget.some((line) => line.includes("no envelope filed")),
-		"and says what is actually missing",
-	);
 });
 
 // ---------------------------------------------------------------------------
@@ -747,12 +492,4 @@ test("the /status row says which of the two it is, and never both", () => {
 	);
 	assert.match(wedged, /possibly wedged/);
 	assert.doesNotMatch(wedged, /settled without filing an envelope/);
-});
-
-test("the operator line names the recovery, and never carries a body", () => {
-	const line = formatSettleOutcome(JOB_ID, { action: "recorded", settles: 2 });
-	assert.ok(line);
-	assert.match(line as string, /cp_send cp-settle/);
-	assert.ok((line as string).split("\n").length <= 3);
-	assert.equal(formatSettleOutcome(JOB_ID, { action: "reported" }), undefined);
 });

@@ -73,6 +73,7 @@ async function stack(t: TestContext, name: string, promptTokens = 100, parentSte
 	const requests = (jobId: string) => provider.requests(script).filter((request) => JSON.stringify(request.body.messages ?? []).includes(jobId)).length;
 	const record = (jobId: string) => (existsSync(join(home.path, LAYOUT.fleetFile)) ? readFleet(home.path).jobs.find((job) => job.job_id === jobId) : undefined);
 	const dispatch = (jobId: string, task = "Add a line to README.md.", over: Partial<DispatchRequest> = {}) => post.dispatch({ jobId, task, fetch: false, ...over });
+	let widgetLines: string[] = [];
 	return {
 		home: home.path,
 		post,
@@ -90,12 +91,16 @@ async function stack(t: TestContext, name: string, promptTokens = 100, parentSte
 				await child.prompt(prompt);
 				await child.waitForSettled(90_000);
 				if (steps) assert.equal(provider.remaining(script), 0, `${script}: the parent left scripted steps unused`);
+				const widgets = child.records().filter((record) => record.type === "extension_ui_request" && record.method === "setWidget");
+				widgetLines = (widgets.at(-1)?.widgetLines as string[] | undefined) ?? [];
 				return child.eventsOfType("tool_execution_end");
 			} finally {
 				await child.close();
 			}
 		},
 		requests,
+		/** The last widget the latest `parent()` child painted. */
+		widget: () => widgetLines,
 		job: async (title: string, risk?: "high", over: { labels?: string[]; kind?: "ship" | "research"; delivery?: "pr" | "local"; description?: string } = {}) =>
 			(await post.ledger().create({ title, project: "demo", delivery: over.delivery ?? "local", kind: over.kind ?? "ship", ...(risk ? { risk } : {}), ...(over.labels ? { labels: over.labels } : {}), ...(over.description ? { description: over.description } : {}) })).id,
 		issue: (job_ids: string[], over: { ask_on?: ("merge" | "risk:high")[]; job_cap?: number; tokens?: number; usd?: number; expiry?: string; dispatch_parallelism?: number; channel?: "bridge" } = {}) =>
@@ -898,6 +903,11 @@ test("authority: cp_escalate batch_risk_high files one approve/drop record for j
 		assert.match(said(ends.get(call.id)), pattern, call.id);
 	}
 	assert.equal(bytes(), before, "every refusal left escalations.json byte-identical");
+	// The widget counts what is open: unchanged by the refusals, then one row per batch after it (P10d).
+	const painted = () => Number(/(\d+) decisions? awaiting you/.exec(s.widget().join("\n"))?.[1] ?? 0);
+	const unbatched = s.post.escalations.open().length;
+	assert.ok(unbatched > 3, String(unbatched));
+	assert.equal(painted(), unbatched, s.widget().join("\n"));
 	// tv8: a covering grant that does not ask lends no authority, even when another grant over the jobs does.
 	s.post.mandates.save({ ...s.post.mandates.require(selected.id), ask_on: [] });
 	ends = await prompted(s, "Batch the risky jobs.", [batch("silent", [a, b])]);
@@ -920,6 +930,7 @@ test("authority: cp_escalate batch_risk_high files one approve/drop record for j
 	const pair = rows.find((row) => row.job_ids.includes(a));
 	assert.equal(pair?.mandate_id, selected.id);
 	assert.deepEqual(rows.map((row) => row.id).sort(), [valid?.id, pair?.id, s.post.escalations.list({ jobId: mixA })[0]?.id].sort(), "only the batches and the unbatched ask stay open");
+	assert.equal(painted(), 3, `the widget repainted after the batch: ${s.widget().join("\n")}`);
 
 	// One approve answers every listed job, under the grant that asked.
 	for (const row of [valid, pair]) await s.post.escalations.answer(String(row?.id), { answer: "approve", by: "operator-quote", basis: { operator_quote: `Approve ${row?.id}.` } });
