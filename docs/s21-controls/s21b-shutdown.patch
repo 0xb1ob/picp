@@ -1,5 +1,0 @@
---- a/src/bounds.ts
-+++ b/src/bounds.ts
-@@ -333 +333 @@
--		if (this.#tripped.has(jobId) || this.#options.closing?.()) return;
-+		if (this.#tripped.has(jobId)) return;

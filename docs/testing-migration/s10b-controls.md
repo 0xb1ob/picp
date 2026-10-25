@@ -1,43 +1,43 @@
 # S10b final-state control replay
 
 Controls run independently through the real product scenarios. Each mutation is reversed before the next run.
-The tables record executed assertion failures, not patch applicability. Final restored checks are recorded in
+The tables record executed assertion failures. Final restored checks are recorded in
 [S10b](s10b.md). Commands use `npm run test:one -- --test-name-pattern="<selector>" tests/e2e/landing-*.test.ts`.
 No live model is used. Existing S02/S03 control definitions remain in their owning manifests and replay notes.
 
 ## Integrate declarations 81–120
 
-The 17 patches are `docs/testing-migration-s10-<control>.patch`; each executed with exit 1.
+The 17 controls each executed with exit 1.
 Selectors are the `landing S10:` groups except `watch-shape`, which uses S02 watcher queries.
 
-| Control | Selector suffix | Observed failed assertion |
-|---|---|---|
-| sync-guards | synchronization | refused synchronization/reset command expectations |
-| sync-reset | synchronization | reset command sequence |
-| prune | rescue | rescue preservation, fetch/list/reachability/delete refusal reasons |
-| ref-scope | rescue | cleanup must preserve main |
-| review-gate | review evidence | review refusal replaced by OPEN PR result |
-| review-pass | review evidence | missing/nonpassing review replaced by OPEN PR result |
-| ci-refusal | unreadable forge | unreadable CI refusal replaced by OPEN PR result |
-| missing-gh | unreadable forge | missing-gh reason replaced by spawn ENOENT |
-| cleanup-retry | cleanup failures | expected retry, got wait after failed cleanup |
-| rebase | cleanup failures | expected cleanup refusal, got OPEN PR result |
-| retry-notice | cleanup failures | forbidden “nothing was mutated” claim appears |
-| prune-safety | rescue | rescue reference set deepEqual |
-| rescue-target | synchronization | rescue target SHA equality |
-| proof-skip | synchronization | behind/stale: reset requires proof |
-| watch-shape | S02: watcher queries | missing blocking_watch refusal |
-| forbid-integrate | dispatch rejects | missing expected rejection |
-| forbid-merged | dispatch rejects | missing expected rejection |
+| Control | Selector suffix | Mutation | Observed failed assertion |
+|---|---|---|---|
+| sync-guards | synchronization | hard-reset to the remote head with no synchronization guard | refused synchronization/reset command expectations |
+| sync-reset | synchronization | run git status instead of the hard reset | reset command sequence |
+| prune | rescue | rescue-ref cleanup always reports itself unavailable | rescue preservation, fetch/list/reachability/delete refusal reasons |
+| ref-scope | rescue | rescue cleanup lists every ref, not only rescue refs | cleanup must preserve main |
+| review-gate | review evidence | skip the review gate entirely | review refusal replaced by OPEN PR result |
+| review-pass | review evidence | ignore a passing review or approved flagged diff | missing/nonpassing review replaced by OPEN PR result |
+| ci-refusal | unreadable forge | unreadable CI answers advance instead of retry | unreadable CI refusal replaced by OPEN PR result |
+| missing-gh | unreadable forge | a missing gh answers retry instead of surface | missing-gh reason replaced by spawn ENOENT |
+| cleanup-retry | cleanup failures | failed cleanup answers wait instead of retry | expected retry, got wait after failed cleanup |
+| rebase | cleanup failures | ignore an in-progress rebase or merge in the worktree | expected cleanup refusal, got OPEN PR result |
+| retry-notice | cleanup failures | the retry hint claims nothing was mutated and says restart | forbidden “nothing was mutated” claim appears |
+| prune-safety | rescue | drop the prune bound and the base-tip, fetch and reachability guards | rescue reference set deepEqual |
+| rescue-target | synchronization | write the rescue ref at the head's parent | rescue target SHA equality |
+| proof-skip | synchronization | run the discard proof path even with no commits to discard | behind/stale: reset requires proof |
+| watch-shape | S02: watcher queries | classify gh run watch as sleep-then-poll | missing blocking_watch refusal |
+| forbid-integrate | dispatch rejects | drop cp_integrate from worker-forbidden tools | missing expected rejection |
+| forbid-merged | dispatch rejects | drop cp_merged from worker-forbidden tools | missing expected rejection |
 
 The carried tracking-ref mutation independently failed the behind and stale reset SHA assertions (86/87).
 The carried permission-classification mutation failed `/token lacks Actions read/` (82).
 The generic review-reason mutation failed `/cp_review/` in both missing and fallback cases (111/120).
-The status and jobless controls have canonical regression rows and reproducible patches in [S10b](s10b.md).
+The status and jobless controls have canonical regression rows in [S10b](s10b.md).
 
 ## S02 watcher controls
 
-The 24 `NC-S02-*` patches are embedded in [S02](s02.md). Every control exited 1 at its selected consumer assertion.
+The 24 `NC-S02-*` controls are recorded in [S02](s02.md). Every control exited 1 at its selected consumer assertion.
 The first GitLab command used an obsolete selector and selected no case; it earned no evidence credit.
 The corrected `landing S02: unavailable gh` replay failed the GitLab query-set deepEqual assertion.
 Run this section with
@@ -150,7 +150,7 @@ synchronous throwing-onLanded assertion.
 
 ## Inherited 05-8 controls
 
-The five patches embedded in [B05](b05.md) replayed independently against
+The five controls recorded in [B05](b05.md) replayed independently against
 `landing: CI watch persists`. Each exited 1; all mutations were restored.
 `npm run test:one -- --test-name-pattern='landing: CI watch persists' tests/e2e/landing-ci-watch.test.ts`.
 
@@ -163,8 +163,8 @@ The five patches embedded in [B05](b05.md) replayed independently against
 | NC-42 | arrival is idempotent |
 
 Across these tables, 101 executed negative controls failed at consumer assertions or bounded waits.
-The discarded zero-match GitLab command is excluded from that count. No patch-application refusal or
-module-load failure is counted as negative evidence.
+The discarded zero-match GitLab command is excluded from that count. No module-load failure is counted
+as negative evidence.
 
 ## Independent wording carry-ins
 

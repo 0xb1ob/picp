@@ -6,10 +6,10 @@
 import type { CiRun, CommandRunner } from "./merge-ask.ts";
 import type { CommandRunner as StatusRunner } from "./merges.ts";
 
-/** Total budget for one observation (every page of runs and jobs), as `MERGE_ASK_QUERY_TIMEOUT_MS`. */
-export const ACTIONS_CI_TIMEOUT_MS = 15_000;
+/** Total budget for one observation (every page of runs and jobs); a time budget, not a GitHub call quota. */
+export const ACTIONS_CI_TIMEOUT_MS = 30_000;
 /** One jobs-page `gh` call's own cap: a hung call must not spend the whole budget and leave no room to retry (#420). */
-export const ACTIONS_ATTEMPT_TIMEOUT_MS = 6_000;
+export const ACTIONS_ATTEMPT_TIMEOUT_MS = 12_000;
 export const ACTIONS_PER_PAGE = 100;
 export const ACTIONS_MAX_PAGES = 10;
 /** GitHub returns at most this many runs for a filtered list; a total at or past it cannot be proven complete. */
