@@ -36,6 +36,8 @@
 	"tests/awaiting-one-decision.test.ts": 171,
 	"tests/awaiting-rows.test.ts": 196,
 	"tests/awaiting-ui-retained.test.ts": 4,
+	"tests/decide-listing-retained.test.ts": 4,
+	"tests/operator-asks-retained.test.ts": 4,
 	"tests/awaiting.test.ts": 994,
 	"tests/bounds.test.ts": 139,
 	"tests/bridge-reattach-knobs.test.ts": 203,
