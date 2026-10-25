@@ -1,9 +1,5 @@
 {
 	"tests/e2e/dispatch-s31.test.ts": 150173,
-	"tests/e2e/operator-relay-outbox.test.ts": 45000,
-	"tests/operator-outbox-host-retained.test.ts": 15000,
-	"tests/operator-outbox-retained.test.ts": 5,
-	"tests/relay-scope-retained.test.ts": 5,
 	"tests/e2e/preflight-s31.test.ts": 51387,
 	"tests/e2e/dashboard-refusals-s26.test.ts": 9000,
 	"tests/e2e/drain-restart.test.ts": 7000,
