@@ -1,5 +1,11 @@
 # Ledger rows: p2d
 
+<!-- manifest:ledger -->
+| PR | Scope | Baseline files deleted | Files (tree) | Static declarations (tree) |
+|---|---|---|---|---|
+| P2d (cp-e2e-migration-p2d-k5to) | behavior 02, fourth slice: the risk warning (02-9), risk:high pre-approval (02-10), batch risk:high (02-11), grant selection and supplements (02-12), live mandate usage (02-13) and the gateway's capacity and quota (02-14), and the P2c review's two lows. `tests/mandate.test.ts` stays with P2e. | 8 (`tests/capacity.test.ts`, `tests/mandate-selection.test.ts`, `tests/mandate-supplement.test.ts`, `tests/mandate-usage.test.ts`, `tests/quota.test.ts`, `tests/risk-batch.test.ts`, `tests/risk-preapproval.test.ts`, `tests/risk-warning.test.ts`) | 392 → 384 | 4,393 → 4,346 |
+<!-- /manifest:ledger -->
+
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
