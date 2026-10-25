@@ -252,13 +252,13 @@ test("P11c-quality-pipeline: home quality.json opts the pipeline in, and a fresh
 	assert.match(sent.at(-1)?.content ?? "", new RegExp(`^${id} quality pass: not ready \\| verify 0/1 \\(>= 0.5\\) \\| completeness missing\\n  - \\[evidence\\]`));
 	assert.match(sent.at(-1)?.content ?? "", new RegExp(`Next: call cp_pipeline advance ${id}\\.$`));
 
-	const plannerTurns = provider.requests("p11c-qp-planner").length;
 	const held = await post.advancePipeline(id);
 	assert.equal(held.next, "wait");
 	assert.match(held.message, new RegExp(`${id}: pre-gate quality pass asked for fixes`));
-	await waitFor(() => provider.requests("p11c-qp-planner").length, (count) => count > plannerTurns, { timeoutMs: 60_000, what: "the promoted planner" });
-	const users = (provider.requests("p11c-qp-planner").at(-1)?.body.messages ?? []).filter((m) => (m as { role?: string }).role === "user");
-	const fix = JSON.stringify(users.at(-1));
+	// Find the promote among all planner requests: a later report_result nudge may already be the last one.
+	const fixOf = () => provider.requests("p11c-qp-planner").flatMap((r) => r.body.messages ?? []).map((m) => JSON.stringify(m))
+		.find((m) => m.includes("Pre-gate quality pass"));
+	const fix = (await waitFor(fixOf, Boolean, { timeoutMs: 60_000, what: "the promoted planner" }))!;
 	for (const line of [`Pre-gate quality pass for ${id}: not ready.`, "Panel: 0/1 sound (threshold 0.5).", "Completeness: the artifact does not cover the task.",
 		"- [evidence] no paths at all", "- [completeness] the rollback path", "update the artifact in place"]) assert.ok(fix.includes(line), `${line} in ${fix}`);
 	assert.ok(!fix.includes("# File list"), "the fix message never carries the artifact body");

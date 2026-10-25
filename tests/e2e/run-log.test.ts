@@ -67,7 +67,8 @@ test("P11c-run-log: a dispatched worker's log and projection are the read surfac
 	assert.ok(raw.endsWith("\n"));
 	assert.doesNotMatch(raw, /partialResult/, "a streamed partialResult is never logged");
 	const live = readRunEvents(home.path, jobId);
-	assert.deepEqual([live[0]?.source, live[0]?.type, (live[0]?.payload as { pid?: number }).pid], ["cp", "spawned", idle.pid]);
+	const s = live.find((e) => e.type === "spawned"); // CI may log worker_packages_unresolved first
+	assert.deepEqual([s?.source, (s?.payload as { pid?: number }).pid], ["cp", idle.pid]);
 	assert.deepEqual(live.map((event) => event.seq), live.map((_, i) => i + 1), "seq is dense and monotonic");
 	for (const type of ["agent_start", "tool_execution_start", "tool_execution_end", "agent_settled"]) assert.ok(live.some((e) => e.type === type), type);
 	assert.ok(!live.some((event) => event.type === "message_update"), "streaming deltas are summarized, not stored");
