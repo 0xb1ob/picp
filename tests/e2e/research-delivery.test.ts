@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { AnswerCardOutbox } from "../../src/answer-delivery.ts";
@@ -105,6 +105,7 @@ test("P11-answer: an answer queued mid-turn and torn down seconds later reaches 
 	const restarted = provider.addScript("p11-answer-restarted", [
 		{ kind: "tool_calls", calls: [{ id: "ask-blocked", name: "cp_ask", args: { project: "demo", question: "Plan the whole migration?", model: blocked } }] },
 		{ kind: "tool_calls", calls: [{ id: "wait-blocked", name: "bash", args: () => ({ command: `for i in $(seq 900); do [ -f "${join(home.path, paths.envelopeFile(jobIds(home.path)[1] as string))}" ] && break; sleep 0.2; done; sleep 2` }) }] },
+		{ kind: "tool_calls", calls: [{ id: "teardown-blocked", name: "cp_teardown", args: () => ({ job_id: jobIds(home.path)[1] }) }] },
 		{ kind: "text", text: "It is blocked." },
 	], { onExhausted: "repeat" });
 	const agent = createAgentDir({ provider });
@@ -164,6 +165,13 @@ test("P11-answer: an answer queued mid-turn and torn down seconds later reaches 
 	await sleep(6_000);
 	assert.equal(notices(again, plan).length, 0, "a blocked Q&A job owes a blocker, not a card");
 	assert.deepEqual([...outbox(home.path).pending, ...outbox(home.path).delivered].map((entry) => entry.id), [`${job}#1`, `${job}#2`]);
+	// cp-n9jh's premise: the envelope wake-up, checked after the same-turn teardown, is superseded, never delivered.
+	assert.notEqual(toolEnd(again, "teardown-blocked")?.isError, true, JSON.stringify(toolEnd(again, "teardown-blocked")));
+	const stale = await waitFor(() => readRunEvents(home.path, plan).filter((event) => event.type === "wakeup_suppressed"),
+		(found) => found.length > 0, { timeoutMs: 20_000, what: "the envelope wake-up suppressed after teardown" });
+	assert.match(String((stale[0]?.payload as { reason?: string }).reason), new RegExp(`${plan} is already done: the delivery landed`));
+	const told = provider.requests("p11-answer-restarted").filter((request) => JSON.stringify(request.body).includes(`${plan} reported blocked`));
+	assert.deepEqual(told, [], "the parent model is never told to act on a torn-down job");
 });
 
 test("P11-headless: a surface-less re-entry delivers only scheduled answers; the operator's session takes the rest, idle first but never past the defer window", { timeout: 240_000 }, async (t) => {
@@ -226,4 +234,89 @@ test("P11-headless: a surface-less re-entry delivers only scheduled answers; the
 	const [late] = await waitFor(() => notices(pi, fresh), (shown) => shown.length > 0, { timeoutMs: 20_000, what: "the fresh card once idle" });
 	assert.ok(indexOf(pi, late) > busyEnd, "a fresh card waits for the session to be idle");
 	assert.deepEqual(outbox(home.path).pending, []);
+});
+
+const toolText = (pi: PiChild, id: string) => JSON.stringify((toolEnd(pi, id) as { result?: unknown } | undefined)?.result ?? null);
+const toolJson = (pi: PiChild, id: string) =>
+	JSON.parse(((toolEnd(pi, id) as { result?: { content?: { text?: string }[] } } | undefined)?.result?.content?.[0]?.text) ?? "null") as Record<string, unknown>;
+
+test("P11-artifact: cp_artifact predeclares, files and exports a job's report by reference, failing closed; /watch points at it", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	for (const job of ["cp-known", "cp-refused"]) mkdirSync(join(home.path, paths.runDir(job)), { recursive: true });
+	writeFileSync(join(home.path, paths.runDir("cp-known"), "events.jsonl"), "");
+	// The parent runs in a subdirectory, so relative files must resolve against its cwd, not the home.
+	const cwd = join(home.path, "work");
+	mkdirSync(join(cwd, "dir"), { recursive: true });
+	writeFileSync(join(cwd, "notes.md"), `# findings\n${MARKER}\n`);
+	writeFileSync(join(cwd, "empty.md"), "");
+	const stored = join(home.path, paths.artifactFile("cp-known"));
+	const call = (id: string, args: Record<string, unknown>): ScriptStep => ({ kind: "tool_calls", calls: [{ id, name: "cp_artifact", args }] });
+	const provider = await MockProvider.start();
+	const parent = provider.addScript("p11-artifact-parent", [
+		call("path", { action: "path", job_id: "cp-fresh" }),
+		call("path-again", { action: "path", job_id: "cp-fresh" }),
+		call("path-unsafe", { action: "path", job_id: "../escape" }),
+		call("add-stranger", { action: "add", job_id: "cp-stranger", file: "notes.md" }),
+		call("add-missing", { action: "add", job_id: "cp-refused", file: "nope.md" }),
+		call("add-dir", { action: "add", job_id: "cp-refused", file: "dir" }),
+		call("add-empty", { action: "add", job_id: "cp-refused", file: "empty.md" }),
+		call("add", { action: "add", job_id: "cp-known", file: "notes.md" }),
+		call("add-self", { action: "add", job_id: "cp-known", file: stored }),
+		call("get", { action: "get", job_id: "cp-known", out: "handoff/task.md" }),
+		call("get-no-out", { action: "get", job_id: "cp-known" }),
+		call("get-blank", { action: "get", job_id: "cp-known", out: "  " }),
+		call("get-missing", { action: "get", job_id: "cp-missing", out: "out.md" }),
+		call("get-store", { action: "get", job_id: "cp-known", out: join(home.path, paths.artifactDir("cp-other"), "copy.md") }),
+		call("get-dir", { action: "get", job_id: "cp-known", out: "dir" }),
+		{ kind: "text", text: "Filed." },
+	], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	t.after(async () => { agent.cleanup(); await provider.stop(); });
+	const pi = startPiChild({ cwd, model: parent, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+	t.after(() => pi.close().then(() => undefined));
+	await pi.getState(30_000);
+	await pi.prompt("File the report.");
+	await pi.waitForSettled(60_000);
+
+	const fresh = join(home.path, paths.artifactFile("cp-fresh"));
+	assert.deepEqual(toolJson(pi, "path"), { job_id: "cp-fresh", path: fresh });
+	assert.deepEqual(toolJson(pi, "path-again"), { job_id: "cp-fresh", path: fresh }, "predeclaring twice is a re-dispatch");
+	assert.ok(existsSync(join(home.path, paths.artifactDir("cp-fresh"))), "path creates the directory");
+	const refused = (id: string, pattern: RegExp) => {
+		assert.equal(toolEnd(pi, id)?.isError, true, `${id} must fail closed: ${toolText(pi, id)}`);
+		assert.match(toolText(pi, id), pattern, id);
+	};
+	refused("path-unsafe", /unsafe job id/);
+	refused("add-stranger", /unknown job cp-stranger/);
+	refused("add-missing", /does not exist/);
+	refused("add-dir", /is not a file/);
+	refused("add-empty", /is empty/);
+	assert.equal(existsSync(join(home.path, paths.artifactFile("cp-refused"))), false, "a refused add stores nothing");
+
+	const added = toolJson(pi, "add");
+	assert.deepEqual([added.copied, added.path, added.source, added.bytes], [true, stored, join(cwd, "notes.md"), Buffer.byteLength(`# findings\n${MARKER}\n`)]);
+	assert.match(String(added.modified_at), /Z$/);
+	assert.equal(readFileSync(stored, "utf8"), `# findings\n${MARKER}\n`, "add files the report by copy");
+	assert.deepEqual([toolJson(pi, "add-self").copied, toolJson(pi, "add-self").bytes], [false, added.bytes], "the predeclared path is not self-copied");
+
+	const out = join(cwd, "handoff/task.md");
+	assert.deepEqual(toolJson(pi, "get"), { job_id: "cp-known", out, bytes: added.bytes, source: stored });
+	assert.equal(readFileSync(out, "utf8"), `# findings\n${MARKER}\n`);
+	refused("get-no-out", /needs `out`/);
+	refused("get-blank", /an output file is required/);
+	refused("get-missing", /no artifact for cp-missing/);
+	refused("get-store", /artifact store/);
+	refused("get-dir", /is a directory/);
+	assert.equal(JSON.stringify(pi.records()).includes(MARKER), false, "no tool result or record carries the body");
+	assert.equal(provider.requests("p11-artifact-parent").some((request) => JSON.stringify(request.body).includes(MARKER)), false, "the parent model never sees it");
+
+	// /watch stats the stored report (path and size) without reading it; a job with no report gets no pointer.
+	const watch = async (job: string) => {
+		pi.send({ id: `watch-${job}`, type: "prompt", message: `/watch ${job}` });
+		await pi.waitFor((r) => r.type === "response" && r.id === `watch-${job}`, 30_000);
+		return pi.records().filter((r) => r.type === "extension_ui_request" && String(r.message ?? "").includes(job)).map((r) => String(r.message)).join("\n");
+	};
+	assert.ok((await watch("cp-known")).includes(`plan: /cp-plan cp-known (${added.bytes} bytes, ${stored})`));
+	assert.equal((await watch("cp-refused")).includes("plan: /cp-plan"), false);
 });

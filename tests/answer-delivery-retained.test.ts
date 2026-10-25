@@ -25,7 +25,6 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
-	AnswerCardOutbox,
 	answerCardId,
 	AnswerCardError,
 	answerCardRecord,
@@ -45,7 +44,6 @@ import {
 } from "../src/contracts.ts";
 import { initJobsDocument, Ledger } from "../src/ledger.ts";
 import { answerCardChannel } from "../extensions/command-post/wakeup-surfaces.ts";
-import { checkWakeup, wakeupFacts, type WakeupStamp } from "../src/wakeups.ts";
 import { createScratchHome, readRunEvents, REPO_ROOT, type ScratchHome } from "./harness/index.ts";
 
 /** The answer body. It must never appear anywhere but the artifact file. */
@@ -151,131 +149,6 @@ function reportAnswer(b: Bench, jobId: string): string {
 	return answer;
 }
 
-/** What `cp_teardown` writes to the record, and nothing else. */
-async function tearDown(b: Bench, jobId: string): Promise<void> {
-	await b.post.fleet.patch(jobId, {
-		phase: "done",
-		closed_at: isoTimestamp(),
-		closed_reason: "gated",
-	});
-	b.post.runs.close(jobId);
-}
-
-// ---------------------------------------------------------------------------
-// 1. the incident
-// ---------------------------------------------------------------------------
-
-test("envelope, then teardown seconds later: the card still reaches the operator", async (t) => {
-	const b = benchOf(t);
-	await b.post.fleet.add(answerJob(b.home.path, "cp-n9jh"));
-	reportAnswer(b, "cp-n9jh");
-
-	const reported = await b.post.intake.intake("cp-n9jh");
-	assert.equal(reported.accepted, true);
-	assert.equal(reported.delivery, "answer");
-	assert.equal(reported.next, "teardown", "a Q&A job is torn down the moment it reports — that is the loop");
-	assert.equal(b.post.answerCards.pending().length, 1, "the card is on disk before anybody is told anything");
-
-	// The parent does exactly what AGENTS.md says: relay, then tear down. Seven
-	// seconds, as observed on cp-n9jh.
-	await tearDown(b, "cp-n9jh");
-	assert.equal(b.post.fleet.require("cp-n9jh").phase, "done");
-
-	// The envelope wake-up is *correctly* superseded by that teardown: it tells
-	// the parent to act on a job that is over. This is the suppression the card
-	// used to ride on, and it is unchanged.
-	const stamp: WakeupStamp = {
-		kind: "envelope",
-		job_id: "cp-n9jh",
-		generation: reported.generation ?? 1,
-		...(reported.reported_at ? { reported_at: reported.reported_at } : {}),
-		issued_at: reported.reported_at ?? isoTimestamp(),
-	};
-	const verdict = checkWakeup(stamp, wakeupFacts({ record: (jobId) => b.post.fleet.get(jobId) }));
-	assert.equal(verdict.state, "superseded", "the wake-up is still stale — the parent must not act on a torn-down job");
-	assert.match(verdict.reason ?? "", /already done/);
-
-	// The card is not a wake-up, and it does not care what the phase became.
-	const shown = b.drain();
-	assert.equal(shown.length, 1, "the answer reaches the operator after the teardown that used to eat it");
-	assert.equal(shown[0]?.job_id, "cp-n9jh");
-	assert.equal(shown[0]?.summary, HEADLINE);
-	assert.equal(shown[0]?.path, b.answerPath("cp-n9jh"));
-	assert.equal(b.post.answerCards.pending().length, 0);
-	assert.equal(b.post.answerCards.delivered(answerCardId("cp-n9jh", 1)), true);
-
-	// And the fact is in the job's own run log, whatever its phase has become.
-	const kinds = readRunEvents(b.home.path, "cp-n9jh").map((event) => event.type);
-	assert.ok(kinds.includes("answer_card_queued"), `queued is a fact: ${kinds.join(", ")}`);
-	assert.ok(kinds.includes("answer_card_delivered"), `so is delivery: ${kinds.join(", ")}`);
-});
-
-// ---------------------------------------------------------------------------
-// 2. exactly once
-// ---------------------------------------------------------------------------
-
-test("a card that reached the operator is never shown again, and never resurrected", async (t) => {
-	const b = benchOf(t);
-	await b.post.fleet.add(answerJob(b.home.path, "cp-once"));
-	reportAnswer(b, "cp-once");
-	await b.post.intake.intake("cp-once");
-
-	assert.equal(b.drain().length, 1);
-	assert.equal(b.drain().length, 0, "a second drain shows nothing");
-	assert.equal(b.shown.length, 1);
-
-	// The trigger fires from three places (intake, session_start, widget tick);
-	// none of them may mint a second card.
-	assert.equal(b.drain().length, 0);
-	assert.equal(b.drain({ idle: false }).length, 0);
-
-	// Intake is idempotent, and a re-intake must not re-queue a shown card.
-	const again = await b.post.intake.intake("cp-once");
-	assert.equal(again.already, true);
-	assert.equal(b.post.answerCards.pending().length, 0, "an already-reported envelope queues nothing");
-
-	// A restart reads the same file and knows the card is history.
-	const restarted = new AnswerCardOutbox({ home: b.home.path });
-	assert.equal(restarted.pending().length, 0);
-	assert.equal(restarted.delivered(answerCardId("cp-once", 1)), true);
-	assert.equal(
-		restarted.enqueue({
-			job_id: "cp-once",
-			generation: 1,
-			summary: HEADLINE,
-			path: b.answerPath("cp-once"),
-			bytes: 10,
-			reported_at: isoTimestamp(),
-		}),
-		false,
-		"a delivered card can never be queued again",
-	);
-	assert.equal(restarted.pending().length, 0);
-});
-
-test("queueing twice queues once", async (t) => {
-	const b = benchOf(t);
-	const outbox = b.post.answerCards;
-	const input = {
-		job_id: "cp-dup",
-		generation: 1,
-		summary: HEADLINE,
-		path: b.answerPath("cp-dup"),
-		bytes: 4571,
-		reported_at: isoTimestamp(),
-	};
-	assert.equal(outbox.enqueue(input), true);
-	assert.equal(outbox.enqueue(input), false, "same envelope generation, same id, one card");
-	assert.equal(outbox.pending().length, 1);
-
-	// A promote that reopens the slot mints a new generation, and a new answer.
-	assert.equal(outbox.enqueue({ ...input, generation: 2 }), true);
-	assert.equal(outbox.pending().length, 2);
-	assert.deepEqual(
-		outbox.pending().map((card) => card.id),
-		[answerCardId("cp-dup", 1), answerCardId("cp-dup", 2)],
-	);
-});
 
 // ---------------------------------------------------------------------------
 // 3. delivery is not consumed by a surface that cannot show it
