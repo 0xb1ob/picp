@@ -348,6 +348,9 @@ test("post-expiry replacement uses a committed original-root link, full findings
 	assert.ok(readFileSync(join(home.path, paths.originalTaskFile(replacement.id)), "utf8").includes(task));
 	assert.equal((await post.dispatch({ jobId: replacement.id, taskFile, model: replacementModel, fetch: false })).receipt, "accepted");
 	await waitFor(() => post.fleet.get(replacement.id)?.phase, (phase) => phase === "held", { timeoutMs: 30_000, what: "replacement public report" });
+	assert.equal(readFileSync(join(home.path, paths.runDir(replacement.id), "previous-original-task.md"), "utf8"), readFileSync(join(home.path, paths.originalTaskFile(original.id)), "utf8"));
+	assert.ok(readFileSync(join(home.path, paths.runDir(replacement.id), "previous-task-addenda.md"), "utf8").includes(addendum));
+	assert.ok(readFileSync(join(home.path, paths.originalTaskFile(replacement.id)), "utf8").includes(task));
 	assert.ok(Math.abs(post.fleet.get(replacement.id)!.budget!.cost_usd - 90.05) < 1e-8);
 	assert.equal(post.fleet.get(replacement.id)!.budget!.tokens, 9_896_800);
 	assert.equal(post.mandates.list().length, 1);
@@ -373,6 +376,14 @@ test("post-expiry replacement uses a committed original-root link, full findings
 	assert.match(JSON.stringify(final[0]!.result), /job cap: 1 \/ 1/);
 	assert.match(JSON.stringify(final[0]!.result), /103300/);
 	assert.match(JSON.stringify(final[0]!.result), /10\.95/);
+	const unrelatedExpiry = new Date(Date.now() + 5000).toISOString().replace(/\.\d{3}Z$/, "Z");
+	const unrelatedRoot = post.mandates.issue({ projects: ["demo"], objective: "Separately authorized research", job_ids: [original.id],
+		expiry: unrelatedExpiry, provenance: { expiry_hours: "home" }, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 1, ask_on: [] }, post.fleet.read().jobs);
+	await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(unrelatedExpiry) - Date.now() + 20)));
+	const rebound = await parent("Try binding the retired original through a different accounting root.", [{ kind: "tool_calls", calls: [{ name: "cp_mandate", args: { ...replacementArgs, source_id: unrelatedRoot.id, replacement_job_id: competing.id } }] }]);
+	assert.match(JSON.stringify(rebound[0]!.result), /original or replacement already belongs to another work link/);
+	assert.equal(post.mandates.get(unrelatedRoot.id)!.same_work_replacements, undefined);
+	assert.equal(post.fleet.get(competing.id), undefined);
 });
 
 test("pipeline reanchor resumes an interrupted exact edge projection and still requires fresh quality and authorization", { skip: !treehouseAvailable(), timeout: 120_000 }, async (t) => {
@@ -393,6 +404,7 @@ test("pipeline reanchor resumes an interrupted exact edge projection and still r
 	let replacementId = "";
 	const worker = (name: string, id: () => string, twice = false) => {
 		const steps: ScriptStep[] = [
+			...(name === "reanchor-replacement" ? [{ kind: "tool_calls" as const, calls: [{ name: "read", args: () => ({ path: join(home.path, paths.runDir(id()), "previous-original-task.md") }) }] }] : []),
 			{ kind: "tool_calls", calls: [{ name: "bash", args: () => ({ command: `printf '%s' '# Original bounded plan' > ${shellArg(post.artifacts.file(id()))}` }) }] },
 			{ kind: "tool_calls", calls: [{ name: "report_result", args: () => ({ job_id: id(), kind: "research", status: "done", artifact_path: post.artifacts.file(id()), summary: "Bounded plan ready.",
 				plan_summary: { goal: "Research the bounded README change", approach: ["Read README.md"], touched: ["README.md"], acceptance: ["Keep the bounded scope"], risk: "Read only" },
@@ -442,6 +454,7 @@ test("pipeline reanchor resumes an interrupted exact edge projection and still r
 	assert.equal(readPriorAttempts(home.path, replacementId).decisions.at(-1)?.verdict, "revise");
 	await post.dispatch({ jobId: replacementId, taskFile: join(home.path, paths.runDir(replacementId), "revision-task.md"), model: replacementModel, fetch: false });
 	await waitFor(() => post.fleet.get(replacementId)?.phase, (phase) => phase === "held", { timeoutMs: 30_000 });
+	assert.ok(provider.requests("reanchor-replacement").some((request) => request.body.messages?.some((message) => message.role === "tool" && typeof message.content === "string" && message.content.includes("Research a bounded README change."))), "ordinary replacement reads its preserved original scope after dispatch");
 	const reviewed = await post.gate({ jobId: replacementId, model: replacementGate });
 	assert.ok(isGateWait(reviewed));
 	post.reviewRuns.handBack(reviewed.key);

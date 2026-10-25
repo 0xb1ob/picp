@@ -11,7 +11,7 @@ import { type Ledger, requireJobLabels } from "./ledger.ts";
 import { MandateError, capReached, scheduleIdOf, workIdentity, type MandateUsageJob } from "./mandate-accounting.ts";
 import { originalScopeDigest, sourceFingerprint } from "./mandate-continuity.ts";
 import type { MandateStore } from "./mandate.ts";
-import { readTaskAddenda } from "./task-addenda.ts";
+import { readTaskAddenda, taskAddendaText } from "./task-addenda.ts";
 
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 export const replacementTaskFile = (home: string, id: string) => join(home, paths.runDir(id), "revision-task.md");
@@ -108,8 +108,9 @@ export async function replaceAdmittedWork(options: {
 			oldLabels.kind !== "research" || readPriorAttempts(store.home, originalJobId).decisions.at(-1)?.verdict !== "revise") return result("ineligible", "original must be closed, torn down research with an actual latest revise");
 		if (replacement.status !== "open" || fleet.get(replacementJobId) || labels.project !== oldLabels.project ||
 			labels.kind !== oldLabels.kind || labels.delivery !== oldLabels.delivery || artifacts.has(replacementJobId)) return result("ineligible", "replacement must be fresh undispatched research in the same project and delivery");
-		if (store.list().some((grant) => grant.same_work_replacements?.some((entry) => entry.replacement_job_id === replacementJobId &&
-			(entry.source_grant_id !== sourceId || entry.original_job_id !== originalJobId)))) return result("ineligible", "replacement already belongs to another work link");
+		if (store.list().some((grant) => grant.same_work_replacements?.some((entry) =>
+			(entry.original_job_id === originalJobId || entry.replacement_job_id === replacementJobId) &&
+			(entry.source_grant_id !== sourceId || entry.original_job_id !== originalJobId || entry.replacement_job_id !== replacementJobId)))) return result("ineligible", "original or replacement already belongs to another work link");
 		const prior = readPriorAttempts(store.home, originalJobId).decisions;
 		const historyDigest = digest(JSON.stringify(prior));
 		const proof = source.admissions!.find((entry) => entry.job_id === workId)!;
@@ -129,9 +130,10 @@ export async function replaceAdmittedWork(options: {
 		if (!existsSync(join(store.home, paths.originalTaskFile(originalJobId)))) return result("ineligible", "complete original task is missing");
 		await assertOrdinaryReplacement({ home: store.home, jobId: originalJobId, replacementJobId, ledger, fleet, artifacts });
 		save(link);
-		await prepareGateReplacement({ home: store.home, jobId: originalJobId, replacementJobId, ledger, fleet, artifacts });
+		await prepareGateReplacement({ home: store.home, jobId: originalJobId, replacementJobId, ledger, fleet, artifacts, mandates: store });
 		const dir = join(store.home, paths.runDir(replacementJobId));
 		const refs = [taskFile, ...source.continuity!.governing_input_refs, join(dir, "previous-plan.md"), join(dir, "original-task.md"),
+			join(dir, "previous-original-task.md"), ...(readTaskAddenda(store.home, originalJobId).length ? [join(dir, "previous-task-addenda.md")] : []),
 			...prior.map((entry) => join(dir, `gate-${entry.attempt}-raw.json`))];
 		if (refs.some((file) => !existsSync(file))) return result("ineligible", "complete original task or findings are missing; preparation remains nonoperative");
 		const inputDigest = replacementInputDigest(refs);
@@ -139,8 +141,11 @@ export async function replaceAdmittedWork(options: {
 		const currentReplacement = await ledger.show(replacementJobId);
 		source = store.require(sourceId);
 		const artifact = artifacts.file(originalJobId);
+		const originalTaskText = readFileSync(join(store.home, paths.originalTaskFile(originalJobId)), "utf8");
+		const originalAddenda = readTaskAddenda(store.home, originalJobId);
 		if (!artifacts.has(originalJobId) || readFileSync(artifact, "utf8") !== readFileSync(join(dir, "previous-plan.md"), "utf8") ||
-			readFileSync(join(store.home, paths.originalTaskFile(originalJobId)), "utf8") !== readFileSync(join(dir, "original-task.md"), "utf8")) return result("ineligible", "original task or prior artifact moved during preparation");
+			originalTaskText !== readFileSync(join(dir, "original-task.md"), "utf8") || originalTaskText !== readFileSync(join(dir, "previous-original-task.md"), "utf8") ||
+			(originalAddenda.length > 0 && taskAddendaText(originalAddenda) !== readFileSync(join(dir, "previous-task-addenda.md"), "utf8"))) return result("ineligible", "original task, addenda or prior artifact moved during preparation");
 		if (sourceFingerprint(source) !== fingerprint || !["active", "expired"].includes(source.status) || !store.continuationProof(originalJobId)[sourceId] ||
 			currentOriginal.status !== "closed" || fleet.get(originalJobId)?.phase !== "done" || digest(JSON.stringify(readPriorAttempts(store.home, originalJobId).decisions)) !== historyDigest ||
 			capReached(source, store.withReviewerSpend(usage(), [source])) || fleet.get(replacementJobId) || artifacts.has(replacementJobId) ||
