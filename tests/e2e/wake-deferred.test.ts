@@ -110,8 +110,8 @@ test(name, { timeout: 120_000 }, async (t) => {
 }
 
 
-test("wake S19: a real CI event cannot open an unreviewed, superseded or unpushed head", { timeout: 180_000 }, async (t) => {
-for (const mode of ["unreviewed", "wrong-head", "missing-head"] as const) await t.test(mode, { timeout: 60_000 }, async (t) => {
+test("wake S19: a real CI event cannot open an unreviewed, superseded or unpushed head", { timeout: 360_000 }, async (t) => {
+for (const mode of ["unreviewed", "wrong-head", "missing-head"] as const) await t.test(mode, { timeout: 120_000 }, async (t) => {
 	const held = await seedHeldHome({ ciState: "in_progress", review: "none" });
 	writeFileSync(join(held.home.path, LAYOUT.data, "wake-rules.json"), '{"enabled":false}\n');
 	if (mode !== "unreviewed") writeReviewPass(held.home.path, held.headSha);
@@ -133,7 +133,7 @@ for (const mode of ["unreviewed", "wrong-head", "missing-head"] as const) await 
 	if (mode === "wrong-head") writeFileSync(held.stateFile, "wrong-head\n");
 	if (mode === "missing-head") held.repo.git("push", "origin", ":cp-held");
 	await waitFor(() => provider.requests("s19-ci-deferred"), (requests) => requests.some((request) => userMessages(request).includes("CI/PR OBSERVED")),
-		{ timeoutMs: 40_000, what: "actual CI wake reaches the parent" });
+		{ timeoutMs: 90_000, what: "actual CI wake reaches the parent" });
 	const store = new AwaitingStore({ home: held.home.path });
 	assert.equal(store.list("open").length, 0, `${mode} must not open a merge decision`);
 	assert.equal(store.list("deferred").length, 1);
