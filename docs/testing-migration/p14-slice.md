@@ -3,7 +3,7 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P14 (cp-e2e-migration-p14-0w42) | behavior 15: session-start nudges through a real parent (P14-nudges), cp-health alerts raised, withdrawn, acknowledged and relayed through a parent and a cp-bridge operator (P14-alerts), cp-install's model, gateway-key and retired-flag steps on a pty (P14-install, P14-install-models), the parent host's gateway key hand-off (P14-gateway-key), and the version view through cp-view, a hosted parent, the cp-bridge footer and /cp-version (P14-version-badge, -running, -live, -lock); 42 declarations from 7 files: 40 mapped, 2 retained verbatim in `tests/version-view-retained.test.ts`; the PR3c `--with-br`/`--no-br` assertions in `tests/service-install.test.ts` moved to P14-install | 7 |
+| P14 (cp-e2e-migration-p14-0w42) | behavior 15: session-start nudges through a real parent (P14-nudges), cp-health alerts raised, withdrawn, acknowledged and relayed through a parent and a cp-bridge operator (P14-alerts), cp-install's model, gateway-key and retired-flag steps on a pty (P14-install, P14-install-models), the parent host's gateway key hand-off (P14-gateway-key), the version view through cp-view, a hosted parent, the cp-bridge footer and /cp-version (P14-version-badge, -running, -live, -lock), and scripts/install-tools.ts on a stub PATH (P14-install-tools, -os); 58 declarations from 8 files: 56 mapped, 2 retained verbatim in `tests/version-view-retained.test.ts`; the PR3c `--with-br`/`--no-br` assertions in `tests/service-install.test.ts` moved to P14-install | 8 |
 <!-- /manifest:ledger -->
 
 P14 converts behavior 15 file by file in one PR; the files still marked `convert` in `p14.md` are its remainder.
@@ -24,6 +24,8 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | P14-version-running | tests/e2e/version.test.ts | P14-version-running: /api/job/<id> keeps the checkout's ancestry and each process's started-on commit apart |
 | P14-version-live | tests/e2e/version.test.ts | P14-version-live: a hosted parent and its host record the commit they loaded; the footer and /cp-version compare it |
 | P14-version-lock | tests/e2e/version.test.ts | P14-version-lock: a live holder's lock without a commit, or with a malformed one, is still a lock |
+| P14-install-tools | tests/e2e/install-tools.test.ts | P14-install-tools: install-tools installs only what is missing, once, and never shadows, sudoes or fights pi |
+| P14-install-tools-os | tests/e2e/install-tools.test.ts | P14-install-tools-os: brew installs a missing tool on macOS once; another platform is reported, not guessed |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -71,6 +73,22 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | tests/version-view.test.ts | #324: merged vs running here — checkout ancestry and each process's started-on commit stay separate | P14-version-running | mapped | NC-vr-ancestry, NC-vr-from, NC-vr-after, NC-vr-procs |
 | tests/version-view.test.ts | GET /api/version: a VersionResponse with no token, csrf or socket from the records it read | P14-version-badge | mapped | NC-vv-leak, NC-vv-detail, NC-vv-fetched |
 | tests/version-view.test.ts | #324 GET /api/job/<id>: a merged job carries `running`; a merge this checkout lacks is unknown, never not-running | P14-version-running | mapped | NC-vr-unknown; /cp-version: NC-cv-state, NC-cv-unchecked (P14-version-live) |
+| tests/install-tools.test.ts | planOrInstall: every tool already on PATH is ok, and nothing is run | P14-install-tools | mapped | NC-it-verdict, NC-it-idem |
+| tests/install-tools.test.ts | planOrInstall: missing tool with a step gets installed, and re-running is idempotent | P14-install-tools | mapped | NC-it-idem, NC-it-landed, NC-it-asset; brew: NC-it-brew (P14-install-tools-os) |
+| tests/install-tools.test.ts | planOrInstall: more than one match on PATH is a conflict, never a second install | P14-install-tools | mapped | NC-it-shadow |
+| tests/install-tools.test.ts | planOrInstall: dry run plans without mutating and fails preflight when something is missing | P14-install-tools | mapped | NC-it-dry |
+| tests/install-tools.test.ts | installExitCode: 0 when ok, 3 for a dry run that only planned installs, 1 when a human must act | P14-install-tools | mapped | NC-it-exit3, NC-it-manual, NC-it-shadow, NC-it-landed |
+| tests/install-tools.test.ts | planOrInstall: dry run with everything present reports ok and mutates nothing | P14-install-tools | mapped | NC-it-verdict, NC-it-dry |
+| tests/install-tools.test.ts | planOrInstall: git on Linux has no non-sudo path and is reported, not run | P14-install-tools | mapped | NC-it-manual |
+| tests/install-tools.test.ts | planOrInstall: unsupported platform is reported, not guessed at | P14-install-tools-os | mapped | NC-it-unsupported |
+| tests/install-tools.test.ts | planOrInstall: pi missing while running inside a pi session refuses to touch it | P14-install-tools | mapped | NC-it-session, NC-it-header |
+| tests/install-tools.test.ts | planOrInstall: pi missing with no pi session in env falls through to the normal install step | P14-install-tools | mapped | NC-it-agent |
+| tests/install-tools.test.ts | runningUnderPi reads PI_SESSION_ID and PI_CODING_AGENT, and only those | P14-install-tools | mapped | NC-it-sessionid, NC-it-agent |
+| tests/install-tools.test.ts | describeStep renders a runnable command for every non-manual step kind | P14-install-tools | mapped | NC-it-npmdesc, NC-it-reldesc, NC-it-manual; brew: NC-it-brew (P14-install-tools-os) |
+| tests/install-tools.test.ts | formatInstallReport names every tool and the overall verdict | P14-install-tools | mapped | NC-it-verdict, NC-it-header |
+| tests/install-tools.test.ts | real script: --dry-run mutates nothing and names every required tool | P14-install-tools | mapped | NC-it-dry, NC-it-verdict |
+| tests/install-tools.test.ts | real script: an unknown tool argument is rejected before anything runs | P14-install-tools | mapped | NC-it-unknown |
+| tests/install-tools.test.ts | real script: restricting to one already-present tool exits 0 | P14-install-tools | mapped | NC-it-idem, NC-it-retry |
 <!-- /manifest:assertions -->
 
 <!-- manifest:incoming -->
@@ -79,6 +97,7 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | tests/e2e/service.test.ts | cp-e2e-migration-p14-0w42 | P14 behavior 15: nudges, service alerts and cp-install through real entry points |
 | tests/e2e/version.test.ts | cp-e2e-migration-p14-0w42 | P14 behavior 15: the version view through cp-view, a hosted parent, the cp-bridge footer and /cp-version |
 | tests/version-view-retained.test.ts | cp-e2e-migration-p14-0w42 | two verbatim version-view declarations no entry point reaches (browser badge, updater-constant mirror) |
+| tests/e2e/install-tools.test.ts | cp-e2e-migration-p14-0w42 | P14 behavior 15: scripts/install-tools.ts on a scratch PATH of logging stubs |
 <!-- /manifest:incoming -->
 
 <!-- manifest:regressions -->
@@ -172,4 +191,22 @@ control mutated `src/`, failed on the named assertion, and passed once restored.
 | P14-NC-ft-clear | tests/version-view.test.ts | P14-version-live | version-line.ts leaves the line on stop | the line is cleared when the session stops |
 | P14-NC-cv-state | tests/version-view.test.ts | P14-version-live | helpers.ts reads the deployed commit as current | deployed … (stale — rotate at a quiet point …) |
 | P14-NC-cv-unchecked | tests/version-view.test.ts | P14-version-live | helpers.ts drops the (unchecked) mark | upstream current (unchecked) |
+| P14-NC-it-shadow | tests/install-tools.test.ts | P14-install-tools | install-tools.ts conflicts only past 2 copies | 2 copies: exit 1, nothing downloaded |
+| P14-NC-it-idem | tests/install-tools.test.ts | P14-install-tools | install-tools.ts reinstalls a present treehouse/git | an installed tool is never installed again |
+| P14-NC-it-dry | tests/install-tools.test.ts | P14-install-tools | install-tools.ts runs steps on a dry run | a dry run plans the download and the npm install |
+| P14-NC-it-manual | tests/install-tools.test.ts | P14-install-tools | install-tools.ts runs a manual step | manual is never planned |
+| P14-NC-it-session | tests/install-tools.test.ts | P14-install-tools | install-tools.ts skips the pi-session guard | ✗ pi: not on PATH, but … inside a pi session |
+| P14-NC-it-agent | tests/install-tools.test.ts | P14-install-tools | install-tools.ts takes any PI_CODING_AGENT as a session | only PI_CODING_AGENT=true marks a session |
+| P14-NC-it-sessionid | tests/install-tools.test.ts | P14-install-tools | install-tools.ts ignores PI_SESSION_ID | running inside a pi session (abc-123) |
+| P14-NC-it-exit3 | tests/install-tools.test.ts | P14-install-tools | install-tools.ts exits 1 for a planned-only dry run | dry run exits 3 |
+| P14-NC-it-landed | tests/install-tools.test.ts | P14-install-tools | install-tools.ts trusts a step that did not land | ✗ pi: ran … but pi is still not on PATH |
+| P14-NC-it-npmdesc | tests/install-tools.test.ts | P14-install-tools | install-tools.ts renders the package before the npm flags | would run: npm install -g --ignore-scripts … |
+| P14-NC-it-reldesc | tests/install-tools.test.ts | P14-install-tools | install-tools.ts renders a release step without its source | download … from its GitHub release |
+| P14-NC-it-verdict | tests/install-tools.test.ts | P14-install-tools | install-tools.ts changes the ok verdict | all required tools are on PATH |
+| P14-NC-it-header | tests/install-tools.test.ts | P14-install-tools | install-tools.ts drops the session header wording | running inside a pi session (…); pi will not be reinstalled |
+| P14-NC-it-brew | tests/install-tools.test.ts | P14-install-tools-os | install-tools.ts renders brew without the formula | ✓ git: brew install git -> … |
+| P14-NC-it-unsupported | tests/install-tools.test.ts | P14-install-tools-os | install-tools.ts guesses the Linux step on another platform | exit 1, no supported install path |
+| P14-NC-it-retry | tests/install-tools.test.ts | P14-install-tools | scripts/install-tools.ts drops the retry line | after fixing the above, retry: … pi |
+| P14-NC-it-unknown | tests/install-tools.test.ts | P14-install-tools | scripts/install-tools.ts exits 1 for an unknown tool | exit 2 |
+| P14-NC-it-asset | tests/install-tools.test.ts | P14-install-tools | scripts/install-tools.ts fetches the latest asset | curl … /releases/download/v<pinned>/<asset> |
 <!-- /manifest:regressions -->
