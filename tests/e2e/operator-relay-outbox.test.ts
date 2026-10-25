@@ -195,7 +195,8 @@ test("P9-relay-refresh: a re-raised escalation replaces its pending text, and af
 	const raise = (usd: number) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_escalate", args: { job_ids: [job.id], kind: "product_ambiguity",
 		question: question(usd), mandate_id: "md-p9refresh", options: [{ id: "hold", label: "Hold", consequence: "Wait", cost: "none" }],
 		recommended: "hold", evidence_paths: [] } }] });
-	const parentModel = provider.addScript("p9-refresh-parent", [raise(5), { kind: "text", text: "Raised." }, raise(7), { kind: "text", text: "Raised." },
+	// The first turn answers 1.5 s late, so the 100 ms send below always outlives its request.
+	const parentModel = provider.addScript("p9-refresh-parent", [raise(5), { kind: "hang", ms: 1_500 }, raise(7), { kind: "text", text: "Raised." },
 		raise(9), { kind: "text", text: "Raised." }, raise(9), { kind: "text", text: "Raised." }], { onExhausted: "repeat" });
 	const script = "p9-refresh-operator";
 	const operatorModel = provider.addScript(script, [{ kind: "text", text: "Escalation seen." }], { onExhausted: "repeat" });
