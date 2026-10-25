@@ -1,6 +1,6 @@
 /**
- * Retained (P12b): from tests/daemon-tunnel.test.ts the busy/idle stop protocol and a lost exit report, which no entry
- * point observes or provokes; from tests/daemon-tunnel-files.test.ts the binding reader, whose consumers are p12c's.
+ * Retained (P12b): from tests/daemon-tunnel.test.ts a restart cancelled by an update hold and a lost exit report, which
+ * no entry point reaches; from tests/daemon-tunnel-files.test.ts the binding reader, whose consumers are p12c's.
  */
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -84,22 +84,13 @@ function bench(options: BenchOptions = {}) {
 }
 
 
-test("stop (daemon stop, reload, update hold): no restart, busy until the exit, then idle; reconcile resumes", () => {
+test("stop cancels a pending restart: an update hold stops the tunnel while the inner lives on", () => {
 	const b = bench();
 	b.controller.reconcile();
 	b.exit(b.live() as number, 1);
 	b.controller.stop();
 	b.advance(600_000);
 	assert.equal(b.spawns.length, 1, "the pending restart is cancelled");
-	b.controller.reconcile();
-	const pid = b.live() as number;
-	b.controller.stop();
-	assert.deepEqual(b.kills.at(-1), [pid, "SIGTERM"]);
-	assert.equal(b.controller.busy(), false);
-	assert.equal(b.idle(), 1);
-	assert.equal(b.last()?.state, "stopped");
-	b.controller.reconcile();
-	assert.equal(b.spawns.length, 3);
 });
 
 

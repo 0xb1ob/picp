@@ -40,6 +40,7 @@ if [ -e "$F/early" ]; then echo "ERR exits before any connection" >&2; exit 1; f
 echo 'ERR failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel": dial tcp' >&2
 echo "INF see https://evil.trycloudflare.com.example.net/" >&2
 for u in http://abc.trycloudflare.com https://a.b.trycloudflare.com https://-abc.trycloudflare.com https://ABC.trycloudflare.com/x; do echo "INF $u" >&2; done
+l="INF lng"; i=0; while [ $i -lt 150 ]; do l="$l ab"; i=$((i+1)); done; echo "$l" >&2
 echo "INF Registered tunnel connection connIndex=9" >&2
 while [ ! -e "$F/go" ]; do sleep 0.1; done
 printf '\\033[31mERR\\033[0m bad\\ttoken ${SECRET}\\r\\n' >&2
@@ -170,6 +171,8 @@ test("P12b-lifecycle: cp-daemon runs the quick, then the named cloudflared for c
 	const lines = s.log().split("\n").filter((line) => line.includes("tunnel: cloudflared: "));
 	assert.equal(lines.length, 201, "200 child lines, then one suppressed line");
 	assert.ok(lines.some((line) => line.endsWith("tunnel: cloudflared: ERR bad token [redacted]")), "escapes and control bytes gone, the token redacted");
+	const long = lines.find((line) => line.includes("tunnel: cloudflared: INF lng ab"))?.split("tunnel: cloudflared: ")[1];
+	assert.equal(long, `INF lng${" ab".repeat(97)} a`, "a 457-character line is cut to 300");
 	assert.ok(!s.log().includes(SECRET));
 	assert.equal(s.log().match(/tunnel: running on /g)?.length, 1, "the first origin of a run is the run's origin");
 	assert.match((await s.cli("cp-daemon", ["status"])).stdout, /^device-notify: running pid \d+/m, "a tunnel config turns the sender on");
@@ -456,7 +459,7 @@ test("P12b-orphan: a recorded pid is signalled only while it shows the exact clo
 	assert.equal(s.runs().length, 2, "nothing restarts a disabled tunnel");
 });
 
-test("P12b-backoff: crashes before registering back off 5 s then 11.34 s, a registered run resets it, a missing binary backs off too", async (t) => {
+test("P12b-backoff: early crashes back off 5 s then 11.34 s, a registered run resets it, a missing binary backs off; cp-daemon stop settles it", async (t) => {
 	const s = await rig(t);
 	s.touch("early");
 	writeFileSync(tunnelConfigFile(s.paths.dataDir), JSON.stringify({ schema_version: 1, enabled: true, mode: "quick", port: s.remotePort, binary: `${s.fake}/cloudflared`, revision: 1 }));
@@ -472,8 +475,16 @@ test("P12b-backoff: crashes before registering back off 5 s then 11.34 s, a regi
 	const spawnFail = new RegExp(`tunnel: cloudflared ${s.fake}/cloudflared did not spawn; restart 2 in 11\\.34s`);
 	await until(s.log, (text) => spawnFail.test(text), "a failed spawn backs off", 30_000);
 	renameSync(join(s.fake, "cloudflared.off"), join(s.fake, "cloudflared"));
-	await until(s.runtime, (r) => r?.state === "running" && r.pid !== up?.pid, "running again", 40_000);
+	const again = await until(s.runtime, (r) => r?.state === "running" && r.pid !== up?.pid, "running again", 40_000);
 	assert.equal(s.runs().length, 4, "two early exits, the registered run and the one after the failed spawn");
+
+	// cp-daemon stop: the child is SIGTERMed and the inner stays until its exit is observed; a start resumes the tunnel.
+	assert.equal((await s.cli("cp-daemon", ["stop"])).code, 0);
+	assert.equal(alive(again?.pid as number), false, "stop waited out the child's exit");
+	assert.match(s.log(), new RegExp(`tunnel: cloudflared pid ${again?.pid} exited \\(0\\) as asked`));
+	assert.equal(s.runtime()?.state, "stopped");
+	assert.equal((await s.cli("cp-daemon", ["start"])).code, 0, s.log());
+	await until(s.runtime, (r) => r?.state === "running" && r.pid !== again?.pid, "reconcile resumes after a start", 40_000);
 });
 
 const API_TOKEN = "cfapi-SECRET-api-token-0123456789";
@@ -596,6 +607,15 @@ test("P12b-api: --api-token-file creates the named tunnel through the Cloudflare
 	const noDns = await dnsScope.up();
 	assert.match(noDns.stderr.trim().split("\n").at(-1)!, new RegExp(`lacks the ${DNS_SCOPE} permission`));
 	dnsScope.clean(noDns);
+
+	// A fetch that rejects with the API token in its message: the one line cp-tunnel prints carries it redacted.
+	cf.reset();
+	cf.state.refuse = (call) => (call.startsWith("GET /zones?") ? [599, `connect ECONNRESET (authorization: Bearer ${API_TOKEN})`] : undefined);
+	const thrown = await homes();
+	const rejected = await thrown.up();
+	assert.equal(rejected.code, 1);
+	assert.match(rejected.stderr.trim().split("\n").at(-1)!, /^cp-tunnel up: GET \/zones\?name=cp\.lab\.example\.co\.uk: "connect ECONNRESET \(authorization: Bearer \[redacted\]\)"$/);
+	thrown.clean(rejected);
 
 	// The DNS create fails after the tunnel exists: it stays, and the re-run finds it by name (no config was saved).
 	cf.reset();

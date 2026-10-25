@@ -1,6 +1,6 @@
 /**
- * Retained from tests/tunnel-cli.test.ts (P12b): the three `cp-tunnel` statements no entry point reaches — an older
- * revision's viewer ack, the revoke's push-cleanup error echo and a thrown fetch that echoes the API token. Fake ports.
+ * Retained from tests/tunnel-cli.test.ts (P12b): two `cp-tunnel` statements no entry point reaches — an older
+ * revision's viewer ack and the revoke's push-cleanup error echo. Fake ports.
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -8,14 +8,11 @@ import { test } from "node:test";
 import { atomicWrite, daemonPaths } from "../src/service/daemon-files.ts";
 import { readTunnelConfig, type TunnelRuntime, tunnelConfigFile, tunnelRuntimeFile } from "../src/service/daemon-tunnel-files.ts";
 import { cli, type TunnelCliPorts } from "../src/tunnel/cli.ts";
-import { type CfFetch, setupNamedTunnel } from "../src/tunnel/cloudflare-api.ts";
 import type { DeviceControlReply } from "../src/viewer/device-control.ts";
 import { createScratchHome } from "./harness/index.ts";
 
 const QUICK = "https://amber-otter.trycloudflare.com";
 const TOKEN = "eyJhIjoic2VjcmV0LXR1bm5lbC10b2tlbiJ9";
-const API_TOKEN = "cfapi-SECRET-api-token-0123456789";
-const HOST = "cp.lab.example.co.uk";
 
 type Rig = ReturnType<typeof rig>;
 
@@ -136,13 +133,4 @@ test("pairing is terminal-only: without a terminal no code is issued; pair, devi
 		`viewer: remote listener open for ${QUICK} (generation ${r.world.generation}, revision 1)`,
 	]);
 	r.noSecrets();
-});
-
-test("setupNamedTunnel redacts the API token from a failure that echoes it", async () => {
-	const echo: CfFetch = async (url) => {
-		throw new Error(`connect failed for ${url} with Bearer ${API_TOKEN}`);
-	};
-	const result = await setupNamedTunnel({ hostname: HOST, port: 8767, apiToken: API_TOKEN, tunnelName: "picp-test" }, echo, () => {});
-	assert.equal(result.ok, false);
-	assert.ok(!result.ok && !result.reason.includes(API_TOKEN) && result.reason.includes("Bearer [redacted]"), JSON.stringify(result));
 });
