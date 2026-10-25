@@ -108,7 +108,7 @@ regression bodies are unchanged. E2e-only V8 captures before/after retirement ea
 processes and cover 94 lines of `src/forge-runtime.ts`, with no lost or gained lines (SHA-256
 `f7025eb885c798fb40b3f815ba62583213ca8209585f10d236ea9b4a53030017`). The fixed landing file passes
 17/17 without skips; the retained file passes 3/3. Legacy-fallback and configured-trunk controls fail the
-actual merge recording and teardown outcome, respectively. Patch blocks use zero context (`git apply --unidiff-zero`).
+actual merge recording and teardown outcome, respectively.
 
 S02 follows the operator's split-file amendment: a range slice adds consumer evidence without removing or moving any
 unit declaration. At S02 delivery, `tests/ci-watch.test.ts` remained 80 static declarations / 89 executed cases.

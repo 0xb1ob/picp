@@ -37,7 +37,7 @@
 <!-- manifest:regressions -->
 | ID | Unit file | Bug commit | Scenario | Patch | sha256 | Failing assertion | Fixed |
 |---|---|---|---|---|---|---|---|
-| NC-main-corrupt | `tests/main-ci.test.ts` |  | 05-main-corrupt | NC-main-corrupt |  | in-flight latch mutation preserves corrupt bytes | pass |
+| NC-main-corrupt | `tests/main-ci.test.ts` |  | 05-main-corrupt | MainCiStore reads a corrupt file as empty instead of refusing to overwrite it |  | in-flight latch mutation preserves corrupt bytes | pass |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->
