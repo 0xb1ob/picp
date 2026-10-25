@@ -1,5 +1,0 @@
---- a/src/wakeups.ts
-+++ b/src/wakeups.ts
-@@ -915 +915 @@
--		`  on disk: ${describeUnreportedWork(work)}`,
-+		`  evidence: ${describeUnreportedWork(work)}`,
