@@ -162,11 +162,11 @@ const R1_ALLOWED = [
 	"tests/e2e/authority.test.ts",
 	// P11-answer writes a legacy top-level state/ file that the dispatch reference snapshot must treat as external.
 	"tests/e2e/research-delivery.test.ts",
+	// P16-doctor-home builds a legacy top-level state/ that doctor's storage.home must name and leave alone.
+	"tests/e2e/configuration.test.ts",
 	// P11c-quality-pipeline writes the legacy top-level data/quality.json that cp-u3i2 must ignore.
 	"tests/e2e/quality-panel.test.ts",
-	"tests/mode.test.ts",
 	"tests/repo-map.test.ts",
-	"tests/storage.test.ts",
 	"tests/viewer.test.ts",
 ];
 /** R2: the only sanctioned reads of `$HOME`/`$TMPDIR` in runtime code. */
