@@ -425,15 +425,28 @@ test("P13 dashboard policy activation: saves and adopts bind revisions while ope
 	const overfull = structuredClone(h.runs().activePolicy(id)!);
 	overfull.exclusions.paths = excludes(13, "own");
 	await answer("save_policy", { revision: 2, policy: overfull }, "refused", /33 paths, over the 32/);
+	const shipless = structuredClone(h.runs().activePolicy(id)!);
+	shipless.exclusions.job_kinds = ["ship"];
+	await answer("save_policy", { revision: 2, policy: shipless }, "refused", /excludes ship jobs/);
+	writeFileSync(defaultsFile, JSON.stringify({ ...loadMandateDefaults(h.home), token_ceiling: 0 }));
+	await answer("save_policy", { revision: 2, policy: draft }, "refused", /token_ceiling is 0: .*nothing to spend/);
 	assert.equal(d.state(forged), undefined);
-	writeFileSync(defaultsFile, JSON.stringify({ ...loadMandateDefaults(h.home), exclude_paths: excludes(33, "home") }));
+	writeFileSync(defaultsFile, JSON.stringify({ ...loadMandateDefaults(join(h.home, "absent")), exclude_paths: excludes(33, "home") }));
 	assert.match(schedulePolicyView(h.stateDir, id).blocking.join(";"), /32/);
 	writeFileSync(defaultsFile, "{");
 	assert.match(schedulePolicyView(h.stateDir, id).blocking.join(";"), /unreadable/);
 	const defaults = { ...loadMandateDefaults(join(h.home, "absent")), token_ceiling: 500_000, exclude_paths: ["home-private"] };
 	writeFileSync(defaultsFile, JSON.stringify(defaults));
+	// demo's own mandate override narrows the preview and every later save, as it narrows a fire.
+	const projectsFile = join(h.home, LAYOUT.projectsFile);
+	const registry = JSON.parse(readFileSync(projectsFile, "utf8")) as { projects: { name: string; mandate?: object }[] };
+	const projectOverride = { exclude_paths: ["project-private"] };
+	registry.projects.find((entry) => entry.name === "demo")!.mandate = projectOverride;
+	writeFileSync(projectsFile, JSON.stringify(registry));
 	const policy = h.runs().activePolicy(id)!;
-	assert.deepEqual(schedulePolicyView(h.stateDir, id).effective, effectivePolicyBounds(policy, { defaults, ceiling: defaults.token_ceiling }, "demo", "ship", new Date()));
+	const preview = schedulePolicyView(h.stateDir, id).effective;
+	assert.deepEqual(preview, effectivePolicyBounds(policy, { defaults, ceiling: defaults.token_ceiling, projectOverride }, "demo", "ship", new Date()));
+	assert.ok(preview?.exclusions.paths?.includes("project-private"), "the preview narrows to the project override");
 	assert.equal(readFileSync(h.runs().policiesFile, "utf8"), before, "no refused save and no preview wrote the policies");
 
 	// The open run settles; the next parent's first tick closes it.
@@ -444,6 +457,9 @@ test("P13 dashboard policy activation: saves and adopts bind revisions while ope
 	await answer("run_now", { revision: 1 }, "refused", /Schedule changed/);
 	await answer("adopt", { revision: 2 }, "done", /./);
 	assert.deepEqual([record().revisions.length, record().active_revision], [3, 3]);
+	const adopted = h.runs().activePolicy(id)!;
+	assert.equal(adopted.limits.tokens, 500_000, "the adopted revision's tokens clamp to the home's token_ceiling");
+	assert.deepEqual(adopted.exclusions.paths, [...new Set([...policy.exclusions.paths ?? [], "home-private", "project-private"])], "exclusions only grow");
 	const excluding = structuredClone(h.runs().activePolicy(id)!);
 	excluding.exclusions.paths = excludes(13, "own");
 	await answer("save_policy", { revision: 3, policy: excluding }, "done", /./);
