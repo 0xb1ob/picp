@@ -220,7 +220,7 @@ export interface ActionsReadOptions {
 	now?: () => number;
 	/** The pause between retries; tests pass a no-op. */
 	sleep?: (ms: number) => Promise<void>;
-	/** Where a failed (or slow) observation's call trace goes; stderr by default. */
+	/** Where a failed observation's call trace goes; stderr by default. */
 	log?: (line: string) => void;
 }
 
@@ -240,23 +240,17 @@ function budgetOf(options: ActionsReadOptions): Budget {
 	return { start, deadline: start + (options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS), now, calls: [], pending: new Set() };
 }
 
-/** One observation; a failure, or a success that spent over half the budget, logs every gh call and the budget left. */
+/** One observation; a failure logs every gh call (settled and in flight) and the budget left, then rethrows. */
 async function observe<T>(options: ActionsReadOptions, read: (budget: Budget) => Promise<T>): Promise<T> {
 	const budget = budgetOf(options);
-	const trace = (outcome: string) => {
-		const calls = [...budget.calls, ...budget.pending].join("; ").slice(0, 4000) || "none";
-		(options.log ?? console.error)(`actions-ci: observation ${outcome} with ${budget.deadline - budget.now()}ms of budget left; calls: ${calls}`);
-	};
 	try {
-		const result = await read(budget);
-		if (budget.now() - budget.start > (budget.deadline - budget.start) / 2) trace("slow");
-		return result;
+		return await read(budget);
 	} catch (error) {
-		trace(`failed (${(error as Error).message.slice(0, 300)})`);
+		const calls = [...budget.calls, ...budget.pending].join("; ").slice(0, 4000) || "none";
+		(options.log ?? console.error)(`actions-ci: observation failed (${(error as Error).message.slice(0, 300)}) with ${budget.deadline - budget.now()}ms of budget left; calls: ${calls}`);
 		throw error;
 	}
 }
-
 
 /** Pauses before each retry of a transient read; the sum stays well inside one tick's budget. */
 export const ACTIONS_RETRY_DELAYS_MS = [250, 750];
