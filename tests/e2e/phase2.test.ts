@@ -424,6 +424,10 @@ test("m2: a crashed worker is classified and re-dispatched once", { skip: SKIP, 
 		{ timeoutMs: 60_000, what: "automatic recovery to hand the crash to the operator" },
 	);
 	assert.ok(!readEventLog(f.home, jobId).some((event) => event.type === "worker_revived"), "no automatic revive ran");
+	// cur.4.4: the spent bound's death wake must read as spent, never as "not attempted — 0 attempt(s) left".
+	const death = f.post.durableWakeups.pending().find((entry) => entry.kind === "death" && entry.job_id === jobId)?.content ?? "";
+	assert.match(death, /automatic recovery: bound spent — one automatic attempt was already made and did not stick/);
+	assert.doesNotMatch(death, /not attempted/);
 
 	// Recovery, as an operator performs it: return the lease (nothing to save),
 	// remove the leftover job branch, dispatch the same brief again.

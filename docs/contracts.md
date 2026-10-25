@@ -6561,7 +6561,7 @@ reason, in order:
 | idle, no queued messages, no injected dashboard request the session has not seen, no dashboard answer click on an ask still open in `asks.jsonl`, no `cp_parent send` from the last 24 h without an observed outcome (`<sessions>/cp-parent.sends.json`; invalid JSON or a failed required field refuses; an unknown optional field does not) | 409 `not now: <blocker>; <blocker>` |
 | the session file is absolute, `.jsonl` and on disk | 409 `the session file … is not on disk; nothing to resume` |
 | the marker is written | 500 `failed: relaunch marker unwritable (…)`, outcome `failed` |
-| — | outcome `restarting`; the reply is written, then (50 ms later) pi's own `ctx.shutdown()` through the compaction idle gate |
+| — | outcome `restarting`; the reply is written, then (50 ms later) pi's own `ctx.shutdown()` through the compaction idle gate; under `--mode rpc`, where that only flags a shutdown for the next stdin command, pi's own SIGTERM handler runs it at once |
 
 `GET /api/operator/control` carries `restart: {supported, blockers, reason}` (the same checks, no journal line) and
 `session_started_at` (the record's `started_at`, so the page tells the relaunched session from the old one); a status

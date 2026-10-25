@@ -91,10 +91,15 @@ export function restartBlockers(input: { idle: boolean; pendingMessages: boolean
 }
 
 /** The bridge's three restart ports in one call; `relaunchFile` is undefined unless the launcher gave an absolute path. */
-export function relaunchPorts(input: { target: () => { home: string; mode: Mode }; ctx: () => { shutdown(): void } | undefined; whenIdle: (fn: () => void) => void; env?: NodeJS.ProcessEnv }): Required<Pick<ControlPorts, "shutdown" | "relaunchFile" | "parentSends">> {
+export function relaunchPorts(input: { target: () => { home: string; mode: Mode }; ctx: () => { shutdown(): void; mode?: string } | undefined; whenIdle: (fn: () => void) => void; env?: NodeJS.ProcessEnv }): Required<Pick<ControlPorts, "shutdown" | "relaunchFile" | "parentSends">> {
 	const env = input.env ?? process.env;
 	return {
-		shutdown: () => input.whenIdle(() => input.ctx()?.shutdown()),
+		shutdown: () => input.whenIdle(() => {
+			const ctx = input.ctx();
+			ctx?.shutdown();
+			// pi --mode rpc only flags the shutdown until its next stdin command; its own SIGTERM handler runs it now.
+			if (ctx?.mode === "rpc") process.kill(process.pid, "SIGTERM");
+		}),
 		relaunchFile: () => {
 			const file = env[RELAUNCH_ENV];
 			return file && isAbsolute(file) ? file : undefined;
