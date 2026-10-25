@@ -308,7 +308,7 @@ scenario column names the e2e case that pins the reachable outcomes beside it.
 
 | File | Declaration | Status | Evidence and expected outcome |
 |---|---|---|---|
-| `tests/integrate.test.ts` | 92 dirty worktree | mapped by S10b | [Current mapping and executed control](testing-migration/s10b.md); original file stays for S11. |
+| `tests/integrate.test.ts` | 92 dirty worktree | mapped by S10b | [Current mapping and executed control](testing-migration/s10b.md); original file retired by cp-xwu0 ([S11b](testing-migration/s11b.md)). |
 | `tests/ci-watch.test.ts` | 71 distinct watch-failure causes | mapped by S10b | [Current mapping and executed control](testing-migration/s10b.md); real-parent two-cause case passes with #443. |
 
 The checker does not accept `pending-fix` inside its assertion section. This separate ledger records parked or product-blocked items without relabelling them retained or changing the checker; original files and declaration counts remain intact until the required consumer behavior passes.

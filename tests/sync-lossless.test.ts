@@ -2,9 +2,9 @@
  * cp-8vf6 acceptance, against **real git**: when may `cp_integrate`'s sync step
  * reset a leased worktree that holds commits `origin/<branch>` does not?
  *
- * `tests/integrate.test.ts` asks the same questions through an injected argv
- * runner, which is the right tool for "which question was asked" but cannot
- * answer the one that decides whether work is destroyed: *does git itself give
+ * `tests/e2e/landing-merge.test.ts` asks the same questions end to end through
+ * injected git faults, which pins "which question was asked"; this file pins the
+ * one that decides whether work is destroyed: *does git itself give
  * the two heads the same cumulative patch-id after the base moved underneath
  * them?* So here `git` is real — a scratch clone, a bare remote and a linked
  * worktree, in the same shape the fleet runs in — and only `gh` is mocked.
