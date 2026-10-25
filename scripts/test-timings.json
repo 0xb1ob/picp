@@ -63,7 +63,6 @@
 	"tests/daemon-runtime.test.ts": 269,
 	"tests/daemon-tunnel-files.test.ts": 14,
 	"tests/daemon-tunnel.test.ts": 3134,
-	"tests/dashboard-control.test.ts": 585,
 	"tests/decide-listing.test.ts": 1,
 	"tests/decide.test.ts": 476,
 	"tests/decision-context.test.ts": 31,
