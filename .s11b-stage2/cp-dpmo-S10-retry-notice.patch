@@ -1,0 +1,14 @@
+diff --git a/src/held-continuation.ts b/src/held-continuation.ts
+index 93f2392..e1eba2b 100644
+--- a/src/held-continuation.ts
++++ b/src/held-continuation.ts
+@@ -122,8 +122,7 @@ const NEXT_HINT: Readonly<Record<string, string>> = Object.freeze({
+ 	resolve: "the job's own implementer was promoted to fix it; its next envelope resumes this. Wait — never re-dispatch.",
+ 	surface: "stopped on a human or repository decision: relay it. Nothing retries this automatically.",
+ 	retry:
+-		"an operational fault; nothing retries automatically. Any step the reason above names as done stands — once the cause " +
+-		"clears, call cp_integrate: it re-reads the facts and resumes, never starting over.",
++		"nothing was mutated; restart integration.",
+ });
+ 
+ /** Which source owns a trigger's head: the watcher for a GitHub fact, the fleet's reported head otherwise. */

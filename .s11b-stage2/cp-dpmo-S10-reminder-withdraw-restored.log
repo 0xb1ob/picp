@@ -1,0 +1,29 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S09:.*repository refusals tests/e2e/landing-s09.test.ts
+
+▶ landing S09: repository refusals and draft transitions preserve head authority
+  ✔ blocked (2735.765292ms)
+  ✔ approved-blocked (2663.537776ms)
+  ✔ unreadable-rules (2585.448326ms)
+  ✔ unstable (2620.083387ms)
+  ✔ no-ci-blocked (2713.584507ms)
+  ✔ auto (2465.203231ms)
+  ✔ moved (2536.05172ms)
+  ✔ unreviewed-draft (2504.307888ms)
+  ✔ stale-draft (2487.987555ms)
+  ✔ ready (2815.632327ms)
+  ✔ ready-unreadable-ci (2571.068843ms)
+  ✔ ready-moved (2801.30923ms)
+  ✔ ready-undo-refused (2664.791318ms)
+  ✔ ready-refused (2508.392168ms)
+  ✔ reminder (3162.630397ms)
+✔ landing S09: repository refusals and draft transitions preserve head authority (39839.904111ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 41410.656597

@@ -1,0 +1,166 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S10:.*cleanup failures tests/e2e/landing-merge.test.ts
+
+▶ landing S10: cleanup failures preserve landed effects and resume
+  ✖ delete (4599.509638ms)
+  ✖ close (4553.325063ms)
+  ✔ rebase (2336.066062ms)
+  ✖ merge-unknown (2774.036026ms)
+✖ landing S10: cleanup failures preserve landed effects and resume (14265.229734ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 1
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15847.569848
+
+✖ failing tests:
+
+test at tests/e2e/landing-merge.test.ts:225:77
+✖ delete (4599.509638ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /nothing was mutated/i. Input:
+  
+  '{\n' +
+    '  "schema_version": 1,\n' +
+    '  "updated_at": "2026-10-25T02:33:06Z",\n' +
+    '  "pending": [\n' +
+    '    {\n' +
+    '      "schema_version": 1,\n' +
+    '      "id": "continuation:cp-n5vp:1:596f280ab4c8:review:review",\n' +
+    '      "kind": "recovery",\n' +
+    '      "content": "HELD PR STOPPED — cp-n5vp (continuation, next: surface)\\n  cp-n5vp: cp_review could not start — no usable model for gate-reviewer job cp-n5vp: every candidate for profile gate-reviewer was refused — anthropic/claude-opus-5-5 (allowlist), openai/gpt-6.1-sol (allowlist). Authenticate one of those providers (`pi auth`), widen `allow`, or edit the candidates in data/routing.json.\\n  https://github.com/example/demo/pull/914\\n  stopped on a human or repository decision: relay it. Nothing retries this automatically.",\n' +
+    '      "queued_at": "2026-10-25T02:33:04Z",\n' +
+    '      "job_id": "cp-n5vp",\n' +
+    '      "keys": [\n' +
+    '        "cp-n5vp"\n' +
+    '      ]\n' +
+    '    },\n' +
+    '    {\n' +
+    '      "schema_version": 1,\n' +
+    '      "id": "continuation:cp-n5vp:1:596f280ab4c8:delete_head:retry",\n' +
+    '      "kind": "recovery",\n' +
+    '      "content": "HELD PR STOPPED — cp-n5vp (continuation, next: retry)\\n  cp-n5vp: merged and torn down, but origin/cp-n5vp could not be deleted (protected branch). Everything else stands; retry, or delete it on GitHub.\\n  https://github.com/example/demo/pull/914\\n  nothing was mutated; restart integration.",\n' +
+    '      "queued_at": "2026-10-25T02:33:06Z",\n' +
+    '      "job_id": "cp-n5vp",\n' +
+    '      "keys": [\n' +
+    '        "cp-n5vp"\n' +
+    '      ]\n' +
+    '    }\n' +
+    '  ],\n' +
+    '  "sends": [],\n' +
+    '  "delivered": []\n' +
+    '}\n'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:264:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:225:69)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '{\n  "schema_version": 1,\n  "updated_at": "2026-10-25T02:33:06Z",\n  "pending": [\n    {\n      "schema_version": 1,\n      "id": "continuation:cp-n5vp:1:596f280ab4c8:review:review",\n      "kind": "recovery",\n      "content": "HELD PR STOPPED — cp-n5vp (continuation, next: surface)\\n  cp-n5vp: cp_review could not start — no usable model for gate-reviewer job cp-n5vp: every candidate for profile gate-reviewer was refused — anthropic/claude-opus-5-5 (allowlist), openai/gpt-6.1-sol (allowlist). Authenticate one of those providers (`pi auth`), widen `allow`, or edit the candidates in data/routing.json.\\n  https://github.com/example/demo/pull/914\\n  stopped on a human or repository decision: relay it. Nothing retries this automatically.",\n      "queued_at": "2026-10-25T02:33:04Z",\n      "job_id": "cp-n5vp",\n      "keys": [\n        "cp-n5vp"\n      ]\n    },\n    {\n      "schema_version": 1,\n      "id": "continuation:cp-n5vp:1:596f280ab4c8:delete_head:retry",\n      "kind": "recovery",\n      "content": "HELD PR STOPPED — cp-n5vp (continuation, next: retry)\\n  cp-n5vp: merged and torn down, but origin/cp-n5vp could not be deleted (protected branch). Everything else stands; retry, or delete it on GitHub.\\n  https://github.com/example/demo/pull/914\\n  nothing was mutated; restart integration.",\n      "queued_at": "2026-10-25T02:33:06Z",\n      "job_id": "cp-n5vp",\n      "keys": [\n        "cp-n5vp"\n      ]\n    }\n  ],\n  "sends": [],\n  "delivered": []\n}\n',
+    expected: /nothing was mutated/i,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:225:77
+✖ close (4553.325063ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /nothing was mutated/i. Input:
+  
+  '{\n' +
+    '  "schema_version": 1,\n' +
+    '  "updated_at": "2026-10-25T02:33:10Z",\n' +
+    '  "pending": [\n' +
+    '    {\n' +
+    '      "schema_version": 1,\n' +
+    '      "id": "continuation:cp-sq9l:1:d69ebc17b1c6:review:review",\n' +
+    '      "kind": "recovery",\n' +
+    '      "content": "HELD PR STOPPED — cp-sq9l (continuation, next: surface)\\n  cp-sq9l: cp_review could not start — no usable model for gate-reviewer job cp-sq9l: every candidate for profile gate-reviewer was refused — anthropic/claude-opus-5-5 (allowlist), openai/gpt-6.1-sol (allowlist). Authenticate one of those providers (`pi auth`), widen `allow`, or edit the candidates in data/routing.json.\\n  https://github.com/example/demo/pull/914\\n  stopped on a human or repository decision: relay it. Nothing retries this automatically.",\n' +
+    '      "queued_at": "2026-10-25T02:33:08Z",\n' +
+    '      "job_id": "cp-sq9l",\n' +
+    '      "keys": [\n' +
+    '        "cp-sq9l"\n' +
+    '      ]\n' +
+    '    },\n' +
+    '    {\n' +
+    '      "schema_version": 1,\n' +
+    '      "id": "continuation:cp-sq9l:1:d69ebc17b1c6:close:retry",\n' +
+    '      "kind": "recovery",\n' +
+    `      "content": "HELD PR STOPPED — cp-sq9l (continuation, next: retry)\\n  cp-sq9l: merged, torn down and the head deleted, but the job is still open (/tmp/cp-home-npFNRT/.pi-command-post/jobs.json is not JSON: Expected property name or '}' in JSON at position 1 (line 1 column 2)). Retry, or close it by hand with a reason.\\n  https://github.com/example/demo/pull/914\\n  nothing was mutated; restart integration.",\n` +
+    '      "queued_at": "2026-10-25T02:33:10Z",\n' +
+    '      "job_id": "cp-sq9l",\n' +
+    '      "keys": [\n' +
+    '        "cp-sq9l"\n' +
+    '      ]\n' +
+    '    }\n' +
+    '  ],\n' +
+    '  "sends": [],\n' +
+    '  "delivered": []\n' +
+    '}\n'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:264:10)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:225:69)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '{\n  "schema_version": 1,\n  "updated_at": "2026-10-25T02:33:10Z",\n  "pending": [\n    {\n      "schema_version": 1,\n      "id": "continuation:cp-sq9l:1:d69ebc17b1c6:review:review",\n      "kind": "recovery",\n      "content": "HELD PR STOPPED — cp-sq9l (continuation, next: surface)\\n  cp-sq9l: cp_review could not start — no usable model for gate-reviewer job cp-sq9l: every candidate for profile gate-reviewer was refused — anthropic/claude-opus-5-5 (allowlist), openai/gpt-6.1-sol (allowlist). Authenticate one of those providers (`pi auth`), widen `allow`, or edit the candidates in data/routing.json.\\n  https://github.com/example/demo/pull/914\\n  stopped on a human or repository decision: relay it. Nothing retries this automatically.",\n      "queued_at": "2026-10-25T02:33:08Z",\n      "job_id": "cp-sq9l",\n      "keys": [\n        "cp-sq9l"\n      ]\n    },\n    {\n      "schema_version": 1,\n      "id": "continuation:cp-sq9l:1:d69ebc17b1c6:close:retry",\n      "kind": "recovery",\n      "content": "HELD PR STOPPED — cp-sq9l (continuation, next: retry)\\n  cp-sq9l: merged, torn down and the head deleted, but the job is still open (/tmp/cp-home-npFNRT/.pi-command-post/jobs.json is not JSON: Expected property name or \'}\' in JSON at position 1 (line 1 column 2)). Retry, or close it by hand with a reason.\\n  https://github.com/example/demo/pull/914\\n  nothing was mutated; restart integration.",\n      "queued_at": "2026-10-25T02:33:10Z",\n      "job_id": "cp-sq9l",\n      "keys": [\n        "cp-sq9l"\n      ]\n    }\n  ],\n  "sends": [],\n  "delivered": []\n}\n',
+    expected: /nothing was mutated/i,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:225:77
+✖ merge-unknown (2774.036026ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /nothing was mutated/i. Input:
+  
+  '{\n' +
+    '  "schema_version": 1,\n' +
+    '  "updated_at": "2026-10-25T02:33:15Z",\n' +
+    '  "pending": [\n' +
+    '    {\n' +
+    '      "schema_version": 1,\n' +
+    '      "id": "continuation:cp-t12h:1:5c9a2fbe8877:review:review",\n' +
+    '      "kind": "recovery",\n' +
+    '      "content": "HELD PR STOPPED — cp-t12h (continuation, next: surface)\\n  cp-t12h: cp_review could not start — no usable model for gate-reviewer job cp-t12h: every candidate for profile gate-reviewer was refused — anthropic/claude-opus-5-5 (allowlist), openai/gpt-6.1-sol (allowlist). Authenticate one of those providers (`pi auth`), widen `allow`, or edit the candidates in data/routing.json.\\n  https://github.com/example/demo/pull/914\\n  stopped on a human or repository decision: relay it. Nothing retries this automatically.",\n' +
+    '      "queued_at": "2026-10-25T02:33:15Z",\n' +
+    '      "job_id": "cp-t12h",\n' +
+    '      "keys": [\n' +
+    '        "cp-t12h"\n' +
+    '      ]\n' +
+    '    },\n' +
+    '    {\n' +
+    '      "schema_version": 1,\n' +
+    '      "id": "continuation:cp-t12h:1:5c9a2fbe8877:merge:retry",\n' +
+    '      "kind": "recovery",\n' +
+    '      "content": "HELD PR STOPPED — cp-t12h (continuation, next: retry)\\n  cp-t12h: gh refused to merge https://github.com/example/demo/pull/914 (connection reset by peer). Nothing was recorded.\\n  https://github.com/example/demo/pull/914\\n  nothing was mutated; restart integration.",\n' +
+    '      "queued_at": "2026-10-25T02:33:15Z",\n' +
+    '      "job_id": "cp-t12h",\n' +
+    '      "keys": [\n' +
+    '        "cp-t12h"\n' +
+    '      ]\n' +
+    '    }\n' +
+    '  ],\n' +
+    '  "sends": [],\n' +
+    '  "delivered": []\n' +
+    '}\n'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:247:11)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:225:69)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '{\n  "schema_version": 1,\n  "updated_at": "2026-10-25T02:33:15Z",\n  "pending": [\n    {\n      "schema_version": 1,\n      "id": "continuation:cp-t12h:1:5c9a2fbe8877:review:review",\n      "kind": "recovery",\n      "content": "HELD PR STOPPED — cp-t12h (continuation, next: surface)\\n  cp-t12h: cp_review could not start — no usable model for gate-reviewer job cp-t12h: every candidate for profile gate-reviewer was refused — anthropic/claude-opus-5-5 (allowlist), openai/gpt-6.1-sol (allowlist). Authenticate one of those providers (`pi auth`), widen `allow`, or edit the candidates in data/routing.json.\\n  https://github.com/example/demo/pull/914\\n  stopped on a human or repository decision: relay it. Nothing retries this automatically.",\n      "queued_at": "2026-10-25T02:33:15Z",\n      "job_id": "cp-t12h",\n      "keys": [\n        "cp-t12h"\n      ]\n    },\n    {\n      "schema_version": 1,\n      "id": "continuation:cp-t12h:1:5c9a2fbe8877:merge:retry",\n      "kind": "recovery",\n      "content": "HELD PR STOPPED — cp-t12h (continuation, next: retry)\\n  cp-t12h: gh refused to merge https://github.com/example/demo/pull/914 (connection reset by peer). Nothing was recorded.\\n  https://github.com/example/demo/pull/914\\n  nothing was mutated; restart integration.",\n      "queued_at": "2026-10-25T02:33:15Z",\n      "job_id": "cp-t12h",\n      "keys": [\n        "cp-t12h"\n      ]\n    }\n  ],\n  "sends": [],\n  "delivered": []\n}\n',
+    expected: /nothing was mutated/i,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }

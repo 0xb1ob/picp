@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..1289f6c 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1367,7 +1367,7 @@ export class Integrator {
+ 			const missing = /ENOENT|command not found|not found/i.test(detail);
+ 			return {
+ 				ok: false,
+-				next: missing ? "surface" : "retry",
++				next: "retry",
+ 				detail,
+ 				reason: missing
+ 					? `gh is not available in ${cwd} (${detail}). Nothing was touched. Install it (node scripts/install-tools.ts gh); ` +

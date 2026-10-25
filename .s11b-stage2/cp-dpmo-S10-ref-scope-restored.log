@@ -1,0 +1,24 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S10:.*rescue tests/e2e/landing-merge.test.ts
+
+▶ landing S10: rescue retention proves reachability and bounds cleanup
+  ✔ mixed (4671.800835ms)
+  ✔ origin-denied (4338.513235ms)
+  ✔ origin-empty (4302.953146ms)
+  ✔ listing (4305.347178ms)
+  ✔ ancestry (4353.809558ms)
+  ✔ delete (4400.699957ms)
+  ✔ fetch (4318.913666ms)
+  ✔ bound (13453.038021ms)
+  ✔ empty (4270.015958ms)
+  ✔ outside (4379.224781ms)
+✔ landing S10: rescue retention proves reachability and bounds cleanup (52797.611736ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 54358.466151

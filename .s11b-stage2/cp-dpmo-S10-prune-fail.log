@@ -1,0 +1,405 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S10:.*rescue tests/e2e/landing-merge.test.ts
+
+▶ landing S10: rescue retention proves reachability and bounds cleanup
+  ✖ mixed (4429.817661ms)
+  ✖ origin-denied (4215.220624ms)
+  ✖ origin-empty (4187.605829ms)
+  ✖ listing (4212.988212ms)
+  ✖ ancestry (4298.747038ms)
+  ✖ delete (4278.002063ms)
+  ✖ fetch (4324.391098ms)
+  ✖ bound (4692.054884ms)
+  ✖ empty (4241.542731ms)
+  ✖ outside (4192.217658ms)
+✖ landing S10: rescue retention proves reachability and bounds cleanup (43075.92492ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 0
+ℹ fail 11
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 44631.84483
+
+✖ failing tests:
+
+test at tests/e2e/landing-merge.test.ts:124:144
+✖ mixed (4429.817661ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+  +   'refs/cp-salvage/cp-old/001',
+      'refs/cp-salvage/cp-old/999'
+    ]
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:152:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:124:136)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'refs/cp-salvage/cp-old/001', 'refs/cp-salvage/cp-old/999' ],
+    expected: [ 'refs/cp-salvage/cp-old/999' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:124:144
+✖ origin-denied (4215.220624ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /origin did not name a tip/. Input:
+  
+  'gh: https://github.com/example/demo/pull/911 is MERGED at bccc56f89e8b\n' +
+    'receipt written: .pi-command-post/state/runs/cp-8hwm/merge.json\n' +
+    'teardown passed: pushed\n' +
+    'deleted origin/cp-8hwm\n' +
+    'job cp-8hwm closed: merged: https://github.com/example/demo/pull/911\n' +
+    'rescue ref cleanup unavailable\n' +
+    'cp-8hwm integrated: https://github.com/example/demo/pull/911 merged as 7b1f804ae5d0, receipt recorded, lease returned, head deleted, job closed.'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:163:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:124:136)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'gh: https://github.com/example/demo/pull/911 is MERGED at bccc56f89e8b\nreceipt written: .pi-command-post/state/runs/cp-8hwm/merge.json\nteardown passed: pushed\ndeleted origin/cp-8hwm\njob cp-8hwm closed: merged: https://github.com/example/demo/pull/911\nrescue ref cleanup unavailable\ncp-8hwm integrated: https://github.com/example/demo/pull/911 merged as 7b1f804ae5d0, receipt recorded, lease returned, head deleted, job closed.',
+    expected: /origin did not name a tip/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:124:144
+✖ origin-empty (4187.605829ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /origin did not name a tip/. Input:
+  
+  'gh: https://github.com/example/demo/pull/911 is MERGED at 23cbb7189153\n' +
+    'receipt written: .pi-command-post/state/runs/cp-lwci/merge.json\n' +
+    'teardown passed: pushed\n' +
+    'deleted origin/cp-lwci\n' +
+    'job cp-lwci closed: merged: https://github.com/example/demo/pull/911\n' +
+    'rescue ref cleanup unavailable\n' +
+    'cp-lwci integrated: https://github.com/example/demo/pull/911 merged as 0a579f2d2e3f, receipt recorded, lease returned, head deleted, job closed.'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:163:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:124:136)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'gh: https://github.com/example/demo/pull/911 is MERGED at 23cbb7189153\nreceipt written: .pi-command-post/state/runs/cp-lwci/merge.json\nteardown passed: pushed\ndeleted origin/cp-lwci\njob cp-lwci closed: merged: https://github.com/example/demo/pull/911\nrescue ref cleanup unavailable\ncp-lwci integrated: https://github.com/example/demo/pull/911 merged as 0a579f2d2e3f, receipt recorded, lease returned, head deleted, job closed.',
+    expected: /origin did not name a tip/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:124:144
+✖ listing (4212.988212ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /could not be listed/. Input:
+  
+  'gh: https://github.com/example/demo/pull/911 is MERGED at ababf66c00e3\n' +
+    'receipt written: .pi-command-post/state/runs/cp-osh0/merge.json\n' +
+    'teardown passed: pushed\n' +
+    'deleted origin/cp-osh0\n' +
+    'job cp-osh0 closed: merged: https://github.com/example/demo/pull/911\n' +
+    'rescue ref cleanup unavailable\n' +
+    'cp-osh0 integrated: https://github.com/example/demo/pull/911 merged as d9692a92709c, receipt recorded, lease returned, head deleted, job closed.'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:163:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:124:136)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'gh: https://github.com/example/demo/pull/911 is MERGED at ababf66c00e3\nreceipt written: .pi-command-post/state/runs/cp-osh0/merge.json\nteardown passed: pushed\ndeleted origin/cp-osh0\njob cp-osh0 closed: merged: https://github.com/example/demo/pull/911\nrescue ref cleanup unavailable\ncp-osh0 integrated: https://github.com/example/demo/pull/911 merged as d9692a92709c, receipt recorded, lease returned, head deleted, job closed.',
+    expected: /could not be listed/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:124:144
+✖ ancestry (4298.747038ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /reachability could not be read/. Input:
+  
+  'gh: https://github.com/example/demo/pull/911 is MERGED at 30730cb77f48\n' +
+    'receipt written: .pi-command-post/state/runs/cp-qbj1/merge.json\n' +
+    'teardown passed: pushed\n' +
+    'deleted origin/cp-qbj1\n' +
+    'job cp-qbj1 closed: merged: https://github.com/example/demo/pull/911\n' +
+    'rescue ref cleanup unavailable\n' +
+    'cp-qbj1 integrated: https://github.com/example/demo/pull/911 merged as b0a14c66071d, receipt recorded, lease returned, head deleted, job closed.'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:163:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:124:136)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'gh: https://github.com/example/demo/pull/911 is MERGED at 30730cb77f48\nreceipt written: .pi-command-post/state/runs/cp-qbj1/merge.json\nteardown passed: pushed\ndeleted origin/cp-qbj1\njob cp-qbj1 closed: merged: https://github.com/example/demo/pull/911\nrescue ref cleanup unavailable\ncp-qbj1 integrated: https://github.com/example/demo/pull/911 merged as b0a14c66071d, receipt recorded, lease returned, head deleted, job closed.',
+    expected: /reachability could not be read/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:124:144
+✖ delete (4278.002063ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /could not be deleted/. Input:
+  
+  'gh: https://github.com/example/demo/pull/911 is MERGED at 21ebc0c50586\n' +
+    'receipt written: .pi-command-post/state/runs/cp-u8nx/merge.json\n' +
+    'teardown passed: pushed\n' +
+    'deleted origin/cp-u8nx\n' +
+    'job cp-u8nx closed: merged: https://github.com/example/demo/pull/911\n' +
+    'rescue ref cleanup unavailable\n' +
+    'cp-u8nx integrated: https://github.com/example/demo/pull/911 merged as 5319138bfd82, receipt recorded, lease returned, head deleted, job closed.'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:163:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:124:136)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'gh: https://github.com/example/demo/pull/911 is MERGED at 21ebc0c50586\nreceipt written: .pi-command-post/state/runs/cp-u8nx/merge.json\nteardown passed: pushed\ndeleted origin/cp-u8nx\njob cp-u8nx closed: merged: https://github.com/example/demo/pull/911\nrescue ref cleanup unavailable\ncp-u8nx integrated: https://github.com/example/demo/pull/911 merged as 5319138bfd82, receipt recorded, lease returned, head deleted, job closed.',
+    expected: /could not be deleted/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:124:144
+✖ fetch (4324.391098ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /could not be fetched/. Input:
+  
+  'gh: https://github.com/example/demo/pull/911 is MERGED at 14683dc5e8a4\n' +
+    'receipt written: .pi-command-post/state/runs/cp-d3tb/merge.json\n' +
+    'teardown passed: pushed\n' +
+    'deleted origin/cp-d3tb\n' +
+    'job cp-d3tb closed: merged: https://github.com/example/demo/pull/911\n' +
+    'rescue ref cleanup unavailable\n' +
+    'cp-d3tb integrated: https://github.com/example/demo/pull/911 merged as b59ad2147c03, receipt recorded, lease returned, head deleted, job closed.'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:163:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:124:136)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'gh: https://github.com/example/demo/pull/911 is MERGED at 14683dc5e8a4\nreceipt written: .pi-command-post/state/runs/cp-d3tb/merge.json\nteardown passed: pushed\ndeleted origin/cp-d3tb\njob cp-d3tb closed: merged: https://github.com/example/demo/pull/911\nrescue ref cleanup unavailable\ncp-d3tb integrated: https://github.com/example/demo/pull/911 merged as b59ad2147c03, receipt recorded, lease returned, head deleted, job closed.',
+    expected: /could not be fetched/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:124:144
+✖ bound (4692.054884ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+  +   'refs/cp-salvage/cp-old/001',
+  +   'refs/cp-salvage/cp-old/002',
+  +   'refs/cp-salvage/cp-old/003',
+  +   'refs/cp-salvage/cp-old/004',
+  +   'refs/cp-salvage/cp-old/005',
+  +   'refs/cp-salvage/cp-old/006',
+  +   'refs/cp-salvage/cp-old/007',
+  +   'refs/cp-salvage/cp-old/008',
+  +   'refs/cp-salvage/cp-old/009',
+  +   'refs/cp-salvage/cp-old/010',
+  +   'refs/cp-salvage/cp-old/011',
+  +   'refs/cp-salvage/cp-old/012',
+  +   'refs/cp-salvage/cp-old/013',
+  +   'refs/cp-salvage/cp-old/014',
+  +   'refs/cp-salvage/cp-old/015',
+  +   'refs/cp-salvage/cp-old/016',
+  +   'refs/cp-salvage/cp-old/017',
+  +   'refs/cp-salvage/cp-old/018',
+  +   'refs/cp-salvage/cp-old/019',
+  +   'refs/cp-salvage/cp-old/020',
+  +   'refs/cp-salvage/cp-old/021',
+  +   'refs/cp-salvage/cp-old/022',
+  +   'refs/cp-salvage/cp-old/023',
+  +   'refs/cp-salvage/cp-old/024',
+  +   'refs/cp-salvage/cp-old/025',
+  +   'refs/cp-salvage/cp-old/026',
+  +   'refs/cp-salvage/cp-old/027',
+  +   'refs/cp-salvage/cp-old/028',
+  +   'refs/cp-salvage/cp-old/029',
+  +   'refs/cp-salvage/cp-old/030',
+  +   'refs/cp-salvage/cp-old/031',
+  +   'refs/cp-salvage/cp-old/032',
+  +   'refs/cp-salvage/cp-old/033',
+  +   'refs/cp-salvage/cp-old/034',
+  +   'refs/cp-salvage/cp-old/035',
+  +   'refs/cp-salvage/cp-old/036',
+  +   'refs/cp-salvage/cp-old/037',
+  +   'refs/cp-salvage/cp-old/038',
+  +   'refs/cp-salvage/cp-old/039',
+  +   'refs/cp-salvage/cp-old/040',
+  +   'refs/cp-salvage/cp-old/041',
+  +   'refs/cp-salvage/cp-old/042',
+  +   'refs/cp-salvage/cp-old/043',
+  +   'refs/cp-salvage/cp-old/044',
+  +   'refs/cp-salvage/cp-old/045',
+  +   'refs/cp-salvage/cp-old/046',
+  +   'refs/cp-salvage/cp-old/047',
+  +   'refs/cp-salvage/cp-old/048',
+  +   'refs/cp-salvage/cp-old/049',
+  +   'refs/cp-salvage/cp-old/050',
+  +   'refs/cp-salvage/cp-old/051',
+  +   'refs/cp-salvage/cp-old/052',
+  +   'refs/cp-salvage/cp-old/053',
+  +   'refs/cp-salvage/cp-old/054',
+  +   'refs/cp-salvage/cp-old/055',
+  +   'refs/cp-salvage/cp-old/056',
+  +   'refs/cp-salvage/cp-old/057',
+  +   'refs/cp-salvage/cp-old/058',
+  +   'refs/cp-salvage/cp-old/059',
+  +   'refs/cp-salvage/cp-old/060',
+  +   'refs/cp-salvage/cp-old/061',
+  +   'refs/cp-salvage/cp-old/062',
+  +   'refs/cp-salvage/cp-old/063',
+  +   'refs/cp-salvage/cp-old/064',
+  +   'refs/cp-salvage/cp-old/065',
+  +   'refs/cp-salvage/cp-old/066',
+  +   'refs/cp-salvage/cp-old/067',
+  +   'refs/cp-salvage/cp-old/068',
+  +   'refs/cp-salvage/cp-old/069',
+  +   'refs/cp-salvage/cp-old/070',
+  +   'refs/cp-salvage/cp-old/071',
+  +   'refs/cp-salvage/cp-old/072',
+  +   'refs/cp-salvage/cp-old/073',
+  +   'refs/cp-salvage/cp-old/074',
+  +   'refs/cp-salvage/cp-old/075',
+  +   'refs/cp-salvage/cp-old/076',
+  +   'refs/cp-salvage/cp-old/077',
+  +   'refs/cp-salvage/cp-old/078',
+  +   'refs/cp-salvage/cp-old/079',
+  +   'refs/cp-salvage/cp-old/080',
+  +   'refs/cp-salvage/cp-old/081',
+  +   'refs/cp-salvage/cp-old/082',
+  +   'refs/cp-salvage/cp-old/083',
+  +   'refs/cp-salvage/cp-old/084',
+  +   'refs/cp-salvage/cp-old/085',
+  +   'refs/cp-salvage/cp-old/086',
+  +   'refs/cp-salvage/cp-old/087',
+  +   'refs/cp-salvage/cp-old/088',
+  +   'refs/cp-salvage/cp-old/089',
+  +   'refs/cp-salvage/cp-old/090',
+  +   'refs/cp-salvage/cp-old/091',
+  +   'refs/cp-salvage/cp-old/092',
+  +   'refs/cp-salvage/cp-old/093',
+  +   'refs/cp-salvage/cp-old/094',
+  +   'refs/cp-salvage/cp-old/095',
+  +   'refs/cp-salvage/cp-old/096',
+  +   'refs/cp-salvage/cp-old/097',
+  +   'refs/cp-salvage/cp-old/098',
+  +   'refs/cp-salvage/cp-old/099',
+  +   'refs/cp-salvage/cp-old/100',
+      'refs/cp-salvage/cp-old/101'
+    ]
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:156:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:124:136)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [
+      'refs/cp-salvage/cp-old/001', 'refs/cp-salvage/cp-old/002', 'refs/cp-salvage/cp-old/003',
+      'refs/cp-salvage/cp-old/004', 'refs/cp-salvage/cp-old/005', 'refs/cp-salvage/cp-old/006',
+      'refs/cp-salvage/cp-old/007', 'refs/cp-salvage/cp-old/008', 'refs/cp-salvage/cp-old/009',
+      'refs/cp-salvage/cp-old/010', 'refs/cp-salvage/cp-old/011', 'refs/cp-salvage/cp-old/012',
+      'refs/cp-salvage/cp-old/013', 'refs/cp-salvage/cp-old/014', 'refs/cp-salvage/cp-old/015',
+      'refs/cp-salvage/cp-old/016', 'refs/cp-salvage/cp-old/017', 'refs/cp-salvage/cp-old/018',
+      'refs/cp-salvage/cp-old/019', 'refs/cp-salvage/cp-old/020', 'refs/cp-salvage/cp-old/021',
+      'refs/cp-salvage/cp-old/022', 'refs/cp-salvage/cp-old/023', 'refs/cp-salvage/cp-old/024',
+      'refs/cp-salvage/cp-old/025', 'refs/cp-salvage/cp-old/026', 'refs/cp-salvage/cp-old/027',
+      'refs/cp-salvage/cp-old/028', 'refs/cp-salvage/cp-old/029', 'refs/cp-salvage/cp-old/030',
+      'refs/cp-salvage/cp-old/031', 'refs/cp-salvage/cp-old/032', 'refs/cp-salvage/cp-old/033',
+      'refs/cp-salvage/cp-old/034', 'refs/cp-salvage/cp-old/035', 'refs/cp-salvage/cp-old/036',
+      'refs/cp-salvage/cp-old/037', 'refs/cp-salvage/cp-old/038', 'refs/cp-salvage/cp-old/039',
+      'refs/cp-salvage/cp-old/040', 'refs/cp-salvage/cp-old/041', 'refs/cp-salvage/cp-old/042',
+      'refs/cp-salvage/cp-old/043', 'refs/cp-salvage/cp-old/044', 'refs/cp-salvage/cp-old/045',
+      'refs/cp-salvage/cp-old/046', 'refs/cp-salvage/cp-old/047', 'refs/cp-salvage/cp-old/048',
+      'refs/cp-salvage/cp-old/049', 'refs/cp-salvage/cp-old/050', 'refs/cp-salvage/cp-old/051',
+      'refs/cp-salvage/cp-old/052', 'refs/cp-salvage/cp-old/053', 'refs/cp-salvage/cp-old/054',
+      'refs/cp-salvage/cp-old/055', 'refs/cp-salvage/cp-old/056', 'refs/cp-salvage/cp-old/057',
+      'refs/cp-salvage/cp-old/058', 'refs/cp-salvage/cp-old/059', 'refs/cp-salvage/cp-old/060',
+      'refs/cp-salvage/cp-old/061', 'refs/cp-salvage/cp-old/062', 'refs/cp-salvage/cp-old/063',
+      'refs/cp-salvage/cp-old/064', 'refs/cp-salvage/cp-old/065', 'refs/cp-salvage/cp-old/066',
+      'refs/cp-salvage/cp-old/067', 'refs/cp-salvage/cp-old/068', 'refs/cp-salvage/cp-old/069',
+      'refs/cp-salvage/cp-old/070', 'refs/cp-salvage/cp-old/071', 'refs/cp-salvage/cp-old/072',
+      'refs/cp-salvage/cp-old/073', 'refs/cp-salvage/cp-old/074', 'refs/cp-salvage/cp-old/075',
+      'refs/cp-salvage/cp-old/076', 'refs/cp-salvage/cp-old/077', 'refs/cp-salvage/cp-old/078',
+      'refs/cp-salvage/cp-old/079', 'refs/cp-salvage/cp-old/080', 'refs/cp-salvage/cp-old/081',
+      'refs/cp-salvage/cp-old/082', 'refs/cp-salvage/cp-old/083', 'refs/cp-salvage/cp-old/084',
+      'refs/cp-salvage/cp-old/085', 'refs/cp-salvage/cp-old/086', 'refs/cp-salvage/cp-old/087',
+      'refs/cp-salvage/cp-old/088', 'refs/cp-salvage/cp-old/089', 'refs/cp-salvage/cp-old/090',
+      'refs/cp-salvage/cp-old/091', 'refs/cp-salvage/cp-old/092', 'refs/cp-salvage/cp-old/093',
+      'refs/cp-salvage/cp-old/094', 'refs/cp-salvage/cp-old/095', 'refs/cp-salvage/cp-old/096',
+      'refs/cp-salvage/cp-old/097', 'refs/cp-salvage/cp-old/098', 'refs/cp-salvage/cp-old/099',
+      'refs/cp-salvage/cp-old/100',
+      ... 1 more item
+    ],
+    expected: [ 'refs/cp-salvage/cp-old/101' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:124:144
+✖ empty (4241.542731ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /rescue ref/. Input:
+  
+  'gh: https://github.com/example/demo/pull/911 is MERGED at 660e2fdf70ce\n' +
+    'receipt written: .pi-command-post/state/runs/cp-b8ih/merge.json\n' +
+    'teardown passed: pushed\n' +
+    'deleted origin/cp-b8ih\n' +
+    'job cp-b8ih closed: merged: https://github.com/example/demo/pull/911\n' +
+    'rescue ref cleanup unavailable\n' +
+    'cp-b8ih integrated: https://github.com/example/demo/pull/911 merged as 4be6853d2091, receipt recorded, lease returned, head deleted, job closed.'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:160:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:124:136)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'gh: https://github.com/example/demo/pull/911 is MERGED at 660e2fdf70ce\nreceipt written: .pi-command-post/state/runs/cp-b8ih/merge.json\nteardown passed: pushed\ndeleted origin/cp-b8ih\njob cp-b8ih closed: merged: https://github.com/example/demo/pull/911\nrescue ref cleanup unavailable\ncp-b8ih integrated: https://github.com/example/demo/pull/911 merged as 4be6853d2091, receipt recorded, lease returned, head deleted, job closed.',
+    expected: /rescue ref/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:124:144
+✖ outside (4192.217658ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   'refs/cp-salvage/cp-old/001'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:148:11)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:124:136)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ 'refs/cp-salvage/cp-old/001' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
