@@ -1,0 +1,639 @@
+/** Behavior 11 (operator to parent delivery), P9d: the dashboard's sends as the real cp-bridge hands them to the
+ * operator session (provider requests, the viewer's transcript) and as the viewer projects them back (pending sends). */
+import assert from "node:assert/strict";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { test, type TestContext } from "node:test";
+import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT } from "../../src/contracts.ts";
+import { FleetStore } from "../../src/fleet.ts";
+import { controlRequest } from "../../src/viewer/control-api.ts";
+import { appendControlAudit } from "../../src/viewer/control-audit.ts";
+import { controlInboxFile, controlJournalFile, controlRecordFile, readControlRecord, REMOTE_PROVENANCE_VERSION } from "../../src/viewer/control-files.ts";
+import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
+import { createViewer } from "../../src/viewer/server.ts";
+import { inlineBudget, newUploadId, TEXT_MESSAGE_INLINE_BYTES, uploadFile, writeUpload } from "../../src/viewer/uploads.ts";
+import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
+import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, startPiChild, waitFor, type PiChild, type RecordedRequest, type ScriptStep } from "../harness/index.ts";
+import { syntheticPng } from "../harness/images.ts";
+
+type Reply = Awaited<ReturnType<typeof controlRequest>>;
+type Json = Record<string, any>;
+
+const PHONE = { device_id: "dev-0123456789abcdef", name: "Ann's \"Phone\"" };
+const TABLET = { device_id: "dev-fedcba9876543210", name: "Tablet" };
+const line = (...parts: string[]) => `[cp-remote — through a paired remote device, not this terminal: ${parts.join("; ")}]`;
+const PHONE_SENT = `sent by ${PHONE.device_id} "Ann's \\"Phone\\""`;
+const TABLET_SENT = `sent by ${TABLET.device_id} "Tablet"`;
+
+/** Every user-role message text in one provider request, in order. */
+function userTexts(request: RecordedRequest): string[] {
+	return (request.body.messages ?? []).filter((message) => message.role === "user").map((message) => {
+		const content = message.content;
+		if (typeof content === "string") return content;
+		return Array.isArray(content) ? content.map((part) => String((part as { text?: unknown }).text ?? "")).join("") : "";
+	});
+}
+
+/** A scratch home with a real viewer on it (`--require-tailnet`, so status reads are allowed). */
+async function scratch(t: TestContext) {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const state = join(home.path, LAYOUT.state);
+	const options = { home: home.path, stateDir: state, host: "127.0.0.1", port: 0, requireTailnet: true, log: () => {}, operatorStart: { tmux: null, herdr: null } };
+	const server = createViewer(options);
+	await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+	t.after(() => server.close());
+	const port = (server.address() as AddressInfo).port;
+	const get = async (path: string): Promise<Json> => {
+		const response = await fetch(`http://127.0.0.1:${port}${path}`, { headers: { "sec-fetch-site": "same-origin" } });
+		assert.equal(response.status, 200, path);
+		return await response.json() as Json;
+	};
+	const journal = (): Json[] => existsSync(controlJournalFile(state)) ? readFileSync(controlJournalFile(state), "utf8").trim().split("\n").filter(Boolean).map((row) => JSON.parse(row)) : [];
+	return { home: home.path, state, get, journal };
+}
+
+/** The operator's own pi session with the real cp-bridge; its dashboard control is listening when this resolves. */
+async function operator(t: TestContext, home: string, name: string, steps: ScriptStep[], env: Record<string, string> = {}) {
+	const provider = await MockProvider.start();
+	const model = provider.addScript(name, steps, { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	const previous = process.env.PI_HOME;
+	process.env.PI_HOME = agent.path;
+	saveOperatorTarget({ home, mode: "multi", hostPid: 0, parentPid: 0 });
+	if (previous === undefined) delete process.env.PI_HOME; else process.env.PI_HOME = previous;
+	const state = join(home, LAYOUT.state);
+	const before = readControlRecord(state);
+	const child: PiChild = startPiChild({ cwd: home, model, sessionDir: join(state, "sessions", "operator"), extensions: [CP_BRIDGE_EXTENSION], env: { ...agent.env, PI_HOME: agent.path, CP_HOME: home, CP_MODE: "multi", ...env } });
+	let closed = false;
+	const close = async () => { if (!closed) { closed = true; await child.close(); } };
+	t.after(async () => { await close(); agent.cleanup(); await provider.stop(); });
+	const found = await waitFor(() => readControlRecord(state), (row) => row.state === "ok" && (before.state !== "ok" || row.record.pid !== before.record.pid), { timeoutMs: 30_000, what: "dashboard control record" });
+	if (found.state !== "ok") throw new Error("no dashboard control");
+	const record = found.record;
+	const requests = () => provider.requests(name);
+	/** The first request whose user messages carry `needle`, and that message's text. */
+	const seen = async (needle: string, timeoutMs = 30_000) => {
+		const request = await waitFor(() => requests().find((item) => userTexts(item).some((text) => text.includes(needle))), Boolean, { timeoutMs, what: `a provider request carrying ${needle}` });
+		return userTexts(request!).find((text) => text.includes(needle))!;
+	};
+	const send = (op: string, args: Record<string, unknown>): Promise<Reply> => controlRequest(record, op, args);
+	return { child, record, requests, seen, send, close };
+}
+
+const tail = (text: string) => text.split("\n").slice(-2);
+const DC_MARKER = /^\[cp-dashboard dc-\d{14}-[0-9a-f]{8} — from the dashboard; remote\]$/;
+
+// P9d-remote: a paired device's id and JSON-quoted name ride one bridge-written line above a `; remote` marker on live
+// sends and steers; local sends keep their bytes; a typed device line stays body text; malformed devices are refused.
+test("P9d-remote: a paired device's id and name reach the operator session above the dashboard marker, and a body can neither forge nor strip it", { timeout: 150_000 }, async (t) => {
+	const s = await scratch(t);
+	let release!: () => void;
+	const busy = new Promise<void>((done) => { release = done; });
+	t.after(() => release());
+	const op = await operator(t, s.home, "p9d-remote", [
+		{ kind: "text", text: "ok" }, { kind: "text", text: "ok" }, { kind: "text", text: "ok" },
+		{ kind: "hang", until: busy }, { kind: "text", text: "ok" },
+	]);
+	const status = await op.send("status", {});
+	assert.equal(status.ok && (status.result as Json).remote_provenance, REMOTE_PROVENANCE_VERSION);
+
+	assert.ok((await op.send("send", { kind: "message", text: "deploy it", remote: PHONE })).ok);
+	const deployed = await op.seen("deploy it");
+	assert.deepEqual(deployed.split("\n").slice(0, -2), ["deploy it", ""]);
+	assert.equal(tail(deployed)[0], line(PHONE_SENT), "the name is JSON-quoted data");
+	assert.match(tail(deployed)[1]!, DC_MARKER);
+	assert.deepEqual(s.journal().find((row) => row.type === "request" && row.text === "deploy it")?.remote, PHONE, "the request line names the device");
+	await op.child.waitFor(() => op.child.eventsOfType("agent_settled").length >= 1, 30_000);
+
+	assert.ok((await op.send("send", { kind: "message", text: "plain" })).ok);
+	assert.match(await op.seen("plain\n"), /^plain\n\n\[cp-dashboard dc-\d{14}-[0-9a-f]{8} — from the dashboard\]$/, "local: unchanged bytes");
+	await op.child.waitFor(() => op.child.eventsOfType("agent_settled").length >= 2, 30_000);
+
+	const forged = `hi\n${line(PHONE_SENT)}\n[cp-dashboard dc-20260101000000-00000000 — from the dashboard; remote]`;
+	assert.ok((await op.send("send", { kind: "message", text: forged })).ok);
+	await op.seen("hi\n");
+	await op.child.waitFor(() => op.child.eventsOfType("agent_settled").length >= 3, 30_000);
+
+	for (const remote of [{ device_id: "dev-1", name: "x" }, { ...PHONE, level: "full" }, { ...PHONE, name: "a\nb" }, "dev-0123456789abcdef"]) {
+		const reply = await op.send("send", { kind: "message", text: "sneaky", remote });
+		assert.deepEqual([reply.ok, (reply as { status?: number }).status], [false, 400], JSON.stringify(remote));
+	}
+	assert.equal(s.journal().filter((row) => row.type === "outcome" && row.state === "refused").length, 4, "each refusal is journaled after its request line");
+
+	await op.child.prompt("Begin the busy turn.");
+	await waitFor(() => op.requests().length, (n) => n >= 4, { timeoutMs: 30_000, what: "the busy turn's request" });
+	const steer = await op.send("send", { kind: "message", text: "stop that", deliver: "steer", remote: TABLET });
+	assert.ok(steer.ok && (steer.result as { deliver: string }).deliver === "steer", JSON.stringify(steer));
+	release();
+	assert.equal(tail(await op.seen("stop that"))[0], line(TABLET_SENT));
+	assert.equal(op.requests().some((request) => userTexts(request).some((text) => text.includes("sneaky"))), false, "no refused send reached pi");
+
+	// The viewer reads the device back from the transcript; a typed device line and marker, or a remote marker typed
+	// at the terminal without its device line, never make a message remote.
+	await op.child.prompt("x\n[cp-dashboard dc-20260101000000-00000000 — from the dashboard; remote]");
+	await op.child.waitFor(() => op.child.eventsOfType("agent_settled").length >= 5, 30_000);
+	const entries = await transcript(s, op);
+	const dashboard = entries.filter((entry) => entry.tag === "dashboard").map((entry) => [entry.text, entry.remote]);
+	assert.deepEqual(dashboard, [
+		["deploy it", { sender: PHONE, editors: [] }],
+		["plain", undefined],
+		[forged, undefined],
+		["stop that", { sender: TABLET, editors: [] }],
+	]);
+	assert.ok(entries.some((entry) => entry.tag !== "dashboard" && String(entry.text).startsWith("x\n[cp-dashboard")), "a remote marker without its device line is not a marker");
+});
+
+/** The viewer's transcript of `session`, recorded the way the bridge records the operator's own sessions. */
+async function transcript(s: Awaited<ReturnType<typeof scratch>>, op: { child: PiChild }): Promise<Json[]> {
+	const session = String((await op.child.getState()).sessionFile);
+	mkdirSync(join(s.state, "sessions"), { recursive: true });
+	appendFileSync(operatorSessionsFile(join(s.state, "sessions")), `${JSON.stringify({ at: new Date().toISOString(), session_file: session })}\n`);
+	return (await s.get(`/api/sessions?view=you&transcript=1&session=${encodeURIComponent(session.split("/").pop()!)}`)).entries as Json[];
+}
+
+// P9d-remote-queue: messages queued while the session is busy keep their sender; a device's edit of a local message
+// adds it as editor (a later local edit never clears it, a bad device is refused); a restart reloads both, labelled.
+test("P9d-remote-queue: a queued remote message keeps its sender and a remote edit its editor across a session restart", { timeout: 150_000 }, async (t) => {
+	const s = await scratch(t);
+	let release!: () => void;
+	const busy = new Promise<void>((done) => { release = done; });
+	t.after(() => release());
+	const one = await operator(t, s.home, "p9d-queue-1", [{ kind: "hang", until: busy }]);
+	await one.child.prompt("Begin the busy turn.");
+	await waitFor(() => one.requests().length, (n) => n >= 1, { timeoutMs: 30_000, what: "the busy turn's request" });
+	const send = async (text: string, remote?: typeof PHONE) => {
+		const reply = await one.send("send", { kind: "message", text, ...(remote ? { remote } : {}) });
+		assert.ok(reply.ok && (reply.result as { state: string }).state === "queued", JSON.stringify(reply));
+		return (reply.result as { id: string }).id;
+	};
+	const [a, b] = [await send("from phone", PHONE), await send("from terminal")];
+	assert.ok((await one.send("queue_edit", { id: b, text: "edited on tablet", remote: TABLET })).ok);
+	assert.ok((await one.send("queue_edit", { id: b, text: "edited locally" })).ok);
+	assert.ok((await one.send("queue_edit", { id: b, text: "edited on tablet again", remote: TABLET })).ok);
+	assert.equal((await one.send("queue_edit", { id: a, text: "x", remote: { device_id: "nope", name: "x" } }) as { status?: number }).status, 400);
+	await one.close();
+
+	const two = await operator(t, s.home, "p9d-queue-2", [{ kind: "text", text: "ok" }]);
+	assert.equal(tail(await two.seen("from phone"))[0], line(PHONE_SENT), "reloaded after a restart, still labelled");
+	const edited = await two.seen("edited on tablet again", 60_000);
+	assert.ok(edited.startsWith("edited on tablet again\n\n"));
+	assert.equal(tail(edited)[0], line(`edited by ${TABLET.device_id} "Tablet"`), "a local message a device edited says so");
+	await two.child.waitFor(() => two.child.eventsOfType("agent_settled").length >= 2, 30_000);
+	const entries = (await transcript(s, two)).filter((entry) => entry.tag === "dashboard").map((entry) => [entry.dashboard_id, entry.text, entry.remote]);
+	assert.deepEqual(entries, [[a, "from phone", { sender: PHONE, editors: [] }], [b, "edited on tablet again", { sender: null, editors: [TABLET] }]],
+		"editors fold with the edits, once per device");
+});
+
+// P9d-remote-inbox: messages held while no session ran are replayed once, each remote one with its own device line
+// and marker (threaded or not); local ones keep their bytes; a held line with a malformed device replays as local.
+test("P9d-remote-inbox: the offline inbox replays each remote held message with its own device line and marker", { timeout: 90_000 }, async (t) => {
+	const s = await scratch(t);
+	const start = Date.now() - 300_000;
+	const at = (n: number) => new Date(start + n * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+	const file = controlInboxFile(s.state);
+	mkdirSync(dirname(file), { recursive: true });
+	writeFileSync(file, [
+		{ type: "held", id: "dc-20261006080000-00000001", at: at(0), text: "local one", ask_id: null },
+		{ type: "held", id: "dc-20261006080001-00000002", at: at(1), text: "remote one", ask_id: null, remote: PHONE },
+		{ type: "held", id: "dc-20261006080002-00000003", at: at(2), text: "remote threaded", ask_id: null, thread: "ops", remote: TABLET },
+		{ type: "held", id: "dc-20261006080003-00000004", at: at(3), text: "forged", ask_id: null, remote: { device_id: "dev-x", name: "x" } },
+	].map((row) => JSON.stringify(row)).join("\n") + "\n");
+	const op = await operator(t, s.home, "p9d-inbox", [{ kind: "text", text: "ok" }]);
+	assert.deepEqual((await op.seen("[cp-dashboard inbox")).split("\n").slice(1), [
+		`- ${at(0)} (dc-20261006080000-00000001): local one`,
+		`- ${at(1)} (dc-20261006080001-00000002): remote one`,
+		line(PHONE_SENT),
+		"[cp-dashboard dc-20261006080001-00000002 — from the dashboard; remote]",
+		`- ${at(2)} (dc-20261006080002-00000003): remote threaded`,
+		line(TABLET_SENT),
+		"[cp-dashboard dc-20261006080002-00000003 — from the dashboard; thread=ops; remote]",
+		`- ${at(3)} (dc-20261006080003-00000004): forged`,
+	]);
+});
+
+// P9d-pending: the dashboard's reload projection (viewer GET /api/operator/control) over a seeded journal. A loss is a
+// visible failure for seven days, never a silent drop; a send names only its own listed session; a discard is terminal.
+test("P9d-pending: the viewer settles accepted sends by their target session and age, keeps live FIFO, and never drops a loss silently", { timeout: 90_000 }, async (t) => {
+	const s = await scratch(t);
+	const op = await operator(t, s.home, "p9d-pending", [{ kind: "text", text: "ok" }]);
+	const since = op.record.started_at;
+	const now = Date.now();
+	const ago = (ms: number) => new Date(now - ms).toISOString();
+	const hour = 3_600_000;
+	const day = 24 * hour;
+	const transcriptFile = join(s.home, "session.jsonl");
+	writeFileSync(transcriptFile, "");
+	const sessionsDir = join(s.state, "sessions");
+	const listed = join(sessionsDir, "A.jsonl");
+	mkdirSync(join(sessionsDir, "dup"), { recursive: true });
+	writeFileSync(listed, "");
+	writeFileSync(operatorSessionsFile(sessionsDir), `${JSON.stringify({ at: ago(2 * day), session_file: listed })}\n`);
+	const rows: object[] = [];
+	let n = 0;
+	const add = (at: string, extra: object, ...outcomes: Array<string | object>) => {
+		const id = `dc-20261008120000-${(n += 1).toString(16).padStart(8, "0")}`;
+		rows.push({ type: "request", by: "bridge", id, at, kind: "message", text: `send ${n}`, ask_id: null, peer: null, deliver: "followUp", session_started_at: since, session_file: transcriptFile, ...extra });
+		for (const outcome of outcomes) rows.push(typeof outcome === "string" ? { type: "outcome", by: "bridge", id, at, state: outcome, reason: outcome === "failed" ? "late rejection" : null } : { id, at, ...outcome });
+		return id;
+	};
+	const legacyFields = { session_started_at: undefined, session_file: undefined };
+	// Target session and 24 h TTL (the boundary to the minute: the viewer reads the wall clock).
+	const boundary = add(ago(day - 120_000), {}, "injected", "queued");
+	const expired = add(ago(day + 120_000), {}, "injected", "queued");
+	const missing = add(ago(hour), { session_file: join(s.home, "missing.jsonl") }, "injected", "injected");
+	const ended = add(ago(hour), { session_started_at: ago(30 * day) }, "injected", "queued");
+	const live = add(ago(hour / 2), {}, "injected", "queued");
+	const delivered = add(ago(hour / 2), {}, "injected", "delivered");
+	const failed = add(ago(hour / 2), {}, "injected", "failed");
+	const legacy = add(new Date(Date.parse(since) - 1000).toISOString(), legacyFields, "injected", "queued");
+	// A dashboard-held message is editable with its saved text until handed over or cancelled.
+	const gone = { session_started_at: ago(30 * day), session_file: join(s.home, "gone.jsonl") };
+	const edit = (text: string) => ({ type: "edited", by: "bridge", peer: null, text });
+	const held = add(ago(hour), gone, "queued", edit("saved 1"));
+	const handed = add(ago(hour), gone, "queued", edit("saved 2"), "injected", edit("never applied"));
+	const cancelled = add(ago(hour), gone, "queued", "cancelled");
+	// Lost sends stay a visible failure for seven days after they were sent, then history.
+	const old = { session_started_at: ago(30 * day), session_file: undefined };
+	const dropped = { type: "outcome", by: "bridge", state: "dropped", reason: "target operator session ended" };
+	const recentExpired = add(ago(6 * day), old, "queued");
+	const boundaryEnded = add(ago(7 * day - 120_000), old, "queued", "injected");
+	const oldDropped = add(ago(7 * day + 120_000), old, "queued", "injected", dropped);
+	const oldExpired = add(ago(30 * day), old, "queued");
+	// A Not confirmed send names only its own recorded, listed session.
+	const shut = { type: "outcome", by: "bridge", state: "dropped", reason: "session shut down" };
+	const inA = add(ago(hour), { session_file: listed }, "queued", "injected", shut);
+	const notSent = add(ago(hour), { session_file: listed }, "queued", shut);
+	const unlisted = add(ago(hour), { session_file: join(s.home, "gone.jsonl") }, "queued", "injected", shut);
+	const legacyLost = add(ago(hour), legacyFields, "queued", "injected", shut);
+	const sameName = add(ago(hour), { session_file: join(sessionsDir, "dup", "A.jsonl") }, "queued", "injected", shut);
+	const file = controlJournalFile(s.state);
+	mkdirSync(dirname(file), { recursive: true });
+	appendFileSync(file, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+	const bytes = readFileSync(file, "utf8");
+
+	const read = async () => {
+		const body = await s.get("/api/operator/control");
+		assert.equal(body.sends_error, null);
+		return { body, sends: new Map((body.sends as Json[]).map((send) => [send.id as string, send])) };
+	};
+	const first = await read();
+	const { sends } = first;
+	const state = (ids: string[], map = sends) => ids.map((id) => map.get(id)?.state);
+	assert.equal(first.body.running, true);
+	assert.deepEqual(state([boundary, expired, missing, ended, live, delivered, failed, legacy]), ["queued", "failed", "failed", "failed", "queued", "delivered", "failed", "failed"],
+		"cp-y43c addendum 2: a loss is a visible failure, never a silent drop");
+	assert.match(sends.get(ended)!.reason, /^Not confirmed: target operator session ended\. .*check the transcript/);
+	assert.equal(sends.get(ended)!.body.text, "send 4", "the original text stays with the failure");
+	assert.equal(sends.get(failed)!.reason, "late rejection");
+	assert.deepEqual((first.body.sends as Json[]).filter((send) => send.state === "queued").map((send) => send.id), [boundary, held, live]);
+	assert.deepEqual([held, handed, cancelled].map((id) => [sends.get(id)?.state, sends.get(id)?.body.text, sends.get(id)?.editable, sends.get(id)?.reason]), [
+		["queued", "saved 1", true, null],
+		["failed", "saved 2", undefined, sends.get(handed)?.reason],
+		["dropped", "send 11", undefined, "Cancelled from the dashboard"],
+	], "held across a session restart with its edit; handed over: the text pi got, never resent; cancelled: history");
+	assert.match(sends.get(handed)!.reason, /^Not confirmed: /);
+	assert.deepEqual(state([recentExpired, boundaryEnded, oldDropped, oldExpired]), ["failed", "failed", "dropped", "dropped"]);
+	assert.match(sends.get(recentExpired)!.reason, /^Not sent: queued longer than 24 h\./);
+	assert.match(sends.get(boundaryEnded)!.reason, /^Not confirmed: target operator session ended\./);
+	assert.deepEqual(state([inA, notSent, unlisted, legacyLost, sameName]), ["failed", "failed", "failed", "failed", "failed"]);
+	assert.match(sends.get(notSent)!.reason, /^Not sent: /);
+	assert.deepEqual([inA, notSent, unlisted, legacyLost, sameName].map((id) => sends.get(id)?.target_session), ["A.jsonl", undefined, undefined, undefined, undefined],
+		"exact mapping only: never injected, unlisted, legacy and a same-basename different file get no link, never the current session");
+	assert.deepEqual((await read()).body.sends, first.body.sends, "repeat reads are idempotent");
+	assert.equal(readFileSync(file, "utf8"), bytes, "the projection never rewrites or appends");
+
+	// With the session gone (no record, a dead pid) an injected live send is lost; an unreadable record is not proof.
+	const record = readFileSync(controlRecordFile(s.state), "utf8");
+	await op.close();
+	rmSync(controlRecordFile(s.state), { force: true });
+	assert.equal((await read()).sends.get(live)?.state, "failed", "no dashboard control record");
+	writeFileSync(controlRecordFile(s.state), record);
+	const dead = await read();
+	assert.match(dead.body.reason, /is not running/);
+	assert.equal(dead.sends.get(live)?.state, "failed", "the recorded session pid is not running");
+	writeFileSync(controlRecordFile(s.state), "{");
+	assert.equal((await read()).sends.get(live)?.state, "queued", "uncertain metadata is not proof of abandonment");
+	appendFileSync(file, `${JSON.stringify({ type: "outcome", by: "viewer", id: live, at: new Date().toISOString(), peer: null, state: "dropped", reason: "operator discarded abandoned send" })}\n`);
+	for (const late of ["queued", "delivered"]) appendFileSync(file, `${JSON.stringify({ type: "outcome", by: "bridge", id: live, at: new Date().toISOString(), peer: null, state: late, reason: null })}\n`);
+	assert.equal((await read()).sends.get(live)?.state, "dropped", "an operator discard stays terminal: late acceptance cannot resurrect it");
+});
+
+// P9d-threads: cp_parent's optional thread files the ans-/ask-/job id in state/operator/threads.jsonl as the bridge,
+// bookkeeping only: tags normalize or refuse before any write, a failed filing never fails the answer or the ask.
+test("P9d-threads: cp_parent answer, ask and thread_bind file their ids under a thread through the real bridge, and a failed filing never fails them", { timeout: 240_000 }, async (t) => {
+	const s = await scratch(t);
+	await new FleetStore({ home: s.home }).add({
+		job_id: "cp-ans", project: "demo", kind: "research", delivery: "answer", origin: DEFAULT_ORIGIN, phase: "held", reported_at: isoTimestamp(),
+		worker: { pid: process.pid, session_id: "s", session_file: join(s.home, "s.jsonl"), profile: "planner", role: "planner", model: "mock/model", started_at: isoTimestamp() },
+		worktree: join(s.home, "wt"), branch: "cp-ans", dispatched_at: isoTimestamp(), usage: EMPTY_USAGE,
+	});
+	let next: object = {};
+	const op = await operator(t, s.home, "p9d-threads", Array.from({ length: 60 }, (): ScriptStep[] => [
+		{ kind: "tool_calls", calls: [{ name: "cp_parent", args: () => next }] }, { kind: "text", text: "done" },
+	]).flat());
+	let calls = 0;
+	const call = async (params: object) => {
+		next = params;
+		calls += 1;
+		await op.child.prompt(`call ${calls}`);
+		await op.child.waitFor(() => op.child.eventsOfType("agent_settled").length >= calls, 30_000);
+		const end = op.child.eventsOfType("tool_execution_end")[calls - 1]!;
+		const result = end.result as { content: Array<{ text: string }>; details: Json };
+		return { text: result.content[0]!.text, isError: end.isError === true, details: result.details };
+	};
+	const operatorFile = (name: string) => join(s.state, "operator", name);
+	const read = (name: string) => existsSync(operatorFile(name)) ? readFileSync(operatorFile(name), "utf8") : null;
+	const lines = () => (read("threads.jsonl") ?? "").split("\n").filter(Boolean).map((row) => JSON.parse(row) as Json);
+	const threads = async () => (await s.get("/api/threads")) as Json;
+	const answer = { action: "answer", project: "demo", question: "Does it work?", answer: "Yes." };
+	const ask = { project: "demo", question: "A or B?", options: [{ label: "A", consequence: "does a" }, { label: "B", consequence: "does b" }], recommendation: "A" };
+
+	const first = await call({ ...answer, thread: "Billing" });
+	assert.equal(first.isError, false, first.text);
+	assert.equal(first.details.state, "posted");
+	const filed = first.details.thread as { tag: string; id: string; error: null };
+	assert.deepEqual([filed.tag, filed.error], ["billing", null]);
+	assert.match(filed.id, /^th-[a-f0-9]{12}$/);
+	assert.match(first.text, new RegExp(`filed under thread billing \\(${filed.id}\\)`));
+	assert.deepEqual(lines().map((row) => [row.type, row.by, row.peer]), [["open", "bridge", null], ["bind", "bridge", null]]);
+	assert.deepEqual([lines()[0]!.tag, lines()[1]!.ref], ["billing", { kind: "answer", id: first.details.id }]);
+	assert.equal(statSync(operatorFile("threads.jsonl")).mode & 0o777, 0o600);
+	assert.equal(statSync(dirname(operatorFile("threads.jsonl"))).mode & 0o777, 0o700);
+	const second = await call({ ...answer, question: "And now?", thread: "billing" });
+	assert.equal((second.details.thread as { id: string }).id, filed.id, "a tag opens once");
+	assert.deepEqual(lines().map((row) => row.type), ["open", "bind", "bind"]);
+	assert.deepEqual(lines()[2]!.ref, { kind: "answer", id: second.details.id });
+	const plain = await call({ ...answer, question: "No thread?" });
+	assert.equal(plain.details.thread, undefined);
+	assert.equal(lines().length, 3, "no thread param: nothing filed");
+	assert.deepEqual((await threads()).threads.map((row: Json) => [row.id, row.tag, row.counts.answers]), [[filed.id, "billing", 2]]);
+
+	// Tags normalize (trim, lowercase, whitespace runs to '-', 1-32) or refuse naming the rule before any write.
+	const before = () => [read("answers.jsonl"), read("asks.jsonl"), read("threads.jsonl")];
+	const unchanged = before();
+	for (const bad of ["bad tag!", "x".repeat(33), "#design-review", "-x", "", "   ", "café", "a_b"]) {
+		const refused = await call({ ...answer, question: "Other?", thread: bad });
+		assert.equal(refused.isError, true, bad);
+		assert.match(refused.text, /thread must be a tag \(1-32 of a-z 0-9 -, first a letter or digit\)/);
+	}
+	assert.equal((await call({ action: "ask", ask, thread: "-x" })).isError, true);
+	assert.deepEqual(before(), unchanged, "a refused tag writes no answer, ask or thread line");
+	const sent = op.requests().length;
+	for (const thread of [7, null, "Bad Tag!"]) assert.equal((await op.send("send", { kind: "message", text: "tagged", thread }) as { status?: number }).status, 400, String(thread));
+	assert.equal(op.requests().length, sent, "a dashboard send with a bad tag never reaches pi");
+
+	const job = await call({ ...answer, job_id: "cp-ans" });
+	assert.equal(job.details.state, "posted");
+	const again = await call({ ...answer, job_id: "cp-ans", thread: "billing" });
+	assert.equal(again.details.state, "duplicate");
+	assert.equal(again.details.thread, undefined);
+	assert.match(again.text, new RegExp(`thread billing: ${job.details.id} was not re-filed`));
+	assert.equal(lines().length, 3, "a duplicate answer files nothing");
+
+	const opened = await call({ action: "ask", ask, thread: "  Q3   plan\tB " });
+	assert.equal(opened.isError, false, opened.text);
+	const parsed = JSON.parse(opened.text) as { id: string; state: string; thread: { tag: string; id: string; error: null } };
+	assert.match(parsed.id, /^ask-[a-f0-9]+$/);
+	assert.deepEqual([parsed.state, parsed.thread.tag], ["open", "q3-plan-b"]);
+	assert.deepEqual(opened.details.thread, parsed.thread);
+	assert.deepEqual(lines().slice(-2).map((row) => [row.type, row.tag ?? row.ref]), [["open", "q3-plan-b"], ["bind", { kind: "ask", id: parsed.id }]]);
+	assert.equal("thread" in JSON.parse(read("asks.jsonl")!.trim()), false, "asks.jsonl keeps today's keys");
+	assert.ok(JSON.stringify(await s.get("/api/decisions")).includes(parsed.id), "the Decisions screen still lists the ask");
+
+	// thread_bind files job refs on the operator side only: normalized, idempotent, newest bind wins, kinds apart.
+	const books = () => [read("answers.jsonl"), read("asks.jsonl")];
+	const kept = books();
+	const mark = lines().length;
+	const jobs = ["cp-one", "other_TWO-2", "9", "x".repeat(128)];
+	const bound = await call({ action: "thread_bind", thread: "  Billing Bug ", job_ids: jobs });
+	assert.equal(bound.isError, false, bound.text);
+	assert.equal(bound.details.state, "filed");
+	const bugs = lines().slice(mark);
+	assert.deepEqual(bugs.map((row) => [row.type, row.by, row.peer]), [["open", "bridge", null], ...jobs.map(() => ["bind", "bridge", null])]);
+	assert.deepEqual([bugs[0]!.tag, bugs.slice(1).map((row) => row.ref)], ["billing-bug", jobs.map((id) => ({ kind: "job", id }))]);
+	await call({ action: "thread_bind", thread: "billing-bug", job_ids: jobs });
+	assert.equal(lines().length, mark + 5, "a repeat bind writes nothing");
+	await call({ action: "thread_bind", thread: "billing", job_ids: [first.details.id] });
+	await call({ action: "thread_bind", thread: "billing", job_ids: [first.details.id] });
+	assert.deepEqual(lines().slice(mark + 5).map((row) => row.ref), [{ kind: "job", id: first.details.id }], "a job id equal to an answer id binds once, as its own kind");
+	await call({ action: "thread_bind", thread: "ops", job_ids: ["cp-one", first.details.id] });
+	const view = new Map(((await threads()).threads as Json[]).map((row) => [row.tag, row]));
+	assert.equal(view.get("billing")!.counts.answers, 2, "moving the job leaves the answer of the same id filed");
+	assert.deepEqual(lines().slice(-3).map((row) => [row.type, row.tag ?? row.ref]), [["open", "ops"], ["bind", { kind: "job", id: "cp-one" }], ["bind", { kind: "job", id: first.details.id }]]);
+	assert.deepEqual(books(), kept, "thread_bind posts no answer and opens no ask");
+	assert.equal(existsSync(join(s.state, "parent.lock")), false, "no parent started for bookkeeping");
+
+	const journal = read("threads.jsonl");
+	for (const params of [
+		{ thread: "bad!", job_ids: ["cp-one"] }, { job_ids: ["cp-one"] },
+		{ thread: "ok" }, { thread: "ok", job_ids: [] },
+		...[["cp-one", "../bad"], ["cp-one", ""], ["cp-one", "x".repeat(129)]].map((job_ids) => ({ thread: "ok", job_ids })),
+	]) {
+		assert.equal((await call({ action: "thread_bind", ...params })).isError, true, JSON.stringify(params));
+	}
+	assert.equal(read("threads.jsonl"), journal, "every field is checked before the first bind");
+	const lone = await call({ action: "thread_bind", thread: "ops", job_ids: "cp-one" });
+	assert.deepEqual([lone.isError, lone.details.state], [false, "filed"], "pi's schema coerces a lone id (or 7) to a valid id list");
+
+	// An unwritable journal: the answer and the ask still land, the result says NOT filed and is no error.
+	const aside = `${operatorFile("threads.jsonl")}.aside`;
+	renameSync(operatorFile("threads.jsonl"), aside);
+	mkdirSync(operatorFile("threads.jsonl"));
+	const posted = await call({ ...answer, question: "Unfiled?", thread: "billing" });
+	assert.deepEqual([posted.isError, posted.details.state], [false, "posted"]);
+	assert.match(posted.text, /; thread billing NOT filed: .*threads\.jsonl/);
+	assert.deepEqual({ ...posted.details.thread, error: "x" }, { tag: "billing", id: null, error: "x" });
+	assert.match(read("answers.jsonl")!, new RegExp(posted.details.id));
+	const unfiledAsk = await call({ action: "ask", ask, thread: "billing" });
+	const unfiled = JSON.parse(unfiledAsk.text) as { id: string; thread: { id: null; error: string } };
+	assert.deepEqual([unfiledAsk.isError, unfiled.thread.id, unfiled.thread.error.length > 0], [false, null, true]);
+	assert.match(read("asks.jsonl")!, new RegExp(unfiled.id));
+	const blocked = await call({ action: "thread_bind", thread: "ok", job_ids: ["cp-one"] });
+	assert.deepEqual([blocked.isError, blocked.details.state], [false, "unfiled"]);
+	assert.match(blocked.text, /cp-one.*thread ok NOT filed: .*threads\.jsonl/);
+	assert.deepEqual(blocked.details.bindings, [{ job_id: "cp-one", tag: "ok", id: null, error: (blocked.details.bindings as Json[])[0]!.error }]);
+	assert.match((await threads()).warning, /^threads unavailable: .*threads\.jsonl: /);
+	rmSync(operatorFile("threads.jsonl"), { recursive: true });
+	renameSync(aside, operatorFile("threads.jsonl"));
+	chmodSync(operatorFile("threads.jsonl"), 0o400);
+	if (process.getuid?.() !== 0) assert.match((await call({ ...answer, question: "Read-only?", thread: "billing" })).text, new RegExp(`thread billing NOT filed: ${escape(operatorFile("threads.jsonl"))}: EACCES$`));
+});
+
+// P9d-threads-journal: GET /api/threads folds threads.jsonl in line order: done after the last bind, a later bind
+// reopens, the newest bind of a ref wins, a second open of one tag aliases, bad lines count as skipped, never throws.
+test("P9d-threads-journal: the viewer's thread list folds the journal in line order and names every unreadable line or file", { timeout: 60_000 }, async (t) => {
+	const s = await scratch(t);
+	const file = join(s.state, "operator", "threads.jsonl");
+	const [A, B, DC, ANS, ASK] = ["th-0123456789ab", "th-ba9876543210", "dc-20261006080000-89abcdef", "ans-a1b2c3d4e5f6", "ask-0a1b"];
+	const [T0, T1, T2] = ["2026-10-06T08:00:00Z", "2026-10-06T08:01:10Z", "2026-10-06T09:00:00Z"];
+	const write = (rows: Array<object | string>, torn = "") => {
+		mkdirSync(dirname(file), { recursive: true });
+		writeFileSync(file, `${rows.map((row) => typeof row === "string" ? row : JSON.stringify(row)).join("\n")}\n${torn}`);
+	};
+	const view = async () => (await s.get("/api/threads")) as Json;
+	const rows = async () => ((await view()).threads as Json[]).map((row) => [row.id, row.tag, row.state, row.counts.messages, row.counts.asks, row.counts.answers]);
+	assert.deepEqual([(await view()).availability, (await view()).threads], ["missing", []]);
+	assert.equal(existsSync(file), false, "reading creates nothing");
+
+	const opened = [
+		{ type: "open", by: "viewer", id: A, at: T0, tag: "billing-bug", peer: "100.64.0.7" },
+		{ type: "bind", by: "viewer", at: T0, thread: A, ref: { kind: "dashboard", id: DC }, peer: "100.64.0.7" },
+		{ type: "bind", by: "bridge", at: T1, thread: A, ref: { kind: "answer", id: ANS }, peer: null },
+		{ type: "done", by: "viewer", id: A, at: T2, peer: "100.64.0.7" },
+	];
+	write(opened);
+	assert.deepEqual([await rows(), (await view()).threads[0].done_at, (await view()).warning], [[[A, "billing-bug", "done", 1, 0, 1]], T2, null]);
+	write([...opened,
+		{ type: "open", by: "bridge", id: B, at: T2, tag: "other", peer: null },
+		{ type: "bind", by: "bridge", at: T2, thread: B, ref: { kind: "answer", id: ANS }, peer: null },
+		{ type: "bind", by: "bridge", at: T2, thread: A, ref: { kind: "ask", id: ASK }, peer: null },
+	]);
+	assert.deepEqual(new Set(await rows()), new Set([[A, "billing-bug", "open", 1, 1, 0], [B, "other", "open", 0, 0, 1]]), "a later bind reopens; the newest bind wins");
+
+	write([
+		{ type: "open", by: "viewer", id: A, at: T0, tag: "race", peer: null },
+		{ type: "open", by: "bridge", id: B, at: T0, tag: "race", peer: null },
+		{ type: "bind", by: "bridge", at: T1, thread: B, ref: { kind: "answer", id: ANS }, peer: null },
+		{ type: "bind", by: "viewer", at: T1, thread: A, ref: { kind: "dashboard", id: DC }, peer: null },
+		{ type: "done", by: "viewer", id: B, at: T2, peer: null },
+	]);
+	assert.deepEqual([await rows(), (await view()).warning], [[[A, "race", "done", 1, 0, 1]], null], "a second open of one tag aliases to the first id");
+
+	const one = [
+		{ type: "open", by: "viewer", id: A, at: T0, tag: "one", peer: null },
+		{ type: "bind", by: "viewer", at: T0, thread: A, ref: { kind: "dashboard", id: DC }, peer: null },
+		{ type: "bind", by: "viewer", at: T1, thread: A, ref: { kind: "dashboard", id: DC }, peer: null },
+	];
+	const bad = [
+		"not json", "null",
+		{ type: "open", by: "viewer", id: A, at: T1, tag: "again", peer: null },
+		{ type: "open", by: "viewer", id: "th-xyz", at: T1, tag: "bad-id", peer: null },
+		{ type: "open", by: "viewer", id: B, at: T1, tag: "Bad Tag", peer: null },
+		{ type: "bind", by: "viewer", at: T1, thread: B, ref: { kind: "dashboard", id: DC }, peer: null },
+		...[{ kind: "dashboard", id: "dc-1" }, { kind: "answer", id: "ans-short" }, { kind: "job", id: "../cp-1" }, { kind: "dashboard", id: [DC] }]
+			.map((ref) => ({ type: "bind", by: "viewer", at: T1, thread: A, ref, peer: null })),
+		{ type: "done", by: "viewer", id: B, at: T1, peer: null },
+		{ type: "done", by: "bridge", id: A, at: T1, peer: null },
+		{ type: "rename", by: "viewer", id: A, at: T1, tag: "two", peer: null },
+		{ type: "done", by: "viewer", id: A, at: "2026-10-06T09:00:00.123Z", peer: null },
+		{ type: "done", by: "someone", id: A, at: T1, peer: null },
+		{ type: "done", by: "viewer", id: A, at: T1 },
+	];
+	write([...one, ...bad]);
+	const skipped = await view();
+	assert.deepEqual([await rows(), skipped.threads[0].last_at], [[[A, "one", "open", 1, 0, 0]], T0], "a repeat bind is ignored, not counted");
+	assert.match(skipped.warning, new RegExp(`^${bad.length} unreadable line\\(s\\) in state/operator/threads\\.jsonl skipped`));
+
+	write(one.slice(0, 1), `{"type":"bind","by":"viewer","at":"${T1}","thread":"${A}"`);
+	assert.deepEqual([(await rows()).length, (await view()).warning], [1, null], "a torn last line is ignored");
+	writeFileSync(file, Buffer.alloc(16 * 1024 * 1024 + 1, 0x20));
+	const big = await view();
+	assert.deepEqual([big.availability, big.threads], ["unavailable", []]);
+	assert.match(big.warning, /threads\.jsonl is \d+ bytes, over the 16777216 byte cap; move it aside/);
+	rmSync(file);
+	mkdirSync(file);
+	assert.match((await view()).warning, /^threads unavailable: .*threads\.jsonl: /);
+});
+
+/** The base64 bytes of every image part of the user message carrying `needle`. */
+function imagesWith(request: RecordedRequest, needle: string): Buffer[] {
+	const message = (request.body.messages ?? []).find((item) => item.role === "user" && userTexts({ ...request, body: { ...request.body, messages: [item] } })[0]!.includes(needle));
+	const parts = Array.isArray(message?.content) ? message.content as Array<Record<string, any>> : [];
+	return parts.filter((part) => part.type !== "text").map((part) => Buffer.from(String(part.image_url?.url ?? part.data ?? "").replace(/^data:[^,]+,/, ""), "base64"));
+}
+
+// P9d-images: dashboard image and text-file attachments reach the operator's model through the real bridge: images
+// as resized image parts with one path line each, files inlined within budget; ids journaled, never bytes or contents.
+test("P9d-images: send_images and send_files hand the operator model image parts and bounded file text, refuse bad uploads, and fall back to a path", { timeout: 150_000 }, async (t) => {
+	const s = await scratch(t);
+	const uploads = mkdtempSync(join(tmpdir(), "cp-p9d-uploads-"));
+	t.after(() => rmSync(uploads, { recursive: true, force: true }));
+	const root = join(uploads, "root");
+	const op = await operator(t, s.home, "p9d-images", [{ kind: "text", text: "ok" }], { CP_UPLOAD_ROOT: root });
+	const stored = (n: number) => Array.from({ length: n }, (_, i) => { const id = newUploadId("png", new Date()); writeUpload(root, id, syntheticPng(2 + i, 2)); return id; });
+	const pathLine = (id: string) => `image: ${uploadFile(root, id)} (deleted after 7 days; copy it if needed longer)`;
+	const status = (await op.send("status", {})) as Json;
+	assert.deepEqual([status.result.images, status.result.files], [true, true], "status advertises both capabilities");
+
+	const [one] = stored(1);
+	const reply = (await op.send("send_images", { kind: "message", text: "what is this?", images: [one] })) as Json;
+	assert.equal(reply.ok && reply.result.state, "delivered", JSON.stringify(reply));
+	const asked = await op.seen("what is this?");
+	assert.match(asked, new RegExp(`^what is this\\?\\n\\n${escape(pathLine(one!))}\\n\\n\\[cp-dashboard dc-\\d{14}-[0-9a-f]{8} — from the dashboard; images=${escape(one!)}\\]$`));
+	const [png] = imagesWith(op.requests().at(-1)!, "what is this?");
+	assert.equal(png?.subarray(1, 4).toString("latin1"), "PNG", "a real PNG, resized by pi, as an image part");
+
+	const three = stored(3);
+	assert.ok((await op.send("send_images", { kind: "message", text: "", images: three })).ok);
+	const bare = await op.seen(pathLine(three[0]!));
+	assert.equal(bare.split("\n\n").slice(0, -1).join("\n\n"), three.map(pathLine).join("\n"), "one path line per image, in order; no text");
+	assert.match(bare.split("\n").at(-1)!, new RegExp(`; images=${three.map(escape).join(",")}\\]$`), "the marker lists the ids in order, last");
+	const parts = imagesWith(op.requests().at(-1)!, pathLine(three[0]!));
+	assert.equal(parts.length, 3);
+	assert.ok(parts.every((part) => part.length <= inlineBudget(3)), "each image within the per-message budget");
+	assert.deepEqual(s.journal().filter((row) => row.type === "request").map((row) => row.images), [[one], three]);
+	assert.equal(readFileSync(controlJournalFile(s.state), "utf8").includes("iVBOR"), false, "no image bytes in the journal");
+
+	const before = op.requests().length;
+	for (const images of [[], ["../../etc/passwd"], [one, one], Array.from({ length: 9 }, () => newUploadId("png", new Date())), "x"]) {
+		const refused = await op.send("send_images", { kind: "message", text: "x", images });
+		assert.deepEqual(refused.ok ? null : [refused.status, refused.error], [400, "images must be 1-8 distinct upload ids"], JSON.stringify(images));
+	}
+	const gone = newUploadId("png", new Date());
+	const missing = await op.send("send_images", { kind: "message", text: "x", images: [one, gone] });
+	assert.deepEqual(missing.ok ? null : [missing.status, missing.error], [410, `image ${gone} expired or was never uploaded; attach it again`]);
+	assert.equal(op.requests().length, before, "a refused attachment never reaches the model");
+
+	const broken = newUploadId("png", new Date());
+	writeUpload(root, broken, Buffer.concat([syntheticPng(2, 2).subarray(0, 16), Buffer.from("garbage")]));
+	const brokenReply = await op.send("send_images", { kind: "message", text: "see", images: [broken] });
+	assert.ok(brokenReply.ok, JSON.stringify(brokenReply));
+	const fallback = await op.seen("could not be attached inline");
+	assert.ok(fallback.startsWith(`see\n\n[image ${broken} could not be attached inline; file: ${uploadFile(root, broken)}]\n\n${pathLine(broken)}\n\n[cp-dashboard `), fallback);
+	assert.deepEqual(imagesWith(op.requests().at(-1)!, "could not be attached inline"), [], "no image part when pi cannot resize it");
+	assert.match(String(s.journal().find((row) => row.id === (s.journal().find((item) => item.type === "request" && (item.images as string[] | undefined)?.[0] === broken)?.id) && row.state === "injected")?.reason), /1 image\(s\) sent as a file path \(resize failed\)/);
+
+	const bytes = Buffer.from("UNIQUE_FILE_CONTENT\n```\n~~~~\n" + "é".repeat(400_000));
+	const files = Array.from({ length: 3 }, () => newUploadId("md", new Date()));
+	for (const id of files) {
+		writeUpload(root, id, bytes);
+		assert.ok(appendControlAudit(s.state, { type: "upload", by: "viewer", id, at: new Date().toISOString(), peer: null, mime: "text/plain", bytes: bytes.length, name: "original.md" }).ok);
+	}
+	assert.ok((await op.send("send_files", { kind: "message", text: "", files, thread: "notes" })).ok);
+	const inlined = await op.seen("File: original.md");
+	assert.match(inlined.split("\n").at(-1)!, new RegExp(`; thread=notes; files=${files.map(escape).join(",")}\\]$`));
+	const body = inlined.slice(0, inlined.lastIndexOf("\n")).trimEnd();
+	assert.ok(Buffer.byteLength(body) <= TEXT_MESSAGE_INLINE_BYTES);
+	assert.doesNotMatch(body, /\uFFFD/, "truncated on a UTF-8 boundary");
+	for (const id of files) assert.ok(body.includes(`[truncated — full file at ${uploadFile(root, id)}]`), id);
+	assert.equal((body.match(/File: original.md/g) ?? []).length, 3);
+	assert.deepEqual(imagesWith(op.requests().at(-1)!, "File: original.md"), [], "files are text only");
+	assert.deepEqual(s.journal().find((row) => (row.files as string[] | undefined)?.[0] === files[0])?.files, files);
+	assert.equal(readFileSync(controlJournalFile(s.state), "utf8").includes("UNIQUE_FILE_CONTENT"), false, "no file contents in the journal");
+	const sent = op.requests().length;
+	for (const bad of [[], [files[0], files[0]], [newUploadId("png", new Date())]]) assert.equal((await op.send("send_files", { kind: "message", text: "", files: bad })).ok, false);
+	writeFileSync(uploadFile(root, files[0]!)!, Buffer.from([0xc3, 0x28]));
+	const mutated = await op.send("send_files", { kind: "message", text: "", files: [files[0]] });
+	assert.equal(mutated.ok ? null : mutated.status, 400, "a file changed into invalid UTF-8 is refused on revalidation");
+	assert.equal(op.requests().length, sent);
+
+	const [image] = stored(1);
+	const note = newUploadId("md", new Date());
+	writeUpload(root, note, Buffer.from("notes\n"));
+	assert.ok((await op.send("send_images", { kind: "message", text: "remote look", images: [image], remote: PHONE })).ok);
+	assert.ok((await op.send("send_files", { kind: "message", text: "remote read", files: [note], remote: PHONE })).ok);
+	for (const [needle, kind] of [["remote look", "images"], ["remote read", "files"]] as const) {
+		const lines = (await op.seen(needle)).split("\n");
+		assert.equal(lines.at(-2), line(PHONE_SENT), `${kind}: the device line sits right above the marker`);
+		assert.match(lines.at(-1)!, new RegExp(`^\\[cp-dashboard dc-\\d{14}-[0-9a-f]{8} — from the dashboard; ${kind}=[^;]+; remote\\]$`));
+	}
+	assert.equal(imagesWith(op.requests().find((item) => userTexts(item).some((text) => text.includes("remote look")))!, "remote look").length, 1, "the image still goes inline");
+	assert.deepEqual(s.journal().filter((row) => row.type === "request" && row.remote).map((row) => row.remote), [PHONE, PHONE]);
+});
+
+function escape(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
