@@ -49,6 +49,7 @@ import {
 	treehouseAvailable,
 	waitFor,
 } from "../harness/index.ts";
+import { recordGateSpend, recordSpend } from "../harness/live.ts";
 
 const SKIP = treehouseAvailable() ? false : "m3 needs treehouse on PATH";
 
@@ -484,6 +485,11 @@ test("m3: research → gate (revise, then pass) → checkpoint → implement", {
 	assert.equal(passVerdict.verdict, "pass");
 	assert.equal(passVerdict.cause, null);
 	assert.equal(passVerdict.attempt, 2);
+	// P8c (behavior 04): each reviewer's spend is its own run's, never the planner's it reviewed; the live suite's
+	// accountant reads exactly that, and an attempt that spawned no reviewer costs nothing.
+	const gateSpend = (attempt: number) => recordGateSpend("m3", f.home, researchId, attempt).tokens;
+	assert.deepEqual([1, 2, 3].map(gateSpend), [950, 950, 0], "one verdict call per reviewer; attempt 3 never ran");
+	assert.equal(recordSpend("m3", f.home, researchId).tokens, 3_100, "the planner's own calls only, no reviewer tokens");
 	assert.equal(pass.state, "implementing");
 	assert.deepEqual(f.asked, [shipId], "the human was asked exactly once");
 
