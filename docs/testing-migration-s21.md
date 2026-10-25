@@ -3,7 +3,8 @@
 Owner: cp-e2e-slice-s21-5gtl. Original source: `tests/wakeup-journal.test.ts`, now retired.
 22 declarations: **15 mapped, 7 retained/moved verbatim, 0 pending, 1 original path retired**.
 Retained share: 31.8%. The mixed retained replacement is not deletion credit: net file count is unchanged.
-The seven structural/documentation declarations live in `tests/wakeup-journal-retained.test.ts`.
+The seven structural/documentation declarations live in `tests/wakeup-journal-retained.test.ts`; P4 later mapped
+declarations 2, 16 and 7's phrase asserts and removed them ([P4 ledger](testing-migration/p4.md)).
 
 ## Long recovery-set proof
 

@@ -712,7 +712,9 @@ test("S21: restart delivers an unobserved death once and discards obsolete fleet
 	await waitFor(() => provider.requests(script).length, (n) => n > before, { timeoutMs: 15_000, what: "restart inspection turn" });
 	const restartText = JSON.stringify(provider.requests(script).slice(before).map((r) => r.body.messages));
 	assert.doesNotMatch(restartText, /S21_LIVE_DEATH|S21_OBSOLETE/);
-	assert.equal(JSON.parse(readFileSync(join(home.path, LAYOUT.wakeupsFile), "utf8")).delivered.filter((row: { id: string }) => row.id === "death:cp-live:1").length, 1);
+	// The literal path pins the documented outbox location an existing home already holds (docs/storage.md).
+	const onDisk = JSON.parse(readFileSync(join(home.path, ".pi-command-post/state/wakeups.json"), "utf8"));
+	assert.equal(onDisk.delivered.filter((row: { id: string }) => row.id === "death:cp-live:1").length, 1);
 });
 
 
