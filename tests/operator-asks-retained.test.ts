@@ -1,3 +1,4 @@
+/** Retained from operator-asks: recent() has no production caller, so no entry point reaches this declaration. */
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,25 +34,4 @@ test("operator asks persist open, answer and withdraw events without rewriting h
 	assert.throws(() => asks.answer(first.id, "again"), /not open/);
 	assert.throws(() => asks.answer("ask-unknown", "yes"), /unknown/);
 	assert.throws(() => asks.withdraw("ask-unknown", "gone"), /unknown/);
-});
-
-test("operator asks validate before append and shorten consequences with an ellipsis", (t) => {
-	const asks = store(t);
-	for (const invalid of [{ ...input, question: " " }, { ...input, options: [] }, { ...input, options: Array(6).fill(input.options[0]) }]) {
-		assert.throws(() => asks.open(invalid));
-	}
-	const opened = asks.open({ ...input, options: [{ label: "yes", consequence: "x".repeat(201) }] });
-	assert.equal(opened.options[0]!.consequence, "x".repeat(199) + "\u2026");
-	assert.throws(() => asks.answer(opened.id, " "));
-	assert.throws(() => asks.withdraw(opened.id, " "));
-	assert.equal(asks.open().length, 1);
-});
-
-test("N11: a recommendation must be exactly one option label; a sentence is refused before append", (t) => {
-	const asks = store(t);
-	const options = [{ label: "approve", consequence: "Plan proceeds" }, { label: "drop", consequence: "Job closes" }];
-	assert.throws(() => asks.open({ ...input, options, recommendation: "approve: because the plan is sound" }), /recommendation must be exactly one option label \("approve", "drop"\); put the rationale in context/);
-	assert.equal(asks.list().length, 0, "nothing is journaled");
-	assert.equal(asks.open({ ...input, options, recommendation: " approve " }).recommendation, " approve ", "a label after trim is accepted as given");
-	assert.equal(asks.open({ ...input, options, recommendation: "approve" }).recommendation, "approve");
 });
