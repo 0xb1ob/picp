@@ -301,6 +301,11 @@ test("S21: budget and provider failures reach the durable death journal", { skip
 		assert.equal(f.post.fleet.require(jobId).failure?.class, cls);
 		assert.match(entries[0]?.content ?? "", /on disk:/);
 		assert.match(entries[0]?.content ?? "", /cp_teardown/);
+		if (cls !== "budget_exceeded") continue;
+		const escalated = await waitFor(() => f.post.escalations.list({ jobId }).map((row) => JSON.stringify(row)), (rows) => rows.length === 1,
+			{ timeoutMs: 15_000, what: "the budget breach's policy escalation" });
+		assert.match(escalated[0] ?? "", /policy cause/, "a budget breach escalates on its first occurrence");
+		assert.equal(existsSync(join(f.home, paths.recoveryAttemptsFile(jobId))), false, "and spends no recovery attempt");
 	}
 });
 

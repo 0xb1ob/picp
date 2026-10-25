@@ -120,7 +120,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | Memory (three files, budgets, tiers, decay, capture/curation, retrieval) | ported | [`src/memory.ts`](../src/memory.ts) + `skills/cp-memory` | `tests/memory.test.ts` |
 | Curation as a human-run pass ("a curation pass promotes ones that generalize") | mechanised | the pass is the parent's own ([`src/curation.ts`](../src/curation.ts)): promotion is bounded (3/day, 60-line ceiling), never pinned, evidence-required, append-only and journalled to `data/curation.jsonl` before the file changes; a superseded/disproven candidate is permanently unpromotable; retirement is a reason+evidence move to the archive | `tests/curation.test.ts` (one test per property) |
 | State files: never commit `data/ state/ projects/` | mechanised | `NEVER_COMMIT_PATHS` + guard blocks `git add/commit/push` and bulk staging in the home | `tests/guards.test.ts` |
-| Slack tokens in `state/slack/tokens.env` (mode 600) | out of scope | no Slack; brief secret-scanning covers the general hazard | `tests/worker-manager.test.ts` (`assertBriefIsSafe`) |
+| Slack tokens in `state/slack/tokens.env` (mode 600) | out of scope | no Slack; brief secret-scanning covers the general hazard | `tests/e2e/worker-lifecycle-p8e.test.ts` (P8e brief guard, `assertBriefIsSafe`) |
 
 ## 4. Reports (ported *knowledge*, not prose)
 
