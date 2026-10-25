@@ -1,15 +1,11 @@
 /**
  * Retained (P12b): from tests/daemon-tunnel.test.ts a restart cancelled by an update hold and a lost exit report, which
- * no entry point reaches; from tests/daemon-tunnel-files.test.ts the binding reader, whose consumers are p12c's.
+ * no entry point reaches. The binding reader moved out in P12c: the device-notify sender pins it end to end.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { test } from "node:test";
-import { LAYOUT } from "../src/contracts.ts";
 import { type TunnelPorts, tunnelController } from "../src/service/daemon-tunnel.ts";
-import { readTunnelBinding, type TunnelConfig, type TunnelConfigRead, type TunnelRuntime, tunnelRuntimeFile } from "../src/service/daemon-tunnel-files.ts";
-import { createScratchHome } from "./harness/index.ts";
+import type { TunnelConfig, TunnelConfigRead, TunnelRuntime } from "../src/service/daemon-tunnel-files.ts";
 
 const T0 = Date.parse("2026-10-01T00:00:00.000Z");
 const BIN = "/opt/cf/cloudflared";
@@ -110,22 +106,4 @@ test("stop settles even when a SIGKILLed child never reports its exit: logged, t
 	assert.deepEqual([b.last()?.state, b.last()?.pid], ["stopped", undefined]);
 	assert.match(b.lines.join("\n"), new RegExp(`cloudflared pid ${pid} did not report its exit 10s after SIGKILL`));
 	assert.equal(b.kills.length, 2, "no further signal");
-});
-
-// From tests/daemon-tunnel-files.test.ts: the binding's consumers (device-notify, the push sweep) are p12c's files.
-test("the binding: none published is null, the last published origin and generation whatever the state, anything malformed refused", (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const stateDir = join(home.path, LAYOUT.state);
-	mkdirSync(stateDir, { recursive: true });
-	assert.deepEqual(readTunnelBinding(stateDir), { ok: true, binding: null });
-	const write = (value: unknown) => writeFileSync(tunnelRuntimeFile(stateDir), typeof value === "string" ? value : JSON.stringify(value));
-	write({ schema_version: 1, generation: 3, origin: "https://abc.trycloudflare.com", state: "stopped" });
-	assert.deepEqual(readTunnelBinding(stateDir), { ok: true, binding: { origin: "https://abc.trycloudflare.com", generation: 3 } });
-	write({ schema_version: 1, generation: 0, origin: null });
-	assert.deepEqual(readTunnelBinding(stateDir), { ok: true, binding: null }, "starting, no origin yet");
-	for (const bad of ["{torn", { schema_version: 2, generation: 1, origin: null }, { schema_version: 1, generation: -1, origin: null }, { schema_version: 1, generation: 1.5, origin: null }, { schema_version: 1, generation: 1, origin: "http://abc.trycloudflare.com" }, { schema_version: 1, generation: 1 }, []]) {
-		write(bad);
-		assert.equal(readTunnelBinding(stateDir).ok, false, JSON.stringify(bad));
-	}
 });

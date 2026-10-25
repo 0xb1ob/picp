@@ -1,7 +1,6 @@
-/**
- * P12 (behavior 16), slice 3: paired devices through real processes — `bin/cp-view` (owner socket, local and remote
+/** P12 (behavior 16), slice 3: paired devices through real processes — `bin/cp-view` (owner socket, local and remote
  * listeners), the `device-notify` sender cp-daemon runs, `bin/cp-tunnel`, and a stand-in push service behind
- * tests/harness/fake-fetch.ts. The tunnel records are seeded on disk; tests/e2e/remote-tunnel.test.ts drives cloudflared.
+ * tests/harness/fake-fetch.ts. Tunnel records are seeded on disk; tests/e2e/remote-tunnel.test.ts drives cloudflared.
  */
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
@@ -58,7 +57,7 @@ const json = (file: string): Record<string, unknown> | undefined => {
 };
 const codeOf = (link: unknown): string => String(link).split("#")[1]!;
 const mode = (path: string) => statSync(path).mode & 0o777;
-/** Raw bytes to the owner socket; resolves with everything it said before closing. */
+/** Raw bytes to the owner socket; resolves with everything it said before closing, or within five seconds. */
 const raw = (path: string, data: string): Promise<string> =>
 	new Promise((done) => {
 		const socket = createConnection(path);
@@ -68,6 +67,7 @@ const raw = (path: string, data: string): Promise<string> =>
 		socket.on("close", () => done(text));
 		socket.on("error", () => {});
 		socket.once("connect", () => socket.write(data));
+		setTimeout(() => socket.destroy(), 5_000).unref();
 	});
 
 /**
@@ -585,6 +585,13 @@ test("P12c-store: a pairing keeps only hashes and hands a __Host- session out on
 	assert.deepEqual(await refusal(s.claim(viewCode, "p", { level: "full" })), [403, "level_mismatch"]);
 	for (const name of ["", "   ", "a\u0007b", "x".repeat(81), 42]) assert.deepEqual(await refusal(s.claim(viewCode, name)), [400, "name_invalid"], JSON.stringify(name));
 	const tablet = await s.pair("Tablet", "view", viewCode);
+	const devicesToken = await s.token(); // given anyway, so only the level can refuse
+	const post = async (path: string, cookie: string, body: Record<string, unknown>) => {
+		const reply = await s.r(path, { method: "POST", headers: { cookie, origin: ORIGIN, "content-type": "application/json", "x-cp-control-token": devicesToken }, body: JSON.stringify(body) });
+		return [reply.status, reply.body.error];
+	};
+	assert.deepEqual(await post("/api/pair/create", phone.cookie, {}), [403, "pairing codes are issued only by the terminal or a loopback/tailnet dashboard"], "a remote Full device never mints");
+	assert.deepEqual(await post("/api/devices/revoke", tablet.cookie, { id: phone.id }), [403, "View-only devices cannot revoke"]);
 	assert.deepEqual(await refusal(s.claim(await s.issue(), "tablet")), [409, "name_taken"]);
 	const failedAudits = s.journal().filter((line) => line.event === "claim_refused").map((line) => line.reason);
 	assert.ok(failedAudits.includes("code_invalid") && failedAudits.includes("name_taken"), "failed claims leave a failure audit");
