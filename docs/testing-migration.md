@@ -94,23 +94,20 @@ ask-0088e0332d00, 2026-10-21.
 | P10c (cp-e2e-migration-p10c-u1pm) | behavior 09, third slice: cp_status_block's Awaiting-you rows (P10c-rows) and the inherited answered decision (answered-restart moved under tests/e2e/). 10 mapped, 1 retained verbatim, operator-decide-vs-ask-evals `retained` (no production caller); [ledger and controls](testing-migration/p10c.md). The 7 behavior-09 files outside #511, #514 and this slice stay `convert` / P10 | 2 (`tests/answered-restart.test.ts`, `tests/awaiting-rows.test.ts`) | 422 → 423 | 3,817 → 3,810 |
 | P9c (cp-e2e-migration-p9c-bqj7) | behavior 11, command output and operator session record slice: `tests/output.test.ts` through a real pi TUI on a pty, RPC and `pi -p` (P9-output-tui, P9-output-headless); `tests/operator-session-log.test.ts` through real cp-bridge `cp_parent` calls and the viewer (P9-session-log). 14 assertions mapped, 0 retained; [ledger and controls](testing-migration/p9.md) NC-P9c-01..17 | 2 (`tests/output.test.ts`, `tests/operator-session-log.test.ts`) | 423 → 423 | 3,812 → 3,808 (base: P10c's 3,810 plus #517's two checker tests; 7 removed, 3 e2e added) |
 
-S06 foreign-watch proof: the source file's blob before deletion was `537b98df76fc920162dc01aeb31cea9775f3a4ab`.
-V8 e2e-only captures on both sides of deletion each include nine product processes and cover 338 lines of
-`src/foreign-ci-watch.ts`, with no gained or lost lines (source SHA-256
-`2ccacd9909526f0cf24520f979996baf78f6ccfc560a31700ffdbcd050200276`). Captures and the comparison command
-live in the S06 artifact directory. Comparing the direct unit capture to e2e gives nine apparent lost lines,
+S06 foreign-watch proof: V8 e2e-only captures on both sides of deletion each include nine product processes and
+cover 338 lines of `src/foreign-ci-watch.ts`, with no gained or lost lines. Comparing the direct unit capture to e2e
+gives nine apparent lost lines,
 373–381, all in `formatForeignCiNotice`: pi transforms extension imports, so raw child V8 offsets alone do not
 prove source-mapped coverage of that formatter. S06-1 instead pins its actual operator RPC/UI notice: the foreign
 PR URL, green head, and evidence-only disclaimer. The retained test covers static import/port inspection.
 S06-timeout and S06-moved are semantic mutations run against the real entry-point scenarios; both fail their
 named assertions and the fixed 15-case file passes without skips before and after deleting the source file.
 
-S06 forge-runtime proof: original blob `042537e3e52c67ad40c2feaa63f0a5f1c4ebcdac`; the three retained
-regression bodies are unchanged. E2e-only V8 captures before/after retirement each include nine product
-processes and cover 94 lines of `src/forge-runtime.ts`, with no lost or gained lines (SHA-256
-`f7025eb885c798fb40b3f815ba62583213ca8209585f10d236ea9b4a53030017`). The fixed landing file passes
+S06 forge-runtime proof: the three retained regression bodies are unchanged. E2e-only V8 captures before/after
+retirement each include nine product processes and cover 94 lines of `src/forge-runtime.ts`, with no lost or gained
+lines. The fixed landing file passes
 17/17 without skips; the retained file passes 3/3. Legacy-fallback and configured-trunk controls fail the
-actual merge recording and teardown outcome, respectively. Patch blocks use zero context (`git apply --unidiff-zero`).
+actual merge recording and teardown outcome, respectively.
 
 S02 follows the operator's split-file amendment: a range slice adds consumer evidence without removing or moving any
 unit declaration. At S02 delivery, `tests/ci-watch.test.ts` remained 80 static declarations / 89 executed cases.
@@ -335,58 +332,15 @@ M4–M6 use `npm run test:one -- --test-name-pattern='cp_merged reads a GitLab' 
 L1 uses `npm run test:one -- --test-name-pattern='cp_teardown passes a deleted branch' tests/e2e/landing-forge-ci.test.ts`.
 Every run exited 1 with one failing case and no skips; failures below are observed output, not predictions.
 
-| Control | Observed failure |
-|---|---|
-| M1 | receipt tuple: actual `head_branch_deleted: false`, expected `true` |
-| M2 | `AssertionError: force stays the exit for the unprovable case`; expected `/cp_teardown <job> force/` |
-| M3 | expected `/carries no PR receipt/`, actual `could not read PR 77` |
-| M4 | MR 7 receipt tuple: actual `unknown`, expected `squash` |
-| M5 | receipt repair tuple: actual `[false,false,'open',1]`, expected `[false,true,'merged',1]` |
-| M6 | expected `/could not read PR .*\(mismatch: /`, actual `merged but names no merge commit` |
-| L1 | `post-squash extra commit remains unlanded`: actual `[true,undefined]` (`landed_by_git`), expected `[false,'unpushed']` |
-
-M1 (`src/merges.ts`):
-```diff
-@@ -279,1 +279,1 @@
--			...(onRemote === undefined ? {} : { head_branch_deleted: !onRemote }),
-+			...(onRemote === undefined ? {} : { head_branch_deleted: onRemote }),
-```
-M2 (`src/merges.ts`):
-```diff
-@@ -208,1 +208,1 @@
--					`cp_teardown ${jobId} can still pass on git evidence when the work is in the base's history; only if neither can prove it, cp_teardown ${jobId} force — which proves nothing, and records that.`,
-+					`cp_teardown ${jobId} can still pass on git evidence when the work is in the base's history.`,
-```
-M3 (`src/merges.ts`):
-```diff
-@@ -193,1 +193,1 @@
--		const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts);
-+		const pr = request.pr?.trim() || prUrlFromReceipts(record.receipts) || "77";
-```
-M4 (`src/merges.ts`):
-```diff
-@@ -268,1 +268,1 @@
--		const strategy = request.strategy ?? (view.provider === "gitlab" ? (view.squash_commit_sha ? "squash" : "unknown") : undefined);
-+		const strategy = request.strategy ?? (view.provider === "gitlab" ? "unknown" : undefined);
-```
-M5 (`src/merges.ts`):
-```diff
-@@ -190,1 +190,1 @@
--			return { receipt: existing, recorded: false, receipt_status_updated: await this.#markReceiptMerged(jobId, existing) };
-+			return { receipt: existing, recorded: false, receipt_status_updated: false };
-```
-M6 (`src/forges/gitlab.ts`):
-```diff
-@@ -148,1 +148,1 @@
--	if (!web || web.number !== iid || !changeRequestBelongsTo(web, repository)) return refuse("mismatch", "response web_url is not this project's merge request");
-+	if (false && (!web || web.number !== iid || !changeRequestBelongsTo(web, repository))) return refuse("mismatch", "response web_url is not this project's merge request");
-```
-L1 (`src/landing-proof.ts`):
-```diff
-@@ -147,1 +147,1 @@
--		const paths = (await run(["diff", "--name-only", "-z", ...DIFF, fork, head])).stdout.split("\0").filter(Boolean);
-+		const paths = (await run(["diff", "--name-only", "-z", ...DIFF, fork, `${head}^`])).stdout.split("\0").filter(Boolean);
-```
+| Control | Bug patched back | Observed failure |
+|---|---|---|
+| M1 | `src/merges.ts` records `head_branch_deleted` as the remote branch's presence, not its absence | receipt tuple: actual `head_branch_deleted: false`, expected `true` |
+| M2 | `src/merges.ts` drops the `cp_teardown <job> force` fallback advice from the unprovable refusal | `AssertionError: force stays the exit for the unprovable case`; expected `/cp_teardown <job> force/` |
+| M3 | `src/merges.ts`: a missing PR defaults to 77 | expected `/carries no PR receipt/`, actual `could not read PR 77` |
+| M4 | `src/merges.ts` records every GitLab merge strategy as unknown, never inferring squash | MR 7 receipt tuple: actual `unknown`, expected `squash` |
+| M5 | `src/merges.ts` never marks an existing receipt merged when repairing it | receipt repair tuple: actual `[false,false,'open',1]`, expected `[false,true,'merged',1]` |
+| M6 | `src/forges/gitlab.ts` skips the web_url same-project merge request check | expected `/could not read PR .*\(mismatch: /`, actual `merged but names no merge commit` |
+| L1 | `src/landing-proof.ts` derives changed paths through `HEAD^`, ignoring the final commit | `post-squash extra commit remains unlanded`: actual `[true,undefined]` (`landed_by_git`), expected `[false,'unpushed']` |
 
 ### P3c CI-watch negative controls
 
@@ -408,14 +362,13 @@ mapped, retained and removed counts; proof of a behavior alone does not count a 
 
 ## Negative controls
 
-Each patch was applied to this worktree's `src/` (no other checkout), `npm run test:one -- tests/e2e/ci-evidence.test.ts`
-run, the patch reversed, and the same command run again: 2 pass, 0 fail, 0 skipped. The bug commit is
-`90c1f22ba20c416abc9fc96b04addd07e2f58ed3` (#131), which added `src/ci-run-ref.ts`. Its whole diff is not
-reverted; each patch puts back one rule it introduced.
+A negative control is proven by running it: put the bug back in `src/`, run the scenario's e2e file with
+`npm run test:one`, see the named assertion fail, remove the bug and see it pass again. Nothing of that run is committed.
 
 A negative-control row needs only the scenario, the control (the bug patched back, in words) and the failing
 assertion: `| ID | Unit file | Scenario | Control | Failing assertion |`. Record no patch, commit sha or hash; the
-checker reads older 8-cell rows' patch id as their control and verifies none of their other cells.
+checker reads an older 8-cell row's Patch cell (a patch id or the control in words) as its control, fails it when
+empty, and verifies none of the row's other cells.
 
 <!-- manifest:regressions -->
 | ID | Unit file | Scenario | Control | Failing assertion |
