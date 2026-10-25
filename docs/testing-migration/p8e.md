@@ -3,7 +3,7 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P8e (cp-e2e-migration-p8e-sdwz) | behavior 04, fifth slice: spawn safety through cp_dispatch (04-27), the brief guard (04-28), the model-call look-alike (04-29), the episode-end exit (04-30), the spawn cap (04-31) and send receipts (04-32) in `tests/e2e/worker-lifecycle-p8e.test.ts`: `tests/worker-manager.test.ts` 10 mapped, 15 retained verbatim in `tests/worker-manager-retained.test.ts`; `tests/worker-process.test.ts` 3 mapped, 14 retained in `tests/worker-process-retained.test.ts`; the #531 review lows (S21-budget policy escalation, two budget-gate declarations kept verbatim, p8d rows and docstring) | 2 (`tests/worker-manager.test.ts`, `tests/worker-process.test.ts`) |
+| P8e (cp-e2e-migration-p8e-sdwz) | behavior 04, fifth slice: spawn safety through cp_dispatch (04-27), the brief guard (04-28), the model-call look-alike (04-29), the episode-end exit (04-30), the spawn cap (04-31) and send receipts (04-32) in `tests/e2e/worker-lifecycle-p8e.test.ts`, script jobs (04-33..04-35) in `tests/e2e/script-jobs-p8e.test.ts`: `tests/worker-manager.test.ts` 10 mapped, 15 retained; `tests/worker-process.test.ts` 3 mapped, 14 retained; `tests/script-jobs.test.ts` 8 mapped, 10 retained, each in its `-retained` file; `tests/harness.test.ts` retained whole as a harness test; the #531 review lows (S21-budget policy escalation, two budget-gate declarations kept verbatim, p8d rows and docstring) | 3 (`tests/worker-manager.test.ts`, `tests/worker-process.test.ts`, `tests/script-jobs.test.ts`) |
 <!-- /manifest:ledger -->
 
 P8e (job `cp-e2e-migration-p8e-sdwz`) is the fifth behavior-04 slice, on real pi workers through a real CommandPost.
@@ -26,10 +26,14 @@ split mid-line, a pi older than 0.99.1, a child closing its stdin) cannot be pro
 (the mock provider's errors, hangs and streamed deltas, the scripted pi child, the scratch repo, the state readers,
 the harness's own argv), which no command-post entry point reaches; a defect there fails every e2e case.
 
+`tests/script-jobs.test.ts` retains 10 of 18 (56%): six inject a crash between the write-ahead claim, the spawn, the
+pid write and the intake (a fault no parent can be timed into from outside); two drive `ScheduleRunner`, which nothing
+in src/ constructs; and two call the runner on a spawn error, or an untracked or traversing path, a lease never yields.
+
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
-| P8e | 04 | tests/e2e/worker-lifecycle-p8e.test.ts | 6 new |
+| P8e | 04 | tests/e2e/worker-lifecycle-p8e.test.ts, tests/e2e/script-jobs-p8e.test.ts | 9 new |
 <!-- /manifest:prs -->
 
 <!-- manifest:scenarios -->
@@ -41,6 +45,9 @@ the harness's own argv), which no command-post entry point reaches; a defect the
 | 04-30 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e episode end: a drained parent's shutdown leaves no worker alive and its held and waiting jobs revivable on the next start, none failed |
 | 04-31 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e spawn cap: at the cap another job is refused naming the live worker, the same job promotes instead of a second worker, and the slot frees on the observed close |
 | 04-32 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e send receipts: a busy worker queues a follow_up and a steer, refuses a bare prompt with pi's reason, and the steer reaches the model first |
+| 04-33 | tests/e2e/script-jobs-p8e.test.ts | P8e script dispatch: a script job leases its branch, intakes once, refuses every replay, and tears down only clean |
+| 04-34 | tests/e2e/script-jobs-p8e.test.ts | P8e script gates: a risk:high script is only previewed under ask_on and refused before any lease; a denied project refuses first |
+| 04-35 | tests/e2e/script-jobs-p8e.test.ts | P8e script runner: the home cap reaches the record and an override wins, a malformed cap refuses before a lease, and exit, timeout and signal each land as their own failure |
 <!-- /manifest:scenarios -->
 
 <!-- manifest:assertions -->
@@ -88,6 +95,24 @@ the harness's own argv), which no command-post entry point reaches; a defect the
 | tests/worker-process.test.ts | cp-xbxz: dialogOptions forwards the worker's signal, and omits the key when there is none | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: no worker dialog source. |
 | tests/worker-process.test.ts | decoder: a message_update is a delta, never a cumulative message snapshot | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: run-artifacts never persists message_update, so no worker output shows the decoded delta. |
 | tests/worker-process.test.ts | a request to a worker that closed its stdin rejects; the EPIPE is never an uncaught error | — | retained | Verbatim in tests/worker-process-retained.test.ts. Missing entry point: pi never closes its own stdin while alive. |
+| tests/script-jobs.test.ts | script dispatch leases a branch, intakes once, and cannot replay | 04-33 | mapped | moved through CommandPost unchanged; control NC-P8e-script-send |
+| tests/script-jobs.test.ts | script risk:high mandate refuses before leasing and dry_run only previews | 04-34 | mapped | preview says would ask, dispatch refuses, no record or branch; control NC-P8e-script-risk |
+| tests/script-jobs.test.ts | cp-7re9: a script job in a denied project is refused by preflight project_denied, before the risk:high gate and before any lease | 04-34 | mapped | project_denied with no record, branch or new escalation; the risk refusal before it is the original's own control |
+| tests/script-jobs.test.ts | script cap: home worker-bounds.json reaches the runner and the record; override wins; malformed refuses before lease | 04-35 | mapped | a malformed cap refuses preview and dispatch with no record; the home cap and an override land on the records, and the timeouts prove the runner got them; control NC-P8e-script-kill |
+| tests/script-jobs.test.ts | script runner observes exit and bounds stdout/stderr outside the worktree | 04-35 | mapped | script_exit, a truncated stdout tail, the worktree path and stderr in the home artifact; control NC-P8e-script-tail |
+| tests/script-jobs.test.ts | script timeout terminates a TERM-ignoring process group | 04-35 | mapped | wall_clock_exceeded at the 1 s home cap; control NC-P8e-script-kill |
+| tests/script-jobs.test.ts | timeout kills an inherited TERM-ignoring descendant after its shell closes | 04-35 | mapped | the descendant's pid is gone after the timeout; control NC-P8e-script-kill |
+| tests/script-jobs.test.ts | script signal is recorded without guessing an exit code | 04-35 | mapped | script_signal with SIGTERM and a null exit code on the record; control NC-P8e-script-signal |
+| tests/script-jobs.test.ts | schedlater S1: a script_path schedule runs with no model; a refused teardown wakes the parent, live and after a restart, until the runner tears it down | — | retained | Verbatim in tests/script-jobs-retained.test.ts. Missing entry point: ScheduleRunner has no constructor call in src/. |
+| tests/script-jobs.test.ts | schedlater S1: a runner fire over its run's parallelism is refused by the real dispatch gate, noted, never woken, and dropped at the next slot | — | retained | Verbatim in tests/script-jobs-retained.test.ts. Missing entry point: ScheduleRunner has no constructor call in src/. |
+| tests/script-jobs.test.ts | post-lease occupancy refusal does not launch a script | — | retained | Verbatim in tests/script-jobs-retained.test.ts. Missing entry point: a lease that passes the pre-lease check and fails the post-lease one cannot be timed from outside. |
+| tests/script-jobs.test.ts | failed write-ahead fleet registration never starts a script | — | retained | Verbatim in tests/script-jobs-retained.test.ts. Missing entry point: a failing fleet write is an injected fault. |
+| tests/script-jobs.test.ts | launch claim survives a restart before spawn without inventing a pid | — | retained | Verbatim in tests/script-jobs-retained.test.ts. Missing entry point: a parent dying between the claim and the spawn is an injected fault. |
+| tests/script-jobs.test.ts | dispatch stamps a spawn error with no pid once | — | retained | Verbatim in tests/script-jobs-retained.test.ts. Missing entry point: /bin/sh is always spawnable; the missing shell is injected. |
+| tests/script-jobs.test.ts | durable spawn error on a pidless claim is stamped once after restart | — | retained | Verbatim in tests/script-jobs-retained.test.ts. Missing entry point: same injected missing shell, plus a seeded launching record. |
+| tests/script-jobs.test.ts | launch claim survives a restart after spawn but before the pid write | — | retained | Verbatim in tests/script-jobs-retained.test.ts. Missing entry point: a parent dying between the spawn and the pid write is an injected fault. |
+| tests/script-jobs.test.ts | restart intakes a durable script exit once instead of calling the dead pid a crash | — | retained | Verbatim in tests/script-jobs-retained.test.ts. Missing entry point: a live parent intakes the exit itself, so a restart that finds an unread result cannot be timed. |
+| tests/script-jobs.test.ts | script validation refuses symlinks and untracked files | — | retained | Verbatim in tests/script-jobs-retained.test.ts. Missing entry point for the untracked and traversal halves: a fresh lease holds only tracked files and the ledger refuses an unsafe scriptPath first; 04-35 pins the committed-symlink refusal (NC-P8e-script-link). |
 | tests/failures.test.ts | the soft gate warns before it breaches, and never kills | — | retained | P8e restores it verbatim in tests/failures-retained.test.ts. Missing entry point: the mock provider's cost table is zero, so no run reaches a cost-only breach. |
 | tests/failures.test.ts | cache_read is excluded from the budgeted token total (cp-d7y) | — | retained | P8e restores it verbatim in tests/failures-retained.test.ts. Same: its cost-only breach line needs a non-zero cost. |
 | tests/failures.test.ts | readModelCallError: assistant text that reads like a provider error is not a failed model call | 04-29 | mapped | a worker saying "401 Invalid API key" is nudged as an unreported settle, with no failure and no outer retry; control NC-P8e-look-alike |
@@ -111,6 +136,12 @@ the harness's own argv), which no command-post entry point reaches; a defect the
 | NC-P8e-cap | tests/worker-manager.test.ts | 04-31 | src/worker-manager.ts: the spawn-cap check never fires | Missing expected rejection |
 | NC-P8e-receipt | tests/worker-process.test.ts | 04-32 | src/worker-process.ts: a queued disposition reads delivered | the follow_up and steer receipts read delivered |
 | NC-P8e-refused | tests/worker-process.test.ts | 04-32 | src/worker-process.ts: a rejected send reads delivered | the bare prompt's receipt reads delivered |
+| NC-P8e-script-send | tests/script-jobs.test.ts | 04-33 | src/send.ts: a script record is not refused by cp_send | the send is refused for another reason, not cannot promote or replay |
+| NC-P8e-script-risk | tests/script-jobs.test.ts | 04-34 | src/script-dispatch.ts: the mandate gate is asked with risk low | Missing expected rejection |
+| NC-P8e-script-kill | tests/script-jobs.test.ts | 04-35 | src/script-runner.ts: the SIGKILL escalation is dropped | timed out waiting for the TERM-ignoring job's exit |
+| NC-P8e-script-tail | tests/script-jobs.test.ts | 04-35 | src/script-runner.ts: the stdout tail is never truncated | stdout is bounded to its tail |
+| NC-P8e-script-signal | tests/script-jobs.test.ts | 04-35 | src/intake.ts: a signal exit is classed script_exit | script_exit where script_signal was expected |
+| NC-P8e-script-link | tests/script-jobs.test.ts | 04-35 | src/script-runner.ts: a symlink component is not refused | Missing expected rejection |
 | NC-P8e-look-alike | tests/failures.test.ts | 04-29 | src/failures.ts: readModelCallError reads a 4xx/5xx in assistant text | timed out waiting for the report nudge |
 | NC-P8e-budget-policy | tests/recovery.test.ts | S21-budget | src/contracts/limits.ts: budget_exceeded revives | timed out waiting for the budget breach's policy escalation |
 | NC-P8e-budget-class | tests/failures.test.ts | S21-budget | src/failures.ts: the budget_exceeded marker is not read | timed out waiting for the budget_exceeded durable emitter |
@@ -122,6 +153,8 @@ the harness's own argv), which no command-post entry point reaches; a defect the
 | tests/e2e/worker-lifecycle-p8e.test.ts | P8e | behavior 04, spawn safety, the brief guard, the model-call look-alike, the episode-end exit and the spawn cap; scenarios 04-27..04-31 |
 | tests/worker-manager-retained.test.ts | P8e | convert-owned; 15 declarations of tests/worker-manager.test.ts retained verbatim, no e2e entry point |
 | tests/worker-process-retained.test.ts | P8e | convert-owned; 14 declarations of tests/worker-process.test.ts retained verbatim, no e2e entry point |
+| tests/e2e/script-jobs-p8e.test.ts | P8e | behavior 04, script jobs through cp_dispatch; scenarios 04-33..04-35 |
+| tests/script-jobs-retained.test.ts | P8e | convert-owned; 10 declarations of tests/script-jobs.test.ts retained verbatim, no e2e entry point |
 <!-- /manifest:incoming -->
 
 <!-- manifest:baseline -->
@@ -129,4 +162,5 @@ the harness's own argv), which no command-post entry point reaches; a defect the
 |---|---|---|---|
 | `tests/worker-manager.test.ts` | deleted | P8e | behavior 04: 10 mapped (04-27, 04-28, 04-30), 15 retained in tests/worker-manager-retained.test.ts; controls NC-P8e-min, NC-P8e-clamp, NC-P8e-brief-scan, NC-P8e-brief-echo, NC-P8e-strip, NC-P8e-cp-prefix, NC-P8e-artifact, NC-P8e-noninteractive, NC-P8e-trust, NC-P8e-quiesce, NC-P8e-closing, NC-P8e-cap |
 | `tests/worker-process.test.ts` | deleted | P8e | behavior 04: 3 mapped (04-20, 04-32), 14 retained in tests/worker-process-retained.test.ts; controls NC-P8e-receipt, NC-P8e-refused |
+| `tests/script-jobs.test.ts` | deleted | P8e | behavior 04: 8 mapped (04-33..04-35), 10 retained in tests/script-jobs-retained.test.ts; controls NC-P8e-script-send, NC-P8e-script-risk, NC-P8e-script-kill, NC-P8e-script-tail, NC-P8e-script-signal, NC-P8e-script-link |
 <!-- /manifest:baseline -->
