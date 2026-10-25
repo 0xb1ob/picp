@@ -16,8 +16,8 @@ receipt-not-busy rearm while pi's busy flag lags, `copyOriginalTask`'s reviewer 
 the release hook (`released`/`revive` racing a stopping worker) with its policy-block and unwritten-session halves.
 
 `tests/cp-bridge.test.ts` (2,120 lines, 116,386 bytes) is not converted here: with `tests/send.test.ts` and the #541
-lows the review diff measured 118,177 bytes before cp-bridge, and its deletion alone adds about 118,000 more, past the
-250 KB stop line before any e2e scenario. Its baseline row keeps `convert`; the follow-on owns it.
+lows the review diff measured 150,792 bytes (`git diff origin/main | wc -c`), and cp-bridge's deletion alone adds about
+118,000 more, past the 250 KB stop line before any e2e scenario. Its baseline row keeps `convert`; the follow-on owns it.
 
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
