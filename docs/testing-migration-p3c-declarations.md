@@ -41,8 +41,8 @@ the absent baseline path: NC-36 proves parked observation wiring, not either ret
 
 | Retained declaration | Specifically missing entry point and evidence |
 |---|---|
-| a lock taken after session_start still sweeps on the next interval | No public API transfers ownership to an already-started parent. `extensions/command-post/index.ts` registers session hooks before the timer; `session-hooks.ts` acquires only at session_start and releases only at session_shutdown. Reinstating the old startup lock guard still passes real 05-12 (`v2-tick-startup-probe.log`, exit 0), so it is not counted as a failing consumer control. |
-| session_shutdown clears the startup catch-up and the interval | No public API observes dormant timer callbacks after shutdown while ownership remains held, or shuts down before the first startup timer in that state. Shutdown releases the lock; the real process then exits. Removing both clears still passes real 05-12 (`v2-tick-shutdown-probe.log`, exit 0), while the retained regression fails (`v2-tick-shutdown-unit-probe.log`, exit 1). The exact timer assertions stay. |
+| a lock taken after session_start still sweeps on the next interval | No public API transfers ownership to an already-started parent. `extensions/command-post/index.ts` registers session hooks before the timer; `session-hooks.ts` acquires only at session_start and releases only at session_shutdown. Reinstating the old startup lock guard still passes real 05-12 (exit 0), so it is not counted as a failing consumer control. |
+| session_shutdown clears the startup catch-up and the interval | No public API observes dormant timer callbacks after shutdown while ownership remains held, or shuts down before the first startup timer in that state. Shutdown releases the lock; the real process then exits. Removing both clears still passes real 05-12 (exit 0), while the retained regression fails (exit 1). The exact timer assertions stay. |
 
 Both mutations were restored. Neither passing consumer probe is a negative control. No P1 exception is
 introduced. A future ownership-transfer API or observable post-shutdown lifecycle is needed to map these cases.

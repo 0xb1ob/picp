@@ -2,7 +2,7 @@
 
 Ownership: the remaining behavior-05 files are owned by P3c-rest and re-sliced by operator decision ask-c77a4f32b23b (Raise cap to ~$2,700 on Sol); slice list operator/scratch/e2e-migration-slices.md; rule v2 applies.
 
-This whole-file slice retires `tests/reviewer-model.test.ts`: **3 mapped, 0 retained, 1 deleted file**. Two new E2E declarations replace three units (net -1); one new file replaces one removed file. Other behavior-05 files remain owned by their slices. Original blob: `c640e4ee1174da8c54c6819504fe3adab3c15237`. History: `fb70938e2e94680d9f6df1a76de53c5c633a6c8a` (#143); inspected the selector, factory wiring and continuation changes.
+This whole-file slice retires `tests/reviewer-model.test.ts`: **3 mapped, 0 retained, 1 deleted file**. Two new E2E declarations replace three units (net -1); one new file replaces one removed file. Other behavior-05 files remain owned by their slices. History: #143; inspected the selector, factory wiring and continuation changes.
 
 | Original declaration | Replacement | Executed control and failing assertion |
 |---|---|---|

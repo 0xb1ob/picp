@@ -3,7 +3,7 @@
 <!-- manifest:ledger -->
 | PR | Scope | Baseline files deleted |
 |---|---|---|
-| P9d (cp-e2e-migration-p9d-ke34) | behavior 11, fourth slice: dashboard sends through the real cp-bridge (paired-device provenance, image and file attachments), the viewer's pending sends and operator threads in `tests/e2e/operator-dashboard.test.ts`; 30 mapped, 1 redundant-unreachable, 4 retained verbatim plus three guard halves in two `*-retained.test.ts` files; [ledger and controls](p9d.md). Behavior-11 files outside #510, #515, #519 and this slice stay `convert` / P9 | 5 (`tests/control-pending.test.ts`, `tests/dashboard-control-remote.test.ts`, `tests/dashboard-control-images.test.ts`, `tests/operator-threads-bridge.test.ts`, `tests/operator-threads-journal.test.ts`) |
+| P9d (cp-e2e-migration-p9d-ke34) | behavior 11, fourth slice: dashboard sends through the real cp-bridge (paired-device provenance, image and file attachments), the viewer's pending sends and operator threads in `tests/e2e/operator-dashboard.test.ts`; 31 mapped (one relabelled from redundant-unreachable by P9e, control I6), 4 retained verbatim plus three guard halves in two `*-retained.test.ts` files; [ledger and controls](p9d.md). Behavior-11 files outside #510, #515, #519 and this slice stay `convert` / P9 | 5 (`tests/control-pending.test.ts`, `tests/dashboard-control-remote.test.ts`, `tests/dashboard-control-images.test.ts`, `tests/operator-threads-bridge.test.ts`, `tests/operator-threads-journal.test.ts`) |
 <!-- /manifest:ledger -->
 
 Behavior 11, fourth slice: the dashboard's sends as the real cp-bridge hands them to a mock-model operator session
@@ -32,9 +32,9 @@ passed once restored. Every other behavior-11 file outside #510, #515, #519 and 
 <!-- manifest:assertions -->
 | Unit file | Assertion | Scenario | Disposition | Note |
 |---|---|---|---|---|
-| tests/control-pending.test.ts | accepted sends settle by target metadata and 24h TTL, preserving live FIFO and final outcomes | P9d-pending | mapped | GET /api/operator/control; controls P1, P6, P7, P8, P10 |
+| tests/control-pending.test.ts | accepted sends settle by target metadata and 24h TTL, preserving live FIFO and final outcomes | P9d-pending | mapped | GET /api/operator/control; controls P1, P6, P7, P8, P10; the exact-ms 24 h boundary is kept in tests/control-pending-retained.test.ts (P9e) |
 | tests/control-pending.test.ts | cp-y43c: a dashboard-held message is editable with its saved text, outlives its session, and loses Edit once handed over or cancelled | P9d-pending | mapped | control P3 |
-| tests/control-pending.test.ts | cp-y43c review 1: a lost send is a visible failure for LOST_SEND_VISIBLE_MS (7 days) after it was sent, then history | P9d-pending | mapped | controls P2, P4 |
+| tests/control-pending.test.ts | cp-y43c review 1: a lost send is a visible failure for LOST_SEND_VISIBLE_MS (7 days) after it was sent, then history | P9d-pending | mapped | controls P2, P4; the exact-ms 7-day boundary is kept in tests/control-pending-retained.test.ts (P9e) |
 | tests/control-pending.test.ts | picp-96n: a Not confirmed send names only its own recorded, listed session, never the current one | P9d-pending | mapped | control P5 |
 | tests/dashboard-control-remote.test.ts | live: status advertises remote provenance; a remote send and steer carry the device line above a `; remote` marker | P9d-remote | mapped | provider request and viewer transcript; control R1 |
 | tests/dashboard-control-remote.test.ts | a body cannot forge or strip it: a typed device line and marker stay body text; a malformed remote arg is refused | P9d-remote | mapped | controls R2, R3 |
@@ -59,7 +59,7 @@ passed once restored. Every other behavior-11 file outside #510, #515, #519 and 
 | tests/operator-threads-journal.test.ts | bindThread never throws: a bad tag or ref writes nothing; an unreadable journal or failed append is an error | P9d-threads | mapped | unreadable and EACCES halves: control T3; bad tag/ref half kept verbatim in tests/operator-threads-retained.test.ts |
 | tests/operator-threads-journal.test.ts | job refs fold like other refs: valid job contract ids, newest bind wins, repeats are idempotent | P9d-threads | mapped | invalid-id half kept verbatim in tests/operator-threads-retained.test.ts; controls J2, J5 |
 | tests/operator-threads-journal.test.ts | job ids matching legacy ref ids bind, deduplicate and move independently by kind | P9d-threads | mapped | job id equal to an answer id; control J5 |
-| tests/dashboard-control-images.test.ts | userMessageContent: text alone stays a string; with images, one text part then one image part each | P9d-images | redundant-unreachable | internal shape; the model-visible text and image parts are pinned by P9d-images and P9d-remote |
+| tests/dashboard-control-images.test.ts | userMessageContent: text alone stays a string; with images, one text part then one image part each | P9d-images | mapped | the model-visible text and image parts; control I6 (relabelled by P9e) |
 | tests/dashboard-control-images.test.ts | send_images: the request line names the ids (no bytes), each image is prepared within the budget, injected as images | P9d-images | mapped | controls I1, I5 |
 | tests/dashboard-control-images.test.ts | send_images refusals: bad ids 400, a missing upload 410, a null resize sends the path instead | P9d-images | mapped | control I2; the 504 deadline half kept verbatim in tests/dashboard-control-images-retained.test.ts |
 | tests/dashboard-control-images.test.ts | send_images without prepareImage: an unknown op, and the status has no images flag | — | retained | the bridge always wires resizeImage; kept verbatim in tests/dashboard-control-images-retained.test.ts |
@@ -103,6 +103,7 @@ passed once restored. Every other behavior-11 file outside #510, #515, #519 and 
 | I3 | tests/dashboard-control-images.test.ts | P9d-images | uploads.ts decodes UTF-8 leniently | `a file changed into invalid UTF-8 is refused`: accepted |
 | I4 | tests/dashboard-control-images.test.ts | P9d-images | uploads.ts gives each file the whole inline budget | inlined body over TEXT_MESSAGE_INLINE_BYTES |
 | I5 | tests/dashboard-control-images.test.ts | P9d-images | dashboard-control.ts resize budget of 1 byte | first image send falls back to a path line |
+| I6 | tests/dashboard-control-images.test.ts | P9d-images | dashboard-control.ts userMessageContent drops images (returns the text alone) | `a real PNG, resized by pi, as an image part` |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->
