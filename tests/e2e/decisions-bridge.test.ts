@@ -1,21 +1,32 @@
 /**
  * Behavior 09 (P10b): the operator's cp-bridge session, real pi with a mock model. The ask guard nudges a prose
- * question once, then cards it for the next chat line; the escalation backstop relays an overdue escalation once.
+ * question once, then cards it for the next chat line; the escalation backstop relays an overdue escalation once;
+ * a parent pi posts schedule result cards, and the real viewer folds the answers journal.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { DETECTED_ASK_PREFIX } from "../../src/ask-guard.ts";
 import {
-	DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, type GateVerdict, isoTimestamp, layoutForHome, paths, SCHEMA_VERSION,
+	DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, type GateVerdict, isoTimestamp, LAYOUT, layoutForHome, paths, SCHEMA_VERSION,
 } from "../../src/contracts.ts";
 import { ESCALATION_RELAY_LEDGER_KEEP, escalationRelayLedgerFile } from "../../src/escalation-backstop.ts";
 import { EscalationStore, raiseForGate } from "../../src/escalation.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { OperatorRelayOutbox, operatorRelayOutboxFile } from "../../src/operator-outbox.ts";
-import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, type PiChild, type ScriptStep, startPiChild } from "../harness/index.ts";
+import { PushDeliveryStore } from "../../src/push/deliveries.ts";
+import { initPush } from "../../src/push/keys.ts";
+import { ScheduleRunStore } from "../../src/schedule-runs.ts";
+import type { DecisionsResponse } from "../../src/viewer/api-types.ts";
+import { policyFromLegacy } from "../../src/viewer/schedule-policy.ts";
+import { createViewer } from "../../src/viewer/server.ts";
+import {
+	COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MockProvider, type PiChild, type ScriptStep, startPiChild, waitFor,
+} from "../harness/index.ts";
 
 type Home = ReturnType<typeof createScratchHome>;
 const NUDGE = "opened no cp_parent ask";
@@ -379,4 +390,82 @@ test("decisions: cp_parent answer posts bookkeeping answers to the dashboard jou
 	const end = blocked.pi.records().find((r) => r.type === "tool_execution_end") as unknown as End | undefined;
 	assert.equal(end?.isError, true, "a directory at the journal path refuses the post");
 	assert.match(end?.result?.content?.[0]?.text ?? "", /answers journal unreadable/);
+});
+
+const SCHED_AT = "2026-10-04T15:00:00Z";
+/** One accepted schedule run whose result card is queued but undelivered, as a crash before posting leaves it. */
+async function pendingRun(runs: ScheduleRunStore, n: number, sourceKey: string, headline: string) {
+	const schedule = `sch-12345${n}`, run = `run-20261004150000-abcde${n}`;
+	const policy = policyFromLegacy({ id: schedule, name: `Nightly ${n}`, project: "demo", mandate_id: "md-123456", enabled: true, created_at: SCHED_AT, trigger: { type: "manual" }, job: { title: `Nightly ${n}`, kind: "research", delivery: "answer" } }, {
+		seed_mandate_id: "md-123456", channel: "operator_chat", objective: "nightly", expiry_hours: 1, spend_usd: 10, spend_tokens: 1000, job_cap: 6,
+		allowed_actions: ["plan", "review"], ask_on: ["merge", "risk:high"], approval: { operator_quote: "Run the report", decided_by: "operator-quote", approved_at: SCHED_AT },
+	});
+	await runs.createRun({ schema_version: 1, id: run, schedule_id: policy.schedule_id, policy_revision: 1, policy, trigger: { via: "slot", at: SCHED_AT }, anchor_job_id: null, members: [], phase: "accepted", outcome: null, started_at: SCHED_AT, deadline_at: "2026-10-04T16:00:00Z", risk_preapproved: [], authority_log: [], cap_notices: [],
+		result: { source_key: sourceKey, job_id: null, generation: null, outcome: "completed", headline, at: SCHED_AT, links: [], answer_id: null, delivered_at: null },
+	});
+	return { schedule_id: policy.schedule_id, run_id: run, source: { kind: "schedule", schedule_id: policy.schedule_id, run_id: run, source_key: sourceKey, outcome: "completed" } };
+}
+
+test("decisions: a parent pi posts each schedule result card once, redacted or refused, pushes only asks, and the dashboard folds acks, garbage and a torn tail", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const scratch = createScratchLedger({ home: home.path, knownProjects: ["demo"] });
+	const stateDir = join(home.path, LAYOUT.state);
+	const journal = join(stateDir, "operator", "answers.jsonl");
+	const viewer = createViewer({ home: home.path, stateDir, host: "127.0.0.1", port: 0, log: () => {} });
+	await new Promise<void>((resolve) => viewer.listen(0, "127.0.0.1", resolve));
+	t.after(() => { viewer.close(); scratch.cleanup(); home.cleanup(); });
+	const answersView = async () => {
+		const res = await fetch(`http://127.0.0.1:${(viewer.address() as AddressInfo).port}/api/decisions`);
+		assert.equal(res.status, 200);
+		return (await res.json() as DecisionsResponse).answers;
+	};
+	assert.equal((await answersView()).availability, "missing", "no journal yet reads as missing, not unavailable");
+
+	const runs = new ScheduleRunStore({ home: home.path });
+	const dup = await pendingRun(runs, 1, "p10b-dup", "posted before the crash");
+	const redacted = await pendingRun(runs, 2, "p10b-redact", `token ${ghShaped} here`);
+	const refused = await pendingRun(runs, 3, "p10b-refuse", `${keyHeader}\nMIIE`);
+	const dupId = `ans-${createHash("sha256").update("p10b-dup").digest("hex").slice(0, 12)}`;
+	const line = (row: Record<string, unknown>) => JSON.stringify(row);
+	const posted = { type: "posted", project: "demo", question: "Q?", evidence_paths: [], job_id: null };
+	mkdirSync(dirname(journal), { recursive: true });
+	writeFileSync(journal, [
+		line({ ...posted, by: "bridge", id: "ans-aaaaaaaaaaaa", at: "2026-01-01T00:00:00Z", answer: "Acked twice." }),
+		line({ ...posted, by: "schedule", id: dupId, at: "2026-01-01T00:00:00Z", answer: "first card", source: dup.source }),
+		line({ type: "acked", by: "viewer", id: "ans-aaaaaaaaaaaa", at: "2026-01-01T01:00:00Z", peer: "127.0.0.1" }),
+		line({ type: "acked", by: "viewer", id: "ans-aaaaaaaaaaaa", at: "2026-02-02T00:00:00Z", peer: "127.0.0.1" }),
+		line({ type: "acked", by: "viewer", id: "ans-000000000000", at: "2026-01-01T00:00:00Z", peer: "127.0.0.1" }),
+		"not json",
+		line({ ...posted, by: "schedule", id: "ans-bbbbbbbbbbbb", at: "2026-01-01T00:00:00Z", answer: "bad source", source: { ...dup.source, extra: 1 } }),
+		"",
+	].join("\n"));
+	initPush({ dataDir: join(home.path, LAYOUT.data), origin: "https://cp.example.test" });
+	const ask = new OperatorAsks(join(stateDir, "operator", "asks.jsonl")).open({ project: "demo", question: "A or B?", options: [{ label: "a", consequence: "b" }], recommendation: "a" });
+
+	const provider = await MockProvider.start();
+	const model = provider.addScript("p10b-parent", [text("checked")]);
+	const agent = createAgentDir({ provider });
+	const parent = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+	t.after(async () => { await parent.close(); agent.cleanup(); await provider.stop(); });
+	await parent.prompt("inspect startup");
+	await parent.waitForSettled(60_000);
+	const result = (id: string) => runs.run(id)!.result!;
+	await waitFor(() => Boolean(result(redacted.run_id).delivered_at && result(refused.run_id).error), Boolean, { timeoutMs: 15_000, what: "schedule result sync" });
+	const pushed = await waitFor(() => new PushDeliveryStore(stateDir).read(), Boolean, { timeoutMs: 20_000, what: "push sweep baseline" });
+
+	const raw = readFileSync(journal, "utf8").split("\n").filter(Boolean);
+	assert.equal(raw.filter((row) => row.includes(dupId)).length, 1, "a retry after a crash reuses the first card");
+	assert.deepEqual([result(dup.run_id).answer_id, Boolean(result(dup.run_id).delivered_at)], [dupId, true]);
+	const card = JSON.parse(raw.find((row) => row.includes("p10b-redact"))!);
+	assert.deepEqual([card.by, card.source, card.answer.includes(ghShaped), card.answer.includes("token")], ["schedule", redacted.source, false, true]);
+	assert.match(result(refused.run_id).error!, /private key block/);
+	assert.equal(result(refused.run_id).delivered_at, null);
+	assert.ok(!raw.some((row) => row.includes("p10b-refuse")), "a refused card never reaches the journal");
+	assert.deepEqual(pushed!.items.map((item) => item.id), [ask.id], "the push sweep baselines the open ask only, never an answer");
+
+	appendFileSync(journal, line({ ...posted, by: "bridge", id: "ans-cccccccccccc", at: "2026-03-03T00:00:00Z", answer: "torn" }).slice(0, 40));
+	const view = await answersView();
+	assert.deepEqual(view.history.map((item) => [item.id, item.acked_at]), [["ans-aaaaaaaaaaaa", "2026-01-01T01:00:00Z"]], "an ack sets acked_at once");
+	assert.deepEqual(view.open.map((item) => [item.id, item.schedule?.run_id]).sort(), [[`ans-${createHash("sha256").update("p10b-redact").digest("hex").slice(0, 12)}`, redacted.run_id], [dupId, dup.run_id]].sort());
+	assert.equal(view.warning, "3 unreadable line(s) in state/operator/answers.jsonl skipped", "unknown ack, garbage and bad source skip; the torn tail is ignored");
 });
