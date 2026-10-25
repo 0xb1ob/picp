@@ -22,6 +22,10 @@ refused, 04-27), and no caller has set `mayAskOperator` since cur.3.1, so no wor
 `streamingBehavior` and `getEntries` have only the parent bridge as caller; and byte-level framing (a CRLF, a chunk
 split mid-line, a pi older than 0.99.1, a child closing its stdin) cannot be produced through pi's own stdout.
 
+`tests/harness.test.ts` is `retained` whole, like p9e's harness files: its six declarations pin the e2e harness
+(the mock provider's errors, hangs and streamed deltas, the scripted pi child, the scratch repo, the state readers,
+the harness's own argv), which no command-post entry point reaches; a defect there fails every e2e case.
+
 <!-- manifest:prs -->
 | PR | Behavior | Target | Proposed cases |
 |---|---|---|---|
