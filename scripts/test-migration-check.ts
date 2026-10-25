@@ -1,4 +1,7 @@
-/** Read-only ledger validator: slice files and rules doc vs the git baseline; `test(` counts; exit 1 on findings. */
+/**
+ * Read-only ledger validator: slice files and rules doc vs the git baseline; `test(` counts; exit 1 on findings.
+ * `--preserved-from <ref>` against a ref from before the ledger split into slice files is expected to mismatch.
+ */
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
