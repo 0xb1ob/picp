@@ -382,8 +382,14 @@ test("P8b wedged: at the default threshold a 31-minute silent call is news and a
 	const ends = await b.run([{ kind: "tool_calls", calls: jobs.map((job, i) => ({ name: "cp_dispatch", args: { job_id: job.id, task: "Run the checks.", model: models[i] } })) }],
 		{ CP_WEDGED_TOOL_CALL_SECONDS: "nonsense" });
 	assert.deepEqual(ends.map((end) => end.isError), [false, false, false], JSON.stringify(ends.map((end) => end.result)));
-	await waitFor(() => started(b.home, silent) && started(b.home, talking) && toolEnds(b.home, closed).length >= 3, Boolean, { timeoutMs: 60_000, what: "calls opened" });
+	const inFlight = (jobId: string): boolean => {
+		const file = join(b.home, paths.statusFile(jobId));
+		return existsSync(file) && (JSON.parse(readFileSync(file, "utf8")) as { current_tool: unknown }).current_tool !== null;
+	};
+	await waitFor(() => inFlight(silent) && inFlight(talking) && toolEnds(b.home, closed).length >= 3, Boolean, { timeoutMs: 60_000, what: "calls opened" });
 	await waitFor(() => b.provider.requests("p8b-default-2").length, (n) => n >= 2, { timeoutMs: 30_000, what: "closed worker back on the model" });
+	// Let the debounced status flush (250 ms) drain so it cannot overwrite the seeded timestamps.
+	await new Promise((resolve) => setTimeout(resolve, 600));
 	// Seed the on-disk run projections the parent reads: legacy shape (no last_progress_at) for the silent call.
 	const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 	const seed = (jobId: string, startedAgo: number, progressAgo?: number) => {
@@ -398,11 +404,12 @@ test("P8b wedged: at the default threshold a 31-minute silent call is news and a
 	seed(silent, 31 * 60);
 	seed(talking, 3600, 60);
 	seed(closed, 15 * 3600);
-	await new Promise((resolve) => setTimeout(resolve, 7_000));
 	const parent = b.parents[0];
 	assert.ok(parent);
-	const notices = parent.records().filter((r) => r.type === "extension_ui_request" && r.method === "notify" && String(r.message).startsWith("WEDGED"))
+	const wedgedNotices = () => parent.records().filter((r) => r.type === "extension_ui_request" && r.method === "notify" && String(r.message).startsWith("WEDGED"))
 		.map((r) => String(r.message));
+	await waitFor(wedgedNotices, (list) => list.length >= 1, { timeoutMs: 60_000, what: "WEDGED notice" });
+	const notices = wedgedNotices();
 	assert.equal(notices.length, 1, `the 31-minute silence only: ${JSON.stringify(notices)}`);
 	assert.match(notices[0] ?? "", new RegExp(`^WEDGED TOOL CALL — 1 worker .*\\n  ${silent}: bash open 31m, silent 31m`));
 	assert.match(notices[0] ?? "", /quiet past 30m/);
