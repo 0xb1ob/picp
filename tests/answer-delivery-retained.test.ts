@@ -16,7 +16,8 @@
  * teardown is reproduced as the two facts it writes to the record — `done` and
  * `closed_at` — because those are the facts every phase-keyed surface reads.
  *
- * `node --test tests/answer-delivery.test.ts`
+ * Retained from answer-delivery (P11): the rest moved to tests/e2e/research-delivery.test.ts; see
+ * docs/testing-migration/p11.md for why each declaration below stays.
  */
 
 import assert from "node:assert/strict";
@@ -25,14 +26,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
 	AnswerCardOutbox,
-	answerCardDue,
 	answerCardId,
 	AnswerCardError,
 	answerCardRecord,
 } from "../src/answer-delivery.ts";
 import { CommandPost } from "../src/command-post.ts";
 import {
-	ANSWER_CARD_DEFER_SECONDS,
 	type AnswerCardChannel,
 	type AnswerCardRecord,
 	DEFAULT_ORIGIN,
@@ -282,22 +281,6 @@ test("queueing twice queues once", async (t) => {
 // 3. delivery is not consumed by a surface that cannot show it
 // ---------------------------------------------------------------------------
 
-test("a mode with no operator surface leaves the card queued", async (t) => {
-	const b = benchOf(t);
-	await b.post.fleet.add(answerJob(b.home.path, "cp-headless"));
-	reportAnswer(b, "cp-headless");
-	await b.post.intake.intake("cp-headless");
-
-	// A headless re-entry into this home (print/json, no UI) must not eat the
-	// answer the operator's terminal is going to show.
-	assert.equal(b.drain({ surface: undefined }).length, 0);
-	assert.equal(b.post.answerCards.pending().length, 1, "still owed");
-
-	// The operator's session starts and takes it.
-	assert.equal(b.drain().length, 1);
-	assert.equal(b.post.answerCards.delivered(answerCardId("cp-headless", 1)), true);
-});
-
 test("cp-hhuf P1: a scheduled job's answer is delivered to the Schedules page, not the operator transcript", async (t) => {
 	const b = benchOf(t);
 	initJobsDocument(b.home.path, "cp");
@@ -357,115 +340,8 @@ test("a sink that throws leaves its card queued, and never un-delivers the ones 
 });
 
 // ---------------------------------------------------------------------------
-// 4. when a card is due
-// ---------------------------------------------------------------------------
-
-test("a card waits for an idle session, but never longer than the defer window", () => {
-	const queued = "2026-09-04T17:41:07Z";
-	const card = answerCardRecord({
-		job_id: "cp-defer",
-		generation: 1,
-		summary: HEADLINE,
-		path: "/tmp/answer.md",
-		bytes: 10,
-		reported_at: queued,
-		queued_at: queued,
-	});
-	const at = (seconds: number) => new Date(Date.parse(queued) + seconds * 1000);
-
-	assert.equal(answerCardDue(card, { idle: true, now: at(0) }), true, "idle wins immediately");
-	assert.equal(answerCardDue(card, { idle: false, now: at(5) }), false, "mid-turn, the card waits");
-	assert.equal(
-		answerCardDue(card, { idle: false, now: at(ANSWER_CARD_DEFER_SECONDS - 1) }),
-		false,
-		"still inside the window",
-	);
-	assert.equal(
-		answerCardDue(card, { idle: false, now: at(ANSWER_CARD_DEFER_SECONDS) }),
-		true,
-		"a parent that never rests still delivers: late is a nuisance, never is the bug",
-	);
-});
-
-test("the drain defers a mid-turn card and the widget tick picks it up", async (t) => {
-	const b = benchOf(t);
-	await b.post.fleet.add(answerJob(b.home.path, "cp-midturn"));
-	reportAnswer(b, "cp-midturn");
-	await b.post.intake.intake("cp-midturn");
-
-	// Intake fires while the parent is streaming: nothing is shown, nothing lost.
-	assert.equal(b.drain({ idle: false }).length, 0);
-	assert.equal(b.post.answerCards.pending().length, 1);
-
-	// The next tick finds the session between turns.
-	assert.equal(b.drain({ idle: true }).length, 1);
-	assert.equal(b.post.answerCards.pending().length, 0);
-});
-
-// ---------------------------------------------------------------------------
-// 5. what may never travel
-// ---------------------------------------------------------------------------
-
-test("the queue holds a pointer and a headline — never the answer body", async (t) => {
-	const b = benchOf(t);
-	await b.post.fleet.add(answerJob(b.home.path, "cp-body"));
-	reportAnswer(b, "cp-body");
-	await b.post.intake.intake("cp-body");
-
-	const raw = readFileSync(b.post.answerCards.file, "utf8");
-	assert.ok(!raw.includes("SECRET-BODY-MARKER-ONLY-IN-THE-ARTIFACT"), "the body is not in the outbox");
-	assert.ok(raw.includes(JSON.stringify(b.answerPath("cp-body")).slice(1, -1)), "the pointer is");
-	const parsed = validateAnswerCardOutboxFile(JSON.parse(raw));
-	assert.equal(parsed.ok, true, parsed.ok ? "" : parsed.errors.join("; "));
-
-	const [card] = b.drain();
-	assert.ok(card);
-	assert.equal(card.summary, HEADLINE);
-	assert.equal(card.bytes, `${ANSWER_BODY}\n`.length);
-	assert.ok(!JSON.stringify(card).includes("SECRET-BODY-MARKER-ONLY-IN-THE-ARTIFACT"));
-
-	// The run log is read by /watch, and it is not a body either.
-	const events = readRunEvents(b.home.path, "cp-body");
-	assert.ok(!JSON.stringify(events).includes("SECRET-BODY-MARKER-ONLY-IN-THE-ARTIFACT"));
-});
-
-// ---------------------------------------------------------------------------
 // 6. what is not a card
 // ---------------------------------------------------------------------------
-
-test("only a done delivery:answer envelope with an artifact mints a card", async (t) => {
-	const b = benchOf(t);
-
-	// A research job that is not delivery:answer writes an artifact and mints no
-	// card: the plan is read with /cp-plan, and always was.
-	const plan = answerJob(b.home.path, "cp-plan");
-	await b.post.fleet.add({ ...plan, delivery: "pipeline" });
-	reportAnswer(b, "cp-plan");
-	await b.post.intake.intake("cp-plan");
-	assert.equal(b.post.answerCards.pending().length, 0);
-
-	// A blocked Q&A job answers nothing.
-	await b.post.fleet.add(answerJob(b.home.path, "cp-blocked"));
-	mkdirSync(join(b.home.path, paths.runDir("cp-blocked")), { recursive: true });
-	writeFileSync(
-		join(b.home.path, paths.envelopeFile("cp-blocked")),
-		`${JSON.stringify({
-			schema_version: SCHEMA_VERSION,
-			job_id: "cp-blocked",
-			received_at: isoTimestamp(),
-			attempt: 1,
-			envelope: {
-				job_id: "cp-blocked",
-				kind: "research",
-				status: "blocked",
-				summary: "The repository this question is about is not registered here.",
-				blockers: ["no clone for the project named in the question"],
-			},
-		})}\n`,
-	);
-	await b.post.intake.intake("cp-blocked");
-	assert.equal(b.post.answerCards.pending().length, 0, "a blocked job owes the operator a blocker, not a card");
-});
 
 test("a card refuses to be built without the facts that make it renderable", () => {
 	assert.throws(
