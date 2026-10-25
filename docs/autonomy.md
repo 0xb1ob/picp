@@ -85,7 +85,7 @@ fails fast and close to the cause.
 | 6 | Revoked mandate mid-mission: in-flight finishes, no new dispatch | `tests/decide.test.ts` ("stale/revoked mandate refuses"), `tests/e2e/authority.test.ts` ("a paused or revoked mandate stops speaking") |
 | 7 | Spend cap hit: pause, refuse new dispatch, escalate once | `tests/e2e/authority.test.ts` ("live usage crosses each cap line once") |
 | 8 | Out-of-scope planner request escalates | `tests/e2e/planner-blocked.test.ts`, `tests/pipeline.test.ts` (escalate/policy) |
-| 9 | `ask_on: plan_approval` path: escalation with summary and paths | `tests/e2e/planner-blocked.test.ts`, `src/operator-note.ts` (plan review), `tests/operator-note.test.ts` |
+| 9 | `ask_on: plan_approval` path: escalation with summary and paths | `tests/e2e/planner-blocked.test.ts`, `src/operator-note.ts` (plan review), `tests/e2e/operator-relay-outbox.test.ts` (P9-note) |
 
 The live suite (`tests/e2e/live.test.ts`, `tests/e2e/live-smoke.test.ts`,
 opt-in via `CP_LIVE_TESTS=1`, never a CI gate) repeats a subset of this
