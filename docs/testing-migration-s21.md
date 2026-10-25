@@ -41,12 +41,12 @@ Each mapped row names an executed mutation and the assertion that fails. Origina
 | # | Behavior | Disposition and proof |
 |---|---|---|
 | 1 | announced transitions and docs table | retained: developer documentation/table consistency has no runtime entry that can inspect the markdown table |
-| 2 | exhaustive failure-class durable-kind table | retained: compile-time enum/table exhaustiveness has no runtime entry for adding a new enum member; Host failures additionally checks current values |
+| 2 | exhaustive failure-class durable-kind table | mapped by P4: S21-host requires every FAILURE_CLASSES member to queue a durable wake that arrives after restart; the non-durable `crash` control fails the pending count (15, expected 16) ([P4 ledger](testing-migration/p4.md)) |
 | 3 | markFailed callers | retained: source call-graph restriction has no runtime entry exposing all call sites |
 | 4 | distinct long recovery-set IDs | mapped: Forty candidates scenario; long-recovery restores unbounded formatting, so the fallback has undefined keys instead of 40; long-id restores prefix truncation and makes the two actual reconcile IDs equal; positive checks forty failures/keys, bounded RPC content and distinct capped IDs |
 | 5 | N7 long CI cause tails | mapped: Host failures; ci-cause control collapses pending count from 16 to 15; distinct-ID and HTTP-tail assertions pin the result |
 | 6 | AGENTS death/recovery guidance | retained: no product entry reads the parent's instruction prose as a verifiable runtime result |
-| 7 | spent-bound guidance and phrase | retained: mixed prose/format contract; no entry can verify that AGENTS contains the required instruction; Bound additionally pins emitted outcome wording |
+| 7 | spent-bound guidance and phrase | retained: mixed prose/format contract; no entry can verify that AGENTS contains the required instruction; Bound additionally pins emitted outcome wording. P4 mapped the BOUND_SPENT_PHRASE asserts to P4-spent |
 | 8 | no preview-derived recovery claim in docs | retained: repository-wide prose prohibition has no runtime consumer exposing all documentation; bound-outcome control pins actual outcome wording |
 | 9 | bound/death versus replacement | mapped: Restart; live-replacement control exposes S21_OBSOLETE in model messages. A launching model record is rejected by the canonical fleet validator, so that synthetic subcase adds no reachable model behavior |
 | 10 | outbox handoff/restart/ack | mapped: Restart; owner control prevents the replayed death reaching the model. Duplicate enqueue is false, handoff stays pending and delivered ID occurs once |
@@ -55,7 +55,7 @@ Each mapped row names an executed mutation and the assertion that fails. Origina
 | 13 | disk evidence, next tools, no polling | mapped: Host failures and Restart; failure-journal control reduces host pending count to 2 instead of 16; reconcile-journal control prevents the recovery message reaching the model. Positive assertions check on disk, cp_teardown, cp_revive and absence of poll |
 | 14 | reconcile journal/restart/confirm | mapped: Restart; reconcile-journal control times out waiting for reconciliation reaching the mock model. Exactly one startup recovery ID is delivered; confirmed source IDs are not replayed |
 | 15 | reviewer partial-finish failure | mapped: Review finish; review-finish control yields zero recovery notices instead of one after the new host starts |
-| 16 | wakeup file layout | retained: storage path is a structural contract, with no runtime entry choosing between alternate constant definitions |
+| 16 | wakeup file layout | mapped by P4: S21-restart reads the delivered row at the literal `.pi-command-post/state/wakeups.json`; the moved-path control fails with ENOENT ([P4 ledger](testing-migration/p4.md)) |
 | 17 | invalid intake emits once | mapped: Intake/loop; failure-journal control times out waiting for envelope_invalid durable death; positive asserts one class-keyed death |
 | 18 | every failure class survives parent death | mapped: Host failures; failure-journal control leaves only the two CI events instead of all 16, breaking count before restart; positive checks per-class IDs, kinds, message content and no second-parent replay |
 | 19 | shutdown owns close/bound events | mapped: Shutdown; own-close control changes the preserved waiting record into failed after real close evaluation; no durable notice or recovery attempt is allowed |

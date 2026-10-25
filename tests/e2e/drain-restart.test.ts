@@ -121,7 +121,7 @@ test("S26: real bridge restart refuses unsupported sessions and restarts a persi
 	assert.match(JSON.stringify(reply), /restarting/);
 	const saved = JSON.parse(readFileSync(marker, "utf8"));
 	assert.equal(saved.version, 1);
-	assert.ok(saved.pid > 0);
+	assert.equal(saved.pid, child.pid, "the marker names the restarted pi's own pid");
 	assert.equal(saved.session_file, sessionFile, "the marker names the exact session file");
 	assert.equal(statSync(marker).mode & 0o777, 0o600);
 	assert.equal(JSON.stringify(reply).includes(home.path), false, "restart response exposes only the basename");
