@@ -108,6 +108,7 @@ test("S26: real bridge restart refuses unsupported sessions and restarts a persi
 	const child = start(restartModel, marker);
 	await child.prompt("Persist the session.");
 	await child.waitForSettled(30_000);
+	const sessionFile = (await child.getState()).sessionFile;
 	const active = await record();
 	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
 	writeFileSync(controlConfigFile(stateDir), '{"enabled":false}');
@@ -121,24 +122,16 @@ test("S26: real bridge restart refuses unsupported sessions and restarts a persi
 	const saved = JSON.parse(readFileSync(marker, "utf8"));
 	assert.equal(saved.version, 1);
 	assert.ok(saved.pid > 0);
-	assert.equal(existsSync(saved.session_file), true);
+	assert.equal(saved.session_file, sessionFile, "the marker names the exact session file");
 	assert.equal(statSync(marker).mode & 0o777, 0o600);
 	assert.equal(JSON.stringify(reply).includes(home.path), false, "restart response exposes only the basename");
 	const restartStatus = journal().filter((line) => line.kind === "restart" || line.state === "restarting");
 	assert.deepEqual(restartStatus.slice(-2).map((line) => [line.type, line.kind ?? line.state, line.peer]), [["request", "restart", "100.64.0.9"], ["outcome", "restarting", "100.64.0.9"]]);
 	assert.equal(saved.id, (reply as { result: { id: string } }).result.id);
-	// RPC pi currently stays alive after ctx.shutdown; shutdown assertions remain pending-fix in the S26 ledger.
-	if (process.env.S26_RESTART_REPRO) {
-		const { isPidAlive } = await import("../../src/fleet.ts");
-		if (process.env.S26_RESTART_REPRO === "terminate") await child.close();
-		let failure: unknown;
-		try { await waitFor(() => isPidAlive(saved.pid), (alive) => !alive, { timeoutMs: 30_000, what: "accepted restart kills the old RPC pi" }); }
-		catch (error) { failure = error; }
-		const socketResponsive = await controlRequest(active, "status", {}).then((result) => result.ok, () => false);
-		console.error(JSON.stringify({ mode: process.env.S26_RESTART_REPRO, pid: saved.pid, pidAlive: isPidAlive(saved.pid), socketExists: existsSync(active.socket), socketResponsive }));
-		if (failure) throw failure;
-		assert.equal(socketResponsive, false, "the old control socket stops serving after process termination");
-	}
+	const { isPidAlive } = await import("../../src/fleet.ts");
+	await waitFor(() => isPidAlive(saved.pid), (alive) => !alive, { timeoutMs: 30_000, what: "accepted restart kills the old RPC pi" });
+	const socketResponsive = await controlRequest(active, "status", {}).then((result) => result.ok, () => false);
+	assert.equal(socketResponsive, false, "the old control socket stops serving after process termination");
 	assert.equal(provider.remaining("s26-restart"), 0);
 });
 
