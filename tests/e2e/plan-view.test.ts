@@ -230,7 +230,8 @@ test("P11b-plan-tui: /cp-plan pages, searches and closes in a real Kitty TUI, re
 	// A legacy (non-Kitty) 60x8 terminal: raw key bytes, and the viewport floor of 4 body rows.
 	const tiny = startTui(t, b.home, b.env, b.args, { lines: 8, columns: 60 });
 	await waitFor(tiny.screen, has("───"), { timeoutMs: 60_000, what: "the tiny TUI editor" });
-	await tiny.run("/cp-plan cp-research-1 ", has("line 1-4/500 (top)"), "tiny viewer");
+	const tinyFirst = await tiny.run("/cp-plan cp-research-1 ", has("line 1-4/500 (top)", "- line 3"), "tiny viewer");
+	assert.doesNotMatch(tinyFirst, /- line [4-9]\b/, "rows()+2 lines: exactly 4 body rows under the floor");
 	await tiny.press("G", has("line 497-500/500 (bot)"), "legacy G");
 	await tiny.press("g", has("line 1-4/500 (top)"), "legacy g");
 	await tiny.press("d", has("line 3-6/500"), "legacy d");
