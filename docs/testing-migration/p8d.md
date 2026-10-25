@@ -45,7 +45,7 @@ by `cp_pipeline recover`, which no e2e drives yet.
 | tests/recovery.test.ts | the policy table has an action for every failure class | — | retained | Verbatim in tests/recovery-retained.test.ts. Missing entry point: a sweep over every failure class has no runtime input; 04-21/04-22 reach crash, the bound and tool_loop. |
 | tests/recovery.test.ts | a transient class recovers on attempt one, escalates on attempt two | 04-21 | mapped | a killed worker is revived once, the second kill escalates naming crash; control NC-P8d-attempt-bound |
 | tests/recovery.test.ts | a hard bound redispatches once, then escalates | 04-21 | mapped | the first tool-call bound redispatches, the second is spent and escalates; control NC-P8d-attempt-bound |
-| tests/recovery.test.ts | a policy cause escalates immediately, on the very first occurrence | — | retained | Verbatim in tests/recovery-retained.test.ts. Missing entry point: 04-22 reaches tool_loop only; budget_exceeded, envelope_invalid, spawn_failed and model_call_failed fail before any death this path sees. |
+| tests/recovery.test.ts | a policy cause escalates immediately, on the very first occurrence | — | retained | Verbatim in tests/recovery-retained.test.ts. Corrected by P8e: S21-budget now pins budget_exceeded reaching onDeath and escalating as a policy cause with no attempt (NC-P8e-budget-policy); model_call_failed is failed by the settle boundary, never onDeath; envelope_invalid and spawn_failed have no death on that path. |
 | tests/recovery.test.ts | risk:high never auto-recovers, whatever the class | 04-20 | mapped | the killed risk:high worker escalates with no recovery_attempted and no counter; control NC-P8d-risk |
 | tests/recovery.test.ts | the attempt counter is per (job, class) and survives a fresh read | 04-21 | mapped | a fresh read gives the bounded job tool_call_cap_exceeded 1 and crash 0, the blocked job crash 1 (04-22); control NC-P8d-attempt-bound |
 | tests/recovery.test.ts | the revive brief with no detected call still says a 'No result provided' error is synthetic | 04-21 | mapped | a worker killed during a model request gets a brief with "No result provided" and no call id; control NC-P8d-no-call |
@@ -91,19 +91,19 @@ by `cp_pipeline recover`, which no e2e drives yet.
 | tests/failures.test.ts | model_call_failed: the worker settled in seconds because the model call errored | 04-17 | mapped | a dead-on-arrival worker is failed closed unprompted (P8c control NC-P8c-doa); S21-budget journals the class; the credential escalation is decideRecovery's, retained below |
 | tests/failures.test.ts | one errored model call in a run that did real work is not dead on arrival | 04-17 | mapped | a run that did work is nudged despite its model error (P8c control NC-P8c-ran) |
 | tests/failures.test.ts | a model error pi is still retrying is a recovery in progress, never dead on arrival | 04-25 | mapped | a kill while pi's ladder is open is a crash, never model_call_failed; a ladder that gave up is provider_limit; controls NC-P8d-retry-open, NC-P8d-provider-limit |
-| tests/failures.test.ts | readModelCallError reads pi's own words, and nothing that merely looks like them | — | retained | Verbatim in tests/failures-retained.test.ts. Missing entry point: the look-alike inputs (assistant text, user message, cp marker) have no outcome of their own beyond 04-17's. |
+| tests/failures.test.ts | readModelCallError reads pi's own words, and nothing that merely looks like them | — | retained | Verbatim in tests/failures-retained.test.ts. P8e's 04-29 now pins the assistant-text look-alike through dispatch (NC-P8e-look-alike); missing entry point for the rest: pi emits no errored user message, no blank provider error, and no cp marker is read as a model call. |
 | tests/failures.test.ts | tool_loop: the same call, over and over | 04-22 | mapped | six identical calls fail as tool_loop (S21-intake journals it); control NC-P8d-tool-loop |
 | tests/failures.test.ts | timeout: silence past the deadline, and only while unsettled | — | retained | Verbatim in tests/failures-retained.test.ts. Missing entry point: the live monitor classifies with alive:false, so inactivity never applies; only cp_pipeline recover reads it. |
-| tests/failures.test.ts | budget_exceeded and explicit failures win over inference | S21-budget | mapped | a worker killed after a real breach is failed budget_exceeded; S21-intake's rejected envelope is envelope_invalid; no P8d control |
+| tests/failures.test.ts | budget_exceeded and explicit failures win over inference | S21-budget | mapped | a worker killed after a real breach is failed budget_exceeded; S21-intake's rejected envelope is envelope_invalid; control NC-P8e-budget-class (p8e.md) |
 | tests/failures.test.ts | recovery: recoverable classes retry the same brief, bounded | — | retained | Verbatim in tests/failures-retained.test.ts. Missing entry point: decideRecovery is read only by cp_pipeline recover, which no e2e drives; live recovery uses the policy table (04-21). |
 | tests/failures.test.ts | recovery: unrecoverable classes never retry | — | retained | Verbatim in tests/failures-retained.test.ts. Same: decideRecovery via cp_pipeline recover only. |
 | tests/failures.test.ts | recovery: provider limits retry the same model, then a fallback | — | retained | Verbatim in tests/failures-retained.test.ts. Same: decideRecovery via cp_pipeline recover only. |
 | tests/failures.test.ts | an implementation failure never re-runs the research that preceded it | — | retained | Verbatim in tests/failures-retained.test.ts. Missing entry point: recoverShip asserts mayRerunResearch as an invariant; no input reaches its throw. |
-| tests/failures.test.ts | the soft gate warns before it breaches, and never kills | 04-26 | mapped | a send at 9x% is delivered with state warn and one budget_warning; the over-ceiling worker stays alive; control NC-P8d-warn |
-| tests/failures.test.ts | cache_read is excluded from the budgeted token total (cp-d7y) | 04-26 | mapped | 50000 cache-read tokens leave the run at warn, under 1000 billable; the cost-only breach is not pinned (the mock's cost table is zero); control NC-P8d-cache |
+| tests/failures.test.ts | the soft gate warns before it breaches, and never kills | 04-26 | mapped | a send at 9x% is delivered with state warn and one budget_warning; the over-ceiling worker stays alive; control NC-P8d-warn; the cost-only breach line is unpinned, so P8e keeps the declaration verbatim in tests/failures-retained.test.ts (the mock's cost table is zero) |
+| tests/failures.test.ts | cache_read is excluded from the budgeted token total (cp-d7y) | 04-26 | mapped | 50000 cache-read tokens leave the run at warn, under 1000 billable; control NC-P8d-cache; P8e keeps the declaration verbatim in tests/failures-retained.test.ts for its unpinned cost-only breach |
 | tests/failures.test.ts | a killed worker is classified and recorded in the fleet | 04-25 | mapped | the killed silent worker's failure is settled_without_report, naming cp_revive; 04-20 shows the fleet phase failed; control NC-P8d-settled-class |
 | tests/failures.test.ts | a shutdown we asked for is not a failure | 04-25 | mapped | the torn-down job records no failure; control NC-P8d-asked-close |
-| tests/failures.test.ts | the budget gate escalates a breach but still delivers the next send | 04-26 | mapped | an exceeded send is still queued, escalates and logs budget_exceeded; syncUsage has no caller in src/, so its fleet tail is unpinned; control NC-P8d-breach-delivers |
+| tests/failures.test.ts | the budget gate escalates a breach but still delivers the next send | 04-26 | mapped | an exceeded send is still queued, escalates and logs budget_exceeded; control NC-P8d-breach-delivers; the syncUsage fleet tail is unreachable: FailureMonitor.syncUsage has no caller in src/ |
 | tests/failures.test.ts | a steer still reaches a worker over its token ceiling but nowhere near its cost ceiling | 04-26 | mapped | a steer to a busy worker at 5200/1000 tokens and $0/$5 is queued and steer_sent; control NC-P8d-breach-delivers |
 <!-- /manifest:assertions -->
 
@@ -144,10 +144,10 @@ by `cp_pipeline recover`, which no e2e drives yet.
 <!-- manifest:incoming -->
 | File | PR | Note |
 |---|---|---|
-| tests/e2e/worker-lifecycle-p8d.test.ts | P8d | behavior 04, revive, bounded recovery and the on-disk settle budget; scenarios 04-19..04-24 |
+| tests/e2e/worker-lifecycle-p8d.test.ts | P8d | behavior 04, revive, bounded recovery, the on-disk settle budget, the held-author release, the failure classes a kill is recorded under (04-25) and the budget soft gate (04-26); scenarios 04-19..04-26 |
 | tests/recovery-retained.test.ts | P8d | convert-owned; 6 declarations of tests/recovery.test.ts retained verbatim, no e2e entry point |
 | tests/revive-retained.test.ts | P8d | convert-owned; 3 declarations of tests/revive.test.ts retained verbatim, no e2e entry point |
-| tests/failures-retained.test.ts | P8d | convert-owned; 8 declarations of tests/failures.test.ts retained verbatim, no e2e entry point |
+| tests/failures-retained.test.ts | P8d | convert-owned; 8 declarations of tests/failures.test.ts retained verbatim, no e2e entry point; P8e adds the 2 budget-gate declarations whose cost-only breach is unpinned |
 <!-- /manifest:incoming -->
 
 <!-- manifest:baseline -->

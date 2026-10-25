@@ -1,12 +1,12 @@
 /**
  * The failure classifier and recovery ladder declarations with no e2e entry point, kept verbatim from
- * tests/failures.test.ts; docs/testing-migration/p8d.md maps the rest to 04-17..04-26.
+ * tests/failures.test.ts; docs/testing-migration/p8d.md maps the rest to 04-17..04-26, p8e.md the budget-gate tails.
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isoTimestamp, type RunEvent } from "../src/contracts.ts";
-import { classifyRun, decideRecovery, MAX_RECOVERY_ATTEMPTS, mayRerunResearch, readModelCallError } from "../src/failures.ts";
+import { EMPTY_USAGE, isoTimestamp, type RunEvent, type Usage } from "../src/contracts.ts";
+import { checkBudget, classifyRun, decideRecovery, MAX_RECOVERY_ATTEMPTS, mayRerunResearch, readModelCallError } from "../src/failures.ts";
 
 let seq = 0;
 function event(type: string, payload: Record<string, unknown> = {}, source: "pi" | "cp" = "pi", ts?: string): RunEvent {
@@ -130,4 +130,55 @@ test("an implementation failure never re-runs the research that preceded it", ()
 	assert.equal(mayRerunResearch("planner", "planner"), true);
 	assert.equal(mayRerunResearch("implementer", "implementer"), true);
 	assert.equal(mayRerunResearch("planner", "implementer"), true);
+});
+
+test("the soft gate warns before it breaches, and never kills", () => {
+	const limits = { tokens: 1000, cost_usd: 10 };
+	const usage = (tokens: number, cost = 0): Usage => ({ ...EMPTY_USAGE, total_tokens: tokens, cost_usd: cost });
+
+	assert.equal(checkBudget(usage(100), limits).state, "ok");
+	const warn = checkBudget(usage(800), limits);
+	assert.equal(warn.state, "warn", `ratio ${warn.ratio}`);
+	assert.match(warn.message ?? "", /budget at 80%/);
+
+	const breach = checkBudget(usage(1200), limits);
+	assert.equal(breach.state, "exceeded");
+	assert.match(breach.message ?? "", /escalating to the operator/);
+
+	// cost can breach on its own
+	assert.equal(checkBudget(usage(10, 11), limits).state, "exceeded");
+});
+
+test("cache_read is excluded from the budgeted token total (cp-d7y)", () => {
+	const limits = { tokens: 1000, cost_usd: 50 };
+
+	// cp-n10's real shape: ~98% cache_read, 300% of the token ceiling by raw
+	// count, 8% of the cost ceiling. Billed on cache_read-inclusive tokens this
+	// reads as a breach; billed on the near-free-read-excluded total it does not.
+	const mostlyCached: Usage = {
+		...EMPTY_USAGE,
+		input: 273_510,
+		cache_read: 14_388_091,
+		total_tokens: 14_661_601,
+		cost_usd: 4.07,
+	};
+	const scaled = checkBudget(mostlyCached, { tokens: 15_000_000, cost_usd: 50 });
+	assert.equal(scaled.state, "ok", `ratio ${scaled.ratio}, tokens.used ${scaled.tokens.used}`);
+	assert.equal(scaled.tokens.used, 273_510, "billable tokens exclude cache_read");
+
+	// A small, cheap, cache-read-heavy run must not misread as a breach either.
+	const cached = (billable: number, cacheRead: number, cost = 0): Usage => ({
+		...EMPTY_USAGE,
+		input: billable,
+		cache_read: cacheRead,
+		total_tokens: billable + cacheRead,
+		cost_usd: cost,
+	});
+	assert.equal(checkBudget(cached(100, 5000), limits).state, "ok", "5100 raw tokens, 100 of them billable");
+
+	// Cache-free usage still breaches exactly as before.
+	assert.equal(checkBudget(cached(1200, 0), limits).state, "exceeded");
+
+	// A cost-only breach is unaffected by the token accounting change.
+	assert.equal(checkBudget(cached(10, 5000, 60), limits).state, "exceeded");
 });

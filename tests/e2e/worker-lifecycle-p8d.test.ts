@@ -1,6 +1,6 @@
 /**
- * Behavior 04 (P8d, 04-19..04-26): cp_revive's plan and relaunch, bounded recovery after a death or a hard bound, the
- * failure class a kill is recorded under and the budget gate, through a real CommandPost, pi workers and the mock provider.
+ * Behavior 04 (P8d, 04-19..04-26): cp_revive, bounded recovery after a death or a hard bound, the failure class a kill
+ * is recorded under and the budget gate, through a real CommandPost, pi workers and the mock provider.
  */
 
 import assert from "node:assert/strict";

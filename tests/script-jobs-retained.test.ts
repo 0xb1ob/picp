@@ -1,63 +1,22 @@
+/**
+ * Script-job units with no e2e entry point, kept verbatim from tests/script-jobs.test.ts: injected crash windows,
+ * the unwired schedule runner and path validation. 04-33..04-35 pin the rest; missing entry points: p8e.md.
+ */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync, existsSync } from "node:fs";
 import { CommandPost } from "../src/command-post.ts";
 import { createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, REPO_ROOT, treehouseAvailable, waitFor } from "./harness/index.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { EMPTY_USAGE, FailureClassSchema, isoTimestamp, LAYOUT, paths, validate, type FleetRecord } from "../src/contracts.ts";
+import { EMPTY_USAGE, FailureClassSchema, isoTimestamp, paths, validate, type FleetRecord } from "../src/contracts.ts";
 import { runScript, resolveScriptFile } from "../src/script-runner.ts";
 import { ScriptDispatcher } from "../src/script-dispatch.ts";
 import type { IntakeResult } from "../src/intake.ts";
 import { ScheduleRunner } from "../src/schedule-runner.ts";
 import { type Schedule, Scheduler } from "../src/scheduler.ts";
 import { loadMandateDefaults } from "../src/mandate-defaults.ts";
-import { EscalationStore } from "../src/escalation.ts";
-
-test("script dispatch leases a branch, intakes once, and cannot replay", { skip: treehouseAvailable() ? false : "treehouse required", timeout: 60_000 }, async (t) => {
- const home = createScratchHome();
- const repo = createScratchRepo({ files: { "scripts/run.sh": "pwd\nexit 7\n" } });
- const received: string[] = [];
- const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, onReported: (result) => received.push(result.job_id) });
- await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
- execFileSync("git", ["clone", "--quiet", repo.remote as string, post.registry.pathOf("demo")]);
- const pool = enableTreehouse(post.registry.pathOf("demo"));
- t.after(() => { pool.cleanup(); repo.cleanup(); home.cleanup(); });
- createScratchLedger({ home: home.path, knownProjects: ["demo"] });
- const ledger = post.ledger();
- const fleet = post.fleet;
- const job = await ledger.create({ title: "run", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
- const base = { projects: ["demo"], objective: "script", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10 };
- post.mandates.issue(base);
- const selected = post.mandates.issue({ ...base, job_ids: [job.id] });
- const preview = await post.previewDispatch({ jobId: job.id });
- assert.equal("executor" in preview && preview.executor, "script");
- assert.equal(preview.mandate_id, selected.id);
- assert.equal(fleet.get(job.id), undefined);
- await assert.rejects(post.dispatch({ jobId: job.id, task: "ignored" }), /task is not accepted/);
- const result = await post.dispatch({ jobId: job.id });
- assert.equal("executor" in result && result.executor, "script");
- assert.equal(result.mandate_id, selected.id);
- assert.equal(result.branch, job.id);
- assert.equal(fleet.require(job.id).worker, undefined);
- assert.equal(fleet.require(job.id).schedule_id, undefined, "schedlater S3: an unscheduled record carries no schedule_id");
- await waitFor(() => fleet.require(job.id).phase, (phase) => phase === "failed", { timeoutMs: 10_000 });
- assert.equal(fleet.require(job.id).failure?.class, "script_exit");
- assert.equal(received.length, 1);
- assert.equal((await post.intake.intake(job.id)).already, true);
- assert.equal(received.length, 1);
- assert.equal((await post.revivePlan(job.id)).ok, false);
- await assert.rejects(post.send({ jobId: job.id, message: "again" }), /cannot promote or replay/);
- await assert.rejects(post.dispatch({ jobId: job.id }), /cannot be replayed|already has a fleet record/);
- writeFileSync(join(result.worktree, "dirty"), "keep this lease\n");
- const refused = await post.tearDown(job.id);
- assert.equal(refused.failure?.code, "dirty");
- unlinkSync(join(result.worktree, "dirty"));
- const closed = await post.tearDown(job.id);
- assert.equal(closed.torn_down, true);
- assert.equal(fleet.require(job.id).phase, "done");
-});
 
 test("schedlater S1: a script_path schedule runs with no model; a refused teardown wakes the parent, live and after a restart, until the runner tears it down", { skip: treehouseAvailable() ? false : "treehouse required", timeout: 60_000 }, async (t) => {
  const home = createScratchHome();
@@ -144,86 +103,6 @@ test("schedlater S1: a runner fire over its run's parallelism is refused by the 
  const dropped = await post.ledger().show(jobId);
  assert.equal(dropped.status, "closed");
  assert.match(dropped.close_reason ?? "", /not dispatched before the next slot: dispatch refused .*run parallelism is full/);
-});
-
- test("script risk:high mandate refuses before leasing and dry_run only previews", async (t) => {
- const home = createScratchHome();
- const repo = createScratchRepo({ files: { "scripts/run.sh": "exit 0\n" } });
- t.after(() => { home.cleanup(); repo.cleanup(); });
- const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT });
- await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
- execFileSync("git", ["clone", "--quiet", repo.remote as string, post.registry.pathOf("demo")]);
- createScratchLedger({ home: home.path, knownProjects: ["demo"] });
- post.mandates.issue({ projects: ["demo"], objective: "ship changes", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
- const job = await post.ledger().create({ title: "rotate production credentials", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
- const preview = await post.previewDispatch({ jobId: job.id });
- assert.equal(preview.mandate_gate, "would ask: risk:high");
- assert.equal(preview.mandate_id, post.mandates.list()[0]!.id);
- await assert.rejects(post.dispatch({ jobId: job.id }), /risk:high under ask_on/);
- assert.equal(post.fleet.get(job.id), undefined);
- assert.equal(execFileSync("git", ["branch", "--list", job.id], { cwd: post.registry.pathOf("demo"), encoding: "utf8" }).trim(), "");
-});
-
-test("cp-7re9: a script job in a denied project is refused by preflight project_denied, before the risk:high gate and before any lease", { skip: treehouseAvailable() ? false : "treehouse required", timeout: 30_000 }, async (t) => {
- const home = createScratchHome();
- const repo = createScratchRepo({ files: { "scripts/run.sh": "exit 0\n" } });
- t.after(() => { home.cleanup(); repo.cleanup(); });
- const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT });
- await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
- execFileSync("git", ["clone", "--quiet", repo.remote as string, post.registry.pathOf("demo")]);
- createScratchLedger({ home: home.path, knownProjects: ["demo"] });
- // A grant that would gate risk:high exists; the deny list is added afterwards (it would refuse the issue itself).
- post.mandates.issue({ projects: ["demo"], objective: "ship changes", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, ask_on: ["risk:high"] });
- mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
- writeFileSync(join(home.path, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...loadMandateDefaults(home.path), deny_projects: ["demo"] }));
- const job = await post.ledger().create({ title: "rotate production credentials", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
- await assert.rejects(post.dispatch({ jobId: job.id }), (error: Error & { result?: { findings: Array<{ code: string }> } }) => {
-  assert.match(error.message, /project demo is denied/);
-  assert.deepEqual(error.result?.findings.map((finding) => finding.code), ["project_denied"]);
-  return true;
- });
- assert.equal(post.fleet.get(job.id), undefined, "no record");
- assert.equal(execFileSync("git", ["branch", "--list", job.id], { cwd: post.registry.pathOf("demo"), encoding: "utf8" }).trim(), "", "no branch, no lease");
- assert.deepEqual(new EscalationStore({ home: home.path }).open(), [], "no risk_high escalation: the deny refuses before the mandate gate");
- // Control: with the deny removed, the same job reaches the risk:high gate, so the order above is what saved the ask.
- writeFileSync(join(home.path, LAYOUT.mandateDefaultsFile), JSON.stringify({ ...loadMandateDefaults(home.path), deny_projects: [] }));
- await assert.rejects(post.dispatch({ jobId: job.id }), /risk:high under ask_on/);
-});
-
-test("script cap: home worker-bounds.json reaches the runner and the record; override wins; malformed refuses before lease", { skip: treehouseAvailable() ? false : "treehouse required", timeout: 30_000 }, async (t) => {
- const home = createScratchHome();
- const repo = createScratchRepo({ files: { "scripts/run.sh": "exit 0\n" } });
- const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT });
- await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "local" });
- execFileSync("git", ["clone", "--quiet", repo.remote as string, post.registry.pathOf("demo")]);
- const pool = enableTreehouse(post.registry.pathOf("demo"));
- t.after(() => { pool.cleanup(); repo.cleanup(); home.cleanup(); });
- createScratchLedger({ home: home.path, knownProjects: ["demo"] });
- const configFile = join(home.path, LAYOUT.workerBoundsFile);
- const seen: number[] = [];
- const dispatcher = new ScriptDispatcher({ home: home.path, ledger: post.ledger(), fleet: post.fleet, preflight: post.preflight, leases: post.leases, runs: post.runs, intake: post.intake, run: (options) => { seen.push(options.wallClockSeconds); return runScript(options); } });
-
- writeFileSync(configFile, JSON.stringify({ wall_clock_seconds: "soon" }));
- const bad = await post.ledger().create({ title: "bad cap", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
- await assert.rejects(dispatcher.preview({ jobId: bad.id }), /worker-bounds\.json wall_clock_seconds must be a positive integer/);
- await assert.rejects(dispatcher.dispatch({ jobId: bad.id }), /worker-bounds\.json wall_clock_seconds must be a positive integer/);
- assert.equal(post.fleet.get(bad.id), undefined);
- assert.equal(execFileSync("git", ["branch", "--list", bad.id], { cwd: post.registry.pathOf("demo"), encoding: "utf8" }).trim(), "");
-
- writeFileSync(configFile, JSON.stringify({ wall_clock_seconds: 77 }));
- const homed = await post.ledger().create({ title: "home cap", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
- assert.equal((await dispatcher.preview({ jobId: homed.id })).wall_clock_seconds, 77);
- assert.equal("mandate_id" in await dispatcher.preview({ jobId: homed.id }), false);
- assert.equal("mandate_id" in await dispatcher.dispatch({ jobId: homed.id }), false);
- assert.equal(post.fleet.require(homed.id).bounds?.wall_clock_seconds, 77);
- await waitFor(() => post.fleet.require(homed.id).phase, (phase) => phase !== "waiting" && phase !== "launching", { timeoutMs: 10_000 });
- assert.equal((await post.tearDown(homed.id)).torn_down, true);
-
- const explicit = await post.ledger().create({ title: "explicit cap", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
- await dispatcher.dispatch({ jobId: explicit.id, wallClockSeconds: 5 });
- assert.equal(post.fleet.require(explicit.id).bounds?.wall_clock_seconds, 5);
- assert.deepEqual(seen, [77, 5]);
- await waitFor(() => post.fleet.require(explicit.id).phase, (phase) => phase !== "waiting" && phase !== "launching", { timeoutMs: 10_000 });
 });
 
 test("post-lease occupancy refusal does not launch a script", { skip: treehouseAvailable() ? false : "treehouse required" }, async (t) => {
@@ -390,70 +269,6 @@ test("restart intakes a durable script exit once instead of calling the dead pid
  const second = await post.reconcile({ isPidAlive: () => false });
  assert.deepEqual(second.report.needs_intake, []);
  assert.deepEqual(received, ["cp-restart"]);
-});
-
-test("script runner observes exit and bounds stdout/stderr outside the worktree", async (t) => {
- const home = mkdtempSync(join(tmpdir(), "cp-script-home-"));
- const worktree = mkdtempSync(join(tmpdir(), "cp-script-repo-"));
- t.after(() => { rmSync(home, { recursive: true, force: true }); rmSync(worktree, { recursive: true, force: true }); });
- execFileSync("git", ["init", "-q"], { cwd: worktree });
- mkdirSync(join(worktree, "scripts"));
- writeFileSync(join(worktree, "scripts/run.sh"), "printf '%070000d' 1\npwd\nprintf 'error' >&2\nexit 7\n");
- execFileSync("git", ["add", "scripts/run.sh"], { cwd: worktree });
- const file = await resolveScriptFile(worktree, "scripts/run.sh");
- const { child, closed } = runScript({ home, jobId: "cp-test", worktree, file, wallClockSeconds: 10 });
- assert.ok(child.pid);
- const result = await closed;
- assert.equal(result.status, "failed");
- assert.equal(result.exit_code, 7);
- const artifact = readFileSync(join(home, paths.artifactFile("cp-test")), "utf8");
- assert.ok(artifact.startsWith("stdout: 7"));
- assert.match(artifact, /truncated/);
- assert.ok(artifact.includes(worktree));
- assert.equal(readFileSync(join(home, paths.scriptResultFile("cp-test")), "utf8").includes('"reason": "exit"'), true);
-});
-
-test("script timeout terminates a TERM-ignoring process group", { timeout: 15_000 }, async (t) => {
- const home = mkdtempSync(join(tmpdir(), "cp-script-timeout-"));
- t.after(() => rmSync(home, { recursive: true, force: true }));
- const file = join(home, "ignore.sh");
- writeFileSync(file, "trap '' TERM\nwhile :; do sleep 0.1; done\n");
- const { closed } = runScript({ home, jobId: "cp-timeout", worktree: home, file, wallClockSeconds: 1 });
- const result = await closed;
- assert.equal(result.status, "failed");
- assert.equal(result.reason, "timeout");
- assert.equal(result.timed_out, true);
-});
-
-test("timeout kills an inherited TERM-ignoring descendant after its shell closes", { timeout: 15_000 }, async (t) => {
- const home = mkdtempSync(join(tmpdir(), "cp-script-descendant-"));
- let pid: number | undefined;
- t.after(() => {
-  if (pid) try { process.kill(pid, "SIGKILL"); } catch { /* Already gone. */ }
-  rmSync(home, { recursive: true, force: true });
- });
- const file = join(home, "descendant.sh");
- writeFileSync(file, "trap 'exit 0' TERM\n(trap '' TERM; exec sleep 30) >/dev/null 2>&1 &\necho $! > \"$CP_RUN_DIR/descendant.pid\"\nwait\n");
- const { closed } = runScript({ home, jobId: "cp-descendant", worktree: home, file, wallClockSeconds: 1 });
- await waitFor(() => existsSync(join(home, paths.runDir("cp-descendant"), "descendant.pid")), Boolean, { timeoutMs: 5_000 });
- pid = Number(readFileSync(join(home, paths.runDir("cp-descendant"), "descendant.pid"), "utf8"));
- assert.equal((await closed).reason, "timeout");
- await waitFor(() => {
-  try { return readFileSync(`/proc/${pid}/stat`, "utf8").split(" ")[2] === "Z"; }
-  catch { return true; }
- }, Boolean, { timeoutMs: 5_000 });
-});
-
-test("script signal is recorded without guessing an exit code", async (t) => {
- const home = mkdtempSync(join(tmpdir(), "cp-script-signal-"));
- t.after(() => rmSync(home, { recursive: true, force: true }));
- const file = join(home, "signal.sh");
- writeFileSync(file, "kill -TERM $$\n");
- const result = await runScript({ home, jobId: "cp-signal", worktree: home, file, wallClockSeconds: 10 }).closed;
- assert.equal(result.status, "failed");
- assert.equal(result.reason, "signal");
- assert.equal(result.signal, "SIGTERM");
- assert.equal(result.exit_code, null);
 });
 
 test("script validation refuses symlinks and untracked files", async (t) => {
