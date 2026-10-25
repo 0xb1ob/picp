@@ -123,7 +123,7 @@ test("P13 cp_schedule add and run_now: a naming quote saves an active native rev
 	const add = (id: string, name: string, extra: Record<string, unknown> = {}) => schedule(id, {
 		action: "add", name, project: "demo", manual: true, title: `${name} fix`, kind: "ship", delivery: "pr", operator_quote: `Add the ${name} schedule.`, ...extra,
 	});
-	const prompt = "P13: please add a schedule. Add the nightlyish schedule. Add the nightly schedule. Add the (a+b) schedule. Add the spare schedule.";
+	const prompt = "P13: please add a schedule. Add the nightlyish schedule. Run NIGHTLY. Add the (a+b) schedule. Add the spare schedule.";
 	const parent = await h.parent(prompt, [
 		{ kind: "tool_calls", calls: [
 			add("unnamed", "nightly", { operator_quote: "please add a schedule." }),
@@ -132,7 +132,7 @@ test("P13 cp_schedule add and run_now: a naming quote saves an active native rev
 			add("mandate", "nightly", { mandate_id: "md-123456", limits: { usd: 1 } }),
 			add("refire", "nightly", { refire: true }),
 			add("approval", "nightly", { approval_quote: "Yes." }),
-			add("nightly", "nightly", { limits: { parallelism: 2 } }),
+			add("nightly", "nightly", { limits: { parallelism: 2 }, operator_quote: "Run NIGHTLY." }),
 			add("meta", "(a+b)", { kind: "research", delivery: "answer" }),
 			add("spare", "spare"),
 		] },
@@ -195,9 +195,10 @@ test("P13 cp_schedule adopt and deactivate: one naming quote each, revisions bin
 	await h.closeParents();
 	const [id, weekly] = [h.idOf("nightly"), h.idOf("weekly")];
 	const adopt = `Adopt ${id}.`;
-	const owner = await h.parent(`P13: ${adopt} Yes, please. Deactivate ${weekly}.`, [
+	const owner = await h.parent(`P13: ${adopt} Yes, please. Adopt ${id}0. Deactivate ${weekly}.`, [
 		{ kind: "tool_calls", calls: [
 			schedule("vague", { action: "adopt", id, operator_quote: "Yes, please.", revision: 1 }),
+			schedule("longer", { action: "adopt", id, operator_quote: `Adopt ${id}0.`, revision: 1 }),
 			schedule("unrevised", { action: "adopt", id, operator_quote: adopt }),
 		] },
 		{ kind: "tool_calls", calls: [schedule("adopt", { action: "adopt", id, operator_quote: adopt, revision: 1 })] },
@@ -213,6 +214,7 @@ test("P13 cp_schedule adopt and deactivate: one naming quote each, revisions bin
 	]);
 	const results = ends(owner);
 	checkCall(results, "vague", "refused", /whole token/);
+	checkCall(results, "longer", "refused", /whole token/);
 	checkCall(results, "unrevised", "refused", /needs revision/);
 	checkCall(results, "adopt", "ok", /revision 2/);
 	checkCall(results, "reused", "refused", /already used/);
