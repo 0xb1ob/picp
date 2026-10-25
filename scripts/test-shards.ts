@@ -1,6 +1,6 @@
 /**
  * Duration-balanced test sharding: greedy longest-first over scripts/test-timings.json.
- * `files <n>` lists shard n; `check` verifies every test file is in exactly one shard;
+ * `files <n>` lists shard n; `check` verifies every test file is in exactly one shard (untimed files weigh the median);
  * `gen <spec-log>` rewrites the table from a CI run's spec reporter output.
  */
 import { globSync, readFileSync, writeFileSync } from "node:fs";
@@ -61,11 +61,8 @@ if (import.meta.main) {
 	} else if (cmd === "check") {
 		const all = discover();
 		const table = loadTable();
-		const missing = all.filter((f) => !(f in table));
-		if (missing.length > 0) {
-			console.error(`timing table has no entry for: ${missing.join(", ")}; run \`test-shards.ts gen <spec-log>\``);
-			process.exit(1);
-		}
+		const untimed = all.filter((f) => !(f in table));
+		if (untimed.length > 0) console.log(`${untimed.length} file(s) with no timing entry weigh the median: ${untimed.join(", ")}`);
 		const shards = assignShards(all, table);
 		const flat = shards.flat();
 		const bad = all.filter((f) => flat.filter((g) => g === f).length !== 1);
