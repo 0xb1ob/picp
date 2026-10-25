@@ -20,9 +20,8 @@ function toolExtension(file: string, tools: Array<{ name: string; properties?: R
 	return file;
 }
 
-// P9-tools: a parent session's foreign tools reach `/doctor --json` by name and guessed capability. Builtins, cp_* and
-// command-post's own extension dir are expected; a path that merely contains "command-post" is not; file reads and
-// shells are flagged outside guard coverage, network tools are not.
+// P9-tools: foreign tools reach `/doctor --json` with guessed capability; builtins, cp_* and command-post's own dir
+// are expected, a lookalike path is not; file reads and shells are uncovered, network tools are not.
 test("P9-tools: /doctor names a parent's foreign tools with their capabilities and guard coverage", { timeout: 120_000 }, async (t) => {
 	const home = createScratchHome();
 	const dir = mkdtempSync(join(tmpdir(), "cp-p9-tools-"));
@@ -68,9 +67,8 @@ function processEnv(t: TestContext, env: NodeJS.ProcessEnv): void {
 	t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
 }
 
-// P9-control: the host reopens a saved parent session only while its file exists, records the session the spawned
-// parent reports once that file is on disk (repairing a dangling record, keeping the saved model choice), keeps the
-// record when the reported file is not on disk, and logs a refused record write without failing the start.
+// P9-control: saved sessions reopen only while on disk; reported sessions are recorded only once on disk (dangling
+// records repaired, saved model kept); a refused record write is logged, never failing the start.
 test("P9-control: the parent host's session record reopens only existing files and never fails a start", { timeout: 180_000 }, async (t) => {
 	const home = createScratchHome();
 	const provider = await MockProvider.start();
@@ -102,11 +100,23 @@ test("P9-control: the parent host's session record reopens only existing files a
 	const first = await run({ model: parentModel, modelExplicit: true }, async (host) => { await host.request("send", "Say ready."); });
 	assert.equal(first.sessionFile, fallback);
 	assert.match(logSince(from), new RegExp(`reported parent session ${escape(fallback)} is not on disk; keeping the saved control record`));
+	assert.doesNotMatch(logSince(from), /is missing; not reopening it/, "no saved record logs nothing about one");
 	assert.equal(existsSync(control), false, "a session not yet on disk is never recorded");
 	assert.ok(existsSync(fallback), "the parent's reply wrote its session");
 
-	await run({ model: parentModel, modelExplicit: true });
+	from = logSize();
+	const second = await run({ model: parentModel, modelExplicit: true });
+	assert.equal(second.sessionFile, fallback);
 	assert.deepEqual(JSON.parse(readFileSync(control, "utf8")), { sessionFile: fallback, model: parentModel });
+
+	const saved = join(home.path, "alt", "saved.jsonl");
+	mkdirSync(join(saved, ".."), { recursive: true });
+	cpSync(fallback, saved);
+	writeFileSync(control, JSON.stringify({ sessionFile: saved, model: parentModel }));
+	const reopened = await run({ model: parentModel });
+	assert.equal(reopened.sessionFile, saved, "an existing saved session other than the fallback is reopened");
+	assert.doesNotMatch(logSince(from), /is missing; not reopening it/, "an existing saved session logs nothing");
+	assert.deepEqual(JSON.parse(readFileSync(control, "utf8")), { sessionFile: saved, model: parentModel });
 
 	const dangling = join(sessions, "deleted.jsonl");
 	writeFileSync(control, JSON.stringify({ sessionFile: dangling, model: parentModel }));
