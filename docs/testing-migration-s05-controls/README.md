@@ -10,7 +10,7 @@ node --import ./tests/harness/hermetic-env.ts --test --test-name-pattern='<filte
 
 The filter is shown below. Each recorded replay exited 1. Reverse the same patch afterward with `git apply --reverse --unidiff-zero ...`. Replay one patch at a time. These controls use the mock provider and temporary agent configuration; no operator credentials are used.
 
-Shared patches are credited only for the independently observed assertions below. A failure earlier in a scenario does not credit later assertions. Logs `replay-<patch>.log` beside the job report preserve the full runs; the assertions and actual/expected values here make the evidence reviewable without that local log directory.
+Shared patches are credited only for the independently observed assertions below. A failure earlier in a scenario does not credit later assertions. The assertions and actual/expected values here make the evidence reviewable on their own.
 
 | Patch | Test-name filter used |
 |---|---|

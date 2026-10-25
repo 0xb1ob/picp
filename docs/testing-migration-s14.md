@@ -74,7 +74,7 @@ Fixed resolution and checkout cases passed before mutations; final fixed rerun f
 
 ## Batch 3: first whole-file retirement
 
-All 9 declarations in `tests/pr-bind.test.ts` are now mapped, with no retention. Deleted only after the fixed bound and unsafe scenarios passed (19 executed tests). Source history inspected: 580289b5c0f709bdc9ae28a50bf55dd12c38d04a (#238), including the original pr-bind production diff. Reference search found only migration evidence rows; no live docs/test/script reference needed retargeting.
+All 9 declarations in `tests/pr-bind.test.ts` are now mapped, with no retention. Deleted only after the fixed bound and unsafe scenarios passed (19 executed tests). Source history inspected: #238, including the original pr-bind production diff. Reference search found only migration evidence rows; no live docs/test/script reference needed retargeting.
 
 | Source declaration | Status | Control and failing assertion |
 |---|---|---|
