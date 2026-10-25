@@ -1,6 +1,6 @@
 /**
- * Behavior 04 (P8c): the spawn cap's gate-reviewer reserve, driven through a real CommandPost, real pi planners and
- * gate reviewers on a treehouse pool and the mock provider.
+ * Behavior 04 (P8c, 04-14..04-17): the spawn cap's gate-reviewer reserve, a silent settle's bounded recovery and the
+ * report nudge, driven through a real CommandPost, real pi workers on a treehouse pool and the mock provider.
  */
 
 import assert from "node:assert/strict";
