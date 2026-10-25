@@ -36,7 +36,7 @@ test("continuity records require bounded typed admission, roots and handoff evid
 		version: 1, handoff_id: digest, source_job_id: "cp-original", replacement_job_id: "cp-replacement",
 		link_id: "link-1", input_digest: digest, created_at: at, phase: "waiting_review",
 		edges: [{ dependent_job_id: "cp-ship", original_blocker_id: "cp-original",
-			replacement_blocker_id: "cp-replacement", provenance_reference: "pipeline.json" }],
+			replacement_blocker_id: "cp-replacement", provenance_reference: "unknown" }],
 	};
 	assert.equal(validateRecovery(GateHandoffSchema, handoff).ok, true);
 	assert.equal(validateRecovery(GateHandoffSchema, { ...handoff, edges: [] }).ok, false);

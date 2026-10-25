@@ -8,7 +8,7 @@ import { parseJobLabels } from "./ledger.ts";
 import type { MandateStore } from "./mandate.ts";
 import { atomicWriteText } from "./json-store.ts";
 
-function confirmationScope(home: string, source: Mandate, jobs: readonly Job[]): string {
+export function confirmationScope(home: string, source: Mandate, jobs: readonly Job[]): string {
 	let inputs = governingInputs(home, jobs);
 	const receipt = source.continuity;
 	if (receipt) {

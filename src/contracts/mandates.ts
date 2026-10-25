@@ -176,6 +176,7 @@ export const MandateAdmissionSchema = Type.Object({
 	job_id: JobIdSchema,
 	admitted_at: Type.Optional(IsoTimestampSchema),
 	confirmation_escalation_id: Type.Optional(Type.String({ pattern: "^es-[a-z0-9]{4,16}$" })),
+	continuation_work: Type.Optional(Type.Boolean()),
 	project: Type.String({ minLength: 1, maxLength: 80 }),
 	kind: JobKindSchema,
 	scope_digest: ContinuityDigestSchema,
@@ -302,7 +303,7 @@ export const MandateSchema = Type.Object(
 		coverage_superseded: Type.Optional(Type.Object({
 			replacement_id: MandateIdSchema,
 			at: IsoTimestampSchema,
-			authority_reference: Type.String({ minLength: 1, maxLength: 4000 }),
+			authority_reference: Type.String({ pattern: "^es-[a-z0-9]{4,16}$" }),
 			scope_digest: ContinuityDigestSchema,
 		}, { additionalProperties: false })),
 	},

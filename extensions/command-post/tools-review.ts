@@ -253,11 +253,12 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 		parameters: Type.Object({
 			job_id: Type.String({ description: "The research job whose artifact is reviewed" }),
 			action: Type.Optional(
-				StringEnum(["start", "status", "replace_planner", "authorize_recovery", "prepare_attempt"], {
+				StringEnum(["start", "status", "replace_planner", "handoff", "authorize_recovery", "prepare_attempt"], {
 					description:
 						"start (default): spawn a NEW reviewer attempt (spend) and return wait, or the decision if this attempt is already decided. status: read pending and decided attempts. replace_planner: prepare a fresh research job with the old plan and gate feedback after planner teardown; dispatch separately using the returned task_file.",
 				}),
 			),
+			source_job_id: Type.Optional(Type.String({ description: "handoff: the normally closed original research job" })),
 			replacement_job_id: Type.Optional(Type.String({ description: "replace_planner: a fresh research job in the same project and delivery; prepares a task_file for normal cp_dispatch" })),
 			replan_escalation_id: Type.Optional(Type.String({ description: "replace_planner: exact operator-quote replan authority for one corrected capped review" })),
 			authority_mode: Type.Optional(StringEnum(["single_use", "standing"])),
@@ -274,6 +275,12 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
 			const post = commandPost(ctx.modelRegistry);
+			if (params.action === "handoff") {
+				if (!params.source_job_id || !params.dependent_job_ids || Object.keys(params).some((key) => !["action", "job_id", "source_job_id", "dependent_job_ids"].includes(key))) throw new Error("handoff accepts only job_id, source_job_id and dependent_job_ids");
+				const result = await post.handoffGate({ job_id: params.job_id, source_job_id: params.source_job_id, dependent_job_ids: params.dependent_job_ids });
+				refreshWidget(ctx);
+				return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result };
+			}
 			if (params.action === "authorize_recovery") {
 				if (!params.authority_mode || !params.operator_control_id || !params.operator_send_id || !params.dependent_job_ids) {
 					throw new Error("authorize_recovery needs authority_mode, operator control/send and dependent_job_ids");

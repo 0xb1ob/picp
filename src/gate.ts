@@ -32,6 +32,7 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { gateInputDigest } from "./gate-input.ts";
 import { claimRecovery, copyRecoveryTask, publishRecoveryFile, recoveryRecord, recoveryDigest, recoveryFile, recoveryJson, recoveryReplay, recoveryTarget, recoveryStatus, validateRecoveryAuthority } from "./gate-recovery.ts";
 import { claimRecoveryAttempt, finishRecoveryAttempt, recoveryAttemptState, gateRecoveryStatus, validateGateRecoveryFinalization, nextRecoveryGateOrdinal, recoverStandingFinalization, recoverySpawnGuard } from "./gate-recovery-authority.ts";
 import type { CapacityReader } from "./capacity.ts";
@@ -840,7 +841,9 @@ export class Gate {
 		const last = prior.decisions.at(-1);
 		if (!selectedAttempt && last?.verdict === "pass") {
 			const info = artifacts.info(jobId);
-			const moved = info.modified_at !== undefined && info.modified_at > last.decided_at;
+			const binding = join(home, paths.gateRunDir(jobId, last.attempt), "input-digest");
+			const moved = (info.modified_at !== undefined && info.modified_at > last.decided_at) ||
+				(existsSync(binding) && readFileSync(binding, "utf8") !== gateInputDigest(home, jobId, artifacts, this.#options.mandates));
 			if (!moved) {
 				return {
 					verdict: last,
@@ -872,6 +875,7 @@ export class Gate {
 		const gateRunDir = join(home, paths.gateRunDir(jobId, attempt));
 		const scratch = join(home, paths.gateScratchDir(jobId, attempt));
 		mkdirSync(scratch, { recursive: true });
+		const inputDigest = gateInputDigest(home, jobId, artifacts, this.#options.mandates);
 		const artifactCopy = join(scratch, "artifact.md");
 		if (recoveryArtifact) writeFileSync(artifactCopy, recoveryArtifact.artifact);
 		else artifacts.get(jobId, artifactCopy);
@@ -887,6 +891,8 @@ export class Gate {
 				original_task: originalTaskBlock(taskCopy) + continuityInputsBlock(this.#options.mandates, jobId) + (recoveryArtifact ? "\nAuthorized addenda in the task are governing scope, not scope growth.\n" : taskAddendaBlock({ home, jobId, scratch })),
 			},
 		});
+		if (gateInputDigest(home, jobId, artifacts, this.#options.mandates) !== inputDigest) throw new GateError(`${jobId}: governing gate input moved during snapshot`);
+		publishRecoveryFile(join(home, paths.gateRunDir(jobId, attempt), "input-digest"), Buffer.from(inputDigest));
 		writeFileSync(join(gateRunDir, "brief.md"), brief);
 
 		const recorder = RunRecorder.open({ home, jobId, dir: gateRunDir });

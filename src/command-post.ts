@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { AnswerCardOutbox, type AnswerCardDueOptions, type AnswerCardSink } from "./answer-delivery.ts";
 import { AnsweredOutbox, isSelfAnswered } from "./answered.ts";
 import { boundedCauseId, boundedWakeupId, type DurableWakeupInput, DurableWakeupOutbox } from "./wakeup-outbox.ts";
-import { observeMandateUsage } from "./mandate-usage.ts";
+import { liveUsageJobs, observeMandateUsage } from "./mandate-usage.ts";
 import { observeRunUsage, runAuthority } from "./schedule-authority.ts";
 import { openScheduleResults, ScheduleResults } from "./schedule-results.ts";
 import { ArtifactStore } from "./artifacts.ts";
@@ -76,6 +76,8 @@ import { memoLogin, resolveMainCiScope } from "./main-ci.ts";
 import { EscalationStore } from "./escalation.ts";
 import { Gate, type GateRequest, type GateStart } from "./gate.ts";
 import { prepareGateReplacement } from "./gate-replacement.ts";
+import { handoffGate } from "./gate-handoff.ts";
+import { assertHandoffProjectionReady } from "./gate-handoff-store.ts";
 import { authorizeRecoveryControl, prepareAttemptControl, standingRecoveryStatus, recoveryGateRequest, type RecoverySelectors, type PrepareAttemptRequest } from "./gate-recovery-authority.ts";
 import { ContextGuard, type GuardDecision, type GuardRequest } from "./guards.ts";
 import {
@@ -1155,6 +1157,7 @@ export class CommandPost {
 	async dispatch(request: DispatchRequest): Promise<DispatchResult | ScriptDispatchResult>;
 	async dispatch(request: DispatchRequest): Promise<DispatchResult | ScriptDispatchResult> {
 		assertNotDraining(this.home, "dispatch");
+		assertHandoffProjectionReady(this.home, request.jobId);
 		const dispatcher = this.dispatcher();
 		const job = await this.ledger().show(request.jobId);
 		if (job.script) return dispatcher.dispatchScript(request);
@@ -1174,6 +1177,7 @@ export class CommandPost {
 	async previewDispatch(request: DispatchRequest & { taskFile: string }): Promise<DispatchPreview>;
 	async previewDispatch(request: DispatchRequest): Promise<DispatchPreview | ScriptPreview>;
 	async previewDispatch(request: DispatchRequest): Promise<DispatchPreview | ScriptPreview> {
+		assertHandoffProjectionReady(this.home, request.jobId);
 		const dispatcher = this.dispatcher();
 		return (await this.ledger().show(request.jobId)).script ? dispatcher.previewScript(request) : dispatcher.preview(request);
 	}
@@ -1260,6 +1264,11 @@ export class CommandPost {
 			standingRecoveryStatus: (jobId) => standingRecoveryStatus(this, jobId),
 			...(this.#options.parentEnv ? { parentEnv: this.#options.parentEnv } : {}),
 		});
+	}
+
+	async handoffGate(request: { source_job_id: string; job_id: string; dependent_job_ids: string[] }) {
+		return handoffGate({ home: this.home, ledger: this.ledger(), fleet: this.fleet, artifacts: this.artifacts,
+			mandates: this.mandates, pipeline: this.pipeline(), reviews: this.reviewRuns, usage: () => liveUsageJobs(this.fleet, this.runs) }, request);
 	}
 
 	async replacePlanner(jobId: string, replacementJobId: string, replanEscalationId?: string) {

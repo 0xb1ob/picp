@@ -1230,7 +1230,8 @@ export class PipelineRunner {
 	}
 
 	/** Reanchor before authorization; interrupted edge projection resumes with the same identities. */
-	async reanchor(researchId: string, replacementResearchId: string): Promise<PipelineRecord> {
+	async reanchor(researchId: string, replacementResearchId: string, assertCurrent?: () => void): Promise<PipelineRecord> {
+		assertCurrent?.();
 		if (replacementResearchId === researchId) throw new PipelineError(`reanchor needs a research job different from ${researchId}`);
 		const old = this.store.require(researchId);
 		if (old.superseded_by && old.superseded_by !== replacementResearchId) {
@@ -1282,7 +1283,7 @@ export class PipelineRunner {
 		try {
 			await this.#options.ledger.retargetDeps([{
 				dependent_job_id: old.ship_id, original_blocker_id: researchId, replacement_blocker_id: replacementResearchId,
-			}]);
+			}], assertCurrent);
 		} catch (error) {
 			throw new PipelineError(`${researchId}: reanchor prepared; dependency projection failed: ${String(error)}; retry the same reanchor IDs`);
 		}

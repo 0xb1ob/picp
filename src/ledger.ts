@@ -670,8 +670,9 @@ export class Ledger {
 	}
 
 	/** Retarget only the named edges, atomically; a completed projection is safe to replay. */
-	async retargetDeps(edges: readonly { dependent_job_id: string; original_blocker_id: string; replacement_blocker_id: string }[]): Promise<void> {
+	async retargetDeps(edges: readonly { dependent_job_id: string; original_blocker_id: string; replacement_blocker_id: string }[], assertCurrent?: () => void): Promise<void> {
 		await this.#mutate((doc) => {
+			assertCurrent?.();
 			for (const edge of edges) {
 				const job = this.#require(doc, edge.dependent_job_id);
 				if (job.status !== "open") throw new LedgerError(`${job.id}: dependency projection requires an open job`);

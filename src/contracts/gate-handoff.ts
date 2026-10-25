@@ -1,8 +1,9 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
-import { IsoTimestampSchema, JobIdSchema } from "./core.ts";
+import { IsoTimestampSchema, JOB_ID_PATTERN, JobIdSchema } from "./core.ts";
 
 const DigestSchema = Type.String({ pattern: "^[0-9a-f]{64}$" });
+const jobIdPattern = JOB_ID_PATTERN.slice(1, -1);
 
 export const GateHandoffSchema = Type.Object({
 	version: Type.Literal(1),
@@ -15,7 +16,8 @@ export const GateHandoffSchema = Type.Object({
 		dependent_job_id: JobIdSchema,
 		original_blocker_id: JobIdSchema,
 		replacement_blocker_id: JobIdSchema,
-		provenance_reference: Type.String({ minLength: 1, maxLength: 4000 }),
+		provenance_reference: Type.String({ minLength: 1, maxLength: 4000,
+			pattern: `^(?:unknown|pipeline:${jobIdPattern}:${jobIdPattern}|confirmation:es-[a-z0-9]{4,16})$` }),
 	}, { additionalProperties: false }), { minItems: 1, maxItems: 64 }),
 	phase: StringEnum(["waiting_review", "prepared", "committed"]),
 	created_at: IsoTimestampSchema,

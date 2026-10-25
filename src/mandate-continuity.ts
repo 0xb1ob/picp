@@ -7,23 +7,37 @@ import { atomicWriteText, queued } from "./json-store.ts";
 import { MandateError, capReached, covers, scheduleIdOf, workIdentity, type MandateUsageJob } from "./mandate-accounting.ts";
 import { replacementTaskFile, validReplacement } from "./mandate-replacement.ts";
 import { readTaskAddenda, taskAddendaBlock } from "./task-addenda.ts";
-import { pathExcluded, subsystemExcluded, type MandateStore } from "./mandate.ts";
+import { pathExcluded, subsystemExcluded, MandateStore } from "./mandate.ts";
+import { ArtifactStore } from "./artifacts.ts";
+import { normalPassDigest } from "./gate-pass.ts";
 import { admissionEvidence, confirmedAdmission } from "./mandate-continuity-confirmation.ts";
 import { readPriorAttempts } from "./gate.ts";
+import { pendingHandoffs } from "./gate-handoff-store.ts";
+import { afterAdmissionCutoff, confirmCoverage, validCoverage } from "./mandate-coverage.ts";
 
 export function workUnfinished(home: string, job: Job, grant?: Mandate): boolean {
+	const admission = grant?.admissions?.find((entry) => entry.job_id === job.id);
+	if (admission && admission.scope_digest !== originalScopeDigest(job)) return true;
+	const mandates = new MandateStore(home);
+	const roots = grant ? [grant, ...mandates.list().filter((entry) => entry.id !== grant.id)] : mandates.list();
 	let current = job;
 	const seen = new Set<string>();
 	for (;;) {
-		const link = grant?.same_work_replacements?.find((entry) => entry.original_job_id === current.id && entry.phase === "committed");
+		const owner = roots.find((entry) => entry.same_work_replacements?.some((link) => link.original_job_id === current.id && link.phase === "committed"));
+		const link = owner?.same_work_replacements?.find((entry) => entry.original_job_id === current.id && entry.phase === "committed");
 		if (!link) break;
 		const jobs = readJobsDocument(home).jobs;
 		const replacement = jobs.find((entry) => entry.id === link.replacement_job_id);
-		if (seen.has(current.id) || !replacement || !validReplacement(home, grant!, replacement, jobs)) return true;
+		if (seen.has(current.id) || !replacement || !validReplacement(home, owner!, replacement, jobs)) return true;
 		seen.add(current.id);
 		current = replacement;
 	}
-	return current.status !== "closed" || (parseJobLabels(current.labels).kind === "research" && readPriorAttempts(home, current.id).decisions.at(-1)?.verdict === "revise");
+	if (current.status !== "closed" || pendingHandoffs(home, current.id).length) return true;
+	if (parseJobLabels(current.labels).kind !== "research") return false;
+	const decision = readPriorAttempts(home, current.id).decisions.at(-1);
+	if (!decision && !seen.size && !roots.some((entry) => entry.same_work_replacements?.some((link) => link.replacement_job_id === current.id))) return false;
+	try { return !normalPassDigest(home, current.id, new ArtifactStore({ home }), mandates); }
+	catch { return true; }
 }
 
 export function originalScopeDigest(job: Job): string {
@@ -51,8 +65,8 @@ export function admittedWork(grant: Mandate, job: Job, confirmationId?: string):
 	const proof = grant.admissions?.find((entry) => entry.job_id === job.id);
 	const labels = parseJobLabels(job.labels);
 	const timed = proof?.admitted_at !== undefined && proof.admitted_at >= grant.issued_at &&
-		proof.admitted_at < grant.expiry && job.created_at <= proof.admitted_at;
-	return proof !== undefined && (timed || (confirmationId !== undefined && proof.confirmation_escalation_id === confirmationId && job.created_at < grant.expiry)) &&
+		!afterAdmissionCutoff(grant, proof.admitted_at) && job.created_at <= proof.admitted_at;
+	return proof !== undefined && (timed || (confirmationId !== undefined && proof.confirmation_escalation_id === confirmationId && !afterAdmissionCutoff(grant, job.created_at))) &&
 		proof.project === labels.project && proof.kind === labels.kind &&
 		proof.scope_digest === originalScopeDigest(job) && grant.job_ids?.includes(job.id) === true &&
 		labels.project !== undefined && covers(grant, { jobId: job.id, project: labels.project,
@@ -100,9 +114,9 @@ export async function continueAdmittedWork(
 		if (!source) return result("ineligible", "source mandate does not exist");
 		if (source.status !== "active" && source.status !== "expired") return result("ineligible", `source is ${source.status}`);
 		if (source.schedule_grant || source.schedule_fire) return result("ineligible", "schedule grants use schedule authority");
-		if (options.replacement_id && source.coverage_superseded?.replacement_id !== options.replacement_id) return result("ineligible", "replacement has no authenticated typed coverage mapping");
+		if (options.replacement_id && source.coverage_superseded && source.coverage_superseded.replacement_id !== options.replacement_id) return result("ineligible", "replacement does not match the committed typed coverage mapping");
 		if (source.provenance?.expiry_hours === "explicit" && source.expiry <= store.authorityNow()) return result("ineligible", "explicit completion deadline remains binding");
-		if (source.expiry > store.authorityNow() && !source.coverage_superseded) return result("ineligible", "admission remains open");
+		if (source.expiry > store.authorityNow() && !source.coverage_superseded && !options.replacement_id) return result("ineligible", "admission remains open");
 		if (capReached(source, store.withReviewerSpend(usage, [source]))) return result("ineligible", "original budget exhausted");
 		if (!source.job_ids?.length) return result("ineligible", "continuation requires named original work");
 		const all = readJobsDocument(store.home).jobs;
@@ -118,18 +132,26 @@ export async function continueAdmittedWork(
 		if (jobs.some((job) => {
 			const proof = initialSource.admissions?.find((entry) => entry.job_id === job.id);
 			const at = proof?.admitted_at;
-			return job.created_at >= initialSource.expiry || (proof !== undefined && proof.scope_digest !== originalScopeDigest(job)) ||
-				(at !== undefined && (at < initialSource.issued_at || at >= initialSource.expiry || job.created_at > at));
+			return afterAdmissionCutoff(initialSource, job.created_at) || job.created_at > store.authorityNow() || (proof !== undefined && proof.scope_digest !== originalScopeDigest(job)) ||
+				(at !== undefined && (at < initialSource.issued_at || afterAdmissionCutoff(initialSource, at) || at > store.authorityNow() || job.created_at > at));
 		})) return result("ineligible", "original scope changed or admission was outside the original window");
-		if (jobs.some((job) => readTaskAddenda(store.home, job.id).some((entry) => entry.added_at >= initialSource.expiry))) return result("ineligible", "scope additions after admission closed require independent authority");
+		if (jobs.some((job) => readTaskAddenda(store.home, job.id).some((entry) => afterAdmissionCutoff(initialSource, entry.added_at) || entry.added_at > store.authorityNow()))) return result("ineligible", "scope additions after admission closed require independent authority");
 		const scopeText = governingInputs(store.home, jobs).map(({ task, job, addenda }) => [task, job.description ?? "", job.notes ?? "", ...addenda.map((entry) => entry.text)].join("\n")).join("\n");
 		if (pathExcluded(source, undefined, scopeText) || subsystemExcluded(source, undefined, scopeText)) return result("ineligible", "original exclusions remain binding");
+		let coverageConfirmation: string | undefined;
+		if (options.replacement_id && !source.coverage_superseded) {
+			const coverage = await confirmCoverage(store, source, jobs, options.replacement_id, options.confirmation_escalation_id);
+			if (!coverage.coverage) return { ...result(coverage.escalation_id ? "confirmation_required" : "ineligible", coverage.reason ?? "confirm exact original admission and obsolete coverage", source.job_ids), escalation_id: coverage.escalation_id };
+			coverageConfirmation = coverage.coverage.authority_reference;
+			source = write({ ...store.require(sourceId), coverage_superseded: coverage.coverage });
+		}
+		if (source.coverage_superseded && !validCoverage(store.home, source, jobs, store.list(), store.authorityNow())) return result("ineligible", "obsolete coverage proof is missing, withdrawn or changed");
 		const originalFingerprint = sourceFingerprint(initialSource);
-		const evidence = await admissionEvidence(store, source, jobs, options.confirmation_escalation_id);
+		const evidence = await admissionEvidence(store, source, jobs, options.confirmation_escalation_id ?? coverageConfirmation);
 		if (!evidence.admissions) return { ...result(evidence.confirmation_required ? "confirmation_required" : "ineligible", evidence.reason ?? "original admission is unproven", source.job_ids), escalation_id: evidence.escalation_id };
 		const currentSource = store.require(sourceId);
 		if (sourceFingerprint(currentSource) !== originalFingerprint || !["active", "expired"].includes(currentSource.status)) return result("ineligible", "source changed while checking admission");
-		source = { ...currentSource, admissions: evidence.admissions };
+		source = { ...currentSource, admissions: currentSource.continuity ? evidence.admissions : evidence.admissions.map((entry) => ({ ...entry, continuation_work: workUnfinished(store.home, jobs.find((job) => job.id === entry.job_id)!, currentSource) })) };
 		const { continuity: previous, ...authority } = source;
 		const fingerprint = sourceFingerprint(source);
 		const inputs = governingInputs(store.home, jobs);
@@ -190,11 +212,12 @@ export function continuationProof(home: string, job: Job | undefined, grants: re
 		const records = readJobsDocument(home).jobs;
 		const originalJobs = grant.job_ids?.map((id) => records.find((entry) => entry.id === id));
 		if (!originalJobs?.length || originalJobs.some((entry) => !entry)) continue;
+		if (grant.coverage_superseded && !validCoverage(home, grant, originalJobs as Job[], grants, now)) continue;
 		const confirmationId = confirmedAdmission(home, grant, originalJobs as Job[]);
 		if (receipt.authority_reference.startsWith("confirmation:") && !confirmationId) continue;
 		if (grant.expiry <= now && !["home", "project"].includes(grant.provenance?.expiry_hours ?? "") && !confirmationId) continue;
 		const admitted = records.find((entry) => entry.id === workIdentity(grant, job.id));
-		if (!admitted || (admitted.id !== job.id && !validReplacement(home, grant, job, records))) continue;
+		if (!admitted || grant.admissions?.find((entry) => entry.job_id === admitted.id)?.continuation_work === false || (admitted.id !== job.id && !validReplacement(home, grant, job, records))) continue;
 		if (receipt.admission_expiry !== grant.expiry || receipt.source_fingerprint !== sourceFingerprint(grant) || !admittedWork(grant, admitted, confirmationId)) continue;
 		const snapshot = `${join(home, paths.mandateFile(grant.id))}.governing-inputs`;
 		if (receipt.governing_input_refs.length !== 1 || receipt.governing_input_refs[0] !== snapshot || !existsSync(snapshot)) continue;

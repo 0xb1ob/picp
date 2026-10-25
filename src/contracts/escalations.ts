@@ -220,6 +220,8 @@ export const EscalationSchema = Type.Object(
 		checkpoint_kind: Type.Optional(CheckpointKindSchema),
 		checkpoint_scope: Type.Optional(CheckpointScopeSchema),
 		continuity_scope_digest: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+		gate_handoff_id: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+		coverage_scope_digest: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
 		awaiting_id: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
 		plan_summary: Type.Optional(PlanSummarySchema),
 		decision_summary: Type.Optional(DecisionSummarySchema),

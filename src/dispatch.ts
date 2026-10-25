@@ -54,6 +54,7 @@ import { formatPreflight, type Preflight, type PreflightResult } from "./preflig
 // value import in both directions would be a runtime cycle. It is re-exported
 // below so `src/dispatch.ts` stays the import path every caller already uses.
 import { assertPipelineProjectionReady, routingRecord, type SuppliedBy } from "./pipeline.ts";
+import { assertHandoffProjectionReady } from "./gate-handoff-store.ts";
 import { assembleBrief, loadProfile, profileForRole, readBriefTemplate } from "./profiles.ts";
 import type { ProjectRegistry } from "./projects.ts";
 import { formatRoutingDecision, type ModelProbe, resolveWithCapacity, RoutingError } from "./routing.ts";
@@ -457,6 +458,7 @@ export class Dispatcher {
 		const options = this.#options;
 		const issue = await options.ledger.show(request.jobId);
 		assertPipelineProjectionReady(options.home, issue.id);
+		assertHandoffProjectionReady(options.home, issue.id);
 		if (issue.script) throw new DispatchError(`${issue.id}: script jobs use CommandPost.previewDispatch`);
 		const task = readTask(request);
 		assertDispatchable(issue);
@@ -528,6 +530,7 @@ export class Dispatcher {
 		const now = options.now ?? (() => new Date());
 		const issue = await options.ledger.show(request.jobId);
 		assertPipelineProjectionReady(options.home, issue.id);
+		assertHandoffProjectionReady(options.home, issue.id);
 		if (issue.script) throw new DispatchError(`${issue.id}: script jobs use CommandPost.dispatch`);
 		const task = readTask(request);
 

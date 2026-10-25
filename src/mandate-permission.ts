@@ -81,6 +81,7 @@ export function grantStanding(grant: Mandate, use: GrantUse, job: GrantJob, now:
 	const cause: Exclude<GrantCause, "expired"> =
 		grant.status === "revoked" ? "revoked" : grant.status !== "paused" ? "active" : ["spend_cap", "token_cap"].includes(grant.pause_reason ?? "") ? "cap_paused" : "paused";
 	const stored = { standing: GRANT_MATRIX[cause][use], cause };
+	if (grant.coverage_superseded && !grant.continuity) return { standing: R, cause: cause === "active" ? "expired" : cause, detail: "obsolete coverage requires committed original-work continuation" };
 	if (grant.continuity) {
 		if (cause !== "active") return { standing: R, cause };
 		if (grant.continuity.phase !== "committed") return { standing: R, cause: "expired", detail: "continuation preparation is not committed" };
@@ -112,7 +113,8 @@ function expiredCell(grant: Mandate, use: GrantUse, job: GrantJob): { standing: 
 
 /** Pure selection: standing, deterministic active precedence, then named headroom without this job. */
 export function selectGrant(grants: readonly Mandate[], use: GrantUse, job: GrantJob, now: string, jobs?: readonly MandateUsageJob[]) {
-	const bound = grants.filter((grant) => grant.same_work_replacements?.some((entry) => entry.replacement_job_id === job.jobId || entry.original_job_id === job.jobId));
+	const aliases = grants.filter((grant) => grant.same_work_replacements?.some((entry) => entry.replacement_job_id === job.jobId || entry.original_job_id === job.jobId));
+	const bound = aliases.length ? aliases : grants.filter((grant) => grant.continuity?.admissions.some((entry) => entry.job_id === job.jobId && entry.continuation_work !== false));
 	if (bound.length > 1) return { grant: bound[0]!, at: { standing: R, cause: "expired" as const, detail: "conflicting immutable accounting roots" } };
 	const judged = (bound.length ? bound : grants).map((grant) => ({ grant, at: grantStanding(grant, use, job, now) }))
 		.filter((entry): entry is { grant: Mandate; at: Exclude<GrantStanding, { standing: "none" }> } => entry.at.standing !== "none");

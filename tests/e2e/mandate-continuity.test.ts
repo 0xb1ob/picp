@@ -354,6 +354,26 @@ test("post-expiry replacement uses a committed original-root link, full findings
 	assert.ok(Math.abs(post.fleet.get(replacement.id)!.budget!.cost_usd - 90.05) < 1e-8);
 	assert.equal(post.fleet.get(replacement.id)!.budget!.tokens, 9_896_800);
 	assert.equal(post.mandates.list().length, 1);
+	const substantiveId = (await post.ledger().create({ title: "Substantive hold", description: "Independent substantive work", project: "demo", kind: "ship", delivery: "pr" })).id;
+	const dependentId = (await post.ledger().create({ title: "Mechanical consumer", description: "Independent consumer", project: "demo", kind: "ship", delivery: "pr" })).id;
+	await post.ledger().addDep(dependentId, original.id);
+	await post.ledger().addDep(dependentId, substantiveId);
+	const handoff = { action: "handoff", job_id: replacement.id, source_job_id: original.id, dependent_job_ids: [dependentId] };
+	const registered = await parent("Register only this exact mechanical handoff; preserve the other hold.", [
+		{ kind: "tool_calls", calls: [{ id: "register-handoff", name: "cp_gate", args: handoff }] },
+		{ kind: "tool_calls", calls: [{ id: "replay-handoff", name: "cp_gate", args: handoff }] },
+	]);
+	for (const event of registered) assert.notEqual(event.isError, true, JSON.stringify(event.result));
+	assert.deepEqual((await post.ledger().show(dependentId)).blocked_by.sort(), [original.id, substantiveId].sort());
+	const mechanical = post.escalations.list().filter((item) => item.gate_handoff_id);
+	assert.equal(mechanical.length, 1);
+	const mechanicalQuote = `${mechanical[0]!.id}: confirm only this recorded mechanical dependency, retaining the substantive hold.`;
+	const confirmed = await parent(mechanicalQuote, [{ kind: "tool_calls", calls: [{ name: "cp_decide", args: { target: mechanical[0]!.id, decision: "confirm", basis: { operator_quote: mechanicalQuote } } }] }]);
+	assert.notEqual(confirmed[0]!.isError, true, JSON.stringify(confirmed[0]!.result));
+	const waiting = await parent("The replacement still needs its real normal gate.", [{ kind: "tool_calls", calls: [{ name: "cp_gate", args: handoff }] }]);
+	assert.notEqual(waiting[0]!.isError, true, JSON.stringify(waiting[0]!.result));
+	assert.match(JSON.stringify(waiting[0]!.result), /waiting_review/);
+	await assert.rejects(() => post.previewDispatch({ jobId: dependentId, task: "No premature dispatch" }), /handoff.*actual PASS/);
 	const passed = await post.gate({ jobId: replacement.id, model: replacementGateModel });
 	assert.ok(isGateWait(passed));
 	post.reviewRuns.handBack(passed.key);
@@ -369,6 +389,28 @@ test("post-expiry replacement uses a committed original-root link, full findings
 		assert.ok(JSON.stringify(provider.requests(script)[0]).includes(join(home.path, paths.runDir(replacement.id), "task-addenda.md")));
 	}
 	assert.ok(received("replacement-gate", task));
+	const unclosed = await parent("A real PASS does not replace normal closure.", [{ kind: "tool_calls", calls: [{ name: "cp_gate", args: handoff }] }]);
+	assert.notEqual(unclosed[0]!.isError, true, JSON.stringify(unclosed[0]!.result));
+	assert.match(JSON.stringify(unclosed[0]!.result), /waiting_review/);
+	await waitFor(() => post.manager.get(replacement.id)?.worker.busy, (busy) => busy === false, { timeoutMs: 30_000 });
+	assert.equal((await post.tearDown(replacement.id)).torn_down, true);
+	const originalLedgerFactory = post.ledger.bind(post);
+	const faultLedger = post.ledger();
+	const projectEdges = faultLedger.retargetDeps.bind(faultLedger);
+	faultLedger.retargetDeps = async (edges, assertCurrent) => { await projectEdges(edges, assertCurrent); throw new Error("interrupted after exact handoff projection"); };
+	post.ledger = () => faultLedger;
+	try {
+		await assert.rejects(() => post.handoffGate(handoff), /interrupted after exact handoff projection/);
+	} finally { post.ledger = originalLedgerFactory; }
+	assert.deepEqual((await post.ledger().show(dependentId)).blocked_by.sort(), [replacement.id, substantiveId].sort());
+	await assert.rejects(() => post.previewDispatch({ jobId: dependentId, task: "No partial handoff dispatch" }), /handoff.*actual PASS/);
+	const committed = await parent("Commit the actual PASS-bound edge projection and replay it.", [
+		{ kind: "tool_calls", calls: [{ id: "commit-handoff", name: "cp_gate", args: handoff }] },
+		{ kind: "tool_calls", calls: [{ id: "commit-replay", name: "cp_gate", args: handoff }] },
+	]);
+	for (const event of committed) { assert.notEqual(event.isError, true, JSON.stringify(event.result)); assert.match(JSON.stringify(event.result), /committed/); }
+	assert.deepEqual((await post.ledger().show(dependentId)).blocked_by.sort(), [replacement.id, substantiveId].sort());
+	assert.equal(post.fleet.get(dependentId), undefined);
 	// A delayed billing update arrives after the original worker has closed.
 	const late = post.fleet.get(original.id)!.usage;
 	post.fleet.patch(original.id, { usage: { ...late, input: late.input + 100, total_tokens: late.total_tokens + 100, cost_usd: late.cost_usd + 1 } });
