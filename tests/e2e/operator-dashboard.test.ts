@@ -2,7 +2,7 @@
  * operator session (provider requests, the viewer's transcript) and as the viewer projects them back (pending sends). */
 import assert from "node:assert/strict";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -10,8 +10,9 @@ import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT } from "../../src/con
 import { FleetStore } from "../../src/fleet.ts";
 import { controlRequest } from "../../src/viewer/control-api.ts";
 import { appendControlAudit } from "../../src/viewer/control-audit.ts";
-import { controlInboxFile, controlJournalFile, controlRecordFile, readControlRecord, REMOTE_PROVENANCE_VERSION } from "../../src/viewer/control-files.ts";
-import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
+import { controlConfigFile, controlInboxFile, controlJournalFile, controlRecordFile, readControlRecord, REMOTE_PROVENANCE_VERSION } from "../../src/viewer/control-files.ts";
+import { operatorSession } from "../../src/viewer/control-inbox.ts";
+import { operatorSessionsFile, readOperatorSessions } from "../../src/viewer/operator-sessions.ts";
 import { createViewer } from "../../src/viewer/server.ts";
 import { inlineBudget, newUploadId, TEXT_MESSAGE_INLINE_BYTES, uploadFile, writeUpload } from "../../src/viewer/uploads.ts";
 import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
@@ -55,25 +56,32 @@ async function scratch(t: TestContext) {
 	return { home: home.path, state, get, journal };
 }
 
-/** The operator's own pi session with the real cp-bridge; its dashboard control is listening when this resolves. */
-async function operator(t: TestContext, home: string, name: string, steps: ScriptStep[], env: Record<string, string> = {}) {
+/** The operator's own pi session with the real cp-bridge, not waiting for its dashboard control. */
+async function session(t: TestContext, home: string, name: string, steps: ScriptStep[], env: Record<string, string> = {}, seed?: (piHome: string) => void) {
 	const provider = await MockProvider.start();
 	const model = provider.addScript(name, steps, { onExhausted: "repeat" });
 	const agent = createAgentDir({ provider });
 	const previous = process.env.PI_HOME;
 	process.env.PI_HOME = agent.path;
 	saveOperatorTarget({ home, mode: "multi", hostPid: 0, parentPid: 0 });
+	seed?.(agent.path);
 	if (previous === undefined) delete process.env.PI_HOME; else process.env.PI_HOME = previous;
 	const state = join(home, LAYOUT.state);
-	const before = readControlRecord(state);
 	const child: PiChild = startPiChild({ cwd: home, model, sessionDir: join(state, "sessions", "operator"), extensions: [CP_BRIDGE_EXTENSION], env: { ...agent.env, PI_HOME: agent.path, CP_HOME: home, CP_MODE: "multi", ...env } });
 	let closed = false;
 	const close = async () => { if (!closed) { closed = true; await child.close(); } };
 	t.after(async () => { await close(); agent.cleanup(); await provider.stop(); });
+	return { child, close, requests: () => provider.requests(name) };
+}
+
+/** The operator's own pi session with the real cp-bridge; its dashboard control is listening when this resolves. */
+async function operator(t: TestContext, home: string, name: string, steps: ScriptStep[], env: Record<string, string> = {}, seed?: (piHome: string) => void) {
+	const state = join(home, LAYOUT.state);
+	const before = readControlRecord(state);
+	const { child, close, requests } = await session(t, home, name, steps, env, seed);
 	const found = await waitFor(() => readControlRecord(state), (row) => row.state === "ok" && (before.state !== "ok" || row.record.pid !== before.record.pid), { timeoutMs: 30_000, what: "dashboard control record" });
 	if (found.state !== "ok") throw new Error("no dashboard control");
 	const record = found.record;
-	const requests = () => provider.requests(name);
 	/** The first request whose user messages carry `needle`, and that message's text. */
 	const seen = async (needle: string, timeoutMs = 30_000) => {
 		const request = await waitFor(() => requests().find((item) => userTexts(item).some((text) => text.includes(needle))), Boolean, { timeoutMs, what: `a provider request carrying ${needle}` });
@@ -637,3 +645,269 @@ test("P9d-images: send_images and send_files hand the operator model image parts
 function escape(text: string): string {
 	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+const ASKS = [
+	{ type: "open", id: "ask-abcd", project: "demo", question: "Raise cap?", created_at: "2026-09-27T08:00:00Z", recommendation: "Keep", options: [{ label: "Keep", consequence: "Paused" }, { label: "Raise", consequence: "Spends more" }] },
+	{ type: "open", id: "ask-bbbb", project: "demo", question: "Merge?", created_at: "2026-09-27T08:00:00Z", recommendation: "Yes", options: [{ label: "Yes", consequence: "Merges" }] },
+	{ type: "answer", id: "ask-bbbb", answer: "Yes", answered_at: "2026-09-27T08:05:00Z" },
+	{ type: "open", id: "ask-cccc", project: "demo", question: "Retry?", created_at: "2026-09-27T08:00:00Z", recommendation: "No", options: [{ label: "No", consequence: "Stops" }] },
+	{ type: "withdraw", id: "ask-cccc", reason: "No longer needed" },
+];
+const writeAsks = (state: string) => {
+	mkdirSync(join(state, "operator"), { recursive: true });
+	writeFileSync(join(state, "operator", "asks.jsonl"), ASKS.map((row) => JSON.stringify(row)).join("\n") + "\n");
+};
+const outcomes = (journal: Json[], id: unknown) => journal.filter((row) => row.id === id).map((row) => row.type === "outcome" ? row.state : row.type);
+const MARK = "\\[cp-dashboard dc-\\d{14}-[0-9a-f]{8} — from the dashboard";
+
+// P9e-control: the operator session's control socket as the dashboard drives it: 0600 socket and record, token-gated,
+// idle sends prompt and busy ones wait for a settled turn, steer and abort act on the live turn, one-click answers
+// carry their ask id, every frame is one journal request line, a rival session or control off opens nothing.
+test("P9e-control: the real bridge's dashboard control delivers, holds, steers, aborts and answers, journaling every frame", { timeout: 180_000 }, async (t) => {
+	const s = await scratch(t);
+	writeAsks(s.state);
+	const asksBefore = readFileSync(join(s.state, "operator", "asks.jsonl"), "utf8");
+	let release!: () => void;
+	const busy = new Promise<void>((done) => { release = done; });
+	t.after(() => release());
+	const op = await operator(t, s.home, "p9e-control", [
+		{ kind: "text", text: "ok" }, { kind: "hang", until: busy }, { kind: "text", text: "ok" }, { kind: "text", text: "ok" }, { kind: "hang" }, { kind: "text", text: "ok" },
+	]);
+	assert.deepEqual([statSync(controlRecordFile(s.state)).mode & 0o777, statSync(op.record.socket).mode & 0o777], [0o600, 0o600]);
+	assert.match(op.record.token, /^[0-9a-f]{64}$/);
+	assert.match(op.record.csrf, /^[0-9a-f]{64}$/);
+	assert.notEqual(op.record.token, op.record.csrf);
+	const forged = await new Promise<string>((resolve) => {
+		const socket = createConnection(op.record.socket);
+		socket.setTimeout(5_000, () => socket.destroy());
+		let data = "";
+		socket.on("data", (chunk) => { data += chunk; });
+		socket.on("close", () => resolve(data));
+		socket.on("connect", () => socket.write(`${JSON.stringify({ v: 1, token: "0".repeat(64), id: 1, op: "send", args: { kind: "message", text: "hi" } })}\n`));
+	});
+	assert.equal(forged, "", "a wrong socket token closes the connection without a reply");
+	assert.deepEqual(s.journal(), [], "and appends nothing to the journal");
+	const sessionFile = String((await op.child.getState()).sessionFile);
+	assert.deepEqual(readOperatorSessions(join(s.home, LAYOUT.sessions)).map((row) => row.file), [sessionFile], "the fresh session file is listed for the Full transcript");
+	const status = await op.send("status", {});
+	assert.ok(status.ok);
+	assert.deepEqual({ ...(status.result as Json), recent: undefined, restart: undefined },
+		{ busy: false, pending: false, session_file: sessionFile.split("/").pop(), recent: undefined, restart: undefined, images: true, files: true, remote_provenance: REMOTE_PROVENANCE_VERSION });
+
+	const hello = await op.send("send", { kind: "message", text: "  hello there  ", peer: "100.64.0.9" });
+	assert.equal(hello.ok && (hello.result as Json).state, "delivered", JSON.stringify(hello));
+	assert.match(await op.seen("hello there"), new RegExp(`^hello there\\n\\n${MARK}\\]$`), "idle: the trimmed body and the marker, as typed");
+	const first = s.journal()[0]!;
+	assert.deepEqual({ ...first, id: undefined, at: undefined, session_started_at: undefined },
+		{ type: "request", by: "bridge", id: undefined, at: undefined, session_started_at: undefined, session_file: sessionFile, peer: "100.64.0.9", kind: "message", text: "hello there", ask_id: null, deliver: "prompt" });
+	assert.equal(typeof first.session_started_at, "string");
+	assert.deepEqual(outcomes(s.journal(), first.id), ["request", "injected", "delivered"]);
+	await op.child.waitFor(() => op.child.eventsOfType("agent_settled").length >= 1, 30_000);
+
+	await op.child.prompt("Begin the busy turn.");
+	await waitFor(() => op.requests().length, (n) => n >= 2, { timeoutMs: 30_000, what: "the busy turn's request" });
+	const held = await op.send("send", { kind: "message", text: "next" });
+	assert.ok(held.ok);
+	assert.deepEqual({ ...(held.result as Json), id: undefined }, { id: undefined, state: "queued", deliver: "followUp", editable: true }, "busy: the dashboard holds it");
+	assert.equal(((await op.send("status", {})) as { result: Json }).result.busy, true);
+	const steer = await op.send("send", { kind: "message", text: "now", deliver: "steer" });
+	assert.equal(steer.ok && (steer.result as Json).deliver, "steer", "a steer is never queued");
+	assert.equal(op.requests().some((request) => userTexts(request).some((text) => text.startsWith("next\n"))), false, "a held message is not given to the busy session");
+	release();
+	await op.seen("now\n");
+	await op.seen("next\n");
+	const next = (held.result as Json).id;
+	await waitFor(() => outcomes(s.journal(), next), (states) => states.includes("delivered"), { timeoutMs: 30_000, what: "the held message's delivery" });
+	assert.deepEqual(outcomes(s.journal(), next), ["request", "queued", "injected", "delivered"]);
+	assert.ok(userTexts(op.requests().find((request) => userTexts(request).some((text) => text.startsWith("next\n")))!).some((text) => text.includes("now\n")),
+		"the held one waits until the turn the steer joined has settled");
+	await waitFor(() => op.child.eventsOfType("agent_settled").length, (n) => n >= 3, { timeoutMs: 30_000, what: "the held message's turn" });
+
+	assert.deepEqual(await op.send("abort", {}), { ok: false, status: 409, error: "session is idle; nothing to abort" });
+	await op.child.prompt("Begin the turn to abort.");
+	await waitFor(() => op.requests().length, (n) => n >= 5, { timeoutMs: 30_000, what: "the turn to abort" });
+	assert.ok((await op.send("abort", {})).ok);
+	await waitFor(() => op.child.eventsOfType("agent_settled").length, (n) => n >= 4, { timeoutMs: 30_000, what: "the aborted turn to settle" });
+
+	const click = await op.send("send", { kind: "answer", ask_id: "ask-abcd", label: "Keep", thread: "Billing Bug", peer: "100.64.0.9" });
+	assert.ok(click.ok, JSON.stringify(click));
+	assert.match(await op.seen("ask-abcd: Keep"), new RegExp(`^ask-abcd: Keep\\n\\n${MARK}; ask=ask-abcd; thread=billing-bug\\]$`), "the verbatim label with the ask id");
+	const refusals = [
+		[{ ask_id: "ask-abcd", label: "keep" }, 400, /not an option/],
+		[{ ask_id: "ask-bbbb", label: "Yes" }, 409, /answered/],
+		[{ ask_id: "ask-cccc", label: "No" }, 409, /withdrawn/],
+		[{ ask_id: "ask-abcd", label: "Raise" }, 409, /already answered from the dashboard/],
+		[{ ask_id: "ask-ffff", label: "Keep" }, 400, /unknown ask/],
+	] as const;
+	for (const [args, code, reason] of refusals) {
+		const reply = await op.send("send", { kind: "answer", ...args });
+		assert.deepEqual([reply.ok, (reply as { status?: number }).status], [false, code], JSON.stringify(args));
+		assert.match((reply as { error: string }).error, reason);
+	}
+	assert.ok((await op.send("send", { kind: "message", text: "billing?", thread: "  Billing Bug " })).ok);
+	assert.match(await op.seen("billing?"), new RegExp(`^billing\\?\\n\\n${MARK}; thread=billing-bug\\]$`), "the tag is normalized in the footer");
+	for (const thread of ["-bad", "x".repeat(33), 7, null]) {
+		const refused = await op.send("send", { kind: "message", text: "bad", thread });
+		assert.match(refused.ok ? "" : refused.error, /thread must be a tag/, String(thread));
+	}
+	assert.equal(readFileSync(join(s.state, "operator", "asks.jsonl"), "utf8"), asksBefore, "a click never records the answer itself");
+	const journal = s.journal();
+	const refused = journal.filter((row) => row.type === "request" && (row.ask_id === "ask-bbbb" || row.ask_id === "ask-cccc" || row.ask_id === "ask-ffff" || row.text === "bad"));
+	assert.equal(refused.length, 7, "every refused frame still has exactly one request line");
+	for (const row of refused) assert.deepEqual(outcomes(journal, row.id).slice(1), ["refused"], "and one final outcome");
+	assert.equal(op.requests().some((request) => userTexts(request).some((text) => /^(ask-abcd: (keep|Raise)|ask-bbbb|ask-cccc|ask-ffff|bad)\b/.test(text))), false,
+		"no refusal reached the model");
+
+	const journalFile = controlJournalFile(s.state);
+	const linesBefore = s.journal().length;
+	chmodSync(journalFile, 0o400);
+	const unwritable = await op.send("send", { kind: "message", text: "never journaled" }).finally(() => chmodSync(journalFile, 0o600));
+	assert.deepEqual(unwritable, { ok: false, status: 500, error: `failed: audit journal unwritable (${journalFile}: EACCES)` }, "no request line, no delivery");
+	assert.equal(s.journal().length, linesBefore);
+	assert.equal(op.requests().some((request) => userTexts(request).some((text) => text.includes("never journaled"))), false, "never injected");
+
+	const rival = await session(t, s.home, "p9e-control-rival", [{ kind: "text", text: "ok" }]);
+	await rival.child.prompt("Start a second operator session.");
+	await rival.child.waitFor(() => rival.child.eventsOfType("agent_settled").length >= 1, 30_000);
+	await rival.close();
+	const kept = readControlRecord(s.state);
+	assert.equal(kept.state === "ok" && kept.record.pid, op.record.pid, "a second session never takes over a live socket");
+	assert.ok((await op.send("status", {})).ok, "and leaves the first one serving");
+
+	mkdirSync(dirname(controlConfigFile(s.state)), { recursive: true });
+	writeFileSync(controlConfigFile(s.state), '{"enabled": false}');
+	const off = await op.send("send", { kind: "message", text: "hi" });
+	assert.deepEqual([off.ok, (off as { status?: number }).status], [false, 403]);
+	assert.match((off as { error: string }).error, /dashboard control is off/);
+	await op.close();
+	assert.deepEqual([existsSync(op.record.socket), existsSync(controlRecordFile(s.state))], [false, false], "shutdown removes the socket and the record");
+	const dark = await session(t, s.home, "p9e-control-off", [{ kind: "text", text: "ok" }]);
+	await dark.child.prompt("Start with control off.");
+	await dark.child.waitFor(() => dark.child.eventsOfType("agent_settled").length >= 1, 30_000);
+	assert.deepEqual([existsSync(op.record.socket), existsSync(controlRecordFile(s.state))], [false, false], "control off: a session start opens nothing");
+});
+
+// P9e-control-queue (cp-y43c): busy sends wait in the dashboard, edit and cancel apply until the handoff, one handoff
+// per settled turn oldest first, a click is never queued; a stopped session's held messages reload with their edits
+// and a cancelled or handed-over one is never sent again.
+test("P9e-control-queue: held messages are edited, cancelled and handed over one per settled turn, and survive a restart once", { timeout: 180_000 }, async (t) => {
+	const s = await scratch(t);
+	writeAsks(s.state);
+	let release!: () => void;
+	const busy = new Promise<void>((done) => { release = done; });
+	t.after(() => release());
+	const one = await operator(t, s.home, "p9e-queue-1", [{ kind: "hang", until: busy }, { kind: "text", text: "ok" }, { kind: "text", text: "ok" }, { kind: "text", text: "ok" }, { kind: "text", text: "ok" }, { kind: "hang" }]);
+	const queued = async (op: typeof one, text: string) => {
+		const reply = await op.send("send", { kind: "message", text });
+		assert.ok(reply.ok && (reply.result as Json).state === "queued", `${text} is held: ${JSON.stringify(reply)}`);
+		return (reply.result as Json).id as string;
+	};
+	await one.child.prompt("Begin the busy turn.");
+	await waitFor(() => one.requests().length, (n) => n >= 1, { timeoutMs: 30_000, what: "the busy turn's request" });
+	const [a, b, c, k] = [await queued(one, "alpha"), await queued(one, "bravo"), await queued(one, "  first draft  "), await queued(one, "ask-abcd: keep it, but ask me tomorrow")];
+	assert.deepEqual((await one.send("queue_edit", { id: a, text: "  alpha, edited  " })), { ok: true, result: { id: a, state: "queued", text: "alpha, edited", editable: true } });
+	assert.deepEqual((await one.send("queue_cancel", { id: b })), { ok: true, result: { id: b, state: "cancelled" } });
+	assert.equal((await one.send("queue_edit", { id: a, text: "   " })).ok, false, "an empty edit is refused");
+	assert.equal((await one.send("queue_edit", { id: "dc-20261006080000-00000000", text: "x" }) as { status?: number }).status, 404);
+	const edited = await one.send("queue_edit", { id: c, text: "\n  line one\n\n    indented  two  \n" });
+	assert.equal(edited.ok && (edited.result as Json).text, "line one\n\n    indented  two", "ends trimmed, inner spaces and blank lines kept");
+	const click = await one.send("send", { kind: "answer", ask_id: "ask-abcd", label: "Keep" });
+	assert.ok(click.ok && (click.result as Json).deliver === "followUp", JSON.stringify(click));
+	release();
+	await one.seen("line one", 60_000);
+	await waitFor(() => one.child.eventsOfType("agent_settled").length, (n) => n >= 4, { timeoutMs: 30_000, what: "the held messages' turns" });
+	await one.seen("ask-abcd: keep it");
+	const order = one.requests().slice(1).map((request) => userTexts(request).at(-1)!.split("\n\n[cp-dashboard")[0]);
+	assert.deepEqual(order.slice(0, 4), ["ask-abcd: Keep", "alpha, edited", "line one\n\n    indented  two", "ask-abcd: keep it, but ask me tomorrow"],
+		"the click joins the live turn; held ones follow one per settled turn, oldest first, with their saved text");
+	assert.equal(one.requests().some((request) => userTexts(request).some((text) => text.startsWith("bravo"))), false, "a cancelled message is never delivered");
+	assert.equal(s.journal().find((row) => row.id === k && row.type === "request")!.ask_id, null, "a free-text reply keeps its prefix, not an ask id");
+	assert.deepEqual(outcomes(s.journal(), a), ["request", "queued", "edited", "injected", "delivered"]);
+	assert.deepEqual(outcomes(s.journal(), b), ["request", "queued", "cancelled"]);
+	const late = await one.send("queue_edit", { id: a, text: "too late" });
+	assert.deepEqual([late.ok, (late as { status?: number }).status, (late as { result?: unknown }).result], [false, 409, { id: a, state: "sent", text: "alpha, edited" }],
+		"already sent names the text the session got");
+	assert.equal((await one.send("queue_cancel", { id: b }) as { status?: number }).status, 409, "a cancelled message cannot be cancelled again");
+
+	await one.child.prompt("Begin the second busy turn.");
+	await waitFor(() => one.requests().length, (n) => n >= 6, { timeoutMs: 30_000, what: "the second busy turn" });
+	const [x, y, z] = [await queued(one, "one"), await queued(one, "two"), await queued(one, "three")];
+	assert.ok((await one.send("queue_edit", { id: y, text: "two, edited" })).ok);
+	assert.ok((await one.send("queue_cancel", { id: z })).ok);
+	await one.close();
+	const two = await operator(t, s.home, "p9e-queue-2", [{ kind: "text", text: "ok" }]);
+	await two.seen("two, edited", 60_000);
+	await waitFor(() => two.child.eventsOfType("agent_settled").length, (n) => n >= 2, { timeoutMs: 30_000, what: "the reloaded messages' turns" });
+	assert.deepEqual(two.requests().map((request) => userTexts(request).at(-1)!.split("\n\n")[0]), ["one", "two, edited"], "reloaded in order with the edit");
+	await two.close();
+	const three = await operator(t, s.home, "p9e-queue-3", [{ kind: "text", text: "ok" }]);
+	await new Promise((done) => setTimeout(done, 1_500));
+	assert.equal(three.requests().length, 0, "a third start has nothing to resend");
+	assert.deepEqual([x, y].map((id) => outcomes(s.journal(), id).filter((state) => state === "injected").length), [1, 1]);
+	assert.equal(outcomes(s.journal(), z).includes("injected"), false);
+});
+
+// P9e-control-target: a PI_HOME selected.json naming a home whose per-home target file is gone must not keep the
+// operator session off the dashboard: control falls back to the CP_HOME runtime and the viewer sees it running.
+test("P9e-control-target: a selected.json naming a missing per-home target still starts dashboard control on the CP_HOME home", { timeout: 90_000 }, async (t) => {
+	const s = await scratch(t);
+	const op = await operator(t, s.home, "p9e-control-target", [{ kind: "text", text: "ok" }], {}, (piHome) => writeFileSync(
+		join(piHome, "command-post", "operator-targets", "selected.json"), JSON.stringify({ home: join(s.home, "gone"), mode: "multi" })));
+	assert.deepEqual(operatorSession(s.state).running, true, "the dashboard's offline check sees a running session");
+	assert.ok((await op.send("status", {})).ok, "the control API answers status");
+});
+
+// P9e-control-inbox (cp-daemon P3): messages typed while no session ran arrive once, oldest first, as one user
+// message with their times, a closed ask marked and >24 h dropped; a held queue message keeps FIFO across the inbox
+// turn and its ask id; a send after the start waits behind both; a second start delivers nothing twice.
+test("P9e-control-inbox: the offline inbox and a reloaded queue hand over in time order, once, across starts", { timeout: 180_000 }, async (t) => {
+	for (const order of ["held-first", "inbox-first"] as const) await t.test(order, async (t) => {
+		const s = await scratch(t);
+		writeAsks(s.state);
+		const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+		// The inbox ranks at its oldest line, a stale one included, so only inbox-first carries the >24 h line.
+		const [heldAt, inboxAt, closedAt, staleAt, taggedAt] = [order === "held-first" ? at(-50) : at(-10), at(-20), at(-30), at(-25 * 60), at(-25)];
+		const stale = order === "inbox-first";
+		const id = "dc-20261009114000-0000a5c1";
+		mkdirSync(dirname(controlJournalFile(s.state)), { recursive: true });
+		writeFileSync(controlJournalFile(s.state), [
+			{ type: "request", by: "bridge", id, at: heldAt, kind: "message", text: "linked to a card", ask_id: "ask-abcd", deliver: "followUp", peer: null },
+			{ type: "outcome", by: "bridge", id, at: heldAt, peer: null, state: "queued", reason: null },
+		].map((row) => JSON.stringify(row)).join("\n") + "\n");
+		const rows = [
+			{ type: "held", id: "dc-20260928110000-00000002", at: inboxAt, text: "second", ask_id: null },
+			...(stale ? [{ type: "held", id: "dc-20260926100000-00000009", at: staleAt, text: "too old", ask_id: null }] : []),
+			{ type: "held", id: "dc-20260928100000-00000001", at: closedAt, text: "ask-bbbb: Yes", ask_id: "ask-bbbb" },
+			{ type: "held", id: "dc-20260928103000-0000c0de", at: taggedAt, text: "later", ask_id: null, thread: "billing-bug" },
+			{ type: "held", id: "dc-20260928090000-00000000", at: at(-40), text: "delivered earlier", ask_id: null },
+			{ type: "delivered", id: "dc-20260928090000-00000000", at: at(-35) },
+		];
+		writeFileSync(controlInboxFile(s.state), rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+		const op = await operator(t, s.home, `p9e-inbox-${order}`, [{ kind: "text", text: "ok" }]);
+		const inbox = await op.seen("[cp-dashboard inbox");
+		const card = await op.seen("linked to a card");
+		assert.match(card, new RegExp(`^linked to a card\\n\\n\\[cp-dashboard ${id} — from the dashboard; ask=ask-abcd\\]$`), "reloaded with its ask id");
+		const later = await op.send("send", { kind: "message", text: "typed after the start" });
+		assert.ok(later.ok, JSON.stringify(later));
+		await op.seen("typed after the start");
+		const texts = op.requests().map((request) => userTexts(request).at(-1)!);
+		const firstOf = (needle: string) => texts.findIndex((text) => text.includes(needle));
+		assert.deepEqual([firstOf("[cp-dashboard inbox") < firstOf("linked to a card"), firstOf("typed after the start")], [order === "inbox-first", 2],
+			"the older one first, one handoff per settled turn, and a later send waits behind both");
+		assert.equal(inbox.split("\n")[0], "[cp-dashboard inbox — 3 message(s) typed while this session was offline; each line keeps its time; re-check state before acting on them]");
+		assert.deepEqual(inbox.split("\n").slice(1), [
+			`- ${closedAt} (dc-20260928100000-00000001): ask-bbbb: Yes (ask-bbbb is answered, no longer open)`,
+			`- ${taggedAt} (dc-20260928103000-0000c0de): later`,
+			"[cp-dashboard dc-20260928103000-0000c0de — from the dashboard; thread=billing-bug]",
+			`- ${inboxAt} (dc-20260928110000-00000002): second`,
+			...(stale ? [`- dropped, held longer than 24 h: ${staleAt} (dc-20260926100000-00000009)`] : []),
+		], "oldest first, each with its time; the closed ask is marked; a held thread tag keeps its marker, untagged lines get none; the stale one listed as dropped, never injected");
+		const after = readFileSync(controlInboxFile(s.state), "utf8").trim().split("\n").map((row) => JSON.parse(row) as Json).slice(rows.length);
+		assert.deepEqual(after.map((row) => [row.type, row.id]).sort(), [["delivered", "dc-20260928100000-00000001"], ["delivered", "dc-20260928103000-0000c0de"],
+			["delivered", "dc-20260928110000-00000002"], ...(stale ? [["dropped", "dc-20260926100000-00000009"]] : [])]);
+		await op.close();
+		const again = await operator(t, s.home, `p9e-inbox-${order}-again`, [{ kind: "text", text: "ok" }]);
+		await new Promise((done) => setTimeout(done, 1_500));
+		assert.equal(again.requests().length, 0, "a second session start delivers nothing twice");
+	});
+});
