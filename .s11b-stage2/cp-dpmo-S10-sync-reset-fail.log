@@ -1,0 +1,228 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S10:.*synchronization tests/e2e/landing-merge.test.ts
+
+From /tmp/cp-repo-6GVb7s/demo
+ * branch            cp-xidu    -> FETCH_HEAD
+HEAD is now at 8fe95e7 v1
+To /tmp/cp-repo-6GVb7s/demo.git
+   8fe95e7..e78dda0  HEAD -> cp-xidu
+Previous HEAD position was e78dda0 remote update
+Switched to branch 'main'
+▶ landing S10: synchronization preserves local work and proves origin before resetting
+  ✖ behind (4036.006332ms)
+From /tmp/cp-repo-Z7tQ2N/demo
+ * branch            cp-kk8t    -> FETCH_HEAD
+HEAD is now at cf8577c v1
+To /tmp/cp-repo-Z7tQ2N/demo.git
+   cf8577c..e47779d  HEAD -> cp-kk8t
+Previous HEAD position was e47779d remote update
+Switched to branch 'main'
+  ✖ stale (3967.874319ms)
+From /tmp/cp-repo-yOT1Le/demo
+ * branch            cp-icxo    -> FETCH_HEAD
+HEAD is now at 2534c07 v1
+To /tmp/cp-repo-yOT1Le/demo.git
+   2534c07..a9f9da8  HEAD -> cp-icxo
+Previous HEAD position was a9f9da8 remote update
+Switched to branch 'main'
+  ✔ dirty (3120.147826ms)
+From /tmp/cp-repo-IFVpOL/demo
+ * branch            cp-f7df    -> FETCH_HEAD
+HEAD is now at f3ea4b8 v1
+To /tmp/cp-repo-IFVpOL/demo.git
+   f3ea4b8..2681248  HEAD -> cp-f7df
+Previous HEAD position was 2681248 remote update
+Switched to branch 'main'
+  ✔ unpushed (3569.321894ms)
+From /tmp/cp-repo-Aw6DkS/demo
+ * branch            cp-n95d    -> FETCH_HEAD
+HEAD is now at e7b4789 v1
+To /tmp/cp-repo-Aw6DkS/demo.git
+   e7b4789..e7a88e3  HEAD -> cp-n95d
+Previous HEAD position was e7a88e3 remote update
+Switched to branch 'main'
+  ✖ absorbed (5424.244857ms)
+From /tmp/cp-repo-7TMvUD/demo
+ * branch            cp-0h1v    -> FETCH_HEAD
+HEAD is now at a2230ae v1
+To /tmp/cp-repo-7TMvUD/demo.git
+   a2230ae..86ef874  HEAD -> cp-0h1v
+Previous HEAD position was 86ef874 remote update
+Switched to branch 'main'
+  ✔ divergence (3293.77159ms)
+From /tmp/cp-repo-Nv7fKL/demo
+ * branch            cp-vtjr    -> FETCH_HEAD
+HEAD is now at 7d28e63 v1
+To /tmp/cp-repo-Nv7fKL/demo.git
+   7d28e63..be6022c  HEAD -> cp-vtjr
+Previous HEAD position was be6022c remote update
+Switched to branch 'main'
+  ✔ branch-denied (3734.823232ms)
+From /tmp/cp-repo-e3Fax9/demo
+ * branch            cp-zomw    -> FETCH_HEAD
+HEAD is now at f126157 v1
+To /tmp/cp-repo-e3Fax9/demo.git
+   f126157..b3775cb  HEAD -> cp-zomw
+Previous HEAD position was b3775cb remote update
+Switched to branch 'main'
+  ✔ branch-empty (3747.995837ms)
+From /tmp/cp-repo-PgS4y8/demo
+ * branch            cp-r4wj    -> FETCH_HEAD
+HEAD is now at 401a997 v1
+To /tmp/cp-repo-PgS4y8/demo.git
+   401a997..ea326c8  HEAD -> cp-r4wj
+Previous HEAD position was ea326c8 remote update
+Switched to branch 'main'
+  ✔ base-denied (3209.415256ms)
+From /tmp/cp-repo-PekRJ8/demo
+ * branch            cp-a35q    -> FETCH_HEAD
+HEAD is now at 1681105 v1
+To /tmp/cp-repo-PekRJ8/demo.git
+   1681105..e3cf8cc  HEAD -> cp-a35q
+Previous HEAD position was e3cf8cc remote update
+Switched to branch 'main'
+  ✔ base-empty (3184.735404ms)
+From /tmp/cp-repo-l2W9ES/demo
+ * branch            cp-l6wl    -> FETCH_HEAD
+HEAD is now at a8727db v1
+To /tmp/cp-repo-l2W9ES/demo.git
+   a8727db..2b075f2  HEAD -> cp-l6wl
+Previous HEAD position was 2b075f2 remote update
+Switched to branch 'main'
+  ✔ merge-base (3296.733675ms)
+From /tmp/cp-repo-7W587a/demo
+ * branch            cp-lkbi    -> FETCH_HEAD
+HEAD is now at 671baf7 v1
+To /tmp/cp-repo-7W587a/demo.git
+   671baf7..84a5938  HEAD -> cp-lkbi
+Previous HEAD position was 84a5938 remote update
+Switched to branch 'main'
+  ✔ diff (3373.385469ms)
+From /tmp/cp-repo-6aR0zr/demo
+ * branch            cp-ftxq    -> FETCH_HEAD
+HEAD is now at fbc50fb v1
+To /tmp/cp-repo-6aR0zr/demo.git
+   fbc50fb..52d0796  HEAD -> cp-ftxq
+Previous HEAD position was 52d0796 remote update
+Switched to branch 'main'
+  ✔ patch-id (3505.562143ms)
+From /tmp/cp-repo-VO0L5f/demo
+ * branch            cp-aib3    -> FETCH_HEAD
+HEAD is now at cbcbb38 v1
+To /tmp/cp-repo-VO0L5f/demo.git
+   cbcbb38..8f2082d  HEAD -> cp-aib3
+Previous HEAD position was 8f2082d remote update
+Switched to branch 'main'
+  ✔ empty-id (3406.719307ms)
+From /tmp/cp-repo-zmIDvt/demo
+ * branch            cp-8ddo    -> FETCH_HEAD
+HEAD is now at 1457c87 v1
+To /tmp/cp-repo-zmIDvt/demo.git
+   1457c87..20a5133  HEAD -> cp-8ddo
+Previous HEAD position was 20a5133 remote update
+Switched to branch 'main'
+  ✔ empty-diff (3401.674202ms)
+From /tmp/cp-repo-xZa6eQ/demo
+ * branch            cp-fwcx    -> FETCH_HEAD
+HEAD is now at 62da205 v1
+To /tmp/cp-repo-xZa6eQ/demo.git
+   62da205..0e89d77  HEAD -> cp-fwcx
+Previous HEAD position was 0e89d77 remote update
+Switched to branch 'main'
+  ✔ salvage (3583.282246ms)
+✖ landing S10: synchronization preserves local work and proves origin before resetting (57860.019026ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 13
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 59421.301405
+
+✖ failing tests:
+
+test at tests/e2e/landing-merge.test.ts:71:230
+✖ behind (4036.006332ms)
+  AssertionError [ERR_ASSERTION]: behind: reset requires proof
+  + actual - expected
+  
+  + []
+  - [
+  -   [
+  -     'reset',
+  -     '--hard',
+  -     'e78dda0439148447b301e6c06d01d90275f433fc'
+  -   ]
+  - ]
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:102:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:71:222)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ [ 'reset', '--hard', 'e78dda0439148447b301e6c06d01d90275f433fc' ] ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:71:230
+✖ stale (3967.874319ms)
+  AssertionError [ERR_ASSERTION]: stale: reset requires proof
+  + actual - expected
+  
+  + []
+  - [
+  -   [
+  -     'reset',
+  -     '--hard',
+  -     'e47779dd70b4aafb802b6022a771d0552c9f3bbc'
+  -   ]
+  - ]
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:102:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:71:222)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ [ 'reset', '--hard', 'e47779dd70b4aafb802b6022a771d0552c9f3bbc' ] ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/e2e/landing-merge.test.ts:71:230
+✖ absorbed (5424.244857ms)
+  AssertionError [ERR_ASSERTION]: absorbed: reset requires proof
+  + actual - expected
+  
+  + []
+  - [
+  -   [
+  -     'reset',
+  -     '--hard',
+  -     'e7a88e3e417d73fa270c3726b620c4071ee6fe3f'
+  -   ]
+  - ]
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:102:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:71:222)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [ [ 'reset', '--hard', 'e7a88e3e417d73fa270c3726b620c4071ee6fe3f' ] ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

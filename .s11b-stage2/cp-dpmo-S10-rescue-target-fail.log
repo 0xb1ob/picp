@@ -1,0 +1,166 @@
+
+> picp@0.1.0 test:one
+> node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-name-pattern=landing S10:.*synchronization tests/e2e/landing-merge.test.ts
+
+From /tmp/cp-repo-1UDUQM/demo
+ * branch            cp-ah99    -> FETCH_HEAD
+HEAD is now at 603cb3b v1
+To /tmp/cp-repo-1UDUQM/demo.git
+   603cb3b..736ed34  HEAD -> cp-ah99
+Previous HEAD position was 736ed34 remote update
+Switched to branch 'main'
+▶ landing S10: synchronization preserves local work and proves origin before resetting
+  ✔ behind (4690.888461ms)
+From /tmp/cp-repo-JWZ83V/demo
+ * branch            cp-rhug    -> FETCH_HEAD
+HEAD is now at 06774e4 v1
+To /tmp/cp-repo-JWZ83V/demo.git
+   06774e4..0501a9d  HEAD -> cp-rhug
+Previous HEAD position was 0501a9d remote update
+Switched to branch 'main'
+  ✔ stale (4548.491428ms)
+From /tmp/cp-repo-bg2oV8/demo
+ * branch            cp-7921    -> FETCH_HEAD
+HEAD is now at ae30da4 v1
+To /tmp/cp-repo-bg2oV8/demo.git
+   ae30da4..1afc8b5  HEAD -> cp-7921
+Previous HEAD position was 1afc8b5 remote update
+Switched to branch 'main'
+  ✔ dirty (3091.288179ms)
+From /tmp/cp-repo-pU76Uc/demo
+ * branch            cp-w45m    -> FETCH_HEAD
+HEAD is now at 5226e9b v1
+To /tmp/cp-repo-pU76Uc/demo.git
+   5226e9b..492de79  HEAD -> cp-w45m
+Previous HEAD position was 492de79 remote update
+Switched to branch 'main'
+  ✔ unpushed (3558.100384ms)
+From /tmp/cp-repo-CEfsyN/demo
+ * branch            cp-kcyo    -> FETCH_HEAD
+HEAD is now at d23f13e v1
+To /tmp/cp-repo-CEfsyN/demo.git
+   d23f13e..e5bc67f  HEAD -> cp-kcyo
+Previous HEAD position was e5bc67f remote update
+Switched to branch 'main'
+  ✖ absorbed (5057.735146ms)
+From /tmp/cp-repo-CIXGFJ/demo
+ * branch            cp-di62    -> FETCH_HEAD
+HEAD is now at 5da5048 v1
+To /tmp/cp-repo-CIXGFJ/demo.git
+   5da5048..a5c4134  HEAD -> cp-di62
+Previous HEAD position was a5c4134 remote update
+Switched to branch 'main'
+  ✔ divergence (3199.958617ms)
+From /tmp/cp-repo-hqT6Wo/demo
+ * branch            cp-eas0    -> FETCH_HEAD
+HEAD is now at 853c1a1 v1
+To /tmp/cp-repo-hqT6Wo/demo.git
+   853c1a1..62e1abe  HEAD -> cp-eas0
+Previous HEAD position was 62e1abe remote update
+Switched to branch 'main'
+  ✔ branch-denied (3760.860924ms)
+From /tmp/cp-repo-1k4KsB/demo
+ * branch            cp-36k8    -> FETCH_HEAD
+HEAD is now at 18dba7e v1
+To /tmp/cp-repo-1k4KsB/demo.git
+   18dba7e..e128c2f  HEAD -> cp-36k8
+Previous HEAD position was e128c2f remote update
+Switched to branch 'main'
+  ✔ branch-empty (3792.242206ms)
+From /tmp/cp-repo-HwJL22/demo
+ * branch            cp-j6rl    -> FETCH_HEAD
+HEAD is now at 76ae255 v1
+To /tmp/cp-repo-HwJL22/demo.git
+   76ae255..ff664d0  HEAD -> cp-j6rl
+Previous HEAD position was ff664d0 remote update
+Switched to branch 'main'
+  ✔ base-denied (3209.553094ms)
+From /tmp/cp-repo-J3sPOb/demo
+ * branch            cp-n0uz    -> FETCH_HEAD
+HEAD is now at be6d200 v1
+To /tmp/cp-repo-J3sPOb/demo.git
+   be6d200..0d30336  HEAD -> cp-n0uz
+Previous HEAD position was 0d30336 remote update
+Switched to branch 'main'
+  ✔ base-empty (3233.40283ms)
+From /tmp/cp-repo-0JA7s2/demo
+ * branch            cp-boek    -> FETCH_HEAD
+HEAD is now at d41baa1 v1
+To /tmp/cp-repo-0JA7s2/demo.git
+   d41baa1..a5a891e  HEAD -> cp-boek
+Previous HEAD position was a5a891e remote update
+Switched to branch 'main'
+  ✔ merge-base (3315.447962ms)
+From /tmp/cp-repo-WAvUBO/demo
+ * branch            cp-jxcu    -> FETCH_HEAD
+HEAD is now at 208f21e v1
+To /tmp/cp-repo-WAvUBO/demo.git
+   208f21e..5654b92  HEAD -> cp-jxcu
+Previous HEAD position was 5654b92 remote update
+Switched to branch 'main'
+  ✔ diff (3372.389346ms)
+From /tmp/cp-repo-6n4Kzn/demo
+ * branch            cp-argp    -> FETCH_HEAD
+HEAD is now at 0da6490 v1
+To /tmp/cp-repo-6n4Kzn/demo.git
+   0da6490..efc4984  HEAD -> cp-argp
+Previous HEAD position was efc4984 remote update
+Switched to branch 'main'
+  ✔ patch-id (3428.858723ms)
+From /tmp/cp-repo-5JOF5U/demo
+ * branch            cp-zyeo    -> FETCH_HEAD
+HEAD is now at 00a9cb0 v1
+To /tmp/cp-repo-5JOF5U/demo.git
+   00a9cb0..3d42dde  HEAD -> cp-zyeo
+Previous HEAD position was 3d42dde remote update
+Switched to branch 'main'
+  ✔ empty-id (3484.44386ms)
+From /tmp/cp-repo-XpXgZM/demo
+ * branch            cp-p6sz    -> FETCH_HEAD
+HEAD is now at 00e3c9b v1
+To /tmp/cp-repo-XpXgZM/demo.git
+   00e3c9b..9bdc3e4  HEAD -> cp-p6sz
+Previous HEAD position was 9bdc3e4 remote update
+Switched to branch 'main'
+  ✔ empty-diff (3433.419801ms)
+From /tmp/cp-repo-4Behbu/demo
+ * branch            cp-4f0f    -> FETCH_HEAD
+HEAD is now at bee8d09 v1
+To /tmp/cp-repo-4Behbu/demo.git
+   bee8d09..73b84ff  HEAD -> cp-4f0f
+Previous HEAD position was 73b84ff remote update
+Switched to branch 'main'
+  ✔ salvage (3624.590742ms)
+✖ landing S10: synchronization preserves local work and proves origin before resetting (58805.917145ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 15
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 60401.604183
+
+✖ failing tests:
+
+test at tests/e2e/landing-merge.test.ts:71:230
+✖ absorbed (5057.735146ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'd23f13ec2e01db6f52207deaa3c5dd64b594acd4'
+  - '6d5fb9a549008dcc9de50c121709c12456d71aea'
+  
+      at TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:111:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async TestContext.<anonymous> (file:///home/ubuntu/.treehouse/picp-7ee3a3/4/picp/tests/e2e/landing-merge.test.ts:71:222)
+      at async Test.run (node:internal/test_runner/test:1332:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'd23f13ec2e01db6f52207deaa3c5dd64b594acd4',
+    expected: '6d5fb9a549008dcc9de50c121709c12456d71aea',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..c819465 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1611,7 +1611,7 @@ export class Integrator {
+ 		// `:` is not legal in a ref name, so the timestamp is dashed.
+ 		const stamp = isoTimestamp(this.#now()).replaceAll(":", "-");
+ 		const ref = `${SALVAGE_REF_PREFIX}${jobId}/${stamp}`;
+-		const written = await this.#run(worktree, "git", ["update-ref", ref, head]);
++		const written = await this.#run(worktree, "git", ["update-ref", ref, `${head}~1`]);
+ 		if (written.status !== 0) return { why: firstLine(written) };
+ 		return { ref };
+ 	}

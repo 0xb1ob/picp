@@ -1,0 +1,13 @@
+diff --git a/src/integrate.ts b/src/integrate.ts
+index e63f33a..87f8b32 100644
+--- a/src/integrate.ts
++++ b/src/integrate.ts
+@@ -1470,7 +1470,7 @@ export class Integrator {
+ 			};
+ 		}
+ 		let absorbed = "";
+-		if (count > 0) {
++		if (count >= 0) {
+ 			// The only path on which this function discards a commit. It runs the
+ 			// proof the parent used to run by hand, and every one of its steps fails
+ 			// closed: an unreadable base, a missing merge base, a diff that will not
