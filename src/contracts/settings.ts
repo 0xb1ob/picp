@@ -5,7 +5,7 @@
  *
  * Every field names its owner file (or env var); the owner's loader stays authoritative. Defaults
  * owned outside `contracts/` are literals here, each pinned against its owning constant by
- * tests/settings.test.ts.
+ * tests/e2e/configuration.test.ts (P16-settings-read).
  */
 
 import { StringEnum } from "@earendil-works/pi-ai";
