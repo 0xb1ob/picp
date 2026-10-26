@@ -316,3 +316,96 @@ test("P14e-update-rollback: a doctor error rolls back to from and never retries 
 	assert.deepEqual([left?.last_result, left?.phase], ["rollback_failed", "rolling_back"], last(c));
 	assert.match(left?.detail ?? "", /live worker\(s\) cp-orphan/);
 });
+
+test("P14e-update-recovery: a run interrupted after the merge rolls back, before it restarts, mid-drain cancels, after drained restarts the parent", { timeout: 300_000 }, async (t) => {
+	const after = await bench(t);
+	const from = after.repo.head();
+	const to = advanceBase(after.repo, "a.txt", "a\n");
+	after.repo.git("fetch", "--quiet", "origin");
+	after.repo.git("merge", "--ff-only", "--quiet", to);
+	after.state({ phase: "verifying", from, to, lock: false });
+	const rolled = await after.run();
+	assert.deepEqual([rolled?.last_result, after.repo.head(), rolled?.bad_sha], ["rolled_back", from, to], last(after));
+	assert.deepEqual(after.causes(), [{ reason: "auto-update", target_sha: from }]);
+
+	const before = await bench(t);
+	const head = before.repo.head();
+	before.state({ phase: "updating", from: head, to: FAR, lock: false });
+	const failed = await before.run();
+	assert.deepEqual([failed?.last_result, before.repo.head(), before.calls().includes("daemon reload")], ["failed", head, true]);
+	assert.match(failed?.detail ?? "", /nothing merged; cp-daemon reloaded/);
+	const drain = await bench(t);
+	drain.state({ phase: "draining", from: drain.repo.head(), to: FAR, lock: false });
+	writeFileSync(join(drain.stateDir, "drain.json"), JSON.stringify({ started_at: isoTimestamp(), state: "draining", jobs: [] }));
+	assert.deepEqual([(await drain.run())?.last_result, drain.calls()], ["failed", ["host drainCancel"]], "nothing stopped, the drain withdrawn");
+
+	// Drained, then the updater died before `updating`: cancel refuses drained, so the parent restart clears it.
+	const late = await bench(t, { enabled: true, interval_min: 5, quiet_min: 10 });
+	const lateHead = late.repo.head();
+	advanceBase(late.repo, "late.txt", "late\n");
+	late.state({ phase: "draining", from: lateHead, to: FAR, lock: false });
+	writeFileSync(join(late.stateDir, "drain.json"), JSON.stringify({ started_at: isoTimestamp(), state: "drained", jobs: [] }));
+	const restarted = await late.run(5);
+	assert.deepEqual([restarted?.last_result, restarted?.phase, late.calls(), late.repo.head()], ["failed", "idle", ["host stop [{}]", "daemon hold", "daemon reload"], lateHead], "no quiet wait");
+	assert.match(restarted?.detail ?? "", /drained parent was restarted, dispatch reopens/);
+	// The same window with a host stop that fails: the units still restart, and both errors are reported.
+	const stuck = await bench(t);
+	const window = () => {
+		stuck.state({ phase: "draining", from: stuck.repo.head(), to: FAR, lock: false });
+		writeFileSync(join(stuck.stateDir, "drain.json"), JSON.stringify({ started_at: isoTimestamp(), state: "drained", jobs: [] }));
+	};
+	window();
+	stuck.plan({ failing: ["host stop", "daemon reload"] });
+	const both = await stuck.run();
+	assert.ok(stuck.calls().includes("daemon reload"), "a failed stop never skips the restart");
+	assert.match(both?.detail ?? "", /host stop failed: stop refused; cp-daemon reload: refused \(the drain may stay latched/);
+	window();
+	stuck.reset();
+	stuck.plan({ failing: ["host stop"] });
+	const once = await stuck.run();
+	assert.deepEqual(stuck.calls().slice(0, 2), ["host stop [{}]", "daemon reload"], "stop failed (no hold asked), restart still ran");
+	assert.match(once?.detail ?? "", /^a run was interrupted after the fleet drained; nothing merged; host stop failed: stop refused \(the drain may stay latched/);
+});
+
+test("P14e-update-drain: a drain timeout, a drain refused during parent control, a drain gone before it drained, other drain errors", { timeout: 300_000 }, async (t) => {
+	const b = await bench(t);
+	const head = b.repo.head();
+	advanceBase(b.repo, "slow.txt", "slow\n");
+	b.plan({ drainStates: ["draining", "drained"] });
+	const timeout = await b.run();
+	assert.deepEqual([timeout?.last_result, b.hostCalls(), b.repo.head()], ["drain_timeout", ["host drain [600]", "host drainCancel"], head], "still draining at 660 s: cancelled, no stop");
+	assert.equal(await b.run(30), undefined, "under 4x interval_min after a drain timeout: silent");
+	assert.equal((await b.run(31))?.last_result, "updated", last(b));
+
+	for (const message of [PARENT_CONTROL_BUSY, `parent diagnostic /cp-drain failed: ${PARENT_CONTROL_BUSY}`]) {
+		const busy = await bench(t);
+		const busyHead = busy.repo.head();
+		advanceBase(busy.repo, "busy.txt", "busy\n");
+		busy.plan({ drainThrow: message });
+		const state = await busy.run();
+		assert.deepEqual([state?.last_result, state?.phase, busy.hostCalls(), busy.repo.head()], ["skipped_busy", "idle", ["host drain [600]", "host drainCancel"], busyHead], message);
+		assert.ok(state?.detail?.includes(PARENT_CONTROL_BUSY) && !busy.calls().some((call) => call.startsWith("daemon ")), "best-effort cancel; nothing held or reloaded");
+		busy.plan({});
+		assert.equal((await busy.run())?.last_result, "updated", "the next interval retries");
+	}
+	const others = [];
+	for (const message of ["parent diagnostic /cp-drain failed: something else", `${PARENT_CONTROL_BUSY} (and more)`, "parent diagnostic /cp-drain is not registered; reload the command-post parent extension"]) {
+		const other = await bench(t);
+		advanceBase(other.repo, "other.txt", "other\n");
+		other.plan({ drainThrow: message });
+		const state = await other.run();
+		others.push([state?.last_result, state?.detail === `drain failed: ${message}; nothing was stopped`]);
+	}
+	assert.deepEqual(others, [["failed", true], ["failed", true], ["failed", true]], "an unrelated error is never swallowed");
+
+	const gone = await bench(t);
+	const goneHead = gone.repo.head();
+	advanceBase(gone.repo, "gone.txt", "gone\n");
+	gone.plan({ drainStates: ["gone"], drainText: `DRAIN: failed: ${PARENT_CONTROL_BUSY}` });
+	const lost = await gone.run();
+	assert.deepEqual([lost?.last_result, gone.hostCalls(), gone.repo.head()], ["drain_timeout", ["host drain [600]", "host drainCancel"], goneHead]);
+	assert.ok(lost?.detail?.includes(`the drain answered: DRAIN: failed: ${PARENT_CONTROL_BUSY}`), lost?.detail);
+	gone.plan({});
+	assert.equal(await gone.run(30), undefined, "retried like a drain timeout: silent under 4x interval_min");
+	assert.equal((await gone.run(31))?.last_result, "updated");
+});
