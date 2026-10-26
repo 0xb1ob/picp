@@ -6,7 +6,7 @@ import { obj, str, type Json } from "./sessions.ts";
 import { timestamp } from "./overview-read.ts";
 import type { SessionEntry, StatsParentWindow } from "./api-types.ts";
 
-/** Mirrors of `../wakeups.ts` (the viewer may not import it); tests/e2e/reports-stats.test.ts pins them equal. */
+/** Mirrors of `../wakeups.ts` (the viewer may not import it); tests/stats-wakeup-drift.test.ts pins them equal. */
 export const STALE_WAKEUP_HEADLINE = "STALE WAKE-UP — do not act on this";
 export const FACT_WAKE_TYPES = ["cp-envelope", "cp-answered", "cp-wedged", "cp-unreported", "cp-ci", "cp-verdict", "cp-bound", "cp-death", "cp-recovery"];
 
