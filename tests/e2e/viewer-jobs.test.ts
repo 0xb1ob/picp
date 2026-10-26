@@ -548,7 +548,9 @@ test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the 
 	assert.deepEqual([back.awaiting_merge, typeof back.lease_id, events("awaiting_merge_resumed").length, events("worker_revived").length], [undefined, "string", 1, 1]);
 	assert.notEqual(back.lease_id, leased, "a fresh lease");
 	assert.deepEqual([git(back.worktree!, "rev-parse", "HEAD"), git(back.worktree!, "rev-parse", "--abbrev-ref", "HEAD")], [tip, live.jobId], "the remote tip is checked out");
-	await waitFor(() => JSON.stringify(s.provider.requests(`landing-${live.jobId}`).map((r) => r.body.messages)), (body) => /\[resumed from awaiting_merge\][^"]*no longer yours[^"]*address the team's review/.test(body), { timeoutMs: 60_000, what: "the note-led message reaches the resumed worker" });
+	const note = /\[resumed from awaiting_merge\][^"]*no longer yours[^"]*address the team's review/;
+	const sent = await waitFor(() => JSON.stringify(s.provider.requests(`landing-${live.jobId}`).map((r) => r.body.messages)), (body) => note.test(body), { timeoutMs: 60_000, what: "the note-led message reaches the resumed worker" });
+	assert.match(sent, note, "the coordinator's note leads the delivered message");
 	await waitFor(() => s.post.fleet.require(live.jobId), (r) => r.phase === "held" && !!r.reported_at && (r.supersessions ?? 0) >= 1, { timeoutMs: 90_000, what: "the resumed worker re-reports" });
 	assert.equal(events("worker_revived").length, 1, "a resumed worker is never restored again as a released one");
 
