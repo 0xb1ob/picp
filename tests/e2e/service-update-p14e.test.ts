@@ -418,12 +418,14 @@ test("P14e-update-verify: busy parents extend the verify to a deferred note, an 
 		const from = b.repo.head();
 		const to = advanceBase(b.repo, "v.txt", "v\n");
 		b.plan(plan);
+		const started = b.now() + 20 * 60_000;
 		const state = await b.run();
-		return { state, b, moved: b.repo.head() === to ? "to" : b.repo.head() === from ? "from" : "?" };
+		return { state, b, elapsed: b.now() - started, moved: b.repo.head() === to ? "to" : b.repo.head() === from ? "from" : "?" };
 	};
 	// Unsettled past 120 s, then a passing doctor: healthy, no note.
 	const late = await verify({ doctor: [...Array(70).fill("unsettled"), "ok"] });
 	assert.deepEqual([late.state?.last_result, late.moved, /deferred/.test(late.state?.detail ?? "")], ["updated", "to", false], last(late.b));
+	assert.ok(late.elapsed > 120_000, `verified past the base 120 s: ${late.elapsed}`);
 	// Busy for the whole window (unsettled, or a doctor queued behind a live parent): accepted with the deferred note.
 	for (const doctor of ["unsettled", "hang"]) {
 		const busy = await verify({ doctor: [doctor] });

@@ -937,7 +937,9 @@ test("P14e-install-gateway: opt-in, validated, kept, tightened, and never printi
 		const fail = lines(run.out, "fail").find((line) => line.startsWith("fail: gateway: ")) ?? run.out;
 		refusals.push([run.code, existsSync(v.cpHome), existsSync(v.keyFile), v.log().some((call) => call.includes("cp-daemon.service") || call.startsWith("daemon ")), keyArgs?.[0] === "bad" ? /holds whitespace/.test(fail) && !fail.includes("k3y with space") : keyArgs ? /needs the admin key.*--gateway-key-file/.test(fail) : fail.endsWith("; nothing written")]);
 	}
-	assert.deepEqual(new Set(refusals.map((row) => JSON.stringify(row))), new Set([JSON.stringify([1, false, false, false, true])]), JSON.stringify(refusals));
+	assert.deepEqual(refusals.slice(0, 5).map((row) => row.slice(0, 4)), Array(5).fill([1, false, false, false]), "a bad url writes and starts nothing");
+	assert.deepEqual(refusals.slice(5).map((row) => row.slice(0, 4)), Array(2).fill([1, false, false, false]), "a missing or bad key writes nothing");
+	assert.deepEqual(refusals.map((row) => row[4]), Array(7).fill(true), `each refusal names its cause: ${JSON.stringify(refusals)}`);
 
 	// Another url or key needs --force (other capacity keys kept); a loose key file is tightened, a dry run only plans it.
 	writeFileSync(u.capacity, `${JSON.stringify({ url: "https://gw.example/", path: "/api/v1/admin/ops/concurrency", quota: { five_hour: 80 } })}\n`);
