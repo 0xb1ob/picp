@@ -922,6 +922,16 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 		}
 		await b.close();
 	}
+
+	// A populated home with an unreadable routing.json and a session env pin: the read still writes and touches nothing.
+	putOwner(home, "routing", "{nope");
+	b = await bridge(t, home, { env: { CP_JOB_TOOL_CALL_CAP: "5" } });
+	const populated = listing(data);
+	const unreadable = (await b.get()).snapshot;
+	assert.equal(ownerRow(unreadable, "routing")?.state, "invalid");
+	expectView(unreadable, "sessions.tool_call_cap", 5, "env");
+	assert.deepEqual(listing(data), populated, "a populated home with invalid routing is read without a write");
+	await b.close();
 });
 
 const auditOf = (home: string): Array<Record<string, unknown>> =>
@@ -965,7 +975,7 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	t.after(() => scratch.cleanup());
 	const home = scratch.path;
 	resetHome(home);
-	const b = await bridge(t, home, { env: { CP_GATEWAY_ADMIN_KEY: "sk-test-secret" } });
+	const b = await bridge(t, home, { env: { CP_GATEWAY_ADMIN_KEY: "sk-test-secret", CP_PARENT_MODEL: "env/parent" } });
 	const audit = () => auditOf(home);
 	const settled = (result: Applied) => [result.status, result.state];
 
@@ -1000,7 +1010,8 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	assert.deepEqual(ownerJson(home, "update"), { enabled: false });
 	assert.deepEqual(ownerJson(home, "viewer"), {});
 	const editable = (await b.get()).catalog.filter((field) => field.editable);
-	for (const field of editable) assert.deepEqual(view(restored.snapshot!, field.key)?.value, field.default, field.key);
+	const restoredValue = (key: string, fallback: unknown) => (key === "models.parent" ? "env/parent" : fallback);
+	for (const field of editable) assert.deepEqual(view(restored.snapshot!, field.key)?.value, restoredValue(field.key, field.default), field.key);
 	const actions = Object.fromEntries((restored.changes ?? []).map((change) => [change.key, change.action]));
 	for (const key of ["review.timeout_ms", "sessions.operator_compact_at_tokens", "capacity.five_hour", "capacity.seven_day", "viewer.strict_host", "maintenance.update_interval_min"]) assert.equal(actions[key], "delete", key);
 	for (const key of ["grants.job_cap", "grants.ask_on", "budgets.spawn_cap", "budgets.warn_ratio", "sessions.wall_clock_seconds", "sessions.parent_compact_at_tokens", "maintenance.update_enabled"]) assert.equal(actions[key], "set", key);
@@ -1080,8 +1091,9 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	assert.deepEqual(dry.changes, [{ key: "grants.job_cap", file_key: "job_cap", action: "set", old: 3, old_source: "file", new: 5 }]);
 	assert.deepEqual(listing(home), dryBefore);
 
-	// An audit journal that cannot take the intent is 503 and no owner byte changes. /dev/full reads as empty and fails
-	// every write with ENOSPC, even for root, so recovery passes and the intent append itself fails.
+	// An audit journal that cannot take the intent is 503 and no owner byte changes. Every write to /dev/full fails
+	// with ENOSPC, even for root. A read yields endless zero bytes, but nothing reads it whole: the tail reader stats
+	// size 0, `listing` skips the symlink, and fullHome() removes it before auditOf() runs again.
 	rmSync(settingsAuditFile(home), { force: true });
 	symlinkSync("/dev/full", settingsAuditFile(home));
 	const ownersBefore = listing(join(home, LAYOUT.data));
@@ -1184,6 +1196,7 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	assert.deepEqual(settled(unset), [200, "applied"]);
 	assert.deepEqual(ownerJson(home, "parent"), { compact_at_tokens: 200000 });
 	assert.deepEqual(unset.changes!.map((change) => [change.key, change.action, change.new]), [["models.parent", "delete", null]]);
+	assert.deepEqual(view(unset.snapshot!, "models.parent"), { key: "models.parent", value: "env/parent", source: "env", status: "ok" });
 	assert.equal((await b.apply({ mode: "set", changes: { "models.parent": null } })).state, "unchanged");
 	assert.deepEqual(settled(await b.apply({ mode: "restore", keys: ["models.parent", "models.operator"] })), [200, "applied"]);
 	assert.deepEqual(ownerJson(home, "operator"), {});
@@ -1546,10 +1559,14 @@ test("P16-repo-map: a dispatched brief carries the base commit's repo map, cache
 	git(b.clone, "config", "--local", "command-post.repoMap", "false");
 	const [off] = await briefs(b, 1);
 	assert.doesNotMatch(off!, /## Repo map/, "the opt-out bypasses a populated cache");
+	const uncached = pushToOrigin(b, { "src/app.ts": "export const optedOut = true;\n" });
+	const [offFresh] = await briefs(b, 1);
+	assert.doesNotMatch(offFresh!, /## Repo map/);
+	assert.deepEqual(readdirSync(cacheDir).sort(), cached, "an opt-out on an uncached commit creates no cache");
 	git(b.clone, "config", "--local", "command-post.repoMap", "true");
 	const [on] = await briefs(b, 1);
 	assert.match(on!, /## Repo map/);
-	assert.deepEqual(readdirSync(cacheDir).sort(), cached);
+	assert.deepEqual(readdirSync(cacheDir).sort(), [...cached, `${uncached}.md`].sort());
 
 	const large: Record<string, string> = { "viewer-app/app.tsx": "export const App = () => null;\n", "src/tiny/\u6587\u5b57-keep.ts": "export const keep = 1;\n" };
 	for (let n = 0; n < 150; n++) large[`src/large/module-${n}.ts`] = `export const symbol${n} = 1;\n`;

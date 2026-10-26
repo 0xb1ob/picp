@@ -31,6 +31,8 @@ import { SELF_REVIEW_SKILL } from "../../src/schedule-self-review.ts";
 import { formatNativeMigration, nativeMigrationMarker, sweepNativeScheduleMigration } from "../../src/schedule-native-migration.ts";
 /** The quote is written verbatim as one ledger comment (≤4000 chars) after its `run-now quote sha <12 hex>: ` prefix. */
 const RUN_NOW_QUOTE_MAX = 3900;
+/** Anchors already offered in this process; on globalThis because new_session reloads the extension module. */
+const woken: Set<string> = ((globalThis as Record<symbol, unknown>)[Symbol.for("cp.schedule.woken")] ??= new Set<string>()) as Set<string>;
 
 /** Whether `word` occurs in `text` as a whole token: no letter, digit or `_` right before or after it. */
 export function namesToken(text: string, word: string, flags: "" | "i"): boolean {
@@ -90,7 +92,6 @@ export function registerScheduleTools(
 	const sendParent = (text: string, details: Record<string, unknown>): void => deferParentWake(() => {
 		pi.sendMessage({ customType: "cp-schedule", content: text, display: true, details }, { deliverAs: "followUp", triggerTurn: true });
 	});
-	const woken = new Set<string>();
 	/** One offer per anchor per process: dedupe now, even if transport is held until compaction. */
 	const wakeParent = (anchorId: string, text: string, details: Record<string, unknown>): void => {
 		if (woken.has(anchorId)) return;
@@ -176,7 +177,9 @@ export function registerScheduleTools(
 		controlTimer = setInterval(() => void drain(), SCHEDULE_CONTROL_POLL_MS);
 		controlTimer.unref();
 	});
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", async (event?: { reason?: string }) => {
+		// A quit or an unlabelled stop ends the process's memory; new/resume/fork/reload keep it.
+		if (!event?.reason || event.reason === "quit") woken.clear();
 		if (timer) clearInterval(timer);
 		timer = undefined;
 		if (controlTimer) clearInterval(controlTimer);
