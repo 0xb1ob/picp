@@ -480,6 +480,9 @@ test("P14-units: on a systemd --user machine cp-install writes cp-daemon.service
 	// systemd --user is running and the user lingers; every other call succeeds. The app holds a quote, %, \ and $.
 	writeFileSync(join(m.tools.dir, "systemctl"), '#!/bin/sh\n[ "$2" = is-system-running ] && echo running\nexit 0\n', { mode: 0o755 });
 	writeFileSync(join(m.tools.dir, "loginctl"), "#!/bin/sh\necho Linger=yes\n", { mode: 0o755 });
+	// P14-install's installs run the real pi probe; this stub answers get_commands once asked, not after a pi boot.
+	writeFileSync(join(m.tools.dir, "pi-machine"), readFileSync(join(m.tools.dir, "pi")), { mode: 0o755 });
+	writeFileSync(join(m.tools.dir, "pi"), `#!/bin/sh\n[ "$1 $2" = "--mode rpc" ] || exec "${m.tools.dir}/pi-machine" "$@"\nread -r _\necho '${JSON.stringify({ type: "response", id: "probe", success: true, data: { commands: [{ name: "cp-version", source: "extension" }] } })}'\n`, { mode: 0o755 });
 	const app = join(m.root, 'a "b" 100%\\x $HOME');
 	mkdirSync(join(app, "bin"), { recursive: true });
 	for (const name of readdirSync(pkg).filter((entry) => entry !== "bin")) symlinkSync(join(pkg, name), join(app, name));
