@@ -230,16 +230,23 @@ test("P14-daemon-bin: bin/cp-daemon in an installed home defaults CP_HOME to tha
 });
 
 /** Newline-JSON `frames` written one by one to the control socket; the replies, and whether the daemon closed it. */
-function socket(path: string, frames: string[], waitMs = 1_500): Promise<{ replies: Array<Record<string, unknown>>; closed: boolean }> {
+function socket(path: string, frames: string[], waitMs = 5_000): Promise<{ replies: Array<Record<string, unknown>>; closed: boolean }> {
 	return new Promise((done) => {
 		const s = connect(path);
-		let buffer = "", closed = false;
-		const finish = () => done({ replies: buffer.split("\n").filter(Boolean).map((line) => JSON.parse(line)), closed });
-		s.setEncoding("utf8").on("data", (chunk: string) => (buffer += chunk));
+		const expected = frames.join("").split("\n").length - 1;
+		let buffer = "", closed = false, timer: NodeJS.Timeout | undefined;
+		const lines = () => buffer.split("\n").filter(Boolean);
+		const finish = () => {
+			clearTimeout(timer);
+			done({ replies: lines().map((line) => JSON.parse(line)), closed });
+			s.destroy();
+		};
+		// Settles on the event: a reply per frame, or the daemon closing the socket; waitMs is only the cap.
+		s.setEncoding("utf8").on("data", (chunk: string) => { buffer += chunk; if (buffer.endsWith("\n") && lines().length >= expected) finish(); });
 		s.on("connect", async () => { for (const frame of frames) { if (!s.destroyed) s.write(frame); await sleep(100); } });
 		s.on("error", () => {});
-		s.on("close", () => { closed = true; });
-		setTimeout(() => { s.destroy(); finish(); }, waitMs);
+		s.on("close", () => { closed = true; finish(); });
+		timer = setTimeout(finish, waitMs);
 	});
 }
 
