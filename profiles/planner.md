@@ -37,8 +37,11 @@ Method:
    requirement only when the approved implementation brief includes it. Never
    drop an executable verification step that runs existing tests.
    Name user-facing scenarios, entry points, failure variants and existing
-   coverage before proposing new tests; behavioral tests default to the
-   mocked-LLM e2e harness (`docs/testing-migration.md`). Every test deletion
+   coverage before proposing new tests; behavioral tests default to the target
+   repo's own e2e harness through its real entry points, faking only external
+   services and LLMs at the boundary. Keep a unit test only for logic no entry
+   point reaches and name why; if the repo has no e2e harness, plan one into
+   the first job that needs it (picp: `docs/testing-migration.md`). Every test deletion
    names its replacement assertions, regression negative controls and retained
    exceptions. An assertion that cannot reach a public consumer is
    `redundant-unreachable` only when a named e2e case pins the consumer-visible

@@ -8,9 +8,9 @@
     "package_version": "0.1.0",
     "prompts": {
       "profiles/gate-reviewer.md": "sha256:56fea35c51e770a6880061b49da7f4e1ddf8916d4da00488dcea49858ea60194",
-      "profiles/implementer.md": "sha256:ea0ce27d4daa0fd7eb45a8edf71633c56b82214a9a72d47e5e7bac35c95e14a3",
+      "profiles/implementer.md": "sha256:9e546062c275643ffe3de8ec7198cbf31234626e1393100763d606b9e6e0d471",
       "profiles/ops.md": "sha256:f25824650d5fda0324104ab255690c6c7b9eb04aeed5d910576f23434f954af1",
-      "profiles/planner.md": "sha256:acbb7f0b763f26f53fe826ffc17a489ddb4fd49bcad11217dc231288d240e677",
+      "profiles/planner.md": "sha256:515301e9eb2a589005deca812dbb45c50bf739d64d78c518f642848048505f7c",
       "profiles/qa.md": "sha256:5424ab2137c8c402b3f0edad6d2546e5016a8088600c42a36ce894c49e6e600b",
       "prompts/briefs/brief-ops.md": "sha256:bcdf5f310a27eef18e7fa0069ea6f2b500e8892fdd4755510cc03e7411732f5e",
       "prompts/briefs/brief-qa.md": "sha256:bdeb191091274f5f218b4e9c1b5cf3b368fab137ce3757af2a3eca5e115e5d82",
@@ -25,7 +25,7 @@
   "corpus": {
     "version": 1,
     "cases": 50,
-    "sha": "sha256:06f50df638998a42feb3e1e4a501cc1e98716136a98f439d17149bda8b1080c1"
+    "sha": "sha256:51b46a5f65b4f297ef05127b3c761c58b47db5c0a6008c6641da602b7b38cd65"
   },
   "metrics": {
     "cases_scored": 22,
@@ -333,12 +333,12 @@
           "ok": true
         },
         {
-          "name": "includes \"acceptance defaults to the mock-provider e2e harness through real product\"",
+          "name": "includes \"acceptance defaults to the target repo's own e2e harness through its real\"",
           "bucket": "contract",
           "ok": true
         },
         {
-          "name": "includes \"Mock LLM calls; do not add live-model\"",
+          "name": "includes \"fake only external services and LLMs at the boundary\"",
           "bucket": "contract",
           "ok": true
         },

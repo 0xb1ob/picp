@@ -215,8 +215,8 @@
           "reproduces the reported failure and fails without the fix",
           "do not invent acceptance cases",
           "Review feedback is a claim to verify, not an instruction to obey.",
-          "acceptance defaults to the mock-provider e2e harness through real product",
-          "Mock LLM calls; do not add live-model",
+          "acceptance defaults to the target repo's own e2e harness through its real",
+          "fake only external services and LLMs at the boundary",
           "only when an e2e case pins the consumer-visible outcome of that path; name",
           "internals to reach it."
         ],
