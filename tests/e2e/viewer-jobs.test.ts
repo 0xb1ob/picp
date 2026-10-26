@@ -12,6 +12,7 @@ import { type TestContext, test } from "node:test";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import type { BoardResponse, JobResponse, JobsResponse, JobTranscriptResponse, OverviewResponse } from "../../src/viewer/api-types.ts";
 import { createScratchHome, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
+import { startViewer } from "../harness/dashboard.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { json, MERGE, mergedCalls, run as ciRun, SKIP, startStack } from "./landing-helpers.ts";
 
@@ -562,4 +563,57 @@ test("P18-with-team: With the team reads this cycle's approvals, the head's curr
 	ciRow("failed", b);
 	assert.deepEqual((await ci())["cp-park"], ["green", null], "a row for another head says nothing about this head");
 	assert.deepEqual((await ci())["cp-bare"], ["unreadable", "green"], "a forwarded green stays separate and never hides a denial");
+});
+
+test("P18-jobs-ui: the served Jobs, Job detail, Board and Overview tabs show notes, CI glyphs, grants, folds and parked PRs", { timeout: 120_000 }, async (t) => {
+	const scratch = createScratchHome();
+	t.after(() => scratch.cleanup());
+	const s = seed(scratch.path);
+	const [a, b] = ["a".repeat(40), "b".repeat(40)];
+	qaFixture(s);
+	const parked = (id: string, over: object) => ({ job_id: id, project: "demo", kind: "ship", delivery: "pr", phase: "awaiting_merge", dispatched_at: iso(130), reported_at: iso(120),
+		awaiting_merge: { cycle: 1, pr_url: "https://github.com/o/r/pull/7", repo: "o/r", branch: id, head_sha: a, base: "main", handed_at: iso(120), released_at: iso(120), frozen_seconds: 600, frozen_usage: {}, ...over } });
+	const fleet = JSON.parse(readFileSync(join(scratch.path, LAYOUT.fleetFile), "utf8")).jobs;
+	s.fleet([...fleet, parked("cp-park", {}), parked("cp-pend", { pending: { kind: "head_moved", event_id: "head:b", observed_at: iso(60), head_sha: b } }),
+		{ job_id: "cp-idle", project: "demo", phase: "waiting", dispatched_at: iso(10) }]);
+	s.put(s.run("cp-idle", "status.json"), { job_id: "cp-idle", phase: "idle", started_at: iso(10) });
+	s.put(paths.ciEvidenceFile("cp-park"), { schema_version: 1, job_id: "cp-park", repo: "o/r", observations: [{ head_sha: a, result: "success", source: "forwarded", observed_at: iso(60), operator_quote: "green." }] });
+	for (const id of ["cp-recorded", "cp-run", "cp-legacy"]) s.put(s.run(id, "envelope.json"), { envelope: { head_sha: a } });
+	s.put(LAYOUT.ciWatchFile, { jobs: [{ job_id: "cp-recorded", head_sha: a, last_ci: "failed" }, { job_id: "cp-run", head_sha: a, last_ci: "green" }, { job_id: "cp-legacy", head_sha: a, last_ci: "in_progress" }] });
+	const view = await startViewer(t, { home: scratch.path, requireTailnet: false, at: new Date(NOON).toISOString() });
+	const note = (await view.get("/api/jobs").then((r) => JSON.parse(r.text) as JobsResponse)).jobs.find((j) => j.id === "cp-recorded")!.note;
+
+	const jobs = await view.open("#jobs");
+	await jobs.find(".job-ci-red");
+	assert.doesNotMatch(jobs.root.innerHTML, /md-original|md-revoked|github\.com/, "the routing and mandate line left the list rows");
+	assert.match(jobs.text(), /Final-fix approval open/);
+	assert.deepEqual(jobs.$$(".job-note").map((el) => el.getAttribute("title")), [note]);
+	for (const color of ["red", "green", "running"]) assert.match(jobs.$(`.job-ci-${color} > .job-ci-dot`)?.parentElement?.textContent ?? `no ${color} glyph`, new RegExp(`CI ${color}`));
+	assert.equal(jobs.$$(".job-pr").length, 0);
+	assert.match(jobs.text(), /With the team · 1/);
+
+	const detail = await view.open("#job/cp-recorded");
+	await detail.find(".job-ci-red");
+	assert.match(detail.text(), /md-original/, "Job detail still names the recorded grant");
+	assert.doesNotMatch(detail.text(), /Running here/, "no merge, no running fact");
+
+	const board = await view.open("#board");
+	await board.find(".board-columns");
+	assert.equal(board.$(".board-note")?.getAttribute("title"), note);
+	assert.ok(board.$('a[href="#job/cp-paused"]'), "All mandates keeps live paused-grant work");
+	assert.ok(board.$(".job-ci-red"));
+	assert.ok(board.$$(".board-column h2").some((h) => /Waiting/.test(h.textContent ?? "")), "an idle job keeps the Waiting column");
+	const strips = board.$$(".board-strip").map((el) => el.getAttribute("aria-label"));
+	assert.ok(strips.includes("Queued · 0") && strips.includes("Failed · 0") && !strips.includes("Waiting · 0"), JSON.stringify(strips));
+	const kinds = [...board.$(".board-columns")!.children].map((el) => el.classList.contains("board-strip") ? "strip" : "col");
+	const cut = kinds.indexOf("strip");
+	assert.ok(cut > 0 && kinds.slice(cut).every((k) => k === "strip"), `strips follow the columns with cards: ${kinds}`);
+
+	const overview = await view.open("#overview");
+	const text = await overview.waitText(/With the team · 1/);
+	const team = text.slice(text.indexOf("With the team"));
+	assert.match(team, /approvals unknown/);
+	assert.match(team, /\(forwarded\)/);
+	assert.doesNotMatch(team.slice(0, team.indexOf("Landed today")), /no CI yet/);
+	assert.match(text, /head moved: review and CI again/, "a pending parked job is In flight on its moved head");
 });
