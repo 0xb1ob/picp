@@ -50,7 +50,7 @@ function clock(view: View, start: number) {
 	return { now, step: (shift = 61_000) => { at = now() + shift; real = Date.now(); view.pin(iso(at)); return at; } };
 }
 
-/** The real dashboard-control server, with the real settings ports on `home` unless `settings` is false; `extra` overrides ports. */
+/** The real dashboard-control server, with the real settings ports on `home` unless `settings` is false. */
 async function session(t: TestContext, home: string, stateDir: string, settings = true, extra: Partial<ControlPorts> = {}): Promise<string> {
 	await operatorSession(t, stateDir, () => true, { ...(settings ? settingsPorts({ target: () => ({ home, mode: "multi" }), env: {} }) : {}), ...extra });
 	return (readControlRecord(stateDir) as { record: { csrf: string } }).record.csrf;
@@ -1257,6 +1257,7 @@ test("P20-schedules-run-groups: a skill run is anchor + readers + S1; suffix bea
 	s.jobs([expanded(ORG.id), expanded(PLAIN.id)]);
 	assert.deepEqual((await item(ORG.id)).runs[0]?.result, { kind: "report", job_id: "cp-s1", href: "#job/cp-s1" }, "the newest expanded: comment names the S1");
 	assert.deepEqual((await item(PLAIN.id)).runs[0]?.result, { kind: "branch", job_id: "cp-a1", href: "#job/cp-a1" });
+	assert.equal((await item(PLAIN.id)).lands, "branch", "a ship/local schedule lands a branch");
 	const results = async (...jobs: Line[]) => {
 		const shapes = [{ ...PLAIN, job: { ...PLAIN.job, kind: "research" } }, { ...PLAIN, id: "sch-b3b3b3", job: { ...PLAIN.job, kind: "research", delivery: "answer" } }, { ...PLAIN, id: "sch-b4b4b4", job: { ...PLAIN.job, delivery: "pr" } }];
 		s.write(scheduleFile(...shapes, MANUAL, ORG));
@@ -1548,6 +1549,7 @@ test("P20-schedule-receipts: a double click sends once; the receipt id survives 
 	assert.deepEqual(JSON.parse(again.storage.get("cp-schedule-receipts")!), [id], "the reload keeps the receipt");
 	assert.equal(again.requests.filter((r) => r.method === "POST").length, 0, "and resends nothing");
 	assert.equal(journal(s).filter((l) => l.type === "request").length, 1);
-	// The served page is the browser bundle (platform browser): the screen running in the tab is the bundle check.
 	assert.equal(again.$$("article.schedule-card").length, 1);
+	const script = (await s.view.get("/")).text.match(/<script type="module" src="([^"]+)"/)![1]!;
+	assert.doesNotMatch((await s.view.get(script)).text, /from ?"node:|require\("node:|import\("node:/, "a browser build: no node module");
 });
