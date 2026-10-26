@@ -1,7 +1,6 @@
 /**
- * The dashboard as an operator's browser runs it: `bin/cp-view` on a scratch home builds and serves the app, and a
- * tab fetches `/`, then runs the served script in a fresh vm realm over a linkedom DOM whose `fetch` reaches that
- * viewer over real HTTP with a same-origin browser's headers. Nothing in the app is stubbed but the browser itself.
+ * The dashboard as an operator's browser runs it: `bin/cp-view` on a scratch home, the served app in a linkedom tab.
+ * The first browser harness: origin/main had none (baseline viewer tests used linkedom, P12 built none); P18 reuses it.
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";

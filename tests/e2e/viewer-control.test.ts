@@ -10,9 +10,10 @@ import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { appendAnswerLine } from "../../src/viewer/control-audit.ts";
-import { controlConfigFile, controlInboxFile, controlJournalFile, operatorAnswersFile } from "../../src/viewer/control-files.ts";
+import { controlConfigFile, controlInboxFile, controlJournalFile, controlRecordFile, operatorAnswersFile } from "../../src/viewer/control-files.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import { dashboard, operatorSession, type Reply, type Tab, until } from "../harness/dashboard.ts";
+import { CP_BRIDGE_EXTENSION, createAgentDir, MockProvider, startPiChild } from "../harness/index.ts";
 
 type Json = Record<string, any>;
 const UTC = { TZ: "UTC" };
@@ -77,10 +78,6 @@ test("P17-awaiting: /api/awaiting folds open asks with their provenance, caps, c
 	assert.deepEqual(one!.escalation, { id: "es-cap", kind: "budget_exhausted", question: "cp-demo hit its cap: raise or drop?", recommended: "Drop the job", differs: true });
 	const file = (path: string) => `#files?${new URLSearchParams({ root: "project:demo", path })}`;
 	assert.deepEqual(one!.evidence.map((e: Json) => [e.href, e.read]), [["#job/cp-demo", null], [file("README.md"), null], [null, null], [file("runs/cp-demo/notes.md"), null], [null, null]], "a project path with a runs/ segment is a file, an unknown run is plain");
-	const written = readFileSync(join(d.stateDir, "operator", "asks.jsonl"), "utf8");
-	const tooLong = { project: "demo", question: "Q", options: [{ label: "A", consequence: "B" }], recommendation: "A", context: "x".repeat(2001) };
-	assert.throws(() => asks.open(tooLong), /invalid operator ask/, "context is capped at 2,000 characters");
-	assert.equal(readFileSync(join(d.stateDir, "operator", "asks.jsonl"), "utf8"), written, "a refused ask writes nothing");
 
 	// The operator transcript: 320 lines after the ask call put the first ask's card outside the 300-entry window.
 	const transcript = join(d.home, "operator-session.jsonl");
@@ -99,6 +96,22 @@ test("P17-awaiting: /api/awaiting folds open asks with their provenance, caps, c
 	put("escalations.json", { items: [{ id: "es-plan", created_at: card, question: "Approve the plan?", status: "open", kind: "plan_approval", job_ids: [], recommended: "ok", options: [{ id: "ok", label: "approve" }, { id: "no", label: "drop" }] }] });
 	const differs = (await awaiting("2026-09-27T09:00:00Z")).items.map((i: Json) => [i.recommendation, i.escalation?.differs]);
 	assert.deepEqual(differs, [[recs[0], false], [recs[1], false], [recs[2], false], [recs[3], true], [recs[4], true]]);
+});
+
+test("P17-ask-context: a cp_parent ask's context reaches Awaiting whole up to 2,000 characters; a longer one is refused and writes nothing", { timeout: 180_000 }, async (t) => {
+	const d = await dashboard(t);
+	const provider = await MockProvider.start();
+	const ask = (id: string, context: string) => ({ id, name: "cp_parent", args: { action: "ask", ask: { project: "demo-app", question: `Context ${id}?`, options: [{ label: "A", consequence: "does a" }], recommendation: "A", context } } });
+	const model = provider.addScript("p17-ask-context", [{ kind: "tool_calls", calls: [ask("fits", "x".repeat(2000)), ask("over", "y".repeat(2001))] }, { kind: "text", text: "Asked." }]);
+	const agentDir = createAgentDir({ provider });
+	const pi = startPiChild({ cwd: d.home, model, env: { ...agentDir.env, PI_HOME: d.home, CP_HOME: d.home, CP_MODE: "multi" }, extensions: [CP_BRIDGE_EXTENSION] });
+	t.after(async () => { await pi.close(); agentDir.cleanup(); await provider.stop(); });
+	await pi.prompt("Ask me both.");
+	await pi.waitFor((r) => r.type === "agent_settled", 60_000);
+	const ends = new Map(pi.records().filter((r) => r.type === "tool_execution_end").map((r) => [(r as Json).toolCallId, (r as Json).isError === true]));
+	assert.deepEqual([ends.get("fits"), ends.get("over")], [false, true], "context is capped at 2,000 characters");
+	const items = ((await d.get("/api/awaiting")).body as Json).items as Json[];
+	assert.deepEqual(items.map((i) => [i.question, i.context?.length]), [["Context fits?", 2000]], "the refused ask writes nothing");
 });
 
 test("P17-decided: /api/decided keeps delegated and your answers with their basis, worth and quote, and counts only today's", { timeout: 120_000 }, async (t) => {
@@ -591,4 +604,14 @@ test("P17-decision-card: an Awaiting card answers through the operator session's
 	asks.answer(last.id, "Yes");
 	tab.click(await tab.find("button.decision-card-option", (b) => !b.hasAttribute("disabled")));
 	await tab.find(".decision-card-failed", (p) => /^Failed: /.test(p.textContent ?? "") && p.getAttribute("role") === "alert");
+
+	// A session that died leaving its record behind (its pid alive, its socket gone): disabled, saying so.
+	const record = readFileSync(controlRecordFile(d.stateDir), "utf8");
+	session.control.stop();
+	writeFileSync(controlRecordFile(d.stateDir), record);
+	const dead = asks.open({ project: "demo", question: "Retry the deploy?", options: [{ label: "Yes", consequence: "Retries" }], recommendation: "Yes" });
+	tab = await tab.reopen();
+	el = await tab.find(`article[aria-labelledby="question-${dead.id}"]`);
+	await tab.find(".decision-card-disabled", (s) => /^Session not running: .* refused the connection/.test(s.textContent ?? ""));
+	assert.ok(buttons(el).every((b) => b.hasAttribute("disabled")), "a dead session's card stays visible, disabled");
 });
