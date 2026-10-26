@@ -1277,9 +1277,14 @@ test("P17-composer: open asks pin above the composer behind one remembered toggl
 	// A new session rotates the CSRF token under the open tab: its next send fails with the server's reason.
 	session.control.stop();
 	const next = await operatorSession(t, d.stateDir);
+	const reads = () => tab.requests.filter((r) => r.method === "GET" && r.path === "/api/operator/control").length, before = reads();
 	tab.type(live, "after a new session");
 	tab.click(await tab.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
 	assert.ok(await tab.find(".session-pending-failed .session-pending-detail", (p) => p.textContent === "Failed: control token missing or stale; reload the transcript"), "stale 403");
+	// The failed send re-reads the status (it learns the new token). Killing the session before that read lands flips
+	// the composer away or leaves the old token, so wait for it; the pause covers its body parse.
+	await until(reads, (n) => n > before, "the status re-read after the stale send");
+	await new Promise((done) => setTimeout(done, 100));
 	const record = readFileSync(controlRecordFile(d.stateDir), "utf8");
 	next.control.stop();
 	writeFileSync(controlRecordFile(d.stateDir), record);
@@ -1334,8 +1339,10 @@ test("P17-composer-start: offline the composer holds a message and offers each l
 	await assertFailed(/^Start failed: .*new-session -d exited 1: no server running on \/tmp\/tmux-1000\/default$/);
 	later(122);
 	box.reply({ "tmux new-session -d": { status: 1, stderr: "duplicate session: cp-operator" } });
-	const seen = tab.requests.length;
+	const seen = tab.requests.length, sent = posts(tab, START).length;
 	await again();
+	// The status is the new POST's own; `.at(-1)` before its reply lands reads the previous click's 503.
+	await until(() => posts(tab, START).length, (n) => n > sent, "the duplicate start's reply");
 	await until(() => tab.requests.slice(seen).filter((r) => r.method === "GET" && r.path.startsWith("/api/operator/control")).length, (n) => n >= 2, "the re-read");
 	assert.deepEqual([posts(tab, START).at(-1)!.status, tab.$(".start-session-line")?.textContent], [409, "Starting the operator session… the composer opens when it serves the dashboard"]);
 	tab.shift(61_000);
