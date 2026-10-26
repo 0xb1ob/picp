@@ -52,10 +52,15 @@ async function home(t: Context, rows: unknown[], seed?: (stateDir: string, file:
 }
 type Home = Awaited<ReturnType<typeof home>>;
 /**
+ * Product input `deliveredWaitMs`: how long a direct send waits for its transcript sighting before it answers queued.
+ * A scenario that never writes the sighting wants the product's queued answer at once; it decides no test wait.
+ */
+const ANSWER_QUEUED_MS = 20;
+/**
  * The operator session's dashboard-control server on `d`'s transcript and upload root; `idle()` says whether it is.
  * A send waits `wait` ms for its transcript sighting (`control.observe`) before it answers queued.
  */
-async function session(t: Context, d: Home, idle: () => boolean, wait = 20) {
+async function session(t: Context, d: Home, idle: () => boolean, wait: number) {
 	const injected: string[] = [];
 	const ports: ControlPorts = {
 		inject: (text) => { injected.push(text); }, abort: () => {}, isIdle: idle, hasPendingMessages: () => false, sessionFile: () => d.file,
@@ -76,7 +81,7 @@ async function compose(tab: Tab, text: string) {
 
 test("P19-queued-bubbles: stored sends follow the newest entry in FIFO order with state, time and attachment chips; a failure offers Send again; the transcript wins", { timeout: 120_000 }, async (t) => {
 	const d = await home(t, [said("13:59", "streaming response")]);
-	await session(t, d, () => false);
+	await session(t, d, () => false, ANSWER_QUEUED_MS);
 	const items = [
 		pending(dc("a"), "queued one", { body: { kind: "message", text: "queued one", images: ["im-fixture.png"], files: ["future-file.json"] } }),
 		pending(dc("b"), "queued two", { state: "held" }),
@@ -147,7 +152,7 @@ test("P19-queued-recovery: invalid stored sends are skipped under a live warning
 	}
 
 	write(controlInboxFile(d.stateDir), jsonl([{ type: "delivered", id: dc("d"), at: at("14:02") }, { type: "delivered", id: dc("e"), at: at("14:02") }]));
-	const live = await session(t, d, () => false);
+	const live = await session(t, d, () => false, ANSWER_QUEUED_MS);
 	let page: Tab | undefined; // a quota error from the page's own realm, as a browser raises it
 	const refused = new (class extends Map<string, string> { override set(key: string, value: string) {
 		if (key === PENDING && page) throw new (runInContext("Error", page.globals) as ErrorConstructor)("quota exceeded");
@@ -156,7 +161,7 @@ test("P19-queued-recovery: invalid stored sends are skipped under a live warning
 	const refusing = page = await openTab(t, d.port, OPERATOR, refused);
 	await refusing.find(".operator-composer-send");
 	live.control.stop(); // the next session's new token refuses this tab's send, failing it
-	await session(t, d, () => false);
+	await session(t, d, () => false, ANSWER_QUEUED_MS);
 	await compose(refusing, "new message");
 	assert.deepEqual(await bubblesAre(refusing, ["queued old", "new message"], "the new send"), ["queued old", "new message"]);
 	assert.match(warning(refusing)?.textContent ?? "", /not persisted: quota exceeded\. Kept in this view only/i);
@@ -229,7 +234,7 @@ const started = (d: Home) => (readControlRecord(d.stateDir) as { record: { start
 
 test("P19-queued-journal: a reload rebuilds the queue from the journal, shows a late failure, discards only its own, and an inbox replay promotes a held send", { timeout: 120_000 }, async (t) => {
 	const d = await home(t, [said("13:59", "response")]);
-	await session(t, d, () => false);
+	await session(t, d, () => false, ANSWER_QUEUED_MS);
 	const since = { session_started_at: started(d) };
 	journal(d, dc("1"), ago(60_000), "queued one", since, "injected", "queued");
 	journal(d, dc("2"), ago(50_000), "queued two", since, "injected", "queued");
@@ -252,7 +257,7 @@ test("P19-queued-journal: a reload rebuilds the queue from the journal, shows a 
 
 test("P19-queued-retry: Send again re-posts a failed send with its image and file ids under a fresh correlation id; the ids survive reload", { timeout: 120_000 }, async (t) => {
 	const d = await home(t, [said("13:59", "response")]);
-	await session(t, d, () => false);
+	await session(t, d, () => false, ANSWER_QUEUED_MS);
 	const IMAGE = "im-20261004-0123456789abcdef01234567.png", FILE = "tx-20261004-0123456789abcdef01234567.md";
 	const failed = pending(dc("a"), "try attachment", { state: "failed", reason: "socket refused", body: { kind: "message", text: "try attachment", images: [IMAGE], files: [FILE] } });
 	let tab = await openTab(t, d.port, OPERATOR, new Map([[PENDING, JSON.stringify({ items: [failed], dismissed: [] })]]));
@@ -324,7 +329,7 @@ test("P19-queued-scroll: a new pending bubble follows the bottom; a reader who s
 
 test("P19-queued-lost: a lost or expired send is a failed bubble with its text; only Send again sends it, as a new message; a cancelled one stays gone", { timeout: 120_000 }, async (t) => {
 	const d = await home(t, [said("13:59", "response")]);
-	await session(t, d, () => false);
+	await session(t, d, () => false, ANSWER_QUEUED_MS);
 	const since = { session_started_at: started(d) }, day = 86_400_000;
 	journal(d, dc("1"), ago(3_600_000), "claimed, never seen", { session_started_at: ago(30 * day) }, "injected", "queued");
 	journal(d, dc("2"), ago(6 * day), "held too long", { session_started_at: ago(30 * day), session_file: undefined }, "queued");
@@ -355,7 +360,7 @@ test("P19-queued-lost: a lost or expired send is a failed bubble with its text; 
 test("P19-queued-edit: a held message edits inline (Esc keeps it, Enter saves), cancels, and a save that lost the race shows the sent text with no Edit; the actions share one 44 px phone rule", { timeout: 120_000 }, async (t) => {
 	const d = await home(t, [said("13:59", "response")]);
 	let idle = false;
-	const live = await session(t, d, () => idle);
+	const live = await session(t, d, () => idle, ANSWER_QUEUED_MS);
 	const tab = await openTab(t, d.port, OPERATOR);
 	await compose(tab, "draft one");
 	await until(() => tab.$$(".session-pending-edit").length, (n) => n === 1, "the first held");
@@ -406,7 +411,7 @@ test("P19-queued-evidence: a Not confirmed failure links to its own recorded ses
 	const window = Array.from({ length: 40 }, (_, i) => line("14:00", { role: "assistant", content: [{ type: "text", text: `A${i} ${"x".repeat(110_000)}` }] }));
 	write(listed(d.stateDir), jsonl(window.map((row) => ({ ...row, timestamp: ago(60_000) }))));
 	write(operatorSessionsFile(join(d.stateDir, "sessions")), jsonl([{ at: ago(172_800_000), session_file: listed(d.stateDir) }, { at: ago(86_400_000), session_file: d.file }]));
-	await session(t, d, () => false);
+	await session(t, d, () => false, ANSWER_QUEUED_MS);
 	const shut = { type: "outcome", by: "bridge", state: "dropped", reason: "session shut down" }, since = started(d);
 	journal(d, dc("a"), ago(3_600_000), "lost a", { session_started_at: since, session_file: listed(d.stateDir) }, "queued", "injected", shut);
 	journal(d, dc("b"), ago(3_500_000), "lost b", { session_started_at: since, session_file: join(d.home, "gone.jsonl") }, "queued", "injected", shut);
@@ -616,12 +621,12 @@ test("P19-chat-replies-send: a chip sends the exact answer once and holds throug
 	});
 	d.append(stamped(local(15, 8), { role: "assistant", content: [{ type: "toolCall", id: "call-1", name: "cp_parent", arguments: { action: "ask" } }] }),
 		stamped(local(15, 8), { role: "toolResult", toolCallId: "call-1", toolName: "cp_parent", content: [{ type: "text", text: JSON.stringify({ id }) }] }));
-	const first = await session(t, d, () => false);
+	const first = await session(t, d, () => false, ANSWER_QUEUED_MS);
 	let tab = await openTab(t, d.port, OPERATOR);
 	const held = (view: Tab) => view.$$(".session-reply").length > 0 && view.$$(".session-reply").every((b) => b.hasAttribute("disabled"));
 	await tab.find(".session-reply", (b) => !b.hasAttribute("disabled"));
 	first.control.stop(); // the next session's new token refuses this tab's answer
-	const live = await session(t, d, () => false);
+	const live = await session(t, d, () => false, ANSWER_QUEUED_MS);
 	tab.click(tab.$(".session-reply")!);
 	assert.deepEqual(pick(await posted(tab, 1), ["kind", "ask_id", "label"]), { kind: "answer", ask_id: id, label: "Keep" });
 	assert.match((await tab.find(".session-replies [role=alert]")).textContent!, /^Failed: /);
@@ -666,7 +671,7 @@ test("P19-chat-replies-send: a chip sends the exact answer once and holds throug
 test("P19-chat-header: Operator with the recorded state and model; checking, working and idle; history says so", { timeout: 120_000 }, async (t) => {
 	const d = await home(t, [{ type: "model_change", timestamp: local(15, 8), provider: "fixture", modelId: "fixture-model" }, reply(local(15, 9), "hello")]);
 	let busy = false;
-	await session(t, d, () => !busy);
+	await session(t, d, () => !busy, ANSWER_QUEUED_MS);
 	const state = (tab: Tab) => tab.$(".session-heading-state > span:not(.session-dot)")?.textContent ?? null;
 	const checking = await openTab(t, d.port, OPERATOR, new Map(), /^\/api\/operator\/control$/);
 	assert.match(await until(() => state(checking), (s) => !!s, "the state line") ?? "", /^Checking status · .*fixture-model/, "before the status read");
