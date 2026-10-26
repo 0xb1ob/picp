@@ -63,11 +63,11 @@ export async function dashboard(t: Context, options: { requireTailnet?: boolean;
 }
 
 /** The operator session's real dashboard-control server (src/dashboard-control.ts) with pi's ports recorded. */
-export async function operatorSession(t: Context, stateDir: string, isIdle = () => true) {
+export async function operatorSession(t: Context, stateDir: string, isIdle = () => true, extra: Partial<ControlPorts> = {}) {
 	const injected: Array<[string, string | undefined]> = [];
 	const sessionFile = join(stateDir, "operator-session.jsonl");
 	writeFileSync(sessionFile, "", { flag: "a" });
-	const ports: ControlPorts = { inject: (text, deliverAs) => { injected.push([text, deliverAs]); }, abort: () => {}, isIdle, hasPendingMessages: () => false, sessionFile: () => sessionFile };
+	const ports: ControlPorts = { inject: (text, deliverAs) => { injected.push([text, deliverAs]); }, abort: () => {}, isIdle, hasPendingMessages: () => false, sessionFile: () => sessionFile, ...extra };
 	const control = await startDashboardControl({ stateDir, ports, deliveredWaitMs: 20, log: () => {} }) as DashboardControl;
 	if (control.state !== "listening") throw new Error(`dashboard control did not start: ${JSON.stringify(control)}`);
 	t.after(() => control.stop());
