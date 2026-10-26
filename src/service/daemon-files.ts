@@ -42,7 +42,7 @@ export interface DaemonPaths {
 
 /**
  * The daemon's own paths. Derived here rather than from `layoutForHome` so the outer imports nothing
- * outside `node:*` (contracts pull typebox); `tests/daemon-files.test.ts` pins equality with the layout.
+ * outside `node:*` (contracts pull typebox); `tests/daemon-files-retained.test.ts` pins equality with the layout.
  */
 export function daemonPaths(home: string): DaemonPaths {
 	const abs = resolve(home);
