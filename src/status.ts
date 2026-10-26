@@ -163,6 +163,8 @@ export interface StatusFacts {
 	 * the widget must never issue a `gh` call.
 	 */
 	ci?: ReadonlyMap<string, StatusJob["ci"]>;
+	/** `false` skips the self-check of the assembled snapshot: the timer path, where it cost seconds per tick (#561). */
+	selfCheck?: boolean;
 }
 
 function addUsage(total: Usage, add: Usage): Usage {
@@ -364,6 +366,7 @@ export function assembleStatus(facts: StatusFacts): StatusSnapshot {
 		jobs,
 		unclaimed,
 	};
+	if (facts.selfCheck === false) return snapshot;
 	const result = validateStatusSnapshot(snapshot);
 	if (!result.ok) {
 		// Our own output disagreeing with its contract is a bug, not a view.
@@ -432,7 +435,7 @@ export class StatusReporter {
 	 * Synchronous and cheap enough to run on a widget refresh.
 	 */
 	collect(query: StatusQuery = {}): StatusSnapshot {
-		return this.#assemble(query, { ok: false, queried: false }, undefined);
+		return this.#assemble(query, { ok: false, queried: false }, undefined, false);
 	}
 
 	/**
@@ -466,7 +469,7 @@ export class StatusReporter {
 		}
 	}
 
-	#assemble(query: StatusQuery, ledger: StatusLedger, issues: readonly Job[] | undefined): StatusSnapshot {
+	#assemble(query: StatusQuery, ledger: StatusLedger, issues: readonly Job[] | undefined, selfCheck = true): StatusSnapshot {
 		const records = this.#options.fleet.read().jobs;
 		const runs = new Map<string, RunStatus>();
 		const alive = new Map<string, boolean>();
@@ -529,6 +532,7 @@ export class StatusReporter {
 			...(blockers.size > 0 ? { blockers } : {}),
 			...(pendingReviews.size > 0 ? { pendingReviews } : {}),
 			...(ci.size > 0 ? { ci } : {}),
+			selfCheck,
 		});
 	}
 }
