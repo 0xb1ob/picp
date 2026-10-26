@@ -613,3 +613,36 @@ test("landing: unreadable worktree status preserves uncommitted content", { skip
 		assert.equal(readFileSync(join(live.worktree, "change.txt"), "utf8"), "precious uncommitted content\n", `unreadable ${fault.cmd} must never authorize destruction of uncommitted work`);
 	});
 });
+
+test("P23-live-report: cp_integrate reads the live report before any merge — blocked strings, planner objects and an unreadable envelope hold, done and absent merge", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("live report gate", 131);
+	const absent = await s.held("absent report gate", 132);
+	writeWindowPass(s.home, live.jobId, live.head, "2026-01-01T00:00:00Z");
+	writeWindowPass(s.home, absent.jobId, absent.head, "2026-01-01T00:00:00Z");
+	s.setGh({ integration: true, runs: [run(131, live.head, "completed", "success"), run(132, absent.head, "completed", "success")] });
+	const file = join(s.home, paths.envelopeFile(live.jobId));
+	const filed = readFileSync(file, "utf8");
+	const put = (envelope: unknown) => writeFileSync(file, JSON.stringify({ ...JSON.parse(filed), envelope }));
+	put({ status: "blocked", blockers: ["  no screenshots  ", "x".repeat(300)], head_sha: "abc" });
+	const strings = await s.integrate(live.jobId);
+	assert.equal(strings.record.next, "surface", strings.text);
+	assert.match(strings.text, new RegExp(`^blocker: no screenshots$\\n^blocker: ${"x".repeat(200)}$\\n^blocked report head abc$`, "m"));
+	put({ status: "blocked", blockers: [{ question: "which base?" }, { why: "no question" }, 7] });
+	const planner = await s.integrate(live.jobId);
+	assert.equal(planner.record.next, "surface", planner.text);
+	assert.match(planner.text, /^blocker: which base\?$\n^cp-\w+: generation 1 reported blocked: which base\?\. A blocked delivery is never merged/m);
+	writeFileSync(file, "{");
+	const torn = await s.integrate(live.jobId);
+	assert.deepEqual([torn.record.next, /generation 1 has an unreadable envelope\.json \(.*JSON/.test(torn.text)], ["surface", true], torn.text);
+	put({ status: "maybe" });
+	const maybe = await s.integrate(live.jobId);
+	assert.match(maybe.text, /unreadable envelope\.json \(status maybe is neither done nor blocked\)/);
+	assert.equal(mergedCalls(s.ghCalls()).length, 0, "a blocked or unreadable report is never merged");
+	writeFileSync(file, filed);
+	const done = await s.integrate(live.jobId);
+	assert.deepEqual([done.record.next, mergedCalls(done.calls).length, /blocked/.test(done.text)], ["advance", 1, false], done.text);
+	rmSync(join(s.home, paths.envelopeFile(absent.jobId)));
+	const gone = await s.integrate(absent.jobId);
+	assert.deepEqual([mergedCalls(gone.calls).length, /blocked|unreadable/.test(gone.text)], [1, false], "an absent report never blocks the merge");
+});

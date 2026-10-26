@@ -41,6 +41,7 @@ import {
 	validateFleetFile,
 	validateRunStatus,
 } from "./contracts.ts";
+import { validatedOnce } from "./validated-text.ts";
 
 export class FleetError extends Error {}
 
@@ -255,9 +256,11 @@ export class FleetStore {
 		if (!existsSync(this.file)) {
 			return { schema_version: SCHEMA_VERSION, updated_at: "1970-01-01T00:00:00Z", jobs: [] };
 		}
+		let text: string;
 		let parsed: unknown;
 		try {
-			parsed = JSON.parse(readFileSync(this.file, "utf8"));
+			text = readFileSync(this.file, "utf8");
+			parsed = JSON.parse(text);
 		} catch (error) {
 			throw new FleetError(
 				`${this.file} is not valid JSON (${(error as Error).message}). Refusing to guess; move it aside to start clean.`,
@@ -269,7 +272,7 @@ export class FleetStore {
 				`${this.file} is schema_version ${version}; this build reads ${SCHEMA_VERSION}. Upgrade pi-command-post instead of downgrading the file.`,
 			);
 		}
-		const result = validateFleetFile(parsed);
+		const result = validatedOnce(this.file, text, parsed, validateFleetFile);
 		if (!result.ok) {
 			throw new FleetError(`${this.file} violates the fleet contract:\n  ${result.errors.join("\n  ")}`);
 		}

@@ -1,6 +1,12 @@
 /** #420: one slow or empty Actions jobs read must not fail the CI watch tick; the retry fits the original budget. */
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { test } from "node:test";
+import { ACTIONS_CI_TIMEOUT_MS } from "../../src/actions-ci.ts";
+import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, paths } from "../../src/contracts.ts";
+import { initialStatus } from "../../src/run-artifacts.ts";
 import { run, SKIP, startStack } from "./landing-helpers.ts";
 
 const hang = { untilFile: "/nonexistent/never" };
@@ -32,4 +38,52 @@ test("ci watch tick: the transient retry never extends past the original deadlin
 	const tick = await s.post.ciTick();
 	assert.ok(Date.now() - started < 40_000, `tick took ${Date.now() - started} ms`);
 	assert.equal(tick.errors.length, 1);
+});
+
+/** Longest the parent's event loop may block for one tick read; a 3,000-job home took seconds before #561's fix. */
+const LAG_BOUND_MS = 1_000;
+
+// #561: every fleet.json/status.json read re-ran the schema check, so a large home blocked the parent's loop for seconds
+// per widget tick and starved gh's pipe ("Actions CI read transport/deadline"). With 3,000 finished jobs on disk the
+// CI watch tick still lands inside its budget, and no widget read or other loop turn blocks past LAG_BOUND_MS.
+test("ci watch tick: a 3,000-job home keeps the tick inside its budget and the event loop responsive", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("large home", 414);
+	const now = isoTimestamp();
+	const done = Array.from({ length: 3_000 }, (_, i): FleetRecord => {
+		const id = `cp-done-${i}`;
+		mkdirSync(join(s.home, paths.runDir(id)), { recursive: true });
+		writeFileSync(join(s.home, paths.statusFile(id)), JSON.stringify(initialStatus(id, {}, now)));
+		return {
+			job_id: id, project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "done", dispatched_at: now, reported_at: now, closed_at: now,
+			closed_reason: "gated", usage: EMPTY_USAGE, worktree: join(s.home, "gone", id), branch: id,
+			worker: { pid: 1, session_id: "s", session_file: join(s.home, `${id}.jsonl`), profile: "implementer", role: "implementer", model: "mock/model", started_at: now, exited_at: now, exit_code: 0 },
+			receipts: [{ kind: "pr", status: "merged", title: `PR ${i}`, url: `https://github.com/example/demo/pull/${1_000 + i}` }],
+		};
+	});
+	await s.post.fleet.mutate((jobs) => void jobs.push(...done));
+	s.setGh({ runs: [run(414, live.head, "completed", "success")] });
+	s.post.awaitingSnapshotSync(); // the first read after a write still checks the files once
+	const lag = monitorEventLoopDelay({ resolution: 10 });
+	lag.enable();
+	const started = performance.now();
+	const pending = s.post.ciTick();
+	const reads: number[] = [];
+	for (let i = 0; i < 3; i++) {
+		const at = performance.now();
+		s.post.statusNow();
+		s.post.awaitingSnapshotSync();
+		reads.push(Math.round(performance.now() - at));
+		await new Promise((resolve) => setImmediate(resolve));
+	}
+	const tick = await pending;
+	const took = Math.round(performance.now() - started);
+	lag.disable();
+	const worst = Math.round(lag.max / 1e6);
+	console.log(`3,000-job home: tick ${took} ms, widget reads ${reads.join("/")} ms, event-loop lag max ${worst} ms`);
+	assert.deepEqual(tick.errors, []);
+	assert.equal(tick.observations[0]?.event, "ci_green");
+	assert.ok(took < ACTIONS_CI_TIMEOUT_MS, `tick took ${took} ms`);
+	assert.ok(Math.max(...reads) < LAG_BOUND_MS, `widget reads took ${reads.join("/")} ms`);
+	assert.ok(worst < LAG_BOUND_MS, `event-loop lag reached ${worst} ms`);
 });
