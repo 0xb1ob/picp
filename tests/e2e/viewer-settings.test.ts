@@ -1251,9 +1251,10 @@ test("P20-schedules-run-groups: a skill run is anchor + readers + S1; suffix bea
 	const window = await item(PLAIN.id);
 	assert.deepEqual([window.runs.length, window.run_count, window.job_count, window.runs[0]?.run_id], [5, 7, 7, "cp-r6"], "the window keeps the latest 5");
 
-	const expanded = (schedule: string) => anchorJob(schedule, "cp-a1", "2026-09-01T10:00:00Z", { comments: [{ text: "expanded: R1 cp-r1, S1 cp-s1" }] });
+	const comments = [{ text: "expanded: R1 cp-r0, S1 cp-s0" }, { text: "note" }, { text: "expanded: R1 cp-r1, S1 cp-s1" }];
+	const expanded = (schedule: string) => anchorJob(schedule, "cp-a1", "2026-09-01T10:00:00Z", { comments });
 	s.jobs([expanded(ORG.id), expanded(PLAIN.id)]);
-	assert.deepEqual((await item(ORG.id)).runs[0]?.result, { kind: "report", job_id: "cp-s1", href: "#job/cp-s1" });
+	assert.deepEqual((await item(ORG.id)).runs[0]?.result, { kind: "report", job_id: "cp-s1", href: "#job/cp-s1" }, "the newest expanded: comment names the S1");
 	assert.deepEqual((await item(PLAIN.id)).runs[0]?.result, { kind: "branch", job_id: "cp-a1", href: "#job/cp-a1" });
 	const results = async (...jobs: Line[]) => {
 		const shapes = [{ ...PLAIN, job: { ...PLAIN.job, kind: "research" } }, { ...PLAIN, id: "sch-b3b3b3", job: { ...PLAIN.job, kind: "research", delivery: "answer" } }, { ...PLAIN, id: "sch-b4b4b4", job: { ...PLAIN.job, delivery: "pr" } }];
@@ -1293,6 +1294,12 @@ test("P20-schedules-anchor-notes: the notes the real Scheduler writes for a cron
 	const of = (id: string) => data.schedules.find((x) => x.id === id)!;
 	assert.deepEqual(of(hourly.id).runs.map((run: Line) => [run.anchor_id, run.via]), [[cron!.job_id, "slot"]]);
 	assert.deepEqual(of(manual.id).runs.map((run: Line) => [run.via, run.anchor_id]).sort(), [["cp_schedule", quote.job_id], ["dashboard", dash.job_id]]);
+	// Those notes on a legacy schedule's jobs (no run store) anchor a run each: here only ANCHOR_NOTE groups them.
+	const notes = await Promise.all([cron, dash, quote].map(async (event) => (await ledger.show(event!.job_id!)).notes ?? ""));
+	const legacy = await schedulesHome(t, scheduleFile(PLAIN));
+	legacy.jobs(notes.map((note, n) => ledgerJob(PLAIN.id, `cp-n${n}`, `2026-09-0${n + 1}T10:00:00Z`, { notes: note })));
+	const grouped = first(await legacy.read()).runs.map((run: Line) => [run.run_id, run.via]);
+	assert.deepEqual(grouped, [["cp-n2", "cp_schedule"], ["cp-n1", "dashboard"], ["cp-n0", "slot"]], "each real note is an anchor");
 });
 
 // ---------------------------------------------------------------------------------------------------------------
