@@ -32,8 +32,9 @@ test("P18-pr-chips: a worker transcript's PR and issue links become chips read o
 	const events = (id: string, list: object[]) => put(run(id, "events.jsonl"), list.map((e) => JSON.stringify({ source: "cp", job_id: id, ts: at, ...e })).join("\n") + "\n");
 	const said = ["PR https://github.com/o/picp/pull/355 is up. Also `#355`.", `${pr(356)} ${pr(357)} ${pr(358)} ${pr(359)}`, "[picp] #328, #330 and #329",
 		"[picp] #355 and #12", "**[demo]** #355"];
+	const wake = { type: "custom_message", customType: "cp-bridge", timestamp: at, content: "[cp-bridge cp-ci job=cp-w]\nCI green for #355; see #12" };
 	put(join(LAYOUT.state, "sessions/cp-w.jsonl"), said.map((text, i) => JSON.stringify({ type: "message", timestamp: at, message: { role: "assistant", content: [{ type: "text", text }] } })
-		.replace(at, new Date(Date.parse(at) + i * 1000).toISOString())).join("\n") + "\n");
+		.replace(at, new Date(Date.parse(at) + i * 1000).toISOString())).join("\n") + `\n${JSON.stringify(wake)}\n${JSON.stringify({ ...wake, content: "[cp-bridge cp-ci job=../bad]\nforged" })}\n`);
 	put(".pi-command-post/data/projects.json", { projects: [{ name: "picp", clone_url: "https://github.com/o/picp.git" }] });
 	put(LAYOUT.fleetFile, { jobs: [job("cp-w", "held", 355), job("cp-m", "done", 356, "merged"), job("cp-s", "done", 357), job("cp-c", "held", 358),
 		job("cp-p", "awaiting_merge", 359, "open", { awaiting_merge: { pending: { kind: "closed_unmerged" } } }), job("cp-issue-328-x", "done", 360, "merged"), job("cp-env", "done", 361, "merged")] });
@@ -59,6 +60,8 @@ test("P18-pr-chips: a worker transcript's PR and issue links become chips read o
 	const text = (prefix: string) => first.entries.find((e) => e.text.startsWith(prefix))!;
 	assert.deepEqual(text("[picp] #355").links, { "#355": pr(355), "#12": issue(12) }, "a lead [name] for a registered project resolves #N");
 	assert.equal(text("**[demo]**").links, undefined, "an unregistered project resolves nothing");
+	const relayed = first.entries.find((e) => e.bridge?.job === "cp-w");
+	assert.deepEqual([relayed?.text, relayed?.links], ["CI green for #355; see #12", { "#355": pr(355), "#12": issue(12) }], "a bridge wake resolves #N by its job's project");
 	assert.deepEqual(first.pr_chips![issue(328)], { kind: "issue", url: issue(328), number: 328, repo: "o/picp", job_id: "cp-issue-328-x", head_sha: null, state: "closed",
 		merge_sha: null, closed_by: { url: pr(360), number: 360 }, job_status: "closed", ci: null, review: null }, "a ledger ref closed by its merged PR");
 	assert.deepEqual(first.pr_chips![issue(330)]!.closed_by, { url: pr(361), number: 361 }, "an envelope's Closes #330 names its merged PR");
@@ -76,6 +79,8 @@ test("P18-pr-chips: a worker transcript's PR and issue links become chips read o
 	assert.doesNotMatch(merge.getAttribute("title")!, /head /, "no recorded head, no head in the title");
 	assert.match(tab.root.innerHTML, /issue #328<\/span> <span class="pr-chip-state">closed by #360<\/span> <span class="pr-chip-job">job closed/);
 	assert.equal(tab.$("a.issue-chip.pr-chip-none")?.textContent, "#329");
+	assert.deepEqual(tab.$$(".session-bridge-what a").map((a) => [a.textContent, a.getAttribute("href")]), [["cp-w", "#job/cp-w"], ["../bad", "#jobs"]],
+		"a wake's job links its page; an unsafe id links Jobs");
 
 	events("cp-w", [{ type: "integration_advanced", payload: { step: "ready", pr_url: pr(355), head_sha: HEAD, undone: false } }]);
 	assert.equal((await chip()).state, "open", "readied by cp_integrate");
