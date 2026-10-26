@@ -10,7 +10,6 @@ import { connect } from "node:net";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
-import { layoutForHome } from "../../src/contracts.ts";
 import { daemonPaths, OUTER_SOURCES } from "../../src/service/daemon-files.ts";
 import { createScratchHome, REPO_ROOT } from "../harness/index.ts";
 
@@ -147,7 +146,7 @@ test("P14-daemon-cli: cp-daemon start, stop, restart and status on the detached 
 
 	// start: `node daemon.ts run --home H` in a session of its own with the clean env; ready, then the reboot command.
 	r.config();
-	const up = r.at("start", "--force");
+	const up = r.cli(["start", "--force", "--home", r.home], { SSH_AUTH_SOCK: "/tmp/agent", ANTHROPIC_API_KEY: "sk-shell-only" });
 	assert.equal(up.code, 0, up.out);
 	const [outer] = r.starts("outer");
 	assert.match(up.out, new RegExp(`^cp-daemon: started pid ${outer!.pid}; after a reboot: "${r.node}" `));
@@ -360,7 +359,7 @@ test("P14-daemon-outer: one locked outer per home, its socket, and its inner's r
 	assert.equal(await new Promise((done) => direct.once("exit", done)), 0);
 });
 
-test("P14-daemon-hash: outer_hash covers every outer source; the outer and CLI run from those sources alone", { timeout: 300_000 }, async (t) => {
+test("P14-daemon-hash: outer_hash covers every outer source — changing any one changes the hash cp-daemon status shows", { timeout: 300_000 }, async (t) => {
 	const r = rig(t, { scale: 20, inner: "stub" });
 	r.config();
 	const seen = new Set<string>();
@@ -386,16 +385,18 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 	r.modes("health", "stubborn", "run");
 	r.modes("update", "run");
 	r.modes("parent", "run", "run", "run", "stubborn");
-	assert.equal(r.at("start").code, 0, r.log());
+	const session = { XDG_RUNTIME_DIR: "/run/user/p14", DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/p14/bus" };
+	assert.equal(r.cli(["start", "--home", r.home], { ...session, SSH_AUTH_SOCK: "/tmp/agent" }).code, 0, r.log());
 	const status = () => r.at("status").out;
 	/** The scaled clock of the first daemon.log line matching `re` (each line starts with its ISO time). */
 	const stamp = (re: RegExp) => Date.parse(r.log().split("\n").find((line) => re.test(line))?.split(" ")[0] ?? "");
 	const token = () => r.state().token as string;
 	const op = async (name: string) => (await socket(r.paths.sock, [`${JSON.stringify({ id: name, token: token(), protocol: 1, op: name })}\n`])).replies[0];
 
-	// The parent and viewer start with their unit argv and env, and nothing else (no remote feature: no sender).
+	// The parent and viewer start with their unit argv and env — the user manager's session keys, nothing else
+	// ambient — and nothing more runs (no remote feature: no sender).
 	const [parent] = r.starts("parent"), [viewer] = r.starts("viewer");
-	const core = { HOME: r.home, CP_HOME: r.home, CP_MODE: "multi", PATH: r.PATH };
+	const core = { HOME: r.home, ...session, CP_HOME: r.home, CP_MODE: "multi", PATH: r.PATH };
 	assert.deepEqual([parent!.argv, roleEnv(parent!.env)], [[], { ...core, CP_VIEWER_PORT: "1" }]);
 	assert.deepEqual([viewer!.argv, roleEnv(viewer!.env)], [["--home", r.home, "--require-tailnet", "--port", "1"], { ...core, CP_DAEMON_ROLE: "viewer" }]);
 	const started = Date.parse(r.state().started_at);
@@ -520,6 +521,24 @@ test("P14-daemon-runtime-fail: a parent crash loop backs off and fails; exit 78 
 	assert.match(r.at("status").out, /^parent: failed \(start-limit-hit\), 0 restart\(s\)\nviewer: restarting, 1 restart\(s\)$/m, "no pid recorded");
 	assert.equal(r.at("stop").code, 0);
 	assert.doesNotMatch(r.log(), /ignored SIGTERM/);
+
+	// A new outer: recorded pids whose command lines no longer match (reused) are neither adopted nor signalled, and
+	// the timers restart from its own start.
+	const reused = spawn("sleep", ["60"]);
+	t.after(() => reused.kill("SIGKILL"));
+	const record = r.runtime();
+	record.units.update = { ...record.units.update, pid: reused.pid, started_at: record.started_at };
+	record.units.viewer = { ...record.units.viewer, state: "running", pid: reused.pid };
+	writeFileSync(r.paths.runtime, JSON.stringify(record));
+	r.modes("parent", "run");
+	r.config();
+	const logged = r.log().length;
+	assert.equal(r.at("start").code, 0, r.log());
+	assert.doesNotMatch(r.log().slice(logged), new RegExp(`adopted the in-flight update|pid ${reused.pid}|orphaned`));
+	assert.ok(alive(reused.pid!), "a reused pid is never signalled");
+	assert.equal(r.runtime().units.update.pid, undefined);
+	assert.equal(r.runtime().units.health.next_due, new Date(Date.parse(r.state().started_at) + 180_000).toISOString());
+	r.at("stop");
 
 	// A runtime on another protocol, or without the outer's IPC, exits 78 before it does anything.
 	const inner = (env: Record<string, string>) => spawnSync(process.execPath, [join(r.app, "src/service/daemon-runtime.ts")], { env: { PATH: r.PATH, HOME: r.home, CP_HOME: r.home, ...env }, encoding: "utf8" });

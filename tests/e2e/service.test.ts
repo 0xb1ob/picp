@@ -347,7 +347,8 @@ test("P14-install: cp-install lists models as the service sees them, asks once p
 	assert.doesNotMatch(spaced.out, /k3y SECRET/);
 	// validGatewayKey's other refusals: a quote, a backslash, non-ASCII, and a key over 4096 characters.
 	const longKey = `k3y${"L".repeat(4094)}`;
-	for (const [key, why] of [[`k3y"Q`, "a quote"], ["k3y'Q", "a quote"], ["k3y\\Q", "a backslash"], ["k3y\u00e9Q", "a non-printable"], [longKey, "longer than 4096"]]) {
+	const refusals: Array<[string, string]> = [[`k3y"Q`, "a quote"], ["k3y'Q", "a quote"], ["k3y\\Q", "a backslash"], ["k3y\u00e9Q", "a non-printable"], [longKey, "longer than 4096"]];
+	for (const [key, why] of refusals) {
 		writeFileSync(keyIn, `${key}\n`);
 		const refused = await installOnTty(xdg, [...flags, "--parent-model", "openai/gpt-6.1-sol"], []);
 		assert.equal(refused.code, 1, refused.out);
