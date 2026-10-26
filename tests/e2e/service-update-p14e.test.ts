@@ -121,8 +121,7 @@ async function bench(t: TestContext, config: unknown = { enabled: true, interval
 		return after === before ? undefined : (JSON.parse(after!) as UpdateState);
 	};
 	const lines = (file: string) => (existsSync(join(sm, file)) ? readFileSync(join(sm, file), "utf8").split("\n").filter(Boolean) : []);
-	// shortcut: the failure's `daemon health` is not awaited and the oneshot exits first, so it is filtered out here.
-	const calls = () => lines("calls.log").filter((call) => call !== "daemon health");
+	const calls = () => lines("calls.log");
 	const hostCalls = () => calls().filter((call) => call.startsWith("host "));
 	const reset = () => writeFileSync(join(sm, "calls.log"), "");
 	const causes = () => lines("causes.log").map((line) => JSON.parse(line) as unknown);
@@ -225,9 +224,9 @@ test("P14e-update-config: config, interval, legacy, fetch and dry run", { timeou
 	for (const config of [{ enabled: false }, null, "{\"enabled\": \"yes\"}", { enabled: true, quiet_min: -5 }, { enabled: true, quiet_min: "10" }, { enabled: true, quiet_min: null }, { enabled: true, quiet_min: 3 }]) {
 		const b = await bench(t, config);
 		const state = await b.run();
-		results.push(`${state?.last_result}${/"quiet_min": N >= 0/.test(state?.detail ?? "") ? " quiet_min" : ""}`);
+		results.push(`${state?.last_result}${/"quiet_min": N >= 0/.test(state?.detail ?? "") ? " quiet_min" : ""}${b.calls().includes("daemon health") ? " health" : ""}`);
 	}
-	assert.deepEqual(results, ["skipped_disabled", "skipped_disabled", "config_invalid quiet_min", "config_invalid quiet_min", "config_invalid quiet_min", "config_invalid quiet_min", "up_to_date"]);
+	assert.deepEqual(results, ["skipped_disabled", "skipped_disabled", "config_invalid quiet_min health", "config_invalid quiet_min health", "config_invalid quiet_min health", "config_invalid quiet_min health", "up_to_date"], "only a failure asks cp-daemon for its health run");
 	const b = await bench(t);
 	assert.equal((await b.run())?.last_result, "up_to_date");
 	assert.equal(await b.run(5), undefined, "under interval_min: silent, nothing recorded");
@@ -244,7 +243,7 @@ test("P14e-update-config: config, interval, legacy, fetch and dry run", { timeou
 	const migrate = await legacy.run(20, { env: { CP_DAEMON_JOB: "", INVOCATION_ID: "legacy" } });
 	assert.deepEqual([migrate?.last_result, migrate?.phase], ["migration_required", "rolling_back"], "an interrupted phase is kept for cp-daemon's first run");
 	assert.match(migrate?.detail ?? "", /rerun cp-install to move it to cp-daemon \(auto-update never reruns it\)/);
-	assert.deepEqual(legacy.calls(), [], "no host, git merge or npm");
+	assert.deepEqual(legacy.calls(), ["daemon health"], "no host, git merge or npm: only the watchdog request");
 	assert.equal((await legacy.run(20, { env: { CP_DAEMON_JOB: "" } }))?.since, migrate?.since, "one distinct result, one notice key");
 	// --dry-run probes, records nothing, drains nothing, needs no CP_DAEMON_JOB.
 	await b.run(0, { dry: true, env: { CP_DAEMON_JOB: "" } });
@@ -256,9 +255,9 @@ test("P14e-update-config: config, interval, legacy, fetch and dry run", { timeou
 	for (let i = 0; i < 3; i++) {
 		b.reset();
 		const state = await b.run();
-		failures.push([state?.last_result, state?.fetch_failures]);
+		failures.push([state?.last_result, state?.fetch_failures, b.calls()]);
 	}
-	assert.deepEqual(failures, [["fetch_failed", 1], ["fetch_failed", 2], ["fetch_failed", 3]]);
+	assert.deepEqual(failures, [["fetch_failed", 1, []], ["fetch_failed", 2, []], ["fetch_failed", 3, ["daemon health"]]], "the watchdog only at the third failure");
 	b.repo.git("remote", "set-url", "origin", b.repo.remote!);
 	const ok = await b.run();
 	assert.deepEqual([ok?.last_result, ok?.fetch_failures], ["updated", 0], last(b));
@@ -275,6 +274,7 @@ test("P14e-update-rollback: rolled back, sticky, held", { timeout: 300_000 }, as
 	assert.match(state?.detail ?? "", /DOCTOR broken/);
 	assert.equal(b.calls().filter((call) => call === "npm ci").length, 2, "npm ci forward and back");
 	assert.deepEqual(b.causes(), [{ reason: "auto-update", target_sha: bad }, { reason: "auto-update", target_sha: from }], "the rollback's drain names from");
+	assert.equal(b.calls().at(-1), "daemon health", "the exited run asked cp-daemon for its health run");
 	b.reset();
 	assert.deepEqual([(await b.run())?.last_result, b.hostCalls()], ["skipped_bad_sha", []], "a rolled-back sha is never retried");
 	const fixed = advanceBase(b.repo, "fix.txt", "fix\n");
@@ -340,7 +340,7 @@ test("P14e-update-recovery: a run interrupted mid-phase", { timeout: 300_000 }, 
 	const drain = await bench(t);
 	drain.state({ phase: "draining", from: drain.repo.head(), to: FAR, lock: false });
 	writeFileSync(join(drain.stateDir, "drain.json"), JSON.stringify({ started_at: isoTimestamp(), state: "draining", jobs: [] }));
-	assert.deepEqual([(await drain.run())?.last_result, drain.calls()], ["failed", ["host drainCancel"]], "nothing stopped, the drain withdrawn");
+	assert.deepEqual([(await drain.run())?.last_result, drain.calls()], ["failed", ["host drainCancel", "daemon health"]], "nothing stopped, the drain withdrawn");
 
 	// Drained, then the updater died before `updating`: cancel refuses drained, so the parent restart clears it.
 	const late = await bench(t, { enabled: true, interval_min: 5, quiet_min: 10 });
@@ -349,7 +349,7 @@ test("P14e-update-recovery: a run interrupted mid-phase", { timeout: 300_000 }, 
 	late.state({ phase: "draining", from: lateHead, to: FAR, lock: false });
 	writeFileSync(join(late.stateDir, "drain.json"), JSON.stringify({ started_at: isoTimestamp(), state: "drained", jobs: [] }));
 	const restarted = await late.run(5);
-	assert.deepEqual([restarted?.last_result, restarted?.phase, late.calls(), late.repo.head()], ["failed", "idle", ["host stop [{}]", "daemon hold", "daemon reload"], lateHead], "no quiet wait");
+	assert.deepEqual([restarted?.last_result, restarted?.phase, late.calls(), late.repo.head()], ["failed", "idle", ["host stop [{}]", "daemon hold", "daemon reload", "daemon health"], lateHead], "no quiet wait");
 	assert.match(restarted?.detail ?? "", /drained parent was restarted, dispatch reopens/);
 	// The same window with a host stop that fails: the units still restart, and both errors are reported.
 	const stuck = await bench(t);
@@ -377,6 +377,7 @@ test("P14e-update-drain: timeout, parent control, gone, other errors", { timeout
 	b.plan({ drainStates: ["draining", "drained"] });
 	const timeout = await b.run();
 	assert.deepEqual([timeout?.last_result, b.hostCalls(), b.repo.head()], ["drain_timeout", ["host drain [600]", "host drainCancel"], head], "still draining at 660 s: cancelled, no stop");
+	assert.equal(b.calls().at(-1), "daemon health", "the exited run asked cp-daemon for its health run");
 	assert.equal(await b.run(30), undefined, "under 4x interval_min after a drain timeout: silent");
 	assert.equal((await b.run(31))?.last_result, "updated", last(b));
 
