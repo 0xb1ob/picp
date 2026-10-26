@@ -270,7 +270,6 @@
 	"tests/viewer-schedule-run-groups.test.ts": 135,
 	"tests/viewer-schedules.test.ts": 786,
 	"tests/viewer-search.test.ts": 85,
-	"tests/viewer-service-worker.test.ts": 10,
 	"tests/viewer-sessions-chat-v2.test.ts": 293,
 	"tests/viewer-sessions-files-render.test.ts": 162,
 	"tests/viewer-sessions-files.test.ts": 194,

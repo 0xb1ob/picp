@@ -9,6 +9,7 @@ import { mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from
 import { request, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { test } from "node:test";
 import { brotliDecompressSync, gunzipSync, gzipSync } from "node:zlib";
 import { LAYOUT } from "../../src/contracts.ts";
@@ -423,4 +424,112 @@ test("P21-deploy: a merged job's page shows its after-merge deploy as queued, de
 	record({ merge_commit_sha: "nope" });
 	assert.equal(await deploy(), null, "a malformed sha shows nothing");
 	assert.equal((await view.get("/api/job/..%2Fcp-merged")).status, 404, "a traversal id reads no record");
+});
+
+type Listener = (event: Record<string, unknown>) => void;
+
+/** Run the served worker script against a fake `self`; returns its listeners and what it asked the browser to do. */
+function worker(script: string, windows: { url: string; navigate?: (url: string) => Promise<unknown> }[] = []) {
+	const listeners = new Map<string, Listener>();
+	const calls: unknown[][] = [];
+	const warnings: unknown[] = [];
+	const clients = windows.map((w) => ({
+		url: w.url,
+		navigate: async (url: string) => { calls.push(["navigate", url]); return w.navigate ? w.navigate(url) : undefined; },
+		focus: async () => { calls.push(["focus", w.url]); },
+	}));
+	const self = {
+		location: { origin: "https://cp.example.com" },
+		addEventListener: (type: string, fn: Listener) => listeners.set(type, fn),
+		skipWaiting: async () => { calls.push(["skipWaiting"]); },
+		registration: { showNotification: async (title: string, options: unknown) => { calls.push(["showNotification", title, options]); } },
+		clients: {
+			claim: async () => { calls.push(["claim"]); },
+			matchAll: async (options: unknown) => { calls.push(["matchAll", options]); return clients; },
+			openWindow: async (url: string) => { calls.push(["openWindow", url]); },
+		},
+	};
+	runInNewContext(script, { self, URL, console: { warn: (...args: unknown[]) => warnings.push(args) } });
+	const fire = async (type: string, event: Record<string, unknown> = {}) => {
+		const pending: Promise<unknown>[] = [];
+		listeners.get(type)?.({ ...event, waitUntil: (p: Promise<unknown>) => pending.push(p) });
+		await Promise.all(pending);
+	};
+	return { listeners, calls, warnings, fire };
+}
+
+/** `/sw.js` as the real server serves it, checked for the strict CSP and a JavaScript type before it runs. */
+async function served(t: { after(fn: () => unknown): void }) {
+	const reply = await (await serve(t)).get("/sw.js");
+	assert.deepEqual([reply.status, reply.headers["content-security-policy"]], [200, APP_CSP]);
+	assert.match(String(reply.headers["content-type"]), /^text\/javascript/);
+	return reply.body.toString("utf8");
+}
+
+const pushEvent = (json: () => unknown) => ({ data: { json } });
+
+test("P21-sw-push: the served /sw.js shows a push as [project] kind with the headline, and nothing else", async (t) => {
+	const script = await served(t);
+	const sw = worker(script);
+	await sw.fire("push", pushEvent(() => ({ project: "demo", kind: "plan approval", headline: "Approve?" })));
+	assert.deepEqual(JSON.parse(JSON.stringify(sw.calls)), [["showNotification", "[demo] plan approval", { body: "Approve?" }]]);
+	const options = sw.calls[0]?.[2] as Record<string, unknown>;
+	assert.equal("actions" in options, false);
+});
+
+test("P21-sw-unreadable: the served /sw.js still notifies on an unreadable or empty payload and warns the parse failure", async (t) => {
+	const script = await served(t);
+	const sw = worker(script);
+	await sw.fire("push", pushEvent(() => { throw new SyntaxError("bad json"); }));
+	await sw.fire("push", {});
+	await sw.fire("push", pushEvent(() => ({ kind: "merge ask" })));
+	assert.deepEqual(JSON.parse(JSON.stringify(sw.calls)), [
+		["showNotification", "Command post needs you", { body: "Open Awaiting you" }],
+		["showNotification", "Command post needs you", { body: "Open Awaiting you" }],
+		["showNotification", "[project unknown] merge ask", { body: "Open Awaiting you" }],
+	]);
+	assert.equal(sw.warnings.length, 1);
+});
+
+test("P21-sw-open: a click on the served /sw.js notification opens Awaiting you in a new window when none is open", async (t) => {
+	const script = await served(t);
+	const sw = worker(script, [{ url: "https://elsewhere.example/" }]);
+	let closed = false;
+	await sw.fire("notificationclick", { notification: { close: () => { closed = true; } } });
+	assert.ok(closed);
+	assert.deepEqual(sw.calls.slice(1), [["openWindow", "https://cp.example.com/#awaiting"]]);
+});
+
+test("P21-sw-focus: a click navigates and focuses an open dashboard window; a failed navigate still focuses", async (t) => {
+	const script = await served(t);
+	const sw = worker(script, [{ url: "https://cp.example.com/#more" }]);
+	await sw.fire("notificationclick", { notification: { close: () => {} } });
+	assert.deepEqual(sw.calls.slice(1), [["navigate", "https://cp.example.com/#awaiting"], ["focus", "https://cp.example.com/#more"]]);
+	const failing = worker(script, [{ url: "https://cp.example.com/", navigate: async () => { throw new TypeError("not controlled"); } }]);
+	await failing.fire("notificationclick", { notification: { close: () => {} } });
+	assert.deepEqual(failing.calls.slice(1).map((call) => call[0]), ["navigate", "focus"]);
+	assert.equal(failing.warnings.length, 1);
+});
+
+test("P21-sw-pairing: a pairing payload shows New device paired, tagged per pairing, bounded, and its click opens Settings", async (t) => {
+	const script = await served(t);
+	const sw = worker(script, [{ url: "https://cp.example.com/#jobs" }]);
+	await sw.fire("push", pushEvent(() => ({ type: "pairing", id: "pair-0123456789abcdef", name: `Phone ${"x".repeat(200)}`, level: "view", at: "2026-09-27T00:00:00.000Z", project: "ignored" })));
+	await sw.fire("push", pushEvent(() => ({ type: "pairing", level: "full" })));
+	const shown = JSON.parse(JSON.stringify(sw.calls));
+	assert.deepEqual(shown[0], ["showNotification", `New device paired: Phone ${"x".repeat(74)}`, { body: "View-only · 2026-09-27T00:00:00.000Z · open Settings to review", tag: "pairing-pair-0123456789abcdef", data: { url: "/#settings" } }]);
+	assert.deepEqual(shown[1], ["showNotification", "New device paired: a device", { body: "Full control · open Settings to review", tag: "pairing-", data: { url: "/#settings" } }]);
+	await sw.fire("notificationclick", { notification: { close: () => {}, data: { url: "/#settings" } } });
+	assert.deepEqual(sw.calls.slice(2).map((call) => call.slice(0, 2)).filter((call) => call[0] !== "matchAll"), [["navigate", "https://cp.example.com/#settings"], ["focus", "https://cp.example.com/#jobs"]]);
+	const other = worker(script);
+	await other.fire("notificationclick", { notification: { close: () => {}, data: { url: "https://evil.example/" } } });
+	assert.deepEqual(other.calls.slice(1), [["openWindow", "https://cp.example.com/#awaiting"]], "only the fixed Settings destination is honoured");
+});
+
+test("P21-sw-install: the served /sw.js takes over at once on install and activate", async (t) => {
+	const script = await served(t);
+	const sw = worker(script);
+	await sw.fire("install");
+	await sw.fire("activate");
+	assert.deepEqual(sw.calls, [["skipWaiting"], ["claim"]]);
 });
