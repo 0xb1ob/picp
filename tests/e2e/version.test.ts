@@ -14,7 +14,8 @@ import { type TestContext, test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import type { JobResponse, VersionResponse } from "../../src/viewer/api-types.ts";
 import {
-	COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, REPO_ROOT, type RpcRecord, type ScriptStep, startPiChild,
+	buildPiArgs, COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, REPO_ROOT, type RpcRecord, type ScriptStep, startPiChild,
+	startRpc,
 } from "../harness/index.ts";
 import { teardownHome } from "../harness/parent-hosts.ts";
 import { call } from "../harness/remote.ts";
@@ -344,4 +345,27 @@ test("P14-version-lock: a live holder's lock without a commit, or with a malform
 			await parent.close();
 		}
 	}
+});
+
+test("P14-version-print: a print-mode cp-bridge session has no UI, so the version line writes nothing anywhere", { timeout: 120_000 }, async (t) => {
+	const repo = checkout(t);
+	const home = createScratchHome();
+	t.after(() => teardownHome(home));
+	const state = stateOf(home.path);
+	state.write("update.json", { last_result: "up_to_date", last_run_at: state.iso(1) });
+	const provider = await MockProvider.start();
+	const agentDir = createAgentDir({ provider });
+	t.after(() => { void provider.stop(); agentDir.cleanup(); });
+	// The model holds the turn 8 s, past the line's first refresh, so a line written without a UI would show.
+	const model = provider.addScript("p14-print", [{ kind: "hang", ms: 8_000 }], { onExhausted: "repeat" });
+	agentDir.writeModels(provider);
+	const env = { ...agentDir.env, CP_HOME: home.path, CP_MODE: "multi", CP_VERSION_REPO: repo.dir };
+	const print = startRpc({ cwd: home.path, mode: "json", env, args: buildPiArgs({ cwd: home.path, model, extensions: [CP_BRIDGE_EXTENSION], extraArgs: ["--print", "status?"] }) });
+	t.after(() => print.close().then(() => undefined));
+	print.endInput();
+	await print.waitFor((r) => r.type === "agent_end", 60_000);
+	assert.equal(await print.close(), 0, print.stderr());
+	assert.deepEqual(print.records().filter((r) => r.type === "extension_ui_request" && r.statusKey === "cp-version"), []);
+	assert.doesNotMatch(print.stderr(), /version: /, "no version line on stderr either");
+	assert.doesNotMatch(JSON.stringify(print.records()), /version: (latest|unknown)/, "nor in the event stream");
 });

@@ -156,7 +156,7 @@ const R2 = /\b(?:homedir|tmpdir)\(/;
 /** R1: each test file is a legacy-layout negative fixture (it builds the old layout on purpose, to prove it is ignored). */
 const R1_ALLOWED = [
 	// Not a fixture: cp-daemon's outer may import only node:* (contracts pull typebox), so it derives its own
-	// data/state paths; tests/daemon-files.test.ts pins them equal to layoutForHome("multi", home).
+	// data/state paths; tests/daemon-files-retained.test.ts pins them equal to layoutForHome("multi", home).
 	"src/service/daemon-files.ts",
 	// The gateway e2e writes the legacy top-level data/capacity.json that cp-u3i2 must ignore.
 	"tests/e2e/authority.test.ts",

@@ -11,8 +11,8 @@ import { standardHome } from "../home.ts";
 
 /**
  * `~/.local/bin/cp-operator`, what the herdr pane runs: the same path as src/service/units.ts
- * `installTargets(env).binDir` + `OPERATOR_WRAPPER` (pinned by tests/service-units.test.ts). The user's home is
- * the standard home's parent (src/home.ts owns the $HOME read).
+ * `installTargets(env).binDir` + `OPERATOR_WRAPPER` (P14-units in tests/e2e/service.test.ts runs it there).
+ * The user's home is the standard home's parent (src/home.ts owns the $HOME read).
  */
 export function operatorWrapperPath(env: NodeJS.ProcessEnv = process.env): string {
 	return resolve(dirname(standardHome(env)), ".local/bin", "cp-operator");
