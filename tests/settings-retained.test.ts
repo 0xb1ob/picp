@@ -1,7 +1,6 @@
 /**
- * Retained from tests/settings.test.ts (P16b). `validateSettingValue` and the frozen catalog are in-process only; (c)
- * also probes the routing owner, which Settings cannot plan; `readOwnerConsistently` needs a self-rewriting loader;
- * the import guard is structural; `loadBudgetConfig`'s bad-JSON ContractError has no e2e consumer.
+ * Retained (P16b): `validateSettingValue` against every owner's schema or loader, the frozen catalog, the import
+ * guard, `readOwnerConsistently`'s self-rewriting loader and `loadBudgetConfig`'s ContractError: no e2e reaches them.
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -174,7 +173,6 @@ test("(c) range agreement: validateSettingValue accepts exactly what the owner s
 	assert.ok(compared > 150, `only ${compared} probes ran`);
 });
 
-/** What each owner's loader answers for an absent file (capacity excluded: its loader cannot answer). */
 test("(i) readOwnerConsistently: one rewrite mid-load is retried to valid; a file that never settles is unstable", (t) => {
 	const home = scratch(t);
 	const file = join(home, "owner.json");

@@ -44,7 +44,7 @@
  *    needs none of the home's guarantees.
  *
  * A `USER.md` sitting in a home directory is therefore not read, on purpose,
- * and `tests/user-context.test.ts` exercises the `root !== home` case directly
+ * and `tests/e2e/configuration.test.ts` (P16-user-context) exercises the `root !== home` case directly
  * rather than collapsing the two into one scratch directory.
  */
 
