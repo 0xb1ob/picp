@@ -176,8 +176,6 @@
 	"tests/pr-resolve-retained.test.ts": 6,
 	"tests/profiles.test.ts": 942,
 	"tests/project-report.test.ts": 5,
-	"tests/push-keys.test.ts": 4145,
-	"tests/push-webpush.test.ts": 11,
 	"tests/questions.test.ts": 107,
 	"tests/relay-preflight.test.ts": 1320,
 	"tests/e2e/restart-intake-s27.test.ts": 10000,

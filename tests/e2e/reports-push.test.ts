@@ -4,9 +4,11 @@
  * configures a home. The push service is a stand-in behind tests/harness/fake-fetch.ts; devices decrypt what it got.
  */
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { createPublicKey, verify } from "node:crypto";
 import { createServer as httpServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -18,10 +20,11 @@ import { OperatorAsks } from "../../src/operator-asks.ts";
 import { acquireParentLock } from "../../src/parent-lock.ts";
 import { initPush } from "../../src/push/keys.ts";
 import { PUSH_RULE } from "../../src/push/sweep.ts";
+import { generateVapidKeyPair, VAPID_EXPIRY_SECONDS } from "../../src/push/webpush.ts";
 import { tunnelRuntimeFile } from "../../src/service/daemon-tunnel-files.ts";
 import { devicesFile } from "../../src/viewer/device-files.ts";
 import { DeviceStore } from "../../src/viewer/device-store.ts";
-import { pushDeliveriesFile, subscriptionFile, subscriptionId, vapidKeyFile } from "../../src/viewer/push-files.ts";
+import { pushConfigFile, pushDeliveriesFile, readPushConfig, subscriptionFile, subscriptionId, vapidKeyFile } from "../../src/viewer/push-files.ts";
 import { createAgentDir, createScratchHome, type PiChild, REPO_ROOT, startPiChild } from "../harness/index.ts";
 import { startViewer } from "../harness/dashboard.ts";
 import { type TestDevice, testDevice } from "../harness/push.ts";
@@ -39,6 +42,7 @@ const HEALTH = "cp-daemon health check \"update\" failing since 2026-09-27T00:00
 type Item = { id: string; source: string; kind: string; status: string; attempts: number; delivered: number; last_error?: string; next_attempt_at?: string; settled_at?: string; created_at: string; accepted?: Array<{ subscription: string; at: string }> };
 type Post = { host: string; slug: string; headers: IncomingHttpHeaders; body: Buffer; at: number };
 type Finding = { check: string; severity: string; what: string; detail?: string; fix?: string };
+type Answer = { status: number; body?: string; headers?: Record<string, string> };
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 async function until<T>(read: () => T | Promise<T>, ok: (value: T) => boolean, what: string, ms = 60_000): Promise<T> {
@@ -59,15 +63,16 @@ async function rig(t: TestContext, { configured = true, scale = SCALE } = {}) {
 	writeFileSync(clock, "0");
 	const parentNow = () => zero + (Date.now() - zero) * scale + Number(readFileSync(clock, "utf8"));
 	const posts: Post[] = [];
-	let answer: (slug: string) => number = () => 201;
+	let answer: (slug: string) => number | Answer = () => 201;
 	const service = httpServer((req, res) => {
 		const chunks: Buffer[] = [];
 		req.on("data", (chunk: Buffer) => chunks.push(chunk));
 		req.on("end", () => {
 			const [, host = "", ...rest] = String(req.url).split("/");
-			const code = answer(rest.at(-1)!);
+			const given = answer(rest.at(-1)!);
+			const { status, body = status === 599 ? "fetch failed" : "", headers = {} } = typeof given === "number" ? { status: given } : given;
 			posts.push({ host, slug: rest.at(-1)!, headers: req.headers, body: Buffer.concat(chunks), at: parentNow() });
-			res.writeHead(code).end(code === 599 ? "fetch failed" : "");
+			if (status !== 0) res.writeHead(status, headers).end(body); // 0: the service never answers
 		});
 	});
 	await new Promise<void>((done) => service.listen(0, "127.0.0.1", done));
@@ -75,6 +80,7 @@ async function rig(t: TestContext, { configured = true, scale = SCALE } = {}) {
 	let child: PiChild | undefined;
 	t.after(async () => {
 		await child?.close();
+		service.closeAllConnections();
 		service.close();
 		agent.cleanup();
 		scratch.cleanup();
@@ -423,4 +429,123 @@ test("P22-push-lock: a parent refused the home's lock runs no push sweep, though
 	assert.deepEqual(await s.doctor(), [{ check: "push", severity: "ok", what: `web push for ${ORIGIN}: 1 subscribed device(s)` }, { check: "push", severity: "ok", what: PUSH_RULE }]);
 	assert.deepEqual([existsSync(pushDeliveriesFile(s.stateDir)), s.posts.length], [false, 0], "no ledger, no fetch without the lock");
 	held.lock.release();
+});
+
+test("P22-push-init: npm run push:init configures a home once, keeps its key, prints none of it and refuses a bad origin or subject", async (t) => {
+	const s = await rig(t, { configured: false });
+	const run = (...args: string[]) => spawnSync(process.execPath, [join(REPO_ROOT, "scripts", "push-init.ts"), "--home", s.home, ...args], { encoding: "utf8" });
+	const ok = run("--origin", "https://x.example.com/");
+	assert.equal(ok.status, 0, ok.stderr);
+	assert.match(ok.stdout, /^web push configured for https:\/\/x\.example\.com \(keys in .*push, never printed\)\n$/);
+	assert.equal(statSync(vapidKeyFile(s.dataDir)).mode & 0o777, 0o600);
+	const key = readFileSync(vapidKeyFile(s.dataDir), "utf8"), jwk = JSON.parse(key);
+	const config = JSON.parse(readFileSync(pushConfigFile(s.dataDir), "utf8"));
+	assert.deepEqual(Object.keys(config).sort(), ["created_at", "origin", "public_key", "schema_version", "subject"]);
+	assert.deepEqual([config.origin, config.subject], ["https://x.example.com", "https://x.example.com"]);
+	assert.ok(![JSON.stringify(config), ok.stdout, ok.stderr].some((text) => text.includes(jwk.d)), "the private key is in vapid.key only");
+	for (const secret of [config.public_key, jwk.x]) assert.ok(!`${ok.stdout}${ok.stderr}`.includes(secret));
+	assert.match(run("--origin", "https://x.example.com").stdout, /already configured for https:\/\/x\.example\.com/);
+	assert.equal(readFileSync(vapidKeyFile(s.dataDir), "utf8"), key, "a re-run leaves the key byte-identical");
+	const moved = run("--origin", "https://CP.example.com:8443", "--subject", "mailto:ops@example.com");
+	assert.match(moved.stdout, /^web push origin changed to https:\/\/cp\.example\.com:8443; keys kept/);
+	assert.equal(readFileSync(vapidKeyFile(s.dataDir), "utf8"), key);
+	const rewritten = JSON.parse(readFileSync(pushConfigFile(s.dataDir), "utf8"));
+	assert.deepEqual([rewritten.origin, rewritten.subject, rewritten.public_key, rewritten.created_at], ["https://cp.example.com:8443", "mailto:ops@example.com", config.public_key, config.created_at]);
+	const subject = run("--origin", "https://cp.example.com", "--subject", "ops");
+	assert.deepEqual([subject.status, /subject must be/.test(subject.stderr)], [2, true], subject.stderr);
+	for (const bad of ["http://x.example.com", "https://x.example.com/path", "https://x.example.com/?q=1", "https://x.example.com/#x", "https://u:p@x.example.com", "x.example.com"]) {
+		const refused = run("--origin", bad);
+		assert.deepEqual([refused.status, /^push-init: /.test(refused.stderr)], [2, true], bad);
+	}
+	assert.match(run("--origin", "http://x.example.com").stderr, /must be https:/);
+	assert.equal(run().status, 2);
+	assert.equal(readPushConfig(s.dataDir)?.origin, "https://cp.example.com:8443", "a refusal changes nothing");
+	// The parent's /doctor reads the key: a corrupt or mismatched one is named, never quoted.
+	await s.start();
+	const keyFinding = async () => (await s.doctor()).find((finding) => /signing key/.test(finding.what));
+	assert.equal(await keyFinding(), undefined);
+	const secret = "SECRETSECRETSECRET";
+	writeFileSync(vapidKeyFile(s.dataDir), `{"kty":"EC","crv":"P-256","d":"${secret}"`);
+	const corrupt = await keyFinding();
+	assert.ok(corrupt && !JSON.stringify(corrupt).includes(secret), JSON.stringify(corrupt));
+	writeFileSync(vapidKeyFile(s.dataDir), JSON.stringify(generateVapidKeyPair().privateJwk));
+	assert.match((await keyFinding())?.detail ?? "", /does not match the public key/);
+	writeFileSync(vapidKeyFile(s.dataDir), JSON.stringify({ kty: "EC", crv: "P-256", d: secret, x: "a", y: "b" }));
+	const shaped = await keyFinding();
+	assert.ok(shaped && !JSON.stringify(shaped).includes(secret), JSON.stringify(shaped));
+});
+
+test("P22-push-wire: each push is an RFC 8030 POST with an ES256 VAPID JWT; answers map to delivered, gone, retry or rejected, never echoing the endpoint", async (t) => {
+	const s = await rig(t);
+	s.subscribe(FCM);
+	await s.start();
+	await until(() => s.ledger(), Boolean, "the baseline");
+	const first = s.asks.open({ ...ASK, question: "First?" });
+	assert.equal((await s.settled(first.id)).status, "sent");
+	const post = s.posts[0]!;
+	assert.deepEqual([post.headers.ttl, post.headers.urgency, post.headers["content-type"], post.headers["content-encoding"]], ["43200", "high", "application/octet-stream", "aes128gcm"]);
+	const match = /^vapid t=([\w-]+)\.([\w-]+)\.([\w-]+), k=([\w-]+)$/.exec(String(post.headers.authorization));
+	assert.ok(match, String(post.headers.authorization));
+	const [, h, c, sig, k] = match as unknown as [string, string, string, string, string];
+	assert.deepEqual(JSON.parse(Buffer.from(h, "base64url").toString()), { typ: "JWT", alg: "ES256" });
+	const claims = JSON.parse(Buffer.from(c, "base64url").toString()) as { aud: string; exp: number; sub: string };
+	assert.deepEqual([claims.aud, claims.sub], ["https://fcm.googleapis.com", ORIGIN]);
+	assert.ok(Math.abs(claims.exp - post.at / 1000 - VAPID_EXPIRY_SECONDS) < 60 && VAPID_EXPIRY_SECONDS <= 24 * 3600, `exp ${claims.exp}`);
+	const publicKey = Buffer.from(k, "base64url");
+	assert.deepEqual([publicKey.length, k], [65, readPushConfig(s.dataDir)?.public_key]);
+	const jwk = { kty: "EC", crv: "P-256", x: publicKey.subarray(1, 33).toString("base64url"), y: publicKey.subarray(33).toString("base64url") };
+	const signature = Buffer.from(sig, "base64url");
+	assert.equal(signature.length, 64);
+	assert.ok(verify("sha256", Buffer.from(`${h}.${c}`), { key: createPublicKey({ key: jwk, format: "jwk" }), dsaEncoding: "ieee-p1363" }, signature));
+	const second = s.asks.open({ ...ASK, question: "Second?" });
+	await s.settled(second.id);
+	assert.notDeepEqual(s.posts[1]!.body.subarray(0, 16), post.body.subarray(0, 16), "a fresh salt per message");
+	assert.deepEqual(s.sent().map(([, payload]) => payload.headline), ["First?", "Second?"]);
+	// A redirect is never followed: the attempt is a retry.
+	s.answer(() => ({ status: 302, headers: { location: "https://fcm.googleapis.com/fcm/send/elsewhere" } }));
+	const moved = s.asks.open({ ...ASK, question: "Redirected?" });
+	const redirected = await s.settled(moved.id, (item) => item.attempts === 1);
+	assert.deepEqual([redirected.status, /retry/.test(redirected.last_error ?? ""), s.posts.map((p) => p.slug)], ["pending", true, ["device-a"]]);
+	s.asks.withdraw(moved.id, "done");
+	s.posts.splice(0);
+	for (const status of [400, 401, 413]) {
+		s.answer(() => status);
+		const ask = s.asks.open({ ...ASK, question: `HTTP ${status}?` });
+		const record = await s.settled(ask.id);
+		assert.deepEqual([record.status, record.attempts, record.last_error], ["failed", 1, `${subscriptionId(FCM).slice(0, 8)} rejected: HTTP ${status}`]);
+	}
+	s.answer(() => ({ status: 403, body: `bad\n  vapid ${"y".repeat(300)}` }));
+	const noisy = s.asks.open({ ...ASK, question: "Noisy?" });
+	const reason = (await s.settled(noisy.id)).last_error!.replace(/^\w+ rejected: /, "");
+	assert.match(reason, /^HTTP 403 bad vapid y+$/);
+	assert.ok(reason.length <= 140, reason);
+	// A long endpoint is redacted before truncation, in a response body or a network error.
+	const long = `https://fcm.googleapis.com/fcm/send/${"SYNTHETIC_CAPABILITY_".repeat(12)}`;
+	rmSync(subscriptionFile(s.dataDir, subscriptionId(FCM)));
+	s.subscribe(long);
+	for (const status of [403, 599]) {
+		s.answer(() => ({ status, body: `fetch failed for ${long}` }));
+		const ask = s.asks.open({ ...ASK, question: `Leak ${status}?` });
+		const record = await s.settled(ask.id, (item) => item.attempts === 1);
+		assert.match(record.last_error ?? "", /<endpoint>/);
+		s.asks.withdraw(ask.id, "done");
+	}
+	for (const text of [readFileSync(pushDeliveriesFile(s.stateDir), "utf8"), s.stderr()]) assert.doesNotMatch(text, /SYNTHETIC_CAPABILITY|fcm\.googleapis/);
+	// A stored subscription with a malformed key is never a target, so encryptPayload never sees it.
+	rmSync(subscriptionFile(s.dataDir, subscriptionId(long)));
+	s.answer(() => 201);
+	s.posts.splice(0);
+	for (const keys of [{ auth: Buffer.alloc(8).toString("base64url") }, { p256dh: Buffer.alloc(33, 2).toString("base64url") }]) {
+		const device = s.subscribe(FCM), file = subscriptionFile(s.dataDir, subscriptionId(FCM));
+		writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), keys: { ...device.keys, ...keys } }));
+		const ask = s.asks.open({ ...ASK, question: `Malformed ${Object.keys(keys)[0]}?` });
+		const record = await s.settled(ask.id);
+		assert.deepEqual([record.status, record.last_error, s.posts.length], ["skipped", "no subscribed device", 0]);
+	}
+	// A push service that never answers is cut off by the fetch timeout: a retry, not a hung sweep.
+	s.subscribe(FCM);
+	s.answer(() => 0);
+	const hung = s.asks.open({ ...ASK, question: "Hung?" });
+	const waited = await s.settled(hung.id, (item) => item.attempts === 1, "the timed-out attempt");
+	assert.deepEqual([waited.status, /retry: .*(timeout|aborted)/i.test(waited.last_error ?? "")], ["pending", true], waited.last_error);
 });
