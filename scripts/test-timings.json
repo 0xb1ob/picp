@@ -246,7 +246,6 @@
 	"tests/viewer-job-detail-render.test.ts": 94,
 	"tests/viewer-job-report.test.ts": 576,
 	"tests/viewer-jobs-render.test.ts": 411,
-	"tests/viewer-json-delta.test.ts": 6,
 	"tests/viewer-linkify.test.ts": 163,
 	"tests/viewer-mandates-map-render.test.ts": 362,
 	"tests/viewer-map-edges.test.ts": 142,
