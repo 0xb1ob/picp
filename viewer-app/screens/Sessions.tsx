@@ -254,8 +254,9 @@ export function Sessions({data,control,draft,threads}: {data:SessionsResponse;co
  const pendingKey = pending.map(send=>`${send.key}:${send.state}`).join("|");
  const lastEntry=data.entries.at(-1)?.id;
  const scrollToEnd=()=>{const el=scroller.current; if(el) el.scrollTop=el.scrollHeight;};
- useEffect(()=>{if(atBottom) scrollToEnd();},[lastEntry,pendingKey,showTools,openRuns,threads?.selected]);
  const follow=useRef(true);
+ // The ref, not `atBottom`: a scroll up between a render and its deferred effect must not be undone by stale state.
+ useEffect(()=>{if(follow.current) scrollToEnd();},[lastEntry,pendingKey,showTools,openRuns,threads?.selected]);
  // The pinned decisions bar opens and collapses at every width; the choice is remembered per browser. It opens by
  // itself only when an ask id it has not shown before appears — never because the count alone changed.
  const askIds=data.transcript === true ? (data.open_asks ?? []).map(a=>a.id) : null, askKey=JSON.stringify(askIds);

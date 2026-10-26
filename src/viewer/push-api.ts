@@ -14,7 +14,7 @@
  * endpoint stored by another device — or by the local listener — is refused 403, never overwritten or removed.
  */
 
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { accessOf } from "./access.ts";
 import { runPushTest } from "../push/test-push.ts";
 import type { PushFetch } from "../push/webpush.ts";
@@ -41,6 +41,8 @@ export interface PushRouteResult {
 	status: number;
 	body: unknown;
 	headers?: Record<string, string>;
+	/** Unread request body left to drop (at most this many bytes) after the response, then the socket closes. */
+	discard?: number;
 }
 
 export function pushStatus(options: { stateDir: string }, now = new Date()): PushStatusResponse {
@@ -97,6 +99,21 @@ export function readBody(req: IncomingMessage, max: number): Promise<Buffer | "t
 			if (!settled) reject(error);
 			settled = true;
 		});
+	});
+}
+
+/** The slack beyond the cap that a refused oversize body may still be drained for, so its sender reads the 413. */
+export const BODY_DISCARD_MAX_BYTES = 1024 * 1024;
+
+/** Drop up to `budget` more bytes of the unread body, then close the socket once `res` has flushed. */
+export function discardBounded(req: IncomingMessage, res: ServerResponse, budget: number): void {
+	let seen = 0;
+	req.on("data", (chunk: Buffer) => {
+		seen += chunk.length;
+		if (seen <= budget) return;
+		req.pause();
+		if (res.writableFinished) req.socket.destroySoon();
+		else res.once("finish", () => req.socket.destroySoon());
 	});
 }
 

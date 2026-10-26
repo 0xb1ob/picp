@@ -273,7 +273,7 @@ test("P19-composer-images: the composer attaches, uploads one at a time, thumbna
 	assert.equal(sendDisabled(tab), true);
 });
 
-// ---- composer keys, drafts, footer and skills ----------------------------------------------------------------------
+// ---- composer keys, drafts, footer and skills ---------------------------------------------------------------------
 
 /** A keydown on the composer field with the modifier and IME fields a browser sets, once the last input has rendered. */
 async function press(tab: Tab, field: Element, key = "Enter", init: { shiftKey?: boolean; ctrlKey?: boolean; isComposing?: boolean; keyCode?: number } = {}) {
@@ -874,7 +874,7 @@ test("P19-tools-sheet: the ⋯ sheet's tool toggle is the same remembered choice
 	assert.match(cssRules(css, ".session-heading"), /overflow:visible/, "the heading row does not clip the toggle");
 });
 
-// ---- the workbench: dashboard spend, the server's routes, a held job's diff, git reads, grants and the parent probe ----
+// ---- the workbench: dashboard spend, the server's routes, a held job's diff, git reads, grants and the parent probe
 
 const LATER = isoTimestamp(new Date(Date.now() + 86_400_000));
 const PR = "https://github.com/acme/repo/pull/7";
@@ -1034,7 +1034,10 @@ test("P19-workbench-grants: a job's grant is the named, earliest-issued, lowest-
 test("P19-workbench-parent: the schedule controls' parent probe calls a zombie lock holder down, a live pid running, as isPidAlive does", { timeout: 120_000 }, async (t) => {
 	const d = await viewer(t);
 	const parent = async (pid: number) => { write(join(d.stateDir, "parent.lock"), { pid }); return ((await d.get("/api/schedules/control")).body as Json).parent as Json; };
-	for (const pid of [0, -1]) assert.deepEqual(await parent(pid), { running: false, pid: null, reason: "parent lock names no pid" }, `pid ${pid}`);
+	for (const pid of [0, -1]) {
+		assert.deepEqual(await parent(pid), { running: false, pid: null, reason: "parent lock names no pid" }, `pid ${pid}`);
+		assert.equal(isPidAlive(pid), false, `pid ${pid}: isPidAlive agrees`);
+	}
 	await withZombie(t, async (zombie, holder) => {
 		for (const pid of [zombie, holder, process.pid, 2 ** 30]) assert.equal((await parent(pid)).running, isPidAlive(pid), `pid ${pid}`);
 		assert.deepEqual(await parent(zombie), { running: false, pid: zombie, reason: `the recorded parent pid ${zombie} is not running` }, "a kill-0-only check would call a zombie alive");
