@@ -494,5 +494,9 @@ test("P23-fleet-reconcile: a restarted parent reconciles fleet.json from facts â
 	await corrupt.child.close();
 	assert.equal(h.read(LAYOUT.fleetFile), "{ not json", "a corrupt fleet file is refused, never rewritten");
 	h.put(LAYOUT.fleetFile, JSON.stringify({ schema_version: SCHEMA_VERSION + 1, updated_at: isoTimestamp(), jobs: [] }));
-	assert.match(String((await fleetNotice(h.parent(), /fleet\.json is schema_version/)).message), /Upgrade pi-command-post/);
+	const future = h.parent();
+	assert.match(String((await fleetNotice(future, /fleet\.json is schema_version/)).message), /Upgrade pi-command-post/);
+	await future.child.close();
+	h.put(LAYOUT.fleetFile, JSON.stringify({ schema_version: SCHEMA_VERSION, updated_at: "yesterday", jobs: [] }));
+	assert.match(String((await fleetNotice(h.parent(), /fleet\.json violates the fleet contract/)).message), /updated_at/);
 });
