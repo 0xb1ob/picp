@@ -1,6 +1,6 @@
 /**
- * Behavior 18 (P18b): a job's Transcript tab as the served app renders it from `bin/cp-view` on a scratch home over real
- * HTTP, its clock pinned; DOM and text only, never pixels.
+ * Behavior 18 (P18b): a job's Transcript tab as the served app renders it from `bin/cp-view` on a scratch home
+ * over real HTTP, its clock pinned; DOM and text only, never pixels.
  */
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
