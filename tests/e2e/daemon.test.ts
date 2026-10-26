@@ -447,10 +447,17 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 	assert.equal(r.starts("update").length, 1);
 
 	// A reload of the same outer adopts the running update and keeps the timers; the parent's restart count resets.
-	const timers = [r.runtime().units.health.next_due, r.runtime().units.update.next_due];
+	const timers = { health: r.runtime().units.health.next_due, update: r.runtime().units.update.next_due };
+	const mark = r.log().length;
 	assert.equal(r.at("reload").out, "cp-daemon reload: ok\n", r.log());
 	assert.match(r.log(), new RegExp(`adopted the in-flight update run pid ${update!.pid}`));
-	assert.deepEqual([r.runtime().units.health.next_due, r.runtime().units.update.next_due], timers);
+	// A kept timer that comes due meanwhile fires and moves on (the flake): it moves only by firing at its kept time.
+	const kept = { health: r.runtime().units.health.next_due, update: r.runtime().units.update.next_due };
+	for (const job of ["health", "update"] as const) {
+		const fired = r.log().slice(mark).split("\n").find((line) => new RegExp(`${job} (started pid|due while pid)`).test(line));
+		if (fired === undefined) assert.equal(kept[job], timers[job], job);
+		else assert.ok(Date.parse(fired.split(" ")[0]!) >= Date.parse(timers[job]), `${job} fired before its kept time: ${fired}`);
+	}
 	assert.equal(r.runtime().units.update.pid, update!.pid);
 	assert.equal(r.starts("update").length, 1, "adopted, not respawned");
 
