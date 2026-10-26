@@ -1,10 +1,9 @@
 /**
  * P23: the declarations of tests/supersede.test.ts kept verbatim (V2): decideReopen's padded-status, done and failed
- * branches that cp_send pre-empts, and readLiveReport. tests/e2e/send-p9g.test.ts (P23-supersede) holds the rest.
+ * branches that cp_send pre-empts. tests/e2e/send-p9g.test.ts and tests/e2e/landing-merge.test.ts hold the rest.
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -13,11 +12,9 @@ import {
 	type Delivery,
 	type FleetRecord,
 	isoTimestamp,
-	paths,
 	type Receipt,
-	SCHEMA_VERSION,
 } from "../src/contracts.ts";
-import { decideReopen, landedReceipt, readLiveReport } from "../src/supersede.ts";
+import { decideReopen, landedReceipt } from "../src/supersede.ts";
 import { createScratchHome, type ScratchHome } from "./harness/index.ts";
 
 /** Only the scratch home of the original bench: these tests never open the fleet or a run. */
@@ -90,25 +87,4 @@ test("decideReopen: done and failed jobs are refused, each with its own path", (
 	});
 	assert.equal(failed.kind, "refuse");
 	assert.match(failed.kind === "refuse" ? failed.reason : "", /a brief does not revive a failed job/);
-});
-
-test("readLiveReport: absent, done, blocked (strings and planner objects), unreadable", (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const file = join(home.path, paths.envelopeFile("cp-live"));
-	mkdirSync(join(file, ".."), { recursive: true });
-	const write = (envelope: unknown) => writeFileSync(file, JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: "cp-live", envelope }));
-	const read = () => readLiveReport(home.path, "cp-live");
-
-	assert.deepEqual(readLiveReport(home.path, "cp-none"), { state: "absent" });
-	write({ status: "done" });
-	assert.deepEqual(read(), { state: "done" });
-	write({ status: "blocked", blockers: ["  no screenshots  ", "x".repeat(300)], head_sha: "abc" });
-	assert.deepEqual(read(), { state: "blocked", blockers: ["no screenshots", "x".repeat(200)], head_sha: "abc" });
-	write({ status: "blocked", blockers: [{ question: "which base?" }, { why: "no question" }, 7] });
-	assert.deepEqual(read(), { state: "blocked", blockers: ["which base?"] });
-	writeFileSync(file, "{");
-	assert.equal(read().state, "unreadable");
-	write({ status: "maybe" });
-	assert.deepEqual(read(), { state: "unreadable", detail: "status maybe is neither done nor blocked" });
 });
