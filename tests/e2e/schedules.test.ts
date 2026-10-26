@@ -1162,4 +1162,16 @@ test("P13c native policy and run options: add saves a report-only revision 1 or 
 		assert.deepEqual([posted.status, String(posted.body.error).endsWith(error)], [400, true], JSON.stringify(posted.body));
 	}
 	assert.equal(existsSync(scheduleControlFile(h.stateDir)), false, "nothing journaled");
+
+	// A run journal that is not JSON, or not this contract, is a named refusal; no run starts and the file stays as is.
+	await h.closeParents();
+	const runsFile = join(h.stateDir, "schedule-runs.json");
+	const corrupt = (callId: string, text: string) => schedule(callId, () => { writeFileSync(runsFile, text); return { action: "run_now", id: h.idOf("broken") }; });
+	const after = await h.parent("P13c: run broken.", [
+		{ kind: "tool_calls", calls: [corrupt("torn", "{")] },
+		{ kind: "tool_calls", calls: [corrupt("future", JSON.stringify({ schema_version: 99, runs: [] }))] },
+	]);
+	checkCall(ends(after), "torn", "refused", /schedule-runs\.json is not valid JSON \(.*\); refusing to guess/);
+	checkCall(ends(after), "future", "refused", /schedule-runs\.json violates the schedule run contract: \/schema_version: must be one of 1/);
+	assert.equal(readFileSync(runsFile, "utf8"), JSON.stringify({ schema_version: 99, runs: [] }), "a refused read rewrites nothing");
 });
