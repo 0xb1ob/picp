@@ -3,7 +3,7 @@
  * and the viewer share. tmux is the absolute `tmux` on PATH, run directly (cp-rrye) by a cp-daemon-run viewer:
  * `tmux new-session -d -s cp-operator <wrapper> [-c]`; herdr is the absolute `herdr` on PATH, usable only while
  * its background server runs (`herdr status server --json`).
- * It lives in src/viewer/ because viewer modules import only `node:` and `./` (tests/viewer-workbench.test.ts).
+ * It lives in src/viewer/ because viewer modules import only `node:` and `./` (tests/viewer-boundary.test.ts).
  */
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";

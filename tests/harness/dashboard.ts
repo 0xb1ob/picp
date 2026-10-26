@@ -100,6 +100,7 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 	}
 	let closed = false;
 	const requests: Requested[] = [];
+	const started: string[] = []; // every request as the app makes it, before a `hold` answers
 	const location = { hash, pathname: "/", search: "", origin, host: `127.0.0.1:${port}`, protocol: "http:", get href() { return `${origin}/${location.hash}`; }, assign() {}, replace() {}, reload() {} };
 	const confirms: string[] = [];
 	const sources = new Set<EventTarget>(); // the app's streams: they speak only when the test calls `refresh()`
@@ -107,6 +108,7 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 	const browserFetch = async (input: string | URL | Request, init: RequestInit = {}) => {
 		if (closed) return new Promise<Response>(() => {});
 		const url = new URL(String(input instanceof Request ? input.url : input), origin);
+		started.push(`${(init.method ?? "GET").toUpperCase()} ${url.pathname}`);
 		if (hold?.test(url.pathname)) await held;
 		const headers = new Headers({ ...extra, ...Object.fromEntries(new Headers(init.headers)) });
 		const method = (init.method ?? "GET").toUpperCase();
@@ -147,7 +149,7 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 	const root = document.getElementById("app") as Element;
 	const text = () => root.textContent ?? "";
 	return {
-		window, document, root, requests, confirms, storage, close, text, release,
+		window, document, root, requests, started, confirms, storage, close, text, release,
 		/** The page's global scope: a test adds what linkedom lacks (a ResizeObserver) before the screen mounts. */
 		globals: sandbox,
 		/** Every open stream fires `type` ("open", "error"), as a browser's EventSource does on connect or loss. */
