@@ -28,6 +28,7 @@ import {
 	type Usage,
 	validateRunStatus,
 } from "./contracts.ts";
+import { validatedOnce } from "./validated-text.ts";
 import type { WorkerEvent, WorkerProcess } from "./worker-process.ts";
 
 /** pi events that carry no information worth a log line of their own. */
@@ -400,7 +401,8 @@ export function readStatusFile(home: string, jobId: string): RunStatus | undefin
 	const file = join(home, paths.statusFile(jobId));
 	if (!existsSync(file)) return undefined;
 	try {
-		const result = validateRunStatus(JSON.parse(readFileSync(file, "utf8")));
+		const text = readFileSync(file, "utf8");
+		const result = validatedOnce(file, text, JSON.parse(text), validateRunStatus);
 		return result.ok ? result.value : undefined;
 	} catch {
 		return undefined;
