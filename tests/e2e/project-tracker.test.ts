@@ -124,10 +124,10 @@ test("P15-jobs-lifecycle: cp_job records, queries, gates and closes jobs, and /c
 			job("retired-priority", { action: "update", job_id: "cp-a", status: "deferred", priority: 2 }),
 			job("unnamed", { action: "create", title: "t", project: "demo", delivery: "pr", nonsense: 1 }),
 		] },
-		{ prompt: "/cp-jobs", until: /four/ },
-		{ prompt: "/cp-jobs ready --project other", until: /o1/ },
-		{ prompt: "/cp-jobs list --all --status closed --project demo", until: /fix it/ },
-		{ prompt: "/cp-jobs list", until: /o3/ },
+		{ prompt: "/cp-jobs", until: /\sfour$/m },
+		{ prompt: "/cp-jobs ready --project other", until: /\so1$/m },
+		{ prompt: "/cp-jobs list --all --status closed --project demo", until: /\sfix it$/m },
+		{ prompt: "/cp-jobs list", until: /\so3$/m },
 		{ prompt: "/cp-jobs show cp-nope", until: /cp-nope/ },
 		{ prompt: "/cp-jobs show", until: /needs a job id/ },
 		{ prompt: "/cp-jobs list --status bogus", until: /--status must be one of/ },
@@ -222,12 +222,13 @@ test("P15-jobs-lifecycle: cp_job records, queries, gates and closes jobs, and /c
 	const line = (job: Job) => new RegExp(`^${job.id}\\s+\\S+\\s+\\S+\\s+\\S+\\s+${job.title}$`, "m");
 	assert.match(fresh[0]!, line(jobOf(ends, "four")), "the command reads what the tool wrote");
 	assert.doesNotMatch(fresh[0]!, /\s(o3|fix it)$/m, "titles only: a random job id may contain o3");
-	assert.match(fresh[1]!, /o1/);
-	assert.doesNotMatch(fresh[1]!, /four/);
-	assert.match(fresh[2]!, /fix it/);
-	assert.doesNotMatch(fresh[2]!, /four/);
-	assert.match(fresh[3]!, /o3/);
-	assert.doesNotMatch(fresh[3]!, /fix it/);
+	assert.match(fresh[1]!, /\so1$/m);
+	// Match the title column: a bare substring can collide with a random job id (e.g. cp-vco3).
+	assert.doesNotMatch(fresh[1]!, /\sfour$/m);
+	assert.match(fresh[2]!, /\sfix it$/m);
+	assert.doesNotMatch(fresh[2]!, /\sfour$/m);
+	assert.match(fresh[3]!, /\so3$/m);
+	assert.doesNotMatch(fresh[3]!, /\sfix it$/m);
 	assert.match(fresh[4]!, /cp-nope: no such job/);
 	assert.match(fresh[5]!, /\/cp-jobs show needs a job id/);
 	assert.match(fresh[6]!, /--status must be one of open\|in_progress\|deferred\|closed/);
