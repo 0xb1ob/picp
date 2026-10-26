@@ -63,7 +63,7 @@ async function viewer(t: TestContext, prepare: ((s: Seed, home: string) => void)
 	const s = seed(home.path);
 	if (!live) prepare(s, home.path);
 	const clockFile = join(home.path, "clock-offset-ms");
-	const clock = (ms = 0) => writeFileSync(clockFile, String(live ? ms : NOON + ms - Date.now()));
+	const clock = (shift = 0) => writeFileSync(clockFile, String(live ? shift : NOON + shift - Date.now()));
 	clock();
 	const port = await freePort();
 	const view: ChildProcess = spawn(join(REPO_ROOT, "bin/cp-view"), ["--home", home.path, "--host", "127.0.0.1", "--port", String(port)], {
