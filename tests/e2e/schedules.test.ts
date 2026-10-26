@@ -30,9 +30,9 @@ import {
 type End = RpcRecord & { toolCallId: string; isError?: boolean; result?: { content?: Array<{ text?: string }> } };
 
 /** A scratch home with project demo cloned onto a treehouse pool, and a mock provider for every pi. */
-async function schedulesHome(t: TestContext, options: { held?: boolean; cloneUrl?: string; skills?: boolean } = {}) {
+async function schedulesHome(t: TestContext, options: { held?: boolean; cloneUrl?: string; skills?: boolean; files?: Record<string, string> } = {}) {
 	const home = createScratchHome();
-	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n" } });
+	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", ...options.files } });
 	const scratch = createScratchLedger({ home: home.path, knownProjects: ["demo"] });
 	const registry = new ProjectRegistry({ home: home.path });
 	await registry.register({ name: "demo", clone_url: options.cloneUrl ?? (repo.remote as string), delivery: "pr" });
@@ -62,7 +62,7 @@ async function schedulesHome(t: TestContext, options: { held?: boolean; cloneUrl
 		return id;
 	};
 	return {
-		home: home.path, stateDir, ledger: scratch.ledger, provider, schedules, idOf, model,
+		home: home.path, stateDir, ledger: scratch.ledger, provider, schedules, idOf, model, clone,
 		runs: () => openScheduleRunStore(home.path),
 		grants: () => new MandateStore(home.path).list(),
 		/** A parent pi on this home: prompts `prompt` (the operator's words), runs `steps`, then `settle` each later turn. */
@@ -277,6 +277,7 @@ test("P13 runner-owned fires: answer, board and local runs are dispatched in cod
 	const parent = await h.parent(`P13: ${names.map((name) => `Add the ${name} schedule.`).join(" ")}`, [
 		{ kind: "tool_calls", calls: names.map((name) => schedule(`add-${name}`, {
 			action: "add", name, project: "demo", manual: true, title: `${name} task`, kind: recipes[name][0], delivery: recipes[name][1], operator_quote: `Add the ${name} schedule.`,
+			...(name === "answer-run" ? { description: "Summarise yesterday's merges." } : {}),
 		})) },
 		{ kind: "tool_calls", calls: names.filter((name) => name !== "blocked-run").map((name) => schedule(`run-${name}`, () => ({ action: "run_now", id: h.idOf(name), overrides: { model: worker } }))) },
 		// The pipeline store turns unwritable before the last fire: its start fails after the run and anchor exist.
@@ -292,9 +293,13 @@ test("P13 runner-owned fires: answer, board and local runs are dispatched in cod
 		const record = await waitFor(() => readFleet(h.home).jobs.find((job) => job.job_id === anchor(name)), Boolean, { timeoutMs: 60_000, what: `${name}'s anchor dispatched` });
 		assert.equal(record?.schedule_id, h.idOf(name));
 	}
-	for (const name of ["answer-run", "board-run", "local-run"]) {
-		assert.match(readFileSync(join(h.home, paths.briefFile(anchor(name))), "utf8"), new RegExp(`${name} task`), `${name}: the runner hands the recipe as the task`);
-	}
+	// The worker's task is the recipe's description, or its title when it has none.
+	const tasks = { "answer-run": /Summarise yesterday's merges\./, "board-run": /board-run task/, "local-run": /local-run task/ };
+	for (const [name, task] of Object.entries(tasks)) assert.match(readFileSync(join(h.home, paths.briefFile(anchor(name))), "utf8"), task, name);
+	const workerRequests = () => h.provider.requests().filter((request) => worker === `${MOCK_PROVIDER_ID}/${h.provider.modelId(request.script)}`);
+	await waitFor(() => workerRequests().length, (count) => count > 0, { timeoutMs: 60_000, what: "a worker's first model request" });
+	const offered = JSON.stringify(workerRequests().map((request) => request.body));
+	assert.ok(offered.includes('"report_result"') && !offered.includes('"cp_schedule"'), "a worker is offered report_result, never cp_schedule");
 	const answered = h.runs().runs().find((run) => run.schedule_id === h.idOf("answer-run"));
 	assert.equal(answered?.authority_log.at(-1)?.use, "dispatch", "the run, not a grant, authorized the dispatch");
 
@@ -735,4 +740,195 @@ test("P13b schedule labels: cp_job adds a schedule: job only to a parent-expande
 	const run = await h.ledger.list({ labels: [org()], all: true });
 	assert.deepEqual(run.filter((entry) => entry.id !== anchor.id).map((entry) => entry.title).sort(), ["reviewer 1", "reviewer 2", "synthesis"], "refusals create nothing; a re-create reuses its job");
 	assert.equal(run.filter((entry) => entry.labels.includes("risk:high")).length, 2);
+});
+
+test("P13c same-process new_session: an unexpanded skill anchor offered by the first session is offered again by the next one", { timeout: 180_000 }, async (t) => {
+	// Known defect, pinned as observed (not fixed here): new_session builds a fresh runtime whose dedupe set is empty,
+	// so the same process offers one unexpanded anchor twice. A fix makes this scenario fail on the second wake.
+	const h = await schedulesHome(t, { cloneUrl: "https://github.com/acme/demo.git" });
+	const parent = await h.parent("P13c: Add the pr-review schedule.", [{ kind: "tool_calls", calls: [
+		schedule("add", { action: "add", name: "pr-review", project: "demo", manual: true, title: "PR review", kind: "research", delivery: "local",
+			skill: "cp-pr-review", description: "pr: https://github.com/acme/demo/pull/1", operator_quote: "Add the pr-review schedule." }),
+	] }]);
+	checkCall(ends(parent), "add", "ok", /added sch-/);
+	const id = h.idOf("pr-review");
+	assert.equal((await dashboard(h.stateDir).ask("run_now", id))[0], "done");
+	await waitFor(() => wakes(parent).length, (count) => count === 1, { timeoutMs: 20_000, what: "the skill fire's wake" });
+	await parent.waitForSettled(30_000);
+	parent.send({ type: "new_session", id: "fresh" });
+	assert.equal((await parent.waitFor((r) => r.type === "response" && r.id === "fresh", 30_000)).success, true);
+	await waitFor(() => wakes(parent).length, (count) => count === 2, { timeoutMs: 20_000, what: "the new session's recovery wake" });
+	await parent.waitForSettled(30_000);
+	const [anchor] = await h.ledger.list({ labels: [`schedule:${id}`], all: true });
+	const offered = wakes(parent).map((wake) => wake.message as { details?: { job_id?: string } });
+	assert.deepEqual(offered.map((message) => message.details?.job_id), [anchor!.id, anchor!.id], "one anchor, offered twice in one process");
+	assert.match(JSON.stringify(wakes(parent)[1]!.message), /use skill cp-pr-review to expand it now/);
+	assert.equal((await h.ledger.list({ labels: [`schedule:${id}`], all: true })).length, 1, "the duplicate offer creates no job");
+});
+
+test("P13c cron and watch fires at parent start: a missed slot is caught up once, an open run holds the next, a watch fires on exit 0 or changed output, an untracked script and a deactivated schedule fire nothing", { timeout: 240_000 }, async (t) => {
+	const h = await schedulesHome(t, { files: { "scripts/ready.sh": "exit 0\n", "scripts/diff.sh": "cat marker.txt\n" } });
+	const DAY = 86_400_000;
+	const cron = { cron: "0 9 * * *", tz: "UTC" };
+	const watch = (script: string, on: string) => ({ watch_script: script, every_seconds: 30, on });
+	const triggers: Record<string, Record<string, unknown>> = {
+		nightly: cron, paused: cron, minutely: { cron: "* * * * *", tz: "UTC" },
+		ready: watch("scripts/ready.sh", "exit0"), diff: watch("scripts/diff.sh", "changed"), stray: watch("scripts/stray.sh", "exit0"),
+	};
+	const names = Object.keys(triggers);
+	const first = await h.parent(`P13c: ${names.map((name) => `Add the ${name} schedule.`).join(" ")}`, [
+		{ kind: "tool_calls", calls: names.map((name) => schedule(`add-${name}`, { action: "add", name, project: "demo", ...triggers[name], title: `${name} fix`, kind: "ship", delivery: "pr", operator_quote: `Add the ${name} schedule.` })) },
+		{ kind: "text", text: "Added." },
+		{ kind: "tool_calls", calls: [schedule("off", () => ({ action: "deactivate", id: h.idOf("paused"), operator_quote: "Deactivate the paused schedule." }))] },
+	]);
+	// A second operator message: a quote is single-use per message.
+	await first.prompt("P13c: Deactivate the paused schedule.");
+	await first.waitFor(() => first.eventsOfType("agent_settled").length >= 2, 60_000);
+	for (const name of names) checkCall(ends(first), `add-${name}`, "ok", /added sch-/);
+	checkCall(ends(first), "off", "ok", /Deactivated/);
+	await h.closeParents();
+	// Between parents nothing ticks: a checkpoint moved back is a parent that was down that long.
+	const rewind = (ago: Record<string, number>) => {
+		const file = join(h.stateDir, "schedules.json");
+		const saved = JSON.parse(readFileSync(file, "utf8")) as { schedules: Schedule[] };
+		for (const entry of saved.schedules) if (ago[entry.name] !== undefined) entry.last_checked_at = new Date(Date.now() - ago[entry.name]!).toISOString();
+		writeFileSync(file, JSON.stringify(saved));
+	};
+	rewind({ nightly: 3 * DAY, paused: 3 * DAY, minutely: DAY });
+	writeFileSync(join(h.clone, "marker.txt"), "v1\n");
+	writeFileSync(join(h.clone, "scripts", "stray.sh"), "exit 0\n");
+	const byName = (name: string) => h.schedules().find((entry) => entry.name === name)!;
+	const jobsOf = (name: string) => h.ledger.list({ labels: [`schedule:${h.idOf(name)}`], all: true });
+
+	const second = await h.parent("P13c: second process.", []);
+	await waitFor(() => wakes(second).length, (count) => count === 3, { timeoutMs: 30_000, what: "the nightly, minutely and ready fires' wakes" });
+	await second.waitForSettled(30_000);
+	const slot = byName("nightly").last_fire?.slot ?? "";
+	assert.match(slot, /T09:00:00\.000Z$/);
+	assert.ok(Date.now() - Date.parse(slot) < DAY, "the latest missed slot, never a backlog");
+	const [nightly, ...extra] = await jobsOf("nightly");
+	assert.deepEqual([nightly?.title, extra.length], [`nightly fix (nightly ${slot.slice(0, 16)}Z)`, 0]);
+	assert.ok(nightly!.labels.includes("delivery:pr"));
+	const run = h.runs().openRun(h.idOf("nightly"))!;
+	assert.deepEqual([run.trigger.missed, run.anchor_job_id], [true, nightly!.id]);
+	assert.match(nightly!.notes ?? "", new RegExp(`under run ${run.id}`));
+	const told = wakes(second).map((wake) => JSON.stringify(wake.message));
+	assert.ok(told.some((text) => text.includes(`missed ${slot.slice(0, 16)}Z while no parent was up`) && text.includes(`Call cp_next: ${nightly!.id}`)), told.join("\n"));
+	const [ready] = await jobsOf("ready");
+	assert.ok(ready && told.some((text) => text.includes(`Call cp_next: ${ready.id}`)), "exit 0 fires");
+	assert.deepEqual([(await jobsOf("diff")).length, typeof byName("diff").last_output_sha], [0, "string"], "the first output is the baseline");
+	assert.match(byName("stray").last_skip?.reason ?? "", /not tracked/);
+	assert.match(byName("paused").last_skip?.reason ?? "", /no active native policy/);
+	assert.deepEqual([(await jobsOf("stray")).length, (await jobsOf("paused")).length], [0, 0]);
+
+	await h.closeParents();
+	rewind({ nightly: 3 * DAY, diff: 60_000 });
+	writeFileSync(join(h.clone, "marker.txt"), "v2\n");
+	const minute = h.runs().openRun(h.idOf("minutely"))!;
+	const fired = byName("minutely").last_fire!.slot;
+	await waitFor(() => new Date().toISOString().slice(0, 16), (now) => now !== fired.slice(0, 16), { timeoutMs: 70_000, what: "the next minute slot" });
+	const third = await h.parent("P13c: third process.", [{ kind: "tool_calls", calls: [{ id: "next", name: "cp_next", args: { project: "demo" } }] }]);
+	await waitFor(() => wakes(third).length, (count) => count === 1, { timeoutMs: 30_000, what: "the changed watch's wake" });
+	await third.waitForSettled(30_000);
+	assert.equal((await jobsOf("diff")).length, 1, "changed output fires");
+	assert.match(byName("nightly").last_skip?.reason ?? "", new RegExp(`fire at ${slot.slice(0, 16)}Z not recorded: it repeats the local minute of ${slot.slice(0, 16)}Z, already fired`));
+	assert.match(byName("minutely").last_skip?.reason ?? "", new RegExp(`already_running: .*open run ${minute.id}`));
+	assert.deepEqual(await Promise.all(["nightly", "minutely", "ready"].map(async (name) => (await jobsOf(name)).length)), [1, 1, 1], "no slot or interval fires twice");
+	checkCall(ends(third), "next", "ok", new RegExp(nightly!.id));
+	assert.deepEqual(h.grants(), [], "no fire mints a grant");
+});
+
+test("P13c cp_schedule add, enable and list: refused adds write nothing, cp-pr-review targets and run caps, enable gated on live bounds and an active revision, an archived project fires nothing", { timeout: 240_000 }, async (t) => {
+	const h = await schedulesHome(t, { cloneUrl: "https://github.com/acme/demo.git" });
+	const pr = (n: number) => `pr: https://github.com/acme/demo/pull/${n}`;
+	const skill = { manual: true, kind: "research", delivery: "local", skill: "cp-self-review" };
+	const review = { manual: true, title: "PR review", kind: "research", delivery: "local", skill: "cp-pr-review" };
+	const daily = { cron: "0 9 * * *", tz: "UTC", title: "daily report", kind: "research", delivery: "answer" };
+	const adds: Record<string, Record<string, unknown>> = {
+		"gate": daily, "later": daily, "self-review": { ...skill, title: "Self-review" },
+		"prs": { ...review, description: `Review the open queue.\n${pr(7)}\n  ${pr(9)}  \n` },
+		"tight": { ...review, description: `${pr(1)}\n${pr(2)}`, limits: { child_jobs: 2 } }, "fits": { ...review, description: `${pr(1)}\n${pr(2)}`, limits: { child_jobs: 9 } },
+	};
+	const refused: [string, Record<string, unknown>, RegExp][] = [
+		["both", { ...daily, manual: true }, /exactly one of cron/], ["skillcron", { ...daily, skill: "cp-self-review", delivery: "local" }, /skill needs a manual schedule/],
+		["skillanswer", { ...skill, title: "x", delivery: "answer" }, /skill needs a manual schedule/], ["skillship", { ...skill, title: "x", kind: "ship" }, /skill needs a manual schedule/],
+		["skillscript", { ...skill, title: "x", script_path: "x.sh" }, /skill needs a manual schedule/],
+		["badcron", { ...daily, cron: "60 * * * *" }, /cron/], ["notz", { ...daily, tz: undefined }, /needs tz/],
+		["other", { ...review, description: `${pr(7)}\npr: https://github.com/other/demo/pull/8` }, /not in the project's repo acme\/demo/],
+		["many", { ...review, description: Array.from({ length: 21 }, (_, i) => pr(i + 1)).join("\n") }, /needs 1-20 description lines .*found 21/],
+		["none", { ...review, description: "no targets here" }, /needs 1-20 description lines .*found 0/],
+		["issue", { ...review, description: "pr: https://github.com/acme/demo/issues/3" }, /is not a PR url/],
+		["files", { ...review, description: "pr: https://github.com/acme/demo/pull/3/files" }, /is not a PR url/], ["twice", { ...review, description: `${pr(3)}\n${pr(3)}` }, /listed twice/],
+	];
+	const add = (name: string, fields: Record<string, unknown>, id = name): MockToolCall => schedule(id, { action: "add", name, project: "demo", operator_quote: `Add the ${name} schedule.`, ...fields });
+	const defaultsFile = join(h.home, LAYOUT.data, "mandate-defaults.json");
+	const defaults = existsSync(defaultsFile) ? readFileSync(defaultsFile, "utf8") : undefined;
+	const restore = () => defaults === undefined ? rmSync(defaultsFile, { force: true }) : writeFileSync(defaultsFile, defaults);
+	let enabledAt = 0;
+	const schedulesFile = join(h.stateDir, "schedules.json");
+	const rewind = (name: string, ms: number) => {
+		const saved = JSON.parse(readFileSync(schedulesFile, "utf8")) as { schedules: Schedule[] };
+		saved.schedules.find((entry) => entry.name === name)!.last_checked_at = new Date(Date.now() - ms).toISOString();
+		writeFileSync(schedulesFile, JSON.stringify(saved));
+	};
+	const parent = await h.parent(`P13c: ${[...Object.keys(adds), ...refused.map(([name]) => name)].map((name) => `Add the ${name} schedule.`).join(" ")}`, [
+		{ kind: "tool_calls", calls: [...Object.entries(adds).map(([name, fields]) => add(name, fields)), ...refused.map(([name, fields]) => add(name, fields))] },
+		{ kind: "tool_calls", calls: [
+			schedule("list", { action: "list" }), schedule("run", () => ({ action: "run_now", id: h.idOf("prs") })), schedule("again", () => ({ action: "run_now", id: h.idOf("prs") })),
+			schedule("disable", () => ({ action: "disable", id: h.idOf("gate") })),
+		] },
+		// Unreadable live defaults refuse an enable; the next enable reads them again.
+		{ kind: "tool_calls", calls: [schedule("unreadable", () => { writeFileSync(defaultsFile, "{"); return { action: "enable", id: h.idOf("gate") }; })] },
+		// Disabled three days ago: the enable restarts evaluation from now, so no missed slot is filed.
+		{ kind: "tool_calls", calls: [schedule("enable", () => { restore(); rewind("gate", 3 * 86_400_000); enabledAt = Date.now(); return { action: "enable", id: h.idOf("gate") }; })] },
+	]);
+	const results = ends(parent);
+	const anchor = h.runs().openRun(h.idOf("prs"))!;
+	// Marked expanded, so no later parent's startup re-offers it before the operator's message.
+	await h.ledger.comment(anchor.anchor_job_id!, `expanded: R1 ${anchor.anchor_job_id}`);
+	await h.closeParents();
+	// A second operator message: a quote is single-use per message.
+	const second = await h.parent("P13c: Add the gate schedule. Deactivate the gate schedule. Add the late schedule.", [
+		{ kind: "tool_calls", calls: [
+			add("gate", daily, "dup"), schedule("off", () => ({ action: "deactivate", id: h.idOf("gate"), operator_quote: "Deactivate the gate schedule." })),
+		] },
+		{ kind: "tool_calls", calls: [schedule("disable-2", () => ({ action: "disable", id: h.idOf("gate") }))] },
+		{ kind: "tool_calls", calls: [
+			schedule("inactive", () => ({ action: "enable", id: h.idOf("gate") })), schedule("unknown", { action: "enable", id: "sch-ffffff" }),
+			{ id: "archive", name: "cp_project", args: { action: "archive", name: "demo" } },
+		] },
+		{ kind: "tool_calls", calls: [add("late", daily), schedule("archived", () => ({ action: "run_now", id: h.idOf("later") }))] },
+	]);
+	for (const [id, list] of ends(second)) results.set(id, list);
+	for (const name of Object.keys(adds)) checkCall(results, name, "ok", /added sch-/);
+	for (const [name, , message] of refused) checkCall(results, name, "refused", message);
+	assert.deepEqual(h.schedules().map((entry) => entry.name), Object.keys(adds), "a refused add writes nothing");
+	const caps = ["tight", "fits"].map((name) => h.runs().activePolicy(h.idOf(name))?.limits.child_jobs);
+	assert.deepEqual(caps, [4, 9], "the run cap holds both reviewers, the synthesis and the anchor");
+	assert.equal(h.schedules().find((entry) => entry.name === "prs")?.job.description, adds.prs!.description);
+	assert.match(checkCall(results, "list", "ok", /self-review/), /manual \(fires only on Run now\) → expanded by skill cp-self-review/);
+	checkCall(results, "run", "ok", /fired: created cp-/);
+	checkCall(results, "again", "ok", new RegExp(`run now not recorded: already_running: .*open run ${anchor.id}`));
+	assert.equal((await h.ledger.show(anchor.anchor_job_id!)).status, "deferred");
+	checkCall(results, "disable", "ok", /disabled/);
+	checkCall(results, "unreadable", "refused", /mandate-defaults\.json is not valid JSON.*refusing to guess mandate defaults/);
+	checkCall(results, "enable", "ok", /enabled/);
+	assert.ok(Date.parse(h.schedules().find((entry) => entry.name === "gate")!.last_checked_at ?? "") >= enabledAt - 1_000, "evaluation restarts at the enable time");
+	checkCall(results, "dup", "refused", /already has a schedule named "gate"/);
+	checkCall(results, "off", "ok", /Deactivated/);
+	checkCall(results, "inactive", "refused", /no active native policy/);
+	checkCall(results, "unknown", "refused", /no schedule sch-ffffff/);
+	checkCall(results, "archive", "ok", /archived/);
+	checkCall(results, "late", "refused", /cp_schedule add refused: archived project demo — unarchive with cp_project unarchive first/);
+	checkCall(results, "archived", "ok", /run now not recorded: archived project demo/);
+
+	await h.closeParents();
+	rewind("later", 86_400_000);
+	const restarted = await h.parent("P13c: restarted.", []);
+	await waitFor(() => h.schedules().find((entry) => entry.name === "later")?.last_skip?.reason, (reason) => /archived project demo/.test(reason ?? ""), { timeoutMs: 20_000, what: "the archived schedule's tick skip" });
+	const selfReview = h.schedules().find((entry) => entry.name === "self-review")!;
+	assert.deepEqual([selfReview.last_checked_at, selfReview.last_fire, selfReview.last_skip], [undefined, undefined, undefined], "a manual schedule is never ticked");
+	assert.deepEqual(wakes(restarted), [], "nothing fires or is re-offered");
+	assert.equal((await h.ledger.list({ all: true })).length, 1, "the prs anchor is the only job");
+	assert.deepEqual(h.grants(), []);
 });

@@ -217,7 +217,6 @@
 	"tests/schedule-runner.test.ts": 66,
 	"tests/schedule-runs.test.ts": 296,
 	"tests/schedule-self-review.test.ts": 529,
-	"tests/scheduler.test.ts": 440,
 	"tests/service-alerts.test.ts": 45,
 	"tests/service-health.test.ts": 180,
 	"tests/service-install.test.ts": 4505,
