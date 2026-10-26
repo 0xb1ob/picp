@@ -75,14 +75,17 @@ test("P11c-run-log: a dispatched worker's log and projection are the read surfac
 	const updates = live.filter((event) => event.type === "tool_execution_update");
 	assert.ok(updates.length > 0 && updates.every((event) => (event.payload as { toolCallId?: string }).toolCallId === working?.current_tool?.tool_call_id));
 	assert.doesNotMatch(JSON.stringify(updates), /STREAMED-SECRET/, "an update keeps its call id, never its streamed output");
-	assert.deepEqual([idle.event_count, idle.last_activity_at], [live.length, live.at(-1)?.ts]);
+	// After idle the one report nudge hits the exhausted mock script; pi retries and the outer ladder add turns.
+	assert.deepEqual([idle.event_count <= live.length, live[idle.event_count - 1]?.ts], [true, idle.last_activity_at]);
 
 	assert.equal((await post.tearDown(jobId, { force: true })).torn_down, true);
 	const exited = readRunStatus(home.path, jobId);
 	const closed = readRunEvents(home.path, jobId);
 	assert.deepEqual(closed.slice(0, live.length), live, "the log is append-only");
 	assert.deepEqual(closed.map((event) => event.seq), closed.map((_, i) => i + 1));
-	assert.deepEqual([exited.phase, exited.exit_code, exited.turns, exited.tool_calls, exited.current_tool], ["exited", 0, 2, 1, null]);
+	assert.deepEqual([exited.phase, exited.exit_code, exited.tool_calls, exited.current_tool], ["exited", 0, 1, null]);
+	assert.ok(exited.turns >= idle.turns && idle.turns >= 2, "turns never shrink; the failed nudge turn and its retries add more");
+	assert.ok(closed.filter((event) => event.type === "report_nudged").length <= 1, "a settled-without-report worker is nudged once");
 	assert.ok(exited.exited_at && post.watch(jobId).exited, "the observed close is a cp marker the projection follows");
 	assert.deepEqual(exited.usage, idle.usage);
 	assert.deepEqual(rebuildStatus(home.path, jobId), exited, "the log rebuilds exactly the cached projection");
