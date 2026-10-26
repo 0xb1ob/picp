@@ -696,6 +696,7 @@ test("P13b org-review schedules: cp_schedule add validates the config and floors
 test("P13b schedule labels: cp_job adds a schedule: job only to a parent-expanded schedule's open run, and an org-review run holds at most max_reviewers reviewers plus one synthesis", { timeout: 180_000 }, async (t) => {
 	const h = await schedulesHome(t);
 	const ids = new Map<string, string>();
+	let saved = "";
 	const label = (name: string) => () => `schedule:${ids.get(name) ?? ids.set(name, h.idOf(name)).get(name)}`;
 	const job = (id: string, title: string, labels: Array<string | (() => string)>, extra: Record<string, unknown> = {}): MockToolCall => ({ id, name: "cp_job", args: () => ({
 		action: "create", project: "demo", kind: "research", delivery: "local", title, labels: labels.map((entry) => typeof entry === "string" ? entry : entry()), ...extra,
@@ -718,7 +719,7 @@ test("P13b schedule labels: cp_job adds a schedule: job only to a parent-expande
 		] },
 		{ kind: "tool_calls", calls: [schedule("off", () => ({ action: "deactivate", id: h.idOf("org"), operator_quote: "Deactivate the org schedule." }))] },
 		// A schedules.json that does not parse reads as no schedule: the label fails closed.
-		{ kind: "tool_calls", calls: [job("corrupt", "corrupt", [() => { const value = org(); writeFileSync(join(h.stateDir, "schedules.json"), "{not json"); return value; }])] },
+		{ kind: "tool_calls", calls: [job("corrupt", "corrupt", [() => { const value = org(); saved = readFileSync(join(h.stateDir, "schedules.json"), "utf8"); writeFileSync(join(h.stateDir, "schedules.json"), "{not json"); return value; }])] },
 	]);
 	const results = ends(parent);
 	checkCall(results, "missing", "refused", /schedule:sch-ffffff is minted by a fire; only a parent-expanded schedule's open run may add jobs to it/);
@@ -740,6 +741,13 @@ test("P13b schedule labels: cp_job adds a schedule: job only to a parent-expande
 	const run = await h.ledger.list({ labels: [org()], all: true });
 	assert.deepEqual(run.filter((entry) => entry.id !== anchor.id).map((entry) => entry.title).sort(), ["reviewer 1", "reviewer 2", "synthesis"], "refusals create nothing; a re-create reuses its job");
 	assert.equal(run.filter((entry) => entry.labels.includes("risk:high")).length, 2);
+	// P13c: a parent-expanded run's open members are the parent's; past a runner tick none is dispatched or noted.
+	writeFileSync(join(h.stateDir, "schedules.json"), saved);
+	await new Promise((resolve) => setTimeout(resolve, 35_000));
+	const fleet = existsSync(join(h.stateDir, "fleet.json")) ? readFleet(h.home).jobs : [];
+	for (const member of h.ledger.read().jobs.filter((entry) => entry.labels.includes(org()) && entry.id !== anchor.id)) {
+		assert.deepEqual([fleet.some((record) => record.job_id === member.id), member.comments.some((comment) => comment.text.startsWith("dispatch refused"))], [false, false], member.title);
+	}
 });
 
 test("P13c same-process new_session: an unexpanded skill anchor offered by the first session is offered again by the next one", { timeout: 180_000 }, async (t) => {
@@ -931,4 +939,111 @@ test("P13c cp_schedule add, enable and list: refused adds write nothing, cp-pr-r
 	assert.deepEqual(wakes(restarted), [], "nothing fires or is re-offered");
 	assert.equal((await h.ledger.list({ all: true })).length, 1, "the prs anchor is the only job");
 	assert.deepEqual(h.grants(), []);
+});
+
+test("P13c runner pending jobs: a refused dispatch is noted once and retried; a disabled or removed schedule's job, a job past its next slot and a watch job past its interval are dropped", { timeout: 420_000 }, async (t) => {
+	const h = await schedulesHome(t, { files: { "scripts/ready.sh": "exit 0\n" } });
+	// A timer fire has no run_now model override, and routing allows only mock models: every dispatch is refused.
+	const minutely = { cron: "* * * * *", tz: "UTC" };
+	const triggers: Record<string, Record<string, unknown>> = {
+		off: minutely, gone: minutely, late: minutely, watched: { watch_script: "scripts/ready.sh", every_seconds: 60, on: "exit0" },
+	};
+	const names = Object.keys(triggers);
+	const parent = await h.parent(`P13c: ${names.map((name) => `Add the ${name} schedule.`).join(" ")}`, [
+		{ kind: "tool_calls", calls: names.map((name) => schedule(`add-${name}`, { action: "add", name, project: "demo", ...triggers[name], title: `${name} digest`, kind: "research", delivery: "answer", operator_quote: `Add the ${name} schedule.` })) },
+		{ kind: "text", text: "Added." },
+		{ kind: "tool_calls", calls: [schedule("disable", () => ({ action: "disable", id: h.idOf("off") })), schedule("remove", () => ({ action: "remove", id: h.idOf("gone") }))] },
+	]);
+	for (const name of names) checkCall(ends(parent), `add-${name}`, "ok", /added sch-/);
+	const ids = Object.fromEntries(names.map((name) => [name, h.idOf(name)]));
+	const jobOf = (name: string) => h.ledger.read().jobs.find((job) => job.labels.includes(`schedule:${ids[name]}`));
+	const refusals = (name: string) => (jobOf(name)?.comments ?? []).filter((comment) => comment.text.startsWith("dispatch refused"));
+	for (const name of ["off", "gone", "late", "watched"]) {
+		await waitFor(() => refusals(name), (notes) => notes.length > 0, { timeoutMs: 150_000, what: `${name}'s refused dispatch` });
+	}
+	await parent.prompt("P13c: Disable the off schedule and remove the gone schedule.");
+	await parent.waitFor(() => parent.eventsOfType("agent_settled").length >= 2, 60_000);
+	checkCall(ends(parent), "disable", "ok", /disabled/);
+	checkCall(ends(parent), "remove", "ok", /removed/);
+	const closed = (name: string) => jobOf(name)?.status === "closed" ? jobOf(name)?.close_reason ?? "" : undefined;
+	for (const name of ["off", "gone", "late", "watched"]) {
+		await waitFor(() => closed(name), (reason) => reason !== undefined, { timeoutMs: 150_000, what: `${name}'s job dropped` });
+	}
+	const refused = /dispatch refused \S+: no usable model for planner job cp-\w+/;
+	assert.match(closed("off")!, new RegExp(`^dropped: schedule ${ids.off} is disabled: ${refused.source}`));
+	assert.match(closed("gone")!, new RegExp(`^dropped: schedule ${ids.gone} is gone: ${refused.source}`));
+	assert.match(closed("late")!, new RegExp(`^dropped: not dispatched before the next slot: ${refused.source}`));
+	assert.match(closed("watched")!, new RegExp(`^dropped: not dispatched before the next slot: ${refused.source}`));
+	for (const name of ["off", "gone", "late", "watched"]) {
+		assert.equal(refusals(name).length, 1, `${name}: the same refusal is noted once`);
+		const fleet = existsSync(join(h.stateDir, "fleet.json")) ? readFleet(h.home).jobs : [];
+		assert.equal(fleet.some((job) => job.job_id === jobOf(name)!.id), false, `${name}: never dispatched`);
+	}
+	assert.deepEqual(wakes(parent), [], "runner-owned jobs wake nobody");
+});
+
+test("P13c runner reports: answer and script runs are torn down in code with one result card and no wake; a local run whose teardown is refused wakes the parent once per process", { timeout: 300_000 }, async (t) => {
+	const h = await schedulesHome(t, { files: { "scripts/tidy.sh": "echo tidied\n" } });
+	const anchorOf = (name: string) => h.runs().runs().find((run) => run.schedule_id === h.idOf(name))?.anchor_job_id as string;
+	const fleetOf = (id: string) => (existsSync(join(h.stateDir, "fleet.json")) ? readFleet(h.home).jobs : []).find((job) => job.job_id === id);
+	const answer = h.model("answer", [{ kind: "tool_calls", calls: [{ name: "report_result", args: () => {
+		const id = anchorOf("ask"), report = join(h.home, LAYOUT.state, "artifacts", id, "report.md");
+		mkdirSync(dirname(report), { recursive: true });
+		writeFileSync(report, "Answer\nNo merges yesterday.\n\nEvidence (paths + short quotes)\nREADME.md\n\nConfidence\nhigh\n\nUnknowns\nnone\n");
+		return { job_id: id, kind: "research", status: "done", summary: "No merges yesterday.", artifact_path: report };
+	} }] }, { kind: "hang" }]);
+	const local = h.model("local", [{ kind: "tool_calls", calls: [{ name: "report_result", args: () => {
+		const id = anchorOf("tidy"), worktree = fleetOf(id)!.worktree!;
+		writeFileSync(join(worktree, "stray.txt"), "left behind\n");
+		const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: worktree, encoding: "utf8" }).trim();
+		return { job_id: id, kind: "ship", status: "done", summary: "Tidied.", branch: id, head_sha: head };
+	} }] }, { kind: "hang" }]);
+	const recipes = { ask: ["research", "answer", answer], tidy: ["ship", "local", local], scripted: ["ship", "local", undefined] } as const;
+	const names = Object.keys(recipes) as Array<keyof typeof recipes>;
+	const parent = await h.parent(`P13c: ${names.map((name) => `Add the ${name} schedule.`).join(" ")}`, [
+		{ kind: "tool_calls", calls: names.map((name) => schedule(`add-${name}`, {
+			action: "add", name, project: "demo", manual: true, title: `${name} task`, kind: recipes[name][0], delivery: recipes[name][1], operator_quote: `Add the ${name} schedule.`,
+			...(name === "scripted" ? { script_path: "scripts/tidy.sh", description: "ignored" } : {}),
+		})) },
+		{ kind: "tool_calls", calls: names.map((name) => schedule(`run-${name}`, () => ({ action: "run_now", id: h.idOf(name), ...(recipes[name][2] ? { overrides: { model: recipes[name][2] } } : {}) }))) },
+	]);
+	for (const name of names) checkCall(ends(parent), `run-${name}`, "ok", /fired: created cp-/);
+	const ask = anchorOf("ask"), tidy = anchorOf("tidy"), scripted = anchorOf("scripted");
+	const record = await waitFor(() => fleetOf(scripted), (found) => found?.phase === "done", { timeoutMs: 60_000, what: "the script run torn down" });
+	// A script recipe runs no pi: no worker, no model, no brief; its report is torn down in code too.
+	assert.deepEqual([record?.executor, record?.worker, existsSync(join(h.home, paths.briefFile(scripted)))], ["script", undefined, false]);
+	await waitFor(() => fleetOf(ask)?.phase, (phase) => phase === "done", { timeoutMs: 120_000, what: "the answer run torn down" });
+	const envelopes = (child: PiChild, id: string) => child.records().filter((r) => r.type === "message_start" && (r.message as { customType?: string })?.customType === "cp-envelope" && JSON.stringify(r.message).includes(id));
+	await waitFor(() => envelopes(parent, tidy).length, (count) => count > 0, { timeoutMs: 120_000, what: "the refused teardown's wake" });
+	const answersFile = join(h.stateDir, "operator", "answers.jsonl");
+	const cards = () => existsSync(answersFile) ? readFileSync(answersFile, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { type: string; by: string; job_id: string | null }).filter((card) => card.job_id === ask) : [];
+	await waitFor(() => cards().length, (count) => count === 1, { timeoutMs: 60_000, what: "the answer run's card" });
+	// Past one 30 s tick: no later tick wakes the parent again or posts a second card.
+	await new Promise((resolve) => setTimeout(resolve, 35_000));
+	await parent.waitForSettled(60_000);
+	assert.deepEqual([cards()[0]?.type, cards()[0]?.by], ["posted", "schedule"]);
+	assert.deepEqual([envelopes(parent, ask).length, envelopes(parent, scripted).length], [0, 0], "answer and script runs are torn down in code, with no wake");
+	assert.equal(envelopes(parent, tidy).length, 1, "the refused teardown wakes the parent once");
+	assert.match(JSON.stringify(envelopes(parent, tidy)[0]!.message), /cp-\w+ reported done \(ship\/local\) → teardown/);
+	assert.deepEqual([fleetOf(ask)?.phase, fleetOf(tidy)?.phase], ["done", "held"]);
+	assert.equal(h.runs().runs().find((run) => run.schedule_id === h.idOf("ask"))?.phase, "closed");
+
+	// A restart: the held run is swept again and wakes once more; the delivered card is not posted twice.
+	await h.closeParents();
+	const restarted = await h.parent("P13c: restarted.", []);
+	await waitFor(() => envelopes(restarted, tidy).length, (count) => count > 0, { timeoutMs: 60_000, what: "the swept run's wake" });
+	await restarted.waitForSettled(60_000);
+	assert.equal(envelopes(restarted, tidy).length, 1);
+	assert.equal(envelopes(restarted, ask).length, 0);
+	assert.equal(cards().length, 1, "a replay posts no second card");
+
+	// With its envelope gone the recorded outcome is not teardown-shaped: the next process wakes the parent without one.
+	rmSync(join(h.home, paths.envelopeFile(tidy)));
+	await h.closeParents();
+	const third = await h.parent("P13c: restarted again.", []);
+	await waitFor(() => envelopes(third, tidy).length, (count) => count > 0, { timeoutMs: 60_000, what: "the unreadable run's wake" });
+	await third.waitForSettled(60_000);
+	assert.equal(envelopes(third, tidy).length, 1);
+	assert.match(JSON.stringify(envelopes(third, tidy)[0]!.message), /cp-\w+: no envelope yet/);
+	assert.equal(fleetOf(tidy)?.phase, "held", "no teardown ran");
 });
