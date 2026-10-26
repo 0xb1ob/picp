@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, truncateSync, utimesSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { connect } from "node:net";
 import { type ControlPorts, type DashboardControl, type InlineImage, startDashboardControl } from "../../src/dashboard-control.ts";
 import { appendAnswerLine, appendThreadLine } from "../../src/viewer/control-audit.ts";
 import { type AnswerLine, controlConfigFile, controlInboxFile, controlJournalFile, operatorThreadsFile, readControlRecord, type ThreadLine } from "../../src/viewer/control-files.ts";
@@ -261,7 +262,8 @@ test("P19-upload: POST /api/operator/upload refuses in order, stores sniffed ima
 	await refused(415, d.bytes("x", png, "application/json"), /Content-Type must be image/);
 	await refused(415, d.bytes("x", STUBS.svg, "image/svg+xml"), /Content-Type must be image/);
 	await refused(415, d.bytes("x", STUBS.heic, "image/heic"), /HEIC\/HEIF is not supported; share the photo as JPEG/);
-	await refused(413, d.bytes("x", png, "image/png", { "content-length": String(10 * 1024 * 1024 + 1) }), /larger than 10485760 bytes/);
+	// The declared length is a lie (the png is tiny): this client must not reuse a socket the server thinks is mid-body.
+	await refused(413, d.bytes("x", png, "image/png", { "content-length": String(10 * 1024 * 1024 + 1), connection: "close" }), /larger than 10485760 bytes/);
 	await refused(409, d.bytes("x", png), /need a running operator session/);
 	const { csrf } = await session(t, d.stateDir, d.root);
 	await refused(403, d.bytes("stale", png), /control token missing or stale/);
@@ -463,4 +465,34 @@ test("P19-upload-send: images and text files reach the operator session inline, 
 	assert.ok(Buffer.byteLength(eight.text) <= 16384 && !/\uFFFD/.test(eight.text), String(Buffer.byteLength(eight.text)));
 	assert.equal((eight.text.match(/File: mix-/g) ?? []).length, 8);
 	for (const [i, file] of eight.ids.entries()) assert.deepEqual(readFileSync(stored(d.root, file)), Buffer.from(`# ${i}\n` + samples[i]!.repeat(4_000 + i * 997)), "the stored file keeps every byte");
+});
+
+/** One raw POST to the image upload with `framing` headers; `paused` reads nothing until the whole body is written. */
+function rawUpload(d: Awaited<ReturnType<typeof viewer>>, framing: string, body: Buffer[], paused: boolean) {
+	const { origin, "sec-fetch-site": site } = d.own;
+	const head = `POST ${UPLOAD} HTTP/1.1\r\nhost: 127.0.0.1:${d.port}\r\norigin: ${origin}\r\nsec-fetch-site: ${site}\r\ncontent-type: image/png\r\n${framing}\r\n\r\n`;
+	return new Promise<{ reply: string; written: boolean }>((resolve) => {
+		const socket = connect(d.port, "127.0.0.1");
+		const chunks: Buffer[] = [];
+		let written = false;
+		const done = () => resolve({ reply: Buffer.concat(chunks).toString("utf8"), written });
+		if (paused) socket.pause();
+		socket.on("data", (chunk: Buffer) => { chunks.push(chunk); if (/\}$/.test(Buffer.concat(chunks).toString("utf8"))) socket.destroy(); });
+		socket.on("error", () => {});
+		socket.on("close", done);
+		socket.write(head);
+		for (const [i, part] of body.entries()) socket.write(part, (error) => { if (!error && i === body.length - 1) { written = true; socket.resume(); } });
+	});
+}
+
+test("P19-upload-oversize: an oversize upload is answered 413 and only a bounded rest of its body is ever read", { timeout: 120_000 }, async (t) => {
+	const d = await viewer(t);
+	// 10 MiB + 512 KiB streamed: the 413 comes at the cap and the 512 KiB beyond is within the discard bound.
+	const frame = Buffer.concat([Buffer.from("10000\r\n"), Buffer.alloc(0x10000, 97), Buffer.from("\r\n")]);
+	const chunked = await rawUpload(d, "transfer-encoding: chunked", [...Array(168).fill(frame), Buffer.from("0\r\n\r\n")], true);
+	assert.match(chunked.reply, /^HTTP\/1\.1 413 [\s\S]*body is larger than 10485760 bytes/);
+	assert.equal(chunked.written, true, "a client just past the cap finishes its write, no EPIPE");
+	// 64 MiB declared: the server stops reading past the bound and closes, so the client never finishes writing.
+	const huge = await rawUpload(d, `content-length: ${64 * 1024 * 1024}`, [Buffer.alloc(64 * 1024 * 1024, 97)], false);
+	assert.equal(huge.written, false, "the server did not ingest the whole body");
 });
