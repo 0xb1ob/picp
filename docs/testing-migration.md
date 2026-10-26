@@ -273,6 +273,7 @@ means no public consumer can feed the helper that input today. The named scenari
 outcome of that path instead (see Method). `unreachable`, with no pinning scenario, blocks the file's deletion.
 `retained` means the assertion was moved verbatim into the kept unit file its note names, where it still runs; the
 scenario column names the e2e case that pins the reachable outcomes beside it.
+`narrowed` names the scenario that pins part of the assertion; its note says `Narrowed:` and names the uncovered part.
 
 <!-- manifest:assertions -->
 | Unit file | Assertion | Scenario | Disposition | Note |
