@@ -51,7 +51,7 @@ npm run test:one -- tests/forge-observers-retained.test.ts   # retained forge se
 npm run test:one -- tests/e2e/landing-forge-ci.test.ts # merge receipts (gh, local GitLab) and the git landing proof
 npm run test:one -- tests/e2e/teardown-s17.test.ts  # the ship gate with receipts and the git proof
 npm run test:one -- tests/e2e/landing-s09.test.ts  # merged MR tail; open/closed MRs run no gh
-npm run test:one -- tests/viewer-jobs.test.ts       # GitLab links in the dashboard
+npm run test:one -- tests/e2e/viewer-jobs.test.ts   # GitLab links in the dashboard
 ```
 
 awaiting_merge (parked `human_handoff` PRs) is covered with synthetic fleet, watch and GraphQL fixtures; no gh, git
@@ -61,7 +61,7 @@ or network runs:
 npm run test:one -- tests/awaiting-merge-park.test.ts       # park/resume primitives, crash stages, refusals
 npm run test:one -- tests/awaiting-merge-watch.test.ts      # batched watch, exits, stack follow-ups, the sweep port
 npm run test:one -- tests/awaiting-merge-lifecycle.test.ts  # handoff parks, viewer keeps CI, change request, merge
-npm run test:one -- tests/awaiting-merge-viewer.test.ts     # With the team, frozen time and cost, head CI
+npm run test:one -- tests/e2e/viewer-jobs.test.ts          # With the team, frozen time and cost, head CI, a parked PR end to end
 npm run test:one -- tests/human-handoff.test.ts             # the handoff port: park, fallback row, review first
 ```
 
