@@ -50,7 +50,7 @@ export async function startViewer(t: Context, { home, requireTailnet = true, at,
 	t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); await exited; });
 	await until(() => call(port, "/healthz").then((reply) => reply.status, () => 0), (status) => status === 200, `cp-view on ${port}\n${output}`, 60_000);
 	const origin = `http://127.0.0.1:${port}`;
-	return { port, origin, pin, output: () => output, get: (path: string, init: Init = {}) => call(port, path, init), open: (hash: string) => openTab(t, port, hash) };
+	return { port, origin, pin, output: () => output, get: (path: string, init: Init = {}) => call(port, path, init), open: (hash: string, hold?: RegExp) => openTab(t, port, hash, new Map(), hold) };
 }
 
 /** A scratch home (its state dir made) with a running viewer. */
@@ -77,8 +77,13 @@ export async function operatorSession(t: Context, stateDir: string, isIdle = () 
 
 type Requested = { method: string; path: string; headers: Record<string, string>; body: string | null; status: number };
 
-/** Opens the served app at `hash`; `close()` stops every timer it started (also on test end). */
-async function openTab(t: Context, port: number, hash: string, storage: Map<string, string> = new Map()) {
+/**
+ * Opens the served app at `hash`; `close()` stops every timer it started (also on test end).
+ * Requests whose path matches `hold` wait until `release()`, so a test can see the page before they answer.
+ */
+async function openTab(t: Context, port: number, hash: string, storage: Map<string, string> = new Map(), hold?: RegExp) {
+	let release = () => {};
+	const held = new Promise<void>((done) => (release = done));
 	const origin = `http://127.0.0.1:${port}`;
 	const page = await call(port, "/");
 	if (page.status !== 200) throw new Error(`GET / answered ${page.status}: ${page.text.slice(0, 200)}`);
@@ -96,6 +101,7 @@ async function openTab(t: Context, port: number, hash: string, storage: Map<stri
 	const browserFetch = async (input: string | URL | Request, init: RequestInit = {}) => {
 		if (closed) return new Promise<Response>(() => {});
 		const url = new URL(String(input instanceof Request ? input.url : input), origin);
+		if (hold?.test(url.pathname)) await held;
 		const headers = new Headers(init.headers);
 		const method = (init.method ?? "GET").toUpperCase();
 		headers.set("sec-fetch-site", "same-origin");
@@ -132,7 +138,7 @@ async function openTab(t: Context, port: number, hash: string, storage: Map<stri
 	const root = document.getElementById("app") as Element;
 	const text = () => root.textContent ?? "";
 	return {
-		window, document, root, requests, confirms, storage, close, text,
+		window, document, root, requests, confirms, storage, close, text, release,
 		$: (selector: string) => root.querySelector(selector) as Element | null,
 		$$: (selector: string) => [...root.querySelectorAll(selector)] as Element[],
 		/** Waits until `selector` matches (and `ok` holds for it). */

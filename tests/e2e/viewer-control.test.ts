@@ -77,6 +77,10 @@ test("P17-awaiting: /api/awaiting folds open asks with their provenance, caps, c
 	assert.deepEqual(one!.escalation, { id: "es-cap", kind: "budget_exhausted", question: "cp-demo hit its cap: raise or drop?", recommended: "Drop the job", differs: true });
 	const file = (path: string) => `#files?${new URLSearchParams({ root: "project:demo", path })}`;
 	assert.deepEqual(one!.evidence.map((e: Json) => [e.href, e.read]), [["#job/cp-demo", null], [file("README.md"), null], [null, null], [file("runs/cp-demo/notes.md"), null], [null, null]], "a project path with a runs/ segment is a file, an unknown run is plain");
+	const written = readFileSync(join(d.stateDir, "operator", "asks.jsonl"), "utf8");
+	const tooLong = { project: "demo", question: "Q", options: [{ label: "A", consequence: "B" }], recommendation: "A", context: "x".repeat(2001) };
+	assert.throws(() => asks.open(tooLong), /invalid operator ask/, "context is capped at 2,000 characters");
+	assert.equal(readFileSync(join(d.stateDir, "operator", "asks.jsonl"), "utf8"), written, "a refused ask writes nothing");
 
 	// The operator transcript: 320 lines after the ask call put the first ask's card outside the 300-entry window.
 	const transcript = join(d.home, "operator-session.jsonl");
@@ -265,11 +269,13 @@ test("P17-decisions-page: the served Decisions page stacks Awaiting, Answers, Be
 	assert.match(decidedText(), /rests on your words or a standing order/);
 	assert.doesNotMatch(decidedText(), /Nothing here for this filter/);
 
-	// Only a leading "<id>: " prefix is stripped; Space toggles a quote.
-	put("escalations.json", { items: [words(0, { question: "Close cp-demo? cp-demo is idle", job_ids: ["cp-demo"], basis: { operator_quote: "yes" } }), words(1, { question: "cp-demo: Close cp-demo?", job_ids: ["cp-demo"], basis: { operator_quote: "yes" } })] });
+	// Only a leading "<id>: " prefix is stripped; one mission-end close alone stays a row; Space toggles a quote.
+	const solo = words(2, { kind: "mission_end", question: "md-solo: every job it names is closed" });
+	put("escalations.json", { items: [words(0, { question: "Close cp-demo? cp-demo is idle", job_ids: ["cp-demo"], basis: { operator_quote: "yes" } }), words(1, { question: "cp-demo: Close cp-demo?", job_ids: ["cp-demo"], basis: { operator_quote: "yes" } }), solo] });
 	tab = await tab.reopen();
 	await tab.find(".decided-question");
-	assert.deepEqual(tab.$$(".decided-question").map((q) => q.textContent), ["Close cp-demo? cp-demo is idle", "Close cp-demo?"]);
+	assert.deepEqual(tab.$$(".decided-question").map((q) => q.textContent), ["Close cp-demo? cp-demo is idle", "Close cp-demo?", "md-solo: every job it names is closed"]);
+	assert.doesNotMatch(decidedText(), /mandate closes/, "one close alone is not folded");
 	const space = tab.key(tab.$(".decided-quote")!, " ");
 	assert.equal(space.defaultPrevented, true);
 	await tab.find(".decided-quote", (q) => q.getAttribute("aria-expanded") === "true");
@@ -307,6 +313,7 @@ test("P17-answers-ack: POST /api/answers/ack refuses in order, journals each ref
 	assert.deepEqual([status.status, status.body.enabled, status.body.reason], [200, true, null]);
 	const token = String(status.body.token);
 	assert.match(token, /^[0-9a-f]{64}$/);
+	assert.equal(lines(journal).length, 4, "the status route never writes");
 	const acks = () => lines(journal).filter((l) => l.type === "acked").length;
 	const ack = (tok: string | null, body: unknown, extra?: Record<string, string>) => d.get("/api/answers/ack", post(d.origin, tok, body, extra));
 	const refused = async (reply: Promise<Reply>, code: number, reason: RegExp, fields: Json = {}) => {
@@ -352,9 +359,11 @@ test("P17-answers-ack: POST /api/answers/ack refuses in order, journals each ref
 	assert.deepEqual([off.body.enabled, off.body.token], [false, null], "off: no token");
 	assert.match(String(off.body.reason), /^Dashboard control is off/);
 	rmSync(controlConfigFile(d.stateDir));
-	let flood: Reply | undefined;
-	for (let i = 0; i < 25 && flood?.status !== 429; i++) flood = await ack(null, "{");
-	assert.equal(flood?.status, 429, "20 requests per 60 s");
+	// A fresh 60 s window: 20 requests are answered on their merits, the 21st is 429.
+	d.pin(new Date(Date.now() + 120_000).toISOString());
+	const codes: number[] = [];
+	for (let i = 0; i < 21; i++) codes.push((await ack(null, "{")).status);
+	assert.deepEqual(codes, [...Array(20).fill(400), 429], "20 requests per 60 s");
 	assert.equal(lines(audit).at(-1)!.status, 429);
 });
 
@@ -387,22 +396,34 @@ test("P17-answers: posted answers project their evidence and render as text; a t
 	const view = await answers();
 	assert.equal(view.availability, "ok");
 	assert.match(String(view.warning), /^1 unreadable line\(s\)/);
+	assert.deepEqual(view.open.map((o: Json) => o.id), [C, B, A], "open is newest first");
 	const item = view.open.find((o: Json) => o.id === A);
 	assert.deepEqual([item.short.length, item.short.endsWith("…"), item.short.includes("second"), item.answer], [281, true, false, long], "short is the first paragraph, clipped");
 	assert.deepEqual(item.evidence, [{ path: `${d.stateDir}/boards/alpha/index.html`, href: "#reports", read: "/boards/alpha/" }, { path: "/nowhere/else.md", href: null, read: null }]);
 	assert.deepEqual([item.job, item.schedule], [{ id: "cp-demo", href: "#job/cp-demo", read: null }, undefined]);
 	assert.deepEqual(view.open.find((o: Json) => o.id === C).schedule, { schedule_id: "sch-123456", run_id: run, outcome: "partial" });
+	// Once the job's envelope names a readable artifact, the answer links it as a Files path.
+	seedCard(d.stateDir, d.home, "2026-07-01T00:00:00Z");
+	write(join(d.stateDir, "runs", "cp-demo", "envelope.json"), { envelope: { artifact_path: join(d.home, LAYOUT.projects, "demo", "README.md") } });
+	const artifact = `/#files?${new URLSearchParams({ root: "project:demo", path: "README.md" })}`;
+	assert.equal((await answers()).open.find((o: Json) => o.id === A).job.read, artifact);
 
-	const tab = await d.open("#answers");
-	await tab.find(`button[aria-label="Acknowledge ${A}"]`);
+	// Until the control status answers, the tick reads Checking… and stays disabled.
+	const tab = await d.open("#answers", /^\/api\/answers\/control$/);
+	await tab.find(".answers-control", (el) => el.textContent === "Checking…");
+	assert.equal(tab.$(`button[aria-label="Acknowledge ${A}"]`)?.hasAttribute("disabled"), true);
+	tab.release();
 	const section = tab.$("#answers")!;
 	assert.equal(section.querySelectorAll("script, [style], [onclick]").length, 0, "no markup, no inline style");
 	const question = tab.$$(".answers-question").find((q) => q.getAttribute("title")?.startsWith("<script>"))!;
 	assert.match(question.textContent ?? "", /^<script>alert/, "the whole question is text and the title; the clamp is CSS");
 	assert.equal(tab.$("details.answers-full")?.hasAttribute("open"), false, "the full answer sits in a closed details");
 	assert.deepEqual(tab.$$(".answers-text a").map((a) => [a.getAttribute("href"), a.getAttribute("target"), a.getAttribute("rel")]), [["https://example.com/a", "_blank", "noopener noreferrer"], ["https://example.org/b", "_blank", "noopener noreferrer"]], "javascript: stays text");
-	assert.ok(tab.$$(".answers-evidence li").some((li) => li.querySelector('a[href="#reports"]') && li.querySelector('a[href="/boards/alpha/"]')));
-	assert.ok(tab.$$(".answers-meta a").some((a) => a.getAttribute("href") === "#job/cp-demo"));
+	assert.equal(tab.$(".answers-header")?.textContent, "Answers to acknowledge3");
+	const evidence = tab.$$(".answers-evidence li");
+	assert.ok(evidence.some((li) => li.querySelector('a[href="#reports"]') && li.querySelector('a[href="/boards/alpha/"]')));
+	assert.ok(evidence.some((li) => li.textContent === "/nowhere/else.md" && !li.querySelector("a")), "an unknown path is plain");
+	assert.deepEqual(tab.$$(".answers-meta a").map((a) => a.getAttribute("href")).filter((h) => !h?.startsWith("#schedules")), ["#job/cp-demo", artifact]);
 	const schedule = tab.$$(".answers-schedule");
 	assert.equal(schedule.length, 1, "a bridge answer shows no schedule");
 	assert.match(schedule[0]!.textContent ?? "", new RegExp(`Schedule result · ${run} · partial`));
@@ -428,6 +449,8 @@ test("P17-answers: posted answers project their evidence and render as text; a t
 	const off = await fresh.reopen();
 	await off.find("button.answers-ack", (b) => b.hasAttribute("disabled"));
 	assert.match(off.$(".answers-control")?.textContent ?? "", /^Dashboard control is off/);
+	assert.equal((await answers()).open_count, 1, "control off: the list still renders, read-only");
+	assert.ok(off.$('button[aria-label="Acknowledge ans-cccccccccccc"]'), "the open card stays listed");
 
 	rmSync(operatorAnswersFile(d.stateDir));
 	mkdirSync(operatorAnswersFile(d.stateDir));
@@ -435,6 +458,61 @@ test("P17-answers: posted answers project their evidence and render as text; a t
 	const broken = await off.reopen();
 	await broken.waitText(/Answers unavailable/);
 	assert.doesNotMatch(broken.text(), /No answers waiting/, "an unreadable journal never claims an empty queue");
+});
+
+test("P17-answers-quiet: an empty, history-only or just-cleared queue collapses to one quiet line; a warning or an unrendered pending answer never does", { timeout: 240_000 }, async (t) => {
+	const NOW = "2026-07-02T00:00:00Z";
+	const d = await dashboard(t, { at: NOW });
+	const journal = operatorAnswersFile(d.stateDir);
+	const summary = (tab: Tab) => tab.$(".answers-quiet > summary")?.textContent ?? null;
+	write(journal, "");
+	let tab = await d.open("#answers");
+	await tab.find(".answers-quiet");
+	assert.equal(summary(tab), "No answers waiting · 0 acknowledged");
+	assert.equal(tab.$(".answers-quiet")!.hasAttribute("open"), false, "collapsed");
+	assert.deepEqual([tab.$(".answers-header"), tab.$(".answers-control"), tab.$(".answers-empty")?.textContent], [null, null, "No acknowledged answers yet"]);
+
+	write(journal, "not json\n");
+	tab = await tab.reopen();
+	await tab.find('[role="alert"].answers-warning');
+	assert.equal(tab.$(".answers-quiet"), null);
+	assert.doesNotMatch(tab.text(), /No answers waiting/, "partial data cannot claim an empty queue");
+
+	write(journal, "");
+	appendAnswerLine(d.stateDir, posted(A, "2026-07-01T00:00:00Z"));
+	appendAnswerLine(d.stateDir, { type: "acked", by: "viewer", id: A, at: "2026-07-01T00:00:01Z", peer: null });
+	tab = await tab.reopen();
+	await tab.find(".answers-quiet");
+	assert.equal(summary(tab), "No answers waiting · 1 acknowledged");
+	assert.ok(tab.$(".answers-quiet > article .answers-text"), "history is one disclosure away");
+	assert.equal(tab.$$(".answers-quiet button").length, 0);
+
+	// The last tick compacts the section at once, before any refresh.
+	appendAnswerLine(d.stateDir, posted(B, "2026-07-01T00:00:02Z"));
+	tab = await tab.reopen();
+	tab.click(await tab.find(`button[aria-label="Acknowledge ${B}"]`, (b) => !b.hasAttribute("disabled")));
+	await tab.find(".answers-quiet");
+	assert.equal(summary(tab), "No answers waiting · 1 acknowledged");
+
+	// 101 pending: the viewer sends a window of 100. Acking all of it leaves the 101st counted, never "No answers waiting".
+	write(journal, jsonl(Array.from({ length: 101 }, (_, n) => posted(`ans-${n.toString(16).padStart(12, "0")}`, new Date(Date.parse("2026-07-01T00:00:00Z") + n * 1000).toISOString().replace(".000Z", "Z")))));
+	tab = await tab.reopen();
+	await tab.find(".answers-ack", (b) => !b.hasAttribute("disabled"));
+	const count = () => tab.$(".answers-count")?.textContent;
+	assert.deepEqual([count(), tab.$$(".answers-ack").length], ["101", 100]);
+	let clock = Date.parse(NOW);
+	for (let n = 0; n < 100; n++) {
+		if (n % 10 === 0) d.pin(new Date((clock += 61_000)).toISOString()); // stay under 20 acks per 60 s
+		const tick = (await tab.find(".answers-ack", (b) => !b.hasAttribute("disabled")));
+		const label = tick.getAttribute("aria-label")!;
+		tab.click(tick);
+		await until(() => tab.$(`button[aria-label="${label}"]`), (b) => b === null, `${label} hides`);
+		if (n === 0) assert.equal(count(), "100", "one tick of 101");
+	}
+	assert.equal(count(), "1");
+	assert.equal(tab.$(".answers-quiet"), null);
+	assert.doesNotMatch(tab.text(), /No answers waiting/, "acking the rendered window cannot hide the unrendered answer");
+	assert.equal(lines(journal).filter((l) => l.type === "acked").length, 100);
 });
 
 test("P17-decision-card: an Awaiting card answers through the operator session's control; down, it stays visible and disabled with the reason", { timeout: 180_000 }, async (t) => {
@@ -447,9 +525,14 @@ test("P17-decision-card: an Awaiting card answers through the operator session's
 	const card = (tab: Tab) => tab.find(`article[aria-labelledby="question-${first.id}"]`);
 	const buttons = (el: Element) => [...el.querySelectorAll("button.decision-card-option")];
 
-	write(controlConfigFile(d.stateDir), '{"enabled": false}');
-	let tab = await d.open("#decisions");
+	let tab = await d.open("#decisions", /^\/api\/operator\/control$/);
 	let el = await card(tab);
+	await tab.find(".decision-card-disabled", (s) => s.textContent === "Checking dashboard control");
+	assert.ok(buttons(el).every((b) => b.hasAttribute("disabled")), "no control status yet: checking, disabled");
+	tab.release();
+	write(controlConfigFile(d.stateDir), '{"enabled": false}');
+	tab = await tab.reopen();
+	el = await card(tab);
 	await tab.find(".decision-card-disabled", (s) => /Dashboard control is off/.test(s.textContent ?? ""));
 	assert.ok(buttons(el).length === 2 && buttons(el).every((b) => b.hasAttribute("disabled")), "control off: buttons stay visible, disabled");
 	assert.doesNotMatch(tab.text(), /Copy reply|Copy a reply/);
@@ -473,7 +556,7 @@ test("P17-decision-card: an Awaiting card answers through the operator session's
 	assert.match(el.querySelector(".decision-card-recommended .overview-rec-badge")?.textContent ?? "", /recommended/);
 	assert.match(html, /<li>Keep: nothing more is spent<\/li><li>Raise: \$5 more, finishes today<\/li>/, "context bullets");
 	assert.match(html, /<p>Risk: low\.<\/p>/, "context paragraphs");
-	assert.match(el.textContent ?? "", /automatic default: Drop the job/, "the escalation's own default never reads as the parent's");
+	assert.equal(el.textContent?.match(/automatic default: Drop the job/g)?.length, 2, "the escalation's own default, in the note and the context");
 	assert.doesNotMatch(html, /parent recommends/);
 	assert.match(el.textContent ?? "", /Ship the demo dashboard/);
 	assert.match(html, /href="#job\/cp-demo"><code>cp-demo<\/code><\/a><span>Demo dashboard job<\/span><small>held · anthropic\/claude-demo · \$1\.50<\/small><a href="https:\/\/github\.com\/acme\/repo\/pull\/7">/);
@@ -488,12 +571,24 @@ test("P17-decision-card: an Awaiting card answers through the operator session's
 	await tab.find(".decision-card-delivery", (p) => /Sent, queued — the card closes when the session records the answer/.test(p.textContent ?? ""));
 	assert.ok([...(await card(tab)).querySelectorAll("button, input")].every((b) => b.hasAttribute("disabled")), "one answer per card until the session records it");
 
-	// The session records the answer; a stale card answering a settled ask is refused and says so.
+	// The session records the answer; an Other answer on the next card reaches the running session as `<ask>: text`.
 	asks.answer(first.id, "Raise");
 	const next = asks.open({ project: "demo", question: "Merge now?", options: [{ label: "Yes", consequence: "Merges" }], recommendation: "Yes" });
 	tab = await tab.reopen();
 	el = await tab.find(`article[aria-labelledby="question-${next.id}"]`);
-	asks.answer(next.id, "Yes");
+	tab.type(el.querySelector("input")!, "approve with changes: cap at $3");
+	tab.click(await tab.find(".decision-card-other button", (b) => b.textContent === "Send" && !b.hasAttribute("disabled")));
+	await until(() => tab.requests.filter((r) => r.method === "POST"), (posts) => posts.length === 1, "the other-answer post");
+	assert.deepEqual(pick(tab.requests.find((r) => r.method === "POST")!, ["path", "body", "status"]), { path: "/api/operator/message", body: JSON.stringify({ kind: "message", text: `${next.id}: approve with changes: cap at $3` }), status: 202 });
+	assert.ok(session.injected.some(([text]) => text.includes(`${next.id}: approve with changes: cap at $3`)), "delivered to the running session");
+	assert.equal(lines(controlInboxFile(d.stateDir)).filter((l) => l.type === "held").length, 1, "a running session's send is never held");
+
+	// A stale card answering a settled ask is refused and says so.
+	asks.answer(next.id, "approve with changes");
+	const last = asks.open({ project: "demo", question: "Tag the release?", options: [{ label: "Yes", consequence: "Tags" }], recommendation: "Yes" });
+	tab = await tab.reopen();
+	await tab.find(`article[aria-labelledby="question-${last.id}"]`);
+	asks.answer(last.id, "Yes");
 	tab.click(await tab.find("button.decision-card-option", (b) => !b.hasAttribute("disabled")));
 	await tab.find(".decision-card-failed", (p) => /^Failed: /.test(p.textContent ?? "") && p.getAttribute("role") === "alert");
 });
