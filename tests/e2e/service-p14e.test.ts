@@ -164,7 +164,7 @@ test("P14e-install-files: cp-install writes, refuses, plans and uninstalls its f
 	assert.doesNotMatch(u.log().join("\n"), /\bsudo\b/, "never sudo");
 	const before = u.log().length;
 	const second = await u.install(PINNED);
-	assert.deepEqual(lines(second.out, "changed"), [], second.out);
+	assert.deepEqual(lines(second.out, "changed").concat(lines(second.out, "fail").filter((l) => !/^fail: doctor: no parent/.test(l))), [], second.out);
 	assert.ok(!u.log().slice(before).some((call) => call === "npm ci" || /try-restart/.test(call)), "no npm ci and no restart on an unchanged rerun");
 
 	for (const path of [u.unit, u.paths.config]) {
