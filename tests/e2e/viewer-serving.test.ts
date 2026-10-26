@@ -759,3 +759,122 @@ async function gitRenames(t: { after(fn: () => unknown): void }, direction: "fro
 
 test("P21-git-renames from denied: git status, show and the job diff suppress both paths and the content of a denied rename", (t) => gitRenames(t, "from denied"));
 test("P21-git-renames to denied: git status, show and the job diff suppress both paths and the content of a denied rename", (t) => gitRenames(t, "to denied"));
+
+/** cp-view on a home seeded with `files` (home-relative JSON), and a tab on its Overview once it has rendered. */
+async function overviewTab(t: { after(fn: () => unknown): void }, files: Record<string, unknown> = {}, hash = "#overview") {
+	const view = await dashboard(t as never, { seed: (_, home) => {
+		for (const [file, value] of Object.entries(files)) {
+			mkdirSync(dirname(join(home, file)), { recursive: true });
+			writeFileSync(join(home, file), typeof value === "string" ? value : JSON.stringify(value));
+		}
+	} });
+	const tab = await view.open(hash);
+	await tab.find(hash === "#overview" ? ".overview" : "main");
+	return { view, tab };
+}
+
+test("P21-render-empty: an empty home's Overview is a calm strip with down parent, offline operator and a neutral main CI chip", { timeout: 120_000 }, async (t) => {
+	const { tab } = await overviewTab(t);
+	const text = await tab.waitText(/Nothing needs you/);
+	const html = tab.$(".overview")!.outerHTML;
+	assert.match(text, /0 live \/ - slots/); assert.match(text, /Nothing in flight/); assert.match(text, /Landed today · 0 merged/);
+	assert.doesNotMatch(text, /Shipped today|closed without PR|Blocked|Decided for you|being handled|Fleet health|Mandates|UTC|quota|not observed/);
+	assert.doesNotMatch(html, /\/classic/, "no classic link");
+	const chip = (name: string) => tab.$$(".overview-health .overview-chip, .overview-health a").find((el) => el.textContent!.startsWith(name));
+	assert.equal(chip("parent")?.querySelector("strong")?.getAttribute("title"), "down");
+	assert.equal(chip("operator")?.querySelector("strong")?.getAttribute("title"), "offline");
+	assert.equal(chip("main CI")?.querySelector("strong")?.getAttribute("title"), "no red latch", "no latch is neutral, never green");
+	assert.ok(chip("main CI")?.querySelector(".overview-dot-idle"), "no latch has the idle dot");
+	const clear = tab.$("#awaiting.overview-clear")!;
+	assert.equal(clear.querySelector("a")?.getAttribute("href"), "#decided"); assert.equal(clear.querySelector("h2"), null);
+});
+
+test("P21-render-asks: four open asks show Needs you · 4 with at most three lines, escaped question text and no inline script", { timeout: 120_000 }, async (t) => {
+	const created = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+	const asks = ["ask-ab", "ask-cd", "ask-ef", "ask-0a"].map((id) => JSON.stringify({ ...ASK, id, created_at: created, question: `<script>bad()</script>${"long".repeat(20)}` })).join("\n");
+	const { tab } = await overviewTab(t, { [join(LAYOUT.state, "operator", "asks.jsonl")]: `${asks}\n` });
+	const text = await tab.waitText(/Needs you · 4/);
+	assert.doesNotMatch(text, /Awaiting you|Nothing needs you/, "Needs you on the Overview");
+	assert.equal(tab.$$('a.overview-line[href="#awaiting"]').length, 3, "at most three awaiting lines");
+	assert.match(text, /<script>bad\(\)<\/script>/, "the question is text");
+	assert.equal(tab.$$(".overview script").length, 0, "the question never becomes a script element");
+	assert.ok(tab.$$(".overview *").every((el) => !el.hasAttribute("style") && !el.hasAttribute("onclick")), "no inline style or handler");
+	assert.ok(tab.$(".overview-square-attention"), "the attention square shows");
+});
+
+test("P21-render-more: More holds Stats, Reports, Schedules, Files and Settings, never Awaiting, Decided, Board or Map", { timeout: 120_000 }, async (t) => {
+	const { tab } = await overviewTab(t, {}, "#more");
+	await tab.find('a[href="#files"]');
+	const html = tab.$("main")!.outerHTML;
+	for (const screen of ["stats", "reports", "schedules", "files"]) assert.ok(tab.$(`a[href="#${screen}"]`), screen);
+	for (const screen of ["stats", "reports", "settings"]) assert.ok(tab.$(`a.more-phone[href="#${screen}"]`), `${screen} is a phone link`);
+	for (const screen of ["awaiting", "decided", "board", "map"]) assert.ok(!tab.$$("main a").some((a) => a.getAttribute("href") === `#${screen}`), screen);
+	assert.doesNotMatch(html, /aria-disabled="true"|#mandates/);
+});
+
+test("P21-render-held-ci: recorded ci-watch values reach each held row's fact, and twelve merges past the finished cap keep their cost", { timeout: 120_000 }, async (t) => {
+	const head = "a".repeat(40), at = new Date().toISOString();
+	const cases: [string, string][] = [["failed", "CI red"], ["red", "CI red"], ["in_progress", "CI running"], ["green", "CI green"], ["unreviewed", "CI green"], ["unknown", "held"]];
+	const merged = Array.from({ length: 12 }, (_, i) => `cp-m${i}`);
+	const files: Record<string, unknown> = {
+		[LAYOUT.fleetFile]: { jobs: [
+			...cases.map(([ci]) => ({ job_id: `cp-${ci.replace("_", "-")}`, project: "demo", phase: "held", dispatched_at: at })),
+			...merged.map((id, i) => ({ job_id: id, project: "demo", phase: "done", dispatched_at: at, closed_at: new Date(Date.now() - i * 1000).toISOString(), usage: { input: 0, output: 0, cache_read: 0, cache_write: 0, total_tokens: 1, cost_usd: 0.5 } })),
+		] },
+		[join(LAYOUT.state, "ci-watch.json")]: { jobs: cases.map(([ci]) => ({ job_id: `cp-${ci.replace("_", "-")}`, head_sha: head, last_ci: ci })) },
+	};
+	for (const id of merged) files[join(LAYOUT.runs, id, "merge.json")] = { job_id: id, pr_url: "https://github.com/acme/repo/pull/9", merge_commit_sha: "b".repeat(40), merged_at: at };
+	const { tab } = await overviewTab(t, files);
+	const text = await tab.waitText(/Landed today · 12 merged/); assert.match(text, /Landed today · 12 merged · \$6\.00/, "all twelve keep their cost");
+	for (const [ci, fact] of cases) assert.equal(tab.$(`[aria-label="cp-${ci.replace("_", "-")}"] .overview-flight-extra .overview-meta`)?.textContent, fact, ci);
+	assert.match(text, /#9 ↗/); assert.equal(tab.$(".overview-merge code")?.textContent, "bbbbbbb");
+	assert.equal(tab.$$(".overview-landed-pr").length, 5, "five landed rows");
+	assert.match(text, /7 more merged in Jobs →/);
+});
+
+test("P21-render-ci-unreadable: a refused CI read is a red badge, a held fact, a health chip and an alarm; forwarded green shows labelled but never beats native", { timeout: 120_000 }, async (t) => {
+	const head = "a".repeat(40), at = new Date().toISOString(), ids = ["cp-denied", "cp-running", "cp-quiet", "cp-plain"];
+	const files: Record<string, unknown> = {
+		[LAYOUT.fleetFile]: { jobs: ids.map((job_id) => ({ job_id, project: job_id === "cp-running" ? "other" : "demo", phase: "held", dispatched_at: at })) },
+		// A refused read carries no head; a running head and no row at all stay distinct.
+		[join(LAYOUT.state, "ci-watch.json")]: { jobs: [{ job_id: "cp-denied", last_ci: "unreadable" }, { job_id: "cp-running", head_sha: head, last_ci: "in_progress" }] },
+	};
+	for (const id of ["cp-denied", "cp-running", "cp-quiet"]) {
+		files[join(LAYOUT.runs, id, "envelope.json")] = { envelope: { head_sha: head } };
+		files[join(LAYOUT.runs, id, "ci-evidence.json")] = { schema_version: 1, job_id: id, repo: "o/r", observations: [{ head_sha: head, result: "success", source: "forwarded", observed_at: "2026-10-15T12:00:00Z", operator_quote: "green." }] };
+	}
+	const { view, tab } = await overviewTab(t, files);
+	await tab.find('[aria-label="cp-plain"]');
+	const ci = (id: string) => tab.$(`[aria-label="${id}"] .overview-ci`)?.textContent;
+	assert.equal(ci("cp-denied"), "CI unreadable — token lacks Actions read · forwarded: CI green", "a forward never clears the red badge");
+	assert.ok(tab.$('[aria-label="cp-denied"] .job-ci-red.job-ci-unreadable'), "red");
+	assert.equal(ci("cp-running"), "CI running aaaaaaa", "native evidence wins");
+	assert.equal(ci("cp-quiet"), "CI green (forwarded) aaaaaaa");
+	assert.match(tab.$('[aria-label="cp-quiet"] .job-ci-forwarded')?.getAttribute("title") ?? "", /display only, native CI still gates the handoff/);
+	assert.equal(ci("cp-plain"), "no CI yet");
+	assert.equal(tab.$('[aria-label="cp-denied"] .overview-flight-extra .overview-meta')?.textContent, "CI unreadable (token)");
+	assert.match(tab.$(".overview-health")!.textContent!, /CI access.*CI unreadable — token lacks Actions read: demo/);
+	assert.match(tab.$(".overview-alarm[role=alert]")!.textContent!, /for demo: 1 held job cannot show CI.*Actions read \+ Contents read \+ Metadata read \+ Pull requests read; classic: repo/);
+	writeFileSync(join(view.home, LAYOUT.state, "ci-watch.json"), JSON.stringify({ jobs: [] }));
+	tab.refresh();
+	assert.doesNotMatch(await until(() => tab.$(".overview")!.textContent!, (text) => !/CI access|unreadable/.test(text), "the cleared flag"), /CI access|unreadable/, "no flag without a refused read");
+});
+
+test("P21-render-css: the served stylesheet ellipsizes long one-line cells, grids the health chips 2×2 on a phone and widens the Title track at the breakpoint", { timeout: 120_000 }, async (t) => {
+	const view = await dashboard(t as never);
+	const page = await view.get("/");
+	const css = (await view.get(/<link rel="stylesheet" href="([^"]+)"/.exec(page.text)![1]!)).text;
+	for (const selector of [".overview-line-text", ".overview-chip strong"]) {
+		const rule = new RegExp(`${selector.replace(/[.-]/g, "\\$&")}\\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+		for (const declaration of ["white-space:nowrap", "overflow:hidden", "text-overflow:ellipsis", "min-width:0"]) assert.ok(rule.includes(declaration), `${selector}: ${declaration}`);
+	}
+	assert.match(css, /(?:^|\})\.overview-health\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/, "a 2×2 chip grid at 390 px");
+	assert.match(css, /@media\s*\(min-width:\s*900px\)\s*\{[^@]*\.overview-health\{display:flex;flex:1 1 auto;min-width:0;gap:0\}/, "one chip row from 900 px");
+	// Content = viewport - 208 px rail - 64 px gutters; Title must be the widest track and fit 45 characters (7 px) at 1440.
+	const wide = /@media\s*\(min-width:\s*(\d+)px\)\s*\{\.overview-flight,\.overview-flight-columns\{grid-template-columns:([^;]+);column-gap:(\d+)px/.exec(css);
+	assert.ok(wide, "wide flight grid");
+	const tracks = wide[2]!.trim().split(" "), fixed = [...wide[2]!.matchAll(/(\d+)px/g)].map((m) => +m[1]!);
+	const title = (width: number) => width - 208 - 64 - fixed.reduce((a, b) => a + b, 0) - 7 * +wide[3]!;
+	assert.ok(tracks.length === 8 && title(+wide[1]!) >= 240 && title(+wide[1]!) >= 1.5 * fixed[0]!, `Title ${title(+wide[1]!)}px at ${wide[1]}px`);
+	assert.ok(title(1440) >= 45 * 7 && +wide[1]! <= 1200, `Title ${title(1440)}px at 1440 fits 45 characters; 8 columns by 1200 px`);
+});

@@ -226,7 +226,6 @@
 	"tests/version-view.test.ts": 2021,
 	"tests/viewer-answers-http.test.ts": 161,
 	"tests/viewer-answers-ui.test.ts": 52,
-	"tests/viewer-app-render.test.ts": 382,
 	"tests/viewer-boards.test.ts": 105,
 	"tests/viewer-context-usage.test.ts": 302,
 	"tests/viewer-control-http.test.ts": 1054,
