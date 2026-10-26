@@ -4,10 +4,10 @@
  * linkedom tab has no layout, so render claims assert served DOM text and bytes, never pixels.
  */
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { request, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, connect, createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { test } from "node:test";
@@ -15,11 +15,12 @@ import { brotliDecompressSync, gunzipSync, gzipSync } from "node:zlib";
 import { LAYOUT } from "../../src/contracts.ts";
 import { APP_CSP, APP_VIEWPORT, type ViewerApp } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
+import { viewerConfigFile } from "../../src/viewer/host-config.ts";
 import { applyDelta } from "../../src/viewer/json-delta.ts";
 import { createRemoteViewer } from "../../src/viewer/remote-server.ts";
 import { createViewer, pollingStreams, type ViewerOptions } from "../../src/viewer/server.ts";
 import { dashboard, openTab, startViewer, type Tab, until } from "../harness/dashboard.ts";
-import { createScratchHome, REPO_ROOT } from "../harness/index.ts";
+import { createScratchHome, git, REPO_ROOT } from "../harness/index.ts";
 import { call, remoteRig } from "../harness/remote.ts";
 
 type Raw = { status: number; headers: IncomingHttpHeaders; body: Buffer };
@@ -596,3 +597,165 @@ test("P21-cache-fresh: screens see event appends and rewrites, status and grant 
 	rmSync(join(view.home, LAYOUT.runs, "cp-a/events.jsonl"));
 	assert.equal((await job()).mandate_id, null, "a deleted log routes nothing");
 });
+
+/** The sessions fixture: a parent and one worker transcript, plus workers whose session files point outside. */
+function sessionsSeed(put: (file: string, value: unknown) => void, home: string) {
+	const sessions = join(home, LAYOUT.state, "sessions");
+	const worker = (id: string, phase: string, extra: Record<string, unknown> = {}) => ({
+		job_id: id, project: "demo", phase, dispatched_at: `2026-09-01T00:00:0${id.length % 10}Z`,
+		worker: { role: "implementer", profile: "implementer", model: "fleet-model", session_file: `/x/${id}.jsonl` }, ...extra,
+	});
+	put(join(LAYOUT.state, "sessions", "cp-parent.jsonl"), '{"type":"session","timestamp":"t0"}\n');
+	put(join(LAYOUT.state, "sessions", "a.jsonl"), '{"type":"session","timestamp":"t1"}\n{"type":"session","timestamp":"t2"}\n');
+	put("secret.jsonl", "{}\n");
+	symlinkSync(join(home, "secret.jsonl"), join(sessions, "link.jsonl"));
+	put(join(LAYOUT.runs, "cp-a", "status.json"), { phase: "working", model: "status-model", profile: "planner", usage: { cost_usd: 1.25 }, last_activity_at: "2026-09-01T01:00:00Z" });
+	put(join(LAYOUT.runs, "cp-b", "status.json"), { phase: "idle" });
+	put(join(LAYOUT.runs, "cp-script", "status.json"), { phase: "working", session_file: join(sessions, "a.jsonl") });
+	put(".pi-command-post/jobs.json", { jobs: ["cp-a", "cp-out", "cp-dots", "cp-link", "cp-passwd", "cp-script"].map((id) => ({ id, title: id, status: "in_progress", labels: ["project:demo"] })) });
+	put(LAYOUT.fleetFile, { jobs: [
+		worker("cp-b", "held", { dispatched_at: "2026-09-01T00:00:02Z" }),
+		worker("cp-a", "waiting", { dispatched_at: "2026-09-01T00:00:01Z", worker: { role: "implementer", profile: "implementer", model: "fleet-model", session_file: join(sessions, "a.jsonl") } }),
+		...Array.from({ length: 12 }, (_, i) => worker(`cp-done${i}`, i % 2 ? "done" : "failed", { closed_at: `2026-09-02T00:00:${String(i).padStart(2, "0")}Z` })),
+		{ job_id: "../evil", phase: "waiting", worker: {} }, "not an object",
+		worker("cp-out", "waiting", { worker: { session_file: join(home, "secret.jsonl") } }),
+		worker("cp-dots", "waiting", { worker: { session_file: join(sessions, "..", "..", "secret.jsonl") } }),
+		worker("cp-link", "waiting", { worker: { session_file: join(sessions, "link.jsonl") } }),
+		worker("cp-passwd", "waiting", { worker: { session_file: "/etc/passwd" } }),
+		worker("cp-script", "waiting", { executor: "script", script_path: "scripts/run.sh", worker: undefined }),
+	] });
+}
+
+test("P21-sessions: the sidebar lists live workers in dispatch order and finished ones newest-first, capped; only known transcripts inside sessions/ resolve", async (t) => {
+	const view = await serve(t, { requireTailnet: true }, sessionsSeed);
+	const list = JSON.parse((await view.get("/api/sessions")).body.toString("utf8")) as { parent: { id: string }; active: Array<Record<string, unknown>>; recent: Array<Record<string, unknown>> };
+	assert.equal(list.parent.id, "cp-parent", "the parent row leads");
+	assert.deepEqual(list.active.slice(0, 2).map((row) => row.id), ["cp-a", "cp-b"], "live workers in dispatch order");
+	assert.deepEqual(
+		[list.active[0]!.project, list.active[0]!.role, list.active[0]!.model, list.active[0]!.profile, list.active[0]!.cost_usd, list.active[0]!.live, list.active[0]!.last_activity],
+		["demo", "implementer", "status-model", "planner", 1.25, true, "2026-09-01T01:00:00Z"], "status.json wins over the fleet's dispatch-time model");
+	assert.equal(list.active[1]!.live, false, "idle is not live");
+	assert.deepEqual([list.recent.length, list.recent[0]!.id, list.recent.every((row) => !row.live)], [10, "cp-done11", true], "finished: newest first, capped at 10");
+	assert.ok(!list.active.some((row) => row.id === "../evil" || row.id === "cp-script"), "a bad id and a script job get no row");
+	const json = async (path: string) => { const r = await view.get(path); return { status: r.status, body: JSON.parse(r.body.toString("utf8") || "null") }; };
+	const parent = await json("/api/sessions?view=parent&transcript=1");
+	assert.deepEqual([parent.status, parent.body.session_id, parent.body.warnings], [200, "cp-parent", []], "the parent transcript resolves with no warning")
+	const worker = await json("/api/job/cp-a/transcript");
+	assert.deepEqual([worker.status, worker.body.warning ?? null], [200, null], "a worker transcript inside sessions/ resolves");
+	for (const id of ["cp-out", "cp-dots", "cp-link", "cp-passwd", "cp-script"]) {
+		assert.deepEqual((await json(`/api/job/${id}/transcript`)).body, { entries: [], truncated: false, warning: "No worker session recorded", from: null, to: null }, `${id} resolves no transcript`);
+	}
+	for (const id of ["..%2Fsecret", "..", "cp-a%2F..%2Fx", "cp-unknown", "%2Fetc%2Fpasswd"]) assert.equal((await view.get(`/api/job/${id}/transcript`)).status, 404, id);
+	assert.equal((await view.get("/state/fleet.json")).status, 404, "no arbitrary path is served");
+	writeFileSync(join(view.stateDir, "fleet.json"), "{nope");
+	assert.deepEqual(JSON.parse((await view.get("/api/sessions")).body.toString("utf8")).active, [], "a corrupt fleet is an empty list");
+});
+
+test("P21-sessions-home: cp-view reads a home's one state dir, never a top-level state/ beside it", { timeout: 120_000 }, async (t) => {
+	const view = await dashboard(t, { requireTailnet: false, seed: (stateDir, home) => {
+		mkdirSync(join(stateDir, "runs", "cp-a"), { recursive: true });
+		writeFileSync(join(stateDir, "fleet.json"), JSON.stringify({ jobs: [{ job_id: "cp-a", project: "demo", phase: "waiting", dispatched_at: "2026-09-01T00:00:01Z", worker: { session_file: "/x/cp-a.jsonl" } }] }));
+		writeFileSync(join(stateDir, "runs", "cp-a", "status.json"), JSON.stringify({ phase: "starting", usage: { cost_usd: 0.5 } }));
+		// A legacy top-level state/ holding a fleet is no candidate: there is exactly one state dir.
+		mkdirSync(join(home, "state"), { recursive: true });
+		writeFileSync(join(home, "state", "fleet.json"), JSON.stringify({ jobs: [] }));
+	} });
+	const list = (await view.get("/api/sessions")).body as { parent: { live: boolean }; active: Array<{ cost_usd: number }> };
+	assert.deepEqual([list.active[0]?.cost_usd, list.parent.live], [0.5, false], "the run's cost is read and no parent transcript is live yet");
+});
+
+test("P21-host-check: by default any Host is served; strict_host refuses all but the bind's own host:port, and a bad value fails closed", async (t) => {
+	const view = await serve(t);
+	const hostless = (strictPort: number) => new Promise<string>((done, fail) => {
+		const socket = connect(strictPort, "127.0.0.1", () => socket.end("GET /healthz HTTP/1.0\r\n\r\n"));
+		let reply = "";
+		socket.on("data", (chunk) => (reply += chunk)).on("end", () => done(reply)).on("error", fail);
+	});
+	assert.equal((await view.get("/healthz", { host: "8766--dev--box.coder.example" })).status, 200, "a proxied name is served by default");
+	assert.match(await hostless(view.port), /^HTTP\/1\.\d 200/, "no Host at all is served by default");
+	const config = viewerConfigFile(view.stateDir);
+	mkdirSync(dirname(config), { recursive: true });
+	writeFileSync(config, JSON.stringify({ strict_host: true }));
+	assert.equal((await view.get("/healthz")).status, 200, "the bind's own Host passes");
+	for (const host of ["evil.example", `127.0.0.1:${view.port + 1}`, `localhost:${view.port}`]) assert.equal((await view.get("/", { host })).status, 421, host);
+	assert.match(await hostless(view.port), /^HTTP\/1\.\d 421/, "strict: no Host is refused");
+	writeFileSync(config, JSON.stringify({ strict_host: "no" }));
+	assert.equal((await view.get("/", { host: "evil.example" })).status, 421, "an invalid value fails closed");
+	writeFileSync(config, JSON.stringify({ strict_host: false }));
+	assert.equal((await view.get("/healthz", { host: "evil.example" })).status, 200, "read per request: no restart");
+});
+
+test("P21-cli-host: unflagged cp-view with no tailnet serves on 127.0.0.1; refusals come before any build or listen", { timeout: 300_000 }, async (t) => {
+	for (const flags of [["--require-tailnet"], []]) for (const host of ["0.0.0.0", "8.8.8.8", "localhost"]) {
+		const run = cpView(t, [...flags, "--host", host]);
+		assert.notEqual(run.status, 0, host);
+		assert.match(run.stderr, new RegExp(`refusing to serve the viewer on ${host.replace(/\./g, "\\.")}`), host);
+	}
+	const none = cpView(t, ["--require-tailnet"]);
+	assert.match(none.stderr, /tailscale ip -4.*--viewer-host/, "the refusal names the pin");
+	const scratch = createScratchHome(); t.after(() => scratch.cleanup());
+	const bin = join(scratch.path, "bin");
+	mkdirSync(bin);
+	writeFileSync(join(bin, "tailscale"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+	const child = spawn(join(REPO_ROOT, "bin", "cp-view"), ["--home", scratch.path, "--port", String(await new Promise<number>((done) => { const probe = createServer().listen(0, "127.0.0.1", () => { const { port } = probe.address() as AddressInfo; probe.close(() => done(port)); }); }))], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+	let output = "";
+	child.stdout.on("data", (chunk) => (output += chunk));
+	child.stderr.on("data", (chunk) => (output += chunk));
+	const exited = new Promise<void>((done) => child.once("exit", () => done()));
+	t.after(async () => { if (child.exitCode === null) child.kill("SIGKILL"); await exited; });
+	assert.match(await until(() => output, (text) => /http:\/\/127\.0\.0\.1:\d+/.test(text), "the loopback listen line"), /http:\/\/127\.0\.0\.1:\d+/, "no tailnet: loopback");
+	assert.doesNotMatch(output, /refusing/, "the loopback default passes the bind guard");
+});
+
+/** Renames to or from a denied path, committed in a project repo, read back through the git and diff routes. */
+async function gitRenames(t: { after(fn: () => unknown): void }, direction: "from denied" | "to denied") {
+	{
+		const view = await serve(t, {}, (put) => {
+			put(join(LAYOUT.runs, "cp-a", "status.json"), {});
+			put(LAYOUT.fleetFile, { jobs: [{ job_id: "cp-a", project: "demo", phase: "waiting", dispatched_at: "2026-09-01T00:00:01Z" }] });
+		});
+		const repo = join(view.home, LAYOUT.projects, "demo");
+		mkdirSync(join(repo, "nested"), { recursive: true });
+		git(repo, "init", "-b", "main", "--quiet");
+		git(repo, "config", "user.name", "test");
+		git(repo, "config", "user.email", "test@example.invalid");
+		const pairs: Array<[string, string]> = [
+			["nested/.ENV.private", "exposed[1].txt"],
+			["nested/auth.json", "odd\tname\n.txt"],
+		];
+		if (direction === "to denied") for (const pair of pairs) pair.reverse();
+		for (const [index, [from]] of pairs.entries()) writeFileSync(join(repo, from), `PRIVATE-${index}\n`.repeat(20));
+		writeFileSync(join(repo, "safe-old.txt"), "ordinary rename\n");
+		git(repo, "add", "-f", ".");
+		git(repo, "commit", "-qm", "baseline");
+		const base = git(repo, "rev-parse", "HEAD");
+		for (const [from, to] of pairs) {
+			renameSync(join(repo, from), join(repo, to));
+			appendFileSync(join(repo, to), "PRIVATE-EDIT\n");
+		}
+		renameSync(join(repo, "safe-old.txt"), join(repo, "safe-new.txt"));
+		writeFileSync(join(repo, "visible.txt"), "PUBLIC-CONTENT\n");
+		git(repo, "add", "-f", ".");
+		const get = async (path: string) => JSON.parse((await view.get(path)).body.toString("utf8"));
+		const status = await get("/api/git?root=project:demo&view=status");
+		git(repo, "commit", "-qm", "moves");
+		const head = git(repo, "rev-parse", "HEAD");
+		const renames = git(repo, "diff", "--name-status", "-M", base, head);
+		assert.equal(renames.split("\n").filter((line) => /^R\d+\t/.test(line)).length, 3, "fixture contains all three detected renames");
+		writeFileSync(join(view.stateDir, "runs", "cp-a", "envelope.json"), JSON.stringify({ envelope: { base_sha: base, head_sha: head } }));
+		const show = await get(`/api/git?root=project:demo&view=show&sha=${head}`);
+		const diff = await get("/api/diff?id=cp-a");
+		assert.deepEqual([status.ok, show.ok, diff.available], [true, true, true]);
+		for (const output of [status.lines.join("\n"), show.text, diff.text]) {
+			assert.match(output, /visible.txt/);
+			assert.match(output, /safe-old.txt/);
+			assert.match(output, /safe-new.txt/);
+			assert.doesNotMatch(output, /PRIVATE-/);
+			for (const name of pairs.flat()) assert.ok(!output.includes(name) && !output.includes(JSON.stringify(name).slice(1, -1)), `leaked ${JSON.stringify(name)}: ${output}`);
+		}
+		for (const output of [show.text, diff.text]) assert.match(output, /PUBLIC-CONTENT/);
+	}
+}
+
+test("P21-git-renames from denied: git status, show and the job diff suppress both paths and the content of a denied rename", (t) => gitRenames(t, "from denied"));
+test("P21-git-renames to denied: git status, show and the job diff suppress both paths and the content of a denied rename", (t) => gitRenames(t, "to denied"));

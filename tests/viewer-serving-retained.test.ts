@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { appPage } from "../src/viewer/app-page.ts";
 import { buildViewer } from "../src/viewer/build.ts";
 import { LAYOUT } from "../src/contracts.ts";
-import { mkdirSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createScratchHome } from "./harness/index.ts";
 import { EventEmitter } from "node:events";
@@ -15,6 +15,8 @@ import { applyDelta, diffJson } from "../src/viewer/json-delta.ts";
 import { deployView } from "../src/viewer/deploy-view.ts";
 import { readObject } from "../src/viewer/sessions.ts";
 import { routingEvents } from "../src/viewer/overview-health.ts";
+import { readLines, startOffset } from "../src/viewer/tail.ts";
+import { hostAllowed } from "../src/viewer/server.ts";
 import type { ViewerJob } from "../src/viewer/api-types.ts";
 import { bindHostRefusal, localAddresses, sameAddress, viewerHostCandidates } from "../src/viewer/bind-host.ts";
 
@@ -251,4 +253,74 @@ test("routingEvents: an unchanged log is a cache hit and an append is read", (t)
 	assert.equal(routingEvents({ home: home.path, stateDir }, "cp-a")[0], first, "unchanged events hit the cache");
 	writeFileSync(log, event("md-first") + event("md-next"));
 	assert.equal(routingEvents({ home: home.path, stateDir }, "cp-a").length, 2);
+});
+
+/** A scratch directory removed after the test. */
+function scratch(t: { after(fn: () => void): void }): string {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	return home.path;
+}
+
+// `readLines`/`startOffset`: byte-offset ids never leave the server, and no caller passes a Last-Event-ID.
+test("tail: complete lines only, ids are byte offsets past each newline, partial line waits", (t) => {
+	const file = join(scratch(t), "s.jsonl");
+	writeFileSync(file, '{"a":1}\n{"b":"é"}\n{"c":');
+	const first = readLines(file, 0);
+	assert.deepEqual(
+		first.lines.map((line) => line.text),
+		['{"a":1}', '{"b":"é"}'],
+	);
+	assert.equal(first.lines[0]?.id, 8);
+	assert.equal(first.lines[1]?.id, 8 + Buffer.byteLength('{"b":"é"}\n'));
+	assert.equal(first.offset, first.lines[1]?.id, "the partial line is not consumed");
+
+	appendFileSync(file, "3}\n");
+	const second = readLines(file, first.offset);
+	assert.deepEqual(
+		second.lines.map((line) => line.text),
+		['{"c":3}'],
+	);
+	assert.equal(readLines(file, second.offset).lines.length, 0);
+});
+
+test("tail: a file that shrank below the offset restarts at 0 and says reset", (t) => {
+	const file = join(scratch(t), "s.jsonl");
+	writeFileSync(file, "x\n");
+	const chunk = readLines(file, 500);
+	assert.equal(chunk.reset, true);
+	assert.deepEqual(
+		chunk.lines.map((line) => line.text),
+		["x"],
+	);
+	assert.deepEqual(readLines(join(scratch(t), "missing.jsonl"), 0), { lines: [], offset: 0, reset: false });
+});
+
+test("resume: Last-Event-ID on a line boundary resumes there; garbage, mid-line or past-end does not", (t) => {
+	const file = join(scratch(t), "s.jsonl");
+	writeFileSync(file, "aaaa\nbbbb\ncccc\n");
+	assert.deepEqual(startOffset(file, "5"), { offset: 5, reset: false });
+	assert.deepEqual(startOffset(file, "0"), { offset: 0, reset: false });
+	// A supplied id that is rejected starts over AND says reset, so the client clears.
+	assert.deepEqual(startOffset(file, "7"), { offset: 0, reset: true }, "mid-line id is not a resume point");
+	assert.deepEqual(startOffset(file, "9999"), { offset: 0, reset: true }, "past EOF: rotated or replaced");
+	assert.deepEqual(startOffset(file, "-1"), { offset: 0, reset: true });
+	assert.deepEqual(startOffset(file, "5; drop"), { offset: 0, reset: true });
+	assert.deepEqual(startOffset(file, undefined), { offset: 0, reset: false }, "a fresh connection is not a reset");
+	assert.deepEqual(startOffset(file, ""), { offset: 0, reset: false });
+	assert.deepEqual(startOffset(join(scratch(t), "gone.jsonl"), "5"), { offset: 0, reset: true });
+	// Resuming at the id of line 1 yields exactly the lines after it.
+	assert.deepEqual(
+		readLines(file, startOffset(file, "5").offset).lines.map((line) => line.text),
+		["bbbb", "cccc"],
+	);
+	// A fresh connection on a big file starts at a line boundary inside the backlog.
+	assert.deepEqual(startOffset(file, undefined, 7), { offset: 10, reset: false });
+	assert.deepEqual(startOffset(file, "7", 7), { offset: 10, reset: true });
+});
+
+// `hostAllowed` for a bracketed IPv6 and a bare name: binding [::1] or a non-IP host is unknown on the CI runner.
+test("host bind: a bracketed IPv6 and a bare host name match exactly", () => {
+	assert.equal(hostAllowed("[::1]:8766", "::1", 8766), true);
+	assert.equal(hostAllowed("box", "box", 80), true);
 });
