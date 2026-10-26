@@ -13,6 +13,8 @@ import { layoutForHome } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { PI_PACKAGE_PATH } from "../../src/pi-version-nudge.ts";
 import type { CheckRecord, HealthRecord } from "../../src/service/health.ts";
+import { LEGACY_UNITS } from "../../src/service/daemon-backend.ts";
+import { daemonPaths } from "../../src/service/daemon-files.ts";
 import { RETIRED_INSTALL_FLAGS } from "../../src/service/install.ts";
 import {
 	COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, REPO_ROOT, type RpcRecord, type ScriptStep, startPiChild,
@@ -562,4 +564,185 @@ test("P14-units: on a systemd --user machine cp-install writes cp-daemon.service
 	await t.test("systemd-analyze --user verify accepts cp-daemon.service", { skip: unverifiable }, () => {
 		assert.doesNotMatch(verify.stderr, /WorkingDirectory|fatal|bad unit|cp-daemon\.service:\d+:/i, verify.stderr);
 	});
+});
+
+/**
+ * A systemd --user machine for cp-install's start step: systemctl, loginctl, crontab and the app's daemon.ts are
+ * logging stand-ins over one state dir per user ($SM: on-<unit> files, a `down` daemon, `manager`, `update-at`).
+ */
+function backendMachine(t: TestContext) {
+	const box = machine(t);
+	writeFileSync(box.listing, `${MODELS}\n`);
+	const { tools, root } = box.user("probe", {});
+	const node = process.execPath;
+	const up = `const up = () => { if (fs.existsSync(sm + "/down")) return; fs.mkdirSync(require("node:path").dirname(process.env.P14_STATE), { recursive: true });
+fs.writeFileSync(process.env.P14_STATE, JSON.stringify({ pid: 1, inner: { state: "ready" } }));
+fs.writeFileSync(process.env.P14_RUNTIME, JSON.stringify({ units: { parent: { state: "running" }, viewer: { state: "running" } } })); };`;
+	const head = (name: string) => `#!${node}\nconst fs = require("node:fs"); const sm = process.env.SM; const a = process.argv.slice(2);\nfs.appendFileSync(sm + "/calls.log", "${name} " + a.join(" ") + "\\n");\nconst read = (f) => (fs.existsSync(sm + "/" + f) ? fs.readFileSync(sm + "/" + f, "utf8") : undefined);\n${up}\n`;
+	writeFileSync(join(tools.dir, "systemctl"), `${head("systemctl")}const [, verb, ...rest] = a; const units = rest.filter((w) => !w.startsWith("--")); const on = (u) => sm + "/on-" + u;
+if (verb === "is-system-running") { const s = read("manager") ?? "running"; console.log(s); process.exit(s ? 0 : 1); }
+if (verb === "is-active" && units[0] === "cp-update.service") { const n = String(Number(read("update-n") ?? 0) + 1); fs.writeFileSync(sm + "/update-n", n); console.log(n === read("update-at") ? "active" : "inactive"); }
+else if (verb === "is-active") console.log(fs.existsSync(on(units[0])) ? "active" : "inactive");
+else if (verb === "show") console.log(units.includes("cp-view.service") && a.includes("--property=Environment") ? "CP_VIEWER_HOST=100.64.0.9" : "0");
+else if (verb === "enable" && rest.includes("--now")) { for (const u of units) fs.writeFileSync(on(u), ""); if (units.includes("cp-daemon.service")) up(); }
+else if (verb === "disable" && rest.includes("--now")) for (const u of units) fs.rmSync(on(u), { force: true });
+else if (verb === "try-restart") up();
+`, { mode: 0o755 });
+	writeFileSync(join(tools.dir, "loginctl"), "#!/bin/sh\necho Linger=yes\n", { mode: 0o755 });
+	writeFileSync(join(tools.dir, "crontab"), `${head("crontab")}if (a[0] === "-l") { console.error("no crontab for u"); process.exit(1); }\nfs.copyFileSync(a[0], sm + "/crontab.txt");\n`, { mode: 0o755 });
+	writeFileSync(join(tools.dir, "pi-machine"), readFileSync(join(tools.dir, "pi")), { mode: 0o755 });
+	writeFileSync(join(tools.dir, "pi"), `#!/bin/sh\n[ "$1 $2" = "--mode rpc" ] || exec "${tools.dir}/pi-machine" "$@"\nread -r _\necho '${JSON.stringify({ type: "response", id: "probe", success: true, data: { commands: [{ name: "cp-version", source: "extension" }] } })}'\n`, { mode: 0o755 });
+	// The app is this package but for src/service/daemon.ts, whose status exits 0 once $SM/running exists.
+	const app = join(root, "app");
+	const mirror = (rel: string, keep: string) => {
+		mkdirSync(join(app, rel), { recursive: true });
+		for (const name of readdirSync(join(pkg, rel)).filter((entry) => entry !== keep)) symlinkSync(join(pkg, rel, name), join(app, rel, name));
+	};
+	for (const [rel, keep] of [["", "src"], ["src", "service"], ["src/service", "daemon.ts"]] as const) mirror(rel, keep);
+	writeFileSync(join(app, "src/service/daemon.ts"), `import { createRequire } from "node:module";\nconst require = createRequire(import.meta.url);\n${head("daemon").split("\n").slice(1).join("\n")}
+if (a[0] === "status") process.exit(fs.existsSync(sm + "/running") ? 0 : 3);
+if (a[0] === "start" || a[0] === "restart") { fs.writeFileSync(sm + "/running", ""); up(); }
+console.log("cp-daemon " + a[0] + ": ok");
+`);
+	let n = 0;
+	const user = (state: { legacy?: boolean; files?: Record<string, string> } = {}) => {
+		const u = box.user(`u${++n}`, {});
+		const sm = join(root, `sm${n}`);
+		mkdirSync(sm);
+		const paths = daemonPaths(u.cpHome);
+		const unitDir = join(u.home, ".config", "systemd", "user");
+		mkdirSync(unitDir, { recursive: true });
+		if (state.legacy) {
+			for (const name of LEGACY_UNITS) writeFileSync(join(unitDir, name), GENERATED);
+			for (const name of ["cp-parent.service", "cp-view.service", "cp-health.timer", "cp-update.timer"]) writeFileSync(join(sm, `on-${name}`), "");
+		}
+		for (const [name, text] of Object.entries(state.files ?? {})) writeFileSync(join(sm, name), text);
+		const env = { ...u.env, SM: sm, P14_STATE: paths.state, P14_RUNTIME: paths.runtime, CP_TEST_TIME_SCALE: "60", CP_TEST_TIME_ZERO: String(Date.now()) };
+		const calls = (tool: string) => (existsSync(join(sm, "calls.log")) ? readFileSync(join(sm, "calls.log"), "utf8") : "").split("\n").filter((line) => line.startsWith(`${tool} `));
+		/** cp-install with the flags P14-install pins plus `args`, on no terminal, its clock 60 times fast. */
+		const install = async (args: string[]) => {
+			const argv = ["--import", join(REPO_ROOT, "tests/harness/time-scale.ts"), join(pkg, "src/service/install.ts"), "--home", u.cpHome, "--app", app, "--no-pi-packages",
+				"--viewer-host", "127.0.0.1", "--parent-model", "openai/gpt-6.1-sol", "--operator-model", "openai/gpt-6.1-sol", ...args];
+			const child = spawn(u.node, argv, { cwd: root, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+			let out = "";
+			child.stdout.on("data", (chunk) => (out += String(chunk)));
+			child.stderr.on("data", (chunk) => (out += String(chunk)));
+			const code = await new Promise<number | null>((resolve) => child.once("exit", resolve));
+			return { code, out };
+		};
+		const on = () => readdirSync(sm).filter((name) => name.startsWith("on-")).map((name) => name.slice(3)).sort();
+		return { ...u, sm, paths, unitDir, install, calls, systemctl: () => calls("systemctl").map((line) => line.slice("systemctl --user ".length)), on };
+	};
+	return { app, node: join(tools.dir, "node"), user };
+}
+const GENERATED = "# Generated by cp-install (pi-command-post); edits are refused on reinstall without --force.\n";
+
+test("P14-backend: cp-install starts cp-daemon on systemd or detached, migrates a legacy home (M1) or rolls it back, and uninstalls", { timeout: 600_000 }, async (t) => {
+	const box = backendMachine(t);
+	const reboot = (u: { cpHome: string }) => `"${box.node}" "${box.app}/src/service/daemon.ts" start --home "${u.cpHome}"`;
+	const after = (calls: string[], from: string) => calls.slice(calls.indexOf(from));
+
+	// The user manager's state picks the backend: running or degraded is systemd, anything else detached.
+	for (const [state, backend] of [["running", /systemctl --user is running: cp-daemon runs as cp-daemon\.service/], ["degraded", /is degraded: cp-daemon runs as/],
+		["offline", /no systemd --user \(offline\): cp-daemon runs detached/], ["", /no systemd --user \(unavailable\)/]] as const) {
+		assert.match((await box.user({ files: { manager: state } }).install(["--dry-run"])).out, new RegExp(`ok: service: [^\\n]*${backend.source}`), state);
+	}
+
+	// systemd, fresh: daemon-reload, enable --now, ready; a changed config try-restarts; one never up fails.
+	const fresh = box.user();
+	const first = await fresh.install([]);
+	assert.deepEqual(after(fresh.systemctl(), "daemon-reload"), ["daemon-reload", "enable --now cp-daemon.service", "is-active cp-daemon.service"], first.out);
+	assert.match(first.out, /^ok: enable: cp-daemon\.service is active: the parent supervisor and the viewer run$/m);
+	const changed = await fresh.install(["--force", "--port", "7301"]);
+	assert.ok(fresh.systemctl().includes("try-restart cp-daemon.service"), changed.out);
+	const down = box.user({ files: { down: "" } });
+	assert.match((await down.install([])).out, /^fail: enable: no \S+daemon\.json yet after 60s/m);
+
+	// --no-start: systemd enables without --now; detached prints the reboot command; a legacy home is left as it is.
+	const quiet = box.user();
+	const enabled = await quiet.install(["--no-start"]);
+	assert.deepEqual(after(quiet.systemctl(), "daemon-reload"), ["daemon-reload", "enable cp-daemon.service"]);
+	assert.match(enabled.out, /enabled, not started \(--no-start\)/);
+	const idle = box.user({ files: { manager: "offline" } });
+	const printed = await idle.install(["--no-start"]);
+	assert.deepEqual(idle.calls("daemon"), [], "no cp-daemon call");
+	assert.ok(printed.out.includes(`skip: daemon: not started (--no-start); start it now and after a reboot run: ${reboot(idle)}`), printed.out);
+	const held = box.user({ legacy: true });
+	const kept = await held.install(["--no-start"]);
+	assert.deepEqual(held.systemctl(), ["is-system-running"], kept.out);
+	assert.deepEqual([readdirSync(held.unitDir).sort(), held.on()], [[...LEGACY_UNITS].sort(), ["cp-health.timer", "cp-parent.service", "cp-update.timer", "cp-view.service"]]);
+	assert.match(kept.out, /^skip: migrate: .*untouched \(--no-start\); rerun without --no-start to migrate/m);
+
+	// detached: a stopped daemon starts, a running one restarts onto a changed config, an unchanged one is left.
+	const det = box.user({ files: { manager: "offline" } });
+	const started = await det.install([]);
+	assert.deepEqual(det.calls("daemon").slice(0, 2), [`daemon status --home ${det.cpHome}`, `daemon start --home ${det.cpHome}`]);
+	assert.match(started.out, /^changed: daemon: started \(detached\); after a reboot run: /m);
+	const restarted = await det.install(["--force", "--port", "7301"]);
+	assert.ok(det.calls("daemon").includes(`daemon restart --home ${det.cpHome}`), restarted.out);
+	const before = det.calls("daemon").length;
+	const same = await det.install(["--port", "7301", "--crontab"]);
+	assert.equal(det.calls("daemon")[before], `daemon status --home ${det.cpHome}`);
+	assert.doesNotMatch(det.calls("daemon").slice(before).join("\n"), / (start|restart) /, "an unchanged running daemon is left");
+	assert.match(same.out, /^ok: daemon: running \(detached\)/m);
+	// --crontab: one marked @reboot line through a file, never stdin; the file goes afterwards.
+	const tmp = join(det.paths.stateDir, "daemon-crontab.tmp");
+	assert.deepEqual(det.calls("crontab"), ["crontab -l", `crontab ${tmp}`]);
+	assert.equal(existsSync(tmp), false, "the temp file is removed");
+	const line = `@reboot ${reboot(det)} >/dev/null 2>&1 # cp-daemon ${det.cpHome}`;
+	assert.equal(readFileSync(join(det.sm, "crontab.txt"), "utf8"), `${line}\n`);
+	assert.ok(same.out.includes(`changed: crontab: added: ${line}`), same.out);
+
+	// M1 preflight refusals: a hand-written legacy unit, an update run in flight, a recorded update phase.
+	const hand = box.user({ legacy: true });
+	writeFileSync(join(hand.unitDir, "cp-view.service"), "[Service]\nExecStart=/bin/true\n");
+	assert.match((await hand.install([])).out, /fail: migrate: \S+cp-view\.service not written by cp-install; migrate by hand/);
+	assert.match((await box.user({ legacy: true, files: { "update-at": "1" } }).install([])).out, /fail: migrate: an update run is in flight/);
+	const phased = box.user({ legacy: true });
+	mkdirSync(phased.paths.stateDir, { recursive: true });
+	writeFileSync(phased.paths.update, JSON.stringify({ phase: "merging" }));
+	assert.match((await phased.install([])).out, /records phase merging; rerun after it is idle, or with --force/);
+	assert.equal(existsSync(phased.paths.config), false, "a refused preflight writes nothing");
+
+	// M1, forced past the phase: timers off, update re-checked, viewer then parent off, cp-daemon on, legacy files go.
+	const m1 = await phased.install(["--force"]);
+	assert.match(m1.out, /sets CP_VIEWER_HOST=100\.64\.0\.9; cp-daemon does not read it: to keep that address rerun with --viewer-host 100\.64\.0\.9 --force/);
+	assert.deepEqual(after(phased.systemctl(), "daemon-reload").slice(0, 7), ["daemon-reload", "disable --now cp-health.timer cp-update.timer", "is-active cp-update.service",
+		"disable --now cp-view.service", "disable --now cp-parent.service", "enable --now cp-daemon.service", "is-active cp-daemon.service"]);
+	assert.equal(phased.systemctl().at(-1), "daemon-reload");
+	assert.deepEqual([readdirSync(phased.unitDir), existsSync(phased.paths.config), phased.on()], [["cp-daemon.service"], true, ["cp-daemon.service"]]);
+	assert.match(m1.out, /^changed: migrate: cp-daemon\.service runs the parent supervisor and the viewer/m);
+
+	// M1 rollback: not ready in 60 s disables cp-daemon, removes its unit and daemon.json, re-enables the legacy units.
+	const back = box.user({ legacy: true, files: { down: "" } });
+	mkdirSync(dirname(back.paths.log), { recursive: true });
+	writeFileSync(back.paths.log, "line one\nboom: EADDRINUSE\n");
+	const rolled = await back.install([]);
+	assert.deepEqual(after(back.systemctl(), "disable --now cp-daemon.service").slice(0, 3), ["disable --now cp-daemon.service", "daemon-reload",
+		"enable --now cp-parent.service cp-view.service cp-health.timer cp-update.timer"], rolled.out);
+	assert.deepEqual([readdirSync(back.unitDir).sort(), existsSync(back.paths.config)], [[...LEGACY_UNITS].sort(), false]);
+	assert.match(rolled.out, /^fail: migrate: .* after 60s; rolled back: .*cp-parent\.service active, cp-view\.service active.*boom: EADDRINUSE/m);
+
+	// An update run that starts while the timers go off (the second check) puts the timers back and changes nothing else.
+	const raced = box.user({ legacy: true, files: { "update-at": "2" } });
+	const race = await raced.install([]);
+	assert.ok(raced.systemctl().includes("enable --now cp-health.timer cp-update.timer"), race.out);
+	assert.ok(!raced.systemctl().some((call) => /cp-parent\.service|cp-daemon\.service/.test(call)), raced.systemctl().join("\n"));
+	assert.equal(existsSync(raced.paths.config), false);
+	assert.match(race.out, /^fail: migrate: an update run started meanwhile/m);
+
+	// --dry-run says what M1 would do and changes no unit.
+	const dry = box.user({ legacy: true });
+	const would = await dry.install(["--dry-run"]);
+	assert.deepEqual(dry.systemctl().filter((call) => /daemon-reload|enable|disable/.test(call)), []);
+	assert.match(would.out, /^changed: migrate: would: systemctl --user daemon-reload; disable --now cp-health\.timer cp-update\.timer/m);
+
+	// --uninstall: disables and removes the generated units, leaves a hand-written one.
+	const gone = box.user({ legacy: true });
+	writeFileSync(join(gone.unitDir, "cp-daemon.service"), GENERATED);
+	writeFileSync(join(gone.unitDir, "cp-health.service"), "[Service]\n");
+	const removed = await gone.install(["--uninstall"]);
+	assert.equal(gone.systemctl()[1], "disable --now cp-daemon.service cp-parent.service cp-view.service cp-health.timer cp-update.timer", removed.out);
+	assert.deepEqual(readdirSync(gone.unitDir), ["cp-health.service"]);
+	assert.match(removed.out, /^skip: uninstall: \S+cp-health\.service was not written by cp-install/m);
 });

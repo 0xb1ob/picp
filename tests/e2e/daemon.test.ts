@@ -491,7 +491,7 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 	assert.equal(r.starts("viewer").length, viewers + 1, "still held");
 	assert.equal(r.at("reload").out, "cp-daemon reload: ok\n");
 	assert.equal(r.runtime().hold, undefined);
-	assert.equal(r.starts("viewer").length, viewers + 2);
+	await r.until("the reloaded viewer's start event", () => r.starts("viewer").length === viewers + 2);
 
 	// stop SIGTERMs the parent, viewer and sender — a stubborn parent is SIGKILLed after 10 s — never the oneshots.
 	await r.until("the stubborn parent", () => r.starts("parent").at(-1)?.mode === "stubborn");
