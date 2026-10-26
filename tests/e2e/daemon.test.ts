@@ -104,7 +104,7 @@ function rig(t: TestContext, { scale = 1, inner = "real" as "real" | "stub", out
 	const at = (...args: string[]) => cli([...args, "--home", home]);
 	t.after(async () => {
 		if (outer === "real") at("stop", "--force");
-		for (const e of events().filter((ev) => ev.event === "start")) try { process.kill(e.pid, "SIGKILL"); } catch { /* gone */ }
+		for (const e of events().filter((ev) => ev.event === "start")) killStandIn(e.pid, home);
 		scratch.cleanup();
 	});
 	const events = (): Array<{ role: string; pid: number; event: string; at?: number; mode?: string; argv?: string[]; env?: Record<string, string>; sid?: number; op?: string }> =>
@@ -192,7 +192,7 @@ test("P14-daemon-cli: cp-daemon start, stop, restart and status on the detached 
 	const silent = r.at("start");
 	assert.equal(silent.code, 1);
 	assert.match(silent.out, /cp-daemon: pid \d+ is not ready within 30s; the log says:\nboot: stuck before the lock/);
-	for (const e of r.starts("outer")) try { process.kill(e.pid, "SIGKILL"); } catch { /* gone */ }
+	for (const e of r.starts("outer")) killStandIn(e.pid, r.home);
 	assert.equal(r.at("start").code, 0);
 	const stubborn = r.starts("outer").at(-1)!.pid;
 	const slow = r.at("stop");
@@ -532,7 +532,13 @@ test("P14-daemon-runtime-fail: a parent crash loop backs off and fails; exit 78 
 	await r.until("the failed spawn", () => /parent spawn failed: spawn \S+\/fake EACCES/.test(r.log()));
 	assert.equal(r.runtime().units.parent.pid, undefined);
 	assert.match(r.at("status").out, /^parent: failed \(start-limit-hit\), 0 restart\(s\)\nviewer: restarting, 1 restart\(s\)$/m, "no pid recorded");
+	assert.doesNotMatch(JSON.stringify(r.runtime()), /"pid":-1/, "never -1");
+	// Hold and stop then signal nothing: innerKill would log a refused or a failed kill for a missing pid.
+	const settled = r.log().length;
+	const hold = `${JSON.stringify({ id: "hold", token: r.state().token, protocol: 1, op: "hold" })}\n`;
+	assert.equal((await socket(r.paths.sock, [hold])).replies[0]?.ok, true);
 	assert.equal(r.at("stop").code, 0);
+	assert.doesNotMatch(r.log().slice(settled), /refused to send|kill SIG|ignored SIGTERM/);
 	assert.doesNotMatch(r.log(), /ignored SIGTERM/);
 
 	// A new outer: recorded pids whose command lines no longer match (reused) are neither adopted nor signalled, and
@@ -560,3 +566,10 @@ test("P14-daemon-runtime-fail: a parent crash loop backs off and fails; exit 78 
 	assert.match(other.stderr, /the outer speaks protocol 2, this runtime 1: run cp-daemon restart; exiting 78/);
 	assert.match(inner({ CP_DAEMON_PROTOCOL: "1" }).stderr, /not started by cp-daemon \(no IPC channel\); exiting 78/);
 });
+
+/** SIGKILL a logged stand-in only while its pid still runs this home's code: a pid reused since is never signalled. */
+function killStandIn(pid: number, home: string): void {
+	try {
+		if (readFileSync(`/proc/${pid}/cmdline`, "utf8").includes(home)) process.kill(pid, "SIGKILL");
+	} catch { /* gone */ }
+}
