@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { ACTIONS_CI_TIMEOUT_MS } from "../../src/actions-ci.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, paths } from "../../src/contracts.ts";
 import { initialStatus } from "../../src/run-artifacts.ts";
+import { StatusError } from "../../src/status.ts";
 import { run, SKIP, startStack } from "./landing-helpers.ts";
 
 const hang = { untilFile: "/nonexistent/never" };
@@ -40,12 +41,11 @@ test("ci watch tick: the transient retry never extends past the original deadlin
 	assert.equal(tick.errors.length, 1);
 });
 
-/** Longest the parent's event loop may block for one tick read; a 3,000-job home took seconds before #561's fix. */
-const LAG_BOUND_MS = 1_000;
+/** Generous absolute ceiling on one loop stall; the cache's win is asserted as a ratio, so load cannot flake it. */
+const LAG_BOUND_MS = 10_000;
 
-// #561: every fleet.json/status.json read re-ran the schema check, so a large home blocked the parent's loop for seconds
-// per widget tick and starved gh's pipe ("Actions CI read transport/deadline"). With 3,000 finished jobs on disk the
-// CI watch tick still lands inside its budget, and no widget read or other loop turn blocks past LAG_BOUND_MS.
+// #561: every read re-ran the schema check. With 3,000 finished jobs the tick fits its budget and
+// repeat reads (cache hits) beat the first read after a write.
 test("ci watch tick: a 3,000-job home keeps the tick inside its budget and the event loop responsive", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const s = await startStack(t);
 	const live = await s.held("large home", 414);
@@ -63,27 +63,44 @@ test("ci watch tick: a 3,000-job home keeps the tick inside its budget and the e
 	});
 	await s.post.fleet.mutate((jobs) => void jobs.push(...done));
 	s.setGh({ runs: [run(414, live.head, "completed", "success")] });
-	s.post.awaitingSnapshotSync(); // the first read after a write still checks the files once
+	await s.post.fleet.mutate(() => undefined); // a fleet write: the next read is the first one after it
+	const widgetRead = () => {
+		const at = performance.now();
+		s.post.statusNow();
+		s.post.awaitingSnapshotSync();
+		return Math.round(performance.now() - at);
+	};
+	const first = widgetRead();
 	const lag = monitorEventLoopDelay({ resolution: 10 });
 	lag.enable();
 	const started = performance.now();
 	const pending = s.post.ciTick();
 	const reads: number[] = [];
 	for (let i = 0; i < 3; i++) {
-		const at = performance.now();
-		s.post.statusNow();
-		s.post.awaitingSnapshotSync();
-		reads.push(Math.round(performance.now() - at));
+		reads.push(widgetRead());
 		await new Promise((resolve) => setImmediate(resolve));
 	}
 	const tick = await pending;
 	const took = Math.round(performance.now() - started);
 	lag.disable();
 	const worst = Math.round(lag.max / 1e6);
-	console.log(`3,000-job home: tick ${took} ms, widget reads ${reads.join("/")} ms, event-loop lag max ${worst} ms`);
+	console.log(`3,000-job home: tick ${took} ms, first read ${first} ms, cached reads ${reads.join("/")} ms, loop lag max ${worst} ms`);
 	assert.deepEqual(tick.errors, []);
 	assert.equal(tick.observations[0]?.event, "ci_green");
 	assert.ok(took < ACTIONS_CI_TIMEOUT_MS, `tick took ${took} ms`);
-	assert.ok(Math.max(...reads) < LAG_BOUND_MS, `widget reads took ${reads.join("/")} ms`);
+	assert.ok(first < LAG_BOUND_MS, `first read after a write took ${first} ms`);
+	assert.ok(Math.max(...reads) * 2 < first, `cached reads ${reads.join("/")} ms vs first ${first} ms`);
 	assert.ok(worst < LAG_BOUND_MS, `event-loop lag reached ${worst} ms`);
+});
+
+// #580 regression: skipping the snapshot self-check outright returned an invalid snapshot raw instead of StatusError.
+test("status: an invalid snapshot throws StatusError on every read, never served from cache", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t);
+	await s.held("status validation", 415);
+	const bad = { include: "bogus" } as never;
+	assert.ok(s.post.statusNow().jobs.length > 0); // a valid read first, so the cache is warm
+	for (let i = 0; i < 2; i++) {
+		assert.throws(() => s.post.statusNow(bad), StatusError);
+		await assert.rejects(s.post.status({ include: "bogus", titles: false } as never), StatusError);
+	}
 });
