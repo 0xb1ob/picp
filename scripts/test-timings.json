@@ -260,8 +260,6 @@
 	"tests/viewer-operator.test.ts": 9889,
 	"tests/viewer-palette.test.ts": 174,
 	"tests/viewer-performance.test.ts": 1757,
-	"tests/viewer-push-http.test.ts": 471,
-	"tests/viewer-push-ui.test.ts": 96,
 	"tests/viewer-queued-bubbles.test.ts": 388,
 	"tests/viewer-reports.test.ts": 129,
 	"tests/viewer-restart-ui.test.ts": 2245,

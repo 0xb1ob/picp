@@ -150,6 +150,8 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 		window, document, root, requests, confirms, storage, close, text, release,
 		/** The app's own `navigator` (linkedom's window keeps its own): set `clipboard` to stage a copy. */
 		navigator: sandbox.navigator as { clipboard?: unknown },
+		/** The app's own global scope: stage browser APIs linkedom lacks (Notification) before the app reads them. */
+		globals: sandbox,
 		/** Moves this tab's clock (its `Date`) forward by `ms`; the viewer's own clock is `pin`. */
 		shift: (ms: number) => void (shifted += ms),
 		/** Every open stream says `refresh`, as the server's does on a change: the mounted page re-reads its data. */
