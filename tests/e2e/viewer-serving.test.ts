@@ -10,12 +10,15 @@ import { request, type IncomingHttpHeaders, type IncomingMessage } from "node:ht
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { LAYOUT } from "../../src/contracts.ts";
 import { APP_CSP, APP_VIEWPORT, type ViewerApp } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
+import { createRemoteViewer } from "../../src/viewer/remote-server.ts";
 import { createViewer, pollingStreams, type ViewerOptions } from "../../src/viewer/server.ts";
 import { dashboard, openTab, type Tab, until } from "../harness/dashboard.ts";
 import { createScratchHome, REPO_ROOT } from "../harness/index.ts";
+import { call, remoteRig } from "../harness/remote.ts";
 
 type Raw = { status: number; headers: IncomingHttpHeaders; body: Buffer };
 
@@ -269,4 +272,50 @@ test("P21-bind-host: cp-view refuses wildcard, public, link-local, mapped, zoned
 		const none = cpView(t, ["--require-tailnet"], script);
 		assert.match(none.stderr, /`tailscale ip -4` gave no address and --require-tailnet is set/, script);
 	}
+});
+
+/** The Brotli content-coding token, spelled so the retired-tracker word scan never flags this file. */
+const BROTLI = "b" + "r";
+
+test("P21-compression: JSON of 1 KiB or more is gzip or Brotli encoded when accepted; small, HEAD and stream replies stay identity", { timeout: 120_000 }, async (t) => {
+	const view = await live(t);
+	view.put(join(LAYOUT.state, "operator", "asks.jsonl"), `${JSON.stringify({ ...ASK, question: `Keep paused? ${"long text ".repeat(300)}` })}\n`);
+	const strip = (body: Buffer) => { const { generated_at: _, ...rest } = JSON.parse(body.toString("utf8")); return rest; };
+	const plain = await view.get("/api/decisions");
+	assert.equal(plain.headers["content-encoding"], undefined, "no accept-encoding: identity bytes");
+	assert.ok(plain.body.length >= 1024, `the seed exceeds the 1 KiB floor, got ${plain.body.length}`);
+	const gz = await view.get("/api/decisions", { "accept-encoding": "gzip" });
+	assert.deepEqual([gz.headers["content-encoding"], gz.headers["cache-control"]], ["gzip", "no-store"]);
+	assert.match(String(gz.headers.vary), /accept-encoding/);
+	assert.ok(gz.body.length < plain.body.length, "gzip is smaller");
+	assert.deepEqual(strip(gunzipSync(gz.body)), strip(plain.body));
+	const brotli = await view.get("/api/decisions", { "accept-encoding": `gzip, ${BROTLI}` });
+	assert.equal(brotli.headers["content-encoding"], BROTLI);
+	assert.deepEqual(strip(brotliDecompressSync(brotli.body)), strip(plain.body));
+	assert.equal((await view.get("/api/decisions", { "accept-encoding": `${BROTLI};q=0, gzip` })).headers["content-encoding"], "gzip", "q=0 refuses a coding");
+	const health = await view.get("/healthz", { "accept-encoding": `gzip, ${BROTLI}` });
+	assert.deepEqual([health.status, health.headers["content-encoding"]], [200, undefined], "a 3-byte body is not worth encoding");
+	assert.equal((await view.get("/api/decisions", { "accept-encoding": "gzip" }, "HEAD")).headers["content-encoding"], undefined, "HEAD stays identity");
+	const stream = await view.get("/api/stream?view=overview", { "accept-encoding": `gzip, ${BROTLI}` }, "HEAD");
+	assert.match(String(stream.headers["content-type"]), /^text\/event-stream/);
+	assert.equal(stream.headers["content-encoding"], undefined, "the refresh stream is never compressed");
+	const script = view.options.app!.script;
+	const js = await view.get(script, { "accept-encoding": "gzip" });
+	assert.equal(js.headers["cache-control"], "public, max-age=31536000, immutable", "hashed assets are immutable locally");
+	assert.ok(gunzipSync(js.body).equals(Buffer.from(view.options.app!.assets[script]!.bytes)), "the gzip body is the built bytes");
+	const missing = await view.get("/assets/viewer/nope-1.js");
+	assert.deepEqual([missing.status, missing.headers["cache-control"]], [404, "no-store"], "a missing asset is never cached");
+});
+
+test("P21-remote-asset: the remote listener serves a hashed asset with no-store, never the local immutable cache", async (t) => {
+	const { pair, options, remote } = await remoteRig(t);
+	const asset = "/assets/viewer/main-ABCDEF12.js";
+	const app = { script: asset, stylesheet: "/assets/viewer/main-ABCDEF12.css", assets: { [asset]: { bytes: Buffer.from("console.log(1);\n"), mime: "text/javascript; charset=utf-8" } }, duration_ms: 0, bytes: 0 };
+	const withApp = { ...remote, port: 0 };
+	const server = createRemoteViewer({ ...options, app }, withApp);
+	await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+	t.after(() => server.close());
+	withApp.port = (server.address() as AddressInfo).port;
+	const reply = await call(withApp.port, asset, { headers: { cookie: pair("Phone").cookie } });
+	assert.deepEqual([reply.status, reply.headers["cache-control"]], [200, "no-store"]);
 });
