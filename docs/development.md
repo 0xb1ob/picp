@@ -58,11 +58,10 @@ awaiting_merge (parked `human_handoff` PRs) is covered with synthetic fleet, wat
 or network runs:
 
 ```bash
-npm run test:one -- tests/awaiting-merge-park.test.ts       # park/resume primitives, crash stages, refusals
-npm run test:one -- tests/awaiting-merge-watch.test.ts      # batched watch, exits, stack follow-ups, the sweep port
-npm run test:one -- tests/awaiting-merge-lifecycle.test.ts  # handoff parks, viewer keeps CI, change request, merge
-npm run test:one -- tests/e2e/viewer-jobs.test.ts          # With the team, frozen time and cost, head CI, a parked PR end to end
-npm run test:one -- tests/human-handoff.test.ts             # the handoff port: park, fallback row, review first
+npm run test:one -- tests/awaiting-merge-park-retained.test.ts   # park/resume crash stages and rollback
+npm run test:one -- tests/awaiting-merge-watch-retained.test.ts  # the in-process claim race and the N20 withdrawal
+npm run test:one -- tests/e2e/viewer-jobs.test.ts                 # a parked PR end to end: park, With the team, resume, merge
+npm run test:one -- tests/e2e/parked-edges-p18b.test.ts           # handoff and watch faults: registry, dirty tree, gh refusals
 ```
 
 CI evidence is GitHub Actions only (runs on the exact head plus each run attempt's jobs, `src/actions-ci.ts`). These

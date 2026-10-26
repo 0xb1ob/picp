@@ -1,4 +1,4 @@
-/** PR2 of awaiting_merge: the park and resume primitives — resource order, crash stages, refusals and rollback. */
+/** Retained from awaiting_merge PR2: park and resume crash stages and rollback (P18b; the rest is e2e P18-parked). */
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -9,13 +9,9 @@ import { AwaitingMergeResume, type ParkFacts, Parking, readParkIntent, ResumeErr
 import { EMPTY_USAGE, type FleetRecord, paths } from "../src/contracts.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { readEventLog } from "../src/run-artifacts.ts";
-import { decideOccupancy } from "../src/preflight.ts";
 import { RunRegistry } from "../src/runs.ts";
-import { Teardown } from "../src/teardown.ts";
 import type { GateOutcome } from "../src/teardown.ts";
-import { HeldRelease } from "../src/held-release.ts";
-import { Sender } from "../src/send.ts";
-import { createScratchHome, type FakeWorker, fakeWorkerManager } from "./harness/index.ts";
+import { createScratchHome } from "./harness/index.ts";
 
 const HEAD = "a".repeat(40);
 const FACTS: ParkFacts = { pr_url: "https://github.com/o/r/pull/7", repo: "o/r", head_sha: HEAD, base: "main", handed_at: "2026-10-15T10:00:00Z" };
@@ -68,25 +64,6 @@ async function bench(t: { after(fn: () => void): void }, record = held()) {
 	return { home: home.path, fleet, runs, calls, state, parking, events };
 }
 
-test("park closes the worker, rechecks, drops the checkpoint, returns the lease by id, then commits the parked record", async (t) => {
-	const b = await bench(t);
-	const result = await b.parking.park("cp-park", FACTS);
-	assert.equal(result.parked, true);
-	assert.deepEqual(b.calls, [
-		"gates", "git rev-parse HEAD", "shutdown", "gates", "git rev-parse HEAD", "git update-ref -d refs/cp-checkpoints/cp-park", "release /wt/cp-park lease-1",
-	]);
-	const record = b.fleet.require("cp-park");
-	assert.equal(record.phase, "awaiting_merge");
-	assert.equal(record.lease_id, undefined);
-	assert.equal(record.checkpoint_ref, undefined);
-	assert.equal(record.awaiting_merge?.cycle, 1);
-	assert.equal(record.awaiting_merge?.frozen_seconds, 5400, "dispatch 09:00 to release 10:30");
-	assert.equal(readParkIntent(b.home, "cp-park"), undefined);
-	assert.equal(b.events("awaiting_merge_parked").length, 1);
-	assert.equal((await b.parking.park("cp-park", FACTS)).parked, true, "idempotent on an already parked job");
-	assert.equal(b.calls.length, 7, "the repeat touched nothing");
-});
-
 test("a gate or head refusal keeps the job held with its lease and leaves a restorable released worker", async (t) => {
 	const b = await bench(t);
 	b.state.gates = [{ ok: true, reason: "pushed" }, { ok: false, failure: { code: "dirty", message: "dirty", fix: "commit" } }];
@@ -126,29 +103,6 @@ test("a failed lease return stops at worker_closed; recovery resumes there witho
 	assert.equal(recovered?.parked, true);
 	assert.deepEqual(b.calls, ["release /wt/cp-park lease-1"], "no gate, git or worker call on a possibly recycled path");
 	assert.equal(b.fleet.require("cp-park").phase, "awaiting_merge");
-});
-
-test("teardown refuses a parked job before any git or lease call, even forced", async (t) => {
-	const b = await bench(t);
-	await b.parking.park("cp-park", FACTS);
-	const teardown = new Teardown({
-		home: b.home, fleet: b.fleet, runs: b.runs,
-		leases: { release: async () => assert.fail("a parked job's lease is not its own") } as never,
-		manager: { get: () => undefined } as never,
-	});
-	const result = await teardown.teardown("cp-park", { force: true } as never);
-	assert.equal(result.torn_down, false);
-	assert.equal(result.failure?.code, "job_parked");
-});
-
-test("a parked job is never re-dispatched under its own id, and is no occupancy for others", async (t) => {
-	const b = await bench(t);
-	await b.parking.park("cp-park", FACTS);
-	const jobs = b.fleet.list();
-	const own = decideOccupancy(jobs, { jobId: "cp-park", project: "demo" });
-	assert.equal(own.kind, "refuse");
-	assert.match(own.kind === "refuse" ? own.fix : "", /cp_send cp-park resumes/);
-	assert.equal(decideOccupancy(jobs, { jobId: "cp-other", project: "demo" }).kind, "clear");
 });
 
 function git(cwd: string, ...args: string[]): string {
@@ -198,22 +152,6 @@ async function resumeBench(t: { after(fn: () => void): void }) {
 	return { ...b, resume, lease, leaseCalls, spawn, tip };
 }
 
-test("resume leases fresh, checks out the remote tip, and revives the same session as held", async (t) => {
-	const b = await resumeBench(t);
-	const result = await b.resume.resume("cp-park");
-	assert.equal(result.worktree, b.lease.path);
-	assert.equal(result.head_sha, b.tip);
-	assert.match(result.note, /no longer yours/);
-	assert.equal(b.spawn.seen?.phase, "held", "revive sees the held record on the new lease");
-	assert.equal(b.spawn.seen?.worktree, b.lease.path);
-	const record = b.fleet.require("cp-park");
-	assert.equal(record.lease_id, "lease-2");
-	assert.equal(record.awaiting_merge, undefined);
-	assert.equal(git(b.lease.path, "rev-parse", "--abbrev-ref", "HEAD"), "cp-park");
-	assert.equal(b.events("awaiting_merge_resumed").length, 1);
-	assert.deepEqual(b.leaseCalls, ["acquire"]);
-});
-
 test("a refused spawn restores the parked record exactly and returns the new lease", async (t) => {
 	const b = await resumeBench(t);
 	const before = structuredClone(b.fleet.require("cp-park"));
@@ -229,35 +167,4 @@ test("a refused spawn restores the parked record exactly and returns the new lea
 	await assert.rejects(b.resume.resume("cp-park"), (error: unknown) => error instanceof ResumeError && error.code === "session_missing");
 	assert.deepEqual(b.leaseCalls, [], "no lease is taken for a session that cannot resume");
 	assert.equal(existsSync(join(b.home, paths.parkIntentFile("cp-park"))), false);
-});
-
-// cp_send is the resume path: the parked job leaves awaiting_merge for held on the new lease, the revived worker gets the
-// note-led message, and HeldRelease's "released" restore never fires a second revive (worker_revived follows the park's
-// held_released). Regression: Sender kept the pre-resume record and could restore the resumed worker as released.
-test("cp_send on a parked job resumes its worker on a fresh lease and the job leaves awaiting_merge", async (t) => {
-	const b = await resumeBench(t);
-	const workers = fakeWorkerManager(b.home, 3);
-	t.after(() => workers.manager.shutdownAll());
-	let revived: FakeWorker | undefined;
-	const resume = new AwaitingMergeResume({
-		fleet: b.fleet, runs: b.runs, clone: () => b.lease.clone, leases: { acquire: async () => b.lease, release: async () => ({ ok: true }) },
-		revive: async (jobId) => {
-			revived = workers.spawn(jobId);
-			b.runs.open(jobId).cp("worker_revived", { pid: revived.pid });
-		},
-	});
-	const heldRelease = new HeldRelease({ home: b.home } as never);
-	const sender = new Sender({
-		fleet: b.fleet, manager: workers.manager, runs: b.runs, home: b.home, resume: (id) => resume.resume(id),
-		released: (id) => heldRelease.wasReleased(id), revive: async () => assert.fail("a resumed worker is never restored as released"),
-	});
-	const result = await sender.send({ jobId: "cp-park", message: "address the team's review" });
-	assert.equal(result.receipt, "delivered");
-	assert.equal(heldRelease.wasReleased("cp-park"), false);
-	assert.match(revived?.sent[0] ?? "", /^\[resumed from awaiting_merge\][^]*\n\naddress the team's review/);
-	const record = b.fleet.require("cp-park");
-	assert.notEqual(record.phase, "awaiting_merge");
-	assert.equal(record.awaiting_merge, undefined);
-	assert.equal(record.worktree, b.lease.path);
-	assert.equal(record.lease_id, "lease-2");
 });

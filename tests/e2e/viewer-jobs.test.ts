@@ -4,14 +4,16 @@
  */
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type TestContext, test } from "node:test";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
+import { drainFile } from "../../src/drain.ts";
 import type { BoardResponse, JobResponse, JobsResponse, JobTranscriptResponse, OverviewResponse } from "../../src/viewer/api-types.ts";
-import { createScratchHome, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
+import { createScratchHome, git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
 import { startViewer } from "../harness/dashboard.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { json, MERGE, mergedCalls, run as ciRun, SKIP, startStack } from "./landing-helpers.ts";
@@ -420,6 +422,20 @@ test("P18-transcript: /api/job/<id>/transcript reads only a recorded session und
 	assert.equal((await v.json<JobResponse>("/api/job/cp-small")).mandate, null);
 });
 
+/** One commit pushed to `branch` on the scratch remote from a fresh clone, as a teammate would; its sha. */
+function teamPush(remote: string, branch: string): string {
+	const dir = mkdtempSync(join(tmpdir(), "cp-team-"));
+	try {
+		git(dir, "clone", "--quiet", "--branch", branch, remote, "work");
+		const work = join(dir, "work");
+		git(work, "commit", "--quiet", "--allow-empty", "-m", "team fixup");
+		git(work, "push", "--quiet", "origin", `HEAD:refs/heads/${branch}`);
+		return git(work, "rev-parse", "HEAD");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the team, resumes through cp_send and lands by the watch", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t);
 	const live = await s.held("P18 parked handoff", 181);
@@ -434,12 +450,24 @@ test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the 
 	writeWindowPass(s.home, live.jobId, live.head, isoTimestamp());
 	s.setGh({ integration: true, runs: [ciRun(181, live.head, "completed", "success")] });
 	await s.tick(live.jobId);
+	const leased = s.post.fleet.require(live.jobId).lease_id;
 	const parked = await s.post.integrate({ jobId: live.jobId });
 	assert.equal(parked.next, "wait", parked.reason);
+	assert.match(parked.facts.at(-1) ?? "", new RegExp(`parked with the team at ${live.head.slice(0, 12)} \\(awaiting_merge cycle 1\\)`));
+	assert.equal(s.post.awaiting.list().filter((item) => item.job_id === live.jobId).length, 0, "a park declares no Awaiting row");
 	const record = s.post.fleet.require(live.jobId);
 	assert.deepEqual([record.phase, record.lease_id, record.checkpoint_ref, record.awaiting_merge?.cycle], ["awaiting_merge", undefined, undefined, 1]);
+	assert.equal(record.awaiting_merge!.frozen_seconds, Math.floor((Date.parse(record.awaiting_merge!.released_at) - Date.parse(record.dispatched_at)) / 1000), "dispatch to release");
+	assert.equal(typeof record.worker.exited_at, "string", "the worker is closed");
 	assert.equal(existsSync(join(s.home, paths.parkIntentFile(live.jobId))), false, "the park intent is spent");
+	// The released worktree is moved aside: a parked job's integrate, refusals and sweeps that entered it would fail here.
+	const released = record.worktree!;
+	renameSync(released, `${released}.away`);
 	assert.equal(events("awaiting_merge_parked").length, 1);
+	assert.equal((await s.post.ciTick()).checked.includes(live.jobId), false, "the per-job CI watch drops a parked job");
+	const again = await s.integrate(live.jobId);
+	assert.deepEqual([again.record.next, again.calls, events("awaiting_merge_parked").length], ["wait", [], 1], "a parked job's cp_integrate runs no gh and parks nothing");
+	assert.match(again.record.reason, /awaiting_merge watch/);
 	// The ci-watch row is gone once parked; the head's green comes from the journaled ci_observed event.
 	rmSync(join(s.home, LAYOUT.ciWatchFile), { force: true });
 	const team = (await overview()).with_team;
@@ -457,6 +485,9 @@ test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the 
 	const torn = await s.post.tearDown(live.jobId, { force: true } as never);
 	assert.deepEqual([torn.torn_down, torn.failure?.code], [false, "job_parked"]);
 	await assert.rejects(s.post.revive(live.jobId), /not_revivable_phase/);
+	const plan = await s.post.revivePlan(live.jobId);
+	assert.match(plan.ok ? "planned" : plan.message, new RegExp(`cp_send ${live.jobId} resumes it on a fresh lease`));
+	assert.equal((await s.post.revivePlan(live.jobId, { continueFailed: true })).ok, false, "no option revives on the old path");
 	await assert.rejects(s.post.dispatch({ jobId: live.jobId, task: "again", model: record.worker.model, fetch: false }), /cp_send .*resumes/);
 	assert.deepEqual(mergedCalls(s.ghCalls()), [], "a handoff never merges");
 
@@ -464,23 +495,32 @@ test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the 
 	const page = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
 	const author = { login: "ann", __typename: "User" };
 	const pr = (over: object) => ({ url: live.prUrl, number: 181, state: "OPEN", headRefOid: live.head, headRefName: live.jobId, baseRefName: "main", mergedAt: null, mergeCommit: null, latestOpinionatedReviews: { nodes: [] }, comments: page, reviews: page, ...over });
-	const answer = (over: object) => s.setGh({ integration: true, runs: [ciRun(181, live.head, "completed", "success")], routes: [
+	const answer = (over: object, runs = [ciRun(181, live.head, "completed", "success")]) => s.setGh({ integration: true, runs, routes: [
 		{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] },
 		{ match: "api graphql", replies: [json({ data: { rateLimit: { remaining: 5000 }, p0: { pullRequest: pr(over), stacked: { nodes: [] } } } })] },
 	] });
 	const after = isoTimestamp(new Date(Date.parse(record.awaiting_merge!.handed_at) + 1_000));
 	await waitFor(() => Date.now(), (now) => now > Date.parse(after) + 1_000, { timeoutMs: 5_000, what: "a review time after the handoff, in the past" });
 	answer({ reviews: { pageInfo: { hasNextPage: false, endCursor: "R1" }, nodes: [{ id: "PRR_1", state: "CHANGES_REQUESTED", body: "", createdAt: after, author, comments: { totalCount: 0 } }] } });
+	const calls = s.ghCalls().length;
 	const swept = await s.post.awaitingMerge.sweep();
 	assert.deepEqual(swept.outcomes.map((o) => o.applied), ["changes_requested"], JSON.stringify(swept));
+	assert.deepEqual(s.ghCalls().slice(calls).filter((call) => !call.startsWith("api ")), [], "the watch only reads GitHub");
 	assert.deepEqual((await s.post.awaitingMerge.sweep()).outcomes.map((o) => o.applied), ["none"], "the same review is applied once");
 	assert.equal(s.post.fleet.require(live.jobId).awaiting_merge?.pending?.kind, "changes_requested");
 	const box = s.post.durableWakeups.read();
 	assert.equal([...box.pending, ...box.delivered].filter((w) => w.id.startsWith(`awaiting-merge:pending:${live.jobId}:1:`)).length, 1);
+	const wakes = box.pending.filter((w) => w.id.startsWith(`awaiting-merge:pending:${live.jobId}:1:`));
+	assert.deepEqual(wakes.map((w) => [w.id, w.keys]), [[`awaiting-merge:pending:${live.jobId}:1:PRR_1`, ["parked-cycle:1"]]], "one wake, stale once the cycle ends");
 	const flight = (await overview()).in_flight.find((j) => j.id === live.jobId);
 	assert.deepEqual([flight?.phase, flight?.parked_pending, (await overview()).with_team], ["held", "changes_requested", []]);
+	assert.equal(existsSync(released), false, "nothing re-created the released worktree");
+	renameSync(`${released}.away`, released);
 
-	// A real parent: the status block and cp_next name the pending parked job; its startup reconcile leaves it parked.
+	// A real parent: the status block and cp_next name the pending parked job; its startup reconcile leaves it parked,
+	// even with its session gone.
+	const session = record.worker.session_file;
+	renameSync(session, `${session}.away`);
 	await s.parent("Show the status block and what is next.", [
 		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: { width: 200 } }, { name: "cp_next", args: {} }] },
 		{ kind: "text", text: "Shown." },
@@ -491,27 +531,70 @@ test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the 
 	});
 	assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge");
 
-	// Negative control for resume: with the session gone the send is refused and the job stays parked.
-	const session = record.worker.session_file;
-	renameSync(session, `${session}.away`);
+	// Negative controls for resume: no session, a paused grant or a drain refuses the send and the job stays parked.
 	await assert.rejects(s.post.send({ jobId: live.jobId, message: "address the team's review" }), /session/);
 	assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge");
 	renameSync(`${session}.away`, session);
+	const grant = s.post.mandates.issue({ projects: ["demo"], objective: "Parked repair", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 1 });
+	s.post.mandates.pause(grant.id, "spend_cap");
+	await assert.rejects(s.post.send({ jobId: live.jobId, message: "go" }), /paused/);
+	s.post.mandates.resume(grant.id);
+	mkdirSync(dirname(drainFile(s.home)), { recursive: true });
+	writeFileSync(drainFile(s.home), JSON.stringify({ state: "draining", started_at: isoTimestamp(), deadline: isoTimestamp(), timeout_s: 5, jobs: [] }));
+	await assert.rejects(s.post.send({ jobId: live.jobId, message: "go" }), new RegExp(`draining for a restart.*resume of parked ${live.jobId}`, "s"));
+	rmSync(drainFile(s.home));
+	assert.deepEqual([s.post.fleet.require(live.jobId).phase, events("awaiting_merge_resumed").length], ["awaiting_merge", 0]);
+
+	// The team pushed a fixup: the resume leases fresh, checks out the remote tip and revives the same session once.
+	const tip = teamPush(s.remote, live.jobId);
 	const resumed = await s.post.send({ jobId: live.jobId, message: "address the team's review" });
 	assert.equal(resumed.receipt, "delivered");
 	const back = s.post.fleet.require(live.jobId);
-	assert.deepEqual([back.awaiting_merge, typeof back.lease_id, events("awaiting_merge_resumed").length], [undefined, "string", 1]);
-	await waitFor(() => JSON.stringify(s.provider.requests(`landing-${live.jobId}`).map((r) => r.body.messages)), (body) => /\[resumed from awaiting_merge\][^"]*address the team's review/.test(body), { timeoutMs: 60_000, what: "the note-led message reaches the resumed worker" });
+	assert.deepEqual([back.awaiting_merge, typeof back.lease_id, events("awaiting_merge_resumed").length, events("worker_revived").length], [undefined, "string", 1, 1]);
+	assert.notEqual(back.lease_id, leased, "a fresh lease");
+	assert.deepEqual([git(back.worktree!, "rev-parse", "HEAD"), git(back.worktree!, "rev-parse", "--abbrev-ref", "HEAD")], [tip, live.jobId], "the remote tip is checked out");
+	const note = /\[resumed from awaiting_merge\][^"]*no longer yours[^"]*address the team's review/;
+	const sent = await waitFor(() => JSON.stringify(s.provider.requests(`landing-${live.jobId}`).map((r) => r.body.messages)), (body) => note.test(body), { timeoutMs: 60_000, what: "the note-led message reaches the resumed worker" });
+	assert.match(sent, note, "the coordinator's note leads the delivered message");
 	await waitFor(() => s.post.fleet.require(live.jobId), (r) => r.phase === "held" && !!r.reported_at && (r.supersessions ?? 0) >= 1, { timeoutMs: 90_000, what: "the resumed worker re-reports" });
+	assert.equal(events("worker_revived").length, 1, "a resumed worker is never restored again as a released one");
 
-	// It parks again for a second cycle, and the human merge seen by the watch lands it without a CP merge.
+	// It parks again for a second cycle on the team's tip.
+	writeWindowPass(s.home, live.jobId, tip, isoTimestamp());
+	answer({ headRefOid: tip }, [ciRun(182, tip, "completed", "success")]);
+	await s.tick(live.jobId);
 	assert.equal((await s.post.integrate({ jobId: live.jobId })).next, "wait");
 	assert.equal(s.post.fleet.require(live.jobId).awaiting_merge?.cycle, 2);
-	answer({ state: "MERGED", mergedAt: isoTimestamp(), mergeCommit: { oid: MERGE } });
+	const second = s.post.fleet.require(live.jobId).worktree!;
+	renameSync(second, `${second}.away`);
+	// A moved head's Actions pending, then red, reach the dashboard; CI alone resumes nothing.
+	const moved = "d".repeat(40);
+	const flying = async () => (await overview()).in_flight.filter((j) => j.id === live.jobId).map((j) => [j.head, j.ci]);
+	answer({ headRefOid: moved }, [ciRun(183, moved, "in_progress", null)]);
+	assert.deepEqual((await s.post.awaitingMerge.sweep()).outcomes.map((o) => o.applied), ["head_moved"]);
+	assert.deepEqual(await flying(), [[moved, "in_progress"]]);
+	rmSync(join(s.home, LAYOUT.ciWatchFile), { force: true }); // the pending read is not due again yet
+	answer({ headRefOid: moved }, [ciRun(183, moved, "completed", "failure")]);
+	await s.post.awaitingMerge.sweep();
+	assert.deepEqual(await flying(), [[moved, "failed"]]);
+	assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge", "a red parked head resumes no worker");
+	assert.equal((await s.post.ciTick()).checked.includes(live.jobId), false);
+
+	// The human merge seen by the watch lands it without a CP merge, and its wake carries the after-merge line.
+	await s.post.registry.setAfterMergeDeploy("demo", { branch: "main", task: "deploy the observed merge", resources: ["host-a"] });
+	answer({ state: "MERGED", headRefOid: moved, mergedAt: isoTimestamp(), mergeCommit: { oid: MERGE } }, []);
+	const landing = s.ghCalls().length;
 	assert.deepEqual((await s.post.awaitingMerge.sweep()).outcomes.map((o) => o.applied), ["merged"]);
+	assert.equal(existsSync(second), false, "the merge never re-created the released worktree");
+	renameSync(`${second}.away`, second);
+	assert.deepEqual(s.ghCalls().slice(landing).filter((call) => call.includes("actions/runs")), [], "a merged snapshot reads no CI");
 	assert.equal(s.post.fleet.require(live.jobId).phase, "done");
 	assert.equal(s.post.ledger().read().jobs.find((j) => j.id === live.jobId)?.status, "closed");
 	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+	const landed = s.post.durableWakeups.read().pending.filter((w) => w.content.includes(`${live.jobId}: the team merged`));
+	assert.equal(landed.length, 1);
+	assert.match(landed[0]!.content, /job closed\. after-merge deploy cp-\S+ created/);
+	assert.equal(landed[0]!.keys, undefined, "a merged wake is always fresh");
 	assert.equal((await row()).phase, "done");
 });
 
@@ -574,8 +657,19 @@ test("P18-jobs-ui: the served Jobs, Job detail, Board and Overview tabs show not
 	const parked = (id: string, over: object) => ({ job_id: id, project: "demo", kind: "ship", delivery: "pr", phase: "awaiting_merge", dispatched_at: iso(130), reported_at: iso(120),
 		awaiting_merge: { cycle: 1, pr_url: "https://github.com/o/r/pull/7", repo: "o/r", branch: id, head_sha: a, base: "main", handed_at: iso(120), released_at: iso(120), frozen_seconds: 600, frozen_usage: {}, ...over } });
 	const fleet = JSON.parse(readFileSync(join(scratch.path, LAYOUT.fleetFile), "utf8")).jobs;
-	s.fleet([...fleet, parked("cp-park", {}), parked("cp-pend", { pending: { kind: "head_moved", event_id: "head:b", observed_at: iso(60), head_sha: b } }), parked("cp-team", {}),
-		{ job_id: "cp-idle", project: "demo", phase: "waiting", dispatched_at: iso(10) }]);
+	// #324: three merged jobs read against a scratch clone of this checkout — in it, beside it, and absent from it.
+	const clone = join(scratch.path, "checkout");
+	git(scratch.path, "clone", "--quiet", "--shared", "--no-checkout", REPO_ROOT, clone);
+	const [inc, out] = [git(clone, "rev-parse", "HEAD~1"), git(clone, "commit-tree", "HEAD^{tree}", "-p", "HEAD~1", "-m", "side")];
+	const merged = (id: string, sha: string) => (s.put(s.run(id, "merge.json"), { job_id: id, pr_url: "https://gitlab.com/o/r/-/merge_requests/9", merge_commit_sha: sha, merged_at: iso(5) }),
+		{ job_id: id, project: "demo", kind: "ship", phase: "done", dispatched_at: iso(60), closed_at: iso(5) });
+	const all = [...fleet, parked("cp-park", {}), parked("cp-pend", { pending: { kind: "head_moved", event_id: "head:b", observed_at: iso(60), head_sha: b } }), parked("cp-team", {}),
+		{ job_id: "cp-idle", project: "demo", phase: "waiting", dispatched_at: iso(10) }, { job_id: "cp-work", project: "demo", phase: "held", dispatched_at: iso(10) },
+		merged("cp-inc", inc), merged("cp-out", out), merged("cp-unk", "f".repeat(40))];
+	s.fleet(all);
+	const ledger = (deps: string[]) => s.ledger([{ id: "cp-idle", title: "idle", status: "in_progress", labels: ["project:demo", "kind:ship"], blocked_by: [] },
+		{ id: "cp-work", title: "work", status: "in_progress", labels: ["project:demo", "kind:ship"], blocked_by: deps }]);
+	ledger(["cp-idle"]);
 	s.put(LAYOUT.awaitingMergeWatchFile, { schema_version: 1, updated_at: iso(60), prs: [{ job_id: "cp-team", cycle: 1, pr_url: "https://github.com/o/r/pull/8", state: "open",
 		head_sha: a, base: "main", cursors: {}, observed_at: iso(60), approvals: 1, approvals_required: null }] });
 	s.events("cp-team", [{ type: "ci_observed", payload: { event: "ci_green", head_sha: a } }]);
@@ -583,14 +677,14 @@ test("P18-jobs-ui: the served Jobs, Job detail, Board and Overview tabs show not
 	s.put(paths.ciEvidenceFile("cp-park"), { schema_version: 1, job_id: "cp-park", repo: "o/r", observations: [{ head_sha: a, result: "success", source: "forwarded", observed_at: iso(60), operator_quote: "green." }] });
 	for (const id of ["cp-recorded", "cp-run", "cp-legacy"]) s.put(s.run(id, "envelope.json"), { envelope: { head_sha: a } });
 	s.put(LAYOUT.ciWatchFile, { jobs: [{ job_id: "cp-recorded", head_sha: a, last_ci: "failed" }, { job_id: "cp-run", head_sha: a, last_ci: "green" }, { job_id: "cp-legacy", head_sha: a, last_ci: "in_progress" }] });
-	const view = await startViewer(t, { home: scratch.path, requireTailnet: false, at: new Date(NOON).toISOString() });
+	const view = await startViewer(t, { home: scratch.path, requireTailnet: false, at: new Date(NOON).toISOString(), env: { CP_VERSION_REPO: clone } });
 	const note = (await view.get("/api/jobs").then((r) => JSON.parse(r.text) as JobsResponse)).jobs.find((j) => j.id === "cp-recorded")!.note;
 
 	const jobs = await view.open("#jobs");
 	await jobs.find(".job-ci-red");
 	assert.doesNotMatch(jobs.root.innerHTML, /md-original|md-revoked|github\.com/, "the routing and mandate line left the list rows");
 	assert.match(jobs.text(), /Final-fix approval open/);
-	assert.deepEqual(jobs.$$(".job-note").map((el) => el.getAttribute("title")), [note]);
+	assert.deepEqual(jobs.$$(".job-note").map((el) => el.getAttribute("title")), ["blocked by cp-idle", note]);
 	for (const color of ["red", "green", "running"]) assert.match(jobs.$(`.job-ci-${color} > .job-ci-dot`)?.parentElement?.textContent ?? `no ${color} glyph`, new RegExp(`CI ${color}`));
 	assert.equal(jobs.$$(".job-pr").length, 0);
 	assert.match(jobs.text(), /With the team · 2/);
@@ -600,6 +694,10 @@ test("P18-jobs-ui: the served Jobs, Job detail, Board and Overview tabs show not
 	await detail.find(".job-ci-red");
 	assert.match(detail.text(), /md-original/, "Job detail still names the recorded grant");
 	assert.doesNotMatch(detail.text(), /Running here/, "no merge, no running fact");
+	const running = async (id: string) => (await (await view.open(`#job/${id}`)).find(".job-fact-running dd")).textContent;
+	assert.match(await running("cp-inc") ?? "", /^in this checkout since unknown.*Viewer server: loaded/, "a merge in the checkout, loaded by the viewer");
+	assert.match(await running("cp-out") ?? "", /^merged · not in this checkout yet — update pending.*Viewer server: not loaded/);
+	assert.equal(await running("cp-unk"), "unknown · fffffff is not in this home's checkout (another project, or not fetched)");
 
 	const board = await view.open("#board");
 	await board.find(".board-columns");
@@ -612,6 +710,7 @@ test("P18-jobs-ui: the served Jobs, Job detail, Board and Overview tabs show not
 	const kinds = [...board.$(".board-columns")!.children].map((el) => el.classList.contains("board-strip") ? "strip" : "col");
 	const cut = kinds.indexOf("strip");
 	assert.ok(cut > 0 && kinds.slice(cut).every((k) => k === "strip"), `strips follow the columns with cards: ${kinds}`);
+	assert.match(board.$('a[href="#job/cp-idle"]')?.textContent ?? "", /blocks cp-work/, "a blocker's card names what it blocks");
 
 	const overview = await view.open("#overview");
 	const text = await overview.waitText(/With the team · 2/);
@@ -625,6 +724,14 @@ test("P18-jobs-ui: the served Jobs, Job detail, Board and Overview tabs show not
 	assert.ok(flying.some((j) => j.id === "cp-pend") && !flying.some((j) => j.id === "cp-park" || j.id === "cp-team"), "parked PRs are never In flight");
 	assert.doesNotMatch(team.slice(0, team.indexOf("Landed today")), /no CI yet/);
 	assert.match(text, /head moved: review and CI again/, "a pending parked job is In flight on its moved head");
+
+	// With no waiting or idle job left, Waiting folds to a strip too.
+	s.fleet(all.filter((j) => j.job_id !== "cp-idle"));
+	ledger([]);
+	const folded = await view.open("#board");
+	await folded.find(".board-columns");
+	assert.ok(folded.$$(".board-strip").some((el) => el.getAttribute("aria-label") === "Waiting · 0"), "an empty Waiting column folds");
+	assert.equal(folded.$$(".board-column h2").some((h) => /Waiting/.test(h.textContent ?? "")), false);
 });
 
 test("P18-not-found: a missing job or worker is a 404 page with a way back; only observed live workers are offered", { timeout: 120_000 }, async (t) => {

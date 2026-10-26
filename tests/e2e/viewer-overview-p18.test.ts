@@ -298,5 +298,7 @@ test("P18-overview-lined-up: the Overview tab shows the cp_next snapshot as writ
 	assert.equal((await v.o()).lined_up.availability, "missing", "an older snapshot version is not yet written, not an error");
 	const older = (await screen()).text;
 	assert.match(older, /Lined up · -.*Refreshes on next scheduling pass/s);
-	assert.doesNotMatch(older.slice(older.indexOf("Lined up")), /^Lined up (unavailable|unreadable)|Nothing queued/);
+	const pass = "Refreshes on next scheduling pass";
+	const section = older.slice(older.indexOf("Lined up"), older.indexOf(pass, older.indexOf("Lined up")) + pass.length);
+	assert.doesNotMatch(section, /unavailable|unreadable|Nothing queued/, "the Lined up section names neither failure");
 });
