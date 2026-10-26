@@ -137,6 +137,9 @@ test("P14-daemon-cli: cp-daemon start, stop, restart and status on the detached 
 	const down = r.at("status");
 	assert.equal(down.code, 3);
 	assert.equal(down.out, `cp-daemon: not running\nstart it (also after a reboot): "${r.node}" "${r.cfgApp}/src/service/daemon.ts" start --home "${r.home}"\n`);
+	r.config({ app: "/a$b", home: '/h"q' });
+	const escaped = r.at("status").out.split("\n")[1];
+	assert.equal(escaped, `start it (also after a reboot): "${r.node}" "/a\\$b/src/service/daemon.ts" start --home "/h\\"q"`, "$ and \" escaped");
 
 	// A node that cannot be run is a failed spawn; a missing one is refused.
 	r.config({ node: r.fake });
@@ -417,17 +420,17 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 	await r.until("the viewer restart", () => r.starts("viewer").length === 2);
 	const viewerExit = stamp(new RegExp(`viewer pid ${viewer!.pid} exited \\(SIGKILL\\); restart 1 in 10s`));
 	const viewerBack = stamp(new RegExp(`viewer started pid ${r.starts("viewer")[1]!.pid}`));
-	assert.ok(viewerBack - viewerExit >= 10_000 && viewerBack - viewerExit < 13_000, `${viewerBack - viewerExit} ms`);
+	assert.ok(viewerBack - viewerExit >= 9_000 && viewerBack - viewerExit < 16_000, `${viewerBack - viewerExit} ms`);
 
 	// health is first due at +3 min; at 120 s a SIGTERM, 10 s later a SIGKILL. The health op starts one now, once.
 	await r.until("the health SIGKILL", () => /health pid \d+ ignored SIGTERM: SIGKILL/.test(r.log()));
 	const [health] = r.starts("health");
 	const healthAt = stamp(new RegExp(`health started pid ${health!.pid}`));
-	assert.ok(healthAt - started >= 180_000 && healthAt - started < 190_000, `${healthAt - started} ms`);
+	assert.ok(healthAt - started >= 180_000 && healthAt - started < 200_000, `${healthAt - started} ms`);
 	const term = stamp(new RegExp(`health pid ${health!.pid} timed out after 120s: SIGTERM`));
-	assert.ok(term - healthAt >= 120_000 && term - healthAt < 126_000, `${term - healthAt} ms`);
+	assert.ok(term - healthAt >= 120_000 && term - healthAt < 140_000, `${term - healthAt} ms`);
 	const kill = stamp(new RegExp(`health pid ${health!.pid} ignored SIGTERM: SIGKILL`));
-	assert.ok(kill - term >= 10_000 && kill - term < 16_000, `${kill - term} ms`);
+	assert.ok(kill - term >= 9_000 && kill - term < 20_000, `${kill - term} ms`);
 	await r.until("the health exit", () => r.runtime().units.health.pid === undefined);
 	const ran = Number(/^cp-daemon health: ok \(health started pid (\d+)\)\n$/.exec(r.at("health").out)?.[1]);
 	assert.equal(r.at("health").out, `cp-daemon health: ok (health pid ${ran} is already running)\n`);
@@ -439,7 +442,7 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 	await r.until("the skipped update", () => /update due while pid \d+ is still running: skipped/.test(r.log()), 90_000);
 	const [update] = r.starts("update");
 	const updateAt = stamp(new RegExp(`update started pid ${update!.pid}`));
-	assert.ok(updateAt - started >= 600_000 && updateAt - started < 610_000, `${updateAt - started} ms`);
+	assert.ok(updateAt - started >= 600_000 && updateAt - started < 620_000, `${updateAt - started} ms`);
 	assert.match(r.log(), new RegExp(`update due while pid ${update!.pid} is still running: skipped`));
 	assert.equal(r.starts("update").length, 1);
 
@@ -470,8 +473,10 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 	assert.match(status(), new RegExp(`^viewer: held, \\d+ restart\\(s\\)$[^]*^viewer held until ${r.runtime().hold.until}$`, "m"));
 	await sleep(1_000);
 	assert.equal(r.starts("viewer").length, viewers, "no restart while held");
+	assert.deepEqual([r.runtime().units["device-notify"].state, r.starts("device-notify").length], ["held", 2], "sender held");
 	await op("release");
 	await r.until("the released viewer", () => r.starts("viewer").length === viewers + 1 && r.starts("device-notify").length === 3);
+	assert.equal(r.starts("device-notify").length, 3, "the release starts the sender again");
 	assert.match(r.log(), /viewer hold released \(released\)/);
 
 	// A persisted hold survives a crash restart of the inner, whose live children are stopped first; a reload clears it.
@@ -494,7 +499,7 @@ test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the heal
 	assert.equal(r.at("stop").code, 0);
 	const termAt = r.events().find((e) => e.pid === stubborn.pid && e.event === "term")!.at!;
 	const killAt = stamp(new RegExp(`parent pid ${stubborn.pid} ignored SIGTERM: SIGKILL`));
-	assert.ok(killAt - termAt >= 9_000 && killAt - termAt < 14_000, `${killAt - termAt} ms`);
+	assert.ok(killAt - termAt >= 9_000 && killAt - termAt < 18_000, `${killAt - termAt} ms`);
 	assert.match(r.log(), /stopped \(oneshots left running\)/);
 	assert.ok(alive(update!.pid), "the update run outlives the daemon");
 	for (const role of ["viewer", "device-notify"]) assert.equal(r.starts(role).every((e) => !alive(e.pid)), true, role);

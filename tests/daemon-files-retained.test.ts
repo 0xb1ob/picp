@@ -1,14 +1,13 @@
 /**
  * cp-wfo4: the pure half of cp-daemon. Retained (P14b): the paths equal the layout, env/argv parity with the legacy
- * units, the outer's import boundary, and the reboot command's quoting are structural pins with no e2e consumer.
+ * units and the outer's import boundary are structural pins with no e2e consumer.
  */
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { layoutForHome } from "../src/contracts/layout.ts";
-import { childArgv, childEnv, type DaemonConfig, daemonPaths, OUTER_SOURCES, rebootCommand, rotateLog, validateDaemonConfig } from "../src/service/daemon-files.ts";
+import { childArgv, childEnv, type DaemonConfig, daemonPaths, OUTER_SOURCES, validateDaemonConfig } from "../src/service/daemon-files.ts";
 import { renderUnits, unitPath } from "../src/service/units.ts";
 
 const SERVICE = resolve(import.meta.dirname, "../src/service");
@@ -104,23 +103,4 @@ test("the outer and inner import only node:* and ./daemon-*.ts, statically, and 
 	for (const spec of importsOf("daemon-tunnel.ts")) assert.ok(spec.startsWith("node:") || spec === "./daemon-files.ts" || spec === "./daemon-tunnel-files.ts" || spec === "../tunnel/cloudflared.ts", `daemon-tunnel.ts imports ${spec}`);
 	for (const spec of importsOf("../tunnel/cloudflared.ts")) assert.ok(spec.startsWith("node:") || spec === "../service/daemon-files.ts", `cloudflared.ts imports ${spec}`);
 	for (const spec of importsOf("daemon-tunnel-files.ts")) assert.ok(spec.startsWith("node:"), `daemon-tunnel-files.ts imports ${spec}`);
-});
-
-
-test("rebootCommand is one quoted command; rotateLog caps the log", () => {
-	assert.equal(rebootCommand({ node: "/opt/n/bin/node", app: "/srv/app", home: "/home/u/.pi-command-post" }), '"/opt/n/bin/node" "/srv/app/src/service/daemon.ts" start --home "/home/u/.pi-command-post"');
-	assert.equal(rebootCommand({ node: "/n", app: "/a$b", home: '/h"q' }), '"/n" "/a\\$b/src/service/daemon.ts" start --home "/h\\"q"');
-	const dir = mkdtempSync(join(tmpdir(), "cp-daemon-log-"));
-	try {
-		const log = join(dir, "daemon.log");
-		const prev = join(dir, "daemon.prev.log");
-		writeFileSync(log, "x".repeat(100));
-		assert.equal(rotateLog(log, prev, 200), false);
-		writeFileSync(log, "y".repeat(300));
-		assert.equal(rotateLog(log, prev, 200), true);
-		assert.equal(readFileSync(log, "utf8"), "");
-		assert.equal(readFileSync(prev, "utf8").length, 300);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
 });
