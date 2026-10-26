@@ -19,6 +19,7 @@ import { daemonPaths } from "../../src/service/daemon-files.ts";
 import { whichAll } from "../../src/doctor.ts";
 import type { UpdateState } from "../../src/service/update.ts";
 import { createScratchHome, REPO_ROOT } from "../harness/index.ts";
+import { until } from "../harness/dashboard.ts";
 import { advanceBase, createScratchRepo } from "../harness/scratch-repo.ts";
 
 const SCALE = 50;
@@ -86,7 +87,7 @@ async function bench(t: TestContext, config: unknown = { enabled: true, interval
 	const env = { SM: sm, HOST_SOCK: join(sm, "host.sock"), DAEMON_SOCK: join(sm, "daemon.sock"), DRAIN: join(stateDir, "drain.json"), UNSETTLED: PARENT_UNSETTLED };
 	const standin = spawn(process.execPath, [join(sm, "standin.cjs")], { env, stdio: "ignore" });
 	t.after(() => standin.kill());
-	while (!existsSync(join(sm, "ready"))) await new Promise((done) => setTimeout(done, 20));
+	await until(() => existsSync(join(sm, "ready")), Boolean, "the stand-in's sockets");
 	writeFileSync(hostPaths.record(1), JSON.stringify({ version: 1, pid: standin.pid, socket: env.HOST_SOCK, token: "t", started_at: isoTimestamp() }));
 	writeFileSync(daemon.state, JSON.stringify({ state: "running", socket: env.DAEMON_SOCK, token: "t", pid: standin.pid }));
 	// The viewer: /api/identity names this home unless the plan says it is down.
