@@ -1,38 +1,29 @@
+/**
+ * Retained from tests/push-tick.test.ts (P22): registerPushTick's catch for a throwing `deps.commandPost()`.
+ * No entry point reaches it: the tick starts at session_start, after the command post exists.
+ */
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { initPush } from "../src/push/keys.ts";
-import { pushDeliveriesFile } from "../src/viewer/push-files.ts";
 import { createScratchHome } from "./harness/index.ts";
 import { LAYOUT } from "../src/contracts.ts";
 
 type Hook = () => Promise<void>;
 
-async function bench(t: import("node:test").TestContext, holdsLock: boolean, commandPost?: () => unknown) {
+async function bench(t: import("node:test").TestContext, holdsLock: boolean, commandPost: () => unknown) {
 	const { registerPushTick } = await import("../extensions/command-post/push-tick.ts");
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	initPush({ dataDir: join(home.path, LAYOUT.data), origin: "https://cp.example.com" });
 	const hooks = new Map<string, Hook>();
-	const post = commandPost ?? (() => ({ home: home.path, escalations: { open: () => [], list: () => [] }, awaiting: { list: () => [] }, finalFixCheckpoints: { listPending: () => [] } }));
-	registerPushTick({ on: (name: string, fn: Hook) => hooks.set(name, fn) } as never, { commandPost: post } as never, () => holdsLock);
-	return { home: home.path, hooks, ledger: pushDeliveriesFile(join(home.path, LAYOUT.state)) };
+	registerPushTick({ on: (name: string, fn: Hook) => hooks.set(name, fn) } as never, { commandPost } as never, () => holdsLock);
+	return { hooks };
 }
 
 const settle = async (done: () => boolean, rounds: number) => {
 	for (let i = 0; i < rounds && !done(); i++) await new Promise((resolve) => setTimeout(resolve, 20));
 };
-
-test("the push sweep ticks only while this session holds the parent lock", async (t) => {
-	for (const holdsLock of [false, true]) {
-		const { hooks, ledger } = await bench(t, holdsLock);
-		await hooks.get("session_start")!();
-		await settle(() => existsSync(ledger), holdsLock ? 250 : 5);
-		await hooks.get("session_shutdown")!();
-		assert.equal(existsSync(ledger), holdsLock, `lock held: ${holdsLock}; the catch-up tick writes the baseline`);
-	}
-});
 
 test("a throwing command post is caught into one stderr line, never a rejection", async (t) => {
 	const lines: string[] = [];
