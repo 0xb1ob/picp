@@ -174,11 +174,16 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 	assert.deepEqual(outranked.outcomes.map((o) => o.applied), ["head_moved"], "a moved head outranks the review");
 	assert.match(outranked.errors.join("\n"), /native CI not recorded/, "a CI store fault skips nothing");
 	assert.equal(s.post.fleet.require(live.jobId).awaiting_merge?.last_human_activity_at, at(2_000), "the review is the last human activity");
+	const ciReads = (from: number) => s.ghCalls().slice(from).filter((call) => call.includes("actions/runs")).length;
+	const opened = s.ghCalls().length;
 	answer(body({ comments: page([{ id: "IC_h", createdAt: at(3_000), author: by("ann") }], "C2") }));
 	await sweep();
 	assert.equal(s.post.fleet.require(live.jobId).awaiting_merge?.pending?.kind, "head_moved", "a human comment never clobbers it");
+	assert.ok(ciReads(opened) > 0, "an open snapshot reads its head's CI");
+	const closing = s.ghCalls().length;
 	answer(body({ state: "CLOSED" }));
 	await sweep();
+	assert.equal(ciReads(closing), 0, "a closed snapshot reads no CI");
 	assert.equal(s.post.fleet.require(live.jobId).awaiting_merge?.pending?.kind, "closed_unmerged", "a close does");
 
 	// A garbage fleet file on disk: each sweep reports it, and one recovery wake is journaled for the cause.
@@ -254,6 +259,7 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 	assert.deepEqual([s.post.fleet.require(live.jobId).phase, watch().prs.map((p) => p.cursors)], ["awaiting_merge", kept]);
 	rmSync(receipt, { recursive: true });
 	assert.deepEqual((await sweep()).outcomes.map((o) => o.applied), ["merged"], "a merge outranks a moved head and a review");
+	assert.equal(JSON.parse(readFileSync(receipt, "utf8")).merge_commit_sha, "9".repeat(40), "the merge receipt is written");
 	const closed = s.post.fleet.require(live.jobId);
 	assert.deepEqual([closed.phase, closed.awaiting_merge?.cycle], ["done", 1], "a done record keeps its parking history");
 	const retargets = () => (JSON.parse(readFileSync(stackPath, "utf8")).actions as { child_job: string; previous_base: string; target_base: string }[])
