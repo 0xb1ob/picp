@@ -288,8 +288,11 @@ test("P19-queued-scroll: a new pending bubble follows the bottom; a reader who s
 	await compose(tab, "new pending");
 	await bubblesAre(tab, ["new pending"], "the pending bubble");
 	assert.equal(await top(700, "the follow"), 700, "adding a pending bubble follows the bottom");
+	await posted(tab, 1); // the send's answer re-keys the queue; let it land before the reader scrolls up
+	await settle();
 	scroller().scrollTop = 200;
 	scroller().dispatchEvent(new tab.window.Event("scroll"));
+	await tab.find(".session-new");
 	metrics.scrollHeight = 1200;
 	d.append(said("14:01", "streaming later"));
 	tab.refresh();
