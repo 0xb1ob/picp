@@ -22,7 +22,7 @@ function completion() {
 	return { promise, resolve };
 }
 
-/** A fresh registration has its own anchor dedupe set, just like a new parent process. */
+/** A stop with no reason ends the process-wide anchor dedupe set, so a fresh registration is a new process. */
 function process_(home: string, ledger: Ledger, mandates: MandateStore, t: TestContext, deferParentWake: (deliver: () => void) => void) {
 	const hooks = new Map<string, () => Promise<void>>();
 	const sent: Sent[] = [];
@@ -89,8 +89,7 @@ for (const held of [false, true]) test(`skill fire and restart recovery: ${held 
 	assert.equal(anchor.status, "deferred");
 	const grants = mandates.list();
 	await first.stop();
-	// P13c: no same-registration restart. A real new_session re-offers the anchor (known defect, e2e 12-10),
-	// so no assertion here claims one offer across a stop and start.
+	// A same-process new_session keeps the dedupe set (e2e 12-10); an unlabelled stop here models a quit.
 
 	// Simulated crash before expansion: a fresh process recovers the existing anchor/grant.
 	const second = process_(home.path, ledger, mandates, t, defer);
