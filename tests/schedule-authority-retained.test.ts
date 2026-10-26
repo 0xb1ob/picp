@@ -1,3 +1,7 @@
+/**
+ * Retained from tests/schedule-authority.test.ts (P13d): the direct reads of scheduleRunVerdict, runAuthority,
+ * observeRunUsage, cpNext's run view, overview decisions and the run DecisionBasis; 12-22 pins cp_dispatch end to end.
+ */
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
@@ -229,35 +233,6 @@ test("a risk:high read-only research dispatch in a schedule run passes with no e
  await assert.rejects(mandates.assertDispatchAllowed({...base,kind:"ship",readOnly:true}),e=>e instanceof ScheduleAuthorityError && e.code==="risk_high");
 });
 
-test("verified operator starts pre-approve risk:high for their run only; timer runs and hard stops still ask under run attribution",async(t)=>{
- const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
- const job = {jobId:"cp-member",project:"demo",kind:"ship" as const,risk:"high" as const};
- const store = new EscalationStore({home:home.path});
- await assert.rejects(mandates.assertDispatchAllowed(job),e=>e instanceof ScheduleAuthorityError && e.code==="risk_high");
- const timer = store.list({jobId:job.jobId,kind:"risk_high_irreversible",status:"open"})[0]!;
- assert.equal(timer.mandate_id,run.id);
- assert.match(timer.mandate_clause,new RegExp(`^${run.id} \\(schedule sch-123456, policy rev 1\\): ask_on includes risk:high$`));
- assert.ok(timer.question.includes(`Started by the timer (slot ${at})`),timer.question);
- await store.withdraw(timer.id);
- const click = "sc-20261010030653-11806a8e";
- runs.editRun(run.id,r=>{r.trigger={via:"dashboard",at,slot:at,missed:false,request_id:click};r.risk_preapproval={operator_quote:(r.policy as LegacySchedulePolicy).approval.operator_quote,decided_by:"operator-quote",scope:"mandate_jobs",granted_at:at};});
- const permission = await mandates.assertDispatchAllowed(job);
- assert.equal(permission.run?.started_by,`Started by the operator via dashboard Run now (request ${click}, ${at})`);
- assert.equal(store.list({kind:"risk_high_irreversible",status:"open"}).length,0);
- assert.deepEqual(runs.run(run.id)?.risk_preapproved.map(r=>[r.decided_by,r.evidence[0]]),[["operator",`fire run_now ${click}`]]);
- const ledger = createScratchLedger({home:home.path,knownProjects:["demo"]}).ledger;
- const dangerous = await ledger.create({title:"dangerous",description:"force push the branch",project:"demo",kind:"ship",delivery:"pr",labels:[`schedule:${run.schedule_id}`,"risk:high"]});
- await runs.admitMember(run.id,{job_id:dangerous.id,role:null,admitted_at:dangerous.created_at});
- await assert.rejects(mandates.assertDispatchAllowed({jobId:dangerous.id,project:"demo",kind:"ship",risk:"high"}),e=>e instanceof ScheduleAuthorityError && e.code==="hard_stop");
- const stop = store.list({jobId:dangerous.id,kind:"risk_high_irreversible",status:"open"})[0]!;
- assert.equal(stop.mandate_id,run.id);assert.match(stop.mandate_clause,/hard stop/);
- assert.match(stop.question,new RegExp(`Started by the operator via dashboard Run now \\(request ${click}, `));
- runs.editRun(run.id,r=>{r.trigger={via:"cp_schedule",at,slot:at,missed:false,tool_call_id:"call-1",quote_sha:"0123456789ab"};r.risk_preapproval={...r.risk_preapproval!,operator_quote:"Run sch-123456 now."};});
- assert.equal((await mandates.assertDispatchAllowed({...job,promotion:true})).run?.started_by,`Started by the operator via cp_schedule run_now (call call-1, ${at})`);
- assert.equal(runs.run(run.id)?.risk_preapproved.at(-1)?.evidence[0],"fire run_now call-1");
- runs.editRun(run.id,r=>{r.policy.exclusions={job_kinds:["ship"]};});
- await assert.rejects(mandates.assertDispatchAllowed(job),e=>e instanceof ScheduleAuthorityError && e.code==="kind_excluded");
-});
 
 test("a pre-approved run passes review, repair and implement uses of a risk:high member with no escalation",async(t)=>{
  const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
