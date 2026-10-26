@@ -260,6 +260,58 @@ test("P9g-send-continue: a send to a failed job names continue_failed; the conti
 	assert.ok(existsSync(join(f.home, paths.supersededEnvelopeFile(jobId, 1))), "the first envelope is kept, not overwritten");
 });
 
+test("P23-supersede: a promote reopens a held report slot — archived envelope and rejection, open stamp, a bodiless marker — the next report is the delivery and a second promote supersedes generation 2; an unreported or report-once job never supersedes", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	const f = await bench(t);
+	const jobId = await f.dispatch("sup", (id) => [
+		report(id, { status: "blocked", summary: "Blocked: the base branch is missing.", blockers: ["origin/main does not exist"], head_sha: f.head }),
+		SLOW,
+		report(id, { status: "done", summary: "Stage A landed.", branch: id, head_sha: f.head }),
+		report(id, { status: "done", summary: "Stage B landed.", branch: id, head_sha: f.head }),
+	]);
+	await waitFor(() => f.post.fleet.require(jobId), (job) => job.phase === "held", { timeoutMs: 60_000, what: "the blocked envelope" });
+	await f.idle(jobId, "sup", 1);
+	const firstReportedAt = f.post.fleet.require(jobId).reported_at;
+	const runDir = join(f.home, paths.runDir(jobId));
+	writeFileSync(join(runDir, "envelope-rejected.json"), JSON.stringify({ job_id: jobId, attempts: 3 }));
+
+	const promote = await f.post.send({ jobId, message: "the base branch is back — implement Stage A and report it" });
+	assert.deepEqual([promote.superseded?.generation, promote.superseded?.prior_status, promote.superseded?.prior_reported_at], [1, "blocked", firstReportedAt]);
+	const open = f.post.fleet.require(jobId);
+	assert.deepEqual([open.phase, open.reported_at, open.supersessions], ["waiting", undefined, 1], "the slot is open: the job owes a report again");
+	assert.equal(existsSync(join(f.home, paths.envelopeFile(jobId))), false);
+	assert.match(readFileSync(join(f.home, paths.supersededEnvelopeFile(jobId, 1)), "utf8"), /base branch is missing/, "nothing is destroyed, it is moved aside");
+	assert.ok(f.post.reportedHeadAt(jobId), "the last filed envelope is read from the archive while the slot is open");
+	assert.deepEqual([existsSync(join(runDir, "envelope-rejected.json")), existsSync(join(f.home, paths.supersededRejectionFile(jobId, 1)))], [false, true],
+		"an exhausted rejection is archived with the envelope it would have failed");
+	const [marker] = f.events(jobId, "envelope_superseded");
+	assert.equal(marker?.generation, 1);
+	assert.match(String(marker?.reason), /\S/, "the supersession carries its reason");
+	assert.ok(!JSON.stringify(marker).includes("origin/main does not exist"), "no body travels in a marker");
+	assert.equal(readRunStatus(f.home, jobId).reported, false, "the run projection stops claiming a report");
+
+	await waitFor(() => f.events(jobId, "envelope_received").length, (n) => n === 2, { timeoutMs: 60_000, what: "the superseding envelope" });
+	assert.deepEqual([f.post.fleet.require(jobId).phase, f.post.fleet.require(jobId).supersessions], ["held", 1], "the superseding envelope is accepted, not swallowed");
+	assert.equal(readRunStatus(f.home, jobId).reported, true);
+	await f.idle(jobId, "sup", 3);
+	const second = await f.post.send({ jobId, message: "now Stage B" });
+	assert.deepEqual([second.superseded?.generation, second.superseded?.prior_status], [2, "done"], "a second supersession is the next generation");
+	await waitFor(() => f.events(jobId, "envelope_received").length, (n) => n === 3, { timeoutMs: 60_000, what: "the third envelope" });
+	assert.deepEqual(readRunEvents(f.home, jobId).filter((event) => event.source === "cp" && event.type.startsWith("envelope_")).map((event) => event.type),
+		["envelope_received", "envelope_superseded", "envelope_received", "envelope_superseded", "envelope_received"], "one live envelope per generation");
+	assert.equal(f.post.fleet.require(jobId).supersessions, 2);
+
+	const once = await f.dispatch("once", (id) => [report(id, { status: "done", summary: "Done once, reported once.", branch: id, head_sha: f.head }), TEXT]);
+	const unreported = await f.dispatch("unreported", () => [TEXT]);
+	await waitFor(() => f.post.fleet.require(once), (job) => job.phase === "held", { timeoutMs: 60_000, what: "the report-once envelope" });
+	await f.idle(once, "once", 1);
+	assert.deepEqual([f.events(once, "envelope_received").length, f.post.fleet.require(once).supersessions, existsSync(join(f.home, paths.supersededEnvelopeFile(once, 1)))],
+		[1, undefined, false], "report once: one envelope, no supersession");
+	await f.idle(unreported, "unreported", 2);
+	const plain = await f.post.send({ jobId: unreported, message: "carry on" });
+	assert.deepEqual([plain.receipt, plain.superseded, f.post.fleet.require(unreported).supersessions, f.events(unreported, "envelope_superseded").length],
+		["delivered", undefined, undefined, 0], "an unreported job is open: nothing to supersede");
+});
+
 test("P9g-send-plan: a conversation revise is refused once the plan is approved or vetoed, delivered once until re-gated, and a question is delivered", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const f = await bench(t);
 	const [researchId, shipId] = ["cp-plan-research", "cp-plan-ship"];
