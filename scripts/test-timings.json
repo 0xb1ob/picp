@@ -195,7 +195,6 @@
 	"tests/schedule-native-migration.test.ts": 488,
 	"tests/schedule-policy.test.ts": 8,
 	"tests/service-alerts.test.ts": 45,
-	"tests/service-health.test.ts": 180,
 	"tests/service-install.test.ts": 4505,
 	"tests/service-models.test.ts": 3,
 	"tests/service-supervise.test.ts": 1549,

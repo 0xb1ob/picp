@@ -18,6 +18,7 @@ import { FleetStore } from "../../src/fleet.ts";
 import { daemonPaths, outerHash } from "../../src/service/daemon-files.ts";
 import { controlConfigFile, controlRecordFile, controlSocketFile } from "../../src/viewer/control-files.ts";
 import { viewerConfigFile } from "../../src/viewer/host-config.ts";
+import { operatorWrapperPath } from "../../src/viewer/launchers.ts";
 import { createAgentDir, createScratchHome, type PiChild, REPO_ROOT, startPiChild } from "../harness/index.ts";
 
 type Finding = DoctorReport["findings"][number];
@@ -712,4 +713,75 @@ test("P14-doctor-daemon: service.daemon is silent uninstalled, then names a stop
 	writeFileSync(daemon.state, JSON.stringify({ ...healthy, outer_hash: "0".repeat(64) }));
 	const stale = one(await p.doctor(), "service.daemon");
 	assert.deepEqual([stale?.severity, /predates the code on disk/.test(stale?.what ?? ""), /cp-daemon restart/.test(stale?.fix ?? "")], ["warn", true, true]);
+});
+
+test("P14-doctor-service: service.legacy_units, service.health and service.launchers, and every service finding fits the report", { timeout: 300_000 }, async (t) => {
+	const box = bin(t);
+	const p = await parent(t, box, { env: KEYS });
+	const unitDir = join(p.home, "xdg", "systemd/user");
+	mkdirSync(unitDir, { recursive: true });
+	const health = (at: number, checks: object = {}) => put(p.home, `${LAYOUT.state}/health.json`, JSON.stringify({ schema_version: 1, last_run_at: new Date(at).toISOString(), checks }));
+	const launchers = async () => one(await p.doctor(), "service.launchers")?.what;
+	assert.equal(one(await p.doctor(), "service.health"), undefined, "nothing installed, never ran: no line");
+
+	// Four legacy units (the cp-operator.service is no legacy unit) warn with a short summary; the timer never ran.
+	for (const name of ["cp-parent.service", "cp-view.service", "cp-health.service", "cp-health.timer", "cp-operator.service"]) {
+		writeFileSync(join(unitDir, name), `ExecStart="${process.execPath}" x\n`);
+	}
+	const legacy = await p.doctor();
+	assert.deepEqual([one(legacy, "service.legacy_units")?.severity, one(legacy, "service.legacy_units")?.what], ["warn", `4 legacy unit(s) in ${unitDir}`]);
+	assert.equal(one(legacy, "service.legacy_units")?.detail, "cp-parent.service, cp-view.service, cp-health.service, cp-health.timer");
+	assert.equal(one(legacy, "service.node")?.severity, "ok");
+	assert.equal(one(legacy, "service.health")?.severity, "warn", "timer installed, never ran");
+	// service.health: the last run, what fails, and a stale watchdog.
+	health(Date.now() - 5 * 60_000);
+	assert.deepEqual(one(await p.doctor(), "service.health"), { check: "service.health", severity: "ok", what: "health last ran 5 min ago: all ok" });
+	health(Date.now() - 5 * 60_000, { disk: { status: "fail", detail: "3 GiB free" } });
+	assert.match(one(await p.doctor(), "service.health")?.what ?? "", /failing: disk \(3 GiB free\)/);
+	health(Date.now() - 70 * 60_000);
+	assert.match(one(await p.doctor(), "service.health")?.fix ?? "", /not running every 5 min: cp-daemon status/);
+
+	// Launchers: tmux needs cp-daemon, tmux on the viewer's PATH and the wrapper; herdr runs only when on PATH.
+	const wrapper = operatorWrapperPath({ HOME: join(p.home, "user") });
+	mkdirSync(dirname(wrapper), { recursive: true });
+	writeFileSync(wrapper, "#!/bin/sh\n");
+	assert.equal(await launchers(), "tmux no, herdr binary no, herdr server running no", "tmux and the wrapper, no cp-daemon: no");
+	assert.doesNotMatch(box.calls(), /herdr/, "no herdr on PATH: never run");
+	const viewerBin = join(p.home, "viewer-bin");
+	mkdirSync(viewerBin);
+	const daemon = daemonPaths(p.home);
+	mkdirSync(daemon.dataDir, { recursive: true });
+	writeFileSync(daemon.config, JSON.stringify({ schema_version: 1, generated_by: "cp-install", backend: "detached", node: process.execPath, app: pkg, home: p.home, path: viewerBin, port: 4000 }));
+	assert.match(await launchers() ?? "", /^tmux no,/, "tmux only on the caller's PATH: the viewer cannot launch it");
+	writeFileSync(join(viewerBin, "tmux"), "");
+	writeFileSync(join(box.dir, "herdr"), `#!/bin/sh\necho "$0 $*" >> "${box.dir}/calls.log"\n/bin/cat "${box.dir}/answers/herdr.out"\n`, { mode: 0o755 });
+	box.answer("herdr.out", '{"running":true}');
+	assert.equal(await launchers(), "tmux yes, herdr binary yes, herdr server running yes");
+	assert.match(box.calls(), new RegExp(`^${box.dir}/herdr status server --json$`, "m"), "the absolute herdr, fixed argv");
+	box.answer("herdr.out", '{"running":false}');
+	assert.equal(await launchers(), "tmux yes, herdr binary yes, herdr server running no");
+	rmSync(wrapper);
+	assert.match(await launchers() ?? "", /^tmux no,/, "no wrapper: no tmux");
+
+	// Maximal inputs — all seven legacy units on a gone node, a failed runtime, 300-character details, a legacy home —
+	// still make a report the schema accepts, for each update record.
+	const long = "x".repeat(300);
+	for (const name of ["cp-update.service", "cp-update.timer"]) writeFileSync(join(unitDir, name), `ExecStart="${join(p.home, "gone", "node")}" x\n`);
+	mkdirSync(join(p.home, "user", ".pi", "command-post", ".pi-command-post"), { recursive: true });
+	mkdirSync(daemon.stateDir, { recursive: true });
+	writeFileSync(daemon.runtime, JSON.stringify({ units: { parent: { state: "failed", result: "start-limit-hit" }, viewer: { state: "failed" } } }));
+	health(Date.now() - 70 * 60_000, Object.fromEntries(["parent", "viewer", "supervisor", "disk", "git", "gh", "update", "relay"].map((name) => [name, { status: "fail", detail: long }])));
+	const seen = new Set<string>();
+	for (const update of [{ phase: "rolling_back", last_result: "rollback_failed", to: "a".repeat(40), detail: long }, { phase: "idle", last_result: "failed", detail: long },
+		{ phase: "idle", last_result: "skipped_busy", since: "2026-09-20T00:00:00Z", behind: 99, detail: long }]) {
+		put(p.home, `${LAYOUT.state}/update.json`, JSON.stringify({ schema_version: 1, last_run_at: new Date().toISOString(), ...update }));
+		const report = await p.doctor();
+		for (const finding of report.findings) if (finding.check.startsWith("service.")) seen.add(finding.check);
+		const valid = validateDoctorReport(report);
+		assert.ok(valid.ok, valid.ok ? "" : valid.errors.join("; "));
+	}
+	put(p.home, `${LAYOUT.state}/update.json`, "{not json");
+	const unreadable = validateDoctorReport(await p.doctor());
+	assert.ok(unreadable.ok, unreadable.ok ? "" : unreadable.errors.join("; "));
+	assert.deepEqual([...seen].sort(), ["service.daemon", "service.health", "service.launchers", "service.legacy_home", "service.legacy_units", "service.node", "service.update"]);
 });
