@@ -4,8 +4,8 @@ import { test } from "node:test";
 import { appPage } from "../src/viewer/app-page.ts";
 import { buildViewer } from "../src/viewer/build.ts";
 import { LAYOUT } from "../src/contracts.ts";
-import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { createScratchHome } from "./harness/index.ts";
 import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -13,6 +13,8 @@ import { refreshStream, refreshStreams } from "../src/viewer/refresh-stream.ts";
 import { createResource, POLL_MS, pollStream, type Stream } from "../viewer-app/resource.ts";
 import { applyDelta, diffJson } from "../src/viewer/json-delta.ts";
 import { deployView } from "../src/viewer/deploy-view.ts";
+import { readObject } from "../src/viewer/sessions.ts";
+import { routingEvents } from "../src/viewer/overview-health.ts";
 import type { ViewerJob } from "../src/viewer/api-types.ts";
 import { bindHostRefusal, localAddresses, sameAddress, viewerHostCandidates } from "../src/viewer/bind-host.ts";
 
@@ -221,4 +223,32 @@ test("applyDelta throws on a delta that does not fit its base", () => {
 	assert.throws(() => applyDelta(5, { sub: { x: { v: 1 } } }), /non-object/);
 	assert.throws(() => applyDelta({}, { sub: { x: { v: 1 } } }), /sub on missing key/);
 	assert.throws(() => applyDelta({ a: 1 }, { key: "id", put: [] }), /malformed array delta/);
+});
+
+// The source caches' identity (a parse-once hit, a cached event list) is process-local; P21-performance and
+// P21-cache-fresh pin what a screen shows. Same-mtime replacement needs utimes on the file under the cache.
+test("JSON source cache reuses unchanged reads and invalidates edits, replacement, deletion and corruption",t=>{
+ const home=createScratchHome();t.after(()=>home.cleanup());const file=join(home.path,"source.json");
+ writeFileSync(file,'{"value":1}');const first=readObject(file);
+ assert.equal(readObject(file),first,"unchanged JSON is parsed only once");
+ const time=statSync(file).mtime;
+ writeFileSync(file,'{"value":2}');utimesSync(file,time,time);
+ assert.equal(readObject(file)?.value,2);
+ writeFileSync(`${file}.new`,'{"value":3}');utimesSync(`${file}.new`,time,time);renameSync(`${file}.new`,file);
+ assert.equal(readObject(file)?.value,3);
+ writeFileSync(file,"{bad");assert.equal(readObject(file),undefined);
+ rmSync(file);assert.equal(readObject(file),undefined);
+ writeFileSync(file,'{"value":4}');assert.equal(readObject(file)?.value,4);
+});
+
+test("routingEvents: an unchanged log is a cache hit and an append is read", (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const stateDir = join(home.path, LAYOUT.state), log = join(stateDir, "runs", "cp-a", "events.jsonl");
+	const event = (mandate: string) => `${JSON.stringify({ source: "cp", type: "routing_resolved", ts: "2026-09-26T12:00:00Z", payload: { mandate_id: mandate } })}\n`;
+	mkdirSync(dirname(log), { recursive: true });
+	writeFileSync(log, event("md-first"));
+	const first = routingEvents({ home: home.path, stateDir }, "cp-a")[0];
+	assert.equal(routingEvents({ home: home.path, stateDir }, "cp-a")[0], first, "unchanged events hit the cache");
+	writeFileSync(log, event("md-first") + event("md-next"));
+	assert.equal(routingEvents({ home: home.path, stateDir }, "cp-a").length, 2);
 });

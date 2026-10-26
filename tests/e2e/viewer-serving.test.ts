@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { request, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
@@ -532,4 +532,67 @@ test("P21-sw-install: the served /sw.js takes over at once on install and activa
 	await sw.fire("install");
 	await sw.fire("activate");
 	assert.deepEqual(sw.calls, [["skipWaiting"], ["claim"]]);
+});
+
+test("P21-performance: board, jobs and map serve a 200-run fleet with 100 revoked grants as bounded JSON, never the 64 MiB of event logs", { timeout: 180_000 }, async (t) => {
+	const at = "2026-09-26T12:00:00Z";
+	const ids = Array.from({ length: 200 }, (_, i) => `cp-run-${i}`);
+	const view = await dashboard(t, { at, seed: (stateDir, home) => {
+		const put = (file: string, value: unknown) => { mkdirSync(dirname(join(home, file)), { recursive: true }); writeFileSync(join(home, file), JSON.stringify(value)); };
+		put(".pi-command-post/jobs.json", { jobs: ids.map((id) => ({ id, title: id, status: "in_progress", labels: ["project:demo", "kind:ship"] })) });
+		put(LAYOUT.fleetFile, { jobs: ids.map((id) => ({ job_id: id, project: "demo", kind: "ship", phase: "held", dispatched_at: at })) });
+		for (const id of ids) {
+			put(`${LAYOUT.runs}/${id}/status.json`, { phase: "idle", started_at: at, usage: { cost_usd: 1, total_tokens: 100 } });
+			put(`${LAYOUT.runs}/${id}/review-1/status.json`, { usage: { cost_usd: 0.5, total_tokens: 20 } });
+			const events = join(stateDir, "runs", id, "events.jsonl");
+			writeFileSync(events, `${JSON.stringify({ source: "cp", job_id: id, ts: at, type: "routing_resolved", payload: { mandate_id: "md-live", scope: "S" } })}\n`);
+			truncateSync(events, 320 * 1024);
+		}
+		for (let i = 0; i < 100; i++) put(`${LAYOUT.mandates}/md-old-${i}.json`, { id: `md-old-${i}`, status: "revoked", projects: ["demo"], issued_at: "2026-01-01T00:00:00Z", revoked_at: "2026-01-02T00:00:00Z", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 1000 } });
+		put(join(LAYOUT.mandates, "md-live.json"), { id: "md-live", status: "active", projects: ["demo"], issued_at: at, expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 1000 } });
+	} });
+	const sizes: Record<string, number> = {};
+	const read = async (path: string) => { const reply = await view.get(path); assert.equal(reply.status, 200, path); sizes[path] = reply.text.length; return reply.body as Record<string, any>; };
+	const board = await read("/api/board");
+	assert.equal(board.jobs.length, 200, "the board lists every run");
+	assert.deepEqual([board.revoked_hidden, board.hidden_mandates.length], [100, 100], "revoked grants are hidden, counted");
+	assert.deepEqual(board.lanes.map((l: { id: string; spend: number }) => [l.id, l.spend]), [["md-live", 300]], "one live lane sums run and review spend");
+	assert.ok(board.jobs.every((j: { mandate_id: string; cost_usd: number }) => j.mandate_id === "md-live" && j.cost_usd === 1.5), "each run reads its routing event and review cost");
+	assert.equal((await read("/api/jobs")).jobs.length, 200, "the jobs screen lists every run");
+	const map = await read("/api/map");
+	assert.deepEqual([map.nodes.length, map.items.length, map.revoked_count], [200, 101, 100], "the map keeps complete history behind its toggle");
+	assert.deepEqual(map.items.find((m: { id: string }) => m.id === "md-live")?.spend, { usd: 300, tokens: 24000, jobs: 200, inFlight: 0 });
+	for (const [path, bytes] of Object.entries(sizes)) assert.ok(bytes < 512 * 1024, `${path} is ${bytes} bytes; event logs never reach a screen payload`);
+});
+
+test("P21-cache-fresh: screens see event appends and rewrites, status and grant changes, clock expiry, a corrupt ledger and a deleted log", { timeout: 120_000 }, async (t) => {
+	const at = "2026-09-26T12:00:00Z";
+	const event = (mandate: string) => `${JSON.stringify({ source: "cp", type: "routing_resolved", ts: at, payload: { mandate_id: mandate, scope: mandate } })}\n`;
+	const view = await dashboard(t, { at, seed: (_, home) => {
+		const put = (file: string, value: string) => { mkdirSync(dirname(join(home, file)), { recursive: true }); writeFileSync(join(home, file), value); };
+		put(LAYOUT.fleetFile, JSON.stringify({ jobs: [{ job_id: "cp-a", project: "demo", phase: "waiting", dispatched_at: at }] }));
+		put(".pi-command-post/jobs.json", JSON.stringify({ jobs: [{ id: "cp-a", status: "in_progress", labels: ["project:demo"] }] }));
+		put(join(LAYOUT.runs, "cp-a/status.json"), JSON.stringify({ phase: "working", started_at: at }));
+		put(join(LAYOUT.runs, "cp-a/events.jsonl"), event("md-first"));
+	} });
+	const put = (file: string, value: string) => writeFileSync(join(view.home, file), value);
+	const job = async () => ((await view.get("/api/board")).body as { jobs: Array<Record<string, unknown>> }).jobs[0]!;
+	assert.equal((await job()).mandate_id, "md-first");
+	put(join(LAYOUT.runs, "cp-a/events.jsonl"), event("md-first") + event("md-next"));
+	assert.equal((await job()).mandate_id, "md-first", "the first routing event still decides after an append");
+	put(join(LAYOUT.runs, "cp-a/events.jsonl"), event("md-next"));
+	assert.equal((await job()).mandate_id, "md-next", "a rewritten log is read");
+	mkdirSync(join(view.home, LAYOUT.mandates), { recursive: true });
+	put(join(LAYOUT.mandates, "md-next.json"), JSON.stringify({ id: "md-next", status: "active", projects: ["demo"], issued_at: at, expiry: "2026-09-26T12:01:00Z", spend_cap: { usd: 10 } }));
+	assert.equal((await job()).board_lane_id, "md-next", "a new grant opens its lane");
+	view.pin("2026-09-26T12:02:00Z");
+	const later = await job();
+	assert.equal(later.board_lane_id, "unassigned", "an expired grant drops its lane on the clock alone");
+	assert.ok(Math.abs(Number(later.elapsed_seconds) - 120) < 5, `elapsed follows the clock, got ${later.elapsed_seconds}`);
+	put(join(LAYOUT.runs, "cp-a/status.json"), JSON.stringify({ phase: "starting", started_at: at }));
+	assert.equal((await job()).phase, "launching", "a status change is read");
+	put(".pi-command-post/jobs.json", "{bad");
+	assert.ok(((await view.get("/api/board")).body as { warnings: Array<{ section: string }> }).warnings.some((w) => w.section === "ledger"), "a corrupt ledger is warned");
+	rmSync(join(view.home, LAYOUT.runs, "cp-a/events.jsonl"));
+	assert.equal((await job()).mandate_id, null, "a deleted log routes nothing");
 });
