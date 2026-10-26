@@ -425,8 +425,14 @@ async function hostedParent(t: TestContext, env: Record<string, string>, setup: 
 		let environ = "";
 		for (const at = Date.now(); !environ.includes("CP_HOME="); await new Promise((resolve) => setTimeout(resolve, 200))) {
 			if (Date.now() - at > 90_000) throw new Error(`no hosted parent for ${home.path}:\n${child.stderr()}`);
-			const parent = parentHostPids(home.path).flatMap(childrenOf)[0];
-			try { environ = parent ? readFileSync(`/proc/${parent}/environ`, "utf8") : ""; } catch { environ = ""; }
+			// A host's other children inherit CP_HOME but not the key; only the pi parent carries CP_HEADLESS.
+			environ = "";
+			for (const pid of parentHostPids(home.path).flatMap(childrenOf)) {
+				try {
+					const text = readFileSync(`/proc/${pid}/environ`, "utf8");
+					if (text.split("\0").includes("CP_HEADLESS=1")) { environ = text; break; }
+				} catch { /* exited while scanning */ }
+			}
 		}
 		const log = join(home.path, layoutForHome("multi", home.path).state, "parent-host.log");
 		const key = environ.split("\0").find((line) => line.startsWith("CP_GATEWAY_ADMIN_KEY="))?.slice("CP_GATEWAY_ADMIN_KEY=".length);
