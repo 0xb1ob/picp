@@ -1,7 +1,7 @@
 /**
  * Behavior 15 (P14c): `/doctor --json` and `/doctor` through real pi parents on scratch homes. Host tools are scripts
- * a scratch bin dir (the only PATH), models come from pi's own registry (API keys and a scratch models.json), and the
- * package is a copy of this checkout, so its profiles and resources can be broken without touching it.
+ * in a scratch bin dir (the only PATH), models come from pi's own registry (API keys and a scratch models.json), and
+ * the package is a copy of this checkout, so its profiles and resources can be broken without touching it.
  */
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
