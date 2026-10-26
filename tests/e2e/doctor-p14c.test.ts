@@ -1,7 +1,7 @@
 /**
- * Behavior 15 (P14c): `/doctor --json` and `/doctor` through real pi parents on scratch homes. Host tools are scripts in
- * a scratch bin dir (the only PATH), models come from pi's own registry (API keys and a scratch models.json), and the
- * package is a copy of this checkout, so its profiles and resources can be broken without touching it.
+ * Behavior 15 (P14c): `/doctor --json` and `/doctor` through real pi parents on scratch homes. Host tools are scripts
+ * in a scratch bin dir (the only PATH), models come from pi's own registry (API keys and a scratch models.json), and
+ * the package is a copy of this checkout, so its profiles and resources can be broken without touching it.
  */
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -772,16 +772,24 @@ test("P14-doctor-service: service.legacy_units, service.health and service.launc
 	writeFileSync(daemon.runtime, JSON.stringify({ units: { parent: { state: "failed", result: "start-limit-hit" }, viewer: { state: "failed" } } }));
 	health(Date.now() - 70 * 60_000, Object.fromEntries(["parent", "viewer", "supervisor", "disk", "git", "gh", "update", "relay"].map((name) => [name, { status: "fail", detail: long }])));
 	const seen = new Set<string>();
-	for (const update of [{ phase: "rolling_back", last_result: "rollback_failed", to: "a".repeat(40), detail: long }, { phase: "idle", last_result: "failed", detail: long },
-		{ phase: "idle", last_result: "skipped_busy", since: "2026-09-20T00:00:00Z", behind: 99, detail: long }]) {
-		put(p.home, `${LAYOUT.state}/update.json`, JSON.stringify({ schema_version: 1, last_run_at: new Date().toISOString(), ...update }));
-		const report = await p.doctor();
-		for (const finding of report.findings) if (finding.check.startsWith("service.")) seen.add(finding.check);
-		const valid = validateDoctorReport(report);
-		assert.ok(valid.ok, valid.ok ? "" : valid.errors.join("; "));
+	const config = readFileSync(daemon.config, "utf8");
+	const updates = [{ phase: "rolling_back", last_result: "rollback_failed", to: "a".repeat(40), detail: long }, { phase: "idle", last_result: "rollback_failed", detail: long },
+		{ phase: "idle", last_result: "failed", to: "b".repeat(40), detail: long }, { phase: "idle", last_result: "failed", detail: long },
+		{ phase: "idle", last_result: "skipped_busy", since: "2026-09-20T00:00:00Z", behind: 99, detail: long }, "{not json"];
+	// Each record under an answering and a refusing ("no user manager") systemctl, with and without data/daemon.json.
+	for (const manager of [["active\n", undefined, undefined], [undefined, "1", "Failed to connect to bus: no user manager"]]) {
+		for (const [i, ext] of ["out", "status", "err"].entries()) box.answer(`systemctl.${ext}`, manager[i]);
+		for (const withConfig of [true, false]) {
+			if (withConfig) writeFileSync(daemon.config, config);
+			else rmSync(daemon.config, { force: true });
+			for (const update of updates) {
+				put(p.home, `${LAYOUT.state}/update.json`, typeof update === "string" ? update : JSON.stringify({ schema_version: 1, last_run_at: new Date().toISOString(), ...update }));
+				const report = await p.doctor();
+				for (const finding of report.findings) if (finding.check.startsWith("service.")) seen.add(finding.check);
+				const valid = validateDoctorReport(report);
+				assert.ok(valid.ok, `${manager[2] ?? "active"} ${withConfig} ${JSON.stringify(update).slice(0, 60)}: ${valid.ok ? "" : valid.errors.join("; ")}`);
+			}
+		}
 	}
-	put(p.home, `${LAYOUT.state}/update.json`, "{not json");
-	const unreadable = validateDoctorReport(await p.doctor());
-	assert.ok(unreadable.ok, unreadable.ok ? "" : unreadable.errors.join("; "));
 	assert.deepEqual([...seen].sort(), ["service.daemon", "service.health", "service.launchers", "service.legacy_home", "service.legacy_units", "service.node", "service.update"]);
 });
