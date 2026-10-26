@@ -418,3 +418,143 @@ test("P14e-install-viewer-host: --viewer-host is checked against this machine, a
 	assert.match(plan.out, /^changed: viewer-host: 100\.80\.0\.1 \(tailscale;.*\(dry-run\)$/m);
 	assert.deepEqual([existsSync(dry.cpHome), /Dashboard address/.test(plan.out)], [false, false]);
 });
+
+test("P14e-install-extras: pi packages, gh, login, pi-lens, push and tmux steps report what they did, skip or why they stopped", { timeout: 600_000 }, async (t) => {
+	const r = rig(t);
+	const quiet = [...PINNED, "--no-start", "--viewer-host", "127.0.0.1"];
+	const installs = (u: User) => u.calls("pi").filter((call) => call.startsWith("install "));
+	// The worker package set is ROLE_PACKAGES' union, each `pi install npm:<spec>`; never this checkout as a package.
+	const u = r.user();
+	const plain = await u.install(quiet, []);
+	assert.deepEqual(installs(u), [...new Set(Object.values(ROLE_PACKAGES).flat())].map((spec) => `install npm:${spec}`));
+	// Complete flags on a terminal ask nothing; push is not set up without --push-origin.
+	assert.doesNotMatch(plain.out, /\]: /, "no prompt");
+	assert.match(plain.out, /^skip: push: not set up; rerun with --push-origin URL to enable it$/m);
+	assert.deepEqual([existsSync(join(u.cpHome, "data", "push", "config.json")), /self-package/.test(plain.out)], [false, false]);
+	const pushed = r.user();
+	const origin = await pushed.install([...quiet, "--push-origin", "https://cp.example"]);
+	assert.match(origin.out, /^changed: push: push set up for https:\/\/cp\.example$/m);
+
+	// Packages the human configured are skipped (their pin kept); settings.json only ever changes through pi install.
+	const mine = ["npm:zzz-theme", { source: "npm:pi-lens@4.3.0" }, "git:github.com/me/tools"];
+	const human = r.user();
+	writeFileSync(join(human.home, ".pi/agent/settings.json"), JSON.stringify({ packages: mine }));
+	const kept = await human.install(quiet);
+	assert.ok(!installs(human).some((call) => call.includes("pi-lens")), "pi-lens is configured (pinned by the human)");
+	assert.match(kept.out, /^ok: pi-package: pi-lens configured as npm:pi-lens@4\.3\.0 \(yours, kept; workers name npm:pi-lens\)$/m);
+	assert.deepEqual(JSON.parse(human.text(join(human.home, ".pi/agent/settings.json"))!).packages.slice(0, 3), mine, "order and entries kept");
+	const off = r.user();
+	const skipped = await off.install([...quiet, "--no-pi-packages", "--no-self-package"]);
+	assert.deepEqual(installs(off), []);
+	assert.match(skipped.out, /^skip: pi-package: --no-pi-packages$/m);
+	const broken = r.user();
+	writeFileSync(join(broken.home, ".pi/agent/settings.json"), "{ nope");
+	const unparsed = await broken.install(quiet);
+	assert.equal(unparsed.code, 1);
+	assert.match(unparsed.out, /^fail: pi-package: .*never edited here/m);
+	assert.deepEqual(installs(broken), []);
+
+	// No tracker CLI is probed, offered or flagged, even with retired tracker state on the home.
+	const tracked = r.user();
+	mkdirSync(join(tracked.cpHome, "data"), { recursive: true });
+	writeFileSync(join(tracked.cpHome, "data", "trackers.json"), "{ retired, malformed");
+	const untracked = await tracked.install(quiet);
+	assert.doesNotMatch(untracked.out, /tracker|--with-/i);
+	assert.deepEqual(tracked.log().filter((call) => call.endsWith(" --version")).map((call) => call.split(" ")[0]).filter((tool) => !["pi", ...PI_LENS_TOOLS.commands].includes(tool!)), [], "only surviving tools are probed");
+
+	// tmux missing, gh logged out and no provider login are reported, never fatal; login is the human's.
+	const NONE = "No models available. Use /login or set an API key environment variable.\n";
+	const bare = r.user({ models: NONE, answers: { "gh auth status": { status: 1 }, "gh api user": { status: 1 } } });
+	const reported = await bare.install(quiet);
+	assert.equal(reported.code, 0, reported.out);
+	assert.match(reported.out, /^skip: tmux: not on PATH \(optional/m);
+	assert.match(reported.out, /^skip: gh: not logged in.*gh auth login/m);
+	assert.match(reported.out, /^skip: login: no provider.*\/login/m);
+	assert.match(reported.out, /treehouse \(required, not optional/);
+	assert.ok(!bare.calls("gh").includes("auth login"), "login is the human's");
+	const logged = r.user({ models: NONE });
+	writeFileSync(join(logged.home, ".pi/agent/auth.json"), JSON.stringify({ anthropic: { type: "oauth" } }));
+	assert.match((await logged.install(quiet)).out, /^ok: login: 1 provider\(s\)/m);
+	// gh reads only the active account; a gh without --active falls back to gh api user.
+	assert.match(plain.out, /^ok: gh: logged in$/m);
+	assert.deepEqual(u.calls("gh"), ["auth status --active"]);
+	const oldGh = r.user({ answers: { "gh auth status": { status: 1, stderr: "unknown flag: --active" } } });
+	const fallback = await oldGh.install(quiet);
+	assert.deepEqual([oldGh.calls("gh").includes("api user --jq .login"), /^ok: gh: logged in$/m.test(fallback.out)], [true, true]);
+
+	// pi-lens: a missing tool installs the manifest's packages; a prefix that needs sudo prints the fix and stops.
+	const lens = r.user({ drop: ["ast-grep"] });
+	mkdirSync(join(lens.home, ".npm-global"));
+	await lens.install(quiet);
+	assert.ok(lens.calls("npm").includes(`i -g ${PI_LENS_TOOLS.packages.join(" ")}`), lens.log().join("\n"));
+	const locked = r.user({ drop: ["ast-grep"], answers: { "npm prefix -g": { stdout: "/nonexistent-p14e-prefix\n" } } });
+	const sudo = await locked.install(quiet);
+	assert.equal(sudo.code, 1);
+	assert.match(sudo.out, /^fail: pi-lens: npm's global prefix \/nonexistent-p14e-prefix needs sudo.*npm config set prefix/m);
+	assert.ok(!locked.calls("npm").some((call) => call.startsWith("i ")), "not run");
+	assert.doesNotMatch(locked.log().join("\n"), /\bsudo\b/);
+	assert.deepEqual([existsSync(locked.cpHome), existsSync(locked.unit), existsSync(join(locked.binDir, "cp-operator"))], [false, false, false], "a failed prerequisite writes nothing");
+	assert.ok(!locked.log().some((call) => call.includes("cp-daemon.service") || call.startsWith("daemon ")), "and starts nothing");
+	assert.match(plain.out, /^ok: node: \S+ v2[4-9]\./m, "node 24 or newer passes");
+});
+
+test("P14e-install-legacy: a legacy home is held under --no-start, migrated by a plain rerun, and refused untouched", { timeout: 600_000 }, async (t) => {
+	const r = rig(t);
+	const untouched = (u: User, units: Record<string, string>) => {
+		assert.deepEqual([existsSync(u.paths.config), existsSync(u.unit)], [false, false], "nothing of cp-daemon's beside the legacy units");
+		assert.deepEqual(Object.keys(units).filter((name) => u.text(join(u.unitDir, name)) !== units[name]), [], "the legacy units as they were");
+		assert.deepEqual(u.calls("systemctl").filter((call) => /^--user (daemon-reload|enable|disable|stop|kill|try-restart)/.test(call)), []);
+	};
+	// --no-start leaves the legacy units (the operator ones too) running and untouched; a plain rerun migrates them.
+	const u = r.user({ ifaces: HOSTS });
+	const units = legacyHome(u, true);
+	assert.ok(units[OPERATOR_UNIT] && units[OPERATOR_RESUME_UNIT], "the operator units are part of the older install");
+	const held = await u.install(["--no-start"]);
+	assert.match(held.out, /^skip: migrate: .*untouched \(--no-start\); rerun without --no-start to migrate$/m);
+	untouched(u, units);
+	const migrated = await u.install([]);
+	assert.deepEqual([u.config()?.viewer_host, u.config()?.parent_model], ["100.80.0.1", "openai/gpt-6.1-sol"], "pins kept from the legacy units");
+	assert.ok(u.calls("systemctl").includes("--user disable --now cp-parent.service") && u.calls("systemctl").includes("--user enable --now cp-daemon.service"), migrated.out);
+	assert.ok(!u.calls("systemctl").some((call) => /^--user (stop|kill)|cp-operator/.test(call)), "never stopped: the parent host and the tmux session keep running");
+	assert.deepEqual(readdirSync(u.unitDir), ["cp-daemon.service"], "the legacy and operator units are gone");
+	assert.match(migrated.out, /^changed: migrate: cp-daemon\.service runs the parent supervisor and the viewer/m);
+
+	// A wrapper that differs (no --force) is refused before anything is written.
+	const wrapped = r.user({ ifaces: HOSTS });
+	const wrappedUnits = legacyHome(wrapped);
+	mkdirSync(wrapped.binDir, { recursive: true });
+	writeFileSync(join(wrapped.binDir, "cp-operator"), "#!/bin/sh\n# hand-edited\n");
+	const refused = await wrapped.install([]);
+	assert.equal(refused.code, 1);
+	assert.ok(refused.out.includes(`fail: wrapper: ${join(wrapped.binDir, "cp-operator")} differs from what this install renders; rerun with --force to replace it`), refused.out);
+	assert.ok(refused.out.includes(`skip: daemon: ${wrapped.paths.config} not written: another file was refused, so nothing is written`), refused.out);
+	assert.equal(wrapped.text(join(wrapped.binDir, "cp-operator")), "#!/bin/sh\n# hand-edited\n");
+	untouched(wrapped, wrappedUnits);
+	// Refused linger stops before anything is written.
+	const linger = r.user({ ifaces: HOSTS, answers: { "loginctl show-user": { stdout: "Linger=no\n" }, "loginctl enable-linger": { status: 1 } } });
+	const lingerUnits = legacyHome(linger);
+	assert.match((await linger.install([])).out, /^fail: linger: loginctl enable-linger refused; run: sudo loginctl enable-linger u$/m);
+	assert.equal(existsSync(join(linger.binDir, "cp-operator")), false, "no wrapper either");
+	untouched(linger, lingerUnits);
+
+	// cp-rrye: the generated operator units go only at M1's success; a refused preflight or a rollback keeps them.
+	const busy = r.user({ ifaces: HOSTS, answers: { "systemctl --user is-active cp-update.service": { stdout: "active\n" } } });
+	const busyUnits = legacyHome(busy, true);
+	const inFlight = await busy.install([]);
+	assert.match(inFlight.out, /^fail: migrate: an update run is in flight.*nothing was changed$/m);
+	untouched(busy, busyUnits);
+	const rolled = r.user({ ifaces: HOSTS, answers: { "systemctl --user enable --now cp-daemon.service": { status: 1, stderr: "boom" } } });
+	const rolledUnits = legacyHome(rolled, true);
+	const back = await rolled.install([]);
+	assert.match(back.out, /^fail: migrate: .*rolled back/m);
+	assert.deepEqual(Object.keys(rolledUnits).filter((name) => !existsSync(join(rolled.unitDir, name))), [], "the legacy and operator units kept by the rollback");
+	assert.ok(!rolled.calls("systemctl").some((call) => call.includes("cp-operator")), "no command touches the operator units");
+	const hand = r.user({ ifaces: HOSTS });
+	legacyHome(hand, true);
+	const mine = "[Service]\nExecStart=/usr/bin/tmux new-session -d -s mine\n";
+	writeFileSync(join(hand.unitDir, OPERATOR_RESUME_UNIT), mine);
+	const done = await hand.install([]);
+	assert.deepEqual([existsSync(join(hand.unitDir, OPERATOR_UNIT)), hand.text(join(hand.unitDir, OPERATOR_RESUME_UNIT))], [false, mine], "a hand-written one stays");
+	assert.match(done.out, new RegExp(`^changed: migrate: cp-daemon\\.service runs the parent supervisor and the viewer; removed .*${OPERATOR_UNIT} \\(the parent host kept running; the operator units never stopped\\)`, "m"));
+	assert.ok(!hand.calls("systemctl").some((call) => call.includes("cp-operator")));
+});
