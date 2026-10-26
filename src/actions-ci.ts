@@ -3,6 +3,8 @@
  * Fail closed: a denied, malformed, partial, capped or late read throws `ActionsCiError`, never a shorter green list.
  * Requests are built from validated ids only; URLs inside a response (jobs_url, check_runs_url …) are never followed.
  */
+import { loadavg } from "node:os";
+import { type IntervalHistogram, monitorEventLoopDelay } from "node:perf_hooks";
 import type { CiRun, CommandRunner } from "./merge-ask.ts";
 import type { CommandRunner as StatusRunner } from "./merges.ts";
 
@@ -232,12 +234,21 @@ interface Budget {
 	calls: string[];
 	/** Calls not settled yet, so a failure also names the parallel or hung ones. */
 	pending: Set<string>;
+	/** Event-loop delay over the observation, so a failure can tell host lag from a slow GitHub. */
+	lag: IntervalHistogram;
 }
 
 function budgetOf(options: ActionsReadOptions): Budget {
 	const now = options.now ?? Date.now;
 	const start = now();
-	return { start, deadline: start + (options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS), now, calls: [], pending: new Set() };
+	const lag = monitorEventLoopDelay({ resolution: 20 });
+	lag.enable();
+	return { start, deadline: start + (options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS), now, calls: [], pending: new Set(), lag };
+}
+
+/** The host-side facts appended to a failed read: 1-minute load, worst event-loop lag, gh spawn-to-first-byte. */
+function diagnostics(budget: Budget, firstByte: string): string {
+	return `; load ${loadavg()[0]?.toFixed(2)}, event-loop lag ${Math.round(budget.lag.max / 1e6)}ms, gh first byte ${firstByte}`;
 }
 
 /** One observation; a failure logs every gh call (settled and in flight) and the budget left, then rethrows. */
@@ -247,8 +258,10 @@ async function observe<T>(options: ActionsReadOptions, read: (budget: Budget) =>
 		return await read(budget);
 	} catch (error) {
 		const calls = [...budget.calls, ...budget.pending].join("; ").slice(0, 4000) || "none";
-		(options.log ?? console.error)(`actions-ci: observation failed (${(error as Error).message.slice(0, 300)}) with ${budget.deadline - budget.now()}ms of budget left; calls: ${calls}`);
+		(options.log ?? console.error)(`actions-ci: observation failed (${(error as Error).message.slice(0, 400)}) with ${budget.deadline - budget.now()}ms of budget left; calls: ${calls}`);
 		throw error;
+	} finally {
+		budget.lag.disable();
 	}
 }
 
@@ -276,10 +289,10 @@ function isJson(text: string): boolean {
 }
 
 /** One attempt: the body when it parses as JSON, else a fault, its exit status and whether a retry may cure it. */
-async function attempt(options: ActionsReadOptions, endpoint: string, timeoutMs: number): Promise<string | { fault: ActionsCiError; retry: boolean; exit: string }> {
+async function attempt(options: ActionsReadOptions, endpoint: string, timeoutMs: number, firstByte: () => void): Promise<string | { fault: ActionsCiError; retry: boolean; exit: string }> {
 	let stdout: string;
 	try {
-		stdout = await options.exec("gh", ["api", endpoint], { cwd: options.cwd, timeoutMs });
+		stdout = await options.exec("gh", ["api", endpoint], { cwd: options.cwd, timeoutMs, firstByte });
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		const body = String((error as { stdout?: unknown })?.stdout ?? "");
@@ -301,17 +314,19 @@ async function attempt(options: ActionsReadOptions, endpoint: string, timeoutMs:
 /** A non-JSON body, HTML error page or transport fault retries with backoff in the budget; the last fault throws. */
 async function get(options: ActionsReadOptions, budget: Budget, endpoint: string): Promise<string> {
 	const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+	let firstByte = "none";
 	for (let tries = 0; ; tries++) {
 		const remaining = budget.deadline - budget.now();
-		if (remaining <= 0) throw new ActionsCiError("deadline", endpoint, "observation budget spent");
+		if (remaining <= 0) throw new ActionsCiError("deadline", endpoint, `observation budget spent${diagnostics(budget, firstByte)}`);
 		const cap = Math.min(remaining, ACTIONS_ATTEMPT_TIMEOUT_MS);
 		const [started, mono] = [budget.now(), performance.now()];
 		const inFlight = `+${started - budget.start}ms ${endpoint} cap ${cap}ms in flight`;
 		budget.pending.add(inFlight);
 		let overrun: ReturnType<typeof setTimeout> | undefined;
+		let byteAt: number | undefined;
 		// A runner whose call never settles (a child that outlives its kill) must not hang the observation.
 		const result = await Promise.race([
-			attempt(options, endpoint, cap),
+			attempt(options, endpoint, cap, () => (byteAt ??= performance.now())),
 			new Promise<{ fault: ActionsCiError; retry: boolean; exit: string }>((resolve) => {
 				overrun = setTimeout(() => resolve({ fault: new ActionsCiError("transport", endpoint, `gh call unsettled ${ACTIONS_OVERRUN_GRACE_MS}ms past its ${cap}ms cap`), retry: true, exit: "unsettled" }), cap + ACTIONS_OVERRUN_GRACE_MS);
 			}),
@@ -323,11 +338,12 @@ async function get(options: ActionsReadOptions, budget: Budget, endpoint: string
 		const took = `${budget.now() - started}ms (monotonic ${Math.round(performance.now() - mono)}ms)`;
 		budget.calls.push(`+${started - budget.start}ms ${endpoint} ${took} cap ${cap}ms ${typeof result === "string" ? "exit 0" : `${result.exit} ${result.fault.category}`}`);
 		if (typeof result === "string") return result;
+		firstByte = byteAt === undefined ? "none" : `${Math.round(byteAt - mono)}ms`;
 		const delay = ACTIONS_RETRY_DELAYS_MS[tries];
 		const left = budget.deadline - budget.now();
 		if (!result.retry || delay === undefined || left <= delay) {
-			if (tries === 0) throw result.fault;
-			throw new ActionsCiError(result.fault.category, endpoint, `${result.fault.detail}; ${tries + 1} attempts`);
+			const attempts = tries === 0 ? "" : `; ${tries + 1} attempts`;
+			throw new ActionsCiError(result.fault.category, endpoint, `${result.fault.detail}${attempts}${diagnostics(budget, firstByte)}`.replace(/^; /, ""));
 		}
 		await sleep(delay);
 	}

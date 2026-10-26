@@ -747,7 +747,7 @@ export class CommandPost {
 
 	/** jje.2: a CI/PR watch tick that threw is journaled durably (state/wakeups.json), once per cause. */
 	ciWatchFailed(error: unknown): void {
-		const cause = (error instanceof Error ? error.message : String(error)).split("\n")[0]?.slice(0, 300) || "no message";
+		const cause = (error instanceof Error ? error.message : String(error)).split("\n")[0]?.slice(0, 400) || "no message";
 		const content = `CI/PR WATCH TICK FAILED — ${cause}\n  The watch keeps ticking and re-derives every unconfirmed fact; held PRs may wake you late until this clears.`;
 		this.#journalDurable({ id: boundedCauseId("ci-watch-failed:", cause), kind: "recovery", content });
 	}
