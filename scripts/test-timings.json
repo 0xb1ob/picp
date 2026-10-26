@@ -66,7 +66,6 @@
 	"tests/dispatch-queue-wiring-retained.test.ts": 143,
 	"tests/dispatch-queue-retained.test.ts": 286,
 	"tests/doc-test-cites.test.ts": 40,
-	"tests/doctor.test.ts": 16759,
 	"tests/e2e-hermetic-gh.test.ts": 14,
 	"tests/e2e/answered-restart.test.ts": 15006,
 	"tests/e2e/authority.test.ts": 315196,
