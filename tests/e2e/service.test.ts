@@ -345,6 +345,17 @@ test("P14-install: cp-install lists models as the service sees them, asks once p
 	const spaced = await installOnTty(xdg, [...flags, "--parent-model", "openai/gpt-6.1-sol"], []);
 	assert.match(spaced.out, /fail: gateway: --gateway-key-file \S+: .*; nothing written/);
 	assert.doesNotMatch(spaced.out, /k3y SECRET/);
+	// validGatewayKey's other refusals: a quote, a backslash, non-ASCII, and a key over 4096 characters.
+	const longKey = `k3y${"L".repeat(4094)}`;
+	for (const [key, why] of [[`k3y"Q`, "a quote"], ["k3y'Q", "a quote"], ["k3y\\Q", "a backslash"], ["k3y\u00e9Q", "a non-printable"], [longKey, "longer than 4096"]]) {
+		writeFileSync(keyIn, `${key}\n`);
+		const refused = await installOnTty(xdg, [...flags, "--parent-model", "openai/gpt-6.1-sol"], []);
+		assert.equal(refused.code, 1, refused.out);
+		assert.match(refused.out, new RegExp(`fail: gateway: --gateway-key-file \\S+: the key [^\\n]*${why}[^\\n]*; nothing written`), key.slice(0, 9));
+		assert.ok(!refused.out.includes(key.slice(0, 5)), `${key.slice(0, 5)} is never echoed`);
+		assert.equal(existsSync(join(m.root, "xdg", "pi-command-post", "gateway.env")), false, "a refused key writes nothing");
+	}
+	assert.equal(longKey.length, 4097, "the long key is one over the cap");
 	writeFileSync(keyIn, "CP_GATEWAY_ADMIN_KEY=other-key\n");
 	const placed = await installOnTty(xdg, [...flags, "--parent-model", "openai/gpt-6.1-sol"], []);
 	assert.equal(placed.code, 0, placed.out);
