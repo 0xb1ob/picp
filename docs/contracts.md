@@ -7598,7 +7598,7 @@ paths behaves exactly as before:
 That guidance is the *only* thing per-turn rendering ever provided, and it is
 checked statically: no module under `src/` imports `status-block.ts` except the
 two that render (`awaiting-rows.ts`, `shipped-seen.ts`), and no `src/` module
-references `cp_status_block` outside a comment (`tests/status-block.test.ts`).
+references `cp_status_block` outside a comment (`tests/status-block-retained.test.ts`).
 The gates — `AwaitingStore`, `evaluateMergeAskCi`, `reviewDeferred`, the CI/PR
 watch — hold their invariants with no block rendered at all; a render only
 decides *when* an operator sees a row, never whether the rule applied.
@@ -8938,7 +8938,7 @@ keeps everything cp-eff was protecting:
 - **The installation contract is one provider.** Anthropic or OpenAI
   authenticated in pi is enough: the shipped template and the shipped profiles
   resolve **every** (role, scope, risk) route under either one alone, and
-  `tests/routing.test.ts` proves both one-provider matrices against pi's own
+  `tests/e2e/routing.test.ts` (P16-route-default) proves both one-provider matrices against pi's own
   registry metadata. (xAI was dropped from every ladder in the 2026-09-23 model
   refresh.) Anthropic stays first when capacity is tied or unknown; an eligible
   OpenAI candidate with more available slots can win a new spawn.

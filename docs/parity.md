@@ -27,7 +27,7 @@ Zero capabilities are unaccounted for: every row below is one of the five.
 | `cmdp dispatch --project --job-id --template --task-file --scope --risk` | ported | `cp_dispatch` tool → [`src/dispatch.ts`](../src/dispatch.ts) | `tests/e2e/dispatch-s29.test.ts`, `tests/e2e/dispatch-s30.test.ts`, `tests/dispatch-retained.test.ts`, `tests/e2e/phase2.test.ts` |
 | `cmdp dispatch --name <alias>` | deleted | worker identity **is** the job id (one worker per job); aliases existed to name panes | `WorkerManager.spawn` one-worker-per-job, `tests/e2e/worker-lifecycle-p8e.test.ts` (P8e spawn cap) |
 | `cmdp dispatch --origin` | out of scope | `origin` is still carried on every fleet record and status row, unread | `FleetRecordSchema.origin`, `StatusJobSchema.origin` |
-| `cmdp dispatch -- CMD…` (CLI override) | ported (narrowed) | `model` override on `cp_dispatch`; there is one CLI (pi) by design | `tests/routing.test.ts` |
+| `cmdp dispatch -- CMD…` (CLI override) | ported (narrowed) | `model` override on `cp_dispatch`; there is one CLI (pi) by design | `tests/e2e/routing.test.ts` |
 | `cmdp check --project <worktree> --base` | ported | `cp_check` tool → [`src/preflight.ts`](../src/preflight.ts) | `tests/e2e/preflight-s31.test.ts`, `tests/contract.test.ts` (tool is exposed) |
 | `cmdp lease --project NAME` | deleted (deliberate) | leasing is a step *inside* dispatch; a lease with no worker is an orphan waiting to happen. `LeaseManager` is still a module | `tests/e2e/dispatch-s31.test.ts` |
 | `cmdp jobs add\|set\|reported\|done\|list` | ported | `state/fleet.json` store (add/update), envelope intake (`reported`), teardown (`done`), `/status` (`list`) | `tests/fleet.test.ts`, `tests/e2e/intake-p9f.test.ts`, `tests/e2e/teardown-s17.test.ts`, `tests/status.test.ts` |
@@ -37,7 +37,7 @@ Zero capabilities are unaccounted for: every row below is one of the five.
 | `cmdp status [--json] [--origin]` | ported | `/status` + widget → [`src/status.ts`](../src/status.ts) | `tests/status.test.ts` + goldens |
 | `cmdp status --html --serve --port --pane` | out of scope | HTML dashboard deferred; `fleet.json` + `runs/` are shaped to feed one later | README.md out-of-scope |
 | `cmdp doctor` | ported | `/doctor` → [`src/doctor.ts`](../src/doctor.ts), plus the ledger checks (document shape, ids, dependency graph, prefix, size) | `tests/doctor.test.ts` + golden |
-| `cmdp models` (catalog, families, TTL cache, allowlist) | ported (narrowed) | pi owns the model registry (`/models`, `get_available_models`); the allowlist and rubric are `data/routing.json`, availability is probed with real auth in `/doctor` | `tests/routing.test.ts`, `tests/doctor.test.ts` |
+| `cmdp models` (catalog, families, TTL cache, allowlist) | ported (narrowed) | pi owns the model registry (`/models`, `get_available_models`); the allowlist and rubric are `data/routing.json`, availability is probed with real auth in `/doctor` | `tests/e2e/routing.test.ts`, `tests/doctor.test.ts` |
 | `cmdp threads bind\|unbind\|list\|events\|status\|log` | out of scope | Slack | README.md out-of-scope |
 | `cmdp relay` | out of scope | Slack | README.md out-of-scope |
 | command-post `install.sh` (deps + scaffold + hooks) | ported (T30) | self-scaffold on `session_start` (`src/scaffold.ts`): `data/`, `state/`, `projects/`, a home `.gitignore`, and an empty `.pi-command-post/jobs.json` when absent; idempotent | `tests/e2e/configuration.test.ts` (P16-scaffold), `tests/e2e/packaging.test.ts` |
@@ -87,7 +87,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | `git worktree add` allowed only when treehouse is missing | ported (hardened) | **no** fallback at all: a missing treehouse is a hard error | `tests/e2e/dispatch-s31.test.ts` |
 | Project management (clone on demand, registry, one canonical clone) | ported | `data/projects.json` + rendered `projects.md` view | `tests/e2e/project-tracker.test.ts` (P15-projects) |
 | Worker dispatch: "pass only the CLI and optional `--model`; no trust/yolo/skip-permissions flags" | mechanised | `WORKER_REQUIRED_FLAGS` / `WORKER_FORBIDDEN_FLAGS` + `assertTrustPolicy(argv)` re-checks the final argv | `tests/e2e/worker-lifecycle-p8e.test.ts` (P8e spawn), `tests/worker-manager-retained.test.ts`, `tests/contracts.test.ts` |
-| Model routing (order, allowlist, `source=/model=/rule=`) | ported | [`src/routing.ts`](../src/routing.ts); resolution table from `reports/model-routing.md` reproduced | `tests/routing.test.ts` |
+| Model routing (order, allowlist, `source=/model=/rule=`) | ported | [`src/routing.ts`](../src/routing.ts); resolution table from `reports/model-routing.md` reproduced | `tests/e2e/routing.test.ts` |
 | First brief contract (`templates/`, placeholders, `--brief-file`) | ported | `prompts/briefs/` + `assembleBrief`; unknown placeholder **or** missing value fails closed | `tests/profiles.test.ts` |
 | Workers search with `grep`/`glob`/`read`, not `bash` grep/cat (audit 2026-09-06: ~2173 bash grep/cat/head/tail/ls calls, `glob` called 0 times) | mechanised | the rule is in all three briefs and all three worker profiles (`prompts/briefs/`, `profiles/`), and five contract cases fail the suite if a surface loses the sentence | `tests/evals.test.ts` (`evals/corpus.json` `*-bounded-search-tools`) |
 | Broker parent turns | deleted | see §2 | — |
@@ -133,7 +133,7 @@ the write-ups themselves stay where they were written.
 | `dispatch-hardening.md` (probe before lease, no orphan branch; stalled-worker empty composer; teardown) | `src/dispatch.ts` order + `docs/contracts.md` §Dispatch; the composer failure mode is deleted with the paste broker |
 | `teardown-research.md` (research gate: clean + no local commits) | `Teardown` research gate, `tests/e2e/teardown-s17.test.ts` |
 | `operating-knowledge.md` (merged auto-deleted head; ledger membership queries; promote-not-spawn; parallel PRs) | `merged_head_deleted` check; unpaged membership queries; `decideOccupancy`; AGENTS.md §Fan out |
-| `model-routing.md` (rubric table) | `data/routing.json` rubric rows; the table is reproduced in `tests/routing.test.ts` |
+| `model-routing.md` (rubric table) | `data/routing.json` rubric rows; the table is reproduced in `tests/e2e/routing.test.ts` |
 | two notes on the former external job tracker (install and research) | retired with the in-house ledger (spec 2026-09-04); `/doctor` checks the jobs document instead |
 | `ai-memory-research.md` (tiers, budgets, decay) | `src/memory.ts` constants + the file headers |
 | `origin-scoping.md` | out of scope (Slack), `origin` field preserved |

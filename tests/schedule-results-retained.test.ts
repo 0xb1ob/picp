@@ -1,0 +1,73 @@
+/**
+ * Retained verbatim from tests/schedule-results.test.ts (P13c): ScheduleResults.reconcile with one run's editRun
+ * refused, and resultOwner with a role-admitted S1 against a stale expanded: marker. No parent induces either.
+ */
+import assert from "node:assert/strict";
+import { join } from "node:path";
+import { test } from "node:test";
+import { LAYOUT } from "../src/contracts.ts";
+import type { IntakeResult } from "../src/intake.ts";
+import { OperatorAnswers } from "../src/operator-answers.ts";
+import { type ResultFacts, type ResultLedgerJob, resultOwner, ScheduleResults } from "../src/schedule-results.ts";
+import { ScheduleRunStore } from "../src/schedule-runs.ts";
+import { readAnswers } from "../src/viewer/control-files.ts";
+import { policyFromLegacy, type SchedulePolicy } from "../src/viewer/schedule-policy.ts";
+import type { ScheduleRun } from "../src/viewer/schedule-run-core.ts";
+import { createScratchHome } from "./harness/index.ts";
+
+const at = "2026-07-01T06:00:00Z";
+const now = () => new Date("2026-07-01T07:00:00Z");
+function policy(job: Partial<{ kind: string; delivery: string; skill: string; description: string }> = {}): SchedulePolicy {
+	return policyFromLegacy({ id: "sch-123456", name: "Nightly report", project: "demo", mandate_id: "md-123456", enabled: true, created_at: at, trigger: { type: "manual" }, job: { title: "Nightly report", kind: "research", delivery: "answer", ...job } as never }, {
+		seed_mandate_id: "md-123456", channel: "operator_chat", objective: "Nightly report", expiry_hours: 1, spend_usd: 10, spend_tokens: 1000, job_cap: 6,
+		allowed_actions: ["plan", "review"], ask_on: ["merge", "risk:high"], approval: { operator_quote: "Run the nightly report", decided_by: "operator-quote", approved_at: at },
+	});
+}
+const member = (job_id: string) => ({ job_id, role: null, admitted_at: at });
+async function bench(t: { after: (fn: () => void) => void }, job: Parameters<typeof policy>[0] = {}, runId = "run-20260701060000-abcdef") {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const runs = new ScheduleRunStore({ home: home.path, active: true });
+	const run: ScheduleRun = { schema_version: 1, id: runId, schedule_id: "sch-123456", policy_revision: 1, policy: policy(job), trigger: { via: "slot", at }, anchor_job_id: null, members: [], phase: "accepted", outcome: null, started_at: at, deadline_at: "2026-07-01T08:00:00Z", risk_preapproved: [], authority_log: [], cap_notices: [] };
+	await runs.createRun(run);
+	await runs.attachAnchor(run.id, member("cp-anchor"));
+	const stateDir = join(home.path, LAYOUT.state);
+	const jobs: ResultLedgerJob[] = [{ id: "cp-anchor", status: "in_progress" }];
+	const facts = new Map<string, ResultFacts>();
+	const make = (answers: Pick<OperatorAnswers, "postScheduleResult"> = new OperatorAnswers(stateDir, { now }), clock = now) =>
+		new ScheduleResults({ runs, answers, ledgerJobs: () => jobs, facts: (id) => facts.get(id), now: clock, log: () => {} });
+	return { home, runs, run, stateDir, jobs, facts, make, cards: () => readAnswers(stateDir).answers.filter((item) => item.source) };
+}
+const accepted = (job_id: string, extra: Partial<IntakeResult> = {}) =>
+	({ job_id, accepted: true, already: false, delivery: "answer", status: "done", summary: "Nightly report: 3 findings", generation: 1, ...extra }) as IntakeResult;
+
+test("one run whose result edit fails does not block the next run's card (PR1 review medium)", async (t) => {
+	const b = await bench(t);
+	await b.runs.closeRun(b.run.id, "completed", "2026-07-01T06:30:00Z");
+	const next: ScheduleRun = { ...structuredClone(b.run), id: "run-20260701061000-fedcba", anchor_job_id: null, members: [] };
+	await b.runs.createRun(next);
+	await b.runs.closeRun(next.id, "partial", "2026-07-01T06:40:00Z");
+	// The first run's edit is refused (a validation failure); the reconcile must still queue and post the second card.
+	const runs = { get active() { return b.runs.active; }, runs: () => b.runs.runs(), run: (id: string) => b.runs.run(id), runOfJob: (id: string) => b.runs.runOfJob(id),
+		editRun: (id: string, fn: (run: ScheduleRun) => void) => { if (id === b.run.id) throw new Error("invalid run"); return b.runs.editRun(id, fn); } };
+	const logged: string[] = [];
+	new ScheduleResults({ runs: runs as unknown as ScheduleRunStore, answers: new OperatorAnswers(b.stateDir, { now }), ledgerJobs: () => b.jobs, facts: () => undefined, now, log: (line) => logged.push(line) }).sync();
+	assert.deepEqual(b.cards().map((card) => card.source?.run_id), [next.id]);
+	assert.ok(logged.some((line) => line.includes(b.run.id) && line.includes("invalid run")), "the bad run is named");
+});
+
+// PR3 review medium: a runner-driven run admits S1 by role and its anchor's marker may lag or name an older S1;
+// the admitted role wins, and a marker naming a non-member never makes a stranger the owner.
+test("resultOwner picks the S1 admitted by role over the expanded: marker; a marker naming a non-member owns nothing", async (t) => {
+	const b = await bench(t, { skill: "cp-org-pr-review", delivery: "local", description: "org: example-org" });
+	await b.runs.admitMember(b.run.id, { job_id: "cp-l1", role: "L1", admitted_at: at });
+	await b.runs.admitMember(b.run.id, { job_id: "cp-s1", role: "S1", admitted_at: at });
+	b.jobs[0]!.comments = [{ text: "expanded: L1 cp-l1, S1 cp-stale" }];
+	assert.equal(resultOwner(b.runs.run(b.run.id)!, b.jobs), "cp-s1");
+	const legacy = { ...b.runs.run(b.run.id)!, members: [member("cp-anchor"), member("cp-l1")] };
+	assert.equal(resultOwner(legacy, b.jobs), null, "cp-stale is not a member");
+	assert.equal(resultOwner(legacy, [{ id: "cp-anchor", status: "in_progress", comments: [{ text: "expanded: S1 cp-l1" }] }]), "cp-l1");
+	const results = b.make();
+	results.accepted(accepted("cp-l1")); results.accepted(accepted("cp-s1"));
+	assert.deepEqual(b.cards().map((card) => card.job_id), ["cp-s1"]);
+});

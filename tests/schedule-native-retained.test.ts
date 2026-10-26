@@ -1,19 +1,19 @@
+/**
+ * Retained verbatim from tests/schedule-native.test.ts (P13c): Scheduler.add's rollback after a failed policy write,
+ * scheduleRunVerdict on non-dispatch actions, startScheduledPipeline's crash replay and a full run's ship refusal.
+ */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { THINKING_LEVELS } from "../src/contracts.ts";
 import { keepsHead } from "../src/dispatch-queue.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { MandateStore } from "../src/mandate.ts";
 import { loadMandateDefaults } from "../src/mandate-defaults.ts";
 import { PipelineRunner, type PipelineOptions } from "../src/pipeline.ts";
-import { selectReviewerModel } from "../src/reviewer-model.ts";
 import { ScheduleAuthorityError, scheduleRunVerdict } from "../src/schedule-authority.ts";
-import { resolveExecution, startScheduledPipeline, withRunExecution } from "../src/schedule-native.ts";
+import { startScheduledPipeline } from "../src/schedule-native.ts";
 import { openScheduleRunStore } from "../src/schedule-runs.ts";
 import { Scheduler } from "../src/scheduler.ts";
-import { isNativePolicy, RUN_THINKING_LEVELS, schedulePolicyErrors, type NativeSchedulePolicy } from "../src/viewer/schedule-policy.ts";
-import { RUN_OPTION_THINKING, runOverrides } from "../viewer-app/schedule-control.ts";
-import { scheduleControlFieldError } from "../src/viewer/control-files.ts";
+import { isNativePolicy, schedulePolicyErrors, type NativeSchedulePolicy } from "../src/viewer/schedule-policy.ts";
 import { createScratchHome, createScratchLedger } from "./harness/index.ts";
 
 const ACTION = { saved_by: "operator-quote" as const, provenance: { channel: "cp_schedule" as const, tool_call_id: "call-add", quote_sha: "abcdef123456" } };
@@ -51,29 +51,6 @@ test("native add saves an activated native revision 1 and writes no grant", asyn
 	assert.ok((await b.scheduler.add({ name: "broken", project: "demo", native: { action: ACTION, limits: {} }, manual: true, title: "x", kind: "research", delivery: "answer" })).id);
 });
 
-test("native run_now needs no quote, freezes overrides, replays a start key and refuses stale or invalid input first", async (t) => {
-	const b = await bench(t);
-	const first = await b.scheduler.fireNow(b.schedule.id, { via: "cp_schedule", tool_call_id: "call-1" });
-	assert.equal(first.outcome, "fired"); assert.equal(first.native, true);
-	const run = b.runs.run(first.run_id!)!;
-	assert.equal(run.start_key, "cp_schedule:call-1");
-	assert.deepEqual(run.execution, { requested: {}, effective: { parallelism: 2 } });
-	assert.deepEqual(b.mandates.list(), [], "a native start writes no grant");
-	// A different request while the run is open is refused; the same request again (a restart) returns the original run.
-	const busy = await b.scheduler.fireNow(b.schedule.id, { via: "dashboard", request_id: "sc-1", peer: null });
-	assert.equal(busy?.outcome, "skipped"); assert.match(busy?.reason ?? "", /already_running/);
-	const replay = await b.scheduler.fireNow(b.schedule.id, { via: "cp_schedule", tool_call_id: "call-1" });
-	assert.equal(replay.replayed, true); assert.equal(replay.run_id, run.id);
-	await b.runs.closeRun(run.id, "completed", b.now.toISOString().replace(/\.\d{3}Z$/, "Z"));
-	await assert.rejects(b.scheduler.fireNow(b.schedule.id, { via: "cp_schedule", tool_call_id: "call-2", revision: 9 }), /Schedule changed/);
-	const invalid = await b.scheduler.fireNow(b.schedule.id, { via: "cp_schedule", tool_call_id: "call-3", overrides: { parallelism: 99 } });
-	assert.equal(invalid?.outcome, "skipped"); assert.match(invalid?.reason ?? "", /parallelism/);
-	assert.equal(b.runs.runs().length, 1, "refused before any run is created");
-	const second = await b.scheduler.fireNow(b.schedule.id, { via: "dashboard", request_id: "sc-2", peer: null, revision: 1, overrides: { model: "mock/fast", thinking: "low", parallelism: 1 } });
-	assert.deepEqual(b.runs.run(second.run_id!)!.execution, { requested: { model: "mock/fast", thinking: "low", parallelism: 1 }, effective: { model: "mock/fast", thinking: "low", parallelism: 1 } });
-	assert.equal(b.runs.activePolicy(b.schedule.id)?.revision, 1, "overrides never edit the saved policy");
-});
-
 test("native authority: risk:high runs without an ask; undeclared kind, report-only implement, merge and hard stops refuse", async (t) => {
 	const b = await bench(t);
 	const fired = await b.scheduler.fireNow(b.schedule.id, { via: "cp_schedule", tool_call_id: "call-1" });
@@ -91,19 +68,6 @@ test("native authority: risk:high runs without an ask; undeclared kind, report-o
 	await b.runs.admitMember(fired.run_id!, { job_id: ship.id, role: "ship", admitted_at: ship.created_at });
 	assert.equal(code(() => scheduleRunVerdict(ctx, "dispatch", { jobId: ship.id, project: "demo", kind: "ship" }, [])), "kind_not_declared");
 	assert.equal(keepsHead(new ScheduleAuthorityError("parallelism_full", "full")), true, "a full run keeps the dispatch queue head");
-});
-
-test("run execution reaches dispatch and the reviewer; a script recipe refuses model overrides", async (t) => {
-	const b = await bench(t);
-	const fired = await b.scheduler.fireNow(b.schedule.id, { via: "cp_schedule", tool_call_id: "call-1", overrides: { model: "mock/run", thinking: "high" } });
-	const request = withRunExecution({ jobId: fired.job_id!, model: "mock/asked", task: "x" }, b.runs, "research");
-	assert.equal(request.model, "mock/run"); assert.equal((request as { thinking?: string }).thinking, "high");
-	const record = { job_id: fired.job_id!, project: "demo", kind: "research" } as Parameters<typeof selectReviewerModel>[0]["record"];
-	assert.deepEqual(selectReviewerModel({ record, mandates: b.mandates }), { model: "mock/run", source: "schedule-run", run_id: fired.run_id, thinking: "high" });
-	// The frozen run model beats an explicit reviewer model, as dispatch's withRunExecution does for the worker.
-	assert.deepEqual(selectReviewerModel({ model: "mock/explicit", record, mandates: b.mandates }), { model: "mock/run", source: "schedule-run", run_id: fired.run_id, thinking: "high" });
-	const policy = { ...structuredClone(b.runs.activePolicy(b.schedule.id) as NativeSchedulePolicy), recipe: { ...b.schedule.job, skill: null, script_path: "scripts/x.sh" } };
-	assert.match(String((resolveExecution(policy, { model: "mock/x" }) as { refusal?: string }).refusal), /script/);
 });
 
 test("a native pipeline starts in code: one bound ship, labelled and admitted, never duplicated on replay", async (t) => {
@@ -151,15 +115,4 @@ test("a native pipeline needs child_jobs >= 2, and a full run refuses its ship b
 	const starter = { start: runner.start.bind(runner), started: (id: string) => runner.store.get(id) !== undefined };
 	await assert.rejects(startScheduledPipeline(starter, b.runs, b.schedule, fired), /cannot admit the ship/);
 	assert.deepEqual((await b.ledger.list({ all: true })).filter((job) => job.title.startsWith("ship:")), [], "no ship created");
-});
-
-test("run thinking levels mirror the routing contract and the dashboard's run options", () => {
-	assert.deepEqual([...RUN_THINKING_LEVELS], [...THINKING_LEVELS]);
-	assert.deepEqual([...RUN_OPTION_THINKING], [...THINKING_LEVELS]);
-	assert.equal(runOverrides(" ", "", ""), undefined);
-	assert.deepEqual(runOverrides("mock/m", "low", "3"), { model: "mock/m", thinking: "low", parallelism: 3 });
-	assert.equal(scheduleControlFieldError({ op: "run_now", overrides: { model: "mock/m", parallelism: 2 } }), undefined);
-	assert.match(scheduleControlFieldError({ op: "enable", overrides: { parallelism: 2 } }) ?? "", /only for run_now/);
-	assert.match(scheduleControlFieldError({ op: "run_now", overrides: { model: "no-provider" } }) ?? "", /provider\/model/);
-	assert.match(scheduleControlFieldError({ op: "run_now", overrides: { thinking: "huge" } }) ?? "", /invalid run overrides/);
 });
