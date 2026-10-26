@@ -24,6 +24,7 @@ import {
 	COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MOCK_PROVIDER_ID,
 	MockProvider, type MockToolCall, type PiChild, type RpcRecord, type ScriptStep, startPiChild, waitFor,
 } from "../harness/index.ts";
+import { startViewer } from "../harness/dashboard.ts";
 
 type End = RpcRecord & { toolCallId: string; isError?: boolean; result?: { content?: Array<{ text?: string }> } };
 const DAY = 86_400_000;
@@ -453,10 +454,10 @@ test("P13d migrations fail closed at parent start: a home with no schedules writ
 	assert.equal(existsSync(join(migrations, SCHEDULE_POLICY_IMPORT_MARKER)), false);
 	// KD-P13d-tick-after-failed-import: the session-start return does not stop the tick, whose native sweep then converts
 	// the schedule. Its own snapshot proves the failed import rewrote nothing first.
+	await waitFor(() => told(damaged), (text) => /native schedule migration \(1 migrated/.test(text), { timeoutMs: 15_000, what: "known defect: a tick runs after the failed import" });
 	const native = JSON.parse(readFileSync(join(migrations, "2027-01-schedule-native.backup.json"), "utf8")) as Backup[];
 	assert.deepEqual([bytes(native.find((r) => r.source === h.schedulesFile)!.backup!), bytes(native.find((r) => r.source === seeds.file(seed.id))!.backup!)], original.slice(0, 2));
 	assert.deepEqual(h.runs().policyRecord("sch-ddddd1")?.revisions.map((r) => [r.revision, isNativePolicy(r)]), [[1, true]], "no import revision was saved");
-	assert.match(told(damaged), /native schedule migration \(1 migrated/, "known defect: a tick runs after the failed import");
 });
 
 test("P13d legacy run authority through cp_dispatch: a draining legacy run asks risk:high once under its own attribution, an operator start pre-approves its members but never a hard stop, exclusions and non-members refuse, and no grant is spent", { timeout: 180_000 }, async (t) => {
@@ -466,38 +467,66 @@ test("P13d legacy run authority through cp_dispatch: a draining legacy run asks 
 	const grant = h.mandates().issue({ projects: ["demo"], objective: "Other work", expiry: isoTimestamp(new Date(Date.now() + DAY)), spend_cap: { usd: 20, tokens: 2000 }, job_cap: 4,
 		allowed_actions: ["implement", "review", "repair"], ask_on: ["merge", "risk:high"] });
 	const grantBytes = bytes(h.mandates().file(grant.id));
+	const approval = { operator_quote: "Run nightly work", decided_by: "operator-quote", scope: "mandate_jobs", granted_at: at } as const;
+	type Member = { title: string; description?: string; kind?: "research" };
+	type Shape = { over?: Partial<LegacySchedulePolicy>; run?: Partial<ScheduleRun>; high?: boolean; orgReview?: boolean };
 	/** A running legacy run of schedule `sid`, as a pre-native fire left it, with ledger jobs admitted as members. */
-	const legacyRun = async (sid: string, trigger: ScheduleRun["trigger"], members: Array<{ title: string; description?: string }>, over: Partial<LegacySchedulePolicy> = {}) => {
-		const policy = { ...policyFromLegacy({ id: sid, name: sid, project: "demo", mandate_id: "md-123456", enabled: true, created_at: at, trigger: { type: "manual" }, job: { title: sid, kind: "ship", delivery: "pr" } }, {
+	const legacyRun = async (sid: string, trigger: ScheduleRun["trigger"], members: Member[], { over = {}, run: extra = {}, high = true, orgReview = false }: Shape = {}) => {
+		const job: Schedule["job"] = orgReview ? { title: sid, kind: "research", delivery: "local", skill: "cp-org-pr-review", description: "org: demo\nmax_reviewers: 1" } : { title: sid, kind: "ship", delivery: "pr" };
+		const base = policyFromLegacy({ id: sid, name: sid, project: "demo", mandate_id: "md-123456", enabled: true, created_at: at, trigger: { type: "manual" }, job }, {
 			seed_mandate_id: "md-123456", channel: "operator_chat", objective: "Nightly work", expiry_hours: 1, spend_usd: 10, spend_tokens: 1000, job_cap: 8,
-			allowed_actions: ["implement", "review", "repair"], ask_on: ["merge", "risk:high"], approval: { operator_quote: "Run nightly work", decided_by: "operator-quote", approved_at: at } }), ...over };
+			allowed_actions: ["implement", "review", "repair"], ask_on: ["merge", "risk:high"], approval: { operator_quote: "Run nightly work", decided_by: "operator-quote", approved_at: at } },
+			orgReview ? { id: "md-123456", schedule_grant: true, risk_preapproval: approval } : undefined) as LegacySchedulePolicy;
+		const policy = { ...base, ...over };
 		await runs.savePolicyRevision(policy);
-		const jobs = await Promise.all(members.map((m) => h.ledger.create({ ...m, project: "demo", kind: "ship", delivery: "pr", labels: [`schedule:${sid}`, ...(over.exclusions ? [] : ["risk:high"])] })));
+		const jobs = await Promise.all(members.map(({ kind, ...m }) => h.ledger.create({ ...m, project: "demo", kind: kind ?? "ship", delivery: "pr", labels: [`schedule:${sid}`, ...(high ? ["risk:high"] : [])] })));
 		const run = { schema_version: 1, id: `run-20261010030655-${sid.slice(4)}`, schedule_id: sid, policy_revision: 1, policy, trigger, anchor_job_id: jobs[0]!.id,
 			members: jobs.map((job) => ({ job_id: job.id, role: null, admitted_at: at })), phase: "running", outcome: null, started_at: at,
 			deadline_at: isoTimestamp(new Date(Date.now() + 3_600_000)), risk_preapproved: [], authority_log: [], cap_notices: [],
-			...(trigger.via === "slot" ? {} : { risk_preapproval: { operator_quote: "Run nightly work", decided_by: "operator-quote", scope: "mandate_jobs", granted_at: at } }) } as ScheduleRun;
+			...(trigger.via === "slot" ? {} : { risk_preapproval: approval }), ...extra } as ScheduleRun;
 		await runs.createRun(run);
 		return { run, jobs };
 	};
+	const pause = () => new Promise((done) => setTimeout(done, 1_100)); // ledger stamps are whole seconds
 	const timer = await legacyRun("sch-a00001", { via: "slot", at, slot: at, missed: false }, [{ title: "timer member" }]);
-	await runs.activatePolicy("sch-a00001", 1, at, { channel: "dashboard", request_id: "sc-test" });
+	// Created before activation, a schedule-labelled job stays under the mandates; one created after must be a member.
+	const legacy = await h.ledger.create({ title: "legacy job", project: "demo", kind: "ship", delivery: "pr", labels: ["schedule:sch-a00001"] });
+	await pause();
+	await runs.activatePolicy("sch-a00001", 1, isoTimestamp(), { channel: "dashboard", request_id: "sc-test" });
 	const outsider = await h.ledger.create({ title: "not admitted", project: "demo", kind: "ship", delivery: "pr", labels: ["schedule:sch-a00001"] });
-	const started = await legacyRun("sch-a00002", { via: "dashboard", at, slot: at, missed: false, request_id: click }, [{ title: "operator member" }, { title: "dangerous", description: "force push the branch" }]);
-	const excluded = await legacyRun("sch-a00003", { via: "slot", at }, [{ title: "excluded member" }], { exclusions: { job_kinds: ["ship"] } });
+	const started = await legacyRun("sch-a00002", { via: "dashboard", at, slot: at, missed: false, request_id: click }, [{ title: "operator member" }, { title: "dangerous", description: "force push the branch" }, { title: "operator second" }]);
+	const excluded = await legacyRun("sch-a00003", { via: "slot", at }, [{ title: "excluded member" }], { over: { exclusions: { job_kinds: ["ship"] } }, high: false });
 	const called = await legacyRun("sch-a00004", { via: "cp_schedule", at, slot: at, missed: false, tool_call_id: "call-1", quote_sha: "0123456789ab" }, [{ title: "called member" }]);
-	const dispatch = (id: string, jobId: string, risk = "high") => ({ id, name: "cp_dispatch", args: { job_id: jobId, task: "Bump x.", model: worker, risk, queue: false, when_ready: false } });
-	const [member, dangerous] = started.jobs;
+	const pathed = await legacyRun("sch-a00005", { via: "slot", at }, [{ title: "path member", description: "Touch fixtures/legacy only." }], { over: { exclusions: { paths: ["fixtures/legacy"] } }, high: false });
+	const subsystem = await legacyRun("sch-a00006", { via: "slot", at }, [{ title: "subsystem member", description: "Edit the docs-site pages." }], { over: { exclusions: { subsystems: ["docs-site"] } }, high: false });
+	const late = await legacyRun("sch-a00007", { via: "slot", at }, [{ title: "late member" }], { run: { deadline_at: isoTimestamp(new Date(Date.now() - 1000)) }, high: false });
+	const research = await legacyRun("sch-a00008", { via: "slot", at }, [{ title: "planned research", kind: "research" }, { title: "written research", kind: "research" }], { over: { allowed_actions: ["implement", "review", "repair", "plan"] } });
+	const orgClick = await legacyRun("sch-a00009", { via: "dashboard", at, request_id: "sc-org-click" }, [{ title: "org member" }], { orgReview: true });
+	const orgCalled = await legacyRun("sch-a0000a", { via: "cp_schedule", at, tool_call_id: "call-2", quote_sha: "0123456789ab" }, [{ title: "org called" }], { orgReview: true });
+	const dispatch = (id: string, jobId: string, risk = "high", extra: Record<string, unknown> = {}) => ({ id, name: "cp_dispatch", args: { job_id: jobId, task: "Bump x.", model: worker, risk, queue: false, when_ready: false, ...extra } });
+	const [member, dangerous, second] = started.jobs;
+	mkdirSync(join(h.home, paths.artifactDir(member!.id)), { recursive: true });
+	writeFileSync(join(h.home, paths.artifactFile(member!.id)), "# Goal\nbump x\n");
 	const parent = await h.parent("P13d: dispatch the run members.", [
 		{ kind: "tool_calls", calls: [dispatch("timer", timer.jobs[0]!.id)] },
 		{ kind: "tool_calls", calls: [dispatch("timer-again", timer.jobs[0]!.id)] },
 		{ kind: "tool_calls", calls: [dispatch("operator", member!.id)] },
+		{ kind: "tool_calls", calls: [dispatch("operator-second", second!.id)] },
 		{ kind: "tool_calls", calls: [dispatch("dangerous", dangerous!.id)] },
 		{ kind: "tool_calls", calls: [dispatch("called", called.jobs[0]!.id)] },
 		{ kind: "tool_calls", calls: [dispatch("excluded", excluded.jobs[0]!.id, "low")] },
 		{ kind: "tool_calls", calls: [dispatch("outsider", outsider.id)] },
+		{ kind: "tool_calls", calls: [dispatch("pathed", pathed.jobs[0]!.id, "low")] },
+		{ kind: "tool_calls", calls: [dispatch("subsystem", subsystem.jobs[0]!.id, "low")] },
+		{ kind: "tool_calls", calls: [dispatch("late", late.jobs[0]!.id, "low")] },
+		{ kind: "tool_calls", calls: [dispatch("planned", research.jobs[0]!.id, "high", { profile: "planner" })] },
+		{ kind: "tool_calls", calls: [dispatch("written", research.jobs[1]!.id, "high", { profile: "implementer" })] },
+		{ kind: "tool_calls", calls: [dispatch("org-click", orgClick.jobs[0]!.id)] },
+		{ kind: "tool_calls", calls: [dispatch("org-called", orgCalled.jobs[0]!.id)] },
+		{ kind: "tool_calls", calls: [{ id: "gate", name: "cp_gate", args: { job_id: member!.id, model: worker } }] },
 	]);
 	const escalations = (jobId: string) => new EscalationStore({ home: h.home }).list({ jobId, kind: "risk_high_irreversible" });
+	const codes = (run: ScheduleRun) => runs.run(run.id)!.authority_log.map((r) => [r.use, r.job_id, r.code ?? r.decision]);
 
 	// A timer run asks risk:high under the run's attribution, once across two dispatches.
 	checkCall(parent, "timer", "refused", new RegExp(`schedule-run ${timer.run.id}: risk:high requires operator text`));
@@ -520,10 +549,95 @@ test("P13d legacy run authority through cp_dispatch: a draining legacy run asks 
 	assert.deepEqual(runs.run(called.run.id)!.risk_preapproved.map((r) => r.evidence[0]), ["fire run_now call-1"]);
 	assert.ok(readFileSync(join(h.home, paths.briefFile(called.jobs[0]!.id)), "utf8").includes(`Started by the operator via cp_schedule run_now (call call-1, ${at})`));
 
-	// Exclusions and non-members refuse with their codes in the run's audit; the operator-chat grant is never touched.
+	// A pre-approved member's review passes with no ask and is audited as a permit, not as a pre-approval.
+	checkCall(parent, "gate", "ok", /./);
+	assert.deepEqual(codes(started.run).filter((r) => r[1] === member!.id), [["dispatch", member!.id, "permit"], ["review", member!.id, "permit"]]);
+	assert.deepEqual([escalations(member!.id), runs.run(started.run.id)!.risk_preapproved.length], [[], 1], "a review is no new ask and no new pre-approval");
+
+	// Read-only planning in a run passes risk:high with no ask; a writing profile on the same kind still asks.
+	checkCall(parent, "planned", "ok", /dispatched/);
+	assert.deepEqual(escalations(research.jobs[0]!.id), [], "read-only planning raises no ask");
+	assert.match(checkCall(parent, "written", "refused", /./), new RegExp(`${research.jobs[1]!.id}: schedule-run ${research.run.id}: risk:high requires operator text`));
+
+	// Org review keeps its dashboard-only clearance: a dashboard start dispatches, a cp_schedule start still asks.
+	checkCall(parent, "org-click", "ok", /dispatched/);
+	assert.deepEqual(runs.run(orgClick.run.id)!.risk_preapproved.map((r) => r.evidence[0]), ["fire run_now sc-org-click"]);
+	checkCall(parent, "org-called", "refused", new RegExp(`${orgCalled.jobs[0]!.id}: schedule-run ${orgCalled.run.id}: risk:high requires operator text`));
+	assert.ok(escalations(orgCalled.jobs[0]!.id)[0]?.question.includes(`Started by the operator via cp_schedule run_now (call call-2, ${at})`));
+
+	// Exclusions, the deadline, parallelism and non-members refuse with their codes in the run's audit.
 	checkCall(parent, "excluded", "refused", /ship is excluded/);
 	assert.deepEqual(runs.run(excluded.run.id)!.authority_log.map((r) => [r.use, r.code]), [["dispatch", "kind_excluded"]]);
+	checkCall(parent, "pathed", "refused", /path fixtures\/legacy is excluded/);
+	checkCall(parent, "subsystem", "refused", /subsystem docs-site is excluded/);
+	checkCall(parent, "late", "refused", /deadline passed; only same-kind continuation remains/);
+	assert.deepEqual([pathed, subsystem, late].map(({ run }) => codes(run)), [[["dispatch", pathed.jobs[0]!.id, "path_excluded"]], [["dispatch", subsystem.jobs[0]!.id, "subsystem_excluded"]], [["dispatch", late.jobs[0]!.id, "deadline_passed"]]]);
+	checkCall(parent, "operator-second", "refused", new RegExp(`${second!.id}: schedule-run ${started.run.id}: run parallelism is full`));
+	assert.deepEqual(codes(started.run).filter((r) => r[1] !== member!.id), [["dispatch", second!.id, "parallelism_full"], ["dispatch", dangerous!.id, "hard_stop"]]);
+	assert.deepEqual(codes(timer.run), [["dispatch", timer.jobs[0]!.id, "risk_high"], ["dispatch", timer.jobs[0]!.id, "risk_high"], ["dispatch", outsider.id, "not_member"]]);
 	assert.match(checkCall(parent, "outsider", "refused", /./), new RegExp(`${outsider.id}: activated schedule sch-a00001 requires run membership`));
-	assert.deepEqual(audited.authority_log.filter((r) => r.decision === "permit").map((r) => [r.use, r.job_id]), [["dispatch", member!.id]]);
 	assert.deepEqual(bytes(h.mandates().file(grant.id)), grantBytes, "no grant spent or mutated");
+
+	// A second process: a pre-activation job dispatches under the grant, then an emptied or unreadable policies file
+	// refuses the run's member and a half-admitted job. The args callbacks edit the file just before their call.
+	await h.closeParents();
+	const policiesFile = runs.policiesFile;
+	let grantBefore: Buffer | undefined;
+	const empty = () => { grantBefore = bytes(h.mandates().file(grant.id)); writeFileSync(policiesFile, JSON.stringify({ schema_version: 1, policies: [] })); };
+	const later = await h.parent("P13d: dispatch the rest.", [
+		{ kind: "tool_calls", calls: [dispatch("legacy", legacy.id, "low")] },
+		{ kind: "tool_calls", calls: [{ ...dispatch("missing", outsider.id), args: () => (empty(), dispatch("missing", outsider.id).args) }] },
+		{ kind: "tool_calls", calls: [dispatch("missing-member", timer.jobs[0]!.id)] },
+		{ kind: "tool_calls", calls: [{ ...dispatch("corrupt", timer.jobs[0]!.id), args: () => (writeFileSync(policiesFile, "{"), dispatch("corrupt", timer.jobs[0]!.id).args) }] },
+	]);
+	checkCall(later, "legacy", "ok", /dispatched/);
+	assert.deepEqual(codes(timer.run).filter((r) => r[1] === legacy.id), [], "a pre-activation job dispatches under the grant, not the run");
+	assert.match(checkCall(later, "missing", "refused", /./), new RegExp(`${timer.run.id}: policy revision missing`));
+	assert.deepEqual([runs.runOfJob(outsider.id), bytes(h.mandates().file(grant.id))], [undefined, grantBefore], "a refused half-admitted job: not admitted, no grant touched");
+	assert.match(checkCall(later, "missing-member", "refused", /./), new RegExp(`${timer.run.id}: policy revision missing`));
+	assert.match(checkCall(later, "corrupt", "refused", /./), /schedule policy unreadable/);
+});
+
+test("P13d legacy run reads: cp_next keeps a run whose members are all blocked under that run and asks once for a dropped dependency, and cp-view's Decided list keeps a run's basis", { timeout: 180_000 }, async (t) => {
+	const h = await schedulesHome(t);
+	const runs = h.runs(), at = isoTimestamp(new Date(Date.now() - 600_000));
+	h.mandates().issue({ projects: ["demo"], objective: "Other work", expiry: isoTimestamp(new Date(Date.now() + DAY)), spend_cap: { usd: 20, tokens: 2000 }, job_cap: 4,
+		allowed_actions: ["implement", "review", "repair"], ask_on: ["merge", "risk:high"] });
+	const policy = policyFromLegacy({ id: "sch-b00001", name: "Nightly work", project: "demo", mandate_id: "md-123456", enabled: true, created_at: at, trigger: { type: "manual" }, job: { title: "Nightly work", kind: "ship", delivery: "pr" } }, {
+		seed_mandate_id: "md-123456", channel: "operator_chat", objective: "Nightly work", expiry_hours: 1, spend_usd: 10, spend_tokens: 1000, job_cap: 3,
+		allowed_actions: ["implement", "review", "repair"], ask_on: ["merge", "risk:high"], approval: { operator_quote: "Run nightly work", decided_by: "operator-quote", approved_at: at } });
+	await runs.savePolicyRevision(policy);
+	const [reader, synthesis] = await Promise.all(["run reader", "run synthesis"].map((title) => h.ledger.create({ title, project: "demo", kind: "ship", delivery: "pr", labels: ["schedule:sch-b00001"] })));
+	const run = { schema_version: 1, id: "run-20261010030655-b00001", schedule_id: "sch-b00001", policy_revision: 1, policy, trigger: { via: "slot", at }, anchor_job_id: reader!.id,
+		members: [reader!, synthesis!].map((job) => ({ job_id: job.id, role: null, admitted_at: at })), phase: "running", outcome: null, started_at: at,
+		deadline_at: isoTimestamp(new Date(Date.now() + 3_600_000)), risk_preapproved: [], authority_log: [], cap_notices: [] } as ScheduleRun;
+	await runs.createRun(run);
+	const job = (id: string, args: Record<string, unknown>): MockToolCall => ({ id, name: "cp_job", args });
+	const parent = await h.parent("P13d: what is next for the run?", [
+		{ kind: "tool_calls", calls: [job("claim", { action: "claim", job_id: reader!.id })] },
+		{ kind: "tool_calls", calls: [job("dep", { action: "dep_add", job_id: synthesis!.id, blocker_id: reader!.id })] },
+		{ kind: "tool_calls", calls: [{ id: "next", name: "cp_next", args: { project: "demo" } }] },
+		{ kind: "tool_calls", calls: [job("drop", { action: "drop", job_id: reader!.id, reason: "source gone" })] },
+		{ kind: "tool_calls", calls: [{ id: "next-again", name: "cp_next", args: { project: "demo", full: true } }] },
+	]);
+	checkCall(parent, "dep", "ok", new RegExp(`${synthesis!.id} is now blocked by ${reader!.id}`));
+	const next = checkCall(parent, "next", "ok", /./);
+	assert.match(next, new RegExp(`run ${run.id}: ${synthesis!.id}: waiting on ${reader!.id} \\(run ${run.id}\\)`));
+	assert.doesNotMatch(next, /no active grant covers/);
+	checkCall(parent, "next-again", "ok", /./);
+	const store = new EscalationStore({ home: h.home });
+	const asked = store.open().filter((item) => item.dropped_dependency?.job_id === synthesis!.id);
+	assert.equal(asked.length, 1, "a run member's dropped dependency asks once, without a grant");
+	assert.match(asked[0]!.mandate_clause ?? "", new RegExp(`schedule run ${run.id}`));
+
+	// A run-attributed answer as the A1 decide path stores it; the dashboard reads it from disk.
+	await h.closeParents();
+	const file = join(h.home, LAYOUT.escalationsFile);
+	const book = JSON.parse(readFileSync(file, "utf8")) as { items: unknown[] };
+	book.items.push({ id: "es-run", status: "answered", question: "Approve work", created_at: at, answered_at: isoTimestamp(), answered_by: `schedule-run:${run.id}`, answer: "approve",
+		job_ids: [synthesis!.id], basis: { run: run.id, clause: `schedule-run ${run.id} (policy rev 1)` } });
+	writeFileSync(file, JSON.stringify(book));
+	const view = await startViewer(t, { home: h.home, requireTailnet: false });
+	const decided = (await view.get("/api/decided")).body.items as Array<{ id: string; basis: unknown; source: string }>;
+	assert.deepEqual(decided.filter((item) => item.id === "es-run").map((item) => [item.basis, item.source]), [[{ kind: "run", ref: run.id }, "schedule-run"]]);
 });

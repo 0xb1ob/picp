@@ -1,6 +1,7 @@
 /**
- * Retained from tests/schedule-authority.test.ts (P13d): the direct reads of scheduleRunVerdict, runAuthority,
- * observeRunUsage, cpNext's run view, overview decisions and the run DecisionBasis; 12-22 pins cp_dispatch end to end.
+ * Retained from tests/schedule-authority.test.ts (P13d): direct scheduleRunVerdict/assertPermitted calls with
+ * injected usage, flags or stubbed stores, observeRunUsage, cpNext's queued port and the run DecisionBasis;
+ * 12-22 and 12-23 pin the rest end to end.
  */
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -20,8 +21,7 @@ import { FleetStore } from "../src/fleet.ts";
 import { EscalationStore } from "../src/escalation.ts";
 import { cpNext, formatNext } from "../src/next.ts";
 import { EMPTY_USAGE } from "../src/contracts.ts";
-import { observeRunUsage, runAuthority, runRiskPreapproval } from "../src/schedule-authority.ts";
-import { decisions } from "../src/viewer/overview-decisions.ts";
+import { observeRunUsage, runRiskPreapproval } from "../src/schedule-authority.ts";
 import { inferredRiskGate } from "../src/risk-warning.ts";
 
 const now = isoTimestamp(), at = isoTimestamp(new Date(Date.now()-600_000));
@@ -92,38 +92,6 @@ test("run dispatch and advice never spend or mutate a pointer grant; caps refuse
  assert.deepEqual(runs.run(run.id)?.authority_log.map(r=>r.use),["dispatch","promote","review","repair"]);
 });
 
-test("run members fail closed for missing and corrupt policies",async(t)=>{
- const {home,runs,mandates} = await fixture();t.after(()=>home.cleanup());
- writeFileSync(runs.policiesFile,JSON.stringify({schema_version:1,policies:[]}));
- assert.throws(()=>scheduleRunVerdict(mandates.runContext(),"dispatch",{jobId:"cp-member",project:"demo"},[],now),e=>e instanceof ScheduleAuthorityError && e.code === "policy_missing");
- writeFileSync(runs.policiesFile,"{");
- assert.throws(()=>scheduleRunVerdict(mandates.runContext(),"dispatch",{jobId:"cp-member",project:"demo"},[],now),e=>e instanceof ScheduleAuthorityError && e.code === "policy_corrupt");
-});
-
-
-test("missing policy after interrupted child admission refuses without touching grants",async(t)=>{
- const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
- await runs.activatePolicy(run.schedule_id,1,at,{channel:"dashboard",request_id:"sc-test"});
- const ledger = createScratchLedger({home:home.path,knownProjects:["demo"]}).ledger;
- const job = await ledger.create({title:"interrupted child",project:"demo",kind:"ship",delivery:"pr",labels:[`schedule:${run.schedule_id}`]});
- const grantFile = `${home.path}/${LAYOUT.mandates}/${mandates.list()[0]!.id}.json`;
- const before = readFileSync(grantFile,"utf8");
- writeFileSync(runs.policiesFile,JSON.stringify({schema_version:1,policies:[]}));
- await assert.rejects(mandates.assertDispatchAllowed({jobId:job.id,project:"demo",kind:"ship"}),e=>e instanceof ScheduleAuthorityError && e.code==="policy_missing" && e.runId===run.id);
- assert.equal(readFileSync(grantFile,"utf8"),before);
- assert.equal(runs.runOfJob(job.id),undefined);
-});
-
-
-test("post-activation non-members fail closed; legacy jobs remain under mandates",async(t)=>{
- const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
- await runs.activatePolicy(run.schedule_id,1,at,{channel:"dashboard",request_id:"sc-test"});
- const ledger = createScratchLedger({home:home.path,knownProjects:["demo"]}).ledger;
- const job = await ledger.create({title:"not admitted",project:"demo",kind:"ship",delivery:"pr",labels:[`schedule:${run.schedule_id}`]});
- assert.throws(()=>mandates.selection("dispatch",{jobId:job.id,project:"demo",kind:"ship"}),e=>e instanceof ScheduleAuthorityError && e.code === "not_member");
- await assert.rejects(mandates.assertDispatchAllowed({jobId:job.id,project:"demo",kind:"ship"}),e=>e instanceof ScheduleAuthorityError && e.code === "not_member");
- assert.deepEqual(runAuthority({...mandates.runContext(),ledgerJob:()=>({...job,created_at:isoTimestamp(new Date(Date.parse(at)-1000))})},job.id),{source:"mandate"});
-});
 
 test("run queue advice and 80 percent/cap notices write only run notices",async(t)=>{
  const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
@@ -149,25 +117,6 @@ test("run queue advice and 80 percent/cap notices write only run notices",async(
  assert.equal(JSON.stringify(mandates.list()),before);
 });
 
-test("PR1: a run with only blocked members is shown under its run, never as uncovered by a grant",async(t)=>{
- const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
- const ledger = createScratchLedger({home:home.path,knownProjects:["demo"]}).ledger;
- const blocker = await ledger.create({title:"run reader",project:"demo",kind:"ship",delivery:"pr",labels:[`schedule:${run.schedule_id}`]});
- const dependent = await ledger.create({title:"run synthesis",project:"demo",kind:"ship",delivery:"pr",labels:[`schedule:${run.schedule_id}`]});
- await ledger.addDep(dependent.id,blocker.id);await ledger.claim(blocker.id,"worker");
- for (const job of [blocker,dependent]) await runs.admitMember(run.id,{job_id:job.id,role:null,admitted_at:job.created_at});
- const view = await cpNext({ledger,mandates,fleet:new FleetStore({home:home.path}),escalations:new EscalationStore({home:home.path}),now:()=>new Date(now)},"demo");
- const own = [view,...(view.others ?? [])].find((entry)=>entry.run?.id===run.id);
- assert.equal(own?.blocked?.[0]?.run_id,run.id);
- assert.match(own?.action.reason ?? "",new RegExp(`run ${run.id}: ${dependent.id}: waiting on ${blocker.id} \\(run ${run.id}\\)`));
- assert.doesNotMatch(formatNext(view),/no active grant covers/);
- await ledger.drop(blocker.id,"source gone");
- const escalations = new EscalationStore({home:home.path});
- await cpNext({ledger,mandates,fleet:new FleetStore({home:home.path}),escalations,now:()=>new Date(now)},"demo");
- const asked = escalations.open().filter((item)=>item.dropped_dependency?.job_id===dependent.id);
- assert.equal(asked.length,1,"a run member's dropped dependency still asks once, without a grant");
- assert.match(asked[0]!.mandate_clause ?? "",new RegExp(`schedule run ${run.id}`));
-});
 
 test("run exclusions, risk, deadline, parallelism and token caps audit their refusal codes",async(t)=>{
  const {home,runs,run,mandates} = await fixture();t.after(()=>home.cleanup());
@@ -189,12 +138,6 @@ test("run exclusions, risk, deadline, parallelism and token caps audit their ref
  assert.equal(runRiskPreapproval(record,{...job,jobId:"cp-outside"}),false);
 });
 
-test("A1 viewer readers retain run basis and source",async(t)=>{
- const {home,run} = await fixture();t.after(()=>home.cleanup());
- writeFileSync(`${home.path}/${LAYOUT.escalationsFile}`,JSON.stringify({items:[{id:"es-run",status:"answered",question:"Approve work",created_at:at,answered_at:now,answered_by:`schedule-run:${run.id}`,answer:"approve",job_ids:["cp-member"],basis:{run:run.id,clause:`schedule-run ${run.id} (policy rev 1)`}}]}));
- const result = decisions({home:home.path,stateDir:`${home.path}/${LAYOUT.state}`},Date.parse(now));
- assert.deepEqual(result.decision_items[0]?.basis,{kind:"run",ref:run.id});assert.equal(result.decision_items[0]?.source,"schedule-run");
-});
 
 
 test("run high-risk asks once under run attribution; scripts never use standing approval",async(t)=>{
@@ -244,13 +187,6 @@ test("a pre-approved run passes review, repair and implement uses of a risk:high
  assert.deepEqual(runs.run(run.id)?.authority_log.map(r=>[r.use,r.decision]),[["review","permit"],["repair","permit"],["implement","permit"]]);
 });
 
-test("org-review keeps dashboard-only clearance: a cp_schedule start records the quote but still asks",async(t)=>{
- const {home,runs,run,mandates} = await fixture(true);t.after(()=>home.cleanup());
- const job = {jobId:"cp-member",project:"demo",kind:"ship" as const,risk:"high" as const};
- assert.equal((await mandates.assertDispatchAllowed(job)).run?.id,run.id);
- runs.editRun(run.id,r=>{r.trigger={via:"cp_schedule",at,tool_call_id:"call-1",quote_sha:"0123456789ab"};});
- await assert.rejects(mandates.assertDispatchAllowed(job),e=>e instanceof ScheduleAuthorityError && e.code==="risk_high");
-});
 
 test("org-review dashboard run whose org_review_approve channel lacks dashboard still asks",async(t)=>{
  const {home,runs,run,mandates} = await fixture(true);t.after(()=>home.cleanup());
