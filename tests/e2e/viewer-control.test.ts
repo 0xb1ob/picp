@@ -631,7 +631,6 @@ test("P17-decision-card: an Awaiting card answers through the operator session's
 	assert.ok(buttons(el).every((b) => b.hasAttribute("disabled")), "a dead session's card stays visible, disabled");
 });
 
-// P17b: the composer's own routes (message, queue, start) against the operator session's real control server.
 const MESSAGE = "/api/operator/message", QUEUE = "/api/operator/queue", START = "/api/operator/start";
 const ORIGIN = "https://cp.example.ts.net";
 const DC = /^dc-\d{14}-[0-9a-f]{8}$/;
@@ -670,7 +669,7 @@ const refusal = (stateDir: string) => async (reply: Promise<Reply>, code: number
 	return out;
 };
 
-test("P17-control-send: control is on with no config file; a send and a click reach the running session once and only the bridge journals them; ?sends=0 is the lean read", { timeout: 120_000 }, async (t) => {
+test("P17-control-send: with no config file a send and a click reach the session once, journaled by the bridge; ?sends=0 is the lean read", { timeout: 120_000 }, async (t) => {
 	const s = await live(t);
 	assert.equal(existsSync(controlConfigFile(s.stateDir)), false);
 	const status = await s.get("/api/operator/control");
@@ -700,7 +699,7 @@ test("P17-control-send: control is on with no config file; a send and a click re
 	assert.deepEqual([unknown.headers["x-cp-delta-base"], unknown.body.token], [undefined, lean.token]);
 });
 
-test("P17-control-refusals: refusals come in order, each named and journaled once by the viewer; reads never write and ask the session only its status", { timeout: 180_000 }, async (t) => {
+test("P17-control-refusals: refusals come in order, each journaled once by the viewer; reads never write", { timeout: 180_000 }, async (t) => {
 	const s = await live(t);
 	pushConfig(s.stateDir);
 	const refused = refusal(s.stateDir);
@@ -769,7 +768,7 @@ test("P17-control-refusals: refusals come in order, each named and journaled onc
 	assert.match(String(unwritten.body.audit), /^unwritten: /);
 });
 
-test("P17-control-origin: with no HTTPS origin only the bind's own http:// origin writes; a proxy's own Host is same-origin until strict_host; push still needs setup", { timeout: 120_000 }, async (t) => {
+test("P17-control-origin: with no HTTPS origin only the bind's own origin writes; a proxy's own Host passes until strict_host", { timeout: 120_000 }, async (t) => {
 	const s = await live(t);
 	const at = (origin: string, host?: string, extra: Record<string, string> = {}, tok = s.token) => s.send(tok, { kind: "message", text: "x" }, { origin, ...(host ? { host } : {}), ...extra });
 	assert.equal((await at(s.origin)).status, 202);
@@ -803,7 +802,7 @@ test("P17-control-origin: with no HTTPS origin only the bind's own http:// origi
 	assert.deepEqual([(await at(ORIGIN)).status, (await at(s.origin)).status], [202, 202], "strict: the configured origin and the loopback bind's own");
 });
 
-test("P17-control-offline: with no session the status carries the inbox token; a send or click is held, abort is 409, a stale token 403, 20 wait at most; a dead pid is offline, a dead socket 503", { timeout: 120_000 }, async (t) => {
+test("P17-control-offline: with no session sends and clicks are held under the inbox token, 20 at most; abort is 409; a dead pid is offline, a dead socket 503", { timeout: 120_000 }, async (t) => {
 	const d = await dashboard(t);
 	seedAsks(d.stateDir);
 	const status = await d.get("/api/operator/control");
@@ -839,7 +838,7 @@ test("P17-control-offline: with no session the status carries the inbox token; a
 	assert.equal(lines(controlJournalFile(d.stateDir)).at(-1)!.status, 503);
 });
 
-test("P17-control-queue: busy sends wait editable until handed over; the queue is journal-backed across restart; a lost claim or a 24 h wait fails with its text and nothing is resent", { timeout: 180_000 }, async (t) => {
+test("P17-control-queue: busy sends wait editable until handed over; the queue survives restart; a lost claim or a 24 h wait fails and nothing is resent", { timeout: 180_000 }, async (t) => {
 	let busy = false;
 	const s = await live(t, { isIdle: () => !busy });
 	const journal = controlJournalFile(s.stateDir);
@@ -930,7 +929,7 @@ test("P17-control-queue: busy sends wait editable until handed over; the queue i
 	assert.match(String((await s.get("/api/operator/control")).body.sends_error), /invalid journal line/);
 });
 
-test("P17-control-skills: an installed @name gains one code-written [cp-skill] line live, on a queue edit and held; typed lines drop; ambiguous, broken or over 8 is a 400; the status shows what was typed", { timeout: 150_000 }, async (t) => {
+test("P17-control-skills: an installed @name gains one code-written [cp-skill] line; typed lines drop; ambiguous, broken or over 8 is a 400", { timeout: 150_000 }, async (t) => {
 	const agentDir = realpathSync(mkdtempSync(join(tmpdir(), "cp-skill-agent-")));
 	t.after(() => rmSync(agentDir, { recursive: true, force: true }));
 	const skill = (root: string, name: string, front = `description: does ${name}`) => { write(join(root, "skills", name, "SKILL.md"), `---\n${front}\n---\nbody\n`); return join(root, "skills", name); };
@@ -993,11 +992,7 @@ if (reply.sleep) setTimeout(() => process.exit(reply.status ?? 0), reply.sleep);
 else process.exit(reply.status ?? 0);
 `;
 
-/**
- * A user whose PATH holds only node, dirname and the named fake launchers, and whose `~/.local/bin/cp-operator`
- * (a space, a quote and `$(false)` in its path) is installed unless `wrapper` is false; `env` is what the viewer
- * runs with.
- */
+/** A user whose PATH holds only node, dirname and the fake `tools`, with a hostile-path `~/.local/bin/cp-operator`. */
 function toolbox(t: TestContext, tools: readonly string[], { wrapper = true, role = "viewer" as string | null } = {}) {
 	const user = mkdtempSync(join(tmpdir(), "cp herdr'$(false)-"));
 	t.after(() => rmSync(user, { recursive: true, force: true }));
@@ -1041,7 +1036,7 @@ async function unavailable(t: TestContext, box: ReturnType<typeof toolbox>, why:
 	assert.equal(box.calls().length, before, "nothing ran");
 }
 
-test("P17-start-tmux: Start session refuses in order, then runs exactly `<tmux> new-session -d -s cp-operator <wrapper> [-c]` with the viewer's env minus CP_DAEMON_*, once per 60 s; unavailable says why and runs nothing", { timeout: 240_000 }, async (t) => {
+test("P17-start-tmux: Start session refuses in order, then runs one fixed tmux argv with the viewer's env minus CP_DAEMON_*, once per 60 s; unavailable runs nothing", { timeout: 240_000 }, async (t) => {
 	const box = toolbox(t, ["tmux"]);
 	const d = await dashboard(t, { env: box.env });
 	const fresh = windows(d);
@@ -1056,7 +1051,7 @@ test("P17-start-tmux: Start session refuses in order, then runs exactly `<tmux> 
 	await refused(start(TMUX, { "content-type": "text/plain" }), 415, /application\/json/);
 	await refused(start("{nope"), 400, /not JSON/);
 	for (const body of [{}, { via: "screen" }, { via: "TMUX" }, { via: ["tmux"] }, { via: "tmux", unit: "evil.service" }, { argv: ["rm", "-rf"] }, ["tmux"], "tmux", null]) {
-		await refused(start(JSON.stringify(body)), 400, /body must be \{"via": "herdr"\} or \{"via": "tmux"\}/);
+		assert.ok(await refused(start(JSON.stringify(body)), 400, /body must be \{"via": "herdr"\} or \{"via": "tmux"\}/));
 	}
 	await refused(start(TMUX, {}, "b".repeat(64)), 403, /inbox token missing or stale/);
 	fresh();
@@ -1109,7 +1104,7 @@ test("P17-start-tmux: Start session refuses in order, then runs exactly `<tmux> 
 	await unavailable(t, toolbox(t, ["tmux"], { role: "health" }), /^Start in tmux needs the cp-daemon-run dashboard/);
 });
 
-test("P17-start-herdr: Start in herdr checks the server, then creates the workspace and types one quoted command into its pane, nothing from the request; down is unavailable; a failed or hung pane run closes the workspace", { timeout: 240_000 }, async (t) => {
+test("P17-start-herdr: Start in herdr checks the server, creates the workspace and types one quoted command; down is unavailable; failed or hung calls end", { timeout: 240_000 }, async (t) => {
 	const box = toolbox(t, ["herdr"], { role: null });
 	const created = { stdout: JSON.stringify({ result: { workspace: { workspace_id: "w_7" }, root_pane: { pane_id: "p_7" } } }) };
 	const up = { "herdr status server": { stdout: JSON.stringify({ status: "running", running: true }) }, "herdr workspace create": created };
@@ -1159,23 +1154,23 @@ test("P17-start-herdr: Start in herdr checks the server, then creates the worksp
 	assert.deepEqual([failed.status, failed.body.state], [503, "unavailable"]);
 	assert.match(String(failed.body.reason), /herdr pane run exited 1: pane p_7 is gone/);
 	assert.deepEqual(herdr().at(-1)!.argv, ["workspace", "close", "w_7"], "a failed pane run closes the workspace it created");
-	fresh();
-	box.reply({ ...up, "herdr pane run": { sleep: 60_000 } });
-	const began = Date.now();
-	const hung = await start(HERDR);
-	assert.deepEqual([hung.status, hung.body.state], [503, "unavailable"], "a pane run past 10 s is killed");
-	assert.ok(Date.now() - began < 30_000, `bounded at 10 s (took ${Date.now() - began} ms)`);
-	assert.deepEqual(herdr().at(-1)!.argv, ["workspace", "close", "w_7"]);
+	const closed = () => herdr().at(-1)!.argv.join(" ") === "workspace close w_7";
+	const control = () => d.get("/api/operator/control").then((r) => (r.body.launchers as Json).herdr === false);
+	for (const [hang, check] of [["herdr pane run", () => start(HERDR).then((r) => r.status === 503 && closed())], ["herdr workspace create", () => start(HERDR).then((r) => r.status === 503)], ["herdr status server", control]] as const) {
+		fresh();
+		box.reply({ ...up, [hang]: { sleep: 60_000 } });
+		const at = Date.now();
+		assert.deepEqual([await check(), Date.now() - at < 30_000], [true, true], `${hang} past 10 s is killed`);
+	}
 });
 
-// The served tab (linkedom, no layout): what the operator transcript, its ⋮ sheet and Settings render and send.
 const OPERATOR = "#sessions?view=you&transcript=1", RESTART = "/api/operator/restart";
 const XSS = "<img src=x onerror=alert(1)>";
 const choice = (question: string, labels: string[]) => ({ project: "demo", question, options: labels.map((label) => ({ label, consequence: `${label} it` })), recommendation: labels[0]! });
 const posts = (tab: Tab, path: string) => tab.requests.filter((r) => r.method === "POST" && r.path === path);
 const bar = (tab: Tab, ok: (b: Element) => boolean = () => true) => tab.find(".session-pinned h2 button", ok);
 
-test("P17-composer: the operator transcript pins open asks above the composer behind one remembered toggle; the composer sends, steers and aborts; off or gone, it says why", { timeout: 180_000 }, async (t) => {
+test("P17-composer: open asks pin above the composer behind one remembered toggle; it sends, steers and aborts; off or gone, it says why", { timeout: 180_000 }, async (t) => {
 	let busy = false;
 	const d = await dashboard(t);
 	const asks = new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl"));
@@ -1212,6 +1207,7 @@ test("P17-composer: the operator transcript pins open asks above the composer be
 	const sheet = (await tab.find("details.session-bar-more .session-bar-file")).closest(".session-bar-sheet")!;
 	assert.deepEqual([sheet.parentElement?.querySelector("summary")?.getAttribute("aria-label"), sheet.querySelector('.session-bar-views a[aria-current="page"]')?.textContent, [...sheet.querySelectorAll("button")].some((b) => b.textContent === "Search"), sheet.querySelector(".session-bar-state .session-dot")?.getAttribute("class")], ["More", "Operator ↔ you", true, "session-dot session-dot-idle"], "the ⋯ sheet");
 	assert.match(sheet.querySelector(".session-bar-file")?.textContent ?? "", /^Delivers to \S+\.jsonl$/);
+	assert.deepEqual([[404, 401, 403].includes(tab.requests.find((r) => r.path === "/api/devices/notices")?.status ?? 0), tab.$(".device-notices")?.outerHTML], [true, undefined], "off: no notices");
 	asks.open(choice("Tag it?", ["Yes"]));
 	tab.refresh();
 	const opened = await bar(tab, (b) => b.textContent === "2 decisions waiting ▾" && b.getAttribute("aria-expanded") === "true");
@@ -1226,7 +1222,7 @@ test("P17-composer: the operator transcript pins open asks above the composer be
 	const refusing = new (class extends Map<string, string> { override set(): this { throw new Error("QuotaExceededError"); } })();
 	const strict = await openTab(t, d.port, OPERATOR, refusing);
 	strict.click(await bar(strict, (b) => b.getAttribute("aria-expanded") === "false"));
-	await bar(strict, (b) => b.getAttribute("aria-expanded") === "true");
+	assert.ok(await bar(strict, (b) => b.getAttribute("aria-expanded") === "true"), "the toggle still works");
 	assert.ok(warn.mock.calls.some((c) => c.arguments[0] === "decisions bar not persisted: QuotaExceededError"), "the refused write warns");
 	strict.close();
 	warn.mock.restore();
@@ -1252,7 +1248,7 @@ test("P17-composer: the operator transcript pins open asks above the composer be
 
 	busy = true;
 	tab = await tab.reopen();
-	await tab.find(".operator-composer-send", (b) => b.getAttribute("aria-label") === "Send after this turn");
+	assert.ok(await tab.find(".operator-composer-send", (b) => b.getAttribute("aria-label") === "Send after this turn"), "busy: follow-up");
 	await tab.waitText(/Session busy — send after this turn, steer, or abort/);
 	assert.equal(tab.$("header.session-bar .session-bar-state .session-dot")?.getAttribute("class"), "session-dot session-dot-working", "busy: the bar's dot");
 	assert.deepEqual(tab.$$(".operator-composer-menu button").map((b) => b.textContent), ["Steer now", "Abort turn"]);
@@ -1267,7 +1263,7 @@ test("P17-composer: the operator transcript pins open asks above the composer be
 	busy = false;
 	write(controlConfigFile(d.stateDir), '{"enabled": false}');
 	tab = await tab.reopen();
-	await tab.waitText(/Dashboard control is off/);
+	assert.ok(await tab.waitText(/Dashboard control is off/), "off: the reason");
 	assert.equal(tab.$("textarea")?.outerHTML, undefined);
 	assert.ok(tab.$$(".session-pinned button.decision-card-option").every((b) => b.hasAttribute("disabled")), "the cards stay, disabled");
 	rmSync(controlConfigFile(d.stateDir));
@@ -1287,7 +1283,7 @@ test("P17-composer: the operator transcript pins open asks above the composer be
 	assert.ok(failure.closest(".session-pending-failed")!.querySelector(".session-pending-again"), "a failed send offers Send again");
 });
 
-test("P17-composer-start: offline the composer holds a message and offers each launcher; Start in tmux runs it, waits, and opens the composer once a session serves; none says why", { timeout: 180_000 }, async (t) => {
+test("P17-composer-start: offline the composer holds a message and offers each launcher; Start in tmux opens the composer once a session serves", { timeout: 180_000 }, async (t) => {
 	const box = toolbox(t, ["tmux", "herdr"]);
 	box.reply({ "herdr status server": { stdout: JSON.stringify({ status: "running", running: true }) } });
 	const d = await dashboard(t, { env: box.env });
@@ -1303,7 +1299,7 @@ test("P17-composer-start: offline the composer holds a message and offers each l
 	assert.deepEqual(posts(tab, MESSAGE).map((r) => [r.headers["x-cp-control-token"], r.status]), [[inbox, 202]], "held with the inbox token");
 	assert.deepEqual(lines(controlInboxFile(d.stateDir)).map((l) => [l.type, l.text]), [["held", "deploy when green"]]);
 	tab = await tab.reopen();
-	await tab.waitText(/Operator session offline · 1 held — a message waits here until a session attaches/);
+	assert.ok(await tab.waitText(/Operator session offline · 1 held — a message waits here until a session attaches/));
 	const overview = await d.open("#overview");
 	await overview.find(".overview-services .start-session-button");
 	assert.equal(overview.$$(".overview-chip strong").find((s) => /^offline/.test(s.textContent ?? ""))?.textContent, "offline · 1 held");
@@ -1324,7 +1320,7 @@ test("P17-composer-start: offline the composer holds a message and offers each l
 	tab.click(await tab.find(".start-session-button", (b) => b.textContent === "Start in tmux"));
 	await tab.find(".start-session-button", (b) => b.textContent === "Starting…");
 	await operatorSession(t, d.stateDir);
-	await tab.find("textarea", (f) => !f.hasAttribute("disabled"), 30_000);
+	assert.ok(await tab.find("textarea", (f) => !f.hasAttribute("disabled"), 30_000), "running opens the composer");
 	assert.equal(tab.$(".start-session-button")?.outerHTML, undefined, "running: no Start session");
 
 	// The Overview alarm: a check failing 16 min and a relay unseen 11 min raise a line each; 14 min failing does not.
@@ -1341,7 +1337,7 @@ test("P17-composer-start: offline the composer holds a message and offers each l
 	assert.match(bare.text(), /Start session unavailable: .*herdr is not on PATH/);
 });
 
-test("P17-restart: the operator bar's Restart session says why it cannot, confirms first, posts {restart:true}, shows a refusal, and follows each owner's control status to restarted", { timeout: 180_000 }, async (t) => {
+test("P17-restart: Restart session says why it cannot, confirms, posts {restart:true}, shows a refusal and follows the status to restarted", { timeout: 180_000 }, async (t) => {
 	const d = await dashboard(t);
 	const plain = await operatorSession(t, d.stateDir);
 	let tab = await d.open(OPERATOR);
@@ -1356,7 +1352,7 @@ test("P17-restart: the operator bar's Restart session says why it cannot, confir
 	let control = await restartable();
 	t.after(() => control.stop());
 	tab = await tab.reopen();
-	await tab.find(button, (b) => b.hasAttribute("disabled") && b.getAttribute("title") === "not now: the session is busy with a turn");
+	assert.ok(await tab.find(button, (b) => b.hasAttribute("disabled") && b.getAttribute("title") === "not now: the session is busy with a turn"));
 
 	idle = true;
 	tab = await tab.reopen();
@@ -1367,7 +1363,7 @@ test("P17-restart: the operator bar's Restart session says why it cannot, confir
 	assert.equal(posts(tab, RESTART).length, 0, "one tap opens the confirm; nothing is sent yet");
 	idle = false;
 	tab.click(confirm);
-	await tab.find(line, (p) => p.textContent === "Refused: not now: the session is busy with a turn" && p.getAttribute("role") === "alert");
+	assert.ok(await tab.find(line, (p) => p.textContent === "Refused: not now: the session is busy with a turn" && p.getAttribute("role") === "alert"));
 
 	idle = true;
 	tab = await tab.reopen();
@@ -1425,7 +1421,7 @@ async function tunnelled(t: TestContext) {
 const TUNNEL = "https://amber-otter.trycloudflare.com";
 const devicesSection = 'section[aria-label="Devices"]';
 
-test("P17-devices: Settings → Devices shows names as text with level and trust, adds a one-time link with a QR that expires, revokes after a confirm, and says when it cannot", { timeout: 180_000 }, async (t) => {
+test("P17-devices: Settings → Devices lists, adds a one-time link with a QR that expires, revokes after a confirm, and says when it cannot", { timeout: 180_000 }, async (t) => {
 	const d = await tunnelled(t);
 	let tab = await d.open("#settings");
 	await tab.find(devicesSection, (s) => (s.textContent ?? "").includes(DEVICE_TRUST));
@@ -1448,7 +1444,7 @@ test("P17-devices: Settings → Devices shows names as text with level and trust
 	const row = await tab.find(".devices-row", (r) => (r.textContent ?? "").includes(XSS));
 	assert.equal(tab.$$(`${devicesSection} img`).length, 0, "names are text");
 	assert.match(row.textContent ?? "", /View only/);
-	assert.match(row.textContent ?? "", /via this machine's dashboard/);
+	assert.match(row.textContent ?? "", /Paired .* via this machine's dashboard · last used /);
 	tab.decline();
 	tab.click(await tab.find(".devices-row button", (b) => b.textContent === "Revoke"));
 	await until(() => tab.confirms.length, (n) => n === 1, "the confirm");
@@ -1458,19 +1454,19 @@ test("P17-devices: Settings → Devices shows names as text with level and trust
 	tab.click(await tab.find(".devices-row button", (b) => b.textContent === "Revoke"));
 	await tab.waitText(new RegExp(`Revoked ${XSS.replace(/[()]/g, "\\$&")}`));
 	assert.deepEqual(posts(tab, "/api/devices/revoke").map((r) => [Object.keys(JSON.parse(r.body!)), r.headers["x-cp-control-token"], r.status]), [[["id"], token, 200]]);
-	await tab.find(".devices-row", (r) => /revoked /.test(r.textContent ?? ""));
+	assert.ok(await tab.find(".devices-row", (r) => /revoked /.test(r.textContent ?? "")));
 	assert.deepEqual(tab.$$(`${devicesSection} button`).map((b) => b.textContent), ["Add device"], "a revoked device has no Revoke");
 
 	// A link whose 5 minutes end a second from now (the viewer's clock pinned back) clears itself and says so.
 	d.pin(new Date(Date.now() - 299_000).toISOString());
 	tab.click(await tab.find(".devices-add button", (b) => b.textContent === "Add device" && !b.hasAttribute("disabled")));
 	await tab.find(".devices-link");
-	await tab.waitText(/The pairing link expired; add the device again for a new one/);
+	assert.ok(await tab.waitText(/The pairing link expired; add the device again for a new one/));
 	assert.equal(tab.$(".devices-link")?.outerHTML, undefined, "cleared at expiry");
 	d.pin(new Date(Date.now() + 1_000).toISOString());
 	for (let i = 0; i < 3; i++) assert.equal((await d.create()).status, 201);
 	tab.click(await tab.find(".devices-add button", (b) => b.textContent === "Add device" && !b.hasAttribute("disabled")));
-	await tab.waitText(/Three pairing links are already live/);
+	assert.ok(await tab.waitText(/Three pairing links are already live/));
 
 	write(tunnelRuntimeFile(d.stateDir), { schema_version: 1, origin: null, generation: 1, revision: 1, state: "stopped", mode: "quick", port: d.remote, updated_at: new Date().toISOString() });
 	await until(async () => (await d.get("/api/devices")).body.origin, (origin) => origin === null, "the stopped tunnel");
@@ -1479,12 +1475,12 @@ test("P17-devices: Settings → Devices shows names as text with level and trust
 	assert.ok(tab.$(".devices-add button")!.hasAttribute("disabled"), "not running: Add device is disabled");
 	writeFileSync(d.store, "{not json");
 	tab = await tab.reopen();
-	await tab.find('[role="alert"]', (a) => /Devices unavailable: The device list is unreadable on this home/.test(a.textContent ?? ""));
+	assert.ok(await tab.find('[role="alert"]', (a) => /Devices unavailable: The device list is unreadable on this home/.test(a.textContent ?? "")));
 	const off = await (await dashboard(t)).open("#settings");
-	await off.find(devicesSection, (s) => /remote dashboard is off on this home.*cp-tunnel up/.test(s.textContent ?? "") && (s.textContent ?? "").includes(DEVICE_TRUST));
+	assert.ok(await off.find(devicesSection, (s) => /remote dashboard is off on this home.*cp-tunnel up/.test(s.textContent ?? "") && (s.textContent ?? "").includes(DEVICE_TRUST)));
 });
 
-test("P17-devices-remote: over the tunnel a Full-control device lists and revokes but never adds; a View-only one only lists, with the trust explanation", { timeout: 180_000 }, async (t) => {
+test("P17-devices-remote: over the tunnel Full control lists and revokes but never adds; View only just lists", { timeout: 180_000 }, async (t) => {
 	const d = await tunnelled(t);
 	const full = await d.pair("Laptop", "full"), view = await d.pair("Tablet", "view");
 	const asFull = await openTab(t, d.remote, "#settings", new Map(), undefined, { cookie: full });
@@ -1493,12 +1489,12 @@ test("P17-devices-remote: over the tunnel a Full-control device lists and revoke
 	assert.deepEqual(asFull.$$(`${devicesSection} button`).map((b) => b.textContent), ["Revoke", "Revoke"]);
 	assert.equal(asFull.$(".devices-add")?.outerHTML, undefined);
 	const asView = await openTab(t, d.remote, "#settings", new Map(), undefined, { cookie: view });
-	await asView.find(devicesSection, (s) => /View only: you can see devices but not change them/.test(s.textContent ?? "") && (s.textContent ?? "").includes(DEVICE_TRUST));
+	assert.ok(await asView.find(devicesSection, (s) => /View only: you can see devices but not change them/.test(s.textContent ?? "") && (s.textContent ?? "").includes(DEVICE_TRUST)));
 	await asView.find(".devices-row", (r) => /Laptop/.test(r.textContent ?? ""));
 	assert.deepEqual(asView.$$(`${devicesSection} button`).map((b) => b.textContent), [], "no write buttons");
 });
 
-test("P17-device-notices: a pairing raises a notice above every screen with name as text, level, time, push state and a Devices link; dismissed stays so; past three it folds; unreadable says so", { timeout: 180_000 }, async (t) => {
+test("P17-device-notices: a pairing raises a notice above every screen; dismissed stays so; past three it folds; unreadable says so", { timeout: 180_000 }, async (t) => {
 	const d = await tunnelled(t);
 	let tab = await d.open("#overview");
 	await tab.find(".shell-main");
@@ -1512,7 +1508,9 @@ test("P17-device-notices: a pairing raises a notice above every screen with name
 	assert.match(notice.textContent ?? "", /push: 1 pending/);
 	assert.equal(notice.querySelector('a[href="#settings"]')?.textContent, "Devices");
 	tab = await tab.reopen("#board");
-	tab.click(await tab.find(".device-notices button", (b) => b.textContent === "Dismiss"));
+	const dismiss = await tab.find(".device-notices button", (b) => b.textContent === "Dismiss");
+	assert.ok(dismiss.closest(".shell-main"), "#board shows it too");
+	tab.click(dismiss);
 	await until(() => tab.$(".device-notices"), (el) => el === null, "the dismissed notice");
 	tab = await tab.reopen("#overview");
 	await tab.find(".shell-main");
@@ -1529,7 +1527,7 @@ test("P17-device-notices: a pairing raises a notice above every screen with name
 	assert.match((await tab.find(".device-notices", (s) => /showing the last read/.test(s.textContent ?? ""))).textContent ?? "", /Pairing notices unavailable \(HTTP 503\); showing the last read/);
 	assert.equal(tab.$$(".device-notice").length, 3, "an offline tab keeps its unread notices");
 	tab = await tab.reopen();
-	await tab.waitText(/Pairing notices unavailable \(HTTP 503\)/);
+	assert.ok(await tab.waitText(/Pairing notices unavailable \(HTTP 503\)/));
 });
 
 /** The served stylesheet's rules, each with its enclosing @media query ("" outside one). */
@@ -1544,8 +1542,7 @@ function cssRules(css: string): Array<{ media: string; selector: string; body: s
 	return out;
 }
 
-test("P17-layout: the served stylesheet wraps the pinned block, cards, Start session, Restart and Devices at 390 px and widens them at 1440 px", { timeout: 120_000 }, async (t) => {
-	// SSR/linkedom has no layout engine: this pins the rules cp-view serves, never pixels.
+test("P17-layout: the served stylesheet wraps the control blocks at 390 px and widens them at 1440 px", { timeout: 120_000 }, async (t) => {
 	const d = await dashboard(t);
 	const href = /<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"|<link[^>]*href="([^"]+\.css)"/.exec((await d.get("/")).text)!;
 	const all = cssRules((await d.get(href[1] ?? href[2]!)).text);
@@ -1571,8 +1568,9 @@ test("P17-layout: the served stylesheet wraps the pinned block, cards, Start ses
 		[".device-notices", "", /overflow-wrap:anywhere/], [".device-notice", "", /overflow-wrap:anywhere/], [".device-notices-error", "", /overflow-wrap:anywhere/],
 		[".device-notices-list", "", /flex:1 1 320px/],
 		[".devices-row", "", /flex-wrap:wrap;.*min-width:0|min-width:0;.*flex-wrap:wrap/], [".devices-pairing", "", /flex-wrap:wrap/], [".devices-name", "", /flex-wrap:wrap/],
-		[".devices-qr", "", /max-width:100%/], [".devices-row button,.devices-pairing button", "", /min-height:44px/], [".devices-qr-dark", "", /fill:var\(--qr-dark\)/],
+		[".devices-qr", "", /max-width:100%/], [".devices-row button,.devices-pairing button", "", /min-height:44px/],
 	] as const) assert.match(rule(selector, media), want, `${media || "every width"} ${selector}`);
+	assert.match(rule(".devices-qr-dark"), /fill:var\(--qr-dark\)/, "QR colours are tokens");
 	const narrow = all.filter((r) => /^\.(operator-restart-(button|line)|device-notice)/.test(r.selector));
 	assert.deepEqual(narrow.filter((r) => /white-space:nowrap|(^|[^-])width:\d/.test(r.body)).map((r) => r.selector), [], "no fixed width or nowrap: long names break");
 	assert.deepEqual(all.filter((r) => r.media === WIDE && /\.session-pinned/.test(r.selector) && /pointer-events:none|>h2>button>span/.test(r.selector + r.body)).length, 0, "at 1440 px the bar is a real toggle");

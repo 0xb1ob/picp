@@ -1,16 +1,25 @@
 /**
- * Retained (P17b): dashboard-control client units no e2e surface reaches: readControl's delta fallback, the client's
- * stale-token, unreachable-home and status lines, herdrCommand's `--session <id>` words and the restart helpers'
- * older-viewer and control-off lines. The rest: tests/e2e/viewer-control.test.ts.
+ * Retained (P17b): units no e2e surface reaches: readControl's delta fallback, the client's stale-token, dead-home and
+ * status lines, herdrCommand's words, restart helper states, a tailnet bind's own origin (the harness binds 127.0.0.1).
+ * The rest: tests/e2e/viewer-control.test.ts.
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { once } from "node:events";
+import { type AddressInfo, createServer } from "node:net";
+import { join } from "node:path";
 import { test } from "node:test";
+import { LAYOUT } from "../src/contracts.ts";
 import type { ControlStatusResponse } from "../src/viewer/api-types.ts";
 import { herdrCommand } from "../src/viewer/launchers.ts";
-import { controlLine, deliveryLine, readControl, sendControl } from "../viewer-app/control.ts";
-import { restartDisabled, restartOperator } from "../viewer-app/restart-control.ts";
+import { viewerConfigFile } from "../src/viewer/host-config.ts";
+import { pushConfigFile, pushDataDir } from "../src/viewer/push-files.ts";
+import { createViewer } from "../src/viewer/server.ts";
+import { controlLine, deliveryLine, readControl, sendControl, startOperator } from "../viewer-app/control.ts";
+import { type Restarting, restartDisabled, restartInFlight, restartOperator } from "../viewer-app/restart-control.ts";
 import { deliverySummary } from "../viewer-app/use-device-notices.ts";
+import { send, write } from "./harness/conversations.ts";
+import { createScratchHome } from "./harness/index.ts";
 
 const status = (over: Partial<ControlStatusResponse>): ControlStatusResponse => ({ generated_at: "2026-09-27T08:30:00Z", enabled: true, running: true, reason: null, token: "t".repeat(64), busy: false, pending: false, session_file: "op.jsonl", recent: [], offline: false, held: 0, inbox_token: null, start_unavailable: null, launchers: { tmux: true, herdr: false }, resume: { tmux: false, herdr: false }, restart: { supported: true, blockers: [], reason: null }, ...over });
 
@@ -38,7 +47,7 @@ test("readControl sends x-cp-delta-base per URL, applies the delta, and falls ba
 	assert.deepEqual(seen, [[lean, undefined], [full, undefined], [lean, "n-1"], [lean, "n-2"], [lean, undefined], [lean, "n-4"], [lean, undefined]]);
 });
 
-test("client: sendControl's stale token and unreachable home, controlLine's 403 and deliveryLine", async () => {
+test("client: sendControl's stale token and unreachable home, controlLine's 403, deliveryLine and startOperator's non-start replies", async () => {
 	const reply = (code: number, body: unknown) => async () => new Response(JSON.stringify(body), { status: code, headers: { "content-type": "application/json" } });
 	assert.deepEqual(await sendControl(reply(403, { error: "stale" }), "tok", { kind: "abort" }), { error: "stale", status: 403 });
 	assert.deepEqual(await sendControl(async () => { throw new Error("offline"); }, "tok", { kind: "abort" }), { error: "Could not reach this home", status: 0 });
@@ -47,6 +56,9 @@ test("client: sendControl's stale token and unreachable home, controlLine's 403 
 	assert.equal(deliveryLine({ id: "dc-1", state: "queued", reason: null, ask_id: null }), "Queued · dc-1");
 	assert.equal(deliveryLine({ id: "dc-1", state: "delivered", reason: null, ask_id: null }), "Delivered to the session · dc-1");
 	assert.equal(deliveryLine({ id: null, state: "failed", reason: "boom", ask_id: null }), "Failed: boom");
+	assert.deepEqual(await startOperator(reply(409, { state: "already_running", error: "running (pid 7)" }), "tok", "tmux"), { state: "already_running", reason: "running (pid 7)" });
+	assert.deepEqual(await startOperator(reply(503, { state: "unavailable", reason: "no unit" }), "tok", "tmux"), { state: "unavailable", reason: "no unit" });
+	assert.deepEqual(await startOperator(reply(429, { error: "one start per 60 s" }), "tok", "tmux"), { error: "one start per 60 s" });
 });
 
 test("herdr launch args: the pane command is one argv element herdr cannot parse flags from; the pane's shell splits it back into the exact words (--session <id> included)", () => {
@@ -61,8 +73,33 @@ test("restart and notice helpers: an older viewer's status, control off, an unre
 	assert.match(restartDisabled(status({ restart: undefined })) ?? "", /did not report whether the session can restart/, "an older viewer's status: disabled, never guessed");
 	assert.equal(restartDisabled(status({ enabled: false })), "no operator session is running");
 	assert.deepEqual(await restartOperator(async () => { throw new Error("down"); }, "tok"), { error: "Could not reach this home", status: 0 });
+	const states: Restarting["state"][] = ["restarting", "stopping", "relaunching", "restarted", "refused", "failed"];
+	assert.deepEqual(states.map((state) => restartInFlight({ state, reason: null, started_at: "", session_file: "" })), [true, true, true, false, false, false]);
 	const at = "2026-09-27T09:00:00.000Z";
 	const recipients = [{ device_id: "dev-aaaaaaaaaaaaaaaa", name: "Laptop", state: "delivered" as const, attempts: 1, updated_at: at, last_error: null }, { device_id: "dev-0123456789abcdef", name: "Phone", state: "unsubscribed" as const, attempts: 0, updated_at: at, last_error: "no push subscription on this device" }];
 	assert.equal(deliverySummary(recipients, null), "push: 1 delivered to push service · 1 not subscribed");
 	assert.equal(deliverySummary([], null), "push: no recipients");
+});
+
+test("no HTTPS origin configured: a tailnet bind's own http:// origin holds a message and a click; others are refused; a configured origin keeps its old rule", async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const probe = createServer().listen(0, "127.0.0.1");
+	await once(probe, "listening");
+	const port = (probe.address() as AddressInfo).port, host = `100.64.0.9:${port}`;
+	await new Promise((done) => probe.close(done));
+	const options = { home: home.path, stateDir: join(home.path, LAYOUT.state), host: "100.64.0.9", port, requireTailnet: true, log: () => {}, operatorStart: { tmux: null, herdr: null } };
+	const server = createViewer(options);
+	await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+	t.after(() => server.close());
+	const inbox = String((await send(port, "/api/operator/control", { headers: { host } })).body.inbox_token);
+	const at = (origin: string, body: unknown) => send(port, "/api/operator/message", { method: "POST", body: JSON.stringify(body), headers: { host, origin, "content-type": "application/json", "x-cp-control-token": inbox } });
+	assert.equal((await at(`http://${host}`, { kind: "message", text: "over http" })).status, 202);
+	assert.equal((await at(`http://${host}`, { kind: "answer", ask_id: "ask-abcd", label: "Keep" })).status, 202, "and a click");
+	for (const foreign of ["https://evil.example", `http://100.64.0.9:${port + 1}`, `http://127.0.0.1:${port}`]) {
+		assert.match(String((await at(foreign, { kind: "message", text: "x" })).body.error), /^Origin must be http:\/\/100\.64\.0\.9:\d+ \(no HTTPS/, foreign);
+	}
+	write(pushConfigFile(pushDataDir(options.stateDir)), { origin: "https://cp.example.ts.net", subject: "mailto:op@example.com", public_key: Buffer.alloc(65, 4).toString("base64url"), created_at: "2026-09-27T08:00:00Z" });
+	write(viewerConfigFile(options.stateDir), { strict_host: true });
+	assert.match(String((await at(`http://${host}`, { kind: "message", text: "x" })).body.error), /^Origin must be https:\/\/cp\.example\.ts\.net$/, "configured: the old rule");
 });

@@ -92,7 +92,7 @@ async function run(op: ReturnType<typeof operator>, argv: string[], extra: NodeJ
 
 const freed = (port: number) => until(() => portInUse(port), (busy) => !busy, `port ${port} released`, 60_000);
 
-test("P17-operator-viewer: cp-operator starts its own viewer for the selected home, hands pi its address and allowlisted skills, returns pi's exit code and stops the viewer", { timeout: 180_000 }, async (t) => {
+test("P17-operator-viewer: cp-operator starts a viewer for the selected home, hands pi its address and skills, returns pi's exit code", { timeout: 180_000 }, async (t) => {
 	const op = operator(t);
 	for (const [home, id] of [[op.home, "cp-selected"], [op.env.CP_HOME!, "cp-wrong"]] as const) {
 		mkdirSync(join(home, LAYOUT.state), { recursive: true });
@@ -109,10 +109,10 @@ test("P17-operator-viewer: cp-operator starts its own viewer for the selected ho
 	writeFileSync(gate, "");
 	assert.deepEqual(await session.exit, { code: 3, signal: null }, "pi's exit code comes back");
 	assert.deepEqual(op.runs(), [{ args: [...PREFIX, "--skill", join(op.agent, "skills/brainstorming"), "--model", "test"], host: "127.0.0.1", port: String(port), web: "", viewers: 1 }]);
-	await freed(port);
+	assert.equal(await freed(port), false, "stop ends its viewer");
 });
 
-test("P17-operator-reuse: a viewer for the same home is reused and never stopped; another home's viewer or an unrelated listener refuses the start and stays up", { timeout: 180_000 }, async (t) => {
+test("P17-operator-reuse: a same-home viewer is reused and never stopped; another home's or an unrelated listener refuses the start", { timeout: 180_000 }, async (t) => {
 	const d = await dashboard(t);
 	const same = operator(t, d.home);
 	const reused = await run(same, ["--host", "127.0.0.1", "--port", String(d.port)]);
@@ -140,11 +140,11 @@ test("P17-operator-signals: SIGINT, SIGTERM or SIGHUP to cp-operator ends pi uns
 		session.child.kill(signal);
 		const exit = await session.exit;
 		assert.notDeepEqual(exit, { code: 0, signal: null }, `${signal}: a session ended by a signal does not report success`);
-		await freed(port);
+		assert.equal(await freed(port), false, `${signal}: the viewer stops`);
 	}
 });
 
-test("P17-operator-address: without --host pi gets the tailnet address; the service viewer starts none of its own; remote-only homes get no local host; no tailnet refuses", { timeout: 180_000 }, async (t) => {
+test("P17-operator-address: without --host pi gets the tailnet address; service mode starts no viewer; remote-only gets no host", { timeout: 180_000 }, async (t) => {
 	const op = operator(t), port = await freePort();
 	op.tailscale("100.101.102.103");
 	const tailnet = await run(op, ["--port", String(port)]);
@@ -171,7 +171,7 @@ test("P17-operator-address: without --host pi gets the tailnet address; the serv
 	assert.match(bad.stderr, /CP_VIEWER_PORT must be 1-65535/);
 });
 
-test("P17-operator-model: data/operator.json's model beats CP_OPERATOR_MODEL, never an explicit model flag or a resume; unreadable is one stderr line", { timeout: 300_000 }, async (t) => {
+test("P17-operator-model: data/operator.json's model beats CP_OPERATOR_MODEL, never a model flag or a resume", { timeout: 300_000 }, async (t) => {
 	const op = operator(t);
 	const env = { CP_OPERATOR_VIEWER: "service", CP_VIEWER_HOST: "127.0.0.1", CP_OPERATOR_MODEL: "env/m" };
 	const model = async (argv: string[] = [], extra: NodeJS.ProcessEnv = {}) => {
