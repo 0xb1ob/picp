@@ -159,7 +159,7 @@ test("P18-nav: every hash, old or unknown, lands on one screen's data and lights
 		["#unknown", "/api/overview", "#overview", "#overview"], ["#overview/missing", "/api/overview", "#overview", "#overview"],
 		["#mandates", "/api/overview", "#overview", "#overview"], ["#overview/mandates", "/api/overview", "#overview", "#overview"],
 		["#overview/awaiting", "/api/overview", "#overview", "#overview"],
-		["#job/..%2Fbad", "/api/overview", "#overview", "#overview"], ["#job/cp-a?tab=timeline", "/api/overview", "#overview", "#overview"],
+		["#job/..%2Fbad", "/api/overview", "#overview", "#overview"], ["#job/cp-a?tab=timeline", "/api/overview", "#overview", "#overview"], ["#job/..%2Fbad?tab=transcript", "/api/overview", "#overview", "#overview"], ["#job/cp-a/..?tab=transcript", "/api/overview", "#overview", "#overview"],
 		["#job/cp-a?tab=transcript&x=1", "/api/overview", "#overview", "#overview"], ["#job/?tab=transcript", "/api/overview", "#overview", "#overview"],
 		["#more", "/api/overview", "#more", "#more"],
 		["#decisions", "/api/decisions", "#decisions", "#decisions"], ["#awaiting", "/api/decisions", "#decisions", "#decisions"],
@@ -170,8 +170,8 @@ test("P18-nav: every hash, old or unknown, lands on one screen's data and lights
 		["#settings", "/api/settings", "#settings", "#more"], ["#stats?range=7d&project=a", "/api/stats?range=7d&project=a", "#stats", "#more"],
 		["#session/cp-parent", "/api/sessions?view=parent", "#sessions", "#sessions"], ["#session/cp-a", "/api/sessions?view=workers&id=cp-a", "#sessions", "#sessions"],
 		["#cp-a", "/api/sessions?view=workers&id=cp-a", "#sessions", "#sessions"], ["#sessions?view=workers&id=cp-a", "/api/sessions?view=workers&id=cp-a", "#sessions", "#sessions"],
-		["#files/project:demo", "/api/files?root=project%3Ademo&path=&view=screen", "#more", "#more"],
-		["#files/project%3Ademo/dir%2Fa%3Fb", "/api/files?root=project%3Ademo&path=dir%2Fa%3Fb&view=screen", "#more", "#more"],
+		["#files/project:demo", "/api/files?root=project%3Ademo&path=&view=screen", "#more", "#more"], ["#files", "/api/files?view=screen", "#more", "#more"], ["#sessions", "/api/sessions?view=you", "#sessions", "#sessions"],
+		["#files?root=project%3Ademo&path=a%3Fb", "/api/files?root=project%3Ademo&path=a%3Fb&view=screen", "#more", "#more"], ["#files/project%3Ademo/dir%2Fa%3Fb", "/api/files?root=project%3Ademo&path=dir%2Fa%3Fb&view=screen", "#more", "#more"],
 		["#git/project%3Ademo", "/api/files?root=project%3Ademo&path=&view=screen", "#more", "#more"],
 	];
 	for (const [hash, read, desktop, phone] of cases) {
