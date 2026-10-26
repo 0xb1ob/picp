@@ -127,7 +127,6 @@
 	"tests/extension-load.test.ts": 822,
 	"tests/failure-announcer-retained.test.ts": 51,
 	"tests/fake-parent-tracker.test.ts": 110,
-	"tests/fleet.test.ts": 1503,
 	"tests/foreign-ci-watch-retained.test.ts": 5,
 	"tests/forge-observers-retained.test.ts": 28,
 	"tests/forge-runtime-retained.test.ts": 1214,

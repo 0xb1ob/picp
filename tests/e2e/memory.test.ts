@@ -8,7 +8,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
-import { LAYOUT } from "../../src/contracts.ts";
+import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { initialStatus } from "../../src/run-artifacts.ts";
 import {
 	COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, type MockToolCall, type PiChild, type RecordedRequest, REPO_ROOT,
 	type RpcRecord, type ScriptStep, startPiChild,
@@ -108,6 +109,7 @@ test("P23-memory-start: session start scaffolds memory once, and its digest carr
 	assert.match(h.read(LAYOUT.candidatesFile) ?? "", /append-only/);
 	assert.match(h.read(LAYOUT.archiveFile) ?? "", /Never delete/);
 	assert.equal(digestIn(fresh.requests()[0]), undefined, "a fresh home does not announce that it has no memory");
+	assert.equal(existsSync(h.path(LAYOUT.fleetFile)), false, "reconciling a home with no fleet creates none");
 	await fresh.child.close();
 
 	// Tiers and decay on 2026-08-27: perishable stales at 7 days, aging at 30; pinned and untiered never decay.
@@ -400,4 +402,97 @@ test("P23-curation-retire: retirement moves a line to the archive with provenanc
 	assert.ok(pinned.every((line) => kept.includes(line)) && /Budget: max ~60 lines/.test(kept), "the other entries and the header survive the rewrite");
 	assert.deepEqual(stagingFiles(dirname(h.path(LAYOUT.learningsFile))), [], "a completed write leaves no .tmp behind");
 	for (const file of [LAYOUT.learningsFile, LAYOUT.candidatesFile, LAYOUT.archiveFile, LAYOUT.curationLog]) assert.ok(existsSync(h.path(file)), `${file} under the scratch home`);
+});
+
+/** A fleet record as a dispatching parent wrote it: a waiting implementer on `pid`. */
+function fleetJob(jobId: string, pid: number, sessionFile: string, extra: Record<string, unknown> = {}) {
+	return { job_id: jobId, project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "waiting", worktree: "/tmp/worktrees/demo",
+		worker: { pid, session_id: `sess-${jobId}`, session_file: sessionFile, profile: "implementer", role: "implementer", model: "mock/mock-model", started_at: isoTimestamp() },
+		branch: jobId, dispatched_at: isoTimestamp(), usage: EMPTY_USAGE, ...extra };
+}
+
+test("P23-fleet-reconcile: a restarted parent reconciles fleet.json from facts — dead, revivable, reported, observed, orphaned — once, and refuses a fleet file it cannot read", async (t) => {
+	const h = await memoryHome(t);
+	const fleetFile = (jobs: unknown[]) => h.put(LAYOUT.fleetFile, `${JSON.stringify({ schema_version: SCHEMA_VERSION, updated_at: isoTimestamp(), jobs }, null, 2)}\n`);
+	const fleetNotice = (parent: ReturnType<typeof h.parent>, text: RegExp) => parent.child.waitFor(
+		(r) => r.type === "extension_ui_request" && r.method === "notify" && text.test(String(r.message)), 60_000);
+	const jobs = () => Object.fromEntries((JSON.parse(h.read(LAYOUT.fleetFile) ?? "{}").jobs as FleetRecord[]).map((job) => [job.job_id, job]));
+
+	// A real worker: one turn persists its session, then kill -9 — no close, no envelope, no status.json.
+	const provider = await MockProvider.start();
+	const agent = createAgentDir({ provider });
+	const worker = startPiChild({ cwd: h.home, model: provider.addScript("kill9", [{ kind: "text", text: "ready" }]), env: agent.env, sessionDir: h.path("sessions") });
+	t.after(async () => { await worker.close(); agent.cleanup(); await provider.stop(); });
+	agent.writeModels(provider);
+	await worker.prompt("say ready");
+	await worker.waitForSettled(60_000);
+	const sessionFile = String((await worker.getState(30_000)).sessionFile);
+	const pid = worker.pid as number;
+	process.kill(pid, "SIGKILL");
+	await worker.close();
+	assert.ok(existsSync(sessionFile), "the killed worker's session survives on disk");
+
+	const dead = 2 ** 22 + 1; // above the default pid_max, so never a live process
+	const live = process.pid;
+	const session = (name: string) => { h.put(`${name}.jsonl`, "{}\n"); return h.path(`${name}.jsonl`); };
+	fleetFile([
+		fleetJob("cp-kill9", pid, sessionFile),
+		fleetJob("cp-dead", dead, h.path("never-written.jsonl")),
+		fleetJob("cp-held", dead, session("held"), { phase: "held", reported_at: isoTimestamp() }),
+		fleetJob("cp-lost", dead, h.path("lost.jsonl"), { phase: "held", reported_at: isoTimestamp() }),
+		fleetJob("cp-rep", dead, h.path("rep.jsonl")),
+		fleetJob("cp-obs", live, h.path("obs.jsonl")),
+		fleetJob("cp-budget", dead, h.path("budget.jsonl")),
+		fleetJob("cp-orphan", live, h.path("orphan.jsonl")),
+		...["cp-script", "cp-unknown"].map((id) => ({ ...fleetJob(id, dead, ""), delivery: "local", executor: "script", worker: undefined,
+			script_path: "scripts/run.sh", script_process: { pid: dead, started_at: isoTimestamp() } })),
+	]);
+	h.put(paths.scriptResultFile("cp-script"), JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: "cp-script", result: { job_id: "cp-script", status: "done",
+		exit_code: 0, signal: null, timed_out: false, reason: "success", summary: "script exited 0", artifact_path: h.path(paths.artifactFile("cp-script")) } }));
+	h.put(paths.artifactFile("cp-script"), "# script report\n");
+	h.put(paths.envelopeFile("cp-rep"), JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: "cp-rep", received_at: isoTimestamp(), attempt: 1,
+		envelope: { job_id: "cp-rep", kind: "ship", status: "done", summary: "shipped it", branch: "cp-rep", pr_url: "https://github.com/o/demo/pull/7" } }));
+	h.put(paths.statusFile("cp-obs"), JSON.stringify({ ...initialStatus("cp-obs", { pid: live }), phase: "exited", exited_at: "2026-01-01T00:00:05Z", exit_code: 137 }));
+	h.put(paths.statusFile("cp-budget"), JSON.stringify({ ...initialStatus("cp-budget", { pid: dead }), phase: "idle",
+		failure: { class: "budget_exceeded", message: "per-job token budget breached at 410000 tokens", at: "2026-01-01T00:00:09Z" } }));
+
+	const restarted = h.parent();
+	const notice = String((await fleetNotice(restarted, /^fleet:/)).message);
+	const after = jobs();
+	assert.deepEqual([after["cp-kill9"]?.phase, after["cp-kill9"]?.failure, after["cp-kill9"]?.worker.exited_at], ["waiting", undefined, undefined], "a killed worker whose session survived is revivable, not failed");
+	assert.match(notice, /cp-kill9 revivable \(resumable\)/);
+	assert.deepEqual([after["cp-dead"]?.phase, after["cp-dead"]?.failure?.class, after["cp-dead"]?.worker.exited_at], ["failed", "crash", undefined]);
+	assert.match(after["cp-dead"]?.failure?.message ?? "", /pid no longer exists/);
+	assert.match(notice, /cp-dead failed/);
+	assert.equal(after["cp-held"]?.phase, "held", "the envelope is in; the hold is not lost with the process");
+	assert.match(notice, /cp-held revivable/);
+	assert.deepEqual([after["cp-lost"]?.phase, /cannot be revived/.test(after["cp-lost"]?.failure?.message ?? "")], ["failed", true]);
+	assert.equal(after["cp-rep"]?.phase, "held", "an envelope on disk is intaken, never overwritten with a failure");
+	assert.ok(after["cp-rep"]?.reported_at, "intake stamps the report");
+	assert.deepEqual([after["cp-obs"]?.phase, after["cp-obs"]?.failure?.class, after["cp-obs"]?.worker.exited_at, after["cp-obs"]?.worker.exit_code],
+		["failed", "crash", "2026-01-01T00:00:05Z", 137], "an observed close outranks a live pid");
+	assert.deepEqual([after["cp-budget"]?.phase, after["cp-budget"]?.failure?.class], ["failed", "budget_exceeded"], "the recorded class wins over a guess");
+	assert.equal(after["cp-orphan"]?.phase, "waiting", "a live pid is a fact; nothing is failed on suspicion");
+	assert.match(notice, /cp-orphan orphan/);
+	assert.match(notice, /cp-script reported: script result is on disk for cp-script; intake owns its outcome/);
+	assert.equal(after["cp-script"]?.phase, "held", "a durable script result is intaken before any pid probe");
+	assert.deepEqual([after["cp-unknown"]?.phase, after["cp-unknown"]?.failure?.message], ["failed", "script pid 4194305 is gone without a durable observed exit; outcome unknown, inspect the lease; never replay"]);
+	assert.deepEqual(readdirSync(h.path(LAYOUT.state)).filter((name) => name.startsWith("fleet")), ["fleet.json"], "no temp file left behind");
+	await restarted.child.close();
+
+	const again = h.parent();
+	const againNotice = String((await fleetNotice(again, /^fleet:/)).message);
+	assert.match(againNotice, /cp-kill9 revivable/, "a revivable job is named on every start");
+	assert.doesNotMatch(againNotice, /cp-unknown revivable/, "an unknown script exit is never revived");
+	const second = jobs();
+	for (const id of ["cp-dead", "cp-lost", "cp-obs", "cp-budget", "cp-unknown"]) assert.deepEqual(second[id], after[id], `${id}: a terminal record is not re-litigated`);
+	await again.child.close();
+
+	h.put(LAYOUT.fleetFile, "{ not json");
+	const corrupt = h.parent();
+	assert.match(String((await fleetNotice(corrupt, /fleet\.json is not valid JSON/)).message), /Refusing to guess; move it aside/);
+	await corrupt.child.close();
+	assert.equal(h.read(LAYOUT.fleetFile), "{ not json", "a corrupt fleet file is refused, never rewritten");
+	h.put(LAYOUT.fleetFile, JSON.stringify({ schema_version: SCHEMA_VERSION + 1, updated_at: isoTimestamp(), jobs: [] }));
+	assert.match(String((await fleetNotice(h.parent(), /fleet\.json is schema_version/)).message), /Upgrade pi-command-post/);
 });
