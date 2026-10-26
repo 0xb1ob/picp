@@ -160,7 +160,7 @@ test("P14e-install-files: cp-install writes, refuses, plans and uninstalls its f
 	assert.deepEqual(u.calls("systemctl").filter((call) => /enable|try-restart/.test(call)), ["--user enable --now cp-daemon.service"], "enabled with --now, never restarted");
 	assert.match(first.out, /^ok: enable: cp-daemon\.service is active: the parent supervisor and the viewer run$/m);
 	assert.match(first.out, /^fail: doctor: no parent running for \S+ after 90s; see cp-daemon log$/m, "the doctor step runs once cp-daemon started");
-	assert.equal(JSON.parse(u.text(join(u.cpHome, "data", "update.json")) ?? "{}").enabled, true);
+	assert.equal(JSON.parse(u.text(join(u.paths.dataDir, "update.json")) ?? "{}").enabled, true);
 	assert.doesNotMatch(u.log().join("\n"), /\bsudo\b/, "never sudo");
 	const before = u.log().length;
 	const second = await u.install(PINNED);
@@ -223,7 +223,7 @@ test("P14e-install-files: cp-install writes, refuses, plans and uninstalls its f
 	assert.deepEqual([existsSync(u.unit), existsSync(u.paths.config), existsSync(join(u.binDir, "cp-tunnel"))], [false, false, false]);
 	assert.equal(u.text(join(u.binDir, "cp-operator")), "#!/bin/sh\n# mine\n", "a wrapper cp-install did not write stays");
 	assert.match(gone.out, /^ok: uninstall: home \S+ kept \(data\/daemon\.json removed\) and app/m);
-	assert.ok(existsSync(join(u.cpHome, "data", "update.json")), "the home's own files stay");
+	assert.ok(existsSync(join(u.paths.dataDir, "update.json")), "the home's own files stay");
 });
 
 test("P14e-install-backend: detached, linger, readiness, --no-start, crontab, operator units", { timeout: 300_000 }, async (t) => {
@@ -407,7 +407,7 @@ test("P14e-install-extras: packages, gh, login, pi-lens, push and tmux", { timeo
 	assert.deepEqual(installs(u), [...new Set(Object.values(ROLE_PACKAGES).flat())].map((spec) => `install npm:${spec}`));
 	assert.doesNotMatch(plain.out, /\]: /, "no prompt");
 	assert.match(plain.out, /^skip: push: not set up; rerun with --push-origin URL to enable it$/m);
-	assert.deepEqual([existsSync(join(u.cpHome, "data", "push", "config.json")), /self-package/.test(plain.out)], [false, false]);
+	assert.deepEqual([existsSync(join(u.paths.dataDir, "push", "config.json")), /self-package/.test(plain.out)], [false, false]);
 	const pushed = r.user();
 	const origin = await pushed.install([...quiet, "--push-origin", "https://cp.example"]);
 	assert.match(origin.out, /^changed: push: push set up for https:\/\/cp\.example$/m);
@@ -435,9 +435,9 @@ test("P14e-install-extras: packages, gh, login, pi-lens, push and tmux", { timeo
 	assert.deepEqual(installs(broken), []);
 
 	const tracked = r.user();
-	mkdirSync(join(tracked.cpHome, "data"), { recursive: true });
-	writeFileSync(join(tracked.cpHome, "data", "trackers.json"), "{ retired, malformed");
-	writeFileSync(join(tracked.cpHome, "data", "projects.json"), JSON.stringify({ schema_version: 1, projects: [{ name: "tracked" }] }));
+	mkdirSync(tracked.paths.dataDir, { recursive: true });
+	writeFileSync(join(tracked.paths.dataDir, "trackers.json"), "{ retired, malformed");
+	writeFileSync(join(tracked.paths.dataDir, "projects.json"), JSON.stringify({ schema_version: 1, projects: [{ name: "tracked" }] }));
 	const untracked = await tracked.install(quiet);
 	assert.doesNotMatch(untracked.out, /tracker|--with-/i);
 	assert.deepEqual(tracked.log().filter((call) => call.endsWith(" --version")).map((call) => call.split(" ")[0]).filter((tool) => !["pi", ...PI_LENS_TOOLS.commands].includes(tool!)), [], "only surviving tools are probed");
