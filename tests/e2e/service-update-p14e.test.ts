@@ -220,11 +220,12 @@ test("P14e-update-skips: dirty, ahead, branch, busy and script skips move nothin
 
 test("P14e-update-config: off, absent and invalid config, the interval, a legacy service, fetch failures and a dry run", { timeout: 300_000 }, async (t) => {
 	const results = [];
-	for (const config of [{ enabled: false }, null, "{\"enabled\": \"yes\"}", { enabled: true, quiet_min: -5 }]) {
+	for (const config of [{ enabled: false }, null, "{\"enabled\": \"yes\"}", { enabled: true, quiet_min: -5 }, { enabled: true, quiet_min: "10" }, { enabled: true, quiet_min: null }, { enabled: true, quiet_min: 3 }]) {
 		const b = await bench(t, config);
-		results.push((await b.run())?.last_result);
+		const state = await b.run();
+		results.push(`${state?.last_result}${/"quiet_min": N >= 0/.test(state?.detail ?? "") ? " quiet_min" : ""}`);
 	}
-	assert.deepEqual(results, ["skipped_disabled", "skipped_disabled", "config_invalid", "config_invalid"]);
+	assert.deepEqual(results, ["skipped_disabled", "skipped_disabled", "config_invalid quiet_min", "config_invalid quiet_min", "config_invalid quiet_min", "config_invalid quiet_min", "up_to_date"]);
 	const b = await bench(t);
 	assert.equal((await b.run())?.last_result, "up_to_date");
 	assert.equal(await b.run(5), undefined, "under interval_min: silent, nothing recorded");
@@ -408,4 +409,70 @@ test("P14e-update-drain: a drain timeout, a drain refused during parent control,
 	gone.plan({});
 	assert.equal(await gone.run(30), undefined, "retried like a drain timeout: silent under 4x interval_min");
 	assert.equal((await gone.run(31))?.last_result, "updated");
+});
+
+test("P14e-update-verify: busy parents extend the verify to a deferred note, an observed failure or a down viewer never does", { timeout: 300_000 }, async (t) => {
+	const verify = async (plan: Plan) => {
+		const b = await bench(t);
+		const from = b.repo.head();
+		const to = advanceBase(b.repo, "v.txt", "v\n");
+		b.plan(plan);
+		const state = await b.run();
+		return { state, b, moved: b.repo.head() === to ? "to" : b.repo.head() === from ? "from" : "?" };
+	};
+	// Unsettled past 120 s, then a passing doctor: healthy, no note.
+	const late = await verify({ doctor: [...Array(70).fill("unsettled"), "ok"] });
+	assert.deepEqual([late.state?.last_result, late.moved, /deferred/.test(late.state?.detail ?? "")], ["updated", "to", false], last(late.b));
+	// Busy for the whole window (unsettled, or a doctor queued behind a live parent): accepted with the deferred note.
+	for (const doctor of ["unsettled", "hang"]) {
+		const busy = await verify({ doctor: [doctor] });
+		assert.deepEqual([busy.state?.last_result, busy.moved], ["updated", "to"], last(busy.b));
+		assert.match(busy.state?.detail ?? "", /; doctor deferred: parent busy 420s$/);
+	}
+	// The rollback verify deferred is not a failure: rolled_back, bad_sha stamped, the note in the detail.
+	const back = await verify({ doctor: ["error:DOCTOR broken", "unsettled"] });
+	assert.deepEqual([back.state?.last_result, back.moved, back.state?.bad_sha === back.state?.to], ["rolled_back", "from", true], last(back.b));
+	assert.match(back.state?.detail ?? "", /; doctor deferred: parent busy 420s$/);
+	// Busy with the viewer down, an absent parent, busy then down: not healthy within the base 120 s, then rolled back.
+	const failures = [];
+	for (const [plan, why] of [[{ doctor: ["unsettled"], viewerDown: true }, "viewer: .* answered 503"], [{ doctor: ["down:parent is not running; call cp_parent start"] }, "parent is not running"],
+		[{ doctor: [...Array(5).fill("unsettled"), "down:parent is not running; call cp_parent start"] }, "parent is not running"]] as const) {
+		const run = await verify(plan as Plan);
+		failures.push([run.state?.last_result, new RegExp(`not healthy within 120s: ${why}`).test(run.state?.detail ?? "")]);
+	}
+	assert.deepEqual(failures, [["rollback_failed", true], ["rollback_failed", true], ["rollback_failed", true]], "the rollback's verify fails alike");
+});
+
+test("P14e-update-quiet: a moving tip keeps settling, a stable tip drains after quiet_min; 0 drains at once; absent is 10", { timeout: 300_000 }, async (t) => {
+	const b = await bench(t, { enabled: true, interval_min: 5, quiet_min: 10 });
+	const first = advanceBase(b.repo, "a.txt", "a\n");
+	const head = b.repo.head();
+	const a = await b.run(5);
+	assert.deepEqual([a?.last_result, a?.first_seen_sha, a?.first_seen_at], ["skipped_settling", first, a?.last_run_at]);
+	assert.match(a?.detail ?? "", new RegExp(`origin/main ${first.slice(0, 12)} first seen ${a?.first_seen_at}; waiting for 10 min.*eligible `));
+	assert.equal((await b.run(5))?.first_seen_at, a?.first_seen_at, "the same tip keeps its first-seen clock");
+	const second = advanceBase(b.repo, "b.txt", "b\n");
+	const moved = await b.run(5);
+	assert.deepEqual([moved?.last_result, moved?.first_seen_sha, moved?.first_seen_at], ["skipped_settling", second, moved?.last_run_at], "a merge restarts the clock");
+	assert.equal((await b.run(5))?.last_result, "skipped_settling", "5 of 10 quiet minutes");
+	assert.deepEqual([b.repo.head(), b.hostCalls()], [head, []], "nothing drained while settling");
+	assert.deepEqual([(await b.run(5))?.last_result, b.repo.head(), b.causes()], ["updated", second, [{ reason: "auto-update", target_sha: second }]], last(b));
+
+	const zero = await bench(t, { enabled: true, interval_min: 5, quiet_min: 0 });
+	advanceBase(zero.repo, "z.txt", "z\n");
+	const state = await zero.run(5);
+	assert.deepEqual([state?.last_result, state?.first_seen_sha], ["updated", undefined]);
+	const absent = await bench(t, { enabled: true, interval_min: 5 });
+	advanceBase(absent.repo, "d.txt", "d\n");
+	const settled = [];
+	for (let i = 0; i < 3; i++) settled.push((await absent.run(5))?.last_result);
+	assert.deepEqual(settled, ["skipped_settling", "skipped_settling", "updated"], "10 minutes after first seen");
+	// A rollback is never held by the quiet period.
+	const r = await bench(t, { enabled: true, interval_min: 5, quiet_min: 10 });
+	const from = r.repo.head();
+	const to = advanceBase(r.repo, "r.txt", "r\n");
+	r.repo.git("fetch", "--quiet", "origin");
+	r.repo.git("merge", "--ff-only", "--quiet", to);
+	r.state({ phase: "verifying", from, to, lock: false });
+	assert.deepEqual([(await r.run(5))?.last_result, r.repo.head()], ["rolled_back", from]);
 });
