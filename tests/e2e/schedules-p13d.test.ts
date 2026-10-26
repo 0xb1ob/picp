@@ -523,7 +523,7 @@ test("P13d legacy run authority through cp_dispatch: a draining legacy run asks 
 	// Exclusions and non-members refuse with their codes in the run's audit; the operator-chat grant is never touched.
 	checkCall(parent, "excluded", "refused", /ship is excluded/);
 	assert.deepEqual(runs.run(excluded.run.id)!.authority_log.map((r) => [r.use, r.code]), [["dispatch", "kind_excluded"]]);
-	checkCall(parent, "outsider", "refused", new RegExp(`${outsider.id}: activated schedule sch-a00001 requires run membership`));
+	assert.match(checkCall(parent, "outsider", "refused", /./), new RegExp(`${outsider.id}: activated schedule sch-a00001 requires run membership`));
 	assert.deepEqual(audited.authority_log.filter((r) => r.decision === "permit").map((r) => [r.use, r.job_id]), [["dispatch", member!.id]]);
 	assert.deepEqual(bytes(h.mandates().file(grant.id)), grantBytes, "no grant spent or mutated");
 });
