@@ -92,6 +92,11 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 	const { window, document, Event, CustomEvent, HTMLElement } = parseHTML(page.text) as unknown as Record<string, any>;
 	HTMLElement.prototype.scrollIntoView ??= () => {}; // linkedom has no layout
 	const timers = new Set<ReturnType<typeof setTimeout>>();
+	let shifted = 0;
+	class TabDate extends Date {
+		constructor(...at: unknown[]) { super(...((at.length ? at : [Date.now() + shifted]) as [number])); }
+		static override now() { return Date.now() + shifted; }
+	}
 	let closed = false;
 	const requests: Requested[] = [];
 	const location = { hash, pathname: "/", search: "", origin, host: `127.0.0.1:${port}`, protocol: "http:", get href() { return `${origin}/${location.hash}`; }, assign() {}, replace() {}, reload() {} };
@@ -119,7 +124,7 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 		window, document, location, navigator: { userAgent: "node", language: "en", clipboard: { writeText: async () => {} } },
 		Event, CustomEvent, HTMLElement, KeyboardEvent: Event, MouseEvent: Event, InputEvent: Event,
 		fetch: browserFetch, Headers, Request, Response, URL, URLSearchParams, AbortController, AbortSignal, FormData, Blob, File,
-		TextEncoder, TextDecoder, console, queueMicrotask, structuredClone, atob, btoa, crypto, performance,
+		TextEncoder, TextDecoder, console, queueMicrotask, structuredClone, atob, btoa, crypto, performance, Date: TabDate,
 		setTimeout: track(setTimeout), setInterval: track(setInterval), clearTimeout, clearInterval,
 		requestAnimationFrame: (fn: (at: number) => void) => track(setTimeout)(() => fn(performance.now()), 16), cancelAnimationFrame: clearTimeout,
 		localStorage: { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, String(v)), removeItem: (k: string) => void storage.delete(k) },
@@ -139,6 +144,8 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 	const text = () => root.textContent ?? "";
 	return {
 		window, document, root, requests, confirms, storage, close, text, release,
+		/** Moves this tab's clock (its `Date`) forward by `ms`; the viewer's own clock is `pin`. */
+		shift: (ms: number) => void (shifted += ms),
 		/** Every open stream says `refresh`, as the server's does on a change: the mounted page re-reads its data. */
 		refresh: () => { for (const source of [...sources]) source.dispatchEvent(new globalThis.Event("refresh")); },
 		$: (selector: string) => root.querySelector(selector) as Element | null,

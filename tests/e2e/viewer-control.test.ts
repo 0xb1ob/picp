@@ -15,6 +15,7 @@ import { type ControlPorts, type DashboardControl, startDashboardControl } from 
 import { RESTART_UNSUPPORTED } from "../../src/dashboard-restart.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { tunnelConfigFile, tunnelRuntimeFile } from "../../src/service/daemon-tunnel-files.ts";
+import { deviceNotificationsFile } from "../../src/viewer/device-notification-files.ts";
 import { DEVICE_TRUST } from "../../src/viewer/api-types.ts";
 import { appendAnswerLine } from "../../src/viewer/control-audit.ts";
 import { controlConfigFile, controlInboxFile, controlJournalFile, controlRecordFile, controlSocketFile, operatorAnswersFile } from "../../src/viewer/control-files.ts";
@@ -616,7 +617,8 @@ test("P17-decision-card: an Awaiting card answers through the operator session's
 	await tab.find(`article[aria-labelledby="question-${last.id}"]`);
 	asks.answer(last.id, "Yes");
 	tab.click(await tab.find("button.decision-card-option", (b) => !b.hasAttribute("disabled")));
-	await tab.find(".decision-card-failed", (p) => /^Failed: /.test(p.textContent ?? "") && p.getAttribute("role") === "alert");
+	await tab.find(".decision-card-failed", (p) => p.textContent === `Failed: ${last.id} is answered; nothing to answer` && p.getAttribute("role") === "alert");
+	assert.equal(tab.requests.filter((r) => r.method === "POST").at(-1)?.status, 409, "the stale card's refusal");
 
 	// A session that died leaving its record behind (its pid alive, its socket gone): disabled, saying so.
 	const record = readFileSync(controlRecordFile(d.stateDir), "utf8");
@@ -992,8 +994,8 @@ else process.exit(reply.status ?? 0);
 `;
 
 /**
- * A user whose PATH holds only node, dirname and the named fake launchers, and whose `~/.local/bin/cp-operator` (a space
- * a quote and `$(false)` in its path) is installed unless `wrapper` is false; `env` is what the viewer runs with.
+ * A user whose PATH holds only node, dirname and the named fake launchers, and whose `~/.local/bin/cp-operator`
+ * (a space, a quote and `$(false)` in its path) is installed unless `wrapper` is false; `env` is what the viewer runs with.
  */
 function toolbox(t: TestContext, tools: readonly string[], { wrapper = true, role = "viewer" as string | null } = {}) {
 	const user = mkdtempSync(join(tmpdir(), "cp herdr'$(false)-"));
@@ -1178,12 +1180,19 @@ test("P17-composer: the operator transcript pins open asks above the composer be
 	const asks = new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl"));
 	const first = asks.open(choice("Keep paused?", ["Keep", "Raise"]));
 	asks.open(choice("Merge now?", ["Yes", "No"]));
+	const gone = asks.open(choice("Old?", ["Drop"]));
+	asks.withdraw(gone.id, "No longer needed");
+	// The transcript's cp_parent ask calls place the first ask's card and the withdrawn one inline, as history.
+	const transcript = join(d.home, "operator-transcript.jsonl"), line = (m: unknown) => JSON.stringify({ type: "message", timestamp: AT, message: m });
+	write(transcript, [first.id, gone.id].flatMap((id) => [line({ role: "assistant", content: [{ type: "toolCall", id: `call-${id}`, name: "cp_parent", arguments: { action: "ask" } }] }), line({ role: "toolResult", toolCallId: `call-${id}`, toolName: "cp_parent", content: [{ type: "text", text: JSON.stringify({ id }) }] })]).join("\n") + "\n");
+	write(operatorSessionsFile(join(d.stateDir, "sessions")), `${JSON.stringify({ at: AT, session_file: transcript })}\n`);
 	const session = await operatorSession(t, d.stateDir, () => !busy);
 	let tab = await d.open(OPERATOR);
 	const toggle = await bar(tab);
 	assert.deepEqual([toggle.textContent, toggle.getAttribute("aria-expanded"), toggle.closest("section")!.getAttribute("aria-label")], ["2 decisions waiting ▾", "false", "Open decisions"]);
 	const html = tab.root.innerHTML;
 	assert.ok(html.indexOf("session-pinned") < html.indexOf("operator-composer"), "the pinned block sits directly above the composer");
+	assert.deepEqual(tab.$$(".session-ask-pointer, .session-ask-settled").map((p) => p.textContent), ["open, answer below", "Withdrawn: No longer needed", "open, answer below"], "inline cards are history");
 	assert.equal(tab.$$(".session-pinned button.decision-card-option").length, 4, "one button per option, per card");
 	assert.equal(tab.storage.get("cp-sessions-pinned-open"), undefined, "nothing remembered before the operator chooses");
 	tab.click(toggle);
@@ -1195,6 +1204,7 @@ test("P17-composer: the operator transcript pins open asks above the composer be
 	asks.answer(first.id, "Keep");
 	tab.refresh();
 	assert.equal((await bar(tab, (b) => b.textContent === "1 decision waiting ▾")).getAttribute("aria-expanded"), "false", "an ask leaving never opens it");
+	assert.match((await tab.find(".session-ask-settled", (p) => /^Answered/.test(p.textContent ?? ""))).textContent ?? "", /^Answered: Keep · /);
 	asks.open(choice("Tag it?", ["Yes"]));
 	tab.refresh();
 	const opened = await bar(tab, (b) => b.textContent === "2 decisions waiting ▾" && b.getAttribute("aria-expanded") === "true");
@@ -1280,6 +1290,11 @@ test("P17-composer-start: offline the composer holds a message and offers each l
 	assert.deepEqual(lines(controlInboxFile(d.stateDir)).map((l) => [l.type, l.text]), [["held", "deploy when green"]]);
 	tab = await tab.reopen();
 	await tab.waitText(/Operator session offline · 1 held — a message waits here until a session attaches/);
+	const overview = await d.open("#overview");
+	await overview.find(".overview-services .start-session-button");
+	assert.equal(overview.$$(".overview-chip strong").find((s) => /^offline/.test(s.textContent ?? ""))?.textContent, "offline · 1 held");
+	assert.deepEqual(overview.$$(".overview-services .start-session-button").map((b) => b.textContent), ["Start in herdr", "Start in tmux", "Resume last session in herdr", "Resume last session in tmux"]);
+	overview.close();
 
 	tab.click(await tab.find(".start-session-button", (b) => b.textContent === "Start in tmux"));
 	await tab.find(".start-session-button", (b) => b.textContent === "Starting…" && b.hasAttribute("disabled"));
@@ -1288,11 +1303,24 @@ test("P17-composer-start: offline the composer holds a message and offers each l
 	const started = await until(() => posts(tab, START), (rows) => rows.length > 0, "the start POST");
 	assert.deepEqual(started.map((r) => [r.body, r.headers["x-cp-control-token"], r.status]), [['{"via":"tmux"}', inbox, 202]]);
 	assert.deepEqual(box.calls().filter((c) => c.name === "tmux").map((c) => c.argv), [["new-session", "-d", "-s", "cp-operator", box.wrapper]]);
+	// No session serves within the tab's 60 s: Start fails, saying where to look; past the viewer's window it reruns.
+	tab.shift(61_000);
+	assert.match((await tab.find(".start-session-failed")).textContent ?? "", /^Start failed: no session served the dashboard within 60 s; attach from a terminal: tmux attach -t cp-operator to see why$/);
+	d.pin(new Date(Date.now() + 61_000).toISOString());
+	tab.click(await tab.find(".start-session-button", (b) => b.textContent === "Start in tmux"));
+	await tab.find(".start-session-button", (b) => b.textContent === "Starting…");
 	await operatorSession(t, d.stateDir);
 	await tab.find("textarea", (f) => !f.hasAttribute("disabled"), 30_000);
 	assert.equal(tab.$(".start-session-button")?.outerHTML, undefined, "running: no Start session");
 
-	const none = await dashboard(t, { env: toolbox(t, [], { role: null }).env });
+	// The Overview alarm: a check failing 16 min and a relay unseen 11 min raise a line each; 14 min failing does not.
+	const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+	const none = await dashboard(t, { env: toolbox(t, [], { role: null }).env, seed: (stateDir) => {
+		write(join(stateDir, "health.json"), { schema_version: 1, last_run_at: ago(1), checks: { disk: { status: "fail", detail: "3 GiB", since: ago(16) }, gh: { status: "fail", detail: "401", since: ago(14) } } });
+		write(join(stateDir, "operator", "relay-outbox.json"), { schema_version: 1, updated_at: ago(1), entries: [{ id: "wake:a", relay: { kind: "wake", stale: false, text: "x", receipt: { level: null, reached: [] }, paths: [] }, queued_at: ago(11), producer: "1.1" }] });
+	} });
+	const alarm = await (await none.open("#overview")).find(".overview-alarm");
+	assert.deepEqual([...alarm.querySelectorAll("p")].map((p) => p.textContent), ["1 parent message not seen by the main session, oldest 11m (wake wake:a)", "health check disk failing 16m: 3 GiB"]);
 	const bare = await none.open(OPERATOR);
 	const only = await bare.find(".start-session-button");
 	assert.deepEqual([bare.$$(".start-session-button").length, only.textContent, only.hasAttribute("disabled")], [1, "Start session", true]);
@@ -1347,6 +1375,16 @@ test("P17-restart: the operator bar's Restart session says why it cannot, confir
 	assert.ok(reads.filter((p) => p.endsWith("?sends=0")).length >= 2 && reads.includes("/api/operator/control"), `each owner's sends: ${reads}`);
 	const based = tab.requests.slice(from).filter((r) => r.path.startsWith("/api/operator/control") && r.headers["x-cp-delta-base"]);
 	assert.ok(based.length > 0 && based.every((r) => r.status === 200), "re-reads name their held version and still land restarted");
+	// A session that never comes back fails once the tab's clock passes the 90 s wait, saying where to look.
+	d.pin(new Date(Date.now() + 61_000).toISOString());
+	tab = await tab.reopen();
+	tab.click(await tab.find(button, (b) => !b.hasAttribute("disabled")));
+	tab.click(await tab.find(".session-bar-restart .operator-restart-confirm"));
+	await until(() => shutdowns, (n) => n === 2, "the second stop");
+	control.stop();
+	await tab.find(line, (p) => p.textContent === "Relaunching · resumes operator-session.jsonl", 30_000);
+	tab.shift(91_000);
+	assert.match((await tab.find(line, (p) => /^Failed: /.test(p.textContent ?? ""))).textContent ?? "", /^Failed: the session has not come back within 90 s; check the operator terminal/);
 });
 
 /** A dashboard whose home runs the quick tunnel: cp-view owns the device store and serves the remote listener. */
@@ -1377,7 +1415,7 @@ test("P17-devices: Settings → Devices shows names as text with level and trust
 	const d = await tunnelled(t);
 	let tab = await d.open("#settings");
 	await tab.find(devicesSection, (s) => (s.textContent ?? "").includes(DEVICE_TRUST));
-	await tab.waitText(/Settings unavailable: /);
+	assert.ok((await tab.waitText(/Settings unavailable: /)).includes(DEVICE_TRUST), "Devices stands beside unavailable Settings");
 	const select = await tab.find(".devices-add select");
 	for (const option of select.querySelectorAll("option")) option.toggleAttribute("selected", option.getAttribute("value") === "view");
 	select.dispatchEvent(new tab.window.Event("change", { bubbles: true }));
@@ -1420,6 +1458,11 @@ test("P17-devices: Settings → Devices shows names as text with level and trust
 	tab.click(await tab.find(".devices-add button", (b) => b.textContent === "Add device" && !b.hasAttribute("disabled")));
 	await tab.waitText(/Three pairing links are already live/);
 
+	write(tunnelRuntimeFile(d.stateDir), { schema_version: 1, origin: null, generation: 1, revision: 1, state: "stopped", mode: "quick", port: d.remote, updated_at: new Date().toISOString() });
+	await until(async () => (await d.get("/api/devices")).body.origin, (origin) => origin === null, "the stopped tunnel");
+	tab = await tab.reopen();
+	await tab.waitText(/The remote dashboard is not running; paired devices sign in again once cp-tunnel up runs/);
+	assert.ok(tab.$(".devices-add button")!.hasAttribute("disabled"), "not running: Add device is disabled");
 	writeFileSync(d.store, "{not json");
 	tab = await tab.reopen();
 	await tab.find('[role="alert"]', (a) => /Devices unavailable: The device list is unreadable on this home/.test(a.textContent ?? ""));
@@ -1464,7 +1507,13 @@ test("P17-device-notices: a pairing raises a notice above every screen with name
 	tab = await tab.reopen();
 	await tab.find(".device-notices", (s) => /\+2 more/.test(s.textContent ?? ""));
 	assert.equal(tab.$$(".device-notice").length, 3);
+	writeFileSync(deviceNotificationsFile(d.stateDir), "{not json");
+	tab.refresh();
+	assert.match((await tab.find(".device-notices", (s) => /push status unavailable/.test(s.textContent ?? ""))).textContent ?? "", /push status unavailable: the pairing-alert delivery ledger is unreadable/);
 	writeFileSync(d.store, "{not json");
+	tab.refresh();
+	assert.match((await tab.find(".device-notices", (s) => /showing the last read/.test(s.textContent ?? ""))).textContent ?? "", /Pairing notices unavailable \(HTTP 503\); showing the last read/);
+	assert.equal(tab.$$(".device-notice").length, 3, "an offline tab keeps its unread notices");
 	tab = await tab.reopen();
 	await tab.waitText(/Pairing notices unavailable \(HTTP 503\)/);
 });
