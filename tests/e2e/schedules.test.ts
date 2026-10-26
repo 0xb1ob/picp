@@ -1175,3 +1175,75 @@ test("P13c native policy and run options: add saves a report-only revision 1 or 
 	checkCall(ends(after), "future", "refused", /schedule-runs\.json violates the schedule run contract: \/schema_version: must be one of 1/);
 	assert.equal(readFileSync(runsFile, "utf8"), JSON.stringify({ schema_version: 99, runs: [] }), "a refused read rewrites nothing");
 });
+
+test("P13c native self-review: six readers and one synthesis run in code within parallelism and close the anchor with no wake; a reader dropped by the parent drops S1 and the run is partial", { timeout: 420_000 }, async (t) => {
+	const h = await schedulesHome(t);
+	const run = () => h.runs().runs().filter((entry) => entry.schedule_id === h.idOf("self-review")).at(-1)!;
+	const roleIds = () => Object.fromEntries(run().members.filter((member) => member.role).map((member) => [member.role, member.job_id])) as Record<string, string>;
+	const reader = h.model("reader", [{ kind: "tool_calls", calls: [{ name: "report_result", args: (request: { body: unknown }) => {
+		const role = /Self-review (?:synthesis (S1)|reader (L\d))/.exec(JSON.stringify(request.body))!;
+		const id = roleIds()[role[1] ?? role[2]!]!, dir = join(h.stateDir, "artifacts", id), report = join(dir, role[1] ? "board.json" : "report.md");
+		mkdirSync(join(dir, "site"), { recursive: true });
+		writeFileSync(join(dir, "site", "index.html"), "<p>Experiment proposals: none.</p>\n");
+		writeFileSync(report, role[1] ? JSON.stringify({ title: "Self-review", description: "Findings.", job_ids: Object.values(roleIds()), created_at: "2026-10-26T00:00:00Z" }) : `Findings\n${id} read its sources.\n`);
+		return { job_id: id, kind: "research", status: "done", summary: `${id} reviewed.`, artifact_path: report,
+			plan_summary: { goal: "Review the window.", approach: ["Read the sources."], acceptance: ["Findings listed."], risk: "none", touched: ["none"] } };
+	} }] }]);
+	const fleetOf = (id: string) => (existsSync(join(h.stateDir, "fleet.json")) ? readFleet(h.home).jobs : []).find((job) => job.job_id === id);
+	const parent = await h.parent("P13c: Add the self-review schedule.", [
+		{ kind: "tool_calls", calls: [schedule("add", { action: "add", name: "self-review", project: "demo", manual: true, title: "Self-review", kind: "research", delivery: "local", skill: "cp-self-review", limits: { parallelism: 2, child_jobs: 8 }, operator_quote: "Add the self-review schedule." })] },
+		{ kind: "tool_calls", calls: [schedule("run", () => ({ action: "run_now", id: h.idOf("self-review"), overrides: { model: reader, thinking: "off" } }))] },
+		{ kind: "tool_calls", calls: [
+			{ id: "label", name: "cp_job", args: () => ({ action: "create", project: "demo", kind: "research", delivery: "local", title: "extra reader", labels: [`schedule:${h.idOf("self-review")}`] }) },
+			{ id: "next", name: "cp_next", args: { project: "demo" } },
+		] },
+	]);
+	checkCall(ends(parent), "run", "ok", /fired: created cp-/);
+	checkCall(ends(parent), "label", "refused", /runner creates this self-review run's jobs in code/);
+	const ids = await waitFor(roleIds, (found) => Object.keys(found).length === 7, { timeoutMs: 30_000, what: "seven roles admitted" });
+	const anchor = run().anchor_job_id!;
+	assert.deepEqual(Object.keys(ids).sort(), ["L1", "L2", "L3", "L4", "L5", "L6", "S1"]);
+	assert.match(checkCall(ends(parent), "next", "ok", /^ready: \(none\)$/m), /^action: (?!dispatch)/m, "cp_next offers no runner-owned member");
+	const s1 = await waitFor(() => h.ledger.read().jobs.find((job) => job.id === ids.S1)!, (job) => job.blocked_by.length === 6, { timeoutMs: 30_000, what: "S1 wired to six readers" });
+	assert.deepEqual([...s1.blocked_by].sort(), ["L1", "L2", "L3", "L4", "L5", "L6"].map((role) => ids[role]).sort());
+	assert.ok(s1.labels.includes(`schedule:${h.idOf("self-review")}`) && s1.labels.includes("delivery:board"));
+	assert.match((await h.ledger.show(anchor)).comments.map((comment) => comment.text).join("\n"), new RegExp(`^expanded: L1 ${ids.L1}, .*S1 ${ids.S1}`, "m"));
+	let busiest = 0;
+	await waitFor(() => run(), (entry) => {
+		busiest = Math.max(busiest, Object.values(ids).filter((id) => ["spawning", "waiting", "working"].includes(fleetOf(id)?.phase ?? "")).length);
+		return entry.phase === "closed";
+	}, { timeoutMs: 300_000, what: "the self-review run closed" });
+	assert.ok(busiest >= 1 && busiest <= 2, `parallelism 2: ${busiest} at once`);
+	assert.equal(run().outcome, "completed");
+	assert.match((await h.ledger.show(anchor)).close_reason ?? "", new RegExp(`^researched: synthesis ${ids.S1}`));
+	// The reader's brief carries its window third: L3 reads the first 12 h of the 36 h before the anchor.
+	const end = Date.parse((await h.ledger.show(anchor)).created_at), at = (hours: number) => new Date(end - hours * 3_600_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+	assert.match(readFileSync(join(h.home, paths.briefFile(ids.L3!)), "utf8"), new RegExp(`Self-review reader L3: [^]*\\[${at(36)}, ${at(24)}\\)`));
+	const synthesis = readFileSync(join(h.home, paths.briefFile(ids.S1!)), "utf8");
+	assert.match(synthesis, /Self-review synthesis S1/);
+	assert.ok(synthesis.includes(`state/artifacts/${ids.L6}/report.md`), "S1 reads every reader's report");
+	assert.match(synthesis, /"Experiment proposals" section: zero to three proposals/);
+	assert.match(synthesis, /S1 runs, dispatches and authorizes nothing/);
+	assert.match(synthesis, /no builds, tests, installs, git writes, or writes to live state/);
+	const memberWakes = (child: PiChild) => child.records().filter((r) => r.type === "message_start" && Object.values(ids).some((id) => JSON.stringify(r.message).includes(id)) && ["cp-envelope", "cp-schedule"].includes((r.message as { customType?: string })?.customType ?? ""));
+	assert.deepEqual(memberWakes(parent), [], "no parent wake for a code-owned run");
+
+	// The parent drops L3 before it starts: S1 never runs without all six reports and the run closes partial.
+	await h.closeParents();
+	const second = await h.parent("P13c: run it again.", [
+		{ kind: "tool_calls", calls: [schedule("again", () => ({ action: "run_now", id: h.idOf("self-review"), overrides: { model: reader, thinking: "off" } }))] },
+		{ kind: "text", text: "Started." },
+		{ kind: "tool_calls", calls: [{ id: "drop", name: "cp_job", args: () => ({ action: "drop", job_id: roleIds().L3, reason: "result not delivered" }) }] },
+	]);
+	checkCall(ends(second), "again", "ok", /fired: created cp-/);
+	const again = await waitFor(roleIds, (found) => Object.keys(found).length === 7 && found.L3 !== ids.L3, { timeoutMs: 30_000, what: "the second run's roles" });
+	await second.prompt("P13c: Drop the L3 reader.");
+	await waitFor(() => ends(second).get("drop"), (found) => found !== undefined, { timeoutMs: 60_000, what: "the drop's result" });
+	checkCall(ends(second), "drop", "ok", new RegExp(again.L3!));
+	assert.notEqual(again.L3, ids.L3);
+	await waitFor(() => run(), (entry) => entry.phase === "closed", { timeoutMs: 300_000, what: "the second run closed" });
+	assert.equal(run().outcome, "partial");
+	assert.match((await h.ledger.show(again.S1!)).close_reason ?? "", new RegExp(`^dropped: run .*: required reader\\(s\\) ${again.L3} not delivered`));
+	assert.equal(fleetOf(again.S1!), undefined, "S1 never starts without all six reports");
+	assert.match((await h.ledger.show(run().anchor_job_id!)).close_reason ?? "", /^dropped: self-review run .* without a synthesis/);
+});

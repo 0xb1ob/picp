@@ -209,7 +209,6 @@
 	"tests/schedule-migrations.test.ts": 244,
 	"tests/schedule-native-migration.test.ts": 488,
 	"tests/schedule-policy.test.ts": 8,
-	"tests/schedule-self-review.test.ts": 529,
 	"tests/service-alerts.test.ts": 45,
 	"tests/service-health.test.ts": 180,
 	"tests/service-install.test.ts": 4505,
