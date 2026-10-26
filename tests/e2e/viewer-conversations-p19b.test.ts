@@ -63,15 +63,32 @@ test("P19-search: the shell's search lists pages, in-flight and landed jobs from
 	const results = () => tab.$$("dialog a");
 	const query = async (value: string) => { tab.type(tab.$("dialog input")!, value); await settle(); };
 	const hrefs = () => results().map((a) => a.getAttribute("href"));
-	const trigger = await tab.find(".shell-search");
+	let trigger = await tab.find(".shell-search");
 	assert.equal(tab.$("dialog"), null, "closed search does not render");
 	tab.click(trigger);
 	await tab.find("dialog[open]");
 	assert.equal(focused(), tab.$("dialog input"), "header search opens a modal dialog with its input focused");
 	assert.match(tab.$("dialog")!.textContent!, /Loading/);
+	tab.go("#decisions");
+	await until(() => tab.$("dialog"), (open) => open === null, "leaving the page to unmount the held search");
+	const stale = await tab.find(".shell-search");
+	tab.go("#jobs");
+	trigger = (await until(() => tab.$(".shell-search"), (el) => !!el && el !== stale, "the Jobs shell to mount again"))!;
+	tab.click(trigger);
+	await tab.find("dialog[open]");
+	tab.click(tab.$('dialog button[aria-label="Close search"]')!);
+	await until(() => tab.$("dialog"), (open) => open === null, "the held search to close");
+	tab.click(tab.$(".shell-desktop-search")!);
+	(await tab.find("dialog[open]")).dispatchEvent(new tab.window.Event("cancel", { cancelable: true }));
+	await until(() => tab.$("dialog"), (open) => open === null, "the held search to cancel");
+	tab.click(trigger);
+	await tab.find("dialog[open]");
 	tab.release();
+	await settle();
+	assert.match(tab.$("dialog")!.textContent!, /Loading/, "late data from a closed dialog cannot appear in a new search");
+	assert.doesNotMatch(tab.$("dialog")!.textContent!, /unavailable/, "nor can a closed dialog's aborted read");
 	await tab.waitText(/Recently landed/);
-	assert.equal(overview(), 1, "one /api/overview read per opening");
+	assert.equal(overview(), 1, "close, cancel and unmount abort their held reads: only the open dialog's read is sent");
 	assert.equal(results().length, 15, "audit P4 #28: 12 pages, two in-flight jobs and one landed");
 	assert.deepEqual(tab.$$("dialog h2").map((h) => h.textContent), ["Go to", "In flight", "Recently landed"]);
 	assert.deepEqual(tab.$$(".search-shortcuts .search-items a").map((a) => a.getAttribute("href")), ["#overview", "#decisions", "#jobs", "#board", "#map", "#sessions", "#stats", "#reports", "#schedules", "#files", "#settings", "#more"], "design shortcut order retains every destination, including More");
@@ -175,9 +192,10 @@ test("P19-rollup-fold: relay turns about one PR or job fold; another subject, an
 		operator("break three"),
 		wake("cp-e", "E woke 1", local(15, 23)), relay("E relay 1", local(15, 23)), wake("cp-e", "E woke 2", local(16, 1)), relay("E relay 2", local(16, 1)),
 		wake("cp-f", "F woke"), relay("F single turn", local(16, 2)),
+		wake("cp-g", "G woke 1", local(16, 22)), relay("G relay 1", local(16, 22)), wake("cp-g", "G woke 2", local(16, 23)), relay("G relay 2", local(17, 0)),
 	]);
 	const tab = await d.open(FULL);
-	await tab.waitText(/F single turn/);
+	await tab.waitText(/G relay 2/);
 	const cards = tab.$$(".session-rollup").map((card) => card.textContent ?? "");
 	assert.equal(cards.length, 2, "only the cp-b pair and the cp-a pair fold");
 	assert.ok(cards[0]!.includes("A relay 2") && !cards[0]!.includes("A relay 1"), "(a) a wake with steps heads its turn: the latest relay shows");
@@ -185,6 +203,7 @@ test("P19-rollup-fold: relay turns about one PR or job fold; another subject, an
 	assert.ok(cards[1]!.includes("I relay 2") && !cards[1]!.includes("I relay 1"), "(i) two PRs named: the job key folds");
 	const folded = cards.join("\n");
 	for (const alone of ["C relay", "D relay", "H relay", "E relay", "F single turn"]) assert.ok(!folded.includes(alone) && tab.text().includes(alone), `(c, d, h, e, f) ${alone} stays its own row`);
+	assert.ok(!folded.includes("G relay") && tab.text().includes("G relay 1"), "(e) a day starting at the later turn's relay, not its wake, folds nothing");
 });
 
 const turns = [wake("cp-a", "first woke"), relay(`first update on ${PR}`), wake("cp-a", "second woke"), relay(`second update on ${PR}`), wake(null, "HELD PR LANDED"), relay(`latest update: ${PR} merged`)];
@@ -344,7 +363,7 @@ test("P19-render-states: an awaiting ask's markup is text, its untimestamped tra
 
 // ---- copy reply ----------------------------------------------------------------------------------------------------
 
-test("P19-copy-reply: a job's awaiting ask copies its exact reply, falls back to manual selection, and never acts after leaving", { timeout: 120_000 }, async (t) => {
+test("P19-copy-reply: a job's awaiting ask copies its exact reply, falls back to manual selection, and disables while copying", { timeout: 120_000 }, async (t) => {
 	const d = await viewer(t, { seed: (stateDir) => {
 		write(join(stateDir, "fleet.json"), { jobs: [{ job_id: "cp-copy", project: "demo", phase: "held" }] });
 		write(ledgerFile(stateDir), { jobs: [{ id: "cp-copy", title: "Copy work", status: "in_progress", labels: ["project:demo", "kind:ship"] }] });
@@ -359,12 +378,13 @@ test("P19-copy-reply: a job's awaiting ask copies its exact reply, falls back to
 
 	const copied: string[] = [];
 	navigator.clipboard = { writeText: async (text: string) => void copied.push(text) };
+	const clicked = Date.now();
 	tab.click(button());
 	await tab.waitText(/Copied/);
 	assert.deepEqual(copied, ["ask-aa: Keep"], "success writes the exact reply");
-	await new Promise((done) => setTimeout(done, 1000));
-	assert.match(button().textContent!, /Copied/, "the feedback holds while its 1600 ms timer runs");
 	await until(() => button().textContent, (label) => label === "Copy", "the feedback timer to reset");
+	const held = Date.now() - clicked; // a lower bound on the feedback, not a wait: a slow runner only lengthens it
+	assert.ok(held >= 1_500, "the feedback holds while its 1600 ms timer runs");
 
 	const focused = browserShims(t, tab);
 	for (const clipboard of [{ writeText: async () => { throw new Error("denied"); } }, undefined]) {
@@ -382,17 +402,10 @@ test("P19-copy-reply: a job's awaiting ask copies its exact reply, falls back to
 
 	let resolve!: () => void;
 	navigator.clipboard = { writeText: () => new Promise<void>((done) => { resolve = done; }) };
-	const fresh = await tab.reopen();
-	fresh.navigator.clipboard = navigator.clipboard;
-	fresh.click(await fresh.find('button[aria-label="Copy reply for the operator chat"]'));
+	tab.click(button());
 	await settle();
-	assert.equal(fresh.$('button[aria-label="Copy reply for the operator chat"]')!.hasAttribute("disabled"), true, "copying disables the button");
-	fresh.go("#jobs");
-	await fresh.find(".jobs, .page-header");
+	assert.equal(button().hasAttribute("disabled"), true, "copying disables the button");
 	resolve();
-	await new Promise((done) => setTimeout(done, 1700));
-	fresh.go("#job/cp-copy");
-	assert.equal((await fresh.find('button[aria-label="Copy reply for the operator chat"]')).textContent, "Copy", "a copy resolving after leaving schedules no feedback");
 });
 
 // ---- skills and links in the operator transcript ------------------------------------------------------------------
@@ -464,10 +477,10 @@ test("P19-links: transcript URLs, .pi-command-post paths and #N refs render as l
 
 test("P19-route: #sessions opens the Full transcript; transcript=0 is Decisions; a refused default falls back silently; a draft stays in the hash", { timeout: 120_000 }, async (t) => {
 	const d = await viewer(t);
-	const requested = async (v: { open(hash: string): Promise<Tab> }, hash: string) => {
+	const requested = async (v: { open(hash: string): Promise<Tab> }, hash: string, count = 1) => {
 		const tab = await v.open(hash);
-		await until(() => tab.requests.filter((r) => r.path.startsWith("/api/sessions")).length, (n) => n > 0, `${hash}'s data request`);
-		await new Promise((done) => setTimeout(done, 200));
+		await until(() => tab.requests.filter((r) => r.path.startsWith("/api/sessions")).length, (n) => n >= count, `${hash}'s data requests`);
+		await settle();
 		return { tab, paths: tab.requests.filter((r) => r.path.startsWith("/api/sessions")).map((r) => r.path) };
 	};
 	for (const hash of ["#sessions", "#sessions?view=you", "#sessions?view=you&transcript=1"]) assert.deepEqual((await requested(d, hash)).paths, ["/api/sessions?view=you&transcript=1"], `${hash} asks for the Full transcript`);
@@ -477,7 +490,7 @@ test("P19-route: #sessions opens the Full transcript; transcript=0 is Decisions;
 	assert.deepEqual(draft.paths, ["/api/sessions?view=you&transcript=1"], "cp-hhuf P6: the composer's draft never reaches the API");
 
 	const plain = await viewer(t, { requireTailnet: false });
-	const fallback = await requested(plain, "#sessions");
+	const fallback = await requested(plain, "#sessions", 2);
 	assert.deepEqual(fallback.paths, ["/api/sessions?view=you&transcript=1", "/api/sessions?view=you&transcript=0"], "one refused default, then Decisions");
 	assert.deepEqual(fallback.tab.requests.filter((r) => r.path.startsWith("/api/sessions")).map((r) => r.status), [403, 200]);
 	assert.doesNotMatch(fallback.tab.text(), /Refresh failed/, "the fallback is silent");

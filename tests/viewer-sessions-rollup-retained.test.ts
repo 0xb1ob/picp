@@ -1,6 +1,6 @@
 /**
- * Rollup units no e2e transcript can produce (P19b): a thread change inside one job's turns, a day start inside a
- * turn, an order gap a filter opened, and an anchor on a run's middle turn. P19-rollup-* pin the served folds.
+ * Rollup units no e2e transcript can produce (P19b): a thread change inside one job's turns, an order gap a filter
+ * opened, and an anchor on a run's middle turn. P19-rollup-* pin the served folds.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -24,7 +24,6 @@ test("rollups: never across a thread change or a source gap; a run ends before t
 	const two = [wake("w1", "cp-b"), relay("r1"), wake("w2", "cp-b"), relay("r2")];
 	const threaded = [wake("w1", "cp-b"), relay("r1"), wake("w2", "cp-b", { thread: "th-x" }), relay("r2", "r2", { thread: "th-x" })];
 	assert.deepEqual(fold(threaded), ids(threaded), "(e) a thread change");
-	assert.deepEqual(fold(two, { days: new Map([["r2", "Fri, Oct 16"]]) }), ids(two), "(e) a day start inside the later turn");
 	assert.deepEqual(fold(two, { order: new Map([["w1", 0], ["r1", 1], ["w2", 7], ["r2", 8]]) }), ids(two), "(e) an order gap a filter opened");
 	const three = [wake("w1", "cp-b"), relay("r1"), wake("w2", "cp-b"), relay("r2"), wake("w3", "cp-b"), relay("r3")];
 	assert.deepEqual(fold(three, { keep: "r2" }), ["w1", "r1", "w2", "r2", "w3", "r3"], "(g) an anchor on the middle turn folds nothing");
