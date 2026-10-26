@@ -26,7 +26,7 @@ import { devicesFile } from "../../src/viewer/device-files.ts";
 import { DeviceStore } from "../../src/viewer/device-store.ts";
 import { pushConfigFile, pushDeliveriesFile, readPushConfig, subscriptionFile, subscriptionId, vapidKeyFile } from "../../src/viewer/push-files.ts";
 import { createAgentDir, createScratchHome, type PiChild, REPO_ROOT, startPiChild } from "../harness/index.ts";
-import { startViewer } from "../harness/dashboard.ts";
+import { startViewer, until as poll } from "../harness/dashboard.ts";
 import { type TestDevice, testDevice } from "../harness/push.ts";
 
 const ORIGIN = "https://cp.example.com";
@@ -44,15 +44,7 @@ type Post = { host: string; slug: string; headers: IncomingHttpHeaders; body: Bu
 type Finding = { check: string; severity: string; what: string; detail?: string; fix?: string };
 type Answer = { status: number; body?: string; headers?: Record<string, string> };
 
-const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
-async function until<T>(read: () => T | Promise<T>, ok: (value: T) => boolean, what: string, ms = 60_000): Promise<T> {
-	let last: T | undefined;
-	for (const end = Date.now() + ms; Date.now() < end; await sleep(100)) {
-		last = await read();
-		if (ok(last)) return last;
-	}
-	throw new Error(`timed out waiting for ${what}; last = ${JSON.stringify(last)}`);
-}
+const until = <T>(read: () => T | Promise<T>, ok: (value: T) => boolean, what: string) => poll(read, ok, what, 60_000);
 
 /** A scratch home, a stand-in push service and (after `start`) a real parent whose clock `advance` moves. */
 async function rig(t: TestContext, { configured = true, scale = SCALE } = {}) {
