@@ -361,14 +361,28 @@ async function paged<T extends object>(
 	throw new ActionsCiError("incomplete", pathOf(ACTIONS_MAX_PAGES), `more than ${ACTIONS_MAX_PAGES} pages`);
 }
 
-async function jobsWithin(options: ActionsReadOptions, budget: Budget, run: { runId: number; attempt: number; sha?: string }): Promise<ActionsJob[]> {
-	return paged(
+/** Finished attempts' jobs per runner: they never change, and re-reading them every watch tick timed out (#537). */
+const finishedJobs = new WeakMap<CommandRunner, Map<string, ActionsJob[]>>();
+const FINISHED_JOBS_KEEP = 256;
+
+async function jobsWithin(options: ActionsReadOptions, budget: Budget, run: { runId: number; attempt: number; sha?: string; finished?: boolean }): Promise<ActionsJob[]> {
+	const key = `${options.repo ? repoPath(options.repo) : options.cwd}#${run.runId}/${run.attempt}`;
+	const cache = finishedJobs.get(options.exec) ?? new Map<string, ActionsJob[]>();
+	const cached = run.finished ? cache.get(key) : undefined;
+	if (cached) return structuredClone(cached);
+	const jobs = await paged(
 		options,
 		budget,
 		(page) => actionsJobsPath({ repo: options.repo, runId: run.runId, attempt: run.attempt, page }),
 		(stdout, endpoint) => parseJobsPage(stdout, run, endpoint),
 		(job) => job.id,
 	);
+	if (run.finished && jobs.every((job) => job.status === "completed")) {
+		cache.set(key, structuredClone(jobs));
+		if (cache.size > FINISHED_JOBS_KEEP) cache.delete(cache.keys().next().value as string);
+		finishedJobs.set(options.exec, cache);
+	}
+	return jobs;
 }
 
 /** Every job of one run attempt, all pages; any failed page throws rather than returning a partial list. */
@@ -393,7 +407,7 @@ export async function readActionsCi(options: ActionsReadOptions & { sha: string;
 		const observed: ActionsRun[] = [];
 		for (let at = 0; at < runs.length; at += ACTIONS_JOBS_CONCURRENCY) {
 			const batch = runs.slice(at, at + ACTIONS_JOBS_CONCURRENCY);
-			const jobs = await Promise.all(batch.map((run) => jobsWithin(options, budget, { runId: run.databaseId, attempt: run.attempt, sha: options.sha })));
+			const jobs = await Promise.all(batch.map((run) => jobsWithin(options, budget, { runId: run.databaseId, attempt: run.attempt, sha: options.sha, finished: run.status === "completed" })));
 			batch.forEach((run, index) => observed.push({ ...run, jobs: jobs[index] as ActionsJob[] }));
 		}
 		return observed;

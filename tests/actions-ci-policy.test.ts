@@ -133,6 +133,31 @@ test("a failed observation's trace names the calls still in flight", async () =>
 	assert.match(lines[0] ?? "", /\+\d+ms repos\/\{owner\}\/\{repo\}\/actions\/runs\/7\/attempts\/1\/jobs\S+ cap \d+ms in flight$/);
 });
 
+// #537: the main watch re-read a finished attempt's jobs every tick, and that call kept timing out. A completed attempt's
+// jobs never change, so the next observation with the same runner reads only the runs list; an unfinished one re-reads.
+test("a finished attempt's jobs are read once per runner; an unfinished attempt's every time", async () => {
+	let status = "in_progress";
+	const calls: string[] = [];
+	const exec: CommandRunner = async (_command, args) => {
+		const endpoint = String(args[1]);
+		calls.push(endpoint.includes("/jobs") ? "jobs" : "runs");
+		const done = status === "completed";
+		return JSON.stringify(
+			endpoint.includes("/jobs")
+				? { total_count: 1, jobs: [{ id: 3, run_id: 7, run_attempt: 2, name: "t", status, conclusion: done ? "success" : null }] }
+				: { total_count: 1, workflow_runs: [{ id: 7, run_attempt: 2, head_sha: SHA, status, conclusion: done ? "success" : null }] },
+		);
+	};
+	await readActionsCi({ cwd: ".", exec, sha: SHA });
+	status = "completed";
+	await readActionsCi({ cwd: ".", exec, sha: SHA });
+	const [again] = await readActionsCi({ cwd: ".", exec, sha: SHA });
+	assert.deepEqual(calls, ["runs", "jobs", "runs", "jobs", "runs"]);
+	assert.equal(again?.jobs[0]?.conclusion, "success", "the cached jobs still answer");
+	await readActionsCi({ cwd: ".", exec: async (...input) => exec(...input), sha: SHA });
+	assert.deepEqual(calls.slice(5), ["runs", "jobs"], "another runner has its own cache");
+});
+
 test("Actions reader issues only runs and attempt-jobs requests and never follows response metadata links", async () => {
 	const api = "https://api.github.com/repos/acme/app";
 	const { exec, calls } = allowlistedGh((endpoint) =>
