@@ -2025,7 +2025,7 @@ biases a review before the evidence does. So `ROLE_PACKAGES`
 |---|---|---|
 | `planner` | `pi-lens` (ast_grep only), `pi-web-access` | a plan is scored on completeness and evidence; compression loses the sections the rubric reads. Ponytail on a plan is a per-profile choice for a case where completeness and evidence explicitly win, never a default. `pi-web-access` gives research and Q&A workers (the `planner` and `qa` profiles) `web_search`, `fetch_content`, `get_search_content` and `source_check` (`PACKAGE_TOOLS`) on their `--tools` allowlist; its lazy loader `web_enable` is never allowlisted; every call passes the `webEgressRefusal` guard; an unavailable provider withholds the package (`withheld`); `/doctor` says which in its `web.search` line. The implementer and the gate-reviewer get no web tools by default |
 | `gate-reviewer` | nothing | same for compression; a standing minimalism lens on every verdict has no measured evidence behind it here |
-| `implementer` | `@dietrichgebert/ponytail`, `pi-lens` (trial), `pi-hashline-edit-pro` | minimal, root-cause, verified changes are the job. pi-lens loads only with `--no-read-guard` (`PACKAGE_FLAGS`): its read guard's one per-edit exemption is the `/lens-allow-edit` slash command, which no headless worker can type; and with `--no-lens-context` (N19): its turn-end findings join one request only, so the next request's prefix differs and the API drops the thinking signed on it (`prefix_binding_mismatch`), while the findings still reach tool results and `lens_diagnostics`; `tests/pi-lens-headless.test.ts` proves the flag against the installed pi-lens |
+| `implementer` | `@dietrichgebert/ponytail`, `pi-lens` (trial), `pi-hashline-edit-pro` | minimal, root-cause, verified changes are the job. pi-lens loads only with `--no-read-guard` (`PACKAGE_FLAGS`): its read guard's one per-edit exemption is the `/lens-allow-edit` slash command, which no headless worker can type; and with `--no-lens-context` (N19): its turn-end findings join one request only, so the next request's prefix differs and the API drops the thinking signed on it (`prefix_binding_mismatch`), while the findings still reach tool results and `lens_diagnostics`; `tests/e2e/host-compatibility.test.ts` ("P24 pi-lens") proves the flags reach a dispatched worker |
 
 **Hashline compaction verification (Refs picp-kfg).** `pi-hashline-edit-pro`
 owns the anchor registry; picp does not restore or clear its claims on
@@ -7129,8 +7129,8 @@ ship ids resolved via `Checkpoint.research_id` then `PipelineStore.findByShipId`
 and, behind `--gate`, a gate decision (`state/runs/<research-id>/gate-<n>-raw.json`,
 falling back to `gate-<n>.json` when nothing had to be capped) — rendered
 through `renderGateDocument` into the same markdown path a report already
-takes. Gate files are not guard-protected (`tests/guards.test.ts`: "reading run
-artifacts, briefs, envelopes and verdicts stays allowed"), so this adds no new
+takes. Gate files are not guard-protected (`tests/e2e/host-compatibility.test.ts`, "P24 guards": reading run
+artifacts, envelopes and verdicts stays allowed), so this adds no new
 guard risk. **Not viewable, on purpose:** `events.jsonl` (that is `/watch`'s
 surface) and `questions.jsonl` (`question_journal_read` already names `/watch`
 as the one sanctioned surface for it; a second pager here would undo the point
