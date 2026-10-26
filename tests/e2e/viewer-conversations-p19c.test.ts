@@ -667,3 +667,202 @@ test("P19-transcript-css: phone pills reach 84% and cards the column; desktop on
 	for (const pair of ["--background: #f4f2ed;", "--nav: #ebe8e1;", "--raised: #ffffff;", "--text: #1d1c1a;", "--dim: #6b675f;", "--session-you: #2d5aa8;", "--session-code-mix: 5%"]) assert.ok(light.includes(pair), `measured light token: ${pair}`);
 	assert.equal(css.match(/prefers-color-scheme/g)?.length, 1, "one light block in every served stylesheet");
 });
+
+// ---- tool calls and bridge notices in the transcript ----------------------------------------------------------------
+
+const TOOLS_KEY = "cp-sessions-tool-calls";
+/** One recorded tool call and its result; the result's first line is its summary. */
+const toolRun = (id: string, name: string, result: string, hm = "14:00") => [
+	line(hm, { role: "assistant", content: [{ type: "toolCall", id, name, arguments: { id } }] }),
+	line(hm, { role: "toolResult", toolCallId: id, toolName: name, content: [{ type: "text", text: result }] }),
+];
+const toolTexts = (tab: Tab) => tab.$$(".session-tool").map((tool) => tool.textContent ?? "");
+const pills = (tab: Tab) => texts(tab, ".session-tools");
+/** Every declaration the served CSS gives `selector` in `sheet`, in order. */
+const cssRules = (sheet: string, selector: string) => [...sheet.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => m[1] === selector).map((m) => m[2]).join(";");
+
+test("P19-tools-toggle: tool calls hide by default, a run is one pill that opens alone, the toggle shows all and is remembered; messages, notices and cards stay", { timeout: 120_000 }, async (t) => {
+	let askId = "";
+	const d = await chat(t, [
+		line("14:00", { role: "user", content: [{ type: "text", text: "MESSAGE-ONE" }] }),
+		...toolRun("t1", "read", "Read 42 lines\nTOOL-ONE"), ...toolRun("t2", "bash", "Ran npm test\nTOOL-TWO"), ...toolRun("t3", "read", "Read 8 lines\nTOOL-THREE"),
+		line("14:01", { role: "assistant", content: [{ type: "text", text: "MESSAGE-TWO" }] }),
+		...toolRun("t4", "read", "Read 2 lines\nTOOL-FOUR", "14:01"),
+		{ type: "custom_message", timestamp: at("14:02"), customType: "cp-bridge", display: true, content: "SYSTEM-NOTICE" },
+		...parentCall("ask-call", { action: "ask" }, "ASK").map((row) => ({ ...row, timestamp: at("14:03") })),
+	], (stateDir) => { askId = new OperatorAsks(join(stateDir, "operator", "asks.jsonl")).open({ project: "demo", question: "CARD-QUESTION", recommendation: "Keep", options: [{ label: "Keep", consequence: "Keep it" }] }).id; });
+	const file = join(d.home, "pi-sessions", "chat.jsonl");
+	write(file, readFileSync(file, "utf8").replace('"ASK"', JSON.stringify(JSON.stringify({ id: askId }))));
+	let tab = await d.open(OPERATOR);
+	const toggle = () => tab.$(".session-tools-toggle")!;
+	await tab.find(".session-tools-toggle");
+	assert.deepEqual(toolTexts(tab), [], "no tool call renders before the toggle");
+	assert.deepEqual(pills(tab), ["≡ 3 steps · Read 42 lines ▸", "≡ 1 step · Read 2 lines ▸", "≡ 1 step · Completed ▸"], "consecutive calls collapse into one pill with the hidden count");
+	assert.deepEqual([toggle().textContent, toggle().getAttribute("aria-pressed")], ["Tools 5", "false"], "the toggle counts everything hidden");
+	for (const text of ["MESSAGE-ONE", "MESSAGE-TWO", "SYSTEM-NOTICE", "CARD-QUESTION"]) assert.match(tab.text(), new RegExp(text), `${text} is never hidden`);
+	tab.click(tab.$$(".session-tools")[0]!);
+	await until(() => toolTexts(tab).length, (n) => n === 3, "the first run open");
+	assert.deepEqual(toolTexts(tab).map((text) => /TOOL-\w+/.exec(text)?.[0]), ["TOOL-ONE", "TOOL-TWO", "TOOL-THREE"], "only the clicked run expands");
+	assert.deepEqual(pills(tab).slice(0, 2), ["≡ 3 steps ▾", "≡ 1 step · Read 2 lines ▸"], "open, the pill drops its preview; the other run is untouched");
+	assert.equal(tab.$$(".session-steps-open .session-steps-rows .session-tool").length, 3, "the opened run's rows sit in one card");
+	assert.equal(toggle().textContent, "Tools 5", "the count is every tool call, open or not");
+	tab.click(tab.$$(".session-tools")[0]!);
+	await until(() => toolTexts(tab).length, (n) => n === 0, "the run collapsed again");
+	tab.click(toggle());
+	assert.equal((await until(() => toolTexts(tab), (all) => all.length === 5, "every call shown")).length, 5);
+	assert.deepEqual([pills(tab), toggle().textContent, tab.storage.get(TOOLS_KEY)], [[], "Tools 5", "1"], "no pills while shown; one key written");
+	tab = await tab.reopen();
+	assert.equal((await until(() => toolTexts(tab), (all) => all.length === 5, "shown after a reload")).length, 5, "the shown choice survives a reload");
+	tab.click(await tab.find(".session-tools-toggle"));
+	await until(() => toolTexts(tab).length, (n) => n === 0, "hidden again");
+	assert.equal(tab.storage.get(TOOLS_KEY), "0");
+	tab = await tab.reopen();
+	await tab.find(".session-tools");
+	assert.deepEqual(toolTexts(tab), [], "the hidden choice survives a reload");
+
+	const long = await chat(t, toolRun("t1", "read", `Read 42 lines\n${"x".repeat(1300)}-TAIL-MARKER`));
+	const tail = await openTab(t, long.port, OPERATOR, new Map([[TOOLS_KEY, "1"]]));
+	await tail.waitText(/show all/);
+	assert.match(tail.text(), /-TAIL-MARKER/, "a long call keeps its tail behind show all");
+	assert.doesNotMatch(tail.root.innerHTML, /x{1300}/, "the head is the truncation point");
+
+	const refusing = await long.open("#settings");
+	const warnings: unknown[][] = [], warn = console.warn;
+	console.warn = (...args: unknown[]) => void warnings.push(args);
+	t.after(() => { console.warn = warn; });
+	const refused = { getItem: () => null, setItem: () => { throw new Error("QuotaExceededError"); }, removeItem() {} };
+	refusing.globals.localStorage = refused;
+	Object.defineProperty(refusing.window, "localStorage", { configurable: true, value: refused });
+	refusing.go(OPERATOR);
+	refusing.click(await refusing.find(".session-tools-toggle"));
+	assert.equal((await until(() => toolTexts(refusing), (all) => all.length === 1, "shown without storage")).length, 1, "the choice holds for this view");
+	console.warn = warn;
+	assert.deepEqual(warnings, [["tool-call toggle not persisted: QuotaExceededError"]], "a refused write warns");
+});
+
+/** A cp-bridge wake as cp-bridge relays it, its `paths:` block naming this home's run and an unlisted artifact. */
+const wakeNotice = (stateDir: string, hm = "14:00") => ({ type: "custom_message", timestamp: at(hm), customType: "cp-bridge", display: true, content: [
+	"[cp-bridge wake job=cp-xrhq receipt=owner_observed]",
+	"[pi-command-post-system] Mobile chat layout and the no-zoom addendum landed: https://github.com/0xb1ob/pi-command-post/pull/357.",
+	"Web-search implementation cp-yxgl remains pending your approval.",
+	"paths:",
+	`- ${stateDir}/runs/cp-xrhq/artifact.md`,
+	`- ${stateDir}/runs/cp-xrhq`,
+	`- ${stateDir}/artifacts/cp-xrhq/report.md`,
+].join("\n") });
+/** A viewer whose transcript is `rows(stateDir)`, with cp-xrhq listed in the fleet so its run paths link. */
+const bridged = (t: Context, rows: (stateDir: string) => unknown[]) => viewer(t, { seed: (stateDir, home) => {
+	write(join(stateDir, "fleet.json"), { jobs: [{ job_id: "cp-xrhq", project: "picp", phase: "held" }] });
+	const file = join(home, "pi-sessions", "chat.jsonl");
+	write(file, jsonl(rows(stateDir)));
+	write(operatorSessionsFile(join(stateDir, "sessions")), jsonl([{ at: at("13:00"), session_file: file }]));
+} });
+
+test("P19-bridge-notice: a wake is one collapsed row (chip once, job linked, toggle inline) that opens its body and paths in place; own and assistant words never collapse", { timeout: 120_000 }, async (t) => {
+	const d = await bridged(t, (stateDir) => [
+		line("13:59", { role: "user", content: [{ type: "text", text: "operator words\nsecond operator line" }] }),
+		wakeNotice(stateDir),
+		line("14:01", { role: "assistant", content: [{ type: "text", text: "assistant words\nsecond assistant line" }] }),
+	]);
+	let tab = await d.open(OPERATOR);
+	const toggle = () => tab.$(".session-notice-line")!;
+	const row = await tab.find(".session-bridge-line");
+	assert.deepEqual([row.textContent, toggle().getAttribute("aria-expanded"), toggle().getAttribute("aria-label")], ["bridgewoke cp-xrhq· owner observednotice ▸", "false", "Show notice"], "one row: chip, verb, job, receipt, toggle");
+	assert.equal(tab.$$(".session-bridge-chip").length, 1);
+	assert.equal(row.textContent!.match(/bridge/g)?.length, 1, "the word bridge appears once: the chip");
+	assert.equal(tab.$(".session-bridge .session-who"), null, "no separate who/tag line");
+	assert.equal(row.querySelector(".session-bridge-what a")?.getAttribute("href"), "#job/cp-xrhq", "the job opens Job detail");
+	assert.equal(row.querySelector("button.session-notice-line")?.textContent, "notice ▸", "the toggle sits inside the row");
+	assert.doesNotMatch(tab.root.innerHTML, /Mobile chat layout|pull\/357/, "the body stays hidden");
+	assert.equal(tab.$$(".session-notice-line").length, 1, "only the bridge notice carries an expander");
+	assert.match(tab.text(), /operator words\nsecond operator line/, "the operator's own words are all on screen");
+	assert.match(tab.text(), /assistant words\nsecond assistant line/, "so is every assistant reply");
+	tab.click(toggle());
+	await tab.waitText(/Mobile chat layout/);
+	assert.equal(toggle().getAttribute("aria-expanded"), "true");
+	assert.equal(row.nextElementSibling?.getAttribute("class"), "session-notice-rest", "the body opens directly below the row");
+	const state = d.stateDir;
+	assert.deepEqual(tab.$$(".session-notice-paths a").map((a) => [a.getAttribute("href"), a.textContent]), [["#job/cp-xrhq", `${state}/runs/cp-xrhq/artifact.md`], ["#job/cp-xrhq", `${state}/runs/cp-xrhq`]], "the paths: block is a list of links");
+	assert.ok(tab.text().includes(`${state}/artifacts/cp-xrhq/report.md`), "a path with no viewer target keeps its text");
+	assert.doesNotMatch(tab.text(), /paths:|^- \//m, "the raw block is replaced by the list");
+	tab.click(toggle());
+	await until(() => toggle().getAttribute("aria-expanded"), (v) => v === "false", "collapsed again");
+	tab.click(toggle());
+	tab = await tab.reopen();
+	assert.equal((await tab.find(".session-notice-line")).getAttribute("aria-expanded"), "false", "a fresh view starts collapsed: nothing is remembered");
+});
+
+test("P19-bridge-steps: a wake and the calls after it are one run of steps; notice and tools open apart; Tools on opens every run; a lone run and a bare notice keep their shapes", { timeout: 120_000 }, async (t) => {
+	const rows = (stateDir: string) => [
+		line("13:59", { role: "assistant", content: [{ type: "text", text: "MESSAGE-ONE" }] }),
+		wakeNotice(stateDir),
+		line("14:00", { role: "assistant", content: [{ type: "thinking", thinking: "Checking the head\nTHINK-ONE" }] }),
+		...toolRun("t2", "bash", "Ran git log\nTOOL-TWO"),
+		line("14:01", { role: "assistant", content: [{ type: "text", text: "MESSAGE-TWO" }] }),
+	];
+	const d = await bridged(t, rows);
+	const tab = await d.open(OPERATOR);
+	const notice = () => tab.$(".session-steps .session-notice-line")!;
+	await tab.find(".session-steps");
+	assert.deepEqual(pills(tab), ["≡ 3 steps · cp-xrhq ▸"], "one pill: the wake plus two calls, named by the recorded job");
+	assert.equal(tab.$$(".session-bridge").length, 1, "the notice is not repeated outside its run");
+	tab.click(notice());
+	await tab.waitText(/Mobile chat layout/);
+	assert.deepEqual([notice().getAttribute("aria-expanded"), toolTexts(tab)], ["true", []], "the notice opens while the tools stay hidden");
+	tab.click(tab.$(".session-steps > .session-tools")!);
+	await until(() => toolTexts(tab).length, (n) => n === 2, "the tools open");
+	assert.deepEqual(toolTexts(tab).map((text) => /THINK-ONE|TOOL-TWO/.exec(text)?.[0] ?? text), ["THINK-ONE", "TOOL-TWO"]);
+	assert.deepEqual(tab.$$(".session-steps-rows .session-tool > summary > code:nth-child(2)").map((name) => name.textContent), ["think", "bash"], "thinking fits the name column as think");
+	assert.equal(notice().getAttribute("aria-expanded"), "true", "opening the tools leaves the notice as it was");
+	const card = tab.$(".session-steps-card")!;
+	assert.deepEqual([...card.children].map((child) => child.getAttribute("class")), ["session-message session-notice session-system session-bridge", "session-steps-rows", "session-steps-link"]);
+	assert.equal(card.querySelector(".session-steps-link")?.getAttribute("href"), "#job/cp-xrhq?tab=transcript");
+	const state = d.stateDir;
+	assert.deepEqual([...card.querySelectorAll(".session-notice-chips a, .session-notice-chips code")].map((chip) => [chip.textContent, chip.getAttribute("title")]), [["artifact.md", `${state}/runs/cp-xrhq/artifact.md`], ["cp-xrhq", `${state}/runs/cp-xrhq`], ["report.md", `${state}/artifacts/cp-xrhq/report.md`]], "chips name the file; the path stays in the title");
+	const file = join(d.home, "pi-sessions", "chat.jsonl"), next = rows(state);
+	next.splice(4, 0, ...toolRun("t3", "read", "Read 1 line\nTOOL-THREE"));
+	write(file, jsonl(next));
+	tab.refresh();
+	assert.deepEqual(await until(() => pills(tab), (p) => p[0] === "≡ 4 steps · cp-xrhq ▾", "the streamed call"), ["≡ 4 steps · cp-xrhq ▾"], "a streamed call joins the open run");
+	assert.deepEqual([toolTexts(tab).length, notice().getAttribute("aria-expanded")], [3, "true"]);
+
+	const lone = await bridged(t, (stateDir) => [...toolRun("t0", "read", "ORPHAN"), line("14:01", { role: "assistant", content: [{ type: "text", text: "MESSAGE-ONE" }] }), wakeNotice(stateDir, "14:02")]);
+	const shapes = await lone.open(OPERATOR);
+	await shapes.find(".session-tools");
+	assert.deepEqual(pills(shapes), ["≡ 1 step · ORPHAN ▸"], "a tool run with no wake notice is a run of its own, no job named");
+	assert.deepEqual([shapes.$$(".session-steps .session-bridge").length, shapes.$$(".session-bridge").length], [0, 1], "a notice no calls follow stays a standalone row");
+	shapes.click(shapes.$(".session-tools-toggle")!);
+	await until(() => toolTexts(shapes).length, (n) => n === 1, "Tools on");
+	assert.deepEqual([pills(shapes), shapes.$$(".session-steps-open .session-steps-card").length, shapes.$(".session-steps-link")], [[], 1, null], "no pills; the run's card; no job link without a recorded job");
+});
+
+test("P19-tools-sheet: the ⋯ sheet's tool toggle is the same remembered choice; pinned decisions collapse to one bar and close after a click; the 390 px toggle and notice rules hold at 1440", { timeout: 120_000 }, async (t) => {
+	let askId = "";
+	const d = await chat(t, [line("14:00", { role: "user", content: [{ type: "text", text: "MESSAGE-ONE" }] }), ...toolRun("t1", "read", "Read 42 lines\nTOOL-ONE")], (stateDir) => {
+		askId = new OperatorAsks(join(stateDir, "operator", "asks.jsonl")).open({ project: "demo", question: "PINNED-QUESTION", recommendation: "Keep", options: [{ label: "Keep", consequence: "Paused" }] }).id;
+	});
+	await operatorSession(t, d.stateDir);
+	const tab = await d.open(OPERATOR);
+	const sheet = await tab.find(".session-bar-more .session-bar-sheet button[aria-pressed]", (b) => /tool calls/.test(b.textContent ?? ""));
+	assert.equal(sheet.textContent, "Show tool calls (1)");
+	tab.click(sheet);
+	await until(() => toolTexts(tab).length, (n) => n === 1, "the sheet's toggle shows tool calls");
+	assert.deepEqual([tab.storage.get(TOOLS_KEY), tab.$(".session-tools-toggle")?.textContent], ["1", "Tools 1"], "remembered like the heading toggle: one state behind both");
+	const pinned = () => tab.$(".session-pinned")!, bar = () => tab.$(".session-pinned h2 button")!;
+	assert.deepEqual([pinned().getAttribute("class"), bar().textContent], ["session-pinned", "1 decision waiting ▾"], "pinned decisions collapse to one bar");
+	tab.click(bar());
+	assert.equal((await tab.find(".session-pinned.session-pinned-open")).getAttribute("class"), "session-pinned session-pinned-open", "tapped open into the sheet");
+	assert.equal(bar().getAttribute("aria-expanded"), "true");
+	tab.click(await tab.find(".session-pinned .decision-card-option", (b) => !b.hasAttribute("disabled")));
+	assert.deepEqual(pick(await posted(tab, 1), ["kind", "ask_id", "label"]), { kind: "answer", ask_id: askId, label: "Keep" }, "the card's button answers, once");
+	assert.equal(await until(() => pinned().getAttribute("class"), (c) => c === "session-pinned", "the sheet collapsed"), "session-pinned", "and the sheet collapses after the click");
+	const css = await servedCss(d);
+	const wide = css.indexOf(".session-entries{max-width:820px"), desktop = css.slice(css.lastIndexOf("@media(min-width:900px)", wide), css.indexOf("}}", wide) + 2);
+	assert.match(cssRules(css, ".session-tools-toggle"), /^display:flex;.*min-height:44px;.*white-space:nowrap/, "a 44px touch target that never wraps at 390px");
+	assert.match(cssRules(css, ".session-system .session-notice-line"), /min-height:44px/, "the collapsed notice is a 44px target");
+	assert.match(cssRules(css, ".session-system .session-notice-line>span"), /text-overflow:ellipsis;.*white-space:nowrap/, "a long first line ellipsizes");
+	assert.match(cssRules(css, ".session-notice-paths a,.session-notice-paths code"), /^min-width:0;overflow-wrap:anywhere/, "long paths wrap inside the body");
+	assert.doesNotMatch(desktop, /\.session-tools-toggle|\.session-bridge|\.session-notice-line|\.session-notice-paths/, "the desktop block leaves the phone rules at 1440px");
+	assert.doesNotMatch(css, /\.session-tools-toggle[^{]*\{[^}]*display:none/, "the heading toggle is never hidden");
+	assert.match(cssRules(css, ".session-heading"), /overflow:visible/, "the heading row does not clip the toggle");
+});
