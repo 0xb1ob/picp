@@ -229,7 +229,6 @@
 	"tests/viewer-answers-http.test.ts": 161,
 	"tests/viewer-answers-ui.test.ts": 52,
 	"tests/viewer-app-render.test.ts": 382,
-	"tests/viewer-bind-host.test.ts": 9,
 	"tests/viewer-boards.test.ts": 105,
 	"tests/viewer-compression-http.test.ts": 90,
 	"tests/viewer-context-usage.test.ts": 302,

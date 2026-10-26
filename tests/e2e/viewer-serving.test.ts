@@ -237,3 +237,36 @@ test("P21-live-stream: a screen stream says refresh at once with a 2 s retry and
 	res.destroy();
 	assert.equal(await until(() => pollingStreams(), (n) => n === 0, "the closed stream's clock"), 0);
 });
+
+/** `bin/cp-view` with `tailscale` answered by `script`; returns once the process exits on its own (a refusal). */
+function cpView(t: { after(fn: () => unknown): void }, args: string[], script = "exit 1") {
+	const scratch = createScratchHome(); t.after(() => scratch.cleanup());
+	const bin = join(scratch.path, "bin");
+	mkdirSync(bin);
+	writeFileSync(join(bin, "tailscale"), `#!/bin/sh\necho "$@" >> "${bin}/calls"\n${script}\n`, { mode: 0o755 });
+	const run = spawnSync(join(REPO_ROOT, "bin", "cp-view"), ["--home", scratch.path, ...args], {
+		encoding: "utf8", timeout: 30_000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CP_VIEWER_PORT: "1" },
+	});
+	return { status: run.status, stderr: run.stderr, calls: (() => { try { return readFileSync(join(bin, "calls"), "utf8"); } catch { return ""; } })() };
+}
+
+test("P21-bind-host: cp-view refuses wildcard, public, link-local, mapped, zoned and non-IP hosts, and binds the first tailnet address", { timeout: 300_000 }, (t) => {
+	const refused: Record<string, RegExp> = {
+		"0.0.0.0": /wildcard/, "::": /wildcard/, "0:0:0:0:0:0:0:0": /wildcard/,
+		"8.8.8.8": /public/, "2001:4860::8888": /public/, "224.0.0.1": /public or non-unicast/, "255.255.255.255": /non-unicast/,
+		"fe80::1": /link-local/, "169.254.1.1": /link-local/, "fe80::1%eth0": /zone id/,
+		"::ffff:10.0.0.1": /IPv4-mapped/, "0:0:0:0:0:ffff:a00:1": /IPv4-mapped/, localhost: /not an IP/,
+	};
+	for (const [host, reason] of Object.entries(refused)) {
+		const run = cpView(t, ["--host", host]);
+		assert.notEqual(run.status, 0, host);
+		assert.match(run.stderr, new RegExp(`refusing to serve the viewer on ${host.replace(/[.%]/g, "\\$&")}: .*${reason.source}`), host);
+	}
+	const tailnet = cpView(t, ["--require-tailnet"], 'printf "100.80.0.1\\n100.1.1.1\\n"');
+	assert.equal(tailnet.calls, "ip -4\n", "the address comes from `tailscale ip -4`");
+	assert.match(tailnet.stderr, /100\.80\.0\.1:1\b/, "the first line is the bind address");
+	for (const script of ['printf "Tailscale is stopped.\\n"', 'printf "8.8.8.8\\n"', 'printf "fd7a::1\\n"', "exit 1"]) {
+		const none = cpView(t, ["--require-tailnet"], script);
+		assert.match(none.stderr, /`tailscale ip -4` gave no address and --require-tailnet is set/, script);
+	}
+});
