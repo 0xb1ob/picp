@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
-import { request, type IncomingHttpHeaders } from "node:http";
+import { request, type IncomingHttpHeaders, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -14,7 +14,7 @@ import { LAYOUT } from "../../src/contracts.ts";
 import { APP_CSP, APP_VIEWPORT, type ViewerApp } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
 import { createViewer, pollingStreams, type ViewerOptions } from "../../src/viewer/server.ts";
-import { dashboard } from "../harness/dashboard.ts";
+import { dashboard, openTab, type Tab, until } from "../harness/dashboard.ts";
 import { createScratchHome, REPO_ROOT } from "../harness/index.ts";
 
 type Raw = { status: number; headers: IncomingHttpHeaders; body: Buffer };
@@ -174,4 +174,66 @@ test("P21-app-assets: built assets are served only by exact name under the stric
 	assert.equal((await get("/api/mandates")).status, 404, "the Mandates page and its endpoint are gone");
 	assert.equal(pollingStreams(), 0, "a HEAD stream leaves no refresh clock running");
 	assert.deepEqual(snapshot(view.home), before, "no request writes to the home");
+});
+
+/** The real server in this process with a freshly built app, so a linkedom tab can open it. */
+async function live(t: { after(fn: () => unknown): void }, extra: Partial<ViewerOptions> = {}) {
+	const scratch = createScratchHome(); t.after(() => scratch.cleanup());
+	return serve(t, { app: await buildViewer({ stateDir: join(scratch.path, LAYOUT.state) }), ...extra });
+}
+const overviewGets = (tab: Tab) => tab.requests.filter((r) => r.path === "/api/overview");
+const visible = (tab: Tab, shown: boolean) => {
+	Object.defineProperty(tab.document, "hidden", { configurable: true, value: !shown });
+	const event = tab.document.createEvent("Event");
+	event.initEvent("visibilitychange");
+	tab.document.dispatchEvent(event);
+};
+
+test("P21-live-refresh: the tab coalesces refreshes into one follow-up GET, sends its held version as the delta base, and asks nothing while hidden", { timeout: 120_000 }, async (t) => {
+	const view = await live(t);
+	const tab = await openTab(t, view.port, "#overview");
+	await tab.waitText(/Nothing needs you/);
+	for (let i = 0; i < 10; i++) tab.refresh();
+	await until(() => overviewGets(tab).length, (n) => n >= 3, "the burst's GET and its one trailing follow-up");
+	tab.refresh();
+	const gets = await until(() => overviewGets(tab), (list) => list.length >= 4, "the next refresh's GET");
+	assert.equal(gets.length, 4, "ten refreshes in one burst coalesced into one GET and one follow-up");
+	assert.equal(gets[0]!.headers["x-cp-delta-base"], undefined, "the first GET has no base");
+	assert.match(gets[1]!.headers["x-cp-delta-base"] ?? "", /^[0-9a-f]+-\d+$/, "later GETs name the held version");
+	view.put(join(LAYOUT.state, "operator", "asks.jsonl"), `${JSON.stringify(ASK)}\n`);
+	tab.refresh();
+	assert.match(await tab.waitText(/Keep paused\?/), /Needs you · 1/, "the reply onto the held base updates the page");
+	visible(tab, false);
+	const hiddenAt = overviewGets(tab).length;
+	tab.refresh();
+	visible(tab, true);
+	const shown = await until(() => overviewGets(tab), (list) => list.length > hiddenAt, "the GET on showing the tab");
+	assert.equal(shown.length, hiddenAt + 1, "a hidden tab asked nothing; showing it asks once");
+	assert.match(shown.at(-1)!.headers["x-cp-delta-base"] ?? "", /^[0-9a-f]+-\d+$/, "the held version survives a hide and show");
+});
+
+test("P21-live-poll: a page served with the poll meta refreshes on a two-second clock with no stream event", { timeout: 120_000 }, async (t) => {
+	const view = await live(t, { refreshTransport: "poll" });
+	const tab = await openTab(t, view.port, "#overview");
+	const gets = await until(() => overviewGets(tab).length, (n) => n >= 3, "two polls after the first GET", 8_000).catch((e) => { throw new Error(`${e.message} ${JSON.stringify(tab.requests.map((r) => r.path))}`); });
+	assert.ok(gets >= 3, "the poll clock asks again with no refresh from a stream");
+});
+
+test("P21-live-stream: a screen stream says refresh at once with a 2 s retry and no ids, ticks again, and frees its clock on close", { timeout: 60_000 }, async (t) => {
+	const view = await serve(t);
+	const chunks: string[] = [];
+	const res = await new Promise<IncomingMessage>((done, fail) => {
+		request({ host: "127.0.0.1", port: view.port, path: "/api/stream?view=overview" }, (reply) => {
+			reply.setEncoding("utf8");
+			reply.on("data", (chunk: string) => chunks.push(chunk));
+			done(reply);
+		}).on("error", fail).end();
+	});
+	await until(() => chunks.length, (n) => n >= 2, "the first tick after the opening refresh");
+	assert.match(chunks[0]!, /^retry: 2000\n\nevent: refresh\ndata: \{\}\n\n$/);
+	assert.equal(chunks[1], "event: refresh\ndata: {}\n\n");
+	assert.doesNotMatch(chunks.join(""), /id:/);
+	assert.equal(pollingStreams(), 1, "one open stream, one clock");
+	res.destroy();
+	assert.equal(await until(() => pollingStreams(), (n) => n === 0, "the closed stream's clock"), 0);
 });
