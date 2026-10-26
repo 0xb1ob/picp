@@ -556,8 +556,10 @@ test("P14-units: on a systemd --user machine cp-install writes cp-daemon.service
 	await refused(box.user("my home", {}), flags, /fail: unit: WorkingDirectory= cannot carry/);
 	await refused(box.user("it's", {}), flags, /fail: unit: WorkingDirectory= cannot carry/);
 
-	// systemd's own parser accepts the written unit (skipped where systemd-analyze cannot run).
+	// systemd's own parser accepts the written unit; only this sub-step skips where systemd-analyze cannot run.
 	const verify = spawnSync("systemd-analyze", ["--user", "verify", unitFile], { encoding: "utf8", env: { ...process.env, XDG_RUNTIME_DIR: m.root } });
-	if (verify.error || /Failed to initialize manager/.test(verify.stderr)) return t.skip(`systemd-analyze: ${verify.error?.message ?? verify.stderr.trim()}`);
-	assert.doesNotMatch(verify.stderr, /WorkingDirectory|fatal|bad unit|cp-daemon\.service:\d+:/i, verify.stderr);
+	const unverifiable = verify.error || /Failed to initialize manager/.test(verify.stderr) ? `systemd-analyze: ${verify.error?.message ?? verify.stderr.trim()}` : false;
+	await t.test("systemd-analyze --user verify accepts cp-daemon.service", { skip: unverifiable }, () => {
+		assert.doesNotMatch(verify.stderr, /WorkingDirectory|fatal|bad unit|cp-daemon\.service:\d+:/i, verify.stderr);
+	});
 });

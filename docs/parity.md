@@ -36,8 +36,8 @@ Zero capabilities are unaccounted for: every row below is one of the five.
 | `cmdp teardown <job-id> [--research]` | ported (improved) | `cp_teardown`; the kind comes from the fleet record, so the flag cannot disagree with the job | `tests/e2e/teardown-s17.test.ts`, `tests/e2e/teardown-s18.test.ts` |
 | `cmdp status [--json] [--origin]` | ported | `/status` + widget → [`src/status.ts`](../src/status.ts) | `tests/status.test.ts` + goldens |
 | `cmdp status --html --serve --port --pane` | out of scope | HTML dashboard deferred; `fleet.json` + `runs/` are shaped to feed one later | README.md out-of-scope |
-| `cmdp doctor` | ported | `/doctor` → [`src/doctor.ts`](../src/doctor.ts), plus the ledger checks (document shape, ids, dependency graph, prefix, size) | `tests/doctor.test.ts` + golden |
-| `cmdp models` (catalog, families, TTL cache, allowlist) | ported (narrowed) | pi owns the model registry (`/models`, `get_available_models`); the allowlist and rubric are `data/routing.json`, availability is probed with real auth in `/doctor` | `tests/e2e/routing.test.ts`, `tests/doctor.test.ts` |
+| `cmdp doctor` | ported | `/doctor` → [`src/doctor.ts`](../src/doctor.ts), plus the ledger checks (document shape, ids, dependency graph, prefix, size) | `tests/e2e/doctor-p14c.test.ts`; golden in `tests/doctor-retained.test.ts` |
+| `cmdp models` (catalog, families, TTL cache, allowlist) | ported (narrowed) | pi owns the model registry (`/models`, `get_available_models`); the allowlist and rubric are `data/routing.json`, availability is probed with real auth in `/doctor` | `tests/e2e/routing.test.ts`, `tests/e2e/doctor-p14c.test.ts` |
 | `cmdp threads bind\|unbind\|list\|events\|status\|log` | out of scope | Slack | README.md out-of-scope |
 | `cmdp relay` | out of scope | Slack | README.md out-of-scope |
 | command-post `install.sh` (deps + scaffold + hooks) | ported (T30) | self-scaffold on `session_start` (`src/scaffold.ts`): `data/`, `state/`, `projects/`, a home `.gitignore`, and an empty `.pi-command-post/jobs.json` when absent; idempotent | `tests/e2e/configuration.test.ts` (P16-scaffold), `tests/e2e/packaging.test.ts` |
