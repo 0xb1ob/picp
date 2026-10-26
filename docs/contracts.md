@@ -8938,7 +8938,7 @@ keeps everything cp-eff was protecting:
 - **The installation contract is one provider.** Anthropic or OpenAI
   authenticated in pi is enough: the shipped template and the shipped profiles
   resolve **every** (role, scope, risk) route under either one alone, and
-  `tests/routing.test.ts` proves both one-provider matrices against pi's own
+  `tests/e2e/routing.test.ts` (P16-route-default) proves both one-provider matrices against pi's own
   registry metadata. (xAI was dropped from every ladder in the 2026-09-23 model
   refresh.) Anthropic stays first when capacity is tied or unknown; an eligible
   OpenAI candidate with more available slots can win a new spawn.
