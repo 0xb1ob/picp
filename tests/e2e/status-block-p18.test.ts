@@ -1,6 +1,6 @@
 /**
  * Behavior 18 (P18): what cp_status_block, /status and the fleet widget tell the operator about jobs, through a real
- * pi parent with the command-post extension and a mock model. Fleet, ledger, run status and CI facts are seeded on disk.
+ * pi parent with the command-post extension and a mock model. Fleet, ledger, run status and CI facts are seeded.
  */
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -10,6 +10,7 @@ import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, pa
 import { FleetStore } from "../../src/fleet.ts";
 import { initialStatus } from "../../src/run-artifacts.ts";
 import { MAX_CELL_CHARS, MAX_LABEL_CHARS } from "../../src/status-block.ts";
+import { WIDGET_MAX_WIDTH } from "../../src/widget.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MockProvider, type PiChild, type ScriptStep, startPiChild, waitFor } from "../harness/index.ts";
 
 const HEAD = "d48a81dfeedfacecafe0000000000000000ab12";
@@ -78,7 +79,8 @@ test("P18-status-block: cp_status_block renders In progress, With the team, Bloc
 			handed_at: ago(120), released_at: ago(120), frozen_seconds: 60, frozen_usage: { ...EMPTY_USAGE }, ...extra } } as Over);
 	const LONG_WHY = "y".repeat(MAX_CELL_CHARS);
 	const child = await parent(t, home, [
-		block({ width: 200 }), DONE,
+		block({ width: 200 }),
+		block({ width: 200, blocked: [{ job_id: "cp-dep", waiting_on: "a dependency" }], awaiting: [{ type: "authorization", decision: "Ship the sweep?", why: "w", blocks: "b", job_id: "cp-x" }] }), DONE,
 		block({ width: 200 }), DONE,
 		block({ width: 200, labels: [{ job_id: "cp-long", label: "x".repeat(MAX_LABEL_CHARS + 1) }] }),
 		block({ width: 200, awaiting: [{ type: "design", decision: "Postgres or sqlite?", why: "y".repeat(MAX_CELL_CHARS + 1), blocks: "b" }] }),
@@ -91,9 +93,9 @@ test("P18-status-block: cp_status_block renders In progress, With the team, Bloc
 		block({ width: 200 }),
 		block({ width: 20, labels: [{ job_id: "cp-parked", label: "a reasonably descriptive label" }] }), DONE,
 	]);
-	await turn(child, 1);
-	await fleet.add(live(home, { job_id: titled, usage: { ...EMPTY_USAGE, total_tokens: 12_300, cost_usd: 0.42 }, routing: { scope: "M", risk: "high", thinking: "high", inferred: true } }));
 	await turn(child, 2);
+	await fleet.add(live(home, { job_id: titled, usage: { ...EMPTY_USAGE, total_tokens: 12_300, cost_usd: 0.42 }, routing: { scope: "M", risk: "high", thinking: "high", inferred: true } }));
+	await turn(child, 3);
 	for (const over of [{ job_id: labelled }, { job_id: "cp-legacy" }, { job_id: "cp-long" }, { job_id: "cp-dep" },
 		{ job_id: "cp-explicit", routing: { scope: "S", risk: "low", thinking: "minimal", inferred: false } },
 		{ job_id: "cp-defaulted", routing: { scope: "S", risk: "low", thinking: "medium", inferred: false, provenance: { scope: "defaulted", risk: "defaulted" } } },
@@ -108,11 +110,15 @@ test("P18-status-block: cp_status_block renders In progress, With the team, Bloc
 	await fleet.add(done("cp-gated", { url: "https://github.com/acme/repo/pull/8" }, { closed_reason: "gated" }));
 	await fleet.add(parking("cp-parked"));
 	await fleet.add(parking("cp-pend", { pending: { kind: "changes_requested", event_id: "PRR_1", observed_at: ago(1) } }));
-	await turn(child, 5);
-	await turn(child, 7);
-	const [empty, first, longLabel, longCell, full, again, narrow] = results(child);
+	await turn(child, 6);
+	await turn(child, 8);
+	const [empty, refusedOnly, first, longLabel, longCell, full, again, narrow] = results(child);
 
 	assert.equal(empty?.text, ["In progress: none", "", "Blocked: none", "", "Awaiting you: none", "", "Shipped: none"].join("\n"), "an empty home: four one-line sections");
+	assert.match(refusedOnly!.text, /^In progress: none$/m, "an empty fleet collapses In progress while Blocked is filled");
+	assert.match(refusedOnly!.text, /^Awaiting you: none$/m, "the refused row prints under an empty table");
+	assert.doesNotMatch(refusedOnly!.text, /answer with cp_decide/, "a refused row is not answerable");
+	assert.match(refusedOnly!.text, /cp-x — \[authorization\] Ship the sweep\?.*\n.*refused: authorization items are derived from state\/checkpoints/);
 	assert.match(first!.text, new RegExp(`- ${titled} — Add the retry ladder {2}\\(demo · claude-sonnet-5 · M\\?/high\\? · high · working \\(waiting\\) · 4m · 12\\.3k \\$0\\.42\\)`));
 	assert.match(first!.text, /^Shipped: none$/m, "In progress filled, other sections still collapse to one line");
 	assert.deepEqual([longLabel?.error, longCell?.error], [true, true], "an over-long label or cell is refused at the tool boundary");
@@ -216,6 +222,7 @@ test("P18-status-waits: /status and the fleet widget say what a held PR waits on
 		(lines) => lines.some((line) => line.includes("cp-held") && line.includes("waits:")), { timeoutMs: 30_000, what: "the widget's wait reason" });
 	assert.ok(widget.find((line) => line.includes("cp-held"))!.includes(`waits: a fix for red CI on ${SHORT}`), "the whole sha, never clipped");
 	assert.ok(!widget.find((line) => line.includes("cp-working"))?.includes("waits:"), "an active row says nothing");
+	assert.deepEqual(widget.filter((line) => line.length > WIDGET_MAX_WIDTH), [], "every RPC widget line fits WIDGET_MAX_WIDTH");
 
 	ci("green");
 	put(home, paths.reviewFile("cp-held", 1), { schema_version: SCHEMA_VERSION, job_id: "cp-held", attempt: 1, verdict: "pass", cause: null,
@@ -230,4 +237,7 @@ test("P18-status-waits: /status and the fleet widget say what a held PR waits on
 	const reviewing = await status();
 	assert.doesNotMatch(reviewing, /waiting on:/, "a reviewer in flight is not a wait reason");
 	assert.match(reviewing, /review 2 running/);
+	const busy = await waitFor(() => child.records().filter((r) => r.type === "extension_ui_request" && r.method === "setWidget").map((r) => (r.widgetLines as string[] | undefined) ?? []).at(-1) ?? [],
+		(lines) => lines.some((line) => line.includes("cp-held") && line.includes("review 2")), { timeoutMs: 30_000, what: "the widget's review row" });
+	assert.ok(!busy.find((line) => line.includes("cp-held"))!.includes("waits:"), "the widget names the reviewer, not a wait reason");
 });

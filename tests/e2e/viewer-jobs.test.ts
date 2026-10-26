@@ -181,7 +181,7 @@ test("P18-job-facts: Job detail's facts — CI, review, failure, asks, receipts,
 			held("cp-skilled", { skills: [{ name: "tdd-x", dir: "/skills/tdd-x" }, { name: "lint-y", dir: "/skills/lint-y" }] }), held("cp-plain"),
 			...["cp-events", "cp-fleet", "cp-partial", "cp-empty"].map((id) => done(id, { routing: id === "cp-empty" ? {} : id === "cp-partial" ? { risk: "high", provenance: { risk: "inferred" } } : routing })),
 		]);
-		// cp-a: two hours of wall clock up to its failure, real CI and review events, a torn last line, an escalation-backed ask.
+		// cp-a: two hours of wall clock up to its failure, real CI and review events, a torn last line, an escalation ask.
 		s.put(s.run("cp-a", "status.json"), { started_at: iso(180) });
 		s.put(s.run("cp-a", "events.jsonl"), [
 			{ source: "cp", ts: iso(60), type: "ci_observed", payload: { event: "ci_failed", reason: "Test failure" } },
@@ -266,7 +266,7 @@ test("P18-job-facts: Job detail's facts — CI, review, failure, asks, receipts,
 	assert.equal((await broken.json<BoardResponse>("/api/board")).stranded_count, null);
 });
 
-/** The QA mandate fixture (cp-6fis): dispatch-recorded, run-recorded and legacy grants, one paused, one uncovered job. */
+/** The QA mandate fixture (cp-6fis): dispatch-recorded, run-recorded and legacy grants, one paused, one uncovered. */
 function qaFixture(s: Seed) {
 	const at = iso(120);
 	s.fleet([
@@ -574,8 +574,11 @@ test("P18-jobs-ui: the served Jobs, Job detail, Board and Overview tabs show not
 	const parked = (id: string, over: object) => ({ job_id: id, project: "demo", kind: "ship", delivery: "pr", phase: "awaiting_merge", dispatched_at: iso(130), reported_at: iso(120),
 		awaiting_merge: { cycle: 1, pr_url: "https://github.com/o/r/pull/7", repo: "o/r", branch: id, head_sha: a, base: "main", handed_at: iso(120), released_at: iso(120), frozen_seconds: 600, frozen_usage: {}, ...over } });
 	const fleet = JSON.parse(readFileSync(join(scratch.path, LAYOUT.fleetFile), "utf8")).jobs;
-	s.fleet([...fleet, parked("cp-park", {}), parked("cp-pend", { pending: { kind: "head_moved", event_id: "head:b", observed_at: iso(60), head_sha: b } }),
+	s.fleet([...fleet, parked("cp-park", {}), parked("cp-pend", { pending: { kind: "head_moved", event_id: "head:b", observed_at: iso(60), head_sha: b } }), parked("cp-team", {}),
 		{ job_id: "cp-idle", project: "demo", phase: "waiting", dispatched_at: iso(10) }]);
+	s.put(LAYOUT.awaitingMergeWatchFile, { schema_version: 1, updated_at: iso(60), prs: [{ job_id: "cp-team", cycle: 1, pr_url: "https://github.com/o/r/pull/8", state: "open",
+		head_sha: a, base: "main", cursors: {}, observed_at: iso(60), approvals: 1, approvals_required: null }] });
+	s.events("cp-team", [{ type: "ci_observed", payload: { event: "ci_green", head_sha: a } }]);
 	s.put(s.run("cp-idle", "status.json"), { job_id: "cp-idle", phase: "idle", started_at: iso(10) });
 	s.put(paths.ciEvidenceFile("cp-park"), { schema_version: 1, job_id: "cp-park", repo: "o/r", observations: [{ head_sha: a, result: "success", source: "forwarded", observed_at: iso(60), operator_quote: "green." }] });
 	for (const id of ["cp-recorded", "cp-run", "cp-legacy"]) s.put(s.run(id, "envelope.json"), { envelope: { head_sha: a } });
@@ -590,7 +593,8 @@ test("P18-jobs-ui: the served Jobs, Job detail, Board and Overview tabs show not
 	assert.deepEqual(jobs.$$(".job-note").map((el) => el.getAttribute("title")), [note]);
 	for (const color of ["red", "green", "running"]) assert.match(jobs.$(`.job-ci-${color} > .job-ci-dot`)?.parentElement?.textContent ?? `no ${color} glyph`, new RegExp(`CI ${color}`));
 	assert.equal(jobs.$$(".job-pr").length, 0);
-	assert.match(jobs.text(), /With the team · 1/);
+	assert.match(jobs.text(), /With the team · 2/);
+	assert.match(jobs.text(), /In flight · \d/);
 
 	const detail = await view.open("#job/cp-recorded");
 	await detail.find(".job-ci-red");
@@ -610,10 +614,15 @@ test("P18-jobs-ui: the served Jobs, Job detail, Board and Overview tabs show not
 	assert.ok(cut > 0 && kinds.slice(cut).every((k) => k === "strip"), `strips follow the columns with cards: ${kinds}`);
 
 	const overview = await view.open("#overview");
-	const text = await overview.waitText(/With the team · 1/);
+	const text = await overview.waitText(/With the team · 2/);
 	const team = text.slice(text.indexOf("With the team"));
 	assert.match(team, /approvals unknown/);
+	assert.match(team, /1\/\? approvals/, "this cycle's watch row: one approval, the rule unknown");
+	assert.match(team, /CI green/);
 	assert.match(team, /\(forwarded\)/);
+	const flying = (await view.get("/api/overview").then((r) => JSON.parse(r.text) as OverviewResponse)).in_flight;
+	assert.match(text, new RegExp(`In flight · ${flying.length}(?!\\d)`), "the In flight count is the served in_flight list");
+	assert.ok(flying.some((j) => j.id === "cp-pend") && !flying.some((j) => j.id === "cp-park" || j.id === "cp-team"), "parked PRs are never In flight");
 	assert.doesNotMatch(team.slice(0, team.indexOf("Landed today")), /no CI yet/);
 	assert.match(text, /head moved: review and CI again/, "a pending parked job is In flight on its moved head");
 });
@@ -624,7 +633,8 @@ test("P18-not-found: a missing job or worker is a 404 page with a way back; only
 	const s = seed(scratch.path);
 	const ids = ["working", "launching", "idle", "script"];
 	s.ledger(ids.map((id) => ({ id: `cp-${id}`, title: `A long fixture title ${id} `.repeat(8), status: "open", labels: ["project:demo", "kind:ship"] })));
-	s.fleet(ids.map((id) => ({ job_id: `cp-${id}`, project: "demo", kind: "ship", phase: "waiting", dispatched_at: iso(10), ...(id === "script" ? { executor: "script", script_path: "script.ts" } : {}) })));
+	const fleet = ids.map((id) => ({ job_id: `cp-${id}`, project: "demo", kind: "ship", phase: "waiting", dispatched_at: iso(10), ...(id === "script" ? { executor: "script", script_path: "script.ts" } : {}) }));
+	s.fleet(fleet);
 	for (const [id, phase] of [["working", "working"], ["launching", "starting"], ["idle", "idle"], ["script", "working"]]) s.put(s.run(`cp-${id}`, "status.json"), { job_id: `cp-${id}`, phase, started_at: iso(10) });
 	const view = await startViewer(t, { home: scratch.path, requireTailnet: false, at: new Date(NOON).toISOString() });
 
@@ -665,8 +675,11 @@ test("P18-not-found: a missing job or worker is a 404 page with a way back; only
 	}
 	assert.doesNotMatch(css, /@media\(max-width:899px\)\{[^@]*\.page-header>h1\{display:none/, "the phone title is clipped, never removed");
 
-	s.put(LAYOUT.fleetFile, "{");
-	const blind = await view.open("#sessions?view=workers&id=cp-missing");
-	await blind.find(".not-found");
-	assert.equal(blind.$(".not-found-workers"), null, "an unreadable fleet invents no recovery links");
+	for (const [file, broken] of [[LAYOUT.fleetFile, "fleet"], [".pi-command-post/jobs.json", "ledger"]] as const) {
+		s.fleet(fleet);
+		s.put(file, "{");
+		const blind = await view.open("#sessions?view=workers&id=cp-missing");
+		await blind.find(".not-found");
+		assert.equal(blind.$(".not-found-workers"), null, `an unreadable ${broken} invents no recovery links`);
+	}
 });
