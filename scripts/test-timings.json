@@ -258,7 +258,6 @@
 	"tests/viewer-mobile-keyboard.test.ts": 53,
 	"tests/viewer-model-list.test.ts": 23,
 	"tests/viewer-more-menu.test.ts": 414,
-	"tests/viewer-operator-composer-images.test.ts": 57,
 	"tests/viewer-operator-composer.test.ts": 48,
 	"tests/e2e/viewer-restart-s27.test.ts": 20000,
 	"tests/viewer-operator-restart-retained.test.ts": 247,
