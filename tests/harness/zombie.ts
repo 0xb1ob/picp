@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { TestContext } from "node:test";
 
 /** Keep a real child unreaped until the assertion finishes, then reap it ourselves. */
-export async function withZombie(t: TestContext, check: (pid: number, holder: number) => void): Promise<void> {
+export async function withZombie(t: TestContext, check: (pid: number, holder: number) => void | Promise<void>): Promise<void> {
 	if (!existsSync("/proc/self/status")) return t.skip("zombie fixture needs procfs");
 	const probe = spawnSync("python3", ["-c", "import os; assert hasattr(os, 'fork')"], { timeout: 5_000 });
 	if (probe.error || probe.status !== 0) return t.skip("zombie fixture needs python3 with os.fork on PATH");
@@ -38,7 +38,7 @@ export async function withZombie(t: TestContext, check: (pid: number, holder: nu
 				}
 				if (/^State:\s+Z/m.test(status)) {
 					process.kill(pid, 0); // A kill-0-only aliveness check would wrongly return true.
-					check(pid, holder.pid!);
+					await check(pid, holder.pid!);
 					return;
 				}
 				assert.ok(Date.now() < deadline, "forked child never became a zombie");

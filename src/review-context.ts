@@ -20,7 +20,7 @@ import type { GitRunner } from "./default-base.ts";
 export const REVIEW_CONTEXT_MAX_BYTES = 300_000;
 export const REVIEW_CONTEXT_FILE = "context.md";
 export const REVIEW_CONTEXT_MANIFEST = "context-manifest.json";
-export const REVIEW_CONTEXT_INVARIANTS = ["AGENTS.md", "package.json", "tests/structure.test.ts", "tests/profiles.test.ts", "tests/viewer-workbench.test.ts"];
+export const REVIEW_CONTEXT_INVARIANTS = ["AGENTS.md", "package.json", "tests/structure.test.ts", "tests/profiles.test.ts", "tests/viewer-boundary.test.ts"];
 
 /** Relative path tokens; the lookbehind skips absolute and `~` paths and mid-word starts. */
 const TASK_PATH = /(?<![\w./~-])(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z0-9]{1,8}\b/g;

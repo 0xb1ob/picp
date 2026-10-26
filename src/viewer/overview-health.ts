@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 
 /**
  * Is the pid `state/parent.lock` records still a process? The viewer re-derives this instead of
- * importing `src/fleet.ts`, which a workbench module may not do (tests/viewer-workbench.test.ts);
+ * importing `src/fleet.ts`, which a workbench module may not do (tests/viewer-boundary.test.ts);
  * that test pins this to `isPidAlive`, the helper `/doctor` and the lock's own reclaim path use.
  * `EPERM` is not alive: the pid was reused by another user's process, never our own parent.
  * A single-thread zombie is gone too — `kill(pid, 0)` still finds it. (cp-hvbj)

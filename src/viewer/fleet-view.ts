@@ -7,7 +7,7 @@
  * `covers`, `mandateTokens`, `mandateSpend` and its `usage_baseline` (usage accrued after issue only) follow
  * `src/mandate-accounting.ts`, reviewer spend follows
  * `MandateStore.withReviewerSpend`, and the live overlay follows `liveUsageJobs` (`src/mandate-usage.ts`).
- * `tests/viewer-workbench.test.ts` pins them to the real functions on the same home.
+ * P19-workbench-dashboard and -spend (`tests/e2e/viewer-conversations-p19c.test.ts`) pin them to the real functions.
  */
 
 import { readdirSync } from "node:fs";

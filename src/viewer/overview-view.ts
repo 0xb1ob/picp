@@ -79,7 +79,7 @@ function linedUp(state: ViewerState): OverviewResponse["lined_up"] {
 }
 /**
  * Audit P3 #19: `state/main-ci.json` (src/main-ci.ts `MainCiStore`), re-derived here because viewer modules import
- * nothing outside `src/viewer/` (tests/viewer-workbench.test.ts). One row per project whose main is latched red; a
+ * nothing outside `src/viewer/` (tests/viewer-boundary.test.ts). One row per project whose main is latched red; a
  * malformed row makes the whole file unavailable, the way the store's own schema read does, never a silent no-latch.
  */
 function mainCi(state: ViewerState): OverviewResponse["main_ci"] {

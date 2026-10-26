@@ -4,7 +4,7 @@
  * manual-only `job.skill`, the
  * `state/schedules.json` schema and reader, and the cron engine. It lives under
  * `src/viewer/` because viewer modules may import only `node:` and `./` (see
- * tests/viewer-workbench.test.ts); nothing here writes, spawns or touches typebox.
+ * tests/viewer-boundary.test.ts); nothing here writes, spawns or touches typebox.
  * JOB_KINDS, DELIVERIES and MANDATE_ID_PATTERN are mirrored from src/contracts;
  * schedules have their own v2 file version (tests/viewer-schedules-retained.test.ts).
  */
