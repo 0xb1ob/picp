@@ -14,9 +14,8 @@ import { startTui } from "../harness/tui.ts";
 const has = (...needles: string[]) => (drawn: string) => needles.every((needle) => drawn.includes(needle));
 const between = (text: string, from: string, to: string) => text.slice(text.indexOf(from), text.indexOf(to, text.indexOf(from)));
 
-// P11c-answer-tui: six queued answers render as cards. Pins the collapsed head and its hidden count, a short answer
-// shown whole, the ANSWER_MAX_BYTES read cap (the tail past it never drawn), a gone or unreadable file degrading to
-// path and size, a header with no project or headline, and ctrl+o expanding every card.
+// P11c-answer-tui: six queued answers as cards: collapsed head and hidden count, a short answer whole, the read cap,
+// a gone or unreadable file degraded to path and size, a bare header, and ctrl+o expanding every card.
 test("P11c-answer-tui: answer cards render collapsed, capped, degraded and expanded in a real TUI", { timeout: 180_000 }, async (t) => {
 	const home = createScratchHome();
 	const provider = await MockProvider.start();
