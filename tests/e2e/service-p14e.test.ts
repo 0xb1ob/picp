@@ -9,8 +9,10 @@ import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
-import { layoutForHome } from "../../src/contracts.ts";
+import { configureLayout, layoutForHome } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
+import { gatewayKeyFile, readGatewayKey } from "../../src/gateway-key.ts";
+import { loadCapacityConfig } from "../../src/quota.ts";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
 import { RETIRED_INSTALL_FLAGS } from "../../src/service/install.ts";
 import { OPERATOR_RESUME_UNIT, OPERATOR_UNIT, renderUnits } from "../../src/service/units.ts";
@@ -443,6 +445,10 @@ test("P14e-install-extras: pi packages, gh, login, pi-lens, push and tmux steps 
 	assert.ok(!installs(human).some((call) => call.includes("pi-lens")), "pi-lens is configured (pinned by the human)");
 	assert.match(kept.out, /^ok: pi-package: pi-lens configured as npm:pi-lens@4\.3\.0 \(yours, kept; workers name npm:pi-lens\)$/m);
 	assert.deepEqual(JSON.parse(human.text(join(human.home, ".pi/agent/settings.json"))!).packages.slice(0, 3), mine, "order and entries kept");
+	const lookalike = r.user();
+	writeFileSync(join(lookalike.home, ".pi/agent/settings.json"), JSON.stringify({ packages: ["../src/pi-command-post", "npm:pi-command-post-extras"] }));
+	const self = await lookalike.install(quiet);
+	assert.ok(!installs(lookalike).includes(`install ${lookalike.app}`) && !/self-package/.test(self.out), "the checkout is never a pi package");
 	const off = r.user();
 	const skipped = await off.install([...quiet, "--no-pi-packages", "--no-self-package"]);
 	assert.deepEqual(installs(off), []);
@@ -458,6 +464,7 @@ test("P14e-install-extras: pi packages, gh, login, pi-lens, push and tmux steps 
 	const tracked = r.user();
 	mkdirSync(join(tracked.cpHome, "data"), { recursive: true });
 	writeFileSync(join(tracked.cpHome, "data", "trackers.json"), "{ retired, malformed");
+	writeFileSync(join(tracked.cpHome, "data", "projects.json"), JSON.stringify({ schema_version: 1, projects: [{ name: "tracked" }] }));
 	const untracked = await tracked.install(quiet);
 	assert.doesNotMatch(untracked.out, /tracker|--with-/i);
 	assert.deepEqual(tracked.log().filter((call) => call.endsWith(" --version")).map((call) => call.split(" ")[0]).filter((tool) => !["pi", ...PI_LENS_TOOLS.commands].includes(tool!)), [], "only surviving tools are probed");
@@ -557,4 +564,408 @@ test("P14e-install-legacy: a legacy home is held under --no-start, migrated by a
 	assert.deepEqual([existsSync(join(hand.unitDir, OPERATOR_UNIT)), hand.text(join(hand.unitDir, OPERATOR_RESUME_UNIT))], [false, mine], "a hand-written one stays");
 	assert.match(done.out, new RegExp(`^changed: migrate: cp-daemon\\.service runs the parent supervisor and the viewer; removed .*${OPERATOR_UNIT} \\(the parent host kept running; the operator units never stopped\\)`, "m"));
 	assert.ok(!hand.calls("systemctl").some((call) => call.includes("cp-operator")));
+});
+
+/** A scratch dir removed after the test, for the shell entry points. */
+function scratch(t: TestContext): string {
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), "cp-p14e-sh-")));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	return dir;
+}
+
+/** A fake `git` (clone writes a stub install.ts that records its argv) and a `node` that runs it. */
+function fakeGit(dir: string, origin: string): { env: NodeJS.ProcessEnv; argvFile: string } {
+	const bin = join(dir, "bin");
+	mkdirSync(bin);
+	const argvFile = join(dir, "argv");
+	writeFileSync(join(bin, "git"), [
+		"#!/bin/sh",
+		`echo "$*" >> ${JSON.stringify(join(dir, "git.log"))}`,
+		'if [ "$1" = clone ]; then for last; do :; done; mkdir -p "$last/.git" "$last/src/service"',
+		`  printf 'import { appendFileSync } from "node:fs"; appendFileSync(%s, JSON.stringify(process.argv.slice(2)) + "\\\\n");\\n' ${JSON.stringify(JSON.stringify(argvFile))} > "$last/src/service/install.ts"; exit 0; fi`,
+		'case "$*" in',
+		`  *"remote get-url origin"*) echo ${JSON.stringify(origin)} ;;`,
+		"  *rev-parse\\ --abbrev-ref*) echo main ;;",
+		"  *status\\ --porcelain*) ;;",
+		"  *rev-list*) echo 0 ;;",
+		"  *rev-parse\\ HEAD*|*rev-parse\\ origin/main*) echo abc ;;",
+		"esac",
+		"",
+	].join("\n"));
+	chmodSync(join(bin, "git"), 0o755);
+	return { env: { ...process.env, HOME: dir, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, CP_REPO_URL: "https://example.invalid/cp.git" }, argvFile };
+}
+
+test("P14e-sh: install.sh: clones the code to ~/.pi-command-post/app when absent, then execs its install.ts with the flags", (t) => {
+	const dir = scratch(t);
+	const { env, argvFile } = fakeGit(dir, "https://example.invalid/cp.git");
+	const out = execFileSync("sh", [join(REPO_ROOT, "scripts/install.sh"), "--no-start", "--port", "9000"], { env, encoding: "utf8" });
+	assert.match(out, /changed: code: cloned https:\/\/example\.invalid\/cp\.git into .*\.pi-command-post\/app/);
+	assert.match(readFileSync(join(dir, "git.log"), "utf8"), /^clone --branch main https:\/\/example\.invalid\/cp\.git .*\/\.pi-command-post\/app$/m);
+	assert.deepEqual(JSON.parse(readFileSync(argvFile, "utf8")), ["--no-start", "--port", "9000"]);
+	// Second run: the checkout exists, is clean and at origin/main.
+	const again = execFileSync("sh", [join(REPO_ROOT, "scripts/install.sh"), "--no-start"], { env, encoding: "utf8" });
+	assert.match(again, /ok: code: .* is at origin\/main/);
+	assert.doesNotMatch(readFileSync(join(dir, "git.log"), "utf8").split("\n").slice(1).join("\n"), /clone|merge/);
+});
+
+test("P14e-sh: install.sh: an existing checkout with another origin is refused; --dry-run with no checkout clones nothing", (t) => {
+	const dir = scratch(t);
+	const { env } = fakeGit(dir, "https://elsewhere.invalid/x.git");
+	mkdirSync(join(dir, ".pi-command-post/app/.git"), { recursive: true });
+	const refused = spawnSync("sh", [join(REPO_ROOT, "scripts/install.sh")], { env, encoding: "utf8" });
+	assert.equal(refused.status, 1);
+	assert.match(refused.stdout, /fail: code: .* has origin 'https:\/\/elsewhere\.invalid\/x\.git'/);
+
+	const fresh = scratch(t);
+	const dry = fakeGit(fresh, "https://example.invalid/cp.git");
+	const app = join(fresh, "app");
+	const result = spawnSync("sh", ["-c", `cat ${JSON.stringify(join(REPO_ROOT, "scripts/install.sh"))} | sh -s -- --dry-run --app ${JSON.stringify(app)}`], { env: dry.env, encoding: "utf8" });
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(result.stdout, /changed: code: would git clone .* \(dry-run\)/);
+	assert.equal(existsSync(app), false);
+});
+
+test("P14e-sh: install.sh --dry-run on an existing checkout never runs git fetch (it writes FETCH_HEAD, refs and objects)", (t) => {
+	const dir = scratch(t);
+	const { env, argvFile } = fakeGit(dir, "https://example.invalid/cp.git");
+	const app = join(dir, ".pi-command-post/app");
+	mkdirSync(join(app, ".git"), { recursive: true });
+	mkdirSync(join(app, "src/service"), { recursive: true });
+	writeFileSync(join(app, "src/service/install.ts"), `import { appendFileSync } from "node:fs"; appendFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n`);
+	const dry = spawnSync("sh", [join(REPO_ROOT, "scripts/install.sh"), "--dry-run"], { env, encoding: "utf8" });
+	assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+	assert.match(dry.stdout, /changed: code: would fetch origin main and fast-forward .* \(dry-run: nothing fetched\)/);
+	assert.doesNotMatch(readFileSync(join(dir, "git.log"), "utf8"), /\bfetch\b|\bmerge\b/);
+	assert.deepEqual(JSON.parse(readFileSync(argvFile, "utf8")), ["--dry-run"]);
+});
+
+test("P14e-sh: install.sh: a checkout with no node_modules runs npm ci before install.ts imports a package; a current one is left alone", (t) => {
+	const dir = scratch(t);
+	const { env, argvFile } = fakeGit(dir, "https://example.invalid/cp.git");
+	const app = join(dir, ".pi-command-post/app");
+	mkdirSync(join(app, ".git"), { recursive: true });
+	mkdirSync(join(app, "src/service"), { recursive: true });
+	writeFileSync(join(app, "package-lock.json"), "{}");
+	writeFileSync(join(app, "src/service/install.ts"), `import "fake-dep"; import { appendFileSync } from "node:fs"; appendFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n`);
+	const npmLog = join(dir, "npm.log");
+	writeFileSync(join(dir, "bin/npm"), [
+		"#!/bin/sh",
+		`echo "$*" >> ${JSON.stringify(npmLog)}`,
+		"mkdir -p node_modules/fake-dep && echo '{\"name\":\"fake-dep\",\"main\":\"index.js\"}' > node_modules/fake-dep/package.json",
+		": > node_modules/fake-dep/index.js && echo '{}' > node_modules/.package-lock.json",
+		"",
+	].join("\n"));
+	chmodSync(join(dir, "bin/npm"), 0o755);
+	const npmCalls = () => (existsSync(npmLog) ? readFileSync(npmLog, "utf8").trim().split("\n") : []);
+
+	const dry = spawnSync("sh", [join(REPO_ROOT, "scripts/install.sh"), "--dry-run", "--no-start"], { env, encoding: "utf8" });
+	assert.match(dry.stdout, /changed: code: would run npm ci in .*app \(dry-run\)/);
+	assert.deepEqual(npmCalls(), [], "dry-run runs no npm");
+
+	const first = spawnSync("sh", [join(REPO_ROOT, "scripts/install.sh"), "--no-start"], { env, encoding: "utf8" });
+	assert.equal(first.status, 0, first.stdout + first.stderr);
+	assert.match(first.stdout, /changed: code: npm ci in .*app/);
+	assert.deepEqual(npmCalls(), ["ci --no-audit --no-fund --loglevel=error"]);
+	assert.match(readFileSync(argvFile, "utf8"), /\["--no-start"\]/, "install.ts got past its imports");
+
+	const again = spawnSync("sh", [join(REPO_ROOT, "scripts/install.sh"), "--no-start"], { env, encoding: "utf8" });
+	assert.equal(again.status, 0, again.stdout + again.stderr);
+	assert.match(again.stdout, /ok: code: .*node_modules matches package-lock\.json/);
+	assert.equal(npmCalls().length, 1, "a current node_modules is not reinstalled");
+});
+
+test("P14e-sh: bin/cp-install is the same one command: it forwards every flag to scripts/install.sh", (t) => {
+	const dir = scratch(t);
+	const { env } = fakeGit(dir, "https://example.invalid/cp.git");
+	const app = join(dir, "app");
+	const home = join(dir, "home");
+	const run = spawnSync(join(REPO_ROOT, "bin/cp-install"), ["--dry-run", "--app", app, "--home", home], { env, encoding: "utf8" });
+	assert.ok(run.stdout.includes(`changed: code: would git clone --branch main https://example.invalid/cp.git ${app} (dry-run)`), run.stdout + run.stderr);
+	assert.match(run.stdout, /^ok: node: /m, "the dry-run went on into install.ts");
+	assert.equal(existsSync(app), false);
+	assert.equal(existsSync(home), false, "dry-run created nothing");
+	// Every flag reaches install.ts: one it does not know is refused there, by name.
+	const bogus = spawnSync(join(REPO_ROOT, "bin/cp-install"), ["--dry-run", "--app", app, "--bogus"], { env, encoding: "utf8" });
+	assert.notEqual(bogus.status, 0);
+	assert.match(bogus.stderr, /--bogus/);
+});
+
+const BOOTSTRAP = join(REPO_ROOT, "bin/cp-bootstrap");
+
+test("P14e-sh: bin/cp-bootstrap: POSIX sh, at most 60 lines, shellcheck-clean when shellcheck is here", (t) => {
+	assert.equal(spawnSync("sh", ["-n", BOOTSTRAP]).status, 0);
+	assert.ok(readFileSync(BOOTSTRAP, "utf8").trimEnd().split("\n").length <= 60);
+	const check = spawnSync("shellcheck", ["-s", "sh", BOOTSTRAP], { encoding: "utf8" });
+	if (check.error) return t.skip("shellcheck is not installed");
+	assert.equal(check.status, 0, check.stdout);
+});
+
+test("P14e-sh: bin/cp-bootstrap --dry-run in a scratch HOME clones nothing; old node and a dirty checkout are refused", (t) => {
+	const dir = scratch(t);
+	const env = { HOME: dir, PATH: `${dirname(process.execPath)}:/usr/bin:/bin` };
+	const dry = spawnSync("sh", ["-c", `cat ${JSON.stringify(BOOTSTRAP)} | sh -s -- --dry-run`], { env, encoding: "utf8" });
+	assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+	assert.match(dry.stdout, /^ok: bootstrap: git and node v\d+/m);
+	assert.match(dry.stdout, /changed: bootstrap: would git clone --branch main https:\/\/github\.com\/0xb1ob\/picp\.git .*\/\.pi-command-post\/app, npm ci, then bin\/cp-install \(dry-run\)/);
+	assert.equal(existsSync(join(dir, ".pi-command-post")), false, "nothing written");
+
+	const bin = join(dir, "oldnode");
+	mkdirSync(bin);
+	writeFileSync(join(bin, "node"), '#!/bin/sh\ncase "$1" in -p) echo 22 ;; *) echo v22.1.0 ;; esac\n');
+	chmodSync(join(bin, "node"), 0o755);
+	const old = spawnSync("sh", [BOOTSTRAP], { env: { ...env, PATH: `${bin}:/usr/bin:/bin` }, encoding: "utf8" });
+	assert.equal(old.status, 1);
+	assert.match(old.stdout, /fail: bootstrap: node v22\.1\.0 is older than 24; install node 24 or newer/);
+
+	const app = join(dir, "app");
+	mkdirSync(app);
+	execFileSync("git", ["init", "-q", "-b", "main", app]);
+	writeFileSync(join(app, "dirty"), "x");
+	const dirty = spawnSync("sh", [BOOTSTRAP, "--dry-run"], { env: { ...env, CP_APP: app }, encoding: "utf8" });
+	assert.equal(dirty.status, 1);
+	assert.match(dirty.stdout, /fail: bootstrap: .*app has uncommitted changes/);
+	assert.deepEqual(readFileSync(join(app, "dirty"), "utf8"), "x", "left as is");
+});
+
+test("P14e-sh: bin/cp-bootstrap honours --app DIR and --app=DIR over CP_APP, and a dry run never fetches an existing checkout", (t) => {
+	const dir = scratch(t);
+	const { env } = fakeGit(dir, "https://example.invalid/cp.git");
+	const fresh = join(dir, "custom-app");
+	for (const args of [["--dry-run", "--app", fresh], ["--dry-run", `--app=${fresh}`]]) {
+		const dry = spawnSync("sh", [BOOTSTRAP, ...args], { env: { ...env, CP_APP: join(dir, "elsewhere") }, encoding: "utf8" });
+		assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+		assert.ok(dry.stdout.includes(`would git clone --branch main https://example.invalid/cp.git ${fresh}, npm ci`), dry.stdout);
+		assert.equal(existsSync(fresh), false);
+	}
+	const app = join(dir, "app");
+	mkdirSync(join(app, ".git"), { recursive: true });
+	mkdirSync(join(app, "bin"));
+	writeFileSync(join(app, "bin/cp-install"), `#!/bin/sh\necho "cp-install $*"\n`);
+	for (const flag of [["--app", app], [`--app=${app}`]]) {
+		const dry = spawnSync("sh", [BOOTSTRAP, "--dry-run", ...flag], { env, encoding: "utf8" });
+		assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+		assert.ok(dry.stdout.includes(`changed: bootstrap: would fetch origin main and fast-forward ${app} when behind (dry-run: nothing fetched; not ahead of the local origin/main)`), dry.stdout);
+		assert.ok(dry.stdout.includes(`cp-install --app ${app} --dry-run ${flag.join(" ")}`), dry.stdout);
+	}
+	assert.doesNotMatch(readFileSync(join(dir, "git.log"), "utf8"), /\bfetch\b|\bmerge\b/);
+
+	// A checkout ahead of its local origin/main is refused in a dry run as in a real one, still without a fetch.
+	const genv = { HOME: dir, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, GIT_CONFIG_NOSYSTEM: "1" };
+	const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env: genv, encoding: "utf8" });
+	const seed = join(dir, "seed");
+	mkdirSync(seed);
+	git(dir, "init", "-q", "-b", "main", seed);
+	git(seed, "commit", "-q", "--allow-empty", "-m", "seed");
+	const ahead = join(dir, "ahead");
+	git(dir, "clone", "-q", "--branch", "main", seed, ahead);
+	git(ahead, "commit", "-q", "--allow-empty", "-m", "local");
+	const refused = spawnSync("sh", [BOOTSTRAP, "--dry-run", "--app", ahead], { env: genv, encoding: "utf8" });
+	assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+	assert.ok(refused.stdout.includes(`fail: bootstrap: ${ahead} has commits not on origin/main; push or drop them, then rerun`), refused.stdout);
+	assert.equal(existsSync(join(ahead, ".git/FETCH_HEAD")), false, "a dry run never fetches");
+});
+
+test("P14e-sh: bin/cp-bootstrap: a second run on an up-to-date checkout is all ok and never reruns npm ci", (t) => {
+	const dir = scratch(t);
+	const env = { HOME: dir, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, GIT_CONFIG_NOSYSTEM: "1" };
+	const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env, encoding: "utf8" });
+	const seed = join(dir, "seed");
+	mkdirSync(join(seed, "bin"), { recursive: true });
+	writeFileSync(join(seed, "bin/cp-install"), `#!/bin/sh\necho "cp-install $*"\n`);
+	writeFileSync(join(seed, ".gitignore"), "node_modules/\n");
+	git(dir, "init", "-q", "-b", "main", seed);
+	git(seed, "add", ".");
+	git(seed, "commit", "-qm", "seed");
+	const app = join(dir, "app");
+	git(dir, "clone", "-q", "--branch", "main", seed, app);
+	mkdirSync(join(app, "node_modules"));
+	writeFileSync(join(app, "node_modules/.package-lock.json"), "{}");
+	const again = spawnSync("sh", [BOOTSTRAP, "--no-start"], { env: { ...env, CP_APP: app }, encoding: "utf8" });
+	assert.equal(again.status, 0, again.stdout + again.stderr);
+	const statuses = again.stdout.split("\n").filter((line) => /^\w+: bootstrap: /.test(line)).map((line) => line.split(":")[0]);
+	assert.deepEqual([...new Set(statuses)], ["ok"], again.stdout);
+	assert.doesNotMatch(again.stdout, /npm ci/);
+	assert.match(again.stdout, new RegExp(`^cp-install --app ${app} --no-start$`, "m"), "execs cp-install with every flag");
+});
+
+const NO_MODELS = "No models available. Use /login or set an API key environment variable.\n";
+const LOCAL = ["--no-start", "--viewer-host", "127.0.0.1"];
+/** The unit, the wrapper and data/daemon.json as written: the files a model pin lives in. */
+const snapshot = (u: User) => [u.text(u.unit), u.text(join(u.binDir, "cp-operator")), u.text(u.paths.config)];
+const exportsOf = (u: User) => (u.text(join(u.binDir, "cp-operator")) ?? "").split("\n").find((line) => line.startsWith("export ")) ?? "";
+
+test("P14e-install-models: the parent's and the operator's questions, their defaults, flags and pins", { timeout: 600_000 }, async (t) => {
+	const r = rig(t);
+	// Fresh on a terminal: the parent's question, then the operator's from the same list defaulting to the parent's pick.
+	const picks = [];
+	for (const [replies, enter] of [[[""], "1"], [["2"], "2"], [["openai-codex/gpt-6.1-sol"], "openai-codex/gpt-6.1-sol"], [["2", "1"], "2"]] as const) {
+		const u = r.user();
+		const run = await u.install(LOCAL, [...replies]);
+		const asked = run.out.split(/\n(?=Model for )/).slice(1).map((q) => q.slice(0, q.indexOf("]: ") + 3));
+		assert.deepEqual(asked.map((q) => q.split(" — ")[0]), ["Model for the parent", "Model for the operator session"], run.out);
+		assert.equal(asked[0]!.split("\n").slice(1, -1).join("\n"), asked[1]!.split("\n").slice(1, -1).join("\n"), "the same numbered list");
+		assert.match(asked[0]!, /\n {2}1\) anthropic\/claude-opus-5-5 +recommended: in the routing rubric\n/);
+		assert.match(asked[0]!, /none \[1\]: $/);
+		assert.ok(asked[1]!.endsWith(`none [${enter}]: `), asked[1]);
+		picks.push(u.pinned());
+		if (replies[0] === "") assert.deepEqual(lines(run.out, "changed").filter((line) => line.includes(" model:")), [
+			"changed: model: parent anthropic/claude-opus-5-5 (recommended: in the routing rubric; --parent-model overrides)",
+			"changed: model: operator anthropic/claude-opus-5-5 (recommended: in the routing rubric; --operator-model overrides)",
+		]);
+	}
+	assert.deepEqual(picks, [["anthropic/claude-opus-5-5", "anthropic/claude-opus-5-5"], ["openai/gpt-6.1-sol", "openai/gpt-6.1-sol"], ["openai-codex/gpt-6.1-sol", "openai-codex/gpt-6.1-sol"], ["openai/gpt-6.1-sol", "anthropic/claude-opus-5-5"]]);
+	const none = r.user();
+	const unpinned = await none.install(LOCAL, ["none"]);
+	assert.match(unpinned.out, /none \[none\]: /, "the operator inherits none");
+	assert.doesNotMatch(snapshot(none).join("\n"), /parent_model|CP_PARENT_MODEL|CP_OPERATOR_MODEL/);
+	const failures = [];
+	for (const [replies, why, flag] of [[["x/y"], "x/y is not a model pi can use", "--parent-model"], [["", "7"], "7 is not one of the choices", "--operator-model"]] as const) {
+		const u = r.user();
+		const run = await u.install(LOCAL, [...replies]);
+		failures.push([run.code, new RegExp(`^fail: model: ${why}.*rerun with ${flag} <provider/model>$`, "m").test(run.out), existsSync(u.paths.config), existsSync(join(u.binDir, "cp-operator"))]);
+	}
+	assert.deepEqual(failures, [[1, true, false, false], [1, true, false, false]], "a failed choice writes nothing");
+
+	// The parent's own default is recommended ahead of the rubric when listed; the listing runs with cp-daemon's env.
+	const saved = r.user({ env: { ANTHROPIC_API_KEY: "sk-shell-only" } });
+	const sessions = join(saved.cpHome, layoutForHome("multi", saved.cpHome).sessions);
+	mkdirSync(sessions, { recursive: true });
+	writeFileSync(join(sessions, "cp-parent-control.json"), JSON.stringify({ model: "openai/gpt-6.1-sol" }));
+	const recommended = await saved.install([...LOCAL, "--yes"], []);
+	assert.doesNotMatch(recommended.out, /\]: /, "--yes asks nothing");
+	for (const role of ["parent", "operator"]) assert.ok(recommended.out.includes(`changed: model: ${role} openai/gpt-6.1-sol (recommended: the parent's current model (cp-parent-control.json); --${role}-model overrides)`), recommended.out);
+	const [keys, path] = (saved.text(join(saved.sm, "list-env")) ?? "").split("\n");
+	assert.deepEqual([keys!.split(" ").includes("ANTHROPIC_API_KEY"), path], [false, saved.config()?.path], "cp-daemon's PATH, no shell-only provider key");
+	const env = r.user({ env: { CP_PARENT_MODEL: "openai-codex/gpt-6.1-sol" } });
+	assert.match((await env.install(LOCAL, [""])).out, /1\) openai-codex\/gpt-6\.1-sol +recommended: the parent's default/);
+	const unlisted = r.user({ env: { CP_PARENT_MODEL: "openai/not-logged-in" } });
+	await unlisted.install([...LOCAL, "--yes"]);
+	assert.deepEqual([env.pinned()[0], unlisted.pinned()[0]], ["openai-codex/gpt-6.1-sol", "anthropic/claude-opus-5-5"], "an unlisted default is never recommended");
+
+	// The flags win, each for its own target, except a lone --parent-model on a fresh install sets both.
+	const flagged = [];
+	for (const [args, replies] of [[["--parent-model", "openai/gpt-6.1-sol"], undefined], [[...PINNED.slice(0, 2), "--operator-model", "anthropic/claude-opus-5-5"], undefined], [["--operator-model", "openai-codex/gpt-6.1-sol"], ["2"]], [["--operator-model", "openai-codex/gpt-6.1-sol", "--yes"], undefined]] as const) {
+		const u = r.user();
+		const run = await u.install([...LOCAL, ...args], replies && [...replies]);
+		flagged.push([...u.pinned(), (run.out.match(/^Model for [^—]+/gm) ?? []).map((q) => q.trim())]);
+	}
+	assert.deepEqual(flagged, [
+		["openai/gpt-6.1-sol", "openai/gpt-6.1-sol", []],
+		["openai/gpt-6.1-sol", "anthropic/claude-opus-5-5", []],
+		["openai/gpt-6.1-sol", "openai-codex/gpt-6.1-sol", ["Model for the parent"]],
+		["anthropic/claude-opus-5-5", "openai-codex/gpt-6.1-sol", []],
+	]);
+	const wrongFlag = r.user();
+	const wrong = await wrongFlag.install([...LOCAL, "--operator-model", "x/y"]);
+	assert.deepEqual([wrong.code, /^fail: model: x\/y \(--operator-model\) is not a model pi can use/m.test(wrong.out), wrongFlag.config()], [1, true, null]);
+	const empty = r.user({ models: NO_MODELS });
+	assert.ok((await empty.install([...LOCAL, "--parent-model", "x/y"])).out.includes("skip: model: parent x/y (--parent-model) written unchecked: pi's model list is empty"));
+	assert.equal(empty.pinned()[0], "x/y");
+
+	// --no-start with no usable model: run pi then /login, nothing pinned; the continuation keeps --home/--app and needs --force.
+	const later = r.user({ models: NO_MODELS });
+	const first = await later.install(LOCAL, []);
+	const line = lines(first.out, "skip").find((l) => l.startsWith("skip: model: no model pi can use as the service sees it (")) ?? "";
+	assert.match(line, /auth\.json.*run `pi`, then \/login, then /, first.out);
+	assert.ok(line.includes(`then ${later.app}/bin/cp-install --home ${later.cpHome} --app ${later.app} --force (without --force a rerun keeps this unpinned;`), line);
+	assert.match(line, /--force also reruns npm ci and replaces data\/daemon\.json, a unit or the wrapper that differs.*a login can still leave nothing to pin$/);
+	assert.doesNotMatch(first.out, /^Model for /m);
+	assert.doesNotMatch(snapshot(later).join("\n"), /parent_model|CP_PARENT_MODEL|CP_OPERATOR_MODEL/);
+	assert.match(first.out, /^skip: login: no provider/m, "the login step is unchanged");
+	writeFileSync(join(later.sm, "models.txt"), LISTING);
+	const before = snapshot(later);
+	const rerun = await later.install(LOCAL);
+	assert.ok(rerun.out.includes("skip: model: parent: none pinned; --force asks, --parent-model <provider/model> --force pins one"), rerun.out);
+	assert.deepEqual(snapshot(later), before, "a rerun keeps the unpinned choice");
+	await later.install([...LOCAL, "--force", "--yes"]);
+	assert.deepEqual(later.pinned(), ["anthropic/claude-opus-5-5", "anthropic/claude-opus-5-5"]);
+
+	// A rerun keeps every pin unasked and byte-identical, listing only for the login check; --force never re-asks it.
+	const kept = r.user();
+	await kept.install(LOCAL, ["2"]);
+	const pins = snapshot(kept);
+	const at = kept.log().length;
+	const again = await kept.install(LOCAL, []);
+	assert.deepEqual(lines(again.out, "ok").filter((l) => l.includes(" model:")), ["ok: model: parent openai/gpt-6.1-sol kept", "ok: model: operator openai/gpt-6.1-sol kept"]);
+	assert.deepEqual([...lines(again.out, "changed"), ...lines(again.out, "fail"), /^Model for /m.test(again.out)], [false]);
+	assert.deepEqual(kept.log().slice(at).filter((call) => call === "pi --no-extensions --list-models"), ["pi --no-extensions --list-models"]);
+	await kept.install([...LOCAL, "--force", "--yes"]);
+	assert.deepEqual(snapshot(kept), pins, "--force never re-asks a pinned choice");
+	// An older install that pinned only data/daemon.json (the wrapper without the model exports) stays byte-identical.
+	const older = r.user();
+	await older.install([...LOCAL, ...PINNED]);
+	const wrapper = join(older.binDir, "cp-operator");
+	writeFileSync(wrapper, older.text(wrapper)!.replace(" CP_PARENT_MODEL='openai/gpt-6.1-sol' CP_OPERATOR_MODEL='openai/gpt-6.1-sol'", ""));
+	const old = snapshot(older);
+	const quiet = await older.install(LOCAL);
+	assert.deepEqual([lines(quiet.out, "changed"), lines(quiet.out, "fail")], [[], []], quiet.out);
+	assert.deepEqual(snapshot(older), old);
+	assert.doesNotMatch(exportsOf(older), /CP_PARENT_MODEL/);
+});
+
+test("P14e-install-gateway: opt-in, validated, kept, tightened, and never printing the key", { timeout: 600_000 }, async (t) => {
+	const r = rig(t);
+	const KEY = "k3y-VALUE";
+	const gw = (o: UserOpts = {}) => {
+		const u = r.user(o);
+		writeFileSync(join(u.home, "gw-key"), `${KEY}\n`);
+		const capacity = join(u.cpHome, layoutForHome("multi", u.cpHome).data, "capacity.json");
+		return Object.assign(u, { capacity, keyFile: gatewayKeyFile({ HOME: u.home })!, flags: ["--gateway-key-file", join(u.home, "gw-key")] });
+	};
+	const plain = await r.user().install([...LOCAL, ...PINNED]);
+	assert.ok(plain.out.includes("skip: gateway: not set up (optional: capacity-aware routing through a sub2api gateway); add it later: cp-install --gateway-url https://<gateway> --gateway-key-file <file>"), plain.out);
+	// The flags write capacity.json and a 0600 key file; the key is in no line, no argv, no unit and no wrapper.
+	const u = gw();
+	const set = await u.install([...LOCAL, ...PINNED, "--gateway-url", "https://gw.example", ...u.flags]);
+	assert.deepEqual(JSON.parse(u.text(u.capacity)!), { url: "https://gw.example/", path: "/api/v1/admin/ops/concurrency" });
+	assert.deepEqual([statSync(u.capacity).mode & 0o777, statSync(u.keyFile).mode & 0o777, u.keyFile], [0o600, 0o600, join(u.home, ".config/pi-command-post/gateway.env")]);
+	assert.match(u.text(u.keyFile)!, new RegExp(`^CP_GATEWAY_ADMIN_KEY=${KEY}$`, "m"));
+	assert.deepEqual([set.out, u.log().join("\n"), ...snapshot(u)].filter((text) => text?.includes(KEY)), [], "the key leaks nowhere");
+	configureLayout("multi", u.cpHome);
+	assert.equal(loadCapacityConfig(u.cpHome).endpoint, "https://gw.example/api/v1/admin/ops/concurrency", "what the parent host reads");
+	const files = snapshot(u);
+	const kept = await u.install(LOCAL);
+	assert.ok(kept.out.includes(`ok: gateway: ${u.capacity} kept`) && kept.out.includes(`ok: gateway-key: ${u.keyFile} kept`), kept.out);
+	assert.deepEqual(snapshot(u), files, "no unit changes");
+
+	// Not https, userinfo, a path, a query, no key or a key with whitespace fail and write nothing, start nothing.
+	const refusals = [];
+	for (const [url, keyArgs] of [["http://gw.example"], ["https://u:p@gw.example"], ["https://gw.example/x"], ["https://gw.example/?q=1"], ["gw.example"], ["https://gw.example", []], ["https://gw.example", ["bad"]]] as const) {
+		const v = gw();
+		writeFileSync(join(v.home, "bad"), "k3y with space\n");
+		const run = await v.install([...PINNED, "--viewer-host", "127.0.0.1", "--gateway-url", url, ...(keyArgs === undefined ? v.flags : keyArgs.map((name) => ["--gateway-key-file", join(v.home, name)]).flat())]);
+		const fail = lines(run.out, "fail").find((line) => line.startsWith("fail: gateway: ")) ?? run.out;
+		refusals.push([run.code, existsSync(v.cpHome), existsSync(v.keyFile), v.log().some((call) => call.includes("cp-daemon.service") || call.startsWith("daemon ")), keyArgs?.[0] === "bad" ? /holds whitespace/.test(fail) && !fail.includes("k3y with space") : keyArgs ? /needs the admin key.*--gateway-key-file/.test(fail) : fail.endsWith("; nothing written")]);
+	}
+	assert.deepEqual(new Set(refusals.map((row) => JSON.stringify(row))), new Set([JSON.stringify([1, false, false, false, true])]), JSON.stringify(refusals));
+
+	// Another url or key needs --force (other capacity keys kept); a loose key file is tightened, by a dry run only in plan.
+	writeFileSync(u.capacity, `${JSON.stringify({ url: "https://gw.example/", path: "/api/v1/admin/ops/concurrency", quota: { five_hour: 80 } })}\n`);
+	const other = await u.install([...LOCAL, "--gateway-url", "https://gw2.example"]);
+	assert.ok(other.code === 1 && other.out.includes(`fail: gateway: ${u.capacity} names https://gw.example/; rerun with --force`), other.out);
+	await u.install([...LOCAL, "--force", "--gateway-url", "https://gw2.example"]);
+	assert.deepEqual(JSON.parse(u.text(u.capacity)!), { url: "https://gw2.example/", path: "/api/v1/admin/ops/concurrency", quota: { five_hour: 80 } });
+	writeFileSync(join(u.home, "gw-key2"), "other-k3y\n");
+	const key2 = ["--gateway-key-file", join(u.home, "gw-key2")];
+	const otherKey = await u.install([...LOCAL, ...key2]);
+	assert.ok(otherKey.code === 1 && otherKey.out.includes(`fail: gateway: ${u.keyFile} holds another key; rerun with --force`), otherKey.out);
+	await u.install([...LOCAL, "--force", ...key2]);
+	assert.match(u.text(u.keyFile)!, /^CP_GATEWAY_ADMIN_KEY=other-k3y$/m);
+	chmodSync(u.keyFile, 0o644);
+	assert.ok((await u.install(LOCAL)).out.includes(`changed: gateway-key: tightened ${u.keyFile} to 0600`));
+	const tightened = [];
+	for (const dry of [true, false]) {
+		chmodSync(u.keyFile, 0o644);
+		const run = await u.install([...LOCAL, ...(dry ? ["--dry-run"] : []), "--gateway-url", "https://gw2.example", ...key2]);
+		tightened.push([run.out.includes(`changed: gateway-key: tightened ${u.keyFile} to 0600`), statSync(u.keyFile).mode & 0o777, run.out.includes("other-k3y")]);
+	}
+	assert.deepEqual(tightened, [[true, 0o644, false], [true, 0o600, false]], "--dry-run writes nothing; the flag path tightens");
+	assert.deepEqual(readGatewayKey(u.keyFile), { key: "other-k3y" }, "what the parent host reads");
+	const dry = gw();
+	const plan = await dry.install([...LOCAL, ...PINNED, "--dry-run", "--gateway-url", "https://gw.example", ...dry.flags]);
+	assert.match(plan.out, /^changed: gateway-key: wrote.*\(dry-run\)$/m);
+	assert.deepEqual([existsSync(dry.capacity), existsSync(dry.keyFile)], [false, false]);
+	const gone = await u.install(["--uninstall"]);
+	assert.ok(gone.out.includes(`skip: uninstall: ${u.keyFile} kept (your gateway admin key; remove it yourself)`) && existsSync(u.keyFile), gone.out);
 });
