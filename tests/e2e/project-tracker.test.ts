@@ -221,7 +221,7 @@ test("P15-jobs-lifecycle: cp_job records, queries, gates and closes jobs, and /c
 	const fresh = notes.slice(-8);
 	const line = (job: Job) => new RegExp(`^${job.id}\\s+\\S+\\s+\\S+\\s+\\S+\\s+${job.title}$`, "m");
 	assert.match(fresh[0]!, line(jobOf(ends, "four")), "the command reads what the tool wrote");
-	assert.doesNotMatch(fresh[0]!, /o3|fix it/);
+	assert.doesNotMatch(fresh[0]!, /\s(o3|fix it)$/m, "titles only: a random job id may contain o3");
 	assert.match(fresh[1]!, /o1/);
 	assert.doesNotMatch(fresh[1]!, /four/);
 	assert.match(fresh[2]!, /fix it/);

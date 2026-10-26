@@ -428,7 +428,14 @@ test("P11c-gate-routing: preferences, refusals, subject axes, fallbacks and capa
 	await assert.rejects(b.gate("cp-gate-override", { model: "unauth/opus" }), /no available model/);
 });
 
-test("P11c-gate-capacity: with no gateway answer, a high-risk reviewer goes to the provider with no waiting worker", { timeout: 300_000 }, async (t) => {
+test("P11c-gate-capacity: gateway admin scores outrank the fleet; with no answer a high-risk reviewer avoids the waiting worker", { timeout: 300_000 }, async (t) => {
+	// The gateway is external, like the LLM: the reader binds fetch at construction, so the stub precedes the bench.
+	const row = (max: number, used: number) => ({ current_in_use: used, max_capacity: max, load_percentage: 0, waiting_in_queue: 0 });
+	const original = globalThis.fetch;
+	t.after(() => { globalThis.fetch = original; });
+	globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => new URL(String(input)).host !== "gateway.test"
+		? original(input, init) : Response.json({ code: 0, message: "success", data: { account: {}, group: {}, enabled: true,
+			timestamp: "2026-09-25T00:00:00Z", platform: { mock: row(8, 0), mock2: row(4, 4) } } })) as typeof fetch;
 	// The admin endpoint must be https; an unreachable one makes the reader compare only the fleet's waiting workers.
 	const b = await bench(t, { CP_GATEWAY_ADMIN_KEY: "test-only" });
 	writeFileSync(join(b.home, LAYOUT.data, "capacity.json"), JSON.stringify({ url: "https://127.0.0.1:9/", path: "/capacity" }));
@@ -440,6 +447,15 @@ test("P11c-gate-capacity: with no gateway answer, a high-risk reviewer goes to t
 	await b.subject("cp-gate-capacity", undefined, { scope: "L", risk: "high", inferred: false });
 	assert.equal((await b.gate("cp-gate-capacity")).model, other, JSON.stringify(b.routed("cp-gate-capacity")));
 	assert.match(String(b.routed("cp-gate-capacity")?.line), /capacity=fleet:mock=-1,mock2=0/);
+
+	// #547 low: a gateway answer outranks the fleet, so a free `mock` wins though its worker is waiting.
+	writeFileSync(join(b.home, LAYOUT.data, "capacity.json"), JSON.stringify({ url: "https://gateway.test", path: "/capacity" }));
+	const adminMain = b.script("gate-cap-admin", [verdict("cp-gate-admin")]);
+	const adminOther = b.script("gate-cap-admin-other", [verdict("cp-gate-admin")]).replace(/^.*\//, "mock2/");
+	b.routing([{ id: "reviews-high", role: "gate-reviewer", risk: "high", model: adminMain, fallbacks: [adminOther], thinking: "low" }]);
+	await b.subject("cp-gate-admin", undefined, { scope: "L", risk: "high", inferred: false });
+	assert.equal((await b.gate("cp-gate-admin")).model, adminMain, JSON.stringify(b.routed("cp-gate-admin")));
+	assert.match(String(b.routed("cp-gate-admin")?.line), /capacity=admin:/);
 });
 
 /** do8.3's original task: three numbered requirements the reviewer scores the plan against. */
