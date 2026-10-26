@@ -793,6 +793,10 @@ test("P13c same-process new_session: an unexpanded skill anchor is offered once 
 	const restarted = await h.parent("P13c: new process.", []);
 	await waitFor(() => wakes(restarted).length, (count) => count === 1, { timeoutMs: 20_000, what: "the new process's recovery wake" });
 	assert.match(JSON.stringify(wakes(restarted)[0]!.message), /use skill cp-pr-review to expand it now/);
+	const second = anchors.find((entry) => entry !== anchor!.id);
+	assert.equal((wakes(restarted)[0]!.message as { details?: { job_id?: string } }).details?.job_id, second, "the still-deferred anchor");
+	await restarted.waitForSettled(30_000);
+	assert.equal(wakes(restarted).length, 1, "offered once in the new process");
 });
 
 test("P13c cron and watch fires at parent start: a missed slot is caught up once, an open run holds the next, a watch fires on exit 0 or changed output, an untracked script and a deactivated schedule fire nothing", { timeout: 240_000 }, async (t) => {
@@ -1260,27 +1264,36 @@ test("P13c native self-review: six readers and one synthesis run in code within 
 	assert.match(synthesis, /no builds, tests, installs, git writes, or writes to live state/);
 	const memberWakes = parent.records().filter((r) => r.type === "message_start" && Object.values(ids).some((id) => JSON.stringify(r.message).includes(id)) && ["cp-envelope", "cp-schedule"].includes((r.message as { customType?: string })?.customType ?? ""));
 	assert.deepEqual(memberWakes, [], "no parent wake for a code-owned run");
+	// P13d: the run's one result card is S1's, never the anchor's or a reader's.
+	const answers = join(h.stateDir, "operator", "answers.jsonl");
+	const cardsOf = () => existsSync(answers) ? readFileSync(answers, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { job_id: string | null; source: Record<string, unknown> }) : [];
+	await waitFor(() => cardsOf().filter((card) => card.source.run_id === run().id).length, (count) => count > 0, { timeoutMs: 30_000, what: "the self-review card" });
+	assert.deepEqual(cardsOf().filter((card) => card.source.run_id === run().id).map((card) => card.job_id), [ids.S1]);
 });
 
 test("P13c native self-review: a reader dropped by the parent before it starts drops S1, and the run closes partial", { timeout: 300_000 }, async (t) => {
 	const { h, run, roleIds, fleetOf, add, runNow, admitted, closed } = await selfReviewHome(t);
-	// Parallelism 1: L6 starts only after five readers report, long after the parent's drop turn.
+	// Parallelism 1: L5 and L6 start only after four readers report, long after the parent's turn; L5 closes failed.
 	const parent = await h.parent("P13c: Add the self-review schedule.", [
 		{ kind: "tool_calls", calls: [add] },
 		{ kind: "tool_calls", calls: [runNow("run", 1)] },
 		{ kind: "text", text: "Started." },
-		{ kind: "tool_calls", calls: [{ id: "drop", name: "cp_job", args: () => ({ action: "drop", job_id: roleIds().L6, reason: "result not delivered" }) }] },
+		{ kind: "tool_calls", calls: [
+			{ id: "drop", name: "cp_job", args: () => ({ action: "drop", job_id: roleIds().L6, reason: "result not delivered" }) },
+			{ id: "fail", name: "cp_job", args: () => ({ action: "close", job_id: roleIds().L5, reason: "failed: source unreachable" }) },
+		] },
 	]);
 	checkCall(ends(parent), "run", "ok", /fired: created cp-/);
 	const ids = await admitted();
-	await parent.prompt("P13c: Drop the L6 reader.");
-	await waitFor(() => ends(parent).get("drop"), (found) => found !== undefined, { timeoutMs: 60_000, what: "the drop's result" });
+	await parent.prompt("P13c: Drop the L6 reader and close L5 as failed.");
+	await waitFor(() => ends(parent).get("fail"), (found) => found !== undefined, { timeoutMs: 60_000, what: "the close's result" });
 	checkCall(ends(parent), "drop", "ok", new RegExp(ids.L6!));
+	checkCall(ends(parent), "fail", "ok", new RegExp(`closed ${ids.L5}: failed: source unreachable`));
 	assert.equal(fleetOf(ids.L6!), undefined, "L6 was dropped before it started");
 	await closed("the run closed");
 	assert.equal(run().outcome, "partial");
-	assert.match((await h.ledger.show(ids.S1!)).close_reason ?? "", new RegExp(`^dropped: run .*: required reader\\(s\\) ${ids.L6} not delivered`));
+	assert.match((await h.ledger.show(ids.S1!)).close_reason ?? "", new RegExp(`^dropped: run .*: required reader\\(s\\) ${ids.L5}, ${ids.L6} not delivered`));
 	assert.equal(fleetOf(ids.S1!), undefined, "S1 never starts without all six reports");
-	assert.equal(fleetOf(ids.L6!), undefined, "a dropped reader never starts");
+	assert.deepEqual([fleetOf(ids.L5!), fleetOf(ids.L6!)], [undefined, undefined], "a failed or dropped reader never starts");
 	assert.match((await h.ledger.show(run().anchor_job_id!)).close_reason ?? "", /^dropped: self-review run .* without a synthesis/);
 });

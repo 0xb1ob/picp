@@ -6,7 +6,7 @@
  * `src/viewer/` because viewer modules may import only `node:` and `./` (see
  * tests/viewer-workbench.test.ts); nothing here writes, spawns or touches typebox.
  * JOB_KINDS, DELIVERIES and MANDATE_ID_PATTERN are mirrored from src/contracts;
- * schedules have their own v2 file version (tests/viewer-schedules.test.ts).
+ * schedules have their own v2 file version (tests/viewer-schedules-retained.test.ts).
  */
 import { existsSync, readFileSync } from "node:fs";
 
@@ -102,7 +102,7 @@ export const GRANT_TEMPLATE_ACTIONS = ["plan", "implement", "review", "repair"] 
 /** Mirrors MANDATE_ASK_ON; a template always holds `merge` and `risk:high`. */
 export const GRANT_TEMPLATE_ASK_ON = ["plan_approval", "merge", "risk:high"] as const;
 export const GRANT_TEMPLATE_FORCED_ASK_ON = ["merge", "risk:high"] as const;
-/** Mirrors MANDATE_CHANNELS; tests/viewer-schedules.test.ts pins the three mirrors. */
+/** Mirrors MANDATE_CHANNELS; tests/viewer-schedules-retained.test.ts pins the three mirrors. */
 export const MANDATE_CHANNEL_VALUES = ["operator_chat", "bridge"] as const;
 
 /** A pause the scheduler re-mints past; any other pause is the operator's. */
