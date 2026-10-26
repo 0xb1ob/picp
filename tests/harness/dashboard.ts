@@ -74,7 +74,8 @@ export async function operatorSession(t: Context, stateDir: string, isIdle = () 
 	return { injected, control };
 }
 
-type Requested = { method: string; path: string; headers: Record<string, string>; body: string | null; status: number };
+/** `read`: the app has parsed the reply's JSON and its state updates have run (set one macrotask after `json()`). */
+type Requested = { method: string; path: string; headers: Record<string, string>; body: string | null; status: number; read: boolean };
 
 /**
  * Opens the served app at `hash`; `hold`-matched requests wait for `release()`; `headers` ride on every request (a
@@ -112,7 +113,10 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 		headers.set("sec-fetch-site", "same-origin");
 		if (method !== "GET" && method !== "HEAD") headers.set("origin", origin);
 		const response = await fetch(url, { ...init, headers });
-		requests.push({ method, path: `${url.pathname}${url.search}`, headers: Object.fromEntries(headers), body: typeof init.body === "string" ? init.body : null, status: response.status });
+		const row: Requested = { method, path: `${url.pathname}${url.search}`, headers: Object.fromEntries(headers), body: typeof init.body === "string" ? init.body : null, status: response.status, read: false };
+		requests.push(row);
+		const json = response.json.bind(response);
+		response.json = () => json().finally(() => void setTimeout(() => { row.read = true; }, 0));
 		return response;
 	};
 	const track = <A extends unknown[]>(start: (fn: () => void, ms?: number, ...rest: A) => ReturnType<typeof setTimeout>) => (fn: () => void, ms?: number, ...rest: A) => {
