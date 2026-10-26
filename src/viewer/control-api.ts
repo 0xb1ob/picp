@@ -423,7 +423,8 @@ export async function guarded(req: IncomingMessage, options: ControlRouteOptions
 		const raw = await readBody(req, max);
 		if (raw === "too_large") {
 			parsed = { ...parsed, bytes: Number(req.headers["content-length"]) || max + 1 };
-			return refuse(413, `body is larger than ${max} bytes`, { connection: "close" });
+			// No `connection: close`: closing on an unread body resets the socket and the client never sees this 413.
+			return refuse(413, `body is larger than ${max} bytes`);
 		}
 		if (image !== undefined) {
 			parsed = { ...parsed, bytes: raw.length };

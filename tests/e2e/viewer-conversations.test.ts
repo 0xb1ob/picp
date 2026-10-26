@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, truncateSync, utimesSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { connect } from "node:net";
 import { type ControlPorts, type DashboardControl, type InlineImage, startDashboardControl } from "../../src/dashboard-control.ts";
 import { appendAnswerLine, appendThreadLine } from "../../src/viewer/control-audit.ts";
 import { type AnswerLine, controlConfigFile, controlInboxFile, controlJournalFile, operatorThreadsFile, readControlRecord, type ThreadLine } from "../../src/viewer/control-files.ts";
@@ -261,7 +262,8 @@ test("P19-upload: POST /api/operator/upload refuses in order, stores sniffed ima
 	await refused(415, d.bytes("x", png, "application/json"), /Content-Type must be image/);
 	await refused(415, d.bytes("x", STUBS.svg, "image/svg+xml"), /Content-Type must be image/);
 	await refused(415, d.bytes("x", STUBS.heic, "image/heic"), /HEIC\/HEIF is not supported; share the photo as JPEG/);
-	await refused(413, d.bytes("x", png, "image/png", { "content-length": String(10 * 1024 * 1024 + 1) }), /larger than 10485760 bytes/);
+	// The declared length is a lie (the png is tiny): this client must not reuse a socket the server thinks is mid-body.
+	await refused(413, d.bytes("x", png, "image/png", { "content-length": String(10 * 1024 * 1024 + 1), connection: "close" }), /larger than 10485760 bytes/);
 	await refused(409, d.bytes("x", png), /need a running operator session/);
 	const { csrf } = await session(t, d.stateDir, d.root);
 	await refused(403, d.bytes("stale", png), /control token missing or stale/);
@@ -463,4 +465,24 @@ test("P19-upload-send: images and text files reach the operator session inline, 
 	assert.ok(Buffer.byteLength(eight.text) <= 16384 && !/\uFFFD/.test(eight.text), String(Buffer.byteLength(eight.text)));
 	assert.equal((eight.text.match(/File: mix-/g) ?? []).length, 8);
 	for (const [i, file] of eight.ids.entries()) assert.deepEqual(readFileSync(stored(d.root, file)), Buffer.from(`# ${i}\n` + samples[i]!.repeat(4_000 + i * 997)), "the stored file keeps every byte");
+});
+
+test("P19-upload-oversize: a refused upload is answered 413 to a client still streaming its body, not reset", { timeout: 120_000 }, async (t) => {
+	const d = await viewer(t);
+	const { origin, "sec-fetch-site": site } = d.own;
+	const body = Buffer.alloc(16 * 1024 * 1024, 97);
+	const head = `POST ${UPLOAD} HTTP/1.1\r\nhost: 127.0.0.1:${d.port}\r\norigin: ${origin}\r\nsec-fetch-site: ${site}\r\ncontent-type: image/png\r\ncontent-length: ${body.length}\r\n\r\n`;
+	// The client reads nothing until its whole body is written: a reset under the write loses the unread refusal.
+	const reply = await new Promise<string>((resolve, reject) => {
+		const socket = connect(d.port, "127.0.0.1");
+		const chunks: Buffer[] = [];
+		socket.pause();
+		socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+		socket.on("error", reject);
+		socket.on("close", () => resolve(Buffer.concat(chunks).toString("utf8")));
+		socket.write(head);
+		socket.write(body, () => socket.resume());
+	});
+	assert.match(reply, /^HTTP\/1\.1 413 /);
+	assert.match(reply, /body is larger than 10485760 bytes/);
 });
