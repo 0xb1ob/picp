@@ -223,11 +223,12 @@ test("P15-jobs-lifecycle: cp_job records, queries, gates and closes jobs, and /c
 	assert.match(fresh[0]!, line(jobOf(ends, "four")), "the command reads what the tool wrote");
 	assert.doesNotMatch(fresh[0]!, /o3|fix it/);
 	assert.match(fresh[1]!, /o1/);
-	assert.doesNotMatch(fresh[1]!, /four/);
-	assert.match(fresh[2]!, /fix it/);
-	assert.doesNotMatch(fresh[2]!, /four/);
-	assert.match(fresh[3]!, /o3/);
-	assert.doesNotMatch(fresh[3]!, /fix it/);
+	// Match the title column: a bare substring can collide with a random job id (e.g. cp-vco3).
+	assert.doesNotMatch(fresh[1]!, /\sfour$/m);
+	assert.match(fresh[2]!, /\sfix it$/m);
+	assert.doesNotMatch(fresh[2]!, /\sfour$/m);
+	assert.match(fresh[3]!, /\so3$/m);
+	assert.doesNotMatch(fresh[3]!, /\sfix it$/m);
 	assert.match(fresh[4]!, /cp-nope: no such job/);
 	assert.match(fresh[5]!, /\/cp-jobs show needs a job id/);
 	assert.match(fresh[6]!, /--status must be one of open\|in_progress\|deferred\|closed/);
