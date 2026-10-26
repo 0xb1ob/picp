@@ -272,7 +272,6 @@
 	"tests/viewer-upload-metadata.test.ts": 23,
 	"tests/viewer-uploads.test.ts": 50,
 	"tests/viewer-version-badge.test.ts": 13,
-	"tests/viewer-workbench.test.ts": 691,
 	"tests/wake-rules-retained.test.ts": 119,
 	"tests/wakeup-head-sources-retained.test.ts": 4,
 	"tests/wakeup-journal-retained.test.ts": 23,

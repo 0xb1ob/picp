@@ -4,7 +4,7 @@
  * served CSS only, no layout or pixels).
  */
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { controlConfigFile, controlJournalFile, operatorThreadsFile } from "../../src/viewer/control-files.ts";
@@ -17,6 +17,13 @@ import { type ControlPorts, type DashboardControl, type InlineImage, startDashbo
 import { type Context, type Json, jsonl, pick, viewer, write } from "../harness/conversations.ts";
 import { openTab, operatorSession, type Tab, until } from "../harness/dashboard.ts";
 import { syntheticPng } from "../harness/images.ts";
+import { EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, SCHEMA_VERSION, type Usage } from "../../src/contracts.ts";
+import { FleetStore, isPidAlive } from "../../src/fleet.ts";
+import { MandateStore, mandateSpend } from "../../src/mandate.ts";
+import { liveUsageJobs } from "../../src/mandate-usage.ts";
+import type { RunRegistry } from "../../src/runs.ts";
+import { git, readRunStatus } from "../harness/index.ts";
+import { withZombie } from "../harness/zombie.ts";
 
 const AT = "2026-10-06T08:00:00Z";
 const DC = "dc-20261006080000-89abcdef";
@@ -722,7 +729,7 @@ test("P19-tools-toggle: tool calls hide by default, a run is one pill that opens
 
 	const long = await chat(t, toolRun("t1", "read", `Read 42 lines\n${"x".repeat(1300)}-TAIL-MARKER`));
 	const tail = await openTab(t, long.port, OPERATOR, new Map([[TOOLS_KEY, "1"]]));
-	await tail.waitText(/show all/);
+	assert.match((await tail.waitText(/show all/), tail.text()), /show all/, "show all is on screen");
 	assert.match(tail.text(), /-TAIL-MARKER/, "a long call keeps its tail behind show all");
 	assert.doesNotMatch(tail.root.innerHTML, /x{1300}/, "the head is the truncation point");
 
@@ -820,7 +827,7 @@ test("P19-bridge-steps: a wake and the calls after it are one run of steps; noti
 	const state = d.stateDir;
 	assert.deepEqual([...card.querySelectorAll(".session-notice-chips a, .session-notice-chips code")].map((chip) => [chip.textContent, chip.getAttribute("title")]), [["artifact.md", `${state}/runs/cp-xrhq/artifact.md`], ["cp-xrhq", `${state}/runs/cp-xrhq`], ["report.md", `${state}/artifacts/cp-xrhq/report.md`]], "chips name the file; the path stays in the title");
 	const file = join(d.home, "pi-sessions", "chat.jsonl"), next = rows(state);
-	next.splice(4, 0, ...toolRun("t3", "read", "Read 1 line\nTOOL-THREE"));
+	next.splice(5, 0, ...toolRun("t3", "read", "Read 1 line\nTOOL-THREE"));
 	write(file, jsonl(next));
 	tab.refresh();
 	assert.deepEqual(await until(() => pills(tab), (p) => p[0] === "≡ 4 steps · cp-xrhq ▾", "the streamed call"), ["≡ 4 steps · cp-xrhq ▾"], "a streamed call joins the open run");
@@ -865,4 +872,172 @@ test("P19-tools-sheet: the ⋯ sheet's tool toggle is the same remembered choice
 	assert.doesNotMatch(desktop, /\.session-tools-toggle|\.session-bridge|\.session-notice-line|\.session-notice-paths/, "the desktop block leaves the phone rules at 1440px");
 	assert.doesNotMatch(css, /\.session-tools-toggle[^{]*\{[^}]*display:none/, "the heading toggle is never hidden");
 	assert.match(cssRules(css, ".session-heading"), /overflow:visible/, "the heading row does not clip the toggle");
+});
+
+// ---- the workbench: dashboard spend, the server's routes, a held job's diff, git reads, grants and the parent probe ----
+
+const LATER = isoTimestamp(new Date(Date.now() + 86_400_000));
+const PR = "https://github.com/acme/repo/pull/7";
+const usage = (cost_usd: number, total_tokens: number, cache_read = 0): Usage => ({ ...EMPTY_USAGE, cost_usd, total_tokens, cache_read });
+const record = (job_id: string, over: Partial<FleetRecord> = {}): FleetRecord => ({
+	job_id, project: "alpha", kind: "ship", delivery: "pr", origin: "terminal", phase: "held", worktree: `/wt/${job_id}`, branch: job_id,
+	worker: { pid: 4242, session_id: "s", session_file: "/s.jsonl", profile: "implementer", role: "implementer", model: "m", started_at: "2026-09-01T00:00:00Z" },
+	dispatched_at: "2026-09-01T00:00:00Z", usage: EMPTY_USAGE, reported_at: "2026-09-01T00:02:00Z", ...over,
+});
+const fleetOf = (stateDir: string, jobs: FleetRecord[]) => write(join(stateDir, "fleet.json"), { schema_version: SCHEMA_VERSION, updated_at: "2026-09-01T00:00:00Z", jobs });
+const runStatus = (stateDir: string, dir: string, job_id: string, u: Usage) => write(join(stateDir, "runs", dir, "status.json"), {
+	schema_version: SCHEMA_VERSION, job_id, phase: "working", turns: 1, tool_calls: 1, usage: u, started_at: "2026-09-01T00:00:00Z",
+	last_activity_at: "2026-09-01T00:01:00Z", event_count: 1, reported: false,
+});
+const liveJobs = (home: string) => liveUsageJobs(new FleetStore({ home }), { get: (id: string) => { try { return { status: readRunStatus(home, id) }; } catch { return undefined; } } } as unknown as RunRegistry);
+/** Each grant's spend as mandate.ts computes it on this home: the oracle the viewer's own mirror must equal. */
+const spendOf = (home: string) => { const store = new MandateStore(home), jobs = store.withReviewerSpend(liveJobs(home)); return new Map(store.list().map((m) => [m.id, mandateSpend(m, jobs)])); };
+const grantsOf = async (d: { get(path: string): Promise<{ body: Json }> }) => ((await d.get("/api/dashboard")).body as Json).mandates as Json[];
+
+test("P19-workbench-dashboard: /api/dashboard groups by project, prefers live usage, adds reviewer spend, keeps only GitHub PR urls; every grant's spend is mandateSpend's", { timeout: 120_000 }, async (t) => {
+	const d = await viewer(t, { seed: (stateDir, home) => {
+		fleetOf(stateDir, [
+			record("cp-a1", { phase: "waiting", usage: usage(0.1, 100), receipts: [{ kind: "pr", status: "open", title: "x", url: "javascript:alert(1)" }] }),
+			record("cp-a2", { receipts: [{ kind: "pr", status: "open", title: "x", url: PR }], usage: usage(1, 1000, 200), dispatched_at: "2026-09-01T00:00:01Z" }),
+			record("cp-a3", { phase: "done", closed_at: "2026-09-02T00:00:00Z", usage: usage(0.5, 50) }),
+			record("cp-b1", { project: "beta", kind: "research", usage: usage(0.25, 40) }),
+			record("cp-b2", { project: "beta", receipts: [{ kind: "pr", status: "open", title: "x", url: "https://evil.example/acme/repo/pull/1" }] }),
+		]);
+		runStatus(stateDir, "cp-a1", "cp-a1", usage(2, 3000, 1000));
+		runStatus(stateDir, "cp-a2/review-1", "cp-a2", usage(0.75, 500, 100));
+		runStatus(stateDir, "cp-b1/gate-1", "cp-b1", usage(0.5, 90));
+		write(join(home, ".pi-command-post", "jobs.json"), { schema_version: 1, prefix: "cp", jobs: [{ id: "cp-a1", title: "first job", status: "in_progress", labels: ["project:alpha", "kind:ship", "delivery:pr"], blocked_by: [], comments: [], created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z" }] });
+		write(join(home, LAYOUT.data, "projects.json"), { projects: [{ name: "gamma" }, { name: "../bad" }] });
+		const store = new MandateStore(home), base = { objective: "ship alpha", expiry: LATER, spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 5 };
+		store.issue({ ...base, projects: ["alpha"], job_ids: ["cp-a1", "cp-a2"] });
+		store.pause(store.issue({ ...base, projects: ["beta", "alpha"], at: isoTimestamp(new Date(Date.now() + 1000)) }).id);
+	} });
+	const view = (await d.get("/api/dashboard")).body as Json;
+	const projects = view.projects as Json[], alpha = projects[0]!.jobs as Json[], job = (id: string) => alpha.find((j) => j.job_id === id)!;
+	assert.deepEqual(projects.map((p) => p.name), ["alpha", "beta", "gamma"], "grouped by project, the unsafe name dropped");
+	assert.deepEqual(alpha.map((j) => j.job_id), ["cp-a1", "cp-a2", "cp-a3"], "active in dispatch order, then finished");
+	assert.deepEqual([job("cp-a1").cost_usd, job("cp-a1").tokens, job("cp-a1").title], [2, 2000, "first job"], "the run's live usage wins over the stale fleet usage");
+	assert.equal(job("cp-a1").pr_url, undefined, "a javascript: url never reaches the page");
+	assert.deepEqual([job("cp-a2").pr_url, job("cp-a2").reviewer_cost_usd], [PR, 0.75], "a GitHub PR url and the reviewer's spend");
+	assert.equal((projects[1]!.jobs as Json[]).find((j) => j.job_id === "cp-b2")!.pr_url, undefined, "a non-GitHub url is dropped");
+	assert.deepEqual(projects[2]!.jobs, []);
+	const grants = view.mandates as Json[], oracle = spendOf(d.home);
+	assert.deepEqual([oracle.size, grants.map((m) => m.status)], [2, ["active", "paused"]]);
+	for (const [id, spend] of oracle) assert.deepEqual(grants.find((m) => m.id === id)?.spend, spend, id);
+	assert.ok((grants[0]!.spend as Json).usd > 2, "the fixture exercises live and reviewer spend");
+});
+
+test("P19-workbench-spend: a baselined grant shows only what accrued after issue; a schedule grant counts its schedule's records, a project-wide grant none", { timeout: 120_000 }, async (t) => {
+	let baselined = "";
+	const d = await viewer(t, { seed: (stateDir, home) => {
+		fleetOf(stateDir, [record("cp-h1", { phase: "done", usage: usage(1, 1000) }), record("cp-h2", { usage: usage(0.5, 500) })]);
+		runStatus(stateDir, "cp-h2/review-1", "cp-h2", usage(0.25, 100));
+		const grant = new MandateStore(home).issue({ objective: "alpha", expiry: LATER, spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 5, projects: ["alpha"] }, liveJobs(home));
+		assert.equal(grant.usage_baseline?.length, 2);
+		baselined = grant.id;
+		runStatus(stateDir, "cp-h2", "cp-h2", usage(1.5, 1500));
+		runStatus(stateDir, "cp-h2/review-2", "cp-h2", usage(0.25, 100));
+		fleetOf(stateDir, [record("cp-h1", { phase: "done", usage: usage(1, 1000) }), record("cp-h2", { usage: usage(0.5, 500) }), record("cp-n1", { usage: usage(0.5, 500) })]);
+	} });
+	const spend = (await grantsOf(d)).find((m) => m.id === baselined)?.spend;
+	assert.deepEqual(spend, { usd: 1.75, tokens: 1600, jobs: 2, inFlight: 0 }, "only the spend after issue");
+	assert.deepEqual(spend, spendOf(d.home).get(baselined), "and mandateSpend agrees");
+
+	const ids: string[] = [];
+	const s = await viewer(t, { seed: (stateDir, home) => {
+		fleetOf(stateDir, [record("cp-s1", { phase: "waiting", usage: usage(1, 1000), schedule_id: "sch-aaa111" }), record("cp-s2", { usage: usage(2, 2000), schedule_id: "sch-bbb222" }), record("cp-u1", { usage: usage(4, 4000) })]);
+		runStatus(stateDir, "cp-s1/review-1", "cp-s1", usage(0.5, 100));
+		const store = new MandateStore(home), base = { objective: "alpha", expiry: LATER, spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 5, projects: ["alpha"] };
+		ids.push(store.issue({ ...base, schedule_grant: true }).id, store.issue({ ...base, schedule_grant: true }).id, store.issue(base).id);
+		const saved = (id: string, mandate_id: string) => ({ id, name: id, project: "alpha", mandate_id, trigger: { type: "cron", cron: "0 9 * * *", tz: "UTC" }, job: { title: "nightly", kind: "ship", delivery: "pr" }, enabled: true, created_at: "2026-09-01T00:00:00Z" });
+		write(join(stateDir, "schedules.json"), { schema_version: 1, schedules: [saved("sch-aaa111", ids[0]!), saved("sch-bbb222", ids[1]!)] });
+	} });
+	const grants = await grantsOf(s), oracle = spendOf(s.home);
+	assert.deepEqual(ids.map((id) => grants.find((m) => m.id === id)?.spend), [
+		{ usd: 1.5, tokens: 1100, jobs: 1, inFlight: 1 }, { usd: 2, tokens: 2000, jobs: 1, inFlight: 0 }, { usd: 4, tokens: 4000, jobs: 1, inFlight: 0 },
+	], "its schedule's run plus its reviewer; the other schedule's; the project-wide grant counts no scheduled record");
+	for (const id of ids) assert.deepEqual(grants.find((m) => m.id === id)?.spend, oracle.get(id), id);
+});
+
+test("P19-workbench-server: /api/dashboard, /api/awaiting and /api/version are JSON under a deny-all CSP; every workbench route is GET-only and host-bound", { timeout: 120_000 }, async (t) => {
+	const d = await viewer(t, { requireTailnet: false });
+	for (const path of ["/api/dashboard", "/api/awaiting", "/api/version"]) {
+		const reply = await d.send(path);
+		assert.deepEqual([reply.status, typeof JSON.parse(reply.raw.toString("utf8"))], [200, "object"], path);
+		assert.match(String(reply.headers["content-type"]), /application\/json/, path);
+		assert.match(String(reply.headers["content-security-policy"]), /default-src 'none'/, path);
+	}
+	for (const path of ["/api/dashboard", "/api/awaiting", "/api/job", "/api/diff", "/api/roots", "/api/files", "/api/git", "/api/version"]) {
+		for (const method of ["POST", "PUT", "PATCH", "DELETE"]) assert.equal((await d.send(path, { method })).status, 405, `${method} ${path}`);
+		assert.notEqual((await d.send(path, { headers: { host: "evil.example" } })).status, 421, `${path}: the Host check is off by default`);
+	}
+});
+
+test("P19-workbench-diff: /api/job carries PR, shas, CI and review; /api/diff serves base...head; /api/git status never locks the index", { timeout: 120_000 }, async (t) => {
+	let base = "", head = "", repo = "";
+	const d = await viewer(t, { seed: (stateDir, home) => {
+		repo = join(home, LAYOUT.projects, "demo");
+		mkdirSync(repo, { recursive: true });
+		git(repo, "init", "-b", "main", "--quiet");
+		for (const [k, v] of [["user.name", "cp test"], ["user.email", "cp@test.invalid"], ["commit.gpgsign", "false"]] as const) git(repo, "config", k, v);
+		writeFileSync(join(repo, "a.txt"), "one\n");
+		git(repo, "add", "-A");
+		git(repo, "commit", "-m", "base", "--quiet");
+		base = git(repo, "rev-parse", "HEAD");
+		writeFileSync(join(repo, "a.txt"), "one\ntwo from head\n");
+		git(repo, "commit", "-am", "head", "--quiet");
+		head = git(repo, "rev-parse", "HEAD");
+		fleetOf(stateDir, [record("cp-h1", { project: "demo", worktree: "/nonexistent/cp-h1", receipts: [{ kind: "pr", status: "open", title: "x", url: PR }] }), record("cp-h2", { project: "demo" })]);
+		const envelope = (id: string, env: object) => write(join(stateDir, "runs", id, "envelope.json"), { schema_version: 1, job_id: id, attempt: 1, envelope: env });
+		envelope("cp-h1", { head_sha: head, base_sha: base, branch: "cp-h1", status: "done", summary: "landed" });
+		envelope("cp-h2", { head_sha: head, branch: "cp-h2", status: "done", summary: "no base" });
+		write(join(stateDir, "runs", "cp-h1", "review-1.json"), { attempt: 1, verdict: "revise", head_sha: base });
+		write(join(stateDir, "runs", "cp-h1", "review-2.json"), { attempt: 2, verdict: "pass", head_sha: head });
+		write(join(stateDir, "ci-watch.json"), { jobs: [{ job_id: "cp-h1", head_sha: head, last_ci: "green" }] });
+	} });
+	const job = (await d.get("/api/job?id=cp-h1")).body as Json;
+	assert.deepEqual([job.pr_url, job.head, job.base, job.ci.last_ci, job.worktree_live], [PR, head, base, "green", false], "PR, shas, CI and no live worktree");
+	assert.deepEqual(job.review, { attempt: 2, verdict: "pass", head_sha: head }, "the latest review");
+	const diff = (await d.get("/api/diff?id=cp-h1")).body as Json;
+	assert.deepEqual([diff.available, diff.root, diff.truncated], [true, "project:demo", false]);
+	assert.match(diff.text, /^\+two from head$/m, "base...head from the project clone");
+	assert.deepEqual((await d.get("/api/diff?id=cp-h2")).body, { available: false, reason: "no head/base sha recorded" });
+	for (const path of ["/api/diff?id=../x", "/api/job?id=../x", "/api/job?id=cp-nope", "/api/diff?id=cp-nope"]) assert.equal((await d.get(path)).status, 404, path);
+	const index = join(repo, ".git", "index"), before = statSync(index).mtimeMs;
+	writeFileSync(join(repo, "a.txt"), "dirty\n");
+	const status = (await d.get("/api/git?root=project:demo&view=status")).body as Json;
+	assert.deepEqual([status.ok, (status.lines as string[]).map((l) => l.trim())], [true, ["## main", "M a.txt"]], "the branch and the dirty file");
+	assert.deepEqual([existsSync(join(repo, ".git", "index.lock")), statSync(index).mtimeMs], [false, before], "no index lock, no index refresh");
+	assert.equal(((await d.get(`/api/git?root=project:demo&view=show&sha=${"f".repeat(40)}`)).body as Json).ok, false, "a missing commit fails");
+});
+
+test("P19-workbench-grants: a job's grant is the named, earliest-issued, lowest-id one; else the project-wide one; with none active, the last matching", { timeout: 120_000 }, async (t) => {
+	const d = await viewer(t, { seed: (stateDir, home) => {
+		const grant = (id: string, issued_at: string, over: Json = {}) => write(join(stateDir, "mandates", `${id}.json`), { id, status: "active", expiry: LATER, issued_at, projects: ["alpha"], objective: "x", spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 5, ...over });
+		grant("md-000001", "2026-08-01T00:00:00Z");
+		for (const id of ["md-a994c5", "md-b994c5"]) grant(id, "2026-09-01T00:00:00Z", { job_ids: ["cp-target"] });
+		grant("md-000000", "2026-09-02T00:00:00Z", { job_ids: ["cp-target"] });
+		grant("md-e00001", "2026-09-01T00:00:00Z", { job_ids: ["cp-excl"], exclusions: { job_kinds: ["ship"] } });
+		grant("md-p00001", "2026-08-01T00:00:00Z", { status: "paused", projects: ["beta"] });
+		grant("md-p00002", "2026-09-01T00:00:00Z", { status: "paused", projects: ["beta"] });
+		const job = (id: string, project: string) => ({ id, title: id, status: "open", labels: [`project:${project}`, "kind:ship"], blocked_by: [], comments: [], created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z" });
+		write(join(home, ".pi-command-post", "jobs.json"), { schema_version: 1, prefix: "cp", jobs: [job("cp-target", "alpha"), job("cp-plain", "alpha"), job("cp-excl", "alpha"), job("cp-beta", "beta")] });
+	} });
+	const nodes = ((await d.get("/api/map")).body as Json).nodes as Json[];
+	const grantOf = (id: string) => nodes.find((n) => n.id === id)?.mandate_id;
+	assert.equal(grantOf("cp-target"), "md-a994c5", "named beats project-wide, earliest issued beats later, the lower id breaks the tie");
+	assert.equal(grantOf("cp-plain"), "md-000001", "a grant naming other jobs leaves the project-wide one");
+	assert.equal(grantOf("cp-excl"), "md-000001", "a named grant excluding the job's kind leaves the project-wide one");
+	assert.equal(grantOf("cp-beta"), "md-p00002", "with no active grant, the last-issued matching grant is kept");
+});
+
+test("P19-workbench-parent: the schedule controls' parent probe calls a zombie lock holder down, a live pid running, as isPidAlive does", { timeout: 120_000 }, async (t) => {
+	const d = await viewer(t);
+	const parent = async (pid: number) => { write(join(d.stateDir, "parent.lock"), { pid }); return ((await d.get("/api/schedules/control")).body as Json).parent as Json; };
+	for (const pid of [0, -1]) assert.deepEqual(await parent(pid), { running: false, pid: null, reason: "parent lock names no pid" }, `pid ${pid}`);
+	await withZombie(t, async (zombie, holder) => {
+		for (const pid of [zombie, holder, process.pid, 2 ** 30]) assert.equal((await parent(pid)).running, isPidAlive(pid), `pid ${pid}`);
+		assert.deepEqual(await parent(zombie), { running: false, pid: zombie, reason: `the recorded parent pid ${zombie} is not running` }, "a kill-0-only check would call a zombie alive");
+		assert.equal((await parent(holder)).running, true);
+	});
 });
