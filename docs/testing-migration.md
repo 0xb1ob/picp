@@ -138,14 +138,14 @@ recovery and `cp_revive` each relaunch it on the same usage observer. 02-14 stub
 external service like the LLM. Seven assertions are `redundant-unreachable` under standing rule 3, each naming its
 scenario. No entry point reaches three of them, so they stay as units. The live usage view that cp_mandate and cp_decide
 read moves to `tests/structure.test.ts`, because the e2e parent is a separate process and owns no live run. #321's
-legacy fire grant and draining schedule run go to `tests/schedule-authority.test.ts`, because no fire mints a grant or a
+legacy fire grant and draining schedule run go to `tests/schedule-authority-retained.test.ts`, because no fire mints a grant or a
 legacy run any more. The supplement's path and subsystem exclusions went to `tests/decide.test.ts`, because P2d drove
 no pipeline auto-decide; P2e drives them there (02-15) and removes that unit. The P2c review's lows: 02-7 names the
 `acceptedRiskMatches` consumer that pins the low-risk row (Assertion map), and 02-6's `recordRecoveryAttempt` comment
 is two lines.
 `tests/e2e/authority.test.ts` joins R1_ALLOWED in place of `tests/quota.test.ts`: 02-14 writes the legacy top-level
 `data/capacity.json` that cp-u3i2 must ignore. P2d's declaration count is 4,346, not 4,344: it added one declaration
-each to `tests/decide.test.ts` and `tests/schedule-authority.test.ts` (P2e review finding).
+each to `tests/decide.test.ts` and `tests/schedule-authority.test.ts` (now `-retained`) (P2e review finding).
 
 P2e (cp-e2e-migration-p2e-fmi5) adds three cases to `tests/e2e/authority.test.ts` and deletes `tests/mandate.test.ts`
 (61 declarations), under negative controls NC-21 to NC-23 beside P2b's NC-05, NC-06 and NC-11. 02-15 runs a real

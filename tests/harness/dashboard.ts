@@ -63,11 +63,11 @@ export async function dashboard(t: Context, options: { requireTailnet?: boolean;
 }
 
 /** The operator session's real dashboard-control server (src/dashboard-control.ts) with pi's ports recorded. */
-export async function operatorSession(t: Context, stateDir: string, isIdle = () => true) {
+export async function operatorSession(t: Context, stateDir: string, isIdle = () => true, extra: Partial<ControlPorts> = {}) {
 	const injected: Array<[string, string | undefined]> = [];
 	const sessionFile = join(stateDir, "operator-session.jsonl");
 	writeFileSync(sessionFile, "", { flag: "a" });
-	const ports: ControlPorts = { inject: (text, deliverAs) => { injected.push([text, deliverAs]); }, abort: () => {}, isIdle, hasPendingMessages: () => false, sessionFile: () => sessionFile };
+	const ports: ControlPorts = { inject: (text, deliverAs) => { injected.push([text, deliverAs]); }, abort: () => {}, isIdle, hasPendingMessages: () => false, sessionFile: () => sessionFile, ...extra };
 	const control = await startDashboardControl({ stateDir, ports, deliveredWaitMs: 20, log: () => {} }) as DashboardControl;
 	if (control.state !== "listening") throw new Error(`dashboard control did not start: ${JSON.stringify(control)}`);
 	t.after(() => control.stop());
@@ -152,6 +152,8 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 		globals: sandbox,
 		/** Every open stream fires `type` ("open", "error"), as a browser's EventSource does on connect or loss. */
 		signal: (type: string) => { for (const source of [...sources]) source.dispatchEvent(new globalThis.Event(type)); },
+		/** The app's own `navigator` (linkedom's window keeps its own): set `clipboard` to stage a copy. */
+		navigator: sandbox.navigator as { clipboard?: unknown },
 		/** Moves this tab's clock (its `Date`) forward by `ms`; the viewer's own clock is `pin`. */
 		shift: (ms: number) => void (shifted += ms),
 		/** Every open stream says `refresh`, as the server's does on a change: the mounted page re-reads its data. */

@@ -1,7 +1,6 @@
 /**
- * The one-shot fresh-grant-per-fire migration (src/schedule-migrations.ts): every schedule without a `grant_template`
- * gets one derived from its seed grant whatever the seed's status; only a seed that is missing or unparseable (or yields
- * no template) skips, named in `last_skip`. The marker makes a re-run a no-op.
+ * Retained from tests/schedule-migrations.test.ts (P13d): direct sweepScheduleGrantTemplates and
+ * sweepSchedulePolicyImport between the sweeps a parent start chains, injected fsync/crash faults, scheduleFileErrors.
  */
 import assert from "node:assert/strict";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -88,28 +87,6 @@ test("migration derives a template from a revoked, expired or pre-approved seed;
 	assert.deepEqual([again.already_done, again.migrated, again.skipped], [true, [], []]);
 	assert.equal(readFileSync(scheduler.file, "utf8"), before, "the marker makes a re-run touch nothing");
 	assert.equal(formatScheduleMigration(again), "");
-});
-
-test("a seed revoked by the parent (revoked_by parent, as cp_mandate revoke with no operator_quote records) still derives a template", async (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const mandates = new MandateStore(home.path, { now: () => T0 });
-	const seed = mandates.issue({ projects: ["demo"], objective: "triage", expiry: "2026-12-01T00:00:00Z", spend_cap: { usd: 20, tokens: 2_000_000 }, job_cap: 3, at: "2026-11-01T00:00:00Z", schedule_grant: true });
-	mandates.revoke(seed.id, { by: "parent" }); // cp_mandate revoke with no operator_quote: the parent's own revoke
-	const ledger = createScratchLedger({ knownProjects: ["demo"], home: home.path }).ledger as Ledger;
-	const scheduler = new Scheduler({ home: home.path, ledger: () => ledger, mandates, usageJobs: () => [], cloneOf: () => home.path, now: () => T0, startedAt: T0, mintContext: () => ({ defaults: loadMandateDefaults(home.path), ceiling: 100_000_000 }) });
-	writeFileSync(scheduler.file, JSON.stringify({ schema_version: SCHEMA_VERSION, schedules: [{ id: "sch-ccccc1", name: "triage", project: "demo", mandate_id: seed.id, trigger: { type: "manual" }, job, enabled: true, created_at: "2026-11-01T00:00:00Z" }] }));
-	assert.equal(sweepScheduleGrantTemplates({ home: home.path, mandates, now: T0 }).migrated.length, 1);
-	assert.equal(scheduler.list()[0]?.grant_template?.seed_mandate_id, seed.id);
-});
-
-test("migration with no schedules file writes only the marker", (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const report = sweepScheduleGrantTemplates({ home: home.path, mandates: new MandateStore(home.path), now: T0 });
-	assert.deepEqual([report.migrated, report.skipped], [[], []]);
-	assert.ok(existsSync(report.marker));
-	assert.equal(formatScheduleMigration(report), "");
 });
 
 
@@ -204,18 +181,6 @@ test("P4 mixed schedules: pipeline legacy, missing template needs setup, operato
 	assert.ok(b.scheduler.list().find(s => s.id === pipeline.id)?.grant_template);
 });
 
-test("P4 backup failure and damaged retry snapshot fail closed before any store rewrite", async (t) => {
-	const b = await importBench(t), s = await b.add("backup-failure"), original = b.v1(), grant = readFileSync(b.mandates.file(s.mandate_id!));
-	const dir = join(b.home.path, ".pi-command-post", "state", ".migrations", "backups");
-	mkdirSync(join(dir, ".."), { recursive: true }); writeFileSync(dir, "not a directory");
-	await assert.rejects(b.sweep(), /EEXIST|ENOTDIR/);
-	assert.deepEqual(readFileSync(b.scheduler.file), original); assert.deepEqual(readFileSync(b.mandates.file(s.mandate_id!)), grant); assert.equal(existsSync(b.runs.policiesFile), false);
-	rmSync(dir); const backups = policyImportBackups(b.home.path, b.mandates, T0);
-	writeFileSync(backups.find(r => r.source === b.scheduler.file)!.backup!, "damaged snapshot");
-	await assert.rejects(b.sweep(), /backup verification failed/);
-	assert.deepEqual(readFileSync(b.scheduler.file), original); assert.deepEqual(readFileSync(b.mandates.file(s.mandate_id!)), grant); assert.equal(existsSync(b.runs.policiesFile), false);
-});
-
 test("P4 syncs snapshot directories and ancestors before publication; every directory-sync failure prevents store writes", async (t) => {
 	const b = await importBench(t), schedule = await b.add("directory-durability");
 	await b.runs.savePolicyRevision(policyFromLegacy(schedule, schedule.grant_template!));
@@ -268,20 +233,6 @@ test("P4 crash after activation retries retirement/v2 write with the original sn
 	b.mandates.revoke = revoke; const retry = await b.sweep();
 	assert.deepEqual(readFileSync(retry.backups.find(r => r.source === b.scheduler.file)!.backup!), original);
 	assert.equal(b.runs.policyRecord(s.id)?.revisions.length, 1); assert.equal(b.mandates.get(s.mandate_id)?.status, "revoked"); assert.ok(existsSync(retry.marker));
-});
-
-test("P4 import keeps dashboard-only org-review clearance under the legacy seed conditions", async (t) => {
-	const b = await importBench(t);
-	const pre = { operator_quote: "Approve safe org PRs", decided_by: "operator-quote" as const, scope: "mandate_jobs" as const, granted_at: "2026-11-01T00:00:00Z" };
-	const cleared = await b.add("cleared", { skill: "cp-org-pr-review", delivery: "local", description: "org: acme\nmax_reviewers: 3" }, { risk_preapproval: pre });
-	const plain = await b.add("plain", { skill: "cp-org-pr-review", delivery: "local", description: "org: acme" });
-	const stopped = await b.add("stopped seed", { skill: "cp-org-pr-review", delivery: "local", description: "org: acme" }, { risk_preapproval: pre });
-	b.mandates.revoke(stopped.mandate_id!, { by: "operator", operator_quote: "stop org", decided_by: "operator-quote" });
-	b.v1(); await b.sweep();
-	const policy = b.runs.activePolicy(cleared.id)!;
-	assert.ok(policy.effects.includes("org_review_approve")); assert.deepEqual((policy as LegacySchedulePolicy).effect_channels.org_review_approve, ["dashboard"]);
-	assert.equal(policy.recipe_config?.max_reviewers, 3); assert.equal(policy.limits.parallelism, 3); assert.equal(policy.limits.child_jobs, 8);
-	for (const id of [plain.id, stopped.id]) assert.equal(b.runs.policyRecord(id)?.revisions[0]?.effects.includes("org_review_approve"), false);
 });
 
 test("P4 v1 reads are pure, v2 legacy fields optional, v1-only contract rejects v2 with SchedulerError", async (t) => {
