@@ -4,14 +4,16 @@
  */
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type TestContext, test } from "node:test";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
+import { drainFile } from "../../src/drain.ts";
 import type { BoardResponse, JobResponse, JobsResponse, JobTranscriptResponse, OverviewResponse } from "../../src/viewer/api-types.ts";
-import { createScratchHome, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
+import { createScratchHome, git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
 import { startViewer } from "../harness/dashboard.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { json, MERGE, mergedCalls, run as ciRun, SKIP, startStack } from "./landing-helpers.ts";
@@ -420,6 +422,20 @@ test("P18-transcript: /api/job/<id>/transcript reads only a recorded session und
 	assert.equal((await v.json<JobResponse>("/api/job/cp-small")).mandate, null);
 });
 
+/** One commit pushed to `branch` on the scratch remote from a fresh clone, as a teammate would; its sha. */
+function teamPush(remote: string, branch: string): string {
+	const dir = mkdtempSync(join(tmpdir(), "cp-team-"));
+	try {
+		git(dir, "clone", "--quiet", "--branch", branch, remote, "work");
+		const work = join(dir, "work");
+		git(work, "commit", "--quiet", "--allow-empty", "-m", "team fixup");
+		git(work, "push", "--quiet", "origin", `HEAD:refs/heads/${branch}`);
+		return git(work, "rev-parse", "HEAD");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the team, resumes through cp_send and lands by the watch", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t);
 	const live = await s.held("P18 parked handoff", 181);
@@ -434,12 +450,21 @@ test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the 
 	writeWindowPass(s.home, live.jobId, live.head, isoTimestamp());
 	s.setGh({ integration: true, runs: [ciRun(181, live.head, "completed", "success")] });
 	await s.tick(live.jobId);
+	const leased = s.post.fleet.require(live.jobId).lease_id;
 	const parked = await s.post.integrate({ jobId: live.jobId });
 	assert.equal(parked.next, "wait", parked.reason);
+	assert.match(parked.facts.at(-1) ?? "", new RegExp(`parked with the team at ${live.head.slice(0, 12)} \\(awaiting_merge cycle 1\\)`));
+	assert.equal(s.post.awaiting.list().filter((item) => item.job_id === live.jobId).length, 0, "a park declares no Awaiting row");
 	const record = s.post.fleet.require(live.jobId);
 	assert.deepEqual([record.phase, record.lease_id, record.checkpoint_ref, record.awaiting_merge?.cycle], ["awaiting_merge", undefined, undefined, 1]);
+	assert.equal(record.awaiting_merge!.frozen_seconds, Math.floor((Date.parse(record.awaiting_merge!.released_at) - Date.parse(record.dispatched_at)) / 1000), "dispatch to release");
+	assert.equal(typeof record.worker.exited_at, "string", "the worker is closed");
 	assert.equal(existsSync(join(s.home, paths.parkIntentFile(live.jobId))), false, "the park intent is spent");
 	assert.equal(events("awaiting_merge_parked").length, 1);
+	assert.equal((await s.post.ciTick()).checked.includes(live.jobId), false, "the per-job CI watch drops a parked job");
+	const again = await s.integrate(live.jobId);
+	assert.deepEqual([again.record.next, again.calls, events("awaiting_merge_parked").length], ["wait", [], 1], "a parked job's cp_integrate runs no gh and parks nothing");
+	assert.match(again.record.reason, /awaiting_merge watch/);
 	// The ci-watch row is gone once parked; the head's green comes from the journaled ci_observed event.
 	rmSync(join(s.home, LAYOUT.ciWatchFile), { force: true });
 	const team = (await overview()).with_team;
@@ -457,6 +482,9 @@ test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the 
 	const torn = await s.post.tearDown(live.jobId, { force: true } as never);
 	assert.deepEqual([torn.torn_down, torn.failure?.code], [false, "job_parked"]);
 	await assert.rejects(s.post.revive(live.jobId), /not_revivable_phase/);
+	const plan = await s.post.revivePlan(live.jobId);
+	assert.match(plan.ok ? "planned" : plan.message, new RegExp(`cp_send ${live.jobId} resumes it on a fresh lease`));
+	assert.equal((await s.post.revivePlan(live.jobId, { continueFailed: true })).ok, false, "no option revives on the old path");
 	await assert.rejects(s.post.dispatch({ jobId: live.jobId, task: "again", model: record.worker.model, fetch: false }), /cp_send .*resumes/);
 	assert.deepEqual(mergedCalls(s.ghCalls()), [], "a handoff never merges");
 
@@ -464,23 +492,30 @@ test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the 
 	const page = { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] };
 	const author = { login: "ann", __typename: "User" };
 	const pr = (over: object) => ({ url: live.prUrl, number: 181, state: "OPEN", headRefOid: live.head, headRefName: live.jobId, baseRefName: "main", mergedAt: null, mergeCommit: null, latestOpinionatedReviews: { nodes: [] }, comments: page, reviews: page, ...over });
-	const answer = (over: object) => s.setGh({ integration: true, runs: [ciRun(181, live.head, "completed", "success")], routes: [
+	const answer = (over: object, runs = [ciRun(181, live.head, "completed", "success")]) => s.setGh({ integration: true, runs, routes: [
 		{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] },
 		{ match: "api graphql", replies: [json({ data: { rateLimit: { remaining: 5000 }, p0: { pullRequest: pr(over), stacked: { nodes: [] } } } })] },
 	] });
 	const after = isoTimestamp(new Date(Date.parse(record.awaiting_merge!.handed_at) + 1_000));
 	await waitFor(() => Date.now(), (now) => now > Date.parse(after) + 1_000, { timeoutMs: 5_000, what: "a review time after the handoff, in the past" });
 	answer({ reviews: { pageInfo: { hasNextPage: false, endCursor: "R1" }, nodes: [{ id: "PRR_1", state: "CHANGES_REQUESTED", body: "", createdAt: after, author, comments: { totalCount: 0 } }] } });
+	const calls = s.ghCalls().length;
 	const swept = await s.post.awaitingMerge.sweep();
 	assert.deepEqual(swept.outcomes.map((o) => o.applied), ["changes_requested"], JSON.stringify(swept));
+	assert.deepEqual(s.ghCalls().slice(calls).filter((call) => !call.startsWith("api ")), [], "the watch only reads GitHub");
 	assert.deepEqual((await s.post.awaitingMerge.sweep()).outcomes.map((o) => o.applied), ["none"], "the same review is applied once");
 	assert.equal(s.post.fleet.require(live.jobId).awaiting_merge?.pending?.kind, "changes_requested");
 	const box = s.post.durableWakeups.read();
 	assert.equal([...box.pending, ...box.delivered].filter((w) => w.id.startsWith(`awaiting-merge:pending:${live.jobId}:1:`)).length, 1);
+	const wakes = box.pending.filter((w) => w.id.startsWith(`awaiting-merge:pending:${live.jobId}:1:`));
+	assert.deepEqual(wakes.map((w) => [w.id, w.keys]), [[`awaiting-merge:pending:${live.jobId}:1:PRR_1`, ["parked-cycle:1"]]], "one wake, stale once the cycle ends");
 	const flight = (await overview()).in_flight.find((j) => j.id === live.jobId);
 	assert.deepEqual([flight?.phase, flight?.parked_pending, (await overview()).with_team], ["held", "changes_requested", []]);
 
-	// A real parent: the status block and cp_next name the pending parked job; its startup reconcile leaves it parked.
+	// A real parent: the status block and cp_next name the pending parked job; its startup reconcile leaves it parked,
+	// even with its session gone.
+	const session = record.worker.session_file;
+	renameSync(session, `${session}.away`);
 	await s.parent("Show the status block and what is next.", [
 		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: { width: 200 } }, { name: "cp_next", args: {} }] },
 		{ kind: "text", text: "Shown." },
@@ -491,27 +526,64 @@ test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the 
 	});
 	assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge");
 
-	// Negative control for resume: with the session gone the send is refused and the job stays parked.
-	const session = record.worker.session_file;
-	renameSync(session, `${session}.away`);
+	// Negative controls for resume: no session, a paused grant or a drain refuses the send and the job stays parked.
 	await assert.rejects(s.post.send({ jobId: live.jobId, message: "address the team's review" }), /session/);
 	assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge");
 	renameSync(`${session}.away`, session);
+	const grant = s.post.mandates.issue({ projects: ["demo"], objective: "Parked repair", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 1 });
+	s.post.mandates.pause(grant.id, "spend_cap");
+	await assert.rejects(s.post.send({ jobId: live.jobId, message: "go" }), /paused/);
+	s.post.mandates.resume(grant.id);
+	mkdirSync(dirname(drainFile(s.home)), { recursive: true });
+	writeFileSync(drainFile(s.home), JSON.stringify({ state: "draining", started_at: isoTimestamp(), deadline: isoTimestamp(), timeout_s: 5, jobs: [] }));
+	await assert.rejects(s.post.send({ jobId: live.jobId, message: "go" }), new RegExp(`draining for a restart.*resume of parked ${live.jobId}`, "s"));
+	rmSync(drainFile(s.home));
+	assert.deepEqual([s.post.fleet.require(live.jobId).phase, events("awaiting_merge_resumed").length], ["awaiting_merge", 0]);
+
+	// The team pushed a fixup: the resume leases fresh, checks out the remote tip and revives the same session once.
+	const tip = teamPush(s.remote, live.jobId);
 	const resumed = await s.post.send({ jobId: live.jobId, message: "address the team's review" });
 	assert.equal(resumed.receipt, "delivered");
 	const back = s.post.fleet.require(live.jobId);
-	assert.deepEqual([back.awaiting_merge, typeof back.lease_id, events("awaiting_merge_resumed").length], [undefined, "string", 1]);
-	await waitFor(() => JSON.stringify(s.provider.requests(`landing-${live.jobId}`).map((r) => r.body.messages)), (body) => /\[resumed from awaiting_merge\][^"]*address the team's review/.test(body), { timeoutMs: 60_000, what: "the note-led message reaches the resumed worker" });
+	assert.deepEqual([back.awaiting_merge, typeof back.lease_id, events("awaiting_merge_resumed").length, events("worker_revived").length], [undefined, "string", 1, 1]);
+	assert.notEqual(back.lease_id, leased, "a fresh lease");
+	assert.deepEqual([git(back.worktree!, "rev-parse", "HEAD"), git(back.worktree!, "rev-parse", "--abbrev-ref", "HEAD")], [tip, live.jobId], "the remote tip is checked out");
+	await waitFor(() => JSON.stringify(s.provider.requests(`landing-${live.jobId}`).map((r) => r.body.messages)), (body) => /\[resumed from awaiting_merge\][^"]*no longer yours[^"]*address the team's review/.test(body), { timeoutMs: 60_000, what: "the note-led message reaches the resumed worker" });
 	await waitFor(() => s.post.fleet.require(live.jobId), (r) => r.phase === "held" && !!r.reported_at && (r.supersessions ?? 0) >= 1, { timeoutMs: 90_000, what: "the resumed worker re-reports" });
+	assert.equal(events("worker_revived").length, 1, "a resumed worker is never restored again as a released one");
 
-	// It parks again for a second cycle, and the human merge seen by the watch lands it without a CP merge.
+	// It parks again for a second cycle on the team's tip.
+	writeWindowPass(s.home, live.jobId, tip, isoTimestamp());
+	answer({ headRefOid: tip }, [ciRun(182, tip, "completed", "success")]);
+	await s.tick(live.jobId);
 	assert.equal((await s.post.integrate({ jobId: live.jobId })).next, "wait");
 	assert.equal(s.post.fleet.require(live.jobId).awaiting_merge?.cycle, 2);
-	answer({ state: "MERGED", mergedAt: isoTimestamp(), mergeCommit: { oid: MERGE } });
+	// A moved head's Actions pending, then red, reach the dashboard; CI alone resumes nothing.
+	const moved = "d".repeat(40);
+	const flying = async () => (await overview()).in_flight.filter((j) => j.id === live.jobId).map((j) => [j.head, j.ci]);
+	answer({ headRefOid: moved }, [ciRun(183, moved, "in_progress", null)]);
+	assert.deepEqual((await s.post.awaitingMerge.sweep()).outcomes.map((o) => o.applied), ["head_moved"]);
+	assert.deepEqual(await flying(), [[moved, "in_progress"]]);
+	rmSync(join(s.home, LAYOUT.ciWatchFile), { force: true }); // the pending read is not due again yet
+	answer({ headRefOid: moved }, [ciRun(183, moved, "completed", "failure")]);
+	await s.post.awaitingMerge.sweep();
+	assert.deepEqual(await flying(), [[moved, "failed"]]);
+	assert.equal(s.post.fleet.require(live.jobId).phase, "awaiting_merge", "a red parked head resumes no worker");
+	assert.equal((await s.post.ciTick()).checked.includes(live.jobId), false);
+
+	// The human merge seen by the watch lands it without a CP merge, and its wake carries the after-merge line.
+	await s.post.registry.setAfterMergeDeploy("demo", { branch: "main", task: "deploy the observed merge", resources: ["host-a"] });
+	answer({ state: "MERGED", headRefOid: moved, mergedAt: isoTimestamp(), mergeCommit: { oid: MERGE } }, []);
+	const landing = s.ghCalls().length;
 	assert.deepEqual((await s.post.awaitingMerge.sweep()).outcomes.map((o) => o.applied), ["merged"]);
+	assert.deepEqual(s.ghCalls().slice(landing).filter((call) => call.includes("actions/runs")), [], "a merged snapshot reads no CI");
 	assert.equal(s.post.fleet.require(live.jobId).phase, "done");
 	assert.equal(s.post.ledger().read().jobs.find((j) => j.id === live.jobId)?.status, "closed");
 	assert.deepEqual(mergedCalls(s.ghCalls()), []);
+	const landed = s.post.durableWakeups.read().pending.filter((w) => w.content.includes(`${live.jobId}: the team merged`));
+	assert.equal(landed.length, 1);
+	assert.match(landed[0]!.content, /job closed\. after-merge deploy cp-\S+ created/);
+	assert.equal(landed[0]!.keys, undefined, "a merged wake is always fresh");
 	assert.equal((await row()).phase, "done");
 });
 

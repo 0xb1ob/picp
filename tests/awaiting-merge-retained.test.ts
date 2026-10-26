@@ -1,15 +1,12 @@
-/** PR1 of awaiting_merge: the parked phase's vocabulary, its validation, and read compatibility (no producer yet). */
+/** Retained from awaiting_merge PR1: the parked phase's record validation (P18b; the rest is e2e P18-parked). */
 
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
 import {
 	type AwaitingMerge,
 	DEFAULT_ORIGIN,
 	EMPTY_USAGE,
 	type FleetRecord,
-	isQuiescentParked,
 	isoTimestamp,
 	LAYOUT,
 	paths,
@@ -20,10 +17,6 @@ import {
 	validateParkIntent,
 	validateStackFollowupsFile,
 } from "../src/contracts.ts";
-import { FleetStore } from "../src/fleet.ts";
-import { overview } from "../src/viewer/overview-view.ts";
-import { boardView, jobsView } from "../src/viewer/jobs-view.ts";
-import { createScratchHome } from "./harness/index.ts";
 
 const HEAD = "a".repeat(40);
 const AT = "2026-10-15T10:00:00Z";
@@ -67,28 +60,6 @@ test("a parked record validates; every mixed-resource or mislabelled shape is re
 	] as const) assert.equal(validateFleetFile(file(bad)).ok, false, why);
 });
 
-test("pending CP work takes a parked job out of the quiescent set", () => {
-	assert.equal(isQuiescentParked(parked()), true);
-	const pending = parked({ awaiting_merge: parking({ pending: { kind: "human_comment", event_id: "IC_1", observed_at: AT } }) });
-	assert.equal(validateFleetFile(file(pending)).ok, true);
-	assert.equal(isQuiescentParked(pending), false);
-	assert.equal(isQuiescentParked(parked({ phase: "held" })), false);
-});
-
-test("reconcile leaves a parked job alone: never revivable, failed or probed, even with its session gone", async (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const store = new FleetStore({ home: home.path });
-	await store.add(parked());
-	let probed = false;
-	const report = await store.reconcile({ isPidAlive: () => { probed = true; return true; } });
-	assert.equal(probed, false);
-	assert.deepEqual(report.entries.map((e) => [e.outcome, e.phase_after, e.resumable]), [["parked", "awaiting_merge", false]]);
-	assert.deepEqual(report.revivable, []);
-	assert.deepEqual(report.needs_intake, []);
-	assert.equal(store.require("cp-park").phase, "awaiting_merge");
-});
-
 test("intent, watch, stack and CI evidence records enforce their cross-field rules", () => {
 	const intent = { schema_version: 1, job_id: "cp-park", cycle: 1, stage: "intent", pr_url: "https://github.com/o/r/pull/7", repo: "o/r", branch: "cp-park", head_sha: HEAD, base: "main", created_at: AT, updated_at: AT };
 	assert.equal(validateParkIntent(intent).ok, true);
@@ -117,23 +88,4 @@ test("intent, watch, stack and CI evidence records enforce their cross-field rul
 	assert.equal(validateCiEvidenceFile(ci({ source: "actions", operator_quote: "x" })).ok, false);
 	assert.equal(paths.parkIntentFile("cp-park"), `${LAYOUT.runs}/cp-park/park-intent.json`);
 	assert.equal(paths.ciEvidenceFile("cp-park"), `${LAYOUT.runs}/cp-park/ci-evidence.json`);
-});
-
-test("viewer: a parked job leaves In flight for With the team, keeps its phase, and the fleet stays readable", (t) => {
-	const home = createScratchHome();
-	t.after(() => home.cleanup());
-	const put = (path: string, value: unknown) => { const full = join(home.path, path); mkdirSync(dirname(full), { recursive: true }); writeFileSync(full, JSON.stringify(value)); };
-	const state = { home: home.path, stateDir: join(home.path, LAYOUT.state) };
-	const pending = parked({ job_id: "cp-pend", branch: "cp-pend", awaiting_merge: parking({ branch: "cp-pend", pending: { kind: "changes_requested", event_id: "PRR_1", observed_at: AT } }) });
-	put(LAYOUT.fleetFile, file(parked(), pending, { job_id: "cp-held", project: "demo", phase: "held" }));
-	const now = Date.parse("2026-10-15T12:00:00Z");
-	const data = overview(state, now);
-	assert.equal(data.availability.fleet, "ok");
-	assert.deepEqual(data.in_flight.map((j) => [j.id, j.phase]), [["cp-pend", "held"], ["cp-held", "held"]], "a pending parked row is CP work");
-	assert.deepEqual(data.with_team.map((j) => [j.id, j.head, j.age_seconds, j.frozen_seconds, j.approvals, j.ci]), [["cp-park", HEAD, 7200, 600, null, null]]);
-	assert.equal(overview(state, now + 60_000).with_team[0]?.frozen_seconds, 600, "execution time is frozen while team age grows");
-	const jobs = jobsView(state, now).jobs;
-	assert.equal(jobs.find((j) => j.id === "cp-park")?.phase, "awaiting_merge");
-	assert.equal(jobs.find((j) => j.id === "cp-pend")?.phase, "held", "Board and Overview agree: pending is not With the team");
-	assert.ok(boardView(state, now).columns.some((c) => c.key === "awaiting_merge"));
 });
