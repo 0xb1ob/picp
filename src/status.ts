@@ -60,6 +60,7 @@ export type { JobRouting } from "./contracts.ts";
 import { CiWatchStore } from "./ci-watch.ts";
 import { type FleetStore, isPidAlive as probePid } from "./fleet.ts";
 import { readReviewPassHeads, shaMatches } from "./merge-ask.ts";
+import { validatedOnce } from "./validated-text.ts";
 import { listPendingReviews } from "./review-runs.ts";
 // The cell vocabulary lives in one module so the table, the widget and the
 // status block can never disagree about a job's state (cp-8tu). Re-exported
@@ -163,9 +164,11 @@ export interface StatusFacts {
 	 * the widget must never issue a `gh` call.
 	 */
 	ci?: ReadonlyMap<string, StatusJob["ci"]>;
-	/** `false` skips the self-check of the assembled snapshot: the timer path, where it cost seconds per tick (#561). */
-	selfCheck?: boolean;
 }
+
+/** Time-derived fields (clamped non-negative ints by ageSeconds) are left out of the validation cache key. */
+const TIME_KEYS = new Set(["generated_at", "age_seconds", "current_tool_seconds", "current_tool_idle_seconds"]);
+const stableKeys = (key: string, value: unknown): unknown => (TIME_KEYS.has(key) ? undefined : value);
 
 function addUsage(total: Usage, add: Usage): Usage {
 	return {
@@ -366,8 +369,7 @@ export function assembleStatus(facts: StatusFacts): StatusSnapshot {
 		jobs,
 		unclaimed,
 	};
-	if (facts.selfCheck === false) return snapshot;
-	const result = validateStatusSnapshot(snapshot);
+	const result = validatedOnce(`status|${facts.home}|${facts.include}|${project}`, JSON.stringify(snapshot, stableKeys), snapshot, validateStatusSnapshot);
 	if (!result.ok) {
 		// Our own output disagreeing with its contract is a bug, not a view.
 		throw new StatusError(`assembled an invalid status snapshot:\n  ${result.errors.join("\n  ")}`);
@@ -435,7 +437,7 @@ export class StatusReporter {
 	 * Synchronous and cheap enough to run on a widget refresh.
 	 */
 	collect(query: StatusQuery = {}): StatusSnapshot {
-		return this.#assemble(query, { ok: false, queried: false }, undefined, false);
+		return this.#assemble(query, { ok: false, queried: false }, undefined);
 	}
 
 	/**
@@ -469,7 +471,7 @@ export class StatusReporter {
 		}
 	}
 
-	#assemble(query: StatusQuery, ledger: StatusLedger, issues: readonly Job[] | undefined, selfCheck = true): StatusSnapshot {
+	#assemble(query: StatusQuery, ledger: StatusLedger, issues: readonly Job[] | undefined): StatusSnapshot {
 		const records = this.#options.fleet.read().jobs;
 		const runs = new Map<string, RunStatus>();
 		const alive = new Map<string, boolean>();
@@ -532,7 +534,6 @@ export class StatusReporter {
 			...(blockers.size > 0 ? { blockers } : {}),
 			...(pendingReviews.size > 0 ? { pendingReviews } : {}),
 			...(ci.size > 0 ? { ci } : {}),
-			selfCheck,
 		});
 	}
 }

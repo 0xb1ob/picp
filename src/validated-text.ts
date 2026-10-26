@@ -17,3 +17,8 @@ export function validatedOnce<T>(file: string, text: string, parsed: unknown, va
 	else passed.delete(file);
 	return result;
 }
+
+/** Record that `text` was just validated and written to `file`, so the next read of it skips the check. */
+export function markValidated(file: string, text: string): void {
+	passed.set(file, text);
+}

@@ -24,7 +24,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { atomicWriteJson, canonicalDir, queued } from "./json-store.ts";
+import { atomicWriteText, canonicalDir, queued } from "./json-store.ts";
 import {
 	type Delivery,
 	type Failure,
@@ -41,7 +41,7 @@ import {
 	validateFleetFile,
 	validateRunStatus,
 } from "./contracts.ts";
-import { validatedOnce } from "./validated-text.ts";
+import { markValidated, validatedOnce } from "./validated-text.ts";
 
 export class FleetError extends Error {}
 
@@ -320,7 +320,9 @@ export class FleetStore {
 			if (!result.ok) {
 				throw new FleetError(`refusing to write an invalid fleet.json:\n  ${result.errors.join("\n  ")}`);
 			}
-			atomicWriteJson(this.file, result.value);
+			const text = `${JSON.stringify(result.value, null, 2)}\n`;
+			atomicWriteText(this.file, text);
+			markValidated(this.file, text);
 			this.#onChanged?.(current.jobs, result.value.jobs);
 			return result.value;
 		});
