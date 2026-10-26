@@ -9,13 +9,13 @@ A scratch home in a `mktemp -d` directory (mode 0700), removed afterwards; no op
 - `data/routing.json`: `defaults/routing.default.json` plus one hand-added row with a long id, project, model, fallbacks and note (the long-text check).
 - `data/mandate-defaults.json`: `SCAFFOLD_MANDATE_DEFAULTS`.
 - `data/parent.json`: `{"compact_at_tokens":200000,"model":"anthropic/claude-opus-5-5"}`; `data/operator.json`: `{"compact_at_tokens":200000}`.
-- The server mirrors `tests/viewer-settings-http.test.ts`: the real `startDashboardControl` with stub ports plus `settingsPorts(home)`, and `createViewer` with a fresh `buildViewer` app under `requireTailnet` on 127.0.0.1. It was stopped by its recorded PID.
+- The server mirrored the settings HTTP unit test of the time (now `tests/e2e/viewer-settings.test.ts`, P20-settings-relay): the real `startDashboardControl` with stub ports plus `settingsPorts(home)`, and `createViewer` with a fresh `buildViewer` app under `requireTailnet` on 127.0.0.1. It was stopped by its recorded PID.
 
 The browser aborted any non-GET request (none were attempted), loaded `/#settings` and was closed in `finally`.
 
 ## Captures
 
-Exact viewport size. The shell scrolls inside the page, so each frame is scrolled to a section: the phone shows Parent and operator models with Grant defaults below; the desktop shows the end of Worker models (the hand-added long row), Parent and operator models and Grant defaults. The top of Worker models (the six shipped rows) is covered by `tests/viewer-settings-ui.test.ts`.
+Exact viewport size. The shell scrolls inside the page, so each frame is scrolled to a section: the phone shows Parent and operator models with Grant defaults below; the desktop shows the end of Worker models (the hand-added long row), Parent and operator models and Grant defaults. The top of Worker models (the six shipped rows) is covered by P20-settings-rubric in `tests/e2e/viewer-settings.test.ts`.
 
 ![Settings at 390×844](settings-minimal/phone.png)
 

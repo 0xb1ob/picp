@@ -80,7 +80,7 @@ function prUrl(state: ViewerState, id: string, envelope: Json | undefined): stri
 	return [receipt, str(envelope?.pr_url)].find((url): url is string => !!url && isSafeChangeRequestUrl(url)) ?? null;
 }
 
-/** Mirrors `ANSWER_MAX_BYTES` (src/contracts); tests/viewer-schedules.test.ts pins it. */
+/** Mirrors `ANSWER_MAX_BYTES` (src/contracts); tests/viewer-schedules-retained.test.ts pins it. */
 export const SCHEDULE_ANSWER_MAX_BYTES = 8192;
 
 /** The length of `buffer` without a trailing, cut-off UTF-8 character. */
