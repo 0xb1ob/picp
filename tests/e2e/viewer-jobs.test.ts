@@ -513,3 +513,53 @@ test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the 
 	assert.deepEqual(mergedCalls(s.ghCalls()), []);
 	assert.equal((await row()).phase, "done");
 });
+
+test("P18-with-team: With the team reads this cycle's approvals, the head's current CI and frozen time; a pending row is In flight", { timeout: 120_000 }, async (t) => {
+	const [a, b] = ["a".repeat(40), "b".repeat(40)];
+	const at = iso(120);
+	const parked = (id: string, over: object = {}) => ({
+		job_id: id, project: "demo", kind: "ship", delivery: "pr", phase: "awaiting_merge", branch: id, dispatched_at: iso(130), reported_at: at,
+		worker: { pid: 4242, session_id: "s", session_file: "/nonexistent/s.jsonl", model: "m/m", started_at: at, exited_at: at, exit_code: 0 },
+		usage: { cost_usd: 1.5, total_tokens: 100 },
+		awaiting_merge: { cycle: 2, pr_url: "https://github.com/o/r/pull/7", repo: "o/r", branch: id, head_sha: a, base: "main", handed_at: at, released_at: at, frozen_seconds: 600, frozen_usage: { cost_usd: 1.5 }, ...over },
+	});
+	const ciEvent = (event: string, head: string) => ({ type: "ci_observed", ts: at, payload: { event, head_sha: head } });
+	const watchRow = (id: string, cycle: number, over: object) => ({ job_id: id, cycle, pr_url: "https://github.com/o/r/pull/7", state: "open", head_sha: a, base: "main", cursors: {}, observed_at: at, ...over });
+	const v = await viewer(t, (s) => {
+		s.fleet([parked("cp-park", { last_human_activity_at: iso(90) }), parked("cp-bare"), parked("cp-pend", { pending: { kind: "head_moved", event_id: "head:b", observed_at: at, head_sha: b } })]);
+		s.put(LAYOUT.awaitingMergeWatchFile, { schema_version: 1, updated_at: at, prs: [
+			watchRow("cp-park", 2, { approvals: 1, approvals_required: null, last_human_activity_at: iso(60) }), watchRow("cp-bare", 1, { approvals: 3, approvals_required: 2 }),
+		] });
+		s.events("cp-park", [ciEvent("ci_failed", a), ciEvent("ci_green", a)]);
+		s.events("cp-pend", [ciEvent("ci_green", a)]);
+		s.put(paths.ciEvidenceFile("cp-bare"), { schema_version: 1, job_id: "cp-bare", repo: "o/r", observations: [{ head_sha: a, result: "success", source: "forwarded", observed_at: at, operator_quote: "green." }] });
+		// A stale run status from the exited worker: parked usage is frozen, so it must not overlay the fleet total.
+		s.put(s.run("cp-park", "status.json"), { job_id: "cp-park", phase: "working", started_at: at, usage: { cost_usd: 9, total_tokens: 900 } });
+	});
+	const team = async () => (await v.json<OverviewResponse>("/api/overview")).with_team;
+	assert.deepEqual((await team()).map((j) => [j.id, j.approvals, j.approvals_required, j.ci, j.ci_forwarded?.ci ?? null, j.last_human_activity_at]), [
+		["cp-park", 1, null, "green", null, iso(60)],
+		["cp-bare", null, null, null, "green", null],
+	], "an older cycle's watch row is unknown, never its approvals");
+	const flight = (await v.json<OverviewResponse>("/api/overview")).in_flight;
+	assert.deepEqual(flight.map((j) => [j.id, j.phase, j.head, j.ci, j.parked_pending, j.elapsed_seconds]), [["cp-pend", "held", b, null, "head_moved", 600]], "only pending CP work is In flight, on its moved head");
+	const job = pick((await v.json<JobsResponse>("/api/jobs")).jobs, "cp-park");
+	assert.deepEqual([job.phase, job.head, job.ci, job.elapsed_seconds, job.cost_usd, job.handed_at, job.parked_pending], ["awaiting_merge", a, "green", 600, 1.5, at, null]);
+	v.clock(HOUR);
+	const later = (await team()).find((j) => j.id === "cp-park")!;
+	assert.deepEqual([Math.round(later.age_seconds), later.frozen_seconds], [10_800, 600], "team age grows; execution time does not");
+	assert.equal(pick((await v.json<JobsResponse>("/api/jobs")).jobs, "cp-park").elapsed_seconds, 600);
+	assert.equal(pick((await v.json<OverviewResponse>("/api/overview")).in_flight, "cp-pend").elapsed_seconds, 600);
+	v.clock();
+	// The parked sweep's current CI row is the answer: an old green never hides unknown, pending or denied.
+	const ciRow = (lastCi: string, head = a) => v.put(LAYOUT.ciWatchFile, { schema_version: 1, updated_at: at,
+		jobs: [{ job_id: "cp-park", announced: [], head_sha: head, last_ci: lastCi }, { job_id: "cp-bare", announced: [], head_sha: a, last_ci: "unreadable" }] });
+	const ci = async () => Object.fromEntries((await team()).map((j) => [j.id, [j.ci, j.ci_forwarded?.ci ?? null]]));
+	for (const state of ["unknown", "in_progress", "unreadable"]) {
+		ciRow(state);
+		assert.deepEqual((await ci())["cp-park"], [state, null], `${state} after an old green`);
+	}
+	ciRow("failed", b);
+	assert.deepEqual((await ci())["cp-park"], ["green", null], "a row for another head says nothing about this head");
+	assert.deepEqual((await ci())["cp-bare"], ["unreadable", "green"], "a forwarded green stays separate and never hides a denial");
+});
