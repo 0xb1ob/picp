@@ -1274,10 +1274,16 @@ test("P17-composer: open asks pin above the composer behind one remembered toggl
 	}
 	tab = await tab.reopen(OPERATOR);
 	const live = await tab.find("textarea");
-	const record = readFileSync(controlRecordFile(d.stateDir), "utf8");
+	// A new session rotates the CSRF token under the open tab: its next send fails with the server's reason.
 	session.control.stop();
+	const next = await operatorSession(t, d.stateDir);
+	tab.type(live, "after a new session");
+	tab.click(await tab.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
+	assert.ok(await tab.find(".session-pending-failed .session-pending-detail", (p) => p.textContent === "Failed: control token missing or stale; reload the transcript"), "stale 403");
+	const record = readFileSync(controlRecordFile(d.stateDir), "utf8");
+	next.control.stop();
 	writeFileSync(controlRecordFile(d.stateDir), record);
-	tab.type(live, "into a dead socket");
+	tab.type(await tab.find("textarea"), "into a dead socket");
 	tab.click(await tab.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
 	const failure = await tab.find(".session-pending-failed .session-pending-detail", (p) => /^Failed: session not running: /.test(p.textContent ?? ""));
 	assert.ok(failure.closest(".session-pending-failed")!.querySelector(".session-pending-again"), "a failed send offers Send again");
@@ -1316,7 +1322,26 @@ test("P17-composer-start: offline the composer holds a message and offers each l
 	// No session serves within the tab's 60 s: Start fails, saying where to look; past the viewer's window it reruns.
 	tab.shift(61_000);
 	assert.match((await tab.find(".start-session-failed")).textContent ?? "", /^Start failed: no session served the dashboard within 60 s; attach from a terminal: tmux attach -t cp-operator to see why$/);
-	d.pin(new Date(Date.now() + 61_000).toISOString());
+	// Inside the viewer's 60 s window a click is a 429, a failed tmux a 503; a duplicate session keeps waiting.
+	const again = async () => tab.click(await tab.find(".start-session-button", (b) => b.textContent === "Start in tmux"));
+	const assertFailed = async (said: RegExp) => assert.match((await tab.find(".start-session-failed", (p) => said.test(p.textContent ?? ""))).textContent ?? "", said);
+	const later = (s: number) => d.pin(new Date(Date.now() + s * 1000).toISOString());
+	await again();
+	await assertFailed(/^Start failed: one start per 60 s; retry in \d+ s$/);
+	later(61);
+	box.reply({ "tmux new-session -d": { status: 1, stderr: "no server running on /tmp/tmux-1000/default\nmore" } });
+	await again();
+	await assertFailed(/^Start failed: .*new-session -d exited 1: no server running on \/tmp\/tmux-1000\/default$/);
+	later(122);
+	box.reply({ "tmux new-session -d": { status: 1, stderr: "duplicate session: cp-operator" } });
+	const seen = tab.requests.length;
+	await again();
+	await until(() => tab.requests.slice(seen).filter((r) => r.method === "GET" && r.path.startsWith("/api/operator/control")).length, (n) => n >= 2, "the re-read");
+	assert.deepEqual([posts(tab, START).at(-1)!.status, tab.$(".start-session-line")?.textContent], [409, "Starting the operator session… the composer opens when it serves the dashboard"]);
+	tab.shift(61_000);
+	await assertFailed(/^Start failed: no session served the dashboard within 60 s/);
+	later(183);
+	box.reply({});
 	tab.click(await tab.find(".start-session-button", (b) => b.textContent === "Start in tmux"));
 	await tab.find(".start-session-button", (b) => b.textContent === "Starting…");
 	await operatorSession(t, d.stateDir);
@@ -1342,6 +1367,7 @@ test("P17-restart: Restart session says why it cannot, confirms, posts {restart:
 	const plain = await operatorSession(t, d.stateDir);
 	let tab = await d.open(OPERATOR);
 	const button = ".session-bar-restart .operator-restart-button", line = ".session-bar-restart .operator-restart-line";
+	const composer = (off: boolean) => tab.find("textarea", (f) => f.hasAttribute("disabled") === off);
 	await tab.find(button, (b) => b.hasAttribute("disabled") && b.getAttribute("title") === RESTART_UNSUPPORTED);
 	assert.equal(tab.$(line)?.textContent, RESTART_UNSUPPORTED, "a session cp-operator cannot relaunch: the manual way");
 	plain.control.stop();
@@ -1364,6 +1390,7 @@ test("P17-restart: Restart session says why it cannot, confirms, posts {restart:
 	idle = false;
 	tab.click(confirm);
 	assert.ok(await tab.find(line, (p) => p.textContent === "Refused: not now: the session is busy with a turn" && p.getAttribute("role") === "alert"));
+	assert.ok(await composer(false), "refused: free");
 
 	idle = true;
 	tab = await tab.reopen();
@@ -1374,11 +1401,14 @@ test("P17-restart: Restart session says why it cannot, confirms, posts {restart:
 	assert.deepEqual([sent!.body, sent!.headers["x-cp-control-token"], sent!.status], ['{"restart":true}', String((await d.get("/api/operator/control")).body.token), 202]);
 	const from = tab.requests.length;
 	await tab.find(line, (p) => p.textContent === "Stopping the session… it stops once its turn and compaction are done", 30_000);
+	assert.ok(await composer(true), "stopping: held");
 	control.stop();
 	await tab.find(line, (p) => p.textContent === "Relaunching · resumes operator-session.jsonl", 30_000);
+	assert.ok(await composer(true), "relaunching: held");
 	assert.equal(tab.$(button)?.textContent, "Restarting…");
 	control = await restartable();
 	await tab.find(line, (p) => p.textContent === "Operator session restarted · operator-session.jsonl", 30_000);
+	assert.ok(await composer(false), "restarted: free");
 	// The bar's Restart runs on the shell's lean control, so its 2 s poll reads ?sends=0 to relaunching and restarted;
 	// the composer's own control re-reads the full status as the restart moves, so its queued sends survive.
 	const reads = tab.requests.slice(from).filter((r) => r.method === "GET" && r.path.startsWith("/api/operator/control")).map((r) => r.path);
@@ -1395,6 +1425,7 @@ test("P17-restart: Restart session says why it cannot, confirms, posts {restart:
 	await tab.find(line, (p) => p.textContent === "Relaunching · resumes operator-session.jsonl", 30_000);
 	tab.shift(91_000);
 	assert.match((await tab.find(line, (p) => /^Failed: /.test(p.textContent ?? ""))).textContent ?? "", /^Failed: the session has not come back within 90 s; check the operator terminal/);
+	assert.ok(await composer(false), "failed: free");
 });
 
 /** A dashboard whose home runs the quick tunnel: cp-view owns the device store and serves the remote listener. */
@@ -1506,6 +1537,10 @@ test("P17-device-notices: a pairing raises a notice above every screen; dismisse
 	assert.equal(notice.querySelectorAll("img").length, 0, "names are text");
 	assert.ok(notice.querySelector("time[datetime]"));
 	assert.match(notice.textContent ?? "", /push: 1 pending/);
+	const event = JSON.parse(readFileSync(d.store, "utf8")).events[0];
+	writeFileSync(deviceNotificationsFile(d.stateDir), JSON.stringify({ schema_version: 1, items: [{ pairing_id: event.id, device_id: event.recipients[0], state: "delivered", attempts: 1, delivered: 1, updated_at: event.at }], unusable: [] }));
+	tab.refresh();
+	assert.ok(await tab.find(".device-notices", (s) => /push: 1 delivered to push service/.test(s.textContent ?? "")), "a delivered recipient");
 	assert.equal(notice.querySelector('a[href="#settings"]')?.textContent, "Devices");
 	tab = await tab.reopen("#board");
 	const dismiss = await tab.find(".device-notices button", (b) => b.textContent === "Dismiss");
