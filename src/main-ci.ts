@@ -266,7 +266,7 @@ export async function checkMainCi(options: { project: string; cwd: string; home:
 	try {
 		runs = await readActionsCi({ cwd, exec, sha: tip, branch: "main", timeoutMs: options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS });
 	} catch (error) {
-		throw new MainCiError(`gh api …/actions/runs unreadable: ${(error as Error).message.slice(0, 200)}`);
+		throw new MainCiError(`gh api …/actions/runs unreadable: ${(error as Error).message.slice(0, 400)}`);
 	}
 	const counted = countedMainRuns(runs, login);
 	const classified = classifyMainTip(tip, counted);

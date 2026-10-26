@@ -133,6 +133,33 @@ test("a failed observation's trace names the calls still in flight", async () =>
 	assert.match(lines[0] ?? "", /\+\d+ms repos\/\{owner\}\/\{repo\}\/actions\/runs\/7\/attempts\/1\/jobs\S+ cap \d+ms in flight$/);
 });
 
+// #537 follow-up: GitHub answered in 0.56-1.7 s while the parent's reads overran 9+ s under host load. A failed read
+// must name the 1-minute load, the event-loop lag and gh's spawn-to-first-byte, in the error and the main-CI tick output.
+test("a failed read appends load average, event-loop lag and gh first-byte time to its message", async () => {
+	const fields = /\(status 502; empty body; 3 attempts; load \d+\.\d{2}, event-loop lag \d+ms, gh first byte (\d+ms|none)\)$/;
+	const failing = (byte: boolean): CommandRunner => async (_command, _args, options) => {
+		if (byte) options.firstByte?.();
+		throw new Error("gh: HTTP 502");
+	};
+	const sleep = async () => {};
+	await assert.rejects(readActionsCi({ cwd: ".", exec: failing(true), sha: SHA, sleep, log: () => {} }), (error: Error) => {
+		assert.match(error.message, fields);
+		assert.match(error.message, /gh first byte \d+ms\)$/);
+		return true;
+	});
+	const mainExec: CommandRunner = async (command, args, options) => (command === "git" ? `${SHA}\n` : failing(false)(command, args, options));
+	const home = createScratchHome();
+	try {
+		await assert.rejects(checkMainCi({ project: "demo", cwd: "/x", home: home.path, store: new MainCiStore({ home: home.path }), login: "me", exec: mainExec }), (error: Error) => {
+			assert.match(error.message, fields);
+			assert.match(error.message, /gh first byte none\)$/);
+			return true;
+		});
+	} finally {
+		home.cleanup();
+	}
+});
+
 test("Actions reader issues only runs and attempt-jobs requests and never follows response metadata links", async () => {
 	const api = "https://api.github.com/repos/acme/app";
 	const { exec, calls } = allowlistedGh((endpoint) =>
