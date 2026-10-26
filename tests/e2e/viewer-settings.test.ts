@@ -7,7 +7,6 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
 import { createHash } from "node:crypto";
@@ -141,8 +140,8 @@ test("P20-schedule-control-http: every refusal, in order, is one viewer line of 
 	assert.match(String(full.body.error), /20 schedule requests already wait for the parent/);
 	assert.equal(lines(scheduleControlFile(stateDir)).length, queued, "a full queue writes no request line");
 	rmSync(scheduleControlFile(stateDir));
-	// Readable (one JSON number) but unwritable even as root: kernfs refuses writes to a 0444 attribute.
-	symlinkSync("/sys/devices/system/cpu/kernel_max", scheduleControlFile(stateDir));
+	// A dangling symlink reads as no journal but cannot be opened for append, root or not.
+	symlinkSync(join(stateDir, "no-such-dir", "journal"), scheduleControlFile(stateDir));
 	await refused(() => send(body), 500, /schedule control journal unwritable/);
 	rmSync(scheduleControlFile(stateDir));
 
@@ -213,7 +212,7 @@ test("P20-schedule-policy-http: the policy GET is tailnet-only and pure; neither
 });
 
 // ---------------------------------------------------------------------------------------------------------------
-// Settings over HTTP and the model list (baseline tests/viewer-settings-http.test.ts, tests/viewer-model-list.test.ts).
+// Settings over HTTP and the model list (retired baselines viewer-settings-http and viewer-model-list).
 
 const APPLY = "/api/settings/apply";
 const RESTORE = "/api/settings/restore";
@@ -372,7 +371,7 @@ test("P20-model-list: GET /api/settings never waits for pi --list-models; one sh
 	assert.equal(stub.calls(), 1, "repeat reads share the one background run");
 	stub.release();
 	const both = ["anthropic/claude-opus-5-5", "openai/gpt-5"];
-	await until(read, (body) => JSON.stringify(models(body)) === JSON.stringify([both, null, false]), "the list once it lands");
+	assert.deepEqual(models(await until(read, (body) => JSON.stringify(models(body)) === JSON.stringify([both, null, false]), "the list once it lands")), [both, null, false]);
 	const landed = time.now();
 
 	time.step(landed + 290_000 - time.now());
@@ -414,7 +413,7 @@ test("P20-model-list: GET /api/settings never waits for pi --list-models; one sh
 });
 
 // ---------------------------------------------------------------------------------------------------------------
-// The Settings page in a served tab (baseline tests/viewer-settings-ui.test.ts).
+// The Settings page in a served tab (retired baseline viewer-settings-ui).
 
 const MODELS = "provider model\nopenai gpt-5\nanthropic claude-opus-5-5\nanthropic claude-haiku-5\n";
 const optionTexts = (select: Element) => [...select.querySelectorAll("option")].map((option) => option.textContent);
@@ -655,6 +654,9 @@ test("P20-settings-stale-token: a refusal with no transaction body is the page's
 	const error = await ui.tab.find(".settings-error");
 	assert.equal(ui.posts()[0]?.status, 403);
 	assert.equal(error.querySelector("p, span, div")?.textContent ?? error.textContent, "Not saved: control token missing or stale; reload the page");
+	await ui.view.stop();
+	await ui.press(grants, "Restore defaults");
+	assert.match((await ui.tab.find(".settings-error", (el) => /Could not reach/.test(el.textContent ?? ""))).textContent ?? "", /^Not saved: Could not reach this home$/);
 });
 
 // ---------------------------------------------------------------------------------------------------------------
