@@ -148,7 +148,7 @@ const threads: ThreadsResponse = { generated_at: GENERATED, availability: "ok", 
 /** The same list with asks unreadable, as threadsView serves it: every `waiting` null, nothing in the waiting state. */
 const blind: ThreadsResponse = { ...threads, warning: "asks unavailable: state/operator/asks.jsonl unreadable; waiting is unknown",
 	threads: threads.threads.map(t => ({ ...t, waiting: null, state: t.state === "waiting" ? "open" : t.state })) };
-/** A done job for the card's "Open job transcript →"; shaped as in tests/viewer-job-detail-render.test.ts. */
+/** A done job for the card's "Open job transcript →"; shaped as in tests/viewer-job-detail-render-retained.test.ts. */
 const job = { generated_at: GENERATED, awaiting_count: 0, description: null, mandate: null, timeline: [], timeline_truncated: false, files_href: null, artifact_href: null, artifact_name: null, run_href: null, reports: [], asks: [], questions: [], warnings: [],
 	job: { id: JOB, project: "picp", title: "Sessions chat v2 PR 2", phase: "done", model: null, script_path: null, elapsed_seconds: null, limit_seconds: null, head: null, ci: null, review: null, review_attempts: 0, routing: null, note: null, ledger_status: "closed", ledger_disagrees: false, mandate_id: null, cost_usd: null, pr_url: null, pr_status: null, finished_at: GENERATED, finished_today: false, merge_sha: null, failure: null, summary: "Steps card and the Job transcript link.", blockers: [], context: null } } as unknown as JobResponse;
 const jobTranscript: JobTranscriptResponse = { entries: [say("j1", "2026-10-15T08:00:00Z", "Worker", "Reading the task file."), tool("j2", "2026-10-15T08:00:05Z", "read", "Arguments\n{}\n\nResult\nok", "Read the plan")], truncated: false, warning: null, from: null, to: null };
