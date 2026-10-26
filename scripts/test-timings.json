@@ -285,8 +285,6 @@
 	"tests/viewer-sessions-qa.test.ts": 137,
 	"tests/viewer-sessions-rollup.test.ts": 71,
 	"tests/viewer-sessions-skills.test.ts": 97,
-	"tests/viewer-settings-http.test.ts": 305,
-	"tests/viewer-settings-ui.test.ts": 2567,
 	"tests/viewer-stats-render.test.ts": 270,
 	"tests/viewer-thread-turns.test.ts": 31,
 	"tests/viewer-threads-http.test.ts": 260,
