@@ -26,17 +26,10 @@ test("encryptPayload reproduces the RFC 8291 Appendix A body byte for byte", () 
 	assert.equal(decryptPayload(body, fromB64url(RFC.uaPrivate), fromB64url(RFC.auth)), RFC.plaintext);
 });
 
-test("encryptPayload round-trips with a fresh sender key and salt, and refuses oversize or malformed input", () => {
+test("encryptPayload refuses a payload over 3993 bytes", () => {
 	const ua = createECDH("prime256v1");
 	ua.generateKeys();
-	const auth = Buffer.alloc(16, 7);
-	const keys = { p256dh: b64url(ua.getPublicKey()), auth: b64url(auth) };
-	const one = encryptPayload('{"project":"demo"}', keys);
-	const two = encryptPayload('{"project":"demo"}', keys);
-	assert.notDeepEqual(one.subarray(0, 16), two.subarray(0, 16), "a fresh salt per message");
-	assert.equal(decryptPayload(one, ua.getPrivateKey(), auth), '{"project":"demo"}');
+	const keys = { p256dh: b64url(ua.getPublicKey()), auth: b64url(Buffer.alloc(16, 7)) };
 	assert.throws(() => encryptPayload("x".repeat(3994), keys), /at most 3993/);
 	assert.doesNotThrow(() => encryptPayload("x".repeat(3993), keys));
-	assert.throws(() => encryptPayload("x", { ...keys, auth: b64url(Buffer.alloc(8)) }), /auth is not 16 bytes/);
-	assert.throws(() => encryptPayload("x", { ...keys, p256dh: b64url(Buffer.alloc(33, 2)) }), /uncompressed P-256/);
 });

@@ -414,8 +414,14 @@ test("P22-push-ui-refused: a denial, a full home, an unreachable home or a stall
 	const away = await more(leaving, device());
 	leaving.click(await button(leaving, "Turn on"));
 	await until(away.meta, (text) => text.startsWith("On for this device"), "on");
+	const offline = await openTab(t, s.viewer.port, "#awaiting");
+	const gone = await more(offline, device());
+	const turnOn = await button(offline, "Turn on");
 	await s.viewer.stop();
 	leaving.click(await button(leaving, "Turn off"));
 	assert.equal((await leaving.find("section.more-push p[role=status]")).textContent, "Removed here; the home drops it on its next push");
 	assert.equal(away.calls.at(-1)?.[0], "unsubscribe", "the browser is unsubscribed even when the home is unreachable");
+	offline.click(turnOn);
+	assert.equal((await offline.find("section.more-push p[role=alert]")).textContent, "Could not reach this home to store the subscription");
+	assert.equal(gone.calls.at(-1)?.[0], "unsubscribe", "Turn on with the home unreachable leaves nothing subscribed");
 });
