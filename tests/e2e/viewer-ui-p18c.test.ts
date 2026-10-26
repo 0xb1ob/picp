@@ -118,7 +118,7 @@ test("P18-job-detail-ui: Job detail's hero, facts, tabs, timeline, asks, failure
 	const fact = (tab: Tab, name: string) => tab.$(`.job-fact-${name} dd`)?.textContent;
 	assert.deepEqual(tab_facts(queued), ["Wall clock:not recorded", "Cost:not recorded", "Model:not recorded", "Head:no commits yet", "Context:none", "Routing:Not recorded", "Skills:none", "Mandate:none", "PR:none yet", "CI:not run yet", "Review:not started · 0 / 5"]);
 	assert.equal(queued.$$("dd").filter((dd) => /^-/.test(dd.textContent ?? "")).length, 0, "no dash-only fact");
-	assert.equal(queued.$(".job-summary-row"), null, "no summary, no summary row");
+	assert.ok(queued.$(".job-summary-row") === null, "no summary, no summary row");
 	assert.equal(queued.root.querySelectorAll("script, [style], [onclick]").length, 0, "no inline script, style or handler");
 
 	// A merged job: the PR link, the short merge sha, two copy buttons, the full head and merge shas, model and provider.
@@ -135,7 +135,7 @@ test("P18-job-detail-ui: Job detail's hero, facts, tabs, timeline, asks, failure
 	assert.deepEqual(texts([...routing.querySelectorAll(".job-routing-pill")]), ["scope:M · inferred", "risk:low · explicit", "recorded rule"]);
 	assert.deepEqual(texts([...routing.querySelectorAll("p")]), ["Recorded explanation · Additional reason"], "one explanation line");
 	assert.doesNotMatch(landed.text(), /scope:M \(inferred\)/, "the routing text is not repeated beside its pills");
-	assert.equal(landed.$(".job-fact-deploy"), null, "no after-merge record, no Deploy row");
+	assert.ok(landed.$(".job-fact-deploy") === null, "no after-merge record, no Deploy row");
 	assert.equal(landed.text().includes("Ask about this failure"), false, "only failed jobs offer it");
 	assert.equal(landed.$('.job-header, .job-detail-heading > .page-header a.page-header-back')?.getAttribute("href"), "#jobs");
 	assert.deepEqual([...landed.$(".job-detail-heading > .page-header")!.children].slice(0, 3).map((e) => [e.tagName, e.textContent]), [["A", "Jobs"], ["H1", "Landed"], ["CODE", "cp-merged"]]);
@@ -145,7 +145,7 @@ test("P18-job-detail-ui: Job detail's hero, facts, tabs, timeline, asks, failure
 	assert.deepEqual(landed.$$(".job-timeline .job-sha > code").map((e) => [e.textContent, e.getAttribute("title")]), [[A.slice(0, 7), A], [B.slice(0, 7), B]]);
 	assert.deepEqual(texts(landed.$$(".job-timeline .overview-reply code")), [A, B]);
 	assert.equal(landed.$('.job-links a[href="/api/job/cp-merged/events"]')?.textContent, "Run log");
-	assert.equal(landed.$(".job-event-pending"), null, "a finished job has no speculative pending stage");
+	assert.ok(landed.$(".job-event-pending") === null, "a finished job has no speculative pending stage");
 	assert.doesNotMatch(landed.text(), /events\.jsonl|not yet/);
 	assert.equal(fact(await v.open("#job/cp-plain", false, ".job-facts"), "skills"), "none");
 	assert.match((await v.open("#job/cp-nohead", false, ".job-facts")).text(), /Ask about this failure/, "a failed phase is enough without a headline");
@@ -163,8 +163,8 @@ test("P18-job-detail-ui: Job detail's hero, facts, tabs, timeline, asks, failure
 	assert.deepEqual([...held.$(".job-detail-body")!.children].map((e) => e.className), ["job-detail-main", "job-detail-side"], "the tab content and the facts rail");
 	assert.deepEqual(texts(held.$$(".job-facts dt")), ["Wall clock", "Cost", "Model", "Head", "Context", "Routing", "Skills", "Mandate", "PR", "CI", "Review"]);
 	assert.equal(held.$(".job-detail-top > .job-summary-row > p.job-summary.job-summary-clamp")?.textContent, "Short");
-	assert.equal(held.$(".job-summary-more"), null, "more shows only on a measured overflow");
-	assert.equal(held.$(".job-detail-side .job-summary"), null, "the summary stays out of the facts");
+	assert.ok(held.$(".job-summary-more") === null, "more shows only on a measured overflow");
+	assert.ok(held.$(".job-detail-side .job-summary") === null, "the summary stays out of the facts");
 
 	// A phone opens on Details with three tabs; a desktop tab opens on Transcript beside the facts rail, Timeline its own tab.
 	const tabs = (tab: Tab) => tab.$$('[role="tab"]').map((e) => [e.textContent, e.getAttribute("aria-selected")]);
@@ -174,7 +174,7 @@ test("P18-job-detail-ui: Job detail's hero, facts, tabs, timeline, asks, failure
 	assert.deepEqual(tabs(desk), [["Transcript", "true"], ["Timeline", "false"]]);
 	assert.equal(desk.$(".job-detail")?.getAttribute("data-tab"), "transcript");
 	assert.ok(desk.$(".job-detail-side .job-facts"), "facts stay on the rail");
-	assert.equal(desk.$(".job-timeline"), null, "Timeline is its own tab");
+	assert.ok(desk.$(".job-timeline") === null, "Timeline is its own tab");
 	assert.deepEqual([...desk.$(".job-detail-side")!.children].map((e) => e.className), ["job-facts", "job-links"]);
 	assert.deepEqual(texts(desk.$$(".job-facts dt")).slice(-2), ["CI", "Review"]);
 
@@ -191,7 +191,7 @@ test("P18-job-detail-ui: Job detail's hero, facts, tabs, timeline, asks, failure
 		assert.equal(failed.$(".job-card p")?.textContent, "Why this job\n  exists", "the description keeps its stored spaces and line breaks");
 		assert.match(failed.$(".job-mandate-snippet")!.textContent!, /md-a.*active.*Ship it.*\$1\.50 \/ \$20\.00.*1 job/);
 	}
-	assert.equal(queued.$(".job-card, .job-mandate-snippet"), null, "omitted when not recorded");
+	assert.ok(queued.$(".job-card, .job-mandate-snippet") === null, "omitted when not recorded");
 
 	// The page's one <h1> is the job's title, whole in its title attribute; its id follows muted.
 	const titled = await v.open("#job/cp-long", false, ".job-facts");
@@ -240,7 +240,7 @@ test("P18-jobs-render: Jobs, a failed job's detail and Board render empty, faile
 	assert.match(blank.text(), /Nothing here/);
 	blank.click(blank.$(".board-trigger")!);
 	await blank.find('[role="listbox"]');
-	assert.equal(blank.$('[role="switch"]'), null, "no revoked mandates, no switch");
+	assert.ok(blank.$('[role="switch"]') === null, "no revoked mandates, no switch");
 
 	const flight = (id: string, project: string, over: object = {}) => ({ job_id: id, project, kind: "ship", phase: "waiting", dispatched_at: iso(10), bounds: { wall_clock_seconds: 7200 }, usage: { cost_usd: 1.5 }, worker: { model: "anthropic/claude-opus-5-5" }, ...over });
 	const done = (id: string, project: string, minutes: number) => ({ job_id: id, project, kind: "ship", phase: "done", dispatched_at: iso(minutes + 30), closed_at: iso(minutes), usage: { cost_usd: 1 }, mandate_id: "md-active" });
@@ -320,7 +320,7 @@ test("P18-jobs-render: Jobs, a failed job's detail and Board render empty, faile
 	assert.equal(jobs.$$("a a").length, 0, "the PR link is separate from the job link");
 	assert.match(jobs.$(".jobs-done-foot")!.textContent!, /Show 2 more from demo.*Nothing done today in alpha \(paused\), delta or gamma\./);
 	assert.match(jobs.$("[aria-label='Filter jobs']")!.textContent!, /Done today10/);
-	assert.equal(jobs.$('a[href="#job/cp-d5"]'), null, "the sixth demo row waits behind show-more");
+	assert.ok(jobs.$('a[href="#job/cp-d5"]') === null, "the sixth demo row waits behind show-more");
 	jobs.click(jobs.$(".jobs-more")!);
 	await jobs.find('a[href="#job/cp-d5"]');
 	// One Jobs item with a List | Board | Map toggle on each view, the current one marked.
@@ -346,7 +346,7 @@ test("P18-jobs-render: Jobs, a failed job's detail and Board render empty, faile
 	assert.doesNotMatch(board.text(), /^Mandates$/m);
 	assert.equal(board.$$('[aria-label="Board columns"]').length, 1, "one renderer for both widths");
 	assert.equal(board.$$('.board-trigger[aria-haspopup="listbox"]').length, 1);
-	assert.equal(board.$('[role="listbox"]'), null, "closed until opened");
+	assert.ok(board.$('[role="listbox"]') === null, "closed until opened");
 	assert.equal(board.root.querySelectorAll("script, [style], [onclick]").length, 0);
 	assert.ok(board.$('a[href="#job/cp-paused"]'), "All mandates retains flight jobs on inactive grants");
 	assert.match(board.$('a[href="#job/cp-wide"]')!.textContent!, /working · 10m \/ 2h 0m · \$1\.50/);
@@ -380,10 +380,10 @@ test("P18-jobs-render: Jobs, a failed job's detail and Board render empty, faile
 	board.click(board.$("#board-opt-md-paused")!);
 	await until(() => board.$('[role="listbox"]'), (open) => open === null, "picking closes the picker");
 	assert.match(board.$(".board-trigger")!.textContent!, /md-paused/);
-	assert.equal(board.$('a[href="#job/cp-wide"]'), null);
+	assert.ok(board.$('a[href="#job/cp-wide"]') === null);
 	assert.ok(board.$('a[href="#job/cp-paused"]'));
 	assert.match(board.text(), /Budget paused/);
-	assert.deepEqual([!!board.$('[aria-label="Waiting · 0"]'), /Empty now/.test(board.text()), board.$(".board-more")], [true, false, null], "Waiting folds; no overflow link");
+	assert.deepEqual([!!board.$('[aria-label="Waiting · 0"]'), /Empty now/.test(board.text()), board.$(".board-more") === null], [true, false, true], "Waiting folds; no overflow link");
 	board.click(board.$(".board-trigger")!);
 	board.click(await board.find("#board-opt-all"));
 	await until(() => board.$('[aria-label="Landed today"]')?.querySelectorAll(".board-card").length, (n) => n === 4, "All mandates restores the preview");
@@ -670,7 +670,7 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 	// One header row per page: the <h1>, then live status, then ⋮ as its last item; a short updated time.
 	assert.deepEqual(texts(tab.$$("h1")), ["Overview"]);
 	assert.ok(tab.$(".overview-heading .page-header:not(.page-header-fallback) h1 + .page-header-end > .shell-live + .shell-more:last-child"), "title, then status, then ⋮");
-	assert.equal(tab.$(".page-header-fallback"), null, "no second header");
+	assert.ok(tab.$(".page-header-fallback") === null, "no second header");
 	assert.equal(menus().length, 1, "no second ⋮");
 	const clock = await tab.find(".overview-heading .page-header-end time");
 	assert.match(clock.textContent!, /^updated \d\d:\d\d$/, "no seconds, no zone");
@@ -679,7 +679,7 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 	assert.equal(tab.$(".shell-desktop-search kbd")?.textContent, "⌘K");
 	const summary = menus()[0]!.querySelector("summary")!;
 	assert.deepEqual([summary.getAttribute("aria-label"), summary.getAttribute("title")], ["More actions", "More actions"]);
-	assert.deepEqual([tab.$(".shell-more-dot"), tab.$(".shell-more-panel")], [null, null], "closed: no panel, no dot");
+	assert.deepEqual([tab.$(".shell-more-dot") === null, tab.$(".shell-more-panel") === null], [true, true], "closed: no panel, no dot");
 	// Open: Refresh, Copy link, Notifications with icons, the Viewer footer, a scrim; no session, no Restart row.
 	const details = menus()[0]! as Element & { open: boolean };
 	const open = async () => { details.open = true; details.dispatchEvent(new tab.window.Event("toggle")); await tab.find(".shell-more-panel"); };
@@ -713,7 +713,7 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 	proto.close ??= function (this: Element) { this.removeAttribute("open"); };
 	tab.click(tab.$(".shell-search")!);
 	await tab.find("dialog");
-	assert.deepEqual([tab.$(".page-header-fallback"), menus().length], [null, 1], "search mounts no second header");
+	assert.deepEqual([tab.$(".page-header-fallback") === null, menus().length], [true, 1], "search mounts no second header");
 
 	// A screen with no header of its own (Sessions while it loads) brings back the shell's fallback row, with no <h1>.
 	tab.go("#sessions?view=you");
@@ -727,11 +727,11 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 	assert.deepEqual(texts(missing.$$("h1")), ["No job cp-doesnotexist"]);
 	assert.deepEqual([missing.$(".page-header-fallback > p")?.textContent, missing.$(".page-header-fallback > .page-header-detail")?.textContent], ["Jobs", "cp-doesnotexist"]);
 	const worker = await v.open("#sessions?view=workers&id=cp-doesnotexist", true, ".not-found-recovery > h2");
-	assert.deepEqual([texts(worker.$$("h1")), worker.$(".page-header-fallback"), worker.$(".not-found-heading .page-header-back")?.textContent], [["Sessions"], null, "← Sessions"]);
+	assert.deepEqual(await until(() => [texts(worker.$$("h1")), worker.$(".page-header-fallback") === null, worker.$(".not-found-heading .page-header-back")?.textContent], (s) => s[1] === true, "the screen's header replaces the fallback"), [["Sessions"], true, "← Sessions"]);
 	assert.deepEqual([worker.$(".not-found-heading > .page-header > .page-header-detail")?.textContent, worker.$(".not-found-recovery > h2")?.textContent], ["cp-doesnotexist", "No worker session cp-doesnotexist"]);
 	// A context pill only when the page gives one.
 	assert.equal((await v.open("#settings", true, ".settings-heading h1")).$(".page-header > h1 + .page-header-context")?.textContent, "This machine");
-	assert.equal((await v.open("#jobs", true, ".jobs-heading h1")).$(".page-header-context"), null, "no context, no pill");
+	assert.ok((await v.open("#jobs", true, ".jobs-heading h1")).$(".page-header-context") === null, "no context, no pill");
 
 	// Phone header: More's views back out to More with the data time and search, no live status; Jobs views and
 	// Decisions keep the live status; a job shows the time only.
@@ -742,7 +742,7 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 		const search = header.querySelector("button.shell-search")!;
 		assert.deepEqual([header.querySelectorAll("time.shell-clock").length, search.getAttribute("aria-haspopup"), /Search/.test(search.getAttribute("aria-label")!), search.hasAttribute("disabled"), search.getAttribute("aria-disabled")],
 			[1, "dialog", true, false, null], hash);
-		assert.equal(phone.$(".shell-corner"), null, hash);
+		assert.ok(phone.$(".shell-corner") === null, hash);
 		assert.ok(header.querySelector(".shell-header-right > .shell-search + details.shell-more:last-child"), `${hash}: ⋮ at the far right, after Search`);
 		return header;
 	};
@@ -750,7 +750,7 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 		const header = await phoneHeader(hash);
 		assert.ok(header.querySelector('a[href="#more"][aria-label="Back to More"]'), hash);
 		assert.match(header.textContent!, /command-post/);
-		assert.equal(header.querySelector(".shell-live, .shell-badge"), null, `${hash}: the dashboard acts, no read-only badge, no live status`);
+		assert.ok(header.querySelector(".shell-live, .shell-badge") === null, `${hash}: the dashboard acts, no read-only badge, no live status`);
 		assert.doesNotMatch(header.textContent!, /read-only/);
 		assert.match(header.querySelector("time.shell-clock")!.textContent!, /^\d\d:\d\d\b/, "the data time sits in the phone header");
 	}
@@ -758,7 +758,7 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 		const header = await phoneHeader(hash);
 		assert.deepEqual([!!header.querySelector('[aria-label="Back to More"]'), !!header.querySelector(".shell-live")], [false, true], hash);
 	}
-	assert.equal((await phoneHeader("#job/cp-one")).querySelector(".shell-live"), null, "a job's header has no live status");
+	assert.ok((await phoneHeader("#job/cp-one")).querySelector(".shell-live") === null, "a job's header has no live status");
 	// The phone clock: stale until the stream opens, live (HH:MM, the full stamp its title), stale on loss, offline hidden.
 	const phone = await v.open("#overview", false, ".overview-heading h1");
 	const live = () => phone.$(".shell-header .shell-live")!.textContent!;
@@ -798,7 +798,7 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 	control.stop();
 	const next = await startDashboardControl({ stateDir: v.stateDir, ports, log: () => {} }) as DashboardControl;
 	t.after(() => next.stop());
-	assert.equal(await until(() => session.$(".shell-more-dot"), (dot) => dot === null, "restarted: the dot clears"), null);
+	assert.ok(await until(() => session.$(".shell-more-dot"), (dot) => dot === null, "restarted: the dot clears") === null);
 
 	// A version alert puts the dot on ⋮ with no session, and Restart stays hidden.
 	const alert = await served(t, (put) => put(join(LAYOUT.state, "update.json"), { schema_version: 1, phase: "idle", last_result: "failed", last_run_at: iso(5), fetch_failures: 0 }));
