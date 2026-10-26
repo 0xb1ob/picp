@@ -377,6 +377,7 @@ test("P20-model-list: GET /api/settings never waits for pi --list-models; one sh
 
 	time.step(landed + 290_000 - time.now());
 	assert.deepEqual((await read()).available_models, both);
+	await new Promise((done) => setTimeout(done, 1_000)); // a background run started by that read would have spawned by now
 	assert.equal(stub.calls(), 1, "a good list is fresh for 5 minutes");
 	stub.answer("provider model\nopenai gpt-6.1-sol\n");
 	stub.hold();
