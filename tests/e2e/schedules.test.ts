@@ -594,6 +594,12 @@ test("P13 restart recovery: a skill anchor is offered once per parent process un
 	assert.equal((await h.ledger.list({ labels: [`schedule:${review}`], all: true })).length, 1);
 	assert.equal(existsSync(join(h.stateDir, "fleet.json")), false, "a local skill anchor belongs to the parent: nothing was dispatched");
 	assert.deepEqual(h.grants(), [], "recovery and release mint no grant");
+	// P13c: a pr run's card waits for its close and names the dropped members; a skill run with no S1 has no card.
+	const answersFile = join(h.stateDir, "operator", "answers.jsonl");
+	const cards = () => existsSync(answersFile) ? readFileSync(answersFile, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { job_id: string | null; answer: string; source: Record<string, unknown> }) : [];
+	await waitFor(() => cards().length, (count) => count >= 2, { timeoutMs: 40_000, what: "the closed runs' cards" });
+	assert.deepEqual(cards().map((card) => [card.source.run_id, card.source.outcome, card.job_id]), [[crashed.id, "completed", null], [partial.id, "partial", null]]);
+	assert.match(cards()[1]!.answer, new RegExp(`^No result envelope from ${partial.anchor_job_id}; run closed partial\\.\\nDropped: ${partial.anchor_job_id} \\(dropped: cap refusal\\)`));
 });
 
 const ORG = "Review the org queue.\norg: acme\nTeam: core\nhold: https://github.com/acme/api/pull/7";
@@ -1046,4 +1052,59 @@ test("P13c runner reports: answer and script runs are torn down in code with one
 	assert.equal(envelopes(third, tidy).length, 1);
 	assert.match(JSON.stringify(envelopes(third, tidy)[0]!.message), /cp-\w+: no envelope yet/);
 	assert.equal(fleetOf(tidy)?.phase, "held", "no teardown ran");
+});
+
+test("P13c result cards: an unwritable Answers journal keeps the card queued with its error and the next process posts it once; a lost card is healed from the filed envelope inside the reconcile window only", { timeout: 300_000 }, async (t) => {
+	const h = await schedulesHome(t);
+	const answersFile = join(h.stateDir, "operator", "answers.jsonl");
+	// A directory in the journal's place: every append fails, with no chmod.
+	mkdirSync(answersFile, { recursive: true });
+	const runOf = () => h.runs().runs().find((run) => run.schedule_id === h.idOf("ask"));
+	const answer = h.model("answer", [{ kind: "tool_calls", calls: [{ name: "report_result", args: () => {
+		const id = runOf()!.anchor_job_id!, report = join(h.home, LAYOUT.state, "artifacts", id, "report.md");
+		mkdirSync(dirname(report), { recursive: true });
+		writeFileSync(report, "Answer\nNo merges yesterday.\n\nEvidence (paths + short quotes)\nREADME.md\n\nConfidence\nhigh\n\nUnknowns\nnone\n");
+		return { job_id: id, kind: "research", status: "done", summary: "No merges yesterday.", artifact_path: report };
+	} }] }, { kind: "hang" }]);
+	const parent = await h.parent("P13c: Add the ask schedule.", [
+		{ kind: "tool_calls", calls: [schedule("add", { action: "add", name: "ask", project: "demo", manual: true, title: "ask task", kind: "research", delivery: "answer", operator_quote: "Add the ask schedule." })] },
+		{ kind: "tool_calls", calls: [schedule("run", () => ({ action: "run_now", id: h.idOf("ask"), overrides: { model: answer } }))] },
+	]);
+	checkCall(ends(parent), "run", "ok", /fired: created cp-/);
+	const queued = await waitFor(() => runOf()?.result, (result) => result?.error !== undefined, { timeoutMs: 120_000, what: "the queued card's error" });
+	assert.match(queued!.error!, /^answers journal unreadable: .*EISDIR/);
+	assert.deepEqual([queued!.outcome, queued!.answer_id, queued!.delivered_at], ["completed", null, null]);
+	await waitFor(() => runOf()?.phase, (phase) => phase === "closed", { timeoutMs: 60_000, what: "the run closed" });
+	await h.closeParents();
+	rmSync(answersFile, { recursive: true });
+	const cards = () => existsSync(answersFile) ? readFileSync(answersFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as { by: string; id: string; job_id: string | null; answer: string; source: Record<string, unknown> }) : [];
+	await h.parent("P13c: restarted.", []);
+	await waitFor(() => cards().length, (count) => count > 0, { timeoutMs: 60_000, what: "the posted card" });
+	const [run, anchor] = [runOf()!, runOf()!.anchor_job_id!];
+	assert.deepEqual(cards()[0]!.source, { kind: "schedule", schedule_id: h.idOf("ask"), run_id: run.id, source_key: `${run.id}:${anchor}:1`, outcome: "completed" });
+	assert.match(cards()[0]!.answer, new RegExp(`^No merges yesterday\\.\\n\\nSchedule ${h.idOf("ask")}, run ${run.id}: completed, result job ${anchor}\\.`));
+	assert.deepEqual([run.result?.answer_id, run.result?.error], [cards()[0]!.id, undefined]);
+
+	// A crash after the journal write but before delivered_at: the next process reuses the first card.
+	await h.closeParents();
+	h.runs().editRun(run.id, (row) => { Object.assign(row.result!, { answer_id: null, delivered_at: null }); });
+	await h.parent("P13c: after the crash.", []);
+	await waitFor(() => runOf()!.result?.delivered_at, (at) => !!at, { timeoutMs: 60_000, what: "the card re-delivered" });
+	assert.deepEqual([cards().length, runOf()!.result?.answer_id], [1, cards()[0]!.id]);
+
+	// The card and its record are lost: past the reconcile window nothing is posted; inside it, the envelope heals it.
+	const lose = async (closedAt: string) => {
+		await h.closeParents();
+		rmSync(answersFile, { force: true });
+		h.runs().editRun(run.id, (row) => { delete row.result; Object.assign(row, { started_at: closedAt, closed_at: closedAt }); });
+		return h.parent("P13c: restarted again.", []);
+	};
+	const old = await lose(new Date(Date.now() - 8 * 86_400_000).toISOString().replace(/\.\d+Z$/, "Z"));
+	await new Promise((resolve) => setTimeout(resolve, 35_000));
+	await old.waitForSettled(30_000);
+	assert.deepEqual([cards().length, runOf()!.result], [0, undefined], "older than the window: no card");
+	await lose(run.closed_at!);
+	await waitFor(() => cards().length, (count) => count > 0, { timeoutMs: 60_000, what: "the healed card" });
+	assert.deepEqual([cards().length, cards()[0]!.source.source_key, cards()[0]!.job_id], [1, `${run.id}:closed`, anchor]);
+	assert.match(cards()[0]!.answer, /^No merges yesterday\./);
 });
