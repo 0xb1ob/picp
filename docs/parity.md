@@ -71,7 +71,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 |---|---|---|---|
 | Parent job ("intake, classify, dispatch, wait, relay, teardown. Nothing else") | ported | AGENTS.md §The loop | `tests/contract.test.ts` |
 | "Never do the worker's job / never read project source" | ported | AGENTS.md §The loop (never-list) | — |
-| Session start: read learnings, then `cp_job ready` | mechanised | memory digest is injected at `session_start`; `/status` + `cp_job ready` are step 2–3 | `tests/memory.test.ts` |
+| Session start: read learnings, then `cp_job ready` | mechanised | memory digest is injected at `session_start`; `/status` + `cp_job ready` are step 2–3 | `tests/e2e/memory.test.ts` (P23-memory-start) |
 | Classify (kind × delivery, do not blur) | ported | AGENTS.md §Classify; labels are the dispatchability contract | `tests/e2e/project-tracker.test.ts` (P15-jobs-refusals: label faults) |
 | "Evidence is not authorization" | mechanised | the checkpoint: written `pending` before anyone is asked, answerable only by a human channel | `tests/e2e/pipeline-run.test.ts`, `tests/e2e/phase3.test.ts` |
 | Pipeline: two jobs, dep-linked, three roles | ported | `cp_pipeline start` | `tests/e2e/pipeline-run.test.ts` |
@@ -117,8 +117,8 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | Jobs ledger: not a backlog (the issue lives where the operator says; `external_ref` points at it), labels, intake, deps, completion, history | ported (in-house document, spec 2026-09-04; `type`/`priority` retired and `external_ref` freed 2026-09-05) | [`src/ledger.ts`](../src/ledger.ts) + AGENTS.md §Jobs | `tests/e2e/project-tracker.test.ts`, `tests/ledger-retained.test.ts` |
 | `slug` on `cp_job create` | ported | `IntakeInput.slug` | `tests/e2e/project-tracker.test.ts` (P15-jobs-lifecycle) |
 | membership queries are never paged | mechanised | `ready`/`blocked`/`blockersOf` are computed over the whole document; there is no page to fall off | `tests/e2e/project-tracker.test.ts` (P15-jobs-lifecycle), `tests/status.test.ts` — **found by this audit**; the fail-open case was `cp-i2s` |
-| Memory (three files, budgets, tiers, decay, capture/curation, retrieval) | ported | [`src/memory.ts`](../src/memory.ts) + `skills/cp-memory` | `tests/memory.test.ts` |
-| Curation as a human-run pass ("a curation pass promotes ones that generalize") | mechanised | the pass is the parent's own ([`src/curation.ts`](../src/curation.ts)): promotion is bounded (3/day, 60-line ceiling), never pinned, evidence-required, append-only and journalled to `data/curation.jsonl` before the file changes; a superseded/disproven candidate is permanently unpromotable; retirement is a reason+evidence move to the archive | `tests/curation.test.ts` (one test per property) |
+| Memory (three files, budgets, tiers, decay, capture/curation, retrieval) | ported | [`src/memory.ts`](../src/memory.ts) + `skills/cp-memory` | `tests/e2e/memory.test.ts` (P23-memory-start, P23-memory-capture) |
+| Curation as a human-run pass ("a curation pass promotes ones that generalize") | mechanised | the pass is the parent's own ([`src/curation.ts`](../src/curation.ts)): promotion is bounded (3/day, 60-line ceiling), never pinned, evidence-required, append-only and journalled to `data/curation.jsonl` before the file changes; a superseded/disproven candidate is permanently unpromotable; retirement is a reason+evidence move to the archive | `tests/e2e/memory.test.ts` (P23-curation-promote, P23-curation-reject, P23-curation-retire) |
 | State files: never commit `data/ state/ projects/` | mechanised | `NEVER_COMMIT_PATHS` + guard blocks `git add/commit/push` and bulk staging in the home | `tests/guards.test.ts` |
 | Slack tokens in `state/slack/tokens.env` (mode 600) | out of scope | no Slack; brief secret-scanning covers the general hazard | `tests/e2e/worker-lifecycle-p8e.test.ts` (P8e brief guard, `assertBriefIsSafe`) |
 
