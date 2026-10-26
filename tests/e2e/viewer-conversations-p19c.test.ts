@@ -614,7 +614,7 @@ test("P19-transcript-scroll: the transcript stays pinned to the bottom unless sc
 	assert.equal(await until(() => scroller().scrollTop, (top) => top === 600, "the open at the newest"), 600, "opens at the newest entry");
 	assert.equal(pill(), null);
 	await grow(1100);
-	assert.equal(scroller().scrollTop, 700, "late layout keeps a pinned transcript at the bottom");
+	assert.equal(await until(() => scroller().scrollTop, (top) => top === 700, "the re-pin after late layout"), 700, "late layout keeps a pinned transcript at the bottom");
 	scroller().scrollTop = 200;
 	scroller().dispatchEvent(new tab.window.Event("scroll"));
 	assert.equal((await tab.find(".session-new")).textContent, "Jump to latest", "scrolled up: the pill offers the way back");
@@ -625,10 +625,11 @@ test("P19-transcript-scroll: the transcript stays pinned to the bottom unless sc
 	metrics.scrollHeight = 1200;
 	tab.click(pill()!);
 	await settle();
-	assert.equal(scroller().scrollTop, 800, "the pill jumps to the latest");
+	assert.equal(await until(() => scroller().scrollTop, (top) => top === 800, "the pill's jump"), 800, "the pill jumps to the latest");
 	assert.equal(pill(), null, "and goes away");
 	await more("a4", 1400);
-	assert.equal(scroller().scrollTop, 1000, "pinned again: the next entry scrolls into view");
+	const repinned = () => [tab.$$(".session-bubble").some((b) => b.textContent?.includes("a4")), scroller().scrollTop] as const;
+	assert.deepEqual(await until(repinned, ([shown, top]) => shown && top === 1000, "a4 rendered and the re-pin"), [true, 1000], "pinned again: the next entry scrolls into view");
 
 	const [long, short] = tab.$$(".session-bridge");
 	tab.click(long!.querySelector(".session-notice-line")!);
