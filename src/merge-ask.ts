@@ -644,7 +644,8 @@ export function createMergeAskProbe(deps: MergeAskProbeDeps): MergeAskProbe {
 export type CommandRunner = (
 	command: string,
 	args: readonly string[],
-	options: { cwd: string; timeoutMs: number },
+	/** `firstByte` fires once, on the child's first stdout byte (src/actions-ci.ts reports spawn-to-first-byte). */
+	options: { cwd: string; timeoutMs: number; firstByte?: () => void },
 ) => Promise<string>;
 
 export const runCommand: CommandRunner = (command, args, options) =>
@@ -665,6 +666,7 @@ export const runCommand: CommandRunner = (command, args, options) =>
 				resolve(stdout.toString());
 			},
 		);
+		if (options.firstByte) child.stdout?.once("data", options.firstByte);
 		// A child that ignores the SIGTERM sent at its timeout is SIGKILLed one grace later.
 		const hardKill = options.timeoutMs > 0 ? setTimeout(() => child.kill("SIGKILL"), options.timeoutMs + ACTIONS_OVERRUN_GRACE_MS) : undefined;
 	});
