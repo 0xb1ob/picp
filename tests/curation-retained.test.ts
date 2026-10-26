@@ -4,12 +4,12 @@
  */
 
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../src/contracts.ts";
-import { promoteCandidate, readCurationLog, traceLearning } from "../src/curation.ts";
+import { readCurationLog, traceLearning } from "../src/curation.ts";
 import { captureCandidate, ensureMemoryScaffold, memoryStatus } from "../src/memory.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
@@ -30,34 +30,22 @@ function capture(home: string, lesson: string, at: Date = AT): string {
 	return captureCandidate(home, lesson, at).line;
 }
 
-const EVIDENCE = "cp-t26; PR #39; src/memory.ts";
 
 test("journal-before-file survives a failed learnings write: the record exists, the file is untouched (cp-nqj)", (t) => {
-	// Invariant 6, exercised rather than asserted: the journal record is on disk
-	// (and fsynced) before the learnings write begins, so a failure at the second
-	// write leaves a traceable record for a line that does not exist — visible and
-	// conservative — rather than a line nobody can trace back to a decision.
-	if (process.getuid?.() === 0) return; // root ignores the mode bit this test needs
+	// Invariant 6: the journal record is fsynced before the learnings write, so a failed second write leaves a
+	// traceable record of a line that does not exist. The fault is RLIMIT_FSIZE on a real writer process, which binds
+	// root too (chmod does not): a learnings.md already past the limit refuses the append; the small journal fits.
 	const home = createScratchHome();
-	t.after(() => {
-		chmodSync(learningsPath(home.path), 0o644);
-		home.cleanup();
-	});
+	t.after(() => home.cleanup());
 	seedLearnings(home.path, ["- 2026-08-01 an entry that must survive; evidence: a. <!--P-->"]);
+	writeFileSync(learningsPath(home.path), `${readFileSync(learningsPath(home.path), "utf8")}${"\n".repeat(1100)}`);
 	const candidate = capture(home.path, "a lesson whose file write will fail");
 	const before = readFileSync(learningsPath(home.path), "utf8");
 
-	chmodSync(learningsPath(home.path), 0o444);
-	assert.throws(
-		() =>
-			promoteCandidate(home.path, {
-				candidate,
-				lesson: "a lesson whose file write will fail; act anyway",
-				evidence: EVIDENCE,
-				at: AT,
-			}),
-		/EACCES|EPERM/,
-	);
+	const fixture = join(REPO_ROOT, "tests/fixtures/memory-writer.mjs");
+	const writer = spawnSync("bash", ["-c", 'ulimit -f 1 && exec "$0" "$@"', process.execPath, fixture, home.path, JSON.stringify([candidate]), "2026-08-27"], { encoding: "utf8" });
+	assert.notEqual(writer.status, 0, writer.stdout);
+	assert.match(writer.stderr, /short append|EFBIG/);
 
 	const log = readCurationLog(home.path);
 	assert.equal(log.length, 1, "the journal record was written first, and it stays");
