@@ -14,7 +14,6 @@ import { whichAll } from "../../src/doctor.ts";
 import { gatewayKeyFile, readGatewayKey } from "../../src/gateway-key.ts";
 import { loadCapacityConfig } from "../../src/quota.ts";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
-import { RETIRED_INSTALL_FLAGS } from "../../src/service/install.ts";
 import { OPERATOR_RESUME_UNIT, OPERATOR_UNIT, renderUnits } from "../../src/service/units.ts";
 import { PI_LENS_TOOLS } from "../../src/tool-manifest.ts";
 import { ROLE_PACKAGES } from "../../src/worker-packages.ts";
