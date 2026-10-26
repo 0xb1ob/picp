@@ -210,7 +210,6 @@
 	"tests/schedule-authority.test.ts": 243,
 	"tests/schedule-migrations.test.ts": 244,
 	"tests/schedule-native-migration.test.ts": 488,
-	"tests/schedule-native.test.ts": 115,
 	"tests/schedule-policy.test.ts": 8,
 	"tests/schedule-runs.test.ts": 296,
 	"tests/schedule-self-review.test.ts": 529,

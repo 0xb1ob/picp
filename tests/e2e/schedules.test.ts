@@ -1108,3 +1108,58 @@ test("P13c result cards: an unwritable Answers journal keeps the card queued wit
 	assert.deepEqual([cards().length, cards()[0]!.source.source_key, cards()[0]!.job_id], [1, `${run.id}:closed`, anchor]);
 	assert.match(cards()[0]!.answer, /^No merges yesterday\./);
 });
+
+test("P13c native policy and run options: add saves a report-only revision 1 or nothing, run_now freezes valid overrides into the run and its worker, invalid ones start nothing", { timeout: 240_000 }, async (t) => {
+	const h = await schedulesHome(t, { files: { "scripts/tidy.sh": "echo tidied\n" } });
+	const worker = h.model("worker", [{ kind: "text", text: "P13c worker received." }]);
+	const policies = join(h.stateDir, "schedule-policies.json");
+	const add = (callId: string, name: string, extra: Record<string, unknown> = {}) => schedule(callId, {
+		action: "add", name, project: "demo", manual: true, title: `${name} report`, kind: "research", delivery: "answer", operator_quote: `Add the ${name} schedule.`, ...extra,
+	});
+	const names = ["nightly", "pipe", "scripted", "broken"];
+	const parent = await h.parent(`P13c: ${names.map((name) => `Add the ${name} schedule.`).join(" ")}`, [
+		{ kind: "tool_calls", calls: [
+			add("nightly", "nightly", { limits: { parallelism: 2 }, description: "Summarize the day." }),
+			add("dup", "nightly"),
+			add("pipe", "pipe", { delivery: "pipeline", limits: { child_jobs: 1 } }),
+			add("scripted", "scripted", { kind: "ship", delivery: "local", script_path: "scripts/tidy.sh" }),
+		] },
+		// A directory where the policy journal belongs: the add is refused and leaves no schedule behind.
+		{ kind: "tool_calls", calls: [{ ...add("broken", "broken"), args: () => { renameSync(policies, `${policies}.stash`); mkdirSync(policies); return add("broken", "broken").args as Record<string, unknown>; } }] },
+		{ kind: "tool_calls", calls: [
+			{ ...add("fixed", "broken"), args: () => { rmSync(policies, { recursive: true }); renameSync(`${policies}.stash`, policies); return add("fixed", "broken").args as Record<string, unknown>; } },
+			schedule("huge", () => ({ action: "run_now", id: h.idOf("nightly"), overrides: { parallelism: 99 } })),
+			schedule("script-model", () => ({ action: "run_now", id: h.idOf("scripted"), overrides: { model: worker } })),
+		] },
+		{ kind: "tool_calls", calls: [schedule("run", () => ({ action: "run_now", id: h.idOf("nightly"), overrides: { model: worker, thinking: "off", parallelism: 1 } }))] },
+	]);
+	const results = ends(parent);
+	checkCall(results, "nightly", "ok", /native policy revision 1 saved and active/);
+	checkCall(results, "dup", "refused", /project demo already has a schedule named "nightly"/);
+	checkCall(results, "pipe", "refused", /\/limits\/child_jobs: a pipeline admits its anchor and its ship \(at least 2\)/);
+	checkCall(results, "broken", "refused", /schedule-policies\.json is not valid JSON \(EISDIR/);
+	checkCall(results, "fixed", "ok", /added sch-[0-9a-f]{6} broken/);
+	checkCall(results, "huge", "refused", /overrides\.parallelism: must be <= 32/);
+	checkCall(results, "script-model", "ok", /run now not recorded: a script_path recipe runs no model: model and thinking overrides are refused/);
+	checkCall(results, "run", "ok", /fired: created cp-\S+ under run .*\(native policy rev 1; model mock\/script-p13-worker-0, thinking off, parallelism 1\)/);
+	const id = h.idOf("nightly");
+	const policy = h.runs().activePolicy(id) as NativeSchedulePolicy;
+	assert.deepEqual([policy.revision, policy.mode, policy.kinds, policy.limits.parallelism], [1, "report-only", ["research"], 2], "overrides never edit the saved policy");
+	assert.equal("approval" in policy || "ask_on" in policy || "allowed_actions" in policy, false);
+	assert.deepEqual(h.runs().runs().map((run) => run.schedule_id), [id], "refused run_now calls start no run");
+	const run = h.runs().openRun(id)!;
+	const frozen = { model: worker, thinking: "off", parallelism: 1 };
+	assert.deepEqual(run.execution, { requested: frozen, effective: frozen });
+	const record = await waitFor(() => existsSync(join(h.stateDir, "fleet.json")) ? readFleet(h.home).jobs.find((job) => job.job_id === run.anchor_job_id) : undefined, Boolean, { timeoutMs: 60_000, what: "the run's worker" });
+	assert.deepEqual([record?.worker?.model, record?.routing?.thinking], [worker, "off"], "the frozen run execution reaches dispatch");
+	assert.deepEqual(h.grants(), []);
+	// The dashboard's POST validates run options before journaling anything.
+	const v = await viewer(t, h.home, h.stateDir);
+	const token = String((await v("/api/schedules/control")).body.token);
+	const refusals = { "overrides are only for run_now": { op: "enable", overrides: { parallelism: 2 } }, "/model: must be provider/model": { op: "run_now", overrides: { model: "no-provider" } }, "/thinking: must be one of off, minimal, low, medium, high, xhigh, max": { op: "run_now", overrides: { thinking: "huge" } } };
+	for (const [error, body] of Object.entries(refusals)) {
+		const posted = await v("/api/schedules/request", { token, body: { schedule_id: id, ...body } });
+		assert.deepEqual([posted.status, String(posted.body.error).endsWith(error)], [400, true], JSON.stringify(posted.body));
+	}
+	assert.equal(existsSync(scheduleControlFile(h.stateDir)), false, "nothing journaled");
+});
