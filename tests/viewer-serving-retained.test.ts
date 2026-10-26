@@ -41,7 +41,7 @@ test("the compilation deadline cancels and disposes without publishing a partial
 
 class Events extends EventTarget implements Stream { closed = false; close() { this.closed = true; } }
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
-// `createResource`: stale, stalled, failed and disposed states need a forged reply or a frozen clock no screen GET gives.
+// `createResource`: stale, stalled, failed and disposed states need a forged reply or a frozen clock.
 test("refreshes coalesce, failed GETs preserve stale data, hidden requests cannot publish", async t => {
  t.mock.timers.enable({apis:["setTimeout"]});
  const streams: Events[] = []; const pending: {resolve(v: Response): void; signal: AbortSignal}[] = [];
