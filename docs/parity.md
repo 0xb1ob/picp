@@ -31,7 +31,7 @@ Zero capabilities are unaccounted for: every row below is one of the five.
 | `cmdp check --project <worktree> --base` | ported | `cp_check` tool → [`src/preflight.ts`](../src/preflight.ts) | `tests/e2e/preflight-s31.test.ts`, `tests/contract.test.ts` (tool is exposed) |
 | `cmdp lease --project NAME` | deleted (deliberate) | leasing is a step *inside* dispatch; a lease with no worker is an orphan waiting to happen. `LeaseManager` is still a module | `tests/e2e/dispatch-s31.test.ts` |
 | `cmdp jobs add\|set\|reported\|done\|list` | ported | `state/fleet.json` store (add/update), envelope intake (`reported`), teardown (`done`), `/status` (`list`) | `tests/fleet-retained.test.ts`, `tests/e2e/memory.test.ts` (P23-fleet-reconcile), `tests/e2e/intake-p9f.test.ts`, `tests/e2e/teardown-s17.test.ts`, `tests/status.test.ts` |
-| `cmdp artifact path\|add\|get` | ported | `cp_artifact` → [`src/artifacts.ts`](../src/artifacts.ts); `get` requires an out file (no inline bodies) | `tests/e2e/research-delivery.test.ts` (P11-artifact), `tests/guards.test.ts` |
+| `cmdp artifact path\|add\|get` | ported | `cp_artifact` → [`src/artifacts.ts`](../src/artifacts.ts); `get` requires an out file (no inline bodies) | `tests/e2e/research-delivery.test.ts` (P11-artifact), `tests/e2e/host-compatibility.test.ts` |
 | `cmdp gate [--model]` | ported | `cp_gate` → [`src/gate.ts`](../src/gate.ts); verdict is a schema, not a regex over prose | `tests/e2e/gate-review.test.ts`, `tests/e2e/phase3.test.ts` |
 | `cmdp teardown <job-id> [--research]` | ported (improved) | `cp_teardown`; the kind comes from the fleet record, so the flag cannot disagree with the job | `tests/e2e/teardown-s17.test.ts`, `tests/e2e/teardown-s18.test.ts` |
 | `cmdp status [--json] [--origin]` | ported | `/status` + widget → [`src/status.ts`](../src/status.ts) | `tests/status.test.ts` + goldens |
@@ -77,7 +77,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | Pipeline: two jobs, dep-linked, three roles | ported | `cp_pipeline start` | `tests/e2e/pipeline-run.test.ts` |
 | Gate verdicts + `cause` ladder (policy / operational / operational_persistent) | mechanised | `decideGate` + `nextAction`; one revise max in code | `tests/e2e/gate-review.test.ts` (every branch), `tests/e2e/phase3.test.ts` |
 | "HARD RULE: workers never mail the findings body" | mechanised | `validateEnvelope`: ≤3 lines, no fences, no headings; a body-shaped summary is rejected in-worker | `tests/e2e/worker-reporter-p8f.test.ts`, `tests/contracts.test.ts` |
-| "Parent never reads artifact bodies" | mechanised | `ContextGuard` blocks `read`/`grep`/`bash`/`edit`/`write`; the ledger holds no bodies | `tests/guards.test.ts`, `tests/e2e/phase3.test.ts` |
+| "Parent never reads artifact bodies" | mechanised | `ContextGuard` blocks `read`/`grep`/`bash`/`edit`/`write`; the ledger holds no bodies | `tests/e2e/host-compatibility.test.ts`, `tests/e2e/phase3.test.ts` |
 | Hung planner (artifact, no envelope) → gate from the path | ported | `advance()` gates it and reports `hung_planner` | `tests/e2e/pipeline-run.test.ts` |
 | "Never re-run research for an implementation failure" | mechanised | `mayRerunResearch` is asserted, not remembered | `tests/failures-retained.test.ts` |
 | Pre-dispatch path (lease-bind, branch=job-id, check, jobs add) | ported | `cp_dispatch`'s fixed order; probe **before** lease, no orphan branch | `tests/e2e/dispatch-s29.test.ts`, `tests/e2e/dispatch-cleanup-s29.test.ts`, `tests/e2e/dispatch-s30.test.ts` |
@@ -119,7 +119,7 @@ is a fact rather than a heuristic. This is the rebuild's reason for existing.
 | membership queries are never paged | mechanised | `ready`/`blocked`/`blockersOf` are computed over the whole document; there is no page to fall off | `tests/e2e/project-tracker.test.ts` (P15-jobs-lifecycle), `tests/status.test.ts` — **found by this audit**; the fail-open case was `cp-i2s` |
 | Memory (three files, budgets, tiers, decay, capture/curation, retrieval) | ported | [`src/memory.ts`](../src/memory.ts) + `skills/cp-memory` | `tests/e2e/memory.test.ts` (P23-memory-start, P23-memory-capture) |
 | Curation as a human-run pass ("a curation pass promotes ones that generalize") | mechanised | the pass is the parent's own ([`src/curation.ts`](../src/curation.ts)): promotion is bounded (3/day, 60-line ceiling), never pinned, evidence-required, append-only and journalled to `data/curation.jsonl` before the file changes; a superseded/disproven candidate is permanently unpromotable; retirement is a reason+evidence move to the archive | `tests/e2e/memory.test.ts` (P23-curation-promote, P23-curation-reject, P23-curation-retire) |
-| State files: never commit `data/ state/ projects/` | mechanised | `NEVER_COMMIT_PATHS` + guard blocks `git add/commit/push` and bulk staging in the home | `tests/guards.test.ts` |
+| State files: never commit `data/ state/ projects/` | mechanised | `NEVER_COMMIT_PATHS` + guard blocks `git add/commit/push` and bulk staging in the home | `tests/e2e/host-compatibility.test.ts` |
 | Slack tokens in `state/slack/tokens.env` (mode 600) | out of scope | no Slack; brief secret-scanning covers the general hazard | `tests/e2e/worker-lifecycle-p8e.test.ts` (P8e brief guard, `assertBriefIsSafe`) |
 
 ## 4. Reports (ported *knowledge*, not prose)
