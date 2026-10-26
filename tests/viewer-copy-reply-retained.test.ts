@@ -7,7 +7,7 @@ import { REPO_ROOT } from "./harness/index.ts";
 const result = await build({stdin:{contents:'import {h,render} from "preact"; import {act} from "preact/test-utils"; import {CopyReply} from "./viewer-app/components/CopyReply.tsx"; export {act}; export const mount=(root,reply)=>render(h(CopyReply,{reply}),root); export const unmount=root=>render(null,root);',resolveDir:REPO_ROOT,loader:"tsx"},bundle:true,platform:"node",format:"esm",write:false,jsx:"automatic",jsxImportSource:"preact"});
 const {act,mount,unmount} = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles![0]!.contents).toString("base64")}`);
 
-/** Retained (V2): CopyReply's unmount cleanup has no consumer-visible outcome, since an unmounted reply renders nothing. */
+/** Retained (V2): CopyReply's unmount cleanup has no consumer-visible outcome: an unmounted reply renders nothing. */
 test("CopyReply unmount cleanup: the feedback timer is cleared and a late clipboard promise schedules nothing", async t => {
  const {window,document} = parseHTML("<html><body><div id='root'></div></body></html>");
  const originals = ["window","document","navigator"].map(key => [key,Object.getOwnPropertyDescriptor(globalThis,key)] as const);

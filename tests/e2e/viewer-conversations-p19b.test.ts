@@ -19,7 +19,7 @@ const record = (stateDir: string, at: string, file: string) => write(operatorSes
 /** Lets the tab's queued renders (preact's microtask debounce) run. */
 const settle = () => new Promise<void>((done) => setImmediate(done));
 /**
- * Linkedom has no dialog or focus, and calls a bubbled listener with the target as `this`: the tab gets showModal/close,
+ * Linkedom has no dialog or focus and calls a bubbled listener with the target as `this`: the tab gets showModal/close,
  * a tracked activeElement and listeners bound to their own element; the app's code is unchanged. Restored after `t`.
  */
 function browserShims(t: Context, tab: Tab) {
@@ -166,7 +166,7 @@ const bash = (id: string) => [
 	say(AT, { role: "toolResult", toolCallId: id, toolName: "bash", content: [{ type: "text", text: "ok" }] }),
 ];
 
-/** A viewer whose recorded operator transcript is `lines`; cp-a (project picp) holds #355 and #356 as its PR receipts. */
+/** A viewer whose recorded operator transcript is `lines`; cp-a (project picp) holds PR receipts #355 and #356. */
 async function transcript(t: Context, lines: string[], seed?: (stateDir: string) => void) {
 	return viewer(t, { seed: (stateDir, home) => {
 		write(join(stateDir, "fleet.json"), { jobs: [{ job_id: "cp-a", project: "picp", phase: "held", receipts: [{ kind: "pr", url: PR }, { kind: "pr", url: PR2 }] }] });
