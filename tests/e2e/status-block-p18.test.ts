@@ -116,6 +116,7 @@ test("P18-status-block: cp_status_block renders In progress, With the team, Bloc
 
 	assert.equal(empty?.text, ["In progress: none", "", "Blocked: none", "", "Awaiting you: none", "", "Shipped: none"].join("\n"), "an empty home: four one-line sections");
 	assert.match(refusedOnly!.text, /^In progress: none$/m, "an empty fleet collapses In progress while Blocked is filled");
+	assert.match(refusedOnly!.text, /^Blocked:[^\n]*\n[^]*cp-dep — cp-dep {2}\(waiting on: a dependency\)/m, "while Blocked lists cp-dep");
 	assert.match(refusedOnly!.text, /^Awaiting you: none$/m, "the refused row prints under an empty table");
 	assert.doesNotMatch(refusedOnly!.text, /answer with cp_decide/, "a refused row is not answerable");
 	assert.match(refusedOnly!.text, /cp-x — \[authorization\] Ship the sweep\?.*\n.*refused: authorization items are derived from state\/checkpoints/);
