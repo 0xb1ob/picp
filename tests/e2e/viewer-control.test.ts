@@ -995,7 +995,8 @@ else process.exit(reply.status ?? 0);
 
 /**
  * A user whose PATH holds only node, dirname and the named fake launchers, and whose `~/.local/bin/cp-operator`
- * (a space, a quote and `$(false)` in its path) is installed unless `wrapper` is false; `env` is what the viewer runs with.
+ * (a space, a quote and `$(false)` in its path) is installed unless `wrapper` is false; `env` is what the viewer
+ * runs with.
  */
 function toolbox(t: TestContext, tools: readonly string[], { wrapper = true, role = "viewer" as string | null } = {}) {
 	const user = mkdtempSync(join(tmpdir(), "cp herdr'$(false)-"));
@@ -1179,7 +1180,7 @@ test("P17-composer: the operator transcript pins open asks above the composer be
 	const d = await dashboard(t);
 	const asks = new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl"));
 	const first = asks.open(choice("Keep paused?", ["Keep", "Raise"]));
-	asks.open(choice("Merge now?", ["Yes", "No"]));
+	const merge = asks.open(choice("Merge now?", ["Yes", "No"]));
 	const gone = asks.open(choice("Old?", ["Drop"]));
 	asks.withdraw(gone.id, "No longer needed");
 	// The transcript's cp_parent ask calls place the first ask's card and the withdrawn one inline, as history.
@@ -1194,6 +1195,7 @@ test("P17-composer: the operator transcript pins open asks above the composer be
 	assert.ok(html.indexOf("session-pinned") < html.indexOf("operator-composer"), "the pinned block sits directly above the composer");
 	assert.deepEqual(tab.$$(".session-ask-pointer, .session-ask-settled").map((p) => p.textContent), ["open, answer below", "Withdrawn: No longer needed", "open, answer below"], "inline cards are history");
 	assert.equal(tab.$$(".session-pinned button.decision-card-option").length, 4, "one button per option, per card");
+	assert.deepEqual([tab.$(".session-pinned .decision-card-recommended .overview-rec-badge")?.textContent, tab.$(".session-pinned a.glossary-link")?.getAttribute("href")], ["recommended", "https://github.com/0xb1ob/picp#words-you-will-see"]);
 	assert.equal(tab.storage.get("cp-sessions-pinned-open"), undefined, "nothing remembered before the operator chooses");
 	tab.click(toggle);
 	await bar(tab, (b) => b.getAttribute("aria-expanded") === "true");
@@ -1205,6 +1207,11 @@ test("P17-composer: the operator transcript pins open asks above the composer be
 	tab.refresh();
 	assert.equal((await bar(tab, (b) => b.textContent === "1 decision waiting ▾")).getAttribute("aria-expanded"), "false", "an ask leaving never opens it");
 	assert.match((await tab.find(".session-ask-settled", (p) => /^Answered/.test(p.textContent ?? ""))).textContent ?? "", /^Answered: Keep · /);
+	const replies = await tab.find(".session-entries > .session-replies");
+	assert.deepEqual([replies.querySelector(".session-replies-to")?.textContent, ...[...replies.querySelectorAll("button.session-reply")].map((b) => b.textContent)], [`Options from ${merge.id}: Merge now?`, "Yes", "No"], "the one carded open ask's quick replies");
+	const sheet = (await tab.find("details.session-bar-more .session-bar-file")).closest(".session-bar-sheet")!;
+	assert.deepEqual([sheet.parentElement?.querySelector("summary")?.getAttribute("aria-label"), sheet.querySelector('.session-bar-views a[aria-current="page"]')?.textContent, [...sheet.querySelectorAll("button")].some((b) => b.textContent === "Search"), sheet.querySelector(".session-bar-state .session-dot")?.getAttribute("class")], ["More", "Operator ↔ you", true, "session-dot session-dot-idle"], "the ⋯ sheet");
+	assert.match(sheet.querySelector(".session-bar-file")?.textContent ?? "", /^Delivers to \S+\.jsonl$/);
 	asks.open(choice("Tag it?", ["Yes"]));
 	tab.refresh();
 	const opened = await bar(tab, (b) => b.textContent === "2 decisions waiting ▾" && b.getAttribute("aria-expanded") === "true");
@@ -1223,6 +1230,12 @@ test("P17-composer: the operator transcript pins open asks above the composer be
 	assert.ok(warn.mock.calls.some((c) => c.arguments[0] === "decisions bar not persisted: QuotaExceededError"), "the refused write warns");
 	strict.close();
 	warn.mock.restore();
+	const held = await d.open(OPERATOR, /^\/api\/operator\/message$/);
+	held.click(await held.find(".session-pinned button.decision-card-option", (b) => !b.hasAttribute("disabled")));
+	assert.equal((await held.find(".decision-card-delivery")).textContent, "Sending — the card closes when the session records the answer");
+	held.release();
+	await until(() => posts(held, MESSAGE), (rows) => rows.length === 1, "the held answer");
+	held.close();
 
 	const field = await tab.find("textarea");
 	assert.deepEqual([field.getAttribute("aria-label"), field.getAttribute("placeholder")], ["Message to the operator session", "Message Operator…"]);
@@ -1241,6 +1254,7 @@ test("P17-composer: the operator transcript pins open asks above the composer be
 	tab = await tab.reopen();
 	await tab.find(".operator-composer-send", (b) => b.getAttribute("aria-label") === "Send after this turn");
 	await tab.waitText(/Session busy — send after this turn, steer, or abort/);
+	assert.equal(tab.$("header.session-bar .session-bar-state .session-dot")?.getAttribute("class"), "session-dot session-dot-working", "busy: the bar's dot");
 	assert.deepEqual(tab.$$(".operator-composer-menu button").map((b) => b.textContent), ["Steer now", "Abort turn"]);
 	tab.type(tab.$("textarea")!, "steer this way");
 	tab.click(await tab.find(".operator-composer-menu button", (b) => b.textContent === "Steer now" && !b.hasAttribute("disabled")));
@@ -1495,7 +1509,7 @@ test("P17-device-notices: a pairing raises a notice above every screen with name
 	assert.match(notice.textContent ?? "", new RegExp(`New device paired: ${XSS.replace(/[()]/g, "\\$&")} · Full control · `));
 	assert.equal(notice.querySelectorAll("img").length, 0, "names are text");
 	assert.ok(notice.querySelector("time[datetime]"));
-	assert.match(notice.textContent ?? "", /push: /);
+	assert.match(notice.textContent ?? "", /push: 1 pending/);
 	assert.equal(notice.querySelector('a[href="#settings"]')?.textContent, "Devices");
 	tab = await tab.reopen("#board");
 	tab.click(await tab.find(".device-notices button", (b) => b.textContent === "Dismiss"));

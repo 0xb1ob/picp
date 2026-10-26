@@ -223,5 +223,5 @@ test("P17-operator-web: an installed pi-web-access rides as -e; missing, withhel
 	writeFileSync(join(broken.agent, "settings.json"), "{ broken");
 	const failed = await web(broken);
 	assert.deepEqual(failed.extensions, []);
-	assert.match(failed.status, /\S/, "an unresolvable package set still says why");
+	assert.match(failed.status, /^web search: unavailable \((?!pi-web-access is not installed\)).+\); CP_OPERATOR_WEB=0 silences this$/, "an unresolvable package set says why");
 });
