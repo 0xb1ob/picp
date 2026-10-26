@@ -161,7 +161,7 @@ test("P14e-update-forward: ff to origin/main, npm ci only on a lockfile change, 
 	assert.equal(state?.last_result, "updated", last(b));
 	assert.deepEqual([b.repo.head(), b.repo.head("origin/main")], [to, to]);
 	assert.deepEqual({ from: state?.from, to: state?.to, phase: state?.phase, lock: state?.lock }, { from, to, phase: "idle", lock: false });
-	assert.deepEqual(b.calls(), ["host drain [600]", "host stop [{}]", "daemon hold", "daemon reload"], "no npm ci, no watchdog");
+	assert.deepEqual(b.calls(), ["host drain [600]", "host stop [{}]", "daemon hold", "daemon reload"], "no npm ci");
 	assert.deepEqual(b.causes(), [{ reason: "auto-update", target_sha: to }]);
 	b.reset();
 	advanceBase(b.repo, "package-lock.json", "{\"v\":2}\n");
@@ -249,7 +249,7 @@ test("P14e-update-config: off, absent and invalid config, the interval, a legacy
 	await b.run(0, { dry: true, env: { CP_DAEMON_JOB: "" } });
 	assert.match(last(b), /dry-run: would drain, then update/);
 	assert.deepEqual([b.repo.head(), b.calls()], [head, []]);
-	// fetch_failed counts runs in a row; the watchdog runs at the third; a good fetch resets the count.
+	// fetch_failed counts runs in a row; a good fetch resets the count.
 	b.repo.git("remote", "set-url", "origin", join(b.repo.path, "missing.git"));
 	const failures = [];
 	for (let i = 0; i < 3; i++) {
