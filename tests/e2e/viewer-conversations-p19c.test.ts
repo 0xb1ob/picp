@@ -1,7 +1,7 @@
 /**
- * Behavior 19 (P19c): the Sessions transcript's threads, the operator composer and the workbench, as `bin/cp-view`
- * serves them on a scratch home: real HTTP and the served app in its linkedom tab (DOM, text and served CSS only,
- * no layout or pixels).
+ * Behavior 19 (P19c): the Sessions transcript's threads, tool calls and notices, and the operator composer, as
+ * `bin/cp-view` serves them on a scratch home: real HTTP and the served app in its linkedom tab (DOM, text and
+ * served CSS only, no layout or pixels).
  */
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
