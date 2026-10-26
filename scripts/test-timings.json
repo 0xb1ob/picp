@@ -266,7 +266,6 @@
 	"tests/viewer-explorer.test.ts": 450,
 	"tests/viewer-job-detail-render.test.ts": 94,
 	"tests/viewer-job-report.test.ts": 576,
-	"tests/viewer-job-transcript-render.test.ts": 27,
 	"tests/viewer-jobs-render.test.ts": 411,
 	"tests/viewer-json-delta.test.ts": 6,
 	"tests/viewer-linkify.test.ts": 163,
