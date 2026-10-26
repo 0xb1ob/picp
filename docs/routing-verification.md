@@ -66,7 +66,7 @@ headless suite is not evidence about what a terminal renders — this repo has t
 incident on record (cur-20260901-5, PR #35) where the suite passed and the UI
 failed differently.
 
-What *is* covered headlessly, and is all that is claimed: `tests/doctor.test.ts`
+What *is* covered headlessly, and is all that is claimed: `tests/e2e/doctor-p14c.test.ts` (P14-doctor-models)
 over the routing findings (shadowed rows, effort drift, allowlist and
 availability refusals) and `tests/e2e/dispatch-preview-s28.test.ts` over the
 `cp_dispatch dry_run` payload. The visual pass stays open work for an operator at

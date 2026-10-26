@@ -8,7 +8,7 @@
  * core here takes `which`/`run`/`env` as options so `scripts/install-tools.ts`
  * wires the real world exactly once, at the edge, and the tests prove the
  * policy without touching a real machine — same shape as
- * `tests/doctor.test.ts` proving doctor's checks with an injected `run`.
+ * `tests/doctor-retained.test.ts` proving doctor's checks with an injected `run`.
  *
  * Rules this holds itself to:
  *
