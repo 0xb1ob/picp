@@ -1,6 +1,6 @@
 /**
  * Behavior 18 (P18): the dashboard's Jobs, Board and Job detail data through `bin/cp-view` on a scratch home, over real
- * HTTP. Rendered-UI scenarios wait for #555's tests/harness/dashboard.ts rather than a second linkedom harness.
+ * HTTP; rendered-UI scenarios open the served app through tests/harness/dashboard.ts.
  */
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
@@ -616,4 +616,57 @@ test("P18-jobs-ui: the served Jobs, Job detail, Board and Overview tabs show not
 	assert.match(team, /\(forwarded\)/);
 	assert.doesNotMatch(team.slice(0, team.indexOf("Landed today")), /no CI yet/);
 	assert.match(text, /head moved: review and CI again/, "a pending parked job is In flight on its moved head");
+});
+
+test("P18-not-found: a missing job or worker is a 404 page with a way back; only observed live workers are offered", { timeout: 120_000 }, async (t) => {
+	const scratch = createScratchHome();
+	t.after(() => scratch.cleanup());
+	const s = seed(scratch.path);
+	const ids = ["working", "launching", "idle", "script"];
+	s.ledger(ids.map((id) => ({ id: `cp-${id}`, title: `A long fixture title ${id} `.repeat(8), status: "open", labels: ["project:demo", "kind:ship"] })));
+	s.fleet(ids.map((id) => ({ job_id: `cp-${id}`, project: "demo", kind: "ship", phase: "waiting", dispatched_at: iso(10), ...(id === "script" ? { executor: "script", script_path: "script.ts" } : {}) })));
+	for (const [id, phase] of [["working", "working"], ["launching", "starting"], ["idle", "idle"], ["script", "working"]]) s.put(s.run(`cp-${id}`, "status.json"), { job_id: `cp-${id}`, phase, started_at: iso(10) });
+	const view = await startViewer(t, { home: scratch.path, requireTailnet: false, at: new Date(NOON).toISOString() });
+
+	const job = await view.open("#job/cp-x");
+	await job.find(".not-found");
+	assert.equal(job.$("h1")?.textContent, "No job cp-x");
+	assert.equal(job.$(".not-found-back")?.getAttribute("href"), "#jobs");
+	assert.match(job.text(), /Back to Jobs/);
+	assert.match(job.text(), /Search jobs/);
+	assert.ok(job.$(".not-found-illustration svg circle"), "a job 404 has the circle icon");
+	assert.equal(job.$(".not-found-workers"), null, "a job 404 offers no workers");
+	assert.equal(job.$('[role="alert"]'), null);
+
+	const worker = await view.open("#sessions?view=workers&id=cp-missing");
+	await worker.find(".not-found-workers a");
+	assert.equal(worker.$(".not-found-heading h1")?.textContent, "Sessions");
+	assert.equal(worker.$(".not-found-heading .page-header-back")?.textContent, "← Sessions");
+	assert.equal(worker.$(".not-found-heading .page-header-detail")?.textContent, "cp-missing");
+	assert.equal(worker.$(".not-found-back")?.getAttribute("href"), "#sessions");
+	assert.match(worker.text(), /No worker session cp-missing/);
+	assert.ok(worker.$('.not-found-illustration[aria-hidden="true"] svg path'));
+	const links = worker.$$(".not-found-workers a");
+	assert.deepEqual(links.map((a) => a.getAttribute("href")).sort(), ["#sessions?view=workers&id=cp-launching", "#sessions?view=workers&id=cp-working"],
+		"only working and launching workers, never idle, script or the missing id");
+	assert.ok(links.every((a) => a.textContent?.includes("demo") && a.querySelector("code")));
+	assert.doesNotMatch(worker.root.innerHTML, /role="alert"|style=|onclick=/i);
+
+	const refused = await view.open("#sessions?view=workers&id=cp-working&transcript=1");
+	await refused.waitText(/View unavailable/);
+	assert.equal(refused.$(".not-found"), null, "a 403 is never a not-found page");
+
+	const css = await view.get("/").then(async (page) => (await view.get(/href="(\/assets\/viewer\/[^"]+\.css)"/.exec(page.text)![1]!)).text.replace(/\s+/g, ""));
+	for (const rule of [/\.not-found-illustration\{[^}]*border-radius:50%/, /\.not-found-actionsa,\.not-found-actionsbutton\{[^}]*min-height:44px/,
+		/@media\(min-width:900px\)\{[^@]*\.not-found-recovery\{[^}]*max-width:468px/, /@media\(min-width:900px\)\{[^@]*\.not-found-actions\{[^}]*flex-direction:row/,
+		/@media\(min-width:900px\)\{[^@]*\.not-found-heading\.page-header-back\{display:none/, /@media\(max-width:899px\)\{[^@]*\.not-found-heading\.page-header-detail\{display:block/,
+		/@media\(max-width:899px\)\{[^@]*\.page-header>h1\{[^}]*clip-path:inset\(50%\)/, /@media\(max-width:899px\)\{[^@]*\.page-header-back::?after\{content:"\/"/]) {
+		assert.match(css, rule, "the served stylesheet keeps phone targets and the wider desktop recovery");
+	}
+	assert.doesNotMatch(css, /@media\(max-width:899px\)\{[^@]*\.page-header>h1\{display:none/, "the phone title is clipped, never removed");
+
+	s.put(LAYOUT.fleetFile, "{");
+	const blind = await view.open("#sessions?view=workers&id=cp-missing");
+	await blind.find(".not-found");
+	assert.equal(blind.$(".not-found-workers"), null, "an unreadable fleet invents no recovery links");
 });
