@@ -1,6 +1,6 @@
 /**
  * cp-wfo4: cp-daemon's inner runtime with a fake clock and a fake process table. Retained (P14b): the kill port's
- * guards and failed spawns that signal nothing are unreachable from an e2e surface.
+ * guards and a failed oneshot spawn beside a live supervisor are unreachable from an e2e surface.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -106,20 +106,6 @@ test("the inner's production kill port: -1, 0, 1 and undefined never reach proce
 		throw new Error("kill ESRCH");
 	})(4243, "SIGTERM");
 	assert.equal(lines.at(-1), "kill SIGTERM 4243: kill ESRCH");
-});
-
-test("a failed spawn records no pid (never -1), and hold and stop then signal nothing", async () => {
-	const raw: Array<[number, string]> = [];
-	const h = harness({ failSpawn: ["parent", "viewer"], raw: (pid, signal) => void raw.push([pid, signal]) });
-	assert.equal(h.record().units.parent.pid, undefined);
-	assert.equal(h.record().units.viewer.pid, undefined);
-	assert.equal(JSON.stringify(h.record()).includes('"pid":-1'), false);
-	h.inner.handle("hold");
-	h.inner.stop();
-	h.advance(10_000);
-	assert.equal(await h.inner.done, 0);
-	assert.deepEqual(raw, []);
-	assert.deepEqual(h.kills, []);
 });
 
 test("a failed oneshot spawn records no pid; a supervisor that does start is still the only pid signalled", async () => {
