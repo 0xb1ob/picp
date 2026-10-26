@@ -10,13 +10,14 @@ import { request, type IncomingHttpHeaders, type IncomingMessage } from "node:ht
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { brotliDecompressSync, gunzipSync } from "node:zlib";
+import { brotliDecompressSync, gunzipSync, gzipSync } from "node:zlib";
 import { LAYOUT } from "../../src/contracts.ts";
 import { APP_CSP, APP_VIEWPORT, type ViewerApp } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
+import { applyDelta } from "../../src/viewer/json-delta.ts";
 import { createRemoteViewer } from "../../src/viewer/remote-server.ts";
 import { createViewer, pollingStreams, type ViewerOptions } from "../../src/viewer/server.ts";
-import { dashboard, openTab, type Tab, until } from "../harness/dashboard.ts";
+import { dashboard, openTab, startViewer, type Tab, until } from "../harness/dashboard.ts";
 import { createScratchHome, REPO_ROOT } from "../harness/index.ts";
 import { call, remoteRig } from "../harness/remote.ts";
 
@@ -318,4 +319,64 @@ test("P21-remote-asset: the remote listener serves a hashed asset with no-store,
 	withApp.port = (server.address() as AddressInfo).port;
 	const reply = await call(withApp.port, asset, { headers: { cookie: pair("Phone").cookie } });
 	assert.deepEqual([reply.status, reply.headers["cache-control"]], [200, "no-store"]);
+});
+
+test("P21-delta: screen GETs carry x-cp-version; a held base gets a small keyed delta, an unknown, other-URL or pre-restart base the full body", { timeout: 180_000 }, async (t) => {
+	const at = "2026-09-26T12:00:00Z";
+	const ids = Array.from({ length: 200 }, (_, i) => `cp-run-${i}`);
+	// Exited runs have a fixed elapsed time, so only the rewritten row differs between two GETs.
+	const status = (cost: number) => JSON.stringify({ phase: "idle", started_at: at, exited_at: at, usage: { cost_usd: cost, total_tokens: 100 } });
+	const line = (i: number) => JSON.stringify({ type: "message", timestamp: new Date(Date.parse(at) + i * 1000).toISOString(), message: i === 0 ? { role: "user", content: "The brief" } : { role: "assistant", content: [{ type: "text", text: `step ${i} ${"x".repeat(300)}` }] } });
+	const lines = Array.from({ length: 200 }, (_, i) => line(i));
+	const view = await dashboard(t, { seed: (_, home) => {
+		const put = (file: string, text: string) => { mkdirSync(dirname(join(home, file)), { recursive: true }); writeFileSync(join(home, file), text); };
+		put(".pi-command-post/jobs.json", JSON.stringify({ jobs: [...ids, "cp-live"].map((id) => ({ id, title: id, status: "in_progress", labels: ["project:demo", "kind:ship"] })) }));
+		put(LAYOUT.fleetFile, JSON.stringify({ jobs: [...ids.map((id) => ({ job_id: id, project: "demo", kind: "ship", phase: "held", dispatched_at: at })), { job_id: "cp-live", project: "demo", kind: "ship", phase: "working", dispatched_at: at }] }));
+		for (const id of ids) put(`${LAYOUT.runs}/${id}/status.json`, status(1));
+		put(join(LAYOUT.state, "sessions", "cp-live.jsonl"), `${lines.join("\n")}\n`);
+		put(join(LAYOUT.runs, "cp-live/status.json"), JSON.stringify({ session_file: join(home, LAYOUT.state, "sessions", "cp-live.jsonl") }));
+	} });
+	const get = (path: string, base?: string) => view.get(path, base ? { headers: { "x-cp-delta-base": base } } : {});
+	// The cp-view clock keeps running, so a live job's elapsed time moves between two GETs.
+	const strip = (value: unknown) => JSON.parse(JSON.stringify(value, (key, v) => key === "generated_at" || key === "elapsed_seconds" ? undefined : v));
+	const first = await get("/api/jobs");
+	const v1 = String(first.headers["x-cp-version"]);
+	assert.match(v1, /^[0-9a-f]+-\d+$/, "a full screen GET is versioned");
+	assert.equal(first.headers["x-cp-delta-base"], undefined, "a GET with no base gets the full body");
+	writeFileSync(join(view.home, LAYOUT.runs, "cp-run-7", "status.json"), status(42));
+	const delta = await get("/api/jobs", v1);
+	assert.deepEqual([delta.status, delta.headers["x-cp-delta-base"]], [200, v1], "a held base gets a delta keyed to it");
+	assert.notEqual(delta.headers["x-cp-version"], v1, "the delta names a new version");
+	assert.ok(delta.text.length < 5000, `one changed row is a small delta, got ${delta.text.length} vs full ${first.text.length}`);
+	const fresh = (await get("/api/jobs")).body;
+	assert.deepEqual(strip(applyDelta(first.body, delta.body as never)), strip(fresh), "the delta applies onto the base");
+	const bogus = await get("/api/jobs", "bogus-1");
+	assert.equal(bogus.headers["x-cp-delta-base"], undefined, "an unknown base gets the full body");
+	assert.deepEqual(strip(bogus.body), strip(fresh));
+	assert.equal((await get("/api/board", v1)).headers["x-cp-delta-base"], undefined, "a base is per URL");
+	const missing = await get("/api/job/nope");
+	assert.deepEqual([missing.status, missing.headers["x-cp-version"]], [404, undefined], "a 404 is never versioned");
+
+	const transcript = "/api/job/cp-live/transcript";
+	const was = await get(transcript);
+	assert.ok(was.headers["x-cp-version"], "the transcript is versioned");
+	writeFileSync(join(view.home, LAYOUT.state, "sessions", "cp-live.jsonl"), `${[...lines, line(200)].join("\n")}\n`);
+	const step = await get(transcript, String(was.headers["x-cp-version"]));
+	assert.equal(step.headers["x-cp-delta-base"], was.headers["x-cp-version"], "a held transcript base gets a delta");
+	// A new entry changes membership, so the delta carries the id list too; it gzips well under 1 KiB.
+	assert.ok(gzipSync(step.text).length < 1024, `one new entry is a small delta, got ${step.text.length} vs full ${was.text.length}`);
+	assert.equal(JSON.stringify(applyDelta(was.body, step.body as never)), (await get(transcript)).text, "the transcript delta applies exactly");
+	assert.equal((await get("/api/job/cp-missing/transcript")).headers["x-cp-version"], undefined, "a 404 transcript is never versioned");
+	const lean = await get("/api/operator/control?sends=0");
+	assert.ok(lean.headers["x-cp-version"], "the control status is versioned");
+	const again = await get("/api/operator/control?sends=0", String(lean.headers["x-cp-version"]));
+	assert.equal(again.headers["x-cp-delta-base"], lean.headers["x-cp-version"], "a held control base gets a delta");
+	const control = (await get("/api/operator/control?sends=0")).body;
+	assert.deepEqual({ ...(applyDelta(lean.body, again.body as never) as Record<string, unknown>), generated_at: null }, { ...control, generated_at: null });
+	assert.equal((await get("/api/operator/control", String(lean.headers["x-cp-version"]))).headers["x-cp-delta-base"], undefined, "the ?sends= query is part of the key");
+
+	const restarted = await startViewer(t, { home: view.home });
+	const after = await restarted.get("/api/jobs", { headers: { "x-cp-delta-base": v1 } });
+	assert.equal(after.headers["x-cp-delta-base"], undefined, "a pre-restart base never matches");
+	assert.deepEqual(strip(after.body), strip(fresh));
 });
