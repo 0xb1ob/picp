@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer as httpServer } from "node:http";
-import { createServer, type Server } from "node:net";
+import { connect, createServer, type Server } from "node:net";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -457,6 +457,25 @@ test("P12b-orphan: a recorded pid is signalled only while it shows the exact clo
 	assert.equal(alive(fresh?.pid as number), false);
 	await new Promise((done) => setTimeout(done, 6_000));
 	assert.equal(s.runs().length, 2, "nothing restarts a disabled tunnel");
+});
+
+test("P14-daemon-hold-tunnel: an update hold stops cloudflared with the viewer; no tick starts it while held; the release starts it again", async (t) => {
+	const s = await rig(t);
+	writeFileSync(tunnelConfigFile(s.paths.dataDir), JSON.stringify({ schema_version: 1, enabled: true, mode: "quick", port: s.remotePort, binary: `${s.fake}/cloudflared`, revision: 1 }));
+	assert.equal((await s.cli("cp-daemon", ["start"])).code, 0, s.log());
+	const first = await until(s.runtime, (r) => r?.state === "running", "the tunnel", 60_000);
+	/** The `op` frame on the control socket, as src/service/update.ts sends it; the reply. */
+	const op = (name: string) => new Promise<unknown>((done) => {
+		const token = (JSON.parse(readFileSync(s.paths.state, "utf8")) as { token: string }).token;
+		const socket = connect(s.paths.sock, () => socket.write(`${JSON.stringify({ id: name, token, protocol: 1, op: name })}\n`));
+		socket.setEncoding("utf8").once("data", (line: string) => { socket.destroy(); done(JSON.parse(line)); });
+	});
+	assert.deepEqual(await op("hold"), { id: "hold", ok: true });
+	await until(() => alive(first?.pid as number), (up) => !up, "cloudflared stopped by the hold");
+	await new Promise((done) => setTimeout(done, 6_000)); // past one 5 s tick
+	assert.equal(s.runs().length, 1, "no tick starts it while held");
+	assert.deepEqual(await op("release"), { id: "release", ok: true });
+	await until(s.runs, (runs) => runs.length === 2, "the release starts it again");
 });
 
 test("P12b-backoff: early crashes back off 5 s then 11.34 s, a registered run resets it, a missing binary backs off; cp-daemon stop settles it", async (t) => {
