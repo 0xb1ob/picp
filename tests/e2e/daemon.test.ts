@@ -219,8 +219,9 @@ test("P14-daemon-bin: bin/cp-daemon in an installed home defaults CP_HOME to tha
 	const env = { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, HOME: scratch.path };
 	const run = (extra: Record<string, string> = {}) => spawnSync(join(home, "app/bin/cp-daemon"), ["status"], { env: { ...env, ...extra }, encoding: "utf8" });
 	assert.equal(run().stdout, "cp-daemon: no home: pass --home <home> or set CP_HOME\n", "no daemon.json beside the app: no home");
-	mkdirSync(join(home, "data"));
-	writeFileSync(join(home, "data/daemon.json"), JSON.stringify({ schema_version: 1, generated_by: "cp-install", backend: "detached", node: process.execPath, app: join(home, "app"), home, path: env.PATH, port: 1 }));
+	const paths = daemonPaths(home);
+	mkdirSync(paths.dataDir);
+	writeFileSync(paths.config, JSON.stringify({ schema_version: 1, generated_by: "cp-install", backend: "detached", node: process.execPath, app: join(home, "app"), home, path: env.PATH, port: 1 }));
 	const installed = run();
 	assert.equal(installed.status, 3);
 	assert.match(installed.stdout, new RegExp(`start --home "${home}"\\n$`), "the enclosing home");
