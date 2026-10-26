@@ -757,9 +757,8 @@ test("P13b schedule labels: cp_job adds a schedule: job only to a parent-expande
 	}
 });
 
-test("P13c same-process new_session: an unexpanded skill anchor offered by the first session is offered again by the next one", { timeout: 180_000 }, async (t) => {
-	// Known defect, pinned as observed (not fixed here): new_session builds a fresh runtime whose dedupe set is empty,
-	// so the same process offers one unexpanded anchor twice. A fix makes this scenario fail on the second wake.
+test("P13c same-process new_session: an unexpanded skill anchor is offered once per process, again by a new process", { timeout: 180_000 }, async (t) => {
+	// KD-P13c-new-session fixed: the dedupe set outlives new_session, so the next session does not re-offer the anchor.
 	const h = await schedulesHome(t, { cloneUrl: "https://github.com/acme/demo.git" });
 	const parent = await h.parent("P13c: Add the pr-review schedule.", [{ kind: "tool_calls", calls: [
 		schedule("add", { action: "add", name: "pr-review", project: "demo", manual: true, title: "PR review", kind: "research", delivery: "local",
@@ -772,13 +771,28 @@ test("P13c same-process new_session: an unexpanded skill anchor offered by the f
 	await parent.waitForSettled(30_000);
 	parent.send({ type: "new_session", id: "fresh" });
 	assert.equal((await parent.waitFor((r) => r.type === "response" && r.id === "fresh", 30_000)).success, true);
-	await waitFor(() => wakes(parent).length, (count) => count === 2, { timeoutMs: 20_000, what: "the new session's recovery wake" });
+	// The new session's catch-up tick runs right after start; a settle and a pause leave room for a second offer.
 	await parent.waitForSettled(30_000);
+	await new Promise((resolve) => setTimeout(resolve, 5_000));
 	const [anchor] = await h.ledger.list({ labels: [`schedule:${id}`], all: true });
 	const offered = wakes(parent).map((wake) => wake.message as { details?: { job_id?: string } });
-	assert.deepEqual(offered.map((message) => message.details?.job_id), [anchor!.id, anchor!.id], "one anchor, offered twice in one process");
-	assert.match(JSON.stringify(wakes(parent)[1]!.message), /use skill cp-pr-review to expand it now/);
-	assert.equal((await h.ledger.list({ labels: [`schedule:${id}`], all: true })).length, 1, "the duplicate offer creates no job");
+	assert.deepEqual(offered.map((message) => message.details?.job_id), [anchor!.id], "one anchor, offered once in one process");
+	assert.equal((await h.ledger.list({ labels: [`schedule:${id}`], all: true })).length, 1, "no duplicate job");
+	// A later fire of the same schedule has a new anchor id, so it is offered once: the key is the anchor, not the schedule.
+	const firstRun = h.runs().openRun(id)!;
+	await h.ledger.close(anchor!.id, "completed");
+	await waitFor(() => h.runs().run(firstRun.id)?.outcome, (outcome) => outcome === "completed", { timeoutMs: 30_000, what: "the first run closed" });
+	assert.equal((await dashboard(h.stateDir).ask("run_now", id))[0], "done");
+	await waitFor(() => wakes(parent).length, (count) => count === 2, { timeoutMs: 20_000, what: "the second fire's wake" });
+	await parent.waitForSettled(30_000);
+	await new Promise((resolve) => setTimeout(resolve, 5_000));
+	const anchors = (await h.ledger.list({ labels: [`schedule:${id}`], all: true })).map((entry) => entry.id);
+	assert.equal(anchors.length, 2);
+	assert.deepEqual(wakes(parent).map((wake) => (wake.message as { details?: { job_id?: string } }).details?.job_id), [anchor!.id, anchors.find((entry) => entry !== anchor!.id)], "the second anchor is offered exactly once");
+	await h.closeParents();
+	const restarted = await h.parent("P13c: new process.", []);
+	await waitFor(() => wakes(restarted).length, (count) => count === 1, { timeoutMs: 20_000, what: "the new process's recovery wake" });
+	assert.match(JSON.stringify(wakes(restarted)[0]!.message), /use skill cp-pr-review to expand it now/);
 });
 
 test("P13c cron and watch fires at parent start: a missed slot is caught up once, an open run holds the next, a watch fires on exit 0 or changed output, an untracked script and a deactivated schedule fire nothing", { timeout: 240_000 }, async (t) => {
