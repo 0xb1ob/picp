@@ -1080,9 +1080,10 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	assert.deepEqual(dry.changes, [{ key: "grants.job_cap", file_key: "job_cap", action: "set", old: 3, old_source: "file", new: 5 }]);
 	assert.deepEqual(listing(home), dryBefore);
 
-	// An audit journal that cannot take the intent is 503 and no owner byte changes.
-	writeFileSync(settingsAuditFile(home), "");
-	chmodSync(settingsAuditFile(home), 0o400);
+	// An audit journal that cannot take the intent is 503 and no owner byte changes. /dev/full reads as empty and fails
+	// every write with ENOSPC, even for root, so recovery passes and the intent append itself fails.
+	rmSync(settingsAuditFile(home), { force: true });
+	symlinkSync("/dev/full", settingsAuditFile(home));
 	const ownersBefore = listing(join(home, LAYOUT.data));
 	const unwritable = await b.apply({ mode: "set", changes: { "grants.job_cap": 5 } });
 	assert.equal(unwritable.status, 503, JSON.stringify(unwritable));
