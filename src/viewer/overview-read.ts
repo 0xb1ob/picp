@@ -3,9 +3,8 @@ import type { SourceAvailability } from "./api-types.ts";
 import type { JobStatus } from "../contracts.ts";
 import { obj, type Json } from "./sessions.ts";
 import { fileCache } from "./file-cache.ts";
-// Not imported from the contract on purpose: tests/viewer-boundary.test.ts allows only node:, ./ and ../home.ts runtime imports
-// in src/viewer (contracts/jobs.ts pulls in typebox + pi-ai), and fails with "imports ../contracts.ts" otherwise.
-// A type-only import is allowed, so the Record<JobStatus, true> keys fail typecheck if JOB_STATUSES gains or loses a status.
+// Not imported from the contract: viewer-boundary.test.ts allows only node:, ./ and ../home.ts runtime imports here.
+// The type-only JobStatus import keeps the Record<JobStatus, true> keys in step with JOB_STATUSES at typecheck.
 const STATUS_KEYS: Record<JobStatus, true> = {open: true, in_progress: true, deferred: true, closed: true};
 export const LEDGER_STATUSES: readonly string[] = Object.keys(STATUS_KEYS);
 export interface Source<T> { availability: SourceAvailability; value: T }
