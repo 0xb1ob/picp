@@ -166,7 +166,7 @@ const R1_ALLOWED = [
 	"tests/e2e/configuration.test.ts",
 	// P11c-quality-pipeline writes the legacy top-level data/quality.json that cp-u3i2 must ignore.
 	"tests/e2e/quality-panel.test.ts",
-	"tests/viewer.test.ts",
+	"tests/e2e/viewer-serving.test.ts",
 ];
 /** R2: the only sanctioned reads of `$HOME`/`$TMPDIR` in runtime code. */
 const R2_ALLOWED = [
