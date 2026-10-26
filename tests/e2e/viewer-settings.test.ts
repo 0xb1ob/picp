@@ -141,12 +141,9 @@ test("P20-schedule-control-http: every refusal, in order, is one viewer line of 
 	assert.match(String(full.body.error), /20 schedule requests already wait for the parent/);
 	assert.equal(lines(scheduleControlFile(stateDir)).length, queued, "a full queue writes no request line");
 	rmSync(scheduleControlFile(stateDir));
-	if (process.getuid?.() !== 0) {
-		appendScheduleControlLine(stateDir, { type: "outcome", by: "parent", id: "sc-x", at: iso(time.now()), state: "done", reason: null, job_id: null });
-		chmodSync(scheduleControlFile(stateDir), 0o400);
-		await refused(() => send(body), 500, /schedule control journal unwritable/);
-		chmodSync(scheduleControlFile(stateDir), 0o600);
-	}
+	// Readable (one JSON number) but unwritable even as root: kernfs refuses writes to a 0444 attribute. No chmod, no skip.
+	symlinkSync("/sys/devices/system/cpu/kernel_max", scheduleControlFile(stateDir));
+	await refused(() => send(body), 500, /schedule control journal unwritable/);
 	rmSync(scheduleControlFile(stateDir));
 
 	time.step();
@@ -856,6 +853,10 @@ test("P20-schedules-links: a GitLab MR on a custom host links; an unsafe url nev
 	}
 	put(join(s.stateDir, "runs", "cp-fire1", "merge.json"), JSON.stringify({ job_id: "cp-fire1", pr_url: mr }));
 	assert.equal(await link(), mr, "the merge receipt's MR link wins over an unsafe envelope url");
+	s.envelope("cp-fire1", { pr_url: "https://github.com/acme/repo/pull/9", summary: "done" });
+	assert.equal(await link(), mr, "and over a safe envelope url: the receipt is read first");
+	rmSync(join(s.stateDir, "runs", "cp-fire1", "merge.json"));
+	assert.equal(await link(), "https://github.com/acme/repo/pull/9", "with no receipt, the safe envelope url links");
 });
 
 test("P20-schedules-answer: an answer is read only from the job's own artifact dir, never through a symlink, traversal or another job", { timeout: 120_000 }, async (t) => {
