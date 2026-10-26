@@ -7664,7 +7664,7 @@ write ever truncates a memory file), because `writeFileSync` opens `O_TRUNC` and
 a kill between the open and the write leaves nothing; `durableAppend` is the
 wrong half of that precedent for a document that is rewritten rather than added
 to. A structural test in `tests/shipped-seen-retained.test.ts` keeps this store on that
-path, exactly as `tests/memory.test.ts` does for the memory files. So a reader
+path, exactly as `tests/memory-retained.test.ts` does for the memory files. So a reader
 never sees a torn document and two parents on one home cannot corrupt it. They
 can interleave: each writer re-reads, replaces its own
 session's entry and copies the rest, so two writers that read before either
@@ -8076,8 +8076,8 @@ the human step added authorization and nothing else.
 The gate is gone, and the properties it was nominally holding are now held by
 the only functions that can write. This is not a convenience: `learnings.md` is
 loaded into **every** future session, and a session that inherits a wrong lesson
-has no way to notice, so each property below is pinned by a test in
-[`tests/curation.test.ts`](../tests/curation.test.ts) that fails if it is removed.
+has no way to notice, so each property below is pinned by a cp_memory scenario in
+[`tests/e2e/memory.test.ts`](../tests/e2e/memory.test.ts) (P23-curation-*) that fails if it is removed.
 
 | Property | How the code holds it |
 |---|---|
