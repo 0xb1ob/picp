@@ -71,11 +71,21 @@ test("S24 parent: schedule wakes hold in order until manual compaction finishes"
 });
 
 
-async function phase(f: Awaited<ReturnType<typeof openParent>>, index: number) {
-	// These PR runs deliberately dispatch no workers; close their fixture lifecycle before the next manual fire.
+/**
+ * These PR runs dispatch no workers, so the test closes them from this process, each in one write with its result card
+ * already delivered: the parent's 30 s result sync then never rewrites schedule-runs.json and cannot revert a closure.
+ */
+function closeOpenRuns(f: Awaited<ReturnType<typeof openParent>>): void {
+	const at = isoTimestamp();
 	for (const run of f.post.mandates.scheduleRuns.runs().filter((run) => run.phase !== "closed")) {
-		await f.post.mandates.scheduleRuns.closeRun(run.id, "refused", isoTimestamp());
+		f.post.mandates.scheduleRuns.editRun(run.id, (row) => Object.assign(row, { phase: "closed", outcome: "refused", closed_at: at,
+			result: { source_key: `${run.id}:fixture`, job_id: null, generation: null, outcome: "refused", headline: "S24 fixture close",
+				at, links: [], answer_id: null, delivered_at: at } }));
 	}
+}
+
+async function phase(f: Awaited<ReturnType<typeof openParent>>, index: number) {
+	closeOpenRuns(f);
 	const [provider, modelId] = f.models[index]!.split("/");
 	f.child.send({ type: "set_model", id: `model-${index}`, provider, modelId });
 	const model = await f.child.waitFor((r) => r.type === "response" && r.id === `model-${index}`, 10_000);
@@ -114,9 +124,7 @@ test("S24 parent: failures and expiries release wakes, three disable, compaction
 	assert.match(readFileSync(f.log, "utf8"), /hold released reason=start_timeout held=3/);
 	await phase(f, 2);
 	assert.equal(f.wakes().length, 6);
-	for (const run of f.post.mandates.scheduleRuns.runs().filter((run) => run.phase !== "closed")) {
-		await f.post.mandates.scheduleRuns.closeRun(run.id, "refused", isoTimestamp());
-	}
+	closeOpenRuns(f);
 	const before = (readFileSync(f.log, "utf8").match(/hold engaged/g) ?? []).length;
 	f.child.send({ type: "compact", id: "cap" });
 	await waitFor(() => readFileSync(f.log, "utf8"), (text) => /hold disabled failures=3/.test(text), { timeoutMs: 10_000, what: "five-second cap disables the third failed hold" });
