@@ -290,7 +290,7 @@ test("P19-upload: POST /api/operator/upload refuses in order, stores sniffed ima
 	const first = await d.send(UPLOAD, d.bytes(csrf, png));
 	assert.equal(first.status, 201, JSON.stringify(first.body));
 	const id = String(first.body.id);
-	assert.match(id, new RegExp(`^im-${day()}-[0-9a-f]{24}\\.png$`));
+	assert.match(id, /^im-\d{8}-[0-9a-f]{24}\.png$/, "the day is the viewer's pinned clock, not this process's");
 	assert.deepEqual({ ...first.body, expires_at: "x" }, { id, mime: "image/png", bytes: png.length, expires_at: "x", url: `/api/operator/uploads/${id}` });
 	const file = stored(d.root, id);
 	assert.deepEqual(readFileSync(file), png);
@@ -316,7 +316,7 @@ test("P19-upload: POST /api/operator/upload refuses in order, stores sniffed ima
 		const reply = await d.send(`/api/operator/uploads/${bad}`);
 		assert.deepEqual([reply.status, reply.body.error], [400, "not an upload id"], bad);
 	}
-	const gone = (hex: string) => `im-${day()}-${hex.repeat(24)}.png`;
+	const gone = (hex: string) => `im-${id.slice(3, 11)}-${hex.repeat(24)}.png`;
 	assert.deepEqual((await d.send(`/api/operator/uploads/${gone("f")}`)).body, { error: "image expired" });
 	write(stored(d.root, gone("a")), STUBS.jpeg);
 	symlinkSync(file, stored(d.root, gone("b")));
