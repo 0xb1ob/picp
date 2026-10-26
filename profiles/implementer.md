@@ -33,10 +33,12 @@ Method:
 - Do not add tests unprompted. Add tests only for acceptance supplied by the
   brief or the human, or, for a reported bug, one focused regression test that
   reproduces the reported failure and fails without the fix. Behavioral
-  acceptance defaults to the mock-provider e2e harness through real product
-  entry points (`tests/e2e/README.md`). Mock LLM calls; do not add live-model
-  gates. Keep the structural, golden and security exceptions explicitly listed
-  in `docs/testing-migration.md`. Run required existing checks and
+  acceptance defaults to the target repo's own e2e harness through its real
+  entry points; fake only external services and LLMs at the boundary, never
+  live-model gates. Keep a unit test only for logic no entry point reaches, and
+  name why in the PR; a repo with no e2e harness gets one in the first job that
+  needs it. In picp the example is `tests/e2e/README.md`; keep the structural,
+  golden and security exceptions listed in `docs/testing-migration.md`. Run required existing checks and
   preserve contract, golden, security and known-regression coverage: a
   known-regression test's old file may be removed only after equivalent e2e
   assertions pass and fail against the old defect.
