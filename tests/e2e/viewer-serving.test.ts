@@ -380,3 +380,47 @@ test("P21-delta: screen GETs carry x-cp-version; a held base gets a small keyed 
 	assert.equal(after.headers["x-cp-delta-base"], undefined, "a pre-restart base never matches");
 	assert.deepEqual(strip(after.body), strip(fresh));
 });
+
+test("P21-deploy: a merged job's page shows its after-merge deploy as queued, deploying, failed, blocked, deployed or skipped; a foreign or malformed record shows none", async (t) => {
+	const SHA = "b59fc3a1".repeat(5), AT = "2026-09-26T12:00:00Z";
+	const view = await serve(t, {}, (put) => put(".pi-command-post/jobs.json", { jobs: [
+		{ id: "cp-merged", title: "ship", status: "closed", closed_at: AT, labels: ["project:demo", "kind:ship"] },
+		{ id: "cp-deploy", title: "deploy", status: "open", labels: ["project:demo", "kind:research", "ops:deploy"], blocked_by: [] },
+	] }));
+	const record = (extra: Record<string, unknown> = {}) => view.put(join(LAYOUT.runs, "cp-merged/after-merge.json"), {
+		schema_version: 1, job_id: "cp-merged", merge_commit_sha: SHA, base_branch: "main", status: "created", deploy_job_id: "cp-deploy",
+		coverage: "none", task_file: "/x/after-merge-task.md", recorded_at: AT, ...extra,
+	});
+	const fleet = (entry?: Record<string, unknown>) => view.put(LAYOUT.fleetFile, { jobs: entry ? [{ job_id: "cp-deploy", project: "demo", kind: "research", dispatched_at: AT, ...entry }] : [] });
+	const envelope = (body: Record<string, unknown>) => view.put(join(LAYOUT.runs, "cp-deploy/envelope.json"), { envelope: body });
+	const deploy = async (id = "cp-merged") => JSON.parse((await view.get(`/api/job/${id}`)).body.toString("utf8")).deploy ?? null;
+	const facts = async () => { const d = await deploy(); return [d?.state, d?.reason]; };
+
+	assert.equal(await deploy(), null, "no record: no Deploy row");
+	record({ coverage: "project_wide", mandate_id: "md-wide" });
+	view.put(join(LAYOUT.runs, "cp-merged/events.jsonl"), `${JSON.stringify({ source: "cp", job_id: "cp-merged", ts: AT, type: "after_merge_deploy", payload: { deploy_job_id: "cp-deploy", coverage: "none" } })}\n`);
+	assert.deepEqual(await deploy(), { state: "queued", merge_sha: SHA, branch: "main", deploy_job_id: "cp-deploy", reason: null, at: null, coverage: "project_wide", mandate_id: "md-wide" }, "created with no fleet record yet: queued");
+	const merged = JSON.parse((await view.get("/api/job/cp-merged")).body.toString("utf8"));
+	assert.deepEqual(merged.timeline.map((e: { label: string; meta: string }) => [e.label, e.meta]), [["Deploy job created", "cp-deploy"]], "the event is labelled");
+	assert.equal("deploy" in JSON.parse((await view.get("/api/job/cp-deploy")).body.toString("utf8")), false, "the deploy job itself carries no deploy row");
+	fleet({ phase: "held" });
+	assert.deepEqual(await facts(), ["deploying", null], "a held deploy job is deploying");
+	fleet({ phase: "failed", failure: { message: "worker died\nstack", at: AT } });
+	assert.deepEqual(await facts(), ["failed", "worker died"], "a failure shows its headline");
+	fleet({ phase: "done", closed_at: AT });
+	assert.deepEqual(await facts(), ["failed", "closed without a report"], "closed silently is never shown as deployed");
+	envelope({ status: "blocked", blockers: [{ question: "rolled back: health check failed on host-a", why: "w" }] });
+	assert.deepEqual(await facts(), ["blocked", "rolled back: health check failed on host-a"], "a planner blocker shows its question");
+	envelope({ status: "blocked", blockers: ["needs the operator to open port 22"] });
+	assert.deepEqual(await facts(), ["blocked", "needs the operator to open port 22"], "a string blocker shows as written");
+	envelope({ status: "done", summary: `deployed ${SHA.slice(0, 12)}` });
+	assert.deepEqual([...(await facts()), (await deploy()).at], ["deployed", null, AT], "a done report is deployed at the close");
+
+	record({ status: "skipped", deploy_job_id: undefined, coverage: undefined, reason: "merged into release, not the deploy branch main" });
+	assert.deepEqual(await deploy(), { state: "skipped", merge_sha: SHA, branch: "main", deploy_job_id: null, reason: "merged into release, not the deploy branch main", at: null, coverage: null, mandate_id: null });
+	record({ job_id: "cp-other" });
+	assert.equal(await deploy(), null, "a record for another job is not this job's deploy");
+	record({ merge_commit_sha: "nope" });
+	assert.equal(await deploy(), null, "a malformed sha shows nothing");
+	assert.equal((await view.get("/api/job/..%2Fcp-merged")).status, 404, "a traversal id reads no record");
+});

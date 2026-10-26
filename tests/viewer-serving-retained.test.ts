@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { appPage } from "../src/viewer/app-page.ts";
 import { buildViewer } from "../src/viewer/build.ts";
 import { LAYOUT } from "../src/contracts.ts";
-import { readdirSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createScratchHome } from "./harness/index.ts";
 import { EventEmitter } from "node:events";
@@ -12,6 +12,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { refreshStream, refreshStreams } from "../src/viewer/refresh-stream.ts";
 import { createResource, POLL_MS, pollStream, type Stream } from "../viewer-app/resource.ts";
 import { diffJson } from "../src/viewer/json-delta.ts";
+import { deployView } from "../src/viewer/deploy-view.ts";
+import type { ViewerJob } from "../src/viewer/api-types.ts";
 import { bindHostRefusal, localAddresses, sameAddress, viewerHostCandidates } from "../src/viewer/bind-host.ts";
 
 // `appPage` escaping: the build names its assets `main-<HASH>.js|css`, so no served page carries markup in a URL.
@@ -166,4 +168,15 @@ test("sameAddress: IPv6 by value, IPv4 by string", () => {
 	assert.ok(sameAddress("10.0.0.1", "10.0.0.1"));
 	assert.ok(!sameAddress("10.0.0.1", "::ffff:10.0.0.1"));
 	assert.ok(!sameAddress("x", "x"));
+});
+
+// `deployView` on live phases: launching and working come only from a running worker's in-flight row, which a scratch
+// home cannot hold; the e2e P21-deploy reads every file-backed state through /api/job.
+test("deployView: a launching deploy job is queued and a working one is deploying", (t) => {
+	const home = createScratchHome(); t.after(() => home.cleanup());
+	const stateDir = join(home.path, LAYOUT.state);
+	mkdirSync(join(stateDir, "runs", "cp-merged"), { recursive: true });
+	writeFileSync(join(stateDir, "runs", "cp-merged", "after-merge.json"), JSON.stringify({ schema_version: 1, job_id: "cp-merged", merge_commit_sha: "b59fc3a1".repeat(5), base_branch: "main", status: "created", deploy_job_id: "cp-deploy", coverage: "none", task_file: "/x/t.md", recorded_at: "2026-09-26T12:00:00Z" }));
+	const at = (phase: string) => deployView({ home: home.path, stateDir }, "cp-merged", [{ id: "cp-deploy", phase, failure: null, finished_at: null } as unknown as ViewerJob])?.state;
+	assert.deepEqual([at("launching"), at("working")], ["queued", "deploying"]);
 });
