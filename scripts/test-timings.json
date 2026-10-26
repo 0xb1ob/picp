@@ -186,7 +186,6 @@
 	"tests/pi-server-dependency.test.ts": 1,
 	"tests/pi-version-nudge.test.ts": 1,
 	"tests/e2e/pipeline-classify-tool.test.ts": 1049,
-	"tests/pipeline.test.ts": 35793,
 	"tests/planner-artifact.test.ts": 6,
 	"tests/pr-resolve-retained.test.ts": 6,
 	"tests/profiles.test.ts": 942,
