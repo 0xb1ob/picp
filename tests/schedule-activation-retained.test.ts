@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { test } from "node:test";
 import { MandateStore } from "../src/mandate.ts";
@@ -73,5 +74,17 @@ test("deactivation drains authority even when bounds forbid new runs, preserving
  assert.equal(record.revisions.at(-1)?.provenance.request_id,off.receipt.id);
  assert.deepEqual(record.revisions.at(-1)?.exclusions,policy.exclusions);
  assert.deepEqual(b.mandates.list(),[]);assert.equal(b.runs.run(event.run_id!)?.phase,"closed");
+});
+
+test("save refuses invalid authority and live bounds without changing policy bytes",async(t)=>{
+ const b=await bench(t);
+ const before=readFileSync(b.runs.policiesFile,"utf8");
+ const policy=structuredClone(b.runs.activePolicy(b.schedule.id)!);
+ policy.effects.push("org_review_approve");
+ await assert.rejects(b.scheduler.savePolicy(b.schedule.id,policy,{saved_by:"operator-quote",provenance:{channel:"cp_schedule",tool_call_id:"tool",quote_sha:"123456abcdef"}},1),/invalid schedule policy/);
+ b.defaults.exclude_paths=Array.from({length:33},(_,i)=>`excluded-${i}`);
+ const refused=await b.request("save_policy",{revision:1,policy:b.runs.activePolicy(b.schedule.id)!});
+ assert.equal(refused.receipt.state,"refused");assert.match(refused.receipt.reason!,/over the 32/);
+ assert.equal(readFileSync(b.runs.policiesFile,"utf8"),before);
 });
 
