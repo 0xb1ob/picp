@@ -1277,14 +1277,13 @@ test("P17-composer: open asks pin above the composer behind one remembered toggl
 	// A new session rotates the CSRF token under the open tab: its next send fails with the server's reason.
 	session.control.stop();
 	const next = await operatorSession(t, d.stateDir);
-	const reads = () => tab.requests.filter((r) => r.method === "GET" && r.path === "/api/operator/control").length, before = reads();
+	const from = tab.requests.length, reads = () => tab.requests.slice(from).filter((r) => r.method === "GET" && r.path === "/api/operator/control" && r.read).length;
 	tab.type(live, "after a new session");
 	tab.click(await tab.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
 	assert.ok(await tab.find(".session-pending-failed .session-pending-detail", (p) => p.textContent === "Failed: control token missing or stale; reload the transcript"), "stale 403");
-	// The failed send re-reads the status (it learns the new token). Killing the session before that read lands flips
-	// the composer away or leaves the old token, so wait for it; the pause covers its body parse.
-	await until(reads, (n) => n > before, "the status re-read after the stale send");
-	await new Promise((done) => setTimeout(done, 100));
+	// The failed send re-reads the status (it learns the new token). Killing the session before the app has taken that
+	// reply in flips the composer away or leaves the old token. The token has no DOM effect, so wait on `read`.
+	await until(reads, (n) => n > 0, "the status re-read after the stale send");
 	const record = readFileSync(controlRecordFile(d.stateDir), "utf8");
 	next.control.stop();
 	writeFileSync(controlRecordFile(d.stateDir), record);
