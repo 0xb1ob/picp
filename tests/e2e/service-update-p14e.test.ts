@@ -140,6 +140,16 @@ async function bench(t: TestContext, config: unknown = { enabled: true, interval
 	return { home, repo, stateDir, dataDir, sm, run, plan, calls, hostCalls, reset, causes, state, job, out, now: () => clock };
 }
 type Bench = Awaited<ReturnType<typeof bench>>;
+/** fleet.json and run status naming `jobId` mid-turn under this (live) process: what a reopened parent dispatched. */
+async function busyFleet(t: TestContext, jobId: string) {
+	const scratch = createScratchHome();
+	t.after(() => scratch.cleanup());
+	const statusRel = paths.statusFile(jobId);
+	const status = JSON.stringify({ ...initialStatus(jobId, {}, isoTimestamp()), phase: "working", usage: EMPTY_USAGE });
+	await new FleetStore({ home: scratch.path }).add({ job_id: jobId, project: "demo", kind: "ship", delivery: "local", origin: DEFAULT_ORIGIN, phase: "waiting", worktree: `/nonexistent/${jobId}`, branch: jobId,
+		dispatched_at: isoTimestamp(), usage: { ...EMPTY_USAGE }, worker: { pid: process.pid, session_id: "s", session_file: "/s.jsonl", profile: "implementer", role: "implementer", model: "m/x", started_at: isoTimestamp() } } as unknown as FleetRecord);
+	return { fleet: readFileSync(join(scratch.path, layoutForHome("multi", scratch.path).state, "fleet.json"), "utf8"), statusRel, status };
+}
 const last = (b: Bench) => b.out.at(-1) ?? "";
 
 test("P14e-update-forward: ff to origin/main, npm ci only on a lockfile change, cp-daemon reloaded → updated; the drain names the target", { timeout: 300_000 }, async (t) => {
@@ -249,4 +259,60 @@ test("P14e-update-config: off, absent and invalid config, the interval, a legacy
 	b.repo.git("remote", "set-url", "origin", b.repo.remote!);
 	const ok = await b.run();
 	assert.deepEqual([ok?.last_result, ok?.fetch_failures], ["updated", 0], last(b));
+});
+
+test("P14e-update-rollback: a doctor error rolls back to from and never retries the sha; a failed rollback is sticky and keeps the prior bad_sha", { timeout: 300_000 }, async (t) => {
+	const b = await bench(t);
+	const from = b.repo.head();
+	const bad = advanceBase(b.repo, "package-lock.json", "{\"v\":2}\n");
+	b.plan({ doctor: ["error:DOCTOR broken", "ok"] });
+	const state = await b.run();
+	assert.deepEqual([state?.last_result, state?.bad_sha, state?.to, b.repo.head()], ["rolled_back", bad, bad, from], last(b));
+	assert.equal(b.repo.git("status", "--porcelain").trim(), "", "reset --keep leaves the checkout clean");
+	assert.match(state?.detail ?? "", /DOCTOR broken/);
+	assert.equal(b.calls().filter((call) => call === "npm ci").length, 2, "npm ci forward and back");
+	assert.deepEqual(b.causes(), [{ reason: "auto-update", target_sha: bad }, { reason: "auto-update", target_sha: from }], "the rollback's drain names from");
+	b.reset();
+	assert.deepEqual([(await b.run())?.last_result, b.hostCalls()], ["skipped_bad_sha", []], "a rolled-back sha is never retried");
+	const fixed = advanceBase(b.repo, "fix.txt", "fix\n");
+	assert.deepEqual([(await b.run())?.last_result, b.repo.head()], ["updated", fixed], "a newer commit is taken");
+
+	// Both verifies fail: rollback_failed keeps the prior bad_sha and stays until a human removes state/update.json.
+	const s = await bench(t);
+	s.state({ phase: "idle", bad_sha: "a".repeat(40) });
+	advanceBase(s.repo, "x.txt", "x\n");
+	s.plan({ doctor: ["error:doctor error", "error:still broken"] });
+	const sticky = await s.run();
+	assert.deepEqual([sticky?.last_result, sticky?.bad_sha], ["rollback_failed", "a".repeat(40)], last(s));
+	advanceBase(s.repo, "y.txt", "y\n");
+	s.reset();
+	assert.equal(await s.run(), undefined);
+	assert.deepEqual(s.calls(), [], "nothing runs while rollback_failed stands");
+	assert.match(last(s), /rollback_failed stays until a human looks: check .*, then remove .*update\.json to resume/);
+
+	// A restarted parent reopened dispatch: the rollback drains first and never stops the fleet under a live worker.
+	const r = await bench(t);
+	const rFrom = r.repo.head();
+	const rBad = advanceBase(r.repo, "bad.txt", "bad\n");
+	const fleet = await busyFleet(t, "cp-new");
+	r.plan({ drainStates: ["drained", "draining"], doctor: ["error:DOCTOR broken"], onDoctor: { files: [{ path: join(r.stateDir, "fleet.json"), text: fleet.fleet }, { path: join(r.home, fleet.statusRel), text: fleet.status }] } });
+	const held = await r.run();
+	assert.deepEqual([held?.last_result, held?.phase, held?.held, held?.bad_sha, r.repo.head()], ["rollback_failed", "rolling_back", true, undefined, rBad], last(r));
+	assert.equal(r.hostCalls().filter((call) => call === "host stop [{}]").length, 1, "only the forward stop: the rollback stopped nothing");
+	assert.deepEqual(r.hostCalls().slice(-2), ["host drain [600]", "host drainCancel"], "the rollback drained, timed out, cancelled");
+	r.reset();
+	assert.deepEqual([await r.run(30), r.calls()], [undefined, []], "under 4x interval_min: it waits like a drain timeout");
+	rmSync(join(r.stateDir, "fleet.json"));
+	r.plan({ drainStates: ["drained"] });
+	const done = await r.run(31);
+	assert.deepEqual([done?.last_result, done?.held, done?.bad_sha, r.repo.head(), r.hostCalls()], ["rolled_back", undefined, rBad, rFrom, ["host drain [600]", "host stop [{}]"]], last(r));
+
+	// No host to drain, yet the fleet names a live worker: held too.
+	const c = await bench(t);
+	advanceBase(c.repo, "c.txt", "c\n");
+	const orphan = await busyFleet(t, "cp-orphan");
+	c.plan({ doctor: ["down:gone"], onDoctor: { files: [{ path: join(c.stateDir, "fleet.json"), text: orphan.fleet }], patch: { failing: ["host drain"] } } });
+	const left = await c.run();
+	assert.deepEqual([left?.last_result, left?.phase], ["rollback_failed", "rolling_back"], last(c));
+	assert.match(left?.detail ?? "", /live worker\(s\) cp-orphan/);
 });
