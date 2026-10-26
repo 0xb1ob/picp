@@ -35,7 +35,7 @@ const take = () => {
 };
 const mode = take();
 const stat = readFileSync("/proc/self/stat", "utf8").slice(readFileSync("/proc/self/stat", "utf8").lastIndexOf(")") + 2).split(" ");
-const log = (event, more = {}) => appendFileSync(fake + "events.jsonl", JSON.stringify({ role, pid: process.pid, event, ...more }) + "\\n");
+const log = (event, more = {}) => appendFileSync(fake + "events.jsonl", JSON.stringify({ role, pid: process.pid, event, at: Date.now(), ...more }) + "\\n");
 log("start", { mode, argv: process.argv.slice(2), env: process.env, sid: Number(stat[3]) });
 const stubborn = mode === "stubborn";
 process.on("SIGTERM", () => { log("term"); if (!stubborn) { if (role === "outer") rmSync(daemonPaths(home).lock, { force: true }); process.exit(0); } });
@@ -108,7 +108,7 @@ function rig(t: TestContext, { scale = 1, inner = "real" as "real" | "stub", out
 		for (const e of events().filter((ev) => ev.event === "start")) try { process.kill(e.pid, "SIGKILL"); } catch { /* gone */ }
 		scratch.cleanup();
 	});
-	const events = (): Array<{ role: string; pid: number; event: string; mode?: string; argv?: string[]; env?: Record<string, string>; sid?: number; op?: string }> =>
+	const events = (): Array<{ role: string; pid: number; event: string; at?: number; mode?: string; argv?: string[]; env?: Record<string, string>; sid?: number; op?: string }> =>
 		existsSync(join(fake, "events.jsonl")) ? readFileSync(join(fake, "events.jsonl"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 	const starts = (role: string) => events().filter((e) => e.role === role && e.event === "start");
 	const modes = (role: string, ...list: string[]) => writeFileSync(join(fake, `${role}.mode`), list.join(","));
@@ -372,4 +372,159 @@ test("P14-daemon-hash: outer_hash covers every outer source; the outer and CLI r
 		seen.add(line);
 	}
 	assert.equal(seen.size, OUTER_SOURCES.length + 1);
+});
+
+/** The env a stand-in saw, without what the scaled-clock wrapper and its shell add. */
+const roleEnv = (env: Record<string, string> | undefined) => {
+	const { CP_TEST_TIME_SCALE: _s, CP_TEST_TIME_ZERO: _z, PWD: _p, ...rest } = env ?? {};
+	return rest;
+};
+
+test("P14-daemon-runtime: the inner runs the parent, viewer and sender, the health and update oneshots, holds and orphans", { timeout: 300_000 }, async (t) => {
+	const r = rig(t, { scale: 30 });
+	r.config();
+	r.modes("health", "stubborn", "run");
+	r.modes("update", "run");
+	r.modes("parent", "run", "run", "run", "stubborn");
+	assert.equal(r.at("start").code, 0, r.log());
+	const status = () => r.at("status").out;
+	/** The scaled clock of the first daemon.log line matching `re` (each line starts with its ISO time). */
+	const stamp = (re: RegExp) => Date.parse(r.log().split("\n").find((line) => re.test(line))?.split(" ")[0] ?? "");
+	const token = () => r.state().token as string;
+	const op = async (name: string) => (await socket(r.paths.sock, [`${JSON.stringify({ id: name, token: token(), protocol: 1, op: name })}\n`])).replies[0];
+
+	// The parent and viewer start with their unit argv and env, and nothing else (no remote feature: no sender).
+	const [parent] = r.starts("parent"), [viewer] = r.starts("viewer");
+	const core = { HOME: r.home, CP_HOME: r.home, CP_MODE: "multi", PATH: r.PATH };
+	assert.deepEqual([parent!.argv, roleEnv(parent!.env)], [[], { ...core, CP_VIEWER_PORT: "1" }]);
+	assert.deepEqual([viewer!.argv, roleEnv(viewer!.env)], [["--home", r.home, "--require-tailnet", "--port", "1"], { ...core, CP_DAEMON_ROLE: "viewer" }]);
+	const started = Date.parse(r.state().started_at);
+	const due = (ms: number) => new Date(started + ms).toISOString();
+	assert.match(status(), new RegExp(`^parent: running pid ${parent!.pid}, 0 restart\\(s\\)\nviewer: running pid ${viewer!.pid}, 0 restart\\(s\\)\nhealth: idle, next ${due(180_000)}\nupdate: idle, next ${due(600_000)}$`, "m"));
+	assert.deepEqual(r.starts("device-notify"), []);
+
+	// The viewer is restarted 10 s after any exit.
+	process.kill(viewer!.pid, "SIGKILL");
+	await r.until("the viewer restart", () => r.starts("viewer").length === 2);
+	const viewerExit = stamp(new RegExp(`viewer pid ${viewer!.pid} exited \\(SIGKILL\\); restart 1 in 10s`));
+	const viewerBack = stamp(new RegExp(`viewer started pid ${r.starts("viewer")[1]!.pid}`));
+	assert.ok(viewerBack - viewerExit >= 10_000 && viewerBack - viewerExit < 13_000, `${viewerBack - viewerExit} ms`);
+
+	// health is first due at +3 min; at 120 s a SIGTERM, 10 s later a SIGKILL. The health op starts one now, once.
+	await r.until("the health SIGKILL", () => /health pid \d+ ignored SIGTERM: SIGKILL/.test(r.log()));
+	const [health] = r.starts("health");
+	const healthAt = stamp(new RegExp(`health started pid ${health!.pid}`));
+	assert.ok(healthAt - started >= 180_000 && healthAt - started < 190_000, `${healthAt - started} ms`);
+	const term = stamp(new RegExp(`health pid ${health!.pid} timed out after 120s: SIGTERM`));
+	assert.ok(term - healthAt >= 120_000 && term - healthAt < 126_000, `${term - healthAt} ms`);
+	const kill = stamp(new RegExp(`health pid ${health!.pid} ignored SIGTERM: SIGKILL`));
+	assert.ok(kill - term >= 10_000 && kill - term < 16_000, `${kill - term} ms`);
+	await r.until("the health exit", () => r.runtime().units.health.pid === undefined);
+	const ran = Number(/^cp-daemon health: ok \(health started pid (\d+)\)\n$/.exec(r.at("health").out)?.[1]);
+	assert.equal(r.at("health").out, `cp-daemon health: ok (health pid ${ran} is already running)\n`);
+	await r.until("the second health", () => r.starts("health").length === 2);
+	assert.equal(r.starts("health")[1]!.pid, ran);
+	assert.equal(r.runtime().units.health.next_due, new Date(stamp(new RegExp(`health started pid ${ran}`)) + 300_000).toISOString(), "5 min after the last start");
+
+	// update is first due at +10 min; still running when due again 5 min later, that run is skipped.
+	await r.until("the skipped update", () => /update due while pid \d+ is still running: skipped/.test(r.log()), 90_000);
+	const [update] = r.starts("update");
+	const updateAt = stamp(new RegExp(`update started pid ${update!.pid}`));
+	assert.ok(updateAt - started >= 600_000 && updateAt - started < 610_000, `${updateAt - started} ms`);
+	assert.match(r.log(), new RegExp(`update due while pid ${update!.pid} is still running: skipped`));
+	assert.equal(r.starts("update").length, 1);
+
+	// A reload of the same outer adopts the running update and keeps the timers; the parent's restart count resets.
+	const timers = [r.runtime().units.health.next_due, r.runtime().units.update.next_due];
+	assert.equal(r.at("reload").out, "cp-daemon reload: ok\n", r.log());
+	assert.match(r.log(), new RegExp(`adopted the in-flight update run pid ${update!.pid}`));
+	assert.deepEqual([r.runtime().units.health.next_due, r.runtime().units.update.next_due], timers);
+	assert.equal(r.runtime().units.update.pid, update!.pid);
+	assert.equal(r.starts("update").length, 1, "adopted, not respawned");
+
+	// The remote feature: a paired device starts the sender on the next tick; a crash restarts it on the backoff.
+	writeFileSync(join(r.paths.dataDir, "devices.json"), "{}");
+	await r.until("the sender", () => r.starts("device-notify").length === 1);
+	const [sender] = r.starts("device-notify");
+	assert.deepEqual([sender!.argv, roleEnv(sender!.env)], [[], { ...core, CP_DAEMON_ROLE: "device-notify" }]);
+	process.kill(sender!.pid, "SIGKILL");
+	await r.until("the sender restart", () => r.starts("device-notify").length === 2);
+	assert.match(r.log(), new RegExp(`device-notify pid ${sender!.pid} exited \\(SIGKILL\\); restart 1 in 5s`));
+
+	// hold stops the viewer and the sender until release, at most 50 min.
+	const viewers = r.starts("viewer").length;
+	assert.deepEqual(await op("hold"), { id: "hold", ok: true });
+	await r.until("the held viewer", () => r.runtime().units.viewer.state === "held" && r.runtime().units["device-notify"].state === "held");
+	const until = Date.parse(r.runtime().hold.until);
+	const heldAt = stamp(/viewer held until /);
+	assert.ok(until - heldAt > 49 * 60_000 && until - heldAt <= 50 * 60_000, `${until - heldAt} ms`);
+	assert.match(status(), new RegExp(`^viewer: held, \\d+ restart\\(s\\)$[^]*^viewer held until ${r.runtime().hold.until}$`, "m"));
+	await sleep(1_000);
+	assert.equal(r.starts("viewer").length, viewers, "no restart while held");
+	await op("release");
+	await r.until("the released viewer", () => r.starts("viewer").length === viewers + 1 && r.starts("device-notify").length === 3);
+	assert.match(r.log(), /viewer hold released \(released\)/);
+
+	// A persisted hold survives a crash restart of the inner, whose live children are stopped first; a reload clears it.
+	await op("hold");
+	await r.until("the held viewer", () => r.runtime().units.viewer.pid === undefined);
+	const orphan = r.runtime().units.parent.pid as number;
+	process.kill(r.state().inner.pid, "SIGKILL");
+	await r.until("the new inner", () => r.state().inner.state === "ready" && r.runtime().units.parent.pid !== orphan);
+	assert.match(r.log(), new RegExp(`stopping orphaned children of a previous runtime: ${orphan}(, \\d+)?\\n`));
+	assert.equal(alive(orphan), false);
+	assert.equal(r.runtime().units.viewer.state, "held");
+	assert.equal(r.starts("viewer").length, viewers + 1, "still held");
+	assert.equal(r.at("reload").out, "cp-daemon reload: ok\n");
+	assert.equal(r.runtime().hold, undefined);
+	assert.equal(r.starts("viewer").length, viewers + 2);
+
+	// stop SIGTERMs the parent, viewer and sender — a stubborn parent is SIGKILLed after 10 s — never the oneshots.
+	await r.until("the stubborn parent", () => r.starts("parent").at(-1)?.mode === "stubborn");
+	const stubborn = r.starts("parent").at(-1)!;
+	assert.equal(r.at("stop").code, 0);
+	const termAt = r.events().find((e) => e.pid === stubborn.pid && e.event === "term")!.at!;
+	const killAt = stamp(new RegExp(`parent pid ${stubborn.pid} ignored SIGTERM: SIGKILL`));
+	assert.ok(killAt - termAt >= 9_000 && killAt - termAt < 14_000, `${killAt - termAt} ms`);
+	assert.match(r.log(), /stopped \(oneshots left running\)/);
+	assert.ok(alive(update!.pid), "the update run outlives the daemon");
+	for (const role of ["viewer", "device-notify"]) assert.equal(r.starts(role).every((e) => !alive(e.pid)), true, role);
+});
+
+test("P14-daemon-runtime-fail: a parent crash loop backs off and fails; exit 78 is never restarted; a failed spawn has no pid; another protocol is refused", { timeout: 300_000 }, async (t) => {
+	const r = rig(t, { scale: 5 }); // the readiness window, 5 s, must outlast a stand-in's node boot
+	r.config();
+	r.modes("parent", "exit:1");
+	const start = r.at("start");
+	assert.equal(start.code, 1);
+	assert.match(start.out, /its runtime is not ready: the runtime reported: parent exited within 5s \(\{"code":1,"signal":null,"at":"[^"]+"\}\), now restarting/);
+	await r.until("the start limit", () => /parent pid \d+ exited \(1\); failed \(start-limit-hit\), not restarting/.test(r.log()));
+	const delays = [...r.log().matchAll(/parent pid \d+ exited \(1\); restart (\d) in ([\d.]+)s/g)].map((m) => `${m[1]}:${m[2]}`);
+	assert.deepEqual(delays, ["1:5", "2:11.34", "3:25.718", "4:58.326", "5:132.279"]);
+	assert.equal(r.starts("parent").length, 6);
+	assert.match(r.at("status").out, /^parent: failed \(start-limit-hit\), 5 restart\(s\)$/m);
+
+	// exit 78 is failed (exit-code) and never restarted.
+	r.modes("parent", "exit:78");
+	r.at("reload");
+	await r.until("the exit-code failure", () => /parent pid \d+ exited \(78\); failed \(exit-code\), not restarting/.test(r.log()));
+	await sleep(1_000);
+	assert.equal(r.starts("parent").length, 7);
+
+	// A node the inner cannot spawn: the parent restarts with no pid recorded, and stop still settles.
+	r.modes("parent", "run");
+	r.config({ node: r.fake });
+	r.at("reload");
+	await r.until("the failed spawn", () => /parent spawn failed: spawn \S+\/fake EACCES/.test(r.log()));
+	assert.equal(r.runtime().units.parent.pid, undefined);
+	assert.match(r.at("status").out, /^parent: failed \(start-limit-hit\), 0 restart\(s\)\nviewer: restarting, 1 restart\(s\)$/m, "no pid recorded");
+	assert.equal(r.at("stop").code, 0);
+	assert.doesNotMatch(r.log(), /ignored SIGTERM/);
+
+	// A runtime on another protocol, or without the outer's IPC, exits 78 before it does anything.
+	const inner = (env: Record<string, string>) => spawnSync(process.execPath, [join(r.app, "src/service/daemon-runtime.ts")], { env: { PATH: r.PATH, HOME: r.home, CP_HOME: r.home, ...env }, encoding: "utf8" });
+	const other = inner({ CP_DAEMON_PROTOCOL: "2" });
+	assert.equal(other.status, 78);
+	assert.match(other.stderr, /the outer speaks protocol 2, this runtime 1: run cp-daemon restart; exiting 78/);
+	assert.match(inner({ CP_DAEMON_PROTOCOL: "1" }).stderr, /not started by cp-daemon \(no IPC channel\); exiting 78/);
 });
