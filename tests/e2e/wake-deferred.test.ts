@@ -5,15 +5,24 @@ import { test } from "node:test";
 import { ArtifactStore } from "../../src/artifacts.ts";
 import { AwaitingStore } from "../../src/awaiting.ts";
 import { CiWatchStore } from "../../src/ci-watch.ts";
-import { LAYOUT } from "../../src/contracts.ts";
+import { LAYOUT, paths } from "../../src/contracts.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, createAgentDir, MockProvider, readRunEvents, startPiChild, waitFor } from "../harness/index.ts";
 import { JOB, seedHeldHome, writeReviewPass } from "../harness/held-home.ts";
 
 const userMessages = (request: { body: unknown }) => JSON.stringify(
 	(request.body as { messages: Array<{ role: string }> }).messages.filter((message) => message.role === "user"));
+/** The watch's first tick and the held continuation's startup pass both read Actions runs; wait for both. */
+async function startupReadsDone(home: string): Promise<void> {
+	await waitFor(() => new CiWatchStore({ home }).job(JOB)?.last_checked_at, Boolean,
+		{ timeoutMs: 30_000, what: "initial CI observation completes" });
+	// A green the startup pass reads instead of the watch never reaches the parent once the test flips the runs.
+	await waitFor(() => existsSync(join(home, paths.eventsFile(JOB))) && readRunEvents(home, JOB)
+		.some((event) => event.type === "continuation" && (event.payload as { event?: string }).event === "startup"), Boolean,
+		{ timeoutMs: 30_000, what: "held continuation's startup CI read completes" });
+}
 for (const [mode, name] of [
 	["race", "wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: race"],
 	["failure", "wake S19: CI and review races preserve decisions, recover from unreadable CI and announce late gates: failure"],
@@ -51,8 +60,7 @@ test(name, { timeout: 300_000 }, async (t) => {
 	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); held.repo.cleanup(); held.home.cleanup(); });
 	const queries = () => existsSync(`${held.ghLog}.states`) ? readFileSync(`${held.ghLog}.states`, "utf8").trim().split("\n")
 		.filter(Boolean).map((line) => JSON.parse(line) as { state: string; at: number }) : [];
-	await waitFor(() => new CiWatchStore({ home: held.home.path }).job(JOB)?.last_checked_at, Boolean,
-		{ timeoutMs: 30_000, what: "initial running-CI observation finishes" });
+	await startupReadsDone(held.home.path);
 	const before = queries().length;
 	// late: three gate reads of 2 x 11 s (runs + jobs, each under the 12 s per-call cap) outlast the 60 s recheck
 	// bound, yet each fits the 30 s Actions CI budget.
@@ -127,8 +135,7 @@ for (const mode of ["unreviewed", "wrong-head", "missing-head"] as const) await 
 	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
 		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "1" }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); held.repo.cleanup(); held.home.cleanup(); });
-	await waitFor(() => new CiWatchStore({ home: held.home.path }).job(JOB)?.last_checked_at, Boolean,
-		{ timeoutMs: 30_000, what: "initial CI observation completes" });
+	await startupReadsDone(held.home.path);
 	writeFileSync(held.stateFile, "green:6000\n");
 	await waitFor(() => readFileSync(`${held.ghLog}.states`, "utf8"), (states) => states.includes('"state":"green"'),
 		{ timeoutMs: 10_000, what: "watch captures a real green fact before the branch or runs change" });

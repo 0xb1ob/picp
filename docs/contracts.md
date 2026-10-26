@@ -7598,7 +7598,7 @@ paths behaves exactly as before:
 That guidance is the *only* thing per-turn rendering ever provided, and it is
 checked statically: no module under `src/` imports `status-block.ts` except the
 two that render (`awaiting-rows.ts`, `shipped-seen.ts`), and no `src/` module
-references `cp_status_block` outside a comment (`tests/status-block.test.ts`).
+references `cp_status_block` outside a comment (`tests/status-block-retained.test.ts`).
 The gates — `AwaitingStore`, `evaluateMergeAskCi`, `reviewDeferred`, the CI/PR
 watch — hold their invariants with no block rendered at all; a render only
 decides *when* an operator sees a row, never whether the rule applied.
