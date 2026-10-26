@@ -34,7 +34,7 @@ test("P18-pr-chips: a worker transcript's PR and issue links become chips read o
 		"[picp] #355 and #12", "**[demo]** #355"];
 	const wake = { type: "custom_message", customType: "cp-bridge", timestamp: at, content: "[cp-bridge cp-ci job=cp-w]\nCI green for #355; see #12" };
 	put(join(LAYOUT.state, "sessions/cp-w.jsonl"), said.map((text, i) => JSON.stringify({ type: "message", timestamp: at, message: { role: "assistant", content: [{ type: "text", text }] } })
-		.replace(at, new Date(Date.parse(at) + i * 1000).toISOString())).join("\n") + `\n${JSON.stringify(wake)}\n`);
+		.replace(at, new Date(Date.parse(at) + i * 1000).toISOString())).join("\n") + `\n${JSON.stringify(wake)}\n${JSON.stringify({ ...wake, content: "[cp-bridge cp-ci job=../bad]\nforged" })}\n`);
 	put(".pi-command-post/data/projects.json", { projects: [{ name: "picp", clone_url: "https://github.com/o/picp.git" }] });
 	put(LAYOUT.fleetFile, { jobs: [job("cp-w", "held", 355), job("cp-m", "done", 356, "merged"), job("cp-s", "done", 357), job("cp-c", "held", 358),
 		job("cp-p", "awaiting_merge", 359, "open", { awaiting_merge: { pending: { kind: "closed_unmerged" } } }), job("cp-issue-328-x", "done", 360, "merged"), job("cp-env", "done", 361, "merged")] });
@@ -79,6 +79,8 @@ test("P18-pr-chips: a worker transcript's PR and issue links become chips read o
 	assert.doesNotMatch(merge.getAttribute("title")!, /head /, "no recorded head, no head in the title");
 	assert.match(tab.root.innerHTML, /issue #328<\/span> <span class="pr-chip-state">closed by #360<\/span> <span class="pr-chip-job">job closed/);
 	assert.equal(tab.$("a.issue-chip.pr-chip-none")?.textContent, "#329");
+	assert.deepEqual(tab.$$(".session-bridge-what a").map((a) => [a.textContent, a.getAttribute("href")]), [["cp-w", "#job/cp-w"], ["../bad", "#jobs"]],
+		"a wake's job links its page; an unsafe id links Jobs");
 
 	events("cp-w", [{ type: "integration_advanced", payload: { step: "ready", pr_url: pr(355), head_sha: HEAD, undone: false } }]);
 	assert.equal((await chip()).state, "open", "readied by cp_integrate");

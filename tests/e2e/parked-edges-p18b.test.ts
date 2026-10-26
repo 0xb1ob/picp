@@ -3,11 +3,12 @@
  * registry, an unreadable CI, a dirty worktree, GitHub refusals, overlapping sweeps — through the landing stack.
  */
 import assert from "node:assert/strict";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { CommandPost } from "../../src/command-post.ts";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
-import { git, readRunEvents } from "../harness/index.ts";
+import { git, readRunEvents, REPO_ROOT } from "../harness/index.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { json, mergedCalls, run as ciRun, SKIP, startStack } from "./landing-helpers.ts";
 
@@ -43,6 +44,10 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 	const unread = await s.integrate(live.jobId);
 	assert.match(unread.text, /CI or merge state unreadable — not handed off/, "a forwarded green never hands off a PR whose merge state is unreadable");
 	assert.deepEqual([unread.record.next, rows().length, parks()], ["surface", 0, 0], "the fallback declares no row");
+	s.setGh({ integration: true, permission: "CLEAN", runs: [], routes: [{ match: "actions/runs", replies: [{ code: 1, stderr: "HTTP 502: Bad Gateway" }] }] } as never);
+	const noCi = await s.integrate(live.jobId);
+	assert.match(noCi.text, /could not read CI/i, "a forwarded green never stands in for an unreadable CI read");
+	assert.deepEqual([mergedCalls(s.ghCalls()), rows().length, parks()], [[], 0, 0], "nothing handed off on unreadable CI");
 
 	green(live.head, "UNSTABLE");
 	await s.tick(live.jobId);
@@ -59,6 +64,31 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 	assert.match(row[0]!.decision, new RegExp(live.head.slice(0, 12)));
 	assert.deepEqual([s.post.fleet.require(live.jobId).phase, s.post.fleet.require(live.jobId).lease_id, parks()], ["held", leased, 0], "held with its lease");
 
+	// Policy and GitHub's verdict through one dirty worktree: a handoff reaches the refused park, the repo path never.
+	const view = (over: object) => ({ match: "pr view", replies: [json({ number: 191, url: live.prUrl, state: "OPEN", mergeable: "MERGEABLE", headRefName: live.jobId,
+		headRefOid: live.head, baseRefName: "main", isDraft: false, autoMergeRequest: null, mergeStateStatus: "CLEAN", ...over })] });
+	const rules = { match: "rules/branches", replies: [json([{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "ci" }] } }])] };
+	const verdicts: [string, boolean, object[], RegExp][] = [["CLEAN", true, [], /mergeStateStatus=CLEAN/], ["BEHIND", true, [], /behind/],
+		["BLOCKED", true, [view({ mergeStateStatus: "BLOCKED", reviewDecision: "REVIEW_REQUIRED" })], /reviewDecision=REVIEW_REQUIRED/],
+		["BLOCKED", false, [rules], /required check/], ["DRAFT", false, [], /draft/], ["UNKNOWN", false, [], /still computing/],
+		["DIRTY", false, [], /conflict/]];
+	for (const [state, hands, routes, why] of verdicts) {
+		s.setGh({ integration: true, permission: state, runs: [ciRun(191, live.head, "completed", "success")], routes } as never);
+		const told = await s.integrate(live.jobId);
+		assert.match(told.text, why, `${state}: ${told.text}`);
+		assert.equal(/Not parked \(gate_refused\)/.test(told.text), hands, `${state} ${routes.length}: ${told.text}`);
+	}
+	const demo = (JSON.parse(saved) as { projects: { name: string }[] }).projects.find((p) => p.name === "demo")!;
+	for (const [why, projects] of [["an explicit repo policy", [{ ...demo, merge_policy: "repo" }]], ["an unregistered project", []]] as const) {
+		writeFileSync(registry, JSON.stringify({ ...JSON.parse(saved), projects }));
+		green(live.head, "BLOCKED");
+		const told = await s.integrate(live.jobId);
+		assert.match(told.text, /BLOCKED/, `${why}: ${told.text}`);
+		assert.doesNotMatch(told.text, /human_handoff|Not parked/, `${why} takes the repo path: ${told.text}`);
+	}
+	writeFileSync(registry, saved);
+	assert.deepEqual([mergedCalls(s.ghCalls()), rows().length, parks()], [[], 1, 0], "no verdict merges or parks the dirty worktree");
+
 	git(live.worktree, "add", "stray.txt");
 	git(live.worktree, "commit", "--quiet", "-m", "stray");
 	git(live.worktree, "push", "--quiet", "origin", live.jobId);
@@ -73,6 +103,11 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 	assert.match(again[0]!.decision, new RegExp(moved.slice(0, 12)));
 
 	rmSync(join(live.worktree, "stray2.txt"));
+	s.setGh({ integration: true, permission: "CLEAN", runs: [ciRun(191, moved, "completed", "success")], routes: [view({ headRefOid: moved, baseRefName: "" })] } as never);
+	const baseless = await s.integrate(live.jobId);
+	assert.match(baseless.text, /Not parked \(not_parkable\)/, "no observed base never parks");
+	assert.deepEqual([rows().length, parks()], [1, 0], "a refused park keeps today's row");
+	green(moved);
 	const parked = await s.integrate(live.jobId);
 	assert.match(parked.text, new RegExp(`parked with the team at ${moved.slice(0, 12)}`), parked.text);
 	assert.equal(s.post.awaiting.get(row[0]!.id)?.state, "withdrawn", "a park withdraws the fallback row");
@@ -81,6 +116,7 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 	// backoff_until removed from disk. A per-PR error keeps the last observation.
 	const handed = s.post.fleet.require(live.jobId).awaiting_merge!.handed_at;
 	const child = await s.held("P18b stacked child", 192);
+	assert.equal(s.post.fleet.require(child.jobId).phase, "held", "a parked job is no occupancy for others");
 	const watchPath = join(s.home, LAYOUT.awaitingMergeWatchFile);
 	const watch = () => JSON.parse(readFileSync(watchPath, "utf8")) as { backoff_until?: string; last_error?: string; prs: { cursors: Record<string, string> }[] };
 	const later = () => writeFileSync(watchPath, JSON.stringify({ ...watch(), backoff_until: undefined }));
@@ -122,17 +158,25 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 	const edges = JSON.parse(readFileSync(join(s.home, LAYOUT.stackFollowupsFile), "utf8")).edges as { parent_job: string; child_job: string }[];
 	assert.deepEqual(edges.map((e) => [e.parent_job, e.child_job]), [[live.jobId, child.jobId]], "only the live stacked job");
 
-	// Overlapping sweeps run one; a lower event never clobbers a pending change request, a close does.
+	// Overlapping sweeps run one. A moved head outranks a review in one snapshot, and a CI store that cannot be read
+	// skips nothing; a lower event never clobbers the pending exit, a close does.
 	const gate = join(s.home, "graphql.gate");
-	answer({ ...body({ reviews: page([{ id: "PRR_1", state: "CHANGES_REQUESTED", body: "", createdAt: at(2_000), author: by("ann"), comments: { totalCount: 0 } }], "R1") }), untilFile: gate });
+	const ciWatch = join(s.home, LAYOUT.ciWatchFile);
+	rmSync(ciWatch, { force: true });
+	mkdirSync(join(ciWatch, "x"), { recursive: true });
+	answer({ ...body({ headRefOid: "e".repeat(40), reviews: page([{ id: "PRR_1", state: "CHANGES_REQUESTED", body: "", createdAt: at(2_000), author: by("ann"), comments: { totalCount: 0 } }], "R1") }), untilFile: gate });
 	const first = sweep();
 	await new Promise((done) => setTimeout(done, 200));
 	assert.equal((await sweep()).skipped, "a sweep is already running");
 	writeFileSync(gate, "");
-	assert.deepEqual((await first).outcomes.map((o) => o.applied), ["changes_requested"]);
+	const outranked = await first;
+	rmSync(ciWatch, { recursive: true });
+	assert.deepEqual(outranked.outcomes.map((o) => o.applied), ["head_moved"], "a moved head outranks the review");
+	assert.match(outranked.errors.join("\n"), /native CI not recorded/, "a CI store fault skips nothing");
+	assert.equal(s.post.fleet.require(live.jobId).awaiting_merge?.last_human_activity_at, at(2_000), "the review is the last human activity");
 	answer(body({ comments: page([{ id: "IC_h", createdAt: at(3_000), author: by("ann") }], "C2") }));
 	await sweep();
-	assert.equal(s.post.fleet.require(live.jobId).awaiting_merge?.pending?.kind, "changes_requested", "a human comment never clobbers it");
+	assert.equal(s.post.fleet.require(live.jobId).awaiting_merge?.pending?.kind, "head_moved", "a human comment never clobbers it");
 	answer(body({ state: "CLOSED" }));
 	await sweep();
 	assert.equal(s.post.fleet.require(live.jobId).awaiting_merge?.pending?.kind, "closed_unmerged", "a close does");
@@ -147,6 +191,11 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 	writeFileSync(fleetPath, fleet);
 	for (const result of broken) assert.match(result.errors.join("\n"), /fleet\.json is not valid JSON/, "a garbage fleet file is reported");
 	assert.equal(recoveries().filter((id) => !before.includes(id)).length, 1, "one wake for the same cause");
+	const other = new CommandPost({ home: s.home, packageRoot: REPO_ROOT, parentEnv: process.env });
+	t.after(() => other.shutdown());
+	const asking = s.ghCalls().length;
+	assert.equal((await other.awaitingMerge.sweep()).skipped, "this process does not hold the home", "a session without the home lock sweeps nothing");
+	assert.equal(s.ghCalls().length, asking, "and asks GitHub nothing");
 
 	// Mislabelled records on disk are refused by the reader that meets them: the fleet and watch file by the sweep, a
 	// stack edge to itself by its recording, a park intent at an unknown stage by startup recovery.
@@ -160,8 +209,15 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 		writeFileSync(fleetPath, JSON.stringify({ ...JSON.parse(fleet), jobs: jobs.map((j) => (j === mine ? { ...j, ...over } : j)) }));
 		assert.match((await sweep()).errors.join("\n"), /violates the fleet contract/, `a fleet record with ${why} is refused`);
 	}
+	const copies = Array.from({ length: 25 }, (_, i) => ({ ...mine, job_id: `cp-copy-${i}`, branch: `cp-copy-${i}`,
+		awaiting_merge: { ...mine.awaiting_merge, branch: `cp-copy-${i}`, pr_url: `https://github.com/example/demo/pull/${300 + i}` } }));
+	writeFileSync(fleetPath, JSON.stringify({ ...JSON.parse(fleet), jobs: [...jobs, ...copies] }));
+	const batched = graphql();
+	answer(body());
+	const wide = await sweep();
 	writeFileSync(fleetPath, fleet);
-	const row0 = watch().prs[0]!;
+	assert.equal(graphql() - batched, 2, `26 parked PRs are asked in two batches: ${wide.errors.slice(0, 2).join("; ")}`);
+	const row0 = watch().prs.find((p) => (p as { job_id?: string }).job_id === live.jobId)!;
 	for (const [why, prs] of [["a merge without its sha", [{ ...row0, state: "merged" }]], ["two rows for one job", [row0, row0]]] as const) {
 		writeFileSync(watchPath, JSON.stringify({ ...watch(), prs }));
 		assert.match((await sweep()).errors.join("\n"), /not a valid awaiting-merge watch file/, why);
@@ -179,4 +235,32 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 	const recovered = (await s.post.awaitingMerge.recover()).find((r) => r.job_id === live.jobId);
 	assert.equal(!recovered?.parked && recovered?.failure.code, "intent_mismatch", "an unknown park stage is refused");
 	rmSync(intent);
+
+	// The team merges. A receipt that cannot be written keeps the cursors; then the merge outranks a moved head and a
+	// review, closes the job, queues the stacked child's retarget and releases the armed dependent, once.
+	const dependent = await s.post.ledger().create({ title: "after the parked PR", project: "demo", kind: "ship", delivery: "local" });
+	await s.post.ledger().addDep(dependent.id, live.jobId);
+	const hang = s.provider.addScript("p18b-dependent", [{ kind: "hang" }]);
+	s.agentDir.writeModels(s.provider);
+	writeFileSync(join(s.home, LAYOUT.armedDispatchFile), JSON.stringify({ schema_version: 1,
+		entries: [{ job_id: dependent.id, request: { task: "after the merge", model: hang }, armed_at: handed, blockers: [live.jobId] }] }));
+	const receipt = join(s.home, LAYOUT.runs, live.jobId, "merge.json");
+	mkdirSync(join(receipt, "x"), { recursive: true });
+	const kept = watch().prs.map((p) => p.cursors);
+	answer(body({ state: "MERGED", headRefOid: "f".repeat(40), mergedAt: isoTimestamp(), mergeCommit: { oid: "9".repeat(40) },
+		reviews: page([{ id: "PRR_2", state: "CHANGES_REQUESTED", body: "", createdAt: at(4_000), author: by("ann"), comments: { totalCount: 0 } }], "R2") }));
+	const unwritable = await sweep();
+	assert.match(unwritable.errors.join("\n"), /cursors kept/, "an unwritable receipt keeps the cursors");
+	assert.deepEqual([s.post.fleet.require(live.jobId).phase, watch().prs.map((p) => p.cursors)], ["awaiting_merge", kept]);
+	rmSync(receipt, { recursive: true });
+	assert.deepEqual((await sweep()).outcomes.map((o) => o.applied), ["merged"], "a merge outranks a moved head and a review");
+	const closed = s.post.fleet.require(live.jobId);
+	assert.deepEqual([closed.phase, closed.awaiting_merge?.cycle], ["done", 1], "a done record keeps its parking history");
+	const retargets = () => (JSON.parse(readFileSync(stackPath, "utf8")).actions as { child_job: string; previous_base: string; target_base: string }[])
+		.map((a) => [a.child_job, a.previous_base, a.target_base]);
+	assert.deepEqual(retargets(), [[child.jobId, live.jobId, "main"]], "the stacked child is queued to retarget");
+	assert.deepEqual(JSON.parse(readFileSync(join(s.home, LAYOUT.armedDispatchFile), "utf8")).entries, [], "the armed dependent is released");
+	assert.equal(typeof s.post.fleet.get(dependent.id)?.dispatched_at, "string", "and dispatched");
+	await sweep();
+	assert.deepEqual(retargets(), [[child.jobId, live.jobId, "main"]], "a second sweep applies nothing again");
 });

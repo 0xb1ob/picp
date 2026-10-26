@@ -7,7 +7,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
-import { createScratchHome } from "../harness/index.ts";
+import { createScratchHome, waitFor } from "../harness/index.ts";
 import { startViewer } from "../harness/dashboard.ts";
 
 process.env.TZ = "UTC";
@@ -40,7 +40,9 @@ test("P18-transcript-ui: the Transcript tab groups tools, files the report and r
 	put(join(LAYOUT.state, "boards/s/board.json"), { title: "T", created_at: at("12:00"), job_ids: ["cp-t"] });
 	const ids = ["cp-t", "cp-u", "cp-none"];
 	put(".pi-command-post/jobs.json", { jobs: ids.map((id) => ({ id, title: id, status: "closed", labels: ["project:demo", "kind:ship"] })) });
-	put(LAYOUT.fleetFile, { jobs: ids.map((job_id) => ({ job_id, project: "demo", kind: "ship", phase: "done", dispatched_at: at("11:59"), closed_at: at("12:30") })) });
+	session("cp-v", [work[0]!, bridge("12:00", "[cp-bridge cp-ci job=../bad]\nforged"), ...work.slice(1)]);
+	put(LAYOUT.fleetFile, { jobs: [...ids.map((job_id) => ({ job_id, project: "demo", kind: "ship", phase: "done", dispatched_at: at("11:59"), closed_at: at("12:30") })),
+		{ job_id: "cp-v", project: "demo", kind: "ship", phase: "held", dispatched_at: at("11:59") }] });
 	const view = await startViewer(t, { home: scratch.path, requireTailnet: false, at: at("12:00") });
 
 	const tab = await view.open("#job/cp-t?tab=transcript");
@@ -73,4 +75,23 @@ test("P18-transcript-ui: the Transcript tab groups tools, files the report and r
 	const bare = await view.open("#job/cp-none?tab=transcript");
 	assert.match((await bare.find('.job-transcript [role="status"]')).textContent!, /No worker session recorded/);
 	assert.equal(bare.$(".jt-jump"), null, "no jump chips for absent blocks");
+	assert.equal(tab.$(".session-steps"), null, "the job transcript never serves the steps variant");
+
+	// Sessions serves the steps variant of the same row: a pill whose closed card still holds the wake notice, opened by
+	// a click, and with Tools on every card open and no pill.
+	const sessions = await view.open("#sessions?view=workers&id=cp-v");
+	const dashed = await sessions.find("div.session-tool-run");
+	assert.deepEqual([dashed.className.split(" ").includes("tool-run-solid"), dashed.querySelector(":scope > button")?.className], [false, "session-tools"],
+		"Sessions serves the same tool-run row and button, without solid");
+	assert.equal(dashed.querySelector(".session-steps-face")?.textContent, "≡ 4 steps · ../bad ▸", "the pill counts the notice and names its job");
+	assert.deepEqual([!!dashed.querySelector(".session-steps-card .session-bridge"), dashed.querySelector(".session-steps-rows")], [true, null],
+		"closed, the card holds the notice and no rows");
+	sessions.click(dashed.querySelector("button")!);
+	const link = await sessions.find(".session-steps-link");
+	assert.equal(link.getAttribute("href"), "#jobs", "a wake naming an unsafe job id links Jobs, not its transcript");
+	assert.match(sessions.$(".session-steps")!.className, /session-steps-open/);
+	sessions.click(sessions.$(".session-tools-toggle")!);
+	await waitFor(() => sessions.$$(".session-steps").every((el) => !el.querySelector(":scope > button")), (none) => none);
+	const cards = sessions.$$(".session-steps");
+	assert.ok(cards.length === 2 && cards.every((el) => /session-steps-open/.test(el.className)), "Tools on: every card open, no pill");
 });

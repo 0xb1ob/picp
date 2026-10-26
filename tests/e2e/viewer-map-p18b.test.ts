@@ -66,6 +66,8 @@ test("P18-map-api: /api/map reads grants, spend, closures and blockers from disk
 	assert.deepEqual(["cp-b", "cp-drop", "cp-missing"].map((id) => map.edges.find((e) => e.from === id)?.kind), ["stranded", "stranded", "stranded"], "failed, dropped and missing blockers strand");
 	assert.equal(map.stranded_count, 3);
 	assert.ok(map.nodes.some((n) => n.id === "cp-missing" && n.ledger_status === null), "a missing blocker is a node with no ledger status");
+	const read = await v.get("/api/map");
+	assert.match(String(read.headers["content-type"]), /^application\/json/, "a map read is one JSON body and leaves no refresh stream open");
 	assert.equal((await v.get("/api/map", { method: "POST" })).status, 405);
 	assert.equal((await v.get("/api/map", { headers: { host: "evil.example" } })).status, 200, "the Host check is off without --require-tailnet");
 	assert.equal((await v.get("/api/stream?view=map", { method: "HEAD" })).status, 200);
