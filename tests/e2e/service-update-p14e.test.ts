@@ -153,7 +153,7 @@ async function busyFleet(t: TestContext, jobId: string) {
 }
 const last = (b: Bench) => b.out.at(-1) ?? "";
 
-test("P14e-update-forward: ff to origin/main, npm ci only on a lockfile change, cp-daemon reloaded → updated; the drain names the target", { timeout: 300_000 }, async (t) => {
+test("P14e-update-forward: ff, npm ci on a lockfile change, reload", { timeout: 300_000 }, async (t) => {
 	const b = await bench(t);
 	const from = b.repo.head();
 	const to = advanceBase(b.repo, "feature.txt", "feature\n");
@@ -170,7 +170,7 @@ test("P14e-update-forward: ff to origin/main, npm ci only on a lockfile change, 
 	assert.deepEqual(b.calls().filter((call) => !call.startsWith("host")), ["daemon hold", "npm ci", "daemon reload"], "npm ci with the host stopped and the viewer held");
 });
 
-test("P14e-update-skips: dirty, ahead, branch, busy and script skips move nothing; an idle held worker does not block; 4x busy drains anyway", { timeout: 300_000 }, async (t) => {
+test("P14e-update-skips: dirty, ahead, branch, busy and script", { timeout: 300_000 }, async (t) => {
 	const skips = [];
 	for (const cause of ["dirty", "ahead", "branch", "busy"] as const) {
 		const b = await bench(t);
@@ -219,7 +219,7 @@ test("P14e-update-skips: dirty, ahead, branch, busy and script skips move nothin
 	assert.deepEqual([scripted, script.hostCalls(), script.repo.head()], [[true, true, true, true, true, true], [], head], "a live script is never forced");
 });
 
-test("P14e-update-config: off, absent and invalid config, the interval, a legacy service, fetch failures and a dry run", { timeout: 300_000 }, async (t) => {
+test("P14e-update-config: config, interval, legacy, fetch and dry run", { timeout: 300_000 }, async (t) => {
 	const results = [];
 	for (const config of [{ enabled: false }, null, "{\"enabled\": \"yes\"}", { enabled: true, quiet_min: -5 }, { enabled: true, quiet_min: "10" }, { enabled: true, quiet_min: null }, { enabled: true, quiet_min: 3 }]) {
 		const b = await bench(t, config);
@@ -263,7 +263,7 @@ test("P14e-update-config: off, absent and invalid config, the interval, a legacy
 	assert.deepEqual([ok?.last_result, ok?.fetch_failures], ["updated", 0], last(b));
 });
 
-test("P14e-update-rollback: a doctor error rolls back to from and never retries the sha; a failed rollback is sticky and keeps the prior bad_sha", { timeout: 300_000 }, async (t) => {
+test("P14e-update-rollback: rolled back, sticky, held", { timeout: 300_000 }, async (t) => {
 	const b = await bench(t);
 	const from = b.repo.head();
 	const bad = advanceBase(b.repo, "package-lock.json", "{\"v\":2}\n");
@@ -319,7 +319,7 @@ test("P14e-update-rollback: a doctor error rolls back to from and never retries 
 	assert.match(left?.detail ?? "", /live worker\(s\) cp-orphan/);
 });
 
-test("P14e-update-recovery: a run interrupted after the merge rolls back, before it restarts, mid-drain cancels, after drained restarts the parent", { timeout: 300_000 }, async (t) => {
+test("P14e-update-recovery: a run interrupted mid-phase", { timeout: 300_000 }, async (t) => {
 	const after = await bench(t);
 	const from = after.repo.head();
 	const to = advanceBase(after.repo, "a.txt", "a\n");
@@ -369,7 +369,7 @@ test("P14e-update-recovery: a run interrupted after the merge rolls back, before
 	assert.match(once?.detail ?? "", /^a run was interrupted after the fleet drained; nothing merged; host stop failed: stop refused \(the drain may stay latched/);
 });
 
-test("P14e-update-drain: a drain timeout, a drain refused during parent control, a drain gone before it drained, other drain errors", { timeout: 300_000 }, async (t) => {
+test("P14e-update-drain: timeout, parent control, gone, other errors", { timeout: 300_000 }, async (t) => {
 	const b = await bench(t);
 	const head = b.repo.head();
 	advanceBase(b.repo, "slow.txt", "slow\n");
@@ -412,7 +412,7 @@ test("P14e-update-drain: a drain timeout, a drain refused during parent control,
 	assert.equal((await gone.run(31))?.last_result, "updated");
 });
 
-test("P14e-update-verify: busy parents extend the verify to a deferred note, an observed failure or a down viewer never does", { timeout: 300_000 }, async (t) => {
+test("P14e-update-verify: busy, deferred, down", { timeout: 300_000 }, async (t) => {
 	const verify = async (plan: Plan) => {
 		const b = await bench(t);
 		const from = b.repo.head();
@@ -448,7 +448,7 @@ test("P14e-update-verify: busy parents extend the verify to a deferred note, an 
 	assert.deepEqual(failures, Array(7).fill(["rollback_failed", true]), "the rollback's verify fails alike");
 });
 
-test("P14e-update-quiet: a moving tip keeps settling, a stable tip drains after quiet_min; 0 drains at once; absent is 10", { timeout: 300_000 }, async (t) => {
+test("P14e-update-quiet: the quiet period", { timeout: 300_000 }, async (t) => {
 	const b = await bench(t, { enabled: true, interval_min: 5, quiet_min: 10 });
 	const first = advanceBase(b.repo, "a.txt", "a\n");
 	const head = b.repo.head();

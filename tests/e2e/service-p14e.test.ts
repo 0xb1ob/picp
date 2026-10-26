@@ -146,7 +146,7 @@ const HOSTS = { tailscale0: ["100.80.0.1"], enp3s0: ["192.168.1.5", "fe80::1"], 
 const TAILSCALE = { "tailscale ip -4": { stdout: "100.80.0.1\n" } };
 const PINNED = ["--parent-model", "openai/gpt-6.1-sol", "--operator-model", "openai/gpt-6.1-sol"];
 
-test("P14e-install-files: cp-install writes, keeps, refuses and replaces its files, plans a dry run and uninstalls only what it wrote", { timeout: 300_000 }, async (t) => {
+test("P14e-install-files: cp-install writes, refuses, plans and uninstalls its files", { timeout: 300_000 }, async (t) => {
 	const r = rig(t);
 	const u = r.user();
 	const first = await u.install(PINNED);
@@ -232,7 +232,7 @@ test("P14e-install-files: cp-install writes, keeps, refuses and replaces its fil
 	assert.ok(existsSync(join(u.cpHome, "data", "update.json")), "the home's own files stay");
 });
 
-test("P14e-install-backend: detached start and reboot line, refused linger, a daemon never ready, --no-start, crontab and the operator units", { timeout: 300_000 }, async (t) => {
+test("P14e-install-backend: detached, linger, readiness, --no-start, crontab, operator units", { timeout: 300_000 }, async (t) => {
 	const r = rig(t);
 	const offline = { "systemctl --user is-system-running": { status: 1, stdout: "offline\n" } };
 	// No systemd --user: cp-daemon runs detached, no unit, the reboot command printed; doctor and the wrapper still land.
@@ -324,7 +324,7 @@ test("P14e-install-backend: detached start and reboot line, refused linger, a da
 	assert.doesNotMatch((await integrated.install([...PINNED, "--no-start"])).out, /^skip: herdr:/m, "pi integrated: no hint");
 });
 
-test("P14e-install-viewer-host: --viewer-host is checked against this machine, a fresh install asks once or takes Tailscale, a kept pin is never re-asked", { timeout: 300_000 }, async (t) => {
+test("P14e-install-viewer-host: the flag, the prompt, --yes and a kept pin", { timeout: 300_000 }, async (t) => {
 	const r = rig(t);
 	const quiet = [...PINNED, "--no-start"];
 	const notOk = (out: string) => [...lines(out, "changed"), ...lines(out, "fail")];
@@ -420,7 +420,7 @@ test("P14e-install-viewer-host: --viewer-host is checked against this machine, a
 	assert.deepEqual([existsSync(dry.cpHome), /Dashboard address/.test(plan.out)], [false, false]);
 });
 
-test("P14e-install-extras: pi packages, gh, login, pi-lens, push and tmux steps report what they did, skip or why they stopped", { timeout: 600_000 }, async (t) => {
+test("P14e-install-extras: packages, gh, login, pi-lens, push and tmux", { timeout: 600_000 }, async (t) => {
 	const r = rig(t);
 	const quiet = [...PINNED, "--no-start", "--viewer-host", "127.0.0.1"];
 	const installs = (u: User) => u.calls("pi").filter((call) => call.startsWith("install "));
@@ -504,7 +504,7 @@ test("P14e-install-extras: pi packages, gh, login, pi-lens, push and tmux steps 
 	assert.match(plain.out, /^ok: node: \S+ v2[4-9]\./m, "node 24 or newer passes");
 });
 
-test("P14e-install-legacy: a legacy home is held under --no-start, migrated by a plain rerun, and refused untouched", { timeout: 600_000 }, async (t) => {
+test("P14e-install-legacy: held, migrated or refused", { timeout: 600_000 }, async (t) => {
 	const r = rig(t);
 	const untouched = (u: User, units: Record<string, string>) => {
 		assert.deepEqual([existsSync(u.paths.config), existsSync(u.unit)], [false, false], "nothing of cp-daemon's beside the legacy units");
@@ -595,7 +595,7 @@ function fakeGit(dir: string, origin: string): { env: NodeJS.ProcessEnv; argvFil
 	return { env: { ...process.env, HOME: dir, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`, CP_REPO_URL: "https://example.invalid/cp.git" }, argvFile };
 }
 
-test("P14e-sh: install.sh: clones the code to ~/.pi-command-post/app when absent, then execs its install.ts with the flags", (t) => {
+test("P14e-sh-clone: install.sh clones, then execs install.ts", (t) => {
 	const dir = scratch(t);
 	const { env, argvFile } = fakeGit(dir, "https://example.invalid/cp.git");
 	const out = execFileSync("sh", [join(REPO_ROOT, "scripts/install.sh"), "--no-start", "--port", "9000"], { env, encoding: "utf8" });
@@ -608,7 +608,7 @@ test("P14e-sh: install.sh: clones the code to ~/.pi-command-post/app when absent
 	assert.doesNotMatch(readFileSync(join(dir, "git.log"), "utf8").split("\n").slice(1).join("\n"), /clone|merge/);
 });
 
-test("P14e-sh: install.sh: an existing checkout with another origin is refused; --dry-run with no checkout clones nothing", (t) => {
+test("P14e-sh-origin: install.sh refuses another origin", (t) => {
 	const dir = scratch(t);
 	const { env } = fakeGit(dir, "https://elsewhere.invalid/x.git");
 	mkdirSync(join(dir, ".pi-command-post/app/.git"), { recursive: true });
@@ -625,7 +625,7 @@ test("P14e-sh: install.sh: an existing checkout with another origin is refused; 
 	assert.equal(existsSync(app), false);
 });
 
-test("P14e-sh: install.sh --dry-run on an existing checkout never runs git fetch (it writes FETCH_HEAD, refs and objects)", (t) => {
+test("P14e-sh-nofetch: install.sh --dry-run never fetches", (t) => {
 	const dir = scratch(t);
 	const { env, argvFile } = fakeGit(dir, "https://example.invalid/cp.git");
 	const app = join(dir, ".pi-command-post/app");
@@ -639,7 +639,7 @@ test("P14e-sh: install.sh --dry-run on an existing checkout never runs git fetch
 	assert.deepEqual(JSON.parse(readFileSync(argvFile, "utf8")), ["--dry-run"]);
 });
 
-test("P14e-sh: install.sh: a checkout with no node_modules runs npm ci before install.ts imports a package; a current one is left alone", (t) => {
+test("P14e-sh-npm: install.sh runs npm ci only when needed", (t) => {
 	const dir = scratch(t);
 	const { env, argvFile } = fakeGit(dir, "https://example.invalid/cp.git");
 	const app = join(dir, ".pi-command-post/app");
@@ -674,7 +674,7 @@ test("P14e-sh: install.sh: a checkout with no node_modules runs npm ci before in
 	assert.equal(npmCalls().length, 1, "a current node_modules is not reinstalled");
 });
 
-test("P14e-sh: bin/cp-install is the same one command: it forwards every flag to scripts/install.sh", (t) => {
+test("P14e-sh-cp-install: bin/cp-install forwards every flag", (t) => {
 	const dir = scratch(t);
 	const { env } = fakeGit(dir, "https://example.invalid/cp.git");
 	const app = join(dir, "app");
@@ -692,7 +692,7 @@ test("P14e-sh: bin/cp-install is the same one command: it forwards every flag to
 
 const BOOTSTRAP = join(REPO_ROOT, "bin/cp-bootstrap");
 
-test("P14e-sh: bin/cp-bootstrap: POSIX sh, at most 60 lines, shellcheck-clean when shellcheck is here", (t) => {
+test("P14e-sh-posix: cp-bootstrap is POSIX sh and short", (t) => {
 	assert.equal(spawnSync("sh", ["-n", BOOTSTRAP]).status, 0);
 	assert.ok(readFileSync(BOOTSTRAP, "utf8").trimEnd().split("\n").length <= 60);
 	const check = spawnSync("shellcheck", ["-s", "sh", BOOTSTRAP], { encoding: "utf8" });
@@ -700,7 +700,7 @@ test("P14e-sh: bin/cp-bootstrap: POSIX sh, at most 60 lines, shellcheck-clean wh
 	assert.equal(check.status, 0, check.stdout);
 });
 
-test("P14e-sh: bin/cp-bootstrap --dry-run in a scratch HOME clones nothing; old node and a dirty checkout are refused", (t) => {
+test("P14e-sh-bootstrap-dry: cp-bootstrap dry run and refusals", (t) => {
 	const dir = scratch(t);
 	const env = { HOME: dir, PATH: `${dirname(process.execPath)}:/usr/bin:/bin` };
 	const dry = spawnSync("sh", ["-c", `cat ${JSON.stringify(BOOTSTRAP)} | sh -s -- --dry-run`], { env, encoding: "utf8" });
@@ -727,7 +727,7 @@ test("P14e-sh: bin/cp-bootstrap --dry-run in a scratch HOME clones nothing; old 
 	assert.deepEqual(readFileSync(join(app, "dirty"), "utf8"), "x", "left as is");
 });
 
-test("P14e-sh: bin/cp-bootstrap honours --app DIR and --app=DIR over CP_APP, and a dry run never fetches an existing checkout", (t) => {
+test("P14e-sh-bootstrap-app: cp-bootstrap honours --app", (t) => {
 	const dir = scratch(t);
 	const { env } = fakeGit(dir, "https://example.invalid/cp.git");
 	const fresh = join(dir, "custom-app");
@@ -765,7 +765,7 @@ test("P14e-sh: bin/cp-bootstrap honours --app DIR and --app=DIR over CP_APP, and
 	assert.equal(existsSync(join(ahead, ".git/FETCH_HEAD")), false, "a dry run never fetches");
 });
 
-test("P14e-sh: bin/cp-bootstrap: a second run on an up-to-date checkout is all ok and never reruns npm ci", (t) => {
+test("P14e-sh-bootstrap-rerun: cp-bootstrap rerun is all ok", (t) => {
 	const dir = scratch(t);
 	const env = { HOME: dir, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, GIT_CONFIG_NOSYSTEM: "1" };
 	const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env, encoding: "utf8" });
@@ -794,7 +794,7 @@ const LOCAL = ["--no-start", "--viewer-host", "127.0.0.1"];
 const snapshot = (u: User) => [u.text(u.unit), u.text(join(u.binDir, "cp-operator")), u.text(u.paths.config)];
 const exportsOf = (u: User) => (u.text(join(u.binDir, "cp-operator")) ?? "").split("\n").find((line) => line.startsWith("export ")) ?? "";
 
-test("P14e-install-models: the parent's and the operator's questions, their defaults, flags and pins", { timeout: 600_000 }, async (t) => {
+test("P14e-install-models: questions, defaults, flags and pins", { timeout: 600_000 }, async (t) => {
 	const r = rig(t);
 	// Fresh on a terminal: the parent's question, then the operator's from the same list defaulting to the parent's pick.
 	const picks = [];
@@ -903,7 +903,7 @@ test("P14e-install-models: the parent's and the operator's questions, their defa
 	assert.doesNotMatch(exportsOf(older), /CP_PARENT_MODEL/);
 });
 
-test("P14e-install-gateway: opt-in, validated, kept, tightened, and never printing the key", { timeout: 600_000 }, async (t) => {
+test("P14e-install-gateway: opt-in, validated, kept, tightened", { timeout: 600_000 }, async (t) => {
 	const r = rig(t);
 	const KEY = "k3y-VALUE";
 	const gw = (o: UserOpts = {}) => {
