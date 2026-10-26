@@ -1,7 +1,6 @@
 /**
- * cp-7bsr PR2: `state/settings.lock` (src/settings-lock.ts). O_EXCL acquire, a live holder refuses,
- * an unreadable lock refuses naming the path, a dead holder is reclaimed once, a competing reclaim wins
- * over the loser, and only the nonce holder releases.
+ * Retained from tests/settings-lock.test.ts (P16b): `acquireSettingsLock`'s result (0600 mode, `reclaimed`)
+ * and its `isPidAlive`/`onBeforeReclaim`/`pid` options; a settings write releases its lock and reports no reclaim.
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -36,18 +35,6 @@ test("acquire: O_EXCL create at 0600; a second acquire while held is busy; relea
 	const third = acquireSettingsLock(dir);
 	assert.ok(third.ok);
 	third.release();
-});
-
-test("acquire: an unreadable or garbage lock refuses, naming the path; nothing is removed", (t) => {
-	const dir = home(t);
-	const path = settingsLockPath(dir);
-	for (const garbage of ["", "{nope", JSON.stringify({ pid: "x" })]) {
-		plant(path, garbage);
-		const result = acquireSettingsLock(dir);
-		assert.equal(result.ok, false);
-		assert.ok((result as { reason: string }).reason.includes(path), (result as { reason: string }).reason);
-		assert.equal(readFileSync(path, "utf8"), garbage);
-	}
 });
 
 test("acquire: a dead holder is reclaimed once and reported", (t) => {
