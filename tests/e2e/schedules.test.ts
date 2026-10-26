@@ -778,6 +778,17 @@ test("P13c same-process new_session: an unexpanded skill anchor is offered once 
 	const offered = wakes(parent).map((wake) => wake.message as { details?: { job_id?: string } });
 	assert.deepEqual(offered.map((message) => message.details?.job_id), [anchor!.id], "one anchor, offered once in one process");
 	assert.equal((await h.ledger.list({ labels: [`schedule:${id}`], all: true })).length, 1, "no duplicate job");
+	// A later fire of the same schedule has a new anchor id, so it is offered once: the key is the anchor, not the schedule.
+	const firstRun = h.runs().openRun(id)!;
+	await h.ledger.close(anchor!.id, "completed");
+	await waitFor(() => h.runs().run(firstRun.id)?.outcome, (outcome) => outcome === "completed", { timeoutMs: 30_000, what: "the first run closed" });
+	assert.equal((await dashboard(h.stateDir).ask("run_now", id))[0], "done");
+	await waitFor(() => wakes(parent).length, (count) => count === 2, { timeoutMs: 20_000, what: "the second fire's wake" });
+	await parent.waitForSettled(30_000);
+	await new Promise((resolve) => setTimeout(resolve, 5_000));
+	const anchors = (await h.ledger.list({ labels: [`schedule:${id}`], all: true })).map((entry) => entry.id);
+	assert.equal(anchors.length, 2);
+	assert.deepEqual(wakes(parent).map((wake) => (wake.message as { details?: { job_id?: string } }).details?.job_id), [anchor!.id, anchors.find((entry) => entry !== anchor!.id)], "the second anchor is offered exactly once");
 	await h.closeParents();
 	const restarted = await h.parent("P13c: new process.", []);
 	await waitFor(() => wakes(restarted).length, (count) => count === 1, { timeoutMs: 20_000, what: "the new process's recovery wake" });
