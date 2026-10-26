@@ -206,7 +206,6 @@
 	"tests/status.test.ts": 1120,
 	"tests/storage.test.ts": 27,
 	"tests/structure.test.ts": 210,
-	"tests/supersede.test.ts": 119,
 	"tests/teardown-retained.test.ts": 5000,
 	"tests/test-concurrency-bound.test.ts": 6798,
 	"tests/test-file-guard.test.ts": 1136,
