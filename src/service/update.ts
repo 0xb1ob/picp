@@ -179,8 +179,21 @@ const clip = (text: string) => {
 	return flat.length > DETAIL_MAX ? `${flat.slice(0, DETAIL_MAX - 1)}…` : flat;
 };
 
+/** How long a finished run waits for cp-daemon to take its health request before the process exits. */
+export const HEALTH_WAIT_MS = 10_000;
+
 /** One updater run: the recorded state, or undefined when it recorded nothing (schedule, sticky failure, dry run). */
 export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Promise<UpdateState | undefined> {
+	const pending: { health?: Promise<void> } = {};
+	try {
+		return await updateOnce(options, ports, pending);
+	} finally {
+		// The CLI exits as soon as this resolves: an unsent health request would lose the failure's one notice.
+		if (pending.health && !(await settleWithin(pending.health, HEALTH_WAIT_MS))) ports.log(`cp-daemon health: no answer within ${HEALTH_WAIT_MS / 1000}s; exiting without it`);
+	}
+}
+
+async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: { health?: Promise<void> }): Promise<UpdateState | undefined> {
 	const dry = options.dryRun === true;
 	const job = !dry && (options.env ?? process.env).CP_DAEMON_JOB !== "update" ? (existsSync(join(options.dataDir, "daemon.json")) ? "refused" : "legacy") : "daemon";
 	if (job === "refused") throw new Error("refused: cp-update runs from cp-daemon (it serializes runs); by hand, use --dry-run");
@@ -203,7 +216,7 @@ export async function runUpdate(options: UpdateOptions, ports: UpdatePorts): Pro
 		ports.log(`${result}: ${detail}${dry ? " (dry-run: nothing recorded)" : ""}`);
 		// Never a push from here: the watchdog sends the one notice per distinct failure.
 		if (!dry && (UPDATE_FAILURES.includes(result) || (result === "fetch_failed" && state.fetch_failures >= 3))) {
-			ports.daemon.health().catch((error: Error) => ports.log(`cp-daemon health: ${error.message}`));
+			pending.health = ports.daemon.health().catch((error: Error) => ports.log(`cp-daemon health: ${error.message}`));
 		}
 		return state;
 	};
