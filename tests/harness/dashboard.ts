@@ -77,18 +77,18 @@ export async function operatorSession(t: Context, stateDir: string, isIdle = () 
 type Requested = { method: string; path: string; headers: Record<string, string>; body: string | null; status: number };
 
 /**
- * Opens the served app at `hash`; `close()` stops every timer it started (also on test end).
- * Requests whose path matches `hold` wait until `release()`, so a test can see the page before they answer.
+ * Opens the served app at `hash`; `close()` stops its timers. `hold`-matched requests wait for `release()`, so a test
+ * can see the page before they answer; `headers` ride on every request the tab makes (a remote device's cookie).
  */
-async function openTab(t: Context, port: number, hash: string, storage: Map<string, string> = new Map(), hold?: RegExp) {
+export async function openTab(t: Context, port: number, hash: string, storage: Map<string, string> = new Map(), hold?: RegExp, extra: Record<string, string> = {}) {
 	let release = () => {};
 	const held = new Promise<void>((done) => (release = done));
 	const origin = `http://127.0.0.1:${port}`;
-	const page = await call(port, "/");
+	const page = await call(port, "/", { headers: extra });
 	if (page.status !== 200) throw new Error(`GET / answered ${page.status}: ${page.text.slice(0, 200)}`);
 	const script = /<script type="module" src="([^"]+)"/.exec(page.text)?.[1];
 	if (!script) throw new Error("the served page names no app script");
-	const code = (await call(port, script)).text;
+	const code = (await call(port, script, { headers: extra })).text;
 	const { window, document, Event, CustomEvent, HTMLElement } = parseHTML(page.text) as unknown as Record<string, any>;
 	HTMLElement.prototype.scrollIntoView ??= () => {}; // linkedom has no layout
 	const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -96,12 +96,13 @@ async function openTab(t: Context, port: number, hash: string, storage: Map<stri
 	const requests: Requested[] = [];
 	const location = { hash, pathname: "/", search: "", origin, host: `127.0.0.1:${port}`, protocol: "http:", get href() { return `${origin}/${location.hash}`; }, assign() {}, replace() {}, reload() {} };
 	const confirms: string[] = [];
+	const sources = new Set<EventTarget>(); // the app's streams: they speak only when the test calls `refresh()`
 	let answerConfirm = true;
 	const browserFetch = async (input: string | URL | Request, init: RequestInit = {}) => {
 		if (closed) return new Promise<Response>(() => {});
 		const url = new URL(String(input instanceof Request ? input.url : input), origin);
 		if (hold?.test(url.pathname)) await held;
-		const headers = new Headers(init.headers);
+		const headers = new Headers({ ...extra, ...Object.fromEntries(new Headers(init.headers)) });
 		const method = (init.method ?? "GET").toUpperCase();
 		headers.set("sec-fetch-site", "same-origin");
 		if (method !== "GET" && method !== "HEAD") headers.set("origin", origin);
@@ -123,7 +124,7 @@ async function openTab(t: Context, port: number, hash: string, storage: Map<stri
 		requestAnimationFrame: (fn: (at: number) => void) => track(setTimeout)(() => fn(performance.now()), 16), cancelAnimationFrame: clearTimeout,
 		localStorage: { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, String(v)), removeItem: (k: string) => void storage.delete(k) },
 		matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }),
-		EventSource: class { onmessage = null; onerror = null; addEventListener() {} removeEventListener() {} close() {} },
+		EventSource: class extends EventTarget { onmessage = null; onerror = null; constructor() { super(); sources.add(this); } close() { sources.delete(this); } },
 		confirm: (text: string) => (confirms.push(text), answerConfirm),
 	};
 	for (const [key, value] of Object.entries({ location, localStorage: sandbox.localStorage, matchMedia: sandbox.matchMedia, confirm: sandbox.confirm, navigator: sandbox.navigator, scrollTo() {}, requestAnimationFrame: sandbox.requestAnimationFrame })) {
@@ -138,6 +139,8 @@ async function openTab(t: Context, port: number, hash: string, storage: Map<stri
 	const text = () => root.textContent ?? "";
 	return {
 		window, document, root, requests, confirms, storage, close, text, release,
+		/** Every open stream says `refresh`, as the server's does on a change: the mounted page re-reads its data. */
+		refresh: () => { for (const source of [...sources]) source.dispatchEvent(new globalThis.Event("refresh")); },
 		$: (selector: string) => root.querySelector(selector) as Element | null,
 		$$: (selector: string) => [...root.querySelectorAll(selector)] as Element[],
 		/** Waits until `selector` matches (and `ok` holds for it). */
@@ -148,7 +151,7 @@ async function openTab(t: Context, port: number, hash: string, storage: Map<stri
 		key: (el: Element, key: string) => { const event = new Event("keydown", { bubbles: true, cancelable: true }); Object.defineProperty(event, "key", { value: key }); el.dispatchEvent(event); return event; },
 		type: (el: Element, value: string) => { (el as unknown as { value: string }).value = value; el.dispatchEvent(new Event("input", { bubbles: true })); },
 		decline: () => { answerConfirm = false; },
-		reopen: (next = hash) => (close(), openTab(t, port, next, storage)),
+		reopen: (next = hash) => (close(), openTab(t, port, next, storage, undefined, extra)),
 	};
 }
 
