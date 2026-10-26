@@ -1,7 +1,7 @@
 /**
  * The bounded pi capability probe (#375): `pi --version`, then one `pi --mode rpc` that loads only the command-post
- * extension and must list /cp-version from it (tests/extension-load.test.ts's check). It runs in a fresh 0700 scratch
- * HOME/agent dir/CP_HOME with no auth, no session and no model call, kills only its own child, and removes the scratch.
+ * extension and must list /cp-version from it (as tests/e2e/host-compatibility.test.ts does), in a fresh 0700 scratch
+ * HOME/agent dir/CP_HOME with no auth, session or model call; it kills only its own child and removes the scratch.
  */
 import { execFile, spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";

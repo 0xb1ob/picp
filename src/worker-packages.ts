@@ -119,7 +119,7 @@ export const ROLE_NEVER: Readonly<Record<Role, readonly string[]>> = Object.free
  * off (a CLI value wins over ~/.pi-lens/config.json in pi-lens's own flag
  * resolution), so no edit can wait on that command. `--no-lazy-tools` keeps
  * structural tools such as `ast_grep_search` active for a headless worker.
- * `tests/pi-lens-headless.test.ts` proves both flags against the installed package.
+ * `tests/e2e/host-compatibility.test.ts` ("P24 pi-lens") proves both flags reach a dispatched worker.
  */
 export const PACKAGE_FLAGS: Readonly<Record<string, readonly string[]>> = Object.freeze({
 	// N19: lens findings injected into one request only change the next request's prefix, so the API drops the thinking
