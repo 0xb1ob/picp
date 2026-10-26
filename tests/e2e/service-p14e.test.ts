@@ -167,7 +167,6 @@ test("P14e-install-files: cp-install writes, refuses, plans and uninstalls its f
 	assert.deepEqual(lines(second.out, "changed"), [], second.out);
 	assert.ok(!u.log().slice(before).some((call) => call === "npm ci" || /try-restart/.test(call)), "no npm ci and no restart on an unchanged rerun");
 
-	// A changed unit or data/daemon.json is refused without --force, nothing started; --force replaces, try-restarts.
 	for (const path of [u.unit, u.paths.config]) {
 		const kept = u.text(path)!;
 		writeFileSync(path, "# edited by hand\n");
@@ -182,7 +181,6 @@ test("P14e-install-files: cp-install writes, refuses, plans and uninstalls its f
 		assert.ok(u.log().slice(at).includes("systemctl --user try-restart cp-daemon.service"), u.log().slice(at).join("\n"));
 	}
 
-	// --dry-run: no file, no mutating command, never gh or pi; a tool a real run installs is planned and the plan goes on.
 	const dry = r.user({ drop: ["treehouse"] });
 	const plan = await dry.install(["--dry-run", "--yes", "--parent-model", "openai/gpt-6.1-sol"]);
 	assert.equal(plan.code, 0, plan.out);
@@ -194,12 +192,10 @@ test("P14e-install-files: cp-install writes, refuses, plans and uninstalls its f
 	assert.match(plan.out, /^changed: enable: would run/m, "the plan reaches activation");
 	const bare = await r.user().install(["--dry-run"]);
 	assert.match(bare.out, /^skip: model: parent, operator: not listed in a dry-run \(pi writes its state under HOME\); a real run asks or recommends/m);
-	// An absent HOME stays absent: gh and pi (both write under HOME) never run.
 	const homeless = r.user({ homeless: true });
 	assert.equal((await homeless.install(["--dry-run", "--yes", "--viewer-host", "127.0.0.1"])).code, 0);
 	assert.equal(existsSync(homeless.home), false, "HOME was never created");
 
-	// Right after npm ci the hidden lockfile (another platform's optional packages absent) reads as fresh.
 	const lock = r.user();
 	writeFileSync(join(lock.app, "package-lock.json"), JSON.stringify({ packages: { "": {}, "node_modules/a": { version: "1" }, "node_modules/@esbuild/darwin-arm64": { version: "0.25.0", optional: true, os: ["darwin"] } } }));
 	const hidden = join(lock.app, "node_modules", ".package-lock.json");
@@ -212,7 +208,6 @@ test("P14e-install-files: cp-install writes, refuses, plans and uninstalls its f
 	}
 	assert.deepEqual(stale, [true, true, true]);
 
-	// A home WorkingDirectory= cannot carry fails before anything runs; an unknown flag is refused by name.
 	const spaced = r.user();
 	const odd = await spaced.install(["--home", join(spaced.home, "my home")]);
 	assert.match(odd.out, /^fail: unit: WorkingDirectory= cannot carry/m);
@@ -221,7 +216,6 @@ test("P14e-install-files: cp-install writes, refuses, plans and uninstalls its f
 	assert.notEqual(bogus.code, 0);
 	assert.match(bogus.out, /--sudo/);
 
-	// --uninstall stops cp-daemon, removes only what cp-install wrote (data/daemon.json too), never the home or a wrapper.
 	writeFileSync(join(u.binDir, "cp-operator"), "#!/bin/sh\n# mine\n");
 	const gone = await u.install(["--uninstall"]);
 	assert.equal(gone.code, 0, gone.out);
@@ -235,7 +229,6 @@ test("P14e-install-files: cp-install writes, refuses, plans and uninstalls its f
 test("P14e-install-backend: detached, linger, readiness, --no-start, crontab, operator units", { timeout: 300_000 }, async (t) => {
 	const r = rig(t);
 	const offline = { "systemctl --user is-system-running": { status: 1, stdout: "offline\n" } };
-	// No systemd --user: cp-daemon runs detached, no unit, the reboot command printed; doctor and the wrapper still land.
 	const off = r.user({ answers: offline });
 	const first = await off.install(PINNED);
 	const reboot = `"${off.node}" "${off.app}/src/service/daemon.ts" start --home "${off.cpHome}"`;
@@ -250,14 +243,12 @@ test("P14e-install-backend: detached, linger, readiness, --no-start, crontab, op
 	const again = await off.install(PINNED);
 	assert.ok(again.out.includes(`ok: daemon: running (detached); after a reboot run: ${reboot}`), again.out);
 	assert.ok(!off.log().slice(at).some((call) => / (start|restart) --home /.test(call)), "an unchanged running daemon is left alone");
-	// --uninstall, detached: daemon.ts stop; a crontab without the marked line is not rewritten.
 	off.answer({ ...offline, "crontab -l": { stdout: "@daily x\n" } });
 	assert.equal((await off.install(["--uninstall"])).code, 0);
 	assert.ok(off.calls("daemon").includes(`stop --home ${off.cpHome}`), off.log().join("\n"));
 	assert.deepEqual(off.calls("crontab").filter((call) => call !== "-l"), [], "no marked line: the crontab is not rewritten");
 	assert.equal(existsSync(off.paths.config), false);
 
-	// --crontab (detached): the @reboot line goes through a file, never stdin.
 	const cron = r.user({ answers: { ...offline, "crontab -l": { stdout: "@daily x\n" } } });
 	const added = await cron.install([...PINNED, "--crontab"]);
 	const tmp = join(cron.paths.stateDir, "daemon-crontab.tmp");
@@ -265,14 +256,12 @@ test("P14e-install-backend: detached, linger, readiness, --no-start, crontab, op
 	assert.match(added.out, new RegExp(`^changed: crontab: added: @reboot .*# cp-daemon ${cron.cpHome}$`, "m"));
 	assert.match(cron.text(join(cron.sm, "crontab.txt")) ?? "", /^@daily x\n@reboot /);
 
-	// Refused linger prints the sudo line, runs no sudo and writes nothing.
 	const linger = r.user({ answers: { "loginctl show-user": { stdout: "Linger=no\n" }, "loginctl enable-linger": { status: 1 } } });
 	const refused = await linger.install(PINNED);
 	assert.equal(refused.code, 1);
 	assert.match(refused.out, /^fail: linger: loginctl enable-linger refused; run: sudo loginctl enable-linger u$/m);
 	assert.deepEqual([existsSync(linger.paths.config), existsSync(join(linger.binDir, "cp-operator"))], [false, false]);
 
-	// A cp-daemon.service that never turns active fails after the whole 60 s window, naming the journal.
 	const dead = r.user({ answers: { "systemctl --user is-active cp-daemon.service": { status: 3, stdout: "failed\n" } } });
 	const failed = await dead.install(PINNED);
 	assert.equal(failed.code, 1);
@@ -281,7 +270,6 @@ test("P14e-install-backend: detached, linger, readiness, --no-start, crontab, op
 	const crashed = r.user();
 	writeFileSync(join(crashed.sm, "runtime"), JSON.stringify({ units: { parent: { state: "failed", result: "exit-code" }, viewer: { state: "running" } } }));
 	assert.match((await crashed.install(PINNED)).out, /^fail: enable: the parent supervisor is failed \(exit-code\) after 60s/m);
-	// --no-start enables without --now and verifies nothing.
 	const quiet = r.user();
 	const enabled = await quiet.install([...PINNED, "--no-start"]);
 	assert.equal(enabled.code, 0, enabled.out);
@@ -290,7 +278,6 @@ test("P14e-install-backend: detached, linger, readiness, --no-start, crontab, op
 	assert.match(enabled.out, /^ok: enable: cp-daemon\.service enabled, not started \(--no-start\); start it: systemctl --user start cp-daemon\.service$/m);
 	assert.match(enabled.out, /^skip: doctor: --no-start$/m);
 
-	// cp-rrye: no cp-operator*.service is written; an older install's generated ones are removed, never stopped.
 	const op = r.user({ tools: ["tmux"] });
 	await op.install([...PINNED, "--no-start"]);
 	assert.deepEqual(readdirSync(op.unitDir), ["cp-daemon.service"], "no operator unit is written");
@@ -305,14 +292,12 @@ test("P14e-install-backend: detached, linger, readiness, --no-start, crontab, op
 	assert.deepEqual(readdirSync(op.unitDir), ["cp-daemon.service"]);
 	writeFileSync(join(op.unitDir, OPERATOR_UNIT), "[Service]\nExecStart=/usr/bin/tmux new-session -d -s mine\n");
 	assert.doesNotMatch((await op.install([...PINNED, "--no-start"])).out, /removed/, "a hand-written cp-operator.service stays");
-	// --uninstall never runs systemctl on the operator units (the live tmux session), but removes generated ones.
 	for (const name of [OPERATOR_UNIT, OPERATOR_RESUME_UNIT]) writeFileSync(join(op.unitDir, name), old[name]!);
 	const gone = await op.install(["--uninstall"]);
 	assert.ok(gone.out.includes(`changed: uninstall: removed ${join(op.unitDir, OPERATOR_UNIT)}`), gone.out);
 	assert.equal(existsSync(join(op.unitDir, OPERATOR_RESUME_UNIT)), false, "and its resume twin");
 	assert.ok(!op.calls("systemctl").some((call) => call.includes("cp-operator") || /--user (stop|kill)/.test(call)), op.calls("systemctl").join("\n"));
 
-	// Launchers: tmux and herdr on the installing PATH are printed; herdr without its pi integration prints the hint only.
 	const none = await r.user().install([...PINNED, "--no-start"]);
 	assert.match(none.out, /^ok: launchers: tmux not on PATH \(the dashboard's Start in tmux needs it\); herdr not on PATH$/m);
 	const both = r.user({ tools: ["tmux", "herdr"], answers: { "herdr integration status": { stdout: "pi: not installed (x)\nomp: not installed\n" } } });
@@ -328,7 +313,6 @@ test("P14e-install-viewer-host: the flag, the prompt, --yes and a kept pin", { t
 	const r = rig(t);
 	const quiet = [...PINNED, "--no-start"];
 	const notOk = (out: string) => [...lines(out, "changed"), ...lines(out, "fail")];
-	// A flag pins data/daemon.json and the wrapper, never the unit; a rerun with it or without is all ok/skip.
 	const u = r.user({ ifaces: { wt0: ["100.70.1.2"], lo: ["127.0.0.1"] } });
 	const pinned = await u.install([...quiet, "--viewer-host", "100.70.1.2"]);
 	assert.equal(u.config()?.viewer_host, "100.70.1.2");
@@ -344,7 +328,6 @@ test("P14e-install-viewer-host: the flag, the prompt, --yes and a kept pin", { t
 	assert.match(moved.out, /^skip: viewer-host: 100\.70\.1\.2 is not on this machine's interfaces now/m);
 	assert.deepEqual(notOk(moved.out), [], "kept, files untouched");
 
-	// Wildcard, public, link-local, mapped, zoned, non-IP and foreign addresses fail before npm ci and write nothing.
 	const bad = r.user({ ifaces: { ...HOSTS, eth1: ["169.254.1.1"] } });
 	const refusals = [];
 	for (const value of ["0.0.0.0", "::", "8.8.8.8", "2001:4860::8888", "fe80::1", "fe80::1%eth0", "169.254.1.1", "::ffff:10.0.0.1", "localhost", "10.9.9.9"]) {
@@ -354,7 +337,6 @@ test("P14e-install-viewer-host: the flag, the prompt, --yes and a kept pin", { t
 	assert.deepEqual(new Set(refusals), new Set(["refused"]));
 	assert.deepEqual([bad.calls("npm"), existsSync(bad.cpHome)], [[], false], "nothing ran or was written");
 
-	// Fresh on a terminal: one numbered question, Tailscale recommended; Enter takes it, a number or a local IP picks.
 	const ask = async (reply: string) => {
 		const user = r.user({ ifaces: HOSTS, answers: TAILSCALE });
 		const run = await user.install(quiet, [reply]);
@@ -375,7 +357,6 @@ test("P14e-install-viewer-host: the flag, the prompt, --yes and a kept pin", { t
 	}
 	assert.deepEqual(wrong, [[1, true, null], [1, true, null], [1, true, null]]);
 
-	// --yes pins the Tailscale address unasked; with none nothing is pinned, the files as on a host with no interfaces.
 	const tailnet = r.user({ ifaces: HOSTS, answers: TAILSCALE });
 	const yes = await tailnet.install([...quiet, "--yes"], []);
 	assert.doesNotMatch(yes.out, /Dashboard address/);
@@ -391,7 +372,6 @@ test("P14e-install-viewer-host: the flag, the prompt, --yes and a kept pin", { t
 	await lan.install([...quiet, "--yes"]);
 	assert.deepEqual(files(), withLan, "byte-identical to an install on a host with no interfaces");
 
-	// An existing data/daemon.json keeps its host (none) unasked; another --viewer-host needs --force, then restarts.
 	const kept = r.user({ ifaces: HOSTS });
 	await kept.install(PINNED.concat("--yes"));
 	kept.answer(TAILSCALE);
@@ -406,14 +386,12 @@ test("P14e-install-viewer-host: the flag, the prompt, --yes and a kept pin", { t
 	assert.equal(kept.config()?.viewer_host, "192.168.1.5");
 	assert.ok(kept.log().slice(at).includes("systemctl --user try-restart cp-daemon.service"), kept.log().slice(at).join("\n"));
 
-	// A legacy cp-view.service drop-in's CP_VIEWER_HOST is reported once by M1's preflight, never adopted.
 	const drop = r.user({ answers: { "systemctl --user show cp-view.service --property=Environment --value": { stdout: "CP_HOME=/h CP_VIEWER_HOST=10.1.1.1\n" } } });
 	mkdirSync(drop.unitDir, { recursive: true });
 	for (const [name, text] of Object.entries(renderUnits({ node: drop.node, app: drop.app, home: drop.cpHome, path: "/bin", port: 8766 }))) writeFileSync(join(drop.unitDir, name), text);
 	const reported = await drop.install([...PINNED, "--yes"]);
 	assert.equal(lines(reported.out, "skip").filter((line) => line.startsWith("skip: viewer-host: a drop-in on cp-view.service sets CP_VIEWER_HOST=10.1.1.1")).length, 1, reported.out);
 	assert.equal(drop.config()?.viewer_host, undefined);
-	// --dry-run prints the choice and writes nothing, never asking.
 	const dry = r.user({ ifaces: HOSTS, answers: TAILSCALE });
 	const plan = await dry.install(["--dry-run"], []);
 	assert.match(plan.out, /^changed: viewer-host: 100\.80\.0\.1 \(tailscale;.*\(dry-run\)$/m);
@@ -424,11 +402,9 @@ test("P14e-install-extras: packages, gh, login, pi-lens, push and tmux", { timeo
 	const r = rig(t);
 	const quiet = [...PINNED, "--no-start", "--viewer-host", "127.0.0.1"];
 	const installs = (u: User) => u.calls("pi").filter((call) => call.startsWith("install "));
-	// The worker package set is ROLE_PACKAGES' union, each `pi install npm:<spec>`; never this checkout as a package.
 	const u = r.user();
 	const plain = await u.install(quiet, []);
 	assert.deepEqual(installs(u), [...new Set(Object.values(ROLE_PACKAGES).flat())].map((spec) => `install npm:${spec}`));
-	// Complete flags on a terminal ask nothing; push is not set up without --push-origin.
 	assert.doesNotMatch(plain.out, /\]: /, "no prompt");
 	assert.match(plain.out, /^skip: push: not set up; rerun with --push-origin URL to enable it$/m);
 	assert.deepEqual([existsSync(join(u.cpHome, "data", "push", "config.json")), /self-package/.test(plain.out)], [false, false]);
@@ -436,7 +412,6 @@ test("P14e-install-extras: packages, gh, login, pi-lens, push and tmux", { timeo
 	const origin = await pushed.install([...quiet, "--push-origin", "https://cp.example"]);
 	assert.match(origin.out, /^changed: push: push set up for https:\/\/cp\.example$/m);
 
-	// Packages the human configured are skipped (their pin kept); settings.json only ever changes through pi install.
 	const mine = ["npm:zzz-theme", { source: "npm:pi-lens@4.3.0" }, "git:github.com/me/tools"];
 	const human = r.user();
 	writeFileSync(join(human.home, ".pi/agent/settings.json"), JSON.stringify({ packages: mine }));
@@ -459,7 +434,6 @@ test("P14e-install-extras: packages, gh, login, pi-lens, push and tmux", { timeo
 	assert.match(unparsed.out, /^fail: pi-package: .*never edited here/m);
 	assert.deepEqual(installs(broken), []);
 
-	// No tracker CLI is probed, offered or flagged, even with retired tracker state on the home.
 	const tracked = r.user();
 	mkdirSync(join(tracked.cpHome, "data"), { recursive: true });
 	writeFileSync(join(tracked.cpHome, "data", "trackers.json"), "{ retired, malformed");
@@ -468,7 +442,6 @@ test("P14e-install-extras: packages, gh, login, pi-lens, push and tmux", { timeo
 	assert.doesNotMatch(untracked.out, /tracker|--with-/i);
 	assert.deepEqual(tracked.log().filter((call) => call.endsWith(" --version")).map((call) => call.split(" ")[0]).filter((tool) => !["pi", ...PI_LENS_TOOLS.commands].includes(tool!)), [], "only surviving tools are probed");
 
-	// tmux missing, gh logged out and no provider login are reported, never fatal; login is the human's.
 	const NONE = "No models available. Use /login or set an API key environment variable.\n";
 	const bare = r.user({ models: NONE, answers: { "gh auth status": { status: 1 }, "gh api user": { status: 1 } } });
 	const reported = await bare.install(quiet);
@@ -481,14 +454,12 @@ test("P14e-install-extras: packages, gh, login, pi-lens, push and tmux", { timeo
 	const logged = r.user({ models: NONE });
 	writeFileSync(join(logged.home, ".pi/agent/auth.json"), JSON.stringify({ anthropic: { type: "oauth" } }));
 	assert.match((await logged.install(quiet)).out, /^ok: login: 1 provider\(s\)/m);
-	// gh reads only the active account; a gh without --active falls back to gh api user.
 	assert.match(plain.out, /^ok: gh: logged in$/m);
 	assert.deepEqual(u.calls("gh"), ["auth status --active"]);
 	const oldGh = r.user({ answers: { "gh auth status": { status: 1, stderr: "unknown flag: --active" } } });
 	const fallback = await oldGh.install(quiet);
 	assert.deepEqual([oldGh.calls("gh").includes("api user --jq .login"), /^ok: gh: logged in$/m.test(fallback.out)], [true, true]);
 
-	// pi-lens: a missing tool installs the manifest's packages; a prefix that needs sudo prints the fix and stops.
 	const lens = r.user({ drop: ["ast-grep"] });
 	mkdirSync(join(lens.home, ".npm-global"));
 	await lens.install(quiet);
@@ -511,7 +482,6 @@ test("P14e-install-legacy: held, migrated or refused", { timeout: 600_000 }, asy
 		assert.deepEqual(Object.keys(units).filter((name) => u.text(join(u.unitDir, name)) !== units[name]), [], "the legacy units as they were");
 		assert.deepEqual(u.calls("systemctl").filter((call) => /^--user (daemon-reload|enable|disable|stop|kill|try-restart)/.test(call)), []);
 	};
-	// --no-start leaves the legacy units (the operator ones too) running and untouched; a plain rerun migrates them.
 	const u = r.user({ ifaces: HOSTS });
 	const units = legacyHome(u, true);
 	assert.ok(units[OPERATOR_UNIT] && units[OPERATOR_RESUME_UNIT], "the operator units are part of the older install");
@@ -525,7 +495,6 @@ test("P14e-install-legacy: held, migrated or refused", { timeout: 600_000 }, asy
 	assert.deepEqual(readdirSync(u.unitDir), ["cp-daemon.service"], "the legacy and operator units are gone");
 	assert.match(migrated.out, /^changed: migrate: cp-daemon\.service runs the parent supervisor and the viewer/m);
 
-	// A wrapper that differs (no --force) is refused before anything is written.
 	const wrapped = r.user({ ifaces: HOSTS });
 	const wrappedUnits = legacyHome(wrapped);
 	mkdirSync(wrapped.binDir, { recursive: true });
@@ -536,14 +505,12 @@ test("P14e-install-legacy: held, migrated or refused", { timeout: 600_000 }, asy
 	assert.ok(refused.out.includes(`skip: daemon: ${wrapped.paths.config} not written: another file was refused, so nothing is written`), refused.out);
 	assert.equal(wrapped.text(join(wrapped.binDir, "cp-operator")), "#!/bin/sh\n# hand-edited\n");
 	untouched(wrapped, wrappedUnits);
-	// Refused linger stops before anything is written.
 	const linger = r.user({ ifaces: HOSTS, answers: { "loginctl show-user": { stdout: "Linger=no\n" }, "loginctl enable-linger": { status: 1 } } });
 	const lingerUnits = legacyHome(linger);
 	assert.match((await linger.install([])).out, /^fail: linger: loginctl enable-linger refused; run: sudo loginctl enable-linger u$/m);
 	assert.equal(existsSync(join(linger.binDir, "cp-operator")), false, "no wrapper either");
 	untouched(linger, lingerUnits);
 
-	// cp-rrye: the generated operator units go only at M1's success; a refused preflight or a rollback keeps them.
 	const busy = r.user({ ifaces: HOSTS, answers: { "systemctl --user is-active cp-update.service": { stdout: "active\n" } } });
 	const busyUnits = legacyHome(busy, true);
 	const inFlight = await busy.install([]);
@@ -796,7 +763,6 @@ const exportsOf = (u: User) => (u.text(join(u.binDir, "cp-operator")) ?? "").spl
 
 test("P14e-install-models: questions, defaults, flags and pins", { timeout: 600_000 }, async (t) => {
 	const r = rig(t);
-	// Fresh on a terminal: the parent's question, then the operator's from the same list defaulting to the parent's pick.
 	const picks = [];
 	for (const [replies, enter] of [[[""], "1"], [["2"], "2"], [["openai-codex/gpt-6.1-sol"], "openai-codex/gpt-6.1-sol"], [["2", "1"], "2"]] as const) {
 		const u = r.user();
@@ -826,7 +792,6 @@ test("P14e-install-models: questions, defaults, flags and pins", { timeout: 600_
 	}
 	assert.deepEqual(failures, [[1, true, false, false], [1, true, false, false]], "a failed choice writes nothing");
 
-	// The parent's own default is recommended ahead of the rubric when listed; the listing runs with cp-daemon's env.
 	const saved = r.user({ env: { ANTHROPIC_API_KEY: "sk-shell-only" } });
 	const sessions = join(saved.cpHome, layoutForHome("multi", saved.cpHome).sessions);
 	mkdirSync(sessions, { recursive: true });
@@ -842,7 +807,6 @@ test("P14e-install-models: questions, defaults, flags and pins", { timeout: 600_
 	await unlisted.install([...LOCAL, "--yes"]);
 	assert.deepEqual([env.pinned()[0], unlisted.pinned()[0]], ["openai-codex/gpt-6.1-sol", "anthropic/claude-opus-5-5"], "an unlisted default is never recommended");
 
-	// The flags win, each for its own target, except a lone --parent-model on a fresh install sets both.
 	const flagged = [];
 	for (const [args, replies] of [[["--parent-model", "openai/gpt-6.1-sol"], undefined], [[...PINNED.slice(0, 2), "--operator-model", "anthropic/claude-opus-5-5"], undefined], [["--operator-model", "openai-codex/gpt-6.1-sol"], ["2"]], [["--operator-model", "openai-codex/gpt-6.1-sol", "--yes"], undefined]] as const) {
 		const u = r.user();
@@ -862,7 +826,6 @@ test("P14e-install-models: questions, defaults, flags and pins", { timeout: 600_
 	assert.ok((await empty.install([...LOCAL, "--parent-model", "x/y"])).out.includes("skip: model: parent x/y (--parent-model) written unchecked: pi's model list is empty"));
 	assert.equal(empty.pinned()[0], "x/y");
 
-	// --no-start, no usable model: run pi then /login, nothing pinned; the continuation keeps --home/--app, needs --force.
 	const later = r.user({ models: NO_MODELS });
 	const first = await later.install(LOCAL, []);
 	const line = lines(first.out, "skip").find((l) => l.startsWith("skip: model: no model pi can use as the service sees it (")) ?? "";
@@ -880,7 +843,6 @@ test("P14e-install-models: questions, defaults, flags and pins", { timeout: 600_
 	await later.install([...LOCAL, "--force", "--yes"]);
 	assert.deepEqual(later.pinned(), ["anthropic/claude-opus-5-5", "anthropic/claude-opus-5-5"]);
 
-	// A rerun keeps every pin unasked and byte-identical, listing only for the login check; --force never re-asks it.
 	const kept = r.user();
 	await kept.install(LOCAL, ["2"]);
 	const pins = snapshot(kept);
@@ -891,7 +853,6 @@ test("P14e-install-models: questions, defaults, flags and pins", { timeout: 600_
 	assert.deepEqual(kept.log().slice(at).filter((call) => call === "pi --no-extensions --list-models"), ["pi --no-extensions --list-models"]);
 	await kept.install([...LOCAL, "--force", "--yes"]);
 	assert.deepEqual(snapshot(kept), pins, "--force never re-asks a pinned choice");
-	// An older install that pinned only data/daemon.json (the wrapper without the model exports) stays byte-identical.
 	const older = r.user();
 	await older.install([...LOCAL, ...PINNED]);
 	const wrapper = join(older.binDir, "cp-operator");
@@ -914,7 +875,6 @@ test("P14e-install-gateway: opt-in, validated, kept, tightened", { timeout: 600_
 	};
 	const plain = await r.user().install([...LOCAL, ...PINNED]);
 	assert.ok(plain.out.includes("skip: gateway: not set up (optional: capacity-aware routing through a sub2api gateway); add it later: cp-install --gateway-url https://<gateway> --gateway-key-file <file>"), plain.out);
-	// The flags write capacity.json and a 0600 key file; the key is in no line, no argv, no unit and no wrapper.
 	const u = gw();
 	const set = await u.install([...LOCAL, ...PINNED, "--gateway-url", "https://gw.example", ...u.flags]);
 	assert.deepEqual(JSON.parse(u.text(u.capacity)!), { url: "https://gw.example/", path: "/api/v1/admin/ops/concurrency" });
@@ -928,7 +888,6 @@ test("P14e-install-gateway: opt-in, validated, kept, tightened", { timeout: 600_
 	assert.ok(kept.out.includes(`ok: gateway: ${u.capacity} kept`) && kept.out.includes(`ok: gateway-key: ${u.keyFile} kept`), kept.out);
 	assert.deepEqual(snapshot(u), files, "no unit changes");
 
-	// Not https, userinfo, a path, a query, no key or a key with whitespace fail and write nothing, start nothing.
 	const refusals = [];
 	for (const [url, keyArgs] of [["http://gw.example"], ["https://u:p@gw.example"], ["https://gw.example/x"], ["https://gw.example/?q=1"], ["gw.example"], ["https://gw.example", []], ["https://gw.example", ["bad"]]] as const) {
 		const v = gw();
@@ -941,7 +900,6 @@ test("P14e-install-gateway: opt-in, validated, kept, tightened", { timeout: 600_
 	assert.deepEqual(refusals.slice(5).map((row) => row.slice(0, 4)), Array(2).fill([1, false, false, false]), "a missing or bad key writes nothing");
 	assert.deepEqual(refusals.map((row) => row[4]), Array(7).fill(true), `each refusal names its cause: ${JSON.stringify(refusals)}`);
 
-	// Another url or key needs --force (other capacity keys kept); a loose key file is tightened, a dry run only plans it.
 	writeFileSync(u.capacity, `${JSON.stringify({ url: "https://gw.example/", path: "/api/v1/admin/ops/concurrency", quota: { five_hour: 80 } })}\n`);
 	const other = await u.install([...LOCAL, "--gateway-url", "https://gw2.example"]);
 	assert.ok(other.code === 1 && other.out.includes(`fail: gateway: ${u.capacity} names https://gw.example/; rerun with --force`), other.out);
