@@ -6,7 +6,7 @@ import { FLEET_MUTATING_TOOLS, LAYOUT, SCHEMA_VERSION, WORKER_FORBIDDEN_TOOLS } 
 import { join } from "node:path";
 import { acquireParentLock, formatParentLock, parentLockPath, parseParentLock, readParentLock, releaseParentLock } from "../src/parent-lock.ts";
 import { commandPostSource, createScratchHome } from "./harness/index.ts";
-/** A pid that cannot be alive (see tests/fleet.test.ts's DEAD_PID). */
+/** A pid that cannot be alive (see tests/fleet-retained.test.ts's DEAD_PID). */
 const DEAD_PID = 2 ** 22;
 
 function home(t: { after(fn: () => void): void }) {

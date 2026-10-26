@@ -660,7 +660,7 @@ test("P18-jobs-ui: the served Jobs, Job detail, Board and Overview tabs show not
 	// #324: three merged jobs read against a scratch clone of this checkout — in it, beside it, and absent from it.
 	const clone = join(scratch.path, "checkout");
 	git(scratch.path, "clone", "--quiet", "--shared", "--no-checkout", REPO_ROOT, clone);
-	const [inc, out] = [git(clone, "rev-parse", "HEAD~1"), git(clone, "commit-tree", "HEAD^{tree}", "-p", "HEAD~1", "-m", "side")];
+	const [inc, out] = [git(clone, "rev-parse", "HEAD"), git(clone, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "side")];
 	const merged = (id: string, sha: string) => (s.put(s.run(id, "merge.json"), { job_id: id, pr_url: "https://gitlab.com/o/r/-/merge_requests/9", merge_commit_sha: sha, merged_at: iso(5) }),
 		{ job_id: id, project: "demo", kind: "ship", phase: "done", dispatched_at: iso(60), closed_at: iso(5) });
 	const all = [...fleet, parked("cp-park", {}), parked("cp-pend", { pending: { kind: "head_moved", event_id: "head:b", observed_at: iso(60), head_sha: b } }), parked("cp-team", {}),

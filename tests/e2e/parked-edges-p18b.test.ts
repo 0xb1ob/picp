@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
-import { git, readRunEvents, REPO_ROOT } from "../harness/index.ts";
+import { git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { json, mergedCalls, run as ciRun, SKIP, startStack } from "./landing-helpers.ts";
 
@@ -149,7 +149,7 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 	assert.deepEqual(watch().prs.map((p) => p.cursors), seen.map((p) => p.cursors));
 
 	// Bots, the CP's own login and pre-handoff comments wake nobody, yet the cursor advances; a stacked job is an edge.
-	const at = (ms: number) => isoTimestamp(new Date(Date.parse(handed) + ms));
+	const at = (shift: number) => isoTimestamp(new Date(Date.parse(handed) + shift));
 	const by = (login: string, __typename = "User") => ({ login, __typename });
 	answer(body({ comments: page([{ id: "IC_old", createdAt: at(-60_000), author: by("ann") }, { id: "IC_bot", createdAt: at(1_000), author: by("ci", "Bot") },
 		{ id: "IC_cp", createdAt: at(1_000), author: by("e2e") }], "C1") }, [{ headRefName: child.jobId }, { headRefName: "someone-else" }]));
@@ -165,8 +165,8 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 	rmSync(ciWatch, { force: true });
 	mkdirSync(join(ciWatch, "x"), { recursive: true });
 	answer({ ...body({ headRefOid: "e".repeat(40), reviews: page([{ id: "PRR_1", state: "CHANGES_REQUESTED", body: "", createdAt: at(2_000), author: by("ann"), comments: { totalCount: 0 } }], "R1") }), untilFile: gate });
-	const first = sweep();
-	await new Promise((done) => setTimeout(done, 200));
+	const sent = s.ghCalls().length, first = sweep();
+	await waitFor(() => s.ghCalls().slice(sent), (calls) => calls.some((call) => call.includes("graphql")), { what: "the first sweep's held gh call" });
 	assert.equal((await sweep()).skipped, "a sweep is already running");
 	writeFileSync(gate, "");
 	const outranked = await first;

@@ -78,10 +78,10 @@ export async function operatorSession(t: Context, stateDir: string, isIdle = () 
 type Requested = { method: string; path: string; headers: Record<string, string>; body: string | null; status: number; read: boolean };
 
 /**
- * Opens the served app at `hash`; `close()` stops its timers. `hold`-matched requests wait for `release()`, so a test
- * can see the page before they answer; `headers` ride on every request the tab makes (a remote device's cookie).
+ * Opens the served app at `hash`; `hold`-matched requests wait for `release()`; `headers` ride on every request (a
+ * remote device's cookie); `wide` makes min-width media queries match, a desktop tab with no layout.
  */
-export async function openTab(t: Context, port: number, hash: string, storage: Map<string, string> = new Map(), hold?: RegExp, extra: Record<string, string> = {}) {
+export async function openTab(t: Context, port: number, hash: string, storage: Map<string, string> = new Map(), hold?: RegExp, extra: Record<string, string> = {}, wide = false) {
 	let release = () => {};
 	const held = new Promise<void>((done) => (release = done));
 	const origin = `http://127.0.0.1:${port}`;
@@ -90,7 +90,7 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 	const script = /<script type="module" src="([^"]+)"/.exec(page.text)?.[1];
 	if (!script) throw new Error("the served page names no app script");
 	const code = (await call(port, script, { headers: extra })).text;
-	const { window, document, Event, CustomEvent, HTMLElement } = parseHTML(page.text) as unknown as Record<string, any>;
+	const { window, document, Event, CustomEvent, EventTarget: DomEventTarget, HTMLElement } = parseHTML(page.text) as unknown as Record<string, any>;
 	HTMLElement.prototype.scrollIntoView ??= () => {}; // linkedom has no layout
 	const timers = new Set<ReturnType<typeof setTimeout>>();
 	let shifted = 0;
@@ -126,13 +126,13 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 	};
 	const sandbox: Record<string, unknown> = {
 		window, document, location, navigator: { userAgent: "node", language: "en", clipboard: { writeText: async () => {} } },
-		Event, CustomEvent, HTMLElement, KeyboardEvent: Event, MouseEvent: Event, InputEvent: Event,
+		Event, CustomEvent, EventTarget: DomEventTarget, HTMLElement, KeyboardEvent: Event, MouseEvent: Event, InputEvent: Event,
 		fetch: browserFetch, Headers, Request, Response, URL, URLSearchParams, AbortController, AbortSignal, FormData, Blob, File,
 		TextEncoder, TextDecoder, console, queueMicrotask, structuredClone, atob, btoa, crypto, performance, Date: TabDate,
 		setTimeout: track(setTimeout), setInterval: track(setInterval), clearTimeout, clearInterval,
 		requestAnimationFrame: (fn: (at: number) => void) => track(setTimeout)(() => fn(performance.now()), 16), cancelAnimationFrame: clearTimeout,
 		localStorage: { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, String(v)), removeItem: (k: string) => void storage.delete(k) },
-		matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }),
+		matchMedia: (query: string) => ({ matches: wide && /min-width/.test(query), addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }),
 		EventSource: class extends EventTarget { onmessage = null; onerror = null; constructor() { super(); sources.add(this); } close() { sources.delete(this); } },
 		confirm: (text: string) => (confirms.push(text), answerConfirm),
 	};
@@ -148,6 +148,10 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 	const text = () => root.textContent ?? "";
 	return {
 		window, document, root, requests, confirms, storage, close, text, release,
+		/** The page's global scope: a test adds what linkedom lacks (a ResizeObserver) before the screen mounts. */
+		globals: sandbox,
+		/** Every open stream fires `type` ("open", "error"), as a browser's EventSource does on connect or loss. */
+		signal: (type: string) => { for (const source of [...sources]) source.dispatchEvent(new globalThis.Event(type)); },
 		/** The app's own `navigator` (linkedom's window keeps its own): set `clipboard` to stage a copy. */
 		navigator: sandbox.navigator as { clipboard?: unknown },
 		/** The app's own global scope: stage browser APIs linkedom lacks (Notification) before the app reads them. */
@@ -166,7 +170,7 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 		key: (el: Element, key: string) => { const event = new Event("keydown", { bubbles: true, cancelable: true }); Object.defineProperty(event, "key", { value: key }); el.dispatchEvent(event); return event; },
 		type: (el: Element, value: string) => { (el as unknown as { value: string }).value = value; el.dispatchEvent(new Event("input", { bubbles: true })); },
 		decline: () => { answerConfirm = false; },
-		reopen: (next = hash) => (close(), openTab(t, port, next, storage, undefined, extra)),
+		reopen: (next = hash) => (close(), openTab(t, port, next, storage, undefined, extra, wide)),
 	};
 }
 

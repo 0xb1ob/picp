@@ -261,9 +261,11 @@ function main(): number {
 	const unmapped = new Map<string, number>();
 	for (const [path = "", assertion = "", scenario = "", status = "", note = ""] of rows(section(docs, "assertions", findings))) {
 		if (!disposition.has(path)) findings.push(`assertion map names ${path}, which is not a baseline file`);
-		const pinned = status === "mapped" || status === "redundant-unreachable";
+		// narrowed: mapped in part; the note's `Narrowed:` names the uncovered part.
+		const pinned = status === "mapped" || status === "redundant-unreachable" || status === "narrowed";
 		if (pinned && !scenarios.has(scenario)) findings.push(`${path}: "${assertion}" is ${status} but names no known e2e scenario (got "${scenario}")`);
 		if (status === "redundant-unreachable" && !note) findings.push(`${path}: "${assertion}" is redundant-unreachable with no reason or approval`);
+		if (status === "narrowed" && !note.includes("Narrowed:")) findings.push(`${path}: "${assertion}" is narrowed with no \`Narrowed:\` naming the uncovered part`);
 		if (status === "unreachable") {
 			if (!note) findings.push(`${path}: "${assertion}" is unreachable with no reason`);
 			unmapped.set(path, (unmapped.get(path) ?? 0) + 1);
