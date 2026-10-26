@@ -288,11 +288,8 @@ test("P19-queued-scroll: a new pending bubble follows the bottom; a reader who s
 	await compose(tab, "new pending");
 	await bubblesAre(tab, ["new pending"], "the pending bubble");
 	assert.equal(await top(700, "the follow"), 700, "adding a pending bubble follows the bottom");
-	await posted(tab, 1); // the send's answer re-keys the queue; let it land before the reader scrolls up
-	await settle();
 	scroller().scrollTop = 200;
 	scroller().dispatchEvent(new tab.window.Event("scroll"));
-	await tab.find(".session-new");
 	metrics.scrollHeight = 1200;
 	d.append(said("14:01", "streaming later"));
 	tab.refresh();
@@ -306,6 +303,22 @@ test("P19-queued-scroll: a new pending bubble follows the bottom; a reader who s
 	tab.refresh();
 	await tab.waitText(/another response/);
 	assert.equal(await top(900, "the re-pin"), 900, "following stays pinned as pending bubbles move below new entries");
+	// #587 regression: a reader who scrolls up after a render commits, before its deferred follow effect runs, was yanked
+	// to the bottom by that effect's stale `atBottom`. The observer scrolls up in exactly that window.
+	const racing = new tab.window.MutationObserver(() => {
+		if (!/racing entry/.test(tab.text())) return;
+		racing.disconnect();
+		scroller().scrollTop = 300;
+		scroller().dispatchEvent(new tab.window.Event("scroll"));
+	});
+	racing.observe(tab.root, { childList: true, subtree: true, characterData: true });
+	metrics.scrollHeight = 1400;
+	d.append(said("14:03", "racing entry"));
+	tab.refresh();
+	await tab.waitText(/racing entry/);
+	// The page's next frame and the task after it: the render's deferred effect was queued first, so it has run.
+	await new Promise<void>((done) => tab.window.requestAnimationFrame(() => tab.window.setTimeout(done)));
+	assert.equal(scroller().scrollTop, 300, "scrolling up in the frame after a render keeps the reader's place");
 });
 
 
