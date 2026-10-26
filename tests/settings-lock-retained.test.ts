@@ -1,9 +1,9 @@
 /**
- * Retained from tests/settings-lock.test.ts (P16b): `acquireSettingsLock`'s `onBeforeReclaim` and `pid` options stage a
- * competing reclaim and a reclaimed holder in one process; no e2e entry point can interleave two settings writes there.
+ * Retained from tests/settings-lock.test.ts (P16b): `acquireSettingsLock`'s result (0600 mode, `reclaimed`)
+ * and its `isPidAlive`/`onBeforeReclaim`/`pid` options; a settings write releases its lock and reports no reclaim.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { test, type TestContext } from "node:test";
 import { acquireSettingsLock, settingsLockPath } from "../src/settings-lock.ts";
@@ -19,6 +19,36 @@ const plant = (path: string, record: unknown) => {
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, typeof record === "string" ? record : JSON.stringify(record));
 };
+
+test("acquire: O_EXCL create at 0600; a second acquire while held is busy; release frees it", (t) => {
+	const dir = home(t);
+	const first = acquireSettingsLock(dir);
+	assert.ok(first.ok);
+	const path = settingsLockPath(dir);
+	assert.equal(statSync(path).mode & 0o777, 0o600);
+	assert.equal(JSON.parse(readFileSync(path, "utf8")).pid, process.pid);
+	const second = acquireSettingsLock(dir);
+	assert.equal(second.ok, false);
+	assert.match((second as { reason: string }).reason, /another settings write holds/);
+	assert.equal(first.release(), true);
+	assert.equal(existsSync(path), false);
+	const third = acquireSettingsLock(dir);
+	assert.ok(third.ok);
+	third.release();
+});
+
+test("acquire: a dead holder is reclaimed once and reported", (t) => {
+	const dir = home(t);
+	const path = settingsLockPath(dir);
+	const stale = { schema_version: 1, pid: 999_999, started_at: "2026-01-01T00:00:00Z", nonce: "dead" };
+	plant(path, stale);
+	const result = acquireSettingsLock(dir, { isPidAlive: () => false });
+	assert.ok(result.ok);
+	assert.deepEqual(result.reclaimed, stale);
+	assert.notEqual(JSON.parse(readFileSync(path, "utf8")).nonce, "dead");
+	assert.ok(result.release());
+});
+
 test("acquire: a competing reclaim in onBeforeReclaim wins; the loser refuses and leaves the winner's lock", (t) => {
 	const dir = home(t);
 	const path = settingsLockPath(dir);

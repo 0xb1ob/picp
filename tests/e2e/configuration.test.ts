@@ -661,7 +661,7 @@ interface Bridge {
 const SETTINGS_ENV = { CP_JOB_WALL_CLOCK_SECONDS: undefined, CP_JOB_TOOL_CALL_CAP: undefined, CP_PARENT_MODEL: undefined, CP_OPERATOR_MODEL: undefined, CP_GATEWAY_ADMIN_KEY: undefined };
 let frames = 0;
 
-/** The operator's own pi with the real cp-bridge on `home`; get/apply are the dashboard's settings frames on its socket. */
+/** The operator's pi with the real cp-bridge on `home`; get/apply send the dashboard's settings frames. */
 async function bridge(t: TestContext, home: string, options: { env?: NodeJS.ProcessEnv; ext?: string; umask?: number } = {}): Promise<Bridge> {
 	const agent = createAgentDir();
 	const state = join(home, LAYOUT.state);
@@ -767,8 +767,8 @@ const OVERRIDES: Record<SettingFileOwner, unknown> = {
 	viewer: { strict_host: true },
 };
 
-// P16-settings-read: settings_get on the real bridge serves the catalog, each owner's own loader value with its source and
-// status, a revision that moves on bytes and session env only, and never writes, throws or leaks a secret or the home.
+// P16-settings-read: settings_get serves the catalog and each owner loader's value, source and status, a revision
+// moved by bytes and session env only; it never writes, throws or leaks a secret or the home.
 test("P16-settings-read: the operator session's settings_get serves the catalog and every owner's value, source and revision, writes nothing and leaks no secret or home path", { timeout: 300_000 }, async (t) => {
 	const scratch = createScratchHome();
 	t.after(() => scratch.cleanup());
@@ -841,7 +841,7 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 	assert.notEqual(changed.revision, first.revision);
 	assert.notEqual(ownerRow(changed, "budgets")?.sha256, ownerRow(first, "budgets")?.sha256);
 
-	// An invalid owner reads as its consumer behaves: refused, disabled or a fallback, never a throw; errors redact the home.
+	// An invalid owner reads as its consumer behaves (refused, disabled or a fallback); errors redact the home.
 	const invalid = (key: SettingKey) => {
 		if (key === "grants.token_ceiling") return { value: 0, source: "code", status: "fallback" };
 		if (key === "sessions.operator_compact_at_tokens") return { value: catalog.find((field) => field.key === key)?.default, source: "code", status: "fallback" };
@@ -881,7 +881,7 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 	] as Array<[SettingKey, unknown, string?]>) expectView(filed, key, value, source);
 	await b.close();
 
-	// Model pins: the file beats them, env when the file has no key, a fallback beside an invalid key; never in the revision.
+	// Model pins: file beats env; env when the key is absent; a fallback beside an invalid key; never in the revision.
 	b = await bridge(t, home, { env: { CP_PARENT_MODEL: " env/parent ", CP_OPERATOR_MODEL: "env/operator" } });
 	const pinned = (await b.get()).snapshot;
 	assert.equal(pinned.revision, filed.revision, "model pins never move the revision");
@@ -969,7 +969,7 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	const audit = () => auditOf(home);
 	const settled = (result: Applied) => [result.status, result.state];
 
-	// Set per owner: only the named key changes, other keys survive, read-back is file/ok; the same values write nothing.
+	// Set per owner: only the named key changes, read-back is file/ok; the same values again write nothing.
 	fullHome(home);
 	const set = await b.apply({ mode: "set", changes: SET });
 	assert.deepEqual(settled(set), [200, "applied"], JSON.stringify(set));
@@ -1005,7 +1005,7 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	for (const key of ["review.timeout_ms", "sessions.operator_compact_at_tokens", "capacity.five_hour", "capacity.seven_day", "viewer.strict_host", "maintenance.update_interval_min"]) assert.equal(actions[key], "delete", key);
 	for (const key of ["grants.job_cap", "grants.ask_on", "budgets.spawn_cap", "budgets.warn_ratio", "sessions.wall_clock_seconds", "sessions.parent_compact_at_tokens", "maintenance.update_enabled"]) assert.equal(actions[key], "set", key);
 
-	// Maintenance restore: the installer seed on an installed home (a dry run shows it), false otherwise, 409 when unreadable.
+	// Maintenance restore: the installer seed on an installed home (dry run shows it), else false; 409 when unreadable.
 	resetHome(home);
 	writeFileSync(join(home, LAYOUT.data, "daemon.json"), JSON.stringify({ schema_version: 1, generated_by: "cp-install" }));
 	putOwner(home, "update", { enabled: false, interval_min: 40 });
@@ -1040,7 +1040,7 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	}
 	assert.equal((await b.apply({ mode: "restore", section: "nope" })).status, 400);
 
-	// Absent bases: update.json is created {enabled:false} at 0600, mandate-defaults from the scaffold; capacity is 409.
+	// Absent bases: update.json is created {enabled:false} at 0600, mandate-defaults from the scaffold; capacity 409.
 	const based = await b.apply({ mode: "set", changes: { "maintenance.update_interval_min": 20, "grants.job_cap": 4 } });
 	assert.equal(based.state, "applied", JSON.stringify(based));
 	assert.deepEqual(ownerJson(home, "update"), { enabled: false, interval_min: 20 });
@@ -1152,7 +1152,7 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	const text = readFileSync(settingsAuditFile(home), "utf8");
 	for (const secret of ["sk-test-secret", "secret-gateway", "/v1/secret-path", home]) assert.ok(!text.includes(secret), `audit leaks ${secret}`);
 
-	// Hand-added policy keys survive set and restore; a flag-only file is valid; a non-boolean flag is 409 with bytes kept.
+	// Hand-added policy keys survive set and restore; a flag-only file is valid; a non-boolean flag is 409, bytes kept.
 	resetHome(home);
 	const policy = { scope_policy: "named_jobs_only", deny_projects: ["demo"] };
 	putOwner(home, "worker-bounds", { wall_clock_seconds: 100, allow_dispatch_override: false });
@@ -1172,7 +1172,7 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	assert.equal((await b.apply({ mode: "set", changes: { "sessions.wall_clock_seconds": 200 } })).status, 409);
 	assert.deepEqual(readFileSync(ownerPath(home, "worker-bounds")), flagBytes);
 
-	// Model pins: set into absent files keeps parent compaction on; null deletes the key; restore deletes; bad refs are 400.
+	// Model pins: set into absent files keeps parent compaction on; null and restore delete the key; bad refs are 400.
 	resetHome(home);
 	const pins = await b.apply({ mode: "set", changes: { "models.parent": "anthropic/claude-opus-5-5", "models.operator": "openai/gpt-5" } });
 	assert.deepEqual(settled(pins), [200, "applied"], JSON.stringify(pins));
@@ -1230,7 +1230,7 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	assert.equal((await b.apply({ mode: "set", changes: { "models.rubric": [{ ...current[0], model: "" }, current[1], current[2]] } })).status, 400);
 	assert.ok(readFileSync(routingFile).equals(routingBytes), "every refusal leaves the bytes");
 
-	// models.rubric restore from the shipped template: matching ids only; a hand row stays; a template-only row is not added.
+	// models.rubric restore from the shipped template: matching ids only; hand rows stay; no template-only row.
 	const shipped = JSON.parse(readFileSync(join(REPO_ROOT, "defaults/routing.default.json"), "utf8"));
 	const handRow = { id: "custom", role: "implementer", project: "demo", model: "openai/gpt-5" };
 	const local = structuredClone(shipped);
@@ -1251,17 +1251,17 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	assert.deepEqual(listing(home, settingsAuditFile(home)), absentBefore);
 });
 
-/** A viewer under --require-tailnet on loopback over `home`; returns GET /api/settings's status and body. */
-async function settingsPage(t: TestContext, home: string): Promise<{ status: number; body: Record<string, unknown> }> {
+/** A viewer under --require-tailnet on loopback over `home`; returns one request's status and JSON body. */
+async function settingsPage(t: TestContext, home: string, path = "/api/settings", init: RequestInit = {}): Promise<{ status: number; body: Record<string, unknown> }> {
 	const viewer = createViewer({ home, stateDir: join(home, LAYOUT.state), host: "127.0.0.1", port: 0, requireTailnet: true, log: () => {}, operatorStart: { tmux: null, herdr: null } });
 	await new Promise<void>((done) => viewer.listen(0, "127.0.0.1", done));
 	t.after(() => viewer.close());
-	const reply = await fetch(`http://127.0.0.1:${(viewer.address() as AddressInfo).port}/api/settings`);
+	const reply = await fetch(`http://127.0.0.1:${(viewer.address() as AddressInfo).port}${path}`, init);
 	return { status: reply.status, body: await reply.json() as Record<string, unknown> };
 }
 
-// P16-settings-frames: the bridge's settings ops check every frame strictly before the transaction, ignore a frame's
-// actor, write no dashboard journal line; the viewer serves them, and an operator session built before Settings says so.
+// P16-settings-frames: settings ops check each frame before the transaction and ignore its actor; the viewer
+// serves and relays them; an operator session built before Settings says so.
 test("P16-settings-frames: settings_apply refuses malformed frames before the transaction, the viewer serves Settings from the bridge, and a pre-Settings bridge answers unknown op", { timeout: 300_000 }, async (t) => {
 	const scratch = createScratchHome();
 	t.after(() => scratch.cleanup());
@@ -1310,6 +1310,26 @@ test("P16-settings-frames: settings_apply refuses malformed frames before the tr
 	const page = await settingsPage(t, home);
 	assert.equal(page.status, 200, JSON.stringify(page.body));
 	assert.deepEqual([page.body.running, page.body.supported, (page.body.snapshot as SettingsSnapshot | null)?.revision], [true, true, restored.revision]);
+
+	// The dashboard's apply/restore relay checks If-Match and the control token; the session's outcome passes through.
+	mkdirSync(join(home, LAYOUT.data, "push"), { recursive: true });
+	writeFileSync(join(home, LAYOUT.data, "push", "config.json"), JSON.stringify({ origin: PUSH_ORIGIN, subject: "mailto:op@example.com", public_key: Buffer.alloc(65, 4).toString("base64url"), created_at: "2026-01-01T00:00:00Z" }));
+	const post = (token: string, path: string, body: object, headers: Record<string, string> = {}) => settingsPage(t, home, path, {
+		method: "POST", body: JSON.stringify(body),
+		headers: { origin: PUSH_ORIGIN, "content-type": "application/json", "sec-fetch-site": "same-origin", "x-cp-control-token": token, ...headers },
+	});
+	const change = { changes: { "review.timeout_ms": 30_000 }, request_id: "web-12345678" };
+	assert.equal((await post(b.record.csrf, "/api/settings/apply", change)).status, 428);
+	assert.equal((await post("stale", "/api/settings/apply", change, { "if-match": `"${restored.revision}"` })).status, 403);
+	const relayed = await post(b.record.csrf, "/api/settings/apply", change, { "if-match": `"${restored.revision}"` });
+	assert.deepEqual([relayed.status, relayed.body.state], [200, "applied"], JSON.stringify(relayed.body));
+	assert.deepEqual(ownerJson(home, "gate"), { schema_version: 1, review_timeout_ms: 30_000 });
+	const staleWeb = await post(b.record.csrf, "/api/settings/apply", change, { "if-match": String(restored.revision) });
+	assert.deepEqual([staleWeb.status, staleWeb.body.state], [412, "stale"]);
+	const back = await post(b.record.csrf, "/api/settings/restore", { section: "review", request_id: "web-87654321" }, { "if-match": String(relayed.body.revision) });
+	assert.deepEqual([back.status, back.body.state], [200, "applied"], JSON.stringify(back.body));
+	assert.deepEqual(ownerJson(home, "gate"), { schema_version: 1 });
+	assert.ok((await b.get()).audit.some((line) => line.request_id === "web-87654321"), "the relayed frame is audited by the session");
 	await b.close();
 
 	// An operator session on a package built before Settings: its socket has no settings op, and the page says why.
@@ -1326,10 +1346,13 @@ test("P16-settings-frames: settings_apply refuses malformed frames before the tr
 	const predates = await settingsPage(t, home);
 	assert.deepEqual([predates.status, predates.body.running, predates.body.supported], [200, true, false]);
 	assert.match(String(predates.body.reason), /predates Settings; restart the operator session to load Settings/);
+	const unsupported = await post(old.record.csrf, "/api/settings/apply", { ...change, dry_run: true });
+	assert.equal(unsupported.status, 409, JSON.stringify(unsupported.body));
+	assert.match(String(unsupported.body.error), /unsupported: the running operator session predates Settings/);
 });
 
-// P16-json-store: Settings' owner writes keep an existing file's mode (fchmod past the umask), create update.json and the
-// audit journal owner-only, leave other new owners to the umask; the curation journal's plain append takes the umask too.
+// P16-json-store: owner writes keep an existing file's mode, create update.json and the audit journal owner-only
+// and other new owners under the umask; the curation journal's plain append takes the umask too.
 test("P16-json-store: settings writes keep an existing owner's mode, create update.json and the audit journal at 0600 and other owners under the umask, and a plain journal append takes the umask", { timeout: 300_000 }, async (t) => {
 	const scratch = createScratchHome();
 	t.after(() => scratch.cleanup());
@@ -1391,8 +1414,8 @@ test("P16-json-store: settings writes keep an existing owner's mode, create upda
 type ToolEnd = { toolCallId?: string; isError?: boolean; result: { content?: Array<{ text?: string }> } };
 const endText = (end: ToolEnd | undefined) => (end?.result.content ?? []).map((part) => part.text ?? "").join("\n");
 
-// P16-grant-policy: data/mandate-defaults.json's scope_policy and deny_projects are re-read on every cp_mandate issue by a
-// lenient loader, refuse writing nothing, leave standing grants alone, and stay file-only: defaults_set cannot touch them.
+// P16-grant-policy: scope_policy and deny_projects are re-read leniently per cp_mandate issue, refuse writing nothing,
+// leave standing grants alone, and stay file-only: defaults_set cannot touch them.
 test("P16-grant-policy: cp_mandate issue re-reads scope_policy and deny_projects per call, refusals write nothing, and defaults_set neither sets nor drops them", { timeout: 300_000 }, async (t) => {
 	const b = await dispatchS29(t);
 	const file = join(b.home, LAYOUT.mandateDefaultsFile);
@@ -1477,8 +1500,8 @@ function pushToOrigin(b: Awaited<ReturnType<typeof dispatchS29>>, files: Record<
 	}
 }
 
-// P16-repo-map: a dispatched worker's brief carries the repo map of the base commit (depth two, exports, line counts,
-// ignored dirs out), cached per project and commit, capped at 6 KiB, opted out per clone; viewer-app gets its hint.
+// P16-repo-map: a dispatched brief carries the base commit's repo map (depth two, exports, line counts), cached per
+// commit, capped at 6 KiB, opted out per clone; viewer-app gets its typecheck hint.
 test("P16-repo-map: a dispatched brief carries the base commit's repo map, cached per commit, capped, with the viewer-app hint only for viewer-app, and a clone's opt-out wins", { timeout: 300_000 }, async (t) => {
 	const b = await dispatchS29(t, { files: {
 		"src/app.ts": "export const x = 1;\nexport async function run() {}\n",
@@ -1551,8 +1574,8 @@ function skill(dir: string, name: string, text = skillMd(`does ${name}`)): strin
 const FAKE_PARENT = join(REPO_ROOT, "tests", "fixtures", "fake-parent.mjs");
 const PUSH_ORIGIN = "https://cp.example.ts.net";
 
-// P16-skills: the viewer's skill catalog lists names and descriptions only and fails closed per entry; a dashboard message's
-// @mentions become code-written skill lines in the operator's turn; cp_parent send re-resolves skills under pi's agent dir.
+// P16-skills: /api/skills lists names and descriptions only, failing closed per entry; dashboard @mentions become
+// code-written skill lines; cp_parent send re-resolves skills under pi's agent dir.
 test("P16-skills: GET /api/skills serves the catalog fail-closed, dashboard @mentions reach the operator as skill lines, and cp_parent send relays fresh lines", { timeout: 300_000 }, async (t) => {
 	const scratch = createScratchHome();
 	const home = realpathSync(scratch.path);
@@ -1643,7 +1666,7 @@ test("P16-skills: GET /api/skills serves the catalog fail-closed, dashboard @men
 	const many = await message(Array.from({ length: 9 }, (_, i) => `@s${i}`).join(" "));
 	assert.deepEqual([many.status, many.body.error], [400, "at most 8 skill mentions per message (got 9)"]);
 
-	// cp_parent send: names and copied lines re-resolved strictly, with fresh dirs from pi's own agent dir, or nothing sent.
+	// cp_parent send: names and copied lines are re-resolved under pi's own agent dir, or nothing is sent.
 	await operator.prompt("Relay it to the parent.");
 	await operator.waitFor((r) => r.type === "tool_execution_end" && r.toolCallId === `bad-${names.length - 1}`, 120_000);
 	await operator.waitForSettled();

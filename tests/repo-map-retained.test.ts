@@ -1,6 +1,6 @@
 /**
- * Retained from tests/repo-map.test.ts (P16b): `repoMap`'s injected `git` runner fails `ls-tree`; a dispatch only reaches
- * repoMap after its own git reads of the same base succeeded, so no e2e entry point makes that read fail.
+ * Retained from tests/repo-map.test.ts (P16b): `repoMap`'s injected `git` runner fails `ls-tree`; a dispatch
+ * only reaches repoMap after its own git reads of the same base succeeded, so no e2e entry point makes that read fail.
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
