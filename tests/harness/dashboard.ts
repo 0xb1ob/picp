@@ -49,7 +49,7 @@ export async function startViewer(t: Context, { home, requireTailnet = true, at,
 	t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); await exited; });
 	await until(() => call(port, "/healthz").then((reply) => reply.status, () => 0), (status) => status === 200, `cp-view on ${port}\n${output}`, 60_000);
 	const origin = `http://127.0.0.1:${port}`;
-	return { port, origin, pin, output: () => output, get: (path: string, init: Init = {}) => call(port, path, init), open: (hash: string, hold?: RegExp) => openTab(t, port, hash, new Map(), hold) };
+	return { port, origin, pin, output: () => output, stop: async () => { child.kill("SIGKILL"); await exited; }, get: (path: string, init: Init = {}) => call(port, path, init), open: (hash: string, hold?: RegExp) => openTab(t, port, hash, new Map(), hold) };
 }
 
 /** A scratch home (its state dir made) with a running viewer. */
