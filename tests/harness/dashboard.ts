@@ -150,6 +150,8 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 	const text = () => root.textContent ?? "";
 	return {
 		window, document, root, requests, started, confirms, storage, close, text, release,
+		/** The app's own globals: set one (a `ResizeObserver`) before the screen that reads it mounts. */
+		globals: sandbox,
 		/** The app's own `navigator` (linkedom's window keeps its own): set `clipboard` to stage a copy. */
 		navigator: sandbox.navigator as { clipboard?: unknown },
 		/** Moves this tab's clock (its `Date`) forward by `ms`; the viewer's own clock is `pin`. */

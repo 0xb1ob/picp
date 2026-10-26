@@ -4,13 +4,15 @@
  * no layout or pixels).
  */
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { controlConfigFile, operatorThreadsFile } from "../../src/viewer/control-files.ts";
+import { controlConfigFile, controlJournalFile, operatorThreadsFile } from "../../src/viewer/control-files.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import { INBOX_REPLAY_PREFIX } from "../../src/viewer/thread-turns.ts";
 import { composerHref } from "../../viewer-app/routes.ts";
+import { time } from "../../viewer-app/format.ts";
+import { OperatorAsks } from "../../src/operator-asks.ts";
 import { type ControlPorts, type DashboardControl, type InlineImage, startDashboardControl } from "../../src/dashboard-control.ts";
 import { type Context, type Json, jsonl, pick, viewer, write } from "../harness/conversations.ts";
 import { openTab, operatorSession, type Tab, until } from "../harness/dashboard.ts";
@@ -468,4 +470,199 @@ test("P19-composer-skills: @ lists the installed skills once; arrows, Enter and 
 	await until(() => plain.requests.filter((r) => r.path.startsWith("/api/sessions")).length, (n) => n > 0, "the transcript read");
 	await settle();
 	assert.equal(plain.$("textarea"), null, "so no composer can hint a refused catalogue");
+});
+
+// ---- the transcript as a chat ---------------------------------------------------------------------------------------
+
+const at = (hm: string) => `2026-10-04T${hm}:00Z`;
+const line = (hm: string, message: unknown) => ({ type: "message", timestamp: at(hm), message });
+const image = (n: number, ext: string) => `im-2026100${n}-${"0123456789abcdef".repeat(2).slice(n, n + 24)}.${ext}`;
+const TX = "tx-20261004-0123456789abcdef01234567.html", LONG_NAME = `${"a".repeat(100)}.html`;
+/** The minified stylesheet the served page links. */
+const servedCss = async (d: { get(path: string): Promise<{ text: string }> }) => (await d.get(String(/<link rel="stylesheet" href="([^"]+)"/.exec((await d.get("/")).text)?.[1]))).text;
+/** A viewer whose recorded operator transcript is `rows`; `seed` adds state (asks, upload audit lines). */
+const chat = (t: Context, rows: unknown[], seed?: (stateDir: string) => void) => viewer(t, { seed: (stateDir, home) => {
+	const file = join(home, "pi-sessions", "chat.jsonl");
+	write(file, jsonl(rows));
+	write(operatorSessionsFile(join(stateDir, "sessions")), jsonl([{ at: at("13:00"), session_file: file }]));
+	seed?.(stateDir);
+} });
+const dashboardSay = (hm: string, id: string, text: string, tail = "") => line(hm, { role: "user", content: [{ type: "text", text: `${text}\n[cp-dashboard ${id} — from the dashboard${tail}]` }] });
+
+test("P19-transcript-chat: own bubbles right, the session's left, grouped under one header; markdown is elements, never HTML; notices and ask cards are not bubbles", { timeout: 120_000 }, async (t) => {
+	let askId = "";
+	const markdown = "Summary:\n- **one**\n- two\n  more of two\n  - nested\n1. first\n\n```\nnpm test -- a-very-long-command-line\n  indented\n```\n\n| job | CI |\n| --- | :-: |\n| cp-a | `green` |\n\n## Title\n> quoted\n> twice\n\n| not a table |\nplain\n\none\ntwo\n\n<script>alert(1)</script>";
+	const d = await chat(t, [
+		line("14:00", { role: "user", content: [{ type: "text", text: "first own" }] }),
+		line("14:01", { role: "user", content: [{ type: "text", text: "second own" }] }),
+		line("14:01", { role: "assistant", content: [{ type: "toolCall", id: "r1", name: "read", arguments: { path: "a" } }] }),
+		line("14:01", { role: "toolResult", toolCallId: "r1", toolName: "read", content: [{ type: "text", text: "a\nb" }] }),
+		line("14:02", { role: "assistant", content: [{ type: "text", text: markdown }] }),
+		line("14:03", { role: "assistant", content: [{ type: "text", text: "grouped reply\n\n```\nunclosed" }] }),
+		line("14:30", { role: "assistant", content: [{ type: "text", text: "after a long gap" }] }),
+		dashboardSay("14:31", "dc-20261004143100-0123abcd", "from the dashboard"),
+		{ type: "compaction", timestamp: at("14:32"), tokensBefore: 182000 },
+		...parentCall("ask-call", { action: "ask" }, "ASK").map((row) => ({ ...row, timestamp: at("14:33") })),
+	], (stateDir) => { askId = new OperatorAsks(join(stateDir, "operator", "asks.jsonl")).open({ project: "demo", question: "CARD", recommendation: "Keep", options: [{ label: "Keep", consequence: "Keep it" }] }).id; });
+	const file = join(d.home, "pi-sessions", "chat.jsonl");
+	write(file, readFileSync(file, "utf8").replace('"ASK"', JSON.stringify(JSON.stringify({ id: askId }))));
+	const tab = await d.open(OPERATOR);
+	await tab.find(".session-ask");
+	const bubbles = tab.$$(".session-bubble");
+	assert.deepEqual(bubbles.map((b) => b.getAttribute("class")), [
+		"session-message session-say session-bubble session-own",
+		"session-message session-say session-bubble session-own session-grouped",
+		"session-message session-say session-bubble session-other",
+		"session-message session-say session-bubble session-other session-grouped",
+		"session-message session-say session-bubble session-other",
+		"session-message session-say session-bubble session-own",
+	], "a tool run never splits a group; a 27-minute gap and a change of author do");
+	const hm = (s: string) => time(at(s));
+	assert.deepEqual(bubbles.map((b) => b.querySelector(".session-who")?.textContent ?? null), [`You${hm("14:00")}`, `You${hm("14:01")}`, `OPOperator${hm("14:02")}`, null, `OPOperator${hm("14:30")}`, `Youdashboard${hm("14:31")}`], "own pills keep their time; the session's header shows once per group");
+	assert.deepEqual(bubbles.map((b) => b.querySelector(".session-who") === null ? null : b.firstElementChild!.classList.contains("session-who") ? "above" : "below"), ["below", "below", "above", null, "above", "below"], "own time below the pill, the session's header above");
+	assert.equal(bubbles[0]!.querySelector(".session-who-name")?.textContent, "You");
+	assert.ok(bubbles[2]!.querySelector(".session-avatar.session-avatar-bot"), "the Operator wears the identity avatar");
+	const html = tab.root.innerHTML, days = tab.$$(".session-day").map((s) => [s.textContent, html.indexOf(s.outerHTML)] as const);
+	assert.deepEqual(days.filter(([, i]) => i < html.indexOf(bubbles[5]!.outerHTML)).map(([day]) => day), ["Sun, Oct 4"], "one day separator above the first message of 4 Oct");
+	const md = bubbles[2]!;
+	assert.deepEqual([...md.querySelectorAll("ul > li > strong")].map((s) => s.textContent), ["one"]);
+	assert.deepEqual([...md.querySelectorAll("ul ul > li")].map((li) => li.textContent), ["nested"], "an indented item nests under the item above");
+	assert.deepEqual([...md.querySelectorAll("ol > li")].map((li) => li.textContent), ["first"]);
+	assert.equal(md.querySelector("pre.md-code > code")?.textContent, "npm test -- a-very-long-command-line\n  indented", "a fence keeps its indentation");
+	assert.deepEqual([...md.querySelectorAll(".md-table th, .md-table td")].map((c) => c.textContent), ["job", "CI", "cp-a", "green"], "one table, its rule row aligned");
+	assert.equal(md.querySelector(".md-table td code")?.textContent, "green");
+	assert.deepEqual([md.querySelector(".md-heading strong")?.textContent, md.querySelector("blockquote")?.textContent], ["Title", "quoted\ntwice"]);
+	assert.ok([...md.querySelectorAll("p")].some((p) => p.textContent === "| not a table |\nplain"), "a pipe line without a rule stays text");
+	assert.ok([...md.querySelectorAll("p")].some((p) => p.textContent === "one\ntwo"), "a paragraph keeps its line break");
+	assert.ok([...md.querySelectorAll("p")].some((p) => p.textContent === "<script>alert(1)</script>"), "HTML stays literal text");
+	assert.equal(tab.root.querySelector("script"), null);
+	assert.equal(bubbles[3]!.querySelector("pre.md-code > code")?.textContent, "unclosed", "an unclosed fence runs to the end");
+	assert.equal(tab.$(".session-system")?.getAttribute("class"), "session-message session-notice session-system", "compaction is a compact system row");
+	assert.match(tab.$(".session-system")?.textContent ?? "", /Context compacted \(182000 tokens before\)/);
+	assert.ok(tab.$("article.session-message.session-notice:not(.session-system) .session-ask"), "the ask card keeps its card");
+	assert.match(bubbles[5]!.textContent!, /dashboard dc-20261004143100-0123abcd/, "a dashboard message keeps its id");
+});
+
+test("P19-transcript-media: a dashboard bubble's upload ids are thumbnails that open and close, a gone one reads image expired; text files are chips to plain-text views; fences stay code", { timeout: 120_000 }, async (t) => {
+	const ids = [image(4, "png"), image(5, "jpg")];
+	const d = await chat(t, [
+		dashboardSay("14:00", "dc-20261004140000-0123abcd", "look", `; images=${ids.join(",")}`),
+		line("14:01", { role: "assistant", content: [{ type: "text", text: "no images here" }] }),
+		dashboardSay("14:02", "dc-20261004140200-4567abcd", "File: report.html\n~~~~~text\n<script>alert(1)</script>\n```\n~~~~\n~~~~~", `; files=${TX}`),
+	], (stateDir) => write(controlJournalFile(stateDir), jsonl([{ type: "upload", id: TX, name: LONG_NAME, bytes: 1025 }])));
+	const tab = await d.open(OPERATOR);
+	const bubble = await tab.find(".session-bubble", (b) => b.querySelector("img.session-image") !== null);
+	assert.deepEqual([...bubble.querySelectorAll("img.session-image")].map((i) => i.getAttribute("src")), ids.map((id) => `/api/operator/uploads/${id}`), "same-origin upload route, so img-src 'self' holds");
+	assert.equal(tab.$$(".session-images").length, 1, "only the bubble with images gets a strip");
+	tab.click(bubble.querySelector(".session-image-toggle")!);
+	await until(() => bubble.querySelector(".session-images > li")?.getAttribute("class"), (c) => c === "session-image-open", "the opened image");
+	assert.equal(bubble.querySelector(".session-image-toggle")!.getAttribute("aria-expanded"), "true");
+	tab.click(bubble.querySelector(".session-image-toggle")!);
+	await until(() => bubble.querySelector(".session-image-open"), (o) => o === null, "a second tap closes it");
+	assert.equal((await d.get(`/api/operator/uploads/${ids[1]}`)).status, 404, "the second upload is gone from the store");
+	bubble.querySelectorAll("img.session-image")[1]!.dispatchEvent(new tab.window.Event("error"));
+	assert.deepEqual(await until(() => [...bubble.querySelectorAll(".session-images > li")].map((li) => li.textContent), (l) => l[1] === "image expired", "image expired"), ["", "image expired"], "the gone file reads image expired; the other stays");
+	assert.equal(bubble.querySelectorAll("img.session-image").length, 1);
+	assert.doesNotMatch(bubble.outerHTML, /style=/, "no inline styles (CSP style-src-attr 'none')");
+	const link = await tab.find(".session-file-link");
+	assert.deepEqual([link.getAttribute("href"), link.getAttribute("target"), link.getAttribute("rel")], [`/api/operator/uploads/${TX}`, "_blank", "noopener noreferrer"]);
+	assert.deepEqual([link.querySelector("span")?.textContent, link.querySelector("small")?.textContent], [LONG_NAME, "2 KiB"], "the audit line's name and size");
+	assert.equal(link.closest(".session-bubble")!.querySelector("pre code")?.textContent, "<script>alert(1)</script>\n```\n~~~~", "a longer fence holds shorter ones as code");
+	assert.equal(tab.root.querySelector("script"), null);
+	const css = await servedCss(d);
+	assert.match(css, /\.session-images\{[^}]*flex-wrap:wrap/, "tiles wrap inside the bubble at 390 px");
+	assert.match(css, /\.session-image\{[^}]*width:96px;height:96px;object-fit:cover/);
+	assert.match(css, /\.session-image-open \.session-image\{[^}]*max-width:100%/, "an opened image never passes the bubble");
+	assert.match(css, /\.session-files\{[^}]*flex-wrap:wrap/);
+	assert.match(css, /\.session-file-link\{[^}]*min-height:44px;[^}]*overflow-wrap:anywhere/);
+});
+
+test("P19-transcript-scroll: the transcript stays pinned to the bottom unless scrolled up; the pill jumps back and re-pins; an opened relay shows six lines behind Show more", { timeout: 120_000 }, async (t) => {
+	const relay = ["HELD PR LANDED", ...Array.from({ length: 10 }, (_, i) => `RELAY-${i + 1}`)].join("\n");
+	const rows: unknown[] = [
+		{ type: "custom_message", timestamp: at("14:00"), customType: "cp-bridge", display: true, content: relay },
+		{ type: "custom_message", timestamp: at("14:00"), customType: "cp-bridge", display: true, content: "short\nRELAY-SHORT" },
+		line("14:01", { role: "assistant", content: [{ type: "text", text: "a1" }] }),
+	];
+	const d = await chat(t, rows);
+	const file = join(d.home, "pi-sessions", "chat.jsonl");
+	const tab = await d.open("#settings");
+	// Linkedom lays nothing out: the transcript's scroll metrics and layout observer are the test's own.
+	const metrics = { scrollHeight: 1000, clientHeight: 400 }, tops = new WeakMap<object, number>(), observers: Array<() => void> = [];
+	const proto = tab.window.HTMLElement.prototype as object;
+	const saved = ["scrollHeight", "clientHeight", "scrollTop"].map((key) => [key, Object.getOwnPropertyDescriptor(proto, key)] as const);
+	t.after(() => { for (const [key, was] of saved) { if (was) Object.defineProperty(proto, key, was); else Reflect.deleteProperty(proto, key); } });
+	Object.defineProperties(proto, {
+		scrollHeight: { configurable: true, get: () => metrics.scrollHeight },
+		clientHeight: { configurable: true, get: () => metrics.clientHeight },
+		scrollTop: { configurable: true, get(this: object) { return tops.get(this) ?? 0; }, set(this: object, value: number) { tops.set(this, Math.min(value, metrics.scrollHeight - metrics.clientHeight)); } },
+	});
+	tab.globals.ResizeObserver = class { constructor(callback: () => void) { observers.push(callback); } observe() {} disconnect() {} };
+	tab.go(OPERATOR);
+	const scroller = () => tab.$(".session-transcript") as unknown as { scrollTop: number; dispatchEvent(e: Event): boolean };
+	const pill = () => tab.$(".session-new");
+	const grow = async (height: number) => { metrics.scrollHeight = height; for (const callback of observers) callback(); await settle(); };
+	const more = async (text: string, height: number) => {
+		metrics.scrollHeight = height;
+		rows.push(line("14:02", { role: "assistant", content: [{ type: "text", text }] }));
+		write(file, jsonl(rows));
+		tab.refresh();
+		await tab.waitText(new RegExp(text));
+		await settle();
+	};
+	await tab.waitText(/a1/);
+	assert.equal(await until(() => scroller().scrollTop, (top) => top === 600, "the open at the newest"), 600, "opens at the newest entry");
+	assert.equal(pill(), null);
+	await grow(1100);
+	assert.equal(scroller().scrollTop, 700, "late layout keeps a pinned transcript at the bottom");
+	scroller().scrollTop = 200;
+	scroller().dispatchEvent(new tab.window.Event("scroll"));
+	assert.equal((await tab.find(".session-new")).textContent, "Jump to latest", "scrolled up: the pill offers the way back");
+	await more("a3", 1200);
+	assert.equal(scroller().scrollTop, 200, "a new entry never yanks a reader who scrolled up");
+	await grow(1250);
+	assert.equal(scroller().scrollTop, 200, "nor does late layout");
+	metrics.scrollHeight = 1200;
+	tab.click(pill()!);
+	await settle();
+	assert.equal(scroller().scrollTop, 800, "the pill jumps to the latest");
+	assert.equal(pill(), null, "and goes away");
+	await more("a4", 1400);
+	assert.equal(scroller().scrollTop, 1000, "pinned again: the next entry scrolls into view");
+
+	const [long, short] = tab.$$(".session-bridge");
+	tab.click(long!.querySelector(".session-notice-line")!);
+	assert.equal((await tab.find(".session-notice-rest p")).textContent, "RELAY-1\nRELAY-2\nRELAY-3\nRELAY-4\nRELAY-5\nRELAY-6");
+	assert.equal(long!.querySelector(".session-notice-more")!.textContent, "Show more (4 lines)");
+	tab.click(long!.querySelector(".session-notice-more")!);
+	assert.match(await until(() => long!.querySelector(".session-notice-rest p")!.textContent!, (s) => s.includes("RELAY-10"), "the rest"), /RELAY-6\nRELAY-7\nRELAY-8\nRELAY-9\nRELAY-10$/);
+	assert.equal(long!.querySelector(".session-notice-more"), null);
+	tab.click(short!.querySelector(".session-notice-line")!);
+	await until(() => short!.querySelector(".session-notice-rest"), Boolean, "the short relay opened");
+	assert.equal(short!.querySelector(".session-notice-more"), null, "nothing to hide, no Show more");
+});
+
+test("P19-transcript-css: phone pills reach 84% and cards the column; desktop one 820 px column, 670 px cards, 72% pills; code and tables scroll inside; one light palette on Sessions and Report", { timeout: 120_000 }, async (t) => {
+	const css = await servedCss(await viewer(t));
+	const wide = css.indexOf(".session-entries{max-width:820px"), split = css.lastIndexOf("@media(min-width:900px)", wide);
+	assert.ok(split > 0 && wide > split, "the 820 px column is desktop only");
+	const [phone, desktop] = [css.slice(0, split), css.slice(split)];
+	/** Every declaration the served CSS gives `selector` in `sheet`, in order. */
+	const rules = (sheet: string, selector: string) => [...sheet.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => m[1] === selector).map((m) => m[2]).join(";");
+	assert.match(rules(phone, ".session-bubble>.session-body"), /max-width:100%;.*overflow-wrap:anywhere/);
+	assert.match(rules(phone, ".session-own>.session-body"), /^max-width:84%;padding:9px 14px;background:var\(--session-you\);color:var\(--session-you-text\)/);
+	assert.match(rules(phone, ".session-other>.session-body"), /^padding:10px 14px;background:var\(--raised\);border:1px solid var\(--divider\);border-radius:4px 18px 18px/);
+	assert.match(rules(phone, ".md .md-code"), /max-width:100%;.*overflow-x:auto;.*white-space:pre/, "a long code line scrolls inside the bubble");
+	assert.match(rules(phone, ".md-table"), /^max-width:100%;overflow-x:auto/, "a wide table scrolls inside the bubble");
+	assert.match(rules(phone, ".sessions .md-table tbody tr:last-child td"), /border-bottom:0/, "Sessions tables have no rule under the last row");
+	assert.match(rules(phone, ".session-message.session-system"), /display:flex;.*background:none;border:0/, "system rows are never cards");
+	assert.match(rules(desktop, ".session-entries"), /^max-width:820px;margin:0 auto;padding:0 32px/);
+	assert.match(rules(desktop, ".session-other>.session-body"), /max-width:670px/);
+	assert.match(rules(desktop, ".session-own>.session-body"), /max-width:72%/);
+	assert.match(rules(phone, ".session-transcript"), /flex:1;min-height:0;overflow-y:auto/, "the transcript is the one scroller");
+	assert.match(rules(css, ".operator-composer"), /flex-shrink:0/, "the composer keeps its height at the bottom of the panel");
+	const light = /@media\(prefers-color-scheme:light\)\{\.shell-sessions,\.shell-report\{([^}]*)\}\}/.exec(css)?.[1] ?? "";
+	assert.match(light, /color-scheme:light;color:var\(--text\)/, "native controls and inherited text follow");
+	for (const pair of ["--background: #f4f2ed;", "--nav: #ebe8e1;", "--raised: #ffffff;", "--text: #1d1c1a;", "--dim: #6b675f;", "--session-you: #2d5aa8;", "--session-code-mix: 5%"]) assert.ok(light.includes(pair), `measured light token: ${pair}`);
+	assert.equal(css.match(/prefers-color-scheme/g)?.length, 1, "one light block in every served stylesheet");
 });
