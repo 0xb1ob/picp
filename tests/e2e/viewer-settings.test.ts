@@ -141,7 +141,7 @@ test("P20-schedule-control-http: every refusal, in order, is one viewer line of 
 	assert.match(String(full.body.error), /20 schedule requests already wait for the parent/);
 	assert.equal(lines(scheduleControlFile(stateDir)).length, queued, "a full queue writes no request line");
 	rmSync(scheduleControlFile(stateDir));
-	// Readable (one JSON number) but unwritable even as root: kernfs refuses writes to a 0444 attribute. No chmod, no skip.
+	// Readable (one JSON number) but unwritable even as root: kernfs refuses writes to a 0444 attribute.
 	symlinkSync("/sys/devices/system/cpu/kernel_max", scheduleControlFile(stateDir));
 	await refused(() => send(body), 500, /schedule control journal unwritable/);
 	rmSync(scheduleControlFile(stateDir));
@@ -993,7 +993,7 @@ test("P20-schedules-pointers: legacy grant pointers project pause, revoke proven
 });
 
 // ---------------------------------------------------------------------------------------------------------------
-// The served Schedules page (baseline tests/viewer-schedules.test.ts renders), DOM and text only: no 390/1440 px layout.
+// The served Schedules page (baseline tests/viewer-schedules.test.ts renders), DOM and text only, no layout.
 
 /** The Schedules page in a tab; `cards()` are the schedule cards, in file order. */
 async function schedulesPage(s: Awaited<ReturnType<typeof schedulesHome>>) {
