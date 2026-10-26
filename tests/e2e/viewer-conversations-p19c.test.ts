@@ -7,12 +7,13 @@ import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { operatorThreadsFile } from "../../src/viewer/control-files.ts";
+import { controlConfigFile, operatorThreadsFile } from "../../src/viewer/control-files.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import { INBOX_REPLAY_PREFIX } from "../../src/viewer/thread-turns.ts";
+import { composerHref } from "../../viewer-app/routes.ts";
 import { type ControlPorts, type DashboardControl, type InlineImage, startDashboardControl } from "../../src/dashboard-control.ts";
-import { type Context, type Json, jsonl, viewer, write } from "../harness/conversations.ts";
-import { type Tab, until } from "../harness/dashboard.ts";
+import { type Context, type Json, jsonl, pick, viewer, write } from "../harness/conversations.ts";
+import { openTab, operatorSession, type Tab, until } from "../harness/dashboard.ts";
 import { syntheticPng } from "../harness/images.ts";
 
 const AT = "2026-10-06T08:00:00Z";
@@ -261,4 +262,210 @@ test("P19-composer-images: the composer attaches, uploads one at a time, thumbna
 	choose(tab, [file("huge.json", "application/json", Buffer.alloc(4 * 1024 * 1024 + 1))]);
 	assert.match((await tab.find(".operator-composer-attachment-failed")).textContent ?? "", /larger than 4 MiB/);
 	assert.equal(sendDisabled(tab), true);
+});
+
+// ---- composer keys, drafts, footer and skills ----------------------------------------------------------------------
+
+/** A keydown on the composer field with the modifier and IME fields a browser sets, once the last input has rendered. */
+async function press(tab: Tab, field: Element, key = "Enter", init: { shiftKey?: boolean; ctrlKey?: boolean; isComposing?: boolean; keyCode?: number } = {}) {
+	await settle();
+	const event = new tab.window.Event("keydown", { bubbles: true, cancelable: true });
+	Object.defineProperties(event, { key: { value: key }, shiftKey: { value: !!init.shiftKey }, ctrlKey: { value: !!init.ctrlKey }, isComposing: { value: !!init.isComposing }, keyCode: { value: init.keyCode ?? 0 } });
+	field.dispatchEvent(event);
+}
+/** Types `value` with the caret at `caret` (default: its end), as a browser reports `selectionStart`. */
+function typeAt(tab: Tab, field: Element, value: string, caret = value.length) {
+	Object.defineProperty(field, "selectionStart", { configurable: true, writable: true, value: caret });
+	tab.type(field, value);
+}
+const field = (tab: Tab) => tab.$("textarea") as unknown as HTMLTextAreaElement;
+const cleared = (tab: Tab) => until(() => field(tab).value, (v) => v === "", "the composer cleared");
+const messages = (tab: Tab) => tab.started.filter((r) => r === "POST /api/operator/message").length;
+/** Lets the tab's queued renders and any request a handler would start run. */
+const settle = async () => { for (let i = 0; i < 5; i++) await new Promise<void>((done) => setImmediate(done)); };
+
+test("P19-composer-keys: Enter sends (a follow-up while busy), Ctrl+Enter too; Shift+Enter, IME, blank and in-flight Enter never send; steer and a two-tap abort", { timeout: 180_000 }, async (t) => {
+	let busy = true;
+	const d = await viewer(t);
+	await operatorSession(t, d.stateDir, () => !busy);
+	let tab = await d.open(OPERATOR);
+	await tab.find(".operator-composer-send", (b) => b.getAttribute("aria-label") === "Send after this turn");
+	const placeholder = field(tab).getAttribute("placeholder")!;
+	assert.deepEqual([placeholder, field(tab).getAttribute("title"), field(tab).getAttribute("rows")], ["Message Operator…", "Enter sends · Shift+Enter for a new line", "1"]);
+	assert.ok(placeholder.length <= 26, "the placeholder fits the one-row box at 390px");
+	const sent = async (n: number) => pick(await posted(tab, n), ["kind", "text", "deliver"]);
+	tab.type(field(tab), "ship it");
+	await press(tab, field(tab));
+	assert.deepEqual(await sent(1), { kind: "message", text: "ship it", deliver: "followUp" }, "Enter while busy follows up after this turn");
+	await cleared(tab);
+	tab.type(field(tab), "line one");
+	await press(tab, field(tab), "Enter", { shiftKey: true });
+	await press(tab, field(tab), "Enter", { isComposing: true });
+	await press(tab, field(tab), "Enter", { keyCode: 229 });
+	tab.type(field(tab), "   ");
+	await press(tab, field(tab));
+	tab.type(field(tab), "after");
+	tab.click(await tab.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
+	assert.deepEqual(await sent(2), { kind: "message", text: "after", deliver: "followUp" }, "the send button follows up; no Shift+Enter, IME or blank Enter sent first");
+	await cleared(tab);
+	tab.type(field(tab), "now");
+	tab.click(await tab.find(".operator-composer-menu button", (b) => b.textContent === "Steer now" && !b.hasAttribute("disabled")));
+	assert.deepEqual(await sent(3), { kind: "message", text: "now", deliver: "steer" });
+	tab.click(await tab.find(".operator-composer-abort", (b) => !b.hasAttribute("disabled")));
+	await tab.find(".operator-composer-abort", (b) => b.textContent === "Tap again to abort");
+	assert.equal(messages(tab), 3, "the first abort tap only arms it");
+	tab.click(tab.$(".operator-composer-abort")!);
+	assert.deepEqual(await sent(4), { kind: "abort", text: undefined, deliver: undefined }, "the confirm tap aborts");
+	assert.ok(await tab.find(".operator-composer-abort", (b) => b.textContent === "Abort turn"), "and disarms again");
+
+	busy = false;
+	tab = await tab.reopen();
+	await tab.find(".operator-composer-send", (b) => b.getAttribute("aria-label") === "Send");
+	assert.equal(tab.$(".operator-composer-more"), null, "idle: no steer or abort menu");
+	tab.type(field(tab), "hello");
+	await press(tab, field(tab));
+	assert.deepEqual(await sent(1), { kind: "message", text: "hello", deliver: undefined }, "Enter while idle is a plain send");
+	await cleared(tab);
+	tab.type(field(tab), "hello again");
+	await press(tab, field(tab), "Enter", { ctrlKey: true });
+	assert.deepEqual(await sent(2), { kind: "message", text: "hello again", deliver: undefined }, "Ctrl+Enter sends like Enter");
+	await cleared(tab);
+	tab.type(field(tab), "plain");
+	tab.click(await tab.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
+	assert.deepEqual(await sent(3), { kind: "message", text: "plain", deliver: undefined }, "the send button while idle is a plain send");
+
+	const held = await d.open(OPERATOR, /^\/api\/operator\/message$/);
+	held.type(await held.find("textarea"), "again");
+	await press(held, field(held));
+	await until(() => messages(held), (n) => n === 1, "the held send");
+	held.type(field(held), "again");
+	await press(held, field(held));
+	await settle();
+	assert.equal(messages(held), 1, "a send in flight is left alone");
+	held.release();
+});
+
+test("P19-composer-draft: a draft link fills the composer, clipped to the text cap, and never reaches the API; it keeps its thread and sends only when asked, online or offline", { timeout: 180_000 }, async (t) => {
+	const draft = "Explain why picp job cp-render failed and the available recovery options.";
+	for (const offline of [false, true]) {
+		const d = await viewer(t);
+		if (!offline) await operatorSession(t, d.stateDir);
+		const tab = await openTab(t, d.port, composerHref(draft), new Map([["cp-thread", "recovery"]]));
+		const box = await tab.find("textarea", (f) => (f as HTMLTextAreaElement).value === draft);
+		assert.equal(box.hasAttribute("disabled"), false);
+		assert.match((await tab.find(".operator-composer-footer select[aria-label=Thread]")).textContent ?? "", /recovery \(new\)/);
+		assert.ok(tab.requests.some((r) => r.path === "/api/sessions?view=you&transcript=1"));
+		assert.deepEqual(tab.requests.filter((r) => r.path.includes("draft")), [], "the draft never reaches the read API");
+		assert.equal(messages(tab), 0, "opening the link never sends");
+		tab.type(box, `${draft} Include the recorded cause.`);
+		await settle();
+		assert.equal(messages(tab), 0, "editing never sends");
+		tab.click(await tab.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
+		assert.deepEqual(pick(await posted(tab, 1), ["kind", "text", "thread"]), { kind: "message", text: `${draft} Include the recorded cause.`, thread: "recovery" }, offline ? "offline" : "online");
+		assert.equal(tab.storage.get("cp-thread"), "recovery", "navigation keeps the selected thread");
+		if (offline) continue;
+		const schedule = await tab.reopen(composerHref("Add a schedule (cp_schedule add): name …"));
+		assert.ok(await schedule.find("textarea", (f) => (f as HTMLTextAreaElement).value === "Add a schedule (cp_schedule add): name …"), "the Schedules page's Add schedule… draft");
+		const long = await schedule.reopen(composerHref("x".repeat(16_500)));
+		assert.equal((await long.find("textarea", (f) => (f as HTMLTextAreaElement).value.length > 0) as HTMLTextAreaElement).value.length, 16_000);
+	}
+});
+
+test("P19-composer-footer: attach, # thread and a closed Options naming the session file share the footer; off or with no file, no Options", { timeout: 180_000 }, async (t) => {
+	const d = await viewer(t);
+	const session = await operatorSession(t, d.stateDir);
+	let tab = await d.open(OPERATOR);
+	const options = await tab.find(".operator-composer-box > .operator-composer-footer > details.operator-composer-options");
+	assert.equal(options.hasAttribute("open"), false);
+	assert.equal(options.querySelector("summary")?.getAttribute("aria-label"), "Message options");
+	assert.match(options.querySelector("summary")?.textContent ?? "", /^Options ▾/);
+	assert.match(options.textContent ?? "", /operator-session\.jsonl/);
+	assert.deepEqual([tab.$(".operator-composer-state")?.textContent, tab.$(".operator-composer-state code"), field(tab).getAttribute("placeholder")], ["Ready", null, "Message Operator…"]);
+	const picker = await tab.find('select[aria-label="Thread"]');
+	assert.ok(picker.closest(".operator-composer-footer"), "the empty picker sits in the footer, outside Options");
+	assert.equal(picker.closest("details"), null);
+	assert.equal(tab.$(".operator-composer-posting"), null, "the pill names the selection; no status line repeats it");
+	assert.deepEqual([picker.closest(".thread-pill")?.querySelector(".thread-pill-label")?.textContent, picker.textContent], ["No thread", "No thread"]);
+	tab.close();
+	tab = await openTab(t, d.port, OPERATOR, new Map([["cp-thread", "new-fixture-thread"]]));
+	assert.match((await tab.find('select[aria-label="Thread"]', (s) => /new-fixture-thread/.test(s.textContent ?? ""))).textContent ?? "", /new-fixture-thread \(new\)/);
+	assert.deepEqual([tab.$(".thread-pill-label")?.textContent, field(tab).getAttribute("placeholder")], ["new-fixture-thread", "Message #new-fixture-thread…"]);
+	write(controlConfigFile(d.stateDir), '{"enabled": false}');
+	tab = await tab.reopen();
+	await tab.waitText(/Dashboard control is off/);
+	assert.equal(tab.$(".operator-composer-options"), null);
+	rmSync(controlConfigFile(d.stateDir));
+	session.control.stop();
+	await operatorSession(t, d.stateDir, () => true, { sessionFile: () => undefined });
+	tab = await tab.reopen();
+	await tab.find(".operator-composer-state", (s) => s.textContent === "Ready");
+	assert.equal(tab.$(".operator-composer-options"), null, "no empty Options without a destination file");
+});
+
+test("P19-composer-skills: @ lists the installed skills once; arrows, Enter and Tab insert, Escape closes; unknown tokens hint; no list without a ready control", { timeout: 180_000 }, async (t) => {
+	const catalogue: Array<[string, string]> = [["teach", "Explain step by step"], ["test-driven-development", "Red, green, refactor"], ["write-tests", "Cover the change"], ...Array.from({ length: 12 }, (_, i): [string, string] => [`s${i}`, `skill ${i}`])];
+	const seed = (_stateDir: string, home: string) => { for (const [name, description] of catalogue) write(join(home, "skills", name, "SKILL.md"), `---\ndescription: ${description}\n---\n\n# Body\n`); };
+	const d = await viewer(t, { seed });
+	const offline = await d.open(OPERATOR);
+	typeAt(offline, await offline.find("textarea"), "@te");
+	await settle();
+	assert.deepEqual([offline.$('[role="listbox"]'), texts(offline, ".operator-composer-hint")], [null, []], "no ready control: no list and no hint");
+	offline.close();
+	await operatorSession(t, d.stateDir);
+	const tab = await d.open(OPERATOR);
+	const options = () => texts(tab, '[role="listbox"] [role="option"]');
+	const hints = () => texts(tab, ".operator-composer-hint");
+	const reads = () => tab.started.filter((r) => r === "GET /api/skills").length;
+	typeAt(tab, await tab.find("textarea"), "please @te");
+	await until(options, (o) => o.length === 3, "the @te list");
+	assert.deepEqual(options(), ["@teachExplain step by step", "@test-driven-developmentRed, green, refactor", "@write-testsCover the change"], "prefix matches first, then substring");
+	assert.equal(reads(), 1, "the first @ fetches the catalogue");
+	assert.deepEqual([field(tab).getAttribute("aria-expanded"), field(tab).getAttribute("aria-controls"), tab.$('[role="option"]')!.getAttribute("aria-selected")], ["true", "operator-composer-skills", "true"]);
+	assert.deepEqual(hints(), [], "the token being completed is not hinted while names are offered");
+	await press(tab, field(tab), "ArrowDown");
+	assert.ok(await tab.find('[role="option"][aria-selected="true"]', (o) => /^@test-driven-development/.test(o.textContent ?? "")), "ArrowDown moves the highlight");
+	await press(tab, field(tab));
+	assert.equal(await until(() => field(tab).value, (v) => v.endsWith(" "), "the insert"), "please @test-driven-development ", "Enter inserts @name and a space");
+	assert.equal(tab.$('[role="listbox"]'), null, "the list closes after the insert");
+	assert.deepEqual(texts(tab, ".operator-composer-mentions li"), ["@test-driven-development"]);
+	assert.equal(messages(tab), 0, "Enter with the list open never sends");
+	await press(tab, field(tab));
+	assert.deepEqual(pick(await posted(tab, 1), ["kind", "text"]), { kind: "message", text: "please @test-driven-development" });
+	await cleared(tab);
+	typeAt(tab, field(tab), "@wr");
+	await until(options, (o) => o.length === 1, "the @wr list");
+	await press(tab, field(tab), "Tab");
+	assert.equal(await until(() => field(tab).value, (v) => v.endsWith(" "), "the Tab insert"), "@write-tests ", "Tab inserts too");
+	typeAt(tab, field(tab), "@te");
+	await until(options, (o) => o.length === 3, "the @te list again");
+	await press(tab, field(tab), "Escape");
+	await gone(tab, '[role="listbox"]');
+	await press(tab, field(tab));
+	assert.deepEqual(pick(await posted(tab, 2), ["kind", "text"]), { kind: "message", text: "@te" }, "Enter sends once the list is closed");
+	await cleared(tab);
+	typeAt(tab, field(tab), "ask @nope about it");
+	assert.deepEqual(await until(hints, (h) => h.length === 1, "the unknown hint"), ["@nope is not an installed skill — sent as plain text"]);
+	assert.equal(tab.$(".operator-composer-send")!.hasAttribute("disabled"), false, "an unknown token never blocks Send");
+	for (const [text, caret] of [["mail a@b.com"], ["hi @te ", 7], ["@Te"]] as Array<[string, number?]>) {
+		typeAt(tab, field(tab), text, caret);
+		await settle();
+		assert.equal(tab.$('[role="listbox"]'), null, `${text}: an email, a finished token or a capital opens no list`);
+		if (text === "mail a@b.com") assert.deepEqual(hints(), [], "an email is never hinted");
+	}
+	typeAt(tab, field(tab), "hi @te there", 6);
+	assert.equal((await until(options, (o) => o.length > 0, "the caret's mention")).length, 3, "the caret decides, not the end of the text");
+	typeAt(tab, field(tab), "@");
+	assert.equal((await until(options, (o) => o.length > 3, "every skill")).length, 8, "at most 8 names");
+	typeAt(tab, field(tab), "use @teach and @nope, mail a@b.com, @teach again", 0);
+	await until(hints, (h) => h.length === 1, "the mention hints");
+	assert.deepEqual([texts(tab, ".operator-composer-mentions li"), hints()], [["@teach"], ["@nope is not an installed skill — sent as plain text"]]);
+	assert.equal(reads(), 1, "the catalogue is fetched once");
+
+	const refused = await viewer(t, { requireTailnet: false, seed });
+	await operatorSession(t, refused.stateDir);
+	assert.deepEqual([(await refused.get("/api/skills")).status, (await refused.get("/api/operator/control")).status], [403, 403], "without --require-tailnet neither the catalogue nor control is served");
+	const plain = await refused.open(OPERATOR);
+	await until(() => plain.requests.filter((r) => r.path.startsWith("/api/sessions")).length, (n) => n > 0, "the transcript read");
+	await settle();
+	assert.equal(plain.$("textarea"), null, "so no composer can hint a refused catalogue");
 });
