@@ -1,15 +1,14 @@
-/** Retained from awaiting_merge PR3: exit precedence, the claim, the batched sweep's cursors and backoff (P18b). */
+/** Retained from awaiting_merge PR3: the in-process claim and the N20 withdrawal (P18b; the rest is e2e). */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyExit, decideExit, type ExitPorts, type PrSnapshot } from "../src/awaiting-merge-exits.ts";
-import { awaitingMergePorts } from "../src/awaiting-merge.ts";
-import { AwaitingMergeWatch, batchQuery, readWatchFile } from "../src/awaiting-merge-watch.ts";
+import { applyExit, type ExitPorts, type PrSnapshot } from "../src/awaiting-merge-exits.ts";
+import { AwaitingMergeWatch, readWatchFile } from "../src/awaiting-merge-watch.ts";
 import { EMPTY_USAGE, type FleetRecord } from "../src/contracts.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { AwaitingStore } from "../src/awaiting.ts";
 import { MergeStore } from "../src/merges.ts";
-import { readStackFollowups, StackFollowups } from "../src/stack-followups.ts";
+import { StackFollowups } from "../src/stack-followups.ts";
 import type { DurableWakeupInput } from "../src/wakeup-outbox.ts";
 import { createScratchHome } from "./harness/index.ts";
 
@@ -50,23 +49,6 @@ async function bench(t: { after(fn: () => void): void }, records: FleetRecord[] 
 	return { home: home.path, fleet, stacks, ports, wakes, closed, landed: () => landed };
 }
 
-test("decideExit: precedence, and a lower-priority event never clobbers a pending one (a close does)", () => {
-	const now = new Date("2026-10-15T12:00:00Z");
-	const record = parked().awaiting_merge!;
-	const busy = snap({ head_sha: "b".repeat(40), base: "dev", events: [
-		{ kind: "human_comment", id: "IC_1", at: "2026-10-15T11:00:00Z" }, { kind: "changes_requested", id: "PRR_1", at: "2026-10-15T11:30:00Z" },
-	] });
-	assert.equal(decideExit(record, { ...busy, state: "merged" }, now).kind, "merged");
-	const head = decideExit(record, busy, now);
-	assert.equal(head.kind === "pending" && head.pending.kind, "head_moved");
-	assert.equal(head.kind === "pending" && head.last_human_activity_at, "2026-10-15T11:30:00Z");
-	const pending = { kind: "human_comment" as const, event_id: "IC_0", observed_at: HANDED };
-	assert.equal(decideExit({ ...record, pending }, snap({ base: "dev" }), now).kind, "none");
-	const closed = decideExit({ ...record, pending }, snap({ state: "closed" }), now);
-	assert.equal(closed.kind === "pending" && closed.pending.kind, "closed_unmerged");
-	assert.equal(decideExit(record, snap({ base: "dev" }), now).kind === "pending", true);
-});
-
 test("applyExit: another claim holder skips the job instead of waiting", async (t) => {
 	const b = await bench(t);
 	const claims = new Map([["cp-park", "resume" as const]]);
@@ -91,55 +73,6 @@ function rawPr(over: Record<string, unknown> = {}) {
 	};
 }
 
-test("watch sweep: batches, filters bots/CP/pre-handoff, keeps a failed PR's last observation, advances cursors", async (t) => {
-	const b = await bench(t, [parked(), parked("cp-two", "cp-two", "main", 9)]);
-	const queries: string[] = [];
-	const answers = [
-		{ data: { rateLimit: { remaining: 4000, resetAt: "2026-10-15T13:00:00Z" }, p0: { pullRequest: rawPr() } } },
-		{ data: { rateLimit: { remaining: 4000 }, p0: null }, errors: [{ message: "Could not resolve to a PullRequest", path: ["p0"] }] },
-	];
-	const watch = new AwaitingMergeWatch({ ...b.ports, home: b.home, cpLogins: ["cp-bot"], batchSize: 1, runner: async (query) => (queries.push(query), answers.shift()) });
-	const result = await watch.sweep();
-	assert.equal(queries.length, 2);
-	assert.deepEqual(result.outcomes.map((outcome) => outcome.applied), ["none"]);
-	assert.deepEqual(result.catching_up, ["cp-park"]);
-	assert.match(result.errors[0]!, /cp-two: Could not resolve/);
-	const file = readWatchFile(b.home);
-	assert.deepEqual(file.prs.map((pr) => [pr.job_id, pr.cursors.comments, pr.approvals, pr.approvals_required]), [["cp-park", "C1", 1, null]]);
-	assert.match(batchQuery([{ owner: "o", name: "r", number: 7, prior: file.prs[0] }]), /comments\(first: 50, after: "C1"\)/);
-});
-
-test("watch sweep: a failing apply keeps the cursor, a runner failure and a low rate limit back off", async (t) => {
-	const b = await bench(t);
-	const human = rawPr({ comments: { pageInfo: { hasNextPage: false, endCursor: "C2" }, nodes: [{ id: "IC_h", createdAt: "2026-10-15T11:00:00Z", author: { login: "ann", __typename: "User" } }] } });
-	let now = new Date("2026-10-15T12:00:00Z");
-	const ports = { ...b.ports, now: () => now, fleet: Object.assign(Object.create(b.fleet), { mutate: async () => { throw new Error("disk full"); } }) };
-	let answer: unknown = { data: { p0: { pullRequest: human } } };
-	const watch = new AwaitingMergeWatch({ ...ports, home: b.home, runner: async () => { if (answer instanceof Error) throw answer; return answer; } });
-	const failed = await watch.sweep();
-	assert.match(failed.errors[0]!, /disk full; cursors kept/);
-	assert.equal(readWatchFile(b.home).prs.length, 0);
-	answer = new Error("gh: network down");
-	const down = await watch.sweep();
-	assert.equal(down.backoff_until, "2026-10-15T12:01:00Z");
-	assert.match((await watch.sweep()).skipped ?? "", /backing off/);
-	now = new Date("2026-10-15T12:02:00Z");
-	answer = { data: { rateLimit: { remaining: 10, resetAt: "2026-10-15T13:00:00Z" }, p0: { pullRequest: rawPr() } } };
-	const limited = await watch.sweep();
-	assert.equal(limited.backoff_until, "2026-10-15T13:00:00Z");
-});
-
-test("watch sweep: overlapping calls run one sweep", async (t) => {
-	const b = await bench(t);
-	let release!: () => void;
-	const gate = new Promise<void>((resolve) => { release = resolve; });
-	const watch = new AwaitingMergeWatch({ ...b.ports, home: b.home, runner: async () => { await gate; return { data: { p0: { pullRequest: rawPr() } } }; } });
-	const first = watch.sweep();
-	assert.equal((await watch.sweep()).skipped, "a sweep is already running");
-	release();
-	assert.equal((await first).observed, 1);
-});
-
 test("watch sweep: a skipped apply keeps the prior cursors, so that page is re-read", async (t) => {
 	const b = await bench(t);
 	const claims = new Map([["cp-park", "resume" as const]]);
@@ -148,26 +81,6 @@ test("watch sweep: a skipped apply keeps the prior cursors, so that page is re-r
 	assert.deepEqual(result.outcomes.map((outcome) => outcome.applied), ["skipped"]);
 	assert.deepEqual(result.catching_up, []);
 	assert.deepEqual(readWatchFile(b.home).prs[0]?.cursors, {});
-});
-
-test("watch sweep: a batch answered only by path-less errors (bad credentials) is a runner failure and backs off", async (t) => {
-	const b = await bench(t);
-	const watch = new AwaitingMergeWatch({ ...b.ports, home: b.home, runner: async () => ({ errors: [{ message: "Bad credentials" }] }) });
-	const result = await watch.sweep();
-	assert.equal(result.backoff_until, "2026-10-15T12:01:00Z");
-	assert.match(readWatchFile(b.home).last_error ?? "", /Bad credentials/);
-	assert.equal(result.observed, 0);
-});
-
-test("watch sweep: a live job whose PR is based on a parked branch gets a stack edge", async (t) => {
-	const live: FleetRecord = { ...parked("cp-child"), phase: "held" };
-	delete live.awaiting_merge;
-	const b = await bench(t, [parked(), live]);
-	const queries: string[] = [];
-	const answer = { data: { p0: { pullRequest: rawPr(), stacked: { nodes: [{ headRefName: "cp-child" }, { headRefName: "someone-else" }] } } } };
-	await new AwaitingMergeWatch({ ...b.ports, stackEdges: b.stacks, home: b.home, runner: async (query) => (queries.push(query), answer) }).sweep();
-	assert.match(queries[0]!, /stacked: pullRequests\(baseRefName: "cp-park", states: OPEN/);
-	assert.deepEqual(readStackFollowups(b.home).edges.map((edge) => [edge.parent_job, edge.child_job]), [["cp-park", "cp-child"]]);
 });
 
 test("N20: the sweep withdraws a done job's open human-review row (merged before any teardown withdrew it), nothing else", async (t) => {
@@ -181,21 +94,4 @@ test("N20: the sweep withdraws a done job's open human-review row (merged before
 	const parkedRow = await row("cp-park", "human-review pr https://github.com/o/r/pull/7");
 	await new AwaitingMergeWatch({ ...b.ports, home: b.home, runner: async () => ({ data: { p0: { pullRequest: rawPr() } } }) }).sweep();
 	assert.deepEqual([stale, reminder, parkedRow].map((item) => awaiting.get(item.id)?.state), ["withdrawn", "open", "open"]);
-});
-
-test("awaiting_merge PR6 sweep port: skipped without the home lock; a throwing sweep is journaled once per cause", async (t) => {
-	const b = await bench(t);
-	const journaled: DurableWakeupInput[] = [];
-	let logins = 0;
-	let owned = false;
-	const unreadable = () => { throw new Error("fleet.json is not readable JSON"); };
-	const fleet = { read: unreadable, list: unreadable, get: () => undefined };
-	const host = { home: b.home, fleet, runs: undefined, merges: b.ports.merges, ledger: b.ports.ledger, armedDispatches: { release: async () => {} }, ghLogin: async () => (logins += 1, "cp-bot") };
-	const ports = awaitingMergePorts(host as never, new Map(), (input) => journaled.push(input), () => owned);
-	assert.equal((await ports.sweep()).skipped, "this process does not hold the home");
-	assert.equal(logins, 0, "no gh call without the lock");
-	owned = true;
-	for (const _ of [1, 2]) assert.deepEqual((await ports.sweep()).errors, ["fleet.json is not readable JSON"]);
-	assert.equal(new Set(journaled.map((input) => input.id)).size, 1, "one outbox id for the same cause");
-	assert.equal(journaled[0]?.kind, "recovery");
 });
