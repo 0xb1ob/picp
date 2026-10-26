@@ -236,6 +236,7 @@ test("P14-health-viewer: a remote-only viewer (no tailnet, cp-tunnel on) is heal
 	t.after(() => "stop" in elsewhere && elsewhere.stop());
 	assert.match(await viewer(), /no device control record/, "another home's viewer never answers for this one");
 	const mine = await startDeviceControl(paths.stateDir, routes, () => undefined);
+	t.after(() => "stop" in mine && mine.stop());
 	assert.equal(state((await h.run(T0)).record, "viewer"), "ok", "the owner socket's status is the readiness probe");
 	if ("stop" in mine) mine.stop();
 	await h.run(T0);

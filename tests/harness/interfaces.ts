@@ -1,4 +1,4 @@
-/** `--import` preload: `os.networkInterfaces()` answers `CP_TEST_INTERFACES` (`{"eth0":["10.0.0.5"]}`) when it is set. */
+/** `--import` preload: `os.networkInterfaces()` answers `CP_TEST_INTERFACES` (`{"eth0":["10.0.0.5"]}`) when set. */
 import { syncBuiltinESMExports } from "node:module";
 import os, { type NetworkInterfaceInfo } from "node:os";
 

@@ -35,7 +35,7 @@ import {
 } from "./daemon-files.ts";
 
 export const DAEMON_UNIT = "cp-daemon.service";
-/** What cp-install wrote before cp-daemon (units.ts renders them; P14-backend in tests/e2e/service.test.ts pins the names). */
+/** What cp-install wrote before cp-daemon (units.ts renders them; P14-backend in tests/e2e/service.test.ts pins). */
 export const LEGACY_UNITS = ["cp-parent.service", "cp-view.service", "cp-health.service", "cp-health.timer", "cp-update.service", "cp-update.timer"] as const;
 const [PARENT, VIEW, , HEALTH_TIMER, UPDATE, UPDATE_TIMER] = LEGACY_UNITS;
 /** The legacy units install enabled; the oneshots ran from their timers. */

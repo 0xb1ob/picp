@@ -19,7 +19,7 @@ import { PI_LENS_TOOLS } from "../../src/tool-manifest.ts";
 import { ROLE_PACKAGES } from "../../src/worker-packages.ts";
 import { REPO_ROOT } from "../harness/index.ts";
 
-/** Every stand-in tool: logs `<tool> <args>` to $SM/calls.log, answers from $SM/answers.json (first matching prefix). */
+/** Every stand-in tool: logs `<tool> <args>` to $SM/calls.log, answers from $SM/answers.json (first prefix). */
 const STUB = `const fs = require("node:fs"); const { dirname, join } = require("node:path");
 const [tool, ...a] = process.argv.slice(2); const sm = process.env.SM; const line = [tool, ...a].join(" ");
 fs.appendFileSync(join(sm, "calls.log"), line + "\\n");
@@ -134,7 +134,7 @@ function rig(t: TestContext) {
 }
 type User = ReturnType<ReturnType<typeof rig>["user"]>;
 const lines = (out: string, status: string) => out.split("\n").filter((line) => line.startsWith(`${status}: `));
-/** The legacy units an older cp-install wrote (pins in cp-view and cp-parent.service), with tmux the operator units too. */
+/** The legacy units an older cp-install wrote (pins in cp-view and cp-parent.service); with tmux, operator units. */
 const legacyHome = (u: User, tmux = false) => {
 	const units = renderUnits({ node: u.node, app: u.app, home: u.cpHome, path: "/bin", port: 8766, viewerHost: "100.80.0.1", parentModel: "openai/gpt-6.1-sol", ...(tmux ? { tmux: "/usr/bin/tmux", wrapper: join(u.binDir, "cp-operator") } : {}) });
 	mkdirSync(u.unitDir, { recursive: true });
@@ -167,7 +167,7 @@ test("P14e-install-files: cp-install writes, keeps, refuses and replaces its fil
 	assert.deepEqual(lines(second.out, "changed"), [], second.out);
 	assert.ok(!u.log().slice(before).some((call) => call === "npm ci" || /try-restart/.test(call)), "no npm ci and no restart on an unchanged rerun");
 
-	// A changed unit or data/daemon.json is refused without --force, nothing started; --force replaces it and try-restarts.
+	// A changed unit or data/daemon.json is refused without --force, nothing started; --force replaces, try-restarts.
 	for (const path of [u.unit, u.paths.config]) {
 		const kept = u.text(path)!;
 		writeFileSync(path, "# edited by hand\n");
@@ -221,7 +221,7 @@ test("P14e-install-files: cp-install writes, keeps, refuses and replaces its fil
 	assert.notEqual(bogus.code, 0);
 	assert.match(bogus.out, /--sudo/);
 
-	// --uninstall stops cp-daemon and removes only what cp-install wrote: data/daemon.json too, never the home or a hand wrapper.
+	// --uninstall stops cp-daemon, removes only what cp-install wrote (data/daemon.json too), never the home or a wrapper.
 	writeFileSync(join(u.binDir, "cp-operator"), "#!/bin/sh\n# mine\n");
 	const gone = await u.install(["--uninstall"]);
 	assert.equal(gone.code, 0, gone.out);
@@ -391,7 +391,7 @@ test("P14e-install-viewer-host: --viewer-host is checked against this machine, a
 	await lan.install([...quiet, "--yes"]);
 	assert.deepEqual(files(), withLan, "byte-identical to an install on a host with no interfaces");
 
-	// An existing data/daemon.json keeps its host (none) unasked; another --viewer-host needs --force, then restarts cp-daemon.
+	// An existing data/daemon.json keeps its host (none) unasked; another --viewer-host needs --force, then restarts.
 	const kept = r.user({ ifaces: HOSTS });
 	await kept.install(PINNED.concat("--yes"));
 	kept.answer(TAILSCALE);
@@ -862,7 +862,7 @@ test("P14e-install-models: the parent's and the operator's questions, their defa
 	assert.ok((await empty.install([...LOCAL, "--parent-model", "x/y"])).out.includes("skip: model: parent x/y (--parent-model) written unchecked: pi's model list is empty"));
 	assert.equal(empty.pinned()[0], "x/y");
 
-	// --no-start with no usable model: run pi then /login, nothing pinned; the continuation keeps --home/--app and needs --force.
+	// --no-start, no usable model: run pi then /login, nothing pinned; the continuation keeps --home/--app, needs --force.
 	const later = r.user({ models: NO_MODELS });
 	const first = await later.install(LOCAL, []);
 	const line = lines(first.out, "skip").find((l) => l.startsWith("skip: model: no model pi can use as the service sees it (")) ?? "";
@@ -939,7 +939,7 @@ test("P14e-install-gateway: opt-in, validated, kept, tightened, and never printi
 	}
 	assert.deepEqual(new Set(refusals.map((row) => JSON.stringify(row))), new Set([JSON.stringify([1, false, false, false, true])]), JSON.stringify(refusals));
 
-	// Another url or key needs --force (other capacity keys kept); a loose key file is tightened, by a dry run only in plan.
+	// Another url or key needs --force (other capacity keys kept); a loose key file is tightened, a dry run only plans it.
 	writeFileSync(u.capacity, `${JSON.stringify({ url: "https://gw.example/", path: "/api/v1/admin/ops/concurrency", quota: { five_hour: 80 } })}\n`);
 	const other = await u.install([...LOCAL, "--gateway-url", "https://gw2.example"]);
 	assert.ok(other.code === 1 && other.out.includes(`fail: gateway: ${u.capacity} names https://gw.example/; rerun with --force`), other.out);

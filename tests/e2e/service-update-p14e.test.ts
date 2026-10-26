@@ -25,7 +25,7 @@ const SCALE = 50;
 const T0 = Date.parse("2026-09-28T10:00:00Z");
 const FAR = "f".repeat(40);
 
-/** The parent host and cp-daemon's control socket: `host <op> <args>` / `daemon <op>` to calls.log, answers from plan.json. */
+/** The parent host and cp-daemon's control socket: `host <op>` / `daemon <op>` to calls.log, answers from plan.json. */
 const STANDIN = `const fs = require("node:fs"); const net = require("node:net"); const e = process.env;
 const log = (line) => fs.appendFileSync(e.SM + "/calls.log", line + "\\n");
 const plan = () => JSON.parse(fs.readFileSync(e.SM + "/plan.json", "utf8"));
@@ -39,14 +39,15 @@ serve(e.HOST_SOCK, (m) => { const p = plan(); const shown = (m.args ?? []).filte
   if (["drain", "drainCancel", "stop"].includes(m.op)) log("host " + m.op + (shown.length ? " " + JSON.stringify(shown) : ""));
   if ((p.failing ?? []).includes("host " + m.op)) throw new Error(m.op + " refused");
   if (m.op === "hello") return { ok: true, result: { pid: process.pid, parent: process.pid } };
-  if (m.op === "status") return { ok: true, result: { alive: true, pid: process.pid } };
+  if (m.op === "status") return { ok: true, result: p.statusPid === undefined ? { alive: true, pid: process.pid } : { alive: p.statusPid > 0, pid: p.statusPid } };
   if (m.op === "drain") { if (p.drainThrow) throw new Error(p.drainThrow); const state = next(p, "drainStates") ?? "drained";
     if (state !== "gone") fs.writeFileSync(e.DRAIN, JSON.stringify({ started_at: new Date().toISOString(), state, jobs: [] }));
     return { ok: true, result: { text: p.drainText ?? "DRAIN: drain", level: "info" } }; }
   if (m.op === "drainCancel") { fs.rmSync(e.DRAIN, { force: true }); return { ok: true, result: { text: "cancelled" } }; }
   if (m.op === "doctor") { const answer = next(p, "doctor") ?? "ok"; if (p.onDoctor) { const { files = [], patch = {} } = p.onDoctor;
       for (const f of files) fs.writeFileSync(f.path, f.text); save({ ...plan(), onDoctor: undefined, ...patch }); }
-    if (answer === "hang") return undefined; if (answer === "unsettled") throw new Error(e.UNSETTLED);
+    if (answer === "viewerdown") save({ ...plan(), viewerDown: true });
+    if (answer === "hang") return undefined; if (answer === "unsettled" || answer === "viewerdown") throw new Error(e.UNSETTLED);
     if (answer.startsWith("down:")) throw new Error(answer.slice(5));
     return { ok: true, result: answer.startsWith("error:") ? { level: "error", text: answer.slice(6) } : { level: "info", text: "DOCTOR ok" } }; }
   return { ok: true, result: {} }; });
@@ -54,7 +55,7 @@ serve(e.DAEMON_SOCK, (m) => { log("daemon " + m.op); return (plan().failing ?? [
 fs.writeFileSync(e.SM + "/ready", "");
 `;
 
-type Plan = { drainStates?: string[]; drainThrow?: string; drainText?: string; doctor?: string[]; failing?: string[]; viewerDown?: boolean; onDoctor?: { files?: Array<{ path: string; text: string }>; patch?: Plan } };
+type Plan = { statusPid?: number; drainStates?: string[]; drainThrow?: string; drainText?: string; doctor?: string[]; failing?: string[]; viewerDown?: boolean; onDoctor?: { files?: Array<{ path: string; text: string }>; patch?: Plan } };
 
 /** A cp-daemon home whose app is a scratch checkout of this tree's src/ with a bare origin, and its stand-ins. */
 async function bench(t: TestContext, config: unknown = { enabled: true, interval_min: 15, quiet_min: 0 }) {
@@ -125,7 +126,7 @@ async function bench(t: TestContext, config: unknown = { enabled: true, interval
 	const reset = () => writeFileSync(join(sm, "calls.log"), "");
 	const causes = () => lines("causes.log").map((line) => JSON.parse(line) as unknown);
 	const state = (value: Partial<UpdateState>) => writeFileSync(join(stateDir, "update.json"), JSON.stringify({ schema_version: 1, fetch_failures: 0, ...value }));
-	/** A fleet job whose worker is the stand-in (alive) with run phase `phase`, or a live script job when `phase` is "script". */
+	/** A fleet job whose live worker is the stand-in in run phase `phase`; a live script job for "script". */
 	const job = async (jobId: string, phase: string) => {
 		const base = { job_id: jobId, project: "demo", kind: "ship", delivery: "local", origin: DEFAULT_ORIGIN, phase: phase === "idle" ? "held" : "waiting", worktree: `/nonexistent/${jobId}`, branch: jobId, dispatched_at: isoTimestamp(), usage: { ...EMPTY_USAGE }, ...(phase === "idle" ? { reported_at: isoTimestamp() } : {}) };
 		const record = phase === "script"
@@ -435,12 +436,14 @@ test("P14e-update-verify: busy parents extend the verify to a deferred note, an 
 	assert.match(back.state?.detail ?? "", /; doctor deferred: parent busy 420s$/);
 	// Busy with the viewer down, an absent parent, busy then down: not healthy within the base 120 s, then rolled back.
 	const failures = [];
-	for (const [plan, why] of [[{ doctor: ["unsettled"], viewerDown: true }, "viewer: .* answered 503"], [{ doctor: ["down:parent is not running; call cp_parent start"] }, "parent is not running"],
-		[{ doctor: [...Array(5).fill("unsettled"), "down:parent is not running; call cp_parent start"] }, "parent is not running"]] as const) {
-		const run = await verify(plan as Plan);
+	for (const [plan, why] of ([[{ doctor: ["unsettled"], viewerDown: true }, "viewer: .* answered 503"], [{ doctor: ["down:parent is not running; call cp_parent start"] }, "parent is not running"],
+		[{ doctor: [...Array(5).fill("unsettled"), "down:parent is not running; call cp_parent start"] }, "parent is not running"],
+		[{ doctor: [`down:${PARENT_UNSETTLED} (x)`] }, "parent must .*send \\(x\\)"], [{ doctor: ["hang"], statusPid: 1 }, "doctor"], [{ doctor: ["hang"], statusPid: 0 }, "doctor"],
+		[{ doctor: [...Array(120).fill("unsettled"), "viewerdown", "unsettled"] }, "viewer: .* answered 503"]] satisfies Array<[Plan, string]>)) {
+		const run = await verify(plan);
 		failures.push([run.state?.last_result, new RegExp(`not healthy within 120s: ${why}`).test(run.state?.detail ?? "")]);
 	}
-	assert.deepEqual(failures, [["rollback_failed", true], ["rollback_failed", true], ["rollback_failed", true]], "the rollback's verify fails alike");
+	assert.deepEqual(failures, Array(7).fill(["rollback_failed", true]), "the rollback's verify fails alike");
 });
 
 test("P14e-update-quiet: a moving tip keeps settling, a stable tip drains after quiet_min; 0 drains at once; absent is 10", { timeout: 300_000 }, async (t) => {
