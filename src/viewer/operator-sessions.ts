@@ -10,7 +10,7 @@
  * the older ones listed, newest first.
  *
  * This half only reads — the viewer's own rule keeps every module here
- * dependency-free and write-free (`tests/viewer-workbench.test.ts`), so the
+ * dependency-free and write-free (`tests/viewer-boundary.test.ts`), so the
  * writer is `src/operator-session-log.ts`, which imports this file. A malformed
  * line is skipped, never a crash: this sits on the viewer's request path.
  */

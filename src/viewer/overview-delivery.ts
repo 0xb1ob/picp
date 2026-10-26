@@ -8,7 +8,7 @@ export const RELAY_ALARM_SECONDS = 600;
 
 /**
  * Has the operator session seen what the parent sent? Re-derived here because viewer modules import nothing outside
- * `src/viewer/` (tests/viewer-workbench.test.ts) from the host's `state/operator/relay-outbox.json` and the operator's
+ * `src/viewer/` (tests/viewer-boundary.test.ts) from the host's `state/operator/relay-outbox.json` and the operator's
  * `relay-acks.jsonl` (src/operator-outbox.ts). Strict like the asks journal: a malformed file is `unavailable` (unseen
  * null), never 0; a torn last ack line is skipped, a missing outbox is `missing` (nothing relayed, or an old host).
  */
