@@ -43,7 +43,7 @@ import { BOARD_CSP, BOARD_CSS, type BoardWarn, contentType, listBoards, onceWarn
 import { gitView, jobRoot, listOrRead, roots, safePatch } from "./explorer.ts";
 import { dashboard, jobDetail } from "./fleet-view.ts";
 import { sidebar, type ViewerState } from "./sessions.ts";
-import { handlePushSubscription, handlePushTest, PUSH_STATUS_PATH, PUSH_SUBSCRIPTION_PATH, PUSH_TEST_PATH, pushStatus } from "./push-api.ts";
+import { discardBounded, handlePushSubscription, handlePushTest, PUSH_STATUS_PATH, PUSH_SUBSCRIPTION_PATH, PUSH_TEST_PATH, pushStatus } from "./push-api.ts";
 import type { PushFetch } from "../push/webpush.ts";
 import { ANSWER_ACK_PATH, ANSWERS_CONTROL_PATH, CONTROL_MESSAGE_PATH, CONTROL_STATUS_PATH, type ControlLimiter, handleAnswerAck, handleAnswersControlStatus, handleControlMessage, handleControlStatus, handleOperatorStart, handleScheduleControl, handleScheduleControlStatus, OPERATOR_START_PATH, type OperatorStart, SCHEDULE_CONTROL_PATH, SCHEDULE_CONTROL_STATUS_PATH } from "./control-api.ts";
 import { handleSchedulePolicy, SCHEDULE_POLICY_PATH } from "./control-api.ts";
@@ -232,7 +232,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 	}
 	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === PUSH_TEST_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === OPERATOR_QUEUE_PATH || requestPath === OPERATOR_UPLOAD_PATH || requestPath === SCHEDULE_CONTROL_PATH || requestPath === ANSWER_ACK_PATH || requestPath === THREAD_DONE_PATH || requestPath === SETTINGS_APPLY_PATH || requestPath === SETTINGS_RESTORE_PATH) {
 		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === PUSH_TEST_PATH ? handlePushTest(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === ANSWER_ACK_PATH ? handleAnswerAck(req, options) : requestPath === THREAD_DONE_PATH ? handleThreadDone(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : requestPath === OPERATOR_QUEUE_PATH ? handleOperatorQueue(req, options) : requestPath === OPERATOR_UPLOAD_PATH ? handleOperatorUpload(req, options) : requestPath === SETTINGS_APPLY_PATH ? handleSettingsWrite(req, options, "set") : requestPath === SETTINGS_RESTORE_PATH ? handleSettingsWrite(req, options, "restore") : handleOperatorStart(req, options))
-			.then((out) => sendJson(res, out.status, out.body, out.headers))
+			.then((out) => { sendJson(res, out.status, out.body, out.headers); if (out.discard) discardBounded(req, res, out.discard); })
 			.catch(() => {
 				if (!res.headersSent) sendJson(res, 500, { error: "internal" });
 			});

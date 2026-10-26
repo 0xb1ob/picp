@@ -55,7 +55,7 @@ import {
 } from "./control-files.ts";
 import { heldId, INBOX_TOKEN, operatorSession, parentHolder, readInbox } from "./control-inbox.ts";
 import { restartStatus } from "./restart-status.ts";
-import { allowedOrigins, bindOrigin, readBody } from "./push-api.ts";
+import { allowedOrigins, BODY_DISCARD_MAX_BYTES, bindOrigin, readBody } from "./push-api.ts";
 import { readScheduleFile, SCHEDULE_ID } from "./schedule-core.ts";
 import { accessOf, canControl, canRead } from "./access.ts";
 import { readPendingSends } from "./control-pending.ts";
@@ -130,6 +130,7 @@ export interface ControlRouteResult {
 	status: number;
 	body: unknown;
 	headers?: Record<string, string>;
+	discard?: number;
 }
 
 /** Sliding window per client address, counting refused requests too, plus one request in flight. */
@@ -423,8 +424,9 @@ export async function guarded(req: IncomingMessage, options: ControlRouteOptions
 		const raw = await readBody(req, max);
 		if (raw === "too_large") {
 			parsed = { ...parsed, bytes: Number(req.headers["content-length"]) || max + 1 };
-			// No `connection: close`: closing on an unread body resets the socket and the client never sees this 413.
-			return refuse(413, `body is larger than ${max} bytes`);
+			// A declared length is unread, so its allowance starts at the cap; a streamed body is already read to it.
+			const declared = Number(req.headers["content-length"]);
+			return { ...refuse(413, `body is larger than ${max} bytes`), discard: Number.isFinite(declared) && declared > max ? max + BODY_DISCARD_MAX_BYTES : BODY_DISCARD_MAX_BYTES };
 		}
 		if (image !== undefined) {
 			parsed = { ...parsed, bytes: raw.length };

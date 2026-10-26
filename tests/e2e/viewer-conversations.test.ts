@@ -467,22 +467,32 @@ test("P19-upload-send: images and text files reach the operator session inline, 
 	for (const [i, file] of eight.ids.entries()) assert.deepEqual(readFileSync(stored(d.root, file)), Buffer.from(`# ${i}\n` + samples[i]!.repeat(4_000 + i * 997)), "the stored file keeps every byte");
 });
 
-test("P19-upload-oversize: a refused upload is answered 413 to a client still streaming its body, not reset", { timeout: 120_000 }, async (t) => {
-	const d = await viewer(t);
+/** One raw POST to the image upload with `framing` headers; `paused` reads nothing until the whole body is written. */
+function rawUpload(d: Awaited<ReturnType<typeof viewer>>, framing: string, body: Buffer[], paused: boolean) {
 	const { origin, "sec-fetch-site": site } = d.own;
-	const body = Buffer.alloc(16 * 1024 * 1024, 97);
-	const head = `POST ${UPLOAD} HTTP/1.1\r\nhost: 127.0.0.1:${d.port}\r\norigin: ${origin}\r\nsec-fetch-site: ${site}\r\ncontent-type: image/png\r\ncontent-length: ${body.length}\r\n\r\n`;
-	// The client reads nothing until its whole body is written: a reset under the write loses the unread refusal.
-	const reply = await new Promise<string>((resolve, reject) => {
+	const head = `POST ${UPLOAD} HTTP/1.1\r\nhost: 127.0.0.1:${d.port}\r\norigin: ${origin}\r\nsec-fetch-site: ${site}\r\ncontent-type: image/png\r\n${framing}\r\n\r\n`;
+	return new Promise<{ reply: string; written: boolean }>((resolve) => {
 		const socket = connect(d.port, "127.0.0.1");
 		const chunks: Buffer[] = [];
-		socket.pause();
-		socket.on("data", (chunk: Buffer) => chunks.push(chunk));
-		socket.on("error", reject);
-		socket.on("close", () => resolve(Buffer.concat(chunks).toString("utf8")));
+		let written = false;
+		const done = () => resolve({ reply: Buffer.concat(chunks).toString("utf8"), written });
+		if (paused) socket.pause();
+		socket.on("data", (chunk: Buffer) => { chunks.push(chunk); if (/\}$/.test(Buffer.concat(chunks).toString("utf8"))) socket.destroy(); });
+		socket.on("error", () => {});
+		socket.on("close", done);
 		socket.write(head);
-		socket.write(body, () => socket.resume());
+		for (const [i, part] of body.entries()) socket.write(part, (error) => { if (!error && i === body.length - 1) { written = true; socket.resume(); } });
 	});
-	assert.match(reply, /^HTTP\/1\.1 413 /);
-	assert.match(reply, /body is larger than 10485760 bytes/);
+}
+
+test("P19-upload-oversize: an oversize upload is answered 413 and only a bounded rest of its body is ever read", { timeout: 120_000 }, async (t) => {
+	const d = await viewer(t);
+	// 10 MiB + 512 KiB streamed: the 413 comes at the cap and the 512 KiB beyond is within the discard bound.
+	const frame = Buffer.concat([Buffer.from("10000\r\n"), Buffer.alloc(0x10000, 97), Buffer.from("\r\n")]);
+	const chunked = await rawUpload(d, "transfer-encoding: chunked", [...Array(168).fill(frame), Buffer.from("0\r\n\r\n")], true);
+	assert.match(chunked.reply, /^HTTP\/1\.1 413 [\s\S]*body is larger than 10485760 bytes/);
+	assert.equal(chunked.written, true, "a client just past the cap finishes its write, no EPIPE");
+	// 64 MiB declared: the server stops reading past the bound and closes, so the client never finishes writing.
+	const huge = await rawUpload(d, `content-length: ${64 * 1024 * 1024}`, [Buffer.alloc(64 * 1024 * 1024, 97)], false);
+	assert.equal(huge.written, false, "the server did not ingest the whole body");
 });
