@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer as httpServer, request } from "node:http";
-import { type AddressInfo, createServer } from "node:net";
+import { type AddressInfo, connect, createServer } from "node:net";
 import { join, relative } from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -19,6 +19,7 @@ import { tunnelConfigFile, tunnelRuntimeFile } from "../../src/service/daemon-tu
 import { APP_COLORS } from "../../src/viewer/app-manifest.ts";
 import { APP_CSP } from "../../src/viewer/app-page.ts";
 import { viewerConfigFile } from "../../src/viewer/host-config.ts";
+import { BODY_DISCARD_IDLE_MS } from "../../src/viewer/push-api.ts";
 import { listSubscriptions, pushDeliveriesFile, readPushConfig, subscriptionFile, subscriptionId, vapidKeyFile } from "../../src/viewer/push-files.ts";
 import { openTab, startViewer, type Tab, until } from "../harness/dashboard.ts";
 import { createScratchHome, REPO_ROOT } from "../harness/index.ts";
@@ -424,4 +425,38 @@ test("P22-push-ui-refused: a denial, a full home, an unreachable home or a stall
 	offline.click(turnOn);
 	assert.equal((await offline.find("section.more-push p[role=alert]")).textContent, "Could not reach this home to store the subscription");
 	assert.equal(gone.calls.at(-1)?.[0], "unsubscribe", "Turn on with the home unreachable leaves nothing subscribed");
+});
+
+/** One raw POST that writes `body` once the reply starts; `hold` keeps the socket open until the server closes it. */
+function rawPost(port: number, path: string, headers: Record<string, string>, body: Buffer, hold = false) {
+	const head = `POST ${path} HTTP/1.1\r\nhost: 127.0.0.1:${port}\r\n${Object.entries(headers).map(([k, v]) => `${k}: ${v}\r\n`).join("")}\r\n`;
+	return new Promise<{ reply: string; written: boolean; held: number }>((resolve) => {
+		const socket = connect(port, "127.0.0.1");
+		let reply = "", written = false, repliedAt = 0;
+		socket.on("data", (chunk: Buffer) => {
+			if (!repliedAt) {
+				repliedAt = Date.now();
+				socket.write(body, (error) => { written = !error; if (written && !hold) socket.destroy(); });
+			}
+			reply += chunk.toString("utf8");
+		});
+		socket.on("error", () => {});
+		socket.on("close", () => resolve({ reply, written, held: Date.now() - repliedAt }));
+		socket.write(head);
+	});
+}
+
+test("P22-push-http-oversize: an oversize push body gets a readable 413, a bounded drain, and a stalled sender is closed", { timeout: 60_000 }, async (t) => {
+	const s = await rig(t);
+	const post = (bytes: number, body: Buffer, hold = false) => rawPost(s.viewer.port, "/api/push/subscription", { ...s.local, "content-length": String(bytes) }, body, hold);
+	const within = await post(1024 * 1024, Buffer.alloc(1024 * 1024, 120));
+	assert.match(within.reply, /^HTTP\/1\.1 413 [\s\S]*body is larger than 4096 bytes/);
+	assert.doesNotMatch(within.reply, /connection: close/i, "the 413 does not reset a sender still writing");
+	assert.equal(within.written, true, "a sender within the discard bound finishes its write, no EPIPE");
+	const huge = await post(64 * 1024 * 1024, Buffer.alloc(64 * 1024 * 1024, 120));
+	assert.match(huge.reply, /^HTTP\/1\.1 413 /);
+	assert.equal(huge.written, false, "past the bound the server stops reading and closes");
+	const stalled = await post(1024 * 1024, Buffer.alloc(0), true);
+	assert.match(stalled.reply, /^HTTP\/1\.1 413 /);
+	assert.ok(BODY_DISCARD_IDLE_MS >= 5000 && stalled.held >= BODY_DISCARD_IDLE_MS - 500, `held ${stalled.held} ms: closed by the idle timer, not at once`);
 });

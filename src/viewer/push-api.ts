@@ -104,17 +104,35 @@ export function readBody(req: IncomingMessage, max: number): Promise<Buffer | "t
 
 /** The slack beyond the cap that a refused oversize body may still be drained for, so its sender reads the 413. */
 export const BODY_DISCARD_MAX_BYTES = 1024 * 1024;
+/** A refused sender silent this long ends the discard and loses its socket, so a stalled client cannot hold it. */
+export const BODY_DISCARD_IDLE_MS = 5000;
+
+/** How much more of a refused body to drop: a declared length was never read, so its allowance starts at the cap. */
+export function discardAllowance(req: IncomingMessage, max: number): number {
+	const declared = Number(req.headers["content-length"]);
+	return Number.isFinite(declared) && declared > max ? max + BODY_DISCARD_MAX_BYTES : BODY_DISCARD_MAX_BYTES;
+}
 
 /** Drop up to `budget` more bytes of the unread body, then close the socket once `res` has flushed. */
 export function discardBounded(req: IncomingMessage, res: ServerResponse, budget: number): void {
+	if (req.complete) return;
 	let seen = 0;
-	req.on("data", (chunk: Buffer) => {
-		seen += chunk.length;
-		if (seen <= budget) return;
+	const close = (): void => {
+		clearTimeout(idle);
+		req.removeListener("data", onData);
 		req.pause();
 		if (res.writableFinished) req.socket.destroySoon();
 		else res.once("finish", () => req.socket.destroySoon());
-	});
+	};
+	const onData = (chunk: Buffer): void => {
+		seen += chunk.length;
+		if (seen > budget) close();
+		else idle.refresh();
+	};
+	const idle = setTimeout(close, BODY_DISCARD_IDLE_MS).unref();
+	req.on("data", onData);
+	req.once("end", () => clearTimeout(idle));
+	req.once("close", () => clearTimeout(idle));
 }
 
 const refuse = (status: number, error: string, headers?: Record<string, string>): PushRouteResult => ({ status, body: { error }, ...(headers ? { headers } : {}) });
@@ -135,7 +153,7 @@ async function guardedJson(req: IncomingMessage, options: PushRouteOptions): Pro
 	if (site !== undefined && site !== "same-origin") return fail(refuse(403, "cross-site request refused"));
 	if (!/^application\/json\s*(?:;|$)/i.test(req.headers["content-type"] ?? "")) return fail(refuse(415, "Content-Type must be application/json"));
 	const body = await readBody(req, PUSH_BODY_MAX_BYTES);
-	if (body === "too_large") return fail(refuse(413, `body is larger than ${PUSH_BODY_MAX_BYTES} bytes`, { connection: "close" }));
+	if (body === "too_large") return fail({ ...refuse(413, `body is larger than ${PUSH_BODY_MAX_BYTES} bytes`), discard: discardAllowance(req, PUSH_BODY_MAX_BYTES) });
 	try {
 		return { ok: true, dataDir, owner, json: JSON.parse(body.toString("utf8")) };
 	} catch {
