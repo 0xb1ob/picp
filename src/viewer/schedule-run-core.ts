@@ -2,6 +2,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { boolean, ISO_SECOND, line, lines, number, object, oneOf, pattern, SCHEDULE_ID, text, type Check } from "./schedule-core.ts";
 import { isNativePolicy, RUN_THINKING_LEVELS, runOverrideErrors, schedulePolicyErrors, type RunOverrides, type SchedulePolicy } from "./schedule-policy.ts";
+import { validatedOnce } from "../validated-text.ts";
 
 export class ScheduleRunError extends Error {}
 export const SCHEDULE_RUN_ID = /^run-[0-9]{14}-[0-9a-f]{6}$/;
@@ -126,11 +127,12 @@ export const schedulePoliciesFileErrors = (v: unknown): string[] => {
 };
 function read<T>(file: string, key: string, validate: (v: unknown) => string[]): T[] {
 	if (!existsSync(file)) return [];
+	const text = readFileSync(file, "utf8");
 	let raw: unknown;
-	try { raw = JSON.parse(readFileSync(file, "utf8")); }
+	try { raw = JSON.parse(text); }
 	catch (error) { throw new ScheduleRunError(`${file} is not valid JSON (${(error as Error).message}); refusing to guess`); }
-	const errors = validate(raw);
-	if (errors.length) throw new ScheduleRunError(`${file} violates the schedule run contract: ${errors.join("; ")}`);
+	const result = validatedOnce(file, text, raw, (v) => { const errors = validate(v); return errors.length ? { ok: false, errors } : { ok: true, value: v }; });
+	if (!result.ok) throw new ScheduleRunError(`${file} violates the schedule run contract: ${result.errors.join("; ")}`);
 	return (raw as Record<string, T[]>)[key]!;
 }
 export const readScheduleRuns = (file: string): ScheduleRun[] => read(file, "runs", scheduleRunsFileErrors);
