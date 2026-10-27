@@ -93,6 +93,27 @@ test("ci watch tick: a 3,000-job home keeps the tick inside its budget and the e
 	assert.ok(worst < LAG_BOUND_MS, `event-loop lag reached ${worst} ms`);
 });
 
+// F5: a failed read must say how bad the loop block was (max, p99) and when, to tell it from gh's own wait.
+test("ci watch tick: a failed read reports loop-lag max, p99 and the time of the largest stall", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("lag diagnostics", 416);
+	s.setGh({ runs: [run(416, live.head, "completed", "success")], routes: [{ match: "/attempts/", replies: [{ code: 1, stderr: "gh: HTTP 502" }] }] });
+	const stalls: Array<[number, number]> = [];
+	const block = setInterval(() => {
+		const from = Date.now();
+		while (Date.now() - from < 400) { /* a synchronous loop block */ }
+		stalls.push([from, Date.now()]);
+	}, 150);
+	const tick = await s.post.ciTick().finally(() => clearInterval(block));
+	const message = tick.errors[0]?.message ?? "";
+	const lag = /event-loop lag max (\d+)ms at (\S+), p99 (\d+)ms/.exec(message);
+	assert.ok(lag, message);
+	assert.ok(Number(lag[1]) >= 300, `max ${lag[1]} ms reflects the injected stall`);
+	assert.ok(Number(lag[3]) <= Number(lag[1]), "p99 never exceeds max");
+	const at = Date.parse(lag[2] ?? "");
+	assert.ok(stalls.some(([from, to]) => at >= from - 100 && at <= to), `${lag[2]} is not inside an injected stall`);
+});
+
 // #580 regression: skipping the snapshot self-check outright returned an invalid snapshot raw instead of StatusError.
 test("status: an invalid snapshot throws StatusError on every read, never served from cache", { skip: SKIP, timeout: 120_000 }, async (t) => {
 	const s = await startStack(t);
