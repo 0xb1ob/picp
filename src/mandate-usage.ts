@@ -12,7 +12,7 @@
  */
 import { isoTimestamp, type JobKind, type Mandate, type Usage } from "./contracts.ts";
 import type { FleetStore } from "./fleet.ts";
-import { MandateError, type MandateStore, type MandateUsageJob, mandateSpend, mandateTokens, matchingJobs } from "./mandate.ts";
+import { liveGrants, MandateError, type MandateStore, type MandateUsageJob, mandateSpend, mandateTokens, matchingJobs } from "./mandate.ts";
 import { continueForJob } from "./mandate-continuity.ts";
 import { parseJobLabels } from "./ledger.ts";
 import type { RunRegistry } from "./runs.ts";
@@ -111,9 +111,10 @@ export function liveUsageJobs(fleet: FleetStore, runs: RunRegistry): MandateUsag
  * message that crosses nothing writes nothing.
  */
 export function observeMandateUsage(options: MandateUsageOptions, jobId: string, previous: Usage, current: Usage): void {
-	const before = new Map(options.mandates.list().map((mandate) => [mandate.id, mandate.status]));
-	const jobs = options.mandates.withReviewerSpend(liveUsageJobs(options.fleet, options.runs));
-	const swept = options.mandates.sweep(isoTimestamp((options.now ?? (() => new Date()))()), jobs);
+	const listed = options.mandates.list();
+	const before = new Map(listed.map((mandate) => [mandate.id, mandate.status]));
+	const jobs = options.mandates.withReviewerSpend(liveUsageJobs(options.fleet, options.runs), liveGrants(listed));
+	const swept = options.mandates.sweep(isoTimestamp((options.now ?? (() => new Date()))()), jobs, listed);
 	for (const mandate of swept) {
 		if (before.get(mandate.id) !== "active" && !(before.get(mandate.id) === "expired" && mandate.continuity?.phase === "committed")) continue;
 		if (!matchingJobs(mandate, jobs).some((job) => job.job_id === jobId)) continue;
