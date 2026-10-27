@@ -5,9 +5,10 @@ import { dirname } from "node:path";
 import { test } from "node:test";
 import { MandateStore } from "../../src/mandate.ts";
 import { policyFromLegacy } from "../../src/viewer/schedule-policy.ts";
-import { readScheduleRuns, type ScheduleRun } from "../../src/viewer/schedule-run-core.ts";
+import { readSchedulePolicies, type ScheduleRun } from "../../src/viewer/schedule-run-core.ts";
+import { ScheduleRunStore } from "../../src/schedule-runs.ts";
 import { createScratchHome } from "../harness/index.ts";
-import { validationStats } from "../../src/validated-text.ts";
+import { validatedOnce, validationStats } from "../../src/validated-text.ts";
 
 const at = "2026-07-01T06:00:00Z";
 const policy = (id: string) => policyFromLegacy({ id, name: "Nightly", project: "demo", mandate_id: "md-123456", enabled: true, created_at: at, trigger: { type: "manual" }, job: { title: "Nightly", kind: "research", delivery: "answer", description: "d" } }, {
@@ -26,28 +27,32 @@ const checks = () => validationStats.checks;
 test("schedule runs read: an unchanged file skips re-validation, a changed or invalid one never does", (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
-	const file = `${home.path}/state/schedule-runs.json`;
+	const store = new ScheduleRunStore({ home: home.path });
+	const file = store.runsFile;
+	const readScheduleRuns = () => store.runs();
 	mkdirSync(dirname(file), { recursive: true });
+	mkdirSync(`${file}.d`);
+	assert.throws(() => readSchedulePolicies(`${file}.d`, validatedOnce), /is not valid JSON \(EISDIR/, "a read failure keeps its wrapped message");
 	const write = (list: ScheduleRun[], pad = 0) => writeFileSync(file, JSON.stringify({ schema_version: 1, runs: list }) + " ".repeat(pad));
 	const big = runs(1_500);
 	write(big);
 	const before = checks();
-	for (let i = 0; i < 5; i++) assert.equal(readScheduleRuns(file).length, 1_500);
+	for (let i = 0; i < 5; i++) assert.equal(readScheduleRuns().length, 1_500);
 	assert.equal(checks() - before, 1, "five reads of unchanged text validate once");
 	write(big, 1);
-	assert.equal(readScheduleRuns(file).length, 1_500);
+	assert.equal(readScheduleRuns().length, 1_500);
 	assert.equal(checks() - before, 2, "changed text validates again");
 
 	const bad = runs(2);
 	bad[1]!.id = bad[0]!.id;
 	write(bad);
 	const badFrom = checks();
-	for (let i = 0; i < 3; i++) assert.throws(() => readScheduleRuns(file), /duplicate run id/, "an invalid file throws on every read");
+	for (let i = 0; i < 3; i++) assert.throws(() => readScheduleRuns(), /duplicate run id/, "an invalid file throws on every read");
 	assert.equal(checks() - badFrom, 3, "an invalid file is re-validated on every read");
 	write(runs(2));
-	assert.equal(readScheduleRuns(file).length, 2, "a corrected file re-validates and reads");
+	assert.equal(readScheduleRuns().length, 2, "a corrected file re-validates and reads");
 	writeFileSync(file, readFileSync(file, "utf8").replace('"accepted"', '"bogus"'));
-	assert.throws(() => readScheduleRuns(file), /schedule run contract/, "a valid file changed to invalid throws");
+	assert.throws(() => readScheduleRuns(), /schedule run contract/, "a valid file changed to invalid throws");
 });
 
 test("mandate get: a changed or invalid mandate file throws on every read, a restored one reads", (t) => {

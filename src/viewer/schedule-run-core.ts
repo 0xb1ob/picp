@@ -2,7 +2,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { boolean, ISO_SECOND, line, lines, number, object, oneOf, pattern, SCHEDULE_ID, text, type Check } from "./schedule-core.ts";
 import { isNativePolicy, RUN_THINKING_LEVELS, runOverrideErrors, schedulePolicyErrors, type RunOverrides, type SchedulePolicy } from "./schedule-policy.ts";
-import { validatedOnce } from "../validated-text.ts";
 
 export class ScheduleRunError extends Error {}
 export const SCHEDULE_RUN_ID = /^run-[0-9]{14}-[0-9a-f]{6}$/;
@@ -125,15 +124,17 @@ export const schedulePoliciesFileErrors = (v: unknown): string[] => {
 	}
 	return errors;
 };
-function read<T>(file: string, key: string, validate: (v: unknown) => string[]): T[] {
+/** Runs `validate(parsed)`; a non-viewer caller passes `validatedOnce` to skip re-checking unchanged text. */
+export type CheckOnce = (file: string, text: string, parsed: unknown, validate: (v: unknown) => { ok: true; value: unknown } | { ok: false; errors: string[] }) => { ok: true; value: unknown } | { ok: false; errors: string[] };
+const always: CheckOnce = (_file, _text, parsed, validate) => validate(parsed);
+function read<T>(file: string, key: string, validate: (v: unknown) => string[], once: CheckOnce): T[] {
 	if (!existsSync(file)) return [];
-	const text = readFileSync(file, "utf8");
-	let raw: unknown;
-	try { raw = JSON.parse(text); }
+	let text = "", raw: unknown;
+	try { text = readFileSync(file, "utf8"); raw = JSON.parse(text); }
 	catch (error) { throw new ScheduleRunError(`${file} is not valid JSON (${(error as Error).message}); refusing to guess`); }
-	const result = validatedOnce(file, text, raw, (v) => { const errors = validate(v); return errors.length ? { ok: false, errors } : { ok: true, value: v }; });
+	const result = once(file, text, raw, (v) => { const errors = validate(v); return errors.length ? { ok: false, errors } : { ok: true, value: v }; });
 	if (!result.ok) throw new ScheduleRunError(`${file} violates the schedule run contract: ${result.errors.join("; ")}`);
 	return (raw as Record<string, T[]>)[key]!;
 }
-export const readScheduleRuns = (file: string): ScheduleRun[] => read(file, "runs", scheduleRunsFileErrors);
-export const readSchedulePolicies = (file: string): PolicyRecord[] => read(file, "policies", schedulePoliciesFileErrors);
+export const readScheduleRuns = (file: string, once: CheckOnce = always): ScheduleRun[] => read(file, "runs", scheduleRunsFileErrors, once);
+export const readSchedulePolicies = (file: string, once: CheckOnce = always): PolicyRecord[] => read(file, "policies", schedulePoliciesFileErrors, once);

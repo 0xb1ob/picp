@@ -5,6 +5,7 @@ import { atomicWriteJson, canonicalDir, queued } from "./json-store.ts";
 import { mandateTokens, type MandateUsageJob } from "./mandate-accounting.ts";
 import { readSchedulePolicies, readScheduleRuns, ScheduleRunError, schedulePoliciesFileErrors, scheduleRunsFileErrors, type PolicyRecord, type ScheduleRun, type ScheduleRunMember } from "./viewer/schedule-run-core.ts";
 import type { SchedulePolicy } from "./viewer/schedule-policy.ts";
+import { validatedOnce } from "./validated-text.ts";
 
 export const SCHEDULE_RUNS_FILE = "schedule-runs.json";
 export const SCHEDULE_POLICIES_FILE = "schedule-policies.json";
@@ -21,11 +22,11 @@ export class ScheduleRunStore {
 		this.#active = options.active ?? SCHEDULE_RUNS_ACTIVE;
 	}
 	get active(): boolean { return this.#active; }
-	runs(): ScheduleRun[] { return readScheduleRuns(this.runsFile); }
+	runs(): ScheduleRun[] { return readScheduleRuns(this.runsFile, validatedOnce); }
 	run(id: string): ScheduleRun | undefined { return this.runs().find((run) => run.id === id); }
 	runOfJob(jobId: string): ScheduleRun | undefined { return this.runs().find((run) => run.members.some((m) => m.job_id === jobId)); }
 	openRun(scheduleId: string): ScheduleRun | undefined { return this.runs().find((run) => run.schedule_id === scheduleId && run.phase !== "closed"); }
-	policyRecord(scheduleId: string): PolicyRecord | undefined { return readSchedulePolicies(this.policiesFile).find((record) => record.schedule_id === scheduleId); }
+	policyRecord(scheduleId: string): PolicyRecord | undefined { return readSchedulePolicies(this.policiesFile, validatedOnce).find((record) => record.schedule_id === scheduleId); }
 	activePolicy(scheduleId: string): SchedulePolicy | undefined {
 		const record = this.policyRecord(scheduleId);
 		return record?.revisions.find((policy) => policy.revision === record.active_revision);

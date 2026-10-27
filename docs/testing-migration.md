@@ -360,6 +360,7 @@ Test files added after the baseline, with the PR that owns them.
 |---|---|---|
 | tests/e2e/wake-ci-promoted.test.ts | cp-fix-promoted-ci-notice-dropped-z1n7 (https://github.com/0xb1ob/picp/pull/473) | S22 fix-job regression: a promoted job's CI notice keeps its promotion note at the provider |
 | tests/e2e/mandate-continuity.test.ts | cp-iojy (https://github.com/0xb1ob/picp/pull/504) | Original admission, authenticated confirmation, shared-root successors and PASS-bound handoff |
+| tests/e2e/validated-reads.test.ts | cp-lag-f2-zic7 (https://github.com/0xb1ob/picp/pull/602) | F2 perf: unchanged schedule-run and mandate text is validated once; invalid or changed text never skips validation |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
