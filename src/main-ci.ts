@@ -34,7 +34,7 @@ import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, isoTimestamp, LAYOUT, type Mandate, SCHEMA_VERSION, validate } from "./contracts.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 import { isActive } from "./mandate-accounting.ts";
-import { ACTIONS_CI_TIMEOUT_MS, type ActionsRun, readActionsCi } from "./actions-ci.ts";
+import { ACTIONS_CI_TIMEOUT_MS, type ActionsRun, readActionsCi, retryTransientRead } from "./actions-ci.ts";
 import { type CiRun, type CommandRunner, evaluateMergeAskCi, MERGE_ASK_QUERY_TIMEOUT_MS, readCiForHead, runCommand, shaMatches } from "./merge-ask.ts";
 import type { CommandRunner as StatusRunner } from "./merges.ts";
 import { CiRerunStore, maybeRerunInfra } from "./ci-infra-rerun.ts";
@@ -226,6 +226,12 @@ export async function readMainTip(cwd: string, exec: CommandRunner, timeoutMs: n
 	const tip = (await exec("git", ["rev-parse", "origin/main"], { cwd, timeoutMs })).trim().toLowerCase();
 	if (!/^[0-9a-f]{7,64}$/.test(tip)) throw new MainCiError(`git rev-parse origin/main answered ${JSON.stringify(tip.slice(0, 80))}, not a sha`);
 	return tip;
+}
+
+/** The fetched `origin/main` head with its Actions runs, for `cp_integrate`'s stale-latch check. */
+export async function readMainTipRuns(cwd: string, exec: CommandRunner): Promise<{ sha: string; runs: MainRun[] }> {
+	const sha = await readMainTip(cwd, exec, MERGE_ASK_QUERY_TIMEOUT_MS);
+	return { sha, runs: await retryTransientRead((timeoutMs) => readActionsCi({ cwd, exec, sha, branch: "main", timeoutMs })) };
 }
 
 /** The failing job's name, from the attempt jobs the observation already read. */
