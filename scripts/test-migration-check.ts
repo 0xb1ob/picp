@@ -1,10 +1,11 @@
 /**
- * Read-only ledger validator: slice files and rules doc vs the git baseline; `test(` counts; exit 1 on findings.
+ * Read-only ledger validator: slice files and rules doc vs the git baseline; `test(` counts; covered-by claim counts
+ * against each deleted case's pre-deletion assertions; exit 1 on findings.
  * `--preserved-from <ref>` against a ref from before the ledger split into slice files is expected to mismatch.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
 
 const DISPOSITIONS = new Set(["convert", "e2e", "retained", "exception", "deleted", "deleted-with-feature"]);
@@ -17,10 +18,11 @@ interface Args {
 	manifest: string;
 	runnerLog?: string;
 	preservedFrom?: string;
+	claimExempt: string;
 }
 
 function parseArgs(argv: readonly string[]): Args {
-	const args: Args = { manifest: "docs/testing-migration.md" };
+	const args: Args = { manifest: "docs/testing-migration.md", claimExempt: fileURLToPath(new URL("claim-count-exempt.json", import.meta.url)) };
 	for (let i = 0; i < argv.length; i += 1) {
 		const flag = argv[i];
 		const value = () => {
@@ -32,6 +34,7 @@ function parseArgs(argv: readonly string[]): Args {
 		else if (flag === "--manifest") args.manifest = value();
 		else if (flag === "--runner-log") args.runnerLog = value();
 		else if (flag === "--preserved-from") args.preservedFrom = value();
+		else if (flag === "--claim-exempt") args.claimExempt = value();
 		else throw new Error(`unknown argument ${flag}`);
 	}
 	return args;
@@ -109,6 +112,64 @@ export function declarationTitles(path: string, source: string): string[] {
 
 function countDeclarations(path: string, source: string): number {
 	return declarationTitles(path, source).length;
+}
+
+/**
+ * Static `assert…`/`expect` calls inside each literal-titled bare-`test` case, summed per title: `assert(x)`,
+ * `assert.equal(…)`, `t.assert.ok(…)`, `expect(x)`; a call inside a helper defined outside the case is not counted.
+ */
+export function assertionCounts(path: string, source: string): Map<string, number> {
+	const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+	const counts = new Map<string, number>();
+	const isAssert = (callee: ts.Expression): boolean =>
+		(ts.isIdentifier(callee) && (callee.text === "assert" || callee.text === "expect"))
+		|| (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "assert")
+		|| (ts.isPropertyAccessExpression(callee) && ts.isPropertyAccessExpression(callee.expression) && callee.expression.name.text === "assert");
+	const count = (node: ts.Node): number => {
+		let n = ts.isCallExpression(node) && isAssert(node.expression) ? 1 : 0;
+		node.forEachChild((child) => void (n += count(child)));
+		return n;
+	};
+	const visit = (node: ts.Node): void => {
+		if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "test") {
+			const [title, ...rest] = node.arguments;
+			if (title && (ts.isStringLiteral(title) || ts.isNoSubstitutionTemplateLiteral(title))) {
+				counts.set(title.text, (counts.get(title.text) ?? 0) + rest.reduce((sum, arg) => sum + count(arg), 0));
+				return;
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(file);
+	return counts;
+}
+
+/** Distinct `file.ts:line` entries in a note's `covered-by:` lists (each list runs to the next `;`). */
+export function coveredByClaims(note: string): Set<string> {
+	return new Set([...note.matchAll(/covered-by:([^;]*)/g)].flatMap((match) => [...(match[1] ?? "").matchAll(/[\w./-]+\.ts:\d+/g)].map((m) => m[0])));
+}
+
+/**
+ * Mapped rows of a deleted file, per baseline case: the rows' distinct `covered-by:` claims must number at least the
+ * case's assertions at the pre-deletion revision, unless a row says `Narrowed:`. A title with no countable case passes.
+ */
+export function claimCountFindings(rows: readonly string[][], baseline: (path: string) => ReadonlyMap<string, number> | undefined): string[] {
+	const cases = new Map<string, { path: string; title: string; claims: Set<string>; narrowed: boolean }>();
+	for (const [path = "", title = "", , status = "", note = ""] of rows) {
+		if (status !== "mapped" && status !== "narrowed") continue;
+		const key = `${path} | ${title}`;
+		const entry = cases.get(key) ?? { path, title, claims: new Set<string>(), narrowed: false };
+		for (const claim of coveredByClaims(note)) entry.claims.add(claim);
+		entry.narrowed ||= status === "narrowed" || note.includes("Narrowed:");
+		cases.set(key, entry);
+	}
+	const findings: string[] = [];
+	for (const { path, title, claims, narrowed } of cases.values()) {
+		const asserts = baseline(path)?.get(title) ?? 0;
+		if (narrowed || claims.size >= asserts) continue;
+		findings.push(`${path}: "${title}" cites ${claims.size} covered-by claim(s) for ${asserts} baseline assertion(s); cite each or say \`Narrowed:\``);
+	}
+	return findings;
 }
 
 /** A `deleted-with-feature` row: owner names the removing PR/job; evidence cites removed source modules. */
@@ -259,7 +320,8 @@ function main(): number {
 	}
 
 	const unmapped = new Map<string, number>();
-	for (const [path = "", assertion = "", scenario = "", status = "", note = ""] of rows(section(docs, "assertions", findings))) {
+	const assertionRows = rows(section(docs, "assertions", findings));
+	for (const [path = "", assertion = "", scenario = "", status = "", note = ""] of assertionRows) {
 		if (!disposition.has(path)) findings.push(`assertion map names ${path}, which is not a baseline file`);
 		// narrowed: mapped in part; the note's `Narrowed:` names the uncovered part.
 		const pinned = status === "mapped" || status === "redundant-unreachable" || status === "narrowed";
@@ -285,6 +347,29 @@ function main(): number {
 		if (!proven.has(path)) findings.push(`${path}: deleted without a negative-control record`);
 		if (unmapped.has(path)) findings.push(`${path}: deleted with ${unmapped.get(path)} unreachable assertion(s)`);
 	}
+	const deletedAt = new Map<string, string>();
+	for (const block of git("log", "--diff-filter=D", "--no-renames", "--name-only", "--format=%x00%H", "--", "tests").split("\0").slice(1)) {
+		const [sha = "", ...paths] = block.trim().split("\n");
+		for (const path of paths) if (!deletedAt.has(path)) deletedAt.set(path, `${sha}^`);
+	}
+	const preDeletion = new Map<string, Map<string, number> | undefined>();
+	const gone = new Set([...disposition].filter(([, entry]) => GONE.has(entry.kind)).map(([path]) => path));
+	const exempt = new Set((JSON.parse(readFileSync(args.claimExempt, "utf8")) as { files: string[] }).files);
+	for (const path of exempt) if (!gone.has(path)) findings.push(`claim count: exempt ${path} is not a deleted baseline file`);
+	const counted = assertionRows.filter(([path = ""]) => gone.has(path) && !exempt.has(path));
+	findings.push(...claimCountFindings(counted, (path) => {
+		if (!preDeletion.has(path)) {
+			const rev = deletedAt.get(path) ?? "HEAD";
+			try {
+				preDeletion.set(path, assertionCounts(path, git("show", `${rev}:${path}`)));
+			} catch {
+				preDeletion.set(path, undefined);
+				console.log(`claim count: no pre-deletion source for ${path} at ${rev}; its rows are not counted`);
+			}
+		}
+		return preDeletion.get(path);
+	}));
+	console.log(`claim count: ${counted.length} rows of deleted files counted, ${exempt.size} files exempt (${args.claimExempt})`);
 
 	const baseCounts = new Map(baseFiles.map((path) => [path, countDeclarations(path, git("show", `${base}:${path}`))]));
 	const baseDecls = [...baseCounts.values()].reduce((sum, n) => sum + n, 0);
