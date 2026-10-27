@@ -236,19 +236,34 @@ interface Budget {
 	pending: Set<string>;
 	/** Event-loop delay over the observation, so a failure can tell host lag from a slow GitHub. */
 	lag: IntervalHistogram;
+	/** The largest timer overshoot and the wall time it began; a fixed-size record, not a sample list. */
+	stall: { ms: number; at: number };
+	timer: ReturnType<typeof setInterval>;
 }
+
+const STALL_TICK_MS = 20;
 
 function budgetOf(options: ActionsReadOptions): Budget {
 	const now = options.now ?? Date.now;
 	const start = now();
-	const lag = monitorEventLoopDelay({ resolution: 20 });
+	const lag = monitorEventLoopDelay({ resolution: STALL_TICK_MS });
 	lag.enable();
-	return { start, deadline: start + (options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS), now, calls: [], pending: new Set(), lag };
+	const stall = { ms: 0, at: 0 };
+	let expected = Date.now() + STALL_TICK_MS;
+	const timer = setInterval(() => {
+		const fired = Date.now();
+		if (fired - expected > stall.ms) Object.assign(stall, { ms: fired - expected, at: expected });
+		expected = fired + STALL_TICK_MS;
+	}, STALL_TICK_MS);
+	timer.unref();
+	return { start, deadline: start + (options.timeoutMs ?? ACTIONS_CI_TIMEOUT_MS), now, calls: [], pending: new Set(), lag, stall, timer };
 }
 
-/** The host-side facts appended to a failed read: 1-minute load, worst event-loop lag, gh spawn-to-first-byte. */
+/** Host-side facts appended to a failed read: load, event-loop lag (max, when, p99), gh spawn-to-first-byte. */
 function diagnostics(budget: Budget, firstByte: string): string {
-	return `; load ${loadavg()[0]?.toFixed(2)}, event-loop lag ${Math.round(budget.lag.max / 1e6)}ms, gh first byte ${firstByte}`;
+	const { lag, stall } = budget;
+	const at = stall.at ? new Date(stall.at).toISOString() : "none";
+	return `; load ${loadavg()[0]?.toFixed(2)}, event-loop lag max ${Math.round(lag.max / 1e6)}ms at ${at}, p99 ${Math.round(lag.percentile(99) / 1e6)}ms, gh first byte ${firstByte}`;
 }
 
 /** One observation; a failure logs every gh call (settled and in flight) and the budget left, then rethrows. */
@@ -262,6 +277,7 @@ async function observe<T>(options: ActionsReadOptions, read: (budget: Budget) =>
 		throw error;
 	} finally {
 		budget.lag.disable();
+		clearInterval(budget.timer);
 	}
 }
 
