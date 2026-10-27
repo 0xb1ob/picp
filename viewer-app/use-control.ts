@@ -54,14 +54,13 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
  // Decision cards and abort keep their delivery summary; composer messages live in the FIFO list.
  const seen = delivery?.id && (entries.some(e => e.dashboard_id === delivery.id) || (status && !("error" in status) && status.recent.some(row=>row.id === delivery.id && row.state === "delivered")));
  const shown = seen ? {...delivery, state: "delivered" as const} : delivery;
- const enqueue = (body: Extract<ControlBody,{kind:"message"}>, card?: string, retryKey?: string) => {
+ const enqueue = (body: Extract<ControlBody,{kind:"message"}>, card?: string, retryKey?: string, retryId?: string) => {
   if (!controlReady(status) || starting?.state === "starting" || restartInFlight(restarting)) return;
   const at = new Date().toISOString(), ask_id = card ?? null;
   const random = [...crypto.getRandomValues(new Uint8Array(4))].map(byte=>byte.toString(16).padStart(2,"0")).join("");
   const key = `dc-${at.replace(/[-:T]/g,"").slice(0,14)}-${random}`;
   updatePending(value=>{
-   const prior=value.items.find(item=>item.key === retryKey);
-   return {...value,items:[...value.items.filter(item=>item.key !== retryKey),{key,at,id:key,state:"sending",reason:null,ask_id,body}],dismissed:prior?.id ? [...value.dismissed,prior.id] : value.dismissed};
+   return {...value,items:[...value.items.filter(item=>item.key !== retryKey),{key,at,id:key,state:"sending",reason:null,ask_id,body}],dismissed:retryId ? [...value.dismissed,retryId] : value.dismissed};
   });
   // The server takes one POST at a time per address. Keep requests FIFO even when the operator sends quickly.
   requests.current = requests.current.then(async ()=>{
@@ -94,7 +93,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
  // Only while the running bridge takes attachments; never held offline.
  const upload = (controlImages(status) || controlFiles(status)) && controlReady(status) ? (file: File) => uploadImage(fetcher, controlToken(status), file) : undefined;
  const visible = composer ? reconcilePending(pending,status,entries,truncated).items : undefined;
- const retry = (key: string) => { const item=pending.items.find(item=>item.key === key && item.state === "failed"); if(item) enqueue(item.body,item.ask_id ?? undefined,key); };
+ const retry = (key: string) => { const item=visible?.find(item=>item.key === key && item.state === "failed"); if(item) enqueue(item.body,item.ask_id ?? undefined,key,item.id ?? undefined); };
  // Discard (failed) and Dismiss (delivered): the shown state decides, since status may have moved it since the last persist.
  const discard = (key: string) => { const shownItem=visible?.find(item=>item.key === key && (item.state === "failed" || item.state === "delivered")); if(shownItem) updatePending(value=>({...value,items:value.items.filter(item=>item.key !== key),dismissed:shownItem.id ? [...value.dismissed,shownItem.id] : value.dismissed})); };
  // cp-y43c: Edit/Cancel a dashboard-queued message; serialized with sends (one POST at a time per address).
