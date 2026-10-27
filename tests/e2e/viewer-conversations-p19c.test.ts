@@ -275,7 +275,7 @@ test("P19-composer-images: the composer attaches, uploads one at a time, thumbna
 
 // ---- composer keys, drafts, footer and skills ---------------------------------------------------------------------
 
-/** A keydown on the composer field with the modifier and IME fields a browser sets, once the last input has rendered. */
+/** A keydown on the composer field with a browser's modifier and IME fields, once the last input has rendered. */
 async function press(tab: Tab, field: Element, key = "Enter", init: { shiftKey?: boolean; ctrlKey?: boolean; isComposing?: boolean; keyCode?: number } = {}) {
 	await settle();
 	const event = new tab.window.Event("keydown", { bubbles: true, cancelable: true });
@@ -1034,10 +1034,12 @@ test("P19-workbench-grants: a job's grant is the named, earliest-issued, lowest-
 test("P19-workbench-parent: the schedule controls' parent probe calls a zombie lock holder down, a live pid running, as isPidAlive does", { timeout: 120_000 }, async (t) => {
 	const d = await viewer(t);
 	const parent = async (pid: number) => { write(join(d.stateDir, "parent.lock"), { pid }); return ((await d.get("/api/schedules/control")).body as Json).parent as Json; };
+	const kill = t.mock.method(process, "kill", () => true); // a regressed guard must never signal a process group
 	for (const pid of [0, -1]) {
 		assert.deepEqual(await parent(pid), { running: false, pid: null, reason: "parent lock names no pid" }, `pid ${pid}`);
 		assert.equal(isPidAlive(pid), false, `pid ${pid}: isPidAlive agrees`);
 	}
+	assert.equal(kill.mock.callCount(), 0, "pid 0 and -1 are refused before any signal"); kill.mock.restore();
 	await withZombie(t, async (zombie, holder) => {
 		for (const pid of [zombie, holder, process.pid, 2 ** 30]) assert.equal((await parent(pid)).running, isPidAlive(pid), `pid ${pid}`);
 		assert.deepEqual(await parent(zombie), { running: false, pid: zombie, reason: `the recorded parent pid ${zombie} is not running` }, "a kill-0-only check would call a zombie alive");
