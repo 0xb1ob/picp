@@ -1,6 +1,6 @@
 /**
  * Read-only ledger validator: slice files and rules doc vs the git baseline; `test(` counts; exit 1 on findings.
- * Covered-by cites of a deleted case must hold its pre-deletion assertions; rows unchanged since CLAIM_SINCE only warn.
+ * A deleted case's Scenario and covered-by e2e bodies must hold its assertions; rows unchanged since CLAIM_SINCE warn.
  * `--preserved-from <ref>` against a ref from before the ledger split into slice files is expected to mismatch.
  */
 import { execFileSync } from "node:child_process";
@@ -97,6 +97,26 @@ function git(...args: string[]): string {
 	return execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 28 });
 }
 
+/**
+ * The claim-count base: `ref` when it is a commit here, else the merge-base with origin/main, else none (gate skipped:
+ * every short case only warns). Each fallback prints a WARN naming it.
+ */
+function claimBase(ref: string): string | undefined {
+	const quiet = (...args: string[]) => {
+		try {
+			return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+		} catch {
+			return undefined;
+		}
+	};
+	if (quiet("rev-parse", "--verify", "--quiet", `${ref}^{commit}`)) return ref;
+	const fork = quiet("merge-base", "HEAD", "origin/main");
+	console.log(fork
+		? `WARN claim count: base ${ref} unreachable; rows as at the merge-base with origin/main (${fork}) count as existing`
+		: `WARN claim-count gate skipped: base ${ref} unreachable and no merge-base with origin/main; short cases only warn`);
+	return fork;
+}
+
 /** Titles of the bare-`test` calls (the case declarations); a non-literal title is `<expr>`. */
 export function declarationTitles(path: string, source: string): string[] {
 	const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
@@ -174,26 +194,30 @@ export function citedAsserts(claims: Iterable<string>, parse: (file: string) => 
 }
 
 /**
- * Mapped rows of a deleted file that cite `covered-by:` lines, per baseline case: the assertions in the cited e2e bodies
- * must number at least the case's assertions at the pre-deletion revision, unless a row says `Narrowed:`. A short case
- * is `existing` (warn) when each of its rows, cells joined by ` | `, is in `known`; a new or edited row fails.
+ * Mapped rows of a deleted file, per baseline case: the e2e bodies of its rows' Scenario and `covered-by:` lines must
+ * hold at least the case's assertions at deletion, unless a row says `Narrowed:`. Rows are keyed by cells joined with
+ * ` | `: a short case whose rows are all in `known` only warns, one with a new or edited row fails; a known row citing
+ * no `covered-by:` line (legacy format) is not counted.
  */
 export function claimCountFindings(
 	rows: readonly string[][],
 	baseline: (path: string) => ReturnType<typeof testBodies> | undefined,
 	cited: (claims: Iterable<string>) => number,
 	known: ReadonlySet<string>,
+	scenarioCite: (id: string) => string | undefined,
 ): { existing: boolean; finding: string }[] {
 	const cases = new Map<string, { path: string; title: string; claims: Set<string>; narrowed: boolean; existing: boolean }>();
 	for (const cells of rows) {
-		const [path = "", title = "", , status = "", note = ""] = cells;
+		const [path = "", title = "", scenario = "", status = "", note = ""] = cells;
 		const claims = coveredByClaims(note);
-		if ((status !== "mapped" && status !== "narrowed") || claims.size === 0) continue;
+		const isKnown = known.has(cells.join(" | "));
+		if ((status !== "mapped" && status !== "narrowed") || (claims.size === 0 && isKnown)) continue;
 		const key = `${path} | ${title}`;
 		const entry = cases.get(key) ?? { path, title, claims: new Set<string>(), narrowed: false, existing: true };
-		for (const claim of claims) entry.claims.add(claim);
+		const cite = scenarioCite(scenario);
+		for (const claim of cite ? [...claims, cite] : claims) entry.claims.add(claim);
 		entry.narrowed ||= status === "narrowed" || note.includes("Narrowed:");
-		entry.existing &&= known.has(cells.join(" | "));
+		entry.existing &&= isKnown;
 		cases.set(key, entry);
 	}
 	const out: { existing: boolean; finding: string }[] = [];
@@ -201,7 +225,7 @@ export function claimCountFindings(
 		const asserts = (baseline(path)?.tests ?? []).filter((t) => t.title === title && title !== "<expr>").reduce((sum, t) => sum + t.asserts, 0);
 		const covered = cited(claims);
 		if (narrowed || covered >= asserts) continue;
-		out.push({ existing, finding: `${path}: "${title}" cites ${claims.size} covered-by line(s) holding ${covered} assertion(s) for ${asserts} at deletion` });
+		out.push({ existing, finding: `${path}: "${title}" cites ${claims.size} e2e line(s) holding ${covered} assertion(s) for ${asserts} at deletion` });
 	}
 	return out;
 }
@@ -400,15 +424,23 @@ function main(): number {
 		return parsed.get(key);
 	};
 	const gone = new Set([...disposition].filter(([, entry]) => GONE.has(entry.kind)).map(([path]) => path));
-	const counted = assertionRows.filter(([path = "", , , , note = ""]) => gone.has(path) && coveredByClaims(note).size > 0);
-	const known = new Set(rows(section(docsAt(args.claimSince, args.manifest), "assertions", [])).map((cells) => cells.join(" | ")));
-	const short = claimCountFindings(counted, (path) => parse(path, deletedAt.get(path) ?? "HEAD"), (claims) => citedAsserts(claims, (file) => parse(file)), known);
+	const counted = assertionRows.filter(([path = ""]) => gone.has(path));
+	const since = claimBase(args.claimSince);
+	const known = new Set((since ? rows(section(docsAt(since, args.manifest), "assertions", [])) : counted).map((cells) => cells.join(" | ")));
+	const scenarioBodies = new Map(rows(section(docs, "scenarios", [])).map(([id = "", path = "", name = ""]) => [id, { path, name }]));
+	const scenarioCite = (id: string) => {
+		const scenario = scenarioBodies.get(id);
+		const body = scenario && parse(scenario.path)?.tests.find((t) => t.title === scenario.name);
+		return scenario && body ? `${scenario.path}:${body.start}` : undefined;
+	};
+	const cited = (claims: Iterable<string>) => citedAsserts(claims, (file) => parse(file));
+	const short = claimCountFindings(counted, (path) => parse(path, deletedAt.get(path) ?? "HEAD"), cited, known, scenarioCite);
 	for (const { existing, finding } of short) {
 		if (existing) console.log(`WARN ${finding}`);
 		else findings.push(`${finding}; cite the e2e lines that hold them or say \`Narrowed:\``);
 	}
 	const warned = short.filter((entry) => entry.existing).length;
-	console.log(`claim count: ${counted.length} covered-by rows of deleted files, ${warned} unchanged since ${args.claimSince.slice(0, 12)} warned`);
+	console.log(`claim count: ${short.length} short case(s), ${warned} unchanged since ${since?.slice(0, 12) ?? "(gate skipped)"} warned`);
 
 	const baseCounts = new Map(baseFiles.map((path) => [path, countDeclarations(path, git("show", `${base}:${path}`))]));
 	const baseDecls = [...baseCounts.values()].reduce((sum, n) => sum + n, 0);
