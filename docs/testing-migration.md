@@ -274,10 +274,12 @@ outcome of that path instead (see Method). `unreachable`, with no pinning scenar
 `retained` means the assertion was moved verbatim into the kept unit file its note names, where it still runs; the
 scenario column names the e2e case that pins the reachable outcomes beside it.
 `narrowed` names the scenario that pins part of the assertion; its note says `Narrowed:` and names the uncovered part.
-Claim count (warning only, not yet a gate): for each `mapped` row of a deleted file, the static
-`assert`/`assert.x`/`t.assert.x`/`expect` calls in the e2e `test(…)` bodies its `covered-by: file.ts:line` cites land
-in (each body once, summed over rows naming the same case) are compared with those in that literal
-`test("<Assertion>")` body at the file's pre-deletion revision; fewer prints a `WARN` unless a note says `Narrowed:`.
+Claim count: for each `mapped` row of a deleted file that cites `covered-by: file.ts:line` lines, the static
+`assert`/`assert.x`/`t.assert.x`/`expect` calls in the e2e `test(…)` bodies those lines land in (each body once, summed
+over rows naming the same case) must be at least those in that literal `test("<Assertion>")` body at the file's
+pre-deletion revision, unless a note says `Narrowed:`. A short case whose rows are all byte-identical to rows at
+`CLAIM_SINCE` (the script's pin, `--claim-since <ref>` overrides) prints `WARN`; a new or edited row fails.
+Rows that cite no `covered-by:` line are not counted.
 
 <!-- manifest:assertions -->
 | Unit file | Assertion | Scenario | Disposition | Note |

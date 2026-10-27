@@ -94,7 +94,7 @@ const CHECKER = fileURLToPath(new URL("../scripts/test-migration-check.ts", impo
 const table = (name: string, ...lines: string[]) => [`<!-- manifest:${name} -->`, "| h | h |", "|---|---|", ...lines, `<!-- /manifest:${name} -->`].join("\n");
 
 /** A repo whose `tests/a.test.ts` case has 1 assertion at the baseline, 3 at deletion; e2e bodies hold 3 and 1. */
-function claimFixture(): { check: (note: string) => { status: number | null; out: string }; done: () => void } {
+function claimFixture() {
 	const dir = mkdtempSync(join(tmpdir(), "claim-count-"));
 	const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8" }).trim();
 	const write = (path: string, body: string) => { mkdirSync(join(dir, path, ".."), { recursive: true }); writeFileSync(join(dir, path), body); };
@@ -109,40 +109,69 @@ function claimFixture(): { check: (note: string) => { status: number | null; out
 	git("commit", "-qm", "grow");
 	git("rm", "-q", "tests/a.test.ts");
 	git("commit", "-qm", "delete");
-	const check = (note: string) => {
+	const ledger = (note?: string) => {
 		write("docs/testing-migration.md", [`Baseline sha: \`${base}\``, table("prs"), table("ledger"), table("feature-removed"),
 			table("baseline", "| tests/a.test.ts | deleted | P1 | |")].join("\n") + "\n");
 		write("docs/testing-migration/p1.md", [table("ledger", "| P1 | scope | 1 |"), table("incoming", "| tests/e2e/x.test.ts | P1 |"),
 			table("scenarios", "| S1 | tests/e2e/x.test.ts | x works |"), table("regressions", "| NC-1 | tests/a.test.ts | S1 | revert | fails |"),
-			table("assertions", `| tests/a.test.ts | case one | S1 | mapped | ${note} |`)].join("\n") + "\n");
-		const run = spawnSync(process.execPath, [CHECKER], { cwd: dir, encoding: "utf8" });
+			table("assertions", ...(note === undefined ? [] : [`| tests/a.test.ts | case one | S1 | mapped | ${note} |`]))].join("\n") + "\n");
+	};
+	/** Commits the ledger with this row (none when undefined) and returns the commit, a `--claim-since` ref. */
+	const commitLedger = (note?: string) => {
+		ledger(note);
+		git("add", "docs");
+		git("commit", "-qm", "ledger");
+		return git("rev-parse", "HEAD");
+	};
+	const empty = commitLedger();
+	const check = (note: string, since = empty) => {
+		ledger(note);
+		const run = spawnSync(process.execPath, [CHECKER, "--claim-since", since], { cwd: dir, encoding: "utf8" });
 		return { status: run.status, out: run.stdout + run.stderr };
 	};
-	return { check, done: () => rmSync(dir, { recursive: true, force: true }) };
+	return { check, commitLedger, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-test("CLI: cites whose e2e bodies hold fewer assertions than the case had at deletion warn", () => {
+const SHORT = "reworded; covered-by: tests/e2e/x.test.ts:4";
+const SHORT_FINDING = /tests\/a\.test\.ts: "case one" cites 1 covered-by line\(s\) holding 1 assertion\(s\) for 3 at deletion/;
+
+test("CLI: a new or edited row whose cited e2e bodies hold fewer assertions than the case had at deletion fails", () => {
 	const fixture = claimFixture();
 	try {
-		const short = fixture.check("reworded; covered-by: tests/e2e/x.test.ts:4");
-		assert.equal(short.status, 0, short.out);
-		assert.match(short.out, /WARN tests\/a\.test\.ts: "case one" cites 1 covered-by line\(s\) holding 1 assertion\(s\) for 3 at deletion/);
-		assert.match(short.out, /claim count: 1 rows of deleted files counted, 1 short/);
-		const none = fixture.check("control NC-1");
-		assert.match(none.out, /"case one" cites 0 covered-by line\(s\) holding 0 assertion\(s\) for 3 at deletion/);
+		const added = fixture.check(SHORT);
+		assert.equal(added.status, 1, added.out);
+		assert.match(added.out, new RegExp(`FAIL ${SHORT_FINDING.source}; cite the e2e lines`));
+		const edited = fixture.check(SHORT, fixture.commitLedger("covered-by: tests/e2e/x.test.ts:2"));
+		assert.equal(edited.status, 1, edited.out);
+		assert.match(edited.out, SHORT_FINDING);
 	} finally {
 		fixture.done();
 	}
 });
 
-test("CLI: one cite into a body holding every assertion, or a row marked Narrowed:, does not warn", () => {
+test("CLI: a short row unchanged since --claim-since only warns; a row citing no covered-by line is not counted", () => {
+	const fixture = claimFixture();
+	try {
+		const existing = fixture.check(SHORT, fixture.commitLedger(SHORT));
+		assert.equal(existing.status, 0, existing.out);
+		assert.match(existing.out, new RegExp(`WARN ${SHORT_FINDING.source}`));
+		assert.match(existing.out, /claim count: 1 covered-by rows of deleted files, 1 unchanged since \w+ warned/);
+		const none = fixture.check("control NC-1");
+		assert.equal(none.status, 0, none.out);
+		assert.match(none.out, /claim count: 0 covered-by rows of deleted files, 0 unchanged/);
+	} finally {
+		fixture.done();
+	}
+});
+
+test("CLI: one cite into a body holding several assertions, or a new short row marked Narrowed:, passes", () => {
 	const fixture = claimFixture();
 	try {
 		for (const note of ["covered-by: tests/e2e/x.test.ts:2", "covered-by: tests/e2e/x.test.ts:4. Narrowed: the equal check has no consumer"]) {
 			const run = fixture.check(note);
 			assert.equal(run.status, 0, run.out);
-			assert.doesNotMatch(run.out, /WARN/);
-			assert.match(run.out, /0 short/);
+			assert.doesNotMatch(run.out, /WARN|cites/);
+			assert.match(run.out, /manifest ok/);
 		}
 	} finally {
 		fixture.done();
