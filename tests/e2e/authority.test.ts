@@ -4,13 +4,14 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import type { DispatchRequest } from "../../src/dispatch.ts";
-import { DEFAULT_BUDGET_CONFIG, EMPTY_USAGE, isoTimestamp, LAYOUT, type Mandate, MINIMAL_PLAN_SUMMARY, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { DEFAULT_BUDGET_CONFIG, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, type Mandate, MINIMAL_PLAN_SUMMARY, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { MANDATE_JOBS_THIS_TURN } from "../../src/mandate.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "../../src/mandate-defaults.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
@@ -239,6 +240,11 @@ test("authority: token raises stay inside the ceiling, the USD cap never moves, 
 	const [spender, next, overflow] = [await s.job("spender"), await s.job("next"), await s.job("overflow")];
 	const grant = s.issue([spender, next], { tokens: 4_000 });
 	grantId = grant.id;
+	// 400 unrelated finished jobs: every usage observation below sweeps a large fleet and must still pause this grant.
+	const tag = randomUUID().slice(0, 8);
+	const worker = { pid: process.pid, session_id: "sess-lf", session_file: "/sessions/lf.jsonl", profile: "implementer", role: "implementer", model: "mock/mock-model", started_at: isoTimestamp() };
+	const done = (i: number) => ({ job_id: `cp-lf${tag}-${i}`, project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, phase: "done", worktree: `/wt/${i}`, branch: `b${i}`, worker, dispatched_at: isoTimestamp(), usage: EMPTY_USAGE });
+	writeFileSync(join(s.home, LAYOUT.fleetFile), JSON.stringify({ schema_version: SCHEMA_VERSION, updated_at: isoTimestamp(), jobs: Array.from({ length: 400 }, (_, i) => done(i)) }));
 
 	// No data/budgets.json yet: the fleet defaults apply.
 	assert.deepEqual((await s.accepted(spender))?.budget, { tokens: DEFAULT_BUDGET_CONFIG.per_job_tokens, cost_usd: DEFAULT_BUDGET_CONFIG.per_job_cost_usd });
