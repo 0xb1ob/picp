@@ -101,6 +101,18 @@ jobs:
           done
           PATH="$bin:$PATH" treehouse --version
 
+      # Diagnostic for the hosted-runner "operation was canceled" runs: memory, top RSS and per-uid process
+      # counts every 20 s, printed by the always() step below; job output only, nothing committed.
+      - name: Start resource sampler
+        run: |
+          nohup bash -c 'while :; do
+            echo "=== $(date -u +%H:%M:%S) load $(cut -d" " -f1-4 /proc/loadavg)"
+            free -m
+            ps -eo pid,ppid,uid,rss,etime,args --sort=-rss | head -n 11 | cut -c1-200
+            echo "processes per uid:"; ps -eo uid= | sort -n | uniq -c
+            sleep 20
+          done' > "$RUNNER_TEMP/sampler.log" 2>&1 &
+
       - name: Run suite shard ${{ matrix.shard }}/4 (scripts/test-timings.json)
         run: bash scripts/ci-as-user.sh npm run test:shard
         env:
@@ -108,6 +120,54 @@ jobs:
           # Never set CP_LIVE_TESTS here: the live suites hit real models,
           # cost money and need credentials. They self-skip without it.
           CP_LIVE_TESTS: ""
+
+      - name: Resource sampler tail and kernel OOM lines
+        if: always()
+        run: |
+          tail -n 400 "$RUNNER_TEMP/sampler.log" || echo "no sampler log"
+          sudo -n dmesg 2>/dev/null | grep -iE 'oom|killed process' || echo "no OOM lines in dmesg (or dmesg unreadable)"
+
+  # TEMPORARY (cp-ci-cancel-diag-qsjw): one suspect file per hosted leg, three serial runs; removed before review.
+  diag-isolate:
+    name: diag-isolate (${{ matrix.file }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        file: [tests/e2e/viewer-conversations-p19c.test.ts, tests/e2e/service.test.ts]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Start resource sampler
+        run: |
+          nohup bash -c 'while :; do
+            echo "=== $(date -u +%H:%M:%S) load $(cut -d" " -f1-4 /proc/loadavg)"
+            free -m
+            ps -eo pid,ppid,pgid,uid,rss,etime,args --sort=-rss | head -n 11 | cut -c1-200
+            echo "processes per uid:"; ps -eo uid= | sort -n | uniq -c
+            sleep 20
+          done' > "$RUNNER_TEMP/sampler.log" 2>&1 &
+      - name: Run ${{ matrix.file }} three times
+        run: |
+          echo "runner tree: $(ps -o pid,pgid,sid,args -p $$ -p $PPID | tr '\n' ';')"
+          systemctl --user is-system-running 2>&1 || true
+          for i in 1 2 3; do
+            echo "::group::run $i $(date -u +%H:%M:%S)"
+            npm run test:one -- --test-reporter=spec "${{ matrix.file }}" || echo "run $i FAILED"
+            echo "::endgroup::"
+          done
+          systemctl --user list-units --all --no-pager 2>&1 | grep -iE 'picp|cp-|command-post' || echo "no cp user units"
+      - name: Sampler tail and kernel OOM lines
+        if: always()
+        run: |
+          tail -n 400 "$RUNNER_TEMP/sampler.log" || echo "no sampler log"
+          sudo -n dmesg 2>/dev/null | grep -iE 'oom|killed process' || echo "no OOM lines in dmesg (or dmesg unreadable)"
+          journalctl --user --no-pager -n 50 2>&1 | tail -n 50 || true
 
   # The one required check: fails unless typecheck and every shard succeeded.
   test:
