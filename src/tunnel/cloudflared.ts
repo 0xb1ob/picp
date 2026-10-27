@@ -19,16 +19,20 @@ import { dirname, isAbsolute, join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { daemonPaths } from "../service/daemon-files.ts";
 
-export const CLOUDFLARED_VERSION = "2026.10.0";
+export const CLOUDFLARED_VERSION = "2026.10.4";
 /** `tunnel run --token-file` arrived in 2025.4.0. */
 export const CLOUDFLARED_MIN_VERSION: readonly [number, number, number] = [2025, 4, 0];
-export type CloudflaredRelease = { asset: string; sha256: string; archive: boolean };
-/** The official release assets and their published SHA256s (github.com/cloudflare/cloudflared/releases/tag/2026.10.0). */
+/** `sha256` hashes the downloaded asset; an archive also carries `binarySha256`, the extracted cloudflared. */
+export type CloudflaredRelease = { asset: string; sha256: string; archive: boolean; binarySha256?: string };
+/**
+ * github.com/cloudflare/cloudflared/releases/tag/2026.10.4: `sha256` is GitHub's asset digest (= the notes for Linux);
+ * `binarySha256` is the notes' value, which for a macOS tarball names the binary inside it, not the tarball.
+ */
 export const CLOUDFLARED_RELEASES: Readonly<Record<string, CloudflaredRelease>> = {
-	"linux-x64": { asset: "cloudflared-linux-amd64", sha256: "d33ff2d14475178d2012c2c56beba87389ac5ded27649519f198a7d3134a99db", archive: false },
-	"linux-arm64": { asset: "cloudflared-linux-arm64", sha256: "e6422b9d4f72d3194bc5a38676f13667c06666523217b842a877d72a80b5ac08", archive: false },
-	"darwin-x64": { asset: "cloudflared-darwin-amd64.tgz", sha256: "0560c9ab7281ac3f746055323623ed23bc0405b6dab9400474020cba33a978da", archive: true },
-	"darwin-arm64": { asset: "cloudflared-darwin-arm64.tgz", sha256: "72edfd3eea463aef4d5cb89e2e209cecb048cc756c2b01915de2e0ad7cb39830", archive: true },
+	"linux-x64": { asset: "cloudflared-linux-amd64", sha256: "ae5e8add7884b0531d66bbca4570d1de491ff6da51e4ebe7eb160cdf241d9e42", archive: false },
+	"linux-arm64": { asset: "cloudflared-linux-arm64", sha256: "2b7203b4fb0ba28a0c1e12f8855ce2c25f76d266a8d5edafac5540b6812acff6", archive: false },
+	"darwin-x64": { asset: "cloudflared-darwin-amd64.tgz", sha256: "f11fbef4207d715892331917dafd437f032cf4b7137ed64dea3008338c1c613d", archive: true, binarySha256: "fdec0f9a1c726f4c10283fc0cd70e602d510c72887b737270433c81a08c883a9" },
+	"darwin-arm64": { asset: "cloudflared-darwin-arm64.tgz", sha256: "68b6bc4080ac1330234db2a9002d07f98b000537a1bd531a687b660d4160fa7f", archive: true, binarySha256: "49e7963072b2ca83fb44c09f4d4a7cda52d390c0c9c6f55bac83454a5bc43910" },
 };
 export const releaseUrl = (asset: string): string => `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/${asset}`;
 /** The only hosts a download may touch, the release redirect's object stores included. */
@@ -153,6 +157,8 @@ export async function provisionCloudflared(binDir: string, ports: ProvisionPorts
 		const digest = createHash("sha256").update(bytes).digest("hex");
 		if (digest !== release.sha256) throw new Error(`checksum mismatch for ${release.asset}: got ${digest}, expected ${release.sha256}`);
 		const binary = release.archive ? extractCloudflared(bytes) : bytes;
+		const inner = createHash("sha256").update(binary).digest("hex");
+		if (release.archive && inner !== release.binarySha256) throw new Error(`checksum mismatch for the cloudflared inside ${release.asset}: got ${inner}, expected ${release.binarySha256}`);
 		mkdirSync(binDir, { recursive: true, mode: 0o700 });
 		chmodSync(binDir, 0o700); // an existing bin/ too: mkdir's mode applies only to a directory it creates
 		temp = join(binDir, `.cloudflared.${process.pid}.${Date.now()}.tmp`);
