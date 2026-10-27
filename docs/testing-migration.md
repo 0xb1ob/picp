@@ -30,7 +30,7 @@ identifier, counted on the TypeScript AST). Static declarations are not executed
 | `e2e` | Already an e2e acceptance file (`tests/e2e/`) | the reason it stays |
 | `retained` | Kept on purpose; not deletable yet | the reason and a link |
 | `exception` | Structural, golden, contract or security check kept by policy | the policy link (see Exceptions) |
-| `deleted` | Removed; every assertion mapped or redundant-unreachable, and a negative control recorded | assertion map + regression row |
+| `deleted` | Removed; every assertion mapped, narrowed (with `Narrowed:`) or redundant-unreachable, and a negative control recorded | assertion map + regression row |
 | `deleted-with-feature` | Removed with the production feature it tested; nothing is left to patch back | owner names the removing PR/job; evidence cites the removed source modules |
 
 P1 completed the manifest: the checker refuses any other disposition, so a new baseline row cannot stay undecided.

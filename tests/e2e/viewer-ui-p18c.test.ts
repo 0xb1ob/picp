@@ -3,7 +3,7 @@
  * in a linkedom tab: DOM, text and the served stylesheet's rules, never pixels or measured layout.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
@@ -387,6 +387,24 @@ test("P18-jobs-render: Jobs, a failed job's detail and Board render empty, faile
 	board.click(board.$(".board-trigger")!);
 	board.click(await board.find("#board-opt-all"));
 	await until(() => board.$('[aria-label="Landed today"]')?.querySelectorAll(".board-card").length, (n) => n === 4, "All mandates restores the preview");
+	// Working counts working runs only: a waiting or an idle job counts under Waiting. Only a failed job offers Ask:
+	// working, done, idle, waiting and held details have none (cp-wide idles, then cp-wait turns held).
+	const counts = (tab: Tab) => ["Working", "Waiting"].map((name) => tab.$(`section[aria-label="${name}"] h2 > span:last-child`)?.textContent);
+	assert.deepEqual(counts(board), ["3", "1"]);
+	assert.equal(board.$('section[aria-label="Waiting"] h2')?.getAttribute("title"), "needs a person, or the worker is idle");
+	v.put(run("cp-wide", "status.json"), { job_id: "cp-wide", phase: "idle", started_at: iso(10) });
+	const idled = async () => { const tab = await v.open("#board", true, ".board-trigger"); const seen = counts(tab); tab.close(); return seen; };
+	assert.deepEqual(await until(idled, (c) => c[0] === "2", "cp-wide idles"), ["2", "2"], "waiting and idle count under Waiting only");
+	const phaseOf = async (id: string) => {
+		const tab = await v.open(`#job/${id}`, false, ".job-facts");
+		const seen = [tab.$(".job-badges > :first-child")?.textContent, tab.text().includes("Ask about this failure")];
+		tab.close();
+		return seen;
+	};
+	for (const [id, phase] of [["cp-bare", "working"], ["cp-d1", "done"], ["cp-wide", "idle"], ["cp-wait", "waiting"]]) assert.deepEqual(await phaseOf(id!), [phase, false], `${phase} has no failure action`);
+	const flown = JSON.parse(readFileSync(join(v.home, LAYOUT.fleetFile), "utf8")) as { jobs: Array<{ job_id: string }> };
+	fleet(v.put, flown.jobs.map((j) => (j.job_id === "cp-wait" ? { ...j, phase: "held" } : j)));
+	assert.deepEqual(await until(() => phaseOf("cp-wait"), (p) => p[0] === "held", "cp-wait turns held"), ["held", false], "held has no failure action");
 
 	// Served CSS: the phone gutter, wrapped-never segments, the 44px phone link, and the desktop subgrid row.
 	assert.equal(v.css.filter((r) => /\.jobs-screen\b/.test(r.selector) && r.media === "" && /max-width|margin/.test(r.body) && !/ /.test(r.selector.replace(".jobs-screen", ""))).length, 0, "no capped phone column");
