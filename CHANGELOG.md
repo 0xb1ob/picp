@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- Dashboard push writes (`/api/push/subscription`, `/api/push/test`) answer an oversize body with a 413 and a bounded discard instead of `connection: close`, so a sender still writing reads the 413 rather than an EPIPE; every refused-body discard (push and upload routes) ends after `BODY_DISCARD_IDLE_MS` (5 s) of silence and closes the socket. Migration: none.
+
 - Main-red gate judges the current `origin/main` head: a `state/main-ci.json` latch from an older commit no longer holds `cp_integrate` once the current head's own CI is green (red or pending on the current head still holds). Migration: none.
 
 - A failed CI read's diagnostic now names the event-loop lag max, its p99 and the wall time of the largest stall, so a loop block reads apart from gh's own wait (`event-loop lag max 415ms at <iso>, p99 12ms`).
