@@ -328,8 +328,8 @@ test("P12c-sender-closed: a bad binding, ledger or store sends nothing; the bind
 		await until(unreadable, (now) => now === count + 1, JSON.stringify(bad));
 	}
 	assert.equal(s.posts.length, 0);
-	// Starting, with no origin yet: no binding, so the session is judged on its own.
-	writeFileSync(tunnelRuntimeFile(s.stateDir), JSON.stringify({ schema_version: 1, generation: 0, origin: null }));
+	// No runtime file (nothing published yet): no binding, so the session is judged on its own.
+	rmSync(tunnelRuntimeFile(s.stateDir));
 	await until(() => s.record(own, laptop.id)?.state, (state) => state === "delivered", "delivered with no binding");
 
 	sender.child.kill("SIGTERM");
@@ -347,7 +347,7 @@ test("P12c-sender-closed: a bad binding, ledger or store sends nothing; the bind
 	sender = s.sender();
 	await until(() => [s.record(tableted, laptop.id)?.state, s.record(tableted, tablet.id)?.state].join(), (states) => states === "expired,expired", "another generation is expired");
 	assert.equal(JSON.parse(readFileSync(lease, "utf8")).pid, sender.child.pid, "a torn lease names no holder");
-	assert.equal(s.posts.length, 0);
+	assert.deepEqual([s.record(tableted, laptop.id)?.state, s.record(tableted, tablet.id)?.state, s.posts.length], ["expired", "expired", 0]);
 
 	// A malformed ledger or device store stops the sender loudly and is never reset.
 	const malformed = '{"schema_version":1,"items":[],"unusable":["nope"]}';
