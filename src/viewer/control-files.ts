@@ -464,7 +464,14 @@ export type ControlAuditLine =
 	| { type: "start"; by: "viewer"; id: null; at: string; peer: string | null; via: "herdr" | "tmux"; resume?: true; state: "starting" | "unavailable"; reason: string | null };
 
 type UploadMetadata = { name: string; bytes: number };
-const uploadMetadataCache = new Map<string, { dev: number; ino: number; size: number; offset: number; uploads: Map<string, UploadMetadata & { order: number }> }>();
+type UploadCache = { dev: number; ino: number; size: number; mtimeMs: number; offset: number; tail: Buffer; uploads: Map<string, UploadMetadata & { order: number }> };
+const uploadMetadataCache = new Map<string, UploadCache>();
+/** The up-to-64 bytes before `end`: a replaced journal that reuses the inode and grows no longer matches them. */
+const tailAt = (fd: number, end: number): Buffer => {
+	const buf = Buffer.alloc(Math.min(64, end));
+	readSync(fd, buf, 0, buf.length, end - buf.length);
+	return buf;
+};
 
 /** Names/sizes have one durable source: upload audit lines, never attachment contents.
  * Cache each journal's uploads and resume at the last complete record; a snapshot bounds each scan.
@@ -478,30 +485,45 @@ export function readUploadMetadata(stateDir: string, ids: readonly string[]): Ma
 	try { fd = openSync(file, "r"); } catch { uploadMetadataCache.delete(file); return found; }
 	try {
 		const stat = fstatSync(fd);
+		const fresh = (): UploadCache => ({ dev: stat.dev, ino: stat.ino, size: 0, mtimeMs: 0, offset: 0, tail: Buffer.alloc(0), uploads: new Map() });
+		const scan = (c: UploadCache) => {
+			c.size = stat.size;
+			c.mtimeMs = stat.mtimeMs;
+			let pending = Buffer.alloc(0);
+			for (let offset = c.offset; offset < stat.size;) {
+				const buf = Buffer.alloc(Math.min(1024 * 1024, stat.size - offset));
+				const read = readSync(fd, buf, 0, buf.length, offset);
+				if (!read) break;
+				offset += read;
+				const chunk = Buffer.concat([pending, buf.subarray(0, read)]);
+				let start = 0;
+				for (let end = chunk.indexOf(0x0a); end !== -1; end = chunk.indexOf(0x0a, start)) {
+					const row = chunk.subarray(start, end).toString("utf8");
+					start = end + 1;
+					let line;
+					try { line = JSON.parse(row); } catch { continue; }
+					if (line?.type !== "upload" || !isUploadId(line.id) || typeof line.name !== "string" || !Number.isSafeInteger(line.bytes) || line.bytes < 0) continue;
+					c.uploads.set(line.id, { name: sanitizeUploadName(line.name), bytes: line.bytes, order: c.uploads.get(line.id)?.order ?? c.uploads.size });
+				}
+				pending = chunk.subarray(start);
+				c.offset = offset - pending.length;
+				c.tail = Buffer.from(Buffer.concat([c.tail, chunk.subarray(0, start)]).subarray(-64));
+			}
+		};
 		let cache = uploadMetadataCache.get(file);
 		if (!cache || cache.dev !== stat.dev || cache.ino !== stat.ino || stat.size < cache.size) {
-			cache = { dev: stat.dev, ino: stat.ino, size: stat.size, offset: 0, uploads: new Map() };
+			cache = fresh();
 			uploadMetadataCache.set(file, cache);
-		}
-		cache.size = stat.size;
-		let pending = Buffer.alloc(0);
-		for (let offset = cache.offset; offset < stat.size;) {
-			const buf = Buffer.alloc(Math.min(1024 * 1024, stat.size - offset));
-			const read = readSync(fd, buf, 0, buf.length, offset);
-			if (!read) break;
-			offset += read;
-			const chunk = Buffer.concat([pending, buf.subarray(0, read)]);
-			let start = 0;
-			for (let end = chunk.indexOf(0x0a); end !== -1; end = chunk.indexOf(0x0a, start)) {
-				const row = chunk.subarray(start, end).toString("utf8");
-				start = end + 1;
-				let line;
-				try { line = JSON.parse(row); } catch { continue; }
-				if (line?.type !== "upload" || !isUploadId(line.id) || typeof line.name !== "string" || !Number.isSafeInteger(line.bytes) || line.bytes < 0) continue;
-				cache.uploads.set(line.id, { name: sanitizeUploadName(line.name), bytes: line.bytes, order: cache.uploads.get(line.id)?.order ?? cache.uploads.size });
+			scan(cache);
+		} else if (cache.size !== stat.size || cache.mtimeMs !== stat.mtimeMs) {
+			const { offset, tail } = cache;
+			scan(cache);
+			// One verify read on growth: the bytes before the old offset must still be the ones we parsed.
+			if (offset && !tailAt(fd, offset).equals(tail)) {
+				cache = fresh();
+				uploadMetadataCache.set(file, cache);
+				scan(cache);
 			}
-			pending = chunk.subarray(start);
-			cache.offset = offset - pending.length;
 		}
 		const matches = [...wanted].flatMap(id => { const metadata = cache.uploads.get(id); return metadata ? [{ id, ...metadata }] : []; });
 		matches.sort((a, b) => a.order - b.order); // Preserve the journal's first-seen order.

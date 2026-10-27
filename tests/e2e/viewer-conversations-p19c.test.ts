@@ -411,14 +411,14 @@ test("P19-composer-footer: attach, # thread and a closed Options naming the sess
 	assert.equal(tab.$(".operator-composer-options"), null, "no empty Options without a destination file");
 });
 
-test("P19-composer-skills: @ lists the installed skills once; arrows, Enter and Tab insert, Escape closes; unknown tokens hint; no list without a ready control", { timeout: 180_000 }, async (t) => {
+test("P19-composer-skills: @ lists the installed skills once; arrows, Enter and Tab insert, Escape closes; unknown tokens hint; no list without a served control", { timeout: 180_000 }, async (t) => {
 	const catalogue: Array<[string, string]> = [["teach", "Explain step by step"], ["test-driven-development", "Red, green, refactor"], ["write-tests", "Cover the change"], ...Array.from({ length: 12 }, (_, i): [string, string] => [`s${i}`, `skill ${i}`])];
 	const seed = (_stateDir: string, home: string) => { for (const [name, description] of catalogue) write(join(home, "skills", name, "SKILL.md"), `---\ndescription: ${description}\n---\n\n# Body\n`); };
 	const d = await viewer(t, { seed });
 	const offline = await d.open(OPERATOR);
 	typeAt(offline, await offline.find("textarea"), "@te");
-	await settle();
-	assert.deepEqual([offline.$('[role="listbox"]'), texts(offline, ".operator-composer-hint")], [null, []], "no ready control: no list and no hint");
+	const held = await until(() => texts(offline, '[role="listbox"] [role="option"]'), (o) => o.length === 3, "the held composer's @te list");
+	assert.equal(held.length, 3, "offline but held (controlReady): the catalogue lists");
 	offline.close();
 	await operatorSession(t, d.stateDir);
 	const tab = await d.open(OPERATOR);
