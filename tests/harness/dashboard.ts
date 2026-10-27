@@ -5,7 +5,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createContext, runInContext } from "node:vm";
 import { parseHTML } from "linkedom";
@@ -36,20 +36,27 @@ const freePort = (): Promise<number> => new Promise((done) => {
 
 /** One running `bin/cp-view`; `at` pins its clock (`CP_TEST_CLOCK_FILE`) so dated fixtures read the same every run. */
 export async function startViewer(t: Context, { home, requireTailnet = true, at, env = {} }: { home: string; requireTailnet?: boolean; at?: string; env?: Record<string, string> }) {
-	const port = await freePort();
 	const clock = join(home, "clock-offset-ms");
 	const pin = (iso: string) => writeFileSync(clock, String(Date.parse(iso) - Date.now()));
 	pin(at ?? new Date().toISOString());
-	const argv = ["--home", home, "--host", "127.0.0.1", "--port", String(port), ...(requireTailnet ? ["--require-tailnet"] : [])];
-	const child: ChildProcess = spawn(join(REPO_ROOT, "bin/cp-view"), argv, { env: { ...process.env, HOME: home, CP_HOME: home, NODE_OPTIONS: CLOCK_HOOK, CP_TEST_CLOCK_FILE: clock, CP_TEST_LIFELINE: "1", ...env }, stdio: ["pipe", "pipe", "pipe"] });
-	let output = "";
-	child.stdout!.on("data", (chunk) => (output += chunk));
-	child.stderr!.on("data", (chunk) => (output += chunk));
-	const exited = new Promise<void>((done) => child.once("exit", () => done()));
-	t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); await exited; });
-	await until(() => call(port, "/healthz").then((reply) => reply.status, () => 0), (status) => status === 200, `cp-view on ${port}\n${output}`, 60_000);
-	const origin = `http://127.0.0.1:${port}`;
-	return { port, origin, pin, output: () => output, stop: async () => { child.kill("SIGKILL"); await exited; }, get: (path: string, init: Init = {}) => call(port, path, init), open: (hash: string, hold?: RegExp) => openTab(t, port, hash, new Map(), hold) };
+	for (let attempt = 1; ; attempt++) {
+		const port = await freePort();
+		const argv = ["--home", home, "--host", "127.0.0.1", "--port", String(port), ...(requireTailnet ? ["--require-tailnet"] : [])];
+		const child: ChildProcess = spawn(join(REPO_ROOT, "bin/cp-view"), argv, { env: { ...process.env, HOME: home, CP_HOME: home, NODE_OPTIONS: CLOCK_HOOK, CP_TEST_CLOCK_FILE: clock, CP_TEST_LIFELINE: "1", ...env }, stdio: ["pipe", "pipe", "pipe"] });
+		let output = "";
+		child.stdout!.on("data", (chunk) => (output += chunk));
+		child.stderr!.on("data", (chunk) => (output += chunk));
+		const exited = new Promise<void>((done) => child.once("exit", () => done()));
+		t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); await exited; });
+		// Another server can take the freed port first: only this home's identity counts, and our EADDRINUSE exit retries.
+		const state = await until(async () => child.exitCode !== null || child.signalCode !== null ? "exited" : await call(port, "/api/identity").then((reply) => reply.body.home === resolve(home) ? "ours" : "other", () => "other"), (s) => s !== "other", `cp-view on ${port}\n${output}`, 60_000);
+		if (state === "exited") {
+			if (attempt < 3) continue;
+			throw new Error(`cp-view exited before serving, ${attempt} ports tried\n${output}`);
+		}
+		const origin = `http://127.0.0.1:${port}`;
+		return { port, origin, pin, output: () => output, stop: async () => { child.kill("SIGKILL"); await exited; }, get: (path: string, init: Init = {}) => call(port, path, init), open: (hash: string, hold?: RegExp) => openTab(t, port, hash, new Map(), hold) };
+	}
 }
 
 /** A scratch home (its state dir made) with a running viewer. */

@@ -772,6 +772,7 @@ test("P14-doctor-service: service.legacy_units, service.health and service.launc
 	writeFileSync(daemon.runtime, JSON.stringify({ units: { parent: { state: "failed", result: "start-limit-hit" }, viewer: { state: "failed" } } }));
 	health(Date.now() - 70 * 60_000, Object.fromEntries(["parent", "viewer", "supervisor", "disk", "git", "gh", "update", "relay"].map((name) => [name, { status: "fail", detail: long }])));
 	const seen = new Set<string>();
+	const rollback = new Set<string>();
 	const config = readFileSync(daemon.config, "utf8");
 	const updates = [{ phase: "rolling_back", last_result: "rollback_failed", to: "a".repeat(40), detail: long }, { phase: "idle", last_result: "rollback_failed", detail: long },
 		{ phase: "idle", last_result: "failed", to: "b".repeat(40), detail: long }, { phase: "idle", last_result: "failed", detail: long },
@@ -786,10 +787,16 @@ test("P14-doctor-service: service.legacy_units, service.health and service.launc
 				put(p.home, `${LAYOUT.state}/update.json`, typeof update === "string" ? update : JSON.stringify({ schema_version: 1, last_run_at: new Date().toISOString(), ...update }));
 				const report = await p.doctor();
 				for (const finding of report.findings) if (finding.check.startsWith("service.")) seen.add(finding.check);
+				const found = report.findings.find((finding) => finding.check === "service.update");
+				if (typeof update !== "string" && update.last_result === "rollback_failed") rollback.add(`${update.phase} ${found?.severity}: ${found?.fix}`);
 				const valid = validateDoctorReport(report);
 				assert.ok(valid.ok, `${manager[2] ?? "active"} ${withConfig} ${JSON.stringify(update).slice(0, 60)}: ${valid.ok ? "" : valid.errors.join("; ")}`);
 			}
 		}
 	}
 	assert.deepEqual([...seen].sort(), ["service.daemon", "service.health", "service.launchers", "service.legacy_home", "service.legacy_units", "service.node", "service.update"]);
+	const [held, sticky, ...more] = rollback;
+	assert.deepEqual(more, [], [...rollback].join("\n"));
+	assert.match(held ?? "", /^rolling_back warn: live workers held the rollback back \(it never kills one\); it drains and retries/);
+	assert.match(sticky ?? "", /^idle warn: check the checkout by hand, then remove \S+\/update\.json to resume auto-update$/);
 });

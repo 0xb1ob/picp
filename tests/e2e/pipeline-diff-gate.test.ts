@@ -16,6 +16,7 @@ import { initJobsDocument } from "../../src/ledger.ts";
 import { readReviewPassVerdict } from "../../src/merge-ask.ts";
 import { ReviewRuns } from "../../src/review-runs.ts";
 import { createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT } from "../harness/index.ts";
+import { until } from "../harness/dashboard.ts";
 
 const NO_FLAGS = { destructive_scope: false, scope_growth: false, blocking_unknowns: false };
 const FLAGGED = { verdict: "escalate", cause: "flagged", flags: { ...NO_FLAGS, destructive_scope: true }, reasons: ["the diff drops the legacy_accounts table"] };
@@ -184,7 +185,7 @@ test("P11d-diff-stop: a truncated pass is reviewed again, a policy stop or a spe
 	}
 	const starved = await s.seed();
 	starved.plan({ enabled: true, model: s.script(`never-${starved.jobId}`, [{ kind: "text", text: "never" }]) });
-	const refused = await s.post.advancePipeline(starved.researchId);
+	const refused = await until(() => s.post.advancePipeline(starved.researchId), (r) => r.pending === undefined, "the reserve refusal to settle");
 	assert.deepEqual([refused.state, refused.next], ["implementing", "wait"]);
 	assert.match(refused.message, /operational fault[^]*uses a different model/);
 	assert.match(readFileSync(join(s.home, paths.reviewFile(starved.jobId, 1)), "utf8"), /reviewer could not run: review reserve exhausted/);
