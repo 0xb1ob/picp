@@ -1,7 +1,8 @@
 /**
- * Behavior 15 (P14e): cp-daemon's update oneshot as cp-daemon runs it — `node <app>/src/service/update.ts` in a scratch
- * checkout with a bare origin, its clock 50 times fast. The parent host and cp-daemon's control socket are one logging
- * stand-in process answering from a plan file; npm is a stub; git, the fleet, run status and drain.json are real.
+ * Behavior 15 (P14e): cp-daemon's update oneshot as cp-daemon runs it — `node <app>/src/service/update.ts` in a
+ * scratch checkout with a bare origin, its clock 50 times fast but for its 10 s cp-daemon waits (a real round trip).
+ * The parent host and cp-daemon's control socket are one logging stand-in process answering from a plan file; npm is
+ * a stub; git, the fleet, run status and drain.json are real.
  */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -17,7 +18,7 @@ import { parentHostPaths } from "../../src/parent-host.ts";
 import { initialStatus } from "../../src/run-artifacts.ts";
 import { daemonPaths } from "../../src/service/daemon-files.ts";
 import { whichAll } from "../../src/doctor.ts";
-import type { UpdateState } from "../../src/service/update.ts";
+import { HEALTH_WAIT_MS, type UpdateState } from "../../src/service/update.ts";
 import { createScratchHome, REPO_ROOT } from "../harness/index.ts";
 import { until } from "../harness/dashboard.ts";
 import { advanceBase, createScratchRepo } from "../harness/scratch-repo.ts";
@@ -40,7 +41,8 @@ serve(e.HOST_SOCK, (m) => { const p = plan(); const shown = (m.args ?? []).filte
   if (["drain", "drainCancel", "stop"].includes(m.op)) log("host " + m.op + (shown.length ? " " + JSON.stringify(shown) : ""));
   if ((p.failing ?? []).includes("host " + m.op)) throw new Error(m.op + " refused");
   if (m.op === "hello") return { ok: true, result: { pid: process.pid, parent: process.pid } };
-  if (m.op === "status") return { ok: true, result: p.statusPid === undefined ? { alive: true, pid: process.pid } : { alive: p.statusPid > 0, pid: p.statusPid } };
+  if (m.op === "status") { fs.appendFileSync(e.SM + "/status.log", "status\\n"); if (p.statusSilent) return undefined;
+    return { ok: true, result: p.statusPid === undefined ? { alive: true, pid: process.pid } : { alive: p.statusPid > 0, pid: p.statusPid } }; }
   if (m.op === "drain") { if (p.drainThrow) throw new Error(p.drainThrow); const state = next(p, "drainStates") ?? "drained";
     if (state !== "gone") fs.writeFileSync(e.DRAIN, JSON.stringify({ started_at: new Date().toISOString(), state, jobs: [] }));
     return { ok: true, result: { text: p.drainText ?? "DRAIN: drain", level: "info" } }; }
@@ -56,7 +58,7 @@ serve(e.DAEMON_SOCK, (m) => { log("daemon " + m.op); return (plan().failing ?? [
 fs.writeFileSync(e.SM + "/ready", "");
 `;
 
-type Plan = { statusPid?: number; drainStates?: string[]; drainThrow?: string; drainText?: string; doctor?: string[]; failing?: string[]; viewerDown?: boolean; onDoctor?: { files?: Array<{ path: string; text: string }>; patch?: Plan } };
+type Plan = { statusPid?: number; statusSilent?: boolean; drainStates?: string[]; drainThrow?: string; drainText?: string; doctor?: string[]; failing?: string[]; viewerDown?: boolean; onDoctor?: { files?: Array<{ path: string; text: string }>; patch?: Plan } };
 
 /** A cp-daemon home whose app is a scratch checkout of this tree's src/ with a bare origin, and its stand-ins. */
 async function bench(t: TestContext, config: unknown = { enabled: true, interval_min: 15, quiet_min: 0 }) {
@@ -109,13 +111,14 @@ async function bench(t: TestContext, config: unknown = { enabled: true, interval
 		const child = spawn(process.execPath, ["--import", join(REPO_ROOT, "tests/harness/time-scale.ts"), script, ...(opts.dry ? ["--dry-run"] : [])], {
 			cwd: home,
 			env: { HOME: home, CP_HOME: home, PATH: bin, CP_DAEMON_JOB: "update", CP_VIEWER_HOST: "127.0.0.1", CP_VIEWER_PORT: String((viewer.address() as AddressInfo).port),
-				CP_TEST_TIME_SCALE: String(SCALE), CP_TEST_TIME_ZERO: String(zero), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", ...opts.env },
+				CP_TEST_TIME_SCALE: String(SCALE), CP_TEST_TIME_ZERO: String(zero), CP_TEST_TIME_REAL_MS: String(HEALTH_WAIT_MS), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", ...opts.env },
 		});
 		let text = "";
 		child.stderr.on("data", (chunk) => (text += String(chunk)));
 		const code = await new Promise<number | null>((done) => child.once("exit", done));
 		clock = Math.round(zero + (Date.now() - zero) * SCALE);
 		out.push(text);
+		assert.doesNotMatch(text, /cp-daemon (health: no answer|did not answer)/, "every cp-daemon request answered within its wait");
 		if (code !== 0) throw new Error(text);
 		const after = existsSync(join(stateDir, "update.json")) ? readFileSync(join(stateDir, "update.json"), "utf8") : undefined;
 		return after === before ? undefined : (JSON.parse(after!) as UpdateState);
@@ -138,7 +141,7 @@ async function bench(t: TestContext, config: unknown = { enabled: true, interval
 		}
 		await new FleetStore({ home }).add(record as unknown as FleetRecord);
 	};
-	return { home, repo, stateDir, dataDir, sm, run, plan, calls, hostCalls, reset, causes, state, job, out, now: () => clock };
+	return { home, repo, stateDir, dataDir, sm, run, plan, calls, hostCalls, reset, causes, state, job, out, now: () => clock, statusReads: () => lines("status.log").length };
 }
 type Bench = Awaited<ReturnType<typeof bench>>;
 /** fleet.json and run status naming `jobId` mid-turn under this (live) process: what a reopened parent dispatched. */
@@ -422,32 +425,36 @@ test("P14e-update-verify: busy, deferred, down", { timeout: 300_000 }, async (t)
 		b.plan(plan);
 		const started = b.now() + 20 * 60_000;
 		const state = await b.run();
-		return { state, b, elapsed: b.now() - started, moved: b.repo.head() === to ? "to" : b.repo.head() === from ? "from" : "?" };
+		return { state, b, elapsed: b.now() - started, statuses: b.statusReads(), moved: b.repo.head() === to ? "to" : b.repo.head() === from ? "from" : "?" };
 	};
-	// Unsettled past 120 s, then a passing doctor: healthy, no note.
+	// Unsettled past 120 s, then a passing doctor: healthy, no note; an answered doctor never asks for status.
 	const late = await verify({ doctor: [...Array(70).fill("unsettled"), "ok"] });
-	assert.deepEqual([late.state?.last_result, late.moved, /deferred/.test(late.state?.detail ?? "")], ["updated", "to", false], last(late.b));
+	assert.deepEqual([late.state?.last_result, late.moved, /deferred/.test(late.state?.detail ?? ""), late.statuses], ["updated", "to", false, 0], last(late.b));
 	assert.ok(late.elapsed > 120_000, `verified past the base 120 s: ${late.elapsed}`);
 	// Busy for the whole window (unsettled, or a doctor queued behind a live parent): accepted with the deferred note.
 	for (const doctor of ["unsettled", "hang"]) {
 		const busy = await verify({ doctor: [doctor] });
-		assert.deepEqual([busy.state?.last_result, busy.moved], ["updated", "to"], last(busy.b));
+		assert.deepEqual([busy.state?.last_result, busy.moved, busy.statuses > 0], ["updated", "to", doctor === "hang"], last(busy.b));
 		assert.match(busy.state?.detail ?? "", /; doctor deferred: parent busy 420s$/);
 	}
 	// The rollback verify deferred is not a failure: rolled_back, bad_sha stamped, the note in the detail.
 	const back = await verify({ doctor: ["error:DOCTOR broken", "unsettled"] });
 	assert.deepEqual([back.state?.last_result, back.moved, back.state?.bad_sha === back.state?.to], ["rolled_back", "from", true], last(back.b));
 	assert.match(back.state?.detail ?? "", /; doctor deferred: parent busy 420s$/);
-	// Busy with the viewer down, an absent parent, busy then down: not healthy within the base 120 s, then rolled back.
+	// Busy with the viewer down, an absent parent, busy then down, a queued doctor whose status names another pid, no
+	// parent, refuses or stays silent: not healthy within the base 120 s, then rolled back.
 	const failures = [];
+	const queued = "doctor did not answer within \\d+ms and status";
 	for (const [plan, why] of ([[{ doctor: ["unsettled"], viewerDown: true }, "viewer: .* answered 503"], [{ doctor: ["down:parent is not running; call cp_parent start"] }, "parent is not running"],
 		[{ doctor: [...Array(5).fill("unsettled"), "down:parent is not running; call cp_parent start"] }, "parent is not running"],
-		[{ doctor: [`down:${PARENT_UNSETTLED} (x)`] }, "parent must .*send \\(x\\)"], [{ doctor: ["hang"], statusPid: 1 }, "doctor"], [{ doctor: ["hang"], statusPid: 0 }, "doctor"],
+		[{ doctor: [`down:${PARENT_UNSETTLED} (x)`] }, "parent must .*send \\(x\\)"], [{ doctor: ["hang"], statusPid: 1 }, `${queued} names pid 1, not \\d+`],
+		[{ doctor: ["hang"], statusPid: 0 }, `${queued} says no parent is alive`], [{ doctor: ["hang"], failing: ["host status"] }, `${queued} failed: status refused`],
+		[{ doctor: ["hang"], statusSilent: true }, `${queued} did not answer within 3000ms`],
 		[{ doctor: [...Array(120).fill("unsettled"), "viewerdown", "unsettled"] }, "viewer: .* answered 503"]] satisfies Array<[Plan, string]>)) {
 		const run = await verify(plan);
-		failures.push([run.state?.last_result, new RegExp(`not healthy within 120s: ${why}`).test(run.state?.detail ?? "")]);
+		failures.push([run.state?.last_result, new RegExp(`not healthy within 120s: ${why}`).test(run.state?.detail ?? "") || run.state?.detail]);
 	}
-	assert.deepEqual(failures, Array(7).fill(["rollback_failed", true]), "the rollback's verify fails alike");
+	assert.deepEqual(failures, Array(9).fill(["rollback_failed", true]), "the rollback's verify fails alike");
 });
 
 test("P14e-update-quiet: the quiet period", { timeout: 300_000 }, async (t) => {

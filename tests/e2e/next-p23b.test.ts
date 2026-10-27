@@ -612,6 +612,18 @@ test("P23b-next-spawn-cap: below the spawn cap cp_next dispatches plainly; at it
 	const items = h.snapshot().items;
 	assert.equal(items.find((item) => item.id === x2)?.verdict, "queued");
 	assert.match(items.find((item) => item.id === x3)?.reason ?? "", /dispatch-parallelism 2 is full .*1 queued/, "why a ready job is not running");
+
+	// tv8: a later named grant selects the queued job once — its slot moves off the broad grant, which then dispatches —
+	// and with a second named grant every grant's dispatch, others included, carries the spawn-cap queue reason.
+	const [z] = await p.jobs(["z"], { delivery: "local" });
+	const named = await p.grant({ objective: "the queued one", dispatch_parallelism: 1, job_ids: [x2] });
+	const moved = (await p.next({ project: "demo", full: true })).result;
+	assert.deepEqual([viewOf(moved, named)?.action.kind, viewOf(moved, named)?.ready], ["wait", []], "the queued job is never ready");
+	assert.equal(viewOf(moved, grant)?.action.job_id, x3, "the broad grant no longer counts the queued job: it has a slot again");
+	const second = await p.grant({ objective: "one more", dispatch_parallelism: 1, job_ids: [z] });
+	const both = (await p.next({ project: "demo", full: true })).result;
+	assert.deepEqual([viewOf(both, grant)?.action.job_id, viewOf(both, second)?.action.job_id, both.others?.some((view) => view.action.kind === "dispatch")], [x3, z, true]);
+	for (const id of [grant, second]) assert.match(viewOf(both, id)?.action.reason ?? "", /spawn cap 1 full: 1 live worker processes — cp_dispatch queues it/, id);
 });
 
 // withReviewerSpend builds one run-membership set per call: a 600-job fleet counts exactly, a torn runs file refuses.

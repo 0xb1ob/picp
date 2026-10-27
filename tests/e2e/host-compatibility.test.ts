@@ -38,31 +38,31 @@ test("P24 extension load: a real pi loads the command-post extension, registers 
 	mkdirSync(join(home.path, LAYOUT.state), { recursive: true });
 	writeFileSync(join(home.path, LAYOUT.fleetFile), JSON.stringify({ schema_version: 1, updated_at: "2026-09-01T00:00:00Z", jobs: [{ br_id: "cp-legacy" }] }));
 	const rpc = startRpc({ cwd: REPO_ROOT, args: ["--no-session", "-e", COMMAND_POST_EXTENSION], env: { CP_HOME: home.path } });
-	t.after(async () => {
-		await rpc.close();
-		home.cleanup();
-	});
-
+	t.after(async () => { await rpc.close(); home.cleanup(); });
 	rpc.send({ id: "cmds", type: "get_commands" });
 	const response = (await rpc.waitFor((r) => r.type === "response" && r.id === "cmds")) as CommandsResponse;
 	assert.equal(response.success, true, `get_commands failed: ${JSON.stringify(response)}`);
 	const commands = response.data?.commands ?? [];
 	const source = (name: string) => commands.find((command) => command.name === name)?.source;
-	assert.deepEqual([source("cp-version"), source("cp-ask"), source("cp-jobs")], ["extension", "extension", "extension"], commands.map((c) => c.name).join(","));
-	assert.deepEqual([source("cp-attach"), source("cp-next"), source("cp-mode")], [undefined, undefined, undefined], "retired commands stay unregistered");
-
+	assert.equal(source("cp-version"), "extension", "/cp-version is registered by the extension");
+	assert.equal(source("cp-ask"), "extension", "/cp-ask is registered by the extension");
+	assert.equal(source("cp-jobs"), "extension", "/cp-jobs is registered by the extension");
+	assert.equal(source("cp-attach"), undefined, "retired /cp-attach stays unregistered");
+	assert.equal(source("cp-next"), undefined, "retired /cp-next stays unregistered");
+	assert.equal(source("cp-mode"), undefined, "retired /cp-mode stays unregistered");
 	rpc.send({ id: "run", type: "prompt", message: "/cp-version" });
 	const identity = readPackageIdentity();
 	// session_start's scaffold notification is also a notify and arrives first on a fresh home.
 	const notify = await rpc.waitFor((r) => r.type === "extension_ui_request" && r.method === "notify" && String(r.message).startsWith(`${identity.name} ${identity.version}`));
-	const [line, homeLine, commitLine] = String(notify.message).split("\n");
+	const [line, homeLine, commitLine, ...extra] = String(notify.message).split("\n");
+	assert.deepEqual(extra, [], "/cp-version prints exactly the identity, home and commit lines");
 	assert.equal(line, `${identity.name} ${identity.version} (root: ${identity.root})`);
 	assert.match(String(homeLine), new RegExp(`^multi-project mode, home ${home.path} \\(source: CP_HOME`));
 	assert.match(String(commitLine), /^commit [0-9a-f]{7} · deployed [0-9a-f]{7} \(current\) · upstream /);
 	assert.equal((await rpc.waitFor((r) => r.type === "response" && r.id === "run")).success, true);
-
 	const swept = readFileSync(join(home.path, LAYOUT.fleetFile), "utf8");
-	assert.deepEqual([swept.includes('"job_id"'), swept.includes('"br_id"')], [true, false], `fleet.json was not swept: ${swept}`);
+	assert.ok(swept.includes('"job_id"'), `fleet.json was not swept: ${swept}`);
+	assert.equal(swept.includes('"br_id"'), false, `fleet.json still carries br_id: ${swept}`);
 	assert.ok(existsSync(join(home.path, LAYOUT.migrationsDir, "2026-09-job-id.done")), "the sweep marker was not written");
 });
 
@@ -81,11 +81,11 @@ const write = (path: string) => call("write", { path, content: "x\n" });
 const edit = (path: string) => call("edit", { path, edits: [{ oldText: "a", newText: "b" }] });
 const label = (c: Call) => `${c.name} ${String(c.args.command ?? c.args.path ?? "")}`;
 
-/** One scripted parent on `home` with `cwd`; each turn is one model message of tool calls. Returns every call's outcome. */
+/** A scripted parent on `home` in `cwd`, a no-op `gh` first on PATH; each turn is one model message of tool calls. */
 async function parentCalls(t: TestContext, provider: MockProvider, home: string, cwd: string, turns: readonly Call[][]) {
 	const model = provider.addScript(`p24-guard-${(seq += 1)}`, [...turns.map((calls): ScriptStep => ({ kind: "tool_calls", calls })), { kind: "text", text: "done" }]);
 	const agentDir = createAgentDir({ provider });
-	const child = startPiChild({ cwd, model, env: { ...agentDir.env, CP_HOME: home, HOME: join(home, "user") }, extensions: [COMMAND_POST_EXTENSION],
+	const child = startPiChild({ cwd, model, env: { ...agentDir.env, CP_HOME: home, HOME: join(home, "user"), PATH: ghStubPath(t) }, extensions: [COMMAND_POST_EXTENSION],
 		tools: ["read", "bash", "grep", "write", "edit", "cp_artifact"] });
 	t.after(async () => {
 		await child.close();
@@ -296,7 +296,7 @@ test("P24 guards: a real parent's read, grep, write, edit and bash calls are ref
 
 // -- MCP access ----------------------------------------------------------------
 
-/** A parent whose PATH starts with a `pi` stub: `pi mcp list --json` answers from files and logs its argv, else the real pi runs. */
+/** A parent with a `pi` stub first on PATH: `pi mcp list --json` is canned and logged, any other call runs real pi. */
 async function mcpParent(t: TestContext) {
 	const scratch = createScratchHome();
 	const home = realpathSync(scratch.path);
@@ -429,3 +429,11 @@ test("P24 pi-lens: dispatched workers with pi-lens installed run headless with i
 	assert.equal(planner.offered.some((tools) => tools.some((tool) => ["write", "edit", "replace"].includes(tool))), false, "a planner is never offered a write tool");
 	assert.equal(planner.results.filter((text) => /not found|not available|unknown tool/i.test(text)).length, 3, `write, edit and replace are refused: ${planner.results.join("\n")}`);
 });
+
+/** PATH with a no-op `gh` first, so an allowed `gh` call in the parent's real bash never reaches GitHub. */
+function ghStubPath(t: TestContext): string {
+	const bin = realpathSync(mkdtempSync(join(tmpdir(), "cp-p24-gh-")));
+	t.after(() => rmSync(bin, { recursive: true, force: true }));
+	writeFileSync(join(bin, "gh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+	return `${bin}:${process.env.PATH ?? ""}`;
+}

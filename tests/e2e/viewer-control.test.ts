@@ -475,7 +475,7 @@ test("P17-answers: posted answers project their evidence and render as text; a t
 	write(controlConfigFile(d.stateDir), '{"enabled": false, "reason": "opt-out"}');
 	const off = await fresh.reopen();
 	await off.find("button.answers-ack", (b) => b.hasAttribute("disabled"));
-	assert.match(off.$(".answers-control")?.textContent ?? "", /^Dashboard control is off/);
+	await off.find(".answers-control", (el) => /^Dashboard control is off/.test(el.textContent ?? ""));
 	assert.equal((await answers()).open_count, 1, "control off: the list still renders, read-only");
 	assert.ok(off.$('button[aria-label="Acknowledge ans-cccccccccccc"]'), "the open card stays listed");
 

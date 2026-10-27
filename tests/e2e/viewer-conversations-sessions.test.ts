@@ -253,7 +253,7 @@ test("P19-upload-metadata: a dashboard file's name and size follow the upload jo
 
 	const partial = Buffer.from(upload(first, "café.md", 2).trimEnd());
 	const split = partial.indexOf(Buffer.from("é")) + 1;
-	rmSync(journal);
+	// Rewritten in place (same inode, larger, other bytes): size and inode alone would read on from the old offset.
 	write(journal, Buffer.concat([Buffer.from(upload(second, "keep.png", 1)), partial.subarray(0, split)]));
 	assert.deepEqual(await meta(), { [second]: { name: "keep.png", bytes: 1 } }, "a partial record split inside a UTF-8 character waits");
 	appendFileSync(journal, partial.subarray(split));

@@ -12,7 +12,8 @@ import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION, type FleetRecord } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { MandateStore } from "../../src/mandate.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, REPO_ROOT, startPiChild, waitFor } from "../harness/index.ts";
+import { EscalationStore } from "../../src/escalation.ts";
+import { COMMAND_POST_EXTENSION, CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, REPO_ROOT, startPiChild, waitFor } from "../harness/index.ts";
 
 const deadPid = (): number => spawnSync("true").pid!;
 const grant = (id: string, projects: string[], extra: Record<string, unknown> = {}) =>
@@ -173,4 +174,22 @@ test("P22-report-escalate: cp_escalate's result opens with its jobs' project, el
 	assert.match(text("grant"), /^\[demo-app\] es-[\w-]+ \[scope_expansion\] open: widen B\?$/);
 	assert.match(text("pair"), /^\[demo-app, atlas\] es-[\w-]+ \[scope_expansion\] open: widen C\?$/);
 	assert.match(text("none"), /^\[project unknown\] es-[\w-]+ \[scope_expansion\] open: widen D\?$/);
+});
+
+test("P22-report-torn-fleet: under a torn fleet.json the operator session's escalation relay still names the job's label project", { timeout: 120_000 }, async (t) => {
+	const h = await home(t);
+	await h.post.registry.register({ name: "labelled", clone_url: h.path, delivery: "local" });
+	const job = await h.post.ledger().create({ title: "labelled only", project: "labelled", delivery: "local", kind: "ship" });
+	const overdue = await new EscalationStore({ home: h.path, now: () => new Date(Date.now() - 20 * 60_000) })
+		.raise({ job_ids: [job.id], kind: "scope_expansion", question: "widen it?", options: OPTIONS, recommended: "approve" });
+	await h.post.shutdown();
+	writeFileSync(join(h.path, LAYOUT.fleetFile), "{torn");
+	const provider = await MockProvider.start();
+	const model = provider.addScript("p22-torn-fleet", [{ kind: "text", text: "Noted." }], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	const pi = startPiChild({ cwd: h.path, model, env: { ...agent.env, PI_HOME: h.path, CP_HOME: h.path, CP_MODE: "multi" }, extensions: [CP_BRIDGE_EXTENSION] });
+	t.after(async () => { await pi.close(); agent.cleanup(); await provider.stop(); });
+	const relay = (r: { type: string }) => r.type === "message_start" && JSON.stringify(r).includes(`id=${overdue.id}`);
+	const text = JSON.stringify(await pi.waitFor(relay, 30_000));
+	assert.ok(text.includes(`[labelled] ${overdue.id} (scope_expansion) has been open`), `the label project, not unknown: ${text.slice(0, 400)}`);
 });
