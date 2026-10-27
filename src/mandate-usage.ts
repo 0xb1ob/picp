@@ -114,7 +114,7 @@ export function observeMandateUsage(options: MandateUsageOptions, jobId: string,
 	const listed = options.mandates.list();
 	const before = new Map(listed.map((mandate) => [mandate.id, mandate.status]));
 	const jobs = options.mandates.withReviewerSpend(liveUsageJobs(options.fleet, options.runs), liveGrants(listed));
-	const swept = options.mandates.sweep(isoTimestamp((options.now ?? (() => new Date()))()), jobs);
+	const swept = options.mandates.sweep(isoTimestamp((options.now ?? (() => new Date()))()), jobs, listed);
 	for (const mandate of swept) {
 		if (before.get(mandate.id) !== "active" && !(before.get(mandate.id) === "expired" && mandate.continuity?.phase === "committed")) continue;
 		if (!matchingJobs(mandate, jobs).some((job) => job.job_id === jobId)) continue;

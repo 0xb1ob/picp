@@ -402,10 +402,11 @@ export class MandateStore {
 		return all;
 	}
 
-	sweep(now?: string, jobs: readonly MandateUsageJob[] = []): Mandate[] {
+	/** With `listed` (the caller's one `list()`), `jobs` are already reviewer-counted: nothing is re-read. */
+	sweep(now?: string, jobs: readonly MandateUsageJob[] = [], listed?: readonly Mandate[]): Mandate[] {
 		const at = this.#stamp(now);
-		const counted = this.withReviewerSpend(jobs);
-		return this.list().map((mandate) => this.#refresh(mandate, at, counted));
+		const counted = listed ? jobs : this.withReviewerSpend(jobs);
+		return (listed ?? this.list()).map((mandate) => this.#refresh(mandate, at, counted));
 	}
 
 	/**
