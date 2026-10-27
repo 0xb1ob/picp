@@ -190,6 +190,8 @@ test("P14e-install-files: cp-install writes, refuses, plans and uninstalls its f
 	assert.match(plan.out, /^skip: gh: login not checked in a dry-run \(gh writes state under HOME\); a real run checks it$/m);
 	assert.match(plan.out, /^skip: model: parent openai\/gpt-6\.1-sol \(--parent-model\) written unchecked: a dry-run never runs pi --list-models$/m);
 	assert.match(plan.out, /^changed: enable: would run/m, "the plan reaches activation");
+	const blocked = await r.user({ drop: ["gh"] }).install(["--dry-run", "--yes"]);
+	assert.deepEqual([blocked.code, /^fail: tools: scripts\/install-tools\.ts exited 1:[^]*gh/m.test(blocked.out), /^changed: enable/m.test(blocked.out)], [1, true, false], blocked.out);
 	const bare = await r.user().install(["--dry-run"]);
 	assert.match(bare.out, /^skip: model: parent, operator: not listed in a dry-run \(pi writes its state under HOME\); a real run asks or recommends/m);
 	const homeless = r.user({ homeless: true });
