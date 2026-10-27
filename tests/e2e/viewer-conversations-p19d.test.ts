@@ -694,7 +694,8 @@ test("P19-chat-replies-send: a chip sends the exact answer once and holds throug
 	assert.equal(held(reader), false, "a failed one does not");
 	write(controlConfigFile(d.stateDir), '{"enabled": false}');
 	reader = await reader.reopen();
-	assert.match((await reader.find(".session-replies-state")).textContent ?? "", /^Dashboard control is off/);
+	await reader.find(".session-replies-state");
+	assert.match(await ready(reader), /^Dashboard control is off/);
 	assert.ok(held(reader));
 });
 

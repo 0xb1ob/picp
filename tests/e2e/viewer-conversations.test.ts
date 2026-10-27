@@ -11,6 +11,7 @@ import { connect } from "node:net";
 import { type ControlPorts, type DashboardControl, type InlineImage, startDashboardControl } from "../../src/dashboard-control.ts";
 import { appendAnswerLine, appendThreadLine } from "../../src/viewer/control-audit.ts";
 import { type AnswerLine, controlConfigFile, controlInboxFile, controlJournalFile, operatorThreadsFile, readControlRecord, type ThreadLine } from "../../src/viewer/control-files.ts";
+import { BODY_DISCARD_IDLE_MS } from "../../src/viewer/push-api.ts";
 import { type Context, type Json, jsonl, lines, mode, pick, send, viewer, write } from "../harness/conversations.ts";
 import { STUBS, syntheticPng } from "../harness/images.ts";
 
@@ -471,13 +472,14 @@ test("P19-upload-send: images and text files reach the operator session inline, 
 function rawUpload(d: Awaited<ReturnType<typeof viewer>>, framing: string, body: Buffer[], paused: boolean) {
 	const { origin, "sec-fetch-site": site } = d.own;
 	const head = `POST ${UPLOAD} HTTP/1.1\r\nhost: 127.0.0.1:${d.port}\r\norigin: ${origin}\r\nsec-fetch-site: ${site}\r\ncontent-type: image/png\r\n${framing}\r\n\r\n`;
-	return new Promise<{ reply: string; written: boolean }>((resolve) => {
+	return new Promise<{ reply: string; written: boolean; held: number }>((resolve) => {
 		const socket = connect(d.port, "127.0.0.1");
 		const chunks: Buffer[] = [];
-		let written = false;
-		const done = () => resolve({ reply: Buffer.concat(chunks).toString("utf8"), written });
+		let written = false, repliedAt = 0;
+		const done = () => resolve({ reply: Buffer.concat(chunks).toString("utf8"), written, held: Date.now() - repliedAt });
 		if (paused) socket.pause();
-		socket.on("data", (chunk: Buffer) => { chunks.push(chunk); if (/\}$/.test(Buffer.concat(chunks).toString("utf8"))) socket.destroy(); });
+		// An empty body is a stalled sender: it waits for the server to close the socket.
+		socket.on("data", (chunk: Buffer) => { chunks.push(chunk); repliedAt ||= Date.now(); if (body.length && /\}$/.test(Buffer.concat(chunks).toString("utf8"))) socket.destroy(); });
 		socket.on("error", () => {});
 		socket.on("close", done);
 		socket.write(head);
@@ -495,4 +497,7 @@ test("P19-upload-oversize: an oversize upload is answered 413 and only a bounded
 	// 64 MiB declared: the server stops reading past the bound and closes, so the client never finishes writing.
 	const huge = await rawUpload(d, `content-length: ${64 * 1024 * 1024}`, [Buffer.alloc(64 * 1024 * 1024, 97)], false);
 	assert.equal(huge.written, false, "the server did not ingest the whole body");
+	const stalled = await rawUpload(d, `content-length: ${11 * 1024 * 1024}`, [], false);
+	assert.match(stalled.reply, /^HTTP\/1\.1 413 /);
+	assert.ok(BODY_DISCARD_IDLE_MS >= 5000 && stalled.held >= BODY_DISCARD_IDLE_MS - 500, `held ${stalled.held} ms: closed by the idle timer`);
 });
