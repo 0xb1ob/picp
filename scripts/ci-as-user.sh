@@ -35,5 +35,10 @@ fi
 # setup-node restored the npm cache for the runner's user; seed cpci's own ~/.npm from it
 [ -d "$cache" ] && [ ! -e "/home/$user/.npm" ] && cp -a "$cache" "/home/$user/.npm"
 chown -R "$user" "${GITHUB_WORKSPACE:-$PWD}" "/home/$user" ${temp:+"$temp"}
-exec setpriv --reuid="$user" --regid="$user" --init-groups env -u SUDO_USER -u SUDO_UID -u SUDO_GID -u SUDO_COMMAND \
+# Optional cgroup cap on the whole suite: the kernel kills the runaway, not the runner. Skipped without systemd.
+cap=()
+if [ -n "${CP_SUITE_MEMORY_MAX:-}" ] && systemd-run --scope -q -p MemoryMax="$CP_SUITE_MEMORY_MAX" -p MemorySwapMax=0 true 2>/dev/null; then
+  cap=(systemd-run --scope -q -p MemoryMax="$CP_SUITE_MEMORY_MAX" -p MemorySwapMax=0)
+fi
+exec "${cap[@]}" setpriv --reuid="$user" --regid="$user" --init-groups env -u SUDO_USER -u SUDO_UID -u SUDO_GID -u SUDO_COMMAND \
   "HOME=/home/$user" "$@"

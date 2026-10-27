@@ -111,6 +111,7 @@ jobs:
             ps -eo pid,ppid,uid,rss,etime,args --sort=-rss | head -n 11 | cut -c1-200
             echo "processes per uid:"; ps -eo uid= | sort -n | uniq -c
             df -h / /tmp | tail -n +2
+            bash scripts/ci-rss-watchdog.sh "$RUNNER_TEMP/rss-handled" || true
             sleep 20
           done' > "$RUNNER_TEMP/sampler.log" 2>&1 &
 
@@ -133,7 +134,9 @@ jobs:
           CP_LIVE_TESTS: ""
           # 16 GB public runner; 3 concurrent files x 4 GB fits; Node's default on 16 GB is ~4 GB
           # scripts/ci-as-user.sh carries it to the cpci suite through its 0600 env file.
-          NODE_OPTIONS: --max-old-space-size=4096 --report-on-fatalerror --report-directory=/tmp/cp-node-reports
+          NODE_OPTIONS: --max-old-space-size=4096 --report-on-fatalerror --report-on-signal --report-signal=SIGUSR2 --report-directory=/tmp/cp-node-reports
+          # Whole-suite cgroup backstop (3 files x 4 GB heap fit); scripts/ci-rss-watchdog.sh kills one process at 3 GB.
+          CP_SUITE_MEMORY_MAX: 13G
 
       - name: Resource sampler tail and kernel OOM lines
         if: always() || cancelled()
