@@ -136,7 +136,7 @@ test("a failed observation's trace names the calls still in flight", async () =>
 // #537 follow-up: GitHub answered in 0.56-1.7 s while the parent's reads overran 9+ s under host load. A failed read
 // must name the 1-minute load, the event-loop lag and gh's spawn-to-first-byte, in the error and the main-CI tick output.
 test("a failed read appends load average, event-loop lag and gh first-byte time to its message", async () => {
-	const fields = /\(status 502; empty body; 3 attempts; load \d+\.\d{2}, event-loop lag \d+ms, gh first byte (\d+ms|none)\)$/;
+	const fields = /\(status 502; empty body; 3 attempts; load \d+\.\d{2}, event-loop lag max \d+ms at (\S+|none), p99 \d+ms, gh first byte (\d+ms|none)\)$/;
 	const failing = (byte: boolean): CommandRunner => async (_command, _args, options) => {
 		if (byte) options.firstByte?.();
 		throw new Error("gh: HTTP 502");
