@@ -1,5 +1,6 @@
 /**
  * Read-only ledger validator: slice files and rules doc vs the git baseline; `test(` counts; exit 1 on findings.
+ * A deleted case's Scenario and covered-by e2e bodies must hold its assertions; rows unchanged since CLAIM_SINCE warn.
  * `--preserved-from <ref>` against a ref from before the ledger split into slice files is expected to mismatch.
  */
 import { execFileSync } from "node:child_process";
@@ -11,16 +12,19 @@ const DISPOSITIONS = new Set(["convert", "e2e", "retained", "exception", "delete
 const GONE = new Set(["deleted", "deleted-with-feature"]);
 /** Names a removing PR (`#123`) or job id (`cp-…`); a programme phase alone (`P1`) does not. */
 const REMOVER_RE = /#\d+|\bcp-[a-z0-9][a-z0-9-]*/;
+/** The ledger when the claim-count rule landed: a short row byte-identical to one here only warns. */
+const CLAIM_SINCE = "e78ffe46b93036fcabf1f011fee0f5bf286cf384";
 
 interface Args {
 	base?: string;
 	manifest: string;
 	runnerLog?: string;
 	preservedFrom?: string;
+	claimSince: string;
 }
 
 function parseArgs(argv: readonly string[]): Args {
-	const args: Args = { manifest: "docs/testing-migration.md" };
+	const args: Args = { manifest: "docs/testing-migration.md", claimSince: CLAIM_SINCE };
 	for (let i = 0; i < argv.length; i += 1) {
 		const flag = argv[i];
 		const value = () => {
@@ -32,6 +36,7 @@ function parseArgs(argv: readonly string[]): Args {
 		else if (flag === "--manifest") args.manifest = value();
 		else if (flag === "--runner-log") args.runnerLog = value();
 		else if (flag === "--preserved-from") args.preservedFrom = value();
+		else if (flag === "--claim-since") args.claimSince = value();
 		else throw new Error(`unknown argument ${flag}`);
 	}
 	return args;
@@ -92,6 +97,26 @@ function git(...args: string[]): string {
 	return execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 28 });
 }
 
+/**
+ * The claim-count base: `ref` when it is a commit here, else the merge-base with origin/main, else none (gate skipped:
+ * every short case only warns). Each fallback prints a WARN naming it.
+ */
+function claimBase(ref: string): string | undefined {
+	const quiet = (...args: string[]) => {
+		try {
+			return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+		} catch {
+			return undefined;
+		}
+	};
+	if (quiet("rev-parse", "--verify", "--quiet", `${ref}^{commit}`)) return ref;
+	const fork = quiet("merge-base", "HEAD", "origin/main");
+	console.log(fork
+		? `WARN claim count: base ${ref} unreachable; rows as at the merge-base with origin/main (${fork}) count as existing`
+		: `WARN claim-count gate skipped: base ${ref} unreachable and no merge-base with origin/main; short cases only warn`);
+	return fork;
+}
+
 /** Titles of the bare-`test` calls (the case declarations); a non-literal title is `<expr>`. */
 export function declarationTitles(path: string, source: string): string[] {
 	const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
@@ -109,6 +134,100 @@ export function declarationTitles(path: string, source: string): string[] {
 
 function countDeclarations(path: string, source: string): number {
 	return declarationTitles(path, source).length;
+}
+
+/** One bare-`test` case: title (`<expr>` if not literal), 1-based line range and its static assertion count. */
+interface TestBody { title: string; start: number; end: number; asserts: number }
+
+/**
+ * Bare-`test` cases and the 1-based lines of every `assert(…)`, `assert.x(…)`, `t.assert.x(…)` or `expect(…)` call;
+ * a call inside a helper defined outside a case counts toward no case.
+ */
+export function testBodies(path: string, source: string): { tests: TestBody[]; assertLines: Map<number, number> } {
+	const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+	const line = (pos: number) => file.getLineAndCharacterOfPosition(pos).line + 1;
+	const tests: TestBody[] = [];
+	const assertLines = new Map<number, number>();
+	const isAssert = (callee: ts.Expression): boolean =>
+		(ts.isIdentifier(callee) && (callee.text === "assert" || callee.text === "expect"))
+		|| (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "assert")
+		|| (ts.isPropertyAccessExpression(callee) && ts.isPropertyAccessExpression(callee.expression) && callee.expression.name.text === "assert");
+	const visit = (node: ts.Node): number => {
+		let n = 0;
+		if (ts.isCallExpression(node) && isAssert(node.expression)) {
+			const at = line(node.getStart(file));
+			assertLines.set(at, (assertLines.get(at) ?? 0) + 1);
+			n = 1;
+		}
+		node.forEachChild((child) => void (n += visit(child)));
+		if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "test") {
+			const title = node.arguments[0];
+			const text = title && (ts.isStringLiteral(title) || ts.isNoSubstitutionTemplateLiteral(title)) ? title.text : "<expr>";
+			tests.push({ title: text, start: line(node.getStart(file)), end: line(node.getEnd()), asserts: n });
+		}
+		return n;
+	};
+	visit(file);
+	return { tests, assertLines };
+}
+
+/** Distinct `file.ts:line` entries in a note's `covered-by:` lists (each list runs to the next `;`). */
+export function coveredByClaims(note: string): Set<string> {
+	return new Set([...note.matchAll(/covered-by:([^;]*)/g)].flatMap((match) => [...(match[1] ?? "").matchAll(/[\w./-]+\.ts:\d+/g)].map((m) => m[0])));
+}
+
+/**
+ * Assertions behind a set of `file.ts:line` cites: each cited line's innermost bare-`test` body counted once, or the
+ * assert calls on the line itself when it is in no case; an unreadable file counts 0.
+ */
+export function citedAsserts(claims: Iterable<string>, parse: (file: string) => ReturnType<typeof testBodies> | undefined): number {
+	const counted = new Map<string, number>();
+	for (const claim of claims) {
+		const [, file = "", at = "0"] = /^(.*):(\d+)$/.exec(claim) ?? [];
+		const parsed = parse(file);
+		const line = Number(at);
+		const body = parsed?.tests.filter((t) => t.start <= line && line <= t.end).sort((a, b) => (a.end - a.start) - (b.end - b.start))[0];
+		if (body) counted.set(`${file}#${body.start}`, body.asserts);
+		else counted.set(claim, parsed?.assertLines.get(line) ?? 0);
+	}
+	return [...counted.values()].reduce((sum, n) => sum + n, 0);
+}
+
+/**
+ * Mapped rows of a deleted file, per baseline case: the e2e bodies of its rows' Scenario and `covered-by:` lines must
+ * hold at least the case's assertions at deletion, unless a row says `Narrowed:`. Rows are keyed by cells joined with
+ * ` | `: a short case whose rows are all in `known` only warns, one with a new or edited row fails; a known row citing
+ * no `covered-by:` line (legacy format) is not counted.
+ */
+export function claimCountFindings(
+	rows: readonly string[][],
+	baseline: (path: string) => ReturnType<typeof testBodies> | undefined,
+	cited: (claims: Iterable<string>) => number,
+	known: ReadonlySet<string>,
+	scenarioCite: (id: string) => string | undefined,
+): { existing: boolean; finding: string }[] {
+	const cases = new Map<string, { path: string; title: string; claims: Set<string>; narrowed: boolean; existing: boolean }>();
+	for (const cells of rows) {
+		const [path = "", title = "", scenario = "", status = "", note = ""] = cells;
+		const claims = coveredByClaims(note);
+		const isKnown = known.has(cells.join(" | "));
+		if ((status !== "mapped" && status !== "narrowed") || (claims.size === 0 && isKnown)) continue;
+		const key = `${path} | ${title}`;
+		const entry = cases.get(key) ?? { path, title, claims: new Set<string>(), narrowed: false, existing: true };
+		const cite = scenarioCite(scenario);
+		for (const claim of cite ? [...claims, cite] : claims) entry.claims.add(claim);
+		entry.narrowed ||= status === "narrowed" || note.includes("Narrowed:");
+		entry.existing &&= isKnown;
+		cases.set(key, entry);
+	}
+	const out: { existing: boolean; finding: string }[] = [];
+	for (const { path, title, claims, narrowed, existing } of cases.values()) {
+		const asserts = (baseline(path)?.tests ?? []).filter((t) => t.title === title && title !== "<expr>").reduce((sum, t) => sum + t.asserts, 0);
+		const covered = cited(claims);
+		if (narrowed || covered >= asserts) continue;
+		out.push({ existing, finding: `${path}: "${title}" cites ${claims.size} e2e line(s) holding ${covered} assertion(s) for ${asserts} at deletion` });
+	}
+	return out;
 }
 
 /** A `deleted-with-feature` row: owner names the removing PR/job; evidence cites removed source modules. */
@@ -259,7 +378,8 @@ function main(): number {
 	}
 
 	const unmapped = new Map<string, number>();
-	for (const [path = "", assertion = "", scenario = "", status = "", note = ""] of rows(section(docs, "assertions", findings))) {
+	const assertionRows = rows(section(docs, "assertions", findings));
+	for (const [path = "", assertion = "", scenario = "", status = "", note = ""] of assertionRows) {
 		if (!disposition.has(path)) findings.push(`assertion map names ${path}, which is not a baseline file`);
 		// narrowed: mapped in part; the note's `Narrowed:` names the uncovered part.
 		const pinned = status === "mapped" || status === "redundant-unreachable" || status === "narrowed";
@@ -285,6 +405,42 @@ function main(): number {
 		if (!proven.has(path)) findings.push(`${path}: deleted without a negative-control record`);
 		if (unmapped.has(path)) findings.push(`${path}: deleted with ${unmapped.get(path)} unreachable assertion(s)`);
 	}
+	const deletedAt = new Map<string, string>();
+	for (const block of git("log", "--diff-filter=D", "--no-renames", "--name-only", "--format=%x00%H", "--", "tests").split("\0").slice(1)) {
+		const [sha = "", ...paths] = block.trim().split("\n");
+		for (const path of paths) if (!deletedAt.has(path)) deletedAt.set(path, `${sha}^`);
+	}
+	const parsed = new Map<string, ReturnType<typeof testBodies> | undefined>();
+	const parse = (path: string, rev?: string) => {
+		const key = `${rev ?? ""}:${path}`;
+		if (!parsed.has(key)) {
+			try {
+				parsed.set(key, testBodies(path, rev ? git("show", `${rev}:${path}`) : readFileSync(path, "utf8")));
+			} catch {
+				parsed.set(key, undefined);
+				console.log(`claim count: cannot read ${path}${rev ? ` at ${rev}` : ""}; it counts 0 assertions`);
+			}
+		}
+		return parsed.get(key);
+	};
+	const gone = new Set([...disposition].filter(([, entry]) => GONE.has(entry.kind)).map(([path]) => path));
+	const counted = assertionRows.filter(([path = ""]) => gone.has(path));
+	const since = claimBase(args.claimSince);
+	const known = new Set((since ? rows(section(docsAt(since, args.manifest), "assertions", [])) : counted).map((cells) => cells.join(" | ")));
+	const scenarioBodies = new Map(rows(section(docs, "scenarios", [])).map(([id = "", path = "", name = ""]) => [id, { path, name }]));
+	const scenarioCite = (id: string) => {
+		const scenario = scenarioBodies.get(id);
+		const body = scenario && parse(scenario.path)?.tests.find((t) => t.title === scenario.name);
+		return scenario && body ? `${scenario.path}:${body.start}` : undefined;
+	};
+	const cited = (claims: Iterable<string>) => citedAsserts(claims, (file) => parse(file));
+	const short = claimCountFindings(counted, (path) => parse(path, deletedAt.get(path) ?? "HEAD"), cited, known, scenarioCite);
+	for (const { existing, finding } of short) {
+		if (existing) console.log(`WARN ${finding}`);
+		else findings.push(`${finding}; cite the e2e lines that hold them or say \`Narrowed:\``);
+	}
+	const warned = short.filter((entry) => entry.existing).length;
+	console.log(`claim count: ${short.length} short case(s), ${warned} unchanged since ${since?.slice(0, 12) ?? "(gate skipped)"} warned`);
 
 	const baseCounts = new Map(baseFiles.map((path) => [path, countDeclarations(path, git("show", `${base}:${path}`))]));
 	const baseDecls = [...baseCounts.values()].reduce((sum, n) => sum + n, 0);
