@@ -4,9 +4,15 @@
 set -euo pipefail
 if [ "$(id -u)" != 0 ]; then
   if [ "${GITHUB_ACTIONS:-}" = true ] && sudo -n true 2>/dev/null; then
-    exec sudo -n --preserve-env env "PATH=$PATH" bash "$0" "$@"
+    # Hosted sudo ignores --preserve-env (env_reset); a 0600 file, not argv, carries the job env and its token.
+    envfile=$(mktemp); env -0 > "$envfile"
+    exec sudo -n bash "$0" --cp-env "$envfile" "$@"
   fi
   exec "$@"
+fi
+if [ "${1:-}" = --cp-env ]; then
+  while IFS= read -r -d '' kv; do export "$kv" 2>/dev/null || true; done < "$2"
+  rm -f "$2"; shift 2
 fi
 user=cpci
 id "$user" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash "$user"
