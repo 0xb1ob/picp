@@ -173,22 +173,24 @@ export function testBodies(path: string, source: string): { tests: TestBody[]; a
 
 /** Distinct `file.ts:line` entries in a note's `covered-by:` lists (each list runs to the next `;`). */
 export function coveredByClaims(note: string): Set<string> {
-	return new Set([...note.matchAll(/covered-by:([^;]*)/g)].flatMap((match) => [...(match[1] ?? "").matchAll(/[\w./-]+\.ts:\d+/g)].map((m) => m[0])));
+	return new Set([...note.matchAll(/covered-by:([^;]*)/g)].flatMap((match) => [...(match[1] ?? "").matchAll(/[\w./-]+\.ts:\d+(?:-\d+)?/g)].map((m) => m[0])));
 }
 
 /**
- * Assertions behind a set of `file.ts:line` cites: each cited line's innermost bare-`test` body counted once, or the
- * assert calls on the line itself when it is in no case; an unreadable file counts 0.
+ * Assertions behind a set of `file.ts:line` or `file.ts:first-last` cites: every cited line's innermost bare-`test` body
+ * counted once, or the assert calls on the line itself when it is in no case; an unreadable file counts 0.
  */
 export function citedAsserts(claims: Iterable<string>, parse: (file: string) => ReturnType<typeof testBodies> | undefined): number {
 	const counted = new Map<string, number>();
 	for (const claim of claims) {
-		const [, file = "", at = "0"] = /^(.*):(\d+)$/.exec(claim) ?? [];
+		const [, file = "", from = "0", to] = /^(.*):(\d+)(?:-(\d+))?$/.exec(claim) ?? [];
 		const parsed = parse(file);
-		const line = Number(at);
-		const body = parsed?.tests.filter((t) => t.start <= line && line <= t.end).sort((a, b) => (a.end - a.start) - (b.end - b.start))[0];
-		if (body) counted.set(`${file}#${body.start}`, body.asserts);
-		else counted.set(claim, parsed?.assertLines.get(line) ?? 0);
+		const last = Math.min(Number(to ?? from), Math.max(0, ...(parsed?.tests.map((t) => t.end) ?? []), ...(parsed?.assertLines.keys() ?? [])));
+		for (let line = Number(from); line <= Math.max(last, Number(from)); line++) {
+			const body = parsed?.tests.filter((t) => t.start <= line && line <= t.end).sort((a, b) => (a.end - a.start) - (b.end - b.start))[0];
+			if (body) counted.set(`${file}#${body.start}`, body.asserts);
+			else counted.set(`${file}:${line}`, parsed?.assertLines.get(line) ?? 0);
+		}
 	}
 	return [...counted.values()].reduce((sum, n) => sum + n, 0);
 }
@@ -197,7 +199,7 @@ export function citedAsserts(claims: Iterable<string>, parse: (file: string) => 
  * Mapped rows of a deleted file, per baseline case: the e2e bodies of its rows' Scenario and `covered-by:` lines must
  * hold at least the case's assertions at deletion, unless a row says `Narrowed:`. Rows are keyed by cells joined with
  * ` | `: a short case whose rows are all in `known` only warns, one with a new or edited row fails; a known row citing
- * no `covered-by:` line (legacy format) is not counted.
+ * no `covered-by:` line (legacy format) is not counted. A case whose title or pre-deletion file cannot be read only warns.
  */
 export function claimCountFindings(
 	rows: readonly string[][],
@@ -205,7 +207,7 @@ export function claimCountFindings(
 	cited: (claims: Iterable<string>) => number,
 	known: ReadonlySet<string>,
 	scenarioCite: (id: string) => string | undefined,
-): { existing: boolean; finding: string }[] {
+): { existing: boolean; finding: string; warn?: boolean }[] {
 	const cases = new Map<string, { path: string; title: string; claims: Set<string>; narrowed: boolean; existing: boolean }>();
 	for (const cells of rows) {
 		const [path = "", title = "", scenario = "", status = "", note = ""] = cells;
@@ -220,9 +222,13 @@ export function claimCountFindings(
 		entry.existing &&= isKnown;
 		cases.set(key, entry);
 	}
-	const out: { existing: boolean; finding: string }[] = [];
+	const out: { existing: boolean; finding: string; warn?: boolean }[] = [];
 	for (const { path, title, claims, narrowed, existing } of cases.values()) {
-		const asserts = (baseline(path)?.tests ?? []).filter((t) => t.title === title && title !== "<expr>").reduce((sum, t) => sum + t.asserts, 0);
+		const parsed = baseline(path);
+		const matched = (parsed?.tests ?? []).filter((t) => t.title === title && title !== "<expr>");
+		const reason = !parsed ? "its pre-deletion file cannot be read" : matched.length === 0 ? "its Assertion cell matches no literal test title at deletion" : "";
+		if (reason) out.push({ existing, warn: true, finding: `${path}: "${title}" is not claim-counted: ${reason}, so it counts 0 assertions` });
+		const asserts = matched.reduce((sum, t) => sum + t.asserts, 0);
 		const covered = cited(claims);
 		if (narrowed || covered >= asserts) continue;
 		out.push({ existing, finding: `${path}: "${title}" cites ${claims.size} e2e line(s) holding ${covered} assertion(s) for ${asserts} at deletion` });
@@ -434,11 +440,12 @@ function main(): number {
 		return scenario && body ? `${scenario.path}:${body.start}` : undefined;
 	};
 	const cited = (claims: Iterable<string>) => citedAsserts(claims, (file) => parse(file));
-	const short = claimCountFindings(counted, (path) => parse(path, deletedAt.get(path) ?? "HEAD"), cited, known, scenarioCite);
-	for (const { existing, finding } of short) {
-		if (existing) console.log(`WARN ${finding}`);
+	const results = claimCountFindings(counted, (path) => parse(path, deletedAt.get(path) ?? "HEAD"), cited, known, scenarioCite);
+	for (const { existing, finding, warn } of results) {
+		if (existing || warn) console.log(`WARN ${finding}`);
 		else findings.push(`${finding}; cite the e2e lines that hold them or say \`Narrowed:\``);
 	}
+	const short = results.filter((entry) => !entry.warn);
 	const warned = short.filter((entry) => entry.existing).length;
 	console.log(`claim count: ${short.length} short case(s), ${warned} unchanged since ${since?.slice(0, 12) ?? "(gate skipped)"} warned`);
 

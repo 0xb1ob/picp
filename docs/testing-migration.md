@@ -145,7 +145,8 @@ no pipeline auto-decide; P2e drives them there (02-15) and removes that unit. Th
 is two lines.
 `tests/e2e/authority.test.ts` joins R1_ALLOWED in place of `tests/quota.test.ts`: 02-14 writes the legacy top-level
 `data/capacity.json` that cp-u3i2 must ignore. P2d's declaration count is 4,346, not 4,344: it added one declaration
-each to `tests/decide.test.ts` and `tests/schedule-authority.test.ts` (now `-retained`) (P2e review finding).
+each to `tests/decide.test.ts` and `tests/schedule-authority.test.ts`, both since deleted (their declarations live on in
+`tests/decide-retained.test.ts` and `tests/schedule-authority-retained.test.ts`) (P2e review finding).
 
 P2e (cp-e2e-migration-p2e-fmi5) adds three cases to `tests/e2e/authority.test.ts` and deletes `tests/mandate.test.ts`
 (61 declarations), under negative controls NC-21 to NC-23 beside P2b's NC-05, NC-06 and NC-11. 02-15 runs a real
@@ -368,6 +369,7 @@ Test files added after the baseline, with the PR that owns them.
 |---|---|---|
 | tests/e2e/wake-ci-promoted.test.ts | cp-fix-promoted-ci-notice-dropped-z1n7 (https://github.com/0xb1ob/picp/pull/473) | S22 fix-job regression: a promoted job's CI notice keeps its promotion note at the provider |
 | tests/e2e/mandate-continuity.test.ts | cp-iojy (https://github.com/0xb1ob/picp/pull/504) | Original admission, authenticated confirmation, shared-root successors and PASS-bound handoff |
+| tests/e2e/validated-reads.test.ts | cp-lag-f2-zic7 (https://github.com/0xb1ob/picp/pull/602) | F2 perf: unchanged schedule-run and mandate text is validated once; invalid or changed text never skips validation |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

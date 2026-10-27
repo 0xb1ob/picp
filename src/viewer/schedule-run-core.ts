@@ -124,14 +124,17 @@ export const schedulePoliciesFileErrors = (v: unknown): string[] => {
 	}
 	return errors;
 };
-function read<T>(file: string, key: string, validate: (v: unknown) => string[]): T[] {
+/** Runs `validate(parsed)`; a non-viewer caller passes `validatedOnce` to skip re-checking unchanged text. */
+export type CheckOnce = (file: string, text: string, parsed: unknown, validate: (v: unknown) => { ok: true; value: unknown } | { ok: false; errors: string[] }) => { ok: true; value: unknown } | { ok: false; errors: string[] };
+const always: CheckOnce = (_file, _text, parsed, validate) => validate(parsed);
+function read<T>(file: string, key: string, validate: (v: unknown) => string[], once: CheckOnce): T[] {
 	if (!existsSync(file)) return [];
-	let raw: unknown;
-	try { raw = JSON.parse(readFileSync(file, "utf8")); }
+	let text = "", raw: unknown;
+	try { text = readFileSync(file, "utf8"); raw = JSON.parse(text); }
 	catch (error) { throw new ScheduleRunError(`${file} is not valid JSON (${(error as Error).message}); refusing to guess`); }
-	const errors = validate(raw);
-	if (errors.length) throw new ScheduleRunError(`${file} violates the schedule run contract: ${errors.join("; ")}`);
+	const result = once(file, text, raw, (v) => { const errors = validate(v); return errors.length ? { ok: false, errors } : { ok: true, value: v }; });
+	if (!result.ok) throw new ScheduleRunError(`${file} violates the schedule run contract: ${result.errors.join("; ")}`);
 	return (raw as Record<string, T[]>)[key]!;
 }
-export const readScheduleRuns = (file: string): ScheduleRun[] => read(file, "runs", scheduleRunsFileErrors);
-export const readSchedulePolicies = (file: string): PolicyRecord[] => read(file, "policies", schedulePoliciesFileErrors);
+export const readScheduleRuns = (file: string, once: CheckOnce = always): ScheduleRun[] => read(file, "runs", scheduleRunsFileErrors, once);
+export const readSchedulePolicies = (file: string, once: CheckOnce = always): PolicyRecord[] => read(file, "policies", schedulePoliciesFileErrors, once);

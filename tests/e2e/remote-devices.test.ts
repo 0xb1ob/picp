@@ -328,8 +328,8 @@ test("P12c-sender-closed: a bad binding, ledger or store sends nothing; the bind
 		await until(unreadable, (now) => now === count + 1, JSON.stringify(bad));
 	}
 	assert.equal(s.posts.length, 0);
-	// Starting, with no origin yet: no binding, so the session is judged on its own.
-	writeFileSync(tunnelRuntimeFile(s.stateDir), JSON.stringify({ schema_version: 1, generation: 0, origin: null }));
+	// No runtime file (nothing published yet): no binding, so the session is judged on its own.
+	rmSync(tunnelRuntimeFile(s.stateDir));
 	await until(() => s.record(own, laptop.id)?.state, (state) => state === "delivered", "delivered with no binding");
 
 	sender.child.kill("SIGTERM");
@@ -347,7 +347,7 @@ test("P12c-sender-closed: a bad binding, ledger or store sends nothing; the bind
 	sender = s.sender();
 	await until(() => [s.record(tableted, laptop.id)?.state, s.record(tableted, tablet.id)?.state].join(), (states) => states === "expired,expired", "another generation is expired");
 	assert.equal(JSON.parse(readFileSync(lease, "utf8")).pid, sender.child.pid, "a torn lease names no holder");
-	assert.equal(s.posts.length, 0);
+	assert.deepEqual([s.record(tableted, laptop.id)?.state, s.record(tableted, tablet.id)?.state, s.posts.length], ["expired", "expired", 0]);
 
 	// A malformed ledger or device store stops the sender loudly and is never reset.
 	const malformed = '{"schema_version":1,"items":[],"unusable":["nope"]}';
@@ -422,12 +422,15 @@ test("P12c-notices: each issuer route's pairing is a notice for every recipient 
 	const fresh = await s.pair("Tablet");
 	assert.deepEqual((await notices(fresh.cookie)).notices.map((n) => n.name), ["Tablet"], "a remote device sees only the events naming it");
 
-	s.sender();
+	const sweeper = s.sender();
 	const states = async () => (await notices(phone.cookie)).notices.find((n) => n.name === "Phone")!.recipients.map((r) => [r.name, r.state, r.last_error]);
 	await until(states, (rows) => rows.every((row) => row[1] === "unavailable"), "the sender's states");
 	assert.deepEqual(await states(), [["Laptop", "unavailable", "push is not set up on this home"], ["Phone", "unavailable", "push is not set up on this home"]]);
 	assert.ok((await s.socket("revoke", { target: laptop.id })).ok);
 	await until(states, (rows) => rows.map((row) => row[1]).join() === "revoked,unavailable", "revoked");
+	// Stop waits out a sweep in flight; a later sweep could rewrite the ledger after the corruption.
+	sweeper.child.kill("SIGTERM");
+	assert.equal(await sweeper.exited, 0);
 	writeFileSync(deviceNotificationsFile(s.stateDir), "{ broken");
 	const broken = await notices(phone.cookie);
 	assert.equal(broken.delivery_error, "the pairing-alert delivery ledger is unreadable");

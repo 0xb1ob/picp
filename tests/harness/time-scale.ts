@@ -13,7 +13,9 @@ if (scale > 0 && Number.isFinite(zero)) {
 		apply: () => new Real(now()).toString(),
 		get: (target, prop, receiver) => (prop === "now" ? now : Reflect.get(target, prop, receiver)),
 	});
-	const shrink = (ms: unknown): number => Math.max(0, Number(ms ?? 0) / scale);
+	// Durations in CP_TEST_TIME_REAL_MS keep real time: budgets for a real socket round trip a shrunk timer would race.
+	const real = new Set((process.env.CP_TEST_TIME_REAL_MS ?? "").split(",").filter(Boolean).map(Number));
+	const shrink = (ms: unknown): number => (real.has(Number(ms)) ? Number(ms) : Math.max(0, Number(ms ?? 0) / scale));
 	const { setTimeout: realTimeout, setInterval: realInterval } = globalThis;
 	globalThis.setTimeout = ((fn: () => void, ms?: number, ...rest: unknown[]) => realTimeout(fn, shrink(ms), ...rest)) as typeof setTimeout;
 	globalThis.setInterval = ((fn: () => void, ms?: number, ...rest: unknown[]) => realInterval(fn, shrink(ms), ...rest)) as typeof setInterval;
