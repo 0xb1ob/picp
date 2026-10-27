@@ -42,7 +42,7 @@ test("ci watch tick: the transient retry never extends past the original deadlin
 	assert.equal(tick.errors.length, 1);
 });
 
-/** Generous absolute ceiling on one loop stall; the cache's win is asserted as counted checks, so load cannot flake it. */
+/** Generous absolute ceiling on one loop stall; the cache's win is a counted check, so load cannot flake it. */
 const LAG_BOUND_MS = 10_000;
 
 // #561: every read re-ran the schema check. With 3,000 finished jobs the tick fits its budget and
