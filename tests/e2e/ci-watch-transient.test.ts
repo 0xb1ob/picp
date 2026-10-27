@@ -8,6 +8,7 @@ import { ACTIONS_CI_TIMEOUT_MS } from "../../src/actions-ci.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, paths } from "../../src/contracts.ts";
 import { initialStatus } from "../../src/run-artifacts.ts";
 import { StatusError } from "../../src/status.ts";
+import { validationStats } from "../../src/validated-text.ts";
 import { run, SKIP, startStack } from "./landing-helpers.ts";
 
 const hang = { untilFile: "/nonexistent/never" };
@@ -41,11 +42,11 @@ test("ci watch tick: the transient retry never extends past the original deadlin
 	assert.equal(tick.errors.length, 1);
 });
 
-/** Generous absolute ceiling on one loop stall; the cache's win is asserted as a ratio, so load cannot flake it. */
+/** Generous absolute ceiling on one loop stall; the cache's win is asserted as counted checks, so load cannot flake it. */
 const LAG_BOUND_MS = 10_000;
 
 // #561: every read re-ran the schema check. With 3,000 finished jobs the tick fits its budget and
-// repeat reads (cache hits) beat the first read after a write.
+// repeat reads of unchanged state are cache hits that run no schema check.
 test("ci watch tick: a 3,000-job home keeps the tick inside its budget and the event loop responsive", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const s = await startStack(t);
 	const live = await s.held("large home", 414);
@@ -70,7 +71,9 @@ test("ci watch tick: a 3,000-job home keeps the tick inside its budget and the e
 		s.post.awaitingSnapshotSync();
 		return Math.round(performance.now() - at);
 	};
+	const before = validationStats.checks;
 	const first = widgetRead();
+	const firstChecks = validationStats.checks - before;
 	const lag = monitorEventLoopDelay({ resolution: 10 });
 	lag.enable();
 	const started = performance.now();
@@ -89,7 +92,11 @@ test("ci watch tick: a 3,000-job home keeps the tick inside its budget and the e
 	assert.equal(tick.observations[0]?.event, "ci_green");
 	assert.ok(took < ACTIONS_CI_TIMEOUT_MS, `tick took ${took} ms`);
 	assert.ok(first < LAG_BOUND_MS, `first read after a write took ${first} ms`);
-	assert.ok(Math.max(...reads) * 2 < first, `cached reads ${reads.join("/")} ms vs first ${first} ms`);
+	widgetRead(); // after the tick's own writes
+	const checks = validationStats.checks;
+	widgetRead();
+	assert.ok(firstChecks > 0, "the first read after a write runs the schema check");
+	assert.equal(validationStats.checks, checks, "a repeat read of unchanged state is a cache hit, never re-checked");
 	assert.ok(worst < LAG_BOUND_MS, `event-loop lag reached ${worst} ms`);
 });
 
@@ -115,7 +122,7 @@ test("ci watch tick: a failed read reports loop-lag max, p99 and the time of the
 });
 
 // #580 regression: skipping the snapshot self-check outright returned an invalid snapshot raw instead of StatusError.
-test("status: an invalid snapshot throws StatusError on every read, never served from cache", { skip: SKIP, timeout: 120_000 }, async (t) => {
+test("status: an invalid snapshot throws StatusError on every read; a failed check is never cached", { skip: SKIP, timeout: 120_000 }, async (t) => {
 	const s = await startStack(t);
 	await s.held("status validation", 415);
 	const bad = { include: "bogus" } as never;
