@@ -338,6 +338,7 @@ export interface MandateStoreOptions {
 	runs?: ScheduleRunStore;
 }
 
+export const liveGrants = (all: readonly Mandate[]): Mandate[] => all.filter((m) => m.status === "active" || m.status === "paused" || m.continuity !== undefined);
 export class MandateStore {
 	readonly home: string;
 	readonly #now: () => Date;
@@ -401,14 +402,11 @@ export class MandateStore {
 		return all;
 	}
 
-	sweep(now?: string, jobs: readonly MandateUsageJob[] = []): Mandate[] {
+	/** With `listed` (the caller's one `list()`), `jobs` are already reviewer-counted: nothing is re-read. */
+	sweep(now?: string, jobs: readonly MandateUsageJob[] = [], listed?: readonly Mandate[]): Mandate[] {
 		const at = this.#stamp(now);
-		const counted = this.withReviewerSpend(jobs);
-		const out: Mandate[] = [];
-		for (const mandate of this.list()) {
-			out.push(this.#refresh(mandate, at, counted));
-		}
-		return out;
+		const counted = listed ? jobs : this.withReviewerSpend(jobs);
+		return (listed ?? this.list()).map((mandate) => this.#refresh(mandate, at, counted));
 	}
 
 	/**
@@ -417,10 +415,10 @@ export class MandateStore {
 	 * Idempotent: `reviewer_usage` is overwritten, never added to. Only jobs some live grant covers are read.
 	 */
 	withReviewerSpend(jobs: readonly MandateUsageJob[], grants?: readonly Mandate[]): MandateUsageJob[] {
-		// ponytail: one readdir per covered job per sweep; cache per run dir mtime if sweeps get hot.
-		const live = grants ?? this.list().filter((mandate) => mandate.status === "active" || mandate.status === "paused" || mandate.continuity !== undefined);
+		const live = grants ?? liveGrants(this.list());
 		const schedules = this.scheduleMandates();
-		return jobs.filter((record) => !this.scheduleRuns.runOfJob(record.job_id)).map((record) => {
+		const scheduled = new Set(jobs.length ? this.scheduleRuns.runs().flatMap((run) => run.members.map((m) => m.job_id)) : []);
+		return jobs.filter((record) => !scheduled.has(record.job_id)).map((record) => {
 			// A scheduled record carries the grant its schedule names, so that schedule grant (and only it) counts it.
 			const mandate = record.schedule_id ? schedules.get(record.schedule_id) : undefined;
 			const job = mandate ? { ...record, schedule_mandate: mandate } : record;

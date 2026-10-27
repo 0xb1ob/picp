@@ -34,7 +34,7 @@ import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, isoTimestamp, LAYOUT, type Mandate, SCHEMA_VERSION, validate } from "./contracts.ts";
 import { atomicWriteJson, canonicalDir } from "./json-store.ts";
 import { isActive } from "./mandate-accounting.ts";
-import { ACTIONS_CI_TIMEOUT_MS, type ActionsRun, readActionsCi } from "./actions-ci.ts";
+import { ACTIONS_CI_TIMEOUT_MS, type ActionsRun, readActionsCi, retryTransientRead } from "./actions-ci.ts";
 import { type CiRun, type CommandRunner, evaluateMergeAskCi, MERGE_ASK_QUERY_TIMEOUT_MS, readCiForHead, runCommand, shaMatches } from "./merge-ask.ts";
 import type { CommandRunner as StatusRunner } from "./merges.ts";
 import { CiRerunStore, maybeRerunInfra } from "./ci-infra-rerun.ts";
@@ -228,6 +228,12 @@ export async function readMainTip(cwd: string, exec: CommandRunner, timeoutMs: n
 	return tip;
 }
 
+/** The fetched `origin/main` head with its Actions runs, for `cp_integrate`'s stale-latch check. */
+export async function readMainTipRuns(cwd: string, exec: CommandRunner): Promise<{ sha: string; runs: MainRun[] }> {
+	const sha = await readMainTip(cwd, exec, MERGE_ASK_QUERY_TIMEOUT_MS);
+	return { sha, runs: await retryTransientRead((timeoutMs) => readActionsCi({ cwd, exec, sha, branch: "main", timeoutMs })) };
+}
+
 /** The failing job's name, from the attempt jobs the observation already read. */
 function failingJobName(run: MainRun | undefined): string | undefined {
 	return run?.jobs.find((job) => job.conclusion && job.conclusion.toLowerCase() !== "success")?.name.trim() || undefined;
@@ -377,6 +383,8 @@ export async function mainRedHold(options: {
 	ancestry: () => Promise<boolean | undefined>;
 	runs: () => Promise<readonly CiRun[]>;
 	scope: () => Promise<MainCiScope>;
+	/** The fetched `origin/main` head and its Actions runs; rejects or `undefined` keeps the latch's hold. */
+	tip: () => Promise<{ sha: string; runs: readonly MainRun[] } | undefined>;
 }): Promise<{ hold?: string; fact?: string }> {
 	const read = new MainCiStore({ home: options.home }).read();
 	if (!read.ok) return { fact: `main-ci: ${read.error} — not blocking` };
@@ -387,6 +395,11 @@ export async function mainRedHold(options: {
 	if (!scope.enforce) return { fact: `main-ci: red since ${sha} not enforced — ${scope.reason}; not blocking` };
 	if (row.login === undefined || !sameLogin(row.login, scope.login)) return { fact: `main-ci: red since ${sha} latched ${row.login ? `for ${row.login}` : "before own-run filtering"}, not ${scope.login}; not blocking` };
 	const hold = { hold: `main is red since ${sha}: ${row.failing ?? row.workflow ?? "CI failed"}; rebase onto origin/main and pass CI to merge` };
+	// A latch from an older commit is stale once the current origin/main head is green (the tick clears it later).
+	const current = await options.tip().catch(() => undefined);
+	if (current && !shaMatches(current.sha, row.red_since_sha) && classifyMainTip(current.sha, countedMainRuns(current.runs, scope.login)).status === "green") {
+		return { fact: `main-ci: red since ${sha} but origin/main ${current.sha.slice(0, 12)} is green; not blocking` };
+	}
 	if ((await options.ancestry()) !== true) return hold;
 	let runs: readonly CiRun[];
 	try {

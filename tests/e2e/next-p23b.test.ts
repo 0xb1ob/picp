@@ -5,6 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -611,4 +612,21 @@ test("P23b-next-spawn-cap: below the spawn cap cp_next dispatches plainly; at it
 	const items = h.snapshot().items;
 	assert.equal(items.find((item) => item.id === x2)?.verdict, "queued");
 	assert.match(items.find((item) => item.id === x3)?.reason ?? "", /dispatch-parallelism 2 is full .*1 queued/, "why a ready job is not running");
+});
+
+// withReviewerSpend builds one run-membership set per call: a 600-job fleet counts exactly, a torn runs file refuses.
+test("P23b-next-large-fleet: cp_next counts a large fleet in one pass and an invalid schedule-runs file still refuses it", { timeout: 300_000 }, async (t) => {
+	const h = await nextHome(t);
+	const p = h.parent();
+	h.shift(-60_000);
+	const grant = await p.grant({ objective: "big fleet", job_cap: 1_000 });
+	h.shift(0);
+	const tag = randomUUID().slice(0, 8);
+	h.fleet(Array.from({ length: 600 }, (_, i) => rec(`cp-big${tag}-${i}`, { phase: "held", reported_at: isoTimestamp(), usage: { ...EMPTY_USAGE, cost_usd: 0.01, total_tokens: 10 } })));
+	const view = viewOf((await p.next()).result, grant);
+	assert.deepEqual([view?.mandate?.jobs_used, view?.mandate?.tokens], [600, 6_000], "every fleet job counts once");
+	h.put(`${LAYOUT.state}/schedule-runs.json`, "{ not json");
+	const end = (await p.run([call("torn", "cp_next", { project: "demo" })])).get("torn");
+	assert.equal(end?.isError, true, said(end));
+	assert.equal(said(end).match(/schedule-runs\.json is not valid JSON/g)?.length, 1, "the refusal is named once");
 });
