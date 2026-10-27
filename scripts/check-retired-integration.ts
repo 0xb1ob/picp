@@ -14,7 +14,7 @@ export const ALLOWLIST_FILE = "scripts/retired-integration-allowlist.json";
 /** Each category may only exempt lines in these files; a trailing `/` names a directory. */
 export const CATEGORY_PATHS: Readonly<Record<string, readonly string[]>> = {
 	"frozen-history": ["CHANGELOG.md"],
-	protocol: ["src/viewer/server.ts"],
+	protocol: ["src/viewer/server.ts", "tests/e2e/viewer-serving.test.ts"],
 	"self-pattern": ["scripts/check-retired-integration.ts"],
 	"deleted-feature-record": ["docs/testing-migration.md", "docs/testing-migration/"],
 	"legacy-compat": [".gitignore", "src/service/install.ts"],
