@@ -402,7 +402,7 @@ test("P17-answers-tailnet: without --require-tailnet both answer routes are 403,
 	assert.equal(existsSync(operatorAnswersFile(d.stateDir)), false);
 	appendAnswerLine(d.stateDir, posted(A, "2026-07-01T00:00:00Z"));
 	const tab = await d.open("#answers");
-	await tab.find(".answers-control", (el) => /^Acknowledge unavailable: answer acknowledgement is served only under --require-tailnet/.test(el.textContent ?? ""));
+	assert.ok(await tab.find(".answers-control", (el) => /^Acknowledge unavailable: answer acknowledgement is served only under --require-tailnet/.test(el.textContent ?? "")));
 	assert.equal(tab.$(`button[aria-label="Acknowledge ${A}"]`)?.hasAttribute("disabled"), true);
 	assert.equal(tab.$("h1")?.getAttribute("title"), "Decisions", "#answers is a section of the Decisions page");
 	assert.equal(lines(operatorAnswersFile(d.stateDir)).length, 1, "nothing acked");
@@ -437,7 +437,7 @@ test("P17-answers: posted answers project their evidence and render as text; a t
 
 	// Until the control status answers, the tick reads Checking… and stays disabled.
 	const tab = await d.open("#answers", /^\/api\/answers\/control$/);
-	await tab.find(".answers-control", (el) => el.textContent === "Checking…");
+	assert.ok(await tab.find(".answers-control", (el) => el.textContent === "Checking…"));
 	assert.equal(tab.$(`button[aria-label="Acknowledge ${A}"]`)?.hasAttribute("disabled"), true);
 	tab.release();
 	const section = tab.$("#answers")!;
@@ -460,7 +460,7 @@ test("P17-answers: posted answers project their evidence and render as text; a t
 
 	const tick = (id: string) => tab.find(`button[aria-label="Acknowledge ${id}"]`, (b) => !b.hasAttribute("disabled"));
 	tab.click(await tick(A));
-	await until(() => tab.$(`button[aria-label="Acknowledge ${A}"]`), (b) => b === null, "the acked card hides");
+	assert.equal(await until(() => tab.$(`button[aria-label="Acknowledge ${A}"]`), (b) => b === null, "the acked card hides"), null);
 	const ackPost = tab.requests.find((r) => r.path === "/api/answers/ack")!;
 	assert.deepEqual([ackPost.method, ackPost.body, ackPost.status, ackPost.headers["x-cp-control-token"]?.length], ["POST", `{"id":"${A}"}`, 202, 64]);
 	assert.match(readFileSync(operatorAnswersFile(d.stateDir), "utf8"), new RegExp(`"type":"acked","by":"viewer","id":"${A}"`));
@@ -475,7 +475,7 @@ test("P17-answers: posted answers project their evidence and render as text; a t
 	write(controlConfigFile(d.stateDir), '{"enabled": false, "reason": "opt-out"}');
 	const off = await fresh.reopen();
 	await off.find("button.answers-ack", (b) => b.hasAttribute("disabled"));
-	assert.match(off.$(".answers-control")?.textContent ?? "", /^Dashboard control is off/);
+	await off.find(".answers-control", (el) => /^Dashboard control is off/.test(el.textContent ?? ""));
 	assert.equal((await answers()).open_count, 1, "control off: the list still renders, read-only");
 	assert.ok(off.$('button[aria-label="Acknowledge ans-cccccccccccc"]'), "the open card stays listed");
 
