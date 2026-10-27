@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer as httpServer, request } from "node:http";
 import { type AddressInfo, connect, createServer } from "node:net";
 import { join, relative } from "node:path";
@@ -115,7 +115,7 @@ test("P22-push-http-status: GET /api/push shows only the public setup; an unconf
 	const s = await rig(t);
 	const reply = await s.l("/api/push");
 	assert.equal(reply.status, 200);
-	assert.deepEqual([reply.json.configured, reply.json.origin, Buffer.from(String(reply.json.public_key), "base64url").length, reply.json.devices, reply.json.undelivered_24h], [true, ORIGIN, 65, 0, 0]);
+	assert.equal(reply.json.configured, true); assert.equal(reply.json.origin, ORIGIN); assert.equal(Buffer.from(String(reply.json.public_key), "base64url").length, 65); assert.equal(reply.json.devices, 0); assert.equal(reply.json.undelivered_24h, 0);
 	const secret = JSON.parse(readFileSync(vapidKeyFile(s.dataDir), "utf8")).d as string;
 	assert.doesNotMatch(reply.body.toString(), new RegExp(secret));
 	assert.equal((await s.l("/api/push", { method: "POST" })).status, 405);
@@ -131,17 +131,17 @@ test("P22-push-http-store: POST stores one 0600 file per device, idempotently; D
 	const before = quiet(snapshot(s.home));
 	const sub = device();
 	const created = await s.post("/api/push/subscription", wire(sub));
-	assert.deepEqual([created.status, created.json], [201, { subscribed: true, devices: 1 }]);
+	assert.equal(created.status, 201); assert.deepEqual(created.json, { subscribed: true, devices: 1 });
 	assert.equal((await s.post("/api/push/subscription", { ...wire(sub), expirationTime: null })).status, 201);
 	const dir = join(s.dataDir, "push", "subscriptions");
-	assert.deepEqual([readdirSync(dir).length, statSync(join(dir, readdirSync(dir)[0]!)).mode & 0o777, statSync(dir).mode & 0o777], [1, 0o600, 0o700]);
+	assert.equal(readdirSync(dir).length, 1); assert.equal(statSync(join(dir, readdirSync(dir)[0]!)).mode & 0o777, 0o600); assert.equal(statSync(dir).mode & 0o777, 0o700);
 	assert.deepEqual(quiet(snapshot(s.home)).filter((line) => !line.startsWith(`${LAYOUT.data}/push/subscriptions/`)), before);
 	const status = await s.l("/api/push");
 	assert.equal(status.json.devices, 1);
 	assert.doesNotMatch(status.body.toString(), /fcm\.googleapis|p256dh|auth/);
 	const removed = await s.post("/api/push/subscription", { endpoint: sub.endpoint }, s.local, "DELETE");
-	assert.deepEqual([removed.status, removed.json, readdirSync(dir)], [200, { unsubscribed: true }, []]);
-	assert.deepEqual((await s.post("/api/push/subscription", { endpoint: sub.endpoint }, s.local, "DELETE")).json, { unsubscribed: false });
+	assert.equal(removed.status, 200); assert.deepEqual(removed.json, { unsubscribed: true }); assert.deepEqual(readdirSync(dir), []);
+	assert.deepEqual((await s.post("/api/push/subscription", { endpoint: sub.endpoint }, s.local, "DELETE")).json, { unsubscribed: false }); assert.ok(existsSync(s.stateDir), "the state dir stays");
 });
 
 test("P22-push-http-guard: only a same-origin JSON subscription on a known push service is stored, ten devices at most", async (t) => {
@@ -166,7 +166,7 @@ test("P22-push-http-guard: only a same-origin JSON subscription on a known push 
 	for (const [name, body, headers, status] of cases) assert.equal((await s.post("/api/push/subscription", body, headers)).status, status, name);
 	for (const method of ["GET", "HEAD", "PUT", "PATCH"]) {
 		const reply = await s.l("/api/push/subscription", { method });
-		assert.deepEqual([reply.status, reply.headers.allow], [405, "POST, DELETE"], method);
+		assert.equal(reply.status, 405, method); assert.equal(reply.headers.allow, "POST, DELETE", method);
 	}
 	assert.equal((await s.post("/api/push/subscription", wire(sub), { ...json, "sec-fetch-site": "same-origin" })).status, 201, "the configured origin");
 	assert.equal((await s.post("/api/push/subscription", wire(device()))).status, 201, "the loopback bind's own origin");
@@ -223,7 +223,7 @@ test("P22-push-http-revoke: an unreadable file is never overwritten; cp-tunnel r
 	for (const [cookie, sub] of [[phone.cookie, device()], [phone.cookie, device()], [laptop.cookie, device()]] as const) assert.equal((await s.remote(cookie, "/api/push/subscription", wire(sub))).status, 201);
 	assert.equal((await s.post("/api/push/subscription", wire(device()))).status, 201);
 	const revoke = spawnSync(join(REPO_ROOT, "bin/cp-tunnel"), ["revoke", "Phone", "--home", s.home], { encoding: "utf8", env: { ...process.env, HOME: s.home, CP_HOME: s.home } });
-	assert.equal(revoke.status, 0, `${revoke.stdout}${revoke.stderr}`);
+	assert.equal(revoke.status, 0, `${revoke.stdout}${revoke.stderr}`); assert.doesNotMatch(revoke.stderr, /the device is revoked, but/, "no cleanup error");
 	assert.deepEqual(s.owners(), [laptop.id, "legacy"].sort(), "both of the phone's went; the laptop's and the legacy one stay");
 	assert.equal(readFileSync(subscriptionFile(s.dataDir, subscriptionId(torn.endpoint)), "utf8"), "{torn", "an unreadable file is never someone's to clean up");
 });
@@ -231,23 +231,23 @@ test("P22-push-http-revoke: an unreadable file is never overwritten; cp-tunnel r
 test("P22-push-http-app: the service worker, manifest and icons are same-origin, standalone and open Awaiting you", async (t) => {
 	const s = await rig(t, { configured: false });
 	const sw = await s.l("/sw.js");
-	assert.deepEqual([sw.status, sw.headers["content-type"], sw.headers["content-security-policy"], sw.headers["cache-control"]], [200, "text/javascript; charset=utf-8", APP_CSP, "no-store"]);
+	assert.equal(sw.status, 200); assert.equal(sw.headers["content-type"], "text/javascript; charset=utf-8"); assert.equal(sw.headers["content-security-policy"], APP_CSP); assert.equal(sw.headers["cache-control"], "no-store");
 	assert.match(sw.body.toString(), /notificationclick/);
 	assert.match(APP_CSP, /; worker-src 'self'; manifest-src 'self'; /);
 	assert.equal(APP_CSP.replace("worker-src 'self'; manifest-src 'self'; ", ""), "default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; font-src 'self'; connect-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
 	const manifest = await s.l("/manifest.webmanifest");
-	assert.deepEqual([manifest.status, manifest.headers["content-type"]], [200, "application/manifest+json; charset=utf-8"]);
+	assert.equal(manifest.status, 200); assert.equal(manifest.headers["content-type"], "application/manifest+json; charset=utf-8");
 	const body = manifest.json as { display: string; start_url: string; theme_color: string; background_color: string; icons: Array<{ src: string; sizes: string }> };
-	assert.deepEqual([body.display, body.start_url, body.theme_color, body.background_color], ["standalone", "/#awaiting", APP_COLORS.background, APP_COLORS.background]);
+	assert.equal(body.display, "standalone"); assert.equal(body.start_url, "/#awaiting"); assert.equal(body.theme_color, APP_COLORS.background); assert.equal(body.background_color, APP_COLORS.background);
 	const tokens = (await s.l(String(/href="([^"]+\.css)"/.exec((await s.l("/")).body.toString())?.[1]))).body.toString();
 	assert.match(tokens, new RegExp(`--background: ${APP_COLORS.background};`));
 	assert.match(tokens, new RegExp(`--amber: ${APP_COLORS.accent};`));
 	assert.match((await s.l("/")).body.toString(), /<link rel="manifest" href="\/manifest.webmanifest"><link rel="apple-touch-icon" href="\/apple-touch-icon.png">/);
 	for (const [path, size] of [["/icon-192.png", 192], ["/icon-512.png", 512], ["/apple-touch-icon.png", 180]] as const) {
 		const icon = await s.l(path);
-		assert.deepEqual([icon.status, icon.headers["content-type"]], [200, "image/png"], path);
+		assert.equal(icon.status, 200, path); assert.equal(icon.headers["content-type"], "image/png", path);
 		assert.deepEqual([...icon.body.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-		assert.deepEqual([icon.body.readUInt32BE(16), icon.body.readUInt32BE(20)], [size, size]);
+		assert.equal(icon.body.readUInt32BE(16), size); assert.equal(icon.body.readUInt32BE(20), size);
 		const pixels = inflateSync(icon.body.subarray(41, 41 + icon.body.readUInt32BE(33)));
 		assert.equal(pixels.length, size * (1 + size * 3));
 		const colours = new Set<string>();

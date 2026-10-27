@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
-# Run a command unprivileged when CI is root (self-hosted nomad): root ignores chmod, so
-# permission-failure tests would pass their writes. Hosted runners are non-root and exec as-is.
+# Run a command as the unprivileged cpci user: root ignores chmod (self-hosted nomad), and on hosted runners
+# (re-entered as root via sudo) no test may share Runner.Worker's uid, where a stray kill(-1) cancels the job.
 set -euo pipefail
-if [ "$(id -u)" != 0 ]; then exec "$@"; fi
+if [ "$(id -u)" != 0 ]; then
+  if [ "${GITHUB_ACTIONS:-}" = true ] && sudo -n true 2>/dev/null; then
+    # Hosted sudo ignores --preserve-env (env_reset); a 0600 file, not argv, carries the job env and its token.
+    envfile=$(mktemp); env -0 > "$envfile"
+    exec sudo -n bash "$0" --cp-env "$envfile" "$@"
+  fi
+  exec "$@"
+fi
+if [ "${1:-}" = --cp-env ]; then
+  while IFS= read -r -d '' kv; do export "$kv" 2>/dev/null || true; done < "$2"
+  rm -f "$2"; shift 2
+fi
 user=cpci
 id "$user" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash "$user"
 sock=/var/run/docker.sock
@@ -12,7 +23,17 @@ if [ -S "$sock" ] && [ "$(stat -c %g "$sock")" != 0 ]; then
   [ -n "$grp" ] || { grp=cpcidocker; groupadd -g "$gid" "$grp"; }
   usermod -aG "$grp" "$user"
 fi
-# setup-node restored the npm cache for root; seed cpci's own ~/.npm from it
-[ -d /root/.npm ] && [ ! -e "/home/$user/.npm" ] && cp -a /root/.npm "/home/$user/.npm"
-chown -R "$user" "${GITHUB_WORKSPACE:-$PWD}" "/home/$user" ${RUNNER_TEMP:+"$RUNNER_TEMP"}
-exec setpriv --reuid="$user" --regid="$user" --init-groups env "HOME=/home/$user" "$@"
+cache=/root/.npm
+temp=${RUNNER_TEMP:-}
+if [ -n "${SUDO_USER:-}" ]; then
+  # Hosted runner: its user's npm cache, a traversable workspace path; RUNNER_TEMP stays the runner's.
+  cache="$(getent passwd "$SUDO_USER" | cut -d: -f6)/.npm"
+  temp=
+  dir=${GITHUB_WORKSPACE:-$PWD}
+  while [ "$dir" != / ]; do dir=$(dirname "$dir"); chmod o+x "$dir"; done
+fi
+# setup-node restored the npm cache for the runner's user; seed cpci's own ~/.npm from it
+[ -d "$cache" ] && [ ! -e "/home/$user/.npm" ] && cp -a "$cache" "/home/$user/.npm"
+chown -R "$user" "${GITHUB_WORKSPACE:-$PWD}" "/home/$user" ${temp:+"$temp"}
+exec setpriv --reuid="$user" --regid="$user" --init-groups env -u SUDO_USER -u SUDO_UID -u SUDO_GID -u SUDO_COMMAND \
+  "HOME=/home/$user" "$@"
