@@ -123,7 +123,7 @@ jobs:
           bash scripts/ci-as-user.sh mkdir -p /tmp/cp-node-reports
           bash scripts/ci-as-user.sh sh -c 'echo "suite runs as uid $(id -u) ($(id -un))"; exec npm run test:shard' || rc=$?
           for f in /tmp/cp-node-reports/*.json; do
-            [ -e "$f" ] && node -e 'const r=require(process.argv[1]);console.log(r.header?.event, r.javascriptStack?.message);console.log((r.javascriptStack?.stack||[]).slice(0,40).join("\n"))' "$f"
+            [ -e "$f" ] && { node -e 'const r=require(process.argv[1]);console.log(r.header?.event, r.javascriptStack?.message);console.log((r.javascriptStack?.stack||[]).slice(0,40).join("\n"))' "$f" || true; }
           done
           exit ${rc:-0}
         env:
@@ -131,9 +131,9 @@ jobs:
           # Never set CP_LIVE_TESTS here: the live suites hit real models,
           # cost money and need credentials. They self-skip without it.
           CP_LIVE_TESTS: ""
-          # A runaway test fails loudly at 2 GB (peaks seen: 776 MB) and leaves a report naming its JS stack.
+          # 16 GB public runner; 3 concurrent files x 4 GB fits; Node's default on 16 GB is ~4 GB
           # scripts/ci-as-user.sh carries it to the cpci suite through its 0600 env file.
-          NODE_OPTIONS: --max-old-space-size=2048 --report-on-fatalerror --report-directory=/tmp/cp-node-reports
+          NODE_OPTIONS: --max-old-space-size=4096 --report-on-fatalerror --report-directory=/tmp/cp-node-reports
 
       - name: Resource sampler tail and kernel OOM lines
         if: always() || cancelled()
