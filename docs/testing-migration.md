@@ -145,7 +145,8 @@ no pipeline auto-decide; P2e drives them there (02-15) and removes that unit. Th
 is two lines.
 `tests/e2e/authority.test.ts` joins R1_ALLOWED in place of `tests/quota.test.ts`: 02-14 writes the legacy top-level
 `data/capacity.json` that cp-u3i2 must ignore. P2d's declaration count is 4,346, not 4,344: it added one declaration
-each to `tests/decide.test.ts` and `tests/schedule-authority.test.ts` (now `-retained`) (P2e review finding).
+each to `tests/decide.test.ts` and `tests/schedule-authority.test.ts`, both since deleted (their declarations live on in
+`tests/decide-retained.test.ts` and `tests/schedule-authority-retained.test.ts`) (P2e review finding).
 
 P2e (cp-e2e-migration-p2e-fmi5) adds three cases to `tests/e2e/authority.test.ts` and deletes `tests/mandate.test.ts`
 (61 declarations), under negative controls NC-21 to NC-23 beside P2b's NC-05, NC-06 and NC-11. 02-15 runs a real

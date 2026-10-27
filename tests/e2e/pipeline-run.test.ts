@@ -1265,6 +1265,7 @@ test("P11d-recover: cp_pipeline recover re-dispatches a failed implementer with 
 	execFileSync("git", ["-C", b.clone, "branch", "-D", ids.shipId], { stdio: "ignore" });
 	const recovered = await b.post.pipeline().recoverShip(ids.researchId);
 	assert.match(recovered.message, /re-dispatched from the same task file/);
+	assert.deepEqual(b.post.fleet.read().jobs.filter((record) => record.job_id === ids.shipId).map((record) => record.phase), ["waiting"], "the re-dispatch drops the done record for its new one");
 	const events = readRunEvents(b.home, ids.shipId).filter((event) => event.type === "routing_resolved");
 	assert.equal(events.length, 2);
 	const routed = events.map((event) => event.payload as Record<string, any>);
