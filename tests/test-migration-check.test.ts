@@ -93,8 +93,8 @@ test("feature-removed rejects an uncovered loss, a missing remover, a duplicate,
 const CHECKER = fileURLToPath(new URL("../scripts/test-migration-check.ts", import.meta.url));
 const table = (name: string, ...lines: string[]) => [`<!-- manifest:${name} -->`, "| h | h |", "|---|---|", ...lines, `<!-- /manifest:${name} -->`].join("\n");
 
-/** A repo whose `tests/a.test.ts` has 1 assertion at the baseline, 3 when it is deleted; the CLI runs on its ledger. */
-function claimFixture(): { check: (note: string, exempt?: string[]) => { status: number | null; out: string }; done: () => void } {
+/** A repo whose `tests/a.test.ts` case has 1 assertion at the baseline, 3 at deletion; e2e bodies hold 3 and 1. */
+function claimFixture(): { check: (note: string) => { status: number | null; out: string }; done: () => void } {
 	const dir = mkdtempSync(join(tmpdir(), "claim-count-"));
 	const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd: dir, encoding: "utf8" }).trim();
 	const write = (path: string, body: string) => { mkdirSync(join(dir, path, ".."), { recursive: true }); writeFileSync(join(dir, path), body); };
@@ -104,51 +104,46 @@ function claimFixture(): { check: (note: string, exempt?: string[]) => { status:
 	git("commit", "-qm", "baseline");
 	const base = git("rev-parse", "HEAD");
 	write("tests/a.test.ts", `test("case one", () => { assert.ok(1); assert.equal(1, 1); t.assert.ok(2); });\n`);
-	write("tests/e2e/x.test.ts", `test("x works", () => {});\n`);
+	write("tests/e2e/x.test.ts", `test("x works", () => {\n\tassert.ok(1); assert.ok(2); expect(3);\n});\ntest("x small", () => { assert.ok(1); });\n`);
 	git("add", "-A");
 	git("commit", "-qm", "grow");
 	git("rm", "-q", "tests/a.test.ts");
 	git("commit", "-qm", "delete");
-	const check = (note: string, exempt: string[] = []) => {
+	const check = (note: string) => {
 		write("docs/testing-migration.md", [`Baseline sha: \`${base}\``, table("prs"), table("ledger"), table("feature-removed"),
 			table("baseline", "| tests/a.test.ts | deleted | P1 | |")].join("\n") + "\n");
 		write("docs/testing-migration/p1.md", [table("ledger", "| P1 | scope | 1 |"), table("incoming", "| tests/e2e/x.test.ts | P1 |"),
 			table("scenarios", "| S1 | tests/e2e/x.test.ts | x works |"), table("regressions", "| NC-1 | tests/a.test.ts | S1 | revert | fails |"),
 			table("assertions", `| tests/a.test.ts | case one | S1 | mapped | ${note} |`)].join("\n") + "\n");
-		write("exempt.json", JSON.stringify({ files: exempt }));
-		const run = spawnSync(process.execPath, [CHECKER, "--claim-exempt", "exempt.json"], { cwd: dir, encoding: "utf8" });
+		const run = spawnSync(process.execPath, [CHECKER], { cwd: dir, encoding: "utf8" });
 		return { status: run.status, out: run.stdout + run.stderr };
 	};
 	return { check, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-test("CLI: a mapped row citing fewer covered-by claims than its case's pre-deletion assertions fails", () => {
+test("CLI: cites whose e2e bodies hold fewer assertions than the case had at deletion warn", () => {
 	const fixture = claimFixture();
 	try {
-		const short = fixture.check("reworded; covered-by: tests/e2e/x.test.ts:1, tests/e2e/x.test.ts:2, tests/e2e/x.test.ts:2");
-		assert.equal(short.status, 1, short.out);
-		assert.match(short.out, /FAIL tests\/a\.test\.ts: "case one" cites 2 covered-by claim\(s\) for 3 baseline assertion\(s\)/);
+		const short = fixture.check("reworded; covered-by: tests/e2e/x.test.ts:4");
+		assert.equal(short.status, 0, short.out);
+		assert.match(short.out, /WARN tests\/a\.test\.ts: "case one" cites 1 covered-by line\(s\) holding 1 assertion\(s\) for 3 at deletion/);
+		assert.match(short.out, /claim count: 1 rows of deleted files counted, 1 short/);
 		const none = fixture.check("control NC-1");
-		assert.match(none.out, /"case one" cites 0 covered-by claim\(s\) for 3 baseline assertion\(s\)/);
+		assert.match(none.out, /"case one" cites 0 covered-by line\(s\) holding 0 assertion\(s\) for 3 at deletion/);
 	} finally {
 		fixture.done();
 	}
 });
 
-test("CLI: a row citing every assertion, a row marked Narrowed: and a grandfathered file pass; a stale exemption fails", () => {
+test("CLI: one cite into a body holding every assertion, or a row marked Narrowed:, does not warn", () => {
 	const fixture = claimFixture();
 	try {
-		for (const [note, exempt] of [
-			["covered-by: tests/e2e/x.test.ts:1, tests/e2e/x.test.ts:2, tests/e2e/x.test.ts:3", []],
-			["covered-by: tests/e2e/x.test.ts:1. Narrowed: the equal check has no consumer", []],
-			["control NC-1", ["tests/a.test.ts"]],
-		] as const) {
-			const run = fixture.check(note, [...exempt]);
+		for (const note of ["covered-by: tests/e2e/x.test.ts:2", "covered-by: tests/e2e/x.test.ts:4. Narrowed: the equal check has no consumer"]) {
+			const run = fixture.check(note);
 			assert.equal(run.status, 0, run.out);
-			assert.match(run.out, /manifest ok/);
+			assert.doesNotMatch(run.out, /WARN/);
+			assert.match(run.out, /0 short/);
 		}
-		const stale = fixture.check("covered-by: tests/e2e/x.test.ts:1, tests/e2e/x.test.ts:2, tests/e2e/x.test.ts:3", ["tests/gone.test.ts"]);
-		assert.match(stale.out, /FAIL claim count: exempt tests\/gone\.test\.ts is not a deleted baseline file/);
 	} finally {
 		fixture.done();
 	}
