@@ -296,7 +296,7 @@ test("P24 guards: a real parent's read, grep, write, edit and bash calls are ref
 
 // -- MCP access ----------------------------------------------------------------
 
-/** A parent with a `pi` stub first on PATH: `pi mcp list --json` answers from files and logs argv, else real pi runs. */
+/** A parent with a `pi` stub first on PATH: `pi mcp list --json` is canned and logged, any other call runs real pi. */
 async function mcpParent(t: TestContext) {
 	const scratch = createScratchHome();
 	const home = realpathSync(scratch.path);
