@@ -105,13 +105,16 @@ jobs:
       # counts every 20 s, printed by the always() step below; job output only, nothing committed.
       - name: Start resource sampler
         run: |
-          nohup bash -c 'while :; do
+          nohup bash -c '
+            # Own 2 s loop: one 20 s tick missed a 3 -> 15 GB jump. Stopped with the sampler (same process).
+            while :; do bash scripts/ci-rss-watchdog.sh "$RUNNER_TEMP/rss-handled" || true; sleep 2; done & dog=$!
+            trap "kill $dog" EXIT
+            while :; do
             echo "=== $(date -u +%H:%M:%S) load $(cut -d" " -f1-4 /proc/loadavg)"
             free -m
             ps -eo pid,ppid,uid,rss,etime,args --sort=-rss | head -n 11 | cut -c1-200
             echo "processes per uid:"; ps -eo uid= | sort -n | uniq -c
             df -h / /tmp | tail -n +2
-            bash scripts/ci-rss-watchdog.sh "$RUNNER_TEMP/rss-handled" || true
             sleep 20
           done' > "$RUNNER_TEMP/sampler.log" 2>&1 &
 
