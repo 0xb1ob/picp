@@ -15,7 +15,7 @@ import { herdrCommand } from "../src/viewer/launchers.ts";
 import { viewerConfigFile } from "../src/viewer/host-config.ts";
 import { pushConfigFile, pushDataDir } from "../src/viewer/push-files.ts";
 import { createViewer } from "../src/viewer/server.ts";
-import { controlLine, deliveryLine, readControl, sendControl } from "../viewer-app/control.ts";
+import { controlLine, deliveryLine, readControl, sendControl, startOperator } from "../viewer-app/control.ts";
 import { restartDisabled, restartOperator } from "../viewer-app/restart-control.ts";
 import { deliverySummary } from "../viewer-app/use-device-notices.ts";
 import { send, write } from "./harness/conversations.ts";
@@ -49,6 +49,7 @@ test("readControl sends x-cp-delta-base per URL, applies the delta, and falls ba
 
 test("client: sendControl's unreachable home, controlLine's 403 and deliveryLine's lines", async () => {
 	assert.deepEqual(await sendControl(async () => { throw new Error("offline"); }, "tok", { kind: "abort" }), { error: "Could not reach this home", status: 0 });
+	assert.deepEqual(await startOperator(async () => { throw new Error("x"); }, "tok", "herdr"), { error: "Could not reach this home" });
 	assert.equal(controlLine(null), "Checking dashboard control");
 	assert.equal(controlLine({ error: "HTTP 403" }), "Not available: HTTP 403");
 	assert.equal(deliveryLine({ id: "dc-1", state: "queued", reason: null, ask_id: null }), "Queued · dc-1");
