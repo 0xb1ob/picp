@@ -95,6 +95,7 @@ import { EscalationStore, raiseMergeRefused } from "./escalation.ts";
 import type { RunRegistry } from "./runs.ts";
 import type { TeardownResult } from "./teardown.ts";
 import { readReviewMergeWindow } from "./review-merge-window.ts";
+import { policyReviewHold } from "./review-policy-escalation.ts";
 
 /**
  * Just enough of `AwaitingStore` for the "merge pending" reminder (cp-e0c).
@@ -823,15 +824,14 @@ export class Integrator {
 			this.#event(jobId, "integration_advanced", { step: "review", final_fix: "promoted", capped_head: record.capped_head, fix_generation: record.fix_generation, decided_by: record.decided_by });
 			return this.#write({ ...common, next: "resolve", facts: [...facts, `final fix promoted once (fix generation ${record.fix_generation})`], reason: `${fix.reason} Wait for its report; only that reported head may merge.` });
 		}
-		if (fix.state !== "none") {
-			return this.#write({ ...common, next: fix.state === "promoted" ? "resolve" : "surface", facts: [...facts, `review: ${fix.state} final fix`], reason: fix.reason });
-		}
+		if (fix.state !== "none") return this.#write({ ...common, next: fix.state === "promoted" ? "resolve" : "surface", facts: [...facts, `review: ${fix.state} final fix`], reason: fix.reason });
+		const policy = await policyReviewHold(this.#options.home, { jobId, head, facts });
+		if (policy) return policy === "accepted" ? undefined : this.#write({ ...common, ...policy });
 		return this.#write({
 			...common,
 			next: "review",
 			facts: [...facts, `review: no pass on ${short}`],
-			reason:
-				`${jobId}: no passing cp_review on ${short}. Run cp_review on that head, or authorize a flagged escalate via the diff checkpoint; never re-review an unchanged one. Nothing was merged.`,
+			reason: `${jobId}: no passing cp_review on ${short}. Run cp_review on that head, or authorize a flagged escalate via the diff checkpoint; never re-review an unchanged one. Nothing was merged.`,
 		});
 	}
 
