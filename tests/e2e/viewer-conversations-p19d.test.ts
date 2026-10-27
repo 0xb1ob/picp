@@ -357,6 +357,36 @@ test("P19-queued-lost: a lost or expired send is a failed bubble with its text; 
 	assert.equal(messages(tab), 0);
 });
 
+test("P19-queued-retry-first-paint: Send again clicked in the frame a journal failure first paints (before anything is persisted) sends one new message and retires the failure from both stores", { timeout: 120_000 }, async (t) => {
+	const d = await home(t, [said("13:59", "response")]);
+	await session(t, d, () => false, ANSWER_QUEUED_MS);
+	journal(d, dc("1"), ago(3_600_000), "lost on arrival", { session_started_at: ago(30 * 86_400_000) }, "injected", "queued");
+	const tab = await openTab(t, d.port, OPERATOR);
+	// A mutation callback runs right after the render commit; the persist effect needs a later timer task.
+	let persistedAtClick: string | null | undefined;
+	const watch = new tab.window.MutationObserver((_rows: unknown, observer: { disconnect(): void }) => {
+		const again = tab.$(".session-pending-again");
+		if (!again || again.hasAttribute("disabled")) return;
+		observer.disconnect();
+		persistedAtClick = tab.storage.get(PENDING) ?? null;
+		tab.click(again);
+	});
+	watch.observe(tab.root, { childList: true, subtree: true, attributes: true });
+	await until(() => persistedAtClick, (seen) => seen !== undefined, "Send again clicked on the first paint");
+	assert.equal(persistedAtClick, null, "the click came before the failure was stored in the browser");
+	const { client_id, ...body } = await posted(tab, 1);
+	assert.deepEqual(body, { kind: "message", text: "lost on arrival", deliver: "followUp" });
+	assert.notEqual(client_id, dc("1"), "a new message, not the lost one");
+	const queued = ["lost on arrival"];
+	assert.deepEqual(await bubblesAre(tab, queued, "the retry"), queued, "the failed bubble gave way to the one new send");
+	assert.equal(tab.$$(".session-pending-failed").length, 0, "no failed bubble stays");
+	await until(() => stored(tab).dismissed, (ids) => ids.includes(dc("1")), "the lost id dismissed");
+	assert.deepEqual(stored(tab).items.map((item) => item.id).filter((id) => id === dc("1")), [], "the failure left the stored list");
+	await settle();
+	assert.equal(messages(tab), 1, "exactly one POST");
+	assert.deepEqual(await bubblesAre(await tab.reopen(), queued, "the reload"), queued, "a reload shows the one send, not the lost one again");
+});
+
 test("P19-queued-edit: a held message edits inline (Esc keeps it, Enter saves), cancels, and a save that lost the race shows the sent text with no Edit; the actions share one 44 px phone rule", { timeout: 120_000 }, async (t) => {
 	const d = await home(t, [said("13:59", "response")]);
 	let idle = false;
