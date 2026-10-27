@@ -110,6 +110,7 @@ jobs:
             free -m
             ps -eo pid,ppid,uid,rss,etime,args --sort=-rss | head -n 11 | cut -c1-200
             echo "processes per uid:"; ps -eo uid= | sort -n | uniq -c
+            df -h / /tmp | tail -n +2
             sleep 20
           done' > "$RUNNER_TEMP/sampler.log" 2>&1 &
 
@@ -118,12 +119,21 @@ jobs:
           # Live sampler lines in this step's log too: a cancelled job skipped the tail step below.
           tail -n 0 -F "$RUNNER_TEMP/sampler.log" & tailer=$!
           trap 'kill "$tailer"' EXIT
-          bash scripts/ci-as-user.sh sh -c 'echo "suite runs as uid $(id -u) ($(id -un))"; exec npm run test:shard'
+          # Node does not create --report-directory; make it as cpci so the suite can write there.
+          bash scripts/ci-as-user.sh mkdir -p /tmp/cp-node-reports
+          bash scripts/ci-as-user.sh sh -c 'echo "suite runs as uid $(id -u) ($(id -un))"; exec npm run test:shard' || rc=$?
+          for f in /tmp/cp-node-reports/*.json; do
+            [ -e "$f" ] && node -e 'const r=require(process.argv[1]);console.log(r.header?.event, r.javascriptStack?.message);console.log((r.javascriptStack?.stack||[]).slice(0,40).join("\n"))' "$f"
+          done
+          exit ${rc:-0}
         env:
           CP_TEST_SHARD: ${{ matrix.shard }}
           # Never set CP_LIVE_TESTS here: the live suites hit real models,
           # cost money and need credentials. They self-skip without it.
           CP_LIVE_TESTS: ""
+          # A runaway test fails loudly at 2 GB (peaks seen: 776 MB) and leaves a report naming its JS stack.
+          # scripts/ci-as-user.sh carries it to the cpci suite through its 0600 env file.
+          NODE_OPTIONS: --max-old-space-size=2048 --report-on-fatalerror --report-directory=/tmp/cp-node-reports
 
       - name: Resource sampler tail and kernel OOM lines
         if: always() || cancelled()
