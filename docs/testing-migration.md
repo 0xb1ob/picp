@@ -360,6 +360,7 @@ Test files added after the baseline, with the PR that owns them.
 |---|---|---|
 | tests/e2e/wake-ci-promoted.test.ts | cp-fix-promoted-ci-notice-dropped-z1n7 (https://github.com/0xb1ob/picp/pull/473) | S22 fix-job regression: a promoted job's CI notice keeps its promotion note at the provider |
 | tests/e2e/mandate-continuity.test.ts | cp-iojy (https://github.com/0xb1ob/picp/pull/504) | Original admission, authenticated confirmation, shared-root successors and PASS-bound handoff |
+| tests/e2e/review-policy-escalation.test.ts | cp-fin-promote-haql (https://github.com/0xb1ob/picp/pull/603) | Policy review escalate surfaces one escalation; an operator-quote cp_decide clears that head only, a push voids it |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
