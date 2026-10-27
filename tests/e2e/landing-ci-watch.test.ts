@@ -817,6 +817,33 @@ test("landing: main-red integration holds stale heads and permits only a current
 	}
 });
 
+test("landing: main-red gate judges only the current origin/main head, not a superseded commit's latch", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t);
+	const live = await s.held("main red superseded", 121);
+	const oldTip = advanceBase(s.repo, "main-old.txt", "main red\n");
+	s.post.mandates.issue({ projects: ["demo"], objective: "main red superseded", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 100, tokens: 1_000_000 }, job_cap: 10 });
+	const file = join(s.home, LAYOUT.state, "main-ci.json");
+	writeFileSync(file, JSON.stringify({ schema_version: SCHEMA_VERSION, updated_at: isoTimestamp(), projects: [{ project: "demo", red_since_sha: oldTip, red_since_at: isoTimestamp(), failing: "structure", login: "e2e" }] }));
+	const main = (id: number, head: string, status: string, conclusion: string | null) => run(id, head, status, conclusion, { event: "push", triggering_actor: { login: "e2e" } });
+	const routes = [{ match: "api user --jq .login", replies: [{ stdout: "e2e" }] }];
+	const newTip = advanceBase(s.repo, "main-new.txt", "main moved on\n");
+	const held = async (rows: readonly RunRow[]) => {
+		s.setGh({ routes, runs: [run(121, live.head, "completed", "success"), ...rows] });
+		return s.integrate(live.jobId);
+	};
+	for (const [what, older] of [["red", main(130, oldTip, "completed", "failure")], ["pending", main(130, oldTip, "in_progress", null)]] as const) {
+		const moved = await held([older, main(131, newTip, "completed", "success")]);
+		assert.doesNotMatch(moved.record.reason, /main is red since/, `older ${what}, newer green: ${moved.text}`);
+		assert.match(moved.text, /is green; not blocking/, what);
+	}
+	for (const [what, rows] of [["newer red", [main(132, newTip, "completed", "failure")]], ["newer pending", [main(133, newTip, "in_progress", null)]]] as const) {
+		const red = await held(rows);
+		assert.equal(red.record.next, "wait", `${what}: ${red.text}`);
+		assert.match(red.text, /main is red since/, what);
+		assert.deepEqual(mergedCalls(red.calls), []);
+	}
+});
+
 
 test("landing: main latch writes refuse corruption introduced during an Actions read", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const s = await startStack(t);

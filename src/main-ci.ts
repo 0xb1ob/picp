@@ -377,6 +377,8 @@ export async function mainRedHold(options: {
 	ancestry: () => Promise<boolean | undefined>;
 	runs: () => Promise<readonly CiRun[]>;
 	scope: () => Promise<MainCiScope>;
+	/** The fetched `origin/main` head and its Actions runs; rejects or `undefined` keeps the latch's hold. */
+	tip: () => Promise<{ sha: string; runs: readonly MainRun[] } | undefined>;
 }): Promise<{ hold?: string; fact?: string }> {
 	const read = new MainCiStore({ home: options.home }).read();
 	if (!read.ok) return { fact: `main-ci: ${read.error} — not blocking` };
@@ -387,6 +389,11 @@ export async function mainRedHold(options: {
 	if (!scope.enforce) return { fact: `main-ci: red since ${sha} not enforced — ${scope.reason}; not blocking` };
 	if (row.login === undefined || !sameLogin(row.login, scope.login)) return { fact: `main-ci: red since ${sha} latched ${row.login ? `for ${row.login}` : "before own-run filtering"}, not ${scope.login}; not blocking` };
 	const hold = { hold: `main is red since ${sha}: ${row.failing ?? row.workflow ?? "CI failed"}; rebase onto origin/main and pass CI to merge` };
+	// A latch from an older commit is stale once the current origin/main head is green (the tick clears it later).
+	const current = await options.tip().catch(() => undefined);
+	if (current && !shaMatches(current.sha, row.red_since_sha) && classifyMainTip(current.sha, countedMainRuns(current.runs, scope.login)).status === "green") {
+		return { fact: `main-ci: red since ${sha} but origin/main ${current.sha.slice(0, 12)} is green; not blocking` };
+	}
 	if ((await options.ancestry()) !== true) return hold;
 	let runs: readonly CiRun[];
 	try {
