@@ -464,7 +464,13 @@ export type ControlAuditLine =
 	| { type: "start"; by: "viewer"; id: null; at: string; peer: string | null; via: "herdr" | "tmux"; resume?: true; state: "starting" | "unavailable"; reason: string | null };
 
 type UploadMetadata = { name: string; bytes: number };
-const uploadMetadataCache = new Map<string, { dev: number; ino: number; size: number; offset: number; uploads: Map<string, UploadMetadata & { order: number }> }>();
+const uploadMetadataCache = new Map<string, { dev: number; ino: number; size: number; offset: number; tail: Buffer; uploads: Map<string, UploadMetadata & { order: number }> }>();
+/** The bytes just before `end`: a replaced journal that reuses the inode and grows no longer matches them. */
+const tailAt = (fd: number, end: number): Buffer => {
+	const buf = Buffer.alloc(Math.min(64, end));
+	readSync(fd, buf, 0, buf.length, end - buf.length);
+	return buf;
+};
 
 /** Names/sizes have one durable source: upload audit lines, never attachment contents.
  * Cache each journal's uploads and resume at the last complete record; a snapshot bounds each scan.
@@ -479,8 +485,8 @@ export function readUploadMetadata(stateDir: string, ids: readonly string[]): Ma
 	try {
 		const stat = fstatSync(fd);
 		let cache = uploadMetadataCache.get(file);
-		if (!cache || cache.dev !== stat.dev || cache.ino !== stat.ino || stat.size < cache.size) {
-			cache = { dev: stat.dev, ino: stat.ino, size: stat.size, offset: 0, uploads: new Map() };
+		if (!cache || cache.dev !== stat.dev || cache.ino !== stat.ino || stat.size < cache.size || !tailAt(fd, cache.offset).equals(cache.tail)) {
+			cache = { dev: stat.dev, ino: stat.ino, size: stat.size, offset: 0, tail: Buffer.alloc(0), uploads: new Map() };
 			uploadMetadataCache.set(file, cache);
 		}
 		cache.size = stat.size;
@@ -503,6 +509,7 @@ export function readUploadMetadata(stateDir: string, ids: readonly string[]): Ma
 			pending = chunk.subarray(start);
 			cache.offset = offset - pending.length;
 		}
+		cache.tail = tailAt(fd, cache.offset);
 		const matches = [...wanted].flatMap(id => { const metadata = cache.uploads.get(id); return metadata ? [{ id, ...metadata }] : []; });
 		matches.sort((a, b) => a.order - b.order); // Preserve the journal's first-seen order.
 		for (const { id, name, bytes } of matches) found.set(id, { name, bytes });
