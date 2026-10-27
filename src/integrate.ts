@@ -81,7 +81,7 @@ import { type CiRun, ghCiRuns, readCiForHead, readReviewPassVerdict, shaMatches 
 import { readOlderBranchRuns, retryTransientRead, statusRunner } from "./actions-ci.ts";
 import { ciRunRef, formatRunRef } from "./ci-run-ref.ts";
 import { readDrain } from "./drain.ts";
-import { type MainCiScope, mainRedHold } from "./main-ci.ts";
+import { type MainCiScope, mainRedHold, readMainTipRuns } from "./main-ci.ts";
 import {
 	type BranchRule,
 	evaluateMergePermission,
@@ -458,7 +458,7 @@ export class Integrator {
 		const mainCiScope = async (): Promise<MainCiScope> => (await this.#options.mainCiScope?.(record.project)) ?? { enforce: false, reason: "no main-CI scope wired" };
 		let observed: Promise<CiRun[]> | undefined; // one Actions observation of this head per advance
 		const readRuns = () => (observed ??= retryTransientRead((timeoutMs) => ghCiRuns({ cwd, timeoutMs, exec: statusRunner((dir, bin, args, opts) => this.#run(dir, bin, args, opts)) })(head)));
-		const mainRed = await mainRedHold({ home: this.#options.home, project: record.project, branch, head, ancestry: () => this.#ancestry(cwd, branch, "main"), runs: readRuns, scope: mainCiScope });
+		const mainRed = await mainRedHold({ home: this.#options.home, project: record.project, branch, head, ancestry: () => this.#ancestry(cwd, branch, "main"), runs: readRuns, scope: mainCiScope, tip: () => readMainTipRuns(cwd, statusRunner((dir, bin, args, opts) => this.#run(dir, bin, args, opts))) });
 		if (mainRed.fact) facts.push(mainRed.fact); // k52: a red origin/main pauses every merge path below, fix-forward excepted
 		if (mainRed.hold) return this.#write({ jobId, branch, step: "merge", next: "wait", facts: [...facts, mainRed.hold], prUrl, headSha: head, reason: `${jobId}: ${mainRed.hold}` });
 
