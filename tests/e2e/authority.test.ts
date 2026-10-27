@@ -339,11 +339,8 @@ test("authority: an ops label fixes the profile and risk, never exempts the risk
 	await s.accepted(wanting);
 
 	// A failed re-dispatch meets its own leftover branch in preflight, before any resource check: never a self-conflict.
-	// The direct recordRecoveryAttempt spends the one automatic attempt; a real death would revive the worker.
-	recordRecoveryAttempt(s.home, wanting, "crash");
-	// The kill must land on a worker whose job branch exists, or the re-dispatch meets no leftover branch.
-	const branchExists = () => { try { execFileSync("git", ["-C", s.post.registry.pathOf("demo"), "show-ref", "--verify", "--quiet", `refs/heads/${wanting}`]); return true; } catch { return false; } };
-	await waitFor(branchExists, (found) => found, { timeoutMs: 60_000, what: `${wanting}'s job branch` });
+	// A SIGKILL is "settled_without_report" once the worker's turn settled, else "crash"; both revive unless spent.
+	for (const cls of ["crash", "settled_without_report"] as const) recordRecoveryAttempt(s.home, wanting, cls);
 	await s.post.manager.get(wanting)?.worker.kill("SIGKILL");
 	await waitFor(() => s.record(wanting), (record) => record?.phase === "failed", { timeoutMs: 60_000, what: "the killed worker to be classified" });
 	await assert.rejects(s.post.dispatch({ jobId: wanting, task: "Add a line to README.md.", fetch: false }), (error: Error) => /branch_exists/.test(error.message) && !/leased by live job/.test(error.message));
