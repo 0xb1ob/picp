@@ -1,0 +1,1 @@
+- CI: `scripts/ci-as-user.sh` creates the `cpci` user by appending to `/etc/passwd`, `/etc/group` and `/etc/shadow` instead of calling `useradd`, which still stalled "Install dependencies" for 80-100 s on some runners after PR #664's `-l`. Migration: none.

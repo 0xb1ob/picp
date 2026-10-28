@@ -1,0 +1,1 @@
+- Dagger (v1.0.0-beta.21, local and optional): `dagger.toml` and `.dagger/modules/picp-dev/` run the CI `checks` job plus `build:viewer` as cached `dagger check` checks and one test shard via `dagger api call test-shard --shard=N` (N in 1..8; docs/development.md "Dagger (local, optional)"). `.github/workflows/ci.yml` is unchanged; no Dagger Cloud. Migration: none.

@@ -15,7 +15,17 @@ if [ "${1:-}" = --cp-env ]; then
   rm -f "$2"; shift 2
 fi
 user=cpci
-id "$user" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash "$user"
+if ! id "$user" >/dev/null 2>&1; then
+  # No useradd: it stalled ~80-100 s on some hosted runners for an unknown reason; append the entries directly.
+  start=$SECONDS
+  id=1002
+  while getent passwd "$id" >/dev/null || getent group "$id" >/dev/null; do id=$((id + 1)); done
+  printf '%s:x:%s:\n' "$user" "$id" >> /etc/group
+  printf '%s:x:%s:%s::/home/%s:/bin/bash\n' "$user" "$id" "$id" "$user" >> /etc/passwd
+  printf '%s:!:19000:0:99999:7:::\n' "$user" >> /etc/shadow
+  mkdir -p "/home/$user" && chown "$user:$user" "/home/$user"
+  [ "${GITHUB_ACTIONS:-}" = true ] && echo "ci-as-user: user setup took $((SECONDS - start)) s" >&2 || true
+fi
 sock=/var/run/docker.sock
 if [ -S "$sock" ] && [ "$(stat -c %g "$sock")" != 0 ]; then
   gid=$(stat -c %g "$sock")
