@@ -41,3 +41,34 @@ test("main CI watch: a non-GitHub project is skipped once, a GitHub project stil
 		assert.ok(stderr().includes(`lab: ${DISABLED}`), "the line names the project");
 	});
 });
+
+test("held-PR, foreign-PR and merge-ask CI readers skip a non-GitHub project, a GitHub project in the same tick is read", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const s = await startStack(t, { github: true });
+	// The reported shape: GitHub holds a stale copy (clone_url), the clone's origin moved to a self-hosted GitLab.
+	await s.project("stale", { cloneUrl: "https://github.com/example/stale" });
+	git(s.post.registry.pathOf("stale"), "remote", "set-url", "origin", "https://gitlab.invalid/stakefish/stale.git");
+	const held = await s.seed("held PR on a non-GitHub project", { project: "stale", prUrl: "https://github.com/example/stale/pull/41" });
+	const github = await s.seed("held PR on GitHub", { prUrl: "https://github.com/example/demo/pull/42" });
+	const calls = (needle: string) => s.ghCalls().filter((call) => call.includes(needle)).length;
+	const tick = await s.post.ciTick();
+	assert.ok(tick.checked.includes(github.jobId), "the GitHub held PR is still read");
+	assert.ok(calls("pulls/42") > 0, "gh is asked about the GitHub PR");
+	assert.ok(!tick.checked.includes(held.jobId) && !tick.skipped.includes(held.jobId), "the non-GitHub held PR is not watched");
+	assert.equal(calls("pulls/41"), 0, "gh is never asked about the non-GitHub held PR");
+	assert.deepEqual(tick.errors.filter((error) => error.job_id === held.jobId), [], "no failure to wake on");
+	assert.deepEqual(tick.observations.filter((fact) => fact.job_id === held.jobId), [], "no CI fact to wake on");
+	const create = (project: string, ref: string) => s.post.ledger().create({ title: `foreign ${ref}`, project, delivery: "local", kind: "research", externalRef: ref, labels: ["schedule:sch-e2e"] });
+	const foreignStale = await create("stale", "https://github.com/example/stale/pull/51");
+	const foreignDemo = await create("demo", "https://github.com/example/demo/pull/52");
+	const foreign = await s.post.foreignCiTick();
+	assert.ok(foreign.checked.includes(foreignDemo.id), "the GitHub foreign PR is still read");
+	assert.ok(calls("pulls/52") > 0, "gh is asked about the GitHub foreign PR");
+	assert.ok(!foreign.checked.includes(foreignStale.id), "the non-GitHub foreign PR is not selected");
+	assert.equal(calls("pulls/51"), 0, "gh is never asked about the non-GitHub foreign PR");
+	assert.deepEqual(foreign.errors.filter((error) => error.job_id === foreignStale.id), []);
+	const events = await s.parent("Render the requested status.", [
+		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: { width: 200, awaiting: [{ type: "approval", decision: "Merge PR #41", why: "delivery", blocks: "delivery", job_id: held.jobId }] } }] },
+		{ kind: "text", text: "Rendered." },
+	], undefined, true);
+	assert.match(JSON.stringify(events), /non-GitHub remote, no forge declared, so CI is unknown/, "the merge ask defers as unknown");
+});

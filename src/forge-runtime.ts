@@ -73,9 +73,10 @@ export function isGitlabJob(record: WatchableRecord | undefined): boolean {
 	return parseChangeRequestUrl(record ? (prReceiptOf(record)?.url ?? "") : "")?.kind === "gitlab";
 }
 
-/** v1 reads no GitLab CI: why a GitLab job's merge ask stays deferred as unknown — never "no CI configured", never green. */
-export function gitlabCiUnsupported(record: WatchableRecord | undefined): string | undefined {
-	return isGitlabJob(record) ? "GitLab CI is not read in v1, so CI is unknown; merge the MR on GitLab, and its observed merge withdraws this ask" : undefined;
+/** Why a job's merge ask stays deferred as unknown with no gh query: a GitLab MR in v1, or a non-GitHub project with no forge. */
+export function gitlabCiUnsupported(home: string, record: WatchableRecord | undefined): string | undefined {
+	if (isGitlabJob(record)) return "GitLab CI is not read in v1, so CI is unknown; merge the MR on GitLab, and its observed merge withdraws this ask";
+	return record && ghCiUnwatched(home, record.project) ? "CI watch disabled: non-GitHub remote, no forge declared, so CI is unknown; declare it with cp_project forge" : undefined;
 }
 
 const unwatchedLogged = new Set<string>();

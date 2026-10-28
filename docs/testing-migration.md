@@ -371,7 +371,7 @@ Test files added after the baseline, with the PR that owns them.
 | tests/e2e/mandate-continuity.test.ts | cp-iojy (https://github.com/0xb1ob/picp/pull/504) | Original admission, authenticated confirmation, shared-root successors and PASS-bound handoff |
 | tests/e2e/review-policy-escalation.test.ts | cp-fin-promote-haql (https://github.com/0xb1ob/picp/pull/603) | Policy review escalate surfaces one escalation; an operator-quote cp_decide clears that head only, a push voids it |
 | tests/e2e/validated-reads.test.ts | cp-lag-f2-zic7 (https://github.com/0xb1ob/picp/pull/602) | F2 perf: unchanged schedule-run and mandate text is validated once; invalid or changed text never skips validation |
-| tests/e2e/ci-watch-nongithub.test.ts | cp-ci-watch-nongithub-jt2p (https://github.com/0xb1ob/picp/pull/635) | gh CI readers skip a non-GitHub project with no forge (one log line, no wake); GitHub main red and read failures still wake |
+| tests/e2e/ci-watch-nongithub.test.ts | cp-ci-watch-nongithub-jt2p (https://github.com/0xb1ob/picp/pull/635) | main, held-PR, foreign-PR and merge-ask gh CI readers skip a non-GitHub project with no forge (one log line, no wake); GitHub projects are still read and wake |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

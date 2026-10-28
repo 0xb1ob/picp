@@ -811,7 +811,7 @@ export class CommandPost {
 			head: async (branch, jobId) =>
 				gitRemoteHead({ cwd: dirFor(jobId), fallback: (id) => this.reportedHeadSha(id) })(branch, jobId),
 			runs: async (_branch, jobId, head) => ghCiRuns({ cwd: dirFor(jobId) })(head),
-			unsupported: (jobId) => gitlabCiUnsupported(this.fleet.get(jobId) as WatchableRecord | undefined),
+			unsupported: (jobId) => gitlabCiUnsupported(this.home, this.fleet.get(jobId) as WatchableRecord | undefined),
 			// cp-no-ci-repo-derived: asked only when the branch has no runs at all, and
 			// only ever able to *unblock* a row — an unreadable answer defers exactly as
 			// zero runs always did. Without it a project with no CI defers its ship row

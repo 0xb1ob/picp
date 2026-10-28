@@ -6,7 +6,7 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
-- Fix: the main-CI watch, the held-PR CI watch and the foreign-PR CI watch no longer ask `gh` about a project whose origin is on a non-github.com host with no `cp_project forge` declared; it is skipped, logged once per project per process ("CI watch disabled: non-GitHub remote, no forge declared"), never a per-tick failure wake. GitHub projects keep every wake. Migration: none.
+- Fix: the main-CI watch, the held-PR CI watch, the foreign-PR CI watch and the merge-ask CI gate no longer ask `gh` about a project whose origin is on a non-github.com host with no `cp_project forge` declared; it is skipped (a merge ask defers as CI unknown), logged once per project per process ("CI watch disabled: non-GitHub remote, no forge declared"), never a per-tick failure wake. GitHub projects keep every wake. Migration: none.
 
 - A complete `cp_review` escalate/policy below the cap no longer sends `cp_integrate` back to `review`: it raises one `conflicting_acceptance` escalation and surfaces; an operator-quote `cp_decide` approving that `es-…` id clears that head only (a push voids it; CI, repo permission and final_fix unchanged). Migration: none.
 
