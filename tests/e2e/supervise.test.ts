@@ -85,10 +85,13 @@ test("P14-supervise: attach-first parent supervisor — model choice, stop and d
 
 	// data/parent.json alone (no env, no saved model) is a model: the supervisor starts a parent instead of exiting 78.
 	const filed = home(t);
-	filed.put(`${LAYOUT.data}/parent.json`, { model: "file/m" });
+	filed.put(`${LAYOUT.data}/parent.json`, { model: "file/m", thinking: "high" });
 	const fromFile = supervisor(t, filed.h);
 	await until("the file-model start", () => fromFile.saw("started parent") > 0, fromFile.log);
 	assert.match(fromFile.log(), /started parent pid \d+ \(file\/m\)/, "a data/parent.json model avoids exit 78");
+	// Its `thinking` becomes `--thinking` right after the model (dashboard Settings, no explicit start level).
+	const filedArgv = JSON.parse(readFileSync(filed.argv, "utf8").trim().split("\n").at(-1)!) as string[];
+	assert.deepEqual(filedArgv.slice(filedArgv.indexOf("--model"), filedArgv.indexOf("--model") + 4), ["--model", "file/m", "--thinking", "high"]);
 	// data/parent.json's model beats CP_PARENT_MODEL, never as modelExplicit: the file model reaches the parent.
 	const both = home(t);
 	both.put(`${LAYOUT.data}/parent.json`, { model: "file/m" });
@@ -96,6 +99,7 @@ test("P14-supervise: attach-first parent supervisor — model choice, stop and d
 	await until("the file-over-env start", () => fileWins.saw("started parent") > 0, fileWins.log);
 	assert.match(fileWins.log(), /started parent pid \d+ \(file\/m\)/);
 	assert.match(readFileSync(both.argv, "utf8").trim().split("\n").at(-1)!, /file\/m/, "never modelExplicit");
+	assert.doesNotMatch(readFileSync(both.argv, "utf8").trim().split("\n").at(-1)!, /--thinking/, "no data/parent.json thinking: no flag, as before");
 
 	// The saved model is the fallback; a second supervisor attaches to the running parent and adds no generation.
 	x.put(`${LAYOUT.sessions}/cp-parent-control.json`, { model: "saved/m" });

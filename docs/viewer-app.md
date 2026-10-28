@@ -493,7 +493,8 @@ a desktop header row `Rule · Model · Fallbacks, in order · Thinking`: the mon
 and a thinking select whose
 blank is the profile default; with no `routing.json`, one line "No data/routing.json: workers use each profile's own
 model." and no controls), **Parent and operator models** (`data/parent.json` / `data/operator.json` `model`, each with
-its source; empty unsets it), **Grant defaults** (the `grants.*` fields from the catalog) and **Auto-compaction**
+its source, then a Parent thinking / Operator thinking select of pi's levels for the same file's `thinking`, badged
+`from file` or `from code`; empty unsets it), **Grant defaults** (the `grants.*` fields from the catalog) and **Auto-compaction**
 (`sessions.parent_compact_at_tokens` / `sessions.operator_compact_at_tokens`, each with an "In force: N tokens, from
 <source>" line, or "Off" with the diagnostic; a number below its minimum or not whole shows the reason and blocks Save,
 since an invalid parent value disables parent auto-compaction). It reads `GET /api/settings`
