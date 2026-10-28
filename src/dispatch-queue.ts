@@ -174,7 +174,9 @@ export class DispatchQueue {
 			outcome === "started"
 				? `QUEUED DISPATCH STARTED — ${head.job_id} (${detail}), queued at ${head.queued_at}; a worker slot freed. Its envelope is the next wake-up.`
 				: `QUEUED DISPATCH DROPPED: ${detail} — ${head.job_id}, queued at ${head.queued_at}. Nothing was dispatched; cp_next decides what runs next.`;
-		this.#options.journal({ id: boundedWakeupId(`dispatch-queue:${outcome}:${head.job_id}:${head.queued_at}`), kind: "recovery", job_id: head.job_id, keys: [head.job_id], content });
+		// A job that did not start has no fleet record; keys would make its notice stale.
+		const keys = outcome === "started" ? { keys: [head.job_id] } : {};
+		this.#options.journal({ id: boundedWakeupId(`dispatch-queue:${outcome}:${head.job_id}:${head.queued_at}`), kind: "recovery", job_id: head.job_id, ...keys, content });
 	}
 
 	#owns(): boolean {

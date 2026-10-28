@@ -173,7 +173,9 @@ export class ArmedDispatches {
 				: outcome === "queued"
 					? `ARMED DISPATCH QUEUED — ${entry.job_id} (${detail}): its blockers landed but the spawn cap is full; it starts when a worker slot frees. Do not re-dispatch.`
 					: `ARMED DISPATCH DROPPED: ${detail} — ${entry.job_id}, armed at ${entry.armed_at}. Nothing was dispatched; cp_next decides what runs next.`;
-		this.#options.journal({ id: boundedWakeupId(`armed-dispatch:${outcome}:${entry.job_id}:${entry.armed_at}`), kind: "recovery", job_id: entry.job_id, keys: [entry.job_id], content });
+		// A job that did not start has no fleet record; keys would make its notice stale.
+		const keys = outcome === "started" ? { keys: [entry.job_id] } : {};
+		this.#options.journal({ id: boundedWakeupId(`armed-dispatch:${outcome}:${entry.job_id}:${entry.armed_at}`), kind: "recovery", job_id: entry.job_id, ...keys, content });
 	}
 
 	#owns(): boolean {
