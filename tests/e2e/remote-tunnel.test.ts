@@ -7,7 +7,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer as httpServer } from "node:http";
 import { connect, createServer, type Server } from "node:net";
-import { dirname, join } from "node:path";
+import { dirname, join, relative as relativePath } from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { initPush } from "../../src/push/keys.ts";
@@ -159,6 +159,7 @@ test("P12b-lifecycle: cp-daemon runs the quick, then the named cloudflared for c
 	assert.equal(first.code, 1, "up, but no terminal for the pairing link");
 	assert.equal(first.stdout, `${QUICK}\n`, "stdout is the origin alone");
 	assert.match(first.stderr, new RegExp(`cloudflared 2026\\.10\\.0 \\(path: ${s.fake}/cloudflared\\)`));
+	assert.doesNotMatch(first.stderr, /downloading cloudflared/, "a compatible cloudflared on PATH: nothing is downloaded");
 	assert.match(first.stderr, /quick tunnel up \(generation 1\)\. Its hostname changes whenever cloudflared restarts/);
 	assert.match(first.stderr, /pairing display refused: no controlling terminal \(\/dev\/tty: ENXIO\); run cp-tunnel pair from an interactive terminal/);
 	assert.deepEqual(s.config(), { schema_version: 1, enabled: true, mode: "quick", port: s.remotePort, binary: `${s.fake}/cloudflared`, revision: 1 });
@@ -670,5 +671,12 @@ test("P12b-download: with no usable cloudflared the pinned download follows only
 		assert.match(run.stderr, why, redirect);
 		assert.equal(cf.state.downloads.length, { http: 1, loop: 6, missing: 1 }[redirect], `${redirect}: nothing past a refused hop`);
 	}
+	// A compatible stand-in reachable only through a relative PATH entry is never probed: the download runs instead.
+	const rel = join(s.home, "bin-rel");
+	mkdirSync(rel);
+	writeFileSync(join(rel, "cloudflared"), CLOUDFLARED, { mode: 0o755 });
+	cf.state.downloads.length = 0;
+	const relative = await s.cli("cp-tunnel", ["up"], { env: { ...cf.env, PATH: `${relativePath(process.cwd(), rel)}:${s.fake}` } });
+	assert.deepEqual([relative.code, cf.state.downloads.length, existsSync(join(rel, "calls"))], [1, 1, false], relative.stderr);
 	assert.deepEqual([s.config(), existsSync(join(s.paths.dataDir, "tunnel", "token")), existsSync(join(dirname(s.paths.dataDir), "bin", "cloudflared"))], [undefined, false, false], "nothing published or written");
 });

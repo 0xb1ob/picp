@@ -83,6 +83,13 @@ test("P14-supervise: attach-first parent supervisor — model choice, stop and d
 	assert.match(none.log(), /no parent model \(no CP_PARENT_MODEL, no data\/parent\.json model, no saved model\).*not restarting/);
 	assert.equal(existsSync(x.argv), false, "no parent was started");
 
+	// data/parent.json alone (no env, no saved model) is a model: the supervisor starts a parent instead of exiting 78.
+	const filed = home(t);
+	filed.put(`${LAYOUT.data}/parent.json`, { model: "file/m" });
+	const fromFile = supervisor(t, filed.h);
+	await until("the file-model start", () => fromFile.saw("started parent") > 0, fromFile.log);
+	assert.match(fromFile.log(), /started parent pid \d+ \(file\/m\)/, "a data/parent.json model avoids exit 78");
+
 	// The saved model is the fallback; a second supervisor attaches to the running parent and adds no generation.
 	x.put(`${LAYOUT.sessions}/cp-parent-control.json`, { model: "saved/m" });
 	const s1 = supervisor(t, x.h);

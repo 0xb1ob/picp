@@ -423,7 +423,7 @@ test("P13 dashboard schedule control: a live parent claims each journaled reques
 	writeFileSync(controlConfigFile(h.stateDir), '{"enabled": true}');
 	const removed = request("remove", id);
 	assert.deepEqual([(await answered(removed))?.state, state(removed)?.reason, h.schedules().map((entry) => entry.id)], ["done", `removed ${id}`, [dormant]]);
-	assert.ok(parent.stderr().includes(`schedule control ${removed} remove ${id}: done`));
+	await waitFor(() => parent.stderr(), (text) => text.includes(`schedule control ${removed} remove ${id}: done`), { what: "the control done stderr line" });
 	assert.equal((await h.ledger.list({ labels: [`schedule:${id}`], all: true })).length, 1, "one run now, one job");
 	const status = await (await viewer(t, h.home, h.stateDir))("/api/schedules/control");
 	assert.equal(status.status, 200, JSON.stringify(status.body));
@@ -1213,10 +1213,10 @@ async function selfReviewHome(t: TestContext) {
 	const add = schedule("add", { action: "add", name: "self-review", project: "demo", manual: true, title: "Self-review", kind: "research", delivery: "local", skill: "cp-self-review", limits: { parallelism: 2, child_jobs: 8 }, operator_quote: "Add the self-review schedule." });
 	const runNow = (callId: string, parallelism?: number) => schedule(callId, () => ({ action: "run_now", id: h.idOf("self-review"), overrides: { model: reader, thinking: "off", ...(parallelism ? { parallelism } : {}) } }));
 	const admitted = () => waitFor(roleIds, (found) => Object.keys(found).length === 7, { timeoutMs: 30_000, what: "seven roles admitted" });
-	/** Waits for the run to close; on a timeout, names S1's fleet phase, failure and ledger status. */
+	/** Waits for the run to close; on a timeout, names every role's fleet phase and ledger status, and S1's failure. */
 	const closed = (what: string, sample: () => void = () => {}) => waitFor(() => run(), (entry) => { sample(); return entry.phase === "closed"; }, { timeoutMs: 120_000, what }).catch((error: Error) => {
-		const s1 = roleIds().S1!;
-		throw new Error(`${error.message.slice(0, 300)}; S1 ${JSON.stringify({ fleet: fleetOf(s1)?.phase, failure: fleetOf(s1)?.failure, job: h.ledger.read().jobs.find((job) => job.id === s1)?.status })}`);
+		const jobs = h.ledger.read().jobs, state = (id: string) => `${fleetOf(id)?.phase ?? "no-fleet"}/${jobs.find((job) => job.id === id)?.status}`;
+		throw new Error(`${error.message.slice(0, 300)}; ${Object.entries(roleIds()).map(([role, id]) => `${role} ${state(id)}`).join(", ")}; S1 failure ${JSON.stringify(fleetOf(roleIds().S1!)?.failure)}`);
 	});
 	return { h, run, roleIds, fleetOf, add, runNow, admitted, closed };
 }

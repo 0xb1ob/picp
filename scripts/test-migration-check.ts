@@ -199,11 +199,8 @@ export function citedAsserts(claims: Iterable<string>, parse: (file: string) => 
 }
 
 /**
- * Mapped rows of a deleted file, per baseline case: the e2e bodies of its rows' Scenario and `covered-by:` lines must
- * hold at least the case's assertions at deletion, unless a row says `Narrowed:`. Rows are keyed by cells joined with
- * ` | `: a short case whose rows are all in `known` only warns, one with a new or edited row fails; a known row
- * citing no `covered-by:` line (legacy format) is not counted. A case whose title or pre-deletion file cannot be
- * read only warns.
+ * Per deleted case, cited e2e bodies must hold its assertions at deletion unless a row says `Narrowed:`. Only warns when
+ * every row is `known` (rows citing no `covered-by:` count nothing) or its title or pre-deletion file cannot be read.
  */
 export function claimCountFindings(
 	rows: readonly string[][],
