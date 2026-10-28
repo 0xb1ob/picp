@@ -94,7 +94,7 @@ curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=1.0.0-beta.21
 dagger generate                          # once per clone: writes the gitignored SDK client
 dagger check                             # every static check, before each push
 dagger check --check=typecheck           # rerun one check
-dagger api call test-shard --shard=1     # one CI shard (1..4); `node scripts/test-shards.ts files 1` lists it
+dagger api call test-shard --shard=1     # one CI shard (1..8); `node scripts/test-shards.ts files 1` lists it
 ```
 
 Run at most one shard at a time, and only when the 1-minute load is under 6. `migration-ledger` reads
@@ -127,6 +127,15 @@ treehouse is not on `PATH`. Off CI a missing treehouse still only skips. The
 live suites stay skipped (`CP_LIVE_TESTS` is empty). After the suite, a separate
 step runs `npm run eval:check` (offline, 5-minute timeout, no `CP_EVAL_LIVE`) and
 fails when `evals/results/contract.json` is stale.
+
+## Changelog fragments
+
+A PR adds its note as its own file, `changelog.d/<branch>.md`, holding one bullet that starts with `- `. It never
+edits `CHANGELOG.md`, so sibling PRs stop conflicting on it. No check requires a `CHANGELOG.md` edit.
+
+At release (by hand, by the maintainer) run `npm run changelog:fold`: it inserts every fragment, in filename order,
+at the top of `## Unreleased` and deletes the fragments. It never commits; review and commit the result yourself.
+A missing or empty `changelog.d/` is a no-op. A PR opened before this scheme keeps its `CHANGELOG.md` edit until merged.
 
 ## Several homes on one machine
 

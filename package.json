@@ -40,6 +40,7 @@
 		"eval:contract": "node scripts/eval.ts --out evals/results/contract.json",
 		"eval:check": "node scripts/eval.ts --out evals/results/contract.json --check",
 		"check:retired-integration": "node scripts/check-retired-integration.ts",
+		"changelog:fold": "node scripts/changelog-fold.ts",
 		"e2e:phase1": "node --test --test-timeout=300000 --test-force-exit tests/e2e/phase1.test.ts",
 		"e2e:phase2": "node --test --test-timeout=300000 --test-force-exit tests/e2e/phase2.test.ts",
 		"smoke:live": "node --test --test-timeout=300000 --test-force-exit tests/e2e/live-smoke.test.ts",

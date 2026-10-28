@@ -170,11 +170,13 @@ const initials = (who: string) => who.replace(/[^A-Za-z]/g,"").slice(0,2).toUppe
 function Bubble({entry:e,first,you}: {entry:SessionEntry;first:boolean;you:boolean}) {
  // In the operator transcript the person is "You" and the session they talk to is "Operator" (frame 06); other views keep the recorded name.
  const own = isOwn(e), who = you ? (own ? "You" : e.who === "Assistant" ? "Operator" : e.who) : e.who;
+ // Issue 589: a multi-project reply renders one section per project; the toggle shows the reply unsplit.
+ const [original, setOriginal] = useState(false), split = e.segments && !original ? e.segments : undefined;
  // A group names its author once: later own bubbles keep only their time (the "You" name is screen-reader text).
  const meta = <div class="session-who">{own ? (you || first) && <span class={you ? "session-who-name" : undefined}>{who}</span> : <><span class={`session-avatar${who === "Operator" ? " session-avatar-bot" : ""}`} aria-hidden="true">{initials(who)}</span><span>{who}</span></>}{e.project && <span class="session-project">{e.project}</span>}{e.tag && <span>{e.tag}</span>}{dayKey(e.at) && <time class="session-time" dateTime={e.at}>{time(e.at)}</time>}</div>;
  return <article class={`session-message session-say session-bubble ${own ? "session-own" : "session-other"}${first ? "" : " session-grouped"}`}>
   {!own && first && meta}
-  <div class="session-body"><Markdown text={e.text} links={e.links}/>{e.images?.length ? <TranscriptImages ids={e.images}/> : null}{e.files?.length ? <TranscriptFiles ids={e.files} metadata={e.file_metadata}/> : null}{e.skills?.length ? <TranscriptSkills names={e.skills}/> : null}{e.send_id && <code class="session-send">send {e.send_id}</code>}{e.dashboard_id && <code class="session-send">dashboard {e.dashboard_id}{e.ask_id ? ` · ${e.ask_id}` : ""}</code>}</div>
+  <div class="session-body">{split ? split.map((s,i)=><section key={i} class="session-segment">{s.projects.length > 0 && <span class="session-project">{s.projects.join(", ")}</span>}<Markdown text={s.text} links={e.links}/></section>) : <Markdown text={e.text} links={e.links}/>}{e.segments && <button type="button" class="session-original" aria-pressed={original} onClick={()=>setOriginal(!original)}>{original ? "Split by project" : "Show original"}</button>}{e.images?.length ? <TranscriptImages ids={e.images}/> : null}{e.files?.length ? <TranscriptFiles ids={e.files} metadata={e.file_metadata}/> : null}{e.skills?.length ? <TranscriptSkills names={e.skills}/> : null}{e.send_id && <code class="session-send">send {e.send_id}</code>}{e.dashboard_id && <code class="session-send">dashboard {e.dashboard_id}{e.ask_id ? ` · ${e.ask_id}` : ""}</code>}</div>
   {own && meta}
  </article>;
 }

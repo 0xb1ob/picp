@@ -90,8 +90,12 @@ test(title, { skip: !treehouseAvailable(), timeout: 120_000 }, async (t) => {
 	assert.deepEqual(armed.entries.at(-1).blockers, [jobs[0]!.id]);
 	assert.equal(provider.remaining("s28-queue-parent"), 0);
 	if (fence === "none") {
+		// The dropped head now wakes the parent (it was silently discarded before #647): script that turn.
+		const settledBefore = child.eventsOfType("agent_settled").length;
+		steps.push({ kind: "text", text: "drop noted" });
 		await setup.ledger().close(jobs[1]!.id, "dropped: superseded");
 		await waitFor(() => JSON.parse(readFileSync(join(home.path, LAYOUT.dispatchQueueFile), "utf8")).entries.length, (length) => length === 31, { timeoutMs: 35_000, what: "closed head drops while spawn cap remains full" });
+		await child.waitFor(() => child.eventsOfType("agent_settled").length > settledBefore, 60_000);
 	}
 	if (fence === "mandate") {
 		setup.mandates.issue({ projects: ["demo"], objective: "ship queued jobs", expiry: new Date(Date.now() + 3600000).toISOString().replace(/\.\d{3}Z$/, "Z"), spend_cap: { usd: 100, tokens: 1000000 }, job_cap: 100, dispatch_parallelism: 1 });

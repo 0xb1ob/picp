@@ -75,9 +75,9 @@ type Entrypoint implements ModuleEntrypoint {
         )
         .withFunction(
           function("testShard", typeDef.withKind(TypeDefKind.VOID_KIND).withOptional(true))
-            .withDescription("One CI test shard (1..4) as `node`, with the pinned treehouse on PATH. Not a check: run one at a time.")
-            .withSourceMap(sourceMap("src/index.ts", 111, 9))
-            .withArg("shard", typeDef.withKind(TypeDefKind.INTEGER_KIND), sourceMap: sourceMap("src/index.ts", 111, 19)),
+            .withDescription("One CI test shard (1..8) as `node`, with the pinned treehouse on PATH. Not a check: run one at a time.")
+            .withSourceMap(sourceMap("src/index.ts", 110, 9))
+            .withArg("shard", typeDef.withKind(TypeDefKind.INTEGER_KIND), sourceMap: sourceMap("src/index.ts", 110, 19)),
         )
         .withFunction(
           function("typecheck", typeDef.withKind(TypeDefKind.VOID_KIND).withOptional(true))

@@ -525,7 +525,7 @@ test("P20-settings-compaction: both keys with what is in force; a bad threshold 
 	const compaction = ui.section("Auto-compaction");
 	const effective = () => [...compaction.querySelectorAll(".settings-effective")].map((p) => p.textContent);
 	assert.match(compaction.querySelector(".settings-help")?.textContent ?? "", /tokens.*next compaction check/);
-	assert.deepEqual(effective(), ["In force: 200000 tokens, from code", "In force: 200000 tokens, from code"]);
+	assert.deepEqual(effective(), ["In force: 150000 tokens, from code", "In force: 200000 tokens, from code"]);
 	const parent = compaction.querySelector("#setting-sessions-parent_compact_at_tokens")!;
 	assert.ok(compaction.querySelector("#setting-sessions-operator_compact_at_tokens"));
 	const save = () => [...compaction.querySelectorAll("button")].find((b) => b.textContent === "Save")!;
@@ -535,16 +535,16 @@ test("P20-settings-compaction: both keys with what is in force; a bad threshold 
 		assert.ok(save().hasAttribute("disabled"), `Save is blocked on ${JSON.stringify(typed)}`);
 	}
 	assert.equal(ui.posts().length, 0, "a blocked Save posts nothing");
-	await ui.enter(parent, "150000");
+	await ui.enter(parent, "175000");
 	assert.equal(compaction.querySelector("[role=alert]") === null, true);
 	await ui.press(compaction, "Save");
 	assert.match((await ui.tab.find(".settings-ok")).textContent ?? "", /^Saved/);
-	assert.equal(ui.posts()[0]!.status, 200, "the real server parses and applies the body"); assert.deepEqual(ui.posts()[0]!.json.changes, { "sessions.parent_compact_at_tokens": 150000 });
-	await until(effective, (now) => now[0] === "In force: 150000 tokens, from file", "the re-read snapshot");
-	assert.deepEqual(effective(), ["In force: 150000 tokens, from file", "In force: 200000 tokens, from code"], "the re-read snapshot shows the written file");
+	assert.equal(ui.posts()[0]!.status, 200, "the real server parses and applies the body"); assert.deepEqual(ui.posts()[0]!.json.changes, { "sessions.parent_compact_at_tokens": 175000 });
+	await until(effective, (now) => now[0] === "In force: 175000 tokens, from file", "the re-read snapshot");
+	assert.deepEqual(effective(), ["In force: 175000 tokens, from file", "In force: 200000 tokens, from code"], "the re-read snapshot shows the written file");
 	await ui.press(compaction, "Restore defaults");
 	assert.deepEqual(ui.posts()[1]!.json.keys, ["sessions.parent_compact_at_tokens", "sessions.operator_compact_at_tokens"]);
-	assert.equal(await until(async () => (await ui.snapshot()).fields.find((f) => f.key === "sessions.parent_compact_at_tokens")!.value, (value) => typeof value === "number" && value !== 150000, "the restore"), 200000, "the restored default");
+	assert.equal(await until(async () => (await ui.snapshot()).fields.find((f) => f.key === "sessions.parent_compact_at_tokens")!.value, (value) => typeof value === "number" && value !== 175000, "the restore"), 150000, "the restored default");
 });
 
 test("P20-settings-readonly: no control token is read only with every control disabled; an absent routing.json is one line, no rubric controls", { timeout: 120_000 }, async (t) => {
