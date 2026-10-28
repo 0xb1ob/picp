@@ -121,7 +121,7 @@ test("P14-supervise: attach-first parent supervisor — model choice, stop and d
 	// A fresh supervisor (an update's reload, a reboot) honours the stop too: it waits and spawns nothing.
 	const s3 = supervisor(t, x.h, { CP_PARENT_MODEL: "env/m" });
 	await until("s3's stop hold", () => s3.saw(`an operator stop closed generation 1: ${POLL}`) > 0, s3.log);
-	await sleep(11_000);
+	await until("s3's first full poll", () => s3.saw("an operator stop closed generation 1: still held after one poll") > 0, s3.log, 20_000);
 	assert.equal(x.host().gen, 1, "a fresh supervisor never respawns over a stop");
 	assert.equal(s3.saw("started parent"), 0, s3.log());
 	// The operator's cp_parent start makes generation 2; every held supervisor joins it.

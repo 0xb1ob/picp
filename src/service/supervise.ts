@@ -138,6 +138,7 @@ export async function supervise(options: SuperviseOptions, ports: SupervisePorts
 /** After a host loss: reconnect, join a newer generation, wait out a drain or stop, or give up (undefined). */
 async function reattach(watched: number, ports: SupervisePorts): Promise<{ client: HostClient; gen: number } | undefined> {
 	let waitingFor: string | undefined;
+	let polls = 0;
 	let staleLogged = false;
 	for (;;) {
 		const { gen, record } = ports.current();
@@ -156,7 +157,10 @@ async function reattach(watched: number, ports: SupervisePorts): Promise<{ clien
 			ports.log(`host generation ${watched} is gone; exiting 1 so cp-daemon restarts the supervisor and it respawns the host`);
 			return undefined;
 		}
-		if (waitingFor !== hold) ports.log(`${hold}: waiting without spawning (polling every ${WAIT_POLL_MS / 1000}s for a newer generation)`);
+		if (waitingFor !== hold) {
+			ports.log(`${hold}: waiting without spawning (polling every ${WAIT_POLL_MS / 1000}s for a newer generation)`);
+			polls = 0;
+		} else if (++polls === 1) ports.log(`${hold}: still held after one poll; nothing respawned`);
 		waitingFor = hold;
 		await ports.sleep(WAIT_POLL_MS);
 	}
