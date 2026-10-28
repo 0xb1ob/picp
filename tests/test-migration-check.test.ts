@@ -120,8 +120,8 @@ function claimFixture() {
 			table("assertions", ...(note === undefined ? [] : [rows("tests/a.test.ts"), ...(ghost ? [rows("tests/ghost.test.ts")] : [])]))].join("\n") + "\n");
 	};
 	/** Commits the ledger with this row (none when undefined) and returns the commit, a `--claim-since` ref. */
-	const commitLedger = (note?: string) => {
-		ledger(note);
+	const commitLedger = (note?: string, opts: LedgerOpts = {}) => {
+		ledger(note, opts);
 		git("add", "docs");
 		git("commit", "-qm", "ledger");
 		return git("rev-parse", "HEAD");
@@ -132,7 +132,7 @@ function claimFixture() {
 		const run = spawnSync(process.execPath, [CHECKER, "--claim-since", since], { cwd: dir, encoding: "utf8" });
 		return { status: run.status, out: run.stdout + run.stderr };
 	};
-	return { check, commitLedger, git, done: () => rmSync(dir, { recursive: true, force: true }) };
+	return { check, commitLedger, git, write, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 const SHORT = "reworded; covered-by: tests/e2e/x.test.ts:4";
@@ -252,6 +252,27 @@ test("CLI: a title matching no baseline case, or a file unreadable before deleti
 		const unreadable = fixture.check(SHORT, undefined, { ghost: true });
 		assert.match(unreadable.out, /WARN tests\/ghost\.test\.ts: "case one" is not claim-counted: its pre-deletion file cannot be read/);
 		assert.doesNotMatch(unreadable.out, /FAIL tests\/ghost\.test\.ts: "case one" is not claim-counted/);
+		// Ghost has no baseline file, so the run exits 1 on its own; only its claim-count line is pinned.
+		const committed = fixture.check(SHORT, fixture.commitLedger(SHORT, { ghost: true }), { ghost: true });
+		assert.match(committed.out, /WARN tests\/ghost\.test\.ts: "case one" is not claim-counted/);
+		assert.match(committed.out, /FAIL tests\/ghost\.test\.ts: listed in the baseline but not a test file/);
+		assert.doesNotMatch(committed.out, /FAIL [^\n]*claim-counted/);
+	} finally {
+		fixture.done();
+	}
+});
+
+test("CLI: a cite to a call of a declared assert helper counts as an assert; an undeclared helper still counts 0", () => {
+	const fixture = claimFixture();
+	try {
+		const x = `test("x works", () => {\n\tassert.ok(1); assert.ok(2); expect(3);\n});\ntest("x small", () => { assert.ok(1); });\n\ntest("x last", () => {\n\tassert.ok(1); assert.ok(2);\n});\n`;
+		fixture.write("tests/e2e/x.test.ts", `${x}test("h", () => {\n\tassertEnd(a);\n\tassertEnd(b);\n\tassertEnd(c);\n});\ntest("u", () => {\n\tcheckEnd(a); checkEnd(b); checkEnd(c);\n});\n`);
+		const declared = fixture.check("covered-by: tests/e2e/x.test.ts:10");
+		assert.equal(declared.status, 0, declared.out);
+		assert.doesNotMatch(declared.out, /cites/);
+		const undeclared = fixture.check("covered-by: tests/e2e/x.test.ts:15");
+		assert.equal(undeclared.status, 1, undeclared.out);
+		assert.match(undeclared.out, /FAIL tests\/a\.test\.ts: "case one" cites 2 e2e line\(s\) holding 1 assertion\(s\) for 3 at deletion/);
 	} finally {
 		fixture.done();
 	}

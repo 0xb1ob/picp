@@ -139,9 +139,12 @@ function countDeclarations(path: string, source: string): number {
 /** One bare-`test` case: title (`<expr>` if not literal), 1-based line range and its static assertion count. */
 interface TestBody { title: string; start: number; end: number; asserts: number }
 
+/** Declared e2e helpers that wrap `assert.*`; a call to one counts as an assert line (not any `assert*` name). */
+const ASSERT_HELPERS = ["assertCall", "assertAnswer", "assertMentions", "assertEnd", "assertNoRunLink", "assertFailed"];
+
 /**
- * Bare-`test` cases and the 1-based lines of every `assert(…)`, `assert.x(…)`, `t.assert.x(…)` or `expect(…)` call;
- * a call inside a helper defined outside a case counts toward no case.
+ * Bare-`test` cases and the 1-based lines of every `assert(…)`, `assert.x(…)`, `t.assert.x(…)`, `expect(…)` or
+ * declared-helper call; a call inside a helper defined outside a case counts toward no case.
  */
 export function testBodies(path: string, source: string): { tests: TestBody[]; assertLines: Map<number, number> } {
 	const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
@@ -149,7 +152,7 @@ export function testBodies(path: string, source: string): { tests: TestBody[]; a
 	const tests: TestBody[] = [];
 	const assertLines = new Map<number, number>();
 	const isAssert = (callee: ts.Expression): boolean =>
-		(ts.isIdentifier(callee) && (callee.text === "assert" || callee.text === "expect"))
+		(ts.isIdentifier(callee) && (callee.text === "assert" || callee.text === "expect" || ASSERT_HELPERS.includes(callee.text)))
 		|| (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "assert")
 		|| (ts.isPropertyAccessExpression(callee) && ts.isPropertyAccessExpression(callee.expression) && callee.expression.name.text === "assert");
 	const visit = (node: ts.Node): number => {
@@ -177,8 +180,8 @@ export function coveredByClaims(note: string): Set<string> {
 }
 
 /**
- * Assertions behind a set of `file.ts:line` or `file.ts:first-last` cites: every cited line's innermost bare-`test` body
- * counted once, or the assert calls on the line itself when it is in no case; an unreadable file counts 0.
+ * Assertions behind a set of `file.ts:line` or `file.ts:first-last` cites: every cited line's innermost
+ * bare-`test` body counted once, or the assert calls on the line itself when it is in no case; unreadable counts 0.
  */
 export function citedAsserts(claims: Iterable<string>, parse: (file: string) => ReturnType<typeof testBodies> | undefined): number {
 	const counted = new Map<string, number>();
@@ -198,8 +201,9 @@ export function citedAsserts(claims: Iterable<string>, parse: (file: string) => 
 /**
  * Mapped rows of a deleted file, per baseline case: the e2e bodies of its rows' Scenario and `covered-by:` lines must
  * hold at least the case's assertions at deletion, unless a row says `Narrowed:`. Rows are keyed by cells joined with
- * ` | `: a short case whose rows are all in `known` only warns, one with a new or edited row fails; a known row citing
- * no `covered-by:` line (legacy format) is not counted. A case whose title or pre-deletion file cannot be read only warns.
+ * ` | `: a short case whose rows are all in `known` only warns, one with a new or edited row fails; a known row
+ * citing no `covered-by:` line (legacy format) is not counted. A case whose title or pre-deletion file cannot be
+ * read only warns.
  */
 export function claimCountFindings(
 	rows: readonly string[][],
