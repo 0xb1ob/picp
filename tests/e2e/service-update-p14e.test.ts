@@ -525,6 +525,20 @@ test("P14e-update-nohost: no parent host running", { timeout: 300_000 }, async (
 	i.state({ phase: "verifying", from: iFrom, to: iTo, lock: false });
 	const recovered = await i.run();
 	assert.deepEqual([recovered?.last_result, i.repo.head(), i.calls()], ["rolled_back", iFrom, ["daemon hold", "daemon reload", "daemon health"]], last(i));
+
+	// The same window with a truncated stop marker: the host-record read threw out of the run, which recorded nothing.
+	const u = await bench(t);
+	const uHost = parentHostPaths(u.home, "multi");
+	writeFileSync(uHost.record(1), JSON.stringify({ ...JSON.parse(readFileSync(uHost.record(1), "utf8")), pid: spawnSync(process.execPath, ["-e", ""]).pid, socket: join(u.sm, "gone.sock") }));
+	writeFileSync(uHost.stopped, "{\"gen\":");
+	const uFrom = u.repo.head();
+	const uTo = advanceBase(u.repo, "u.txt", "u\n");
+	u.repo.git("fetch", "--quiet", "origin");
+	u.repo.git("merge", "--ff-only", "--quiet", uTo);
+	u.state({ phase: "verifying", from: uFrom, to: uTo, lock: false });
+	const unreadable = await u.run();
+	assert.equal(unreadable?.last_result, "rollback_failed", last(u));
+	assert.match(unreadable?.detail ?? "", /after the rollback: the parent host record could not be read: parent host stop marker unreadable/);
 });
 
 test("P14e-update-converge: a newer tip or a drain timeout never restarts the busy clock", { timeout: 300_000 }, async (t) => {

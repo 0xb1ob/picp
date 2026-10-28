@@ -302,9 +302,9 @@ test("S26: cp_parent drain freeze runs /cp-drain 120 freeze in the real parent: 
 	await turn("Stop the parent.");
 });
 
-test("S26: a freeze drain that timed out no longer suppresses the nudge of a worker settling after it", { timeout: 120_000 }, async (t) => {
-	// Review 1 of PR 669: freezing() read any freeze record on disk, so a timed-out (or drained) freeze record left
-	// behind kept suppressing every later report nudge. Only a freeze still `draining` skips the nudge.
+for (const outcome of ["timeout", "drained"] as const) test(`S26: a ${outcome} freeze drain ${outcome === "timeout" ? "nudges" : "never nudges"} a worker settling after it`, { timeout: 120_000 }, async (t) => {
+	// Review 1 of PR 669: a `draining` or `drained` freeze suppresses nudges (workers stay frozen until the restart,
+	// and start-up recovery removes the record); only a timed-out one, whose survivors ran past it, nudges.
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "demo\n" } });
 	const provider = await MockProvider.start();
@@ -328,7 +328,10 @@ test("S26: a freeze drain that timed out no longer suppresses the nudge of a wor
 	await waitFor(() => post.manager.quiesce().busy, (busy) => busy.length === 1, { timeoutMs: 30_000, what: "the implementer mid-turn" });
 	assert.equal(post.drain.start(0, { reason: "freeze" }).state, "draining");
 	await waitFor(() => post.drain.check()?.state, (state) => state === "timeout", { timeoutMs: 10_000, what: "the freeze drain times out" });
+	// The drained record a freeze leaves while its workers stay frozen until the restart.
+	if (outcome === "drained") writeFileSync(join(home.path, LAYOUT.state, "drain.json"), JSON.stringify({ ...readDrain(home.path), state: "drained" }));
 	writeFileSync(gate, "open\n");
-	await waitFor(() => readRunEvents(home.path, job.id).filter((event) => event.type === "report_nudged"), (rows) => rows.length > 0, { timeoutMs: 60_000, what: `${job.id} nudged after the timeout` });
-	assert.equal(readDrain(home.path)?.state, "timeout", "the timed-out freeze record is still on disk");
+	const settled = await waitFor(() => readRunEvents(home.path, job.id).filter((event) => ["settled_without_report", "report_nudged"].includes(event.type)), (rows) => rows.length > 0, { timeoutMs: 60_000, what: `${job.id} settles` });
+	assert.deepEqual(settled.map((event) => event.type), [outcome === "timeout" ? "report_nudged" : "settled_without_report"]);
+	assert.equal(readDrain(home.path)?.state, outcome, `the ${outcome} freeze record is still on disk`);
 });

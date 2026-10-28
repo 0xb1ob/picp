@@ -134,8 +134,8 @@ export function drainArgs(timeoutS: number, cause?: DrainCause): string {
 }
 
 /**
- * True while a freeze drain is draining or drained (the tick can mark it drained before a settle is classified);
- * timed out (survivors ran past it) or unreadable reads false, so a settle nudges.
+ * A `draining` or `drained` freeze suppresses nudges: its workers stay frozen until the restart, and start-up
+ * recovery removes the record. Only a `timeout` one (survivors ran past it), or an unreadable record, nudges.
  */
 export function freezing(home: string): boolean {
 	try {

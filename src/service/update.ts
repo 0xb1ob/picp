@@ -263,12 +263,19 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 		}
 		return ports.daemon.hold();
 	};
-	const verifyUnits = async (): Promise<VerifyResult> => {
-		if (!ports.noHost()) return ports.verify(VERIFY_MS);
+	/** A throwing host-record read is a failed verify that names it: the run records a result, never throws. */
+	const verifyUnits = async (target: string): Promise<VerifyResult> => {
+		let noHost: boolean;
+		try {
+			noHost = ports.noHost();
+		} catch (error) {
+			return `the parent host record could not be read: ${(error as Error).message}`;
+		}
+		if (!noHost) return ports.verify(VERIFY_MS);
 		const deadline = ports.now().getTime() + VERIFY_MS;
 		for (;;) {
 			const down = await ports.viewerDown();
-			if (!down) return undefined;
+			if (!down) return { note: `the parent was not running: viewer verified only, the next cp_parent start runs ${short(target)}` };
 			if (ports.now().getTime() >= deadline) return `not healthy within ${VERIFY_MS / 1000}s: viewer: ${down}`;
 			await ports.sleep(2_000);
 		}
@@ -322,7 +329,7 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 		const reset = git("reset", "--quiet", "--keep", from);
 		if (reset.status !== 0) return finish("rollback_failed", `${why}; git reset --keep ${short(from)} failed: ${reset.stderr.trim()}`, patch);
 		const failed = (lock ? npmCi() : undefined) ?? (await restartUnits());
-		const verified = failed ? undefined : await verifyUnits();
+		const verified = failed ? undefined : await verifyUnits(from);
 		const broken = failed ?? (typeof verified === "string" ? verified : undefined);
 		if (broken) return finish("rollback_failed", `${why}; after the rollback: ${broken}`, patch);
 		return finish("rolled_back", `${why}; back at ${short(from)}; ${short(to)} is never retried${typeof verified === "object" ? `; ${verified.note}` : ""}`, { ...patch, bad_sha: to });
@@ -429,10 +436,9 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 	const broken = (lock ? npmCi() : undefined) ?? (await restartUnits());
 	if (broken) return rollback(from, to, lock, broken);
 	save({ phase: "verifying" });
-	const verified = await verifyUnits();
+	const verified = await verifyUnits(to);
 	if (typeof verified === "string") return rollback(from, to, lock, verified);
-	const noParent = ports.noHost() ? `; the parent was not running: viewer verified only, the next cp_parent start runs ${short(to)}` : "";
-	return finish("updated", `${short(from)} → ${short(to)}${lock ? " (npm ci)" : ""}${verified ? `; ${verified.note}` : ""}${noParent}`, { from, to, updated_at: at });
+	return finish("updated", `${short(from)} → ${short(to)}${lock ? " (npm ci)" : ""}${verified ? `; ${verified.note}` : ""}`, { from, to, updated_at: at });
 }
 
 /** `promise` settled within `ms`: its value or its error; undefined on timeout. */
