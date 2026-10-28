@@ -27,7 +27,6 @@ import { useDevices } from "./use-devices.ts";
 import { Devices } from "./components/Devices.tsx";
 import { PushControl } from "./components/PushControl.tsx";
 import { useAnswersControl } from "./use-answers-control.ts";
-import { useThreads } from "./use-threads.ts";
 export function DetailScreen({current:asked, workers}: {current:Route; workers?: OverviewResponse["in_flight"] | undefined}) {
  // A defaulted Full transcript the server refuses (403) falls back to Decisions, silently (routes.ts).
  // `refused` never outlives its route: DetailScreen is keyed on `${screen}?${query}`, so a route change remounts it.
@@ -44,12 +43,11 @@ export function DetailScreen({current:asked, workers}: {current:Route; workers?:
  const restarting=shell.control?.restarting ?? null;
  const own=useControl(transcript,`${data?.generated_at ?? ""}|${restarting?.state ?? ""}`,data?.entries ?? [],undefined,true,data?.truncated === true);
  const control=own && restarting ? {...own,restarting} : own;
- const threads=useThreads(transcript,data?.generated_at ?? null);
  if (current.defaulted && resource.code === 403) return <p role="status">Loading</p>;
  const missing = resource.data ? null : notFoundFor(current, resource.code, workers);
  if (missing) return <NotFound {...missing}/>;
  const draft=sessions ? query.get("draft") ?? undefined : undefined;
- return <>{resource.error && <p role="alert" class="overview-error">{resource.error}</p>}{resource.data ? sessions ? <Sessions data={resource.data as SessionsResponse} control={control} draft={draft} threads={threads}/> : <Files data={resource.data as FilesResponse}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}</>;
+ return <>{resource.error && <p role="alert" class="overview-error">{resource.error}</p>}{resource.data ? sessions ? <Sessions data={resource.data as SessionsResponse} control={control} draft={draft}/> : <Files data={resource.data as FilesResponse}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}</>;
 }
 export function App() {
  const current = useRoute();

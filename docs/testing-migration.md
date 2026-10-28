@@ -270,7 +270,6 @@ case is cited as `covered-by` for a deleted baseline file, so none is a coverage
 | `tests/pi-hashline-compaction.test.ts` | manual and threshold compaction, 4 cases | pi-hashline-edit-pro is not installed on CI (host-integration exception above) |
 | `tests/web-access.test.ts` | the installed pi-web-access lazy-loader case | pi-web-access is not installed on CI |
 | `tests/worker-packages-retained.test.ts` | the really-installed optional package case | neither optional package is installed on CI |
-| `tests/viewer-threads-ui.test.ts` | the sidebar-rail real-browser layout case | playwright is not installed on CI (`CP_PLAYWRIGHT`) |
 
 ## Scenarios
 

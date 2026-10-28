@@ -844,11 +844,11 @@ test("P17-control-queue: busy sends wait editable until handed over; the queue s
 	const journal = controlJournalFile(s.stateDir);
 	const sends = async () => (await s.get("/api/operator/control")).body.sends as Json[];
 	const client_id = "dc-20261004140000-00000009";
-	const accepted = await s.send(s.token, { kind: "message", text: "keep the queued text", thread: "layout", client_id });
+	const accepted = await s.send(s.token, { kind: "message", text: "keep the queued text", client_id });
 	assert.equal(accepted.body.id, client_id, "the transcript marker can match before the POST acknowledgement");
 	assert.equal((await s.send(s.token, { kind: "message", text: "duplicate", client_id })).status, 409);
 	assert.equal((await s.send(s.token, { kind: "message", text: "invalid", client_id: "not-an-id" })).status, 400);
-	assert.deepEqual((await sends()).map((x) => [x.id, x.body]), [[client_id, { kind: "message", text: "keep the queued text", thread: "layout" }]]);
+	assert.deepEqual((await sends()).map((x) => [x.id, x.body]), [[client_id, { kind: "message", text: "keep the queued text" }]]);
 
 	busy = true;
 	const first = await s.send(s.token, { kind: "message", text: "first draft" });
@@ -920,7 +920,8 @@ test("P17-control-queue: busy sends wait editable until handed over; the queue s
 	rmSync(controlRecordFile(s.stateDir), { force: true });
 	const recovered = (await s.get("/api/operator/control")).body as Json;
 	assert.deepEqual(recovered.recent, []);
-	assert.deepEqual(pick(row(recovered.sends, attached), ["state", "reason", "body"]), { state: "failed", reason: "late rejection", body: { kind: "message", text: "attached", deliver: "followUp", images: [image], thread: "images" } });
+	// Legacy (#588): the journal line's `thread` key is ignored, never projected.
+	assert.deepEqual(pick(row(recovered.sends, attached), ["state", "reason", "body"]), { state: "failed", reason: "late rejection", body: { kind: "message", text: "attached", deliver: "followUp", images: [image] } });
 	assert.equal(row(recovered.sends, offline)?.state, "failed", "dropped held sends remain visible failures");
 	assert.equal(recovered.sends_error, null);
 	appendFileSync(journal, '{"torn":');

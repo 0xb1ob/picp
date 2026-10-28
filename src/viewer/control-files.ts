@@ -11,8 +11,6 @@
  *   state/schedule-control.jsonl    0600: Schedules page requests (viewer request lines) and the parent's
  *                                   claimed/outcome lines (cp-hhuf P6)
  *   state/operator/answers.jsonl    0600: answers the operator asked for and schedule result cards (posted), viewer acks
- *   state/operator/threads.jsonl    0600: operator threads (cp-xmw2): tags and dc-/ask-/ans-/job bindings, never text
- *                                   (bridge and viewer open/bind lines, viewer done lines)
  *
  * Nothing in this file writes.
  */
@@ -21,7 +19,6 @@ import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from
 import { join } from "node:path";
 import { pushDataDir, readPushConfig } from "./push-files.ts";
 import { IMAGE_ID_SOURCE, TEXT_ID_SOURCE, isUploadId, sanitizeUploadName } from "./uploads.ts";
-import { isSafeId } from "./sessions.ts";
 
 import { runOverrideErrors, schedulePolicyErrors, type RunOverrides, type SchedulePolicy } from "./schedule-policy.ts";
 export const CONTROL_PROTOCOL = 1;
@@ -42,7 +39,7 @@ export const INBOX_MAX_HELD = 20;
 /** A held message older than this is dropped and reported at delivery, never injected. */
 export const INBOX_MAX_AGE_MS = 24 * 3_600_000;
 export type InboxLine =
-	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; thread?: string; remote?: RemoteDevice }
+	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; remote?: RemoteDevice }
 	| { type: "delivered"; id: string; at: string }
 	| { type: "dropped"; id: string; at: string; reason: string };
 
@@ -210,112 +207,9 @@ export function readAnswers(stateDir: string): { exists: boolean; answers: Recor
 	return { exists: true, answers: [...byId.values()], skipped, error: null };
 }
 
-/** cp-xmw2: operator threads; the bridge and the viewer append `open`/`bind`, the viewer `done`. Views of one chat, bookkeeping only. */
-export const operatorThreadsFile = (stateDir: string): string => join(stateDir, "operator", "threads.jsonl");
-export const THREAD_TAG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
-export const THREAD_ID_RE = /^th-[a-f0-9]{12}$/;
 export const DASHBOARD_ID_RE = /^dc-\d{14}-[0-9a-f]{8}$/;
-export const THREADS_MAX_BYTES = 16 * 1024 * 1024;
-export const THREADS_LIST_MAX = 100;
-export type ThreadRef = { kind: "dashboard" | "ask" | "answer" | "job"; id: string };
-/** Ref identity includes its kind; a path-safe job id may also be a dashboard, ask or answer id. */
-export const threadRefKey = (ref: ThreadRef): string => `${ref.kind}:${ref.id}`;
-export type ThreadLine =
-	| { type: "open"; by: "bridge" | "viewer"; id: string; at: string; tag: string; peer: string | null }
-	| { type: "bind"; by: "bridge" | "viewer"; at: string; thread: string; ref: ThreadRef; peer: string | null }
-	| { type: "done"; by: "viewer"; id: string; at: string; peer: string | null };
-export interface RecordedThread {
-	id: string;
-	tag: string;
-	opened_at: string;
-	/** Every ref ever bound here, first bind order; the fold's `refs` map names a ref's current thread. */
-	refs: { ref: ThreadRef; at: string; line: number }[];
-	/** Journal line index of the newest recorded bind; null before the first. */
-	last_bind_line: number | null;
-	/** `at` of the open or the newest recorded bind. */
-	last_at: string;
-	/** Journal line index and `at` of the newest done; the thread is done only while done_line > last_bind_line. */
-	done_line: number | null;
-	done_at: string | null;
-}
-
-/** Trim, ASCII-lowercase, collapse whitespace runs to `-`; null unless the result is a tag (1-32 of a-z 0-9 -, first a letter or digit). */
-export function normalizeThreadTag(raw: unknown): string | null {
-	if (typeof raw !== "string") return null;
-	const tag = raw.trim().replace(/[A-Z]/g, (char) => char.toLowerCase()).replace(/\s+/g, "-");
-	return THREAD_TAG_RE.test(tag) ? tag : null;
-}
-
-const THREAD_REF_TEST: Record<ThreadRef["kind"], (id: string) => boolean> = { dashboard: (id) => DASHBOARD_ID_RE.test(id), ask: (id) => isAskId(id), answer: (id) => isAnswerId(id), job: isSafeId };
-export function isThreadRef(value: unknown): value is ThreadRef {
-	if (value === null || typeof value !== "object") return false;
-	const { kind, id } = value as Record<string, unknown>;
-	return typeof kind === "string" && typeof id === "string" && Object.hasOwn(THREAD_REF_TEST, kind) && THREAD_REF_TEST[kind as ThreadRef["kind"]](id);
-}
-
-/**
- * Fold the threads journal in line order. An unterminated last line (torn) is ignored. A complete line that is not JSON,
- * not an object, has a bad `at`/`by`/`peer` or an unknown `type` counts in `skipped`, as do a repeated open id, a bind or
- * done for an unknown thread and a bind with a bad ref. An open for a tag already opened under another id makes that id
- * an alias of the first (two writers opening one new tag at once). A bind of a ref to the thread it already belongs to is
- * ignored; otherwise the newest bind wins in `refs`, keyed by kind and id. `error` names an unreadable or oversized file (never truncated).
- */
-export function readThreads(stateDir: string): { exists: boolean; threads: RecordedThread[]; refs: Map<string, string>; skipped: number; error: string | null } {
-	const file = operatorThreadsFile(stateDir);
-	let text: string;
-	try {
-		const size = statSync(file).size;
-		if (size > THREADS_MAX_BYTES) return { exists: true, threads: [], refs: new Map(), skipped: 0, error: `${file} is ${size} bytes, over the ${THREADS_MAX_BYTES} byte cap; move it aside` };
-		text = readFileSync(file, "utf8");
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return { exists: false, threads: [], refs: new Map(), skipped: 0, error: null };
-		return { exists: true, threads: [], refs: new Map(), skipped: 0, error: `${file}: ${(error as Error).message}` };
-	}
-	const rows = text.split("\n");
-	rows.pop(); // "" after the final newline, or the torn last line
-	const byId = new Map<string, RecordedThread>();
-	const byTag = new Map<string, RecordedThread>();
-	const alias = new Map<string, RecordedThread>();
-	const refs = new Map<string, string>();
-	let skipped = 0;
-	const known = (id: unknown): RecordedThread | undefined => (isText(id) ? (byId.get(id) ?? alias.get(id)) : undefined);
-	for (const [index, row] of rows.entries()) {
-		let line: Record<string, unknown>;
-		try {
-			line = JSON.parse(row) as Record<string, unknown>;
-		} catch {
-			skipped++;
-			continue;
-		}
-		if (line === null || typeof line !== "object" || !isText(line.at) || !ANSWER_TIME_RE.test(line.at) || (line.by !== "bridge" && line.by !== "viewer") || (line.peer !== null && !isText(line.peer))) {
-			skipped++;
-			continue;
-		}
-		const at = line.at;
-		const thread = known(line.type === "bind" ? line.thread : line.id);
-		if (line.type === "open" && isText(line.id) && THREAD_ID_RE.test(line.id) && isText(line.tag) && THREAD_TAG_RE.test(line.tag) && !thread) {
-			const first = byTag.get(line.tag);
-			if (first) alias.set(line.id, first);
-			else {
-				const opened: RecordedThread = { id: line.id, tag: line.tag, opened_at: at, refs: [], last_bind_line: null, last_at: at, done_line: null, done_at: null };
-				byId.set(opened.id, opened);
-				byTag.set(opened.tag, opened);
-			}
-		} else if (line.type === "bind" && thread && isThreadRef(line.ref)) {
-			const ref = line.ref;
-			const key = threadRefKey(ref);
-			if (refs.get(key) === thread.id) continue; // already filed there: ignored, not counted
-			refs.set(key, thread.id);
-			const seen = thread.refs.find((item) => threadRefKey(item.ref) === key);
-			if (seen) Object.assign(seen, { at, line: index }); // moved back from another thread
-			else thread.refs.push({ ref: { kind: ref.kind, id: ref.id }, at, line: index });
-			Object.assign(thread, { last_bind_line: index, last_at: at });
-		} else if (line.type === "done" && line.by === "viewer" && thread) {
-			Object.assign(thread, { done_line: index, done_at: at });
-		} else skipped++;
-	}
-	return { exists: true, threads: [...byId.values()], refs, skipped, error: null };
-}
+/** The head of the one user message that replays held dashboard messages (src/dashboard-control.ts). */
+export const INBOX_REPLAY_PREFIX = "[cp-dashboard inbox — ";
 
 export type ControlConfig = { state: "on" | "off" | "invalid"; reason: string };
 
@@ -372,9 +266,9 @@ export function readControlRecord(stateDir: string): { state: "absent" } | { sta
 	return { state: "ok", record: raw as ControlRecord };
 }
 
-/** The trailing marker keeps ask/thread/images ordering; files and then `; remote` are additive final fields. */
-export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[], thread?: string | null, files?: readonly string[], remote = false): string {
-	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${thread ? `; thread=${thread}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}${files?.length ? `; files=${files.join(",")}` : ""}${remote ? "; remote" : ""}]`;
+/** The trailing marker keeps ask/images ordering; files and then `; remote` are additive final fields. */
+export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[], files?: readonly string[], remote = false): string {
+	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}${files?.length ? `; files=${files.join(",")}` : ""}${remote ? "; remote" : ""}]`;
 }
 
 /**
@@ -421,25 +315,26 @@ function parseRemoteLine(line: string): RemoteInvolvement | undefined {
 	return out;
 }
 
-const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; thread=([a-z0-9][a-z0-9-]{0,31}))?(?:; images=(${IMAGE_ID_SOURCE}(?:,${IMAGE_ID_SOURCE}){0,7}))?(?:; files=(${TEXT_ID_SOURCE}(?:,${TEXT_ID_SOURCE}){0,7}))?(; remote)?\\]\\s*$`);
+// `; thread=` is a legacy (#588) marker field: still parsed so old transcripts keep their entries, never written.
+const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; thread=[a-z0-9][a-z0-9-]{0,31})?(?:; images=(${IMAGE_ID_SOURCE}(?:,${IMAGE_ID_SOURCE}){0,7}))?(?:; files=(${TEXT_ID_SOURCE}(?:,${TEXT_ID_SOURCE}){0,7}))?(; remote)?\\]\\s*$`);
 
 /**
  * A marker with `; remote` is a remote message: its line directly above the marker names the devices (`remote`) and is
  * not part of the body. Only the bridge writes that flag, after the user's text, so typed text can neither forge nor
  * remove it; a flagged marker without a well-formed line is not a marker.
  */
-export function parseDashboardText(text: string): { body: string; id: string; askId: string | null; thread?: string; images?: string[]; files?: string[]; remote?: RemoteInvolvement } | undefined {
+export function parseDashboardText(text: string): { body: string; id: string; askId: string | null; images?: string[]; files?: string[]; remote?: RemoteInvolvement } | undefined {
 	const match = MARKER_RE.exec(text);
 	if (!match) return undefined;
 	let body = text.slice(0, match.index).trimEnd();
 	let remote: RemoteInvolvement | undefined;
-	if (match[6]) {
+	if (match[5]) {
 		const cut = body.lastIndexOf("\n");
 		remote = parseRemoteLine(body.slice(cut + 1));
 		if (!remote) return undefined;
 		body = body.slice(0, Math.max(cut, 0)).trimEnd();
 	}
-	return { body, id: match[1]!, askId: match[2] ?? null, ...(match[3] ? { thread: match[3] } : {}), ...(match[4] ? { images: match[4].split(",") } : {}), ...(match[5] ? { files: match[5].split(",") } : {}), ...(remote ? { remote } : {}) };
+	return { body, id: match[1]!, askId: match[2] ?? null, ...(match[3] ? { images: match[3].split(",") } : {}), ...(match[4] ? { files: match[4].split(",") } : {}), ...(remote ? { remote } : {}) };
 }
 
 export const isAskId = (value: unknown): value is string => typeof value === "string" && ASK_ID_RE.test(value);
@@ -452,12 +347,12 @@ export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restar
  * and one `upload` line per stored attachment: ids, mime, bytes and optional display names, never contents.
  */
 export type ControlAuditLine =
-	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; thread?: string; session_started_at?: string; session_file?: string; remote?: RemoteDevice }
+	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; session_started_at?: string; session_file?: string; remote?: RemoteDevice }
 	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting" | "dropped" | "cancelled"; reason: string | null }
 	/** cp-y43c: a dashboard-queued message's text replaced before its handoff; every revision stays in the journal. */
 	| { type: "edited"; by: "bridge"; id: string; at: string; peer: string | null; text: string; remote?: RemoteDevice }
 	| { type: "outcome"; by: "viewer"; id: string; at: string; peer: string | null; state: "dropped"; reason: string }
-	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | "settings" | "queue" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; answer_id?: string; images?: string[]; files?: string[]; mime?: string; thread?: string; thread_id?: string; queue_id?: string }
+	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "settings" | "queue" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; answer_id?: string; images?: string[]; files?: string[]; mime?: string; queue_id?: string }
 	| { type: "upload"; by: "viewer"; id: string; at: string; peer: string | null; mime: string; bytes: number; name?: string }
 	/** Remote dashboard: secret-free device events from `device-store.ts`; `id` stays null so the composer readers skip them. */
 	| { type: "device"; by: "viewer"; id: null; at: string; peer: string | null; event: "code_issued" | "paired" | "claim_refused" | "signin_refused" | "revoked"; reason: string | null; pairing_id?: string; device_id?: string; name?: string; level?: "full" | "view"; route?: "cli-up" | "cli-pair" | "loopback-dashboard" | "tailnet-dashboard" }

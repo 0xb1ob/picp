@@ -1,5 +1,5 @@
 /**
- * Behavior 19 (P19a): the dashboard's threads and composer attachments as `bin/cp-view` serves them on a scratch home,
+ * Behavior 19 (P19a): the dashboard's composer attachments as `bin/cp-view` serves them on a scratch home,
  * over real HTTP, with the operator session's own dashboard-control server (src/dashboard-control.ts) on the other end.
  * The Sessions transcripts and the file explorer are in viewer-conversations-sessions.test.ts.
  */
@@ -9,8 +9,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { connect } from "node:net";
 import { type ControlPorts, type DashboardControl, type InlineImage, startDashboardControl } from "../../src/dashboard-control.ts";
-import { appendAnswerLine, appendThreadLine } from "../../src/viewer/control-audit.ts";
-import { type AnswerLine, controlConfigFile, controlInboxFile, controlJournalFile, operatorThreadsFile, readControlRecord, type ThreadLine } from "../../src/viewer/control-files.ts";
+import { controlConfigFile, controlInboxFile, controlJournalFile, readControlRecord } from "../../src/viewer/control-files.ts";
 import { BODY_DISCARD_IDLE_MS } from "../../src/viewer/push-api.ts";
 import { type Context, type Json, jsonl, lines, mode, pick, send, viewer, write } from "../harness/conversations.ts";
 import { STUBS, syntheticPng } from "../harness/images.ts";
@@ -30,211 +29,6 @@ async function session(t: Context, stateDir: string, root: string, images = true
 	return { injected, limits, csrf: (readControlRecord(stateDir) as { record: { csrf: string } }).record.csrf };
 }
 
-// ---- threads -------------------------------------------------------------------------------------------------------
-
-const [ALPHA, BETA, GAMMA, DELTA, EPS] = ["a", "b", "c", "d", "e"].map((c) => `th-${c.repeat(12)}`) as [string, string, string, string, string];
-const DC1 = "dc-20261006080000-89abcdef";
-const open = (id: string, tag: string, at: string): ThreadLine => ({ type: "open", by: "viewer", id, at, tag, peer: null });
-const bind = (thread: string, kind: "dashboard" | "ask" | "answer" | "job", id: string, at: string): ThreadLine => ({ type: "bind", by: "bridge", at, thread, ref: { kind, id }, peer: null });
-const done = (id: string, at: string): ThreadLine => ({ type: "done", by: "viewer", id, at, peer: null });
-
-/** alpha waits on an open ask, beta on an unacked answer; gamma's refs are settled; delta is done; eps reopened. */
-function threads(stateDir: string) {
-	write(join(stateDir, "operator", "asks.jsonl"), jsonl([
-		{ type: "open", id: "ask-abcd", project: "demo", question: "Raise cap?", created_at: "2026-10-06T08:00:00Z", recommendation: "Keep", options: [{ label: "Keep", consequence: "Paused" }] },
-		{ type: "open", id: "ask-dddd", project: "demo", question: "Merge?", created_at: "2026-10-06T08:00:00Z", recommendation: "Yes", options: [{ label: "Yes", consequence: "Merges" }] },
-		{ type: "answer", id: "ask-dddd", answer: "Yes", answered_at: "2026-10-06T08:05:00Z" },
-	]));
-	const posted = (id: string): AnswerLine => ({ type: "posted", by: "bridge", id, at: "2026-10-06T08:00:00Z", project: "demo", question: "q", answer: "a", evidence_paths: [], job_id: null });
-	appendAnswerLine(stateDir, posted("ans-aaaaaaaaaaaa"));
-	appendAnswerLine(stateDir, { type: "acked", by: "viewer", id: "ans-aaaaaaaaaaaa", at: "2026-10-06T08:01:00Z", peer: null });
-	appendAnswerLine(stateDir, posted("ans-bbbbbbbbbbbb"));
-	for (const line of [
-		open(ALPHA, "alpha", "2026-10-06T08:00:00Z"), bind(ALPHA, "ask", "ask-abcd", "2026-10-06T08:00:01Z"),
-		open(BETA, "beta", "2026-10-06T08:00:00Z"), bind(BETA, "dashboard", DC1, "2026-10-06T08:00:02Z"), bind(BETA, "answer", "ans-bbbbbbbbbbbb", "2026-10-06T08:00:03Z"),
-		open(GAMMA, "gamma", "2026-10-06T08:00:00Z"), bind(GAMMA, "ask", "ask-dddd", "2026-10-06T08:00:04Z"), bind(GAMMA, "answer", "ans-aaaaaaaaaaaa", "2026-10-06T08:00:05Z"),
-		open(DELTA, "delta", "2026-10-06T08:00:00Z"), bind(DELTA, "dashboard", "dc-20261006080000-00000001", "2026-10-06T08:00:06Z"), done(DELTA, "2026-10-06T09:00:00Z"),
-		open(EPS, "eps", "2026-10-06T08:00:00Z"), done(EPS, "2026-10-06T08:30:00Z"), bind(EPS, "dashboard", "dc-20261006080000-00000002", "2026-10-06T08:00:07Z"),
-	]) assert.equal(appendThreadLine(stateDir, line).ok, true);
-}
-
-test("P19-threads: /api/threads lists each thread's state, waiting reasons, counts and working jobs; job refs never collide", { timeout: 120_000 }, async (t) => {
-	const d = await viewer(t);
-	const list = async () => (await d.get("/api/threads")).body as Json;
-	const missing = await list();
-	assert.deepEqual([missing.availability, missing.threads, missing.total, missing.warning], ["missing", [], 0, null]);
-	assert.equal(existsSync(operatorThreadsFile(d.stateDir)), false, "reading never creates the journal");
-
-	threads(d.stateDir);
-	appendThreadLine(d.stateDir, bind(BETA, "job", "cp-one", "2026-10-06T08:00:03Z"));
-	const listed = await list();
-	assert.deepEqual([listed.availability, listed.enabled, listed.total, listed.warning], ["ok", true, 5, null]);
-	assert.match(String(listed.token), /^[0-9a-f]{64}$/);
-	assert.deepEqual(listed.threads.map((th: Json) => [th.tag, th.state]), [["beta", "waiting"], ["alpha", "waiting"], ["eps", "open"], ["gamma", "open"], ["delta", "done"]], "waiting, then open newest first, then done");
-	const by = Object.fromEntries(listed.threads.map((th: Json) => [th.tag, th]));
-	assert.deepEqual([by.alpha.waiting, by.beta.waiting], [{ asks: 1, answers: 0 }, { asks: 0, answers: 1 }]);
-	assert.deepEqual([by.beta.counts, by.gamma.counts], [{ messages: 1, asks: 0, answers: 1, jobs_working: 0 }, { messages: 0, asks: 1, answers: 1, jobs_working: 0 }]);
-	assert.deepEqual([by.delta.done_at, by.eps.done_at, by.delta.id], ["2026-10-06T09:00:00Z", null, DELTA]);
-
-	write(controlConfigFile(d.stateDir), '{"enabled": false}');
-	const off = await list();
-	assert.deepEqual([off.enabled, off.token, off.threads.length], [false, null, 5], "off: the list stays, the token goes");
-	assert.match(String(off.reason), /^Dashboard control is off/);
-	assert.equal(existsSync(controlJournalFile(d.stateDir)), false, "the list never writes");
-	rmSync(controlConfigFile(d.stateDir));
-
-	const before = (await list()).threads;
-	for (const id of [DC1, "ask-abcd", "ans-bbbbbbbbbbbb"]) assert.ok(appendThreadLine(d.stateDir, bind(EPS, "job", id, "2026-10-06T08:00:07Z")).ok);
-	assert.deepEqual((await list()).threads, before, "job refs with existing ids add no counts and remove no waiting items");
-	const token = String((await list()).token);
-	assert.equal((await d.send("/api/threads/done", d.json(token, { id: ALPHA }))).status, 409, "an open ask still blocks done after a colliding job bind");
-
-	const working = async () => (await list()).threads.find((th: Json) => th.tag === "eps").counts.jobs_working;
-	assert.equal(await working(), 0, "no fleet.json");
-	for (const id of ["cp-live", "cp-idle", "cp-ghost", "../evil", "a/b"]) assert.ok(appendThreadLine(d.stateDir, bind(EPS, "job", id, "2026-10-06T08:00:08Z")).ok, `the journal accepts ${id}`);
-	write(join(d.stateDir, "evil", "status.json"), { phase: "working" });
-	write(join(d.stateDir, "fleet.json"), { jobs: [{ job_id: "cp-live", phase: "working" }, { job_id: "cp-idle", phase: "working" }, { job_id: "cp-other", phase: "working" }, { phase: "working" }, { job_id: "", phase: "working" }, { job_id: "../evil", phase: "working" }, { job_id: "a/b", phase: "working" }] });
-	for (const [job, phase] of [["cp-live", "working"], ["cp-idle", "exited"], ["cp-other", "working"]]) write(join(d.stateDir, "runs", job!, "status.json"), { phase });
-	assert.equal(await working(), 1, "only the live worker bound to the thread counts; no status is read outside runs/<id>");
-	write(join(d.stateDir, "fleet.json"), "{not json");
-	assert.equal(await working(), null, "an unreadable fleet is null, never 0");
-});
-
-test("P19-threads-done: POST /api/threads/done refuses in order, journals each refusal once, and 202s only with its done line", { timeout: 120_000 }, async (t) => {
-	const d = await viewer(t, { seed: threads });
-	const journal = operatorThreadsFile(d.stateDir);
-	const audit = controlJournalFile(d.stateDir);
-	const token = String((await d.get("/api/threads")).body.token);
-	const doneLines = () => lines(journal).filter((l) => l.type === "done").length;
-	let baseline = doneLines();
-	const refused = async (body: unknown, status: number, reason: RegExp, fields: Json = {}, given: string | null = token) => {
-		d.tick();
-		const before = lines(audit).length;
-		const out = await d.send("/api/threads/done", d.json(given, body));
-		assert.equal(out.status, status, JSON.stringify(out.body));
-		assert.match(String(out.body.error), reason);
-		const after = lines(audit);
-		assert.equal(after.length, before + 1, `one audit line for ${status} ${reason}`);
-		const line = after.at(-1)!;
-		assert.deepEqual(pick(line, ["type", "by", "kind", "status", "peer"]), { type: "refused", by: "viewer", kind: "thread_done", status, peer: "127.0.0.1" });
-		for (const [key, value] of Object.entries(fields)) assert.deepEqual(line[key], value, key);
-		assert.equal(doneLines(), baseline, "no refusal writes a done line");
-	};
-	assert.equal((await d.send("/api/threads/done")).status, 405);
-	assert.equal(lines(audit).length, 0, "405 is not journaled");
-	write(controlConfigFile(d.stateDir), '{"enabled": false}');
-	await refused({ id: GAMMA }, 403, /dashboard control is off/);
-	rmSync(controlConfigFile(d.stateDir));
-	await refused({ id: "th-../x" }, 400, /^body must be \{"id": "th-<12 hex>"\}$/, { thread_id: undefined });
-	await refused({ id: GAMMA, extra: 1 }, 400, /body must be/, { thread_id: GAMMA });
-	await refused({ id: GAMMA }, 403, /^control token missing or stale; reload the page$/, { thread_id: GAMMA }, null);
-	await refused({ id: GAMMA }, 403, /control token missing or stale/, {}, "f".repeat(64));
-	await refused({ id: "th-ffffffffffff" }, 404, /^no thread th-ffffffffffff$/);
-	await refused({ id: ALPHA }, 409, /^answer or acknowledge first: 1 open ask\(s\), 0 unacknowledged answer\(s\) in alpha$/);
-	await refused({ id: BETA }, 409, /^answer or acknowledge first: 0 open ask\(s\), 1 unacknowledged answer\(s\) in beta$/);
-	await refused({ id: DELTA }, 409, /^th-d{12} is already done since 2026-10-06T09:00:00Z$/);
-	const asks = join(d.stateDir, "operator", "asks.jsonl");
-	renameSync(asks, `${asks}.aside`);
-	mkdirSync(asks);
-	await refused({ id: GAMMA }, 503, /^cannot tell whether th-c{12} is waiting: state\/operator\/asks\.jsonl unreadable$/);
-	const blind = (await d.get("/api/threads")).body as Json;
-	assert.equal(blind.threads.find((th: Json) => th.id === ALPHA).waiting, null, "unknowable waiting is null, never 0");
-	assert.match(String(blind.warning), /asks unavailable/);
-	rmSync(asks, { recursive: true });
-	renameSync(`${asks}.aside`, asks);
-
-	d.tick();
-	const sent = await d.send("/api/threads/done", d.json(token, { id: GAMMA }));
-	assert.equal(sent.status, 202, JSON.stringify(sent.body));
-	assert.deepEqual([sent.body.id, sent.body.state], [GAMMA, "done"]);
-	assert.match(String(sent.body.done_at), /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
-	assert.deepEqual(lines(journal).at(-1), { type: "done", by: "viewer", id: GAMMA, at: sent.body.done_at, peer: "127.0.0.1" });
-	assert.equal(doneLines(), baseline + 1, "exactly one done line");
-	baseline = doneLines();
-	const state = async (id: string) => ((await d.get("/api/threads")).body as Json).threads.find((th: Json) => th.id === id).state;
-	assert.equal(await state(GAMMA), "done");
-	await refused({ id: GAMMA }, 409, /already done since/);
-	appendThreadLine(d.stateDir, bind(GAMMA, "dashboard", "dc-20261006100000-00000003", "2026-10-06T10:00:00Z"));
-	assert.equal(await state(GAMMA), "open", "a later bind reopens it");
-
-	renameSync(journal, `${journal}.aside`);
-	mkdirSync(journal);
-	d.tick();
-	const unreadable = await d.send("/api/threads/done", d.json(token, { id: GAMMA }));
-	assert.equal(unreadable.status, 500);
-	assert.match(String(unreadable.body.error), /^threads unreadable: /);
-	assert.deepEqual(pick(lines(audit).at(-1)!, ["kind", "status"]), { kind: "thread_done", status: 500 });
-	const unavailable = (await d.get("/api/threads")).body as Json;
-	assert.deepEqual([unavailable.availability, unavailable.threads], ["unavailable", []]);
-	assert.match(String(unavailable.warning), /^threads unavailable: /);
-
-	const plain = await viewer(t, { requireTailnet: false, seed: threads });
-	const listOff = await plain.get("/api/threads");
-	assert.deepEqual([listOff.status, listOff.body.error], [403, "threads are served only under --require-tailnet"]);
-	assert.equal((await plain.send("/api/threads/done", plain.json("x", { id: GAMMA }))).status, 403);
-	assert.equal(existsSync(controlJournalFile(plain.stateDir)), false, "off-tailnet refusals are not journaled");
-	assert.equal(lines(operatorThreadsFile(plain.stateDir)).filter((l) => l.type === "done").length, 2, "only the fixture's done lines");
-});
-
-test("P19-thread-send: a composer send names its thread to the operator session and files the dc- id; offline, the held id", { timeout: 120_000 }, async (t) => {
-	const d = await viewer(t);
-	const message = "/api/operator/message";
-	const offline = String((await d.get("/api/operator/control")).body.inbox_token);
-	const held = await d.send(message, d.json(offline, { kind: "message", text: "later", thread: "deploys" }));
-	assert.equal(held.status, 202, JSON.stringify(held.body));
-	assert.equal(held.body.state, "held");
-	assert.deepEqual(lines(controlInboxFile(d.stateDir)).map((l) => [Object.keys(l).sort(), l.thread]), [[["ask_id", "at", "id", "text", "thread", "type"], "deploys"]]);
-	let journal = lines(operatorThreadsFile(d.stateDir));
-	assert.deepEqual([journal.map((l) => l.type), journal[1]!.ref], [["open", "bind"], { kind: "dashboard", id: held.body.id }]);
-	assert.deepEqual(held.body.thread, { tag: "deploys", id: journal[0]!.id, error: null });
-	rmSync(controlInboxFile(d.stateDir));
-	rmSync(operatorThreadsFile(d.stateDir));
-
-	write(join(d.stateDir, "operator", "asks.jsonl"), jsonl([{ type: "open", id: "ask-abcd", project: "demo", question: "Raise cap?", created_at: "2026-10-06T08:00:00Z", recommendation: "Keep", options: [{ label: "Keep", consequence: "Paused" }] }]));
-	const { injected, csrf } = await session(t, d.stateDir, d.root);
-	const requests = () => lines(controlJournalFile(d.stateDir)).filter((l) => l.type === "request");
-	const sent = await d.send(message, d.json(csrf, { kind: "message", text: "hello", thread: "  Billing Bug " }));
-	assert.equal(sent.status, 202, JSON.stringify(sent.body));
-	assert.match(injected[0]!.text, new RegExp(`^hello\\n\\n\\[cp-dashboard ${sent.body.id} — from the dashboard; thread=billing-bug\\]$`), "the session hears the normalized thread");
-	assert.deepEqual(pick(requests()[0]!, ["kind", "text", "thread", "peer"]), { kind: "message", text: "hello", thread: "billing-bug", peer: "127.0.0.1" });
-	const thread = sent.body.thread as Json;
-	assert.deepEqual([thread.tag, thread.error], ["billing-bug", null]);
-	assert.match(thread.id, /^th-[0-9a-f]{12}$/);
-	journal = lines(operatorThreadsFile(d.stateDir));
-	assert.deepEqual(journal.map((l) => l.type), ["open", "bind"]);
-	assert.deepEqual([journal[0]!.tag, journal[0]!.id, journal[0]!.by, journal[0]!.peer, journal[1]!.ref], ["billing-bug", thread.id, "viewer", "127.0.0.1", { kind: "dashboard", id: sent.body.id }]);
-	assert.match(String(journal[1]!.at), /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
-
-	const again = await d.send(message, d.json(csrf, { kind: "message", text: "again", thread: "billing-bug" }));
-	assert.equal(again.body.thread.id, thread.id, "the tag's thread is reused");
-	assert.deepEqual(lines(operatorThreadsFile(d.stateDir)).map((l) => l.type), ["open", "bind", "bind"]);
-	const untagged = await d.send(message, d.json(csrf, { kind: "message", text: "no thread" }));
-	assert.equal(untagged.status, 202);
-	assert.equal("thread" in untagged.body, false, "no thread named: today's body");
-	assert.equal(requests()[2]!.thread, undefined, "the untagged request names no thread");
-	assert.match(injected[2]!.text, / — from the dashboard\]$/);
-	assert.equal(lines(operatorThreadsFile(d.stateDir)).length, 3);
-
-	d.tick();
-	const bad = await d.send(message, d.json(csrf, { kind: "message", text: "x", thread: "-nope" }));
-	assert.deepEqual([bad.status, bad.body.error], [400, "thread must be a tag: 1-32 of a-z 0-9 -, starting with a letter or digit"]);
-	for (const body of [{ kind: "message", text: "x", thread: "x".repeat(33) }, { kind: "message", text: "x", thread: 7 }, { kind: "answer", ask_id: "ask-abcd", label: "Keep", thread: "bad!" }, { kind: "abort", thread: "billing-bug" }]) {
-		assert.equal((await d.send(message, d.json(csrf, body))).status, 400, JSON.stringify(body));
-	}
-	assert.equal(lines(controlJournalFile(d.stateDir)).at(-1)!.thread, "billing-bug", "the refusal records the thread it parsed");
-	const answer = await d.send(message, d.json(csrf, { kind: "answer", ask_id: "ask-abcd", label: "Keep", thread: "  Billing Bug " }));
-	assert.equal(answer.status, 202, JSON.stringify(answer.body));
-	assert.deepEqual(pick(requests().at(-1)!, ["kind", "ask_id", "text", "thread"]), { kind: "answer", ask_id: "ask-abcd", text: "ask-abcd: Keep", thread: "billing-bug" });
-	assert.equal(injected.length, 4, "no refused request reaches the session");
-
-	rmSync(operatorThreadsFile(d.stateDir));
-	mkdirSync(operatorThreadsFile(d.stateDir));
-	const unbound = await d.send(message, d.json(csrf, { kind: "message", text: "still sent", thread: "billing-bug" }));
-	assert.equal(unbound.status, 202, "a bind that cannot be written never changes the 202");
-	assert.equal(injected.length, 5, "the message was delivered");
-	assert.deepEqual([unbound.body.thread.tag, unbound.body.thread.id], ["billing-bug", null]);
-	assert.match(unbound.body.thread.error, /threads\.jsonl/);
-});
 
 // ---- uploads -------------------------------------------------------------------------------------------------------
 
@@ -415,14 +209,20 @@ test("P19-upload-send: images and text files reach the operator session inline, 
 
 	d.tick();
 	const client_id = "dc-20261004140000-00000019";
+	// #588: a stale client's `thread` is accepted and dropped: not in the projected body, not in the marker.
 	const mixed = await d.send(MESSAGE, d.json(csrf, { kind: "message", text: "look", images: [image], files: [id], thread: "file-chat", client_id }));
 	assert.equal(mixed.status, 202, JSON.stringify(mixed.body));
 	assert.equal(mixed.body.id, client_id, "mixed uploads keep the pre-acknowledgement correlation id");
-	assert.deepEqual((await control()).sends.find((s: Json) => s.id === client_id)?.body, { kind: "message", text: "look", images: [image], files: [id], thread: "file-chat" }, "the reload projection keeps both kinds and the thread");
+	assert.deepEqual((await control()).sends.find((s: Json) => s.id === client_id)?.body, { kind: "message", text: "look", images: [image], files: [id] }, "the reload projection keeps both kinds");
 	const last = () => injected.at(-1)!;
 	assert.equal(last().images!.length, 1);
 	assert.ok(last().text.includes("File: report_1_.HTML\n```text\n<script>UNIQUE_ATTACHMENT_CONTENT</script>\n```"));
-	assert.match(last().text, /; thread=file-chat; images=im-[^;]+; files=tx-[^\]]+\]$/);
+	assert.match(last().text, / — from the dashboard; images=im-[^;]+; files=tx-[^\]]+\]$/);
+	assert.doesNotMatch(last().text, /thread=/);
+	// #588: the thread routes are gone: GET falls through like any unknown path, POST is the read-only 405.
+	assert.equal("threads" in (await d.send("/api/threads")).body, false, "no threads response");
+	const done = await d.send("/api/threads/done", d.json(csrf, { id: "th-aaaaaaaaaaaa" }));
+	assert.deepEqual([done.status, done.raw.toString("utf8")], [405, "read-only viewer: GET only\n"]);
 	for (const body of [{ files: [image] }, { images: [id] }, { files: [id, id] }, { files: [] }, { files: "x" }, { files: [id], images: Array.from({ length: 8 }, () => `im-${day()}-${"d".repeat(24)}.png`) }]) {
 		assert.equal((await d.send(MESSAGE, d.json(csrf, { kind: "message", text: "", ...body }))).status, 400, JSON.stringify(body));
 	}

@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- #588: the operator threads feature (cp-xmw2) is deleted end to end: `/api/threads*`, the thread journal and views, the Sessions thread chips, sidebar, picker and New thread dialog, `cp_parent thread_bind` and `thread`, and the operator note's thread line. A stale `thread` on `POST /api/operator/message` is accepted and ignored; a legacy `; thread=` marker still parses. Migration: none; `state/operator/threads.jsonl` is left on disk unread, and the main session's `cp_parent` schema changes on its next bridge load.
+
 - #576: on the systemd backend each worker runs in its own `systemd-run --user --scope` unit (`cp-worker-<job>-<rand>`, `MemoryMax` from `worker_memory_max` in `data/daemon.json`, default 6G, `MemorySwapMax=0`), so a runaway worker is killed alone instead of taking cp-daemon down. When the scope cannot start, the worker spawns unscoped and this is logged once. `/doctor` warns `service.worker_scope`. A new e2e pins that a SIGKILLed test runner leaks no dashboard viewer. Migration: none; the parent cp-daemon starts after the update carries the setting.
 
 - Final-sweep src fixes: a held PR whose current-head CI has the cancellation signature (a cancelled or timed-out job, or a failed job with no failed step) now waits and promotes no CI repair, while a test-step red still repairs; main CI's `failing` prefers a FAIL line over an earlier WARN line; the `review_escalated` teardown fix names the operator-quoted `cp_decide` path for a policy escalation; a failed CI read's diagnostic now reads `event-loop lag max Nms, largest stall Nms at <iso>`. Migration: none.

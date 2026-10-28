@@ -65,7 +65,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
   // The server takes one POST at a time per address. Keep requests FIFO even when the operator sends quickly.
   requests.current = requests.current.then(async ()=>{
    const result = await sendControl(fetcher,controlToken(status),{...body,client_id:key}).catch((error: unknown)=>({error:error instanceof Error ? error.message : "Send failed",status:0}));
-   updatePending(value=>({...value,items:value.items.map(item=>item.key !== key ? item : {...item,...("error" in result ? {state:"failed" as const,reason:result.error} : {id:result.id,state:result.state,reason:result.thread?.error ? `thread not recorded: ${result.thread.error}` : null,...(result.editable === true ? {editable:true} : {})})})}));
+   updatePending(value=>({...value,items:value.items.map(item=>item.key !== key ? item : {...item,...("error" in result ? {state:"failed" as const,reason:result.error} : {id:result.id,state:result.state,reason:null,...(result.editable === true ? {editable:true} : {})})})}));
    setGeneration(value=>value+1);
   });
  };
@@ -76,7 +76,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
   setDelivery({id: null, state: "sending", reason: null, ask_id: askId});
   const perform = async () => {
    const result = await sendControl(fetcher, controlToken(status), body);
-   setDelivery("error" in result ? {id: null, state: "failed", reason: result.error, ask_id: askId} : {id: result.id, state: result.state, reason: result.thread?.error ? `thread not recorded: ${result.thread.error}` : null, ask_id: askId});
+   setDelivery("error" in result ? {id: null, state: "failed", reason: result.error, ask_id: askId} : {id: result.id, state: result.state, reason: null, ask_id: askId});
    setGeneration(value => value + 1);
   };
   if (composer) requests.current = requests.current.then(perform);

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { LAYOUT } from "../../src/contracts.ts";
-import type { ControlStatusResponse, JobResponse, JobTranscriptResponse, PrChip, SessionEntry, SessionsResponse, ThreadsResponse, ThreadView } from "../../src/viewer/api-types.ts";
+import type { ControlStatusResponse, JobResponse, JobTranscriptResponse, PrChip, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
 import { APP_CSP, appPage } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
@@ -41,22 +41,21 @@ const TABLE = "| Job | Project | State | Head | Note |\n|---|---|---|---|---|\n"
 	+ "| cp-sessions-v2-pr1 | picp | held | 3f2a9c1 | Themes, cards and dates for the Sessions transcript |\n"
 	+ "| cp-very-long-job-identifier-that-keeps-going-to-force-a-scroll | demo-app | working | 9b77e02 | long cells scroll inside the table |\n"
 	+ "| cp-ab12 | picp | done | 1c0ffee | merged |";
-const TH = { v2: "th-0123456789ab", improv: "th-aaaaaaaaaaaa", long: "th-bbbbbbbbbbbb", done: "th-dddddddddddd" };
 const entries: SessionEntry[] = [
-	say("e1", "2026-10-14T09:12:00Z", "Operator", "Morning. Where is the Sessions redesign?", { thread: TH.done }),
-	say("e2", "2026-10-14T09:12:40Z", "Assistant", "PR 1 of 5 is in flight: tokens, cards and date separators. Status by job:\n\n" + TABLE, { thread: TH.done }),
+	say("e1", "2026-10-14T09:12:00Z", "Operator", "Morning. Where is the Sessions redesign?"),
+	say("e2", "2026-10-14T09:12:40Z", "Assistant", "PR 1 of 5 is in flight: tokens, cards and date separators. Status by job:\n\n" + TABLE),
 	tool("t1", "2026-10-14T09:13:00Z", "bash", "git log --oneline -3"),
 	tool("t2", "2026-10-14T09:13:05Z", "read", "viewer-app/screens/sessions.css"),
 	say("e3", "2026-10-14T09:14:00Z", "Assistant", "The theme lives on `.shell-sessions` only, so Overview keeps its palette:\n\n```css\n.shell-sessions { color-scheme: light; background: var(--background); }\n```"),
-	say("e4", "2026-10-15T08:02:00Z", "Operator", "Long words must wrap: https://github.com/example/picp/pull/1234/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", { project: "picp", thread: TH.v2 }),
-	say("e5", "2026-10-15T08:03:00Z", "Assistant", "They do; an inline `code-identifier-that-is-quite-long` chip wraps too.\n\nA second paragraph keeps the card readable on a phone without a horizontal page scroll, even when the reply runs to several lines of plain prose like this one.", { thread: TH.v2 }),
+	say("e4", "2026-10-15T08:02:00Z", "Operator", "Long words must wrap: https://github.com/example/picp/pull/1234/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", { project: "picp" }),
+	say("e5", "2026-10-15T08:03:00Z", "Assistant", "They do; an inline `code-identifier-that-is-quite-long` chip wraps too.\n\nA second paragraph keeps the card readable on a phone without a horizontal page scroll, even when the reply runs to several lines of plain prose like this one."),
 	wake,
 	tool("k1", "2026-10-15T08:03:31Z", "thinking", "Let me verify the precedence claim before answering.", "Let me verify the precedence claim: docs say parent.json overrides CP_PARENT_MODEL"),
 	tool("k2", "2026-10-15T08:03:35Z", "bash", "Arguments\n{\"command\":\"rg -n Models docs\"}\n\nResult\n## Models", "## Models"),
 	tool("k3", "2026-10-15T08:03:38Z", "read", "Arguments\n{\"path\":\"src/service/supervise.ts\"}\n\nResult\n…", "src/service/supervise.ts"),
 	tool("k4", "2026-10-15T08:03:40Z", "cp_integrate", `Arguments\n{"job_id":"${JOB}"}\n\nResult\nnext: wait`, `${JOB} · next: wait`),
 	tool("k5", "2026-10-15T08:03:44Z", "fetch_content", "Arguments\n{\"url\":\"https://example.com/notes\"}\n\nResult\n…", "https://example.com/notes"),
-	say("e6", "2026-10-15T08:04:00Z", "Assistant", "Anything else before I open the draft?", { thread: TH.improv }),
+	say("e6", "2026-10-15T08:04:00Z", "Assistant", "Anything else before I open the draft?"),
 	tool("o1", "2026-10-15T08:04:10Z", "bash", "Arguments\n{\"command\":\"git status\"}\n\nResult\nclean", "git status"),
 	tool("o2", "2026-10-15T08:04:12Z", "cp_parent", "Arguments\n{\"action\":\"status\"}\n\nResult\nrunning", "status · running"),
 ];
@@ -139,15 +138,6 @@ const control: ControlStatusResponse = {
 	],
 	offline: false, held: 0, inbox_token: null, start_unavailable: null, launchers: { tmux: false, herdr: false }, resume: { tmux: false, herdr: false },
 };
-const thread = (id: string, tag: string, state: ThreadView["state"], waiting: ThreadView["waiting"], working = 0): ThreadView => ({ id, tag, state, waiting,
-	counts: { messages: 1, asks: 0, answers: 0, jobs_working: working }, opened_at: "2026-10-14T09:00:00Z", last_at: "2026-10-15T08:04:00Z", done_at: state === "done" ? "2026-10-15T08:00:00Z" : null });
-const threads: ThreadsResponse = { generated_at: GENERATED, availability: "ok", enabled: true, reason: null, token: "fixture-token", threads: [
-	thread(TH.v2, "sessions-v2", "waiting", { asks: 1, answers: 1 }), thread(TH.improv, "picp-improv", "open", { asks: 0, answers: 0 }, 1),
-	thread(TH.long, "a-thread-tag-of-the-full-32-char", "open", { asks: 0, answers: 0 }), thread(TH.done, "old-release", "done", { asks: 0, answers: 0 }),
-], total: 4, warning: null };
-/** The same list with asks unreadable, as threadsView serves it: every `waiting` null, nothing in the waiting state. */
-const blind: ThreadsResponse = { ...threads, warning: "asks unavailable: state/operator/asks.jsonl unreadable; waiting is unknown",
-	threads: threads.threads.map(t => ({ ...t, waiting: null, state: t.state === "waiting" ? "open" : t.state })) };
 /** A done job for the card's "Open job transcript →"; shaped as in tests/viewer-job-detail-render-retained.test.ts. */
 const job = { generated_at: GENERATED, awaiting_count: 0, description: null, mandate: null, timeline: [], timeline_truncated: false, files_href: null, artifact_href: null, artifact_name: null, run_href: null, reports: [], asks: [], questions: [], warnings: [],
 	job: { id: JOB, project: "picp", title: "Sessions chat v2 PR 2", phase: "done", model: null, script_path: null, elapsed_seconds: null, limit_seconds: null, head: null, ci: null, review: null, review_attempts: 0, routing: null, note: null, ledger_status: "closed", ledger_disagrees: false, mandate_id: null, cost_usd: null, pr_url: null, pr_status: null, finished_at: GENERATED, finished_today: false, merge_sha: null, failure: null, summary: "Steps card and the Job transcript link.", blockers: [], context: null } } as unknown as JobResponse;
@@ -168,7 +158,7 @@ const deadline = <T>(what: string, ms: number, run: Promise<T>) => {
 try {
 	const app = await buildViewer({ stateDir: join(scratch, LAYOUT.state) });
 	const empty = overview({ home: scratch, stateDir: join(scratch, LAYOUT.state) }, Date.parse(GENERATED));
-	const routes: Record<string, unknown> = { "/api/sessions": sessions, "/api/overview": empty, "/api/operator/control": control, "/api/threads": threads, [`/api/job/${JOB}`]: job, [`/api/job/${JOB}/transcript`]: jobTranscript };
+	const routes: Record<string, unknown> = { "/api/sessions": sessions, "/api/overview": empty, "/api/operator/control": control, [`/api/job/${JOB}`]: job, [`/api/job/${JOB}/transcript`]: jobTranscript };
 	if (args.stage === "pr5") routes["/api/skills"] = { generated_at: GENERATED, skipped: [], omitted: 0, skills: [
 		{ name: "cp-pr-review", description: "Review a pull request against its task file", source: "agent" }, { name: "cp-memory", description: "Capture and curate lessons", source: "home" }] };
 	server.on("request", (req, res) => {
@@ -258,9 +248,8 @@ try {
 				summary_x: [...document.querySelectorAll(".session-steps-open .session-steps-rows")].map(card => [...new Set([...card.querySelectorAll(".session-tool > summary > span")].map(s => Math.round(s.getBoundingClientRect().left)))]),
 				replies: [...document.querySelectorAll(".session-replies .session-reply")].map(b => b.textContent + (b.disabled ? " (disabled)" : "")),
 				heading: document.querySelector(".session-heading")?.innerText ?? null, composer: document.querySelector(".operator-composer textarea")?.placeholder ?? null,
-				thread_pills: [...document.querySelectorAll(".thread-pill")].map(p => Math.round(p.getBoundingClientRect().width)),
 				columns: [".shell-sidebar", ".session-sidebar", ".session-panel"].map(s => Math.round(document.querySelector(s)?.getBoundingClientRect().width ?? 0)),
-				chats: [...document.querySelectorAll(".session-sidebar .session-choice strong, .session-sidebar .session-thread-choice, .session-thread-waiting")].map(e => e.getAttribute("aria-label") ?? e.textContent),
+				chats: [...document.querySelectorAll(".session-sidebar .session-choice strong")].map(e => e.getAttribute("aria-label") ?? e.textContent),
 				page_scroll: document.documentElement.scrollHeight - innerHeight, scroll_top: Math.round(document.querySelector(".session-transcript")?.scrollTop ?? -1),
 				jump: !!document.querySelector(".session-new"), overlap: Math.round((document.querySelector(".session-transcript")?.getBoundingClientRect().bottom ?? 0) - (document.querySelector(".operator-composer")?.getBoundingClientRect().top ?? Infinity)),
 				small_targets: [...document.querySelectorAll(".session-bar-icon, .session-bar-more > summary, .session-bar-sheet button, .session-bar-views > a, .operator-composer-box button, .operator-composer-more > summary, .session-pending-actions button")]
@@ -286,7 +275,6 @@ try {
 		}
 		if (facts.clipped.length) throw new Error(`${name}: step names clipped: ${facts.clipped.join(", ")}`);
 		if (facts.summary_x.some((xs: number[]) => xs.length > 1)) throw new Error(`${name}: step summaries start at ${JSON.stringify(facts.summary_x)}, not one x per card`);
-		if (stage === "pr4" && facts.thread_pills.some((w: number) => w > 240)) throw new Error(`${name}: a # thread pill is ${facts.thread_pills.join("/")} px wide, not compact`);
 		if (stage === "pr5" && facts.page_scroll > 0) throw new Error(`${name}: the page scrolls by ${facts.page_scroll}px`);
 		if (stage === "pr5" && facts.overlap > 0) throw new Error(`${name}: the transcript runs ${facts.overlap}px under the composer`);
 		if (stage === "pr5" && width < 900 && facts.small_targets.length) throw new Error(`${name}: targets under 44 px: ${facts.small_targets.join(", ")}`);
@@ -338,24 +326,11 @@ try {
 		// Step names at phone width too: cp_integrate and fetch_content fit their column (the run fails on a clipped one).
 		await capture("pr3-steps-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom", [[`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-open")`],
 			[`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-steps-open").getBoundingClientRect().top - t.getBoundingClientRect().top - 60; })()`, "true"]]);
-		const rows: [string, string] = ["true", `!!document.querySelector(".session-thread-row")`];
-		const pick = (label: string): [string, string] => [`[...document.querySelectorAll(".session-sidebar .session-thread-choice")].find(b => (b.getAttribute("aria-label") ?? "").startsWith(${JSON.stringify(label)})).click()`,
-			`!!document.querySelector('.session-sidebar .session-thread-choice[aria-pressed="true"][aria-label^=${JSON.stringify(label)}]')`];
-		const chats = (name: string, theme: "dark" | "light", steps: [string, string][]) => capture(`pr3-${name}-desktop-${theme}-1440x1000`, transcript, 1440, 1000, theme, loaded, "bottom", [rows, ...steps]);
-		for (const theme of ["dark", "light"] as const) await chats("thread-selected", theme, [pick("sessions-v2:")]);
-		await chats("thread-done", "dark", [[`document.querySelector(".session-sidebar details > summary").click()`, `document.querySelector(".session-sidebar details").open`], pick("old-release:")]);
-		const plus = `document.querySelector(".session-chats-new").click()`, dialog = `!!document.querySelector(".new-thread input")`;
-		const typed: [string, string] = [`(() => { const i = document.querySelector(".new-thread input"); i.value = "fresh-idea"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`, `!document.querySelector(".new-thread-create").disabled`];
-		await chats("new-thread-dialog", "dark", [[plus, dialog], typed]);
-		await chats("thread-new", "dark", [[plus, dialog], [`document.querySelector(".new-thread-close").click()`, `!document.querySelector(".new-thread")`], [plus, dialog], typed,
-			[`document.querySelector(".new-thread-create").click()`, `!document.querySelector(".new-thread") && !!document.querySelector('.session-thread-choice[aria-pressed="true"][aria-label^="fresh-idea:"]')`]]);
-		routes["/api/threads"] = blind;
-		await chats("waiting-unknown", "dark", []);
-		routes["/api/threads"] = threads;
+		const chats = (name: string, theme: "dark" | "light", steps: [string, string][]) => capture(`pr3-${name}-desktop-${theme}-1440x1000`, transcript, 1440, 1000, theme, loaded, "bottom", steps);
 		sessions.workers = [];
 		await chats("fleet-empty", "light", []);
 		sessions.workers = workers;
-		if (posts.length) throw new Error(`pr3 sent ${posts.join(", ")}: New thread and Cancel must request nothing`);
+		if (posts.length) throw new Error(`pr3 sent ${posts.join(", ")}: the Chats list must request nothing`);
 	}
 	if (stage === "pr4") {
 		const chips = `document.querySelectorAll(".session-replies .session-reply").length === 3`, at = (selector: string): [string, string] =>
@@ -366,9 +341,6 @@ try {
 		}
 		// Step names at phone width: cp_integrate and fetch_content fit, every summary at one x (the run fails otherwise).
 		await capture("pr4-steps-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom", [[`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-open")`], at(".session-steps-open")]);
-		// The header filter and the composer picker are one selection (cp-thread).
-		await capture("pr4-header-filter-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [[`(() => { const s = document.querySelector(".session-thread-filter select"); s.value = "sessions-v2"; s.dispatchEvent(new Event("change", { bubbles: true })); })()`,
-			`document.querySelector(".operator-composer-thread select")?.value === "sessions-v2"`]]);
 		// The ⋮ menu carries the transcript file picker and Tools N above the shell's rows.
 		await capture("pr4-header-menu-desktop-dark-1440x1000", transcript, 1440, 1000, "dark", loaded, "bottom", [[`document.querySelector(".page-header .shell-more > summary").click()`,
 			`!!document.querySelector(".shell-more[open] .session-menu .session-file-picker") && !!document.querySelector(".shell-more[open] .session-menu .session-tools-toggle")`]]);
@@ -389,13 +361,10 @@ try {
 	}
 	if (stage === "pr5") {
 		const phone = (name: string, steps: Step[], scroll: "top" | "bottom" = "bottom", height = 844) => capture(`pr5-${name}-phone-dark-390x${height}`, transcript, 390, height, "dark", loaded, scroll, steps);
-		const more = `document.querySelector(".session-bar-more > summary").click()`, opened = `!!document.querySelector(".session-bar-more[open] .session-bar-threads .session-thread-chip")`;
+		const more = `document.querySelector(".session-bar-more > summary").click()`, opened = `!!document.querySelector(".session-bar-more[open] .session-bar-sheet")`;
 		// Every action the phone moved out of the composer and heading: one ⋯ sheet, the state line first.
 		await phone("menu", [[more, opened]]);
 		await capture("pr5-menu-phone-light-390x844", transcript, 390, 844, "light", loaded, "bottom", [[more, opened]]);
-		// A thread chip picks the thread and closes the sheet; the # filter under the name and the composer follow it.
-		await phone("filter", [[more, opened], [`[...document.querySelectorAll(".session-bar-threads .session-thread-chip")].find(b => b.textContent.startsWith("picp-improv")).click()`,
-			`!document.querySelector(".session-bar-more[open]") && document.querySelector(".session-bar-sub select")?.value === "picp-improv" && /#picp-improv/.test(document.querySelector(".operator-composer textarea").placeholder)`]]);
 		// Escape closes the sheet and hands focus back to ⋯ (the Sessions screen's document handler, not a reload).
 		await phone("menu-escape", [[`(() => { const s = document.querySelector(".session-bar-more > summary"); s.focus(); s.click(); })()`, opened],
 			[`document.querySelector(".session-bar-more").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,

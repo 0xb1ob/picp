@@ -9,14 +9,13 @@
  * (control-api.ts); `POST /api/operator/start` runs the fixed `<tmux> new-session -d -s cp-operator <wrapper>` (or a herdr workspace);
  * `POST /api/schedules/request` (with its status `GET /api/schedules/control`) journals one Schedules page request;
  * `POST /api/answers/ack` (with its status `GET /api/answers/control`) appends one `acked` line to `state/operator/answers.jsonl`;
- * `POST /api/threads/done` (with the thread list `GET /api/threads`, threads-api.ts) appends one `done` line to `state/operator/threads.jsonl`;
  * `POST /api/settings/apply|restore` (with `GET /api/settings`, settings-api.ts) forward one `settings_apply` frame to the
  * operator session, which validates, audits and writes the owner files; the viewer writes no settings file.
  * The one request that reaches the parent does so only as a line in `state/schedule-control.jsonl`, which the
  * parent reads. Every route answers any Host unless `viewer.strict_host` (data/viewer.json) pins the bind Host
  * (host-config.ts); the operator's own Full transcript
  * (`/api/sessions?view=you&transcript=1`), both dashboard-control routes, both schedule-control routes, both answers routes,
- * both thread routes, the three settings routes and the skills list (`/api/skills`, names and descriptions only) are served only by a viewer started with `--require-tailnet` and refused 403 otherwise.
+ * the three settings routes and the skills list (`/api/skills`, names and descriptions only) are served only by a viewer started with `--require-tailnet` and refused 403 otherwise.
  * Remote dashboard: `dispatch` is also reached through the remote listener's gate (remote-server.ts), which binds an
  * authenticated device context to the request (access.ts); with `devices` set, three device routes are added (devices-api.ts).
  */
@@ -50,7 +49,6 @@ import { handleSchedulePolicy, SCHEDULE_POLICY_PATH } from "./control-api.ts";
 import { handleOperatorRestart } from "./operator-restart.ts";
 import { handleOperatorQueue, OPERATOR_QUEUE_PATH } from "./operator-queue.ts";
 import { handleSettingsStatus, handleSettingsWrite, SETTINGS_APPLY_PATH, SETTINGS_PATH, SETTINGS_RESTORE_PATH } from "./settings-api.ts";
-import { handleThreadDone, handleThreadsStatus, THREAD_DONE_PATH, THREADS_PATH } from "./threads-api.ts";
 import { handleSkillsList, SKILLS_PATH } from "./skill-catalog.ts";
 import { handleOperatorUpload, OPERATOR_UPLOAD_PATH, OPERATOR_UPLOADS_PREFIX, serveOperatorUpload } from "./operator-upload-api.ts";
 import { OPERATOR_RESTART_PATH } from "./restart-status.ts";
@@ -230,8 +228,8 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			});
 		return;
 	}
-	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === PUSH_TEST_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === OPERATOR_QUEUE_PATH || requestPath === OPERATOR_UPLOAD_PATH || requestPath === SCHEDULE_CONTROL_PATH || requestPath === ANSWER_ACK_PATH || requestPath === THREAD_DONE_PATH || requestPath === SETTINGS_APPLY_PATH || requestPath === SETTINGS_RESTORE_PATH) {
-		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === PUSH_TEST_PATH ? handlePushTest(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === ANSWER_ACK_PATH ? handleAnswerAck(req, options) : requestPath === THREAD_DONE_PATH ? handleThreadDone(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : requestPath === OPERATOR_QUEUE_PATH ? handleOperatorQueue(req, options) : requestPath === OPERATOR_UPLOAD_PATH ? handleOperatorUpload(req, options) : requestPath === SETTINGS_APPLY_PATH ? handleSettingsWrite(req, options, "set") : requestPath === SETTINGS_RESTORE_PATH ? handleSettingsWrite(req, options, "restore") : handleOperatorStart(req, options))
+	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === PUSH_TEST_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === OPERATOR_QUEUE_PATH || requestPath === OPERATOR_UPLOAD_PATH || requestPath === SCHEDULE_CONTROL_PATH || requestPath === ANSWER_ACK_PATH || requestPath === SETTINGS_APPLY_PATH || requestPath === SETTINGS_RESTORE_PATH) {
+		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === PUSH_TEST_PATH ? handlePushTest(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === ANSWER_ACK_PATH ? handleAnswerAck(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : requestPath === OPERATOR_QUEUE_PATH ? handleOperatorQueue(req, options) : requestPath === OPERATOR_UPLOAD_PATH ? handleOperatorUpload(req, options) : requestPath === SETTINGS_APPLY_PATH ? handleSettingsWrite(req, options, "set") : requestPath === SETTINGS_RESTORE_PATH ? handleSettingsWrite(req, options, "restore") : handleOperatorStart(req, options))
 			.then((out) => { sendJson(res, out.status, out.body, out.headers); if (out.discard) discardBounded(req, res, out.discard); })
 			.catch(() => {
 				if (!res.headersSent) sendJson(res, 500, { error: "internal" });
@@ -325,11 +323,6 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 		}
 		case ANSWERS_CONTROL_PATH: {
 			const out = handleAnswersControlStatus(req, options);
-			sendJson(res, out.status, out.body, out.headers);
-			return;
-		}
-		case THREADS_PATH: {
-			const out = handleThreadsStatus(req, options);
 			sendJson(res, out.status, out.body, out.headers);
 			return;
 		}

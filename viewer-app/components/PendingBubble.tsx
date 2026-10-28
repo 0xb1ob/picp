@@ -43,6 +43,6 @@ export function PendingBubble({send,position,total,control,viewing,truncated}: {
    {/* picp-cc0: a delivered bubble whose transcript entry never loads (older than the window) must still go away on request. */}
    {send.state === "delivered" && <div class="session-pending-actions"><button type="button" class="session-pending-dismiss" onClick={()=>control.discard?.(send.key)}>Dismiss</button></div>}
   </div>
-  <div class="session-who"><span class="session-who-name">You</span>{send.body.thread && <span class="session-project">{send.body.thread}</span>}<time class="session-time" dateTime={send.at}>{time(send.at)}</time></div>
+  <div class="session-who"><span class="session-who-name">You</span><time class="session-time" dateTime={send.at}>{time(send.at)}</time></div>
  </article>;
 }

@@ -196,7 +196,7 @@ test("P9d-remote-queue: a queued remote message keeps its sender and a remote ed
 });
 
 // P9d-remote-inbox: messages held while no session ran are replayed once, each remote one with its own device line
-// and marker (threaded or not); local ones keep their bytes; a held line with a malformed device replays as local.
+// and marker (a legacy thread tag dropped, #588); local ones keep their bytes; a malformed device replays as local.
 test("P9d-remote-inbox: the offline inbox replays each remote held message with its own device line and marker", { timeout: 90_000 }, async (t) => {
 	const s = await scratch(t);
 	const start = Date.now() - 300_000;
@@ -217,7 +217,7 @@ test("P9d-remote-inbox: the offline inbox replays each remote held message with 
 		"[cp-dashboard dc-20261006080001-00000002 — from the dashboard; remote]",
 		`- ${at(2)} (dc-20261006080002-00000003): remote threaded`,
 		line(TABLET_SENT),
-		"[cp-dashboard dc-20261006080002-00000003 — from the dashboard; thread=ops; remote]",
+		"[cp-dashboard dc-20261006080002-00000003 — from the dashboard; remote]",
 		`- ${at(3)} (dc-20261006080003-00000004): forged`,
 	]);
 });
@@ -329,222 +329,6 @@ test("P9d-pending: the viewer settles accepted sends by their target session and
 	assert.equal((await read()).sends.get(live)?.state, "dropped", "an operator discard stays terminal: late acceptance cannot resurrect it");
 });
 
-// P9d-threads: cp_parent's optional thread files the ans-/ask-/job id in state/operator/threads.jsonl as the bridge,
-// bookkeeping only: tags normalize or refuse before any write, a failed filing never fails the answer or the ask.
-test("P9d-threads: cp_parent answer, ask and thread_bind file their ids under a thread through the real bridge, and a failed filing never fails them", { timeout: 240_000 }, async (t) => {
-	const s = await scratch(t);
-	await new FleetStore({ home: s.home }).add({
-		job_id: "cp-ans", project: "demo", kind: "research", delivery: "answer", origin: DEFAULT_ORIGIN, phase: "held", reported_at: isoTimestamp(),
-		worker: { pid: process.pid, session_id: "s", session_file: join(s.home, "s.jsonl"), profile: "planner", role: "planner", model: "mock/model", started_at: isoTimestamp() },
-		worktree: join(s.home, "wt"), branch: "cp-ans", dispatched_at: isoTimestamp(), usage: EMPTY_USAGE,
-	});
-	let next: object = {};
-	const op = await operator(t, s.home, "p9d-threads", Array.from({ length: 60 }, (): ScriptStep[] => [
-		{ kind: "tool_calls", calls: [{ name: "cp_parent", args: () => next }] }, { kind: "text", text: "done" },
-	]).flat());
-	let calls = 0;
-	const call = async (params: object) => {
-		next = params;
-		calls += 1;
-		await op.child.prompt(`call ${calls}`);
-		await op.child.waitFor(() => op.child.eventsOfType("agent_settled").length >= calls, 30_000);
-		const end = op.child.eventsOfType("tool_execution_end")[calls - 1]!;
-		const result = end.result as { content: Array<{ text: string }>; details: Json };
-		return { text: result.content[0]!.text, isError: end.isError === true, details: result.details };
-	};
-	const operatorFile = (name: string) => join(s.state, "operator", name);
-	const read = (name: string) => existsSync(operatorFile(name)) ? readFileSync(operatorFile(name), "utf8") : null;
-	const lines = () => (read("threads.jsonl") ?? "").split("\n").filter(Boolean).map((row) => JSON.parse(row) as Json);
-	const threads = async () => (await s.get("/api/threads")) as Json;
-	const answer = { action: "answer", project: "demo", question: "Does it work?", answer: "Yes." };
-	const ask = { project: "demo", question: "A or B?", options: [{ label: "A", consequence: "does a" }, { label: "B", consequence: "does b" }], recommendation: "A" };
-
-	const first = await call({ ...answer, thread: "Billing" });
-	assert.equal(first.isError, false, first.text);
-	assert.equal(first.details.state, "posted");
-	const filed = first.details.thread as { tag: string; id: string; error: null };
-	assert.deepEqual([filed.tag, filed.error], ["billing", null]);
-	assert.match(filed.id, /^th-[a-f0-9]{12}$/);
-	assert.match(first.text, new RegExp(`filed under thread billing \\(${filed.id}\\)`));
-	assert.deepEqual(lines().map((row) => [row.type, row.by, row.peer]), [["open", "bridge", null], ["bind", "bridge", null]]);
-	assert.deepEqual([lines()[0]!.tag, lines()[1]!.ref], ["billing", { kind: "answer", id: first.details.id }]);
-	assert.equal(statSync(operatorFile("threads.jsonl")).mode & 0o777, 0o600);
-	assert.equal(statSync(dirname(operatorFile("threads.jsonl"))).mode & 0o777, 0o700);
-	const second = await call({ ...answer, question: "And now?", thread: "billing" });
-	assert.equal((second.details.thread as { id: string }).id, filed.id, "a tag opens once");
-	assert.deepEqual(lines().map((row) => row.type), ["open", "bind", "bind"]);
-	assert.deepEqual(lines()[2]!.ref, { kind: "answer", id: second.details.id });
-	const plain = await call({ ...answer, question: "No thread?" });
-	assert.equal(plain.details.thread, undefined);
-	assert.equal(lines().length, 3, "no thread param: nothing filed");
-	assert.deepEqual((await threads()).threads.map((row: Json) => [row.id, row.tag, row.counts.answers]), [[filed.id, "billing", 2]]);
-
-	// Tags normalize (trim, lowercase, whitespace runs to '-', 1-32) or refuse naming the rule before any write.
-	const before = () => [read("answers.jsonl"), read("asks.jsonl"), read("threads.jsonl")];
-	const unchanged = before();
-	for (const bad of ["bad tag!", "x".repeat(33), "#design-review", "-x", "", "   ", "café", "a_b"]) {
-		const refused = await call({ ...answer, question: "Other?", thread: bad });
-		assert.equal(refused.isError, true, bad);
-		assert.match(refused.text, /thread must be a tag \(1-32 of a-z 0-9 -, first a letter or digit\)/);
-	}
-	assert.equal((await call({ action: "ask", ask, thread: "-x" })).isError, true);
-	assert.deepEqual(before(), unchanged, "a refused tag writes no answer, ask or thread line");
-	const sent = op.requests().length;
-	for (const thread of [7, null, "Bad Tag!"]) assert.equal((await op.send("send", { kind: "message", text: "tagged", thread }) as { status?: number }).status, 400, String(thread));
-	assert.equal(op.requests().length, sent, "a dashboard send with a bad tag never reaches pi");
-
-	const job = await call({ ...answer, job_id: "cp-ans" });
-	assert.equal(job.details.state, "posted");
-	const again = await call({ ...answer, job_id: "cp-ans", thread: "billing" });
-	assert.equal(again.details.state, "duplicate");
-	assert.equal(again.details.thread, undefined);
-	assert.match(again.text, new RegExp(`thread billing: ${job.details.id} was not re-filed`));
-	assert.equal(lines().length, 3, "a duplicate answer files nothing");
-
-	const opened = await call({ action: "ask", ask, thread: "  Q3   plan\tB " });
-	assert.equal(opened.isError, false, opened.text);
-	const parsed = JSON.parse(opened.text) as { id: string; state: string; thread: { tag: string; id: string; error: null } };
-	assert.match(parsed.id, /^ask-[a-f0-9]+$/);
-	assert.deepEqual([parsed.state, parsed.thread.tag], ["open", "q3-plan-b"]);
-	assert.deepEqual(opened.details.thread, parsed.thread);
-	assert.deepEqual(lines().slice(-2).map((row) => [row.type, row.tag ?? row.ref]), [["open", "q3-plan-b"], ["bind", { kind: "ask", id: parsed.id }]]);
-	assert.equal("thread" in JSON.parse(read("asks.jsonl")!.trim()), false, "asks.jsonl keeps today's keys");
-	assert.ok(JSON.stringify(await s.get("/api/decisions")).includes(parsed.id), "the Decisions screen still lists the ask");
-
-	// thread_bind files job refs on the operator side only: normalized, idempotent, newest bind wins, kinds apart.
-	const books = () => [read("answers.jsonl"), read("asks.jsonl")];
-	const kept = books();
-	const mark = lines().length;
-	const jobs = ["cp-one", "other_TWO-2", "9", "x".repeat(128)];
-	const bound = await call({ action: "thread_bind", thread: "  Billing Bug ", job_ids: jobs });
-	assert.equal(bound.isError, false, bound.text);
-	assert.equal(bound.details.state, "filed");
-	const bugs = lines().slice(mark);
-	assert.deepEqual(bugs.map((row) => [row.type, row.by, row.peer]), [["open", "bridge", null], ...jobs.map(() => ["bind", "bridge", null])]);
-	assert.deepEqual([bugs[0]!.tag, bugs.slice(1).map((row) => row.ref)], ["billing-bug", jobs.map((id) => ({ kind: "job", id }))]);
-	await call({ action: "thread_bind", thread: "billing-bug", job_ids: jobs });
-	assert.equal(lines().length, mark + 5, "a repeat bind writes nothing");
-	await call({ action: "thread_bind", thread: "billing", job_ids: [first.details.id] });
-	await call({ action: "thread_bind", thread: "billing", job_ids: [first.details.id] });
-	assert.deepEqual(lines().slice(mark + 5).map((row) => row.ref), [{ kind: "job", id: first.details.id }], "a job id equal to an answer id binds once, as its own kind");
-	await call({ action: "thread_bind", thread: "ops", job_ids: ["cp-one", first.details.id] });
-	const view = new Map(((await threads()).threads as Json[]).map((row) => [row.tag, row]));
-	assert.equal(view.get("billing")!.counts.answers, 2, "moving the job leaves the answer of the same id filed");
-	assert.deepEqual(lines().slice(-3).map((row) => [row.type, row.tag ?? row.ref]), [["open", "ops"], ["bind", { kind: "job", id: "cp-one" }], ["bind", { kind: "job", id: first.details.id }]]);
-	assert.deepEqual(books(), kept, "thread_bind posts no answer and opens no ask");
-	assert.equal(existsSync(join(s.state, "parent.lock")), false, "no parent started for bookkeeping");
-
-	const journal = read("threads.jsonl");
-	for (const params of [
-		{ thread: "bad!", job_ids: ["cp-one"] }, { job_ids: ["cp-one"] },
-		{ thread: "ok" }, { thread: "ok", job_ids: [] },
-		...[["cp-one", "../bad"], ["cp-one", ""], ["cp-one", "x".repeat(129)]].map((job_ids) => ({ thread: "ok", job_ids })),
-	]) {
-		assert.equal((await call({ action: "thread_bind", ...params })).isError, true, JSON.stringify(params));
-	}
-	assert.equal(read("threads.jsonl"), journal, "every field is checked before the first bind");
-	const lone = await call({ action: "thread_bind", thread: "ops", job_ids: "cp-one" });
-	assert.deepEqual([lone.isError, lone.details.state], [false, "filed"], "pi's schema coerces a lone id (or 7) to a valid id list");
-
-	// An unwritable journal: the answer and the ask still land, the result says NOT filed and is no error.
-	const aside = `${operatorFile("threads.jsonl")}.aside`;
-	renameSync(operatorFile("threads.jsonl"), aside);
-	mkdirSync(operatorFile("threads.jsonl"));
-	const posted = await call({ ...answer, question: "Unfiled?", thread: "billing" });
-	assert.deepEqual([posted.isError, posted.details.state], [false, "posted"]);
-	assert.match(posted.text, /; thread billing NOT filed: .*threads\.jsonl/);
-	assert.deepEqual({ ...posted.details.thread, error: "x" }, { tag: "billing", id: null, error: "x" });
-	assert.match(read("answers.jsonl")!, new RegExp(posted.details.id));
-	const unfiledAsk = await call({ action: "ask", ask, thread: "billing" });
-	const unfiled = JSON.parse(unfiledAsk.text) as { id: string; thread: { id: null; error: string } };
-	assert.deepEqual([unfiledAsk.isError, unfiled.thread.id, unfiled.thread.error.length > 0], [false, null, true]);
-	assert.match(read("asks.jsonl")!, new RegExp(unfiled.id));
-	const blocked = await call({ action: "thread_bind", thread: "ok", job_ids: ["cp-one"] });
-	assert.deepEqual([blocked.isError, blocked.details.state], [false, "unfiled"]);
-	assert.match(blocked.text, /cp-one.*thread ok NOT filed: .*threads\.jsonl/);
-	assert.deepEqual(blocked.details.bindings, [{ job_id: "cp-one", tag: "ok", id: null, error: (blocked.details.bindings as Json[])[0]!.error }]);
-	assert.match((await threads()).warning, /^threads unavailable: .*threads\.jsonl: /);
-	rmSync(operatorFile("threads.jsonl"), { recursive: true });
-	renameSync(aside, operatorFile("threads.jsonl"));
-	chmodSync(operatorFile("threads.jsonl"), 0o400);
-	if (process.getuid?.() !== 0) assert.match((await call({ ...answer, question: "Read-only?", thread: "billing" })).text, new RegExp(`thread billing NOT filed: ${escape(operatorFile("threads.jsonl"))}: EACCES$`));
-});
-
-// P9d-threads-journal: GET /api/threads folds threads.jsonl in line order: done after the last bind, a later bind
-// reopens, the newest bind of a ref wins, a second open of one tag aliases, bad lines count as skipped, never throws.
-test("P9d-threads-journal: the viewer's thread list folds the journal in line order and names every unreadable line or file", { timeout: 60_000 }, async (t) => {
-	const s = await scratch(t);
-	const file = join(s.state, "operator", "threads.jsonl");
-	const [A, B, DC, ANS, ASK] = ["th-0123456789ab", "th-ba9876543210", "dc-20261006080000-89abcdef", "ans-a1b2c3d4e5f6", "ask-0a1b"];
-	const [T0, T1, T2] = ["2026-10-06T08:00:00Z", "2026-10-06T08:01:10Z", "2026-10-06T09:00:00Z"];
-	const write = (rows: Array<object | string>, torn = "") => {
-		mkdirSync(dirname(file), { recursive: true });
-		writeFileSync(file, `${rows.map((row) => typeof row === "string" ? row : JSON.stringify(row)).join("\n")}\n${torn}`);
-	};
-	const view = async () => (await s.get("/api/threads")) as Json;
-	const rows = async () => ((await view()).threads as Json[]).map((row) => [row.id, row.tag, row.state, row.counts.messages, row.counts.asks, row.counts.answers]);
-	assert.deepEqual([(await view()).availability, (await view()).threads], ["missing", []]);
-	assert.equal(existsSync(file), false, "reading creates nothing");
-
-	const opened = [
-		{ type: "open", by: "viewer", id: A, at: T0, tag: "billing-bug", peer: "100.64.0.7" },
-		{ type: "bind", by: "viewer", at: T0, thread: A, ref: { kind: "dashboard", id: DC }, peer: "100.64.0.7" },
-		{ type: "bind", by: "bridge", at: T1, thread: A, ref: { kind: "answer", id: ANS }, peer: null },
-		{ type: "done", by: "viewer", id: A, at: T2, peer: "100.64.0.7" },
-	];
-	write(opened);
-	assert.deepEqual([await rows(), (await view()).threads[0].done_at, (await view()).warning], [[[A, "billing-bug", "done", 1, 0, 1]], T2, null]);
-	write([...opened,
-		{ type: "open", by: "bridge", id: B, at: T2, tag: "other", peer: null },
-		{ type: "bind", by: "bridge", at: T2, thread: B, ref: { kind: "answer", id: ANS }, peer: null },
-		{ type: "bind", by: "bridge", at: T2, thread: A, ref: { kind: "ask", id: ASK }, peer: null },
-	]);
-	assert.deepEqual(new Set(await rows()), new Set([[A, "billing-bug", "open", 1, 1, 0], [B, "other", "open", 0, 0, 1]]), "a later bind reopens; the newest bind wins");
-
-	write([
-		{ type: "open", by: "viewer", id: A, at: T0, tag: "race", peer: null },
-		{ type: "open", by: "bridge", id: B, at: T0, tag: "race", peer: null },
-		{ type: "bind", by: "bridge", at: T1, thread: B, ref: { kind: "answer", id: ANS }, peer: null },
-		{ type: "bind", by: "viewer", at: T1, thread: A, ref: { kind: "dashboard", id: DC }, peer: null },
-		{ type: "done", by: "viewer", id: B, at: T2, peer: null },
-	]);
-	assert.deepEqual([await rows(), (await view()).warning], [[[A, "race", "done", 1, 0, 1]], null], "a second open of one tag aliases to the first id");
-
-	const one = [
-		{ type: "open", by: "viewer", id: A, at: T0, tag: "one", peer: null },
-		{ type: "bind", by: "viewer", at: T0, thread: A, ref: { kind: "dashboard", id: DC }, peer: null },
-		{ type: "bind", by: "viewer", at: T1, thread: A, ref: { kind: "dashboard", id: DC }, peer: null },
-	];
-	const bad = [
-		"not json", "null",
-		{ type: "open", by: "viewer", id: A, at: T1, tag: "again", peer: null },
-		{ type: "open", by: "viewer", id: "th-xyz", at: T1, tag: "bad-id", peer: null },
-		{ type: "open", by: "viewer", id: B, at: T1, tag: "Bad Tag", peer: null },
-		{ type: "bind", by: "viewer", at: T1, thread: B, ref: { kind: "dashboard", id: DC }, peer: null },
-		...[{ kind: "dashboard", id: "dc-1" }, { kind: "answer", id: "ans-short" }, { kind: "job", id: "../cp-1" }, { kind: "dashboard", id: [DC] }]
-			.map((ref) => ({ type: "bind", by: "viewer", at: T1, thread: A, ref, peer: null })),
-		{ type: "done", by: "viewer", id: B, at: T1, peer: null },
-		{ type: "done", by: "bridge", id: A, at: T1, peer: null },
-		{ type: "rename", by: "viewer", id: A, at: T1, tag: "two", peer: null },
-		{ type: "done", by: "viewer", id: A, at: "2026-10-06T09:00:00.123Z", peer: null },
-		{ type: "done", by: "someone", id: A, at: T1, peer: null },
-		{ type: "done", by: "viewer", id: A, at: T1 },
-	];
-	write([...one, ...bad]);
-	const skipped = await view();
-	assert.deepEqual([await rows(), skipped.threads[0].last_at], [[[A, "one", "open", 1, 0, 0]], T0], "a repeat bind is ignored, not counted");
-	assert.match(skipped.warning, new RegExp(`^${bad.length} unreadable line\\(s\\) in state/operator/threads\\.jsonl skipped`));
-
-	write(one.slice(0, 1), `{"type":"bind","by":"viewer","at":"${T1}","thread":"${A}"`);
-	assert.deepEqual([(await rows()).length, (await view()).warning], [1, null], "a torn last line is ignored");
-	writeFileSync(file, Buffer.alloc(16 * 1024 * 1024 + 1, 0x20));
-	const big = await view();
-	assert.deepEqual([big.availability, big.threads], ["unavailable", []]);
-	assert.match(big.warning, /threads\.jsonl is \d+ bytes, over the 16777216 byte cap; move it aside/);
-	rmSync(file);
-	mkdirSync(file);
-	assert.match((await view()).warning, /^threads unavailable: .*threads\.jsonl: /);
-});
 
 /** The base64 bytes of every image part of the user message carrying `needle`. */
 function imagesWith(request: RecordedRequest, needle: string): Buffer[] {
@@ -610,9 +394,9 @@ test("P9d-images: send_images and send_files hand the operator model image parts
 		writeUpload(root, id, bytes);
 		assert.ok(appendControlAudit(s.state, { type: "upload", by: "viewer", id, at: new Date().toISOString(), peer: null, mime: "text/plain", bytes: bytes.length, name: "original.md" }).ok);
 	}
-	assert.ok((await op.send("send_files", { kind: "message", text: "", files, thread: "notes" })).ok);
+	assert.ok((await op.send("send_files", { kind: "message", text: "", files })).ok);
 	const inlined = await op.seen("File: original.md");
-	assert.match(inlined.split("\n").at(-1)!, new RegExp(`; thread=notes; files=${files.map(escape).join(",")}\\]$`));
+	assert.match(inlined.split("\n").at(-1)!, new RegExp(`; files=${files.map(escape).join(",")}\\]$`));
 	const body = inlined.slice(0, inlined.lastIndexOf("\n")).trimEnd();
 	assert.ok(Buffer.byteLength(body) <= TEXT_MESSAGE_INLINE_BYTES);
 	assert.doesNotMatch(body, /\uFFFD/, "truncated on a UTF-8 boundary");
@@ -731,7 +515,8 @@ test("P9e-control: the real bridge's dashboard control delivers, holds, steers, 
 
 	const click = await op.send("send", { kind: "answer", ask_id: "ask-abcd", label: "Keep", thread: "Billing Bug", peer: "100.64.0.9" });
 	assert.ok(click.ok, JSON.stringify(click));
-	assert.match(await op.seen("ask-abcd: Keep"), new RegExp(`^ask-abcd: Keep\\n\\n${MARK}; ask=ask-abcd; thread=billing-bug\\]$`), "the verbatim label with the ask id");
+	// #588: a stale `thread` field is accepted and dropped, never named in the marker.
+	assert.match(await op.seen("ask-abcd: Keep"), new RegExp(`^ask-abcd: Keep\\n\\n${MARK}; ask=ask-abcd\\]$`), "the verbatim label with the ask id");
 	const refusals = [
 		[{ ask_id: "ask-abcd", label: "keep" }, 400, /not an option/],
 		[{ ask_id: "ask-bbbb", label: "Yes" }, 409, /answered/],
@@ -744,18 +529,12 @@ test("P9e-control: the real bridge's dashboard control delivers, holds, steers, 
 		assert.deepEqual([reply.ok, (reply as { status?: number }).status], [false, code], JSON.stringify(args));
 		assert.match((reply as { error: string }).error, reason);
 	}
-	assert.ok((await op.send("send", { kind: "message", text: "billing?", thread: "  Billing Bug " })).ok);
-	assert.match(await op.seen("billing?"), new RegExp(`^billing\\?\\n\\n${MARK}; thread=billing-bug\\]$`), "the tag is normalized in the footer");
-	for (const thread of ["-bad", "x".repeat(33), 7, null]) {
-		const refused = await op.send("send", { kind: "message", text: "bad", thread });
-		assert.match(refused.ok ? "" : refused.error, /thread must be a tag/, String(thread));
-	}
 	assert.equal(readFileSync(join(s.state, "operator", "asks.jsonl"), "utf8"), asksBefore, "a click never records the answer itself");
 	const journal = s.journal();
-	const refused = journal.filter((row) => row.type === "request" && (row.ask_id === "ask-bbbb" || row.ask_id === "ask-cccc" || row.ask_id === "ask-ffff" || row.text === "bad"));
-	assert.equal(refused.length, 7, "every refused frame still has exactly one request line");
+	const refused = journal.filter((row) => row.type === "request" && (row.ask_id === "ask-bbbb" || row.ask_id === "ask-cccc" || row.ask_id === "ask-ffff"));
+	assert.equal(refused.length, 3, "every refused frame still has exactly one request line");
 	for (const row of refused) assert.deepEqual(outcomes(journal, row.id).slice(1), ["refused"], "and one final outcome");
-	assert.equal(op.requests().some((request) => userTexts(request).some((text) => /^(ask-abcd: (keep|Raise)|ask-bbbb|ask-cccc|ask-ffff|bad)\b/.test(text))), false,
+	assert.equal(op.requests().some((request) => userTexts(request).some((text) => /^(ask-abcd: (keep|Raise)|ask-bbbb|ask-cccc|ask-ffff)\b/.test(text))), false,
 		"no refusal reached the model");
 
 	const journalFile = controlJournalFile(s.state);
@@ -898,10 +677,9 @@ test("P9e-control-inbox: the offline inbox and a reloaded queue hand over in tim
 		assert.deepEqual(inbox.split("\n").slice(1), [
 			`- ${closedAt} (dc-20260928100000-00000001): ask-bbbb: Yes (ask-bbbb is answered, no longer open)`,
 			`- ${taggedAt} (dc-20260928103000-0000c0de): later`,
-			"[cp-dashboard dc-20260928103000-0000c0de — from the dashboard; thread=billing-bug]",
 			`- ${inboxAt} (dc-20260928110000-00000002): second`,
 			...(stale ? [`- dropped, held longer than 24 h: ${staleAt} (dc-20260926100000-00000009)`] : []),
-		], "oldest first, each with its time; the closed ask is marked; a held thread tag keeps its marker, untagged lines get none; the stale one listed as dropped, never injected");
+		], "oldest first, each with its time; the closed ask is marked; a legacy thread tag (#588) adds no marker; the stale one listed as dropped, never injected");
 		const after = readFileSync(controlInboxFile(s.state), "utf8").trim().split("\n").map((row) => JSON.parse(row) as Json).slice(rows.length);
 		assert.deepEqual(after.map((row) => [row.type, row.id]).sort(), [["delivered", "dc-20260928100000-00000001"], ["delivered", "dc-20260928103000-0000c0de"],
 			["delivered", "dc-20260928110000-00000002"], ...(stale ? [["dropped", "dc-20260926100000-00000009"]] : [])]);

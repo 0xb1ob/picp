@@ -96,37 +96,6 @@
 .operator-composer-mentions { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
 .operator-composer-mentions > li { min-width: 0; max-width: 100%; padding: 2px 10px; background: var(--nav-selected); color: var(--text); border-radius: 999px; font-size: 12px; overflow-wrap: anywhere; }
 .operator-composer-hint { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-/* Thread pills (chat v2): "# All messages ▾" in the header, "# No thread ▾" in the composer (cp-xmw2). The native
-   select lies transparent over the face, 6 px past it vertically for a 44 px target; 16 px on the phone (no iOS zoom). */
-.thread-pill { position: relative; display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 0; max-width: 240px; height: 32px; padding: 0 12px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; white-space: nowrap; }
-.thread-pill:focus-within { border-color: var(--focus); outline: 2px solid var(--focus); }
-.thread-pill > .thread-pill-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
-.thread-pill > select { position: absolute; inset: -6px 0; width: 100%; max-width: none; min-height: 0; margin: 0; padding: 0; opacity: 0; font: inherit; cursor: pointer; }
-/* New thread (cp-6rsr): a centred 12px-radius dialog at 900 px and up, a bottom sheet below; 44px targets, 16px fields. The scrim is the page colour at reduced opacity. */
-.new-thread-scrim { position: fixed; inset: 0 0 auto 0; height: var(--cp-viewport-height, 100dvh); transform: translateY(var(--cp-viewport-offset, 0px)); z-index: 30; display: flex; align-items: flex-end; justify-content: center; }
-.new-thread-hit { position: absolute; inset: 0; padding: 0; background: var(--page); opacity: 0.7; border: 0; cursor: default; }
-.new-thread { position: relative; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; width: 100%; max-height: 92%; padding: 16px; overflow-y: auto; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px 12px 0 0; }
-.new-thread > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.new-thread > header > h2 { margin: 0; padding: 0; font-size: 16px; font-weight: 600; color: var(--text); }
-.new-thread > p { margin: 0; padding: 0; font-size: 13px; line-height: 20px; color: var(--muted); }
-.new-thread > footer > small { flex: 1; align-self: center; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.new-thread-close { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; background: none; color: var(--muted); border: 0; border-radius: 50%; cursor: pointer; }
-.new-thread label { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12px; color: var(--muted); }
-.new-thread-name { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 12px; background: var(--background); border: 1px solid var(--border); border-radius: 10px; color: var(--dim); }
-.new-thread-name:focus-within, .new-thread textarea:focus { border-color: var(--focus); }
-.new-thread input, .new-thread textarea { box-sizing: border-box; flex: 1; min-width: 0; min-height: 44px; padding: 0; background: none; color: var(--text); border: 0; outline: 0; font: inherit; font-size: 16px; }
-.new-thread textarea { width: 100%; min-height: 88px; padding: 10px 12px; background: var(--background); border: 1px solid var(--border); border-radius: 10px; resize: vertical; overflow-wrap: anywhere; }
-.new-thread > small { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
-.new-thread > small[role=alert] { color: var(--secondary); }
-.new-thread-shown { display: none; }
-.new-thread-chip { display: inline-block; padding: 0 8px; background: var(--nav-selected); color: var(--text); border-radius: 999px; }
-.new-thread-optional { color: var(--dim); }
-.new-thread-grab { align-self: center; width: 36px; height: 4px; margin: -6px 0 2px; background: var(--border); border-radius: 2px; }
-.new-thread > footer > small { display: none; }
-.new-thread > footer { display: flex; justify-content: flex-end; gap: 8px; }
-.new-thread-cancel { display: none; min-height: 44px; padding: 0 16px; background: none; color: var(--muted); border: 0; font: inherit; font-size: 14px; cursor: pointer; }
-.new-thread-create { flex: 1; min-height: 44px; padding: 0 18px; background: var(--text); color: var(--background); border: 0; border-radius: 999px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
-.new-thread-create:disabled { opacity: 0.4; cursor: default; }
 /* Start session (cp-daemon P3): offline only; wraps at 390 px, one row with its lines at 1440 px. */
 .start-session { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
 .start-session-button { min-height: 44px; padding: 0 18px; background: var(--text); color: var(--background); border: 0; border-radius: 999px; font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; }
@@ -149,18 +118,15 @@
  .operator-composer-field { order: 1; }
  .operator-composer-more, .operator-composer-send { order: 2; }
  .operator-composer-options { display: none; }
- /* The top bar's # filter is the same selection (cp-thread); its ⋯ sheet holds the 44 px thread chips. */
- .operator-composer-thread { display: none; }
  .operator-composer-attach, .operator-composer-send, .operator-composer-more > summary { width: 44px; height: 44px; }
  .operator-composer textarea { min-height: 46px; padding: 12px 16px; border-radius: 22px; font-size: 16px; }
  /* The status and file name live in the top bar (dot and ⋯ sheet); only a failure or an unready session speaks here. */
  .operator-composer-delivery:not(.operator-composer-failed) { display: none; }
- .thread-pill > select { font-size: 16px; }
 }
 @media (min-width: 900px) {
  .operator-composer { padding: 12px 16px 16px; }
  .operator-composer > * { max-width: none; }
- /* Chat v2: one rounded box, the field over a footer of attach, # thread, Options and (right) ⋯ and the round send. */
+ /* Chat v2: one rounded box, the field over a footer of attach, Options and (right) ⋯ and the round send. */
  .operator-composer-box { flex-direction: column; align-items: stretch; gap: 4px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; }
  .operator-composer-box:focus-within { border-color: var(--focus); }
  .operator-composer-box textarea { background: none; border: 0; border-radius: 10px; }
@@ -175,13 +141,4 @@
  .decision-card-options { grid-template-columns: repeat(2,minmax(0,1fr)); }
  .decision-card-question h2 { font-size: 26px; line-height: 1.3; max-width: 760px; }
  .awaiting-card .decision-card-dl { grid-template-columns: minmax(0,1fr) minmax(0,3fr); }
-}
-@media (min-width: 900px) {
- .new-thread-scrim { align-items: center; }
- .new-thread { width: min(560px, calc(100vw - 32px)); padding: 20px; border-radius: 12px; }
- .new-thread-grab { display: none; }
- .new-thread-shown { display: inline; }
- .new-thread > footer > small { display: block; }
- .new-thread-cancel { display: block; }
- .new-thread-create { flex: 0 0 auto; }
 }

@@ -43,10 +43,6 @@ export interface SessionEntry {
  project?: string | null;
  /** A cp-bridge notice parsed off its first line (slice F). */
  bridge?: {kind:string; job:string|null; id:string|null; receipt:string|null} | null;
- /** Full transcript (cp-xmw2): the th- id this entry is filed under, by the turn rule (src/viewer/thread-turns.ts). */
- thread?: string;
- /** Full transcript (cp-xmw2): a system entry without a bound job, or the inbox replay. Shown in a thread only inside that thread's own span. */
- shared?: true;
  /** Full transcript: the `ans-` id a `cp_parent answer` call posted (or, on a duplicate, the first one it names). */
  answer_id?: string;
  /** The assistant message's recorded `usage.cost.total`, on its first entry (Stats Parent panel). */
@@ -58,7 +54,7 @@ export interface TranscriptAsk {
  state: "open" | "answered" | "withdrawn"; answer: string | null; answered_at: string | null; reason: string | null;
 }
 /** Composer request and its durable status projection; attachment ids stay on the original body for retry. */
-export type ControlMessageBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; thread?: string; client_id?: string};
+export type ControlMessageBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; client_id?: string};
 export interface ControlPendingSend { id: string; at: string; state: "queued" | "held" | "delivered" | "failed" | "dropped"; reason: string | null; ask_id: string | null; body: ControlMessageBody; /** cp-y43c: queued by the dashboard, not yet handed to the session: Edit and Cancel apply. */ editable?: boolean; /** picp-96n: basename of the listed operator session a Not confirmed send was handed to; never the current one. */ target_session?: string }
 /** `POST /api/operator/queue` (cp-y43c): 200 with the queued message's committed text, or `cancelled`. A refusal for a message already handed over carries `state: "sent"` and the `text` the session was given. */
 export type OperatorQueueResponse = { id: string; state: "queued"; text: string; editable: true } | { id: string; state: "cancelled" };
@@ -127,8 +123,6 @@ export interface ControlSendResponse {
 	id: string; state: "queued" | "delivered" | "held"; deliver: "prompt" | "followUp" | "steer" | "abort";
 	/** cp-y43c: the session was busy, so the dashboard queued it (editable until the session settles and takes it). */
 	editable?: true;
-	/** cp-xmw2: present when the send named a `thread`; `error` says why the dc- id was not filed (the send still stands). */
-	thread?: { tag: string; id: string | null; error: string | null };
 }
 /**
  * `POST /api/operator/start` `{"via": "herdr" | "tmux", "resume"?: true}`: a herdr workspace, or `<tmux> new-session -d -s
@@ -392,18 +386,6 @@ export interface AnswersControlStatusResponse { generated_at: string; enabled: b
 export interface AnswerAckResponse { id: string; state: "acked"; acked_at: string }
 /** `GET /api/skills` (--require-tailnet only): installed pi skills by name; never a SKILL.md body or a directory path. */
 export interface SkillsResponse { generated_at: string; skills: { name: string; description: string; source: "agent" | "home" }[]; skipped: { name: string; reason: string }[]; omitted: number }
-/** cp-xmw2: one operator thread with its derived state (`waiting` null while asks or answers are unreadable). */
-export interface ThreadView {
- id: string; tag: string; state: "open" | "waiting" | "done";
- waiting: { asks: number; answers: number } | null;
- /** `jobs_working`: job refs that are live workers; null while fleet.json is unreadable. */
- counts: { messages: number; asks: number; answers: number; jobs_working: number | null };
- opened_at: string; last_at: string; done_at: string | null;
-}
-/** `GET /api/threads` (--require-tailnet only): the list, and the done CSRF token only while control is on. */
-export interface ThreadsResponse { generated_at: string; availability: SourceAvailability; enabled: boolean; reason: string | null; token: string | null; threads: ThreadView[]; total: number; warning: string | null }
-/** `POST /api/threads/done` accepted: 202 once its `done` line is on disk. */
-export interface ThreadDoneResponse { id: string; state: "done"; done_at: string }
 export interface DecisionsResponse extends AwaitingResponse { decided: DecisionDetail[]; answers: AnswersView }
 /** `ci` in the native vocabulary (green, failed, in_progress); `url` only a plain https link. */
 export interface ForwardedCi { ci: string; observed_at: string; url: string | null }

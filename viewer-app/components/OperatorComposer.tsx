@@ -3,22 +3,18 @@ import { attachmentSize, attachRefusal, CONTROL_TEXT_MAX, type ControlView, cont
 import { Icon } from "./icons.tsx";
 import { StartSession } from "./StartSession.tsx";
 import { restartInFlight } from "../restart-control.ts";
-import type { ThreadsView } from "../threads.ts";
-import { ThreadPicker } from "./ThreadNav.tsx";
 import { composerMentions, matchSkills, mentionAt, type SkillCatalog } from "../skills.ts";
 
 /** The composer's placeholder (chat v2): short enough for the one-row box at 390px, even with the busy ⋯ button. */
 export const COMPOSER_PLACEHOLDER = "Message Operator…";
-/** With a thread selected the placeholder names it: `Message #tag…`. */
-export const composerPlaceholder = (tag?: string | null) => tag ? `Message #${tag}…` : COMPOSER_PLACEHOLDER;
 /** Uploads finish sequentially; failed/unfinished attachments must be removed or resolved before send. */
 type Attachment = {key: number; name: string; bytes: number; text: boolean; state: "uploading" | "ready" | "failed"; id?: string; reason?: string};
 type Picked = {name: string; type: string; size: number};
 /**
  * The Full transcript's composer, into the running operator session. One rounded box (chat v2): the growing textarea
- * over attach, thread, Options, busy ⋯ (steer, confirm-tap abort) and send; one row below 900 px. Up to 8 attachments.
+ * over attach, Options, busy ⋯ (steer, confirm-tap abort) and send; one row below 900 px. Up to 8 attachments.
  */
-export function OperatorComposer({control, draft, thread}: {control:ControlView; draft?:string; thread?:ThreadsView}) {
+export function OperatorComposer({control, draft}: {control:ControlView; draft?:string}) {
  const [text,setText] = useState((draft ?? "").slice(0, CONTROL_TEXT_MAX));
  const [confirmAbort,setConfirmAbort] = useState(false);
  const [attachments,setAttachments] = useState<Attachment[]>([]);
@@ -99,7 +95,7 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
  const send = (deliver?: "followUp" | "steer") => {
   const body = text.trim();
   if (!canSend) return;
-  const extra = {...(deliver ? {deliver} : {}), ...(images.length ? {images} : {}), ...(files.length ? {files} : {}), ...(thread?.selected ? {thread: thread.selected} : {})};
+  const extra = {...(deliver ? {deliver} : {}), ...(images.length ? {images} : {}), ...(files.length ? {files} : {})};
   control.send({kind:"message",text:body,...extra});
   setText("");
   setAttachments([]);
@@ -132,7 +128,7 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
    </ul>}
    <textarea ref={field} aria-label="Message to the operator session" maxLength={CONTROL_TEXT_MAX} rows={1} value={text} disabled={sending}
     aria-autocomplete="list" aria-expanded={listOpen} aria-controls={listOpen ? "operator-composer-skills" : undefined} aria-activedescendant={listOpen ? `operator-composer-skill-${highlighted}` : undefined}
-    placeholder={composerPlaceholder(thread?.selected)} title="Enter sends · Shift+Enter for a new line"
+    placeholder={COMPOSER_PLACEHOLDER} title="Enter sends · Shift+Enter for a new line"
     onPaste={e => {
      // File pastes attach; text in a mixed paste keeps the browser's default.
      const files = [...(e.clipboardData?.files ?? [])];
@@ -155,7 +151,6 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
    {/* The paperclip always leads the footer; disabled, its title says why it cannot attach now. */}
    {control.upload && <button type="button" class="operator-composer-attach" aria-label="Attach files or images" title={upload ? "Attach files or images (or paste/drop)" : status.running ? "This session does not take attachments (⋮ → Restart session)" : "Attachments need a running session"} disabled={sending || !upload} onClick={() => picker.current?.click()}><Icon name="attach"/></button>}
    {upload && <input ref={picker} type="file" accept={controlFiles(status) ? "image/*,.txt,.md,.html,.json" : "image/*"} multiple hidden onChange={e => { const input = e.currentTarget; attach([...(input.files ?? [])]); input.value = ""; }}/>}
-   {thread && <ThreadPicker threads={thread}/>}
    {status.running && status.session_file && <details class="operator-composer-options">
     <summary aria-label="Message options" title="Message options"><span>Options</span><span aria-hidden="true"> ▾</span></summary>
     <div class="operator-composer-options-panel"><p>Delivers to the running session <code>{status.session_file}</code></p></div>
@@ -173,7 +168,7 @@ export function OperatorComposer({control, draft, thread}: {control:ControlView;
   {ready && mentions.known.length > 0 && <ul class="operator-composer-mentions" aria-label="Skills mentioned">{mentions.known.map(name => <li key={name}><code>@{name}</code></li>)}</ul>}
   {ready && unknown.map(name => <p key={name} role="status" class="operator-composer-hint">@{name} is not an installed skill — sent as plain text</p>)}
   {ready && catalog && "error" in catalog && <p role="status" class="operator-composer-hint">skill list unavailable: {catalog.error}</p>}
-  {/* A failure, or a delivered send with a reason (its thread not recorded), is an alert the phone shows too. */}
+  {/* A failure, or a delivered send with a reason, is an alert the phone shows too. */}
   {line && <p role={flagged ? "alert" : "status"} class={flagged ? "operator-composer-delivery operator-composer-failed" : "operator-composer-delivery"}>{line}</p>}
  </section>;
 }
