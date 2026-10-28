@@ -367,6 +367,10 @@ export function daemonFindings(run: FindRun, home: string, unitDir: string, prob
 		findings.push({ check: "service.daemon", severity: "warn", what: (error as Error).message, fix: "rerun cp-install --force (it rewrites data/daemon.json)" });
 	}
 	if (config) findings.push(daemonFinding(run, home, paths, config, probe));
+	// The same probe src/worker-scope.ts runs before it scopes a worker (the outer may not import it).
+	if (config?.backend === "systemd" && run("systemd-run", ["--user", "--scope", "--quiet", "--collect", "--", "true"], home).status !== 0) {
+		findings.push({ check: "service.worker_scope", severity: "warn", what: "systemd-run --user --scope does not start a scope: workers run in cp-daemon's cgroup without a MemoryMax", fix: "check `systemd-run --user --scope true` as this user (it needs the user bus: XDG_RUNTIME_DIR)" });
+	}
 	const legacy = LEGACY_UNITS.filter((name) => existsSync(join(unitDir, name)));
 	if (legacy.length) {
 		findings.push({

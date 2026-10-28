@@ -30,6 +30,8 @@ const SESSION_ENV_KEYS: readonly string[] = [
 	"CP_WORKTREE",
 	"CP_ARTIFACT_PATH",
 	"CP_ASK_OPERATOR",
+	// #576: a suite run inside a scoped worker must never scope its own fake workers.
+	"CP_WORKER_MEMORY_MAX",
 ];
 
 for (const key of SESSION_ENV_KEYS) delete process.env[key];

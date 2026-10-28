@@ -47,6 +47,7 @@ import {
 	type WorkerEvent,
 	type WorkerExit,
 } from "./worker-process.ts";
+import { WORKER_MEMORY_MAX_ENV } from "./worker-scope.ts";
 
 export const DEFAULT_BRIDGE_SETTLE_MS = 120_000;
 /** Immediate deaths before the child is ready. Then stop, don't spin. */
@@ -247,7 +248,8 @@ const RISK_WARNING_TOOLS: readonly string[] = ["cp_dispatch", "cp_send", "cp_pip
 export function parentEnv(home: string, mode: Mode, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {};
 	for (const [key, value] of Object.entries(base)) {
-		if (key.startsWith("CP_") || (STRIPPED_ENV_KEYS as readonly string[]).includes(key)) continue;
+		// cp-daemon's worker limit (#576) is the one CP_* setting the parent needs: it scopes the workers it spawns.
+		if ((key.startsWith("CP_") && key !== WORKER_MEMORY_MAX_ENV) || (STRIPPED_ENV_KEYS as readonly string[]).includes(key)) continue;
 		env[key] = value;
 	}
 	Object.assign(env, NONINTERACTIVE_WORKER_ENV);

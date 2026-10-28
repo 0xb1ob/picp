@@ -290,7 +290,7 @@ export async function install(flags: InstallFlags, ports: InstallPorts): Promise
 	if (models === "fail") return 1;
 	// A kept parent pin leaves the wrapper's own export as it was (an older wrapper carries none): byte-identical.
 	const wrapperParent = models.parent === kept.parent ? wrapped.parent : models.parent;
-	ctx.config = { ...baseConfig, ...(viewerHost ? { viewer_host: viewerHost } : {}), ...(models.parent ? { parent_model: models.parent } : {}) };
+	ctx.config = { ...baseConfig, ...(viewerHost ? { viewer_host: viewerHost } : {}), ...(models.parent ? { parent_model: models.parent } : {}), ...(previousConfig?.worker_memory_max ? { worker_memory_max: previousConfig.worker_memory_max } : {}) };
 
 	// 3d. M1's preflight (docs/service.md §Migration), before anything is written. --no-start leaves a legacy home as is.
 	const legacy = systemd ? legacyPresent(ports, unitDir) : [];

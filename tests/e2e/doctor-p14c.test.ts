@@ -699,6 +699,10 @@ test("P14-doctor-daemon: service.daemon is silent uninstalled, then names a stop
 	runtime({ viewer: { state: "held" } });
 	const ok = await p.doctor();
 	assert.deepEqual([one(ok, "service.daemon")?.severity, one(ok, "viewer")?.severity], ["ok", "ok"]);
+	// #576: no working `systemd-run --user --scope` on a systemd home warns; a working one is silent.
+	assert.deepEqual([one(ok, "service.worker_scope")?.severity, /without a MemoryMax/.test(one(ok, "service.worker_scope")?.what ?? "")], ["warn", true]);
+	writeFileSync(join(box.dir, "systemd-run"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+	assert.equal(one(await p.doctor(), "service.worker_scope"), undefined);
 	runtime({ parent: { state: "failed", result: "start-limit-hit" } });
 	assert.match(one(await p.doctor(), "service.daemon")?.what ?? "", /parent supervisor is failed \(start-limit-hit\) — a crash loop/);
 	runtime({ parent: { state: "failed", result: "exit-code" } });
