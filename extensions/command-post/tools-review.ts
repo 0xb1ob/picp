@@ -110,6 +110,10 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			scope: Type.Optional(StringEnum([...SCOPES], { description: SCOPE_CRITERIA })),
 			risk: Type.Optional(StringEnum([...RISKS], { description: RISK_CRITERIA })),
 			model: Type.Optional(Type.String({ description: "start: planner model override" })),
+			implementer_model: Type.Optional(Type.String({
+				minLength: 1,
+				description: "start/advance/recover: implementer model override (operator-named, explicit; routing allow-list applies). model stays the planner's.",
+			})),
 			wall_clock_seconds: Type.Optional(Type.Integer({
 				minimum: 1, description: "start: wall-clock bound in seconds for both planner and implementer; home/env defaults when omitted",
 			})),
@@ -177,6 +181,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 					...(params.scope ? { scope: params.scope as "S" | "M" | "L" } : {}),
 					...(params.risk ? { risk: params.risk as "low" | "high" } : {}),
 					...(params.model ? { model: params.model } : {}),
+					...(params.implementer_model ? { implementerModel: params.implementer_model } : {}),
 					...(params.wall_clock_seconds !== undefined ? { wallClockSeconds: params.wall_clock_seconds } : {}),
 					...(params.quality ? { quality: params.quality } : {}),
 					...(params.review ? { review: params.review } : {}),
@@ -209,10 +214,11 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 					details: record as unknown as Record<string, unknown>,
 				};
 			}
+			const implementerOptions = params.implementer_model ? { implementerModel: params.implementer_model } : {};
 			const result =
 				params.action === "advance"
-					? await runner.advance(params.research_id)
-					: await runner.recoverShip(params.research_id);
+					? await runner.advance(params.research_id, implementerOptions)
+					: await runner.recoverShip(params.research_id, implementerOptions);
 			refreshWidget(ctx);
 			const payload = {
 				content: [{ type: "text" as const, text: formatAdvance(result) }],

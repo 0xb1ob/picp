@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
-import { COMMAND_POST_EXTENSION, git, readFleet, startPiChild, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, git, readFleet, readRunEvents, startPiChild, treehouseAvailable, waitFor } from "../harness/index.ts";
 import { json, startStack } from "./landing-helpers.ts";
 
 for (const [kind, title] of [["queue", "S28: queued bound PR replays onto its existing branch"], ["armed", "S28: armed bound PR replays onto its existing branch"]] as const) {
@@ -27,6 +27,8 @@ for (const [kind, title] of [["queue", "S28: queued bound PR replays onto its ex
 		const record = await waitFor(() => readFleet(f.home).jobs.find((entry) => entry.job_id === job.id), (entry) => entry?.worker !== undefined, { timeoutMs: 60_000, what: "bound replay reaches worker" });
 		assert.equal(record?.branch, "bound-head");
 		assert.equal(record?.bound_pr?.number, 169);
+		const routed = readRunEvents(f.home, job.id).findLast((event) => event.type === "routing_resolved")?.payload as Record<string, unknown>;
+		assert.deepEqual([routed.source, routed.model], ["override", worker], "the replayed request's model stays the explicit override");
 		assert.equal(git(record!.worktree, "branch", "--show-current"), "bound-head");
 		assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).entries, []);
 	});

@@ -4293,6 +4293,11 @@ to both planner and implementer dispatches through the usual bound resolver.
 The request is persisted across advances and reanchors; omission keeps the
 home/env defaults. Each dispatch result reports its effective `wall_clock_seconds`.
 
+`cp_pipeline start|advance|recover implementer_model` is the operator's explicit
+implementer override (`model` stays the planner's). It is persisted on the pipeline
+record across advances, recover and reanchor, shown in the checkpoint evidence, and
+refused once the implementer exists. `suggested_implementer_model` stays advisory.
+
 **`escalate` is not one exit (cp-n10).** `escalated` is reserved for the
 verdicts that must never reach a human: `policy`, `operational` and
 `operational_persistent`. A `flagged` escalate — the reviewer found the plan
