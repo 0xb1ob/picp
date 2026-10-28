@@ -16,11 +16,15 @@ if [ "${1:-}" = --cp-env ]; then
 fi
 user=cpci
 if ! id "$user" >/dev/null 2>&1; then
-  # -l: skip lastlog/faillog init, which took ~78 s on hosted runners' sparse log files
-  [ "${GITHUB_ACTIONS:-}" = true ] && ls -ls /var/log/lastlog /var/log/faillog >&2 || true
+  # No useradd: it stalled ~80-100 s on some hosted runners for an unknown reason; append the entries directly.
   start=$SECONDS
-  useradd -l --create-home --shell /bin/bash "$user"
-  [ "${GITHUB_ACTIONS:-}" = true ] && echo "ci-as-user: useradd took $((SECONDS - start)) s" >&2 || true
+  id=1002
+  while getent passwd "$id" >/dev/null || getent group "$id" >/dev/null; do id=$((id + 1)); done
+  printf '%s:x:%s:\n' "$user" "$id" >> /etc/group
+  printf '%s:x:%s:%s::/home/%s:/bin/bash\n' "$user" "$id" "$id" "$user" >> /etc/passwd
+  printf '%s:!:19000:0:99999:7:::\n' "$user" >> /etc/shadow
+  mkdir -p "/home/$user" && chown "$user:$user" "/home/$user"
+  [ "${GITHUB_ACTIONS:-}" = true ] && echo "ci-as-user: user setup took $((SECONDS - start)) s" >&2 || true
 fi
 sock=/var/run/docker.sock
 if [ -S "$sock" ] && [ "$(stat -c %g "$sock")" != 0 ]; then
