@@ -512,7 +512,7 @@ test("S15: reviewers receive bounded whole-file snapshots with resolved task pat
 		"docs/legacy.md": "S15_FORK_ONLY\n", "lib/unique.ts": "unique\n",
 		"src/one/util.ts": "one\n", "src/two/util.ts": "two\n",
 		"etc/hosts.md": "S15_ABSOLUTE\n", "x.ts": "S15_HOME\n",
-		"tests/fixtures/big.json": "f".repeat(299_999) + "\n",
+		"tests/fixtures/big.json": "S15_BIG_SENTINEL" + "x".repeat(299_983) + "\n",
 		"lib/core.py": "core = 1\n", "src/core.ts": "export const core = 1;\n",
 	};
 	for (const [path, body] of Object.entries(base)) s.repo.write(path, body);
@@ -569,7 +569,7 @@ test("S15: reviewers receive bounded whole-file snapshots with resolved task pat
 	assert.deepEqual(entries.filter((e) => e.reason === "changed").map((e) => `${e.side}:${e.path}`), ["head", "fork"].flatMap((side) => ["docs/legacy.md", "img.bin", "src/core.ts", "src/run.py", "tests/core.test.ts"].map((path) => `${side}:${path}`)));
 	const context = readFileSync(join(result.scratch, "context.md"), "utf8");
 	assert.match(context, /S15_FORK_ONLY/);
-	assert.doesNotMatch(context, /binary_marker|S15_ABSOLUTE|S15_HOME|ffff/);
+	assert.doesNotMatch(context, /binary_marker|S15_ABSOLUTE|S15_HOME|S15_BIG_SENTINEL/);
 	assert.equal(context.match(/^### /gm)?.length, entries.filter((e) => e.state === "included").length);
 	assert.equal(manifest.used_bytes, entries.filter((e) => e.state === "included").reduce((sum, e) => sum + e.bytes!, 0));
 	assert.ok(context.includes("r".repeat(99)));
