@@ -934,15 +934,17 @@ export class PipelineRunner {
 	 * repeatedly: every transition is guarded by the fact that produces it.
 	 */
 	async advance(researchId: string, options: AdvanceOptions = {}): Promise<AdvanceResult> {
-		const record = this.#setImplementerModel(this.store.require(researchId), options);
-		assertPipelineProjectionReady(this.#options.home, record.ship_id);
+		const stored = this.store.require(researchId);
+		assertPipelineProjectionReady(this.#options.home, stored.ship_id);
 		const recovery = recoveryTarget(this.#options.home, researchId);
-		if (record.superseded_by) {
+		if (stored.superseded_by) {
 			throw new PipelineError(
-				`${researchId} was superseded by ${record.superseded_by} (cp_pipeline reanchor) — its artifact must never reach an ` +
-					`implementer; advance ${record.superseded_by} instead.`,
+				`${researchId} was superseded by ${stored.superseded_by} (cp_pipeline reanchor) — its artifact must never reach an ` +
+					`implementer; advance ${stored.superseded_by} instead.`,
 			);
 		}
+		// Persisted only past the guards: a superseded record must never be written.
+		const record = this.#setImplementerModel(stored, options);
 		const { artifacts, fleet } = this.#options;
 
 		// --- 0. the implementer already has it --------------------------------
@@ -1317,8 +1319,8 @@ export class PipelineRunner {
 	 * Recovery for a failed implementer: same brief, same task file, bounded.
 	 * The research job is never re-run — its findings are not what broke.
 	 */
-	async recoverShip(researchId: string, options: AdvanceOptions = {}): Promise<AdvanceResult> {
-		const record = this.#setImplementerModel(this.store.require(researchId), options);
+	async recoverShip(researchId: string): Promise<AdvanceResult> {
+		const record = this.store.require(researchId);
 		const shipId = record.ship_id;
 		const job = this.#options.fleet.get(shipId);
 		if (!job) throw new PipelineError(`${shipId} was never dispatched — nothing to recover`);

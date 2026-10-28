@@ -27,6 +27,7 @@ import { ReviewApprovalStore } from "../../src/review-approval.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { ReviewRuns, type ReviewWakeup } from "../../src/review-runs.ts";
 import { type Authorizer, formatAdvance, type AdvanceResult, composeImplementationRouting } from "../../src/pipeline.ts";
+import { registerReviewTools } from "../../extensions/command-post/tools-review.ts";
 import {
 	createAgentDir,
 	createScratchHome,
@@ -998,7 +999,8 @@ test(
 		// its artifact must never reach an implementer.
 		const old = b.post.pipeline().store.get(oldResearchId);
 		assert.equal(old?.superseded_by, replacement.id);
-		await assert.rejects(() => b.post.advancePipeline(oldResearchId), /superseded by/);
+		await assert.rejects(() => b.post.advancePipeline(oldResearchId, { implementerModel: b.named }), /superseded by/);
+		assert.equal(b.post.pipeline().store.get(oldResearchId)?.implementer_model, undefined, "#648: a refused advance writes no model");
 
 		// The ledger dep now names the replacement, not the superseded research.
 		assert.deepEqual(await ledger.blockersOf(shipId), [replacement.id]);
@@ -1305,6 +1307,21 @@ test("#648: an operator-named implementer model overrides the rubric at start, a
 	const plain = await handoff(b, steps, { task: BUMP, assessment: CONFIDENT });
 	assert.equal(plain.routed.source, "rubric");
 	assert.doesNotMatch(plain.evidence, /operator-named implementer model/);
+});
+
+/** #648 follow-up: the cp_pipeline tool maps `start implementer_model` onto the record; recover no longer takes one. */
+test("#648: cp_pipeline start carries implementer_model through the tool; recover refuses it", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const b = await bench(t, []);
+	const tools = new Map<string, { parameters: any; execute: (...args: unknown[]) => Promise<{ details: Record<string, any> }> }>();
+	registerReviewTools({ registerTool: (tool: { name: string }) => tools.set(tool.name, tool as never) } as never,
+		{ commandPost: () => b.post, setLive: () => {}, refreshWidget: () => {} } as never);
+	const tool = tools.get("cp_pipeline")!;
+	assert.equal(tool.parameters.properties.implementer_model.maxLength, 128, "the tool caps it like PipelineRecordSchema");
+	const call = (params: Record<string, unknown>) => tool.execute("c", params, undefined, undefined, { hasUI: false, modelRegistry: undefined });
+	const started = (await call({ action: "start", title: "tool start", project: "demo", task: BUMP, delivery: "local", implementer_model: b.named })).details;
+	assert.equal(b.post.pipeline().store.require(started.research_id).implementer_model, b.named);
+	await assert.rejects(call({ action: "recover", research_id: started.research_id, implementer_model: "mock/other" }), /recover takes no `implementer_model`/);
+	await b.post.tearDown(started.research_id, { force: true });
 });
 
 test("P11d-plan-revise: a conversation revise re-gates the plan only once its artifact changes", { skip: SKIP, timeout: 300_000 }, async (t) => {

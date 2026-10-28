@@ -75,7 +75,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			"classify: recommend single vs pipeline vs qa for a task, with reasons (qa means it is a question: use cp_ask). " +
 			"start: create the two jobs (dep-linked) and dispatch the planner. " +
 			"advance: take the next step from what is on disk (gate, close, authorization, implementer dispatch). " +
-			"recover: re-dispatch a failed implementer from the same task file. " +
+			"recover: re-dispatch a failed implementer from the same task file, on the persisted implementer model. " +
 			"reanchor: point a pipeline at a replacement research job (a superseded plan can never reach an implementer; " +
 			"the replacement is re-gated from scratch). " +
 			"classify decides a workflow (how many workers, and whether a plan comes first); scope/risk decide resources " +
@@ -112,7 +112,8 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			model: Type.Optional(Type.String({ description: "start: planner model override" })),
 			implementer_model: Type.Optional(Type.String({
 				minLength: 1,
-				description: "start/advance/recover: implementer model override (operator-named, explicit; routing allow-list applies). model stays the planner's.",
+				maxLength: 128,
+				description: "start/advance: implementer model override (operator-named, explicit; routing allow-list applies). model stays the planner's; recover reuses the persisted one.",
 			})),
 			wall_clock_seconds: Type.Optional(Type.Integer({
 				minimum: 1, description: "start: wall-clock bound in seconds for both planner and implementer; home/env defaults when omitted",
@@ -214,11 +215,16 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 					details: record as unknown as Record<string, unknown>,
 				};
 			}
-			const implementerOptions = params.implementer_model ? { implementerModel: params.implementer_model } : {};
+			if (params.action === "recover" && params.implementer_model) {
+				throw new Error("cp_pipeline recover takes no `implementer_model` — it reuses the persisted one");
+			}
 			const result =
 				params.action === "advance"
-					? await runner.advance(params.research_id, implementerOptions)
-					: await runner.recoverShip(params.research_id, implementerOptions);
+					? await runner.advance(
+						params.research_id,
+						params.implementer_model ? { implementerModel: params.implementer_model } : {},
+					)
+					: await runner.recoverShip(params.research_id);
 			refreshWidget(ctx);
 			const payload = {
 				content: [{ type: "text" as const, text: formatAdvance(result) }],
