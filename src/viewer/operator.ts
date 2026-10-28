@@ -8,7 +8,8 @@
  * reused only for the same home, never killed. A remote seat is ssh or tmux onto this session.
  * With `CP_OPERATOR_VIEWER=service` (the installed `cp-operator` wrapper) `cp-view.service`
  * serves the dashboard and no session viewer starts; `data/operator.json` `model` (dashboard Settings), else its
- * `CP_OPERATOR_MODEL`, becomes pi's `--model` (`operatorModelArgs`: never over an explicit model flag or a resumed session),
+ * `CP_OPERATOR_MODEL`, becomes pi's `--model` (`operatorModelArgs`: never over an explicit model flag or a resumed
+ * session),
  * and its `thinking` becomes `--thinking` (never over an explicit `--thinking` or a resumed session; no env pin).
  * Restart session (cp-aqxl): pi gets `CP_OPERATOR_RELAUNCH_FILE`; when pi exits leaving a marker there that names its
  * own pid (the dashboard restart), pi is relaunched here with exactly `--session <file>`, at most 3 times per 10 min.

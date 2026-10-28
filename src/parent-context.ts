@@ -62,7 +62,10 @@ export function parentModelSetting(home: string): string | undefined {
 	} catch { return undefined; }
 }
 
-/** `data/parent.json` `thinking`: a valid pi level, else undefined (absent, unreadable or invalid = no `--thinking`). */
+/**
+ * `data/parent.json` `thinking`: a valid pi level, else undefined
+ * (absent, unreadable or invalid = no `--thinking`).
+ */
 export function parentThinkingSetting(home: string): ThinkingLevel | undefined {
 	try {
 		const thinking: unknown = JSON.parse(readFileSync(join(home, layoutForHome("multi", home).data, "parent.json"), "utf8"))?.thinking;
