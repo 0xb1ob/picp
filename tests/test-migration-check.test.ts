@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -179,6 +179,28 @@ test("CLI: one cite into a body holding several assertions, or a new short row m
 			assert.doesNotMatch(run.out, /WARN|cites/);
 			assert.match(run.out, /manifest ok/);
 		}
+	} finally {
+		fixture.done();
+	}
+});
+
+test("CLI: a narrowed row fails without a Narrowed: marker naming the uncovered part, and passes with one", () => {
+	const fixture = claimFixture();
+	try {
+		const ledger = join(fixture.git("rev-parse", "--show-toplevel"), "docs/testing-migration/p1.md");
+		const narrowed = (note: string) => {
+			fixture.check(note);
+			writeFileSync(ledger, readFileSync(ledger, "utf8").replace("| mapped |", "| narrowed |"));
+			const run = spawnSync(process.execPath, [CHECKER, "--claim-since", "HEAD"], { cwd: join(ledger, "../../.."), encoding: "utf8" });
+			return { status: run.status, out: run.stdout + run.stderr };
+		};
+		const bare = narrowed(SHORT);
+		assert.equal(bare.status, 1, bare.out);
+		assert.match(bare.out, /tests\/a\.test\.ts: "case one" is narrowed with no `Narrowed:` naming the uncovered part/);
+		assert.doesNotMatch(bare.out, SHORT_FINDING, "a narrowed row is exempt from the claim count");
+		const marked = narrowed(`${SHORT}. Narrowed: the equal check has no consumer`);
+		assert.equal(marked.status, 0, marked.out);
+		assert.match(marked.out, /manifest ok/);
 	} finally {
 		fixture.done();
 	}

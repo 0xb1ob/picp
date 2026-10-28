@@ -80,7 +80,7 @@ const said = (end: End | undefined): string => end?.result?.content?.map((part) 
 const schedule = (id: string, args: Record<string, unknown> | (() => Record<string, unknown>)): MockToolCall =>
 	({ id, name: "cp_schedule", args: typeof args === "function" ? () => args() : args });
 /** Call `id`'s result: `ok` must not be an error, `refused` must be one; either way it matches `pattern`. */
-function checkCall(child: PiChild, id: string, outcome: "ok" | "refused", pattern: RegExp): string {
+function assertCall(child: PiChild, id: string, outcome: "ok" | "refused", pattern: RegExp): string {
 	const end = ends(child).get(id)?.[0];
 	assert.ok(end, `${id}: no tool result`);
 	assert.equal(end.isError === true, outcome === "refused", `${id}: ${said(end)}`);
@@ -201,7 +201,7 @@ test("P13d native migration at parent start: legacy schedules become native revi
 	assert.deepEqual(closedRun, e9Run, "closed runs are untouched (the parent's result delivery aside)");
 	assert.deepEqual(row(e9), e9, "id, name, trigger and recipe are preserved");
 	// Saved pins are run defaults, not a ceiling: a run now overrides them, still with no grant.
-	checkCall(first, "run-e9", "ok", /fired: created cp-/);
+	assertCall(first, "run-e9", "ok", /fired: created cp-/);
 	const e9Open = h.runs().openRun(e9.id)!;
 	assert.deepEqual([e9Open.execution?.effective, e9Open.policy_revision], [{ model: worker, parallelism: 1 }, 3]);
 
@@ -226,8 +226,8 @@ test("P13d native migration at parent start: legacy schedules become native revi
 	assert.match(notice, new RegExp(`${corrupt.id}: needs setup: a legacy grant of ${corrupt.id} is unreadable`));
 	assert.match(notice, new RegExp(`${bare.id}: needs setup: no saved policy or grant template`));
 	assert.ok(row(gated).grant_template, "a skipped schedule keeps its legacy rows readable");
-	checkCall(first, "run-missing", "ok", new RegExp(`\\(${missing.id}\\) skipped: run now not recorded: native migration: needs setup: seed grant`));
-	checkCall(first, "run-cron", "ok", /fired: created cp-/);
+	assertCall(first, "run-missing", "ok", new RegExp(`\\(${missing.id}\\) skipped: run now not recorded: native migration: needs setup: seed grant`));
+	assertCall(first, "run-cron", "ok", /fired: created cp-/);
 	assert.equal(h.mandates().list().length, grants, "neither a refused nor a native fire mints a grant");
 
 	// Open legacy work defers its schedule under its original authority, and holds the marker back.
@@ -235,12 +235,12 @@ test("P13d native migration at parent start: legacy schedules become native revi
 	assert.match(notice, new RegExp(`${byJob.id}: open legacy run or job`));
 	assert.equal(existsSync(join(migrations, "2027-01-schedule-native.done")), false, "a deferred schedule holds the marker back");
 	assert.equal(h.mandates().get(byRun.mandate_id)?.status, "active", "a deferred pointer is not retired");
-	checkCall(first, "run-open", "ok", new RegExp(`legacy run ${oldFire.id} is still open: it continues under its original authority`));
+	assertCall(first, "run-open", "ok", new RegExp(`legacy run ${oldFire.id} is still open: it continues under its original authority`));
 
 	// The add refusals P13c's 12-12 did not carry: nothing is written for any of them.
-	checkCall(first, "cp-other", "refused", /Validation failed for tool "cp_schedule":\n {2}- skill: must be equal to one of the allowed values/);
-	checkCall(first, "no-quote", "refused", /cp_schedule add needs operator_quote/);
-	checkCall(first, "no-repo", "refused", /needs the project's GitHub repo/);
+	assertCall(first, "cp-other", "refused", /Validation failed for tool "cp_schedule":\n {2}- skill: must be equal to one of the allowed values/);
+	assertCall(first, "no-quote", "refused", /cp_schedule add needs operator_quote/);
+	assertCall(first, "no-repo", "refused", /needs the project's GitHub repo/);
 	assert.deepEqual(h.schedules().filter((entry) => ["other-skill", "no quote", "prs"].includes(entry.name)), [], "a refused add writes nothing");
 
 	// A migration-skipped schedule saved natively later, or adopting a saved native revision, keeps no legacy row.
@@ -529,53 +529,53 @@ test("P13d legacy run authority through cp_dispatch: a draining legacy run asks 
 	const codes = (run: ScheduleRun) => runs.run(run.id)!.authority_log.map((r) => [r.use, r.job_id, r.code ?? r.decision]);
 
 	// A timer run asks risk:high under the run's attribution, once across two dispatches.
-	checkCall(parent, "timer", "refused", new RegExp(`schedule-run ${timer.run.id}: risk:high requires operator text`));
-	checkCall(parent, "timer-again", "refused", /risk:high requires operator text/);
+	assertCall(parent, "timer", "refused", new RegExp(`schedule-run ${timer.run.id}: risk:high requires operator text`));
+	assertCall(parent, "timer-again", "refused", /risk:high requires operator text/);
 	const [ask, ...more] = escalations(timer.jobs[0]!.id);
 	assert.deepEqual([ask?.mandate_id, more.length], [timer.run.id, 0], "one ask, attributed to the run");
 	assert.match(ask!.mandate_clause ?? "", new RegExp(`^${timer.run.id} \\(schedule sch-a00001, policy rev 1\\): ask_on includes risk:high$`));
 	assert.ok(ask!.question.includes(`Started by the timer (slot ${at})`), ask!.question);
 
 	// A verified operator start pre-approves its member's dispatch, audited with the click; a hard stop still asks.
-	checkCall(parent, "operator", "ok", /dispatched/);
+	assertCall(parent, "operator", "ok", /dispatched/);
 	assert.deepEqual(escalations(member!.id), [], "no ask for a pre-approved member");
 	const audited = runs.run(started.run.id)!;
 	assert.deepEqual(audited.risk_preapproved.map((r) => [r.job_id, r.decided_by, r.evidence[0]]), [[member!.id, "operator", `fire run_now ${click}`]]);
 	assert.ok(readFileSync(join(h.home, paths.briefFile(member!.id)), "utf8").includes(`Started by the operator via dashboard Run now (request ${click}, ${at})`));
-	checkCall(parent, "dangerous", "refused", new RegExp(`${dangerous!.id}: schedule-run ${started.run.id}: risk:high requires operator text`));
+	assertCall(parent, "dangerous", "refused", new RegExp(`${dangerous!.id}: schedule-run ${started.run.id}: risk:high requires operator text`));
 	assert.match(escalations(dangerous!.id)[0]?.mandate_clause ?? "", /hard stop; no standing approval covers it/);
 	assert.match(escalations(dangerous!.id)[0]?.question ?? "", new RegExp(`Started by the operator via dashboard Run now \\(request ${click}, `));
-	checkCall(parent, "called", "ok", /dispatched/);
+	assertCall(parent, "called", "ok", /dispatched/);
 	assert.deepEqual(runs.run(called.run.id)!.risk_preapproved.map((r) => r.evidence[0]), ["fire run_now call-1"]);
 	assert.ok(readFileSync(join(h.home, paths.briefFile(called.jobs[0]!.id)), "utf8").includes(`Started by the operator via cp_schedule run_now (call call-1, ${at})`));
 
 	// A pre-approved member's review passes with no ask and is audited as a permit, not as a pre-approval.
-	checkCall(parent, "gate", "ok", /./);
+	assertCall(parent, "gate", "ok", /./);
 	assert.deepEqual(codes(started.run).filter((r) => r[1] === member!.id), [["dispatch", member!.id, "permit"], ["review", member!.id, "permit"]]);
 	assert.deepEqual([escalations(member!.id), runs.run(started.run.id)!.risk_preapproved.length], [[], 1], "a review is no new ask and no new pre-approval");
 
 	// Read-only planning in a run passes risk:high with no ask; a writing profile on the same kind still asks.
-	checkCall(parent, "planned", "ok", /dispatched/);
+	assertCall(parent, "planned", "ok", /dispatched/);
 	assert.deepEqual(escalations(research.jobs[0]!.id), [], "read-only planning raises no ask");
-	assert.match(checkCall(parent, "written", "refused", /./), new RegExp(`${research.jobs[1]!.id}: schedule-run ${research.run.id}: risk:high requires operator text`));
+	assert.match(assertCall(parent, "written", "refused", /./), new RegExp(`${research.jobs[1]!.id}: schedule-run ${research.run.id}: risk:high requires operator text`));
 
 	// Org review keeps its dashboard-only clearance: a dashboard start dispatches, a cp_schedule start still asks.
-	checkCall(parent, "org-click", "ok", /dispatched/);
+	assertCall(parent, "org-click", "ok", /dispatched/);
 	assert.deepEqual(runs.run(orgClick.run.id)!.risk_preapproved.map((r) => r.evidence[0]), ["fire run_now sc-org-click"]);
-	checkCall(parent, "org-called", "refused", new RegExp(`${orgCalled.jobs[0]!.id}: schedule-run ${orgCalled.run.id}: risk:high requires operator text`));
+	assertCall(parent, "org-called", "refused", new RegExp(`${orgCalled.jobs[0]!.id}: schedule-run ${orgCalled.run.id}: risk:high requires operator text`));
 	assert.ok(escalations(orgCalled.jobs[0]!.id)[0]?.question.includes(`Started by the operator via cp_schedule run_now (call call-2, ${at})`));
 
 	// Exclusions, the deadline, parallelism and non-members refuse with their codes in the run's audit.
-	checkCall(parent, "excluded", "refused", /ship is excluded/);
+	assertCall(parent, "excluded", "refused", /ship is excluded/);
 	assert.deepEqual(runs.run(excluded.run.id)!.authority_log.map((r) => [r.use, r.code]), [["dispatch", "kind_excluded"]]);
-	checkCall(parent, "pathed", "refused", /path fixtures\/legacy is excluded/);
-	checkCall(parent, "subsystem", "refused", /subsystem docs-site is excluded/);
-	checkCall(parent, "late", "refused", /deadline passed; only same-kind continuation remains/);
+	assertCall(parent, "pathed", "refused", /path fixtures\/legacy is excluded/);
+	assertCall(parent, "subsystem", "refused", /subsystem docs-site is excluded/);
+	assertCall(parent, "late", "refused", /deadline passed; only same-kind continuation remains/);
 	assert.deepEqual([pathed, subsystem, late].map(({ run }) => codes(run)), [[["dispatch", pathed.jobs[0]!.id, "path_excluded"]], [["dispatch", subsystem.jobs[0]!.id, "subsystem_excluded"]], [["dispatch", late.jobs[0]!.id, "deadline_passed"]]]);
-	checkCall(parent, "operator-second", "refused", new RegExp(`${second!.id}: schedule-run ${started.run.id}: run parallelism is full`));
+	assertCall(parent, "operator-second", "refused", new RegExp(`${second!.id}: schedule-run ${started.run.id}: run parallelism is full`));
 	assert.deepEqual(codes(started.run).filter((r) => r[1] !== member!.id), [["dispatch", second!.id, "parallelism_full"], ["dispatch", dangerous!.id, "hard_stop"]]);
 	assert.deepEqual(codes(timer.run), [["dispatch", timer.jobs[0]!.id, "risk_high"], ["dispatch", timer.jobs[0]!.id, "risk_high"], ["dispatch", outsider.id, "not_member"]]);
-	assert.match(checkCall(parent, "outsider", "refused", /./), new RegExp(`${outsider.id}: activated schedule sch-a00001 requires run membership`));
+	assert.match(assertCall(parent, "outsider", "refused", /./), new RegExp(`${outsider.id}: activated schedule sch-a00001 requires run membership`));
 	assert.deepEqual(bytes(h.mandates().file(grant.id)), grantBytes, "no grant spent or mutated");
 
 	// A second process: a pre-activation job dispatches under the grant, then an emptied or unreadable policies file
@@ -590,12 +590,12 @@ test("P13d legacy run authority through cp_dispatch: a draining legacy run asks 
 		{ kind: "tool_calls", calls: [dispatch("missing-member", timer.jobs[0]!.id)] },
 		{ kind: "tool_calls", calls: [{ ...dispatch("corrupt", timer.jobs[0]!.id), args: () => (writeFileSync(policiesFile, "{"), dispatch("corrupt", timer.jobs[0]!.id).args) }] },
 	]);
-	checkCall(later, "legacy", "ok", /dispatched/);
+	assertCall(later, "legacy", "ok", /dispatched/);
 	assert.deepEqual(codes(timer.run).filter((r) => r[1] === legacy.id), [], "a pre-activation job dispatches under the grant, not the run");
-	assert.match(checkCall(later, "missing", "refused", /./), new RegExp(`${timer.run.id}: policy revision missing`));
+	assert.match(assertCall(later, "missing", "refused", /./), new RegExp(`${timer.run.id}: policy revision missing`));
 	assert.deepEqual([runs.runOfJob(outsider.id), bytes(h.mandates().file(grant.id))], [undefined, grantBefore], "a refused half-admitted job: not admitted, no grant touched");
-	assert.match(checkCall(later, "missing-member", "refused", /./), new RegExp(`${timer.run.id}: policy revision missing`));
-	assert.match(checkCall(later, "corrupt", "refused", /./), /schedule policy unreadable/);
+	assert.match(assertCall(later, "missing-member", "refused", /./), new RegExp(`${timer.run.id}: policy revision missing`));
+	assert.match(assertCall(later, "corrupt", "refused", /./), /schedule policy unreadable/);
 });
 
 test("P13d legacy run reads: cp_next keeps a run whose members are all blocked under that run and asks once for a dropped dependency, and cp-view's Decided list keeps a run's basis", { timeout: 180_000 }, async (t) => {
@@ -620,11 +620,11 @@ test("P13d legacy run reads: cp_next keeps a run whose members are all blocked u
 		{ kind: "tool_calls", calls: [job("drop", { action: "drop", job_id: reader!.id, reason: "source gone" })] },
 		{ kind: "tool_calls", calls: [{ id: "next-again", name: "cp_next", args: { project: "demo", full: true } }] },
 	]);
-	checkCall(parent, "dep", "ok", new RegExp(`${synthesis!.id} is now blocked by ${reader!.id}`));
-	const next = checkCall(parent, "next", "ok", /./);
+	assertCall(parent, "dep", "ok", new RegExp(`${synthesis!.id} is now blocked by ${reader!.id}`));
+	const next = assertCall(parent, "next", "ok", /./);
 	assert.match(next, new RegExp(`run ${run.id}: ${synthesis!.id}: waiting on ${reader!.id} \\(run ${run.id}\\)`));
 	assert.doesNotMatch(next, /no active grant covers/);
-	checkCall(parent, "next-again", "ok", /./);
+	assertCall(parent, "next-again", "ok", /./);
 	const store = new EscalationStore({ home: h.home });
 	const asked = store.open().filter((item) => item.dropped_dependency?.job_id === synthesis!.id);
 	assert.equal(asked.length, 1, "a run member's dropped dependency asks once, without a grant");

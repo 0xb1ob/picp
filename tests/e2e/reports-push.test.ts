@@ -333,9 +333,9 @@ test("P22-push-tunnel: a newer quick-tunnel generation or an unreadable runtime 
 	];
 	for (const [value, expected, why] of cases) {
 		writeFileSync(tunnelRuntimeFile(s.stateDir), typeof value === "string" ? value : JSON.stringify(value));
-		const ask = s.asks.open({ ...ASK, question: `${why}?` });
-		await s.settled(ask.id);
-		assert.deepEqual(s.posts.splice(0).map((post) => post.slug).sort(), expected, why);
+		const ask = s.asks.open({ ...ASK, question: `${why}?` }); await s.settled(ask.id);
+		const slugs = s.posts.splice(0).map((post) => post.slug).sort(); assert.ok(slugs.includes("device-a"), `${why}: the legacy one still goes`);
+		assert.deepEqual(slugs, expected, why);
 	}
 });
 

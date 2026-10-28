@@ -235,6 +235,8 @@
 	"tests/viewer-schedule-run-groups.test.ts": 135,
 	"tests/viewer-schedules.test.ts": 786,
 	"tests/viewer-search.test.ts": 85,
+	"tests/viewer-serving-retained.test.ts": 1812,
+	"tests/e2e/viewer-serving.test.ts": 68455,
 	"tests/viewer-sessions-files-render.test.ts": 162,
 	"tests/viewer-sessions-files.test.ts": 194,
 	"tests/viewer-sessions-qa.test.ts": 137,

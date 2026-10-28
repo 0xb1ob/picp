@@ -469,6 +469,7 @@ test("P23-fleet-reconcile: a restarted parent reconciles fleet.json from facts â
 	assert.deepEqual([after["cp-lost"]?.phase, /cannot be revived/.test(after["cp-lost"]?.failure?.message ?? "")], ["failed", true]);
 	assert.equal(after["cp-rep"]?.phase, "held", "an envelope on disk is intaken, never overwritten with a failure");
 	assert.ok(after["cp-rep"]?.reported_at, "intake stamps the report");
+	assert.deepEqual([after["cp-rep"]?.project, after["cp-rep"]?.branch, after["cp-rep"]?.worker.session_id], ["demo", "cp-rep", "sess-cp-rep"], "the intake patch keeps every field it does not name");
 	assert.deepEqual([after["cp-obs"]?.phase, after["cp-obs"]?.failure?.class, after["cp-obs"]?.worker.exited_at, after["cp-obs"]?.worker.exit_code],
 		["failed", "crash", "2026-01-01T00:00:05Z", 137], "an observed close outranks a live pid");
 	assert.deepEqual([after["cp-budget"]?.phase, after["cp-budget"]?.failure?.class], ["failed", "budget_exceeded"], "the recorded class wins over a guess");

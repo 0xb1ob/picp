@@ -85,7 +85,7 @@ test("P19-search: the shell's search lists pages, in-flight and landed jobs from
 	await tab.find("dialog[open]");
 	tab.release();
 	await settle();
-	assert.match(tab.$("dialog")!.textContent!, /Loading/, "late data from a closed dialog cannot appear in a new search");
+	assert.deepEqual([/Loading/.test(tab.$("dialog")!.textContent!), hrefs().filter((h) => h?.startsWith("#job/"))], [true, []], "the new search shows only its own Loading: no closed dialog's late jobs fill it");
 	assert.doesNotMatch(tab.$("dialog")!.textContent!, /unavailable/, "nor can a closed dialog's aborted read");
 	await tab.waitText(/Recently landed/);
 	assert.equal(overview(), 1, "close, cancel and unmount abort their held reads: only the open dialog's read is sent");
