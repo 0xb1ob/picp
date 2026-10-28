@@ -314,13 +314,14 @@ export default function(pi) { pi.on("input", () => {
 });
 
 
-test("S23: decided verdicts reach the provider only for current attempts and live jobs", { timeout: 110_000 }, async (t) => {
-	const variants = ["fresh", "missing", "newer", "pending", "done"];
+test("S23: decided verdicts reach the provider only for current attempts; terminal jobs withhold all but gate", { timeout: 110_000 }, async (t) => {
+	const variants = ["fresh", "missing", "newer", "pending", "done", "done-review"];
 	const text = await carried(t, variants.map((v) => ({ job_id: `cp-v-${v}`,
-		...(v === "done" ? { phase: "done" as const } : {}) })), variants.map((v) => ({
-		kind: "verdict", job: `cp-v-${v}`, body: `S23_VERDICT_${v}`, stamp: { keys: ["gate", "1"] },
+		...(v.startsWith("done") ? { phase: "done" as const } : {}) })), variants.map((v) => ({
+		kind: "verdict", job: `cp-v-${v}`, body: `S23_VERDICT_${v}`,
+		stamp: { keys: v === "done-review" ? ["review", "1"] : ["gate", "1"] },
 	})), (home) => {
-		for (const v of variants.filter((v) => v !== "missing")) {
+		for (const v of variants.filter((v) => v !== "missing" && v !== "done-review")) {
 			for (const attempt of v === "newer" ? [1, 2] : [1]) {
 				writeFileSync(join(home, paths.gateFile(`cp-v-${v}`, attempt)), JSON.stringify({
 					schema_version: 1, job_id: `cp-v-${v}`, attempt, verdict: "pass", cause: "policy",
@@ -335,7 +336,7 @@ test("S23: decided verdicts reach the provider only for current attempts and liv
 			attempt: 2, model: "mock/one", pid: process.pid, started_at: issued,
 			deadline: "2999-01-01T00:00:00Z", handed_back: true }));
 	});
-	assert.deepEqual(variants.filter((v) => text.includes(`S23_VERDICT_${v}`)), ["fresh"]);
+	assert.deepEqual(variants.filter((v) => text.includes(`S23_VERDICT_${v}`)), ["fresh", "done"]);
 });
 
 
