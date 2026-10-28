@@ -29,6 +29,8 @@ import { parentExpandedIds } from "./schedule-expand.ts";
 import { runIsSettled } from "./schedule-runs.ts";
 import { wasDropped } from "./ledger.ts";
 import { advanceSelfReview, isSelfReviewRun, SELF_REVIEW_SKILL, selfReviewRole } from "./schedule-self-review.ts";
+import { nativeRunOf } from "./schedule-native.ts";
+import { type AdvanceResult, formatAdvance } from "./pipeline.ts";
 
 export const RUNNER_DELIVERIES: readonly string[] = ["answer", "board", "local"];
 const SCHEDULE_LABEL = "schedule:";
@@ -57,6 +59,10 @@ export interface RunnerPorts {
 	now: () => Date;
 	log: (line: string) => void;
 	runs?: import("./schedule-runs.ts").ScheduleRunStore;
+	/** A native pipeline anchor's in-code advance (#444); `state` is undefined when the job started no pipeline. */
+	pipeline?: { state: (researchId: string) => string | undefined; advance: (researchId: string) => Promise<AdvanceResult>; handBack: (result: AdvanceResult) => void };
+	/** Wakes the parent with text (an advance that needs a human); absent, the envelope wake is the fallback. */
+	notify?: (text: string, details: Record<string, unknown>) => void;
 }
 
 /** A teardown-shaped outcome on a runner-owned job; anything else (hold, escalate, an escalation raised) is the parent's. */
@@ -73,6 +79,7 @@ export class ScheduleRunner {
 	#swept = false;
 	/** One self-review advance at a time per run: a fire, an envelope and a tick never interleave their writes. */
 	readonly #advancing = new Map<string, Promise<void>>();
+	readonly #pipelineAdvancing = new Map<string, Promise<boolean>>();
 
 	constructor(ports: RunnerPorts) {
 		this.#ports = ports;
@@ -159,6 +166,47 @@ export class ScheduleRunner {
 		return !result.already && this.#claimable(result) && this.#owns(result.job_id);
 	}
 
+	/** Whether a fresh `advance` envelope is a native scheduled pipeline's anchor, advanced here in code (#444). */
+	claimsPipeline(result: IntakeResult): boolean {
+		return !result.already && result.accepted && result.next === "advance" && this.#nativePipelineAnchor(result.job_id);
+	}
+
+	#nativePipelineAnchor(jobId: string): boolean {
+		try {
+			return this.#ports.pipeline?.state(jobId) !== undefined && nativeRunOf(this.#ports.runs, jobId)?.anchor_job_id === jobId;
+		} catch {
+			return false; // unreadable state: the parent's envelope wake
+		}
+	}
+
+	/**
+	 * Advance a claimed pipeline anchor once (serialized per research id). `wait`/`done` wake nobody; `authorize`/`surface`
+	 * notify the parent with the advance text; a throw sends the envelope wake. Returns whether nobody needed waking.
+	 */
+	onPipelineReported(result: IntakeResult): Promise<boolean> {
+		const id = result.job_id, pipeline = this.#ports.pipeline;
+		this.#handled.add(id);
+		if (!pipeline) return Promise.resolve(false);
+		const step = async (): Promise<boolean> => {
+			try {
+				const advanced = await pipeline.advance(id);
+				if (advanced.pending) pipeline.handBack(advanced);
+				this.#ports.log(`schedule runner: pipeline ${id} advanced in code → ${advanced.next} (${advanced.state})`);
+				if (advanced.next !== "authorize" && advanced.next !== "surface") return true;
+				if (this.#ports.notify) this.#ports.notify(formatAdvance(advanced), { ...advanced });
+				else this.#ports.wake(result);
+			} catch (error) {
+				this.#ports.log(`schedule runner: pipeline ${id} did not advance: ${(error as Error).message}; waking the parent`);
+				this.#ports.wake(result);
+			}
+			return false;
+		};
+		const next = (this.#pipelineAdvancing.get(id) ?? Promise.resolve(true)).then(step);
+		this.#pipelineAdvancing.set(id, next);
+		void next.then(() => { if (this.#pipelineAdvancing.get(id) === next) this.#pipelineAdvancing.delete(id); });
+		return next;
+	}
+
 	/** A recipe member is the runner's only on a done envelope: a blocked or failed one is the parent's exception. */
 	#claimable(result: IntakeResult): boolean {
 		return teardownShaped(result) && (result.status === "done" || !this.#selfReviewRunOf(result.job_id));
@@ -197,7 +245,10 @@ export class ScheduleRunner {
 		if (this.#swept) return;
 		this.#swept = true;
 		for (const record of this.#ports.fleetJobs()) {
-			if (record.phase !== "held" || !record.reported_at || this.#handled.has(record.job_id) || !this.#owns(record.job_id)) continue;
+			if (record.phase !== "held" || !record.reported_at || this.#handled.has(record.job_id)) continue;
+			// A native pipeline anchor that reported while no parent was up still owes its gate (#444).
+			const unadvanced = this.#nativePipelineAnchor(record.job_id) && this.#ports.pipeline?.state(record.job_id) === "researching";
+			if (!unadvanced && !this.#owns(record.job_id)) continue;
 			let result: IntakeResult;
 			try {
 				result = await this.#ports.recorded(record.job_id);
@@ -207,7 +258,8 @@ export class ScheduleRunner {
 				result = { job_id: record.job_id, accepted: false, already: true, phase: record.phase, summary: message };
 			}
 			if (this.#handled.has(record.job_id)) continue; // a live onReported took it meanwhile
-			if (this.#claimable(result)) await this.onReported(result);
+			if (unadvanced && result.accepted && result.next === "advance") await this.onPipelineReported(result);
+			else if (!unadvanced && this.#claimable(result)) await this.onReported(result);
 			else {
 				this.#handled.add(record.job_id);
 				this.#ports.wake(result);

@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- Fix: issue 444: a `delivery:pipeline` research `done` envelope now reports `next: advance` (was `teardown`, which got the planner torn down before its gate), and a native scheduled pipeline's anchor is advanced in code when it reports, so its gate starts with no parent turn; a failed advance or an `authorize`/`surface` outcome wakes the parent, and a restart sweeps a reported, unadvanced anchor once. Migration: none.
+
 - Fix: issue 401: the dispatch brief now carries every task addendum frozen up to dispatch time, so an armed job's worker starts with addenda added while it waited. Migration: none.
 
 - #588 (part 2 of 2): the operator threads feature (cp-xmw2) is deleted end to end: `/api/threads*`, the thread journal and views, `cp_parent thread_bind` and `thread`, and the operator note's thread line (part 1, #637, removed the Sessions thread UI). A stale `thread` on `POST /api/operator/message` is accepted and ignored; a legacy `; thread=` marker still parses. Migration: none; `state/operator/threads.jsonl` is left on disk unread, and the main session's `cp_parent` schema changes on its next bridge load. Rollback: revert.

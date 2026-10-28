@@ -8522,6 +8522,9 @@ titled `ship: <title> (<run id>)`, labelled `schedule:<id>` and admitted to the 
 recorded; a replay after a crash finds that ship again by title and never starts a second pipeline. Only a
 failed start wakes the parent. A native pipeline policy needs `limits.child_jobs` ≥ 2 (anchor + ship), and a run
 that cannot admit the ship (closed, or its child cap spent) refuses before the ship job is created.
+When the research anchor files a `done` envelope (`next: advance`), the host advances the pipeline in code (the gate
+starts); only an `authorize`/`surface` outcome or a failed advance wakes the parent; a restart sweeps a reported,
+unadvanced anchor once. Every `delivery:pipeline` research `done` envelope reports `next: advance`, never `teardown`.
 
 #### Native self-review runs (PR3 of the schedules refactor)
 
