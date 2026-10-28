@@ -51,7 +51,10 @@ export interface DrainJob {
 	head: string | null;
 }
 
-/** Why a drain runs: cp-daemon's updater (`auto-update`), an operator's `/cp-drain` (`manual`), or `freeze` (steers implementers to checkpoint). Absent on older records. */
+/**
+ * Why a drain runs: cp-daemon's updater (`auto-update`), an operator's `/cp-drain` (`manual`), or `freeze`
+ * (steers implementers to checkpoint). Absent on older records.
+ */
 export interface DrainCause {
 	reason: "auto-update" | "manual" | "freeze";
 	target_sha?: string;
@@ -130,10 +133,14 @@ export function drainArgs(timeoutS: number, cause?: DrainCause): string {
 	return cause?.reason === "auto-update" ? [timeoutS, "auto-update", cause.target_sha].filter((word) => word !== undefined).join(" ") : String(timeoutS);
 }
 
-/** True while the drain on disk is a freeze; an unreadable record reads false, so a settle keeps today's nudge. */
+/**
+ * True while a freeze drain is draining or drained (the tick can mark it drained before a settle is classified);
+ * timed out (survivors ran past it) or unreadable reads false, so a settle nudges.
+ */
 export function freezing(home: string): boolean {
 	try {
-		return readDrain(home)?.cause?.reason === "freeze";
+		const drain = readDrain(home);
+		return drain?.state !== "timeout" && drain?.cause?.reason === "freeze";
 	} catch {
 		return false;
 	}
@@ -159,7 +166,8 @@ export function inFlightJobs(records: readonly FleetRecord[], head: (jobId: stri
 		.map((record) => ({ job_id: record.job_id, phase: record.phase, lease: record.lease_id ?? record.worktree, head: head(record.job_id) ?? null }));
 }
 
-/** The freeze checkpoint: the pushed `origin/<branch>`, else the worktree HEAD; undefined (head none) when git cannot say. */
+/** The freeze checkpoint: the pushed `origin/<branch>`, else the worktree HEAD; undefined (head none) when git
+ * cannot say. */
 function checkpointHead(record: FleetRecord | undefined): string | undefined {
 	if (!record?.worktree) return undefined;
 	for (const ref of [`origin/${record.branch}`, "HEAD"]) {

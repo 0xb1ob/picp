@@ -32,7 +32,7 @@ async function fixture(t: TestContext, steps: ScriptStep[], raw?: string, timeou
 	};
 }
 
-for (const [index, raw, expected] of [[0, undefined, 150000], [1, '{"compact_at_tokens":150000}', 150000], [2, '{}', undefined]] as const) {
+for (const [index, raw, expected] of [[0, undefined, 150000], [1, '{"compact_at_tokens":175000}', 175000], [2, '{}', undefined]] as const) {
 	test("S25 parent: settings reach bridge status", { timeout: 60_000 }, async (t) => {
 		t.diagnostic(`settings ${index}`);
 		const f = await fixture(t, [{ kind: "text", text: "Ready." }], raw);

@@ -15,6 +15,7 @@ import { UPDATE_HOLD_MAX_MS } from "../../src/update-hold.ts";
 import { CheckpointStore } from "../../src/checkpoint.ts";
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { createScratchHome, createScratchLedger } from "../harness/index.ts";
+import { SpawnSafetyError } from "../../src/worker-manager.ts";
 
 const calls = [
 	{ name: "cp_next", args: {} },
@@ -150,6 +151,24 @@ test("S26: queued and armed dispatches made before the update hold survive a slo
 	const wakes = post.durableWakeups.pending().map((entry) => entry.content).join("\n");
 	assert.doesNotMatch(wakes, /DROPPED|DRAIN FAILED/, "no drop and no failed drain journalled");
 	assert.equal(post.fleet.get(queued.id) ?? post.fleet.get(armed.id), undefined, "nothing was dispatched");
+});
+
+test("S26: an armed dispatch refused by the spawn cap as the update hold turns on stays armed", { timeout: 60_000 }, async (t) => {
+	// Review 2 of PR 667: the hold turned on between the spawn_cap refusal and the enqueue, the queue's hold refusal
+	// fell into the drop branch, and the armed entry was lost. The dispatch seam turns the hold on, then refuses.
+	const home = createScratchHome();
+	const { ledger } = createScratchLedger({ home: home.path });
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	t.after(async () => { await post.shutdown(); home.cleanup(); });
+	const armed = await ledger.create({ title: "armed work", project: "demo", kind: "ship", delivery: "pr" });
+	post.armedDispatches.arm(armed.id, { task: "armed" }, ["cp-landed"]);
+	post.dispatch = async () => {
+		holdUpdate(home.path);
+		throw new SpawnSafetyError("spawn cap reached", { code: "spawn_cap" });
+	};
+	await post.armedDispatches.release();
+	assert.deepEqual([post.armedDispatches.ids(), post.dispatchQueue.ids()], [[armed.id], []], "still armed, never queued");
+	assert.doesNotMatch(post.durableWakeups.pending().map((entry) => entry.content).join("\n"), /DROPPED/);
 });
 
 test("S26: a pipeline advance under the update hold defers the implementer dispatch and never records a failure", { timeout: 60_000 }, async (t) => {

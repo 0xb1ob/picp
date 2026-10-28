@@ -169,11 +169,11 @@ test("P14-doctor-home: a healthy bridge-launched home is green with a fix on eve
 	assert.match(one(bare, "parent.compact_threshold")?.what ?? "", /default 150000/);
 	put(h, `${LAYOUT.data}/parent.json`, '{"compact_at_tokens":0}');
 	assert.equal(one(await p.doctor(), "parent.compact_threshold")?.severity, "warn");
-	put(h, `${LAYOUT.data}/parent.json`, '{"compact_at_tokens":150000}');
+	put(h, `${LAYOUT.data}/parent.json`, '{"compact_at_tokens":175000}');
 	put(h, `${LAYOUT.data}/standing-orders.md`, "# Standing orders\n");
 	put(h, `${LAYOUT.sessions}/cp-parent-context.json`, JSON.stringify({ contextTokens: 42000, lastCompactAt: "2026-09-25T00:00:00Z", lastRotateAt: "2026-09-25T01:00:00Z" }));
 	const parentLines = await p.doctor();
-	assert.match(one(parentLines, "parent.compact_threshold")?.what ?? "", /150000/);
+	assert.match(one(parentLines, "parent.compact_threshold")?.what ?? "", /175000/);
 	assert.match(one(parentLines, "parent.context")?.what ?? "", /42000.*last compact.*last rotate/);
 	assert.match(one(parentLines, "parent.standing_orders")?.what ?? "", /modified/);
 

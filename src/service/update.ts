@@ -47,7 +47,7 @@ import { FleetStore, isPidAlive } from "../fleet.ts";
 import { PACKAGE_ROOT, resolveHome } from "../home.ts";
 import { atomicWriteJson } from "../json-store.ts";
 import { PARENT_CONTROL_BUSY, PARENT_UNSETTLED } from "../parent-diagnostics.ts";
-import { currentHost, ParentHostClient, parentHostPaths } from "../parent-host.ts";
+import { currentHost, ParentHostClient, parentHostPaths, readStopMarker } from "../parent-host.ts";
 import { readStatusFile } from "../run-artifacts.ts";
 import { UPDATE_FAILURES, viewerDown } from "./health.ts";
 import { type DaemonControl, daemonControl } from "./daemon-control.ts";
@@ -160,6 +160,8 @@ export interface UpdatePorts {
 	drain(): DrainRecord["state"] | undefined;
 	/** Jobs with any live worker or script pid (`liveWorkerJobs`): the rollback's no-host guard. */
 	busy(): string[];
+	/** The current host record names no live pid, and no stop by an update closed it: no parent comes back to verify. */
+	noHost(): boolean;
 	/** Live script jobs, and live workers not idle (`restartActivity`): what a restart would cut mid-turn. */
 	activity(): { working: string[]; scripts: string[] };
 	/**
@@ -251,19 +253,18 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 		const answer = await ports.host("drainCancel").catch((error: Error) => ({ text: `drainCancel failed: ${error.message}` }));
 		ports.log(`drain cancel: ${(answer as { text?: string } | null)?.text ?? "no answer"}`);
 	};
-	/** False once a drain found no parent host: nothing to stop, and only the viewer is verified. */
-	let parentRunning = true;
+	// Read from the host record each time, never kept: a run recovering an interrupted no-host apply must see it too.
 	const stopFleet = async (): Promise<string | undefined> => {
 		try {
 			// `by: "update"`: the marker it leaves holds the old supervisor only, never the reload's fresh one.
-			if (parentRunning) await ports.host("stop", { by: "update" });
+			if (!ports.noHost()) await ports.host("stop", { by: "update" });
 		} catch (error) {
 			return `host stop failed: ${(error as Error).message}`;
 		}
 		return ports.daemon.hold();
 	};
 	const verifyUnits = async (): Promise<VerifyResult> => {
-		if (parentRunning) return ports.verify(VERIFY_MS);
+		if (!ports.noHost()) return ports.verify(VERIFY_MS);
 		const deadline = ports.now().getTime() + VERIFY_MS;
 		for (;;) {
 			const down = await ports.viewerDown();
@@ -410,7 +411,6 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 			// No host to drain: nothing runs under it unless a worker or script pid outlived it.
 			const live = ports.busy();
 			if (live.length > 0) return finish("failed", `${NO_HOST} and live worker(s) ${live.join(", ")}; nothing merged or stopped`, { from, to });
-			parentRunning = false;
 		} else {
 			await cancelDrain();
 			// Only the exact refusal, bare (the bridge) or as parentDiagnostic wraps a throwing /cp-drain: every other error stays `failed`.
@@ -431,7 +431,7 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 	save({ phase: "verifying" });
 	const verified = await verifyUnits();
 	if (typeof verified === "string") return rollback(from, to, lock, verified);
-	const noParent = parentRunning ? "" : `; the parent was not running: viewer verified only, the next cp_parent start runs ${short(to)}`;
+	const noParent = ports.noHost() ? `; the parent was not running: viewer verified only, the next cp_parent start runs ${short(to)}` : "";
 	return finish("updated", `${short(from)} → ${short(to)}${lock ? " (npm ci)" : ""}${verified ? `; ${verified.note}` : ""}${noParent}`, { from, to, updated_at: at });
 }
 
@@ -539,6 +539,13 @@ export function hostUpdatePorts(home: string, env: NodeJS.ProcessEnv = process.e
 		},
 		drain: () => readDrain(home)?.state,
 		busy: () => liveWorkerJobs(new FleetStore({ home }).list()),
+		noHost: () => {
+			const { gen, record } = currentHost(paths);
+			if (record && isPidAlive(record.pid)) return false;
+			// A host this or an interrupted update stopped is respawned by the reload's supervisor: verify it.
+			const stop = readStopMarker(paths);
+			return !(stop?.gen === gen && stop.by === "update");
+		},
 		activity: () => restartActivity(new FleetStore({ home }).list(), (jobId) => readStatusFile(home, jobId)?.phase),
 		verify: (timeoutMs) =>
 			verifyRestart(
