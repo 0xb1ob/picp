@@ -6,13 +6,15 @@ import { INBOX_REPLAY_PREFIX, isAskId, parseDashboardText, readUploadMetadata } 
 import { operatorSessionsFile, readOperatorSessions } from "./operator-sessions.ts";
 import { askDetails, evidenceLink } from "./decision-views.ts";
 import { localPaths } from "./linkify.ts";
-import { attachPrChips } from "./pr-chips.ts";
+import { attachPrChips, projectRepos } from "./pr-chips.ts";
+import { parseChangeRequestUrl } from "../forge-url.ts";
+import { projectByRefs, splitReply } from "../reply-split.ts";
 import { decisions } from "./overview-decisions.ts";
 import { parseObject, source, timestamp } from "./overview-read.ts";
 import { modelWindows, operatorContext, parentContext, workerContext } from "./context-usage.ts";
 import { modelText } from "./model-text.ts";
 import { parseSkillLines } from "./skill-mentions.ts";
-import { num, obj, resolveSessionFile, sessionRoots, sidebar, str, type Json, type ViewerState } from "./sessions.ts";
+import { fleetJobs, num, obj, readObject, resolveSessionFile, runtimeRoot, sessionRoots, sidebar, str, type Json, type ViewerState } from "./sessions.ts";
 import { BACKLOG_BYTES, readLines, startOffset } from "./tail.ts";
 
 const sendId = (v: unknown): v is string => typeof v === "string" && /^ps-\d{14}-[a-f0-9]{8}$/.test(v);
@@ -65,12 +67,41 @@ function projectNames(state: ViewerState): Set<string> {
  try { return new Set(readdirSync(join(dirname(state.stateDir),"projects"),{withFileTypes:true}).filter(d => d.isDirectory()).map(d => d.name)); }
  catch { return new Set(); }
 }
-function stampProjects(entries: SessionEntry[], names: Set<string>): void {
+/** Id/URL → project from fleet, ledger labels, asks, escalations and registered repos; never the mandates (they drift). */
+function refProject(state: ViewerState, d: ReturnType<typeof decisions>): (ref: string) => string | undefined {
+ const jobs = new Map<string,string>(), rawLedger = readObject(join(runtimeRoot(state.home),"jobs.json"))?.jobs;
+ for (const j of Array.isArray(rawLedger) ? rawLedger.map(obj) : []) {
+  const label = (Array.isArray(j?.labels) ? j.labels : []).find((l): l is string => typeof l === "string" && l.startsWith("project:"));
+  if (typeof j?.id === "string" && label) jobs.set(j.id,label.slice("project:".length));
+ }
+ for (const j of fleetJobs(state)) { const p = str(j.project); if (p) jobs.set(String(j.job_id),p); }
+ const asks = new Map(d.askHistory.value.map(({ask}) => [ask.id,str(ask.project)]));
+ const escalations = new Map(d.escalations.value.map(e => [String(e.id),(Array.isArray(e.job_ids) ? e.job_ids : []).map(id => jobs.get(String(id))).find(Boolean)]));
+ const repos = [...projectRepos(state)].map(([name,r]) => [name,`${r.kind} ${r.web_base_url}/${r.path}`.toLowerCase()] as const);
+ return ref => {
+  const cr = ref.startsWith("http") ? parseChangeRequestUrl(ref) : undefined, key = cr && `${cr.kind} ${cr.origin}/${cr.path}`.toLowerCase();
+  return key ? repos.find(([,k]) => k === key)?.[0] : jobs.get(ref) ?? asks.get(ref) ?? escalations.get(ref);
+ };
+}
+/**
+ * Operator tier chips: a reply splits into `[project]` sections (src/reply-split.ts), its fallback the project of the
+ * last own message; own messages only lose a leading known `[project] ` header, as before issue 589.
+ */
+function stampSegments(entries: SessionEntry[], names: Set<string>, projectOf: (ref: string) => string | undefined): void {
+ let replyTo: string | undefined;
  for (const e of entries) {
+  if (e.kind === "via" || (e.kind === "say" && e.who === SIDES.you.user)) {
+   const m = /^\[([^\]]+)\] /.exec(e.text), named = m && names.has(m[1]!) ? m[1]! : undefined;
+   if (named && e.kind === "say") { e.project = named; e.text = e.text.slice(m![0].length); }
+   replyTo = named ?? projectByRefs(e.text,{projects:names,projectOf});
+   continue;
+  }
   if (e.kind !== "say") continue;
-  const m = /^\[([^\]]+)\] /.exec(e.text);
-  if (!m || !names.has(m[1]!)) continue;
-  e.project = m[1]!; e.text = e.text.slice(m[0].length);
+  const segments = splitReply(e.text,{projects:names,projectOf,fallback:replyTo});
+  if (segments.length > 1) { e.segments = segments; continue; }
+  const only = segments[0];
+  if (only?.source === "header") e.text = only.text;
+  if (only?.projects.length) e.project = only.projects.join(", ");
  }
 }
 function parseTranscript(state: ViewerState, file: string, sides: {user:string;assistant:string}, backlog = BACKLOG_BYTES): {entries:SessionEntry[];truncated:boolean} {
@@ -155,7 +186,6 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
  }
  const uploadMetadata=readUploadMetadata(state.stateDir,entries.flatMap(e=>e.files ?? []));
  for (const e of entries) if (e.files) e.file_metadata=Object.fromEntries(e.files.flatMap(id=>uploadMetadata.has(id) ? [[id,uploadMetadata.get(id)!]] : []));
- if (sides === SIDES.you) stampProjects(entries, projectNames(state));
  return {entries,truncated:start.offset>0};
 }
 /** The parent session file as the Sessions tier parses it, with a caller-sized tail (Stats reads whole archives). */
@@ -279,6 +309,7 @@ function operatorTranscript(state: ViewerState, wanted: string | null, now: numb
   }
  }
  const d = decisions(state,now), asks = d.askHistory;
+ stampSegments(entries,projectNames(state),refProject(state,d));
  if (asks.availability === "unavailable") warnings.push("asks unavailable");
  const cards = withAskCards(entries,asks.value);
  const window = windowed(cards,(e)=>e.ask?.state === "open");
