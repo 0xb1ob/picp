@@ -198,7 +198,7 @@ test("P19-composer-images: the composer attaches, uploads one at a time, thumbna
 	const d = await viewer(t);
 	const offline = await d.open(OPERATOR);
 	await offline.find(".operator-composer", (s) => /Operator session offline/.test(s.textContent ?? ""));
-	assert.equal(offline.$(".operator-composer-attach"), null, "no running session: no paperclip");
+	assert.equal(offline.$(".operator-composer-attach") === null, true, "no running session: no paperclip");
 	offline.close();
 	const injected = await imageSession(t, d.stateDir, d.root);
 	const tab = await d.open(OPERATOR, /^\/api\/operator\/upload$/);
@@ -258,7 +258,7 @@ test("P19-composer-images: the composer attaches, uploads one at a time, thumbna
 
 	choose(tab, [file(`${"a".repeat(110)}.md`, "", Buffer.alloc(2048, "x"))]);
 	const name = await tab.find(".operator-composer-file-name", (el) => /\.md2 KiB$/.test(el.textContent ?? ""));
-	assert.equal(name.querySelector("img"), null, "a text file shows its name, never a thumbnail");
+	assert.equal(name.querySelector("img") === null, true, "a text file shows its name, never a thumbnail");
 	await until(() => sendDisabled(tab), (off) => !off, "a text file alone can be sent");
 	tab.click(tab.$(".operator-composer-thumb-remove")!);
 	await gone(tab, ".operator-composer-file-name");
@@ -330,7 +330,7 @@ test("P19-composer-keys: Enter sends (a follow-up while busy), Ctrl+Enter too; S
 	busy = false;
 	tab = await tab.reopen();
 	await tab.find(".operator-composer-send", (b) => b.getAttribute("aria-label") === "Send");
-	assert.equal(tab.$(".operator-composer-more"), null, "idle: no steer or abort menu");
+	assert.equal(tab.$(".operator-composer-more") === null, true, "idle: no steer or abort menu");
 	tab.type(field(tab), "hello");
 	await press(tab, field(tab));
 	assert.deepEqual(await sent(1), { kind: "message", text: "hello", deliver: undefined }, "Enter while idle is a plain send");
@@ -389,11 +389,11 @@ test("P19-composer-footer: attach, # thread and a closed Options naming the sess
 	assert.equal(options.querySelector("summary")?.getAttribute("aria-label"), "Message options");
 	assert.match(options.querySelector("summary")?.textContent ?? "", /^Options ▾/);
 	assert.match(options.textContent ?? "", /operator-session\.jsonl/);
-	assert.deepEqual([tab.$(".operator-composer-state")?.textContent, tab.$(".operator-composer-state code"), field(tab).getAttribute("placeholder")], ["Ready", null, "Message Operator…"]);
+	assert.deepEqual([tab.$(".operator-composer-state")?.textContent, tab.$(".operator-composer-state code") === null, field(tab).getAttribute("placeholder")], ["Ready", true, "Message Operator…"]);
 	const picker = await tab.find('select[aria-label="Thread"]');
 	assert.ok(picker.closest(".operator-composer-footer"), "the empty picker sits in the footer, outside Options");
-	assert.equal(picker.closest("details"), null);
-	assert.equal(tab.$(".operator-composer-posting"), null, "the pill names the selection; no status line repeats it");
+	assert.equal(picker.closest("details") === null, true);
+	assert.equal(tab.$(".operator-composer-posting") === null, true, "the pill names the selection; no status line repeats it");
 	assert.deepEqual([picker.closest(".thread-pill")?.querySelector(".thread-pill-label")?.textContent, picker.textContent], ["No thread", "No thread"]);
 	tab.close();
 	tab = await openTab(t, d.port, OPERATOR, new Map([["cp-thread", "new-fixture-thread"]]));
@@ -402,13 +402,13 @@ test("P19-composer-footer: attach, # thread and a closed Options naming the sess
 	write(controlConfigFile(d.stateDir), '{"enabled": false}');
 	tab = await tab.reopen();
 	await tab.waitText(/Dashboard control is off/);
-	assert.equal(tab.$(".operator-composer-options"), null);
+	assert.equal(tab.$(".operator-composer-options") === null, true);
 	rmSync(controlConfigFile(d.stateDir));
 	session.control.stop();
 	await operatorSession(t, d.stateDir, () => true, { sessionFile: () => undefined });
 	tab = await tab.reopen();
 	await tab.find(".operator-composer-state", (s) => s.textContent === "Ready");
-	assert.equal(tab.$(".operator-composer-options"), null, "no empty Options without a destination file");
+	assert.equal(tab.$(".operator-composer-options") === null, true, "no empty Options without a destination file");
 });
 
 test("P19-composer-skills: @ lists the installed skills once; arrows, Enter and Tab insert, Escape closes; unknown tokens hint; no list without a served control", { timeout: 180_000 }, async (t) => {
@@ -435,7 +435,7 @@ test("P19-composer-skills: @ lists the installed skills once; arrows, Enter and 
 	assert.ok(await tab.find('[role="option"][aria-selected="true"]', (o) => /^@test-driven-development/.test(o.textContent ?? "")), "ArrowDown moves the highlight");
 	await press(tab, field(tab));
 	assert.equal(await until(() => field(tab).value, (v) => v.endsWith(" "), "the insert"), "please @test-driven-development ", "Enter inserts @name and a space");
-	assert.equal(tab.$('[role="listbox"]'), null, "the list closes after the insert");
+	assert.equal(tab.$('[role="listbox"]') === null, true, "the list closes after the insert");
 	assert.deepEqual(texts(tab, ".operator-composer-mentions li"), ["@test-driven-development"]);
 	assert.equal(messages(tab), 0, "Enter with the list open never sends");
 	await press(tab, field(tab));
@@ -458,7 +458,7 @@ test("P19-composer-skills: @ lists the installed skills once; arrows, Enter and 
 	for (const [text, caret] of [["mail a@b.com"], ["hi @te ", 7], ["@Te"]] as Array<[string, number?]>) {
 		typeAt(tab, field(tab), text, caret);
 		await settle();
-		assert.equal(tab.$('[role="listbox"]'), null, `${text}: an email, a finished token or a capital opens no list`);
+		assert.equal(tab.$('[role="listbox"]') === null, true, `${text}: an email, a finished token or a capital opens no list`);
 		if (text === "mail a@b.com") assert.deepEqual(hints(), [], "an email is never hinted");
 	}
 	typeAt(tab, field(tab), "hi @te there", 6);
@@ -476,7 +476,7 @@ test("P19-composer-skills: @ lists the installed skills once; arrows, Enter and 
 	const plain = await refused.open(OPERATOR);
 	await until(() => plain.requests.filter((r) => r.path.startsWith("/api/sessions")).length, (n) => n > 0, "the transcript read");
 	await settle();
-	assert.equal(plain.$("textarea"), null, "so no composer can hint a refused catalogue");
+	assert.equal(plain.$("textarea") === null, true, "so no composer can hint a refused catalogue");
 });
 
 // ---- the transcript as a chat ---------------------------------------------------------------------------------------
@@ -542,7 +542,7 @@ test("P19-transcript-chat: own bubbles right, the session's left, grouped under 
 	assert.ok([...md.querySelectorAll("p")].some((p) => p.textContent === "| not a table |\nplain"), "a pipe line without a rule stays text");
 	assert.ok([...md.querySelectorAll("p")].some((p) => p.textContent === "one\ntwo"), "a paragraph keeps its line break");
 	assert.ok([...md.querySelectorAll("p")].some((p) => p.textContent === "<script>alert(1)</script>"), "HTML stays literal text");
-	assert.equal(tab.root.querySelector("script"), null);
+	assert.equal(tab.root.querySelector("script") === null, true);
 	assert.equal(bubbles[3]!.querySelector("pre.md-code > code")?.textContent, "unclosed", "an unclosed fence runs to the end");
 	assert.equal(tab.$(".session-system")?.getAttribute("class"), "session-message session-notice session-system", "compaction is a compact system row");
 	assert.match(tab.$(".session-system")?.textContent ?? "", /Context compacted \(182000 tokens before\)/);
@@ -575,7 +575,7 @@ test("P19-transcript-media: a dashboard bubble's upload ids are thumbnails that 
 	assert.deepEqual([link.getAttribute("href"), link.getAttribute("target"), link.getAttribute("rel")], [`/api/operator/uploads/${TX}`, "_blank", "noopener noreferrer"]);
 	assert.deepEqual([link.querySelector("span")?.textContent, link.querySelector("small")?.textContent], [LONG_NAME, "2 KiB"], "the audit line's name and size");
 	assert.equal(link.closest(".session-bubble")!.querySelector("pre code")?.textContent, "<script>alert(1)</script>\n```\n~~~~", "a longer fence holds shorter ones as code");
-	assert.equal(tab.root.querySelector("script"), null);
+	assert.equal(tab.root.querySelector("script") === null, true);
 	const css = await servedCss(d);
 	assert.match(css, /\.session-images\{[^}]*flex-wrap:wrap/, "tiles wrap inside the bubble at 390 px");
 	assert.match(css, /\.session-image\{[^}]*width:96px;height:96px;object-fit:cover/);
@@ -619,7 +619,7 @@ test("P19-transcript-scroll: the transcript stays pinned to the bottom unless sc
 	};
 	await tab.waitText(/a1/);
 	assert.equal(await until(() => scroller().scrollTop, (top) => top === 600, "the open at the newest"), 600, "opens at the newest entry");
-	assert.equal(pill(), null);
+	assert.equal(pill() === null, true);
 	await grow(1100);
 	assert.equal(await until(() => scroller().scrollTop, (top) => top === 700, "the re-pin after late layout"), 700, "late layout keeps a pinned transcript at the bottom");
 	scroller().scrollTop = 200;
@@ -633,7 +633,7 @@ test("P19-transcript-scroll: the transcript stays pinned to the bottom unless sc
 	tab.click(pill()!);
 	await settle();
 	assert.equal(await until(() => scroller().scrollTop, (top) => top === 800, "the pill's jump"), 800, "the pill jumps to the latest");
-	assert.equal(pill(), null, "and goes away");
+	assert.equal(pill() === null, true, "and goes away");
 	await more("a4", 1400);
 	const repinned = () => [tab.$$(".session-bubble").some((b) => b.textContent?.includes("a4")), scroller().scrollTop] as const;
 	assert.deepEqual(await until(repinned, ([shown, top]) => shown && top === 1000, "a4 rendered and the re-pin"), [true, 1000], "pinned again: the next entry scrolls into view");
@@ -644,10 +644,10 @@ test("P19-transcript-scroll: the transcript stays pinned to the bottom unless sc
 	assert.equal(long!.querySelector(".session-notice-more")!.textContent, "Show more (4 lines)");
 	tab.click(long!.querySelector(".session-notice-more")!);
 	assert.match(await until(() => long!.querySelector(".session-notice-rest p")!.textContent!, (s) => s.includes("RELAY-10"), "the rest"), /RELAY-6\nRELAY-7\nRELAY-8\nRELAY-9\nRELAY-10$/);
-	assert.equal(long!.querySelector(".session-notice-more"), null);
+	assert.equal(long!.querySelector(".session-notice-more") === null, true);
 	tab.click(short!.querySelector(".session-notice-line")!);
 	await until(() => short!.querySelector(".session-notice-rest"), Boolean, "the short relay opened");
-	assert.equal(short!.querySelector(".session-notice-more"), null, "nothing to hide, no Show more");
+	assert.equal(short!.querySelector(".session-notice-more") === null, true, "nothing to hide, no Show more");
 });
 
 test("P19-transcript-css: phone pills reach 84% and cards the column; desktop one 820 px column, 670 px cards, 72% pills; code and tables scroll inside; one light palette on Sessions and Report", { timeout: 120_000 }, async (t) => {
@@ -777,7 +777,7 @@ test("P19-bridge-notice: a wake is one collapsed row (chip once, job linked, tog
 	assert.deepEqual([row.textContent, toggle().getAttribute("aria-expanded"), toggle().getAttribute("aria-label")], ["bridgewoke cp-xrhq· owner observednotice ▸", "false", "Show notice"], "one row: chip, verb, job, receipt, toggle");
 	assert.equal(tab.$$(".session-bridge-chip").length, 1);
 	assert.equal(row.textContent!.match(/bridge/g)?.length, 1, "the word bridge appears once: the chip");
-	assert.equal(tab.$(".session-bridge .session-who"), null, "no separate who/tag line");
+	assert.equal(tab.$(".session-bridge .session-who") === null, true, "no separate who/tag line");
 	assert.equal(row.querySelector(".session-bridge-what a")?.getAttribute("href"), "#job/cp-xrhq", "the job opens Job detail");
 	assert.equal(row.querySelector("button.session-notice-line")?.textContent, "notice ▸", "the toggle sits inside the row");
 	assert.doesNotMatch(tab.root.innerHTML, /Mobile chat layout|pull\/357/, "the body stays hidden");
@@ -840,7 +840,7 @@ test("P19-bridge-steps: a wake and the calls after it are one run of steps; noti
 	assert.deepEqual([shapes.$$(".session-steps .session-bridge").length, shapes.$$(".session-bridge").length], [0, 1], "a notice no calls follow stays a standalone row");
 	shapes.click(shapes.$(".session-tools-toggle")!);
 	await until(() => toolTexts(shapes).length, (n) => n === 1, "Tools on");
-	assert.deepEqual([pills(shapes), shapes.$$(".session-steps-open .session-steps-card").length, shapes.$(".session-steps-link")], [[], 1, null], "no pills; the run's card; no job link without a recorded job");
+	assert.deepEqual([pills(shapes), shapes.$$(".session-steps-open .session-steps-card").length, shapes.$(".session-steps-link") === null], [[], 1, true], "no pills; the run's card; no job link without a recorded job");
 });
 
 test("P19-tools-sheet: the ⋯ sheet's tool toggle is the same remembered choice; pinned decisions collapse to one bar and close after a click; the 390 px toggle and notice rules hold at 1440", { timeout: 120_000 }, async (t) => {

@@ -484,5 +484,5 @@ test("P22-stats-flow: a refused Custom range is corrected in place, and an older
 	await until(() => oldSettled, Boolean, "the older answer");
 	await new Promise((done) => setImmediate(done));
 	assert.equal(spend(), "$4.00", "the older query's $3.00 never lands");
-	assert.equal(tab.$(".stats-from input"), from);
+	assert.ok(tab.$(".stats-from input") === from, "the From input is the same element, never remounted");
 });

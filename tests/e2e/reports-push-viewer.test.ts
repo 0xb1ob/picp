@@ -319,7 +319,7 @@ test("P22-push-ui-phases: More's Notifications says why it cannot turn on, with 
 	const s = await rig(t);
 	const tab = await s.viewer.open("#awaiting");
 	await tab.find("nav");
-	assert.equal(tab.$("section.more-push"), null, "no Notifications control off More");
+	assert.equal(tab.$("section.more-push") === null, true, "no Notifications control off More");
 	const phase = async (staged: Staged, meta: RegExp, home = s) => {
 		const page = await more(await openTab(t, home.viewer.port, "#awaiting"), device(), staged);
 		await page.section();
@@ -458,5 +458,5 @@ test("P22-push-http-oversize: an oversize push body gets a readable 413, a bound
 	assert.equal(huge.written, false, "past the bound the server stops reading and closes");
 	const stalled = await post(1024 * 1024, Buffer.alloc(0), true);
 	assert.match(stalled.reply, /^HTTP\/1\.1 413 /);
-	assert.ok(BODY_DISCARD_IDLE_MS >= 5000 && stalled.held >= BODY_DISCARD_IDLE_MS - 500, `held ${stalled.held} ms: closed by the idle timer, not at once`);
+	assert.ok(BODY_DISCARD_IDLE_MS >= 5000 && stalled.held >= BODY_DISCARD_IDLE_MS - 500 && stalled.held < BODY_DISCARD_IDLE_MS + 15_000, `held ${stalled.held} ms: closed by the idle timer, not at once`);
 });
