@@ -14,6 +14,7 @@ if [ "${1:-}" = --cp-env ]; then
   while IFS= read -r -d '' kv; do export "$kv" 2>/dev/null || true; done < "$2"
   rm -f "$2"; shift 2
 fi
+if [ "${GITHUB_ACTIONS:-}" = true ]; then PS4='+ ${EPOCHREALTIME} '; set -x; fi # after the env load: xtrace would print secrets
 user=cpci
 id "$user" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash "$user"
 sock=/var/run/docker.sock
