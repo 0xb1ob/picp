@@ -14,9 +14,14 @@ if [ "${1:-}" = --cp-env ]; then
   while IFS= read -r -d '' kv; do export "$kv" 2>/dev/null || true; done < "$2"
   rm -f "$2"; shift 2
 fi
-if [ "${GITHUB_ACTIONS:-}" = true ]; then PS4='+ ${EPOCHREALTIME} '; set -x; fi # after the env load: xtrace would print secrets
 user=cpci
-id "$user" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash "$user"
+if ! id "$user" >/dev/null 2>&1; then
+  # -l: skip lastlog/faillog init, which took ~78 s on hosted runners' sparse log files
+  [ "${GITHUB_ACTIONS:-}" = true ] && ls -ls /var/log/lastlog /var/log/faillog >&2 || true
+  start=$SECONDS
+  useradd -l --create-home --shell /bin/bash "$user"
+  [ "${GITHUB_ACTIONS:-}" = true ] && echo "ci-as-user: useradd took $((SECONDS - start)) s" >&2 || true
+fi
 sock=/var/run/docker.sock
 if [ -S "$sock" ] && [ "$(stat -c %g "$sock")" != 0 ]; then
   gid=$(stat -c %g "$sock")
