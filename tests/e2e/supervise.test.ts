@@ -182,3 +182,36 @@ test("P14-supervise: attach-first parent supervisor — model choice, stop and d
 	blocked.child.kill("SIGTERM");
 	assert.equal(await blocked.exit, 0);
 });
+
+test("P14-supervise-update-stop: an updater's stop or a pre-537 marker never holds a fresh supervisor", { timeout: 300_000 }, async (t) => {
+	// Issue 537 revise: the updater's own host stop writes the stop marker too. The reload's fresh supervisor must
+	// respawn the parent over it; only `by: "operator"` holds startup. A marker without `by` (an old host) never does.
+	const u = home(t);
+	u.put(`${LAYOUT.data}/parent.json`, { model: "file/m" });
+	const old = supervisor(t, u.h);
+	await until("the first start", () => old.saw("started parent") > 0, old.log);
+	const client = await ParentHostClient.connect(u.host().record!);
+	await client.request("stop", { by: "update" });
+	await client.closed;
+	assert.deepEqual([readStopMarker(u.paths)?.gen, readStopMarker(u.paths)?.by], [1, "update"]);
+	await until("the old supervisor's hold through the update window", () => old.saw(`generation 1: ${POLL}`) > 0, old.log);
+	old.child.kill("SIGTERM");
+	assert.equal(await old.exit, 0);
+	const fresh = supervisor(t, u.h);
+	await until("the respawn after the update", () => fresh.saw("started parent") > 0, fresh.log);
+	assert.equal(u.host().gen, 2, "the reload's supervisor respawned the parent");
+	assert.equal(fresh.saw("waiting without spawning"), 0, fresh.log());
+
+	// The transition update runs the old update.ts against an old host: its marker has no `by`.
+	const second = await ParentHostClient.connect(u.host().record!);
+	await second.request("stop");
+	await second.closed;
+	assert.equal(readStopMarker(u.paths)?.by, "operator", "a stop with no option is the operator's");
+	u.put(`${LAYOUT.state}/parent-host.stopped.json`, { gen: 2, at: new Date().toISOString() });
+	await until("the held supervisor", () => fresh.saw(`generation 2: ${POLL}`) > 0, fresh.log);
+	fresh.child.kill("SIGTERM");
+	assert.equal(await fresh.exit, 0);
+	const after = supervisor(t, u.h);
+	await until("the respawn over a pre-537 marker", () => after.saw("started parent") > 0, after.log);
+	assert.equal(u.host().gen, 3);
+});

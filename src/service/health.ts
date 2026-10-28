@@ -177,7 +177,8 @@ export function hostProbes(options: HostProbeOptions): HealthProbes {
 			const paths = parentHostPaths(home, "multi");
 			const { gen, record } = currentHost(paths);
 			// An intended pause, not an outage: the stop marker names this dead generation.
-			if (record && !isPidAlive(record.pid) && readStopMarker(paths)?.gen === gen) return { skip: `operator stop closed generation ${gen}` };
+			const stop = record && !isPidAlive(record.pid) ? readStopMarker(paths) : undefined;
+			if (stop?.gen === gen && stop.by === "operator") return { skip: `operator stop closed generation ${gen}` };
 			if (!record || !isPidAlive(record.pid)) return failed("no parent host is running");
 			const client = await ParentHostClient.connect(record, 3_000).catch(() => undefined);
 			if (!client) return failed(`parent host pid ${record.pid} does not answer`);

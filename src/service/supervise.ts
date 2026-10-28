@@ -5,8 +5,9 @@
  * generation, a live foreign lock refuses, a live-but-silent host is never
  * replaced — it only decides when cp-daemon should try again:
  *
- *  - startup joins or spawns, except over a dead generation the stop marker names (an operator stop survives a
- *    reload or a reboot): it waits, as after a host loss, for the generation `cp_parent start` makes;
+ *  - startup joins or spawns, except over a dead generation an operator's stop marker names (`by: "operator"`;
+ *    an updater's stop or a pre-537 marker without `by` respawns): it waits, as after a host loss, for the
+ *    generation `cp_parent start` makes;
  *    a host running no parent gets `start` with
  *    `CP_PARENT_MODEL`, else `data/parent.json` `model` (dashboard Settings), else the saved
  *    `cp-parent-control.json` model, else the supervisor exits 78 (`RestartPreventExitStatus=78`: no crash loop).
@@ -58,6 +59,8 @@ export interface SupervisePorts {
 	current(): { gen: number; record?: HostRecord };
 	/** The generation the last completed operator stop closed. */
 	stoppedGen(): number | undefined;
+	/** That generation only when an operator closed it (`by: "operator"`): an updater's or a pre-537 stop is not. */
+	operatorStoppedGen(): number | undefined;
 	draining(): boolean;
 	/** `state/drain.json` when readable; absent or unreadable is undefined (an unreadable one keeps the wait). */
 	drainRecord(): DrainRecord | undefined;
@@ -87,8 +90,9 @@ export async function supervise(options: SuperviseOptions, ports: SupervisePorts
 	let client: HostClient | undefined;
 	let foreignLogged = false;
 	// A fresh supervisor (an update's reload, a reboot) never respawns a generation an operator stop closed.
+	// The updater's own stop is `by: "update"`: that reload must respawn the parent.
 	const startup = ports.current();
-	const stopped = startup.record !== undefined && !ports.alive(startup.record.pid) && ports.stoppedGen() === startup.gen;
+	const stopped = startup.record !== undefined && !ports.alive(startup.record.pid) && ports.operatorStoppedGen() === startup.gen;
 	if (stopped) {
 		const next = await reattach(startup.gen, ports);
 		if (!next) return 1;
@@ -180,6 +184,10 @@ export function hostPorts(home: string, overrides: Partial<SupervisePorts> = {})
 		connect: (record) => ParentHostClient.connect(record),
 		current: () => currentHost(paths),
 		stoppedGen: () => readStopMarker(paths)?.gen,
+		operatorStoppedGen: () => {
+			const marker = readStopMarker(paths);
+			return marker?.by === "operator" ? marker.gen : undefined;
+		},
 		draining: () => existsSync(drainFile(home)),
 		drainRecord: () => {
 			try {

@@ -247,7 +247,8 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 	let parentRunning = true;
 	const stopFleet = async (): Promise<string | undefined> => {
 		try {
-			if (parentRunning) await ports.host("stop", {});
+			// `by: "update"`: the marker it leaves holds the old supervisor only, never the reload's fresh one.
+			if (parentRunning) await ports.host("stop", { by: "update" });
 		} catch (error) {
 			return `host stop failed: ${(error as Error).message}`;
 		}

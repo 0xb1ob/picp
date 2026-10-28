@@ -277,7 +277,7 @@ test("P14-health-stopped: an operator stop is a pause, not a parent outage", { t
 	const first = await h.run(T0, env);
 	assert.deepEqual([state(first.record, "parent"), first.record.checks.parent?.fails], ["ok", 1], "no host yet: one failed run is a blip");
 	record(1);
-	writeFileSync(join(h.stateDir, "parent-host.stopped.json"), JSON.stringify({ gen: 1, at: "2026-09-28T10:00:00Z" }));
+	writeFileSync(join(h.stateDir, "parent-host.stopped.json"), JSON.stringify({ gen: 1, at: "2026-09-28T10:00:00Z", by: "operator" }));
 	for (let i = 1; i < 3; i++) {
 		const paused = await h.run(T0 + i * 5 * MIN, env);
 		assert.match(paused.out, /parent: skipped \(operator stop closed generation 1\)/);

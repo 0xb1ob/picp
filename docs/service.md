@@ -471,11 +471,12 @@ not started by a relaunching `cp-operator` (no `CP_OPERATOR_RELAUNCH_FILE`) repo
 ## Stop, drain, restart
 
 - **Stopping the fleet stays `cp_parent drain` + `cp_parent stop`.** A
-  completed `stop` writes `state/parent-host.stopped.json` `{gen, at}` before
+  completed `stop` writes `state/parent-host.stopped.json` `{gen, at, by}` before
   the host exits; the supervisor then waits without spawning (polling every
   10 s) and joins a newer generation when `cp_parent start` makes one. A fresh supervisor (an update's
-  `reload`, a `cp-daemon restart`, a reboot) does the same over a dead generation the marker names, and the
-  health check skips `parent` while it stands.
+  `reload`, a `cp-daemon restart`, a reboot) does the same over a dead generation an operator stop
+  (`by: "operator"`) closed, and the health check skips `parent` while it stands. The updater's own stop is
+  `by: "update"` and a marker written before #537 has no `by`: neither holds a fresh supervisor.
 - While `state/drain.json` exists, a host loss also waits without spawning.
   A boot starts regardless: the boot is the restart the drain prepared, and
   the parent's `session_start` reports and clears it.
@@ -581,9 +582,9 @@ one result in `state/update.json` (its only writer):
 - **no parent host** (#537): a drain that finds no live host record (`no parent host is running`, e.g. after
   `cp_parent stop`) counts as drained when no worker or script pid is live; a live one is `failed` and nothing is
   merged. It skips the host `stop`, verifies the viewer only (no `/doctor` without a parent), and the `updated`
-  detail says the parent was not running. The reload's fresh supervisor honours the stop marker, so the parent
+  detail says the parent was not running. The reload's fresh supervisor honours the operator's stop marker, so the parent
   stays down until the operator's next `cp_parent start`, which runs the new code;
-- **update:** host `stop` (unlanded sends stay queued; the stop marker keeps the supervisor from
+- **update:** host `stop` `{by: "update"}` (unlanded sends stay queued; the stop marker keeps the old supervisor from
   respawning), cp-daemon `hold` (the viewer stops and stays down), `git merge --ff-only <to>`, `npm ci` only
   when `package-lock.json` changed, cp-daemon `reload` (a new inner on the new code: the supervisor starts a
   fresh host, the viewer restarts, the hold is released);

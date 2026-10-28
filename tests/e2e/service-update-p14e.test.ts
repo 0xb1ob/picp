@@ -164,7 +164,7 @@ test("P14e-update-forward: ff, npm ci on a lockfile change, reload", { timeout: 
 	assert.equal(state?.last_result, "updated", last(b));
 	assert.deepEqual([b.repo.head(), b.repo.head("origin/main")], [to, to]);
 	assert.deepEqual({ from: state?.from, to: state?.to, phase: state?.phase, lock: state?.lock }, { from, to, phase: "idle", lock: false });
-	assert.deepEqual(b.calls(), ["host drain [600]", "host stop [{}]", "daemon hold", "daemon reload"], "no npm ci");
+	assert.deepEqual(b.calls(), ["host drain [600]", "host stop [{\"by\":\"update\"}]", "daemon hold", "daemon reload"], "no npm ci; an updater stop, never an operator one");
 	assert.deepEqual(b.causes(), [{ reason: "auto-update", target_sha: to }]);
 	b.reset();
 	advanceBase(b.repo, "package-lock.json", "{\"v\":2}\n");
@@ -304,14 +304,14 @@ test("P14e-update-rollback: rolled back, sticky, held", { timeout: 300_000 }, as
 	r.plan({ drainStates: ["drained", "draining"], doctor: ["error:DOCTOR broken"], onDoctor: { files: [{ path: join(r.stateDir, "fleet.json"), text: fleet.fleet }, { path: join(r.home, fleet.statusRel), text: fleet.status }] } });
 	const held = await r.run();
 	assert.deepEqual([held?.last_result, held?.phase, held?.held, held?.bad_sha, r.repo.head()], ["rollback_failed", "rolling_back", true, undefined, rBad], last(r));
-	assert.equal(r.hostCalls().filter((call) => call === "host stop [{}]").length, 1, "only the forward stop: the rollback stopped nothing");
+	assert.equal(r.hostCalls().filter((call) => call === "host stop [{\"by\":\"update\"}]").length, 1, "only the forward stop: the rollback stopped nothing");
 	assert.deepEqual(r.hostCalls().slice(-2), ["host drain [600]", "host drainCancel"], "the rollback drained, timed out, cancelled");
 	r.reset();
 	assert.deepEqual([await r.run(30), r.calls()], [undefined, []], "under 4x interval_min: it waits like a drain timeout");
 	rmSync(join(r.stateDir, "fleet.json"));
 	r.plan({ drainStates: ["drained"] });
 	const done = await r.run(31);
-	assert.deepEqual([done?.last_result, done?.held, done?.bad_sha, r.repo.head(), r.hostCalls()], ["rolled_back", undefined, rBad, rFrom, ["host drain [600]", "host stop [{}]"]], last(r));
+	assert.deepEqual([done?.last_result, done?.held, done?.bad_sha, r.repo.head(), r.hostCalls()], ["rolled_back", undefined, rBad, rFrom, ["host drain [600]", "host stop [{\"by\":\"update\"}]"]], last(r));
 
 	// No host to drain, yet the fleet names a live worker: held too.
 	const c = await bench(t);
@@ -352,7 +352,7 @@ test("P14e-update-recovery: a run interrupted mid-phase", { timeout: 300_000 }, 
 	late.state({ phase: "draining", from: lateHead, to: FAR, lock: false });
 	writeFileSync(join(late.stateDir, "drain.json"), JSON.stringify({ started_at: isoTimestamp(), state: "drained", jobs: [] }));
 	const restarted = await late.run(5);
-	assert.deepEqual([restarted?.last_result, restarted?.phase, late.calls(), late.repo.head()], ["failed", "idle", ["host stop [{}]", "daemon hold", "daemon reload", "daemon health"], lateHead], "no quiet wait");
+	assert.deepEqual([restarted?.last_result, restarted?.phase, late.calls(), late.repo.head()], ["failed", "idle", ["host stop [{\"by\":\"update\"}]", "daemon hold", "daemon reload", "daemon health"], lateHead], "no quiet wait");
 	assert.match(restarted?.detail ?? "", /drained parent was restarted, dispatch reopens/);
 	// The same window with a host stop that fails: the units still restart, and both errors are reported.
 	const stuck = await bench(t);
@@ -369,7 +369,7 @@ test("P14e-update-recovery: a run interrupted mid-phase", { timeout: 300_000 }, 
 	stuck.reset();
 	stuck.plan({ failing: ["host stop"] });
 	const once = await stuck.run();
-	assert.deepEqual(stuck.calls().slice(0, 2), ["host stop [{}]", "daemon reload"], "stop failed (no hold asked), restart still ran");
+	assert.deepEqual(stuck.calls().slice(0, 2), ["host stop [{\"by\":\"update\"}]", "daemon reload"], "stop failed (no hold asked), restart still ran");
 	assert.match(once?.detail ?? "", /^a run was interrupted after the fleet drained; nothing merged; host stop failed: stop refused \(the drain may stay latched/);
 });
 
