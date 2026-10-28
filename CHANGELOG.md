@@ -6,6 +6,7 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- issue 648: `cp_pipeline recover` no longer takes `implementer_model` (it was always refused, since recover needs a dispatched implementer); recover reuses the persisted model, and the tool caps `implementer_model` at 128 characters like the pipeline record. Migration: drop `implementer_model` from recover calls.
 - Fix (#648): the pipeline implementer honours an operator-named model (`cp_pipeline start|advance|recover implementer_model`), persisted on the pipeline record; the planner's `model` is unchanged. Migration: none.
 
 - Default parent auto-compaction is now 150000 context tokens (was 200000), used when `data/parent.json` is absent and as the Settings default; an explicit file keeps its value and the operator default stays 200000. Part of issue 537. Migration: none.

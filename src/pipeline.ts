@@ -1317,8 +1317,8 @@ export class PipelineRunner {
 	 * Recovery for a failed implementer: same brief, same task file, bounded.
 	 * The research job is never re-run — its findings are not what broke.
 	 */
-	async recoverShip(researchId: string, options: AdvanceOptions = {}): Promise<AdvanceResult> {
-		const record = this.#setImplementerModel(this.store.require(researchId), options);
+	async recoverShip(researchId: string): Promise<AdvanceResult> {
+		const record = this.store.require(researchId);
 		const shipId = record.ship_id;
 		const job = this.#options.fleet.get(shipId);
 		if (!job) throw new PipelineError(`${shipId} was never dispatched — nothing to recover`);
