@@ -78,7 +78,7 @@ async function rig(t: TestContext, { push = true } = {}) {
 	const scratch = createScratchHome();
 	const home = scratch.path, { stateDir, dataDir } = daemonPaths(home);
 	for (const dir of [stateDir, dataDir]) mkdirSync(dir, { recursive: true });
-	const [localPort, remotePort] = [await freePort(), await freePort()];
+	let [localPort, remotePort] = [await freePort(), await freePort()];
 	const clock = join(home, "clock-offset-ms");
 	writeFileSync(clock, "0");
 	const posts: Array<{ slug: string; body: Buffer }> = [];
@@ -145,9 +145,25 @@ async function rig(t: TestContext, { push = true } = {}) {
 		return browser;
 	};
 	const ledger = () => (json(deviceNotificationsFile(stateDir))?.items ?? []) as Item[];
-	const viewer = (port = localPort) => start(join(REPO_ROOT, "bin/cp-view"), ["--home", home, "--host", "127.0.0.1", "--port", String(port)]);
+	let first = true;
+	/** The rig's first default-port viewer re-picks both ports and restarts, up to 3 tries, when it exits on a lost port. */
+	const viewer = (port?: number): Proc => {
+		const launch = () => start(join(REPO_ROOT, "bin/cp-view"), ["--home", home, "--host", "127.0.0.1", "--port", String(port ?? localPort)]);
+		let current = launch();
+		if (port !== undefined || !first) return current;
+		first = false;
+		const retry = (attempt: number) => void current.exited.then(async () => {
+			if (attempt >= 3 || current.child.signalCode !== null || !current.out().includes("EADDRINUSE")) return;
+			[localPort, remotePort] = [await freePort(), await freePort()];
+			bind();
+			current = launch();
+			retry(attempt + 1);
+		});
+		retry(1);
+		return { get child() { return current.child; }, out: () => current.out(), get exited() { return current.exited; } };
+	};
 	return {
-		home, stateDir, dataDir, localPort, remotePort, posts, bind, r, l, token, create, issue, claim, pair, subscribe, ledger, viewer,
+		home, stateDir, dataDir, get localPort() { return localPort; }, get remotePort() { return remotePort; }, posts, bind, r, l, token, create, issue, claim, pair, subscribe, ledger, viewer,
 		answer: (fn: typeof answer) => (answer = fn),
 		advance: (ms: number) => writeFileSync(clock, String(Number(readFileSync(clock, "utf8")) + ms)),
 		sender: () => start(process.execPath, [join(REPO_ROOT, "src/push/device-notify.ts")]),
@@ -329,11 +345,14 @@ test("P12c-sender-closed: a bad binding, ledger or store sends nothing; the bind
 		writeFileSync(tunnelRuntimeFile(s.stateDir), JSON.stringify(bad));
 		await until(unreadable, (now) => now === count + 1, JSON.stringify(bad));
 	}
+	assert.equal(unreadable(), 4, "each refused sweep is reported once, and the next sweep runs after it settles");
 	assert.equal(s.posts.length, 0);
 	// A starting runtime (generation 0, origin null) or no runtime file at all is no binding: judged on its own.
 	writeFileSync(tunnelRuntimeFile(s.stateDir), JSON.stringify({ schema_version: 1, generation: 0, origin: null }));
 	await until(() => s.record(own, laptop.id)?.state, (state) => state === "delivered", "delivered with a starting runtime");
+	const torn = unreadable();
 	writeFileSync(tunnelRuntimeFile(s.stateDir), "{torn");
+	await until(unreadable, (count) => count === torn + 1, "the torn runtime refused before the kiosk subscription");
 	const pad = testDevice("https://fcm.googleapis.com/fcm/send/kiosk"); // stored directly: the listener is down now
 	assert.ok(saveSubscription(s.dataDir, { endpoint: pad.endpoint, keys: pad.keys }, new Date(), { device_id: kiosk.id, origin: ORIGIN }).ok);
 	rmSync(tunnelRuntimeFile(s.stateDir));

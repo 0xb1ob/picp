@@ -240,15 +240,15 @@ function failingJobName(run: MainRun | undefined): string | undefined {
 	return run?.jobs.find((job) => job.conclusion && job.conclusion.toLowerCase() !== "success")?.name.trim() || undefined;
 }
 
-/** `gh run view <id> --log-failed`: the first failing-test line. A heuristic over log text, best-effort. */
+/** `gh run view <id> --log-failed`: the first FAIL line, else the first failing-test line. A best-effort heuristic. */
 const FAILING_LINE_RE = /(AssertionError|FAIL\b|not ok\b|✖|Error:)/i;
 async function failingTestLine(cwd: string, runId: number, exec: CommandRunner, timeoutMs: number): Promise<string | undefined> {
 	try {
-		const line = (await exec("gh", ["run", "view", String(runId), "--log-failed"], { cwd, timeoutMs })).split("\n").find((row) => FAILING_LINE_RE.test(row));
-		if (!line) return undefined;
-		// gh's log-failed lines are `<job>\t<step>\t<timestamp> <message>`; keep the message.
-		const message = (line.split("\t").pop() ?? line).replace(/^\S+\s+/, "").trim();
-		return message.length > 0 ? message.slice(0, 200) : undefined;
+		const rows = (await exec("gh", ["run", "view", String(runId), "--log-failed"], { cwd, timeoutMs })).split("\n").filter((row) => FAILING_LINE_RE.test(row));
+		// gh's log-failed lines are `<job>\t<step>\t<timestamp> <message>`; keep the message. A FAIL beats an earlier WARN.
+		const messages = rows.map((line) => (line.split("\t").pop() ?? line).replace(/^\S+\s+/, "").trim());
+		const message = messages.find((text) => /\bFAIL\b/.test(text) && !/^WARN\b/.test(text)) ?? messages[0];
+		return message ? message.slice(0, 200) : undefined;
 	} catch {
 		return undefined; // Falls back to the job name.
 	}
