@@ -172,10 +172,15 @@ export class ScheduleRunner {
 	}
 
 	#nativePipelineAnchor(jobId: string): boolean {
+		return this.#nativePipelineState(jobId) !== undefined;
+	}
+
+	/** A native run anchor's pipeline state; undefined for any other job or an unreadable store (the parent's to see). */
+	#nativePipelineState(jobId: string): string | undefined {
 		try {
-			return this.#ports.pipeline?.state(jobId) !== undefined && nativeRunOf(this.#ports.runs, jobId)?.anchor_job_id === jobId;
+			return nativeRunOf(this.#ports.runs, jobId)?.anchor_job_id === jobId ? this.#ports.pipeline?.state(jobId) : undefined;
 		} catch {
-			return false; // unreadable state: the parent's envelope wake
+			return undefined;
 		}
 	}
 
@@ -247,7 +252,7 @@ export class ScheduleRunner {
 		for (const record of this.#ports.fleetJobs()) {
 			if (record.phase !== "held" || !record.reported_at || this.#handled.has(record.job_id)) continue;
 			// A native pipeline anchor that reported while no parent was up still owes its gate (#444).
-			const unadvanced = this.#nativePipelineAnchor(record.job_id) && this.#ports.pipeline?.state(record.job_id) === "researching";
+			const unadvanced = this.#nativePipelineState(record.job_id) === "researching";
 			if (!unadvanced && !this.#owns(record.job_id)) continue;
 			let result: IntakeResult;
 			try {
@@ -258,8 +263,12 @@ export class ScheduleRunner {
 				result = { job_id: record.job_id, accepted: false, already: true, phase: record.phase, summary: message };
 			}
 			if (this.#handled.has(record.job_id)) continue; // a live onReported took it meanwhile
-			if (unadvanced && result.accepted && result.next === "advance") await this.onPipelineReported(result);
-			else if (!unadvanced && this.#claimable(result)) await this.onReported(result);
+			if (unadvanced) {
+				// Only a recorded `advance` is ours; anything else stays with the parent's own intake path.
+				if (result.accepted && result.next === "advance") await this.onPipelineReported(result);
+				continue;
+			}
+			if (this.#claimable(result)) await this.onReported(result);
 			else {
 				this.#handled.add(record.job_id);
 				this.#ports.wake(result);

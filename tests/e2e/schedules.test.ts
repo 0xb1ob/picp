@@ -325,7 +325,8 @@ const envelopeWakes = (child: PiChild, jobId: string) => child.records().filter(
 	&& (r.message as { customType?: string })?.customType === "cp-envelope" && JSON.stringify(r.message).includes(jobId));
 const gateStarts = (h: Home, jobId: string) => readRunEvents(h.home, jobId).filter((event) => event.type === "review_started" && (event.payload as { surface?: string }).surface === "gate");
 
-/** Routes planner and gate-reviewer to scripts: the planner writes its plan, waits for `go` when given, reports done; the gate passes. */
+/** Routes planner and gate-reviewer to scripts: the planner writes its plan, waits for `go` when given, reports done;
+ * the gate passes. */
 function pipelineRoles(h: Home, name: string, go?: string): void {
 	const anchor = () => anchorOf(h, name);
 	const wait = go ? `; while [ ! -e '${go}' ]; do sleep 0.1; done` : "";
@@ -342,9 +343,12 @@ function pipelineRoles(h: Home, name: string, go?: string): void {
 		rubric: [{ id: "planner", role: "planner", model: planner }, { id: "gate-reviewer", role: "gate-reviewer", model: gate }] }));
 }
 
-const runPipeline = (h: Home, name: string) => h.parent(`P13: Add the ${name} schedule.`, [
-	{ kind: "tool_calls", calls: [schedule("add", { action: "add", name, project: "demo", manual: true, title: `${name} task`, kind: "research", delivery: "pipeline", operator_quote: `Add the ${name} schedule.` })] },
-	{ kind: "tool_calls", calls: [schedule("run", () => ({ action: "run_now", id: h.idOf(name) }))] },
+/** Adds and runs native pipeline schedule `name`, and `also` with its planner pinned by a run override when given. */
+const runPipeline = (h: Home, name: string, also?: { name: string; model: string }) => h.parent(`P13: Add the ${name} schedule.${also ? ` Add the ${also.name} schedule.` : ""}`, [
+	{ kind: "tool_calls", calls: [name, ...(also ? [also.name] : [])].map((each) => schedule(`add-${each}`, { action: "add", name: each, project: "demo", manual: true,
+		title: `${each} task`, kind: "research", delivery: "pipeline", operator_quote: `Add the ${each} schedule.` })) },
+	{ kind: "tool_calls", calls: [schedule("run", () => ({ action: "run_now", id: h.idOf(name) })),
+		...(also ? [schedule("run-also", () => ({ action: "run_now", id: h.idOf(also.name), overrides: { model: also.model } }))] : [])] },
 ]);
 
 test("P13 native pipeline (#444): a done plan reports next=advance and its gate starts in code, with no parent turn and no planner teardown", { timeout: 240_000 }, async (t) => {
@@ -367,7 +371,11 @@ test("P13 native pipeline (#444): a failed in-code advance wakes the parent once
 	const h = await schedulesHome(t);
 	const go = join(h.home, `go-${randomBytes(4).toString("hex")}`);
 	pipelineRoles(h, "sweep-run", go);
-	const first = await runPipeline(h, "sweep-run");
+	// A planner whose worker dies before reporting: a failed anchor the restart sweep must not wake again.
+	const failedPlanner = h.model("planner-failed-run", [{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "kill -9 $PPID" } }] }]);
+	const first = await runPipeline(h, "sweep-run", { name: "failed-run", model: failedPlanner });
+	const failed = anchorOf(h, "failed-run");
+	await waitFor(() => readFleet(h.home).jobs.find((job) => job.job_id === failed)?.phase, (phase) => phase === "failed", { timeoutMs: 60_000, what: "the failed anchor" });
 	const research = anchorOf(h, "sweep-run");
 	const file = join(h.home, paths.pipelineFile(research));
 	const saved = await waitFor(() => existsSync(file) ? readFileSync(file, "utf8") : undefined, Boolean, { timeoutMs: 30_000, what: "the pipeline record" }) as string;
@@ -387,6 +395,7 @@ test("P13 native pipeline (#444): a failed in-code advance wakes the parent once
 	await second.waitForSettled(30_000);
 	assert.equal(gateStarts(h, research).length, 1, "the sweep starts the gate once");
 	assert.equal(envelopeWakes(second, research).length, 0, "the sweep advanced it; nobody was woken");
+	assert.equal(envelopeWakes(second, failed).length, 0, "a failed anchor is not re-woken on restart");
 });
 
 test("P13 held parent: a pr fire's job and run exist before the held wake is released once by compaction; runner-owned fires dispatch at once", { timeout: 180_000 }, async (t) => {
