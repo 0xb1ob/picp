@@ -12,7 +12,7 @@ const MODEL_PATTERN = "[^\\s/]+/\\S+";
 /** The "Custom…" option's value: never a model id, which always has a slash. */
 const CUSTOM = "custom";
 const MAX_FALLBACKS = 4;
-const PEOPLE_MODELS: SettingKey[] = ["models.parent", "models.operator"];
+const PEOPLE_MODELS: SettingKey[] = ["models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"];
 const GRANTS: SettingKey[] = ["grants.expiry_hours", "grants.spend_usd", "grants.spend_tokens", "grants.token_ceiling", "grants.job_cap", "grants.dispatch_parallelism", "grants.allowed_actions", "grants.ask_on", "grants.exclude_paths"];
 const COMPACTION: SettingKey[] = ["sessions.parent_compact_at_tokens", "sessions.operator_compact_at_tokens"];
 const lines = (text: string): string[] => text.split(/[\n,]/).map(line => line.trim()).filter(Boolean);
@@ -145,6 +145,8 @@ function Field({field, value, source, error, set, disabled, models}: {field: Set
   ? <textarea id={id} rows={3} disabled={disabled} onChange={event => set(lines(event.currentTarget.value))} value={Array.isArray(value) ? (value as string[]).join("\n") : ""}/>
   : field.type === "model_ref"
    ? <ModelSelect id={id} label={field.label} value={typeof value === "string" ? value : ""} set={next => set(next || null)} models={models} unset disabled={disabled}/>
+   : field.type === "thinking_level"
+   ? <select id={id} value={typeof value === "string" ? value : ""} disabled={disabled} onChange={event => set(event.currentTarget.value || null)}><option value="">(unset)</option>{THINKING.map(level => <option key={level} value={level}>{level}</option>)}</select>
    : <input id={id} type="number" value={typeof value === "number" ? String(value) : ""} min={field.minimum ?? field.exclusive_minimum} max={field.maximum} step={field.type === "integer" ? 1 : "any"} aria-invalid={error ? true : undefined} disabled={disabled} onInput={event => set(event.currentTarget.value === "" ? null : Number(event.currentTarget.value))}/>;
  return <div class="settings-field"><label for={id}>{field.label} {meta}</label><p class="settings-help">{field.help}</p>{input}{error && <small class="settings-warn" role="alert">{error}</small>}{field.type === "model_ref" && typeof value === "string" && <ModelNote models={models} values={[value]}/>}</div>;
 }
@@ -186,7 +188,7 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
    {routingAbsent ? <p class="settings-readonly">No data/routing.json: workers use each profile's own model.</p> : <Rubric rows={rows} original={original} setRow={setRow} disabled={disabled} models={models}/>}
    {modelsNote}
   </Section>
-  <Section title="Parent and operator models" help="Empty means unset: the env pin, else today's behaviour. Nothing switches live." keys={PEOPLE_MODELS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: PEOPLE_MODELS}} restoreText="Unset the parent and operator models?" disabled={disabled}>
+  <Section title="Parent and operator models" help="Empty means unset: the env pin, else today's behaviour. Nothing switches live." keys={PEOPLE_MODELS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: PEOPLE_MODELS}} restoreText="Unset the parent and operator models and thinking?" disabled={disabled}>
    {PEOPLE_MODELS.map(field)}
   </Section>
   <Section title="Grant defaults" help="What a new grant starts with (data/mandate-defaults.json); grants already issued keep theirs." keys={GRANTS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{section: "grants"}} restoreText="Restore every grant default?" disabled={disabled} invalid={invalid(GRANTS)}>

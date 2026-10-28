@@ -171,7 +171,7 @@ test("P17-operator-address: without --host pi gets the tailnet address; service 
 	assert.match(bad.stderr, /CP_VIEWER_PORT must be 1-65535/);
 });
 
-test("P17-operator-model: data/operator.json's model beats CP_OPERATOR_MODEL, never a model flag or a resume", { timeout: 300_000 }, async (t) => {
+test("P17-operator-model: data/operator.json's model beats CP_OPERATOR_MODEL, never a model flag or a resume; its thinking never an explicit --thinking or a resume", { timeout: 300_000 }, async (t) => {
 	const op = operator(t);
 	const env = { CP_OPERATOR_VIEWER: "service", CP_VIEWER_HOST: "127.0.0.1", CP_OPERATOR_MODEL: "env/m" };
 	const model = async (argv: string[] = [], extra: NodeJS.ProcessEnv = {}) => {
@@ -189,8 +189,16 @@ test("P17-operator-model: data/operator.json's model beats CP_OPERATOR_MODEL, ne
 	for (const argv of [["--model", "x"], ["--model=x"], ["--models", "x"], ["--provider", "p"], ["-c"], ["--continue"], ["-r"], ["--resume"], ["--session", "s"], ["--session=s"], ["--session-id", "i"], ["--fork", "f"]]) {
 		assert.deepEqual((await model(argv)).args, argv, argv.join(" "));
 	}
-	writeFileSync(settings, JSON.stringify({ model: "not a model" }));
-	assert.deepEqual((await model()).args, ["--model", "env/m"], "an invalid model is ignored");
+	// Thinking (dashboard Settings): only an explicit --thinking or a resume beats it; an explicit --model keeps it.
+	writeFileSync(settings, JSON.stringify({ model: "file/m", thinking: "low" }));
+	assert.deepEqual((await model()).args, ["--model", "file/m", "--thinking", "low"]);
+	assert.deepEqual((await model(["--model", "x"])).args, ["--thinking", "low", "--model", "x"], "an explicit model keeps the file thinking");
+	for (const argv of [["--thinking", "high"], ["--thinking=high"]]) assert.deepEqual((await model(argv)).args, ["--model", "file/m", ...argv], argv.join(" "));
+	for (const argv of [["--session", "s"], ["-c"]]) assert.deepEqual((await model(argv)).args, argv, argv.join(" "));
+	writeFileSync(settings, JSON.stringify({ thinking: "low" }));
+	assert.deepEqual((await model()).args, ["--model", "env/m", "--thinking", "low"], "file thinking with the env model");
+	writeFileSync(settings, JSON.stringify({ model: "not a model", thinking: "huge" }));
+	assert.deepEqual((await model()).args, ["--model", "env/m"], "an invalid model or thinking is ignored");
 	rmSync(settings);
 	mkdirSync(settings);
 	const unreadable = await model();

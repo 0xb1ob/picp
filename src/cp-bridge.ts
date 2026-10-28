@@ -17,7 +17,7 @@ import {
 	type ThinkingLevel,
 	WORKER_FORBIDDEN_FLAGS,
 } from "./contracts.ts";
-import { type AssistantLike, lastValidAssistant, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus, parentModelSetting } from "./parent-context.ts";
+import { type AssistantLike, lastValidAssistant, liveParentStatus, missionEndOf, parentBridgeStatus, parentCompactInstructions, parentContextFile, parentContextStatus, parentModelSetting, parentThinkingSetting } from "./parent-context.ts";
 import { CpBridgeError } from "./cp-bridge-error.ts";
 import { journalBridgeEvent, runAutoControl, trackAssistant } from "./parent-auto-control.ts";
 import { PARENT_COMPACT_TIMEOUT_MS } from "./parent-compact-hold.ts";
@@ -481,6 +481,8 @@ export class CpBridge {
 			const configured = this.#options?.modelExplicit ? undefined : parentModelSetting(this.#home);
 			const kept = this.#model;
 			if (configured && configured !== kept) await this.#setModel(proc, configured).catch((error: Error) => this.#emit({ kind: "error", stale: false, text: `parent rotate kept ${kept}: ${error.message}`, receipt: emptyReceipt(), paths: [] }));
+			const level = this.#options?.thinking ? undefined : parentThinkingSetting(this.#home);
+			if (level) await proc.request("set_thinking_level", { level }, this.#options?.requestTimeoutMs).catch((error: Error) => this.#emit({ kind: "error", stale: false, text: `parent rotate kept thinking: ${error.message}`, receipt: emptyReceipt(), paths: [] }));
 			return { sessionFile: current, archivedFile };
 		} finally { this.#controlBusy = false; }
 	}
@@ -541,7 +543,7 @@ export class CpBridge {
 			model: options.model,
 			extension,
 			skills: parentSkillPaths(this.#home),
-			...(options.thinking ? { thinking: options.thinking } : {}),
+			thinking: options.thinking ?? parentThinkingSetting(this.#home),
 		});
 		const proc = WorkerProcess.spawn({
 			cwd: options.cwd ?? this.#home,

@@ -8,7 +8,8 @@
  * reused only for the same home, never killed. A remote seat is ssh or tmux onto this session.
  * With `CP_OPERATOR_VIEWER=service` (the installed `cp-operator` wrapper) `cp-view.service`
  * serves the dashboard and no session viewer starts; `data/operator.json` `model` (dashboard Settings), else its
- * `CP_OPERATOR_MODEL`, becomes pi's `--model` (`operatorModelArgs`: never over an explicit model flag or a resumed session).
+ * `CP_OPERATOR_MODEL`, becomes pi's `--model` (`operatorModelArgs`: never over an explicit model flag or a resumed session),
+ * and its `thinking` becomes `--thinking` (never over an explicit `--thinking` or a resumed session; no env pin).
  * Restart session (cp-aqxl): pi gets `CP_OPERATOR_RELAUNCH_FILE`; when pi exits leaving a marker there that names its
  * own pid (the dashboard restart), pi is relaunched here with exactly `--session <file>`, at most 3 times per 10 min.
  */
@@ -17,9 +18,9 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { resolveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
-import { layoutForHome } from "../contracts.ts";
+import { layoutForHome, type ThinkingLevel } from "../contracts.ts";
 import { operatorPiArgs, operatorSkillPaths } from "../cp-bridge.ts";
-import { operatorModelSetting } from "../operator-compact.ts";
+import { operatorModelSetting, operatorThinkingSetting } from "../operator-compact.ts";
 import { tryResolveWorkerPackages, type WorkerPackageResolution } from "../worker-packages.ts";
 import { relaunchFileFor, superviseOperatorPi } from "../operator-relaunch.ts";
 import { PACKAGE_ROOT } from "../home.ts";
@@ -104,27 +105,32 @@ export async function startViewer(options: ViewerOptions = {}): Promise<Operator
 	};
 }
 
-/** Flags that pick the model, or resume a session (pi restores its recorded model): the installed model never overrides them. */
-const MODEL_CHOOSING_FLAGS = ["--model", "--models", "--provider", "-c", "--continue", "-r", "--resume", "--session", "--session-id", "--fork"];
+/** Flags that resume a session (pi restores its recorded model and thinking level). */
+const RESUME_FLAGS = ["-c", "--continue", "-r", "--resume", "--session", "--session-id", "--fork"];
+/** Flags that pick the model, or resume a session: the installed model never overrides them. */
+const MODEL_CHOOSING_FLAGS = ["--model", "--models", "--provider", ...RESUME_FLAGS];
+
+export type OperatorConfigured = { model?: string; thinking?: ThinkingLevel };
 
 /**
- * `--model <m>` ahead of `piArgs`, unless they already pick a model or resume a session. `<m>` is the
- * `data/operator.json` `model` (dashboard Settings, `configured`), else the wrapper's `CP_OPERATOR_MODEL` pin.
+ * `--model <m>` (the `configured` file model, else `CP_OPERATOR_MODEL`) unless `piArgs` pick a model or resume;
+ * `--thinking <l>` from `configured.thinking` unless they hold `--thinking` or resume (an explicit model keeps it).
  */
-export function operatorModelArgs(piArgs: readonly string[], env: NodeJS.ProcessEnv = process.env, configured?: string): string[] {
-	const model = configured ?? env.CP_OPERATOR_MODEL?.trim();
-	if (!model || piArgs.some((arg) => MODEL_CHOOSING_FLAGS.includes(arg.split("=", 1)[0] as string))) return [...piArgs];
-	return ["--model", model, ...piArgs];
+export function operatorModelArgs(piArgs: readonly string[], env: NodeJS.ProcessEnv = process.env, configured: OperatorConfigured = {}): string[] {
+	const has = (flags: string[]) => piArgs.some((arg) => flags.includes(arg.split("=", 1)[0] as string));
+	const model = configured.model ?? env.CP_OPERATOR_MODEL?.trim();
+	const thinking = configured.thinking && !has(["--thinking", ...RESUME_FLAGS]) ? ["--thinking", configured.thinking] : [];
+	return [...(model && !has(MODEL_CHOOSING_FLAGS) ? ["--model", model] : []), ...thinking, ...piArgs];
 }
 
-/** `data/operator.json` `model` of `home`; unreadable is one stderr line and undefined (the env pin applies). */
-export function configuredOperatorModel(home: string | undefined): string | undefined {
-	if (!home) return undefined;
+/** `data/operator.json` `model` and `thinking` of `home`; unreadable is one stderr line and `{}` (the env pin applies). */
+export function configuredOperatorModel(home: string | undefined): OperatorConfigured {
+	if (!home) return {};
 	const file = join(home, layoutForHome("multi", home).data, "operator.json");
-	try { return operatorModelSetting(file); }
+	try { return { model: operatorModelSetting(file), thinking: operatorThinkingSetting(file) }; }
 	catch (error) {
 		process.stderr.write(`cp-operator: operator model setting unreadable (${file}: ${(error as Error).message}); falling back to CP_OPERATOR_MODEL\n`);
-		return undefined;
+		return {};
 	}
 }
 

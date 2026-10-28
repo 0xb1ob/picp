@@ -721,6 +721,8 @@ function probes(field: SettingField): unknown[] {
 			return [[], ["a/b"], [""], ["x".repeat(field.max_length ?? 1)], ["x".repeat((field.max_length ?? 1) + 1)], Array((field.max_items ?? 1) + 1).fill("a"), 5];
 		case "model_ref":
 			return [null, "a/b", "anthropic/claude-opus-5-5", "ab", "a/", "/b", "a b/c", "", `a/${"x".repeat(126)}`, `a/${"x".repeat(127)}`, 5, true];
+		case "thinking_level":
+			return [null, "off", "max", "high", "huge", "", 5, true];
 		default:
 			return [];
 	}
@@ -734,7 +736,7 @@ function probeFile(field: SettingField, value: unknown): unknown {
 	const key = field.file_key as string;
 	if (field.owner === "capacity") return { ...CAPACITY_MIN, quota: { [key.split(".")[1] as string]: value } };
 	// A null pin is the key's absence, which is how Settings writes it.
-	if ((field.owner === "parent" || field.owner === "operator") && key === "model") return { compact_at_tokens: 200000, ...(value === null ? {} : { model: value }) };
+	if ((field.owner === "parent" || field.owner === "operator") && (key === "model" || key === "thinking")) return { compact_at_tokens: 200000, ...(value === null ? {} : { [key]: value }) };
 	return { ...OWNER_BASE[field.owner as SettingFileOwner], [key]: value };
 }
 
@@ -757,8 +759,8 @@ const OVERRIDES: Record<SettingFileOwner, unknown> = {
 	"mandate-defaults": { ...SCAFFOLD_MANDATE_DEFAULTS, job_cap: 7, token_ceiling: undefined, scope_policy: "named_jobs_only", deny_projects: ["demo"] },
 	budgets: { ...DEFAULT_BUDGET_CONFIG, spawn_cap: 5 },
 	"worker-bounds": { wall_clock_seconds: 120, allow_dispatch_override: false },
-	parent: { compact_at_tokens: 12345, model: "anthropic/claude-opus-5-5" },
-	operator: { compact_at_tokens: 54321, model: "openai/gpt-5" },
+	parent: { compact_at_tokens: 12345, model: "anthropic/claude-opus-5-5", thinking: "high" },
+	operator: { compact_at_tokens: 54321, model: "openai/gpt-5", thinking: "low" },
 	gate: { schema_version: 1, review_timeout_ms: 60_000 },
 	quality: { verify: true, voters: 3 },
 	capacity: { ...SECRET_CAPACITY, quota: { five_hour: 70, balance_margin: null } },
@@ -783,7 +785,7 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 	const catalog = empty.catalog;
 	assert.deepEqual(catalog.map((field) => field.key), [...SETTING_KEYS]);
 	assert.deepEqual(catalog, JSON.parse(JSON.stringify(SETTING_FIELDS)));
-	assert.equal(new Set(catalog.map((field) => field.key)).size, 32);
+	assert.equal(new Set(catalog.map((field) => field.key)).size, 34);
 	for (const field of catalog) assert.ok(field.key.startsWith(`${field.section}.`), field.key);
 	assert.deepEqual(catalog.filter((field) => !field.editable).map((field) => field.key), ["sessions.tool_call_cap", "models.allow"]);
 	assert.deepEqual(empty.audit, []);
@@ -845,7 +847,7 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 	const invalid = (key: SettingKey) => {
 		if (key === "grants.token_ceiling") return { value: 0, source: "code", status: "fallback" };
 		if (key === "sessions.operator_compact_at_tokens") return { value: catalog.find((field) => field.key === key)?.default, source: "code", status: "fallback" };
-		if (key === "models.parent" || key === "models.operator") return { value: null, source: "code", status: "ok" };
+		if (["models.parent", "models.operator", "models.parent_thinking", "models.operator_thinking"].includes(key)) return { value: null, source: "code", status: "ok" };
 		const disabled = ["parent", "capacity", "update"].includes(catalog.find((field) => field.key === key)?.owner as string);
 		return { value: null, source: "none", status: disabled ? "disabled" : "refused" };
 	};
@@ -878,6 +880,7 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 		["capacity.five_hour", 70], ["capacity.seven_day", 85, "code"], ["capacity.balance_margin", null], ["maintenance.update_enabled", true],
 		["maintenance.update_interval_min", 30], ["viewer.strict_host", true], ["models.allow", ["anthropic/*"]],
 		["models.rubric", [{ id: "small", role: "implementer", model: "anthropic/claude-haiku" }]], ["models.parent", "anthropic/claude-opus-5-5"], ["models.operator", "openai/gpt-5"],
+		["models.parent_thinking", "high"], ["models.operator_thinking", "low"],
 	] as Array<[SettingKey, unknown, string?]>) expectView(filed, key, value, source);
 	await b.close();
 

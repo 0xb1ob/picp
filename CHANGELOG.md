@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- Settings: thinking-effort control for the parent and operator (dc-20261028135009-bab0a6a4). Two catalog keys, `models.parent_thinking` / `models.operator_thinking`, are `data/parent.json` / `data/operator.json` `thinking`; a level becomes `--thinking` on the next parent start (and `set_thinking_level` at rotation) and the next fresh `cp-operator` launch. Only an explicit start/argv `--thinking` or a resume beats it; pi clamps an unserved level; no env pin. Migration: none (absent keys behave as before). Rollback: revert; a stored `thinking` key is then ignored.
+
 - Fix: issue 401: the dispatch brief now carries every task addendum frozen up to dispatch time, so an armed job's worker starts with addenda added while it waited. Migration: none.
 
 - #588 (part 2 of 2): the operator threads feature (cp-xmw2) is deleted end to end: `/api/threads*`, the thread journal and views, `cp_parent thread_bind` and `thread`, and the operator note's thread line (part 1, #637, removed the Sessions thread UI). A stale `thread` on `POST /api/operator/message` is accepted and ignored; a legacy `; thread=` marker still parses. Migration: none; `state/operator/threads.jsonl` is left on disk unread, and the main session's `cp_parent` schema changes on its next bridge load. Rollback: revert.

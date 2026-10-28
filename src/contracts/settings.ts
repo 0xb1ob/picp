@@ -14,7 +14,7 @@ import { IsoTimestampSchema, type ValidationResult, validate } from "./core.ts";
 import { DEFAULT_BUDGET_CONFIG, DEFAULT_JOB_TOOL_CALL_CAP, DEFAULT_JOB_WALL_CLOCK_SECONDS } from "./limits.ts";
 import { MANDATE_ACTIONS, MANDATE_ASK_ON } from "./mandates.ts";
 import { DEFAULT_QUALITY_THRESHOLD, DEFAULT_QUALITY_VOTERS, GATE_REVIEW_TIMEOUT_MAX_MS, GATE_REVIEW_TIMEOUT_MIN_MS } from "./reviews.ts";
-import { ReviewerModelSchema, RoutingRuleSchema } from "./routing.ts";
+import { ReviewerModelSchema, RoutingRuleSchema, ThinkingLevelSchema } from "./routing.ts";
 
 export const SETTING_SECTIONS = ["grants", "budgets", "sessions", "models", "review", "capacity", "maintenance", "viewer"] as const;
 export type SettingSection = (typeof SETTING_SECTIONS)[number];
@@ -67,7 +67,7 @@ export const SETTING_APPLIES = [
 ] as const;
 export type SettingApplies = (typeof SETTING_APPLIES)[number];
 
-export const SETTING_VALUE_TYPES = ["integer", "number", "nullable_number", "boolean", "enum_list", "string_list", "model_ref", "rubric"] as const;
+export const SETTING_VALUE_TYPES = ["integer", "number", "nullable_number", "boolean", "enum_list", "string_list", "model_ref", "thinking_level", "rubric"] as const;
 export type SettingValueType = (typeof SETTING_VALUE_TYPES)[number];
 
 export const SETTING_KEYS = [
@@ -92,6 +92,8 @@ export const SETTING_KEYS = [
 	"models.rubric",
 	"models.parent",
 	"models.operator",
+	"models.parent_thinking",
+	"models.operator_thinking",
 	"review.timeout_ms",
 	"review.quality_verify",
 	"review.quality_completeness",
@@ -149,7 +151,7 @@ function deepFreeze<T>(value: T): T {
 
 const SAFE_MAX = Number.MAX_SAFE_INTEGER;
 
-/** The 32 fields, in `SETTING_KEYS` order. */
+/** The 34 fields, in `SETTING_KEYS` order. */
 export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	...group("grants", "mandate-defaults", { applies: "next_grant", on_invalid: "refuse" }, {
 		expiry_hours: { file_key: "expiry_hours", type: "number", minimum: 0.1, maximum: 720, default: 8, label: "Grant expiry (hours)", help: "How long a new grant stands before it must be re-issued." },
@@ -189,6 +191,12 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	}),
 	...group("models", "operator", { applies: "next_operator_launch", on_invalid: "default" }, {
 		operator: { file_key: "model", env: "CP_OPERATOR_MODEL", type: "model_ref", default: null, label: "Operator model", help: "Next fresh cp-operator launch; beats CP_OPERATOR_MODEL, never an explicit --model. A resumed or restarted session keeps its recorded model. Empty unsets it." },
+	}),
+	...group("models", "parent", { applies: "next_parent_start", on_invalid: "default" }, {
+		parent_thinking: { file_key: "thinking", type: "thinking_level", default: null, label: "Parent thinking", help: "Next parent start or rotation; an explicit cp_parent start thinking beats it, a start model does not. No env pin. pi clamps a level the model cannot serve. Empty unsets it." },
+	}),
+	...group("models", "operator", { applies: "next_operator_launch", on_invalid: "default" }, {
+		operator_thinking: { file_key: "thinking", type: "thinking_level", default: null, label: "Operator thinking", help: "Next fresh cp-operator launch; never over an explicit --thinking or a resumed session (an explicit --model keeps it). No env pin. pi clamps a level the model cannot serve. Empty unsets it." },
 	}),
 	...group("review", "gate", { applies: "next_review_attempt", on_invalid: "refuse" }, {
 		timeout_ms: { file_key: "review_timeout_ms", type: "integer", minimum: GATE_REVIEW_TIMEOUT_MIN_MS, maximum: GATE_REVIEW_TIMEOUT_MAX_MS, default: 300_000, label: "Review timeout (ms)", help: "How long one review attempt may take before it counts as operational." },
@@ -241,6 +249,8 @@ export function settingValueSchema(field: SettingField): TSchema {
 			return Type.Array(Type.String({ minLength: 1, ...(field.max_length === undefined ? {} : { maxLength: field.max_length }) }), items);
 		case "model_ref":
 			return Type.Union([ReviewerModelSchema, Type.Null()]);
+		case "thinking_level":
+			return Type.Union([ThinkingLevelSchema, Type.Null()]);
 		case "rubric":
 			return Type.Array(RoutingRuleSchema, items);
 	}

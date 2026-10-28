@@ -1197,11 +1197,11 @@ test("cp_parent starts again immediately after stopping the host", { timeout: 90
 	assert.match((await invoke("start", { mode: "multi" })).content[0]!.text, /started pid=/);
 });
 
-test("cp_parent start wiring: data/parent.json model beats CP_PARENT_MODEL; an explicit model is sent as modelExplicit and beats the file", { timeout: 90_000 }, async (t) => {
+test("cp_parent start wiring: data/parent.json model beats CP_PARENT_MODEL; an explicit model is sent as modelExplicit and beats the file; file thinking yields only to an explicit start thinking", { timeout: 90_000 }, async (t) => {
 	const argvFile = join(scratch(), "argv");
 	const ctx = hostHome(t, { CP_PARENT_PI_BIN: FAKE_PARENT, FAKE_PARENT_ARGV: argvFile, CP_PARENT_MODEL: "mock/env" });
 	mkdirSync(join(ctx.home, LAYOUT.data), { recursive: true });
-	writeFileSync(join(ctx.home, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 1000, model: "mock/file" }));
+	writeFileSync(join(ctx.home, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 1000, model: "mock/file", thinking: "high" }));
 	const tools = new Map<string, { execute: (_id: string, params: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }> }>();
 	bridgeExtension({
 		registerTool: (tool: { name: string }) => tools.set(tool.name, tool as never),
@@ -1210,13 +1210,18 @@ test("cp_parent start wiring: data/parent.json model beats CP_PARENT_MODEL; an e
 		sendMessage: () => {},
 	} as never);
 	const tool = tools.get("cp_parent")!;
-	const modelArg = () => { const argv = JSON.parse(lines(argvFile).at(-1)!) as string[]; return argv[argv.indexOf("--model") + 1]; };
+	const flag = (name: string) => { const argv = JSON.parse(lines(argvFile).at(-1)!) as string[]; return argv.includes(name) ? argv[argv.indexOf(name) + 1] : undefined; };
+	const modelArg = () => flag("--model");
 	assert.match((await tool.execute("call", { action: "start", home: ctx.home })).content[0]!.text, /started pid=/);
-	assert.equal(modelArg(), "mock/file");
+	assert.deepEqual([modelArg(), flag("--thinking")], ["mock/file", "high"]);
 	assert.match((await tool.execute("call", { action: "stop" })).content[0]!.text, /stopped code=0/);
 	rmSync(join(ctx.home, LAYOUT.sessions, "cp-parent-control.json"), { force: true });
 	assert.match((await tool.execute("call", { action: "start", home: ctx.home, model: "mock/explicit" })).content[0]!.text, /started pid=/);
 	assert.equal(modelArg(), "mock/explicit", "explicit beats the file (no saved control model in the way)");
+	assert.equal(flag("--thinking"), "high", "an explicit start model keeps the file thinking");
+	assert.match((await tool.execute("call", { action: "stop" })).content[0]!.text, /stopped code=0/);
+	assert.match((await tool.execute("call", { action: "start", home: ctx.home, thinking: "low" })).content[0]!.text, /started pid=/);
+	assert.equal(flag("--thinking"), "low", "an explicit start thinking beats the file");
 	assert.match((await tool.execute("call", { action: "stop" })).content[0]!.text, /stopped code=0/);
 	rmSync(join(ctx.home, LAYOUT.sessions, "cp-parent-control.json"), { force: true });
 	rmSync(join(ctx.home, LAYOUT.data, "parent.json"));

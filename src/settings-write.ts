@@ -71,6 +71,8 @@ export const RESTORE_ACTIONS: Readonly<Partial<Record<SettingKey, "delete" | "de
 	"models.rubric": "shipped_rubric",
 	"models.parent": "delete",
 	"models.operator": "delete",
+	"models.parent_thinking": "delete",
+	"models.operator_thinking": "delete",
 	"review.timeout_ms": "delete",
 	"review.quality_verify": "delete",
 	"review.quality_completeness": "delete",
@@ -371,7 +373,7 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 			let value: SettingValue;
 			if (request.mode === "set") {
 				value = request.changes[field.key] as SettingValue;
-				if (field.type === "model_ref" && value === null) action = "delete"; // unset, never a stored null
+				if ((field.type === "model_ref" || field.type === "thinking_level") && value === null) action = "delete"; // unset, never a stored null
 				if (field.type === "rubric") value = mergeRubric(present.value, value as unknown as Record<string, unknown>[]) as SettingValue;
 			} else {
 				const restore = RESTORE_ACTIONS[field.key];
