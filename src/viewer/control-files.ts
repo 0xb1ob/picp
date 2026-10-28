@@ -215,6 +215,8 @@ export const operatorThreadsFile = (stateDir: string): string => join(stateDir, 
 export const THREAD_TAG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 export const THREAD_ID_RE = /^th-[a-f0-9]{12}$/;
 export const DASHBOARD_ID_RE = /^dc-\d{14}-[0-9a-f]{8}$/;
+/** The head of the one user message that replays held dashboard messages (src/dashboard-control.ts). */
+export const INBOX_REPLAY_PREFIX = "[cp-dashboard inbox — ";
 export const THREADS_MAX_BYTES = 16 * 1024 * 1024;
 export const THREADS_LIST_MAX = 100;
 export type ThreadRef = { kind: "dashboard" | "ask" | "answer" | "job"; id: string };

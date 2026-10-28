@@ -24,9 +24,7 @@ import { badgeView } from "../use-version.ts";
 import { RestartSession, restartShown } from "../components/RestartSession.tsx";
 import { type ControlView, controlReady } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
-import { NewThread, ThreadChips, ThreadPicker, ThreadSidebar } from "../components/ThreadNav.tsx";
 import { QuickReplies } from "../components/QuickReplies.tsx";
-import { threadBands, threadFilter, type ThreadsView, threadsReady } from "../threads.ts";
 import { dayKey, dayStarts, isOwn, lastDay, replyAsk, rollups, type Row, rowHead, rows } from "../session-rows.ts";
 import { RelayRollup } from "../components/RelayRollup.tsx";
 
@@ -198,8 +196,8 @@ function Entry({entry:e,first=true,you=false}: {entry:SessionEntry;first?:boolea
 /** Close the menu a tap came from. */
 const closeMenu = (e: {currentTarget: EventTarget | null}) => { const menu = (e.currentTarget as Element | null)?.closest?.("details"); if (menu) (menu as HTMLDetailsElement).open = false; };
 /**
- * The phone top bar (chat v2): back, avatar, the name (a menu with every session) over the # thread filter or the state
- * line, and one ⋯ sheet: the state with ctx, the thread chips (New, Mark done), tools, search, file, version, restart.
+ * The phone top bar (chat v2): back, avatar, the name (a menu with every session) over the state line,
+ * and one ⋯ sheet: the state with ctx, tools, search, file, version, restart.
  * It replaces the shell header and the heading below 900 px; desktop keeps its sidebar and heading.
  */
 const sessionWhen = new Intl.DateTimeFormat("en",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
@@ -208,20 +206,18 @@ function sessionOptionLabel(at: string, current: boolean): string {
  return current ? `${when} · current` : when;
 }
 const fileOptions = (files: {id:string;at:string}[]) => files.map((s,i)=><option key={s.id} value={s.id} title={s.id}>{sessionOptionLabel(s.at,i === 0)}</option>);
-function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTools,threads,state}: {data:SessionsResponse;control:ControlView | undefined;context:ContextUsage | null | undefined;toolCalls:number;showTools:boolean;hiddenTools:number;onTools:()=>void;threads:ThreadsView | false | undefined;state:{text:string;dot:string}}) {
+function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTools,state}: {data:SessionsResponse;control:ControlView | undefined;context:ContextUsage | null | undefined;toolCalls:number;showTools:boolean;hiddenTools:number;onTools:()=>void;state:{text:string;dot:string}}) {
  const shell = useContext(ShellContext);
  const composer = data.transcript === true && control;
  const files = data.operator_sessions ?? [];
  const views = [["you","Operator ↔ you"],["parent","CP parent"],["workers","Workers"]] as const;
- const filter = threads && threadsReady(threads.status);
  const alert = !!shell.version && badgeView(shell.version, null).level === "alert";
- // The name is text: the # filter's select covers the whole name column (a 48 px target); switching lives in ⋯.
  return <header class="session-bar">
   <a class="session-bar-icon" href="#overview" aria-label="Back to Overview"><Icon name="back"/></a>
   {data.selected !== "workers" && <span class={data.selected === "you" ? "session-avatar session-avatar-bot" : "session-avatar"} aria-hidden="true">{data.selected === "you" ? "OP" : "CP"}</span>}
   <div class="session-bar-id">
    <strong>{data.selected === "you" && data.transcript === true ? "Operator" : data.title}</strong>
-   <span class="session-bar-sub"><span class={`session-dot session-dot-${state.dot}`} role="img" aria-label={state.text} title={state.text}/>{filter ? <ThreadPicker threads={threads} filter/> : <span aria-hidden="true">{state.text}</span>}</span>
+   <span class="session-bar-sub"><span class={`session-dot session-dot-${state.dot}`} role="img" aria-label={state.text} title={state.text}/><span aria-hidden="true">{state.text}</span></span>
   </div>
   <span class={`shell-live shell-live-${shell.status}`} role="status" aria-label={`Data ${shell.status}`} title={shell.status}><span/></span>
   <details class="session-bar-menu session-bar-more">
@@ -232,8 +228,6 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
      {views.map(([id,label]) => <a key={id} href={sessionHref(id)} aria-current={data.selected === id ? "page" : undefined} onClick={closeMenu}>{label}</a>)}
      {data.workers.map(w => <a key={w.id} class="session-bar-worker" href={sessionHref("workers",w.id)} aria-current={data.selected === "workers" && data.session_id === w.id ? "page" : undefined} onClick={closeMenu}><span class={`session-dot session-dot-${workerDot(w)}`}/><span>{w.id}</span><small>{workerPhase(w)}</small></a>)}
     </nav>
-    {/* Picking a thread closes the sheet; + New and Mark done keep it open for their dialog or refusal. */}
-    {filter && <div class="session-bar-threads" onClick={e => { if ((e.target as Element).closest?.(".session-thread-chip:not(.session-thread-new):not(.session-thread-done)")) closeMenu(e); }}><ThreadChips threads={threads} control={control}/></div>}
     {toolCalls > 0 && <button type="button" aria-pressed={showTools} onClick={e => { onTools(); closeMenu(e); }}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
     <button type="button" aria-haspopup="dialog" onClick={e => { closeMenu(e); shell.openSearch(); }}>Search</button>
     {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
@@ -244,19 +238,19 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
   </details>
  </header>;
 }
-export function Sessions({data,control,draft,threads}: {data:SessionsResponse;control?:ControlView;draft?:string;threads?:ThreadsView}) {
+export function Sessions({data,control,draft}: {data:SessionsResponse;control?:ControlView;draft?:string}) {
  const scroller=useRef<HTMLDivElement>(null);
  const [atBottom,setAtBottom]=useState(true);
  const [showTools,setShowTools]=useState(readToolCalls);
  const [openRuns,setOpenRuns]=useState<string[]>([]);
- const pending = data.selected === "you" && data.transcript === true ? (control?.pending ?? []).filter(send=>!transcriptHasSend(data.entries,send.id) && (!threads?.selected || send.body.thread === threads.selected)) : [];
+ const pending = data.selected === "you" && data.transcript === true ? (control?.pending ?? []).filter(send=>!transcriptHasSend(data.entries,send.id)) : [];
  const queued = pending.filter(send=>send.state !== "failed" && send.state !== "delivered");
  const pendingKey = pending.map(send=>`${send.key}:${send.state}`).join("|");
  const lastEntry=data.entries.at(-1)?.id;
  const scrollToEnd=()=>{const el=scroller.current; if(el) el.scrollTop=el.scrollHeight;};
  const follow=useRef(true);
  // The ref, not `atBottom`: a scroll up between a render and its deferred effect must not be undone by stale state.
- useEffect(()=>{if(follow.current) scrollToEnd();},[lastEntry,pendingKey,showTools,openRuns,threads?.selected]);
+ useEffect(()=>{if(follow.current) scrollToEnd();},[lastEntry,pendingKey,showTools,openRuns]);
  // The pinned decisions bar opens and collapses at every width; the choice is remembered per browser. It opens by
  // itself only when an ask id it has not shown before appears — never because the count alone changed.
  const askIds=data.transcript === true ? (data.open_asks ?? []).map(a=>a.id) : null, askKey=JSON.stringify(askIds);
@@ -291,19 +285,11 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   document.addEventListener("pointerdown",outside); document.addEventListener("keydown",escape);
   return ()=>{document.removeEventListener("pointerdown",outside); document.removeEventListener("keydown",escape);};
  },[]);
- // Operator threads (cp-xmw2): own entries, plus shared ones inside that thread's own span; pinned decisions are never filtered.
- const filter=data.transcript === true ? threadFilter(threads?.status,threads?.selected) : null, bands=threadBands(data.entries,filter), shown=bands.inside;
- // `Show N earlier / later`: what the thread filter hides around its span, collapsed until asked for; a new selection collapses them again.
- const [edges,setEdges]=useState({tag:threads?.selected ?? null,before:false,after:false});
- const edgeOpen=edges.tag === (threads?.selected ?? null) ? edges : {tag:threads?.selected ?? null,before:false,after:false};
- // A local-day separator opens each new day; a band continues from the day shown right above it.
- const beforeDay=edgeOpen.before ? lastDay(bands.before) : null, insideDay=lastDay(shown) ?? beforeDay;
- // Pending sends follow the later band only while it is open; one queued past local midnight opens its own day.
- const pendingDays=dayStarts(pending.map(send=>({id:send.key,at:send.at})),(edgeOpen.after ? lastDay(bands.after) : null) ?? insideDay);
- // Source order by id: a run of steps never spans entries the thread filter left out.
+ // A local-day separator opens each new day; one pending send queued past local midnight opens its own day.
+ const shown=data.entries;
+ const pendingDays=dayStarts(pending.map(send=>({id:send.key,at:send.at})),lastDay(shown));
  const order=new Map(data.entries.map((e,i)=>[e.id,i]));
- const rowList=rows(shown,dayStarts(shown,beforeDay),order);
- // One renderer for the thread and its earlier/later bands: tool runs follow `showTools` / `openRuns` everywhere.
+ const rowList=rows(shown,dayStarts(shown,null),order);
  // Tools on, every row stands alone: rollups fold relay turns only in the chat view of the operator transcript.
  const renderRows=(list:SessionEntry[],prev:string | null)=>{const days=dayStarts(list,prev), base=rows(list,days,order), rl=data.transcript === true && !showTools ? rollups(base,days,order,data.pr_chips ?? {},replyAt) : base, st=groupStarts(rl,days);
  const node=(row:Row):ComponentChild=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : row.kind === "steps" ? <Steps key={row.key} row={row} open={showTools || openRuns.includes(row.key)} onToggle={showTools ? undefined : ()=>toggleRun(row.key)}/> : <RelayRollup key={row.key} row={row} render={node}/>;
@@ -312,7 +298,6 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   const out=label ? [dayPill(head.id,head.at,label),node(row)] : [node(row)];
   return replies && row.kind === "entry" && row.entry.id === replyAt ? [...out,replies] : out;
  });};
- const edge=(side:"before"|"after",list:SessionEntry[],word:string,prev:string | null)=>list.length > 0 && (edgeOpen[side] ? <div class="session-edge" key={side}>{renderRows(list,prev)}</div> : <button type="button" key={side} class="session-edge-toggle" onClick={()=>setEdges({...edgeOpen,[side]:true})}><span>{list.length} {word} {list.length === 1 ? "message" : "messages"} in other threads · show</span></button>);
  const toolCalls=shown.filter(e=>e.kind === "tool").length;
  const hiddenTools=rowList.reduce((n,row)=>row.kind === "steps" && !openRuns.includes(row.key) ? n+row.entries.length : n,0);
  const toggleTools=()=>{const next=!showTools; setShowTools(next); rememberToolCalls(next); setOpenRuns([]);};
@@ -328,9 +313,8 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const history=data.transcript === true && !!data.operator_session && !!files[0] && data.operator_session !== files[0].id;
  const last=data.selected === "you" && data.transcript === true && !history ? data.entries.findLast(e=>isBubble(e) && e.text.trim() !== "") : undefined;
  const preview=last && `${isOwn(last) ? "You: " : ""}${last.text.replace(/[`*#>|]/g,"").replace(/\s+/g," ").trim().slice(0,200)}`;
- const threadsOn=data.selected === "you" && data.transcript === true && threads;
  // Quick replies follow the newest shown operator-session message or card (else the rows), before the pending tail.
- const replyTo=data.selected === "you" && data.transcript === true && !history ? replyAsk(data.entries,open,filter) : null;
+ const replyTo=data.selected === "you" && data.transcript === true && !history ? replyAsk(data.entries,open) : null;
  const replies=replyTo && <QuickReplies key={`replies-${replyTo.id}`} ask={replyTo} control={control}/>;
  const replyAt=replies ? shown.findLast(e=>!isOwn(e) && (isBubble(e) || e.kind === "ask"))?.id : undefined;
  const state=headerState(data,control?.status,history);
@@ -341,29 +325,26 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
    {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} aria-label={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} title={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} onClick={toggleTools}>Tools {toolCalls}</button>}
   </div> : undefined}/>
-  {threadsOn && threadsReady(threadsOn.status) && <NewThread threads={threadsOn} control={control} class="session-chats-new" label="+"/>}
   <aside class="session-sidebar" aria-label="Session streams">
    <section aria-label="Operator">{row(sessionHref("you"),"Operator",history ? "Historical transcript" : preview || modelText(data.operator_context ?? {}),data.selected === "you",{avatar:"OP",at:last?.at,context:preview ? null : data.operator_context,preview:!!preview})}</section>
-   {threadsOn && <ThreadSidebar threads={threadsOn}/>}
    <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:workerDot(w),at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section>
   </aside>
   <div class="session-panel">
-   <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools} threads={threadsOn} state={state}/>
+   <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools} state={state}/>
    <header class="session-heading">{data.selected !== "workers" && <span class={data.selected === "you" ? "session-avatar session-avatar-bot" : "session-avatar"} aria-hidden="true">{data.selected === "you" ? "OP" : "CP"}</span>}
     <div><strong>{data.selected === "you" && data.transcript === true ? "Operator" : data.title}</strong><span class="session-heading-state"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><CtxPct usage={context} label/></span></div>
-    {threadsOn && <ThreadPicker threads={threadsOn} filter/>}
     {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}</header>
    {control?.pending_error && <p class="session-warning" role="status" aria-live="polite" aria-atomic="true">{control.pending_error}</p>}
    {control?.pending && <p class="session-pending-live" aria-live="polite" aria-atomic="true">{pending.length ? pending.map(send=>`Message at ${time(send.at)}: ${send.state}${send.reason ? `, ${send.reason}` : ""}`).join(". ") : "No pending messages"}</p>}
    <div class="session-transcript" role="region" aria-label="Transcript" ref={scroller} onScroll={()=>{const el=scroller.current; if(el){follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<48; setAtBottom(follow.current);}}}>
-    <div class="session-entries"><PrChips.Provider value={data.pr_chips ?? {}}>{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{filter === "none" && !pending.length && <p class="session-empty">No messages in {threads?.selected} yet</p>}{edge("before",bands.before,"earlier",null)}{renderRows(shown,beforeDay)}{edge("after",bands.after,"later",insideDay)}{!replyAt && replies}{pending.flatMap(send=>{const label=pendingDays.get(send.key), node=<PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!} viewing={data.operator_session ?? null} truncated={data.truncated === true}/>; return label ? [dayPill(send.key,send.at,label),node] : [node];})}</PrChips.Provider></div>
+    <div class="session-entries"><PrChips.Provider value={data.pr_chips ?? {}}>{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{renderRows(shown,null)}{!replyAt && replies}{pending.flatMap(send=>{const label=pendingDays.get(send.key), node=<PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!} viewing={data.operator_session ?? null} truncated={data.truncated === true}/>; return label ? [dayPill(send.key,send.at,label),node] : [node];})}</PrChips.Provider></div>
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
    </div>
    {data.transcript === true && open.length > 0 && <section class={pinOpen ? "session-pinned session-pinned-open" : "session-pinned"} aria-label="Open decisions">
     <h2><button type="button" aria-expanded={pinOpen} onClick={togglePin}>{open.length === 1 ? "1 decision waiting" : `${open.length} decisions waiting`}<span aria-hidden="true"> ▾</span></button></h2>
     {open.map(ask=><DecisionCard key={ask.id} ask={ask} control={pinControl} level={3} contextOpen={false}/>)}
    </section>}
-   {data.transcript === true && control && <OperatorComposer control={control} draft={draft} thread={threads}/>}
+   {data.transcript === true && control && <OperatorComposer control={control} draft={draft}/>}
   </div>
  </div>;
 }

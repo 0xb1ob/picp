@@ -40,15 +40,15 @@ const entriesOf = (row: Row): SessionEntry[] => row.kind === "entry" ? [row.entr
 /** The entry a row opens with: where its day pill goes. */
 export const rowHead = (row: Row): SessionEntry => entriesOf(row)[0]!;
 /**
- * Rows in source order, never reordered. A run of steps ends at any other entry, a new local day (`days`), another
- * thread, or a gap a filter opened in `order` (source index by id); its key is its first source entry's id.
+ * Rows in source order, never reordered. A run of steps ends at any other entry, a new local day (`days`),
+ * or a gap in `order` (source index by id); its key is its first source entry's id.
  */
 export function rows(entries: SessionEntry[], days: Map<string,string>, order?: Map<string,number>): Exclude<Row,{kind:"rollup"}>[] {
  const out: Exclude<Row,{kind:"rollup"}>[] = [];
  let prev: SessionEntry | undefined;
  for (const e of entries) {
   const tail = out.at(-1);
-  const joins = e.kind === "tool" && prev !== undefined && !days.has(e.id) && (prev.thread ?? null) === (e.thread ?? null)
+  const joins = e.kind === "tool" && prev !== undefined && !days.has(e.id)
    && (!order || order.get(e.id) === (order.get(prev.id) ?? NaN) + 1);
   if (joins && tail?.kind === "steps") tail.entries.push(e);
   else if (joins && tail?.kind === "entry" && tail.entry.kind === "system" && tail.entry.bridge) out[out.length-1] = {kind:"steps",key:tail.entry.id,notice:tail.entry,entries:[e]};
@@ -64,10 +64,10 @@ const isHead = (row: Row) => row.kind === "steps" ? !!row.notice?.bridge : row.k
 const follows = (a: SessionEntry, b: SessionEntry, order: Map<string,number>) => order.get(b.id) === (order.get(a.id) ?? NaN) + 1;
 /**
  * The turn's subject: the one PR chip its relays name, else its job's one PR chip, else `job:<id>`. None for a turn
- * holding `keep`, a day start past its head, or two threads: such a turn is never folded.
+ * holding `keep` or a day start past its head: such a turn is never folded.
  */
 function subjectOf(rows: Row[], entries: SessionEntry[], days: Map<string,string>, chips: Record<string,PrChip>, keep?: string): string | null {
- if (entries.some((e,i) => e.id === keep || (i > 0 && days.has(e.id)) || (e.thread ?? null) !== (entries[0]!.thread ?? null))) return null;
+ if (entries.some((e,i) => e.id === keep || (i > 0 && days.has(e.id)))) return null;
  const named = new Set(rows.flatMap(row => row.kind === "entry" && row.entry.kind === "say"
   ? [...linkify(row.entry.text, row.entry.links).flatMap(s => s.href ? [s.href] : []), ...Object.values(row.entry.links ?? {})].map(clean) : []).filter(url => chips[url]?.kind === "pr"));
  if (named.size === 1) return `pr:${[...named][0]}`;
@@ -75,7 +75,7 @@ function subjectOf(rows: Row[], entries: SessionEntry[], days: Map<string,string
  return own.length === 1 ? `pr:${clean(own[0]!.url)}` : job ? `job:${job}` : null;
 }
 /**
- * Fold ≥2 consecutive turns with one subject into a rollup row, on one thread, adjacent in `order`, with no day start
+ * Fold ≥2 consecutive turns with one subject into a rollup row, adjacent in `order`, with no day start
  * after its first row and never past `keep` (the quick-reply anchor). Every other row passes through in order.
  */
 export function rollups(list: Row[], days: Map<string,string>, order: Map<string,number>, chips: Record<string,PrChip>, keep?: string): Row[] {
@@ -88,19 +88,18 @@ export function rollups(list: Row[], days: Map<string,string>, order: Map<string
   for (let next = list[i]; next?.kind === "entry" && next.entry.kind === "say" && !isOwn(next.entry) && follows(entriesOf(rows.at(-1)!).at(-1)!, next.entry, order); next = list[++i]) rows.push(next);
   const entries = rows.flatMap(entriesOf), turn = {rows, entries, subject: subjectOf(rows, entries, days, chips, keep)};
   const last = run.at(-1)?.entries.at(-1);
-  if (!(last && turn.subject === run[0]!.subject && (entries[0]!.thread ?? null) === (last.thread ?? null) && !days.has(entries[0]!.id) && follows(last, entries[0]!, order))) flush();
+  if (!(last && turn.subject === run[0]!.subject && !days.has(entries[0]!.id) && follows(last, entries[0]!, order))) flush();
   if (turn.subject) run.push(turn); else out.push(...rows);
  }
  flush();
  return out;
 }
 /**
- * The one open ask quick replies may answer: still open, carded in this transcript (filed under the selected thread
- * when `filter` names one), and the only such ask. None otherwise: chips are never guessed.
+ * The one open ask quick replies may answer: still open, carded in this transcript, and the only such ask.
+ * None otherwise: chips are never guessed.
  */
-export function replyAsk(entries: SessionEntry[], open: AwaitingDetail[], filter: string | null): AwaitingDetail | null {
- if (filter === "none") return null;
- const carded = new Set(entries.flatMap(e => e.kind === "ask" && e.ask?.state === "open" && (filter === null || e.thread === filter) ? [e.ask.id] : []));
+export function replyAsk(entries: SessionEntry[], open: AwaitingDetail[]): AwaitingDetail | null {
+ const carded = new Set(entries.flatMap(e => e.kind === "ask" && e.ask?.state === "open" ? [e.ask.id] : []));
  const eligible = open.filter(ask => carded.has(ask.id));
  return eligible.length === 1 ? eligible[0]! : null;
 }

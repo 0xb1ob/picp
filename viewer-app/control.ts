@@ -22,7 +22,7 @@ export const TEXT_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 export const isTextFile = (file: {name: string}): boolean => /\.(txt|md|html|json)$/i.test(file.name);
 export const attachmentSize = (bytes: number): string => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${Math.ceil(bytes / 1024)} KiB` : `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 
-export type ControlBody = ControlMessageBody | {kind: "answer"; ask_id: string; label: string; thread?: string} | {kind: "abort"};
+export type ControlBody = ControlMessageBody | {kind: "answer"; ask_id: string; label: string} | {kind: "abort"};
 export type ControlStatus = ControlStatusResponse | {error: string};
 export interface Delivery { id: string | null; state: "sending" | "queued" | "delivered" | "held" | "failed"; reason: string | null; ask_id: string | null }
 /** cp-y43c — `editable`: the dashboard still holds it; `edited`: a saved text the status has not confirmed yet; `sent`: the bridge said it was handed over, so no status read makes it editable again. */
@@ -169,7 +169,7 @@ export function startLine(status: ControlStatus | null | undefined, starting: St
  return "Starting a session spends model tokens";
 }
 
-/** The delivery line: Sending, Queued, Delivered, or Failed with the reason; a delivered send's own reason (an unfiled thread) follows it. */
+/** The delivery line: Sending, Queued, Delivered, or Failed with the reason; a delivered send's own reason follows it. */
 export function deliveryLine(delivery: Delivery | null): string {
  if (!delivery) return "";
  if (delivery.state === "failed") return `Failed: ${delivery.reason ?? "unknown"}`;

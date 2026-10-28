@@ -243,7 +243,6 @@
 	"tests/viewer-sessions-rollup.test.ts": 71,
 	"tests/viewer-sessions-skills.test.ts": 97,
 	"tests/viewer-threads-http.test.ts": 260,
-	"tests/viewer-threads-ui.test.ts": 144,
 	"tests/viewer-upload-http.test.ts": 496,
 	"tests/viewer-upload-metadata.test.ts": 23,
 	"tests/viewer-uploads.test.ts": 50,

@@ -91,16 +91,14 @@ test("P19-kbd-css: the served page and stylesheet pin the phone shell, stop page
 	assert.doesNotMatch(css, /operator-composer-field>\.operator-composer-attach/, "the attach icon is never positioned over the field");
 	assert.match(css, /\.operator-composer textarea\{[^}]*padding:10px 12px;/, "the field keeps its own padding only");
 
-	// Chat v2 (PR5): below 900 px the footer flattens into the box's row; the thread and Options live in the top bar.
+	// Chat v2 (PR5): below 900 px the footer flattens into the box's row; Options is desktop-only.
 	assert.match(css, /\.operator-composer-box\{display:flex;align-items:flex-end;/, "one flex row of 44 px targets");
 	assert.match(css, /\.operator-composer-footer\{display:contents\}/, "the footer's controls share the field's row");
 	assert.match(phone, /\.operator-composer-field\{order:1\}/);
 	assert.match(phone, /\.operator-composer-more,\.operator-composer-send\{order:2\}/, "send stays at the row's end");
-	assert.match(phone, /\.operator-composer-options,\.operator-composer-thread\{display:none\}/, "Options is desktop-only; the top bar carries the thread");
+	assert.match(phone, /\.operator-composer-options\{display:none\}/, "Options is desktop-only");
 	assert.match(phone, /\.operator-composer-attach,\.operator-composer-send,\.operator-composer-more>summary\{width:44px;height:44px\}/);
 	assert.match(phone, /\.operator-composer textarea\{min-height:46px;padding:12px 16px;border-radius:22px;font-size:16px\}/, "a 16 px field");
-	assert.match(css, /\.thread-pill>select\{position:absolute;inset:-6px 0;width:100%;[^}]*opacity:0;/, "the native select stays the control");
-	assert.match(css, /\.session-bar-id\{position:relative;flex:1;align-self:stretch;/, "the bar's name column is the # target");
-	assert.match(css, /\.session-bar-sub>\.thread-pill\{position:static;/, "so its select covers the whole column");
+	assert.match(css, /\.session-bar-id\{position:relative;flex:1;align-self:stretch;/, "the bar's name column");
 	assert.match(css, /\.session-bar-icon,\.session-bar-more>summary\{position:relative;width:44px;height:44px;/, "back and ⋯ are 44 px");
 });
