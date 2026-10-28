@@ -66,9 +66,20 @@ test("held-PR, foreign-PR and merge-ask CI readers skip a non-GitHub project, a 
 	assert.ok(!foreign.checked.includes(foreignStale.id), "the non-GitHub foreign PR is not selected");
 	assert.equal(calls("pulls/51"), 0, "gh is never asked about the non-GitHub foreign PR");
 	assert.deepEqual(foreign.errors.filter((error) => error.job_id === foreignStale.id), []);
+	// The GitHub job's branch exists on the remote, so its merge ask resolves a head and reads Actions for it.
+	const demoHead = git(s.remote, "rev-parse", "main");
+	git(s.remote, "branch", github.jobId, "main");
+	const before = s.ghCalls().length;
+	const ask = (jobId: string, n: number) => ({ type: "approval", decision: `Merge PR #${n}`, why: "delivery", blocks: "delivery", job_id: jobId });
 	const events = await s.parent("Render the requested status.", [
-		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: { width: 200, awaiting: [{ type: "approval", decision: "Merge PR #41", why: "delivery", blocks: "delivery", job_id: held.jobId }] } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_status_block", args: { width: 200, awaiting: [ask(held.jobId, 41), ask(github.jobId, 42)] } }] },
 		{ kind: "text", text: "Rendered." },
 	], undefined, true);
 	assert.match(JSON.stringify(events), /non-GitHub remote, no forge declared, so CI is unknown/, "the merge ask defers as unknown");
+	const runReads = s.ghCalls().slice(before).filter((call) => call.includes("actions/runs?"));
+	assert.ok(runReads.some((call) => call.includes(`head_sha=${demoHead}`)), "gh is asked for the GitHub job's CI");
+	assert.deepEqual(runReads.filter((call) => !call.includes(`head_sha=${demoHead}`)), [], "no Actions read for any other head");
+	const reasons = Object.fromEntries(s.post.awaiting.read().items.map((item) => [item.job_id, item.deferred_reason ?? ""]));
+	assert.match(reasons[held.jobId] ?? "", /non-GitHub remote, no forge declared/, "the non-GitHub ask carries the deferral");
+	assert.doesNotMatch(reasons[github.jobId] ?? "", /non-GitHub remote/, "the GitHub ask is gated on its own CI");
 });
