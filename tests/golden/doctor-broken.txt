@@ -60,7 +60,7 @@ package: <PKG>
     running from a source checkout; the package root is the home
 ✓ [parent.lock] no parent lock held for this home
     <HOME>/.pi-command-post/state/parent.lock
-✓ [parent.compact_threshold] no parent.json; parent compacts at default 200000 context tokens
+✓ [parent.compact_threshold] no parent.json; parent compacts at default 150000 context tokens
 ✓ [parent.context] parent context tokens: unknown; last turn cost: unknown; last compact: never; last rotate: never
 ✓ [state.job_id_migration] no state files carry the pre-rename br_id key
 ✓ [fleet.file] fleet: 0 record(s)
