@@ -472,7 +472,8 @@ export function checkWakeup(stamp: WakeupStamp, facts: WakeupFacts, now: Date = 
 	if (stamp.kind === "verdict") {
 		const surface = stamp.keys?.[0] as ReviewSurface | undefined;
 		const attempt = Number(stamp.keys?.[1]);
-		if (TERMINAL.includes(job.phase)) {
+		// A gate verdict judges the artifact, which outlives its planner (picp-ox6 replace_planner rides on it).
+		if (surface !== "gate" && TERMINAL.includes(job.phase)) {
 			return stale(`${stamp.job_id} is already ${job.phase}: the review it describes is history`);
 		}
 		if (!surface || !Number.isInteger(attempt) || attempt < 1) return fresh;
