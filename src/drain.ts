@@ -13,6 +13,7 @@
  * flag every start gate reads (`assertNotDraining`), and the record the next
  * parent reports at startup and then clears.
  */
+import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { type FleetRecord, isoTimestamp, LAYOUT, type RunPhase } from "./contracts.ts";
@@ -50,11 +51,14 @@ export interface DrainJob {
 	head: string | null;
 }
 
-/** Why a drain runs: cp-daemon's updater (`auto-update`, restarts the parent itself) or an operator's `/cp-drain` (`manual`). Absent on records older than this field. */
+/** Why a drain runs: cp-daemon's updater (`auto-update`), an operator's `/cp-drain` (`manual`), or `freeze` (steers implementers to checkpoint). Absent on older records. */
 export interface DrainCause {
-	reason: "auto-update" | "manual";
+	reason: "auto-update" | "manual" | "freeze";
 	target_sha?: string;
 }
+
+/** The steer a freeze drain sends each mid-turn implementer; `profiles/implementer.md` names the prefix. */
+export const FREEZE_STEER = "FREEZE: the parent is pausing. Commit your work in progress and push it to your job branch now, do not call report_result, and end your turn. You will be resumed on this session.";
 
 export interface DrainRecord {
 	cause?: DrainCause;
@@ -102,24 +106,37 @@ export function describeCause(record: Pick<DrainRecord, "cause" | "deadline">): 
 		const target = typeof cause.target_sha === "string" && cause.target_sha ? ` to ${cause.target_sha.slice(0, 12)}` : "";
 		return `auto-update${target} in progress, drain timeout ${record.deadline}; it restarts the parent by itself, a manual restart does not apply it`;
 	}
+	if (cause?.reason === "freeze") return "freeze /cp-drain: mid-turn implementers checkpoint their work to the job branch";
 	return cause?.reason === "manual" ? "manual /cp-drain" : undefined;
 }
 
-/** `/cp-drain`'s arguments: `[seconds] [auto-update [sha]]`, `cancel` or `status`; undefined when malformed. */
+/** `/cp-drain`'s arguments: `[seconds] [auto-update [sha] | freeze]`, `cancel` or `status`; undefined when malformed. */
 export function parseDrainArgs(text: string): { timeoutS?: number; cancel?: boolean; status?: boolean; cause?: DrainCause } | undefined {
 	const [first = "", ...rest] = text.trim().split(/\s+/).filter(Boolean);
 	if (first === "cancel" || first === "status") return rest.length === 0 ? (first === "cancel" ? { cancel: true } : { status: true }) : undefined;
+	if (first === "freeze") return rest.length === 0 ? { cause: { reason: "freeze" } } : undefined;
 	const timeoutS = first === "" ? undefined : Number(first);
 	if (timeoutS !== undefined && !(Number.isFinite(timeoutS) && timeoutS >= 0)) return undefined;
 	if (rest.length === 0) return { timeoutS };
 	const [reason, sha, ...extra] = rest;
+	if (reason === "freeze") return sha === undefined ? { timeoutS, cause: { reason } } : undefined;
 	if (reason !== "auto-update" || extra.length > 0 || (sha !== undefined && !/^[0-9a-f]{7,64}$/i.test(sha))) return undefined;
 	return { timeoutS, cause: { reason, ...(sha ? { target_sha: sha } : {}) } };
 }
 
 /** The inverse of `parseDrainArgs` for a drain started with a cause. */
 export function drainArgs(timeoutS: number, cause?: DrainCause): string {
+	if (cause?.reason === "freeze") return `${timeoutS} freeze`;
 	return cause?.reason === "auto-update" ? [timeoutS, "auto-update", cause.target_sha].filter((word) => word !== undefined).join(" ") : String(timeoutS);
+}
+
+/** True while the drain on disk is a freeze; an unreadable record reads false, so a settle keeps today's nudge. */
+export function freezing(home: string): boolean {
+	try {
+		return readDrain(home)?.cause?.reason === "freeze";
+	} catch {
+		return false;
+	}
 }
 
 /** The one refusal every process start shares while a drain is on disk; it names the drain and, when recorded, why. */
@@ -140,6 +157,20 @@ export function inFlightJobs(records: readonly FleetRecord[], head: (jobId: stri
 	return records
 		.filter((record) => IN_FLIGHT.includes(record.phase))
 		.map((record) => ({ job_id: record.job_id, phase: record.phase, lease: record.lease_id ?? record.worktree, head: head(record.job_id) ?? null }));
+}
+
+/** The freeze checkpoint: the pushed `origin/<branch>`, else the worktree HEAD; undefined (head none) when git cannot say. */
+function checkpointHead(record: FleetRecord | undefined): string | undefined {
+	if (!record?.worktree) return undefined;
+	for (const ref of [`origin/${record.branch}`, "HEAD"]) {
+		try {
+			const sha = execFileSync("git", ["-C", record.worktree, "rev-parse", "--verify", "-q", `${ref}^{commit}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+			if (sha) return sha;
+		} catch {
+			// An absent ref falls through to the next; the drain line says `head none` when both are.
+		}
+	}
+	return undefined;
 }
 
 export interface DurableWakeupSweepStore {
@@ -188,6 +219,8 @@ export interface DrainControlDeps {
 	/** The parent's compact hold is on (cp-35d0 S6): no new drain starts, a running one cannot finish `drained`. Absent = false. */
 	parentControlBusy?: () => boolean;
 	now?: () => Date;
+	/** A steer into a running turn (the `cp_send` path); a freeze drain sends `FREEZE_STEER` through it. */
+	steer?: (jobId: string, message: string) => Promise<unknown>;
 }
 
 function outcomeWakeId(record: Pick<DrainRecord, "started_at">, state: "drained" | "timeout"): string {
@@ -250,6 +283,40 @@ export class DrainControl {
 		return [...this.#deps.busy(), ...(steps > 0 ? [`${steps} merge step(s)`] : []), ...(this.#deps.parentControlBusy?.() ? ["parent compaction"] : [])];
 	}
 
+	/** A freeze records each job's pushed checkpoint (`origin/<branch>`, else worktree HEAD) before any reported head. */
+	#jobs(cause: DrainCause | undefined): DrainJob[] {
+		const records = this.#deps.fleet.list();
+		if (cause?.reason !== "freeze") return inFlightJobs(records, this.#deps.head);
+		return inFlightJobs(records, (jobId) => checkpointHead(records.find((record) => record.job_id === jobId)) ?? this.#deps.head(jobId));
+	}
+
+	/**
+	 * Steer each mid-turn implementer of a running freeze drain to push its WIP and end its turn; one line per busy key.
+	 * Reviewers and planners are named, never steered: a review re-runs and a planner's work is its session.
+	 */
+	async freeze(): Promise<string[]> {
+		const drain = readDrain(this.#deps.home);
+		if (drain?.cause?.reason !== "freeze") return [`  freeze: not sent; the drain on disk is ${drain ? (describeCause(drain) ?? "uncaused") : "absent"}`];
+		const busy = this.#deps.busy();
+		if (busy.length === 0) return ["  freeze: no mid-turn worker to steer"];
+		const records = this.#deps.fleet.list();
+		const lines: string[] = [];
+		for (const key of busy) {
+			const role = records.find((record) => record.job_id === key)?.worker?.role;
+			if (role !== "implementer" || !this.#deps.steer) {
+				lines.push(`  freeze: ${key} not steered (${role ?? "no fleet record"}${this.#deps.steer ? "" : ", no steer path"})`);
+				continue;
+			}
+			try {
+				const sent = (await this.#deps.steer(key, FREEZE_STEER)) as { receipt?: string } | undefined;
+				lines.push(`  freeze: ${key} steered (${sent?.receipt ?? "sent"})`);
+			} catch (error) {
+				lines.push(`  freeze: ${key} not steered: ${(error as Error).message}`);
+			}
+		}
+		return lines;
+	}
+
 	/**
 	 * Write the flag and return at once. A drain already running is returned as
 	 * is. When nothing is mid-turn right now, the answer is `drained` and this
@@ -271,7 +338,7 @@ export class DrainControl {
 			deadline: isoTimestamp(new Date(started.getTime() + bounded * 1000)),
 			timeout_s: bounded,
 			cause,
-			jobs: inFlightJobs(this.#deps.fleet.list(), this.#deps.head),
+			jobs: this.#jobs(cause),
 		};
 		atomicWriteJson(drainFile(this.#deps.home), record);
 		created.add(createdKey(this.#deps.home, record));
@@ -328,7 +395,7 @@ export class DrainControl {
 			finished_at: isoTimestamp(this.#now()),
 			...(left.length > 0 ? { survivors: left } : {}),
 			reported,
-			jobs: inFlightJobs(this.#deps.fleet.list(), this.#deps.head),
+			jobs: this.#jobs(record.cause),
 		};
 		return this.#writeIfCurrent(done) ? done : undefined;
 	}

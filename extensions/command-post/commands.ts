@@ -168,7 +168,7 @@ export function registerCommands(pi: ExtensionAPI, deps: ExtensionDeps): void {
 
 	// Graceful drain before a restart (src/drain.ts); the operator's `cp_parent drain` runs this same command.
 	pi.registerCommand("cp-drain", {
-		description: `Start a drain and return: refuse new processes and merge steps; one wake follows when live workers and reviewers settle, or after [seconds] (default ${DRAIN_DEFAULT_TIMEOUT_S}); /cp-drain status shows the running drain and why; /cp-drain cancel withdraws a draining or timed-out drain, or a drained record an earlier parent left`,
+		description: `Start a drain and return: refuse new processes and merge steps; one wake follows when live workers and reviewers settle, or after [seconds] (default ${DRAIN_DEFAULT_TIMEOUT_S}); /cp-drain [seconds] freeze also steers each mid-turn implementer to push its WIP and end its turn unreported; /cp-drain status shows the running drain and why; /cp-drain cancel withdraws a draining or timed-out drain, or a drained record an earlier parent left`,
 		handler: async (args, ctx) => {
 			setLive(ctx);
 			const trimmed = args.trim();
@@ -176,7 +176,7 @@ export function registerCommands(pi: ExtensionAPI, deps: ExtensionDeps): void {
 			let text: string;
 			let level: "info" | "error" = "error";
 			if (!parsed) {
-				text = `${DRAIN_PREFIX}refused: ${JSON.stringify(trimmed)} is not a timeout in seconds \u2014 usage: /cp-drain [seconds|status|cancel]`;
+				text = `${DRAIN_PREFIX}refused: ${JSON.stringify(trimmed)} is not a timeout in seconds \u2014 usage: /cp-drain [seconds] [freeze] | status | cancel`;
 			} else {
 				// Returns at once: the outcome is one cp-recovery wake from the ordinary tick (DrainControl.check).
 				try {
@@ -190,7 +190,8 @@ export function registerCommands(pi: ExtensionAPI, deps: ExtensionDeps): void {
 						level = "info";
 					} else {
 						const record = post.drain.start(parsed.timeoutS, parsed.cause);
-						text = formatDrain(record, post.home);
+						const frozen = parsed.cause?.reason === "freeze" && record.state === "draining" ? await post.drain.freeze() : [];
+						text = [formatDrain(record, post.home), ...frozen].join("\n");
 						if (record.state !== "timeout") level = "info";
 					}
 				} catch (error) {

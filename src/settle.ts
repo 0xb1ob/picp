@@ -102,6 +102,7 @@ import {
 	type UnreportedWork,
 	unreportedWorkPresent,
 } from "./contracts.ts";
+import { freezing } from "./drain.ts";
 import type { FailJob } from "./failure-announcer.ts";
 import { detectDeadModelCall, type ModelCallError } from "./failures.ts";
 import { type FleetStore, hasEnvelopeOnDisk } from "./fleet.ts";
@@ -485,6 +486,8 @@ export class SettleWatcher {
 					: "the nudge to report was already spent",
 			);
 		}
+		// A freeze drain told this worker to end its turn unreported; a nudge would restart the turn it just checkpointed.
+		if (freezing(fleet.home)) return this.#record(jobId, settles, work, "a freeze drain checkpointed it: no nudge is sent");
 		if (!worker.alive) {
 			// Nothing to prompt. The observed close is classified by FailureMonitor;
 			// this records the settle itself so the run log says which of the two

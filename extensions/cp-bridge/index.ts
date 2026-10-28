@@ -578,7 +578,7 @@ export default function (pi: ExtensionAPI): void {
 		description:
 			"Own the CP parent over RPC. start spawns it, send delivers prose and returns a receipt level " +
 			"(injected, turn_settled, http_accepted, owner_observed — never 'accepted') plus the reply when the turn settles, " +
-			"status reports the process, context tokens, open escalations, operator asks and sends; ask, ask_answer and ask_withdraw record operator questions only and never authorize parent actions (ask: a short question, the background in context); doctor and version read the parent's diagnostics, mode and home; drain stops new dispatches, promotions and merge steps and waits (timeout_s) for live workers to settle before a restart; drain_cancel withdraws a draining or timed-out drain or a drained record an earlier parent left (never this parent's own); compact, rotate and model manage the live parent; stop closes it, never-landed sends undeliverable; stop and rotate say whether the parent was drained or how many live workers they kill. Fleet tools stay on the parent, not here. " +
+			"status reports the process, context tokens, open escalations, operator asks and sends; ask, ask_answer and ask_withdraw record operator questions only and never authorize parent actions (ask: a short question, the background in context); doctor and version read the parent's diagnostics, mode and home; drain stops new dispatches, promotions and merge steps and waits (timeout_s) for live workers to settle before a restart (freeze: true first steers each mid-turn implementer to push its WIP and end its turn unreported); drain_cancel withdraws a draining or timed-out drain or a drained record an earlier parent left (never this parent's own); compact, rotate and model manage the live parent; stop closes it, never-landed sends undeliverable; stop and rotate say whether the parent was drained or how many live workers they kill. Fleet tools stay on the parent, not here. " +
 			"integration_hold and integration_release write a durable per-job merge pause directly, without waiting for a parent turn. " +
 			"answer posts an answer the human asked for (their question, your answer, evidence, the research job it lands) to the dashboard's Answers to acknowledge list (state/operator/answers.jsonl) directly, without a parent turn; bookkeeping only, never pushed. " +
 			"Relays name paths (state/runs/<id>/artifact.md, gate files); this session may read those bodies. The parent may not. " +
@@ -603,6 +603,7 @@ export default function (pi: ExtensionAPI): void {
 		parameters: Type.Object({
 			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "doctor", "version", "drain", "drain_cancel", "compact", "rotate", "model", "stop"], { description: "manage or diagnose the parent" }),
 			timeout_s: Type.Optional(Type.Number({ minimum: 0, maximum: DRAIN_MAX_TIMEOUT_S, description: `drain: seconds to wait for live workers to settle (default ${DRAIN_DEFAULT_TIMEOUT_S})` })),
+			freeze: Type.Optional(Type.Boolean({ description: "drain: also steer each mid-turn implementer to commit and push its WIP and end its turn without reporting (before a usage pause)" })),
 			home: Type.Optional(Type.String({ description: "start: command-post home path" })),
 			mode: Type.Optional(StringEnum([...MODES], { description: "start: multi (the only mode; may be omitted)" })),
 			model: Type.Optional(Type.String({ description: "start or model: provider/model-id" })),
@@ -738,7 +739,8 @@ export default function (pi: ExtensionAPI): void {
 				}
 				if (params.action === "doctor" || params.action === "version" || params.action === "drain" || params.action === "drain_cancel") {
 					const activeClient = await ensureClient(undefined, undefined, true);
-					const result = await activeClient.request(params.action === "drain_cancel" ? "drainCancel" : params.action, ...(params.action === "drain" && params.timeout_s !== undefined ? [params.timeout_s] : [])) as import("../../src/parent-diagnostics.ts").ParentDiagnostic;
+					const drainArgs = params.freeze ? [params.timeout_s ?? DRAIN_DEFAULT_TIMEOUT_S, { reason: "freeze" }] : params.timeout_s !== undefined ? [params.timeout_s] : [];
+					const result = await activeClient.request(params.action === "drain_cancel" ? "drainCancel" : params.action, ...(params.action === "drain" ? drainArgs : [])) as import("../../src/parent-diagnostics.ts").ParentDiagnostic;
 					return { ...textResult(result.text, { ...result }), isError: result.level === "error" };
 				}
 				if (params.action === "model") {
