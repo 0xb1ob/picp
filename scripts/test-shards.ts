@@ -6,7 +6,7 @@
 import { globSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-export const SHARDS = 4;
+export const SHARDS = 8;
 const TABLE = fileURLToPath(new URL("./test-timings.json", import.meta.url));
 const CI_YML = fileURLToPath(new URL("../.github/workflows/ci.yml", import.meta.url));
 const GLOB = "tests/**/*.test.ts";
@@ -86,7 +86,7 @@ if (import.meta.main) {
 		for (const f of files) if (!t[f]) t[f] = prior[f] === 0 ? 0 : Math.round(med);
 		writeFileSync(TABLE, `${JSON.stringify(Object.fromEntries(Object.entries(t).sort()), null, "\t")}\n`);
 	} else {
-		console.error("usage: test-shards.ts files <1..4> | check | gen <spec-log>");
+		console.error(`usage: test-shards.ts files <1..${SHARDS}> | check | gen <spec-log>`);
 		process.exit(2);
 	}
 }
