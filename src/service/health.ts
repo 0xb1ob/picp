@@ -4,7 +4,8 @@
  * `service_health` escalation, src/service-alerts.ts) is where a failure or a recovery shows.
  *
  *   parent      no responsive host, `hello.parent` null, or the lock not held by a live pid (2 runs in a row;
- *               never while `state/update.json` `phase` is not idle, a `held` rollback excepted) → `health: parent down`
+ *               never while `state/update.json` `phase` is not idle, a `held` rollback excepted, nor while the
+ *               stop marker names the current dead generation: an operator stop) → `health: parent down`
  *   viewer      `/api/identity` not 200 for this home within 3 s (2 runs; never mid-update) → `health: viewer down`
  *   supervisor  cp-daemon's parent supervisor `failed` (`state/daemon-runtime.json`) → `health: crash-looping`
  *   disk        free < 5 GiB or < 10 % of the home's filesystem                → `health: disk low`
@@ -28,7 +29,7 @@ import { configureLayout, isoTimestamp, layoutForHome } from "../contracts.ts";
 import { isPidAlive } from "../fleet.ts";
 import { PACKAGE_ROOT, resolveHome } from "../home.ts";
 import { atomicWriteJson } from "../json-store.ts";
-import { currentHost, ParentHostClient, parentHostPaths } from "../parent-host.ts";
+import { currentHost, ParentHostClient, parentHostPaths, readStopMarker } from "../parent-host.ts";
 import { hostHeaderFor } from "../viewer/server.ts";
 import { listenPlan } from "../viewer/cli.ts";
 import { deviceControlRequest } from "../viewer/device-control.ts";
@@ -173,7 +174,10 @@ export function hostProbes(options: HostProbeOptions): HealthProbes {
 		parent: async () => {
 			const updating = midUpdate();
 			if (updating) return { skip: updating };
-			const { record } = currentHost(parentHostPaths(home, "multi"));
+			const paths = parentHostPaths(home, "multi");
+			const { gen, record } = currentHost(paths);
+			// An intended pause, not an outage: the stop marker names this dead generation.
+			if (record && !isPidAlive(record.pid) && readStopMarker(paths)?.gen === gen) return { skip: `operator stop closed generation ${gen}` };
 			if (!record || !isPidAlive(record.pid)) return failed("no parent host is running");
 			const client = await ParentHostClient.connect(record, 3_000).catch(() => undefined);
 			if (!client) return failed(`parent host pid ${record.pid} does not answer`);

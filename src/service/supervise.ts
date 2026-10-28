@@ -5,7 +5,9 @@
  * generation, a live foreign lock refuses, a live-but-silent host is never
  * replaced — it only decides when cp-daemon should try again:
  *
- *  - startup joins or spawns; a host running no parent gets `start` with
+ *  - startup joins or spawns, except over a dead generation the stop marker names (an operator stop survives a
+ *    reload or a reboot): it waits, as after a host loss, for the generation `cp_parent start` makes;
+ *    a host running no parent gets `start` with
  *    `CP_PARENT_MODEL`, else `data/parent.json` `model` (dashboard Settings), else the saved
  *    `cp-parent-control.json` model, else the supervisor exits 78 (`RestartPreventExitStatus=78`: no crash loop).
  *    It never sends `modelExplicit`: the env pin is not an explicit choice, so `bridge.start` lets the
@@ -84,6 +86,14 @@ export interface SuperviseOptions {
 export async function supervise(options: SuperviseOptions, ports: SupervisePorts): Promise<number> {
 	let client: HostClient | undefined;
 	let foreignLogged = false;
+	// A fresh supervisor (an update's reload, a reboot) never respawns a generation an operator stop closed.
+	const startup = ports.current();
+	const stopped = startup.record !== undefined && !ports.alive(startup.record.pid) && ports.stoppedGen() === startup.gen;
+	if (stopped) {
+		const next = await reattach(startup.gen, ports);
+		if (!next) return 1;
+		client = next.client;
+	}
 	while (!client) {
 		try {
 			client = await ports.attach();
@@ -98,7 +108,8 @@ export async function supervise(options: SuperviseOptions, ports: SupervisePorts
 			await ports.sleep(FOREIGN_LOCK_RETRY_MS);
 		}
 	}
-	if (client.parentPid === undefined) {
+	// Joined via the stop wait: the operator's start made that generation and its parent.
+	if (!stopped && client.parentPid === undefined) {
 		const configured = ports.configuredModel();
 		const model = options.model?.trim() || configured || ports.savedModel();
 		if (!model) {
@@ -109,7 +120,7 @@ export async function supervise(options: SuperviseOptions, ports: SupervisePorts
 		const started = await client.request("start", { home: options.home, mode: "multi", model, ...(options.piBin ? { piBin: options.piBin } : {}) }) as { pid?: number; already?: boolean };
 		// An already-running parent keeps whatever model it runs; only a fresh start names the model it was given.
 		ports.log(`host pid ${client.hostPid}: ${started.already ? `parent already running pid ${started.pid ?? "?"}` : `started parent pid ${started.pid ?? "?"} (${configured ?? model})`}`);
-	} else ports.log(`attached to host pid ${client.hostPid}, parent pid ${client.parentPid}`);
+	} else if (!stopped) ports.log(`attached to host pid ${client.hostPid}, parent pid ${client.parentPid}`);
 	let gen = ports.current().gen;
 	for (;;) {
 		await client.closed;

@@ -473,7 +473,9 @@ not started by a relaunching `cp-operator` (no `CP_OPERATOR_RELAUNCH_FILE`) repo
 - **Stopping the fleet stays `cp_parent drain` + `cp_parent stop`.** A
   completed `stop` writes `state/parent-host.stopped.json` `{gen, at}` before
   the host exits; the supervisor then waits without spawning (polling every
-  10 s) and joins a newer generation when `cp_parent start` makes one.
+  10 s) and joins a newer generation when `cp_parent start` makes one. A fresh supervisor (an update's
+  `reload`, a `cp-daemon restart`, a reboot) does the same over a dead generation the marker names, and the
+  health check skips `parent` while it stands.
 - While `state/drain.json` exists, a host loss also waits without spawning.
   A boot starts regardless: the boot is the restart the drain prepared, and
   the parent's `session_start` reports and clears it.
@@ -576,6 +578,11 @@ one result in `state/update.json` (its only writer):
 - **drain:** host `drain 600` with cause `auto-update` and the target sha (so the refusal and notices say it is
   an update that restarts the parent by itself), then up to 660 s for `drained`. Still draining or timed out → host
   `drainCancel` (`/cp-drain cancel`: dispatch reopens) → `drain_timeout`; nothing is stopped;
+- **no parent host** (#537): a drain that finds no live host record (`no parent host is running`, e.g. after
+  `cp_parent stop`) counts as drained when no worker or script pid is live; a live one is `failed` and nothing is
+  merged. It skips the host `stop`, verifies the viewer only (no `/doctor` without a parent), and the `updated`
+  detail says the parent was not running. The reload's fresh supervisor honours the stop marker, so the parent
+  stays down until the operator's next `cp_parent start`, which runs the new code;
 - **update:** host `stop` (unlanded sends stay queued; the stop marker keeps the supervisor from
   respawning), cp-daemon `hold` (the viewer stops and stays down), `git merge --ff-only <to>`, `npm ci` only
   when `package-lock.json` changed, cp-daemon `reload` (a new inner on the new code: the supervisor starts a

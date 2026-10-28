@@ -3,7 +3,7 @@
  * with stub git, gh, pi and npm as its only PATH and its clock set per run by the time-scale preload (nearly frozen).
  */
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -14,6 +14,7 @@ import type { BridgeRelay } from "../../src/cp-bridge.ts";
 import { EscalationStore } from "../../src/escalation.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../../src/operator-outbox.ts";
+import { parentHostPaths } from "../../src/parent-host.ts";
 import { initPush } from "../../src/push/keys.ts";
 import { atomicWrite, daemonPaths } from "../../src/service/daemon-files.ts";
 import { tunnelConfigFile } from "../../src/service/daemon-tunnel-files.ts";
@@ -136,6 +137,17 @@ test("P14-health: the health oneshot records each check's failure and recovery, 
 	assert.doesNotMatch((await p.run((at += 5 * MIN), viewer(down))).out, /parent: skipped|viewer: skipped/);
 	writeFileSync(update, JSON.stringify({ phase: "rolling_back", last_result: "rollback_failed" }));
 	assert.match((await p.run((at += 5 * MIN), viewer(down))).out, /parent: skipped \(update phase rolling_back\)/);
+	// An operator stop is a pause, not an outage: skipped while the marker names the current dead generation only.
+	writeFileSync(update, JSON.stringify({ phase: "idle" }));
+	const hosts = parentHostPaths(p.home, "multi");
+	const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+	writeFileSync(hosts.record(1), JSON.stringify({ version: 1, pid: dead, socket: "/nonexistent.sock", token: "t", started_at: "2026-09-28T10:00:00Z" }));
+	writeFileSync(hosts.stopped, JSON.stringify({ gen: 1, at: "2026-09-28T10:00:00Z" }));
+	assert.match((await p.run((at += 5 * MIN), viewer(up))).out, /parent: skipped \(operator stop closed generation 1\)/);
+	writeFileSync(hosts.record(2), JSON.stringify({ version: 1, pid: dead, socket: "/nonexistent.sock", token: "t", started_at: "2026-09-28T10:00:00Z" }));
+	const lost = await p.run((at += 5 * MIN), viewer(up));
+	assert.deepEqual([/parent: skipped/.test(lost.out), lost.record.checks.parent!.detail], [false, "no parent host is running"], "generation 2 was never stopped");
+	for (const file of [hosts.record(1), hosts.record(2), hosts.stopped]) rmSync(file);
 	// A viewer blip that recovers never counts.
 	writeFileSync(update, JSON.stringify({ phase: "idle" }));
 	const viewers = [];

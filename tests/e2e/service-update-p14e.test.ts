@@ -5,7 +5,7 @@
  * a stub; git, the fleet, run status and drain.json are real.
  */
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -489,4 +489,26 @@ test("P14e-update-quiet: the quiet period", { timeout: 300_000 }, async (t) => {
 	r.repo.git("merge", "--ff-only", "--quiet", to);
 	r.state({ phase: "verifying", from, to, lock: false });
 	assert.deepEqual([(await r.run(5))?.last_result, r.repo.head()], ["rolled_back", from]);
+});
+
+test("P14e-update-nohost: no parent host running", { timeout: 300_000 }, async (t) => {
+	// The operator stopped the parent: its host record names a dead pid. Issue 537 recorded
+	// `failed: drain failed: no parent host is running` every run and never applied.
+	const b = await bench(t);
+	const record = parentHostPaths(b.home, "multi").record(1);
+	writeFileSync(record, JSON.stringify({ ...JSON.parse(readFileSync(record, "utf8")), pid: spawnSync(process.execPath, ["-e", ""]).pid }));
+	// An idle worker's pid outlived the host: refused, nothing merged, held or stopped.
+	await b.job("cp-orphan", "idle");
+	const head = b.repo.head();
+	const to = advanceBase(b.repo, "n.txt", "n\n");
+	const refused = await b.run();
+	assert.deepEqual([refused?.last_result, refused?.phase, b.repo.head(), b.calls()], ["failed", "idle", head, ["daemon health"]], last(b));
+	assert.match(refused?.detail ?? "", /^no parent host is running and live worker\(s\) cp-orphan; nothing merged/);
+	// Nothing live: applied with no host op, the viewer verified only; the stale failure detail is replaced.
+	rmSync(join(b.stateDir, "fleet.json"));
+	b.reset();
+	const applied = await b.run();
+	assert.deepEqual([applied?.last_result, applied?.phase, b.repo.head(), b.calls()], ["updated", "idle", to, ["daemon hold", "daemon reload"]], last(b));
+	assert.match(applied?.detail ?? "", /; the parent was not running: viewer verified only, the next cp_parent start runs /);
+	assert.doesNotMatch(applied?.detail ?? "", /live worker/);
 });
