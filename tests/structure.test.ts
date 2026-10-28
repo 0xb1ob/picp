@@ -15,6 +15,7 @@
  * with a one-sentence justification in the PR (AGENTS.md, "Size ceilings").
  */
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { test } from "node:test";
@@ -253,4 +254,18 @@ test("cp_mandate and cp_decide read the live view, so the baseline and every cap
 	assert.match(source, /const jobs = liveUsageJobs\(post\.fleet, post\.runs\);/);
 	assert.match(source, /usageJobs: \(\) => liveUsageJobs\(post\.fleet, post\.runs\)/);
 	assert.doesNotMatch(source, /post\.fleet\.read\(\)\.jobs/);
+});
+
+// CI let markers at CHANGELOG.md:13-17 through on PR 656 head 10adef8. No tracked file quotes markers, so no allow-list.
+const CONFLICT_MARKER = /^(<<<<<<<|=======|>>>>>>>)( |$)/m;
+const markerFiles = (files: string[]) =>
+	files.filter((file) => {
+		const buf = readFileSync(join(REPO_ROOT, file));
+		return !buf.includes(0) && CONFLICT_MARKER.test(buf.toString("utf8"));
+	});
+
+test("no tracked text file carries a committed merge-conflict marker", () => {
+	assert.ok(CONFLICT_MARKER.test("a\n<<<<<<< HEAD\nb\n=======\nc\n>>>>>>> main\n")); // negative control
+	const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: REPO_ROOT, encoding: "utf8", maxBuffer: 1 << 26 }).split("\0").filter(Boolean);
+	assert.deepEqual(markerFiles(tracked), []);
 });
