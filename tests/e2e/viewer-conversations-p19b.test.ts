@@ -237,6 +237,27 @@ test("P19-rollup-card: one card shows the latest relay and its chip under one me
 	assert.equal(tools.$$(".session-rollup").length, 0, "(k) Tools on forms no rollup");
 });
 
+test("P19-rollup-steps: a rollup's wake notice shows once, inside its steps pill; the meta line sits above the latest relay", { timeout: 120_000 }, async (t) => {
+	// Operator report: "bridge woke <job> · owner observed" showed as its own row under the steps pill, and again when
+	// the pill opened; the "1 earlier" line sat above the pill, away from the relay. Base fails the collapsed count.
+	const d = await transcript(t, [wake("cp-a", "EARLY woke"), relay("early update"), wake("cp-a", "LATEST woke"), ...bash("call-l"), relay("latest relay")]);
+	const tab = await d.open(FULL);
+	const card = await tab.find(".session-rollup");
+	const count = () => (tab.$(".session-rollup")!.textContent!.match(/LATEST woke/g) ?? []).length;
+	assert.equal(count(), 0, "collapsed pill: no notice row of its own");
+	const meta = card.querySelector(".session-rollup-meta")!;
+	assert.deepEqual([meta.previousElementSibling?.matches(".session-steps"), meta.nextElementSibling?.textContent?.includes("latest relay")], [true, true], "meta: below the pill, right above the latest relay");
+	tab.click(tab.$(".session-rollup .session-steps > .session-tools")!);
+	await until(() => tab.$(".session-rollup .session-steps")?.className ?? "", (c) => c.includes("session-steps-open"), "the pill to open");
+	assert.equal(count(), 1, "open pill: the notice once, inside the card");
+	assert.equal(tab.$$(".session-rollup .session-steps-card .session-bridge").length, 1);
+	tab.click(tab.$("button.session-rollup-toggle")!);
+	await until(() => tab.$(".session-rollup")!.textContent!, (text) => text.includes("early update"), "the earlier turn");
+	assert.equal(count(), 1, "earlier turns open: still once");
+	const text = tab.$(".session-rollup")!.textContent!;
+	assert.ok(text.indexOf("early update") < text.indexOf("LATEST woke") && text.indexOf("LATEST woke") < text.indexOf("latest relay"), "in order");
+});
+
 test("P19-rollup-chips: the header chip stays when the latest relay names no PR; a notice chips a PR like the turn card; quick replies keep their anchor", { timeout: 120_000 }, async (t) => {
 	const head = "e".repeat(40);
 	const quiet = await transcript(t, [wake("cp-a", "first woke"), relay("first update"), wake("cp-a", "second woke"), relay("second update")]);

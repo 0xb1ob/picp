@@ -558,10 +558,11 @@ test("P19-chat-steps: a run of steps takes the one wake notice above it and link
 	await tab.waitText(/a message ends the run/);
 	const runs = tab.$$(".session-steps");
 	assert.deepEqual(runs.map((r) => r.querySelector(".session-steps-face")?.textContent?.replace(/[▸▾]/g, "").trim()), ["≡ 3 steps · cp-done", "≡ 1 step · ran t3"], "the notice joins its run; a message ends it");
-	assert.match(runs[0]!.querySelector(".session-steps-card")?.textContent ?? "", /Woke for CI/, "only the nearest notice joins");
-	assert.doesNotMatch(runs[0]!.querySelector(".session-steps-card")?.textContent ?? "", /An earlier wake/, "never the notice above it");
 	tab.click(runs[0]!.querySelector(".session-tools")!);
 	const link = await tab.find(".session-steps-link");
+	// The two wakes fold into a rollup, where the notice shows only inside the open pill.
+	assert.match(tab.$(".session-steps-card")?.textContent ?? "", /Woke for CI/, "only the nearest notice joins");
+	assert.doesNotMatch(tab.$(".session-steps-card")?.textContent ?? "", /An earlier wake/, "never the notice above it");
 	assert.equal(link.getAttribute("href"), "#job/cp-done?tab=transcript");
 	tab.go("#job/cp-done?tab=transcript");
 	const pane = () => tab.$(".job-detail")?.getAttribute("data-tab");

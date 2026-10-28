@@ -42,7 +42,7 @@ export function parentContextStatus(home: string): {
 	try { return JSON.parse(readFileSync(parentContextFile(home), "utf8")); } catch { return {}; }
 }
 
-export const DEFAULT_PARENT_COMPACT_TOKENS = 200000;
+export const DEFAULT_PARENT_COMPACT_TOKENS = 150000;
 
 /** Absent parent.json → the default; an explicit file with a bad value stays `{}` (disabled, doctor warns). */
 export function parentSettings(home: string): { compact_at_tokens?: number } {

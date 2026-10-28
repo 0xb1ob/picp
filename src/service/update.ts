@@ -15,7 +15,9 @@
  *             still skips: the drain decides. A tip not yet unchanged for `quiet_min` (data/update.json,
  *             default 10, 0 = off) since this updater first saw it → `skipped_settling`: a burst of merges is one restart
  *   drain     host `drain 600`, wait ≤ 660 s for `drained`; a timeout → host `drainCancel` → `drain_timeout`;
- *             refused during parent control (PARENT_CONTROL_BUSY) → `skipped_busy`; gone before `drained` → `drain_timeout`
+ *             refused during parent control (PARENT_CONTROL_BUSY) → `skipped_busy`; gone before `drained` → `drain_timeout`;
+ *             no parent host running (NO_HOST) → already drained unless a worker or script pid is live (`failed`):
+ *             no host stop, verify the viewer only, and the parent stays down until the operator's next start
  *   update    host `stop`, cp-daemon `hold` (the viewer), `git merge --ff-only <to>`, `npm ci` only when
  *             package-lock.json changed, cp-daemon `reload` (a new inner: parent supervisor and viewer)
  *   verify    ≤ 120 s: a host running a parent whose `/doctor` is not an error, and the viewer's identity
@@ -80,6 +82,8 @@ export interface UpdateState {
 }
 
 export const DRAIN_TIMEOUT_S = 600;
+/** The production `host` port's refusal when no live host record exists: the fleet is already stopped. */
+export const NO_HOST = "no parent host is running";
 /** `skipped_busy` for this many × interval_min: mid-turn workers no longer skip, the drain decides (cp-ccm0). */
 export const BUSY_FORCE_FACTOR = 4;
 export const DRAIN_WAIT_MS = 660_000;
@@ -157,6 +161,8 @@ export interface UpdatePorts {
 	 * not an error and the viewer answers; `{note}` when a still-busy parent was accepted without doctor; else why not.
 	 */
 	verify(timeoutMs: number): Promise<VerifyResult>;
+	/** Why the viewer is not answering for this home, or undefined: the only verify when no parent host runs. */
+	viewerDown(): Promise<string | undefined>;
 	/** cp-daemon's control socket: `hold` the viewer, `reload` the inner (parent supervisor and viewer), ask for a `health` run. */
 	daemon: DaemonControl;
 	now(): Date;
@@ -237,13 +243,26 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 		const answer = await ports.host("drainCancel").catch((error: Error) => ({ text: `drainCancel failed: ${error.message}` }));
 		ports.log(`drain cancel: ${(answer as { text?: string } | null)?.text ?? "no answer"}`);
 	};
+	/** False once a drain found no parent host: nothing to stop, and only the viewer is verified. */
+	let parentRunning = true;
 	const stopFleet = async (): Promise<string | undefined> => {
 		try {
-			await ports.host("stop", {});
+			// `by: "update"`: the marker it leaves holds the old supervisor only, never the reload's fresh one.
+			if (parentRunning) await ports.host("stop", { by: "update" });
 		} catch (error) {
 			return `host stop failed: ${(error as Error).message}`;
 		}
 		return ports.daemon.hold();
+	};
+	const verifyUnits = async (): Promise<VerifyResult> => {
+		if (parentRunning) return ports.verify(VERIFY_MS);
+		const deadline = ports.now().getTime() + VERIFY_MS;
+		for (;;) {
+			const down = await ports.viewerDown();
+			if (!down) return undefined;
+			if (ports.now().getTime() >= deadline) return `not healthy within ${VERIFY_MS / 1000}s: viewer: ${down}`;
+			await ports.sleep(2_000);
+		}
 	};
 	/** The host's answer to the last `drain`: names why a drain that never reached disk is `gone` (cp-35d0 S6). */
 	let drainAnswer = "no answer";
@@ -294,7 +313,7 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 		const reset = git("reset", "--quiet", "--keep", from);
 		if (reset.status !== 0) return finish("rollback_failed", `${why}; git reset --keep ${short(from)} failed: ${reset.stderr.trim()}`, patch);
 		const failed = (lock ? npmCi() : undefined) ?? (await restartUnits());
-		const verified = failed ? undefined : await ports.verify(VERIFY_MS);
+		const verified = failed ? undefined : await verifyUnits();
 		const broken = failed ?? (typeof verified === "string" ? verified : undefined);
 		if (broken) return finish("rollback_failed", `${why}; after the rollback: ${broken}`, patch);
 		return finish("rolled_back", `${why}; back at ${short(from)}; ${short(to)} is never retried${typeof verified === "object" ? `; ${verified.note}` : ""}`, { ...patch, bad_sha: to });
@@ -378,13 +397,20 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 		}
 		if (drained === "timeout") return finish("drain_timeout", `the fleet did not drain within ${DRAIN_TIMEOUT_S}s; the drain was cancelled and nothing was stopped`, { from, to });
 	} catch (error) {
-		await cancelDrain();
 		const message = (error as Error).message;
-		// Only the exact refusal, bare (the bridge) or as parentDiagnostic wraps a throwing /cp-drain: every other error stays `failed`.
-		if (message === PARENT_CONTROL_BUSY || message === `parent diagnostic /cp-drain failed: ${PARENT_CONTROL_BUSY}`) {
-			return finish("skipped_busy", `the parent is mid-control (${message}); nothing drained or stopped`, { behind: behind() });
+		if (message === NO_HOST) {
+			// No host to drain: nothing runs under it unless a worker or script pid outlived it.
+			const live = ports.busy();
+			if (live.length > 0) return finish("failed", `${NO_HOST} and live worker(s) ${live.join(", ")}; nothing merged or stopped`, { from, to });
+			parentRunning = false;
+		} else {
+			await cancelDrain();
+			// Only the exact refusal, bare (the bridge) or as parentDiagnostic wraps a throwing /cp-drain: every other error stays `failed`.
+			if (message === PARENT_CONTROL_BUSY || message === `parent diagnostic /cp-drain failed: ${PARENT_CONTROL_BUSY}`) {
+				return finish("skipped_busy", `the parent is mid-control (${message}); nothing drained or stopped`, { behind: behind() });
+			}
+			return finish("failed", `drain failed: ${message}; nothing was stopped`, { from, to });
 		}
-		return finish("failed", `drain failed: ${message}; nothing was stopped`, { from, to });
 	}
 
 	save({ phase: "updating" });
@@ -395,9 +421,10 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 	const broken = (lock ? npmCi() : undefined) ?? (await restartUnits());
 	if (broken) return rollback(from, to, lock, broken);
 	save({ phase: "verifying" });
-	const verified = await ports.verify(VERIFY_MS);
+	const verified = await verifyUnits();
 	if (typeof verified === "string") return rollback(from, to, lock, verified);
-	return finish("updated", `${short(from)} → ${short(to)}${lock ? " (npm ci)" : ""}${verified ? `; ${verified.note}` : ""}`, { from, to, updated_at: at });
+	const noParent = parentRunning ? "" : `; the parent was not running: viewer verified only, the next cp_parent start runs ${short(to)}`;
+	return finish("updated", `${short(from)} → ${short(to)}${lock ? " (npm ci)" : ""}${verified ? `; ${verified.note}` : ""}${noParent}`, { from, to, updated_at: at });
 }
 
 /** `promise` settled within `ms`: its value or its error; undefined on timeout. */
@@ -494,7 +521,7 @@ export function hostUpdatePorts(home: string, env: NodeJS.ProcessEnv = process.e
 		},
 		host: async (op, ...args) => {
 			const { record } = currentHost(paths);
-			if (!record || !isPidAlive(record.pid)) throw new Error("no parent host is running");
+			if (!record || !isPidAlive(record.pid)) throw new Error(NO_HOST);
 			const client = await ParentHostClient.connect(record, 5_000);
 			try {
 				return await client.request(op, ...args);
@@ -533,6 +560,7 @@ export function hostUpdatePorts(home: string, env: NodeJS.ProcessEnv = process.e
 				},
 				timeoutMs,
 			),
+		viewerDown: () => viewerDown(home, env),
 		daemon: daemonControl(home, (line) => console.error(`update: ${line}`)),
 		now: () => new Date(),
 		sleep,

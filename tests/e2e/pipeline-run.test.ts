@@ -27,6 +27,7 @@ import { ReviewApprovalStore } from "../../src/review-approval.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { ReviewRuns, type ReviewWakeup } from "../../src/review-runs.ts";
 import { type Authorizer, formatAdvance, type AdvanceResult, composeImplementationRouting } from "../../src/pipeline.ts";
+import { registerReviewTools } from "../../extensions/command-post/tools-review.ts";
 import {
 	createAgentDir,
 	createScratchHome,
@@ -49,6 +50,8 @@ const SKIP = treehouseAvailable() ? false : "the pipeline e2e needs treehouse on
 
 interface Bench {
 	home: string;
+	/** A scripted model the rubric never picks: only an explicit override can route to it. */
+	named: string;
 	post: CommandPost;
 	provider: MockProvider;
 	clone: string;
@@ -100,6 +103,7 @@ async function bench(t: { after(fn: () => void | Promise<void>): void }, gateSte
 	);
 	const reviewer = provider.addScript("pipe-gate", gateSteps);
 	const implementer = provider.addScript("pipe-ship", shipSteps, { onExhausted: "repeat" });
+	const named = provider.addScript("pipe-ship-named", shipSteps, { onExhausted: "repeat" });
 	agentDir.writeModels(provider);
 
 	// One rubric row per role, pinning each to a scripted model — exactly how an
@@ -121,6 +125,7 @@ async function bench(t: { after(fn: () => void | Promise<void>): void }, gateSte
 	const approvals: string[] = [];
 	const state: Bench = {
 		home: home.path,
+		named,
 		post: undefined as unknown as CommandPost,
 		provider,
 		clone: "",
@@ -277,6 +282,7 @@ interface Case {
 	prep?: (ids: { researchId: string; shipId: string }) => void | Promise<void>;
 	keep?: boolean;
 	again?: boolean;
+	implementerModel?: string;
 }
 
 let cases = 0;
@@ -284,7 +290,7 @@ const planned = new WeakMap<Bench, number>();
 /** One pipeline from start to its implementer: a written plan and envelope, the scripted gate, then the bench's answer. */
 async function handoff(b: Bench, steps: ScriptStep[], c: Case) {
 	const started = await b.post.startPipeline({ title: `case ${++cases}`, project: "demo", task: c.task, delivery: "local", fetch: false,
-		...(c.scope ? { scope: c.scope } : {}), ...(c.risk ? { risk: c.risk } : {}) });
+		...(c.scope ? { scope: c.scope } : {}), ...(c.risk ? { risk: c.risk } : {}), ...(c.implementerModel ? { implementerModel: c.implementerModel } : {}) });
 	const ids = { researchId: started.research_id, shipId: started.ship_id };
 	const nth = (planned.get(b) ?? 0) + 1;
 	planned.set(b, nth);
@@ -993,7 +999,8 @@ test(
 		// its artifact must never reach an implementer.
 		const old = b.post.pipeline().store.get(oldResearchId);
 		assert.equal(old?.superseded_by, replacement.id);
-		await assert.rejects(() => b.post.advancePipeline(oldResearchId), /superseded by/);
+		await assert.rejects(() => b.post.advancePipeline(oldResearchId, { implementerModel: b.named }), /superseded by/);
+		assert.equal(b.post.pipeline().store.get(oldResearchId)?.implementer_model, undefined, "#648: a refused advance writes no model");
 
 		// The ledger dep now names the replacement, not the superseded research.
 		assert.deepEqual(await ledger.blockersOf(shipId), [replacement.id]);
@@ -1271,6 +1278,50 @@ test("P11d-recover: cp_pipeline recover re-dispatches a failed implementer with 
 	const routed = events.map((event) => event.payload as Record<string, any>);
 	assert.deepEqual(routed.map((payload) => [payload.risk, payload.provenance?.risk]), [["high", "inferred"], ["high", "inferred"]]);
 	await b.post.tearDown(ids.shipId, { force: true });
+});
+
+test("#648: an operator-named implementer model overrides the rubric at start, at advance, and across recover", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const steps: ScriptStep[] = [];
+	const b = await bench(t, steps);
+	const suggestion = { ...CONFIDENT, suggested_implementer_model: "anthropic/claude-opus-5" };
+	const ids = await handoff(b, steps, { task: BUMP, assessment: suggestion, implementerModel: b.named, keep: true });
+	assert.deepEqual([ids.routed.source, ids.routed.model], ["override", b.named]);
+	assert.match(ids.evidence, /operator-named implementer model: .+ \(explicit override\)/);
+	assert.match(ids.evidence, /planner suggested model: anthropic\/claude-opus-5 \(advisory; routing decides\)/);
+	await assert.rejects(b.post.advancePipeline(ids.researchId, { implementerModel: "mock/other" }), /already dispatched/);
+	// A recovery re-dispatch keeps the named model: the same failure choreography as P11d-recover.
+	const failure = { class: "crash" as const, message: "worker died", at: isoTimestamp() };
+	b.post.runs.open(ids.shipId).markFailure(failure);
+	await b.post.fail(ids.shipId, failure);
+	await b.post.tearDown(ids.shipId, { force: true });
+	execFileSync("git", ["-C", b.clone, "branch", "-D", ids.shipId], { stdio: "ignore" });
+	await b.post.pipeline().recoverShip(ids.researchId);
+	const events = readRunEvents(b.home, ids.shipId).filter((event) => event.type === "routing_resolved");
+	assert.deepEqual(events.map((event) => [(event.payload as any).source, (event.payload as any).model]), [["override", b.named], ["override", b.named]]);
+	await b.post.tearDown(ids.shipId, { force: true });
+
+	// Named after start, before the hand-off: the advance that persists it is the one that dispatches.
+	const later = await handoff(b, steps, { task: BUMP, assessment: CONFIDENT, prep: (late) => b.post.advancePipeline(late.researchId, { implementerModel: b.named }).then(() => {}) });
+	assert.deepEqual([later.routed.source, later.routed.model], ["override", b.named]);
+	// Negative control: nothing named, the rubric still decides.
+	const plain = await handoff(b, steps, { task: BUMP, assessment: CONFIDENT });
+	assert.equal(plain.routed.source, "rubric");
+	assert.doesNotMatch(plain.evidence, /operator-named implementer model/);
+});
+
+/** #648 follow-up: the cp_pipeline tool maps `start implementer_model` onto the record; recover no longer takes one. */
+test("#648: cp_pipeline start carries implementer_model through the tool; recover refuses it", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const b = await bench(t, []);
+	const tools = new Map<string, { parameters: any; execute: (...args: unknown[]) => Promise<{ details: Record<string, any> }> }>();
+	registerReviewTools({ registerTool: (tool: { name: string }) => tools.set(tool.name, tool as never) } as never,
+		{ commandPost: () => b.post, setLive: () => {}, refreshWidget: () => {} } as never);
+	const tool = tools.get("cp_pipeline")!;
+	assert.equal(tool.parameters.properties.implementer_model.maxLength, 128, "the tool caps it like PipelineRecordSchema");
+	const call = (params: Record<string, unknown>) => tool.execute("c", params, undefined, undefined, { hasUI: false, modelRegistry: undefined });
+	const started = (await call({ action: "start", title: "tool start", project: "demo", task: BUMP, delivery: "local", implementer_model: b.named })).details;
+	assert.equal(b.post.pipeline().store.require(started.research_id).implementer_model, b.named);
+	await assert.rejects(call({ action: "recover", research_id: started.research_id, implementer_model: "mock/other" }), /recover takes no `implementer_model`/);
+	await b.post.tearDown(started.research_id, { force: true });
 });
 
 test("P11d-plan-revise: a conversation revise re-gates the plan only once its artifact changes", { skip: SKIP, timeout: 300_000 }, async (t) => {

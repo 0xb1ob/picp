@@ -1005,7 +1005,7 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	assert.deepEqual(ownerJson(home, "mandate-defaults"), SCAFFOLD_MANDATE_DEFAULTS);
 	assert.deepEqual(ownerJson(home, "budgets"), { ...DEFAULT_BUDGET_CONFIG, cumulative_cost_usd: 5 });
 	assert.deepEqual(ownerJson(home, "worker-bounds"), { wall_clock_seconds: 5400 });
-	assert.deepEqual(ownerJson(home, "parent"), { compact_at_tokens: 200000 });
+	assert.deepEqual(ownerJson(home, "parent"), { compact_at_tokens: 150000 });
 	assert.deepEqual(ownerJson(home, "operator"), { handoffs_dir: "/tmp/handoffs" });
 	assert.deepEqual(ownerJson(home, "gate"), { schema_version: 1 });
 	assert.deepEqual(ownerJson(home, "quality"), { model: "anthropic/claude-haiku" });
@@ -1191,13 +1191,13 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	resetHome(home);
 	const pins = await b.apply({ mode: "set", changes: { "models.parent": "anthropic/claude-opus-5-5", "models.operator": "openai/gpt-5" } });
 	assert.deepEqual(settled(pins), [200, "applied"], JSON.stringify(pins));
-	assert.deepEqual(ownerJson(home, "parent"), { compact_at_tokens: 200000, model: "anthropic/claude-opus-5-5" });
+	assert.deepEqual(ownerJson(home, "parent"), { compact_at_tokens: 150000, model: "anthropic/claude-opus-5-5" });
 	assert.deepEqual(ownerJson(home, "operator"), { model: "openai/gpt-5" });
 	assert.deepEqual(view(pins.snapshot!, "models.parent"), { key: "models.parent", value: "anthropic/claude-opus-5-5", source: "file", status: "ok" });
-	assert.deepEqual(view(pins.snapshot!, "sessions.parent_compact_at_tokens"), { key: "sessions.parent_compact_at_tokens", value: 200000, source: "file", status: "ok" });
+	assert.deepEqual(view(pins.snapshot!, "sessions.parent_compact_at_tokens"), { key: "sessions.parent_compact_at_tokens", value: 150000, source: "file", status: "ok" });
 	const unset = await b.apply({ mode: "set", changes: { "models.parent": null } });
 	assert.deepEqual(settled(unset), [200, "applied"]);
-	assert.deepEqual(ownerJson(home, "parent"), { compact_at_tokens: 200000 });
+	assert.deepEqual(ownerJson(home, "parent"), { compact_at_tokens: 150000 });
 	assert.deepEqual(unset.changes!.map((change) => [change.key, change.action, change.new]), [["models.parent", "delete", null]]);
 	assert.deepEqual(view(unset.snapshot!, "models.parent"), { key: "models.parent", value: "env/parent", source: "env", status: "ok" });
 	assert.equal((await b.apply({ mode: "set", changes: { "models.parent": null } })).state, "unchanged");
