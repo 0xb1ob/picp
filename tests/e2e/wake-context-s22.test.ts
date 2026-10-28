@@ -9,6 +9,7 @@ import { CiWatchStore } from "../../src/ci-watch.ts";
 import { AnsweredOutbox } from "../../src/answered.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, startPiChild } from "../harness/index.ts";
 import { readRunEvents, waitFor } from "../harness/index.ts";
+import { WAKEUP_WITHHELD_REASON_MAX_CHARS } from "../../src/wakeups.ts";
 
 const issued = "2026-08-31T12:45:43Z";
 const head = "a".repeat(40);
@@ -389,10 +390,15 @@ test("S23: persisted replay tokens suppress redeliveries while new verdict attem
 
 
 test("S23: a carried report stays in later requests after closure and withheld identities keep their first reason", { timeout: 110_000 }, async (t) => {
-	const text = await carried(t, [{ job_id: "cp-carried", reported_at: issued }, { job_id: "cp-hidden" }], [
+	const long = `2026-${"9".repeat(400)}`;
+	const capped = `withheld:${JSON.stringify(["envelope", "cp-capped", null, long, null, issued])}`;
+	const legacy = `withheld:${JSON.stringify(["unreported", "cp-legacy", 1, null, null, issued])}`;
+	const text = await carried(t, [{ job_id: "cp-carried", reported_at: issued }, { job_id: "cp-hidden" }, { job_id: "cp-capped", reported_at: issued }, { job_id: "cp-legacy" }], [
 		{ kind: "envelope", job: "cp-carried", body: "S23_ALREADY_READ", stamp: { reported_at: issued } },
 		{ kind: "envelope", job: "cp-hidden", body: "S23_HIDDEN_REPORT", stamp: { generation: 1 } },
-	], undefined, (home) => {
+		{ kind: "envelope", job: "cp-capped", body: "S23_CAPPED_REPORT", stamp: { reported_at: long } },
+		{ kind: "unreported", job: "cp-legacy", body: "S23_LEGACY_BODY", stamp: { generation: 1 } },
+	], (home) => void writeFileSync(join(home, ".pi-command-post/state/wakeup-replay.json"), JSON.stringify([[legacy, ""]])), (home) => {
 		const file = join(home, ".pi-command-post/state/fleet.json");
 		const fleet = JSON.parse(readFileSync(file, "utf8"));
 		fleet.jobs.find((job: FleetRecord) => job.job_id === "cp-carried").phase = "done";
@@ -406,11 +412,13 @@ test("S23: a carried report stays in later requests after closure and withheld i
 		const memory = readFileSync(join(home, ".pi-command-post/state/wakeup-replay.json"), "utf8");
 		assert.match(memory, /nothing is filed/);
 		assert.doesNotMatch(memory, /S23_ALREADY_READ|S23_HIDDEN_REPORT/);
+		const reason = new Map<string, string>(JSON.parse(memory)).get(capped) ?? "";
+		assert.deepEqual([reason.length, reason.startsWith("a different envelope is filed for cp-capped")], [WAKEUP_WITHHELD_REASON_MAX_CHARS, true]);
 		return () => assert.equal(readFileSync(join(home, ".pi-command-post/state/wakeup-replay.json"), "utf8"), memory,
 			"a second context preserves the first withhold reason and replay identities");
 	});
 	assert.equal(text.split("S23_ALREADY_READ").length - 1, 2, "the parent already read the original entry");
-	assert.doesNotMatch(text, /S23_HIDDEN_REPORT/);
+	assert.doesNotMatch(text, /S23_HIDDEN_REPORT|S23_CAPPED_REPORT|S23_LEGACY_BODY/);
 });
 
 test("S23: superseded review findings reach the provider without the verdict or directive", { timeout: 110_000 }, async (t) => {
