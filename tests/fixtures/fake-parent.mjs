@@ -45,6 +45,7 @@ let activeSession = sessionFromArgv();
 if (activeSession && !existsSync(activeSession)) writeFileSync(activeSession, '{"type":"session"}\n');
 const rl = createInterface({ input: process.stdin, terminal: false });
 let woke = false;
+let bootDelayed = false;
 /** The body of a HANG turn still open. */
 let held = null;
 /** A SEGMENT turn answered at a clean turn_end, its run still open. */
@@ -76,6 +77,12 @@ rl.on("line", (line) => {
 		return;
 	}
 	const { type, id, message } = record;
+	const bootDelay = Number(process.env.FAKE_PARENT_BOOT_DELAY_MS ?? 0);
+	if (type === "get_state" && !bootDelayed && bootDelay > 0) {
+		bootDelayed = true; // FAKE_PARENT_BOOT_DELAY_MS: a slow cold start answers its first get_state late
+		setTimeout(() => rl.emit("line", line), bootDelay);
+		return;
+	}
 	if (type === "get_state") {
 		const lines = [
 			{

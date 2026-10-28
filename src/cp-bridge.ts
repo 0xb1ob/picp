@@ -38,7 +38,7 @@ import { isPidAlive } from "./fleet.ts";
 import { asEscalation, openMissionEnds } from "./escalation-relay.ts";
 import { deliverableRelay, type EnvelopeSummary, envelopeSummaryOf, scheduleJobIdOf, withEnvelopeSummaries } from "./relay-scope.ts";
 import { readParentLock } from "./parent-lock.ts";
-import { existingSavedSession, recordSpawnedSession } from "./parent-control.ts";
+import { existingSavedSession, parentBootState, recordSpawnedSession } from "./parent-control.ts";
 import { escalationProjects, homeMandateProjects, homeProjectResolver, withProjectTag } from "./project-report.ts";
 import { boundedSeen, STALE_WAKEUP_HEADLINE, type WakeupCarrier, wakeupStampOf } from "./wakeups.ts";
 import { NONINTERACTIVE_WORKER_ENV, STRIPPED_ENV_KEYS } from "./worker-manager.ts";
@@ -559,7 +559,7 @@ export class CpBridge {
 		this.#attach(proc);
 		this.#booting = true;
 		try {
-			const state = await proc.getState(options.requestTimeoutMs);
+			const state = await parentBootState(proc, sessionFile, options.requestTimeoutMs);
 			if (typeof state.sessionFile === "string" && state.sessionFile.length > 0) {
 				this.#sessionFile = state.sessionFile;
 			}
