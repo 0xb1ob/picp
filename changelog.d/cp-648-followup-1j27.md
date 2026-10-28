@@ -1,0 +1,1 @@
+- issue 648: `cp_pipeline recover` no longer takes `implementer_model` (it was always refused, since recover needs a dispatched implementer); recover reuses the persisted model, the tool caps `implementer_model` at 128 characters like the pipeline record, and `advance` writes it only after the superseded check. Migration: drop `implementer_model` from recover calls.
