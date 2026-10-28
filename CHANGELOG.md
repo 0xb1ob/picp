@@ -10,6 +10,8 @@ are recorded here with the migration; the binding detail lives in
 
 - Fix: the no-report nudge no longer forces an immediate report (`blocked` is now for a real blocker only), and the on-disk-work recovery prompt no longer says "do not start anything new"; both tell a worker whose acceptance is unmet and who is under its tool-call and wall-clock caps to keep working and report only when done, blocked or capped. Migration: none.
 
+- Fix: issue 419: the no-report nudge's "do not redo, re-verify or push again" now applies only to finished work, so an unfinished worker is no longer told not to push. Migration: none.
+
 - Fix: issue 401: the dispatch brief now carries every task addendum frozen up to dispatch time, so an armed job's worker starts with addenda added while it waited. Migration: none.
 
 - #588 (part 2 of 2): the operator threads feature (cp-xmw2) is deleted end to end: `/api/threads*`, the thread journal and views, `cp_parent thread_bind` and `thread`, and the operator note's thread line (part 1, #637, removed the Sessions thread UI). A stale `thread` on `POST /api/operator/message` is accepted and ignored; a legacy `; thread=` marker still parses. Migration: none; `state/operator/threads.jsonl` is left on disk unread, and the main session's `cp_parent` schema changes on its next bridge load. Rollback: revert.
