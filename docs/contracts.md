@@ -1317,7 +1317,7 @@ never create a durable send or an LLM turn. Missing commands, unavailable
 parents and diagnostic failures return explicit errors; doctor findings
 retain the parent's info/error level.
 
-**Parent context control.** `cp_parent compact` and `rotate` require a settled parent with no pending durable send; `model <provider/id>` switches live without touching workers. Automatic compaction is on by default at 200000 context tokens (`DEFAULT_PARENT_COMPACT_TOKENS`, used when `data/parent.json` is absent); a home overrides it with `data/parent.json`:
+**Parent context control.** `cp_parent compact` and `rotate` require a settled parent with no pending durable send; `model <provider/id>` switches live without touching workers. Automatic compaction is on by default at 150000 context tokens (`DEFAULT_PARENT_COMPACT_TOKENS`, used when `data/parent.json` is absent); a home overrides it with `data/parent.json`:
 
 ```json
 { "compact_at_tokens": 150000 }
@@ -9584,7 +9584,7 @@ added, removed or reordered row is 400. The rest of `routing.json` (`profiles`,
 the scaffold for `mandate-defaults.json`, `DEFAULT_BUDGET_CONFIG` for `budgets.json`,
 `{schema_version}` for `gate.json`, `{enabled: false}` for `update.json` (created 0600) and
 `{}` otherwise. `capacity.json` is never created here (409, use `cp-install --gateway-url`).
-An absent `parent.json` gets `{compact_at_tokens: 200000}` beside the new `model`, because
+An absent `parent.json` gets `{compact_at_tokens: 150000}` beside the new `model`, because
 a model-only file would read as invalid and turn compaction off. An absent `routing.json` is
 409 (workers use each profile's model; there is no rubric to edit).
 
