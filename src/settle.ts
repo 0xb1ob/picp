@@ -140,7 +140,7 @@ export const REPORT_NUDGE_TEXT = [
 	"task, and report only when it is done, blocked, or capped.",
 	"",
 	'Report status "blocked" with concrete blockers only for a real blocker you cannot get past, never because the work',
-	"is merely unfinished. Do not redo finished work, do not re-verify, do not push again. This is the only prompt you",
+	"is merely unfinished. If the work is done: do not redo, re-verify or push again. This is the only prompt you",
 	"get: after it the job is recorded as having finished without reporting, and a human has to reconstruct what you did.",
 ].join("\n");
 

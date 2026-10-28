@@ -252,6 +252,7 @@ test("P8c unreported: a silent settle with work on disk gets two recovery prompt
 	const nudge = f.prompts("clean")[1] ?? "";
 	assert.ok(nudge.includes("keep working") && nudge.includes("only for a real blocker"), "the nudge lets an unfinished worker continue");
 	assert.ok(!nudge.includes("Call report_result now"), "the nudge no longer forces an immediate report");
+	assert.ok(!nudge.includes("do not push again") && nudge.includes("If the work is done: do not redo"), "the no-push ban covers finished work only");
 	assert.equal(f.post.fleet.require(clean).unreported_work?.state, "clean");
 	assert.equal(f.events(clean, "settled_without_report")[0]?.reason, "the nudge to report was already spent");
 

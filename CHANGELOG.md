@@ -8,7 +8,11 @@ are recorded here with the migration; the binding detail lives in
 
 - Fix: issue 444: a `delivery:pipeline` research `done` envelope now reports `next: advance` (was `teardown`, which got the planner torn down before its gate), and a native scheduled pipeline's anchor is advanced in code when it reports, so its gate starts with no parent turn; a failed advance or an `authorize`/`surface` outcome wakes the parent, and a restart sweeps a reported, unadvanced anchor once. Migration: none.
 
+- Fix (#537, part 4 of 5): the parent's cold-start `get_state` budget scales with its session file: the request timeout (30 s by default) plus 15 s per MiB, capped at 180 s. `parent-host.log` logs `parent boot: get_state answered in Xms (session N MiB, budget Yms)`, and a failed boot names the session size and the budget. Migration: none.
+
 - Fix: the no-report nudge no longer forces an immediate report (`blocked` is now for a real blocker only), and the on-disk-work recovery prompt no longer says "do not start anything new"; both tell a worker whose acceptance is unmet and who is under its tool-call and wall-clock caps to keep working and report only when done, blocked or capped. Migration: none.
+
+- Fix: issue 419: the no-report nudge's "do not redo, re-verify or push again" now applies only to finished work, so an unfinished worker is no longer told not to push. Migration: none.
 
 - Fix: issue 401: the dispatch brief now carries every task addendum frozen up to dispatch time, so an armed job's worker starts with addenda added while it waited. Migration: none.
 
