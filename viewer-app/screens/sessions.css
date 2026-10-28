@@ -160,6 +160,9 @@
 .session-own > .session-who { justify-content: flex-end; }
 .session-own .md a { color: inherit; text-decoration: underline; }
 .session-who > .session-project { padding: 0 5px; border-radius: 4px; font-size: 10.5px; }
+.session-segment + .session-segment { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.session-segment > .session-project { display: inline-block; max-width: 100%; overflow-wrap: anywhere; margin-bottom: 4px; }
+.session-original { margin-top: 6px; padding: 0; border: 0; background: none; color: var(--secondary); font-size: 11px; text-decoration: underline; cursor: pointer; }
 .session-message.session-other { position: relative; padding-left: 34px; }
 .session-other > .session-who { min-height: 16px; align-items: center; }
 .session-other > .session-who > .session-avatar { position: absolute; left: 0; top: 0; }

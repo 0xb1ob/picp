@@ -39,8 +39,10 @@ export interface SessionEntry {
  paths?: { path: string; href: string | null; read: string | null }[];
  /** Each bare `.pi-command-post` path in `text` the viewer can open (src/viewer/linkify.ts), path → href. */
  links?: Record<string, string>;
- /** Say-entry project chip: a `projects/*` name stripped from a leading `[name]` (slice F). */
+ /** Say-entry project chip: a `projects/*` name stripped from a leading `[name]` (slice F), or resolved from its ids. */
  project?: string | null;
+ /** Operator tier, a reply with two or more `[project]` sections (issue 589); `text` stays the unsplit original. */
+ segments?: {text: string; projects: string[]; source: "header" | "id" | "reply" | "general"}[];
  /** A cp-bridge notice parsed off its first line (slice F). */
  bridge?: {kind:string; job:string|null; id:string|null; receipt:string|null} | null;
  /** Full transcript: the `ans-` id a `cp_parent answer` call posted (or, on a duplicate, the first one it names). */
