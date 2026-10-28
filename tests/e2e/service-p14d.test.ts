@@ -14,7 +14,6 @@ import type { BridgeRelay } from "../../src/cp-bridge.ts";
 import { EscalationStore } from "../../src/escalation.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "../../src/operator-outbox.ts";
-import { parentHostPaths } from "../../src/parent-host.ts";
 import { initPush } from "../../src/push/keys.ts";
 import { atomicWrite, daemonPaths } from "../../src/service/daemon-files.ts";
 import { tunnelConfigFile } from "../../src/service/daemon-tunnel-files.ts";
@@ -137,17 +136,6 @@ test("P14-health: the health oneshot records each check's failure and recovery, 
 	assert.doesNotMatch((await p.run((at += 5 * MIN), viewer(down))).out, /parent: skipped|viewer: skipped/);
 	writeFileSync(update, JSON.stringify({ phase: "rolling_back", last_result: "rollback_failed" }));
 	assert.match((await p.run((at += 5 * MIN), viewer(down))).out, /parent: skipped \(update phase rolling_back\)/);
-	// An operator stop is a pause, not an outage: skipped while the marker names the current dead generation only.
-	writeFileSync(update, JSON.stringify({ phase: "idle" }));
-	const hosts = parentHostPaths(p.home, "multi");
-	const dead = spawnSync(process.execPath, ["-e", ""]).pid;
-	writeFileSync(hosts.record(1), JSON.stringify({ version: 1, pid: dead, socket: "/nonexistent.sock", token: "t", started_at: "2026-09-28T10:00:00Z" }));
-	writeFileSync(hosts.stopped, JSON.stringify({ gen: 1, at: "2026-09-28T10:00:00Z" }));
-	assert.match((await p.run((at += 5 * MIN), viewer(up))).out, /parent: skipped \(operator stop closed generation 1\)/);
-	writeFileSync(hosts.record(2), JSON.stringify({ version: 1, pid: dead, socket: "/nonexistent.sock", token: "t", started_at: "2026-09-28T10:00:00Z" }));
-	const lost = await p.run((at += 5 * MIN), viewer(up));
-	assert.deepEqual([/parent: skipped/.test(lost.out), lost.record.checks.parent!.detail], [false, "no parent host is running"], "generation 2 was never stopped");
-	for (const file of [hosts.record(1), hosts.record(2), hosts.stopped]) rmSync(file);
 	// A viewer blip that recovers never counts.
 	writeFileSync(update, JSON.stringify({ phase: "idle" }));
 	const viewers = [];
@@ -276,4 +264,26 @@ test("P14-health-drift: an unqualified newer pi is a host.pi.drift warning in th
 	h.answer("gh.status", "1");
 	assert.doesNotMatch((await h.run(T0 + 152 * MIN)).out, /host\.pi\.drift/);
 	assert.equal(probes(), once + 2);
+});
+
+test("P14-health-stopped: an operator stop is a pause, not a parent outage", { timeout: 300_000 }, async (t) => {
+	// Issue 537: while the operator held the parent stopped, the parent check failed as down. It skips only while
+	// the stop marker names the current dead generation; a newer dead generation still fails.
+	const h = healthHome(t);
+	const port = await identity(t, h.home);
+	const env = { CP_VIEWER_HOST: "127.0.0.1", CP_VIEWER_PORT: port };
+	const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+	const record = (gen: number) => writeFileSync(join(h.stateDir, `parent-host.${gen}.json`), JSON.stringify({ version: 1, pid: dead, socket: "/nonexistent.sock", token: "t", started_at: "2026-09-28T10:00:00Z" }));
+	const first = await h.run(T0, env);
+	assert.deepEqual([state(first.record, "parent"), first.record.checks.parent?.fails], ["ok", 1], "no host yet: one failed run is a blip");
+	record(1);
+	writeFileSync(join(h.stateDir, "parent-host.stopped.json"), JSON.stringify({ gen: 1, at: "2026-09-28T10:00:00Z" }));
+	for (let i = 1; i < 3; i++) {
+		const paused = await h.run(T0 + i * 5 * MIN, env);
+		assert.match(paused.out, /parent: skipped \(operator stop closed generation 1\)/);
+		assert.deepEqual([state(paused.record, "parent"), paused.record.checks.parent?.fails], ["ok", 1], "a stopped run neither counts nor resets");
+	}
+	record(2);
+	const lost = await h.run(T0 + 15 * MIN, env);
+	assert.deepEqual([state(lost.record, "parent"), lost.record.checks.parent?.detail], ["fail down", "no parent host is running"], "generation 2 was never stopped");
 });
