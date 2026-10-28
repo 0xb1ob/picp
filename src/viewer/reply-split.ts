@@ -26,11 +26,19 @@ function headerProjects(inner: string, known: ReadonlySet<string>): string[] | u
 	return names.length > 0 && names.every((name) => known.has(name)) ? [...new Set(names)] : undefined;
 }
 
+/** Every known project the ids in `text` resolve to. */
+export function refProjects(text: string, ctx: Pick<SplitContext, "projects" | "projectOf">): Set<string> {
+	return new Set([...text.matchAll(REFS)].map((m) => ctx.projectOf(m[0])).filter((p): p is string => !!p && ctx.projects.has(p)));
+}
+
 /** The one known project the ids in `text` resolve to; several or none is undefined. */
 export function projectByRefs(text: string, ctx: Pick<SplitContext, "projects" | "projectOf">): string | undefined {
-	const found = new Set([...text.matchAll(REFS)].map((m) => ctx.projectOf(m[0])).filter((p): p is string => !!p && ctx.projects.has(p)));
+	const found = refProjects(text, ctx);
 	return found.size === 1 ? [...found][0] : undefined;
 }
+
+/** Whether `text` names any id or change-request URL at all (no I/O, before a resolver is built). */
+export const hasRefs = (text: string): boolean => text.search(REFS) >= 0;
 
 /**
  * One segment per `[project]` section; text before the first header is `general`. A reply with no header is one

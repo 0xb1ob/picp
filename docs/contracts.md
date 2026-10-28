@@ -1310,6 +1310,18 @@ a card opened for a false positive is withdrawn like any ask. A card pushes like
 open ask; there is no LLM classifier. A guard failure sets the `ask-guard` status line
 and never fails the turn.
 
+**Header guard** (`src/header-guard.ts`, issue 589). It runs at `agent_before_settle` only when the ask guard
+returned nothing for that settle. A miss: the final reply has a section with no `[project]` header of its own whose
+job, ask, escalation or PR ids resolve to a known `projects/*` project (the viewer's resolver, mandates excluded); a
+reply naming no id ("Done.") is never checked. The first miss in a run gets one `continue: true` with a hidden
+`cp-header-guard` message ("re-send with one `[project]` header per section, or reply `NO-PROJECT`"); there is never a
+second header nudge in that run. At the next settle one line is appended to `state/operator/reply-splits.jsonl`:
+`superseded` for the original when the re-send passes, `hidden` for a `NO-PROJECT` reply, or `split` for a re-send that
+misses again, its segments tagged by ids, then the human line it answers, then the single active-mandate project,
+else `general`. Records are keyed by `session_file`, the assistant `message.timestamp` and the text block's index;
+the operator Full transcript applies `split` and folds `superseded`/`hidden` behind a toggle. The transcript is never
+edited. A guard failure sets the `header-guard` status line and never fails the turn.
+
 `cp_parent doctor` and `version` read the live parent's `/doctor` and
 `/cp-version` output, including its mode and home. They require a settled
 parent with no pending send, attach without starting or replacing it, and
