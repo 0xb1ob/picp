@@ -49,12 +49,17 @@ the generated `cp-operator.service` / `cp-operator-resume.service` an older inst
 (on a legacy home only at M1's success, §Migration).
 
 The configuration is one file, `data/daemon.json` (0600, written only by cp-install): `{schema_version,
-generated_by, backend, node, app, home, path, port, viewer_host?, parent_model?}`. The children get only
+generated_by, backend, node, app, home, path, port, viewer_host?, parent_model?, worker_memory_max?}`. The children get only
 `CP_HOME`, `CP_MODE=multi`, the installing `PATH`, `CP_VIEWER_PORT`, `CP_VIEWER_HOST` when a host is pinned
 (step 3b) and `CP_PARENT_MODEL` when pinned (step 3c) — never a secret — plus `HOME`, `USER`, `LOGNAME` and,
 when cp-daemon itself has them, `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` (the user manager gave the
 legacy units these implicitly; a git/gh credential helper may need the session bus). Nothing else from the
 starting shell passes.
+On the systemd backend the parent also gets `CP_WORKER_MEMORY_MAX` (`worker_memory_max`, hand-set and kept by
+cp-install; default `6G`). Each worker then runs in its own `systemd-run --user --scope` unit,
+`cp-worker-<job>-<rand>`, with that `MemoryMax` and `MemorySwapMax=0`, so a worker that outgrows it is killed alone
+and cp-daemon keeps running (#576). If the scope probe fails, the worker spawns unscoped and this is logged once.
+`/doctor` warns `service.worker_scope`.
 The wrapper carries `CP_PARENT_MODEL`/`CP_OPERATOR_MODEL` when pinned; the optional gateway admin key lives only in
 `gateway.env` (step 7b). The parent
 authenticates through `~/.pi/agent/auth.json`, as it does today. cp-daemon and its children never

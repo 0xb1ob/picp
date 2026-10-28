@@ -55,7 +55,7 @@ export async function startViewer(t: Context, { home, requireTailnet = true, at,
 			throw new Error(`cp-view exited before serving, ${attempt} ports tried\n${output}`);
 		}
 		const origin = `http://127.0.0.1:${port}`;
-		return { port, origin, pin, output: () => output, stop: async () => { child.kill("SIGKILL"); await exited; }, get: (path: string, init: Init = {}) => call(port, path, init), open: (hash: string, hold?: RegExp) => openTab(t, port, hash, new Map(), hold) };
+		return { port, origin, pid: child.pid as number, pin, output: () => output, stop: async () => { child.kill("SIGKILL"); await exited; }, get: (path: string, init: Init = {}) => call(port, path, init), open: (hash: string, hold?: RegExp) => openTab(t, port, hash, new Map(), hold) };
 	}
 }
 

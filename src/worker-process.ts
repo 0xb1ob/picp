@@ -1,4 +1,5 @@
 import { guardedReviewerCommand } from "./reviewer-spawn-guard.ts";
+import { scopedCommand } from "./worker-scope.ts";
 /**
  * WorkerProcess — the only way pi-command-post talks to a worker.
  *
@@ -93,6 +94,8 @@ export interface WorkerSpawnOptions {
 	tools?: readonly string[];
 	thinking?: ThinkingLevel;
 	spawnGuard?: import("./reviewer-spawn-guard.ts").ReviewerSpawnGuard;
+	/** Names the worker's systemd scope (`cp-worker-<job>-<rand>`) when one is asked for (src/worker-scope.ts). */
+	jobId?: string;
 	/** Session persistence: a directory for a new session, or a file to revive. */
 	sessionDir?: string;
 	sessionFile?: string;
@@ -323,10 +326,13 @@ export class WorkerProcess {
 	/** Return immediately; readiness is proven by an RPC response. */
 	static spawn(options: WorkerSpawnOptions): WorkerProcess {
 		const args = options.argv ? [...options.argv] : buildWorkerArgs(options);
-		const command = guardedReviewerCommand(options.piBin ?? "pi", args, options.spawnGuard);
+		const env = options.replaceEnv ? options.env : { ...process.env, ...options.env };
+		const guarded = guardedReviewerCommand(options.piBin ?? "pi", args, options.spawnGuard);
+		// Only a worker gets a scope: an `argv` child is the headless parent bridge, not a worker.
+		const command = options.argv ? guarded : scopedCommand(guarded.binary, guarded.args, env ?? {}, options.jobId);
 		const child = spawn(command.binary, command.args, {
 			cwd: options.cwd,
-			env: options.replaceEnv ? options.env : { ...process.env, ...options.env },
+			env,
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		return new WorkerProcess(child, options);
