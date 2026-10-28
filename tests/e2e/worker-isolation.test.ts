@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { type TestContext, test } from "node:test";
 import { pathToFileURL } from "node:url";
+import { parentEnv } from "../../src/cp-bridge.ts";
 import { childEnv, type DaemonConfig } from "../../src/service/daemon-files.ts";
 import { WorkerProcess } from "../../src/worker-process.ts";
 import { until } from "../harness/dashboard.ts";
@@ -22,8 +23,11 @@ function fakeSystemdRun(t: TestContext, broken = false) {
 	const dir = mkdtempSync(join(tmpdir(), "cp-576-bin-"));
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
 	const log = join(dir, "calls.log");
-	writeFileSync(join(dir, "systemd-run"), `#!/bin/sh\necho "$*" >> "${log}"\n${broken ? "exit 1\n" : ""}while [ "$1" != -- ]; do shift; done\nshift\nexec "$@"\n`, { mode: 0o755 });
-	return { PATH: `${dir}:${process.env.PATH}`, calls: () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []) };
+	const envLog = join(dir, "env.log");
+	const exec = `while [ "$1" != -- ]; do shift; done\nshift\n[ "$1" = true ] || echo "\${CP_WORKER_MEMORY_MAX-unset}" >> "${envLog}"\nexec "$@"\n`;
+	writeFileSync(join(dir, "systemd-run"), `#!/bin/sh\necho "$*" >> "${log}"\n${broken ? "exit 1\n" : exec}`, { mode: 0o755 });
+	const lines = (file: string) => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n") : []);
+	return { PATH: `${dir}:${process.env.PATH}`, calls: () => lines(log), workerLimits: () => lines(envLog) };
 }
 
 async function runWorker(t: TestContext, env: NodeJS.ProcessEnv, jobId: string) {
@@ -46,6 +50,7 @@ test("#576 scope: a worker on the systemd backend runs under systemd-run with Me
 		assert.match(line, new RegExp(`^--user --scope --quiet --collect --unit=cp-worker-${job}-[0-9a-f]{6} -p MemoryMax=6G -p MemorySwapMax=0 -- ${FAKE_WORKER} --mode rpc `));
 	}
 	assert.notEqual(spawns[0]!.split(" ")[4], spawns[1]!.split(" ")[4], "every worker gets its own unit name");
+	assert.deepEqual(bin.workerLimits(), ["unset", "unset"], "the scope holds the limit; the worker never sees CP_WORKER_MEMORY_MAX");
 });
 
 test("#576 scope: when systemd-run cannot start a scope the worker spawns unscoped and it is logged once", { timeout: 30_000 }, async (t) => {
@@ -63,6 +68,9 @@ test("#576 scope: the detached backend asks for no scope, so workers spawn exact
 	assert.equal(childEnv(config({}), "parent", {}).CP_WORKER_MEMORY_MAX, "6G", "systemd defaults to 6G");
 	assert.equal(childEnv(config({ worker_memory_max: "2G" }), "parent", {}).CP_WORKER_MEMORY_MAX, "2G");
 	assert.equal(childEnv(config({}), "viewer", {}).CP_WORKER_MEMORY_MAX, undefined, "only the parent spawns workers");
+	const home = mkdtempSync(join(tmpdir(), "cp-576-home-"));
+	t.after(() => rmSync(home, { recursive: true, force: true }));
+	assert.equal(parentEnv(home, "multi", { CP_WORKER_MEMORY_MAX: "6G", CP_JOB_ID: "x" }).CP_WORKER_MEMORY_MAX, "6G", "the bridge's parent keeps it");
 	const bin = fakeSystemdRun(t);
 	await runWorker(t, { PATH: bin.PATH, CP_WORKER_MEMORY_MAX: "" }, "cp-576-detached");
 	assert.deepEqual(bin.calls(), [], "systemd-run never ran");

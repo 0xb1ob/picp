@@ -1,5 +1,5 @@
 import { guardedReviewerCommand } from "./reviewer-spawn-guard.ts";
-import { scopedCommand } from "./worker-scope.ts";
+import { scopedCommand, WORKER_MEMORY_MAX_ENV } from "./worker-scope.ts";
 /**
  * WorkerProcess — the only way pi-command-post talks to a worker.
  *
@@ -330,9 +330,11 @@ export class WorkerProcess {
 		const guarded = guardedReviewerCommand(options.piBin ?? "pi", args, options.spawnGuard);
 		// Only a worker gets a scope: an `argv` child is the headless parent bridge, not a worker.
 		const command = options.argv ? guarded : scopedCommand(guarded.binary, guarded.args, env ?? {}, options.jobId);
+		// The scope holds the limit; a worker that kept it would scope its own nested test spawns outside that limit.
+		const { [WORKER_MEMORY_MAX_ENV]: _limit, ...workerEnv } = env ?? process.env;
 		const child = spawn(command.binary, command.args, {
 			cwd: options.cwd,
-			env,
+			env: options.argv ? env : workerEnv,
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		return new WorkerProcess(child, options);
