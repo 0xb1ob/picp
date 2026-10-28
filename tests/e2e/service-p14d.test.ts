@@ -3,7 +3,7 @@
  * with stub git, gh, pi and npm as its only PATH and its clock set per run by the time-scale preload (nearly frozen).
  */
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -264,4 +264,26 @@ test("P14-health-drift: an unqualified newer pi is a host.pi.drift warning in th
 	h.answer("gh.status", "1");
 	assert.doesNotMatch((await h.run(T0 + 152 * MIN)).out, /host\.pi\.drift/);
 	assert.equal(probes(), once + 2);
+});
+
+test("P14-health-stopped: an operator stop is a pause, not a parent outage", { timeout: 300_000 }, async (t) => {
+	// Issue 537: while the operator held the parent stopped, the parent check failed as down. It skips only while
+	// the stop marker names the current dead generation; a newer dead generation still fails.
+	const h = healthHome(t);
+	const port = await identity(t, h.home);
+	const env = { CP_VIEWER_HOST: "127.0.0.1", CP_VIEWER_PORT: port };
+	const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+	const record = (gen: number) => writeFileSync(join(h.stateDir, `parent-host.${gen}.json`), JSON.stringify({ version: 1, pid: dead, socket: "/nonexistent.sock", token: "t", started_at: "2026-09-28T10:00:00Z" }));
+	const first = await h.run(T0, env);
+	assert.deepEqual([state(first.record, "parent"), first.record.checks.parent?.fails], ["ok", 1], "no host yet: one failed run is a blip");
+	record(1);
+	writeFileSync(join(h.stateDir, "parent-host.stopped.json"), JSON.stringify({ gen: 1, at: "2026-09-28T10:00:00Z", by: "operator" }));
+	for (let i = 1; i < 3; i++) {
+		const paused = await h.run(T0 + i * 5 * MIN, env);
+		assert.match(paused.out, /parent: skipped \(operator stop closed generation 1\)/);
+		assert.deepEqual([state(paused.record, "parent"), paused.record.checks.parent?.fails], ["ok", 1], "a stopped run neither counts nor resets");
+	}
+	record(2);
+	const lost = await h.run(T0 + 15 * MIN, env);
+	assert.deepEqual([state(lost.record, "parent"), lost.record.checks.parent?.detail], ["fail down", "no parent host is running"], "generation 2 was never stopped");
 });

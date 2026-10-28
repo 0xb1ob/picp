@@ -1,0 +1,1 @@
+- CI: `scripts/ci-as-user.sh` no longer stalls the "Install dependencies" step on its first call (see PR #664 for the culprit and before/after times). Migration: none.
