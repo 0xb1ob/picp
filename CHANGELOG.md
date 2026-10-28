@@ -6,7 +6,7 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
-- Fix: the no-report nudge and the on-disk-work recovery prompt no longer say "do not start anything new" to a worker that stopped mid-task; they tell a worker whose acceptance is unmet and who is under its tool-call and wall-clock caps to continue and report only when done, blocked or capped. Migration: none.
+- Fix: the no-report nudge no longer forces an immediate report (`blocked` is now for a real blocker only), and the on-disk-work recovery prompt no longer says "do not start anything new"; both tell a worker whose acceptance is unmet and who is under its tool-call and wall-clock caps to keep working and report only when done, blocked or capped. Migration: none.
 
 - Fix: issue 401: the dispatch brief now carries every task addendum frozen up to dispatch time, so an armed job's worker starts with addenda added while it waited. Migration: none.
 

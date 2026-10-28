@@ -249,6 +249,9 @@ test("P8c unreported: a silent settle with work on disk gets two recovery prompt
 
 	await waitFor(() => f.events(clean, "settled_without_report").length, (n) => n === 1, { timeoutMs: 30_000, what: "the clean job's record" });
 	assert.deepEqual(f.prompts("clean").slice(1), [REPORT_NUDGE_TEXT], "one plain nudge, never a recovery");
+	const nudge = f.prompts("clean")[1] ?? "";
+	assert.ok(nudge.includes("keep working") && nudge.includes("only for a real blocker"), "the nudge lets an unfinished worker continue");
+	assert.ok(!nudge.includes("Call report_result now"), "the nudge no longer forces an immediate report");
 	assert.equal(f.post.fleet.require(clean).unreported_work?.state, "clean");
 	assert.equal(f.events(clean, "settled_without_report")[0]?.reason, "the nudge to report was already spent");
 

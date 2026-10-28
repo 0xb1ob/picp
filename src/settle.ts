@@ -126,25 +126,22 @@ export const MAX_REPORT_NUDGES = 1;
 export const MAX_RECOVERY_PROMPTS = 2;
 
 /**
- * The nudge itself. Deliberately short, deliberately imperative, and it names
- * the one legal shape of the answer: the worker is not being asked whether it
- * is finished, it is being told that finishing means reporting. `blocked` is
- * offered as a first-class outcome so a worker that genuinely cannot finish
- * has somewhere to go other than silence.
+ * The nudge: report once done, keep working while acceptance is unmet; `blocked` is for a real blocker only.
  */
 export const REPORT_NUDGE_TEXT = [
 	"You have stopped without calling report_result. Your work does not reach the operator until you do:",
 	"the parent wakes on envelopes, and there is no other channel — a pushed branch, an open PR and a written",
 	"artifact are all invisible to it until an envelope is filed.",
 	"",
-	"Call report_result now, exactly once, as your only remaining action:",
-	'  - status "done" with the summary of what you delivered (and pr_url for delivery: pr), or',
-	'  - status "blocked" with concrete blockers if the work is not finished.',
+	"If the task's acceptance is met, call report_result exactly once, as your only remaining action:",
+	'  - status "done" with the summary of what you delivered (and pr_url for delivery: pr).',
 	"",
-	"Do not redo finished work, do not re-verify, do not push again. If the work is complete, report it as done;",
-	"if you are blocked, report it as blocked. If the task is not finished and you are under your tool-call and",
-	"wall-clock caps, continue it and report only when it is done, blocked, or capped. This is the only prompt you get:",
-	"after it the job is recorded as having finished without reporting, and a human has to reconstruct what you did.",
+	"If the acceptance is NOT met and you are under your tool-call and wall-clock caps, keep working: continue the",
+	"task, and report only when it is done, blocked, or capped.",
+	"",
+	'Report status "blocked" with concrete blockers only for a real blocker you cannot get past, never because the work',
+	"is merely unfinished. Do not redo finished work, do not re-verify, do not push again. This is the only prompt you",
+	"get: after it the job is recorded as having finished without reporting, and a human has to reconstruct what you did.",
 ].join("\n");
 
 /**
