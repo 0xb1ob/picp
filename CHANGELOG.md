@@ -8,6 +8,8 @@ are recorded here with the migration; the binding detail lives in
 
 - Fix (#537, part 4 of 5): the parent's cold-start `get_state` budget scales with its session file: the request timeout (30 s by default) plus 15 s per MiB, capped at 180 s. `parent-host.log` logs `parent boot: get_state answered in Xms (session N MiB, budget Yms)`, and a failed boot names the session size and the budget. Migration: none.
 
+- Fix: issue 401: the dispatch brief now carries every task addendum frozen up to dispatch time, so an armed job's worker starts with addenda added while it waited. Migration: none.
+
 - #588 (part 2 of 2): the operator threads feature (cp-xmw2) is deleted end to end: `/api/threads*`, the thread journal and views, `cp_parent thread_bind` and `thread`, and the operator note's thread line (part 1, #637, removed the Sessions thread UI). A stale `thread` on `POST /api/operator/message` is accepted and ignored; a legacy `; thread=` marker still parses. Migration: none; `state/operator/threads.jsonl` is left on disk unread, and the main session's `cp_parent` schema changes on its next bridge load. Rollback: revert.
 
 - Fix: the main-CI watch, the held-PR CI watch, the foreign-PR CI watch and the merge-ask CI gate no longer ask `gh` about a project whose origin is on a non-github.com host with no `cp_project forge` declared; it is skipped (a merge ask defers as CI unknown), logged once per project per process ("CI watch disabled: non-GitHub remote, no forge declared"), never a per-tick failure wake. GitHub projects keep every wake. Accepted narrowing: a GitHub Enterprise origin is skipped too (GitHub Enterprise was never supported, see `forge-url.ts`). Migration: none.
