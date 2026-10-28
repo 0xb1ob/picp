@@ -86,6 +86,8 @@ export const PipelineRecordSchema = Type.Object(
 		updated_at: IsoTimestampSchema,
 		/** Requested per-stage override; absent keeps dispatch's home/env defaults. */
 		wall_clock_seconds: Type.Optional(Type.Integer({ minimum: 1 })),
+		/** Operator-named implementer model; absent leaves routing to the rubric. */
+		implementer_model: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 		/** Per-job opt-in for the T22 quality pass. Absent means off. */
 		quality: Type.Optional(QualityConfigSchema),
 		/** Per-job opt-in for the post-implementation diff-review gate. Absent means off. */

@@ -80,7 +80,7 @@ import { handoffGate } from "./gate-handoff.ts";
 import { authorizeRecoveryControl, prepareAttemptControl, standingRecoveryStatus, recoveryGateRequest, type RecoverySelectors, type PrepareAttemptRequest } from "./gate-recovery-authority.ts";
 import { ContextGuard, type GuardDecision, type GuardRequest } from "./guards.ts";
 import {
-	type AdvanceResult,
+	type AdvanceOptions, type AdvanceResult,
 	type Authorizer,
 	PipelineRunner,
 	PipelineStore,
@@ -1367,8 +1367,8 @@ export class CommandPost {
 		return this.pipeline().start(request);
 	}
 
-	async advancePipeline(researchId: string): Promise<AdvanceResult> {
-		return this.pipeline().advance(researchId);
+	async advancePipeline(researchId: string, options?: AdvanceOptions): Promise<AdvanceResult> {
+		return this.pipeline().advance(researchId, options);
 	}
 
 	async reanchorPipeline(researchId: string, replacementResearchId: string): Promise<PipelineRecord> {
