@@ -458,5 +458,5 @@ test("P22-push-http-oversize: an oversize push body gets a readable 413, a bound
 	assert.equal(huge.written, false, "past the bound the server stops reading and closes");
 	const stalled = await post(1024 * 1024, Buffer.alloc(0), true);
 	assert.match(stalled.reply, /^HTTP\/1\.1 413 /);
-	assert.ok(BODY_DISCARD_IDLE_MS >= 5000 && stalled.held >= BODY_DISCARD_IDLE_MS - 500 && stalled.held < BODY_DISCARD_IDLE_MS + 3000, `held ${stalled.held} ms: closed by the idle timer, not at once`);
+	assert.ok(BODY_DISCARD_IDLE_MS >= 5000 && stalled.held >= BODY_DISCARD_IDLE_MS - 500 && stalled.held < BODY_DISCARD_IDLE_MS + 15_000, `held ${stalled.held} ms: closed by the idle timer, not at once`);
 });

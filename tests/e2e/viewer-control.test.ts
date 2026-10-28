@@ -456,7 +456,7 @@ test("P17-answers: posted answers project their evidence and render as text; a t
 	assert.match(schedule[0]!.textContent ?? "", new RegExp(`Schedule result · ${run} · partial`));
 	assert.equal(schedule[0]!.querySelector("a")?.getAttribute("href"), "#schedules");
 	assert.match(tab.$('[role="alert"].answers-warning')?.textContent ?? "", /1 unreadable line/);
-	assert.ok(await tab.find(".answers-control", (el) => /^Tick ✓ to acknowledge/.test(el.textContent ?? "")), "ready: Tick ✓ to acknowledge");
+	assert.equal(Boolean(await tab.find(".answers-control", (el) => /^Tick ✓ to acknowledge/.test(el.textContent ?? ""))), true, "ready: Tick ✓ to acknowledge");
 
 	const tick = (id: string) => tab.find(`button[aria-label="Acknowledge ${id}"]`, (b) => !b.hasAttribute("disabled"));
 	tab.click(await tick(A));
@@ -468,14 +468,14 @@ test("P17-answers: posted answers project their evidence and render as text; a t
 	// Acknowledged elsewhere: the tick fails with the server's reason; a fresh load shows both in read-only history.
 	await d.get("/api/answers/ack", post(d.origin, String((await d.get("/api/answers/control")).body.token), { id: B }));
 	tab.click(await tick(B));
-	assert.ok(await tab.find(".answers-failed", (el) => /Failed: .*already acknowledged/.test(el.textContent ?? "")), "Failed: … already acknowledged");
+	assert.equal(Boolean(await tab.find(".answers-failed", (el) => /Failed: .*already acknowledged/.test(el.textContent ?? ""))), true, "Failed: … already acknowledged");
 	const fresh = await tab.reopen();
-	assert.ok(await fresh.find(".answers-history summary", (s) => /Acknowledged · 2/.test(s.textContent ?? "")), "Acknowledged · 2 in history");
+	assert.equal(Boolean(await fresh.find(".answers-history summary", (s) => /Acknowledged · 2/.test(s.textContent ?? ""))), true, "Acknowledged · 2 in history");
 	assert.equal(fresh.$$(".answers-history button").length, 0, "history is read-only");
 	write(controlConfigFile(d.stateDir), '{"enabled": false, "reason": "opt-out"}');
 	const off = await fresh.reopen();
-	assert.ok(await off.find("button.answers-ack", (b) => b.hasAttribute("disabled")), "control off: the tick is disabled");
-	assert.ok(await off.find(".answers-control", (el) => /^Dashboard control is off/.test(el.textContent ?? "")), "Dashboard control is off");
+	assert.equal(Boolean(await off.find("button.answers-ack", (b) => b.hasAttribute("disabled"))), true, "control off: the tick is disabled");
+	assert.equal(Boolean(await off.find(".answers-control", (el) => /^Dashboard control is off/.test(el.textContent ?? ""))), true, "Dashboard control is off");
 	assert.equal((await answers()).open_count, 1, "control off: the list still renders, read-only");
 	assert.ok(off.$('button[aria-label="Acknowledge ans-cccccccccccc"]'), "the open card stays listed");
 
@@ -1317,7 +1317,7 @@ test("P17-composer-start: offline the composer holds a message and offers each l
 	overview.close();
 
 	tab.click(await tab.find(".start-session-button", (b) => b.textContent === "Start in tmux"));
-	assert.ok(await tab.find(".start-session-button", (b) => b.textContent === "Starting…" && b.hasAttribute("disabled")), "starting disables Start");
+	assert.equal(Boolean(await tab.find(".start-session-button", (b) => b.textContent === "Starting…" && b.hasAttribute("disabled"))), true, "starting disables Start");
 	await tab.waitText(/Starting the operator session… the composer opens when it serves the dashboard/);
 	assert.ok(tab.$("textarea")!.hasAttribute("disabled"), "the composer waits for the live session");
 	const started = await until(() => posts(tab, START), (rows) => rows.length > 0, "the start POST");
@@ -1527,7 +1527,7 @@ test("P17-devices-remote: over the tunnel Full control lists and revokes but nev
 	assert.equal(asFull.$(".devices-add")?.outerHTML, undefined);
 	const asView = await openTab(t, d.remote, "#settings", new Map(), undefined, { cookie: view });
 	assert.ok(await asView.find(devicesSection, (s) => /View only: you can see devices but not change them/.test(s.textContent ?? "") && (s.textContent ?? "").includes(DEVICE_TRUST)));
-	assert.ok(await asView.find(".devices-row", (r) => /Laptop/.test(r.textContent ?? "")), "View only lists the devices");
+	assert.equal(Boolean(await asView.find(".devices-row", (r) => /Laptop/.test(r.textContent ?? ""))), true, "View only lists the devices");
 	assert.deepEqual(asView.$$(`${devicesSection} button`).map((b) => b.textContent), [], "no write buttons");
 });
 
