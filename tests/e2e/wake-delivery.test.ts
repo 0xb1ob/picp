@@ -154,20 +154,47 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 });
 
  test("S20: persisted stale notices are filtered at the actual provider boundary", { timeout: 120_000 }, async (t) => {
+	// Registered first so a timeout or failed assert before the end still reaps the children and scratch home (LIFO).
+	const cleanups: Array<() => unknown> = [];
+	t.after(async () => { for (const cleanup of cleanups.reverse()) await cleanup(); });
 	const home = createScratchHome();
+	cleanups.push(() => home.cleanup());
 	const provider = await MockProvider.start();
+	cleanups.push(() => provider.stop());
 	const model = provider.addScript("s20-context", [
 		{ kind: "text", text: "Context checked." },
 		{ kind: "text", text: "Tail checked." },
 		{ kind: "text", text: "Reload checked." },
 	]);
 	const agent = createAgentDir({ provider });
+	cleanups.push(() => agent.cleanup());
 	const session = join(home.path, "legacy.jsonl");
 	mkdirSync(join(home.path, paths.runDir("cp-gone")), { recursive: true });
 	writeFileSync(join(home.path, paths.eventsFile("cp-gone")), "");
-	// A never-ran job (addendum-only run dir) must not gain a status.json from suppression bookkeeping.
-	mkdirSync(join(home.path, paths.runDir("cp-never-ran")), { recursive: true });
-	writeFileSync(join(home.path, paths.runDir("cp-never-ran"), "task-addenda.jsonl"), "");
+	// A never-ran job (real amend, refused dispatch, no worker) must not gain a status.json from stale-wake bookkeeping.
+	initJobsDocument(home.path, "cp");
+	const seed = new CommandPost({ home: home.path, packageRoot: REPO_ROOT });
+	await seed.registry.register({ name: "demo", clone_url: home.path, delivery: "local" });
+	const never = await seed.ledger().create({ title: "never ran", project: "demo", delivery: "local", kind: "ship" });
+	await seed.shutdown();
+	const amend = provider.addScript("s20-amend", [
+		{ kind: "tool_calls", calls: [{ name: "cp_job", args: { action: "amend", job_id: never.id, text: "Keep the change small.", quote: "keep the change small", reason: "pre-start scope" } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: never.id, task_file: join(home.path, "missing-task.md") } }] },
+		{ kind: "text", text: "amended" },
+	]);
+	const amender = startPiChild({ cwd: home.path, model: amend, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+	cleanups.push(() => amender.close());
+	await amender.prompt(`Please keep the change small for ${never.id}, then dispatch it.`);
+	await amender.waitForSettled(60_000);
+	await amender.close();
+	const ends = amender.eventsOfType("tool_execution_end") as Array<{ toolName?: string; isError?: boolean; result?: unknown }>;
+	const dispatched = ends.find((end) => end.toolName === "cp_dispatch");
+	assert.equal(dispatched?.isError, true);
+	assert.match(JSON.stringify(dispatched?.result), /task file [^"]*missing-task\.md does not exist/);
+	assert.equal(provider.remaining("s20-amend"), 0);
+	assert.ok(existsSync(join(home.path, paths.taskAddendaFile(never.id))));
+	assert.equal(existsSync(join(home.path, paths.eventsFile(never.id))), false);
+	assert.equal(existsSync(join(home.path, paths.statusFile(never.id))), false);
 	const stamp = (kind: string, extra = {}) => ({ kind, job_id: "cp-gone", issued_at: "2026-09-26T08:00:00Z", ...extra });
 	const messages = [
 		{ role: "user", content: "Keep this ordinary user message" },
@@ -188,7 +215,7 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 		{ role: "custom", customType: "cp-recovery", content: "JOBLESS-GONE", display: true,
 			details: { cp_wakeup: { kind: "recovery", keys: ["cp-gone"], issued_at: "2026-09-26T08:05:00Z" } } },
 		{ role: "custom", customType: "cp-recovery", content: "NEVER-RAN-GONE", display: true,
-			details: { cp_wakeup: { kind: "recovery", keys: ["cp-never-ran"], issued_at: "2026-09-26T08:06:00Z" } } },
+			details: { cp_wakeup: { kind: "recovery", keys: [never.id], issued_at: "2026-09-26T08:06:00Z" } } },
 	];
 	const timestamp = new Date().toISOString();
 	let parentId: string | null = null;
@@ -208,7 +235,7 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 	}`);
 	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
 		extensions: [COMMAND_POST_EXTENSION, injector], sessionFile: session });
-	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	cleanups.push(() => child.close());
 	await child.prompt("Inspect the carried context.");
 	await child.waitForSettled(60_000);
 	const request = JSON.stringify(provider.requests("s20-context").map((r) => r.body.messages));
@@ -219,7 +246,8 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 	assert.doesNotMatch(request, /OBSOLETE-INTEGRATE/);
 	assert.match(request, /LANDED-FIRST/);
 	assert.doesNotMatch(request, /LANDED-DUPLICATE|JOBLESS-GONE|NEVER-RAN-GONE/);
-	assert.equal(existsSync(join(home.path, paths.statusFile("cp-never-ran"))), false);
+	assert.equal(existsSync(join(home.path, paths.statusFile(never.id))), false);
+	assert.equal(existsSync(join(home.path, paths.eventsFile(never.id))), false);
 	const suppressed = readRunEvents(home.path, "cp-gone").filter((e) => e.type === "wakeup_suppressed");
 	const payloads = suppressed.map((e) => e.payload as { kind: string; stage: string; reason: string; keys?: string[] });
 	for (const kind of ["envelope", "ci", "verdict", "answered", "recovery"]) {
