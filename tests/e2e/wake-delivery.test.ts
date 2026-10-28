@@ -154,14 +154,20 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 });
 
  test("S20: persisted stale notices are filtered at the actual provider boundary", { timeout: 120_000 }, async (t) => {
+	// Registered first so a timeout or failed assert before the end still reaps the children and scratch home (LIFO).
+	const cleanups: Array<() => unknown> = [];
+	t.after(async () => { for (const cleanup of cleanups.reverse()) await cleanup(); });
 	const home = createScratchHome();
+	cleanups.push(() => home.cleanup());
 	const provider = await MockProvider.start();
+	cleanups.push(() => provider.stop());
 	const model = provider.addScript("s20-context", [
 		{ kind: "text", text: "Context checked." },
 		{ kind: "text", text: "Tail checked." },
 		{ kind: "text", text: "Reload checked." },
 	]);
 	const agent = createAgentDir({ provider });
+	cleanups.push(() => agent.cleanup());
 	const session = join(home.path, "legacy.jsonl");
 	mkdirSync(join(home.path, paths.runDir("cp-gone")), { recursive: true });
 	writeFileSync(join(home.path, paths.eventsFile("cp-gone")), "");
@@ -177,9 +183,15 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 		{ kind: "text", text: "amended" },
 	]);
 	const amender = startPiChild({ cwd: home.path, model: amend, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+	cleanups.push(() => amender.close());
 	await amender.prompt(`Please keep the change small for ${never.id}, then dispatch it.`);
 	await amender.waitForSettled(60_000);
 	await amender.close();
+	const ends = amender.eventsOfType("tool_execution_end") as Array<{ toolName?: string; isError?: boolean; result?: unknown }>;
+	const dispatched = ends.find((end) => end.toolName === "cp_dispatch");
+	assert.equal(dispatched?.isError, true);
+	assert.match(JSON.stringify(dispatched?.result), /task file [^"]*missing-task\.md does not exist/);
+	assert.equal(provider.remaining("s20-amend"), 0);
 	assert.ok(existsSync(join(home.path, paths.taskAddendaFile(never.id))));
 	assert.equal(existsSync(join(home.path, paths.eventsFile(never.id))), false);
 	assert.equal(existsSync(join(home.path, paths.statusFile(never.id))), false);
@@ -223,7 +235,7 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 	}`);
 	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path },
 		extensions: [COMMAND_POST_EXTENSION, injector], sessionFile: session });
-	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	cleanups.push(() => child.close());
 	await child.prompt("Inspect the carried context.");
 	await child.waitForSettled(60_000);
 	const request = JSON.stringify(provider.requests("s20-context").map((r) => r.body.messages));
