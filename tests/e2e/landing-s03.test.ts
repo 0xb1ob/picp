@@ -68,20 +68,22 @@ test("landing S03: actual parent CI notices carry facts and integration advice",
 });
 
 test("landing S03: a durable review deadline resumes once and respects changed facts", { skip: SKIP, timeout: 600_000 }, async (t) => {
-	for (const guard of ["none", "hold", "head", "missing_head", "generation", "phase", "closed", "drain", "stop"]) await t.test(guard, async (t) => {
+	for (const guard of ["none", "draft", "hold", "head", "missing_head", "generation", "phase", "closed", "drain", "stop"]) await t.test(guard, async (t) => {
 		const s = await startStack(t, { continuation: true, env: { CP_REVIEW_MERGE_WINDOW_SECONDS: "5" } });
 		const live = await s.held(`review deadline ${guard}`, 310);
 		await s.post.continuation.serialize(live.jobId, async () => {});
 		const passedAt = isoTimestamp();
 		writeWindowPass(s.home, live.jobId, live.head, passedAt);
-		s.setGh({ integration: true, runs: [run(310, live.head, "completed", "success")] });
+		const draft = json({ number: 310, url: live.prUrl, state: "OPEN", headRefName: live.jobId, headRefOid: live.head, baseRefName: "main", mergeStateStatus: "CLEAN", mergeable: "MERGEABLE", isDraft: true });
+		const routes = guard === "draft" ? [{ match: "pr view", replies: [draft, draft, { pass: true }] }, { match: "pr ready", replies: [{}] }] : [];
+		s.setGh({ integration: true, runs: [run(310, live.head, "completed", "success")], routes });
 		await s.tick(live.jobId);
 		await s.post.continuation.serialize(live.jobId, async () => {});
 		const waiting = s.post.durableWakeups.pending().filter((entry) => entry.content.includes("HELD PR WAITING"));
 		assert.equal(waiting.length, 1, "one deadline notice");
 		assert.match(waiting[0]!.content, /re-enters every gate.*by itself; no cp_integrate advance is needed/);
 		assert.match(waiting[0]!.content, /Sampled hold: none recorded/);
-		if (guard !== "none") new IntegrationHolds(s.home).hold(live.jobId, "deadline hold");
+		if (guard !== "none" && guard !== "draft") new IntegrationHolds(s.home).hold(live.jobId, "deadline hold");
 		const before = readRunEvents(s.home, live.jobId).filter((event) => event.type === "continuation").length;
 		if (guard === "head") {
 			const file = join(s.home, LAYOUT.ciWatchFile);
@@ -106,9 +108,10 @@ test("landing S03: a durable review deadline resumes once and respects changed f
 		if (guard !== "stop") {
 			const events = await waitFor(() => readRunEvents(s.home, live.jobId).filter((event) => event.type === "continuation"), (events) => events.length > before, { timeoutMs: 45_000, what: `deadline resumes through ${guard}` });
 			const outcome = events.at(-1)!.payload as { action: string; steps: number };
-			assert.equal(outcome.action, guard === "none" ? "done" : guard === "hold" || guard === "missing_head" ? "wait" : guard === "drain" ? "draining" : "stale", `${guard}: ${JSON.stringify(outcome)}`);
-			assert.equal(mergedCalls(s.ghCalls()).length, guard === "none" ? 1 : 0, "the deadline rechecks every gate and merges only the unheld head");
-			if (guard !== "none") assert.equal(outcome.steps, guard === "hold" ? 1 : 0, "changed facts prevent further integration");
+			assert.equal(outcome.action, guard === "none" || guard === "draft" ? "done" : guard === "hold" || guard === "missing_head" ? "wait" : guard === "drain" ? "draining" : "stale", `${guard}: ${JSON.stringify(outcome)}`);
+			assert.equal(mergedCalls(s.ghCalls()).length, guard === "none" || guard === "draft" ? 1 : 0, "the deadline rechecks every gate and merges only the unheld head");
+			if (guard === "draft") assert.equal(s.ghCalls().filter((call) => call.startsWith("pr ready")).length, 1, "the timer readies the reviewed draft once, with no cp_integrate call");
+			if (guard !== "none" && guard !== "draft") assert.equal(outcome.steps, guard === "hold" ? 1 : 0, "changed facts prevent further integration");
 		}
 	});
 });

@@ -60,6 +60,10 @@ for (const base of ["main", "trunk"]) {
 		const taskFile = join(home.path, "task.md");
 		const body = "Bump x to 2 in src/app.ts.\n";
 		writeFileSync(taskFile, body);
+		// Issue 401: an addendum frozen before dispatch (as when armed) must reach the first brief.
+		const addendum = `Also keep y at 1 ${job.id}.`;
+		mkdirSync(join(home.path, paths.runDir(job.id)), { recursive: true });
+		writeFileSync(join(home.path, paths.taskAddendaFile(job.id)), `${JSON.stringify({ schema_version: SCHEMA_VERSION, n: 1, added_at: isoTimestamp(), text: addendum, by: "operator-quote", quote: "add it", reason: "scope" })}\n`);
 		const model = provider.addScript("s29-parent", [
 			{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task_file: taskFile, model: workerModel } }] },
 			{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "do it again", model: workerModel } }] },
@@ -113,6 +117,7 @@ for (const base of ["main", "trunk"]) {
 		const brief = readFileSync(join(home.path, paths.briefFile(job.id)), "utf8");
 		assert.ok(brief.includes(taskFile));
 		assert.ok(!brief.includes(body.trim()), "task file body stays out of the brief");
+		assert.ok(brief.includes(addendum) && brief.includes("Addendum 1"), "frozen addendum is in the first brief");
 		assert.ok(brief.includes(`git merge origin/${base}`));
 		assert.ok(brief.includes(`git rev-parse origin/${base}`));
 		if (base === "trunk") assert.ok(!brief.includes("origin/main"));
