@@ -113,7 +113,7 @@ test("ci watch tick: a failed read reports loop-lag max, p99 and the time of the
 	}, 150);
 	const tick = await s.post.ciTick().finally(() => clearInterval(block));
 	const message = tick.errors[0]?.message ?? "";
-	const lag = /event-loop lag max (\d+)ms at (\S+), p99 (\d+)ms/.exec(message);
+	const lag = /event-loop lag max (\d+)ms, largest stall \d+ms at (\S+), p99 (\d+)ms/.exec(message);
 	assert.ok(lag, message);
 	assert.ok(Number(lag[1]) >= 300, `max ${lag[1]} ms reflects the injected stall`);
 	assert.ok(Number(lag[3]) <= Number(lag[1]), "p99 never exceeds max");

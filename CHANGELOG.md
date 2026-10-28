@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- Final-sweep src fixes: a held PR whose current-head CI has the cancellation signature (a cancelled or timed-out job, or a failed job with no failed step) now waits and promotes no CI repair, while a test-step red still repairs; main CI's `failing` prefers a FAIL line over an earlier WARN line; the `review_escalated` teardown fix names the operator-quoted `cp_decide` path for a policy escalation; a failed CI read's diagnostic now reads `event-loop lag max Nms, largest stall Nms at <iso>`. Migration: none.
+
 - A complete `cp_review` escalate/policy below the cap no longer sends `cp_integrate` back to `review`: it raises one `conflicting_acceptance` escalation and surfaces; an operator-quote `cp_decide` approving that `es-…` id clears that head only (a push voids it; CI, repo permission and final_fix unchanged). Migration: none.
 
 - Fix: the macOS cloudflared auto-download no longer fails with a checksum mismatch. A pinned archive now carries two hashes, the tarball's (GitHub's asset digest, checked before extraction) and the extracted binary's (the release notes, checked before anything is made executable). Pin bumped to cloudflared 2026.10.4.

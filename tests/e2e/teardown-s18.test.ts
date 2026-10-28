@@ -61,7 +61,7 @@ for (const [mode, title] of [
    checkpoint("pending");
    await refused("review_escalated");
    checkpoint("approved");
-   if (mode === "policy") { assert.match((await refused("review_escalated")).failure?.message ?? "", /policy/); return; }
+   if (mode === "policy") { const { message, fix } = (await refused("review_escalated")).failure ?? {}; assert.match(message ?? "", /policy/); assert.match(fix ?? "", /diff checkpoint for \S+, or cp_decide with an operator quote on the policy escalation's es- id/); return; }
   } else if (mode === "truncated") {
    review("pass");
    assert.match((await refused("review_escalated")).failure?.message ?? "", /truncated subject/);
