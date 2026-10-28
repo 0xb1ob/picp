@@ -531,6 +531,9 @@ test("P19-transcript-css: phone pills reach 84% and cards the column; desktop on
 	assert.match(rules(phone, ".md-table"), /^max-width:100%;overflow-x:auto/, "a wide table scrolls inside the bubble");
 	assert.match(rules(phone, ".sessions .md-table tbody tr:last-child td"), /border-bottom:0/, "Sessions tables have no rule under the last row");
 	assert.match(rules(phone, ".session-message.session-system"), /display:flex;.*background:none;border:0/, "system rows are never cards");
+	assert.match(rules(phone, ".session-message.session-other"), /padding-left:34px/, "chat v2: the phone avatar gutter is 26 px plus an 8 px gap");
+	assert.match(rules(phone, ".session-other>.session-who>.session-avatar"), /position:absolute/, "the avatar sits in that gutter");
+	assert.match(rules(phone, ".session-avatar"), /^display:flex/, "the phone avatar is visible, not hidden below 900 px");
 	assert.match(rules(desktop, ".session-entries"), /^max-width:820px;margin:0 auto;padding:0 32px/);
 	assert.match(rules(desktop, ".session-other>.session-body"), /max-width:670px/);
 	assert.match(rules(desktop, ".session-own>.session-body"), /max-width:72%/);
