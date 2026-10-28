@@ -162,6 +162,8 @@ export interface UpdatePorts {
 	busy(): string[];
 	/** The current host record names no live pid, and no stop by an update closed it: no parent comes back to verify. */
 	noHost(): boolean;
+	/** The current host record names a live pid: the only host a `stop` can reach. */
+	hostAlive(): boolean;
 	/** Live script jobs, and live workers not idle (`restartActivity`): what a restart would cut mid-turn. */
 	activity(): { working: string[]; scripts: string[] };
 	/**
@@ -257,7 +259,7 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 	const stopFleet = async (): Promise<string | undefined> => {
 		try {
 			// `by: "update"`: the marker it leaves holds the old supervisor only, never the reload's fresh one.
-			if (!ports.noHost()) await ports.host("stop", { by: "update" });
+			if (ports.hostAlive()) await ports.host("stop", { by: "update" });
 		} catch (error) {
 			return `host stop failed: ${(error as Error).message}`;
 		}
@@ -545,12 +547,16 @@ export function hostUpdatePorts(home: string, env: NodeJS.ProcessEnv = process.e
 		},
 		drain: () => readDrain(home)?.state,
 		busy: () => liveWorkerJobs(new FleetStore({ home }).list()),
+		hostAlive: () => {
+			const { record } = currentHost(paths);
+			return !!record && isPidAlive(record.pid);
+		},
 		noHost: () => {
 			const { gen, record } = currentHost(paths);
 			if (record && isPidAlive(record.pid)) return false;
-			// A host this or an interrupted update stopped is respawned by the reload's supervisor: verify it.
+			// A host an update stopped (this gen or an older one) is respawned by the reload's supervisor: verify it.
 			const stop = readStopMarker(paths);
-			return !(stop?.gen === gen && stop.by === "update");
+			return !(stop?.by === "update" && stop.gen <= gen);
 		},
 		activity: () => restartActivity(new FleetStore({ home }).list(), (jobId) => readStatusFile(home, jobId)?.phase),
 		verify: (timeoutMs) =>
