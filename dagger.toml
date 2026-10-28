@@ -1,0 +1,12 @@
+[modules.typescript-sdk]
+source = "dagger.io/sdk/typescript"
+
+[sdks.typescript]
+module = "typescript-sdk"
+
+[modules.picp-dev]
+main = true
+source = ".dagger/modules/picp-dev"
+
+[sdks.typescript.scopes.".dagger/modules/picp-dev"]
+is-module = true

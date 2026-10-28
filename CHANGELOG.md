@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- Dagger (v1.0.0-beta.21, local and optional): `dagger.toml` and `.dagger/modules/picp-dev/` run the CI `checks` job plus `build:viewer` as cached `dagger check` checks and one test shard via `dagger api call test-shard --shard=N` (docs/development.md "Dagger (local, optional)"). `.github/workflows/ci.yml` is unchanged; no Dagger Cloud. Migration: none.
+
 - #588 (part 2 of 2): the operator threads feature (cp-xmw2) is deleted end to end: `/api/threads*`, the thread journal and views, `cp_parent thread_bind` and `thread`, and the operator note's thread line (part 1, #637, removed the Sessions thread UI). A stale `thread` on `POST /api/operator/message` is accepted and ignored; a legacy `; thread=` marker still parses. Migration: none; `state/operator/threads.jsonl` is left on disk unread, and the main session's `cp_parent` schema changes on its next bridge load. Rollback: revert.
 
 - Fix: the main-CI watch, the held-PR CI watch, the foreign-PR CI watch and the merge-ask CI gate no longer ask `gh` about a project whose origin is on a non-github.com host with no `cp_project forge` declared; it is skipped (a merge ask defers as CI unknown), logged once per project per process ("CI watch disabled: non-GitHub remote, no forge declared"), never a per-tick failure wake. GitHub projects keep every wake. Accepted narrowing: a GitHub Enterprise origin is skipped too (GitHub Enterprise was never supported, see `forge-url.ts`). Migration: none.
