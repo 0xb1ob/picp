@@ -80,8 +80,9 @@ jobs:
 
       # The m2/m3/pipeline lease suites need a real treehouse on PATH and
       # self-skip without it; tests/ci-host-tools.test.ts fails the run if it
-      # is missing. Prepending ~/.local/bin makes the upstream install script
-      # pick that directory (no sudo). install-tools.ts no-ops when the image
+      # is missing. Root and sudo-capable runners install and test as cpci via
+      # scripts/ci-as-user.sh, into /home/cpci/.local/bin; others into ~/.local/bin.
+      # install-tools.ts no-ops when the image
       # already has one copy. The version is pinned in src/tool-manifest.ts.
       - name: Install treehouse
         env:

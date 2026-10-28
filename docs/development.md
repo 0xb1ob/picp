@@ -98,9 +98,12 @@ fork PR, never reaches a privileged self-hosted runner.
 The m2, m3 and `tests/e2e/pipeline-run.test.ts` lease suites (and the other
 lease-backed tests) need a real `treehouse` on `PATH`; without it they
 self-skip and `node --test` still exits 0. So before `npm test` the job prepends
-`$HOME/.local/bin` via `GITHUB_PATH`, installs treehouse with
-`node scripts/install-tools.ts treehouse` (ordinary privileges, no sudo) and
-prints `treehouse --version` into the log; the installer tracks upstream
+the install directory via `GITHUB_PATH`, installs treehouse with
+`node scripts/install-tools.ts treehouse` and prints `treehouse --version` into
+the log. On a root or sudo-capable runner (nomad, hosted), `scripts/ci-as-user.sh`
+runs the install and the suite as the unprivileged `cpci` user, so treehouse lands
+in `/home/cpci/.local/bin`; elsewhere it runs as the job user into
+`$HOME/.local/bin`. The installer tracks upstream
 latest, so that line is the version record. The sentinel
 `tests/ci-host-tools.test.ts` fails the run when `GITHUB_ACTIONS=true` and
 treehouse is not on `PATH`. Off CI a missing treehouse still only skips. The
