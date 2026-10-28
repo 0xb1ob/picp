@@ -71,10 +71,10 @@ export function createWakeupSurfaces(
 	 *
 	 * The dedupe, the bound and the truncation live in `sourceFailureRecorder`
 	 * above, which is the tested unit; what stays here is the sink it writes to —
-	 * the job's own run log, and never for a job with no run directory.
+	 * the job's own run log, and never for a job with no run log.
 	 */
 	const recordSourceFailure = sourceFailureRecorder((source, jobId, reason) => {
-		if (!existsSync(join(currentRuntime().home, paths.runDir(jobId)))) return;
+		if (!existsSync(join(currentRuntime().home, paths.eventsFile(jobId)))) return;
 		commandPost().runs.open(jobId).cp("wakeup_source_failed", { source, reason });
 	});
 
@@ -151,8 +151,8 @@ export function createWakeupSurfaces(
 	 * A withheld wake-up is silence, and silence about the silence is how this
 	 * class of bug hides: the fact lands in the job's own run log, once per
 	 * (stage, stamp) so a context review that runs on every provider request does
-	 * not write the same line a hundred times. A job with no run directory is
-	 * skipped rather than having one created for it.
+	 * not write the same line a hundred times. A job with no run log is
+	 * skipped rather than having a status file created for it.
 	 */
 	// pi-command-post-8ok: keyed by `issued_at`, so this memory grows with the
 	// session and not with the fleet. Same bound as the head-source journal.
@@ -169,7 +169,7 @@ export function createWakeupSurfaces(
 		if (!staleWakeupUnseen(key)) return;
 		for (const jobId of targets) {
 			try {
-				if (!existsSync(join(currentRuntime().home, paths.runDir(jobId)))) continue;
+				if (!existsSync(join(currentRuntime().home, paths.eventsFile(jobId)))) continue;
 				commandPost().runs.open(jobId).cp("wakeup_suppressed", {
 					kind: stamp.kind,
 					...(stamp.generation !== undefined ? { generation: stamp.generation } : {}),
