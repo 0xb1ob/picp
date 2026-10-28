@@ -1283,6 +1283,27 @@ in an open schedule run reads `<id> (run <run id>)`, never "no active grant cove
 `run_id`. `cp_next` lists such rows under their run's result (a run with only blocked members still shows); a
 dropped dependency of a run member asks once with no `mandate_id` and a clause naming the run.
 
+**Operator threads.** `cp_parent answer` and `cp_parent ask` take an optional top-level `thread` (cp-xmw2 S2): a
+short tag the human named for the topic, never invented and never for relays. It is normalized like the viewer's
+`normalizeThreadTag` (trim, ASCII-lowercase, whitespace runs to `-`) and must then be 1-32 of `a-z 0-9 -`, first a
+letter or digit; anything else is refused before `answers.jsonl` or `asks.jsonl` is written. After a `posted` answer
+or an opened ask, the bridge (`src/operator-threads.ts`) files the `ans-`/`ask-` id under that tag in
+`state/operator/threads.jsonl` through `bindThread`: an `open` line on the tag's first use, then a `bind`
+(`by:"bridge"`, `peer:null`). A `duplicate` answer is not filed; its text says the first id was not re-filed. A
+failed bind never undoes the post and the tool is not an error: the answer text adds `; thread <tag> NOT filed:
+<error>`, and the ask's JSON result (and details) carry `thread:{tag, id:null, error}`; on success `thread` holds
+the `th-` id. The ask journal line keeps its keys (no `thread`), so the Decisions fold is unchanged. Bookkeeping
+only: a thread grants nothing. A dashboard marker with `thread=<tag>` tells the session which human-named tag to pass
+on its answer/ask and to `cp_parent thread_bind` for any jobs it creates.
+
+**Job filing.** `cp_parent thread_bind {thread, job_ids}` files a non-empty array of job ids on the operator side
+only, without a parent turn. Normalize and validate the tag and every id before writing anything; job ids follow
+`JOB_ID_PATTERN` (1-128 of `A-Z a-z 0-9 _ -`, first a letter or digit). Each id is filed through `fileUnderThread` /
+`bindThread` with `ref:{kind:"job",id}`, `by:"bridge"`, `peer:null`. Repeats are idempotent and the newest bind wins.
+The result carries `bindings:[{job_id,tag,id,error}]`, with state `filed`, `partial` or `unfiled`; a failed write never
+throws and its text names each job and `thread <tag> NOT filed: <error>`. Invalid input is a tool error before any
+bind. This is bookkeeping, never authorization, scope assignment, dispatch or decision behavior.
+
 **Ask guard** (`src/ask-guard.ts`, cp-6fyl E). A question put to the human in prose
 without a `cp_parent ask` is forced back once, then carded by the bridge itself.
 *Enforced:* whether a `cp_parent ask` succeeded in the run (`tool_execution_end`,
@@ -6371,7 +6392,7 @@ is literal (`expandPromptTemplates` is never set, so no slash command, template 
 busy is the dashboard queue below (Send after this turn) or `deliverAs: "steer"` (Steer now), and Abort turn calls
 `ctx.abort()`. A click on option *Keep* of open ask `ask-abcd` sends `ask-abcd: Keep` (the reply the Awaiting
 screen copies). Every injected message ends with one marker line, `[cp-dashboard dc-… — from the dashboard]`
-(a click adds `; ask=<id>`), so the transcript shows it tagged `dashboard`. **A click is the human's answer, never
+(a click adds `; ask=<id>`; a send with a thread adds `; thread=<tag>`), so the transcript shows it tagged `dashboard`. **A click is the human's answer, never
 an authorization**: it never calls `cp_decide`, a `cp_parent` action or the parent host, and never writes
 `state/operator/asks.jsonl`; the main session records it with `ask_answer` (verbatim) and relays it, by its
 `cp_parent` guideline, and the card stays open until the ask journal says otherwise. Refused: a label that is not
@@ -6439,8 +6460,9 @@ repository; `CP_VERSION_REPO` (or the `repo` option) names another checkout.
 **The viewer's routes** ([`src/viewer/control-api.ts`](../src/viewer/control-api.ts)). `GET
 /api/operator/control` returns `{enabled, running, reason, token, busy, pending, session_file, recent}` — the
 session's CSRF token, which the page fetches itself; it never writes. `POST /api/operator/message` takes
-`{kind:"message", text, deliver?, images?, files?, client_id?}`, `{kind:"answer", ask_id, label}` or `{kind:"abort"}` and refuses,
-in order (a stale `thread` field is accepted and ignored; see Operator threads, retired):
+`{kind:"message", text, deliver?, thread?, images?, files?, client_id?}`, `{kind:"answer", ask_id, label, thread?}` or `{kind:"abort"}` and refuses,
+in order (`thread` — a normalized tag on messages and clicks, forwarded to the session's marker — is covered
+under Operator threads):
 
 | Check | Refusal |
 |---|---|
@@ -6464,11 +6486,11 @@ still 405 (the image upload route below is the one addition). The Full transcrip
 
 A composer's optional `client_id` must match `dc-<14 digits>-<8 lowercase hex>` or the body is 400. The bridge uses it as the request/marker id (the offline inbox as its held id), so a transcript arriving before the HTTP reply already matches the pending bubble. Without it the server generates an id. Reusing an id still in the bridge's open/recent sets or the held inbox is 409; this is a correlation field, not an idempotency or authorization mechanism. Retries use a fresh id. An older running bridge may ignore it until restarted.
 
-The guarded status also projects `sends: [{id, at, state, reason, ask_id, body}]` from the dashboard and inbox journals (`src/viewer/control-pending.ts`), preserving original message text and attachment ids. It is read-only, caps each journal read at 16 MiB, ignores a torn final line, and returns named `sends_error` warnings for unreadable, oversized or malformed journal content. All unresolved/failed accepted sends and the newest 100 delivered outcomes are retained. Known delivered bubbles wait for actual transcript appearance (including held ids in inbox replay), while historical delivered rows do not create new bubbles. Browser persistence keeps still-unseen sends and dismissed ids across reload; interrupted POSTs become an explicit failure without automatic replay. See `docs/viewer-app.md` for FIFO bubbles, scrolling and retry/discard.
+The guarded status also projects `sends: [{id, at, state, reason, ask_id, body}]` from the dashboard and inbox journals (`src/viewer/control-pending.ts`), preserving original message text, attachment ids and thread tags. It is read-only, caps each journal read at 16 MiB, ignores a torn final line, and returns named `sends_error` warnings for unreadable, oversized or malformed journal content. All unresolved/failed accepted sends and the newest 100 delivered outcomes are retained. Known delivered bubbles wait for actual transcript appearance (including held ids in inbox replay), while historical delivered rows do not create new bubbles. Browser persistence keeps still-unseen sends and dismissed ids across reload; interrupted POSTs become an explicit failure without automatic replay. See `docs/viewer-app.md` for FIFO bubbles, threading, scrolling and retry/discard.
 
 **Audit journal** `state/operator/dashboard.jsonl` (0600, append-only, one `O_APPEND` write + `fsync` per line, two
 writers). The session appends a `request` line (`by:"bridge"`, `id`, `at`, `peer` — the client address — `kind`,
-`text`, `ask_id`, `deliver`, and `images`/`files` — upload ids, never contents — for a message with attachments) **before** anything happens — a request line that cannot be written refuses the request
+`text`, `ask_id`, `deliver`, optional `thread`, and `images`/`files` — upload ids, never contents — for a message with attachments) **before** anything happens — a request line that cannot be written refuses the request
 (500) and nothing is injected — then `outcome` lines (`injected`, then `delivered` once the marker is seen in a
 `message_start` or `context` event, `queued` when it is not seen within 2 s, `failed` or `refused` with the reason).
 The viewer appends one `refused` line (`by:"viewer"`, `status`, `reason`, `peer`, and whatever `kind`/`text`/`ask_id`/`images`/`mime`
@@ -6484,7 +6506,7 @@ When the session's record is absent, invalid or names a pid that is gone, `GET /
 session's CSRF token does not exist then — and the dashboard says **operator session offline · N held**. The POST
 runs the same chain up to the record step, then, instead of 503: the inbox token (403 `inbox token missing or
 stale`), `abort` is 409 (`nothing to abort; the operator session is offline`), at most 20 waiting (409), and one
-`held` line `{type, id: dc-…, at, text, ask_id}` appended to `state/operator/inbox.jsonl` (0600, one `O_APPEND`
+`held` line `{type, id: dc-…, at, text, ask_id, thread?}` appended to `state/operator/inbox.jsonl` (0600, one `O_APPEND`
 write, like the journal) → 202 `{id, state: "held"}`. A click holds as `<ask>: <label>` with its `ask_id`. At the
 next `session_start`, once dashboard control listens (after any older dashboard-queued messages, one per settled turn: §The dashboard queue), the session injects every held message younger than 24 h as
 **one** user message, oldest first, headed `[cp-dashboard inbox — N message(s) typed while this session was
@@ -6663,7 +6685,7 @@ The main session receives each file inline as `File: <sanitized name>` followed 
 boundaries. Fences use backticks or tildes longer than any matching run in the included content, so arbitrary source
 text cannot close them. Over-budget files end with **`[truncated — full file at <absolute path>]`**; the stored file is
 complete and the session can use its read tool on that path. File contents are never added to the upload/request journal.
-The trailing marker adds `; files=<id>,…` **after** ask/images, preserving their ordering and existing markers.
+The trailing marker adds `; files=<id>,…` **after** ask/thread/images, preserving their ordering and existing markers.
 `SessionEntry.files` carries those ids, and optional `file_metadata` carries names/sizes for the plain-text links.
 
 **Recovery.** `rm -rf /tmp/cp-dashboard-uploads` is safe at any time (a pending send then answers 410); the opt-out
@@ -6792,14 +6814,80 @@ first ack.
 read-only. Deleting `state/operator/answers.jsonl` clears the list and loses nothing else. An unreadable or over-16-MiB
 journal shows "Answers unavailable".
 
-### Operator threads (retired by #588)
+### Operator threads (cp-xmw2)
 
-The cp-xmw2 operator threads feature is deleted: no `/api/threads*` route (GET falls through to the default handler,
-POST is 405 `read-only viewer: GET only`), no `cp_parent thread_bind` or `thread` argument, no thread line in the
-operator note. `POST /api/operator/message` still accepts a stale `thread` field and ignores it, so an old client's send
-lands untagged. A legacy `; thread=<tag>` marker in a session file still parses (the tag is dropped), and a legacy
-`thread` key on an inbox `held` or dashboard request line is ignored. `state/operator/threads.jsonl` is left on disk,
-never read or written.
+Threads let the human sort the one operator chat; they are **views of one chat, never separate model contexts**, and
+bookkeeping only (no model call, no push, no authority). Tagged sends carry their normalized tag to the session's
+marker; untagged messages are unchanged.
+
+**Journal** `state/operator/threads.jsonl` (0600, dir 0700, append-only, one `O_APPEND` write + `fsync` per line through
+[`src/viewer/control-audit.ts`](../src/viewer/control-audit.ts); created on first use; 16 MiB read cap; no rotation). Two
+writers: the operator session's bridge (`by:"bridge"`, `peer:null`) and the viewer (`by:"viewer"`, `peer` = client
+address); `at` is ISO seconds. Lines: `{"type":"open","by","id":"th-<12 hex>","at","tag","peer"}`,
+`{"type":"bind","by","at","thread":"th-…","ref":{"kind":"dashboard"|"ask"|"answer"|"job","id":"dc-…"|"ask-…"|"ans-…"|"<job-id>"},"peer"}`,
+`{"type":"done","by":"viewer","id","at","peer"}` — tags, ids, timestamps and addresses, never message, ask or answer text.
+Job refs use the existing path-safe job id contract; they do not add message/ask/answer counts or waiting items.
+A tag is `^[a-z0-9][a-z0-9-]{0,31}$` after `normalizeThreadTag` (trim, ASCII-lowercase, whitespace runs to `-`).
+`readThreads` folds it in line order: the torn last line is ignored; bad lines, unknown types, repeated open ids and
+binds/dones for unknown threads count in `skipped`; a second `open` of a tag aliases its id to the first (two writers
+racing); the newest bind of a ref wins. Ref identity is `(kind, id)`: in-memory lookups use `kind:id`, so a job whose
+id matches a dashboard, ask or answer id cannot move or suppress that other ref, its counts/waiting, or its transcript
+turn. Bind lines retain their existing `{kind,id}` shape; no journal migration is required.
+
+**Derived state** (`src/viewer/threads-view.ts`; nothing stored): `waiting` while a ref the thread holds is an open ask
+(`asks.jsonl`) or an unacknowledged answer (`answers.jsonl`) — `waiting: {asks, answers}`; else `done` while its newest
+done line comes after its newest bind (line order, never clocks — a later bind reopens it); else `open`. With asks or
+answers unreadable `waiting` is null and a warning names the source.
+
+**Routes** ([`src/viewer/threads-api.ts`](../src/viewer/threads-api.ts)). `GET /api/threads` (403 `threads are served
+only under --require-tailnet` otherwise — tags can name private topics; never writes) returns `{generated_at,
+availability, enabled, reason, token, threads, total, warning}`: `threads` are `{id, tag, state, waiting, counts:
+{messages, asks, answers, jobs_working}, opened_at, last_at, done_at}` (`jobs_working` = the thread's `job` refs that are live
+workers in `fleet.json` — run `starting`/`working`, phase not done/failed; `0` when the fleet file is missing, `null`
+when unreadable; display only, never waiting), waiting first, then open (newest `last_at`), then done (newest
+`done_at`), at most 100 with `total`; `token` is this viewer process's random thread token, only while control is on.
+`POST /api/threads/done` takes exactly `{"id": "th-<12 hex>"}` and refuses, in order:
+
+| Check | Refusal |
+|---|---|
+| method, `--require-tailnet`, rate, opt-out, Origin, Sec-Fetch-Site, JSON, 20 KiB, JSON parse | as in the Dashboard control table (kind `thread_done`) |
+| body shape | 400 `body must be {"id": "th-<12 hex>"}` |
+| `x-cp-control-token` equals the thread token | 403 `control token missing or stale; reload the page` |
+| the journal is readable | 500 `threads unreadable: …` |
+| the thread is known | 404 `no thread <id>` |
+| asks and answers readable | 503 `cannot tell whether <id> is waiting: <source> unreadable` |
+| nothing waiting | 409 `answer or acknowledge first: <n> open ask(s), <m> unacknowledged answer(s) in <tag>` |
+| not already done | 409 `<id> is already done since <done_at>` |
+| the `done` line is appended | 500 `threads journal unwritable (…)` |
+| — | 202 `{id, state: "done", done_at}` |
+
+Every refusal after the `--require-tailnet` guard is one `refused` line (`kind: "thread_done"`, `thread_id` once parsed)
+in `state/operator/dashboard.jsonl`; no refusal writes a done line. Mark done authorizes and acknowledges nothing.
+
+**Composer `thread`.** `POST /api/operator/message` accepts `thread` on `kind:"message"` and on an ask click
+(`kind:"answer"`); on `abort` it remains 400 `unknown field thread`. A value that does not normalize is 400
+`thread must be a tag: 1-32 of a-z 0-9 -, starting with a letter or digit`, before any frame. The normalized tag
+reaches the socket and the session sees `[cp-dashboard dc-… — from the dashboard; thread=<tag>]`. Clicks keep
+`ask=<id>` and add `; thread=<tag>` only when the click carried one; no thread is inferred from the ask or the
+current view. Image ids still follow as `; images=…`. Untagged markers and frames are unchanged. A held message
+keeps its optional normalized `thread` in the inbox; replay adds that message's tagged footer, while the aggregate
+inbox replay stays shared. After the session's 202 (or the inbox `held` line) the viewer files the `dc-` id: `open`
+on the tag's first use,
+then `bind`. The 202 body gains `thread: {tag, id, error}`; a bind that cannot be written never changes the 202 —
+`thread.error` names why and the viewer logs one line (`viewer: thread bind unwritten for <dc-id>: …`). A send later
+dropped leaves an orphan bind that matches no entry; harmless.
+
+**Transcript filter.** In the Full transcript, **All** (no filter) shows every entry. A selected thread shows its own entries, and a shared entry (a system entry or the inbox replay) only when that entry sits inside the thread's own span — from its first own entry through its last, in file order. A shared entry before the first or after the last is not shown. Another thread's entries are never shown, even inside that span. A thread with no own entries, and a selected tag that has no thread yet (`threadFilter` is `"none"`), shows no entries; a tag with no thread yet still shows `No messages in <tag> yet`.
+
+**Job notices in the transcript.** `assignThreads` uses the newest `job` ref binding: a cp-bridge entry whose
+`bridge.job` is bound owns that thread, is not shared and opens a turn there, so following main-session replies
+are filed there. Unbound bridge entries, other system entries, compactions and aggregate inbox replays stay
+shared and end the current turn. Own dashboard/ask/answer refs still beat a turn's inherited thread.
+
+**Failure and recovery.** A missing journal is `availability: "missing"` (empty list). An unreadable or over-16-MiB one
+is `unavailable` with a warning, done answers 500 and composer binds fail with `thread.error` while the message still
+delivers; nothing is truncated — move the file aside (deleting it clears all grouping and loses nothing else). The
+trust boundary is the dashboard control one: a same-user local process can already write `state/`.
 
 ### Remote devices (remote dashboard PR 1)
 
@@ -6875,8 +6963,8 @@ request line, keeps the sender and every remote editor (first-edit order, one pe
 them) through the queue and a restart reload (`src/viewer/control-queue.ts`), and injects one line directly above the
 marker — `[cp-remote — through a paired remote device, not this terminal: sent by dev-… "Name"; edited by dev-… "Name"]`,
 names JSON-quoted — with a trailing `; remote` field on the marker. A held offline message keeps `remote` on its
-`held` line (`src/viewer/control-inbox.ts`), and each replayed remote message gets its own line and marker.
-`parseDashboardText` reads the line into `remote: {sender, editors}` (the transcript's `SessionEntry.remote`)
+`held` line (`src/viewer/control-inbox.ts`), and each replayed remote message gets its own line and marker, threaded
+or not. `parseDashboardText` reads the line into `remote: {sender, editors}` (the transcript's `SessionEntry.remote`)
 and never into the body; a `; remote` marker without a well-formed line above it is not a marker, and since the
 bridge appends its own marker after the user's text, typed text can neither forge nor strip the label. Local
 messages and journals without `remote` keep their exact bytes.

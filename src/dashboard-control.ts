@@ -33,7 +33,7 @@ import { restartRequest, restartState } from "./dashboard-restart.ts";
 import { appendControlAudit, appendInboxLine } from "./viewer/control-audit.ts";
 import {
 	CONTROL_PROTOCOL, CONTROL_TEXT_MAX, type ControlAuditLine, type ControlDeliver, type ControlKind, controlRecordFile, controlSocketFile,
-	dashboardMarker, DASHBOARD_ID_RE, INBOX_MAX_AGE_MS, type InboxLine, isAskId, readControlConfig, readControlRecord, readUploadMetadata,
+	dashboardMarker, DASHBOARD_ID_RE, INBOX_MAX_AGE_MS, type InboxLine, isAskId, normalizeThreadTag, readControlConfig, readControlRecord, readUploadMetadata,
 	REMOTE_PROVENANCE_VERSION, type RemoteDevice, remoteDevice, remoteLine, withEditor,
 } from "./viewer/control-files.ts";
 import { readInbox } from "./viewer/control-inbox.ts";
@@ -211,10 +211,11 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		const supplied = kind === "message" && typeof args.client_id === "string" && DASHBOARD_ID_RE.test(args.client_id) ? args.client_id : null;
 		const duplicate = supplied !== null && (open.has(supplied) || recent.some(row=>row.id === supplied) || queue.some((entry) => entry.id === supplied) || handed.has(supplied));
 		const id = supplied && !duplicate ? supplied : newControlId(now());
+		const tag = normalizeThreadTag(args.thread);
 		// PR 1c: the viewer's remote gate names the paired device; a malformed one is journaled bare, then refused below.
 		const remote = remoteDevice(args.remote);
 		const sessionFile = ports.sessionFile();
-		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, session_started_at: startedAt, ...(sessionFile ? {session_file: sessionFile} : {}), ...(images ? { images } : {}), ...(files ? { files } : {}), ...(remote ? { remote } : {}) });
+		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, session_started_at: startedAt, ...(sessionFile ? {session_file: sessionFile} : {}), ...(images ? { images } : {}), ...(files ? { files } : {}), ...(tag ? { thread: tag } : {}), ...(remote ? { remote } : {}) });
 		if (!journaled.ok) return { ok: false, status: 500, error: `failed: audit journal unwritable (${journaled.error})` };
 		const refuse = (status: number, reason: string): Reply => {
 			outcome(id, kind, askId, peer, "refused", reason);
@@ -230,6 +231,8 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			outcome(id, kind, null, peer, "delivered", null);
 			return { ok: true, result: { id, state: "delivered", deliver } };
 		}
+		const thread = args.thread === undefined ? null : normalizeThreadTag(args.thread);
+		if (args.thread !== undefined && thread === null) return refuse(400, "thread must be a tag: 1-32 of a-z 0-9 -, starting with a letter or digit");
 		if (images && (kind !== "message" || images.length < 1 || images.length > UPLOAD_MAX_PER_MESSAGE || new Set(images).size !== images.length || !images.every(isImageUploadId))) return refuse(400, `images must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct upload ids`);
 		if (files && (kind !== "message" || files.length < 1 || files.length > UPLOAD_MAX_PER_MESSAGE || new Set(files).size !== files.length || !files.every(isTextUploadId))) return refuse(400, `files must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct text upload ids`);
 		const attachments = [...(images ?? []), ...(files ?? [])];
@@ -261,11 +264,11 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (kind === "message" && deliver !== "steer" && (!idle || queue.length > 0 || inboxAt !== null || handing !== null)) {
 			const held = outcome(id, kind, askId, peer, "queued", null, false);
 			if (!held.ok) return refuse(500, `failed: audit journal unwritable (${held.error})`);
-			queue.push({ id, at: now().toISOString(), peer, text: text ?? "", askId, ...(images ? { images } : {}), ...(files ? { files } : {}), ...(remote ? { remote } : {}) });
+			queue.push({ id, at: now().toISOString(), peer, text: text ?? "", askId, ...(images ? { images } : {}), ...(files ? { files } : {}), ...(thread ? { thread } : {}), ...(remote ? { remote } : {}) });
 			settle(false);
 			return { ok: true, result: { id, state: "queued", deliver, editable: true } };
 		}
-		return handOver({ id, kind, askId, peer, text, images, files, ...(remote ? { remote } : {}) }, deliverAs, deliver, refuse, false);
+		return handOver({ id, kind, askId, peer, text, images, files, thread, ...(remote ? { remote } : {}) }, deliverAs, deliver, refuse, false);
 	};
 
 	/**
@@ -274,9 +277,9 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	 * a restarted bridge reloads only ids with no `injected` line, so it never hands one over twice. A direct send waits
 	 * up to `waitMs` for the sighting to answer delivered or queued, as before.
 	 */
-	type Handing = { id: string; kind: ControlKind; askId: string | null; peer: string | null; text: string | null; images?: string[]; files?: string[]; remote?: RemoteDevice; editors?: RemoteDevice[]; again?: true };
+	type Handing = { id: string; kind: ControlKind; askId: string | null; peer: string | null; text: string | null; images?: string[]; files?: string[]; thread: string | null; remote?: RemoteDevice; editors?: RemoteDevice[]; again?: true };
 	const handOver = async (entry: Handing, deliverAs: "steer" | "followUp" | undefined, deliver: ControlDeliver, refuse: (status: number, reason: string) => Reply, queued: boolean): Promise<Reply> => {
-		const { id, kind, askId, peer, text, images, files } = entry;
+		const { id, kind, askId, peer, text, images, files, thread } = entry;
 		// PR 1c: the device line sits right above the marker, after the user's text, so typed text can never forge it.
 		const viaRemote = remoteLine(entry);
 		const metadata = readUploadMetadata(stateDir, files ?? []);
@@ -311,7 +314,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			const fallback = paths.length ? `${paths.join("\n")}\n\n` : "";
 			// One plain line per image before the marker: where the upload lives, and that it is swept (UPLOAD_MAX_AGE_MS = 7 days).
 			const imageLines = images?.length ? `${images.map((image) => `image: ${resolve(uploadFile(root, image)!)} (deleted after 7 days; copy it if needed longer)`).join("\n")}\n\n` : "";
-			result = ports.inject(`${text ? `${text}\n\n` : ""}${fallback}${imageLines}${fileText}${viaRemote ? `${viaRemote}\n` : ""}${dashboardMarker(id, askId, images, files, viaRemote !== null)}`, queued ? (ports.isIdle() ? undefined : "followUp") : deliverAs, inline.length ? inline : undefined);
+			result = ports.inject(`${text ? `${text}\n\n` : ""}${fallback}${imageLines}${fileText}${viaRemote ? `${viaRemote}\n` : ""}${dashboardMarker(id, askId, images, thread, files, viaRemote !== null)}`, queued ? (ports.isIdle() ? undefined : "followUp") : deliverAs, inline.length ? inline : undefined);
 		} catch (error) {
 			open.delete(id);
 			outcome(id, kind, askId, peer, "failed", (error as Error).message);
@@ -347,7 +350,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	 * FIFO across a restart: the offline inbox turn (messages typed while no session ran) takes its place by time —
 	 * every held message older than its oldest line goes first (addendum 2 review).
 	 */
-	type Held = { id: string; at: string; peer: string | null; text: string; askId: string | null; images?: string[]; files?: string[]; remote?: RemoteDevice; editors?: RemoteDevice[] };
+	type Held = { id: string; at: string; peer: string | null; text: string; askId: string | null; images?: string[]; files?: string[]; thread?: string; remote?: RemoteDevice; editors?: RemoteDevice[] };
 	const queue: Held[] = [];
 	/** The id last handed over (or INBOX), until it fails or a turn settles: one handoff per settled turn. */
 	let handing: string | null = null;
@@ -370,7 +373,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		handing = entry.id;
 		preparing.add(entry.id);
 		const refuse = (status: number, reason: string): Reply => { outcome(entry.id, "message", entry.askId, entry.peer, "refused", reason); return { ok: false, status, error: reason }; };
-		void handOver({ ...entry, kind: "message", ...(tries > 1 ? { again: true as const } : {}) }, undefined, "prompt", refuse, true).then((reply) => {
+		void handOver({ ...entry, kind: "message", thread: entry.thread ?? null, ...(tries > 1 ? { again: true as const } : {}) }, undefined, "prompt", refuse, true).then((reply) => {
 			preparing.delete(entry.id);
 			if (reply.ok) given.set(entry.id, { entry, tries });
 			if (reply.ok || stopped) return;
@@ -534,7 +537,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	const journal = readQueueJournal(stateDir);
 	if (journal.error) log(`cp-bridge: dashboard queue unreadable, nothing reloaded: ${journal.error}\n`);
 	for (const message of journal.messages.values()) {
-		if (dashboardHeld(message)) queue.push({ id: message.id, at: message.at, peer: message.peer, text: message.text, askId: message.ask_id, ...(message.images ? { images: message.images } : {}), ...(message.files ? { files: message.files } : {}), ...(message.remote ? { remote: message.remote } : {}), ...(message.editors ? { editors: message.editors } : {}) });
+		if (dashboardHeld(message)) queue.push({ id: message.id, at: message.at, peer: message.peer, text: message.text, askId: message.ask_id, ...(message.images ? { images: message.images } : {}), ...(message.files ? { files: message.files } : {}), ...(message.thread ? { thread: message.thread } : {}), ...(message.remote ? { remote: message.remote } : {}), ...(message.editors ? { editors: message.editors } : {}) });
 	}
 	try {
 		await listen();
@@ -620,7 +623,7 @@ export function deliverInbox(stateDir: string, ports: Pick<ControlPorts, "inject
 		const state = message.ask_id ? asks?.get(message.ask_id) : undefined;
 		const note = message.ask_id && asks && state !== "open" ? ` (${message.ask_id} is ${state ?? "unknown"}, no longer open)` : "";
 		const via = remoteLine(message);
-		const tail = via ? `\n${via}\n${dashboardMarker(message.id, message.ask_id, undefined, undefined, true)}` : "";
+		const tail = via || message.thread ? `\n${via ? `${via}\n` : ""}${dashboardMarker(message.id, message.ask_id, undefined, message.thread, undefined, via !== null)}` : "";
 		return `- ${message.at} (${message.id}): ${message.text}${note}${tail}`;
 	});
 	const dropped = stale.map((message) => `- dropped, held longer than 24 h: ${message.at} (${message.id})`);

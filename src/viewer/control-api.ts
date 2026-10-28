@@ -33,7 +33,9 @@
  * `answer_ack`), then the answer token, the answer existing and not yet acknowledged, and appends one `acked` line to
  * `state/operator/answers.jsonl` before it answers 202. No session, no parent: it only moves the answer to the history.
  *
- * #588 retired operator threads: a stale tab's `thread` on a message or answer body is accepted and dropped, never sent.
+ * cp-xmw2, operator threads: message and answer bodies may carry `thread`, normalized by `normalizeThreadTag`.
+ * It reaches the session's marker; after the 202 (or the held line), the viewer files the dc- id via `bindThread`.
+ * A failed bind is named as `thread.error`. The thread list and done route live in threads-api.ts.
  */
 
 import { execFile } from "node:child_process";
@@ -44,10 +46,10 @@ import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 import { HERDR_TIMEOUT_MS, HERDR_WORKSPACE_LABEL, herdrCommand, herdrServerArgv, herdrServerRunning, type Launcher, OPERATOR_TMUX_SESSION, onPath, operatorWrapperPath, tmuxLaunch } from "./launchers.ts";
 import type { AnswerAckResponse, AnswersControlStatusResponse, ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, ScheduleControlSendResponse, ScheduleControlStatusResponse } from "./api-types.ts";
-import { appendAnswerLine, appendControlAudit, appendInboxLine, appendScheduleControlLine } from "./control-audit.ts";
+import { appendAnswerLine, appendControlAudit, appendInboxLine, appendScheduleControlLine, bindThread } from "./control-audit.ts";
 import {
 	CONTROL_BODY_MAX_BYTES, CONTROL_PROTOCOL, CONTROL_RATE_LIMIT, CONTROL_RATE_WINDOW_MS, CONTROL_TEXT_MAX, type ControlKind, type ControlRecord,
-	controlInboxFile, controlOrigin, controlRecordFile, DASHBOARD_ID_RE, INBOX_MAX_HELD, isAnswerId, isAskId, operatorAnswersFile, readAnswers, readControlConfig, readControlRecord,
+	controlInboxFile, controlOrigin, controlRecordFile, DASHBOARD_ID_RE, INBOX_MAX_HELD, isAnswerId, isAskId, normalizeThreadTag, operatorAnswersFile, readAnswers, readControlConfig, readControlRecord,
 	REMOTE_PROVENANCE_VERSION, type RemoteDevice,
 	readScheduleControl, SCHEDULE_CONTROL_MAX_AGE_MS, SCHEDULE_CONTROL_MAX_PENDING, SCHEDULE_CONTROL_OPS, scheduleControlFile, type ScheduleControlOp, type ScheduleControlRequest,
 } from "./control-files.ts";
@@ -281,28 +283,31 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 	};
 }
 
-type Parsed = { kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "settings" | "queue" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; answer_id?: string; images?: string[]; files?: string[]; mime?: string; queue_id?: string };
-type Body = ControlMessageBody | { kind: "answer"; ask_id: string; label: string } | { kind: "abort" };
+type Parsed = { kind: ControlKind | "start" | "schedule" | "answer_ack" | "upload" | "thread_done" | "settings" | "queue" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; answer_id?: string; images?: string[]; files?: string[]; mime?: string; thread?: string; thread_id?: string; queue_id?: string };
+type Body = ControlMessageBody | { kind: "answer"; ask_id: string; label: string; thread?: string } | { kind: "abort" };
 type Refuse = (status: number, reason: string, headers?: Record<string, string>, extra?: Record<string, unknown>) => ControlRouteResult;
 export interface Gate { peer: string | null; refuse: Refuse; parsed(value: Parsed): void }
 
-function parseBody(json: unknown): { ok: true; body: Body; parsed: Parsed } | { ok: false; reason: string; parsed: Parsed } {
+/** Normalize a message or click's optional thread before any socket frame or inbox write. */
+function parseBody(json: unknown): { ok: true; body: Body; thread: string | null; parsed: Parsed } | { ok: false; reason: string; parsed: Parsed } {
 	const value = json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : undefined;
 	const kind = value?.kind === "message" || value?.kind === "answer" || value?.kind === "abort" ? value.kind : null;
 	const text = typeof value?.text === "string" ? value.text : kind === "answer" && typeof value?.label === "string" ? value.label : null;
 	const images = Array.isArray(value?.images) ? value.images.slice(0, UPLOAD_MAX_PER_MESSAGE).map((image) => String(image).slice(0, 64)) : undefined;
 	const files = Array.isArray(value?.files) ? value.files.slice(0, UPLOAD_MAX_PER_MESSAGE).map((file) => String(file).slice(0, 64)) : undefined;
-	const parsed: Parsed = { kind, text, ask_id: typeof value?.ask_id === "string" ? value.ask_id.slice(0, 100) : null, ...(images ? { images } : {}), ...(files ? { files } : {}) };
-	// A stale tab may still send the retired `thread` (#588): allowed here, never read below.
+	const parsed: Parsed = { kind, text, ask_id: typeof value?.ask_id === "string" ? value.ask_id.slice(0, 100) : null, ...(images ? { images } : {}), ...(files ? { files } : {}), ...(typeof value?.thread === "string" ? { thread: value.thread.slice(0, 64) } : {}) };
 	const keys = { message: ["kind", "text", "deliver", "images", "files", "thread", "client_id"], answer: ["kind", "ask_id", "label", "thread"], abort: ["kind"] };
 	if (!value || !kind) return { ok: false, reason: 'kind must be "message", "answer" or "abort"', parsed };
 	const extra = Object.keys(value).filter((key) => !keys[kind].includes(key));
 	if (extra.length) return { ok: false, reason: `unknown field ${extra.join(", ")}`, parsed };
-	if (kind === "abort") return { ok: true, body: { kind }, parsed };
+	if (kind === "abort") return { ok: true, body: { kind }, thread: null, parsed };
+	const thread = value.thread === undefined ? null : normalizeThreadTag(value.thread);
+	if (value.thread !== undefined && thread === null) return { ok: false, reason: "thread must be a tag: 1-32 of a-z 0-9 -, starting with a letter or digit", parsed };
+	const tagged = thread === null ? {} : { thread };
 	if (kind === "answer") {
 		if (!isAskId(value.ask_id)) return { ok: false, reason: "ask_id must be an ask id", parsed };
 		if (typeof value.label !== "string" || !value.label) return { ok: false, reason: "label must be one of the ask's options", parsed };
-		return { ok: true, body: { kind, ask_id: value.ask_id, label: value.label }, parsed };
+		return { ok: true, body: { kind, ask_id: value.ask_id, label: value.label, ...tagged }, thread, parsed };
 	}
 	const ids = value.images, fileIds = value.files;
 	if (ids !== undefined && (!Array.isArray(ids) || ids.length < 1 || ids.length > UPLOAD_MAX_PER_MESSAGE || new Set(ids).size !== ids.length || !ids.every(isImageUploadId))) return { ok: false, reason: `images must be 1-${UPLOAD_MAX_PER_MESSAGE} distinct upload ids`, parsed };
@@ -313,7 +318,7 @@ function parseBody(json: unknown): { ok: true; body: Body; parsed: Parsed } | { 
 	if (trimmed.length > CONTROL_TEXT_MAX) return { ok: false, reason: `text is longer than ${CONTROL_TEXT_MAX} characters`, parsed };
 	if (value.client_id !== undefined && (typeof value.client_id !== "string" || !DASHBOARD_ID_RE.test(value.client_id))) return { ok: false, reason: "client_id must be a dashboard id", parsed };
 	if (value.deliver !== undefined && value.deliver !== "followUp" && value.deliver !== "steer") return { ok: false, reason: 'deliver must be "followUp" or "steer"', parsed };
-	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}), ...(fileIds ? { files: fileIds as string[] } : {}), ...(typeof value.client_id === "string" ? { client_id: value.client_id } : {}) }, parsed };
+	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}), ...(fileIds ? { files: fileIds as string[] } : {}), ...(typeof value.client_id === "string" ? { client_id: value.client_id } : {}), ...tagged }, thread, parsed };
 }
 
 /** A message's `@skill` mentions as code-written `[cp-skill <name> <dir>]` lines (typed ones dropped), within CONTROL_TEXT_MAX. */
@@ -327,6 +332,19 @@ export function withMentionedSkills(text: string, options: ControlRouteOptions):
 /** The journals' timestamp form: ISO seconds, no milliseconds. */
 export const isoSeconds = (now: Date): string => now.toISOString().replace(/\.\d{3}Z$/, "Z");
 
+/**
+ * cp-xmw2: file an accepted (or held) `dc-` message under the composer's thread. A failed bind never changes the 202:
+ * the body names it as `thread.error` and the viewer log gets one line.
+ */
+function threaded(options: ControlRouteOptions, result: ControlSendResponse, tag: string | null, peer: string | null, now: Date): ControlSendResponse {
+	if (tag === null) return result;
+	const id = result?.id;
+	const bound = typeof id === "string" && DASHBOARD_ID_RE.test(id)
+		? bindThread(options.stateDir, { tag, ref: { kind: "dashboard", id }, by: "viewer", peer, at: isoSeconds(now) })
+		: { ok: false as const, error: `the session answered without a dc- id (${JSON.stringify(id ?? null)})` };
+	if (!bound.ok) log(options)(`viewer: thread bind unwritten for ${String(id)}: ${bound.error}\n`);
+	return { ...result, thread: { tag, id: bound.ok ? bound.thread : null, error: bound.ok ? null : bound.error } };
+}
 
 /** The `Origin` header is http(s) on exactly this request's Host header, its default port written or not. */
 function originIsHost(req: IncomingMessage): boolean {
@@ -454,7 +472,7 @@ export function handleControlMessage(req: IncomingMessage, options: ControlRoute
 			if (total > UPLOAD_MESSAGE_MAX_BYTES) return refuse(413, `${files ? "attachments" : "images"} total ${total} bytes; at most ${UPLOAD_MESSAGE_MAX_BYTES} per message`);
 		}
 		const remote = remoteOf(req);
-		if (!running || record.state !== "ok") return hold(options, now, shape.body, req.headers["x-cp-control-token"], refuse, remote);
+		if (!running || record.state !== "ok") return hold(options, now, shape.body, req.headers["x-cp-control-token"], refuse, peer, shape.thread, remote);
 		if (!tokenMatches(req.headers["x-cp-control-token"], record.record.csrf)) return refuse(403, "control token missing or stale; reload the transcript");
 		const provenance = await remoteProvenance(record.record, remote);
 		if (!provenance.ok) return refuse(provenance.status, provenance.reason);
@@ -463,7 +481,7 @@ export function handleControlMessage(req: IncomingMessage, options: ControlRoute
 			? await controlRequest(record.record, "send_files", args, UPLOAD_SEND_TIMEOUT_MS)
 			: images ? await controlRequest(record.record, "send_images", args, UPLOAD_SEND_TIMEOUT_MS)
 			: await controlRequest(record.record, shape.body.kind === "abort" ? "abort" : "send", args);
-		if (reply.ok) return { status: 202, body: reply.result as ControlSendResponse };
+		if (reply.ok) return { status: 202, body: threaded(options, reply.result as ControlSendResponse, shape.thread, peer, now) };
 		// The bridge journals its own request/outcome once the frame reached it; only transport failures are ours.
 		if (reply.status === 503 || (reply.status === 504 && reply.error.startsWith("session "))) return refuse(reply.status, reply.error);
 		// An older cp-bridge has no send_images op and journals nothing for it: our refused line is the only record.
@@ -491,8 +509,8 @@ export async function remoteProvenance(record: ControlRecord, remote: RemoteDevi
 	return { ok: true, args: { remote } };
 }
 
-/** No live operator session: hold the message in the inbox for the next session to deliver. */
-function hold(options: ControlRouteOptions, now: Date, body: Body, token: unknown, refuse: Refuse, remote: RemoteDevice | undefined): ControlRouteResult {
+/** No live operator session: hold the message in the inbox for the next session to deliver (filed under its thread, if any). */
+function hold(options: ControlRouteOptions, now: Date, body: Body, token: unknown, refuse: Refuse, peer: string | null, thread: string | null, remote: RemoteDevice | undefined): ControlRouteResult {
 	if (!tokenMatches(token, INBOX_TOKEN)) return refuse(403, "inbox token missing or stale; reload the page");
 	if (body.kind === "abort") return refuse(409, "nothing to abort; the operator session is offline");
 	const inbox = readInbox(options.stateDir);
@@ -500,9 +518,9 @@ function hold(options: ControlRouteOptions, now: Date, body: Body, token: unknow
 	if (inbox.held.length >= INBOX_MAX_HELD) return refuse(409, `the inbox already holds ${INBOX_MAX_HELD} messages; start the operator session to deliver them`);
 	const id = body.kind === "message" && body.client_id ? body.client_id : heldId(now);
 	if (inbox.held.some(message=>message.id === id)) return refuse(409, "client_id was already used; check the transcript before retrying");
-	const written = appendInboxLine(options.stateDir, { type: "held", id, at: now.toISOString(), text: body.kind === "answer" ? `${body.ask_id}: ${body.label}` : body.text, ask_id: body.kind === "answer" ? body.ask_id : null, ...(remote ? { remote } : {}) });
+	const written = appendInboxLine(options.stateDir, { type: "held", id, at: now.toISOString(), text: body.kind === "answer" ? `${body.ask_id}: ${body.label}` : body.text, ask_id: body.kind === "answer" ? body.ask_id : null, ...(thread ? { thread } : {}), ...(remote ? { remote } : {}) });
 	if (!written.ok) return refuse(500, `inbox unwritable (${controlInboxFile(options.stateDir)}): ${written.error}`);
-	return { status: 202, body: { id, state: "held", deliver: "prompt" } satisfies ControlSendResponse };
+	return { status: 202, body: threaded(options, { id, state: "held", deliver: "prompt" }, thread, peer, now) };
 }
 
 const runFixed: Run = (argv, timeoutMs, env) => new Promise((done) => {

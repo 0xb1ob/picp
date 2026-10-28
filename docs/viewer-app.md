@@ -34,7 +34,7 @@ Only this trusted startup/build command writes generated output. Requests never
 write operational state (the request-time writes are a device's Web Push
 subscription under `data/push/subscriptions/`, the dashboard-control audit line in
 `state/operator/dashboard.jsonl`, a Schedules page `request` line in `state/schedule-control.jsonl`, which the
-parent reads, and an Answers `acked` line in `state/operator/answers.jsonl`, which nothing reads but the dashboard), contact a gateway, invoke policy stores, probe process
+parent reads, an Answers `acked` line in `state/operator/answers.jsonl`, which nothing reads but the dashboard, and a thread `open`/`bind`/`done` line in `state/operator/threads.jsonl`, likewise), contact a gateway, invoke policy stores, probe process
 liveness or communicate with a parent or worker (dashboard control talks only to the
 operator's own session, over its owner-only socket). No viewer request writes a settings file: a Settings change is one
 `settings_apply` frame to that session, which writes the owner file. Build failure is logged to
@@ -53,7 +53,7 @@ default-src 'none'; script-src 'self'; script-src-attr 'none'; worker-src 'self'
 `worker-src 'self'` and `manifest-src 'self'` are the only additions Web Push
 needs (the same-origin `/sw.js` and `/manifest.webmanifest`); nothing else is
 loosened. The separate published-board policy still forbids scripts. Host binding (opt-in `viewer.strict_host`),
-GET/HEAD-only handling (except `POST|DELETE /api/push/subscription`, `POST /api/operator/message`, `POST /api/schedules/request`, `POST /api/answers/ack`, `POST /api/settings/apply` and `POST /api/settings/restore`) and explorer
+GET/HEAD-only handling (except `POST|DELETE /api/push/subscription`, `POST /api/operator/message`, `POST /api/schedules/request`, `POST /api/answers/ack`, `POST /api/threads/done`, `POST /api/settings/apply` and `POST /api/settings/restore`) and explorer
 confinement remain in force. HEAD never starts a refresh timer.
 
 ## Routes
@@ -72,6 +72,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Dashboard control | `GET /api/operator/control` (status + this session's CSRF token), `POST /api/operator/message` and `POST /api/operator/restart` (only under `--require-tailnet`) |
 | Schedule controls | `GET /api/schedules/control` (status + schedule token), `GET /api/schedules/policy?schedule_id=` (pure policy preview), `POST /api/schedules/request` (only under `--require-tailnet`; journaled for the parent) |
 | Answers | `GET /api/answers/control` (status + this viewer's answer token), `POST /api/answers/ack` (only under `--require-tailnet`; appends one `acked` line, no session or parent) |
+| Threads | `GET /api/threads` (list + this viewer's thread token), `POST /api/threads/done` (only under `--require-tailnet`; appends one `done` line, no session or parent) |
 | Skills | `GET /api/skills` (only under `--require-tailnet`; read-only): the pi skills directly under `<agentDir>/skills` and `<home>/skills` with a valid `SKILL.md`, as `{name, description ≤ 200 chars, source}` plus a capped `skipped` `{name, reason}` list and an `omitted` count; never a SKILL.md body or a directory path (`src/viewer/skill-catalog.ts`) |
 | Settings | `GET /api/settings`, `POST /api/settings/apply`, `POST /api/settings/restore` (only under `--require-tailnet`; forwarded to the operator session, which validates, audits and writes the owner file) |
 | Stats | `#stats?range=&project=&mandate=&from=&to=` (range `1h`, `24h`, `7d` or `custom`; `from`/`to` only for custom, UTC ISO). The screen reads `GET /api/stats?range=1h\|24h\|7d\|custom&from=&to=&project=&mandate=&tz=<IANA zone>` (read-only; 400 `{error}` for a bad range; the browser's `tz` is optional) and `stats` in the `/api/stream?view=` allowlist |
@@ -443,7 +444,7 @@ opt-out (`data/dashboard-control.json` `{"enabled": false}`), `Origin` (the orig
 record, its CSRF token, and the socket. Every refusal after the
 `--require-tailnet` guard appends one `refused` line to
 `state/operator/dashboard.jsonl` (`src/viewer/control-audit.ts`, append-only,
-imported only by `control-api.ts` and the image upload route `operator-upload-api.ts`); the operator session journals what it
+imported only by `control-api.ts`, the image upload route `operator-upload-api.ts` and the thread done route `threads-api.ts`); the operator session journals what it
 receives. There is no login or device allowlist: the HTTPS origin is reachable only
 from the operator's tailnet devices. No `<form>` (CSP `form-action 'none'`), no
 inline styles; `components/control.css` wraps long text and the action buttons at
@@ -477,8 +478,8 @@ sends nothing to the operator session or the parent and never pushes. `screens/a
 (light and dark), no inline styles; rows wrap and long text breaks (`overflow-wrap: anywhere`) at 390 px and sit in the
 page column at 1440 px.
 
-**Threads** were removed by #588 (docs/contracts.md §Operator threads, retired): the transcript is one unfiltered
-chat, with no thread chips, sidebar section, composer picker or `cp-thread` selection.
+The Sessions thread UI was removed by #588 (part 1 of 2): the transcript is one unfiltered
+chat, with no thread chips, sidebar section, composer picker or `cp-thread` selection; the server routes go in part 2.
 
 **Settings** (cp-settings-minimal, docs/contracts.md §Settings writes; `screens/Settings.tsx`,
 `use-settings-control.ts`, `settings-control.ts`). `#settings`, in the desktop rail and under More on phone, has exactly four sections, each with its own

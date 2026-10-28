@@ -362,7 +362,7 @@ const PROTECTED = [
 	"/api/awaiting", "/api/decided", "/api/decisions", "/api/stats", "/api/job?id=x", "/api/job/x/events", "/api/job/x/transcript", "/api/diff?id=x",
 	"/api/sessions", "/api/sessions?view=you&transcript=1", "/api/roots", "/api/files", "/api/git", "/api/skills", "/api/operator/uploads/x",
 	"/api/stream?view=overview", "/api/stream?id=x", "/api/operator/control", "/api/schedules/control", "/api/schedules/policy", "/api/answers/control",
-	"/api/settings", "/api/push", "/api/devices", "/api/devices/notices", "/classic", "/nope", "/pair?code=x", "/pair/", "/api/pair/claim?x=1",
+	"/api/threads", "/api/settings", "/api/push", "/api/devices", "/api/devices/notices", "/classic", "/nope", "/pair?code=x", "/pair/", "/api/pair/claim?x=1",
 ];
 
 test("P12-gate: an unpaired caller is refused 401 on every route and method, forged headers confer nothing, and only the pair page and claim are public", async (t) => {
@@ -376,7 +376,7 @@ test("P12-gate: an unpaired caller is refused 401 on every route and method, for
 			assert.equal(reply.headers["access-control-allow-origin"], undefined);
 		}
 	}
-	for (const path of ["/api/operator/message", "/api/operator/start", "/api/operator/queue", "/api/operator/upload", "/api/settings/apply", "/api/push/subscription", "/api/pair/create", "/api/devices/revoke"]) {
+	for (const path of ["/api/operator/message", "/api/operator/start", "/api/operator/queue", "/api/operator/upload", "/api/settings/apply", "/api/push/subscription", "/api/pair/create", "/api/devices/revoke", "/api/threads/done"]) {
 		assert.equal((await s.r(path, { method: "POST", headers: { ...forged, "content-type": "application/json" }, body: "{}" })).status, 401, path);
 	}
 	const page = await s.r("/pair");
@@ -422,7 +422,7 @@ test("P12-levels: both levels read every protected route with a sliding cookie a
 	const id = newUploadId("txt", new Date());
 	writeUpload(s.uploads, id, Buffer.from("hello\n"));
 	for (const device of [full, view]) {
-		for (const path of ["/api/overview", "/api/identity", "/healthz", "/api/sessions?view=you&transcript=1", "/api/skills", "/api/operator/control", "/api/schedules/control", "/api/answers/control", `/api/operator/uploads/${id}`, "/api/devices", "/sw.js"]) {
+		for (const path of ["/api/overview", "/api/identity", "/healthz", "/api/sessions?view=you&transcript=1", "/api/skills", "/api/operator/control", "/api/schedules/control", "/api/answers/control", "/api/threads", `/api/operator/uploads/${id}`, "/api/devices", "/sw.js"]) {
 			const reply = await s.r(path, { headers: { cookie: device.cookie } });
 			assert.notEqual(reply.status, 401, path);
 			assert.notEqual(reply.status, 403, `${path} is readable remotely`);
@@ -435,19 +435,20 @@ test("P12-levels: both levels read every protected route with a sliding cookie a
 		(await s.r("/api/operator/control", { headers: { cookie } })).body.inbox_token,
 		(await s.r("/api/schedules/control", { headers: { cookie } })).body.token,
 		(await s.r("/api/answers/control", { headers: { cookie } })).body.token,
+		(await s.r("/api/threads", { headers: { cookie } })).body.token,
 		(await s.r("/api/devices", { headers: { cookie } })).body.token,
 	];
-	assert.deepEqual(await tokens(view.cookie), [null, null, null, null], "View-only reads with every write token withheld");
+	assert.deepEqual(await tokens(view.cookie), [null, null, null, null, null], "View-only reads with every write token withheld");
 	const fullTokens = await tokens(full.cookie);
 	for (const token of fullTokens) assert.equal(typeof token, "string");
-	assert.equal(fullTokens[3], await s.token(), "the device management token is the local screen's");
+	assert.equal(fullTokens[4], await s.token(), "the device management token is the local screen's");
 	const devices = (await s.r("/api/devices", { headers: { cookie: view.cookie } })).body;
 	assert.deepEqual([devices.can_create, devices.can_revoke], [false, false]);
 	assert.equal(JSON.stringify(devices).includes("session_digest"), false);
 	assert.match(String(devices.trust), /trusted like your terminal/);
 
 	const json = async (cookie: string, extra: Record<string, string> = {}) => ({ cookie, origin: ORIGIN, "content-type": "application/json", "x-cp-control-token": await s.token(), ...extra });
-	for (const path of ["/api/operator/message", "/api/operator/start", "/api/operator/restart", "/api/operator/queue", "/api/operator/upload", "/api/schedules/request", "/api/answers/ack", "/api/settings/apply", "/api/settings/restore"]) {
+	for (const path of ["/api/operator/message", "/api/operator/start", "/api/operator/restart", "/api/operator/queue", "/api/operator/upload", "/api/schedules/request", "/api/answers/ack", "/api/threads/done", "/api/settings/apply", "/api/settings/restore"]) {
 		const viewed = await s.r(path, { method: "POST", headers: await json(view.cookie), body: '{"kind":"message","text":"hi"}' });
 		assert.equal(viewed.status, 403, path);
 		assert.match(String(viewed.body.error), /View-only/);

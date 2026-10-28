@@ -15,7 +15,7 @@ const PROTECTED = [
 	"/api/awaiting", "/api/decided", "/api/decisions", "/api/stats", "/api/job?id=x", "/api/job/x/events", "/api/job/x/transcript", "/api/diff?id=x",
 	"/api/sessions", "/api/sessions?view=you&transcript=1", "/api/roots", "/api/files", "/api/git", "/api/skills", "/api/operator/uploads/x",
 	"/api/stream?view=overview", "/api/stream?id=x", "/api/operator/control", "/api/schedules/control", "/api/schedules/policy", "/api/answers/control",
-	"/api/settings", "/api/push", "/api/devices", "/api/devices/notices", "/classic", "/nope", "/pair?code=x", "/pair/", "/api/pair/claim?x=1",
+	"/api/threads", "/api/settings", "/api/push", "/api/devices", "/api/devices/notices", "/classic", "/nope", "/pair?code=x", "/pair/", "/api/pair/claim?x=1",
 ];
 
 test("unpaired: every route class and method refuses 401 before the dispatcher; forged headers confer nothing; only /pair and the claim are public", async (t) => {
@@ -29,7 +29,7 @@ test("unpaired: every route class and method refuses 401 before the dispatcher; 
 			assert.equal(reply.headers["access-control-allow-origin"], undefined);
 		}
 	}
-	for (const path of ["/api/operator/message", "/api/operator/start", "/api/operator/queue", "/api/operator/upload", "/api/settings/apply", "/api/push/subscription", "/api/pair/create", "/api/devices/revoke"]) {
+	for (const path of ["/api/operator/message", "/api/operator/start", "/api/operator/queue", "/api/operator/upload", "/api/settings/apply", "/api/push/subscription", "/api/pair/create", "/api/devices/revoke", "/api/threads/done"]) {
 		assert.equal((await r(path, { method: "POST", headers: { ...forged, "content-type": "application/json" }, body: "{}" })).status, 401, path);
 	}
 	assert.equal(pollingStreams(), 0, "an unpaired stream request starts no timer");

@@ -62,6 +62,7 @@ Record every human question with \`cp_parent ask\` before relaying it; a step on
 Close with \`ask_answer\` using their verbatim reply, or \`ask_withdraw\` with a reason.
 These are bookkeeping only, never parent authorization; relay decisions through \`send\`.
 A question in prose without \`cp_parent ask\` is forced back to you once, then carded automatically.
+A dashboard message with thread=<tag> means: pass thread=<tag> on its answer/ask, and cp_parent thread_bind any job it creates.
 ${OPERATOR_REMOTE_DEVICE_RULE}
 
 Decide yourself, never ask: ${OPERATOR_DECIDE_LIST}.
