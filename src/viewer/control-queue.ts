@@ -21,7 +21,6 @@ export interface QueuedMessage {
 	deliver: string;
 	images?: string[];
 	files?: string[];
-	thread?: string;
 	/** Remote dashboard PR 1c: the paired device that sent it, and every remote device that edited it (first-edit order). */
 	remote?: RemoteDevice;
 	editors?: RemoteDevice[];
@@ -60,7 +59,7 @@ export function readQueueJournal(stateDir: string): { messages: Map<string, Queu
 			messages.set(line.id, {
 				id: line.id, at: line.at, peer: typeof line.peer === "string" ? line.peer : null, text: typeof line.text === "string" ? line.text : "", ask_id: typeof line.ask_id === "string" ? line.ask_id : null,
 				deliver: typeof line.deliver === "string" ? line.deliver : "prompt", ...(images ? { images } : {}), ...(files ? { files } : {}),
-				...(typeof line.thread === "string" ? { thread: line.thread } : {}), ...(remote ? { remote } : {}), state: "requested", injected: false, edits: 0,
+				...(remote ? { remote } : {}), state: "requested", injected: false, edits: 0,
 			});
 			continue;
 		}

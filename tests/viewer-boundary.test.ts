@@ -12,7 +12,7 @@ const VIEWER = join(REPO_ROOT, "src", "viewer");
 // copied) may import outside the viewer.
 const standalone = () => readdirSync(VIEWER).filter((name) => name.endsWith(".ts") && name !== "operator.ts" && name !== "doctor-check.ts" && name !== "model-list.ts");
 
-test("viewer request/projection modules stay dependency-free and read-only; only the startup builder writes assets, push-subscriptions.ts writes device subscriptions, control-audit.ts appends the dashboard audit journal, uploads.ts stores composer images, threads-api.ts appends thread done lines, device-store.ts writes data/devices.json, device-control.ts owns the device CLI socket", () => {
+test("viewer request/projection modules stay dependency-free and read-only; only the startup builder writes assets, push-subscriptions.ts writes device subscriptions, control-audit.ts appends the dashboard audit journal, uploads.ts stores composer images, device-store.ts writes data/devices.json, device-control.ts owns the device CLI socket", () => {
 	const writers = new Set(["build.ts", "push-subscriptions.ts", "control-audit.ts", "uploads.ts", "device-store.ts", "device-control.ts"]);
 	for (const name of standalone()) {
 		const text = readFileSync(join(VIEWER, name), "utf8");
@@ -37,9 +37,9 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 			assert.match(match[1] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$/, `${name} dynamically imports ${match[1]}`);
 		}
 		if (!writers.has(name)) assert.doesNotMatch(text, /writeFileSync|appendFileSync|mkdirSync|rmSync|renameSync|unlinkSync|createWriteStream|\bwriteSync\(|\b(?:writeFile|appendFile|mkdir|rename|unlink)\s*\(/, name);
-		// The dashboard-control writer: only the three write routes (control, image upload, thread done) and the device
+		// The dashboard-control writer: only the two write routes (control, image upload) and the device
 		// store (its secret-free device events) import it, nothing else in the viewer.
-		if (name !== "control-api.ts" && name !== "operator-upload-api.ts" && name !== "threads-api.ts" && name !== "device-store.ts") assert.doesNotMatch(text, /from "\.\/control-audit\.ts"/, `${name} imports the audit writer`);
+		if (name !== "control-api.ts" && name !== "operator-upload-api.ts" && name !== "device-store.ts") assert.doesNotMatch(text, /from "\.\/control-audit\.ts"/, `${name} imports the audit writer`);
 		// data/devices.json has one writer: only the device routes, the remote gate and the remote runtime (which composes
 		// them) reach the store (devices-api.ts for its type), never another module.
 		if (!["device-store.ts", "devices-api.ts", "pair-api.ts", "remote-server.ts", "remote-runtime.ts"].includes(name)) assert.doesNotMatch(text, /from "\.\/device-store\.ts"/, `${name} imports the device store writer`);

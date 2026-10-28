@@ -85,13 +85,14 @@ test("parsers: config defaults on and opts out with enabled:false; record and ma
 	assert.deepEqual(parseDashboardText(dashboardMarker(id, null, eight)), { body: "", id, askId: null, images: eight }, "eight ids, no text");
 	assert.equal(parseDashboardText(`x\n\n[cp-dashboard ${id} — from the dashboard; images=im-1.png]`), undefined, "a malformed image id is not a marker");
 	assert.equal(parseDashboardText(dashboardMarker(id, null, [...eight, one])), undefined, "nine ids are not a marker");
-	assert.deepEqual(parseDashboardText(`hello\n\n[cp-dashboard ${id} — from the dashboard; thread=billing-bug]`), { body: "hello", id, askId: null, thread: "billing-bug" });
-	assert.deepEqual(parseDashboardText(`click\n\n[cp-dashboard ${id} — from the dashboard; ask=ask-abcd; thread=billing-bug; images=${one}]`), { body: "click", id, askId: "ask-abcd", thread: "billing-bug", images: [one] });
+	// Legacy (#588): an old `; thread=` marker still parses, its tag dropped; a malformed tag is still no marker.
+	assert.deepEqual(parseDashboardText(`hello\n\n[cp-dashboard ${id} — from the dashboard; thread=billing-bug]`), { body: "hello", id, askId: null });
+	assert.deepEqual(parseDashboardText(`click\n\n[cp-dashboard ${id} — from the dashboard; ask=ask-abcd; thread=billing-bug; images=${one}]`), { body: "click", id, askId: "ask-abcd", images: [one] });
 	for (const tag of ["-bad", "Bad", "bad tag", "x".repeat(33)]) assert.equal(parseDashboardText(`[cp-dashboard ${id} — from the dashboard; thread=${tag}]`), undefined);
 	const file = "tx-20261004-0123456789abcdef01234567.html";
-	const marker = dashboardMarker(id, "ask-abcd", [one], "billing-bug", [file]);
-	assert.equal(marker, `[cp-dashboard ${id} — from the dashboard; ask=ask-abcd; thread=billing-bug; images=${one}; files=${file}]`);
-	assert.deepEqual(parseDashboardText(`files\n\n${marker}`), {body: "files", id, askId: "ask-abcd", thread: "billing-bug", images: [one], files: [file]});
+	const marker = dashboardMarker(id, "ask-abcd", [one], [file]);
+	assert.equal(marker, `[cp-dashboard ${id} — from the dashboard; ask=ask-abcd; images=${one}; files=${file}]`);
+	assert.deepEqual(parseDashboardText(`files\n\n${marker}`), {body: "files", id, askId: "ask-abcd", images: [one], files: [file]});
 	assert.equal(parseDashboardText(marker.replace(`files=${file}`, `files=${one}`)), undefined);
 	assert.equal(parseDashboardText(marker.replace(`images=${one}`, `images=${file}`)), undefined);
 });
