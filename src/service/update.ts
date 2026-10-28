@@ -47,7 +47,7 @@ import { FleetStore, isPidAlive } from "../fleet.ts";
 import { PACKAGE_ROOT, resolveHome } from "../home.ts";
 import { atomicWriteJson } from "../json-store.ts";
 import { PARENT_CONTROL_BUSY, PARENT_UNSETTLED } from "../parent-diagnostics.ts";
-import { currentHost, ParentHostClient, parentHostPaths } from "../parent-host.ts";
+import { currentHost, ParentHostClient, parentHostPaths, readStopMarker } from "../parent-host.ts";
 import { readStatusFile } from "../run-artifacts.ts";
 import { UPDATE_FAILURES, viewerDown } from "./health.ts";
 import { type DaemonControl, daemonControl } from "./daemon-control.ts";
@@ -160,6 +160,8 @@ export interface UpdatePorts {
 	drain(): DrainRecord["state"] | undefined;
 	/** Jobs with any live worker or script pid (`liveWorkerJobs`): the rollback's no-host guard. */
 	busy(): string[];
+	/** The current host record names no live pid, and no stop by an update closed it: no parent comes back to verify. */
+	noHost(): boolean;
 	/** Live script jobs, and live workers not idle (`restartActivity`): what a restart would cut mid-turn. */
 	activity(): { working: string[]; scripts: string[] };
 	/**
@@ -251,23 +253,29 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 		const answer = await ports.host("drainCancel").catch((error: Error) => ({ text: `drainCancel failed: ${error.message}` }));
 		ports.log(`drain cancel: ${(answer as { text?: string } | null)?.text ?? "no answer"}`);
 	};
-	/** False once a drain found no parent host: nothing to stop, and only the viewer is verified. */
-	let parentRunning = true;
+	// Read from the host record each time, never kept: a run recovering an interrupted no-host apply must see it too.
 	const stopFleet = async (): Promise<string | undefined> => {
 		try {
 			// `by: "update"`: the marker it leaves holds the old supervisor only, never the reload's fresh one.
-			if (parentRunning) await ports.host("stop", { by: "update" });
+			if (!ports.noHost()) await ports.host("stop", { by: "update" });
 		} catch (error) {
 			return `host stop failed: ${(error as Error).message}`;
 		}
 		return ports.daemon.hold();
 	};
-	const verifyUnits = async (): Promise<VerifyResult> => {
-		if (parentRunning) return ports.verify(VERIFY_MS);
+	/** A throwing host-record read is a failed verify that names it: the run records a result, never throws. */
+	const verifyUnits = async (target: string): Promise<VerifyResult> => {
+		let noHost: boolean;
+		try {
+			noHost = ports.noHost();
+		} catch (error) {
+			return `the parent host record could not be read: ${(error as Error).message}`;
+		}
+		if (!noHost) return ports.verify(VERIFY_MS);
 		const deadline = ports.now().getTime() + VERIFY_MS;
 		for (;;) {
 			const down = await ports.viewerDown();
-			if (!down) return undefined;
+			if (!down) return { note: `the parent was not running: viewer verified only, the next cp_parent start runs ${short(target)}` };
 			if (ports.now().getTime() >= deadline) return `not healthy within ${VERIFY_MS / 1000}s: viewer: ${down}`;
 			await ports.sleep(2_000);
 		}
@@ -321,7 +329,7 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 		const reset = git("reset", "--quiet", "--keep", from);
 		if (reset.status !== 0) return finish("rollback_failed", `${why}; git reset --keep ${short(from)} failed: ${reset.stderr.trim()}`, patch);
 		const failed = (lock ? npmCi() : undefined) ?? (await restartUnits());
-		const verified = failed ? undefined : await verifyUnits();
+		const verified = failed ? undefined : await verifyUnits(from);
 		const broken = failed ?? (typeof verified === "string" ? verified : undefined);
 		if (broken) return finish("rollback_failed", `${why}; after the rollback: ${broken}`, patch);
 		return finish("rolled_back", `${why}; back at ${short(from)}; ${short(to)} is never retried${typeof verified === "object" ? `; ${verified.note}` : ""}`, { ...patch, bad_sha: to });
@@ -410,7 +418,6 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 			// No host to drain: nothing runs under it unless a worker or script pid outlived it.
 			const live = ports.busy();
 			if (live.length > 0) return finish("failed", `${NO_HOST} and live worker(s) ${live.join(", ")}; nothing merged or stopped`, { from, to });
-			parentRunning = false;
 		} else {
 			await cancelDrain();
 			// Only the exact refusal, bare (the bridge) or as parentDiagnostic wraps a throwing /cp-drain: every other error stays `failed`.
@@ -429,10 +436,9 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 	const broken = (lock ? npmCi() : undefined) ?? (await restartUnits());
 	if (broken) return rollback(from, to, lock, broken);
 	save({ phase: "verifying" });
-	const verified = await verifyUnits();
+	const verified = await verifyUnits(to);
 	if (typeof verified === "string") return rollback(from, to, lock, verified);
-	const noParent = parentRunning ? "" : `; the parent was not running: viewer verified only, the next cp_parent start runs ${short(to)}`;
-	return finish("updated", `${short(from)} → ${short(to)}${lock ? " (npm ci)" : ""}${verified ? `; ${verified.note}` : ""}${noParent}`, { from, to, updated_at: at });
+	return finish("updated", `${short(from)} → ${short(to)}${lock ? " (npm ci)" : ""}${verified ? `; ${verified.note}` : ""}`, { from, to, updated_at: at });
 }
 
 /** `promise` settled within `ms`: its value or its error; undefined on timeout. */
@@ -539,6 +545,13 @@ export function hostUpdatePorts(home: string, env: NodeJS.ProcessEnv = process.e
 		},
 		drain: () => readDrain(home)?.state,
 		busy: () => liveWorkerJobs(new FleetStore({ home }).list()),
+		noHost: () => {
+			const { gen, record } = currentHost(paths);
+			if (record && isPidAlive(record.pid)) return false;
+			// A host this or an interrupted update stopped is respawned by the reload's supervisor: verify it.
+			const stop = readStopMarker(paths);
+			return !(stop?.gen === gen && stop.by === "update");
+		},
 		activity: () => restartActivity(new FleetStore({ home }).list(), (jobId) => readStatusFile(home, jobId)?.phase),
 		verify: (timeoutMs) =>
 			verifyRestart(

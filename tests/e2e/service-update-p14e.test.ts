@@ -511,6 +511,34 @@ test("P14e-update-nohost: no parent host running", { timeout: 300_000 }, async (
 	assert.deepEqual([applied?.last_result, applied?.phase, b.repo.head(), b.calls()], ["updated", "idle", to, ["daemon hold", "daemon reload"]], last(b));
 	assert.match(applied?.detail ?? "", /; the parent was not running: viewer verified only, the next cp_parent start runs /);
 	assert.doesNotMatch(applied?.detail ?? "", /live worker/);
+
+	// An operator stop holds the supervisor and the no-host apply died mid-verify: the next run's rollback kept
+	// `parentRunning` in memory (true), verified a parent that never returns, and recorded rollback_failed.
+	const i = await bench(t);
+	const host = parentHostPaths(i.home, "multi");
+	writeFileSync(host.record(1), JSON.stringify({ ...JSON.parse(readFileSync(host.record(1), "utf8")), pid: spawnSync(process.execPath, ["-e", ""]).pid, socket: join(i.sm, "gone.sock") }));
+	writeFileSync(host.stopped, JSON.stringify({ gen: 1, at: isoTimestamp(), by: "operator" }));
+	const iFrom = i.repo.head();
+	const iTo = advanceBase(i.repo, "i.txt", "i\n");
+	i.repo.git("fetch", "--quiet", "origin");
+	i.repo.git("merge", "--ff-only", "--quiet", iTo);
+	i.state({ phase: "verifying", from: iFrom, to: iTo, lock: false });
+	const recovered = await i.run();
+	assert.deepEqual([recovered?.last_result, i.repo.head(), i.calls()], ["rolled_back", iFrom, ["daemon hold", "daemon reload", "daemon health"]], last(i));
+
+	// The same window with a truncated stop marker: the host-record read threw out of the run, which recorded nothing.
+	const u = await bench(t);
+	const uHost = parentHostPaths(u.home, "multi");
+	writeFileSync(uHost.record(1), JSON.stringify({ ...JSON.parse(readFileSync(uHost.record(1), "utf8")), pid: spawnSync(process.execPath, ["-e", ""]).pid, socket: join(u.sm, "gone.sock") }));
+	writeFileSync(uHost.stopped, "{\"gen\":");
+	const uFrom = u.repo.head();
+	const uTo = advanceBase(u.repo, "u.txt", "u\n");
+	u.repo.git("fetch", "--quiet", "origin");
+	u.repo.git("merge", "--ff-only", "--quiet", uTo);
+	u.state({ phase: "verifying", from: uFrom, to: uTo, lock: false });
+	const unreadable = await u.run();
+	assert.equal(unreadable?.last_result, "rollback_failed", last(u));
+	assert.match(unreadable?.detail ?? "", /after the rollback: the parent host record could not be read: parent host stop marker unreadable/);
 });
 
 test("P14e-update-converge: a newer tip or a drain timeout never restarts the busy clock", { timeout: 300_000 }, async (t) => {

@@ -8,10 +8,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
-import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
-import { parseDrainArgs, readDrain } from "../../src/drain.ts";
+import { isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { readDrain } from "../../src/drain.ts";
+import { ProjectRegistry } from "../../src/projects.ts";
+import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { randomUUID } from "node:crypto";
-import { createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, MockProvider, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
+import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MOCK_PROVIDER_ID, MockProvider, readFleet, readRunEvents, REPO_ROOT, startPiChild, waitFor } from "../harness/index.ts";
+import { teardownHome } from "../harness/parent-hosts.ts";
 
 for (const [mode, name] of [
 	["delete", "S26: an external delete while actual outcome journaling blocks is never resurrected"],
@@ -226,23 +229,26 @@ for (const [mode, name] of [
 	assert.equal(provider.remaining(script), 0);
 });
 
-test("S26: a freeze drain steers each mid-turn implementer to push its WIP, files no envelope and sends no nudge", { timeout: 150_000 }, async (t) => {
+test("S26: cp_parent drain freeze runs /cp-drain 120 freeze in the real parent: each mid-turn implementer pushes its WIP, files no envelope and gets no nudge", { timeout: 180_000 }, async (t) => {
+	// Review 1 of PR 669: the freeze was only driven through post.drain.*; this goes operator cp_parent drain → host
+	// `drain` op → the parent's /cp-drain command, so a lost {reason:"freeze"} on that mapping fails here.
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "demo\n" } });
 	const provider = await MockProvider.start();
 	const agent = createAgentDir({ provider });
-	initJobsDocument(home.path, "cp");
-	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env }, holdsParentLock: () => true });
-	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "pr" });
-	execFileSync("git", ["clone", "--quiet", repo.remote as string, post.registry.pathOf("demo")]);
-	const pool = enableTreehouse(post.registry.pathOf("demo"), { maxTrees: 2 });
-	t.after(async () => { await post.shutdown(); pool.cleanup(); agent.cleanup(); repo.cleanup(); home.cleanup(); await provider.stop(); });
+	const { ledger } = createScratchLedger({ home: home.path, knownProjects: ["demo"] });
+	const registry = new ProjectRegistry({ home: home.path });
+	await registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "pr" });
+	execFileSync("git", ["clone", "--quiet", repo.remote as string, registry.pathOf("demo")]);
+	const pool = enableTreehouse(registry.pathOf("demo"), { maxTrees: 2 });
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: [`${MOCK_PROVIDER_ID}/*`], rubric: [] }));
 	// The first tool call holds each turn open until the test writes the gate, so the steer lands mid-turn.
 	const gate = join(home.path, `freeze-gate-${randomUUID()}`);
 	const hold = `node -e "const f=process.argv[1];const t=setInterval(()=>{if(require('fs').existsSync(f))clearInterval(t)},50)" ${gate}`;
 	const jobs: Array<{ id: string; name: string; model: string }> = [];
 	for (const n of [1, 2]) {
-		const job = await post.ledger().create({ title: `Freeze ${n}`, project: "demo", kind: "ship", delivery: "pr", slug: `s26-freeze-${n}` });
+		const job = await ledger.create({ title: `Freeze ${n}`, project: "demo", kind: "ship", delivery: "pr", slug: `s26-freeze-${n}` });
 		const name = `s26-freeze-${n}-${randomUUID()}`;
 		const model = provider.addScript(name, [
 			{ kind: "tool_calls", calls: [{ name: "bash", args: { command: hold } }] },
@@ -251,26 +257,81 @@ test("S26: a freeze drain steers each mid-turn implementer to push its WIP, file
 		]);
 		jobs.push({ id: job.id, name, model });
 	}
+	const parentModel = provider.addScript("s26-freeze-parent", [
+		...jobs.map((job) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Implement the change", model: job.model, queue: false, when_ready: false } }] })),
+		{ kind: "text", text: "Dispatched." },
+	], { onExhausted: "repeat" });
+	const call = (args: Record<string, unknown>) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_parent", args }] });
+	const operatorModel = provider.addScript("s26-freeze-operator", [
+		{ kind: "text", text: "Ready." },
+		call({ action: "start", home: home.path, mode: "multi", model: parentModel }), { kind: "text", text: "Started." },
+		call({ action: "send", text: "Dispatch both jobs." }), { kind: "text", text: "Sent." },
+		call({ action: "drain", freeze: true, timeout_s: 120 }), { kind: "text", text: "Frozen." },
+		call({ action: "stop" }), { kind: "text", text: "Stopped." },
+	]);
 	agent.writeModels(provider);
-	for (const job of jobs) await post.dispatch({ jobId: job.id, model: job.model, task: "Implement the change", fetch: false });
-	await waitFor(() => post.manager.quiesce().busy, (busy) => busy.length === 2, { timeoutMs: 30_000, what: "both implementers mid-turn" });
-	const parsed = parseDrainArgs("120 freeze")!;
-	assert.deepEqual(parsed, { timeoutS: 120, cause: { reason: "freeze" } });
-	assert.equal(post.drain.start(parsed.timeoutS, parsed.cause).state, "draining");
-	const steered = await post.drain.freeze();
-	for (const job of jobs) assert.ok(steered.some((line) => line.startsWith(`  freeze: ${job.id} steered (`)), steered.join("\n"));
+	saveOperatorTarget({ home: home.path, mode: "multi", hostPid: 0, parentPid: 0 }, { ...process.env, PI_HOME: agent.path });
+	const operator = startPiChild({ cwd: home.path, model: operatorModel, env: { ...agent.env, PI_HOME: agent.path, CP_HOME: home.path, CP_MODE: "multi" }, extensions: [CP_BRIDGE_EXTENSION] });
+	t.after(() => teardownHome(home, () => operator.close(), () => pool.cleanup(), () => agent.cleanup(), () => repo.cleanup(), () => provider.stop()));
+	const turn = async (prompt: string) => {
+		const before = operator.records().length;
+		await operator.prompt(prompt);
+		await operator.waitFor((r) => operator.records().indexOf(r) >= before && r.type === "agent_settled", 60_000);
+		return operator.records().slice(before).filter((r) => r.type === "tool_execution_end" && r.toolName === "cp_parent").map((r) => JSON.stringify(r.result));
+	};
+	await turn("Prepare to manage the parent.");
+	assert.match((await turn("Start the parent.")).join(""), /started pid=/);
+	await turn("Have the parent dispatch both jobs.");
+	for (const job of jobs) await waitFor(() => provider.requests(job.name).length, (n) => n > 0, { timeoutMs: 30_000, what: `${job.id} mid-turn` });
+	const reply = (await turn("Freeze the fleet.")).join("");
+	assert.deepEqual([readDrain(home.path)?.cause, readDrain(home.path)?.timeout_s], [{ reason: "freeze" }, 120], reply);
+	for (const job of jobs) assert.ok(reply.includes(`freeze: ${job.id} steered (`), reply);
 	writeFileSync(gate, "open\n");
 	for (const job of jobs) {
 		const settled = await waitFor(() => readRunEvents(home.path, job.id).filter((event) => ["settled_without_report", "report_nudged"].includes(event.type)), (rows) => rows.length > 0, { timeoutMs: 60_000, what: `${job.id} settles` });
 		assert.deepEqual(settled.map((event) => event.type), ["settled_without_report"]);
 		assert.match(JSON.stringify(provider.requests(job.name)[1]?.body.messages ?? null), /FREEZE: /);
 		assert.equal(provider.requests(job.name).length, 3, "no nudge restarts a frozen turn");
-		assert.equal(readRunEvents(home.path, job.id).filter((event) => event.type === "report_nudged").length, 0);
-		assert.equal(post.fleet.get(job.id)?.reported_at, undefined, "no envelope, so the job is never held");
+		assert.equal(readFleet(home.path).jobs.find((row) => row.job_id === job.id)?.reported_at, undefined, "no envelope, so the job is never held");
 	}
-	assert.equal(post.drain.check()?.state, "drained");
+	await waitFor(() => readDrain(home.path)?.state, (state) => state === "drained", { timeoutMs: 30_000, what: "the parent's tick reports drained" });
 	for (const job of jobs) {
 		const pushed = repo.git("ls-remote", "origin", `refs/heads/${job.id}`).split("\t")[0]!.trim();
 		assert.equal(readDrain(home.path)?.jobs.find((row) => row.job_id === job.id)?.head, pushed);
 	}
+	await turn("Stop the parent.");
+});
+
+for (const outcome of ["timeout", "drained"] as const) test(`S26: a ${outcome} freeze drain ${outcome === "timeout" ? "nudges" : "never nudges"} a worker settling after it`, { timeout: 120_000 }, async (t) => {
+	// Review 1 of PR 669: a `draining` or `drained` freeze suppresses nudges (workers stay frozen until the restart,
+	// and start-up recovery removes the record); only a timed-out one, whose survivors ran past it, nudges.
+	const home = createScratchHome();
+	const repo = createScratchRepo({ name: "demo", files: { "README.md": "demo\n" } });
+	const provider = await MockProvider.start();
+	const agent = createAgentDir({ provider });
+	initJobsDocument(home.path, "cp");
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env }, holdsParentLock: () => true });
+	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "pr" });
+	execFileSync("git", ["clone", "--quiet", repo.remote as string, post.registry.pathOf("demo")]);
+	const pool = enableTreehouse(post.registry.pathOf("demo"), { maxTrees: 1 });
+	t.after(async () => { await post.shutdown(); pool.cleanup(); agent.cleanup(); repo.cleanup(); home.cleanup(); await provider.stop(); });
+	const gate = join(home.path, `late-gate-${randomUUID()}`);
+	const job = await post.ledger().create({ title: "Late settle", project: "demo", kind: "ship", delivery: "pr", slug: "s26-late" });
+	const name = `s26-late-${randomUUID()}`;
+	const model = provider.addScript(name, [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `node -e "const f=process.argv[1];const t=setInterval(()=>{if(require('fs').existsSync(f))clearInterval(t)},50)" ${gate}` } }] },
+		{ kind: "text", text: "Done, no report." },
+		{ kind: "text", text: "Still no report." },
+	]);
+	agent.writeModels(provider);
+	await post.dispatch({ jobId: job.id, model, task: "Implement the change", fetch: false });
+	await waitFor(() => post.manager.quiesce().busy, (busy) => busy.length === 1, { timeoutMs: 30_000, what: "the implementer mid-turn" });
+	assert.equal(post.drain.start(0, { reason: "freeze" }).state, "draining");
+	await waitFor(() => post.drain.check()?.state, (state) => state === "timeout", { timeoutMs: 10_000, what: "the freeze drain times out" });
+	// The drained record a freeze leaves while its workers stay frozen until the restart.
+	if (outcome === "drained") writeFileSync(join(home.path, LAYOUT.state, "drain.json"), JSON.stringify({ ...readDrain(home.path), state: "drained" }));
+	writeFileSync(gate, "open\n");
+	const settled = await waitFor(() => readRunEvents(home.path, job.id).filter((event) => ["settled_without_report", "report_nudged"].includes(event.type)), (rows) => rows.length > 0, { timeoutMs: 60_000, what: `${job.id} settles` });
+	assert.deepEqual(settled.map((event) => event.type), [outcome === "timeout" ? "report_nudged" : "settled_without_report"]);
+	assert.equal(readDrain(home.path)?.state, outcome, `the ${outcome} freeze record is still on disk`);
 });

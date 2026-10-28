@@ -1994,7 +1994,7 @@ export class PipelineRunner {
 		};
 	}
 
-	/** A fresh dispatch refused by the update hold: nothing is recorded, so the next advance retries the same step. */
+	/** A fresh dispatch refused by the update hold: no state change is recorded, so the next advance retries the step. */
 	#heldDispatch(record: PipelineRecord, state: PipelineState, error: UpdateHoldError): AdvanceResult {
 		return this.#step(record, state, "wait", `${record.ship_id}: implementer dispatch deferred, not failed — ${error.message}. Run cp_pipeline advance again once the hold clears.`);
 	}

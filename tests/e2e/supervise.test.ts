@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
@@ -34,8 +34,11 @@ function home(t: TestContext) {
 	t.after(() => teardownHome(h));
 	const paths = parentHostPaths(h.path, "multi");
 	const put = (rel: string, value: unknown) => {
-		mkdirSync(dirname(join(h.path, rel)), { recursive: true });
-		writeFileSync(join(h.path, rel), typeof value === "string" ? value : JSON.stringify(value));
+		const file = join(h.path, rel);
+		mkdirSync(dirname(file), { recursive: true });
+		// atomic like the product: a live supervisor polls it
+		writeFileSync(`${file}.tmp`, typeof value === "string" ? value : JSON.stringify(value));
+		renameSync(`${file}.tmp`, file);
 	};
 	const host = () => currentHost(paths);
 	return { h, paths, put, host, argv: join(h.path, "fake-parent.argv") };

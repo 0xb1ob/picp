@@ -161,6 +161,7 @@ export class ArmedDispatches {
 		try {
 			position = this.#options.enqueue(entry.job_id, entry.request);
 		} catch (error) {
+			if (error instanceof UpdateHoldError) return; // the hold turned on after the spawn_cap refusal: still armed
 			this.#finish(entry, "dropped", `its blockers landed but the spawn cap is full and it could not be queued: ${(error as Error).message.split("\n")[0]}`);
 			return;
 		}
