@@ -4,6 +4,7 @@
  * and served CSS only, no layout or pixels).
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
@@ -301,11 +302,25 @@ test("P19-sessions-render: the operator helper, project and bridge chips, the â‹
 
 	const file = join(d.home, "pi-sessions", "newest.jsonl");
 	write(file, `${[say(stamped, { role: "assistant", content: [{ type: "text", text: "[picp] landed" }] }), bridgeNote(stamped, "[cp-bridge wake job=cp-x receipt=owner_observed]\nMobile chat landed.\nSecond line."),
-		say(stamped, { role: "assistant", content: [], errorMessage: "Delivery failed" }), say("", { role: "assistant", content: [{ type: "text", text: "untimed reply" }] })].join("\n")}\n`);
+		say(stamped, { role: "assistant", content: [], errorMessage: "Delivery failed" }), say("", { role: "assistant", content: [{ type: "text", text: "untimed reply" }] }),
+		say(stamped, { role: "assistant", content: [{ type: "text", text: "Status first.\n\n[picp] merged cp-a\n\n[atlas] queued the next step" }] }),
+		say(stamped, { role: "assistant", content: [{ type: "text", text: "cp-run is waiting on CI" }] })].join("\n")}\n`);
+	write(join(d.home, LAYOUT.projects, "atlas", "README.md"), "x\n");
 	record(d.stateDir, stamped, file);
+	const bytes = readFileSync(file);
 	const full = await d.open("#sessions?view=you&transcript=1");
 	assert.equal((await full.find(".session-project")).textContent, "picp", "a [project] prefix becomes the project chip");
 	assert.ok(full.$$(".session-message").some((m) => m.textContent?.includes("landed") && !m.textContent.includes("[picp]")), "and leaves the text");
+	// Issue 589: a reply naming two projects renders one section each, the preamble unchipped; ids alone chip a reply.
+	const split = full.$$(".session-message").find((m) => m.querySelector(".session-segment"))!;
+	assert.deepEqual([...split.querySelectorAll(".session-segment")].map((s) => [s.querySelector(".session-project")?.textContent ?? null, s.textContent?.includes("[")]),
+		[[null, false], ["picp", false], ["atlas", false]], "one section per [project] header, the header out of the text");
+	const says = ((await d.get("/api/sessions?view=you&transcript=1")).body as Json).entries.filter((e: Json) => e.kind === "say");
+	assert.equal(says.find((e: Json) => e.text === "cp-run is waiting on CI")?.project, "picp", "a fleet job id chips an untagged reply");
+	full.click(split.querySelector("button.session-original")!);
+	await until(() => split.querySelector(".session-segment"), (s) => s === null, "Show original to render the reply unsplit");
+	assert.match(split.textContent ?? "", /\[picp\] merged cp-a[\s\S]*\[atlas\] queued/, "the original keeps its headers");
+	assert.ok(readFileSync(file).equals(bytes), "splitting never rewrites the pi session file");
 	assert.equal(full.$(".session-bridge-chip")?.textContent, "bridge");
 	assert.deepEqual([full.$(".session-bridge-what")?.textContent, full.$(".session-bridge-what a")?.getAttribute("href"), full.$(".session-bridge-receipt")?.textContent], ["woke cp-x", "#job/cp-x", "Â· owner observed"]);
 	assert.ok(full.$$(".session-message").some((m) => m.textContent?.includes("Delivery failed")), "a failed entry renders its error");
