@@ -193,3 +193,49 @@ test("wake S19: a native plan-gate verdict leaves the held merge gate and awaiti
 	assert.equal(snapshots[1]!.bytes, snapshots[0]!.bytes, "a native plan gate must not rewrite awaiting state");
 	assert.equal(new AwaitingStore({ home: held.home.path }).list("deferred").length, 1);
 });
+
+// A late revise on a torn-down planner must reach the parent with its replace_planner remedy (#651).
+// Before the fix the send stage suppressed it as "history" and ReviewRuns re-sent it every retry tick.
+test("wake S19b (#651): a gate revise for a torn-down planner reaches the parent once", { timeout: 90_000 }, async (t) => {
+	const held = await seedHeldHome({ ciState: "in_progress", review: "none" });
+	const foreign = "cp-s19b-plan";
+	const fleet = new FleetStore({ home: held.home.path });
+	writeFileSync(new ArtifactStore({ home: held.home.path }).path(foreign), "# Plan\nThe planner is gone but the artifact is judged.\n");
+	const outbox = new DurableWakeupOutbox({ home: held.home.path });
+	outbox.enqueue({ id: `recovery:${JOB}`, kind: "recovery", job_id: JOB, content: "Previously relayed recovery", keys: [JOB] });
+	outbox.confirmDelivered([`recovery:${JOB}`]);
+	const provider = await MockProvider.start();
+	const reviewer = provider.addScript("s19b-gate-reviewer", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: {
+		job_id: foreign, verdict: "revise", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false },
+		reasons: ["The plan is vague"], revisions: ["name the exact commands"],
+	} }] }]);
+	const contexts: string[] = [];
+	const capture = (request: { body: unknown }) => { contexts.push(userMessages(request)); return { action: "list" }; };
+	const model = provider.addScript("s19b-gate-parent", [
+		{ kind: "tool_calls", calls: [{ name: "cp_gate", args: { job_id: foreign, model: reviewer } }] },
+		{ kind: "text", text: "Gate started." },
+		{ kind: "tool_calls", calls: [{ name: "cp_project", args: capture }] },
+		{ kind: "text", text: "Revise observed." },
+	]);
+	const agent = createAgentDir({ provider });
+	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
+		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "3600", CP_VERDICT_DELIVERY_RETRY_SECONDS: "1" },
+	extensions: [COMMAND_POST_EXTENSION] });
+	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); held.repo.cleanup(); held.home.cleanup(); });
+	await waitFor(() => new CiWatchStore({ home: held.home.path }).job(JOB)?.last_checked_at, Boolean,
+		{ timeoutMs: 30_000, what: "initial CI catch-up completes before the foreign verdict" });
+	await fleet.add({ ...fleet.get(JOB)!, job_id: foreign, kind: "research", delivery: "pipeline", phase: "done", branch: foreign, receipts: [] });
+	await child.prompt("Gate the research artifact and acknowledge its actual verdict.");
+	await waitFor(() => contexts.length, (count) => count === 1, { timeoutMs: 45_000, what: "gate verdict reaches the parent model" });
+	assert.match(contexts[0]!, /gate attempt 1: revise/);
+	assert.match(contexts[0]!, /replace_planner/);
+	const events = () => readRunEvents(held.home.path, foreign);
+	const sends = () => events().filter((event) => event.type === "verdict_wakeup_sent");
+	assert.equal(events().some((event) => event.type === "wakeup_suppressed"
+		&& (event.payload as { kind?: string }).kind === "verdict"), false, "the send stage must not suppress the gate verdict");
+	const first = Date.parse(sends()[0]!.ts);
+	await waitFor(() => Date.now(), (now) => now - first >= 5_000, { timeoutMs: 10_000, intervalMs: 250, what: "retry window elapses" });
+	assert.ok(sends().length <= 2, `no resend loop: ${sends().length} sends`);
+	assert.ok(sends().every((event) => (event.payload as { sent?: boolean }).sent === true));
+	assert.equal(events().filter((event) => event.type === "verdict_wakeup_delivered").length, 1);
+});

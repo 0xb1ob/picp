@@ -2456,6 +2456,8 @@ Mechanics that matter:
 - **Revise prefers the live planner.** The gate sends revisions through
   `cp_send`. A torn-down planner instead gets a `revise_error` naming
   `cp_gate action: replace_planner, job_id: <old>, replacement_job_id: <new>`.
+  Its `cp-verdict` is still delivered: a gate verdict is never superseded by its
+  research job's `done`/`failed` phase, only by attempt facts (#651).
   Create a fresh research job with the same project and delivery first. This
   action prepares a `task_file` pointing at copies of the old plan, frozen
   scope (when available), and `gate-N-raw.json` (or the complete uncapped
@@ -4347,6 +4349,7 @@ them.
   journaled on the job's run log; arrival is confirmed from the message in the
   parent's context, never from the send. An unconfirmed wake-up is resent once
   after `VERDICT_DELIVERY_RETRY_SECONDS`.
+  A verdict for any other surface on a `done`/`failed` job is withheld as history.
 
 ### The three rules that make it a pipeline and not a script
 
