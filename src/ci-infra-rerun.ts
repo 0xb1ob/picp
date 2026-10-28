@@ -59,6 +59,14 @@ export function classifyInfraFailure(jobs: readonly Pick<ActionsJob, "name" | "c
 	return { infra: true, ...(first ? { step: first } : {}), reason: `every failed job first failed in a setup step ("${first}")` };
 }
 
+/** A cancelled/timed-out job, or a failed job with no failed step; a failed test step always wins (fail-fast cancels). */
+export function cancellationSignature(jobs: readonly Pick<ActionsJob, "conclusion" | "steps">[]): boolean {
+	const failure = (value: string | null) => (value ?? "").toLowerCase() === "failure";
+	const failed = jobs.filter((job) => failure(job.conclusion)).map((job) => job.steps.filter((step) => failure(step.conclusion)));
+	if (failed.some((steps) => steps.some((step) => TEST_STEP.test(step.name)))) return false;
+	return jobs.some((job) => ["cancelled", "timed_out"].includes((job.conclusion ?? "").toLowerCase())) || failed.some((steps) => steps.length === 0);
+}
+
 /** `state/ci-reruns.json`: the claims, written before any `gh run rerun`. */
 export class CiRerunStore {
 	readonly file: string;

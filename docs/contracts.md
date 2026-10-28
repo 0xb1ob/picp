@@ -3341,6 +3341,10 @@ rebase, merge or cherry-pick. A confirming PR read must still name that open
 branch and head. Hold/drain, fleet/report generation, worker identity and
 promotion state are rechecked after awaited reads; changed or unreadable
 eligibility admits no repair. A hold released mid-probe requires a fresh advance.
+A current-head red with the cancellation signature (a cancelled or timed-out
+job, or a failed job with no failed step, and no failed test step) is not the
+implementer's: it returns `next: wait` and promotes no repair; a red in a test
+step still promotes the bounded repair.
 
 A delivered repair returns `step: ci`, `next: resolve`, the hold reason, CI
 provenance and sender receipt. A refused sender or completed failed repair

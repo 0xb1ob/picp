@@ -1,7 +1,8 @@
 import type { FleetRecord } from "./contracts.ts";
 import type { IntegrateResult } from "./integrate.ts";
 import { ciRunRef, formatRunRef } from "./ci-run-ref.ts";
-import { ghCiRuns, readCiForHead } from "./merge-ask.ts";
+import { GREEN_CONCLUSIONS, ghCiRuns, readCiForHead, shaMatches } from "./merge-ask.ts";
+import { cancellationSignature } from "./ci-infra-rerun.ts";
 import { statusRunner } from "./actions-ci.ts";
 import type { CommandRunner } from "./merges.ts";
 
@@ -88,6 +89,8 @@ export async function advanceHeld(input: { jobId: string; record: FleetRecord; c
 		seen.facts.push(`ci: ${ci.ci} — ${ci.reason}${formatRunRef(ref)}`);
 		seen.lead = `CI ${ci.ci} on ${head.slice(0, 12)}${ref.run_id === undefined ? "" : ` (run ${ref.run_id})`}`;
 		if (ci.ci !== "failed") return wait();
+		const red = parsed.filter((run) => shaMatches(run.headSha, head) && run.status === "completed" && !GREEN_CONCLUSIONS.has((run.conclusion ?? "").toLowerCase()));
+		if (red.some((run) => cancellationSignature(run.jobs))) return wait("cancellation-signature red: not the implementer's; rerun the failed jobs unchanged");
 		if (view.value.headRefName !== record.branch) return wait(`PR branch ${view.value.headRefName ?? "unproven"} does not prove this job's branch ${record.branch}`);
 		failure = ci.reason + formatRunRef(ref);
 		const blocked = eligible(prUrl, head);

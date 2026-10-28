@@ -717,6 +717,10 @@ test("landing: a real parent's timer latches only its mandated main runs and cle
 		writeFileSync(file, JSON.stringify(foreign));
 		await observe([own(tip, "failure")], { routes: [routes[0]!, { match: "run view 106 --log-failed", replies: [{ stdout: "nothing useful" }] }], jobs: { 106: [{ id: 1060, name: "structure checks", status: "completed", conclusion: "failure", steps: [] }] } });
 		assert.equal(rows()[0]?.failing, "structure checks", "missing failure log falls back to the failed job");
+		writeFileSync(file, JSON.stringify(foreign));
+		const warnThenFail = "suite\tRun suite\t2026-01-01T00:00:00Z WARN docs/x.md: Error: cell matches no test title\nsuite\tRun suite\t2026-01-01T00:00:01Z FAIL tests/x.test.ts: main regression";
+		await observe([own(tip, "failure")], { routes: [routes[0]!, { match: "run view 106 --log-failed", replies: [{ stdout: warnThenFail }] }], jobs: { 106: [{ id: 1060, name: "structure checks", status: "completed", conclusion: "failure", steps: [] }] } });
+		assert.equal(rows()[0]?.failing, "FAIL tests/x.test.ts: main regression", "a FAIL line wins over an earlier WARN line");
 		const saved = readFileSync(file, "utf8");
 		writeFileSync(file, "{not json");
 		s.setGh({ routes, runs: [own(tip, "success")] });
@@ -835,6 +839,8 @@ test("landing: main-red gate judges only the current origin/main head, not a sup
 		const moved = await held([older, main(131, newTip, "completed", "success")]);
 		assert.doesNotMatch(moved.record.reason, /main is red since/, `older ${what}, newer green: ${moved.text}`);
 		assert.match(moved.text, /is green; not blocking/, what);
+		assert.equal(moved.record.next, "review", `older ${what}, newer green: main CI no longer holds the PR: ${moved.text}`);
+		assert.deepEqual(mergedCalls(moved.calls), []);
 	}
 	for (const [what, rows] of [["newer red", [main(132, newTip, "completed", "failure")]], ["newer pending", [main(133, newTip, "in_progress", null)]]] as const) {
 		const red = await held(rows);
@@ -1042,7 +1048,13 @@ test("landing: held CI repairs the same real worker once while preserving an int
 	const holds = new IntegrationHolds(s.home);
 	holds.hold(live.jobId, "QA in progress");
 	holds.hold(peer.jobId, "peer QA");
-	s.setGh({ runs: [run(111, live.head, "completed", "failure")] });
+	// Operator decision: a cancellation-signature red under a hold waits for an unchanged rerun and promotes no repair.
+	s.setGh({ runs: [run(111, live.head, "completed", "failure")], jobs: { 111: [{ id: 1110, name: "suite", status: "completed", conclusion: "cancelled", steps: [] }] } });
+	const cancelled = await s.post.integrate({ jobId: live.jobId });
+	assert.equal(cancelled.next, "wait", JSON.stringify(cancelled.record));
+	assert.match(cancelled.record.facts.join("\n"), /no CI repair: cancellation-signature red: not the implementer's; rerun the failed jobs unchanged/);
+	assert.deepEqual([s.post.integrator.get(live.jobId)?.resolve_attempts ?? 0, s.post.fleet.require(live.jobId).supersessions ?? 0], [0, 0], "no repair promoted");
+	s.setGh({ runs: [run(111, live.head, "completed", "failure")], jobs: {} });
 	const gate = join(s.home, "held-ci-probe-release");
 	s.setGh({ routes: [{ match: `pr view ${live.prUrl}`, replies: [{ pass: true }, { untilFile: gate, pass: true }, { pass: true }] }] });
 	const beforeCalls = s.ghCalls().length;
