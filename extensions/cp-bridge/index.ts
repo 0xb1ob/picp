@@ -346,13 +346,16 @@ export default function (pi: ExtensionAPI): void {
 		if (outcome !== undefined && outcome !== "completed") return undefined; // an aborted or failed run is never nudged
 		const result = guarded("settle check", () => askGuard.beforeSettle(lastAssistantText(context?.contextMessages), operatorAsks));
 		if (result?.card) setStatusLine(sessionCtx, "ask-guard", `ask guard: opened ${result.card.id} for a question asked in prose`);
+		if (result?.continue) headerGuard.askNudged(); // the re-send was forced back: it never added headers
 		if (result) return result.continue ? { entries: result.entries, continue: true } : undefined;
-		try { return headerGuard.beforeSettle(context?.contextMessages); } // issue 589: only when the ask guard stayed quiet
+		// issue 589: only when the ask guard stayed quiet
+		try { return headerGuard.beforeSettle(context?.contextMessages); }
 		catch (error) { setStatusLine(sessionCtx, "header-guard", `header guard: failed (${(error as Error).message})`); return undefined; }
 	});
 	pi.on("agent_settled", async (_event, ctx) => {
 		sessionCtx = ctx ?? sessionCtx;
-		askGuard.runEnded(); headerGuard.runEnded(); // pi emits agent_start for every loop, a forced continuation included: a run ends only when it settles
+		// pi emits agent_start for every loop, a forced continuation included: a run ends only when it settles
+		askGuard.runEnded(); headerGuard.runEnded();
 		consumer.settled({ idle: sessionCtx?.isIdle?.() ?? false, pending: (sessionCtx?.hasPendingMessages?.() ?? true) || deferredRelays > 0 });
 		// cp-y43c: hand one queued dashboard message over from a macrotask: pi defers a prompt sent inside agent_settled
 		// behind its own settle-time turns and refuses it if one of them compacts (never seen, never failed).

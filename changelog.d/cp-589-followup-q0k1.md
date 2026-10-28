@@ -1,0 +1,1 @@
+- #589 follow-up: the header guard closes out a re-send the ask guard forced back with no record (the original stays), writes `superseded` for the first reply when a second miss is `split`, and keeps a `NO-PROJECT`-answered reply with its id chip; the sidecar reader reads only its last 4 MiB and skips malformed lines. Migration: none. Rollback: revert.

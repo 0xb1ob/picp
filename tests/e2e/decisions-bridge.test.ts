@@ -188,6 +188,8 @@ test("decisions: the header guard forces one re-send of a reply naming project w
 	const R = {
 		first: "cp-1234 landed and ask-0a1b2c3d4e5f is open.", resent: "[demo-app] cp-1234 landed; ask-0a1b2c3d4e5f is open.",
 		mixed: "cp-1234 and cp-5678 merged.", stillMixed: "cp-1234 and cp-5678 are both merged.", bare: "cp-1234 is done.",
+		humanMixed: "cp-1234 and cp-5678 shipped.", humanStill: "cp-1234 and cp-5678 are both shipped.",
+		askMiss: "cp-1234 is merged now.", askMissAsk: "cp-1234 is merged now. Should I proceed?",
 	};
 	// Each run: [prompt, replies, header-nudged]. A miss gets one re-send; plain, headed and ask-nudged runs add no turn.
 	const runs: Array<[string, string[], boolean]> = [
@@ -195,6 +197,8 @@ test("decisions: the header guard forces one re-send of a reply naming project w
 		["Status?", ["[demo-app] cp-1234 landed."], false],
 		["Status?", [R.first, R.resent], true],
 		["Next?", [R.mixed, R.stillMixed], true],
+		["[other-app] Then?", [R.humanMixed, R.humanStill], true],
+		["Later?", [R.askMiss, R.askMissAsk, "NO-ASK"], true],
 		["And?", [R.bare, "NO-PROJECT"], true],
 		["Proceed?", ["cp-1234 landed. Should I proceed?", "NO-ASK"], false],
 	];
@@ -215,13 +219,18 @@ test("decisions: the header guard forces one re-send of a reply naming project w
 	assert.ok(file, "the bridge session was saved");
 	const sidecar = replySplitsFile(stateDir);
 	const records = readFileSync(sidecar, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
-	assert.deepEqual(records.map((r) => [r.type, r.session_file, typeof r.ts, r.block]), [["superseded", file, "number", 0], ["split", file, "number", 0], ["hidden", file, "number", 0]]);
-	assert.deepEqual(records[1].segments, [{ text: R.stillMixed, projects: ["demo-app"], source: "reply" }], "two projects by id: the active mandate's");
+	const kinds = [["superseded", 0], ["superseded", 0], ["split", 0], ["superseded", 0], ["split", 0], ["hidden", 0]];
+	assert.deepEqual(records.map((r) => [r.type, r.block]), kinds, "a second miss supersedes the first; NO-PROJECT and an ask-nudged re-send write no superseded");
+	assert.ok(records.every((r) => r.session_file === file && typeof r.ts === "number"));
+	assert.deepEqual(records[2].segments, [{ text: R.stillMixed, projects: ["demo-app"], source: "reply" }], "two projects by id: the active mandate's");
+	assert.deepEqual(records[4].segments, [{ text: R.humanStill, projects: ["other-app"], source: "reply" }], "the human's [project], not the mandate's");
 	assert.equal(statSync(sidecar).mode & 0o777, 0o600);
 
 	const sessions = operatorSessionsFile(join(stateDir, "sessions"));
 	mkdirSync(dirname(sessions), { recursive: true });
 	appendFileSync(sessions, `${JSON.stringify({ at: isoTimestamp(), session_file: file })}\n`);
+	// Malformed lines (bad JSON, a split with no `projects`) are skipped, never a 500.
+	appendFileSync(sidecar, `not json\n${JSON.stringify({ type: "split", session_file: file, ts: 1, block: 0, segments: [{ text: "x" }] })}\n`);
 	const viewer = createViewer({ home: home.path, stateDir, host: "127.0.0.1", port: 0, requireTailnet: true, log: () => {}, operatorStart: { tmux: null, herdr: null } });
 	await new Promise<void>((resolve) => viewer.listen(0, "127.0.0.1", resolve));
 	t.after(() => viewer.close());
@@ -232,10 +241,12 @@ test("decisions: the header guard forces one re-send of a reply naming project w
 	const shown = (reply: string) => says.find((e) => e.text === reply);
 	assert.equal(shown(R.first)?.collapsed, "superseded", "the reply the re-send replaced folds");
 	assert.deepEqual([shown(R.resent.slice("[demo-app] ".length))?.project, shown(R.resent.slice("[demo-app] ".length))?.collapsed], ["demo-app", undefined]);
-	assert.deepEqual([shown(R.mixed)?.project ?? null, shown(R.mixed)?.collapsed], [null, undefined], "no sidecar record: the read-time split");
+	assert.deepEqual([shown(R.mixed)?.collapsed, shown(R.humanMixed)?.collapsed], ["superseded", "superseded"], "one copy shows");
 	assert.equal(shown(R.stillMixed)?.project, "demo-app", "the split record overrides the read-time split");
+	assert.equal(shown(R.humanStill)?.project, "other-app", "the fallback is the human's project");
+	assert.deepEqual([shown(R.askMiss)?.collapsed, shown(R.askMiss)?.project], [undefined, "demo-app"], "an ask-nudged re-send is not a superseded reply");
 	assert.equal(shown("NO-PROJECT")?.collapsed, "hidden");
-	assert.equal(shown(R.bare)?.collapsed, undefined);
+	assert.deepEqual([shown(R.bare)?.collapsed, shown(R.bare)?.project], [undefined, "demo-app"], "NO-PROJECT keeps the reply and its id chip");
 	assert.ok(readFileSync(file).equals(bytes), "reading the transcript never rewrites the session file");
 });
 

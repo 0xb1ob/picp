@@ -1,5 +1,5 @@
 /** The header guard's sidecar (issue 589): `state/operator/reply-splits.jsonl`, read by the operator transcript. */
-import { readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import type { SessionEntry } from "./api-types.ts";
 import type { ReplySegment } from "./reply-split.ts";
@@ -20,15 +20,32 @@ export interface ReplySplitRecord {
 export const replySplitsFile = (stateDir: string): string => join(stateDir, "operator", "reply-splits.jsonl");
 export const replyKey = (ts: unknown, block: number): string => `${String(ts)}:${block}`;
 
+const TAIL_BYTES = 4 * 1024 * 1024;
+
+/** The last `TAIL_BYTES` of the file from a line start. Never rotated: records older than the tail read as none. */
+function readTail(file: string): string {
+	const fd = openSync(file, "r");
+	try {
+		const size = fstatSync(fd).size, start = Math.max(0, size - TAIL_BYTES), buf = Buffer.alloc(size - start);
+		const text = buf.toString("utf8", 0, readSync(fd, buf, 0, buf.length, start));
+		return start > 0 ? text.slice(text.indexOf("\n") + 1) : text; // a cut first line is dropped
+	} finally { closeSync(fd); }
+}
+
+/** A `split` record must carry segments with a `projects` array; the other types carry nothing more. */
+const wellFormed = (r: ReplySplitRecord): boolean =>
+	["split", "superseded", "hidden"].includes(r.type) &&
+	(r.type !== "split" || (Array.isArray(r.segments) && r.segments.every((s) => Array.isArray(s?.projects) && typeof s.text === "string")));
+
 /** The records for one session file, by key; the last record for a key wins. Missing or torn lines read as none. */
 export function readReplySplits(stateDir: string, sessionFile: string): Map<string, ReplySplitRecord> {
 	let raw = "";
-	try { raw = readFileSync(replySplitsFile(stateDir), "utf8"); } catch { return new Map(); }
+	try { raw = readTail(replySplitsFile(stateDir)); } catch { return new Map(); }
 	const out = new Map<string, ReplySplitRecord>();
 	for (const line of raw.split("\n")) {
 		let record: ReplySplitRecord | undefined;
 		try { record = JSON.parse(line) as ReplySplitRecord; } catch { continue; }
-		if (record?.session_file === sessionFile && typeof record.ts === "number" && Number.isInteger(record.block)) out.set(replyKey(record.ts, record.block), record);
+		if (record?.session_file === sessionFile && typeof record.ts === "number" && Number.isInteger(record.block) && wellFormed(record)) out.set(replyKey(record.ts, record.block), record);
 	}
 	return out;
 }
