@@ -27,6 +27,7 @@ import type { ExtensionDeps } from "./shared.ts";
 import { schedulePolicyView } from "../../src/viewer/schedule-policy-view.ts";
 import { RUN_THINKING_LEVELS } from "../../src/viewer/schedule-policy.ts";
 import { startScheduledPipeline } from "../../src/schedule-native.ts";
+import { ReviewRuns } from "../../src/review-runs.ts";
 import { SELF_REVIEW_SKILL } from "../../src/schedule-self-review.ts";
 import { formatNativeMigration, nativeMigrationMarker, sweepNativeScheduleMigration } from "../../src/schedule-native-migration.ts";
 /** The quote is written verbatim as one ledger comment (≤4000 chars) after its `run-now quote sha <12 hex>: ` prefix. */
@@ -83,6 +84,12 @@ export function registerScheduleTools(
 			dispatch: (request) => post.dispatch(request), tearDown: (jobId) => post.tearDown(jobId), ledger: () => post.ledger(),
 			recorded: (jobId) => post.intake.intake(jobId), wake: wakeEnvelope,
 			runs: post.mandates.scheduleRuns,
+			pipeline: {
+				state: (id) => post.pipeline().store.get(id)?.state, advance: (id) => post.advancePipeline(id),
+				// As cp_pipeline advance does: the reviewer advance started hands its verdict wake back.
+				handBack: (r) => r.pending && post.reviewRuns.handBack(ReviewRuns.key(r.pending.surface === "review" ? r.ship_id : r.research_id, r.pending.surface, r.pending.attempt)),
+			},
+			notify: (text, details) => sendParent(text, details),
 			fleetJobs: () => post.fleet.read().jobs, schedules: () => (scheduler ??= build()).list(), now: () => new Date(), log,
 		});
 	};

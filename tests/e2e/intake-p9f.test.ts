@@ -91,6 +91,9 @@ test("P9f-intake-policy: a restart takes each settled envelope once, by delivery
 		assert.equal(f.job(id)?.receipts?.find((r) => r.kind === "artifact")?.status, "stored");
 	}
 	assert.match(wake("cp-research"), /details in the artifact/, "the headline travels");
+	// #444: a pipeline plan goes to its gate; "teardown" advice left a gate revise no planner to promote.
+	assert.match(wake("cp-research"), /cp-research reported done \(research\/pipeline\) → advance/);
+	assert.match(wake("cp-research"), /call cp_pipeline advance cp-research/);
 	const fleetText = readFileSync(join(f.home, LAYOUT.fleetFile), "utf8");
 	for (const body of ["P9F_ANSWER_BODY", "P9F_REPORT_BODY", "P9F_PLANQ_BODY"]) {
 		assert.ok(!wakes.some((text) => text.includes(body)) && !fleetText.includes(body), `${body} never enters the parent's world`);

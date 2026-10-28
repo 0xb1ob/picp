@@ -4,11 +4,12 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { LAYOUT, MINIMAL_PLAN_SUMMARY, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { parentSkillPaths } from "../../src/cp-bridge.ts";
 import { MandateStore } from "../../src/mandate.ts";
 import { loadMandateDefaults } from "../../src/mandate-defaults.ts";
@@ -24,7 +25,7 @@ import { pushConfigFile, pushDataDir } from "../../src/viewer/push-files.ts";
 import { createViewer, type ViewerOptions } from "../../src/viewer/server.ts";
 import {
 	COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MOCK_PROVIDER_ID,
-	MockProvider, type MockToolCall, type PiChild, readFleet, type RpcRecord, type ScriptStep, startPiChild, waitFor,
+	MockProvider, type MockToolCall, type PiChild, readFleet, readRunEvents, type RpcRecord, type ScriptStep, startPiChild, waitFor,
 } from "../harness/index.ts";
 
 type End = RpcRecord & { toolCallId: string; isError?: boolean; result?: { content?: Array<{ text?: string }> } };
@@ -316,6 +317,85 @@ test("P13 runner-owned fires: answer, board and local runs are dispatched in cod
 	assert.match(JSON.stringify(wakes(parent)[0]!.message), new RegExp(`schedule blocked-run \\(${blocked}\\) could not start its pipeline on ${anchor("blocked-run")}`));
 	assert.equal(existsSync(join(h.home, paths.pipelineFile(anchor("blocked-run")))), false);
 	assert.deepEqual(h.grants(), []);
+});
+
+type Home = Awaited<ReturnType<typeof schedulesHome>>;
+const anchorOf = (h: Home, name: string): string => h.runs().runs().find((run) => run.schedule_id === h.idOf(name))?.anchor_job_id as string;
+const envelopeWakes = (child: PiChild, jobId: string) => child.records().filter((r) => r.type === "message_start"
+	&& (r.message as { customType?: string })?.customType === "cp-envelope" && JSON.stringify(r.message).includes(jobId));
+const gateStarts = (h: Home, jobId: string) => readRunEvents(h.home, jobId).filter((event) => event.type === "review_started" && (event.payload as { surface?: string }).surface === "gate");
+
+/** Routes planner and gate-reviewer to scripts: the planner writes its plan, waits for `go` when given, reports done;
+ * the gate passes. */
+function pipelineRoles(h: Home, name: string, go?: string): void {
+	const anchor = () => anchorOf(h, name);
+	const wait = go ? `; while [ ! -e '${go}' ]; do sleep 0.1; done` : "";
+	const planner = h.model(`planner-${name}`, [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `printf '# Plan\\nBump x.\\n' > "$CP_ARTIFACT_PATH"${wait}` } }] },
+		{ kind: "tool_calls", calls: [{ name: "report_result", args: () => ({ job_id: anchor(), kind: "research", status: "done", summary: "Plan written.",
+			artifact_path: join(h.home, paths.artifactFile(anchor())), plan_summary: MINIMAL_PLAN_SUMMARY,
+			self_assessment: { confidence: "high", scope: "S", blocking_unknowns: false, destructive_scope: false } }) }] },
+		{ kind: "text", text: "standing by" },
+	]);
+	const gate = h.model(`gate-${name}`, [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: () => ({ job_id: anchor(), verdict: "pass",
+		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["the plan names its change"] }) }] }, { kind: "text", text: "Verdict filed." }]);
+	writeFileSync(join(h.home, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: [`${MOCK_PROVIDER_ID}/*`],
+		rubric: [{ id: "planner", role: "planner", model: planner }, { id: "gate-reviewer", role: "gate-reviewer", model: gate }] }));
+}
+
+/** Adds and runs native pipeline schedule `name`, and `also` with its planner pinned by a run override when given. */
+const runPipeline = (h: Home, name: string, also?: { name: string; model: string }) => h.parent(`P13: Add the ${name} schedule.${also ? ` Add the ${also.name} schedule.` : ""}`, [
+	{ kind: "tool_calls", calls: [name, ...(also ? [also.name] : [])].map((each) => schedule(`add-${each}`, { action: "add", name: each, project: "demo", manual: true,
+		title: `${each} task`, kind: "research", delivery: "pipeline", operator_quote: `Add the ${each} schedule.` })) },
+	{ kind: "tool_calls", calls: [schedule("run", () => ({ action: "run_now", id: h.idOf(name) })),
+		...(also ? [schedule("run-also", () => ({ action: "run_now", id: h.idOf(also.name), overrides: { model: also.model } }))] : [])] },
+]);
+
+test("P13 native pipeline (#444): a done plan reports next=advance and its gate starts in code, with no parent turn and no planner teardown", { timeout: 240_000 }, async (t) => {
+	const h = await schedulesHome(t);
+	pipelineRoles(h, "plan-run");
+	const parent = await runPipeline(h, "plan-run");
+	assertCall(ends(parent), "run", "ok", /fired: created cp-/);
+	const research = anchorOf(h, "plan-run");
+	await waitFor(() => existsSync(join(h.home, paths.gateFile(research, 1))), Boolean, { timeoutMs: 120_000, what: "the gate's first verdict" });
+	const events = readRunEvents(h.home, research);
+	assert.deepEqual(events.filter((event) => event.type === "envelope_received").map((event) => (event.payload as { next?: string }).next), ["advance"]);
+	assert.notEqual((JSON.parse(readFileSync(join(h.home, paths.pipelineFile(research)), "utf8")) as { state: string }).state, "researching");
+	assert.equal(gateStarts(h, research).length, 1);
+	assert.equal(events.some((event) => event.type === "shutdown_requested"), false, "the planner stays for a gate revise");
+	assert.equal(parent.records().filter((r) => r.type === "tool_execution_end" && r.toolName === "cp_pipeline").length, 0, "no cp_pipeline call");
+	assert.deepEqual([envelopeWakes(parent, research).length, wakes(parent).length], [0, 0], "a gate in flight wakes nobody");
+});
+
+test("P13 native pipeline (#444): a failed in-code advance wakes the parent once; a restart sweeps the reported anchor and starts its gate once", { timeout: 300_000 }, async (t) => {
+	const h = await schedulesHome(t);
+	const go = join(h.home, `go-${randomBytes(4).toString("hex")}`);
+	pipelineRoles(h, "sweep-run", go);
+	// A planner whose worker dies before reporting: a failed anchor the restart sweep must not wake again.
+	const failedPlanner = h.model("planner-failed-run", [{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "kill -9 $PPID" } }] }]);
+	const first = await runPipeline(h, "sweep-run", { name: "failed-run", model: failedPlanner });
+	const failed = anchorOf(h, "failed-run");
+	await waitFor(() => readFleet(h.home).jobs.find((job) => job.job_id === failed)?.phase, (phase) => phase === "failed", { timeoutMs: 60_000, what: "the failed anchor" });
+	const research = anchorOf(h, "sweep-run");
+	const file = join(h.home, paths.pipelineFile(research));
+	const saved = await waitFor(() => existsSync(file) ? readFileSync(file, "utf8") : undefined, Boolean, { timeoutMs: 30_000, what: "the pipeline record" }) as string;
+	// A superseded record makes advance throw once the plan is in; the planner reports only after this write.
+	writeFileSync(file, JSON.stringify({ ...JSON.parse(saved), superseded_by: (JSON.parse(saved) as { ship_id: string }).ship_id }));
+	writeFileSync(go, "");
+	await waitFor(() => envelopeWakes(first, research).length, (count) => count > 0, { timeoutMs: 120_000, what: "the failed advance's envelope wake" });
+	await first.waitForSettled(30_000);
+	assert.equal(envelopeWakes(first, research).length, 1, "exactly one wake");
+	assert.match(JSON.stringify(envelopeWakes(first, research)[0]!.message), /reported done \(research\/pipeline\) → advance/);
+	assert.deepEqual([wakes(first).length, gateStarts(h, research).length], [0, 0], "no gate and no advance text after a throw");
+	await h.closeParents();
+
+	writeFileSync(file, saved);
+	const second = await h.parent("P13: second process.", []);
+	await waitFor(() => existsSync(join(h.home, paths.gateFile(research, 1))), Boolean, { timeoutMs: 120_000, what: "the swept anchor's gate" });
+	await second.waitForSettled(30_000);
+	assert.equal(gateStarts(h, research).length, 1, "the sweep starts the gate once");
+	assert.equal(envelopeWakes(second, research).length, 0, "the sweep advanced it; nobody was woken");
+	assert.equal(envelopeWakes(second, failed).length, 0, "a failed anchor is not re-woken on restart");
 });
 
 test("P13 held parent: a pr fire's job and run exist before the held wake is released once by compaction; runner-owned fires dispatch at once", { timeout: 180_000 }, async (t) => {
