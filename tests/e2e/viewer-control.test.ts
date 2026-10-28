@@ -178,10 +178,10 @@ test("P17-decisions-page: the served Decisions page stacks Awaiting, Answers, Be
 	assert.match(inside(tab, "decided"), /Nothing here for this filter/);
 	assert.doesNotMatch(tab.text(), /Being handled|Always asks you about/);
 	assert.ok(tab.root.innerHTML.indexOf('id="awaiting"') < tab.root.innerHTML.indexOf('id="decided"'), "Awaiting sits above the Decided log");
-	assert.equal(tab.$("#answers"), null, "no answers journal: no Answers section");
+	assert.equal(tab.$("#answers") === null, true, "no answers journal: no Answers section");
 	assert.ok(tab.$(".decisions-log #decided"));
 	assert.match(tab.$(".decisions-log-aside")?.textContent ?? "", /own judgement/);
-	assert.equal(tab.$(".shell-count"), null, "no badge at zero");
+	assert.equal(tab.$(".shell-count") === null, true, "no badge at zero");
 
 	put("operator/asks.jsonl", "bad\n");
 	put("escalations.json", "{bad");
@@ -456,11 +456,11 @@ test("P17-answers: posted answers project their evidence and render as text; a t
 	assert.match(schedule[0]!.textContent ?? "", new RegExp(`Schedule result · ${run} · partial`));
 	assert.equal(schedule[0]!.querySelector("a")?.getAttribute("href"), "#schedules");
 	assert.match(tab.$('[role="alert"].answers-warning')?.textContent ?? "", /1 unreadable line/);
-	await tab.find(".answers-control", (el) => /^Tick ✓ to acknowledge/.test(el.textContent ?? ""));
+	assert.equal(Boolean(await tab.find(".answers-control", (el) => /^Tick ✓ to acknowledge/.test(el.textContent ?? ""))), true, "ready: Tick ✓ to acknowledge");
 
 	const tick = (id: string) => tab.find(`button[aria-label="Acknowledge ${id}"]`, (b) => !b.hasAttribute("disabled"));
 	tab.click(await tick(A));
-	assert.equal(await until(() => tab.$(`button[aria-label="Acknowledge ${A}"]`), (b) => b === null, "the acked card hides"), null);
+	assert.equal(await until(() => tab.$(`button[aria-label="Acknowledge ${A}"]`) === null, Boolean, "the acked card hides"), true, "the acked card hides");
 	const ackPost = tab.requests.find((r) => r.path === "/api/answers/ack")!;
 	assert.deepEqual([ackPost.method, ackPost.body, ackPost.status, ackPost.headers["x-cp-control-token"]?.length], ["POST", `{"id":"${A}"}`, 202, 64]);
 	assert.match(readFileSync(operatorAnswersFile(d.stateDir), "utf8"), new RegExp(`"type":"acked","by":"viewer","id":"${A}"`));
@@ -468,14 +468,14 @@ test("P17-answers: posted answers project their evidence and render as text; a t
 	// Acknowledged elsewhere: the tick fails with the server's reason; a fresh load shows both in read-only history.
 	await d.get("/api/answers/ack", post(d.origin, String((await d.get("/api/answers/control")).body.token), { id: B }));
 	tab.click(await tick(B));
-	await tab.find(".answers-failed", (el) => /Failed: .*already acknowledged/.test(el.textContent ?? ""));
+	assert.equal(Boolean(await tab.find(".answers-failed", (el) => /Failed: .*already acknowledged/.test(el.textContent ?? ""))), true, "Failed: … already acknowledged");
 	const fresh = await tab.reopen();
-	await fresh.find(".answers-history summary", (s) => /Acknowledged · 2/.test(s.textContent ?? ""));
+	assert.equal(Boolean(await fresh.find(".answers-history summary", (s) => /Acknowledged · 2/.test(s.textContent ?? ""))), true, "Acknowledged · 2 in history");
 	assert.equal(fresh.$$(".answers-history button").length, 0, "history is read-only");
 	write(controlConfigFile(d.stateDir), '{"enabled": false, "reason": "opt-out"}');
 	const off = await fresh.reopen();
-	await off.find("button.answers-ack", (b) => b.hasAttribute("disabled"));
-	await off.find(".answers-control", (el) => /^Dashboard control is off/.test(el.textContent ?? ""));
+	assert.equal(Boolean(await off.find("button.answers-ack", (b) => b.hasAttribute("disabled"))), true, "control off: the tick is disabled");
+	assert.equal(Boolean(await off.find(".answers-control", (el) => /^Dashboard control is off/.test(el.textContent ?? ""))), true, "Dashboard control is off");
 	assert.equal((await answers()).open_count, 1, "control off: the list still renders, read-only");
 	assert.ok(off.$('button[aria-label="Acknowledge ans-cccccccccccc"]'), "the open card stays listed");
 
@@ -497,12 +497,12 @@ test("P17-answers-quiet: an empty, history-only or just-cleared queue collapses 
 	await tab.find(".answers-quiet");
 	assert.equal(summary(tab), "No answers waiting · 0 acknowledged");
 	assert.equal(tab.$(".answers-quiet")!.hasAttribute("open"), false, "collapsed");
-	assert.deepEqual([tab.$(".answers-header"), tab.$(".answers-control"), tab.$(".answers-empty")?.textContent], [null, null, "No acknowledged answers yet"]);
+	assert.deepEqual([tab.$(".answers-header") === null, tab.$(".answers-control") === null, tab.$(".answers-empty")?.textContent], [true, true, "No acknowledged answers yet"]);
 
 	write(journal, "not json\n");
 	tab = await tab.reopen();
 	await tab.find('[role="alert"].answers-warning');
-	assert.equal(tab.$(".answers-quiet"), null);
+	assert.equal(tab.$(".answers-quiet") === null, true);
 	assert.doesNotMatch(tab.text(), /No answers waiting/, "partial data cannot claim an empty queue");
 
 	write(journal, "");
@@ -537,7 +537,7 @@ test("P17-answers-quiet: an empty, history-only or just-cleared queue collapses 
 		if (n === 0) assert.equal(count(), "100", "one tick of 101");
 	}
 	assert.equal(count(), "1");
-	assert.equal(tab.$(".answers-quiet"), null);
+	assert.equal(tab.$(".answers-quiet") === null, true);
 	assert.doesNotMatch(tab.text(), /No answers waiting/, "acking the rendered window cannot hide the unrendered answer");
 	assert.equal(lines(journal).filter((l) => l.type === "acked").length, 100);
 });
@@ -1317,7 +1317,7 @@ test("P17-composer-start: offline the composer holds a message and offers each l
 	overview.close();
 
 	tab.click(await tab.find(".start-session-button", (b) => b.textContent === "Start in tmux"));
-	await tab.find(".start-session-button", (b) => b.textContent === "Starting…" && b.hasAttribute("disabled"));
+	assert.equal(Boolean(await tab.find(".start-session-button", (b) => b.textContent === "Starting…" && b.hasAttribute("disabled"))), true, "starting disables Start");
 	await tab.waitText(/Starting the operator session… the composer opens when it serves the dashboard/);
 	assert.ok(tab.$("textarea")!.hasAttribute("disabled"), "the composer waits for the live session");
 	const started = await until(() => posts(tab, START), (rows) => rows.length > 0, "the start POST");
@@ -1522,12 +1522,12 @@ test("P17-devices-remote: over the tunnel Full control lists and revokes but nev
 	const full = await d.pair("Laptop", "full"), view = await d.pair("Tablet", "view");
 	const asFull = await openTab(t, d.remote, "#settings", new Map(), undefined, { cookie: full });
 	await asFull.find(devicesSection, (s) => /a remote device can never add one/.test(s.textContent ?? ""));
-	await until(() => asFull.$$(`${devicesSection} button`).map((b) => b.textContent), (labels) => labels.length === 2, "both rows");
+	assert.deepEqual((await until(() => asFull.$$(".devices-row").map((r) => r.textContent ?? ""), (rows) => rows.length === 2 && asFull.$$(`${devicesSection} button`).length === 2, "both rows")).map((r) => [/Laptop|Tablet/.exec(r)?.[0], /Full control|View only/.exec(r)?.[0]]).sort(), [["Laptop", "Full control"], ["Tablet", "View only"]], "each row names its device and level");
 	assert.deepEqual(asFull.$$(`${devicesSection} button`).map((b) => b.textContent), ["Revoke", "Revoke"]);
 	assert.equal(asFull.$(".devices-add")?.outerHTML, undefined);
 	const asView = await openTab(t, d.remote, "#settings", new Map(), undefined, { cookie: view });
 	assert.ok(await asView.find(devicesSection, (s) => /View only: you can see devices but not change them/.test(s.textContent ?? "") && (s.textContent ?? "").includes(DEVICE_TRUST)));
-	await asView.find(".devices-row", (r) => /Laptop/.test(r.textContent ?? ""));
+	assert.equal(Boolean(await asView.find(".devices-row", (r) => /Laptop/.test(r.textContent ?? ""))), true, "View only lists the devices");
 	assert.deepEqual(asView.$$(`${devicesSection} button`).map((b) => b.textContent), [], "no write buttons");
 });
 

@@ -460,14 +460,14 @@ test("P20-settings-page: four sections; Save posts If-Match, the control token a
 	const fresh = (await ui.snapshot()).revision;
 	assert.notEqual(fresh, loaded, "a change on disk the page has not seen");
 	await ui.press(people, "Save");
-	assert.match((await ui.tab.find(".settings-stale")).textContent ?? "", /Changed on disk/);
+	assert.equal(Boolean(await ui.tab.find(".settings-stale", (el) => /Changed on disk/.test(el.textContent ?? ""))), true, "a 412 says the settings changed on disk");
 	const [stale, ...extra] = ui.posts(); assert.equal(extra.length, 0, "the first Save is one POST");
 	assert.deepEqual([stale?.path, stale?.status, stale?.headers["if-match"], stale?.headers["x-cp-control-token"]], ["/api/settings/apply", 412, `"${loaded}"`, ui.csrf]);
 	assert.deepEqual(stale?.json.changes, { "models.parent": "anthropic/claude-opus-5-5" });
 	assert.match(String(stale?.json.request_id), /^[A-Za-z0-9_-]{16}$/);
 	assert.equal((people.querySelector("#setting-models-parent")!.parentElement!.querySelector("input") as HTMLInputElement).value, "anthropic/claude-opus-5-5", "the draft survives a 412");
 	await ui.press(people, "Save");
-	assert.match((await ui.tab.find(".settings-ok")).textContent ?? "", /^Saved · 1 change$/);
+	assert.equal(Boolean(await ui.tab.find(".settings-ok", (el) => /^Saved · 1 change$/.test(el.textContent ?? ""))), true, "the retry saves one change");
 	assert.equal(ui.posts()[1]?.headers["if-match"], `"${fresh}"`, "the retry carries the fresh revision");
 	assert.deepEqual(ui.posts()[1]?.json.changes, { "models.parent": "anthropic/claude-opus-5-5" });
 	assert.equal((await ui.snapshot()).fields.find((f) => f.key === "models.parent")?.value, "anthropic/claude-opus-5-5", "written by the session");
@@ -536,7 +536,7 @@ test("P20-settings-compaction: both keys with what is in force; a bad threshold 
 	}
 	assert.equal(ui.posts().length, 0, "a blocked Save posts nothing");
 	await ui.enter(parent, "150000");
-	assert.equal(compaction.querySelector("[role=alert]"), null);
+	assert.equal(compaction.querySelector("[role=alert]") === null, true);
 	await ui.press(compaction, "Save");
 	assert.match((await ui.tab.find(".settings-ok")).textContent ?? "", /^Saved/);
 	assert.equal(ui.posts()[0]!.status, 200, "the real server parses and applies the body"); assert.deepEqual(ui.posts()[0]!.json.changes, { "sessions.parent_compact_at_tokens": 150000 });
@@ -544,7 +544,7 @@ test("P20-settings-compaction: both keys with what is in force; a bad threshold 
 	assert.deepEqual(effective(), ["In force: 150000 tokens, from file", "In force: 200000 tokens, from code"], "the re-read snapshot shows the written file");
 	await ui.press(compaction, "Restore defaults");
 	assert.deepEqual(ui.posts()[1]!.json.keys, ["sessions.parent_compact_at_tokens", "sessions.operator_compact_at_tokens"]);
-	assert.equal(await until(async () => (await ui.snapshot()).fields.find((f) => f.key === "sessions.parent_compact_at_tokens")!.value, (value) => value !== 150000, "the restore"), 200000, "the restored default");
+	assert.equal(await until(async () => (await ui.snapshot()).fields.find((f) => f.key === "sessions.parent_compact_at_tokens")!.value, (value) => typeof value === "number" && value !== 150000, "the restore"), 200000, "the restored default");
 });
 
 test("P20-settings-readonly: no control token is read only with every control disabled; an absent routing.json is one line, no rubric controls", { timeout: 120_000 }, async (t) => {
@@ -560,7 +560,7 @@ test("P20-settings-readonly: no control token is read only with every control di
 
 test("P20-settings-dropdowns: grouped by provider; (unset) only for parent/operator; unlisted kept; Custom…; fallbacks cap at 4 and save", { timeout: 120_000 }, async (t) => {
 	const ui = await settingsTab(t);
-	assert.equal(ui.tab.$("datalist"), null, "no datalist any more");
+	assert.equal(ui.tab.$("datalist") === null, true, "no datalist any more");
 	const people = ui.section("Parent and operator models");
 	const parent = people.querySelector("#setting-models-parent")!;
 	assert.equal(parent.tagName, "SELECT");
@@ -577,14 +577,14 @@ test("P20-settings-dropdowns: grouped by provider; (unset) only for parent/opera
 	assert.equal(optionTexts(first.querySelector("select[aria-label='Fallback 1 of risky-any']")!)[0], "openai/gpt-6.1-sol (not in pi's list)", "the unlisted current value stays selectable");
 	const warns = (scope: Element) => [...scope.querySelectorAll(".settings-warn")].map((warn) => warn.textContent);
 	assert.deepEqual(warns(first), ["Not in pi's model list: openai/gpt-6.1-sol. It can still be saved."]);
-	assert.equal(first.querySelector("input"), null, "no text input until Custom…");
+	assert.equal(first.querySelector("input") === null, true, "no text input until Custom…");
 	await ui.choose(model, "custom");
 	const custom = first.querySelector("input[aria-label='Model of risky-any: custom id']") as HTMLInputElement;
 	assert.equal(custom.value, "anthropic/claude-opus-5-5", "Custom… opens on the current value");
 	await ui.enter(custom, "my/other");
 	assert.equal(warns(first).length, 2, "an unlisted custom model warns too");
 	await ui.choose(model, "openai/gpt-5");
-	assert.equal(first.querySelector("input[aria-label='Model of risky-any: custom id']"), null, "picking a listed model closes the custom input");
+	assert.equal(first.querySelector("input[aria-label='Model of risky-any: custom id']") === null, true, "picking a listed model closes the custom input");
 	assert.equal(warns(first).length, 1, "a listed value does not warn");
 	const add = () => first.querySelector("select[aria-label='Add a fallback to risky-any']");
 	assert.equal(optionTexts(add()!)[0], "Add fallback…");
@@ -593,7 +593,7 @@ test("P20-settings-dropdowns: grouped by provider; (unset) only for parent/opera
 	await ui.choose(add()!, "custom");
 	await ui.enter(first.querySelector("input[aria-label='Add a fallback to risky-any: custom id']")!, "my/fourth", "change");
 	assert.equal(first.querySelectorAll(".settings-chip:not(.settings-add) select").length, 4);
-	assert.equal(add(), null, "no Add fallback past 4");
+	assert.equal(add() === null, true, "no Add fallback past 4");
 	await ui.press(first, "×");
 	assert.equal(first.querySelectorAll(".settings-chip:not(.settings-add) select").length, 3, "× removed one fallback (the saved list says which)");
 	assert.ok(add(), "Add fallback is back under 4");
@@ -630,13 +630,13 @@ test("P20-settings-listing: while pi's first listing runs, the current value and
 	ui.stub.release();
 	await ui.tab.find("optgroup");
 	assert.deepEqual(optionTexts(ui.tab.$("#setting-models-parent")!), ["(unset)", "openai/gpt-5", "Custom…"], "the retry picked the list up");
-	assert.equal(status(), null);
+	assert.equal(status() === null, true);
 	assert.ok(ui.tab.requests.filter((r) => r.path === "/api/settings").length >= 2, "the page asked again");
 });
 
 test("P20-settings-unavailable: an unavailable list keeps each current value plus Custom…, and one note", { timeout: 120_000 }, async (t) => {
 	const ui = await settingsTab(t, { status: 1 });
-	assert.equal(ui.tab.$("optgroup"), null);
+	assert.equal(ui.tab.$("optgroup") === null, true);
 	const first = ui.section("Model routing").querySelector("li.settings-rule")!;
 	assert.deepEqual(optionTexts(first.querySelector("select")!), ["anthropic/claude-opus-5-5", "Custom…"]);
 	assert.deepEqual(optionTexts(first.querySelector("select[aria-label='Fallback 1 of risky-any']")!), ["openai/gpt-6.1-sol", "Custom…"]);
@@ -1040,7 +1040,7 @@ test("P20-schedules-page: empty and error states; cron and watch cards with fact
 		assert.ok(details && !details.hasAttribute("open"), "advanced grant/template/history details start collapsed");
 		assert.ok(details.querySelector(".schedule-approval"), "verbatim template approval remains reachable");
 		assert.ok(details.querySelector(".schedule-history") || details.textContent?.includes("No job fired yet"));
-		assert.equal(card.querySelector(".schedule-result")?.closest("details"), null, "result destination is a primary fact");
+		assert.equal(card.querySelector(".schedule-result")?.closest("details") === null, true, "result destination is a primary fact");
 	}
 	const html = page.html();
 	const text = tab.text();
@@ -1475,7 +1475,7 @@ test("P20-schedule-editor: a bad field shows its own error and blocks Save; ceil
 	await ed.type(/At once/, "0");
 	assert.equal(ed.button("Save settings")?.hasAttribute("disabled"), true);
 	assert.equal(ed.field(/At once/).querySelector(".schedule-field-error")?.textContent, "must be a whole number, at least 1", "under its own field");
-	assert.equal(ed.field(/USD/).querySelector(".schedule-field-error"), null);
+	assert.equal(ed.field(/USD/).querySelector(".schedule-field-error") === null, true);
 	await ed.type(/USD/, "7");
 	await ed.type(/At once/, "1");
 	assert.equal(ed.button("Save settings")?.hasAttribute("disabled"), false);

@@ -64,10 +64,10 @@ test("P19-search: the shell's search lists pages, in-flight and landed jobs from
 	const query = async (value: string) => { tab.type(tab.$("dialog input")!, value); await settle(); };
 	const hrefs = () => results().map((a) => a.getAttribute("href"));
 	let trigger = await tab.find(".shell-search");
-	assert.equal(tab.$("dialog"), null, "closed search does not render");
+	assert.equal(tab.$("dialog") === null, true, "closed search does not render");
 	tab.click(trigger);
 	await tab.find("dialog[open]");
-	assert.equal(focused(), tab.$("dialog input"), "header search opens a modal dialog with its input focused");
+	assert.ok(focused() === tab.$("dialog input"), "header search opens a modal dialog with its input focused");
 	assert.match(tab.$("dialog")!.textContent!, /Loading/);
 	tab.go("#decisions");
 	await until(() => tab.$("dialog"), (open) => open === null, "leaving the page to unmount the held search");
@@ -95,7 +95,7 @@ test("P19-search: the shell's search lists pages, in-flight and landed jobs from
 	assert.deepEqual([tab.$("dialog input")!.getAttribute("placeholder"), tab.$("dialog input")!.getAttribute("aria-label")], ["Job ID, title or page", "Search job IDs, titles and pages"]);
 	for (const [id, phase] of [["cp-search", "held"], ["cp-wait", "waiting"], ["cp-landed", "done"]]) {
 		const hit = results().find((a) => a.getAttribute("href") === `#job/${id}`)!;
-		assert.deepEqual([!!hit.querySelector(`.job-dot-${phase}[aria-hidden="true"]`), hit.querySelector("svg")], [true, null], `${id} uses its phase dot, never a navigation icon`);
+		assert.deepEqual([!!hit.querySelector(`.job-dot-${phase}[aria-hidden="true"]`), hit.querySelector("svg") === null], [true, true], `${id} uses its phase dot, never a navigation icon`);
 	}
 	assert.ok(tab.$(".search-shortcuts a svg"), "page shortcuts retain their navigation icons");
 	const meta = (id: string) => results().find((a) => a.getAttribute("href") === `#job/${id}`)!.textContent!;
@@ -113,21 +113,21 @@ test("P19-search: the shell's search lists pages, in-flight and landed jobs from
 	assert.match(tab.$("dialog")!.textContent!, /No results/);
 	await query("");
 	tab.key(tab.$("dialog input")!, "ArrowDown");
-	assert.equal(focused(), results()[0]);
+	assert.ok(focused() === results()[0], "ArrowDown focuses the first result");
 	tab.key(focused()!, "ArrowDown");
-	assert.equal(focused(), results()[1]);
+	assert.ok(focused() === results()[1], "ArrowDown moves to the second result");
 	tab.key(focused()!, "ArrowUp");
-	assert.equal(focused(), results()[0], "arrows move through the results");
+	assert.ok(focused() === results()[0], "arrows move through the results");
 	tab.click(tab.$('dialog button[aria-label="Close search"]')!);
 	await until(() => tab.$("dialog"), (dialog) => dialog === null, "the dialog to close");
-	assert.equal(focused(), trigger, "closing returns focus to its opener");
+	assert.ok(focused() === trigger, "closing returns focus to its opener");
 
 	const desktop = tab.$(".shell-desktop-search")!;
 	tab.click(desktop);
 	const dialog = await tab.find("dialog[open]");
 	dialog.dispatchEvent(new tab.window.Event("cancel", { cancelable: true }));
 	await until(() => tab.$("dialog"), (open) => open === null, "Escape's cancel to close");
-	assert.equal(focused(), desktop, "the desktop trigger gets its own focus back");
+	assert.ok(focused() === desktop, "the desktop trigger gets its own focus back");
 	for (const modifier of ["ctrlKey", "metaKey"]) {
 		const shortcut = new tab.window.Event("keydown", { bubbles: true, cancelable: true });
 		Object.assign(shortcut, { key: "k", [modifier]: true });
@@ -215,7 +215,7 @@ test("P19-rollup-card: one card shows the latest relay and its chip under one me
 	assert.equal(tab.$$(".session-rollup").length, 1, "(j) one card");
 	assert.match(card.textContent!, /latest update/);
 	assert.doesNotMatch(card.textContent!, /first update|second update|HELD PR LANDED/, "earlier turns and the latest notice are hidden");
-	assert.equal(card.querySelector(".session-rollup-head"), null, "(b) the latest relay chips #355, so the card has no header chip");
+	assert.equal(card.querySelector(".session-rollup-head") === null, true, "(b) the latest relay chips #355, so the card has no header chip");
 	assert.deepEqual([card.querySelectorAll("a.pr-chip").length, !!card.querySelector(".session-bubble a.pr-chip")], [1, true], "(b) the inline chip shows once");
 	const meta = card.querySelectorAll(".session-rollup-meta");
 	const time = new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(AT));
@@ -316,7 +316,7 @@ test("P19-sessions-render: the operator helper, project and bridge chips, the �
 	assert.equal(full.$(".sessions > .page-header > h1")?.textContent, "Chats", "the desktop title row stays inside the direct-child screen");
 	assert.equal(full.$('.session-choice[aria-current="page"] strong')?.textContent, "Operator");
 	assert.equal(full.$(".shell-more .session-menu label")?.firstChild?.textContent, "Transcript", "amendment 2: the file picker sits in the ⋮ menu");
-	assert.equal(full.$('.session-heading select[aria-label="Operator session file"]'), null, "the heading keeps only the filter pill");
+	assert.equal(full.$('.session-heading select[aria-label="Operator session file"]') === null, true, "the heading keeps only the filter pill");
 	assert.doesNotMatch(full.$(".session-heading")?.textContent ?? "", /entry for entry|Full transcript/);
 
 	const fleet = await d.open("#sessions?view=workers&id=cp-run");
@@ -354,9 +354,9 @@ test("P19-render-states: an awaiting ask's markup is text, its untimestamped tra
 	const file = async (path: string) => { const tab = await d.open(`#files?root=project%3Ademo&path=${path}`); await tab.find(".file-text, section[aria-labelledby=file-listing] .files-empty"); return tab; };
 	const unsafe = await file("unsafe.html");
 	assert.equal(unsafe.$(".file-text")?.textContent, "<script>unsafe</script>", "file text renders as text");
-	assert.equal(unsafe.$("main script, .file-text script"), null);
+	assert.equal(unsafe.$("main script, .file-text script") === null, true);
 	assert.ok(unsafe.$('a[href^="#files?root=project%3Ademo"]'), "the listing heading links back to its root");
-	assert.equal(unsafe.$('a[href*="/api/git"], a[href*="/classic"], .file-git'), null, "no raw-JSON git link and no classic view");
+	assert.equal(unsafe.$('a[href*="/api/git"], a[href*="/classic"], .file-git') === null, true, "no raw-JSON git link and no classic view");
 	assert.match((await file("big.txt")).text(), /File exceeds the 512 KiB cap/);
 	assert.match((await file("bin.dat")).text(), /Binary file · 3 bytes/);
 });
@@ -396,7 +396,7 @@ test("P19-copy-reply: a job's awaiting ask copies its exact reply, falls back to
 		tab.click(button());
 		await until(status, (text) => /Clipboard unavailable/.test(text ?? ""), "the manual-copy fallback");
 		const code = tab.$(".overview-reply code");
-		assert.deepEqual([selected, focused()], [code, code], `${clipboard ? "a denial" : "no clipboard API (plain HTTP)"} selects and focuses the reply`);
+		assert.deepEqual([code !== null && selected === code, code !== null && focused() === code], [true, true], `${clipboard ? "a denial" : "no clipboard API (plain HTTP)"} selects and focuses the reply`);
 		assert.doesNotMatch(button().textContent!, /Copied/, "never claims success");
 	}
 
@@ -466,7 +466,7 @@ test("P19-links: transcript URLs, .pi-command-post paths and #N refs render as l
 	await tab.find(".session-bridge p a");
 	assert.deepEqual(links(/#12/).filter(([text]) => text?.startsWith("#")), [["#355 draft", pr], ["#12", "https://github.com/o/r/issues/12"]], "#N refs resolve through the job's repo (#355 as its PR chip); anchors, entities and ## never do");
 	const plain = () => tab.$$(".session-bridge").find((n) => /landed/.test(n.textContent ?? ""))!;
-	assert.equal(plain().querySelector("a[target=_blank]"), null, "collapsed, a plain notice's first line is the button's label");
+	assert.equal(plain().querySelector("a[target=_blank]") === null, true, "collapsed, a plain notice's first line is the button's label");
 	tab.click(plain().querySelector("button.session-notice-line")!);
 	await until(() => plain().querySelector("p a"), Boolean, "the opened notice's link");
 	assert.deepEqual([plain().querySelector("p a")!.getAttribute("href"), plain().querySelector("p a")!.getAttribute("rel")], ["https://github.com/o/r/pull/9", "noopener noreferrer"], "open, its first line is text, so its URL is a link");

@@ -752,8 +752,8 @@ test("P18-not-found: a missing job or worker is a 404 page with a way back; only
 	assert.match(job.text(), /Back to Jobs/);
 	assert.match(job.text(), /Search jobs/);
 	assert.ok(job.$(".not-found-illustration svg circle"), "a job 404 has the circle icon");
-	assert.equal(job.$(".not-found-workers"), null, "a job 404 offers no workers");
-	assert.equal(job.$('[role="alert"]'), null);
+	assert.equal(job.$(".not-found-workers") === null, true, "a job 404 offers no workers");
+	assert.equal(job.$('[role="alert"]') === null, true);
 
 	const worker = await view.open("#sessions?view=workers&id=cp-missing");
 	await worker.find(".not-found-workers a");
@@ -771,7 +771,7 @@ test("P18-not-found: a missing job or worker is a 404 page with a way back; only
 
 	const refused = await view.open("#sessions?view=workers&id=cp-working&transcript=1");
 	await refused.waitText(/View unavailable/);
-	assert.equal(refused.$(".not-found"), null, "a 403 is never a not-found page");
+	assert.equal(refused.$(".not-found") === null, true, "a 403 is never a not-found page");
 
 	const css = await view.get("/").then(async (page) => (await view.get(/href="(\/assets\/viewer\/[^"]+\.css)"/.exec(page.text)![1]!)).text.replace(/\s+/g, ""));
 	for (const rule of [/\.not-found-illustration\{[^}]*border-radius:50%/, /\.not-found-actionsa,\.not-found-actionsbutton\{[^}]*min-height:44px/,
@@ -787,6 +787,6 @@ test("P18-not-found: a missing job or worker is a 404 page with a way back; only
 		s.put(file, "{");
 		const blind = await view.open("#sessions?view=workers&id=cp-missing");
 		await blind.find(".not-found");
-		assert.equal(blind.$(".not-found-workers"), null, `an unreadable ${broken} invents no recovery links`);
+		assert.equal(blind.$(".not-found-workers") === null, true, `an unreadable ${broken} invents no recovery links`);
 	}
 });
