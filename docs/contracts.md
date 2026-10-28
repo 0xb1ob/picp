@@ -2210,9 +2210,9 @@ Other spawn-time policy, all fail-closed:
   the drain; any other refusal, a `promote`, a closed or fleet-known job
   drops the entry. Every start or drop is one `recovery` wake-up
   (`QUEUED DISPATCH STARTED`/`DROPPED`); a drain that throws keeps every
-  Only STARTED carries the job as a candidate key, so a DROPPED notice is never
-  superseded for lacking a fleet record.
-  entry and wakes `DISPATCH QUEUE DRAIN FAILED` once per cause.
+  entry and wakes `DISPATCH QUEUE DRAIN FAILED` once per cause. Only STARTED carries
+  the job as a candidate key, so a DROPPED notice is never superseded for lacking a
+  fleet record.
 - **Armed dispatch (unload-parent PR2).** A `cp_dispatch` refused only by open
   blockers (`BlockedDispatchError`; `when_ready` not `false`; never a pipeline
   or script job) is armed in `state/armed-dispatches.json`
