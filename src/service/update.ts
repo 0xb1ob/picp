@@ -548,9 +548,9 @@ export function hostUpdatePorts(home: string, env: NodeJS.ProcessEnv = process.e
 		noHost: () => {
 			const { gen, record } = currentHost(paths);
 			if (record && isPidAlive(record.pid)) return false;
-			// A host this or an interrupted update stopped is respawned by the reload's supervisor: verify it.
+			// A host an update stopped (this gen or an older one) is respawned by the reload's supervisor: verify it.
 			const stop = readStopMarker(paths);
-			return !(stop?.gen === gen && stop.by === "update");
+			return !(stop?.by === "update" && stop.gen <= gen);
 		},
 		activity: () => restartActivity(new FleetStore({ home }).list(), (jobId) => readStatusFile(home, jobId)?.phase),
 		verify: (timeoutMs) =>

@@ -40,6 +40,7 @@ serve(e.HOST_SOCK, (m) => { const p = plan(); const shown = (m.args ?? []).filte
   if (shown.length < (m.args ?? []).length) fs.appendFileSync(e.SM + "/causes.log", JSON.stringify(m.args.at(-1)) + "\\n");
   if (["drain", "drainCancel", "stop"].includes(m.op)) log("host " + m.op + (shown.length ? " " + JSON.stringify(shown) : ""));
   if ((p.failing ?? []).includes("host " + m.op)) throw new Error(m.op + " refused");
+  if (m.op === "stop") for (const f of p.onStop ?? []) fs.writeFileSync(f.path, f.text);
   if (m.op === "hello") return { ok: true, result: { pid: process.pid, parent: process.pid } };
   if (m.op === "status") { fs.appendFileSync(e.SM + "/status.log", "status\\n"); if (p.statusSilent) return undefined;
     return { ok: true, result: p.statusPid === undefined ? { alive: true, pid: process.pid } : { alive: p.statusPid > 0, pid: p.statusPid } }; }
@@ -58,7 +59,7 @@ serve(e.DAEMON_SOCK, (m) => { log("daemon " + m.op); return (plan().failing ?? [
 fs.writeFileSync(e.SM + "/ready", "");
 `;
 
-type Plan = { statusPid?: number; statusSilent?: boolean; drainStates?: string[]; drainThrow?: string; drainText?: string; doctor?: string[]; failing?: string[]; viewerDown?: boolean; onDoctor?: { files?: Array<{ path: string; text: string }>; patch?: Plan } };
+type Plan = { statusPid?: number; statusSilent?: boolean; drainStates?: string[]; drainThrow?: string; drainText?: string; doctor?: string[]; failing?: string[]; viewerDown?: boolean; onStop?: Array<{ path: string; text: string }>; onDoctor?: { files?: Array<{ path: string; text: string }>; patch?: Plan } };
 
 /** A cp-daemon home whose app is a scratch checkout of this tree's src/ with a bare origin, and its stand-ins. */
 async function bench(t: TestContext, config: unknown = { enabled: true, interval_min: 15, quiet_min: 0 }) {
@@ -539,6 +540,20 @@ test("P14e-update-nohost: no parent host running", { timeout: 300_000 }, async (
 	const unreadable = await u.run();
 	assert.equal(unreadable?.last_result, "rollback_failed", last(u));
 	assert.match(unreadable?.detail ?? "", /after the rollback: the parent host record could not be read: parent host stop marker unreadable/);
+});
+
+test("P14e-update-nohost: a respawned host that died at once is verified, never viewer-only", { timeout: 300_000 }, async (t) => {
+	// The update stops gen 1, the reload respawns gen 2 and it dies: the marker names gen 1, not the current gen.
+	const b = await bench(t);
+	const host = parentHostPaths(b.home, "multi");
+	const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+	const respawned = { ...JSON.parse(readFileSync(host.record(1), "utf8")), pid: dead, socket: join(b.sm, "gone.sock") };
+	const marker = { gen: 1, at: isoTimestamp(), by: "update" };
+	b.plan({ onStop: [{ path: host.record(2), text: JSON.stringify(respawned) }, { path: host.stopped, text: JSON.stringify(marker) }] });
+	advanceBase(b.repo, "n.txt", "n\n");
+	const state = await b.run();
+	assert.notEqual(state?.last_result, "updated", last(b));
+	assert.doesNotMatch(state?.detail ?? "", /viewer verified only/);
 });
 
 test("P14e-update-converge: a newer tip or a drain timeout never restarts the busy clock", { timeout: 300_000 }, async (t) => {

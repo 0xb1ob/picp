@@ -162,11 +162,14 @@ test("S26: an armed dispatch refused by the spawn cap as the update hold turns o
 	t.after(async () => { await post.shutdown(); home.cleanup(); });
 	const armed = await ledger.create({ title: "armed work", project: "demo", kind: "ship", delivery: "pr" });
 	post.armedDispatches.arm(armed.id, { task: "armed" }, ["cp-landed"]);
+	let dispatched = 0;
 	post.dispatch = async () => {
 		holdUpdate(home.path);
+		dispatched++;
 		throw new SpawnSafetyError("spawn cap reached", { code: "spawn_cap" });
 	};
 	await post.armedDispatches.release();
+	assert.equal(dispatched, 1, "the stub ran once with the hold on, so \"still armed\" is not vacuous");
 	assert.deepEqual([post.armedDispatches.ids(), post.dispatchQueue.ids()], [[armed.id], []], "still armed, never queued");
 	assert.doesNotMatch(post.durableWakeups.pending().map((entry) => entry.content).join("\n"), /DROPPED/);
 });

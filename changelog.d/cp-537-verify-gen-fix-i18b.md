@@ -1,0 +1,1 @@
+- issue 537: an update whose respawned host dies at once is verified against the parent (a failed verify rolls back) instead of recorded `updated` after a viewer-only check.
