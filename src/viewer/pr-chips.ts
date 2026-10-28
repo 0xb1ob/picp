@@ -59,6 +59,17 @@ function reviewOf(state: ViewerState, id: string, head: string | null): string |
 	return str(recordedReview(state, id, head).review?.verdict) ?? null;
 }
 
+/** Registered project name → its forge repository, from `data/projects.json`. */
+export function projectRepos(state: ViewerState): Map<string, ForgeRepository> {
+	const rawProjects = readObject(join(dirname(state.stateDir), "data", "projects.json"))?.projects;
+	const repos = new Map<string, ForgeRepository>();
+	for (const p of Array.isArray(rawProjects) ? rawProjects.map(obj) : []) {
+		const name = str(p?.name), clone = str(p?.clone_url), resolved = clone ? resolveForgeRepository(clone, obj(p?.forge) as ForgeConfig | undefined) : undefined;
+		if (name && resolved?.ok) repos.set(name, resolved.repository);
+	}
+	return repos;
+}
+
 /**
  * Chips for every PR and issue URL the entries name, keyed by URL; resolves each `#N` of a registered project into
  * `entry.links`. Reads only fleet, ledger, projects, ci-watch and run files, no GitHub call; an unknown fact is null.
@@ -68,12 +79,7 @@ export function attachPrChips(state: ViewerState, entries: SessionEntry[]): Reco
 	const rawLedger = readObject(join(runtimeRoot(state.home), "jobs.json"))?.jobs;
 	const ledger = (Array.isArray(rawLedger) ? rawLedger.map(obj) : []).filter((j): j is Json => typeof j?.id === "string");
 	const rawCi = readObject(join(state.stateDir, "ci-watch.json"))?.jobs, ciRows = Array.isArray(rawCi) ? rawCi.map(obj) : [];
-	const rawProjects = readObject(join(dirname(state.stateDir), "data", "projects.json"))?.projects;
-	const repos = new Map<string, ForgeRepository>();
-	for (const p of Array.isArray(rawProjects) ? rawProjects.map(obj) : []) {
-		const name = str(p?.name), clone = str(p?.clone_url), resolved = clone ? resolveForgeRepository(clone, obj(p?.forge) as ForgeConfig | undefined) : undefined;
-		if (name && resolved?.ok) repos.set(name, resolved.repository);
-	}
+	const repos = projectRepos(state);
 	const prs = new Map<string, { job: Json; merged: boolean }>();
 	for (const job of jobs) {
 		const receipts = (Array.isArray(job.receipts) ? job.receipts.map(obj) : []).filter((r) => r?.kind === "pr");
