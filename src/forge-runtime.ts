@@ -8,7 +8,7 @@
  */
 
 import { type PrObservation, prReceiptOf, type WatchableRecord } from "./ci-watch.ts";
-import { type ForgeResolution, parseChangeRequestUrl, resolveForgeRepository } from "./forge-url.ts";
+import { type ForgeResolution, parseChangeRequestUrl, parseRemote, resolveForgeRepository } from "./forge-url.ts";
 import { type ForgeObserver, type ObserverPorts, observerFor } from "./forges/adapter.ts";
 import { githubObserver } from "./forges/github.ts";
 import { type GitlabTransport, gitlabObserver } from "./forges/gitlab.ts";
@@ -73,9 +73,33 @@ export function isGitlabJob(record: WatchableRecord | undefined): boolean {
 	return parseChangeRequestUrl(record ? (prReceiptOf(record)?.url ?? "") : "")?.kind === "gitlab";
 }
 
-/** v1 reads no GitLab CI: why a GitLab job's merge ask stays deferred as unknown — never "no CI configured", never green. */
-export function gitlabCiUnsupported(record: WatchableRecord | undefined): string | undefined {
-	return isGitlabJob(record) ? "GitLab CI is not read in v1, so CI is unknown; merge the MR on GitLab, and its observed merge withdraws this ask" : undefined;
+/**
+ * Why a job's merge ask stays deferred as unknown with no gh query: a GitLab MR in v1,
+ * or a non-GitHub project with no forge declared.
+ */
+export function gitlabCiUnsupported(home: string, record: WatchableRecord | undefined): string | undefined {
+	if (isGitlabJob(record)) return "GitLab CI is not read in v1, so CI is unknown; merge the MR on GitLab, and its observed merge withdraws this ask";
+	return record && ghCiUnwatched(home, record.project) ? "CI watch disabled: non-GitHub remote, no forge declared, so CI is unknown; declare it with cp_project forge" : undefined;
+}
+
+const unwatchedLogged = new Set<string>();
+
+/**
+ * True when no gh CI reader may ask about a project: its origin names a non-github.com host and no forge is
+ * declared. The skip is logged once per home and project per process, never as a per-tick failure.
+ */
+export function ghCiUnwatched(home: string, project: string): boolean {
+	const found = registryEntry(home, project);
+	if (!found || found.entry.forge) return false;
+	// An unparsable remote (a local path) keeps the gh reader and its named failure.
+	const host = parseRemote(found.origin ?? found.entry.clone_url)?.host;
+	if (host === undefined || host === "github.com") return false;
+	const key = `${home}\n${project}`;
+	if (!unwatchedLogged.has(key)) {
+		unwatchedLogged.add(key);
+		console.error(`cp: ${project}: CI watch disabled: non-GitHub remote, no forge declared`);
+	}
+	return true;
 }
 
 const NO_GH: ObserverPorts["run"] = async () => ({ status: 1, stdout: "", stderr: "gh is never asked about a GitLab merge request" });

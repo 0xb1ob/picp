@@ -18,7 +18,7 @@ import { ghCiConfigured } from "./ci-configured.ts";
 import { type CiObservation, CiWatch, type CiWatchTick, ghPrRest, type WatchableRecord } from "./ci-watch.ts";
 import { recordCiObserved } from "./ci-evidence.ts";
 import { ForeignCiWatch, type ForeignCiTick, ghForeignRuns } from "./foreign-ci-watch.ts";
-import { gitlabCiUnsupported, isGitlabJob, watchChangeRequest } from "./forge-runtime.ts";
+import { ghCiUnwatched, gitlabCiUnsupported, isGitlabJob, watchChangeRequest } from "./forge-runtime.ts";
 import {
 	buildDecisionContext,
 	type BuildDecisionContextOptions,
@@ -642,7 +642,7 @@ export class CommandPost {
 		this.shippedSeen = new ShippedSeenStore({ home: options.home });
 		this.ciWatch = new CiWatch({
 			home: options.home,
-			jobs: () => this.fleet.list() as WatchableRecord[],
+			jobs: () => (this.fleet.list() as WatchableRecord[]).filter((job) => job.phase !== "held" || isGitlabJob(job) || !ghCiUnwatched(options.home, job.project)),
 			pr: async (job, prUrl) => watchChangeRequest(options.home, job.project, prUrl, () => ghPrRest({ cwd: this.#clonePath(job.job_id) })(prUrl)),
 			runs: async (job, head, timeoutMs) => (isGitlabJob(job) ? [] : ghCiRuns({ cwd: this.#clonePath(job.job_id), timeoutMs })(head)),
 			head: async (job) =>
@@ -657,7 +657,7 @@ export class CommandPost {
 			home: options.home,
 			jobs: () => this.ledger().read().jobs,
 			ownPrUrls: () => this.fleet.list().flatMap((record) => (record.receipts ?? []).flatMap((receipt) => (receipt.kind === "pr" && receipt.url ? [receipt.url] : []))),
-			repoOf: (project) => githubRepoFromCloneUrl(this.registry.get(project)?.clone_url ?? ""),
+			repoOf: (project) => (ghCiUnwatched(options.home, project) ? undefined : githubRepoFromCloneUrl(this.registry.get(project)?.clone_url ?? "")),
 			pr: async (target) => ghPrRest({ cwd: this.registry.pathOf(target.project) })(target.url),
 			runs: async (owner, repo, sha) => ghForeignRuns({ cwd: options.home })(owner, repo, sha),
 			disabled: () => this.ciWatch.disabled,
@@ -811,7 +811,7 @@ export class CommandPost {
 			head: async (branch, jobId) =>
 				gitRemoteHead({ cwd: dirFor(jobId), fallback: (id) => this.reportedHeadSha(id) })(branch, jobId),
 			runs: async (_branch, jobId, head) => ghCiRuns({ cwd: dirFor(jobId) })(head),
-			unsupported: (jobId) => gitlabCiUnsupported(this.fleet.get(jobId) as WatchableRecord | undefined),
+			unsupported: (jobId) => gitlabCiUnsupported(this.home, this.fleet.get(jobId) as WatchableRecord | undefined),
 			// cp-no-ci-repo-derived: asked only when the branch has no runs at all, and
 			// only ever able to *unblock* a row — an unreadable answer defers exactly as
 			// zero runs always did. Without it a project with no CI defers its ship row

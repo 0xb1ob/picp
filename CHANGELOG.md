@@ -6,7 +6,7 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
-- #588: the operator threads feature (cp-xmw2) is deleted end to end: `/api/threads*`, the thread journal and views, the Sessions thread chips, sidebar, picker and New thread dialog, `cp_parent thread_bind` and `thread`, and the operator note's thread line. A stale `thread` on `POST /api/operator/message` is accepted and ignored; a legacy `; thread=` marker still parses. Migration: none; `state/operator/threads.jsonl` is left on disk unread, and the main session's `cp_parent` schema changes on its next bridge load.
+- Fix: the main-CI watch, the held-PR CI watch, the foreign-PR CI watch and the merge-ask CI gate no longer ask `gh` about a project whose origin is on a non-github.com host with no `cp_project forge` declared; it is skipped (a merge ask defers as CI unknown), logged once per project per process ("CI watch disabled: non-GitHub remote, no forge declared"), never a per-tick failure wake. GitHub projects keep every wake. Accepted narrowing: a GitHub Enterprise origin is skipped too (GitHub Enterprise was never supported, see `forge-url.ts`). Migration: none.
 
 - #576: on the systemd backend each worker runs in its own `systemd-run --user --scope` unit (`cp-worker-<job>-<rand>`, `MemoryMax` from `worker_memory_max` in `data/daemon.json`, default 6G, `MemorySwapMax=0`), so a runaway worker is killed alone instead of taking cp-daemon down. When the scope cannot start, the worker spawns unscoped and this is logged once. `/doctor` warns `service.worker_scope`. A new e2e pins that a SIGKILLed test runner leaks no dashboard viewer. Migration: none; the parent cp-daemon starts after the update carries the setting.
 
