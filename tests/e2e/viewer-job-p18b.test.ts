@@ -71,11 +71,11 @@ test("P18-transcript-ui: the Transcript tab groups tools, files the report and r
 
 	const unpublished = await view.open("#job/cp-u?tab=transcript");
 	await unpublished.find(".jt-report");
-	assert.equal(unpublished.$(".jt-report a"), null, "no report link without a published report");
+	assert.equal(unpublished.$(".jt-report a") === null, true, "no report link without a published report");
 	const bare = await view.open("#job/cp-none?tab=transcript");
 	assert.match((await bare.find('.job-transcript [role="status"]')).textContent!, /No worker session recorded/);
-	assert.equal(bare.$(".jt-jump"), null, "no jump chips for absent blocks");
-	assert.equal(tab.$(".session-steps"), null, "the job transcript never serves the steps variant");
+	assert.equal(bare.$(".jt-jump") === null, true, "no jump chips for absent blocks");
+	assert.equal(tab.$(".session-steps") === null, true, "the job transcript never serves the steps variant");
 
 	// Sessions serves the steps variant of the same row: a pill whose closed card still holds the wake notice, opened by
 	// a click, and with Tools on every card open and no pill.
@@ -84,7 +84,7 @@ test("P18-transcript-ui: the Transcript tab groups tools, files the report and r
 	assert.deepEqual([dashed.className.split(" ").includes("tool-run-solid"), dashed.querySelector(":scope > button")?.className], [false, "session-tools"],
 		"Sessions serves the same tool-run row and button, without solid");
 	assert.equal(dashed.querySelector(".session-steps-face")?.textContent, "≡ 4 steps · ../bad ▸", "the pill counts the notice and names its job");
-	assert.deepEqual([!!dashed.querySelector(".session-steps-card .session-bridge"), dashed.querySelector(".session-steps-rows")], [true, null],
+	assert.deepEqual([!!dashed.querySelector(".session-steps-card .session-bridge"), dashed.querySelector(".session-steps-rows") === null], [true, true],
 		"closed, the card holds the notice and no rows");
 	sessions.click(dashed.querySelector("button")!);
 	const link = await sessions.find(".session-steps-link");

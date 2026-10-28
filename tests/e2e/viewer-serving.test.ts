@@ -789,7 +789,7 @@ test("P21-render-empty: an empty home's Overview is a calm strip with down paren
 	assert.equal(chip("main CI")?.querySelector("strong")?.getAttribute("title"), "no red latch", "no latch is neutral, never green");
 	assert.ok(chip("main CI")?.querySelector(".overview-dot-idle"), "no latch has the idle dot");
 	const clear = tab.$("#awaiting.overview-clear")!;
-	assert.equal(clear.querySelector("a")?.getAttribute("href"), "#decided"); assert.equal(clear.querySelector("h2"), null);
+	assert.equal(clear.querySelector("a")?.getAttribute("href"), "#decided"); assert.equal(clear.querySelector("h2") === null, true);
 });
 
 test("P21-render-asks: four open asks show Needs you · 4 with at most three lines, escaped question text and no inline script", { timeout: 120_000 }, async (t) => {

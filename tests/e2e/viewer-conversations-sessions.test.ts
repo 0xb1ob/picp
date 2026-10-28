@@ -297,13 +297,13 @@ test("P19-sessions-qa: the operator tier shows decisions and every ask state, ne
 	assert.doesNotMatch(text, /PARENT-REPLY-MUST-NOT-APPEAR|Parent reply via main session|worth a look|cp-done|told you/);
 	for (const shown of [/send ps-20260926103900-1234abcd/, /Inside the approved objective/, /decided for you/, /awaiting you/, /Question ask-bb/, /Question ask-cc/, /Trace a decision/]) assert.match(text, shown);
 	assert.equal(decisions.$$('a[href*="transcript="], .session-views').length, 0, "audit P4 #27: no Decisions / Full transcript toggle");
-	assert.equal(decisions.$('[aria-label="Operator session file"]'), null, "no file picker before the transcript view");
+	assert.equal(decisions.$('[aria-label="Operator session file"]') === null, true, "no file picker before the transcript view");
 
 	const worker = await d.open("#sessions?view=workers&id=cp-live");
 	const pill = await worker.find("button.session-tools");
 	assert.deepEqual([pill.getAttribute("aria-expanded"), pill.closest(".session-tool-run.session-steps") !== null], ["false", true]);
 	assert.match(pill.textContent ?? "", /≡ 1 step/, "the shared ToolRunRow's collapsed steps pill");
-	assert.equal(worker.$(".session-tool"), null, "a hidden tool call renders neither its summary nor its result");
+	assert.equal(worker.$(".session-tool") === null, true, "a hidden tool call renders neither its summary nor its result");
 	assert.doesNotMatch(worker.text(), /Full file contents/);
 	assert.deepEqual([worker.$$("strong").some((b) => b.textContent === "Checked"), worker.$$("code").some((c) => c.textContent === "src/main.ts")], [true, true]);
 	assert.ok(worker.text().includes("<script>alert(1)</script>") && !worker.$("script"), "markup in a reply is text");
