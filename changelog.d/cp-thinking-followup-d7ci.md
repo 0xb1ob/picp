@@ -1,0 +1,1 @@
+- Follow-up to the thinking setting: a `set_thinking_level` that pi answers with `success: false` at parent rotation is now one `parent rotate kept thinking: …` error notice (it was silently dropped); the rotation still completes. New e2e cases: a thinking saved in Settings reaches the next parent start's `--thinking`, and the refused-rotation path.

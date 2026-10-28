@@ -21,6 +21,7 @@ import { Scheduler } from "../../src/scheduler.ts";
 import { readScheduleFile } from "../../src/viewer/schedule-core.ts";
 import { nativePolicyDraft, policyFromLegacy } from "../../src/viewer/schedule-policy.ts";
 import type { ControlPorts } from "../../src/dashboard-control.ts";
+import { CpBridge } from "../../src/cp-bridge.ts";
 import { settingsPorts } from "../../src/settings-control.ts";
 import { appendScheduleControlLine } from "../../src/viewer/control-audit.ts";
 import { controlConfigFile, controlJournalFile, controlRecordFile, controlSocketFile, readControlRecord, scheduleControlFile } from "../../src/viewer/control-files.ts";
@@ -651,6 +652,28 @@ test("P20-settings-thinking: parent and operator thinking selects save to their 
 	await until(() => ui.posts().length, (n) => n === 3, "the restore post");
 	assert.deepEqual(ui.posts()[2]!.json.keys, ["models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"]);
 	await until(() => ownerJson("operator.json"), (doc) => !("thinking" in doc), "the restore");
+});
+
+test("P20-settings-thinking-launch: a parent thinking saved in Settings is the next parent start's --thinking", { timeout: 120_000 }, async (t) => {
+	const ui = await settingsTab(t);
+	const people = ui.section("Parent and operator models");
+	await ui.choose(people.querySelector("#setting-models-parent_thinking")!, "xhigh");
+	await ui.press(people, "Save");
+	await until(() => ui.posts().length, (n) => n === 1, "the save");
+	assert.equal(ui.posts()[0]!.status, 200);
+	const argvFile = join(ui.view.home, "fake-parent.argv");
+	const previous = process.env.FAKE_PARENT_ARGV;
+	process.env.FAKE_PARENT_ARGV = argvFile;
+	const bridge = new CpBridge();
+	t.after(async () => { await bridge.stop(); if (previous === undefined) delete process.env.FAKE_PARENT_ARGV; else process.env.FAKE_PARENT_ARGV = previous; });
+	await bridge.start({ home: ui.view.home, mode: "multi", model: "mock/parent", piBin: join(REPO_ROOT, "tests/fixtures/fake-parent.mjs"), requestTimeoutMs: 5_000 });
+	const argv = JSON.parse(readFileSync(argvFile, "utf8").trim().split("\n").at(-1)!) as string[];
+	assert.equal(argv[argv.indexOf("--thinking") + 1], "xhigh", JSON.stringify(argv));
+	assert.equal(argv.filter((arg) => arg === "--thinking").length, 1);
+	await bridge.stop();
+	await bridge.start({ home: ui.view.home, mode: "multi", model: "mock/explicit", modelExplicit: true, piBin: join(REPO_ROOT, "tests/fixtures/fake-parent.mjs"), requestTimeoutMs: 5_000 });
+	const explicit = JSON.parse(readFileSync(argvFile, "utf8").trim().split("\n").at(-1)!) as string[];
+	assert.equal(explicit[explicit.indexOf("--thinking") + 1], "xhigh", "an explicit start model keeps the saved thinking");
 });
 
 test("P20-settings-listing: while pi's first listing runs, the current value and Custom… only, then the list after a retry", { timeout: 120_000 }, async (t) => {

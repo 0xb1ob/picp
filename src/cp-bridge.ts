@@ -482,7 +482,7 @@ export class CpBridge {
 			const kept = this.#model;
 			if (configured && configured !== kept) await this.#setModel(proc, configured).catch((error: Error) => this.#emit({ kind: "error", stale: false, text: `parent rotate kept ${kept}: ${error.message}`, receipt: emptyReceipt(), paths: [] }));
 			const level = this.#options?.thinking ? undefined : parentThinkingSetting(this.#home);
-			if (level) await proc.request("set_thinking_level", { level }, this.#options?.requestTimeoutMs).catch((error: Error) => this.#emit({ kind: "error", stale: false, text: `parent rotate kept thinking: ${error.message}`, receipt: emptyReceipt(), paths: [] }));
+			if (level) await proc.request("set_thinking_level", { level }, this.#options?.requestTimeoutMs).then((response) => { if (response.success === false) throw new CpBridgeError(`set_thinking_level ${level} rejected: ${response.error ?? "unknown error"}`); }).catch((error: Error) => this.#emit({ kind: "error", stale: false, text: `parent rotate kept thinking: ${error.message}`, receipt: emptyReceipt(), paths: [] }));
 			return { sessionFile: current, archivedFile };
 		} finally { this.#controlBusy = false; }
 	}
