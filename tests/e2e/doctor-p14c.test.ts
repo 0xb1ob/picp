@@ -166,7 +166,7 @@ test("P14-doctor-home: a healthy bridge-launched home is green with a fix on eve
 	const bare = await p.doctor();
 	assert.equal(one(bare, "parent.standing_orders")?.severity, "warn");
 	assert.match(one(bare, "parent.standing_orders")?.fix ?? "", /standing-orders\.md/);
-	assert.match(one(bare, "parent.compact_threshold")?.what ?? "", /default 200000/);
+	assert.match(one(bare, "parent.compact_threshold")?.what ?? "", /default 150000/);
 	put(h, `${LAYOUT.data}/parent.json`, '{"compact_at_tokens":0}');
 	assert.equal(one(await p.doctor(), "parent.compact_threshold")?.severity, "warn");
 	put(h, `${LAYOUT.data}/parent.json`, '{"compact_at_tokens":150000}');
