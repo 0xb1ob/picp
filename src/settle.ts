@@ -126,24 +126,22 @@ export const MAX_REPORT_NUDGES = 1;
 export const MAX_RECOVERY_PROMPTS = 2;
 
 /**
- * The nudge itself. Deliberately short, deliberately imperative, and it names
- * the one legal shape of the answer: the worker is not being asked whether it
- * is finished, it is being told that finishing means reporting. `blocked` is
- * offered as a first-class outcome so a worker that genuinely cannot finish
- * has somewhere to go other than silence.
+ * The nudge: report once done, keep working while acceptance is unmet; `blocked` is for a real blocker only.
  */
 export const REPORT_NUDGE_TEXT = [
 	"You have stopped without calling report_result. Your work does not reach the operator until you do:",
 	"the parent wakes on envelopes, and there is no other channel — a pushed branch, an open PR and a written",
 	"artifact are all invisible to it until an envelope is filed.",
 	"",
-	"Call report_result now, exactly once, as your only remaining action:",
-	'  - status "done" with the summary of what you delivered (and pr_url for delivery: pr), or',
-	'  - status "blocked" with concrete blockers if the work is not finished.',
+	"If the task's acceptance is met, call report_result exactly once, as your only remaining action:",
+	'  - status "done" with the summary of what you delivered (and pr_url for delivery: pr).',
 	"",
-	"Do not redo the work, do not re-verify, do not push again. If the work is complete, report it as done;",
-	"if it is not, report it as blocked. This is the only prompt you get: after it the job is recorded as",
-	"having finished without reporting, and a human has to reconstruct what you did.",
+	"If the acceptance is NOT met and you are under your tool-call and wall-clock caps, keep working: continue the",
+	"task, and report only when it is done, blocked, or capped.",
+	"",
+	'Report status "blocked" with concrete blockers only for a real blocker you cannot get past, never because the work',
+	"is merely unfinished. Do not redo finished work, do not re-verify, do not push again. This is the only prompt you",
+	"get: after it the job is recorded as having finished without reporting, and a human has to reconstruct what you did.",
 ].join("\n");
 
 /**
@@ -172,18 +170,20 @@ export function recoveryPromptText(
 	const last = attempt >= MAX_RECOVERY_PROMPTS;
 	return [
 		`You stopped without calling report_result, and your work is still sitting in the worktree, uncommitted or unpushed.`,
-		`Do NOT redo it, do NOT re-analyse it, do NOT start anything new. It is already there.`,
+		`Do NOT redo it and do NOT re-analyse it. It is already there.`,
 		"",
 		`What the parent observed in ${record.worktree} at ${work.observed_at}:`,
 		`  branch ${record.branch}; ${origin}`,
 		`  ${describeUnreportedWork(work)}`,
 		...(shown.length > 0 ? ["  uncommitted paths:", ...shown] : []),
 		"",
-		"Finish the delivery from exactly that state, and nothing more:",
+		"If the task's acceptance is already met, finish the delivery from exactly that state, and nothing more:",
 		`  1. commit what is there on branch ${record.branch} (git add -A, then git commit -F <file> or -m "…"; never a detached HEAD).`,
 		"  2. push it (a plain git push, never a force push), then verify: git status --porcelain empty, git rev-parse HEAD.",
 		`  3. call report_result exactly once — status "done" with head_sha (and the PR url for delivery: ${record.delivery}),`,
 		'     or status "blocked" with the exact command and error that stopped you.',
+		"If the acceptance is NOT met yet and you are under your tool-call and wall-clock caps, do not stop: continue the",
+		"task from this state, commit and push as you go, and report only when it is done, blocked, or capped.",
 		"",
 		last
 			? `This is automatic recovery attempt ${attempt} of ${MAX_RECOVERY_PROMPTS}, and the last one: after it no further prompt is sent, the job is recorded as unreported-with-work, and a human has to reconstruct it by hand.`

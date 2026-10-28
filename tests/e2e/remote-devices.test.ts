@@ -114,6 +114,11 @@ async function rig(t: TestContext, { push = true } = {}) {
 		writeFileSync(tunnelConfigFile(dataDir), JSON.stringify({ schema_version: 1, enabled: true, mode: "quick", port: remotePort, binary: "/opt/cf/cloudflared", revision: 1 }));
 		writeFileSync(tunnelRuntimeFile(stateDir), JSON.stringify({ schema_version: 1, origin: ORIGIN, generation, revision: 1, state: "running", mode: "quick", port: remotePort, pid: process.pid, binary: "/opt/cf/cloudflared", argv: ["tunnel"], updated_at: new Date().toISOString(), ...runtime }));
 	};
+	/** Moves the tunnel records to a fresh remote port; the viewer re-reads them on its next check. */
+	const repick = async () => {
+		remotePort = await freePort();
+		for (const file of [tunnelConfigFile(dataDir), tunnelRuntimeFile(stateDir)]) writeFileSync(file, JSON.stringify({ ...json(file), port: remotePort }));
+	};
 	bind();
 	if (push) initPush({ dataDir, origin: ORIGIN });
 	let peer = 0;
@@ -167,8 +172,12 @@ async function rig(t: TestContext, { push = true } = {}) {
 		answer: (fn: typeof answer) => (answer = fn),
 		advance: (ms: number) => writeFileSync(clock, String(Number(readFileSync(clock, "utf8")) + ms)),
 		sender: () => start(process.execPath, [join(REPO_ROOT, "src/push/device-notify.ts")]),
-		/** Waits for the remote listener's line for `generation`, printed after byte `from` of the viewer's output. */
-		listening: (proc: Proc, generation = 1, from = 0) => until(() => proc.out().slice(from), (out) => out.includes(`listening on 127.0.0.1:${remotePort} for ${ORIGIN} (generation ${generation},`), `the remote listener (generation ${generation})\n${proc.out()}`),
+		/** Waits for the remote listener's line for `generation` after byte `from`; a stolen remote port is re-picked. */
+		listening: (proc: Proc, generation = 1, from = 0) => until(async () => {
+			const out = proc.out().slice(from);
+			if (out.includes(`cannot listen on 127.0.0.1:${remotePort} (EADDRINUSE)`)) await repick();
+			return out;
+		}, (out) => out.includes(`listening on 127.0.0.1:${remotePort} for ${ORIGIN} (generation ${generation},`), `the remote listener (generation ${generation})\n${proc.out()}`),
 		stop: async (proc: Proc) => (proc.child.kill("SIGKILL"), await proc.exited),
 		socket: (op: string, args: Record<string, unknown> = {}) => deviceControlRequest(stateDir, op, args),
 		tunnel: (...argv: string[]) => {
