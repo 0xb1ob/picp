@@ -46,6 +46,7 @@ import { registerOperatorCompact } from "../../src/operator-compact.ts";
 import { OPERATOR_NOTE } from "../../src/operator-note.ts";
 import { operatorCacheWarming } from "../../src/operator-cache-warming.ts";
 import { AskGuard, lastAssistantText } from "../../src/ask-guard.ts";
+import { HeaderGuard } from "../../src/header-guard.ts";
 import { operatorStartContext } from "../../src/operator-context.ts";
 import { ALWAYS_AVAILABLE, registryProbe } from "../../src/routing.ts";
 import { detectCiWait, detectSleepLoop } from "../../src/ci-wait.ts";
@@ -327,6 +328,7 @@ export default function (pi: ExtensionAPI): void {
 
 	// cp-6fyl E: a human question in prose with no `cp_parent ask` is forced back once, then carded (src/ask-guard.ts).
 	const askGuard = new AskGuard();
+	const headerGuard = new HeaderGuard(() => ({ home: (connectedTarget ?? resolveOperatorTarget()).home, stateDir: operatorStateDir(), sessionFile: sessionCtx?.sessionManager?.getSessionFile() ?? process.env.PI_SESSION_FILE }));
 	const guarded = <T>(what: string, fn: () => T): T | undefined => {
 		try { return fn(); } catch (error) { setStatusLine(sessionCtx, "ask-guard", `ask guard: ${what} failed (${(error as Error).message})`); return undefined; }
 	};
@@ -344,11 +346,13 @@ export default function (pi: ExtensionAPI): void {
 		if (outcome !== undefined && outcome !== "completed") return undefined; // an aborted or failed run is never nudged
 		const result = guarded("settle check", () => askGuard.beforeSettle(lastAssistantText(context?.contextMessages), operatorAsks));
 		if (result?.card) setStatusLine(sessionCtx, "ask-guard", `ask guard: opened ${result.card.id} for a question asked in prose`);
-		return result?.continue ? { entries: result.entries, continue: true } : undefined;
+		if (result) return result.continue ? { entries: result.entries, continue: true } : undefined;
+		try { return headerGuard.beforeSettle(context?.contextMessages); } // issue 589: only when the ask guard stayed quiet
+		catch (error) { setStatusLine(sessionCtx, "header-guard", `header guard: failed (${(error as Error).message})`); return undefined; }
 	});
 	pi.on("agent_settled", async (_event, ctx) => {
 		sessionCtx = ctx ?? sessionCtx;
-		askGuard.runEnded(); // pi emits agent_start for every loop, a forced continuation included: a run ends only when it settles
+		askGuard.runEnded(); headerGuard.runEnded(); // pi emits agent_start for every loop, a forced continuation included: a run ends only when it settles
 		consumer.settled({ idle: sessionCtx?.isIdle?.() ?? false, pending: (sessionCtx?.hasPendingMessages?.() ?? true) || deferredRelays > 0 });
 		// cp-y43c: hand one queued dashboard message over from a macrotask: pi defers a prompt sent inside agent_settled
 		// behind its own settle-time turns and refuses it if one of them compacts (never seen, never failed).
