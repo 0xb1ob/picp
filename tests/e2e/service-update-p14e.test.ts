@@ -552,8 +552,22 @@ test("P14e-update-nohost: a respawned host that died at once is verified, never 
 	b.plan({ onStop: [{ path: host.record(2), text: JSON.stringify(respawned) }, { path: host.stopped, text: JSON.stringify(marker) }] });
 	advanceBase(b.repo, "n.txt", "n\n");
 	const state = await b.run();
-	assert.notEqual(state?.last_result, "updated", last(b));
+	assert.ok(["rolled_back", "rollback_failed"].includes(state?.last_result ?? ""), last(b));
+	assert.ok(b.hostCalls().includes("host stop [{\"by\":\"update\"}]"), "the live gen 1 host was stopped");
 	assert.doesNotMatch(state?.detail ?? "", /viewer verified only/);
+});
+
+test("P14e-update-nohost: a dead host with an older update marker is applied without a host stop", { timeout: 300_000 }, async (t) => {
+	// Gen 2 is dead and the marker is an update's for gen 1: no stop can reach a host, so none is asked (no NO_HOST throw).
+	const b = await bench(t);
+	const host = parentHostPaths(b.home, "multi");
+	const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+	writeFileSync(host.record(2), JSON.stringify({ ...JSON.parse(readFileSync(host.record(1), "utf8")), pid: dead, socket: join(b.sm, "gone.sock") }));
+	writeFileSync(host.stopped, JSON.stringify({ gen: 1, at: isoTimestamp(), by: "update" }));
+	advanceBase(b.repo, "n.txt", "n\n");
+	const state = await b.run();
+	assert.deepEqual(b.hostCalls(), [], last(b));
+	assert.doesNotMatch(state?.detail ?? "", /host stop failed/, last(b));
 });
 
 test("P14e-update-converge: a newer tip or a drain timeout never restarts the busy clock", { timeout: 300_000 }, async (t) => {
