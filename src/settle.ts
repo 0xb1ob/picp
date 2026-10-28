@@ -141,9 +141,10 @@ export const REPORT_NUDGE_TEXT = [
 	'  - status "done" with the summary of what you delivered (and pr_url for delivery: pr), or',
 	'  - status "blocked" with concrete blockers if the work is not finished.',
 	"",
-	"Do not redo the work, do not re-verify, do not push again. If the work is complete, report it as done;",
-	"if it is not, report it as blocked. This is the only prompt you get: after it the job is recorded as",
-	"having finished without reporting, and a human has to reconstruct what you did.",
+	"Do not redo finished work, do not re-verify, do not push again. If the work is complete, report it as done;",
+	"if you are blocked, report it as blocked. If the task is not finished and you are under your tool-call and",
+	"wall-clock caps, continue it and report only when it is done, blocked, or capped. This is the only prompt you get:",
+	"after it the job is recorded as having finished without reporting, and a human has to reconstruct what you did.",
 ].join("\n");
 
 /**
@@ -172,18 +173,20 @@ export function recoveryPromptText(
 	const last = attempt >= MAX_RECOVERY_PROMPTS;
 	return [
 		`You stopped without calling report_result, and your work is still sitting in the worktree, uncommitted or unpushed.`,
-		`Do NOT redo it, do NOT re-analyse it, do NOT start anything new. It is already there.`,
+		`Do NOT redo it and do NOT re-analyse it. It is already there.`,
 		"",
 		`What the parent observed in ${record.worktree} at ${work.observed_at}:`,
 		`  branch ${record.branch}; ${origin}`,
 		`  ${describeUnreportedWork(work)}`,
 		...(shown.length > 0 ? ["  uncommitted paths:", ...shown] : []),
 		"",
-		"Finish the delivery from exactly that state, and nothing more:",
+		"If the task's acceptance is already met, finish the delivery from exactly that state, and nothing more:",
 		`  1. commit what is there on branch ${record.branch} (git add -A, then git commit -F <file> or -m "…"; never a detached HEAD).`,
 		"  2. push it (a plain git push, never a force push), then verify: git status --porcelain empty, git rev-parse HEAD.",
 		`  3. call report_result exactly once — status "done" with head_sha (and the PR url for delivery: ${record.delivery}),`,
 		'     or status "blocked" with the exact command and error that stopped you.',
+		"If the acceptance is NOT met yet and you are under your tool-call and wall-clock caps, do not stop: continue the",
+		"task from this state, commit and push as you go, and report only when it is done, blocked, or capped.",
 		"",
 		last
 			? `This is automatic recovery attempt ${attempt} of ${MAX_RECOVERY_PROMPTS}, and the last one: after it no further prompt is sent, the job is recorded as unreported-with-work, and a human has to reconstruct it by hand.`
