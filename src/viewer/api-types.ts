@@ -43,6 +43,8 @@ export interface SessionEntry {
  project?: string | null;
  /** Operator tier, a reply with two or more `[project]` sections (issue 589); `text` stays the unsplit original. */
  segments?: {text: string; projects: string[]; source: "header" | "id" | "reply" | "general"}[];
+ /** Operator tier: a reply the header guard folded (issue 589), re-sent (`superseded`) or a `NO-PROJECT` answer (`hidden`). */
+ collapsed?: "superseded" | "hidden";
  /** A cp-bridge notice parsed off its first line (slice F). */
  bridge?: {kind:string; job:string|null; id:string|null; receipt:string|null} | null;
  /** Full transcript: the `ans-` id a `cp_parent answer` call posted (or, on a duplicate, the first one it names). */

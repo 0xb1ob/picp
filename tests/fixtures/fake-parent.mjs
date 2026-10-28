@@ -216,6 +216,10 @@ rl.on("line", (line) => {
 		write({ type: "response", command: type, id, success: true, data: { provider: record.provider, id: record.modelId } });
 		return;
 	}
+	if (type === "set_thinking_level" && process.env.FAKE_PARENT_REJECT_THINKING === "1") {
+		write({ type: "response", command: type, id, success: false, error: `fixture refuses thinking ${record.level}` });
+		return;
+	}
 	if (type === "get_entries") {
 		write({ type: "response", command: type, id, success: true, data: { entries: readEntries(), leafId: null } });
 		return;

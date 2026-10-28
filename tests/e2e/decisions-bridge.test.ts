@@ -10,6 +10,10 @@ import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { DETECTED_ASK_PREFIX } from "../../src/ask-guard.ts";
+import { HEADER_NUDGE } from "../../src/header-guard.ts";
+import { MandateStore } from "../../src/mandate.ts";
+import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
+import { replySplitsFile } from "../../src/viewer/reply-splits.ts";
 import {
 	DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, type GateVerdict, isoTimestamp, LAYOUT, layoutForHome, paths, SCHEMA_VERSION,
 } from "../../src/contracts.ts";
@@ -21,7 +25,7 @@ import { OperatorRelayOutbox, operatorRelayOutboxFile } from "../../src/operator
 import { PushDeliveryStore } from "../../src/push/deliveries.ts";
 import { initPush } from "../../src/push/keys.ts";
 import { ScheduleRunStore } from "../../src/schedule-runs.ts";
-import type { DecisionsResponse } from "../../src/viewer/api-types.ts";
+import type { DecisionsResponse, SessionsResponse } from "../../src/viewer/api-types.ts";
 import { policyFromLegacy } from "../../src/viewer/schedule-policy.ts";
 import { createViewer } from "../../src/viewer/server.ts";
 import {
@@ -32,12 +36,12 @@ type Home = ReturnType<typeof createScratchHome>;
 const NUDGE = "opened no cp_parent ask";
 
 /** A cp-bridge pi on `home` whose mock model runs `steps`; torn down after the test. */
-async function bridge(t: TestContext, home: Home, steps: ScriptStep[], repeat = false) {
+async function bridge(t: TestContext, home: Home, steps: ScriptStep[], repeat = false, sessionDir?: string) {
 	const provider = await MockProvider.start();
 	const script = `bridge-${Math.random().toString(16).slice(2)}`;
 	const model = provider.addScript(script, steps, repeat ? { onExhausted: "repeat" } : undefined);
 	const agentDir = createAgentDir({ provider });
-	const pi = startPiChild({ cwd: home.path, model, env: { ...agentDir.env, PI_HOME: home.path, CP_HOME: home.path, CP_MODE: "multi" }, extensions: [CP_BRIDGE_EXTENSION] });
+	const pi = startPiChild({ cwd: home.path, model, sessionDir, env: { ...agentDir.env, PI_HOME: home.path, CP_HOME: home.path, CP_MODE: "multi" }, extensions: [CP_BRIDGE_EXTENSION] });
 	let closed = false;
 	const close = async () => {
 		if (closed) return;
@@ -170,6 +174,69 @@ test("decisions: the ask guard nudges a prose question once per run, cards it fo
 	assert.equal((failed as { isError?: boolean } | undefined)?.isError, true, "the bad ask was refused");
 	const status = pi.stderr() + JSON.stringify(pi.records().filter((r) => r.type === "extension_ui_request"));
 	assert.doesNotMatch(status, /ask guard: [^"]*failed/, "a blank line is skipped, never a failed answer");
+});
+
+test("decisions: the header guard forces one re-send of a reply naming project work without a [project] header, records the outcome in the sidecar the transcript folds, and never adds a turn to a plain or an ask-nudged reply", { timeout: 240_000 }, async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const layout = layoutForHome("multi", home.path), stateDir = join(home.path, layout.state);
+	for (const name of ["demo-app", "other-app"]) mkdirSync(join(home.path, layout.projects, name), { recursive: true });
+	const fleet = new FleetStore({ home: home.path });
+	await fleet.add(fleetJob(home.path, "cp-1234", { project: "demo-app" }));
+	await fleet.add(fleetJob(home.path, "cp-5678", { project: "other-app" }));
+	new MandateStore(home.path).issue({ projects: ["demo-app"], objective: "issue 589", expiry: "2099-01-01T00:00:00Z", spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 5 });
+	const R = {
+		first: "cp-1234 landed and ask-0a1b2c3d4e5f is open.", resent: "[demo-app] cp-1234 landed; ask-0a1b2c3d4e5f is open.",
+		mixed: "cp-1234 and cp-5678 merged.", stillMixed: "cp-1234 and cp-5678 are both merged.", bare: "cp-1234 is done.",
+	};
+	// Each run: [prompt, replies, header-nudged]. A miss gets one re-send; plain, headed and ask-nudged runs add no turn.
+	const runs: Array<[string, string[], boolean]> = [
+		["Hi.", ["Done."], false],
+		["Status?", ["[demo-app] cp-1234 landed."], false],
+		["Status?", [R.first, R.resent], true],
+		["Next?", [R.mixed, R.stillMixed], true],
+		["And?", [R.bare, "NO-PROJECT"], true],
+		["Proceed?", ["cp-1234 landed. Should I proceed?", "NO-ASK"], false],
+	];
+	const sessionDir = join(home.path, "operator-sessions");
+	const { pi, provider, script } = await bridge(t, home, runs.flatMap(([, replies]) => replies.map(text)), false, sessionDir);
+	const requests = () => provider.requests(script);
+	const headerNudges = (index: number) => JSON.stringify(requests()[index]?.body ?? "").split(HEADER_NUDGE).length - 1;
+	for (const [prompt, replies, nudged] of runs) {
+		const before = requests().length;
+		await turn(pi, prompt);
+		assert.equal(requests().length - before, replies.length, `${replies[0]}: provider requests`);
+		assert.equal(headerNudges(requests().length - 1) > headerNudges(before), nudged, `${replies[0]}: header nudged`);
+	}
+	assert.match(JSON.stringify(requests().at(-1)?.body), new RegExp(NUDGE), "the question run got the ask nudge instead");
+	assert.equal(provider.remaining(script), 0);
+
+	const [file] = readdirSync(sessionDir).filter((name) => name.endsWith(".jsonl")).map((name) => join(sessionDir, name));
+	assert.ok(file, "the bridge session was saved");
+	const sidecar = replySplitsFile(stateDir);
+	const records = readFileSync(sidecar, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+	assert.deepEqual(records.map((r) => [r.type, r.session_file, typeof r.ts, r.block]), [["superseded", file, "number", 0], ["split", file, "number", 0], ["hidden", file, "number", 0]]);
+	assert.deepEqual(records[1].segments, [{ text: R.stillMixed, projects: ["demo-app"], source: "reply" }], "two projects by id: the active mandate's");
+	assert.equal(statSync(sidecar).mode & 0o777, 0o600);
+
+	const sessions = operatorSessionsFile(join(stateDir, "sessions"));
+	mkdirSync(dirname(sessions), { recursive: true });
+	appendFileSync(sessions, `${JSON.stringify({ at: isoTimestamp(), session_file: file })}\n`);
+	const viewer = createViewer({ home: home.path, stateDir, host: "127.0.0.1", port: 0, requireTailnet: true, log: () => {}, operatorStart: { tmux: null, herdr: null } });
+	await new Promise<void>((resolve) => viewer.listen(0, "127.0.0.1", resolve));
+	t.after(() => viewer.close());
+	const bytes = readFileSync(file);
+	const res = await fetch(`http://127.0.0.1:${(viewer.address() as AddressInfo).port}/api/sessions?view=you&transcript=1`);
+	assert.equal(res.status, 200);
+	const says = ((await res.json()) as SessionsResponse).entries.filter((e) => e.kind === "say" && e.who === "Assistant");
+	const shown = (reply: string) => says.find((e) => e.text === reply);
+	assert.equal(shown(R.first)?.collapsed, "superseded", "the reply the re-send replaced folds");
+	assert.deepEqual([shown(R.resent.slice("[demo-app] ".length))?.project, shown(R.resent.slice("[demo-app] ".length))?.collapsed], ["demo-app", undefined]);
+	assert.deepEqual([shown(R.mixed)?.project ?? null, shown(R.mixed)?.collapsed], [null, undefined], "no sidecar record: the read-time split");
+	assert.equal(shown(R.stillMixed)?.project, "demo-app", "the split record overrides the read-time split");
+	assert.equal(shown("NO-PROJECT")?.collapsed, "hidden");
+	assert.equal(shown(R.bare)?.collapsed, undefined);
+	assert.ok(readFileSync(file).equals(bytes), "reading the transcript never rewrites the session file");
 });
 
 const OPTIONS = [{ id: "hold", label: "Hold", consequence: "waits", cost: "time" }];

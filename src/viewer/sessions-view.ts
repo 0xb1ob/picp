@@ -9,6 +9,7 @@ import { localPaths } from "./linkify.ts";
 import { attachPrChips, projectRepos } from "./pr-chips.ts";
 import { parseChangeRequestUrl } from "../forge-url.ts";
 import { projectByRefs, splitReply } from "./reply-split.ts";
+import { applyReplySplits, readReplySplits, replyKey } from "./reply-splits.ts";
 import { decisions } from "./overview-decisions.ts";
 import { parseObject, source, timestamp } from "./overview-read.ts";
 import { modelWindows, operatorContext, parentContext, workerContext } from "./context-usage.ts";
@@ -83,6 +84,10 @@ function refProject(state: ViewerState, d: ReturnType<typeof decisions>): (ref: 
   return key ? repos.find(([,k]) => k === key)?.[0] : jobs.get(ref) ?? asks.get(ref) ?? escalations.get(ref);
  };
 }
+/** The project names and id resolver operator replies split with; the bridge's header guard lints with the same. */
+export function operatorReplyContext(state: ViewerState, now = Date.now()): {projects: Set<string>; projectOf: (ref: string) => string | undefined} {
+ return {projects:projectNames(state),projectOf:refProject(state,decisions(state,now))};
+}
 /**
  * Operator tier chips: a reply splits into `[project]` sections (reply-split.ts), its fallback the project of the
  * last own message; own messages only lose a leading known `[project] ` header, as before issue 589.
@@ -104,10 +109,11 @@ function stampSegments(entries: SessionEntry[], names: Set<string>, projectOf: (
   if (only?.projects.length) e.project = only.projects.join(", ");
  }
 }
-function parseTranscript(state: ViewerState, file: string, sides: {user:string;assistant:string}, backlog = BACKLOG_BYTES): {entries:SessionEntry[];truncated:boolean} {
+function parseTranscript(state: ViewerState, file: string, sides: {user:string;assistant:string}, backlog = BACKLOG_BYTES): {entries:SessionEntry[];truncated:boolean;keys?:Map<SessionEntry,string>} {
  const start = startOffset(file,undefined,backlog);
  const lines = readLines(file,start.offset,backlog);
  const entries: SessionEntry[] = [];
+ const keys = new Map<SessionEntry,string>(); // assistant text block → its reply-splits key
  const calls = new Map<string,SessionEntry>();
  const askCalls = new Set<string>(); // cp_parent ask calls: their result names the ask id
  const answerCalls = new Set<string>(); // cp_parent answer calls: their result names the ans- id (posted, or the first on a duplicate)
@@ -140,7 +146,7 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
    const first = entries.length, cost = num(obj(obj(message.usage)?.cost)?.total);
    for (const [i,block] of (Array.isArray(message.content) ? message.content : []).entries()) {
     const b = obj(block); if (!b) continue;
-    if (b.type === "text" && str(b.text)) entries.push(entry(`${base}-${i}`,at,"say",sides.assistant,String(b.text)));
+    if (b.type === "text" && str(b.text)) { const e=entry(`${base}-${i}`,at,"say",sides.assistant,String(b.text)); keys.set(e,replyKey(message.timestamp,i)); entries.push(e); }
     if (b.type === "toolCall" || b.type === "thinking") {
      const e = entry(`${base}-${i}`,at,"tool",role,b.type === "thinking" ? String(b.thinking ?? "") : `Arguments\n${JSON.stringify(b.arguments ?? {},null,2)}`);
      e.name = b.type === "thinking" ? "thinking" : str(b.name) ?? "tool";
@@ -186,7 +192,7 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
  }
  const uploadMetadata=readUploadMetadata(state.stateDir,entries.flatMap(e=>e.files ?? []));
  for (const e of entries) if (e.files) e.file_metadata=Object.fromEntries(e.files.flatMap(id=>uploadMetadata.has(id) ? [[id,uploadMetadata.get(id)!]] : []));
- return {entries,truncated:start.offset>0};
+ return {entries,truncated:start.offset>0,keys};
 }
 /** The parent session file as the Sessions tier parses it, with a caller-sized tail (Stats reads whole archives). */
 export function parentTranscript(state: ViewerState, file: string, backlog: number): {entries:SessionEntry[];truncated:boolean} {
@@ -296,13 +302,13 @@ function operatorTranscript(state: ViewerState, wanted: string | null, now: numb
  const selected = wanted ? files.find((file) => file.id === wanted) : files[0];
  const warnings: string[] = [];
  let entries: SessionEntry[] = [];
- let truncated = false;
+ let truncated = false, keys = new Map<SessionEntry,string>();
  if (!selected) warnings.push(`No operator session recorded yet (${operatorSessionsFile(dir)})`);
  else {
   try {
    if (!statSync(selected.file).isFile()) throw new Error("not a file");
    const parsed = parseTranscript(state, selected.file, SIDES.you);
-   entries = parsed.entries; truncated = parsed.truncated;
+   entries = parsed.entries; truncated = parsed.truncated; keys = parsed.keys ?? keys;
   } catch (error) {
    const code = (error as NodeJS.ErrnoException).code;
    warnings.push(`Operator transcript ${code === "ENOENT" ? "missing" : "unreadable"}: ${selected.file} (${code ?? "not a file"})`);
@@ -310,6 +316,7 @@ function operatorTranscript(state: ViewerState, wanted: string | null, now: numb
  }
  const d = decisions(state,now), asks = d.askHistory;
  stampSegments(entries,projectNames(state),refProject(state,d));
+ if (selected) applyReplySplits(entries,keys,readReplySplits(state.stateDir,selected.file));
  if (asks.availability === "unavailable") warnings.push("asks unavailable");
  const cards = withAskCards(entries,asks.value);
  const window = windowed(cards,(e)=>e.ask?.state === "open");

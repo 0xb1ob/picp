@@ -10,7 +10,7 @@ import { EscalationStore } from "../../src/escalation.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { acquireParentLock } from "../../src/parent-lock.ts";
 import { parentFile, parentRow } from "../../src/viewer/sessions.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MockProvider, type ScriptStep, startRpc, waitFor } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MockProvider, REPO_ROOT, type ScriptStep, startRpc, waitFor } from "../harness/index.ts";
 
 type StartOptions = { model?: string; modelExplicit?: boolean; home?: string; thinking?: ThinkingLevel };
 
@@ -303,6 +303,27 @@ test("P9h-bridge-escalation: a refused cp_escalate is one error notice, never ke
 	assert.deepEqual(escalations().map((relay) => [relay.escalationId, relay.jobId]), [[stored[0]!.id, job.id]], "one relay, by id");
 	await settled(bridge);
 	assert.equal(errors().length, 1, "the refused call beside a successful one adds no notice");
+});
+
+test("P9h-bridge-thinking-refused: a refused set_thinking_level at rotation is one error notice and the rotation completes", { timeout: 60_000 }, async (t) => {
+	const home = createScratchHome();
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 100000, thinking: "high" }));
+	const previous = process.env.FAKE_PARENT_REJECT_THINKING;
+	process.env.FAKE_PARENT_REJECT_THINKING = "1";
+	const bridge = new CpBridge();
+	t.after(async () => {
+		await bridge.stop(); home.cleanup();
+		if (previous === undefined) delete process.env.FAKE_PARENT_REJECT_THINKING; else process.env.FAKE_PARENT_REJECT_THINKING = previous;
+	});
+	const relays: BridgeRelay[] = [];
+	bridge.onRelay((relay) => { relays.push(relay); });
+	const started = await bridge.start({ home: home.path, mode: "multi", model: "mock/parent", piBin: join(REPO_ROOT, "tests/fixtures/fake-parent.mjs"), requestTimeoutMs: 5_000 });
+	const rotated = await bridge.rotate();
+	assert.notEqual(rotated.sessionFile, started.sessionFile, "the rotation itself completed");
+	assert.equal(bridge.status().sessionFile, rotated.sessionFile);
+	const errors = relays.filter((relay) => relay.kind === "error").map((relay) => relay.text);
+	assert.deepEqual(errors, ["parent rotate kept thinking: set_thinking_level high rejected: fixture refuses thinking high"]);
 });
 
 test("P9h-bridge-operator: the operator main session offers cp_parent and never a fleet tool", { timeout: 60_000 }, async (t) => {
