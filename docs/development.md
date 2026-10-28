@@ -83,6 +83,23 @@ Live-model suites are operator-run only and skipped by default:
 [tests/e2e/README.md](../tests/e2e/README.md) and
 [tests/harness/README.md](../tests/harness/README.md).
 
+### Dagger (local, optional)
+
+`dagger.toml` and `.dagger/modules/picp-dev/` run the `checks` job of `.github/workflows/ci.yml` (plus
+`build:viewer`) and its test shards in containers, each step cached by its inputs: `npm ci` re-runs only
+when `package.json`/`package-lock.json` change. CI does not use it; it is a pre-push verdict.
+
+```bash
+curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=1.0.0-beta.21 BIN_DIR=$HOME/.local/bin sh
+dagger generate                          # once per clone: writes the gitignored SDK client
+dagger check                             # every static check, before each push
+dagger check --check=typecheck           # rerun one check
+dagger api call test-shard --shard=1     # one CI shard (1..8); `node scripts/test-shards.ts files 1` lists it
+```
+
+Run at most one shard at a time, and only when the 1-minute load is under 6. `migration-ledger` reads
+the workspace's HEAD history, so it works in linked worktrees, and re-runs every time (not cacheable at beta.21).
+
 ## CI
 
 `.github/workflows/ci.yml` runs `npm test` on GitHub-hosted `ubuntu-latest`.
