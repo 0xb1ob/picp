@@ -28,8 +28,8 @@ import {
 	validateSettingValue,
 } from "../src/contracts.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "../src/mandate-defaults.ts";
-import { operatorCompactThreshold, operatorModelSetting } from "../src/operator-compact.ts";
-import { parentModelSetting, parentSettings } from "../src/parent-context.ts";
+import { operatorCompactThreshold, operatorModelSetting, operatorThinkingSetting } from "../src/operator-compact.ts";
+import { parentModelSetting, parentSettings, parentThinkingSetting } from "../src/parent-context.ts";
 import { loadCapacityConfig } from "../src/quota.ts";
 import { DEFAULT_ROUTING_CONFIG } from "../src/routing.ts";
 import { readUpdateConfig } from "../src/service/update.ts";
@@ -65,10 +65,10 @@ const write = (home: string, owner: SettingFileOwner, body: unknown) =>
 const fieldOf = (key: SettingKey) => SETTING_FIELDS.find((field) => field.key === key) as SettingField;
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
-test("(a) catalog: 32 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
-	assert.equal(SETTING_KEYS.length, 32);
+test("(a) catalog: 34 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
+	assert.equal(SETTING_KEYS.length, 34);
 	assert.deepEqual(SETTING_FIELDS.map((field) => field.key), [...SETTING_KEYS]);
-	assert.equal(new Set(SETTING_KEYS).size, 32);
+	assert.equal(new Set(SETTING_KEYS).size, 34);
 	assert.ok(Object.isFrozen(SETTING_FIELDS));
 	for (const field of SETTING_FIELDS) {
 		assert.ok(field.key.startsWith(`${field.section}.`), `${field.key} sits in section ${field.section}`);
@@ -109,6 +109,8 @@ function probes(field: SettingField): unknown[] {
 			return [[], ["a/b"], [""], ["x".repeat(field.max_length ?? 1)], ["x".repeat((field.max_length ?? 1) + 1)], Array((field.max_items ?? 1) + 1).fill("a"), 5];
 		case "model_ref":
 			return [null, "a/b", "anthropic/claude-opus-5-5", "ab", "a/", "/b", "a b/c", "", `a/${"x".repeat(126)}`, `a/${"x".repeat(127)}`, 5, true];
+		case "thinking_level":
+			return [null, "off", "max", "high", "huge", "", 5, true];
 		case "rubric": {
 			const row = { id: "r1", role: "implementer", model: "a/b" };
 			return [
@@ -138,11 +140,15 @@ test("(c) range agreement: validateSettingValue accepts exactly what the owner s
 	const loaders: Partial<Record<SettingFileOwner, (field: SettingField, value: unknown) => boolean>> = {
 		"worker-bounds": (_field, value) => (write(home, "worker-bounds", { wall_clock_seconds: value }), accepts(() => homeWallClockSeconds(home), value)),
 		parent: (field, value) =>
-			field.file_key === "model"
+			field.file_key === "thinking"
+				? (write(home, "parent", { compact_at_tokens: 200000, thinking: value }), parentThinkingSetting(home) === (value ?? undefined))
+				: field.file_key === "model"
 				? (write(home, "parent", { compact_at_tokens: 200000, model: value }), parentModelSetting(home) === (value ?? undefined))
 				: (write(home, "parent", { compact_at_tokens: value }), parentSettings(home).compact_at_tokens === value),
 		operator: (field, value) =>
-			field.file_key === "model"
+			field.file_key === "thinking"
+				? (write(home, "operator", { compact_at_tokens: 200000, thinking: value }), operatorThinkingSetting(ownerFile(home, "operator")) === (value ?? undefined))
+				: field.file_key === "model"
 				? (write(home, "operator", { compact_at_tokens: 200000, model: value }), operatorModelSetting(ownerFile(home, "operator")) === (value ?? undefined))
 				: (write(home, "operator", { compact_at_tokens: value }), operatorCompactThreshold(ownerFile(home, "operator")) === value),
 		capacity: (field, value) => {

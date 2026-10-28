@@ -24,7 +24,7 @@ function ports(overrides: Partial<SupervisePorts> = {}): SupervisePorts & { line
 		attach: async () => fakeClient(300),
 		connect: async () => { throw new Error("nothing answers"); },
 		current: () => ({ gen: 1 }),
-		stoppedGen: () => undefined,
+		stoppedGen: () => undefined, operatorStoppedGen: () => undefined,
 		draining: () => false,
 		drainRecord: () => undefined,
 		updateInFlight: () => false,

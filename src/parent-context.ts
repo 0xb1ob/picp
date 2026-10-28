@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { LAYOUT, layoutForHome, type Mandate, ReviewerModelSchema, validate } from "./contracts.ts";
+import { LAYOUT, layoutForHome, type Mandate, ReviewerModelSchema, type ThinkingLevel, ThinkingLevelSchema, validate } from "./contracts.ts";
 import type { ParentStatus } from "./cp-bridge.ts";
 import { EscalationStore } from "./escalation.ts";
 import { FleetStore } from "./fleet.ts";
@@ -42,7 +42,7 @@ export function parentContextStatus(home: string): {
 	try { return JSON.parse(readFileSync(parentContextFile(home), "utf8")); } catch { return {}; }
 }
 
-export const DEFAULT_PARENT_COMPACT_TOKENS = 200000;
+export const DEFAULT_PARENT_COMPACT_TOKENS = 150000;
 
 /** Absent parent.json → the default; an explicit file with a bad value stays `{}` (disabled, doctor warns). */
 export function parentSettings(home: string): { compact_at_tokens?: number } {
@@ -59,6 +59,14 @@ export function parentModelSetting(home: string): string | undefined {
 	try {
 		const model: unknown = JSON.parse(readFileSync(join(home, layoutForHome("multi", home).data, "parent.json"), "utf8"))?.model;
 		return validate(ReviewerModelSchema, model).ok ? (model as string) : undefined;
+	} catch { return undefined; }
+}
+
+/** `data/parent.json` `thinking`: a valid pi level, else undefined (absent, unreadable or invalid = no `--thinking`). */
+export function parentThinkingSetting(home: string): ThinkingLevel | undefined {
+	try {
+		const thinking: unknown = JSON.parse(readFileSync(join(home, layoutForHome("multi", home).data, "parent.json"), "utf8"))?.thinking;
+		return validate(ThinkingLevelSchema, thinking).ok ? (thinking as ThinkingLevel) : undefined;
 	} catch { return undefined; }
 }
 

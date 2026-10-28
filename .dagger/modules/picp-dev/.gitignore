@@ -1,0 +1,3 @@
+# Generated SDK client (~5 MB); `dagger generate` writes it.
+/clients/dagger/
+/node_modules/

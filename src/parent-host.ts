@@ -80,7 +80,7 @@ export interface HostRecord {
 export interface HostPaths {
 	dir: string;
 	log: string;
-	/** `parent-host.stopped.json`: the generation a completed `stop` closed (cp-daemon P2). */
+	/** `parent-host.stopped.json`: the generation a completed `stop` closed, and who stopped it (cp-daemon P2). */
 	stopped: string;
 	record(gen: number): string;
 	socket(gen: number): string;
@@ -101,7 +101,8 @@ export function parentHostPaths(home: string, mode: Mode): HostPaths {
 	};
 }
 
-export interface StopMarker { gen: number; at: string }
+/** `by` is absent on a marker written before issue 537: only an `operator` marker survives a fresh supervisor. */
+export interface StopMarker { gen: number; at: string; by?: "operator" | "update" }
 
 /** The generation an operator stop closed, so a supervisor never respawns it; undefined when absent, a refusal naming the file when unreadable. */
 export function readStopMarker(paths: HostPaths): StopMarker | undefined {
@@ -330,7 +331,8 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 			// Only a completed stop closes the host; a refused or failed one leaves it usable.
 			// The marker lands first, so a supervisor watching this generation never respawns it.
 			const marker = `${paths.stopped}.${process.pid}.tmp`;
-			writeFileSync(marker, `${JSON.stringify({ gen, at: new Date().toISOString() })}\n`, { mode: 0o600 });
+			const by = (options as { by?: unknown }).by === "update" ? "update" : "operator";
+			writeFileSync(marker, `${JSON.stringify({ gen, at: new Date().toISOString(), by })}\n`, { mode: 0o600 });
 			renameSync(marker, paths.stopped);
 			stopping = true;
 			return exit ?? null;

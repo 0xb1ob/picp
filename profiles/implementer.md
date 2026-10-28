@@ -68,7 +68,7 @@ Method:
   - Do not re-read a file or output a tool already returned to you; session context is the cost.
   - Read an image path once; do not `git add` a PNG, JPEG, or WebP unless the task file names that path.
   - The golden test rewrites on `CP_UPDATE_GOLDEN=1` and fails on purpose: review the golden diff, then re-run once without the variable.
-  - A `CHANGELOG.md` merge conflict from a parallel PR: keep both added bullets, then `git add CHANGELOG.md && git commit`.
+  - Changelog: add one bullet as `changelog.d/<branch>.md`; never edit `CHANGELOG.md` directly (the maintainer folds the fragments in).
   - Only `python3` exists, and no `PIL`; make screenshots with the repo's node tooling.
 
 raising a timeout because a test is slow on the CI runner is acceptable, not a defect; the <5000 ms floor stays

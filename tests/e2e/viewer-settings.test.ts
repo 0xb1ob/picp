@@ -306,7 +306,7 @@ test("P20-settings-relay: the session's outcomes pass through with no viewer lin
 	const status = await view.get("/api/settings");
 	assert.equal(status.status, 200);
 	assert.deepEqual([status.body.enabled, status.body.running, status.body.supported, status.body.writable], [true, true, true, true]);
-	assert.equal((status.body.catalog as unknown[]).length, 32);
+	assert.equal((status.body.catalog as unknown[]).length, 34);
 	assert.ok("available_models" in status.body && "models_error" in status.body, "the model list rides the read: a list or a note, never missing");
 	for (const secret of ["secret-gateway", "/v1/secret-path", home]) assert.ok(!status.text.includes(secret), `GET leaks ${secret}`);
 	const revision = (status.body.snapshot as { revision: string }).revision;
@@ -365,7 +365,7 @@ test("P20-model-list: GET /api/settings never waits for pi --list-models; one sh
 	const models = (body: Line) => [body.available_models, body.models_error, body.models_loading];
 	stub.hold();
 	const first = await read();
-	assert.deepEqual([...models(first), (first.catalog as unknown[]).length], [null, null, true, 32], "a listing that never returns answers loading at once");
+	assert.deepEqual([...models(first), (first.catalog as unknown[]).length], [null, null, true, 34], "a listing that never returns answers loading at once");
 	assert.deepEqual(models(await read()), [null, null, true]);
 	await until(stub.calls, (n) => n === 1, "the one background run");
 	assert.equal(stub.calls(), 1, "repeat reads share the one background run");
@@ -499,7 +499,7 @@ test("P20-settings-rubric: rubric edits post the whole row list; restore bodies 
 	await until(() => ui.posts().length, (n) => n === 4, "three restores");
 	assert.deepEqual(ui.posts().slice(1).map((p) => [p.path, p.json.keys ?? p.json.section]), [
 		["/api/settings/restore", ["models.rubric"]],
-		["/api/settings/restore", ["models.parent", "models.operator"]],
+		["/api/settings/restore", ["models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"]],
 		["/api/settings/restore", "grants"],
 	]);
 	const grants = ui.posts()[3]!;
@@ -525,7 +525,7 @@ test("P20-settings-compaction: both keys with what is in force; a bad threshold 
 	const compaction = ui.section("Auto-compaction");
 	const effective = () => [...compaction.querySelectorAll(".settings-effective")].map((p) => p.textContent);
 	assert.match(compaction.querySelector(".settings-help")?.textContent ?? "", /tokens.*next compaction check/);
-	assert.deepEqual(effective(), ["In force: 200000 tokens, from code", "In force: 200000 tokens, from code"]);
+	assert.deepEqual(effective(), ["In force: 150000 tokens, from code", "In force: 200000 tokens, from code"]);
 	const parent = compaction.querySelector("#setting-sessions-parent_compact_at_tokens")!;
 	assert.ok(compaction.querySelector("#setting-sessions-operator_compact_at_tokens"));
 	const save = () => [...compaction.querySelectorAll("button")].find((b) => b.textContent === "Save")!;
@@ -535,16 +535,16 @@ test("P20-settings-compaction: both keys with what is in force; a bad threshold 
 		assert.ok(save().hasAttribute("disabled"), `Save is blocked on ${JSON.stringify(typed)}`);
 	}
 	assert.equal(ui.posts().length, 0, "a blocked Save posts nothing");
-	await ui.enter(parent, "150000");
+	await ui.enter(parent, "175000");
 	assert.equal(compaction.querySelector("[role=alert]") === null, true);
 	await ui.press(compaction, "Save");
 	assert.match((await ui.tab.find(".settings-ok")).textContent ?? "", /^Saved/);
-	assert.equal(ui.posts()[0]!.status, 200, "the real server parses and applies the body"); assert.deepEqual(ui.posts()[0]!.json.changes, { "sessions.parent_compact_at_tokens": 150000 });
-	await until(effective, (now) => now[0] === "In force: 150000 tokens, from file", "the re-read snapshot");
-	assert.deepEqual(effective(), ["In force: 150000 tokens, from file", "In force: 200000 tokens, from code"], "the re-read snapshot shows the written file");
+	assert.equal(ui.posts()[0]!.status, 200, "the real server parses and applies the body"); assert.deepEqual(ui.posts()[0]!.json.changes, { "sessions.parent_compact_at_tokens": 175000 });
+	await until(effective, (now) => now[0] === "In force: 175000 tokens, from file", "the re-read snapshot");
+	assert.deepEqual(effective(), ["In force: 175000 tokens, from file", "In force: 200000 tokens, from code"], "the re-read snapshot shows the written file");
 	await ui.press(compaction, "Restore defaults");
 	assert.deepEqual(ui.posts()[1]!.json.keys, ["sessions.parent_compact_at_tokens", "sessions.operator_compact_at_tokens"]);
-	assert.equal(await until(async () => (await ui.snapshot()).fields.find((f) => f.key === "sessions.parent_compact_at_tokens")!.value, (value) => typeof value === "number" && value !== 150000, "the restore"), 200000, "the restored default");
+	assert.equal(await until(async () => (await ui.snapshot()).fields.find((f) => f.key === "sessions.parent_compact_at_tokens")!.value, (value) => typeof value === "number" && value !== 175000, "the restore"), 150000, "the restored default");
 });
 
 test("P20-settings-readonly: no control token is read only with every control disabled; an absent routing.json is one line, no rubric controls", { timeout: 120_000 }, async (t) => {
@@ -619,6 +619,38 @@ test("P20-settings-unset: picking (unset) saves null", { timeout: 120_000 }, asy
 	await ui.press(people, "Save");
 	await until(() => ui.posts().length, (n) => n === 1, "the save");
 	assert.deepEqual(ui.posts()[0]!.json.changes, { "models.operator": null, "models.parent": "openai/gpt-5" });
+});
+
+test("P20-settings-thinking: parent and operator thinking selects save to their owner files, badge the source, unset and restore", { timeout: 120_000 }, async (t) => {
+	const ui = await settingsTab(t);
+	const people = ui.section("Parent and operator models");
+	assert.deepEqual([...people.querySelectorAll("select[id^=setting-models-]")].map((s) => s.id), ["setting-models-parent", "setting-models-parent_thinking", "setting-models-operator", "setting-models-operator_thinking"]);
+	const parent = people.querySelector("#setting-models-parent_thinking")!;
+	const operator = people.querySelector("#setting-models-operator_thinking")!;
+	const badge = (select: Element) => select.parentElement!.querySelector(".settings-meta")?.textContent;
+	const ownerJson = (name: string) => JSON.parse(readFileSync(join(ui.view.home, LAYOUT.data, name), "utf8"));
+	for (const select of [parent, operator]) {
+		assert.equal(select.tagName, "SELECT");
+		assert.deepEqual(optionTexts(select), ["(unset)", "off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+		assert.equal(badge(select), "from code");
+	}
+	await ui.choose(parent, "high");
+	await ui.choose(operator, "low");
+	await ui.press(people, "Save");
+	await until(() => ui.posts().length, (n) => n === 1, "the save");
+	assert.deepEqual([ui.posts()[0]!.status, ui.posts()[0]!.json.changes], [200, { "models.parent_thinking": "high", "models.operator_thinking": "low" }]);
+	await until(() => [badge(parent), badge(operator)], (now) => now.every((text) => text === "from file"), "the re-read badges");
+	assert.deepEqual(ownerJson("parent.json"), { compact_at_tokens: 150000, thinking: "high" });
+	assert.deepEqual(ownerJson("operator.json"), { thinking: "low" });
+	await ui.choose(parent, "");
+	await ui.press(people, "Save");
+	await until(() => ui.posts().length, (n) => n === 2, "the unset");
+	assert.deepEqual(ui.posts()[1]!.json.changes, { "models.parent_thinking": null });
+	await until(() => ownerJson("parent.json"), (doc) => !("thinking" in doc), "the unset write");
+	await ui.press(people, "Restore defaults");
+	await until(() => ui.posts().length, (n) => n === 3, "the restore post");
+	assert.deepEqual(ui.posts()[2]!.json.keys, ["models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"]);
+	await until(() => ownerJson("operator.json"), (doc) => !("thinking" in doc), "the restore");
 });
 
 test("P20-settings-listing: while pi's first listing runs, the current value and Custom… only, then the list after a retry", { timeout: 120_000 }, async (t) => {

@@ -29,6 +29,7 @@ import {
 	type SettingSource,
 	type SettingValue,
 	ReviewerModelSchema,
+	ThinkingLevelSchema,
 	type RoutingConfig,
 	validate,
 } from "./contracts.ts";
@@ -173,6 +174,13 @@ function modelView(key: "models.parent" | "models.operator", read: OwnerRead<unk
 	return raw === undefined ? view : { ...view, status: "fallback", diagnostic: "invalid model; ignored" };
 }
 
+/** `models.*_thinking`: the owner file's valid `thinking` (file), else unset (code); no env pin exists. */
+function thinkingView(read: OwnerRead<unknown>): View {
+	const raw = at(parsed(read.text), "thinking");
+	if (raw !== undefined && validate(ThinkingLevelSchema, raw.json).ok) return { value: raw.json as string, source: "file", status: "ok" };
+	return raw === undefined ? { value: null, source: "code", status: "ok" } : { value: null, source: "code", status: "fallback", diagnostic: "invalid thinking level; ignored" };
+}
+
 type Owner = { file: (home: string) => string; read: (home: string, env: NodeJS.ProcessEnv, file: string) => Settled };
 
 const dataFile = (name: string) => (home: string) => join(home, LAYOUT.data, name);
@@ -227,6 +235,7 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 			});
 			const out = settle("parent", read, (limit: number) => ({ "sessions.parent_compact_at_tokens": limit }));
 			out.views["models.parent"] = modelView("models.parent", read, env);
+			out.views["models.parent_thinking"] = thinkingView(read);
 			return out;
 		},
 	},
@@ -243,6 +252,7 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 			const out = settle("operator", read, (value: number) => ({ "sessions.operator_compact_at_tokens": value }));
 			if (read.state === "invalid" && read.result !== undefined) out.views["sessions.operator_compact_at_tokens"] = { value: read.result, source: "code", status: "fallback" };
 			out.views["models.operator"] = modelView("models.operator", read, env);
+			out.views["models.operator_thinking"] = thinkingView(read);
 			return out;
 		},
 	},
