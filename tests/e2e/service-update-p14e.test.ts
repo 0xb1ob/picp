@@ -512,3 +512,23 @@ test("P14e-update-nohost: no parent host running", { timeout: 300_000 }, async (
 	assert.match(applied?.detail ?? "", /; the parent was not running: viewer verified only, the next cp_parent start runs /);
 	assert.doesNotMatch(applied?.detail ?? "", /live worker/);
 });
+
+test("P14e-update-converge: a newer tip or a drain timeout never restarts the busy clock", { timeout: 300_000 }, async (t) => {
+	// Issue 396: each merge (skipped_settling) and each drain_timeout reset `since`, so under steady load the
+	// forced drain after 4x interval_min never came. `busy_since` now spans the whole busy episode.
+	const b = await bench(t, { enabled: true, interval_min: 15, quiet_min: 10 });
+	await b.job("cp-a", "working");
+	b.plan({ drainStates: ["draining", "drained"] });
+	advanceBase(b.repo, "one.txt", "one\n");
+	assert.equal((await b.run())?.last_result, "skipped_settling");
+	const busy = await b.run();
+	assert.deepEqual([busy?.last_result, busy?.busy_since], ["skipped_busy", busy?.last_run_at], last(b));
+	const to = advanceBase(b.repo, "two.txt", "two\n");
+	const settling = await b.run();
+	assert.deepEqual([settling?.last_result, settling?.busy_since], ["skipped_settling", busy?.busy_since], "a newer tip keeps the busy clock");
+	assert.deepEqual([(await b.run())?.last_result, b.hostCalls()], ["skipped_busy", []], "40 of 60 busy minutes");
+	const timeout = await b.run();
+	assert.deepEqual([timeout?.last_result, timeout?.busy_since, b.hostCalls()], ["drain_timeout", busy?.busy_since, ["host drain [600]", "host drainCancel"]], last(b));
+	const updated = await b.run(61);
+	assert.deepEqual([updated?.last_result, updated?.busy_since, b.repo.head()], ["updated", undefined, to], "the next run drains at once and clears the clock");
+});

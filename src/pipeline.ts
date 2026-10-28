@@ -80,6 +80,7 @@ import {
 import { type DiffReviewWait, isDiffReviewWait } from "./diff-review.ts";
 import { raisePlanApproval } from "./escalation.ts";
 import type { Dispatcher, DispatchResult } from "./dispatch.ts";
+import { UpdateHoldError } from "./update-hold.ts";
 import type { QuestionStore } from "./questions.ts";
 import { ReviewApprovalStore } from "./review-approval.ts";
 import { resolveFinalFix } from "./final-fix.ts";
@@ -1209,7 +1210,13 @@ export class PipelineRunner {
 		}
 
 		// --- 6. hand the artifact over by path, never by context --------------
-		const dispatch = await this.#dispatchImplementer(record);
+		let dispatch: DispatchResult;
+		try {
+			dispatch = await this.#dispatchImplementer(record);
+		} catch (error) {
+			if (error instanceof UpdateHoldError) return this.#heldDispatch(record, "awaiting_authorization", error);
+			throw error;
+		}
 		this.store.setState(researchId, "implementing", this.#now());
 		const suggested = this.#selfAssessment(researchId)?.suggested_implementer_model;
 		const mismatch =
@@ -1345,7 +1352,13 @@ export class PipelineRunner {
 		if (decision.action === "escalate") {
 			return this.#step(record, record.state, "surface", `${shipId}: ${classification.class} — ${decision.reason}`);
 		}
-		const dispatch = await this.#dispatchImplementer(record);
+		let dispatch: DispatchResult;
+		try {
+			dispatch = await this.#dispatchImplementer(record);
+		} catch (error) {
+			if (error instanceof UpdateHoldError) return this.#heldDispatch(record, record.state, error);
+			throw error;
+		}
 		return this.#step(record, "implementing", "wait", `${shipId}: re-dispatched from the same task file (${decision.reason}).`, {
 			dispatch,
 		});
@@ -1979,6 +1992,11 @@ export class PipelineRunner {
 			deadline: pending.deadline,
 			key: ReviewRuns.key(pending.job_id, pending.surface, pending.attempt),
 		};
+	}
+
+	/** A fresh dispatch refused by the update hold: nothing is recorded, so the next advance retries the same step. */
+	#heldDispatch(record: PipelineRecord, state: PipelineState, error: UpdateHoldError): AdvanceResult {
+		return this.#step(record, state, "wait", `${record.ship_id}: implementer dispatch deferred, not failed — ${error.message}. Run cp_pipeline advance again once the hold clears.`);
 	}
 
 	#step(

@@ -570,8 +570,15 @@ one result in `state/update.json` (its only writer):
   drained). An idle held/waiting worker does not block: the drain answers `drained` and the
   restart leaves it `revivable`. Nothing revives it automatically: once the restarted parent is up,
   it acts on the `cp-recovery` wake and runs `cp_revive` for each held worker the wake lists.
-  After 4× `interval_min` of `skipped_busy`, only a script still skips: the run drains anyway
-  and the drain decides (`drained`, or `drain_timeout`);
+  After 4× `interval_min` since `busy_since` (the first mid-turn `skipped_busy` of the episode; kept through
+  `skipped_settling`, `drain_timeout`, `fetch_failed` and a newer tip, cleared by any other result), only a script still
+  skips: the run drains anyway and the drain decides (`drained`, or `drain_timeout`, whose retry then drains at
+  once). While the last result is `skipped_busy` or `drain_timeout` and `busy_since` is under 2 h old, fresh
+  dispatches (`cp_dispatch`, queued, armed and pipeline dispatch) are refused naming the update
+  (`src/update-hold.ts`, #396): queued and armed entries are kept, and a pipeline advance answers `wait` with
+  the implementer dispatch deferred (retried by the next advance, never a failed step); sends, promotions,
+  reviews, revives and merges stay open, an unreadable record fails open, and `data/update.json`
+  `enabled: false` lifts the hold at once;
 - **settling:** `skipped_settling` while the `origin/main` tip is not yet `quiet_min` old, measured from when the
   updater first saw it (`first_seen_sha`/`first_seen_at` in `state/update.json`; a different tip restarts the
   clock); the detail names the tip and when it is eligible. Nothing is drained, and it never delays a
