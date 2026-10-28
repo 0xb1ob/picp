@@ -38,6 +38,7 @@ import { ACTIONS_CI_TIMEOUT_MS, type ActionsRun, readActionsCi, retryTransientRe
 import { type CiRun, type CommandRunner, evaluateMergeAskCi, MERGE_ASK_QUERY_TIMEOUT_MS, readCiForHead, runCommand, shaMatches } from "./merge-ask.ts";
 import type { CommandRunner as StatusRunner } from "./merges.ts";
 import { CiRerunStore, maybeRerunInfra } from "./ci-infra-rerun.ts";
+import { ghCiUnwatched } from "./forge-runtime.ts";
 
 const MainCiEntrySchema = Type.Object(
 	{
@@ -341,7 +342,7 @@ export async function runMainCiTick(options: {
 	let projects: string[];
 	let login: string;
 	try {
-		projects = mandatedProjects(options.projects, options.mandates(), (options.now ?? isoTimestamp)());
+		projects = mandatedProjects(options.projects, options.mandates(), (options.now ?? isoTimestamp)()).filter((project) => !ghCiUnwatched(options.home, project));
 		if (projects.length === 0) return [];
 		login = await options.login();
 	} catch (error) {

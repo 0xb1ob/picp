@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- Fix: the main-CI watch, the held-PR CI watch and the foreign-PR CI watch no longer ask `gh` about a project whose origin is on a non-github.com host with no `cp_project forge` declared; it is skipped, logged once per project per process ("CI watch disabled: non-GitHub remote, no forge declared"), never a per-tick failure wake. GitHub projects keep every wake. Migration: none.
+
 - A complete `cp_review` escalate/policy below the cap no longer sends `cp_integrate` back to `review`: it raises one `conflicting_acceptance` escalation and surfaces; an operator-quote `cp_decide` approving that `es-…` id clears that head only (a push voids it; CI, repo permission and final_fix unchanged). Migration: none.
 
 - Fix: the macOS cloudflared auto-download no longer fails with a checksum mismatch. A pinned archive now carries two hashes, the tarball's (GitHub's asset digest, checked before extraction) and the extracted binary's (the release notes, checked before anything is made executable). Pin bumped to cloudflared 2026.10.4.
