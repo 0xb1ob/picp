@@ -211,7 +211,7 @@ test("P8c unreported: a silent settle with work on disk gets two recovery prompt
 	const prompts = f.prompts("work").slice(2);
 	assert.equal(prompts.length, 2, "two prompts, sent by the settle boundary itself, then none");
 	const [first = "", last = ""] = prompts;
-	for (const text of [worktree, `origin has ${work}`, "28 more file(s)", "2 unpushed commit(s)", "still sitting in the worktree", "Do NOT redo it", "report_result exactly once", "blocked"]) {
+	for (const text of [worktree, `origin has ${work}`, "28 more file(s)", "2 unpushed commit(s)", "still sitting in the worktree", "Do NOT redo it", "report_result exactly once", "blocked", "acceptance is NOT met yet"]) {
 		assert.ok(first.includes(text), `the first prompt carries ${text}`);
 	}
 	assert.ok(first.length < 3000 && !first.includes(`Brief for ${work}.`), "a short instruction plus evidence, never a re-brief");
@@ -249,6 +249,9 @@ test("P8c unreported: a silent settle with work on disk gets two recovery prompt
 
 	await waitFor(() => f.events(clean, "settled_without_report").length, (n) => n === 1, { timeoutMs: 30_000, what: "the clean job's record" });
 	assert.deepEqual(f.prompts("clean").slice(1), [REPORT_NUDGE_TEXT], "one plain nudge, never a recovery");
+	const nudge = f.prompts("clean")[1] ?? "";
+	assert.ok(nudge.includes("keep working") && nudge.includes("only for a real blocker"), "the nudge lets an unfinished worker continue");
+	assert.ok(!nudge.includes("Call report_result now"), "the nudge no longer forces an immediate report");
 	assert.equal(f.post.fleet.require(clean).unreported_work?.state, "clean");
 	assert.equal(f.events(clean, "settled_without_report")[0]?.reason, "the nudge to report was already spent");
 

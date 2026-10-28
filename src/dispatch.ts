@@ -19,6 +19,7 @@
  */
 import { captureCheckpoint, checkpointRef, deleteCheckpoint } from "./checkpoint-ref.ts";
 import { referencedMaterial } from "./task-references.ts";
+import { readTaskAddenda, taskAddendaText } from "./task-addenda.ts";
 import { repoMap } from "./repo-map.ts";
 import type { CommandRunner } from "./merge-ask.ts";
 import type { CapacityReader } from "./capacity.ts";
@@ -694,10 +695,9 @@ export class Dispatcher {
 					task: task.forBrief + references + continuityNote,
 					artifact_path: artifactPath,
 				},
-			}) + boundNote + (deps.note ? `\n\n> ${deps.note}\n` : "") + (startedBy ? `\n\n> ${startedBy}\n` : "") + (skills.length ? `\n\n> ${skillsBriefNote(skills, overridden)}\n` : "") + await repoMap({ home: options.home, project: labels.project, worktree: lease.path, git: options.git ?? defaultGit });
+			}) + taskAddendaText(readTaskAddenda(options.home, issue.id)) + boundNote + (deps.note ? `\n\n> ${deps.note}\n` : "") + (startedBy ? `\n\n> ${startedBy}\n` : "") + (skills.length ? `\n\n> ${skillsBriefNote(skills, overridden)}\n` : "") + await repoMap({ home: options.home, project: labels.project, worktree: lease.path, git: options.git ?? defaultGit });
 			writeFileSync(join(options.home, paths.briefFile(issue.id)), brief);
-			// Freeze parent input for reviewer coverage, never worker-authored text.
-			// taskFile stays out of the brief; both receive the reference snapshot.
+			// Freeze parent input for reviewer coverage, never worker-authored text; taskFile stays out of the brief.
 			const originalTaskFile = join(options.home, paths.originalTaskFile(issue.id));
 			if (!continuityNote || !existsSync(originalTaskFile)) writeFileSync(originalTaskFile, originalTask);
 
