@@ -423,7 +423,7 @@ test("P13 dashboard schedule control: a live parent claims each journaled reques
 	writeFileSync(controlConfigFile(h.stateDir), '{"enabled": true}');
 	const removed = request("remove", id);
 	assert.deepEqual([(await answered(removed))?.state, state(removed)?.reason, h.schedules().map((entry) => entry.id)], ["done", `removed ${id}`, [dormant]]);
-	assert.ok(parent.stderr().includes(`schedule control ${removed} remove ${id}: done`));
+	await waitFor(() => parent.stderr(), (text) => text.includes(`schedule control ${removed} remove ${id}: done`), { what: "the control done stderr line" });
 	assert.equal((await h.ledger.list({ labels: [`schedule:${id}`], all: true })).length, 1, "one run now, one job");
 	const status = await (await viewer(t, h.home, h.stateDir))("/api/schedules/control");
 	assert.equal(status.status, 200, JSON.stringify(status.body));
