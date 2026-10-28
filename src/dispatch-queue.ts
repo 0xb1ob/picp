@@ -20,7 +20,8 @@ import {
 	validateDispatchQueueFile,
 } from "./contracts.ts";
 import type { DispatchRequest } from "./dispatch.ts";
-import { assertNotDraining, readDrain } from "./drain.ts";
+import { assertDispatchOpen, readDrain } from "./drain.ts";
+import { UpdateHoldError } from "./update-hold.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { MandateError } from "./mandate-accounting.ts";
 import { ScheduleAuthorityError } from "./schedule-authority.ts";
@@ -43,8 +44,9 @@ export interface DispatchQueueOptions {
 	now?: () => Date;
 }
 
-/** Still full: keep the entry at the head, untouched, and stop the drain. */
+/** Still full, or held for a pending update: keep the entry at the head, untouched, and stop the drain. */
 export function keepsHead(error: unknown): boolean {
+	if (error instanceof UpdateHoldError) return true;
 	if (error instanceof SpawnSafetyError) return error.code === "spawn_cap";
 	return (error instanceof MandateError || error instanceof ScheduleAuthorityError) && error.code === "parallelism_full";
 }
@@ -104,7 +106,7 @@ export class DispatchQueue {
 
 	/** Append; refuses a duplicate or a full queue. Returns the new position. */
 	enqueue(jobId: string, request: QueuedDispatchRequest): number {
-		assertNotDraining(this.#options.home, `queued dispatch of ${jobId}`); // draining wins: nothing new is queued either
+		assertDispatchOpen(this.#options.home, `queued dispatch of ${jobId}`); // draining wins: nothing new is queued either
 		const file = this.read();
 		const at = file.entries.findIndex((entry) => entry.job_id === jobId);
 		if (at >= 0) throw new DispatchQueueError(`${jobId} is already queued at position ${at + 1} — it starts when a worker slot frees; do not re-dispatch`);

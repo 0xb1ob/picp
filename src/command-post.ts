@@ -67,7 +67,7 @@ import { boundContinueNext, HardBoundsWatch } from "./bounds.ts";
 import { boundWakeupId, deathWakeupId, FailureAnnouncer, type FailRecoveryFact } from "./failure-announcer.ts";
 import { homeProjectResolver } from "./project-report.ts";
 import { formatRecoveryNotice } from "./wakeups.ts";
-import { assertNotDraining, DrainControl, readDrain, staleDrainOutcome, sweepDurableWakeups as sweepDurableWakeupsHelper } from "./drain.ts";
+import { assertDispatchOpen, assertNotDraining, DrainControl, readDrain, staleDrainOutcome, sweepDurableWakeups as sweepDurableWakeupsHelper } from "./drain.ts";
 import { type Checkpoint, type DurableWakeupEntry, type Failure, type FleetRecord, type PipelineRecord, type Role, type Runtime, type UnreportedWork, type Usage } from "./contracts.ts";
 import { FailureMonitor } from "./failures.ts";
 import { CheckpointStore } from "./checkpoint.ts";
@@ -1155,7 +1155,7 @@ export class CommandPost {
 	async dispatch(request: DispatchRequest & { taskFile: string }): Promise<DispatchResult>;
 	async dispatch(request: DispatchRequest): Promise<DispatchResult | ScriptDispatchResult>;
 	async dispatch(request: DispatchRequest): Promise<DispatchResult | ScriptDispatchResult> {
-		assertNotDraining(this.home, "dispatch");
+		assertDispatchOpen(this.home, "dispatch");
 		const dispatcher = this.dispatcher();
 		const job = await this.ledger().show(request.jobId);
 		if (job.script) return dispatcher.dispatchScript(request);
@@ -1340,7 +1340,7 @@ export class CommandPost {
 		return new PipelineRunner({
 			home: this.home,
 			ledger: this.ledger(),
-			dispatcher: () => (assertNotDraining(this.home, "dispatch"), this.dispatcher()),
+			dispatcher: () => (assertDispatchOpen(this.home, "dispatch"), this.dispatcher()),
 			gate: () => this.gateModule(),
 			artifacts: this.artifacts,
 			fleet: this.fleet,
