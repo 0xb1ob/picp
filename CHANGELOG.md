@@ -6,7 +6,7 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
-- #537 (part 1): auto-update no longer fails every run while the parent is stopped. With no parent host and no live worker or script pid it applies the update with no host op (cp-daemon `hold`, merge, `npm ci` when the lock changed, `reload`), verifies the viewer only, and records `updated` saying the parent was not running; a live pid still refuses (`failed`, nothing merged). The stop marker `state/parent-host.stopped.json` gains `by` (`operator`, or `update` for the updater's own stop). A fresh supervisor (the reload, a `cp-daemon restart`, a reboot) now honours an operator's marker at startup and waits for `cp_parent start` instead of spawning a parent; an updater's marker or one without `by` (written before this change) still respawns. The health `parent` check skips while an operator stop stands. Migration: none (a marker without `by` keeps today's startup behaviour). Rollback: revert.
+- ci: the suite runs in 8 time-balanced shards (was 4); `scripts/test-timings.json` refreshed from main CI run 40725373381. Required check `test` is unchanged; per-shard checks `test-shard (5..8)` are new. Migration: none.
 
 - Fix (#648): the pipeline implementer honours an operator-named model (`cp_pipeline start|advance|recover implementer_model`), persisted on the pipeline record; the planner's `model` is unchanged. Migration: none.
 

@@ -111,6 +111,15 @@ live suites stay skipped (`CP_LIVE_TESTS` is empty). After the suite, a separate
 step runs `npm run eval:check` (offline, 5-minute timeout, no `CP_EVAL_LIVE`) and
 fails when `evals/results/contract.json` is stale.
 
+## Changelog fragments
+
+A PR adds its note as its own file, `changelog.d/<branch>.md`, holding one bullet that starts with `- `. It never
+edits `CHANGELOG.md`, so sibling PRs stop conflicting on it. No check requires a `CHANGELOG.md` edit.
+
+At release (by hand, by the maintainer) run `npm run changelog:fold`: it inserts every fragment, in filename order,
+at the top of `## Unreleased` and deletes the fragments. It never commits; review and commit the result yourself.
+A missing or empty `changelog.d/` is a no-op. A PR opened before this scheme keeps its `CHANGELOG.md` edit until merged.
+
 ## Several homes on one machine
 
 Only needed when you run more than one home; both default to normal behaviour
