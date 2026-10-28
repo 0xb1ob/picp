@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { COMMAND_POST_EXTENSION, createAgentDir, MockProvider, REPO_ROOT, startPiChild } from "../harness/index.ts";
 import { drainFile } from "../../src/drain.ts";
@@ -10,8 +10,11 @@ import { waitFor } from "../harness/index.ts";
 import { JOB, seedHeldHome } from "../harness/held-home.ts";
 import { RunRegistry } from "../../src/runs.ts";
 import { join } from "node:path";
-import { LAYOUT } from "../../src/contracts.ts";
+import { DEFAULT_ORIGIN, EMPTY_USAGE, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { UPDATE_HOLD_MAX_MS } from "../../src/update-hold.ts";
+import { CheckpointStore } from "../../src/checkpoint.ts";
+import { atomicWriteJson } from "../../src/json-store.ts";
+import { createScratchHome, createScratchLedger } from "../harness/index.ts";
 
 const calls = [
 	{ name: "cp_next", args: {} },
@@ -120,4 +123,60 @@ test("S26: an update waiting on mid-turn workers holds fresh dispatch, not sends
 		const lapsed = await post.dispatch({ jobId: JOB, task: "work" }).then((result) => JSON.stringify(result), (error: Error) => error.message);
 		assert.match(lapsed, /cp-held: no such job/, "past the bound the hold lapses");
 	} finally { await post.shutdown(); s.repo.cleanup(); s.home.cleanup(); }
+});
+
+/** Turn the update hold on (auto-update enabled, the updater skipped busy a minute ago) for `home`. */
+function holdUpdate(home: string): void {
+	mkdirSync(join(home, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home, LAYOUT.data, "update.json"), JSON.stringify({ enabled: true }));
+	writeFileSync(join(home, LAYOUT.state, "update.json"), JSON.stringify({ schema_version: 1, phase: "idle", fetch_failures: 0, last_result: "skipped_busy", to: "cd".repeat(20), busy_since: new Date(Date.now() - 60_000).toISOString() }));
+}
+
+test("S26: queued and armed dispatches made before the update hold survive a slot freeing under it", { timeout: 60_000 }, async (t) => {
+	// Review 1 of PR 667: the hold's refusal reached the queue and armed pumps as an unknown error, and each entry was
+	// dropped for good with a DROPPED wake-up. Both entries must stay, untouched, until the hold clears.
+	const home = createScratchHome();
+	const { ledger } = createScratchLedger({ home: home.path });
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	t.after(async () => { await post.shutdown(); home.cleanup(); });
+	const queued = await ledger.create({ title: "queued work", project: "demo", kind: "ship", delivery: "pr" });
+	const armed = await ledger.create({ title: "armed work", project: "demo", kind: "ship", delivery: "pr" });
+	post.dispatchQueue.enqueue(queued.id, { task: "queued" });
+	post.armedDispatches.arm(armed.id, { task: "armed" }, ["cp-landed"]);
+	holdUpdate(home.path);
+	await post.dispatchQueue.drain();
+	await post.armedDispatches.release();
+	assert.deepEqual([post.dispatchQueue.ids(), post.armedDispatches.ids()], [[queued.id], [armed.id]], "both entries kept");
+	const wakes = post.durableWakeups.pending().map((entry) => entry.content).join("\n");
+	assert.doesNotMatch(wakes, /DROPPED|DRAIN FAILED/, "no drop and no failed drain journalled");
+	assert.equal(post.fleet.get(queued.id) ?? post.fleet.get(armed.id), undefined, "nothing was dispatched");
+});
+
+test("S26: a pipeline advance under the update hold defers the implementer dispatch and never records a failure", { timeout: 60_000 }, async (t) => {
+	const home = createScratchHome();
+	const { ledger } = createScratchLedger({ home: home.path });
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	t.after(async () => { await post.shutdown(); home.cleanup(); });
+	const research = await ledger.create({ title: "plan it", project: "demo", kind: "research", delivery: "pipeline" });
+	const ship = await ledger.create({ title: "ship it", project: "demo", kind: "ship", delivery: "pr" });
+	const at = "2026-09-04T18:00:00Z";
+	// The planner reported and was torn down, its plan passed the gate and the checkpoint is approved: step 6 is next.
+	await post.fleet.add({ job_id: research.id, project: "demo", kind: "research", delivery: "pipeline", origin: DEFAULT_ORIGIN, phase: "done", reported_at: at,
+		worker: { pid: 1, session_id: "s", session_file: "/s.jsonl", profile: "planner", role: "planner", model: "mock/test", started_at: at },
+		worktree: `/wt/${research.id}`, branch: research.id, dispatched_at: at, usage: EMPTY_USAGE });
+	writeFileSync(post.artifacts.path(research.id), "# plan\n");
+	atomicWriteJson(join(home.path, paths.gateFile(research.id, 1)), { schema_version: SCHEMA_VERSION, job_id: research.id, attempt: 1, verdict: "pass", cause: null,
+		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["sound"], decided_at: at });
+	const checkpoints = new CheckpointStore(home.path);
+	checkpoints.request({ jobId: ship.id, researchId: research.id, question: `Authorize implementation of ${ship.id}?` });
+	checkpoints.decide(ship.id, true, { by: "operator command" });
+	post.pipelines.write({ schema_version: SCHEMA_VERSION, research_id: research.id, ship_id: ship.id, project: "demo", delivery: "pr", state: "awaiting_authorization", created_at: at, updated_at: at });
+	holdUpdate(home.path);
+	for (let i = 0; i < 2; i++) {
+		const step = await post.advancePipeline(research.id);
+		assert.deepEqual([step.state, step.next], ["awaiting_authorization", "wait"], step.message);
+		assert.match(step.message, /implementer dispatch deferred, not failed — refused: an auto-update to cdcdcdcdcdcd/);
+	}
+	assert.equal(post.pipelines.get(research.id)?.state, "awaiting_authorization", "the step stays retryable");
+	assert.equal(post.fleet.get(ship.id), undefined, "nothing was dispatched or failed");
 });

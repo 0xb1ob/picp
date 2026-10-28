@@ -34,11 +34,14 @@ export function updatePending(home: string, now = Date.now()): { to: string; bus
 	}
 }
 
-/** Refuses a fresh `what` while an eligible update waits on mid-turn workers; names the update, its bound and the opt-out. */
+/** The hold's refusal: queued and armed pumps keep their entry on it instead of dropping it. */
+export class UpdateHoldError extends Error {}
+
+/** Refuses a fresh `what` while an update waits on mid-turn workers; names the update, its bound and the opt-out. */
 export function assertNoUpdatePending(home: string, what: string): void {
 	const pending = updatePending(home);
 	if (pending) {
-		throw new Error(
+		throw new UpdateHoldError(
 			`refused: an auto-update to ${pending.to.slice(0, 12)} waits for mid-turn workers (busy since ${pending.busy_since}); no ${what} starts until it applies or the hold lapses at ${pending.until}. Promotions, reviews and merges stay open; data/update.json "enabled": false turns auto-update off`,
 		);
 	}
