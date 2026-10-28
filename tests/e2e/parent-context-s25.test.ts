@@ -32,7 +32,7 @@ async function fixture(t: TestContext, steps: ScriptStep[], raw?: string, timeou
 	};
 }
 
-for (const [index, raw, expected] of [[0, undefined, 200000], [1, '{"compact_at_tokens":150000}', 150000], [2, '{}', undefined]] as const) {
+for (const [index, raw, expected] of [[0, undefined, 150000], [1, '{"compact_at_tokens":150000}', 150000], [2, '{}', undefined]] as const) {
 	test("S25 parent: settings reach bridge status", { timeout: 60_000 }, async (t) => {
 		t.diagnostic(`settings ${index}`);
 		const f = await fixture(t, [{ kind: "text", text: "Ready." }], raw);
@@ -206,7 +206,7 @@ test("S25 parent: default compact deadline exceeds the ordinary thirty-second re
 
 
 for (const [tag, reply] of [
-	["low", { kind: "text", text: "Below threshold.", usage: { prompt_tokens: 150000 } }],
+	["low", { kind: "text", text: "Below threshold.", usage: { prompt_tokens: 149000 } }],
 	["length", { kind: "text", text: "Discarded output.", finishReason: "length", usage: { prompt_tokens: 127500, completion_tokens: 128000 } }],
 ] as const) {
 	test("S25 parent: low and length-stop context avoid automatic compaction", { timeout: 60_000 }, async (t) => {
@@ -218,7 +218,7 @@ for (const [tag, reply] of [
 		assert.equal(f.provider.requests("s25-parent").length, 2, "no intervening summarizer request");
 		const log = (() => { try { return readFileSync(join(f.home, LAYOUT.state, "daemon.log"), "utf8"); } catch { return ""; } })();
 		if (tag === "low") assert.doesNotMatch(log, /parent context/, "below threshold logs nothing");
-		else assert.match(log, /parent context skipped_length_stop raw=2\d{5} effective=1\d{5} threshold=200000/);
+		else assert.match(log, /parent context skipped_length_stop raw=2\d{5} effective=1\d{5} threshold=150000/);
 	});
 }
 
