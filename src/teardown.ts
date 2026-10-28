@@ -65,6 +65,7 @@ import { deleteCheckpoint } from "./checkpoint-ref.ts";
 import { resolveDefaultBase } from "./default-base.ts";
 import { isPidAlive, type FleetStore } from "./fleet.ts";
 import { resolveFinalFix } from "./final-fix.ts";
+import { policyEscalationApproved } from "./review-policy-escalation.ts";
 import { readReviewPassVerdict } from "./merge-ask.ts";
 import { type JobClaims, type JobOwner, withJobClaim } from "./job-claims.ts";
 import { type Lease, leaseFromRecord, type LeaseManager } from "./leases.ts";
@@ -652,6 +653,7 @@ export class Teardown {
 		// A flagged escalate is the one an operator can clear: the reviewer found the
 		// diff sound apart from the flags it is required to raise.
 		if (latest.cause === "flagged" && this.#diffCheckpointApproved(branch)) return undefined;
+		if (latest.cause === "policy" && policyEscalationApproved(home, branch, head)) return undefined;
 
 		return {
 			ok: false,
