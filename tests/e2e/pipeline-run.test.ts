@@ -999,7 +999,8 @@ test(
 		// its artifact must never reach an implementer.
 		const old = b.post.pipeline().store.get(oldResearchId);
 		assert.equal(old?.superseded_by, replacement.id);
-		await assert.rejects(() => b.post.advancePipeline(oldResearchId), /superseded by/);
+		await assert.rejects(() => b.post.advancePipeline(oldResearchId, { implementerModel: b.named }), /superseded by/);
+		assert.equal(b.post.pipeline().store.get(oldResearchId)?.implementer_model, undefined, "#648: a refused advance writes no model");
 
 		// The ledger dep now names the replacement, not the superseded research.
 		assert.deepEqual(await ledger.blockersOf(shipId), [replacement.id]);
