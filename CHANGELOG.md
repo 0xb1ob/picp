@@ -8,6 +8,8 @@ are recorded here with the migration; the binding detail lives in
 
 - A complete `cp_review` escalate/policy below the cap no longer sends `cp_integrate` back to `review`: it raises one `conflicting_acceptance` escalation and surfaces; an operator-quote `cp_decide` approving that `es-…` id clears that head only (a push voids it; CI, repo permission and final_fix unchanged). Migration: none.
 
+- Fix: the macOS cloudflared auto-download no longer fails with a checksum mismatch. A pinned archive now carries two hashes, the tarball's (GitHub's asset digest, checked before extraction) and the extracted binary's (the release notes, checked before anything is made executable). Pin bumped to cloudflared 2026.10.4.
+
 - Dashboard push writes (`/api/push/subscription`, `/api/push/test`) answer an oversize body with a 413 and a bounded discard instead of `connection: close`, so a sender still writing reads the 413 rather than an EPIPE; every refused-body discard (push and upload routes) ends after `BODY_DISCARD_IDLE_MS` (5 s) of silence and closes the socket. Migration: none.
 
 - Main-red gate judges the current `origin/main` head: a `state/main-ci.json` latch from an older commit no longer holds `cp_integrate` once the current head's own CI is green (red or pending on the current head still holds). Migration: none.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -93,6 +93,8 @@ test("feature-removed rejects an uncovered loss, a missing remover, a duplicate,
 const CHECKER = fileURLToPath(new URL("../scripts/test-migration-check.ts", import.meta.url));
 const table = (name: string, ...lines: string[]) => [`<!-- manifest:${name} -->`, "| h | h |", "|---|---|", ...lines, `<!-- /manifest:${name} -->`].join("\n");
 
+type LedgerOpts = { title?: string; ghost?: boolean };
+
 /** A repo whose `tests/a.test.ts` case has 1 assertion at the baseline, 3 at deletion; scenario S1's body holds 1. */
 function claimFixture() {
 	const dir = mkdtempSync(join(tmpdir(), "claim-count-"));
@@ -104,32 +106,33 @@ function claimFixture() {
 	git("commit", "-qm", "baseline");
 	const base = git("rev-parse", "HEAD");
 	write("tests/a.test.ts", `test("case one", () => { assert.ok(1); assert.equal(1, 1); t.assert.ok(2); });\n`);
-	write("tests/e2e/x.test.ts", `test("x works", () => {\n\tassert.ok(1); assert.ok(2); expect(3);\n});\ntest("x small", () => { assert.ok(1); });\n`);
+	write("tests/e2e/x.test.ts", `test("x works", () => {\n\tassert.ok(1); assert.ok(2); expect(3);\n});\ntest("x small", () => { assert.ok(1); });\n\ntest("x last", () => {\n\tassert.ok(1); assert.ok(2);\n});\n`);
 	git("add", "-A");
 	git("commit", "-qm", "grow");
 	git("rm", "-q", "tests/a.test.ts");
 	git("commit", "-qm", "delete");
-	const ledger = (note?: string) => {
+	const ledger = (note?: string, { title = "case one", ghost = false }: LedgerOpts = {}) => {
+		const rows = (path: string) => `| ${path} | ${title} | S1 | mapped | ${note} |`;
 		write("docs/testing-migration.md", [`Baseline sha: \`${base}\``, table("prs"), table("ledger"), table("feature-removed"),
-			table("baseline", "| tests/a.test.ts | deleted | P1 | |")].join("\n") + "\n");
+			table("baseline", "| tests/a.test.ts | deleted | P1 | |", ...(ghost ? ["| tests/ghost.test.ts | deleted | P1 | |"] : []))].join("\n") + "\n");
 		write("docs/testing-migration/p1.md", [table("ledger", "| P1 | scope | 1 |"), table("incoming", "| tests/e2e/x.test.ts | P1 |"),
 			table("scenarios", "| S1 | tests/e2e/x.test.ts | x small |"), table("regressions", "| NC-1 | tests/a.test.ts | S1 | revert | fails |"),
-			table("assertions", ...(note === undefined ? [] : [`| tests/a.test.ts | case one | S1 | mapped | ${note} |`]))].join("\n") + "\n");
+			table("assertions", ...(note === undefined ? [] : [rows("tests/a.test.ts"), ...(ghost ? [rows("tests/ghost.test.ts")] : [])]))].join("\n") + "\n");
 	};
 	/** Commits the ledger with this row (none when undefined) and returns the commit, a `--claim-since` ref. */
-	const commitLedger = (note?: string) => {
-		ledger(note);
+	const commitLedger = (note?: string, opts: LedgerOpts = {}) => {
+		ledger(note, opts);
 		git("add", "docs");
 		git("commit", "-qm", "ledger");
 		return git("rev-parse", "HEAD");
 	};
 	const empty = commitLedger();
-	const check = (note: string, since = empty) => {
-		ledger(note);
+	const check = (note: string, since = empty, opts: LedgerOpts = {}) => {
+		ledger(note, opts);
 		const run = spawnSync(process.execPath, [CHECKER, "--claim-since", since], { cwd: dir, encoding: "utf8" });
 		return { status: run.status, out: run.stdout + run.stderr };
 	};
-	return { check, commitLedger, git, done: () => rmSync(dir, { recursive: true, force: true }) };
+	return { check, commitLedger, git, write, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 const SHORT = "reworded; covered-by: tests/e2e/x.test.ts:4";
@@ -181,6 +184,28 @@ test("CLI: one cite into a body holding several assertions, or a new short row m
 	}
 });
 
+test("CLI: a narrowed row fails without a Narrowed: marker naming the uncovered part, and passes with one", () => {
+	const fixture = claimFixture();
+	try {
+		const ledger = join(fixture.git("rev-parse", "--show-toplevel"), "docs/testing-migration/p1.md");
+		const narrowed = (note: string) => {
+			fixture.check(note);
+			writeFileSync(ledger, readFileSync(ledger, "utf8").replace("| mapped |", "| narrowed |"));
+			const run = spawnSync(process.execPath, [CHECKER, "--claim-since", "HEAD"], { cwd: join(ledger, "../../.."), encoding: "utf8" });
+			return { status: run.status, out: run.stdout + run.stderr };
+		};
+		const bare = narrowed(SHORT);
+		assert.equal(bare.status, 1, bare.out);
+		assert.match(bare.out, /tests\/a\.test\.ts: "case one" is narrowed with no `Narrowed:` naming the uncovered part/);
+		assert.doesNotMatch(bare.out, SHORT_FINDING, "a narrowed row is exempt from the claim count");
+		const marked = narrowed(`${SHORT}. Narrowed: the equal check has no consumer`);
+		assert.equal(marked.status, 0, marked.out);
+		assert.match(marked.out, /manifest ok/);
+	} finally {
+		fixture.done();
+	}
+});
+
 test("CLI: an unreachable --claim-since falls back to the merge-base with origin/main, else skips the gate loudly", () => {
 	const fixture = claimFixture();
 	const gone = "0".repeat(40);
@@ -199,6 +224,55 @@ test("CLI: an unreachable --claim-since falls back to the merge-base with origin
 		assert.equal(skipped.status, 0, skipped.out);
 		assert.match(skipped.out, /WARN claim-count gate skipped: base 0+ unreachable and no merge-base with origin\/main/);
 		assert.match(skipped.out, /claim count: 1 short case\(s\), 1 unchanged since \(gate skipped\) warned/);
+	} finally {
+		fixture.done();
+	}
+});
+
+test("CLI: a cite range counts every body it spans, and a range holding too few assertions still fails a new row", () => {
+	const fixture = claimFixture();
+	try {
+		const spans = fixture.check("covered-by: tests/e2e/x.test.ts:4-6");
+		assert.equal(spans.status, 0, spans.out);
+		assert.doesNotMatch(spans.out, /WARN|cites/);
+		const short = fixture.check("covered-by: tests/e2e/x.test.ts:4-5");
+		assert.equal(short.status, 1, short.out);
+		assert.match(short.out, /FAIL tests\/a\.test\.ts: "case one" cites \d+ e2e line\(s\) holding 1 assertion\(s\) for 3 at deletion/);
+	} finally {
+		fixture.done();
+	}
+});
+
+test("CLI: a title matching no baseline case, or a file unreadable before deletion, warns by name and does not fail", () => {
+	const fixture = claimFixture();
+	try {
+		const unmatched = fixture.check(SHORT, undefined, { title: "case uno" });
+		assert.equal(unmatched.status, 0, unmatched.out);
+		assert.match(unmatched.out, /WARN tests\/a\.test\.ts: "case uno" is not claim-counted: its Assertion cell matches no literal test title/);
+		const unreadable = fixture.check(SHORT, undefined, { ghost: true });
+		assert.match(unreadable.out, /WARN tests\/ghost\.test\.ts: "case one" is not claim-counted: its pre-deletion file cannot be read/);
+		assert.doesNotMatch(unreadable.out, /FAIL tests\/ghost\.test\.ts: "case one" is not claim-counted/);
+		// Ghost has no baseline file, so the run exits 1 on its own; only its claim-count line is pinned.
+		const committed = fixture.check(SHORT, fixture.commitLedger(SHORT, { ghost: true }), { ghost: true });
+		assert.match(committed.out, /WARN tests\/ghost\.test\.ts: "case one" is not claim-counted/);
+		assert.match(committed.out, /FAIL tests\/ghost\.test\.ts: listed in the baseline but not a test file/);
+		assert.doesNotMatch(committed.out, /FAIL [^\n]*claim-counted/);
+	} finally {
+		fixture.done();
+	}
+});
+
+test("CLI: a cite to a call of a declared assert helper counts as an assert; an undeclared helper still counts 0", () => {
+	const fixture = claimFixture();
+	try {
+		const x = `test("x works", () => {\n\tassert.ok(1); assert.ok(2); expect(3);\n});\ntest("x small", () => { assert.ok(1); });\n\ntest("x last", () => {\n\tassert.ok(1); assert.ok(2);\n});\n`;
+		fixture.write("tests/e2e/x.test.ts", `${x}test("h", () => {\n\tassertEnd(a);\n\tassertEnd(b);\n\tassertEnd(c);\n});\ntest("u", () => {\n\tcheckEnd(a); checkEnd(b); checkEnd(c);\n});\n`);
+		const declared = fixture.check("covered-by: tests/e2e/x.test.ts:10");
+		assert.equal(declared.status, 0, declared.out);
+		assert.doesNotMatch(declared.out, /cites/);
+		const undeclared = fixture.check("covered-by: tests/e2e/x.test.ts:15");
+		assert.equal(undeclared.status, 1, undeclared.out);
+		assert.match(undeclared.out, /FAIL tests\/a\.test\.ts: "case one" cites 2 e2e line\(s\) holding 1 assertion\(s\) for 3 at deletion/);
 	} finally {
 		fixture.done();
 	}

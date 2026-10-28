@@ -1,7 +1,6 @@
 /**
- * P21, behavior 21: the dashboard's serving and live refresh. `bin/cp-view` on a scratch home (tests/harness/dashboard.ts),
- * or the real `createViewer` server in this process where a scenario reads its process-local stream count; the
- * linkedom tab has no layout, so render claims assert served DOM text and bytes, never pixels.
+ * P21, behavior 21: serving and live refresh via `bin/cp-view` on a scratch home, or the in-process `createViewer`
+ * where a scenario reads its stream count; the linkedom tab has no layout, so render claims assert DOM text and bytes.
  */
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -277,8 +276,8 @@ test("P21-bind-host: cp-view refuses wildcard, public, link-local, mapped, zoned
 	}
 });
 
-/** The Brotli content-coding token, spelled so the retired-tracker word scan never flags this file. */
-const BROTLI = "b" + "r";
+/** The Brotli content-coding token; scripts/retired-integration-allowlist.json exempts this line as `protocol`. */
+const BROTLI = "br";
 
 test("P21-compression: JSON of 1 KiB or more is gzip or Brotli encoded when accepted; small, HEAD and stream replies stay identity", { timeout: 120_000 }, async (t) => {
 	const view = await live(t);
@@ -407,6 +406,10 @@ test("P21-deploy: a merged job's page shows its after-merge deploy as queued, de
 	assert.equal("deploy" in JSON.parse((await view.get("/api/job/cp-deploy")).body.toString("utf8")), false, "the deploy job itself carries no deploy row");
 	fleet({ phase: "held" });
 	assert.deepEqual(await facts(), ["deploying", null], "a held deploy job is deploying");
+	fleet({ phase: "launching" });
+	assert.deepEqual(await facts(), ["queued", null], "a launching deploy job is queued");
+	fleet({ phase: "waiting" }); view.put(join(LAYOUT.runs, "cp-deploy/status.json"), { phase: "working" });
+	assert.deepEqual(await facts(), ["deploying", null], "a working deploy job is deploying");
 	fleet({ phase: "failed", failure: { message: "worker died\nstack", at: AT } });
 	assert.deepEqual(await facts(), ["failed", "worker died"], "a failure shows its headline");
 	fleet({ phase: "done", closed_at: AT });
@@ -870,7 +873,7 @@ test("P21-render-css: the served stylesheet ellipsizes long one-line cells, grid
 	}
 	assert.match(css, /(?:^|\})\.overview-health\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/, "a 2×2 chip grid at 390 px");
 	assert.match(css, /@media\s*\(min-width:\s*900px\)\s*\{[^@]*\.overview-health\{display:flex;flex:1 1 auto;min-width:0;gap:0\}/, "one chip row from 900 px");
-	// Content = viewport - 208 px rail - 64 px gutters; Title must be the widest track and fit 45 characters (7 px) at 1440.
+	// Content = viewport - 208 px rail - 64 px gutters; Title is the widest track and fits 45 characters (7 px) at 1440.
 	const wide = /@media\s*\(min-width:\s*(\d+)px\)\s*\{\.overview-flight,\.overview-flight-columns\{grid-template-columns:([^;]+);column-gap:(\d+)px/.exec(css);
 	assert.ok(wide, "wide flight grid");
 	const tracks = wide[2]!.trim().split(" "), fixed = [...wide[2]!.matchAll(/(\d+)px/g)].map((m) => +m[1]!);

@@ -82,15 +82,15 @@ const linuxRelease = (bytes: Buffer): Record<string, CloudflaredRelease> => ({ "
 
 test("the pinned release table is the plan's official SHA256s, and the argv is fixed for both modes", () => {
 	assert.deepEqual(
-		Object.fromEntries(Object.entries(CLOUDFLARED_RELEASES).map(([key, release]) => [key, release.sha256])),
+		Object.fromEntries(Object.entries(CLOUDFLARED_RELEASES).map(([key, release]) => [key, [release.sha256, release.binarySha256]])),
 		{
-			"linux-x64": "d33ff2d14475178d2012c2c56beba87389ac5ded27649519f198a7d3134a99db",
-			"linux-arm64": "e6422b9d4f72d3194bc5a38676f13667c06666523217b842a877d72a80b5ac08",
-			"darwin-x64": "0560c9ab7281ac3f746055323623ed23bc0405b6dab9400474020cba33a978da",
-			"darwin-arm64": "72edfd3eea463aef4d5cb89e2e209cecb048cc756c2b01915de2e0ad7cb39830",
+			"linux-x64": ["ae5e8add7884b0531d66bbca4570d1de491ff6da51e4ebe7eb160cdf241d9e42", undefined],
+			"linux-arm64": ["2b7203b4fb0ba28a0c1e12f8855ce2c25f76d266a8d5edafac5540b6812acff6", undefined],
+			"darwin-x64": ["f11fbef4207d715892331917dafd437f032cf4b7137ed64dea3008338c1c613d", "fdec0f9a1c726f4c10283fc0cd70e602d510c72887b737270433c81a08c883a9"],
+			"darwin-arm64": ["68b6bc4080ac1330234db2a9002d07f98b000537a1bd531a687b660d4160fa7f", "49e7963072b2ca83fb44c09f4d4a7cda52d390c0c9c6f55bac83454a5bc43910"],
 		},
 	);
-	assert.equal(URL_LINUX, "https://github.com/cloudflare/cloudflared/releases/download/2026.10.0/cloudflared-linux-amd64");
+	assert.equal(URL_LINUX, "https://github.com/cloudflare/cloudflared/releases/download/2026.10.4/cloudflared-linux-amd64");
 	assert.deepEqual(quickArgv(8767), ["tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:8767", "--http-host-header", "127.0.0.1:8767"]);
 	assert.deepEqual(namedArgv("/home/u/.pi-command-post/data/tunnel/token"), ["tunnel", "--no-autoupdate", "run", "--token-file", "/home/u/.pi-command-post/data/tunnel/token"]);
 	for (const port of [80, 1023, 65536, 8767.5, Number.NaN]) assert.throws(() => quickArgv(port), /1024–65535/);
@@ -176,7 +176,7 @@ test("A10: a verified macOS archive yields only its one regular cloudflared; lin
 		["truncated", gzipSync(tarEntry("cloudflared", Buffer.alloc(2000, 1)).subarray(0, 1024)), /truncated/],
 	];
 	for (const [label, archive, reason] of hostile) {
-		const release = { "darwin-arm64": { asset: "cloudflared-darwin-arm64.tgz", sha256: sha(archive), archive: true } };
+		const release = { "darwin-arm64": { asset: "cloudflared-darwin-arm64.tgz", sha256: sha(archive), archive: true, binarySha256: sha(BINARY) } };
 		const url = releaseUrl("cloudflared-darwin-arm64.tgz");
 		const result = await provisionCloudflared(b.binDir, { platform: "darwin", arch: "arm64", pathEnv: "", fetch: fakeFetch({ [url]: { status: 200, body: archive } }), run: fakeRun({ ".cloudflared.": "2026.10.0" }) }, release);
 		assert.equal(result.ok, false, label);
@@ -185,9 +185,38 @@ test("A10: a verified macOS archive yields only its one regular cloudflared; lin
 	}
 	const good = tgz(tarEntry("cloudflared", BINARY));
 	const url = releaseUrl("cloudflared-darwin-arm64.tgz");
-	const result = await provisionCloudflared(b.binDir, { platform: "darwin", arch: "arm64", pathEnv: "", fetch: fakeFetch({ [url]: { status: 200, body: good } }), run: fakeRun({ ".cloudflared.": "2026.10.0" }) }, { "darwin-arm64": { asset: "cloudflared-darwin-arm64.tgz", sha256: sha(good), archive: true } });
+	const result = await provisionCloudflared(b.binDir, { platform: "darwin", arch: "arm64", pathEnv: "", fetch: fakeFetch({ [url]: { status: 200, body: good } }), run: fakeRun({ ".cloudflared.": "2026.10.0" }) }, { "darwin-arm64": { asset: "cloudflared-darwin-arm64.tgz", sha256: sha(good), archive: true, binarySha256: sha(BINARY) } });
 	assert.equal(result.ok, true);
 	assert.deepEqual(readFileSync(join(b.binDir, "cloudflared")), BINARY);
+});
+
+/*
+Feature: a macOS release pins both the tarball and the cloudflared inside it
+  Scenario: the tarball hash matches but the inner binary hash does not
+    Given a pinned darwin release whose binarySha256 is not the extracted binary's
+    When cloudflared is provisioned
+    Then it is refused naming the inner binary and nothing is published
+  Scenario: the inner hash matches but the tarball hash does not
+    Then it is refused naming the asset and nothing is published
+*/
+test("A10: a macOS archive is verified twice, the tarball before extraction and the inner binary before publishing", async (t) => {
+	const b = bench(t);
+	const good = tgz(tarEntry("cloudflared", BINARY));
+	const url = releaseUrl("cloudflared-darwin-arm64.tgz");
+	const run = fakeRun({ ".cloudflared.": "2026.10.0" });
+	const asset = "cloudflared-darwin-arm64.tgz";
+	const cases: Array<[string, { sha256: string; binarySha256?: string }, RegExp]> = [
+		["inner mismatch", { sha256: sha(good), binarySha256: sha(Buffer.from("other")) }, /inside cloudflared-darwin-arm64\.tgz/],
+		["outer mismatch", { sha256: sha(Buffer.from("other")), binarySha256: sha(BINARY) }, /checksum mismatch for cloudflared-darwin-arm64\.tgz/],
+		["inner hash missing", { sha256: sha(good) }, /inside cloudflared-darwin-arm64\.tgz/],
+		["notes hash on the tarball", { sha256: sha(BINARY), binarySha256: sha(BINARY) }, /checksum mismatch for cloudflared-darwin-arm64\.tgz/],
+	];
+	for (const [label, hashes, reason] of cases) {
+		const result = await provisionCloudflared(b.binDir, { platform: "darwin", arch: "arm64", pathEnv: "", fetch: fakeFetch({ [url]: { status: 200, body: good } }), run }, { "darwin-arm64": { asset, archive: true, ...hashes } });
+		assert.equal(result.ok, false, label);
+		assert.match(result.ok ? "" : result.reason, reason, label);
+		assert.deepEqual(b.listBin(), [], `${label}: nothing published`);
+	}
 });
 
 /** A 12-byte GNU base-256 size field: the high bit set, then the value big-endian. */

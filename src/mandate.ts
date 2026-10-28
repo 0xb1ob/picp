@@ -52,6 +52,7 @@ import { assertDispatchAllowed, type DispatchAuthorityJob, riskGateExempt } from
 import { openScheduleRunStore, type ScheduleRunStore } from "./schedule-runs.ts";
 import { runAuthority, runRiskPreapproval, scheduleRunVerdict, type ScheduleAuthorityContext } from "./schedule-authority.ts";
 import { continuationProof, continueAdmittedWork, issueAdmissions } from "./mandate-continuity.ts";
+import { validatedOnce } from "./validated-text.ts";
 
 export * from "./mandate-accounting.ts";
 export * from "./mandate-permission.ts";
@@ -377,10 +378,9 @@ export class MandateStore {
 		if (id === undefined) return undefined;
 		const file = this.file(id);
 		if (!existsSync(file)) return undefined;
-		const parsed = validate<Mandate>(MandateSchema, JSON.parse(readFileSync(file, "utf8")));
-		if (!parsed.ok) {
-			throw new MandateError(`${file} violates the mandate contract:\n  ${parsed.errors.join("\n  ")}`);
-		}
+		const text = readFileSync(file, "utf8");
+		const parsed = validatedOnce(file, text, JSON.parse(text), (v) => validate<Mandate>(MandateSchema, v));
+		if (!parsed.ok) throw new MandateError(`${file} violates the mandate contract:\n  ${parsed.errors.join("\n  ")}`);
 		return parsed.value;
 	}
 

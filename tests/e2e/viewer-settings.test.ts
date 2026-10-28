@@ -460,14 +460,14 @@ test("P20-settings-page: four sections; Save posts If-Match, the control token a
 	const fresh = (await ui.snapshot()).revision;
 	assert.notEqual(fresh, loaded, "a change on disk the page has not seen");
 	await ui.press(people, "Save");
-	await ui.tab.find(".settings-stale", (el) => /Changed on disk/.test(el.textContent ?? ""));
-	const [stale] = ui.posts();
+	assert.match((await ui.tab.find(".settings-stale")).textContent ?? "", /Changed on disk/);
+	const [stale, ...extra] = ui.posts(); assert.equal(extra.length, 0, "the first Save is one POST");
 	assert.deepEqual([stale?.path, stale?.status, stale?.headers["if-match"], stale?.headers["x-cp-control-token"]], ["/api/settings/apply", 412, `"${loaded}"`, ui.csrf]);
 	assert.deepEqual(stale?.json.changes, { "models.parent": "anthropic/claude-opus-5-5" });
 	assert.match(String(stale?.json.request_id), /^[A-Za-z0-9_-]{16}$/);
 	assert.equal((people.querySelector("#setting-models-parent")!.parentElement!.querySelector("input") as HTMLInputElement).value, "anthropic/claude-opus-5-5", "the draft survives a 412");
 	await ui.press(people, "Save");
-	await ui.tab.find(".settings-ok", (el) => /^Saved · 1 change$/.test(el.textContent ?? ""));
+	assert.match((await ui.tab.find(".settings-ok")).textContent ?? "", /^Saved · 1 change$/);
 	assert.equal(ui.posts()[1]?.headers["if-match"], `"${fresh}"`, "the retry carries the fresh revision");
 	assert.deepEqual(ui.posts()[1]?.json.changes, { "models.parent": "anthropic/claude-opus-5-5" });
 	assert.equal((await ui.snapshot()).fields.find((f) => f.key === "models.parent")?.value, "anthropic/claude-opus-5-5", "written by the session");
@@ -538,13 +538,13 @@ test("P20-settings-compaction: both keys with what is in force; a bad threshold 
 	await ui.enter(parent, "150000");
 	assert.equal(compaction.querySelector("[role=alert]"), null);
 	await ui.press(compaction, "Save");
-	await ui.tab.find(".settings-ok", (el) => /^Saved/.test(el.textContent ?? ""));
-	assert.deepEqual(ui.posts()[0]!.json.changes, { "sessions.parent_compact_at_tokens": 150000 });
+	assert.match((await ui.tab.find(".settings-ok")).textContent ?? "", /^Saved/);
+	assert.equal(ui.posts()[0]!.status, 200, "the real server parses and applies the body"); assert.deepEqual(ui.posts()[0]!.json.changes, { "sessions.parent_compact_at_tokens": 150000 });
 	await until(effective, (now) => now[0] === "In force: 150000 tokens, from file", "the re-read snapshot");
 	assert.deepEqual(effective(), ["In force: 150000 tokens, from file", "In force: 200000 tokens, from code"], "the re-read snapshot shows the written file");
 	await ui.press(compaction, "Restore defaults");
 	assert.deepEqual(ui.posts()[1]!.json.keys, ["sessions.parent_compact_at_tokens", "sessions.operator_compact_at_tokens"]);
-	await until(async () => (await ui.snapshot()).fields.find((f) => f.key === "sessions.parent_compact_at_tokens")!.value, (value) => value === 200000, "the restored default");
+	assert.equal(await until(async () => (await ui.snapshot()).fields.find((f) => f.key === "sessions.parent_compact_at_tokens")!.value, (value) => value !== 150000, "the restore"), 200000, "the restored default");
 });
 
 test("P20-settings-readonly: no control token is read only with every control disabled; an absent routing.json is one line, no rubric controls", { timeout: 120_000 }, async (t) => {

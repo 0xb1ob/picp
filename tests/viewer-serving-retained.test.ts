@@ -12,7 +12,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { refreshStream, refreshStreams } from "../src/viewer/refresh-stream.ts";
 import { createResource, POLL_MS, pollStream, type Stream } from "../viewer-app/resource.ts";
 import { applyDelta, diffJson } from "../src/viewer/json-delta.ts";
-import { deployView } from "../src/viewer/deploy-view.ts";
 import { readObject } from "../src/viewer/sessions.ts";
 import { routingEvents } from "../src/viewer/overview-health.ts";
 import { readLines, startOffset } from "../src/viewer/tail.ts";
@@ -20,7 +19,6 @@ import { hostAllowed } from "../src/viewer/server.ts";
 import { build } from "esbuild";
 import { overview } from "../src/viewer/overview-view.ts";
 import { REPO_ROOT } from "./harness/index.ts";
-import type { ViewerJob } from "../src/viewer/api-types.ts";
 import { bindHostRefusal, localAddresses, sameAddress, viewerHostCandidates } from "../src/viewer/bind-host.ts";
 
 // `appPage` escaping: the build names its assets `main-<HASH>.js|css`, so no served page carries markup in a URL.
@@ -177,18 +175,8 @@ test("sameAddress: IPv6 by value, IPv4 by string", () => {
 	assert.ok(!sameAddress("x", "x"));
 });
 
-// `deployView` on live phases: launching and working come only from a running worker's in-flight row, which a scratch
-// home cannot hold; the e2e P21-deploy reads every file-backed state through /api/job.
-test("deployView: a launching deploy job is queued and a working one is deploying", (t) => {
-	const home = createScratchHome(); t.after(() => home.cleanup());
-	const stateDir = join(home.path, LAYOUT.state);
-	mkdirSync(join(stateDir, "runs", "cp-merged"), { recursive: true });
-	writeFileSync(join(stateDir, "runs", "cp-merged", "after-merge.json"), JSON.stringify({ schema_version: 1, job_id: "cp-merged", merge_commit_sha: "b59fc3a1".repeat(5), base_branch: "main", status: "created", deploy_job_id: "cp-deploy", coverage: "none", task_file: "/x/t.md", recorded_at: "2026-09-26T12:00:00Z" }));
-	const at = (phase: string) => deployView({ home: home.path, stateDir }, "cp-merged", [{ id: "cp-deploy", phase, failure: null, finished_at: null } as unknown as ViewerJob])?.state;
-	assert.deepEqual([at("launching"), at("working")], ["queued", "deploying"]);
-});
 
-// `diffJson`/`applyDelta` codec matrix: key order, __proto__, scalars and duplicate ids are shapes no screen view emits;
+// `diffJson`/`applyDelta` codec matrix: key order, __proto__, scalars and duplicate ids no screen view emits;
 // the throws guard a forged or mismatched delta the server never sends. P21-delta covers the served round trip.
 const rows = Array.from({ length: 700 }, (_, i) => ({ id: `cp-${i}`, title: `job ${i} ${"long text ".repeat(5)}`, cost: i }));
 const oneChanged = rows.map((r) => (r.id === "cp-7" ? { ...r, cost: 9999 } : r));
@@ -328,9 +316,8 @@ test("host bind: a bracketed IPv6 and a bare host name match exactly", () => {
 	assert.equal(hostAllowed("box", "box", 80), true);
 });
 
-// `Overview` rendered to a string from hand-set view data: quota, mandate, parent-lock, operator-question, main-CI latch and
-// blocked shapes come from other subsystems' records; P21-render-* pin the served Overview from seeded files.
-// `time`/`clock`/`stamp` and friends read the process zone, which the shared tab cannot switch per test.
+// `Overview` SSR from hand-set quota, mandate, parent-lock, operator-question, main-CI latch and blocked shapes owned by
+// other subsystems; P21-render-* pin the served Overview. `time`/`clock` read the process zone a shared tab can't switch.
 test("times format in the browser's own zone, never a server zone", async t => {
  const {time,observedTime,clock} = await import("../viewer-app/format.ts");
  const zone = process.env.TZ; t.after(() => { if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone; });
@@ -353,7 +340,7 @@ test("Overview is executive: health strip, awaiting, blocked, in flight and ship
  assert.doesNotMatch(empty, /Blocked|Decided for you|being handled|Fleet health|Mandates|UTC|\/classic/);
  assert.match(empty, /operator<\/span><strong title="offline">offline</); assert.match(empty, /overview-dot-idle"><\/span>main CI<\/span><strong title="no red latch">no red latch</, "no latch is neutral, not a green dot"); assert.doesNotMatch(empty, /main CI<\/span><strong[^>]*>green/, "no latch is never claimed green");
  const more = screen(data,true); assert.doesNotMatch(more,/aria-disabled="true"|#mandates/);
- // Audit P4 #25: More holds Schedules, Files (and Reports, phone only) plus Notifications; Board and Map are Jobs views.
+ // Audit P4 #25: More holds Schedules, Files (and Reports, phone only) and Notifications; Board and Map are Jobs views.
  for (const screen of ["stats","reports","schedules","files"]) assert.ok(more.includes(`href="#${screen}"`),screen);
  assert.match(more,/class="more-phone" href="#stats"|href="#stats" class="more-phone"/);
  for (const screen of ["awaiting","decided","board","map"]) assert.ok(!more.includes(`href="#${screen}"`),screen);

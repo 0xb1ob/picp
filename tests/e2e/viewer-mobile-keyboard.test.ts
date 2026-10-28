@@ -80,7 +80,7 @@ test("P19-kbd-css: the served page and stylesheet pin the phone shell, stop page
 	assert.match(css, /\.shell:has\(>\.shell-main>\.sessions\)\{height:var\(--cp-viewport-height, 100dvh\)\}/, "the shell's height is the visible area");
 	assert.match(phone, /html:has\(\.shell>\.shell-main>\.sessions\),html:has\(\.shell>\.shell-main>\.sessions\)>body\{overflow:hidden;overscroll-behavior:none\}/, "no page scroll and no rubber-banding behind the shell");
 	assert.match(phone, /\.shell:has\(>\.shell-main>\.sessions\)\{position:fixed;inset:0 auto auto 0;width:100%;transform:translateY\(var\(--cp-viewport-offset, 0px\)\)\}/, "fixed to the visual viewport, moved by its pan");
-	assert.doesNotMatch(desktop, /position:fixed;inset:0 auto auto 0/, "desktop keeps the ordinary flex shell");
+	assert.ok(desktop.length > 0, "the desktop block is served"); assert.doesNotMatch(desktop, /position:fixed;inset:0 auto auto 0/, "desktop keeps the ordinary flex shell");
 
 	// Measured (Chromium, 1440x900 and 390x844): `.sessions { height: 100% }` under a 64 px page bar hid the composer.
 	assert.match(css, /\.shell-main:has\(>\.sessions\)\{display:flex;flex-direction:column\}/, "main stacks its children, so siblings above .sessions take their own height");

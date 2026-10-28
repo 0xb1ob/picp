@@ -86,6 +86,8 @@ test("P11c-run-log: a dispatched worker's log and projection are the read surfac
 	assert.deepEqual([exited.phase, exited.exit_code, exited.tool_calls, exited.current_tool], ["exited", 0, 1, null]);
 	assert.ok(exited.turns >= idle.turns && idle.turns >= 2, "turns never shrink; the failed nudge turn and its retries add more");
 	assert.ok(closed.filter((event) => event.type === "report_nudged").length <= 1, "a settled-without-report worker is nudged once");
+	const extraTurnCause = closed.some((event) => ["report_nudged", "recovery_prompted", "auto_retry_start"].includes(event.type));
+	assert.ok(exited.turns <= 2 || extraTurnCause, `${exited.turns} turns past the script's two need a nudge or a retry event`);
 	assert.ok(exited.exited_at && post.watch(jobId).exited, "the observed close is a cp marker the projection follows");
 	assert.deepEqual(exited.usage, idle.usage);
 	assert.deepEqual(rebuildStatus(home.path, jobId), exited, "the log rebuilds exactly the cached projection");

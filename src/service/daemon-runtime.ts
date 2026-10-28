@@ -86,7 +86,8 @@ export interface InnerPorts {
 	readRuntime(): RuntimeRecord | undefined;
 	writeRuntime(record: RuntimeRecord): void;
 	send(event: InnerEvent): void;
-	log(line: string): void;
+	/** `atMs`: the clock read to stamp the line with, so a caller's record and its log line carry one instant. */
+	log(line: string, atMs?: number): void;
 	/** Whether the home uses the remote feature (`remoteFeatureConfigured`): only then does the pairing-alert sender run. Absent: never. */
 	remoteConfigured?(): boolean;
 	/** The cloudflared controller's own I/O (`daemon-tunnel.ts`, remote dashboard PR 2c). Absent: no tunnel. */
@@ -247,9 +248,10 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 			save();
 		});
 		if (pid !== undefined) owned.add(pid);
-		Object.assign(unit, { pid, started_at: at(), last_start: at(), next_due: iso(now() + PERIOD_MS) });
+		const started = now();
+		Object.assign(unit, { pid, started_at: iso(started), last_start: iso(started), next_due: iso(started + PERIOD_MS) });
 		delete unit.term_at;
-		ports.log(`${job} started pid ${pid}`);
+		ports.log(`${job} started pid ${pid}`, started);
 		save();
 	};
 
@@ -406,7 +408,7 @@ export function runInner(options: InnerOptions, ports: InnerPorts): Inner {
 
 // Not import.meta.main: that is node 24.2+, and engines admits every 24.x (#375).
 if (process.argv[1] !== undefined && (() => { try { return entryRealpath(process.argv[1]) === entryPath(import.meta.url); } catch { return false; } })()) {
-	const log = (line: string): void => void process.stderr.write(`${new Date().toISOString()} cp-daemon inner[${process.pid}]: ${line}\n`);
+	const log = (line: string, atMs = Date.now()): void => void process.stderr.write(`${new Date(atMs).toISOString()} cp-daemon inner[${process.pid}]: ${line}\n`);
 	const refuse = (why: string): never => {
 		log(`${why}; exiting ${EXIT_CONFIG}`);
 		process.exit(EXIT_CONFIG);

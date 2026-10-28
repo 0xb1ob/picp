@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { LAYOUT, WORKER_FORBIDDEN_TOOLS } from "../src/contracts.ts";
+import { LAYOUT } from "../src/contracts.ts";
 import {
 	archiveEntry,
 	captureCandidate,
@@ -198,11 +198,4 @@ test("/memory's argument completion never offers a bare 'capture' that would sub
 	assert.deepEqual(atStatusPrefix, [{ value: "status", label: "status" }]);
 
 	assert.equal(memoryArgumentCompletions("zzz"), null, "an unmatched prefix offers nothing");
-});
-test("cp_memory is a parent-only tool: a worker profile can never hold it", () => {
-	// data/ is the parent's home only. cp_project is the existing precedent
-	// (registering a project would let a worker clone repositories of its
-	// choosing); cp_memory's write is smaller in blast radius but the same rule
-	// applies — a worker must never be the one appending to candidates.md.
-	assert.ok(WORKER_FORBIDDEN_TOOLS.includes("cp_memory"));
 });

@@ -106,7 +106,7 @@ test("P22-reports-api: /api/reports lists valid boards newest first, one revisio
 test("P22-boards-serve: a board is served read-only from its own site/ under a strict CSP; everything else 404s", async (t) => {
 	const s = await boardsRig(t);
 	const index = await s.get("/boards/alpha/");
-	assert.deepEqual([index.status, index.headers["content-type"]], [200, "text/html; charset=utf-8"]);
+	assert.equal(index.status, 200); assert.equal(index.headers["content-type"], "text/html; charset=utf-8");
 	const csp = String(index.headers["content-security-policy"]);
 	assert.match(csp, /default-src 'self'/);
 	assert.match(csp, /style-src 'self' 'unsafe-inline'/, "inline <style> blocks and style attributes render");
@@ -114,21 +114,21 @@ test("P22-boards-serve: a board is served read-only from its own site/ under a s
 	assert.match(csp, /object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'/);
 	assert.match(index.body.toString(), /<h1>Alpha<\/h1>/);
 	const png = await s.get("/boards/alpha/img/a.png");
-	assert.deepEqual([png.headers["content-type"], [...png.body]], ["image/png", [0x89, 0x50, 0x4e, 0x47]]);
+	assert.equal(png.headers["content-type"], "image/png"); assert.deepEqual([...png.body], [0x89, 0x50, 0x4e, 0x47]);
 	assert.equal((await s.get("/boards/alpha/in.html")).status, 200, "a symlink that stays inside site/ is fine");
 	assert.equal((await s.get("/boards/q3-report-")).status, 404, "a valid slug with no board");
 	const css = await s.get("/boards/board.css");
-	assert.deepEqual([css.status, /text\/css/.test(String(css.headers["content-type"]))], [200, true]);
+	assert.equal(css.status, 200); assert.match(String(css.headers["content-type"]), /text\/css/);
 	assert.doesNotMatch(css.body.toString(), /https?:\/\/|@import|url\(/, "the built-in stylesheet loads nothing external");
 	const redirect = await s.get("/boards/alpha");
-	assert.deepEqual([redirect.status, redirect.headers.location], [308, "/boards/alpha/"]);
+	assert.equal(redirect.status, 308); assert.equal(redirect.headers.location, "/boards/alpha/");
 	const refused = ["/boards/nope/", "/boards/broken/", "/boards/Upper/", "/boards/-a/", "/boards/a_b/", "/boards/a.b/", `/boards/${"x".repeat(65)}/`, "/boards/%C3%A9/",
 		"/boards/alpha/out.txt", "/boards/alpha/..%2Fboard.json", "/boards/alpha/%2e%2e/board.json", "/boards/alpha/img/..%2f..%2fboard.json", "/boards/alpha/.hidden",
 		"/boards/alpha/img", "/boards/alpha/img/", "/boards/alpha/%E0%A4%A", "/boards/alpha/a%00.png", "/boards/alpha/missing.html", "/boards/escape/", "/boards/jsonout/",
 		"/boards/jsonout", "/boards/linked/", "/boards/untimed/", "/boards/..%2Falpha/"];
 	for (const path of refused) {
 		const reply = await s.get(path);
-		assert.deepEqual([reply.status, /default-src 'self'/.test(String(reply.headers["content-security-policy"]))], [404, true], path);
+		assert.equal(reply.status, 404, path); assert.match(String(reply.headers["content-security-policy"]), /default-src 'self'/, path);
 	}
 	assert.equal((await s.get("/boards/alpha/", "evil.example")).status, 200, "same Host policy as the viewer: off by default");
 	for (let i = 0; i < 2; i += 1) assert.deepEqual((await s.get("/api/sessions")).json.boards.map((b: { slug: string; title: string; created_at: string }) => [b.slug, b.title, b.created_at]), [["beta", "Beta report", "2026-09-03T00:00:00Z"], ["alpha", "Alpha report", "2026-09-01T00:00:00Z"]]);
@@ -144,7 +144,7 @@ test("P22-reports-screen: Reports lists each board's link, description and job, 
 	const grid = await tab.find(".reports-grid");
 	const html = grid.outerHTML;
 	assert.match(html, /^<div class="reports-grid"><article class="job-row"/, "cards sit in the grid container desktop lays out");
-	assert.match(html, /href="\/boards\/alpha\/"[^>]*target="_blank"|target="_blank"[^>]*href="\/boards\/alpha\/"/);
+	assert.match(html, /href="\/boards\/alpha\/"/); assert.match(html, /href="\/boards\/alpha\/"[^>]*target="_blank"|target="_blank"[^>]*href="\/boards\/alpha\/"/);
 	assert.match(html, /the first/);
 	assert.match(html, /href="#job\/cp-1"/);
 	assert.doesNotMatch(html, /overview-reply|<code[^>]*>[^<]*\/boards\/alpha\/<\/code>|Copy/, "no copy-URL box: the title already links");
@@ -228,7 +228,7 @@ test("P22-stats-api: jobs, spend, tokens, phases, decisions and mandates follow 
 	const row = day.mandates.find((m: { id: string }) => m.id === "md-a");
 	assert.deepEqual([row.tokens, row.jobs, row.spend_usd, row.spend_cap_usd, row.token_cap, row.status, row.objective, row.time_left_seconds > 0], [175, 1, 2, 20, 1000, "active", "Goal A", true], "(total - cache_read) worker + reviewer");
 	assert.deepEqual(day.mandates[1], { id: "unassigned", objective: "No covering live grant", status: null, jobs: 2, spend_usd: null, spend_cap_usd: null, tokens: null, token_cap: null, time_left_seconds: null });
-	assert.ok(day.warnings.some((w: { message: string }) => /hourly token series sums 150/.test(w.message)), "event sum vs status totals gap is named");
+	assert.ok(day.warnings.some((w: { message: string }) => /hourly token series sums 150/.test(w.message)), "event sum vs status totals gap is named"); assert.ok(!day.warnings.some((w: { message: string }) => /exceed|not read/.test(w.message)), "no run log is over a bound");
 	const hour = day.tokens_by_model.buckets.find((b: { start: string }) => b.start === "2026-10-08T09:00:00.000Z");
 	assert.deepEqual([hour.tokens, day.tokens_by_model.models, day.tokens_by_model.buckets.filter((b: { tokens: object }) => Object.keys(b.tokens).length).length], [{ "worker-model": 150 }, ["worker-model"], 1]);
 	assert.deepEqual([day.decisions, day.kpis.decisions], [{ for_you: 2, by_you: 1, worth: 1 }, 3]);
@@ -310,7 +310,7 @@ test("P22-stats-bounds: an over-size or over-budget run log is left out of log f
 	const big = await statsRig(t, (home) => { for (const id of ["cp-m", "cp-c"]) truncateSync(join(home, LAYOUT.runs, id, "events.jsonl"), 17 * MiB); });
 	const small = await big.stats();
 	assert.ok(small.warnings.some((w: { message: string }) => /2 run log\(s\) exceed 16 MiB/.test(w.message)), "cp-m and cp-c logs are over the per-file bound");
-	assert.deepEqual([small.phases.queued_seconds, small.kpis.ci_green_first_try, small.tokens_by_model.models], [null, null, []]);
+	assert.deepEqual([small.phases.queued_seconds, small.kpis.ci_green_first_try, small.tokens_by_model.models], [null, null, []]); assert.equal(small.jobs_finished.closed, 2);
 	const extra = Array.from({ length: 9 }, (_, i) => `cp-x${i}`);
 	const wide = await statsRig(t, (home, put) => {
 		const ledger = JSON.parse(readFileSync(join(home, ".pi-command-post/jobs.json"), "utf8"));
@@ -388,14 +388,23 @@ test("P22-stats-screen: Stats shows six KPIs, four tables, the Parent panel, CSV
 	assert.equal(tab.$$('button[aria-pressed="false"]').filter((b) => b.textContent === "Table").length, 4);
 	assert.match(tab.text(), /Spend includes reviewers/);
 	assert.doesNotMatch(tab.text(), /Nothing finished|sample|NaN|Infinity/i);
-	assert.doesNotMatch(html, /type="datetime-local"|style=|amber|coral/);
-	const cells = (days: number) => {
-		const block = tab.$$(".stats-parent h3").find((h) => h.textContent === `${days} days`)!.nextElementSibling!;
+	assert.doesNotMatch(html, /type="datetime-local"|style=|amber|coral|="#[\da-f]{3,8}"/i);
+	const cells = (days: number, page = tab) => {
+		const block = page.$$(".stats-parent h3").find((h) => h.textContent === `${days} days`)!.nextElementSibling!;
 		return [...block.querySelectorAll("dt")].map((dt) => `${dt.textContent}=${dt.nextElementSibling!.textContent}`);
 	};
 	assert.deepEqual(cells(7), ["Turns=4", "Reply p50=42s", "Reply p90=2m 30s", "Wasted turns=25% · 1 of 4", "Wasted $=25% · $0.50 of $2.00"]);
 	assert.deepEqual(cells(30), cells(7), "every turn is inside both windows");
 	assert.match(tab.$(".stats-parent h2")!.getAttribute("title")!, /Wasted turns = wasted \/ all answered turns; wasted \$ = recorded cost of wasted turns \/ recorded cost of all turns/);
+	// Two turns 18 days ago, answered after 600 s and 4000 s: the 7-day window has none, so every figure is a dash.
+	const slow = await statsRig(t, (_home, put) => put(join(LAYOUT.sessions, "cp-parent.jsonl"), [["10:00:00", "10:10:00"], ["11:00:00", "12:06:40"]]
+		.flatMap(([asked, replied]) => [{ type: "message", timestamp: `2026-09-20T${asked}Z`, message: { role: "user", content: "status?" } },
+			{ type: "message", timestamp: `2026-09-20T${replied}Z`, message: { role: "assistant", content: [{ type: "toolCall", id: "c", name: "cp_next", arguments: {} }], usage: { cost: { total: 1 } } } }])
+		.map((r) => JSON.stringify(r)).join("\n") + "\n"));
+	const late = await slow.viewer.open("#stats?range=24h");
+	await until(() => late.$$(".stats-parent h3").length, (n) => n === 2, "the Parent panel");
+	assert.deepEqual(cells(7, late), ["Turns=0", "Reply p50=-", "Reply p90=-", "Wasted turns=-", "Wasted $=-"], "no turns is a dash, never 0%");
+	assert.deepEqual(cells(30, late).slice(0, 3), ["Turns=2", "Reply p50=10m", "Reply p90=1h 6m"], "10 minutes and over drop the seconds");
 	let csv = "";
 	(tab.globals.URL as { createObjectURL: unknown }).createObjectURL = (blob: Blob) => { void blob.text().then((text) => { csv = text; }); return "blob:stats"; };
 	(tab.globals.URL as { revokeObjectURL: unknown }).revokeObjectURL = () => {};
@@ -408,7 +417,7 @@ test("P22-stats-screen: Stats shows six KPIs, four tables, the Parent panel, CSV
 	const css = (await get(s.viewer.port, /<link rel="stylesheet" href="([^"]+)"/.exec(page.body.toString())![1]!)).body.toString();
 	const stats = css.slice(css.indexOf(".stats-"));
 	for (const token of ["blue", "green", "muted", "dim"]) assert.match(stats, new RegExp(`\\.stats-fill-${token}\\s*\\{\\s*fill:\\s*var\\(--${token}\\)`));
-	assert.doesNotMatch(stats.slice(0, stats.lastIndexOf(".stats-") + 400), /font-family|--amber|--coral|#[\da-f]{6}\b/i, "charts paint with tokens only");
+	assert.doesNotMatch(stats.slice(0, stats.lastIndexOf(".stats-") + 400), /font-family|--amber|--coral|#[\da-f]{3,8}\b/i, "charts paint with tokens only");
 });
 
 test("P22-stats-filters: filters rewrite only the hash, the zone goes to the API, Custom shows From/To, and unknown is a dash", async (t) => {
