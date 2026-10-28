@@ -8,7 +8,7 @@ import { askDetails, evidenceLink } from "./decision-views.ts";
 import { localPaths } from "./linkify.ts";
 import { attachPrChips, projectRepos } from "./pr-chips.ts";
 import { parseChangeRequestUrl } from "../forge-url.ts";
-import { projectByRefs, splitReply } from "../reply-split.ts";
+import { projectByRefs, splitReply } from "./reply-split.ts";
 import { decisions } from "./overview-decisions.ts";
 import { parseObject, source, timestamp } from "./overview-read.ts";
 import { modelWindows, operatorContext, parentContext, workerContext } from "./context-usage.ts";
@@ -84,7 +84,7 @@ function refProject(state: ViewerState, d: ReturnType<typeof decisions>): (ref: 
  };
 }
 /**
- * Operator tier chips: a reply splits into `[project]` sections (src/reply-split.ts), its fallback the project of the
+ * Operator tier chips: a reply splits into `[project]` sections (reply-split.ts), its fallback the project of the
  * last own message; own messages only lose a leading known `[project] ` header, as before issue 589.
  */
 function stampSegments(entries: SessionEntry[], names: Set<string>, projectOf: (ref: string) => string | undefined): void {
