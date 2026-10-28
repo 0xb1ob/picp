@@ -2210,7 +2210,9 @@ Other spawn-time policy, all fail-closed:
   the drain; any other refusal, a `promote`, a closed or fleet-known job
   drops the entry. Every start or drop is one `recovery` wake-up
   (`QUEUED DISPATCH STARTED`/`DROPPED`); a drain that throws keeps every
-  entry and wakes `DISPATCH QUEUE DRAIN FAILED` once per cause.
+  entry and wakes `DISPATCH QUEUE DRAIN FAILED` once per cause. Only STARTED carries
+  the job as a candidate key, so a DROPPED notice is never superseded for lacking a
+  fleet record.
 - **Armed dispatch (unload-parent PR2).** A `cp_dispatch` refused only by open
   blockers (`BlockedDispatchError`; `when_ready` not `false`; never a pipeline
   or script job) is armed in `state/armed-dispatches.json`
@@ -2226,6 +2228,8 @@ Other spawn-time policy, all fail-closed:
   or a blocker that reopened keeps it; a start, a `promote`, any other refusal,
   or an entry gone stale (in the fleet, closed, script, pipeline-owned,
   unreadable) is one `recovery` wake-up (`ARMED DISPATCH STARTED`/`DROPPED`).
+  Only STARTED carries the job as a candidate key; a notice about a job that did not
+  start is never superseded for lacking a fleet record.
   A release that throws keeps every entry and wakes `ARMED DISPATCH RELEASE
   FAILED` once per cause.
 - `WorkerManager.shutdownAll()` is the `session_shutdown` cleanup: the parent

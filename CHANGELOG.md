@@ -14,6 +14,8 @@ are recorded here with the migration; the binding detail lives in
 
 - Fix: the no-report nudge no longer forces an immediate report (`blocked` is now for a real blocker only), and the on-disk-work recovery prompt no longer says "do not start anything new"; both tell a worker whose acceptance is unmet and who is under its tool-call and wall-clock caps to keep working and report only when done, blocked or capped. Migration: none.
 
+- Fix: issue 647: an `ARMED DISPATCH DROPPED`/`QUEUED` (and `QUEUED DISPATCH DROPPED`) notice is no longer discarded as stale for a job that never got a fleet record, and wake-up suppression bookkeeping no longer creates a `starting` status.json for a job that never ran. Migration: none.
+
 - Fix: issue 419: the no-report nudge's "do not redo, re-verify or push again" now applies only to finished work, so an unfinished worker is no longer told not to push. Migration: none.
 
 - Fix: issue 401: the dispatch brief now carries every task addendum frozen up to dispatch time, so an armed job's worker starts with addenda added while it waited. Migration: none.

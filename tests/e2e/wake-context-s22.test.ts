@@ -32,6 +32,7 @@ async function carried(t: TestContext, records: Array<Partial<FleetRecord> & { j
 			worker: { pid: process.pid, session_id: "legacy", session_file: session, profile: "implementer",
 				role: "implementer", model, started_at: issued }, ...record });
 		mkdirSync(join(home.path, paths.runDir(record.job_id)), { recursive: true });
+		writeFileSync(join(home.path, paths.eventsFile(record.job_id)), "");
 	}
 	const timestamp = isoTimestamp();
 	let parentId: string | null = null;
