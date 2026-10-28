@@ -15,7 +15,7 @@ import { call, type Init, type Reply } from "./remote.ts";
 import { createScratchHome, REPO_ROOT } from "./index.ts";
 
 type Context = { after(fn: () => unknown): void };
-const CLOCK_HOOK = `--import ${pathToFileURL(join(REPO_ROOT, "tests/harness/process-clock.ts")).href}`;
+const CLOCK_HOOK = ["process-clock.ts", "parent-lifeline.ts"].map((f) => `--import ${pathToFileURL(join(REPO_ROOT, "tests/harness", f)).href}`).join(" ");
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
 export async function until<T>(read: () => T | Promise<T>, ok: (value: T) => boolean, what: string, ms = 20_000): Promise<T> {
@@ -42,7 +42,7 @@ export async function startViewer(t: Context, { home, requireTailnet = true, at,
 	for (let attempt = 1; ; attempt++) {
 		const port = await freePort();
 		const argv = ["--home", home, "--host", "127.0.0.1", "--port", String(port), ...(requireTailnet ? ["--require-tailnet"] : [])];
-		const child: ChildProcess = spawn(join(REPO_ROOT, "bin/cp-view"), argv, { env: { ...process.env, HOME: home, CP_HOME: home, NODE_OPTIONS: CLOCK_HOOK, CP_TEST_CLOCK_FILE: clock, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+		const child: ChildProcess = spawn(join(REPO_ROOT, "bin/cp-view"), argv, { env: { ...process.env, HOME: home, CP_HOME: home, NODE_OPTIONS: CLOCK_HOOK, CP_TEST_CLOCK_FILE: clock, CP_TEST_LIFELINE: "1", ...env }, stdio: ["pipe", "pipe", "pipe"] });
 		let output = "";
 		child.stdout!.on("data", (chunk) => (output += chunk));
 		child.stderr!.on("data", (chunk) => (output += chunk));
