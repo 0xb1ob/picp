@@ -9,8 +9,9 @@ import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
-import { readDrain } from "../../src/drain.ts";
-import { createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, MockProvider, REPO_ROOT, waitFor } from "../harness/index.ts";
+import { parseDrainArgs, readDrain } from "../../src/drain.ts";
+import { randomUUID } from "node:crypto";
+import { createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, MockProvider, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
 
 for (const [mode, name] of [
 	["delete", "S26: an external delete while actual outcome journaling blocks is never resurrected"],
@@ -223,4 +224,53 @@ for (const [mode, name] of [
 		} finally { await next.shutdown(); }
 	}
 	assert.equal(provider.remaining(script), 0);
+});
+
+test("S26: a freeze drain steers each mid-turn implementer to push its WIP, files no envelope and sends no nudge", { timeout: 150_000 }, async (t) => {
+	const home = createScratchHome();
+	const repo = createScratchRepo({ name: "demo", files: { "README.md": "demo\n" } });
+	const provider = await MockProvider.start();
+	const agent = createAgentDir({ provider });
+	initJobsDocument(home.path, "cp");
+	const post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env }, holdsParentLock: () => true });
+	await post.registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "pr" });
+	execFileSync("git", ["clone", "--quiet", repo.remote as string, post.registry.pathOf("demo")]);
+	const pool = enableTreehouse(post.registry.pathOf("demo"), { maxTrees: 2 });
+	t.after(async () => { await post.shutdown(); pool.cleanup(); agent.cleanup(); repo.cleanup(); home.cleanup(); await provider.stop(); });
+	// The first tool call holds each turn open until the test writes the gate, so the steer lands mid-turn.
+	const gate = join(home.path, `freeze-gate-${randomUUID()}`);
+	const hold = `node -e "const f=process.argv[1];const t=setInterval(()=>{if(require('fs').existsSync(f))clearInterval(t)},50)" ${gate}`;
+	const jobs: Array<{ id: string; name: string; model: string }> = [];
+	for (const n of [1, 2]) {
+		const job = await post.ledger().create({ title: `Freeze ${n}`, project: "demo", kind: "ship", delivery: "pr", slug: `s26-freeze-${n}` });
+		const name = `s26-freeze-${n}-${randomUUID()}`;
+		const model = provider.addScript(name, [
+			{ kind: "tool_calls", calls: [{ name: "bash", args: { command: hold } }] },
+			{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `printf 'wip ${n}\\n' > wip.txt && git add -A && git commit -q -m wip && git push -q -u origin ${job.id}` } }] },
+			{ kind: "text", text: "Frozen." },
+		]);
+		jobs.push({ id: job.id, name, model });
+	}
+	agent.writeModels(provider);
+	for (const job of jobs) await post.dispatch({ jobId: job.id, model: job.model, task: "Implement the change", fetch: false });
+	await waitFor(() => post.manager.quiesce().busy, (busy) => busy.length === 2, { timeoutMs: 30_000, what: "both implementers mid-turn" });
+	const parsed = parseDrainArgs("120 freeze")!;
+	assert.deepEqual(parsed, { timeoutS: 120, cause: { reason: "freeze" } });
+	assert.equal(post.drain.start(parsed.timeoutS, parsed.cause).state, "draining");
+	const steered = await post.drain.freeze();
+	for (const job of jobs) assert.ok(steered.some((line) => line.startsWith(`  freeze: ${job.id} steered (`)), steered.join("\n"));
+	writeFileSync(gate, "open\n");
+	for (const job of jobs) {
+		const settled = await waitFor(() => readRunEvents(home.path, job.id).filter((event) => ["settled_without_report", "report_nudged"].includes(event.type)), (rows) => rows.length > 0, { timeoutMs: 60_000, what: `${job.id} settles` });
+		assert.deepEqual(settled.map((event) => event.type), ["settled_without_report"]);
+		assert.match(JSON.stringify(provider.requests(job.name)[1]?.body.messages ?? null), /FREEZE: /);
+		assert.equal(provider.requests(job.name).length, 3, "no nudge restarts a frozen turn");
+		assert.equal(readRunEvents(home.path, job.id).filter((event) => event.type === "report_nudged").length, 0);
+		assert.equal(post.fleet.get(job.id)?.reported_at, undefined, "no envelope, so the job is never held");
+	}
+	assert.equal(post.drain.check()?.state, "drained");
+	for (const job of jobs) {
+		const pushed = repo.git("ls-remote", "origin", `refs/heads/${job.id}`).split("\t")[0]!.trim();
+		assert.equal(readDrain(home.path)?.jobs.find((row) => row.job_id === job.id)?.head, pushed);
+	}
 });

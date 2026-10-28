@@ -689,7 +689,13 @@ step throws, and the file is removed even when the `RESTART AFTER DRAIN` notice 
 be journaled (a duplicate id included; the failure goes to stderr). The tick never writes
 a drain back that was removed or replaced while its outcome wake was journaling (it re-reads
 `started_at` before every write). `cp_parent stop` and `rotate` say whether the parent
-was drained, or warn how many live workers they will kill. **Cancel:** `/cp-drain cancel`
+was drained, or warn how many live workers they will kill. **Freeze:** `/cp-drain [seconds] freeze`
+(`cp_parent drain` with `freeze: true`) starts the drain with cause `freeze`, then steers each
+mid-turn implementer (never a reviewer or planner) through the `cp_send` steer path to commit and
+push its WIP, skip `report_result` and end its turn; the answer carries one `freeze:` line per busy
+key. While a freeze is on disk a settle without an envelope is recorded but never nudged, and the
+recorded `jobs[].head` is each job's pushed `origin/<branch>` (else worktree HEAD).
+**Cancel:** `/cp-drain cancel`
 (the host's `drainCancel` op, used by cp-update on a drain timeout) is owner-only too; it
 removes a `draining` or `timeout` record, or a `drained` record an earlier parent left
 behind — never the live parent's own `drained` one, the restart already prepared — and

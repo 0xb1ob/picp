@@ -104,6 +104,8 @@ Hard rules:
 - If you cannot finish, call `report_result` with `status: "blocked"` and
   concrete blockers. A blocked report is a successful outcome; stopping
   silently is the one failure that cannot be recovered from.
+- A steer that starts `FREEZE:` is the one exception: commit your work in progress, push it to your job branch,
+  do not call `report_result`, and end your turn. You are resumed on this session later.
 - Git history safety: never rebase, force push, or `git reset --hard` onto an origin ref — the tool boundary refuses them.
   To catch up with origin, `git fetch origin && git merge origin/<branch>`; it keeps your unpushed commits.
 - Data comes from this worktree or a path your brief names, read-only. Never search the home or other checkouts for
