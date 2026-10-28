@@ -686,7 +686,7 @@ test("P19-chat-replies-send: a chip sends the exact answer once and holds throug
 	const ready = (view: Tab) => until(() => texts(view, ".session-replies-state").join("|"), (s) => !/Checking/.test(s), "the control status");
 	let reader = await openTab(t, d.port, OPERATOR, new Map([[PENDING, JSON.stringify({ items: [queued], dismissed: [] })]]));
 	await reader.find(".session-reply");
-	await ready(reader);
+	assert.equal(await ready(reader), `Queued · ${dc("f")} — the options close when the session records the answer`, "deliveryLine: Queued · <its id>");
 	assert.ok(held(reader), "a queued free-text reply to the same card holds them");
 	reader = await openTab(t, d.port, OPERATOR, new Map([[PENDING, JSON.stringify({ items: [{ ...queued, state: "failed", reason: "x" }], dismissed: [] })]]));
 	await reader.find(".session-pending-failed");

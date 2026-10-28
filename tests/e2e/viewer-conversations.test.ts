@@ -221,6 +221,8 @@ test("P19-upload-send: images and text files reach the operator session inline, 
 	assert.doesNotMatch(last().text, /thread=/);
 	// #588: the thread routes are gone: GET falls through like any unknown path, POST is the read-only 405.
 	assert.equal("threads" in (await d.send("/api/threads")).body, false, "no threads response");
+	const listed = await d.get("/api/threads");
+	assert.equal("threads" in listed.body, false, `GET /api/threads falls through like any unknown path (${listed.status})`);
 	const done = await d.send("/api/threads/done", d.json(csrf, { id: "th-aaaaaaaaaaaa" }));
 	assert.deepEqual([done.status, done.raw.toString("utf8")], [405, "read-only viewer: GET only\n"]);
 	for (const body of [{ files: [image] }, { images: [id] }, { files: [id, id] }, { files: [] }, { files: "x" }, { files: [id], images: Array.from({ length: 8 }, () => `im-${day()}-${"d".repeat(24)}.png`) }]) {
