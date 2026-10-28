@@ -2210,7 +2210,9 @@ Other spawn-time policy, all fail-closed:
   the drain; any other refusal, a `promote`, a closed or fleet-known job
   drops the entry. Every start or drop is one `recovery` wake-up
   (`QUEUED DISPATCH STARTED`/`DROPPED`); a drain that throws keeps every
-  entry and wakes `DISPATCH QUEUE DRAIN FAILED` once per cause.
+  entry and wakes `DISPATCH QUEUE DRAIN FAILED` once per cause. Only STARTED carries
+  the job as a candidate key, so a DROPPED notice is never superseded for lacking a
+  fleet record.
 - **Armed dispatch (unload-parent PR2).** A `cp_dispatch` refused only by open
   blockers (`BlockedDispatchError`; `when_ready` not `false`; never a pipeline
   or script job) is armed in `state/armed-dispatches.json`
@@ -2226,6 +2228,8 @@ Other spawn-time policy, all fail-closed:
   or a blocker that reopened keeps it; a start, a `promote`, any other refusal,
   or an entry gone stale (in the fleet, closed, script, pipeline-owned,
   unreadable) is one `recovery` wake-up (`ARMED DISPATCH STARTED`/`DROPPED`).
+  Only STARTED carries the job as a candidate key; a notice about a job that did not
+  start is never superseded for lacking a fleet record.
   A release that throws keeps every entry and wakes `ARMED DISPATCH RELEASE
   FAILED` once per cause.
 - `WorkerManager.shutdownAll()` is the `session_shutdown` cleanup: the parent
@@ -2456,6 +2460,8 @@ Mechanics that matter:
 - **Revise prefers the live planner.** The gate sends revisions through
   `cp_send`. A torn-down planner instead gets a `revise_error` naming
   `cp_gate action: replace_planner, job_id: <old>, replacement_job_id: <new>`.
+  Its `cp-verdict` is still delivered: a gate verdict is never superseded by its
+  research job's `done`/`failed` phase, only by attempt facts (#651).
   Create a fresh research job with the same project and delivery first. This
   action prepares a `task_file` pointing at copies of the old plan, frozen
   scope (when available), and `gate-N-raw.json` (or the complete uncapped
@@ -4289,6 +4295,11 @@ to both planner and implementer dispatches through the usual bound resolver.
 The request is persisted across advances and reanchors; omission keeps the
 home/env defaults. Each dispatch result reports its effective `wall_clock_seconds`.
 
+`cp_pipeline start|advance|recover implementer_model` is the operator's explicit
+implementer override (`model` stays the planner's). It is persisted on the pipeline
+record across advances, recover and reanchor, shown in the checkpoint evidence, and
+refused once the implementer exists. `suggested_implementer_model` stays advisory.
+
 **`escalate` is not one exit (cp-n10).** `escalated` is reserved for the
 verdicts that must never reach a human: `policy`, `operational` and
 `operational_persistent`. A `flagged` escalate — the reviewer found the plan
@@ -4347,6 +4358,7 @@ them.
   journaled on the job's run log; arrival is confirmed from the message in the
   parent's context, never from the send. An unconfirmed wake-up is resent once
   after `VERDICT_DELIVERY_RETRY_SECONDS`.
+  A verdict for any other surface on a `done`/`failed` job is withheld as history.
 
 ### The three rules that make it a pipeline and not a script
 

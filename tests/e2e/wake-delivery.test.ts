@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { FleetStore } from "../../src/fleet.ts";
@@ -164,6 +164,10 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 	const agent = createAgentDir({ provider });
 	const session = join(home.path, "legacy.jsonl");
 	mkdirSync(join(home.path, paths.runDir("cp-gone")), { recursive: true });
+	writeFileSync(join(home.path, paths.eventsFile("cp-gone")), "");
+	// A never-ran job (addendum-only run dir) must not gain a status.json from suppression bookkeeping.
+	mkdirSync(join(home.path, paths.runDir("cp-never-ran")), { recursive: true });
+	writeFileSync(join(home.path, paths.runDir("cp-never-ran"), "task-addenda.jsonl"), "");
 	const stamp = (kind: string, extra = {}) => ({ kind, job_id: "cp-gone", issued_at: "2026-09-26T08:00:00Z", ...extra });
 	const messages = [
 		{ role: "user", content: "Keep this ordinary user message" },
@@ -183,6 +187,8 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 			}) } },
 		{ role: "custom", customType: "cp-recovery", content: "JOBLESS-GONE", display: true,
 			details: { cp_wakeup: { kind: "recovery", keys: ["cp-gone"], issued_at: "2026-09-26T08:05:00Z" } } },
+		{ role: "custom", customType: "cp-recovery", content: "NEVER-RAN-GONE", display: true,
+			details: { cp_wakeup: { kind: "recovery", keys: ["cp-never-ran"], issued_at: "2026-09-26T08:06:00Z" } } },
 	];
 	const timestamp = new Date().toISOString();
 	let parentId: string | null = null;
@@ -212,7 +218,8 @@ test("S20: shipped rows collapse through cp_status_block and survive a resumed p
 	assert.match(request, /medium: preserve these findings/);
 	assert.doesNotMatch(request, /OBSOLETE-INTEGRATE/);
 	assert.match(request, /LANDED-FIRST/);
-	assert.doesNotMatch(request, /LANDED-DUPLICATE|JOBLESS-GONE/);
+	assert.doesNotMatch(request, /LANDED-DUPLICATE|JOBLESS-GONE|NEVER-RAN-GONE/);
+	assert.equal(existsSync(join(home.path, paths.statusFile("cp-never-ran"))), false);
 	const suppressed = readRunEvents(home.path, "cp-gone").filter((e) => e.type === "wakeup_suppressed");
 	const payloads = suppressed.map((e) => e.payload as { kind: string; stage: string; reason: string; keys?: string[] });
 	for (const kind of ["envelope", "ci", "verdict", "answered", "recovery"]) {
