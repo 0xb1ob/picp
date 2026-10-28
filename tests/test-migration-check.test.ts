@@ -252,11 +252,10 @@ test("CLI: a title matching no baseline case, or a file unreadable before deleti
 		const unreadable = fixture.check(SHORT, undefined, { ghost: true });
 		assert.match(unreadable.out, /WARN tests\/ghost\.test\.ts: "case one" is not claim-counted: its pre-deletion file cannot be read/);
 		assert.doesNotMatch(unreadable.out, /FAIL tests\/ghost\.test\.ts: "case one" is not claim-counted/);
-		// Ghost has no baseline file, so the run exits 1 on its own; only its claim-count line is pinned.
-		const committed = fixture.check(SHORT, fixture.commitLedger(SHORT, { ghost: true }), { ghost: true });
-		assert.match(committed.out, /WARN tests\/ghost\.test\.ts: "case one" is not claim-counted/);
-		assert.match(committed.out, /FAIL tests\/ghost\.test\.ts: listed in the baseline but not a test file/);
-		assert.doesNotMatch(committed.out, /FAIL [^\n]*claim-counted/);
+		const committed = fixture.check(SHORT, fixture.commitLedger(SHORT, { title: "case uno" }), { title: "case uno" });
+		assert.equal(committed.status, 0, committed.out);
+		assert.match(committed.out, /WARN tests\/a\.test\.ts: "case uno" is not claim-counted/);
+		assert.doesNotMatch(committed.out, /FAIL/);
 	} finally {
 		fixture.done();
 	}

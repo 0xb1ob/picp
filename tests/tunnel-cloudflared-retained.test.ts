@@ -190,15 +190,8 @@ test("A10: a verified macOS archive yields only its one regular cloudflared; lin
 	assert.deepEqual(readFileSync(join(b.binDir, "cloudflared")), BINARY);
 });
 
-/*
-Feature: a macOS release pins both the tarball and the cloudflared inside it
-  Scenario: the tarball hash matches but the inner binary hash does not
-    Given a pinned darwin release whose binarySha256 is not the extracted binary's
-    When cloudflared is provisioned
-    Then it is refused naming the inner binary and nothing is published
-  Scenario: the inner hash matches but the tarball hash does not
-    Then it is refused naming the asset and nothing is published
-*/
+/* Given a pinned darwin release, When cloudflared is provisioned with a wrong inner binarySha256, Then it is refused naming
+   the inner binary; with a wrong tarball sha256, Then it is refused naming the asset. Neither case publishes anything. */
 test("A10: a macOS archive is verified twice, the tarball before extraction and the inner binary before publishing", async (t) => {
 	const b = bench(t);
 	const good = tgz(tarEntry("cloudflared", BINARY));
