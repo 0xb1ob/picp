@@ -580,10 +580,10 @@ export class Teardown {
 	 * the PR head, not its job id (`FleetRecord.bound_pr`), and `PipelineStore`
 	 * needs only the home this `Teardown` already holds.
 	 *
-	 * Teardown proceeds when the latest `review-<n>.json` is `pass`, or is
-	 * `escalate`/`flagged` with an **approved** second (diff) checkpoint — a human
-	 * saying "ship it anyway" is the only thing that clears an escalation, because
-	 * evidence is not authorization and neither is its absence.
+	 * Teardown proceeds when the latest `review-<n>.json` is `pass`, `escalate`/`flagged` with an
+	 * **approved** second (diff) checkpoint, or a `policy` escalation whose es- id an operator-quoted
+	 * cp_decide approved — a human saying "ship it anyway" is the only thing that clears an escalation,
+	 * because evidence is not authorization and neither is its absence.
 	 *
 	 * Returns `undefined` when there is nothing to refuse (out of scope, or the
 	 * review cleared), so the caller reads as "carry on, or stop here".
@@ -659,8 +659,8 @@ export class Teardown {
 			ok: false,
 			failure: {
 				code: "review_escalated",
-				message: `${branch}: diff review attempt ${latest.attempt} escalated (cause: ${latest.cause ?? "none"}) and no approved diff checkpoint clears it`,
-				fix: `keep the lease; this is the operator's call — have the escalation authorized (the diff checkpoint for ${branch}) or fix the diff and run cp_review ${branch} again, then retry teardown`,
+				message: `${branch}: diff review attempt ${latest.attempt} escalated (cause: ${latest.cause ?? "none"}) and no approval clears it`,
+				fix: `keep the lease; this is the operator's call — have the escalation authorized (the diff checkpoint for ${branch}, or cp_decide with an operator quote on the policy escalation's es- id) or fix the diff and run cp_review ${branch} again, then retry teardown`,
 			},
 		};
 	}

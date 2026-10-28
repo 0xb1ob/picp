@@ -263,7 +263,7 @@ function budgetOf(options: ActionsReadOptions): Budget {
 function diagnostics(budget: Budget, firstByte: string): string {
 	const { lag, stall } = budget;
 	const at = stall.at ? new Date(stall.at).toISOString() : "none";
-	return `; load ${loadavg()[0]?.toFixed(2)}, event-loop lag max ${Math.round(lag.max / 1e6)}ms at ${at}, p99 ${Math.round(lag.percentile(99) / 1e6)}ms, gh first byte ${firstByte}`;
+	return `; load ${loadavg()[0]?.toFixed(2)}, event-loop lag max ${Math.round(lag.max / 1e6)}ms, largest stall ${stall.ms}ms at ${at}, p99 ${Math.round(lag.percentile(99) / 1e6)}ms, gh first byte ${firstByte}`;
 }
 
 /** One observation; a failure logs every gh call (settled and in flight) and the budget left, then rethrows. */

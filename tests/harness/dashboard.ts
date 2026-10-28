@@ -3,9 +3,9 @@
  * The first browser harness: origin/main had none (baseline viewer tests used linkedom, P12 built none); P18 reuses it.
  */
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createContext, runInContext } from "node:vm";
 import { parseHTML } from "linkedom";
@@ -49,7 +49,7 @@ export async function startViewer(t: Context, { home, requireTailnet = true, at,
 		const exited = new Promise<void>((done) => child.once("exit", () => done()));
 		t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); await exited; });
 		// Another server can take the freed port first: only this home's identity counts, and our EADDRINUSE exit retries.
-		const state = await until(async () => child.exitCode !== null || child.signalCode !== null ? "exited" : await call(port, "/api/identity").then((reply) => reply.body.home === resolve(home) ? "ours" : "other", () => "other"), (s) => s !== "other", `cp-view on ${port}\n${output}`, 60_000);
+		const state = await until(async () => child.exitCode !== null || child.signalCode !== null ? "exited" : await call(port, "/api/identity").then((reply) => realpathSync(reply.body.home as string) === realpathSync(home) ? "ours" : "other").catch(() => "other"), (s) => s !== "other", `cp-view on ${port}\n${output}`, 60_000);
 		if (state === "exited") {
 			if (attempt < 3) continue;
 			throw new Error(`cp-view exited before serving, ${attempt} ports tried\n${output}`);
