@@ -56,6 +56,9 @@ export class HeaderGuard {
 	/** `agent_settled`: a forced continuation is another loop of the same run, so the run ends only here. */
 	runEnded(): void { this.#nudged = undefined; this.#done = false; }
 
+	/** The ask guard forced the re-send back first: it never added headers, so close out with no record. */
+	askNudged(): void { if (this.#nudged) this.#done = true; }
+
 	/** First miss in a run: one forced continuation. The next settle records its outcome; never a second nudge. */
 	beforeSettle(contextMessages: unknown): { entries: GuardEntry[]; continue: true } | undefined {
 		if (this.#done) return undefined;
@@ -73,6 +76,7 @@ export class HeaderGuard {
 		if (reply.text.trim().toUpperCase().startsWith(NO_PROJECT)) this.#append(target, "hidden", reply);
 		else if (headerMiss(reply.text, ctx)) {
 			const fallback = replyTo(messages, ctx) ?? mandateProject(target.home);
+			this.#append(target, "superseded", original); // one copy shows: the re-send's split, not both
 			this.#append(target, "split", reply, splitReply(reply.text, { ...ctx, fallback }));
 		} else this.#append(target, "superseded", original);
 		return undefined;
