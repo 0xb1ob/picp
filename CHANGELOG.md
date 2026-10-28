@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- Fix: the main-CI watch, the held-PR CI watch, the foreign-PR CI watch and the merge-ask CI gate no longer ask `gh` about a project whose origin is on a non-github.com host with no `cp_project forge` declared; it is skipped (a merge ask defers as CI unknown), logged once per project per process ("CI watch disabled: non-GitHub remote, no forge declared"), never a per-tick failure wake. GitHub projects keep every wake. Accepted narrowing: a GitHub Enterprise origin is skipped too (GitHub Enterprise was never supported, see `forge-url.ts`). Migration: none.
+
 - #576: on the systemd backend each worker runs in its own `systemd-run --user --scope` unit (`cp-worker-<job>-<rand>`, `MemoryMax` from `worker_memory_max` in `data/daemon.json`, default 6G, `MemorySwapMax=0`), so a runaway worker is killed alone instead of taking cp-daemon down. When the scope cannot start, the worker spawns unscoped and this is logged once. `/doctor` warns `service.worker_scope`. A new e2e pins that a SIGKILLed test runner leaks no dashboard viewer. Migration: none; the parent cp-daemon starts after the update carries the setting.
 
 - Final-sweep src fixes: a held PR whose current-head CI has the cancellation signature (a cancelled or timed-out job, or a failed job with no failed step) now waits and promotes no CI repair, while a test-step red still repairs; main CI's `failing` prefers a FAIL line over an earlier WARN line; the `review_escalated` teardown fix names the operator-quoted `cp_decide` path for a policy escalation; a failed CI read's diagnostic now reads `event-loop lag max Nms, largest stall Nms at <iso>`. Migration: none.
