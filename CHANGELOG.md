@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- #576: on the systemd backend each worker runs in its own `systemd-run --user --scope` unit (`cp-worker-<job>-<rand>`, `MemoryMax` from `worker_memory_max` in `data/daemon.json`, default 6G, `MemorySwapMax=0`), so a runaway worker is killed alone instead of taking cp-daemon down. When the scope cannot start, the worker spawns unscoped and this is logged once. `/doctor` warns `service.worker_scope`. A new e2e pins that a SIGKILLed test runner leaks no dashboard viewer. Migration: none; the parent cp-daemon starts after the update carries the setting.
+
 - Final-sweep src fixes: a held PR whose current-head CI has the cancellation signature (a cancelled or timed-out job, or a failed job with no failed step) now waits and promotes no CI repair, while a test-step red still repairs; main CI's `failing` prefers a FAIL line over an earlier WARN line; the `review_escalated` teardown fix names the operator-quoted `cp_decide` path for a policy escalation; a failed CI read's diagnostic now reads `event-loop lag max Nms, largest stall Nms at <iso>`. Migration: none.
 
 - A complete `cp_review` escalate/policy below the cap no longer sends `cp_integrate` back to `review`: it raises one `conflicting_acceptance` escalation and surfaces; an operator-quote `cp_decide` approving that `es-…` id clears that head only (a push voids it; CI, repo permission and final_fix unchanged). Migration: none.

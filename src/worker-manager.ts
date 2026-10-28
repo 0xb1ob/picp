@@ -643,6 +643,7 @@ export class WorkerManager {
 		const optional = this.#optionalPackages(request.profile);
 		const worker = spawnFn({
 			cwd: request.identity.worktree,
+			jobId,
 			model: request.model,
 			tools: plan.tools,
 			...(onDialog ? { onDialog } : {}),

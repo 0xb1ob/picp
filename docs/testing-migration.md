@@ -388,6 +388,7 @@ Test files added after the baseline, with the PR that owns them.
 | tests/e2e/mandate-continuity.test.ts | cp-iojy (https://github.com/0xb1ob/picp/pull/504) | Original admission, authenticated confirmation, shared-root successors and PASS-bound handoff |
 | tests/e2e/review-policy-escalation.test.ts | cp-fin-promote-haql (https://github.com/0xb1ob/picp/pull/603) | Policy review escalate surfaces one escalation; an operator-quote cp_decide clears that head only, a push voids it |
 | tests/e2e/validated-reads.test.ts | cp-lag-f2-zic7 (https://github.com/0xb1ob/picp/pull/602) | F2 perf: unchanged schedule-run and mandate text is validated once; invalid or changed text never skips validation |
+| tests/e2e/worker-isolation.test.ts | cp-issue-576-ycpj (https://github.com/0xb1ob/picp/pull/636) | #576: a worker's memory-capped systemd scope, its unscoped fallback and the detached backend; no viewer outlives a SIGKILLed runner |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

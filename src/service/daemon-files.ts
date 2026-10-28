@@ -79,7 +79,11 @@ export interface DaemonConfig {
 	port: number;
 	viewer_host?: string;
 	parent_model?: string;
+	/** Each worker's own systemd scope `MemoryMax` (systemd backend only); hand-set, kept by cp-install. */
+	worker_memory_max?: string;
 }
+
+export const DEFAULT_WORKER_MEMORY_MAX = "6G";
 
 /** Strict: the first bad field is named. */
 export function validateDaemonConfig(raw: unknown): DaemonConfig {
@@ -95,6 +99,7 @@ export function validateDaemonConfig(raw: unknown): DaemonConfig {
 	if (typeof value.path !== "string" || value.path.length === 0) bad("path", "a non-empty PATH");
 	if (!Number.isInteger(value.port) || (value.port as number) < 1 || (value.port as number) > 65535) bad("port", "an integer 1-65535");
 	for (const field of ["viewer_host", "parent_model"]) if (value[field] !== undefined && (typeof value[field] !== "string" || (value[field] as string).length === 0)) bad(field, "a non-empty string when present");
+	if (value.worker_memory_max !== undefined && !/^\d+[KMGT]?$/.test(String(value.worker_memory_max))) bad("worker_memory_max", 'a size like "6G" when present');
 	return {
 		schema_version: 1,
 		generated_by: "cp-install",
@@ -106,6 +111,7 @@ export function validateDaemonConfig(raw: unknown): DaemonConfig {
 		port: value.port as number,
 		...(value.viewer_host ? { viewer_host: value.viewer_host as string } : {}),
 		...(value.parent_model ? { parent_model: value.parent_model as string } : {}),
+		...(value.worker_memory_max ? { worker_memory_max: value.worker_memory_max as string } : {}),
 	};
 }
 
@@ -155,7 +161,7 @@ export function childEnv(config: DaemonConfig, role: Role, base: Record<string, 
 	const port = { CP_VIEWER_PORT: String(config.port) };
 	switch (role) {
 		case "parent":
-			return { ...base, ...core, ...port, ...host, ...(config.parent_model ? { CP_PARENT_MODEL: config.parent_model } : {}) };
+			return { ...base, ...core, ...port, ...host, ...(config.parent_model ? { CP_PARENT_MODEL: config.parent_model } : {}), ...(config.backend === "systemd" ? { CP_WORKER_MEMORY_MAX: config.worker_memory_max ?? DEFAULT_WORKER_MEMORY_MAX } : {}) };
 		case "viewer":
 			return { ...base, ...core, ...host, CP_DAEMON_ROLE: "viewer" };
 		case "device-notify":
