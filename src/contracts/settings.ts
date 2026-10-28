@@ -175,7 +175,7 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		tool_call_cap: { env: "CP_JOB_TOOL_CALL_CAP", type: "integer", minimum: 1, default: DEFAULT_JOB_TOOL_CALL_CAP, editable: false, label: "Job tool-call cap", help: "Hard tool-call bound per job, from the env as observed by the reading process." },
 	}),
 	...group("sessions", "parent", { applies: "next_compaction_check", on_invalid: "disable" }, {
-		parent_compact_at_tokens: { file_key: "compact_at_tokens", type: "integer", minimum: 1, maximum: SAFE_MAX, default: 200000, label: "Parent compaction threshold (tokens)", help: "Context size at which the parent compacts; an invalid file disables it." },
+		parent_compact_at_tokens: { file_key: "compact_at_tokens", type: "integer", minimum: 1, maximum: SAFE_MAX, default: 150000, label: "Parent compaction threshold (tokens)", help: "Context size at which the parent compacts; an invalid file disables it." },
 	}),
 	...group("sessions", "operator", { applies: "next_compaction_check", on_invalid: "default" }, {
 		operator_compact_at_tokens: { file_key: "compact_at_tokens", type: "integer", minimum: 1, maximum: SAFE_MAX, default: 200000, label: "Operator compaction threshold (tokens)", help: "Context size at which the operator session compacts; an invalid value keeps the default." },
