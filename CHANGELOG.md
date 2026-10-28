@@ -8,6 +8,8 @@ are recorded here with the migration; the binding detail lives in
 
 - Dagger (v1.0.0-beta.21, local and optional): `dagger.toml` and `.dagger/modules/picp-dev/` run the CI `checks` job plus `build:viewer` as cached `dagger check` checks and one test shard via `dagger api call test-shard --shard=N` (docs/development.md "Dagger (local, optional)"). `.github/workflows/ci.yml` is unchanged; no Dagger Cloud. Migration: none.
 
+- Fix (#537, part 4 of 5): the parent's cold-start `get_state` budget scales with its session file: the request timeout (30 s by default) plus 15 s per MiB, capped at 180 s. `parent-host.log` logs `parent boot: get_state answered in Xms (session N MiB, budget Yms)`, and a failed boot names the session size and the budget. Migration: none.
+
 - Fix: the no-report nudge no longer forces an immediate report (`blocked` is now for a real blocker only), and the on-disk-work recovery prompt no longer says "do not start anything new"; both tell a worker whose acceptance is unmet and who is under its tool-call and wall-clock caps to keep working and report only when done, blocked or capped. Migration: none.
 
 - Fix: issue 401: the dispatch brief now carries every task addendum frozen up to dispatch time, so an armed job's worker starts with addenda added while it waited. Migration: none.
