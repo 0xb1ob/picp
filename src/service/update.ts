@@ -11,9 +11,11 @@
  *   skips     dirty → `skipped_dirty`; not on main → `skipped_branch`; `git fetch origin main` fails →
  *             `fetch_failed` (counted); ahead of origin/main → `skipped_ahead`; nothing new → `up_to_date`;
  *             origin/main is the `bad_sha` → `skipped_bad_sha`; a live script pid, or a mid-turn worker (an idle
- *             held/waiting one does not block) → `skipped_busy`; after 4× interval_min of that, only a script
- *             still skips: the drain decides. A tip not yet unchanged for `quiet_min` (data/update.json,
- *             default 10, 0 = off) since this updater first saw it → `skipped_settling`: a burst of merges is one restart
+ *             held/waiting one does not block) → `skipped_busy`; after 4× interval_min since `busy_since` (kept
+ *             through settling, drain timeouts and a newer tip), only a script still skips: the drain decides;
+ *             meanwhile fresh dispatch is held (src/update-hold.ts, ≤ 2 h). A tip not yet unchanged for `quiet_min`
+ *             (data/update.json, default 10, 0 = off) since this updater first saw it → `skipped_settling`: a burst
+ *             of merges is one restart
  *   drain     host `drain 600`, wait ≤ 660 s for `drained`; a timeout → host `drainCancel` → `drain_timeout`;
  *             refused during parent control (PARENT_CONTROL_BUSY) → `skipped_busy`; gone before `drained` → `drain_timeout`;
  *             no parent host running (NO_HOST) → already drained unless a worker or script pid is live (`failed`):
@@ -63,6 +65,8 @@ export interface UpdateState {
 	last_result?: UpdateResult;
 	/** When `last_result` first took its current value. */
 	since?: string;
+	/** First `skipped_busy` on mid-turn workers of this busy episode; kept through settling and drain timeouts (#396). */
+	busy_since?: string;
 	detail?: string;
 	from?: string;
 	to?: string;
@@ -86,6 +90,8 @@ export const DRAIN_TIMEOUT_S = 600;
 export const NO_HOST = "no parent host is running";
 /** `skipped_busy` for this many × interval_min: mid-turn workers no longer skip, the drain decides (cp-ccm0). */
 export const BUSY_FORCE_FACTOR = 4;
+/** Results that keep `busy_since`: the update is still pending behind the same busy fleet. */
+const BUSY_EPISODE: readonly UpdateResult[] = ["skipped_busy", "skipped_settling", "drain_timeout", "fetch_failed"];
 export const DRAIN_WAIT_MS = 660_000;
 /** After a drain_timeout (or a held-back rollback) the next run waits this many × interval_min. */
 export const DRAIN_TIMEOUT_RETRY_FACTOR = 4;
@@ -218,7 +224,9 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 		if (!dry) atomicWriteJson(updateStateFile(options.stateDir), state);
 	};
 	const finish = (result: UpdateResult, detail: string, patch: Partial<UpdateState> = {}): UpdateState => {
-		save({ phase: "idle", last_run_at: at, last_result: result, since: prior.last_result === result && prior.since ? prior.since : at, detail: clip(detail), behind: undefined, held: undefined, ...patch });
+		// The busy clock outlives a newer tip or a timed-out drain, so continuous load still reaches the forced drain.
+		const busySince = BUSY_EPISODE.includes(result) ? prior.busy_since : undefined;
+		save({ phase: "idle", last_run_at: at, last_result: result, since: prior.last_result === result && prior.since ? prior.since : at, busy_since: busySince, detail: clip(detail), behind: undefined, held: undefined, ...patch });
 		ports.log(`${result}: ${detail}${dry ? " (dry-run: nothing recorded)" : ""}`);
 		// Never a push from here: the watchdog sends the one notice per distinct failure.
 		if (!dry && (UPDATE_FAILURES.includes(result) || (result === "fetch_failed" && state.fetch_failures >= 3))) {
@@ -378,9 +386,9 @@ async function updateOnce(options: UpdateOptions, ports: UpdatePorts, pending: {
 		}
 		const { working, scripts } = ports.activity();
 		if (scripts.length > 0) return finish("skipped_busy", `live script job(s): ${scripts.join(", ")} (a drain never waits for a script); nothing drained`, { behind: behind() });
-		const starved = prior.last_result === "skipped_busy" && prior.since !== undefined && since(prior.since) >= BUSY_FORCE_FACTOR * interval;
-		if (working.length > 0 && !starved) return finish("skipped_busy", `mid-turn worker(s): ${working.join(", ")}; nothing drained (drained anyway after ${BUSY_FORCE_FACTOR}× interval_min busy)`, { behind: behind() });
-		if (working.length > 0) ports.log(`busy since ${prior.since}: draining anyway; the drain waits for ${working.join(", ")} to settle`);
+		const starved = prior.busy_since !== undefined && since(prior.busy_since) >= BUSY_FORCE_FACTOR * interval;
+		if (working.length > 0 && !starved) return finish("skipped_busy", `mid-turn worker(s): ${working.join(", ")}; nothing drained (drained anyway after ${BUSY_FORCE_FACTOR}× interval_min busy)`, { behind: behind(), to, busy_since: prior.busy_since ?? at });
+		if (working.length > 0) ports.log(`busy since ${prior.busy_since}: draining anyway; the drain waits for ${working.join(", ")} to settle`);
 		lock = git("diff", "--quiet", from, to, "--", "package-lock.json").status !== 0;
 	} catch (error) {
 		return finish("failed", (error as Error).message);

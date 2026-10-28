@@ -9,6 +9,9 @@ import { readFileSync } from "node:fs";
 import { waitFor } from "../harness/index.ts";
 import { JOB, seedHeldHome } from "../harness/held-home.ts";
 import { RunRegistry } from "../../src/runs.ts";
+import { join } from "node:path";
+import { LAYOUT } from "../../src/contracts.ts";
+import { UPDATE_HOLD_MAX_MS } from "../../src/update-hold.ts";
 
 const calls = [
 	{ name: "cp_next", args: {} },
@@ -84,4 +87,37 @@ test("S26: held continuation refuses a persisted or malformed drain and reopens 
 	assert.equal(reopened.action, "wait", reopened.reason);
 	assert.equal(reopened.steps, 1, "the same event advances an actual integration step after drain removal");
 	assert.match(readFileSync(s.ghLog, "utf8"), /pr view/);
+});
+
+test("S26: an update waiting on mid-turn workers holds fresh dispatch, not sends, and lapses after its bound", { timeout: 90_000 }, async () => {
+	// Issue 396: while the updater skipped busy, dispatch kept refilling the fleet and the update never applied.
+	const s = await seedHeldHome({ ciState: "in_progress" });
+	const provider = await MockProvider.start();
+	const agent = createAgentDir({ provider });
+	const dispatch = { name: "cp_dispatch", args: { job_id: JOB, task: "work" } };
+	const send = { name: "cp_send", args: { job_id: JOB, message: "Repair the held PR", purpose: "repair" } };
+	const tool = (call: typeof dispatch | typeof send) => ({ kind: "tool_calls" as const, calls: [call] });
+	const done = { kind: "text" as const, text: "checked" };
+	const model = provider.addScript("s26-update-hold", [tool(dispatch), tool(send), done], { onExhausted: "repeat" });
+	agent.writeModels(provider);
+	const to = "ab".repeat(20);
+	const pending = (ageMs: number) => writeFileSync(join(s.home.path, LAYOUT.state, "update.json"), JSON.stringify({ schema_version: 1, phase: "idle", fetch_failures: 0, last_result: "skipped_busy", to, busy_since: new Date(Date.now() - ageMs).toISOString() }));
+	writeFileSync(join(s.home.path, LAYOUT.data, "update.json"), JSON.stringify({ enabled: true }));
+	pending(60_000);
+	const held = new RegExp(`auto-update to ${to.slice(0, 12)} waits for mid-turn workers`);
+	const child = startPiChild({ cwd: s.home.path, model, env: { ...agent.env, CP_HOME: s.home.path, PATH: `${s.bin}:${process.env.PATH}` }, extensions: [COMMAND_POST_EXTENSION] });
+	try {
+		const ends = (name: string) => child.eventsOfType("tool_execution_end").filter((r) => r.toolName === name).map((r) => JSON.stringify(r.result));
+		await child.prompt("Check the gates.");
+		await child.waitFor(() => ends("cp_send").length > 0, 20_000);
+		assert.match(ends("cp_dispatch")[0] ?? "", held, "a fresh dispatch is refused, naming the update");
+		assert.match(ends("cp_send")[0] ?? "", /cp-held has no live worker in this session/, "a send passes the hold and reaches its worker lookup");
+	} finally { await child.close(); agent.cleanup(); await provider.stop(); }
+	// Past the bound the hold lapses: the same dispatch passes both gates and reaches the ledger lookup.
+	pending(UPDATE_HOLD_MAX_MS + 60_000);
+	const post = new CommandPost({ home: s.home.path, packageRoot: REPO_ROOT, holdsParentLock: () => true });
+	try {
+		const lapsed = await post.dispatch({ jobId: JOB, task: "work" }).then((result) => JSON.stringify(result), (error: Error) => error.message);
+		assert.match(lapsed, /cp-held: no such job/, "past the bound the hold lapses");
+	} finally { await post.shutdown(); s.repo.cleanup(); s.home.cleanup(); }
 });

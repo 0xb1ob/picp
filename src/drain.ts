@@ -20,6 +20,7 @@ import type { DurableWakeupEntry } from "./contracts/wakeups.ts";
 import { isPidAlive } from "./fleet.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { PARENT_CONTROL_BUSY } from "./parent-diagnostics.ts";
+import { assertNoUpdatePending } from "./update-hold.ts";
 
 export const DRAIN_DEFAULT_TIMEOUT_S = 600;
 export const DRAIN_MAX_TIMEOUT_S = 3600;
@@ -127,6 +128,12 @@ export function assertNotDraining(home: string, what: string): void {
 	if (drain && healers.get(home)?.healStale(drain)) drain = readDrain(home);
 	const why = drain && describeCause(drain);
 	if (drain) throw new DrainError(`refused: the parent is draining for a restart (since ${drain.started_at}, ${drain.state}${why ? `; ${why}` : ""}); no ${what} starts until the parent restarts or /cp-drain cancel withdraws it (${drainFile(home)})`);
+}
+
+/** A fresh dispatch's gate: the drain, then the update-pending hold (#396). */
+export function assertDispatchOpen(home: string, what: string): void {
+	assertNotDraining(home, what);
+	assertNoUpdatePending(home, what);
 }
 
 export function inFlightJobs(records: readonly FleetRecord[], head: (jobId: string) => string | undefined): DrainJob[] {
