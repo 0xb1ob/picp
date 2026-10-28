@@ -499,5 +499,5 @@ test("P19-upload-oversize: an oversize upload is answered 413 and only a bounded
 	assert.equal(huge.written, false, "the server did not ingest the whole body");
 	const stalled = await rawUpload(d, `content-length: ${11 * 1024 * 1024}`, [], false);
 	assert.match(stalled.reply, /^HTTP\/1\.1 413 /);
-	assert.ok(BODY_DISCARD_IDLE_MS >= 5000 && stalled.held >= BODY_DISCARD_IDLE_MS - 500, `held ${stalled.held} ms: closed by the idle timer`);
+	assert.ok(BODY_DISCARD_IDLE_MS >= 5000 && stalled.held >= BODY_DISCARD_IDLE_MS - 500 && stalled.held < BODY_DISCARD_IDLE_MS + 3000, `held ${stalled.held} ms: closed by the idle timer`);
 });

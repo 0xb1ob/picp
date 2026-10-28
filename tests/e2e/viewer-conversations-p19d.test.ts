@@ -98,7 +98,7 @@ test("P19-queued-bubbles: stored sends follow the newest entry in FIFO order wit
 	assert.equal(shown[1]!.querySelector(".session-pending-detail")?.textContent, "Held until an operator session attaches");
 	assert.match(shown[2]!.textContent!, /Failed: connection refused.*Send again.*Discard/);
 	assert.ok(tab.$(".session-pending-live[aria-live=polite]"), "a polite live region reads the queue");
-	assert.equal(tab.$(".session-entries")?.lastElementChild, shown[2], "the queue sits after the newest transcript entry");
+	assert.ok(tab.$(".session-entries")?.lastElementChild === shown[2], "the queue sits after the newest transcript entry");
 	assert.match(shown[0]!.previousElementSibling?.textContent ?? "", /streaming response/);
 	d.append(own("14:01", `queued one\n\n[cp-dashboard ${dc("a")} — from the dashboard]`));
 	tab.refresh();
@@ -425,8 +425,8 @@ test("P19-queued-edit: a held message edits inline (Esc keeps it, Enter saves), 
 	tab.click(tab.$(".session-pending-save")!);
 	const raced = await tab.find(".session-pending", (b) => /Already sent.*not applied/.test(b.textContent ?? ""));
 	assert.equal(raced.querySelector(".md")?.textContent, "draft two", "the authoritative delivered text");
-	assert.equal(raced.querySelector(".session-pending-edit"), null, "no Edit once sent");
-	assert.equal(editor(), null);
+	assert.equal(raced.querySelector(".session-pending-edit") === null, true, "no Edit once sent");
+	assert.equal(editor() === null, true);
 	assert.ok(!bubbles(await tab.reopen()).includes("draft one, revised"), "a cancelled message stays gone");
 	const css = await servedCss(d);
 	const media = [...css.matchAll(/@media[^{]*\{((?:[^{}]*\{[^{}]*\})*)[^{}]*\}/g)];
@@ -507,7 +507,7 @@ test("P19-chat-days: local-day pills in source order split a tool run and a bubb
 	assert.deepEqual(sequence(tab), ["day:Thu, Oct 15", "before midnight", "tools", "day:Fri, Oct 16", "tools", "after midnight", "undated", "day:Thu, Oct 15", "out of order stays put"]);
 	const shown = tab.$$(".session-bubble");
 	assert.equal(shown[1]!.querySelector(".session-who")?.textContent?.includes("Operator"), true, "a new day opens a new group even within five minutes");
-	assert.equal(shown[2]!.querySelector("time"), null, "no time is invented for an unparseable stamp");
+	assert.equal(shown[2]!.querySelector("time") === null, true, "no time is invented for an unparseable stamp");
 	assert.deepEqual(tab.$$(".session-day time").map((el) => el.getAttribute("datetime")), ["2026-10-15", "2026-10-16", "2026-10-15"]);
 
 	const queued = await home(t, [reply(local(15, 23, 50), "before midnight")]);
@@ -677,7 +677,7 @@ test("P19-chat-replies-send: a chip sends the exact answer once and holds throug
 	assert.ok(held(tab), "after a reload, the recorded answer holds them");
 	asks.answer(id, "Raise");
 	tab.refresh();
-	assert.equal(await until(() => tab.$(".session-entries > .session-replies"), (r) => r === null, "the closed ask"), null, "the journal closing the ask removes them");
+	assert.equal(await until(() => tab.$(".session-entries > .session-replies") === null, Boolean, "the closed ask"), true, "the journal closing the ask removes them");
 
 	const other = asks.open({ project: "picp", question: "Again?", recommendation: "Keep", options: [{ label: "Keep", consequence: "x" }] }).id;
 	d.append(stamped(local(15, 9), { role: "assistant", content: [{ type: "toolCall", id: "call-2", name: "cp_parent", arguments: { action: "ask" } }] }),
