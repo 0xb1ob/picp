@@ -313,6 +313,8 @@ test("P12c-sender-closed: a bad binding, ledger or store sends nothing; the bind
 	const laptop = await s.pair("Laptop");
 	await s.subscribe(laptop, "laptop");
 	const own = (await eventOf(s, laptop)).id;
+	const kiosk = await s.pair("Kiosk"); // pairing needs a readable runtime, so it happens first
+	const kioskOwn = (await eventOf(s, kiosk)).id;
 	writeFileSync(lease, JSON.stringify({ pid: 999_999_999 })); // a dead holder
 	writeFileSync(tunnelRuntimeFile(s.stateDir), "{torn");
 	const started = Date.now();
@@ -328,9 +330,14 @@ test("P12c-sender-closed: a bad binding, ledger or store sends nothing; the bind
 		await until(unreadable, (now) => now === count + 1, JSON.stringify(bad));
 	}
 	assert.equal(s.posts.length, 0);
-	// No runtime file (nothing published yet): no binding, so the session is judged on its own.
+	// A starting runtime (generation 0, origin null) or no runtime file at all is no binding: judged on its own.
+	writeFileSync(tunnelRuntimeFile(s.stateDir), JSON.stringify({ schema_version: 1, generation: 0, origin: null }));
+	await until(() => s.record(own, laptop.id)?.state, (state) => state === "delivered", "delivered with a starting runtime");
+	writeFileSync(tunnelRuntimeFile(s.stateDir), "{torn");
+	const pad = testDevice("https://fcm.googleapis.com/fcm/send/kiosk"); // stored directly: the listener is down now
+	assert.ok(saveSubscription(s.dataDir, { endpoint: pad.endpoint, keys: pad.keys }, new Date(), { device_id: kiosk.id, origin: ORIGIN }).ok);
 	rmSync(tunnelRuntimeFile(s.stateDir));
-	await until(() => s.record(own, laptop.id)?.state, (state) => state === "delivered", "delivered with no binding");
+	await until(() => s.record(kioskOwn, kiosk.id)?.state, (state) => state === "delivered", "delivered with no runtime file");
 
 	sender.child.kill("SIGTERM");
 	assert.equal(await sender.exited, 0);
