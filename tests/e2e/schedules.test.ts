@@ -1216,8 +1216,7 @@ async function selfReviewHome(t: TestContext) {
 	/** Waits for the run to close; on a timeout, names every role's fleet phase and ledger status, and S1's failure. */
 	const closed = (what: string, sample: () => void = () => {}) => waitFor(() => run(), (entry) => { sample(); return entry.phase === "closed"; }, { timeoutMs: 120_000, what }).catch((error: Error) => {
 		const jobs = h.ledger.read().jobs, state = (id: string) => `${fleetOf(id)?.phase ?? "no-fleet"}/${jobs.find((job) => job.id === id)?.status}`;
-		const roles = Object.entries(roleIds()).map(([role, id]) => `${role} ${state(id)}`).join(", ");
-		throw new Error(`${error.message.slice(0, 300)}; ${roles}; S1 failure ${JSON.stringify(fleetOf(roleIds().S1!)?.failure)}`);
+		throw new Error(`${error.message.slice(0, 300)}; ${Object.entries(roleIds()).map(([role, id]) => `${role} ${state(id)}`).join(", ")}; S1 failure ${JSON.stringify(fleetOf(roleIds().S1!)?.failure)}`);
 	});
 	return { h, run, roleIds, fleetOf, add, runNow, admitted, closed };
 }
