@@ -640,7 +640,7 @@ test("P20-settings-thinking: parent and operator thinking selects save to their 
 	await until(() => ui.posts().length, (n) => n === 1, "the save");
 	assert.deepEqual([ui.posts()[0]!.status, ui.posts()[0]!.json.changes], [200, { "models.parent_thinking": "high", "models.operator_thinking": "low" }]);
 	await until(() => [badge(parent), badge(operator)], (now) => now.every((text) => text === "from file"), "the re-read badges");
-	assert.deepEqual(ownerJson("parent.json"), { compact_at_tokens: 200000, thinking: "high" });
+	assert.deepEqual(ownerJson("parent.json"), { compact_at_tokens: 150000, thinking: "high" });
 	assert.deepEqual(ownerJson("operator.json"), { thinking: "low" });
 	await ui.choose(parent, "");
 	await ui.press(people, "Save");
