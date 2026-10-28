@@ -80,6 +80,7 @@ import {
 import { type DiffReviewWait, isDiffReviewWait } from "./diff-review.ts";
 import { raisePlanApproval } from "./escalation.ts";
 import type { Dispatcher, DispatchResult } from "./dispatch.ts";
+import { UpdateHoldError } from "./update-hold.ts";
 import type { QuestionStore } from "./questions.ts";
 import { ReviewApprovalStore } from "./review-approval.ts";
 import { resolveFinalFix } from "./final-fix.ts";
@@ -716,6 +717,12 @@ export interface StartRequest {
 	review?: DiffReviewConfig;
 	/** Internal only, never a tool parameter: binds both stages to a native schedule run, reusing its fired anchor. */
 	run?: { runs: import("./schedule-runs.ts").ScheduleRunStore; runId: string; anchorId: string; scheduleId: string };
+	/** Operator-named implementer model (explicit routing override); `model` stays the planner's. */
+	implementerModel?: string;
+}
+
+export interface AdvanceOptions {
+	implementerModel?: string;
 }
 
 export interface StartResult {
@@ -895,6 +902,7 @@ export class PipelineRunner {
 			created_at: at,
 			updated_at: at,
 			...(request.wallClockSeconds !== undefined ? { wall_clock_seconds: request.wallClockSeconds } : {}),
+			...(request.implementerModel ? { implementer_model: request.implementerModel } : {}),
 			...(request.quality ? { quality: request.quality } : {}),
 			...(request.review ? { review: request.review } : {}),
 			...(request.reasons && request.reasons.length > 0 ? { reasons: request.reasons.slice(0, 10) } : {}),
@@ -926,16 +934,18 @@ export class PipelineRunner {
 	 * One step of the machine, driven entirely by what is on disk. Safe to call
 	 * repeatedly: every transition is guarded by the fact that produces it.
 	 */
-	async advance(researchId: string): Promise<AdvanceResult> {
-		const record = this.store.require(researchId);
-		assertPipelineProjectionReady(this.#options.home, record.ship_id);
+	async advance(researchId: string, options: AdvanceOptions = {}): Promise<AdvanceResult> {
+		const stored = this.store.require(researchId);
+		assertPipelineProjectionReady(this.#options.home, stored.ship_id);
 		const recovery = recoveryTarget(this.#options.home, researchId);
-		if (record.superseded_by) {
+		if (stored.superseded_by) {
 			throw new PipelineError(
-				`${researchId} was superseded by ${record.superseded_by} (cp_pipeline reanchor) — its artifact must never reach an ` +
-					`implementer; advance ${record.superseded_by} instead.`,
+				`${researchId} was superseded by ${stored.superseded_by} (cp_pipeline reanchor) — its artifact must never reach an ` +
+					`implementer; advance ${stored.superseded_by} instead.`,
 			);
 		}
+		// Persisted only past the guards: a superseded record must never be written.
+		const record = this.#setImplementerModel(stored, options);
 		const { artifacts, fleet } = this.#options;
 
 		// --- 0. the implementer already has it --------------------------------
@@ -1200,7 +1210,13 @@ export class PipelineRunner {
 		}
 
 		// --- 6. hand the artifact over by path, never by context --------------
-		const dispatch = await this.#dispatchImplementer(record);
+		let dispatch: DispatchResult;
+		try {
+			dispatch = await this.#dispatchImplementer(record);
+		} catch (error) {
+			if (error instanceof UpdateHoldError) return this.#heldDispatch(record, "awaiting_authorization", error);
+			throw error;
+		}
 		this.store.setState(researchId, "implementing", this.#now());
 		const suggested = this.#selfAssessment(researchId)?.suggested_implementer_model;
 		const mismatch =
@@ -1277,6 +1293,7 @@ export class PipelineRunner {
 			updated_at: at,
 			reanchor: { source_job_id: researchId, phase: "prepared" },
 			...(old.wall_clock_seconds !== undefined ? { wall_clock_seconds: old.wall_clock_seconds } : {}),
+			...(old.implementer_model ? { implementer_model: old.implementer_model } : {}),
 			...(old.quality ? { quality: old.quality } : {}),
 			...(old.review ? { review: old.review } : {}),
 			...(old.task_impact ? { task_impact: old.task_impact } : {}),
@@ -1291,6 +1308,18 @@ export class PipelineRunner {
 		}
 		replacement = this.store.write({ ...replacement, reanchor: { source_job_id: researchId, phase: "committed" }, updated_at: this.#now() });
 		return replacement;
+	}
+
+	/** Persists an operator-named implementer model; refused once the implementer exists. */
+	#setImplementerModel(record: PipelineRecord, options: AdvanceOptions): PipelineRecord {
+		const model = options.implementerModel;
+		if (!model || model === record.implementer_model) return record;
+		if (this.#options.fleet.get(record.ship_id)) {
+			throw new PipelineError(
+				`${record.ship_id}: the implementer is already dispatched — the model cannot change; promote or tear down.`,
+			);
+		}
+		return this.store.write({ ...record, implementer_model: model, updated_at: this.#now() });
 	}
 
 	/**
@@ -1323,7 +1352,13 @@ export class PipelineRunner {
 		if (decision.action === "escalate") {
 			return this.#step(record, record.state, "surface", `${shipId}: ${classification.class} — ${decision.reason}`);
 		}
-		const dispatch = await this.#dispatchImplementer(record);
+		let dispatch: DispatchResult;
+		try {
+			dispatch = await this.#dispatchImplementer(record);
+		} catch (error) {
+			if (error instanceof UpdateHoldError) return this.#heldDispatch(record, record.state, error);
+			throw error;
+		}
 		return this.#step(record, "implementing", "wait", `${shipId}: re-dispatched from the same task file (${decision.reason}).`, {
 			dispatch,
 		});
@@ -1499,6 +1534,7 @@ export class PipelineRunner {
 									" (advisory; routing decides)",
 							]
 						: []),
+					...(record.implementer_model ? [`operator-named implementer model: ${record.implementer_model} (explicit override)`] : []),
 					// routing T2: why the composed assessment is what it is. Present even
 					// with no envelope at all — a hung planner does not erase what the task
 					// is known to touch.
@@ -1838,6 +1874,7 @@ export class PipelineRunner {
 			jobId: record.ship_id,
 			taskFile,
 			...(record.wall_clock_seconds !== undefined ? { wallClockSeconds: record.wall_clock_seconds } : {}),
+			...(record.implementer_model ? { model: record.implementer_model } : {}),
 			...(routing.scope ? { scope: routing.scope } : {}),
 			...(routing.risk ? { risk: routing.risk } : {}),
 			...(routing.recordedRisk ? { recordedRisk: routing.recordedRisk } : {}),
@@ -1955,6 +1992,11 @@ export class PipelineRunner {
 			deadline: pending.deadline,
 			key: ReviewRuns.key(pending.job_id, pending.surface, pending.attempt),
 		};
+	}
+
+	/** A fresh dispatch refused by the update hold: nothing is recorded, so the next advance retries the same step. */
+	#heldDispatch(record: PipelineRecord, state: PipelineState, error: UpdateHoldError): AdvanceResult {
+		return this.#step(record, state, "wait", `${record.ship_id}: implementer dispatch deferred, not failed — ${error.message}. Run cp_pipeline advance again once the hold clears.`);
 	}
 
 	#step(

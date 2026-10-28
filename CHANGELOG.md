@@ -6,14 +6,21 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
-- #589 (part 2 of 2): the operator session's header guard (`src/header-guard.ts`) forces one re-send of a final reply whose job, ask, escalation or PR ids name project work no `[project]` header covers (never on a reply with no ids, never alongside an ask-guard nudge); `NO-PROJECT` accepts it untagged. Outcomes append to the new `state/operator/reply-splits.jsonl` (0600): `superseded`, `hidden`, or an auto-tagged `split` (ids, then the human line answered, then the single active-mandate project). The Full transcript applies them and folds superseded and `NO-PROJECT` replies; the pi session file is unchanged. Migration: none. Rollback: revert; the sidecar can be deleted.
+- ci: the suite runs in 8 time-balanced shards (was 4); `scripts/test-timings.json` refreshed from main CI run 40725373381. Required check `test` is unchanged; per-shard checks `test-shard (5..8)` are new. Migration: none.
+
+- Fix (#648): the pipeline implementer honours an operator-named model (`cp_pipeline start|advance|recover implementer_model`), persisted on the pipeline record; the planner's `model` is unchanged. Migration: none.
+
 - Default parent auto-compaction is now 150000 context tokens (was 200000), used when `data/parent.json` is absent and as the Settings default; an explicit file keeps its value and the operator default stays 200000. Part of issue 537. Migration: none.
+
+- Fix (#651): a gate verdict is no longer withheld as history when its research job is `done`/`failed`, so a late revise carrying the `replace_planner` instruction reaches the parent once instead of being suppressed and resent every ~2 min. Gate verdicts are still superseded by attempt facts; `review`/`quality` verdicts keep the terminal-phase rule. Migration: none.
 
 - #589 (part 1 of 2): the Full transcript splits an operator reply with several `[project]` headers into one chipped section per project, with a *Show original* toggle; an untagged reply is chipped from its job, ask, escalation or PR ids, else the project of the message it answers. Display-only: computed at read time, nothing stored, the pi session file unchanged. Migration: none. Rollback: revert.
 
 - Fix (#537, part 4 of 5): the parent's cold-start `get_state` budget scales with its session file: the request timeout (30 s by default) plus 15 s per MiB, capped at 180 s. `parent-host.log` logs `parent boot: get_state answered in Xms (session N MiB, budget Yms)`, and a failed boot names the session size and the budget. Migration: none.
 
 - Fix: the no-report nudge no longer forces an immediate report (`blocked` is now for a real blocker only), and the on-disk-work recovery prompt no longer says "do not start anything new"; both tell a worker whose acceptance is unmet and who is under its tool-call and wall-clock caps to keep working and report only when done, blocked or capped. Migration: none.
+
+- Fix: issue 647: an `ARMED DISPATCH DROPPED`/`QUEUED` (and `QUEUED DISPATCH DROPPED`) notice is no longer discarded as stale for a job that never got a fleet record, and wake-up suppression bookkeeping no longer creates a `starting` status.json for a job that never ran. Migration: none.
 
 - Fix: issue 419: the no-report nudge's "do not redo, re-verify or push again" now applies only to finished work, so an unfinished worker is no longer told not to push. Migration: none.
 

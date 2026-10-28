@@ -287,6 +287,11 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 					// schedlater S1: a runner-owned scheduled run is torn down in code, no parent turn;
 					// a refused teardown makes the runner send this same envelope wake itself.
 					const runner = s.scheduleRunner?.();
+					// #444: a native scheduled pipeline's anchor is advanced in code, its gate started with no parent turn.
+					if (runner?.claimsPipeline(result)) {
+						claimedRun({ onReported: (claimed) => runner.onPipelineReported(claimed) }, result, wakeEnvelope);
+						return;
+					}
 					if (runner?.claims(result)) {
 						claimedRun(runner, result, wakeEnvelope);
 						return;

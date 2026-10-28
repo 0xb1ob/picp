@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { BRIDGE_RECEIPT_LEVELS, LAYOUT } from "../../src/contracts.ts";
+import { BRIDGE_RECEIPT_LEVELS, LAYOUT, type ThinkingLevel } from "../../src/contracts.ts";
 import { type BridgeRelay, CpBridge, CpBridgeError, operatorPiArgs } from "../../src/cp-bridge.ts";
 import { EscalationStore } from "../../src/escalation.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
@@ -12,7 +12,7 @@ import { acquireParentLock } from "../../src/parent-lock.ts";
 import { parentFile, parentRow } from "../../src/viewer/sessions.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MockProvider, type ScriptStep, startRpc, waitFor } from "../harness/index.ts";
 
-type StartOptions = { model?: string; modelExplicit?: boolean; home?: string };
+type StartOptions = { model?: string; modelExplicit?: boolean; home?: string; thinking?: ThinkingLevel };
 
 /** One mock provider whose scripts are all parent models; every bridge started here is stopped after the test. */
 async function fixture(t: TestContext, scripts: Record<string, ScriptStep[]>, parentJson?: string, existing?: string) {
@@ -41,6 +41,7 @@ async function fixture(t: TestContext, scripts: Record<string, ScriptStep[]>, pa
 		bridge: () => { const bridge = new CpBridge(); bridges.push(bridge); bridge.onRelay((relay) => { relays.push(relay); }); return bridge; },
 		start: async (bridge: CpBridge, options: StartOptions = {}, sleeps: number[] = []) => bridge.start({
 			home: options.home ?? home.path, mode: "multi", model: options.model ?? first, ...(options.modelExplicit ? { modelExplicit: true } : {}),
+			...(options.thinking ? { thinking: options.thinking } : {}),
 			cwd: options.home ?? home.path, commandPostExtension: COMMAND_POST_EXTENSION, outerRetrySleep: async (ms) => { sleeps.push(ms); },
 		}),
 		bodies: (name: string) => provider.requests(name).map((request) => JSON.stringify(request.body)),
@@ -240,6 +241,41 @@ test("P9h-bridge-model: start precedence, a live switch and rotation settle the 
 	await pinned.rotate();
 	assert.equal(pinned.status().model, m["p9h-explicit"], "an explicit start model survives rotation");
 	assert.equal(control(explicit).model, m["p9h-explicit"]);
+	await pinned.stop();
+
+	// Thinking (dashboard Settings): rotation applies data/parent.json `thinking`, pi clamps max to the served high;
+	// an explicit start level survives rotation. The models serve off..high, as reasoning models.
+	const config = f.provider.modelsJson();
+	for (const entry of Object.values(config.providers)) {
+		for (const row of (entry as { models: Record<string, unknown>[] }).models) {
+			row.reasoning = true;
+			row.thinkingLevelMap = { off: "off", minimal: "minimal", low: "low", medium: "medium", high: "high", xhigh: null, max: null };
+		}
+	}
+	writeFileSync(join(process.env.PI_CODING_AGENT_DIR!, "models.json"), JSON.stringify(config));
+	const effort = (name: string) => (f.provider.requests(name).at(-1)!.body as { reasoning_effort?: string }).reasoning_effort;
+	const thinking = f.newHome();
+	mkdirSync(join(thinking, LAYOUT.data), { recursive: true });
+	const leveled = f.bridge();
+	await f.start(leveled, { home: thinking, model: m["p9h-saved"] });
+	await leveled.send("P9H before the thinking rotation");
+	await settled(leveled);
+	writeFileSync(join(thinking, LAYOUT.data, "parent.json"), JSON.stringify({ compact_at_tokens: 100000, thinking: "max" }));
+	const errorsBefore = f.relays.filter((relay) => relay.kind === "error").length;
+	await leveled.rotate();
+	await leveled.send("P9H after the thinking rotation");
+	await settled(leveled);
+	assert.equal(effort("p9h-saved"), "high", "rotation applied the file thinking, clamped to the served level");
+	assert.equal(f.relays.filter((relay) => relay.kind === "error").length, errorsBefore, "a clamp is no error");
+	await leveled.stop();
+	const lowStart = f.bridge();
+	await f.start(lowStart, { home: thinking, model: m["p9h-saved"], thinking: "low" });
+	await lowStart.send("P9H on the explicit level");
+	await settled(lowStart);
+	await lowStart.rotate();
+	await lowStart.send("P9H after the explicit-level rotation");
+	await settled(lowStart);
+	assert.equal(effort("p9h-saved"), "low", "an explicit start thinking survives rotation over the file");
 });
 
 test("P9h-bridge-escalation: a refused cp_escalate is one error notice, never keyed by its call id; a retry in the same turn relays only the escalation", { timeout: 120_000 }, async (t) => {

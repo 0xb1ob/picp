@@ -471,9 +471,12 @@ not started by a relaunching `cp-operator` (no `CP_OPERATOR_RELAUNCH_FILE`) repo
 ## Stop, drain, restart
 
 - **Stopping the fleet stays `cp_parent drain` + `cp_parent stop`.** A
-  completed `stop` writes `state/parent-host.stopped.json` `{gen, at}` before
+  completed `stop` writes `state/parent-host.stopped.json` `{gen, at, by}` before
   the host exits; the supervisor then waits without spawning (polling every
-  10 s) and joins a newer generation when `cp_parent start` makes one.
+  10 s) and joins a newer generation when `cp_parent start` makes one. A fresh supervisor (an update's
+  `reload`, a `cp-daemon restart`, a reboot) does the same over a dead generation an operator stop
+  (`by: "operator"`) closed, and the health check skips `parent` while it stands. The updater's own stop is
+  `by: "update"` and a marker written before #537 has no `by`: neither holds a fresh supervisor.
 - While `state/drain.json` exists, a host loss also waits without spawning.
   A boot starts regardless: the boot is the restart the drain prepared, and
   the parent's `session_start` reports and clears it.
@@ -567,8 +570,15 @@ one result in `state/update.json` (its only writer):
   drained). An idle held/waiting worker does not block: the drain answers `drained` and the
   restart leaves it `revivable`. Nothing revives it automatically: once the restarted parent is up,
   it acts on the `cp-recovery` wake and runs `cp_revive` for each held worker the wake lists.
-  After 4× `interval_min` of `skipped_busy`, only a script still skips: the run drains anyway
-  and the drain decides (`drained`, or `drain_timeout`);
+  After 4× `interval_min` since `busy_since` (the first mid-turn `skipped_busy` of the episode; kept through
+  `skipped_settling`, `drain_timeout`, `fetch_failed` and a newer tip, cleared by any other result), only a script still
+  skips: the run drains anyway and the drain decides (`drained`, or `drain_timeout`, whose retry then drains at
+  once). While the last result is `skipped_busy` or `drain_timeout` and `busy_since` is under 2 h old, fresh
+  dispatches (`cp_dispatch`, queued, armed and pipeline dispatch) are refused naming the update
+  (`src/update-hold.ts`, #396): queued and armed entries are kept, and a pipeline advance answers `wait` with
+  the implementer dispatch deferred (retried by the next advance, never a failed step); sends, promotions,
+  reviews, revives and merges stay open, an unreadable record fails open, and `data/update.json`
+  `enabled: false` lifts the hold at once;
 - **settling:** `skipped_settling` while the `origin/main` tip is not yet `quiet_min` old, measured from when the
   updater first saw it (`first_seen_sha`/`first_seen_at` in `state/update.json`; a different tip restarts the
   clock); the detail names the tip and when it is eligible. Nothing is drained, and it never delays a
@@ -576,7 +586,12 @@ one result in `state/update.json` (its only writer):
 - **drain:** host `drain 600` with cause `auto-update` and the target sha (so the refusal and notices say it is
   an update that restarts the parent by itself), then up to 660 s for `drained`. Still draining or timed out → host
   `drainCancel` (`/cp-drain cancel`: dispatch reopens) → `drain_timeout`; nothing is stopped;
-- **update:** host `stop` (unlanded sends stay queued; the stop marker keeps the supervisor from
+- **no parent host** (#537): a drain that finds no live host record (`no parent host is running`, e.g. after
+  `cp_parent stop`) counts as drained when no worker or script pid is live; a live one is `failed` and nothing is
+  merged. It skips the host `stop`, verifies the viewer only (no `/doctor` without a parent), and the `updated`
+  detail says the parent was not running. The reload's fresh supervisor honours the operator's stop marker, so the parent
+  stays down until the operator's next `cp_parent start`, which runs the new code;
+- **update:** host `stop` `{by: "update"}` (unlanded sends stay queued; the stop marker keeps the old supervisor from
   respawning), cp-daemon `hold` (the viewer stops and stays down), `git merge --ff-only <to>`, `npm ci` only
   when `package-lock.json` changed, cp-daemon `reload` (a new inner on the new code: the supervisor starts a
   fresh host, the viewer restarts, the hold is released);

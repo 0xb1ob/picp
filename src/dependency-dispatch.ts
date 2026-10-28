@@ -30,7 +30,8 @@ import {
 } from "./contracts.ts";
 import { BlockedDispatchError, type DispatchRequest } from "./dispatch.ts";
 import { toDispatchRequest } from "./dispatch-queue.ts";
-import { assertNotDraining, readDrain } from "./drain.ts";
+import { assertDispatchOpen, readDrain } from "./drain.ts";
+import { UpdateHoldError } from "./update-hold.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { MandateError } from "./mandate-accounting.ts";
 import { boundedWakeupId, type DurableWakeupInput } from "./wakeup-outbox.ts";
@@ -84,7 +85,7 @@ export class ArmedDispatches {
 
 	/** Arm (or re-arm with the newer request). Refuses a pipeline job, a drain and a full file. */
 	arm(jobId: string, request: QueuedDispatchRequest, blockers: readonly string[]): { rearmed: boolean } {
-		assertNotDraining(this.#options.home, `armed dispatch of ${jobId}`);
+		assertDispatchOpen(this.#options.home, `armed dispatch of ${jobId}`);
 		if (this.#options.pipelineOwned(jobId)) throw new ArmedDispatchError(`${jobId} belongs to a pipeline — cp_pipeline advance dispatches it`);
 		const file = this.read();
 		const rest = file.entries.filter((entry) => entry.job_id !== jobId);
@@ -130,6 +131,7 @@ export class ArmedDispatches {
 				else this.#finish(entry, "started", result.state);
 			} catch (error) {
 				if (error instanceof BlockedDispatchError) continue; // a blocker reopened: still armed
+				if (error instanceof UpdateHoldError) continue; // held for a pending update: still armed
 				if (error instanceof MandateError && error.code === "parallelism_full") continue;
 				if (error instanceof SpawnSafetyError && error.code === "spawn_cap") {
 					this.#queue(entry);
@@ -173,7 +175,9 @@ export class ArmedDispatches {
 				: outcome === "queued"
 					? `ARMED DISPATCH QUEUED — ${entry.job_id} (${detail}): its blockers landed but the spawn cap is full; it starts when a worker slot frees. Do not re-dispatch.`
 					: `ARMED DISPATCH DROPPED: ${detail} — ${entry.job_id}, armed at ${entry.armed_at}. Nothing was dispatched; cp_next decides what runs next.`;
-		this.#options.journal({ id: boundedWakeupId(`armed-dispatch:${outcome}:${entry.job_id}:${entry.armed_at}`), kind: "recovery", job_id: entry.job_id, keys: [entry.job_id], content });
+		// A job that did not start has no fleet record; keys would make its notice stale.
+		const keys = outcome === "started" ? { keys: [entry.job_id] } : {};
+		this.#options.journal({ id: boundedWakeupId(`armed-dispatch:${outcome}:${entry.job_id}:${entry.armed_at}`), kind: "recovery", job_id: entry.job_id, ...keys, content });
 	}
 
 	#owns(): boolean {

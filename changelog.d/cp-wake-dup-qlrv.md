@@ -1,0 +1,1 @@
+- Viewer: a relay rollup's wake notice shows once, inside its open steps pill, instead of also as its own row; the rollup's meta line (time · job · N earlier) now sits right above the latest relay.

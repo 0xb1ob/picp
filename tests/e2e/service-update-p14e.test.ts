@@ -5,7 +5,7 @@
  * a stub; git, the fleet, run status and drain.json are real.
  */
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -164,7 +164,7 @@ test("P14e-update-forward: ff, npm ci on a lockfile change, reload", { timeout: 
 	assert.equal(state?.last_result, "updated", last(b));
 	assert.deepEqual([b.repo.head(), b.repo.head("origin/main")], [to, to]);
 	assert.deepEqual({ from: state?.from, to: state?.to, phase: state?.phase, lock: state?.lock }, { from, to, phase: "idle", lock: false });
-	assert.deepEqual(b.calls(), ["host drain [600]", "host stop [{}]", "daemon hold", "daemon reload"], "no npm ci");
+	assert.deepEqual(b.calls(), ["host drain [600]", "host stop [{\"by\":\"update\"}]", "daemon hold", "daemon reload"], "no npm ci; an updater stop, never an operator one");
 	assert.deepEqual(b.causes(), [{ reason: "auto-update", target_sha: to }]);
 	b.reset();
 	advanceBase(b.repo, "package-lock.json", "{\"v\":2}\n");
@@ -304,14 +304,14 @@ test("P14e-update-rollback: rolled back, sticky, held", { timeout: 300_000 }, as
 	r.plan({ drainStates: ["drained", "draining"], doctor: ["error:DOCTOR broken"], onDoctor: { files: [{ path: join(r.stateDir, "fleet.json"), text: fleet.fleet }, { path: join(r.home, fleet.statusRel), text: fleet.status }] } });
 	const held = await r.run();
 	assert.deepEqual([held?.last_result, held?.phase, held?.held, held?.bad_sha, r.repo.head()], ["rollback_failed", "rolling_back", true, undefined, rBad], last(r));
-	assert.equal(r.hostCalls().filter((call) => call === "host stop [{}]").length, 1, "only the forward stop: the rollback stopped nothing");
+	assert.equal(r.hostCalls().filter((call) => call === "host stop [{\"by\":\"update\"}]").length, 1, "only the forward stop: the rollback stopped nothing");
 	assert.deepEqual(r.hostCalls().slice(-2), ["host drain [600]", "host drainCancel"], "the rollback drained, timed out, cancelled");
 	r.reset();
 	assert.deepEqual([await r.run(30), r.calls()], [undefined, []], "under 4x interval_min: it waits like a drain timeout");
 	rmSync(join(r.stateDir, "fleet.json"));
 	r.plan({ drainStates: ["drained"] });
 	const done = await r.run(31);
-	assert.deepEqual([done?.last_result, done?.held, done?.bad_sha, r.repo.head(), r.hostCalls()], ["rolled_back", undefined, rBad, rFrom, ["host drain [600]", "host stop [{}]"]], last(r));
+	assert.deepEqual([done?.last_result, done?.held, done?.bad_sha, r.repo.head(), r.hostCalls()], ["rolled_back", undefined, rBad, rFrom, ["host drain [600]", "host stop [{\"by\":\"update\"}]"]], last(r));
 
 	// No host to drain, yet the fleet names a live worker: held too.
 	const c = await bench(t);
@@ -352,7 +352,7 @@ test("P14e-update-recovery: a run interrupted mid-phase", { timeout: 300_000 }, 
 	late.state({ phase: "draining", from: lateHead, to: FAR, lock: false });
 	writeFileSync(join(late.stateDir, "drain.json"), JSON.stringify({ started_at: isoTimestamp(), state: "drained", jobs: [] }));
 	const restarted = await late.run(5);
-	assert.deepEqual([restarted?.last_result, restarted?.phase, late.calls(), late.repo.head()], ["failed", "idle", ["host stop [{}]", "daemon hold", "daemon reload", "daemon health"], lateHead], "no quiet wait");
+	assert.deepEqual([restarted?.last_result, restarted?.phase, late.calls(), late.repo.head()], ["failed", "idle", ["host stop [{\"by\":\"update\"}]", "daemon hold", "daemon reload", "daemon health"], lateHead], "no quiet wait");
 	assert.match(restarted?.detail ?? "", /drained parent was restarted, dispatch reopens/);
 	// The same window with a host stop that fails: the units still restart, and both errors are reported.
 	const stuck = await bench(t);
@@ -369,7 +369,7 @@ test("P14e-update-recovery: a run interrupted mid-phase", { timeout: 300_000 }, 
 	stuck.reset();
 	stuck.plan({ failing: ["host stop"] });
 	const once = await stuck.run();
-	assert.deepEqual(stuck.calls().slice(0, 2), ["host stop [{}]", "daemon reload"], "stop failed (no hold asked), restart still ran");
+	assert.deepEqual(stuck.calls().slice(0, 2), ["host stop [{\"by\":\"update\"}]", "daemon reload"], "stop failed (no hold asked), restart still ran");
 	assert.match(once?.detail ?? "", /^a run was interrupted after the fleet drained; nothing merged; host stop failed: stop refused \(the drain may stay latched/);
 });
 
@@ -489,4 +489,46 @@ test("P14e-update-quiet: the quiet period", { timeout: 300_000 }, async (t) => {
 	r.repo.git("merge", "--ff-only", "--quiet", to);
 	r.state({ phase: "verifying", from, to, lock: false });
 	assert.deepEqual([(await r.run(5))?.last_result, r.repo.head()], ["rolled_back", from]);
+});
+
+test("P14e-update-nohost: no parent host running", { timeout: 300_000 }, async (t) => {
+	// The operator stopped the parent: its host record names a dead pid. Issue 537 recorded
+	// `failed: drain failed: no parent host is running` every run and never applied.
+	const b = await bench(t);
+	const record = parentHostPaths(b.home, "multi").record(1);
+	writeFileSync(record, JSON.stringify({ ...JSON.parse(readFileSync(record, "utf8")), pid: spawnSync(process.execPath, ["-e", ""]).pid }));
+	// An idle worker's pid outlived the host: refused, nothing merged, held or stopped.
+	await b.job("cp-orphan", "idle");
+	const head = b.repo.head();
+	const to = advanceBase(b.repo, "n.txt", "n\n");
+	const refused = await b.run();
+	assert.deepEqual([refused?.last_result, refused?.phase, b.repo.head(), b.calls()], ["failed", "idle", head, ["daemon health"]], last(b));
+	assert.match(refused?.detail ?? "", /^no parent host is running and live worker\(s\) cp-orphan; nothing merged/);
+	// Nothing live: applied with no host op, the viewer verified only; the stale failure detail is replaced.
+	rmSync(join(b.stateDir, "fleet.json"));
+	b.reset();
+	const applied = await b.run();
+	assert.deepEqual([applied?.last_result, applied?.phase, b.repo.head(), b.calls()], ["updated", "idle", to, ["daemon hold", "daemon reload"]], last(b));
+	assert.match(applied?.detail ?? "", /; the parent was not running: viewer verified only, the next cp_parent start runs /);
+	assert.doesNotMatch(applied?.detail ?? "", /live worker/);
+});
+
+test("P14e-update-converge: a newer tip or a drain timeout never restarts the busy clock", { timeout: 300_000 }, async (t) => {
+	// Issue 396: each merge (skipped_settling) and each drain_timeout reset `since`, so under steady load the
+	// forced drain after 4x interval_min never came. `busy_since` now spans the whole busy episode.
+	const b = await bench(t, { enabled: true, interval_min: 15, quiet_min: 10 });
+	await b.job("cp-a", "working");
+	b.plan({ drainStates: ["draining", "drained"] });
+	advanceBase(b.repo, "one.txt", "one\n");
+	assert.equal((await b.run())?.last_result, "skipped_settling");
+	const busy = await b.run();
+	assert.deepEqual([busy?.last_result, busy?.busy_since], ["skipped_busy", busy?.last_run_at], last(b));
+	const to = advanceBase(b.repo, "two.txt", "two\n");
+	const settling = await b.run();
+	assert.deepEqual([settling?.last_result, settling?.busy_since], ["skipped_settling", busy?.busy_since], "a newer tip keeps the busy clock");
+	assert.deepEqual([(await b.run())?.last_result, b.hostCalls()], ["skipped_busy", []], "40 of 60 busy minutes");
+	const timeout = await b.run();
+	assert.deepEqual([timeout?.last_result, timeout?.busy_since, b.hostCalls()], ["drain_timeout", busy?.busy_since, ["host drain [600]", "host drainCancel"]], last(b));
+	const updated = await b.run(61);
+	assert.deepEqual([updated?.last_result, updated?.busy_since, b.repo.head()], ["updated", undefined, to], "the next run drains at once and clears the clock");
 });

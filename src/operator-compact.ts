@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { layoutForHome, type Mode, ReviewerModelSchema, validate } from "./contracts.ts";
+import { layoutForHome, type Mode, ReviewerModelSchema, type ThinkingLevel, ThinkingLevelSchema, validate } from "./contracts.ts";
 import { atomicWriteText } from "./json-store.ts";
 import { relayIdsOfMessage } from "./operator-outbox.ts";
 
@@ -31,11 +31,8 @@ export function operatorCompactThreshold(settingsFile: string): number {
 	} catch { return OPERATOR_COMPACT_DEFAULT_TOKENS; }
 }
 
-/**
- * `model` from the operator settings file (dashboard Settings): a valid `provider/model` ref, else undefined.
- * Absent file → undefined; an unreadable file or invalid JSON throws, so `cp-operator` can say why it fell back.
- */
-export function operatorModelSetting(settingsFile: string): string | undefined {
+/** The operator settings file as JSON; absent → undefined, unreadable or invalid JSON throws. */
+function operatorSettingsJson(settingsFile: string): { model?: unknown; thinking?: unknown } | undefined {
 	let text: string;
 	try {
 		text = readFileSync(settingsFile, "utf8");
@@ -43,8 +40,22 @@ export function operatorModelSetting(settingsFile: string): string | undefined {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
 		throw error;
 	}
-	const model: unknown = JSON.parse(text)?.model;
+	return JSON.parse(text) ?? undefined;
+}
+
+/**
+ * `model` from the operator settings file (dashboard Settings): a valid `provider/model` ref, else undefined.
+ * Absent file → undefined; an unreadable file or invalid JSON throws, so `cp-operator` can say why it fell back.
+ */
+export function operatorModelSetting(settingsFile: string): string | undefined {
+	const model = operatorSettingsJson(settingsFile)?.model;
 	return validate(ReviewerModelSchema, model).ok ? (model as string) : undefined;
+}
+
+/** `thinking` from the operator settings file, with `operatorModelSetting`'s absent/throw semantics. */
+export function operatorThinkingSetting(settingsFile: string): ThinkingLevel | undefined {
+	const thinking = operatorSettingsJson(settingsFile)?.thinking;
+	return validate(ThinkingLevelSchema, thinking).ok ? (thinking as ThinkingLevel) : undefined;
 }
 
 export type OperatorCompactControl = {

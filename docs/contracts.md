@@ -1337,6 +1337,8 @@ retain the parent's info/error level.
 
 **Parent and operator model (cp-settings-minimal).** An optional `data/parent.json` `model` (`provider/id`, set from dashboard Settings) picks the parent model on the next start or rotation; `cp_parent model` still switches now. At start (`src/cp-bridge.ts` `start`): without an explicit `cp_parent start model`, `parent.json` `model` wins, then the saved control model (`sessions/cp-parent-control.json`), then `CP_PARENT_MODEL`, then the session model; with an explicit model, a saved control model still beats it, as before. The file beats the env, so the supervisor's `CP_PARENT_MODEL` never overrides it. A rotation applies the configured model with `set_model` and records it in the control file, unless the running model is an explicit choice (an explicit `cp_parent start model`, or a live `cp_parent model` switch in this session: `modelExplicit`), which rotation keeps; a refusal keeps the running model and relays one error. `data/operator.json` `model` likewise beats `CP_OPERATOR_MODEL` on a fresh `cp-operator` launch (an explicit `--model` still wins, a resume keeps its recorded model); an unreadable `operator.json` prints one stderr line and falls back to the env. Absent, both behave exactly as before.
 
+**Parent and operator thinking.** The same files' optional `thinking` (one of pi's levels, from dashboard Settings) becomes `--thinking <level>` on the next parent start (supervisor, bridge start or crash relaunch) unless `cp_parent start thinking` names one; an explicit start model keeps it. A rotation applies it with RPC `set_thinking_level` after the configured model unless the start named a level; a request error is one `parent rotate kept thinking: …` error relay and the rotation completes. On a fresh `cp-operator` launch it becomes `--thinking <level>` unless argv holds `--thinking` or a resume flag (an explicit `--model` keeps it; a Restart-session relaunch keeps the recorded level). pi clamps a level the model cannot serve; nothing refuses it. There is no env pin, and nothing switches live. Absent or invalid, no `--thinking` is added, as before.
+
 An existing `parent.json` with an invalid `compact_at_tokens` disables automatic compaction and `/doctor` warns; only an absent file takes the default. After each settled turn, and once at ready when a queued send waits, the bridge reads pi's context estimate and runs automatic control before it drains queued sends; the next send waits until control completes, and a send still queued in the bridge never blocks it. At or above this limit it compacts before the next turn; the compact request waits 240 s unless the bridge's explicit `requestTimeoutMs` overrides it. The limit is compared with **effective** tokens: when the last valid assistant message (error, aborted and zero-usage ones skipped, nothing before a compaction) stopped on `length`, its billed output is replaced by an estimate of what was stored (`ceil(chars/4)`), so a length stop's discarded output never triggers a compaction; the parent cancels pi's own `threshold` compaction by the same rule (`manual` and `overflow` untouched). On a headless parent, from the first `turn_end` or settle whose effective reading is at or above the limit, wake-ups (including `answered`, the send-first release and the stranded-notice nudge) are held, not sent as follow-ups, until the compaction lands; a failed manual compaction, no compaction start within 15 s, a 270 s cap from its start, or a settle reading below the limit releases them, `agent_start` never does, and three consecutive failures or expiries disable holding until the next compaction (`src/parent-compact-hold.ts`). Every outcome at or above the limit is one line in `state/daemon.log`: the bridge's `cp-parent-host[pid]: parent context compacted|refused <reason>|failed|timed_out|skipped_length_stop|rotated|rotate_failed`, the parent's `cp-parent[pid]: parent context hold …|threshold_compaction_cancelled`; `failed`, `timed_out` and `rotate_failed` also relay an operator error, and the `timed_out` relay says to retry the compaction once the parent has settled, since a rotation or restart can abort running workers and is no substitute for that retry. Compaction instructions name the current open escalation ids, held PR jobs, active mandate ids and unsettled bridge sends from disk, preserving standing operator instructions and any caller-supplied focus. A `cp_next` mission-end recommendation rotates the session after settlement once no other active grant remains; so does any revoke or expiry (by the operator, the parent or the system) once no grant is active, when it is newer than the last rotation (N17, `missionRotation`). A `cp_next` mission id counts only while its grant is still the one open grant (or the store never had it), so a stale id never names the rotation; the `rotated`/`rotate_failed` line carries `mission=<the grant that ended> trigger="cp_next mission_end|revoked by <who>|expired"`, and the rotation records that mission as `lastMissionEnd`. A failed rotation is logged and falls through to the compaction check. The bridge archives the old transcript and persists the new path, last compact/rotate times, context tokens and last turn cost in `state/sessions/`; `/doctor`, `cp_parent status` and the read-only viewer report those facts. Unknown context estimates are not treated as over threshold.
 
 Parent-directed `cp-schedule` wakes share this same compaction hold: ordinary PR/pipeline fires, live parent-expanded skill fires (including local skill anchors), and startup recovery of unexpanded anchors. Release sends each offered wake once in offer order with its original content/details, `display: true`, `deliverAs: followUp` and `triggerTurn: true`. Anchor dedupe is recorded at offer time. Only transport waits: schedule/control polling, fire timing, job creation, quote verification/single-use recording, fresh-grant minting, open-fire guards and runner-owned answer/board/local dispatch/teardown retain their existing boundaries. Release never mints another grant. The queue is in memory; a new parent process recovers unexpanded anchors from the ledger. Operator steering and the existing schedule send-first/busy-gate behavior are unchanged.
@@ -2222,7 +2224,9 @@ Other spawn-time policy, all fail-closed:
   the drain; any other refusal, a `promote`, a closed or fleet-known job
   drops the entry. Every start or drop is one `recovery` wake-up
   (`QUEUED DISPATCH STARTED`/`DROPPED`); a drain that throws keeps every
-  entry and wakes `DISPATCH QUEUE DRAIN FAILED` once per cause.
+  entry and wakes `DISPATCH QUEUE DRAIN FAILED` once per cause. Only STARTED carries
+  the job as a candidate key, so a DROPPED notice is never superseded for lacking a
+  fleet record.
 - **Armed dispatch (unload-parent PR2).** A `cp_dispatch` refused only by open
   blockers (`BlockedDispatchError`; `when_ready` not `false`; never a pipeline
   or script job) is armed in `state/armed-dispatches.json`
@@ -2238,6 +2242,8 @@ Other spawn-time policy, all fail-closed:
   or a blocker that reopened keeps it; a start, a `promote`, any other refusal,
   or an entry gone stale (in the fleet, closed, script, pipeline-owned,
   unreadable) is one `recovery` wake-up (`ARMED DISPATCH STARTED`/`DROPPED`).
+  Only STARTED carries the job as a candidate key; a notice about a job that did not
+  start is never superseded for lacking a fleet record.
   A release that throws keeps every entry and wakes `ARMED DISPATCH RELEASE
   FAILED` once per cause.
 - `WorkerManager.shutdownAll()` is the `session_shutdown` cleanup: the parent
@@ -2468,6 +2474,8 @@ Mechanics that matter:
 - **Revise prefers the live planner.** The gate sends revisions through
   `cp_send`. A torn-down planner instead gets a `revise_error` naming
   `cp_gate action: replace_planner, job_id: <old>, replacement_job_id: <new>`.
+  Its `cp-verdict` is still delivered: a gate verdict is never superseded by its
+  research job's `done`/`failed` phase, only by attempt facts (#651).
   Create a fresh research job with the same project and delivery first. This
   action prepares a `task_file` pointing at copies of the old plan, frozen
   scope (when available), and `gate-N-raw.json` (or the complete uncapped
@@ -4301,6 +4309,13 @@ to both planner and implementer dispatches through the usual bound resolver.
 The request is persisted across advances and reanchors; omission keeps the
 home/env defaults. Each dispatch result reports its effective `wall_clock_seconds`.
 
+`cp_pipeline start|advance implementer_model` is the operator's explicit
+implementer override (`model` stays the planner's). It is persisted on the pipeline
+record across advances, recover and reanchor, shown in the checkpoint evidence, and
+refused once the implementer exists. `recover` takes no `implementer_model`: it needs
+a dispatched implementer, so a new value was always refused; it reuses the persisted one.
+`suggested_implementer_model` stays advisory.
+
 **`escalate` is not one exit (cp-n10).** `escalated` is reserved for the
 verdicts that must never reach a human: `policy`, `operational` and
 `operational_persistent`. A `flagged` escalate — the reviewer found the plan
@@ -4359,6 +4374,7 @@ them.
   journaled on the job's run log; arrival is confirmed from the message in the
   parent's context, never from the send. An unconfirmed wake-up is resent once
   after `VERDICT_DELIVERY_RETRY_SECONDS`.
+  A verdict for any other surface on a `done`/`failed` job is withheld as history.
 
 ### The three rules that make it a pipeline and not a script
 
@@ -8534,6 +8550,9 @@ titled `ship: <title> (<run id>)`, labelled `schedule:<id>` and admitted to the 
 recorded; a replay after a crash finds that ship again by title and never starts a second pipeline. Only a
 failed start wakes the parent. A native pipeline policy needs `limits.child_jobs` ≥ 2 (anchor + ship), and a run
 that cannot admit the ship (closed, or its child cap spent) refuses before the ship job is created.
+When the research anchor files a `done` envelope (`next: advance`), the host advances the pipeline in code (the gate
+starts); only an `authorize`/`surface` outcome or a failed advance wakes the parent; a restart sweeps a reported,
+unadvanced anchor once. Every `delivery:pipeline` research `done` envelope reports `next: advance`, never `teardown`.
 
 #### Native self-review runs (PR3 of the schedules refactor)
 
@@ -9542,6 +9561,9 @@ unset). Their source is `file` when the owner has a valid key, else `env` for a 
 `CP_PARENT_MODEL` / `CP_OPERATOR_MODEL`, else `code` with value null; an invalid key is
 `fallback` ("invalid model; ignored"). The file beats the env at launch, so `env` here
 reports only what this process sees. An unset `model` keeps today's behaviour exactly.
+`models.parent_thinking` and `models.operator_thinking` are the same files' `thinking` (one of pi's levels `off` …
+`max`; absent or null means unset). They have no env pin: the source is `file` for a valid key, else `code` with value
+null; an invalid key is `fallback` ("invalid thinking level; ignored"). Null in a write deletes the key.
 
 ### Settings writes
 
@@ -9578,7 +9600,7 @@ refuse or disable on a present file without the key. `sessions.operator_compact_
 "cp-install"`) gets the installer seed (`enabled: true`, `interval_min: 15`). Any other home
 gets `enabled: false` and loses `interval_min`. An unreadable `daemon.json` is 409. Section
 and all restores skip non-editable fields. A restore never creates an absent owner file.
-`models.parent` and `models.operator` delete the key. `models.rubric` (`shipped_rubric`) puts
+`models.parent`, `models.operator`, `models.parent_thinking` and `models.operator_thinking` delete the key. `models.rubric` (`shipped_rubric`) puts
 back the shipped `defaults/routing.default.json` model, fallbacks and thinking on every row
 whose `id` the template has; a hand-added row and every other row field stay. An unreadable
 template is 409 and restores nothing.

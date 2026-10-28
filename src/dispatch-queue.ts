@@ -20,7 +20,8 @@ import {
 	validateDispatchQueueFile,
 } from "./contracts.ts";
 import type { DispatchRequest } from "./dispatch.ts";
-import { assertNotDraining, readDrain } from "./drain.ts";
+import { assertDispatchOpen, readDrain } from "./drain.ts";
+import { UpdateHoldError } from "./update-hold.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { MandateError } from "./mandate-accounting.ts";
 import { ScheduleAuthorityError } from "./schedule-authority.ts";
@@ -43,8 +44,9 @@ export interface DispatchQueueOptions {
 	now?: () => Date;
 }
 
-/** Still full: keep the entry at the head, untouched, and stop the drain. */
+/** Still full, or held for a pending update: keep the entry at the head, untouched, and stop the drain. */
 export function keepsHead(error: unknown): boolean {
+	if (error instanceof UpdateHoldError) return true;
 	if (error instanceof SpawnSafetyError) return error.code === "spawn_cap";
 	return (error instanceof MandateError || error instanceof ScheduleAuthorityError) && error.code === "parallelism_full";
 }
@@ -104,7 +106,7 @@ export class DispatchQueue {
 
 	/** Append; refuses a duplicate or a full queue. Returns the new position. */
 	enqueue(jobId: string, request: QueuedDispatchRequest): number {
-		assertNotDraining(this.#options.home, `queued dispatch of ${jobId}`); // draining wins: nothing new is queued either
+		assertDispatchOpen(this.#options.home, `queued dispatch of ${jobId}`); // draining wins: nothing new is queued either
 		const file = this.read();
 		const at = file.entries.findIndex((entry) => entry.job_id === jobId);
 		if (at >= 0) throw new DispatchQueueError(`${jobId} is already queued at position ${at + 1} — it starts when a worker slot frees; do not re-dispatch`);
@@ -174,7 +176,9 @@ export class DispatchQueue {
 			outcome === "started"
 				? `QUEUED DISPATCH STARTED — ${head.job_id} (${detail}), queued at ${head.queued_at}; a worker slot freed. Its envelope is the next wake-up.`
 				: `QUEUED DISPATCH DROPPED: ${detail} — ${head.job_id}, queued at ${head.queued_at}. Nothing was dispatched; cp_next decides what runs next.`;
-		this.#options.journal({ id: boundedWakeupId(`dispatch-queue:${outcome}:${head.job_id}:${head.queued_at}`), kind: "recovery", job_id: head.job_id, keys: [head.job_id], content });
+		// A job that did not start has no fleet record; keys would make its notice stale.
+		const keys = outcome === "started" ? { keys: [head.job_id] } : {};
+		this.#options.journal({ id: boundedWakeupId(`dispatch-queue:${outcome}:${head.job_id}:${head.queued_at}`), kind: "recovery", job_id: head.job_id, ...keys, content });
 	}
 
 	#owns(): boolean {

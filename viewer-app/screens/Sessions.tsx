@@ -26,7 +26,7 @@ import { type ControlView, controlReady } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
 import { QuickReplies } from "../components/QuickReplies.tsx";
 import { dayKey, dayStarts, isOwn, lastDay, replyAsk, rollups, type Row, rowHead, rows } from "../session-rows.ts";
-import { RelayRollup } from "../components/RelayRollup.tsx";
+import { InRollup, RelayRollup } from "../components/RelayRollup.tsx";
 
 /** A tool call/result longer than this shows its head, with the rest behind one "show all" link. */
 const TOOL_TEXT_MAX = 1200;
@@ -103,9 +103,9 @@ function groupStarts(rowList: Row[], days: Map<string,string>): Set<string> {
  * for a recorded job, its transcript link. Tools on (no `onToggle`) shows every card open, without pills.
  */
 function Steps({row,open,onToggle}: {row:Extract<Row,{kind:"steps"}>;open:boolean;onToggle?:()=>void}) {
- const job=row.notice?.bridge?.job ?? null;
+ const job=row.notice?.bridge?.job ?? null, tucked=useContext(InRollup);
  // Open, a summary preview would repeat the first row right below it; the job id never does.
- return <ToolRunRow steps count={row.entries.length+(row.notice ? 1 : 0)} detail={job ?? (open ? null : row.entries.find(e=>e.summary)?.summary)} open={open} onToggle={onToggle} notice={row.notice && <BridgeNotice entry={row.notice} clock={clockOf(row.notice)} chips/>}>
+ return <ToolRunRow steps count={row.entries.length+(row.notice ? 1 : 0)} detail={job ?? (open ? null : row.entries.find(e=>e.summary)?.summary)} open={open} onToggle={onToggle} notice={row.notice && (open || !tucked) && <BridgeNotice entry={row.notice} clock={clockOf(row.notice)} chips/>}>
   <div class="session-steps-rows">{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</div>
   {job && <a class="session-steps-link" href={jobTranscriptHref(job)}>Open job transcript →</a>}
  </ToolRunRow>;

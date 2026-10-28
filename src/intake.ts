@@ -85,7 +85,7 @@ export interface IntakeResult {
 	kind?: JobKind;
 	delivery?: Delivery;
 	/** What the parent should do next with the lease and the worker. */
-	next?: "hold" | "teardown" | "answer" | "escalate";
+	next?: "hold" | "teardown" | "answer" | "escalate" | "advance";
 	status?: "done" | "blocked" | "failed";
 	/** Headline only. Never a body — that is the contract. */
 	summary?: string;
@@ -246,7 +246,9 @@ export class EnvelopeIntake {
 		const plannerBlocked = envelope.status === "blocked" && expectsPlannerBlockers(record);
 		const blockedRound = plannerBlocked ? (record.planner_blocked_rounds ?? 0) + 1 : undefined;
 		const plannerAction = plannerBlocked ? plannerBlockedRoundAction(record.planner_blocked_rounds ?? 0) : undefined;
-		const next: IntakeResult["next"] = plannerAction ?? (record.delivery === "pr" ? "hold" : "teardown");
+		// A pipeline's plan goes to its gate next; tearing the planner down leaves a gate revise nobody to promote (#444).
+		const pipelineDone = record.kind === "research" && record.delivery === "pipeline" && envelope.status === "done";
+		const next: IntakeResult["next"] = plannerAction ?? (record.delivery === "pr" ? "hold" : pipelineDone ? "advance" : "teardown");
 		const phase: JobPhase = plannerBlocked ? "waiting" : "held";
 		const generation = (record.supersessions ?? 0) + 1;
 		const base: IntakeResult = {
@@ -667,7 +669,9 @@ export function formatIntake(result: IntakeResult): string {
 	const escalated =
 		result.next === "escalate"
 			? `\n  escalated${result.escalation_id ? ` ${result.escalation_id}` : ""} (loop exhausted): do not answer these blockers; relay the escalation.`
-			: "";
+			: result.next === "advance"
+				? `\n  call cp_pipeline advance ${result.job_id} (keep the planner: a gate revise is promoted to it)`
+				: "";
 	return `${parts.join(" ")}\n  ${result.summary}${pr?.url ? `\n  PR: ${pr.url}` : ""}${prNote}${result.board_url ? `\n  board: ${result.board_url}` : ""}${artifact}${escalated}${blockers}`;
 }
 
