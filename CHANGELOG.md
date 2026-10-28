@@ -6,9 +6,13 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- ci: the suite runs in 8 time-balanced shards (was 4); `scripts/test-timings.json` refreshed from main CI run 40725373381. Required check `test` is unchanged; per-shard checks `test-shard (5..8)` are new. Migration: none.
+
 - Fix (#648): the pipeline implementer honours an operator-named model (`cp_pipeline start|advance|recover implementer_model`), persisted on the pipeline record; the planner's `model` is unchanged. Migration: none.
 
 - Default parent auto-compaction is now 150000 context tokens (was 200000), used when `data/parent.json` is absent and as the Settings default; an explicit file keeps its value and the operator default stays 200000. Part of issue 537. Migration: none.
+
+- Fix (#651): a gate verdict is no longer withheld as history when its research job is `done`/`failed`, so a late revise carrying the `replace_planner` instruction reaches the parent once instead of being suppressed and resent every ~2 min. Gate verdicts are still superseded by attempt facts; `review`/`quality` verdicts keep the terminal-phase rule. Migration: none.
 
 - #589 (part 1 of 2): the Full transcript splits an operator reply with several `[project]` headers into one chipped section per project, with a *Show original* toggle; an untagged reply is chipped from its job, ask, escalation or PR ids, else the project of the message it answers. Display-only: computed at read time, nothing stored, the pi session file unchanged. Migration: none. Rollback: revert.
 
