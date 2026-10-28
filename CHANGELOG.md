@@ -6,6 +6,8 @@ are recorded here with the migration; the binding detail lives in
 
 ## Unreleased
 
+- Fix (#648): the pipeline implementer honours an operator-named model (`cp_pipeline start|advance|recover implementer_model`), persisted on the pipeline record; the planner's `model` is unchanged. Migration: none.
+
 - Fix (#537, part 4 of 5): the parent's cold-start `get_state` budget scales with its session file: the request timeout (30 s by default) plus 15 s per MiB, capped at 180 s. `parent-host.log` logs `parent boot: get_state answered in Xms (session N MiB, budget Yms)`, and a failed boot names the session size and the budget. Migration: none.
 
 - Fix: the no-report nudge no longer forces an immediate report (`blocked` is now for a real blocker only), and the on-disk-work recovery prompt no longer says "do not start anything new"; both tell a worker whose acceptance is unmet and who is under its tool-call and wall-clock caps to keep working and report only when done, blocked or capped. Migration: none.
