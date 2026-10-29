@@ -71,7 +71,7 @@ test("one human message: bin/cp-operator's session starts the parent and issues 
 	const toolResults = child.eventsOfType("tool_execution_end");
 	const texts = toolResults.map((r) => JSON.stringify(r));
 	assert.ok(
-		texts.some((t2) => /started pid=/.test(t2)),
+		texts.some((t2) => /started (clean|resumed) pid=/.test(t2)),
 		"no evidence cp_parent start ran",
 	);
 	assert.ok(
@@ -183,6 +183,6 @@ test("'fix example-infra #17' issues the mandate in one send, no follow-up quest
 
 	const toolResults = child.eventsOfType("tool_execution_end");
 	const texts = toolResults.map((r) => JSON.stringify(r));
-	assert.ok(texts.some((t2) => /started pid=/.test(t2)), "no evidence cp_parent start ran");
+	assert.ok(texts.some((t2) => /started (clean|resumed) pid=/.test(t2)), "no evidence cp_parent start ran");
 	assert.ok(texts.some((t2) => /receipt: owner_observed/.test(t2)), "no evidence cp_parent send settled");
 });

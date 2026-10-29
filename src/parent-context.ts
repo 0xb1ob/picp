@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { LAYOUT, layoutForHome, type Mandate, ReviewerModelSchema, type ThinkingLevel, ThinkingLevelSchema, validate } from "./contracts.ts";
 import type { ParentStatus } from "./cp-bridge.ts";
@@ -263,6 +263,7 @@ export function parentBridgeStatus(
 		...(home && parentSettings(home).compact_at_tokens ? { compactAtTokens: parentSettings(home).compact_at_tokens } : {}),
 		...(standingOrders ? { standingOrders } : {}),
 		...state,
+		...(state.sessionFile ? { sessionFileOnDisk: existsSync(state.sessionFile) } : {}),
 		openEscalations,
 		paths: [...new Set(paths)],
 		...(escalationsError ? { escalationsError } : {}),

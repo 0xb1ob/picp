@@ -111,9 +111,12 @@ test("S26: a real operator starts from no host, refreshes attached status after 
 	const model = provider.addScript("s26-status-operator", [
 		{ kind: "text", text: "Ready to manage the parent." },
 		{ kind: "tool_calls", calls: [{ name: "cp_parent", args: { action: "start", home: home.path, mode: "multi", model: parentModel } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_parent", args: { action: "send", text: "Say ready." } }] },
 		{ kind: "text", text: "Parent started." },
 		{ kind: "tool_calls", calls: [{ name: "cp_parent", args: { action: "stop" } }] },
 		{ kind: "text", text: "Parent stopped." },
+		{ kind: "tool_calls", calls: [{ name: "cp_parent", args: { action: "start", home: home.path, mode: "multi", model: parentModel } }] },
+		{ kind: "text", text: "Parent restarted." },
 	]);
 	const agent = createAgentDir({ provider });
 	const previous = process.env.PI_HOME;
@@ -132,7 +135,7 @@ test("S26: a real operator starts from no host, refreshes attached status after 
 	await child.prompt("Start the parent.");
 	const started = await child.waitFor((r) => r.type === "tool_execution_end" && r.toolName === "cp_parent", 30_000);
 	await child.waitFor((r) => child.records().indexOf(r) >= beforeStart && r.type === "agent_settled", 20_000);
-	const pid = /started pid=(\d+)/.exec(JSON.stringify(started.result))?.[1];
+	const pid = /started clean pid=(\d+)/.exec(JSON.stringify(started.result))?.[1];
 	assert.ok(pid, JSON.stringify(started.result));
 	const hostPid = currentHost(paths).record!.pid;
 	assert.ok(status().includes(`cp-parent: attached (host pid ${hostPid}, parent pid ${pid})`), status());
@@ -143,5 +146,11 @@ test("S26: a real operator starts from no host, refreshes attached status after 
 	assert.match(JSON.stringify(stopped.result), /stopped/, JSON.stringify(stopped.result));
 	await child.waitFor((r) => child.records().indexOf(r) >= beforeStop && r.type === "agent_settled", 20_000);
 	await waitFor(() => status().slice(before), (text) => text.includes("cp-parent: not attached"), { timeoutMs: 15_000, what: "stop clears attached status" });
+	// The reply above wrote the parent session, so a stop+start resumes it and says so.
+	const beforeRestart = child.records().length;
+	await child.prompt("Start the parent again.");
+	const restarted = await child.waitFor((r) => child.records().indexOf(r) >= beforeRestart && r.type === "tool_execution_end" && r.toolName === "cp_parent", 30_000);
+	assert.match(JSON.stringify(restarted.result), /started resumed pid=\d+/, JSON.stringify(restarted.result));
+	await child.waitFor((r) => child.records().indexOf(r) >= beforeRestart && r.type === "agent_settled", 20_000);
 	assert.equal(provider.remaining("s26-status-operator"), 0);
 });

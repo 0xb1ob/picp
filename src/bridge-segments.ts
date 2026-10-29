@@ -4,8 +4,35 @@
  * text answer — closes a segment. At that point each landed send gets its
  * reply and the parent's own text since the last segment relays as a wake.
  */
+import type { BridgeRelay } from "./cp-bridge.ts";
+import type { ModelCallError } from "./failures.ts";
 import { markSpan } from "./parent-outbox.ts";
-import type { LandedTurn } from "./parent-delivery.ts";
+import type { LandedMark, LandedTurn } from "./parent-delivery.ts";
+import type { EnvelopeSummary } from "./relay-scope.ts";
+
+export interface TurnBuf {
+	texts: string[];
+	stale: boolean;
+	jobId?: string;
+	jobIds: string[];
+	assistantCount: number;
+	/** Set/cleared by each assistant message_end; only the LAST one survives. */
+	error?: ModelCallError;
+	/** Sends whose marker landed in this run. */
+	landed: LandedMark[];
+	answers: number[];
+	/** Refused cp_escalate calls, relayed at settle unless a later call in this run succeeds. */
+	refused: BridgeRelay[];
+	/** Accepted cp-envelope wake-ups seen this run (issue #2); appended verbatim to the wake relay. */
+	envelopes: EnvelopeSummary[];
+	/** Segment cursor (bridge-segments.ts): `texts` before it already relayed; jobs stamped since the last wake relay. */
+	relayed: number;
+	segJobIds: string[];
+	/** `idleNextKey` of a run whose only tool call was an idle cp_next; null once anything else happened. */
+	idleKey?: string | null;
+}
+
+export const freshTurn = (): TurnBuf => ({ texts: [], stale: false, jobIds: [], assistantCount: 0, landed: [], answers: [], refused: [], envelopes: [], relayed: 0, segJobIds: [] });
 
 const UNCLEAN_STOPS: readonly string[] = ["error", "aborted", "length"];
 

@@ -77,7 +77,7 @@ for (const stops of [true, false]) {
 		const elapsed = Date.now() - before;
 		assert.ok(refusals >= 3, "start retried instead of returning the first refusal");
 		if (stops) {
-			assert.match(result.content[0]!.text, /started pid=/);
+			assert.match(result.content[0]!.text, /started (clean|resumed) pid=/);
 			assert.equal(isPidAlive(old.hostPid), false);
 			assert.equal(isPidAlive(started.pid), false);
 			assert.equal(currentHost(paths).gen, generation + 1, "only one successor host");

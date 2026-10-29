@@ -4,11 +4,13 @@
  * would open a fresh session under a dangling name); and a spawn whose
  * `getState` reports an existing file records that file — the spawned path
  * included — so the next start reopens the session that actually holds the
- * transcript. Session jsonl is never deleted or rewritten here.
+ * transcript. Session jsonl is only renamed (archived) here, never deleted or rewritten.
  */
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, renameSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { LAYOUT } from "./contracts.ts";
+import { CpBridgeError } from "./cp-bridge-error.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { DEFAULT_REQUEST_TIMEOUT_MS, type WorkerProcess, type WorkerState } from "./worker-process.ts";
 
@@ -49,6 +51,44 @@ export function existingSavedSession(saved: string | undefined, log: (line: stri
 	if (saved === undefined || existsSync(saved)) return saved;
 	log(`parent host ${process.pid}: saved parent session ${saved} is missing; not reopening it`);
 	return undefined;
+}
+
+export interface ParentSessionChoice {
+	sessionFile: string;
+	start: "clean" | "resumed";
+	archivedFile?: string;
+	/** The saved session that was never written (pi persists only after a reply): nothing to resume. */
+	missing?: string;
+}
+export type ParentStartResult = { already: boolean; pid?: number } & Pick<ParentSessionChoice, "sessionFile"> & Partial<ParentSessionChoice>;
+
+/**
+ * The session a start opens and whether it resumes. `fresh` archives the file it would resume (rename, never delete),
+ * then records the clean path before any spawn; a failed archive throws with nothing started.
+ */
+export function chooseParentSession(options: { home: string; explicit?: string; saved?: string; fresh?: boolean; model?: string }): ParentSessionChoice {
+	const fallback = join(options.home, LAYOUT.sessions, "cp-parent.jsonl");
+	const kept = options.explicit === undefined ? existingSavedSession(options.saved) : undefined;
+	const missing = options.explicit === undefined && options.saved !== undefined && kept === undefined ? { missing: options.saved } : {};
+	const resumable = options.explicit ?? kept ?? fallback;
+	if (!options.fresh) return { sessionFile: resumable, start: existsSync(resumable) ? "resumed" : "clean", ...missing };
+	const sessionFile = options.explicit ?? fallback;
+	let archivedFile: string | undefined;
+	for (const file of new Set([resumable, sessionFile])) {
+		if (!existsSync(file)) continue;
+		try { const archived = archiveSessionFile(file); archivedFile ??= archived; }
+		catch (error) { throw new CpBridgeError(`clean start refused: could not archive ${file}: ${(error as Error).message}; nothing started, the session is untouched`); }
+	}
+	try { atomicWriteJson(parentControlFile(options.home), { sessionFile, model: options.model }); }
+	catch (error) { throw new CpBridgeError(`clean start refused: archived ${archivedFile ?? "nothing"}, but ${parentControlFile(options.home)} was not written: ${(error as Error).message}`); }
+	return { sessionFile, start: "clean", ...(archivedFile ? { archivedFile } : {}), ...missing };
+}
+
+/** Renames a parent session to `cp-parent-<ms>-<uuid8>.jsonl` beside it; returns the archive path. */
+export function archiveSessionFile(file: string): string {
+	const archived = join(dirname(file), `cp-parent-${Date.now()}-${randomUUID().slice(0, 8)}.jsonl`);
+	renameSync(file, archived);
+	return archived;
 }
 
 /** After `getState`: the reported session file, when it exists, becomes the control record — the spawned path too, which repairs a dangling saved one. A saved model is kept; a missing file is logged and the old record kept. Never throws into the spawn. */

@@ -87,7 +87,7 @@ for (const [mode, name] of [
 			const startAt = operator.records().length;
 			await operator.prompt("Start the parent.");
 			const started = await operator.waitFor((row) => operator.records().indexOf(row) >= startAt && row.type === "tool_execution_end" && row.toolName === "cp_parent", 20_000);
-			assert.match(JSON.stringify(started.result), /started pid=/);
+			assert.match(JSON.stringify(started.result), /started (clean|resumed) pid=/);
 			await operator.waitFor((row) => operator.records().indexOf(row) >= startAt && row.type === "agent_settled", 20_000);
 			const before = operator.records().length;
 			await operator.prompt("Stop the parent.");
@@ -280,7 +280,7 @@ test("S26: cp_parent drain freeze runs /cp-drain 120 freeze in the real parent: 
 		return operator.records().slice(before).filter((r) => r.type === "tool_execution_end" && r.toolName === "cp_parent").map((r) => JSON.stringify(r.result));
 	};
 	await turn("Prepare to manage the parent.");
-	assert.match((await turn("Start the parent.")).join(""), /started pid=/);
+	assert.match((await turn("Start the parent.")).join(""), /started (clean|resumed) pid=/);
 	await turn("Have the parent dispatch both jobs.");
 	for (const job of jobs) await waitFor(() => provider.requests(job.name).length, (n) => n > 0, { timeoutMs: 30_000, what: `${job.id} mid-turn` });
 	const reply = (await turn("Freeze the fleet.")).join("");

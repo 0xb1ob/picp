@@ -12,7 +12,7 @@ import { acquireParentLock } from "../../src/parent-lock.ts";
 import { parentFile, parentRow } from "../../src/viewer/sessions.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MockProvider, REPO_ROOT, type ScriptStep, startRpc, waitFor } from "../harness/index.ts";
 
-type StartOptions = { model?: string; modelExplicit?: boolean; home?: string; thinking?: ThinkingLevel };
+type StartOptions = { model?: string; modelExplicit?: boolean; home?: string; thinking?: ThinkingLevel; fresh?: boolean };
 
 /** One mock provider whose scripts are all parent models; every bridge started here is stopped after the test. */
 async function fixture(t: TestContext, scripts: Record<string, ScriptStep[]>, parentJson?: string, existing?: string) {
@@ -41,7 +41,7 @@ async function fixture(t: TestContext, scripts: Record<string, ScriptStep[]>, pa
 		bridge: () => { const bridge = new CpBridge(); bridges.push(bridge); bridge.onRelay((relay) => { relays.push(relay); }); return bridge; },
 		start: async (bridge: CpBridge, options: StartOptions = {}, sleeps: number[] = []) => bridge.start({
 			home: options.home ?? home.path, mode: "multi", model: options.model ?? first, ...(options.modelExplicit ? { modelExplicit: true } : {}),
-			...(options.thinking ? { thinking: options.thinking } : {}),
+			...(options.thinking ? { thinking: options.thinking } : {}), ...(options.fresh ? { fresh: true } : {}),
 			cwd: options.home ?? home.path, commandPostExtension: COMMAND_POST_EXTENSION, outerRetrySleep: async (ms) => { sleeps.push(ms); },
 		}),
 		bodies: (name: string) => provider.requests(name).map((request) => JSON.stringify(request.body)),
@@ -149,10 +149,12 @@ test("P9h-bridge-relaunch: a killed parent relaunches its same session once and 
 	const rotated = await bridge.rotate();
 	assert.notEqual(rotated.sessionFile, started.sessionFile);
 	assert.equal(bridge.status().pid, pid, "rotation keeps the running parent");
+	assert.equal(bridge.status().sessionFileOnDisk, false, "pi writes the rotated session only once the parent replies");
 	assert.ok(rotated.archivedFile.includes("cp-parent-"));
 	assert.ok(readFileSync(rotated.archivedFile, "utf8").includes('"type":"session"'));
 	const delivered = await bridge.send("P9H after rotation");
 	assert.equal(bridge.status().sends.find((send) => send.id === delivered.send_id)?.level, "owner_observed");
+	assert.equal(bridge.status().sessionFileOnDisk, true, "the reply wrote the rotated session");
 	assert.equal(f.bodies("p9h-relaunch").at(-1)!.split("P9H operator order.").length - 1, 1, "the edited orders reach the rotated session once");
 	assert.equal(readFileSync(orders, "utf8"), "# Standing orders\n\nP9H operator order.\n", "operator edits are never reseeded");
 	const viewer = { home: f.home, stateDir: join(f.home, LAYOUT.state) };
@@ -162,6 +164,28 @@ test("P9h-bridge-relaunch: a killed parent relaunches its same session once and 
 	await kill(rotated.sessionFile, 2);
 	await bridge.stop();
 	assert.equal((await f.start(f.bridge())).sessionFile, rotated.sessionFile, "a later start opens the rotated session");
+});
+
+test("P9h-bridge-clean: a first start is clean, a restart resumes, and fresh archives the session before starting clean", { timeout: 180_000 }, async (t) => {
+	const f = await fixture(t, { "p9h-clean": [{ kind: "text", text: "P9H clean." }] });
+	const bridge = f.bridge();
+	const first = await f.start(bridge);
+	assert.deepEqual([first.start, first.archivedFile, first.missing], ["clean", undefined, undefined]);
+	assert.equal((await bridge.send("P9H write the session")).reply, "P9H clean.");
+	await settled(bridge);
+	await bridge.stop();
+	const resumed = await f.start(bridge);
+	assert.deepEqual([resumed.start, resumed.sessionFile], ["resumed", first.sessionFile]);
+	await bridge.stop();
+	const before = readFileSync(first.sessionFile, "utf8");
+	const clean = await f.start(bridge, { fresh: true });
+	assert.deepEqual([clean.start, clean.sessionFile], ["clean", first.sessionFile]);
+	assert.ok(clean.archivedFile?.includes("cp-parent-"), JSON.stringify(clean));
+	assert.equal(readFileSync(clean.archivedFile!, "utf8"), before, "the archive holds the old session, header included");
+	assert.ok(before.includes('"type":"session"'));
+	assert.equal((await bridge.send("P9H after clean")).reply, "P9H clean.");
+	assert.notEqual(readFileSync(clean.sessionFile, "utf8").split("\n")[0], before.split("\n")[0], "the clean start wrote a new session");
+	assert.deepEqual(control(f.home), { sessionFile: first.sessionFile, model: f.models["p9h-clean"] });
 });
 
 test("P9h-bridge-model: start precedence, a live switch and rotation settle the parent model without a restart", { timeout: 240_000 }, async (t) => {
