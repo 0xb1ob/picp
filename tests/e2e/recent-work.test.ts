@@ -113,6 +113,25 @@ test("P1 recent work: an unreadable ledger is named while standing orders still 
 	assert.match(body, /Recent work unavailable: .*is not JSON/);
 });
 
+test("P1 recent work: a malformed envelope keeps the ledger row in both start contexts", { timeout: 180_000 }, async (t) => {
+	const s = await bench(t, "rw-malformed");
+	writeFile(join(s.home, LAYOUT.data, "standing-orders.md"), "- RW malformed order.\n");
+	writeFile(join(s.home, LAYOUT.jobsFile), JSON.stringify({ schema_version: 1, prefix: "cp", jobs: [{
+		id: "cp-rwbad", title: "RW malformed", status: "closed", labels: ["project:demo-app", "delivery:pr"], blocked_by: [], comments: [],
+		created_at: minutesAgo(30), updated_at: minutesAgo(1), closed_at: minutesAgo(1), close_reason: "landed RW malformed",
+	}] }));
+	await reported(s.home, "cp-rwbad", "demo-app");
+	writeFile(join(s.home, paths.envelopeFile("cp-rwbad")), '{"envelope": {"status": "done", "summ');
+	const before = s.requests().length;
+	await s.session("Say what recently happened.", []);
+	const parent = JSON.stringify(s.requests()[before]?.body);
+	const operator = JSON.stringify(await operatorRequest(t, s.home, "rw-malformed-operator"));
+	for (const [who, body] of [["parent", parent], ["operator", operator]] as const) {
+		assert.match(body, /RW malformed order/, who);
+		assert.match(digestOf(JSON.parse(body)) ?? "", /cp-rwbad "RW malformed" — closed \S+: landed RW malformed\nSource limited: 1 envelope\(s\) unreadable/, who);
+	}
+});
+
 test("P1 recent work: parent compaction and rotation refresh the digest once; an unchanged resume adds nothing", { timeout: 180_000 }, async (t) => {
 	const home = createScratchHome();
 	const provider = await MockProvider.start();

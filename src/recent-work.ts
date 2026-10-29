@@ -30,7 +30,7 @@ export function recentWorkContext(home: string, now: Date = new Date()): string 
 	const since = now.getTime() - RECENT_WORK_LIMITS.windowMs;
 	const closed = jobs
 		.filter((job) => job.status === "closed" && job.closed_at && Date.parse(job.closed_at) >= since)
-		.sort((a, b) => b.closed_at!.localeCompare(a.closed_at!) || a.id.localeCompare(b.id));
+		.sort((a, b) => Date.parse(b.closed_at!) - Date.parse(a.closed_at!) || a.id.localeCompare(b.id));
 	if (closed.length === 0) return undefined;
 
 	const warnings: string[] = [];
@@ -52,10 +52,11 @@ export function recentWorkContext(home: string, now: Date = new Date()): string 
 		let line = `- ${marker}${job.id} "${clip(job.title, 120)}" — closed ${job.closed_at}: ${clip(job.close_reason ?? "", 200)}`;
 		const record = fleet?.get(job.id);
 		if (!record?.reported_at) return line;
-		const envelope = join(home, paths.envelopeFile(job.id));
-		let size = Infinity;
-		try { size = statSync(envelope).size; } catch { /* counted as unreadable below */ }
-		const facts = size <= RECENT_WORK_LIMITS.envelopeBytes ? reportedFacts(home, record) : undefined;
+		let facts: ReturnType<typeof reportedFacts>;
+		try {
+			const size = statSync(join(home, paths.envelopeFile(job.id))).size;
+			facts = size <= RECENT_WORK_LIMITS.envelopeBytes ? reportedFacts(home, record) : undefined;
+		} catch { /* missing or malformed: counted as unreadable below */ }
 		if (!facts) {
 			unread += 1;
 			return line;
