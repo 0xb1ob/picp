@@ -11,7 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test, type TestContext } from "node:test";
 import { CheckpointStore } from "../../src/checkpoint.ts";
-import { LAYOUT, paths, PLAN_VIEW_IDLE_TIMEOUT_MS, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { createScratchHome } from "../harness/state.ts";
 import { startRpc } from "../harness/rpc.ts";
@@ -250,15 +250,16 @@ test("P11b-plan-tui: /cp-plan pages, searches and closes in a real Kitty TUI, re
 	assert.ok(tools.includes("cp_pipeline") && !tools.some((name) => /plan/i.test(name)), tools.join(","));
 });
 
-// P11b-plan-idle: an untouched pager closes itself after PLAN_VIEW_IDLE_TIMEOUT_MS. Typed into a pager still open,
+// P11b-plan-idle: an untouched pager closes itself after the idle timeout. Typed into a pager still open,
 // "/cp-plan cp-short" would start a search instead of opening the short plan.
-test("P11b-plan-idle: an idle /cp-plan pager closes itself and hands the editor back", { timeout: PLAN_VIEW_IDLE_TIMEOUT_MS + 180_000 }, async (t) => {
+test("P11b-plan-idle: an idle /cp-plan pager closes itself and hands the editor back", { timeout: 180_000 }, async (t) => {
 	const b = await tuiBench(t);
 	writeArtifact(b.home, "cp-research-1", "- the long-lived plan\n".repeat(200));
 	writeArtifact(b.home, "cp-short", "- only line\n");
-	const tui = startTui(t, b.home, b.env, b.args, { kitty: true });
+	const tui = startTui(t, b.home, { ...b.env, CP_PLAN_VIEW_IDLE_SECONDS: "10" }, b.args, { kitty: true });
 	await waitFor(tui.screen, has("───"), { timeoutMs: 60_000, what: "the TUI editor" });
 	await tui.run("/cp-plan cp-research-1 ", has("line 1-54/200 (top)"), "the pager");
-	await new Promise((done) => setTimeout(done, PLAN_VIEW_IDLE_TIMEOUT_MS + 5_000));
+	const mark = tui.screen().length;
+	await waitFor(() => tui.screen().slice(mark), has("───"), { timeoutMs: 60_000, what: "the editor redrawn by the idle close" });
 	await tui.run("/cp-plan cp-short ", has("cp-short — plan · 12 B · line 1/1 (all)"), "the editor after the idle close");
 });

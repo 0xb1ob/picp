@@ -1,6 +1,7 @@
 /** Per-home env overrides for the delivery-retry, suppression and merge-window timers (milliseconds). */
 import {
 	CI_WATCH_DELIVERY_RETRY_SECONDS,
+	PLAN_VIEW_IDLE_TIMEOUT_MS,
 	REVIEW_MERGE_WINDOW_MS,
 	VERDICT_DELIVERY_RETRY_SECONDS,
 	VERDICT_SUPPRESSED_RETRY_MAX_SECONDS,
@@ -33,4 +34,9 @@ export function reviewSuppressionMs(env: NodeJS.ProcessEnv = process.env): numbe
 /** `CP_REVIEW_MERGE_WINDOW_SECONDS` (default 30). */
 export function reviewMergeWindowMs(env: NodeJS.ProcessEnv = process.env): number {
 	return knobMs("CP_REVIEW_MERGE_WINDOW_SECONDS", REVIEW_MERGE_WINDOW_MS, env);
+}
+
+/** `CP_PLAN_VIEW_IDLE_SECONDS` (default 600): how long an untouched `/cp-plan` pager stays open. */
+export function planViewIdleTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+	return knobMs("CP_PLAN_VIEW_IDLE_SECONDS", PLAN_VIEW_IDLE_TIMEOUT_MS, env);
 }
