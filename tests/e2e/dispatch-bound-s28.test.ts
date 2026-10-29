@@ -30,7 +30,7 @@ for (const [kind, title] of [["queue", "S28: queued bound PR replays onto its ex
 		const routed = readRunEvents(f.home, job.id).findLast((event) => event.type === "routing_resolved")?.payload as Record<string, unknown>;
 		assert.deepEqual([routed.source, routed.model], ["override", worker], "the replayed request's model stays the explicit override");
 		assert.equal(git(record!.worktree, "branch", "--show-current"), "bound-head");
-		assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).entries, []);
+		await waitFor(() => JSON.parse(readFileSync(file, "utf8")).entries, (entries: unknown[]) => entries.length === 0, { timeoutMs: 30_000, what: "replayed entry removed" });
 	});
 }
 
