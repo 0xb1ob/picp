@@ -13,7 +13,6 @@ import { test, type TestContext } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { type ControlPorts, type DashboardControl, startDashboardControl } from "../../src/dashboard-control.ts";
 import { RESTART_UNSUPPORTED } from "../../src/dashboard-restart.ts";
-import { CLEAN_PREDATES } from "../../viewer-app/restart-control.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { tunnelConfigFile, tunnelRuntimeFile } from "../../src/service/daemon-tunnel-files.ts";
 import { deviceNotificationsFile } from "../../src/viewer/device-notification-files.ts";
@@ -1423,23 +1422,12 @@ test("P17-restart: Restart session says why it cannot, confirms, posts {restart:
 	assert.ok(reads.filter((p) => p.endsWith("?sends=0")).length >= 2 && reads.includes("/api/operator/control"), `each owner's sends: ${reads}`);
 	const based = tab.requests.slice(from).filter((r) => r.path.startsWith("/api/operator/control") && r.headers["x-cp-delta-base"]);
 	assert.ok(based.length > 0 && based.every((r) => r.status === 200), "re-reads name their held version and still land restarted");
-	// Restart clean against a launcher that predates `fresh`: the same file comes back, so the line says it resumed.
-	d.pin(new Date(Date.now() + 61_000).toISOString());
-	tab = await tab.reopen();
-	tab.click(await tab.find(".session-bar-restart .operator-restart-clean", (b) => !b.hasAttribute("disabled")));
-	tab.click(await tab.find(".session-bar-restart .operator-restart-confirm"));
-	await until(() => shutdowns, (n) => n === 2, "the clean stop");
-	assert.equal(posts(tab, RESTART).at(-1)!.body, '{"restart":true,"fresh":true}');
-	control.stop();
-	await tab.find(line, (p) => p.textContent === "Relaunching · no handoff found; the new session starts without one", 30_000);
-	control = await restartable();
-	await tab.find(line, (p) => p.textContent === CLEAN_PREDATES, 30_000);
 	// A session that never comes back fails once the tab's clock passes the 90 s wait, saying where to look.
-	d.pin(new Date(Date.now() + 122_000).toISOString());
+	d.pin(new Date(Date.now() + 61_000).toISOString());
 	tab = await tab.reopen();
 	tab.click(await tab.find(button, (b) => !b.hasAttribute("disabled")));
 	tab.click(await tab.find(".session-bar-restart .operator-restart-confirm"));
-	await until(() => shutdowns, (n) => n === 3, "the third stop");
+	await until(() => shutdowns, (n) => n === 2, "the second stop");
 	control.stop();
 	await tab.find(line, (p) => p.textContent === "Relaunching · resumes operator-session.jsonl", 30_000);
 	tab.shift(91_000);
@@ -1628,4 +1616,30 @@ test("P17-layout: the served stylesheet wraps the control blocks at 390 px and w
 	const narrow = all.filter((r) => /^\.(operator-restart-(button|line)|device-notice)/.test(r.selector));
 	assert.deepEqual(narrow.filter((r) => /white-space:nowrap|(^|[^-])width:\d/.test(r.body)).map((r) => r.selector), [], "no fixed width or nowrap: long names break");
 	assert.deepEqual(all.filter((r) => r.media === WIDE && /\.session-pinned/.test(r.selector) && /pointer-events:none|>h2>button>span/.test(r.selector + r.body)).length, 0, "at 1440 px the bar is a real toggle");
+});
+
+// Restart clean against a launcher that predates `fresh`: two taps post the clean body, the line names the missing
+// handoff while relaunching, and the same session file coming back says it resumed instead of claiming a clean session.
+test("P17-restart-clean: Restart clean confirms, posts fresh, and says when an older cp-operator resumed instead", { timeout: 120_000 }, async (t) => {
+	const d = await dashboard(t);
+	const file = join(d.stateDir, "operator-session.jsonl");
+	writeFileSync(file, "", { flag: "a" });
+	let shutdowns = 0;
+	const ports: ControlPorts = { inject: () => {}, abort: () => {}, isIdle: () => true, hasPendingMessages: () => false, sessionFile: () => file, shutdown: () => void (shutdowns += 1), relaunchFile: () => join(d.stateDir, "operator", "relaunch.json"), parentSends: () => ({ ids: [], error: null }) };
+	let control = await startDashboardControl({ stateDir: d.stateDir, ports, log: () => {} }) as DashboardControl;
+	t.after(() => control.stop());
+	const tab = await d.open(OPERATOR);
+	const line = ".session-bar-restart .operator-restart-line";
+	tab.click(await tab.find(".session-bar-restart .operator-restart-clean", (b) => !b.hasAttribute("disabled") && b.textContent === "Restart clean"));
+	const confirm = await tab.find(".session-bar-restart .operator-restart-confirm");
+	assert.equal(confirm.textContent, "Tap again to restart clean · starts a new session on the newest handoff");
+	assert.equal(posts(tab, RESTART).length, 0, "one tap sends nothing");
+	tab.click(confirm);
+	await until(() => shutdowns, (n) => n === 1, "the clean stop");
+	assert.deepEqual(posts(tab, RESTART).map((r) => r.body), ['{"restart":true,"fresh":true}']);
+	assert.equal(JSON.parse(readFileSync(join(d.stateDir, "operator", "relaunch.json"), "utf8")).fresh, true);
+	control.stop();
+	await tab.find(line, (p) => p.textContent === "Relaunching · no handoff found; the new session starts without one", 30_000);
+	control = await startDashboardControl({ stateDir: d.stateDir, ports, log: () => {} }) as DashboardControl;
+	await tab.find(line, (p) => p.textContent === "resumed: this cp-operator predates clean restart; restart it once by hand", 30_000);
 });
