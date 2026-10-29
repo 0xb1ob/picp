@@ -1,0 +1,1 @@
+- CI test shards now start their files longest-first through `scripts/test-shards.ts run` (the coverage guard and hermetic env kept), and the S28 bound-PR replay tests close the parent pi before stack teardown.

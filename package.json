@@ -33,7 +33,7 @@
 		"doctor:preflight": "node scripts/install-tools.ts --dry-run",
 		"push:init": "node scripts/push-init.ts",
 		"test": "npm run typecheck && node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/test-file-guard.ts --test-reporter-destination=stdout \"tests/**/*.test.ts\"",
-		"test:shard": "files=$(node scripts/test-shards.ts files \"$CP_TEST_SHARD\") && test -n \"$files\" && node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/test-file-guard.ts --test-reporter-destination=stdout $files",
+		"test:shard": "node --import ./tests/harness/hermetic-env.ts scripts/test-shards.ts run \"$CP_TEST_SHARD\"",
 		"check:shards": "node scripts/test-shards.ts check",
 		"test:one": "node --import ./tests/harness/hermetic-env.ts --test --test-concurrency=3 --test-timeout=300000 --test-force-exit",
 		"eval": "node scripts/eval.ts",

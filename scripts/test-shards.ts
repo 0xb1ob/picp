@@ -1,10 +1,13 @@
 /**
- * Duration-balanced test sharding: greedy longest-first over scripts/test-timings.json.
- * `files <n>` lists shard n; `check` verifies every test file is in exactly one shard (untimed files weigh the median);
- * `gen <spec-log>` rewrites the table from a CI run's spec reporter output.
+ * Duration-balanced sharding (greedy longest-first over scripts/test-timings.json): `files <n>` lists shard n, `run <n>`
+ * runs it heaviest file first, `check` verifies the partition (untimed weigh the median), `gen <spec-log>` rewrites it.
  */
 import { globSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { run } from "node:test";
+import { spec } from "node:test/reporters";
 import { fileURLToPath } from "node:url";
+import TestFileGuard from "./test-file-guard.ts";
 
 export const SHARDS = 8;
 const TABLE = fileURLToPath(new URL("./test-timings.json", import.meta.url));
@@ -29,6 +32,13 @@ export function assignShards(files: readonly string[], timings: Record<string, n
 	return shards.map((s) => s.files.sort());
 }
 
+/** The node CLI runs files alphabetically; starting the heaviest first keeps a late-sorting big file off the tail. */
+export function startOrder(files: readonly string[], timings: Record<string, number>): string[] {
+	const med = median(Object.values(timings).filter((v) => v > 0));
+	const weight = (f: string) => timings[f] ?? med;
+	return [...files].sort((a, b) => weight(b) - weight(a) || a.localeCompare(b));
+}
+
 function loadTable(): Record<string, number> {
 	try {
 		return JSON.parse(readFileSync(TABLE, "utf8"));
@@ -50,14 +60,27 @@ export function timingsFromSpecLog(log: string, sources: Record<string, string>)
 	return out;
 }
 
+function shardFiles(arg: string | undefined, table: Record<string, number>): string[] {
+	const i = Number(arg);
+	if (!Number.isInteger(i) || i < 1 || i > SHARDS) throw new Error(`shard must be 1..${SHARDS}, got ${arg}`);
+	const list = assignShards(discover(), table)[i - 1]!;
+	if (list.length === 0) throw new Error(`shard ${i} is empty`);
+	return list;
+}
+
 if (import.meta.main) {
 	const [cmd, arg] = process.argv.slice(2);
 	if (cmd === "files") {
-		const i = Number(arg);
-		if (!Number.isInteger(i) || i < 1 || i > SHARDS) throw new Error(`shard must be 1..${SHARDS}, got ${arg}`);
-		const list = assignShards(discover(), loadTable())[i - 1]!;
-		if (list.length === 0) throw new Error(`shard ${i} is empty`);
-		console.log(list.join("\n"));
+		console.log(shardFiles(arg, loadTable()).join("\n"));
+	} else if (cmd === "run") {
+		const table = loadTable();
+		const list = startOrder(shardFiles(arg, table), table);
+		const stream = run({ files: list.map((f) => resolve(f)), concurrency: 3, timeout: 300_000, forceExit: true });
+		stream.on("test:fail", () => {
+			process.exitCode = 1;
+		});
+		stream.pipe(new spec()).pipe(process.stdout);
+		stream.pipe(new TestFileGuard(undefined, list)).pipe(process.stdout);
 	} else if (cmd === "check") {
 		const all = discover();
 		const table = loadTable();
@@ -86,7 +109,7 @@ if (import.meta.main) {
 		for (const f of files) if (!t[f]) t[f] = prior[f] === 0 ? 0 : Math.round(med);
 		writeFileSync(TABLE, `${JSON.stringify(Object.fromEntries(Object.entries(t).sort()), null, "\t")}\n`);
 	} else {
-		console.error(`usage: test-shards.ts files <1..${SHARDS}> | check | gen <spec-log>`);
+		console.error(`usage: test-shards.ts files <1..${SHARDS}> | run <1..${SHARDS}> | check | gen <spec-log>`);
 		process.exit(2);
 	}
 }
