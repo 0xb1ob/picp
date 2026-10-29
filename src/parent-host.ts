@@ -38,11 +38,11 @@ import { type BridgeRelay, CpBridge, CpBridgeError, type ParentStartOptions } fr
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile } from "./operator-outbox.ts";
 import { OperatorAsks } from "./operator-asks.ts";
 import { EscalationStore } from "./escalation.ts";
-import type { DrainCause } from "./drain.ts";
+import { type DrainCause, restartSafety } from "./drain.ts";
 import { EscalationRelayLedger, escalationRelayLedgerFile } from "./escalation-backstop.ts";
 import { runEscalationRelayWatch } from "./escalation-relay-watch.ts";
 import { SINGLE_MODE_REMOVED } from "./mode.ts";
-import { isPidAlive } from "./fleet.ts";
+import { FleetStore, isPidAlive } from "./fleet.ts";
 import { deliverableRelay } from "./relay-scope.ts";
 import type { ParentSendDelegation } from "./parent-outbox.ts";
 import { readParentLock } from "./parent-lock.ts";
@@ -305,6 +305,7 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 	}, HOST_RELAY_TICK_MS);
 	relayTick.unref();
 	let queue: Promise<unknown> = Promise.resolve();
+	const gate = () => restartSafety(home, () => new FleetStore({ home }).list());
 	let stopping = false;
 	const reads: Record<string, (args: unknown[]) => unknown> = {
 		status: () => bridge.status(),
@@ -313,6 +314,7 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 		// Outside the queue: a drain waits minutes, and sends must still reach the parent meanwhile.
 		drain: (args) => bridge.drain(typeof args[0] === "number" ? args[0] : undefined, (args[1] ?? undefined) as DrainCause | undefined),
 		drainCancel: () => bridge.drainCancel(),
+		restartGate: () => gate(),
 	};
 	const queued: Record<string, (args: unknown[]) => Promise<unknown>> = {
 		observe: async (args) => bridge.observe(args[0]),
@@ -323,6 +325,16 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 		version: () => bridge.diagnostic("version"),
 		compact: (args) => bridge.compact(args[0] as string | undefined),
 		rotate: () => bridge.rotate(),
+		// Gated here, inside the queue: the authoritative refusal. Never stops the host; queued sends are kept.
+		restart: async (args) => {
+			const safety = gate();
+			if (!safety.safe) throw new CpBridgeError(`not safe to restart: ${safety.reason}`);
+			const options = bridge.startOptions();
+			if (!options) throw new CpBridgeError("parent was never started on this host; use cp_parent start");
+			try { await bridge.stop({}); } catch (error) { throw new CpBridgeError(`stop: ${(error as Error).message}`); }
+			try { return await bridge.start({ ...options, fresh: (args[0] as { fresh?: unknown } | undefined)?.fresh === true, home, mode }); }
+			catch (error) { throw new CpBridgeError(`parent stopped; start failed: ${(error as Error).message}; the parent is down — cp_parent start or dashboard Restart retries`); }
+		},
 		model: (args) => bridge.model(String(args[0])),
 		stop: async (args) => {
 			const options = args[0] ?? {};

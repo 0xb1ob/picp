@@ -73,14 +73,19 @@ export function chooseParentSession(options: { home: string; explicit?: string; 
 	const resumable = options.explicit ?? kept ?? fallback;
 	if (!options.fresh) return { sessionFile: resumable, start: existsSync(resumable) ? "resumed" : "clean", ...missing };
 	const sessionFile = options.explicit ?? fallback;
-	let archivedFile: string | undefined;
+	const archived: string[] = [];
 	for (const file of new Set([resumable, sessionFile])) {
 		if (!existsSync(file)) continue;
-		try { const archived = archiveSessionFile(file); archivedFile ??= archived; }
-		catch (error) { throw new CpBridgeError(`clean start refused: could not archive ${file}: ${(error as Error).message}; nothing started, the session is untouched`); }
+		try { archived.push(archiveSessionFile(file)); }
+		catch (error) {
+			const done = archived.length ? `already archived ${archived.join(", ")}` : "the session is untouched";
+			throw new CpBridgeError(`clean start refused: could not archive ${file}: ${(error as Error).message}; nothing started, ${done}`);
+		}
+		console.error(`parent host ${process.pid}: clean start archived ${file} to ${archived.at(-1)}`);
 	}
+	const archivedFile = archived[0];
 	try { atomicWriteJson(parentControlFile(options.home), { sessionFile, model: options.model }); }
-	catch (error) { throw new CpBridgeError(`clean start refused: archived ${archivedFile ?? "nothing"}, but ${parentControlFile(options.home)} was not written: ${(error as Error).message}`); }
+	catch (error) { throw new CpBridgeError(`clean start refused: archived ${archived.join(", ") || "nothing"}, but ${parentControlFile(options.home)} was not written: ${(error as Error).message}`); }
 	return { sessionFile, start: "clean", ...(archivedFile ? { archivedFile } : {}), ...missing };
 }
 

@@ -1244,8 +1244,10 @@ not yet written (after a rotation, until the parent replies): the path is where 
 **Idle wake dedupe.** A parent run whose only tool call was a `cp_next` with nothing to act on (every grant or run
 `wait`/`paused`/`no_mandate`, nothing ready, no escalation, warning or escalation-blocked job) relays its wake once
 per identical answer: `state/parent-idle-wake.json` keeps the last relayed key (grant ids, status, action kind and
-reason, lined-up job ids) for 24 h, an identical one is journaled `idle_wake_deduped` in `state/bridge-retry.jsonl`
-instead of relayed, and any other relayed wake clears the file (`src/idle-wake.ts`). An unreadable file never
+reason with its standalone counts and ISO times masked, digits inside ids kept, lined-up job ids) for 24 h, an
+identical one is journaled `idle_wake_deduped` in
+`state/bridge-retry.jsonl` instead of relayed, and any other relayed parent-turn wake clears the file
+(`src/idle-wake.ts`); a model-error wake and direct wakes (a drain outcome, a landing relay) leave it. An unreadable file never
 suppresses. **Operator pauses in `cp_next`.** A grant paused by the operator (`pause_reason: "operator"`) is never
 named in the `cp_next` text: other grants collapse to `N grant(s) paused by the operator — nothing to do`, and a
 primary one reads `a grant paused by the operator: …`. Cap pauses still name their id and the action they need.
@@ -6602,6 +6604,36 @@ reason, in order:
 `GET /api/operator/control` carries `restart: {supported, blockers, reason}` (the same checks, no journal line) and
 `session_started_at` (the record's `started_at`, so the page tells the relaunched session from the old one); a status
 without `restart` reads unsupported.
+
+**Restart the CP parent** (`POST /api/parent/restart`, [`src/viewer/parent-restart.ts`](../src/viewer/parent-restart.ts)
+→ the bridge's `parent_restart` op, [`src/parent-restart.ts`](../src/parent-restart.ts) → the parent host's queued
+`restart` op, [`src/parent-host.ts`](../src/parent-host.ts)). The CP parent view (phone ⋯ sheet, desktop ⋮ menu) offers
+**Restart parent** (resume) and **Restart parent clean** (archives the session it would resume, as `cp_parent start
+fresh:true`), each a two-tap confirm, both disabled with `parent_restart.reason` while the gate is closed. The gate is
+`restartSafety` (`src/drain.ts`, the text `cp_parent stop`/`rotate` print): open only while `state/drain.json` is
+`drained`; the next started parent consumes the drain, so a second restart needs a new `cp_parent drain`. The page is
+advisory; the bridge reads the host's `restartGate` and the host re-checks it inside its queue, the authoritative refusal.
+
+| Check | Refusal |
+|---|---|
+| the shared chain (`guarded`), as for Restart session | kind `parent_restart` |
+| body is exactly `{"restart": "resume"}` or `{"restart": "clean"}` | 400 |
+| a live session record | 409 `{state: "offline"}` |
+| `x-cp-control-token` equals the record's `csrf` | 403 |
+| an older bridge answers `unknown op parent_restart` | 409 `unsupported: …` |
+| the bridge: control on (403), no restart already running (409 `a parent restart is running`), the host gate (409 `not safe to restart: <reason>`) | `{state: "refused", error}` |
+| — | 202 `{id, state: "restarting", mode}` |
+
+There is no per-viewer window: the bridge refuses a second restart while one runs, and a finished one consumed the
+drain. The bridge journals `request` (`kind`/`deliver` `parent_restart`, `text` the mode), then `restarting`, then
+one outcome when the host answers: `restarted` (`restarted clean|resumed pid=… session=…[ (archived …)]`, with
+`; warning: operator target not updated: …` when the restart succeeded but the operator target could not record the
+new pid), `refused` (the host's re-check) or `failed` (`stop: …`, or `parent stopped; start failed: …; the parent is
+down`: the host stays up, queued sends are kept and the drain stays `drained`, so a retry is allowed). A host that has
+not answered within 300 s (`CP_PARENT_RESTART_TIMEOUT_MS`) ends it `failed: no answer from the parent host …` and frees
+the running latch; the host's late answer still replaces `last`. `GET /api/operator/control` carries
+`parent_restart: {safe, reason, last}`, `last` the latest outcome line. `cp_parent restart [fresh]` runs the same host
+op from the operator session and prints that line.
 
 **The handshake and the marker.** `cp-operator` gives every pi it starts `CP_OPERATOR_RELAUNCH_FILE` =
 `state/operator/relaunch.json` of its home (cleared, never inherited, when no home resolves); its presence is the

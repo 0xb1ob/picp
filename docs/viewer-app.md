@@ -69,7 +69,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Search | Shell dialog (f7g.7), available from every screen |
 | Version | Shell ⋮ menu row (phone and desktop) and the Sessions top bar; `GET /api/version` |
 | Web Push | `/sw.js`, `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`, `/api/push`, `POST\|DELETE /api/push/subscription` |
-| Dashboard control | `GET /api/operator/control` (status + this session's CSRF token), `POST /api/operator/message` and `POST /api/operator/restart` (only under `--require-tailnet`) |
+| Dashboard control | `GET /api/operator/control` (status + this session's CSRF token), `POST /api/operator/message`, `POST /api/operator/restart` and `POST /api/parent/restart` (only under `--require-tailnet`) |
 | Schedule controls | `GET /api/schedules/control` (status + schedule token), `GET /api/schedules/policy?schedule_id=` (pure policy preview), `POST /api/schedules/request` (only under `--require-tailnet`; journaled for the parent) |
 | Answers | `GET /api/answers/control` (status + this viewer's answer token), `POST /api/answers/ack` (only under `--require-tailnet`; appends one `acked` line, no session or parent) |
 | Skills | `GET /api/skills` (only under `--require-tailnet`; read-only): the pi skills directly under `<agentDir>/skills` and `<home>/skills` with a valid `SKILL.md`, as `{name, description ≤ 200 chars, source}` plus a capped `skipped` `{name, reason}` list and an `omitted` count; never a SKILL.md body or a directory path (`src/viewer/skill-catalog.ts`) |
@@ -442,6 +442,13 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   inside the viewport (`max-width: calc(100vw - 16px)`, theme tokens for light and dark), stacking the
   button and the line in one column. The shell owns one `useControl` for the menu (`ShellContext.control`);
   the transcript composer stays held while that restart runs.
+- `components/ParentRestart.tsx`: on the CP parent view (phone ⋯ sheet, desktop ⋮ menu), **Restart parent** and
+  **Restart parent clean**, each a two-tap confirm (`Tap again to restart the parent · resumes its session` /
+  `… clean · archives its session`) posting `POST /api/parent/restart` `{"restart": "resume"|"clean"}`. Both are
+  disabled while `parent_restart.safe` is false, with `parent_restart.reason` (the drain gate, e.g. `warning: not
+  drained; …`) as their title and line; the server refuses the same (409). The line then reads `Restarting the
+  parent…` until the status's `parent_restart.last` (`restarted clean|resumed pid=…`, `refused: …`, `failed: …`)
+  changes. It reads the shell's `useControl` status; `.session-menu .parent-restart` caps it at 360 px in the menu.
 - `use-control.ts` (route-level, in `app.tsx`) reads `/api/operator/control` on
   mount and on every refresh of the transcript, and sends with the
   `x-cp-control-token` header; `control.ts` holds the fetch and the one-line texts.

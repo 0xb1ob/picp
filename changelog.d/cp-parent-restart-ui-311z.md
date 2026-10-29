@@ -1,0 +1,1 @@
+- The dashboard's CP parent view gets **Restart parent** and **Restart parent clean** (`POST /api/parent/restart`, `cp_parent restart [fresh]`): drain-gated by `restartSafety`, refused 409 by the parent host while undrained, disabled with the reason in the page, and the outcome says `restarted clean|resumed` (or `failed: …` with the parent down and the drain kept for a retry).

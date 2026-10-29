@@ -1,4 +1,4 @@
-import type { OperatorRestartResponse } from "../src/viewer/api-types.ts";
+import type { OperatorRestartResponse, ParentRestartResponse } from "../src/viewer/api-types.ts";
 import type { ControlStatus } from "./control.ts";
 
 /** Restart session (cp-aqxl): the session stops itself after its checks; its cp-operator relaunches the same session file. */
@@ -54,3 +54,23 @@ export function restartLine(status: ControlStatus | null | undefined, restarting
 
 const cleanTarget = (handoff: string | null | undefined): string =>
  handoff ? `a new session on ${handoff}` : "no handoff found; the new session starts without one";
+
+export const PARENT_RESTART_URL = "/api/parent/restart";
+/** `POST /api/parent/restart` `{"restart": "resume"|"clean"}` with the CSRF token: the 202, or the refusal. */
+export async function restartParent(fetch: Fetch, token: string, mode: "resume" | "clean"): Promise<ParentRestartResponse | {error: string; status: number}> {
+ try {
+  const response = await fetch(PARENT_RESTART_URL, {method: "POST", headers: {"content-type": "application/json", "x-cp-control-token": token}, body: JSON.stringify({restart: mode})});
+  const body = await response.json().catch(() => ({})) as Partial<ParentRestartResponse> & {error?: unknown};
+  if (response.status === 202 && body.state === "restarting" && typeof body.id === "string") return {state: "restarting", id: body.id, mode};
+  return {error: typeof body.error === "string" ? body.error : `HTTP ${response.status}`, status: response.status};
+ } catch {
+  return {error: "Could not reach this home", status: 0};
+ }
+}
+
+/** Why the parent cannot restart now (advisory: the parent host decides), or null when the drain gate is open. */
+export function parentRestartDisabled(status: ControlStatus | null | undefined): string | null {
+ if (!status || "error" in status || !status.enabled || !status.running || !status.token) return "no operator session is running";
+ if (!status.parent_restart) return "this operator session's cp-bridge predates parent restart; restart the operator session once";
+ return status.parent_restart.safe ? null : status.parent_restart.reason;
+}

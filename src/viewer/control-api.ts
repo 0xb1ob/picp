@@ -52,7 +52,7 @@ import {
 	readScheduleControl, SCHEDULE_CONTROL_MAX_AGE_MS, SCHEDULE_CONTROL_MAX_PENDING, SCHEDULE_CONTROL_OPS, scheduleControlFile, type ScheduleControlOp, type ScheduleControlRequest,
 } from "./control-files.ts";
 import { heldId, INBOX_TOKEN, operatorSession, parentHolder, readInbox } from "./control-inbox.ts";
-import { restartStatus } from "./restart-status.ts";
+import { parentRestartStatus, restartStatus } from "./restart-status.ts";
 import { allowedOrigins, bindOrigin, discardAllowance, readBody } from "./push-api.ts";
 import { readScheduleFile, SCHEDULE_ID } from "./schedule-core.ts";
 import { accessOf, canControl, canRead } from "./access.ts";
@@ -268,6 +268,7 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 	const reply = await controlRequest(record.record, "status", {});
 	if (!reply.ok) return { status: 200, body: { ...base, enabled: true, reason: reply.error.replace(/^session not running/, "Session not running") } };
 	const status = reply.result as Partial<ControlStatusResponse>;
+	const parent = parentRestartStatus(status.parent_restart);
 	return {
 		status: 200,
 		body: {
@@ -277,6 +278,7 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 			restart: restartStatus(status.restart), session_started_at: record.record.started_at,
 			...(status.images === true ? { images: true } : {}),
 			...(status.files === true ? { files: true } : {}),
+			...(parent ? { parent_restart: parent } : {}),
 		} satisfies ControlStatusResponse,
 	};
 }

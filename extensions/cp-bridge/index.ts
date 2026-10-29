@@ -39,6 +39,7 @@ import { ParentSendDelegationSchema, parentSendFile, sendIdOfMessage } from "../
 import { recordOperatorSession } from "../../src/operator-session-log.ts";
 import { type DashboardControl, startDashboardControl, userMessageContent } from "../../src/dashboard-control.ts";
 import { relaunchPorts } from "../../src/operator-relaunch.ts";
+import { parentRestartPorts, restartedLine } from "../../src/parent-restart.ts";
 import { settingsPorts } from "../../src/settings-control.ts";
 import { startVersionLine, type VersionLine } from "./version-line.ts";
 
@@ -235,6 +236,8 @@ export default function (pi: ExtensionAPI): void {
 			return `warning: drain state and live workers unknown (${(error as Error).message})`;
 		}
 	};
+	const parentRestart = parentRestartPorts({ home: () => { const t = connectedTarget ?? resolveOperatorTarget(); configureLayout(t.mode, t.home); return t.home; },
+		client: () => ensureClient(undefined, undefined, true), restarted: (r) => { if (connectedTarget?.parentPid && r.pid) saveOperatorTarget(connectedTarget = { ...connectedTarget, parentPid: r.pid }); } });
 	const ensureClient = async (home?: string, mode?: Mode, readOnly = false): Promise<ParentHostClient> => {
 		if (client && home && mode && connectedTarget) assertOperatorTarget(connectedTarget, { home, mode, hostPid: 0, parentPid: 0 });
 		if (!client) {
@@ -506,6 +509,7 @@ export default function (pi: ExtensionAPI): void {
 					sessionFile: () => sessionCtx?.sessionManager?.getSessionFile() ?? process.env.PI_SESSION_FILE,
 					...relaunchPorts({ target: () => target, ctx: () => sessionCtx, whenIdle: compaction.whenIdle }),
 					...settingsPorts({ target: () => target }),
+					parentRestart: parentRestart.parentRestart, parentRestartState: parentRestart.parentRestartState,
 				},
 			});
 			if (started.state === "listening") {
@@ -609,14 +613,14 @@ export default function (pi: ExtensionAPI): void {
 			"Every relay to the human starts with its bracketed project, e.g. [demo-app] cp-78vu: \u2026; split an update spanning several projects into one section per project.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "doctor", "version", "drain", "drain_cancel", "compact", "rotate", "model", "stop"], { description: "manage or diagnose the parent" }),
+			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "doctor", "version", "drain", "drain_cancel", "compact", "rotate", "model", "restart", "stop"], { description: "manage or diagnose the parent" }),
 			timeout_s: Type.Optional(Type.Number({ minimum: 0, maximum: DRAIN_MAX_TIMEOUT_S, description: `drain: seconds to wait for live workers to settle (default ${DRAIN_DEFAULT_TIMEOUT_S})` })),
 			freeze: Type.Optional(Type.Boolean({ description: "drain: also steer each mid-turn implementer to commit and push its WIP and end its turn without reporting (before a usage pause)" })),
 			home: Type.Optional(Type.String({ description: "start: command-post home path" })),
 			mode: Type.Optional(StringEnum([...MODES], { description: "start: multi (the only mode; may be omitted)" })),
 			model: Type.Optional(Type.String({ description: "start or model: provider/model-id" })),
 			thinking: Type.Optional(StringEnum([...THINKING_LEVELS], { description: "start: optional thinking level" })),
-			fresh: Type.Optional(Type.Boolean({ description: "start: archive the session it would resume, then start clean" })),
+			fresh: Type.Optional(Type.Boolean({ description: "start or restart: archive the session it would resume, then start clean" })),
 			ask: Type.Optional(OperatorAskInputSchema),
 			id: Type.Optional(Type.String({ description: "ask_answer or ask_withdraw: ask id" })),
 			answer: Type.Optional(Type.String({ description: "ask_answer: human's verbatim words; answer: the full answer text" })),
@@ -757,6 +761,7 @@ export default function (pi: ExtensionAPI): void {
 					if (!params.model) throw new CpBridgeError("cp_parent model needs provider/model-id");
 					requireAvailableParentModel(params.model, ctx?.modelRegistry ? registryProbe(ctx.modelRegistry) : ALWAYS_AVAILABLE);
 				}
+				if (params.action === "restart") { const r = await parentRestart.restart(params.fresh ? "clean" : "resume"); return textResult(restartedLine(r), { ...r }); }
 				if (["status", "compact", "rotate", "model"].includes(params.action)) {
 					const activeClient = await ensureClient();
 					const notice = params.action === "rotate" ? killNotice() : undefined;

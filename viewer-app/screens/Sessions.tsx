@@ -22,6 +22,7 @@ import { PageHeader } from "../components/PageHeader.tsx";
 import { VersionBadge } from "../components/VersionBadge.tsx";
 import { badgeView } from "../use-version.ts";
 import { RestartSession, restartShown } from "../components/RestartSession.tsx";
+import { ParentRestart } from "../components/ParentRestart.tsx";
 import { type ControlView, controlReady } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
 import { QuickReplies } from "../components/QuickReplies.tsx";
@@ -237,6 +238,7 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
     {composer && controlReady(control.status) && control.status.session_file && <p class="session-bar-file">Delivers to <code>{control.status.session_file}</code></p>}
     {shell.version && <div class="shell-more-version"><span>Viewer</span><VersionBadge state={shell.version} labelled/></div>}
     {shell.control && restartShown(shell.control) && <div class="session-bar-restart"><RestartSession control={shell.control}/></div>}
+    {data.selected === "parent" && <div class="session-bar-restart"><ParentRestart status={shell.control?.status}/></div>}
    </div>
   </details>
  </header>;
@@ -321,9 +323,11 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const replies=replyTo && <QuickReplies key={`replies-${replyTo.id}`} ask={replyTo} control={control}/>;
  const replyAt=replies ? shown.findLast(e=>!isOwn(e) && (isBubble(e) || e.kind === "ask"))?.id : undefined;
  const state=headerState(data,control?.status,history);
+ const shell=useContext(ShellContext);
  return <div class="sessions">
   {/* The ⋮ menu carries the transcript file and the tool-call toggle; the phone's ⋯ sheet keeps its own. */}
-  <PageHeader title="Chats" menu={(files.length > 0 && data.transcript === true) || toolCalls > 0 ? <div class="session-menu">
+  <PageHeader title="Chats" menu={(files.length > 0 && data.transcript === true) || toolCalls > 0 || data.selected === "parent" ? <div class="session-menu">
+   {data.selected === "parent" && <ParentRestart status={shell.control?.status}/>}
    {/* Audit P4 #27: the decision log lives on the Decisions page; a refused transcript still falls back silently. */}
    {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
    {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} aria-label={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} title={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} onClick={toggleTools}>Tools {toolCalls}</button>}

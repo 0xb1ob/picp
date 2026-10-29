@@ -872,3 +872,43 @@ test("P18-shell-menu-clean: Restart clean in the ⋮ menu confirms, then posts e
 	assert.deepEqual(posts().map((r) => r.body), ['{"restart":true,"fresh":true}']);
 	assert.equal(JSON.parse(readFileSync(join(v.stateDir, "operator", "relaunch.json"), "utf8")).fresh, true);
 });
+
+test("P18-parent-restart: the CP parent view's two restart buttons show the gate's reason, then confirm and post the mode", { timeout: 120_000 }, async (t) => {
+	const v = await served(t, () => {}, { tailnet: true });
+	const reason = `warning: not drained; this kills 3 live worker(s) (cp_parent drain first to let them settle) ${"long-".repeat(30)}`;
+	let gate = { safe: false, reason, last: null as string | null };
+	const modes: string[] = [];
+	const ports: ControlPorts = { inject: () => {}, abort: () => {}, isIdle: () => true, hasPendingMessages: () => false, sessionFile: () => undefined,
+		parentRestartState: () => gate, parentRestart: async (mode) => { modes.push(mode); return { done: Promise.resolve(`restarted ${mode === "clean" ? "clean" : "resumed"} pid=2 session=x`) }; } };
+	const control = await startDashboardControl({ stateDir: v.stateDir, ports, log: () => {} }) as DashboardControl;
+	t.after(() => control.stop());
+	const sheet = ".session-bar-sheet .parent-restart", panel = ".shell-more-panel .parent-restart";
+	const openMenu = (tab: Tab) => { const menu = tab.$(".shell-main details.shell-more")! as Element & { open: boolean }; menu.open = true; menu.dispatchEvent(new tab.window.Event("toggle")); };
+	// B3 on a 390 px phone sheet and a 1440 px desktop ⋮ panel: both disabled, title and visible line the reason.
+	const phone = await v.open("#sessions?view=parent", false, `${sheet} .operator-restart-button`);
+	const desk = await v.open("#sessions?view=parent", true, ".page-header");
+	openMenu(desk);
+	for (const [tab, scope] of [[phone, sheet], [desk, panel]] as const) {
+		const buttons = await until(() => tab.$$(`${scope} .operator-restart-button`), (list) => list.length === 2 && list.every((b) => b.getAttribute("title") === reason), `${scope} disabled with the reason`);
+		assert.deepEqual(texts(buttons), ["Restart parent", "Restart parent clean"]);
+		assert.ok(buttons.every((b) => b.hasAttribute("disabled")));
+		assert.equal(tab.$(`${scope} .operator-restart-line`)!.textContent, reason);
+	}
+	assert.match(v.rule(".operator-restart-line"), /overflow-wrap:anywhere/, "a long reason wraps at either width");
+	assert.match(v.rule(".session-menu .parent-restart"), /max-width:360px/);
+	assert.ok(!desk.$(".session-bar .parent-restart") || v.rule(".session-bar", WIDE) === "display:none", "one restart control per width");
+	// B1: once drained the buttons enable; one tap asks, the second posts exactly the mode.
+	gate = { safe: true, reason: "drained at now: safe to restart", last: null };
+	const posts = (tab: Tab) => tab.requests.filter((r) => r.method === "POST" && r.path === "/api/parent/restart").map((r) => r.body);
+	for (const [mode, wide, scope, label] of [["resume", true, panel, "Restart parent"], ["clean", false, sheet, "Restart parent clean"]] as const) {
+		const tab = await v.open("#sessions?view=parent", wide, wide ? ".page-header" : `${sheet} .operator-restart-button`);
+		if (wide) openMenu(tab);
+		tab.click(await tab.find(`${scope} .operator-restart-button`, (b) => !b.hasAttribute("disabled") && b.textContent === label));
+		const confirm = await tab.find(`${scope} .operator-restart-confirm`);
+		assert.match(confirm.textContent!, mode === "clean" ? /archives its session/ : /resumes its session/);
+		assert.deepEqual(posts(tab), [], "one tap sends nothing");
+		tab.click(confirm);
+		await until(() => modes.length, (n) => n > 0 && modes.at(-1) === mode, `the second tap restarts (${mode})`);
+		assert.deepEqual(posts(tab), [JSON.stringify({ restart: mode })]);
+	}
+});

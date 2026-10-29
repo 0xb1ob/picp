@@ -501,22 +501,28 @@ export function formatDrain(record: DrainRecord, home: string): string {
 
 /** What `cp_parent stop`/`rotate` says before it kills the parent's workers. */
 export function restartNotice(home: string, records: () => readonly FleetRecord[]): string {
+	return restartSafety(home, records).reason;
+}
+
+/** The one safe-to-restart truth: safe only once drained; `reason` is what stop, rotate and the dashboard show. */
+export function restartSafety(home: string, records: () => readonly FleetRecord[]): { safe: boolean; reason: string } {
 	let drain: DrainRecord | undefined;
 	try {
 		drain = readDrain(home);
 	} catch (error) {
-		return `warning: ${(error as Error).message}`;
+		return { safe: false, reason: `warning: ${(error as Error).message}` };
 	}
-	if (drain?.state === "drained") return `drained at ${drain.finished_at ?? drain.started_at}: safe to restart; ${drain.jobs.length} job(s) recorded in ${drainFile(home)}`;
+	if (drain?.state === "drained") return { safe: true, reason: `drained at ${drain.finished_at ?? drain.started_at}: safe to restart; ${drain.jobs.length} job(s) recorded in ${drainFile(home)}` };
 	let live: number | string;
 	try {
 		live = liveWorkerJobs(records()).length;
 	} catch (error) {
 		live = `an unknown number of (${(error as Error).message})`;
 	}
-	if (drain?.state === "timeout") return `warning: the drain timed out with ${drain.survivors?.join(", ") ?? "survivors"} still busy; this kills ${live} live worker(s)`;
-	if (drain) return `warning: a drain started at ${drain.started_at} has not finished; this kills ${live} live worker(s)`;
-	return `warning: not drained; this kills ${live} live worker(s) (cp_parent drain first to let them settle)`;
+	const reason = drain?.state === "timeout" ? `warning: the drain timed out with ${drain.survivors?.join(", ") ?? "survivors"} still busy; this kills ${live} live worker(s)`
+		: drain ? `warning: a drain started at ${drain.started_at} has not finished; this kills ${live} live worker(s)`
+		: `warning: not drained; this kills ${live} live worker(s) (cp_parent drain first to let them settle)`;
+	return { safe: false, reason };
 }
 
 /** Jobs with a live worker or script pid in flight (held PR workers included): what a restart kills. */

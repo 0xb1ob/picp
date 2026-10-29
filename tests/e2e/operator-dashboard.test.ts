@@ -475,8 +475,9 @@ test("P9e-control: the real bridge's dashboard control delivers, holds, steers, 
 	assert.deepEqual(readOperatorSessions(join(s.home, LAYOUT.sessions)).map((row) => row.file), [sessionFile], "the fresh session file is listed for the Full transcript");
 	const status = await op.send("status", {});
 	assert.ok(status.ok);
-	assert.deepEqual({ ...(status.result as Json), recent: undefined, restart: undefined },
-		{ busy: false, pending: false, session_file: sessionFile.split("/").pop(), recent: undefined, restart: undefined, images: true, files: true, remote_provenance: REMOTE_PROVENANCE_VERSION });
+	assert.deepEqual({ ...(status.result as Json), recent: undefined, restart: undefined, parent_restart: undefined },
+		{ busy: false, pending: false, session_file: sessionFile.split("/").pop(), recent: undefined, restart: undefined, parent_restart: undefined, images: true, files: true, remote_provenance: REMOTE_PROVENANCE_VERSION });
+	assert.deepEqual({ ...(status.result as Json).parent_restart as Json, reason: undefined }, { safe: false, reason: undefined, last: null }, "undrained");
 
 	const hello = await op.send("send", { kind: "message", text: "  hello there  ", peer: "100.64.0.9" });
 	assert.equal(hello.ok && (hello.result as Json).state, "delivered", JSON.stringify(hello));
@@ -633,7 +634,9 @@ test("P9e-control-target: a selected.json naming a missing per-home target still
 	const op = await operator(t, s.home, "p9e-control-target", [{ kind: "text", text: "ok" }], {}, (piHome) => writeFileSync(
 		join(piHome, "command-post", "operator-targets", "selected.json"), JSON.stringify({ home: join(s.home, "gone"), mode: "multi" })));
 	assert.deepEqual(operatorSession(s.state).running, true, "the dashboard's offline check sees a running session");
-	assert.ok((await op.send("status", {})).ok, "the control API answers status");
+	const status = await op.send("status", {});
+	assert.ok(status.ok, "the control API answers status");
+	assert.equal(((status.result as Json).parent_restart as Json).safe, false, "an unresolvable target reads parent restart unsafe");
 });
 
 // P9e-control-inbox (cp-daemon P3): messages typed while no session ran arrive once, oldest first, as one user

@@ -339,8 +339,8 @@ export function parseDashboardText(text: string): { body: string; id: string; as
 
 export const isAskId = (value: unknown): value is string => typeof value === "string" && ASK_ID_RE.test(value);
 
-export type ControlKind = "message" | "answer" | "abort" | "restart";
-export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restart";
+export type ControlKind = "message" | "answer" | "abort" | "restart" | "parent_restart";
+export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restart" | "parent_restart";
 
 /**
  * One audit line. The bridge writes request/outcome; the viewer writes refused (after the --require-tailnet guard)
@@ -348,7 +348,7 @@ export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restar
  */
 export type ControlAuditLine =
 	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; session_started_at?: string; session_file?: string; remote?: RemoteDevice }
-	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting" | "dropped" | "cancelled"; reason: string | null }
+	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting" | "restarted" | "dropped" | "cancelled"; reason: string | null }
 	/** cp-y43c: a dashboard-queued message's text replaced before its handoff; every revision stays in the journal. */
 	| { type: "edited"; by: "bridge"; id: string; at: string; peer: string | null; text: string; remote?: RemoteDevice }
 	| { type: "outcome"; by: "viewer"; id: string; at: string; peer: string | null; state: "dropped"; reason: string }
