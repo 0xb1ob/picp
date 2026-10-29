@@ -552,9 +552,9 @@ test("P14e-update-nohost: a respawned host that died at once is verified, never 
 	b.plan({ onStop: [{ path: host.record(2), text: JSON.stringify(respawned) }, { path: host.stopped, text: JSON.stringify(marker) }] });
 	advanceBase(b.repo, "n.txt", "n\n");
 	const state = await b.run();
-	assert.ok(["rolled_back", "rollback_failed"].includes(state?.last_result ?? ""), last(b));
-	assert.ok(b.hostCalls().includes("host stop [{\"by\":\"update\"}]"), "the live gen 1 host was stopped");
-	assert.doesNotMatch(state?.detail ?? "", /viewer verified only/);
+	assert.equal(state?.last_result, "rollback_failed", last(b));
+	assert.match(state?.detail ?? "", /^not healthy within 120s: connect ENOENT .*gone\.sock; after the rollback: not healthy/, last(b));
+	assert.deepEqual(b.hostCalls(), ["host drain [600]", "host stop [{\"by\":\"update\"}]"], "the live gen 1 host was stopped");
 });
 
 test("P14e-update-nohost: a dead host with an older update marker is applied without a host stop", { timeout: 300_000 }, async (t) => {
