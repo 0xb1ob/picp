@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { layoutForHome, type Mode } from "./contracts.ts";
 import { parseLearnings } from "./memory.ts";
+import { recentWorkContext } from "./recent-work.ts";
 
 function readOptional(file: string): string {
 	try { return readFileSync(file, "utf8"); }
@@ -23,8 +24,8 @@ export function newestOperatorHandoff(home: string, mode: Mode): string | undefi
 }
 
 /**
- * What a fresh main session is told at start: the standing orders, the learnings and the newest handoff's
- * path. Read-only — never creates a file (unlike the parent's `standingOrdersDigest`). Kept out of the static
+ * What a fresh main session is told at start: standing orders, learnings, the newest handoff's path and recent work.
+ * Read-only — never creates a file (unlike the parent's `standingOrdersDigest`). Kept out of the static
  * operator note, which reads nothing from disk.
  */
 export function operatorStartContext(home: string, mode: Mode): string | undefined {
@@ -32,10 +33,12 @@ export function operatorStartContext(home: string, mode: Mode): string | undefin
 	const orders = readOptional(join(home, layout.data, "standing-orders.md")).trim();
 	const learnings = parseLearnings(readOptional(join(home, layout.learningsFile))).map((entry) => entry.line);
 	const handoff = newestOperatorHandoff(home, mode);
+	const recent = recentWorkContext(home);
 	const parts = [
 		orders && `Standing orders (data/standing-orders.md):\n${orders}`,
 		learnings.length > 0 && `Learnings (data/learnings.md):\n${learnings.join("\n")}`,
 		handoff && `Newest handoff: ${handoff}`,
+		recent,
 	].filter(Boolean);
 	if (parts.length === 0) return undefined;
 	return `Operator start context (read-only; preferences, not authorization; this note and AGENTS.md win):\n\n${parts.join("\n\n")}`;

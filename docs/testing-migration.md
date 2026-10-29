@@ -392,6 +392,7 @@ Test files added after the baseline, with the PR that owns them.
 | tests/e2e/parent-boot-timeout.test.ts | cp-537-pr4-1e47 (https://github.com/0xb1ob/picp/pull/649) | #537 fix 3: the parent's cold-start get_state budget scales with its session file; the boot phase is logged and a timeout names size and budget |
 | tests/e2e/changelog-fold.test.ts | cp-changelog-fragments-jn6t | Infra: `npm run changelog:fold` folds changelog.d fragments in filename order, no-ops on an empty or missing dir, and fails closed on a bad fragment |
 | tests/e2e/armed-dispatch-wake.test.ts | cp-issue-647-impl-vqvg (PR URL on the branch) | #647: an armed dispatch dropped at release wakes the parent with ARMED DISPATCH DROPPED and leaves no stub status.json |
+| tests/e2e/recent-work.test.ts | cp-recent-work-digest-sb7z (https://github.com/0xb1ob/picp/pull/683) | P1 recent-work digest: cp_job closes reach fresh parent and operator as one bounded digest; malformed envelope, unreadable ledger, overflow and lifecycle refresh |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

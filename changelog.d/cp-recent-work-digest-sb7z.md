@@ -1,0 +1,1 @@
+- Recent-work digest: fresh parent sessions (start, rotation, compaction) and fresh operator sessions now get a hidden, read-only summary of jobs closed in the last 7 days, grouped by project (3 per project, 10 projects, 8 KiB), with accepted envelope headlines and links, dropped jobs marked and no report bodies; an unchanged digest is not re-injected on resume. Migration: none.
