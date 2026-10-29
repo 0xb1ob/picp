@@ -43,7 +43,7 @@ export interface SessionEntry {
  project?: string | null;
  /** Operator tier, a reply with two or more `[project]` sections (issue 589); `text` stays the unsplit original. */
  segments?: {text: string; projects: string[]; source: "header" | "id" | "reply" | "general"}[];
- /** Operator tier: a reply the header guard folded (issue 589), `superseded` by a re-send or a `NO-PROJECT` `hidden` one. */
+ /** Operator tier: a reply the header guard folded (issue 589), `superseded` by a re-send or `NO-PROJECT` `hidden`. */
  collapsed?: "superseded" | "hidden";
  /** A cp-bridge notice parsed off its first line (slice F). */
  bridge?: {kind:string; job:string|null; id:string|null; receipt:string|null} | null;

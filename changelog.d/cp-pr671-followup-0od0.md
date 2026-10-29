@@ -1,0 +1,1 @@
+- #671 follow-up: the malformed-sidecar e2e now reuses a live split's key, so it fails if the `split` shape check is dropped; one over-long `api-types.ts` docstring line shortened. Migration: none. Rollback: revert.
