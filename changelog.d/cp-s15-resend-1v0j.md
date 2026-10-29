@@ -1,0 +1,1 @@
+- A withheld `cp-verdict` whose suppression lifetime ends is now journaled as `verdict_wakeup_expired` on the job's run log, and the S15 retry e2e waits on that drop instead of a wall-clock cutoff that could trail the product's own clock under load.

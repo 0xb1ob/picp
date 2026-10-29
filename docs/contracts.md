@@ -4398,7 +4398,8 @@ them.
 - **Delivery.** `verdict_wakeup_sent` and `verdict_wakeup_delivered` are
   journaled on the job's run log; arrival is confirmed from the message in the
   parent's context, never from the send. An unconfirmed wake-up is resent once
-  after `VERDICT_DELIVERY_RETRY_SECONDS`.
+  after `VERDICT_DELIVERY_RETRY_SECONDS`. A withheld wake-up stays eligible until
+  `CP_REVIEW_SUPPRESSION_SECONDS` past its first send; its drop is journaled as `verdict_wakeup_expired`.
   A verdict for any other surface on a `done`/`failed` job is withheld as history.
 
 ### The three rules that make it a pipeline and not a script

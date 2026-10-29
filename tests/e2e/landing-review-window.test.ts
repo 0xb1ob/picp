@@ -69,8 +69,12 @@ test("landing S15 retry: real parent delivery confirms, retries withheld verdict
 	assert.equal((sends(0)[1]!.payload as { resend: boolean }).resend, true);
 	assert.ok(sends(1).length >= 7, "withheld copies outlast the old five-copy bound without consuming the successful resend");
 	const cutoff = Date.parse(sends(2)[0]!.ts) + 32_000;
-	await waitFor(() => Date.now(), (now) => now >= cutoff, { timeoutMs: 40_000, what: "configured suppression lifetime expires" });
-	assert.ok(sends(2).every((event) => Date.parse(event.ts) < cutoff), "permanent suppression stops at its lifetime bound");
+	// The product drops the key on its own clock, which may trail the first send's log stamp; wait on that drop.
+	const expiry = await waitFor(() => events(2).find((event) => event.type === "verdict_wakeup_expired"), Boolean, { timeoutMs: 40_000, what: "configured suppression lifetime expires" });
+	const expiredAt = events(2).findIndex((event) => event.type === "verdict_wakeup_expired");
+	assert.ok(events(2).every((event, at) => event.type !== "verdict_wakeup_sent" || at < expiredAt), "permanent suppression stops at its lifetime bound");
+	assert.ok(Date.parse(expiry!.ts) >= cutoff, "suppression is never dropped before its configured lifetime");
+	assert.ok(Date.parse(expiry!.ts) < cutoff + 6_000, "suppression is dropped on the first tick past its configured lifetime");
 	assert.ok(Date.parse(sends(2).at(-1)!.ts) >= cutoff - 6_000, "suppressed attempts remain eligible until near the configured cutoff");
 	assert.ok(sends(2).length >= 7, "suppressed retries outlast the old five-copy bound");
 	const counts = jobs.map((_, n) => sends(n).length);
