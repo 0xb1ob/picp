@@ -277,6 +277,11 @@ export class CpBridge {
 		return () => this.#listeners.delete(listener);
 	}
 
+	/** The last start's options, a copy: the host `restart` op starts again with them. */
+	startOptions(): ParentStartOptions | undefined {
+		return this.#options && { ...this.#options };
+	}
+
 	async start(options: ParentStartOptions): Promise<ParentStartResult> {
 		if ((options.mode as string) !== "multi") throw new CpBridgeError((options.mode as string) === "single" ? SINGLE_MODE_REMOVED : `mode must be multi, got ${String(options.mode)}`);
 		if (!options.home.trim()) throw new CpBridgeError("home is required");

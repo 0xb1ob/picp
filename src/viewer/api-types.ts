@@ -85,6 +85,8 @@ export interface ControlStatusResponse {
  images?: boolean;
  /** Running only: text attachments via send_files (also accepts images). */
  files?: boolean;
+ /** Running only: the CP parent's restart gate (advisory; the parent host re-checks) and its last outcome line. */
+ parent_restart?: ParentRestartStatus;
 }
 /** `POST /api/operator/upload` stored an attachment: 201 with its upload id (the composer sends ids, never bytes). */
 export interface OperatorUploadResponse { id: string; mime: string; bytes: number; expires_at: string; url: string; name?: string }
@@ -94,6 +96,10 @@ export interface RestartStatus { supported: boolean; blockers: string[]; reason:
  * launcher resumes `session_file`. With `"fresh": true` (Restart clean) it starts a new session instead, and `handoff`
  * is the newest handoff's basename that session is pointed at, or null. */
 export interface OperatorRestartResponse { state: "restarting"; id: string; session_file: string | null; fresh?: true; handoff?: string | null }
+/** `last`: `restarted clean|resumed pid=… session=…`, `refused: …` or `failed: …`; null before any restart. */
+export interface ParentRestartStatus { safe: boolean; reason: string; last: string | null }
+/** `POST /api/parent/restart` accepted: the host restart runs; its outcome lands in `parent_restart.last`. */
+export interface ParentRestartResponse { state: "restarting"; id: string; mode: "resume" | "clean" }
 /** One `data/settings-audit.jsonl` line as the operator session returns it (src/settings-write.ts `SettingsAuditLine`). */
 export interface SettingsAuditRow { v: 1; type: "intent" | "applied" | "failed" | "recovered" | "refused"; id: string | null; at: string; [field: string]: unknown }
 /** `GET /api/settings`: read through the operator session; offline or unsupported is `snapshot: null`, never a projection. */

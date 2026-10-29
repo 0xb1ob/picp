@@ -470,6 +470,11 @@ not started by a relaunching `cp-operator` (no `CP_OPERATOR_RELAUNCH_FILE`) repo
 `cp-operator -c`, once. The page follows the restart (stopping → relaunching → restarted, by a new
 `session_started_at`) and blocks the composer meanwhile; after 90 s it says where to look.
 
+**Restart parent** / **Restart parent clean** on the CP parent view post `POST /api/parent/restart`
+`{"restart": "resume"|"clean"}` through the same guard chain; the operator bridge asks the parent host, which restarts
+the cp-parent (never itself) only while `state/drain.json` is `drained` and refuses 409 with the drain reason otherwise
+(docs/contracts.md, "Restart the CP parent"). Drain first: `cp_parent drain`.
+
 ## Stop, drain, restart
 
 - **Stopping the fleet stays `cp_parent drain` + `cp_parent stop`.** A

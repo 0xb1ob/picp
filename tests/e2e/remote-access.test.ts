@@ -447,7 +447,7 @@ test("P12-levels: both levels read every protected route with a sliding cookie a
 	assert.match(String(devices.trust), /trusted like your terminal/);
 
 	const json = async (cookie: string, extra: Record<string, string> = {}) => ({ cookie, origin: ORIGIN, "content-type": "application/json", "x-cp-control-token": await s.token(), ...extra });
-	for (const path of ["/api/operator/message", "/api/operator/start", "/api/operator/restart", "/api/operator/queue", "/api/operator/upload", "/api/schedules/request", "/api/answers/ack", "/api/settings/apply", "/api/settings/restore"]) {
+	for (const path of ["/api/operator/message", "/api/operator/start", "/api/operator/restart", "/api/parent/restart", "/api/operator/queue", "/api/operator/upload", "/api/schedules/request", "/api/answers/ack", "/api/settings/apply", "/api/settings/restore"]) {
 		const viewed = await s.r(path, { method: "POST", headers: await json(view.cookie), body: '{"kind":"message","text":"hi"}' });
 		assert.equal(viewed.status, 403, path);
 		assert.match(String(viewed.body.error), /View-only/);

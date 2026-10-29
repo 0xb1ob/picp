@@ -4,8 +4,9 @@
  *
  * Order, exact: the `request` line first (unwritable: 500, nothing else happens); the kill switch; the capability
  * (`relaunchFile`/`shutdown`/`parentSends` ports: cp-bridge started by a relaunching cp-operator); the blockers; the
- * session file absolute (and on disk, unless `fresh`: Restart clean); the 0600 relaunch marker (src/operator-relaunch.ts); outcome `restarting`;
- * then the caller writes the reply and only after that runs `after` (pi's own `ctx.shutdown()`).
+ * session file absolute (and on disk, unless `fresh`: Restart clean); the 0600 relaunch marker
+ * (src/operator-relaunch.ts); outcome `restarting`; then the caller writes the reply and only after that runs `after`
+ * (pi's own `ctx.shutdown()`).
  */
 
 import { existsSync } from "node:fs";

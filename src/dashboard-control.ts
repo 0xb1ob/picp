@@ -17,6 +17,7 @@
  *    (`injected` journaled first). `queue_edit` / `queue_cancel` change it until then (control-queue.ts);
  *  - `abort` → abort the running turn;
  *  - `restart` → Restart session (src/dashboard-restart.ts): checks, a relaunch marker, then pi's own shutdown.
+ *  - `parent_restart` → the CP parent's drain-gated host restart, resume or clean (src/parent-restart.ts).
  *  - `settings_get` / `settings_apply` → Settings (src/settings-control.ts), only with the `settings` port; they write
  *    no dashboard.jsonl line, their record is data/settings-audit.jsonl.
  * Every `send`/`abort` appends its `request` line to `state/operator/dashboard.jsonl` before anything happens;
@@ -30,6 +31,7 @@ import { createConnection, createServer, type Socket } from "node:net";
 import { basename, join, resolve } from "node:path";
 import { OperatorAsks } from "./operator-asks.ts";
 import { restartRequest, restartState } from "./dashboard-restart.ts";
+import { parentRestartRequest } from "./parent-restart.ts";
 import { appendControlAudit, appendInboxLine } from "./viewer/control-audit.ts";
 import {
 	CONTROL_PROTOCOL, CONTROL_TEXT_MAX, type ControlAuditLine, type ControlDeliver, type ControlKind, controlRecordFile, controlSocketFile,
@@ -77,6 +79,9 @@ export interface ControlPorts {
 	handoff?(): string | undefined;
 	/** Settings (src/settings-control.ts); absent: settings_get/settings_apply are unknown ops; their record is data/settings-audit.jsonl. */
 	settings?: { get(): unknown; apply(args: Record<string, unknown>): { status: number } };
+	/** Parent restart (src/parent-restart.ts); absent: `parent_restart` is an unknown op, and status omits it. */
+	parentRestart?(mode: "resume" | "clean"): Promise<{ refused: string } | { done: Promise<string> }>;
+	parentRestartState?(): { safe: boolean; reason: string; last: string | null };
 }
 
 export interface ControlOutcome { id: string; kind: ControlKind; state: string; at: string; reason: string | null; ask_id: string | null }
@@ -462,7 +467,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (frame.op === "hello") return { ok: true, result: { pid: process.pid, protocol: CONTROL_PROTOCOL } };
 		if (frame.op === "status") {
 			const file = ports.sessionFile();
-			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, ...(ports.prepareImage ? { images: true } : {}) } };
+			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, ...(ports.prepareImage ? { images: true } : {}), ...(ports.parentRestartState ? { parent_restart: ports.parentRestartState() } : {}) } };
 		}
 		if (frame.op === "send" || frame.op === "abort") return request(args, frame.op);
 		// A bridge without prepareImage answers `unknown op send_images`: the viewer says restart, never drops the images.
@@ -470,6 +475,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (frame.op === "send_files") return request(args, "send", true, true);
 		if (frame.op === "queue_edit" || frame.op === "queue_cancel") return queueRequest(args, frame.op);
 		if (frame.op === "restart") return restartRequest({ args, ports, stateDir, open, clicks, now, newId: newControlId, append, outcome });
+		if (frame.op === "parent_restart" && ports.parentRestart) return parentRestartRequest({ args, ports, stateDir, now, newId: newControlId, append, outcome });
 		if (frame.op === "settings_get" && ports.settings) return { ok: true, result: ports.settings.get() };
 		if (frame.op === "settings_apply" && ports.settings) return { ok: true, result: ports.settings.apply(args) };
 		return { ok: false, status: 400, error: `unknown op ${String(frame.op)}` };
