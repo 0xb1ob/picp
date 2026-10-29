@@ -1150,7 +1150,7 @@ test("cp_parent delegated send crosses the host socket and stamps the injected m
 	t.after(async () => { for (const close of shutdown) await close(); });
 	const tool = tools.get("cp_parent")!;
 	const started = await tool.execute("start", { action: "start", home: ctx.home, mode: "multi", model: "mock/parent" });
-	assert.match(started.content[0]!.text, /started pid=/);
+	assert.match(started.content[0]!.text, /started (clean|resumed) pid=/);
 	const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
 	process.env.PI_CODING_AGENT_DIR = scratch();
 	t.after(() => { if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldAgentDir; });
@@ -1191,10 +1191,10 @@ test("cp_parent starts again immediately after stopping the host", { timeout: 90
 		...extra,
 	});
 	// No mode: cp_parent start defaults to multi (cp-8knh).
-	assert.match((await invoke("start")).content[0]!.text, /started pid=/);
+	assert.match((await invoke("start")).content[0]!.text, /started (clean|resumed) pid=/);
 	assert.match((await invoke("stop")).content[0]!.text, /stopped code=0/);
 	// An explicit mode: "multi" is accepted unchanged.
-	assert.match((await invoke("start", { mode: "multi" })).content[0]!.text, /started pid=/);
+	assert.match((await invoke("start", { mode: "multi" })).content[0]!.text, /started (clean|resumed) pid=/);
 });
 
 test("cp_parent start wiring: data/parent.json model beats CP_PARENT_MODEL; an explicit model is sent as modelExplicit and beats the file", { timeout: 90_000 }, async (t) => {
@@ -1211,16 +1211,16 @@ test("cp_parent start wiring: data/parent.json model beats CP_PARENT_MODEL; an e
 	} as never);
 	const tool = tools.get("cp_parent")!;
 	const modelArg = () => { const argv = JSON.parse(lines(argvFile).at(-1)!) as string[]; return argv[argv.indexOf("--model") + 1]; };
-	assert.match((await tool.execute("call", { action: "start", home: ctx.home })).content[0]!.text, /started pid=/);
+	assert.match((await tool.execute("call", { action: "start", home: ctx.home })).content[0]!.text, /started (clean|resumed) pid=/);
 	assert.equal(modelArg(), "mock/file");
 	assert.match((await tool.execute("call", { action: "stop" })).content[0]!.text, /stopped code=0/);
 	rmSync(join(ctx.home, LAYOUT.sessions, "cp-parent-control.json"), { force: true });
-	assert.match((await tool.execute("call", { action: "start", home: ctx.home, model: "mock/explicit" })).content[0]!.text, /started pid=/);
+	assert.match((await tool.execute("call", { action: "start", home: ctx.home, model: "mock/explicit" })).content[0]!.text, /started (clean|resumed) pid=/);
 	assert.equal(modelArg(), "mock/explicit", "explicit beats the file (no saved control model in the way)");
 	assert.match((await tool.execute("call", { action: "stop" })).content[0]!.text, /stopped code=0/);
 	rmSync(join(ctx.home, LAYOUT.sessions, "cp-parent-control.json"), { force: true });
 	rmSync(join(ctx.home, LAYOUT.data, "parent.json"));
-	assert.match((await tool.execute("call", { action: "start", home: ctx.home })).content[0]!.text, /started pid=/);
+	assert.match((await tool.execute("call", { action: "start", home: ctx.home })).content[0]!.text, /started (clean|resumed) pid=/);
 	assert.equal(modelArg(), "mock/env", "no file: resolveParentModel (CP_PARENT_MODEL), as before");
 	assert.match((await tool.execute("call", { action: "stop" })).content[0]!.text, /stopped code=0/);
 });

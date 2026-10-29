@@ -164,6 +164,8 @@ test("S26: drained restarts relay an identical idle wake once and a changed cp_n
 	const deduped = () => (existsSync(journal) ? readFileSync(journal, "utf8").split("\n").filter((line) => line.includes('"idle_wake_deduped"')).length : 0);
 	const start = () => bridge.start({ home: home.path, mode: "multi", model, cwd: home.path, commandPostExtension: COMMAND_POST_EXTENSION });
 	const restart = async (relays: number, skipped: number) => {
+		// The restart notice id is the drain's second-precision started_at: two drains in one second share one wake.
+		await new Promise((resolve) => setTimeout(resolve, 1100));
 		for (let attempt = 0; ; attempt++) {
 			try { await bridge.drain(30); break; } catch (error) { if (attempt > 200) throw error; await new Promise((resolve) => setTimeout(resolve, 50)); }
 		}
