@@ -1,4 +1,4 @@
-/** Per-home env overrides for the delivery-retry, suppression and merge-window timers (milliseconds). */
+/** Per-home env overrides for the delivery-retry, suppression, merge-window and plan-view idle timers (ms). */
 import {
 	CI_WATCH_DELIVERY_RETRY_SECONDS,
 	PLAN_VIEW_IDLE_TIMEOUT_MS,
