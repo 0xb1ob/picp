@@ -425,6 +425,11 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   feature), or while it must wait (`not now: <blockers>`: busy, queued messages, an unseen dashboard
   message or answer click, a pending `cp_parent send`). One `POST /api/operator/restart`
   `{"restart": true}` with the `x-cp-control-token` header; then the status every 2 s for up to 90 s.
+  Beside it, `Restart clean` (two taps: `Tap again to restart clean · starts a new session on the newest handoff`)
+  posts `{"restart": true, "fresh": true}`: the session relaunches on a new session pointed at the newest handoff,
+  and the line reads `Relaunching · a new session on <handoff>` (or `no handoff found; the new session starts without
+  one`); when the same session file comes back, it reads `resumed: this cp-operator predates clean restart; restart
+  it once by hand`.
   The line reads `Restarting…` (the POST), `Stopping the session…` (the same session still serves:
   same `session_started_at`), `Relaunching · resumes <file>` (no session serves), `Operator session
   restarted · <file>` (a new session serves), `Refused: <reason>` (a 4xx: the viewer's or the

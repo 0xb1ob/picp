@@ -817,6 +817,27 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 	const next = await startDashboardControl({ stateDir: v.stateDir, ports, log: () => {} }) as DashboardControl;
 	t.after(() => next.stop());
 	assert.ok(await until(() => session.$(".shell-more-dot"), (dot) => dot === null, "restarted: the dot clears") === null);
+	// Restart clean (its own viewer: the first restart holds this one's 60 s window): a second two-tap button that posts
+	// `fresh` and says it starts a new session on the newest handoff.
+	const cleanViewer = await served(t, () => {}, { tailnet: true });
+	const cleanCalls: string[] = [];
+	const cleanControl = await startDashboardControl({ stateDir: cleanViewer.stateDir, ports: { ...ports, shutdown: () => void cleanCalls.push("shutdown"),
+		relaunchFile: () => join(cleanViewer.stateDir, "operator", "relaunch.json") }, log: () => {} }) as DashboardControl;
+	t.after(() => cleanControl.stop());
+	const cleanTab = await cleanViewer.open("#overview", true, ".overview-heading h1");
+	const cleanMenu = cleanTab.$(".shell-main details.shell-more")! as Element & { open: boolean };
+	cleanMenu.open = true;
+	cleanMenu.dispatchEvent(new cleanTab.window.Event("toggle"));
+	cleanTab.click(await cleanTab.find(".shell-more-panel .operator-restart-clean", (b) => !b.hasAttribute("disabled") && b.textContent === "Restart clean"));
+	const cleanConfirm = await cleanTab.find(".shell-more-panel .operator-restart-confirm");
+	assert.equal(cleanConfirm.textContent, "Tap again to restart clean · starts a new session on the newest handoff");
+	const cleanPosts = () => cleanTab.requests.filter((r) => r.method === "POST" && r.path === "/api/operator/restart");
+	assert.equal(cleanPosts().length, 0, "one tap sends nothing");
+	cleanTab.click(cleanConfirm);
+	await until(() => cleanCalls.length, (n) => n === 1, "the second tap restarts clean");
+	assert.deepEqual([cleanPosts().length, cleanPosts()[0]!.body], [1, '{"restart":true,"fresh":true}']);
+	assert.equal(JSON.parse(readFileSync(join(cleanViewer.stateDir, "operator", "relaunch.json"), "utf8")).fresh, true);
+	cleanControl.stop();
 
 	// A version alert puts the dot on ⋮ with no session, and Restart stays hidden.
 	const alert = await served(t, (put) => put(join(LAYOUT.state, "update.json"), { schema_version: 1, phase: "idle", last_result: "failed", last_run_at: iso(5), fetch_failures: 0 }));

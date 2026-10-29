@@ -13,6 +13,7 @@ import { test, type TestContext } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { type ControlPorts, type DashboardControl, startDashboardControl } from "../../src/dashboard-control.ts";
 import { RESTART_UNSUPPORTED } from "../../src/dashboard-restart.ts";
+import { CLEAN_PREDATES } from "../../viewer-app/restart-control.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { tunnelConfigFile, tunnelRuntimeFile } from "../../src/service/daemon-tunnel-files.ts";
 import { deviceNotificationsFile } from "../../src/viewer/device-notification-files.ts";
@@ -1422,12 +1423,23 @@ test("P17-restart: Restart session says why it cannot, confirms, posts {restart:
 	assert.ok(reads.filter((p) => p.endsWith("?sends=0")).length >= 2 && reads.includes("/api/operator/control"), `each owner's sends: ${reads}`);
 	const based = tab.requests.slice(from).filter((r) => r.path.startsWith("/api/operator/control") && r.headers["x-cp-delta-base"]);
 	assert.ok(based.length > 0 && based.every((r) => r.status === 200), "re-reads name their held version and still land restarted");
-	// A session that never comes back fails once the tab's clock passes the 90 s wait, saying where to look.
+	// Restart clean against a launcher that predates `fresh`: the same file comes back, so the line says it resumed.
 	d.pin(new Date(Date.now() + 61_000).toISOString());
+	tab = await tab.reopen();
+	tab.click(await tab.find(".session-bar-restart .operator-restart-clean", (b) => !b.hasAttribute("disabled")));
+	tab.click(await tab.find(".session-bar-restart .operator-restart-confirm"));
+	await until(() => shutdowns, (n) => n === 2, "the clean stop");
+	assert.equal(posts(tab, RESTART).at(-1)!.body, '{"restart":true,"fresh":true}');
+	control.stop();
+	await tab.find(line, (p) => p.textContent === "Relaunching · no handoff found; the new session starts without one", 30_000);
+	control = await restartable();
+	await tab.find(line, (p) => p.textContent === CLEAN_PREDATES, 30_000);
+	// A session that never comes back fails once the tab's clock passes the 90 s wait, saying where to look.
+	d.pin(new Date(Date.now() + 122_000).toISOString());
 	tab = await tab.reopen();
 	tab.click(await tab.find(button, (b) => !b.hasAttribute("disabled")));
 	tab.click(await tab.find(".session-bar-restart .operator-restart-confirm"));
-	await until(() => shutdowns, (n) => n === 2, "the second stop");
+	await until(() => shutdowns, (n) => n === 3, "the third stop");
 	control.stop();
 	await tab.find(line, (p) => p.textContent === "Relaunching · resumes operator-session.jsonl", 30_000);
 	tab.shift(91_000);
