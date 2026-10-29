@@ -15,6 +15,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { decodeKittyPrintable, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { PLAN_VIEW_IDLE_TIMEOUT_MS, PLAN_VIEW_MIN_ROWS, PLAN_VIEW_RESERVED_ROWS } from "../../src/contracts.ts";
+import { planViewIdleTimeoutMs } from "../../src/timer-knobs.ts";
 import {
 	findMatches,
 	formatBytes,
@@ -99,7 +100,7 @@ export async function openPlanViewer(ctx: PlanViewerCtx, target: PlanTarget, dep
 				renderLines: deps.renderLines,
 				rows,
 				...(deps.now ? { now: deps.now } : {}),
-				idleTimeoutMs: deps.idleTimeoutMs ?? PLAN_VIEW_IDLE_TIMEOUT_MS,
+				idleTimeoutMs: deps.idleTimeoutMs ?? planViewIdleTimeoutMs(),
 				// docs/tui.md §Using Components: a component that changes state outside the
 				// input path (the idle timer, a resize) must ask for a repaint itself. The
 				// input path already gets `requestImmediateRender` from TUI, so this is

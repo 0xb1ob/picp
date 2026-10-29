@@ -1,0 +1,1 @@
+- Added `CP_PLAN_VIEW_IDLE_SECONDS` to override the `/cp-plan` pager idle timeout (default stays 600 s); the idle e2e now takes about 10 s instead of 605 s.
