@@ -9,11 +9,12 @@ import { buildImage, dockerUnavailable, formatRun, runScenario, SCENARIOS } from
 
 const skip = process.env.CP_INSTALL_E2E === "1" ? false : "opt-in: CP_INSTALL_E2E=1 (CI's install-sandbox job) or npm run e2e:install";
 
-// Longest measured walls first, so three lanes finish together; SCENARIOS keeps the CLI's order.
+// Longest measured walls first, so the lanes finish together; SCENARIOS keeps the CLI's order. Three lanes timed out
+// pi's 15 s capability probe on the CI runner, so two.
 const LONGEST_FIRST = ["compat", "rerun", "recovery", "fresh", "node-floor", "login", "root", "onboarding", "prompt", "prerequisites"] as const;
 assert.deepEqual([...LONGEST_FIRST].sort(), [...SCENARIOS].sort());
 
-describe("installer sandbox", { skip, concurrency: 3 }, () => {
+describe("installer sandbox", { skip, concurrency: 2 }, () => {
 	before(async () => {
 		// A requested run without Docker fails: a silent skip here would be the only coverage going missing.
 		assert.equal(dockerUnavailable(), undefined);
