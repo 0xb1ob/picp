@@ -73,6 +73,8 @@ export interface ControlPorts {
 	shutdown?(): void;
 	relaunchFile?(): string | undefined;
 	parentSends?(): { ids: string[]; error: string | null };
+	/** Restart clean: the newest handoff the fresh session is pointed at; absent or undefined means none. */
+	handoff?(): string | undefined;
 	/** Settings (src/settings-control.ts); absent: settings_get/settings_apply are unknown ops; their record is data/settings-audit.jsonl. */
 	settings?: { get(): unknown; apply(args: Record<string, unknown>): { status: number } };
 }

@@ -17,6 +17,11 @@ function newestHandoff(dir: string): string | undefined {
 	return stamped.sort((a, b) => b.at - a.at)[0]?.file;
 }
 
+/** The handoff a fresh main session is pointed at (Restart clean names it too). */
+export function newestOperatorHandoff(home: string, mode: Mode): string | undefined {
+	return newestHandoff(join(home, layoutForHome(mode, home).operatorWorkspace, "handoffs"));
+}
+
 /**
  * What a fresh main session is told at start: the standing orders, the learnings and the newest handoff's
  * path. Read-only — never creates a file (unlike the parent's `standingOrdersDigest`). Kept out of the static
@@ -26,7 +31,7 @@ export function operatorStartContext(home: string, mode: Mode): string | undefin
 	const layout = layoutForHome(mode, home);
 	const orders = readOptional(join(home, layout.data, "standing-orders.md")).trim();
 	const learnings = parseLearnings(readOptional(join(home, layout.learningsFile))).map((entry) => entry.line);
-	const handoff = newestHandoff(join(home, layout.operatorWorkspace, "handoffs"));
+	const handoff = newestOperatorHandoff(home, mode);
 	const parts = [
 		orders && `Standing orders (data/standing-orders.md):\n${orders}`,
 		learnings.length > 0 && `Learnings (data/learnings.md):\n${learnings.join("\n")}`,

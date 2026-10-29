@@ -398,6 +398,31 @@ test("P13 native pipeline (#444): a failed in-code advance wakes the parent once
 	assert.equal(envelopeWakes(second, failed).length, 0, "a failed anchor is not re-woken on restart");
 });
 
+test("P13 native pipeline (#444): an advance that surfaces notifies the parent exactly once, with no envelope wake, and a restart does not repeat it", { timeout: 300_000 }, async (t) => {
+	const h = await schedulesHome(t);
+	const go = join(h.home, `go-${randomBytes(4).toString("hex")}`);
+	pipelineRoles(h, "surface-run", go);
+	const first = await runPipeline(h, "surface-run");
+	const research = anchorOf(h, "surface-run");
+	// A recorded policy escalate makes the planner's first advance end in `surface`, not in a gate.
+	const gate = join(h.home, paths.gateFile(research, 1));
+	mkdirSync(dirname(gate), { recursive: true });
+	writeFileSync(gate, JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: research, attempt: 1, verdict: "escalate", cause: "policy",
+		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["needs a human"], decided_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z") }));
+	writeFileSync(go, "");
+	await waitFor(() => wakes(first).length, (count) => count > 0, { timeoutMs: 120_000, what: "the surfaced advance's notice" });
+	await first.waitForSettled(30_000);
+	assert.equal(wakes(first).length, 1, "exactly one notice");
+	assert.match(JSON.stringify(wakes(first)[0]!.message), /This is yours now/);
+	assert.equal(envelopeWakes(first, research).length, 0, "the notice replaces the envelope wake");
+	assert.equal(gateStarts(h, research).length, 0, "no gate started");
+	await h.closeParents();
+
+	const second = await h.parent("P13: second process.", []);
+	await second.waitForSettled(30_000);
+	assert.deepEqual([wakes(second).length, envelopeWakes(second, research).length], [0, 0], "a restart does not notify again");
+});
+
 test("P13 held parent: a pr fire's job and run exist before the held wake is released once by compaction; runner-owned fires dispatch at once", { timeout: 180_000 }, async (t) => {
 	const h = await schedulesHome(t, { held: true });
 	const worker = h.model("worker", [{ kind: "text", text: "P13 worker received." }]);

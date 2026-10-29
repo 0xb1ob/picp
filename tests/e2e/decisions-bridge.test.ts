@@ -229,8 +229,10 @@ test("decisions: the header guard forces one re-send of a reply naming project w
 	const sessions = operatorSessionsFile(join(stateDir, "sessions"));
 	mkdirSync(dirname(sessions), { recursive: true });
 	appendFileSync(sessions, `${JSON.stringify({ at: isoTimestamp(), session_file: file })}\n`);
-	// Malformed lines (bad JSON, a split with no `projects`) are skipped, never a 500.
-	appendFileSync(sidecar, `not json\n${JSON.stringify({ type: "split", session_file: file, ts: 1, block: 0, segments: [{ text: "x" }] })}\n`);
+	// Malformed lines (bad JSON, a split with no `projects`) are skipped, never a 500. The bad split reuses the live
+	// split's key: last record wins, so without the shape check it would override the valid split.
+	const bad = { type: "split", session_file: file, ts: records[2].ts, block: records[2].block, segments: [{ text: "x" }] };
+	appendFileSync(sidecar, `not json\n${JSON.stringify(bad)}\n`);
 	const viewer = createViewer({ home: home.path, stateDir, host: "127.0.0.1", port: 0, requireTailnet: true, log: () => {}, operatorStart: { tmux: null, herdr: null } });
 	await new Promise<void>((resolve) => viewer.listen(0, "127.0.0.1", resolve));
 	t.after(() => viewer.close());

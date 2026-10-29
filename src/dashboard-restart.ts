@@ -4,7 +4,7 @@
  *
  * Order, exact: the `request` line first (unwritable: 500, nothing else happens); the kill switch; the capability
  * (`relaunchFile`/`shutdown`/`parentSends` ports: cp-bridge started by a relaunching cp-operator); the blockers; the
- * session file absolute and on disk; the 0600 relaunch marker (src/operator-relaunch.ts); outcome `restarting`;
+ * session file absolute (and on disk, unless `fresh`: Restart clean); the 0600 relaunch marker (src/operator-relaunch.ts); outcome `restarting`;
  * then the caller writes the reply and only after that runs `after` (pi's own `ctx.shutdown()`).
  */
 
@@ -65,13 +65,26 @@ export function restartRequest(input: RestartInput & { args: Record<string, unkn
 	const state = restartState(input);
 	if (!state.supported) return refuse(409, `unsupported: ${RESTART_UNSUPPORTED}`);
 	if (state.blockers.length > 0) return refuse(409, `not now: ${state.blockers.join("; ")}`);
+	const fresh = input.args.fresh === true;
 	const file = ports.sessionFile();
-	if (!file || !isAbsolute(file) || !file.endsWith(".jsonl") || !existsSync(file)) return refuse(409, `the session file ${file ?? "(none)"} is not on disk; nothing to resume`);
-	const written = writeRelaunchMarker(ports.relaunchFile!()!, { id, pid: process.pid, session_file: file, at: now().toISOString() });
+	const usable = !!file && isAbsolute(file) && file.endsWith(".jsonl");
+	// A clean restart resumes nothing, so the old file need not be on disk; the marker still names it.
+	if (!usable || (!fresh && !existsSync(file))) return refuse(409, `the session file ${file ?? "(none)"} is not on disk; nothing to resume`);
+	const written = writeRelaunchMarker(ports.relaunchFile!()!, { id, pid: process.pid, session_file: file, at: now().toISOString(), ...(fresh ? { fresh: true as const } : {}) });
 	if (!written.ok) {
 		input.outcome(id, "restart", null, peer, "failed", `relaunch marker unwritable: ${written.error}`);
 		return { ok: false, status: 500, error: `failed: relaunch marker unwritable (${written.error})` };
 	}
 	input.outcome(id, "restart", null, peer, "restarting", null);
-	return { ok: true, result: { id, state: "restarting", session_file: basename(file) }, after: () => ports.shutdown!() };
+	const result = { id, state: "restarting", session_file: basename(file), ...(fresh ? { fresh: true, handoff: handoffName(ports) } : {}) };
+	return { ok: true, result, after: () => ports.shutdown!() };
+}
+
+function handoffName(ports: ControlPorts): string | null {
+	try {
+		const file = ports.handoff?.();
+		return file ? basename(file) : null;
+	} catch {
+		return null; // an unreadable handoffs dir only loses the name; the fresh session reports it at start
+	}
 }

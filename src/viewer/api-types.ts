@@ -43,7 +43,7 @@ export interface SessionEntry {
  project?: string | null;
  /** Operator tier, a reply with two or more `[project]` sections (issue 589); `text` stays the unsplit original. */
  segments?: {text: string; projects: string[]; source: "header" | "id" | "reply" | "general"}[];
- /** Operator tier: a reply the header guard folded (issue 589), `superseded` by a re-send or a `NO-PROJECT` `hidden` one. */
+ /** Operator tier: a reply the header guard folded (issue 589), `superseded` by a re-send or `NO-PROJECT` `hidden`. */
  collapsed?: "superseded" | "hidden";
  /** A cp-bridge notice parsed off its first line (slice F). */
  bridge?: {kind:string; job:string|null; id:string|null; receipt:string|null} | null;
@@ -89,8 +89,11 @@ export interface ControlStatusResponse {
 /** `POST /api/operator/upload` stored an attachment: 201 with its upload id (the composer sends ids, never bytes). */
 export interface OperatorUploadResponse { id: string; mime: string; bytes: number; expires_at: string; url: string; name?: string }
 export interface RestartStatus { supported: boolean; blockers: string[]; reason: string | null }
-/** `POST /api/operator/restart` `{"restart": true}` accepted: the session journaled it, wrote its marker and stops; its launcher resumes `session_file`. */
-export interface OperatorRestartResponse { state: "restarting"; id: string; session_file: string | null }
+/**
+ * `POST /api/operator/restart` `{"restart": true}` accepted: the session journaled it, wrote its marker and stops; its
+ * launcher resumes `session_file`. With `"fresh": true` (Restart clean) it starts a new session instead, and `handoff`
+ * is the newest handoff's basename that session is pointed at, or null. */
+export interface OperatorRestartResponse { state: "restarting"; id: string; session_file: string | null; fresh?: true; handoff?: string | null }
 /** One `data/settings-audit.jsonl` line as the operator session returns it (src/settings-write.ts `SettingsAuditLine`). */
 export interface SettingsAuditRow { v: 1; type: "intent" | "applied" | "failed" | "recovered" | "refused"; id: string | null; at: string; [field: string]: unknown }
 /** `GET /api/settings`: read through the operator session; offline or unsupported is `snapshot: null`, never a projection. */

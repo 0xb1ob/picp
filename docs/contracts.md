@@ -134,7 +134,7 @@ defaults/routing.default.json  shipped default rubric template (tracked; cp-defa
     tunnel-runtime.json             cloudflared controller state: binding {generation, origin}, revision, state, owned pid, 0600 (remote dashboard PR 2c)
     operator/dashboard.{json,sock}  dashboard-control record and socket, 0600 (the operator session's)
     operator/dashboard.jsonl        dashboard-control audit journal, append-only, 0600
-    operator/relaunch.json          Restart session marker {version, id, pid, session_file, at}, 0600; written by the bridge, taken by cp-operator
+    operator/relaunch.json          Restart session marker {version, id, pid, session_file, at, fresh?}, 0600; written by the bridge, taken by cp-operator
 ```
 
 `.pi-command-post/` is never committed or pushed
@@ -6559,13 +6559,13 @@ signals or locates a process (tmux/herdr pane hunting was rejected as fragile). 
 | Check | Refusal |
 |---|---|
 | method, `--require-tailnet`, rate, opt-out, Origin, Sec-Fetch-Site, JSON, 20 KiB, JSON parse | as in the Dashboard control table (kind `restart`) |
-| body is exactly `{"restart": true}` | 400 `body must be exactly {"restart": true}` |
+| body is exactly `{"restart": true}` or `{"restart": true, "fresh": true}` (Restart clean) | 400 `body must be exactly {"restart": true} or {"restart": true, "fresh": true}` |
 | a live session record | 409 `{state: "offline"}` `no operator session is running (…); use Start session or Resume last session` |
 | `x-cp-control-token` equals the record's `csrf` | 403 `control token missing or stale; reload the page` |
 | one accepted restart per 60 s (reserved across the frame, released unless the bridge accepted, so a `not now` can be retried) | 429 with `retry-after` |
 | the socket answers within 5 s | 503 / 504, as for a message |
 | an older bridge answers `unknown op restart` | 409 `unsupported: this session's cp-bridge predates Restart session; restart it once by hand: /quit, then cp-operator -c` |
-| the bridge's own checks (below) | 202 `{id, state: "restarting", session_file}` (basename only), or its status and reason as `{state: "refused", error}` |
+| the bridge's own checks (below) | 202 `{id, state: "restarting", session_file}` (basename only; clean adds `fresh: true` and `handoff`, the newest handoff's basename or null), or its status and reason as `{state: "refused", error}` |
 
 Every viewer refusal after the `--require-tailnet` guard is one `refused` line (`kind: "restart"`) in
 `state/operator/dashboard.jsonl`; a refusal the bridge made is journaled by the bridge, not twice. The bridge's
@@ -6578,7 +6578,7 @@ reason, in order:
 | `data/dashboard-control.json` on | 403 `dashboard control is off (…)` |
 | supported: the bridge has the `shutdown`, `parentSends` and `relaunchFile` ports and `CP_OPERATOR_RELAUNCH_FILE` is an absolute path | 409 `unsupported: this session was not started by a cp-operator that relaunches it; restart it once by hand: /quit, then cp-operator -c` |
 | idle, no queued messages, no injected dashboard request the session has not seen, no dashboard answer click on an ask still open in `asks.jsonl`, no `cp_parent send` from the last 24 h without an observed outcome (`<sessions>/cp-parent.sends.json`; invalid JSON or a failed required field refuses; an unknown optional field does not) | 409 `not now: <blocker>; <blocker>` |
-| the session file is absolute, `.jsonl` and on disk | 409 `the session file … is not on disk; nothing to resume` |
+| the session file is absolute, `.jsonl` and on disk (clean: on disk not required, it resumes nothing) | 409 `the session file … is not on disk; nothing to resume` |
 | the marker is written | 500 `failed: relaunch marker unwritable (…)`, outcome `failed` |
 | — | outcome `restarting`; the reply is written, then (50 ms later) pi's own `ctx.shutdown()` through the compaction idle gate; under `--mode rpc`, where that only flags a shutdown for the next stdin command, pi's own SIGTERM handler runs it at once |
 
@@ -6589,14 +6589,20 @@ without `restart` reads unsupported.
 **The handshake and the marker.** `cp-operator` gives every pi it starts `CP_OPERATOR_RELAUNCH_FILE` =
 `state/operator/relaunch.json` of its home (cleared, never inherited, when no home resolves); its presence is the
 capability. The bridge writes the marker 0600 through a tmp file and a rename: `{version: 1, id: dc-…, pid,
-session_file, at}`, `pid` being its own pi's pid. When that pi exits, `cp-operator` takes (reads and removes) the
+session_file, at}` (+ `fresh: true` for Restart clean), `pid` being its own pi's pid. When that pi exits,
+`cp-operator` takes (reads and removes) the
 marker **only** when it is well-formed and names the pid of the child that just exited — any other marker stays,
 inert — and spawns pi again with exactly `--session <file>` (`-c` when the file is gone; the wrapper's `--model` is
 not added), at most 3 relaunches per 10 min (then one line: `resume by hand: cp-operator --session <file>`, and its
 exit code). A `cp-operator` that was itself signalled never relaunches. No marker: it exits with pi's code, as before.
+**Restart clean** (`fresh: true`): pi is spawned with no resume flag, so it starts a new session on the configured
+model (`--model` added as on a first start) and gets the operator start context with `Newest handoff: <path>`;
+the old session file is never touched (resume it by hand or from the Transcript picker), and the relaunch counts toward
+the same cap. A `cp-operator` that predates `fresh` ignores it (version stays 1) and resumes; the page sees the same
+session file come back and says `resumed: this cp-operator predates clean restart; restart it once by hand`.
 **Migration:** a session started before this release has no handshake and reports unsupported; restart it once by
-hand (`/quit`, then `cp-operator -c`). Restart is never an authorization and starts nothing new: it resumes the same
-session file.
+hand (`/quit`, then `cp-operator -c`). Restart is never an authorization: Restart session resumes the same
+session file, Restart clean starts a fresh one.
 
 **Trust boundary.** Any local process of the same user can already read the 0600 record and reach the socket;
 that is the same boundary as the parent host's. The Origin check and CSRF token stop a hostile web page in the

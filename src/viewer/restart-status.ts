@@ -9,10 +9,12 @@ export const OPERATOR_RESTART_PATH = "/api/operator/restart";
 export const OPERATOR_RESTART_WINDOW_MS = 60_000;
 export const RESTART_PREDATES = "this session's cp-bridge predates Restart session; restart it once by hand: /quit, then cp-operator -c";
 
-/** Null when the body is exactly `{"restart": true}`, else the refusal. */
+/** Null when the body is exactly `{"restart": true}` or `{"restart": true, "fresh": true}`, else the refusal. */
 export function parseRestartBody(json: unknown): string | null {
 	const value = json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : undefined;
-	return value && Object.keys(value).length === 1 && value.restart === true ? null : 'body must be exactly {"restart": true}';
+	const keys = value ? Object.keys(value).length : 0;
+	const ok = value?.restart === true && (keys === 1 || (keys === 2 && value.fresh === true));
+	return ok ? null : 'body must be exactly {"restart": true} or {"restart": true, "fresh": true}';
 }
 
 /** The bridge's `restart` status, validated; absent or malformed is an older bridge: unsupported, with the manual way. */

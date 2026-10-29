@@ -21,8 +21,9 @@ const names = [
 	"S27 launcher: bad-relative preserves resume arguments, exit status and marker ownership",
 	"S27 launcher: bad-session preserves resume arguments, exit status and marker ownership",
 	"S27 launcher: sliding preserves resume arguments, exit status and marker ownership",
+	"S27 launcher: fresh relaunches a clean session on the configured model with no resume flag",
 ];
-for (const [index, mode] of (["once", "other", "never", "gone", "always", "bad-json", "bad-version", "bad-relative", "bad-session", "sliding"] as const).entries()) {
+for (const [index, mode] of (["once", "other", "never", "gone", "always", "bad-json", "bad-version", "bad-relative", "bad-session", "sliding", "fresh"] as const).entries()) {
 	test(names[index]!, async (t) => {
 		const dir = mkdtempSync(join(tmpdir(), "cp-s27-agent-"));
 		const session = join(dir, "2026-01-01T00-00-00-000Z_0123abcd.jsonl");
@@ -46,10 +47,12 @@ for (const [index, mode] of (["once", "other", "never", "gone", "always", "bad-j
 		const runs = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
 		const builtins = OPERATOR_BUILTIN_EXTENSIONS.flatMap((entry) => ["-e", entry]);
 		assert.deepEqual(runs[0], [...builtins, "--model", mode === "never" ? "x" : "test-model"]);
-		assert.equal(code, mode === "once" || mode === "gone" ? 2 : mode === "never" || mode.startsWith("bad-") ? 1 : 0);
-		assert.equal(runs.length, mode === "sliding" ? 5 : mode === "always" ? 3 : mode === "once" || mode === "gone" ? 2 : 1);
+		assert.equal(code, mode === "once" || mode === "gone" || mode === "fresh" ? 2 : mode === "never" || mode.startsWith("bad-") ? 1 : 0);
+		assert.equal(runs.length, mode === "sliding" ? 5 : mode === "always" ? 3 : mode === "once" || mode === "gone" || mode === "fresh" ? 2 : 1);
 		assert.equal(existsSync(marker), mode === "other" || mode.startsWith("bad-"));
-		for (const args of runs.slice(1)) assert.deepEqual(args, [...builtins, ...(mode === "gone" ? ["-c"] : ["--session", session])]);
+		const relaunched = mode === "gone" ? ["-c"] : mode === "fresh" ? ["--model", "test-model"] : ["--session", session];
+		for (const args of runs.slice(1)) assert.deepEqual(args, [...builtins, ...relaunched]);
+		if (mode === "fresh") assert.ok(lines.includes("cp-operator: restarting from the dashboard with a clean session\n"));
 		if (mode === "once") assert.ok(lines.includes(`cp-operator: restarting from the dashboard, resuming ${session}\n`));
 		if (mode === "gone") assert.ok(lines.some((line) => line.includes(`${session} is gone, continuing the most recent session (-c)`)));
 		if (mode === "always") assert.ok(lines.some((line) => line.startsWith(`cp-operator: not restarting: 2 restarts within 10 min; resume by hand: cp-operator --session ${session}`)));

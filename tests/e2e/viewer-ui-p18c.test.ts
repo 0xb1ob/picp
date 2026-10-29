@@ -848,3 +848,27 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 function tab_facts(tab: Tab): string[] {
 	return tab.$$(".job-facts > div").map((row) => `${row.querySelector("dt")?.textContent}:${row.querySelector("dd")?.textContent}`);
 }
+
+test("P18-shell-menu-clean: Restart clean in the ⋮ menu confirms, then posts exactly {restart, fresh}", { timeout: 120_000 }, async (t) => {
+	const v = await served(t, () => {}, { tailnet: true });
+	const file = join(v.stateDir, "operator-session.jsonl");
+	writeFileSync(file, "", { flag: "a" });
+	let shutdowns = 0;
+	const ports: ControlPorts = { inject: () => {}, abort: () => {}, isIdle: () => true, hasPendingMessages: () => false, sessionFile: () => file, shutdown: () => void (shutdowns += 1),
+		relaunchFile: () => join(v.stateDir, "operator", "relaunch.json"), parentSends: () => ({ ids: [], error: null }) };
+	const control = await startDashboardControl({ stateDir: v.stateDir, ports, log: () => {} }) as DashboardControl;
+	t.after(() => control.stop());
+	const tab = await v.open("#overview", true, ".overview-heading h1");
+	const menu = tab.$(".shell-main details.shell-more")! as Element & { open: boolean };
+	menu.open = true;
+	menu.dispatchEvent(new tab.window.Event("toggle"));
+	tab.click(await tab.find(".shell-more-panel .operator-restart-clean", (b) => !b.hasAttribute("disabled") && b.textContent === "Restart clean"));
+	const confirm = await tab.find(".shell-more-panel .operator-restart-confirm");
+	assert.equal(confirm.textContent, "Tap again to restart clean · starts a new session on the newest handoff");
+	const posts = () => tab.requests.filter((r) => r.method === "POST" && r.path === "/api/operator/restart");
+	assert.equal(posts().length, 0, "one tap sends nothing");
+	tab.click(confirm);
+	await until(() => shutdowns, (n) => n === 1, "the second tap restarts clean");
+	assert.deepEqual(posts().map((r) => r.body), ['{"restart":true,"fresh":true}']);
+	assert.equal(JSON.parse(readFileSync(join(v.stateDir, "operator", "relaunch.json"), "utf8")).fresh, true);
+});

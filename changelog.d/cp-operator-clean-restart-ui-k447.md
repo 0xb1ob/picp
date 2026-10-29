@@ -1,0 +1,1 @@
+- Dashboard **Restart clean** for the operator session: `{"restart": true, "fresh": true}` writes a `fresh: true` relaunch marker, `cp-operator` relaunches pi on a new session (configured model, no resume flag) pointed at the newest handoff, and the 202 names `handoff`; a launcher that predates it resumes and the page says so.

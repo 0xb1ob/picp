@@ -5,7 +5,8 @@
  * (`state/operator/relaunch.json`): its presence is the capability handshake. On an accepted dashboard restart the
  * bridge (src/dashboard-restart.ts) writes a 0600 marker `{version: 1, id, pid, session_file, at}` there and calls
  * pi's own `ctx.shutdown()`. When that pi exits, `superviseOperatorPi` takes the marker only when it names the exited
- * child's pid, removes it, and spawns pi again with exactly `--session <file>` (`-c` when the file is gone); at most
+ * child's pid, removes it, and spawns pi again with exactly `--session <file>` (`-c` when the file is gone; no resume
+ * flag at all for a `fresh: true` marker, Restart clean); at most
  * 3 relaunches per 10 min. No marker: the launcher exits with pi's code, as before. Nothing here signals, kills or
  * looks up any process from outside: the stop is pi's own, the relaunch is the terminal's own launcher.
  */
@@ -16,12 +17,14 @@ import { constants } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { layoutForHome, type Mode } from "./contracts.ts";
 import type { ControlPorts } from "./dashboard-control.ts";
+import { newestOperatorHandoff } from "./operator-context.ts";
 import { PARENT_SEND_MAX_AGE_HOURS, parentSendFile, readParentSendOutboxForRestart } from "./parent-outbox.ts";
 
 export const RELAUNCH_ENV = "CP_OPERATOR_RELAUNCH_FILE";
 export const RELAUNCH_LIMIT = { count: 3, windowMs: 10 * 60_000 };
 
-export interface RelaunchMarker { version: 1; id: string; pid: number; session_file: string; at: string }
+/** `fresh`: relaunch on a new session (Restart clean); a launcher that predates it ignores the field and resumes. */
+export interface RelaunchMarker { version: 1; id: string; pid: number; session_file: string; at: string; fresh?: true }
 
 /** `<home>/<state>/operator/relaunch.json`: where the launcher looks, and what it tells pi. */
 export function relaunchFileFor(home: string, mode: Mode): string {
@@ -48,7 +51,7 @@ export function writeRelaunchMarker(file: string, marker: Omit<RelaunchMarker, "
 }
 
 /** The marker, removed, only when it is well-formed and names `pid`; any other marker stays where it is (inert). */
-export function takeRelaunchMarker(file: string, pid: number): { id: string; session_file: string } | undefined {
+export function takeRelaunchMarker(file: string, pid: number): { id: string; session_file: string; fresh: boolean } | undefined {
 	let raw: Partial<RelaunchMarker> | null;
 	try {
 		raw = JSON.parse(readFileSync(file, "utf8")) as Partial<RelaunchMarker> | null;
@@ -58,11 +61,12 @@ export function takeRelaunchMarker(file: string, pid: number): { id: string; ses
 	if (!raw || typeof raw !== "object" || raw.version !== 1 || raw.pid !== pid || typeof raw.id !== "string") return undefined;
 	if (typeof raw.session_file !== "string" || !isAbsolute(raw.session_file) || !raw.session_file.endsWith(".jsonl")) return undefined;
 	rmSync(file, { force: true });
-	return { id: raw.id, session_file: raw.session_file };
+	return { id: raw.id, session_file: raw.session_file, fresh: raw.fresh === true };
 }
 
-/** Resume the exact file; `-c` only when it no longer exists. */
-export function relaunchArgs(marker: { session_file: string }, exists: (path: string) => boolean = existsSync): string[] {
+/** No resume flag when fresh (pi starts a new session on the configured model); else the exact file, `-c` when gone. */
+export function relaunchArgs(marker: { session_file: string; fresh?: boolean }, exists: (path: string) => boolean = existsSync): string[] {
+	if (marker.fresh) return [];
 	return exists(marker.session_file) ? ["--session", marker.session_file] : ["-c"];
 }
 
@@ -90,8 +94,8 @@ export function restartBlockers(input: { idle: boolean; pendingMessages: boolean
 	return out;
 }
 
-/** The bridge's three restart ports in one call; `relaunchFile` is undefined unless the launcher gave an absolute path. */
-export function relaunchPorts(input: { target: () => { home: string; mode: Mode }; ctx: () => { shutdown(): void; mode?: string } | undefined; whenIdle: (fn: () => void) => void; env?: NodeJS.ProcessEnv }): Required<Pick<ControlPorts, "shutdown" | "relaunchFile" | "parentSends">> {
+/** The bridge's restart ports in one call; `relaunchFile` is undefined unless the launcher gave an absolute path. */
+export function relaunchPorts(input: { target: () => { home: string; mode: Mode }; ctx: () => { shutdown(): void; mode?: string } | undefined; whenIdle: (fn: () => void) => void; env?: NodeJS.ProcessEnv }): Required<Pick<ControlPorts, "shutdown" | "relaunchFile" | "parentSends" | "handoff">> {
 	const env = input.env ?? process.env;
 	return {
 		shutdown: () => input.whenIdle(() => {
@@ -107,6 +111,10 @@ export function relaunchPorts(input: { target: () => { home: string; mode: Mode 
 		parentSends: () => {
 			const { home, mode } = input.target();
 			return pendingParentSends(home, mode);
+		},
+		handoff: () => {
+			const { home, mode } = input.target();
+			return newestOperatorHandoff(home, mode);
 		},
 	};
 }
@@ -159,6 +167,7 @@ export async function superviseOperatorPi(options: SuperviseOptions): Promise<nu
 		}
 		relaunches.push(at);
 		args = relaunchArgs(marker);
-		log(args[0] === "--session" ? `cp-operator: restarting from the dashboard, resuming ${marker.session_file}\n` : `cp-operator: restarting from the dashboard; ${marker.session_file} is gone, continuing the most recent session (-c)\n`);
+		log(marker.fresh ? "cp-operator: restarting from the dashboard with a clean session\n"
+			: args[0] === "--session" ? `cp-operator: restarting from the dashboard, resuming ${marker.session_file}\n` : `cp-operator: restarting from the dashboard; ${marker.session_file} is gone, continuing the most recent session (-c)\n`);
 	}
 }
