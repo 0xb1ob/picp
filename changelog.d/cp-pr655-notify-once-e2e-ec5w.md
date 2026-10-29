@@ -1,0 +1,1 @@
+- tests: e2e case for #655 pinning that a native scheduled pipeline whose in-code advance surfaces notifies the parent exactly once (no envelope wake, no repeat after a restart).
