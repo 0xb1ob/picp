@@ -21,8 +21,9 @@ export function idleNextKey(details: unknown): string | undefined {
 	const busy = (view: NextResult) => !IDLE_KINDS.includes(view.action?.kind) || (view.ready?.length ?? 0) > 0 || view.escalation_id !== undefined
 		|| view.warning !== undefined || (view.blocked ?? []).some((row) => row.escalation_ids?.length);
 	if (views.some(busy)) return undefined;
-	// Spend and the reasons' figures (queued counts, run times) are left out: they move without anything to do.
-	const rows = views.map((view) => [view.mandate?.id ?? view.run?.id ?? null, view.mandate?.status ?? null, view.action.kind, view.action.reason.replace(/\d+/g, "#")]);
+	// Spend and the reasons' figures (ISO times, counts like `3`, `30s`, `1.5M`) are left out; ids like `cp-7e3a` stay.
+	const figures = (reason: string) => reason.replace(/\d{4}-\d\d-\d\dT[\d:.]+Z?/g, "#").replace(/(?<![\w.-])\d+(?:\.\d+)?(?:ms|[smhdkM%])?(?![\w-])/g, "#");
+	const rows = views.map((view) => [view.mandate?.id ?? view.run?.id ?? null, view.mandate?.status ?? null, view.action.kind, figures(view.action.reason)]);
 	return JSON.stringify({ rows, lined_up: (result.lined_up?.jobs ?? []).map((job) => job.id) });
 }
 

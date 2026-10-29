@@ -1244,7 +1244,8 @@ not yet written (after a rotation, until the parent replies): the path is where 
 **Idle wake dedupe.** A parent run whose only tool call was a `cp_next` with nothing to act on (every grant or run
 `wait`/`paused`/`no_mandate`, nothing ready, no escalation, warning or escalation-blocked job) relays its wake once
 per identical answer: `state/parent-idle-wake.json` keeps the last relayed key (grant ids, status, action kind and
-reason with its figures masked, lined-up job ids) for 24 h, an identical one is journaled `idle_wake_deduped` in
+reason with its standalone counts and ISO times masked, digits inside ids kept, lined-up job ids) for 24 h, an
+identical one is journaled `idle_wake_deduped` in
 `state/bridge-retry.jsonl` instead of relayed, and any other relayed parent-turn wake clears the file
 (`src/idle-wake.ts`); a model-error wake and direct wakes (a drain outcome, a landing relay) leave it. An unreadable file never
 suppresses. **Operator pauses in `cp_next`.** A grant paused by the operator (`pause_reason: "operator"`) is never
@@ -6625,9 +6626,12 @@ advisory; the bridge reads the host's `restartGate` and the host re-checks it in
 
 There is no per-viewer window: the bridge refuses a second restart while one runs, and a finished one consumed the
 drain. The bridge journals `request` (`kind`/`deliver` `parent_restart`, `text` the mode), then `restarting`, then
-one outcome when the host answers: `restarted` (`restarted clean|resumed pid=… session=…[ (archived …)]`), `refused`
-(the host's re-check) or `failed` (`stop: …`, or `parent stopped; start failed: …; the parent is down`: the host stays
-up, queued sends are kept and the drain stays `drained`, so a retry is allowed). `GET /api/operator/control` carries
+one outcome when the host answers: `restarted` (`restarted clean|resumed pid=… session=…[ (archived …)]`, with
+`; warning: operator target not updated: …` when the restart succeeded but the operator target could not record the
+new pid), `refused` (the host's re-check) or `failed` (`stop: …`, or `parent stopped; start failed: …; the parent is
+down`: the host stays up, queued sends are kept and the drain stays `drained`, so a retry is allowed). A host that has
+not answered within 300 s (`CP_PARENT_RESTART_TIMEOUT_MS`) ends it `failed: no answer from the parent host …` and frees
+the running latch; the host's late answer still replaces `last`. `GET /api/operator/control` carries
 `parent_restart: {safe, reason, last}`, `last` the latest outcome line. `cp_parent restart [fresh]` runs the same host
 op from the operator session and prints that line.
 

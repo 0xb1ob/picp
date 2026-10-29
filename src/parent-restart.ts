@@ -12,23 +12,32 @@ import { type ControlAuditLine, type ControlKind, readControlConfig } from "./vi
 export type ParentRestartMode = "resume" | "clean";
 const RUNNING = "a parent restart is running";
 
+/** A restart's result; `warning` when it succeeded but the operator target could not follow the new pid. */
+export type ParentRestartResult = ParentStartResult & { warning?: string };
+/** Past this, the dashboard restart reports `failed` and frees the latch; the host's late answer still follows. */
+const RESTART_WAIT_MS = 300_000;
+
 /** How a restart ended: `cp_parent restart`'s text and the dashboard outcome. */
-export function restartedLine(result: ParentStartResult): string {
-	return `restarted ${result.start ?? "clean"} pid=${result.pid ?? "?"} session=${result.sessionFile}${result.archivedFile ? ` (archived ${result.archivedFile})` : ""}`;
+export function restartedLine(result: ParentRestartResult): string {
+	return `restarted ${result.start ?? "clean"} pid=${result.pid ?? "?"} session=${result.sessionFile}${result.archivedFile ? ` (archived ${result.archivedFile})` : ""}${result.warning ? `; warning: ${result.warning}` : ""}`;
 }
 
 export interface ParentRestartPorts extends Required<Pick<ControlPorts, "parentRestart" | "parentRestartState">> {
 	/** `cp_parent restart`: the same gated host op, awaited. */
-	restart(mode: ParentRestartMode): Promise<ParentStartResult>;
+	restart(mode: ParentRestartMode): Promise<ParentRestartResult>;
 }
 
-/** `restarted` runs after a host restart succeeded (the operator target's new parent pid). */
-export function parentRestartPorts(options: { home: () => string; client: () => Promise<ParentHostClient>; restarted?: (result: ParentStartResult) => void }): ParentRestartPorts {
+/**
+ * `restarted` runs after a host restart succeeded (the operator target's new parent pid); its failure is a warning.
+ * `waitMs` bounds the dashboard restart (default 300 s, or `CP_PARENT_RESTART_TIMEOUT_MS`).
+ */
+export function parentRestartPorts(options: { home: () => string; client: () => Promise<ParentHostClient>; restarted?: (result: ParentStartResult) => void; waitMs?: number }): ParentRestartPorts {
+	const waitMs = options.waitMs ?? (Number(process.env.CP_PARENT_RESTART_TIMEOUT_MS) || RESTART_WAIT_MS);
 	let running = false;
 	let last: string | null = null;
-	const restart = async (mode: ParentRestartMode): Promise<ParentStartResult> => {
+	const restart = async (mode: ParentRestartMode): Promise<ParentRestartResult> => {
 		const result = await (await options.client()).request("restart", { fresh: mode === "clean" }) as ParentStartResult;
-		options.restarted?.(result);
+		try { options.restarted?.(result); } catch (error) { return { ...result, warning: `operator target not updated: ${(error as Error).message}` }; }
 		return result;
 	};
 	return {
@@ -43,8 +52,12 @@ export function parentRestartPorts(options: { home: () => string; client: () => 
 			let gate: { safe: boolean; reason: string };
 			try { gate = await (await options.client()).request("restartGate") as typeof gate; } catch (error) { running = false; throw error; }
 			if (!gate.safe) { running = false; return { refused: `not safe to restart: ${gate.reason}` }; }
-			const done = restart(mode).then(restartedLine, (error: Error) => `${/^not safe to restart:/.test(error.message) ? "refused" : "failed"}: ${error.message}`)
-				.then((line) => { running = false; last = line; return line; });
+			const outcome = restart(mode).then(restartedLine, (error: Error) => `${/^not safe to restart:/.test(error.message) ? "refused" : "failed"}: ${error.message}`);
+			let expired = false;
+			let timer: NodeJS.Timeout | undefined;
+			const expiry = new Promise<string>((resolve) => { timer = setTimeout(() => { expired = true; resolve(`failed: no answer from the parent host within ${waitMs / 1000} s; its outcome follows when it answers`); }, waitMs); timer.unref(); });
+			const done = Promise.race([outcome, expiry]).then((line) => { clearTimeout(timer); running = false; last = line; return line; });
+			void outcome.then((line) => { if (expired) last = line; });
 			return { done };
 		},
 	};
