@@ -132,10 +132,10 @@ for (const base of ["main", "trunk"]) {
 		const status = await waitFor(() => readRunStatus(home.path, job.id), (value) => value.tool_calls >= 1);
 		assert.equal(status.profile, "implementer");
 		assert.equal(status.model, workerModel);
-		const resolved = readRunEvents(home.path, job.id).find((event) => event.type === "routing_resolved");
+		const wanted = ["spawned", "prompt_sent", "checkpoint_captured", "original_task_frozen", "routing_resolved"];
+		const events = await waitFor(() => readRunEvents(home.path, job.id), (seen) => wanted.every((type) => seen.some((event) => event.type === type)), { what: "dispatch run events" });
+		const resolved = events.find((event) => event.type === "routing_resolved");
 		assert.deepEqual((resolved?.payload as { provenance?: unknown })?.provenance, { scope: "defaulted", risk: "defaulted" });
-		const types = readRunEvents(home.path, job.id).map((event) => event.type);
-		for (const type of ["spawned", "prompt_sent", "checkpoint_captured", "original_task_frozen", "routing_resolved"]) assert.ok(types.includes(type), type);
 		assert.equal(provider.remaining("s29-parent"), 0);
 	});
 }
@@ -172,14 +172,16 @@ test("S29: public validation refuses unavailable routing, effort, skills and ina
 	];
 	const ends = await b.run(variants.map(({ expected, ...args }) => ({ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { task: "Bump x.", model, queue: false, when_ready: false, ...args } }] })));
 	assert.equal(ends.length, variants.length);
-	for (let i = 0; i < variants.length; i++) await t.test(String(i), () => {
+	for (let i = 0; i < variants.length; i++) await t.test(String(i), async () => {
 		assert.equal(ends[i]!.isError, true);
 		assert.match(JSON.stringify(ends[i]!.result), variants[i]!.expected);
 		const id = variants[i]!.job_id;
-		if (id !== deferred.id && existsSync(join(b.home, paths.eventsFile(id)))) assert.ok(!readRunEvents(b.home, id).some((event) => event.type === "spawned"), id);
+		if (id !== deferred.id && existsSync(join(b.home, paths.eventsFile(id)))) {
+			await waitFor(() => readRunEvents(b.home, id), (seen) => !seen.some((event) => event.type === "spawned"), { what: `no spawned event for ${id}` });
+		}
 	});
-	assert.deepEqual(readFleet(b.home).jobs, []);
-	assert.equal(b.provider.remaining("worker"), 1);
+	await waitFor(() => readFleet(b.home).jobs, (jobs) => jobs.length === 0, { what: "empty fleet" });
+	await waitFor(() => b.provider.remaining("worker"), (left) => left === 1, { what: "worker script untouched" });
 	for (const job of [ordinary, blocked, deferred]) assert.equal(git(b.clone, "branch", "--list", job.id), "");
 });
 

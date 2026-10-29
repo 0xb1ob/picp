@@ -1,0 +1,1 @@
+- Deflake `dispatch-s29` and `dispatch-bound-s28` e2e tests by polling their post-dispatch reads with `waitFor` instead of one-shot reads.
