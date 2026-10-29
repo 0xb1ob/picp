@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { connect, createServer, type AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { LAYOUT, isoTimestamp } from "../../src/contracts.ts";
+import { LAYOUT, isoTimestamp, layoutForHome } from "../../src/contracts.ts";
 import { isPidAlive } from "../../src/fleet.ts";
 import { OperatorAsks } from "../../src/operator-asks.ts";
 import { RESTART_UNSUPPORTED } from "../../src/dashboard-restart.ts";
@@ -105,6 +105,25 @@ test("S27 viewer restart: HTTP validation, real busy bridge, accepted restart an
 	const pid = JSON.parse(readFileSync(b.marker, "utf8")).pid as number;
 	assert.equal(pid, b.rpc.pid, "the marker names the bridge's own pi");
 	await waitFor(() => isPidAlive(pid), (alive) => !alive, { timeoutMs: 30_000, what: "accepted restart shuts down its idle RPC pi" });
+});
+
+// Restart clean: only `fresh: true` is accepted beside `restart`; the marker carries it and the reply names the newest
+// handoff (by mtime) the new session is pointed at. Regression: a clean body used to be a 400.
+test("S27 viewer restart: clean restart writes a fresh marker and names the newest handoff", { timeout: 90_000 }, async (t) => {
+	const s = await setup(t);
+	const handoffs = join(s.home, layoutForHome("multi", s.home).operatorWorkspace, "handoffs");
+	put(join(handoffs, "main-session-compact-a.md"), "old");
+	utimesSync(join(handoffs, "main-session-compact-a.md"), 1000, 1000);
+	put(join(handoffs, "main-session-2026-09-29.md"), "new");
+	const b = await s.bridge(true);
+	for (const body of [{ restart: true, fresh: false }, { restart: true, fresh: true, extra: 1 }, { fresh: true }]) refused(await s.restart(b.csrf, body), 400);
+	const accepted = await s.restart(b.csrf, { restart: true, fresh: true });
+	assert.equal(accepted.status, 202, JSON.stringify(accepted.body));
+	assert.deepEqual({ ...accepted.body, id: undefined }, { state: "restarting", id: undefined, session_file: "2026-01-01T00-00-00-000Z_0123abcd.jsonl", fresh: true, handoff: "main-session-2026-09-29.md" });
+	await waitFor(() => existsSync(b.marker), Boolean, { what: "restart marker" });
+	const marker = JSON.parse(readFileSync(b.marker, "utf8"));
+	assert.deepEqual([marker.id, marker.fresh, marker.version], [accepted.body.id, true, 1]);
+	await waitFor(() => isPidAlive(marker.pid), (alive) => !alive, { timeoutMs: 30_000, what: "clean restart shuts down its idle RPC pi" });
 });
 
 test("S27 viewer restart: plain bridge reports unsupported through HTTP status and restart", { timeout: 60_000 }, async (t) => {

@@ -462,7 +462,9 @@ busy or has queued messages, while a dashboard message or answer click is not ye
 `cp_parent send` from the last 24 h has no observed outcome (an unreadable outbox refuses too). Otherwise it writes
 `state/operator/relaunch.json` (0600: `{version, id, pid, session_file, at}`) and calls pi's own `ctx.shutdown()`
 once compaction is idle. `cp-operator`, the parent of that pi, relaunches it in the same terminal with exactly
-`--session <file>` (`-c` if the file is gone) only when the marker names the pid of the child that just exited; at
+`--session <file>` (`-c` if the file is gone; no resume flag for **Restart clean**, `{"restart": true, "fresh": true}`,
+whose marker carries `fresh: true` and whose new session is pointed at the newest handoff) only when the marker names
+the pid of the child that just exited; at
 most 3 relaunches in 10 min, then it prints how to resume by hand. A signalled `cp-operator` never relaunches. A pi
 not started by a relaunching `cp-operator` (no `CP_OPERATOR_RELAUNCH_FILE`) reports unsupported: `/quit`, then
 `cp-operator -c`, once. The page follows the restart (stopping → relaunching → restarted, by a new

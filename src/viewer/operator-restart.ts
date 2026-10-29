@@ -4,7 +4,8 @@
  * session's launcher relaunches it (src/operator-relaunch.ts). This module spawns, signals and locates no process.
  *
  * Refusal order: the shared chain (`guarded`: method, --require-tailnet, rate, opt-out, Origin, Sec-Fetch-Site, JSON,
- * 20 KiB), then exactly `{"restart": true}`, a live session (409 `offline`), its CSRF token, one accepted restart per 60 s;
+ * 20 KiB), then exactly `{"restart": true}` (optionally `"fresh": true`: Restart clean), a live session (409 `offline`),
+ * its CSRF token, one accepted restart per 60 s;
  * each refusal after the --require-tailnet guard is one `refused` line (kind `restart`) through `guarded`'s refuse.
  */
 import type { IncomingMessage } from "node:http";
@@ -31,7 +32,7 @@ export function handleOperatorRestart(req: IncomingMessage, options: ControlRout
 		// Reserved across the await so a double tap sends one frame; released unless the bridge accepted, so a
 		// "not now" can be retried as soon as the blocker clears.
 		start.restartAt = now.getTime();
-		const reply = await controlRequest(record.record, "restart", { peer });
+		const reply = await controlRequest(record.record, "restart", { peer, ...((json as { fresh?: true }).fresh ? { fresh: true } : {}) });
 		if (reply.ok) return { status: 202, body: reply.result as OperatorRestartResponse };
 		start.restartAt = previous;
 		// The bridge journals its own request/outcome once the frame reached it; transport failures are ours.

@@ -13,7 +13,7 @@ export const restartShown = (control: ControlView): boolean => {
  return (!!status && !("error" in status) && status.running && !!status.token) || !!control.restarting;
 };
 export function RestartSession({control}: {control:ControlView}) {
- const [confirm,setConfirm] = useState(false);
+ const [confirm,setConfirm] = useState<false | "resume" | "clean">(false);
  const status = control.status;
  const restarting = control.restarting ?? null;
  const running = !!status && !("error" in status) && status.running && !!status.token;
@@ -22,14 +22,18 @@ export function RestartSession({control}: {control:ControlView}) {
  const disabled = restartDisabled(status);
  const file = (status && !("error" in status) ? status.session_file : null) ?? restarting?.session_file ?? "this session";
  const failed = restarting?.state === "refused" || restarting?.state === "failed";
+ const clean = confirm === "clean";
  return <div class="operator-restart" role="group" aria-label="Restart the operator session">
   {busy ? <button type="button" class="operator-restart-button" disabled>Restarting…</button>
    : !running ? null
    : confirm && !disabled ? [
-    <button key="go" type="button" class="operator-restart-button operator-restart-confirm" onClick={() => { setConfirm(false); control.restart?.(); }}>{`Tap again to restart · resumes ${file}`}</button>,
+    <button key="go" type="button" class="operator-restart-button operator-restart-confirm" onClick={() => { setConfirm(false); control.restart?.(clean); }}>{clean ? "Tap again to restart clean · starts a new session on the newest handoff" : `Tap again to restart · resumes ${file}`}</button>,
     <button key="cancel" type="button" class="operator-restart-cancel" onClick={() => setConfirm(false)}>Cancel</button>,
    ]
-   : <button type="button" class="operator-restart-button" disabled={!!disabled} title={disabled ?? undefined} onClick={() => setConfirm(true)}>Restart session</button>}
+   : [
+    <button key="resume" type="button" class="operator-restart-button" disabled={!!disabled} title={disabled ?? undefined} onClick={() => setConfirm("resume")}>Restart session</button>,
+    <button key="clean" type="button" class="operator-restart-button operator-restart-clean" disabled={!!disabled} title={disabled ?? undefined} onClick={() => setConfirm("clean")}>Restart clean</button>,
+   ]}
   <p class={failed ? "operator-restart-line operator-restart-failed" : "operator-restart-line"} role={failed ? "alert" : "status"}>{restartLine(status, restarting)}</p>
  </div>;
 }
