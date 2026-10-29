@@ -393,6 +393,7 @@ Test files added after the baseline, with the PR that owns them.
 | tests/e2e/changelog-fold.test.ts | cp-changelog-fragments-jn6t | Infra: `npm run changelog:fold` folds changelog.d fragments in filename order, no-ops on an empty or missing dir, and fails closed on a bad fragment |
 | tests/e2e/armed-dispatch-wake.test.ts | cp-issue-647-impl-vqvg (PR URL on the branch) | #647: an armed dispatch dropped at release wakes the parent with ARMED DISPATCH DROPPED and leaves no stub status.json |
 | tests/e2e/recent-work.test.ts | cp-recent-work-digest-sb7z (https://github.com/0xb1ob/picp/pull/683) | P1 recent-work digest: cp_job closes reach fresh parent and operator as one bounded digest; malformed envelope, unreadable ledger, overflow and lifecycle refresh |
+| tests/e2e/viewer-parent-restart.test.ts | cp-parent-restart-ui-311z (https://github.com/0xb1ob/picp/pull/684) | Restart PR B: dashboard and `cp_parent restart` parent restart, drain-gated by the host (409, pid unchanged), resumed/clean outcome, failed start, host re-check, bounded host request |
 <!-- /manifest:incoming -->
 
 ## Feature-removed
