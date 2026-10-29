@@ -121,6 +121,8 @@ export const CP_EVENT_KINDS = [
 	"verdict_wakeup_sent",
 	/** That wake-up was observed landing in the parent's context (cp-nx7). */
 	"verdict_wakeup_delivered",
+	/** A withheld wake-up outlived `CP_REVIEW_SUPPRESSION_SECONDS` and was dropped; it is never resent. */
+	"verdict_wakeup_expired",
 	/**
 	 * An attempt whose reviewer died with a previous parent session was finished
 	 * as an operational fault, with no worker (D4). The ladder decides what next.

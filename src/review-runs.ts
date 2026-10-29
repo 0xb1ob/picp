@@ -279,7 +279,7 @@ export class ReviewRuns {
 
 	#record(
 		jobId: string,
-		kind: "review_started" | "verdict_wakeup_sent" | "review_orphaned",
+		kind: "review_started" | "verdict_wakeup_sent" | "verdict_wakeup_expired" | "review_orphaned",
 		payload: Record<string, unknown>,
 	): void {
 		try {
@@ -564,8 +564,11 @@ export class ReviewRuns {
 	resendDue(now: Date = this.#now()): string[] {
 		const resent: string[] = [];
 		for (const [key, entry] of this.#inFlight) {
-			if (entry.resent || now.getTime() - entry.firstSentAt >= reviewSuppressionMs()) {
+			const expired = !entry.resent && now.getTime() - entry.firstSentAt >= reviewSuppressionMs();
+			if (entry.resent || expired) {
 				this.#inFlight.delete(key);
+				// A dropped verdict must not look like nothing: the expiry is a run-log fact.
+				if (expired) this.#record(entry.wakeup.jobId, "verdict_wakeup_expired", { surface: entry.wakeup.surface, attempt: entry.wakeup.attempt });
 				continue;
 			}
 			if (now.getTime() - entry.sentAt < verdictDeliveryRetryMs()) continue;
