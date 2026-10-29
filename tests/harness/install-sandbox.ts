@@ -3,7 +3,7 @@
  * Host: builds tests/fixtures/install/Dockerfile, streams a tar of this checkout's files into a `--network none`
  * container and reads back one result line. Inside (`--inside`): the scenario runs bin/cp-bootstrap end to end.
  */
-import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -92,23 +92,39 @@ function files(): Buffer {
 	return tar.stdout;
 }
 
-/** One scenario in a fresh container, removed by its own name afterwards whatever happened. */
-export function runScenario(scenario: Scenario, timeoutMs = 900_000): SandboxRun {
+/** One scenario in a fresh container, removed by its own name afterwards whatever happened; async, so runs overlap. */
+export async function runScenario(scenario: Scenario, timeoutMs = 900_000): Promise<SandboxRun> {
 	const name = `picp-install-${scenario}-${randomBytes(4).toString("hex")}`;
 	const start = performance.now();
 	const inner = `mkdir -p /tmp/src && tar -x -C /tmp/src && exec node /tmp/src/tests/harness/install-sandbox.ts --inside --scenario ${scenario}`;
-	let run: SpawnSyncReturns<string>;
+	let stdout = "";
+	let stderr = "";
+	let error: Error | undefined;
+	let status: number | null = null;
 	try {
 		// uid 0 is the container's own root (never host sudo), with root's own HOME.
 		const user = scenario === "root" ? ["--user", "0", "-e", "HOME=/root"] : [];
-		run = spawnSync("docker", ["run", "-i", "--rm", "--init", "--network", "none", "--name", name, "-e", "npm_config_prefer_offline=true", ...user, IMAGE, "sh", "-c", inner], { input: files(), encoding: "utf8", timeout: timeoutMs, maxBuffer: 256 << 20 });
+		const child = spawn("docker", ["run", "-i", "--rm", "--init", "--network", "none", "--name", name, "-e", "npm_config_prefer_offline=true", ...user, IMAGE, "sh", "-c", inner], { stdio: ["pipe", "pipe", "pipe"] });
+		child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
+		child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+		child.stdin.on("error", (err) => (error ??= err));
+		child.stdin.end(files());
+		const timer = setTimeout(() => {
+			error ??= new Error(`docker run timed out after ${timeoutMs}ms`);
+			child.kill("SIGKILL");
+		}, timeoutMs);
+		status = await new Promise<number | null>((done) => {
+			child.on("error", (err) => (error ??= err));
+			child.on("close", (code) => done(code));
+		});
+		clearTimeout(timer);
 	} finally {
 		spawnSync("docker", ["rm", "-f", name], { encoding: "utf8", timeout: 60_000 });
 	}
-	const output = `${run.stdout ?? ""}${run.stderr ?? ""}${run.error ? `\n${run.error.message}` : ""}`;
+	const output = `${stdout}${stderr}${error ? `\n${error.message}` : ""}`;
 	const line = output.split("\n").reverse().find((text) => text.startsWith(RESULT_MARK));
 	const result = line ? (JSON.parse(line.slice(RESULT_MARK.length)) as ScenarioResult) : undefined;
-	return { scenario, exit: run.status, seconds: since(start), output, ...(result ? { result } : {}) };
+	return { scenario, exit: status, seconds: since(start), output, ...(result ? { result } : {}) };
 }
 
 /** The phase table, waits and observations; the whole timestamped container output on failure or `verbose`. */
@@ -541,7 +557,7 @@ if (process.argv[1] !== undefined && (() => { try { return entryRealpath(process
 	process.stdout.write(`image ${IMAGE} built in ${await buildImage()}s\n`);
 	let failed = false;
 	for (const scenario of wanted as Scenario[]) {
-		const run = runScenario(scenario);
+		const run = await runScenario(scenario);
 		failed ||= run.exit !== 0 || !run.result || run.result.failures.length > 0;
 		process.stdout.write(`${formatRun(run, values.verbose === true)}\n`);
 	}

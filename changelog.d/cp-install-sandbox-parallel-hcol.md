@@ -1,0 +1,1 @@
+- The installer sandbox E2E runs its scenarios three at a time, longest first, to cut the CI install-sandbox job.
