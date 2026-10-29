@@ -79,8 +79,11 @@ export function explicitFilesFromArgv(argv: readonly string[] = process.argv.sli
 
 export default class TestFileGuard extends Transform {
 	readonly #reported = new Set<string>();
-	constructor(options?: TransformOptions) {
+	readonly #files: readonly string[] | undefined;
+	/** `files` is the runner's explicit list (a shard run through `run()`); omitted, argv or the glob decides. */
+	constructor(options?: TransformOptions, files?: readonly string[]) {
 		super({ ...options, writableObjectMode: true });
+		this.#files = files;
 	}
 
 	override _transform(event: TestEvent, _encoding: BufferEncoding, callback: TransformCallback): void {
@@ -96,7 +99,7 @@ export default class TestFileGuard extends Transform {
 		// ends the process without awaiting async reporter work, so a flush that
 		// awaited its glob could be cut off — and the guard would pass by default.
 		try {
-			const explicit = explicitFilesFromArgv();
+			const explicit = this.#files ?? explicitFilesFromArgv();
 			const discovered = explicit.length > 0 ? explicit : globSync(TEST_FILE_GLOB);
 			const missing = filesProducingNothing(discovered, this.#reported);
 			if (discovered.length === 0) {

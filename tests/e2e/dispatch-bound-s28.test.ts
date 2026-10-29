@@ -31,6 +31,7 @@ for (const [kind, title] of [["queue", "S28: queued bound PR replays onto its ex
 		assert.deepEqual([routed.source, routed.model], ["override", worker], "the replayed request's model stays the explicit override");
 		assert.equal(git(record!.worktree, "branch", "--show-current"), "bound-head");
 		await waitFor(() => JSON.parse(readFileSync(file, "utf8")).entries, (entries: unknown[]) => entries.length === 0, { timeoutMs: 30_000, what: "replayed entry removed" });
+		await child.close();
 	});
 }
 
