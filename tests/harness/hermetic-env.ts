@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
-import { STRIPPED_ENV_KEYS } from "../../src/worker-manager.ts";
+import { STRIPPED_ENV_KEYS } from "../../src/stripped-env.ts";
 import { installGhStub } from "./gh-stub.ts";
 
 const SESSION_ENV_KEYS: readonly string[] = [
