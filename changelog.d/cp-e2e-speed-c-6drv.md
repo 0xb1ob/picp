@@ -1,0 +1,1 @@
+- `scripts/test-timings.json` regenerated with `scripts/test-shards.ts gen` from CI run 40821047722 (main e26b259b): drops the 65 stale entries and the skipped installer's 514 s, so shard balance reflects the plan-view idle knob and the hermetic-env leaf module. Migration: none.
