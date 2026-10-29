@@ -67,6 +67,7 @@ PR3 (Docker 29.9, warm): login 48 s (list failure 4.0 s); root 40 s; compat 66â€
 npm ci, then 4.3 s and 3.0 s; `--force` install 32 s; newer 6.1 s; update then install 7.3 s; each probe about 1.3 s).
 PR4 (Docker 29.9, warm): onboarding 47 s (install 42.8 s); prompt 40 s (install 36.2 s); node-floor 67 s (install 49.8 s).
 Docker is shared: a parallel checkout rebuilding `picp-install-sandbox:local` mid-run fails scenarios with npm `EAI_AGAIN`.
+The test file runs two scenarios at a time (longest first) in their own containers; `npm run e2e:install` stays serial.
 
 ## E2E is the default for behavioral acceptance
 
