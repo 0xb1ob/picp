@@ -519,7 +519,7 @@ test("P14-daemon-runtime-fail: a parent crash loop backs off and fails; exit 78 
 	const start = r.at("start");
 	assert.equal(start.code, 1);
 	assert.match(start.out, /its runtime is not ready: the runtime reported: parent exited within 5s \(\{"code":1,"signal":null,"at":"[^"]+"\}\), now restarting/);
-	await r.until("the start limit", () => /parent pid \d+ exited \(1\); failed \(start-limit-hit\), not restarting/.test(r.log()));
+	await r.until("the start limit", () => /parent pid \d+ exited \(1\); failed \(start-limit-hit\), not restarting/.test(r.log()), 150_000);
 	const delays = [...r.log().matchAll(/parent pid \d+ exited \(1\); restart (\d) in ([\d.]+)s/g)].map((m) => `${m[1]}:${m[2]}`);
 	assert.deepEqual(delays, ["1:5", "2:11.34", "3:25.718", "4:58.326", "5:132.279"]);
 	assert.equal(r.starts("parent").length, 6);

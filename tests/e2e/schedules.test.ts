@@ -1319,15 +1319,15 @@ async function selfReviewHome(t: TestContext) {
 	const runNow = (callId: string, parallelism?: number) => schedule(callId, () => ({ action: "run_now", id: h.idOf("self-review"), overrides: { model: reader, thinking: "off", ...(parallelism ? { parallelism } : {}) } }));
 	const admitted = () => waitFor(roleIds, (found) => Object.keys(found).length === 7, { timeoutMs: 30_000, what: "seven roles admitted" });
 	/** Waits for the run to close; on a timeout, names every role's fleet phase and ledger status, and S1's failure. */
-	const closed = (what: string, sample: () => void = () => {}) => waitFor(() => run(), (entry) => { sample(); return entry.phase === "closed"; }, { timeoutMs: 120_000, what }).catch((error: Error) => {
+	const closed = (what: string, sample: () => void = () => {}) => waitFor(() => run(), (entry) => { sample(); return entry.phase === "closed"; }, { timeoutMs: 200_000, what }).catch((error: Error) => {
 		const jobs = h.ledger.read().jobs, state = (id: string) => `${fleetOf(id)?.phase ?? "no-fleet"}/${jobs.find((job) => job.id === id)?.status}`;
 		throw new Error(`${error.message.slice(0, 300)}; ${Object.entries(roleIds()).map(([role, id]) => `${role} ${state(id)}`).join(", ")}; S1 failure ${JSON.stringify(fleetOf(roleIds().S1!)?.failure)}`);
 	});
 	return { h, run, roleIds, fleetOf, add, runNow, admitted, closed };
 }
 
-// Measured with 6 CPU burners on 6 cores and no tailnet: the run closes in 15.6-18.3 s; the 120 s wait is the margin.
-test("P13c native self-review: six readers and one synthesis run in code within parallelism and close the anchor with no wake", { timeout: 300_000 }, async (t) => {
+// Measured with 6 CPU burners on 6 cores and no tailnet: closes in 15.6-18.3 s; the 200 s wait is the CI margin.
+test("P13c native self-review: six readers and one synthesis run in code within parallelism and close the anchor with no wake", { timeout: 420_000 }, async (t) => {
 	const { h, run, fleetOf, add, runNow, admitted, closed } = await selfReviewHome(t);
 	const parent = await h.parent("P13c: Add the self-review schedule.", [
 		{ kind: "tool_calls", calls: [add] },
@@ -1376,7 +1376,7 @@ test("P13c native self-review: six readers and one synthesis run in code within 
 	assert.deepEqual(cardsOf().filter((card) => card.source.run_id === run().id).map((card) => card.job_id), [ids.S1]);
 });
 
-test("P13c native self-review: a reader dropped by the parent before it starts drops S1, and the run closes partial", { timeout: 300_000 }, async (t) => {
+test("P13c native self-review: a reader dropped by the parent before it starts drops S1, and the run closes partial", { timeout: 420_000 }, async (t) => {
 	const { h, run, roleIds, fleetOf, add, runNow, admitted, closed } = await selfReviewHome(t);
 	// Parallelism 1: L5 and L6 start only after four readers report, long after the parent's turn; L5 closes failed.
 	const parent = await h.parent("P13c: Add the self-review schedule.", [

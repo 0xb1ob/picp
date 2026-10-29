@@ -1,0 +1,1 @@
+- Tests: the P14 daemon crash-loop and P13c "reader dropped" e2e cases wait longer for a slow CI runner (test-only). Migration: none.
