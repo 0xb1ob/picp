@@ -34,6 +34,7 @@ import { assertNotDraining } from "./drain.ts";
 import { PARENT_BUILTIN_TOOLS } from "./session-tools.ts";
 import { ASKING_ROLES, type QuestionRelay } from "./questions.ts";
 import { SECRET_PATTERNS } from "./secret-patterns.ts";
+import { STRIPPED_ENV_KEYS } from "./stripped-env.ts";
 import {
 	activePackagesForRole,
 	type DetectedWorkerPackages,
@@ -84,14 +85,7 @@ export const TERMINATING_TOOLS: readonly string[] = Object.freeze(["report_resul
  */
 export { ASK_OPERATOR_TOOL };
 
-/** Parent-session facts a worker must not inherit. */
-export const STRIPPED_ENV_KEYS: readonly string[] = Object.freeze([
-	"PI_SESSION_ID",
-	"PI_SESSION_FILE",
-	"PI_MODEL",
-	"PI_PROVIDER",
-	"PI_REASONING_LEVEL",
-]);
+export { STRIPPED_ENV_KEYS };
 
 /**
  * A worker must be structurally incapable of hanging on an editor or a pager.

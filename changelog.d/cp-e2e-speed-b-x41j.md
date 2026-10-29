@@ -1,0 +1,1 @@
+- Tests: `STRIPPED_ENV_KEYS` moved to the leaf `src/stripped-env.ts` so the hermetic-env preload no longer loads the worker-manager module graph (~1 s per test file); `src/worker-manager.ts` still re-exports it.
