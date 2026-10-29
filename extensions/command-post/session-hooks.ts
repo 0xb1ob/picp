@@ -31,6 +31,7 @@ import { computePiVersionNudge } from "../../src/pi-version-nudge.ts";
 import { computeRoutingNudge } from "../../src/routing.ts";
 import { digestsInContext, parentContextLog, standingOrdersDigest } from "../../src/parent-context.ts";
 import { thresholdCancel } from "../../src/parent-compact-hold.ts";
+import { recentWorkContext } from "../../src/recent-work.ts";
 import { formatScaffold, scaffoldHome } from "../../src/scaffold.ts";
 import { formatScheduleMigration, formatSchedulePolicyImport, sweepScheduleGrantTemplates, sweepSchedulePolicyImport } from "../../src/schedule-migrations.ts";
 import { formatNativeMigration, sweepNativeScheduleMigration } from "../../src/schedule-native-migration.ts";
@@ -109,6 +110,8 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		}
 		const orders = standingOrdersDigest(home);
 		if (orders) messages.push({ customType: "cp-standing-orders", content: orders, display: false });
+		const recent = recentWorkContext(home); // never throws: an unreadable ledger is its own one-line notice
+		if (recent) messages.push({ customType: "cp-recent-work", content: recent, display: false });
 		// picp-99l: a resumed session already holding this exact pair gets no second copy.
 		if (digestsInContext(ctx.sessionManager.getBranch(), messages)) return;
 		const key = JSON.stringify([home, ctx.sessionManager.getSessionId(), compactEpoch, messages.map((message) => [message.customType, message.content])]);

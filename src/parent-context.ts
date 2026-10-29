@@ -279,7 +279,7 @@ export function deliverStandingOrders(
 	return true;
 }
 
-const DIGEST_TYPES = ["cp-memory", "cp-standing-orders"] as const;
+const DIGEST_TYPES = ["cp-memory", "cp-standing-orders", "cp-recent-work"] as const;
 
 /**
  * picp-99l: a resumed parent session re-ran `session_start` and appended the same

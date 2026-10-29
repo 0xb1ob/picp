@@ -69,7 +69,7 @@ test("S24 context: an empty home adds no operator context or preference files", 
 	const result = await rpc.waitFor((r) => r.type === "response" && r.id === "empty-transcript");
 	assert.equal((result.data as { messages: Array<{ customType?: string }> }).messages.filter((m) => m.customType === "cp-operator-context").length, 0);
 	const layout = layoutForHome("multi", home.path);
-	for (const file of [join(layout.data, "standing-orders.md"), layout.learningsFile, join(layout.operatorWorkspace, "handoffs")]) {
+	for (const file of [join(layout.data, "standing-orders.md"), layout.learningsFile, join(layout.operatorWorkspace, "handoffs"), layout.jobsFile]) {
 		assert.equal(existsSync(join(home.path, file)), false, `${file} remains absent`);
 	}
 });
