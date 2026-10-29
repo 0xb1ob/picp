@@ -43,8 +43,10 @@ export function parentRestartPorts(options: { home: () => string; client: () => 
 	return {
 		restart,
 		parentRestartState: () => {
-			const home = options.home();
-			return { ...(running ? { safe: false, reason: RUNNING } : restartSafety(home, () => new FleetStore({ home }).list())), last };
+			if (running) return { safe: false, reason: RUNNING, last };
+			// An unresolvable target (e.g. a stale selected.json) must not break the whole control status.
+			try { const home = options.home(); return { ...restartSafety(home, () => new FleetStore({ home }).list()), last }; }
+			catch (error) { return { safe: false, reason: `parent unknown: ${(error as Error).message}`, last }; }
 		},
 		parentRestart: async (mode) => {
 			if (running) return { refused: RUNNING };

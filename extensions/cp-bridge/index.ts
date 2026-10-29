@@ -508,7 +508,8 @@ export default function (pi: ExtensionAPI): void {
 					hasPendingMessages: () => sessionCtx?.hasPendingMessages() ?? false,
 					sessionFile: () => sessionCtx?.sessionManager?.getSessionFile() ?? process.env.PI_SESSION_FILE,
 					...relaunchPorts({ target: () => target, ctx: () => sessionCtx, whenIdle: compaction.whenIdle }),
-					...settingsPorts({ target: () => target }), parentRestart: parentRestart.parentRestart, parentRestartState: parentRestart.parentRestartState,
+					...settingsPorts({ target: () => target }),
+					parentRestart: parentRestart.parentRestart, parentRestartState: parentRestart.parentRestartState,
 				},
 			});
 			if (started.state === "listening") {
