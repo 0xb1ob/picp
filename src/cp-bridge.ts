@@ -1,7 +1,6 @@
 /** Operator-owned RPC parent: durable sends, observed-death recovery and read-only diagnostics. */
-import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
 	type BridgeReceiptLevel,
 	BRIDGE_RECEIPT_LEVELS,
@@ -26,8 +25,9 @@ import { PARENT_CONTROL_BUSY, PARENT_UNSETTLED, parentDiagnostic, type ParentDia
 import { DRAIN_DEFAULT_TIMEOUT_S, type DrainCause, drainArgs } from "./drain.ts";
 import { durableIdsFromMessage, isLandedContinuation, KILLED_UNREPORTED_WAKEUP_PREFIX } from "./wakeup-outbox.ts";
 import { isRelayOnlyNotice, relayOnlyMessage } from "./wake-rules.ts";
-import { type LandedMark, ParentDelivery } from "./parent-delivery.ts";
-import { cleanSegmentEnd, wakeSpans } from "./bridge-segments.ts";
+import { ParentDelivery } from "./parent-delivery.ts";
+import { cleanSegmentEnd, freshTurn, type TurnBuf, wakeSpans } from "./bridge-segments.ts";
+import { idleNextKey, idleWakeGate } from "./idle-wake.ts";
 import { type ParentSendDelegation, messageText as textOf, parentSendFile, ParentSendOutbox, receiptOf, sendIdOfMessage } from "./parent-outbox.ts";
 import { PACKAGE_ROOT } from "./home.ts";
 import { agentDirFor } from "./viewer/skill-catalog.ts";
@@ -36,9 +36,9 @@ import { SINGLE_MODE_REMOVED } from "./mode.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { isPidAlive } from "./fleet.ts";
 import { asEscalation, openMissionEnds } from "./escalation-relay.ts";
-import { deliverableRelay, type EnvelopeSummary, envelopeSummaryOf, scheduleJobIdOf, withEnvelopeSummaries } from "./relay-scope.ts";
+import { deliverableRelay, envelopeSummaryOf, scheduleJobIdOf, withEnvelopeSummaries } from "./relay-scope.ts";
 import { readParentLock } from "./parent-lock.ts";
-import { existingSavedSession, parentBootState, recordSpawnedSession } from "./parent-control.ts";
+import { archiveSessionFile, chooseParentSession, parentBootState, type ParentStartResult, recordSpawnedSession } from "./parent-control.ts";
 import { escalationProjects, homeMandateProjects, homeProjectResolver, withProjectTag } from "./project-report.ts";
 import { boundedSeen, STALE_WAKEUP_HEADLINE, type WakeupCarrier, wakeupStampOf } from "./wakeups.ts";
 import { NONINTERACTIVE_WORKER_ENV, STRIPPED_ENV_KEYS } from "./worker-manager.ts";
@@ -92,6 +92,8 @@ export interface ParentStartOptions {
 	thinking?: ThinkingLevel;
 	piBin?: string;
 	sessionFile?: string;
+	/** Archive the session this start would resume, then start clean (`chooseParentSession`). */
+	fresh?: boolean;
 	commandPostExtension?: string;
 	cwd?: string;
 	settleTimeoutMs?: number;
@@ -110,6 +112,8 @@ export interface ParentStatus {
 	alive: boolean;
 	pid?: number;
 	sessionFile?: string;
+	/** False until pi writes the file: it persists a session only once it holds an assistant reply. */
+	sessionFileOnDisk?: boolean;
 	lastReplyAt?: string;
 	model?: string;
 	contextTokens?: number | null;
@@ -128,28 +132,6 @@ export interface ParentStatus {
 }
 
 export type RelayListener = (relay: BridgeRelay) => void;
-
-interface TurnBuf {
-	texts: string[];
-	stale: boolean;
-	jobId?: string;
-	jobIds: string[];
-	assistantCount: number;
-	/** Set/cleared by each assistant message_end; only the LAST one survives. */
-	error?: ModelCallError;
-	/** Sends whose marker landed in this run. */
-	landed: LandedMark[];
-	answers: number[];
-	/** Refused cp_escalate calls, relayed at settle unless a later call in this run succeeds. */
-	refused: BridgeRelay[];
-	/** Accepted cp-envelope wake-ups seen this run (issue #2); appended verbatim to the wake relay. */
-	envelopes: EnvelopeSummary[];
-	/** Segment cursor (bridge-segments.ts): `texts` before it already relayed; jobs stamped since the last wake relay. */
-	relayed: number;
-	segJobIds: string[];
-}
-
-const freshTurn = (): TurnBuf => ({ texts: [], stale: false, jobIds: [], assistantCount: 0, landed: [], answers: [], refused: [], envelopes: [], relayed: 0, segJobIds: [] });
 
 const emptyReceipt = (): BridgeReceipt => ({ level: null, reached: [] });
 
@@ -295,7 +277,7 @@ export class CpBridge {
 		return () => this.#listeners.delete(listener);
 	}
 
-	async start(options: ParentStartOptions): Promise<{ already: boolean; pid?: number; sessionFile: string }> {
+	async start(options: ParentStartOptions): Promise<ParentStartResult> {
 		if ((options.mode as string) !== "multi") throw new CpBridgeError((options.mode as string) === "single" ? SINGLE_MODE_REMOVED : `mode must be multi, got ${String(options.mode)}`);
 		if (!options.home.trim()) throw new CpBridgeError("home is required");
 		if (!options.model.trim()) throw new CpBridgeError("model is required");
@@ -317,12 +299,9 @@ export class CpBridge {
 		let saved: { sessionFile?: string; model?: string } = {};
 		try { if (existsSync(controlFile)) saved = JSON.parse(readFileSync(controlFile, "utf8")); }
 		catch (error) { throw new CpBridgeError(`parent control unreadable: ${controlFile}: ${(error as Error).message}`); }
-		const sessionFile = options.sessionFile ?? existingSavedSession(saved.sessionFile) ?? join(home, LAYOUT.sessions, "cp-parent.jsonl");
 		const model = (options.modelExplicit ? undefined : parentModelSetting(home)) ?? saved.model ?? options.model;
-		mkdirSync(join(sessionFile, ".."), { recursive: true });
 		this.#options = { ...options, model };
 		this.#model = model;
-		this.#sessionFile = sessionFile;
 		this.#home = home;
 		this.#mode = options.mode;
 		const outbox = new ParentSendOutbox({ file: parentSendFile(join(home, LAYOUT.sessions, "cp-parent.jsonl")) });
@@ -335,9 +314,13 @@ export class CpBridge {
 			countTurn: (failed, error) => this.#countTurn(failed, error),
 			...(options.requestTimeoutMs !== undefined ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
 		});
-		await this.#spawn(sessionFile);
+		const choice = chooseParentSession({ home, explicit: options.sessionFile, saved: saved.sessionFile, fresh: options.fresh, model });
+		mkdirSync(join(choice.sessionFile, ".."), { recursive: true });
+		this.#sessionFile = choice.sessionFile;
+		if (choice.start === "clean" && existsSync(parentContextFile(home))) this.#recordControl({ contextTokens: null, totalCostUsd: 0 });
+		await this.#spawn(choice.sessionFile);
 		this.#delivery.relaysDue();
-		return { already: false, pid: this.#proc?.pid, sessionFile };
+		return { already: false, pid: this.#proc?.pid, ...choice };
 	}
 
 	/**
@@ -472,9 +455,8 @@ export class CpBridge {
 			// Record the active file before archiving; a crash must never reopen the old one.
 			atomicWriteJson(join(this.#home, LAYOUT.sessions, "cp-parent-control.json"), { sessionFile: current, model: this.#model });
 			this.#sessionFile = current;
-			const archivedFile = join(dirname(old), `cp-parent-${Date.now()}-${randomUUID().slice(0, 8)}.jsonl`);
 			if (!existsSync(old)) throw new CpBridgeError(`session file missing; cannot archive ${old}`);
-			renameSync(old, archivedFile);
+			const archivedFile = archiveSessionFile(old);
 			this.#recordControl({ lastRotateAt: new Date().toISOString(), contextTokens: null, totalCostUsd: 0, ...(mission ? { lastMissionEnd: mission } : {}) });
 			// dashboard Settings: a configured parent model applies at rotation, as at a start without an explicit model;
 			// an explicit start model or a live `cp_parent model` switch stays (modelExplicit). A refusal keeps the running one.
@@ -656,6 +638,7 @@ export class CpBridge {
 			const envelope = envelopeSummaryOf(message);
 			if (envelope) this.#turn.envelopes.push(envelope);
 			if (message?.role === "user") this.#delivery?.landed(textOf(message), this.#turn);
+			if (stamped || envelope || message?.role === "user") this.#turn.idleKey = null;
 			if (!message || message.role !== "assistant") return;
 			this.#turn.assistantCount += 1;
 			this.#lastAssistant = trackAssistant(this.#home, this.#lastAssistant, lastValidAssistant([message]));
@@ -673,6 +656,8 @@ export class CpBridge {
 			} as RunEvent);
 			return;
 		}
+		// Only a run whose sole tool call is an idle cp_next may dedupe its wake (idle-wake.ts).
+		if (event.type === "tool_execution_end") this.#turn.idleKey = event.toolName === "cp_next" && event.isError !== true && this.#turn.idleKey !== null ? idleNextKey((event.result as { details?: unknown } | undefined)?.details) ?? null : null;
 		if (event.type === "tool_execution_end" && event.toolName === "cp_escalate") {
 			if (event.isError === true) this.#turn.refused.push({ kind: "error", stale: false, text: textOf(event.result) || "cp_escalate was refused", receipt: climb(emptyReceipt(), "turn_settled"), paths: [] });
 			else {
@@ -720,6 +705,7 @@ export class CpBridge {
 		turn.relayed = turn.texts.length;
 		if (!modelError && text.trim().length === 0) return;
 		this.#lastReplyAt = new Date().toISOString();
+		if (!modelError && idleWakeGate(this.#home, turn.idleKey ?? undefined, (event, payload) => journalBridgeEvent(this.#home, event, payload))) return;
 		const jobIds = turn.segJobIds.length > 0 ? turn.segJobIds.splice(0) : [...turn.jobIds];
 		const home = this.#home;
 		this.#emit({

@@ -31,6 +31,7 @@ import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { resolveRuntime, SINGLE_MODE_REMOVED } from "../../src/mode.ts";
 import { readParentLock } from "../../src/parent-lock.ts";
+import type { ParentStartResult } from "../../src/parent-control.ts";
 import { parentModelSetting } from "../../src/parent-context.ts";
 import { FleetStore, isPidAlive } from "../../src/fleet.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_MAX_TIMEOUT_S, restartNotice } from "../../src/drain.ts";
@@ -615,6 +616,7 @@ export default function (pi: ExtensionAPI): void {
 			mode: Type.Optional(StringEnum([...MODES], { description: "start: multi (the only mode; may be omitted)" })),
 			model: Type.Optional(Type.String({ description: "start or model: provider/model-id" })),
 			thinking: Type.Optional(StringEnum([...THINKING_LEVELS], { description: "start: optional thinking level" })),
+			fresh: Type.Optional(Type.Boolean({ description: "start: archive the session it would resume, then start clean" })),
 			ask: Type.Optional(OperatorAskInputSchema),
 			id: Type.Optional(Type.String({ description: "ask_answer or ask_withdraw: ask id" })),
 			answer: Type.Optional(Type.String({ description: "ask_answer: human's verbatim words; answer: the full answer text" })),
@@ -683,7 +685,7 @@ export default function (pi: ExtensionAPI): void {
 						);
 					requireAvailableParentModel(model, ctx?.modelRegistry ? registryProbe(ctx.modelRegistry) : ALWAYS_AVAILABLE);
 					const startDeadline = Date.now() + 10_000;
-					let started: { already: boolean; pid?: number; sessionFile: string };
+					let started: ParentStartResult;
 					for (;;) {
 						const activeClient = await ensureClient(params.home, mode);
 						try {
@@ -693,8 +695,9 @@ export default function (pi: ExtensionAPI): void {
 								model,
 								...(explicit ? { modelExplicit: true } : {}),
 								...(params.thinking ? { thinking: params.thinking } : {}),
+								...(params.fresh ? { fresh: true } : {}),
 								...(process.env.CP_PARENT_PI_BIN ? { piBin: process.env.CP_PARENT_PI_BIN } : {}),
-							}) as { already: boolean; pid?: number; sessionFile: string };
+							}) as ParentStartResult;
 							break;
 						} catch (error) {
 							if (!(error instanceof Error) || error.message !== "parent host is stopping") throw error;
@@ -718,7 +721,7 @@ export default function (pi: ExtensionAPI): void {
 					return textResult(
 						started.already
 							? `already running pid=${started.pid ?? "?"} session=${started.sessionFile}`
-							: `started pid=${started.pid ?? "?"} session=${started.sessionFile}`,
+							: `started ${started.start ?? "clean"} pid=${started.pid ?? "?"} session=${started.sessionFile}${started.archivedFile ? ` (archived ${started.archivedFile})` : ""}${started.missing ? ` (saved session ${started.missing} was never written; nothing to resume)` : ""}`,
 						started,
 					);
 				}

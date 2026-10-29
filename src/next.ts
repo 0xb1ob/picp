@@ -79,6 +79,8 @@ export interface NextMandateView {
 	token_cap: number;
 	jobs_used: number;
 	job_cap: number;
+	/** Set on a paused grant; `operator` keeps its id out of the `cp_next` text. */
+	pause_reason?: string;
 }
 
 export interface NextResult {
@@ -273,7 +275,7 @@ async function nextForMandate(ports: NextPorts, mandate: Mandate, readyAll: read
 					: ` — at token_ceiling ${ceiling}: budget_exhausted is the operator's`
 				: "";
 		return {
-			mandate: view,
+			mandate: { ...view, ...(mandate.pause_reason ? { pause_reason: mandate.pause_reason } : {}) },
 			ready,
 			action: {
 				kind: "paused",
@@ -361,7 +363,7 @@ export function formatNext(result: NextResult): string {
 	if (result.warning) lines.push(`warning: ${result.warning}`);
 	if (result.mandate) {
 		const m = result.mandate;
-		lines.push(`${m.id}: ${m.status}, ${m.live_workers}/${m.parallelism} workers working under this mandate`);
+		lines.push(`${operatorPaused(result) ? "a grant paused by the operator" : m.id}: ${m.status}, ${m.live_workers}/${m.parallelism} workers working under this mandate`);
 		lines.push(`  spend: $${m.spend_usd.toFixed(2)} / $${m.spend_cap_usd.toFixed(2)}; ${m.tokens} / ${m.token_cap} tokens; jobs ${m.jobs_used} / ${m.job_cap}`);
 	} else if (result.run) {
 		const r = result.run;
@@ -375,9 +377,13 @@ export function formatNext(result: NextResult): string {
 		lines.push(`blocked: ${row.job.id}: waiting on ${row.waiting_on}${row.escalation_ids?.length ? `; cp_decide ${row.escalation_ids.join(", ")}` : ""}`);
 	}
 	if ((result.blocked?.length ?? 0) > 10) lines.push(`blocked: +${result.blocked!.length - 10} more jobs`);
-	lines.push(`action: ${result.action.kind}${result.action.job_id ? ` ${result.action.job_id}` : ""} \u2014 ${result.action.reason}`);
+	lines.push(`action: ${result.action.kind}${result.action.job_id ? ` ${result.action.job_id}` : ""} \u2014 ${operatorPaused(result) ? "no new dispatch; in-flight continues" : result.action.reason}`);
 	if (result.escalation_id) lines.push(`escalation: ${result.escalation_id}`);
-	for (const other of result.others ?? []) lines.push(needsAction(other) ? formatNext(other) : compactOther(other));
+	// Operator pauses are the human's own: one count line, never an id for the parent to repeat.
+	const quiet = (result.others ?? []).filter((other) => operatorPaused(other) && !needsAction(other));
+	for (const other of result.others ?? []) if (!quiet.includes(other)) lines.push(needsAction(other) ? formatNext(other) : compactOther(other));
+	const count = quiet.length + (operatorPaused(result) ? 1 : 0);
+	if (count > 0) lines.push(`${count} grant(s) paused by the operator \u2014 nothing to do`);
 	return lines.join("\n");
 }
 
@@ -386,6 +392,8 @@ function needsAction(result: NextResult): boolean {
 	const kind = result.action.kind;
 	return kind === "dispatch" || kind === "pipeline" || kind === "mission_end" || result.escalation_id !== undefined || result.warning !== undefined || (result.blocked ?? []).some((row) => row.escalation_ids?.length);
 }
+
+const operatorPaused = (result: NextResult): boolean => result.action.kind === "paused" && result.mandate?.pause_reason === "operator";
 
 function compactOther(result: NextResult): string {
 	const m = result.mandate;

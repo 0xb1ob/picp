@@ -306,6 +306,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			"Reuse a cp_next result you already hold for the decision it answered: call it once after a state-changing batch, not before and after it; a successful cp_send or an unchanged status is not a new event; full:true only after losing context. Its fleet total is informational \u2014 per-grant parallelism and cp_dispatch's spawn queue decide admission, so do not re-read fleet or drain files to override it.",
 			"When cp_next says nothing is ready, say so in one line and stop the turn \u2014 do not poll or re-ask.",
 			"A paused mandate's recommendation is 'no dispatch'; in-flight jobs still finish on their own.",
+			"Never name a grant paused by the operator in a reply: cp_next counts those grants without ids, and so do you.",
 		],
 		parameters: Type.Object({
 			project: Type.Optional(Type.String({ description: "Filter to one project; default considers every project the active mandate covers" })),

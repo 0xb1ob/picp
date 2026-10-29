@@ -130,9 +130,11 @@ test("P23b-next-dispatch: cp_next names no grant without one, dispatches a depen
 	assert.equal(h.escalations().open().filter((item) => item.kind === "mission_end").length, 0, "a project-wide grant invents no mission end on the first close");
 
 	await p.mandate("pause", grant);
-	const paused = (await p.next()).result;
-	assert.equal(paused.action.kind, "paused");
-	assert.match(paused.action.reason, /paused/);
+	const paused = await p.next();
+	assert.equal(paused.result.action.kind, "paused");
+	assert.match(paused.result.action.reason, /paused \(operator\)/);
+	assert.ok(!paused.text.includes(grant), `an operator-paused grant is never named: ${paused.text}`);
+	assert.match(paused.text, /1 grant\(s\) paused by the operator/);
 	await p.mandate("resume", grant);
 	h.shift(48 * HOUR);
 	const lapsed = (await p.next()).result;
@@ -193,7 +195,8 @@ test("P23b-next-slots: parallelism, a held delivery, the job cap and the fleet t
 	await p.mandate("pause", wide);
 	const pausedView = await p.next();
 	assert.deepEqual([pausedView.result.action.kind, pausedView.result.mandate?.live_workers, pausedView.result.fleet_live_workers], ["paused", 0, 4]);
-	assert.match(pausedView.text, new RegExp(`${wide}: paused, 0/3 workers working under this mandate`));
+	assert.match(pausedView.text, /a grant paused by the operator: paused, 0\/3 workers working under this mandate/);
+	assert.ok(!pausedView.text.includes(wide), "the operator-paused grant's id stays out of the text");
 	assert.doesNotMatch(pausedView.text, /workers working across all mandates/);
 	await p.mandate("resume", wide);
 

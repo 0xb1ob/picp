@@ -135,6 +135,53 @@ test("S26: real bridge restart refuses unsupported sessions and restarts a persi
 	assert.equal(provider.remaining("s26-restart"), 0);
 });
 
+// A4: the manual restart and the auto-update restart each woke the parent to the same "nothing ready" answer, and
+// both relayed. The second identical idle wake must be journaled, not relayed; new ready work relays again.
+test("S26: drained restarts relay an identical idle wake once and a changed cp_next state again", { timeout: 180_000 }, async (t) => {
+	const { CpBridge } = await import("../../src/cp-bridge.ts");
+	const { createScratchLedger, waitFor } = await import("../harness/index.ts");
+	const { readFileSync } = await import("node:fs");
+	const home = createScratchHome();
+	const scratch = createScratchLedger({ home: home.path, knownProjects: ["demo"] });
+	const provider = await MockProvider.start();
+	const model = provider.addScript("s26-idle-wake", Array.from({ length: 3 }, () => [
+		{ kind: "tool_calls" as const, calls: [{ name: "cp_next", args: {} }] },
+		{ kind: "text" as const, text: "Nothing is ready to dispatch after the restart." },
+	]).flat());
+	const agent = createAgentDir({ provider });
+	const previous = { ...process.env };
+	Object.assign(process.env, agent.env);
+	const bridge = new CpBridge();
+	t.after(async () => {
+		await bridge.stop();
+		for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key];
+		Object.assign(process.env, previous);
+		agent.cleanup(); await provider.stop(); home.cleanup();
+	});
+	const wakes: string[] = [];
+	bridge.onRelay((relay) => { if (relay.kind === "wake" && relay.text.includes("Nothing is ready")) wakes.push(relay.text); });
+	const journal = join(home.path, LAYOUT.state, "bridge-retry.jsonl");
+	const deduped = () => (existsSync(journal) ? readFileSync(journal, "utf8").split("\n").filter((line) => line.includes('"idle_wake_deduped"')).length : 0);
+	const start = () => bridge.start({ home: home.path, mode: "multi", model, cwd: home.path, commandPostExtension: COMMAND_POST_EXTENSION });
+	const restart = async (relays: number, skipped: number) => {
+		for (let attempt = 0; ; attempt++) {
+			try { await bridge.drain(30); break; } catch (error) { if (attempt > 200) throw error; await new Promise((resolve) => setTimeout(resolve, 50)); }
+		}
+		await bridge.stop();
+		await start();
+		await waitFor(() => [wakes.length, deduped()], ([w, d]) => w === relays && d === skipped, { timeoutMs: 60_000, what: `${relays} idle wake(s), ${skipped} deduped` });
+	};
+	await start();
+	await restart(1, 0);
+	assert.ok(existsSync(join(home.path, LAYOUT.state, "parent-idle-wake.json")), "the relayed idle wake is remembered on disk");
+	await restart(1, 1);
+	await scratch.ledger.create({ title: "New ready work", project: "demo", kind: "ship", delivery: "pr" });
+	await restart(2, 1);
+	await new Promise((resolve) => setTimeout(resolve, 500));
+	assert.deepEqual([wakes.length, deduped()], [2, 1], "nothing else relays or dedupes");
+	assert.equal(provider.remaining("s26-idle-wake"), 0, "each restart ran one cp_next turn");
+});
+
 test("S26: public dispatch gates heal only spent foreign drains and reopen after removal", { timeout: 110_000 }, async (t) => {
 	const { readFileSync, rmSync } = await import("node:fs");
 	const home = createScratchHome();

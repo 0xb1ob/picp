@@ -1228,12 +1228,27 @@ options — the model is never guessed. Either way the resolved id is checked
 against `ctx.modelRegistry` (`registryProbe`) before spawn; an unknown or
 unauthenticated model is refused with the known models, spawning nothing.
 `cp_parent start` also refuses when `state/parent.lock` names a live pid.
+Its result says `start: "clean" | "resumed"` (tool text `started clean|resumed pid=…`): it resumes the saved (or
+`cp-parent.jsonl`) session only when that file exists; `missing` names a saved session pi never wrote (pi persists
+a session only after the parent's first reply). `cp_parent start fresh:true` first renames the file it would
+resume to `cp-parent-<ms>-<uuid8>.jsonl` (returned as `archivedFile`; a failed rename starts nothing), records
+`cp-parent.jsonl` in `cp-parent-control.json`, resets the context tokens and cost, and starts clean there.
 `cp_parent send` writes prose over RPC and returns a `BRIDGE_RECEIPT_LEVELS`
 level, its `send_id`, and the reply when the turn settles honestly within the
 wait. `cp_parent status` reports alive, pid, session file, last reply time,
 open escalations from the store, and `sends` (each unobserved send, plus the
-last 10 observed, with its state and receipt level). `cp_parent stop` is a
-graceful observed close that ends never-landed sends `undeliverable`.
+last 10 observed, with its state and receipt level). `sessionFileOnDisk` is false while the session file is
+not yet written (after a rotation, until the parent replies): the path is where history will go, not history.
+`cp_parent stop` is a graceful observed close that ends never-landed sends `undeliverable`.
+
+**Idle wake dedupe.** A parent run whose only tool call was a `cp_next` with nothing to act on (every grant or run
+`wait`/`paused`/`no_mandate`, nothing ready, no escalation, warning or escalation-blocked job) relays its wake once
+per identical answer: `state/parent-idle-wake.json` keeps the last relayed key (grant ids, status, action kind and
+reason, lined-up job ids) for 24 h, an identical one is journaled `idle_wake_deduped` in `state/bridge-retry.jsonl`
+instead of relayed, and any other relayed wake clears the file (`src/idle-wake.ts`). An unreadable file never
+suppresses. **Operator pauses in `cp_next`.** A grant paused by the operator (`pause_reason: "operator"`) is never
+named in the `cp_next` text: other grants collapse to `N grant(s) paused by the operator — nothing to do`, and a
+primary one reads `a grant paused by the operator: …`. Cap pauses still name their id and the action they need.
 
 **Operator questions.** Before relaying any human question, use `cp_parent ask`
 with `ask: {project, question, options: [{label, consequence}], recommendation}`

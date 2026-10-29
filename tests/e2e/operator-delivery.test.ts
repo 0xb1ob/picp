@@ -125,6 +125,7 @@ test("P9-control: the parent host's session record reopens only existing files a
 	from = logSize();
 	const repaired = await run({ model: parentModel });
 	assert.equal(repaired.sessionFile, fallback, "a missing saved session is not reopened");
+	assert.equal((repaired as { missing?: string }).missing, dangling, "the start reports the saved session it could not resume");
 	assert.match(logSince(from), new RegExp(`saved parent session ${escape(dangling)} is missing; not reopening it`));
 	assert.deepEqual(JSON.parse(readFileSync(control, "utf8")), { sessionFile: fallback, model: parentModel }, "the path is repaired; the saved model is kept");
 	rmSync(join(home.path, layout.data, "parent.json"));
