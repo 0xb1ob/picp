@@ -811,6 +811,7 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 	assert.equal(posts().length, 0, "one tap sends nothing");
 	session.click(confirm);
 	await until(() => shutdowns, (n) => n === 1, "the second tap restarts");
+	await until(() => posts(), (p) => p.length > 0, "the client logs the restart post");
 	assert.deepEqual([posts().length, posts()[0]!.body], [1, '{"restart":true}']);
 	assert.ok(await session.find('.shell-more-dot[aria-label="Restart in progress"]'), "a dot while the restart runs");
 	control.stop();
@@ -869,6 +870,7 @@ test("P18-shell-menu-clean: Restart clean in the ⋮ menu confirms, then posts e
 	assert.equal(posts().length, 0, "one tap sends nothing");
 	tab.click(confirm);
 	await until(() => shutdowns, (n) => n === 1, "the second tap restarts clean");
+	await until(() => posts(), (p) => p.length > 0, "the client logs the clean restart post");
 	assert.deepEqual(posts().map((r) => r.body), ['{"restart":true,"fresh":true}']);
 	assert.equal(JSON.parse(readFileSync(join(v.stateDir, "operator", "relaunch.json"), "utf8")).fresh, true);
 });
@@ -909,6 +911,7 @@ test("P18-parent-restart: the CP parent view's two restart buttons show the gate
 		assert.deepEqual(posts(tab), [], "one tap sends nothing");
 		tab.click(confirm);
 		await until(() => modes.length, (n) => n > 0 && modes.at(-1) === mode, `the second tap restarts (${mode})`);
+		await until(() => posts(tab), (p) => p.length > 0, `the client logs the ${mode} post`);
 		assert.deepEqual(posts(tab), [JSON.stringify({ restart: mode })]);
 	}
 });

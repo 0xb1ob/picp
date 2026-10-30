@@ -1,0 +1,1 @@
+- Test-only: P18 restart e2e cases wait for the tab's client request log before asserting the restart POST, removing a CI flake.
