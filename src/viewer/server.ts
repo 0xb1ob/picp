@@ -25,6 +25,7 @@ import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:z
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { boardView, jobsView, jobView, jobEvents } from "./jobs-view.ts";
+import { ledgerHistoryView } from "./ledger-history.ts";
 import { statsView } from "./stats-view.ts";
 import { statScope } from "./file-cache.ts";
 import { prewarm, warming } from "./prewarm.ts";
@@ -356,6 +357,11 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 		case "/api/jobs":
 			afterWarm(res, options, "jobs", () => sendView(req, res, statScope(() => jobsView(options))));
 			return;
+		case "/api/jobs/history": {
+			const out = statScope(() => ledgerHistoryView(options, url.searchParams, Date.now()));
+			if (out.status === 200) sendView(req, res, out.body); else sendJson(res, out.status, out.body);
+			return;
+		}
 		case "/api/board":
 			afterWarm(res, options, "jobs", () => sendView(req, res, statScope(() => boardView(options))));
 			return;

@@ -131,3 +131,17 @@
  .job-finished { display: flex; }
  .job-row-done .job-cost { margin-left: auto; }
 }
+/* Jobs History (#jobs?view=history): wraps at 390px; long titles, reasons and headlines break instead of overflowing. */
+.jobs-history-link { display: inline-flex; align-items: center; justify-self: start; min-height: 44px; padding: 0 10px; font-size: 13px; color: var(--muted); }
+.jobs-older a { color: inherit; }
+.jobs-history-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; padding: 12px 0; }
+.jobs-history-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; flex: 1 1 140px; }
+.jobs-history-field input, .jobs-history-field select { min-height: 44px; min-width: 0; width: 100%; }
+.jobs-history-search { min-height: 44px; padding: 0 14px; }
+.jobs-history-rows { list-style: none; margin: 0; padding: 0; }
+.jobs-history-row { display: flex; flex-direction: column; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--divider); min-width: 0; overflow-wrap: anywhere; }
+.jobs-history-title { display: flex; flex-wrap: wrap; gap: 4px 10px; min-height: 44px; align-items: center; color: inherit; text-decoration: none; }
+.jobs-history-title code { font-size: 13px; }
+.jobs-history-meta, .jobs-history-reason, .jobs-history-headline { font-size: 12px; color: var(--muted); }
+.jobs-history-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 12px; font-size: 12px; color: var(--dim); }
+.jobs-history-pages a { display: inline-flex; align-items: center; min-height: 44px; }

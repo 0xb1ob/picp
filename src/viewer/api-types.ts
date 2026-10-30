@@ -197,6 +197,13 @@ export interface JobsResponse {
  generated_at: string; awaiting_count: number | null;
  jobs: ViewerJob[]; projects: {name:string; paused:boolean}[]; warnings: {section:string;message:string}[];
 }
+/** `GET /api/jobs/history` (docs/viewer-app.md): closed ledger jobs, filtered and sorted before the page is cut. */
+export interface JobsHistoryResponse {
+ generated_at: string; total: number; offset: number; limit: number; next_offset: number | null;
+ query: {project: string | null; q: string | null; since: string | null; until: string | null; date_field: string};
+ rows: {id: string; title: string; project: string | null; status: string; created_at: string; updated_at: string; closed_at: string | null; close_reason: string | null; dropped: boolean; report_status: "done" | "blocked" | "failed" | null; headline: string | null}[];
+ projects: string[]; warnings: {section: string; message: string}[];
+}
 export interface JobResponse {
  generated_at: string; awaiting_count: number | null; job: ViewerJob;
  timeline: {at:string;label:string;meta:string;tone:string}[]; timeline_truncated: boolean;

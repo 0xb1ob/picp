@@ -205,7 +205,7 @@ open. A fact you attribute to a worker ("found", "confirmed", "reports") comes f
 
 ## Jobs
 
-The ledger records accepted work: `open` → `in_progress` → `closed` with a reason, forever. `cp_job create` (title/project/delivery/kind/`external_ref`); `cp_job ready`/`blocked`; `cp_job dep_add` for real dependencies (cycles refused); `cp_job close`/`drop` always with a reason — never delete.
+The ledger records accepted work: `open` → `in_progress` → `closed` with a reason, forever. `cp_job create` (title/project/delivery/kind/`external_ref`); `cp_job ready`/`blocked`; `cp_job dep_add` for real dependencies (cycles refused); `cp_job close`/`drop` always with a reason — never delete. Older closed work is `cp_job history` (`q`/`since`/`until`/`date_field`, 20 a page, `offset` from the result) — never a whole `cp_job list --all` pulled into context.
 
 ## Status block
 

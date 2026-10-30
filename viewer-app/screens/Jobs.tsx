@@ -1,7 +1,7 @@
 import { useState } from "preact/hooks";
 import type { JobsResponse, ViewerJob } from "../../src/viewer/api-types.ts";
 import { elapsed, money, percent, phaseText, prNumber, shortSha, time } from "../format.ts";
-import { jobHref } from "../routes.ts";
+import { jobHref, jobsHistoryHref } from "../routes.ts";
 import { ContextChip } from "../components/ContextChip.tsx";
 import { JobsViews } from "../components/JobsViews.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
@@ -55,10 +55,10 @@ export function Jobs({data}:{data:JobsResponse}) {
  const {groups, empty} = doneGroups(done, data.projects);
  const more = groups.filter(g => g.items.length > DONE_ROWS && open[g.name] !== true);
  return <div class="jobs-screen"><header class="jobs-heading"><PageHeader title="Jobs"/><div class="jobs-toolbar"><JobsViews current="jobs"/>
- <div class="jobs-segments" role="group" aria-label="Filter jobs">{[["all","All",live.length+team.length+done.length+queued.length],["live","In flight",live.length],["done","Done today",done.length]].map(([key,label,count])=><button type="button" key={key} aria-pressed={filter===key} onClick={()=>setFilter(String(key))}>{label}<span>{count}</span></button>)}</div></div></header>
+ <div class="jobs-segments" role="group" aria-label="Filter jobs">{[["all","All",live.length+team.length+done.length+queued.length],["live","In flight",live.length],["done","Done today",done.length]].map(([key,label,count])=><button type="button" key={key} aria-pressed={filter===key} onClick={()=>setFilter(String(key))}>{label}<span>{count}</span></button>)}</div><a class="jobs-history-link" href={jobsHistoryHref()}>History</a></div></header>
  {filter!=="done" && <section class="jobs-group"><header><h2>In flight · {live.length}</h2><p>held = waiting on CI or review, normal for hours</p></header>{live.length>0 && <JobColumns/>}{live.map(job=><JobRow key={job.id} job={job}/>)}{!live.length && <p class="jobs-empty">Nothing in flight.</p>}</section>}
  {filter==="all" && team.length>0 && <section class="jobs-group"><header><h2>With the team · {team.length}</h2><p>handed off; waiting on a human merge, no worker or slot</p></header><JobColumns/>{team.map(job=><JobRow key={job.id} job={job}/>)}</section>}
  {filter==="all" && queued.length>0 && <section class="jobs-group"><header><h2>Queued · {queued.length}</h2></header>{queued.map(job=><JobRow key={job.id} job={job}/>)}</section>}
- {filter!=="live" && <section class="jobs-group"><header><h2>Done today · {done.length}</h2><p>newest first</p></header>{groups.map(group => <DoneGroup key={group.name} name={group.name} items={group.items} open={open[group.name] === true}/>)}{(more.length > 0 || empty.length > 0) && <div class="jobs-done-foot">{more.map(g => <button type="button" class="jobs-more" key={g.name} onClick={() => setOpen(s => ({...s, [g.name]: true}))}>Show {g.items.length - DONE_ROWS} more from {g.name}</button>)}{empty.length > 0 && <p class="jobs-empty">Nothing done today in {projectList(empty)}.</p>}</div>}{!done.length && !data.projects.length && <p class="jobs-empty">No finished jobs today.</p>}{older>0 && <p class="jobs-older">{older} older finished jobs not shown</p>}</section>}
+ {filter!=="live" && <section class="jobs-group"><header><h2>Done today · {done.length}</h2><p>newest first</p></header>{groups.map(group => <DoneGroup key={group.name} name={group.name} items={group.items} open={open[group.name] === true}/>)}{(more.length > 0 || empty.length > 0) && <div class="jobs-done-foot">{more.map(g => <button type="button" class="jobs-more" key={g.name} onClick={() => setOpen(s => ({...s, [g.name]: true}))}>Show {g.items.length - DONE_ROWS} more from {g.name}</button>)}{empty.length > 0 && <p class="jobs-empty">Nothing done today in {projectList(empty)}.</p>}</div>}{!done.length && !data.projects.length && <p class="jobs-empty">No finished jobs today.</p>}{older>0 && <p class="jobs-older"><a href={jobsHistoryHref()}>{older} older finished jobs in History →</a></p>}</section>}
  </div>;
 }

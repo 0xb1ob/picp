@@ -52,6 +52,105 @@ export function filterJobs(doc: JobsDocument, filter: ListFilter): Job[] {
 	return jobs;
 }
 
+// ---------------------------------------------------------------------------
+// History query: pure and import-free at runtime, so the viewer shares it (tests/viewer-boundary.test.ts).
+// ---------------------------------------------------------------------------
+
+export const HISTORY_DATE_FIELDS = ["created_at", "updated_at", "closed_at"] as const;
+export type HistoryDateField = (typeof HISTORY_DATE_FIELDS)[number];
+export const HISTORY_LIMITS = { page: 20, maxPage: 100, maxQuery: 200, envelopeBytes: 65_536 } as const;
+
+/** The ledger fields a history query reads; a `Job` satisfies it, the viewer maps its raw rows onto it. */
+export interface HistoryJob {
+	id: string;
+	title: string;
+	status: string;
+	labels: readonly string[];
+	created_at: string;
+	updated_at: string;
+	closed_at?: string | undefined;
+	description?: string | undefined;
+	notes?: string | undefined;
+	external_ref?: string | undefined;
+	close_reason?: string | undefined;
+	comments?: readonly { text: string }[] | undefined;
+}
+export interface HistoryQueryInput { project?: string; q?: string; since?: string; until?: string; date_field?: string; limit?: number; offset?: number }
+export interface HistoryQuery { project?: string; q?: string; since?: number; until?: number; dateField: HistoryDateField; order: "asc" | "desc"; limit: number; offset: number }
+export interface HistoryPage<T> { rows: T[]; total: number; next_offset: number | null }
+
+/** A strict UTC instant or `YYYY-MM-DD` (midnight UTC) as epoch ms; throws on anything else or a non-calendar date. */
+function historyDate(name: string, value: string): number {
+	const ms = /^\d{4}-\d\d-\d\d(?:T\d\d:\d\d:\d\d(?:\.\d{1,3})?Z)?$/.test(value) ? Date.parse(value) : NaN;
+	if (!Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== value.slice(0, 10)) {
+		throw new Error(`${name} must be a UTC instant (YYYY-MM-DDTHH:MM:SSZ) or a date (YYYY-MM-DD), got ${JSON.stringify(value)}`);
+	}
+	return ms;
+}
+
+/** Validate a history query: dates are `[since, until)`, a page is 1..100 rows (default 20). Throws a named refusal. */
+export function historyQuery(input: HistoryQueryInput, defaults: { dateField: HistoryDateField; order: "asc" | "desc" }): HistoryQuery {
+	const dateField = input.date_field ?? defaults.dateField;
+	if (!(HISTORY_DATE_FIELDS as readonly string[]).includes(dateField)) throw new Error(`date_field must be one of ${HISTORY_DATE_FIELDS.join("|")}`);
+	const limit = input.limit ?? HISTORY_LIMITS.page;
+	if (!Number.isInteger(limit) || limit < 1 || limit > HISTORY_LIMITS.maxPage) throw new Error(`limit must be an integer 1..${HISTORY_LIMITS.maxPage}`);
+	const offset = input.offset ?? 0;
+	if (!Number.isInteger(offset) || offset < 0) throw new Error("offset must be a non-negative integer");
+	const q = input.q?.trim();
+	if (q && q.length > HISTORY_LIMITS.maxQuery) throw new Error(`q is at most ${HISTORY_LIMITS.maxQuery} characters`);
+	const since = input.since === undefined ? undefined : historyDate("since", input.since);
+	const until = input.until === undefined ? undefined : historyDate("until", input.until);
+	if (since !== undefined && until !== undefined && since >= until) throw new Error("since must be before until");
+	return {
+		dateField: dateField as HistoryDateField, order: defaults.order, limit, offset,
+		...(input.project ? { project: input.project } : {}), ...(q ? { q } : {}),
+		...(since !== undefined ? { since } : {}), ...(until !== undefined ? { until } : {}),
+	};
+}
+
+/**
+ * Filter, sort and only then page `jobs`. Text is a literal, case-insensitive match over id, title, description, notes,
+ * labels, external ref, close reason, comments and the accepted headline (`headline` is asked only when the rest misses).
+ */
+export function runHistoryQuery<T extends HistoryJob>(jobs: readonly T[], query: HistoryQuery, headline: (job: T) => string | undefined = () => undefined): HistoryPage<T> {
+	const at = (job: T): number => {
+		const value = job[query.dateField];
+		return value ? Date.parse(value) : NaN;
+	};
+	const needle = query.q?.toLowerCase();
+	const matches = (job: T): boolean => {
+		if (!needle) return true;
+		const fields = [job.id, job.title, job.description, job.notes, ...job.labels, job.external_ref, job.close_reason, ...(job.comments ?? []).map((c) => c.text)];
+		return fields.some((field) => field?.toLowerCase().includes(needle)) || (headline(job)?.toLowerCase().includes(needle) ?? false);
+	};
+	const sign = query.order === "desc" ? -1 : 1;
+	const hits = jobs
+		.filter((job) => {
+			if (query.project && !job.labels.includes(`${LABEL_PREFIX.project}${query.project}`)) return false;
+			if (query.since !== undefined || query.until !== undefined) {
+				const time = at(job);
+				if (!Number.isFinite(time) || (query.since !== undefined && time < query.since) || (query.until !== undefined && time >= query.until)) return false;
+			}
+			return matches(job);
+		})
+		.sort((a, b) => {
+			const [x, y] = [at(a), at(b)];
+			if (Number.isFinite(x) !== Number.isFinite(y)) return Number.isFinite(x) ? -1 : 1; // undated rows last
+			return (Number.isFinite(x) && x !== y ? sign * (x - y) : 0) || a.id.localeCompare(b.id);
+		});
+	const rows = hits.slice(query.offset, query.offset + query.limit);
+	return { rows, total: hits.length, next_offset: query.offset + rows.length < hits.length ? query.offset + rows.length : null };
+}
+
+/** An accepted envelope file's status and first summary line; undefined unless it is a done/blocked/failed report. */
+export function envelopeHeadline(file: unknown): { status: "done" | "blocked" | "failed"; headline: string } | undefined {
+	const envelope = (file as { envelope?: { status?: unknown; summary?: unknown } } | null)?.envelope;
+	const status = envelope?.status;
+	if (typeof envelope?.summary !== "string" || (status !== "done" && status !== "blocked" && status !== "failed")) return undefined;
+	const headline = envelope.summary.split("\n").find((line) => line.trim())?.trim();
+	return headline ? { status, headline } : undefined;
+}
+
 /**
  * The `risk:` label a composed routing earns (cp-yxgl review): an **assessed** high only — a
  * `defaulted`/`inferred` axis is nobody's record — replacing a stale low rather than sitting
