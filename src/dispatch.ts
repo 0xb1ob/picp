@@ -828,6 +828,8 @@ export class Dispatcher {
 
 			// --- 8. the ledger learns last: a claim is only true once it is ---
 			await options.ledger.claim(issue.id, issue.id).catch(async (error) => { await options.fleet.remove(issue.id); throw error; });
+			// A worker that reported and settled before its record existed had both intake triggers refused; replay them.
+			await options.intake?.intake(issue.id).catch(() => undefined);
 			return {
 				job_id: issue.id,
 				...(mandateId ? { mandate_id: mandateId } : {}),
