@@ -5,9 +5,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
-import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { LAYOUT, MINIMAL_PLAN_SUMMARY, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { parentSkillPaths } from "../../src/cp-bridge.ts";
@@ -31,7 +32,7 @@ import {
 type End = RpcRecord & { toolCallId: string; isError?: boolean; result?: { content?: Array<{ text?: string }> } };
 
 /** A scratch home with project demo cloned onto a treehouse pool, and a mock provider for every pi. */
-async function schedulesHome(t: TestContext, options: { held?: boolean; cloneUrl?: string; skills?: boolean; files?: Record<string, string> } = {}) {
+async function schedulesHome(t: TestContext, options: { held?: boolean; cloneUrl?: string; skills?: boolean; files?: Record<string, string>; env?: NodeJS.ProcessEnv } = {}) {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n", ...options.files } });
 	const scratch = createScratchLedger({ home: home.path, knownProjects: ["demo"] });
@@ -69,7 +70,7 @@ async function schedulesHome(t: TestContext, options: { held?: boolean; cloneUrl
 		/** A parent pi on this home: prompts `prompt` (the operator's words), runs `steps`, then `settle` each later turn. */
 		async parent(prompt: string, steps: ScriptStep[], settle: ScriptStep = { kind: "text", text: "P13 parent settled." }): Promise<PiChild> {
 			const child = startPiChild({ cwd: home.path, model: model("parent", [...steps, settle]),
-				env: { ...agent.env, ...holdEnv, CP_HOME: home.path, CP_VIEWER_HOST: "127.0.0.1" }, extensions: [COMMAND_POST_EXTENSION],
+				env: { ...agent.env, ...holdEnv, CP_HOME: home.path, CP_VIEWER_HOST: "127.0.0.1", ...options.env }, extensions: [COMMAND_POST_EXTENSION],
 				// CP_VIEWER_HOST: a board receipt needs a viewer host, and a CI runner has no tailnet address.
 				// The parent's skills as cp-bridge launches it.
 				...(options.skills ? { extraArgs: parentSkillPaths(home.path).flatMap((path) => ["--skill", path]) } : {}) });
@@ -1301,8 +1302,8 @@ test("P13c native policy and run options: add saves a report-only revision 1 or 
 });
 
 /** A native cp-self-review schedule on a fresh home, and one mock model that files each reader's or S1's report. */
-async function selfReviewHome(t: TestContext) {
-	const h = await schedulesHome(t);
+async function selfReviewHome(t: TestContext, env?: NodeJS.ProcessEnv) {
+	const h = await schedulesHome(t, { env });
 	const run = () => h.runs().runs().filter((entry) => entry.schedule_id === h.idOf("self-review")).at(-1)!;
 	const roleIds = () => Object.fromEntries(run().members.filter((member) => member.role).map((member) => [member.role, member.job_id])) as Record<string, string>;
 	const reader = h.model("reader", [{ kind: "tool_calls", calls: [{ name: "report_result", args: (request: { body: unknown }) => {
@@ -1401,4 +1402,51 @@ test("P13c native self-review: a reader dropped by the parent before it starts d
 	assert.equal(fleetOf(ids.S1!), undefined, "S1 never starts without all six reports");
 	assert.deepEqual([fleetOf(ids.L5!), fleetOf(ids.L6!)], [undefined, undefined], "a failed or dropped reader never starts");
 	assert.match((await h.ledger.show(run().anchor_job_id!)).close_reason ?? "", /^dropped: self-review run .* without a synthesis/);
+});
+
+// CI run 41012228348: the parent read a reader's prompt response, report_result and agent_settled in one stdout chunk,
+// before dispatch wrote its fleet record; both intakes found no record and L1 sat `waiting/in_progress` forever. The shim
+// forces that read for every worker: it holds a prompt's response and everything after it until the run settles.
+test("P13c native self-review: readers that report before dispatch records them are still taken in, and the run closes", { timeout: 300_000 }, async (t) => {
+	const bin = mkdtempSync(join(tmpdir(), "cp-batched-pi-"));
+	t.after(() => rmSync(bin, { recursive: true, force: true }));
+	const realPi = (process.env.PATH ?? "").split(delimiter).map((dir) => join(dir, "pi")).find((file) => existsSync(file))!;
+	const batches = join(bin, "batches.log");
+	writeFileSync(join(bin, "pi"), `#!${process.execPath}
+const { spawn } = require("node:child_process");
+const { appendFileSync } = require("node:fs");
+const worker = Boolean(process.env.CP_JOB_ID);
+const child = spawn(${JSON.stringify(realPi)}, process.argv.slice(2), { stdio: ["inherit", worker ? "pipe" : "inherit", "inherit"] });
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, () => child.kill(signal));
+child.on("close", (code) => process.exit(code ?? 1));
+let rest = "", held = null;
+if (worker) child.stdout.setEncoding("utf8").on("data", (chunk) => {
+	const lines = (rest + chunk).split("\\n");
+	rest = lines.pop();
+	for (const line of lines) {
+		let record = {};
+		try { record = JSON.parse(line); } catch {}
+		if (held) {
+			held.push(line);
+			if (record.type !== "agent_settled") continue;
+			process.stdout.write(held.join("\\n") + "\\n");
+			appendFileSync(${JSON.stringify(batches)}, "batched\\n");
+			held = null;
+		} else if (record.type === "response" && record.command === "prompt") held = [line];
+		else process.stdout.write(line + "\\n");
+	}
+});
+`);
+	chmodSync(join(bin, "pi"), 0o755);
+	const { h, run, add, runNow, admitted, closed } = await selfReviewHome(t, { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` });
+	const parent = await h.parent("P13c: Add the self-review schedule.", [
+		{ kind: "tool_calls", calls: [add] },
+		{ kind: "tool_calls", calls: [runNow("run")] },
+		{ kind: "text", text: "Started." },
+	]);
+	assertCall(ends(parent), "run", "ok", /fired: created cp-/);
+	await admitted();
+	await closed("the run closed");
+	assert.equal(run().outcome, "completed");
+	assert.equal(readFileSync(batches, "utf8").split("\n").filter(Boolean).length, 7, "every reader and S1 reported in one batched read");
 });

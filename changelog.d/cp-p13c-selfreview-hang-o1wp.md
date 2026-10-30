@@ -1,0 +1,1 @@
+- Dispatch: a worker that reports and settles before dispatch has written its fleet record is now taken in. Before, both intake triggers were refused ("no fleet record") and the job sat `waiting` forever. This was the P13c native self-review hang (L1 `waiting/in_progress`). Migration: none.
