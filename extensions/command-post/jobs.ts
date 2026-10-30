@@ -5,7 +5,7 @@
  *    argument typed in the schema so a malformed call is refused at the
  *    boundary. It returns the affected job (or the list) and never anything
  *    the ledger does not store.
- *  - **`/cp-jobs`** is the operator's: `ready`, `list` and `show`, all read-only.
+ *  - **`/cp-jobs`** is the operator's: `ready`, `list`, `history` and `show`, all read-only.
  *
  * Three refusals live here and not in `Ledger`, because the model is the only
  * caller that could make them by accident: closing a job a live worker holds
@@ -23,6 +23,8 @@ import { addTaskAddendum } from "../../src/task-addenda.ts";
 import { DELIVERIES, JOB_KINDS, JOB_STATUSES, jobLabelErrors, type Job, type JobStatus, RISK_CRITERIA, RISKS, type Runtime } from "../../src/contracts.ts";
 import { type EscalationStore, raiseConflictingRef } from "../../src/escalation.ts";
 import { type Ledger, assertScriptIntake, formatJobLabels, parseJobLabels } from "../../src/ledger.ts";
+import { HISTORY_DATE_FIELDS, HISTORY_LIMITS, type HistoryQueryInput } from "../../src/ledger-filter.ts";
+import { formatHistory, historyDetails, isQueryList, queryJobs } from "../../src/job-history.ts";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { admitScheduledMember, readSchedulesOrEmpty, scheduleLabelRefusal, scheduleRiskRefusal } from "../../src/schedule-expand.ts";
 import { openScheduleRunStore, type ScheduleRunStore } from "../../src/schedule-runs.ts";
@@ -32,6 +34,7 @@ export const JOB_ACTIONS = [
 	"create",
 	"show",
 	"list",
+	"history",
 	"ready",
 	"blocked",
 	"claim",
@@ -55,7 +58,7 @@ export const JobActionSchema = Type.Object(
 		action: StringEnum([...JOB_ACTIONS]),
 		job_id: Type.Optional(Type.String({ description: "show/claim/update/comment/amend/dep_*/close/drop: the job" })),
 		title: Type.Optional(Type.String({ description: "create: the job title (a question, for Q&A; a one-line task otherwise)" })),
-		project: Type.Optional(Type.String({ description: "create: a registered project name; list/ready: filter" })),
+		project: Type.Optional(Type.String({ description: "create: a registered project name; list/ready/history: filter" })),
 		delivery: Type.Optional(StringEnum([...DELIVERIES], { description: "create: pr|local (pipeline and answer come from cp_pipeline / cp_ask); list: filter" })),
 		kind: Type.Optional(StringEnum([...JOB_KINDS], { description: "create: ship|research; list: filter" })),
 		risk: Type.Optional(StringEnum([...RISKS], { description: `create: what a mistake costs, recorded on the job as a risk:<low|high> label (explicit). The risk:high gate reads it: a recorded low turns a keyword-only high into a warning, a recorded high always gates. ${RISK_CRITERIA}` })),
@@ -71,7 +74,12 @@ export const JobActionSchema = Type.Object(
 		labels: Type.Optional(Type.Array(Type.String(), { description: "create: extra labels (remote-host ops job: one ops:<pull|deploy|process>, any resource:<name>, kind research, delivery local); list: AND filter" })),
 		status: Type.Optional(StringEnum([...JOB_STATUSES], { description: "update: open|in_progress|deferred (never closed); list: filter" })),
 		all: Type.Optional(Type.Boolean({ description: "list: include closed jobs" })),
-		limit: Type.Optional(Type.Integer({ minimum: 0, description: "list: page size; 0 or absent = unlimited" })),
+		limit: Type.Optional(Type.Integer({ minimum: 0, description: `list: page size; 0 or absent = unlimited. history, or list with q/since/until/date_field/offset: 1..${HISTORY_LIMITS.maxPage}, default ${HISTORY_LIMITS.page}` })),
+		q: Type.Optional(Type.String({ maxLength: HISTORY_LIMITS.maxQuery, description: "history/list: literal, case-insensitive text over id, title, description, notes, labels, ref, close reason, comments and accepted headline" })),
+		since: Type.Optional(Type.String({ description: "history/list: UTC instant or YYYY-MM-DD (midnight UTC), inclusive" })),
+		until: Type.Optional(Type.String({ description: "history/list: UTC instant or YYYY-MM-DD (midnight UTC), exclusive" })),
+		date_field: Type.Optional(StringEnum([...HISTORY_DATE_FIELDS], { description: "history/list: the date since/until and the order read (history default closed_at, newest first; list created_at, oldest first)" })),
+		offset: Type.Optional(Type.Integer({ minimum: 0, description: "history/list: rows to skip; pass a result's next offset" })),
 		notes: Type.Optional(Type.String({ description: "update: replace the notes" })),
 		add_labels: Type.Optional(Type.Array(Type.String())),
 		remove_labels: Type.Optional(Type.Array(Type.String())),
@@ -176,6 +184,7 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 	const runs = ports.runs ?? openScheduleRunStore(ledger.home);
 	if (params.script_path !== undefined && params.action !== "create") throw new Error("script_path is create only");
 	if (params.risk !== undefined && params.action !== "create") throw new Error("risk is create only; change a recorded risk with cp_job update add_labels/remove_labels (risk:<low|high>)");
+	if (isQueryList(params) && params.action !== "list" && params.action !== "history") throw new Error("q, since, until, date_field and offset are history/list only");
 	switch (params.action) {
 		case "create": {
 			const delivery = need(params, "delivery");
@@ -247,7 +256,22 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 			const blockers = await Promise.all(job.blocked_by.map((id) => ledger.show(id).catch(() => undefined)));
 			return { text: formatJobDetail(job, blockers.filter((b): b is Job => b !== undefined)), details: { job } };
 		}
+		case "history":
 		case "list": {
+			if (params.action === "history" || isQueryList(params)) {
+				const input: HistoryQueryInput = {
+					...(params.project ? { project: params.project } : {}), ...(params.q !== undefined ? { q: params.q } : {}),
+					...(params.since !== undefined ? { since: params.since } : {}), ...(params.until !== undefined ? { until: params.until } : {}),
+					...(params.date_field !== undefined ? { date_field: params.date_field } : {}), ...(params.limit !== undefined ? { limit: params.limit } : {}),
+					...(params.offset !== undefined ? { offset: params.offset } : {}),
+				};
+				const filter = {
+					...(params.delivery ? { delivery: params.delivery } : {}), ...(params.kind ? { kind: params.kind } : {}), ...(params.labels ? { labels: params.labels } : {}),
+					...(params.action === "list" && params.status ? { status: params.status as JobStatus } : {}), ...(params.action === "list" && params.all ? { all: true } : {}),
+				};
+				const result = queryJobs(ledger.home, params.action, input, filter);
+				return { text: formatHistory(result), details: historyDetails(result) };
+			}
 			const jobs = await ledger.list({
 				...(params.project ? { project: params.project } : {}),
 				...(params.delivery ? { delivery: params.delivery } : {}),
@@ -357,9 +381,10 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 export type JobsCommand =
 	| { kind: "ready"; project?: string }
 	| { kind: "list"; project?: string; all: boolean; status?: JobStatus }
+	| { kind: "history"; query: HistoryQueryInput }
 	| { kind: "show"; jobId: string };
 
-const USAGE = "usage: /cp-jobs [ready [--project N] | list [--all] [--status S] [--project N] | show <job-id>]";
+const USAGE = "usage: /cp-jobs [ready [--project N] | list [--all] [--status S] [--project N] | history [--project N] [--q TEXT] [--since D] [--until D] [--date-field F] [--limit N] [--offset N] | show <job-id>]";
 
 export function parseJobsArgs(args: string): JobsCommand {
 	const tokens = args.trim().split(/\s+/).filter(Boolean);
@@ -384,6 +409,23 @@ export function parseJobsArgs(args: string): JobsCommand {
 				throw new Error(`/cp-jobs list: --status must be one of ${JOB_STATUSES.join("|")}`);
 			}
 			return { kind: "list", all: rest.includes("--all"), ...(project ? { project } : {}), ...(status ? { status: status as JobStatus } : {}) };
+		}
+		case "history": {
+			// `--q` takes every word up to the next flag, so a phrase needs no quoting.
+			const at = rest.indexOf("--q");
+			const end = rest.findIndex((token, index) => index > at && token.startsWith("--"));
+			const words = at < 0 ? [] : rest.slice(at + 1, end < 0 ? undefined : end);
+			if (at >= 0 && words.length === 0) throw new Error(`/cp-jobs: --q needs a value — ${USAGE}`);
+			const count = (name: string): number | undefined => {
+				const value = flag(name);
+				if (value !== undefined && !/^\d+$/.test(value)) throw new Error(`/cp-jobs history: ${name} must be a non-negative integer`);
+				return value === undefined ? undefined : Number(value);
+			};
+			const [project, since, until, dateField, limit, offset] = [flag("--project"), flag("--since"), flag("--until"), flag("--date-field"), count("--limit"), count("--offset")];
+			return { kind: "history", query: {
+				...(project ? { project } : {}), ...(words.length > 0 ? { q: words.join(" ") } : {}), ...(since ? { since } : {}), ...(until ? { until } : {}),
+				...(dateField ? { date_field: dateField } : {}), ...(limit !== undefined ? { limit } : {}), ...(offset !== undefined ? { offset } : {}),
+			} };
 		}
 		case "show": {
 			const jobId = rest[0];
@@ -444,10 +486,10 @@ export function registerJobs(pi: ExtensionAPI, ports: JobsRegistration): void {
 		name: "cp_job",
 		label: "Jobs ledger",
 		description:
-			"The job ledger: create a job (project + delivery labels are the dispatchability contract), show/list/ready/blocked, " +
+			"The job ledger: create a job (project + delivery labels are the dispatchability contract), show/list/ready/blocked, history (closed jobs, newest close first, paged, q/since/until search), " +
 			"claim, update, comment, amend scope with a verified operator quote, add or remove a blocking dependency, close or drop with a reason. Pipelines come from cp_pipeline, " +
 			"Q&A jobs from cp_ask; finished research/answer close on cp_teardown and ship on cp_integrate; a live worker is refused here.",
-		promptSnippet: "Record and query jobs in the ledger: create/show/list/ready/blocked/claim/update/comment/amend/dep_add/dep_remove/close/drop (cp_job)",
+		promptSnippet: "Record and query jobs in the ledger: create/show/list/history/ready/blocked/claim/update/comment/amend/dep_add/dep_remove/close/drop (cp_job)",
 		promptGuidelines: [
 			"Every job needs project (a registered name) and delivery (pr|local); add kind ship|research when it helps routing.",
 			"Pass risk on cp_job create only when the operator or the spec states it (never invent it): a recorded low turns a keyword-only risk:high into a warning, a recorded high always gates.",
@@ -469,9 +511,9 @@ export function registerJobs(pi: ExtensionAPI, ports: JobsRegistration): void {
 	});
 
 	pi.registerCommand("cp-jobs", {
-		description: "The job ledger: ready (default), list [--all] [--status S] [--project N], show <job-id>",
+		description: "The job ledger: ready (default), list [--all] [--status S] [--project N], history [--project N] [--q TEXT] [--since D] [--until D] [--date-field F] [--limit N] [--offset N], show <job-id>",
 		getArgumentCompletions: (prefix: string) => {
-			const words = ["ready", "list", "show", "--all", "--status", "--project"]
+			const words = ["ready", "list", "history", "show", "--all", "--status", "--project", "--q", "--since", "--until", "--date-field", "--limit", "--offset"]
 				.filter((word) => word.startsWith(prefix))
 				.map((word) => ({ value: word, label: word }));
 			return words.length > 0 ? words : null;
@@ -498,6 +540,9 @@ export function registerJobs(pi: ExtensionAPI, ports: JobsRegistration): void {
 								p,
 							)
 						).text;
+						break;
+					case "history":
+						text = (await runJobAction({ action: "history", ...command.query } as JobActionInput, p)).text;
 						break;
 					case "show":
 						text = (await runJobAction({ action: "show", job_id: command.jobId }, p)).text;

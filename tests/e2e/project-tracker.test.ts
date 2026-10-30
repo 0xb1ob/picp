@@ -216,7 +216,7 @@ test("P15-jobs-lifecycle: cp_job records, queries, gates and closes jobs, and /c
 	for (const call of ["retired-type", "retired-priority", "unnamed"]) failed(ends, call, /must not have additional properties/);
 	const actions = s.requests()[0]?.body.tools?.map((tool) => tool as { function?: { name?: string; parameters?: { properties?: { action?: { enum?: string[] } } } } })
 		.find((tool) => tool.function?.name === "cp_job")?.function?.parameters?.properties?.action?.enum;
-	assert.deepEqual(actions, ["create", "show", "list", "ready", "blocked", "claim", "update", "comment", "amend", "dep_add", "dep_remove", "close", "drop"]);
+	assert.deepEqual(actions, ["create", "show", "list", "history", "ready", "blocked", "claim", "update", "comment", "amend", "dep_add", "dep_remove", "close", "drop"]);
 
 	const fresh = notes.slice(-8);
 	const line = (job: Job) => new RegExp(`^${job.id}\\s+\\S+\\s+\\S+\\s+\\S+\\s+${job.title}$`, "m");

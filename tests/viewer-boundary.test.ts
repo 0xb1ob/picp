@@ -19,8 +19,15 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 		for (const match of text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)"/gm)) {
 			if (match[1]) continue;
 			if (name === "build.ts" && match[2] === "esbuild") continue;
-			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$|^\.\.\/forge-url\.ts$|^\.\.\/service\/daemon-tunnel-files\.ts$|^\.\.\/push\/test-push\.ts$/, `${name} imports ${match[2]}`);
+			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$|^\.\.\/forge-url\.ts$|^\.\.\/ledger-filter\.ts$|^\.\.\/service\/daemon-tunnel-files\.ts$|^\.\.\/push\/test-push\.ts$/, `${name} imports ${match[2]}`);
 			if (match[2] === "../grant-order.ts") assert.equal(name, "overview-jobs.ts", "only the shared dependency-free comparator crosses the viewer boundary");
+			// P2 job history: only the history route shares the pure query, and only while it has no runtime import or write.
+			if (match[2] === "../ledger-filter.ts") {
+				assert.equal(name, "ledger-history.ts", "only the history route shares the pure ledger query");
+				const helper = readFileSync(join(VIEWER, "..", "ledger-filter.ts"), "utf8");
+				assert.doesNotMatch(helper, /^import\s+(?!type\b)|\bimport\s*\(|\brequire\s*\(/m, "ledger-filter.ts may cross the viewer boundary only with type-only imports");
+				assert.doesNotMatch(helper, /node:|writeFile|appendFile|mkdir|rename|unlink|rmSync/, "ledger-filter.ts reads and writes no file");
+			}
 			// #328: the test-notification send (VAPID, journal) lives in src/push; only the test route reaches it.
 			if (match[2] === "../push/test-push.ts") assert.equal(name, "push-api.ts", "only the push test route sends a push");
 			if (match[2] === "../forge-url.ts") assert.doesNotMatch(readFileSync(join(VIEWER, "..", "forge-url.ts"), "utf8"), /^\s*import\b|\bimport\s*\(|\brequire\s*\(/m, "forge-url.ts may cross the viewer boundary only while it imports nothing");

@@ -50,6 +50,7 @@ import { operatorCacheWarming } from "../../src/operator-cache-warming.ts";
 import { AskGuard, lastAssistantText } from "../../src/ask-guard.ts";
 import { HeaderGuard } from "../../src/header-guard.ts";
 import { operatorStartContext } from "../../src/operator-context.ts";
+import { OperatorJobsQuerySchema, operatorJobs } from "../../src/operator-ledger.ts";
 import { ALWAYS_AVAILABLE, registryProbe } from "../../src/routing.ts";
 import { detectCiWait, detectSleepLoop } from "../../src/ci-wait.ts";
 import { canonicalCloneRefusal } from "../../src/guards.ts";
@@ -591,11 +592,11 @@ export default function (pi: ExtensionAPI): void {
 			"Own the CP parent over RPC. start spawns it, send delivers prose and returns a receipt level " +
 			"(injected, turn_settled, http_accepted, owner_observed — never 'accepted') plus the reply when the turn settles, " +
 			"status reports the process, context tokens, open escalations, operator asks and sends; ask, ask_answer and ask_withdraw record operator questions only and never authorize parent actions (ask: a short question, the background in context); doctor and version read the parent's diagnostics, mode and home; drain stops new dispatches, promotions and merge steps and waits (timeout_s) for live workers to settle before a restart (freeze: true first steers each mid-turn implementer to push its WIP and end its turn unreported); drain_cancel withdraws a draining or timed-out drain or a drained record an earlier parent left (never this parent's own); compact, rotate and model manage the live parent; stop closes it, never-landed sends undeliverable; stop and rotate say whether the parent was drained or how many live workers they kill. Fleet tools stay on the parent, not here. " +
-			"integration_hold and integration_release write a durable per-job merge pause directly, without waiting for a parent turn. " +
+			"integration_hold and integration_release write a durable per-job merge pause directly, without waiting for a parent turn. jobs (mode list/history/show, q/since/until/date_field/limit/offset) reads the job ledger directly, read-only, with or without a parent. " +
 			"answer posts an answer the human asked for (their question, your answer, evidence, the research job it lands) to the dashboard's Answers to acknowledge list (state/operator/answers.jsonl) directly, without a parent turn; bookkeeping only, never pushed. " +
 			"Relays name paths (state/runs/<id>/artifact.md, gate files); this session may read those bodies. The parent may not. " +
 			"When answering on the human's behalf, send delegated:true and delegation_rule; omit delegated when relaying the human's own answer.",
-		promptSnippet: "Drive the CP parent (cp_parent start/send/status/ask/ask_answer/ask_withdraw/answer/doctor/version/drain/drain_cancel/compact/rotate/model/stop)",
+		promptSnippet: "Drive the CP parent (cp_parent start/send/status/ask/ask_answer/ask_withdraw/answer/doctor/version/drain/drain_cancel/compact/rotate/model/stop) and read job history (cp_parent jobs)",
 		promptGuidelines: [
 			"Call cp_parent start once with home (mode is always multi and may be omitted); pass model only when the human named one, " +
 				"otherwise omit it and the bridge uses your own. A live lock holder is a refusal.",
@@ -613,7 +614,8 @@ export default function (pi: ExtensionAPI): void {
 			"Every relay to the human starts with its bracketed project, e.g. [demo-app] cp-78vu: \u2026; split an update spanning several projects into one section per project.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "doctor", "version", "drain", "drain_cancel", "compact", "rotate", "model", "restart", "stop"], { description: "manage or diagnose the parent" }),
+			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "doctor", "version", "drain", "drain_cancel", "compact", "rotate", "model", "restart", "stop", "jobs"], { description: "manage or diagnose the parent; jobs reads the ledger directly" }),
+			jobs: Type.Optional(OperatorJobsQuerySchema),
 			timeout_s: Type.Optional(Type.Number({ minimum: 0, maximum: DRAIN_MAX_TIMEOUT_S, description: `drain: seconds to wait for live workers to settle (default ${DRAIN_DEFAULT_TIMEOUT_S})` })),
 			freeze: Type.Optional(Type.Boolean({ description: "drain: also steer each mid-turn implementer to commit and push its WIP and end its turn without reporting (before a usage pause)" })),
 			home: Type.Optional(Type.String({ description: "start: command-post home path" })),
@@ -635,6 +637,7 @@ export default function (pi: ExtensionAPI): void {
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			try {
+				if (params.action === "jobs") { const read = operatorJobs(connectedTarget ?? resolveOperatorTarget(), params.jobs); return textResult(read.text, read.details); }
 				if (params.action === "integration_hold" || params.action === "integration_release") {
 					if (!params.job_id) throw new CpBridgeError(`${params.action} needs job_id`);
 					const target = connectedTarget ?? resolveOperatorTarget();
@@ -786,7 +789,7 @@ export default function (pi: ExtensionAPI): void {
 				);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				return { ...textResult(message), ...(["doctor", "version", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release"].includes(params.action) ? { isError: true } : {}) };
+				return { ...textResult(message), ...(["doctor", "version", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "jobs"].includes(params.action) ? { isError: true } : {}) };
 			}
 		},
 	});

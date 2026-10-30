@@ -522,10 +522,12 @@ export class Ledger {
 			.filter((job) => job.status !== "closed" && openBlockersOf(doc, job.id).length > 0);
 	}
 
-	/** Closed jobs are the job history; newest close first. */
+	/** Closed jobs are the job history; newest close first, sorted before `limit` cuts. */
 	async history(filter: Omit<ListFilter, "status" | "all"> = {}): Promise<Job[]> {
-		return filterJobs(this.read(), { ...filter, status: "closed" })
+		const { limit, ...rest } = filter;
+		const jobs = filterJobs(this.read(), { ...rest, status: "closed" })
 			.sort((a, b) => (b.closed_at ?? "").localeCompare(a.closed_at ?? "") || a.id.localeCompare(b.id));
+		return limit !== undefined && limit > 0 ? jobs.slice(0, limit) : jobs;
 	}
 
 	/** Unresolved blockers of one job. The fail-closed pre-dispatch check. */

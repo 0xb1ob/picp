@@ -43,6 +43,8 @@ export function route(hash: string): Route {
   return {...fallback,screen:screen as "sessions" | "files" | "stats",query:screen === "sessions" ? params.toString() : query.join("?"),...(defaulted ? {defaulted} : {})};
  }
  if (value === "jobs" || value === "board" || value === "reports" || value === "schedules") return {...fallback,screen:value};
+ // Jobs History keeps its filters in the hash: `#jobs?view=history&q=…` (jobsHistoryHref).
+ if (/^jobs\?view=history(?:&|$)/.test(hash.replace(/^#/,""))) return {...fallback,screen:"jobs",query:hash.replace(/^#jobs\?/,"")};
  // `?tab=transcript` is the one Job query (jobTranscriptHref); any other query is not a job route.
  const job=/^job\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(\?tab=transcript)?$/.exec(value);
  if (job) return {...fallback,screen:"job",jobId:job[1]!,...(job[2] ? {query:"tab=transcript"} : {})};
@@ -89,3 +91,9 @@ export const jobHref = (id: string): string => JOB_ID.test(id) ? `#job/${encodeU
 export const jobTranscriptHref = (id: string): string => JOB_ID.test(id) ? `#job/${encodeURIComponent(id)}?tab=transcript` : "#jobs";
 /** A job's report.md as a readable page: a stable, shareable link that opens on a fresh load. */
 export const reportHref = (id: string): string => JOB_ID.test(id) ? `#report/${encodeURIComponent(id)}` : "#reports";
+/** Jobs History with its filters; empty values are left out so the hash stays short. */
+export const jobsHistoryHref = (filters: Record<string, string | number | null | undefined> = {}): string => {
+ const query = new URLSearchParams({view:"history"});
+ for (const [key,value] of Object.entries(filters)) if (value !== null && value !== undefined && String(value).trim()) query.set(key,String(value).trim());
+ return `#jobs?${query}`;
+};
