@@ -8,6 +8,7 @@ import { configureLayout, type Mode } from "./contracts.ts";
 import { formatHistory, historyDetails, queryJobs } from "./job-history.ts";
 import { HISTORY_DATE_FIELDS, HISTORY_LIMITS } from "./ledger-filter.ts";
 import { readJobsDocument } from "./ledger.ts";
+import { handoffsForJob } from "./viewer/handoffs-view.ts";
 
 export const OperatorJobsQuerySchema = Type.Object(
 	{
@@ -38,7 +39,12 @@ export function operatorJobs(target: { home: string; mode: Mode }, query: Operat
 		if (job.external_ref) lines.push(`  ref:     ${job.external_ref}`);
 		if (job.status === "closed") lines.push(`  closed:  ${job.closed_at}  ${job.close_reason}`);
 		for (const comment of job.comments) lines.push(`  comment: ${comment.at} ${comment.author}: ${comment.text}`);
-		return { text: lines.join("\n"), details: { job } };
+		// P6: handoff paths naming this job exactly, newest first; pointers only, never a note body.
+		const handoffs = handoffsForJob(target.home, job.id);
+		for (const path of handoffs.paths.slice(0, 5)) lines.push(`  handoff: ${path}`);
+		if (handoffs.paths.length > 5) lines.push(`  handoff: … ${handoffs.paths.length - 5} older`);
+		if (!handoffs.complete) lines.push("  handoff: scan incomplete (file or request bound)");
+		return { text: lines.join("\n"), details: { job, handoffs: handoffs.paths } };
 	}
 	const { mode, job_id: _id, all, ...input } = query;
 	const result = queryJobs(target.home, mode === "list" ? "list" : "history", input, mode === "list" && all ? { all: true } : {});
