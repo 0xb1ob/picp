@@ -14,7 +14,8 @@
  * The one request that reaches the parent does so only as a line in `state/schedule-control.jsonl`, which the
  * parent reads. Every route answers any Host unless `viewer.strict_host` (data/viewer.json) pins the bind Host
  * (host-config.ts); the operator's own Full transcript
- * (`/api/sessions?view=you&transcript=1`), both dashboard-control routes, both schedule-control routes, both answers routes,
+ * (`/api/sessions?view=you&transcript=1`), a handoff note's text (`/api/handoffs/file/…`),
+ * both dashboard-control routes, both schedule-control routes, both answers routes,
  * the three settings routes and the skills list (`/api/skills`, names and descriptions only) are served only by a viewer started with `--require-tailnet` and refused 403 otherwise.
  * Remote dashboard: `dispatch` is also reached through the remote listener's gate (remote-server.ts), which binds an
  * authenticated device context to the request (access.ts); with `devices` set, three device routes are added (devices-api.ts).
@@ -26,6 +27,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { resolve } from "node:path";
 import { boardView, jobsView, jobView, jobEvents } from "./jobs-view.ts";
 import { ledgerHistoryView } from "./ledger-history.ts";
+import { handoffDetail, handoffsView } from "./handoffs-view.ts";
 import { statsView } from "./stats-view.ts";
 import { statScope } from "./file-cache.ts";
 import { prewarm, warming } from "./prewarm.ts";
@@ -368,6 +370,11 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 		case "/api/reports":
 			sendView(req, res, reportsView(options, warn));
 			return;
+		case "/api/handoffs": {
+			const out = statScope(() => handoffsView(options, url.searchParams, Date.now()));
+			if (out.status === 200) sendView(req, res, out.body); else sendJson(res, out.status, out.body);
+			return;
+		}
 		case "/api/schedules":
 			sendView(req, res, statScope(() => schedulesView(options, warn)));
 			return;
@@ -428,6 +435,17 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			return;
 		}
 		default:
+			// A handoff note can hold anything, so its body is gated like the operator's own transcript.
+			if (url.pathname.startsWith("/api/handoffs/file/")) {
+				if (!canRead(accessOf(req), options.requireTailnet === true)) { sendJson(res, 403, { error: "handoff notes are served only under --require-tailnet" }); return; }
+				const match = /^\/api\/handoffs\/file\/([a-z]+)\/([^/]+)$/.exec(url.pathname);
+				let name = ""; try { name = decodeURIComponent(match?.[2] ?? ""); } catch { /* Invalid encoding is not a note name. */ }
+				const note = match ? handoffDetail(options, match[1]!, name) : undefined;
+				if (!note) { sendJson(res, 404, { error: "no such handoff" }); return; }
+				send(res, 200, "text/plain; charset=utf-8", note.truncated ? `${note.text}\n\n[truncated: first ${Buffer.byteLength(note.text)} of ${note.bytes} bytes]\n` : note.text,
+					{ "content-security-policy": "default-src 'none'; frame-ancestors 'none'; sandbox" });
+				return;
+			}
 			if (url.pathname.startsWith("/api/report/")) {
 				const match = /^\/api\/report\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(?:\/files\/(.+))?$/.exec(url.pathname);
 				if (match?.[2] !== undefined) {

@@ -395,6 +395,7 @@ Test files added after the baseline, with the PR that owns them.
 | tests/e2e/recent-work.test.ts | cp-recent-work-digest-sb7z (https://github.com/0xb1ob/picp/pull/683) | P1 recent-work digest: cp_job closes reach fresh parent and operator as one bounded digest; malformed envelope, unreadable ledger, overflow and lifecycle refresh |
 | tests/e2e/viewer-parent-restart.test.ts | cp-parent-restart-ui-311z (https://github.com/0xb1ob/picp/pull/684) | Restart PR B: dashboard and `cp_parent restart` parent restart, drain-gated by the host (409, pid unchanged), resumed/clean outcome, failed start, host re-check, bounded host request |
 | tests/e2e/ledger-history.test.ts | cp-ledger-history-p2-szlx (PR URL on the branch) | P2 job history: `cp_job history`, `/cp-jobs history`, `cp_parent jobs` (no parent running) and `GET /api/jobs/history` agree on ids, order, dates, text and pages; bad queries refuse; list and `/api/jobs` defaults unchanged; missing/corrupt sources are warnings; served Jobs History |
+| tests/e2e/project-handoffs.test.ts | cp-project-handoffs-p6-j354 (PR URL on the branch) | P6 project handoffs: notes in all three roots reach fresh parent and operator as per-project pointers (never bodies), `cp_parent jobs show`, `GET /api/handoffs` and Reports › Handoffs; token-boundary near misses, symlink escape, 64 KiB truncation, answer/report joins, detail read gate and missing roots |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

@@ -66,6 +66,7 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Jobs (List / Board / Map) / Job | `#jobs` / `#board` / `#map` / `#job/<safe-id>` |
 | Jobs History | `#jobs?view=history&project=&q=&since=&until=&date_field=&limit=&offset=` (the List's History link and its "older finished jobs" line open it). The screen reads `GET /api/jobs/history` with the same query (read-only; closed jobs, newest close first, 20 a page up to 100; `total`, `next_offset`, source `warnings`; 400 `{error}` for a bad date, range, field or page). It shares the pure query in `src/ledger-filter.ts` with `cp_job history` — the one viewer import of it (`tests/viewer-boundary.test.ts`) — and never reads a report body. Rows wrap long titles, reasons and headlines at 390 px and 1440 px; filters wrap into rows on a phone |
 | Reports / Schedules / Files / Settings | `#reports` / `#schedules` / `#files?root=<root-id>&path=<relative-path>` / `#settings` |
+| Reports Handoffs | `#reports?view=handoffs&project=` (the Reports page's Handoffs link). Reads `GET /api/handoffs` with the same `project` (read-only; pointers grouped by project, newest first, plus the unassociated bucket when no project is named; joined report and answer links; `complete: false` and an "Incomplete" line when a file, request or confinement bound cut the scan). A note opens as plain text from `GET /api/handoffs/file/<root>/<name>`, served only under `--require-tailnet` (src/viewer/handoffs-view.ts). Rows reuse the History list classes, which wrap long names at 390 px and 1440 px |
 | Job report | `#report/<safe-id>`: the job's `state/artifacts/<id>/report.md` rendered as a page (`GET /api/report/<id>`; its images from `GET /api/report/<id>/files/<path>`, png/jpeg/gif/webp inside that dir only); linked from the job page and the Reports page's Job reports section |
 | Search | Shell dialog (f7g.7), available from every screen |
 | Version | Shell ⋮ menu row (phone and desktop) and the Sessions top bar; `GET /api/version` |
@@ -549,7 +550,7 @@ request accepts it, with `vary: accept-encoding`; the event stream never is. Has
 `public, max-age=31536000, immutable` on the local listener only; the remote listener keeps `no-store`.
 
 Each tick still GETs the screen's URL; only the body shrinks. Screen views (`/api/overview`, `/api/jobs`, `/api/board`,
-`/api/map`, `/api/decisions`, `/api/awaiting`, `/api/decided`, `/api/reports`, `/api/schedules`, `/api/stats`, `/api/jobs/history`,
+`/api/map`, `/api/decisions`, `/api/awaiting`, `/api/decided`, `/api/reports`, `/api/schedules`, `/api/stats`, `/api/jobs/history`, `/api/handoffs`,
 `/api/sessions?view=…`, `/api/files?view=screen`, `/api/job/<id>`, `/api/report/<id>`, plus `/api/job/<id>/transcript` and
 `/api/operator/control`, keyed with its `?sends=` query) tag each 200 with `x-cp-version`. The app sends the
 version it holds as `x-cp-delta-base`; when the server still holds that version for the same principal (local or the

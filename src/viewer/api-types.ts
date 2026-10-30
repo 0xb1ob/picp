@@ -288,6 +288,26 @@ export interface ReportsResponse {
 export interface JobReportItem { job_id: string; title: string; modified_at: string; href: string }
 /** `GET /api/report/<id>`: the job's report.md text, capped; the app renders it (never as raw HTML). */
 export interface JobReportResponse { generated_at: string; job_id: string; title: string; text: string; bytes: number; truncated: boolean; modified_at: string }
+/** Why a handoff belongs to a project: an exact ledger job id, a registered project name or repository URL. */
+export interface HandoffEvidence { kind: "job" | "project" | "repo"; value: string; project: string | null }
+/** One handoff note as a pointer (never its body); `href` is the gated detail route. */
+export interface HandoffPointer {
+ root: "handoffs" | "compact" | "configured"; name: string; path: string; href: string; modified_at: string; bytes: number; truncated: boolean;
+ evidence: HandoffEvidence[]; evidence_omitted: number;
+ answers: {id: string; project: string; job_id: string | null; posted_at: string}[];
+ reports: {job_id: string; href: string}[];
+}
+/** `GET /api/handoffs[?project=]` (docs/viewer-app.md): handoffs grouped by project at read time, newest first. */
+export interface HandoffsResponse {
+ generated_at: string; project: string | null; projects: string[];
+ groups: {project: string; handoffs: HandoffPointer[]}[];
+ /** Notes naming no known job, project or repository; listed only without a project filter. */
+ unassociated: HandoffPointer[];
+ sources: {root: HandoffPointer["root"]; path: string; state: "ok" | "missing" | "unavailable" | "refused"}[];
+ /** False when a file or request bound cut the scan (see the counts). */
+ complete: boolean; scanned: number; skipped: number; truncated: number; escaped: number;
+ warnings: {section: string; message: string}[];
+}
 /** One run of a schedule: an anchor job (a fire or Run now) plus the jobs it fanned out to. */
 export interface ScheduleRunView {
 	run_id: string; anchor_id: string; via: "slot" | "dashboard" | "cp_schedule"; at: string; missed: boolean;

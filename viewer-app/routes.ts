@@ -45,6 +45,8 @@ export function route(hash: string): Route {
  if (value === "jobs" || value === "board" || value === "reports" || value === "schedules") return {...fallback,screen:value};
  // Jobs History keeps its filters in the hash: `#jobs?view=history&q=…` (jobsHistoryHref).
  if (/^jobs\?view=history(?:&|$)/.test(hash.replace(/^#/,""))) return {...fallback,screen:"jobs",query:hash.replace(/^#jobs\?/,"")};
+ // Project handoffs live on Reports: `#reports?view=handoffs&project=…` (handoffsHref).
+ if (/^reports\?view=handoffs(?:&|$)/.test(hash.replace(/^#/,""))) return {...fallback,screen:"reports",query:hash.replace(/^#reports\?/,"")};
  // `?tab=transcript` is the one Job query (jobTranscriptHref); any other query is not a job route.
  const job=/^job\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(\?tab=transcript)?$/.exec(value);
  if (job) return {...fallback,screen:"job",jobId:job[1]!,...(job[2] ? {query:"tab=transcript"} : {})};
@@ -97,3 +99,5 @@ export const jobsHistoryHref = (filters: Record<string, string | number | null |
  for (const [key,value] of Object.entries(filters)) if (value !== null && value !== undefined && String(value).trim()) query.set(key,String(value).trim());
  return `#jobs?${query}`;
 };
+/** Reports' project handoffs view, optionally one project's group. */
+export const handoffsHref = (project?: string | null): string => `#reports?${new URLSearchParams({view:"handoffs",...(project ? {project} : {})})}`;
