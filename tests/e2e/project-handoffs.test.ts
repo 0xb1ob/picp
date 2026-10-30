@@ -51,10 +51,11 @@ function seed(home: string, alphaId: string, betaId: string) {
 	return file;
 }
 
-/** One fresh operator session (cp-bridge only) that reads `cp_parent jobs show <jobId>`; its first request and ends. */
-async function operator(home: string, jobId: string): Promise<{ body: unknown; ends: Ends }> {
+/** One fresh operator session (cp-bridge only), reading `cp_parent jobs show <jobId>` if given; first request, ends. */
+async function operator(home: string, jobId?: string): Promise<{ body: unknown; ends: Ends }> {
 	const provider = await MockProvider.start();
-	const model = provider.addScript("ph-operator", [{ kind: "tool_calls", calls: [{ id: "show", name: "cp_parent", args: { action: "jobs", jobs: { mode: "show", job_id: jobId } } }] }, { kind: "text", text: "read" }]);
+	const show = jobId ? [{ kind: "tool_calls" as const, calls: [{ id: "show", name: "cp_parent", args: { action: "jobs", jobs: { mode: "show", job_id: jobId } } }] }] : [];
+	const model = provider.addScript("ph-operator", [...show, { kind: "text", text: "read" }]);
 	const agent = createAgentDir({ provider });
 	const rpc = startRpc({ cwd: home, env: { ...agent.env, PI_HOME: home, CP_HOME: home }, args: ["--no-extensions", "-e", CP_BRIDGE_EXTENSION, "--no-session", "--model", model] });
 	try {
@@ -148,7 +149,7 @@ test("P6 project handoffs: fresh parent and operator, cp_parent jobs, HTTP and R
 	await tab.find(`.handoff-row a[href='${alpha.href}']`);
 	assert.equal(tab.$$(".handoff-row").length, 3);
 	assert.ok(tab.text().includes(`Report ${alphaId}`) && tab.text().includes("Answer ans-0123456789ab"), tab.text());
-	assert.match(tab.text(), /Incomplete: 6 scanned, 0 not scanned, 1 matched on their first 64 KiB only/);
+	assert.match(tab.text(), /Incomplete: 6 scanned, 0 not scanned, 1 matched on their first 64 KiB only, 1 refused for leaving their directory/);
 });
 
 test("P6 project handoffs: missing roots are named, empty and unwritten", { timeout: 120_000 }, async (t) => {
@@ -162,3 +163,29 @@ test("P6 project handoffs: missing roots are named, empty and unwritten", { time
 	assert.equal(statSync(join(home.path, LAYOUT.operatorWorkspace), { throwIfNoEntry: false }), undefined, "a read creates no workspace");
 	assert.equal((await viewer.get("/api/handoffs/file/handoffs/a.md")).status, 404);
 });
+
+// An escape alone, and a handoffs_dir outside the home, match no project yet must read as incomplete, never as
+// "nothing happened": the API says complete:false and the fresh operator context keeps the warning.
+for (const [label, setup, section, warning] of [
+	["escape-only", (home: string) => {
+		put(join(home, "outside.md"), "PH-OUTSIDE-SENTINEL\n");
+		mkdirSync(join(home, LAYOUT.operatorWorkspace, "handoffs"), { recursive: true });
+		symlinkSync(join(home, "outside.md"), join(home, LAYOUT.operatorWorkspace, "handoffs", "escape.md"));
+	}, "confinement", /Source limited: confinement: 1 file\(s\) resolve outside their directory and are refused/],
+	["refused-root", (home: string) => put(join(home, LAYOUT.data, "operator.json"), JSON.stringify({ handoffs_dir: dirname(home) })),
+		"source configured", /Source limited: source configured: refused: /],
+] as const) {
+	test(`P6 project handoffs: ${label} is incomplete in the API and in fresh context`, { timeout: 120_000 }, async (t) => {
+		const home = createScratchHome();
+		t.after(() => home.cleanup());
+		setup(home.path);
+		const reply = await startViewer(t, { home: home.path }).then((viewer) => viewer.get("/api/handoffs"));
+		const body = reply.body as { groups: unknown[]; complete: boolean; warnings: Array<{ section: string }> };
+		assert.deepEqual([reply.status, body.groups, body.complete, body.warnings.map((w) => w.section)], [200, [], false, [section]], reply.text);
+		const context = sectionOf((await operator(home.path)).body);
+		assert.ok(context, "an incomplete scan with no match still reaches fresh context");
+		assert.match(context, /No scanned note names a job, project or repository\./);
+		assert.match(context, warning);
+		assert.doesNotMatch(context, SENTINELS);
+	});
+}

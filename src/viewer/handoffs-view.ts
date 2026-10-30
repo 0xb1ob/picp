@@ -86,7 +86,8 @@ export function handoffIndex(state: ViewerState): Index & { jobs: Map<HandoffPoi
 			try { listing = readdirSync(root.dir); } catch { root.state = "unavailable"; }
 		}
 		rows.push({ root: source.root, path: source.dir, state: root.state });
-		if (root.state === "unavailable" || root.state === "refused") warnings.push({ section: `source ${source.root}`, message: `${root.state}: ${source.dir}` });
+		const absent = source.root === "configured" && root.state === "missing"; // a set handoffs_dir that is gone
+		if (absent || root.state === "unavailable" || root.state === "refused") warnings.push({ section: `source ${source.root}`, message: `${root.state}: ${source.dir}` });
 		for (const name of listing.filter((entry) => NAME.test(entry) && source.accept(entry))) {
 			const path = join(source.dir, name);
 			try {
@@ -153,7 +154,8 @@ export function handoffIndex(state: ViewerState): Index & { jobs: Map<HandoffPoi
 	}
 	return {
 		projects: [...groups.keys()].sort(), groups: [...groups].map(([project, handoffs]) => ({ project, handoffs })), unassociated, sources: rows,
-		complete: skipped === 0 && truncated === 0 && unreadable === 0, scanned, skipped, truncated, escaped, warnings, jobs: jobIds,
+		// Every warning (bound, escape, refused/unavailable source) means notes may be missing from this result.
+		complete: warnings.length === 0, scanned, skipped, truncated, escaped, warnings, jobs: jobIds,
 	};
 }
 
@@ -209,6 +211,7 @@ export function handoffPointersContext(home: string): string | undefined {
 		}
 		if (handoffs.length > HANDOFF_CONTEXT.perProject) lines.push(`  … ${handoffs.length - HANDOFF_CONTEXT.perProject} older in ${project}`);
 	}
+	if (lines.length === 0) lines.push("No scanned note names a job, project or repository.");
 	const tail: string[] = [];
 	if (index.groups.length > HANDOFF_CONTEXT.projects) tail.push(`… ${index.groups.length - HANDOFF_CONTEXT.projects} more project(s) omitted`);
 	if (index.unassociated.length > 0) tail.push(`${index.unassociated.length} unassociated handoff(s): no job id, project name or repository URL`);
