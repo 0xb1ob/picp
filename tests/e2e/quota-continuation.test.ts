@@ -5,14 +5,17 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
-import { type Delivery, isoTimestamp, type JobKind, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { DEFAULT_BUDGET_CONFIG, type Delivery, isoTimestamp, type JobKind, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
+import { cpNext } from "../../src/next.ts";
 import { QUOTA_CONTINUE_NUDGE, type QuotaIntent, quotaContinuationErrorsFile, quotaContinuationFile } from "../../src/quota-continuation.ts";
 import { PRODUCTION_QUOTA_RESET_ADAPTER } from "../../src/quota-reset-signal.ts";
+import { readRecoveryAttempts } from "../../src/recovery.ts";
+import { readStatusFile } from "../../src/run-artifacts.ts";
 import {
 	createAgentDir,
 	createScratchHome,
@@ -288,9 +291,9 @@ test("reconcile pending consumed cancelled", { skip: SKIP, timeout: 240_000 }, a
 	const cancel = f.post.quota.cancel(cancelled, { actor: "operator", reason: "taking the job back" });
 	assert.equal(cancel.ok, true, JSON.stringify(cancel));
 	assert.deepEqual(await f.post.quota.tick(), [], "nothing is due before the reset");
-	await new Promise((resolve) => setTimeout(resolve, Math.max(0, soon.getTime() - Date.now() + 200)));
-	const due = await f.post.quota.tick();
-	assert.deepEqual(due.map((intent) => [intent.job_id, intent.state, intent.delivery, intent.consumed?.receipt]), [[consumed, "consumed", "sending", "delivered"]]);
+	// No manual tick: the due timer armed by the claim is the production entry point that sends the continuation.
+	const [done] = await waitFor(() => f.post.quota.intents(consumed), (rows) => rows[0]?.state === "consumed", { timeoutMs: 60_000, what: "the due timer's send" });
+	assert.deepEqual([done?.state, done?.delivery, done?.consumed?.receipt, done?.attempts], ["consumed", "sending", "delivered", 1]);
 	await waitFor(() => f.post.fleet.require(consumed).phase, (phase) => phase === "held", { timeoutMs: 60_000, what: "the continued job's envelope" });
 	const continued = f.provider.requests("consumed");
 	assert.equal(lastUserText(continued[1]!), QUOTA_CONTINUE_NUDGE, "the continuation is the short nudge, never the brief");
@@ -394,6 +397,272 @@ test("corrupt quota store never stops startup reconcile", { skip: SKIP, timeout:
 	assert.equal(readFileSync(store, "utf8"), variants[1][1], "dispatch and claim never overwrite the unreadable store");
 	assert.throws(() => f.post.quota.setPolicy({ enabled: true, actor: "operator" }), { name: "QuotaStoreError" });
 	assert.equal(readFileSync(store, "utf8"), variants[1][1], "a refused policy write leaves the file as found");
+});
+
+const FAR = "2099-01-01T00:00:00Z";
+const nudges = (f: Fleet, name: string) => f.provider.requests(name).filter((request) => lastUserText(request) === QUOTA_CONTINUE_NUDGE).length;
+const settled = (f: Fleet, jobIds: string[]) => waitFor(() => jobIds.map((jobId) => f.post.quota.intents(jobId)[0]),
+	(rows) => rows.every((intent) => intent && intent.state !== "pending"), { timeoutMs: 60_000, what: "every due intent decided" });
+
+test("pending intent frees its slot keeps its lease and spends no bounded recovery", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	const f = await fleet(t, { verified: true, maxTrees: 4 });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	writeFileSync(join(f.home, LAYOUT.budgetsFile), JSON.stringify({ ...DEFAULT_BUDGET_CONFIG, spawn_cap: 1 }));
+	const held = await f.job({ slug: "held" });
+	const soon = resetIn(8_000);
+	const worktree = await f.dispatch(held, f.script("held", [
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "printf 'dirty bytes' > dirty.txt" } }] },
+		quotaResetError(soon),
+		{ kind: "text", text: "continued" },
+	]));
+	const record = await failed(f, held);
+	assert.deepEqual(f.post.quota.intents(held).map((row) => row.state), ["pending"]);
+	// Settle fails the job itself, so BoundedRecovery spends no attempt, escalates nothing and revives nothing.
+	const recovery = ["recovery_attempted", "recovery_failed", "recovery_escalated", "worker_revived"].flatMap((type) => f.events(held, type));
+	assert.deepEqual(recovery, []);
+	assert.deepEqual(f.post.escalations.open().filter((item) => item.job_ids.includes(held)), []);
+
+	// The one slot is free for another job while the lease, session and dirty bytes stay.
+	const other = await f.job({ slug: "other" });
+	await f.dispatch(other, f.script("other", [{ kind: "hang" }]));
+	await waitFor(() => f.provider.requests("other").length, (n) => n === 1, { timeoutMs: 30_000, what: "the other job's first turn" });
+	assert.equal(readFileSync(join(worktree, "dirty.txt"), "utf8"), "dirty bytes");
+	assert.deepEqual([f.post.fleet.require(held).worktree, f.post.fleet.require(held).worker.session_file], [record.worktree, record.worker.session_file]);
+	assert.ok(existsSync(record.worker.session_file));
+
+	// Due while the slot is taken: the intent waits instead of crowding the cap, then continues once a slot frees.
+	await new Promise((resolve) => setTimeout(resolve, Math.max(0, soon.getTime() - Date.now() + 500)));
+	assert.deepEqual(await f.post.quota.tick(), []);
+	assert.deepEqual([f.post.quota.intents(held)[0]?.state, f.post.quota.intents(held)[0]?.delivery, nudges(f, "held")], ["pending", "waiting", 0]);
+	assert.equal((await f.post.teardown.teardown(other, { force: true })).failure, undefined);
+	const [done] = await f.post.quota.tick();
+	assert.deepEqual([done?.job_id, done?.state, done?.consumed?.receipt], [held, "consumed", "delivered"]);
+	await waitFor(() => f.provider.requests("held").length, (n) => n === 3, { timeoutMs: 30_000, what: "the continued turn" });
+	assert.equal(nudges(f, "held"), 1);
+	assert.equal(readFileSync(join(worktree, "dirty.txt"), "utf8"), "dirty bytes", "the continued session found its dirty work");
+	assert.equal(f.post.fleet.require(held).worker.session_file, record.worker.session_file);
+});
+
+test("startup reconcile keeps a pending intent's dead worker failed not revivable", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const f = await fleet(t, { verified: true });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const jobId = await f.job({ slug: "cut" });
+	await f.dispatch(jobId, f.script("cut", [quotaResetError(resetIn(HOURS_5)), { kind: "hang" }]));
+	await failed(f, jobId);
+	const [intent] = f.post.quota.intents(jobId);
+	// The parent died after the quota claim but before the failed write: the record still says waiting.
+	const post = await f.restart(async () => {
+		await f.post.fleet.mutate((jobs) => {
+			const r = jobs.find((record) => record.job_id === jobId)!;
+			r.phase = "waiting";
+			delete r.failure;
+		});
+	});
+	const record = post.fleet.require(jobId);
+	assert.equal(record.phase, "failed", "never offered to cp_revive as an ordinary revivable");
+	assert.match(record.failure?.message ?? "", new RegExp(`quota continuation ${intent?.continuation_id} is pending`));
+	assert.deepEqual(post.quota.intents(jobId).map((row) => [row.state, row.delivery]), [["pending", "waiting"]], "the intent survives");
+	assert.deepEqual(f.events(jobId, "worker_revived"), []);
+});
+
+test("due tick survives a store gone unreadable mid-pass", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const f = await fleet(t, { verified: true });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const soon = resetIn(10_000);
+	const jobs: string[] = [];
+	for (const name of ["first", "second"]) {
+		const jobId = await f.job({ slug: name });
+		await f.dispatch(jobId, f.script(name, [quotaResetError(soon), { kind: "hang" }]));
+		await failed(f, jobId);
+		jobs.push(jobId);
+	}
+	// The due timer claims one intent and revives its worker; the store turns corrupt before the next read.
+	const [claimed] = await waitFor(() => f.post.quota.intents().filter((row) => row.delivery === "claimed"), (rows) => rows.length === 1, { timeoutMs: 30_000, intervalMs: 5, what: "a claimed intent" });
+	writeFileSync(quotaContinuationFile(f.home), "{ not json");
+	for (const jobId of jobs) {
+		await waitFor(() => f.events(jobId, "quota_continuation"), (rows) => rows.some((row) => row.during === "tick"), { timeoutMs: 30_000, what: `${jobId}'s own tick error` });
+	}
+	assert.ok(jobs.includes(claimed!.job_id));
+	assert.deepEqual(await f.post.quota.tick(), [], "a later pass resolves on the unreadable store");
+	assert.equal(readFileSync(quotaContinuationFile(f.home), "utf8"), "{ not json", "the store is left as found");
+	assert.deepEqual(["first", "second"].map((name) => nudges(f, name)), [0, 0], "nothing was sent on an unreadable store");
+});
+
+test("closure revocation and manual replacement send nothing; restart and replay send once", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const f = await fleet(t, { verified: true, maxTrees: 6 });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const closed = await f.job({ slug: "closed" });
+	const revoked = await f.job({ slug: "revoked" });
+	const replaced = await f.job({ slug: "replaced" });
+	const once = await f.job({ slug: "once" });
+	const grant = f.post.mandates.issue({ projects: ["demo"], objective: `cover ${revoked}`, expiry: FAR, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [], job_ids: [revoked] });
+	const soon = resetIn(20_000);
+	for (const [jobId, name] of [[closed, "closed"], [revoked, "revoked"], [replaced, "replaced"]] as const) {
+		await f.dispatch(jobId, f.script(name, [quotaResetError(soon), { kind: "hang" }]));
+	}
+	await f.dispatch(once, f.script("once", [quotaResetError(soon), quotaResetError(resetIn(HOURS_5)), { kind: "hang" }]));
+	for (const jobId of [closed, revoked, replaced, once]) await failed(f, jobId);
+	await waitFor(() => f.post.quota.intents().length, (n) => n === 4, { timeoutMs: 10_000, what: "four pending intents" });
+
+	assert.equal((await f.post.teardown.teardown(closed, { force: true })).failure, undefined);
+	f.post.mandates.revoke(grant.id);
+	await f.post.revive(replaced, { continueFailed: true });
+	// A restart before the reset: the new owner's startup timer is the only wake; replayed passes race it.
+	const post = await f.restart();
+	await new Promise((resolve) => setTimeout(resolve, Math.max(0, soon.getTime() - Date.now())));
+	await Promise.all([post.quota.tick(), post.quota.tick()]);
+	const [c, r, m, o] = await settled(f, [closed, revoked, replaced, once]);
+	assert.deepEqual([c?.state, c?.reason], ["cancelled", `${closed} is closed`]);
+	assert.deepEqual(r?.state, "cancelled");
+	assert.match(String(r?.reason), /^authority refused: /);
+	assert.deepEqual([m?.state, m?.reason], ["cancelled", `${replaced} was continued by other means (phase waiting)`]);
+	assert.deepEqual([o?.state, o?.consumed?.receipt, o?.attempts], ["consumed", "delivered", 1]);
+	await waitFor(() => nudges(f, "once"), (n) => n === 1, { timeoutMs: 30_000, what: "the one continuation request" });
+	assert.deepEqual(["closed", "revoked", "replaced"].map((name) => nudges(f, name)), [0, 0, 0], "nothing sent where a stop applied");
+
+	// The continued turn hits a second limit: a new generation, the first stays consumed, and nothing resends.
+	const second = await waitFor(() => post.quota.intents(once), (rows) => rows.length === 2, { timeoutMs: 60_000, what: "the second limit's intent" });
+	assert.deepEqual(second.map((row) => [row.generation, row.state, row.delivery]), [[1, "consumed", "sending"], [2, "pending", "waiting"]]);
+	assert.match((await failed(f, once)).failure?.message ?? "", new RegExp(`quota continuation ${once}:quota:2 is pending`));
+	await post.quota.tick();
+	assert.equal(nudges(f, "once"), 1);
+});
+
+test("a continuation resumes the interrupted round: caps, spend and counters are never renewed", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	const f = await fleet(t, { verified: true });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const tools = await f.job({ slug: "tools" });
+	const clock = await f.job({ slug: "clock" });
+	const usage = { prompt_tokens: 1000, completion_tokens: 100 };
+	const bash = (command: string): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "bash", args: { command } }], usage });
+	// Three tool starts across two limits against a cap of three: only a carried count reaches it. risk:high makes a
+	// tripped bound escalate instead of re-dispatching, so the bound's failure stays on the record.
+	const toolsModel = f.script("tools", [bash("true"), quotaResetError(resetIn(8_000)), bash("true"), quotaResetError(resetIn(16_000)), bash("true"), { kind: "text", text: "unreached" }]);
+	const clockModel = f.script("clock", [bash("sleep 10"), quotaResetError(resetIn(14_000)), bash("sleep 15"), { kind: "text", text: "unreached" }]);
+	await f.post.dispatch({ jobId: tools, task: "Brief.", model: toolsModel, fetch: false, wallClockSeconds: 600, toolCallCap: 3, risk: "high" });
+	await f.post.dispatch({ jobId: clock, task: "Brief.", model: clockModel, fetch: false, wallClockSeconds: 20, toolCallCap: 100, risk: "high" });
+
+	const before = await failed(f, tools);
+	const counters = (jobId: string) => {
+		const status = readStatusFile(f.home, jobId);
+		return { tool_calls: status?.tool_calls, tokens: status?.usage.total_tokens, recovery: readRecoveryAttempts(f.home, jobId, "model_call_failed") };
+	};
+	const first = counters(tools);
+	await waitFor(() => f.post.quota.intents(tools), (rows) => rows.length === 2 && f.post.fleet.require(tools).phase === "failed", { timeoutMs: 60_000, what: "the second limit" });
+	const second = counters(tools);
+	const final = await waitFor(() => f.post.fleet.require(tools), (record) => record.failure?.class === "tool_call_cap_exceeded", { timeoutMs: 60_000, what: "the carried tool-call cap" });
+	const third = counters(tools);
+	assert.deepEqual([first.tool_calls, second.tool_calls, third.tool_calls], [1, 2, 3], "tool calls accumulate across both continuations");
+	assert.ok(first.tokens! > 0 && second.tokens! > first.tokens! && third.tokens! > second.tokens!, `spend accumulates: ${JSON.stringify([first, second, third])}`);
+	assert.deepEqual([first.recovery, second.recovery, third.recovery], [0, 0, 0], "no bounded-recovery attempt is spent or renewed");
+	assert.deepEqual(final.bounds, before.bounds, "the job's caps are unchanged");
+	assert.deepEqual(f.post.quota.intents(tools).map((row) => [row.generation, row.state, row.attempts]), [[1, "consumed", 1], [2, "consumed", 1]]);
+	assert.equal(f.events(tools, "prompt_sent").length, 3, "the brief and one continuation per limit, nothing more");
+
+	const tripped = await waitFor(() => f.post.fleet.require(clock), (record) => record.failure?.class === "wall_clock_exceeded", { timeoutMs: 90_000, what: "the carried wall clock" });
+	const [resumed] = f.post.quota.intents(clock);
+	assert.equal(resumed?.state, "consumed");
+	// The first round spent ~10 of 20 s before its limit; a renewed round (revive or prompt) would run the full 20 s.
+	const ran = Date.parse(tripped.failure!.at) - Date.parse(resumed!.consumed!.at);
+	assert.ok(ran < 15_000, `the continued round got only what was left of the first: tripped ${ran} ms after the send`);
+	assert.equal(f.provider.requests("clock").length, 3, "the second sleep never finished");
+});
+
+test("a restart mid-delivery holds ambiguous: never resent, never cancelled, recovery stands down", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	const f = await fleet(t, { verified: true });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const jobId = await f.job({ slug: "crash" });
+	await f.dispatch(jobId, f.script("crash", [quotaResetError(resetIn(4_000)), { kind: "hang" }]));
+	await failed(f, jobId);
+	const old = f.post;
+	// The production due timer claims; the owner stops before its revive returns, so no later step is written.
+	await waitFor(() => old.quota.intents(jobId)[0]?.delivery, (delivery) => delivery === "claimed", { timeoutMs: 30_000, intervalMs: 5, what: "the due claim" });
+	const post = await f.restart(async () => {
+		assert.deepEqual(await old.quota.tick(), [], "the stopped owner's pass is over and writes nothing");
+	});
+	const [intent] = post.quota.intents(jobId);
+	assert.deepEqual([intent?.state, intent?.delivery, intent?.attempts], ["pending", "ambiguous", 1]);
+	assert.match(String(intent?.reason), /^the parent restarted while (claimed|idle|sending): delivery unknown, never resent$/);
+	assert.equal(post.fleet.require(jobId).phase, "failed", "the dead worker stays failed for the hold, never revivable");
+	await post.quota.tick();
+	await post.quota.tick();
+	await new Promise((resolve) => setTimeout(resolve, 1_000));
+	assert.equal(nudges(f, "crash"), 0, "replayed passes and timers never resend an ambiguous delivery");
+	const refused = post.quota.cancel(jobId, { actor: "operator", reason: "drop it" });
+	assert.deepEqual(refused, { ok: false, reason: `${intent?.continuation_id} is ambiguous: past the point a cancel can stop` });
+	assert.deepEqual(post.quota.intents(jobId), [intent], "a refused cancel changes nothing");
+
+	// Manual from here: the operator continues it, and when that worker dies mid-turn automatic recovery stands down
+	// unspent, with no escalation and no wake promising an attempt.
+	await post.revive(jobId, { continueFailed: true });
+	assert.equal((await post.send({ jobId, message: "Carry on." })).receipt, "delivered");
+	await waitFor(() => f.provider.requests("crash").length, (n) => n === 2, { timeoutMs: 30_000, what: "the operator's turn" });
+	const pid = post.manager.get(jobId)?.worker.pid;
+	assert.ok(pid, "the operator's revive started a worker");
+	process.kill(pid, "SIGKILL");
+	const [stood] = await waitFor(() => f.events(jobId, "recovery_failed"), (rows) => rows.length > 0, { timeoutMs: 60_000, what: "recovery's stand-down" });
+	assert.equal(stood?.stage, "quota");
+	assert.match(String(stood?.error), new RegExp(`quota continuation ${intent?.continuation_id} owns its next turn`));
+	const dead = await failed(f, jobId);
+	const wakes = post.durableWakeups.pending().filter((entry) => entry.job_id === jobId).map((entry) => entry.content ?? "");
+	assert.ok(wakes.some((text) => text.includes("automatic recovery: not attempted")), `the death wake promises no attempt: ${wakes.join("\n")}`);
+	assert.ok(!wakes.some((text) => text.includes("attempt in flight")), wakes.join("\n"));
+	assert.deepEqual(["recovery_attempted", "recovery_escalated", "worker_revived"].map((type) => f.events(jobId, type).length), [0, 0, 1]);
+	assert.deepEqual(post.escalations.open().filter((item) => item.job_ids.includes(jobId)), []);
+	assert.equal(readRecoveryAttempts(f.home, jobId, dead.failure!.class), 0);
+	assert.equal(nudges(f, "crash"), 0);
+});
+
+test("a missing session and a passed deadline end visibly with zero sends", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const f = await fleet(t, { verified: true });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const gone = await f.job({ slug: "gone" });
+	const late = await f.job({ slug: "late" });
+	const deadline = new Date(Date.now() + 6_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+	f.post.mandates.issue({ projects: ["demo"], objective: `finish ${late} by the deadline`, job_ids: [late], expiry: deadline,
+		provenance: { expiry_hours: "explicit" }, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [] });
+	const soon = resetIn(10_000);
+	for (const [jobId, name] of [[gone, "gone"], [late, "late"]] as const) {
+		await f.dispatch(jobId, f.script(name, [quotaResetError(soon), { kind: "hang" }]));
+	}
+	const record = await failed(f, gone);
+	await failed(f, late);
+	rmSync(record.worker.session_file);
+	const [lost] = await waitFor(() => f.post.quota.intents(gone), (rows) => rows[0]?.delivery === "ambiguous", { timeoutMs: 60_000, what: "the missing session" });
+	assert.equal(lost?.state, "pending", "held for the operator");
+	assert.match(String(lost?.reason), new RegExp(`^revive refused: cannot revive ${gone} \\(session_missing\\)`));
+	const [expired] = await settled(f, [late]);
+	assert.equal(expired?.state, "cancelled");
+	assert.match(String(expired?.reason), /^authority refused: .*deadline/);
+	assert.deepEqual(["gone", "late"].map((name) => nudges(f, name)), [0, 0]);
+	assert.equal(f.post.fleet.require(gone).phase, "failed");
+});
+
+test("drain defers a due intent and cp_next never offers its job", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const f = await fleet(t, { verified: true });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const held = await f.job({ slug: "drained" });
+	const open = await f.job({ slug: "open" });
+	f.post.mandates.issue({ projects: ["demo"], objective: "drain cover", job_ids: [held, open], expiry: FAR, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [] });
+	const soon = resetIn(5_000);
+	await f.dispatch(held, f.script("drained", [quotaResetError(soon), { kind: "text", text: "continued" }]));
+	await failed(f, held);
+	// src/next.ts:146 reads only open ledger rows: a dispatched job holding an intent is never a dispatch candidate.
+	const next = await cpNext({ ledger: f.post.ledger(), fleet: f.post.fleet, mandates: f.post.mandates, escalations: f.post.escalations, packageRoot: REPO_ROOT }, "demo");
+	assert.deepEqual(next.ready.map((job) => job.id), [open]);
+	assert.notEqual(next.action.job_id, held);
+
+	assert.equal(f.post.drain.start().state, "drained", "no live worker: the drain is idle at once");
+	await new Promise((resolve) => setTimeout(resolve, Math.max(0, soon.getTime() - Date.now() + 500)));
+	assert.deepEqual(await f.post.quota.tick(), []);
+	assert.deepEqual(f.post.quota.intents(held).map((row) => [row.state, row.delivery]), [["pending", "waiting"]]);
+	assert.equal(nudges(f, "drained"), 0, "nothing is sent while the parent drains");
+	// The restart a drain prepares clears it; the new owner continues the session once.
+	const post = await f.restart();
+	await post.quota.tick();
+	const [done] = await settled(f, [held]);
+	assert.deepEqual([done?.state, done?.consumed?.receipt], ["consumed", "delivered"]);
+	await waitFor(() => nudges(f, "drained"), (n) => n === 1, { timeoutMs: 30_000, what: "the one continuation" });
 });
 
 /** Every `.ts`/`.tsx` file below `dir`, skipping dependencies. */
