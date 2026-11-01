@@ -40,6 +40,7 @@ export interface QuotaIntent {
 	worktree: string;
 	branch: string;
 	session_file: string;
+	worker_pid: number;
 	attempts: number;
 	/** The interrupted round's caps spend at the claim; the continuation resumes it instead of a fresh round. */
 	round?: CarriedBounds;
@@ -92,9 +93,8 @@ export interface QuotaContinuationOptions {
 /** The due timer's longest sleep, so a clock jump, a suspended host or a skipped pass is retried. */
 export const QUOTA_TICK_MAX_MS = 60_000;
 
-/** The worker the intent interrupted was replaced since (a manual revive or re-dispatch). */
-const replaced = (record: FleetRecord, intent: QuotaIntent): boolean =>
-	Date.parse(record.worker.started_at) > Date.parse(intent.observed_at);
+/** The worker the intent interrupted was replaced since (a manual revive or re-dispatch); `started_at` is too coarse. */
+const replaced = (record: FleetRecord, intent: QuotaIntent): boolean => record.worker.pid !== intent.worker_pid;
 
 type Listener = (event: WorkerEvent) => void;
 
@@ -323,6 +323,7 @@ export class QuotaContinuation {
 			worktree: record.worktree,
 			branch: record.branch,
 			session_file: record.worker.session_file,
+			worker_pid: record.worker.pid,
 			attempts: 0,
 		};
 		const round = this.#options.spent?.(jobId);
@@ -370,9 +371,15 @@ export class QuotaContinuation {
 		return changed;
 	}
 
+	#closed(jobId: string): string | undefined {
+		const record = this.#options.fleet.get(jobId);
+		return !record || record.phase === "done" ? `${jobId} is closed` : undefined;
+	}
+
 	#stale(doc: QuotaDocument, intent: QuotaIntent): string | undefined {
-		const record = this.#options.fleet.get(intent.job_id);
-		if (!record || record.phase === "done") return `${intent.job_id} is closed`;
+		const closed = this.#closed(intent.job_id);
+		if (closed) return closed;
+		const record = this.#options.fleet.require(intent.job_id);
 		if (replaced(record, intent)) return `${intent.job_id} was continued by other means (phase ${record.phase})`;
 		if (!effectiveQuotaPolicy(doc.policy, intent.job_id).enabled) return "quota continuation is turned off";
 		return undefined;
@@ -402,7 +409,8 @@ export class QuotaContinuation {
 				const settled = await this.#continue(continuation_id);
 				if (settled) done.push(settled);
 			} catch (error) {
-				this.#storeError(error, "tick", job_id); // a store gone unreadable mid-pass stops this intent, never the pass
+				// A store gone unreadable mid-pass stops this intent, never the pass; a lost owner's stop is not a store error.
+				if (this.#options.owns()) this.#storeError(error, "tick", job_id);
 			}
 		}
 		return done;
@@ -440,6 +448,8 @@ export class QuotaContinuation {
 			return step({ delivery: "ambiguous", reason: `revive refused: ${(error as Error).message.slice(0, 300)}` });
 		}
 		step({ delivery: "idle" });
+		const late = this.#closed(intent.job_id) ?? this.#refused(intent.job_id);
+		if (late) return step({ state: "cancelled", reason: late, cancelled: { actor: "command-post", reason: late, at: this.#now().toISOString() } });
 		step({ delivery: "sending" });
 		let result: SendResult;
 		try {
