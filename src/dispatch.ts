@@ -77,6 +77,7 @@ import type { ResolvedSkill } from "./viewer/skill-catalog.ts";
 import { assertBranchFree, type BindPrInput, bindFromOrigin, type BoundPrFacts, boundPrNote, checkoutBoundBranch } from "./pr-bind.ts";
 import { assertResourcesFree, OPS_PROFILE_NAME, opsRequest } from "./ops-jobs.ts";
 import { withRunExecution } from "./schedule-native.ts";
+import { isQuotaContinuationEligible, type QuotaEligibility } from "./quota-continuation-policy.ts";
 import { ScheduleAuthorityError } from "./schedule-authority.ts";
 import { DispatchError } from "./dispatch-error.ts";
 export { cleanupCreatedJobBranch, type JobBranchCleanup } from "./job-branch-cleanup.ts";
@@ -378,6 +379,7 @@ export interface DispatchPreview {
 	blockers?: string[];
 	/** Set (verbatim `"would ask: risk:high"`) when a real dispatch would hit the risk:high gate (cur.2.4); nothing is escalated for a dry run. */
 	mandate_gate?: string;
+	quota_continuation: QuotaEligibility; // P3: the one eligibility answer dispatch would record
 	/** The named skills, resolved exactly as a dispatch would. */
 	skills?: ResolvedSkill[];
 }
@@ -418,6 +420,7 @@ export interface DispatcherOptions extends Pick<WorkerObserverOptions, "onUsage"
 	skillAgentDir?: string;
 	/** Reads and gates a `pr` ref; tests inject it. Defaults to `gh pr view` against the project's GitHub origin. */
 	bindPr?: (input: BindPrInput) => Promise<BoundPrFacts>;
+	quota?: { recordEligibility(jobId: string, eligibility: QuotaEligibility): void }; // P3: facts for the arbiter
 }
 
 export class Dispatcher {
@@ -502,6 +505,7 @@ export class Dispatcher {
 			kind,
 			delivery,
 			profile: profile.frontmatter.name,
+			quota_continuation: isQuotaContinuationEligible({ kind, delivery, profile, labels: issue.labels }),
 			routing: routingRecord(inputs, decision?.thinking),
 			...(decision ? { decision, line: formatRoutingDecision(decision) } : {}),
 			...(decision
@@ -546,6 +550,7 @@ export class Dispatcher {
 
 		// --- 2. profile + model, both before anything is taken ---------------
 		const profile: WorkerProfile = selectProfile(options.profilesDir, request, { kind, delivery });
+		options.quota?.recordEligibility(issue.id, isQuotaContinuationEligible({ kind, delivery, profile, labels: issue.labels }));
 		const { skills, overridden } = this.#skills(request, profile);
 		const skillNames = skills.map((s) => s.name);
 		const inputs = composeRoutingInputs(request, issue, task);
@@ -717,9 +722,7 @@ export class Dispatcher {
 				},
 				profile,
 				model: routing.model,
-				// The routing decision carries the effort too (cp-eff): a rubric row
-				// that names `thinking` sets it for this job, and the profile's level
-				// stands when the row says nothing.
+				// cp-eff: a rubric row's `thinking` sets the effort; the profile's level stands when the row says nothing.
 				...(routing.thinking ? { thinking: routing.thinking } : {}),
 				brief,
 				sessionDir: join(options.home, LAYOUT.sessions),
@@ -749,11 +752,8 @@ export class Dispatcher {
 				bytes: Buffer.byteLength(originalTask),
 				source: request.taskFile !== undefined ? "task_file" : "task",
 			});
-			// cp-rte: what routing was told, and where those inputs came from. A
-			// model chosen from inferred inputs must be explainable afterwards.
-			// cp-routing-provenance: `inputs` stays the one-word legacy summary that
-			// older run logs and readers already carry; `provenance` is the per-axis
-			// truth beside it. Same event, no second journal.
+			// cp-rte/cp-routing-provenance: what routing was told and where it came from; `inputs` is the legacy
+			// one-word summary older readers carry, `provenance` the per-axis truth beside it.
 			const recorded = { ...routingRecord(inputs, routing.thinking), ...(gate.recorded && gate.recorded.risk !== risk ? { recorded_risk: gate.recorded.risk } : {}) };
 			recorder.cp("routing_resolved", {
 				model: routing.model,
