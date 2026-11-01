@@ -962,3 +962,26 @@ test("P19-composer-persist: unsent text survives leaving Sessions and a reload, 
 	console.warn = warn;
 	assert.deepEqual(warnings, [["composer draft not persisted: SecurityError"]], "a refused write warns once");
 });
+
+test("P19-composer-persist-offline: text typed while the session is offline survives navigation and is restored when the session comes up", { timeout: 180_000 }, async (t) => {
+	const d = await viewer(t);
+	const offline = "cp-composer-draft:offline", session = "cp-composer-draft:operator-session.jsonl";
+	let tab = await d.open(OPERATOR);
+	await tab.find(".operator-composer", (s) => /Operator session offline/.test(s.textContent ?? ""));
+	tab.type(await tab.find("textarea", (f) => !f.hasAttribute("disabled")), "typed while down");
+	assert.equal(tab.storage.get(offline), "typed while down", "no session file: the offline key");
+	tab.go("#settings");
+	await gone(tab, "textarea");
+	tab.go(OPERATOR);
+	assert.ok(await tab.find("textarea", (f) => (f as HTMLTextAreaElement).value === "typed while down"), "navigating back restores it");
+	await operatorSession(t, d.stateDir);
+	tab = await tab.reopen();
+	assert.ok(await tab.find("textarea", (f) => (f as HTMLTextAreaElement).value === "typed while down"), "the session came up with the offline draft");
+	await tab.find(".operator-composer-send", (b) => b.getAttribute("aria-label") === "Send");
+	assert.deepEqual([tab.storage.get(session), tab.storage.has(offline)], ["typed while down", false], "adopted into the session file's key");
+	tab.storage.set(offline, "stale");
+	tab.click(await tab.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
+	assert.equal(pick(await posted(tab, 1), ["text"]).text, "typed while down");
+	await cleared(tab);
+	assert.deepEqual([tab.storage.has(session), tab.storage.has(offline)], [false, false], "a send clears both keys");
+});

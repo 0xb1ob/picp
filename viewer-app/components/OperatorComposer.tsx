@@ -10,8 +10,9 @@ export const COMPOSER_PLACEHOLDER = "Message Operator…";
 /** Uploads finish sequentially; failed/unfinished attachments must be removed or resolved before send. */
 type Attachment = {key: number; name: string; bytes: number; text: boolean; state: "uploading" | "ready" | "failed"; id?: string; reason?: string};
 type Picked = {name: string; type: string; size: number};
-/** The unsent text per operator session file, kept across leaving Sessions and reloads; absent when empty. */
+/** The unsent text per operator session file (`offline` while none is known); absent when empty. */
 const DRAFT_KEY = "cp-composer-draft:";
+const OFFLINE_DRAFT_KEY = `${DRAFT_KEY}offline`;
 let draftWarned = false;
 function readDraft(key: string): string {
  try { return window.localStorage?.getItem(key) ?? ""; } catch { return ""; }
@@ -51,14 +52,21 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
  // A failed or unfinished attachment blocks sending: remove it or wait.
  const pending = attachments.some(a => a.state !== "ready");
  const canSend = ready && !sending && !pending && (!!text.trim() || images.length > 0 || files.length > 0);
- const draftKey = ready && status.session_file ? `${DRAFT_KEY}${status.session_file}` : null;
+ const draftKey = ready ? status.session_file ? `${DRAFT_KEY}${status.session_file}` : OFFLINE_DRAFT_KEY : null;
  const restored = useRef<string | null>(null);
- // Restore once per session file; an explicit draft link wins, and text already typed is never replaced.
+ // Restore once per key; an explicit draft link wins, and text already typed is never replaced.
  useEffect(() => {
   if (!draftKey || restored.current === draftKey) return;
   restored.current = draftKey;
-  const saved = draft === undefined ? readDraft(draftKey).slice(0, CONTROL_TEXT_MAX) : "";
-  if (saved) setText(current => current || saved);
+  if (draft !== undefined) return;
+  let saved = readDraft(draftKey);
+  // The session came up: an empty session draft adopts what was typed while offline.
+  if (!saved && draftKey !== OFFLINE_DRAFT_KEY) {
+   saved = readDraft(OFFLINE_DRAFT_KEY);
+   if (saved) { rememberDraft(draftKey, saved); rememberDraft(OFFLINE_DRAFT_KEY, ""); }
+  }
+  const text = saved.slice(0, CONTROL_TEXT_MAX);
+  if (text) setText(current => current || text);
  },[draftKey,draft]);
  const edit = (next: string) => { setText(next); if (draftKey) rememberDraft(draftKey, next); };
  // Grow with the text; CSS max-height (about five lines) makes it scroll inside past that.
@@ -118,6 +126,7 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
   const extra = {...(deliver ? {deliver} : {}), ...(images.length ? {images} : {}), ...(files.length ? {files} : {})};
   control.send({kind:"message",text:body,...extra});
   edit("");
+  rememberDraft(OFFLINE_DRAFT_KEY, "");
   setAttachments([]);
  };
  const abort = () => {
