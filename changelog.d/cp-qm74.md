@@ -1,0 +1,1 @@
+- Tests: the mock provider can carry extra error-body fields, and a test-only quota-reset decoder proves a reset epoch survives pi's spent inner retry ladder on the terminal event (P3 Milestone 1); no provider gains a reset capability.
