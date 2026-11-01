@@ -92,6 +92,8 @@ export interface SendRequest {
 	 * as the mandate's `repair` use before delivery; a ship brief (`task`/`taskFile`) is a `promote` instead.
 	 */
 	purpose?: "repair";
+	/** A quota continuation resumes its interrupted round: delivery never restarts the hard wall-clock bound. */
+	keepRound?: boolean;
 }
 
 export interface SendResult {
@@ -439,7 +441,7 @@ export class Sender {
 			recordPlanRevise(home, planDecision.researchId, planDecision.text, new Date().toISOString());
 		}
 
-		const rearmed = mode === "prompt" && outcome.receipt === "delivered" && this.#options.onPromptDelivered?.(request.jobId) === true;
+		const rearmed = mode === "prompt" && outcome.receipt === "delivered" && !request.keepRound && this.#options.onPromptDelivered?.(request.jobId) === true;
 
 		// The marker is written whatever the receipt says: a refused delivery is
 		// exactly the kind of fact a run log exists to keep.

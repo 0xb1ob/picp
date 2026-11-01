@@ -42,7 +42,7 @@ import {
 	LAYOUT, paths,
 	type WorkerProfile,
 } from "./contracts.ts";
-import { type HardBoundsWatch, resolveJobHardBounds } from "./bounds.ts";
+import { type CarriedBounds, type HardBoundsWatch, resolveJobHardBounds } from "./bounds.ts";
 import type { FailureMonitor } from "./failures.ts";
 import type { FleetStore } from "./fleet.ts";
 import type { EnvelopeIntake } from "./intake.ts";
@@ -112,10 +112,10 @@ export interface WorkerObserverOptions {
 	 * to file the report before anything is recorded (cp-settle-without-report).
 	 */
 	settle?: SettleWatcher;
-	/** When present, wall-clock and tool-call caps are enforced on this worker. */
+	/** Enforces wall-clock and tool-call caps: `hardBounds` (env defaults if omitted), resuming `carriedBounds` spend. */
 	bounds?: HardBoundsWatch;
-	/** Resolved caps for this job; defaults from env when omitted. */
 	hardBounds?: JobHardBounds;
+	carriedBounds?: CarriedBounds;
 	onUsage?: (jobId: string, previous: Usage, current: Usage) => void; // per model message that advanced run usage
 }
 
@@ -145,7 +145,7 @@ export function attachWorkerObservers(options: WorkerObserverOptions): void {
 	// on is a failed model call, never an unreported one to nudge.
 	options.settle?.watch(options.jobId, options.worker, outerRetry.isPending, outerRetry.exhaustedError);
 	options.failures?.watch(options.jobId, options.worker);
-	options.bounds?.watch(options.jobId, options.worker, options.hardBounds ?? resolveJobHardBounds());
+	options.bounds?.watch(options.jobId, options.worker, options.hardBounds ?? resolveJobHardBounds(), options.carriedBounds);
 	const { onUsage, jobId } = options;
 	if (onUsage) options.recorder.onUsageAdvance((previous, current) => onUsage(jobId, previous, current));
 }

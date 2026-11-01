@@ -5,6 +5,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { CarriedBounds } from "./bounds.ts";
 import { type FleetRecord, isoTimestamp, LAYOUT } from "./contracts.ts";
 import { readDrain } from "./drain.ts";
 import type { FleetStore } from "./fleet.ts";
@@ -40,6 +41,8 @@ export interface QuotaIntent {
 	branch: string;
 	session_file: string;
 	attempts: number;
+	/** The interrupted round's caps spend at the claim; the continuation resumes it instead of a fresh round. */
+	round?: CarriedBounds;
 	reason?: string;
 	cancelled?: { actor: string; reason: string; at: string };
 	consumed?: { at: string; receipt: SendResult["receipt"]; mode: SendResult["mode"] };
@@ -73,7 +76,7 @@ export interface QuotaContinuationOptions {
 	/** Absent means production: the frozen empty adapter, which decodes nothing. */
 	adapter?: QuotaResetAdapter;
 	/** Due-tick ports: the existing continue_failed revive and the ordinary send. */
-	revive: (jobId: string) => Promise<unknown>;
+	revive: (jobId: string, carried?: CarriedBounds) => Promise<unknown>;
 	send: (request: SendRequest) => Promise<SendResult>;
 	/** Only the home's owner reconciles or sends. */
 	owns: () => boolean;
@@ -81,6 +84,8 @@ export interface QuotaContinuationOptions {
 	mandates: Pick<MandateStore, "assertPermitted">;
 	/** False while every worker slot is taken: a due intent then waits for a later pass. */
 	capacityFree: () => boolean;
+	/** The live worker's hard-bound spend in its current round (`HardBoundsWatch.spent`). */
+	spent?: (jobId: string) => CarriedBounds | undefined;
 	now?: () => Date;
 }
 
@@ -180,17 +185,18 @@ export class QuotaContinuation {
 		return intent.continuation_id;
 	}
 
-	/** One unref'd timer for the earliest waiting reset; a due intent a pass skipped (busy, drain) waits the cap. */
-	arm(afterPass = false): void {
+	/** One unref'd timer for the earliest waiting reset; one due by `passStart` was skipped (busy, drain): the cap. */
+	arm(passStart?: number): void {
 		clearTimeout(this.#timer);
 		this.#timer = undefined;
 		if (!this.#options.owns()) return;
 		const resets = this.intents().filter((intent) => intent.state === "pending" && intent.delivery === "waiting").map((intent) => intent.signal.resetsAtEpochSeconds * 1000);
 		if (resets.length === 0) return;
-		const wait = Math.min(...resets) - this.#now().getTime();
-		const delay = wait > 0 ? Math.min(wait, QUOTA_TICK_MAX_MS) : afterPass ? QUOTA_TICK_MAX_MS : 0;
+		const now = this.#now().getTime();
+		const delay = Math.min(QUOTA_TICK_MAX_MS, ...resets.map((at) => (at > now ? at - now : passStart !== undefined && at <= passStart ? QUOTA_TICK_MAX_MS : 0)));
 		this.#timer = setTimeout(() => {
-			void this.tick().catch((error: unknown) => this.#storeError(error, "tick")).finally(() => this.arm(true));
+			const started = this.#now().getTime();
+			void this.tick().catch((error: unknown) => this.#storeError(error, "tick")).finally(() => this.arm(started));
 		}, delay);
 		this.#timer.unref();
 	}
@@ -319,6 +325,8 @@ export class QuotaContinuation {
 			session_file: record.worker.session_file,
 			attempts: 0,
 		};
+		const round = this.#options.spent?.(jobId);
+		if (round) intent.round = round;
 		doc.intents.push(intent);
 		this.#write(doc);
 		this.#journal(intent);
@@ -403,6 +411,8 @@ export class QuotaContinuation {
 	/** Each step is persisted before the call it guards, so a crash leaves a holdable state, never a resend. */
 	async #continue(id: string): Promise<QuotaIntent | undefined> {
 		const step = (patch: Partial<QuotaIntent>): QuotaIntent => {
+			// A stopping parent never writes past its last persisted step: the next owner holds that step as ambiguous.
+			if (!this.#options.owns()) throw new Error(`${id}: ownership lost mid-delivery; left for the next owner's reconcile`);
 			const doc = this.#read();
 			const intent = doc.intents.find((candidate) => candidate.continuation_id === id) as QuotaIntent;
 			Object.assign(intent, patch);
@@ -425,7 +435,7 @@ export class QuotaContinuation {
 		if (this.#options.fleet.get(intent.job_id)?.phase !== "failed" || !this.#options.capacityFree() || readDrain(this.#options.home)) return undefined;
 		step({ delivery: "claimed", attempts: intent.attempts + 1 });
 		try {
-			await this.#options.revive(intent.job_id);
+			await this.#options.revive(intent.job_id, intent.round);
 		} catch (error) {
 			return step({ delivery: "ambiguous", reason: `revive refused: ${(error as Error).message.slice(0, 300)}` });
 		}
@@ -433,7 +443,7 @@ export class QuotaContinuation {
 		step({ delivery: "sending" });
 		let result: SendResult;
 		try {
-			result = await this.#options.send({ jobId: intent.job_id, message: QUOTA_CONTINUE_NUDGE });
+			result = await this.#options.send({ jobId: intent.job_id, message: QUOTA_CONTINUE_NUDGE, keepRound: true });
 		} catch (error) {
 			return step({ delivery: "ambiguous", reason: `send failed: ${(error as Error).message.slice(0, 300)}` });
 		}

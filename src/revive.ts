@@ -36,7 +36,7 @@ import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, path
 import { type FleetStore, isPidAlive } from "./fleet.ts";
 import { loadProfile } from "./profiles.ts";
 import type { RunRegistry } from "./runs.ts";
-import { resolveJobHardBounds } from "./bounds.ts";
+import { type CarriedBounds, resolveJobHardBounds } from "./bounds.ts";
 import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import { readCheckpoint } from "./checkpoint-ref.ts";
@@ -137,6 +137,8 @@ export type RevivePlanResult = RevivePlan | ReviveRefusal;
 export interface RevivePlanOptions {
 	recovering?: boolean;
 	continueFailed?: boolean;
+	/** A quota continuation resumes the interrupted round's caps (src/quota-continuation.ts). */
+	carriedBounds?: CarriedBounds;
 }
 
 export interface ReviveResult {
@@ -572,7 +574,7 @@ export class Reviver {
 				...(this.#options.settle ? { settle: this.#options.settle } : {}),
 				...(this.#options.failures ? { failures: this.#options.failures } : {}),
 				...(this.#options.bounds
-					? { bounds: this.#options.bounds, hardBounds: record.bounds ?? resolveJobHardBounds() }
+					? { bounds: this.#options.bounds, hardBounds: record.bounds ?? resolveJobHardBounds(), ...(options?.carriedBounds ? { carriedBounds: options.carriedBounds } : {}) }
 					: {}),
 				...(this.#options.onUsage ? { onUsage: this.#options.onUsage } : {}),
 			});

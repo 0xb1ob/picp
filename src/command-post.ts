@@ -131,7 +131,7 @@ import { afterMergeHook } from "./after-merge.ts";
 import { MergeStore, type RecordMergeRequest, type RecordMergeResult } from "./merges.ts";
 import { Preflight } from "./preflight.ts";
 import { ProjectRegistry, projectDirResolver } from "./projects.ts";
-import { Reviver, type ReviveResult, type RevivePlanResult } from "./revive.ts";
+import { Reviver, type ReviveResult, type RevivePlanOptions, type RevivePlanResult } from "./revive.ts";
 import { ALWAYS_AVAILABLE, loadRoutingConfig, type ModelProbe, type PiModelRegistryLike, registryProbe } from "./routing.ts";
 import { type Asker, QuestionRelay } from "./questions.ts";
 import { type PlanTarget, type ResolvePlanOptions, resolvePlanTarget } from "./plan-view.ts";
@@ -385,7 +385,7 @@ export class CommandPost {
 		this.mandates = new MandateStore(options.home);
 		this.#ghLogin = memoLogin(runCommand, options.home); // k52/cp-oc0m: whose main CI runs count; resolved once, retried after a failure
 		this.sender = new Sender({ fleet: this.fleet, manager: this.manager, runs: this.runs, home: options.home, budgets: () => this.budgets(), mandates: this.mandates, onPromptDelivered: (jobId) => this.bounds.rearm(jobId), revive: (jobId) => this.revive(jobId), released: (jobId) => this.heldRelease.wasReleased(jobId), resume: (jobId) => this.awaitingMerge.resume(jobId) });
-		this.quota = new QuotaContinuation({ home: options.home, fleet: this.fleet, runs: this.runs, ...(options.quotaResetAdapter ? { adapter: options.quotaResetAdapter } : {}), revive: (jobId) => this.revive(jobId, { continueFailed: true }), send: (request) => this.send(request), owns: () => !this.manager.closing && this.#ownsHome(), mandates: this.mandates, capacityFree: () => this.heldRelease.capacityFree() });
+		this.quota = new QuotaContinuation({ home: options.home, fleet: this.fleet, runs: this.runs, ...(options.quotaResetAdapter ? { adapter: options.quotaResetAdapter } : {}), revive: (jobId, carriedBounds) => this.revive(jobId, { continueFailed: true, ...(carriedBounds ? { carriedBounds } : {}) }), send: (request) => this.send(request), owns: () => !this.manager.closing && this.#ownsHome(), mandates: this.mandates, capacityFree: () => this.heldRelease.capacityFree(), spent: (jobId) => this.bounds.spent(jobId) });
 		// cp-6lg7: the answer card is queued **before** anyone is told anything. It
 		// is built here, ahead of intake, because intake's `onReported` is what feeds
 		// it and a card that is only queued when a live extension happens to be
@@ -1232,7 +1232,7 @@ export class CommandPost {
 		return this.reviver().plan(jobId, options);
 	}
 
-	async revive(jobId: string, options: { continueFailed?: boolean } = {}): Promise<ReviveResult> {
+	async revive(jobId: string, options: RevivePlanOptions = {}): Promise<ReviveResult> {
 		return this.reviver().revive(jobId, options);
 	}
 

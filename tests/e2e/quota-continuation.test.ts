@@ -5,14 +5,17 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_BUDGET_CONFIG, type Delivery, isoTimestamp, type JobKind, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
+import { cpNext } from "../../src/next.ts";
 import { QUOTA_CONTINUE_NUDGE, type QuotaIntent, quotaContinuationErrorsFile, quotaContinuationFile } from "../../src/quota-continuation.ts";
 import { PRODUCTION_QUOTA_RESET_ADAPTER } from "../../src/quota-reset-signal.ts";
+import { readRecoveryAttempts } from "../../src/recovery.ts";
+import { readStatusFile } from "../../src/run-artifacts.ts";
 import {
 	createAgentDir,
 	createScratchHome,
@@ -463,7 +466,7 @@ test("startup reconcile keeps a pending intent's dead worker failed not revivabl
 test("due tick survives a store gone unreadable mid-pass", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const f = await fleet(t, { verified: true });
 	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
-	const soon = resetIn(5_000);
+	const soon = resetIn(10_000);
 	const jobs: string[] = [];
 	for (const name of ["first", "second"]) {
 		const jobId = await f.job({ slug: name });
@@ -491,7 +494,7 @@ test("closure revocation and manual replacement send nothing; restart and replay
 	const replaced = await f.job({ slug: "replaced" });
 	const once = await f.job({ slug: "once" });
 	const grant = f.post.mandates.issue({ projects: ["demo"], objective: `cover ${revoked}`, expiry: FAR, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [], job_ids: [revoked] });
-	const soon = resetIn(10_000);
+	const soon = resetIn(20_000);
 	for (const [jobId, name] of [[closed, "closed"], [revoked, "revoked"], [replaced, "replaced"]] as const) {
 		await f.dispatch(jobId, f.script(name, [quotaResetError(soon), { kind: "hang" }]));
 	}
@@ -521,6 +524,143 @@ test("closure revocation and manual replacement send nothing; restart and replay
 	assert.match((await failed(f, once)).failure?.message ?? "", new RegExp(`quota continuation ${once}:quota:2 is pending`));
 	await post.quota.tick();
 	assert.equal(nudges(f, "once"), 1);
+});
+
+test("a continuation resumes the interrupted round: caps, spend and counters are never renewed", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	const f = await fleet(t, { verified: true });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const tools = await f.job({ slug: "tools" });
+	const clock = await f.job({ slug: "clock" });
+	const usage = { prompt_tokens: 1000, completion_tokens: 100 };
+	const bash = (command: string): ScriptStep => ({ kind: "tool_calls", calls: [{ name: "bash", args: { command } }], usage });
+	// Three tool starts across two limits against a cap of three: only a carried count reaches it. risk:high makes a
+	// tripped bound escalate instead of re-dispatching, so the bound's failure stays on the record.
+	const toolsModel = f.script("tools", [bash("true"), quotaResetError(resetIn(8_000)), bash("true"), quotaResetError(resetIn(16_000)), bash("true"), { kind: "text", text: "unreached" }]);
+	const clockModel = f.script("clock", [bash("sleep 10"), quotaResetError(resetIn(14_000)), bash("sleep 15"), { kind: "text", text: "unreached" }]);
+	await f.post.dispatch({ jobId: tools, task: "Brief.", model: toolsModel, fetch: false, wallClockSeconds: 600, toolCallCap: 3, risk: "high" });
+	await f.post.dispatch({ jobId: clock, task: "Brief.", model: clockModel, fetch: false, wallClockSeconds: 20, toolCallCap: 100, risk: "high" });
+
+	const before = await failed(f, tools);
+	const counters = (jobId: string) => {
+		const status = readStatusFile(f.home, jobId);
+		return { tool_calls: status?.tool_calls, tokens: status?.usage.total_tokens, recovery: readRecoveryAttempts(f.home, jobId, "model_call_failed") };
+	};
+	const first = counters(tools);
+	await waitFor(() => f.post.quota.intents(tools), (rows) => rows.length === 2 && f.post.fleet.require(tools).phase === "failed", { timeoutMs: 60_000, what: "the second limit" });
+	const second = counters(tools);
+	const final = await waitFor(() => f.post.fleet.require(tools), (record) => record.failure?.class === "tool_call_cap_exceeded", { timeoutMs: 60_000, what: "the carried tool-call cap" });
+	const third = counters(tools);
+	assert.deepEqual([first.tool_calls, second.tool_calls, third.tool_calls], [1, 2, 3], "tool calls accumulate across both continuations");
+	assert.ok(first.tokens! > 0 && second.tokens! > first.tokens! && third.tokens! > second.tokens!, `spend accumulates: ${JSON.stringify([first, second, third])}`);
+	assert.deepEqual([first.recovery, second.recovery, third.recovery], [0, 0, 0], "no bounded-recovery attempt is spent or renewed");
+	assert.deepEqual(final.bounds, before.bounds, "the job's caps are unchanged");
+	assert.deepEqual(f.post.quota.intents(tools).map((row) => [row.generation, row.state, row.attempts]), [[1, "consumed", 1], [2, "consumed", 1]]);
+	assert.equal(f.events(tools, "prompt_sent").length, 3, "the brief and one continuation per limit, nothing more");
+
+	const tripped = await waitFor(() => f.post.fleet.require(clock), (record) => record.failure?.class === "wall_clock_exceeded", { timeoutMs: 90_000, what: "the carried wall clock" });
+	const [resumed] = f.post.quota.intents(clock);
+	assert.equal(resumed?.state, "consumed");
+	// The first round spent ~10 of 20 s before its limit; a renewed round (revive or prompt) would run the full 20 s.
+	const ran = Date.parse(tripped.failure!.at) - Date.parse(resumed!.consumed!.at);
+	assert.ok(ran < 15_000, `the continued round got only what was left of the first: tripped ${ran} ms after the send`);
+	assert.equal(f.provider.requests("clock").length, 3, "the second sleep never finished");
+});
+
+test("a restart mid-delivery holds ambiguous: never resent, never cancelled, recovery stands down", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	const f = await fleet(t, { verified: true });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const jobId = await f.job({ slug: "crash" });
+	await f.dispatch(jobId, f.script("crash", [quotaResetError(resetIn(4_000)), { kind: "hang" }]));
+	await failed(f, jobId);
+	const old = f.post;
+	// The production due timer claims; the owner stops before its revive returns, so no later step is written.
+	await waitFor(() => old.quota.intents(jobId)[0]?.delivery, (delivery) => delivery === "claimed", { timeoutMs: 30_000, intervalMs: 5, what: "the due claim" });
+	const post = await f.restart(async () => {
+		assert.deepEqual(await old.quota.tick(), [], "the stopped owner's pass is over and writes nothing");
+	});
+	const [intent] = post.quota.intents(jobId);
+	assert.deepEqual([intent?.state, intent?.delivery, intent?.attempts], ["pending", "ambiguous", 1]);
+	assert.match(String(intent?.reason), /^the parent restarted while (claimed|idle|sending): delivery unknown, never resent$/);
+	assert.equal(post.fleet.require(jobId).phase, "failed", "the dead worker stays failed for the hold, never revivable");
+	await post.quota.tick();
+	await post.quota.tick();
+	await new Promise((resolve) => setTimeout(resolve, 1_000));
+	assert.equal(nudges(f, "crash"), 0, "replayed passes and timers never resend an ambiguous delivery");
+	const refused = post.quota.cancel(jobId, { actor: "operator", reason: "drop it" });
+	assert.deepEqual(refused, { ok: false, reason: `${intent?.continuation_id} is ambiguous: past the point a cancel can stop` });
+	assert.deepEqual(post.quota.intents(jobId), [intent], "a refused cancel changes nothing");
+
+	// Manual from here: the operator continues it, and when that worker dies mid-turn automatic recovery stands down
+	// unspent, with no escalation and no wake promising an attempt.
+	await post.revive(jobId, { continueFailed: true });
+	assert.equal((await post.send({ jobId, message: "Carry on." })).receipt, "delivered");
+	await waitFor(() => f.provider.requests("crash").length, (n) => n === 2, { timeoutMs: 30_000, what: "the operator's turn" });
+	const pid = post.manager.get(jobId)?.worker.pid;
+	assert.ok(pid, "the operator's revive started a worker");
+	process.kill(pid, "SIGKILL");
+	const [stood] = await waitFor(() => f.events(jobId, "recovery_failed"), (rows) => rows.length > 0, { timeoutMs: 60_000, what: "recovery's stand-down" });
+	assert.equal(stood?.stage, "quota");
+	assert.match(String(stood?.error), new RegExp(`quota continuation ${intent?.continuation_id} owns its next turn`));
+	const dead = await failed(f, jobId);
+	const wakes = post.durableWakeups.pending().filter((entry) => entry.job_id === jobId).map((entry) => entry.content ?? "");
+	assert.ok(wakes.some((text) => text.includes("automatic recovery: not attempted")), `the death wake promises no attempt: ${wakes.join("\n")}`);
+	assert.ok(!wakes.some((text) => text.includes("attempt in flight")), wakes.join("\n"));
+	assert.deepEqual(["recovery_attempted", "recovery_escalated", "worker_revived"].map((type) => f.events(jobId, type).length), [0, 0, 1]);
+	assert.deepEqual(post.escalations.open().filter((item) => item.job_ids.includes(jobId)), []);
+	assert.equal(readRecoveryAttempts(f.home, jobId, dead.failure!.class), 0);
+	assert.equal(nudges(f, "crash"), 0);
+});
+
+test("a missing session and a passed deadline end visibly with zero sends", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const f = await fleet(t, { verified: true });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const gone = await f.job({ slug: "gone" });
+	const late = await f.job({ slug: "late" });
+	const deadline = new Date(Date.now() + 6_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+	f.post.mandates.issue({ projects: ["demo"], objective: `finish ${late} by the deadline`, job_ids: [late], expiry: deadline,
+		provenance: { expiry_hours: "explicit" }, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [] });
+	const soon = resetIn(10_000);
+	for (const [jobId, name] of [[gone, "gone"], [late, "late"]] as const) {
+		await f.dispatch(jobId, f.script(name, [quotaResetError(soon), { kind: "hang" }]));
+	}
+	const record = await failed(f, gone);
+	await failed(f, late);
+	rmSync(record.worker.session_file);
+	const [lost] = await waitFor(() => f.post.quota.intents(gone), (rows) => rows[0]?.delivery === "ambiguous", { timeoutMs: 60_000, what: "the missing session" });
+	assert.equal(lost?.state, "pending", "held for the operator");
+	assert.match(String(lost?.reason), new RegExp(`^revive refused: cannot revive ${gone} \\(session_missing\\)`));
+	const [expired] = await settled(f, [late]);
+	assert.equal(expired?.state, "cancelled");
+	assert.match(String(expired?.reason), /^authority refused: .*deadline/);
+	assert.deepEqual(["gone", "late"].map((name) => nudges(f, name)), [0, 0]);
+	assert.equal(f.post.fleet.require(gone).phase, "failed");
+});
+
+test("drain defers a due intent and cp_next never offers its job", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const f = await fleet(t, { verified: true });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const held = await f.job({ slug: "drained" });
+	const open = await f.job({ slug: "open" });
+	f.post.mandates.issue({ projects: ["demo"], objective: "drain cover", job_ids: [held, open], expiry: FAR, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [] });
+	const soon = resetIn(5_000);
+	await f.dispatch(held, f.script("drained", [quotaResetError(soon), { kind: "text", text: "continued" }]));
+	await failed(f, held);
+	// src/next.ts:146 reads only open ledger rows: a dispatched job holding an intent is never a dispatch candidate.
+	const next = await cpNext({ ledger: f.post.ledger(), fleet: f.post.fleet, mandates: f.post.mandates, escalations: f.post.escalations, packageRoot: REPO_ROOT }, "demo");
+	assert.deepEqual(next.ready.map((job) => job.id), [open]);
+	assert.notEqual(next.action.job_id, held);
+
+	assert.equal(f.post.drain.start().state, "drained", "no live worker: the drain is idle at once");
+	await new Promise((resolve) => setTimeout(resolve, Math.max(0, soon.getTime() - Date.now() + 500)));
+	assert.deepEqual(await f.post.quota.tick(), []);
+	assert.deepEqual(f.post.quota.intents(held).map((row) => [row.state, row.delivery]), [["pending", "waiting"]]);
+	assert.equal(nudges(f, "drained"), 0, "nothing is sent while the parent drains");
+	// The restart a drain prepares clears it; the new owner continues the session once.
+	const post = await f.restart();
+	await post.quota.tick();
+	const [done] = await settled(f, [held]);
+	assert.deepEqual([done?.state, done?.consumed?.receipt], ["consumed", "delivered"]);
+	await waitFor(() => nudges(f, "drained"), (n) => n === 1, { timeoutMs: 30_000, what: "the one continuation" });
 });
 
 /** Every `.ts`/`.tsx` file below `dir`, skipping dependencies. */
