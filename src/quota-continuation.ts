@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { type FleetRecord, isoTimestamp, LAYOUT } from "./contracts.ts";
 import { readDrain } from "./drain.ts";
 import type { FleetStore } from "./fleet.ts";
+import type { MandateStore } from "./mandate.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import {
 	type EffectiveQuotaPolicy,
@@ -76,8 +77,8 @@ export interface QuotaContinuationOptions {
 	send: (request: SendRequest) => Promise<SendResult>;
 	/** Only the home's owner reconciles or sends. */
 	owns: () => boolean;
-	/** Throws when the job's mandate refuses a repair-class continuation (revoked, capped, past an explicit deadline). */
-	authorize: (jobId: string) => void;
+	/** The repair check a due intent passes before any claim: a revoked, capped or past-deadline grant cancels it. */
+	mandates: Pick<MandateStore, "assertPermitted">;
 	/** False while every worker slot is taken: a due intent then waits for a later pass. */
 	capacityFree: () => boolean;
 	now?: () => Date;
@@ -96,7 +97,6 @@ export class QuotaContinuation {
 	readonly #options: QuotaContinuationOptions;
 	readonly #adapter: QuotaResetAdapter;
 	#timer: NodeJS.Timeout | undefined;
-	#stopped = false;
 	#passes: Promise<unknown> = Promise.resolve();
 
 	constructor(options: QuotaContinuationOptions) {
@@ -184,7 +184,7 @@ export class QuotaContinuation {
 	arm(afterPass = false): void {
 		clearTimeout(this.#timer);
 		this.#timer = undefined;
-		if (this.#stopped || !this.#options.owns()) return;
+		if (!this.#options.owns()) return;
 		const resets = this.intents().filter((intent) => intent.state === "pending" && intent.delivery === "waiting").map((intent) => intent.signal.resetsAtEpochSeconds * 1000);
 		if (resets.length === 0) return;
 		const wait = Math.min(...resets) - this.#now().getTime();
@@ -193,12 +193,6 @@ export class QuotaContinuation {
 			void this.tick().catch((error: unknown) => this.#storeError(error, "tick")).finally(() => this.arm(true));
 		}, delay);
 		this.#timer.unref();
-	}
-
-	/** Shutdown: no due timer outlives its parent. */
-	stop(): void {
-		this.#stopped = true;
-		clearTimeout(this.#timer);
 	}
 
 	/** An unreadable store reads as no settings: quota continuation is off. */
@@ -344,6 +338,8 @@ export class QuotaContinuation {
 		} catch (error) {
 			this.#storeError(error, "reconcile"); // startup goes on; the store file is left as found
 			return [];
+		} finally {
+			this.arm(); // P3: the startup wake; an overdue intent behind a drain record retries at the cap
 		}
 	}
 
@@ -374,7 +370,7 @@ export class QuotaContinuation {
 		return undefined;
 	}
 
-	/** One due pass at a time: every waiting intent past its reset is revived idle and sent the short continuation once. */
+	/** One due pass at a time: each waiting intent past its reset is revived idle and sent the short continuation once. */
 	tick(): Promise<QuotaIntent[]> {
 		const pass = this.#passes.then(() => this.#tick());
 		this.#passes = pass.catch(() => undefined);
@@ -447,7 +443,8 @@ export class QuotaContinuation {
 
 	#refused(jobId: string): string | undefined {
 		try {
-			this.#options.authorize(jobId);
+			const record = this.#options.fleet.require(jobId);
+			this.#options.mandates.assertPermitted("repair", { jobId, project: record.project, kind: record.kind }, this.#options.fleet.read().jobs);
 			return undefined;
 		} catch (error) {
 			return `authority refused: ${(error as Error).message.slice(0, 300)}`;
