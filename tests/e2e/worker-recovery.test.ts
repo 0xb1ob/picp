@@ -27,6 +27,7 @@ import {
 	treehouseAvailable,
 	waitFor,
 } from "../harness/index.ts";
+import { decodeMockQuotaReset, QUOTA_RESET_CATEGORY, QUOTA_RESET_SCOPE, quotaResetError } from "../harness/quota-reset-adapter.ts";
 
 const SKIP = treehouseAvailable() ? false : "worker-recovery e2e needs treehouse on PATH";
 
@@ -41,12 +42,12 @@ interface Fleet {
 	events(jobId: string, type?: string): Array<{ type: string; payload: Record<string, unknown> }>;
 }
 
-async function fleet(t: { after(fn: () => void | Promise<void>): void }, maxTrees = 3): Promise<Fleet> {
+async function fleet(t: { after(fn: () => void | Promise<void>): void }, maxTrees = 3, retry: Record<string, unknown> = { enabled: false }): Promise<Fleet> {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo", files: { "README.md": "# demo\n" } });
 	const provider = await MockProvider.start();
-	// pi's own inner retry is off so each provider error reaches command-post's outer ladder at once.
-	const agentDir = createAgentDir({ provider, settings: { retry: { enabled: false } } });
+	// pi's own inner retry is off by default so each provider error reaches command-post's outer ladder at once.
+	const agentDir = createAgentDir({ provider, settings: { retry } });
 	initJobsDocument(home.path, "cp");
 	const settles: Fleet["settles"] = [];
 	const post = new CommandPost({
@@ -227,6 +228,46 @@ test("04-3: only capacity and connectivity errors enter the ladder; quota, auth 
 	assert.notEqual(revived.pid, auth.pid);
 	assert.equal(f.post.fleet.require(auth.jobId).phase, "waiting");
 	assert.equal(f.post.manager.get(auth.jobId)?.worker.pid, revived.pid);
+});
+
+test("04-6: a reset-bearing usage limit survives pi's spent inner ladder on the terminal event and stays unsupported", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	// P3 Milestone 1 stop rule: the fake transport must carry structured reset metadata through a real pi terminal
+	// event before any continuation is built. Production behaviour is unchanged: no capability, failed at once.
+	const f = await fleet(t, 3, { enabled: true, maxRetries: 2, baseDelayMs: 50 });
+	const jobId = await f.job("quota-reset");
+	const resetsAt = new Date(Math.floor(Date.now() / 1000) * 1000 + 5 * 3_600_000);
+	await f.dispatch(jobId, f.script("quota-reset", [quotaResetError(resetsAt, 3), { kind: "hang" }]));
+	const failed = await waitFor(() => f.post.fleet.require(jobId), (record) => record.phase === "failed", { timeoutMs: 60_000, what: "the spent inner ladder" });
+
+	const pi = readRunEvents(f.home, jobId).filter((event) => event.source === "pi");
+	const payload = (event: (typeof pi)[number]) => (event.payload ?? {}) as Record<string, unknown>;
+	assert.deepEqual(pi.filter((event) => event.type === "auto_retry_start").map((event) => payload(event).attempt), [1, 2]);
+	const [end] = pi.filter((event) => event.type === "auto_retry_end").map(payload);
+	assert.equal(end?.success, false, "pi's own ladder gave up");
+	assert.equal(f.provider.requests("quota-reset").length, 3, "one request per inner attempt, nothing after");
+	const terminal = pi.filter((event) => event.type === "message_end").map((event) => payload(event).message).at(-1) as Record<string, unknown>;
+	assert.equal(terminal.errorMessage, end?.finalError, "the terminal message is the one pi's ladder ended on");
+	assert.deepEqual(decodeMockQuotaReset(f.provider, terminal), {
+		provider: "mock",
+		model: f.provider.modelId("quota-reset"),
+		status: 429,
+		category: QUOTA_RESET_CATEGORY,
+		scope: QUOTA_RESET_SCOPE,
+		resetsAtEpochSeconds: resetsAt.getTime() / 1000,
+		resetsAtUtc: resetsAt.toISOString(),
+	});
+
+	// The decoder grants nothing outside the exact mock identity and a well-formed absolute reset.
+	const rewritten = (patch: Record<string, unknown>) => decodeMockQuotaReset(f.provider, { ...terminal, ...patch });
+	assert.equal(rewritten({ provider: "openai" }), undefined, "a real provider id is never decoded");
+	assert.equal(rewritten({ model: "script-never-served" }), undefined, "a model this mock did not serve is never decoded");
+	assert.equal(rewritten({ errorMessage: '429: {"message":"rate limited","type":"rate_limit_error"}' }), undefined, "a bare 429");
+	assert.equal(rewritten({ errorMessage: String(terminal.errorMessage).replace(/"resets_at":\d+/, '"resets_at":"in 5 hours"') }), undefined);
+
+	assert.deepEqual(f.events(jobId, "outer_retry_attempt"), [], "a usage limit never enters the outer ladder");
+	assert.equal(failed.failure?.class, "model_call_failed");
+	assert.match(failed.failure?.message ?? "", /usage limit/);
+	assert.match(failed.failure?.message ?? "", /never ran a turn.*re-dispatch/, "the outcome stays actionable");
 });
 
 test("04-4: continue_failed closes a failed job's still-registered worker before it relaunches", { skip: SKIP, timeout: 120_000 }, async (t) => {

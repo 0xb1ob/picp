@@ -47,8 +47,8 @@ export type ScriptStep =
 	| { kind: "tool_calls"; calls: MockToolCall[]; text?: string; usage?: MockUsage }
 	/** Settles with no content at all — drives `agent_empty_output`. */
 	| { kind: "empty"; usage?: MockUsage }
-	/** HTTP error injection (429/500/...); `repeat` consumes N requests. */
-	| { kind: "error"; status: number; message?: string; type?: string; repeat?: number }
+	/** HTTP error injection (429/500/...); `repeat` consumes N requests; `fields` extend the error body object. */
+	| { kind: "error"; status: number; message?: string; type?: string; repeat?: number; fields?: Record<string, unknown> }
 	/** Never answers, or completes after `ms` or an explicit `until` release. */
 	| { kind: "hang"; ms?: number; until?: Promise<void> };
 
@@ -292,6 +292,7 @@ export class MockProvider {
 		if (step.kind === "error") {
 			this.json(res, step.status, {
 				error: {
+					...step.fields,
 					message: step.message ?? `mock provider: injected ${step.status}`,
 					type: step.type ?? (step.status === 429 ? "rate_limit_error" : "server_error"),
 				},
