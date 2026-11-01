@@ -12,6 +12,7 @@ import { CommandPost } from "../../src/command-post.ts";
 import { type Failure, type UnreportedWork, paths, LAYOUT, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import {
+	routeNamed,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -115,6 +116,7 @@ test("a looping worker trips the tool-call cap, keeps the file, wakes once", { s
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "echo three" } }] },
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "echo four" } }] },
 	]);
+	routeNamed(f.home, [model]);
 	const dispatched = await f.post.dispatch({
 		jobId,
 		task: "Loop.",
@@ -152,6 +154,7 @@ test("a long-sleeping tool trips the wall-clock, keeps the file, wakes once", { 
 		},
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 60" } }] },
 	]);
+	routeNamed(f.home, [model]);
 	const dispatched = await f.post.dispatch({
 		jobId,
 		task: "Sleep.",
@@ -186,6 +189,7 @@ test("S21: a real bound whose checkout disappears journals its recovery outcome 
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "echo retained > leftover.txt" } }] },
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "echo bound" } }] },
 	]);
+	routeNamed(f.home, [model]);
 	const dispatched = await f.post.dispatch({ jobId, task: "Write, then stop at the bound.", model, fetch: false, toolCallCap: 2, wallClockSeconds: 90 });
 	const entries = await waitFor(
 		() => f.post.durableWakeups.pending().filter((entry) => entry.job_id === jobId),
@@ -212,6 +216,7 @@ test("S21: a rejected envelope and an observed worker loop emit durable deaths",
 		const model = f.script(`emitter-${cls}`, cls === "envelope_invalid"
 			? [{ kind: "hang", ms: 1000 }]
 			: [{ kind: "tool_calls", calls: Array.from({ length: 6 }, () => ({ name: "bash", args: { command: "echo identical" } })) }, { kind: "hang" }]);
+		routeNamed(f.home, [model]);
 		await f.post.dispatch({ jobId, task: "Exercise the worker emitter.", model, fetch: false, toolCallCap: 100, wallClockSeconds: 90 });
 		if (cls === "envelope_invalid") {
 			const rejected = join(f.home, paths.runDir(jobId), "envelope-rejected.json");
@@ -251,6 +256,7 @@ test("S21: parent shutdown preserves the interrupted worker without a death or s
 	const f = await fleet(t);
 	const jobId = await f.intake("shutdown owns the close", "own-close");
 	const model = f.script("shutdown-owned", [{ kind: "hang" }]);
+	routeNamed(f.home, [model]);
 	await f.post.dispatch({ jobId, task: "Wait for the parent.", model, fetch: false, toolCallCap: 100, wallClockSeconds: 90 });
 	await waitFor(() => f.provider.requests("shutdown-owned").length, (n) => n > 0, { timeoutMs: 15_000, what: "worker request before shutdown" });
 	const worker = f.post.manager.get(jobId)!.worker;
@@ -283,6 +289,7 @@ test("S21: budget and provider failures reach the durable death journal", { skip
 		const model = f.script(`failure-${cls}`, cls === "model_call_failed"
 			? [{ kind: "error", status: 401, message: "401 Invalid API key", repeat: 20 }]
 			: [{ kind: "text", text: "budgeted turn", usage: { prompt_tokens: 900, completion_tokens: 200 } }, { kind: "hang" }]);
+		routeNamed(f.home, [model]);
 		await f.post.dispatch({ jobId, task: "Exercise a public worker failure.", model, fetch: false, toolCallCap: 100, wallClockSeconds: 90 });
 		if (cls === "budget_exceeded") {
 			await waitFor(() => f.provider.requests(`failure-${cls}`).length, (n) => n >= 2,
@@ -314,6 +321,7 @@ test("S21: an idle worker that ignores its report nudge emits one unreported out
 	const f = await fleet(t);
 	const jobId = await f.intake("silent worker", "silent-worker");
 	const model = f.script("s21-silent", [{ kind: "text", text: "No report yet." }, { kind: "text", text: "Still no report." }]);
+	routeNamed(f.home, [model]);
 	await f.post.dispatch({ jobId, task: "Exercise the report boundary.", model, fetch: false, toolCallCap: 100, wallClockSeconds: 90 });
 	await waitFor(() => f.unreported, (rows) => rows.includes("settled_without_report"),
 		{ timeoutMs: 20_000, what: "real unreported-settle emitter" });

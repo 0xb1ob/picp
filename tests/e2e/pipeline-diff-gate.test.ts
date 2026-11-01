@@ -15,7 +15,7 @@ import { atomicWriteJson } from "../../src/json-store.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { readReviewPassVerdict } from "../../src/merge-ask.ts";
 import { ReviewRuns } from "../../src/review-runs.ts";
-import { createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT } from "../harness/index.ts";
+import { createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT, routeNamed } from "../harness/index.ts";
 
 const NO_FLAGS = { destructive_scope: false, scope_growth: false, blocking_unknowns: false };
 const FLAGGED = { verdict: "escalate", cause: "flagged", flags: { ...NO_FLAGS, destructive_scope: true }, reasons: ["the diff drops the legacy_accounts table"] };
@@ -62,6 +62,7 @@ async function stack(t: TestContext) {
 	const script = (...args: Parameters<MockProvider["addScript"]>) => {
 		const model = provider.addScript(...args);
 		agent.writeModels(provider);
+		routeNamed(home.path, [model]);
 		return model;
 	};
 	/** A scripted reviewer model that files one verdict per review it is asked for. */
@@ -70,7 +71,8 @@ async function stack(t: TestContext) {
 			args: { job_id: jobId, verdict: "pass", flags: NO_FLAGS, reasons: ["reviewed complete subject"], ...observation } }] })));
 	/** cp_review's own path: a real reviewer on the current head, handed back and settled. */
 	async function review(jobId: string, observation: Record<string, unknown> = {}): Promise<DiffVerdict> {
-		const started = await post.diffReview({ jobId, model: reviewer(jobId, observation) });
+		const model = reviewer(jobId, observation);
+		const started = await post.diffReview({ jobId, model: model });
 		if (!isDiffReviewWait(started)) return started.verdict;
 		post.reviewRuns.handBack(started.key);
 		await post.reviewRuns.settled(started.key);
@@ -180,7 +182,8 @@ test("P11d-diff-stop: a truncated pass is reviewed again, a policy stop or a spe
 	writeFileSync(join(s.home, LAYOUT.budgetsFile), JSON.stringify({ schema_version: 1, per_job_tokens: 1_000_000, per_job_cost_usd: 3, warn_ratio: 0.8, spawn_cap: 1 }));
 	for (let n = 0; n < 4; n += 1) {
 		const busy = await s.seed();
-		assert.ok(isDiffReviewWait(await s.post.diffReview({ jobId: busy.jobId, model: s.script(`busy-${busy.jobId}`, [{ kind: "hang", until: held }]) })));
+		const busyModel = s.script(`busy-${busy.jobId}`, [{ kind: "hang", until: held }]);
+		assert.ok(isDiffReviewWait(await s.post.diffReview({ jobId: busy.jobId, model: busyModel })));
 	}
 	const starved = await s.seed();
 	starved.plan({ enabled: true, model: s.script(`never-${starved.jobId}`, [{ kind: "text", text: "never" }]) });

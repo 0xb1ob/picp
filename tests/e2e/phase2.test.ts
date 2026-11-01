@@ -30,6 +30,7 @@ import type { IntakeResult } from "../../src/intake.ts";
 import { readEventLog } from "../../src/run-artifacts.ts";
 
 import {
+	routeNamed,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -219,6 +220,7 @@ test("m2: intake → dispatch → envelope → promote → unreported head needs
 	]);
 
 	// --- dispatch --------------------------------------------------------
+	routeNamed(f.home, [model]);
 	const dispatched = await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model, fetch: false });
 	assert.equal(dispatched.state, "dispatched");
 	assert.equal(dispatched.receipt, "accepted");
@@ -329,6 +331,7 @@ test("m2: a dirty worktree keeps everything until it is clean", { skip: SKIP, ti
 	const model = f.provider.addScript("m2-dirty-model", []);
 	void model;
 
+	routeNamed(f.home, [`mock/m2-dirty`]);
 	const dispatched = await f.post.dispatch({
 		jobId,
 		task: "Write notes.txt.",
@@ -382,6 +385,7 @@ test("m2: a crashed worker is classified and re-dispatched once", { skip: SKIP, 
 	const firstModel = f.script("m2-crash-1", [
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 30" } }] },
 	]);
+	routeNamed(f.home, [firstModel]);
 	const first = await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model: firstModel, fetch: false });
 	const managed = f.post.manager.get(jobId);
 	assert.ok(managed, "the manager owns the worker it spawned");
@@ -437,6 +441,7 @@ test("m2: a crashed worker is classified and re-dispatched once", { skip: SKIP, 
 
 	const firstLeaseId = failed?.lease_id;
 	const secondModel = f.script("m2-crash-2", shipSteps(f.home, jobId, { push: false }));
+	routeNamed(f.home, [secondModel]);
 	const second = await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model: secondModel, fetch: false });
 	assert.equal(second.state, "dispatched");
 	// The pool may hand back the same slot (it is free again); the LEASE is what
@@ -462,6 +467,7 @@ test("m2: an unspent crash is revived once, in place, on the same lease", { skip
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 5" } }] },
 		...shipSteps(f.home, jobId, { push: false }),
 	]);
+	routeNamed(f.home, [model]);
 	await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model, fetch: false });
 	const managed = f.post.manager.get(jobId);
 	assert.ok(managed, "the manager owns the worker it spawned");
@@ -494,6 +500,7 @@ test("m2: a forced teardown racing an automatic revive never claims a lease it d
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 5" } }] },
 		...shipSteps(f.home, jobId, { push: false }),
 	]);
+	routeNamed(f.home, [model]);
 	await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model, fetch: false });
 	const managed = f.post.manager.get(jobId);
 	assert.ok(managed, "the manager owns the worker it spawned");
@@ -559,6 +566,7 @@ test("m2: a drained restart then an explicit revive completes the same job once,
 	// MAX_RECOVERY_PROMPTS, not one nudge). Waiting on recovery_exhausted means no prompt is still coming, so the
 	// worker is truly idle; with one step short, the second prompt raced the drain and ate the revive's report.
 	const model = f.script("m2-drain", [commit!, { kind: "text", text: "paused for the restart" }, { kind: "text", text: "still paused" }, { kind: "text", text: "paused again" }, report!]);
+	routeNamed(f.home, [model]);
 	await f.post.dispatch({ jobId, task: "Bump x to 2 in src/app.ts.", model, fetch: false });
 	await waitFor(() => readEventLog(f.home, jobId), (events) => events.some((event) => event.type === "recovery_exhausted"), { timeoutMs: 60_000, what: "automatic recovery to be spent with the worker idle" });
 	const before = readFleet(f.home).jobs[0];
@@ -615,6 +623,7 @@ test("m2: a budget breach escalates and the worker survives", { skip: SKIP, time
 		{ kind: "text", text: "third turn, still reachable", usage: { prompt_tokens: 100, completion_tokens: 20 } },
 	]);
 
+	routeNamed(f.home, [model]);
 	await f.post.dispatch({ jobId, task: "Think about tokens.", model, fetch: false });
 	await waitFor(
 		() => readRunStatus(f.home, jobId),

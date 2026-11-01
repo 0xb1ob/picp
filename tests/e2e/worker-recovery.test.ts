@@ -21,6 +21,7 @@ import {
 	MockProvider,
 	readRunEvents,
 	REPO_ROOT,
+	routeNamed,
 	type RecordedRequest,
 	type ScriptStep,
 	treehouse,
@@ -84,6 +85,7 @@ async function fleet(t: { after(fn: () => void | Promise<void>): void }, maxTree
 		},
 		script(name, steps) {
 			const model = provider.addScript(name, steps, { onExhausted: "repeat" });
+			routeNamed(home.path, [model]);
 			agentDir.writeModels(provider);
 			return model;
 		},

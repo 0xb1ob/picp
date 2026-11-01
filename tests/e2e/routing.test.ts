@@ -3,14 +3,14 @@
  * in-process CommandPosts (pi's registry and the sub2api gateway stubbed at their edges) cover capacity and launches.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { type DoctorReport, EMPTY_USAGE, LAYOUT, THINKING_LEVELS, type ThinkingLevel } from "../../src/contracts.ts";
 import type { DispatchPreview } from "../../src/dispatch.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { COMMAND_POST_EXTENSION, readFleet, readRunEvents, REPO_ROOT, type RpcRecord, startPiChild, waitFor } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, readFleet, readRunEvents, REPO_ROOT, routeNamed, type RpcRecord, startPiChild, waitFor } from "../harness/index.ts";
 
 type Bench = Awaited<ReturnType<typeof dispatchS29>>;
 type Finding = DoctorReport["findings"][number];
@@ -120,7 +120,7 @@ test("P16-route-default: the scaffolded template routes every role and size as d
 	const grid: Call[] = [
 		...combos.flatMap((axes) => [{ job_id: ship, task: "tidy up", ...axes }, { job_id: plan, task: "plan it", ...axes },
 			{ job_id: plan, task: "review it", profile: "gate-reviewer", ...axes }, { job_id: qa, task: "where?", ...axes }]),
-		{ job_id: plan, task: "plan it", scope: "S", risk: "low", model: "anthropic/claude-opus-5", thinking: "xhigh" },
+		{ job_id: plan, task: "plan it", scope: "S", risk: "low", model: OPUS, thinking: "xhigh" },
 	];
 	// The documented table: [profile, scope, risk] -> [source, rule, model, thinking] on the shipped template.
 	const want = (profile: string, scope: string, risk: string): [string, string, string, string] => {
@@ -137,7 +137,7 @@ test("P16-route-default: the scaffolded template routes every role and size as d
 		assert.equal(said(got), `source=${source} model=${model} rule=${rule} thinking=${thinking} quota=off:no admin key`, `call ${i} (${got.profile})`);
 	}
 	assert.deepEqual(routes.slice(0, 4).map((p) => p.profile), ["implementer", "planner", "gate-reviewer", "qa"]);
-	assert.equal(said(routes.at(-1)!), "source=override model=anthropic/claude-opus-5 rule=explicit override (model+effort) thinking=xhigh effort=override");
+	assert.equal(said(routes.at(-1)!), `source=override model=${OPUS} rule=explicit override (model+effort) thinking=xhigh effort=override`);
 	assert.deepEqual(findings(anthropic.doctor, "config.routing").map((f) => [f.severity, f.what, f.detail]), [["ok", "routing config: 6 rubric row(s)", "allow: */*"]]);
 	assert.deepEqual(findings(anthropic.doctor, "config.routing.effort").map((f) => f.severity), ["ok"]);
 	assert.deepEqual(findings(anthropic.doctor, "config.routing.shadowed"), [], "the shipped template has no dead row");
@@ -218,6 +218,7 @@ test("P16-route-rubric: rubric order, override and project rows, the allowlist, 
 
 	// Override > project row > size rows > profile; a project row placed after the broad rows never fires.
 	routing(b.home, { rubric: [{ id: "demo-research", role: "planner", project: "demo", model: "mock/project-row" }, ...ported] });
+	routeNamed(b.home, ["mock/chosen"]);
 	assert.deepEqual([(await route(blind, plan, { model: "mock/chosen" })).decision?.source, (await route(blind, plan, { model: "mock/chosen" })).decision?.model], ["override", "mock/chosen"]);
 	assert.deepEqual([(await route(blind, plan, { scope: "M" })).decision?.rule, (await route(blind, plan, { scope: "M" })).decision?.model], ["demo-research", "mock/project-row"]);
 	routing(b.home, { rubric: [{ id: "web-research", role: "planner", project: "web", model: "mock/project-row" }, ...ported] });
@@ -229,27 +230,31 @@ test("P16-route-rubric: rubric order, override and project rows, the allowlist, 
 
 	// The allowlist gates every source; an empty one allows nothing; the globs are the shapes operators write.
 	routing(b.home, { allow: ["mock/allowed*"], rubric: [] });
+	routeNamed(b.home, ["mock/forbidden", "mock/allowed-1"]);
 	assert.match(said(await route(blind, plan, { model: "mock/forbidden" })), /allowlist refuses/);
 	assert.match(said(await route(blind, plan)), new RegExp(`${OPUS} \\(allowlist\\), ${SOL} \\(allowlist\\)`), "the profile default is not exempt");
 	assert.equal((await route(blind, plan, { model: "mock/allowed-1" })).decision?.model, "mock/allowed-1");
 	routing(b.home, { allow: ["mock/allowed*"], rubric: [{ id: "r", role: "planner", model: "mock/forbidden" }] });
 	assert.match(said(await route(blind, plan)), /rubric r names/);
 	routing(b.home, { allow: [], rubric: [] });
+	routeNamed(b.home, ["mock/anything"]);
 	assert.match(said(await route(blind, plan, { model: "mock/anything" })), /nothing is allowed/);
 	for (const [allow, model, admitted] of [["anthropic/*", "anthropic/claude-sonnet-5", true], ["anthropic/*", "openai/gpt-5", false],
 		["**", "anything/at/all", true], ["mock/exact-model", "mock/exact-model", true], ["mock/exact-model", "mock/exact-model-2", false]] as const) {
 		routing(b.home, { allow: [allow], rubric: [] });
+		routeNamed(b.home, [model]);
 		const got = await route(blind, plan, { model });
 		assert.equal(got.decision?.model === model, admitted, `${allow} vs ${model}: ${said(got)}`);
 	}
 	routing(b.home, null);
-	assert.deepEqual([(await route(blind, plan, { model: "anthropic/claude-sonnet-5" })).decision?.model, (await route(blind, plan)).decision?.rule],
-		["anthropic/claude-sonnet-5", "profile planner"], "no file: the permissive default");
+	assert.match(said(await route(blind, plan, { model: "anthropic/claude-sonnet-5" })), /does not route.*Routed: \(none\)/s, "no file routes no model");
+	assert.equal((await route(blind, plan)).decision?.rule, "profile planner", "no file: the permissive default");
 
 	// cp-7re9: a role's deny list is a gate on every candidate, overrides included; other roles are untouched.
 	const denied = /^settings: model mock\/denied-1 is not allowed for role planner \(.*data\/routing\.json deny_by_role\.planner matches mock\/denied\*\)/;
 	const deny = (rubric: unknown[], role = "planner") => routing(b.home, { deny_by_role: { [role]: ["mock/denied*"] }, rubric });
 	deny([]);
+	routeNamed(b.home, ["mock/denied-1"]);
 	assert.match(said(await route(blind, plan, { model: "mock/denied-1" })), denied);
 	deny([{ id: "r", role: "planner", model: "mock/denied-1" }]);
 	assert.match(said(await route(blind, plan)), denied);
@@ -259,6 +264,7 @@ test("P16-route-rubric: rubric order, override and project rows, the allowlist, 
 	deny([{ id: "w", role: "planner", model: "mock/denied-1", fallbacks: ["mock/denied-2"] }]);
 	assert.match(said(await route(blind, plan)), /every candidate for rubric row w was refused — .*mock\/denied-2 \(allowlist\)/);
 	deny([], "implementer");
+	routeNamed(b.home, ["mock/denied-1"]);
 	assert.equal((await route(blind, plan, { model: "mock/denied-1" })).decision?.model, "mock/denied-1");
 	routing(b.home, { deny_by_role: { qa: ["mock/x"] }, rubric: [] });
 	const unknownRole = said(await route(blind, plan));
@@ -353,6 +359,27 @@ test("P16-route-rubric: rubric order, override and project rows, the allowlist, 
 	assert.deepEqual(findings(await blind.doctor(), "config.routing.effort"), [], "no registry, no effort claim");
 });
 
+// P16-route-unrouted: an explicit model routing.json does not name is refused at every launch path, never substituted.
+test("P16-route-unrouted: an explicit model no rubric row names is refused in the preview, the launch and a parent's dry run, before any lease", { timeout: 300_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const ship = await job(b, "ship");
+	const blind = post(b);
+	routing(b.home, { rubric: [{ id: "small-ship", role: "implementer", model: "mock/routed", fallbacks: ["mock/spare"] }] });
+	const refused = /override names mock\/unrouted, which data\/routing\.json does not route: .*refused, never substituted.*Routed: mock\/routed, mock\/spare\./s;
+	const previewed = await preview(blind, { jobId: ship, task: "tidy up", model: "mock/unrouted" });
+	assert.match(said(previewed), refused);
+	assert.equal(previewed.decision, undefined);
+	assert.deepEqual([(await preview(blind, { jobId: ship, task: "tidy up", model: "mock/spare" })).decision?.source], ["override"], "a fallback is a routed name");
+	await assert.rejects(blind.dispatch({ jobId: ship, task: "tidy up", model: "mock/unrouted" }),
+		(error: Error & { refusal?: string }) => error.refusal === "unrouted" && refused.test(error.message));
+	assert.equal(existsSync(join(b.home, LAYOUT.fleetFile)) && readFleet(b.home).jobs.some((each) => each.job_id === ship), false, "a refused override took a fleet record");
+	const dry = (await parent(b, { phases: [{ calls: [{ job_id: ship, task: "tidy up", model: "mock/unrouted" }] }] })).previews[0]![0]!;
+	assert.match(said(dry), refused);
+	// The allowlist still gates a routed name: routing names it, the operator's allow refuses it.
+	routing(b.home, { allow: ["mock/routed"], rubric: [{ id: "small-ship", role: "implementer", model: "mock/routed", fallbacks: ["mock/spare"] }] });
+	assert.match(said(await preview(blind, { jobId: ship, task: "tidy up", model: "mock/spare" })), /override names mock\/spare, which the allowlist refuses/);
+});
+
 // P16-route-effort: the effort a worker is spawned at, judged on pi's own models.json metadata in a real parent.
 test("P16-route-effort: rows, profiles and overrides set the effort, pi's metadata decides what is serviceable, and nothing is substituted", { timeout: 300_000 }, async (t) => {
 	const b = await dispatchS29(t);
@@ -364,7 +391,8 @@ test("P16-route-effort: rows, profiles and overrides set the effort, pi's metada
 	const { previews: [rowed, direct, effortOnly, profiled, rowCapped, rowInert] } = await parent(b, { models, env: { ANTHROPIC_API_KEY: "sk-ant-test" }, phases: [
 		{ before: rows({ id: "risky", role: "implementer", risk: "high", model: "mock/big", thinking: "xhigh" }, { id: "small", role: "implementer", scope: ["S"], model: "mock/small" }),
 			calls: [{ job_id: ship, task: "t", risk: "high" }, { job_id: ship, task: "t", scope: "S", risk: "low" }] },
-		{ before: rows(), calls: [{ job_id: plan, task: "t" }, { job_id: plan, task: "t", model: "mock/fable", thinking: "xhigh" }, { job_id: plan, task: "t", model: "mock/fable" },
+		{ before: () => { rows()(); routeNamed(b.home, ["mock/fable", "mock/capped", "mock/no-reasoning", "mock/nothing", "mock/no-xhigh"]); },
+			calls: [{ job_id: plan, task: "t" }, { job_id: plan, task: "t", model: "mock/fable", thinking: "xhigh" }, { job_id: plan, task: "t", model: "mock/fable" },
 			{ job_id: plan, task: "t", model: "mock/capped" }, { job_id: plan, task: "t", profile: "gate-reviewer", model: "mock/no-reasoning" },
 			{ job_id: plan, task: "t", model: "mock/no-reasoning", thinking: "high" }, { job_id: ship, task: "t", model: "mock/nothing" }, { job_id: plan, task: "t", model: "mock/nothing" },
 			{ job_id: plan, task: "t", profile: "gate-reviewer", model: "mock/nothing" }, { job_id: plan, task: "t", model: "mock/nothing", thinking: "high" },
@@ -404,6 +432,7 @@ test("P16-route-effort: rows, profiles and overrides set the effort, pi's metada
 	// Ignorance is not evidence: with no registry metadata the same asks are honoured as named.
 	const blind = post(b);
 	routing(b.home, { allow: ["**"], rubric: [] });
+	routeNamed(b.home, ["mock/unknown-support", "mock/capped"]);
 	assert.equal((await preview(blind, { jobId: plan, task: "t", model: "mock/unknown-support", thinking: "xhigh" })).decision?.thinking, "xhigh");
 	assert.equal((await preview(blind, { jobId: plan, task: "t", model: "mock/capped" })).decision?.thinking, "medium");
 

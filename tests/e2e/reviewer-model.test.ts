@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, type Mandate } from "../../src/contracts.ts";
-import { argOf, captureSpawns, createAgentDir, createScratchHome, MockProvider, REPO_ROOT } from "../harness/index.ts";
+import { argOf, captureSpawns, createAgentDir, createScratchHome, MockProvider, REPO_ROOT, routeNamed } from "../harness/index.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 
 test("S16: public plan gates select reviewer preferences from current and legacy authority", { timeout: 180_000 }, async (t) => {
@@ -34,6 +34,7 @@ test("S16: public plan gates select reviewer preferences from current and legacy
   const model = provider.addScript(script, [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job.id, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: [label] } }] }]);
   const other = provider.addScript(`${script}-wrong`, [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job.id, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["wrong reviewer selected"] } }] }]);
   agent.writeModels(provider); routing(model);
+  routeNamed(home.path, [model, other]);
   await post.registry.setReviewerModel("demo", project ? source === "mandate" ? other : model : null);
   save(grants(model, other));
   const now = isoTimestamp();

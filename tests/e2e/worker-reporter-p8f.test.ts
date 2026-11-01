@@ -14,7 +14,7 @@ import { ENVELOPE_REPAIR_MAX_ATTEMPTS, type EnvelopeRecord, type GateVerdict, MI
 	type VerdictRecord, VerdictRecordSchema } from "../../src/contracts.ts";
 import { ReviewRuns } from "../../src/review-runs.ts";
 import { PACKAGE_TOOLS } from "../../src/worker-packages.ts";
-import { type ScriptStep, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { routeNamed, type ScriptStep, treehouseAvailable, waitFor } from "../harness/index.ts";
 import { fakeExtension, installPackage, offeredTools, type PackageBench, packageBench } from "../harness/package-home.ts";
 
 const SKIP = treehouseAvailable() ? false : "worker-reporter-p8f e2e needs treehouse on PATH";
@@ -38,7 +38,9 @@ const toolEnds = (file: string) => (existsSync(file) ? readFileSync(file, "utf8"
 
 async function dispatch(f: PackageBench, slug: string, kind: "ship" | "research", delivery: "pr" | "pipeline" | "answer", steps: (jobId: string) => ScriptStep[]) {
 	const jobId = await f.job(slug, kind, delivery);
-	await f.post.dispatch({ jobId, task: "Do the job.", model: f.script(slug, steps(jobId)), fetch: false });
+	const model = f.script(slug, steps(jobId));
+	routeNamed(f.home, [model]);
+	await f.post.dispatch({ jobId, task: "Do the job.", model: model, fetch: false });
 	return jobId;
 }
 const reported = (f: PackageBench, jobId: string) =>
@@ -184,7 +186,9 @@ test("P8f reporter verdicts: a gate reviewer files one schema-valid verdict, ove
 		return id;
 	};
 	const gate = async (id: string, script: string, steps: ScriptStep[]) => {
-		await f.post.gate({ jobId: id, model: f.script(script, steps) });
+		const model = f.script(script, steps);
+		routeNamed(f.home, [model]);
+		await f.post.gate({ jobId: id, model: model });
 		const key = ReviewRuns.key(id, "gate", 1);
 		f.post.reviewRuns.handBack(key);
 		await f.post.reviewRuns.settled(key);

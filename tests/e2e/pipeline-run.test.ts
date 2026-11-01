@@ -13,6 +13,8 @@ import { MandateStore } from "../../src/mandate.ts";
 import { CommandPost } from "../../src/command-post.ts";
 import {
 	type GateVerdict,
+	DEFAULT_ORIGIN,
+	EMPTY_USAGE,
 	isoTimestamp,
 	LAYOUT,
 	paths,
@@ -29,6 +31,7 @@ import { ReviewRuns, type ReviewWakeup } from "../../src/review-runs.ts";
 import { type Authorizer, formatAdvance, type AdvanceResult, composeImplementationRouting } from "../../src/pipeline.ts";
 import { registerReviewTools } from "../../extensions/command-post/tools-review.ts";
 import {
+	routeNamed,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -289,6 +292,7 @@ let cases = 0;
 const planned = new WeakMap<Bench, number>();
 /** One pipeline from start to its implementer: a written plan and envelope, the scripted gate, then the bench's answer. */
 async function handoff(b: Bench, steps: ScriptStep[], c: Case) {
+	if (c.implementerModel) routeNamed(b.home, [c.implementerModel]);
 	const started = await b.post.startPipeline({ title: `case ${++cases}`, project: "demo", task: c.task, delivery: "local", fetch: false,
 		...(c.scope ? { scope: c.scope } : {}), ...(c.risk ? { risk: c.risk } : {}), ...(c.implementerModel ? { implementerModel: c.implementerModel } : {}) });
 	const ids = { researchId: started.research_id, shipId: started.ship_id };
@@ -999,6 +1003,7 @@ test(
 		// its artifact must never reach an implementer.
 		const old = b.post.pipeline().store.get(oldResearchId);
 		assert.equal(old?.superseded_by, replacement.id);
+		routeNamed(b.home, [b.named]);
 		await assert.rejects(() => b.post.advancePipeline(oldResearchId, { implementerModel: b.named }), /superseded by/);
 		assert.equal(b.post.pipeline().store.get(oldResearchId)?.implementer_model, undefined, "#648: a refused advance writes no model");
 
@@ -1280,14 +1285,113 @@ test("P11d-recover: cp_pipeline recover re-dispatches a failed implementer with 
 	await b.post.tearDown(ids.shipId, { force: true });
 });
 
+// P11d-stored-models (R1 PR1): advance and recover check every stored model a step could spawn on, before acting.
+// A refusal leaves no gate, checkpoint, implementer, pending review or rewritten pipeline record behind.
+test("P11d-stored-models: an unrouted stored model refuses advance and recover before anything is written", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const steps: ScriptStep[] = [];
+	const b = await bench(t, steps);
+	const UNROUTED = "mock/unrouted";
+	routeNamed(b.home, [b.named]);
+	const store = () => b.post.pipeline().store;
+	const quote = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+	const plannedPipeline = async () => {
+		const started = await b.post.startPipeline({ title: `case ${++cases}`, project: "demo", task: BUMP, delivery: "local", fetch: false });
+		const nth = (planned.get(b) ?? 0) + 1;
+		planned.set(b, nth);
+		if (nth === 1) await artifactWritten(b, started.research_id);
+		else writeFileSync(b.post.artifacts.file(started.research_id), ARTIFACT_BODY);
+		writeEnvelope(b, started.research_id, CONFIDENT);
+		return { id: started.research_id, ship: started.ship_id, file: paths.pipelineFile(started.research_id) };
+	};
+	type Ids = Awaited<ReturnType<typeof plannedPipeline>>;
+	const seedRecord = (ids: Ids, fields: object) => store().write({ ...store().require(ids.id), ...fields });
+	const refused = async (c: { where: (ids: Ids) => string; seed?: (ids: Ids) => unknown; implementerModel?: string; shipSeeded?: boolean }) => {
+		const ids = await plannedPipeline();
+		await c.seed?.(ids);
+		const bytes = readFileSync(join(b.home, ids.file), "utf8");
+		await assert.rejects(b.post.advancePipeline(ids.id, c.implementerModel ? { implementerModel: c.implementerModel } : {}),
+			new RegExp(`${quote(c.where(ids))} names mock\\/unrouted, which data\\/routing\\.json does not route`));
+		assert.equal(existsSync(join(b.home, paths.gateFile(ids.id, 1))), false, "no gate started");
+		assert.equal(b.post.checkpoints.get(ids.ship), undefined, "no checkpoint written");
+		if (!c.shipSeeded) assert.equal(b.post.fleet.get(ids.ship), undefined, "no implementer dispatched");
+		assert.deepEqual([b.post.reviewRuns.pendingFor(ids.id), b.post.reviewRuns.pendingFor(ids.ship)], [[], []], "no review pending");
+		assert.equal(readFileSync(join(b.home, ids.file), "utf8"), bytes, "the pipeline record is untouched");
+		return ids;
+	};
+	const close = (ids: Ids) => b.post.tearDown(ids.id, { force: true });
+	const grant = () => b.post.mandates.issue({ projects: ["demo"], objective: "review", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)),
+		spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 100 });
+
+	await t.test("F1: a stored implementer pin, at advance and at recover", async () => {
+		await close(await refused({ seed: (ids) => seedRecord(ids, { implementer_model: UNROUTED }), where: (ids) => `${ids.file} implementer_model` }));
+		// The cp-9ibz shape on recover: the same failure choreography as P11d-recover, then a stale unrouted pin.
+		const ids = await handoff(b, steps, { task: BUMP, assessment: CONFIDENT, keep: true });
+		const failure = { class: "crash" as const, message: "worker died", at: isoTimestamp() };
+		b.post.runs.open(ids.shipId).markFailure(failure);
+		await b.post.fail(ids.shipId, failure);
+		await b.post.tearDown(ids.shipId, { force: true });
+		execFileSync("git", ["-C", b.clone, "branch", "-D", ids.shipId], { stdio: "ignore" });
+		store().write({ ...store().require(ids.researchId), implementer_model: UNROUTED });
+		await assert.rejects(b.post.pipeline().recoverShip(ids.researchId), /implementer_model names mock\/unrouted, which data\/routing\.json does not route/);
+		assert.equal(readRunEvents(b.home, ids.shipId).filter((event) => event.type === "routing_resolved").length, 1, "recover dispatched nothing");
+	});
+	await t.test("F2: the advance argument is refused and writes no pin", async () => {
+		const ids = await refused({ where: () => "cp_pipeline advance implementer_model", implementerModel: UNROUTED });
+		assert.equal(store().require(ids.id).implementer_model, undefined);
+		await close(ids);
+	});
+	await t.test("F3: the pipeline's quality model", async () => {
+		await close(await refused({ seed: (ids) => seedRecord(ids, { quality: { verify: true, model: UNROUTED } }), where: (ids) => `${ids.file} quality.model` }));
+	});
+	await t.test("F4: the home's quality default when the pipeline names none", async () => {
+		const file = join(b.home, LAYOUT.data, "quality.json");
+		writeFileSync(file, JSON.stringify({ verify: true, model: UNROUTED }));
+		await close(await refused({ where: () => `${LAYOUT.data}/quality.json model` }));
+		rmSync(file);
+	});
+	await t.test("F5: the diff review model, with the ship already reported", async () => {
+		const ids = await refused({ shipSeeded: true, where: (each) => `${each.file} review.model`, seed: async (each) => {
+			seedRecord(each, { review: { enabled: true, model: UNROUTED } });
+			const now = isoTimestamp();
+			await b.post.fleet.add({ job_id: each.ship, project: "demo", kind: "ship", delivery: "local", origin: DEFAULT_ORIGIN, phase: "held", reported_at: now,
+				dispatched_at: now, usage: EMPTY_USAGE, worktree: b.home, branch: each.ship,
+				worker: { pid: process.pid, session_id: "seeded", session_file: join(b.home, "seeded.jsonl"), profile: "implementer", role: "implementer", model: b.named, started_at: now } });
+		} });
+		assert.notEqual(store().require(ids.id).state, "done");
+		await b.post.fleet.remove(ids.ship);
+		await close(ids);
+	});
+	await t.test("F9: the project's reviewer preference", async () => {
+		await b.post.registry.setReviewerModel("demo", UNROUTED);
+		await close(await refused({ where: () => `${LAYOUT.projectsFile} demo reviewer_model` }));
+		await b.post.registry.setReviewerModel("demo", null);
+	});
+	await t.test("F8: a mandate's reviewer preference", async () => {
+		const mandate = grant();
+		b.post.mandates.setReviewerModel(mandate.id, UNROUTED);
+		await close(await refused({ where: () => `${paths.mandateFile(mandate.id)} reviewer_model` }));
+		b.post.mandates.revoke(mandate.id);
+	});
+	await t.test("positive control: every field routed, advance reaches the gate", async () => {
+		const ids = await plannedPipeline();
+		seedRecord(ids, { implementer_model: b.named, quality: { model: b.named }, review: { enabled: true, model: b.named } });
+		await b.post.registry.setReviewerModel("demo", b.named);
+		b.post.mandates.setReviewerModel(grant().id, b.named);
+		const result = await b.post.advancePipeline(ids.id);
+		assert.equal(result.pending?.surface, "gate", result.message);
+	});
+});
+
 test("#648: an operator-named implementer model overrides the rubric at start, at advance, and across recover", { skip: SKIP, timeout: 600_000 }, async (t) => {
 	const steps: ScriptStep[] = [];
 	const b = await bench(t, steps);
 	const suggestion = { ...CONFIDENT, suggested_implementer_model: "anthropic/claude-opus-5" };
+	routeNamed(b.home, [b.named]);
 	const ids = await handoff(b, steps, { task: BUMP, assessment: suggestion, implementerModel: b.named, keep: true });
 	assert.deepEqual([ids.routed.source, ids.routed.model], ["override", b.named]);
 	assert.match(ids.evidence, /operator-named implementer model: .+ \(explicit override\)/);
 	assert.match(ids.evidence, /planner suggested model: anthropic\/claude-opus-5 \(advisory; routing decides\)/);
+	routeNamed(b.home, ["mock/other"]);
 	await assert.rejects(b.post.advancePipeline(ids.researchId, { implementerModel: "mock/other" }), /already dispatched/);
 	// A recovery re-dispatch keeps the named model: the same failure choreography as P11d-recover.
 	const failure = { class: "crash" as const, message: "worker died", at: isoTimestamp() };
@@ -1301,6 +1405,7 @@ test("#648: an operator-named implementer model overrides the rubric at start, a
 	await b.post.tearDown(ids.shipId, { force: true });
 
 	// Named after start, before the hand-off: the advance that persists it is the one that dispatches.
+	routeNamed(b.home, [b.named]);
 	const later = await handoff(b, steps, { task: BUMP, assessment: CONFIDENT, prep: (late) => b.post.advancePipeline(late.researchId, { implementerModel: b.named }).then(() => {}) });
 	assert.deepEqual([later.routed.source, later.routed.model], ["override", b.named]);
 	// Negative control: nothing named, the rubric still decides.
@@ -1318,8 +1423,10 @@ test("#648: cp_pipeline start carries implementer_model through the tool; recove
 	const tool = tools.get("cp_pipeline")!;
 	assert.equal(tool.parameters.properties.implementer_model.maxLength, 128, "the tool caps it like PipelineRecordSchema");
 	const call = (params: Record<string, unknown>) => tool.execute("c", params, undefined, undefined, { hasUI: false, modelRegistry: undefined });
+	routeNamed(b.home, [b.named]);
 	const started = (await call({ action: "start", title: "tool start", project: "demo", task: BUMP, delivery: "local", implementer_model: b.named })).details;
 	assert.equal(b.post.pipeline().store.require(started.research_id).implementer_model, b.named);
+	routeNamed(b.home, ["mock/other"]);
 	await assert.rejects(call({ action: "recover", research_id: started.research_id, implementer_model: "mock/other" }), /recover takes no `implementer_model`/);
 	await b.post.tearDown(started.research_id, { force: true });
 });

@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
-import { git, waitFor } from "../harness/index.ts";
+import { routeNamed, git, waitFor } from "../harness/index.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { SKIP, run, startStack } from "./landing-helpers.ts";
 
@@ -327,6 +327,7 @@ test("S13: persisted review attempts require a readable complete pass and surviv
 		} }] }]);
 		s.agentDir.writeModels(s.provider);
 		const file = join(s.home, paths.reviewFile(live.jobId, 1));
+		routeNamed(s.home, [reviewer], { seed: "template" });
 		await s.parent("Review the S13 writer job.", [
 			{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: live.jobId, model: reviewer } }] },
 			{ kind: "text", text: "Review started." },

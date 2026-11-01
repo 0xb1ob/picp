@@ -14,6 +14,7 @@ import { type DurableWakeupEntry, isoTimestamp } from "../../src/contracts.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import {
+	routeNamed,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -80,6 +81,7 @@ test("kill a mock worker mid-run produces exactly one death wake-up", { skip: SK
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 30" } }] },
 	]);
 	agentDir.writeModels(provider);
+	routeNamed(home.path, [model]);
 	await post.dispatch({ jobId, task: "Bump x.", model, fetch: false });
 	const managed = post.manager.get(jobId);
 	assert.ok(managed);

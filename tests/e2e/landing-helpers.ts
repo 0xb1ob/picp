@@ -10,7 +10,7 @@ import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import type { ForgeConfig } from "../../src/forge-url.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
-import { COMMAND_POST_EXTENSION, startPiChild, createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, git, MockProvider, readFleet, REPO_ROOT, type ScratchRepo, type ScriptStep, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, startPiChild, createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, git, MockProvider, readFleet, REPO_ROOT, routeNamed, type ScratchRepo, type ScriptStep, treehouseAvailable, waitFor } from "../harness/index.ts";
 
 export const SKIP = treehouseAvailable() ? false : "the landing e2e needs treehouse on PATH";
 export const CANARY = "ghp_canary0123456789";
@@ -351,6 +351,7 @@ export async function startStack(t: TestContext, options: { project?: boolean; e
 			...(over.repairGate ? [report, { kind: "text" as const, text: "standing by" }] : []),
 		];
 		const model = provider.addScript(`landing-${job.id}`, steps, { onExhausted: "repeat" });
+		routeNamed(home.path, [model]);
 		agentDir.writeModels(provider);
 		gh.prs[job.id] = { number, url: prUrl };
 		setGh({});

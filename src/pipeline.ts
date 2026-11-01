@@ -113,6 +113,7 @@ import type { Ledger } from "./ledger.ts";
 import { readEventLog } from "./run-artifacts.ts";
 import { lastFiledEnvelopeFile } from "./supersede.ts";
 import type { Teardown, TeardownResult } from "./teardown.ts";
+import { requireStoredModelsRouted, type StoredModelsInput } from "./pipeline-model-check.ts";
 
 
 function decisionReviseAt(home: string, researchId: string): string | undefined {
@@ -944,6 +945,7 @@ export class PipelineRunner {
 					`implementer; advance ${stored.superseded_by} instead.`,
 			);
 		}
+		requireStoredModelsRouted({ ...this.#modelCheckInput(stored), implementerModel: options.implementerModel });
 		// Persisted only past the guards: a superseded record must never be written.
 		const record = this.#setImplementerModel(stored, options);
 		const { artifacts, fleet } = this.#options;
@@ -1310,6 +1312,11 @@ export class PipelineRunner {
 		return replacement;
 	}
 
+	#modelCheckInput(record: PipelineRecord): StoredModelsInput {
+		const { home, qualityDefaults, fleet, mandates } = this.#options;
+		return { home, record, fleet, now: new Date(this.#now()), ...(qualityDefaults ? { qualityDefaults } : {}), ...(mandates ? { mandates } : {}) };
+	}
+
 	/** Persists an operator-named implementer model; refused once the implementer exists. */
 	#setImplementerModel(record: PipelineRecord, options: AdvanceOptions): PipelineRecord {
 		const model = options.implementerModel;
@@ -1328,6 +1335,7 @@ export class PipelineRunner {
 	 */
 	async recoverShip(researchId: string): Promise<AdvanceResult> {
 		const record = this.store.require(researchId);
+		requireStoredModelsRouted(this.#modelCheckInput(record));
 		const shipId = record.ship_id;
 		const job = this.#options.fleet.get(shipId);
 		if (!job) throw new PipelineError(`${shipId} was never dispatched — nothing to recover`);

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { DispatchError } from "../../src/dispatch.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { git, readRunEvents, REPO_ROOT, treehouse } from "../harness/index.ts";
+import { routeNamed, git, readRunEvents, REPO_ROOT, treehouse } from "../harness/index.ts";
 import { paths, DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp } from "../../src/contracts.ts";
 import { json, startStack } from "./landing-helpers.ts";
 
@@ -23,6 +23,7 @@ test("a failing branch cleanup never masks the original error", { timeout: 120_0
 	let failure: unknown;
 	try {
 		process.env.PATH = `${bin}:${previousPath}`;
+		routeNamed(b.home, [model]);
 		failure = await post.dispatch({ jobId: job.id, task: "Bump x.", model, fetch: false }).catch((error: unknown) => error);
 	} finally {
 		process.env.PATH = previousPath;
@@ -69,6 +70,7 @@ test("picp-d0p: dispatch pr checks out the PR head at its sha, records bound_pr,
 	const job = await f.post.ledger().create({ title: "finish pr", project: "demo", delivery: "pr", kind: "ship" });
 	const model = f.provider.addScript("bound-worker", [{ kind: "text", text: "received" }]);
 	f.agentDir.writeModels(f.provider);
+	routeNamed(f.home, [model]);
 	const result = await f.post.dispatch({ jobId: job.id, task: "Finish it.", model, pr: "169" });
 	assert.equal(result.state, "dispatched");
 	if (result.state !== "dispatched") return;
@@ -102,6 +104,7 @@ test("picp-d0p: pr on a non ship/pr job, a branch another job holds, and a bound
 	const model = f.provider.addScript("unused", [{ kind: "text", text: "must not start" }]);
 	f.agentDir.writeModels(f.provider);
 	const local = await f.post.ledger().create({ title: "local", project: "demo", delivery: "local", kind: "ship" });
+	routeNamed(f.home, [model]);
 	await assert.rejects(f.post.dispatch({ jobId: local.id, task: "x", model, pr: "169" }), /pr binds only a kind:ship delivery:pr job/);
 	const script = await f.post.ledger().create({ title: "script", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
 	await assert.rejects(f.post.dispatch({ jobId: script.id, pr: "169" }), /a script job pushes no branch/);
@@ -109,11 +112,14 @@ test("picp-d0p: pr on a non ship/pr job, a branch another job holds, and a bound
 	const failed = { phase: "failed" as const, failure: { class: "crash" as const, message: "exit 1", at: isoTimestamp() } };
 	await f.post.fleet.add({ job_id: "cp-b55w", project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, ...failed, worker, worktree: "/wt", branch: "cp-b55w", dispatched_at: isoTimestamp(), usage: EMPTY_USAGE });
 	const job = await f.post.ledger().create({ title: "held branch", project: "demo", delivery: "pr", kind: "ship" });
+	routeNamed(f.home, [model]);
 	await assert.rejects(f.post.dispatch({ jobId: job.id, task: "x", model, pr: "169" }), /job cp-b55w \(failed\) holds it/);
 	await f.post.fleet.remove("cp-b55w");
 	const again = await f.post.ledger().create({ title: "bound again", project: "demo", delivery: "pr", kind: "ship" });
 	await f.post.fleet.add({ job_id: again.id, project: "demo", kind: "ship", delivery: "pr", origin: DEFAULT_ORIGIN, ...failed, worker, worktree: "/wt2", branch: "other", bound_pr: { number: 170, url: "https://github.com/example/demo/pull/170", base: "main" }, dispatched_at: isoTimestamp(), usage: EMPTY_USAGE });
+	routeNamed(f.home, [model]);
 	await assert.rejects(f.post.dispatch({ jobId: again.id, task: "x", model }), /was bound to .*pull\/170; re-dispatch it with pr 170/);
+	routeNamed(f.home, [model]);
 	await assert.rejects(f.post.dispatch({ jobId: again.id, task: "x", model, pr: "169" }), /was bound to .*pull\/170, not .*pull\/169/);
 	assert.ok(!/leased/.test(treehouse(f.post.registry.pathOf("demo"), "status")));
 	assert.equal(f.provider.remaining("unused"), 1);
@@ -130,6 +136,7 @@ test("picp-d0p: a failure after the bound checkout only detaches; the bound bran
 	const job = await f.post.ledger().create({ title: "bound fails", project: "demo", delivery: "pr", kind: "ship" });
 	const model = f.provider.addScript("unused", [{ kind: "text", text: "must not start" }]);
 	f.agentDir.writeModels(f.provider);
+	routeNamed(f.home, [model]);
 	await assert.rejects(f.post.dispatch({ jobId: job.id, task: "x", model, pr: "169" }), /preflight refused the leased worktree/);
 	const calls = readFileSync(log, "utf8");
 	assert.doesNotMatch(calls, /branch -D /);

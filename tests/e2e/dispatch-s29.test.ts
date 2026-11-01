@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MOCK_PROVIDER_ID, MockProvider, startPiChild } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MOCK_PROVIDER_ID, MockProvider, startPiChild } from "../harness/index.ts";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { ProjectRegistry } from "../../src/projects.ts";
@@ -30,6 +30,7 @@ test("S29: cp_dispatch rejects ambiguous and missing task files without allocati
 	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
 	writeFileSync(join(home.path, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: [`${MOCK_PROVIDER_ID}/*`], rubric: [] }));
 	const agent = createAgentDir({ provider });
+	routeNamed(home.path, [model], { seed: "template" });
 	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); scratch.cleanup(); home.cleanup(); });
 	await child.prompt(`dispatch ${job.id}`);
@@ -72,6 +73,7 @@ for (const base of ["main", "trunk"]) {
 		mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
 		writeFileSync(join(home.path, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: [`${MOCK_PROVIDER_ID}/*`], rubric: [] }));
 		const agent = createAgentDir({ provider });
+		routeNamed(home.path, [workerModel], { seed: "template" });
 		const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
 		t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); pool.cleanup(); scratch.cleanup(); repo.cleanup(); home.cleanup(); });
 		await child.prompt(`dispatch ${job.id}`);
@@ -170,6 +172,7 @@ test("S29: public validation refuses unavailable routing, effort, skills and ina
 		{ job_id: deferred.id, expected: /is deferred/ },
 		{ job_id: legacy.id, expected: /not dispatchable/ },
 	];
+	routeNamed(b.home, ["mock/not-installed"]);
 	const ends = await b.run(variants.map(({ expected, ...args }) => ({ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { task: "Bump x.", model, queue: false, when_ready: false, ...args } }] })));
 	assert.equal(ends.length, variants.length);
 	for (let i = 0; i < variants.length; i++) await t.test(String(i), async () => {

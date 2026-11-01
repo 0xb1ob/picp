@@ -13,7 +13,7 @@ import { readDrain } from "../../src/drain.ts";
 import { ProjectRegistry } from "../../src/projects.ts";
 import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
 import { randomUUID } from "node:crypto";
-import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MOCK_PROVIDER_ID, MockProvider, readFleet, readRunEvents, REPO_ROOT, startPiChild, waitFor } from "../harness/index.ts";
+import { routeNamed, CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MOCK_PROVIDER_ID, MockProvider, readFleet, readRunEvents, REPO_ROOT, startPiChild, waitFor } from "../harness/index.ts";
 import { teardownHome } from "../harness/parent-hosts.ts";
 
 for (const [mode, name] of [
@@ -47,6 +47,7 @@ for (const [mode, name] of [
 			plan_summary: { goal: "Verify drain", approach: ["Observe the worker report"], touched: ["README.md"], acceptance: ["Worker reports"], risk: "None" } } }] },
 	]);
 	agent.writeModels(provider);
+	routeNamed(home.path, [model]);
 	const dispatch = post.dispatch({ jobId: job.id, model, task: "Report the supplied findings", fetch: false });
 	if (mode === "spawn-race") {
 		post.drain.start(30);
@@ -271,6 +272,7 @@ test("S26: cp_parent drain freeze runs /cp-drain 120 freeze in the real parent: 
 	]);
 	agent.writeModels(provider);
 	saveOperatorTarget({ home: home.path, mode: "multi", hostPid: 0, parentPid: 0 }, { ...process.env, PI_HOME: agent.path });
+	routeNamed(home.path, jobs.map((job) => job.model), { seed: "template" });
 	const operator = startPiChild({ cwd: home.path, model: operatorModel, env: { ...agent.env, PI_HOME: agent.path, CP_HOME: home.path, CP_MODE: "multi" }, extensions: [CP_BRIDGE_EXTENSION] });
 	t.after(() => teardownHome(home, () => operator.close(), () => pool.cleanup(), () => agent.cleanup(), () => repo.cleanup(), () => provider.stop()));
 	const turn = async (prompt: string) => {
@@ -324,6 +326,7 @@ for (const outcome of ["timeout", "drained"] as const) test(`S26: a ${outcome} f
 		{ kind: "text", text: "Still no report." },
 	]);
 	agent.writeModels(provider);
+	routeNamed(home.path, [model]);
 	await post.dispatch({ jobId: job.id, model, task: "Implement the change", fetch: false });
 	await waitFor(() => post.manager.quiesce().busy, (busy) => busy.length === 1, { timeoutMs: 30_000, what: "the implementer mid-turn" });
 	assert.equal(post.drain.start(0, { reason: "freeze" }).state, "draining");

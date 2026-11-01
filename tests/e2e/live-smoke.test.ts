@@ -30,6 +30,7 @@ import {
 	readFleet,
 	readRunStatus,
 	REPO_ROOT,
+	routeNamed,
 	treehouseAvailable,
 	waitFor,
 	WORKER_REPORTER_EXTENSION,
@@ -152,6 +153,7 @@ test(
 		// worker's own envelope -> teardown gates. delivery:local, so nothing is
 		// pushed anywhere and no PR is opened.
 		const home = createScratchHome();
+		routeNamed(home.path, [LIVE_MODEL]);
 		const repo = createScratchRepo({
 			name: "demo",
 			files: { "README.md": "# live m2\n", "src/version.txt": "1\n" },
@@ -227,6 +229,7 @@ test(
 		// is pushed and no PR is opened. Two live workers plus one reviewer, so the
 		// budget below is per job, checked after each stage.
 		const home = createScratchHome();
+		routeNamed(home.path, [LIVE_MODEL]);
 		const repo = createScratchRepo({
 			name: "demo",
 			files: { "README.md": "# live m3\n", "src/version.txt": "1\n" },

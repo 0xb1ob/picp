@@ -22,6 +22,7 @@ import { ReviewRuns } from "../../src/review-runs.ts";
 import { quoteSha } from "../../src/risk-preapproval.ts";
 import { readEventLog } from "../../src/run-artifacts.ts";
 import {
+	routeNamed,
 	COMMAND_POST_EXTENSION,
 	createAgentDir,
 	createScratchHome,
@@ -293,6 +294,7 @@ test("authority: a held PR job counts toward the job and spend caps but never ho
 		{ kind: "tool_calls", calls: [{ name: "report_result", args: () => ({ job_id: held, kind: "ship", status: "done", summary: "Added a line.", branch: held, head_sha: head(), pr_url: "https://github.com/example/demo/pull/7" }) }], usage },
 		{ kind: "text", text: "reported", usage: { prompt_tokens: 10, completion_tokens: 10 } },
 	], { onExhausted: "repeat" });
+	routeNamed(s.home, [model]);
 	const dispatched = await s.post.dispatch({ jobId: held, task: "Add a line to README.md.", model, fetch: false });
 	assert.equal("mandate_id" in dispatched ? dispatched.mandate_id : undefined, grant.id);
 	await waitFor(() => s.record(held), (record) => record?.phase === "held", { timeoutMs: 60_000, what: "the PR job's envelope to be held" });
@@ -1111,6 +1113,7 @@ test("authority: live usage crosses each cap line once while the worker runs; ca
 	const [live, spender, top] = [await s.job("live"), await s.job("spender"), await s.job("top")];
 	const grant = s.issue([live], { tokens: 10_000 });
 	const model = gated("tok", [tokens(50_007_000, 50_000_000), tokens(1_100), tokens(2_000), tokens(6_000), tokens(4_000)]);
+	routeNamed(s.home, [model]);
 	assert.equal(((await s.post.dispatch({ jobId: live, task: "Add a line to README.md.", model, fetch: false })) as { mandate_id?: string }).mandate_id, grant.id);
 	await waitFor(() => shown(grant.id), (text) => /7000 \/ 10000 non-cached tokens/.test(text), { timeoutMs: 60_000, what: "the first turn's usage" });
 	assert.deepEqual(ids(grant.id), [], "cache reads never count; 70% says nothing");
@@ -1188,6 +1191,7 @@ test("authority: live usage crosses each cap line once while the worker runs; ca
 	// $1,000 per million input tokens: 850 tokens is $0.85.
 	for (const entry of config.providers.mock.models) if (entry.id === s.provider.modelId("usd")) entry.cost = { input: 1_000, output: 0, cacheRead: 0, cacheWrite: 0 };
 	writeFileSync(models, JSON.stringify(config));
+	routeNamed(s.home, [usd]);
 	await s.post.dispatch({ jobId: spender, task: "Add a line to README.md.", model: usd, fetch: false });
 	await until(dollars.id, ["warn-usd"]);
 	open("usd", 0);
@@ -1199,7 +1203,9 @@ test("authority: live usage crosses each cap line once while the worker runs; ca
 	const ceiling = await prompted(s, "Set the token ceiling.", [tool("ceiling", "cp_mandate", { action: "defaults_set", key: "token_ceiling", value: "1000" })]);
 	assert.notEqual(ceiling.get("ceiling")?.isError, true, said(ceiling.get("ceiling")));
 	const capped = s.issue([top], { tokens: 1_000 });
-	await s.post.dispatch({ jobId: top, task: "Add a line to README.md.", model: gated("top", [tokens(1_000)]), fetch: false });
+	const topModel = gated("top", [tokens(1_000)]);
+	routeNamed(s.home, [topModel]);
+	await s.post.dispatch({ jobId: top, task: "Add a line to README.md.", model: topModel, fetch: false });
 	await waitFor(() => notices(capped.id).at(-1)?.content ?? "", (text) => /TOKEN CEILING/.test(text), { timeoutMs: 60_000, what: "the ceiling notice" });
 	await waitFor(budgetAsks, (rows) => rows.length === 2, { what: "the ceiling's operator ask" });
 	for (const name of ["usd-1", "top-0"]) writeFileSync(join(gates, name), "");
@@ -1402,6 +1408,7 @@ test("authority: a pipeline's plan checkpoint is mandate-decided and journaled; 
 			{ kind: "text", text: "standing by", usage: tiny },
 		], { onExhausted: "repeat" });
 		s.agentDir.writeModels(s.provider);
+		routeNamed(s.home, [model]);
 		const started = await s.post.startPipeline({ title: `pipe ${n}`, project: "demo", task, fetch: false, model, ...(risk ? { risk } : {}) });
 		flags.set(started.research_id, flagged);
 		await waitFor(() => s.record(started.research_id)?.reported_at, (at) => at !== undefined, { timeoutMs: 60_000, what: `${started.research_id}'s plan` });

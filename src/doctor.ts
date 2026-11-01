@@ -154,9 +154,13 @@ const REFUSAL_SUMMARY: Readonly<Record<RoutingRefusal, string>> = Object.freeze(
 	availability: "no usable model",
 	effort: "effort the model cannot serve",
 	exhausted: "every candidate refused",
+	unrouted: "model data/routing.json does not route",
 });
 
 function refusalFix(refusal: RoutingRefusal | undefined, who: string): string {
+	if (refusal === "unrouted") {
+		return `an explicit model must be one a rubric row in ${LAYOUT.routingFile} already names: omit the model to let routing decide, or add it to a row's \`model\` or \`fallbacks\``;
+	}
 	if (refusal === "allowlist") {
 		return `the row fired and its model is not in \`allow\`, or \`deny_by_role.<role>\` matches it: add a pattern that covers it in ${LAYOUT.routingFile} (or narrow the deny pattern), or point that row at an allowed model (nothing here is unauthenticated — the model was never tried)`;
 	}

@@ -16,6 +16,7 @@ import { frameBatch, sendMarker } from "../../src/parent-outbox.ts";
 import { readTaskAddenda } from "../../src/task-addenda.ts";
 import { initJobsDocument, Ledger, readJobsDocument } from "../../src/ledger.ts";
 import {
+	routeNamed,
 	buildPiArgs,
 	COMMAND_POST_EXTENSION,
 	createAgentDir,
@@ -138,6 +139,7 @@ test("P11-answer: an answer queued mid-turn and torn down seconds later reaches 
 	const agent = createAgentDir({ provider });
 	t.after(async () => { agent.cleanup(); await provider.stop(); });
 	const open = (model: string) => {
+		routeNamed(home.path, [worker, blocked], { seed: "template" });
 		const pi = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
 		t.after(() => pi.close().then(() => undefined));
 		return pi;

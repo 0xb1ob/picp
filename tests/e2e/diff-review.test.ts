@@ -10,7 +10,7 @@ import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, DIFF_REVIEW_MAX_BYTES, DIFF_REVIEW_MAX_STAT_FILES, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, type DiffVerdict } from "../../src/contracts.ts";
 import { DiffVerdictSchema, validate } from "../../src/contracts.ts";
 import { isDiffReviewWait } from "../../src/diff-review.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT, startPiChild } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT, startPiChild } from "../harness/index.ts";
 import type { PiModelRegistryLike } from "../../src/routing.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { enableTreehouse, readRunEvents, waitFor } from "../harness/index.ts";
@@ -46,6 +46,7 @@ async function stack(t: TestContext, registry?: PiModelRegistryLike, transport?:
 		const name = `review-${jobId}-${++reviews}`;
 		const model = provider.addScript(name, [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: jobId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["reviewed complete subject"], ...observation } }] }]);
 		agent.writeModels(provider);
+		routeNamed(home.path, [model]);
 		if (source === "project") await post.registry.setReviewerModel("demo", model);
 		if (source === "mandate") post.mandates.issue({ projects: ["demo"], job_ids: [jobId], objective: "review", reviewer_model: model, expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 20, tokens: 1_000_000 }, job_cap: 10 });
 		let started!: Awaited<ReturnType<typeof post.diffReview>>;
@@ -281,6 +282,7 @@ test("S04: reviewer preferences reread project and mandate settings while preser
 		assert.equal(selection.model, result.verdict.model);
 		const route = events.find((e) => e.type === "routing_resolved")?.payload;
 		assert.deepEqual([route.scope, route.risk, route.provenance], ["L", "high", { scope: "inherited", risk: "inherited" }]);
+		routeNamed(s.home, ["unavailable/model"]);
 		await s.post.registry.setReviewerModel("demo", "unavailable/model");
 		const cached = await s.post.diffReview({ jobId: job });
 		assert.ok(!isDiffReviewWait(cached));
@@ -299,6 +301,7 @@ test("S04: configured reviewer denials never fall back, while an unconfigured ro
 	s.agent.writeModels(s.provider);
 	const config = { schema_version: 1, allow: ["mock/*"], rubric: [{ id: "fallback", role: "gate-reviewer", model: chosen, fallbacks: [spare], thinking: "high" }] };
 	const save = (value: unknown) => writeFileSync(join(s.home, LAYOUT.data, "routing.json"), JSON.stringify(value));
+	routeNamed(s.home, [chosen]);
 	await s.post.registry.setReviewerModel("demo", chosen);
 	for (const mode of ["allowlist", "availability", "effort", "role"] as const) {
 		blocked = mode === "availability" ? chosen : "";
@@ -306,6 +309,7 @@ test("S04: configured reviewer denials never fall back, while an unconfigured ro
 		save({ ...config, ...(mode === "allowlist" ? { allow: [spare] } : {}), ...(mode === "role" ? { deny_by_role: { "gate-reviewer": [chosen] } } : {}) });
 		const refusal = { allowlist: /allowlist refuses/, availability: /no available model.*is not usable/, effort: /thinking=high.*cannot serve/, role: /not allowed for role gate-reviewer/ };
 		await assert.rejects(() => s.post.diffReview({ jobId: job }), refusal[mode]);
+		routeNamed(s.home, [chosen]);
 		if (mode === "role") await assert.rejects(() => s.post.diffReview({ jobId: job, model: chosen }), /not allowed for role/);
 		assert.equal(s.provider.requests("chosen").length, 0, mode);
 		assert.equal(s.provider.requests("spare").length, 0, mode);
@@ -396,6 +400,7 @@ test("S04: blocking review promotes the real implementer on the same branch with
 		{ kind: "text", text: "standing by" },
 	], { onExhausted: "repeat" });
 	s.agent.writeModels(s.provider);
+	routeNamed(s.home, [model]);
 	assert.equal((await s.post.dispatch({ jobId: job.id, task: "Write app.ts, push and report the PR.", model, fetch: false })).receipt, "accepted");
 	await waitFor(() => s.post.fleet.get(job.id), (record) => record?.phase === "held" && !!record.reported_at, { timeoutMs: 90_000, what: "implementer held" });
 	for (let attempt = 1; attempt <= 3; attempt++) {
@@ -474,6 +479,7 @@ test("S15: a real quality waiter filesystem failure becomes an operational wakeu
 	};
 	syncBuiltinESMExports();
 	try {
+		routeNamed(s.home, [model]);
 		const started = await s.post.qualityPass().start({ jobId: job, task: "Implement the scoped task.", config: { verify: true, voters: 1, model } });
 		assert.ok(started && "key" in started);
 		s.post.reviewRuns.handBack(started.key);
@@ -491,6 +497,7 @@ test("S15: a lost caller handback cannot swallow a real review verdict or pin it
 	const job = await s.seed({ "src/bounded.ts": "export const bounded = 1;\n" });
 	const model = s.provider.addScript("s15-lost-handback", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["bounded handback"] } }] }]);
 	s.agent.writeModels(s.provider);
+	routeNamed(s.home, [model]);
 	const started = await s.post.diffReview({ jobId: job, model });
 	assert.ok(isDiffReviewWait(started));
 	await waitFor(() => s.wakes.length, (count) => count === 1, { timeoutMs: 70_000, what: "lost handback's bounded verdict delivery" });
@@ -629,6 +636,7 @@ test("S15: real reviewer attempts persist before waiting, reject duplicates and 
 	]);
 	const qualityModel = s.provider.addScript("s15-independent-quality", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["sound"] } }] }]);
 	s.agent.writeModels(s.provider);
+	routeNamed(s.home, [model]);
 	const started = await s.post.diffReview({ jobId: job, model });
 	assert.ok(isDiffReviewWait(started));
 	assert.deepEqual([started.next, started.surface, started.attempt, started.model], ["wait", "review", 1, model]);
@@ -642,12 +650,14 @@ test("S15: real reviewer attempts persist before waiting, reject duplicates and 
 	assert.deepEqual(s.post.reviewRuns.pending(job, "review"), pending);
 	assert.equal(pending.handed_back, false);
 	assert.ok(pending.pid > 0);
+	routeNamed(s.home, [model]);
 	await assert.rejects(() => s.post.diffReview({ jobId: job, model }), /already has a diff review in flight/);
 	const artifact = join(s.home, "independent-quality.md");
 	writeFileSync(artifact, "# Proposed change\nImplement the scoped task.\n");
 	s.post.artifacts.add(job, artifact);
 	let qualityKey = "";
 	await assert.doesNotReject(async () => {
+		routeNamed(s.home, [qualityModel]);
 		const quality = await s.post.qualityPass().start({ jobId: job, task: "Implement the scoped task.", config: { verify: true, voters: 1, model: qualityModel } });
 		assert.ok(quality && "key" in quality);
 		qualityKey = quality.key;
@@ -705,6 +715,7 @@ test("S15: the real cp_review tool relays bounded verdicts and policy refusals w
 	writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = merge-base ]; then\n touch '${gate}'\n while [ ! -f '${gate}.release' ]; do sleep 0.05; done\nfi\nexec '${git}' "$@"\n`);
 	chmodSync(join(bin, "git"), 0o700);
 	t.after(() => rmSync(bin, { recursive: true, force: true }));
+	routeNamed(s.home, [blockedModel], { seed: "template" });
 	const child = startPiChild({ cwd: s.home, model: parent, env: { ...s.agent.env, CP_HOME: s.home, PATH: `${bin}:${process.env.PATH}` }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(() => child.close());
 	await child.prompt("Review all five branches.");
@@ -859,6 +870,7 @@ test("S15: real review decision writes recover once before persistence and prese
 		const before = s.wakes.length;
 		const noticesBefore = failedNotices;
 		try {
+			routeNamed(s.home, [model]);
 			const started = await s.post.diffReview({ jobId: job, model });
 			assert.ok(isDiffReviewWait(started));
 			s.post.reviewRuns.handBack(started.key);
@@ -950,6 +962,7 @@ test("S05: a settled reviewer without a verdict retries once with the full subje
 	for (let attempt = 1; attempt <= 2; attempt++) {
 		const model = s.provider.addScript(`silent-${attempt}`, [{ kind: "text", text: "looks fine" }]);
 		s.agent.writeModels(s.provider);
+		routeNamed(s.home, [model]);
 		const started = await s.post.diffReview({ jobId: job, model });
 		assert.ok(isDiffReviewWait(started));
 		s.post.reviewRuns.handBack(started.key);
@@ -970,6 +983,7 @@ test("S05: pending reviews fence duplicate starts and carry the reviewed head in
 	const job = await s.seed({ "app.ts": "S05_PRIVATE_BODY\n" });
 	const model = s.provider.addScript("pending", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["small subject"] } }] }]);
 	s.agent.writeModels(s.provider);
+	routeNamed(s.home, [model]);
 	const started = await s.post.diffReview({ jobId: job, model });
 	assert.ok(isDiffReviewWait(started));
 	assert.equal(started.head_sha, s.repo.head(job));
@@ -978,6 +992,7 @@ test("S05: pending reviews fence duplicate starts and carry the reviewed head in
 	assert.equal(pending?.subject?.head_sha, started.head_sha);
 	assert.equal(pending?.subject?.branch, job);
 	assert.equal(listPendingReviews(s.home, job).length, 1);
+	routeNamed(s.home, ["unavailable/reviewer"]);
 	await s.post.registry.setReviewerModel("demo", "unavailable/reviewer");
 	await assert.rejects(() => s.post.diffReview({ jobId: job }), (error: Error) => {
 		assert.ok(error.message.includes(started.head_sha!));
@@ -1079,6 +1094,7 @@ test("S21: a reviewer decision followed by a run-log failure owes one durable re
 		{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["reviewed"] } }] },
 	]);
 	s.agent.writeModels(s.provider);
+	routeNamed(s.home, [model]);
 	const started = await s.post.diffReview({ jobId: job, model });
 	assert.ok(isDiffReviewWait(started));
 	await waitFor(() => s.provider.requests(script).length, (n) => n > 0, { timeoutMs: 15_000, what: "reviewer reaching provider" });

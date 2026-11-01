@@ -19,6 +19,7 @@ import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { ProjectRegistry } from "../../src/projects.ts";
 import {
+	routeNamed,
 	COMMAND_POST_EXTENSION,
 	CP_BRIDGE_EXTENSION,
 	createAgentDir,
@@ -581,6 +582,7 @@ test("S20: a green watch fact starts a real mock reviewer and relays without a p
 	const provider = await MockProvider.start();
 	const reviewer = provider.addScript("s20-started-review", [{ kind: "hang" }]);
 	const model = provider.addScript("s20-started-parent", [{ kind: "text", text: "Unexpected parent wake." }]);
+	routeNamed(held.home.path, [reviewer]);
 	await new ProjectRegistry({ home: held.home.path }).setReviewerModel("demo", reviewer);
 	const agent = createAgentDir({ provider });
 	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
@@ -718,6 +720,7 @@ test(name, { timeout: 120_000 }, async (t) => {
 	recovery.confirmDelivered([`recovery:${JOB}`]);
 	new IntegrationHolds(held.home.path).hold(JOB, "S19 isolates verdict delivery before integration");
 	writeReviewPass(held.home.path, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+	routeNamed(held.home.path, [reviewer], { seed: "template" });
 	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
 		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "3600" }, extensions: [COMMAND_POST_EXTENSION] });
 	const awaitingDir = dirname(new AwaitingStore({ home: held.home.path }).file);

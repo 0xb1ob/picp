@@ -18,6 +18,7 @@ import { assembleStatusBlock } from "../../src/status-block.ts";
 import { jobState } from "../../src/status-render.ts";
 import { renderFleetWidget } from "../../src/widget.ts";
 import {
+	routeNamed,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -81,6 +82,7 @@ test("P8c reserve: held authors at the spawn cap refuse another author, yet gate
 			{ kind: "text", text: "Reported." },
 		], { onExhausted: "repeat" });
 		agentDir.writeModels(provider);
+		routeNamed(home.path, [model]);
 		await post.dispatch({ jobId, task: `Plan ${slug}.`, model, fetch: false });
 		authors.push(jobId);
 	}
@@ -95,13 +97,16 @@ test("P8c reserve: held authors at the spawn cap refuse another author, yet gate
 
 	writeFileSync(join(home.path, LAYOUT.budgetsFile), JSON.stringify({ schema_version: 1, per_job_tokens: 1_000_000, per_job_cost_usd: 3, warn_ratio: 0.8, spawn_cap: 1 }));
 	const fresh = (await post.ledger().create({ title: "fresh", project: "demo", delivery: "local", kind: "ship", slug: "fresh" })).id;
+	routeNamed(home.path, [freshModel]);
 	await assert.rejects(post.dispatch({ jobId: fresh, task: "More work.", model: freshModel, fetch: false }),
 		/spawn cap reached \(3\/1 workers\).*Three extra slots are reserved for gate-reviewer/, "an author never takes the reserve");
 
+	routeNamed(home.path, [gateR1]);
 	const first = await post.gate({ jobId: r1, model: gateR1 });
 	assert.ok(isGateWait(first), JSON.stringify(first));
 	assert.ok(post.manager.get(first.key), "a gate reviewer starts past the authors' cap");
 
+	routeNamed(home.path, [gateR2]);
 	const full = await post.gate({ jobId: r2, model: gateR2 });
 	assert.equal(isGateWait(full), false, "no reviewer past the reserve");
 	const refusal = JSON.parse(readFileSync(join(home.path, paths.gateFile(r2, 1)), "utf8")) as { cause: string; reasons: string[] };
@@ -113,6 +118,7 @@ test("P8c reserve: held authors at the spawn cap refuse another author, yet gate
 	post.reviewRuns.handBack(first.key);
 	await post.reviewRuns.settled(first.key);
 	await waitFor(() => post.manager.get(first.key), (live) => live === undefined, { timeoutMs: 30_000, what: "the first reviewer's close" });
+	routeNamed(home.path, [gateR2]);
 	const retry = await post.gate({ jobId: r2, model: gateR2 });
 	assert.ok(isGateWait(retry), `a closed reviewer frees its reserve slot: ${JSON.stringify(retry)}`);
 	post.reviewRuns.handBack(retry.key);
@@ -170,6 +176,7 @@ async function bench(t: { after(fn: () => void | Promise<void>): void }): Promis
 		},
 		script(name, steps) {
 			const model = provider.addScript(name, steps);
+			routeNamed(home.path, [model]);
 			agentDir.writeModels(provider);
 			return model;
 		},

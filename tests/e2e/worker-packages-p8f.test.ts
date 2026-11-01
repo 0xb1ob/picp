@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { PACKAGE_FLAGS, PACKAGE_TOOLS } from "../../src/worker-packages.ts";
-import { type ScriptStep, treehouseAvailable, waitFor, WORKER_REPORTER_EXTENSION } from "../harness/index.ts";
+import { routeNamed, type ScriptStep, treehouseAvailable, waitFor, WORKER_REPORTER_EXTENSION } from "../harness/index.ts";
 import { configure, environ, fakeExtension, flagValues, installPackage, offeredTools, type PackageBench, packageBench, writeSkill } from "../harness/package-home.ts";
 
 const SKIP = treehouseAvailable() ? false : "worker-packages-p8f e2e needs treehouse on PATH";
@@ -22,7 +22,9 @@ const HASHLINE_ONLY = /tools resolve to nothing: replace, insert, anchor_grep, u
 /** Dispatch one hanging worker and return what it was spawned with once its model has been called. */
 async function spawned(f: PackageBench, slug: string, kind: "ship" | "research", extra: { profile?: string; skills?: string[] } = {}) {
 	const jobId = await f.job(slug, kind);
-	await f.post.dispatch({ jobId, task: "Do the job.", model: f.script(slug, [HANG]), fetch: false, ...extra });
+	const model = f.script(slug, [HANG]);
+	routeNamed(f.home, [model]);
+	await f.post.dispatch({ jobId, task: "Do the job.", model: model, fetch: false, ...extra });
 	await waitFor(() => f.provider.requests(slug).length, (n) => n >= 1, { timeoutMs: 60_000, what: `${slug}'s first request` });
 	const pid = f.post.fleet.require(jobId).worker.pid as number;
 	// pi retitles its process, so /proc cmdline no longer holds the argv; the manager keeps the exec'd one.

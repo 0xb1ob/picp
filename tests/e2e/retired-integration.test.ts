@@ -17,6 +17,7 @@ import { isMultiHomeDir } from "../../src/mode.ts";
 import { formatNext } from "../../src/next.ts";
 import { nextFor } from "../../src/wake-rules.ts";
 import {
+	routeNamed,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -143,6 +144,7 @@ test("retired integration: an existing home keeps its data and runs the native l
 	]);
 	agentDir.writeModels(provider);
 	// The task names the job's own id: no inferred issue lookup may follow from it.
+	routeNamed(home.path, [model]);
 	const dispatched = await post.dispatch({ jobId: DB_JOB, task: `Bump x to 2 in src/app.ts (${DB_JOB}).`, model, fetch: false });
 	assert.equal(dispatched.state, "dispatched");
 	const brief = readFileSync(join(home.path, paths.briefFile(DB_JOB)), "utf8");

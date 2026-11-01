@@ -12,7 +12,7 @@ import { isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { MainCiStore } from "../../src/main-ci.ts";
 import { readMergeReceipt } from "../../src/merges.ts";
-import { CP_BRIDGE_EXTENSION, startPiChild, advanceBase, git, REPO_ROOT, type ScriptStep, waitFor } from "../harness/index.ts";
+import { routeNamed, CP_BRIDGE_EXTENSION, startPiChild, advanceBase, git, REPO_ROOT, type ScriptStep, waitFor } from "../harness/index.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { SKIP, type Reply, type Route, run, json, runsBody, startStack, mergedCalls, deployJobs } from "./landing-helpers.ts";
 
@@ -285,6 +285,7 @@ test("landing S10: dispatch rejects profiles granting parent integration tools",
 		const job = await s.post.ledger().create({ title: `S10 forbidden ${tool}`, project: "demo", delivery: "pr", kind: "ship" });
 		const model = s.provider.addScript(`forbidden-${tool}`, [{ kind: "text", text: "done" }], { onExhausted: "repeat" });
 		s.agentDir.writeModels(s.provider);
+		routeNamed(s.home, [model]);
 		await assert.rejects(s.post.dispatch({ jobId: job.id, task: "Make a change.", model, fetch: false }), new RegExp(`${tool}.*parent-only tool`));
 		assert.equal(s.post.fleet.list().some((entry) => entry.job_id === job.id), false);
 	});

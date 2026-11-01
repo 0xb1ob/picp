@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { git, readFleet, readRunEvents, treehouse } from "../harness/index.ts";
+import { routeNamed, git, readFleet, readRunEvents, treehouse } from "../harness/index.ts";
 import { CommandPost } from "../../src/command-post.ts";
 import { DispatchError } from "../../src/dispatch.ts";
 import { REPO_ROOT } from "../harness/index.ts";
@@ -139,6 +139,7 @@ test("S29 cleanup: public leased-preflight failure preserves its typed payload a
 	let failure: unknown;
 	try {
 		process.env.PATH = `${bin}:${previousPath}`;
+		routeNamed(b.home, [model]);
 		failure = await post.dispatch({ jobId: job.id, task: "Bump x.", model }).catch((error: unknown) => error);
 	} finally {
 		process.env.PATH = previousPath;

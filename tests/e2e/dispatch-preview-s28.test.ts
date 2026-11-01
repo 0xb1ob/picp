@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MOCK_PROVIDER_ID, MockProvider, startPiChild } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MOCK_PROVIDER_ID, MockProvider, startPiChild } from "../harness/index.ts";
 
 test("S28: cp_dispatch previews permitted and refused routes without claiming resources", { timeout: 120_000 }, async (t) => {
 	const home = createScratchHome();
@@ -20,6 +20,7 @@ test("S28: cp_dispatch previews permitted and refused routes without claiming re
 	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
 	writeFileSync(join(home.path, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: [`${MOCK_PROVIDER_ID}/*`], rubric: [] }));
 	const agent = createAgentDir({ provider });
+	routeNamed(home.path, [model, "forbidden/model"], { seed: "template" });
 	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); scratch.cleanup(); home.cleanup(); });
 	await child.prompt(`preview ${job.id}`);

@@ -16,6 +16,7 @@ import { initJobsDocument } from "../../src/ledger.ts";
 import { decisionReviseAt } from "../../src/plan-followup.ts";
 import type { SendRequest } from "../../src/send.ts";
 import {
+	routeNamed,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -77,6 +78,7 @@ async function bench(t: TestContext) {
 			const jobId = (await post.ledger().create({ title: slug, project: "demo", delivery: "local", kind: "ship", slug })).id;
 			const model = provider.addScript(slug, steps(jobId), { onExhausted: "repeat" });
 			agentDir.writeModels(provider);
+			routeNamed(home.path, [model]);
 			await post.dispatch({ jobId, task, model, fetch: false });
 			return jobId;
 		},

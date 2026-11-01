@@ -22,6 +22,7 @@ import {
 	type RecordedRequest,
 	readRunEvents,
 	REPO_ROOT,
+	routeNamed,
 	type ScriptStep,
 	treehouse,
 	treehouseAvailable,
@@ -98,6 +99,7 @@ async function fleet(t: { after(fn: () => void | Promise<void>): void }, options
 			return model;
 		},
 		async dispatch(jobId, model, profile) {
+			routeNamed(home.path, [model]);
 			const dispatched = await post.dispatch({ jobId, task: `Brief for ${jobId}.`, model, fetch: false, wallClockSeconds: 600, toolCallCap: 100, ...(profile ? { profile } : {}) });
 			return dispatched.worktree;
 		},

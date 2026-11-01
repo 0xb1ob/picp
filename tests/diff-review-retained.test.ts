@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { DEFAULT_ORIGIN, DiffVerdictSchema, EMPTY_USAGE, GATE_MAX_REVISE, GateVerdictSchema, isoTimestamp, paths, REVIEW_MAX_ATTEMPTS, validate, type DiffVerdict, type GateReview } from "../src/contracts.ts";
+import { DEFAULT_ORIGIN, DiffVerdictSchema, EMPTY_USAGE, GATE_MAX_REVISE, GateVerdictSchema, isoTimestamp, paths, REVIEW_MAX_ATTEMPTS, validate, type DiffVerdict, type GateReview, type RoutingConfig } from "../src/contracts.ts";
 import { DiffReview } from "../src/diff-review.ts";
 import { gateCapExhausted } from "../src/gate.ts";
 import { FleetStore } from "../src/fleet.ts";
@@ -32,11 +32,17 @@ async function reviewBenchOf(t: { after(fn: () => void | Promise<void>): void })
 	const reviews = new ReviewRuns({ home: home.path, runs, wakeup: (wakeup) => (sent.push(wakeup), true) });
 	const registry = new ProjectRegistry({ home: home.path });
 	await registry.register({ name: "demo", clone_url: repo.remote as string, delivery: "pr" });
-	const review = new DiffReview({ home: home.path, profilesDir: join(REPO_ROOT, "profiles"), briefsDir: join(REPO_ROOT, "prompts/briefs"), manager, routing: { ...DEFAULT_ROUTING_CONFIG, rubric: [] }, probe: { isAvailable: (model) => model.startsWith("mock/") }, fleet, runs, sender, registry, reviews, mandates: new MandateStore(home.path), reviewTimeoutMs: 20_000 });
+	// Routing is handed in, not read from the home, so each scripted model is named on this config directly.
+	const routing: RoutingConfig = { ...DEFAULT_ROUTING_CONFIG, rubric: [] };
+	const review = new DiffReview({ home: home.path, profilesDir: join(REPO_ROOT, "profiles"), briefsDir: join(REPO_ROOT, "prompts/briefs"), manager, routing, probe: { isAvailable: (model) => model.startsWith("mock/") }, fleet, runs, sender, registry, reviews, mandates: new MandateStore(home.path), reviewTimeoutMs: 20_000 });
 	t.after(async () => { await manager.shutdownAll(); runs.closeAll(); agentDir.cleanup(); await provider.stop(); repo.cleanup(); home.cleanup(); });
 	return {
 		home: home.path, manager, review, sent,
-		script: (name: string, steps: ScriptStep[]) => provider.addScript(name, steps),
+		script: (name: string, steps: ScriptStep[]) => {
+			const model = provider.addScript(name, steps);
+			routing.rubric.push({ id: `named-${name}`, role: "gate-reviewer", project: "__named__", model });
+			return model;
+		},
 		seal: () => agentDir.writeModels(provider),
 		pushJobBranch(jobId: string) {
 			repo.git("checkout", "--quiet", "-b", jobId, repo.branch);

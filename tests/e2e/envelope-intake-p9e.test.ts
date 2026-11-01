@@ -8,7 +8,7 @@ import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSIO
 import { FleetStore } from "../../src/fleet.ts";
 import { readStatusFile } from "../../src/run-artifacts.ts";
 import { REPORT_NUDGE_TEXT } from "../../src/settle.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, readFleet, readRunEvents, startRpc, waitFor } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, readFleet, readRunEvents, startRpc, waitFor } from "../harness/index.ts";
 import { SKIP, startStack } from "./landing-helpers.ts";
 
 const PR = "https://github.com/demo/demo/pull/42";
@@ -147,6 +147,7 @@ test("P9e-reporter: a worker's report naming a missing artifact is refused at th
 		{ kind: "hang" },
 	]);
 	s.agentDir.writeModels(s.provider);
+	routeNamed(s.home, [model]);
 	assert.equal((await s.post.dispatch({ jobId: job.id, task: "Report the delivery.", model, fetch: false })).receipt, "accepted");
 	await waitFor(() => s.post.fleet.get(job.id)?.reported_at, (stamp) => stamp !== undefined, { timeoutMs: 60_000, what: "the repaired report" });
 	const refusal = JSON.stringify(s.provider.requests(script)[1]?.body.messages);
@@ -174,6 +175,7 @@ test("P9e-settle: the settle watcher stamps an envelope on disk atomically, neve
 		{ kind: "hang" },
 	]);
 	s.agentDir.writeModels(s.provider);
+	routeNamed(s.home, [lateModel]);
 	await s.post.dispatch({ jobId: late.id, task: "Do the work.", model: lateModel, fetch: false });
 	await waitFor(() => s.post.fleet.get(late.id)?.reported_at, (stamp) => stamp !== undefined, { timeoutMs: 60_000, what: "the late envelope's stamp" });
 	const nudged = s.provider.requests(lateScript)[1]?.body.messages as Array<{ role: string; content: unknown }>;
@@ -190,6 +192,7 @@ test("P9e-settle: the settle watcher stamps an envelope on disk atomically, neve
 		head_sha: head(s.post.fleet.require(twice.id).worktree), pr_url: PR }) });
 	const twiceModel = s.provider.addScript(`p9e-twice-${twice.id}`, [{ kind: "tool_calls", calls: [report("first report"), report("a different summary")] }, { kind: "hang" }]);
 	s.agentDir.writeModels(s.provider);
+	routeNamed(s.home, [twiceModel]);
 	await s.post.dispatch({ jobId: twice.id, task: "Report twice.", model: twiceModel, fetch: false });
 	const envelopeFile = join(s.home, paths.envelopeFile(twice.id));
 	await waitFor(() => readFileSync(join(s.home, paths.eventsFile(twice.id)), "utf8"), (log) => log.includes("already filed"), { timeoutMs: 60_000, what: "the duplicate refusal" });
@@ -207,6 +210,7 @@ test("P9e-settle: the settle watcher stamps an envelope on disk atomically, neve
 		{ kind: "hang" },
 	]);
 	s.agentDir.writeModels(s.provider);
+	routeNamed(s.home, [brokenModel]);
 	await s.post.dispatch({ jobId: broken.id, task: "Do the work.", model: brokenModel, fetch: false });
 	const recorded = await waitFor(() => events(broken.id, "settled_without_report"), (rows) => rows.length > 0, { timeoutMs: 60_000, what: "the recorded settle" })
 		.finally(() => chmodSync(state, 0o755));

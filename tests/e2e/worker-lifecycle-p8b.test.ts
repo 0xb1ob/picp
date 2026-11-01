@@ -14,6 +14,7 @@ import { initJobsDocument } from "../../src/ledger.ts";
 import { MCP_CALL_TOOL } from "../../src/worker-mcp.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import {
+	routeNamed,
 	type AgentDir,
 	createAgentDir,
 	createScratchHome,
@@ -124,12 +125,14 @@ test("P8b bounds: dispatch freezes the resolved hard bounds, and a bad worker-bo
 	};
 	const dispatched = async (slug: string, override: { wallClockSeconds?: number; toolCallCap?: number } = {}) => {
 		const jobId = await f.intake(slug);
+		routeNamed(f.home, [model]);
 		const result = await f.post.dispatch({ jobId, task: "Wait.", model, fetch: false, ...override });
 		assert.equal("wall_clock_seconds" in result ? result.wall_clock_seconds : undefined, f.post.fleet.require(jobId).bounds?.wall_clock_seconds);
 		return f.post.fleet.require(jobId).bounds;
 	};
 	const refused = async (slug: string, override: { wallClockSeconds?: number; toolCallCap?: number }, pattern: RegExp) => {
 		const jobId = await f.intake(slug);
+		routeNamed(f.home, [model]);
 		await assert.rejects(f.post.dispatch({ jobId, task: "Wait.", model, fetch: false, ...override }), (error: Error) => pattern.test(error.message), slug);
 		assert.equal(f.post.fleet.get(jobId), undefined, `${slug}: refused before any fleet record`);
 		return jobId;
@@ -183,7 +186,9 @@ test("P8b bounds: a delivered send starts a fresh wall-clock round, and tool sta
 	const toolJob = await f.intake("tool-round");
 	const toolModel = f.script("p8b-round-tools", [bash("echo one"), { kind: "text", text: "Idle." }, { kind: "text", text: "Still idle." }, bash("echo two"), { kind: "hang" }]);
 	const spawned = Date.now();
+	routeNamed(f.home, [clockModel]);
 	await f.post.dispatch({ jobId: clockJob, task: "Idle.", model: clockModel, fetch: false, wallClockSeconds: 10 });
+	routeNamed(f.home, [toolModel]);
 	await f.post.dispatch({ jobId: toolJob, task: "Idle.", model: toolModel, fetch: false, toolCallCap: 2, wallClockSeconds: 600 });
 	for (const [name, n] of [["p8b-round-clock", 2], ["p8b-round-tools", 3]] as const) {
 		await waitFor(() => f.provider.requests(name).length, (count) => count >= n, { timeoutMs: 20_000, what: `${name} idle after its nudge` });
@@ -210,6 +215,7 @@ test("P8b bounds: a bound names the job, bound and work on disk, and the redispa
 	const jobId = await f.intake("bounded-twice");
 	const loop = Array.from({ length: 6 }, (_, i) => bash(`echo ${i}`));
 	const model = f.script("p8b-twice", [bash("printf 'keep\\n' > leftover.txt"), ...loop, { kind: "hang" }]);
+	routeNamed(f.home, [model]);
 	const dispatched = await f.post.dispatch({ jobId, task: "Loop.", model, fetch: false, toolCallCap: 2, wallClockSeconds: 600 });
 	await waitFor(() => f.bounds.length, (n) => n >= 2, { timeoutMs: 60_000, what: "a second bound after bounded recovery" });
 	const [first, second] = f.bounds;
@@ -228,6 +234,7 @@ test("P8b bounds: a legacy record without frozen bounds revives on env bounds, n
 	writeFileSync(join(f.home, LAYOUT.workerBoundsFile), JSON.stringify({ wall_clock_seconds: 1800 }));
 	const jobId = await f.intake("legacy-bounds");
 	const model = f.script("p8b-legacy", [{ kind: "hang" }, { kind: "hang" }]);
+	routeNamed(f.home, [model]);
 	await f.post.dispatch({ jobId, task: "Wait.", model, fetch: false });
 	assert.equal(f.post.fleet.require(jobId).bounds?.wall_clock_seconds, 1800);
 	await waitFor(() => f.provider.requests("p8b-legacy").length, (n) => n >= 1, { timeoutMs: 20_000, what: "first worker request" });
@@ -270,7 +277,9 @@ test("P8b MCP: dispatched read-only workers reach enabled servers through mcp_ca
 		{ kind: "tool_calls", calls: [{ name: "report_result", args: {} }] } as ScriptStep, { kind: "hang" } as ScriptStep];
 	const dispatch = async (slug: string, profile: string, kind: "ship" | "research", steps: ScriptStep[]) => {
 		const jobId = await f.intake(slug, kind);
-		await f.post.dispatch({ jobId, task: "Use MCP.", model: f.script(`p8b-mcp-${slug}`, steps), profile, fetch: false });
+		const model = f.script(`p8b-mcp-${slug}`, steps);
+		routeNamed(f.home, [model]);
+		await f.post.dispatch({ jobId, task: "Use MCP.", model: model, profile, fetch: false });
 		await waitFor(() => toolEnds(f.home, jobId).length, (n) => n >= steps.length - 1, { timeoutMs: 60_000, what: `${slug} tool calls` });
 		return toolEnds(f.home, jobId);
 	};
