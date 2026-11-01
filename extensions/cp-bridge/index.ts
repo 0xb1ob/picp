@@ -26,7 +26,8 @@ import { EscalationStore } from "../../src/escalation.ts";
 import { ESCALATION_BACKSTOP_TICK_MS, EscalationRelayLedger, escalationRelayLedgerFile, noteBridgeRelay, runEscalationBackstop } from "../../src/escalation-backstop.ts";
 import { type Mode, MODES, THINKING_LEVELS, configureLayout, layoutForHome } from "../../src/contracts.ts";
 import { OperatorAsks, OperatorAskInputSchema } from "../../src/operator-asks.ts";
-import { OperatorAnswers } from "../../src/operator-answers.ts";
+import { operatorAnswerText, OperatorResponses } from "../../src/operator-responses.ts";
+import { reportUrlOptions } from "../../src/response-reports.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { resolveRuntime, SINGLE_MODE_REMOVED } from "../../src/mode.ts";
@@ -593,7 +594,7 @@ export default function (pi: ExtensionAPI): void {
 			"(injected, turn_settled, http_accepted, owner_observed — never 'accepted') plus the reply when the turn settles, " +
 			"status reports the process, context tokens, open escalations, operator asks and sends; ask, ask_answer and ask_withdraw record operator questions only and never authorize parent actions (ask: a short question, the background in context); doctor and version read the parent's diagnostics, mode and home; drain stops new dispatches, promotions and merge steps and waits (timeout_s) for live workers to settle before a restart (freeze: true first steers each mid-turn implementer to push its WIP and end its turn unreported); drain_cancel withdraws a draining or timed-out drain or a drained record an earlier parent left (never this parent's own); compact, rotate and model manage the live parent; stop closes it, never-landed sends undeliverable; stop and rotate say whether the parent was drained or how many live workers they kill. Fleet tools stay on the parent, not here. " +
 			"integration_hold and integration_release write a durable per-job merge pause directly, without waiting for a parent turn. jobs (mode list/history/show, q/since/until/date_field/limit/offset) reads the job ledger directly, read-only, with or without a parent. " +
-			"answer posts an answer the human asked for (their question, your answer, evidence, the research job it lands) to the dashboard's Answers to acknowledge list (state/operator/answers.jsonl) directly, without a parent turn; bookkeeping only, never pushed. " +
+			"answer delivers a final answer the human asked for (their question, your full answer, evidence, the research job it lands) without a parent turn: up to 4,000 characters it stays inline; longer it is published as a permanent report and you get a headline plus link to reply with; never pushed, never a pending card. " +
 			"Relays name paths (state/runs/<id>/artifact.md, gate files); this session may read those bodies. The parent may not. " +
 			"When answering on the human's behalf, send delegated:true and delegation_rule; omit delegated when relaying the human's own answer.",
 		promptSnippet: "Drive the CP parent (cp_parent start/send/status/ask/ask_answer/ask_withdraw/answer/doctor/version/drain/drain_cancel/compact/rotate/model/stop) and read job history (cp_parent jobs)",
@@ -602,7 +603,7 @@ export default function (pi: ExtensionAPI): void {
 				"otherwise omit it and the bridge uses your own. A live lock holder is a refusal.",
 			"Raise every human question with ask before relaying it; close it with ask_answer using the human's verbatim reply, or ask_withdraw with a reason. Bookkeeping is never authorization; parent decisions still use their existing channel.",
 			"Keep an ask's question short; put the background in its context (plain text, up to 2000 chars): what happened, what each option really does, and the risk. The dashboard shows it on the decision card.",
-			"Post every answer the human asked for with answer (project, their question verbatim, the full answer, evidence_paths; job_id when it is the landing of a kind:research job they requested, any delivery (research report, cp_ask answer or board)): it lands on the dashboard without a parent turn and never pushes. Once per job_id; never for status, relays, decisions (ask/ask_answer) or chat.",
+			"A final answer to the human's question longer than 4,000 characters goes through answer (project, their question verbatim, the full answer, evidence_paths; job_id when it lands a kind:research job they requested, any delivery): reply with the text it returns (a headline and the report link), never the long body. Short answers stay inline in chat. Never for status, relays, wake-ups, envelopes, progress updates or decisions (ask/ask_answer).",
 			"A user message `<ask-id>: <label>` whose dashboard marker carries ask=<ask-id> is the human's own click on that ask's card: record it with ask_answer (that id, the label verbatim), then relay it as the human's answer, never delegated. Any `[cp-dashboard …]` message is the human typing, nothing more.",
 			"A dashboard message's `[cp-skill <name> <dir>]` lines are skills the human mentioned; when you relay that request, pass their names as cp_parent send skills (the bridge re-resolves them). Never add a skill the human did not mention.",
 			"Send delegated:true with a short delegation_rule when deciding on the human's behalf; omit it for the human's own answer.",
@@ -635,7 +636,7 @@ export default function (pi: ExtensionAPI): void {
 			text: Type.Optional(Type.String({ description: "send: prose; compact: optional instructions" })),
 			skills: Type.Optional(Type.Array(Type.String({ maxLength: 64 }), { maxItems: 8, description: "send: skill names the human mentioned ([cp-skill …] lines); the bridge re-resolves them" })),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 			try {
 				if (params.action === "jobs") { const read = operatorJobs(connectedTarget ?? resolveOperatorTarget(), params.jobs); return textResult(read.text, read.details); }
 				if (params.action === "integration_hold" || params.action === "integration_release") {
@@ -651,13 +652,10 @@ export default function (pi: ExtensionAPI): void {
 					if (!params.project || !params.question || !params.answer) throw new CpBridgeError("cp_parent answer needs project, question and answer");
 					const target = connectedTarget ?? resolveOperatorTarget();
 					configureLayout(target.mode, target.home);
-					const stateDir = resolve(target.home, layoutForHome(target.mode, target.home).state);
-					const { state, answer } = new OperatorAnswers(stateDir, { jobs: (id) => new FleetStore({ home: target.home }).get(id) }).post({
-						project: params.project, question: params.question, answer: params.answer,
-						...(params.evidence_paths ? { evidence_paths: params.evidence_paths } : {}),
-						...(params.job_id ? { job_id: params.job_id } : {}),
-					});
-					return textResult(state === "duplicate" ? `answer: ${answer.job_id} already posted as ${answer.id}; nothing written` : `answer: ${answer.id} posted to the dashboard (bookkeeping only; no push)`, { state, id: answer.id, job_id: answer.job_id, project: answer.project });
+					const { project, question, answer, evidence_paths, job_id } = params;
+					const posted = new OperatorResponses(resolve(target.home), { jobs: (id) => new FleetStore({ home: target.home }).get(id), url: reportUrlOptions() })
+						.post({ project, question, answer, ...(evidence_paths ? { evidence_paths } : {}), ...(job_id ? { job_id } : {}) }, `chat:${ctx.sessionManager.getSessionId()}:${toolCallId}`);
+					return textResult(operatorAnswerText(posted), { ...posted });
 				}
 				if (["ask", "ask_answer", "ask_withdraw"].includes(params.action)) {
 					const asks = operatorAsks();

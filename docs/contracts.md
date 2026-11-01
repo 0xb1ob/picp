@@ -1270,7 +1270,7 @@ card — on `#awaiting` and pinned above the Full transcript's composer — whos
 option buttons and "Other answer…" field go through the guarded
 `POST /api/operator/message` path (`{kind:"answer"}` / `{kind:"message"}`).
 
-**Response reports** (M2 PR1, `src/response-reports.ts`; no producer calls it yet). `deliverFinalAnswer` redacts like
+**Response reports** (M2 PR1, `src/response-reports.ts`; producers since M2 PR2). `deliverFinalAnswer` redacts like
 operator answers (a still-secret-shaped text is refused by pattern name) and keeps an answer of at most 4,000 Unicode
 code points inline (`delivery:"inline"`, `url: null`); a longer one becomes a permanent board
 `state/boards/report-<first 32 hex of sha256(source)>/` and returns `delivery:"report"`, `state` (`posted` or
@@ -1287,36 +1287,54 @@ nothing is ever overwritten. The URL is the running tunnel origin when `wantedLi
 configured viewer host/port as intake builds a board URL; no usable address is `no_url` before anything is written.
 Remote reads keep the paired-device gate; links carry no credentials. Reports have no expiry or cleanup in v1.
 
-**Operator answers.** `cp_parent answer` (cp-mxk4 PR1) posts an answer the human asked for
-to `state/operator/answers.jsonl`: `project`, `question` (their words; stored up to 500 chars, then `…`), `answer`
-(at most 8,000 chars; the first paragraph is the short answer), optional `evidence_paths` (at most 10) and `job_id`.
-The bridge handles it before any parent client, so it works with the parent busy or down: no parent turn, no push,
-no relay, never authorization. Question, answer and paths go through `redactSecrets`; text that still matches a
-`SECRET_PATTERNS` entry is refused by pattern name, never value. `job_id` must be a `kind:research` job of the same
-project in phase `held` or `done`, whatever its `delivery` (`local`, `pipeline`, `answer`, `board`, `pr`: `answer` and
-`board` are deliveries of research jobs, not kinds); a ship job, an unknown id, another project's job or an unlanded
-one is refused with the reason. A second post for the same `job_id` writes nothing and returns `state:"duplicate"`
-with the first `ans-` id. Status pings, relays (`[cp-bridge…]`, `[cp-dashboard…]`, `ask-…:` replies), decisions and
-chat are not answers; `id` is `ask_answer`'s. The journal is append-only: the bridge's `posted` lines (`ans-<12 hex>`)
-and the viewer's `acked` lines, folded by `readAnswers` (`src/viewer/control-files.ts`; a torn last line is
-ignored, bad lines count as skipped, the first `job_id` wins, a repeat ack is ignored). The dashboard list and the
-acknowledge route are §Answers to acknowledge.
+**Operator answers** (M2 PR2, `src/operator-responses.ts`; cp-mxk4 journal before it). `cp_parent answer` delivers an
+answer the human asked for through `deliverFinalAnswer`: `project`, `question` (their words), `answer` (the full text, at
+most 1 MiB; the first paragraph is the headline), optional `evidence_paths` (at most 10) and `job_id`. Up to 4,000 code
+points after redaction it stays inline and nothing is written; longer, it becomes a permanent report whose headline and
+link the session replies with. The result keeps `state` (`inline`, `posted` or `duplicate`), `id` (the report slug,
+`null` inline), `job_id` and `project`, and adds `delivery` (`inline|report`), `text` and `url` (`null` inline); `posted`
+no longer means a pending card. The source is `research:<job_id>` for a job-bound answer (a repost is `duplicate`, a
+changed one a `conflict`), else `chat:<session>:<tool-call>`. The bridge handles it before any parent client: no parent
+turn, no push, no relay, never authorization. A text that still matches a `SECRET_PATTERNS` entry is refused by pattern
+name, never value. `job_id` must be a `kind:research` job of the same project in phase `held` or `done`, whatever its
+`delivery`; a ship job, an unknown id, another project's job or an unlanded one is refused with the reason. Status
+pings, relays (`[cp-bridge…]`, `[cp-dashboard…]`, `ask-…:` replies), decisions, protocol wakes, envelopes and progress
+updates are not answers; `id` is `ask_answer`'s. Ordinary chat routes a long final reply through this tool by
+instruction (the operator note and tool guidelines), never by intercepting model output.
+
+**Research answer cards** (M2 PR2, `src/answer-card.ts`). The parent's answer-card drain reads the card's body (bounded)
+and sends a long one through `deliverFinalAnswer` as `research:<job>#<generation>` before it accepts the card; the
+notice then carries the report link. A short body keeps today's card. A `secret`, `too_large` or `invalid` body keeps
+today's card too; any other failure (`conflict`, `no_url`, a migration error) leaves the card pending with one warning
+per distinct error.
+
+**Answer migration** (M2 PR2, `src/migrate-answer-reports.ts`). Every producer above and schedule results first run
+`answerMigrationGate` on `state/operator/answers.jsonl` (live) and `answers.jsonl.migrated` (archive): neither or the
+archive alone is a no-op; both is `answer migration conflict: live and migrated journals both exist`, no producer
+writes, and the parent's service-alert tick raises one `service_health` escalation for manual diagnosis; the live journal
+alone migrates. Migration snapshots and strictly parses the journal (a torn or malformed line, a bad id or time, an ack
+naming no earlier post, a re-posted id with other content, over 16 MiB, or secret-shaped text fails), publishes every
+unique `posted` line, acknowledged ones included, as `legacy:<ans-id>` reports with `time` = its `at` and no ack
+metadata, reads each one back against the canonical payload, rechecks the journal bytes and that no archive exists, then
+renames the live journal to the archive. Neither file is ever unlinked, truncated or overwritten; any failure leaves the
+original bytes in place and producers closed, and a restart reuses verified reports. Activation is a human boundary:
+the bridge reload and a parent drain/restart, confirmed by the main session, precede it, so no old writer appends during
+the rename. The old dashboard list (§Answers to acknowledge) reads `missing` once migrated and gets no new data.
 
 **Schedule result cards** (schedules refactor PR1, `src/schedule-results.ts`). A durable schedule run's final result
-is a second producer on the same journal: a `posted` line with `by:"schedule"` and `source: {kind:"schedule",
-schedule_id, run_id, source_key, outcome}` (exactly those keys; `readAnswers` skips any other shape). It is never an
-operator question, so `cp_parent answer`'s question and job rules do not apply; the same redaction and
-`SECRET_PATTERNS` refusal do. The id is `ans-` plus 12 hex of sha256(`source_key`), so a repost after a crash returns
-the first card (`duplicate`), and the first `job_id` still wins. The card is queued first on the run record
+is delivered like an operator answer (M2 PR2): source `schedule:<source_key>`, `time` = the result's `at`, the run's
+title as question; the same redaction and `SECRET_PATTERNS` refusal apply, `cp_parent answer`'s question and job rules do
+not. A retry after a crash reuses the same report (`duplicate`). The card is queued first on the run record
 (`ScheduleRun.result`: `source_key`, `job_id`, `generation`, `outcome` of `completed|partial|refused|blocked|failed`,
-`headline` ≤4,000, `at`, `links` ≤10, `answer_id`, `delivered_at`, optional `error`), then posted, then marked
-`delivered_at`; a failed post stays queued with its `error` and retries on the 30 s scheduler tick. The first result
+`headline` ≤4,000, `at`, `links` ≤10, `answer_id` (legacy cards only), `report_href` for a long result, `delivered_at`,
+optional `error`), then delivered, then marked `delivered_at`; a failed delivery or a closed migration gate stays queued
+with its `error` and retries on the 30 s scheduler tick. The first result
 wins and is never overwritten. Owner: an ordinary run's anchor; a skill run's S1 named by the anchor's `expanded:`
 comment, never a sole-child guess. Intake queues it when the owner's envelope is accepted (`pr`/`pipeline` runs wait
 for run close); the tick heals a crash before that from the filed envelope (`state/runs/<id>/envelope.json`) and
 gives a run that closed in the last 7 days without one a run-level card naming dropped members. No parent turn,
-wake, relay or artifact body is involved. The dashboard shows `schedule: {schedule_id, run_id, outcome}` on the
-Answers item and `card: {state, answer_id, error}` on the Schedules run row.
+wake, relay or artifact body is involved. The Schedules run row shows the headline inline, or a "Result report" link
+(`report_href`), or "Result card in Answers" for a legacy `answer_id`.
 
 **Run-aware dependencies.** `blockedJobs` takes an optional `runOf` resolver (`openRunOf(scheduleRuns)`): a blocker
 in an open schedule run reads `<id> (run <run id>)`, never "no active grant covers it", and the dependent row carries

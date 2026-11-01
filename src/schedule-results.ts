@@ -1,15 +1,17 @@
 /**
- * Schedule result cards (schedules refactor PR1): a run's final result is queued on the run record first, then posted
- * to the dashboard Answers journal and only then marked delivered. No parent turn, wake or fleet phase is involved,
- * so a teardown, a suppressed scheduled relay or an absent operator cannot lose it. Reads no artifact body.
+ * Schedule result cards (schedules refactor PR1, M2 PR2): a run's final result is queued on the run record first, then
+ * delivered (inline when short, else a permanent response report) and only then marked delivered. No parent turn, wake
+ * or fleet phase is involved, so a teardown, a suppressed scheduled relay or an absent operator cannot lose it.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type FleetRecord, LAYOUT, paths, type Receipt } from "./contracts.ts";
+import { type FleetRecord, paths, type Receipt } from "./contracts.ts";
 import type { FleetStore } from "./fleet.ts";
 import type { IntakeResult } from "./intake.ts";
 import type { Ledger } from "./ledger.ts";
-import { OperatorAnswers } from "./operator-answers.ts";
+import { answerMigrationGate } from "./migrate-answer-reports.ts";
+import { OperatorResponses } from "./operator-responses.ts";
+import { reportUrlOptions } from "./response-reports.ts";
 import type { ScheduleRunStore } from "./schedule-runs.ts";
 import type { ScheduleRun, ScheduleRunResult } from "./viewer/schedule-run-core.ts";
 import { expandedRoles } from "./viewer/schedule-run-groups.ts";
@@ -24,7 +26,9 @@ export type ResultLedgerJob = { id: string; status: string; close_reason?: strin
 export interface ResultFacts { status: keyof typeof OUTCOME; summary: string; generation: number | null; links: readonly (string | undefined)[] }
 export interface ScheduleResultPorts {
 	runs: ScheduleRunStore;
-	answers: Pick<OperatorAnswers, "postScheduleResult">;
+	answers: Pick<OperatorResponses, "postScheduleResult">;
+	/** The startup migration gate (src/migrate-answer-reports.ts); throws while answer producers must stay off. */
+	migrate?: () => void;
 	ledgerJobs: () => readonly ResultLedgerJob[];
 	/** A job's accepted envelope, read from disk (it survives teardown); undefined before intake accepted one. */
 	facts: (jobId: string) => ResultFacts | undefined;
@@ -80,10 +84,24 @@ export class ScheduleResults {
 
 	/** Startup and scheduler tick: heal a crash before the card was queued, queue closed runs' cards, then post. */
 	sync(): void {
+		this.#migrate();
 		if (!this.#ports.runs.active) return;
 		this.#safely("reconcile schedule results", () => this.reconcile());
 		this.#safely("post schedule results", () => this.drain());
 	}
+
+	/** Logged once per distinct error: the gate is retried every tick, and each pending card records it too. */
+	#migrate(): void {
+		try {
+			this.#ports.migrate?.();
+			this.#migrationError = undefined;
+		} catch (error) {
+			const message = (error as Error).message;
+			if (message !== this.#migrationError) this.#log(`answers journal migration: ${message}`);
+			this.#migrationError = message;
+		}
+	}
+	#migrationError: string | undefined;
 
 	reconcile(): void {
 		const jobs = this.#ports.ledgerJobs();
@@ -109,12 +127,11 @@ export class ScheduleResults {
 			try {
 				const posted = this.#ports.answers.postScheduleResult({
 					project: run.policy.project, title: `${run.policy.recipe.title} — run ${result.outcome}`, text: cardText(run, result),
-					evidence_paths: result.links, job_id: result.job_id,
-					source: { kind: "schedule", schedule_id: run.schedule_id, run_id: run.id, source_key: result.source_key, outcome: result.outcome },
+					evidence_paths: result.links, job_id: result.job_id, source_key: result.source_key, at: result.at,
 				});
 				this.#ports.runs.editRun(run.id, (row) => {
 					const { error: _error, ...delivered } = row.result!;
-					row.result = { ...delivered, answer_id: posted.answer.id, delivered_at: stamp(this.#now()) };
+					row.result = { ...delivered, ...(posted.href ? { report_href: posted.href } : {}), delivered_at: stamp(this.#now()) };
 				});
 			} catch (error) {
 				const message = (error as Error).message.trim().slice(0, 1000) || "unknown error";
@@ -162,7 +179,7 @@ function cardText(run: ScheduleRun, result: ScheduleRunResult): string {
 	return [result.headline, facts, ...result.links].join("\n\n");
 }
 
-/** The production wiring: the home's Answers journal, ledger and fleet. */
+/** The production wiring: the home's response reports and migration gate, ledger and fleet. */
 export function openScheduleResults(home: string, runs: ScheduleRunStore, fleet: FleetStore, ledger: () => Ledger): ScheduleResults {
-	return new ScheduleResults({ runs, answers: new OperatorAnswers(join(home, LAYOUT.state)), ledgerJobs: () => ledger().read().jobs, facts: (id) => reportedFacts(home, fleet.get(id)) });
+	return new ScheduleResults({ runs, answers: new OperatorResponses(home, { url: reportUrlOptions() }), migrate: () => void answerMigrationGate(home), ledgerJobs: () => ledger().read().jobs, facts: (id) => reportedFacts(home, fleet.get(id)) });
 }

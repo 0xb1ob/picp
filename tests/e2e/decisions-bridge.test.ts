@@ -1,7 +1,8 @@
 /**
  * Behavior 09 (P10b): the operator's cp-bridge session, real pi with a mock model. The ask guard nudges a prose
  * question once, then cards it for the next chat line; the escalation backstop relays an overdue escalation once;
- * a parent pi posts schedule result cards, and the real viewer folds the answers journal.
+ * cp_parent answer keeps short answers inline and publishes long ones as reports behind the M2 PR2 migration gate;
+ * a parent pi migrates the legacy answers journal at startup and delivers schedule result cards.
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -12,6 +13,9 @@ import { type TestContext, test } from "node:test";
 import { DETECTED_ASK_PREFIX } from "../../src/ask-guard.ts";
 import { HEADER_NUDGE } from "../../src/header-guard.ts";
 import { MandateStore } from "../../src/mandate.ts";
+import { answerJournals } from "../../src/migrate-answer-reports.ts";
+import { publishResponseReport, readResponseReport, RESPONSE_INLINE_MAX, RESPONSE_REPORT_MAX_BYTES, responseReportSlug } from "../../src/response-reports.ts";
+import { resolveStateDir } from "../../src/viewer/sessions.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import { replySplitsFile } from "../../src/viewer/reply-splits.ts";
 import {
@@ -36,12 +40,12 @@ type Home = ReturnType<typeof createScratchHome>;
 const NUDGE = "opened no cp_parent ask";
 
 /** A cp-bridge pi on `home` whose mock model runs `steps`; torn down after the test. */
-async function bridge(t: TestContext, home: Home, steps: ScriptStep[], repeat = false, sessionDir?: string) {
+async function bridge(t: TestContext, home: Home, steps: ScriptStep[], repeat = false, sessionDir?: string, env: Record<string, string> = {}) {
 	const provider = await MockProvider.start();
 	const script = `bridge-${Math.random().toString(16).slice(2)}`;
 	const model = provider.addScript(script, steps, repeat ? { onExhausted: "repeat" } : undefined);
 	const agentDir = createAgentDir({ provider });
-	const pi = startPiChild({ cwd: home.path, model, sessionDir, env: { ...agentDir.env, PI_HOME: home.path, CP_HOME: home.path, CP_MODE: "multi" }, extensions: [CP_BRIDGE_EXTENSION] });
+	const pi = startPiChild({ cwd: home.path, model, sessionDir, env: { ...agentDir.env, PI_HOME: home.path, CP_HOME: home.path, CP_MODE: "multi", ...env }, extensions: [CP_BRIDGE_EXTENSION] });
 	let closed = false;
 	const close = async () => {
 		if (closed) return;
@@ -370,7 +374,25 @@ function snapshot(root: string, rel = ""): Record<string, string> {
 	return out;
 }
 
-test("decisions: cp_parent answer posts bookkeeping answers to the dashboard journal, redacted, deduplicated per research landing and refused for anything else", { timeout: 120_000 }, async (t) => {
+const VIEWER_ENV = { CP_VIEWER_HOST: "127.0.0.2", CP_VIEWER_PORT: "9911" };
+/** Astral characters: 4,000 code points are 8,000 UTF-16 units, so a `.length` threshold would misfire. */
+const astral = (n: number) => "\u{1F600}".repeat(n);
+const LONG_ANSWER = `Headline.\n\n${astral(RESPONSE_INLINE_MAX)}`;
+type End = { toolCallId: string; isError?: boolean; result?: { content?: Array<{ text?: string }>; details?: Record<string, unknown> } };
+const boardsOf = (home: string): string[] => { const dir = join(resolveStateDir(home), "boards"); return existsSync(dir) ? readdirSync(dir).sort() : []; };
+const LEGACY = [
+	{ type: "posted", by: "bridge", id: "ans-aaaaaaaaaaaa", at: "2026-01-01T00:00:00Z", project: "demo", question: "Q?", answer: "Acked answer.", evidence_paths: ["README.md"], job_id: "cp-local" },
+	{ type: "posted", by: "schedule", id: "ans-bbbbbbbbbbbb", at: "2026-01-02T00:00:00Z", project: "demo", question: "Nightly", answer: "Card.", evidence_paths: [], job_id: null,
+		source: { kind: "schedule", schedule_id: "sch-123456", run_id: "run-1", source_key: "k", outcome: "completed" } },
+	{ type: "acked", by: "viewer", id: "ans-aaaaaaaaaaaa", at: "2026-01-03T00:00:00Z", peer: "127.0.0.1" },
+	{ type: "acked", by: "viewer", id: "ans-aaaaaaaaaaaa", at: "2026-01-04T00:00:00Z", peer: null },
+].map((row) => `${JSON.stringify(row)}\n`).join("");
+const MIGRATED = [
+	{ project: "demo", question: "Q?", answer: "Acked answer.", evidence: ["README.md"], job: "cp-local", source: "legacy:ans-aaaaaaaaaaaa", time: "2026-01-01T00:00:00Z" },
+	{ project: "demo", question: "Nightly", answer: "Card.", evidence: [], job: null, source: "legacy:ans-bbbbbbbbbbbb", time: "2026-01-02T00:00:00Z" },
+];
+
+test("decisions: cp_parent answer keeps short answers inline, publishes long ones as permanent reports (redacted, one per source) and refuses anything else", { timeout: 120_000 }, async (t) => {
 	const home = createScratchHome();
 	t.after(() => home.cleanup());
 	const fleet = new FleetStore({ home: home.path });
@@ -380,32 +402,33 @@ test("decisions: cp_parent answer posts bookkeeping answers to the dashboard jou
 		["cp-waiting", { phase: "waiting" }], ["cp-failed", { phase: "failed" }],
 	] as Array<[string, Partial<FleetRecord>]>) await fleet.add(fleetJob(home.path, id, over));
 	const input = { action: "answer", project: "demo", question: "Does it work?", answer: "Yes." };
+	const jobs = ["cp-local", "cp-answer", "cp-board"];
 	const calls: Array<[string, Record<string, unknown>]> = [
-		["long", { ...input, question: "q".repeat(600), evidence_paths: ["state/runs/cp-1/artifact.md"] }],
-		["redacted", { ...input, answer: `token ${ghShaped} here` }],
+		["short", input],
+		["exact", { ...input, answer: astral(RESPONSE_INLINE_MAX) }],
+		["long", { ...input, question: "q".repeat(600), answer: LONG_ANSWER, evidence_paths: ["state/runs/cp-1/artifact.md"] }],
+		["redacted", { ...input, answer: `token ${ghShaped} here\n\n${LONG_ANSWER}` }],
 		["key", { ...input, answer: `${keyHeader}\nMIIE` }],
-		...["cp-local", "cp-answer", "cp-board"].map((id): [string, Record<string, unknown>] => [`job-${id}`, { ...input, job_id: id }]),
-		...["cp-local", "cp-answer", "cp-board"].map((id): [string, Record<string, unknown>] => [`again-${id}`, { ...input, answer: "second", job_id: id }]),
+		...jobs.map((id): [string, Record<string, unknown>] => [`job-${id}`, { ...input, answer: LONG_ANSWER, job_id: id }]),
+		...jobs.map((id): [string, Record<string, unknown>] => [`again-${id}`, { ...input, answer: LONG_ANSWER, job_id: id }]),
+		["changed", { ...input, answer: `${LONG_ANSWER} changed`, job_id: "cp-local" }],
 		...["cp-nope", "cp-ship", "cp-other", "cp-waiting", "cp-failed"].map((id): [string, Record<string, unknown>] => [`refuse-${id}`, { ...input, job_id: id }]),
-		["too-long", { ...input, answer: "a".repeat(8001) }],
+		["too-long", { ...input, answer: "a".repeat(RESPONSE_REPORT_MAX_BYTES + 1) }],
 		["too-many", { ...input, evidence_paths: Array.from({ length: 11 }, (_, i) => `p${i}`) }],
-		["max", { ...input, answer: "a".repeat(8000) }],
 		["ask-id", { ...input, id: "ask-abc123" }],
 		["ask-question", { ...input, question: "ask-abc123: Keep" }],
 		["relay", { ...input, question: "[cp-bridge send] wake-up" }],
 		["no-project", { ...input, project: "" }],
 	];
 	const steps = calls.map(([id, args]): ScriptStep => ({ kind: "tool_calls", calls: [{ id, name: "cp_parent", args }] }));
-	const { pi } = await bridge(t, home, [text("Hello."), text("Hello again."), ...steps, text("Posted.")]);
-	const stateDir = join(home.path, layoutForHome("multi", home.path).state);
-	const journal = join(stateDir, "operator", "answers.jsonl");
+	const { pi } = await bridge(t, home, [text("Hello."), text("Hello again."), ...steps, text("Posted.")], false, undefined, VIEWER_ENV);
+	const boards = join(resolveStateDir(home.path), "boards");
 	await turn(pi, "Hi.");
 	const quiet = snapshot(home.path);
 	await turn(pi, "Again.");
 	const before = snapshot(home.path);
 	await turn(pi, "Post the answers.");
 
-	type End = { toolCallId: string; isError?: boolean; result?: { content?: Array<{ text?: string }>; details?: Record<string, unknown> } };
 	const ends = new Map((pi.records().filter((r) => r.type === "tool_execution_end") as unknown as End[]).map((end) => [end.toolCallId, end]));
 	const ok = (id: string) => {
 		const end = ends.get(id);
@@ -418,58 +441,116 @@ test("decisions: cp_parent answer posts bookkeeping answers to the dashboard jou
 		assert.match(end?.result?.content?.[0]?.text ?? "", message, id);
 		return end?.result?.content?.[0]?.text ?? "";
 	};
-	const lines = () => readFileSync(journal, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-	const byId = (id: unknown) => lines().find((line) => line.id === id) ?? {};
+	const payloadOf = (slug: unknown) => readFileSync(join(boards, String(slug), "site", "content.json"), "utf8");
 
+	assert.deepEqual(ok("short"), { state: "inline", id: null, job_id: null, project: "demo", delivery: "inline", text: "Yes.", url: null });
+	assert.deepEqual([ok("exact").delivery, ok("exact").url], ["inline", null], "exactly 4,000 code points stays inline");
 	const long = ok("long");
-	assert.equal(long.state, "posted");
-	assert.match(String(long.id), /^ans-[a-f0-9]{12}$/);
-	const line = byId(long.id);
-	assert.deepEqual([line.type, line.by, line.job_id, line.evidence_paths], ["posted", "bridge", null, ["state/runs/cp-1/artifact.md"]]);
-	assert.equal(String(line.question).length, 500);
-	assert.ok(String(line.question).endsWith("\u2026"));
-	assert.equal(statSync(journal).mode & 0o777, 0o600);
-	assert.equal(statSync(dirname(journal)).mode & 0o777, 0o700);
+	assert.deepEqual([long.state, long.delivery, long.url], ["posted", "report", `http://127.0.0.2:9911/boards/${long.id}/`]);
+	assert.match(String(long.id), /^report-[0-9a-f]{32}$/);
+	assert.equal(long.text, `Headline.\n\nFull answer: ${long.url}`);
+	assert.doesNotMatch(ends.get("long")?.result?.content?.[0]?.text ?? "", /\u{1F600}/u, "the tool text is the headline and link, never the body");
+	const content = payloadOf(long.id), payload = JSON.parse(content) as Record<string, unknown>;
+	assert.deepEqual(Object.keys(payload), ["project", "question", "answer", "evidence", "job", "source", "time"]);
+	assert.deepEqual([String(payload.question).length, payload.answer, payload.evidence, payload.job], [600, LONG_ANSWER, ["state/runs/cp-1/artifact.md"], null]);
+	assert.match(String(payload.source), /^chat:\S+:long$/);
+	const meta = JSON.parse(readFileSync(join(boards, String(long.id), "board.json"), "utf8")) as Record<string, unknown>;
+	assert.deepEqual([meta.project, meta.source, meta.content_sha256], ["demo", payload.source, createHash("sha256").update(content, "utf8").digest("hex")]);
+	assert.equal(statSync(join(boards, String(long.id), "site", "content.json")).mode & 0o777, 0o600);
 
-	const stored = String(byId(ok("redacted").id).answer);
-	assert.ok(stored.includes("\u2022\u2022\u2022") && !stored.includes(ghShaped));
+	const redacted = payloadOf(ok("redacted").id);
+	assert.ok(redacted.includes("\u2022\u2022\u2022") && !redacted.includes(ghShaped));
 	assert.doesNotMatch(refused("key", /secret-shaped text \(private key block\) remains after redaction/), /BEGIN/);
 
-	const first = ["cp-local", "cp-answer", "cp-board"].map((id) => ok(`job-${id}`));
-	assert.deepEqual(first.map((details) => details.state), ["posted", "posted", "posted"]);
-	assert.equal(new Set(first.map((details) => details.id)).size, 3);
-	assert.deepEqual(["cp-local", "cp-answer", "cp-board"].map((id) => [ok(`again-${id}`).state, ok(`again-${id}`).id]), first.map((details) => ["duplicate", details.id]));
+	const first = jobs.map((id) => ok(`job-${id}`));
+	assert.deepEqual(first.map((details) => [details.state, details.job_id, JSON.parse(payloadOf(details.id)).source]), jobs.map((id) => ["posted", id, `research:${id}`]));
+	assert.deepEqual(jobs.map((id) => [ok(`again-${id}`).state, ok(`again-${id}`).id]), first.map((details) => ["duplicate", details.id]));
+	refused("changed", /response report conflict: research:cp-local is already published as \/boards\/report-[0-9a-f]{32}\/ with different content/);
 	refused("refuse-cp-nope", /unknown job cp-nope/);
 	refused("refuse-cp-ship", /cp-ship is a ship job \(delivery pr\); answers name kind:research landings only, any delivery/);
 	refused("refuse-cp-other", /cp-other belongs to elsewhere, not demo/);
 	refused("refuse-cp-waiting", /has not landed \(phase waiting\)/);
 	refused("refuse-cp-failed", /has not landed \(phase failed\)/);
-
 	refused("too-long", /invalid operator answer/);
 	refused("too-many", /invalid operator answer/);
-	assert.equal(String(byId(ok("max").id).answer).length, 8000);
 	refused("ask-id", /ask_answer/);
 	for (const id of ["ask-question", "relay"]) refused(id, /the question is a relay or a decision reply/);
 	refused("no-project", /cp_parent answer needs project, question and answer/);
 
-	assert.equal(lines().length, 6, "two posts, three job landings and the max answer; every refusal and duplicate wrote nothing");
+	assert.equal(boardsOf(home.path).length, 5, "long, redacted and three job landings; inline, refused and duplicate posts publish nothing");
 	const after = snapshot(home.path);
-	const relJournal = join(layoutForHome("multi", home.path).state, "operator", "answers.jsonl");
 	const touched = (from: Record<string, string>, to: Record<string, string>) => Object.keys(to).filter((file) => from[file] !== to[file]);
 	const plain = touched(quiet, before);
-	const extra = touched(before, after).filter((file) => file !== relJournal && !plain.includes(file));
-	assert.deepEqual(extra, [], `beyond what a plain turn touches (${plain.join(", ")}), only the journal is written`);
-	assert.ok(!(relJournal in before) && relJournal in after);
-	assert.equal(existsSync(join(stateDir, "operator", "asks.jsonl")), false, "posting an answer creates no ask");
+	const extra = touched(before, after).filter((file) => !file.includes("/boards/report-") && !plain.includes(file));
+	assert.deepEqual(extra, [], `beyond what a plain turn touches (${plain.join(", ")}), only reports are written`);
+	assert.equal(existsSync(answerJournals(home.path).live), false, "no answers journal and no pending card");
+	assert.equal(existsSync(join(resolveStateDir(home.path), "operator", "asks.jsonl")), false, "posting an answer creates no ask");
+});
 
-	const other = createScratchHome();
-	t.after(() => other.cleanup());
-	mkdirSync(join(other.path, layoutForHome("multi", other.path).state, "operator", "answers.jsonl"), { recursive: true });
-	const blocked = await bridge(t, other, [{ kind: "tool_calls", calls: [{ id: "dir", name: "cp_parent", args: input }] }, text("Refused.")]);
-	await turn(blocked.pi, "Post it.");
-	const end = blocked.pi.records().find((r) => r.type === "tool_execution_end") as unknown as End | undefined;
-	assert.equal(end?.isError, true, "a directory at the journal path refuses the post");
-	assert.match(end?.result?.content?.[0]?.text ?? "", /answers journal unreadable/);
+test("decisions: the answer migration gate runs before any cp_parent answer write: live-only migrates and renames, archive-only is a no-op, both or a bad journal fail closed", { timeout: 240_000 }, async (t) => {
+	const input = { action: "answer", project: "demo", question: "Does it work?", answer: LONG_ANSWER };
+	const seed = (live?: string, archive?: string) => {
+		const dir = createScratchHome();
+		t.after(() => dir.cleanup());
+		const files = answerJournals(dir.path);
+		mkdirSync(dirname(files.live), { recursive: true });
+		if (live !== undefined) writeFileSync(files.live, live, { mode: 0o640 });
+		if (archive !== undefined) writeFileSync(files.archive, archive);
+		return { dir, ...files };
+	};
+	const post = async (dir: Home, id: string, args: Record<string, unknown> = input) => {
+		const b = await bridge(t, dir, [{ kind: "tool_calls", calls: [{ id, name: "cp_parent", args }] }, text("Done.")], false, undefined, VIEWER_ENV);
+		await turn(b.pi, "Post it.");
+		const end = b.pi.records().find((r) => r.type === "tool_execution_end") as unknown as End;
+		await b.close();
+		return { end, text: end.result?.content?.[0]?.text ?? "" };
+	};
+
+	// Live only: every unique posted answer, acknowledged or not, becomes a report with no ack metadata; then the rename.
+	const live = seed(LEGACY);
+	const migrated = await post(live.dir, "migrate");
+	assert.ok(!migrated.end.isError, migrated.text);
+	assert.deepEqual([existsSync(live.live), readFileSync(live.archive, "utf8"), statSync(live.archive).mode & 0o777], [false, LEGACY, 0o640]);
+	assert.deepEqual(MIGRATED.map((p) => readResponseReport(live.dir.path, p.source)?.payload), MIGRATED);
+	assert.deepEqual(boardsOf(live.dir.path).length, 3, "two legacy reports plus the new answer");
+	assert.ok(!boardsOf(live.dir.path).some((slug) => /acked|peer/.test(readFileSync(join(resolveStateDir(live.dir.path), "boards", slug, "site", "content.json"), "utf8"))));
+	// Archive only (the next startup): nothing is migrated again and the archive keeps its bytes.
+	const again = await post(live.dir, "again", { ...input, answer: "Short." });
+	assert.ok(!again.end.isError, again.text);
+	assert.deepEqual([existsSync(live.live), readFileSync(live.archive, "utf8"), boardsOf(live.dir.path).length], [false, LEGACY, 3]);
+
+	// Both journals: the named conflict, both byte-identical, no producer write.
+	const both = seed(LEGACY, "older archive\n");
+	const conflict = await post(both.dir, "both");
+	assert.equal(conflict.end.isError, true);
+	assert.match(conflict.text, /answer migration conflict: live and migrated journals both exist/);
+	assert.deepEqual([readFileSync(both.live, "utf8"), readFileSync(both.archive, "utf8"), boardsOf(both.dir.path)], [LEGACY, "older archive\n", []]);
+
+	// A journal that does not parse strictly, or a report that disagrees with it, aborts with the live bytes unchanged.
+	const unknownAck = `${JSON.stringify({ type: "acked", by: "viewer", id: "ans-cccccccccccc", at: "2026-01-01T00:00:00Z", peer: null })}\n`;
+	for (const [name, bytes, why] of [
+		["torn", `${LEGACY}{"type":"posted"`, /last line is torn/], ["garbage", `not json\n${LEGACY}`, /line 1 is not JSON/],
+		["unknown-ack", unknownAck, /acknowledges ans-cccccccccccc, which no earlier line posted/],
+	] as const) {
+		const bad = seed(bytes);
+		const failed = await post(bad.dir, name);
+		assert.equal(failed.end.isError, true, name);
+		assert.match(failed.text, /answer migration failed, \S+answers\.jsonl left unchanged: /, name);
+		assert.match(failed.text, why, name);
+		assert.deepEqual([readFileSync(bad.live, "utf8"), existsSync(bad.archive), boardsOf(bad.dir.path)], [bytes, false, []], name);
+	}
+	const mismatch = seed(LEGACY);
+	publishResponseReport(mismatch.dir.path, { ...MIGRATED[0]!, answer: "Something else." });
+	const refused = await post(mismatch.dir, "mismatch");
+	assert.match(refused.text, /answer migration failed, .*legacy:ans-aaaaaaaaaaaa: response report conflict/);
+	assert.deepEqual([readFileSync(mismatch.live, "utf8"), existsSync(mismatch.archive), boardsOf(mismatch.dir.path).length], [LEGACY, false, 1]);
+
+	// A restart after a partial publication reuses the verified report and completes once.
+	const partial = seed(LEGACY);
+	publishResponseReport(partial.dir.path, MIGRATED[0]!);
+	const resumed = await post(partial.dir, "partial", { ...input, answer: "Short." });
+	assert.ok(!resumed.end.isError, resumed.text);
+	assert.deepEqual([existsSync(partial.live), readFileSync(partial.archive, "utf8"), boardsOf(partial.dir.path).length], [false, LEGACY, 2]);
 });
 
 const SCHED_AT = "2026-10-04T15:00:00Z";
@@ -486,11 +567,11 @@ async function pendingRun(runs: ScheduleRunStore, n: number, sourceKey: string, 
 	return { schedule_id: policy.schedule_id, run_id: run, source: { kind: "schedule", schedule_id: policy.schedule_id, run_id: run, source_key: sourceKey, outcome: "completed" } };
 }
 
-test("decisions: a parent pi posts each schedule result card once, redacted or refused, pushes only asks, and the dashboard folds acks, garbage and a torn tail", { timeout: 120_000 }, async (t) => {
+test("decisions: a parent pi migrates the legacy journal at startup, then delivers each schedule result card once (inline or a redacted report) or refuses it, and pushes only asks", { timeout: 120_000 }, async (t) => {
 	const home = createScratchHome();
 	const scratch = createScratchLedger({ home: home.path, knownProjects: ["demo"] });
 	const stateDir = join(home.path, LAYOUT.state);
-	const journal = join(stateDir, "operator", "answers.jsonl");
+	const { live, archive } = answerJournals(home.path);
 	const viewer = createViewer({ home: home.path, stateDir, host: "127.0.0.1", port: 0, log: () => {} });
 	await new Promise<void>((resolve) => viewer.listen(0, "127.0.0.1", resolve));
 	t.after(() => { viewer.close(); scratch.cleanup(); home.cleanup(); });
@@ -499,53 +580,48 @@ test("decisions: a parent pi posts each schedule result card once, redacted or r
 		assert.equal(res.status, 200);
 		return (await res.json() as DecisionsResponse).answers;
 	};
-	assert.equal((await answersView()).availability, "missing", "no journal yet reads as missing, not unavailable");
 
 	const runs = new ScheduleRunStore({ home: home.path });
-	const dup = await pendingRun(runs, 1, "p10b-dup", "posted before the crash");
-	const redacted = await pendingRun(runs, 2, "p10b-redact", `token ${ghShaped} here`);
+	const short = await pendingRun(runs, 1, "p10b-short", "posted before the crash");
+	// The headline is capped at 4,000 characters; the card's facts line pushes the delivered text past the threshold.
+	const long = await pendingRun(runs, 2, "p10b-long", `token ${ghShaped} here\n\n${"x".repeat(3940)}`);
 	const refused = await pendingRun(runs, 3, "p10b-refuse", `${keyHeader}\nMIIE`);
-	const dupId = `ans-${createHash("sha256").update("p10b-dup").digest("hex").slice(0, 12)}`;
-	const line = (row: Record<string, unknown>) => JSON.stringify(row);
-	const posted = { type: "posted", project: "demo", question: "Q?", evidence_paths: [], job_id: null };
-	mkdirSync(dirname(journal), { recursive: true });
-	writeFileSync(journal, [
-		line({ ...posted, by: "bridge", id: "ans-aaaaaaaaaaaa", at: "2026-01-01T00:00:00Z", answer: "Acked twice." }),
-		line({ ...posted, by: "schedule", id: dupId, at: "2026-01-01T00:00:00Z", answer: "first card", source: dup.source }),
-		line({ type: "acked", by: "viewer", id: "ans-aaaaaaaaaaaa", at: "2026-01-01T01:00:00Z", peer: "127.0.0.1" }),
-		line({ type: "acked", by: "viewer", id: "ans-aaaaaaaaaaaa", at: "2026-02-02T00:00:00Z", peer: "127.0.0.1" }),
-		line({ type: "acked", by: "viewer", id: "ans-000000000000", at: "2026-01-01T00:00:00Z", peer: "127.0.0.1" }),
-		"not json",
-		line({ ...posted, by: "schedule", id: "ans-bbbbbbbbbbbb", at: "2026-01-01T00:00:00Z", answer: "bad source", source: { ...dup.source, extra: 1 } }),
-		"",
-	].join("\n"));
+	mkdirSync(dirname(live), { recursive: true });
+	// Until PR3 the viewer still folds a live journal: an ack sets acked_at once, unknown acks and garbage skip.
+	assert.equal((await answersView()).availability, "missing", "no journal yet reads as missing, not unavailable");
+	const unknownAck = JSON.stringify({ type: "acked", by: "viewer", id: "ans-000000000000", at: "2026-01-05T00:00:00Z", peer: null });
+	writeFileSync(live, `${LEGACY}${unknownAck}\nnot json\n{"type":"posted"`);
+	const folded = await answersView();
+	assert.deepEqual(folded.history.map((item) => [item.id, item.acked_at]), [["ans-aaaaaaaaaaaa", "2026-01-03T00:00:00Z"]], "an ack sets acked_at once");
+	assert.deepEqual(folded.open.map((item) => [item.id, item.schedule?.run_id]), [["ans-bbbbbbbbbbbb", "run-1"]]);
+	assert.equal(folded.warning, "2 unreadable line(s) in state/operator/answers.jsonl skipped", "unknown ack and garbage skip; the torn tail is ignored");
+	writeFileSync(live, LEGACY);
 	initPush({ dataDir: join(home.path, LAYOUT.data), origin: "https://cp.example.test" });
 	const ask = new OperatorAsks(join(stateDir, "operator", "asks.jsonl")).open({ project: "demo", question: "A or B?", options: [{ label: "a", consequence: "b" }], recommendation: "a" });
 
 	const provider = await MockProvider.start();
 	const model = provider.addScript("p10b-parent", [text("checked")]);
 	const agent = createAgentDir({ provider });
-	const parent = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
+	const parent = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path, ...VIEWER_ENV }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(async () => { await parent.close(); agent.cleanup(); await provider.stop(); });
 	await parent.prompt("inspect startup");
 	await parent.waitForSettled(60_000);
 	const result = (id: string) => runs.run(id)!.result!;
-	await waitFor(() => Boolean(result(redacted.run_id).delivered_at && result(refused.run_id).error), Boolean, { timeoutMs: 15_000, what: "schedule result sync" });
+	await waitFor(() => Boolean(result(long.run_id).delivered_at && result(refused.run_id).error), Boolean, { timeoutMs: 15_000, what: "schedule result sync" });
 	const pushed = await waitFor(() => new PushDeliveryStore(stateDir).read(), Boolean, { timeoutMs: 20_000, what: "push sweep baseline" });
 
-	const raw = readFileSync(journal, "utf8").split("\n").filter(Boolean);
-	assert.equal(raw.filter((row) => row.includes(dupId)).length, 1, "a retry after a crash reuses the first card");
-	assert.deepEqual([result(dup.run_id).answer_id, Boolean(result(dup.run_id).delivered_at)], [dupId, true]);
-	const card = JSON.parse(raw.find((row) => row.includes("p10b-redact"))!);
-	assert.deepEqual([card.by, card.source, card.answer.includes(ghShaped), card.answer.includes("token")], ["schedule", redacted.source, false, true]);
+	assert.deepEqual([existsSync(live), readFileSync(archive, "utf8")], [false, LEGACY], "startup migrated the journal and renamed it");
+	assert.deepEqual(MIGRATED.map((p) => readResponseReport(home.path, p.source)?.payload), MIGRATED);
+	assert.deepEqual([Boolean(result(short.run_id).delivered_at), result(short.run_id).report_href], [true, undefined], "a short card stays inline");
+	const slug = responseReportSlug("schedule:p10b-long");
+	assert.equal(result(long.run_id).report_href, `/boards/${slug}/`);
+	const content = readFileSync(join(stateDir, "boards", slug, "site", "content.json"), "utf8");
+	assert.ok(content.includes("token") && !content.includes(ghShaped), "the long card is a redacted report");
 	assert.match(result(refused.run_id).error!, /private key block/);
 	assert.equal(result(refused.run_id).delivered_at, null);
-	assert.ok(!raw.some((row) => row.includes("p10b-refuse")), "a refused card never reaches the journal");
+	assert.equal(existsSync(join(stateDir, "boards", responseReportSlug("schedule:p10b-refuse"))), false, "a refused card publishes nothing");
+	assert.deepEqual(boardsOf(home.path).length, 3, "two legacy reports and the long card");
 	assert.deepEqual(pushed!.items.map((item) => item.id), [ask.id], "the push sweep baselines the open ask only, never an answer");
-
-	appendFileSync(journal, line({ ...posted, by: "bridge", id: "ans-cccccccccccc", at: "2026-03-03T00:00:00Z", answer: "torn" }).slice(0, 40));
 	const view = await answersView();
-	assert.deepEqual(view.history.map((item) => [item.id, item.acked_at]), [["ans-aaaaaaaaaaaa", "2026-01-01T01:00:00Z"]], "an ack sets acked_at once");
-	assert.deepEqual(view.open.map((item) => [item.id, item.schedule?.run_id]).sort(), [[`ans-${createHash("sha256").update("p10b-redact").digest("hex").slice(0, 12)}`, redacted.run_id], [dupId, dup.run_id]].sort());
-	assert.equal(view.warning, "3 unreadable line(s) in state/operator/answers.jsonl skipped", "unknown ack, garbage and bad source skip; the torn tail is ignored");
+	assert.deepEqual([view.availability, view.open, view.history], ["missing", [], []], "no new acknowledgement data after the switchover");
 });

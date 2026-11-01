@@ -8,13 +8,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { answeredIdsFromMessage, formatAnsweredNotice } from "../../src/answered.ts";
-import { type AnswerCardData, formatAnswerNotice } from "../../src/answer-card.ts";
+import { type AnswerCardData, formatAnswerNotice, routeAnswerCard } from "../../src/answer-card.ts";
 import { ciKeysFromMessage, type CiObservation, formatCiNotice } from "../../src/ci-watch.ts";
 import { formatForeignCiNotice } from "../../src/foreign-ci-watch.ts";
 import { runMainCiTick } from "../../src/main-ci.ts";
 import type { CommandRunner } from "../../src/merge-ask.ts";
 import type { CommandPost } from "../../src/command-post.ts";
-import { ANSWER_ENTRY_TYPE, type AnswerCardChannel, type AnswerCardRecord, type AwaitingItem, DiffVerdictSchema, isSafeJobId, LAYOUT, paths, type StatusSnapshot } from "../../src/contracts.ts";
+import { ANSWER_ENTRY_TYPE, type AnswerCardChannel, type AwaitingItem, DiffVerdictSchema, isSafeJobId, LAYOUT, paths, type StatusSnapshot } from "../../src/contracts.ts";
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { type DeferredRecheckTrigger, formatRaisedNotice, recheckDeferredBounded } from "../../src/deferred-recheck.ts";
 import { readPriorAttempts, reviewCapExhausted } from "../../src/gate.ts";
@@ -327,15 +327,7 @@ export function createWakeupSurfaces(
 	 * intake and shown by this drain — at intake, at `session_start` and on the
 	 * widget tick — until a real operator surface has taken it, exactly once.
 	 */
-	const answerCardData = (record: AnswerCardRecord): AnswerCardData => ({
-		job_id: record.job_id,
-		...(record.project ? { project: record.project } : {}),
-		summary: record.summary,
-		path: record.path,
-		bytes: record.bytes,
-		...(record.reported_at ? { reported_at: record.reported_at } : {}),
-	});
-
+	// M2 PR2: a long answer is published as a report before its card is accepted; a failed publication stays pending.
 	const surfaceAnswerCards = (): void => {
 		try {
 			// A card appended into a streaming turn is spliced above the message being
@@ -351,9 +343,10 @@ export function createWakeupSurfaces(
 			})();
 			commandPost().drainAnswerCards((record) => {
 				const channel = answerCardChannel(currentRuntime().home, record.job_id, s.live);
-				if (channel === "card") pi.appendEntry<AnswerCardData>(ANSWER_ENTRY_TYPE, answerCardData(record));
-				else if (channel === "notice") s.live?.ui.notify(formatAnswerNotice(answerCardData(record)), "info");
-				return channel;
+				const data = channel === "card" || channel === "notice" ? routeAnswerCard(currentRuntime().home, record, (message) => operatorNotify(s.live, message, "warning")) : undefined;
+				if (channel === "card" && data) pi.appendEntry<AnswerCardData>(ANSWER_ENTRY_TYPE, data);
+				else if (channel === "notice" && data) s.live?.ui.notify(formatAnswerNotice(data), "info");
+				return channel === "schedules_page" || data ? channel : undefined;
 			}, { idle });
 		} catch {
 			// A card that could not be shown stays pending, and the next tick tries

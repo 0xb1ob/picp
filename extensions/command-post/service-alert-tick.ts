@@ -6,6 +6,7 @@
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { LAYOUT } from "../../src/contracts.ts";
+import { escalateAnswerMigration } from "../../src/migrate-answer-reports.ts";
 import { serviceAlerts, syncServiceEscalations } from "../../src/service-alerts.ts";
 import { readHealth } from "../../src/service/health.ts";
 import type { ExtensionDeps } from "./shared.ts";
@@ -25,6 +26,9 @@ export function registerServiceAlertTick(pi: ExtensionAPI, deps: ExtensionDeps, 
 		try {
 			const post = deps.commandPost();
 			const stateDir = join(post.home, LAYOUT.state);
+			// M2 PR2: the startup answer-journal migration; a conflict or failure becomes an escalation.
+			const migration = await escalateAnswerMigration(post.escalations, post.home);
+			if (migration) log(`answer migration: raised ${migration}`);
 			const record = readHealth(stateDir);
 			if (!record) return; // never ran or unreadable: nothing was promised, so nothing is withdrawn
 			const { raised, withdrawn } = await syncServiceEscalations(post.escalations, serviceAlerts(record, new Date()), stateDir);

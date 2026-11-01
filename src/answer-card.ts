@@ -8,10 +8,9 @@
  * collapsed/expanded body selection and the degrade line for a file that is no
  * longer there.
  *
- * Import discipline, deliberately the same as `plan-view.ts`: `node:*` and
- * `./contracts.ts` only. No pi import, no TUI import, so nothing here can
- * append an entry, send a message or return a tool result — the answer body
- * has exactly one destination, the renderer's terminal output.
+ * Import discipline, deliberately close to `plan-view.ts`: `node:*`, `./contracts.ts` and, for the M2 PR2 report
+ * routing, `./response-reports.ts`. No pi import, no TUI import, so nothing here can append an entry, send a message
+ * or return a tool result — the answer body goes to the renderer's terminal output or into a permanent report.
  *
  * The read is at **render** time, from the path the entry points at. The entry
  * itself stores a pointer (job id, project, path, bytes, headline), so the
@@ -21,8 +20,10 @@
  */
 
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
-import { ANSWER_CARD_COLLAPSED_LINES, ANSWER_MAX_BYTES } from "./contracts.ts";
+import { ANSWER_CARD_COLLAPSED_LINES, ANSWER_MAX_BYTES, type AnswerCardRecord } from "./contracts.ts";
 import { formatBytes } from "./plan-view.ts";
+import { answerMigrationGate } from "./migrate-answer-reports.ts";
+import { deliverFinalAnswer, RESPONSE_REPORT_MAX_BYTES, ResponseReportError, type ReportUrlOptions, reportUrlOptions } from "./response-reports.ts";
 
 /** Payload of a `cp-answer` entry: a pointer and a headline, never a body. */
 export interface AnswerCardData {
@@ -35,6 +36,42 @@ export interface AnswerCardData {
 	/** Size at intake, so the degrade line can still say how big it was. */
 	bytes: number;
 	reported_at?: string;
+	/** M2 PR2: a long answer was published as a permanent report; the card shows this link, never the body. */
+	report_url?: string;
+}
+
+/** The card for a queued record: its pointer and headline, never a body. */
+export function answerCardData(record: AnswerCardRecord): AnswerCardData {
+	return {
+		job_id: record.job_id, ...(record.project ? { project: record.project } : {}), summary: record.summary, path: record.path, bytes: record.bytes,
+		...(record.reported_at ? { reported_at: record.reported_at } : {}),
+	};
+}
+
+const lastPending = new Map<string, string>();
+
+/**
+ * M2 PR2: route a research answer before its card is shown. Over `RESPONSE_INLINE_MAX` code points it is published as
+ * a report first and the card carries the link. A publication failure returns undefined (the card stays pending) and
+ * calls `pending` once per distinct error; an answer no report can ever hold (secret, oversize) keeps today's card.
+ */
+export function routeAnswerCard(home: string, record: AnswerCardRecord, pending: (message: string) => void, url: ReportUrlOptions = reportUrlOptions()): AnswerCardData | undefined {
+	const data = answerCardData(record);
+	let source: AnswerSource;
+	try { source = readAnswerSource(record.path, RESPONSE_REPORT_MAX_BYTES); } catch { return data; } // unreadable: the degrade line, as before
+	if (source.truncated) return data;
+	try {
+		answerMigrationGate(home);
+		const sent = deliverFinalAnswer(home, { project: record.project ?? null, question: record.summary, answer: source.text, evidence: [record.path], job: record.job_id, source: `research:${record.id}`, time: record.reported_at }, url);
+		lastPending.delete(record.id);
+		return sent.delivery === "report" ? { ...data, report_url: sent.url } : data;
+	} catch (error) {
+		if (error instanceof ResponseReportError && (error.code === "secret" || error.code === "too_large" || error.code === "invalid")) return data;
+		const message = `answer report for ${record.id} is still pending: ${(error as Error).message}`;
+		if (lastPending.get(record.id) !== message) pending(message);
+		lastPending.set(record.id, message);
+		return undefined;
+	}
 }
 
 export interface AnswerSource {
@@ -118,6 +155,7 @@ export function answerCardView(data: AnswerCardData, options: AnswerCardOptions 
 	const exists = options.exists ?? existsSync;
 	const read = options.read ?? ((path: string, cap: number) => readAnswerSource(path, cap));
 	const summary = data.summary.trim().length > 0 ? data.summary.trim().split("\n") : [];
+	if (data.report_url) return { header: formatAnswerHeader(data, data.bytes), summary, body: [`Full answer: ${data.report_url}`], hidden: 0, truncated: false };
 
 	let source: AnswerSource | undefined;
 	if (exists(data.path)) {
@@ -159,5 +197,6 @@ export function answerCardView(data: AnswerCardData, options: AnswerCardOptions 
  * an answer body it never asked for.
  */
 export function formatAnswerNotice(data: AnswerCardData): string {
+	if (data.report_url) return `answer for ${data.job_id}: ${data.report_url} (${formatBytes(data.bytes)}) — the full answer is a permanent report`;
 	return `answer for ${data.job_id}: ${data.path} (${formatBytes(data.bytes)}) — open it yourself; the card needs a terminal`;
 }

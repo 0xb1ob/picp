@@ -29,10 +29,10 @@ export interface ScheduleRun {
 	cap_notices: string[];
 	result?: ScheduleRunResult;
 }
-/** The run's one dashboard result card: queued here first, `delivered_at` only once the Answers journal took it. */
+/** The run's one result card: queued here first, `delivered_at` once delivered (inline, or a report at `report_href`). */
 export interface ScheduleRunResult {
 	source_key: string; job_id: string | null; generation: number | null; outcome: (typeof RESULT_OUTCOMES)[number];
-	headline: string; at: string; links: string[]; answer_id: string | null; delivered_at: string | null; error?: string;
+	headline: string; at: string; links: string[]; answer_id: string | null; delivered_at: string | null; error?: string; report_href?: string;
 }
 export const RESULT_OUTCOMES = ["completed", "partial", "refused", "blocked", "failed"] as const;
 export interface PolicyRecord {
@@ -70,6 +70,7 @@ const runShape = object({
 	"result?": object({
 		source_key: line(300), job_id: nullable(jobId), generation: nullable(positive), outcome: oneOf(RESULT_OUTCOMES), headline: text(4000), at,
 		links: lines(1000, 10), answer_id: nullable(pattern(/^ans-[a-f0-9]{12}$/)), delivered_at: nullable(at), "error?": text(1000),
+		"report_href?": pattern(/^\/boards\/report-[0-9a-f]{32}\/$/),
 	}),
 });
 export function scheduleRunErrors(value: unknown): string[] {
