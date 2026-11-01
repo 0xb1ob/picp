@@ -1270,6 +1270,23 @@ card — on `#awaiting` and pinned above the Full transcript's composer — whos
 option buttons and "Other answer…" field go through the guarded
 `POST /api/operator/message` path (`{kind:"answer"}` / `{kind:"message"}`).
 
+**Response reports** (M2 PR1, `src/response-reports.ts`; no producer calls it yet). `deliverFinalAnswer` redacts like
+operator answers (a still-secret-shaped text is refused by pattern name) and keeps an answer of at most 4,000 Unicode
+code points inline (`delivery:"inline"`, `url: null`); a longer one becomes a permanent board
+`state/boards/report-<first 32 hex of sha256(source)>/` and returns `delivery:"report"`, `state` (`posted` or
+`duplicate`), `href` `/boards/<slug>/`, an absolute `url` and a headline-plus-link `text`. Sources are
+`research:<job>#<generation>`, `schedule:<source_key>`, `legacy:<ans-id>` or `chat:<session>:<tool-call>`. The canonical
+payload is `JSON.stringify` of `{project, question, answer, evidence, job, source, time}` in that key order, stored
+as `site/content.json`; `board.json` adds `project`, `source` and `content_sha256` (SHA-256 of those UTF-8 bytes, never
+of the HTML) to its usual fields, with `job_ids: []` so a report never supersedes a job's board. `site/index.html` is
+rendered deterministically from the payload: escaped text, `http(s)` evidence as links and anything else as text, served
+under the board CSP. Input over 1 MiB, payload plus page over 1 MiB or `board.json` over 16 KiB fails `too_large` with
+no URL and no truncation. A retry with the same source and content (its stored `time` wins) is `duplicate`; other
+content is a `conflict`, and a stored report whose payload, hash, source or HTML does not verify is `tampered` —
+nothing is ever overwritten. The URL is the running tunnel origin when `wantedListener` holds for its config, else the
+configured viewer host/port as intake builds a board URL; no usable address is `no_url` before anything is written.
+Remote reads keep the paired-device gate; links carry no credentials. Reports have no expiry or cleanup in v1.
+
 **Operator answers.** `cp_parent answer` (cp-mxk4 PR1) posts an answer the human asked for
 to `state/operator/answers.jsonl`: `project`, `question` (their words; stored up to 500 chars, then `…`), `answer`
 (at most 8,000 chars; the first paragraph is the short answer), optional `evidence_paths` (at most 10) and `job_id`.
