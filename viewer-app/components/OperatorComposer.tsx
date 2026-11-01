@@ -10,6 +10,17 @@ export const COMPOSER_PLACEHOLDER = "Message Operator…";
 /** Uploads finish sequentially; failed/unfinished attachments must be removed or resolved before send. */
 type Attachment = {key: number; name: string; bytes: number; text: boolean; state: "uploading" | "ready" | "failed"; id?: string; reason?: string};
 type Picked = {name: string; type: string; size: number};
+/** The unsent text per operator session file (`offline` while none is known); absent when empty. */
+const DRAFT_KEY = "cp-composer-draft:";
+const OFFLINE_DRAFT_KEY = `${DRAFT_KEY}offline`;
+let draftWarned = false;
+function readDraft(key: string): string {
+ try { return window.localStorage?.getItem(key) ?? ""; } catch { return ""; }
+}
+function rememberDraft(key: string, text: string) {
+ try { if (text) window.localStorage?.setItem(key, text.slice(0, CONTROL_TEXT_MAX)); else window.localStorage?.removeItem(key); }
+ catch (error) { if (!draftWarned) console.warn(`composer draft not persisted: ${(error as Error).message}`); draftWarned = true; }
+}
 /**
  * The Full transcript's composer, into the running operator session. One rounded box (chat v2): the growing textarea
  * over attach, Options, busy ⋯ (steer, confirm-tap abort) and send; one row below 900 px. Up to 8 attachments.
@@ -41,6 +52,23 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
  // A failed or unfinished attachment blocks sending: remove it or wait.
  const pending = attachments.some(a => a.state !== "ready");
  const canSend = ready && !sending && !pending && (!!text.trim() || images.length > 0 || files.length > 0);
+ const draftKey = ready ? status.session_file ? `${DRAFT_KEY}${status.session_file}` : OFFLINE_DRAFT_KEY : null;
+ const restored = useRef<string | null>(null);
+ // Restore once per key; an explicit draft link wins, and text already typed is never replaced.
+ useEffect(() => {
+  if (!draftKey || restored.current === draftKey) return;
+  restored.current = draftKey;
+  if (draft !== undefined) return;
+  let saved = readDraft(draftKey);
+  // The session came up: an empty session draft adopts what was typed while offline.
+  if (!saved && draftKey !== OFFLINE_DRAFT_KEY) {
+   saved = readDraft(OFFLINE_DRAFT_KEY);
+   if (saved) { rememberDraft(draftKey, saved); rememberDraft(OFFLINE_DRAFT_KEY, ""); }
+  }
+  const text = saved.slice(0, CONTROL_TEXT_MAX);
+  if (text) setText(current => current || text);
+ },[draftKey,draft]);
+ const edit = (next: string) => { setText(next); if (draftKey) rememberDraft(draftKey, next); };
  // Grow with the text; CSS max-height (about five lines) makes it scroll inside past that.
  useLayoutEffect(() => {
   const el = field.current;
@@ -69,7 +97,7 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
   const end = mention.start + 1 + mention.query.length;
   const next = `${text.slice(0, mention.start)}@${name} ${text.slice(end)}`.slice(0, CONTROL_TEXT_MAX);
   const at = Math.min(mention.start + name.length + 2, next.length);
-  setText(next);
+  edit(next);
   setCaret(at);
   setActive(0);
   placeCaret.current = at;
@@ -97,7 +125,8 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
   if (!canSend) return;
   const extra = {...(deliver ? {deliver} : {}), ...(images.length ? {images} : {}), ...(files.length ? {files} : {})};
   control.send({kind:"message",text:body,...extra});
-  setText("");
+  edit("");
+  rememberDraft(OFFLINE_DRAFT_KEY, "");
   setAttachments([]);
  };
  const abort = () => {
@@ -137,7 +166,7 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
      attach(files);
     }}
     onClick={e => setCaret(e.currentTarget.selectionStart ?? null)}
-    onInput={e => { setText(e.currentTarget.value); setCaret(e.currentTarget.selectionStart ?? null); setActive(0); setClosed(false); }} onKeyDown={e => {
+    onInput={e => { edit(e.currentTarget.value); setCaret(e.currentTarget.selectionStart ?? null); setActive(0); setClosed(false); }} onKeyDown={e => {
      if (e.isComposing || e.keyCode === 229) return;
      if (listOpen) {
       // The open list owns the arrows, Enter/Tab (insert `@name `) and Escape; Enter sends only while it is closed.

@@ -337,6 +337,7 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   session as a user message, literally (no slash commands or templates). The
   delivery line remains for decision clicks and aborts; composer sends have their own queued bubbles below.
   `Session not running` or `Dashboard control is off (…)` replaces the controls when they cannot work.
+- **Composer draft**: unsent text is kept in `localStorage` under `cp-composer-draft:<session file>` and restored on return or reload; a send clears it, an explicit `draft=` link wins, and a refusing browser still types and sends.
 - **Skill mentions** (`skills.ts`, cp-skill-mentions PR4): typing `@` at a word start (never inside `a@b.com`) fetches
   `GET /api/skills` once per mount and opens a listbox above the field of up to 8 installed skills — prefix matches
   first, then substring matches — each with its name and a one-line description. ArrowUp/ArrowDown move, Enter or Tab

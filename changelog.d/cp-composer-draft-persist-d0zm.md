@@ -1,0 +1,1 @@
+- Sessions composer: unsent text persists per operator session file in `localStorage` and restores after leaving Sessions or reloading; a send clears it and an explicit `draft=` link wins.
