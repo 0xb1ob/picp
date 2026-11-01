@@ -248,6 +248,8 @@ export interface BoundedRecoveryOptions {
 	claims?: JobClaims;
 	/** Bounded wait for a hard-bound shutdown to finish before planning a revive. Test hook. */
 	sleep?: (ms: number) => Promise<void>;
+	/** P3: the job's pending quota continuation id; while one owns the job's next turn, recovery stands down unspent. */
+	quotaPending?: (jobId: string) => string | undefined;
 }
 
 /** One decided outcome, for a caller (and a test) to inspect without re-reading disk. */
@@ -294,6 +296,7 @@ export class BoundedRecovery {
 		const record = fleet.get(jobId);
 		if (record && isScriptFleetRecord(record)) return { attempted: false, attemptsLeft: 0 };
 		const attempts = readRecoveryAttempts(home, jobId, failure.class);
+		if (this.#options.quotaPending?.(jobId)) return { attempted: false, attemptsLeft: Math.max(RECOVERY_ATTEMPT_BOUND - attempts, 0) };
 		const decision = decideBoundedRecovery({
 			class: failure.class,
 			attempts,
@@ -389,6 +392,12 @@ export class BoundedRecovery {
 			return { action: "revive_refused", reason: (error as Error).message, attempted: false, attemptsLeft: Math.max(RECOVERY_ATTEMPT_BOUND - readRecoveryAttempts(home, jobId, failure.class), 0) };
 		}
 		const attempts = readRecoveryAttempts(home, jobId, failure.class);
+		const quota = this.#options.quotaPending?.(jobId);
+		if (quota) {
+			const reason = `automatic recovery of ${jobId} stood down: quota continuation ${quota} owns its next turn`;
+			runs.open(jobId).cp("recovery_failed", { class: failure.class, stage: "quota", error: reason });
+			return { action: "revive_refused", reason, attempted: false, attemptsLeft: Math.max(RECOVERY_ATTEMPT_BOUND - attempts, 0) };
+		}
 		const decision = decideBoundedRecovery({
 			class: failure.class,
 			attempts,

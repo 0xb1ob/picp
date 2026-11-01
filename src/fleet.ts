@@ -114,6 +114,8 @@ export interface ReconcileOptions {
 	isPidAlive?: (pid: number) => boolean;
 	/** Injected in tests; production hits the real filesystem. */
 	fileExists?: (path: string) => boolean;
+	/** P3: the job's pending quota continuation id; a dead worker it owns is failed for it, never offered to cp_revive. */
+	quotaPending?: (jobId: string) => string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +423,7 @@ export class FleetStore {
 		const revivable: string[] = [];
 		await this.mutate((jobs) => {
 			for (const job of jobs) {
-				const entry = this.#reconcileRecord(job, { owned, alive, fileExists });
+				const entry = this.#reconcileRecord(job, { owned, alive, fileExists, quotaPending: options.quotaPending });
 				entries.push(entry);
 				if (entry.phase_after !== entry.phase_before) changed += 1;
 				if (envelopeNeedsIntake(this.home, job)) needsIntake.push(job.job_id);
@@ -437,7 +439,7 @@ export class FleetStore {
 	/** Mutates `job` in place and returns what the evidence said. */
 	#reconcileRecord(
 		job: FleetRecord,
-		ctx: { owned: Set<string>; alive: (pid: number) => boolean; fileExists: (path: string) => boolean },
+		ctx: { owned: Set<string>; alive: (pid: number) => boolean; fileExists: (path: string) => boolean; quotaPending?: (jobId: string) => string | undefined },
 	): ReconcileEntry {
 		const phaseBefore = job.phase;
 		if (isScriptFleetRecord(job)) {
@@ -550,6 +552,19 @@ export class FleetStore {
 				resumable: sessionPresent,
 				detail: `worker gone (pid ${pid}) but it left an envelope; envelope intake owns the phase change`,
 			};
+		}
+
+		// P3: the parent died between the quota claim and the failed write; the intent owns this session's next turn.
+		const quota = ctx.quotaPending?.(job.job_id);
+		if (quota) {
+			const failure: Failure = observation?.failure ?? {
+				class: "model_call_failed",
+				message: `provider usage limit: quota continuation ${quota} is pending — command-post continues this session after the reset`,
+				at: isoTimestamp(this.#now()),
+			};
+			job.phase = "failed";
+			job.failure = failure;
+			return { ...base, outcome: "failed", phase_after: "failed", pid_alive: false, resumable: false, detail: failure.message };
 		}
 
 		// cp-8km, operator-confirmed (option A): a `waiting` job that crashed before

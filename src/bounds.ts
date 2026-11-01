@@ -225,6 +225,12 @@ export interface HardBoundsWatchOptions {
 	closing?: () => boolean;
 }
 
+/** What the interrupted worker had already spent of its round: tool starts and wall-clock seconds. */
+export interface CarriedBounds {
+	toolStarts: number;
+	elapsedSeconds: number;
+}
+
 /**
  * One watch per live worker. Counts `tool_execution_start` and arms a
  * wall-clock timer at attach. A second trip on the same job is a no-op.
@@ -234,18 +240,19 @@ export interface HardBoundsWatchOptions {
 export class HardBoundsWatch {
 	readonly #options: HardBoundsWatchOptions;
 	readonly #tripped = new Set<string>();
-	readonly #rounds = new Map<string, () => void>();
+	readonly #rounds = new Map<string, { rearm: () => void; spent: () => CarriedBounds }>();
 
 	constructor(options: HardBoundsWatchOptions) {
 		this.#options = options;
 	}
 
-	watch(jobId: string, worker: WorkerProcess, bounds: JobHardBounds): () => void {
+	/** `carried`: a quota continuation resumes the interrupted worker's round instead of starting a fresh one. */
+	watch(jobId: string, worker: WorkerProcess, bounds: JobHardBounds, carried?: CarriedBounds): () => void {
 		// A revived worker re-arms the watch under the same jobId. Drop any prior
 		// trip so the new session's counters can trip the guard again.
 		this.#tripped.delete(jobId);
-		let started = Date.now();
-		let starts = 0;
+		let started = Date.now() - (carried?.elapsedSeconds ?? 0) * 1000;
+		let starts = carried?.toolStarts ?? 0;
 		let timer: NodeJS.Timeout | undefined;
 		const offEvent = worker.onEvent((event: WorkerEvent) => {
 			if (event.type !== "tool_execution_start") return;
@@ -273,11 +280,12 @@ export class HardBoundsWatch {
 			if (timer) clearTimeout(timer);
 			arm();
 		};
-		this.#rounds.set(jobId, rearm);
+		const round = { rearm, spent: (): CarriedBounds => ({ toolStarts: starts, elapsedSeconds: Math.floor((Date.now() - started) / 1000) }) };
+		this.#rounds.set(jobId, round);
 		const cleanup = (): void => {
 			offEvent();
 			if (timer) clearTimeout(timer);
-			if (this.#rounds.get(jobId) === rearm) this.#rounds.delete(jobId);
+			if (this.#rounds.get(jobId) === round) this.#rounds.delete(jobId);
 		};
 		void worker.closed.then(cleanup);
 		return cleanup;
@@ -285,9 +293,14 @@ export class HardBoundsWatch {
 
 	/** Fresh wall-clock round for the job's live watch; false when none is armed. */
 	rearm(jobId: string): boolean {
-		const rearm = this.#rounds.get(jobId);
-		rearm?.();
-		return rearm !== undefined;
+		const round = this.#rounds.get(jobId);
+		round?.rearm();
+		return round !== undefined;
+	}
+
+	/** What the job's live round has spent so far; undefined when no watch is armed. */
+	spent(jobId: string): CarriedBounds | undefined {
+		return this.#rounds.get(jobId)?.spent();
 	}
 
 	async #trip(jobId: string, breach: BoundBreach): Promise<void> {
