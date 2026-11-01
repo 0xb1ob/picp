@@ -135,6 +135,7 @@ import { Reviver, type ReviveResult, type RevivePlanResult } from "./revive.ts";
 import { ALWAYS_AVAILABLE, loadRoutingConfig, type ModelProbe, type PiModelRegistryLike, registryProbe } from "./routing.ts";
 import { type Asker, QuestionRelay } from "./questions.ts";
 import { type PlanTarget, type ResolvePlanOptions, resolvePlanTarget } from "./plan-view.ts";
+import { QuotaContinuation, type QuotaContinuationOptions } from "./quota-continuation.ts";
 import { BoundedRecovery } from "./recovery.ts";
 import { RunRegistry } from "./runs.ts";
 import { Sender, type SendRequest, type SendResult } from "./send.ts";
@@ -223,6 +224,8 @@ export interface CommandPostOptions {
 	 * about the job's own project clone, once, without polling.
 	 */
 	mergeAsk?: MergeAskProbe;
+	/** P3 composition port for the quota-reset decoder. Only e2e composition passes one; absent decodes nothing. */
+	quotaResetAdapter?: QuotaContinuationOptions["adapter"];
 }
 
 export class CommandPost {
@@ -263,6 +266,7 @@ export class CommandPost {
 	readonly failures: FailureMonitor;
 	readonly settle: SettleWatcher;
 	readonly bounds: HardBoundsWatch;
+	readonly quota: QuotaContinuation; // P3: usage-limit continuation intents (src/quota-continuation.ts)
 	/** Bounded recovery without the operator (cur.4.2): one revive/redispatch per class per job, then escalation. */
 	readonly recovery: BoundedRecovery;
 	readonly artifacts: ArtifactStore;
@@ -333,9 +337,7 @@ export class CommandPost {
 		this.registry = new ProjectRegistry({ home: options.home });
 		this.fleet = new FleetStore({ home: options.home });
 		this.capacity = new CapacityReader({ home: options.home, env: options.parentEnv ?? process.env, fleet: this.fleet });
-		// cp-epy2 §4.2: the pool root is per home, read from the environment this
-		// parent was started with. `resolvePoolRoot` omits the key when nothing is
-		// set, so a single-home machine's argv is unchanged.
+		// cp-epy2 §4.2: per-home pool root from this parent's env; omitted when unset, so single-home argv is unchanged.
 		this.leases = new LeaseManager({
 			home: options.home,
 			...resolvePoolRoot(options.parentEnv ?? process.env),
@@ -365,11 +367,7 @@ export class CommandPost {
 				this.runs.open(jobId).cp(kind, payload);
 			},
 		});
-		// Both pass a getter, not a snapshot: `this.budgets()` re-reads
-		// data/budgets.json every time it is called (see the file header), and a
-		// value captured once here at construction would defeat that — a raise
-		// made after this CommandPost was built (i.e. after the parent session
-		// started) would then need a parent restart to take effect (cp-sr5).
+		// Getters, not snapshots: `this.budgets()` re-reads data/budgets.json per call, so a raise needs no restart (cp-sr5).
 		this.manager = new WorkerManager({
 			home: options.home,
 			workerReporterPath: join(options.packageRoot, "extensions/worker-reporter/index.ts"),
@@ -387,6 +385,7 @@ export class CommandPost {
 		this.mandates = new MandateStore(options.home);
 		this.#ghLogin = memoLogin(runCommand, options.home); // k52/cp-oc0m: whose main CI runs count; resolved once, retried after a failure
 		this.sender = new Sender({ fleet: this.fleet, manager: this.manager, runs: this.runs, home: options.home, budgets: () => this.budgets(), mandates: this.mandates, onPromptDelivered: (jobId) => this.bounds.rearm(jobId), revive: (jobId) => this.revive(jobId), released: (jobId) => this.heldRelease.wasReleased(jobId), resume: (jobId) => this.awaitingMerge.resume(jobId) });
+		this.quota = new QuotaContinuation({ home: options.home, fleet: this.fleet, runs: this.runs, ...(options.quotaResetAdapter ? { adapter: options.quotaResetAdapter } : {}), revive: (jobId) => this.revive(jobId, { continueFailed: true }), send: (request) => this.send(request), owns: () => this.#ownsHome() });
 		// cp-6lg7: the answer card is queued **before** anyone is told anything. It
 		// is built here, ahead of intake, because intake's `onReported` is what feeds
 		// it and a card that is only queued when a live extension happens to be
@@ -479,7 +478,7 @@ export class CommandPost {
 			fleet: this.fleet,
 			runs: this.runs,
 			intake: this.intake,
-			fail: (jobId, failure) => this.fail(jobId, failure),
+			fail: (jobId, failure) => this.fail(jobId, failure), quota: this.quota,
 			shutdown: (jobId) => this.manager.shutdown(jobId), // cp-mub7: a model-call failure stops its worker
 			...(options.onUnreportedSettle ? { onUnreported: options.onUnreportedSettle } : {}),
 		});
@@ -706,6 +705,7 @@ export class CommandPost {
 			}
 		}
 		this.#journalRecovery(report);
+		this.quota.reconcile(); // P3: before anything can revive; an in-flight step from a dead parent holds, never resends
 		await this.teardown.retryLedgerCloses();
 		await this.awaitingMerge.recover(); // a park cut by the restart continues from its stage; refusals land in the run log
 		return { report, intake: results };
@@ -1140,7 +1140,7 @@ export class CommandPost {
 			routing: loadRoutingConfig(this.home),
 			probe: this.probe(),
 			runs: this.runs,
-			...this.#observers(),
+			...this.#observers(), quota: this.quota,
 			mandates: this.mandates,
 		});
 	}

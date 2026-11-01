@@ -4,6 +4,7 @@
  * that passes this object explicitly can read a reset time off the mock's terminal error.
  */
 
+import type { QuotaResetAdapter, QuotaResetSignal } from "../../src/quota-reset-signal.ts";
 import { MOCK_PROVIDER_ID, type MockProvider, type ScriptStep } from "./mock-provider.ts";
 
 /** Synthetic, sanitized category: no real provider body, account or plan is reproduced. */
@@ -22,15 +23,11 @@ export function quotaResetError(resetsAt: Date, repeat = 1): ScriptStep {
 	};
 }
 
-export interface QuotaResetSignal {
-	provider: string;
-	model: string;
-	status: number;
-	category: string;
-	scope: string;
-	/** Absolute reset instant, epoch seconds; never a relative delay. */
-	resetsAtEpochSeconds: number;
-	resetsAtUtc: string;
+export type { QuotaResetSignal };
+
+/** The test-only verified adapter e2e composition hands to CommandPost; it decodes this mock instance only. */
+export function mockQuotaResetAdapter(provider: MockProvider): QuotaResetAdapter {
+	return { capabilityVersion: "mock-quota-reset/1", decode: (message) => decodeMockQuotaReset(provider, message) };
 }
 
 /** The reset signal on one terminal assistant message, only for a model this mock instance served. */
