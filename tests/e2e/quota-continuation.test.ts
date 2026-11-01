@@ -539,6 +539,7 @@ test("a continuation resumes the interrupted round: caps, spend and counters are
 	// tripped bound escalate instead of re-dispatching, so the bound's failure stays on the record.
 	const toolsModel = f.script("tools", [bash("true"), quotaResetError(resetIn(8_000)), bash("true"), quotaResetError(resetIn(16_000)), bash("true"), { kind: "text", text: "unreached" }]);
 	const clockModel = f.script("clock", [bash("sleep 10"), quotaResetError(resetIn(14_000)), bash("sleep 15"), { kind: "text", text: "unreached" }]);
+	routeNamed(f.home, [toolsModel, clockModel]);
 	await f.post.dispatch({ jobId: tools, task: "Brief.", model: toolsModel, fetch: false, wallClockSeconds: 600, toolCallCap: 3, risk: "high" });
 	await f.post.dispatch({ jobId: clock, task: "Brief.", model: clockModel, fetch: false, wallClockSeconds: 20, toolCallCap: 100, risk: "high" });
 
