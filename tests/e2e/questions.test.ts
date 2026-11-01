@@ -27,6 +27,7 @@ import { readEventLog } from "../../src/run-artifacts.ts";
 import { ASK_OPERATOR_TOOL } from "../../src/worker-manager.ts";
 import type { Asker, OperatorQuestion } from "../../src/questions.ts";
 import {
+	routeNamed,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -147,6 +148,7 @@ async function bench(
 		kind: "research",
 		slug: "t31",
 	});
+	routeNamed(home.path, [planner]);
 	await post.dispatch({ jobId: issue.id, task: "Plan the cache store.", model: planner, fetch: false });
 
 	return {

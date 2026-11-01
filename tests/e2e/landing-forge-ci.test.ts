@@ -12,7 +12,7 @@ import { formatMerge, readMergeReceipt } from "../../src/merges.ts";
 import { formatStatusTable } from "../../src/status.ts";
 import { createViewer } from "../../src/viewer/server.ts";
 import type { AddressInfo } from "node:net";
-import { argOf, captureSpawns, advanceBase, git, readRunEvents, rebaseMergeAndDeleteHead, REPO_ROOT, squashMergeAndDeleteHead, waitFor } from "../harness/index.ts";
+import { routeNamed, argOf, captureSpawns, advanceBase, git, readRunEvents, rebaseMergeAndDeleteHead, REPO_ROOT, squashMergeAndDeleteHead, waitFor } from "../harness/index.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { SKIP, CANARY, type RunRow, type Reply, type Route, run, json, runsBody, setupJob, mergeAndDeleteHead, type GitlabReply, startFakeGitlab, landOnOrigin, startStack, mergedCalls, MERGE, deployJobs, afterMergeRecord } from "./landing-helpers.ts";
 
@@ -24,6 +24,7 @@ test("landing S16: automatic green CI reviews use the current mandate reviewer",
  const script = "s16-auto-review";
  const model = s.provider.addScript(script, [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: live.jobId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["current reviewer"] } }] }]);
  s.agentDir.writeModels(s.provider);
+ routeNamed(s.home, [model]);
  s.post.mandates.issue({ projects: ["demo"], job_ids: [live.jobId], objective: "review", reviewer_model: model, expiry: isoTimestamp(new Date(Date.now() + 86400000)), spend_cap: { usd: 10, tokens: 1000000 }, job_cap: 10 });
  s.setGh({ integration: true, runs: [run(916, live.head, "completed", "success")] });
  await s.tick(live.jobId);
@@ -170,6 +171,7 @@ test("landing: spawn pressure releases the oldest held author and a journal refu
 	rmSync(eventsFile);
 	mkdirSync(eventsFile);
 	try {
+		routeNamed(s.home, [model]);
 		await assert.rejects(s.post.dispatch({ jobId: job.id, task: "Do the fresh work.", model, fetch: false }), /EISDIR/);
 		assert.equal(s.provider.requests("spawn-pressure").length, 0, "journal failure never starts the caller");
 		assert.equal(s.post.fleet.get(older.jobId)?.worker.pid, original.worker.pid);
@@ -177,6 +179,7 @@ test("landing: spawn pressure releases the oldest held author and a journal refu
 		rmSync(eventsFile, { recursive: true });
 		writeFileSync(eventsFile, journal);
 	}
+	routeNamed(s.home, [model]);
 	s.post.dispatchQueue.enqueue(job.id, { task: "Do the fresh work.", model });
 	await s.post.dispatchQueue.drain();
 	assert.ok(s.post.fleet.get(job.id), "queue capacity counts a releasable author as free after journal recovery");
@@ -190,6 +193,7 @@ test("landing: spawn pressure releases the oldest held author and a journal refu
 	await s.post.send({ jobId: older.jobId, message: "Continue once more.", mode: "prompt" });
 	assert.equal(s.post.fleet.get(older.jobId)!.worker.pid, resumedPid, "a revived worker is sent to without another restoration");
 	const blocked = await s.post.ledger().create({ title: "no idle held author", project: "demo", kind: "ship", delivery: "local" });
+	routeNamed(s.home, [model]);
 	s.post.dispatchQueue.enqueue(blocked.id, { task: "Wait for capacity.", model });
 	await s.post.dispatchQueue.drain();
 	assert.equal(s.post.fleet.get(blocked.id), undefined, "at cap with no releasable author, dispatch stays queued");
@@ -295,6 +299,7 @@ test("landing S14: unsafe existing PRs refuse before leasing or contacting a wor
 		s.setGh({ routes: [{ match: "pr view 169", replies: [row.reply ?? json(view)] }] });
 		const model = s.provider.addScript("unsafe", [{ kind: "text", text: "This worker must not start." }]);
 		s.agentDir.writeModels(s.provider);
+		routeNamed(s.home, [model]);
 		await assert.rejects(s.post.dispatch({ jobId: job.id, task: "Finish existing PR.", pr: row.ref ?? "169", model, fetch: false }), row.expected);
 		assert.equal(s.post.fleet.get(job.id), undefined);
 		assert.equal(s.provider.requests("unsafe").length, 0);
@@ -331,6 +336,7 @@ test("landing S14: binding an existing PR checks forge facts and preserves check
 		const script = `bound-${mode}`;
 		const model = s.provider.addScript(script, [{ kind: "tool_calls", calls: [{ name: "report_result", args: { job_id: job.id, kind: "ship", status: "done", summary: "Bound PR ready.", branch: "feat", pr_url: mode === "wrong-url" ? url.replace("169", "170") : url, head_sha: c2 } }] }, { kind: "text", text: "standing by" }], { onExhausted: "repeat" });
 		s.agentDir.writeModels(s.provider);
+		routeNamed(s.home, [model]);
 		const dispatch = () => s.post.dispatch({ jobId: job.id, task: "Finish the bound PR.", pr: mode === "absent" ? "https://github.com/EXAMPLE/Demo/pull/169" : "#169", model, fetch: false });
 		if (mode === "own-failed") {
 			const old = await s.seed("old own branch", { branch: "feat" });

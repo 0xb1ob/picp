@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
-import { git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
+import { routeNamed, git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { json, mergedCalls, run as ciRun, SKIP, startStack } from "./landing-helpers.ts";
 
@@ -247,6 +247,7 @@ test("P18-parked-edges: review first, a garbage registry, an unreadable merge st
 	await s.post.ledger().addDep(dependent.id, live.jobId);
 	const hang = s.provider.addScript("p18b-dependent", [{ kind: "hang" }]);
 	s.agentDir.writeModels(s.provider);
+	routeNamed(s.home, [hang]);
 	writeFileSync(join(s.home, LAYOUT.armedDispatchFile), JSON.stringify({ schema_version: 1,
 		entries: [{ job_id: dependent.id, request: { task: "after the merge", model: hang }, armed_at: handed, blockers: [live.jobId] }] }));
 	const receipt = join(s.home, LAYOUT.runs, live.jobId, "merge.json");

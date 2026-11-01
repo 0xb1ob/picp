@@ -18,6 +18,7 @@ import { initJobsDocument } from "../../src/ledger.ts";
 import { loadProfile } from "../../src/profiles.ts";
 import type { ReviewWakeup } from "../../src/review-runs.ts";
 import {
+	routeNamed,
 	createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT, type ScriptOptions, type ScriptStep,
 } from "../harness/index.ts";
 
@@ -230,12 +231,15 @@ test("P11c-gate-run: isolation, the async wake-up, status, orphans, promotes, re
 	await b.subject("cp-gate-async");
 	const asyncModel = b.script("gate-async", [verdict("cp-gate-async")]);
 	assert.deepEqual(b.post.gateModule().status("cp-gate-async"), { decisions: [] });
+	routeNamed(b.home, [asyncModel]);
 	const started = await b.post.gate({ jobId: "cp-gate-async", model: asyncModel, directive: "call cp_pipeline advance cp-gate-async" });
 	assert.ok(isGateWait(started) && started.attempt === 1 && started.model === asyncModel, JSON.stringify(started));
 	assert.ok(existsSync(join(b.home, paths.pendingReviewFile("cp-gate-async", "gate", 1))) && !existsSync(join(b.home, paths.gateFile("cp-gate-async", 1))));
 	assert.equal(b.post.gateModule().status("cp-gate-async").pending?.attempt, 1);
+	routeNamed(b.home, ["unavailable/reviewer"]);
 	await b.post.registry.setReviewerModel("demo", "unavailable/reviewer");
 	await assert.rejects(b.post.gate({ jobId: "cp-gate-async" }), /already has a gate review in flight/);
+	routeNamed(b.home, [asyncModel]);
 	await assert.rejects(b.post.gate({ jobId: "cp-gate-async", model: asyncModel }), /already has a gate review in flight/);
 	await b.post.registry.setReviewerModel("demo", null);
 	const wakes = b.sent.length;
@@ -246,6 +250,7 @@ test("P11c-gate-run: isolation, the async wake-up, status, orphans, promotes, re
 	assert.ok(!b.sent.at(-1)!.content.includes("ship it"), "the wake-up never carries the artifact");
 	const status = b.post.gateModule().status("cp-gate-async");
 	assert.deepEqual([status.pending, status.decisions.length], [undefined, 1]);
+	routeNamed(b.home, [asyncModel]);
 	const finished = await b.post.gate({ jobId: "cp-gate-async", model: asyncModel });
 	assert.ok(!isGateWait(finished) && finished.verdict.attempt === 1 && finished.next === "proceed");
 	assert.match(b.jobLog("cp-gate-async"), /review_started[^]*verdict_wakeup_sent/);
@@ -366,16 +371,21 @@ test("P11c-gate-routing: preferences, refusals, subject axes, fallbacks and capa
 	for (const [index, source] of cases.entries()) {
 		const jobId = `cp-pref-${source}`, model = models[index]!;
 		await b.subject(jobId, undefined, { scope: "L", risk: "high", inferred: false });
+		routeNamed(b.home, [model, models[0]!]);
 		await b.post.registry.setReviewerModel("demo", source === "reread" ? model : models[0]!);
+		routeNamed(b.home, [models[1]!]);
 		if (source === "mandate" || source === "explicit") b.post.mandates.issue({ projects: ["demo"], job_ids: [jobId], objective: "review",
 			reviewer_model: models[1]!, expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10 });
+		routeNamed(b.home, [model]);
 		const result = await b.gate(jobId, source === "explicit" ? { model } : {});
 		assert.deepEqual([result.model, result.verdict.verdict, b.effort(jobId)], [model, "pass", "high"], source);
 		assert.deepEqual([b.selected(jobId)?.source, b.selected(jobId)?.model], [source === "reread" ? "project" : source, model]);
 		const routed = b.routed(jobId)!;
 		assert.deepEqual([routed.scope, routed.risk, routed.provenance], ["L", "high", { scope: "inherited", risk: "inherited" }]);
+		routeNamed(b.home, ["unavailable/reviewer"]);
 		await b.post.registry.setReviewerModel("demo", "unavailable/reviewer");
 		const grant = b.post.mandates.list().find((each) => each.job_ids?.includes(jobId));
+		routeNamed(b.home, ["unavailable/reviewer"]);
 		if (grant) b.post.mandates.setReviewerModel(grant.id, "unavailable/reviewer");
 		const reused = await b.post.gateModule().start({ jobId });
 		assert.ok(!isGateWait(reused) && reused.model === model, "a complete pass is retained when preferences change");
@@ -392,9 +402,11 @@ test("P11c-gate-routing: preferences, refusals, subject axes, fallbacks and capa
 		b.routing([{ id: "available-spare", role: "gate-reviewer", model: spare, fallbacks: [spare] }],
 			refusal === "allowlist" ? { allow: [spare] } : refusal === "deny" ? { deny_by_role: { "gate-reviewer": [chosen] } } : {});
 		await b.subject(jobId);
+		routeNamed(b.home, [chosen]);
 		await b.post.registry.setReviewerModel("demo", chosen);
 		await assert.rejects(b.post.gate({ jobId }), { allowlist: /which the allowlist refuses/, availability: /no available model for gate-reviewer/,
 			effort: /cannot serve.*never substitutes an effort level/, deny: /not allowed for role gate-reviewer/ }[refusal]);
+		routeNamed(b.home, [chosen]);
 		if (refusal === "deny") await assert.rejects(b.post.gate({ jobId, model: chosen }), /not allowed for role gate-reviewer/);
 		assert.ok(noSpawn(jobId) && b.provider.requests(`gate-spare-${refusal}`).length === 0, refusal);
 	}
@@ -425,6 +437,7 @@ test("P11c-gate-routing: preferences, refusals, subject axes, fallbacks and capa
 	assert.deepEqual(b.routed("cp-gate-fallback")?.attempted, [{ model: "unauth/opus", refusal: "availability" }]);
 	assert.match(String(b.routed("cp-gate-fallback")?.line), /attempted=unauth\/opus\(availability\)/);
 	await b.subject("cp-gate-override");
+	routeNamed(b.home, ["unauth/opus"]);
 	await assert.rejects(b.gate("cp-gate-override", { model: "unauth/opus" }), /no available model/);
 });
 
@@ -550,7 +563,9 @@ test("P11c-gate-diff-bar: cp_review's high-only bar downgrades a revise with no 
 			reported_at: isoTimestamp(), dispatched_at: isoTimestamp(), usage: EMPTY_USAGE, worktree: join(b.home, "gone", jobId), branch: jobId,
 			worker: { pid: process.pid, session_id: "s", session_file: join(b.home, "s.jsonl"), profile: "implementer", role: "implementer",
 				model: "mock/implementer", started_at: isoTimestamp() } });
-		const started = await b.post.diffReview({ jobId, model: b.script(`diff-${jobId}`, [verdict(jobId, observation)]) });
+		const diffModel = b.script(`diff-${jobId}`, [verdict(jobId, observation)]);
+		routeNamed(b.home, [diffModel]);
+		const started = await b.post.diffReview({ jobId, model: diffModel });
 		if (!isDiffReviewWait(started)) return started.verdict;
 		b.post.reviewRuns.handBack(started.key);
 		await b.post.reviewRuns.settled(started.key);

@@ -9,7 +9,7 @@ import { isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts
 import { drainFile } from "../../src/drain.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { lastFiledEnvelopeFile } from "../../src/supersede.ts";
-import { COMMAND_POST_EXTENSION, startPiChild, advanceBase, git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, startPiChild, advanceBase, git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { SKIP, run, json, startStack, mergedCalls } from "./landing-helpers.ts";
 
@@ -186,6 +186,7 @@ test("landing S03: a driving worker keeps its slot and an integration write faul
 	await s.tick(live.jobId);
 	try {
 		await waitFor(() => s.ghCalls().slice(before), (calls) => calls.some((call) => call.startsWith("pr view")), { timeoutMs: 10_000, what: "integration occupies its worker's busy fence" });
+		routeNamed(s.home, [model]);
 		await assert.rejects(() => s.post.dispatch({ jobId: candidate.id, task: "Wait for a free worker slot.", model, fetch: false }), /spawn cap/);
 		assert.equal(s.post.manager.get(live.jobId)?.worker.alive, true, "dispatch cannot release an author while integration drives");
 		const file = join(s.home, paths.runDir(live.jobId), "integration.json");
@@ -199,6 +200,7 @@ test("landing S03: a driving worker keeps its slot and an integration write faul
 	rmSync(join(s.home, paths.runDir(live.jobId), "integration.json"), { recursive: true });
 	const after = await s.post.ledger().create({ title: "dispatch after integration throws", project: "demo", delivery: "local", kind: "ship" });
 	await assert.doesNotReject(async () => {
+		routeNamed(s.home, [model]);
 		assert.equal((await s.post.dispatch({ jobId: after.id, task: "Use the now-free worker slot.", model, fetch: false })).receipt, "accepted");
 	}, "the throwing step clears its busy fence");
 	assert.equal(s.post.heldRelease.wasReleased(live.jobId), true);
@@ -644,6 +646,7 @@ test("landing S03: a real passing research gate starts no held-PR continuation",
 	const reviewer = s.provider.addScript("s03-gate-reviewer", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: job.id, verdict: "pass", reasons: ["Plan is complete"], flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false } } }] }, { kind: "hang" }]);
 	s.agentDir.writeModels(s.provider);
 	writeFileSync(join(s.home, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*"], rubric: [{ id: "gate-reviewer", role: "gate-reviewer", model: reviewer }] }));
+	routeNamed(s.home, [planner]);
 	await s.post.dispatch({ jobId: job.id, task: "Read and report a short inspection plan.", model: planner, fetch: false });
 	await waitFor(() => s.post.fleet.get(job.id)?.reported_at, Boolean, { timeoutMs: 20_000, what: "planner report" });
 	const gate = await s.post.gate({ jobId: job.id });

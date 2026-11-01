@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, SCHEMA_VERSION, isoTimestamp, paths, type FleetRecord } from "../../src/contracts.ts";
 import { FleetStore } from "../../src/fleet.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, readFleet, readRunEvents, startRpc, waitFor } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, readFleet, readRunEvents, startRpc, waitFor } from "../harness/index.ts";
 import { startStack, SKIP } from "./landing-helpers.ts";
 
 function envelope(home: string, id: string, extra: object = {}) {
@@ -108,6 +108,7 @@ test("S27 intake: a real settling worker receives one refused-envelope correctio
 		{ kind: "text", text: "S27 correction received; standing by." },
 	]);
 	s.agentDir.writeModels(s.provider);
+	routeNamed(s.home, [model]);
 	const dispatched = await s.post.dispatch({ jobId: job.id, task: "Inspect the supplied report fixture.", model, fetch: false });
 	assert.equal(dispatched.receipt, "accepted");
 	await waitFor(() => s.provider.requests(script), (requests) => requests.length >= 3, { timeoutMs: 30_000, what: "worker correction turn" });

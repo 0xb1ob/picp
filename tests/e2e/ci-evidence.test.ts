@@ -17,6 +17,7 @@ import {
 	createScratchRepo,
 	enableTreehouse,
 	MockProvider,
+	routeNamed,
 	readFleet,
 	REPO_ROOT,
 	type ScriptStep,
@@ -177,6 +178,7 @@ async function startStack(t: TestContext) {
 		return { jobId: job.id, script, model };
 	};
 	const dispatch = async (jobId: string, model: string) => {
+		routeNamed(home.path, [model]);
 		const dispatched = await post.dispatch({ jobId, task: "Change change.txt and open a PR.", model, fetch: false });
 		assert.equal(dispatched.receipt, "accepted");
 		await waitFor(() => readFleet(home.path).jobs.find((job) => job.job_id === jobId), (job) => job?.phase === "held" && job.reported_at !== undefined, {

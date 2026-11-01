@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT, paths } from "../../src/contracts.ts";
 import { readDrain } from "../../src/drain.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, createAgentDir, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
 import { JOB, seedHeldHome } from "../harness/held-home.ts";
 import { FleetStore } from "../../src/fleet.ts";
 
@@ -34,6 +34,7 @@ for (const [timeout, name] of [
 		agent.writeModels(provider);
 		mkdirSync(join(s.home.path, LAYOUT.data), { recursive: true });
 		writeFileSync(join(s.home.path, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: 1, allow: ["mock/*"], rubric: [] }));
+		routeNamed(s.home.path, [reviewer], { seed: "template" });
 		const child = startPiChild({ cwd: s.home.path, model, extensions: [COMMAND_POST_EXTENSION], env: { ...agent.env, CP_HOME: s.home.path, PATH: `${s.bin}:${process.env.PATH}` } });
 		t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); s.repo.cleanup(); s.home.cleanup(); });
 		await child.prompt("Review the held change using cp_review.");

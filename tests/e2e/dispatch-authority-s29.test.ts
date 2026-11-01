@@ -7,7 +7,7 @@ import { DEFAULT_BUDGET_CONFIG, isoTimestamp, LAYOUT, paths } from "../../src/co
 import { MandateStore } from "../../src/mandate.ts";
 import { EscalationStore } from "../../src/escalation.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { readFleet, readRunEvents, waitFor, type ScriptStep } from "../harness/index.ts";
+import { routeNamed, readFleet, readRunEvents, waitFor, type ScriptStep } from "../harness/index.ts";
 import { ScheduleRunStore } from "../../src/schedule-runs.ts";
 import { Scheduler } from "../../src/scheduler.ts";
 import { loadMandateDefaults } from "../../src/mandate-defaults.ts";
@@ -183,6 +183,7 @@ test("S29 authority: headless public dispatch preserves planner provenance and c
 	await t.test("classify-only warning", async () => {
 		const plain = await b.ledger.create({ title: "unassessed", project: "demo", delivery: "local", kind: "ship" });
 		const routing = composeImplementationRouting({});
+		routeNamed(b.home, [model]);
 		const result = await post.dispatch({ jobId: plain.id, task, model, ...routing });
 		assert.equal(result.state, "dispatched");
 		assert.match("risk_warning" in result ? result.risk_warning ?? "" : "", /issued from operator chat/);
@@ -190,6 +191,7 @@ test("S29 authority: headless public dispatch preserves planner provenance and c
 	await t.test("planner high gates", async () => {
 		const assessed = await b.ledger.create({ title: "assessed", project: "demo", delivery: "local", kind: "ship", risk: "low" });
 		const destructive = composeImplementationRouting({ assessment: { confidence: "high", scope: "S", blocking_unknowns: false, destructive_scope: true } });
+		routeNamed(b.home, [model]);
 		await assert.rejects(post.dispatch({ jobId: assessed.id, task, model, ...destructive }), /risk:high under ask_on/);
 		assert.equal(post.fleet.get(assessed.id), undefined);
 	});
@@ -197,6 +199,7 @@ test("S29 authority: headless public dispatch preserves planner provenance and c
 		const planned = await b.ledger.create({ title: "planner low", project: "demo", delivery: "local", kind: "ship" });
 		const plannedModel = b.provider.addScript("planned-worker", [{ kind: "text", text: "received" }]);
 		b.agent.writeModels(b.provider);
+		routeNamed(b.home, [plannedModel]);
 		const low = await post.dispatch({ jobId: planned.id, task, model: plannedModel, recordedRisk: { risk: "low", from: "planner", provenance: "assessed" } });
 		assert.equal(low.state, "dispatched");
 		assert.match("risk_warning" in low ? low.risk_warning ?? "" : "", /risk low was assessed by the planner/);
@@ -217,6 +220,7 @@ test("S29 authority: a reported idle author yields its real process at the spawn
 	const model = b.provider.addScript("author", [{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "git push --set-upstream origin HEAD" } }] }, { kind: "tool_calls", calls: [{ name: "report_result", args: { job_id: author.id, kind: "ship", status: "done", summary: "Fixture delivery.", branch: author.id, head_sha: sha, pr_url: "https://github.com/example/demo/pull/1" } }] }, { kind: "text", text: "reported" }]);
 	b.agent.writeModels(b.provider);
 	const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
+	routeNamed(b.home, [model]);
 	const first = await post.dispatch({ jobId: author.id, task: "Bump x.", model });
 	assert.equal(first.state, "dispatched");
 	await waitFor(() => post.fleet.get(author.id), (record) => record?.phase === "held" && post.manager.get(author.id)?.worker.busy === false, { timeoutMs: 30_000 });
@@ -230,18 +234,21 @@ test("S29 authority: a reported idle author yields its real process at the spawn
 		watcher.close();
 	});
 	t.after(() => watcher.close());
+	routeNamed(b.home, [nextModel]);
 	await assert.rejects(post.dispatch({ jobId: next.id, task: "Bump x.", model: nextModel }), /violates the budget contract/);
 	watcher.close();
 	writeFileSync(join(b.home, LAYOUT.budgetsFile), JSON.stringify({ ...DEFAULT_BUDGET_CONFIG, spawn_cap: 1 }));
 	assert.equal(post.manager.reserved, 0);
 	assert.equal(post.fleet.get(next.id), undefined);
 	assert.equal(post.fleet.get(author.id)?.phase, "held");
+	routeNamed(b.home, [nextModel]);
 	const second = await post.dispatch({ jobId: next.id, task: "Bump x.", model: nextModel });
 	assert.equal(second.state, "dispatched");
 	assert.equal(post.fleet.get(author.id)?.phase, "held");
 	assert.equal(post.manager.get(author.id), undefined);
 	assert.equal(readRunEvents(b.home, author.id).filter((event) => event.type === "held_released").length, 1);
 	const blocked = await b.ledger.create({ title: "no held slot", project: "demo", delivery: "local", kind: "ship" });
+	routeNamed(b.home, [nextModel]);
 	await assert.rejects(post.dispatch({ jobId: blocked.id, task: "Bump x.", model: nextModel }), /spawn cap reached/);
 	assert.equal(post.fleet.get(blocked.id), undefined);
 });
@@ -259,10 +266,13 @@ test("S29 authority: parallelism keeps the real queue head byte-identical until 
 	post.mandates.issue({ projects: ["demo"], objective: "queue", expiry: isoTimestamp(new Date(Date.now() + 86_400_000)), spend_cap: { usd: 10, tokens: 100_000 }, job_cap: 10, dispatch_parallelism: 1 });
 	const first = await b.ledger.create({ title: "first", project: "demo", delivery: "local", kind: "ship" });
 	const second = await b.ledger.create({ title: "queued", project: "demo", delivery: "local", kind: "ship" });
+	routeNamed(b.home, [firstModel]);
 	assert.equal((await post.dispatch({ jobId: first.id, task: "Bump x.", model: firstModel })).state, "dispatched");
+	routeNamed(b.home, [secondModel]);
 	post.dispatchQueue.enqueue(second.id, { task: "Bump x.", model: secondModel });
 	const file = join(b.home, LAYOUT.dispatchQueueFile);
 	const before = readFileSync(file, "utf8");
+	routeNamed(b.home, [secondModel]);
 	const refusal = await post.dispatch({ jobId: second.id, task: "Bump x.", model: secondModel }).catch((error: unknown) => error);
 	await post.dispatchQueue.drain();
 	assert.equal(readFileSync(file, "utf8"), before);

@@ -25,6 +25,7 @@ import {
 	MockProvider,
 	readRunEvents,
 	REPO_ROOT,
+	routeNamed,
 	type RecordedRequest,
 	type ScriptStep,
 	treehouse,
@@ -267,6 +268,7 @@ async function bench(t: { after(fn: () => void | Promise<void>): void }): Promis
 		},
 		script(name, steps) {
 			const model = provider.addScript(name, steps);
+			routeNamed(home.path, [model]);
 			agentDir.writeModels(provider);
 			return model;
 		},

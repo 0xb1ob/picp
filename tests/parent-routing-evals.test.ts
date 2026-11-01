@@ -185,7 +185,7 @@ test("a named model decides resources and nothing else", () => {
 	const profile = loadProfile(join(REPO_ROOT, "profiles"), "implementer");
 	const picked = pickModel(
 		{ profile, jobId: "cp-parent-eval", project: "demo", kind: "ship", override },
-		DEFAULT_ROUTING_CONFIG,
+		{ ...DEFAULT_ROUTING_CONFIG, rubric: [{ id: "named", role: "implementer", project: "__named__", model: override }, ...DEFAULT_ROUTING_CONFIG.rubric] },
 	);
 	assert.equal(picked.model, override);
 	assert.equal(picked.source, "override");

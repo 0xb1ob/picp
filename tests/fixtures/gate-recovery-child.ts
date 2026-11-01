@@ -45,6 +45,8 @@ childProcess.default.spawn = ((...args: Parameters<typeof spawn>) => {
 }) as typeof spawn;
 syncBuiltinESMExports();
 const { CommandPost } = await import("../../src/command-post.ts");
+const { routeNamed } = await import("../harness/routing-names.ts");
+routeNamed(home, [model ?? "mock/test"]);
 const post = new CommandPost({ home, packageRoot: process.cwd(), parentEnv: process.env });
 if (action === "source-race") {
 	const registry = {

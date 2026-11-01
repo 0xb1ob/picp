@@ -14,7 +14,7 @@ import { loadMandateDefaults } from "../../src/mandate-defaults.ts";
 import { Scheduler } from "../../src/scheduler.ts";
 import { createViewer } from "../../src/viewer/server.ts";
 import type { AddressInfo } from "node:net";
-import { advanceBase, git, readRunEvents, REPO_ROOT, type ScriptStep, waitFor } from "../harness/index.ts";
+import { routeNamed, advanceBase, git, readRunEvents, REPO_ROOT, type ScriptStep, waitFor } from "../harness/index.ts";
 import { SKIP, type RunRow, type Reply, type Route, type GhState, run, json, runsBody, setupJob, startFakeGitlab, startStack, mergedCalls, MERGE } from "./landing-helpers.ts";
 
 test("landing S02: only reported held PR deliveries are queried", { skip: SKIP, timeout: 600_000 }, async (t) => {
@@ -505,6 +505,7 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 		await s.post.ledger().create({ title: "ship is not a foreign reviewer", project: "demo", kind: "ship", delivery: "pr", externalRef: url, labels: ["schedule:sch-e2e"] }),
 		await create("review another repo", "https://github.com/example/other/pull/299"),
 	]) {
+		routeNamed(s.home, [bypassModel]);
 		await assert.rejects(s.post.dispatch({ jobId: bypass.id, task: "review", model: bypassModel, fetch: false }), /origin_mismatch/, "non-reviewers pass the foreign gate and reach normal preflight");
 		await s.post.ledger().close(bypass.id, "dropped: gate bypass fixture complete");
 	}
@@ -543,6 +544,7 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 	const gitShim = join(s.home, "bin", "git");
 	writeFileSync(gitShim, `#!/usr/bin/env node\nconst { spawnSync } = require("child_process");\nconst args = process.argv.slice(2);\nconst raw = args.includes("get-url");\nconst result = spawnSync(${JSON.stringify(realGit)}, [...(raw ? [] : ["-c", ${JSON.stringify(`url.${s.remote}.insteadOf=https://github.com/example/demo`)}]), ...args], { stdio: "inherit" });\nprocess.exit(result.status ?? 1);\n`);
 	chmodSync(gitShim, 0o755);
+	routeNamed(s.home, [model]);
 	assert.equal((await s.post.dispatch({ jobId: job.id, task: "review", model, fetch: false })).receipt, "accepted");
 	await waitFor(() => s.provider.requests("foreign-timeout"), (requests) => requests.length > 0, { timeoutMs: 60_000, what: "reviewer sees timed-out foreign CI" });
 	assert.match(JSON.stringify(s.provider.requests("foreign-timeout")[0]!.body), /CI unknown — not completed within 60 min/);
@@ -565,6 +567,7 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 	writeFileSync(join(s.home, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*"], rubric: [{ id: "foreign-reviewer", role: "planner", model: armedModel }] }));
 	const armState = (conclusion: string | null) => s.setGh({ runs: [run(209, head, conclusion ? "completed" : "in_progress", conclusion)], routes: [{ match: "pulls/209", replies: [json({ number: 209, html_url: armed.external_ref, state: "open", merged: false, head: { sha: head, ref: "foreign" } })] }] });
 	armState(null);
+	routeNamed(s.home, [armedModel], { seed: "template" });
 	await s.parent("Dispatch the foreign reviewer when its CI completes.", [
 		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: armed.id, task: "Review the foreign PR.", model: armedModel } }] },
 		{ kind: "text", text: "Waiting for foreign CI." },
@@ -595,6 +598,7 @@ test("landing: foreign CI selection, failed reads, corrupt memory and reviewer t
 	assert.match(s.post.ciWatch.disabled ?? "", /gh is not available/, JSON.stringify(disabled));
 	const offModel = s.provider.addScript("foreign-off", [{ kind: "text", text: "Reviewing without CI." }], { onExhausted: "repeat" });
 	s.agentDir.writeModels(s.provider);
+	routeNamed(s.home, [offModel]);
 	assert.equal((await s.post.dispatch({ jobId: offJob.id, task: "review", model: offModel, fetch: false })).receipt, "accepted");
 	await waitFor(() => s.provider.requests("foreign-off"), (requests) => requests.length > 0, { timeoutMs: 60_000, what: "reviewer sees disabled watch" });
 	assert.match(JSON.stringify(s.provider.requests("foreign-off")[0]!.body), /CI unknown — the CI watch is off/);

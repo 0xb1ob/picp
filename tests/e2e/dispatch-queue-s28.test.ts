@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { type Job, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, MockProvider, REPO_ROOT, startPiChild, treehouseAvailable, waitFor, type ScriptStep } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, MockProvider, REPO_ROOT, startPiChild, treehouseAvailable, waitFor, type ScriptStep } from "../harness/index.ts";
 
 for (const [fence, title] of [
 	["none", "S28: real spawn cap queues FIFO and arms dependencies"],
@@ -54,6 +54,7 @@ test(title, { skip: !treehouseAvailable(), timeout: 120_000 }, async (t) => {
 	];
 	const model = provider.addScript("s28-queue-parent", steps);
 	const agent = createAgentDir({ provider });
+	routeNamed(home.path, workerModels, { seed: "template" });
 	const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(async () => { await child.close(); agent.cleanup(); pool.cleanup(); repo.cleanup(); home.cleanup(); await provider.stop(); });
 	await child.prompt("dispatch the scripted queue");

@@ -8,7 +8,7 @@ import { CheckpointStore } from "../../src/checkpoint.ts";
 import { isoTimestamp, paths } from "../../src/contracts.ts";
 import { isDiffReviewWait } from "../../src/diff-review.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
-import { COMMAND_POST_EXTENSION, startPiChild, git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, startPiChild, git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { SKIP, run, startStack, mergedCalls } from "./landing-helpers.ts";
 
@@ -40,6 +40,7 @@ test("landing S15 retry: real parent delivery confirms, retries withheld verdict
 		{ kind: "text", text: "Review deliveries observed." },
 	], { onExhausted: "repeat" });
 	s.agentDir.writeModels(s.provider);
+	routeNamed(s.home, models, { seed: "template" });
 	const child = startPiChild({ cwd: s.home, model: parent, env: { ...s.agentDir.env, CP_HOME: s.home }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(() => child.close());
 	const prompted = child.prompt("Review these three branches and wait while their verdict delivery settles.");
@@ -103,6 +104,7 @@ test("S21b: verdict delivery precedes the merge-window notice", { skip: SKIP, ti
 		job_id: live.jobId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["ordered verdict"],
 	} }] }]);
 	s.agentDir.writeModels(s.provider);
+	routeNamed(s.home, [model]);
 	const started = await post.diffReview({ jobId: live.jobId, model });
 	assert.ok(isDiffReviewWait(started));
 	post.reviewRuns.handBack(started.key);
@@ -116,6 +118,7 @@ test("landing S15 order: a real verdict wakes the parent before its deadline con
 	s.setGh({ integration: true, permission: "CLEAN", runs: [run(153, live.head, "completed", "success")] });
 	const reviewer = s.provider.addScript("s15-order-reviewer", [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: live.jobId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["S15 scoped pass"] } }] }]);
 	s.agentDir.writeModels(s.provider);
+	routeNamed(s.home, [reviewer], { seed: "template" });
 	await s.parent("Review the S15 ordering branch.", [
 		{ kind: "tool_calls", calls: [{ name: "cp_review", args: { job_id: live.jobId, model: reviewer } }] },
 		{ kind: "text", text: "Review started." },

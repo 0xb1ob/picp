@@ -18,6 +18,7 @@ import {
 	MockProvider,
 	type PiChild,
 	REPO_ROOT,
+	routeNamed,
 	type RpcRecord,
 	type ScriptStep,
 	startPiChild,
@@ -398,7 +399,9 @@ test("P24 pi-lens: dispatched workers with pi-lens installed run headless with i
 	});
 	const dispatch = async (slug: string, kind: "ship" | "research", calls: Array<{ name: string; args: Record<string, unknown> }>) => {
 		const jobId = await f.job(slug, kind);
-		await f.post.dispatch({ jobId, task: "Exercise the tools.", model: f.script(slug, [{ kind: "tool_calls", calls }, { kind: "hang" }]), fetch: false });
+		const model = f.script(slug, [{ kind: "tool_calls", calls }, { kind: "hang" }]);
+		routeNamed(f.home, [model]);
+		await f.post.dispatch({ jobId, task: "Exercise the tools.", model: model, fetch: false });
 		await waitFor(() => f.provider.requests(slug).length, (n) => n >= 2, { timeoutMs: 120_000, what: `${slug}'s tool results` });
 		const record = f.post.fleet.require(jobId);
 		const args = f.post.manager.get(jobId)?.plan.args ?? [];

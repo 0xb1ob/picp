@@ -21,6 +21,7 @@ import { createScratchHome, type ScratchHome } from "./state.ts";
 import { createScratchRepo, type ScratchRepo } from "./scratch-repo.ts";
 import { enableTreehouse, type TreehousePool, treehouseAvailable } from "./treehouse.ts";
 import { REPO_ROOT } from "./pi-child.ts";
+import { routeNamed } from "./routing-names.ts";
 
 export const LIVE_TESTS_ENABLED = process.env.CP_LIVE_TESTS === "1";
 
@@ -185,6 +186,7 @@ export interface LiveFixture {
 export async function createLiveFixture(options: LiveFixtureOptions = {}): Promise<LiveFixture> {
 	const project = options.project ?? "demo";
 	const home = createScratchHome();
+	routeNamed(home.path, [LIVE_MODEL]);
 	const repo = createScratchRepo({
 		name: project,
 		files: options.files ?? { "README.md": "# live suite\n", "src/version.txt": "1\n" },

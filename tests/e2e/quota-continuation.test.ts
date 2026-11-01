@@ -25,6 +25,7 @@ import {
 	type RecordedRequest,
 	readRunEvents,
 	REPO_ROOT,
+	routeNamed,
 	type ScriptStep,
 	treehouse,
 	treehouseAvailable,
@@ -101,6 +102,7 @@ async function fleet(t: { after(fn: () => void | Promise<void>): void }, options
 			return model;
 		},
 		async dispatch(jobId, model, profile) {
+			routeNamed(home.path, [model]);
 			const dispatched = await post.dispatch({ jobId, task: `Brief for ${jobId}.`, model, fetch: false, wallClockSeconds: 600, toolCallCap: 100, ...(profile ? { profile } : {}) });
 			return dispatched.worktree;
 		},
@@ -537,6 +539,7 @@ test("a continuation resumes the interrupted round: caps, spend and counters are
 	// tripped bound escalate instead of re-dispatching, so the bound's failure stays on the record.
 	const toolsModel = f.script("tools", [bash("true"), quotaResetError(resetIn(8_000)), bash("true"), quotaResetError(resetIn(16_000)), bash("true"), { kind: "text", text: "unreached" }]);
 	const clockModel = f.script("clock", [bash("sleep 10"), quotaResetError(resetIn(14_000)), bash("sleep 15"), { kind: "text", text: "unreached" }]);
+	routeNamed(f.home, [toolsModel, clockModel]);
 	await f.post.dispatch({ jobId: tools, task: "Brief.", model: toolsModel, fetch: false, wallClockSeconds: 600, toolCallCap: 3, risk: "high" });
 	await f.post.dispatch({ jobId: clock, task: "Brief.", model: clockModel, fetch: false, wallClockSeconds: 20, toolCallCap: 100, risk: "high" });
 

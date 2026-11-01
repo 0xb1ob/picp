@@ -4,7 +4,7 @@ import { test, type TestContext } from "node:test";
 import { CommandPost } from "../src/command-post.ts";
 import { cleanupCreatedJobBranch, type DispatchResult, type GitRunner } from "../src/dispatch.ts";
 import { dispatchS29 } from "./harness/dispatch-s29.ts";
-import { git, REPO_ROOT, treehouseAvailable } from "./harness/index.ts";
+import { routeNamed, git, REPO_ROOT, treehouseAvailable } from "./harness/index.ts";
 
 const SKIP = treehouseAvailable() ? false : "treehouse is required for dispatch tests";
 
@@ -30,6 +30,7 @@ function recordingGit(log: string[][]): GitRunner {
 test("model-only dispatcher refuses declared scripts without falling through to routing", { skip: SKIP }, async (t) => {
 	const b = await bench(t);
 	const job = await b.ledger.create({ title: "run", project: "demo", kind: "ship", delivery: "local", scriptPath: "scripts/run.sh" });
+	routeNamed(b.home, [b.model]);
 	const request = { jobId: job.id, task: "run", model: b.model };
 	await assert.rejects(b.dispatcher.preview(request), /script jobs use CommandPost.previewDispatch/);
 	await assert.rejects(b.dispatcher.dispatch(request), /script jobs use CommandPost.dispatch/);
@@ -57,6 +58,7 @@ test("an unlabelled issue is not a job", { skip: SKIP, timeout: 180_000 }, async
 	doc.jobs.push(unlabelled);
 	writeFileSync(b.ledger.file, JSON.stringify(doc));
 
+	routeNamed(b.home, [b.model]);
 	await assert.rejects(
 		() => b.dispatcher.dispatch({ jobId: "cp-unlabelled", task: "do it", model: b.model, fetch: false }),
 		/not dispatchable/,

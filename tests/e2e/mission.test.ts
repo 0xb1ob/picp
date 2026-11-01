@@ -31,6 +31,7 @@ import { cpNext } from "../../src/next.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { ReviewRuns, type ReviewWakeup } from "../../src/review-runs.ts";
 import {
+	routeNamed,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -420,6 +421,7 @@ test(
 			{ onExhausted: "repeat" },
 		);
 		agentDir.writeModels(provider);
+		routeNamed(home.path, [jobTwoScript]);
 		const dispatchedTwo = await post.dispatch({ jobId: jobTwo.id, task: "Write second.txt.", model: jobTwoScript, fetch: false });
 		assert.equal(dispatchedTwo.receipt, "accepted");
 		await waitFor(
@@ -529,6 +531,7 @@ test("armed dependant: the blocker's own landing dispatches it once; a replay an
 	await ledger.addDep(stuck.id, base.id);
 	await ledger.addDep(stuck.id, other.id);
 	// What cp_dispatch does with a blocked refusal (tools-dispatch.ts): arm the parent's own request.
+	routeNamed(home.path, [childModel]);
 	for (const [job, request] of [[child.id, { task: "Write the child file.", model: childModel }], [stuck.id, { task: "Never yet.", model: childModel }]] as const) {
 		const refusal = await post.dispatch({ jobId: job, ...request }).then(
 			() => assert.fail(`${job} dispatched while blocked`),
@@ -543,6 +546,7 @@ test("armed dependant: the blocker's own landing dispatches it once; a replay an
 	writeFakeGh(bin, base.id, PR_URL, join(home.path, "gh-state"));
 	process.env.PATH = `${bin}:${originalPath ?? ""}`;
 	reviewerSteps.push(verdict(base.id, { reasons: ["the diff does what the brief asked"] }));
+	routeNamed(home.path, [baseModel]);
 	const dispatched = await post.dispatch({ jobId: base.id, task: "Write the base file.", model: baseModel, fetch: false });
 	assert.equal(dispatched.receipt, "accepted");
 

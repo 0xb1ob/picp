@@ -20,6 +20,7 @@ import { PLAN_REVISE_MARK } from "../../src/plan-followup.ts";
 import { formatIntake, type IntakeResult } from "../../src/intake.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import {
+	routeNamed,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -116,6 +117,7 @@ async function startPlanner(t: TestContext, script: string, steps: Script) {
 		kind: "research",
 		slug: "blocked",
 	});
+	routeNamed(home.path, [model]);
 	await post.dispatch({ jobId: issue.id, task: "Plan the cache store.", model, fetch: false });
 	const job = () => readFleet(home.path).jobs.find((record) => record.job_id === issue.id);
 	return { home, post, provider, reported, jobId: issue.id, job };
@@ -290,7 +292,9 @@ test("P11b-plan-followup: plan follow-ups reach a live planner as briefs, and ev
 
 	new CheckpointStore(home.path).request({ jobId: ship.id, question: `ship ${ship.id}?`, researchId: jobId });
 	new CheckpointStore(home.path).decide(ship.id, true, { by: "mandate:test" });
-	await post.dispatch({ jobId: ship.id, task: "Ship the cache.", model: provider.addScript("followup-ship", [{ kind: "text", text: "ok" }], { onExhausted: "repeat" }), fetch: false });
+	const shipModel = provider.addScript("followup-ship", [{ kind: "text", text: "ok" }], { onExhausted: "repeat" });
+	routeNamed(home.path, [shipModel]);
+	await post.dispatch({ jobId: ship.id, task: "Ship the cache.", model: shipModel, fetch: false });
 	const implemented = await refusal(`revise the plan for job ${jobId}: split step 3`);
 	assert.match(implemented, new RegExp(`plan checkpoint for ${ship.id} is already approved and the implementer has been dispatched`));
 	assert.match(implemented, new RegExp(`start a new research job, or steer the implementer with cp_send ${ship.id}`));

@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, paths } from "../../src/contracts.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { COMMAND_POST_EXTENSION, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, git, leaseState, readFleet, readRunEvents, REPO_ROOT, type ScriptStep, startPiChild, waitFor } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, git, leaseState, readFleet, readRunEvents, REPO_ROOT, type ScriptStep, startPiChild, waitFor } from "../harness/index.ts";
 
 for (const state of ["stale", "missing", "current", "no-lock", "failed"] as const) {
 	test(state === "stale" ? "S31 dependencies: stale reaches a worker with its persisted outcome" : `S31 dependencies: ${state} reaches a worker with its persisted outcome`, { timeout: 120_000 }, async (t) => {
@@ -191,6 +191,7 @@ test("S31 stale lease identity cannot return a recycled slot", { timeout: 120_00
 	const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
 	const job = await b.ledger.create({ title: "fence", project: "demo", delivery: "local", kind: "ship" });
 	const model = b.provider.addScript("fenced-worker", [{ kind: "text", text: "received" }]); b.agent.writeModels(b.provider);
+	routeNamed(b.home, [model]);
 	const result = await post.dispatch({ jobId: job.id, task: "Inspect fixture.", model, fetch: false });
 	assert.equal(result.state, "dispatched"); if (result.state !== "dispatched") return;
 	const old = post.fleet.get(job.id)!;
@@ -258,7 +259,9 @@ for (const isolation of ["shared", "distinct"] as const) {
 			const j2 = await ledger.ledger.create({ title: "home-b", project: "demo", delivery: "local", kind: "ship" });
 			const m1 = b.provider.addScript("home-a", [{ kind: "text", text: "received" }]);
 			const m2 = b.provider.addScript("home-b", [{ kind: "text", text: "received" }]); b.agent.writeModels(b.provider);
+			routeNamed(b.home, [m1]);
 			const r1 = await first.dispatch({ jobId: j1.id, task: "Inspect.", model: m1, fetch: false });
+			routeNamed(other.path, [m2]);
 			const r2 = await second.dispatch({ jobId: j2.id, task: "Inspect.", model: m2, fetch: false });
 			assert.equal(r1.state, "dispatched"); assert.equal(r2.state, "dispatched");
 			if (r1.state !== "dispatched" || r2.state !== "dispatched") return;

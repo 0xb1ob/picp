@@ -21,6 +21,7 @@ import { readScheduleFile, type Schedule } from "../../src/viewer/schedule-core.
 import { isNativePolicy, nativePolicyDraft, policyFromLegacy, type LegacySchedulePolicy, type NativeSchedulePolicy } from "../../src/viewer/schedule-policy.ts";
 import type { ScheduleRun } from "../../src/viewer/schedule-run-core.ts";
 import {
+	routeNamed,
 	COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MOCK_PROVIDER_ID,
 	MockProvider, type MockToolCall, type PiChild, type RpcRecord, type ScriptStep, startPiChild, waitFor,
 } from "../harness/index.ts";
@@ -175,6 +176,7 @@ test("P13d native migration at parent start: legacy schedules become native revi
 	const before = new Map([h.schedulesFile, runs.policiesFile, runs.runsFile, mandates.file(cron.mandate_id!)].map((file) => [file, bytes(file)]));
 	const grants = mandates.list().length;
 
+	routeNamed(h.home, [worker], { seed: "template" });
 	const first = await h.parent("P13d: Add the other-skill schedule. Add the prs schedule.", [{ kind: "tool_calls", calls: [
 		schedule("run-missing", { action: "run_now", id: missing.id }),
 		schedule("run-cron", { action: "run_now", id: cron.id, overrides: { model: worker } }),
@@ -507,6 +509,7 @@ test("P13d legacy run authority through cp_dispatch: a draining legacy run asks 
 	const [member, dangerous, second] = started.jobs;
 	mkdirSync(join(h.home, paths.artifactDir(member!.id)), { recursive: true });
 	writeFileSync(join(h.home, paths.artifactFile(member!.id)), "# Goal\nbump x\n");
+	routeNamed(h.home, [worker], { seed: "template" });
 	const parent = await h.parent("P13d: dispatch the run members.", [
 		{ kind: "tool_calls", calls: [dispatch("timer", timer.jobs[0]!.id)] },
 		{ kind: "tool_calls", calls: [dispatch("timer-again", timer.jobs[0]!.id)] },

@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
-import { COMMAND_POST_EXTENSION, git, readFleet, readRunEvents, startPiChild, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, git, readFleet, readRunEvents, startPiChild, treehouseAvailable, waitFor } from "../harness/index.ts";
 import { json, startStack } from "./landing-helpers.ts";
 
 for (const [kind, title] of [["queue", "S28: queued bound PR replays onto its existing branch"], ["armed", "S28: armed bound PR replays onto its existing branch"]] as const) {
@@ -20,6 +20,7 @@ for (const [kind, title] of [["queue", "S28: queued bound PR replays onto its ex
 		f.agentDir.writeModels(f.provider);
 		const file = join(f.home, kind === "queue" ? LAYOUT.dispatchQueueFile : LAYOUT.armedDispatchFile);
 		mkdirSync(dirname(file), { recursive: true });
+		routeNamed(f.home, [worker]);
 		writeFileSync(file, JSON.stringify({ schema_version: 1, entries: [{ job_id: job.id, request: { task: "finish existing PR", pr: "169", model: worker }, ...(kind === "queue" ? { queued_at: "2026-10-04T15:00:00Z", attempts: 0 } : { armed_at: "2026-10-04T15:00:00Z", blockers: [] }) }] }));
 		const child = startPiChild({ cwd: f.home, model: parent, env: { ...f.agentDir.env, CP_HOME: f.home }, extensions: [COMMAND_POST_EXTENSION] });
 		t.after(() => child.close());
@@ -48,6 +49,7 @@ test("S28: manual dispatch supersedes its armed request after removing the block
 		{ kind: "text", text: "started" },
 	]);
 	f.agentDir.writeModels(f.provider);
+	routeNamed(f.home, [worker], { seed: "template" });
 	const child = startPiChild({ cwd: f.home, model, env: { ...f.agentDir.env, CP_HOME: f.home }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(() => child.close());
 	await child.prompt("arm, remove the dependency, then dispatch the same job");
@@ -71,6 +73,7 @@ for (const [kind, title] of [["queue", "S28: queue rereads ownership between rep
 		f.agentDir.writeModels(f.provider);
 		const file = join(f.home, kind === "queue" ? LAYOUT.dispatchQueueFile : LAYOUT.armedDispatchFile);
 		mkdirSync(dirname(file), { recursive: true });
+		routeNamed(f.home, models);
 		writeFileSync(file, JSON.stringify({ schema_version: 1, entries: [first, second].map((job, n) => ({ job_id: job.id, request: { task: "check ownership", model: models[n] }, ...(kind === "queue" ? { queued_at: "2026-10-04T15:00:00Z", attempts: 0 } : { armed_at: "2026-10-04T15:00:00Z", blockers: [] }) })) }));
 		const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
 		const bin = join(f.home, "bin", "git");

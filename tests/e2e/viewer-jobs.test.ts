@@ -13,7 +13,7 @@ import { type TestContext, test } from "node:test";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import { drainFile } from "../../src/drain.ts";
 import type { BoardResponse, JobResponse, JobsResponse, JobTranscriptResponse, OverviewResponse } from "../../src/viewer/api-types.ts";
-import { createScratchHome, git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
+import { routeNamed, createScratchHome, git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
 import { startViewer } from "../harness/dashboard.ts";
 import { writeWindowPass } from "../harness/review-window.ts";
 import { json, MERGE, mergedCalls, run as ciRun, SKIP, startStack } from "./landing-helpers.ts";
@@ -488,6 +488,7 @@ test("P18-parked: a human_handoff PR parks through cp_integrate, shows With the 
 	const plan = await s.post.revivePlan(live.jobId);
 	assert.match(plan.ok ? "planned" : plan.message, new RegExp(`cp_send ${live.jobId} resumes it on a fresh lease`));
 	assert.equal((await s.post.revivePlan(live.jobId, { continueFailed: true })).ok, false, "no option revives on the old path");
+	routeNamed(s.home, [record.worker.model]);
 	await assert.rejects(s.post.dispatch({ jobId: live.jobId, task: "again", model: record.worker.model, fetch: false }), /cp_send .*resumes/);
 	assert.deepEqual(mergedCalls(s.ghCalls()), [], "a handoff never merges");
 

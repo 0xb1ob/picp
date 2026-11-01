@@ -16,6 +16,7 @@ import { loadProfile } from "../../src/profiles.ts";
 import { REPORT_NUDGE_TEXT } from "../../src/settle.ts";
 import { NONINTERACTIVE_WORKER_ENV, STRIPPED_ENV_KEYS } from "../../src/worker-manager.ts";
 import {
+	routeNamed,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -126,7 +127,9 @@ test("P8e spawn: a worker dispatched into a hostile clone loads none of its conf
 	// Config stricter than the implementer profile's 50M tokens: clamped, and the clamp is journaled.
 	writeFileSync(join(f.home, LAYOUT.budgetsFile), JSON.stringify({ ...DEFAULT_BUDGET_CONFIG, per_job_tokens: 1000 }));
 	const ship = await f.job("hostile");
-	const dispatched = await f.post.dispatch({ jobId: ship, task: "Do the job in this worktree.", model: f.script("hostile", [{ kind: "text", text: "I only follow my brief." }, HANG]), fetch: false });
+	const hostileModel = f.script("hostile", [{ kind: "text", text: "I only follow my brief." }, HANG]);
+	routeNamed(f.home, [hostileModel]);
+	const dispatched = await f.post.dispatch({ jobId: ship, task: "Do the job in this worktree.", model: hostileModel, fetch: false });
 	await waitFor(() => f.provider.requests("hostile").length, (n) => n === 1, { timeoutMs: 60_000, what: "the hostile clone's first request" });
 	const record = f.post.fleet.require(ship);
 	const worktree = dispatched.worktree;
@@ -157,7 +160,9 @@ test("P8e spawn: a worker dispatched into a hostile clone loads none of its conf
 	// A looser config leaves the profile's budget binding, unclamped; a research job carries its artifact path.
 	writeFileSync(join(f.home, LAYOUT.budgetsFile), JSON.stringify({ ...DEFAULT_BUDGET_CONFIG, per_job_tokens: 90_000_000 }));
 	const research = await f.job("planner", "research");
-	await f.post.dispatch({ jobId: research, task: "Investigate.", model: f.script("planner", [{ kind: "text", text: "looking" }, HANG]), fetch: false });
+	const plannerModel = f.script("planner", [{ kind: "text", text: "looking" }, HANG]);
+	routeNamed(f.home, [plannerModel]);
+	await f.post.dispatch({ jobId: research, task: "Investigate.", model: plannerModel, fetch: false });
 	const planned = f.post.fleet.require(research);
 	assert.deepEqual(planned.budget, { tokens: 50_000_000, cost_usd: DEFAULT_BUDGET_CONFIG.per_job_cost_usd }, "the profile is stricter");
 	assert.deepEqual(f.events(research, "budget_clamped"), []);
@@ -181,6 +186,7 @@ test("P8e brief guard: a task carrying a credential is refused before any worker
 	const model = f.script("leak", [{ kind: "text", text: "never asked" }]);
 	for (const [index, leak] of leaks.entries()) {
 		const jobId = await f.job(`leak-${index}`);
+		routeNamed(f.home, [model]);
 		await assert.rejects(f.post.dispatch({ jobId, task: `line one\nline two\n${leak}\nline four`, model, fetch: false }), (error: Error) => {
 			assert.match(error.message, /never carry credentials/);
 			assert.match(error.message, /\(line \d+\)/, "the refusal names a line");
@@ -189,6 +195,7 @@ test("P8e brief guard: a task carrying a credential is refused before any worker
 		assert.equal(f.post.manager.get(jobId), undefined, "nothing spawned");
 	}
 	const named = await f.job("named");
+	routeNamed(f.home, [model]);
 	await assert.rejects(f.post.dispatch({ jobId: named, task: `line one\nline two\nAWS id ${aws}\nline four`, model, fetch: false }), (error: Error) => {
 		assert.match(error.message, /aws access key id \(line \d+\)/);
 		assert.ok(!error.message.includes(aws), "the message never echoes the matched text");
@@ -196,15 +203,21 @@ test("P8e brief guard: a task carrying a credential is refused before any worker
 	});
 	assert.equal(f.provider.requests("leak").length, 0, "no brief reached a model");
 	const clean = await f.job("clean");
-	await f.post.dispatch({ jobId: clean, task: "Fix the retry ladder in src/app.ts. Use the staging config.", model: f.script("clean", [{ kind: "text", text: "ok" }, HANG]), fetch: false });
+	const cleanModel = f.script("clean", [{ kind: "text", text: "ok" }, HANG]);
+	routeNamed(f.home, [cleanModel]);
+	await f.post.dispatch({ jobId: clean, task: "Fix the retry ladder in src/app.ts. Use the staging config.", model: cleanModel, fetch: false });
 	assert.ok(f.post.manager.get(clean), "a clean brief spawns");
 });
 
 test("P8e look-alike: a worker whose own text reads like a provider error is an ordinary unreported settle, never a model-call failure or an outer retry", { skip: SKIP, timeout: 120_000 }, async (t) => {
 	const f = await bench(t);
 	const [transient, auth] = [await f.job("transient"), await f.job("auth")];
-	await f.post.dispatch({ jobId: transient, task: "Report the gateway.", model: f.script("transient", [{ kind: "text", text: "the gateway returned 503 overloaded" }, HANG]), fetch: false });
-	await f.post.dispatch({ jobId: auth, task: "Report the key.", model: f.script("auth", [{ kind: "text", text: "the API returned 401 Invalid API key" }, HANG]), fetch: false });
+	const transientModel = f.script("transient", [{ kind: "text", text: "the gateway returned 503 overloaded" }, HANG]);
+	routeNamed(f.home, [transientModel]);
+	await f.post.dispatch({ jobId: transient, task: "Report the gateway.", model: transientModel, fetch: false });
+	const authModel = f.script("auth", [{ kind: "text", text: "the API returned 401 Invalid API key" }, HANG]);
+	routeNamed(f.home, [authModel]);
+	await f.post.dispatch({ jobId: auth, task: "Report the key.", model: authModel, fetch: false });
 	for (const [jobId, name] of [[transient, "transient"], [auth, "auth"]] as const) {
 		await waitFor(() => f.events(jobId, "report_nudged").length, (n) => n === 1, { timeoutMs: 30_000, what: `${name}'s report nudge` });
 		await waitFor(() => f.provider.requests(name).length, (n) => n === 2, { timeoutMs: 30_000, what: `${name}'s nudged request` });
@@ -220,9 +233,13 @@ test("P8e look-alike: a worker whose own text reads like a provider error is an 
 test("P8e episode end: a drained parent's shutdown leaves no worker alive and its held and waiting jobs revivable on the next start, none failed", { skip: SKIP, timeout: 120_000 }, async (t) => {
 	const f = await bench(t);
 	const [held, waiting] = [await f.job("held"), await f.job("waiting")];
-	await f.post.dispatch({ jobId: held, task: "Report.", fetch: false, model: f.script("held", [{ kind: "tool_calls", calls: [{ name: "report_result", args: {
-		job_id: held, kind: "ship", status: "blocked", summary: "Waiting on a human.", blockers: ["a human must pick the API"] } }] }, { kind: "text", text: "filed" }]) });
-	await f.post.dispatch({ jobId: waiting, task: "Work.", fetch: false, model: f.script("waiting", [{ kind: "text", text: "partial" }, { kind: "text", text: "still partial" }]) });
+	const heldModel = f.script("held", [{ kind: "tool_calls", calls: [{ name: "report_result", args: {
+		job_id: held, kind: "ship", status: "blocked", summary: "Waiting on a human.", blockers: ["a human must pick the API"] } }] }, { kind: "text", text: "filed" }]);
+	routeNamed(f.home, [heldModel]);
+	await f.post.dispatch({ jobId: held, task: "Report.", fetch: false, model: heldModel });
+	const waitingModel = f.script("waiting", [{ kind: "text", text: "partial" }, { kind: "text", text: "still partial" }]);
+	routeNamed(f.home, [waitingModel]);
+	await f.post.dispatch({ jobId: waiting, task: "Work.", fetch: false, model: waitingModel });
 	await waitFor(() => f.post.fleet.require(held).reported_at, Boolean, { timeoutMs: 60_000, what: "the held job's envelope" });
 	await waitFor(() => f.events(waiting, "settled_without_report").length, (n) => n === 1, { timeoutMs: 60_000, what: "the waiting job's record" });
 	await waitFor(() => f.post.quiesce(), (drain) => drain.active === 2 && drain.busy.length === 0, { timeoutMs: 30_000, what: "a drained episode" });
@@ -243,16 +260,20 @@ test("P8e spawn cap: at the cap another job is refused naming the live worker, t
 	writeFileSync(join(f.home, LAYOUT.budgetsFile), JSON.stringify({ ...DEFAULT_BUDGET_CONFIG, spawn_cap: 1 }));
 	const [first, second] = [await f.job("first"), await f.job("second")];
 	const model = f.script("capped", [{ kind: "text", text: "working" }, HANG, HANG]);
+	routeNamed(f.home, [model]);
 	await f.post.dispatch({ jobId: first, task: "Work.", model, fetch: false });
 	const pid = f.post.fleet.require(first).worker.pid;
 
+	routeNamed(f.home, [model]);
 	await assert.rejects(f.post.dispatch({ jobId: second, task: "Work.", model, fetch: false }), new RegExp(`spawn cap reached \\(1/1 workers\\): ${first}`));
 	assert.equal(f.post.manager.get(second), undefined, "nothing spawned over the cap");
+	routeNamed(f.home, [model]);
 	const again = await f.post.dispatch({ jobId: first, task: "Work again.", model, fetch: false });
 	assert.deepEqual([again.state, f.post.fleet.require(first).worker.pid, f.post.manager.active.length], ["promote", pid, 1], "one worker per job");
 
 	await f.post.tearDown(first, { force: true });
 	assert.throws(() => process.kill(pid, 0), "the slot frees only once the close is observed");
+	routeNamed(f.home, [model]);
 	await f.post.dispatch({ jobId: second, task: "Work.", model, fetch: false });
 	assert.ok(f.post.manager.get(second), "the freed slot takes the next job");
 });
@@ -262,6 +283,7 @@ test("P8e send receipts: a busy worker queues a follow_up and a steer, refuses a
 	const jobId = await f.job("busy");
 	const model = f.script("busy", [{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "sleep 3 && echo slept" } }] },
 		{ kind: "text", text: "first answer" }, { kind: "text", text: "second answer" }, HANG, HANG, HANG]);
+	routeNamed(f.home, [model]);
 	await f.post.dispatch({ jobId, task: "Work.", model, fetch: false });
 	await waitFor(() => readRunEvents(f.home, jobId).filter((event) => event.source === "pi" && event.type === "tool_execution_start").length,
 		(n) => n === 1, { timeoutMs: 60_000, what: "the slow bash call" });

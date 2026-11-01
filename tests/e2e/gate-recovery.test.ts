@@ -7,7 +7,7 @@ import { CommandPost } from "../../src/command-post.ts";
 import { EMPTY_USAGE, paths, SCHEMA_VERSION, type GateVerdict } from "../../src/contracts.ts";
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { recoveryDigest, recoveryFile } from "../../src/gate-recovery.ts";
-import { createScratchHome, createScratchLedger, REPO_ROOT, waitFor } from "../harness/index.ts";
+import { routeNamed, createScratchHome, createScratchLedger, REPO_ROOT, waitFor } from "../harness/index.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { MockProvider } from "../harness/index.ts";
@@ -54,6 +54,7 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 			assert.equal(readFileSync(join(f.scratch.path, "spawn-observations.jsonl"), "utf8").trim().split("\n").length, 1);
 			return;
 		}
+		routeNamed(f.scratch.path, [model]);
 		const result = await post.gate({ jobId: f.target, model, ...(attemptId ? { recoveryAttemptId: attemptId } : {}) });
 		assert.ok(isGateWait(result));
 		post.reviewRuns.handBack(result.key);
@@ -97,6 +98,7 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 			self_assessment: { confidence: "high", scope: "S", blocking_unknowns: false, destructive_scope: false },
 		} }] }]);
 		writeFileSync(join(agent, "models.json"), JSON.stringify(provider.modelsJson()));
+		routeNamed(f.scratch.path, [model]);
 		const dispatched = await post.dispatch({ jobId: f.target, model, taskFile: join(f.scratch.path, paths.runDir(f.target), "revision-task.md") });
 		assert.equal(dispatched.state, "dispatched");
 		await waitFor(() => post.fleet.get(f.target), (record) => record?.phase === "held", { timeoutMs: 30000, what: "research report accepted" });
@@ -171,6 +173,7 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 			const task = join(f.scratch.path, paths.runDir(f.target), "revision-task.md");
 			const original = readFileSync(task);
 			writeFileSync(task, "changed governing task");
+			routeNamed(f.scratch.path, [model]);
 			await assert.rejects(post.gate({ jobId: f.target, model, recoveryAttemptId: first.attempt_id }), /frozen candidate/);
 			writeFileSync(task, original);
 		} else {
@@ -194,6 +197,7 @@ for (const mode of ["corrected", "postclaim", "run-directory", "live-unregistere
 				await post.reviewRuns.sweepOrphans({ gate: (pending, reason) => post.gateModule().orphan(pending, reason) }, [f.target]);
 			}
 		}
+		routeNamed(f.scratch.path, [model]);
 		await assert.rejects(post.gate({ jobId: f.target, model, recoveryAttemptId: first.attempt_id }), /claimed|terminal/);
 		if (mode === "postdecision") {
 			assert.throws(() => prepare(first.attempt_id), /terminal nonpass/);
@@ -347,6 +351,7 @@ test("recovery public preparation preserves full input/history and binds an idem
 	}
 	assert.deepEqual([1, 2].map((n) => recoveryDigest(readFileSync(join(f.scratch.path, paths.gateFile(f.source, n))))), history);
 	writeFileSync(f.post.artifacts.path(f.target), "corrected plan\n");
+	routeNamed(f.scratch.path, ["invalid/too/many"]);
 	await assert.rejects(f.post.gate({ jobId: f.target, model: "invalid/too/many" }), /allowlist/);
 	assert.equal(existsSync(recoveryFile(join(f.scratch.path, paths.runDir(f.target)), "claim")), false);
 	await assert.rejects(f.post.gate({ jobId: f.source }), /recovery reserved/);
@@ -587,6 +592,7 @@ for (const outcome of ["pass", "revise", "escalate", "operational"] as const) {
 		assert.ok(governing.startsWith("full original scope\n"));
 		assert.ok(governing.includes("Preserve the complete migration scope.\n".repeat(1000)));
 		assert.ok(governing.includes(`Write the complete corrected plan to ${post.artifacts.file(f.target)}`));
+		routeNamed(f.scratch.path, [model]);
 		const started = await post.gate({ jobId: f.target, ...(outcome === "pass" ? {} : { model }) });
 		assert.ok(isGateWait(started));
 		post.reviewRuns.handBack(started.key);
@@ -595,6 +601,7 @@ for (const outcome of ["pass", "revise", "escalate", "operational"] as const) {
 		assert.ok(JSON.stringify(provider.requests()).includes("full original scope"));
 		assert.ok(!JSON.stringify(provider.requests()).includes("EXTERNAL-ONLY-SECRET-MARKER"));
 		const count = provider.requests().length;
+		routeNamed(f.scratch.path, [model]);
 		const replay = await post.gate({ jobId: f.target, model });
 		assert.ok(!isGateWait(replay));
 		assert.equal(replay.next, outcome === "pass" ? "proceed" : "surface");

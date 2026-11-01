@@ -13,6 +13,7 @@ import { FleetStore } from "../../src/fleet.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { rebuildStatus } from "../../src/run-artifacts.ts";
 import {
+	routeNamed,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -54,6 +55,7 @@ test("P11c-run-log: a dispatched worker's log and projection are the read surfac
 	]);
 	agentDir.writeModels(provider);
 	const jobId = (await post.ledger().create({ title: "run log", project: "demo", delivery: "local", kind: "ship", slug: "runlog" })).id;
+	routeNamed(home.path, [worker]);
 	await post.dispatch({ jobId, task: "Echo, then stop.", model: worker, fetch: false, toolCallCap: 100 });
 
 	const watched = () => post.watch(jobId).status;

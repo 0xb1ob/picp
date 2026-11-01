@@ -39,6 +39,7 @@ import {
 import { DEFAULT_BALANCE_MARGIN, formatQuota, type QuotaSnapshot } from "./quota.ts";
 import type { CapacityReader, CapacityScore } from "./capacity.ts";
 import { listProfiles } from "./profiles.ts";
+import { requireRouted } from "./routed-models.ts";
 
 /**
  * Why routing refused. The message says it in words; this says it in something
@@ -47,10 +48,10 @@ import { listProfiles } from "./profiles.ts";
  * has no credentials", and guessing between them from prose would be the drift
  * this package refuses everywhere else.
  */
-export type RoutingRefusal = "allowlist" | "availability" | "effort" | "exhausted";
+export type RoutingRefusal = "allowlist" | "availability" | "effort" | "exhausted" | "unrouted";
 
 /** Why one candidate was skipped. `exhausted` is about the list, never a member. */
-export type CandidateRefusal = Exclude<RoutingRefusal, "exhausted">;
+export type CandidateRefusal = Exclude<RoutingRefusal, "exhausted" | "unrouted">;
 
 export class RoutingError extends Error {
 	/** What was refused, when the thrower knew. */
@@ -547,6 +548,7 @@ export function pickModel(request: RouteRequest, config: RoutingConfig): Candida
 	if (request.override) {
 		// An override is one candidate, always: the caller named this model, so an
 		// unusable one is their decision to revisit, not routing's to route around.
+		requireRouted(config, request.override, "override");
 		requireAllowed(config, request.override, "override", role);
 		// An override that names an effort keeps it; one that does not keeps today's
 		// behaviour exactly (the profile's level), which is the backwards-compatible

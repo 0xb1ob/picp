@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { git, REPO_ROOT } from "../harness/index.ts";
+import { routeNamed, git, REPO_ROOT } from "../harness/index.ts";
 import { EscalationStore } from "../../src/escalation.ts";
 
 test("preview: the same request dispatched afterwards lands on exactly what the preview said", { timeout: 120_000 }, async (t) => {
@@ -14,6 +14,7 @@ test("preview: the same request dispatched afterwards lands on exactly what the 
 	const model = b.provider.addScript("worker", [{ kind: "text", text: "received" }]);
 	b.agent.writeModels(b.provider);
 	const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
+	routeNamed(b.home, [model]);
 	const request = { jobId: job.id, task: "Migrate the billing tables across every service.", model, fetch: false };
 	const preview = await post.previewDispatch(request);
 	for (const path of [LAYOUT.fleetFile, paths.runDir(job.id), LAYOUT.sessions]) assert.equal(existsSync(join(b.home, path)), false);
@@ -61,11 +62,13 @@ test("preview: an explicit model and effort, a QA job's profile, and a project r
 	b.agent.writeModels(b.provider);
 	writeFileSync(join(b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*"], rubric: [{ id: "small-ship", role: "implementer", scope: ["S"], model, thinking: "low" }] }));
 	const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
+	routeNamed(b.home, [override]);
 	const overridden = await post.previewDispatch({ jobId: ship.id, task: "tidy up", model: override, thinking: "xhigh" });
 	assert.equal(overridden.decision?.source, "override");
 	assert.equal(overridden.decision?.model, override);
 	assert.equal(overridden.decision?.thinking, "xhigh");
 	assert.match(overridden.line ?? "", /effort=override/);
+	routeNamed(b.home, [model]);
 	const answer = await post.previewDispatch({ jobId: qa.id, task: "look and tell me", model });
 	assert.equal(answer.profile, "qa");
 	assert.equal(answer.kind, "research");
@@ -100,6 +103,7 @@ test("preview: a routing refusal is reported, not thrown, and an open blocker is
 	b.agent.writeModels(b.provider);
 	writeFileSync(join(b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*"], rubric: [{ id: "ship", role: "implementer", model: "mock/unavailable" }] }));
 	const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
+	routeNamed(b.home, ["forbidden/model"]);
 	const ends = await b.run([
 		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "ship it", dry_run: true } }] },
 		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "ship it", model: "forbidden/model", dry_run: true } }] },
@@ -145,6 +149,7 @@ test("preview: dry_run reports would ask: risk:high without escalating anything"
 		{ name: "low label", title: "cleanup low", task: "Delete the stale fixture and migrate the test helper.", risk: "low" as const, gate: undefined },
 	]) await t.test(variant.name, async () => {
 		const job = await b.ledger.create({ title: variant.title, project: "demo", delivery: "pr", kind: "ship", ...(variant.risk ? { risk: variant.risk } : {}) });
+		routeNamed(b.home, [model]);
 		const preview = await post.previewDispatch({ jobId: job.id, task: variant.task, model });
 		assert.equal(preview.mandate_gate, variant.gate, `${variant.name} gate`);
 		if (variant.risk) assert.equal(preview.routing.risk, "high");

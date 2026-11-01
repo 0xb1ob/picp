@@ -9,7 +9,7 @@ import { LAYOUT, paths } from "../../src/contracts.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { DurableWakeupOutbox } from "../../src/wakeup-outbox.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, MockProvider, readRunEvents, startPiChild, waitFor } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, createAgentDir, MockProvider, readRunEvents, startPiChild, waitFor } from "../harness/index.ts";
 import { JOB, seedHeldHome, writeReviewPass } from "../harness/held-home.ts";
 
 const userMessages = (request: { body: unknown }) => JSON.stringify(
@@ -55,6 +55,7 @@ test(name, { timeout: 300_000 }, async (t) => {
 	], { onExhausted: "repeat" });
 	const agent = createAgentDir({ provider });
 	// Keep the slow gate inside one CI poll.
+	routeNamed(held.home.path, [reviewer], { seed: "template" });
 	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
 		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: mode === "late" ? "60" : "1" }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); held.repo.cleanup(); held.home.cleanup(); });
@@ -178,6 +179,7 @@ test("wake S19: a native plan-gate verdict leaves the held merge gate and awaiti
 		{ kind: "text", text: "Foreign verdict observed." },
 	]);
 	const agent = createAgentDir({ provider });
+	routeNamed(held.home.path, [reviewer], { seed: "template" });
 	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
 		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "3600" }, extensions: [COMMAND_POST_EXTENSION] });
 	t.after(async () => { await child.close(); agent.cleanup(); await provider.stop(); held.repo.cleanup(); held.home.cleanup(); });
@@ -218,6 +220,7 @@ test("wake S19b (#651): a gate revise for a torn-down planner reaches the parent
 		{ kind: "text", text: "Revise observed." },
 	]);
 	const agent = createAgentDir({ provider });
+	routeNamed(held.home.path, [reviewer], { seed: "template" });
 	const child = startPiChild({ cwd: held.home.path, model, env: { ...agent.env, CP_HOME: held.home.path,
 		PATH: `${held.bin}:${process.env.PATH ?? ""}`, CP_CI_WATCH_SECONDS: "3600", CP_VERDICT_DELIVERY_RETRY_SECONDS: "1" },
 	extensions: [COMMAND_POST_EXTENSION] });

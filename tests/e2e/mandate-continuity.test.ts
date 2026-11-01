@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { MandateStore } from "../../src/mandate.ts";
-import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, MockProvider, REPO_ROOT, startPiChild, type ScriptStep, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, MockProvider, REPO_ROOT, startPiChild, type ScriptStep, treehouseAvailable, waitFor } from "../harness/index.ts";
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { cpNext } from "../../src/next.ts";
@@ -359,8 +359,10 @@ test("post-expiry replacement uses a committed original-root link, full findings
 	writeFileSync(join(agent.path, "models.json"), JSON.stringify(models));
 	writeFileSync(join(home.path, LAYOUT.data, "routing.json"), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: ["mock/*"], rubric: [{ id: "planner", role: "planner", model: originalModel }] }));
 	await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(expiry) - Date.now() + 20)));
+	routeNamed(home.path, [originalModel]);
 	assert.equal((await post.dispatch({ jobId: original.id, task, model: originalModel, fetch: false })).receipt, "accepted");
 	await waitFor(() => post.fleet.get(original.id)?.phase, (phase) => phase === "held", { timeoutMs: 30_000, what: "original public research report" });
+	routeNamed(home.path, [gateModel]);
 	const reviewed = await post.gate({ jobId: original.id, model: gateModel });
 	assert.ok(isGateWait(reviewed));
 	post.reviewRuns.handBack(reviewed.key);
@@ -394,7 +396,9 @@ test("post-expiry replacement uses a committed original-root link, full findings
 	await parent("Prepare the original-work replacement.", [{ kind: "tool_calls", calls: [{ name: "cp_mandate", args: replacementArgs }] }]);
 	assert.equal(post.mandates.get(grant.id)!.same_work_replacements?.[0]?.phase, "prepared");
 	assert.equal(post.fleet.get(replacement.id), undefined);
+	routeNamed(home.path, [replacementModel]);
 	await assert.rejects(post.dispatch({ jobId: replacement.id, task: "Continue the unchanged original work", model: replacementModel, fetch: false }), /not committed/);
+	routeNamed(home.path, [gateModel]);
 	await assert.rejects(post.gate({ jobId: original.id, model: gateModel }), /same work is bound/);
 	rmdirSync(blockedFile);
 	await Promise.all([
@@ -423,6 +427,7 @@ test("post-expiry replacement uses a committed original-root link, full findings
 	const taskFile = join(home.path, paths.runDir(replacement.id), "revision-task.md");
 	assert.equal(readFileSync(join(home.path, paths.runDir(replacement.id), "previous-plan.md"), "utf8"), plan);
 	assert.ok(readFileSync(join(home.path, paths.originalTaskFile(replacement.id)), "utf8").includes(task));
+	routeNamed(home.path, [replacementModel]);
 	assert.equal((await post.dispatch({ jobId: replacement.id, taskFile, model: replacementModel, fetch: false })).receipt, "accepted");
 	await waitFor(() => post.fleet.get(replacement.id)?.phase, (phase) => phase === "held", { timeoutMs: 30_000, what: "replacement public report" });
 	await waitFor(() => post.manager.get(replacement.id)?.worker.busy, (busy) => busy === false, { timeoutMs: 30_000 });
@@ -460,6 +465,7 @@ test("post-expiry replacement uses a committed original-root link, full findings
 	assert.notEqual(waiting[0]!.isError, true, JSON.stringify(waiting[0]!.result));
 	assert.match(JSON.stringify(waiting[0]!.result), /waiting_review/);
 	await assert.rejects(() => post.previewDispatch({ jobId: dependentId, task: "No premature dispatch" }), /handoff.*actual PASS/);
+	routeNamed(home.path, [replacementGateModel]);
 	const passed = await post.gate({ jobId: replacement.id, model: replacementGateModel });
 	assert.ok(isGateWait(passed));
 	post.reviewRuns.handBack(passed.key);
@@ -554,9 +560,11 @@ test("pipeline reanchor resumes an interrupted exact edge projection and still r
 	const originalGate = gate("reanchor-original-gate", () => originalId, "revise");
 	const replacementGate = gate("reanchor-replacement-gate", () => replacementId, "pass");
 	agent.writeModels(provider);
+	routeNamed(home.path, [originalModel]);
 	const started = await post.startPipeline({ title: "Bounded README research", project: "demo", task: "Research a bounded README change.", delivery: "local", model: originalModel });
 	originalId = started.research_id;
 	await waitFor(() => post.fleet.get(originalId)?.phase, (phase) => phase === "held", { timeoutMs: 30_000 });
+	routeNamed(home.path, [originalGate]);
 	const first = await post.gate({ jobId: originalId, model: originalGate });
 	assert.ok(isGateWait(first));
 	post.reviewRuns.handBack(first.key);
@@ -580,6 +588,7 @@ test("pipeline reanchor resumes an interrupted exact edge projection and still r
 	await post.shutdown();
 	post = new CommandPost({ home: home.path, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...agent.env } });
 	await assert.rejects(() => post.advancePipeline(replacementId), /reanchor prepared/);
+	routeNamed(home.path, [replacementModel]);
 	await assert.rejects(() => post.dispatch({ jobId: started.ship_id, task: "Research a bounded README change.", model: replacementModel, fetch: false }), /reanchor prepared/);
 	const projection = await post.reanchorPipeline(originalId, replacementId);
 	assert.equal(projection.reanchor?.phase, "committed");
@@ -587,9 +596,11 @@ test("pipeline reanchor resumes an interrupted exact edge projection and still r
 	assert.deepEqual(await post.reanchorPipeline(originalId, replacementId), projection);
 	await assert.rejects(() => post.advancePipeline(originalId), /superseded/);
 	assert.equal(readPriorAttempts(home.path, replacementId).decisions.at(-1)?.verdict, "revise");
+	routeNamed(home.path, [replacementModel]);
 	await post.dispatch({ jobId: replacementId, taskFile: join(home.path, paths.runDir(replacementId), "revision-task.md"), model: replacementModel, fetch: false });
 	await waitFor(() => post.fleet.get(replacementId)?.phase, (phase) => phase === "held", { timeoutMs: 30_000 });
 	assert.ok(provider.requests("reanchor-replacement").some((request) => request.body.messages?.some((message) => message.role === "tool" && typeof message.content === "string" && message.content.includes("Research a bounded README change."))), "ordinary replacement reads its preserved original scope after dispatch");
+	routeNamed(home.path, [replacementGate]);
 	const reviewed = await post.gate({ jobId: replacementId, model: replacementGate });
 	assert.ok(isGateWait(reviewed));
 	post.reviewRuns.handBack(reviewed.key);

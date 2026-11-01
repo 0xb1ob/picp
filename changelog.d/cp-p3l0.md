@@ -1,0 +1,1 @@
+- Routing: an explicit model data/routing.json does not name is refused, and cp_pipeline advance/recover check every stored model before acting.

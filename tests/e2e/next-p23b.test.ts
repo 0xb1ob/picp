@@ -16,6 +16,7 @@ import { MandateStore } from "../../src/mandate.ts";
 import type { NextResult, NextSnapshot } from "../../src/next.ts";
 import { ProjectRegistry } from "../../src/projects.ts";
 import {
+	routeNamed,
 	COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MockProvider, type MockToolCall,
 	type PiChild, REPO_ROOT, type RpcRecord, type ScriptStep, startPiChild, treehouseAvailable,
 } from "../harness/index.ts";
@@ -593,6 +594,7 @@ test("P23b-next-spawn-cap: below the spawn cap cp_next dispatches plainly; at it
 	});
 	t.after(() => { pool?.cleanup(); repo.cleanup(); });
 	const hang = [h.provider.addScript("p23b-hang-1", [{ kind: "hang" }]), h.provider.addScript("p23b-hang-2", [{ kind: "hang" }])];
+	routeNamed(h.home, hang, { seed: "template" });
 	const p = h.parent();
 	await p.jobs(["a", "b", "c"], { delivery: "local" });
 	const grant = await p.grant({ objective: "ship three", dispatch_parallelism: 2 });

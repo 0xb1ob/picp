@@ -26,7 +26,8 @@ import { pushConfigFile, pushDataDir } from "../../src/viewer/push-files.ts";
 import { createViewer, type ViewerOptions } from "../../src/viewer/server.ts";
 import {
 	COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, createScratchRepo, enableTreehouse, MOCK_PROVIDER_ID,
-	MockProvider, type MockToolCall, type PiChild, readFleet, readRunEvents, type RpcRecord, type ScriptStep, startPiChild, waitFor,
+	MockProvider, type MockToolCall, type PiChild, readFleet, readRunEvents, REPO_ROOT, routeNamed, type RpcRecord, type ScriptStep, startPiChild,
+	waitFor,
 } from "../harness/index.ts";
 
 type End = RpcRecord & { toolCallId: string; isError?: boolean; result?: { content?: Array<{ text?: string }> } };
@@ -149,6 +150,7 @@ test("P13 cp_schedule add and run_now: a naming quote saves an active native rev
 		action: "add", name, project: "demo", manual: true, title: `${name} fix`, kind: "ship", delivery: "pr", operator_quote: `Add the ${name} schedule.`, ...extra,
 	});
 	const prompt = "P13: please add a schedule. Add the nightlyish schedule. Run NIGHTLY. Add the (a+b) schedule. Add the spare schedule.";
+	routeNamed(h.home, ["mock/fast"], { seed: "template" });
 	const parent = await h.parent(prompt, [
 		{ kind: "tool_calls", calls: [
 			add("unnamed", "nightly", { operator_quote: "please add a schedule." }),
@@ -277,6 +279,7 @@ test("P13 runner-owned fires: answer, board and local runs are dispatched in cod
 	const block = () => { renameSync(pipelines, stash); writeFileSync(pipelines, ""); };
 	const unblock = () => { if (!existsSync(stash)) return; rmSync(pipelines, { force: true }); renameSync(stash, pipelines); };
 	t.after(unblock);
+	routeNamed(h.home, [worker], { seed: "template" });
 	const parent = await h.parent(`P13: ${names.map((name) => `Add the ${name} schedule.`).join(" ")}`, [
 		{ kind: "tool_calls", calls: names.map((name) => schedule(`add-${name}`, {
 			action: "add", name, project: "demo", manual: true, title: `${name} task`, kind: recipes[name][0], delivery: recipes[name][1], operator_quote: `Add the ${name} schedule.`,
@@ -328,7 +331,7 @@ const gateStarts = (h: Home, jobId: string) => readRunEvents(h.home, jobId).filt
 
 /** Routes planner and gate-reviewer to scripts: the planner writes its plan, waits for `go` when given, reports done;
  * the gate passes. */
-function pipelineRoles(h: Home, name: string, go?: string): void {
+function pipelineRoles(h: Home, name: string, go?: string): string {
 	const anchor = () => anchorOf(h, name);
 	const wait = go ? `; while [ ! -e '${go}' ]; do sleep 0.1; done` : "";
 	const planner = h.model(`planner-${name}`, [
@@ -342,6 +345,7 @@ function pipelineRoles(h: Home, name: string, go?: string): void {
 		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["the plan names its change"] }) }] }, { kind: "text", text: "Verdict filed." }]);
 	writeFileSync(join(h.home, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: [`${MOCK_PROVIDER_ID}/*`],
 		rubric: [{ id: "planner", role: "planner", model: planner }, { id: "gate-reviewer", role: "gate-reviewer", model: gate }] }));
+	return planner;
 }
 
 /** Adds and runs native pipeline schedule `name`, and `also` with its planner pinned by a run override when given. */
@@ -374,6 +378,7 @@ test("P13 native pipeline (#444): a failed in-code advance wakes the parent once
 	pipelineRoles(h, "sweep-run", go);
 	// A planner whose worker dies before reporting: a failed anchor the restart sweep must not wake again.
 	const failedPlanner = h.model("planner-failed-run", [{ kind: "tool_calls", calls: [{ name: "bash", args: { command: "kill -9 $PPID" } }] }]);
+	routeNamed(h.home, [failedPlanner], { seed: "template" });
 	const first = await runPipeline(h, "sweep-run", { name: "failed-run", model: failedPlanner });
 	const failed = anchorOf(h, "failed-run");
 	await waitFor(() => readFleet(h.home).jobs.find((job) => job.job_id === failed)?.phase, (phase) => phase === "failed", { timeoutMs: 60_000, what: "the failed anchor" });
@@ -424,11 +429,50 @@ test("P13 native pipeline (#444): an advance that surfaces notifies the parent e
 	assert.deepEqual([wakes(second).length, envelopeWakes(second, research).length], [0, 0], "a restart does not notify again");
 });
 
+// P13-run-model-entry (R1 PR1): the in-code advance checks a native run's frozen models before any gate. The planner is
+// dispatched on a routed run override; routing.json then loses it (F6), or the run's frozen pin names an unrouted
+// implementer (F7). Either way the advance throws, no gate starts, and the parent is woken exactly once.
+test("P13-run-model-entry: a native run's unrouted override or role pin stops the in-code advance before the gate", { timeout: 300_000 }, async (t) => {
+	for (const field of ["F6", "F7"] as const) {
+		const h = await schedulesHome(t);
+		const go = join(h.home, `go-${randomBytes(4).toString("hex")}`);
+		const planner = pipelineRoles(h, "entry-run", go);
+		const parent = await h.parent("P13: Add the entry-run schedule.", [
+			{ kind: "tool_calls", calls: [schedule("add-entry-run", { action: "add", name: "entry-run", project: "demo", manual: true,
+				title: "entry-run task", kind: "research", delivery: "pipeline", operator_quote: "Add the entry-run schedule." })] },
+			{ kind: "tool_calls", calls: [schedule("run", () => ({ action: "run_now", id: h.idOf("entry-run"), overrides: { model: planner } }))] },
+		]);
+		assertCall(ends(parent), "run", "ok", /fired: created cp-/);
+		const research = anchorOf(h, "entry-run");
+		await waitFor(() => readFleet(h.home).jobs.find((job) => job.job_id === research)?.worker.model, (model) => model === planner,
+			{ timeoutMs: 60_000, what: `${field}: the planner on the run override` });
+		writeFileSync(join(h.home, LAYOUT.routingFile), readFileSync(join(REPO_ROOT, "defaults/routing.default.json"), "utf8"));
+		if (field === "F7") {
+			const runsFile = join(h.stateDir, "schedule-runs.json");
+			const doc = JSON.parse(readFileSync(runsFile, "utf8")) as { runs: Array<Record<string, any>> };
+			const run = doc.runs.find((each) => each.anchor_job_id === research)!;
+			run.policy.model_policy = { mode: "pinned", by_role: { implementer: "mock/unrouted" } };
+			delete run.execution.effective.model;
+			writeFileSync(runsFile, JSON.stringify(doc));
+		}
+		writeFileSync(go, "");
+		await waitFor(() => envelopeWakes(parent, research).length, (count) => count > 0, { timeoutMs: 120_000, what: `${field}: the failed advance's wake` });
+		await parent.waitForSettled(30_000);
+		assert.equal(envelopeWakes(parent, research).length, 1, `${field}: exactly one wake`);
+		assert.match(parent.stderr(), field === "F6"
+			? /pipeline .* did not advance: state\/schedule-runs\.json run .* execution\.effective\.model names .*which data\/routing\.json does not route/
+			: /pipeline .* did not advance: state\/schedule-runs\.json run .* model_policy\.by_role\.implementer names mock\/unrouted/);
+		assert.deepEqual([existsSync(join(h.home, paths.gateFile(research, 1))), gateStarts(h, research).length], [false, 0], `${field}: no gate`);
+		await h.closeParents();
+	}
+});
+
 test("P13 held parent: a pr fire's job and run exist before the held wake is released once by compaction; runner-owned fires dispatch at once", { timeout: 180_000 }, async (t) => {
 	const h = await schedulesHome(t, { held: true });
 	const worker = h.model("worker", [{ kind: "text", text: "P13 worker received." }]);
 	const usage = { prompt_tokens: 1000, completion_tokens: 1 };
 	const add = (name: string, kind: string, delivery: string, extra: Record<string, unknown> = {}) => schedule(`add-${name}`, { action: "add", name, project: "demo", manual: true, title: `${name} task`, kind, delivery, operator_quote: `Add the ${name} schedule.`, ...extra });
+	routeNamed(h.home, [worker], { seed: "template" });
 	const parent = await h.parent("P13: Add the pr-run schedule. Add the answer-run schedule. Add the review-run schedule.", [
 		{ kind: "tool_calls", calls: [
 			add("pr-run", "ship", "pr"), add("answer-run", "research", "answer"),
@@ -1131,6 +1175,7 @@ test("P13c runner reports: answer and script runs are torn down in code with one
 	} }] }, { kind: "hang" }]);
 	const recipes = { ask: ["research", "answer", answer], tidy: ["ship", "local", local], scripted: ["ship", "local", undefined] } as const;
 	const names = Object.keys(recipes) as Array<keyof typeof recipes>;
+	routeNamed(h.home, [answer, local], { seed: "template" });
 	const parent = await h.parent(`P13c: ${names.map((name) => `Add the ${name} schedule.`).join(" ")}`, [
 		{ kind: "tool_calls", calls: names.map((name) => schedule(`add-${name}`, {
 			action: "add", name, project: "demo", manual: true, title: `${name} task`, kind: recipes[name][0], delivery: recipes[name][1], operator_quote: `Add the ${name} schedule.`,
@@ -1191,6 +1236,7 @@ test("P13c result cards: an unwritable Answers journal keeps the card queued wit
 		writeFileSync(report, "Answer\nNo merges yesterday.\n\nEvidence (paths + short quotes)\nREADME.md\n\nConfidence\nhigh\n\nUnknowns\nnone\n");
 		return { job_id: id, kind: "research", status: "done", summary: "No merges yesterday.", artifact_path: report };
 	} }] }, { kind: "hang" }]);
+	routeNamed(h.home, [answer], { seed: "template" });
 	const parent = await h.parent("P13c: Add the ask schedule.", [
 		{ kind: "tool_calls", calls: [schedule("add", { action: "add", name: "ask", project: "demo", manual: true, title: "ask task", kind: "research", delivery: "answer", operator_quote: "Add the ask schedule." })] },
 		{ kind: "tool_calls", calls: [schedule("run", () => ({ action: "run_now", id: h.idOf("ask"), overrides: { model: answer } }))] },
@@ -1242,6 +1288,7 @@ test("P13c native policy and run options: add saves a report-only revision 1 or 
 		action: "add", name, project: "demo", manual: true, title: `${name} report`, kind: "research", delivery: "answer", operator_quote: `Add the ${name} schedule.`, ...extra,
 	});
 	const names = ["nightly", "pipe", "scripted", "broken"];
+	routeNamed(h.home, [worker], { seed: "template" });
 	const parent = await h.parent(`P13c: ${names.map((name) => `Add the ${name} schedule.`).join(" ")}`, [
 		{ kind: "tool_calls", calls: [
 			add("nightly", "nightly", { limits: { parallelism: 2 }, description: "Summarize the day." }),
@@ -1315,6 +1362,7 @@ async function selfReviewHome(t: TestContext, env?: NodeJS.ProcessEnv) {
 		return { job_id: id, kind: "research", status: "done", summary: `${id} reviewed.`, artifact_path: report,
 			plan_summary: { goal: "Review the window.", approach: ["Read the sources."], acceptance: ["Findings listed."], risk: "none", touched: ["none"] } };
 	} }] }]);
+	routeNamed(h.home, [reader], { seed: "template" });
 	const fleetOf = (id: string) => (existsSync(join(h.stateDir, "fleet.json")) ? readFleet(h.home).jobs : []).find((job) => job.job_id === id);
 	const add = schedule("add", { action: "add", name: "self-review", project: "demo", manual: true, title: "Self-review", kind: "research", delivery: "local", skill: "cp-self-review", limits: { parallelism: 2, child_jobs: 8 }, operator_quote: "Add the self-review schedule." });
 	const runNow = (callId: string, parallelism?: number) => schedule(callId, () => ({ action: "run_now", id: h.idOf("self-review"), overrides: { model: reader, thinking: "off", ...(parallelism ? { parallelism } : {}) } }));

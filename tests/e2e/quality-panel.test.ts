@@ -16,6 +16,7 @@ import { initJobsDocument } from "../../src/ledger.ts";
 import { QUALITY_OFF } from "../../src/quality.ts";
 import { ReviewRuns, type ReviewWakeup } from "../../src/review-runs.ts";
 import {
+	routeNamed,
 	createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, MockProvider, type RecordedRequest, REPO_ROOT,
 	type ScriptStep, treehouse, treehouseAvailable, waitFor,
 } from "../harness/index.ts";
@@ -159,6 +160,7 @@ test("P11c-quality-panel: the panel votes, tallies, abstains, routes and refuses
 	assert.equal((await pass().runAndWait({ jobId: "cp-q-routed", task: "t", config: { verify: true, voters: 1, threshold: 0.5 } }))?.verify?.votes[0]?.model, narrow);
 	assert.deepEqual([b.decision("cp-q-routed")?.model, b.decision("cp-q-routed")?.thinking], [narrow, "medium"]);
 	assert.equal(b.effort("cp-q-routed"), "medium", "the voter spawns at the routed effort");
+	routeNamed(b.home, [broad]);
 	assert.equal((await pass().runAndWait({ jobId: "cp-q-override", task: "t", config: { verify: true, voters: 1, threshold: 0.5, model: broad } }))?.verify?.votes[0]?.model, broad);
 	const overridden = b.decision("cp-q-override")!;
 	assert.deepEqual([overridden.surface, "attempt" in overridden, overridden.source, overridden.requested, "requested_thinking" in overridden], ["quality/verify-1", false, "override", broad, false]);
@@ -173,6 +175,7 @@ test("P11c-quality-panel: the panel votes, tallies, abstains, routes and refuses
 	const deny = { "gate-reviewer": [denied] };
 	await b.subject("cp-q-deny");
 	b.routing({ deny_by_role: deny, rubric: [{ id: "voters", role: "gate-reviewer", model: spare }] });
+	routeNamed(b.home, [denied]);
 	await assert.rejects(pass().runAndWait({ jobId: "cp-q-deny", task: "t", config: { verify: true, voters: 1, model: denied } }),
 		/^Error: settings: model .* is not allowed for role gate-reviewer \(override;/);
 	b.routing({ deny_by_role: deny, rubric: [{ id: "voters", role: "gate-reviewer", model: denied }] });
