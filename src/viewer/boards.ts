@@ -2,8 +2,8 @@
  * Boards (W1a): read-only static pages the viewer serves under `/boards/<slug>/`.
  *
  * A board is `<stateDir>/boards/<slug>/` holding `board.json`
- * (`{title, description, job_ids, created_at}`) and `site/`, the only served
- * directory. Nothing here writes: boards are created by writing files.
+ * (`{title, description, job_ids, created_at}`, optionally `project`/`source`/`content_sha256`) and `site/`,
+ * the only served directory. Nothing here writes: boards are created by writing files.
  *
  * A URL reaches the filesystem only through `resolveBoardFile`, which refuses a
  * bad slug, dot segments, encoded slashes and anything whose real path is not
@@ -29,6 +29,10 @@ export interface Board {
 	description: string;
 	job_ids: string[];
 	created_at: string;
+	/** Optional metadata a generated response report always carries (src/response-reports.ts); old boards omit it. */
+	project?: string | null;
+	source?: string;
+	content_sha256?: string;
 }
 
 /** Board responses: own-origin CSS and images only, no script, no framing. */
@@ -72,7 +76,7 @@ export function boardsDir(state: ViewerState): string {
  */
 export function parseBoard(slug: string, value: Record<string, unknown> | undefined): Board | undefined {
 	if (!value || !isBoardSlug(slug)) return undefined;
-	const { title, description, job_ids: jobIds, created_at: createdAt } = value;
+	const { title, description, job_ids: jobIds, created_at: createdAt, project, source, content_sha256: hash } = value;
 	if (typeof title !== "string" || title.length === 0 || typeof createdAt !== "string") return undefined;
 	return {
 		slug,
@@ -80,6 +84,9 @@ export function parseBoard(slug: string, value: Record<string, unknown> | undefi
 		description: typeof description === "string" ? description : "",
 		job_ids: Array.isArray(jobIds) ? jobIds.filter((id): id is string => typeof id === "string") : [],
 		created_at: createdAt,
+		...(project === null || typeof project === "string" ? { project } : {}),
+		...(typeof source === "string" ? { source } : {}),
+		...(typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash) ? { content_sha256: hash } : {}),
 	};
 }
 

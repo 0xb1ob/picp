@@ -277,6 +277,10 @@ export interface ReportItem {
 	created_at: string;
 	job_ids: string[];
 	href: string;
+	/** Generated response reports only (src/response-reports.ts). */
+	project?: string | null;
+	source?: string;
+	content_sha256?: string;
 }
 export interface ReportsResponse {
 	generated_at: string;
