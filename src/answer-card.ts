@@ -50,25 +50,34 @@ export function answerCardData(record: AnswerCardRecord): AnswerCardData {
 
 const lastPending = new Map<string, string>();
 
+/** What routing reports: a publication still pending (once per distinct error) and a body kept as a card, named. */
+export interface AnswerCardReporting { pending: (message: string) => void; kept: (code: "secret" | "too_large" | "invalid", message: string) => void }
+
 /**
  * M2 PR2: route a research answer before its card is shown. Over `RESPONSE_INLINE_MAX` code points it is published as
- * a report first and the card carries the link. A publication failure returns undefined (the card stays pending) and
- * calls `pending` once per distinct error; an answer no report can ever hold (secret, oversize) keeps today's card.
+ * a report first and the card carries the link. A publication failure returns undefined (the card stays pending); an
+ * answer no report can ever hold (secret, oversize, invalid) keeps today's card and is reported through `kept`.
  */
-export function routeAnswerCard(home: string, record: AnswerCardRecord, pending: (message: string) => void, url: ReportUrlOptions = reportUrlOptions()): AnswerCardData | undefined {
+export function routeAnswerCard(home: string, record: AnswerCardRecord, report: AnswerCardReporting, url: ReportUrlOptions = reportUrlOptions()): AnswerCardData | undefined {
 	const data = answerCardData(record);
 	let source: AnswerSource;
 	try { source = readAnswerSource(record.path, RESPONSE_REPORT_MAX_BYTES); } catch { return data; } // unreadable: the degrade line, as before
-	if (source.truncated) return data;
+	if (source.truncated) {
+		report.kept("too_large", `response report too large: ${source.bytes} bytes > ${RESPONSE_REPORT_MAX_BYTES}`);
+		return data;
+	}
 	try {
 		answerMigrationGate(home);
 		const sent = deliverFinalAnswer(home, { project: record.project ?? null, question: record.summary, answer: source.text, evidence: [record.path], job: record.job_id, source: `research:${record.id}`, time: record.reported_at }, url);
 		lastPending.delete(record.id);
 		return sent.delivery === "report" ? { ...data, report_url: sent.url } : data;
 	} catch (error) {
-		if (error instanceof ResponseReportError && (error.code === "secret" || error.code === "too_large" || error.code === "invalid")) return data;
+		if (error instanceof ResponseReportError && (error.code === "secret" || error.code === "too_large" || error.code === "invalid")) {
+			report.kept(error.code, error.message);
+			return data;
+		}
 		const message = `answer report for ${record.id} is still pending: ${(error as Error).message}`;
-		if (lastPending.get(record.id) !== message) pending(message);
+		if (lastPending.get(record.id) !== message) report.pending(message);
 		lastPending.set(record.id, message);
 		return undefined;
 	}

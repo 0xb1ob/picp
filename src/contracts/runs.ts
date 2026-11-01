@@ -263,6 +263,8 @@ export const CP_EVENT_KINDS = [
 	 */
 	"answer_card_queued",
 	"answer_card_delivered",
+	/** M2 PR2: a research answer no report can hold (secret, too_large, invalid) kept its card; the named error. */
+	"answer_report_kept",
 	/**
 	 * Intake resolved a `delivery:pr` envelope's PR from gh and it differed from the
 	 * worker's reported `pr_url` (pi-command-post-fbn). The canonical url is the one every

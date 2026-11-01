@@ -409,6 +409,9 @@ test("decisions: cp_parent answer keeps short answers inline, publishes long one
 		["long", { ...input, question: "q".repeat(600), answer: LONG_ANSWER, evidence_paths: ["state/runs/cp-1/artifact.md"] }],
 		["redacted", { ...input, answer: `token ${ghShaped} here\n\n${LONG_ANSWER}` }],
 		["key", { ...input, answer: `${keyHeader}\nMIIE` }],
+		// lastIndex: a late match, then one in the first text checked; a global regex would carry its index and miss it.
+		["key-late", { ...input, answer: `${"pad ".repeat(200)}${keyHeader}\nMIIE` }],
+		["key-question", { ...input, question: `${keyHeader}\nMIIE` }],
 		...jobs.map((id): [string, Record<string, unknown>] => [`job-${id}`, { ...input, answer: LONG_ANSWER, job_id: id }]),
 		...jobs.map((id): [string, Record<string, unknown>] => [`again-${id}`, { ...input, answer: LONG_ANSWER, job_id: id }]),
 		["changed", { ...input, answer: `${LONG_ANSWER} changed`, job_id: "cp-local" }],
@@ -460,7 +463,7 @@ test("decisions: cp_parent answer keeps short answers inline, publishes long one
 
 	const redacted = payloadOf(ok("redacted").id);
 	assert.ok(redacted.includes("\u2022\u2022\u2022") && !redacted.includes(ghShaped));
-	assert.doesNotMatch(refused("key", /secret-shaped text \(private key block\) remains after redaction/), /BEGIN/);
+	for (const id of ["key", "key-late", "key-question"]) assert.doesNotMatch(refused(id, /secret-shaped text \(private key block\) remains after redaction/), /BEGIN/);
 
 	const first = jobs.map((id) => ok(`job-${id}`));
 	assert.deepEqual(first.map((details) => [details.state, details.job_id, JSON.parse(payloadOf(details.id)).source]), jobs.map((id) => ["posted", id, `research:${id}`]));

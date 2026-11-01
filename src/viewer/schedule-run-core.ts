@@ -29,7 +29,7 @@ export interface ScheduleRun {
 	cap_notices: string[];
 	result?: ScheduleRunResult;
 }
-/** The run's one result card: queued here first, `delivered_at` once delivered (inline, or a report at `report_href`). */
+/** The run's one result card: queued here first, `delivered_at` once delivered (inline, or a report: `report_href`). */
 export interface ScheduleRunResult {
 	source_key: string; job_id: string | null; generation: number | null; outcome: (typeof RESULT_OUTCOMES)[number];
 	headline: string; at: string; links: string[]; answer_id: string | null; delivered_at: string | null; error?: string; report_href?: string;

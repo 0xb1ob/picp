@@ -28,7 +28,7 @@ export function registerServiceAlertTick(pi: ExtensionAPI, deps: ExtensionDeps, 
 			const stateDir = join(post.home, LAYOUT.state);
 			// M2 PR2: the startup answer-journal migration; a conflict or failure becomes an escalation.
 			const migration = await escalateAnswerMigration(post.escalations, post.home);
-			if (migration) log(`answer migration: raised ${migration}`);
+			if (migration.raised || migration.withdrawn.length) log(`answer migration: raised ${migration.raised ?? "none"}; withdrew ${migration.withdrawn.join(", ") || "none"}`);
 			const record = readHealth(stateDir);
 			if (!record) return; // never ran or unreadable: nothing was promised, so nothing is withdrawn
 			const { raised, withdrawn } = await syncServiceEscalations(post.escalations, serviceAlerts(record, new Date()), stateDir);

@@ -1219,6 +1219,8 @@ test("P13c result cards: a migration conflict keeps the card queued with its err
 	const [run, anchor] = [runOf()!, runOf()!.anchor_job_id!];
 	assert.deepEqual([run.result?.source_key, run.result?.headline, run.result?.report_href, run.result?.error], [`${run.id}:${anchor}:1`, "No merges yesterday.", undefined, undefined]);
 	assert.deepEqual([existsSync(live), readFileSync(archive, "utf8")], [false, legacy], "the live-only journal migrated and was renamed");
+	const withdrawn = await waitFor(() => new EscalationStore({ home: h.home }).get(escalated[0]!.id), (item) => item?.status === "withdrawn", { timeoutMs: 30_000, what: "the conflict escalation withdrawn" });
+	assert.equal(withdrawn!.status, "withdrawn", "the gate passing withdraws the escalation it raised");
 
 	// A crash after delivery but before delivered_at: the next process delivers it again, the same inline card.
 	await h.closeParents();

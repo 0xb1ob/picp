@@ -206,7 +206,7 @@ export function readResponseReport(home: string, source: string): { payload: Res
 	return { payload, content_sha256: hash, href: `/boards/${slug}/` };
 }
 
-/** The viewer address intake uses: CP_VIEWER_HOST as configured (else the tailnet address), CP_VIEWER_PORT validated. */
+/** The viewer address intake uses: CP_VIEWER_HOST as configured (else the tailnet address), a validated port. */
 export function reportUrlOptions(env: NodeJS.ProcessEnv = process.env): ReportUrlOptions {
 	return { ...(env.CP_VIEWER_HOST ? { viewerHost: env.CP_VIEWER_HOST } : {}), viewerPort: viewerAddress(env, false, () => undefined).port };
 }

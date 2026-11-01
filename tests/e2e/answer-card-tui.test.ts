@@ -3,11 +3,13 @@
  * outbox are drained by the command-post extension at session start and drawn by its entry renderer; ctrl+o expands.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { AnswerCardOutbox } from "../../src/answer-delivery.ts";
 import { ANSWER_CARD_COLLAPSED_LINES, ANSWER_MAX_BYTES, paths } from "../../src/contracts.ts";
+import { formatBytes } from "../../src/plan-view.ts";
+import { RESPONSE_REPORT_MAX_BYTES } from "../../src/response-reports.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, waitFor } from "../harness/index.ts";
 import { startTui } from "../harness/tui.ts";
 
@@ -36,8 +38,11 @@ test("P11c-answer-tui: answer cards render collapsed, capped, degraded and expan
 	const rows = Array.from({ length: ANSWER_CARD_COLLAPSED_LINES + 7 }, (_, i) => `row ${i + 1}`);
 	queue("cp-q2", `${rows.join("\n")}\n`);
 	const bigLines = Array.from({ length: Math.ceil(ANSWER_MAX_BYTES / 100) + 10 }, (_, i) => `big ${String(i).padStart(3, "0")} ${"x".repeat(91)}`);
-	const big = `${bigLines.join("\n")}\nTAIL-PAST-CAP\n`;
+	// Past the report cap, so it keeps its capped pointer card (M2) and its run log names why.
+	const big = `${bigLines.join("\n")}\nTAIL-PAST-CAP\n${"pad\n".repeat(RESPONSE_REPORT_MAX_BYTES / 4)}`;
 	const bigPath = queue("cp-q3", big);
+	mkdirSync(join(home.path, paths.runDir("cp-q3")), { recursive: true });
+	writeFileSync(join(home.path, paths.eventsFile("cp-q3")), "");
 	const gonePath = queue("cp-q4", "Answer\n\nhere\n");
 	rmSync(gonePath);
 	const dirPath = join(home.path, paths.artifactFile("cp-q5"));
@@ -61,8 +66,11 @@ test("P11c-answer-tui: answer cards render collapsed, capped, degraded and expan
 	assert.ok(q2.includes("… 7 more line(s) (expand)"), q2);
 
 	const q3 = between(drawn, "ANSWER — cp-q3", "ANSWER — cp-q4");
-	assert.ok(q3.includes(`ANSWER — cp-q3 · demo · ${(Buffer.byteLength(big) / 1024).toFixed(1)} KB`), "the header is the size on disk");
+	assert.ok(q3.includes(`ANSWER — cp-q3 · demo · ${formatBytes(Buffer.byteLength(big))}`), "the header is the size on disk");
 	assert.ok(q3.includes(`— capped at ${ANSWER_MAX_BYTES} bytes; full file at ${bigPath}`), q3);
+	const kept = readFileSync(join(home.path, paths.eventsFile("cp-q3")), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+	assert.deepEqual(kept.filter((e) => e.type === "answer_report_kept").map((e) => [e.payload.code, e.payload.message]),
+		[["too_large", `response report too large: ${Buffer.byteLength(big)} bytes > ${RESPONSE_REPORT_MAX_BYTES}`]]);
 
 	const q4 = between(drawn, "ANSWER — cp-q4", "ANSWER — cp-q5");
 	assert.ok(q4.includes("ANSWER — cp-q4 · demo · 13 B"), "the header still renders once the file is gone");

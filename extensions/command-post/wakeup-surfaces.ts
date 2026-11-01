@@ -343,7 +343,10 @@ export function createWakeupSurfaces(
 			})();
 			commandPost().drainAnswerCards((record) => {
 				const channel = answerCardChannel(currentRuntime().home, record.job_id, s.live);
-				const data = channel === "card" || channel === "notice" ? routeAnswerCard(currentRuntime().home, record, (message) => operatorNotify(s.live, message, "warning")) : undefined;
+				const kept = (code: string, message: string) => { try {
+					if (existsSync(join(currentRuntime().home, paths.eventsFile(record.job_id)))) commandPost().runs.open(record.job_id).cp("answer_report_kept", { generation: record.generation, code, message: message.slice(0, 300) });
+				} catch (error) { operatorNotify(s.live, `answer for ${record.id} kept as a card (${code}); journal failed: ${(error as Error).message}`, "warning"); } };
+				const data = channel === "card" || channel === "notice" ? routeAnswerCard(currentRuntime().home, record, { pending: (message) => operatorNotify(s.live, message, "warning"), kept }) : undefined;
 				if (channel === "card" && data) pi.appendEntry<AnswerCardData>(ANSWER_ENTRY_TYPE, data);
 				else if (channel === "notice" && data) s.live?.ui.notify(formatAnswerNotice(data), "info");
 				return channel === "schedules_page" || data ? channel : undefined;

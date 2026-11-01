@@ -17,10 +17,13 @@ export const OperatorAnswerInputSchema = Type.Object({
 }, { additionalProperties: false });
 export type OperatorAnswerInput = Static<typeof OperatorAnswerInputSchema>;
 
-/** What the bridge reads off a fleet record. Only `kind`, `project` and `phase` are checked; `delivery` is for the refusal text. */
+/**
+ * What the bridge reads off a fleet record. Only `kind`, `project` and `phase` are checked; `delivery` is for the
+ * refusal text.
+ */
 export interface AnswerJobFacts { project: string; kind: string; delivery: string; phase: string }
 
-/** `cp_parent answer`'s details: the pre-M2 state/id/job_id/project plus delivery, the text to reply with, and the url. */
+/** `cp_parent answer`'s details: pre-M2 state/id/job_id/project plus delivery, the text to reply with, and the url. */
 export interface OperatorAnswerResult {
 	state: "inline" | "posted" | "duplicate"; id: string | null; job_id: string | null; project: string;
 	delivery: "inline" | "report"; text: string; url: string | null;
@@ -44,7 +47,7 @@ export class OperatorResponses {
 		this.#url = options.url ?? {};
 	}
 
-	/** `chatSource` names this tool call (`chat:<session>:<call>`); a job-bound answer uses the job's stable source instead. */
+	/** `chatSource` names this tool call (`chat:<session>:<call>`); a job-bound answer uses the job's source instead. */
 	post(input: OperatorAnswerInput, chatSource: string): OperatorAnswerResult {
 		const checked = validate<OperatorAnswerInput>(OperatorAnswerInputSchema, input);
 		if (!checked.ok) throw new Error(`invalid operator answer: ${JSON.stringify(checked.errors)}`);

@@ -13,7 +13,9 @@ import type { EscalationStore } from "./escalation.ts";
 export const ANSWER_MIGRATION_CONFLICT = "answer migration conflict: live and migrated journals both exist";
 const JOURNAL_MAX_BYTES = 16 * 1024 * 1024;
 const ID = /^ans-[a-f0-9]{12}$/;
-const AT = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/;
+// Every writer stamped whole seconds (isoTimestamp, the viewer ack); Date.toISOString's milliseconds are accepted too.
+const AT = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{3})?Z$/;
+const MIGRATION_QUESTION = "answer migration ";
 
 export class AnswerMigrationError extends Error {
 	readonly code: "conflict" | "failed";
@@ -68,7 +70,8 @@ function parseJournal(text: string, fail: (why: string) => never): ResponsePaylo
 		if (!shaped || !isText(line.project) || !isText(line.question) || !isText(line.answer) || !Array.isArray(evidence) || !evidence.every(isText) || !(line.job_id === null || isText(line.job_id))) fail(`${at} is not a valid posted answer`);
 		const first = posted.get(id);
 		if (first) return void (first.row !== row && fail(`${at} posts ${id} again with different content`));
-		posted.set(id, { row, payload: { project: line.project as string, question: line.question as string, answer: line.answer as string, evidence: evidence as string[], job: line.job_id as string | null, source: `legacy:${id}`, time: line.at as string } });
+		const time = (line.at as string).replace(/\.[0-9]{3}Z$/, "Z"); // a report's time is whole seconds
+		posted.set(id, { row, payload: { project: line.project as string, question: line.question as string, answer: line.answer as string, evidence: evidence as string[], job: line.job_id as string | null, source: `legacy:${id}`, time } });
 	});
 	return [...posted.values()].map((entry) => entry.payload);
 }
@@ -76,9 +79,19 @@ function parseJournal(text: string, fail: (why: string) => never): ResponsePaylo
 /**
  * Producers call this before every write. Throws `AnswerMigrationError`: `conflict` when both journals exist, `failed`
  * when migration could not complete; either way the live journal keeps its exact bytes and producers must not write.
+ * The bridge and the parent may race: a gate that finds the other's rename done returns `already_migrated`.
  */
 export function answerMigrationGate(home: string): AnswerMigration {
 	const { live, archive } = answerJournals(home);
+	try {
+		return migrate(home, live, archive);
+	} catch (error) {
+		if (error instanceof AnswerMigrationError && !present(live) && present(archive)) return { state: "already_migrated" };
+		throw error;
+	}
+}
+
+function migrate(home: string, live: string, archive: string): AnswerMigration {
 	const conflict = () => new AnswerMigrationError("conflict", `${ANSWER_MIGRATION_CONFLICT} (${live} and ${archive}); answer producers stay off until a human diagnoses them, neither file is touched`);
 	const hasLive = present(live), hasArchive = present(archive);
 	if (hasLive && hasArchive) throw conflict();
@@ -114,28 +127,40 @@ export function answerMigrationGate(home: string): AnswerMigration {
 	try {
 		renameSync(live, archive);
 	} catch (error) {
-		// Another producer process finished the same migration first.
-		if (!present(live) && present(archive) && readFileSync(archive).equals(snapshot)) return { state: "migrated", reports: verified };
 		throw new AnswerMigrationError("failed", `answer migration verified ${verified} reports but could not rename ${live}: ${(error as Error).message}; answer producers stay off`);
 	}
 	return { state: "migrated", reports: verified };
 }
 
-/** Parent-side, each tick: a gate error becomes one open `service_health` escalation per distinct message, never re-raised. */
-export async function escalateAnswerMigration(store: EscalationStore, home: string): Promise<string | undefined> {
-	let question: string;
+const lastFailure = new Map<string, string>();
+
+/**
+ * Parent-side, each tick: a conflict raises one open `service_health` escalation at once; a failure only once the next
+ * tick's recheck still sees it (a racing gate may be mid-migration). A passing gate withdraws every open one it raised.
+ */
+export async function escalateAnswerMigration(store: EscalationStore, home: string): Promise<{ raised?: string; withdrawn: string[] }> {
+	const ours = () => store.list({ kind: "service_health" }).filter((item) => item.question.startsWith(MIGRATION_QUESTION));
+	let failure: AnswerMigrationError;
 	try {
 		answerMigrationGate(home);
-		return undefined;
+		lastFailure.delete(home);
+		const withdrawn: string[] = [];
+		for (const item of ours()) if (item.status === "open") withdrawn.push((await store.withdraw(item.id)).id);
+		return { withdrawn };
 	} catch (error) {
 		if (!(error instanceof AnswerMigrationError)) throw error;
-		question = `${error.message.slice(0, 900)} — diagnose by hand`;
+		failure = error;
 	}
-	if (store.list({ kind: "service_health" }).some((item) => item.question === question)) return undefined;
+	if (failure.code === "failed" && lastFailure.get(home) !== failure.message) {
+		lastFailure.set(home, failure.message);
+		return { withdrawn: [] };
+	}
+	const question = `${failure.message.slice(0, 900)} \u2014 diagnose by hand`;
+	if (ours().some((item) => item.question === question && item.status !== "withdrawn")) return { withdrawn: [] };
 	const { live, archive } = answerJournals(home);
 	const made = await store.raise({
 		job_ids: [SERVICE_HEALTH_JOB_ID], kind: "service_health", question, recommended: "ack", evidence_paths: [live, archive],
-		options: [{ id: "ack", label: "Acknowledged — I will diagnose the journals", consequence: "closes this alert; answer producers stay off until fixed", cost: "none" }],
+		options: [{ id: "ack", label: "Acknowledged \u2014 I will diagnose the journals", consequence: "closes this alert; answer producers stay off until fixed", cost: "none" }],
 	});
-	return made.id;
+	return { raised: made.id, withdrawn: [] };
 }

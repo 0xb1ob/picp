@@ -1305,17 +1305,21 @@ instruction (the operator note and tool guidelines), never by intercepting model
 **Research answer cards** (M2 PR2, `src/answer-card.ts`). The parent's answer-card drain reads the card's body (bounded)
 and sends a long one through `deliverFinalAnswer` as `research:<job>#<generation>` before it accepts the card; the
 notice then carries the report link. A short body keeps today's card. A `secret`, `too_large` or `invalid` body keeps
-today's card too; any other failure (`conflict`, `no_url`, a migration error) leaves the card pending with one warning
-per distinct error.
+today's card too and journals `answer_report_kept` (the code and its named error) in the job's run log; any other
+failure (`conflict`, `no_url`, a migration error) leaves the card pending with one warning per distinct error.
 
 **Answer migration** (M2 PR2, `src/migrate-answer-reports.ts`). Every producer above and schedule results first run
 `answerMigrationGate` on `state/operator/answers.jsonl` (live) and `answers.jsonl.migrated` (archive): neither or the
 archive alone is a no-op; both is `answer migration conflict: live and migrated journals both exist`, no producer
-writes, and the parent's service-alert tick raises one `service_health` escalation for manual diagnosis; the live journal
-alone migrates. Migration snapshots and strictly parses the journal (a torn or malformed line, a bad id or time, an ack
-naming no earlier post, a re-posted id with other content, over 16 MiB, or secret-shaped text fails), publishes every
-unique `posted` line, acknowledged ones included, as `legacy:<ans-id>` reports with `time` = its `at` and no ack
-metadata, reads each one back against the canonical payload, rechecks the journal bytes and that no archive exists, then
+writes, and the parent's service-alert tick raises one `service_health` escalation for manual diagnosis (a `failed`
+migration only once the next tick's recheck still fails; a passing gate withdraws them); the live journal alone
+migrates. The bridge and the parent may race: a gate that finds the other's rename done is `already_migrated`, never a
+failure. Migration snapshots and strictly parses the journal (a torn or malformed line, a bad id or time, an ack
+naming no earlier post, a re-posted id with other content, a key no writer emitted, over 16 MiB, or secret-shaped text
+fails; `at` is whole seconds as every writer stamped it, or `Date.toISOString` milliseconds), publishes every
+unique `posted` line, acknowledged ones included, as `legacy:<ans-id>` reports with `time` = its `at` in whole seconds
+and no ack metadata, reads each one back against the canonical payload, rechecks the journal bytes and that no archive
+exists, then
 renames the live journal to the archive. Neither file is ever unlinked, truncated or overwritten; any failure leaves the
 original bytes in place and producers closed, and a restart reuses verified reports. Activation is a human boundary:
 the bridge reload and a parent drain/restart, confirmed by the main session, precede it, so no old writer appends during
