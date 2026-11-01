@@ -3,7 +3,7 @@
  * pending intent; reconciliation and the due tick cancel, hold or consume it. Never deletes job, session or counters.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isoTimestamp, LAYOUT } from "./contracts.ts";
 import { readDrain } from "./drain.ts";
@@ -57,6 +57,13 @@ export const QUOTA_CONTINUE_NUDGE =
 	"do not repeat the original task or brief, and do not redo actions you already completed.";
 
 export const quotaContinuationFile = (home: string): string => join(home, LAYOUT.state, "quota-continuation.json");
+/** Append-only journal of store failures; there is no job to journal a home-wide failure on. */
+export const quotaContinuationErrorsFile = (home: string): string => join(home, LAYOUT.state, "quota-continuation.errors.jsonl");
+
+/** The store is unreadable or of an unknown schema: quota continuation is off and the file stays as found. */
+export class QuotaStoreError extends Error {
+	override name = "QuotaStoreError";
+}
 
 export interface QuotaContinuationOptions {
 	home: string;
@@ -94,18 +101,39 @@ export class QuotaContinuation {
 	#read(): QuotaDocument {
 		const file = quotaContinuationFile(this.#options.home);
 		if (!existsSync(file)) return { schema_version: 1, policy: { jobs: {} }, eligibility: {}, intents: [] };
-		let doc: QuotaDocument;
+		let doc: QuotaDocument | null;
 		try {
-			doc = JSON.parse(readFileSync(file, "utf8")) as QuotaDocument;
+			doc = JSON.parse(readFileSync(file, "utf8")) as QuotaDocument | null;
 		} catch (error) {
-			throw new Error(`${file} is unreadable: ${(error as Error).message}`);
+			throw new QuotaStoreError(`${file} is unreadable: ${(error as Error).message}`);
 		}
-		if (doc.schema_version !== 1 || !Array.isArray(doc.intents)) throw new Error(`${file}: unsupported quota-continuation document`);
+		if (typeof doc !== "object" || doc === null || doc.schema_version !== 1 || !Array.isArray(doc.intents)
+			|| typeof doc.policy?.jobs !== "object" || typeof doc.eligibility !== "object") {
+			throw new QuotaStoreError(`${file}: unknown quota-continuation schema (schema_version ${String(doc?.schema_version)})`);
+		}
 		return doc;
 	}
 
 	#write(doc: QuotaDocument): void {
 		atomicWriteJson(quotaContinuationFile(this.#options.home), doc);
+	}
+
+	/** Never throws: one line in the home journal, plus the job's run log when a job is in scope. */
+	#storeError(error: unknown, during: string, jobId?: string): void {
+		const entry = { error_name: error instanceof Error ? error.name : "Error", error: (error instanceof Error ? error.message : String(error)).slice(0, 300), during };
+		const file = quotaContinuationErrorsFile(this.#options.home);
+		try {
+			mkdirSync(join(this.#options.home, LAYOUT.state), { recursive: true });
+			appendFileSync(file, `${JSON.stringify({ ts: this.#now().toISOString(), ...entry })}\n`);
+		} catch (writeError) {
+			process.stderr.write(`${file} unwritable (${(writeError as Error).message}): ${JSON.stringify(entry)}\n`);
+		}
+		if (!jobId) return;
+		try {
+			this.#options.runs.open(jobId).cp("quota_continuation", entry);
+		} catch {
+			// the home journal above already holds the failure
+		}
 	}
 
 	#journal(intent: QuotaIntent): void {
@@ -118,12 +146,23 @@ export class QuotaContinuation {
 
 	/** Every intent, oldest first, optionally for one job. */
 	intents(jobId?: string): QuotaIntent[] {
-		const all = this.#read().intents;
-		return jobId === undefined ? all : all.filter((intent) => intent.job_id === jobId);
+		try {
+			const all = this.#read().intents;
+			return jobId === undefined ? all : all.filter((intent) => intent.job_id === jobId);
+		} catch (error) {
+			this.#storeError(error, "intents", jobId);
+			return [];
+		}
 	}
 
+	/** An unreadable store reads as no settings: quota continuation is off. */
 	policy(): QuotaPolicy {
-		return this.#read().policy;
+		try {
+			return this.#read().policy;
+		} catch (error) {
+			this.#storeError(error, "policy");
+			return { jobs: {} };
+		}
 	}
 
 	/** Dispatch's resolved eligibility facts, kept for the observer and every later revival. */
@@ -134,13 +173,19 @@ export class QuotaContinuation {
 			this.#write(doc);
 		} catch (error) {
 			// Fail closed: a job without recorded facts never gets an intent, and the dispatch is not refused for it.
-			this.#options.runs.open(jobId).cp("quota_continuation", { error: (error as Error).message.slice(0, 300) });
+			this.#storeError(error, "recordEligibility", jobId);
 		}
 	}
 
 	/** Set the home default (no `jobId`) or a job override; an effective opt-out cancels that scope's unsent intents. */
 	setPolicy(input: { jobId?: string; enabled: boolean; actor: string }): QuotaIntent[] {
-		const doc = this.#read();
+		let doc: QuotaDocument;
+		try {
+			doc = this.#read();
+		} catch (error) {
+			this.#storeError(error, "setPolicy", input.jobId);
+			throw error; // an operator write is refused loudly, and nothing is overwritten
+		}
 		const setting = { enabled: input.enabled, changed_at: this.#now().toISOString(), actor: input.actor };
 		if (input.jobId === undefined) doc.policy.home = setting;
 		else doc.policy.jobs[input.jobId] = setting;
@@ -157,7 +202,13 @@ export class QuotaContinuation {
 
 	/** The operator's cancel of one job's unsent intent; anything already claimed for sending is refused, not undone. */
 	cancel(jobId: string, input: { actor: string; reason: string }): { ok: true; intent: QuotaIntent } | { ok: false; reason: string } {
-		const doc = this.#read();
+		let doc: QuotaDocument;
+		try {
+			doc = this.#read();
+		} catch (error) {
+			this.#storeError(error, "cancel", jobId);
+			return { ok: false, reason: (error as Error).message };
+		}
 		const intent = doc.intents.find((candidate) => candidate.job_id === jobId && candidate.state === "pending");
 		if (!intent) return { ok: false, reason: `${jobId} has no pending quota continuation` };
 		if (intent.delivery !== "waiting") return { ok: false, reason: `${intent.continuation_id} is ${intent.delivery}: past the point a cancel can stop` };
@@ -194,7 +245,7 @@ export class QuotaContinuation {
 			try {
 				return this.#claim(jobId, found);
 			} catch (error) {
-				this.#options.runs.open(jobId).cp("quota_continuation", { error: (error as Error).message.slice(0, 300) });
+				this.#storeError(error, "claim", jobId);
 				return undefined;
 			}
 		};
@@ -241,6 +292,15 @@ export class QuotaContinuation {
 	/** Startup: an in-flight step from a dead parent holds as ambiguous; a vanished or opted-out job's intent cancels. */
 	reconcile(): QuotaIntent[] {
 		if (!this.#options.owns()) return [];
+		try {
+			return this.#reconcile();
+		} catch (error) {
+			this.#storeError(error, "reconcile"); // startup goes on; the store file is left as found
+			return [];
+		}
+	}
+
+	#reconcile(): QuotaIntent[] {
 		const doc = this.#read();
 		const changed: QuotaIntent[] = [];
 		for (const intent of doc.intents) {
@@ -272,7 +332,14 @@ export class QuotaContinuation {
 		if (!this.#options.owns() || readDrain(this.#options.home)) return [];
 		const done: QuotaIntent[] = [];
 		const nowSeconds = this.#now().getTime() / 1000;
-		const due = this.#read().intents.filter((intent) => intent.state === "pending" && intent.delivery === "waiting" && intent.signal.resetsAtEpochSeconds <= nowSeconds);
+		let intents: QuotaIntent[];
+		try {
+			intents = this.#read().intents;
+		} catch (error) {
+			this.#storeError(error, "tick");
+			return done;
+		}
+		const due = intents.filter((intent) => intent.state === "pending" && intent.delivery === "waiting" && intent.signal.resetsAtEpochSeconds <= nowSeconds);
 		for (const { continuation_id } of due) done.push(await this.#continue(continuation_id));
 		return done;
 	}

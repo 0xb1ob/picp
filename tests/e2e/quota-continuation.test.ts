@@ -5,13 +5,13 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
-import type { Delivery, JobKind } from "../../src/contracts.ts";
+import { type Delivery, isoTimestamp, type JobKind, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
-import { QUOTA_CONTINUE_NUDGE, type QuotaIntent } from "../../src/quota-continuation.ts";
+import { QUOTA_CONTINUE_NUDGE, type QuotaIntent, quotaContinuationErrorsFile, quotaContinuationFile } from "../../src/quota-continuation.ts";
 import { PRODUCTION_QUOTA_RESET_ADAPTER } from "../../src/quota-reset-signal.ts";
 import {
 	createAgentDir,
@@ -47,8 +47,8 @@ interface Fleet {
 	script(name: string, steps: ScriptStep[]): string;
 	dispatch(jobId: string, model: string, profile?: string): Promise<string>;
 	events(jobId: string, type: string): Array<Record<string, unknown>>;
-	/** Stop this parent and start a new owner on the same home, as a restart does. */
-	restart(): Promise<CommandPost>;
+	/** Stop this parent and start a new owner on the same home, as a restart does; `between` runs while none is up. */
+	restart(between?: () => Promise<void>): Promise<CommandPost>;
 }
 
 async function fleet(t: { after(fn: () => void | Promise<void>): void }, options: { verified: boolean; maxTrees?: number }): Promise<Fleet> {
@@ -104,8 +104,9 @@ async function fleet(t: { after(fn: () => void | Promise<void>): void }, options
 		events(jobId, type) {
 			return readRunEvents(home.path, jobId).filter((event) => event.source === "cp" && event.type === type).map((event) => (event.payload ?? {}) as Record<string, unknown>);
 		},
-		async restart() {
+		async restart(between) {
 			await post.shutdown();
+			await between?.();
 			post = start();
 			await post.reconcile();
 			return post;
@@ -337,6 +338,60 @@ test("production capabilities cannot create intents", { skip: SKIP, timeout: 180
 	for (const provider of ["anthropic", "openai", "openai-codex"]) {
 		assert.equal(fake.decode({ ...message, provider }), undefined, `even the test resolver refuses ${provider}`);
 	}
+});
+
+test("corrupt quota store never stops startup reconcile", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	const f = await fleet(t, { verified: true, maxTrees: 4 });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const research: string[] = [];
+	for (const name of ["research-a", "research-b"]) {
+		const jobId = await f.job({ slug: name, kind: "research" });
+		await f.dispatch(jobId, f.script(name, [{ kind: "hang" }]));
+		await waitFor(() => f.provider.requests(name).length, (n) => n === 1, { timeoutMs: 30_000, what: `${name} first request` });
+		research.push(jobId);
+	}
+	const store = quotaContinuationFile(f.home);
+	const journal = () => (existsSync(quotaContinuationErrorsFile(f.home)) ? readFileSync(quotaContinuationErrorsFile(f.home), "utf8") : "")
+		.split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, string>);
+	const variants = [["corrupt", "{ not json", /is unreadable/], ["unknown schema", JSON.stringify({ schema_version: 2, intents: [] }), /unknown quota-continuation schema/]] as const;
+	for (const [i, [why, bytes, named]] of variants.entries()) {
+		const jobId = research[i]!;
+		// While no parent is up: a done research job with an open ledger row (startup's ledger retry closes it) and a
+		// junk park intent (park recovery refuses it in the run log) — proof both later reconcile steps still ran.
+		const post = await f.restart(async () => {
+			await f.post.fleet.mutate((jobs) => {
+				const r = jobs.find((record) => record.job_id === jobId)!;
+				Object.assign(r, { phase: "done", closed_reason: "gated", reported_at: isoTimestamp(), closed_at: isoTimestamp(new Date(Date.now() + 60_000)) });
+			});
+			mkdirSync(join(f.home, paths.runDir(jobId)), { recursive: true });
+			writeFileSync(join(f.home, paths.envelopeFile(jobId)), JSON.stringify({ schema_version: SCHEMA_VERSION, job_id: jobId, received_at: isoTimestamp(), attempt: 1,
+				envelope: { job_id: jobId, kind: "research", status: "done", summary: "findings" } }));
+			mkdirSync(dirname(join(f.home, paths.parkIntentFile(jobId))), { recursive: true });
+			writeFileSync(join(f.home, paths.parkIntentFile(jobId)), "{}");
+			writeFileSync(store, bytes);
+		});
+		const rows = journal().filter((row) => row.during === "reconcile");
+		assert.equal(rows.length, i + 1, `${why}: reconcile journaled the store failure once`);
+		assert.equal(rows[i]?.error_name, "QuotaStoreError", why);
+		assert.match(rows[i]?.error ?? "", named, why);
+		assert.equal((await post.ledger().show(jobId)).status, "closed", `${why}: retryLedgerCloses still ran`);
+		assert.ok(f.events(jobId, "awaiting_merge_refused").some((e) => e.code === "intent_mismatch"), `${why}: awaitingMerge.recover still ran`);
+		assert.deepEqual(post.quota.intents(), [], `${why}: an unreadable store reads as no intents`);
+		assert.equal(readFileSync(store, "utf8"), bytes, `${why}: the store is left in place, never overwritten`);
+	}
+
+	// Disabled, not default: the home opt-in written before the corruption is not honoured, and nothing rewrites the file.
+	const ship = await f.job({ slug: "after-corrupt" });
+	await f.dispatch(ship, f.script("after-corrupt", [quotaResetError(resetIn(HOURS_5)), { kind: "hang" }]));
+	const record = await failed(f, ship);
+	assert.match(record.failure?.message ?? "", /never ran a turn.*re-dispatch/, "the ordinary outcome");
+	assert.ok(decodeMockQuotaReset(f.provider, terminal(f, ship)), "the verified reset did arrive");
+	const errors = await waitFor(() => f.events(ship, "quota_continuation"), (rows) => rows.some((row) => row.during === "claim"), { timeoutMs: 10_000, what: "the claim's store error" });
+	assert.deepEqual([...new Set(errors.map((row) => row.error_name))], ["QuotaStoreError"]);
+	assert.deepEqual(f.post.quota.intents(), []);
+	assert.equal(readFileSync(store, "utf8"), variants[1][1], "dispatch and claim never overwrite the unreadable store");
+	assert.throws(() => f.post.quota.setPolicy({ enabled: true, actor: "operator" }), { name: "QuotaStoreError" });
+	assert.equal(readFileSync(store, "utf8"), variants[1][1], "a refused policy write leaves the file as found");
 });
 
 /** Every `.ts`/`.tsx` file below `dir`, skipping dependencies. */
