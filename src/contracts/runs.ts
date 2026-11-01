@@ -180,6 +180,8 @@ export const CP_EVENT_KINDS = [
 	"teardown_landing_proven",
 	/** A dead worker was relaunched on its own session file (cp-8km). */
 	"worker_revived",
+	/** P3: a quota-continuation intent was created, cancelled, held or consumed (`state/quota-continuation.json`). */
+	"quota_continuation",
 	/** `cp_revive` refused to relaunch a worker; nothing changed. */
 	"revive_refused",
 	/** A live, idle held author's process was stopped to free a spawn slot (phase and lease kept); `cp_send` restores it. */

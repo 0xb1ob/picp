@@ -110,6 +110,7 @@ import type { EnvelopeIntake } from "./intake.ts";
 import { readMergeReceipt } from "./merges.ts";
 import { LIVE_PHASES } from "./preflight.ts";
 import { readEventLog, readStatusFile } from "./run-artifacts.ts";
+import type { QuotaContinuation } from "./quota-continuation.ts";
 import type { RunRegistry } from "./runs.ts";
 import type { WorkerEvent } from "./worker-process.ts";
 import { inspectWorktreeWork } from "./worktree-work.ts";
@@ -297,6 +298,8 @@ export interface SettleWatcherOptions {
 	 * `worker_already_live` and `cp_send` refuses it as failed.
 	 */
 	shutdown?: (jobId: string) => Promise<void>;
+	/** P3: the quota arbiter; a settle it claims is failed with its durable intent, never nudged or failed as dead. */
+	quota?: Pick<QuotaContinuation, "watch">;
 }
 
 /**
@@ -318,6 +321,7 @@ export class SettleWatcher {
 	readonly #retryPending = new Map<string, () => boolean>();
 	/** cp-mub7: per-job "the outer ladder is spent on this settle" reads, set by `watch`'s fourth argument. */
 	readonly #retryExhausted = new Map<string, () => string | undefined>();
+	readonly #quotaClaim = new Map<string, () => string | undefined>();
 
 	constructor(options: SettleWatcherOptions) {
 		this.#options = options;
@@ -341,6 +345,8 @@ export class SettleWatcher {
 	): () => void {
 		if (isRetryPending) this.#retryPending.set(jobId, isRetryPending);
 		if (retryExhausted) this.#retryExhausted.set(jobId, retryExhausted);
+		const quota = this.#options.quota?.watch(jobId, worker);
+		if (quota) this.#quotaClaim.set(jobId, quota.claim);
 		const detach = worker.onEvent((event) => {
 			if (event.type !== "agent_settled") return;
 			void this.settled(jobId, worker).catch(() => {
@@ -356,6 +362,10 @@ export class SettleWatcher {
 			detach();
 			if (isRetryPending && this.#retryPending.get(jobId) === isRetryPending) this.#retryPending.delete(jobId);
 			if (retryExhausted && this.#retryExhausted.get(jobId) === retryExhausted) this.#retryExhausted.delete(jobId);
+			if (quota) {
+				quota.detach();
+				if (this.#quotaClaim.get(jobId) === quota.claim) this.#quotaClaim.delete(jobId);
+			}
 		};
 	}
 
@@ -380,9 +390,11 @@ export class SettleWatcher {
 		// finding 1). A worker that can settle no more is the one safe point to
 		// drop it here; `watch`'s detach drops the rest.
 		const retryExhausted = this.#retryExhausted.get(jobId);
+		const quotaClaim = this.#quotaClaim.get(jobId);
 		if (!worker.alive) {
 			this.#retryPending.delete(jobId);
 			this.#retryExhausted.delete(jobId);
+			this.#quotaClaim.delete(jobId);
 		}
 		if (retryPending?.()) {
 			return this.#ignore(jobId, "an outer provider retry is pending for this settle");
@@ -447,6 +459,9 @@ export class SettleWatcher {
 		if (run?.phase === "working" && run.current_tool) {
 			return this.#ignore(jobId, `the run is working again (${run.current_tool.name} in flight): not unreported`);
 		}
+
+		const quota = quotaClaim?.();
+		if (quota) return this.#failModelCall(jobId, (record.unreported_settles ?? 0) + 1, { message: quota }, false, quota);
 
 		// cp-0wq7: before any prompt is composed, ask whether this worker can talk
 		// to a model at all. A dead-on-arrival run is failed closed here, with the
@@ -565,18 +580,18 @@ export class SettleWatcher {
 	 * the log. Leaving it `waiting` is what made four such jobs look like they
 	 * were still owed an envelope.
 	 */
-	async #failModelCall(jobId: string, settles: number, error: ModelCallError, retryExhausted: boolean): Promise<SettleOutcome> {
+	async #failModelCall(jobId: string, settles: number, error: ModelCallError, retryExhausted: boolean, quota?: string): Promise<SettleOutcome> {
 		const at = isoTimestamp((this.#options.now ?? (() => new Date()))());
 		const where = [error.provider, error.model].filter(Boolean).join("/");
 		const failure: Failure = {
 			class: "model_call_failed",
-			message: retryExhausted
+			message: quota ?? (retryExhausted
 				? `the provider kept failing after the outer retry ladder was spent: ${error.message} — ` +
 					"not nudged: another prompt is another failed call. The worktree and session are kept; once the provider " +
 					`recovers, continue it with cp_revive ${jobId} continue_failed:true.`
 				: `the model call failed and the worker never ran a turn: ${error.message}${where ? ` (${where})` : ""} — ` +
 					"no assistant output, no tool calls, no delivery. Not nudged: a prompt cannot fix a credential or a " +
-					"routed model. Fix it, then re-dispatch.",
+					"routed model. Fix it, then re-dispatch."),
 			at,
 		};
 		const recorder = this.#options.runs.open(jobId);
@@ -586,7 +601,7 @@ export class SettleWatcher {
 			action: "recorded",
 			settles,
 			failure,
-			...(retryExhausted ? { reason: "outer provider retry exhausted" } : {}),
+			...(retryExhausted ? { reason: "outer provider retry exhausted" } : quota ? { reason: "quota continuation pending" } : {}),
 		};
 		this.#options.onUnreported?.(jobId, outcome);
 		// cp-mub7: the bound path's second half (src/bounds.ts). A failed job must
