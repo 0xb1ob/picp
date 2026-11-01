@@ -916,3 +916,49 @@ test("P19-workbench-parent: the schedule controls' parent probe calls a zombie l
 		assert.equal((await parent(holder)).running, true);
 	});
 });
+
+test("P19-composer-persist: unsent text survives leaving Sessions and a reload, per session file; a send clears it; a draft link wins; no storage still sends", { timeout: 180_000 }, async (t) => {
+	const d = await viewer(t);
+	await operatorSession(t, d.stateDir);
+	const key = "cp-composer-draft:operator-session.jsonl"; // the status names the session file by its basename
+	let tab = await d.open(OPERATOR);
+	tab.type(await tab.find("textarea"), "half a thought");
+	assert.equal(tab.storage.get(key), "half a thought", "written on input");
+	tab.go("#settings");
+	await gone(tab, "textarea");
+	tab.go(OPERATOR);
+	assert.ok(await tab.find("textarea", (f) => (f as HTMLTextAreaElement).value === "half a thought"), "navigating back restores it");
+	tab = await tab.reopen();
+	assert.ok(await tab.find("textarea", (f) => (f as HTMLTextAreaElement).value === "half a thought"), "a reload restores it");
+	tab.type(field(tab), "");
+	assert.equal(tab.storage.has(key), false, "empty text drops the key");
+	tab.type(field(tab), "kept");
+	const linked = await tab.reopen(composerHref("from the link"));
+	assert.ok(await linked.find("textarea", (f) => (f as HTMLTextAreaElement).value === "from the link"), "an explicit draft link wins");
+	assert.equal(linked.storage.get(key), "kept", "the link alone never overwrites the saved draft");
+	tab = await linked.reopen(OPERATOR);
+	await tab.find("textarea", (f) => (f as HTMLTextAreaElement).value === "kept");
+	tab.click(await tab.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
+	assert.equal(pick(await posted(tab, 1), ["text"]).text, "kept");
+	await cleared(tab);
+	assert.equal(tab.storage.has(key), false, "a handed-off send clears it");
+	const capped = await openTab(t, d.port, OPERATOR, new Map([[key, "x".repeat(16_500)]]));
+	assert.equal((await capped.find("textarea", (f) => (f as HTMLTextAreaElement).value.length > 0) as HTMLTextAreaElement).value.length, 16_000, "capped at the text limit");
+
+	// A browser refusing storage outright (private mode, quota): typing and sending still work, one warning only.
+	const refusing = await d.open("#settings");
+	const warnings: unknown[][] = [], warn = console.warn;
+	console.warn = (...args: unknown[]) => void warnings.push(args);
+	t.after(() => { console.warn = warn; });
+	const refused = { getItem: () => { throw new Error("SecurityError"); }, setItem: () => { throw new Error("SecurityError"); }, removeItem: () => { throw new Error("SecurityError"); } };
+	refusing.globals.localStorage = refused;
+	Object.defineProperty(refusing.window, "localStorage", { configurable: true, value: refused });
+	refusing.go(OPERATOR);
+	refusing.type(await refusing.find("textarea"), "no storage");
+	refusing.type(field(refusing), "no storage here");
+	refusing.click(await refusing.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
+	assert.equal(pick(await posted(refusing, 1), ["text"]).text, "no storage here");
+	await cleared(refusing);
+	console.warn = warn;
+	assert.deepEqual(warnings, [["composer draft not persisted: SecurityError"]], "a refused write warns once");
+});
