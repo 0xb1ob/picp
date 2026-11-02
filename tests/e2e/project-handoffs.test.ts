@@ -118,8 +118,10 @@ test("P6 project handoffs: fresh parent and operator, cp_parent jobs, HTTP and R
 	assert.deepEqual(body.sources.map((source) => [source.root, source.state]), [["handoffs", "ok"], ["compact", "ok"], ["configured", "ok"]]);
 	const alpha = body.groups[0]!.handoffs[2]!;
 	assert.deepEqual(alpha.evidence, [{ kind: "job", value: alphaId, project: "ph-demo" }]);
-	assert.deepEqual([alpha.answers.map((a) => a.id), alpha.reports], [["ans-0123456789ab"], [{ job_id: alphaId, href: `#report/${alphaId}` }]]);
-	assert.deepEqual(body.groups[1]!.handoffs[1]!.answers.map((a) => a.id), ["ans-0123456789ab"], "an answer citing the note by path joins it");
+	// M2 PR2: the fresh parent migrated the legacy answer to a report at startup, so no journal answer joins any note.
+	assert.deepEqual([alpha.answers.map((a) => a.id), alpha.reports], [[], [{ job_id: alphaId, href: `#report/${alphaId}` }]]);
+	assert.deepEqual(body.groups[1]!.handoffs[1]!.answers, [], "the migrated journal is never read as answers");
+	assert.ok(statSync(join(s.home, LAYOUT.state, "operator", "answers.jsonl.migrated")).isFile(), "the journal was archived, not unlinked");
 	assert.deepEqual(body.groups[0]!.handoffs[0]!.evidence.map((e) => [e.kind, e.value, e.project]), [
 		["project", "ph-demo", "ph-demo"], ["project", "ph-other", "ph-other"], ["repo", "https://github.com/acme/ph-other/pull/7", "ph-other"]]);
 	assert.deepEqual(body.unassociated.map((p) => [p.name, p.evidence, p.truncated]), [["prose.md", [], false], ["big.md", [], true]], "near misses and a cut-off id match nothing");
@@ -148,7 +150,7 @@ test("P6 project handoffs: fresh parent and operator, cp_parent jobs, HTTP and R
 	tab.go("#reports?view=handoffs&project=ph-demo");
 	await tab.find(`.handoff-row a[href='${alpha.href}']`);
 	assert.equal(tab.$$(".handoff-row").length, 3);
-	assert.ok(tab.text().includes(`Report ${alphaId}`) && tab.text().includes("Answer ans-0123456789ab"), tab.text());
+	assert.ok(tab.text().includes(`Report ${alphaId}`) && !tab.text().includes("Answer ans-"), tab.text());
 	assert.match(tab.text(), /Incomplete: 6 scanned, 0 not scanned, 1 matched on their first 64 KiB only, 1 refused for leaving their directory/);
 });
 

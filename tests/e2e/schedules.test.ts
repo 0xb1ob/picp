@@ -5,14 +5,16 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { LAYOUT, MINIMAL_PLAN_SUMMARY, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { parentSkillPaths } from "../../src/cp-bridge.ts";
+import { EscalationStore } from "../../src/escalation.ts";
 import { MandateStore } from "../../src/mandate.ts";
+import { answerJournals } from "../../src/migrate-answer-reports.ts";
 import { loadMandateDefaults } from "../../src/mandate-defaults.ts";
 import { effectivePolicyBounds } from "../../src/schedule-policy.ts";
 import { ProjectRegistry } from "../../src/projects.ts";
@@ -746,11 +748,11 @@ test("P13 restart recovery: a skill anchor is offered once per parent process un
 	assert.equal(existsSync(join(h.stateDir, "fleet.json")), false, "a local skill anchor belongs to the parent: nothing was dispatched");
 	assert.deepEqual(h.grants(), [], "recovery and release mint no grant");
 	// P13c: a pr run's card waits for its close and names the dropped members; a skill run with no S1 has no card.
-	const answersFile = join(h.stateDir, "operator", "answers.jsonl");
-	const cards = () => existsSync(answersFile) ? readFileSync(answersFile, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { job_id: string | null; answer: string; source: Record<string, unknown> }) : [];
+	// M2 PR2: a delivered card is the run record's delivered result; a short one stays inline, with no report.
+	const cards = () => h.runs().runs().filter((run) => run.result?.delivered_at).map((run) => ({ run_id: run.id, ...run.result! }));
 	await waitFor(() => cards().length, (count) => count >= 2, { timeoutMs: 40_000, what: "the closed runs' cards" });
-	assert.deepEqual(cards().map((card) => [card.source.run_id, card.source.outcome, card.job_id]), [[crashed.id, "completed", null], [partial.id, "partial", null]]);
-	assert.match(cards()[1]!.answer, new RegExp(`^No result envelope from ${partial.anchor_job_id}; run closed partial\\.\\nDropped: ${partial.anchor_job_id} \\(dropped: cap refusal\\)`));
+	assert.deepEqual(cards().map((card) => [card.run_id, card.outcome, card.job_id, card.report_href]), [[crashed.id, "completed", null, undefined], [partial.id, "partial", null, undefined]]);
+	assert.match(cards()[1]!.headline, new RegExp(`^No result envelope from ${partial.anchor_job_id}; run closed partial\\.\\nDropped: ${partial.anchor_job_id} \\(dropped: cap refusal\\)`));
 });
 
 const ORG = "Review the org queue.\norg: acme\nTeam: core\nhold: https://github.com/acme/api/pull/7";
@@ -1191,13 +1193,14 @@ test("P13c runner reports: answer and script runs are torn down in code with one
 	await waitFor(() => fleetOf(ask)?.phase, (phase) => phase === "done", { timeoutMs: 120_000, what: "the answer run torn down" });
 	const envelopes = (child: PiChild, id: string) => child.records().filter((r) => r.type === "message_start" && (r.message as { customType?: string })?.customType === "cp-envelope" && JSON.stringify(r.message).includes(id));
 	await waitFor(() => envelopes(parent, tidy).length, (count) => count > 0, { timeoutMs: 120_000, what: "the refused teardown's wake" });
-	const answersFile = join(h.stateDir, "operator", "answers.jsonl");
-	const cards = () => existsSync(answersFile) ? readFileSync(answersFile, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { type: string; by: string; job_id: string | null }).filter((card) => card.job_id === ask) : [];
+	// M2 PR2: the card is the run record's delivered result; this short one stays inline, with no report.
+	const cards = () => h.runs().runs().filter((run) => run.result?.delivered_at && run.result.job_id === ask).map((run) => run.result!);
 	await waitFor(() => cards().length, (count) => count === 1, { timeoutMs: 60_000, what: "the answer run's card" });
+	const delivered = cards()[0]!.delivered_at;
 	// Past one 30 s tick: no later tick wakes the parent again or posts a second card.
 	await new Promise((resolve) => setTimeout(resolve, 35_000));
 	await parent.waitForSettled(60_000);
-	assert.deepEqual([cards()[0]?.type, cards()[0]?.by], ["posted", "schedule"]);
+	assert.deepEqual([cards()[0]?.report_href, cards()[0]?.headline], [undefined, "No merges yesterday."]);
 	assert.deepEqual([envelopes(parent, ask).length, envelopes(parent, scripted).length], [0, 0], "answer and script runs are torn down in code, with no wake");
 	assert.equal(envelopes(parent, tidy).length, 1, "the refused teardown wakes the parent once");
 	assert.match(JSON.stringify(envelopes(parent, tidy)[0]!.message), /cp-\w+ reported done \(ship\/local\) → teardown/);
@@ -1211,7 +1214,7 @@ test("P13c runner reports: answer and script runs are torn down in code with one
 	await restarted.waitForSettled(60_000);
 	assert.equal(envelopes(restarted, tidy).length, 1);
 	assert.equal(envelopes(restarted, ask).length, 0);
-	assert.equal(cards().length, 1, "a replay posts no second card");
+	assert.deepEqual(cards().map((card) => card.delivered_at), [delivered], "a replay delivers no second card");
 
 	// With its envelope gone the recorded outcome is not teardown-shaped: the next process wakes the parent without one.
 	rmSync(join(h.home, paths.envelopeFile(tidy)));
@@ -1224,11 +1227,14 @@ test("P13c runner reports: answer and script runs are torn down in code with one
 	assert.equal(fleetOf(tidy)?.phase, "held", "no teardown ran");
 });
 
-test("P13c result cards: an unwritable Answers journal keeps the card queued with its error and the next process posts it once; a lost card is healed from the filed envelope inside the reconcile window only", { timeout: 300_000 }, async (t) => {
+test("P13c result cards: a migration conflict keeps the card queued with its error and the next process delivers it once; a lost card is healed from the filed envelope inside the reconcile window only", { timeout: 300_000 }, async (t) => {
 	const h = await schedulesHome(t);
-	const answersFile = join(h.stateDir, "operator", "answers.jsonl");
-	// A directory in the journal's place: every append fails, with no chmod.
-	mkdirSync(answersFile, { recursive: true });
+	const { live, archive } = answerJournals(h.home);
+	// M2 PR2: both journals present is the fail-closed migration state: no producer writes until a human diagnoses it.
+	const legacy = `${JSON.stringify({ type: "posted", by: "bridge", id: "ans-0123456789ab", at: "2026-03-01T00:00:00Z", project: "demo", question: "q", answer: "a", evidence_paths: [], job_id: null })}\n`;
+	mkdirSync(dirname(live), { recursive: true });
+	writeFileSync(live, legacy);
+	writeFileSync(archive, "archived bytes\n");
 	const runOf = () => h.runs().runs().find((run) => run.schedule_id === h.idOf("ask"));
 	const answer = h.model("answer", [{ kind: "tool_calls", calls: [{ name: "report_result", args: () => {
 		const id = runOf()!.anchor_job_id!, report = join(h.home, LAYOUT.state, "artifacts", id, "report.md");
@@ -1243,30 +1249,35 @@ test("P13c result cards: an unwritable Answers journal keeps the card queued wit
 	]);
 	assertCall(ends(parent), "run", "ok", /fired: created cp-/);
 	const queued = await waitFor(() => runOf()?.result, (result) => result?.error !== undefined, { timeoutMs: 120_000, what: "the queued card's error" });
-	assert.match(queued!.error!, /^answers journal unreadable: .*EISDIR/);
+	assert.match(queued!.error!, /^answer migration conflict: live and migrated journals both exist/);
 	assert.deepEqual([queued!.outcome, queued!.answer_id, queued!.delivered_at], ["completed", null, null]);
 	await waitFor(() => runOf()?.phase, (phase) => phase === "closed", { timeoutMs: 60_000, what: "the run closed" });
+	const escalated = await waitFor(() => new EscalationStore({ home: h.home }).list({ kind: "service_health" }), (items) => items.length > 0, { timeoutMs: 60_000, what: "the conflict escalation" });
+	assert.match(escalated[0]!.question, /^answer migration conflict: live and migrated journals both exist/);
+	assert.deepEqual([readFileSync(live, "utf8"), readFileSync(archive, "utf8")], [legacy, "archived bytes\n"], "neither journal is touched");
+	assert.equal(existsSync(join(h.stateDir, "boards")) && readdirSync(join(h.stateDir, "boards")).length > 0, false, "no producer wrote a report");
 	await h.closeParents();
-	rmSync(answersFile, { recursive: true });
-	const cards = () => existsSync(answersFile) ? readFileSync(answersFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as { by: string; id: string; job_id: string | null; answer: string; source: Record<string, unknown> }) : [];
+	// The human's diagnosis: the stray archive was not a real migration (fixture home only).
+	rmSync(archive);
+	const cards = () => { const result = runOf()?.result; return result?.delivered_at ? [result] : []; };
 	await h.parent("P13c: restarted.", []);
-	await waitFor(() => cards().length, (count) => count > 0, { timeoutMs: 60_000, what: "the posted card" });
+	await waitFor(() => cards().length, (count) => count > 0, { timeoutMs: 60_000, what: "the delivered card" });
 	const [run, anchor] = [runOf()!, runOf()!.anchor_job_id!];
-	assert.deepEqual(cards()[0]!.source, { kind: "schedule", schedule_id: h.idOf("ask"), run_id: run.id, source_key: `${run.id}:${anchor}:1`, outcome: "completed" });
-	assert.match(cards()[0]!.answer, new RegExp(`^No merges yesterday\\.\\n\\nSchedule ${h.idOf("ask")}, run ${run.id}: completed, result job ${anchor}\\.`));
-	assert.deepEqual([run.result?.answer_id, run.result?.error], [cards()[0]!.id, undefined]);
+	assert.deepEqual([run.result?.source_key, run.result?.headline, run.result?.report_href, run.result?.error], [`${run.id}:${anchor}:1`, "No merges yesterday.", undefined, undefined]);
+	assert.deepEqual([existsSync(live), readFileSync(archive, "utf8")], [false, legacy], "the live-only journal migrated and was renamed");
+	const withdrawn = await waitFor(() => new EscalationStore({ home: h.home }).get(escalated[0]!.id), (item) => item?.status === "withdrawn", { timeoutMs: 30_000, what: "the conflict escalation withdrawn" });
+	assert.equal(withdrawn!.status, "withdrawn", "the gate passing withdraws the escalation it raised");
 
-	// A crash after the journal write but before delivered_at: the next process reuses the first card.
+	// A crash after delivery but before delivered_at: the next process delivers it again, the same inline card.
 	await h.closeParents();
-	h.runs().editRun(run.id, (row) => { Object.assign(row.result!, { answer_id: null, delivered_at: null }); });
+	h.runs().editRun(run.id, (row) => { Object.assign(row.result!, { delivered_at: null }); });
 	await h.parent("P13c: after the crash.", []);
 	await waitFor(() => runOf()!.result?.delivered_at, (at) => !!at, { timeoutMs: 60_000, what: "the card re-delivered" });
-	assert.deepEqual([cards().length, runOf()!.result?.answer_id], [1, cards()[0]!.id]);
+	assert.deepEqual([runOf()!.result?.headline, runOf()!.result?.report_href], ["No merges yesterday.", undefined]);
 
-	// The card and its record are lost: past the reconcile window nothing is posted; inside it, the envelope heals it.
+	// The card's record is lost: past the reconcile window nothing is delivered; inside it, the envelope heals it.
 	const lose = async (closedAt: string) => {
 		await h.closeParents();
-		rmSync(answersFile, { force: true });
 		h.runs().editRun(run.id, (row) => { delete row.result; Object.assign(row, { started_at: closedAt, closed_at: closedAt }); });
 		return h.parent("P13c: restarted again.", []);
 	};
@@ -1276,8 +1287,8 @@ test("P13c result cards: an unwritable Answers journal keeps the card queued wit
 	assert.deepEqual([cards().length, runOf()!.result], [0, undefined], "older than the window: no card");
 	await lose(run.closed_at!);
 	await waitFor(() => cards().length, (count) => count > 0, { timeoutMs: 60_000, what: "the healed card" });
-	assert.deepEqual([cards().length, cards()[0]!.source.source_key, cards()[0]!.job_id], [1, `${run.id}:closed`, anchor]);
-	assert.match(cards()[0]!.answer, /^No merges yesterday\./);
+	assert.deepEqual([cards()[0]!.source_key, cards()[0]!.job_id], [`${run.id}:closed`, anchor]);
+	assert.match(cards()[0]!.headline, /^No merges yesterday\./);
 });
 
 test("P13c native policy and run options: add saves a report-only revision 1 or nothing, run_now freezes valid overrides into the run and its worker, invalid ones start nothing", { timeout: 240_000 }, async (t) => {
@@ -1422,10 +1433,9 @@ test("P13c native self-review: six readers and one synthesis run in code within 
 	const memberWakes = parent.records().filter((r) => r.type === "message_start" && Object.values(ids).some((id) => JSON.stringify(r.message).includes(id)) && ["cp-envelope", "cp-schedule"].includes((r.message as { customType?: string })?.customType ?? ""));
 	assert.deepEqual(memberWakes, [], "no parent wake for a code-owned run");
 	// P13d: the run's one result card is S1's, never the anchor's or a reader's.
-	const answers = join(h.stateDir, "operator", "answers.jsonl");
-	const cardsOf = () => existsSync(answers) ? readFileSync(answers, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { job_id: string | null; source: Record<string, unknown> }) : [];
-	await waitFor(() => cardsOf().filter((card) => card.source.run_id === run().id).length, (count) => count > 0, { timeoutMs: 30_000, what: "the self-review card" });
-	assert.deepEqual(cardsOf().filter((card) => card.source.run_id === run().id).map((card) => card.job_id), [ids.S1]);
+	// M2 PR2: the card is the run record's delivered result.
+	await waitFor(() => run().result?.delivered_at, (at) => !!at, { timeoutMs: 30_000, what: "the self-review card" });
+	assert.equal(run().result?.job_id, ids.S1);
 });
 
 test("P13c native self-review: a reader dropped by the parent before it starts drops S1, and the run closes partial", { timeout: 300_000 }, async (t) => {

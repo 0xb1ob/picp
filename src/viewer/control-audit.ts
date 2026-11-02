@@ -5,8 +5,7 @@
  * inbox (`state/operator/inbox.jsonl`, cp-daemon P3) takes lines the same way: the viewer's `held`, the
  * session's `delivered`/`dropped`. `state/schedule-control.jsonl` (cp-hhuf P6) has two writers too: the viewer's
  * `request` lines and the parent's `claimed`/`outcome` lines (src/schedule-control.ts). `state/operator/answers.jsonl`
- * (cp-mxk4) too: the session's `posted` lines (src/operator-answers.ts: bridge answers and schedule result cards) and
- * the viewer's `acked` lines.
+ * (cp-mxk4) had the session's `posted` lines too; since M2 PR2 only the viewer's `acked` lines remain until PR3.
  *
  * `O_APPEND` with exactly one `write()` per line, then `fsync` — the `durableAppend` discipline
  * (src/json-store.ts), the only one safe for a file two processes add to at once. That module is not importable

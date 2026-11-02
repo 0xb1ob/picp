@@ -11,7 +11,7 @@ import { redactSecrets } from "./decision-context.ts";
 import { readTunnelConfig, readTunnelRuntime } from "./service/daemon-tunnel-files.ts";
 import { SECRET_PATTERNS } from "./secret-patterns.ts";
 import { boardsDir, isBoardSlug, readBoard, resolveBoardFile } from "./viewer/boards.ts";
-import { DEFAULT_PORT, defaultHost } from "./viewer/cli.ts";
+import { DEFAULT_PORT, defaultHost, viewerAddress } from "./viewer/cli.ts";
 import { wantedListener } from "./viewer/remote-runtime.ts";
 import { hostHeaderFor } from "./viewer/server.ts";
 import { resolveStateDir, type ViewerState } from "./viewer/sessions.ts";
@@ -196,6 +196,19 @@ function publishPayload(home: string, payload: ResponsePayload): PublishedReport
 /** Publish regardless of length (migration, explicit report); a retry of the same source and content is `duplicate`. */
 export function publishResponseReport(home: string, input: FinalAnswerInput): PublishedReport {
 	return publishPayload(home, normalize(input));
+}
+
+/** The report published for `source`, re-verified (payload, metadata hash, HTML); undefined when none exists. */
+export function readResponseReport(home: string, source: string): { payload: ResponsePayload; content_sha256: string; href: string } | undefined {
+	const state: ViewerState = { home, stateDir: resolveStateDir(home) }, slug = responseReportSlug(source);
+	if (!existsSync(join(boardsDir(state), slug))) return undefined;
+	const { payload, hash } = readPublished(state, slug);
+	return { payload, content_sha256: hash, href: `/boards/${slug}/` };
+}
+
+/** The viewer address intake uses: CP_VIEWER_HOST as configured (else the tailnet address), a validated port. */
+export function reportUrlOptions(env: NodeJS.ProcessEnv = process.env): ReportUrlOptions {
+	return { ...(env.CP_VIEWER_HOST ? { viewerHost: env.CP_VIEWER_HOST } : {}), viewerPort: viewerAddress(env, false, () => undefined).port };
 }
 
 /**

@@ -995,7 +995,7 @@ test("P20-schedules-runs: an activated schedule counts durable runs and legacy j
 	assert.equal(view.history.find((job: Line) => job.id === "cp-fire2")?.run_id, id);
 	assert.equal(view.runs[0]?.card, undefined, "no result queued yet");
 	runs.editRun(id, (row) => { row.result = { source_key: `${id}:cp-fire2:1`, job_id: "cp-fire2", generation: 1, outcome: "completed", headline: "done", at: "2026-09-21T04:05:00Z", links: [], answer_id: null, delivered_at: null, error: "answers journal unwritable: EACCES" }; });
-	assert.deepEqual(first(await s.read()).runs[0]?.card, { state: "pending", answer_id: null, error: "answers journal unwritable: EACCES" });
+	assert.deepEqual(first(await s.read()).runs[0]?.card, { state: "pending", answer_id: null, report_href: null, headline: "done", error: "answers journal unwritable: EACCES" });
 
 	const updated = structuredClone(policy);
 	updated.revision = 2;
@@ -1239,13 +1239,20 @@ test("P20-schedules-page-policy: a policy-only v2 schedule renders its saved run
 	assert.equal(data.error, null);
 	assert.deepEqual([data.schedules[0]?.mandate_id, data.schedules[0]?.policy?.active_revision, data.schedules[1]?.mandate_id, data.schedules[1]?.policy], [undefined, 1, WATCH.mandate_id, null]);
 	const run = (n: number, at: string) => runs.createRun({ schema_version: 1, id: `run-2026092104000${n}-abcdef`, schedule_id: saved.id, policy_revision: 1, policy, trigger: { via: "slot", at }, anchor_job_id: null, members: [], phase: "accepted", outcome: null, started_at: at, deadline_at: "2026-09-22T04:00:10Z", risk_preapproved: [], authority_log: [], cap_notices: [] });
-	const result = (n: number, answer_id: string | null, delivered_at: string | null, error: string | null) => runs.editRun(`run-2026092104000${n}-abcdef`, (row) => { row.result = { source_key: `k${n}`, job_id: `cp-fire${n}`, generation: 1, outcome: "completed", headline: "done", at: "2026-09-21T04:05:00Z", links: [], answer_id, delivered_at, ...(error ? { error } : {}) }; });
+	const result = (n: number, answer_id: string | null, delivered_at: string | null, error: string | null, report_href?: string) => runs.editRun(`run-2026092104000${n}-abcdef`, (row) => { row.result = { source_key: `k${n}`, job_id: `cp-fire${n}`, generation: 1, outcome: "completed", headline: `done ${n}`, at: "2026-09-21T04:05:00Z", links: [], answer_id, delivered_at, ...(report_href ? { report_href } : {}), ...(error ? { error } : {}) }; });
 	await run(1, "2026-09-21T04:00:20Z");
 	await runs.closeRun("run-20260921040001-abcdef", "completed", "2026-09-21T04:06:00Z");
 	result(1, "ans-aaaaaaaaaaaa", "2026-09-21T04:05:30Z", null);
 	await run(2, "2026-09-21T04:00:10Z");
 	await runs.closeRun("run-20260921040002-abcdef", "completed", "2026-09-21T04:06:00Z");
 	result(2, null, null, `answers journal unwritable: ${"x".repeat(900)}`);
+	// M2 PR2: a delivered long result links its report; a delivered short one shows its headline on the run.
+	await run(3, "2026-09-21T04:00:05Z");
+	await runs.closeRun("run-20260921040003-abcdef", "completed", "2026-09-21T04:06:00Z");
+	result(3, null, "2026-09-21T04:05:30Z", null, `/boards/report-${"a".repeat(32)}/`);
+	await run(4, "2026-09-21T04:00:01Z");
+	await runs.closeRun("run-20260921040004-abcdef", "completed", "2026-09-21T04:06:00Z");
+	result(4, null, "2026-09-21T04:05:30Z", null);
 	const page = await schedulesPage(s);
 	const card = page.cards()[0]!;
 	assert.match(card.querySelector(".schedule-identity")?.textContent ?? "", /policy revision 1/);
@@ -1254,10 +1261,14 @@ test("P20-schedules-page-policy: a policy-only v2 schedule renders its saved run
 	assert.doesNotMatch(card.textContent ?? "", /no grant template|every fire is refused|undefined/);
 	assert.match(card.querySelector(".schedule-policy-line")?.textContent ?? "", /\$10\/run/);
 	assert.equal(card.querySelectorAll("[style], form").length, 0);
-	assert.match(card.querySelector(".schedule-result")?.textContent ?? "", /Each run also posts one result card to Answers/);
+	assert.match(card.querySelector(".schedule-result")?.textContent ?? "", /Each run also delivers one result on its own, with no operator session needed: short here, long as a report/);
 	const heads = [...card.querySelectorAll(".schedule-run-head")].map((head) => head.textContent ?? "");
 	assert.ok(heads.some((head) => /Result card in Answers/.test(head)), heads.join(" | "));
 	assert.ok(heads.some((head) => new RegExp(`Result card pending: answers journal unwritable: x{900}`).test(head)), "a long error is text in the wrapping run head");
+	const reportLink = [...card.querySelectorAll(".schedule-run-head a")].find((a) => a.textContent === "Result report");
+	assert.equal(reportLink?.getAttribute("href"), `/boards/report-${"a".repeat(32)}/`);
+	assert.ok(heads.some((head) => / · Result delivered$/.test(head)), heads.join(" | "));
+	assert.deepEqual([...card.querySelectorAll(".schedule-history > li > .schedule-summary")].map((line) => line.textContent), ["done 4"], "only the short result shows its headline");
 	assert.match(await servedCss(s.view), /overflow-wrap: ?anywhere/);
 });
 

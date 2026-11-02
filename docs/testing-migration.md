@@ -398,6 +398,7 @@ Test files added after the baseline, with the PR that owns them.
 | tests/e2e/project-handoffs.test.ts | cp-project-handoffs-p6-j354 (PR URL on the branch) | P6 project handoffs: notes in all three roots reach fresh parent and operator as per-project pointers (never bodies), `cp_parent jobs show`, `GET /api/handoffs` and Reports › Handoffs; token-boundary near misses, symlink escape, 64 KiB truncation, answer/report joins, detail read gate and missing roots |
 | tests/e2e/response-reports.test.ts | cp-22no (https://github.com/0xb1ob/picp/pull/695) | M2 PR1 response reports: 4,000/4,001 code-point threshold, canonical-payload `content_sha256` served by cp-view, retry duplicate/conflict/tamper, restart survival, escaping and http(s)-only evidence links, redaction/secret refusal, size caps, tunnel/viewer/no_url URL, paired-device remote read and revoke |
 | tests/e2e/quota-continuation.test.ts | cp-p3-pr2-f9ae (PR URL on the branch) | P3 PR2: durable quota-continuation intents (pending, consumed, cancelled) with a test-only verified adapter; eligibility, variant C policy, restart reconciliation, production refusal and a structural no-harness-import guard |
+| tests/e2e/answer-migration.test.ts | cp-m2-pr2-fpbd (https://github.com/0xb1ob/picp/pull/697) | M2 PR2 repair: the answers-journal migration on a pre-M2 real-writer fixture: concurrent bridge/parent gates migrate once with no failing loser, millisecond `at`, a mid-migration journal change and archive collision fail closed |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

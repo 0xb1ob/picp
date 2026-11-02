@@ -3,14 +3,11 @@
  * refused, and resultOwner with a role-admitted S1 against a stale expanded: marker. No parent induces either.
  */
 import assert from "node:assert/strict";
-import { join } from "node:path";
 import { test } from "node:test";
-import { LAYOUT } from "../src/contracts.ts";
 import type { IntakeResult } from "../src/intake.ts";
-import { OperatorAnswers } from "../src/operator-answers.ts";
+import { OperatorResponses } from "../src/operator-responses.ts";
 import { type ResultFacts, type ResultLedgerJob, resultOwner, ScheduleResults } from "../src/schedule-results.ts";
 import { ScheduleRunStore } from "../src/schedule-runs.ts";
-import { readAnswers } from "../src/viewer/control-files.ts";
 import { policyFromLegacy, type SchedulePolicy } from "../src/viewer/schedule-policy.ts";
 import type { ScheduleRun } from "../src/viewer/schedule-run-core.ts";
 import { createScratchHome } from "./harness/index.ts";
@@ -31,12 +28,13 @@ async function bench(t: { after: (fn: () => void) => void }, job: Parameters<typ
 	const run: ScheduleRun = { schema_version: 1, id: runId, schedule_id: "sch-123456", policy_revision: 1, policy: policy(job), trigger: { via: "slot", at }, anchor_job_id: null, members: [], phase: "accepted", outcome: null, started_at: at, deadline_at: "2026-07-01T08:00:00Z", risk_preapproved: [], authority_log: [], cap_notices: [] };
 	await runs.createRun(run);
 	await runs.attachAnchor(run.id, member("cp-anchor"));
-	const stateDir = join(home.path, LAYOUT.state);
 	const jobs: ResultLedgerJob[] = [{ id: "cp-anchor", status: "in_progress" }];
 	const facts = new Map<string, ResultFacts>();
-	const make = (answers: Pick<OperatorAnswers, "postScheduleResult"> = new OperatorAnswers(stateDir, { now }), clock = now) =>
+	const make = (answers: Pick<OperatorResponses, "postScheduleResult"> = new OperatorResponses(home.path, { now }), clock = now) =>
 		new ScheduleResults({ runs, answers, ledgerJobs: () => jobs, facts: (id) => facts.get(id), now: clock, log: () => {} });
-	return { home, runs, run, stateDir, jobs, facts, make, cards: () => readAnswers(stateDir).answers.filter((item) => item.source) };
+	// M2 PR2: a delivered card is the run record's delivered result, no longer an Answers journal line.
+	const cards = () => runs.runs().filter((row) => row.result?.delivered_at).map((row) => ({ run_id: row.id, job_id: row.result!.job_id }));
+	return { home, runs, run, jobs, facts, make, cards };
 }
 const accepted = (job_id: string, extra: Partial<IntakeResult> = {}) =>
 	({ job_id, accepted: true, already: false, delivery: "answer", status: "done", summary: "Nightly report: 3 findings", generation: 1, ...extra }) as IntakeResult;
@@ -51,8 +49,8 @@ test("one run whose result edit fails does not block the next run's card (PR1 re
 	const runs = { get active() { return b.runs.active; }, runs: () => b.runs.runs(), run: (id: string) => b.runs.run(id), runOfJob: (id: string) => b.runs.runOfJob(id),
 		editRun: (id: string, fn: (run: ScheduleRun) => void) => { if (id === b.run.id) throw new Error("invalid run"); return b.runs.editRun(id, fn); } };
 	const logged: string[] = [];
-	new ScheduleResults({ runs: runs as unknown as ScheduleRunStore, answers: new OperatorAnswers(b.stateDir, { now }), ledgerJobs: () => b.jobs, facts: () => undefined, now, log: (line) => logged.push(line) }).sync();
-	assert.deepEqual(b.cards().map((card) => card.source?.run_id), [next.id]);
+	new ScheduleResults({ runs: runs as unknown as ScheduleRunStore, answers: new OperatorResponses(b.home.path, { now }), ledgerJobs: () => b.jobs, facts: () => undefined, now, log: (line) => logged.push(line) }).sync();
+	assert.deepEqual(b.cards().map((card) => card.run_id), [next.id]);
 	assert.ok(logged.some((line) => line.includes(b.run.id) && line.includes("invalid run")), "the bad run is named");
 });
 

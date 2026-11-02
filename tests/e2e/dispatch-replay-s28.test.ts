@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { ScheduleRunStore } from "../../src/schedule-runs.ts";
-import { readAnswers } from "../../src/viewer/control-files.ts";
 import { policyFromLegacy } from "../../src/viewer/schedule-policy.ts";
 import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchLedger, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
 
@@ -76,11 +75,11 @@ for (const [kind, variant, title] of [
 				assert.equal((wakes.match(/:dropped:/g) ?? []).length, variant === "scheduler-fault" ? ids.length : 3, "one terminal wake per request");
 			}
 			if (variant === "scheduler-fault") {
-				const cards = await waitFor(() => readAnswers(join(home.path, LAYOUT.state)).answers, (answers) => answers.some((answer) => answer.source?.source_key === "s28-pending-result"), { timeoutMs: 5_000, what: "Answers card delivered despite scheduler ledger fault" });
-				const matching = cards.filter((answer) => answer.source?.source_key === "s28-pending-result");
-				assert.equal(matching.length, 1, "one pending result reaches the Answers consumer");
-				assert.match(matching[0]!.answer, /S28 completed before the ledger fault/);
-				assert.ok(new ScheduleRunStore({ home: home.path }).run("run-20261004150000-abcdef")!.result!.delivered_at);
+				// M2 PR2: a short result is delivered inline on its run (no answers journal), never as a report.
+				const result = await waitFor(() => new ScheduleRunStore({ home: home.path }).run("run-20261004150000-abcdef")!.result!, (row) => !!row.delivered_at, { timeoutMs: 5_000, what: "schedule result delivered despite scheduler ledger fault" });
+				assert.equal(result.source_key, "s28-pending-result");
+				assert.match(result.headline, /S28 completed before the ledger fault/);
+				assert.equal(result.report_href, undefined);
 			}
 		});
 }

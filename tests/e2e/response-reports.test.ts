@@ -1,17 +1,21 @@
 /**
  * M2 PR1: long final answers become permanent response reports (src/response-reports.ts, the API PR2 and P1 call),
- * served by a real `bin/cp-view` and the remote listener's paired-device gate; short answers stay inline.
+ * served by a real `bin/cp-view` and the remote listener's paired-device gate; short answers stay inline. M2 PR2 adds
+ * the research entry point (a real parent's answer-card drain); cp_parent answer and schedules: decisions-bridge.
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
-import { LAYOUT } from "../../src/contracts.ts";
+import { AnswerCardOutbox } from "../../src/answer-delivery.ts";
+import { LAYOUT, paths } from "../../src/contracts.ts";
+import { initJobsDocument, Ledger } from "../../src/ledger.ts";
+import { formatBytes } from "../../src/plan-view.ts";
 import { deliverFinalAnswer, type FinalAnswerInput, publishResponseReport, RESPONSE_INLINE_MAX, responseReportSlug, responseReportUrl } from "../../src/response-reports.ts";
 import { tunnelConfigFile, tunnelRuntimeFile } from "../../src/service/daemon-tunnel-files.ts";
 import { startViewer } from "../harness/dashboard.ts";
-import { createScratchHome } from "../harness/index.ts";
+import { COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, MockProvider, startPiChild, waitFor } from "../harness/index.ts";
 import { remoteRig } from "../harness/remote.ts";
 
 const sha = (text: string | Buffer) => createHash("sha256").update(text).digest("hex");
@@ -153,4 +157,46 @@ test("M2-report-remote: a paired device reads a report over the remote listener;
 	assert.deepEqual([read.status, read.body.source], [200, "schedule:run-1:cp-r1:1"]);
 	assert.ok(rig.store.revoke(phone.id).ok);
 	assert.equal((await rig.r(report.href, { headers: { cookie: phone.cookie } })).status, 401);
+});
+
+// M2 PR2 research entry point: the parent's answer-card drain publishes a long answer before it accepts the card.
+test("M2-report-research: a long research answer reaches the operator as a report link, a short one keeps its card, a failed publication stays pending", { timeout: 120_000 }, async (t) => {
+	const h = home(t);
+	initJobsDocument(h.path, "cp");
+	const ledger = new Ledger({ home: h.path });
+	const queue = async (title: string, body: string) => {
+		const job = (await ledger.create({ title, project: "demo", kind: "research", delivery: "answer" })).id;
+		const path = join(h.path, paths.artifactFile(job));
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, body);
+		assert.ok(new AnswerCardOutbox({ home: h.path }).enqueue({ job_id: job, project: "demo", generation: 1, summary: `${title} headline`, path, bytes: Buffer.byteLength(body), reported_at: T0 }));
+		return { job, path };
+	};
+	const longBody = `Long answer.\n\n${astral(RESPONSE_INLINE_MAX)}`;
+	const long = await queue("Long", longBody), short = await queue("Short", "Short answer.\n"), stuck = await queue("Stuck", longBody);
+	// A report already published for the stuck card's source with other content: its publication must conflict.
+	publishResponseReport(h.path, input({ source: `research:${stuck.job}#1`, answer: "Other." }));
+	const provider = await MockProvider.start();
+	const model = provider.addScript("m2-research", [{ kind: "text", text: "Idle." }], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider });
+	t.after(async () => { agent.cleanup(); await provider.stop(); });
+	const pi = startPiChild({ cwd: h.path, model, env: { ...agent.env, CP_HOME: h.path, CP_VIEWER_HOST: "127.0.0.2", CP_VIEWER_PORT: "9911" }, extensions: [COMMAND_POST_EXTENSION] });
+	t.after(() => pi.close().then(() => undefined));
+	const notes = (prefix: string) => pi.records().filter((r) => r.type === "extension_ui_request" && r.method === "notify" && String(r.message).startsWith(prefix)).map((r) => String(r.message));
+	await waitFor(() => notes("answer for ").length, (count) => count === 2, { timeoutMs: 30_000, what: "the long and short cards" });
+	await waitFor(() => notes(`answer report for ${stuck.job}#1`).length, (count) => count > 0, { timeoutMs: 30_000, what: "the stuck card's warning" });
+
+	const slug = responseReportSlug(`research:${long.job}#1`);
+	assert.deepEqual(notes("answer for "), [
+		`answer for ${long.job}: http://127.0.0.2:9911/boards/${slug}/ (${formatBytes(Buffer.byteLength(longBody))}) — the full answer is a permanent report`,
+		`answer for ${short.job}: ${short.path} (${formatBytes(14)}) — open it yourself; the card needs a terminal`,
+	]);
+	const payload = JSON.parse(readFileSync(join(h.boards, slug, "site", "content.json"), "utf8")) as Record<string, unknown>;
+	assert.deepEqual([payload.answer, payload.job, payload.evidence, payload.time], [longBody, long.job, [long.path], T0]);
+	assert.match(notes(`answer report for ${stuck.job}#1`)[0]!, /is still pending: response report conflict/);
+	const cards = new AnswerCardOutbox({ home: h.path }).read();
+	assert.deepEqual([cards.pending.map((card) => card.job_id), cards.delivered.map((entry) => entry.job_id)], [[stuck.job], [long.job, short.job]]);
+	assert.equal(h.entries().length, 2, "the long report and the conflicting one; the short answer publishes nothing");
+	await new Promise((resolve) => setTimeout(resolve, 6_000));
+	assert.equal(notes(`answer report for ${stuck.job}#1`).length, 1, "a repeated failure is not re-announced every tick");
 });

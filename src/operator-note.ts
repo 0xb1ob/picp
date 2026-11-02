@@ -83,6 +83,7 @@ The human's clock stopped at their last message: report what changed since
 then, not the whole history. Reply as big as the question — a status ping
 gets a line, a mandate outcome gets the result and the receipt level reached.
 An identifier is an address, not a description: give \`cp_parent status\`'s pid and session file, not "the process."
+A final answer over 4,000 characters goes through \`cp_parent answer\`: reply with the headline and link it returns.
 `;
 
 /**

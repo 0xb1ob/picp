@@ -35,7 +35,8 @@ export function serviceAlerts(record: HealthRecord | undefined, now: Date): Serv
 	return alerts;
 }
 
-const alertQuestion = (alert: ServiceAlert): string => `cp-daemon health check "${alert.check}" failing since ${alert.since} (key ${alert.key})`;
+const ALERT_PREFIX = "cp-daemon health check ";
+const alertQuestion = (alert: ServiceAlert): string => `${ALERT_PREFIX}"${alert.check}" failing since ${alert.since} (key ${alert.key})`;
 
 /** Raise what is owed, withdraw the open records whose failure is gone. Errors propagate (the tick logs them). */
 export async function syncServiceEscalations(store: EscalationStore, alerts: readonly ServiceAlert[], stateDir: string): Promise<{ raised: string[]; withdrawn: string[] }> {
@@ -43,7 +44,8 @@ export async function syncServiceEscalations(store: EscalationStore, alerts: rea
 	const known = store.list({ kind: "service_health" });
 	const withdrawn: string[] = [];
 	for (const item of known) {
-		if (item.status !== "open" || wanted.has(item.question)) continue;
+		// Only this check's own records: the answer migration's alerts are withdrawn by its own gate.
+		if (item.status !== "open" || wanted.has(item.question) || !item.question.startsWith(ALERT_PREFIX)) continue;
 		await store.withdraw(item.id);
 		withdrawn.push(item.id);
 	}
