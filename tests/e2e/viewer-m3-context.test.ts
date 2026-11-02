@@ -4,7 +4,7 @@
  * and served CSS; no layout — the browser fixture's `m3-context` screenshots are the layout evidence).
  */
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
@@ -134,6 +134,14 @@ test("M3-context-phone: the context sheet and the Conversations drawer are modal
 	tab.click(worker);
 	await until(() => tab.$("dialog.workspace-sessions"), (el) => el === null, "a followed link closes the drawer");
 
+	tab.click(button);
+	await tab.find("dialog.workspace-context[open]");
+	// The operator starts a new session file while the sheet is open: the refreshed chat drops it (same mount, no route).
+	const next = join(d.home, "pi-sessions", "next.jsonl");
+	writeFileSync(next, "");
+	appendFileSync(operatorSessionsFile(join(d.stateDir, "sessions")), `${JSON.stringify({ at: iso(1), session_file: next })}\n`);
+	tab.refresh();
+	await until(() => tab.$("dialog"), (el) => el === null, "a new session file to drop the sheet");
 	tab.click(button);
 	await tab.find("dialog.workspace-context[open]");
 	tab.go(worker.getAttribute("href")!);
