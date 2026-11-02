@@ -449,7 +449,8 @@ try {
 		if (posts.length) throw new Error(`m3-context sent ${posts.join(", ")}: the context and drawer only read`);
 	}
 	if (stage === "m3-composer") {
-		// Real clicks and input: the `/` menu (two commands, three jobs), the typed list, /status and a P1 reference.
+		// Real clicks and input: the `/` menu, the typed list, /status and a P1 reference. Five menu buttons: 2 commands,
+		// the 2 in-flight `/api/jobs` rows above (working, held) and JOB done today; cp-m3-park is With the team.
 		const slash: Step = [`document.querySelector(".operator-composer-slash").click()`, `document.querySelectorAll("#operator-composer-command-menu button").length === 5`];
 		const typed: Step = [`(() => { const i = document.querySelector(".operator-composer textarea"); i.focus(); i.value = "/"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
 			`document.querySelectorAll(".operator-composer-skills [role=option]").length === 2`];

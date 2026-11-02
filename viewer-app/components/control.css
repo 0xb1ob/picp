@@ -102,6 +102,7 @@
 .operator-composer-command-menu ul { margin: 0; padding: 0; list-style: none; }
 .operator-composer-command-menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 44px; padding: 4px 10px; background: none; color: var(--text); border: 0; border-radius: 8px; font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
 .operator-composer-command-menu button:hover, .operator-composer-command-menu button:focus-visible { background: var(--nav-selected); }
+.operator-composer-command-menu button:disabled { cursor: progress; opacity: 0.6; }
 .operator-composer-command-menu code, .operator-composer-command-menu small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .operator-composer-command-menu code { flex-shrink: 0; max-width: 60%; }
 .operator-composer-command-menu small { margin-left: auto; font-size: 12px; color: var(--muted); }
