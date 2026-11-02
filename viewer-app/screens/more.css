@@ -18,5 +18,4 @@
 @media (min-width: 900px) {
  .more { max-width: none; margin: 0; gap: var(--page-header-gap); }
  .more > :not(.page-header) { width: 100%; max-width: 390px; margin: 0 auto; }
- .more-menu > .more-phone { display: none; }
 }

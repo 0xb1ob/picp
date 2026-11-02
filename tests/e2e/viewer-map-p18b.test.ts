@@ -150,24 +150,24 @@ test("P18-nav: every hash, old or unknown, lands on one screen's data and lights
 		return seen;
 	};
 	const home = await visit("#overview", "/api/overview");
-	assert.deepEqual(home.sidebar, ["#overview", "#decisions", "#jobs", "#sessions", "#stats", "#reports", "#settings", "#more"], "eight desktop items");
-	assert.deepEqual(home.tabs, ["#overview", "#decisions", "#jobs", "#sessions", "#more"], "five phone tabs");
+	assert.deepEqual(home.sidebar, ["#sessions", "#jobs", "#more"], "three desktop items: Chat, Jobs, More");
+	assert.deepEqual(home.tabs, ["#sessions", "#jobs", "#more"], "the same three phone tabs");
 	assert.ok(!home.sidebar.includes("#mandates") && !home.sidebar.includes("#map"), "nothing links to the gone Mandates page");
 	// [hash, the screen's data read, lit on desktop, lit on phone]
 	const cases: Array<[string, string, string, string]> = [
-		["", "/api/overview", "#overview", "#overview"], ["#%E0", "/api/overview", "#overview", "#overview"],
-		["#unknown", "/api/overview", "#overview", "#overview"], ["#overview/missing", "/api/overview", "#overview", "#overview"],
-		["#mandates", "/api/overview", "#overview", "#overview"], ["#overview/mandates", "/api/overview", "#overview", "#overview"],
-		["#overview/awaiting", "/api/overview", "#overview", "#overview"],
-		["#job/..%2Fbad", "/api/overview", "#overview", "#overview"], ["#job/cp-a?tab=timeline", "/api/overview", "#overview", "#overview"], ["#job/..%2Fbad?tab=transcript", "/api/overview", "#overview", "#overview"], ["#job/cp-a/..?tab=transcript", "/api/overview", "#overview", "#overview"],
-		["#job/cp-a?tab=transcript&x=1", "/api/overview", "#overview", "#overview"], ["#job/?tab=transcript", "/api/overview", "#overview", "#overview"],
+		["", "/api/overview", "#more", "#more"], ["#%E0", "/api/overview", "#more", "#more"],
+		["#unknown", "/api/overview", "#more", "#more"], ["#overview/missing", "/api/overview", "#more", "#more"],
+		["#mandates", "/api/overview", "#more", "#more"], ["#overview/mandates", "/api/overview", "#more", "#more"],
+		["#overview/awaiting", "/api/overview", "#more", "#more"],
+		["#job/..%2Fbad", "/api/overview", "#more", "#more"], ["#job/cp-a?tab=timeline", "/api/overview", "#more", "#more"], ["#job/..%2Fbad?tab=transcript", "/api/overview", "#more", "#more"], ["#job/cp-a/..?tab=transcript", "/api/overview", "#more", "#more"],
+		["#job/cp-a?tab=transcript&x=1", "/api/overview", "#more", "#more"], ["#job/?tab=transcript", "/api/overview", "#more", "#more"],
 		["#more", "/api/overview", "#more", "#more"],
-		["#decisions", "/api/decisions", "#decisions", "#decisions"], ["#awaiting", "/api/decisions", "#decisions", "#decisions"],
-		["#decided", "/api/decisions", "#decisions", "#decisions"],
+		["#decisions", "/api/decisions", "#more", "#more"], ["#awaiting", "/api/decisions", "#more", "#more"],
+		["#decided", "/api/decisions", "#more", "#more"],
 		["#jobs", "/api/jobs", "#jobs", "#jobs"], ["#dashboard", "/api/jobs", "#jobs", "#jobs"], ["#board", "/api/board", "#jobs", "#jobs"],
 		["#map", "/api/map", "#jobs", "#jobs"], ["#job/cp-a", "/api/job/cp-a", "#jobs", "#jobs"], ["#job/cp-a?tab=transcript", "/api/job/cp-a", "#jobs", "#jobs"],
-		["#reports", "/api/reports", "#reports", "#more"], ["#schedules", "/api/schedules", "#more", "#more"],
-		["#settings", "/api/settings", "#settings", "#more"], ["#stats?range=7d&project=a", "/api/stats?range=7d&project=a", "#stats", "#more"],
+		["#reports", "/api/reports", "#more", "#more"], ["#schedules", "/api/schedules", "#more", "#more"],
+		["#settings", "/api/settings", "#more", "#more"], ["#stats?range=7d&project=a", "/api/stats?range=7d&project=a", "#more", "#more"],
 		["#session/cp-parent", "/api/sessions?view=parent", "#sessions", "#sessions"], ["#session/cp-a", "/api/sessions?view=workers&id=cp-a", "#sessions", "#sessions"],
 		["#cp-a", "/api/sessions?view=workers&id=cp-a", "#sessions", "#sessions"], ["#sessions?view=workers&id=cp-a", "/api/sessions?view=workers&id=cp-a", "#sessions", "#sessions"],
 		["#files/project:demo", "/api/files?root=project%3Ademo&path=&view=screen", "#more", "#more"], ["#files", "/api/files?view=screen", "#more", "#more"], ["#sessions", "/api/sessions?view=you", "#sessions", "#sessions"],

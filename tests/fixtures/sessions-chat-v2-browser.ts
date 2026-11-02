@@ -17,7 +17,7 @@ import { buildViewer } from "../../src/viewer/build.ts";
 import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -192,7 +192,7 @@ try {
 		}
 		if (path in routes) return send(200, "application/json", JSON.stringify(routes[path]));
 		// M3: every other screen reads the real viewer's APIs on this scratch home (empty state, same palette check).
-		if (args.stage === "m3-transcript" && path.startsWith("/api/") && !ABSENT.has(path)) {
+		if ((args.stage === "m3-transcript" || args.stage === "nav-simplify") && path.startsWith("/api/") && !ABSENT.has(path)) {
 			return dispatch(req, res, { home: scratch, stateDir: join(scratch, LAYOUT.state), host: "127.0.0.1", port: (server.address() as AddressInfo).port, app });
 		}
 		if (!ABSENT.has(path) && path !== "/favicon.ico" && !path.startsWith("/manifest") && !path.endsWith(".png")) unexpected.push(path);
@@ -467,6 +467,25 @@ try {
 		];
 		for (const [name, width, height, steps] of shots4) await capture(`m3-composer-${name}`, transcript, width, height, "dark", loaded, "bottom", [...steps, fits]);
 		if (posts.length) throw new Error(`m3-composer sent ${posts.join(", ")}: commands and references never send`);
+	}
+	if (stage === "nav-simplify") {
+		// Chat, Jobs and More are the only visible primary items either side of 900 px; More shows all seven rows at every width.
+		const fits = (lit: string, rows: number): Step => ["true", `(() => { const shown = [...document.querySelectorAll(".shell-sidebar-nav > a, .shell-tabs a")].filter(a => a.getClientRects().length);
+			return shown.map(a => a.textContent).join() === "Chat,Jobs,More" && shown.find(a => a.getAttribute("aria-current") === "page")?.textContent === "${lit}"
+				&& [...document.querySelectorAll(".more-menu > a")].filter(a => a.getClientRects().length).length === ${rows}; })()`];
+		const shots5: [string, string, string, number, number, number][] = [
+			["more-phone-dark-390x844", "#more", ".more-menu", 390, 844, 7], ["more-phone-dark-899x1000", "#more", ".more-menu", 899, 1000, 7],
+			["more-desktop-dark-900x1000", "#more", ".more-menu", 900, 1000, 7], ["more-desktop-dark-1440x1000", "#more", ".more-menu", 1440, 1000, 7],
+			["jobs-phone-dark-390x844", "#jobs", ".jobs-heading", 390, 844, 0], ["jobs-desktop-dark-1440x1000", "#jobs", ".jobs-heading", 1440, 1000, 0],
+			["history-desktop-dark-1440x1000", "#jobs?view=history", ".jobs-history-link", 1440, 1000, 0], ["map-phone-dark-390x844", "#map", ".map-screen", 390, 844, 0],
+			["overview-phone-dark-390x844", "#overview", ".overview", 390, 844, 0], ["overview-desktop-dark-1440x1000", "#overview", ".overview", 1440, 1000, 0],
+			["chat-desktop-dark-1440x1000", transcript, loaded, 1440, 1000, 0],
+		];
+		for (const [name, hash, ready, width, height, rows] of shots5) {
+			const lit = hash.startsWith("#sessions") ? "Chat" : hash.startsWith("#jobs") || hash === "#map" ? "Jobs" : "More";
+			await capture(`nav-${name}`, hash, width, height, "dark", ready, hash === transcript ? "bottom" : undefined, [fits(lit, rows)]);
+		}
+		if (posts.length) throw new Error(`nav-simplify sent ${posts.join(", ")}: navigation only reads`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);
