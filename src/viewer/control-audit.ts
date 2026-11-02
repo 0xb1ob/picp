@@ -4,8 +4,7 @@
  * the operator session's bridge half calls it for every request and outcome (src/dashboard-control.ts). The
  * inbox (`state/operator/inbox.jsonl`, cp-daemon P3) takes lines the same way: the viewer's `held`, the
  * session's `delivered`/`dropped`. `state/schedule-control.jsonl` (cp-hhuf P6) has two writers too: the viewer's
- * `request` lines and the parent's `claimed`/`outcome` lines (src/schedule-control.ts). `state/operator/answers.jsonl`
- * (cp-mxk4) had the session's `posted` lines too; since M2 PR2 only the viewer's `acked` lines remain until PR3.
+ * `request` lines and the parent's `claimed`/`outcome` lines (src/schedule-control.ts).
  *
  * `O_APPEND` with exactly one `write()` per line, then `fsync` — the `durableAppend` discipline
  * (src/json-store.ts), the only one safe for a file two processes add to at once. That module is not importable
@@ -14,7 +13,7 @@
 
 import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
-import { type AnswerLine, CONTROL_TEXT_MAX, controlInboxFile, controlJournalFile, type ControlAuditLine, type InboxLine, operatorAnswersFile, scheduleControlFile, type ScheduleControlLine } from "./control-files.ts";
+import { CONTROL_TEXT_MAX, controlInboxFile, controlJournalFile, type ControlAuditLine, type InboxLine, scheduleControlFile, type ScheduleControlLine } from "./control-files.ts";
 
 export function appendControlAudit(stateDir: string, line: ControlAuditLine): { ok: true } | { ok: false; error: string } {
 	const clipped = "text" in line && typeof line.text === "string" && line.text.length > CONTROL_TEXT_MAX ? { ...line, text: line.text.slice(0, CONTROL_TEXT_MAX) } : line;
@@ -29,11 +28,6 @@ export function appendInboxLine(stateDir: string, line: InboxLine): { ok: true }
 /** cp-hhuf P6: one line to `state/schedule-control.jsonl`, same discipline (the viewer's `request`, the parent's `claimed`/`outcome`). */
 export function appendScheduleControlLine(stateDir: string, line: ScheduleControlLine): { ok: true } | { ok: false; error: string } {
 	return appendLine(scheduleControlFile(stateDir), line);
-}
-
-/** cp-mxk4: one line to `state/operator/answers.jsonl`: bridge or schedule `posted`, the viewer's `acked`. */
-export function appendAnswerLine(stateDir: string, line: AnswerLine): { ok: true } | { ok: false; error: string } {
-	return appendLine(operatorAnswersFile(stateDir), line);
 }
 
 function appendLine(file: string, line: unknown): { ok: true } | { ok: false; error: string } {

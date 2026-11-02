@@ -241,8 +241,8 @@ export function claimCountFindings(
 export function deletedWithFeatureFindings(path: string, owner: string, evidence: string, exists: (path: string) => boolean): string[] {
 	const findings: string[] = [];
 	if (!REMOVER_RE.test(owner)) findings.push(`${path}: deleted-with-feature owner must name the removing PR or job (got "${owner}")`);
-	const sources = [...evidence.matchAll(/\b(?:src|extensions)\/[\w./-]+\.ts\b/g)].map((match) => match[0]);
-	if (sources.length === 0) findings.push(`${path}: deleted-with-feature names no removed source module (src/… or extensions/…)`);
+	const sources = [...evidence.matchAll(/\b(?:src|extensions|viewer-app)\/[\w./-]+\.tsx?\b/g)].map((match) => match[0]);
+	if (sources.length === 0) findings.push(`${path}: deleted-with-feature names no removed source module (src/…, extensions/… or viewer-app/…)`);
 	for (const source of sources) if (exists(source)) findings.push(`${path}: deleted-with-feature cites ${source}, which still exists`);
 	return findings;
 }

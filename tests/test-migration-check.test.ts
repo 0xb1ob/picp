@@ -14,6 +14,7 @@ const exists = (path: string) => path === "src/kept.ts";
 test("deleted-with-feature accepts a named remover and removed source modules, and needs no negative control", () => {
 	assert.deepEqual(deletedWithFeatureFindings("tests/x.test.ts", "cp-remove-x (#12)", "tested `src/x.ts`", exists), []);
 	assert.deepEqual(deletedWithFeatureFindings("tests/x.test.ts", "#12", "tested extensions/command-post/x.ts", exists), []);
+	assert.deepEqual(deletedWithFeatureFindings("tests/x.test.ts", "cp-remove-x", "removed `viewer-app/screens/X.tsx`", exists), []);
 });
 
 test("deleted-with-feature rejects a phase-only owner, no cited module, and a module still in the tree", () => {

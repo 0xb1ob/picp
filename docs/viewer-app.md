@@ -7,8 +7,7 @@ artifacts remain available. This is a read-only operational viewer, never an
 authority or decision endpoint. Decisions still go through the operator chat.
 Its writes are a browser's own Web Push subscription (see Web Push below), under `--require-tailnet`
 one message into the operator's own running session with its audit line (see Dashboard control below) — a message is
-exactly what the human could type in that chat, never an authorization — and an Answers acknowledgement, one `acked`
-line in `state/operator/answers.jsonl` that reaches no session and no parent and is not a decision. A Settings write is
+exactly what the human could type in that chat, never an authorization. A Settings write is
 an operator-configuration change, forwarded to the operator's own session, which validates, audits and writes the owner
 file; never a decision, grant or authorization.
 
@@ -34,7 +33,7 @@ Only this trusted startup/build command writes generated output. Requests never
 write operational state (the request-time writes are a device's Web Push
 subscription under `data/push/subscriptions/`, the dashboard-control audit line in
 `state/operator/dashboard.jsonl`, a Schedules page `request` line in `state/schedule-control.jsonl`, which the
-parent reads, and an Answers `acked` line in `state/operator/answers.jsonl`, which nothing reads but the dashboard), contact a gateway, invoke policy stores, probe process
+parent reads), contact a gateway, invoke policy stores, probe process
 liveness or communicate with a parent or worker (dashboard control talks only to the
 operator's own session, over its owner-only socket). No viewer request writes a settings file: a Settings change is one
 `settings_apply` frame to that session, which writes the owner file. Build failure is logged to
@@ -53,7 +52,7 @@ default-src 'none'; script-src 'self'; script-src-attr 'none'; worker-src 'self'
 `worker-src 'self'` and `manifest-src 'self'` are the only additions Web Push
 needs (the same-origin `/sw.js` and `/manifest.webmanifest`); nothing else is
 loosened. The separate published-board policy still forbids scripts. Host binding (opt-in `viewer.strict_host`),
-GET/HEAD-only handling (except `POST|DELETE /api/push/subscription`, `POST /api/operator/message`, `POST /api/schedules/request`, `POST /api/answers/ack`, `POST /api/settings/apply` and `POST /api/settings/restore`) and explorer
+GET/HEAD-only handling (except `POST|DELETE /api/push/subscription`, `POST /api/operator/message`, `POST /api/schedules/request`, `POST /api/settings/apply` and `POST /api/settings/restore`) and explorer
 confinement remain in force. HEAD never starts a refresh timer.
 
 ## Routes
@@ -61,19 +60,18 @@ confinement remain in force. HEAD never starts a refresh timer.
 | Entry | Destination |
 | --- | --- |
 | Overview / More | `#overview` / `#more` |
-| Decisions | `#decisions`; `#awaiting`, `#answers` and `#decided` open it scrolled to its Awaiting you, Answers to acknowledge and Decided sections |
+| Decisions | `#decisions`; `#awaiting` and `#decided` open it scrolled to its Awaiting you and Decided sections; the retired `#answers` opens Reports |
 | Sessions | `#sessions?view=you`, `#sessions?view=you&transcript=1&session=<file-id>`, `#sessions?view=parent`, `#sessions?view=workers&id=<id>` |
 | Jobs (List / Board / Map) / Job | `#jobs` / `#board` / `#map` / `#job/<safe-id>` |
 | Jobs History | `#jobs?view=history&project=&q=&since=&until=&date_field=&limit=&offset=` (the List's History link and its "older finished jobs" line open it). The screen reads `GET /api/jobs/history` with the same query (read-only; closed jobs, newest close first, 20 a page up to 100; `total`, `next_offset`, source `warnings`; 400 `{error}` for a bad date, range, field or page). It shares the pure query in `src/ledger-filter.ts` with `cp_job history` — the one viewer import of it (`tests/viewer-boundary.test.ts`) — and never reads a report body. Rows wrap long titles, reasons and headlines at 390 px and 1440 px; filters wrap into rows on a phone |
 | Reports / Schedules / Files / Settings | `#reports` / `#schedules` / `#files?root=<root-id>&path=<relative-path>` / `#settings` |
-| Reports Handoffs | `#reports?view=handoffs&project=` (the Reports page's Handoffs link). Reads `GET /api/handoffs` with the same `project` (read-only; pointers grouped by project, newest first, plus the unassociated bucket when no project is named; joined report and answer links; `complete: false` and an "Incomplete" line when a file, request or confinement bound cut the scan). A note opens as plain text from `GET /api/handoffs/file/<root>/<name>`, served only under `--require-tailnet` (src/viewer/handoffs-view.ts). Rows reuse the History list classes, which wrap long names at 390 px and 1440 px |
+| Reports Handoffs | `#reports?view=handoffs&project=` (the Reports page's Handoffs link). Reads `GET /api/handoffs` with the same `project` (read-only; pointers grouped by project, newest first, plus the unassociated bucket when no project is named; joined report links; `complete: false` and an "Incomplete" line when a file, request or confinement bound cut the scan). A note opens as plain text from `GET /api/handoffs/file/<root>/<name>`, served only under `--require-tailnet` (src/viewer/handoffs-view.ts). Rows reuse the History list classes, which wrap long names at 390 px and 1440 px |
 | Job report | `#report/<safe-id>`: the job's `state/artifacts/<id>/report.md` rendered as a page (`GET /api/report/<id>`; its images from `GET /api/report/<id>/files/<path>`, png/jpeg/gif/webp inside that dir only); linked from the job page and the Reports page's Job reports section |
 | Search | Shell dialog (f7g.7), available from every screen |
 | Version | Shell ⋮ menu row (phone and desktop) and the Sessions top bar; `GET /api/version` |
 | Web Push | `/sw.js`, `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`, `/api/push`, `POST\|DELETE /api/push/subscription` |
 | Dashboard control | `GET /api/operator/control` (status + this session's CSRF token), `POST /api/operator/message`, `POST /api/operator/restart` and `POST /api/parent/restart` (only under `--require-tailnet`) |
 | Schedule controls | `GET /api/schedules/control` (status + schedule token), `GET /api/schedules/policy?schedule_id=` (pure policy preview), `POST /api/schedules/request` (only under `--require-tailnet`; journaled for the parent) |
-| Answers | `GET /api/answers/control` (status + this viewer's answer token), `POST /api/answers/ack` (only under `--require-tailnet`; appends one `acked` line, no session or parent) |
 | Skills | `GET /api/skills` (only under `--require-tailnet`; read-only): the pi skills directly under `<agentDir>/skills` and `<home>/skills` with a valid `SKILL.md`, as `{name, description ≤ 200 chars, source}` plus a capped `skipped` `{name, reason}` list and an `omitted` count; never a SKILL.md body or a directory path (`src/viewer/skill-catalog.ts`) |
 | Settings | `GET /api/settings`, `POST /api/settings/apply`, `POST /api/settings/restore` (only under `--require-tailnet`; forwarded to the operator session, which validates, audits and writes the owner file) |
 | Stats | `#stats?range=&project=&mandate=&from=&to=` (range `1h`, `24h`, `7d` or `custom`; `from`/`to` only for custom, UTC ISO). The screen reads `GET /api/stats?range=1h\|24h\|7d\|custom&from=&to=&project=&mandate=&tz=<IANA zone>` (read-only; 400 `{error}` for a bad range; the browser's `tz` is optional) and `stats` in the `/api/stream?view=` allowlist |
@@ -487,16 +485,9 @@ Run history groups jobs by run (`src/viewer/schedule-run-groups.ts`): one anchor
 
 **Schedules body (P3b)** (`screens/Schedules.tsx`, `screens/ScheduleEditor.tsx`, `use-schedule-control.ts`). Each card adds a one-line policy summary ("Up to 3 reviewers, 3 at once, plus a report board; $X/run; model …", "1 at a time" when concurrency is 1, never more than the child-job cap allows), a readiness line from `GET /api/schedules/policy` ("Ready" or "Blocked: …"; an unreadable policy is never Ready, and a legacy grant-shaped policy is blocked as read-only) and **Last 3 runs** (anchor, trigger, time, open/closed job counts, result link; "closed" means every job closed, not that the run succeeded). An open durable run adds stage, child jobs admitted against the cap, the saved USD/token limits and the deadline (spend is not in the projection, so none is shown). Run now sends the active policy `revision` (a stale one is refused: "Schedule changed; review updated settings") and becomes **View active run** while a run is open; **Edit settings**, **Adopt saved settings** (a saved native revision not yet active) and **Deactivate policy** sit below the controls, so the two-column grid is unchanged. The editor is plain inputs, no `<form>`: USD, tokens, child jobs, parallelism and run hours, model policy (routing default or pinned by role), per-field errors (client `schedulePolicyErrors`, then the server's), read-only inherited ceilings and org-review config; Save sends one `save_policy` with the latest saved revision. Request lines: `Request queued · <op> · <id>`, `Starting run…`, `Run accepted · <job> · view run` (accepted, not completed), the server's `Settings saved · revision N (applies to the next run)`, `Deactivated · no new runs until a revision is adopted`. Since PR4 a legacy pointer reads `Legacy grant <id> · <status> · no fire mints a grant: …` (docs/contracts.md, *Native schedule migration*). Every send carries a `client_id` and is never retried or resent; the ids of accepted requests persist in `localStorage` `cp-schedule-receipts` (ids only). Layout holds at 390 px and 1440 px (44 px targets, `overflow-wrap: anywhere`, no inline style).
 
-**Answers to acknowledge** (cp-mxk4, docs/contracts.md §Answers to acknowledge). `screens/Answers.tsx` renders
-`answers` from `/api/decisions` as a section between Awaiting you and Being handled (`#answers`); it is absent while no
-journal exists. A row is the `[project]` tag, the time, the job and `read` links, the question (3-line clamp, the whole text
-as its title), the short answer, the **Full answer** expander (`white-space: pre-wrap`; only `http(s)` URLs and resolved
-local paths become links), the evidence list and a 44 px **✓ Acknowledge** button. The tick is one `POST /api/answers/ack`
-`{id}` with the `x-cp-control-token` header (`answers-control.ts`, `use-answers-control.ts`); the row hides at once and
-moves to the collapsed **Acknowledged · N** history (read-only). Disabled, with the reason line, unless control is on. It
-sends nothing to the operator session or the parent and never pushes. `screens/answers.css` uses only palette tokens
-(light and dark), no inline styles; rows wrap and long text breaks (`overflow-wrap: anywhere`) at 390 px and sit in the
-page column at 1440 px.
+**Answers to acknowledge** were removed by M2 PR3 (cp-m2-pr3-mh3m; docs/contracts.md §Response reports): a long final
+answer is a report under Reports, a short one stays in chat. `#answers` opens Reports; `GET /api/answers/control` is 404
+and `POST /api/answers/ack` the read-only viewer's 405.
 
 **Threads** were removed by #588 (docs/contracts.md §Operator threads, retired): the transcript is one unfiltered
 chat, with no thread chips, sidebar section, composer picker or `cp-thread` selection.

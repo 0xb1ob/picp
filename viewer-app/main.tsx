@@ -17,5 +17,4 @@ import "./screens/decided.css";
 import "./screens/sessions.css";
 import "./screens/files.css";
 import "./screens/map.css";
-import "./screens/answers.css";
 render(<App/>, document.getElementById("app")!);

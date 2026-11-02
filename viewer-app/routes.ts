@@ -28,7 +28,7 @@ export function navOwner(screen: Route["screen"], desktop: boolean): NavId {
  if (screen === "schedules" || screen === "files" || (screen === "settings" && !desktop) || (screen === "reports" && !desktop) || (screen === "stats" && !desktop)) return "more";
  return screen;
 }
-export interface Route {screen:"overview" | "more" | "decisions" | "sessions" | "files" | "map" | "jobs" | "job" | "report" | "board" | "reports" | "schedules" | "settings" | "stats"; jobId?:string; section:"awaiting" | "decided" | "answers" | null; query?:string; defaulted?:boolean}
+export interface Route {screen:"overview" | "more" | "decisions" | "sessions" | "files" | "map" | "jobs" | "job" | "report" | "board" | "reports" | "schedules" | "settings" | "stats"; jobId?:string; section:"awaiting" | "decided" | null; query?:string; defaulted?:boolean}
 export function route(hash: string): Route {
  const fallback: Route = {screen:"overview",section:null};
  let value: string; try { value = decodeURIComponent(hash.replace(/^#/,"")); } catch { return fallback; }
@@ -55,7 +55,9 @@ export function route(hash: string): Route {
  if (report) return {...fallback,screen:"report",jobId:report[1]!};
  if (value === "more" || value === "decisions" || value === "map" || value === "settings") return {...fallback,screen:value};
  // Awaiting and Decided are one Decisions page (audit P4 #24): their old hashes scroll to its sections.
- if (value === "awaiting" || value === "decided" || value === "answers") return {...fallback,screen:"decisions",section:value};
+ if (value === "awaiting" || value === "decided") return {...fallback,screen:"decisions",section:value};
+ // M2 retired Answers to acknowledge: a stale `#answers` link opens Reports, where the answer reports live.
+ if (value === "answers") return {...fallback,screen:"reports"};
  if (/^overview\/(awaiting|decided)$/.test(value)) return {...fallback,section:value.slice(9) as Route["section"]};
  if (value === "dashboard") return {...fallback,screen:"jobs"};
  if (/^(session\/)?cp-[A-Za-z0-9_-]+$/.test(value)) {

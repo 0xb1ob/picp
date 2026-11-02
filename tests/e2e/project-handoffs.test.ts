@@ -106,7 +106,7 @@ test("P6 project handoffs: fresh parent and operator, cp_parent jobs, HTTP and R
 	const all = await viewer.get("/api/handoffs");
 	assert.equal(all.status, 200, all.text);
 	assert.doesNotMatch(all.text, SENTINELS);
-	type Pointer = { name: string; root: string; href: string; truncated: boolean; evidence: Array<{ kind: string; value: string; project: string | null }>; answers: Array<{ id: string }>; reports: Array<{ job_id: string; href: string }> };
+	type Pointer = { name: string; root: string; href: string; truncated: boolean; evidence: Array<{ kind: string; value: string; project: string | null }>; reports: Array<{ job_id: string; href: string }> };
 	type View = { project: string | null; projects: string[]; groups: Array<{ project: string; handoffs: Pointer[] }>; unassociated: Pointer[]; sources: Array<{ root: string; state: string }>;
 		complete: boolean; scanned: number; skipped: number; truncated: number; escaped: number; warnings: Array<{ section: string }> };
 	const body = all.body as unknown as View;
@@ -119,8 +119,7 @@ test("P6 project handoffs: fresh parent and operator, cp_parent jobs, HTTP and R
 	const alpha = body.groups[0]!.handoffs[2]!;
 	assert.deepEqual(alpha.evidence, [{ kind: "job", value: alphaId, project: "ph-demo" }]);
 	// M2 PR2: the fresh parent migrated the legacy answer to a report at startup, so no journal answer joins any note.
-	assert.deepEqual([alpha.answers.map((a) => a.id), alpha.reports], [[], [{ job_id: alphaId, href: `#report/${alphaId}` }]]);
-	assert.deepEqual(body.groups[1]!.handoffs[1]!.answers, [], "the migrated journal is never read as answers");
+	assert.deepEqual([alpha.reports, "answers" in alpha], [[{ job_id: alphaId, href: `#report/${alphaId}` }], false]);
 	assert.ok(statSync(join(s.home, LAYOUT.state, "operator", "answers.jsonl.migrated")).isFile(), "the journal was archived, not unlinked");
 	assert.deepEqual(body.groups[0]!.handoffs[0]!.evidence.map((e) => [e.kind, e.value, e.project]), [
 		["project", "ph-demo", "ph-demo"], ["project", "ph-other", "ph-other"], ["repo", "https://github.com/acme/ph-other/pull/7", "ph-other"]]);

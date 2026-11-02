@@ -116,7 +116,6 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
  const keys = new Map<SessionEntry,string>(); // assistant text block → its reply-splits key
  const calls = new Map<string,SessionEntry>();
  const askCalls = new Set<string>(); // cp_parent ask calls: their result names the ask id
- const answerCalls = new Set<string>(); // cp_parent answer calls: their result names the ans- id (posted, or the first on a duplicate)
  for (const line of lines.lines) {
   const record = parseObject(line.text);
   const at = stamp(record?.timestamp);
@@ -151,7 +150,7 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
      const e = entry(`${base}-${i}`,at,"tool",role,b.type === "thinking" ? String(b.thinking ?? "") : `Arguments\n${JSON.stringify(b.arguments ?? {},null,2)}`);
      e.name = b.type === "thinking" ? "thinking" : str(b.name) ?? "tool";
      e.summary = b.type === "thinking" ? resultSummary(e.text,false) : "Result not recorded";
-     if (b.type === "toolCall" && str(b.id)) { calls.set(String(b.id),e); const action=sides === SIDES.you && e.name === "cp_parent" ? obj(b.arguments)?.action : undefined; if (action === "ask") askCalls.add(String(b.id)); if (action === "answer") answerCalls.add(String(b.id)); }
+     if (b.type === "toolCall" && str(b.id)) { calls.set(String(b.id),e); const action=sides === SIDES.you && e.name === "cp_parent" ? obj(b.arguments)?.action : undefined; if (action === "ask") askCalls.add(String(b.id)); }
      entries.push(e);
     }
    }
@@ -163,7 +162,6 @@ function parseTranscript(state: ViewerState, file: string, sides: {user:string;a
    e.name=str(message.toolName) ?? e.name ?? "tool";
    e.text+=`${call ? "\n\n" : ""}Result\n${text}`; e.failed=message.isError === true; e.summary=resultSummary(text,e.failed);
    if (callId && askCalls.has(callId)) { const id=parseObject(text)?.id; if (isAskId(id)) e.ask_id=id; }
-   if (callId && answerCalls.has(callId)) { const id=/\bans-[a-f0-9]{12}\b/.exec(text)?.[0]; if (id) e.answer_id=id; }
    if (!call) entries.push(e);
    if (callId) calls.delete(callId);
   } else {
