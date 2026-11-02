@@ -81,7 +81,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					description: "show with no mandate_id: which statuses to list. Omitted (or empty): active and paused only. Pass revoked and/or expired, or any subset, to list closed grants. Ignored when mandate_id is set",
 				}),
 			),
-			reviewer_model: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "Exact provider/model for gate and diff reviews. issue accepts string or absence; reviewer_model action accepts null to clear. Explicit call model wins, then newest eligible active mandate, expired continuation, project, existing routing." })),
+			reviewer_model: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "Reviewer model for gate and diff reviews; must be named in data/routing.json. issue accepts string or absence; reviewer_model action accepts null to clear. Explicit call model wins, then newest eligible active mandate, expired continuation, project, existing routing." })),
 			operator_quote: Type.Optional(Type.String({ description: "preapprove_risk: the operator's words pre-approving risk:high, verbatim from an operator message in this session. revoke: the operator's verbatim words revoking the grant, recorded as revoked_by operator; without it the revoke is recorded as the parent's, which never stops a schedule's fires" })),
 			risk_preapproval: Type.Optional(
 				Type.Object(

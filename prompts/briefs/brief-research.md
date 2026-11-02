@@ -127,8 +127,6 @@ rejected as `additionalProperties`). Booleans are `true`/`false`, matching the
     scope: S|M|L
     blocking_unknowns: true|false
     destructive_scope: true|false   (data migrations, deletions, force-pushes, schema changes)
-    suggested_implementer_model: <model identifier only, e.g. "claude-opus-4-6">
-    suggested_implementer_model_reason: <optional, one sentence why>
 
 Guessing is forbidden. An unknown stays listed as an unknown.
 

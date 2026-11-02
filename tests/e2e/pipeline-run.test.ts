@@ -1118,7 +1118,7 @@ test("P11d-measure: the planner's measurements cross the handoff as assessed; it
 	const assessed = await handoff(b, steps, { task: BUMP, assessment: { ...CONFIDENT, destructive_scope: true, suggested_implementer_model: "anthropic/claude-opus-5" } });
 	assert.match(assessed.evidence, /planner: scope M, confidence high, destructive/);
 	assert.deepEqual(routedAs(assessed.evidence), ["M", "high"]);
-	assert.match(assessed.evidence, /planner suggested model: anthropic\/claude-opus-5 \(advisory; routing decides\)/);
+	assert.doesNotMatch(assessed.evidence, /planner suggested|claude-opus-5/);
 	assert.deepEqual([assessed.routed.scope, assessed.routed.risk, assessed.routed.provenance], ["M", "high", { scope: "assessed", risk: "assessed" }]);
 	assert.ok(!JSON.stringify(assessed.routed).includes("claude-opus-5"), "the suggestion never becomes a routing input");
 	assert.equal(assessed.routed.risk_warning, undefined, "a planner-assessed high leaves the gate nothing to warn against");
@@ -1406,7 +1406,7 @@ test("#648: an operator-named implementer model overrides the rubric at start, a
 	const ids = await handoff(b, steps, { task: BUMP, assessment: suggestion, implementerModel: b.named, keep: true });
 	assert.deepEqual([ids.routed.source, ids.routed.model], ["override", b.named]);
 	assert.match(ids.evidence, /operator-named implementer model: .+ \(explicit override\)/);
-	assert.match(ids.evidence, /planner suggested model: anthropic\/claude-opus-5 \(advisory; routing decides\)/);
+	assert.doesNotMatch(ids.evidence, /planner suggested|claude-opus-5/);
 	routeNamed(b.home, ["mock/other"]);
 	await assert.rejects(b.post.advancePipeline(ids.researchId, { implementerModel: "mock/other" }), /already dispatched/);
 	// A recovery re-dispatch keeps the named model: the same failure choreography as P11d-recover.

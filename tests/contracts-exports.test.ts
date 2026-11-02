@@ -9,7 +9,7 @@
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import ts from "typescript";
@@ -78,4 +78,35 @@ test("the contracts barrel exports exactly the pinned surface: names, kinds, dec
 		return `${name}\t${d.kind}\t${hash(d.text)}\t${value}`;
 	});
 	assertGolden("contracts-exports.txt", lines.join("\n"));
+});
+
+// cp-8p74 P4: prompts, skills, profiles, tool descriptions and the routing docs name no model; routing.json chooses.
+const MODEL_ID = /\b(?:anthropic|openai|xai|google|mistral|deepseek|openrouter)\/[\w.-]+|\b(?:claude|gpt|grok|gemini)-[0-9a-z]|\bClaude (?:Haiku|Sonnet|Opus|Fable)\b/;
+/** Lines allowed to keep an id, by exact trimmed text; PR4 removes the profile ones. */
+const KEPT = new Set([
+	"model: anthropic/claude-sonnet-5", // docs/contracts.md profile example: PR4 drops profile models
+	"read each `SKILL.md` at session start (34 gpt-6-sol jobs, about 11.6K tokens", // measured history, not a choice
+]);
+
+test("P4: no provider/model id is named in prompts, skills, profiles, tool descriptions or the routing docs", () => {
+	const files = (dir: string, ext: RegExp) =>
+		readdirSync(join(REPO_ROOT, dir), { recursive: true, encoding: "utf8" }).filter((f) => ext.test(f)).map((f) => join(dir, f));
+	const section = (text: string, from: string, to: string) => {
+		const start = text.indexOf(from);
+		const end = text.indexOf(to, start);
+		assert.ok(start >= 0 && end > start, `section ${from} … ${to} not found`);
+		return text.slice(start, end);
+	};
+	const surfaces: Array<[string, string]> = [
+		...["AGENTS.md", ...files("prompts", /\.md$/), ...files("skills", /\.md$/), ...files("extensions", /\.ts$/), ...files("src/contracts", /\.ts$/)]
+			.map((file): [string, string] => [file, readFileSync(join(REPO_ROOT, file), "utf8")]),
+		// Until PR4 the profile frontmatter pair is the routed fallback source; every other profile line is guarded.
+		...files("profiles", /\.md$/).map((file): [string, string] => [file, readFileSync(join(REPO_ROOT, file), "utf8").replace(/^(?:model|fallbacks): .*$/gm, "")]),
+		["docs/contracts.md", readFileSync(join(REPO_ROOT, "docs/contracts.md"), "utf8")],
+		["docs/routing-rollout.md#matrix", section(readFileSync(join(REPO_ROOT, "docs/routing-rollout.md"), "utf8"), "## The matrix", "Profiles (")],
+	];
+	const hits = surfaces.flatMap(([file, text]) =>
+		text.split("\n").flatMap((line, i) => (MODEL_ID.test(line) && !KEPT.has(line.trim()) ? [`${file}:${i + 1}: ${line.trim()}`] : [])),
+	);
+	assert.deepEqual(hits, [], "omit the model and let data/routing.json decide; never name or suggest an id here");
 });

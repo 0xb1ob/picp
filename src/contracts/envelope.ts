@@ -40,11 +40,7 @@ export const PLANNER_BLOCKER_MAX_OPTIONS = 4;
 export const PLANNER_BLOCKED_ROUND_CAP = 2;
 
 /**
- * `suggested_implementer_model` is an identifier; the justification for it is
- * a separate, more generous field (real run logs show rationale up to ~175
- * chars once split from the id, e.g. "high-stakes incident-response runbook
- * with irreversible credential-revocation and live-restore steps; needs
- * strong judgment at each STOP point, not just mechanical execution").
+ * `suggested_implementer_model` is deprecated: accepted, never read, never surfaced.
  */
 export const SUGGESTED_MODEL_MAX_CHARS = 80;
 export const SUGGESTED_MODEL_REASON_MAX_CHARS = 240;
@@ -206,26 +202,17 @@ export const SelfAssessmentSchema = Type.Object(
 		destructive_scope: Type.Boolean({
 			description: "data migrations, deletions, force-pushes, schema changes",
 		}),
-		/**
-		 * Identifier only, e.g. "claude-opus-4-6" — never read as an input (see
-		 * pipeline.ts), but the pipeline DOES compare it against the routing
-		 * decision verbatim, so a prose value here silently breaks that
-		 * comparison. Workers naturally want to justify the suggestion too
-		 * (real run logs show "claude-opus-4-6 (high-stakes incident-response
-		 * runbook needing judgment at each STOP point)" at 191 chars against an
-		 * old 120-char cap); that justification has its own field below instead
-		 * of being crammed into the identifier.
-		 */
+		/** Deprecated: accepted for old envelopes, never read; routing decides (data/routing.json). */
 		suggested_implementer_model: Type.Optional(
 			Type.String({
 				maxLength: SUGGESTED_MODEL_MAX_CHARS,
-				description: 'A model identifier only, e.g. "claude-opus-4-6". Put the justification in suggested_implementer_model_reason, not here.',
+				description: "Deprecated; omit. Routing decides the implementer's model (data/routing.json).",
 			}),
 		),
 		suggested_implementer_model_reason: Type.Optional(
 			Type.String({
 				maxLength: SUGGESTED_MODEL_REASON_MAX_CHARS,
-				description: "One sentence: why this model matters for the follow-on work (e.g. judgment-heavy, irreversible steps). Optional.",
+				description: "Deprecated; omit.",
 			}),
 		),
 	},

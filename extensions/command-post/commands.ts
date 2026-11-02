@@ -246,7 +246,7 @@ export function registerCommands(pi: ExtensionAPI, deps: ExtensionDeps): void {
 	pi.registerCommand("cp-ask", {
 		description:
 			"Ask a small question about an onboarded project. A read-only worker answers it and the answer arrives " +
-			"as a card in this transcript — no plan to open. Usage: /cp-ask <project> <question…> [--model <ref>]",
+			"as a card in this transcript — no plan to open. Usage: /cp-ask <project> <question…> [--model <ref>] (--model must be named in data/routing.json)",
 		getArgumentCompletions: (prefix: string) => {
 			try {
 				const names = commandPost().registry.names().filter((name) => name.startsWith(prefix));

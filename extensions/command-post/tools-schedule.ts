@@ -206,7 +206,7 @@ export function registerScheduleTools(
 			run_hours: Type.Optional(Type.Integer({ minimum: 1 })),
 		}, { additionalProperties: false, description: "native add: per-run caps; each omitted one comes from the project override, then data/mandate-defaults.json" })),
 		overrides: Type.Optional(Type.Object({
-			model: Type.Optional(Type.String({ description: "provider/model for every stage of this run" })),
+			model: Type.Optional(Type.String({ description: "model for every stage of this run; must be named in data/routing.json. Omit: routing decides." })),
 			thinking: Type.Optional(StringEnum([...RUN_THINKING_LEVELS])), parallelism: Type.Optional(Type.Integer({ minimum: 1, maximum: 32 })),
 		}, { additionalProperties: false, description: "native run_now only: this run's execution, frozen at start" })),
 		cron: Type.Optional(Type.String({ description: "minute hour day-of-month month day-of-week" })),

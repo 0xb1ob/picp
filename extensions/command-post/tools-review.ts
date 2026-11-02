@@ -109,11 +109,11 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			),
 			scope: Type.Optional(StringEnum([...SCOPES], { description: SCOPE_CRITERIA })),
 			risk: Type.Optional(StringEnum([...RISKS], { description: RISK_CRITERIA })),
-			model: Type.Optional(Type.String({ description: "start: planner model override" })),
+			model: Type.Optional(Type.String({ description: "start: planner model. Omit: routing decides; an explicit one must be named in data/routing.json." })),
 			implementer_model: Type.Optional(Type.Union([Type.String({
 				minLength: 1,
 				maxLength: 128,
-				description: "start/advance: implementer model override (operator-named, explicit; routing allow-list applies). model stays the planner's; recover reuses the persisted one.",
+				description: "start/advance: implementer model. Omit: routing decides; an explicit one must be named in data/routing.json; null clears (advance). recover reuses the stored one.",
 			}), Type.Null({ description: "advance: clears a stored implementer pin so routing decides" })])),
 			wall_clock_seconds: Type.Optional(Type.Integer({
 				minimum: 1, description: "start: wall-clock bound in seconds for both planner and implementer; home/env defaults when omitted",
@@ -126,7 +126,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 						completeness: Type.Optional(Type.Boolean({ description: "one pass: does the artifact cover the task?" })),
 						voters: Type.Optional(Type.Integer({ minimum: 1, maximum: 5 })),
 						threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
-						model: Type.Optional(Type.String({ description: "cheap model for the panel" })),
+						model: Type.Optional(Type.String({ description: "panel model. Omit: routing decides; an explicit one must be named in data/routing.json." })),
 					},
 					{
 						additionalProperties: false,
@@ -138,7 +138,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 				Type.Object(
 					{
 						enabled: Type.Optional(Type.Boolean({ description: "gate `done` on a diff review of the pushed branch" })),
-						model: Type.Optional(Type.String({ description: "reviewer model override; routing decides when absent" })),
+						model: Type.Optional(Type.String({ description: "reviewer model. Omit: routing decides; an explicit one must be named in data/routing.json." })),
 					},
 					{
 						additionalProperties: false,
@@ -282,7 +282,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			reinforcement_send_id: Type.Optional(Type.String()), dependent_job_ids: Type.Optional(Type.Array(Type.String())),
 			recovery_authority_id: Type.Optional(Type.String()), expected_previous_attempt_id: Type.Optional(Type.String()),
 			current_artifact_sha256: Type.Optional(Type.String()), recovery_attempt_id: Type.Optional(Type.String()),
-			model: Type.Optional(Type.String({ description: "Explicit reviewer model override (provider/model-id)" })),
+			model: Type.Optional(Type.String({ description: "Omit: routing decides. An explicit reviewer model must be named in data/routing.json." })),
 			deliver_revise: Type.Optional(
 				Type.Boolean({ description: "Promote a revise verdict to the live planner. Default true." }),
 			),
@@ -386,7 +386,7 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 						"start (default): spawn the reviewer and return wait, or the decision if this attempt is already decided. status: what is pending and decided, changing nothing.",
 				}),
 			),
-			model: Type.Optional(Type.String({ description: "Explicit reviewer model override (provider/model-id)" })),
+			model: Type.Optional(Type.String({ description: "Omit: routing decides. An explicit reviewer model must be named in data/routing.json." })),
 			deliver_revise: Type.Optional(
 				Type.Boolean({ description: "Promote a revise verdict to the live implementer. Default true." }),
 			),

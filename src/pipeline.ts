@@ -1222,12 +1222,7 @@ export class PipelineRunner {
 			throw error;
 		}
 		this.store.setState(researchId, "implementing", this.#now());
-		const suggested = this.#selfAssessment(researchId)?.suggested_implementer_model;
-		const mismatch =
-			suggested && dispatch.model && suggested !== dispatch.model
-				? ` The planner suggested ${suggested}; routing chose ${dispatch.model} (${dispatch.routing ?? "no routing line"}).`
-				: "";
-		let dispatchMsg = `${record.ship_id}: implementer dispatched with the artifact as its task file.${mismatch}${dispatch.risk_warning ? ` ${dispatch.risk_warning}` : ""}`;
+		let dispatchMsg = `${record.ship_id}: implementer dispatched with the artifact as its task file.${dispatch.risk_warning ? ` ${dispatch.risk_warning}` : ""}`;
 		// If we're replaying a pass verdict, label it and check if the artifact changed.
 		if (!gateResult && last.verdict === "pass") {
 			const artifactChanged = artifact.modified_at !== undefined && artifact.modified_at > last.decided_at;
@@ -1538,15 +1533,6 @@ export class PipelineRunner {
 									// longer silently S/low — dispatch assesses it from the task on its
 									// own. Say that, rather than printing a default nobody chose.
 									` -> routing as scope ${routing.scope ?? "(inferred at dispatch)"} / risk ${routing.risk ?? "(inferred at dispatch)"}`,
-							]
-						: []),
-					// Recorded, never obeyed: a worker does not choose its successor's
-					// model. The operator sees the opinion next to the decision.
-					...(assessment?.suggested_implementer_model
-						? [
-								`planner suggested model: ${assessment.suggested_implementer_model}` +
-									(assessment.suggested_implementer_model_reason ? ` (${assessment.suggested_implementer_model_reason})` : "") +
-									" (advisory; routing decides)",
 							]
 						: []),
 					...(record.implementer_model ? [`operator-named implementer model: ${record.implementer_model} (explicit override)`] : []),

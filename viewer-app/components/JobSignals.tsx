@@ -34,7 +34,7 @@ export function CiSignal({job,badge=false}:{job:ViewerJob;badge?:boolean}) {
  return <span class={cls(ci ?? "none")}><span class="job-ci-dot" aria-hidden="true"/>{job.ci == null ? "no CI yet" : <>CI {ci}{sha && <> <code>{sha}</code></>}</>}</span>;
 }
 
-/** The model without its provider prefix (`anthropic/claude-opus-5-5` → `claude-opus-5-5`); the full id stays in the title. */
+/** The model without its provider prefix (`<provider>/<model>` → `<model>`); the full id stays in the title. */
 export const shortModel = (id:string | null) => id ? id.slice(id.lastIndexOf("/")+1) : "-";
 
 export function ModelName({job}:{job:ViewerJob}) { const id=job.script_path ?? job.model; return <code title={id ?? undefined}>{shortModel(id)}</code>; }
