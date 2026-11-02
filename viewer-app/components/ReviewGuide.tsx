@@ -64,7 +64,7 @@ export function ReviewGuide({guide: g}: {guide: Guide}) {
    {g.truncated && <p class="review-guide-warn">The reviewer saw a truncated diff{g.file_count === null ? "" : ` of ${g.file_count} files`}: this review does not cover the whole change.</p>}
    <ol>
     {g.stops.map((s, i) => <li key={i}><span class="review-guide-meta">attempt {s.attempt} · {s.list === "revisions" ? "revision request" : "reviewer reason"}{s.historical ? ` · earlier review (${verdictText(s.verdict)} on ${shortSha(s.head)}), not marked resolved` : ""}</span> {s.text}</li>)}
-    <li class="review-guide-files">{g.files_href ? <a href={g.files_href} target="_blank" rel="noopener noreferrer">PR Files ↗</a> : <span>PR files: no safe link recorded</span>} <span class="review-guide-meta">no recorded finding names a file or line</span></li>
+    <li class="review-guide-files">{g.files_href ? <a href={g.files_href} target="_blank" rel="noopener noreferrer">PR Files ↗</a> : <span>PR files: no safe link recorded</span>} <span class="review-guide-meta">no validated file or line location is recorded; a path named in the text above is not checked</span></li>
    </ol>
    {!g.stops.length && <p class="review-guide-meta">No findings or revision requests are recorded.</p>}
    {g.omitted_count > 0 && <p class="review-guide-meta">{g.omitted_count} more recorded {g.omitted_count === 1 ? "concern" : "concerns"} not shown.</p>}

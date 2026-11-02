@@ -200,6 +200,8 @@ test("P2-review-guide: parked, moved, reopened, equivalent, truncated and merged
 	assert.match(proseTab.$(".review-guide-start")?.textContent ?? "", /<script>alert\(1\)<\/script>/, "prose renders as text");
 	assert.equal(proseTab.$$(".review-guide script").length, 0);
 	assert.deepEqual(proseTab.$$(".review-guide-start a").map((a) => a.getAttribute("href")), ["https://gitlab.com/g/p/-/merge_requests/3/diffs"], "no invented location link");
+	assert.equal(proseTab.$(".review-guide-files .review-guide-meta")?.textContent, "no validated file or line location is recorded; a path named in the text above is not checked",
+		"prose citing src/app.ts:12 is not called location-free, nor validated");
 
 	// Both With the team entry points carry an explicit Review guide link to the job page.
 	const jobs = await view.open("#jobs");
