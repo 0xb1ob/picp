@@ -127,6 +127,17 @@ export function readLedger(state: ViewerState): Map<string, { title?: string | u
 	return out;
 }
 
+/** Job id → project: the ledger's `project:` label, a fleet record's `project` winning (as the Jobs list does). */
+export function jobProjects(state: ViewerState): Map<string, string> {
+	const out = new Map<string, string>(), ledger = readObject(join(runtimeRoot(state.home), "jobs.json"))?.jobs;
+	for (const job of Array.isArray(ledger) ? ledger.map(obj) : []) {
+		const label = (Array.isArray(job?.labels) ? job.labels : []).find((l): l is string => typeof l === "string" && l.startsWith("project:"));
+		if (typeof job?.id === "string" && label) out.set(job.id, label.slice("project:".length));
+	}
+	for (const job of fleetJobs(state)) { const project = str(job.project); if (project) out.set(String(job.job_id), project); }
+	return out;
+}
+
 export function readStatus(state: ViewerState, jobId: string): Json | undefined {
 	if (!isSafeId(jobId)) return undefined;
 	return readObject(join(state.stateDir, "runs", jobId, "status.json"));

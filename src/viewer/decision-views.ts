@@ -6,7 +6,7 @@ import { dashboard } from "./fleet-view.ts";
 import { jobArtifact, jobsView } from "./jobs-view.ts";
 import { decisions } from "./overview-decisions.ts";
 import { nonnegative, objectList, text, timestamp } from "./overview-read.ts";
-import { fleetJobs, isSafeId, obj, readLedger, readObject, type ViewerState } from "./sessions.ts";
+import { fleetJobs, isSafeId, jobProjects, obj, readLedger, readObject, type ViewerState } from "./sessions.ts";
 
 function screen(data: ReturnType<typeof decisions>, now: number): DecisionScreenResponse {
  const complete = data.askSource.availability !== "unavailable" && data.escalations.availability !== "unavailable";
@@ -83,6 +83,10 @@ export function decidedScreen(state: ViewerState, now = Date.now()): DecidedResp
  return {...screen(data,now), items:data.decision_items};
 }
 export function decisionsScreen(state: ViewerState, now = Date.now()): DecisionsResponse {
- const data = decisions(state,now);
- return {...screen(data,now), items:askDetails(state,data.awaiting.items,now,data), decided:data.decision_items};
+ const data = decisions(state,now), projectOf = jobProjects(state);
+ const resolved = (ids: string[]) => [...new Set(ids.flatMap(id => projectOf.get(id) ?? []))];
+ const base = screen(data,now);
+ // The project filter's identities: a recorded project wins over the job ids' fallback.
+ return {...base, parent_questions:base.parent_questions.map(q => ({...q, projects:resolved(q.job_ids)})), items:askDetails(state,data.awaiting.items,now,data),
+  decided:data.decision_items.map(d => ({...d, projects:d.project ? [d.project] : resolved(d.job_ids)}))};
 }

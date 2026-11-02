@@ -56,7 +56,9 @@ export function App() {
  if (current.screen === "decisions") return <DecisionPage current={current}/>;
  if (current.screen === "settings") return <SettingsPage current={current}/>;
  if (current.screen === "stats") return <StatsPage current={current}/>;
- return ["jobs","job","report","board","reports","schedules"].includes(current.screen) ? <JobsRoute key={`${current.screen}/${current.jobId ?? ""}?${current.query ?? ""}`} current={current}/> : <OverviewPage current={current}/>;
+ // A list's project selection never remounts it (Jobs keeps its phase tab); History and Handoffs key on their filters.
+ const listed = (current.screen === "jobs" || current.screen === "reports") && !new URLSearchParams(current.query).has("view");
+ return ["jobs","job","report","board","reports","schedules"].includes(current.screen) ? <JobsRoute key={`${current.screen}/${current.jobId ?? ""}?${listed ? withoutSelection(current.query) : current.query ?? ""}`} current={current}/> : <OverviewPage current={current}/>;
 }
 /** Scroll a page's `#awaiting`/`#decided` section into view once its data has loaded. */
 function useSection(current: Route, loaded: boolean) {
@@ -70,7 +72,7 @@ function DecisionPage({current}: {current:Route}) {
  useSection(current,resource.data !== null);
  return <Shell current={current} awaiting={resource.data?.awaiting_count ?? null} status={resource.status} updatedAt={resource.data?.generated_at ?? null}>
   {resource.error && <p role="alert" class="overview-error">{resource.error}{resource.data && " · showing last recorded data"}</p>}
-  {resource.data ? <Decisions data={resource.data} control={control}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
+  {resource.data ? <Decisions data={resource.data} control={control} selection={readSelection(current.query)}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
  </Shell>;
 }
 /** Settings (under More): its own GET and writes, no stream; once read it reloads only after a write, so the shell says stale, never live. */
@@ -104,7 +106,7 @@ function JobsRoute({current}:{current:Route}) {
   {missing ? <NotFound {...missing}/> : <>
   {resource.error && <p role="alert" class="overview-error">{resource.error}{data && " · showing last recorded data"}</p>}
   {summary?.warnings.map(w=><p role="alert" class="overview-error" key={w.section}>{w.section}: {w.message}</p>)}
-  {handoffs ? <Handoffs data={data as HandoffsResponse | null} refused={resource.code === 400}/> : history && resource.code === 400 ? <JobsHistory data={null} query={current.query ?? ""}/> : data ? history ? <JobsHistory data={data as JobsHistoryResponse} query={current.query ?? ""}/> : current.screen === "job" ? <JobDetail data={data as JobResponse} initial={current.query === "tab=transcript" ? "transcript" : undefined}/> : current.screen === "report" ? <JobReport data={data as JobReportResponse}/> : current.screen === "board" ? <Board data={data as BoardResponse}/> : current.screen === "reports" ? <Reports data={data as ReportsResponse}/> : current.screen === "schedules" ? <Schedules data={data as SchedulesResponse} control={scheduleControl}/> : <Jobs data={data as JobsResponse}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
+  {handoffs ? <Handoffs data={data as HandoffsResponse | null} refused={resource.code === 400}/> : history && resource.code === 400 ? <JobsHistory data={null} query={current.query ?? ""}/> : data ? history ? <JobsHistory data={data as JobsHistoryResponse} query={current.query ?? ""}/> : current.screen === "job" ? <JobDetail data={data as JobResponse} initial={current.query === "tab=transcript" ? "transcript" : undefined}/> : current.screen === "report" ? <JobReport data={data as JobReportResponse}/> : current.screen === "board" ? <Board data={data as BoardResponse}/> : current.screen === "reports" ? <Reports data={data as ReportsResponse} selection={readSelection(current.query)}/> : current.screen === "schedules" ? <Schedules data={data as SchedulesResponse} control={scheduleControl}/> : <Jobs data={data as JobsResponse} selection={readSelection(current.query)}/> : <p role="status">{resource.error ? "Recorded data unavailable" : "Loading"}</p>}
   </>}
  </Shell>;
 }
@@ -119,6 +121,6 @@ function OverviewPage({current}: {current:Route}) {
  const workers = !resource.error && resource.data && "in_flight" in resource.data && resource.data.availability.fleet === "ok" && resource.data.availability.ledger !== "unavailable" ? resource.data.in_flight : undefined;
  return <Shell current={current} awaiting={resource.data && "awaiting" in resource.data ? resource.data.awaiting.count : null} status={resource.status} updatedAt={resource.data?.generated_at ?? null}>
   {resource.error && <p role="alert" class="overview-error">{resource.error}{loaded && " · showing last recorded data"}</p>}
-  {current.screen === "sessions" || current.screen === "files" ? <DetailScreen key={`${current.screen}?${current.screen === "sessions" ? withoutSelection(current.query) : current.query ?? ""}`} current={current} workers={workers}/> : resource.data ? "awaiting" in resource.data ? current.screen === "more" ? <More data={resource.data} push={push}/> : <Overview data={resource.data} control={control}/> : <DependencyMap data={resource.data}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}
+  {current.screen === "sessions" || current.screen === "files" ? <DetailScreen key={`${current.screen}?${current.screen === "sessions" ? withoutSelection(current.query) : current.query ?? ""}`} current={current} workers={workers}/> : resource.data ? "awaiting" in resource.data ? current.screen === "more" ? <More data={resource.data} push={push}/> : <Overview data={resource.data} control={control} selection={readSelection(current.query)}/> : <DependencyMap data={resource.data}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}
  </Shell>;
 }

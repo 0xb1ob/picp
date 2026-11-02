@@ -15,7 +15,7 @@ import { parseObject, source, timestamp } from "./overview-read.ts";
 import { modelWindows, operatorContext, parentContext, workerContext } from "./context-usage.ts";
 import { modelText } from "./model-text.ts";
 import { parseSkillLines } from "./skill-mentions.ts";
-import { fleetJobs, num, obj, readObject, resolveSessionFile, runtimeRoot, sessionRoots, sidebar, str, type Json, type ViewerState } from "./sessions.ts";
+import { jobProjects, num, obj, resolveSessionFile, sessionRoots, sidebar, str, type Json, type ViewerState } from "./sessions.ts";
 import { BACKLOG_BYTES, readLines, startOffset } from "./tail.ts";
 
 const sendId = (v: unknown): v is string => typeof v === "string" && /^ps-\d{14}-[a-f0-9]{8}$/.test(v);
@@ -70,12 +70,7 @@ function projectNames(state: ViewerState): Set<string> {
 }
 /** Id/URL → project from fleet, ledger labels, asks, escalations and registered repos; never the mandates (they drift). */
 function refProject(state: ViewerState, d: ReturnType<typeof decisions>): (ref: string) => string | undefined {
- const jobs = new Map<string,string>(), rawLedger = readObject(join(runtimeRoot(state.home),"jobs.json"))?.jobs;
- for (const j of Array.isArray(rawLedger) ? rawLedger.map(obj) : []) {
-  const label = (Array.isArray(j?.labels) ? j.labels : []).find((l): l is string => typeof l === "string" && l.startsWith("project:"));
-  if (typeof j?.id === "string" && label) jobs.set(j.id,label.slice("project:".length));
- }
- for (const j of fleetJobs(state)) { const p = str(j.project); if (p) jobs.set(String(j.job_id),p); }
+ const jobs = jobProjects(state);
  const asks = new Map(d.askHistory.value.map(({ask}) => [ask.id,str(ask.project)]));
  const escalations = new Map(d.escalations.value.map(e => [String(e.id),(Array.isArray(e.job_ids) ? e.job_ids : []).map(id => jobs.get(String(id))).find(Boolean)]));
  const repos = [...projectRepos(state)].map(([name,r]) => [name,`${r.kind} ${r.web_base_url}/${r.path}`.toLowerCase()] as const);
