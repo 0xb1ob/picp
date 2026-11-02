@@ -225,8 +225,8 @@ test("P17-decisions-page: the served Decisions page stacks Awaiting, Being handl
 	assert.match(tab.text(), /Close md-x\?/);
 	for (const label of ["Desktop primary", "Primary"]) {
 		const links = tab.$$(`nav[aria-label="${label}"] a`);
-		assert.deepEqual(links.filter((a) => a.querySelector(".shell-count")).map((a) => [a.getAttribute("href"), a.querySelector(".shell-count")!.textContent]), [["#decisions", "3"]], label);
-		assert.deepEqual(links.filter((a) => a.getAttribute("aria-current") === "page").map((a) => a.getAttribute("href")), ["#decisions"], label);
+		assert.deepEqual(links.filter((a) => a.querySelector(".shell-count")).map((a) => [a.getAttribute("href"), a.querySelector(".shell-count")!.textContent]), [["#more", "3"]], label);
+		assert.deepEqual(links.filter((a) => a.getAttribute("aria-current") === "page").map((a) => a.getAttribute("href")), ["#more"], label);
 	}
 
 	// The Decided log: today on the for-you tab, the closes folded, the job id leading once, the quote clamped.

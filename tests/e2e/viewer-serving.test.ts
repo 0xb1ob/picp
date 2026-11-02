@@ -810,7 +810,8 @@ test("P21-render-more: More holds Stats, Reports, Schedules, Files and Settings,
 	await tab.find('a[href="#files"]');
 	const html = tab.$("main")!.outerHTML;
 	for (const screen of ["stats", "reports", "schedules", "files"]) assert.ok(tab.$(`a[href="#${screen}"]`), screen);
-	for (const screen of ["stats", "reports", "settings"]) assert.ok(tab.$(`a.more-phone[href="#${screen}"]`), `${screen} is a phone link`);
+	for (const screen of ["overview", "decisions", "settings"]) assert.ok(tab.$(`a[href="#${screen}"]`), `${screen} is a More link on every width`);
+	assert.equal(tab.$("a.more-phone"), null, "no phone-only More row");
 	for (const screen of ["awaiting", "decided", "board", "map"]) assert.ok(!tab.$$("main a").some((a) => a.getAttribute("href") === `#${screen}`), screen);
 	assert.doesNotMatch(html, /aria-disabled="true"|#mandates/);
 });

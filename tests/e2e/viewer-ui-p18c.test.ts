@@ -595,11 +595,11 @@ test("P18-map-render: Map renders lanes, history, legend, selection, done folds,
 	for (const phase of ["working", "not dispatched", "held", "done"]) assert.ok(map.$$(".map-graph small").some((s) => s.textContent === phase), phase);
 	assert.ok(map.$(".map-selection-empty svg"));
 
-	// Map is a Jobs view: List | Board | Map, Map current; the sidebar has eight links, the tab bar five, Jobs lit in both.
+	// Map is a Jobs view: List | Board | Map, Map current; the sidebar and the tab bar have Chat, Jobs, More, Jobs lit in both.
 	assert.deepEqual(map.$$('nav[aria-label="Jobs view"] a').map((a) => [a.getAttribute("href"), a.textContent, a.getAttribute("aria-current")]), [["#jobs", "List", null], ["#board", "Board", null], ["#map", "Map", "page"]]);
 	const nav = (label: string) => map.document.querySelectorAll(`nav[aria-label="${label}"] a`) as unknown as Element[];
-	assert.deepEqual([...nav("Desktop primary")].map((a) => a.getAttribute("href")), ["#overview", "#decisions", "#jobs", "#sessions", "#stats", "#reports", "#settings", "#more"]);
-	assert.deepEqual([...nav("Primary")].map((a) => a.getAttribute("href")), ["#overview", "#decisions", "#jobs", "#sessions", "#more"]);
+	assert.deepEqual([...nav("Desktop primary")].map((a) => a.getAttribute("href")), ["#sessions", "#jobs", "#more"]);
+	assert.deepEqual([...nav("Primary")].map((a) => a.getAttribute("href")), ["#sessions", "#jobs", "#more"]);
 	for (const label of ["Desktop primary", "Primary"]) assert.deepEqual([...nav(label)].filter((a) => a.getAttribute("aria-current") === "page").map((a) => a.getAttribute("href")), ["#jobs"], label);
 	assert.equal(map.root.querySelectorAll("script, [style], [onclick]").length, 0);
 
@@ -736,7 +736,7 @@ test("P18-shell-menu: the ⋮ menu, page header and phone header across screens;
 	// A screen with no header of its own (Sessions while it loads) brings back the shell's fallback row, with no <h1>.
 	tab.go("#sessions?view=you");
 	const fallback = await tab.find(".shell-main > .page-header.page-header-fallback");
-	assert.equal(fallback.querySelector("p")?.textContent, "Sessions");
+	assert.equal(fallback.querySelector("p")?.textContent, "Chat");
 	assert.ok(fallback.querySelector(".page-header-end > .shell-live > span") && fallback.querySelector(".page-header-end > .shell-more:last-child"), "the live dot and ⋮ stay");
 	assert.deepEqual([tab.$$("h1").length, menus().length], [0, 1], "the fallback returns when the screen drops its header");
 	tab.release();
