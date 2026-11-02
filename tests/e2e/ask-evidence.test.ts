@@ -3,7 +3,6 @@
  * or CI run from retained records (PR A); the served Job page and operator composer carry one such reference (PR B).
  */
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
@@ -12,9 +11,9 @@ import { LAYOUT, paths } from "../../src/contracts.ts";
 import { readParentLock } from "../../src/parent-lock.ts";
 import { tunnelConfigFile, tunnelRuntimeFile } from "../../src/service/daemon-tunnel-files.ts";
 import { controlRecordFile } from "../../src/viewer/control-files.ts";
-import { EVIDENCE_LOOKUP_SHA } from "../../src/viewer/version-view.ts";
+import { EVIDENCE_LOOKUP_FILE } from "../../src/viewer/version-view.ts";
 import { dashboard, openTab, operatorSession, type Tab, until } from "../harness/dashboard.ts";
-import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, MockProvider, REPO_ROOT, startRpc } from "../harness/index.ts";
+import { CP_BRIDGE_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, MockProvider, startRpc } from "../harness/index.ts";
 import { call } from "../harness/remote.ts";
 import { details, type End, type Ends, failed, ok, text } from "./project-tracker-helpers.ts";
 
@@ -199,8 +198,8 @@ async function timeline(t: TestContext, port: number, id: string, storage = new 
 }
 
 /** A served home seeded by `uiSeed` with a running operator dashboard-control server. */
-async function served(t: TestContext, seedMore: (stateDir: string, home: string) => void = () => {}) {
-	const d = await dashboard(t, { seed: (stateDir, home) => { uiSeed(home); seedMore(stateDir, home); } });
+async function served(t: TestContext, seedMore: (stateDir: string, home: string) => void = () => {}, env: Record<string, string> = {}) {
+	const d = await dashboard(t, { env, seed: (stateDir, home) => { uiSeed(home); seedMore(stateDir, home); } });
 	return { ...d, session: await operatorSession(t, d.stateDir) };
 }
 
@@ -298,8 +297,19 @@ test("P1-ask-ui 3: each same-head CI run keeps its run id; a run-less row names 
 	assert.equal(evidence(ends, "ci2").historical.length, 5, "the head-level reference reads every observation of A, run-less included");
 });
 
-test("P1-ask-ui 4: sparse ledger-only job, removed record, cross-project selector and an old bridge fail explicitly", { timeout: 300_000 }, async (t) => {
-	const d = await served(t);
+test("P1-ask-ui 4: sparse ledger-only job, removed record, cross-project selector and an old or unknown bridge fail explicitly", { timeout: 300_000 }, async (t) => {
+	// The bridge's commit is checked in a fixture repo (CP_VERSION_REPO), whatever this checkout's depth.
+	const repo = createScratchRepo({ withRemote: false });
+	t.after(() => repo.cleanup());
+	const before = repo.head();
+	repo.write(EVIDENCE_LOOKUP_FILE, "export {};\n");
+	const after = repo.commitAll("evidence lookup");
+	const d = await served(t, () => {}, { CP_VERSION_REPO: repo.path });
+	const bridge = (commit: string) => {
+		const record = JSON.parse(readFileSync(controlRecordFile(d.stateDir), "utf8"));
+		writeFileSync(controlRecordFile(d.stateDir), JSON.stringify({ ...record, commit }));
+	};
+	bridge(after);
 	const done = await timeline(t, d.port, "cp-askdone", new Map());
 	const legacy = (await row(done, /^Review 1 /)).querySelector("a.evidence-ask")!;
 	assert.deepEqual([legacy.textContent, refOf(legacy)], ["Ask about this job", { kind: "job", project: "demo-app", job_id: "cp-askdone" }], "no head recorded: the job, never a guess");
@@ -314,15 +324,15 @@ test("P1-ask-ui 4: sparse ledger-only job, removed record, cross-project selecto
 	composer.click(await composer.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
 	const [message] = (await until(() => d.session.injected, (rows) => rows.length === 1, "the send"))[0]!;
 
-	// The old bridge: the operator session runs a commit before the lookup landed.
-	const parent = execFileSync("git", ["-C", REPO_ROOT, "rev-parse", `${EVIDENCE_LOOKUP_SHA}^`], { encoding: "utf8" }).trim();
-	const record = JSON.parse(readFileSync(controlRecordFile(d.stateDir), "utf8"));
-	writeFileSync(controlRecordFile(d.stateDir), JSON.stringify({ ...record, commit: parent }));
-	const old = await timeline(t, d.port, "cp-ask1", new Map());
-	await old.waitText(/Asking about evidence is unsupported: the operator session predates evidence lookup/);
-	assert.equal(old.$$("a.evidence-ask").length, 0, "no reference link while the bridge cannot resolve one");
-	assert.ok(old.$$(".evidence-ask-unsupported").length > 0);
-	assert.equal(old.$$(".job-links a").find((a) => a.textContent === "Ask about this failure")!.getAttribute("href")!.includes("ref="), false, "the plain question names no record");
+	// The old bridge runs a commit without the lookup; the unknown one a commit this checkout cannot read.
+	for (const [commit, why] of [[before, /unsupported: the operator session predates evidence lookup/], ["d".repeat(40), /unsupported: the operator session's loaded commit cannot be read here/]] as const) {
+		bridge(commit);
+		const old = await timeline(t, d.port, "cp-ask1", new Map());
+		await old.waitText(why);
+		assert.equal(old.$$("a.evidence-ask").length, 0, "no reference link while the bridge cannot resolve one");
+		assert.ok(old.$$(".evidence-ask-unsupported").length > 0);
+		assert.equal(old.$$(".job-links a").find((a) => a.textContent === "Ask about this failure")!.getAttribute("href")!.includes("ref="), false, "the plain question names no record");
+	}
 
 	rmSync(join(d.home, paths.reviewFile("cp-askdone", 1)));
 	d.session.control.stop();

@@ -469,8 +469,8 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 				// With a merge_sha, finished_at is the merge receipt's merged_at (jobs-view.ts).
 				const running = merge && SHA.test(merge) ? readRunning(merge, versionOptions, job.job.finished_at)
 					.catch(() => ({ checkout: "unknown" as const, since: null, why: "version read failed", processes: [] })) : Promise.resolve(undefined);
-				const lookup = evidenceLookup(versionOptions).catch(() => undefined);
-				Promise.all([running, lookup]).then(([ran, evidence]) => sendView(req, res, { ...job, ...(ran ? { running: ran } : {}), ...(evidence ? { evidence_lookup: evidence } : {}) }))
+				const lookup = evidenceLookup(versionOptions).catch(() => ({ supported: false, why: "evidence lookup could not be checked" }));
+				Promise.all([running, lookup]).then(([ran, evidence_lookup]) => sendView(req, res, { ...job, ...(ran ? { running: ran } : {}), evidence_lookup }))
 					.catch(() => { if (!res.headersSent) sendJson(res, 500, { error: "internal" }); });
 				return;
 			}

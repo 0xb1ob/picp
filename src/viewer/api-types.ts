@@ -211,7 +211,7 @@ export interface JobResponse {
  timeline: {at:string;label:string;meta:string;tone:string;reference?:EvidenceReference;findings?:TimelineFinding[];findings_elided?:number}[]; timeline_truncated: boolean;
  /** The job's own reference; null when the ledger names no project for `cp_parent jobs show` to check. */
  ask_reference: EvidenceReference | null;
- /** `GET /api/job/<id>`: can the running operator session resolve evidence references (version-view.ts)? */
+ /** Set on every `GET /api/job/<id>` (version-view.ts `evidenceLookup`); an unreadable commit is `supported: false`. */
  evidence_lookup?: {supported: boolean; why: string};
  files_href: string | null; artifact_href: string | null; artifact_name: string | null; run_href: string | null;
  /** `#report/<id>` when the job has a report.md; absent or null otherwise. */

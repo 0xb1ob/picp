@@ -253,14 +253,36 @@ export async function readRunning(sha: string, options: VersionOptions, mergedAt
 	};
 }
 
-/** P1 PR A (#704): the first commit whose `cp_parent jobs show` takes an evidence selector. */
-export const EVIDENCE_LOOKUP_SHA = "e49db4d18e5e6892863d791da0e6e21a8232448c";
+/** P1 PR A (#704) added this module with the `cp_parent jobs show` evidence selector; a commit's own tree answers. */
+export const EVIDENCE_LOOKUP_FILE = "src/operator-evidence.ts";
+const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const lookupCache = new Map<string, boolean>();
+/** Whether `commit`'s tree holds the evidence module, from that commit alone (no ancestry, so any checkout depth). */
+async function hasEvidenceLookup(repo: string, commit: string | null, git: GitRunner): Promise<boolean | null> {
+	if (!commit || !SHA.test(commit)) return null;
+	const key = `${repo}\0${commit}`;
+	const hit = lookupCache.get(key);
+	if (hit !== undefined) return hit;
+	const out = await git(repo, ["diff", "--name-only", EMPTY_TREE, commit, "--", EVIDENCE_LOOKUP_FILE], { maxBytes: 4096 });
+	if (!out.ok) return null;
+	if (lookupCache.size >= 100) lookupCache.clear();
+	lookupCache.set(key, out.stdout.trim() !== "");
+	return out.stdout.trim() !== "";
+}
 
-/** False only when the running operator session loaded a commit without PR A; down or unreadable stays undefined. */
-export async function evidenceLookup(options: VersionOptions): Promise<{ supported: boolean; why: string } | undefined> {
-	const state = (await readRunning(EVIDENCE_LOOKUP_SHA, options)).processes.find((p) => p.role === "operator")?.state;
-	if (state === "loaded") return { supported: true, why: "the operator session resolves evidence references" };
-	return state === "not_loaded" ? { supported: false, why: `the operator session predates evidence lookup — ${FIXES.operator}` } : undefined;
+/**
+ * Supported only when the operator's loaded commit (or, with no operator running, the checkout the next one starts
+ * from) has the evidence lookup; an old or unresolvable commit is unsupported, never a latest-record fallback.
+ */
+export async function evidenceLookup(options: VersionOptions): Promise<{ supported: boolean; why: string }> {
+	const view = await readVersion(options);
+	const repo = options.repo ?? (options.env ?? process.env).CP_VERSION_REPO ?? PACKAGE_ROOT;
+	const operator = view.processes.find((p) => p.role === "operator");
+	const down = !operator || operator.state === "down";
+	const has = await hasEvidenceLookup(repo, down ? view.deployed?.sha ?? null : operator.commit, options.git ?? runGit);
+	if (has) return { supported: true, why: down ? "the next operator session starts from a checkout that resolves evidence references" : "the operator session resolves evidence references" };
+	if (has === false) return { supported: false, why: down ? "this checkout predates evidence lookup" : `the operator session predates evidence lookup — ${FIXES.operator}` };
+	return { supported: false, why: down ? "this checkout's commit cannot be read, so evidence lookup cannot be confirmed" : `the operator session's loaded commit cannot be read here, so evidence lookup cannot be confirmed — ${FIXES.operator}` };
 }
 
 /** The cp-bridge footer line: the operator layer is this session's own loaded commit, not its record. */
