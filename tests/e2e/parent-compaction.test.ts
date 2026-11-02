@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { isoTimestamp, LAYOUT } from "../../src/contracts.ts";
-import { initJobsDocument } from "../../src/ledger.ts";
+import { initJobsDocument, Ledger } from "../../src/ledger.ts";
 import { frameBatch } from "../../src/parent-outbox.ts";
 import { buildPiArgs, COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT, startRpc, type ScriptStep, waitFor } from "../harness/index.ts";
 
@@ -196,4 +196,73 @@ test("S24 parent: length stops cancel threshold compaction without disabling lat
 	assert.match(readFileSync(log, "utf8"), /hold engaged/);
 	assert.ok(provider.requests("s24-parent-over").length >= 2);
 	assert.equal((readFileSync(log, "utf8").match(/threshold_compaction_cancelled/g) ?? []).length, 5);
+});
+
+
+const DIGEST_TYPES = ["cp-parent-guidance", "cp-memory", "cp-standing-orders", "cp-recent-work"] as const;
+
+/**
+ * S1-03/E1: each resume of the same session file sends only the digest types whose content changed; startup and a
+ * successful compaction send every available type once. Whole-set emission fails the memory-only count.
+ */
+test("B1 parent: resumes send only changed digests and a successful compaction restores the full set without a turn", { timeout: 120_000 }, async (t) => {
+	const home = createScratchHome();
+	const provider = await MockProvider.start();
+	const model = provider.addScript("b1-parent", [{ kind: "text", text: "B1 ready." }, { kind: "text", text: "B1 compact summary." }], { onExhausted: "repeat" });
+	const agent = createAgentDir({ provider, settings: { compaction: { enabled: false, keepRecentTokens: 1 }, retry: { enabled: false } } });
+	const children: Array<ReturnType<typeof startRpc>> = [];
+	t.after(async () => { for (const child of children) await child.close(); agent.cleanup(); await provider.stop(); home.cleanup(); });
+	mkdirSync(join(home.path, LAYOUT.data), { recursive: true });
+	writeFileSync(join(home.path, LAYOUT.data, "parent.json"), "{}");
+	writeFileSync(join(home.path, LAYOUT.data, "standing-orders.md"), "# Standing orders\n\nB1 order.\n");
+	writeFileSync(join(home.path, LAYOUT.learningsFile), "# Learnings\n\n- B1 first memory. <!--P-->\n");
+	initJobsDocument(home.path, "cp");
+	const closeOne = async (title: string) => {
+		const ledger = new Ledger({ home: home.path });
+		await ledger.close((await ledger.create({ title, project: "demo", delivery: "pr", kind: "ship" })).id, `landed ${title}`);
+	};
+	await closeOne("B1 first close");
+	const sessionFile = join(home.path, "b1-parent.jsonl");
+	const open = async (id: string) => {
+		const child = startRpc({ cwd: home.path, env: { ...agent.env, CP_HOME: home.path },
+			args: buildPiArgs({ cwd: home.path, model, sessionFile, extensions: [COMMAND_POST_EXTENSION] }) });
+		children.push(child);
+		child.send({ type: "get_state", id });
+		await child.waitFor((r) => r.type === "response" && r.id === id, 30_000);
+		return child;
+	};
+	// Per-type custom_message counts in the persisted session: the whole file, and after its last compaction.
+	const counts = (afterCompaction = false) => {
+		const entries = readFileSync(sessionFile, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { type: string; customType?: string; display?: boolean });
+		const from = afterCompaction ? entries.findLastIndex((entry) => entry.type === "compaction") + 1 : 0;
+		const digests = entries.slice(from).filter((entry) => entry.type === "custom_message" && DIGEST_TYPES.includes(entry.customType as never));
+		assert.ok(digests.every((entry) => entry.display === false), "every digest is hidden");
+		const result = Object.fromEntries(DIGEST_TYPES.map((type) => [type, digests.filter((entry) => entry.customType === type).length]));
+		t.diagnostic(`${afterCompaction ? "after compaction" : "session"} ${JSON.stringify(result)}`);
+		return result;
+	};
+	const each = (n: number, extra: Partial<Record<(typeof DIGEST_TYPES)[number], number>> = {}) => ({ ...Object.fromEntries(DIGEST_TYPES.map((type) => [type, n])), ...extra });
+	const resume = async (id: string) => { await children.at(-1)!.close(); await open(id); };
+
+	const first = await open("start");
+	first.send({ type: "prompt", id: "begin", message: "B1 begin." });
+	await first.waitFor((r) => r.type === "agent_settled", 30_000);
+	assert.deepEqual(counts(), each(1), "initial complete set");
+	await resume("unchanged");
+	assert.deepEqual(counts(), each(1), "an unchanged resume sends nothing");
+	writeFileSync(join(home.path, LAYOUT.learningsFile), "# Learnings\n\n- B1 changed memory. <!--P-->\n");
+	await resume("memory");
+	assert.deepEqual(counts(), each(1, { "cp-memory": 2 }), "memory-only change sends memory alone");
+	await closeOne("B1 second close");
+	await resume("recent");
+	const last = children.at(-1)!;
+	assert.deepEqual(counts(), each(1, { "cp-memory": 2, "cp-recent-work": 2 }), "recent-only change sends recent work alone");
+	last.send({ type: "compact", id: "compact" });
+	const compacted = await last.waitFor((r) => r.type === "response" && r.id === "compact", 30_000);
+	assert.equal(compacted.success, true, JSON.stringify(compacted));
+	last.send({ type: "get_state", id: "settled" });
+	await last.waitFor((r) => r.type === "response" && r.id === "settled", 10_000);
+	assert.deepEqual(counts(true), each(1), "a successful compaction sends the complete set once");
+	assert.deepEqual(counts(), each(2, { "cp-memory": 3, "cp-recent-work": 3 }));
+	assert.equal(provider.requests("b1-parent").length, 2, "one prompt and one summarizer: no digest starts a model turn");
 });

@@ -280,23 +280,22 @@ export function deliverStandingOrders(
 	return true;
 }
 
-const DIGEST_TYPES = ["cp-memory", "cp-standing-orders", "cp-recent-work"] as const;
-
 /**
- * picp-99l: a resumed parent session re-ran `session_start` and appended the same
- * cp-memory + cp-standing-orders pair again. True when the latest pair since the last
- * compaction already equals `messages`; a compaction (or a changed digest) means send.
+ * picp-99l, S1-03: the digests whose content differs from the latest copy since the last compaction, `queued`
+ * (sent but not yet on the branch) overriding the branch. A type absent from `messages` is never sent.
  */
-export function digestsInContext(
+export function changedDigests<T extends { customType: string; content: string }>(
 	branch: readonly { type: string; customType?: string; content?: unknown }[],
-	messages: readonly { customType: string; content: string }[],
-): boolean {
+	messages: readonly T[],
+	queued: ReadonlyMap<string, string>,
+): T[] {
 	const latest = new Map<string, unknown>();
 	for (let index = branch.length - 1; index >= 0 && branch[index]!.type !== "compaction"; index--) {
 		const entry = branch[index]!;
 		if (entry.type === "custom_message" && entry.customType && !latest.has(entry.customType)) latest.set(entry.customType, entry.content);
 	}
-	return messages.length > 0 && [...new Set([...DIGEST_TYPES, ...messages.map((message) => message.customType)])].every((type) => latest.get(type) === messages.find((message) => message.customType === type)?.content);
+	for (const [type, content] of queued) latest.set(type, content);
+	return messages.filter((message) => latest.get(message.customType) !== message.content);
 }
 
 export function standingOrdersDigest(home: string): string | undefined {

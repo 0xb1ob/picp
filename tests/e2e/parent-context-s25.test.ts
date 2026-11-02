@@ -104,12 +104,12 @@ test("S25 parent: start, compact and resume deliver current hidden guidance once
 	writeFileSync(memory, "# Learnings\n\n- S25 newer memory. <!--P-->\n");
 	await f.start(); await f.bridge.send("Use changed memory.");
 	assert.equal(f.input().split("S25 newer memory.").length - 1, 1);
-	assert.equal(f.input().split("S25 refreshed order.").length - 1, 2, "changed memory reinjects the pair");
+	assert.equal(f.input().split("S25 refreshed order.").length - 1, 1, "changed memory sends memory alone (S1-03)");
 	await waitFor(() => f.bridge.status().sends, (sends) => sends.every((send) => send.state === "settled"), { timeoutMs: 10_000, what: "changed memory settled" });
 	await f.bridge.stop();
 	writeFileSync(memory, "# Learnings\n\n");
 	await f.start(); await f.bridge.send("Memory is now empty.");
-	assert.equal(f.input().split("S25 refreshed order.").length - 1, 3, "disappeared memory changes the digest set");
+	assert.equal(f.input().split("S25 refreshed order.").length - 1, 1, "disappeared memory resends no unchanged digest (S1-03)");
 });
 
 
