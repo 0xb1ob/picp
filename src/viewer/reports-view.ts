@@ -9,7 +9,7 @@
 import { listBoards, type BoardWarn } from "./boards.ts";
 import type { ReportItem, ReportsResponse } from "./api-types.ts";
 import { jobReports } from "./job-report.ts";
-import type { ViewerState } from "./sessions.ts";
+import { jobProjects, type ViewerState } from "./sessions.ts";
 
 /** Newest first, one card per job set: an older board for the same jobs is a superseded revision (cp-xslf, cp-xslf-rev2). A board naming no job is always listed. */
 export function boardReports(state: ViewerState, warn: BoardWarn = () => {}): ReportItem[] {
@@ -23,7 +23,16 @@ export function boardReports(state: ViewerState, warn: BoardWarn = () => {}): Re
 	}).map((board): ReportItem => ({ ...board, href: `/boards/${board.slug}/` }));
 }
 
-/** The Reports page: boards plus the newest job reports, a scan of every artifact dir that only `/api/reports` pays. */
+/**
+ * The Reports page: boards plus the newest job reports, a scan of every artifact dir that only `/api/reports` pays.
+ * `projects`: a board.json `project` (null is none) wins; a legacy board falls back to its job ids, read once.
+ */
 export function reportsView(state: ViewerState, warn: BoardWarn = () => {}, now = Date.now()): ReportsResponse {
-	return { generated_at: new Date(now).toISOString(), reports: boardReports(state, warn), job_reports: jobReports(state) };
+	const projectOf = jobProjects(state);
+	const resolved = (ids: string[]) => [...new Set(ids.flatMap((id) => projectOf.get(id) ?? []))];
+	return {
+		generated_at: new Date(now).toISOString(),
+		reports: boardReports(state, warn).map((r) => ({ ...r, projects: r.project !== undefined ? (r.project ? [r.project] : []) : resolved(r.job_ids) })),
+		job_reports: jobReports(state).map((r) => ({ ...r, projects: resolved([r.job_id]) })),
+	};
 }

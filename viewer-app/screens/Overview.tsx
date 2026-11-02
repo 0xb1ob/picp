@@ -7,6 +7,8 @@ import { StartSession } from "../components/StartSession.tsx";
 import type { ControlView } from "../control.ts";
 import { count, elapsed, money, observedTime, percent, phaseText, prNumber, shortSha, time } from "../format.ts";
 import { jobHref } from "../routes.ts";
+import { matchesProject, pickSelection, type ProjectSelection } from "../project-filter.ts";
+import { ProjectFilter } from "../components/ProjectFilter.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { GlossaryLink } from "../components/GlossaryLink.tsx";
 function Chip({href,tone,label,value,title,wide}: {href?:string;tone:string;label:string;value:string;title?:string | undefined;wide?:boolean}) {
@@ -130,22 +132,33 @@ const LANDED_ROWS = 5;
 function Block({id,title,children}: {id?:string;title:ComponentChildren;children:ComponentChildren}) {
  return <section id={id} tabIndex={id ? -1 : undefined} class="overview-block"><h2>{title}</h2>{children}</section>;
 }
-export function Overview({data,control}: {data:OverviewResponse;control?:ControlView | undefined}) {
+/** Every project-bearing list narrowed alike before its counts and slices; health, alarms and services stay global. */
+function selected(data: OverviewResponse, s: ProjectSelection): OverviewResponse {
+ if (!s) return data;
+ const keep = <T extends {project?: string | null}>(rows: T[]) => rows.filter(r => matchesProject(r.project,s));
+ const items = keep(data.awaiting.items);
+ return {...data, awaiting:{count:data.awaiting.count === null ? null : items.length, items}, in_flight:keep(data.in_flight), with_team:keep(data.with_team),
+  shipped_today:keep(data.shipped_today), closed_today:null, blocked:{...data.blocked, items:keep(data.blocked.items)}, failed:keep(data.failed),
+  lined_up:{...data.lined_up, items:keep(data.lined_up.items), unavailable:keep(data.lined_up.unavailable)}};
+}
+export function Overview({data:all,control,selection=null}: {data:OverviewResponse;control?:ControlView | undefined;selection?:ProjectSelection}) {
+ const names = [all.awaiting.items,all.in_flight,all.with_team,all.shipped_today,all.blocked.items,all.failed,all.lined_up.items].flatMap(rows => rows.flatMap((r: {project?: string | null}) => r.project ?? []));
+ const data = selected(all,selection);
  const paused = data.mandates.paused_projects;
  const fleet = data.availability.fleet === "unavailable";
  const stuck = data.blocked.items.length + data.failed.length;
  const manyProjects = new Set(data.in_flight.map(j => j.project)).size > 1;
  const teamProjects = new Set(data.with_team.map(j => j.project)).size > 1;
- const blockerPhase = (id: string, phase: string | null) => { const live = data.in_flight.find(f => f.id === id)?.phase ?? phase; return live ? phaseText(live) : null; };
+ const blockerPhase = (id: string, phase: string | null) => { const live = all.in_flight.find(f => f.id === id)?.phase ?? phase; return live ? phaseText(live) : null; };
  const costs = data.shipped_today.flatMap(j => j.cost_usd === null ? [] : [j.cost_usd]);
  const more = data.shipped_today.length - LANDED_ROWS;
  const pills = paused.length > 0 ? paused.map(project => <span key={project} class="overview-paused-pill">{project} &middot; paused</span>) : undefined;
- return <div class="overview"><Alarm data={data}/><div class="overview-heading"><div><PageHeader title="Overview" context={pills}/></div></div>
+ return <div class="overview"><Alarm data={all}/><div class="overview-heading"><div><PageHeader title="Overview" context={pills}/></div><ProjectFilter names={names} selection={selection} onChange={pickSelection}/></div>
   {data.warnings.length > 0 && <div role="status" class="overview-error">{data.warnings.map(w => <p key={w.section}>{w.section}: {w.message}</p>)}</div>}
   {data.availability.asks !== "unavailable" && !data.awaiting.items.length ? <section id="awaiting" tabIndex={-1} class="overview-clear" aria-label="Needs you"><a href="#decided"><Icon name="check" size={16}/><div><strong>Nothing needs you</strong><span>{decidedLine(data)} →</span></div></a></section> : <Block id="awaiting" title={<><span class={`overview-square${data.availability.asks !== "unavailable" && data.awaiting.items.length ? " overview-square-attention" : ""}`}/>Needs you &middot; {count(data.awaiting.count)}</>}>
    {data.availability.asks === "unavailable" ? <p class="overview-error">Questions unavailable</p> : data.awaiting.items.slice(0,3).map(ask => <a key={ask.id} href="#awaiting" class="overview-line"><code>{ask.id}</code><span class="overview-line-text" title={ask.question}>{ask.question}</span><span class="overview-meta">{ask.project}</span></a>)}
   </Block>}
-  <div class="overview-status"><Health data={data}/><Services data={data} control={control}/></div>
+  <div class="overview-status"><Health data={all}/><Services data={all} control={control}/></div>
   {stuck > 0 && <Block title={<>Blocked &amp; failed &middot; {stuck}</>}>
    {data.failed.map(j => <a key={j.id} href={jobHref(j.id)} class="overview-line"><code>{j.id}</code><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><span class="overview-meta"><span class="overview-failed">failed</span>{j.failure && <> &middot; <span title={j.failure}>{j.failure}</span></>}</span></a>)}
    {data.blocked.items.map(j => <a key={j.id} href={jobHref(j.id)} class="overview-line"><code>{j.id}</code><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><span class="overview-meta">blocked by {j.blockers.map((b,i) => { const phase = blockerPhase(b.id, b.phase); return <span key={b.id}>{i > 0 && ", "}<code>{b.id}</code>{phase && ` (${phase})`}{b.stranded && <span class="overview-amber"> · {b.grant_status ?? "no active grant"}</span>}</span>; })}</span></a>)}

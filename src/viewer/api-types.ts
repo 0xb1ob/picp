@@ -310,6 +310,8 @@ export interface ReportItem {
 	project?: string | null;
 	source?: string;
 	content_sha256?: string;
+	/** `[project]` when board.json records one (null: none), else the projects its job ids resolve to. */
+	projects?: string[];
 }
 export interface ReportsResponse {
 	generated_at: string;
@@ -317,8 +319,8 @@ export interface ReportsResponse {
 	/** Job reports (`state/artifacts/<id>/report.md`), newest first, capped at 50. */
 	job_reports?: JobReportItem[];
 }
-/** One job report as the Reports page lists it: `href` is its `#report/<id>` page. */
-export interface JobReportItem { job_id: string; title: string; modified_at: string; href: string }
+/** One job report as the Reports page lists it: `href` is its `#report/<id>` page; `projects` its job's, if resolved. */
+export interface JobReportItem { job_id: string; title: string; modified_at: string; href: string; projects?: string[] }
 /** `GET /api/report/<id>`: the job's report.md text, capped; the app renders it (never as raw HTML). */
 export interface JobReportResponse { generated_at: string; job_id: string; title: string; text: string; bytes: number; truncated: boolean; modified_at: string }
 /** Why a handoff belongs to a project: an exact ledger job id, a registered project name or repository URL. */
@@ -409,9 +411,15 @@ export interface Ask {
  /** The ask's optional plain-text background (≤ 2,000 chars) and its evidence paths, as recorded. */
  context: string | null; evidence_paths: string[];
 }
-export interface Question { id: string; question: string; kind: string; created_at: string; job_ids: string[]; age_seconds: number }
+export interface Question {
+ id: string; question: string; kind: string; created_at: string; job_ids: string[]; age_seconds: number;
+ /** Decisions only: the projects its job ids resolve to (fleet, ledger label); empty is untagged. */
+ projects?: string[];
+}
 export interface Decision { id: string; question: string; answer: string; answered_at: string; job_ids: string[] }
 export interface DecisionDetail extends Decision {
+ /** Decisions only: `[project]` when recorded, else the projects its job ids resolve to; empty is untagged. */
+ projects?: string[];
  source: "operator-delegated" | "you" | "schedule-run"; project: string | null; source_escalation: string | null;
  quote: string | null; rule: string | null; worth: ("risk" | "scope" | "override" | "judgement")[]; today: boolean;
  /** The escalation kind behind it (`mission_end`, `scope_expansion`, …); null when none is recorded. */
@@ -457,7 +465,7 @@ export interface FlightJob {
  context?: ContextUsage | null;
  cost_usd?: number | null;
 }
-export interface ShippedJob { id: string; title: string | null; merged_at: string; merge_sha: string; pr_url: string; cost_usd: number | null }
+export interface ShippedJob { id: string; project?: string; title: string | null; merged_at: string; merge_sha: string; pr_url: string; cost_usd: number | null }
 /**
  * A parked PR waiting on a human merge. `age_seconds` grows; `frozen_seconds` is execution time, stopped at handoff.
  * Null: unknown.
@@ -471,7 +479,7 @@ export interface TeamJob {
 export interface FailedJob { id: string; project: string; title: string | null; failure: string | null }
 /** One `state/main-ci.json` row: that project's main is latched red (src/main-ci.ts). No row is no latch, never proof of green. */
 export interface MainCiRed { project: string; red_since_sha: string; red_since_at: string; workflow: string | null; failing: string | null }
-export interface BlockedJob { id: string; title: string | null; blockers: {id: string; phase: string | null; grant_status: string | null; mandate_id: string | null; stranded: boolean}[] }
+export interface BlockedJob { id: string; project?: string | null; title: string | null; blockers: {id: string; phase: string | null; grant_status: string | null; mandate_id: string | null; stranded: boolean}[] }
 export interface OverviewMandate {
  id: string; status: string; projects: string[]; objective: string; expiry: string; pause_reason: string | null;
  ask_on: string[]; spend_cap: {usd: number | null; tokens: number | null}; job_cap: number | null; dispatch_parallelism: number | null;

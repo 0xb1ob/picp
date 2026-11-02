@@ -24,6 +24,7 @@
 .decision-diamond { width: 8px; height: 8px; transform: rotate(45deg); border: 1.5px solid currentColor; flex-shrink: 0; }
 /* The one Decisions page (audit P4 #24): Awaiting, a collapsed Being handled line, then Decided; each section a heading. */
 .decisions { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+.decisions-filter { display: flex; min-width: 0; margin-top: -16px; }
 .decisions > section { min-width: 0; outline: none; }
 .decision-heading h2 { font-size: 20px; color: var(--text); }
 .decisions-log { min-width: 0; }

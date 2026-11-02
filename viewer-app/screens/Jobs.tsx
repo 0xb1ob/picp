@@ -2,6 +2,8 @@ import { useState } from "preact/hooks";
 import type { JobsResponse, ViewerJob } from "../../src/viewer/api-types.ts";
 import { elapsed, money, percent, phaseText, prNumber, shortSha, time } from "../format.ts";
 import { jobHref, jobsHistoryHref } from "../routes.ts";
+import { matchesProject, pickSelection, type ProjectSelection } from "../project-filter.ts";
+import { ProjectFilter } from "../components/ProjectFilter.tsx";
 import { ContextChip } from "../components/ContextChip.tsx";
 import { JobsViews } from "../components/JobsViews.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
@@ -47,16 +49,23 @@ function DoneGroup({name, items, open}: {name: string; items: ViewerJob[]; open:
  const costs = items.flatMap(j => j.cost_usd === null ? [] : [j.cost_usd]);
  return <section class="jobs-project"><h3><strong>{name}</strong><span> · {merged} merged · {closed} closed without PR</span><span class="jobs-project-cost">{money(costs.length ? costs.reduce((sum, c) => sum + c, 0) : null)}</span></h3><JobColumns finished/>{shown.map(job => <JobRow key={job.id} job={job}/>)}</section>;
 }
-export function Jobs({data}:{data:JobsResponse}) {
+/** jobs-view.ts's bucket for a job no fleet record or ledger label names: untagged, never a project. */
+const UNASSIGNED = "Unassigned";
+const tagOf = (name: string) => name === UNASSIGNED ? null : name;
+export function Jobs({data:all,selection=null}:{data:JobsResponse;selection?:ProjectSelection}) {
  const [filter,setFilter]=useState("all");
  const [open,setOpen]=useState<Record<string, boolean>>({});
+ // The selection narrows the rows before every bucket, group and count; options come from every job.
+ const data={...all,jobs:all.jobs.filter(j=>matchesProject(tagOf(j.project),selection)),projects:all.projects.filter(p=>matchesProject(tagOf(p.name),selection))};
+ const names=[...all.jobs.map(j=>j.project),...all.projects.map(p=>p.name)].flatMap(p=>tagOf(p) ?? []);
  const live=data.jobs.filter(inFlight); const done=data.jobs.filter(j=>["done","failed"].includes(j.phase) && j.finished_today); const queued=data.jobs.filter(j=>j.phase==="queued");
  const team=data.jobs.filter(j=>j.phase==="awaiting_merge");
  const older=data.jobs.filter(j=>["done","failed"].includes(j.phase) && !j.finished_today).length;
  const {groups, empty} = doneGroups(done, data.projects);
  const more = groups.filter(g => g.items.length > DONE_ROWS && open[g.name] !== true);
  return <div class="jobs-screen"><header class="jobs-heading"><PageHeader title="Jobs"/><div class="jobs-toolbar"><JobsViews current="jobs"/>
- <div class="jobs-segments" role="group" aria-label="Filter jobs">{[["all","All",live.length+team.length+done.length+queued.length],["live","In flight",live.length],["done","Done today",done.length]].map(([key,label,count])=><button type="button" key={key} aria-pressed={filter===key} onClick={()=>setFilter(String(key))}>{label}<span>{count}</span></button>)}</div><a class="jobs-history-link" href={jobsHistoryHref()}>History</a></div></header>
+ <div class="jobs-segments" role="group" aria-label="Filter jobs">{[["all","All",live.length+team.length+done.length+queued.length],["live","In flight",live.length],["done","Done today",done.length]].map(([key,label,count])=><button type="button" key={key} aria-pressed={filter===key} onClick={()=>setFilter(String(key))}>{label}<span>{count}</span></button>)}</div><ProjectFilter names={names} selection={selection} onChange={pickSelection}/><a class="jobs-history-link" href={jobsHistoryHref()}>History</a></div></header>
+ {selection && !data.jobs.length && <p class="jobs-empty" role="status">{"project" in selection ? `No jobs for ${selection.project}` : "No untagged jobs"}</p>}
  {filter!=="done" && <section class="jobs-group"><header><h2>In flight · {live.length}</h2><p>held = waiting on CI or review, normal for hours</p></header>{live.length>0 && <JobColumns/>}{live.map(job=><JobRow key={job.id} job={job}/>)}{!live.length && <p class="jobs-empty">Nothing in flight.</p>}</section>}
  {filter==="all" && team.length>0 && <section class="jobs-group"><header><h2>With the team · {team.length}</h2><p>handed off; waiting on a human merge, no worker or slot</p></header><JobColumns/>{team.map(job=><JobRow key={job.id} job={job}/>)}</section>}
  {filter==="all" && queued.length>0 && <section class="jobs-group"><header><h2>Queued · {queued.length}</h2></header>{queued.map(job=><JobRow key={job.id} job={job}/>)}</section>}

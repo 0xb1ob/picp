@@ -28,3 +28,7 @@ export function withoutSelection(query: string | undefined): string {
 /** Exact any-project match: Untagged is no project at all; All matches everything. */
 export const matchesSelection = (projects: readonly string[] | undefined, s: ProjectSelection): boolean =>
  !s || ("project" in s ? !!projects?.includes(s.project) : !projects?.length);
+/** A list row with one recorded project (absent or empty is untagged). */
+export const matchesProject = (project: string | null | undefined, s: ProjectSelection): boolean => matchesSelection(project ? [project] : [], s);
+/** A list screen's filter change: only the hash moves, every other parameter kept. */
+export const pickSelection = (value: string): void => { window.location.hash = selectionHash(location.hash, value); };

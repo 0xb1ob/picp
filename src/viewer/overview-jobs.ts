@@ -133,7 +133,7 @@ export function shipped(state: ViewerState, jobs: Json[], ledger: Json[], now: n
   const id = String(j.job_id); const receipt = mergeReceipt(state,id);
   if (!receipt || !today(receipt.merged_at,now)) return [];
   const row = rows.find(r => r.job_id === id);
-  return [{id, title:str(ledger.find(l => l.id === id)?.title) ?? null, merged_at:String(receipt.merged_at), merge_sha:String(receipt.merge_commit_sha), pr_url:String(receipt.pr_url), cost_usd:row ? row.cost_usd + row.reviewer_cost_usd : null}];
+  return [{id, project:String(j.project), title:str(ledger.find(l => l.id === id)?.title) ?? null, merged_at:String(receipt.merged_at), merge_sha:String(receipt.merge_commit_sha), pr_url:String(receipt.pr_url), cost_usd:row ? row.cost_usd + row.reviewer_cost_usd : null}];
  }).sort((a,b) => b.merged_at.localeCompare(a.merged_at));
 }
 /** Audit P3 #17: a failed fleet job is the top blocker. Its cause is the failure headline, one line of at most 80 chars. */
@@ -196,7 +196,8 @@ export function blocked(ledger: Json[], grants: Json[], jobs: Json[], now: numbe
    if (isStranded) stranded.add(id);
    return [{id, phase:str(jobs.find(j => j.job_id === id)?.phase) ?? null, grant_status, mandate_id:grant ? String(grant.id) : null, stranded:isStranded}];
   });
-  if (blockers.length) items.push({id:String(job.id), title:str(job.title) ?? null, blockers});
+  const project = str(jobs.find(j => j.job_id === job.id)?.project) ?? strings(job.labels).find(l => l.startsWith("project:"))?.slice(8) ?? null;
+  if (blockers.length) items.push({id:String(job.id), project, title:str(job.title) ?? null, blockers});
  }
  return {items, stranded_count:available ? stranded.size : null};
 }

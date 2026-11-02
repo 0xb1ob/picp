@@ -49,6 +49,9 @@ export function route(hash: string): Route {
  if (/^jobs\?view=history(?:&|$)/.test(hash.replace(/^#/,""))) return {...fallback,screen:"jobs",query:hash.replace(/^#jobs\?/,"")};
  // Project handoffs live on Reports: `#reports?view=handoffs&project=…` (handoffsHref).
  if (/^reports\?view=handoffs(?:&|$)/.test(hash.replace(/^#/,""))) return {...fallback,screen:"reports",query:hash.replace(/^#reports\?/,"")};
+ // A list's project filter (`#jobs?project=…`, project-filter.ts); History and Handoffs matched above keep their own.
+ const list=/^(overview|decisions|jobs|reports)\?(.*)$/.exec(hash.replace(/^#/,""));
+ if (list) return {...fallback,screen:list[1] as "overview" | "decisions" | "jobs" | "reports",query:list[2]!};
  // `?tab=transcript` is the one Job query (jobTranscriptHref); any other query is not a job route.
  const job=/^job\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})(\?tab=transcript)?$/.exec(value);
  if (job) return {...fallback,screen:"job",jobId:job[1]!,...(job[2] ? {query:"tab=transcript"} : {})};
