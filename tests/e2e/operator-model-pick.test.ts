@@ -3,7 +3,8 @@
  * with a persisted session, then honoured once by a real CommandPost dispatch over the mock provider.
  */
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
 import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
@@ -11,6 +12,7 @@ import { CommandPost } from "../../src/command-post.ts";
 import { LAYOUT, type OperatorModelPickReference, THINKING_LEVELS } from "../../src/contracts.ts";
 import { modelPicksDir } from "../../src/operator-model-pick.ts";
 import { acquireParentLock } from "../../src/parent-lock.ts";
+import { controlJournalFile, readControlRecord } from "../../src/viewer/control-files.ts";
 import { renderEvents } from "../../src/watch.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { CP_BRIDGE_EXTENSION, readRunEvents, REPO_ROOT, startPiChild, waitFor } from "../harness/index.ts";
@@ -25,8 +27,10 @@ test("D2-pick: the bridge issues a pick only from the human's own words; the par
 	const prefix = picked.slice(0, -1);
 	const quote = `use ${picked} for this one`;
 	const pickCall = (id: string, args: Record<string, unknown>) => ({ id, name: "cp_parent", args: { action: "model_pick", model: picked, quote, ...args } });
-	const titles = ["pick a model", "reuse a pick", "queue a pick"];
-	const [ship, other, queued] = (await Promise.all(titles.map(async (title) => (await b.ledger.create({ title, project: "demo", delivery: "pr", kind: "ship" })).id))) as [string, string, string];
+	const titles = ["pick a model", "reuse a pick", "queue a pick", "dashboard pick", "dashboard edited", "forged source"];
+	const [ship, other, queued, dashJob, dashEdited, forgedJob] = (await Promise.all(titles.map(async (title) => (await b.ledger.create({ title, project: "demo", delivery: "pr", kind: "ship" })).id))) as [string, string, string, string, string, string];
+	const DASH_ID = "dc-20260101000000-0123abcd";
+	const dashQuote = `use ${picked} from the dashboard`;
 	const esc = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 	const operatorModel = b.provider.addScript("d2-operator", [
 		{ kind: "text", text: `I suggest ${picked} for this one.` },
@@ -34,9 +38,13 @@ test("D2-pick: the bridge issues a pick only from the human's own words; the par
 		{ kind: "text", text: "refused" },
 		{ kind: "tool_calls", calls: [pickCall("bound", { job_id: ship }), pickCall("free", {}), pickCall("queue", {}), pickCall("prefix", { model: prefix })] },
 		{ kind: "text", text: "issued" },
+		{ kind: "tool_calls", calls: [pickCall("dash", { job_id: dashJob, control_id: DASH_ID, quote: dashQuote }), pickCall("dash2", { control_id: DASH_ID, quote: dashQuote })] },
+		{ kind: "text", text: "dashboard issued" },
 	]);
 	b.agent.writeModels(b.provider);
 	writeFileSync(join(b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*"], rubric: [{ id: "small-ship", role: "implementer", model: routed }] }));
+	const routingBytes = readFileSync(join(b.home, LAYOUT.routingFile), "utf8");
+	const state = join(b.home, LAYOUT.state);
 
 	// The operator: a real cp-bridge whose session persists, so the parent can re-read the human's entry.
 	saveOperatorTarget({ home: b.home, mode: "multi", hostPid: 0, parentPid: 0 }, { PI_HOME: b.home });
@@ -46,14 +54,18 @@ test("D2-pick: the bridge issues a pick only from the human's own words; the par
 		await op.prompt(message);
 		await waitFor(() => op.eventsOfType("agent_settled").length, (count) => count > n, { timeoutMs: 60_000, what: `operator turn ${n}` });
 	}
+	// The dashboard path: a human message through the bridge's own control socket, audited before injection.
+	await waitFor(() => readControlRecord(state).state, (s) => s === "ok", { timeoutMs: 30_000, what: "the dashboard control socket" });
+	assert.equal((await control(state, "send", { kind: "message", text: `Please ${dashQuote}.`, client_id: DASH_ID })).ok, true);
+	await waitFor(() => op.eventsOfType("agent_settled").length, (count) => count > 3, { timeoutMs: 60_000, what: "the dashboard turn" });
 	const ends = op.eventsOfType("tool_execution_end") as unknown as End[];
 	const end = (id: string) => ends.find((each) => each.toolCallId === id);
 	assert.match(textOf(end("assistant")), /operator_pick_main_session_authored/, "the operator's model saying it is no pick");
 	assert.match(textOf(end("prefix")), new RegExp(`operator_pick_fabricated: the quote does not name ${esc(prefix)} as a whole provider/model token`));
-	const [bound, free, queuedRef] = ["bound", "free", "queue"].map((id) => {
+	const [bound, free, queuedRef, dash, dash2] = ["bound", "free", "queue", "dash", "dash2"].map((id) => {
 		assert.notEqual(end(id)?.isError, true, textOf(end(id)));
 		return end(id)!.result.details!.operator_quote!;
-	}) as [OperatorModelPickReference, OperatorModelPickReference, OperatorModelPickReference];
+	}) as [OperatorModelPickReference, OperatorModelPickReference, OperatorModelPickReference, OperatorModelPickReference, OperatorModelPickReference];
 	await op.close();
 
 	const lock = acquireParentLock({ home: b.home });
@@ -88,6 +100,37 @@ test("D2-pick: the bridge issues a pick only from the human's own words; the par
 	assert.match(await via(gated(true), { jobId: ship, task: "tidy", model: picked, thinking: "high", operatorQuote: bound }), /asks for thinking=high, which .* cannot serve/);
 	assert.deepEqual(claims(), [], "no refusal spent a pick");
 
+	// Bad sources: a proof naming a parent, worker or relay entry is refused by author, with guidance, unspawned.
+	const proofOf = (ref: OperatorModelPickReference) => JSON.parse(readFileSync(join(modelPicksDir(b.home), `${ref.proof_id}.json`), "utf8"));
+	const base = proofOf(free);
+	const forge = (n: number, source: Record<string, string>): OperatorModelPickReference => {
+		const proof_id = `omp-${String(n).repeat(32)}`;
+		writeFileSync(join(modelPicksDir(b.home), `${proof_id}.json`), JSON.stringify({ ...base, proof_id, source: { ...base.source, ...source } }));
+		return { version: 1, proof_id, quote };
+	};
+	const said = (id: string, entry: object) => appendFileSync(base.source.session_file, `${JSON.stringify({ id, parentId: null, timestamp: new Date().toISOString(), ...entry })}\n`);
+	said("relay1", { type: "custom_message", customType: "cp-bridge", content: `[cp-bridge wake job=cp-x receipt=none] Please ${quote}.` });
+	said("send1", { type: "custom_message", customType: "cp-bridge", content: `[cp-bridge send send=ps-1 receipt=none] Please ${quote}.` });
+	said("tool1", { type: "message", message: { role: "toolResult", toolName: "cp_parent", content: [{ type: "text", text: `Please ${quote}.` }] } });
+	for (const [n, source, code] of [
+		[1, { session_file: join(b.home, LAYOUT.sessions, "cp-parent.jsonl") }, "operator_pick_parent_authored"],
+		[2, { session_file: join(b.home, LAYOUT.sessions, "cp-worker.jsonl") }, "operator_pick_worker_authored"],
+		[3, { entry_id: "relay1" }, "operator_pick_worker_authored"],
+		[4, { entry_id: "send1" }, "operator_pick_parent_authored"],
+		[5, { entry_id: "tool1" }, "operator_pick_parent_authored"],
+	] as const) {
+		assert.match(await refusal({ jobId: forgedJob, task: "tidy", model: picked, operatorQuote: forge(n, source) }), new RegExp(`^${code}: .*does not route`), `${code} (${n})`);
+	}
+	assert.deepEqual([post.fleet.get(forgedJob), claims()], [undefined, []], "no bad source spawned or spent anything");
+
+	// Dashboard: honoured with its source; once the audit shows an edit, the same request's other proof is refused.
+	assert.equal(await refusal({ jobId: dashJob, task: "tidy", model: picked, operatorQuote: dash, fetch: false }), "accepted");
+	assert.deepEqual([post.fleet.require(dashJob).routing?.operator_pick?.source.kind, post.fleet.require(dashJob).routing?.operator_pick?.source.control_id], ["dashboard", DASH_ID]);
+	assert.match(renderEvents(readRunEvents(b.home, dashJob)).join("\n"), /operator pick \(dashboard entry \S+\) "use mock/);
+	assert.equal((await post.tearDown(dashJob, { force: true })).torn_down, true);
+	appendFileSync(controlJournalFile(state), `${JSON.stringify({ type: "edited", by: "bridge", id: DASH_ID, at: new Date().toISOString(), peer: null, text: "changed" })}\n`);
+	assert.match(await refusal({ jobId: dashEdited, task: "tidy", model: picked, operatorQuote: dash2 }), new RegExp(`operator_pick_edited: dashboard request ${DASH_ID} was edited`));
+
 	// Honoured once, recorded truthfully: the fleet record, the run event and /watch carry the verbatim quote.
 	assert.equal(await refusal({ jobId: ship, task: "tidy", model: picked, operatorQuote: bound, fetch: false }), "accepted");
 	const record = post.fleet.require(ship);
@@ -112,4 +155,18 @@ test("D2-pick: the bridge issues a pick only from the human's own words; the par
 	await post.dispatchQueue.drain();
 	assert.deepEqual([post.dispatchQueue.ids(), post.fleet.get(queued), claims()], [[], undefined, before]);
 	assert.match(post.durableWakeups.pending().map((entry) => entry.content).join("\n"), new RegExp(`QUEUED DISPATCH DROPPED: operator_pick_edited: .* — ${queued}`));
+	assert.equal(readFileSync(join(b.home, LAYOUT.routingFile), "utf8"), routingBytes, "no pick was ever written to routing.json");
 });
+
+/** One request on the bridge's dashboard control socket, as the viewer sends it. */
+function control(state: string, op: string, args: object): Promise<{ ok?: boolean; error?: string }> {
+	return new Promise((resolve, reject) => {
+		const record = readControlRecord(state);
+		if (record.state !== "ok") return reject(new Error("control offline"));
+		const client = connect(record.record.socket);
+		let response = "";
+		client.on("connect", () => client.write(`${JSON.stringify({ v: 1, id: 1, token: record.record.token, op, args })}\n`));
+		client.on("data", (chunk) => { response += String(chunk); if (response.includes("\n")) { client.end(); resolve(JSON.parse(response.trim())); } });
+		client.on("error", reject);
+	});
+}
