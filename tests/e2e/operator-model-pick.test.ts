@@ -16,6 +16,7 @@ import { controlJournalFile, readControlRecord } from "../../src/viewer/control-
 import { renderEvents } from "../../src/watch.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { CP_BRIDGE_EXTENSION, readRunEvents, REPO_ROOT, startPiChild, waitFor } from "../harness/index.ts";
+import { seedOperatorPick } from "../harness/operator-pick.ts";
 
 type End = { toolCallId: string; isError?: boolean; result: { details?: { operator_quote?: OperatorModelPickReference }; content?: Array<{ text?: string }> } };
 const textOf = (end: End | undefined): string => (end?.result.content ?? []).map((part) => part.text ?? "").join("\n");
@@ -156,6 +157,46 @@ test("D2-pick: the bridge issues a pick only from the human's own words; the par
 	assert.deepEqual([post.dispatchQueue.ids(), post.fleet.get(queued), claims()], [[], undefined, before]);
 	assert.match(post.durableWakeups.pending().map((entry) => entry.content).join("\n"), new RegExp(`QUEUED DISPATCH DROPPED: operator_pick_edited: .* — ${queued}`));
 	assert.equal(readFileSync(join(b.home, LAYOUT.routingFile), "utf8"), routingBytes, "no pick was ever written to routing.json");
+});
+
+// cp_ask and an armed cp_dispatch, called by a real parent: the quote is verified before anything is stored, the armed
+// request carries only the reference, and the release spends it once. Negative control: arming unverified stores a forgery.
+test("D2-pick-tools: cp_ask and an armed cp_dispatch carry the quote, verify it before storing, and honour it once", { timeout: 300_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const picked = b.provider.addScript("d2-tools-picked", [{ kind: "text", text: "working" }], { onExhausted: "repeat" });
+	const blocker = (await b.ledger.create({ title: "blocker", project: "demo", delivery: "local", kind: "ship" })).id;
+	const armed = (await b.ledger.create({ title: "armed pick", project: "demo", delivery: "local", kind: "ship" })).id;
+	await b.ledger.addDep(armed, blocker);
+	const askRef = seedOperatorPick(b.home, picked);
+	const armRef = seedOperatorPick(b.home, picked, { jobId: armed });
+	const dispatchCall = (quote: OperatorModelPickReference) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_dispatch", args: { job_id: armed, task: "Do it.", model: picked, operator_quote: quote } }] });
+	const ends = await b.run([
+		dispatchCall({ ...armRef, quote: `${armRef.quote}!` }),
+		dispatchCall(armRef),
+		{ kind: "tool_calls", calls: [{ name: "cp_ask", args: { project: "demo", question: "What does the README say?", model: picked, operator_quote: { ...askRef, version: 2 } } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_ask", args: { project: "demo", question: "What does the README say?", model: picked, operator_quote: askRef } }] },
+	]);
+	const routingBytes = readFileSync(join(b.home, LAYOUT.routingFile), "utf8");
+	const [forged, arming, oldBridge, asked] = ends.map((end) => [end.isError, JSON.stringify(end.result)] as const);
+	assert.deepEqual([forged?.[0], /operator_pick_fabricated: operator_quote does not match proof .*nothing was spawned/.test(forged?.[1] ?? "")], [true, true], forged?.[1]);
+	assert.match(arming?.[1] ?? "", /"state":"armed"/);
+	assert.deepEqual(JSON.parse(readFileSync(join(b.home, LAYOUT.armedDispatchFile), "utf8")).entries.map((entry: { request: { operator_quote?: unknown } }) => entry.request.operator_quote), [armRef]);
+	assert.deepEqual([oldBridge?.[0], /operator_pick_bridge_unsupported/.test(oldBridge?.[1] ?? "")], [true, true], oldBridge?.[1]);
+	assert.equal(asked?.[0], false, asked?.[1]);
+	await b.closeParents();
+
+	const lock = acquireParentLock({ home: b.home });
+	assert.equal(lock.ok, true);
+	if (lock.ok) t.after(() => lock.lock.release());
+	const post = b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env } }));
+	const askJob = post.fleet.read().jobs.find((record) => record.kind === "research");
+	assert.deepEqual([askJob?.worker.model, askJob?.routing?.operator_pick?.proof_id, askJob?.routing?.operator_pick?.quote], [picked, askRef.proof_id, askRef.quote], "cp_ask bound the unbound proof to its new job");
+	assert.equal(post.fleet.get(armed), undefined, "armed, not started");
+	await post.ledger().close(blocker, "done");
+	await post.armedDispatches.release();
+	const started = await waitFor(() => post.fleet.get(armed), Boolean, { timeoutMs: 60_000, what: "the armed release" });
+	assert.deepEqual([started?.worker.model, started?.routing?.operator_pick?.proof_id], [picked, armRef.proof_id]);
+	assert.equal(readFileSync(join(b.home, LAYOUT.routingFile), "utf8"), routingBytes, "no pick was written to routing.json");
 });
 
 /** One request on the bridge's dashboard control socket, as the viewer sends it. */
