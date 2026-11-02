@@ -1,10 +1,11 @@
 /** Native schedule runs: one start key, one frozen execution, an idempotent anchor (docs/contracts.md). */
 import { randomBytes } from "node:crypto";
-import { isoTimestamp, type JobKind } from "./contracts.ts";
+import { isoTimestamp, type JobKind, type RoutingConfig } from "./contracts.ts";
 import type { Ledger } from "./ledger.ts";
 import { effectivePolicyBounds } from "./schedule-policy.ts";
 import { refused, type MintContext, type Refusal } from "./schedule-grant.ts";
 import { reconcileRun, type ScheduleRunStore } from "./schedule-runs.ts";
+import { requireRouted } from "./routed-models.ts";
 import type { Schedule } from "./viewer/schedule-core.ts";
 import { isNativePolicy, runOverrideErrors, type NativeSchedulePolicy, type RunOverrides } from "./viewer/schedule-policy.ts";
 import type { RunExecution, ScheduleRun } from "./viewer/schedule-run-core.ts";
@@ -35,6 +36,20 @@ export function resolveExecution(policy: NativeSchedulePolicy, overrides: RunOve
 	};
 }
 
+/** The run's models (its override, else the policy's pins) must be ones data/routing.json routes; checked before any job. */
+function unroutedRun(policy: NativeSchedulePolicy, execution: RunExecution, routing: () => RoutingConfig): Refusal | undefined {
+	const pins = policy.model_policy.mode === "pinned" && policy.recipe.script_path === undefined ? policy.model_policy.by_role : {};
+	const named = execution.effective.model
+		? [["run override model", execution.effective.model] as const]
+		: Object.entries(pins).map(([role, model]) => [`schedule ${policy.schedule_id} model_policy.by_role.${role}`, model] as const);
+	try {
+		for (const [where, model] of named) if (model) requireRouted(routing(), model, where);
+	} catch (error) {
+		return { refusal: (error as Error).message };
+	}
+	return undefined;
+}
+
 /** A native member's run, else undefined (legacy runs and non-members keep their existing paths). */
 export function nativeRunOf(runs: ScheduleRunStore | undefined, jobId: string): ScheduleRun | undefined {
 	const run = runs?.active ? runs.runOfJob(jobId) : undefined;
@@ -59,6 +74,8 @@ export function withRunExecution<T extends { jobId: string; model?: string; thin
 
 interface StartInput {
 	runs: ScheduleRunStore; ledger: Ledger; schedule: Schedule; policy: NativeSchedulePolicy; context: () => MintContext | Refusal;
+	/** The home's data/routing.json, read only when the run names a model. */
+	routing: () => RoutingConfig;
 	title: string; now: Date; slot: Date; missed: boolean; missedAt: Date; manual?: NativeTrigger;
 }
 
@@ -104,6 +121,8 @@ export async function nativeStart(input: StartInput): Promise<NativeStarted | Re
 	if ((["title", "kind", "delivery", "description", "script_path"] as const).some((key) => schedule.job[key] !== recipe[key]) || (schedule.job.skill ?? null) !== recipe.skill) return { refusal: `schedule ${schedule.id}: saved policy recipe differs from the schedule` };
 	const execution = resolveExecution(policy, manual?.overrides);
 	if (refused(execution)) return execution;
+	const unrouted = unroutedRun(policy, execution, input.routing);
+	if (unrouted) return unrouted;
 	const context = input.context();
 	if (refused(context)) return context;
 	const bounds = effectivePolicyBounds(policy, context, schedule.project, recipe.kind, now);

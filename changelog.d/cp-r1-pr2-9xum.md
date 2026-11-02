@@ -1,0 +1,1 @@
+- Routing: pipeline start, reviewer preferences, schedule overrides and respawns refuse an unrouted model; `implementer_model: null` clears a stored pin.

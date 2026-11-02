@@ -27,7 +27,8 @@ export function requireStoredModelsRouted(input: StoredModelsInput): void {
 	const { home, record, implementerModel, qualityDefaults, fleet, mandates, now } = input;
 	const file = paths.pipelineFile(record.research_id);
 	const fields: Array<[model: string | undefined, where: string]> = [
-		[implementerModel === undefined ? record.implementer_model : undefined, `${file} implementer_model`],
+		[implementerModel === undefined ? record.implementer_model : undefined, `${file} implementer_model — pass implementer_model ` +
+			`with a routed model, or implementer_model: null to let routing decide (cp_pipeline advance ${record.research_id}) —`],
 		[typeof implementerModel === "string" ? implementerModel : undefined, "cp_pipeline advance implementer_model"],
 		[record.quality?.model, `${file} quality.model`],
 		[record.quality?.model === undefined && isEnabled(resolveQualityConfig(qualityDefaults, record.quality))
@@ -58,4 +59,12 @@ export function requireStoredModelsRouted(input: StoredModelsInput): void {
 	if (present.length === 0) return;
 	const config = loadRoutingConfig(home);
 	for (const [model, where] of present) requireRouted(config, model, where);
+}
+
+/** `cp_pipeline start`: every explicit model must be routed before either job exists. */
+export function requireStartModelsRouted(home: string, models: Record<string, string | undefined>): void {
+	const present = Object.entries(models).filter((field): field is [string, string] => field[1] !== undefined);
+	if (present.length === 0) return;
+	const config = loadRoutingConfig(home);
+	for (const [where, model] of present) requireRouted(config, model, `cp_pipeline start ${where}`);
 }

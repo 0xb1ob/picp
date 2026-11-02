@@ -113,7 +113,7 @@ import type { Ledger } from "./ledger.ts";
 import { readEventLog } from "./run-artifacts.ts";
 import { lastFiledEnvelopeFile } from "./supersede.ts";
 import type { Teardown, TeardownResult } from "./teardown.ts";
-import { requireStoredModelsRouted, type StoredModelsInput } from "./pipeline-model-check.ts";
+import { requireStartModelsRouted, requireStoredModelsRouted, type StoredModelsInput } from "./pipeline-model-check.ts";
 
 
 function decisionReviseAt(home: string, researchId: string): string | undefined {
@@ -723,7 +723,8 @@ export interface StartRequest {
 }
 
 export interface AdvanceOptions {
-	implementerModel?: string;
+	/** A model pins the implementer; `null` deletes a stored pin so routing decides. */
+	implementerModel?: string | null;
 }
 
 export interface StartResult {
@@ -861,6 +862,7 @@ export class PipelineRunner {
 		}
 		const title = request.title.trim();
 		if (title.length === 0) throw new PipelineError("a pipeline needs a title");
+		requireStartModelsRouted(this.#options.home, { model: request.model, implementer_model: request.implementerModel, "quality.model": request.quality?.model, "review.model": request.review?.model });
 
 		const bound = request.run;
 		if (bound && this.store.get(bound.anchorId)) throw new PipelineError(`${bound.anchorId} already started its pipeline (run ${bound.runId})`);
@@ -1317,9 +1319,14 @@ export class PipelineRunner {
 		return { home, record, fleet, now: new Date(this.#now()), ...(qualityDefaults ? { qualityDefaults } : {}), ...(mandates ? { mandates } : {}) };
 	}
 
-	/** Persists an operator-named implementer model; refused once the implementer exists. */
+	/** Persists an operator-named implementer model (refused once the implementer exists); `null` deletes the pin. */
 	#setImplementerModel(record: PipelineRecord, options: AdvanceOptions): PipelineRecord {
 		const model = options.implementerModel;
+		if (model === null) {
+			if (record.implementer_model === undefined) return record;
+			const { implementer_model: _cleared, ...rest } = record;
+			return this.store.write({ ...rest, updated_at: this.#now() });
+		}
 		if (!model || model === record.implementer_model) return record;
 		if (this.#options.fleet.get(record.ship_id)) {
 			throw new PipelineError(

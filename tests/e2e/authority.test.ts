@@ -1500,6 +1500,7 @@ test("authority: cp_mandate through a real parent sets the reviewer model, names
 	s.post.mandates.revoke(short.id);
 	const before = mandates().length;
 
+	routeNamed(s.home, ["mock/a", "mock/b"], { seed: "template" });
 	// Issue: this turn's jobs expand into job_ids; a refusal writes no grant; an issue ref mints a job, never pins it.
 	let ends = await prompted(s, "Create two jobs and cover them.",
 		[tool("a", "cp_job", { action: "create", title: "alpha", project: "demo", delivery: "local", kind: "ship" }), tool("b", "cp_job", { action: "create", title: "beta", project: "demo", delivery: "local", kind: "ship" })],

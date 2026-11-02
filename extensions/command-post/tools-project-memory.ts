@@ -16,6 +16,8 @@ import { type CommandRunner, execRunner, whichAll } from "../../src/doctor.ts";
 import { formatReadiness, piReadiness } from "../../src/project-readiness.ts";
 import { probePiSync } from "../../src/pi-compat-probe.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
+import { requireRoutedPreference } from "../../src/routed-models.ts";
+import { loadRoutingConfig } from "../../src/routing.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
 /** `probe` reads who merges a newly added GitHub project, `ciRun` runs add's CI read;
@@ -138,6 +140,7 @@ export function registerProjectMemoryTools(
 			}
 			if (params.action === "reviewer_model") {
 				if (params.reviewer_model === undefined) throw new Error("cp_project reviewer_model needs reviewer_model (provider/model or null)");
+				if (params.reviewer_model !== null) requireRoutedPreference(() => loadRoutingConfig(post.home), params.reviewer_model, "cp_project reviewer_model");
 				const project = await registry.setReviewerModel(params.name, params.reviewer_model);
 				return { content: [{ type: "text", text: `${project.name} reviewer model: ${project.reviewer_model ?? "unset"}` }], details: { project } as unknown as Record<string, unknown> };
 			}
