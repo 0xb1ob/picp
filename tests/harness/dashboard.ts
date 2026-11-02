@@ -181,5 +181,34 @@ export async function openTab(t: Context, port: number, hash: string, storage: M
 	};
 }
 
+/**
+ * Linkedom has no dialog or focus and calls a bubbled listener with the target as `this`: the tab gets showModal/close,
+ * a tracked activeElement and listeners bound to their own element; the app's code is unchanged. Restored after `t`.
+ */
+export function browserShims(t: Context, tab: Tab) {
+	const target = tab.window.EventTarget.prototype, element = tab.window.HTMLElement.prototype;
+	const saved = [target, element].map((proto) => [proto, Object.getOwnPropertyDescriptors(proto)] as const);
+	t.after(() => { for (const [proto, descriptors] of saved) Object.defineProperties(proto, descriptors); });
+	const bound = new WeakMap<object, WeakMap<object, EventListener>>();
+	const add = target.addEventListener, remove = target.removeEventListener;
+	target.addEventListener = function (this: EventTarget, type: string, listener: EventListener, options?: unknown) {
+		let own = bound.get(this);
+		if (!own) bound.set(this, own = new WeakMap());
+		if (!own.has(listener)) own.set(listener, listener.bind(this));
+		add.call(this, type, own.get(listener)!, options);
+	};
+	target.removeEventListener = function (this: EventTarget, type: string, listener: EventListener, options?: unknown) {
+		remove.call(this, type, bound.get(this)?.get(listener) ?? listener, options);
+	};
+	let focused: Element | null = tab.document.body;
+	Object.defineProperty(tab.document, "activeElement", { configurable: true, get: () => focused });
+	Object.assign(element, {
+		focus(this: Element) { focused = this; },
+		showModal(this: Element) { this.setAttribute("open", ""); },
+		close(this: Element) { this.removeAttribute("open"); },
+	});
+	return () => focused;
+}
+
 export type Tab = Awaited<ReturnType<typeof openTab>>;
 export type { Reply };

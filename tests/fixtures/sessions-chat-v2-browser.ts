@@ -1,7 +1,7 @@
 /**
  * Sessions chat v2 browser capture: the production app on loopback (production CSP, synthetic APIs), isolated headless
  * Chrome over CDP, PNGs plus manifest.json. `m3-transcript` serves the other screens' APIs from the real viewer.
- * `--stage pr1|pr2|pr3|pr4|pr5|chips|rollup|notice|m3-transcript [--chrome /usr/bin/google-chrome] --out <dir>`
+ * `--stage pr1|pr2|pr3|pr4|pr5|chips|rollup|notice|m3-transcript|m3-jobs [--chrome /usr/bin/google-chrome] --out <dir>`
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,7 +17,7 @@ import { buildViewer } from "../../src/viewer/build.ts";
 import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -162,6 +162,14 @@ try {
 	const routes: Record<string, unknown> = { "/api/sessions": sessions, "/api/overview": empty, "/api/operator/control": control, [`/api/job/${JOB}`]: job, [`/api/job/${JOB}/transcript`]: jobTranscript };
 	if (args.stage === "pr5") routes["/api/skills"] = { generated_at: GENERATED, skipped: [], omitted: 0, skills: [
 		{ name: "cp-pr-review", description: "Review a pull request against its task file", source: "agent" }, { name: "cp-memory", description: "Capture and curate lessons", source: "home" }] };
+	// M3 slice 2: the chat's Jobs drawer lists these; a long title and id wrap, the done job opens beside the chat.
+	const row = (id: string, project: string, phase: string, title: string, over: object = {}) => ({ ...job.job, id, project, phase, title, finished_at: null, ...over });
+	if (args.stage === "m3-jobs") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
+		row("cp-m3-live-with-a-very-long-job-identifier", "picp", "working", "Repair the queue so a very long job title keeps wrapping inside its drawer row instead of clipping", { cost_usd: 1.42, model: "fixture-model" }),
+		row("cp-m3-held", "demo-app", "held", "Settings copy pass", { cost_usd: 0.31 }),
+		row("cp-m3-park", "picp", "awaiting_merge", "Parked with the team", { pr_url: "https://github.com/o/picp/pull/712", pr_status: "open" }),
+		row(JOB, "picp", "done", "Sessions chat v2 PR 2", { finished_today: true, finished_at: GENERATED, cost_usd: 2.05, pr_url: "https://github.com/o/picp/pull/700", pr_status: "merged" }),
+	] };
 	server.on("request", (req, res) => {
 		const path = new URL(req.url ?? "/", "http://fixture").pathname;
 		const send = (status: number, type: string, data: string | Uint8Array) => { res.writeHead(status, { "content-type": type, "content-security-policy": APP_CSP, "cache-control": "no-store" }); res.end(data); };
@@ -402,6 +410,27 @@ try {
 		}
 		const off = (shots as Array<{ file: string; background: string; color_scheme: string }>).filter(s => s.background !== "#0d0d0d" || s.color_scheme !== "dark");
 		if (off.length) throw new Error(`m3: not the dark palette: ${off.map(s => `${s.file} ${s.background} ${s.color_scheme}`).join(", ")}`);
+	}
+	if (stage === "m3-jobs") {
+		// Real clicks and a CDP Ctrl+J (modifiers 2) on the chat; each capture fails on a target under 44 px or off screen.
+		const listed = `document.querySelectorAll(".workspace-jobs[open] .workspace-jobs-row").length === 4`;
+		const key: Step = [{ cdp: "Input.dispatchKeyEvent", params: { type: "rawKeyDown", key: "j", code: "KeyJ", windowsVirtualKeyCode: 74, modifiers: 2 } }, listed];
+		const open: Step = [`document.querySelector(".workspace-jobs-open").click()`, listed];
+		const pick: Step = [`[...document.querySelectorAll(".workspace-jobs-row")].find(b => b.textContent.includes("${JOB}")).click()`,
+			`!document.querySelector(".workspace-jobs") && !!document.querySelector(".workspace-job .job-detail-embedded .job-badges")`];
+		const escape: Step = [{ cdp: "Input.dispatchKeyEvent", params: { type: "rawKeyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 } },
+			`!document.querySelector(".workspace-job") && document.activeElement === document.querySelector(".workspace-jobs-open")`];
+		// The last step waits until no surface target is under 44 px or off screen; a clipped one times the capture out.
+		const fits: Step = ["true", `[...document.querySelectorAll(".workspace-close, .workspace-full, .workspace-jobs-row, .workspace-jobs .jobs-segments button, .workspace-jobs select")]
+			.filter(e => e.getClientRects().length).every(e => { const r = e.getBoundingClientRect(); return r.height >= 44 && r.left >= -0.5 && r.right <= innerWidth + 0.5; })`];
+		const shots3: [string, number, number, Step[]][] = [
+			["drawer-desktop-dark-1440x1000", 1440, 1000, [key]], ["job-desktop-dark-1440x1000", 1440, 1000, [open, pick]],
+			["escape-desktop-dark-1440x1000", 1440, 1000, [open, pick, escape]], ["job-desktop-dark-900x1000", 900, 1000, [open, pick]],
+			["drawer-desktop-dark-900x1000", 900, 1000, [open]], ["drawer-phone-dark-899x1000", 899, 1000, [open]],
+			["drawer-phone-dark-390x844", 390, 844, [open]], ["job-phone-dark-390x844", 390, 844, [open, pick]],
+		];
+		for (const [name, width, height, steps] of shots3) await capture(`m3-jobs-${name}`, transcript, width, height, "dark", loaded, "bottom", [...steps, fits]);
+		if (posts.length) throw new Error(`m3-jobs sent ${posts.join(", ")}: the drawer and pane only read`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);
