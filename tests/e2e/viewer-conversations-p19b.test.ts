@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import { type Context, type Json, jsonl, viewer, write } from "../harness/conversations.ts";
-import { type Tab, until } from "../harness/dashboard.ts";
+import { operatorSession, type Tab, until } from "../harness/dashboard.ts";
 
 const ledgerFile = (stateDir: string) => join(dirname(stateDir), "jobs.json");
 const say = (timestamp: string, m: unknown) => JSON.stringify({ type: "message", timestamp, message: m });
@@ -531,4 +531,128 @@ test("P19-route: #sessions opens the Full transcript; transcript=0 is Decisions;
 	assert.deepEqual(fallback.tab.requests.filter((r) => r.path.startsWith("/api/sessions")).map((r) => r.status), [403, 200]);
 	assert.doesNotMatch(fallback.tab.text(), /Refresh failed/, "the fallback is silent");
 	assert.equal(fallback.tab.$$('a[href*="transcript="], .session-views').length, 0, "audit P4 #27: no Decisions | Full transcript toggle");
+});
+
+// ---- Sessions: project filter on reply sections (M1 PR1) -----------------------------------------------------------
+
+const MANY = Array.from({ length: 30 }, (_, i) => `p${String(i).padStart(2, "0")}`);
+const SPLIT = "Status first.\n\n[picp] merged cp-a\n\n[atlas] queued the next step";
+/** An assistant text block with its own `message.timestamp`, so a reply-splits record can key it. */
+const keyed = (ts: number, text: string) => JSON.stringify({ type: "message", timestamp: AT, message: { role: "assistant", timestamp: ts, content: [{ type: "text", text }] } });
+const FILTER = 'select[aria-label="Filter by project"]';
+/** The filter's shown value (linkedom reads it from the selected option). */
+const chosen = (tab: Tab) => (tab.$(FILTER) as unknown as { value: string } | null)?.value;
+/** The transcript's text alone: the sidebar's Operator preview reads the full data by design. */
+const shown = (tab: Tab) => tab.$(".session-entries")?.textContent ?? "";
+/** Picks `value` in the filter as a browser would, then lets the route see the hash the app wrote. */
+async function choose(tab: Tab, value: string) {
+	const select = await tab.find(FILTER);
+	for (const option of select.querySelectorAll("option")) option.toggleAttribute("selected", option.getAttribute("value") === value);
+	select.dispatchEvent(new tab.window.Event("change", { bubbles: true }));
+	tab.go(tab.window.location.hash);
+	await settle();
+}
+const bubble = (tab: Tab, text: string) => tab.$$(".session-bubble").find((b) => b.textContent?.includes(text));
+const sections = (b: Element | undefined) => [...(b?.querySelectorAll(".session-segment") ?? [])].map((s) => s.querySelector(".session-project")?.textContent ?? null);
+
+/** Recorded headers, an id-inferred reply, a split, sidecar overrides (to atlas; a stale tag to general) and 30 names. */
+async function tagged(t: Context) {
+	return viewer(t, { seed: (stateDir, home) => {
+		for (const name of ["picp", "atlas", ...MANY]) write(join(home, LAYOUT.projects, name, "README.md"), "x\n");
+		write(join(stateDir, "fleet.json"), { jobs: [{ job_id: "cp-a", project: "picp", phase: "held" }] });
+		const file = join(home, "pi-sessions", "session.jsonl"), gone = join(home, "pi-sessions", "gone.jsonl");
+		write(file, `${[operator("[picp] please merge cp-a"), relay(SPLIT), relay("cp-a is waiting on CI"), operator("hello there"), relay("general chatter"),
+			keyed(1001, "sidecar target words"), keyed(1002, "[picp] stale tag words"), relay(`[${MANY.join(", ")}] fleet-wide note`)].join("\n")}\n`);
+		write(operatorSessionsFile(join(stateDir, "sessions")), jsonl([{ at: local(14, 9), session_file: gone }, { at: AT, session_file: file }]));
+		write(join(stateDir, "operator/reply-splits.jsonl"), jsonl([
+			{ type: "split", session_file: file, ts: 1001, block: 0, segments: [{ text: "sidecar target words", projects: ["atlas"], source: "header" }] },
+			{ type: "split", session_file: file, ts: 1002, block: 0, segments: [{ text: "stale tag words", projects: [], source: "general" }] },
+		]));
+	} });
+}
+
+test("M1-sections: a project shows only its sections, the original toggle the untouched reply; All, Untagged and unknown", { timeout: 120_000 }, async (t) => {
+	const d = await tagged(t);
+	const entries = ((await d.get("/api/sessions?view=you&transcript=1")).body as Json).entries as Json[];
+	const projects = (text: string) => entries.find((e) => e.text.includes(text))?.projects;
+	assert.deepEqual([projects("please merge"), projects("Status first"), projects("waiting on CI"), projects("general chatter")], [["picp"], ["picp", "atlas"], ["picp"], undefined], "header, sections, id inference, general");
+	assert.deepEqual([projects("sidecar target"), projects("stale tag"), entries.find((e) => e.text.includes("stale tag"))?.project], [["atlas"], undefined, null], "a sidecar record replaces identities; a general override drops the stale tag");
+	assert.equal(entries.find((e) => e.text === SPLIT)?.text, SPLIT, "the API keeps the unsplit original");
+
+	const tab = await d.open(`${FULL}&project=picp`);
+	await tab.waitText(/please merge/);
+	const reads = () => tab.requests.filter((r) => r.path.startsWith("/api/sessions")).map((r) => r.path);
+	assert.deepEqual(reads(), ["/api/sessions?view=you&transcript=1"], "the selection never reaches the API");
+	assert.equal(chosen(tab), "picp");
+	assert.deepEqual(sections(bubble(tab, "merged cp-a")), ["picp"], "only the picp section of the two-project reply");
+	assert.ok(!shown(tab).includes("Status first") && !shown(tab).includes("queued the next step"), "the preamble and atlas section are hidden");
+	for (const hidden of ["general chatter", "sidecar target", "stale tag", "fleet-wide"]) assert.ok(!shown(tab).includes(hidden), `${hidden} is not picp`);
+	assert.ok(shown(tab).includes("waiting on CI"), "an id-inferred reply matches");
+	tab.click(bubble(tab, "merged cp-a")!.querySelector("button.session-original")!);
+	await until(() => bubble(tab, "merged cp-a"), (b) => !!b && sections(b).length === 0, "Show original");
+	assert.match(bubble(tab, "merged cp-a")!.textContent!, /Status first\.[\s\S]*\[picp\] merged cp-a[\s\S]*\[atlas\] queued/, "the original is the full reply");
+	tab.click(bubble(tab, "merged cp-a")!.querySelector("button.session-original")!);
+	await until(() => sections(bubble(tab, "merged cp-a")), (s) => s.length === 1, "Split by project");
+	assert.deepEqual(sections(bubble(tab, "merged cp-a")), ["picp"], "toggling back restores the selection");
+
+	await choose(tab, "atlas");
+	assert.equal(tab.window.location.hash, "#sessions?view=you&transcript=1&project=atlas", "the hash keeps every other parameter");
+	await tab.waitText(/sidecar target/);
+	assert.deepEqual(sections(bubble(tab, "queued the next step")), ["atlas"]);
+	assert.ok(!shown(tab).includes("please merge") && !shown(tab).includes("waiting on CI"));
+	await choose(tab, "/untagged");
+	assert.equal(tab.window.location.hash, "#sessions?view=you&transcript=1&untagged=1");
+	await tab.waitText(/general chatter/);
+	assert.deepEqual(sections(bubble(tab, "Status first")), [null], "Untagged keeps a mixed reply's preamble only");
+	assert.ok(shown(tab).includes("stale tag words") && !shown(tab).includes("please merge") && !shown(tab).includes("fleet-wide"), "untagged entries only");
+	await choose(tab, "");
+	assert.equal(tab.window.location.hash, "#sessions?view=you&transcript=1", "All clears both parameters");
+	await tab.waitText(/fleet-wide note/);
+	assert.deepEqual(sections(bubble(tab, "merged cp-a")), [null, "picp", "atlas"], "All renders as before");
+	assert.deepEqual(reads(), ["/api/sessions?view=you&transcript=1"], "a selection change re-reads nothing and keeps the screen mounted");
+
+	const options = [...tab.$(FILTER)!.querySelectorAll("option")].map((o) => o.getAttribute("value"));
+	assert.deepEqual(options, ["", "/untagged", "atlas", ...MANY, "picp"], "All, Untagged, then every name sorted, none truncated");
+	await choose(tab, "p17");
+	await until(() => tab.$$(".session-bubble").length, (n) => n === 1, "a large tag set matches any one of its names");
+
+	const renamed = await d.open(`${FULL}&project=old-name`);
+	await renamed.waitText(/No loaded entries for old-name/);
+	assert.deepEqual([chosen(renamed), renamed.$$(".session-bubble").length], ["old-name", 0], "an unknown or renamed name stays selected, explicitly empty");
+	const reloaded = await tab.reopen(`${FULL}&project=atlas`);
+	await reloaded.waitText(/sidecar target/);
+	assert.equal(chosen(reloaded), "atlas", "reload keeps the selection");
+	reloaded.go(`${FULL}&untagged=1`);
+	await reloaded.waitText(/general chatter/);
+	reloaded.go(`${FULL}&project=atlas`);
+	await until(() => shown(reloaded), (text) => text.includes("sidecar target") && !text.includes("general chatter"), "Back to the earlier selection");
+
+	const picker = await reloaded.find('select[aria-label="Operator session file"]');
+	for (const option of picker.querySelectorAll("option")) option.toggleAttribute("selected", option.getAttribute("value") === "gone.jsonl");
+	picker.dispatchEvent(new reloaded.window.Event("change", { bubbles: true }));
+	assert.equal(reloaded.window.location.hash, "#sessions?view=you&transcript=1&project=atlas&session=gone.jsonl", "the file picker keeps the selection");
+	reloaded.go(reloaded.window.location.hash);
+	await reloaded.waitText(/Operator transcript missing/);
+	assert.match(shown(reloaded), /No recorded entries/);
+	assert.doesNotMatch(shown(reloaded), /No loaded entries for/, "no records is not no matches");
+});
+
+test("M1-sections-composer: a selection keeps the P1 reference, pending sends and pinned decisions on the full data", { timeout: 120_000 }, async (t) => {
+	const d = await tagged(t);
+	write(join(d.stateDir, "operator/asks.jsonl"), jsonl([{ type: "open", id: "ask-aaaa", project: "atlas", question: "Merge atlas?", created_at: local(15, 8), recommendation: "Merge", options: [{ label: "Merge", consequence: "Lands" }] }]));
+	const session = await operatorSession(t, d.stateDir);
+	const reference = { kind: "job", project: "picp", job_id: "cp-a" };
+	const tab = await d.open(`${FULL}&${new URLSearchParams({ ref: JSON.stringify(reference) })}`);
+	await tab.find(".evidence-chip");
+	await choose(tab, "picp");
+	assert.equal(new URLSearchParams(tab.window.location.hash.split("?")[1]).get("ref"), JSON.stringify(reference), "the selection never clobbers the reference link");
+	await until(() => shown(tab), (text) => !text.includes("general chatter"), "the picp selection");
+	assert.equal(tab.$(".evidence-chip summary")?.textContent, "job cp-a (picp)", "the chip is unchanged");
+	assert.match(tab.$(".session-pinned")?.textContent ?? "", /1 decision waiting/, "an atlas decision stays pinned under picp");
+	tab.type(tab.$("textarea")!, "What is left on cp-a?");
+	tab.click(await tab.find(".operator-composer-send", (b) => !b.hasAttribute("disabled")));
+	const [message] = (await until(() => session.injected, (rows) => rows.length === 1, "the one send"))[0]!;
+	assert.deepEqual(JSON.parse(/Resolve read-only with cp_parent jobs (\{.*\})/.exec(message)![1]!), { mode: "show", job_id: "cp-a", evidence: reference }, "the exact reference identity");
+	await tab.find(".session-pending");
+	assert.ok(!shown(tab).includes("general chatter"), "the pending send shows beside the filtered transcript");
 });

@@ -97,16 +97,16 @@ function stampSegments(entries: SessionEntry[], names: Set<string>, projectOf: (
  for (const e of entries) {
   if (e.kind === "via" || (e.kind === "say" && e.who === SIDES.you.user)) {
    const m = /^\[([^\]]+)\] /.exec(e.text), named = m && names.has(m[1]!) ? m[1]! : undefined;
-   if (named && e.kind === "say") { e.project = named; e.text = e.text.slice(m![0].length); }
+   if (named && e.kind === "say") { e.project = named; e.projects = [named]; e.text = e.text.slice(m![0].length); }
    replyTo = named ?? projectByRefs(e.text,{projects:names,projectOf});
    continue;
   }
   if (e.kind !== "say") continue;
   const segments = splitReply(e.text,{projects:names,projectOf,fallback:replyTo});
-  if (segments.length > 1) { e.segments = segments; continue; }
+  if (segments.length > 1) { e.segments = segments; e.projects = [...new Set(segments.flatMap(s => s.projects))]; continue; }
   const only = segments[0];
   if (only?.source === "header") e.text = only.text;
-  if (only?.projects.length) e.project = only.projects.join(", ");
+  if (only?.projects.length) { e.project = only.projects.join(", "); e.projects = [...only.projects]; }
  }
 }
 function parseTranscript(state: ViewerState, file: string, sides: {user:string;assistant:string}, backlog = BACKLOG_BYTES): {entries:SessionEntry[];truncated:boolean;keys?:Map<SessionEntry,string>} {
