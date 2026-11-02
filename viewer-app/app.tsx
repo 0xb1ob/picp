@@ -2,6 +2,7 @@ import { useContext, useEffect, useState } from "preact/hooks";
 import type { DecisionsResponse, OverviewResponse, BoardResponse, HandoffsResponse, JobResponse, JobReportResponse, JobsHistoryResponse, JobsResponse, SessionsResponse, FilesResponse, MapResponse, ReportsResponse, SchedulesResponse, StatsResponse } from "../src/viewer/api-types.ts";
 import { Stats, statsApiUrl } from "./screens/Stats.tsx";
 import { type Route, decisionsFallback, screenDataUrl } from "./routes.ts";
+import { readSelection, withoutSelection } from "./project-filter.ts";
 import { useControl } from "./use-control.ts";
 import { useScheduleControl } from "./use-schedule-control.ts";
 import { Decisions } from "./screens/Decisions.tsx";
@@ -48,7 +49,7 @@ export function DetailScreen({current:asked, workers}: {current:Route; workers?:
  if (missing) return <NotFound {...missing}/>;
  const draft=sessions ? query.get("draft") ?? undefined : undefined;
  const reference=sessions ? query.get("ref") ?? undefined : undefined;
- return <>{resource.error && <p role="alert" class="overview-error">{resource.error}</p>}{resource.data ? sessions ? <Sessions data={resource.data as SessionsResponse} control={control} draft={draft} reference={reference}/> : <Files data={resource.data as FilesResponse}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}</>;
+ return <>{resource.error && <p role="alert" class="overview-error">{resource.error}</p>}{resource.data ? sessions ? <Sessions data={resource.data as SessionsResponse} control={control} draft={draft} reference={reference} selection={readSelection(current.query)}/> : <Files data={resource.data as FilesResponse}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}</>;
 }
 export function App() {
  const current = useRoute();
@@ -118,6 +119,6 @@ function OverviewPage({current}: {current:Route}) {
  const workers = !resource.error && resource.data && "in_flight" in resource.data && resource.data.availability.fleet === "ok" && resource.data.availability.ledger !== "unavailable" ? resource.data.in_flight : undefined;
  return <Shell current={current} awaiting={resource.data && "awaiting" in resource.data ? resource.data.awaiting.count : null} status={resource.status} updatedAt={resource.data?.generated_at ?? null}>
   {resource.error && <p role="alert" class="overview-error">{resource.error}{loaded && " · showing last recorded data"}</p>}
-  {current.screen === "sessions" || current.screen === "files" ? <DetailScreen key={`${current.screen}?${current.query ?? ""}`} current={current} workers={workers}/> : resource.data ? "awaiting" in resource.data ? current.screen === "more" ? <More data={resource.data} push={push}/> : <Overview data={resource.data} control={control}/> : <DependencyMap data={resource.data}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}
+  {current.screen === "sessions" || current.screen === "files" ? <DetailScreen key={`${current.screen}?${current.screen === "sessions" ? withoutSelection(current.query) : current.query ?? ""}`} current={current} workers={workers}/> : resource.data ? "awaiting" in resource.data ? current.screen === "more" ? <More data={resource.data} push={push}/> : <Overview data={resource.data} control={control}/> : <DependencyMap data={resource.data}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}
  </Shell>;
 }

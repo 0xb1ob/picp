@@ -44,6 +44,8 @@ export interface SessionEntry {
  links?: Record<string, string>;
  /** Say-entry project chip: a `projects/*` name stripped from a leading `[name]` (slice F), or resolved from its ids. */
  project?: string | null;
+ /** Operator tier: every project the reply's sections (or own `[name]` header) name, exact; absent is untagged. */
+ projects?: string[];
  /** Operator tier, a reply with two or more `[project]` sections (issue 589); `text` stays the unsplit original. */
  segments?: {text: string; projects: string[]; source: "header" | "id" | "reply" | "general"}[];
  /** Operator tier: a reply the header guard folded (issue 589), `superseded` by a re-send or `NO-PROJECT` `hidden`. */

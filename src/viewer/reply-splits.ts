@@ -58,6 +58,9 @@ export function applyReplySplits(entries: SessionEntry[], keys: Map<SessionEntry
 		if (!record) continue;
 		if (record.type !== "split") { e.collapsed = record.type; continue; }
 		const segments = Array.isArray(record.segments) ? record.segments : [];
+		// The record's identities replace the read-time ones, so a general override never keeps a stale tag.
+		const projects = [...new Set(segments.flatMap((s) => s.projects.filter((p) => typeof p === "string")))];
+		if (projects.length) e.projects = projects; else delete e.projects;
 		if (segments.length > 1) { e.segments = segments; e.project = null; continue; }
 		delete e.segments;
 		e.project = segments[0]?.projects.join(", ") || null;

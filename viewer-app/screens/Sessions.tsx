@@ -1,6 +1,8 @@
 import { ToolRunRow } from "../components/ToolRunRow.tsx";
-import type { ComponentChild } from "preact";
+import { type ComponentChild, createContext } from "preact";
 import { useContext, useEffect, useRef, useState } from "preact/hooks";
+import { matchesSelection, type ProjectSelection, selectionHash } from "../project-filter.ts";
+import { ProjectFilter } from "../components/ProjectFilter.tsx";
 import type { ContextUsage, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
 import { contextText } from "../components/ContextChip.tsx";
 import { modelText } from "../../src/viewer/model-text.ts";
@@ -77,6 +79,20 @@ function readSeen(): string[] | null {
 }
 
 const isBubble = (e: SessionEntry) => e.kind === "say" || e.kind === "via";
+type Segment = NonNullable<SessionEntry["segments"]>[number];
+/** Under a project selection, each split reply's matching sections by entry id; null is All (every section). */
+const VisibleSections = createContext<Map<string,Segment[]> | null>(null);
+/** The entries a selection keeps, before rows and days: a split reply by its sections, any other by its projects. */
+function selectEntries(entries: SessionEntry[], selection: ProjectSelection): {entries:SessionEntry[]; sections:Map<string,Segment[]> | null} {
+ if (!selection) return {entries,sections:null};
+ const sections = new Map<string,Segment[]>(), kept = entries.filter(e => {
+  if (!e.segments) return matchesSelection(e.projects,selection);
+  const visible = e.segments.filter(s => matchesSelection(s.projects,selection));
+  if (visible.length) sections.set(e.id,visible);
+  return visible.length > 0;
+ });
+ return {entries:kept,sections};
+}
 /** Consecutive messages from one author within this gap share one header (who and time). */
 const GROUP_GAP_MS = 5 * 60_000;
 /** An opened relay longer than this many lines shows its head, the rest behind "Show more". */
@@ -172,7 +188,9 @@ function Bubble({entry:e,first,you}: {entry:SessionEntry;first:boolean;you:boole
  // In the operator transcript the person is "You" and the session they talk to is "Operator" (frame 06); other views keep the recorded name.
  const own = isOwn(e), who = you ? (own ? "You" : e.who === "Assistant" ? "Operator" : e.who) : e.who;
  // Issue 589: a multi-project reply renders one section per project; the toggle shows the reply unsplit.
- const [original, setOriginal] = useState(false), split = e.segments && !original ? e.segments : undefined;
+ const visible = useContext(VisibleSections)?.get(e.id);
+ // The original toggle always renders the untouched entry; a selection only narrows the split sections.
+ const [original, setOriginal] = useState(false), split = e.segments && !original ? visible ?? e.segments : undefined;
  const folded = e.collapsed && !original ? (e.collapsed === "hidden" ? "NO-PROJECT reply" : "original reply (re-sent with project headers)") : undefined;
  // A group names its author once: later own bubbles keep only their time (the "You" name is screen-reader text).
  const meta = <div class="session-who">{own ? (you || first) && <span class={you ? "session-who-name" : undefined}>{who}</span> : <><span class={`session-avatar${who === "Operator" ? " session-avatar-bot" : ""}`} aria-hidden="true">{initials(who)}</span><span>{who}</span></>}{e.project && <span class="session-project">{e.project}</span>}{e.tag && <span>{e.tag}</span>}{dayKey(e.at) && <time class="session-time" dateTime={e.at}>{time(e.at)}</time>}</div>;
@@ -210,6 +228,12 @@ function sessionOptionLabel(at: string, current: boolean): string {
  return current ? `${when} · current` : when;
 }
 const fileOptions = (files: {id:string;at:string}[]) => files.map((s,i)=><option key={s.id} value={s.id} title={s.id}>{sessionOptionLabel(s.at,i === 0)}</option>);
+/** Another transcript file keeps the hash's project selection and composer link. */
+function openFile(id: string) {
+ const query=new URLSearchParams(location.hash.split("?")[1] ?? "");
+ query.set("view","you"); query.set("transcript","1"); query.set("session",id);
+ window.location.hash=`#sessions?${query}`;
+}
 function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTools,state}: {data:SessionsResponse;control:ControlView | undefined;context:ContextUsage | null | undefined;toolCalls:number;showTools:boolean;hiddenTools:number;onTools:()=>void;state:{text:string;dot:string}}) {
  const shell = useContext(ShellContext);
  const composer = data.transcript === true && control;
@@ -234,7 +258,7 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
     </nav>
     {toolCalls > 0 && <button type="button" aria-pressed={showTools} onClick={e => { onTools(); closeMenu(e); }}>{showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`}</button>}
     <button type="button" aria-haspopup="dialog" onClick={e => { closeMenu(e); shell.openSearch(); }}>Search</button>
-    {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
+    {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>openFile(e.currentTarget.value)}>{fileOptions(files)}</select></label>}
     {composer && controlReady(control.status) && control.status.session_file && <p class="session-bar-file">Delivers to <code>{control.status.session_file}</code></p>}
     {shell.version && <div class="shell-more-version"><span>Viewer</span><VersionBadge state={shell.version} labelled/></div>}
     {shell.control && restartShown(shell.control) && <div class="session-bar-restart"><RestartSession control={shell.control}/></div>}
@@ -243,7 +267,7 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
   </details>
  </header>;
 }
-export function Sessions({data,control,draft,reference}: {data:SessionsResponse;control?:ControlView;draft?:string;reference?:string}) {
+export function Sessions({data,control,draft,reference,selection:asked=null}: {data:SessionsResponse;control?:ControlView;draft?:string;reference?:string;selection?:ProjectSelection}) {
  const scroller=useRef<HTMLDivElement>(null);
  const [atBottom,setAtBottom]=useState(true);
  const [showTools,setShowTools]=useState(readToolCalls);
@@ -290,8 +314,11 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   document.addEventListener("pointerdown",outside); document.addEventListener("keydown",escape);
   return ()=>{document.removeEventListener("pointerdown",outside); document.removeEventListener("keydown",escape);};
  },[]);
+ // Only the operator Full transcript carries project tags; controls, pending sends and decisions keep the full data.
+ const filterable=data.selected === "you" && data.transcript === true, selection=filterable ? asked : null;
+ const picked=selectEntries(data.entries,selection), shown=picked.entries;
+ const names=filterable ? data.entries.flatMap(e=>e.projects ?? []) : [];
  // A local-day separator opens each new day; one pending send queued past local midnight opens its own day.
- const shown=data.entries;
  const pendingDays=dayStarts(pending.map(send=>({id:send.key,at:send.at})),lastDay(shown));
  const order=new Map(data.entries.map((e,i)=>[e.id,i]));
  const rowList=rows(shown,dayStarts(shown,null),order);
@@ -329,7 +356,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   <PageHeader title="Chats" menu={(files.length > 0 && data.transcript === true) || toolCalls > 0 || data.selected === "parent" ? <div class="session-menu">
    {data.selected === "parent" && <ParentRestart status={shell.control?.status}/>}
    {/* Audit P4 #27: the decision log lives on the Decisions page; a refused transcript still falls back silently. */}
-   {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>{window.location.hash=`sessions?view=you&transcript=1&session=${encodeURIComponent(e.currentTarget.value)}`;}}>{fileOptions(files)}</select></label>}
+   {data.transcript === true && files.length > 0 && <label class="session-file-picker">Transcript<select aria-label="Operator session file" value={data.operator_session ?? ""} onChange={e=>openFile(e.currentTarget.value)}>{fileOptions(files)}</select></label>}
    {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} aria-label={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} title={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} onClick={toggleTools}>Tools {toolCalls}</button>}
   </div> : undefined}/>
   <aside class="session-sidebar" aria-label="Session streams">
@@ -343,8 +370,9 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
     {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}</header>
    {control?.pending_error && <p class="session-warning" role="status" aria-live="polite" aria-atomic="true">{control.pending_error}</p>}
    {control?.pending && <p class="session-pending-live" aria-live="polite" aria-atomic="true">{pending.length ? pending.map(send=>`Message at ${time(send.at)}: ${send.state}${send.reason ? `, ${send.reason}` : ""}`).join(". ") : "No pending messages"}</p>}
+   {filterable && <div class="session-filter"><ProjectFilter names={names} selection={selection} onChange={value=>{window.location.hash=selectionHash(location.hash,value);}}/></div>}
    <div class="session-transcript" role="region" aria-label="Transcript" ref={scroller} onScroll={()=>{const el=scroller.current; if(el){follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<48; setAtBottom(follow.current);}}}>
-    <div class="session-entries"><PrChips.Provider value={data.pr_chips ?? {}}>{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{renderRows(shown,null)}{!replyAt && replies}{pending.flatMap(send=>{const label=pendingDays.get(send.key), node=<PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!} viewing={data.operator_session ?? null} truncated={data.truncated === true}/>; return label ? [dayPill(send.key,send.at,label),node] : [node];})}</PrChips.Provider></div>
+    <div class="session-entries"><PrChips.Provider value={data.pr_chips ?? {}}><VisibleSections.Provider value={picked.sections}>{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{data.entries.length > 0 && !shown.length && selection && <p class="session-empty" role="status">{"project" in selection ? `No loaded entries for ${selection.project}` : "No untagged loaded entries"}</p>}{renderRows(shown,null)}{!replyAt && replies}{pending.flatMap(send=>{const label=pendingDays.get(send.key), node=<PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!} viewing={data.operator_session ?? null} truncated={data.truncated === true}/>; return label ? [dayPill(send.key,send.at,label),node] : [node];})}</VisibleSections.Provider></PrChips.Provider></div>
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
    </div>
    {data.transcript === true && open.length > 0 && <section class={pinOpen ? "session-pinned session-pinned-open" : "session-pinned"} aria-label="Open decisions">

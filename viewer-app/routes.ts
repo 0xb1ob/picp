@@ -3,6 +3,7 @@
  * reached through them — Board and Map are Jobs views, Schedules, Files and Settings live under More. Search lists them all.
  */
 import type { EvidenceReference } from "../src/evidence-reference.ts";
+import { withoutSelection } from "./project-filter.ts";
 export const navigation = [
  {id:"overview", label:"Overview", href:"#overview"},
  {id:"decisions", label:"Decisions", href:"#decisions"},
@@ -73,8 +74,8 @@ export function route(hash: string): Route {
 }
 /** The JSON a detail screen (sessions, files) loads for `current`: the hash's own query, so a deep link reaches the API. */
 export function screenDataUrl(current: Route): string {
- const query=new URLSearchParams(current.query);
- // The composer's draft and reference (composerHref) stay in the hash; they never reach the API.
+ const query=new URLSearchParams(current.screen === "sessions" ? withoutSelection(current.query) : current.query);
+ // The composer's draft and reference (composerHref) and the project selection stay in the hash, never the API.
  query.delete("draft");
  query.delete("ref");
  if (current.screen !== "sessions") query.set("view","screen");
