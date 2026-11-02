@@ -807,7 +807,7 @@ test("P13b org-review schedules: cp_schedule add validates the config and floors
 		assertMentions(flat(recipe(skill)), ["anchor names its durable run", "admitted members", "no grant is minted", "no standing order"], skill);
 	}
 	assertMentions(recipe("cp-self-review"), [
-		"L1", "L2", "L3-L5", "L6", "S1", "xai/grok-4.7", "xhigh", "10800", "36", "NEW", "ALREADY COVERED", "PARTIALLY COVERED",
+		"L1", "L2", "L3-L5", "L6", "S1", "no model: routing decides", "xhigh", "10800", "36", "NEW", "ALREADY COVERED", "PARTIALLY COVERED",
 		"[REDACTED]", "schedule:<id>", "expanded:", "window_hours", "no builds",
 		"Context usage", "Context & compaction", "compactAtTokens", "self_compact", "cp-parent-control.json",
 		"L1-L6 are always delivery `local`", "S1 is\nalways delivery `board`", "board.json", "site/index.html", "/#job/<L-id>", "/boards/<S1-id>/",
