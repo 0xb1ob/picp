@@ -50,7 +50,8 @@ test("M3-transcript-theme: one dark palette on Sessions and all eight other scre
 		const main = await tab.find(`.shell-main > .${screen}`);
 		await tab.find("h2", (h) => h.textContent === sections[0]);
 		assert.equal(tab.$(".shell")!.getAttribute("class"), hash === "#sessions" ? "shell shell-sessions" : "shell", `${hash}: no theme variant on the shell`);
-		assert.equal(main.closest(".shell-main")!.children.length, 1, `${hash}: one screen root`);
+		// Count screen roots only: Shell's transient .page-header-fallback sibling is chrome, not a second screen.
+		assert.equal(tab.$$(".shell-main > :not(.page-header-fallback)").length, 1, `${hash}: one screen root`);
 		assert.deepEqual(tab.$$(`${wide ? ".shell-sidebar-nav > a" : ".shell-tabs a"}[aria-current=page]`).map((a) => a.textContent), [wide ? desktop : phone], `${hash}: nav owner`);
 		if (wide) assert.deepEqual(tab.$$("h2").map((h) => h.textContent), sections, `${hash}: section order`);
 		// The composer's auto-height is set through CSSOM (OperatorComposer), not markup; nothing else carries a style.
