@@ -33,6 +33,7 @@ import {
 	treehouseAvailable,
 	waitFor,
 } from "../harness/index.ts";
+import { seedOperatorPick } from "../harness/operator-pick.ts";
 
 const SKIP = treehouseAvailable() ? false : "worker-lifecycle-p8d e2e needs treehouse on PATH";
 const DEAD_PID = spawnSync(process.execPath, ["-e", ""], { stdio: "ignore" }).pid as number;
@@ -489,6 +490,97 @@ test("P6 unrouted redispatch: a bound whose recorded model routing.json no longe
 	const droppedBound = await waitFor(() => f.post.durableWakeups.pending().filter((entry) => entry.job_id === dropped && entry.kind === "bound"), (found) => found.length === 1, { timeoutMs: 60_000, what: "the unrouted redispatch's wake-up" });
 	assert.match(droppedBound[0]?.content ?? "", /could not redispatch .*the redispatch of \S+ on its recorded model names \S+, which data\/routing\.json does not route/s);
 	assert.deepEqual([f.post.manager.get(dropped), f.post.fleet.require(dropped).worker.model], [undefined, droppedModel], "nothing respawned");
+});
+
+// R1 D2: one honoured pick, then every later execution of that job spawns on the fresh rubric route.
+// Negative controls: respawn on worker.model (picked spawns again), spread routing (operator_pick stays current).
+test("R1 D2 later attempts: retry, death recovery, revive and continue_failed spawn on the rubric; a third follows a changed rubric; only the snapshot keeps the pick", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const f = await bench(t);
+	const hang: ScriptStep = { kind: "hang" };
+	const hangs = Array.from({ length: 12 }, () => hang);
+	const [retry, death, held, failed] = [await f.job("d2-retry"), await f.job("d2-death"), await f.job("d2-held"), await f.job("d2-failed")];
+	const picked = {
+		[retry]: f.provider.addScript("d2-retry", [hang]),
+		[death]: f.provider.addScript("d2-death", [hang]),
+		[held]: f.provider.addScript("d2-held", [{ kind: "tool_calls", calls: [{ name: "report_result", args: {
+			job_id: held, kind: "ship", status: "blocked", summary: "Waiting on a human.", blockers: ["a human must pick the API"] } }] }, { kind: "text", text: "filed" }, hang]),
+		[failed]: f.provider.addScript("d2-failed", [hang]),
+	};
+	const rubricB = f.provider.addScript("d2-rubric-b", hangs);
+	const rubricA = f.script("d2-rubric-a", hangs);
+	const config = JSON.parse(readFileSync(join(f.home, LAYOUT.routingFile), "utf8"));
+	const rubric = (model: string) => writeFileSync(join(f.home, LAYOUT.routingFile), JSON.stringify({ ...config, rubric: [...config.rubric, { id: "d2-fresh", role: "implementer", model }] }));
+	rubric(rubricA);
+	const requests = (model: string) => f.provider.requests(model.split("/").pop()!.replace(/^script-/, "")).length;
+	const spawned = (model: string, n: number, what: string) => waitFor(() => requests(model), (count) => count >= n, { timeoutMs: 60_000, what });
+	const current = (jobId: string) => { const r = f.post.fleet.require(jobId); return [r.worker.model, r.routing?.operator_pick]; };
+	const pickOnce = async (jobId: string, extra: { risk?: "high" } = {}) => {
+		const model = picked[jobId]!;
+		await f.post.dispatch({ jobId, task: `Brief for ${jobId}.`, model, operatorQuote: seedOperatorPick(f.home, model, { jobId }), fetch: false, toolCallCap: 100, ...extra });
+		await spawned(model, 1, `${jobId}'s picked worker`);
+		assert.deepEqual([f.post.fleet.require(jobId).worker.model, f.post.fleet.require(jobId).routing?.operator_pick?.model], [model, model]);
+		return f.post.fleet.require(jobId).routing!.operator_pick!;
+	};
+	const snapshot = (jobId: string, attempt: string) => JSON.parse(readFileSync(join(f.home, LAYOUT.runs, jobId, "attempts", `${attempt}.json`), "utf8"));
+	const fresh = (jobId: string, attempt: string) => {
+		const event = f.events(jobId, "routing_resolved").at(-1)!;
+		assert.deepEqual([event.operator_pick, event.prior_pick_attempt], [undefined, attempt], `${jobId}: the new event names the prior attempt, never its quote`);
+		assert.equal(snapshot(jobId, attempt).routing.operator_pick.quote, `use ${picked[jobId]} for this one`, `${jobId}: the snapshot keeps the original pick`);
+	};
+
+	// Dispatch retry after a teardown; an explicit unrouted model is refused; the third attempt follows the new rubric.
+	const first = await pickOnce(retry);
+	const again = async () => {
+		await f.post.tearDown(retry, { force: true });
+		execFileSync("git", ["-C", f.clone, "branch", "-D", retry], { stdio: "ignore" });
+	};
+	await again();
+	await assert.rejects(f.post.dispatch({ jobId: retry, task: "again", model: picked[retry], fetch: false }), /does not route/);
+	await f.post.dispatch({ jobId: retry, task: "again", fetch: false });
+	await spawned(rubricA, 1, "the retry's rubric worker");
+	assert.deepEqual(current(retry), [rubricA, undefined]);
+	fresh(retry, first.attempt_id);
+	await again();
+	rubric(rubricB);
+	await f.post.dispatch({ jobId: retry, task: "third", fetch: false });
+	await spawned(rubricB, 1, "the third attempt on the changed rubric");
+	assert.deepEqual([current(retry), requests(picked[retry]!)], [[rubricB, undefined], 1]);
+	assert.equal(snapshot(retry, first.attempt_id).worker.model, picked[retry], "the snapshot is the picked attempt, untouched");
+	rubric(rubricA);
+	await f.post.tearDown(retry, { force: true });
+
+	// Observed death: bounded recovery revives the same session on the rubric model.
+	const dying = await pickOnce(death);
+	process.kill(f.post.fleet.require(death).worker.pid, "SIGKILL");
+	await spawned(rubricA, 2, "the recovered worker's revive brief");
+	assert.deepEqual([current(death), f.events(death, "recovery_attempted").length], [[rubricA, undefined], 1]);
+	assert.equal(f.events(death, "worker_revived").at(-1)?.rerouted_after_pick, dying.attempt_id);
+	assert.equal(snapshot(death, dying.attempt_id).routing.operator_pick.quote, dying.quote);
+
+	// cp_revive of a held job whose worker is gone.
+	const reported = await pickOnce(held);
+	await waitFor(() => f.post.fleet.get(held), (record) => record?.phase === "held" && f.post.manager.get(held)?.worker.busy === false, { timeoutMs: 60_000, what: "held and idle" });
+	const heldPid = f.post.fleet.require(held).worker.pid;
+	const heldTurns = requests(picked[held]!);
+	process.kill(heldPid, "SIGKILL");
+	await waitFor(() => alive(heldPid), (up) => !up, { timeoutMs: 30_000, what: "the held worker gone" });
+	await waitFor(() => f.post.manager.get(held), (worker) => worker === undefined, { timeoutMs: 30_000, what: "the manager observed it" });
+	await f.post.revive(held);
+	await f.post.send({ jobId: held, message: "Continue." });
+	await spawned(rubricA, 3, "the revived worker's turn");
+	assert.deepEqual(current(held), [rubricA, undefined]);
+	assert.equal(snapshot(held, reported.attempt_id).routing.operator_pick.quote, reported.quote);
+
+	// continue_failed: a risk:high death is never auto-recovered; the operator's continue spawns on the rubric.
+	const cut = await pickOnce(failed, { risk: "high" });
+	process.kill(f.post.fleet.require(failed).worker.pid, "SIGKILL");
+	await waitFor(() => f.post.fleet.require(failed), (job) => job.phase === "failed", { timeoutMs: 30_000, what: "the recorded death" });
+	await f.post.revive(failed, { continueFailed: true });
+	await f.post.send({ jobId: failed, message: "Continue." });
+	await spawned(rubricA, 4, "the continued worker's turn");
+	assert.deepEqual([current(failed), f.post.fleet.require(failed).routing?.risk], [[rubricA, undefined], "high"]);
+	assert.equal(snapshot(failed, cut.attempt_id).routing.operator_pick.quote, cut.quote);
+	assert.deepEqual(Object.values(picked).map(requests), [1, 1, heldTurns, 1], "no picked model ran again");
 });
 
 test("P8d unreported bound: a spent count written to the fleet file by another store is the budget a live settle reads; the same job without it is prompted", { skip: SKIP, timeout: 120_000 }, async (t) => {
