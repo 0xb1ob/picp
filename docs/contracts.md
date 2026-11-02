@@ -242,9 +242,7 @@ Schema: `EnvelopeSchema`; full contract: `validateEnvelope(value, ctx)`.
   "blockers": ["migration needs owner sign-off"],       // status: blocked
   "self_assessment": {                                  // research
     "confidence": "high", "scope": "M",
-    "blocking_unknowns": false, "destructive_scope": false,
-    "suggested_implementer_model": "claude-sonnet-5",       // identifier only
-    "suggested_implementer_model_reason": "routine, low risk" // optional, one sentence
+    "blocking_unknowns": false, "destructive_scope": false
   }
 }
 ```
@@ -4360,7 +4358,7 @@ implementer override (`model` stays the planner's). It is persisted on the pipel
 record across advances, recover and reanchor, shown in the checkpoint evidence, and
 refused once the implementer exists. `recover` takes no `implementer_model`: it needs
 a dispatched implementer, so a new value was always refused; it reuses the persisted one.
-`suggested_implementer_model` stays advisory.
+`suggested_implementer_model` is deprecated: accepted, never read, never surfaced.
 
 **`escalate` is not one exit (cp-n10).** `escalated` is reserved for the
 verdicts that must never reach a human: `policy`, `operational` and
@@ -5048,20 +5046,12 @@ GitHub permits.
   Before this, every pipeline implementer routed as `S`/`low` and rubric rows for
   bigger work were dead code.
 
-  **`suggested_implementer_model` is never read as an input.** A worker naming
-  its successor's model is a worker choosing its own budget, with an obvious
-  incentive and no way to check the claim. It travels as **checkpoint evidence**
-  (`planner suggested model: … (advisory; routing decides)`) and, when it
-  disagrees with the decision, as a line in the advance message. The operator
-  sees the opinion next to the choice; the choice stays with the rubric.
-
-  The field is an identifier, not a paragraph (`SUGGESTED_MODEL_MAX_CHARS`,
-  80 chars) — real run logs showed workers cramming a justification into it
-  ("claude-opus-4-6 (high-stakes incident-response runbook …)", 191 chars
-  against the old 120-char cap), which both overflowed and broke the verbatim
-  comparison against the routing decision above. The justification has its own
-  field, `suggested_implementer_model_reason` (`SUGGESTED_MODEL_REASON_MAX_CHARS`,
-  240 chars), folded into the same advisory line when present.
+  **`suggested_implementer_model` is deprecated: accepted, never read, never
+  surfaced.** A worker naming its successor's model is a worker choosing its own
+  budget, with an obvious incentive and no way to check the claim; routing
+  (`data/routing.json`) decides. The field and `suggested_implementer_model_reason`
+  stay in the schema only so old envelopes still validate; no brief asks for them,
+  and neither the checkpoint evidence nor the advance message mentions them.
 - **A revised artifact is a new artifact.** After a `revise`, the gate re-runs
   only when the artifact's mtime is newer than the last decision. Without that,
   the one-revise cap would be spent by a verdict on the *unrevised* file. So an
@@ -8988,10 +8978,10 @@ keeps everything cp-eff was protecting:
   prose supplies a reviewer preference.
 
   ```text
-  cp_project action:reviewer_model name:picp reviewer_model:openai/gpt-6.1-sol
+  cp_project action:reviewer_model name:picp reviewer_model:<provider>/<model>
   cp_project action:reviewer_model name:picp reviewer_model:null
-  cp_mandate action:issue projects:[picp] objective:<objective> reviewer_model:openai/gpt-6.1-sol
-  cp_mandate action:reviewer_model mandate_id:<id> reviewer_model:openai/gpt-6.1-sol
+  cp_mandate action:issue projects:[picp] objective:<objective> reviewer_model:<provider>/<model>
+  cp_mandate action:reviewer_model mandate_id:<id> reviewer_model:<provider>/<model>
   cp_mandate action:reviewer_model mandate_id:<id> reviewer_model:null
   ```
 
@@ -9332,9 +9322,9 @@ worker's level for jobs that row matches; a row that omits it leaves the
 profile's in force, because routing narrows policy rather than resetting what it
 did not mention. Levels are pi's: `off | minimal | low | medium | high | xhigh |
 max`, and they are valid on **any** model — pi maps a level to whatever the
-provider supports (extended-thinking budgets on Claude Haiku 4.5, adaptive effort
-on the opus/sonnet/fable line). A level on a non-reasoning model is inert, not an
-error, which is why there is no model table here to rot — but a level pi's own
+provider supports (provider-specific thinking budgets or adaptive effort). A
+level on a non-reasoning model is inert, not an error, which is why there is no
+model table here to rot — but a level pi's own
 live metadata says the resolved model **cannot serve** is refused before the
 spawn whichever source named it (see the effective-effort rule below).
 
@@ -9488,36 +9478,21 @@ unavailable. It is probed *before* the lease, so an unavailable model never
 leaves an orphan branch. Every decision is printed and stored as
 `source=/model=/rule=` (`RoutingDecisionSchema`).
 
-The shipped default, `defaults/routing.default.json` (models as of this writing —
-check `pi --list-models`, and see [choosing a model](https://platform.claude.com/docs/en/about-claude/models/choosing-a-model)):
+The shipped rows live in defaults/routing.default.json; cp_dispatch dry_run and /doctor show what each route resolves to
+(check `pi --list-models` for the ids this machine knows).
 
-```json
-{
-  "schema_version": 1,
-  "allow": ["*/*"],
-  "rubric": [
-    { "id": "risky-any", "role": "planner", "risk": "high", "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"], "thinking": "xhigh" },
-    { "id": "risky-ship", "role": "implementer", "risk": "high", "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"], "thinking": "high" },
-    { "id": "reviews", "role": "gate-reviewer", "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"], "thinking": "high" },
-    { "id": "research-big", "role": "planner", "scope": ["L"], "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"], "thinking": "high" },
-    { "id": "big-ship", "role": "implementer", "scope": ["M", "L"], "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"], "thinking": "medium" },
-    { "id": "small-ship", "role": "implementer", "scope": ["S"], "model": "anthropic/claude-sonnet-5-5", "fallbacks": ["anthropic/claude-opus-5-5", "openai/gpt-6.1-sol"], "thinking": "high" }
-  ]
-}
-```
-
-The four shipped profiles carry the same shape, one `fallbacks:` line each
-(`[openai/gpt-6.1-sol]`), which is what makes the profile-sourced routes
+The four shipped profiles carry the same shape, one `fallbacks:` line each,
+which is what makes the profile-sourced routes
 — ordinary planning and QA — resolve on a one-provider machine too. The
 candidates and the capability evidence behind them are in
 [`docs/routing-rollout.md`](routing-rollout.md); with Anthropic authenticated
 every route resolves to its preferred candidate, with no `attempted` list.
 
 Rows are matched in order, so the narrow ones come first: the two `risk: "high"`
-rows before the size rows. Both remaining planner rows resolve to opus and
+rows before the size rows. Both remaining planner rows resolve to the same model and
 differ only in `thinking` — kept explicit rather than collapsed, because each row
 documents an operator decision and a later model change is then a one-row edit.
-`claude-fable-5` is deliberately unused. Add `"project": "<registered name>"` to
+Add `"project": "<registered name>"` to
 a row to make it apply in one repository only.
 
 **Ordinary planning and ordinary QA route through their profiles, not through a

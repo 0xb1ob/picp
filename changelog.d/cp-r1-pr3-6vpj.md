@@ -1,0 +1,1 @@
+- Prompts, tool descriptions and docs name no model: omit model; routing decides.

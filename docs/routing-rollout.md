@@ -32,12 +32,12 @@ not candidates passed over by the capacity comparison.
 
 | row | selector | preferred | then | effort |
 |---|---|---|---|---|
-| `risky-any` | planner, risk high | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | xhigh |
-| `risky-ship` | implementer, risk high | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | high |
-| `reviews` | gate-reviewer | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | high |
-| `research-big` | planner, scope L | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | high |
-| `big-ship` | implementer, scope M/L | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | medium |
-| `small-ship` | implementer, scope S | `anthropic/claude-sonnet-5-5` | `anthropic/claude-opus-5-5`, `openai/gpt-6.1-sol` | high |
+| `risky-any` | planner, risk high | see defaults/routing.default.json | see defaults/routing.default.json | xhigh |
+| `risky-ship` | implementer, risk high | see defaults/routing.default.json | see defaults/routing.default.json | high |
+| `reviews` | gate-reviewer | see defaults/routing.default.json | see defaults/routing.default.json | high |
+| `research-big` | planner, scope L | see defaults/routing.default.json | see defaults/routing.default.json | high |
+| `big-ship` | implementer, scope M/L | see defaults/routing.default.json | see defaults/routing.default.json | medium |
+| `small-ship` | implementer, scope S | see defaults/routing.default.json | see defaults/routing.default.json | high |
 
 Profiles (`profiles/*.md`), which is what ordinary planning and QA resolve from
 (cp-routing-t4 left them without a rubric row on purpose):

@@ -54,9 +54,9 @@ returns the existing ids (create dedupes on project + title).
 1. Create L1-L6, then S1.
 2. `cp_job dep_add` S1 ← each of L1-L6.
 3. `cp_job comment <anchor> "expanded: L1 <id>, …, L6 <id>, S1 <id>"`.
-4. `cp_dispatch` each of L1-L6 with `model: "xai/grok-4.7"`, `thinking: "xhigh"`, `wall_clock_seconds: 10800` and the
+4. `cp_dispatch` each of L1-L6 with `thinking: "xhigh"` and `wall_clock_seconds: 10800` (no model: routing decides) and the
    reader task below (window or slice, sources, focus).
-5. When `cp_next` offers S1, dispatch it (delivery `board`) with the same three overrides and the S1 task below.
+5. When `cp_next` offers S1, dispatch it (delivery `board`) with the same two overrides and the S1 task below.
 6. Tear each job down on its envelope as usual.
 7. On S1's envelope, relay one line: the served URL from its `board` receipt (`board_url`,
    `http://<viewer host>/boards/<S1-id>/`) and the artifact path `state/artifacts/<S1-id>/report.md` — never the body.

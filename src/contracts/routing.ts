@@ -172,9 +172,8 @@ export const RoutingRuleSchema = Type.Object(
 		 * Effort for jobs this row matches; falls back to the profile's level when
 		 * absent. Model and effort are one decision, so they live in one row.
 		 *
-		 * pi maps the level to whatever the provider supports (extended-thinking
-		 * budgets on Claude Haiku 4.5, adaptive effort on the opus/sonnet/fable
-		 * line), and a level on a non-reasoning model is inert, not an error — which
+		 * pi maps the level to whatever the provider supports (provider-specific thinking
+		 * budgets or adaptive effort), and a level on a non-reasoning model is inert, not an error — which
 		 * is why this is not validated against a model table that would rot the day a
 		 * model ships. It IS checked against pi's own live metadata for the resolved
 		 * model at resolution time (cp-reviewer-routing): a level that model reports

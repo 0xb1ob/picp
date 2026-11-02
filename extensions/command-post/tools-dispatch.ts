@@ -45,7 +45,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				Type.String({ description: "Registered project name" }),
 			),
 			question: Type.String({ description: "The question, as the operator asked it. It becomes the job title and the worker's task." }),
-			model: Type.Optional(Type.String({ description: "Explicit provider/model-id override" })),
+			model: Type.Optional(Type.String({ description: "Omit: routing decides (data/routing.json). An explicit model must already be named there, else refused." })),
 			thinking: Type.Optional(StringEnum([...THINKING_LEVELS], { description: "Explicit effort override" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -111,7 +111,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			),
 			scope: Type.Optional(StringEnum([...SCOPES], { description: SCOPE_CRITERIA })),
 			risk: Type.Optional(StringEnum([...RISKS], { description: RISK_CRITERIA })),
-			model: Type.Optional(Type.String({ description: "Explicit provider/model-id override" })),
+			model: Type.Optional(Type.String({ description: "Omit: routing decides (data/routing.json). An explicit model must already be named there, else refused." })),
 			thinking: Type.Optional(
 				StringEnum([...THINKING_LEVELS], {
 					description:

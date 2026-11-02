@@ -527,13 +527,13 @@ test("m3: research → gate (revise, then pass) → checkpoint → implement", {
 	assert.match(pass.dispatch?.routing ?? "", /rule=big-risky-ship/);
 	assert.match(pass.dispatch?.routing ?? "", /thinking=xhigh/, "the row's effort travels with its model");
 	assert.notEqual(pass.dispatch?.model, "mock/script-m3-gate-ladder", "a planner does not pick its successor's model");
-	// And the disagreement is surfaced rather than silently resolved.
-	assert.match(pass.message, /planner suggested mock\/script-m3-gate-ladder; routing chose mock\/script-m3-ship-big/);
+	// The deprecated suggestion is never surfaced: routing alone decides.
+	assert.doesNotMatch(pass.message, /planner suggested/);
 
-	// The checkpoint carries both as evidence, so a human saw them before saying yes.
+	// The checkpoint carries the planner's assessment as evidence, so a human saw it before saying yes.
 	const evidence = (f.post.checkpoints.get(shipId)?.evidence ?? []).join("\n");
 	assert.match(evidence, /planner: scope L, confidence high, destructive -> routing as scope L \/ risk high/);
-	assert.match(evidence, /planner suggested model: mock\/script-m3-gate-ladder \(advisory; routing decides\)/);
+	assert.doesNotMatch(evidence, /planner suggested/);
 
 	const shipJob = readFleet(f.home).jobs.find((job) => job.job_id === shipId);
 	assert.equal(shipJob?.phase, "waiting");

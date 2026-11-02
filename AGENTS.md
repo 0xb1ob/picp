@@ -67,7 +67,7 @@ Never: dispatch a second worker for a job that has one (promote instead); read a
 
 Two axes, do not blur them: **kind** (`ship` changes code, `research` reads and reports) and **delivery** (`pr`, `local`, `pipeline`, `answer`). Both live on the job as labels. **Evidence is not authorization**: a research result never starts an implementation on its own, and a passed gate is quality, not permission.
 
-A third pair picks the *model and effort*: **scope** (`S`/`M`/`L`) and **risk**
+A third pair feeds data/routing.json's choice of model and effort: **scope** (`S`/`M`/`L`) and **risk**
 (`high` for security/auth/money/production/irreversible, `low` for a rerun
 that undoes it). An axis you don't know stays absent — record
 `inferred`/`defaulted`, never invent one.

@@ -48,7 +48,7 @@ artifact against these criteria:
 Required artifact sections, in this order: Goal; Acceptance; Non-goals;
 Evidence; Approach; File list; Implementation order; Constraints; Test plan;
 Unknowns/Blockers; Self-assessment (confidence, scope, blocking_unknowns,
-destructive_scope, suggested_implementer_model). A heading with nothing under
+destructive_scope). A heading with nothing under
 it is a missing section.
 
 Flags (each is true/false, and you set them from the artifact, not from

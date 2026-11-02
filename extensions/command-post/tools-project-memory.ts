@@ -41,7 +41,7 @@ export function registerProjectMemoryTools(
 		promptGuidelines: [
 			"Use cp_project add before the first dispatch into a repository this home has never worked in.",
 			"A project name is what `project:<name>` labels use; it must match ^[a-z0-9][a-z0-9._-]{0,63}$.",
-			"reviewer_model sets the exact model for plan/diff reviewers; null clears. Explicit review model wins, then the newest eligible configured mandate, then project, then existing routing. This changes no author routing or permission.",
+			"reviewer_model sets the reviewer model (must be named in data/routing.json) for plan/diff reviewers; null clears. Explicit review model wins, then the newest eligible configured mandate, then project, then existing routing. This changes no author routing or permission.",
 			"forge declares a self-managed GitLab (kind gitlab, web_base_url, optional api_base_url, token_env = the variable NAME); null clears. Never pass a token value.",
 			"cp_project add without policy detects who merges: a solo GitHub repo gets repo, a team or unreadable one human_handoff. A team-owned repo is merge_policy, never a standing order.",
 			"Set after_merge_deploy only on the operator's explicit instruction; it creates (never dispatches) one ops:deploy job per merge into branch, gated by risk:high at dispatch.",
@@ -82,7 +82,7 @@ export function registerProjectMemoryTools(
 					{ description: "add/forge: which forge hosts the remote; null clears. github.com and gitlab.com need none; a self-managed GitLab needs kind gitlab and web_base_url." },
 				),
 			),
-			reviewer_model: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "reviewer_model: exact provider/model for plan gates and diff reviews; null clears. Eligible mandate preference takes precedence; unusable models refuse." })),
+			reviewer_model: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "reviewer_model: reviewer model for plan gates and diff reviews, named in data/routing.json; null clears. Eligible mandate preference takes precedence; unusable models refuse." })),
 			policy: Type.Optional(StringEnum(["repo", "human_handoff"], { description: "merge_policy, or add's policy (wins over detection): human_handoff (a reviewed, green PR is handed to a human on GitHub and never merged by the command post) or repo (cp_integrate merges when the repository permits). add without it detects: a solo GitHub repo gets repo, anything else human_handoff" })),
 			clone_url: Type.Optional(Type.String({ description: "git remote to clone/fetch from; required for add" })),
 			delivery: Type.Optional(

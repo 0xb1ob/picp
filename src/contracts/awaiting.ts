@@ -81,8 +81,6 @@ export const SUGGEST_FIELD_MAX_CHARS = 200;
 export const SUGGEST_CACHE_MAX_ENTRIES = 200;
 /** How many items the suggestion generator may generate for, per listing (no live reader since the overlay was retired). */
 export const SUGGEST_MAX_ITEMS_PER_LISTING = 5;
-/** Cheap-model default; overridable in `data/suggest.json`. */
-export const SUGGEST_DEFAULT_MODEL = "anthropic/claude-haiku-4-5";
 
 // ---------------------------------------------------------------------------
 // The decision details pane (pi-command-post-4mn) — the bounded evidence block
