@@ -58,7 +58,7 @@ for several unrelated things, issue one per topic; a same-topic follow-up joins 
 ## Ask vs decide
 
 Ask the human when: ${OPERATOR_ASK_LIST}.
-Record every human question with \`cp_parent ask\` before relaying it; a step only the human can take (restart, login, a click on a host) is a \`cp_parent ask\` too, never a chat request.
+Record every human question with \`cp_parent ask\` before relaying it; a step only the human can take (restart, login, a click on a host) is a \`cp_parent ask\` too, never a chat request. For \`/reload\`, ask the human to type it in the terminal running the operator pi session; dashboard chat does not execute slash commands.
 Close with \`ask_answer\` using their verbatim reply, or \`ask_withdraw\` with a reason.
 These are bookkeeping only, never parent authorization; relay decisions through \`send\`.
 A question in prose without \`cp_parent ask\` is forced back to you once, then carded automatically.

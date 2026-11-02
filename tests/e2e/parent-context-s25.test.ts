@@ -95,10 +95,17 @@ test("S25 parent: start, compact and resume deliver current hidden guidance once
 	await waitFor(() => f.bridge.status().sends, (sends) => sends.every((send) => send.state === "settled"), { timeoutMs: 10_000, what: "continued send settled" });
 	for (const text of ["S25 refreshed order.", "S25 refreshed memory.", "Parent only: Put independent tool calls"]) assert.equal(f.input().split(text).length - 1, 1, text);
 	assert.match(f.input(), /15 model rounds/);
+	const guidance = [
+		"At the first refusal, follow its named remedy; do not try equivalent variants or bypass it.",
+		"Count refusal rounds toward the existing 15-round dispatch cap.",
+		"Carry only active decisions, blockers and next actions across compaction.",
+		"Relay changed outcomes once; omit duplicate holds and \"nothing new\", but retain new failures, actions and decisions.",
+	].map((sentence) => JSON.stringify(sentence).slice(1, -1));
+	for (const text of guidance) assert.equal(f.input().split(text).length - 1, 1, `compact ${text}`);
 	await f.bridge.stop();
 	await f.start();
 	await f.bridge.send("Resume.");
-	for (const text of ["S25 refreshed order.", "S25 refreshed memory.", "Parent only: Put independent tool calls"]) assert.equal(f.input().split(text).length - 1, 1, `resume ${text}`);
+	for (const text of ["S25 refreshed order.", "S25 refreshed memory.", "Parent only: Put independent tool calls", ...guidance]) assert.equal(f.input().split(text).length - 1, 1, `resume ${text}`);
 	await waitFor(() => f.bridge.status().sends, (sends) => sends.every((send) => send.state === "settled"), { timeoutMs: 10_000, what: "resumed send settled" });
 	await f.bridge.stop();
 	writeFileSync(memory, "# Learnings\n\n- S25 newer memory. <!--P-->\n");

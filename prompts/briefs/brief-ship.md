@@ -31,7 +31,8 @@ GNU `timeout` does not exist here — avoid a hang rather than bound it after.
 Never kill by name or pattern (no `pkill`, `killall`, `kill -f`) — only a PID
 you started.
 
-Don't chain checks with `&&`/`;` into silence: run them separately, or `|| echo "FAILED: <step>"`.
+Run checks separately and preserve each exit code; a no-match search is not a failed test. Fix explicit diagnostics before retrying a timeout.
+At the first refusal, follow its named remedy; try no variants.
 
 **Agent isolation.** Any pi/agent run your task needs gets a throwaway agent directory, never `~/.pi` or the installed home. Copy only `models.json` into it; add authentication only if the run truly needs it. Create it outside the worktree (`mktemp -d`, mode `0700`) and remove it in a `trap ... EXIT` or `finally`. Name that path and its cleanup in the PR body. A credential comes only from the env var or file your task names (`printenv NAME >/dev/null && echo set`); never search files or the home for keys — unset or unnamed, report `blocked` naming it. Before pushing, audit `git log -p origin/${base}..HEAD` for credential material with `grep -cEi … || true` (a printed 0 is clean), never printing a matched line.
 
