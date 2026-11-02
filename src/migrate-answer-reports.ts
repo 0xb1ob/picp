@@ -3,7 +3,7 @@
  * answer producer writes. Neither journal: nothing to do; archive only: already migrated; live only: migrate, verify,
  * rename; both: a named conflict and no producer writes (docs/contracts.md, *Answer migration*).
  */
-import { lstatSync, readFileSync, renameSync } from "node:fs";
+import { closeSync, lstatSync, openSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { canonicalResponse, cleanResponseTexts, publishResponseReport, readResponseReport, type ResponsePayload } from "./response-reports.ts";
 import { resolveStateDir } from "./viewer/sessions.ts";
@@ -122,8 +122,11 @@ function migrate(home: string, live: string, archive: string): AnswerMigration {
 	});
 	if (verified !== records.length) fail(`verified ${verified} of ${records.length} reports`);
 	step("recheck", () => { if (!readFileSync(live).equals(snapshot)) throw new Error("the journal changed while migrating"); });
-	if (present(archive)) throw conflict();
-	// shortcut: renameSync replaces an archive that appears after the recheck; the drained writer boundary rules that out.
+	// An exclusive empty placeholder: an archive that appeared after the check fails closed, never gets replaced.
+	try { closeSync(openSync(archive, "wx", 0o600)); } catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EEXIST") throw conflict();
+		throw new AnswerMigrationError("failed", `answer migration could not reserve ${archive}: ${(error as Error).message}; answer producers stay off`);
+	}
 	try {
 		renameSync(live, archive);
 	} catch (error) {
