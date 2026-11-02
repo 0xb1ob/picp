@@ -401,6 +401,7 @@ Test files added after the baseline, with the PR that owns them.
 | tests/e2e/quota-continuation.test.ts | cp-p3-pr2-f9ae (PR URL on the branch) | P3 PR2: durable quota-continuation intents (pending, consumed, cancelled) with a test-only verified adapter; eligibility, variant C policy, restart reconciliation, production refusal and a structural no-harness-import guard |
 | tests/e2e/answer-migration.test.ts | cp-m2-pr2-fpbd (https://github.com/0xb1ob/picp/pull/697) | M2 PR2 repair: the answers-journal migration on a pre-M2 real-writer fixture: concurrent bridge/parent gates migrate once with no failing loser, millisecond `at`, a mid-migration journal change and archive collision fail closed |
 | tests/e2e/ask-evidence.test.ts | cp-p1-pra-wood (PR URL on the branch) | P1 PR A evidence lookup: `cp_parent jobs show` with an evidence selector (no parent) resolves the exact review attempt, finding ordinal and same-head CI run; head-level and legacy CI rows, ambiguous runs, missing/mismatched/oversized/symlinked records unavailable without substitution, cross-job/project and malformed selectors refused, redaction, selector-free show unchanged |
+| tests/e2e/operator-model-pick.test.ts | cp-r1-pr5-bvs8 (https://github.com/0xb1ob/picp/pull/705) | R1 D2: the operator's one-job model pick issued by the real cp-bridge (terminal and dashboard), honoured once by dispatch, cp_ask and an armed release; fabricated, missing, edited, old-bridge and parent/worker/main-session sources refused; routing.json untouched |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

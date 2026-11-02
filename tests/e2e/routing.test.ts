@@ -458,7 +458,7 @@ test("P16-route-unrouted: an explicit model no rubric row names is refused in th
 });
 
 // R1 D2: a quote picks a model only by its exact, case-sensitive provider/model token; every other gate still holds.
-// Negative controls: folding case or matching substrings issues the bad proofs; waiving requireAllowed lets allow/deny pass.
+// Negative controls: case folding or substring matching issues the bad proofs; waiving requireAllowed passes allow/deny.
 test("D2-route-match: an exact token picks an unrouted model; partial, case and provider mismatches refuse; allowlist and role deny still gate", { timeout: 300_000 }, async (t) => {
 	const b = await dispatchS29(t);
 	const ship = await job(b, "ship");

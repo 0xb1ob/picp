@@ -92,7 +92,7 @@ test("D2-pick: the bridge issues a pick only from the human's own words; the par
 	writeFileSync(join(b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: [routed], rubric: [{ id: "small-ship", role: "implementer", model: routed }] }));
 	assert.match(await refusal({ jobId: ship, task: "tidy", model: picked, operatorQuote: bound }), /allowlist refuses/);
 	writeFileSync(join(b.home, LAYOUT.routingFile), JSON.stringify({ schema_version: 1, allow: ["mock/*"], rubric: [{ id: "small-ship", role: "implementer", model: routed }] }));
-	// Availability and effort still gate a pick: pi's registry, stubbed at its edge, lacks auth, then serves only low effort.
+	// Availability and effort still gate a pick: pi's registry, stubbed at its edge, lacks auth, then serves low only.
 	const thinkingLevelMap = Object.fromEntries(THINKING_LEVELS.map((level) => [level, level === "low" ? "low" : null]));
 	const gated = (auth: boolean) => b.ownPost(new CommandPost({ home: b.home, packageRoot: REPO_ROOT, parentEnv: { ...process.env, ...b.agent.env },
 		modelRegistry: () => ({ find: (provider: string, id: string) => ({ provider, id, reasoning: true, thinkingLevelMap }), hasConfiguredAuth: () => auth }) }));
@@ -147,7 +147,7 @@ test("D2-pick: the bridge issues a pick only from the human's own words; the par
 	assert.match(await refusal({ jobId: queued, task: "tidy", model: picked, operatorQuote: free }), /operator_pick_consumed: proof \S+ was already used/);
 	assert.match(await refusal({ jobId: ship, task: "tidy", model: picked, operatorQuote: queuedRef }), /operator_pick_consumed: \S+ already had its one operator pick/);
 
-	// Queued admission re-verifies: the human's entry edited after enqueue drops the entry, spends nothing, spawns nothing.
+	// Queued admission re-verifies: the human's entry edited after enqueue drops the entry, spending and spawning nothing.
 	await post.previewDispatch({ jobId: queued, task: "tidy", model: picked, operatorQuote: queuedRef });
 	post.dispatchQueue.enqueue(queued, { task: "tidy", model: picked, operator_quote: queuedRef });
 	const proof = JSON.parse(readFileSync(join(modelPicksDir(b.home), `${queuedRef.proof_id}.json`), "utf8")) as { source: { session_file: string } };
@@ -160,7 +160,7 @@ test("D2-pick: the bridge issues a pick only from the human's own words; the par
 });
 
 // cp_ask and an armed cp_dispatch, called by a real parent: the quote is verified before anything is stored, the armed
-// request carries only the reference, and the release spends it once. Negative control: arming unverified stores a forgery.
+// request carries only the reference, and the release spends it once. Negative control: arming unverified.
 test("D2-pick-tools: cp_ask and an armed cp_dispatch carry the quote, verify it before storing, and honour it once", { timeout: 300_000 }, async (t) => {
 	const b = await dispatchS29(t);
 	const picked = b.provider.addScript("d2-tools-picked", [{ kind: "text", text: "working" }], { onExhausted: "repeat" });
