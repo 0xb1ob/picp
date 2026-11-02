@@ -216,6 +216,7 @@ test("P14-doctor-home: a healthy bridge-launched home is green with a fix on eve
 
 	// Config files: invalid routing and budgets, the gate timeout, an empty allowlist and the per-job budget clamp.
 	assert.equal(one(sound, "config.routing")?.severity, "ok");
+	const scaffolded = readFileSync(join(h, LAYOUT.routingFile), "utf8");
 	put(h, LAYOUT.routingFile, JSON.stringify({ schema_version: 1, allow: "everything" }));
 	put(h, LAYOUT.budgetsFile, "{ nope");
 	const badConfig = await p.doctor();
@@ -228,7 +229,8 @@ test("P14-doctor-home: a healthy bridge-launched home is green with a fix on eve
 	assert.match(JSON.stringify(one(gateless, "config.routing.allow")), /"warn".*no model may be used/);
 	assert.match(JSON.stringify(one(gateless, "config.gate")), /"ok".*no \.pi-command-post\/data\/gate\.json/);
 	assert.match(one(gateless, "config.gate.review_timeout_ms")?.what ?? "", /300000ms \(default\)/);
-	rmSync(join(h, LAYOUT.routingFile));
+	// No routing.json now refuses every route (R1 PR4), so the scaffolded rows come back rather than the file going.
+	put(h, LAYOUT.routingFile, scaffolded);
 	put(h, LAYOUT.gateConfigFile, JSON.stringify({ schema_version: 1, review_timeout_ms: 60_000 }));
 	const gated = await p.doctor();
 	assert.equal(one(gated, "config.gate")?.severity, "ok");
@@ -543,7 +545,9 @@ test("P14-doctor-models: pi's registry decides each route — no auth fails loud
 
 	// A project-scoped row and an L-only row are really resolved, against the registered projects and the whole grid.
 	projects(h, ["web", "api"]);
-	routing(h, [{ id: "web-ship", role: "implementer", project: "web", model: "pinned/only-for-web" }, { id: "big-ship", role: "implementer", scope: ["L"], model: "pinned/only-for-big-jobs" }]);
+	// A profile names no model (R1 PR4): the last row is what an uncovered implementer cell used to fall through to.
+	const fallThrough = { id: "implementer-default", role: "implementer", model: "mock/shared" };
+	routing(h, [{ id: "web-ship", role: "implementer", project: "web", model: "pinned/only-for-web" }, { id: "big-ship", role: "implementer", scope: ["L"], model: "pinned/only-for-big-jobs" }, fallThrough]);
 	const scoped = await p.doctor();
 	const web = one(scoped, "models.implementer.web");
 	assert.deepEqual([web?.severity, /implementer in web/.test(web?.what ?? ""), /pinned\/only-for-web/.test(web?.detail ?? ""), /routing\.json/.test(web?.fix ?? "")], ["error", true, true, true]);
@@ -551,7 +555,7 @@ test("P14-doctor-models: pi's registry decides each route — no auth fails loud
 	const big = all(scoped, "models.implementer").find((f) => f.detail?.includes("pinned/only-for-big-jobs"));
 	assert.deepEqual([big?.severity, /scope\/risk: L\/low, L\/high/.test(big?.detail ?? "")], ["error", true]);
 	assert.ok(all(scoped, "models.implementer").some((f) => f.severity === "ok" && f.detail?.includes("S/low")), "S/low still routes to a reachable model");
-	routing(h, [{ id: "risky-ship", role: "implementer", risk: "high", model: "pinned/only-for-risky" }]);
+	routing(h, [{ id: "risky-ship", role: "implementer", risk: "high", model: "pinned/only-for-risky" }, fallThrough]);
 	const grid = await p.doctor();
 	const implementer = all(grid, "models.implementer");
 	assert.deepEqual(implementer.map((f) => f.severity).sort(), ["error", "ok"], "one ok row and one error row");
