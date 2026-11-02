@@ -227,6 +227,27 @@ export interface JobResponse {
  running?: JobRunning;
  /** Merged jobs with an after-merge record (#326): the deploy that follows the merge. */
  deploy?: JobDeploy;
+ /** Parked or merged jobs (P2): the read-only review guide; null or absent when the job was never handed off. */
+ review_guide?: ReviewGuide | null;
+}
+/** One reading stop: a recorded revision request or reviewer reason, redacted; `historical` is an earlier attempt's. */
+export interface ReviewGuideStop { text: string; list: "revisions" | "reasons"; attempt: number; head: string; verdict: string; historical: boolean }
+/**
+ * P2 review guide (src/viewer/review-guide.ts). Heads are full SHAs; `freshness` is `current` only when the reviewed
+ * head is the handed-off head and this cycle's latest observation; `incomplete` names every gap in the records.
+ */
+export interface ReviewGuide {
+ key: string; project: string; job_id: string; pr_url: string | null; task: string | null;
+ reviewed_head: string | null; attempt: number | null; verdict: string | null; reviewed_at: string | null; model: string | null;
+ kind: "full" | "delta" | "equivalent" | null; source_head: string | null; source_attempt: number | null;
+ delta_from: string | null; compare_href: string | null; files_href: string | null; file_count: number | null; truncated: boolean; flags: string[];
+ observed_head: string | null; observed_at: string | null; observed_source: "pending" | "watch" | "ci_watch" | null;
+ freshness: "current" | "historical" | "unknown"; cycle: number | null; handed_head: string | null;
+ stops: ReviewGuideStop[]; omitted_count: number;
+ ci: {head: string | null; state: string; source: "watch" | "event" | null; at: string | null; read_failure: boolean; forwarded: ForwardedCi | null};
+ handoff: {state: "with_team" | "pending" | "closed" | "merged" | "not_parked"; pending: string | null; pending_at: string | null; handed_at: string | null;
+  approvals: number | null; approvals_required: number | null; last_human_activity_at: string | null; watched_at: string | null; merged_at: string | null; merge_sha: string | null};
+ incomplete: string[];
 }
 /** After-merge deploy (#326): `deployed` is the deploy job's own `done` report; `at` is set only then. */
 export interface JobDeploy {

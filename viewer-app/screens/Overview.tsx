@@ -83,7 +83,7 @@ function TeamRow({j, manyProjects, now}: {j: TeamJob; manyProjects: boolean; now
  const approvals = j.approvals === null ? "approvals unknown" : `${j.approvals}/${j.approvals_required ?? "?"} approvals`;
  return <article class="overview-line overview-team" aria-label={j.id}>
   <a href={jobHref(j.id)} class="overview-job-id"><span aria-hidden="true" class="overview-dot overview-dot-awaiting_merge"/><code>{j.id}</code></a>
-  <div class="overview-flight-title"><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span>{manyProjects && <div class="overview-flight-extra"><span class="overview-project" title={j.project}>{j.project}</span></div>}</div>
+  <div class="overview-flight-title"><span class="overview-line-text" title={j.title ?? undefined}>{j.title ?? "-"}</span><div class="overview-flight-extra">{manyProjects && <span class="overview-project" title={j.project}>{j.project}</span>}<a class="overview-team-guide" href={jobHref(j.id)}>Review guide</a></div></div>
   <a href={j.pr_url} class="overview-team-pr" title={j.pr_url}>{prNumber(j.pr_url) ?? "PR"} ↗</a>
   <code class="overview-team-head" title={`${j.head} → ${j.base}`}>{shortSha(j.head)}</code>
   <span class="overview-team-age" title={`handed off ${observedTime(j.handed_at)}; execution ${elapsed(j.frozen_seconds)}, stopped at hand-off`}>{elapsed(j.age_seconds)}</span>

@@ -1,0 +1,1 @@
+- Viewer: a job parked with the team (or merged with retained reviews) shows a read-only review guide above its tabs — full reviewed and observed heads with freshness, ordered stops ending at PR Files, full/delta/equivalent review with an exact compare link, per-head CI, and hand-off status — linked from With the team on Overview and Jobs.
