@@ -35,6 +35,8 @@ import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, paths, type Role, type ThinkingLevel } from "./contracts.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
 import { loadProfile } from "./profiles.ts";
+import { requireRouted } from "./routed-models.ts";
+import { loadRoutingConfig, RoutingError } from "./routing.ts";
 import type { RunRegistry } from "./runs.ts";
 import { type CarriedBounds, resolveJobHardBounds } from "./bounds.ts";
 import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts";
@@ -60,6 +62,7 @@ export const REVIVE_REFUSAL_CODES = [
 	"session_policy_blocked",
 	"session_scan_failed",
 	"skill_unresolved",
+	"model_unrouted",
 ] as const;
 export type ReviveRefusalCode = (typeof REVIVE_REFUSAL_CODES)[number];
 
@@ -478,6 +481,14 @@ export class Reviver {
 				"repo_detached_head",
 				`${record.worktree} is on a detached HEAD, not ${record.branch} \u2014 inspect and fix the checkout before reviving.`,
 			);
+		}
+
+		// P6: a respawn never resumes on a model data/routing.json does not route (an override it no longer names).
+		try {
+			requireRouted(loadRoutingConfig(this.#options.home), record.worker.model, `the respawn of ${jobId} on its recorded model`);
+		} catch (error) {
+			if (!(error instanceof RoutingError && error.refusal === "unrouted")) throw error;
+			return refuse(jobId, "model_unrouted", `${error.message} Nothing was spawned: add the model to a rubric row and retry, or tear the job down and re-dispatch.`);
 		}
 
 		// Operator-named skills are re-resolved by name: a directory is never trusted from the record.

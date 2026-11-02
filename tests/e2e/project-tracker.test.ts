@@ -14,7 +14,7 @@ import { EscalationStore } from "../../src/escalation.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { Ledger, legacyArchiveFile } from "../../src/ledger.ts";
 import { ProjectRegistry } from "../../src/projects.ts";
-import { createScratchRepo, git, waitFor } from "../harness/index.ts";
+import { createScratchRepo, git, routeNamed, waitFor } from "../harness/index.ts";
 import { bench, details, failed, job, ok, project, scriptedGh, text } from "./project-tracker-helpers.ts";
 
 const JOB: Job = {
@@ -803,6 +803,7 @@ test("P15-projects: cp_project registers, clones, detects who merges, reads CI r
 		edit(doc.projects.find((entry) => entry.name === "web")!);
 		writeFileSync(registry.file, JSON.stringify(doc));
 	};
+	routeNamed(s.home, ["a/first", "b/second"], { seed: "template" });
 	const { ends } = await s.run([
 		{ prompt: "What is registered?", calls: [project("empty-list", { action: "list" }), project("empty-show", { action: "show", name: "ghost" })] },
 		{ prompt: "Set up the projects.", before: async () => {
@@ -843,6 +844,7 @@ test("P15-projects: cp_project registers, clones, detects who merges, reads CI r
 			project("forge-cleared", { action: "show", name: "gl" }),
 			project("reviewer", { action: "reviewer_model", name: "web", reviewer_model: "a/first" }),
 			project("reviewer-trim", { action: "reviewer_model", name: "web", reviewer_model: " b/second " }),
+			project("reviewer-unrouted", { action: "reviewer_model", name: "web", reviewer_model: "a/unrouted" }),
 			...["invalid", "   ", "a/has space", `a/${"x".repeat(129)}`].map((value, index) => project(`bad-reviewer ${index}`, { action: "reviewer_model", name: "web", reviewer_model: value })),
 			project("reviewer-ghost", { action: "reviewer_model", name: "ghost", reviewer_model: null }),
 			project("reviewer-missing", { action: "reviewer_model", name: "web" }),
@@ -964,6 +966,8 @@ test("P15-projects: cp_project registers, clones, detects who merges, reads CI r
 
 	ok(ends, "reviewer", /web reviewer model: a\/first/);
 	ok(ends, "reviewer-trim", /web reviewer model: b\/second$/);
+	// R1 PR2 write-time check: an unrouted reviewer model is refused and the registry keeps b/second (reviewer-show).
+	failed(ends, "reviewer-unrouted", /cp_project reviewer_model names a\/unrouted, which data\/routing\.json does not route/);
 	for (const index of [0, 1, 2, 3]) failed(ends, `bad-reviewer ${index}`, /refusing to write an invalid project registry:\n {2}\/projects\/\d+\/reviewer_model: must/);
 	failed(ends, "reviewer-ghost", /unknown project/);
 	failed(ends, "reviewer-missing", /needs reviewer_model/);

@@ -74,6 +74,7 @@ test("P8d revive plan: cp_revive over seeded fleet records refuses each unsafe s
 		home.cleanup();
 	});
 	const fleet = new FleetStore({ home: home.path });
+	routeNamed(home.path, ["mock/mock-model"]);
 	const tree = (jobId: string): string => {
 		const worktree = join(home.path, "worktrees", jobId);
 		git(repo.path, "clone", "--quiet", repo.path, worktree);
@@ -146,6 +147,8 @@ test("P8d revive plan: cp_revive over seeded fleet records refuses each unsafe s
 	appendFileSync(join(home.path, "cp-f-blocked.jsonl"), `${POLICY_BLOCK}\n`);
 	await failed("cp-f-garbled");
 	appendFileSync(join(home.path, "cp-f-garbled.jsonl"), "{\"type\":\n");
+	await failed("cp-f-unrouted", { worker: { ...fleet.require("cp-done").worker, session_file: join(home.path, "cp-f-unrouted.jsonl"), model: "mock/unrouted" } });
+	tree("cp-unrouted"), session("cp-unrouted"), await seed("cp-unrouted", {}, { model: "mock/unrouted" });
 	// SAFETY: the fleet contract validates this script record without a worker; FleetRecord still types model readers.
 	await fleet.add({ job_id: "cp-script", project: "demo", kind: "ship", delivery: "local", origin: DEFAULT_ORIGIN, phase: "failed", failure: { ...CRASH, class: "script_exit" },
 		executor: "script", script_path: "scripts/run.sh", script_process: { pid: DEAD_PID, started_at: isoTimestamp() }, worktree: home.path, branch: "cp-script",
@@ -204,7 +207,7 @@ test("P8d revive plan: cp_revive over seeded fleet records refuses each unsafe s
 	const refusals: Record<string, string> = {
 		"cp-f-live": "pid_alive", "cp-script": "not_revivable_phase", "cp-f-nosess": "session_missing", "cp-f-detach": "repo_detached_head",
 		"cp-f-rebase": "repo_operation_in_progress", "cp-f-unaccepted": "envelope_unresolved", "cp-f-rejected": "envelope_unresolved",
-		"cp-f-blocked": "session_policy_blocked", "cp-f-garbled": "session_scan_failed",
+		"cp-f-blocked": "session_policy_blocked", "cp-f-garbled": "session_scan_failed", "cp-f-unrouted": "model_unrouted",
 	};
 	for (const [jobId, expected] of Object.entries(refusals)) {
 		const unchanged = fleet.require(jobId);
@@ -218,6 +221,18 @@ test("P8d revive plan: cp_revive over seeded fleet records refuses each unsafe s
 	assert.equal(garbled.ok ? "" : garbled.code, "session_scan_failed");
 	assert.ok(!garbled.ok && garbled.message.includes(join(home.path, "cp-garbled.jsonl")), "the scan error names the path");
 	assert.equal(post.manager.get("cp-blocked"), undefined);
+
+	// P6 (R1 PR2): a respawn on a model data/routing.json does not route is refused; nothing is spawned or rewritten.
+	// Negative control: without the revive.ts check, cp-unrouted plans "ok".
+	const unroutedBefore = fleet.require("cp-unrouted");
+	const unrouted = await post.revivePlan("cp-unrouted");
+	assert.deepEqual(unrouted.ok ? [] : [unrouted.code], ["model_unrouted"]);
+	assert.match(unrouted.ok ? "" : unrouted.message, /the respawn of cp-unrouted on its recorded model names mock\/unrouted, which data\/routing\.json does not route.*Nothing was spawned/s);
+	await assert.rejects(post.revive("cp-unrouted"), (error: unknown) => error instanceof ReviveError && /model_unrouted/.test(error.message));
+	assert.deepEqual([new FleetStore({ home: home.path }).require("cp-unrouted"), post.manager.get("cp-unrouted")], [unroutedBefore, undefined]);
+	// An unreadable routing.json is its own error, never mislabelled model_unrouted.
+	writeFileSync(join(home.path, LAYOUT.routingFile), "{ not json");
+	await assert.rejects(post.revivePlan("cp-unrouted"), (error: unknown) => !(error instanceof ReviveError) && /routing\.json is not valid JSON/.test(String(error)));
 });
 
 interface Bench {
@@ -441,6 +456,24 @@ test("P8d recovery refusals: a tool loop escalates without a revive, a policy-bl
 	assert.equal(bound().length, 1, "announced once, never a preview");
 	assert.equal(f.escalations(skilled).length, 1);
 	assert.equal(f.post.manager.get(skilled), undefined, "nothing spawned");
+});
+
+// P6 (R1 PR2): the operator drops a live worker's row; its bound's redispatch is refused, never respawned on it.
+// Negative control: without the recovery.ts check, the wake-up reports a redispatch instead.
+test("P6 unrouted redispatch: a bound whose recorded model routing.json no longer routes is refused, nothing respawned", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const f = await bench(t);
+	const dropped = await f.job("dropped");
+	let unroute = (): void => {};
+	const unrouted = new Promise<void>((resolve) => (unroute = resolve));
+	const droppedModel = f.script("dropped", [bash("echo one"), { kind: "hang", until: unrouted }, bash("echo two"), { kind: "hang" }]);
+	await f.dispatch(dropped, droppedModel, { toolCallCap: 2 });
+	await waitFor(() => f.toolStarts(dropped), (n) => n === 1, { timeoutMs: 30_000, what: "the dropped worker's first call" });
+	const routing = JSON.parse(readFileSync(join(f.home, LAYOUT.routingFile), "utf8"));
+	writeFileSync(join(f.home, LAYOUT.routingFile), JSON.stringify({ ...routing, rubric: routing.rubric.filter((row: { model: string }) => row.model !== droppedModel) }));
+	unroute();
+	const droppedBound = await waitFor(() => f.post.durableWakeups.pending().filter((entry) => entry.job_id === dropped && entry.kind === "bound"), (found) => found.length === 1, { timeoutMs: 60_000, what: "the unrouted redispatch's wake-up" });
+	assert.match(droppedBound[0]?.content ?? "", /could not redispatch .*the redispatch of \S+ on its recorded model names \S+, which data\/routing\.json does not route/s);
+	assert.deepEqual([f.post.manager.get(dropped), f.post.fleet.require(dropped).worker.model], [undefined, droppedModel], "nothing respawned");
 });
 
 test("P8d unreported bound: a spent count written to the fleet file by another store is the budget a live settle reads; the same job without it is prompted", { skip: SKIP, timeout: 120_000 }, async (t) => {

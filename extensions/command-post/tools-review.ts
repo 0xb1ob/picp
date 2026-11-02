@@ -110,11 +110,11 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			scope: Type.Optional(StringEnum([...SCOPES], { description: SCOPE_CRITERIA })),
 			risk: Type.Optional(StringEnum([...RISKS], { description: RISK_CRITERIA })),
 			model: Type.Optional(Type.String({ description: "start: planner model override" })),
-			implementer_model: Type.Optional(Type.String({
+			implementer_model: Type.Optional(Type.Union([Type.String({
 				minLength: 1,
 				maxLength: 128,
 				description: "start/advance: implementer model override (operator-named, explicit; routing allow-list applies). model stays the planner's; recover reuses the persisted one.",
-			})),
+			}), Type.Null({ description: "advance: clears a stored implementer pin so routing decides" })])),
 			wall_clock_seconds: Type.Optional(Type.Integer({
 				minimum: 1, description: "start: wall-clock bound in seconds for both planner and implementer; home/env defaults when omitted",
 			})),
@@ -215,14 +215,17 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 					details: record as unknown as Record<string, unknown>,
 				};
 			}
-			if (params.action === "recover" && params.implementer_model) {
-				throw new Error("cp_pipeline recover takes no `implementer_model` — it reuses the persisted one");
+			if (params.action === "recover" && params.implementer_model !== undefined) {
+				throw new Error(
+					"cp_pipeline recover takes no `implementer_model` — it reuses the persisted one; to clear a stale pin, " +
+						`cp_pipeline advance ${params.research_id} implementer_model: null first`,
+				);
 			}
 			const result =
 				params.action === "advance"
 					? await runner.advance(
 						params.research_id,
-						params.implementer_model ? { implementerModel: params.implementer_model } : {},
+						params.implementer_model !== undefined ? { implementerModel: params.implementer_model } : {},
 					)
 					: await runner.recoverShip(params.research_id);
 			refreshWidget(ctx);

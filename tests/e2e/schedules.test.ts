@@ -1302,6 +1302,7 @@ test("P13c native policy and run options: add saves a report-only revision 1 or 
 			{ ...add("fixed", "broken"), args: () => { rmSync(policies, { recursive: true }); renameSync(`${policies}.stash`, policies); return add("fixed", "broken").args as Record<string, unknown>; } },
 			schedule("huge", () => ({ action: "run_now", id: h.idOf("nightly"), overrides: { parallelism: 99 } })),
 			schedule("script-model", () => ({ action: "run_now", id: h.idOf("scripted"), overrides: { model: worker } })),
+			schedule("unrouted", () => ({ action: "run_now", id: h.idOf("nightly"), overrides: { model: "mock/unrouted" } })),
 		] },
 		{ kind: "tool_calls", calls: [schedule("run", () => ({ action: "run_now", id: h.idOf("nightly"), overrides: { model: worker, thinking: "off", parallelism: 1 } }))] },
 	]);
@@ -1313,6 +1314,8 @@ test("P13c native policy and run options: add saves a report-only revision 1 or 
 	assertCall(results, "fixed", "ok", /added sch-[0-9a-f]{6} broken/);
 	assertCall(results, "huge", "refused", /overrides\.parallelism: must be <= 32/);
 	assertCall(results, "script-model", "ok", /run now not recorded: a script_path recipe runs no model: model and thinking overrides are refused/);
+	// R1 PR2: an unrouted run override is refused before any run or job exists ("refused run_now calls start no run").
+	assertCall(results, "unrouted", "ok", /run now not recorded: run override model names mock\/unrouted, which data\/routing\.json does not route/);
 	assertCall(results, "run", "ok", /fired: created cp-\S+ under run .*\(native policy rev 1; model mock\/script-p13-worker-0, thinking off, parallelism 1\)/);
 	const id = h.idOf("nightly");
 	const policy = h.runs().activePolicy(id) as NativeSchedulePolicy;

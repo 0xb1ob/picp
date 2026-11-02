@@ -26,6 +26,8 @@ import { cpNext, dedupeNext, formatNext, writeNextSnapshot } from "../../src/nex
 import { homeMandateProjects } from "../../src/project-report.ts";
 import { decide, DecideError, operatorTextsFromEntries, requireOperatorQuote } from "../../src/decide.ts";
 import { preapprovalRecord } from "../../src/risk-preapproval.ts";
+import { requireRoutedPreference } from "../../src/routed-models.ts";
+import { loadRoutingConfig } from "../../src/routing.ts";
 import { EscalationError } from "../../src/escalation.ts";
 import { batchRiskHigh } from "../../src/risk-batch.ts";
 import { currentRuntime, escalateToolText } from "./helpers.ts";
@@ -173,6 +175,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 				}
 				if (params.action === "reviewer_model") {
 					if (!params.mandate_id || params.reviewer_model === undefined) throw new MandateError("cp_mandate reviewer_model needs mandate_id and reviewer_model (provider/model or null)");
+					if (params.reviewer_model !== null) requireRoutedPreference(() => loadRoutingConfig(post.home), params.reviewer_model, "cp_mandate reviewer_model");
 					const mandate = post.mandates.setReviewerModel(params.mandate_id, params.reviewer_model);
 					return { content: [{ type: "text", text: `${mandate.id} reviewer model: ${mandate.reviewer_model ?? "unset"}` }], details: mandate as unknown as Record<string, unknown> };
 				}
@@ -204,6 +207,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 					return { content: [{ type: "text", text: `${mandate.id} ${said[action]}` }], details: mandate as unknown as Record<string, unknown> };
 				}
 				if (params.reviewer_model === null) throw new MandateError("cp_mandate issue: reviewer_model must be a provider/model string or absent; null only clears an existing grant");
+				if (params.reviewer_model !== undefined) requireRoutedPreference(() => loadRoutingConfig(post.home), params.reviewer_model, "cp_mandate issue reviewer_model");
 				if (!params.projects?.length) throw new MandateError("cp_mandate issue needs projects");
 				const archived = params.projects.filter((name) => post.registry.get(name)?.archived);
 				if (archived.length) throw new MandateError(`cp_mandate issue refused: archived project(s) ${archived.join(", ")} — unarchive with cp_project unarchive first`);

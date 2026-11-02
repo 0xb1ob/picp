@@ -1,6 +1,7 @@
 /** The models data/routing.json names: an explicit model must be one of them, never a new one. */
 
-import type { RoutingConfig } from "./contracts.ts";
+import { Value } from "typebox/value";
+import { ReviewerModelSchema, type RoutingConfig } from "./contracts.ts";
 import { boundedList, RoutingError } from "./routing.ts";
 
 /** Every rubric row's `model` and `fallbacks`, in file order, de-duplicated. */
@@ -19,4 +20,9 @@ export function requireRouted(config: RoutingConfig, model: string, where: strin
 			`Routed: ${boundedList(routed, { max: 8, cap: 400, separator: ", " }) || "(none)"}.`,
 		{ refusal: "unrouted" },
 	);
+}
+
+/** A reviewer preference's write-time check; a malformed value passes through to its store's own schema refusal. */
+export function requireRoutedPreference(config: () => RoutingConfig, model: string, where: string): void {
+	if (Value.Check(ReviewerModelSchema, model.trim())) requireRouted(config(), model.trim(), where);
 }

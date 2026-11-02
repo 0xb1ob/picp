@@ -37,6 +37,7 @@ import { nativeAddPolicy, type NativeAddLimits } from "./schedule-native-add.ts"
 import { formatNativeEvent, nativeStart } from "./schedule-native.ts";
 import { nativeMigrationReason } from "./schedule-native-migration.ts";
 import { effectivePolicyBounds } from "./schedule-policy.ts";
+import { loadRoutingConfig } from "./routing.ts";
 
 import { policyImportBackups } from "./schedule-migrations.ts";
 export { assertTimeZone, type CronSpec, latestCronSlot, nextCronSlot, ORG_REVIEW_MAX_REVIEWERS, orgReviewConfig, type OrgReviewConfig, orgReviewMaxReviewers, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
@@ -533,7 +534,8 @@ export class Scheduler {
 		};
 		const overrides = manual?.overrides ? { overrides: manual.overrides } : {};
 		const trigger = manual === undefined ? {} : { manual: manual.via === "dashboard" ? { via: "dashboard" as const, request_id: manual.request_id, peer: manual.peer, ...overrides } : { via: "cp_schedule" as const, tool_call_id: manual.tool_call_id, ...overrides } };
-		const started = await nativeStart({ runs: this.#ports.runs, ledger: this.#ports.ledger(), schedule, policy, context, title, now, slot, missed, missedAt, ...trigger });
+		const routing = () => loadRoutingConfig(this.#ports.home);
+		const started = await nativeStart({ runs: this.#ports.runs, ledger: this.#ports.ledger(), schedule, policy, context, routing, title, now, slot, missed, missedAt, ...trigger });
 		if (refused(started)) return refuse(started.refusal);
 		if (!manual && !started.replayed && started.job_id) await this.#patch(schedule.id, { last_fire: { at: now.toISOString(), slot: slot.toISOString(), job_id: started.job_id, missed } });
 		return { ...base, outcome: "fired", ...started, delivery: schedule.job.delivery, ...(schedule.job.skill ? { skill: schedule.job.skill } : {}), ...(missed ? { missed_at: minuteIso(missedAt) } : {}), ...manualFields };

@@ -1323,7 +1323,8 @@ test("P11d-stored-models: an unrouted stored model refuses advance and recover b
 		spend_cap: { usd: 10, tokens: 1_000_000 }, job_cap: 100 });
 
 	await t.test("F1: a stored implementer pin, at advance and at recover", async () => {
-		await close(await refused({ seed: (ids) => seedRecord(ids, { implementer_model: UNROUTED }), where: (ids) => `${ids.file} implementer_model` }));
+		const clear = (id: string) => ` — pass implementer_model with a routed model, or implementer_model: null to let routing decide (cp_pipeline advance ${id}) —`;
+		await close(await refused({ seed: (ids) => seedRecord(ids, { implementer_model: UNROUTED }), where: (ids) => `${ids.file} implementer_model${clear(ids.id)}` }));
 		// The cp-9ibz shape on recover: the same failure choreography as P11d-recover, then a stale unrouted pin.
 		const ids = await handoff(b, steps, { task: BUMP, assessment: CONFIDENT, keep: true });
 		const failure = { class: "crash" as const, message: "worker died", at: isoTimestamp() };
@@ -1332,13 +1333,28 @@ test("P11d-stored-models: an unrouted stored model refuses advance and recover b
 		await b.post.tearDown(ids.shipId, { force: true });
 		execFileSync("git", ["-C", b.clone, "branch", "-D", ids.shipId], { stdio: "ignore" });
 		store().write({ ...store().require(ids.researchId), implementer_model: UNROUTED });
-		await assert.rejects(b.post.pipeline().recoverShip(ids.researchId), /implementer_model names mock\/unrouted, which data\/routing\.json does not route/);
+		await assert.rejects(b.post.pipeline().recoverShip(ids.researchId), new RegExp(`implementer_model${quote(clear(ids.researchId))} names mock\\/unrouted, which data\\/routing\\.json does not route`));
 		assert.equal(readRunEvents(b.home, ids.shipId).filter((event) => event.type === "routing_resolved").length, 1, "recover dispatched nothing");
 	});
-	await t.test("F2: the advance argument is refused and writes no pin", async () => {
+	await t.test("F2: the advance argument is refused and writes no pin; null clears a stale pin and routing decides", async () => {
 		const ids = await refused({ where: () => "cp_pipeline advance implementer_model", implementerModel: UNROUTED });
 		assert.equal(store().require(ids.id).implementer_model, undefined);
 		await close(ids);
+		const cleared = await handoff(b, steps, { task: BUMP, assessment: CONFIDENT, prep: (late) => {
+			store().write({ ...store().require(late.researchId), implementer_model: UNROUTED });
+			return b.post.advancePipeline(late.researchId, { implementerModel: null }).then(() => {});
+		} });
+		assert.deepEqual([cleared.routed.source, store().require(cleared.researchId).implementer_model], ["rubric", undefined]);
+	});
+	await t.test("start: an unrouted model is refused before either job exists", async () => {
+		const before = (await b.post.ledger().list({ all: true })).length;
+		const fields = { model: { model: UNROUTED }, implementer_model: { implementerModel: UNROUTED },
+			"quality.model": { quality: { verify: true, model: UNROUTED } }, "review.model": { review: { enabled: true, model: UNROUTED } } };
+		for (const [where, field] of Object.entries(fields)) {
+			await assert.rejects(b.post.startPipeline({ title: `refused ${where}`, project: "demo", task: BUMP, delivery: "local", fetch: false, ...field }),
+				new RegExp(`cp_pipeline start ${quote(where)} names mock\\/unrouted, which data\\/routing\\.json does not route`));
+		}
+		assert.equal((await b.post.ledger().list({ all: true })).length, before, "no research or ship job was created");
 	});
 	await t.test("F3: the pipeline's quality model", async () => {
 		await close(await refused({ seed: (ids) => seedRecord(ids, { quality: { verify: true, model: UNROUTED } }), where: (ids) => `${ids.file} quality.model` }));
@@ -1421,13 +1437,18 @@ test("#648: cp_pipeline start carries implementer_model through the tool; recove
 	registerReviewTools({ registerTool: (tool: { name: string }) => tools.set(tool.name, tool as never) } as never,
 		{ commandPost: () => b.post, setLive: () => {}, refreshWidget: () => {} } as never);
 	const tool = tools.get("cp_pipeline")!;
-	assert.equal(tool.parameters.properties.implementer_model.maxLength, 128, "the tool caps it like PipelineRecordSchema");
+	const pinned = tool.parameters.properties.implementer_model.anyOf.find((each: { type: string }) => each.type === "string");
+	assert.equal(pinned.maxLength, 128, "the tool caps it like PipelineRecordSchema");
 	const call = (params: Record<string, unknown>) => tool.execute("c", params, undefined, undefined, { hasUI: false, modelRegistry: undefined });
 	routeNamed(b.home, [b.named]);
 	const started = (await call({ action: "start", title: "tool start", project: "demo", task: BUMP, delivery: "local", implementer_model: b.named })).details;
 	assert.equal(b.post.pipeline().store.require(started.research_id).implementer_model, b.named);
 	routeNamed(b.home, ["mock/other"]);
 	await assert.rejects(call({ action: "recover", research_id: started.research_id, implementer_model: "mock/other" }), /recover takes no `implementer_model`/);
+	await assert.rejects(call({ action: "recover", research_id: started.research_id, implementer_model: null }),
+		new RegExp(`recover takes no \`implementer_model\`.*cp_pipeline advance ${started.research_id} implementer_model: null first`));
+	await call({ action: "advance", research_id: started.research_id, implementer_model: null });
+	assert.equal(b.post.pipeline().store.require(started.research_id).implementer_model, undefined, "advance null clears the pin");
 	await b.post.tearDown(started.research_id, { force: true });
 });
 
