@@ -29,7 +29,7 @@ import { LOADED_COMMIT } from "../../src/viewer/loaded-commit.ts";
 import { recordModelWindows } from "../../src/model-windows.ts";
 import { computePiVersionNudge } from "../../src/pi-version-nudge.ts";
 import { computeRoutingNudge } from "../../src/routing.ts";
-import { digestsInContext, parentContextLog, standingOrdersDigest } from "../../src/parent-context.ts";
+import { changedDigests, parentContextLog, standingOrdersDigest } from "../../src/parent-context.ts";
 import { thresholdCancel } from "../../src/parent-compact-hold.ts";
 import { recentWorkContext } from "../../src/recent-work.ts";
 import { formatScaffold, scaffoldHome } from "../../src/scaffold.ts";
@@ -91,11 +91,12 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		if (event.reason === "manual") compactHold.failed();
 	});
 
-	// cp-35d0 S10: a queued set is not on the branch yet, so a same-tick second call would
-	// re-send it. Reserve the latest set per home, session and successful-compaction epoch.
+	// cp-35d0 S10: a queued digest is not on the branch yet, so a same-tick second call would re-send it.
+	// S1-03: reserve each type's content per home, session and successful-compaction epoch; send only changed types.
 	let compactEpoch = 0;
-	let reserved: string | undefined;
-	const deliverDigests = (home: string, ctx: ExtensionContext): void => {
+	let reservedScope: string | undefined;
+	const reserved = new Map<string, string>();
+	const deliverDigests = (home: string, ctx: ExtensionContext, compacted = false): void => {
 		const messages: Array<{ customType: string; content: string; display: false }> = [];
 		messages.push({ customType: "cp-parent-guidance", display: false, content: "Parent only: Put independent tool calls in one assistant message; keep dependent calls sequential (hold→send, amend→send, revive plan→confirm→send). A dispatch turn stops at 15 model rounds: compact or end the turn and report decisions already made instead of further investigation. Reuse results you hold: no second cp_next without a new event between, no cp_revive after a `revived … idle` receipt (cp_send next). Once every landed send has its outcome or durable blocker and required actions ran, give the one final answer per send — no acknowledgement first, no extra discovery." });
 		try {
@@ -112,16 +113,20 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		if (orders) messages.push({ customType: "cp-standing-orders", content: orders, display: false });
 		const recent = recentWorkContext(home); // never throws: an unreadable ledger is its own one-line notice
 		if (recent) messages.push({ customType: "cp-recent-work", content: recent, display: false });
-		// picp-99l: a resumed session already holding this exact pair gets no second copy.
-		if (digestsInContext(ctx.sessionManager.getBranch(), messages)) return;
-		const key = JSON.stringify([home, ctx.sessionManager.getSessionId(), compactEpoch, messages.map((message) => [message.customType, message.content])]);
-		if (reserved === key) return;
-		reserved = key;
-		try {
-			for (const message of messages) pi.sendMessage(message, { triggerTurn: false });
-		} catch (error) {
-			reserved = undefined; // a failed send stays retryable
-			throw error;
+		const scope = JSON.stringify([home, ctx.sessionManager.getSessionId(), compactEpoch]);
+		if (reservedScope !== scope) {
+			reservedScope = scope;
+			reserved.clear();
+		}
+		// A successful compaction re-sends every available digest, whatever the callback's branch still shows.
+		for (const message of changedDigests(compacted ? [] : ctx.sessionManager.getBranch(), messages, reserved)) {
+			reserved.set(message.customType, message.content);
+			try {
+				pi.sendMessage(message, { triggerTurn: false });
+			} catch (error) {
+				reserved.delete(message.customType); // a failed send stays retryable; earlier sends stay reserved
+				throw error;
+			}
 		}
 	};
 
@@ -130,7 +135,7 @@ export function registerSessionHooks(pi: ExtensionAPI, s: SessionState, session:
 		compactEpoch++;
 		// After pi's compact() has returned (its isCompacting cleared), held wakes go out.
 		setTimeout(() => compactHold.compacted(), 0);
-		if (s.parentLock) deliverDigests(currentRuntime().home, ctx);
+		if (s.parentLock) deliverDigests(currentRuntime().home, ctx, true);
 	});
 
 	// Hide pi's working loader for the outer extension-prompt span, and set

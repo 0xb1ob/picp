@@ -81,13 +81,14 @@ test("cp-35d0 S10: a queued digest set is reserved per session and successful-co
 	type Digest = { message: { customType: string; content: string; display?: boolean }; options: { triggerTurn?: boolean } };
 	const sent: Digest[] = [];
 	let failSend = false;
+	let failType: string | undefined;
 	const DIGESTS = ["cp-parent-guidance", "cp-memory", "cp-standing-orders"];
 	const pi = {
 		on(name: string, handler: (event: unknown, ctx: unknown) => unknown) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
 		registerEntryRenderer() {}, registerTool() {}, getAllTools: () => [],
 		sendMessage(message: Digest["message"], options: Digest["options"]) {
 			if (!DIGESTS.includes(message.customType)) return;
-			if (failSend) throw new Error("synthetic send failure");
+			if (failSend || failType === message.customType) throw new Error("synthetic send failure");
 			sent.push({ message, options });
 		},
 	} as unknown as ExtensionAPI;
@@ -108,24 +109,32 @@ test("cp-35d0 S10: a queued digest set is reserved per session and successful-co
 	// The branch never shows what was just queued: that is the same-tick race.
 	const session = (id: string, branch: unknown[] = []) => ({ hasUI: false, cwd: home.path, sessionManager: { getSessionId: () => id, getBranch: () => branch } });
 
+	const tally = () => {
+		const counts: Record<string, number> = {};
+		for (const entry of sent) counts[entry.message.customType] = (counts[entry.message.customType] ?? 0) + 1;
+		return counts;
+	};
 	await fire("session_start", session("A"));
 	const size = sent.length;
 	assert.ok(size >= 2, "guidance and standing orders at least");
 	assert.ok(sent.every((entry) => entry.message.display === false && entry.options.triggerTurn === false), "no model turn starts");
+	const types = Object.keys(tally());
+	const each = (n: number, extra: Record<string, number> = {}) => ({ ...Object.fromEntries(types.map((type) => [type, n])), ...extra });
+	assert.deepEqual(tally(), each(1));
 	await fire("session_start", session("A"));
-	assert.equal(sent.length, size, "a duplicate session_start for the same session and epoch enqueues one set");
+	assert.deepEqual(tally(), each(1), "a duplicate session_start for the same session and epoch enqueues one set");
 	const recorded = sent.map((entry) => ({ type: "custom_message", customType: entry.message.customType, content: entry.message.content }));
 	await fire("session_start", session("B", recorded));
-	assert.equal(sent.length, size, "a resumed session already holding the set skips");
+	assert.deepEqual(tally(), each(1), "a resumed session already holding the set skips");
 	await fire("session_start", session("C"));
-	assert.equal(sent.length, 2 * size, "a new session sends a fresh set");
+	assert.deepEqual(tally(), each(2), "a new session sends a fresh set");
 	await fire("session_compact", session("C"));
-	assert.equal(sent.length, 3 * size, "a successful compaction opens a fresh epoch");
-	await fire("session_compact", session("C"));
-	assert.equal(sent.length, 4 * size);
+	assert.deepEqual(tally(), each(3), "a successful compaction opens a fresh epoch");
+	await fire("session_compact", session("C", recorded));
+	assert.deepEqual(tally(), each(4), "a compaction sends the full set even when the callback branch still holds it");
 	writeFileSync(standingOrdersFile(home.path), "changed orders\n");
 	await fire("session_start", session("C"));
-	assert.equal(sent.length, 5 * size, "a changed digest sends");
+	assert.deepEqual(tally(), each(4, { "cp-standing-orders": 5 }), "a changed digest sends alone");
 	assert.match(sent.at(-1)!.message.content, /changed orders/);
 
 	writeFileSync(standingOrdersFile(home.path), "orders after a failed send\n");
@@ -133,9 +142,20 @@ test("cp-35d0 S10: a queued digest set is reserved per session and successful-co
 	await assert.rejects(fire("session_start", session("C")), /synthetic send failure/);
 	failSend = false;
 	await fire("session_start", session("C"));
-	assert.equal(sent.length, 6 * size, "a failed send releases its reservation, so the retry goes out");
+	assert.deepEqual(tally(), each(4, { "cp-standing-orders": 6 }), "a failed send releases its reservation, so the retry goes out");
 	await fire("session_start", session("C"));
-	assert.equal(sent.length, 6 * size);
+	assert.deepEqual(tally(), each(4, { "cp-standing-orders": 6 }));
+
+	// S1-03: memory sends before orders; when orders throw, the retry sends orders only, never memory again.
+	writeFileSync(join(home.path, LAYOUT.learningsFile), "# Learnings\n\n- B1 partial memory. <!--P-->\n");
+	writeFileSync(standingOrdersFile(home.path), "orders after a partial failure\n");
+	failType = "cp-standing-orders";
+	await assert.rejects(fire("session_start", session("C")), /synthetic send failure/);
+	failType = undefined;
+	assert.deepEqual(tally(), each(4, { "cp-standing-orders": 6, "cp-memory": 1 }), "the prefix before the failure went out");
+	await fire("session_start", session("C"));
+	assert.deepEqual(tally(), each(4, { "cp-standing-orders": 7, "cp-memory": 1 }), "the retry sends only the failed suffix");
+	assert.match(sent.at(-1)!.message.content, /orders after a partial failure/);
 });
 
 
