@@ -19,6 +19,7 @@
 export * from "./contracts/core.ts";
 export * from "./contracts/envelope.ts";
 export * from "./contracts/limits.ts";
+export * from "./contracts/operator-model-pick.ts";
 export * from "./contracts/routing.ts";
 export * from "./contracts/fleet.ts";
 export * from "./contracts/questions.ts";

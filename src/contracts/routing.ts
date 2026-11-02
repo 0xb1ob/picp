@@ -4,6 +4,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 import { type Role, RoleSchema } from "./core.ts";
 import type { Narrow, Replace } from "./internal.ts";
+import { OperatorPickRecordSchema } from "./operator-model-pick.ts";
 
 /** Reviewer preferences enter the existing override tier; they add no routing pins. */
 export const ReviewerModelSchema = Type.String({ minLength: 3, maxLength: 128, pattern: "^[^\\s/]+/[^\\s]+$" });
@@ -121,6 +122,8 @@ export const JobRoutingSchema = Type.Object(
 		reasons: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { maxItems: 4 })),
 		/** H6: a risk a planner recorded that routing was not given (src/risk-warning.ts); only the risk:high gate reads it. */
 		recorded_risk: Type.Optional(RiskSchema),
+		/** R1 D2: the operator's verified one-job pick; only the picked attempt carries it (src/operator-model-pick.ts). */
+		operator_pick: Type.Optional(OperatorPickRecordSchema),
 	},
 	{ additionalProperties: false },
 );

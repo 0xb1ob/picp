@@ -11,15 +11,15 @@ export function routedModels(config: RoutingConfig): string[] {
 
 /** Throws `RoutingError` (`refusal: "unrouted"`) when `model` is not one `config` routes; `where` names its source. */
 export function requireRouted(config: RoutingConfig, model: string, where: string): void {
-	const routed = routedModels(config);
-	if (routed.includes(model)) return;
-	throw new RoutingError(
-		`${where} names ${model}, which data/routing.json does not route: an explicit model must be one routing.json ` +
-			`already names (a rubric row's model or fallbacks), so it is refused, never substituted. Omit the model to let ` +
-			`routing decide, or add ${model} to a rubric row in data/routing.json (dashboard Settings → models). ` +
-			`Routed: ${boundedList(routed, { max: 8, cap: 400, separator: ", " }) || "(none)"}.`,
-		{ refusal: "unrouted" },
-	);
+	if (!routedModels(config).includes(model)) throw new RoutingError(unroutedMessage(config, model, where), { refusal: "unrouted" });
+}
+
+/** PR1's routing.json guidance for an unrouted explicit model; an operator-pick refusal appends it too. */
+export function unroutedMessage(config: RoutingConfig, model: string, where: string): string {
+	return `${where} names ${model}, which data/routing.json does not route: an explicit model must be one routing.json ` +
+		`already names (a rubric row's model or fallbacks), so it is refused, never substituted. Omit the model to let ` +
+		`routing decide, or add ${model} to a rubric row in data/routing.json (dashboard Settings → models). ` +
+		`Routed: ${boundedList(routedModels(config), { max: 8, cap: 400, separator: ", " }) || "(none)"}.`;
 }
 
 /** A reviewer preference's write-time check; a malformed value passes through to its store's own schema refusal. */

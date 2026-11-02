@@ -101,6 +101,13 @@ function clip(value: string, cap = WATCH_LINE_CAP): string {
 	return flat.length > cap ? `${flat.slice(0, cap - 1)}…` : flat;
 }
 
+/** R1 D2: the picked attempt's verbatim quote and source, or a later attempt's fresh-route note. */
+function pickLine(payload: Record<string, unknown>): string {
+	const pick = payload.operator_pick as { quote?: string; source?: { kind?: string; entry_id?: string } } | undefined;
+	if (pick) return ` operator pick (${pick.source?.kind ?? "?"} entry ${pick.source?.entry_id ?? "?"}) "${clip(String(pick.quote ?? ""), 120)}"`;
+	return payload.prior_pick_attempt ? ` fresh route after operator pick attempt ${String(payload.prior_pick_attempt)}` : "";
+}
+
 function timeOf(ts: string): string {
 	return ts.length >= 19 ? ts.slice(11, 19) : ts;
 }
@@ -263,7 +270,7 @@ function renderOne(event: RunEvent, mode: WatchMode, state: RenderState): string
 				return line(
 					"~",
 					`routing ${payload.model ?? "?"} (source=${payload.source ?? "?"}, rule=${payload.rule ?? "?"}` +
-						`${payload.thinking ? `, thinking=${payload.thinking}` : ""}) inputs=${inputs}`,
+						`${payload.thinking ? `, thinking=${payload.thinking}` : ""}) inputs=${inputs}${pickLine(payload)}`,
 				);
 			}
 			case "question_asked": {

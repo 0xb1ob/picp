@@ -8,7 +8,8 @@ import { getMarkdownTheme, type ExtensionAPI, type ExtensionContext } from "@ear
 import { Markdown } from "@earendil-works/pi-tui";
 import { type ResolvedAwaitingItem } from "../../src/awaiting.ts";
 import { CommandPost } from "../../src/command-post.ts";
-import { PLAN_VIEW_MAX_BYTES, type ThinkingLevel } from "../../src/contracts.ts";
+import { type OperatorModelPickReference, PLAN_VIEW_MAX_BYTES, type ThinkingLevel } from "../../src/contracts.ts";
+import { checkStoredPick } from "../../src/reroute.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { formatIntake, type IntakeResult } from "../../src/intake.ts";
 import { resolveProjectArg } from "../../src/mode.ts";
@@ -374,12 +375,15 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 		question: string;
 		model?: string;
 		thinking?: ThinkingLevel;
+		operatorQuote?: OperatorModelPickReference;
 		registry?: unknown;
 	}): Promise<{ job_id: string; dispatch: Awaited<ReturnType<CommandPost["dispatch"]>> }> => {
 		const question = request.question.trim();
 		if (question.length === 0) throw new Error("cp_ask needs a question");
 		const project = resolveProjectArg(currentRuntime(), request.project, "cp_ask");
 		const post = commandPost(request.registry);
+		// R1 D2: a bad quote refuses before a job exists; the dispatch binds and claims it for the new job.
+		checkStoredPick(post.home, "(new cp_ask job)", request.model, request.operatorQuote);
 		const issue = await post.ledger().create({
 			title: question,
 			project,
@@ -394,6 +398,7 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 			risk: "low",
 			...(request.model ? { model: request.model } : {}),
 			...(request.thinking ? { thinking: request.thinking } : {}),
+			...(request.operatorQuote ? { operatorQuote: request.operatorQuote } : {}),
 		});
 		return { job_id: issue.id, dispatch };
 	};

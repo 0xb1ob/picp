@@ -45,7 +45,7 @@ const GRANDFATHERED: Record<string, number> = {
 	"src/wakeups.ts": 1190, // 1152
 	"src/diff-review.ts": 1160, // 1117
 	"src/routing.ts": 1020, // 990
-	"src/dispatch.ts": 960, // 928
+	"src/dispatch.ts": 967, // 928; R1 D2 (+7): the operator pick's admission and record wiring on the one dispatch path
 	"src/ci-watch.ts": 960, // 927
 	"src/merge-ask.ts": 840, // 809
 	"src/worker-process.ts": 830, // 802

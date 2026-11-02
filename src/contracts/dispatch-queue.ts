@@ -2,6 +2,7 @@
 
 import { type Static, Type } from "typebox";
 import { IsoTimestampSchema, JobIdSchema, SkillNameSchema, validate, type ValidationResult } from "./core.ts";
+import { OperatorModelPickReferenceSchema } from "./operator-model-pick.ts";
 
 /** At most this many queued dispatches; a full queue refuses the enqueue (today's spawn_cap refusal stands). */
 export const DISPATCH_QUEUE_MAX = 32;
@@ -22,6 +23,8 @@ export const QueuedDispatchRequestSchema = Type.Object(
 		skills: Type.Optional(Type.Array(SkillNameSchema, { minItems: 1, maxItems: 8, uniqueItems: true })),
 		/** `cp_dispatch pr` (picp-d0p): a queued/armed bound dispatch replays bound. */
 		pr: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
+		/** R1 D2: a reference only, never renewable authority; re-verified and claimed at admission. */
+		operator_quote: Type.Optional(OperatorModelPickReferenceSchema),
 	},
 	{ additionalProperties: false },
 );

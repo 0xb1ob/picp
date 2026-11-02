@@ -40,7 +40,7 @@ import {
 	EMPTY_USAGE,
 	type JobHardBounds,
 	LAYOUT, paths,
-	type WorkerProfile,
+	type WorkerProfile, type OperatorModelPickReference, type OperatorPickRecord,
 } from "./contracts.ts";
 import { type CarriedBounds, type HardBoundsWatch, resolveJobHardBounds } from "./bounds.ts";
 import type { FailureMonitor } from "./failures.ts";
@@ -77,6 +77,7 @@ import type { ResolvedSkill } from "./viewer/skill-catalog.ts";
 import { assertBranchFree, type BindPrInput, bindFromOrigin, type BoundPrFacts, boundPrNote, checkoutBoundBranch } from "./pr-bind.ts";
 import { assertResourcesFree, OPS_PROFILE_NAME, opsRequest } from "./ops-jobs.ts";
 import { withRunExecution } from "./schedule-native.ts";
+import { admitOperatorPick, withOperatorPick } from "./reroute.ts";
 import { isQuotaContinuationEligible, type QuotaEligibility } from "./quota-continuation-policy.ts";
 import { ScheduleAuthorityError } from "./schedule-authority.ts";
 import { DispatchError } from "./dispatch-error.ts";
@@ -313,6 +314,8 @@ export interface DispatchRequest {
 	skills?: string[];
 	/** Bind to an existing PR (cp_dispatch pr, picp-d0p): a number or url; ship/pr jobs only. */
 	pr?: string;
+	/** R1 D2: the operator's quote reference; `pick`/`pickSpent` are set only by withOperatorPick (src/reroute.ts). */
+	operatorQuote?: OperatorModelPickReference; pick?: import("./operator-model-pick.ts").VerifiedPick; pickSpent?: string;
 }
 export interface DispatchResult {
 	job_id: string;
@@ -325,6 +328,7 @@ export interface DispatchResult {
 	/** `accepted` = pi answered the id-correlated prompt. A fact, not a guess. */
 	receipt: "accepted" | "refused";
 	model?: string;
+	/** R1 D2: the verified pick this attempt honours, verbatim quote and source. */ operator_pick?: OperatorPickRecord;
 	profile?: string;
 	routing?: string;
 	pid?: number;
@@ -467,7 +471,7 @@ export class Dispatcher {
 		const labels = requireJobLabels(issue);
 		const kind: JobKind = labels.kind ?? "ship";
 		const delivery: Delivery = labels.delivery;
-		request = withRunExecution(opsRequest(request, issue, kind, delivery), options.mandates?.scheduleRuns, kind);
+		request = withOperatorPick(options.home, request.model, withRunExecution(opsRequest(request, issue, kind, delivery), options.mandates?.scheduleRuns, kind), options.routing);
 		const blockers = await options.ledger.blockersOf(issue.id);
 		const profile = selectProfile(options.profilesDir, request, { kind, delivery });
 		const { skills } = this.#skills(request, profile);
@@ -483,7 +487,7 @@ export class Dispatcher {
 					kind,
 					scope: inputs.scope,
 					risk: inputs.risk,
-					...(request.model ? { override: request.model } : {}),
+					...(request.model ? { override: request.model, ...(request.pick ? { pick: request.pick } : {}) } : {}),
 					...(request.thinking ? { thinking: request.thinking } : {}),
 				},
 				options.routing,
@@ -540,7 +544,7 @@ export class Dispatcher {
 		const labels = requireJobLabels(issue);
 		const kind: JobKind = labels.kind ?? "ship";
 		const delivery: Delivery = labels.delivery;
-		request = withRunExecution(opsRequest(request, issue, kind, delivery), options.mandates?.scheduleRuns, kind);
+		request = withOperatorPick(options.home, request.model, withRunExecution(opsRequest(request, issue, kind, delivery), options.mandates?.scheduleRuns, kind), options.routing);
 		const blockers = await options.ledger.blockersOf(issue.id);
 		if (blockers.length > 0) {
 			throw new BlockedDispatchError(`${issue.id} is blocked by ${blockers.join(", ")} — close the blocker or drop the dependency; cp_job ready is the queue`, blockers);
@@ -563,7 +567,7 @@ export class Dispatcher {
 				kind,
 				scope,
 				risk,
-				...(request.model ? { override: request.model } : {}),
+				...(request.model ? { override: request.model, ...(request.pick ? { pick: request.pick } : {}) } : {}),
 				...(request.thinking ? { thinking: request.thinking } : {}),
 			},
 			options.routing,
@@ -729,6 +733,8 @@ export class Dispatcher {
 				sessionName: issue.id,
 				...(skills.length ? { skills: skills.map((s) => s.dir) } : {}),
 			});
+			// R1 D2: spent after the spawn cap admitted it (a queued replay keeps it) and before the brief; failure cleans up.
+			const operatorPick = admitOperatorPick(options.home, request, options.fleet.get(issue.id), now());
 			recorder.markSpawned({
 				pid: managed.worker.pid,
 				model: routing.model,
@@ -754,7 +760,7 @@ export class Dispatcher {
 			});
 			// cp-rte/cp-routing-provenance: what routing was told and where it came from; `inputs` is the legacy
 			// one-word summary older readers carry, `provenance` the per-axis truth beside it.
-			const recorded = { ...routingRecord(inputs, routing.thinking), ...(gate.recorded && gate.recorded.risk !== risk ? { recorded_risk: gate.recorded.risk } : {}) };
+			const recorded = { ...routingRecord(inputs, routing.thinking), ...(gate.recorded && gate.recorded.risk !== risk ? { recorded_risk: gate.recorded.risk } : {}), ...(operatorPick ? { operator_pick: operatorPick } : {}) };
 			recorder.cp("routing_resolved", {
 				model: routing.model,
 				source: routing.source,
@@ -768,6 +774,7 @@ export class Dispatcher {
 				provenance: inputs.provenance,
 				...(inputs.reasons.length > 0 ? { reasons: inputs.reasons } : {}),
 				...(gate.warning ? { risk_warning: gate.warning } : {}), ...(gate.recorded ? { recorded_risk: gate.recorded.risk, recorded_risk_from: gate.recorded.from } : {}),
+				...(operatorPick ? { operator_pick: operatorPick } : {}), ...(request.pickSpent ? { prior_pick_attempt: request.pickSpent } : {}),
 			});
 			attachWorkerObservers({
 				recorder, worker: managed.worker, jobId: issue.id,
@@ -836,7 +843,7 @@ export class Dispatcher {
 				branch,
 				state: "dispatched",
 				receipt: "accepted",
-				model: routing.model,
+				model: routing.model, ...(operatorPick ? { operator_pick: operatorPick } : {}),
 				profile: profile.frontmatter.name,
 				routing: formatRoutingDecision(routing),
 				...(managed.worker.pid !== undefined ? { pid: managed.worker.pid } : {}),

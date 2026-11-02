@@ -12,6 +12,7 @@ import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_BUDGET_CONFIG, DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import { FleetStore } from "../../src/fleet.ts";
 import { readRecoveryAttempts } from "../../src/recovery.ts";
+import { modelPicksDir } from "../../src/operator-model-pick.ts";
 import { BOUND_SPENT_PHRASE } from "../../src/failure-announcer.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { formatRevivePlan, ReviveError } from "../../src/revive.ts";
@@ -230,6 +231,21 @@ test("P8d revive plan: cp_revive over seeded fleet records refuses each unsafe s
 	assert.match(unrouted.ok ? "" : unrouted.message, /the respawn of cp-unrouted on its recorded model names mock\/unrouted, which data\/routing\.json does not route.*Nothing was spawned/s);
 	await assert.rejects(post.revive("cp-unrouted"), (error: unknown) => error instanceof ReviveError && /model_unrouted/.test(error.message));
 	assert.deepEqual([new FleetStore({ home: home.path }).require("cp-unrouted"), post.manager.get("cp-unrouted")], [unroutedBefore, undefined]);
+	// R1 D2: a job whose one operator pick is spent respawns on a fresh rubric route, never on the pick (here unrouted).
+	// Negative control: without reroute.ts, cp-picked is refused model_unrouted like cp-unrouted above.
+	const pick = { proof_id: `omp-${"a".repeat(32)}`, attempt_id: "att-0123456789abcdef", model: "mock/unrouted", quote: "use mock/unrouted",
+		source: { kind: "terminal" as const, session_file: "/operator.jsonl", entry_id: "e1", sha256: "0".repeat(64) } };
+	mkdirSync(join(modelPicksDir(home.path), "claims"), { recursive: true });
+	writeFileSync(join(modelPicksDir(home.path), "claims", "job-cp-picked.json"), JSON.stringify({ version: 1, proof_id: pick.proof_id,
+		job_id: "cp-picked", attempt_id: pick.attempt_id, source_sha256: pick.source.sha256, claimed_at: isoTimestamp() }));
+	tree("cp-picked"), session("cp-picked");
+	await seed("cp-picked", { routing: { inferred: false, scope: "S", risk: "low", operator_pick: pick } }, { model: "mock/unrouted" });
+	const config = JSON.parse(readFileSync(join(home.path, LAYOUT.routingFile), "utf8"));
+	config.rubric.push({ id: "fresh-implementer", role: "implementer", model: "mock/mock-model" });
+	writeFileSync(join(home.path, LAYOUT.routingFile), JSON.stringify(config));
+	const rerouted = await post.revivePlan("cp-picked");
+	assert.deepEqual(rerouted.ok ? [rerouted.model, rerouted.routing?.operator_pick, rerouted.priorPick] : [rerouted.code, rerouted.message],
+		["mock/mock-model", undefined, pick.attempt_id]);
 	// An unreadable routing.json is its own error, never mislabelled model_unrouted.
 	writeFileSync(join(home.path, LAYOUT.routingFile), "{ not json");
 	await assert.rejects(post.revivePlan("cp-unrouted"), (error: unknown) => !(error instanceof ReviveError) && /routing\.json is not valid JSON/.test(String(error)));

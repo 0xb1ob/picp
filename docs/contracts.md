@@ -8927,6 +8927,31 @@ cp-cxt):
    A profile carries no `model` or `fallbacks` (R1 PR4); its `thinking` is the
    effort when neither the override nor the row names one.
 
+**Operator model pick (R1 D2).** An explicit override must be a model `data/routing.json` routes, with one exception:
+the human's own one-job pick. In the operator session, `cp_parent model_pick {model, quote, source_entry_id?,
+control_id?, job_id?}` (local to the operator bridge, no parent RPC) finds the human-typed user entry holding `quote`
+verbatim (a dashboard entry also needs one bridge `request`, a delivered/injected outcome and no edit in the control
+audit), requires `model` as a whole, case-sensitive `provider/model` token in it, registers the session, and writes an
+owner-only proof `state/operator/model-picks/<proof_id>.json` (`OperatorModelPickProofSchema`, version 1). It returns
+only the reference `{version, proof_id, quote}`, which the parent passes as `operator_quote` with the same `model` on
+`cp_dispatch` (direct, preview, queued, armed) or `cp_ask`. The parent re-reads the proof and the session entry
+(sha256 and text); a verified pick is a module-created capability, never a JSON flag, and waives **only** routing.json
+membership: `allow`, `deny_by_role`, availability, effort and every mandate/resource gate still apply, and routing.json
+is never written. Preview verifies read-only. Admission, after the spawn cap admitted the request, claims
+`claims/proof-<id>.json` then `claims/job-<id>.json` by exclusive create; a partial claim stays spent. Queued and armed
+requests store the reference only and verify again at admission. The picked attempt records `routing.operator_pick`
+(proof, attempt id, model, quote, source without text) on the fleet record, `cp:routing_resolved` and the receipt;
+`/watch` shows its source and quote. Refusals name a code — `operator_pick_missing`, `_edited`, `_worker_authored`,
+`_parent_authored`, `_main_session_authored`, `_fabricated`, `_consumed`, `_bridge_unsupported` — and nothing spawns.
+An older bridge has no `model_pick` (its tool refuses the action) and so no proof: the parent answers
+`operator_pick_missing`/`operator_pick_bridge_unsupported` naming the bridge and parent update. A pick honours one
+attempt: every later execution of a picked job (dispatch retry, revive, `continue_failed`, bounded recovery, pipeline
+recover) first freezes the picked record once in `state/runs/<job>/attempts/<attempt_id>.json`, then routes freshly
+from the rubric without override, recording routing without `operator_pick`; an explicit model on that retry must
+still be routed and is then dropped. A job without a spent claim keeps P6: an unrouted recorded model refuses
+`model_unrouted`. Pipelines and quality/review jobs take no quote and never inherit a pick; a schedule policy never
+stores one, and a quote on a schedule run's `cp_dispatch` exempts only its own model after the run's pin is validated.
+
 **Role deny (`deny_by_role`, cp-7re9).** An optional
 `deny_by_role: { planner?, implementer?, "gate-reviewer"? }` lists minimatch
 patterns (≤64 each, 1–128 chars) on `provider/model-id`. It is checked after

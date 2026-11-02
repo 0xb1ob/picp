@@ -40,6 +40,7 @@ import { DEFAULT_BALANCE_MARGIN, formatQuota, type QuotaSnapshot } from "./quota
 import type { CapacityReader, CapacityScore } from "./capacity.ts";
 import { listProfiles } from "./profiles.ts";
 import { requireRouted } from "./routed-models.ts";
+import { isVerifiedPick, type VerifiedPick } from "./operator-model-pick.ts";
 
 /**
  * Why routing refused. The message says it in words; this says it in something
@@ -506,6 +507,8 @@ export interface RouteRequest {
 	 * model cannot serve it. Never substituted.
 	 */
 	thinking?: ThinkingLevel;
+	/** R1 D2: the capability `verifyOperatorPick` returned for `override`; anything else is ignored. */
+	pick?: VerifiedPick;
 }
 
 interface Candidate {
@@ -542,7 +545,8 @@ export function pickModel(request: RouteRequest, config: RoutingConfig): Candida
 	if (request.override) {
 		// An override is one candidate, always: the caller named this model, so an
 		// unusable one is their decision to revisit, not routing's to route around.
-		requireRouted(config, request.override, "override");
+		// R1 D2: a verified operator pick waives only routing.json membership; allowlist, deny, availability, effort stay.
+		if (!isVerifiedPick(request.pick, request.override)) requireRouted(config, request.override, "override");
 		requireAllowed(config, request.override, "override", role);
 		// An override that names an effort keeps it; one that does not keeps today's
 		// behaviour exactly (the profile's level), which is the backwards-compatible

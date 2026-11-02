@@ -1,0 +1,1 @@
+- R1 D2: the operator can pick one job's model in their own words — `cp_parent model_pick` issues a proof from the human's session entry, `cp_dispatch`/`cp_ask` `operator_quote` honours it once (only routing.json membership is waived), and every later attempt of that job routes freshly from the rubric. Needs the operator bridge and parent restarted.
