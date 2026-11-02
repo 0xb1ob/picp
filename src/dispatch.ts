@@ -40,7 +40,7 @@ import {
 	EMPTY_USAGE,
 	type JobHardBounds,
 	LAYOUT, paths,
-	type WorkerProfile, type OperatorModelPickReference, type OperatorPickRecord,
+	type WorkerProfile, type OperatorPickRecord,
 } from "./contracts.ts";
 import { type CarriedBounds, type HardBoundsWatch, resolveJobHardBounds } from "./bounds.ts";
 import type { FailureMonitor } from "./failures.ts";
@@ -77,7 +77,7 @@ import type { ResolvedSkill } from "./viewer/skill-catalog.ts";
 import { assertBranchFree, type BindPrInput, bindFromOrigin, type BoundPrFacts, boundPrNote, checkoutBoundBranch } from "./pr-bind.ts";
 import { assertResourcesFree, OPS_PROFILE_NAME, opsRequest } from "./ops-jobs.ts";
 import { withRunExecution } from "./schedule-native.ts";
-import { admitOperatorPick, withOperatorPick } from "./reroute.ts";
+import { admitOperatorPick, decisionFields, type PickRequest, withOperatorPick } from "./reroute.ts";
 import { isQuotaContinuationEligible, type QuotaEligibility } from "./quota-continuation-policy.ts";
 import { ScheduleAuthorityError } from "./schedule-authority.ts";
 import { DispatchError } from "./dispatch-error.ts";
@@ -258,7 +258,8 @@ function selectProfile(
 // every caller and test that already reaches for it here.
 export { resolveRoutingInputs } from "./pipeline.ts";
 
-export interface DispatchRequest {
+/** R1 D2: `operatorQuote` is the operator's reference; `pick`/`pickSpent` are set only by withOperatorPick. */
+export interface DispatchRequest extends PickRequest {
 	jobId: string;
 	/** The task text substituted into the brief. Use `taskFile` instead to hand over a file. */
 	task?: string;
@@ -314,8 +315,6 @@ export interface DispatchRequest {
 	skills?: string[];
 	/** Bind to an existing PR (cp_dispatch pr, picp-d0p): a number or url; ship/pr jobs only. */
 	pr?: string;
-	/** R1 D2: the operator's quote reference; `pick`/`pickSpent` are set only by withOperatorPick (src/reroute.ts). */
-	operatorQuote?: OperatorModelPickReference; pick?: import("./operator-model-pick.ts").VerifiedPick; pickSpent?: string;
 }
 export interface DispatchResult {
 	job_id: string;
@@ -327,8 +326,7 @@ export interface DispatchResult {
 	state: "dispatched" | "promote";
 	/** `accepted` = pi answered the id-correlated prompt. A fact, not a guess. */
 	receipt: "accepted" | "refused";
-	model?: string;
-	/** R1 D2: the verified pick this attempt honours, verbatim quote and source. */ operator_pick?: OperatorPickRecord;
+	model?: string; /** R1 D2: the verified pick this attempt honours. */ operator_pick?: OperatorPickRecord;
 	profile?: string;
 	routing?: string;
 	pid?: number;
@@ -716,6 +714,7 @@ export class Dispatcher {
 			reservation = await options.makeRoom?.(issue.id, profile.frontmatter.role);
 			await options.manager.ready();
 			assertPipelineProjectionReady(options.home, issue.id);
+			let operatorPick: OperatorPickRecord | undefined;
 			const managed = options.manager.spawn({
 				budgetLimit: continuationBudget(options.mandates, issue.id, options.fleet.read().jobs, "dispatch"),
 				identity: {
@@ -732,9 +731,8 @@ export class Dispatcher {
 				sessionDir: join(options.home, LAYOUT.sessions),
 				sessionName: issue.id,
 				...(skills.length ? { skills: skills.map((s) => s.dir) } : {}),
+				admit: () => void (operatorPick = admitOperatorPick(options.home, request, options.fleet.get(issue.id), now())),
 			});
-			// R1 D2: spent after the spawn cap admitted it (a queued replay keeps it) and before the brief; failure cleans up.
-			const operatorPick = admitOperatorPick(options.home, request, options.fleet.get(issue.id), now());
 			recorder.markSpawned({
 				pid: managed.worker.pid,
 				model: routing.model,
@@ -762,12 +760,7 @@ export class Dispatcher {
 			// one-word summary older readers carry, `provenance` the per-axis truth beside it.
 			const recorded = { ...routingRecord(inputs, routing.thinking), ...(gate.recorded && gate.recorded.risk !== risk ? { recorded_risk: gate.recorded.risk } : {}), ...(operatorPick ? { operator_pick: operatorPick } : {}) };
 			recorder.cp("routing_resolved", {
-				model: routing.model,
-				source: routing.source,
-				rule: routing.rule,
-				...(routing.thinking ? { thinking: routing.thinking } : {}),
-				...(routing.attempted ? { attempted: routing.attempted } : {}),
-				...(routing.capacity ? { capacity: routing.capacity } : {}), ...(routing.quota ? { quota: routing.quota } : {}),
+				...decisionFields(routing),
 				scope,
 				risk,
 				inputs: recorded.inferred ? "inferred" : "explicit",

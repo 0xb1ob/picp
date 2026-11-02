@@ -490,7 +490,7 @@ export class Reviver {
 			);
 		}
 
-		// P6: a respawn never resumes on a model data/routing.json does not route; R1 D2: a picked job routes freshly instead.
+		// P6: a respawn never resumes on a model data/routing.json does not route; R1 D2: a picked job reroutes.
 		let route: RespawnRoute;
 		try {
 			route = respawnRoute({ home: this.#options.home, profilesDir: this.#options.profilesDir, record: { ...record, worker: record.worker }, ...(this.#options.probe ? { probe: this.#options.probe() } : {}), where: `the respawn of ${jobId} on its recorded model` });

@@ -94,7 +94,7 @@ function dashboardRefusal(stateDir: string, controlId: string, body: string, ses
 	return undefined;
 }
 
-/** The human source behind `entry`, or the refusal; `quote` must sit in its text after the dashboard marker is removed. */
+/** The human source behind `entry`, or the refusal; `quote` must sit in its text minus the dashboard marker. */
 function sourceOf(stateDir: string, sessionFile: string, entry: SessionEntry, quote: string): OperatorPickSource | [OperatorPickErrorCode, string] {
 	const author = nonHumanAuthor(entry);
 	if (author) return [author, `session entry ${entry.id} is not a human-typed user message`];
@@ -219,15 +219,18 @@ export function claimOperatorPick(home: string, pick: VerifiedPick, jobId: strin
 	return { proof_id: proof.proof_id, attempt_id: claim.attempt_id, model: proof.model, quote: proof.quote, source };
 }
 
-/** The job's spent pick, if any; a corrupt claim fails closed rather than reading as "never picked". */
+/** The job's spent pick, if any, backed by its proof and proof claim; anything else fails closed. */
 export function pickedJobClaim(home: string, jobId: string): OperatorModelPickClaim | undefined {
 	const file = claimFile(home, "job", jobId);
 	if (!existsSync(file)) return undefined;
 	const raw = readRecord(file);
-	if (!Value.Check(OperatorModelPickClaimSchema, raw) || (raw as OperatorModelPickClaim).job_id !== jobId) {
-		throw new RoutingError(`${jobId}: operator pick claim ${file} is unreadable; refusing rather than guessing (inspect it by hand)`);
-	}
-	return raw as OperatorModelPickClaim;
+	const claim = Value.Check(OperatorModelPickClaimSchema, raw) && (raw as OperatorModelPickClaim).job_id === jobId ? (raw as OperatorModelPickClaim) : undefined;
+	const proof = claim && readRecord(proofFile(home, claim.proof_id));
+	const twin = claim && readRecord(claimFile(home, "proof", claim.proof_id));
+	const backed = claim && Value.Check(OperatorModelPickProofSchema, proof) && (proof as OperatorModelPickProof).source.sha256 === claim.source_sha256 &&
+		JSON.stringify(twin) === JSON.stringify(claim);
+	if (!backed) throw new RoutingError(`${jobId}: operator pick claim ${file} is unreadable or not backed by its proof; refusing rather than guessing (inspect it by hand)`);
+	return claim;
 }
 
 /** Freeze the picked attempt (worker + routing) once, before a later attempt replaces the fleet record. */

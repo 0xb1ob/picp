@@ -8948,7 +8948,9 @@ An older bridge has no `model_pick` (its tool refuses the action) and so no proo
 attempt: every later execution of a picked job (dispatch retry, revive, `continue_failed`, bounded recovery, pipeline
 recover) first freezes the picked record once in `state/runs/<job>/attempts/<attempt_id>.json`, then routes freshly
 from the rubric without override, recording routing without `operator_pick`; an explicit model on that retry must
-still be routed and is then dropped. A job without a spent claim keeps P6: an unrouted recorded model refuses
+still be routed and is then dropped. A spent claim counts only when its proof and proof claim back it; anything else
+fails closed. A fresh route that refuses (availability, allowlist, effort, exhausted) refuses the revive as
+`route_refused`. A job without a spent claim keeps P6: an unrouted recorded model refuses
 `model_unrouted`. Pipelines and quality/review jobs take no quote and never inherit a pick; a schedule policy never
 stores one, and a quote on a schedule run's `cp_dispatch` exempts only its own model after the run's pin is validated.
 

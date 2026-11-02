@@ -1,4 +1,4 @@
-/** The operator's one-job model pick (R1 D2): reference, proof, claim and recorded provenance. Import via src/contracts.ts. */
+/** The operator's one-job model pick (R1 D2): reference, proof, claim, provenance. Import via src/contracts.ts. */
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
