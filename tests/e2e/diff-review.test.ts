@@ -841,7 +841,7 @@ test("S15: dispatch preview rejects parent tools in external worker profile conf
 	initJobsDocument(s.home, "cp");
 	const job = await post.ledger().create({ title: "S15 invalid profile", project: "demo", kind: "ship", delivery: "local" });
 	for (const [name, tool] of [["forbidden-review", "cp_review"], ["forbidden-gate", "cp_gate"], ["forbidden-escalate", "cp_escalate"], ["forbidden-ask", "cp_ask"], ["forbidden-decide", "cp_decide"], ["forbidden-next", "cp_next"], ["forbidden-memory", "cp_memory"]]) {
-		writeFileSync(join(root, "profiles", `${name}.md`), `---\nname: ${name}\nrole: implementer\ndescription: Invalid parent tool fixture.\ntools: [report_result, ${tool}]\nmodel: mock/model\nbriefTemplate: brief-ship\nreadOnly: false\n---\nReject this configuration before any process starts.\n`);
+		writeFileSync(join(root, "profiles", `${name}.md`), `---\nname: ${name}\nrole: implementer\ndescription: Invalid parent tool fixture.\ntools: [report_result, ${tool}]\nbriefTemplate: brief-ship\nreadOnly: false\n---\nReject this configuration before any process starts.\n`);
 		await assert.rejects(post.previewDispatch({ jobId: job.id, profile: name, task: "Add one line.", fetch: false }), new RegExp(`"${tool}" is a parent-only tool`));
 	}
 	assert.equal(s.provider.requests().length, 0);

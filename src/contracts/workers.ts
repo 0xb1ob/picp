@@ -20,14 +20,7 @@ export const ProfileFrontmatterSchema = Type.Object(
 		description: Type.Optional(Type.String({ maxLength: 300 })),
 		/** Allowlist passed to `pi --tools`. Empty array = no tools at all. */
 		tools: Type.Array(Type.String({ minLength: 1 }), { maxItems: 64 }),
-		model: Type.String({ minLength: 1 }),
 		thinking: Type.Optional(ThinkingLevelSchema),
-		/**
-		 * Ordered candidates tried after `model` when it is unusable
-		 * (pi-command-post-0a9). Same three gates, same effort: fallback changes
-		 * which model runs, never how hard it thinks.
-		 */
-		fallbacks: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 4 })),
 		/** Template name in prompts/ used to assemble the first brief. */
 		briefTemplate: Type.String({ minLength: 1 }),
 		/** Refuse the profile if the job would let it write (research hygiene). */
@@ -53,7 +46,7 @@ export const ProfileFrontmatterSchema = Type.Object(
 );
 export type ProfileFrontmatter = Replace<
 	Static<typeof ProfileFrontmatterSchema>,
-	{ role: Role; thinking?: ThinkingLevel; fallbacks?: string[] }
+	{ role: Role; thinking?: ThinkingLevel }
 >;
 
 export const WorkerProfileSchema = Type.Object(

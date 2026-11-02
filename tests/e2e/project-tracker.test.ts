@@ -466,7 +466,7 @@ test("P15-jobs-refusals: cp_job refuses bad intake, guards live workers and unre
 	t.after(() => post.shutdown());
 	const worker = await post.ledger().create({ title: "parent tools", project: "demo", kind: "ship", delivery: "local" });
 	for (const tool of ["cp_job", "cp_project", "cp_pipeline"]) {
-		writeFileSync(join(root, "profiles", `with-${tool}.md`), `---\nname: with-${tool}\nrole: implementer\ndescription: Invalid parent tool fixture.\ntools: [report_result, ${tool}]\nmodel: mock/model\nbriefTemplate: brief-ship\nreadOnly: false\n---\nRefuse this.\n`);
+		writeFileSync(join(root, "profiles", `with-${tool}.md`), `---\nname: with-${tool}\nrole: implementer\ndescription: Invalid parent tool fixture.\ntools: [report_result, ${tool}]\nbriefTemplate: brief-ship\nreadOnly: false\n---\nRefuse this.\n`);
 		await assert.rejects(post.previewDispatch({ jobId: worker.id, profile: `with-${tool}`, task: "Add one line.", fetch: false }), new RegExp(`"${tool}" is a parent-only tool`));
 	}
 });

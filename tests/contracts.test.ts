@@ -787,7 +787,6 @@ function profile(overrides: Partial<ProfileFrontmatter> = {}): unknown {
 		name: "planner",
 		role: "planner",
 		tools: ["read", "bash", "report_result"],
-		model: "anthropic/claude-sonnet-5",
 		briefTemplate: "brief-research",
 		readOnly: true,
 		...overrides,

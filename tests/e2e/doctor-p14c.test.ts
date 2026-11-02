@@ -530,7 +530,7 @@ test("P14-doctor-models: pi's registry decides each route — no auth fails loud
 	const none = await (await parent(t, box)).doctor();
 	for (const role of roles) assert.deepEqual([one(none, `models.${role}`)?.severity, /pi auth/.test(one(none, `models.${role}`)?.fix ?? "")], ["error", true], role);
 	const planner = one(none, "models.planner");
-	assert.match(planner?.detail ?? "", /no usable model.*every candidate for profile planner was refused/);
+	assert.match(planner?.detail ?? "", /no usable model.*every candidate for rubric row planner-default was refused/);
 	for (const candidate of ["anthropic/claude-opus-5-5", "openai/gpt-6.1-sol"]) assert.ok(planner?.detail?.includes(`${candidate} (availability)`), `${candidate} must be named`);
 	assert.equal(none.ok, false);
 	const openai = await (await parent(t, box, { env: { OPENAI_API_KEY: "sk-test" } })).doctor();
@@ -590,18 +590,12 @@ test("P14-doctor-models: pi's registry decides each route — no auth fails loud
 	assert.match(JSON.stringify(one(duplicate, "config.routing")), /"error".*duplicate rubric id.*rubric\[0\] -> mock\/plan.*rubric\[1\] -> mock\/shared/);
 	assert.deepEqual([all(duplicate, "models.implementer"), duplicate.ok], [[], false], "a config that cannot load is not re-diagnosed as a model problem");
 
-	// config.routing.effort: rubric rows and profiles asking for a level the model lacks; unknown metadata is no proof.
-	const gate = join(pkg, "profiles", "gate-reviewer.md");
-	const original = readFileSync(gate, "utf8");
-	t.after(() => writeFileSync(gate, original));
-	writeFileSync(gate, original.replace("model: anthropic/claude-opus-5-5", "model: mock/capped"));
+	// config.routing.effort: a rubric row asking for a level the model lacks; unknown metadata is no proof.
 	routing(h, [{ id: "risky-ship", role: "implementer", risk: "high", model: "mock/capped", thinking: "xhigh" }]);
 	const drift = one(await p.doctor(), "config.routing.effort");
 	assert.match(drift?.what ?? "", /configured model\/effort pair\(s\)/);
 	assert.match(drift?.detail ?? "", /rubric row risky-ship asks for thinking=xhigh on mock\/capped.*available: off, minimal, low, medium/);
-	assert.match(drift?.detail ?? "", /profile gate-reviewer asks for thinking=high on mock\/capped/);
 	assert.deepEqual([drift?.severity, /never substitutes/.test(drift?.fix ?? "")], ["error", true]);
-	writeFileSync(gate, original);
 	routing(h, [{ id: "risky-ship", role: "implementer", risk: "high", model: "pinned/unknown", thinking: "xhigh" }]);
 	assert.equal(one(await p.doctor(), "config.routing.effort")?.severity, "ok", "a model pi has no metadata for is never called unsupported");
 

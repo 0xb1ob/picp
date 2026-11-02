@@ -3,8 +3,6 @@ name: qa
 role: planner
 description: Answers one small question about a repository from its own source. Changes nothing.
 tools: [read, bash, find, ls, grep, report_result]
-model: anthropic/claude-opus-5-5
-fallbacks: [openai/gpt-6.1-sol]
 thinking: low
 briefTemplate: brief-qa
 readOnly: true

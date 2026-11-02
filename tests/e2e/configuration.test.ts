@@ -226,7 +226,8 @@ test("P16-scaffold: a first session scaffolds a fresh home once, an operator's o
 	assert.doesNotMatch(ownedSteps, /gitignore|routing\.default/, "present steps are not announced");
 	assert.match(ownedSteps, /\+ ledger: created — .*prefix cps/);
 	assert.equal(readFileSync(join(owned, ".gitignore"), "utf8"), "# mine\n");
-	assert.equal(readFileSync(join(owned, LAYOUT.routingFile), "utf8"), mine);
+	assert.deepEqual(JSON.parse(readFileSync(join(owned, LAYOUT.routingFile), "utf8")), { schema_version: 1, allow: ["mock/*"], rubric: JSON.parse(readFileSync(join(app, "defaults/routing.role-defaults.json"), "utf8")).rubric });
+	assert.match(ownedSteps, /\+ routing\.roles: created/);
 	assert.equal(JSON.parse(readFileSync(join(owned, LAYOUT.jobsFile), "utf8")).prefix, "cps");
 
 	for (const bad of ["CP", "1cp", "toolongprefix", "cp-x", "c p"]) {

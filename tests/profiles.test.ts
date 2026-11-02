@@ -14,6 +14,7 @@ import {
 	DIFF_REVIEW_MAX_BYTES,
 	DIFF_REVIEW_MAX_STAT_FILES,
 	ROLES,
+	type RoutingRule,
 	SUMMARY_MAX_CHARS,
 	SUMMARY_MAX_LINES,
 	terminatingToolForRole,
@@ -116,44 +117,27 @@ test("the gate reviewer holds read-only discovery and its verdict tool", () => {
 	assert.match(reviewer.systemPrompt, /Do not open the repository/);
 });
 
-test("profiles declare a model, an effort level and a budget", () => {
-	// The ordered candidate list is `fallbacks` (pi-command-post-0a9); the
-	// pre-cp-eff `fallbackModels` ladder is not coming back under its old name.
+test("profiles declare an effort level and a budget, and carry no model: data/routing.json decides", () => {
 	for (const profile of listProfiles(PROFILES_DIR)) {
 		const front = profile.frontmatter;
-		assert.match(front.model, /\//, `${front.name} model must be provider/model-id`);
+		for (const key of ["model", "fallbacks", "fallbackModels"]) assert.ok(!(key in front), `${front.name} still declares ${key}`);
 		assert.ok((front.budget?.tokens ?? 0) > 0, `${front.name} needs a token budget`);
 		assert.ok(front.thinking !== undefined, `${front.name} needs a thinking level`);
-		assert.ok(!("fallbackModels" in front), `${front.name} still declares fallbackModels`);
 	}
+	const withModel = VALID.replace("thinking: low", "model: mock/script-a\nthinking: low");
+	assert.throws(() => parseProfile(withModel, "probe.md"), ProfileError, "a profile model is refused, never ignored");
 });
 
-test("a profile's fallbacks parse as an ordered list, and every shipped profile ships one", () => {
-	// The installation contract: Anthropic or OpenAI is enough, so every shipped
-	// profile names an OpenAI candidate after its Anthropic preference.
-	for (const profile of listProfiles(PROFILES_DIR)) {
-		const { name, model, fallbacks } = profile.frontmatter;
-		assert.ok(Array.isArray(fallbacks) && fallbacks.length > 0, `${name} needs a fallback candidate`);
-		const providers = [model, ...(fallbacks ?? [])].map((ref) => ref.split("/")[0]);
-		assert.deepEqual(providers, ["anthropic", "openai"], `${name}: anthropic first, then openai`);
+test("the role defaults ship one row per role, Anthropic then OpenAI, and the template's planner row is its planner row", () => {
+	// The installation contract: Anthropic or OpenAI is enough, so every default row names an OpenAI fallback.
+	const rubric = (file: string) => (JSON.parse(readFileSync(join(REPO_ROOT, "defaults", file), "utf8")) as { rubric: RoutingRule[] }).rubric;
+	const defaults = rubric("routing.role-defaults.json");
+	assert.deepEqual(defaults.map((row) => [row.id, row.role]), ROLES.map((role) => [`${role}-default`, role]));
+	for (const row of defaults) {
+		assert.deepEqual([row.model, ...(row.fallbacks ?? [])].map((ref) => ref.split("/")[0]), ["anthropic", "openai"], row.id);
+		for (const key of ["project", "scope", "risk", "thinking"]) assert.ok(!(key in row), `${row.id} carries ${key}`);
 	}
-
-	// The inline-array frontmatter parser needs no help with it.
-	const parsed = parseProfile(
-		[
-			"---",
-			"name: fixture",
-			"role: implementer",
-			"tools: [read]",
-			"model: mock/preferred",
-			"fallbacks: [mock/second, mock/third]",
-			"briefTemplate: brief-ship",
-			"---",
-			"body",
-		].join("\n"),
-		join(PROFILES_DIR, "fixture.md"),
-	);
-	assert.deepEqual(parsed.frontmatter.fallbacks, ["mock/second", "mock/third"]);
+	assert.deepEqual(rubric("routing.default.json").find((row) => row.id === "planner-default"), defaults[0]);
 });
 
 // ---------------------------------------------------------------------------
@@ -164,7 +148,6 @@ const VALID = `---
 name: probe
 role: implementer
 tools: [read, report_result]
-model: mock/script-a
 thinking: low
 briefTemplate: brief-ship
 readOnly: false
@@ -215,7 +198,7 @@ test("invalid profiles never load", () => {
 		assert.throws(() => loadProfile(dirWith({ "wrong-role": wrongRole }), "wrong-role"), ProfileError);
 
 		// empty body
-		const bodyless = "---\nname: bodyless\nrole: implementer\ntools: [read]\nmodel: m/x\nbriefTemplate: brief-ship\n---\n";
+		const bodyless = "---\nname: bodyless\nrole: implementer\ntools: [read]\nbriefTemplate: brief-ship\n---\n";
 		assert.throws(() => loadProfile(dirWith({ bodyless }), "bodyless"), /body is empty/);
 
 		// unknown profile name lists what exists, even when a sibling is broken
@@ -241,7 +224,6 @@ test("cp-u3o4: two profiles for one role resolve to the one named after the role
 name: planner
 role: planner
 tools: [read, report_result]
-model: mock/script-a
 thinking: high
 briefTemplate: brief-research
 readOnly: true

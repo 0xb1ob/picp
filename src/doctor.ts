@@ -76,7 +76,8 @@ import { jobsFile } from "./ledger.ts";
 import { describeRuntime } from "./mode.ts";
 import { listProfiles } from "./profiles.ts";
 import { ProjectRegistry } from "./projects.ts";
-import { resolveLedgerPrefix } from "./scaffold.ts";
+import { resolveLedgerPrefix, routingCoverageFindings } from "./scaffold.ts";
+import { routedModels } from "./routed-models.ts";
 import {
 	boundedList,
 	describeEffortDrift,
@@ -159,7 +160,7 @@ const REFUSAL_SUMMARY: Readonly<Record<RoutingRefusal, string>> = Object.freeze(
 
 function refusalFix(refusal: RoutingRefusal | undefined, who: string): string {
 	if (refusal === "unrouted") {
-		return `an explicit model must be one a rubric row in ${LAYOUT.routingFile} already names: omit the model to let routing decide, or add it to a row's \`model\` or \`fallbacks\``;
+		return `an explicit model must be one a rubric row in ${LAYOUT.routingFile} already names: omit the model to let routing decide, or add it to a row's \`model\` or \`fallbacks\`; a role no row routes needs a row for that role (defaults/routing.role-defaults.json has one)`;
 	}
 	if (refusal === "allowlist") {
 		return `the row fired and its model is not in \`allow\`, or \`deny_by_role.<role>\` matches it: add a pattern that covers it in ${LAYOUT.routingFile} (or narrow the deny pattern), or point that row at an allowed model (nothing here is unauthenticated — the model was never tried)`;
@@ -168,7 +169,7 @@ function refusalFix(refusal: RoutingRefusal | undefined, who: string): string {
 		return `name an effort level this model serves (the row's \`thinking\`, or ${who}'s own in its profile), or route to a model that serves it; routing never substitutes a level`;
 	}
 	if (refusal === "exhausted") {
-		return `no candidate for this route is usable — the detail names each one and the gate that refused it: authenticate one of those providers (\`pi auth\`), widen \`allow\`, or edit the \`fallbacks\` of that row (or of ${who}'s profile) in ${LAYOUT.routingFile}`;
+		return `no candidate for this route is usable — the detail names each one and the gate that refused it: authenticate one of those providers (\`pi auth\`), widen \`allow\`, or edit the \`fallbacks\` of that row in ${LAYOUT.routingFile}`;
 	}
 	return `authenticate the provider (\`pi auth\`) or set a reachable model for ${who} in ${LAYOUT.routingFile}`;
 }
@@ -733,7 +734,7 @@ export class Doctor {
 			findings.push({
 				check: "config.routing",
 				severity: "ok",
-				what: `no ${LAYOUT.routingFile} (profile defaults only)`,
+				what: `no ${LAYOUT.routingFile} (no rubric rows: every route is refused until one exists)`,
 			});
 		} else {
 			try {
@@ -752,7 +753,7 @@ export class Doctor {
 						fix: `add at least one pattern to allow in ${routingFile} (an empty allow list is honoured as written)`,
 					});
 				}
-				findings.push(...this.#routingLint(config, routingFile));
+				findings.push(...this.#routingLint(config, routingFile), ...routingCoverageFindings(this.#options.home, config));
 			} catch (error) {
 				findings.push({
 					check: "config.routing",
@@ -1015,25 +1016,23 @@ export class Doctor {
 		} catch {
 			return []; // already reported by #packageResources
 		}
+		let routing: ReturnType<typeof loadRoutingConfig> | undefined;
+		try {
+			routing = loadRoutingConfig(this.#options.home);
+		} catch {
+			routing = undefined; // reported by #config
+		}
 		if (!probe) {
 			return [
 				{
 					check: "models.probe",
 					severity: "ok",
 					what: "model availability not probed (no live model registry in this context)",
-					// cp-u3o4: keyed on the profile NAME, not its role. Two profiles can
-					// share a role (qa.md is `role: planner`), and keying on the role
-					// rendered the same word twice with no way to tell them apart.
-					detail: profiles.map((profile) => `${profile.frontmatter.name}: ${profile.frontmatter.model}`).join(", "),
+					detail: (routing && routedModels(routing).join(", ")) || "(none)",
 				},
 			];
 		}
-		let routing: ReturnType<typeof loadRoutingConfig>;
-		try {
-			routing = loadRoutingConfig(this.#options.home);
-		} catch {
-			return []; // already reported by #config
-		}
+		if (!routing) return [];
 		// cp-2bm: routing pins match on role/project/kind/job_id, so probing with a
 		// synthetic project reported the model a *fake* job would get. A home that
 		// pins per project would have had those rows silently skipped — doctor could

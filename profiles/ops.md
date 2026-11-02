@@ -3,8 +3,6 @@ name: ops
 role: planner
 description: Does one remote-host job (a data pull, a deploy, or process control) over ssh and reports what it did. Changes nothing in the repository.
 tools: [read, bash, find, ls, grep, report_result]
-model: anthropic/claude-opus-5-5
-fallbacks: [openai/gpt-6.1-sol]
 thinking: medium
 briefTemplate: brief-ops
 readOnly: true
