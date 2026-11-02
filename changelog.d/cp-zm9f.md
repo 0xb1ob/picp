@@ -1,3 +1,4 @@
 - Refresh dashboard colours and typography with a dark-only palette and compact chat transcripts.
 - Add chat jobs and log surfaces preserving references and review guides.
 - Add responsive context and current-session navigation.
+- Add navigation and editable-draft menus alongside skills and references.

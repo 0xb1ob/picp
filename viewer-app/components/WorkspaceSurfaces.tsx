@@ -5,6 +5,7 @@ import { matchesProject, type ProjectSelection, selectionHash, selectionValue } 
 import { jobHref, sessionHref } from "../routes.ts";
 import { JobDetail } from "../screens/JobDetail.tsx";
 import { useScreenData } from "../use-screen-data.ts";
+import type { ComposerMenuContext } from "./ComposerMenu.tsx";
 import { ConversationContext } from "./ConversationContext.tsx";
 import { Icon } from "./icons.tsx";
 import { JobsDrawer } from "./JobsDrawer.tsx";
@@ -44,7 +45,7 @@ function JobPane({id, onClose}: {id: string; onClose: () => void}) {
  * Conversations drawer (M3). `active` registers Ctrl/Cmd+J; leaving, or another session file, drops every surface.
  * Escape closes the top surface; focus goes back to the opener.
  */
-export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelection, chat: ChatContext): {trigger: ComponentChild; surfaces: ComponentChild; conversations: ComponentChild} {
+export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelection, chat: ChatContext): {trigger: ComponentChild; surfaces: ComponentChild; conversations: ComponentChild; composer: ComposerMenuContext | null} {
  const [drawer, setDrawer] = useState(false);
  const [job, setJob] = useState<string | null>(null);
  const [panel, setPanel] = useState<"inspector" | "sheet" | null>(null);
@@ -73,7 +74,14 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
   window.addEventListener("keydown", key);
   return () => window.removeEventListener("keydown", key);
  }, [active, drawer, job, panel, sessions]);
- if (!active) return {trigger: null, surfaces: null, conversations: null};
+ // The mode was picked at open time: crossing 900 px closes it, so no hidden inspector or desktop sheet stays expanded.
+ useEffect(() => {
+  if (!active || !panel || typeof matchMedia !== "function") return;
+  const query = matchMedia("(min-width: 900px)"), change = () => { if (panel === "sheet" || !job) closePanel(); else setPanel(null); };
+  query.addEventListener("change", change);
+  return () => query.removeEventListener("change", change);
+ }, [active, panel, job]);
+ if (!active) return {trigger: null, surfaces: null, conversations: null, composer: null};
  const context = {asks: chat.asks, live: chat.live.filter(w => matchesProject(w.project, selection)), selection, onClose: closePanel, onJob: pickJob,
   onJobs: () => openDrawer(toggle.current), onAnswer: () => { if (panel === "sheet") closePanel(); chat.onAnswer(); }};
  const asked = chat.asks.length;
@@ -92,5 +100,6 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
   </>,
   conversations: <button type="button" class="session-bar-icon workspace-sessions-open" aria-haspopup="dialog" aria-expanded={sessions} aria-label="Conversations"
    onClick={e => { from(e.currentTarget); setSessions(true); }}><Icon name="sessions"/></button>,
+  composer: {onJobs: openDrawer, selection},
  };
 }

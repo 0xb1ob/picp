@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/ho
 import type { EvidenceReference } from "../../src/evidence-reference.ts";
 import { attachmentSize, attachRefusal, CONTROL_TEXT_MAX, type ControlView, controlFiles, controlImages, controlLine, controlReady, deliveryLine, isTextFile, uploadUrl } from "../control.ts";
 import { parseReference, referenceContext } from "../evidence-ref.ts";
+import { type Command, ComposerMenu, type ComposerMenuContext, slashCommands, STATUS_DRAFT } from "./ComposerMenu.tsx";
 import { EvidenceChip } from "./EvidenceReference.tsx";
 import { Icon } from "./icons.tsx";
 import { StartSession } from "./StartSession.tsx";
@@ -39,7 +40,7 @@ function rememberDraft(key: string, text: string) {
  * The Full transcript's composer, into the running operator session. One rounded box (chat v2): the growing textarea
  * over attach, Options, busy ⋯ (steer, confirm-tap abort) and send; one row below 900 px. Up to 8 attachments.
  */
-export function OperatorComposer({control, draft, reference}: {control:ControlView; draft?:string; reference?:string}) {
+export function OperatorComposer({control, draft, reference, chat}: {control:ControlView; draft?:string; reference?:string; chat?:ComposerMenuContext | null}) {
  // A reference link (composerHref) keeps saved text: its draft is only a suggestion for an empty composer.
  const linked = useMemo(() => parseReference(reference), [reference]);
  const [text,setText] = useState(linked ? "" : (draft ?? "").slice(0, CONTROL_TEXT_MAX));
@@ -116,8 +117,11 @@ export function OperatorComposer({control, draft, reference}: {control:ControlVi
  const mention = mentionAt(text, Math.min(caret ?? text.length, text.length));
  const skills = catalog && !("error" in catalog) ? catalog.skills : null;
  const matches = mention && skills ? matchSkills(skills, mention.query) : [];
- const listOpen = ready && !sending && !closed && matches.length > 0;
- const highlighted = Math.min(active, matches.length - 1);
+ // A `/word` draft offers the commands (operator chat only); anything else keeps the `@skill` list.
+ const commands = chat ? slashCommands(text) : [];
+ const options = commands.length ? commands.map(c => ({name: `/${c.name}`, description: c.detail})) : matches.map(s => ({name: `@${s.name}`, description: s.description}));
+ const listOpen = ready && !sending && !closed && options.length > 0;
+ const highlighted = Math.min(active, options.length - 1);
  const mentions = skills ? composerMentions(text, skills) : {known: [], unknown: []};
  // The token being completed is not "unknown" yet while the list still offers names for it.
  const unknown = mentions.unknown.filter(name => !(listOpen && name === mention?.query));
@@ -136,6 +140,17 @@ export function OperatorComposer({control, draft, reference}: {control:ControlVi
   setActive(0);
   placeCaret.current = at;
  };
+ /** A command never sends: `/status` writes its editable question (typed text kept); `/jobs` opens the drawer. */
+ const run = (name: Command) => {
+  const kept = /^\/[a-z]*$/.test(text) ? "" : text;
+  setActive(0);
+  if (name === "jobs") { edit(kept); chat?.onJobs(field.current); return; }
+  const next = (kept.trim() ? `${kept}\n${STATUS_DRAFT}` : STATUS_DRAFT).slice(0, CONTROL_TEXT_MAX);
+  edit(next);
+  placeCaret.current = next.length;
+  field.current?.focus();
+ };
+ const choose = (i: number) => { if (commands.length) run(commands[i]!.name); else pick(matches[i]!.name); };
  const closeMenu = () => { if (menu.current) menu.current.open = false; setConfirmAbort(false); };
  const update = (key: number, change: Partial<Attachment>) => setAttachments(list => list.map(a => a.key === key ? {...a, ...change} : a));
  const attach = (files: Picked[]) => {
@@ -187,9 +202,9 @@ export function OperatorComposer({control, draft, reference}: {control:ControlVi
   {ready && tooLong && <p role="alert" class="operator-composer-hint">Too long with the reference: shorten the question by {outgoing.length - CONTROL_TEXT_MAX} characters, or remove the reference</p>}
   {ready && <div class="operator-composer-box">
    <div class="operator-composer-field">
-   {listOpen && <ul role="listbox" id="operator-composer-skills" class="operator-composer-skills" aria-label="Installed skills">
-    {matches.map((s, i) => <li key={s.name} id={`operator-composer-skill-${i}`} role="option" aria-selected={i === highlighted} onMouseDown={e => { e.preventDefault(); pick(s.name); }}>
-     <span>@{s.name}</span>{s.description && <small>{s.description}</small>}
+   {listOpen && <ul role="listbox" id="operator-composer-skills" class="operator-composer-skills" aria-label={commands.length ? "Commands" : "Installed skills"}>
+    {options.map((s, i) => <li key={s.name} id={`operator-composer-skill-${i}`} role="option" aria-selected={i === highlighted} onMouseDown={e => { e.preventDefault(); choose(i); }}>
+     <span>{s.name}</span>{s.description && <small>{s.description}</small>}
     </li>)}
    </ul>}
    <textarea ref={field} aria-label="Message to the operator session" maxLength={CONTROL_TEXT_MAX} rows={1} value={text} disabled={sending}
@@ -206,9 +221,9 @@ export function OperatorComposer({control, draft, reference}: {control:ControlVi
     onInput={e => { edit(e.currentTarget.value); setCaret(e.currentTarget.selectionStart ?? null); setActive(0); setClosed(false); }} onKeyDown={e => {
      if (e.isComposing || e.keyCode === 229) return;
      if (listOpen) {
-      // The open list owns the arrows, Enter/Tab (insert `@name `) and Escape; Enter sends only while it is closed.
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setActive((highlighted + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length); return; }
-      if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") { e.preventDefault(); pick(matches[highlighted]!.name); return; }
+      // The open list owns the arrows, Enter/Tab (pick) and Escape; Enter sends only while it is closed.
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setActive((highlighted + (e.key === "ArrowDown" ? 1 : options.length - 1)) % options.length); return; }
+      if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") { e.preventDefault(); choose(highlighted); return; }
       if (e.key === "Escape") { e.preventDefault(); setClosed(true); return; }
      }
      if (e.key !== "Enter" || e.shiftKey) return; e.preventDefault(); send(busy ? "followUp" : undefined); }}/>
@@ -217,6 +232,7 @@ export function OperatorComposer({control, draft, reference}: {control:ControlVi
    {/* The paperclip always leads the footer; disabled, its title says why it cannot attach now. */}
    {control.upload && <button type="button" class="operator-composer-attach" aria-label="Attach files or images" title={upload ? "Attach files or images (or paste/drop)" : status.running ? "This session does not take attachments (⋮ → Restart session)" : "Attachments need a running session"} disabled={sending || !upload} onClick={() => picker.current?.click()}><Icon name="attach"/></button>}
    {upload && <input ref={picker} type="file" accept={controlFiles(status) ? "image/*,.txt,.md,.html,.json" : "image/*"} multiple hidden onChange={e => { const input = e.currentTarget; attach([...(input.files ?? [])]); input.value = ""; }}/>}
+   {chat && <ComposerMenu context={chat} disabled={sending} onCommand={run} onRefer={ref => { pin(ref); field.current?.focus(); }}/>}
    {status.running && status.session_file && <details class="operator-composer-options">
     <summary aria-label="Message options" title="Message options"><span>Options</span><span aria-hidden="true"> ▾</span></summary>
     <div class="operator-composer-options-panel"><p>Delivers to the running session <code>{status.session_file}</code></p></div>

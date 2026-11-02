@@ -1,7 +1,7 @@
 /**
  * Sessions chat v2 browser capture: the production app on loopback (production CSP, synthetic APIs), isolated headless
  * Chrome over CDP, PNGs plus manifest.json. `m3-transcript` serves the other screens' APIs from the real viewer.
- * `--stage pr1|pr2|pr3|pr4|pr5|chips|rollup|notice|m3-transcript|m3-jobs|m3-context [--chrome <path>] --out <dir>`
+ * `--stage <one of STAGES below> [--chrome <path>] --out <dir>`
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,7 +17,7 @@ import { buildViewer } from "../../src/viewer/build.ts";
 import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -160,16 +160,18 @@ try {
 	const app = await buildViewer({ stateDir: join(scratch, LAYOUT.state) });
 	const empty = overview({ home: scratch, stateDir: join(scratch, LAYOUT.state) }, Date.parse(GENERATED));
 	const routes: Record<string, unknown> = { "/api/sessions": sessions, "/api/overview": empty, "/api/operator/control": control, [`/api/job/${JOB}`]: job, [`/api/job/${JOB}/transcript`]: jobTranscript };
-	if (args.stage === "pr5") routes["/api/skills"] = { generated_at: GENERATED, skipped: [], omitted: 0, skills: [
+	if (args.stage === "pr5" || args.stage === "m3-composer") routes["/api/skills"] = { generated_at: GENERATED, skipped: [], omitted: 0, skills: [
 		{ name: "cp-pr-review", description: "Review a pull request against its task file", source: "agent" }, { name: "cp-memory", description: "Capture and curate lessons", source: "home" }] };
 	// M3 slice 2: the chat's Jobs drawer lists these; a long title and id wrap, the done job opens beside the chat.
 	const row = (id: string, project: string, phase: string, title: string, over: object = {}) => ({ ...job.job, id, project, phase, title, finished_at: null, ...over });
-	if (args.stage === "m3-jobs") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
+	if (args.stage === "m3-jobs" || args.stage === "m3-composer") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
 		row("cp-m3-live-with-a-very-long-job-identifier", "picp", "working", "Repair the queue so a very long job title keeps wrapping inside its drawer row instead of clipping", { cost_usd: 1.42, model: "fixture-model" }),
 		row("cp-m3-held", "demo-app", "held", "Settings copy pass", { cost_usd: 0.31 }),
 		row("cp-m3-park", "picp", "awaiting_merge", "Parked with the team", { pr_url: "https://github.com/o/picp/pull/712", pr_status: "open" }),
 		row(JOB, "picp", "done", "Sessions chat v2 PR 2", { finished_today: true, finished_at: GENERATED, cost_usd: 2.05, pr_url: "https://github.com/o/picp/pull/700", pr_status: "merged" }),
 	] };
+	// M3 slice 4: the composer menu attaches the done job's own P1 reference, as its job page's Ask would.
+	if (args.stage === "m3-composer") routes[`/api/job/${JOB}`] = { ...job, ask_reference: { kind: "job", project: "picp", job_id: JOB }, evidence_lookup: { supported: true, why: "fixture" } };
 	server.on("request", (req, res) => {
 		const path = new URL(req.url ?? "/", "http://fixture").pathname;
 		const send = (status: number, type: string, data: string | Uint8Array) => { res.writeHead(status, { "content-type": type, "content-security-policy": APP_CSP, "cache-control": "no-store" }); res.end(data); };
@@ -445,6 +447,25 @@ try {
 		];
 		for (const [name, width, height, steps] of shots3) await capture(`m3-context-${name}`, transcript, width, height, "dark", loaded, "bottom", [...steps, fits]);
 		if (posts.length) throw new Error(`m3-context sent ${posts.join(", ")}: the context and drawer only read`);
+	}
+	if (stage === "m3-composer") {
+		// Real clicks and input: the `/` menu (two commands, three jobs), the typed list, /status and a P1 reference.
+		const slash: Step = [`document.querySelector(".operator-composer-slash").click()`, `document.querySelectorAll("#operator-composer-command-menu button").length === 5`];
+		const typed: Step = [`(() => { const i = document.querySelector(".operator-composer textarea"); i.focus(); i.value = "/"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+			`document.querySelectorAll(".operator-composer-skills [role=option]").length === 2`];
+		const status: Step = [`[...document.querySelectorAll("#operator-composer-command-menu button")].find(b => b.textContent.startsWith("/status")).click()`,
+			`document.querySelector(".operator-composer textarea").value === "What is running and what needs me?"`];
+		const refer: Step = [`[...document.querySelectorAll("#operator-composer-command-menu button")].find(b => b.textContent.startsWith("${JOB}")).click()`, `!!document.querySelector(".evidence-chip")`];
+		const fits: Step = ["true", `[...document.querySelectorAll(".operator-composer-slash, #operator-composer-command-menu button, .operator-composer-skills [role=option]")]
+			.filter(e => e.getClientRects().length).every(e => { const r = e.getBoundingClientRect(); return (innerWidth >= 900 || r.height >= 44) && r.top >= 0 && r.left >= -0.5 && r.right <= innerWidth + 0.5; })`];
+		const shots4: [string, number, number, Step[]][] = [
+			["menu-desktop-dark-1440x1000", 1440, 1000, [slash]], ["typed-desktop-dark-1440x1000", 1440, 1000, [typed]],
+			["status-desktop-dark-1440x1000", 1440, 1000, [slash, status]], ["reference-desktop-dark-1440x1000", 1440, 1000, [slash, refer]],
+			["menu-desktop-dark-900x1000", 900, 1000, [slash]], ["menu-phone-dark-899x1000", 899, 1000, [slash]],
+			["menu-phone-dark-390x844", 390, 844, [slash]], ["typed-phone-dark-390x844", 390, 844, [typed]], ["reference-phone-dark-390x844", 390, 844, [slash, refer]],
+		];
+		for (const [name, width, height, steps] of shots4) await capture(`m3-composer-${name}`, transcript, width, height, "dark", loaded, "bottom", [...steps, fits]);
+		if (posts.length) throw new Error(`m3-composer sent ${posts.join(", ")}: commands and references never send`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

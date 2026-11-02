@@ -642,7 +642,7 @@ Done today segments and the chat's M1 project selection (one hash, shared with t
 page header, P1 Ask and the P2 review guide unchanged) in a pane with Full page (`#job/<id>`) and ×: 520 px beside the
 chat from 1280 px, over the chat column from 900 px, full screen on a phone. Escape closes the top surface unless a
 dialog or menu owns it; focus returns to the opener and the draft, reference, filter and scroll stay. Deferred:
-"From this chat" lists, Today totals, live-log tabs and `/jobs` (slice 4).
+"From this chat" lists, Today totals and live-log tabs (`/jobs` arrived with slice 4).
 
 **Chat context and Conversations (M3 slice 3, cp-zm9f).** The same Full transcript gains `Context` beside `Jobs ⌘J`
 (an amber badge counts the open asks). `ConversationContext.tsx` shows "This conversation": Asked you (the transcript's
@@ -652,8 +652,19 @@ Session link), then All jobs (the drawer). It is a 340 px inspector beside the c
 edge from 900 px, and a modal bottom sheet below. The phone's session bar adds a Conversations button: a 316 px modal
 left drawer (`SessionDrawer.tsx`) with the sidebar's own rows, the Operator row keeping the selection. Escape closes the
 top surface and focus returns to its button; every surface closes on leaving the chat or switching its session file.
-Deferred: per-conversation job lists and totals (not recorded), threads and Cmd+N. `m3-context` captures both surfaces
-at 1440, 900, 899 and 390 px.
+Crossing 900 px while the context is open closes it (the sheet hands focus back to Context), so no hidden inspector stays
+expanded or keeps Escape and no bottom sheet remains on a desktop. Deferred: per-conversation job lists and totals (not
+recorded), threads and Cmd+N. `m3-context` captures both surfaces at 1440, 900, 899 and 390 px.
+
+**Composer menu (M3 slice 4, cp-zm9f).** In the operator chat's composer (`ComposerMenu.tsx`), a draft that is exactly
+`/` or `/word` lists the matching commands in the composer's listbox (arrows, Enter/Tab run one, Escape closes it; an
+IME Enter is the composition's), and a 44 px `/` button after the paperclip opens the same commands for touch, then the
+M1 selection's in-flight and done-today jobs. `/status` writes "What is running and what needs me?" as an editable
+draft (below any typed text); `/jobs` opens the slice 2 drawer as Ctrl/Cmd+J does, focus returning to the field.
+Picking a job attaches its own P1 reference (the `ask_reference` of `GET /api/job/<id>`, refused with the reason when
+it has no ledger project or the lookup is unsupported) as the composer's one chip. Nothing in the menu sends; `@skill`
+completion, attachments, drafts and the offline composer are unchanged. Not offered: `/stop` (revocation), `/thread`
+and threads. `m3-composer` captures the menu, the typed list, `/status` and a reference at 1440, 900, 899 and 390 px.
 
 Live PR and issue chips (Sessions chat): `GET /api/sessions` carries `pr_chips`, keyed by URL, built by
 `src/viewer/pr-chips.ts` from files the viewer already reads — fleet PR receipts and `bound_pr`, `merge.json`, the
