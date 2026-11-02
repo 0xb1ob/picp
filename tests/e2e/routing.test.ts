@@ -230,6 +230,7 @@ test("P16-route-migrate: a rubric that left a role to its profile gets one defau
 		// The cells that fell through keep the profile's old candidates [OPUS, SOL]: OpenAI alone walks OPUS to SOL.
 		const fell = grid.filter(({ profile, scope, risk }) => !home.before(ROLE[profile]!, scope, risk));
 		const openai = await parent(b, { phases: [{ calls: fell }], env: { OPENAI_API_KEY: "sk-test" } });
+		assert.equal(openai.previews[0]!.length, fell.length, `${home.name}: one preview per fell-through cell`);
 		for (const [i, got] of openai.previews[0]!.entries()) {
 			const candidates = [...(got.decision?.attempted ?? []).map((skip) => skip.model), got.decision?.model];
 			assert.deepEqual(candidates, [OPUS, SOL], `${home.name} ${fell[i]!.profile} ${fell[i]!.scope}/${fell[i]!.risk}: ${said(got)}`);
