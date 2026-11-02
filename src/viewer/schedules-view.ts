@@ -21,6 +21,8 @@ import { readSchedulePolicies, readScheduleRuns } from "./schedule-run-core.ts";
 import { isNativePolicy } from "./schedule-policy.ts";
 export const SCHEDULE_HISTORY = 40;
 
+/** A pre-M2 card's `legacy:<ans-id>` report slug: responseReportSlug, inlined as the viewer may not import it. */
+const legacyReportSlug = (id: string): string => `report-${createHash("sha256").update(`legacy:${id}`, "utf8").digest("hex").slice(0, 32)}`;
 function next(schedule: Schedule, now: number): Pick<ScheduleItem, "next_at" | "next_note"> {
 	const trigger = schedule.trigger;
 	if (trigger.type === "manual") return { next_at: null, next_note: "manual: fires only on Run now" };
@@ -139,6 +141,11 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 	const grants = readMandates(state);
 	const ledger = objectList(join(runtimeRoot(state.home), "jobs.json"), "jobs", (j) => typeof j.id === "string" && isSafeId(j.id)).value;
 	const boards = listBoards(state, warn);
+	// An unmigrated or conflicted home has no legacy board: the card shows no link rather than a 404.
+	const legacyReportHref = (id: string | null): string | null => {
+		const slug = id ? legacyReportSlug(id) : null;
+		return slug && boards.some((b) => b.slug === slug) ? `/boards/${slug}/` : null;
+	};
 	const factsOf = (id: string): RunJobFacts & { envelope: Json | undefined; record: Json | undefined } => {
 		const board = boards.find((b) => b.job_ids.includes(id));
 		const record = readObject(join(state.stateDir, "runs", id, "envelope.json"));
@@ -158,7 +165,7 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 			const inferred = groupScheduleRuns(members,{...schedule,job:{...recipe,...(skill ? {skill} : {})}},schedule.last_fire,facts).runs.find(v=>v.anchor_id === r.anchor_job_id);
 			return {run_id:r.id,anchor_id:r.anchor_job_id ?? r.id,via:r.trigger.via === "watch" ? "slot" as const : r.trigger.via,at:r.started_at,missed:r.trigger.missed ?? false,
 				status:r.phase === "closed" ? "closed" as const : "open" as const,jobs_open:r.members.filter(m=>!members.some(j=>j.id === m.job_id && j.status === "closed")).length,jobs_total:r.members.length,job_ids:r.members.map(m=>m.job_id),result:inferred?.result ?? null,
-				...(r.result ? {card:{state:r.result.delivered_at ? "posted" as const : "pending" as const,answer_id:r.result.answer_id,report_href:r.result.report_href ?? null,headline:r.result.headline,error:r.result.error ?? null}} : {})};
+				...(r.result ? {card:{state:r.result.delivered_at ? "posted" as const : "pending" as const,report_href:r.result.report_href ?? legacyReportHref(r.result.answer_id),headline:r.result.headline,error:r.result.error ?? null}} : {})};
 		});
 		const views = [...storedViews,...groups.runs].sort((a,b)=>b.at.localeCompare(a.at)).slice(0,5);
 		const runOf = new Map(views.flatMap((r) => r.job_ids.map((id): [string, string] => [id, r.run_id])));

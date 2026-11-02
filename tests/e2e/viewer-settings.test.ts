@@ -18,6 +18,7 @@ import type { Ledger } from "../../src/ledger.ts";
 import { MandateStore } from "../../src/mandate.ts";
 import { loadMandateDefaults } from "../../src/mandate-defaults.ts";
 import { Scheduler } from "../../src/scheduler.ts";
+import { publishResponseReport, responseReportSlug } from "../../src/response-reports.ts";
 import { readScheduleFile } from "../../src/viewer/schedule-core.ts";
 import { nativePolicyDraft, policyFromLegacy } from "../../src/viewer/schedule-policy.ts";
 import type { ControlPorts } from "../../src/dashboard-control.ts";
@@ -995,7 +996,7 @@ test("P20-schedules-runs: an activated schedule counts durable runs and legacy j
 	assert.equal(view.history.find((job: Line) => job.id === "cp-fire2")?.run_id, id);
 	assert.equal(view.runs[0]?.card, undefined, "no result queued yet");
 	runs.editRun(id, (row) => { row.result = { source_key: `${id}:cp-fire2:1`, job_id: "cp-fire2", generation: 1, outcome: "completed", headline: "done", at: "2026-09-21T04:05:00Z", links: [], answer_id: null, delivered_at: null, error: "answers journal unwritable: EACCES" }; });
-	assert.deepEqual(first(await s.read()).runs[0]?.card, { state: "pending", answer_id: null, report_href: null, headline: "done", error: "answers journal unwritable: EACCES" });
+	assert.deepEqual(first(await s.read()).runs[0]?.card, { state: "pending", report_href: null, headline: "done", error: "answers journal unwritable: EACCES" });
 
 	const updated = structuredClone(policy);
 	updated.revision = 2;
@@ -1263,12 +1264,15 @@ test("P20-schedules-page-policy: a policy-only v2 schedule renders its saved run
 	assert.equal(card.querySelectorAll("[style], form").length, 0);
 	assert.match(card.querySelector(".schedule-result")?.textContent ?? "", /Each run also delivers one result on its own, with no operator session needed: short here, long as a report/);
 	const heads = [...card.querySelectorAll(".schedule-run-head")].map((head) => head.textContent ?? "");
-	assert.ok(heads.some((head) => /Result card in Answers/.test(head)), heads.join(" | "));
+	assert.doesNotMatch(heads.join(" | "), /Result card in Answers/, "M2 PR3: no run links the retired Answers list");
 	assert.ok(heads.some((head) => new RegExp(`Result card pending: answers journal unwritable: x{900}`).test(head)), "a long error is text in the wrapping run head");
-	const reportLink = [...card.querySelectorAll(".schedule-run-head a")].find((a) => a.textContent === "Result report");
-	assert.equal(reportLink?.getAttribute("href"), `/boards/report-${"a".repeat(32)}/`);
+	const reportLinks = [...card.querySelectorAll(".schedule-run-head a")].filter((a) => a.textContent === "Result report").map((a) => a.getAttribute("href"));
+	assert.deepEqual(reportLinks, [`/boards/report-${"a".repeat(32)}/`], "an unmigrated pre-M2 card renders without a 404 link");
+	publishResponseReport(s.home, { project: "demo", question: "q", answer: "a", source: "legacy:ans-aaaaaaaaaaaa", time: "2026-09-21T04:05:30Z" });
+	const legacy = first(await s.read()).runs.find((r: Line) => r.run_id === "run-20260921040001-abcdef")?.card;
+	assert.equal(legacy?.report_href, `/boards/${responseReportSlug("legacy:ans-aaaaaaaaaaaa")}/`, "migrated, it links its legacy report");
 	assert.ok(heads.some((head) => / · Result delivered$/.test(head)), heads.join(" | "));
-	assert.deepEqual([...card.querySelectorAll(".schedule-history > li > .schedule-summary")].map((line) => line.textContent), ["done 4"], "only the short result shows its headline");
+	assert.deepEqual([...card.querySelectorAll(".schedule-history > li > .schedule-summary")].map((line) => line.textContent), ["done 1", "done 4"], "a short result and an unlinked legacy card show their headline");
 	assert.match(await servedCss(s.view), /overflow-wrap: ?anywhere/);
 });
 

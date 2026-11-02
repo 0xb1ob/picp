@@ -51,6 +51,6 @@ function HandoffRow({pointer}: {pointer: HandoffPointer}) {
   <a class="jobs-history-title" href={pointer.href} target="_blank" rel="noopener noreferrer"><code>{pointer.name}</code></a>
   <span class="jobs-history-meta">{pointer.root} · modified {observedTime(pointer.modified_at)}{pointer.truncated ? " · matched on its first 64 KiB" : ""}</span>
   {pointer.evidence.length > 0 && <span class="jobs-history-reason">Matched {pointer.evidence.map(e => e.value).join(", ")}{pointer.evidence_omitted ? ` and ${pointer.evidence_omitted} more` : ""}</span>}
-  {(pointer.reports.length > 0 || pointer.answers.length > 0) && <span class="decided-job">{pointer.reports.map(r => <a key={r.job_id} href={r.href}>Report <code>{r.job_id}</code></a>)}{pointer.answers.map(a => <a key={a.id} href="#answers">Answer <code>{a.id}</code></a>)}</span>}
+  {pointer.reports.length > 0 && <span class="decided-job">{pointer.reports.map(r => <a key={r.job_id} href={r.href}>Report <code>{r.job_id}</code></a>)}</span>}
  </li>;
 }

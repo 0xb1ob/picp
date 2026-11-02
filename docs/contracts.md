@@ -1321,7 +1321,7 @@ exists, then
 renames the live journal to the archive. Neither file is ever unlinked, truncated or overwritten; any failure leaves the
 original bytes in place and producers closed, and a restart reuses verified reports. Activation is a human boundary:
 the bridge reload and a parent drain/restart, confirmed by the main session, precede it, so no old writer appends during
-the rename. The old dashboard list (§Answers to acknowledge) reads `missing` once migrated and gets no new data.
+the rename. The old dashboard list (§Answers to acknowledge) is removed (M2 PR3); the migration stays for unmigrated homes.
 
 **Schedule result cards** (schedules refactor PR1, `src/schedule-results.ts`). A durable schedule run's final result
 is delivered like an operator answer (M2 PR2): source `schedule:<source_key>`, `time` = the result's `at`, the run's
@@ -6879,41 +6879,13 @@ fire*); `remove` also revokes that schedule's current grant, and its outcome rea
 the parent; `state/schedule-control.jsonl` may be deleted while nothing is queued. The trust boundary is the
 dashboard control one: a same-user local process can already write `state/`.
 
-### Answers to acknowledge (cp-mxk4)
+### Answers to acknowledge (retired by M2 PR3)
 
-The Decisions page lists the answers the human asked for, posted with `cp_parent answer` (see Operator answers), between
-**Awaiting you** and **Being handled** (`#answers`; absent while `state/operator/answers.jsonl` does not exist). Each row
-shows the project, the question (verbatim, clipped), the short answer (first paragraph, ≤ 280 chars), the time, the job
-and report/board links and the full answer behind an expander. `GET /api/decisions` carries `answers: {availability, open,
-open_count, history, history_total, warning}`: open items are unacknowledged, newest first (≤ 100); history is
-acknowledged items, newest-acked first (≤ 50). Evidence links come only from `evidenceLink` (a board → `/boards/<slug>/`, a
-run → `#job/<id>`, a Files root); anything else stays plain text, and only `http(s)` URLs in the answer become external
-links. No push, no Overview line, no nav badge: the count sits on the section heading.
-
-**An acknowledgement is not an operator decision.** The tick (✓ Acknowledge) is one `POST /api/answers/ack` `{"id":
-"ans-<12 hex>"}` that appends one `{"type":"acked","by":"viewer","id","at","peer"}` line to `state/operator/answers.jsonl`
-(the journal stays append-only; the row moves to the collapsed **Acknowledged** history). It needs no operator session and
-no parent, reaches neither, never pushes and authorizes nothing. `GET /api/answers/control` (403 without
-`--require-tailnet`; never writes) returns `{enabled, reason, token}`: `token` is this viewer process's random answer
-token, only while control is on. The POST refuses, in order:
-
-| Check | Refusal |
-|---|---|
-| method, `--require-tailnet`, rate, opt-out, Origin, Sec-Fetch-Site, JSON, 20 KiB, JSON parse | as in the Dashboard control table (kind `answer_ack`) |
-| body shape | 400 `body must be {"id": "ans-<12 hex>"}` |
-| `x-cp-control-token` equals the answer token | 403 `control token missing or stale; reload the page` |
-| the journal is readable | 500 `answers unreadable: …` |
-| the id is in the journal / not yet acknowledged | 404 `no answer <id>` / 409 `<id> was already acknowledged at <iso>` |
-| the `acked` line is appended | 500 `answers journal unwritable (…)` |
-| — | 202 `{id, state: "acked", acked_at}` |
-
-Every refusal after the `--require-tailnet` guard is one `refused` line (`kind: "answer_ack"`, `answer_id` once parsed) in
-`state/operator/dashboard.jsonl`; no refusal writes an `acked` line. Two tabs racing can both get 202; the fold keeps the
-first ack.
-
-**Recovery:** `{"enabled": false}` in `data/dashboard-control.json` stops the ack route; the list still renders
-read-only. Deleting `state/operator/answers.jsonl` clears the list and loses nothing else. An unreadable or over-16-MiB
-journal shows "Answers unavailable".
+The cp-mxk4 Answers list is deleted (cp-m2-pr3-mh3m): final answers are response reports (§Response reports), so
+`GET /api/decisions` carries no `answers`, `GET /api/answers/control` is 404 and `POST /api/answers/ack` is 405
+`read-only viewer: GET only`; neither writes. A stale `#answers` link opens Reports. The viewer never reads
+`state/operator/answers.jsonl`; only the upgrade one-shot (`src/migrate-answer-reports.ts`) does. Old `answer_ack`
+refusal lines in `state/operator/dashboard.jsonl` are left in place.
 
 ### Operator threads (retired by #588)
 

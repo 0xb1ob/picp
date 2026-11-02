@@ -1,5 +1,5 @@
 /**
- * Behavior 17 (P17a): the dashboard's Decisions page — Awaiting, Being handled, Answers and the Decided log — as
+ * Behavior 17 (P17a): the dashboard's Decisions page — Awaiting, Being handled and the Decided log — as
  * `bin/cp-view` serves it on a scratch home: its HTTP routes, and the served app run in a tab (tests/harness/dashboard)
  * whose clicks reach the viewer and, for a decision card, the operator session's own dashboard-control server.
  */
@@ -17,8 +17,7 @@ import { OperatorAsks } from "../../src/operator-asks.ts";
 import { tunnelConfigFile, tunnelRuntimeFile } from "../../src/service/daemon-tunnel-files.ts";
 import { deviceNotificationsFile } from "../../src/viewer/device-notification-files.ts";
 import { DEVICE_TRUST } from "../../src/viewer/api-types.ts";
-import { appendAnswerLine } from "../../src/viewer/control-audit.ts";
-import { controlConfigFile, controlInboxFile, controlJournalFile, controlRecordFile, controlSocketFile, operatorAnswersFile } from "../../src/viewer/control-files.ts";
+import { controlConfigFile, controlInboxFile, controlJournalFile, controlRecordFile, controlSocketFile } from "../../src/viewer/control-files.ts";
 import { devicesFile } from "../../src/viewer/device-files.ts";
 import { viewerConfigFile } from "../../src/viewer/host-config.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
@@ -161,7 +160,7 @@ test("P17-decided: /api/decided keeps delegated and your answers with their basi
 	assert.deepEqual(row("es-quote").basis, { kind: "words", ref: "“do the listed work”" }, "a quote absent from standing orders is your words");
 });
 
-test("P17-decisions-page: the served Decisions page stacks Awaiting, Answers, Being handled and the Decided log, truthfully in every state", { timeout: 180_000 }, async (t) => {
+test("P17-decisions-page: the served Decisions page stacks Awaiting, Being handled and the Decided log, truthfully in every state", { timeout: 180_000 }, async (t) => {
 	const NOW = "2026-09-26T12:00:00Z";
 	const d = await dashboard(t, { at: NOW, env: UTC });
 	const put = (file: string, value: unknown) => write(join(d.stateDir, file), value);
@@ -194,7 +193,7 @@ test("P17-decisions-page: the served Decisions page stacks Awaiting, Answers, Be
 	assert.match(tab.text(), /Parent questions unavailable/);
 
 	// Three open asks (one hostile, tied to an open escalation), two parent questions, today's delegated decision
-	// with three mission-end closes, an older answer of yours and one posted answer.
+	// with three mission-end closes, an older answer of yours and a leftover legacy answers journal.
 	const ago = (seconds: number) => new Date(Date.parse(NOW) - seconds * 1000).toISOString().replace(".000Z", "Z");
 	const today = (id: string, extra: Json = {}) => escalation(id, { answered_at: ago(600), job_ids: [], ...extra });
 	put("operator/asks.jsonl", jsonl([
@@ -207,7 +206,7 @@ test("P17-decisions-page: the served Decisions page stacks Awaiting, Answers, Be
 		today("es-risk", { kind: "risk_high_irreversible", question: "cp-demo: Risk?", job_ids: ["cp-demo"], delegation_rule: "Evidence clears it", basis: { operator_quote: "Remove it with a normal revert commit." } }),
 		...["md-aaaa", "md-bbbb", "md-cccc"].map((id) => today(`es-${id}`, { kind: "mission_end", question: `${id}: every job it names is closed`, delegation_rule: "see ask-0123456789ab" })),
 	] });
-	appendAnswerLine(d.stateDir, { type: "posted", by: "bridge", id: "ans-aaaaaaaaaaaa", at: ago(30), project: "demo", question: "What?", answer: "Because.", evidence_paths: [], job_id: null } as never);
+	put("operator/answers.jsonl", jsonl([{ type: "posted", by: "bridge", id: "ans-aaaaaaaaaaaa", at: ago(30), project: "demo", question: "What?", answer: "Because.", evidence_paths: [], job_id: null }]));
 	tab = await tab.reopen();
 	await tab.find(".decided-row");
 	const awaitingHtml = tab.$("#awaiting")!.innerHTML;
@@ -217,8 +216,9 @@ test("P17-decisions-page: the served Decisions page stacks Awaiting, Answers, Be
 	assert.match(inside(tab, "awaiting"), /Not delegated/);
 	assert.ok(tab.$('#awaiting a[href="#sessions?view=parent"]'));
 	const html = tab.root.innerHTML;
-	const order = ['id="awaiting"', 'id="answers"', "Being handled", 'id="decided"'].map((needle) => html.indexOf(needle));
-	assert.deepEqual(order.toSorted((a, b) => a - b), order, "Awaiting, Answers, Being handled, then the Decided log");
+	const order = ['id="awaiting"', "Being handled", 'id="decided"'].map((needle) => html.indexOf(needle));
+	assert.deepEqual(order.toSorted((a, b) => a - b), order, "Awaiting, Being handled, then the Decided log");
+	assert.deepEqual([tab.$("#answers"), /Because\.|ans-aaaaaaaaaaaa/.test(tab.text())], [null, false], "M2 PR3: a leftover journal renders no Answers");
 	assert.ok(order.every((at) => at >= 0));
 	assert.equal(tab.$("details.decisions-handled.decisions-handled-overdue")?.hasAttribute("open"), false, "collapsed, amber past 10 minutes");
 	assert.equal(tab.$("details.decisions-handled > summary")?.textContent, "Being handled · 2 (oldest 57m)");
@@ -277,7 +277,6 @@ test("P17-decisions-page: the served Decisions page stacks Awaiting, Answers, Be
 	const words = (n: number, extra: Json = {}) => today(`es-r${n}`, { question: `Q${n}?`, delegation_rule: "see ask-0123456789ab", ...extra });
 	put("operator/asks.jsonl", "");
 	put("escalations.json", { items: Array.from({ length: 6 }, (_, n) => words(n)) });
-	write(operatorAnswersFile(d.stateDir), "");
 	tab = await tab.reopen();
 	await tab.find(".decided-row");
 	assert.equal(tab.$$(".decided-row").length, 5);
@@ -316,230 +315,21 @@ function seedCard(stateDir: string, home: string, at: string) {
 	write(join(home, LAYOUT.projects, "demo", "runs", "cp-demo", "notes.md"), "# notes\n");
 }
 
-const A = "ans-aaaaaaaaaaaa";
-const B = "ans-bbbbbbbbbbbb";
-const C = "ans-cccccccccccc";
-const posted = (id: string, at: string, extra: Json = {}) => ({ type: "posted", by: "bridge", id, at, project: "demo", question: `question ${id}`, answer: `short ${id}\n\nlong ${id}`, evidence_paths: [], job_id: null, ...extra }) as never;
 const lines = (file: string): Json[] => existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
 const post = (origin: string, token: string | null, body: unknown, extra: Record<string, string> = {}) => ({
 	method: "POST", body: typeof body === "string" ? body : JSON.stringify(body),
 	headers: { origin, "content-type": "application/json", "sec-fetch-site": "same-origin", ...(token ? { "x-cp-control-token": token } : {}), ...extra },
 });
 
-test("P17-answers-ack: POST /api/answers/ack refuses in order, journals each refusal once, and 202s only with its acked line", { timeout: 120_000 }, async (t) => {
+test("M2-answers-retired: the old acknowledgement routes are gone (GET 404, POST the viewer's 405) and #answers opens Reports", { timeout: 120_000 }, async (t) => {
 	const d = await dashboard(t);
-	const journal = operatorAnswersFile(d.stateDir);
-	const audit = controlJournalFile(d.stateDir);
-	appendAnswerLine(d.stateDir, posted(A, "2026-07-01T00:00:00Z"));
-	appendAnswerLine(d.stateDir, { type: "acked", by: "viewer", id: B, at: "2026-07-01T00:00:01Z", peer: null });
-	appendAnswerLine(d.stateDir, posted(B, "2026-07-01T00:00:02Z"));
-	appendAnswerLine(d.stateDir, { type: "acked", by: "viewer", id: B, at: "2026-07-01T00:00:03Z", peer: null });
-	const status = await d.get("/api/answers/control");
-	assert.deepEqual([status.status, status.body.enabled, status.body.reason], [200, true, null]);
-	const token = String(status.body.token);
-	assert.match(token, /^[0-9a-f]{64}$/);
-	assert.equal(lines(journal).length, 4, "the status route never writes");
-	const acks = () => lines(journal).filter((l) => l.type === "acked").length;
-	const ack = (tok: string | null, body: unknown, extra?: Record<string, string>) => d.get("/api/answers/ack", post(d.origin, tok, body, extra));
-	const refused = async (reply: Promise<Reply>, code: number, reason: RegExp, fields: Json = {}) => {
-		const before = lines(audit).length;
-		const out = await reply;
-		assert.equal(out.status, code, JSON.stringify(out.body));
-		assert.match(String(out.body.error), reason);
-		const after = lines(audit);
-		assert.equal(after.length, before + 1, `one audit line for ${code} ${reason}`);
-		const line = after.at(-1)!;
-		assert.deepEqual([line.type, line.by, line.kind, line.status, line.peer], ["refused", "viewer", "answer_ack", code, "127.0.0.1"]);
-		for (const [key, value] of Object.entries(fields)) assert.deepEqual(line[key], value, key);
-		assert.equal(acks(), 2, "no refusal writes an acked line");
-	};
-	assert.equal((await d.get("/api/answers/ack")).status, 405);
-	assert.equal(existsSync(audit), false, "405 is not journaled");
-	write(controlConfigFile(d.stateDir), '{"enabled": false}');
-	await refused(ack(token, { id: A }), 403, /dashboard control is off/);
-	rmSync(controlConfigFile(d.stateDir));
-	await refused(ack(token, { id: A }, { origin: "https://evil.example" }), 403, /Origin must be/);
-	await refused(ack(token, { id: A }, { "sec-fetch-site": "cross-site" }), 403, /cross-site/);
-	await refused(ack(token, { id: A }, { "content-type": "text/plain" }), 415, /application\/json/);
-	await refused(ack(token, { id: A, pad: "z".repeat(21 * 1024) }), 413, /20480 bytes/);
-	await refused(ack(token, "{not json"), 400, /not JSON/);
-	await refused(ack(token, { id: "ans-../x" }), 400, /body must be/, { answer_id: undefined });
-	await refused(ack(token, { id: A, extra: 1 }), 400, /body must be/, { answer_id: A });
-	await refused(ack(null, { id: A }), 403, /control token missing or stale/, { answer_id: A });
-	await refused(ack("f".repeat(64), { id: A }), 403, /control token missing or stale/);
-	await refused(ack(token, { id: C }), 404, /no answer ans-cccccccccccc/);
-	await refused(ack(token, { id: B }), 409, /already acknowledged at 2026-07-01T00:00:03Z/);
-
-	const sent = await ack(token, { id: A });
-	assert.equal(sent.status, 202, JSON.stringify(sent.body));
-	assert.deepEqual([sent.body.id, sent.body.state], [A, "acked"]);
-	assert.deepEqual(lines(journal).filter((l) => l.type === "acked").at(-1), { type: "acked", by: "viewer", id: A, at: sent.body.acked_at, peer: "127.0.0.1" });
-	assert.equal(lines(journal).length, 5, "append-only: the posted lines stay");
-	const after = (await d.get("/api/decisions")).body.answers as Json;
-	assert.deepEqual([after.open_count, after.history.map((a: Json) => a.id), after.history[0].acked_at], [0, [A, B], sent.body.acked_at]);
-	assert.equal((await ack(token, { id: A })).status, 409);
-	for (const file of ["operator/asks.jsonl", "escalations.json", "push-deliveries.json", "operator/inbox.jsonl"]) assert.equal(existsSync(join(d.stateDir, file)), false, file);
-	write(controlConfigFile(d.stateDir), '{"enabled": false}');
-	const off = await d.get("/api/answers/control");
-	assert.deepEqual([off.body.enabled, off.body.token], [false, null], "off: no token");
-	assert.match(String(off.body.reason), /^Dashboard control is off/);
-	rmSync(controlConfigFile(d.stateDir));
-	// A fresh 60 s window: 20 requests are answered on their merits, the 21st is 429.
-	d.pin(new Date(Date.now() + 120_000).toISOString());
-	const codes: number[] = [];
-	for (let i = 0; i < 21; i++) codes.push((await ack(null, "{")).status);
-	assert.deepEqual(codes, [...Array(20).fill(400), 429], "20 requests per 60 s");
-	assert.equal(lines(audit).at(-1)!.status, 429);
-});
-
-test("P17-answers-tailnet: without --require-tailnet both answer routes are 403, nothing is journaled, and the tick says why", { timeout: 120_000 }, async (t) => {
-	const d = await dashboard(t, { requireTailnet: false });
-	// The refusal must be the tailnet rule itself: a bad token or Origin is a 403 too (#555 review).
-	for (const reply of [await d.get("/api/answers/control"), await d.get("/api/answers/ack", post(d.origin, "x", { id: A }))]) {
-		assert.deepEqual([reply.status, /served only under --require-tailnet$/.test(String(reply.body.error))], [403, true], String(reply.body.error));
-	}
-	assert.equal(existsSync(controlJournalFile(d.stateDir)), false);
-	assert.equal(existsSync(operatorAnswersFile(d.stateDir)), false);
-	appendAnswerLine(d.stateDir, posted(A, "2026-07-01T00:00:00Z"));
+	const control = await d.get("/api/answers/control"), ack = await d.get("/api/answers/ack", post(d.origin, "x", { id: "ans-aaaaaaaaaaaa" }));
+	assert.deepEqual([control.status, ack.status], [404, 405], "an old tab's status read is 404; its tick POST is the read-only viewer's 405");
+	assert.equal(existsSync(controlJournalFile(d.stateDir)), false, "a retired route journals nothing");
+	assert.equal(existsSync(join(d.stateDir, "operator", "answers.jsonl")), false, "a retired route writes no answers journal");
 	const tab = await d.open("#answers");
-	assert.ok(await tab.find(".answers-control", (el) => /^Acknowledge unavailable: answer acknowledgement is served only under --require-tailnet/.test(el.textContent ?? "")));
-	assert.equal(tab.$(`button[aria-label="Acknowledge ${A}"]`)?.hasAttribute("disabled"), true);
-	assert.equal(tab.$("h1")?.getAttribute("title"), "Decisions", "#answers is a section of the Decisions page");
-	assert.equal(lines(operatorAnswersFile(d.stateDir)).length, 1, "nothing acked");
-});
-
-test("P17-answers: posted answers project their evidence and render as text; a tick acknowledges over HTTP and the card moves to history", { timeout: 180_000 }, async (t) => {
-	const d = await dashboard(t);
-	const answers = async () => (await d.get("/api/decisions")).body.answers as Json;
-	assert.deepEqual(await answers(), { availability: "missing", open: [], open_count: 0, history: [], history_total: 0, warning: null });
-	write(join(d.stateDir, "boards", "alpha", "board.json"), { title: "Alpha", created_at: "2026-09-01T00:00:00Z" });
-	write(join(d.stateDir, "boards", "alpha", "site", "index.html"), "<h1>Alpha</h1>");
-	const long = `${"word ".repeat(100)}end\nsecond line\n\nsecond paragraph`;
-	const run = `run-20260701060000-${"a".repeat(6)}`;
-	appendAnswerLine(d.stateDir, posted(A, "2026-07-01T00:00:00Z", { question: `<script>alert(1)</script>${"q ".repeat(400)}`, answer: long, evidence_paths: [`${d.stateDir}/boards/alpha/index.html`, "/nowhere/else.md"], job_id: "cp-demo" }));
-	appendAnswerLine(d.stateDir, posted(B, "2026-07-01T00:00:01Z", { answer: "javascript:alert(1) and https://example.com/a and [x](https://example.org/b)\n\nlong" }));
-	appendAnswerLine(d.stateDir, posted(C, "2026-07-01T00:00:02Z", { by: "schedule", source: { kind: "schedule", schedule_id: "sch-123456", run_id: run, source_key: `${run}:closed`, outcome: "partial" } }));
-	writeFileSync(operatorAnswersFile(d.stateDir), `${readFileSync(operatorAnswersFile(d.stateDir), "utf8")}not json\n`);
-	const view = await answers();
-	assert.equal(view.availability, "ok");
-	assert.match(String(view.warning), /^1 unreadable line\(s\)/);
-	assert.deepEqual(view.open.map((o: Json) => o.id), [C, B, A], "open is newest first");
-	const item = view.open.find((o: Json) => o.id === A);
-	assert.deepEqual([item.short.length, item.short.endsWith("…"), item.short.includes("second"), item.answer], [281, true, false, long], "short is the first paragraph, clipped");
-	assert.deepEqual(item.evidence, [{ path: `${d.stateDir}/boards/alpha/index.html`, href: "#reports", read: "/boards/alpha/" }, { path: "/nowhere/else.md", href: null, read: null }]);
-	assert.deepEqual([item.job, item.schedule], [{ id: "cp-demo", href: "#job/cp-demo", read: null }, undefined]);
-	assert.deepEqual(view.open.find((o: Json) => o.id === C).schedule, { schedule_id: "sch-123456", run_id: run, outcome: "partial" });
-	// Once the job's envelope names a readable artifact, the answer links it as a Files path.
-	seedCard(d.stateDir, d.home, "2026-07-01T00:00:00Z");
-	write(join(d.stateDir, "runs", "cp-demo", "envelope.json"), { envelope: { artifact_path: join(d.home, LAYOUT.projects, "demo", "README.md") } });
-	const artifact = `/#files?${new URLSearchParams({ root: "project:demo", path: "README.md" })}`;
-	assert.equal((await answers()).open.find((o: Json) => o.id === A).job.read, artifact);
-
-	// Until the control status answers, the tick reads Checking… and stays disabled.
-	const tab = await d.open("#answers", /^\/api\/answers\/control$/);
-	assert.ok(await tab.find(".answers-control", (el) => el.textContent === "Checking…"));
-	assert.equal(tab.$(`button[aria-label="Acknowledge ${A}"]`)?.hasAttribute("disabled"), true);
-	tab.release();
-	const section = tab.$("#answers")!;
-	assert.equal(section.querySelectorAll("script, [style], [onclick]").length, 0, "no markup, no inline style");
-	const question = tab.$$(".answers-question").find((q) => q.getAttribute("title")?.startsWith("<script>"))!;
-	assert.match(question.textContent ?? "", /^<script>alert/, "the whole question is text and the title; the clamp is CSS");
-	assert.equal(tab.$("details.answers-full")?.hasAttribute("open"), false, "the full answer sits in a closed details");
-	assert.deepEqual(tab.$$(".answers-text a").map((a) => [a.getAttribute("href"), a.getAttribute("target"), a.getAttribute("rel")]), [["https://example.com/a", "_blank", "noopener noreferrer"], ["https://example.org/b", "_blank", "noopener noreferrer"]], "javascript: stays text");
-	assert.equal(tab.$(".answers-header")?.textContent, "Answers to acknowledge3");
-	const evidence = tab.$$(".answers-evidence li");
-	assert.ok(evidence.some((li) => li.querySelector('a[href="#reports"]') && li.querySelector('a[href="/boards/alpha/"]')));
-	assert.ok(evidence.some((li) => li.textContent === "/nowhere/else.md" && !li.querySelector("a")), "an unknown path is plain");
-	assert.deepEqual(tab.$$(".answers-meta a").map((a) => a.getAttribute("href")).filter((h) => !h?.startsWith("#schedules")), ["#job/cp-demo", artifact]);
-	const schedule = tab.$$(".answers-schedule");
-	assert.equal(schedule.length, 1, "a bridge answer shows no schedule");
-	assert.match(schedule[0]!.textContent ?? "", new RegExp(`Schedule result · ${run} · partial`));
-	assert.equal(schedule[0]!.querySelector("a")?.getAttribute("href"), "#schedules");
-	assert.match(tab.$('[role="alert"].answers-warning')?.textContent ?? "", /1 unreadable line/);
-	assert.equal(Boolean(await tab.find(".answers-control", (el) => /^Tick ✓ to acknowledge/.test(el.textContent ?? ""))), true, "ready: Tick ✓ to acknowledge");
-
-	const tick = (id: string) => tab.find(`button[aria-label="Acknowledge ${id}"]`, (b) => !b.hasAttribute("disabled"));
-	tab.click(await tick(A));
-	assert.equal(await until(() => tab.$(`button[aria-label="Acknowledge ${A}"]`) === null, Boolean, "the acked card hides"), true, "the acked card hides");
-	const ackPost = tab.requests.find((r) => r.path === "/api/answers/ack")!;
-	assert.deepEqual([ackPost.method, ackPost.body, ackPost.status, ackPost.headers["x-cp-control-token"]?.length], ["POST", `{"id":"${A}"}`, 202, 64]);
-	assert.match(readFileSync(operatorAnswersFile(d.stateDir), "utf8"), new RegExp(`"type":"acked","by":"viewer","id":"${A}"`));
-
-	// Acknowledged elsewhere: the tick fails with the server's reason; a fresh load shows both in read-only history.
-	await d.get("/api/answers/ack", post(d.origin, String((await d.get("/api/answers/control")).body.token), { id: B }));
-	tab.click(await tick(B));
-	assert.equal(Boolean(await tab.find(".answers-failed", (el) => /Failed: .*already acknowledged/.test(el.textContent ?? ""))), true, "Failed: … already acknowledged");
-	const fresh = await tab.reopen();
-	assert.equal(Boolean(await fresh.find(".answers-history summary", (s) => /Acknowledged · 2/.test(s.textContent ?? ""))), true, "Acknowledged · 2 in history");
-	assert.equal(fresh.$$(".answers-history button").length, 0, "history is read-only");
-	write(controlConfigFile(d.stateDir), '{"enabled": false, "reason": "opt-out"}');
-	const off = await fresh.reopen();
-	assert.equal(Boolean(await off.find("button.answers-ack", (b) => b.hasAttribute("disabled"))), true, "control off: the tick is disabled");
-	assert.equal(Boolean(await off.find(".answers-control", (el) => /^Dashboard control is off/.test(el.textContent ?? ""))), true, "Dashboard control is off");
-	assert.equal((await answers()).open_count, 1, "control off: the list still renders, read-only");
-	assert.ok(off.$('button[aria-label="Acknowledge ans-cccccccccccc"]'), "the open card stays listed");
-
-	rmSync(operatorAnswersFile(d.stateDir));
-	mkdirSync(operatorAnswersFile(d.stateDir));
-	assert.deepEqual(await answers(), { availability: "unavailable", open: [], open_count: null, history: [], history_total: null, warning: "Answers unavailable" });
-	const broken = await off.reopen();
-	await broken.waitText(/Answers unavailable/);
-	assert.doesNotMatch(broken.text(), /No answers waiting/, "an unreadable journal never claims an empty queue");
-});
-
-test("P17-answers-quiet: an empty, history-only or just-cleared queue collapses to one quiet line; a warning or an unrendered pending answer never does", { timeout: 240_000 }, async (t) => {
-	const NOW = "2026-07-02T00:00:00Z";
-	const d = await dashboard(t, { at: NOW });
-	const journal = operatorAnswersFile(d.stateDir);
-	const summary = (tab: Tab) => tab.$(".answers-quiet > summary")?.textContent ?? null;
-	write(journal, "");
-	let tab = await d.open("#answers");
-	await tab.find(".answers-quiet");
-	assert.equal(summary(tab), "No answers waiting · 0 acknowledged");
-	assert.equal(tab.$(".answers-quiet")!.hasAttribute("open"), false, "collapsed");
-	assert.deepEqual([tab.$(".answers-header") === null, tab.$(".answers-control") === null, tab.$(".answers-empty")?.textContent], [true, true, "No acknowledged answers yet"]);
-
-	write(journal, "not json\n");
-	tab = await tab.reopen();
-	await tab.find('[role="alert"].answers-warning');
-	assert.equal(tab.$(".answers-quiet") === null, true);
-	assert.doesNotMatch(tab.text(), /No answers waiting/, "partial data cannot claim an empty queue");
-
-	write(journal, "");
-	appendAnswerLine(d.stateDir, posted(A, "2026-07-01T00:00:00Z"));
-	appendAnswerLine(d.stateDir, { type: "acked", by: "viewer", id: A, at: "2026-07-01T00:00:01Z", peer: null });
-	tab = await tab.reopen();
-	await tab.find(".answers-quiet");
-	assert.equal(summary(tab), "No answers waiting · 1 acknowledged");
-	assert.ok(tab.$(".answers-quiet > article .answers-text"), "history is one disclosure away");
-	assert.equal(tab.$$(".answers-quiet button").length, 0);
-
-	// The last tick compacts the section at once, before any refresh.
-	appendAnswerLine(d.stateDir, posted(B, "2026-07-01T00:00:02Z"));
-	tab = await tab.reopen();
-	tab.click(await tab.find(`button[aria-label="Acknowledge ${B}"]`, (b) => !b.hasAttribute("disabled")));
-	await tab.find(".answers-quiet");
-	assert.equal(summary(tab), "No answers waiting · 1 acknowledged");
-
-	// 101 pending: the viewer sends a window of 100. Acking all of it leaves the 101st counted, never "No answers waiting".
-	write(journal, jsonl(Array.from({ length: 101 }, (_, n) => posted(`ans-${n.toString(16).padStart(12, "0")}`, new Date(Date.parse("2026-07-01T00:00:00Z") + n * 1000).toISOString().replace(".000Z", "Z")))));
-	tab = await tab.reopen();
-	await tab.find(".answers-ack", (b) => !b.hasAttribute("disabled"));
-	const count = () => tab.$(".answers-count")?.textContent;
-	assert.deepEqual([count(), tab.$$(".answers-ack").length], ["101", 100]);
-	let clock = Date.parse(NOW);
-	for (let n = 0; n < 100; n++) {
-		if (n % 10 === 0) d.pin(new Date((clock += 61_000)).toISOString()); // stay under 20 acks per 60 s
-		const tick = (await tab.find(".answers-ack", (b) => !b.hasAttribute("disabled")));
-		const label = tick.getAttribute("aria-label")!;
-		tab.click(tick);
-		await until(() => tab.$(`button[aria-label="${label}"]`), (b) => b === null, `${label} hides`);
-		if (n === 0) assert.equal(count(), "100", "one tick of 101");
-	}
-	assert.equal(count(), "1");
-	assert.equal(tab.$(".answers-quiet") === null, true);
-	assert.doesNotMatch(tab.text(), /No answers waiting/, "acking the rendered window cannot hide the unrendered answer");
-	assert.equal(lines(journal).filter((l) => l.type === "acked").length, 100);
+	assert.equal((await tab.find("h1")).getAttribute("title"), "Reports");
+	assert.equal(tab.$("#answers"), null, "no Answers section anywhere");
 });
 
 test("P17-decision-card: an Awaiting card answers through the operator session's control; down, it stays visible and disabled with the reason", { timeout: 180_000 }, async (t) => {

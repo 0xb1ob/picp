@@ -578,10 +578,10 @@ test("decisions: a parent pi migrates the legacy journal at startup, then delive
 	const viewer = createViewer({ home: home.path, stateDir, host: "127.0.0.1", port: 0, log: () => {} });
 	await new Promise<void>((resolve) => viewer.listen(0, "127.0.0.1", resolve));
 	t.after(() => { viewer.close(); scratch.cleanup(); home.cleanup(); });
-	const answersView = async () => {
+	const decisionsPage = async () => {
 		const res = await fetch(`http://127.0.0.1:${(viewer.address() as AddressInfo).port}/api/decisions`);
 		assert.equal(res.status, 200);
-		return (await res.json() as DecisionsResponse).answers;
+		return await res.json() as DecisionsResponse;
 	};
 
 	const runs = new ScheduleRunStore({ home: home.path });
@@ -590,14 +590,6 @@ test("decisions: a parent pi migrates the legacy journal at startup, then delive
 	const long = await pendingRun(runs, 2, "p10b-long", `token ${ghShaped} here\n\n${"x".repeat(3940)}`);
 	const refused = await pendingRun(runs, 3, "p10b-refuse", `${keyHeader}\nMIIE`);
 	mkdirSync(dirname(live), { recursive: true });
-	// Until PR3 the viewer still folds a live journal: an ack sets acked_at once, unknown acks and garbage skip.
-	assert.equal((await answersView()).availability, "missing", "no journal yet reads as missing, not unavailable");
-	const unknownAck = JSON.stringify({ type: "acked", by: "viewer", id: "ans-000000000000", at: "2026-01-05T00:00:00Z", peer: null });
-	writeFileSync(live, `${LEGACY}${unknownAck}\nnot json\n{"type":"posted"`);
-	const folded = await answersView();
-	assert.deepEqual(folded.history.map((item) => [item.id, item.acked_at]), [["ans-aaaaaaaaaaaa", "2026-01-03T00:00:00Z"]], "an ack sets acked_at once");
-	assert.deepEqual(folded.open.map((item) => [item.id, item.schedule?.run_id]), [["ans-bbbbbbbbbbbb", "run-1"]]);
-	assert.equal(folded.warning, "2 unreadable line(s) in state/operator/answers.jsonl skipped", "unknown ack and garbage skip; the torn tail is ignored");
 	writeFileSync(live, LEGACY);
 	initPush({ dataDir: join(home.path, LAYOUT.data), origin: "https://cp.example.test" });
 	const ask = new OperatorAsks(join(stateDir, "operator", "asks.jsonl")).open({ project: "demo", question: "A or B?", options: [{ label: "a", consequence: "b" }], recommendation: "a" });
@@ -625,6 +617,5 @@ test("decisions: a parent pi migrates the legacy journal at startup, then delive
 	assert.equal(existsSync(join(stateDir, "boards", responseReportSlug("schedule:p10b-refuse"))), false, "a refused card publishes nothing");
 	assert.deepEqual(boardsOf(home.path).length, 3, "two legacy reports and the long card");
 	assert.deepEqual(pushed!.items.map((item) => item.id), [ask.id], "the push sweep baselines the open ask only, never an answer");
-	const view = await answersView();
-	assert.deepEqual([view.availability, view.open, view.history], ["missing", [], []], "no new acknowledgement data after the switchover");
+	assert.equal("answers" in await decisionsPage(), false, "M2 PR3: the Decisions page carries no answers list");
 });

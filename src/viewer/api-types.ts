@@ -47,8 +47,6 @@ export interface SessionEntry {
  collapsed?: "superseded" | "hidden";
  /** A cp-bridge notice parsed off its first line (slice F). */
  bridge?: {kind:string; job:string|null; id:string|null; receipt:string|null} | null;
- /** Full transcript: the `ans-` id a `cp_parent answer` call posted (or, on a duplicate, the first one it names). */
- answer_id?: string;
  /** The assistant message's recorded `usage.cost.total`, on its first entry (Stats Parent panel). */
  cost_usd?: number;
 }
@@ -298,7 +296,6 @@ export interface HandoffEvidence { kind: "job" | "project" | "repo"; value: stri
 export interface HandoffPointer {
  root: "handoffs" | "compact" | "configured"; name: string; path: string; href: string; modified_at: string; bytes: number; truncated: boolean;
  evidence: HandoffEvidence[]; evidence_omitted: number;
- answers: {id: string; project: string; job_id: string | null; posted_at: string}[];
  reports: {job_id: string; href: string}[];
 }
 /** `GET /api/handoffs[?project=]` (docs/viewer-app.md): handoffs grouped by project at read time, newest first. */
@@ -318,7 +315,7 @@ export interface ScheduleRunView {
 	status: "open" | "closed"; jobs_open: number; jobs_total: number; job_ids: string[];
 	result: { kind: "board" | "pull_request" | "answer" | "report" | "branch" | "job"; job_id: string; href: string } | null;
 	/** A durable run's result card: pending with its last error, or delivered inline (headline) or as a report (href). */
-	card?: { state: "posted" | "pending"; answer_id: string | null; report_href: string | null; headline: string; error: string | null };
+	card?: { state: "posted" | "pending"; report_href: string | null; headline: string; error: string | null };
 }
 /** One ledger job a schedule fired (labelled `schedule:<id>`), newest first. */
 export interface ScheduleHistoryJob {
@@ -410,27 +407,10 @@ export interface DecisionScreenResponse {
 }
 export interface AwaitingResponse extends DecisionScreenResponse { items: AwaitingDetail[] }
 export interface DecidedResponse extends DecisionScreenResponse { items: DecisionDetail[] }
-/** The one Decisions page (dashboard audit P4 #24): Awaiting's asks as `items`, then the Decided log. */
-/** One answer the operator asked for (cp-mxk4): `short` is its first paragraph, `evidence`/`links` only what `evidenceLink` resolves. */
-export interface AnswerItem {
- id: string; project: string; question: string; answer: string; short: string; posted_at: string; acked_at: string | null;
- job: {id: string; href: string; read: string | null} | null;
- evidence: AwaitingDetail["evidence"];
- links: Record<string, string>;
- /** A schedule run's result card (src/schedule-results.ts), never an operator question; absent on a bridge answer. */
- schedule?: {schedule_id: string; run_id: string; outcome: string};
-}
-export interface AnswersView {
- availability: SourceAvailability; open: AnswerItem[]; open_count: number | null;
- history: AnswerItem[]; history_total: number | null; warning: string | null;
-}
-/** `GET /api/answers/control` (--require-tailnet only): the ack CSRF token only while control is on. */
-export interface AnswersControlStatusResponse { generated_at: string; enabled: boolean; reason: string | null; token: string | null }
-/** `POST /api/answers/ack` accepted: 202 once its `acked` line is on disk. */
-export interface AnswerAckResponse { id: string; state: "acked"; acked_at: string }
 /** `GET /api/skills` (--require-tailnet only): installed pi skills by name; never a SKILL.md body or a directory path. */
 export interface SkillsResponse { generated_at: string; skills: { name: string; description: string; source: "agent" | "home" }[]; skipped: { name: string; reason: string }[]; omitted: number }
-export interface DecisionsResponse extends AwaitingResponse { decided: DecisionDetail[]; answers: AnswersView }
+/** The one Decisions page (dashboard audit P4 #24): Awaiting's asks as `items`, then the Decided log. */
+export interface DecisionsResponse extends AwaitingResponse { decided: DecisionDetail[] }
 /** `ci` in the native vocabulary (green, failed, in_progress); `url` only a plain https link. */
 export interface ForwardedCi { ci: string; observed_at: string; url: string | null }
 export interface FlightJob {

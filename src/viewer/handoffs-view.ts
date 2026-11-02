@@ -6,7 +6,6 @@
 import { closeSync, openSync, readdirSync, readSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import type { HandoffEvidence, HandoffPointer, HandoffsResponse } from "./api-types.ts";
-import { readAnswers } from "./control-files.ts";
 import { reportFile } from "./job-report.ts";
 import { objectList, strings } from "./overview-read.ts";
 import { projectRepos } from "./pr-chips.ts";
@@ -73,8 +72,6 @@ export function handoffIndex(state: ViewerState): Index & { jobs: Map<HandoffPoi
 	if (registry.availability === "unavailable") warnings.push({ section: "projects", message: "unavailable: project names and repository URLs are not matched" });
 	const names = new Set(registry.value.map((project) => str(project.name)).filter((name): name is string => !!name && PROJECT.test(name)));
 	const repos = [...projectRepos(state)].map(([name, repo]) => [name, `${repo.web_base_url}/${repo.path}`.toLowerCase()] as const);
-	const answers = readAnswers(state.stateDir);
-	if (answers.error) warnings.push({ section: "answers", message: `unavailable, not joined: ${answers.error}` });
 
 	const rows: Index["sources"] = [];
 	const found: Found[] = [];
@@ -129,13 +126,10 @@ export function handoffIndex(state: ViewerState): Index & { jobs: Map<HandoffPoi
 			if (reports.length >= HANDOFF_LIMITS.joins) break;
 			if (reportFile(state, id)) reports.push({ job_id: id, href: `#report/${id}` });
 		}
-		const joined = answers.answers.filter((answer) => (answer.job_id !== null && named.has(answer.job_id))
-			|| answer.evidence_paths.some((path) => [file.path, file.real].includes(resolve(state.home, path))));
 		const pointer: HandoffPointer = {
 			root: file.root, name: file.name, path: file.path, href: `/api/handoffs/file/${file.root}/${encodeURIComponent(file.name)}`,
 			modified_at: new Date(file.mtime).toISOString(), bytes: file.size, truncated: file.size > want,
 			evidence: all.slice(0, HANDOFF_LIMITS.evidence), evidence_omitted: Math.max(0, all.length - HANDOFF_LIMITS.evidence),
-			answers: joined.slice(-HANDOFF_LIMITS.joins).reverse().map((answer) => ({ id: answer.id, project: answer.project, job_id: answer.job_id, posted_at: answer.posted_at })),
 			reports,
 		};
 		jobIds.set(pointer, [...named]);

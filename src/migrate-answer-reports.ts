@@ -123,7 +123,8 @@ function migrate(home: string, live: string, archive: string): AnswerMigration {
 	if (verified !== records.length) fail(`verified ${verified} of ${records.length} reports`);
 	step("recheck", () => { if (!readFileSync(live).equals(snapshot)) throw new Error("the journal changed while migrating"); });
 	if (present(archive)) throw conflict();
-	// shortcut: renameSync replaces an archive that appears after the recheck; the drained writer boundary rules that out.
+	// shortcut: Node has no RENAME_NOREPLACE, so an archive appearing after this check is replaced; accepted by decision.
+	// The fail-closed both-files gate above covers every observed state; a racing writer is drained before migration.
 	try {
 		renameSync(live, archive);
 	} catch (error) {
