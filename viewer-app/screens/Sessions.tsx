@@ -235,7 +235,7 @@ function openFile(id: string) {
  query.set("view","you"); query.set("transcript","1"); query.set("session",id);
  window.location.hash=`#sessions?${query}`;
 }
-function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTools,state}: {data:SessionsResponse;control:ControlView | undefined;context:ContextUsage | null | undefined;toolCalls:number;showTools:boolean;hiddenTools:number;onTools:()=>void;state:{text:string;dot:string}}) {
+function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTools,state,conversations}: {data:SessionsResponse;control:ControlView | undefined;context:ContextUsage | null | undefined;toolCalls:number;showTools:boolean;hiddenTools:number;onTools:()=>void;state:{text:string;dot:string};conversations:ComponentChild}) {
  const shell = useContext(ShellContext);
  const composer = data.transcript === true && control;
  const files = data.operator_sessions ?? [];
@@ -243,6 +243,7 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
  const alert = !!shell.version && badgeView(shell.version, null).level === "alert";
  return <header class="session-bar">
   <a class="session-bar-icon" href="#overview" aria-label="Back to Overview"><Icon name="back"/></a>
+  {conversations}
   {data.selected !== "workers" && <span class={data.selected === "you" ? "session-avatar session-avatar-bot" : "session-avatar"} aria-hidden="true">{data.selected === "you" ? "OP" : "CP"}</span>}
   <div class="session-bar-id">
    <strong>{data.selected === "you" && data.transcript === true ? "Operator" : data.title}</strong>
@@ -317,7 +318,6 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  },[]);
  // Only the operator Full transcript carries project tags; controls, pending sends and decisions keep the full data.
  const filterable=data.selected === "you" && data.transcript === true, selection=filterable ? asked : null;
- const workspace=useWorkspaceSurfaces(filterable,selection);
  const picked=selectEntries(data.entries,selection), shown=picked.entries;
  const names=filterable ? data.entries.flatMap(e=>e.projects ?? []) : [];
  // A local-day separator opens each new day; one pending send queued past local midnight opens its own day.
@@ -353,6 +353,11 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const replyAt=replies ? shown.findLast(e=>!isOwn(e) && (isBubble(e) || e.kind === "ask"))?.id : undefined;
  const state=headerState(data,control?.status,history);
  const shell=useContext(ShellContext);
+ /** Chats: the sidebar from 900 px; the phone's Conversations drawer passes an Operator href keeping the selection. */
+ const chats=(you:string)=><><section aria-label="Operator">{row(you,"Operator",history ? "Historical transcript" : preview || modelText(data.operator_context ?? {}),data.selected === "you",{avatar:"OP",at:last?.at,context:preview ? null : data.operator_context,preview:!!preview})}</section>
+  <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:workerDot(w),at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section></>;
+ const workspace=useWorkspaceSurfaces(filterable,selection,{session:data.operator_session ?? null,asks:open,live:data.workers.filter(countedLive),chats,
+  onAnswer:()=>{setPinOpen(true); remember(PINNED_KEY,"1","decisions bar");}});
  return <div class="sessions">
   {/* The ⋮ menu carries the transcript file and the tool-call toggle; the phone's ⋯ sheet keeps its own. */}
   <PageHeader title="Chats" menu={(files.length > 0 && data.transcript === true) || toolCalls > 0 || data.selected === "parent" ? <div class="session-menu">
@@ -362,11 +367,10 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} aria-label={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} title={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} onClick={toggleTools}>Tools {toolCalls}</button>}
   </div> : undefined}/>
   <aside class="session-sidebar" aria-label="Session streams">
-   <section aria-label="Operator">{row(sessionHref("you"),"Operator",history ? "Historical transcript" : preview || modelText(data.operator_context ?? {}),data.selected === "you",{avatar:"OP",at:last?.at,context:preview ? null : data.operator_context,preview:!!preview})}</section>
-   <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:workerDot(w),at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section>
+   {chats(sessionHref("you"))}
   </aside>
   <div class="session-panel">
-   <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools} state={state}/>
+   <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools} state={state} conversations={workspace.conversations}/>
    <header class="session-heading">{data.selected !== "workers" && <span class={data.selected === "you" ? "session-avatar session-avatar-bot" : "session-avatar"} aria-hidden="true">{data.selected === "you" ? "OP" : "CP"}</span>}
     <div><strong>{data.selected === "you" && data.transcript === true ? "Operator" : data.title}</strong><span class="session-heading-state"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><CtxPct usage={context} label/></span></div>
     {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}</header>

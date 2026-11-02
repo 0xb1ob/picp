@@ -61,6 +61,9 @@ const KEEP = [
  /^\.session-notice \.session-awaiting(?![\w-])/,
  /^\.decision-overdue(?![\w-])/,
  /^\.decisions-handled-overdue(?![\w-])/,
+ /^\.workspace-badge-ask(?![\w-])/,
+ /^\.workspace-context-asked(?![\w-])/,
+ /^\.workspace-context-ask(?![\w-])/,
  /^\.job-ci-red(?![\w-])/,
  /^\.job-badge\.job-ci-red(?![\w-])/,
  /^\.job-event-red(?![\w-])/,
@@ -94,6 +97,8 @@ test("amber and coral only on open human decisions and CI that is red", () => {
  assert.equal(allowed(".job-failure"), false);
  assert.equal(allowed(".job-ci-red > span"), true);
  assert.equal(allowed(".overview-dot-ci-red"), true);
+ assert.equal(allowed(".workspace-badge"), false);
+ assert.equal(allowed(".workspace-context"), false);
 });
 
 test("Needs-you attention comes only from an available open ask", async t => {

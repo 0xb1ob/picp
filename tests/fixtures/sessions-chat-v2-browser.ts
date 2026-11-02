@@ -1,7 +1,7 @@
 /**
  * Sessions chat v2 browser capture: the production app on loopback (production CSP, synthetic APIs), isolated headless
  * Chrome over CDP, PNGs plus manifest.json. `m3-transcript` serves the other screens' APIs from the real viewer.
- * `--stage pr1|pr2|pr3|pr4|pr5|chips|rollup|notice|m3-transcript|m3-jobs [--chrome /usr/bin/google-chrome] --out <dir>`
+ * `--stage pr1|pr2|pr3|pr4|pr5|chips|rollup|notice|m3-transcript|m3-jobs|m3-context [--chrome <path>] --out <dir>`
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,7 +17,7 @@ import { buildViewer } from "../../src/viewer/build.ts";
 import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -77,7 +77,7 @@ const asked = (id: string, question: string) => ({ id, project: "picp", question
 	mandate_objective: null, jobs: [], escalation: null, evidence: [] }) as unknown as NonNullable<SessionsResponse["open_asks"]>[number];
 const askCard = (ask: ReturnType<typeof asked>, at: string): SessionEntry => ({ ...say(`c-${ask.id}`, at, "Operator → you", ask.question), kind: "ask", ask_id: ask.id,
 	ask: { id: ask.id, question: ask.question, options: ask.options, recommendation: ask.recommendation, state: "open", answer: null, answered_at: null, reason: null } });
-if (args.stage === "pr4" || args.stage === "pr5") {
+if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context") {
 	const ask = asked("ask-pr4a", "PR #321 is green on its pushed head. Merge it, or hold it for another review?");
 	sessions.entries = [...entries, askCard(ask, "2026-10-15T08:04:40Z")];
 	sessions.open_asks = [ask];
@@ -431,6 +431,20 @@ try {
 		];
 		for (const [name, width, height, steps] of shots3) await capture(`m3-jobs-${name}`, transcript, width, height, "dark", loaded, "bottom", [...steps, fits]);
 		if (posts.length) throw new Error(`m3-jobs sent ${posts.join(", ")}: the drawer and pane only read`);
+	}
+	if (stage === "m3-context") {
+		// Real clicks open the context (inspector from 900 px, sheet below) and the phone's Conversations drawer.
+		const asked = `!!document.querySelector(".workspace-context .workspace-context-ask")`;
+		const context: Step = [`document.querySelector(".workspace-context-open").click()`, asked];
+		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `!!document.querySelector(".workspace-sessions[open] .session-choice")`];
+		const fits: Step = ["true", `[...document.querySelectorAll(".workspace-close, .workspace-context-open, .workspace-sessions-open, .workspace-context button, .workspace-context a, .workspace-sessions .session-choice")]
+			.filter(e => e.getClientRects().length).every(e => { const r = e.getBoundingClientRect(); return r.left >= -0.5 && r.right <= innerWidth + 0.5; })`];
+		const shots3: [string, number, number, Step[]][] = [
+			["inspector-desktop-dark-1440x1000", 1440, 1000, [context]], ["inspector-desktop-dark-900x1000", 900, 1000, [context]],
+			["sheet-phone-dark-899x1000", 899, 1000, [context]], ["sheet-phone-dark-390x844", 390, 844, [context]], ["conversations-phone-dark-390x844", 390, 844, [drawer]],
+		];
+		for (const [name, width, height, steps] of shots3) await capture(`m3-context-${name}`, transcript, width, height, "dark", loaded, "bottom", [...steps, fits]);
+		if (posts.length) throw new Error(`m3-context sent ${posts.join(", ")}: the context and drawer only read`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);
