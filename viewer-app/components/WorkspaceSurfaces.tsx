@@ -81,7 +81,7 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
   trigger: <>
    <button type="button" class="workspace-jobs-open" aria-haspopup="dialog" aria-expanded={drawer} title="Jobs (Ctrl/⌘ J)" onClick={e => openDrawer(e.currentTarget)}>Jobs<kbd>⌘J</kbd></button>
    <button ref={toggle} type="button" class="workspace-context-open" aria-expanded={panel !== null} aria-label={asked ? `Context, ${asked} asked you` : "Context"}
-    onClick={e => { if (panel) closePanel(); else if (nowWide()) setPanel("inspector"); else { from(e.currentTarget); setPanel("sheet"); } }}>Context{asked > 0 && <span class="workspace-badge" aria-hidden="true">{asked}</span>}</button>
+    onClick={e => { if (panel) closePanel(); else if (nowWide()) setPanel("inspector"); else { from(e.currentTarget); setPanel("sheet"); } }}>Context{asked > 0 && <span class="workspace-badge workspace-badge-ask" aria-hidden="true">{asked}</span>}</button>
   </>,
   surfaces: <>
    {job && <JobPane key={job} id={job} onClose={closeJob}/>}

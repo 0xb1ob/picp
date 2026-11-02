@@ -62,6 +62,7 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	tab.type(field as unknown as Element, "KEEP-DRAFT");
 	const toggle = await tab.find(".session-filter > .workspace-context-open", (b) => b.getAttribute("aria-label") === "Context, 1 asked you");
 	assert.deepEqual([toggle.getAttribute("aria-expanded"), tab.$(".workspace-context"), tab.$(".session-pinned-open")], ["false", null, null], "closed until asked");
+	assert.equal(toggle.querySelector(".workspace-badge.workspace-badge-ask")?.textContent, "1", "an open ask paints the count");
 
 	tab.click(toggle);
 	const panel = await tab.find(".sessions > aside.workspace-context");
@@ -95,6 +96,13 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	tab.click((await tab.find(".workspace-context-jobs")));
 	await tab.find("dialog.workspace-jobs[open]");
 	assert.ok(tab.$("aside.workspace-context"), "All jobs opens the Jobs drawer over the inspector");
+	// Negative control: with no open ask left, nothing amber remains (no badge, no asked class, no ask card).
+	const asks = new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl"));
+	for (const ask of asks.open()) asks.withdraw(ask.id, "fixture");
+	tab.refresh();
+	await tab.find(".workspace-context-open", (b) => b.getAttribute("aria-label") === "Context");
+	assert.deepEqual([tab.$(".workspace-badge"), tab.$(".workspace-context-asked"), tab.$(".workspace-context-ask"), texts(tab, "aside.workspace-context h3")[0]],
+		[null, null, null, "Asked you · 0"], "no open ask: no badge and no amber class");
 });
 
 test("M3-context-phone: the context sheet and the Conversations drawer are modal, close on Escape back to their button, keep the selection and drop on leaving", { timeout: 180_000 }, async (t) => {
