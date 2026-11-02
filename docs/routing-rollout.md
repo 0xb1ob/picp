@@ -127,7 +127,7 @@ touched. Adopting the new matrix is therefore an explicit operator step.
 4. **Validate before the first dispatch.**
    - `/doctor` — `config.routing*` and `models.*` green. This is the live
      registry-and-auth read: it proves, on this machine, which providers are
-     actually authenticated and that every route resolves. A route
+     actually authenticated and that every rubric route resolves. A route
      carried by a fallback reads `ok` with `fallback from <preferred>`; a route
      with no usable candidate is an `error` naming each candidate and its reason.
    - `cp_dispatch` with `dry_run: true` over a representative grid: a planner
@@ -169,5 +169,5 @@ its conversation or thinking state. The next spawn re-scores independently.
 - It does not reintroduce the gate's "retry on a different model" rung:
   fallback is resolved once before the spawn. A retry stays bounded; a new
   attempt re-scores before its spawn.
-- It does not let a fallback change the effort, cross from one rubric row to
-  another, or rescue an explicit override.
+- It does not let a fallback change the effort, cross from a rubric row to a
+  row, or rescue an explicit override.
