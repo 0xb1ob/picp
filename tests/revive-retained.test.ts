@@ -14,7 +14,7 @@ import { HeldRelease } from "../src/held-release.ts";
 import { Reviver } from "../src/revive.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { WorkerManager } from "../src/worker-manager.ts";
-import { createScratchHome, fakeWorker, fakeWorkerManager, readRunEvents, REPO_ROOT, WORKER_REPORTER_EXTENSION } from "./harness/index.ts";
+import { createScratchHome, fakeWorker, fakeWorkerManager, readRunEvents, REPO_ROOT, routeNamed, WORKER_REPORTER_EXTENSION } from "./harness/index.ts";
 
 const PROFILES_DIR = join(REPO_ROOT, "profiles");
 
@@ -62,6 +62,7 @@ test("revive() writes the worker_revived marker before it tees a single event (c
 	// A fake child emits on registration, which is the tightest version of that
 	// race a real buffered stdout chunk can produce.
 	const home = createScratchHome();
+	routeNamed(home.path, ["mock/mock-model"]);
 	t.after(() => home.cleanup());
 	const fleet = new FleetStore({ home: home.path });
 	const runs = new RunRegistry(home.path);
@@ -188,6 +189,7 @@ async function addFailed(home: string, fleet: FleetStore, jobId: string, overrid
 
 test("continueFailed: a spawn that fails keeps the failure and the lease", async (t) => {
 	const home = createScratchHome();
+	routeNamed(home.path, ["mock/mock-model"]);
 	t.after(() => home.cleanup());
 	const fleet = new FleetStore({ home: home.path });
 	const runs = new RunRegistry(home.path);
@@ -212,6 +214,7 @@ test("continueFailed: a spawn that fails keeps the failure and the lease", async
 
 async function capBench(t: { after(fn: () => void | Promise<void>): void }) {
 	const home = createScratchHome();
+	routeNamed(home.path, ["mock/mock-model"]);
 	const fleet = new FleetStore({ home: home.path });
 	const runs = new RunRegistry(home.path);
 	const workers = fakeWorkerManager(home.path, 2);

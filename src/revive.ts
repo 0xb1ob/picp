@@ -36,7 +36,7 @@ import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, path
 import { type FleetStore, isPidAlive } from "./fleet.ts";
 import { loadProfile } from "./profiles.ts";
 import { requireRouted } from "./routed-models.ts";
-import { loadRoutingConfig } from "./routing.ts";
+import { loadRoutingConfig, RoutingError } from "./routing.ts";
 import type { RunRegistry } from "./runs.ts";
 import { type CarriedBounds, resolveJobHardBounds } from "./bounds.ts";
 import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts";
@@ -487,7 +487,8 @@ export class Reviver {
 		try {
 			requireRouted(loadRoutingConfig(this.#options.home), record.worker.model, `the respawn of ${jobId} on its recorded model`);
 		} catch (error) {
-			return refuse(jobId, "model_unrouted", `${(error as Error).message} Nothing was spawned: add the model to a rubric row and retry, or tear the job down and re-dispatch.`);
+			if (!(error instanceof RoutingError && error.refusal === "unrouted")) throw error;
+			return refuse(jobId, "model_unrouted", `${error.message} Nothing was spawned: add the model to a rubric row and retry, or tear the job down and re-dispatch.`);
 		}
 
 		// Operator-named skills are re-resolved by name: a directory is never trusted from the record.

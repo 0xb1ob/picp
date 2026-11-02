@@ -36,7 +36,7 @@ export function resolveExecution(policy: NativeSchedulePolicy, overrides: RunOve
 	};
 }
 
-/** The run's models (its override, else the policy's pins) must be ones data/routing.json routes; checked before any job. */
+/** The run's override, else the policy's pins, must be models data/routing.json routes; checked before any job. */
 function unroutedRun(policy: NativeSchedulePolicy, execution: RunExecution, routing: () => RoutingConfig): Refusal | undefined {
 	const pins = policy.model_policy.mode === "pinned" && policy.recipe.script_path === undefined ? policy.model_policy.by_role : {};
 	const named = execution.effective.model

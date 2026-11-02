@@ -230,6 +230,9 @@ test("P8d revive plan: cp_revive over seeded fleet records refuses each unsafe s
 	assert.match(unrouted.ok ? "" : unrouted.message, /the respawn of cp-unrouted on its recorded model names mock\/unrouted, which data\/routing\.json does not route.*Nothing was spawned/s);
 	await assert.rejects(post.revive("cp-unrouted"), (error: unknown) => error instanceof ReviveError && /model_unrouted/.test(error.message));
 	assert.deepEqual([new FleetStore({ home: home.path }).require("cp-unrouted"), post.manager.get("cp-unrouted")], [unroutedBefore, undefined]);
+	// An unreadable routing.json is its own error, never mislabelled model_unrouted.
+	writeFileSync(join(home.path, LAYOUT.routingFile), "{ not json");
+	await assert.rejects(post.revivePlan("cp-unrouted"), (error: unknown) => !(error instanceof ReviveError) && /routing\.json is not valid JSON/.test(String(error)));
 });
 
 interface Bench {
@@ -416,7 +419,7 @@ test("P8d recovery: a bound redispatches into the same worktree with its evidenc
 	assert.equal(f.provider.requests("dies").length, 2);
 });
 
-test("P8d recovery refusals: a tool loop escalates without a revive, a policy-blocked session spends its attempt and escalates, a redispatch whose skill vanished is announced once, and one on an unrouted model is refused", { skip: SKIP, timeout: 180_000 }, async (t) => {
+test("P8d recovery refusals: a tool loop escalates without a revive, a policy-blocked session spends its attempt and escalates, and a redispatch whose skill vanished is announced once", { skip: SKIP, timeout: 180_000 }, async (t) => {
 	const f = await bench(t);
 	const [loop, blocked, skilled] = [await f.job("loop"), await f.job("blocked"), await f.job("skilled")];
 	await f.dispatch(loop, f.script("loop", [...Array.from({ length: 6 }, () => bash("echo same")), bash("sleep 20"), { kind: "hang" }]));
@@ -453,9 +456,12 @@ test("P8d recovery refusals: a tool loop escalates without a revive, a policy-bl
 	assert.equal(bound().length, 1, "announced once, never a preview");
 	assert.equal(f.escalations(skilled).length, 1);
 	assert.equal(f.post.manager.get(skilled), undefined, "nothing spawned");
+});
 
-	// P6 (R1 PR2): the operator drops a live worker's row; its bound's redispatch is refused, never respawned on it.
-	// Negative control: without the recovery.ts check, the wake-up reports a redispatch instead.
+// P6 (R1 PR2): the operator drops a live worker's row; its bound's redispatch is refused, never respawned on it.
+// Negative control: without the recovery.ts check, the wake-up reports a redispatch instead.
+test("P6 unrouted redispatch: a bound whose recorded model routing.json no longer routes is refused, nothing respawned", { skip: SKIP, timeout: 120_000 }, async (t) => {
+	const f = await bench(t);
 	const dropped = await f.job("dropped");
 	let unroute = (): void => {};
 	const unrouted = new Promise<void>((resolve) => (unroute = resolve));

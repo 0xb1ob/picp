@@ -11,7 +11,7 @@ import { Reviver } from "../src/revive.ts";
 import { RunRegistry } from "../src/runs.ts";
 import { WorkerManager } from "../src/worker-manager.ts";
 import type { WorkerProcess } from "../src/worker-process.ts";
-import { createScratchHome, REPO_ROOT, WORKER_REPORTER_EXTENSION } from "./harness/index.ts";
+import { createScratchHome, REPO_ROOT, routeNamed, WORKER_REPORTER_EXTENSION } from "./harness/index.ts";
 
 const PROFILES_DIR = join(REPO_ROOT, "profiles");
 const JOB_ID = "cp-503";
@@ -56,6 +56,7 @@ function spawnInto(manager: WorkerManager, record: FleetRecord, runs: RunRegistr
 
 async function setup(t: { after(fn: () => void | Promise<void>): void }) {
 	const home = createScratchHome();
+	routeNamed(home.path, ["mock/mock-model"]);
 	t.after(() => home.cleanup());
 	const fleet = new FleetStore({ home: home.path });
 	const runs = new RunRegistry(home.path);
