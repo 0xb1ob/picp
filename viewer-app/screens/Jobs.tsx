@@ -51,7 +51,7 @@ function DoneGroup({name, items, open}: {name: string; items: ViewerJob[]; open:
 }
 /** jobs-view.ts's bucket for a job no fleet record or ledger label names: untagged, never a project. */
 const UNASSIGNED = "Unassigned";
-const tagOf = (name: string) => name === UNASSIGNED ? null : name;
+export const tagOf = (name: string) => name === UNASSIGNED ? null : name;
 export function Jobs({data:all,selection=null}:{data:JobsResponse;selection?:ProjectSelection}) {
  const [filter,setFilter]=useState("all");
  const [open,setOpen]=useState<Record<string, boolean>>({});

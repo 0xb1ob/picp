@@ -628,7 +628,21 @@ light-preference and dark-preference captures and `manifest.json`; `pr1` adds an
 notice opened alone, tools shown, and a done job's Transcript tab reached through the card's link. From `pr2` on, an
 open card fails the run if a `cp_integrate` or `fetch_content` name is clipped, or if its summaries start at more than
 one x. `pr3` adds Chats with an empty Fleet. `pr4` adds quick replies (one ask, a refused answer POST, two asks,
-history, offline).
+history, offline). `m3-jobs` adds the operator chat's Jobs drawer (Ctrl/Cmd+J, desktop and the phone sheet) and a
+picked job beside the chat at 1440 px, over it at 900 px and full screen at 390 px, failing on sideways scroll.
+
+**Chat Jobs surfaces (M3 slice 2, cp-zm9f).** Only the operator's Full transcript has them
+(`viewer-app/components/WorkspaceSurfaces.tsx`): a `Jobs ⌘J` button on its filter row and Ctrl/Cmd+J, registered
+while that chat is on screen and removed when it leaves, so every other screen keeps the key (no `preventDefault`) and
+Ctrl/Cmd+K search is unchanged. The drawer (`JobsDrawer.tsx`) is a native modal `<dialog>`: an 860 px right drawer
+from 900 px and a bottom sheet (18 px radius) below. It reads `/api/jobs` only while open and lists In flight, With the
+team, Queued and Done today rows (dot, wrapping title, id, project, status, cost from 900 px) under All / In flight /
+Done today segments and the chat's M1 project selection (one hash, shared with the transcript); Full page opens
+`#jobs` with that selection. Picking a row opens the existing job page (`JobDetail` `embedded`: an `<h2>` instead of the
+page header, P1 Ask and the P2 review guide unchanged) in a pane with Full page (`#job/<id>`) and ×: 520 px beside the
+chat from 1280 px, over the chat column from 900 px, full screen on a phone. Escape closes the top surface unless a
+dialog or menu owns it; focus returns to the opener and the draft, reference, filter and scroll stay. Deferred:
+"From this chat" lists, Today totals, live-log tabs and `/jobs` (slice 4).
 
 Live PR and issue chips (Sessions chat): `GET /api/sessions` carries `pr_chips`, keyed by URL, built by
 `src/viewer/pr-chips.ts` from files the viewer already reads — fleet PR receipts and `bound_pr`, `merge.json`, the

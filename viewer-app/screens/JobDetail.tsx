@@ -141,7 +141,8 @@ function MandateSnippet({mandate}: {mandate: NonNullable<JobResponse["mandate"]>
  return <section class="job-mandate-snippet"><h2>Mandate</h2><p><a href="#map"><code>{mandate.id}</code> →</a> <span class="job-provider">{mandate.status}</span></p><p class="job-mandate-objective">{mandate.objective}</p><p class="job-provider">{spend} · {mandate.jobs} {mandate.jobs === 1 ? "job" : "jobs"}</p></section>;
 }
 
-export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: boolean; initial?: Tab}) {
+/** `embedded` (the operator chat's job pane, M3): an <h2> title instead of the page header, which owns the route. */
+export function JobDetail({data, wide, initial, embedded = false}: {data: JobResponse; wide?: boolean; initial?: Tab; embedded?: boolean}) {
  const job = data.job;
  const [isWide, setWide] = useState(wide ?? nowWide());
  const [tab, setTab] = useState<Tab>(initial ?? (isWide ? "transcript" : "details"));
@@ -154,9 +155,9 @@ export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: bool
  const active: Tab = isWide && tab === "details" ? "transcript" : tab;
  const tabs: Tab[] = isWide ? ["transcript", "timeline"] : ["details", "transcript", "timeline"];
  const unsupported = data.evidence_lookup?.supported === false ? data.evidence_lookup.why : undefined;
- return <div class="job-detail" data-tab={active}>
+ return <div class={embedded ? "job-detail job-detail-embedded" : "job-detail"} data-tab={active}>
   <header class="job-detail-heading">
-   <PageHeader stack back={{href:"#jobs", label:"Jobs"}} title={job.title ?? job.id} detail={job.title ? job.id : undefined}/>
+   {embedded ? <h2 class="job-detail-title">{job.title ?? job.id}</h2> : <PageHeader stack back={{href:"#jobs", label:"Jobs"}} title={job.title ?? job.id} detail={job.title ? job.id : undefined}/>}
    <div class="job-badges"><span class={`job-badge job-badge-${job.phase}`}><PhaseDot phase={job.phase}/>{job.phase}</span>{job.pr_url && <a class="job-badge job-badge-pr" href={job.pr_url}>{prNumber(job.pr_url)}{job.pr_status && ` ${job.pr_status}`} ↗</a>}<CiSignal job={job} badge/><span class="job-badge job-badge-review">review {reviewFact(job)}</span></div>
    {job.phase === "held" && <p>{parkedPendingText(job.parked_pending) ?? "held = waiting on CI or review, normal for hours"}</p>}
    {job.phase === "awaiting_merge" && <p>with the team{job.handed_at ? ` since ${observedTime(job.handed_at)}` : ""}: waiting on a human merge, no worker or slot; execution clock stopped</p>}

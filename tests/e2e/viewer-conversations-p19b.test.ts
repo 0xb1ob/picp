@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import { type Context, type Json, jsonl, viewer, write } from "../harness/conversations.ts";
-import { operatorSession, type Tab, until } from "../harness/dashboard.ts";
+import { browserShims, operatorSession, type Tab, until } from "../harness/dashboard.ts";
 
 const ledgerFile = (stateDir: string) => join(dirname(stateDir), "jobs.json");
 const say = (timestamp: string, m: unknown) => JSON.stringify({ type: "message", timestamp, message: m });
@@ -19,34 +19,6 @@ const bridgeNote = (timestamp: string, content: string) => JSON.stringify({ type
 const record = (stateDir: string, at: string, file: string) => write(operatorSessionsFile(join(stateDir, "sessions")), jsonl([{ at, session_file: file }]));
 /** Lets the tab's queued renders (preact's microtask debounce) run. */
 const settle = () => new Promise<void>((done) => setImmediate(done));
-/**
- * Linkedom has no dialog or focus and calls a bubbled listener with the target as `this`: the tab gets showModal/close,
- * a tracked activeElement and listeners bound to their own element; the app's code is unchanged. Restored after `t`.
- */
-function browserShims(t: Context, tab: Tab) {
-	const target = tab.window.EventTarget.prototype, element = tab.window.HTMLElement.prototype;
-	const saved = [target, element].map((proto) => [proto, Object.getOwnPropertyDescriptors(proto)] as const);
-	t.after(() => { for (const [proto, descriptors] of saved) Object.defineProperties(proto, descriptors); });
-	const bound = new WeakMap<object, WeakMap<object, EventListener>>();
-	const add = target.addEventListener, remove = target.removeEventListener;
-	target.addEventListener = function (this: EventTarget, type: string, listener: EventListener, options?: unknown) {
-		let own = bound.get(this);
-		if (!own) bound.set(this, own = new WeakMap());
-		if (!own.has(listener)) own.set(listener, listener.bind(this));
-		add.call(this, type, own.get(listener)!, options);
-	};
-	target.removeEventListener = function (this: EventTarget, type: string, listener: EventListener, options?: unknown) {
-		remove.call(this, type, bound.get(this)?.get(listener) ?? listener, options);
-	};
-	let focused: Element | null = tab.document.body;
-	Object.defineProperty(tab.document, "activeElement", { configurable: true, get: () => focused });
-	Object.assign(element, {
-		focus(this: Element) { focused = this; },
-		showModal(this: Element) { this.setAttribute("open", ""); },
-		close(this: Element) { this.removeAttribute("open"); },
-	});
-	return () => focused;
-}
 
 // ---- search --------------------------------------------------------------------------------------------------------
 

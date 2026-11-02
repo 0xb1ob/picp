@@ -12,6 +12,7 @@ import { InlineText, Linked, Markdown } from "../components/Markdown.tsx";
 import { PrChips } from "../components/PrChip.tsx";
 import { Icon } from "../components/icons.tsx";
 import { OperatorComposer } from "../components/OperatorComposer.tsx";
+import { useWorkspaceSurfaces } from "../components/WorkspaceSurfaces.tsx";
 import { DecisionCard } from "../components/DecisionCard.tsx";
 import { TranscriptAsk } from "../components/TranscriptAsk.tsx";
 import { TranscriptImages } from "../components/TranscriptImages.tsx";
@@ -316,6 +317,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  },[]);
  // Only the operator Full transcript carries project tags; controls, pending sends and decisions keep the full data.
  const filterable=data.selected === "you" && data.transcript === true, selection=filterable ? asked : null;
+ const workspace=useWorkspaceSurfaces(filterable,selection);
  const picked=selectEntries(data.entries,selection), shown=picked.entries;
  const names=filterable ? data.entries.flatMap(e=>e.projects ?? []) : [];
  // A local-day separator opens each new day; one pending send queued past local midnight opens its own day.
@@ -370,7 +372,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
     {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}</header>
    {control?.pending_error && <p class="session-warning" role="status" aria-live="polite" aria-atomic="true">{control.pending_error}</p>}
    {control?.pending && <p class="session-pending-live" aria-live="polite" aria-atomic="true">{pending.length ? pending.map(send=>`Message at ${time(send.at)}: ${send.state}${send.reason ? `, ${send.reason}` : ""}`).join(". ") : "No pending messages"}</p>}
-   {filterable && <div class="session-filter"><ProjectFilter names={names} selection={selection} onChange={value=>{window.location.hash=selectionHash(location.hash,value);}}/></div>}
+   {filterable && <div class="session-filter"><ProjectFilter names={names} selection={selection} onChange={value=>{window.location.hash=selectionHash(location.hash,value);}}/>{workspace.trigger}</div>}
    <div class="session-transcript" role="region" aria-label="Transcript" ref={scroller} onScroll={()=>{const el=scroller.current; if(el){follow.current=el.scrollHeight-el.scrollTop-el.clientHeight<48; setAtBottom(follow.current);}}}>
     <div class="session-entries"><PrChips.Provider value={data.pr_chips ?? {}}><VisibleSections.Provider value={picked.sections}>{data.warnings.map(w=><p class="session-warning" role="alert" key={w}>{w}</p>)}{control?.status && !("error" in control.status) && control.status.sends_error && <p class="session-warning" role="alert">Queued messages unavailable: {control.status.sends_error}</p>}{data.truncated && <p class="session-empty">Recent entries only</p>}{!data.entries.length && !pending.length && <p class="session-empty">No recorded entries</p>}{data.entries.length > 0 && !shown.length && selection && <p class="session-empty" role="status">{"project" in selection ? `No loaded entries for ${selection.project}` : "No untagged loaded entries"}</p>}{renderRows(shown,null)}{!replyAt && replies}{pending.flatMap(send=>{const label=pendingDays.get(send.key), node=<PendingBubble key={send.key} send={send} position={queued.indexOf(send)+1} total={queued.length} control={control!} viewing={data.operator_session ?? null} truncated={data.truncated === true}/>; return label ? [dayPill(send.key,send.at,label),node] : [node];})}</VisibleSections.Provider></PrChips.Provider></div>
     {!atBottom && <div class="session-new-wrap"><button class="session-new" type="button" aria-label="Jump to the newest entries" onClick={()=>{scrollToEnd();follow.current=true;setAtBottom(true);}}><Icon name="down" size={16}/>Jump to latest</button></div>}
@@ -381,5 +383,6 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    </section>}
    {data.transcript === true && control && <OperatorComposer control={control} draft={draft} reference={reference}/>}
   </div>
+  {workspace.surfaces}
  </div>;
 }
