@@ -187,8 +187,8 @@ test("P16-route-default: the scaffolded template routes every role and size as d
 	}
 });
 
-// P16-route-migrate (D1): profiles carry no model, so a role a home's rubric left to its profile gets that route back as
-// one journaled, append-only row per role, once; every profile keeps today's model, candidates and effort on every cell.
+// P16-route-migrate (D1): profiles carry no model, so a role a rubric left to its profile gets one journaled,
+// append-only default row, once; every profile keeps today's model, candidates and effort on every cell.
 test("P16-route-migrate: a rubric that left a role to its profile gets one default row per role, once, and every profile routes as before", { timeout: 900_000 }, async (t) => {
 	const b = await dispatchS29(t);
 	const ship = await job(b, "ship"), plan = await job(b, "research");
@@ -204,7 +204,8 @@ test("P16-route-migrate: a rubric that left a role to its profile gets one defau
 	const legacy = [{ id: "risky-any", role: "researcher", risk: "high", model: "anthropic/claude-opus-5", thinking: "xhigh" },
 		{ id: "research", role: "researcher", model: "anthropic/claude-opus-5", thinking: "medium" },
 		{ id: "small-ship", role: "implementer", scope: ["S"], model: "anthropic/claude-haiku-4-5", thinking: "low" }];
-	type Route = [string, string, string] | undefined; // [rule, model, thinking]; undefined fell through to the profile on main
+	// [rule, model, thinking]; undefined is a cell that fell through to the profile on main.
+	type Route = [string, string, string] | undefined;
 	const shipped = (role: string, scope: string, risk: string): Route => role === "gate-reviewer" ? ["reviews", OPUS, "high"]
 		: role === "implementer" ? (risk === "high" ? ["risky-ship", OPUS, "high"] : scope === "S" ? ["small-ship", SONNET, "high"] : ["big-ship", OPUS, "medium"])
 		: risk === "high" ? ["risky-any", OPUS, "xhigh"] : scope === "L" ? ["research-big", OPUS, "high"] : undefined;
@@ -225,6 +226,13 @@ test("P16-route-migrate: a rubric that left a role to its profile gets one defau
 			const { profile, scope, risk } = grid[i]!, role = ROLE[profile]!, was = home.before(role, scope, risk);
 			const want = was ? ["rubric", ...was] : ["rubric", `${role}-default`, OPUS, THINKING[profile]];
 			assert.deepEqual([got.decision?.source, got.decision?.rule, got.decision?.model, got.decision?.thinking], want, `${home.name} ${profile} ${scope}/${risk}: ${said(got)}`);
+		}
+		// The cells that fell through keep the profile's old candidates [OPUS, SOL]: OpenAI alone walks OPUS to SOL.
+		const fell = grid.filter(({ profile, scope, risk }) => !home.before(ROLE[profile]!, scope, risk));
+		const openai = await parent(b, { phases: [{ calls: fell }], env: { OPENAI_API_KEY: "sk-test" } });
+		for (const [i, got] of openai.previews[0]!.entries()) {
+			const candidates = [...(got.decision?.attempted ?? []).map((skip) => skip.model), got.decision?.model];
+			assert.deepEqual(candidates, [OPUS, SOL], `${home.name} ${fell[i]!.profile} ${fell[i]!.scope}/${fell[i]!.risk}: ${said(got)}`);
 		}
 		const rows = JSON.parse(readFileSync(file, "utf8")).rubric;
 		assert.deepEqual(rows.slice(0, home.rubric.length), home.rubric, `${home.name}: existing rows untouched, legacy words kept`);
