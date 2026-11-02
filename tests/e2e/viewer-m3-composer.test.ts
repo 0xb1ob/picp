@@ -101,6 +101,8 @@ test("M3-composer-typed: a `/` draft offers /status and /jobs only; Enter/Tab ru
 	assert.deepEqual([tab.$('[role="listbox"]')!.getAttribute("aria-label"), options(tab)], ["Installed skills", ["@teachExplain step by step"]], "skills keep the @ list");
 	await type(tab, "1/jobs");
 	assert.equal(tab.$('[role="listbox"]'), null, "only a whole `/word` draft is a command");
+	const footer = [...tab.document.querySelectorAll(".operator-composer-attach, .operator-composer-slash")] as unknown as Element[];
+	assert.deepEqual(footer.map((el) => el.className), ["operator-composer-attach", "operator-composer-slash"], "the paperclip stays first");
 });
 
 test("M3-composer-menu: the touch `/` menu runs commands and attaches a selection's job as the P1 reference; Escape and removal keep the draft", { timeout: 180_000 }, async (t) => {
