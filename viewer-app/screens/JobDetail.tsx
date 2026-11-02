@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { EvidenceReference } from "../../src/evidence-reference.ts";
-import type { JobDeploy, JobResponse, JobRunning, TimelineFinding, ViewerJob } from "../../src/viewer/api-types.ts";
+import type { JobDeploy, JobQuotaContinuation, JobResponse, JobRunning, TimelineFinding, ViewerJob } from "../../src/viewer/api-types.ts";
 import { AskAbout } from "../components/EvidenceReference.tsx";
 import { ReviewGuide } from "../components/ReviewGuide.tsx";
 import { findingReference } from "../evidence-ref.ts";
 import { ROLE } from "../components/VersionBadge.tsx";
 import { JobTranscript } from "./JobTranscript.tsx";
-import { elapsed, money, observedTime, prNumber, shortSha, time } from "../format.ts";
+import { elapsed, money, observedTime, prNumber, shortSha, time, zone } from "../format.ts";
 import { CopyReply } from "../components/CopyReply.tsx";
 import { ContextChip } from "../components/ContextChip.tsx";
 import { PhaseDot, CiSignal, ModelName, parkedPendingText } from "../components/JobSignals.tsx";
@@ -82,6 +82,18 @@ function DeployFact({deploy}: {deploy: JobDeploy}) {
  const [status, detail] = deployLines(deploy);
  return <><p class="job-deploy-status">{status}{deploy.deploy_job_id && <> · <a href={jobHref(deploy.deploy_job_id)}><code>{deploy.deploy_job_id}</code></a></>}</p>
   {detail && <p class="job-deploy-detail" title={detail}>{detail}</p>}</>;
+}
+
+/** P3: unsupported in production comes before any policy, so an "on" never reads as scheduled; cancel goes via the operator. */
+function QuotaFact({jobId, q}: {jobId: string; q: JobQuotaContinuation}) {
+ const policy = q.policy ? `policy ${q.policy.enabled ? "on" : "off"} (${q.policy.source})` : "policy unreadable";
+ const head = q.supported ? `${policy} · adapter ${q.capability_version}` : `unsupported in production (capability ${q.capability_version}) · ${policy}, schedules nothing`;
+ const i = q.intent;
+ if (!i) return <>{head} · no continuation</>;
+ const status = i.state === "pending" && i.delivery === "ambiguous" ? "held for the operator" : i.overdue ? "waiting · overdue" : `${i.state} · ${i.delivery}`;
+ const local = `${observedTime(i.resets_at)} ${zone(new Date(i.resets_at))}`.trim();
+ return <><p>{head}</p><p><code>{i.continuation_id}</code> {status}, resets {local} (<span title="UTC">{i.resets_at}</span>){i.reason ? ` — ${i.reason}` : ""}</p>
+  {i.state === "pending" && i.delivery === "waiting" && <a href={composerHref(`Cancel the quota continuation for ${jobId} (cp_parent quota cancel).`)}>Cancel through the operator</a>}</>;
 }
 
 function RoutingFact({job}: {job: ViewerJob}) {
@@ -190,6 +202,7 @@ export function JobDetail({data, wide, initial, embedded = false}: {data: JobRes
      <div class="job-fact-pr"><dt>PR</dt><dd>{prFact(job)}</dd></div>
      {data.running && <div class="job-fact-wide job-fact-running"><dt>Running here</dt><dd><RunningFact running={data.running}/></dd></div>}
      {data.deploy && <div class="job-fact-wide job-fact-deploy"><dt>Deploy</dt><dd><DeployFact deploy={data.deploy}/></dd></div>}
+     {data.quota_continuation && <div class="job-fact-wide job-fact-quota"><dt>Quota continuation</dt><dd><QuotaFact jobId={job.id} q={data.quota_continuation}/></dd></div>}
      <div class="job-fact-ci"><dt>CI</dt><dd>{ciFact(job)}</dd></div>
      <div class="job-fact-review"><dt>Review</dt><dd>{reviewFact(job)}</dd></div>
     </dl>

@@ -18,7 +18,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { attachParentHost, currentHost, parentHostPaths, ParentHostClient } from "../../src/parent-host.ts";
 import { hostProbeMs, probeHost, reattachLoop } from "../../src/bridge-reattach.ts";
-import { type BridgeRelay, CpBridgeError, requireAvailableParentModel, resolveParentModel } from "../../src/cp-bridge.ts";
+import { type BridgeRelay, CpBridgeError, QuotaCommandSchema, quotaCommandArgs, requireAvailableParentModel, resolveParentModel } from "../../src/cp-bridge.ts";
 import { agentDirFor, relaySkillLines, skillRoots } from "../../src/viewer/skill-catalog.ts";
 import { OperatorRelayConsumer, RELAY_TICK_MS, recheckRelay } from "../../src/operator-delivery.ts";
 import { OperatorRelayAcks, OperatorRelayOutbox, operatorRelayAcksFile, operatorRelayOutboxFile, relayIdOf } from "../../src/operator-outbox.ts";
@@ -44,7 +44,6 @@ import { parentRestartPorts, restartedLine } from "../../src/parent-restart.ts";
 import { settingsPorts } from "../../src/settings-control.ts";
 import { startVersionLine, type VersionLine } from "./version-line.ts";
 import { modelPick } from "./model-pick.ts";
-
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { registerOperatorCompact } from "../../src/operator-compact.ts";
 import { OPERATOR_NOTE } from "../../src/operator-note.ts";
@@ -598,7 +597,7 @@ export default function (pi: ExtensionAPI): void {
 			"answer delivers a final answer the human asked for (their question, your full answer, evidence, the research job it lands) without a parent turn: up to 4,000 characters it stays inline; longer it is published as a permanent report and you get a headline plus link to reply with; never pushed, never a pending card. " +
 			"Relays name paths (state/runs/<id>/artifact.md, gate files); this session may read those bodies. The parent may not. " +
 			"When answering on the human's behalf, send delegated:true and delegation_rule; omit delegated when relaying the human's own answer.",
-		promptSnippet: "Drive the CP parent (cp_parent start/send/status/ask/ask_answer/ask_withdraw/answer/doctor/version/drain/drain_cancel/compact/rotate/model/stop) and read job history (cp_parent jobs)",
+		promptSnippet: "Drive the CP parent (cp_parent start/send/status/ask/ask_answer/ask_withdraw/answer/doctor/version/drain/drain_cancel/quota/compact/rotate/model/stop) and read job history (cp_parent jobs); quota reads, sets or cancels quota continuation (unsupported in production)",
 		promptGuidelines: [
 			"Call cp_parent start once with home (mode is always multi and may be omitted); pass model only when the human named one, " +
 				"otherwise omit it and the bridge uses your own. A live lock holder is a refusal.",
@@ -617,7 +616,8 @@ export default function (pi: ExtensionAPI): void {
 			"Every relay to the human starts with its bracketed project, e.g. [demo-app] cp-78vu: \u2026; split an update spanning several projects into one section per project.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "doctor", "version", "drain", "drain_cancel", "compact", "rotate", "model", "restart", "stop", "jobs", "model_pick"], { description: "manage or diagnose the parent; jobs reads the ledger directly" }),
+			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "doctor", "version", "drain", "drain_cancel", "quota", "compact", "rotate", "model", "restart", "stop", "jobs", "model_pick"], { description: "manage or diagnose the parent; jobs reads the ledger directly" }),
+			quota: Type.Optional({ ...QuotaCommandSchema, description: "quota: op status (job_id optional) | on/off (home default, or a job override with job_id) | cancel (job_id, reason)" }),
 			quote: Type.Optional(Type.String({ minLength: 1, maxLength: 16_000, description: "model_pick: the human's own words naming the model, verbatim and contiguous" })),
 			source_entry_id: Type.Optional(Type.String({ description: "model_pick: that human message's session entry id; omit for the newest human message containing quote" })),
 			control_id: Type.Optional(Type.String({ description: "model_pick: the dashboard request id (dc-…) when the human typed it in the dashboard" })),
@@ -758,10 +758,10 @@ export default function (pi: ExtensionAPI): void {
 					consumer.replied(receipt.reply);
 					return textResult(lines.join("\n"), { ...receipt });
 				}
-				if (params.action === "doctor" || params.action === "version" || params.action === "drain" || params.action === "drain_cancel") {
+				if (params.action === "doctor" || params.action === "version" || params.action === "drain" || params.action === "drain_cancel" || params.action === "quota") {
 					const activeClient = await ensureClient(undefined, undefined, true);
 					const drainArgs = params.freeze ? [params.timeout_s ?? DRAIN_DEFAULT_TIMEOUT_S, { reason: "freeze" }] : params.timeout_s !== undefined ? [params.timeout_s] : [];
-					const result = await activeClient.request(params.action === "drain_cancel" ? "drainCancel" : params.action, ...(params.action === "drain" ? drainArgs : [])) as import("../../src/parent-diagnostics.ts").ParentDiagnostic;
+					const result = await activeClient.request(params.action === "drain_cancel" ? "drainCancel" : params.action, ...(params.action === "drain" ? drainArgs : params.action === "quota" ? [quotaCommandArgs(params.quota)] : [])) as import("../../src/parent-diagnostics.ts").ParentDiagnostic;
 					return { ...textResult(result.text, { ...result }), isError: result.level === "error" };
 				}
 				if (params.action === "model") {
@@ -793,7 +793,7 @@ export default function (pi: ExtensionAPI): void {
 				);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				return { ...textResult(message), ...(["doctor", "version", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "jobs", "model_pick"].includes(params.action) ? { isError: true } : {}) };
+				return { ...textResult(message), ...(["doctor", "version", "quota", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "jobs", "model_pick"].includes(params.action) ? { isError: true } : {}) };
 			}
 		},
 	});

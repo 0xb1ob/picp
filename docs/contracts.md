@@ -1389,6 +1389,16 @@ never create a durable send or an LLM turn. Missing commands, unavailable
 parents and diagnostic failures return explicit errors; doctor findings
 retain the parent's info/error level.
 
+**Quota continuation surface (P3).** `cp_parent quota` (`quota: {op, job_id?, reason?}`) runs the live parent's
+`/cp-quota` beside a busy turn, like a drain, and never creates a durable send or an LLM turn. `status` leads with the
+production capability: no provider reset signal is verified (capability `none`), so it reads **unsupported in
+production**, and a policy alone schedules nothing. `on`/`off` set the home default, or a job override with `job_id`,
+recorded with actor `operator`; an effective off cancels that scope's unsent intents. `cancel` stops one job's waiting
+intent with the reason and actor; one already claimed, sending or held is refused, and a repeat is refused unchanged.
+A parent that predates `/cp-quota` refuses as unregistered: never a false cancel success. A hold, or a command-post
+cancel (closed, revoked, replaced), queues one distinct durable `quota:<continuation_id>:held|cancelled` wake; the
+report envelope is unchanged.
+
 **Parent context control.** `cp_parent compact` and `rotate` require a settled parent with no pending durable send; `model <provider/id>` switches live without touching workers. Automatic compaction is on by default at 150000 context tokens (`DEFAULT_PARENT_COMPACT_TOKENS`, used when `data/parent.json` is absent); a home overrides it with `data/parent.json`:
 
 ```json

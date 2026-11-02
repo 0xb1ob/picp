@@ -40,7 +40,9 @@ export interface QuotaIntent {
 	worktree: string;
 	branch: string;
 	session_file: string;
-	worker_pid: number;
+	/** The interrupted worker's pid and start; optional, so an intent an older build wrote (neither) still loads. */
+	worker_pid?: number;
+	worker_started_at?: string;
 	attempts: number;
 	/** The interrupted round's caps spend at the claim; the continuation resumes it instead of a fresh round. */
 	round?: CarriedBounds;
@@ -87,14 +89,18 @@ export interface QuotaContinuationOptions {
 	capacityFree: () => boolean;
 	/** The live worker's hard-bound spend in its current round (`HardBoundsWatch.spent`). */
 	spent?: (jobId: string) => CarriedBounds | undefined;
+	/** One distinct durable wake per hold or command-post cancel: operator news, never delivery proof. */
+	notify?: (wake: { id: string; job_id: string; content: string }) => void;
 	now?: () => Date;
 }
 
 /** The due timer's longest sleep, so a clock jump, a suspended host or a skipped pass is retried. */
 export const QUOTA_TICK_MAX_MS = 60_000;
 
-/** The worker the intent interrupted was replaced since (a manual revive or re-dispatch); `started_at` is too coarse. */
-const replaced = (record: FleetRecord, intent: QuotaIntent): boolean => record.worker.pid !== intent.worker_pid;
+/** The interrupted worker was replaced since (a manual revive or re-dispatch); pid and start together survive pid reuse. */
+const replaced = (record: FleetRecord, intent: QuotaIntent): boolean =>
+	(intent.worker_pid !== undefined && record.worker.pid !== intent.worker_pid)
+	|| (intent.worker_started_at !== undefined && record.worker.started_at !== intent.worker_started_at);
 
 type Listener = (event: WorkerEvent) => void;
 
@@ -161,6 +167,16 @@ export class QuotaContinuation {
 			continuation_id, generation, state, delivery, resets_at: intent.signal.resetsAtUtc,
 			...(intent.reason ? { reason: intent.reason } : {}),
 		});
+		const held = state === "pending" && delivery === "ambiguous";
+		if (!held && !(state === "cancelled" && intent.cancelled?.actor === "command-post")) return;
+		const why = intent.reason ?? "no reason recorded";
+		this.#options.notify?.({
+			id: `quota:${continuation_id}:${held ? "held" : "cancelled"}`,
+			job_id: intent.job_id,
+			content: held
+				? `QUOTA CONTINUATION ${continuation_id}: held, never resent — ${why}. Continue it by hand (cp_revive ${intent.job_id} continue_failed:true); job, session and counters are kept.`
+				: `QUOTA CONTINUATION ${continuation_id}: cancelled — ${why}. No continuation was sent; job, session and counters are kept.`,
+		});
 	}
 
 	/** Every intent, oldest first, optionally for one job. */
@@ -199,6 +215,12 @@ export class QuotaContinuation {
 			void this.tick().catch((error: unknown) => this.#storeError(error, "tick")).finally(() => this.arm(started));
 		}, delay);
 		this.#timer.unref();
+	}
+
+	/** The operator's read: policy and intents as stored; an unreadable store throws instead of reading as empty. */
+	snapshot(): { policy: QuotaPolicy; intents: QuotaIntent[] } {
+		const { policy, intents } = this.#read();
+		return { policy, intents };
 	}
 
 	/** An unreadable store reads as no settings: quota continuation is off. */
@@ -324,6 +346,7 @@ export class QuotaContinuation {
 			branch: record.branch,
 			session_file: record.worker.session_file,
 			worker_pid: record.worker.pid,
+			worker_started_at: record.worker.started_at,
 			attempts: 0,
 		};
 		const round = this.#options.spent?.(jobId);

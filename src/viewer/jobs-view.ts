@@ -20,6 +20,7 @@ import { reportFile } from "./job-report.ts";
 import { deployView } from "./deploy-view.ts";
 import { jobReference, reviewFindings, rowReference } from "./evidence-timeline.ts";
 import { type CiSeen, reviewGuide } from "./review-guide.ts";
+import { quotaView } from "./quota-view.ts";
 
 function records(state:ViewerState) {
  const fleet=objectList(join(state.stateDir,"fleet.json"),"jobs",j=>typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project));
@@ -180,7 +181,7 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
  const review_guide=reviewGuide(state,{id,project:job.project,entry:fleet.find(j=>j.job_id===id),task:str(ledgerJob?.description) ?? str(ledgerJob?.title) ?? null,pr_url:job.pr_url,
   merged:job.merge_sha && job.finished_at ? {at:job.finished_at,sha:job.merge_sha} : null,ci_seen:ciSeen});
  return {generated_at:data.generated_at,awaiting_count:data.awaiting_count,job,description:str(ledger.find(j=>j.id===id)?.description) ?? null,mandate,timeline:timeline.slice(-200),timeline_truncated:(events.value?.start ?? 0)>0 || timeline.length>200,ask_reference:ask,
-  ...(deploy ? {deploy} : {}),review_guide,
+  ...(deploy ? {deploy} : {}),review_guide,quota_continuation:quotaView(state,id),
   files_href:root ? `/#files?${new URLSearchParams({root:root.id,path:""})}` : null,
   artifact_href:artifact?.href ?? null,artifact_name:artifact?.name ?? null,report_href:reportFile(state,id) ? `#report/${id}` : null,
   reports:boardReports(state).filter(report=>report.job_ids.includes(id)),

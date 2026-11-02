@@ -231,6 +231,15 @@ export interface JobResponse {
  deploy?: JobDeploy;
  /** Parked or merged jobs (P2): the read-only review guide; null or absent when the job was never handed off. */
  review_guide?: ReviewGuide | null;
+ /** P3 quota continuation (state/quota-continuation.json): optional so an older server's response still renders. */
+ quota_continuation?: JobQuotaContinuation;
+}
+/** `supported` is the production capability: false ("none") until a verified reset adapter ships; `policy` null: unreadable store. */
+export interface JobQuotaContinuation {
+ supported: boolean; capability_version: string;
+ policy: {enabled: boolean; source: "job" | "home" | "default"} | null;
+ /** The job's latest intent; `overdue`: still waiting after its reset. */
+ intent: {continuation_id: string; generation: number; state: string; delivery: string; resets_at: string; overdue: boolean; reason: string | null; capability_version: string} | null;
 }
 /** One reading stop: a recorded revision request or reviewer reason, redacted; `historical` is an earlier attempt's. */
 export interface ReviewGuideStop { text: string; list: "revisions" | "reasons"; attempt: number; head: string; verdict: string; historical: boolean }

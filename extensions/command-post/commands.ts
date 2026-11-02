@@ -1,5 +1,5 @@
 /**
- * The operator's slash commands: /cp-version, /status, /memory, /doctor, /cp-drain, /watch, /cp-ask, /cp-plan,
+ * The operator's slash commands: /cp-version, /status, /memory, /doctor, /cp-drain, /cp-quota, /watch, /cp-ask, /cp-plan,
  * /cp-mandate-defaults and /cp-revive.
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
@@ -18,6 +18,7 @@ import { formatRevivePlan, formatReviveResult } from "../../src/revive.ts";
 import { formatMandateDefaults, loadMandateDefaults, setMandateDefault } from "../../src/mandate-defaults.ts";
 import { formatRunView } from "../../src/watch.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_PREFIX, formatDrain, parseDrainArgs, readDrain } from "../../src/drain.ts";
+import { QUOTA_PREFIX, runQuotaCommand } from "../../src/quota-continuation-command.ts";
 import { openPlanViewer } from "./plan-viewer.ts";
 import { runtimeOrRefusal, formatCommitLine, formatVersionLine, readPackageIdentity, parseStatusArgs, parseWatchArgs, parsePlanArgs, type PlanArgs, parseAskArgs, memoryArgumentCompletions } from "./helpers.ts";
 import type { ExtensionDeps } from "./shared.ts";
@@ -199,6 +200,20 @@ export function registerCommands(pi: ExtensionAPI, deps: ExtensionDeps): void {
 				}
 			}
 			emit(ctx, "cp-drain", text, { level });
+		},
+	});
+
+	pi.registerCommand("cp-quota", {
+		description: "Quota continuation: /cp-quota [status [job]] reads (production: unsupported, capability none); on|off [job] sets the home default or a job override; cancel <job> [reason] stops one unsent continuation",
+		handler: async (args, ctx) => {
+			setLive(ctx);
+			let result: { text: string; level: "info" | "error" };
+			try {
+				result = runQuotaCommand(commandPost(ctx.modelRegistry).quota, args);
+			} catch (error) {
+				result = { text: `${QUOTA_PREFIX}failed: ${(error as Error).message}; nothing changed`, level: "error" };
+			}
+			emit(ctx, "cp-quota", result.text, { level: result.level });
 		},
 	});
 

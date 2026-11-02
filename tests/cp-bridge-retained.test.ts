@@ -1083,6 +1083,8 @@ for (const outcome of ["missing", "error", "silent", "rejected"]) {
 			else if (outcome === "silent") failure = /no diagnostic output/;
 			await assert.rejects(client.request(action), failure);
 		}
+		// An older parent never registered /cp-quota: the bridge refuses, never a false cancel success or a prompt.
+		await assert.rejects(client.request("quota", "cancel cp-job"), /parent diagnostic \/cp-quota is not registered/);
 		assert.deepEqual(lines(prompts), [], "a missing or failed diagnostic never falls through to a model prompt");
 	});
 }
