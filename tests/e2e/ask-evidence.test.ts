@@ -40,7 +40,7 @@ function seed(home: string): void {
 	], { revisions: ["keep the trailing newline"] }));
 	writeFile(join(home, paths.eventsFile("cp-ask1")), [
 		JSON.stringify({ seq: 0, ts: "2026-11-01T00:30:00Z", job_id: "cp-ask1", source: "pi", type: "agent_start", payload: {} }),
-		ci("cp-ask1", "2026-11-01T01:00:00Z", "ci_green", A, 101),
+		ci("cp-ask1", "2026-11-01T01:00:00Z", "ci_failed", A, 101),
 		ci("cp-ask1", "2026-11-01T01:10:00Z", "ci_failed", A, 102),
 		ci("cp-ask1", "2026-11-01T01:20:00Z", "ci_green", A),
 		ci("cp-ask1", "2026-11-01T01:30:00Z", "ci_green", A, 104),
@@ -103,6 +103,7 @@ test("P1 evidence lookup: exact review, finding and CI run from retained records
 		{ id: "cross-project", jobs: { mode: "show", job_id: "cp-ask2", evidence: { kind: "ci", project: "demo-app", job_id: "cp-ask2", head_sha: A, run_id: 999 } } },
 		{ id: "short-sha", jobs: show("cp-ask1", { kind: "review", head_sha: "aaaaaaa", attempt: 2 }) },
 		{ id: "stray-field", jobs: show("cp-ask1", { kind: "job", attempt: 2 }) },
+		{ id: "history-evidence", jobs: { mode: "history", evidence: { kind: "job", project: "demo-app", job_id: "cp-ask1" } } },
 	]);
 
 	assert.equal("evidence" in details(ends, "plain"), false, "a selector-free show keeps its old shape");
@@ -127,8 +128,9 @@ test("P1 evidence lookup: exact review, finding and CI run from retained records
 	assert.deepEqual(evidence(ends, "flag").historical.slice(1), ["flags[1]: scope_growth"]);
 	assert.deepEqual([evidence(ends, "no-finding").availability, evidence(ends, "no-finding").reason], ["unavailable", "review-2 has no revisions[1]"]);
 
-	// Two runs on one head resolve independently; the head-level reference names the legacy row's missing run id.
-	assert.deepEqual(evidence(ends, "run101").historical, [`2026-11-01T01:00:00Z ci_green on ${A} run 101 — ci_green seen`]);
+	// Real shape: a failed run carries run_id (a rerun on one head is a second run), green never does.
+	// Each run resolves alone; the head-level reference names the missing run id. Run 104 is a defensive case.
+	assert.deepEqual(evidence(ends, "run101").historical, [`2026-11-01T01:00:00Z ci_failed on ${A} run 101 — ci_failed seen`]);
 	assert.deepEqual(evidence(ends, "run102").historical, [`2026-11-01T01:10:00Z ci_failed on ${A} run 102 — ci_failed seen`]);
 	assert.match(ok(ends, "head-ci"), /evidence: CI observations for cp-ask1 @ a{12} — available/);
 	assert.equal(evidence(ends, "head-ci").historical.length, 5);
@@ -151,6 +153,7 @@ test("P1 evidence lookup: exact review, finding and CI run from retained records
 	failed(ends, "cross-project", /cp-ask2 is in project other-app, not demo-app/);
 	failed(ends, "short-sha", /head_sha/);
 	failed(ends, "stray-field", /attempt/);
+	failed(ends, "history-evidence", /cp_parent jobs history refuses evidence: the selector applies to show only/);
 
 	assert.equal(readParentLock(home.path).state, "absent", "a lookup never starts a parent");
 	assert.equal(readFileSync(join(home.path, LAYOUT.jobsFile), "utf8"), ledgerBefore, "a lookup writes no ledger");

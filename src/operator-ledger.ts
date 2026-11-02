@@ -34,6 +34,7 @@ export type OperatorJobsQuery = Static<typeof OperatorJobsQuerySchema>;
 export function operatorJobs(target: { home: string; mode: Mode }, query: OperatorJobsQuery | undefined): { text: string; details: Record<string, unknown> } {
 	if (!query) throw new Error("cp_parent jobs needs jobs: { mode: list|history|show, … }");
 	configureLayout(target.mode, target.home);
+	if (query.evidence && query.mode !== "show") throw new Error(`cp_parent jobs ${query.mode} refuses evidence: the selector applies to show only`);
 	if (query.mode === "show") {
 		if (!query.job_id) throw new Error("cp_parent jobs show needs job_id");
 		const ref = query.evidence;

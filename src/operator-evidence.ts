@@ -29,7 +29,7 @@ export interface OperatorEvidence {
 
 type Read = { ok: true; text: string; truncated: boolean } | { ok: false; reason: string; missing: boolean };
 
-/** Read a file under `root` (default the runs dir), refusing a symlink that escapes it; `tail` keeps the newest bytes. */
+/** Read a file under `root` (default: runs), refusing a symlink that escapes it; `tail` keeps the newest bytes. */
 function readConfined(home: string, rel: string, maxBytes: number, tail: boolean, root: string = LAYOUT.runs): Read {
 	let fd: number | undefined;
 	try {
