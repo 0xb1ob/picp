@@ -39,15 +39,16 @@ not candidates passed over by the capacity comparison.
 | `big-ship` | implementer, scope M/L | see defaults/routing.default.json | see defaults/routing.default.json | medium |
 | `small-ship` | implementer, scope S | see defaults/routing.default.json | see defaults/routing.default.json | high |
 
-Profiles (`profiles/*.md`), which is what ordinary planning and QA resolve from
-(cp-routing-t4 left them without a rubric row on purpose):
+Profiles (`profiles/*.md`) name no model since R1 PR4; a profile's `thinking` is the
+effort only where the row names none. Ordinary planning and QA resolve from the template's
+last row, `planner-default`; a home whose rubric left a role uncovered gets that role's row
+from `defaults/routing.role-defaults.json` once (contracts.md §Routing config). Models: see that file.
 
-| profile | preferred | then | effort |
-|---|---|---|---|
-| `planner` | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | medium |
-| `implementer` | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | medium |
-| `qa` | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | low |
-| `gate-reviewer` | `anthropic/claude-opus-5-5` | `openai/gpt-6.1-sol` | high |
+| row | role | effort |
+|---|---|---|
+| `planner-default` | planner | the profile's: `planner` medium, `qa` low, `ops` medium |
+| `implementer-default` | implementer (migration only) | `implementer` medium |
+| `gate-reviewer-default` | gate-reviewer (migration only) | `gate-reviewer` high |
 
 ## The evidence
 
@@ -126,7 +127,7 @@ touched. Adopting the new matrix is therefore an explicit operator step.
 4. **Validate before the first dispatch.**
    - `/doctor` — `config.routing*` and `models.*` green. This is the live
      registry-and-auth read: it proves, on this machine, which providers are
-     actually authenticated and that every profile route resolves. A route
+     actually authenticated and that every rubric route resolves. A route
      carried by a fallback reads `ok` with `fallback from <preferred>`; a route
      with no usable candidate is an `error` naming each candidate and its reason.
    - `cp_dispatch` with `dry_run: true` over a representative grid: a planner
@@ -169,4 +170,4 @@ its conversation or thinking state. The next spawn re-scores independently.
   fallback is resolved once before the spawn. A retry stays bounded; a new
   attempt re-scores before its spawn.
 - It does not let a fallback change the effort, cross from a rubric row to a
-  profile, or rescue an explicit override.
+  row, or rescue an explicit override.

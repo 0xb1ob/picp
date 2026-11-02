@@ -3,8 +3,6 @@ name: gate-reviewer
 role: gate-reviewer
 description: Fresh-context reviewer that scores a research artifact and returns a verdict.
 tools: [read, grep, find, ls, report_verdict]
-model: anthropic/claude-opus-5-5
-fallbacks: [openai/gpt-6.1-sol]
 thinking: high
 briefTemplate: gate-rubric
 readOnly: true

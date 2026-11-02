@@ -451,7 +451,7 @@ async function settingsTab(t: TestContext, { routing = true, models = MODELS, st
 test("P20-settings-page: four sections; Save posts If-Match, the control token and only the drafted keys; a 412 keeps the draft", { timeout: 120_000 }, async (t) => {
 	const ui = await settingsTab(t);
 	assert.deepEqual(ui.tab.$$("section.settings-section > h2").map((h) => h.textContent), ["Model routing", "Parent and operator models", "Grant defaults", "Auto-compaction", "Devices"], "the four settings sections, then the served page's Devices");
-	assert.equal(ui.section("Model routing").querySelectorAll("li.settings-rule").length, 6, "one row per shipped rubric entry");
+	assert.equal(ui.section("Model routing").querySelectorAll("li.settings-rule").length, 7, "one row per shipped rubric entry");
 	const people = ui.section("Parent and operator models");
 	const parent = people.querySelector("#setting-models-parent")!;
 	await ui.choose(parent, "custom");
@@ -519,7 +519,7 @@ test("P20-settings-rubric: rubric edits post the whole row list; restore bodies 
 	await ui.press(ui.section("Model routing"), "Save");
 	const errors = await ui.tab.find(".settings-error");
 	assert.equal(ui.posts().at(-1)?.status, 400);
-	assert.deepEqual([...errors.querySelectorAll("li")].map((li) => li.textContent), ["models.rubric: 6 rows sent for 5; rows cannot be added, removed or reordered here"]);
+	assert.deepEqual([...errors.querySelectorAll("li")].map((li) => li.textContent), ["models.rubric: 7 rows sent for 6; rows cannot be added, removed or reordered here"]);
 });
 
 test("P20-settings-compaction: both keys with what is in force; a bad threshold blocks Save; save and restore round-trip the file", { timeout: 120_000 }, async (t) => {
@@ -555,7 +555,7 @@ test("P20-settings-readonly: no control token is read only with every control di
 	const controls = ui.tab.$$("section.settings-section").flatMap((s) => [...s.querySelectorAll("input, select, textarea, button")]);
 	assert.ok(controls.length > 0 && controls.every((el) => el.hasAttribute("disabled") || el.closest("fieldset[disabled]")), "every settings control is disabled");
 	const workers = ui.section("Model routing");
-	assert.equal(workers.querySelector(".settings-readonly")?.textContent, "No data/routing.json: workers use each profile's own model.");
+	assert.equal(workers.querySelector(".settings-readonly")?.textContent, "No data/routing.json: every worker route is refused until it exists.");
 	assert.equal(workers.querySelectorAll("input, button").length, 0);
 	assert.equal(ui.posts().length, 0);
 });

@@ -316,12 +316,12 @@ JobStatus	type	221dc0ca1696f40f	-
 JobStatusSchema	value	50748456edcad95b	bd62caaeedebc279
 JobsDocument	type	34b6a954ff5d593a	-
 JobsDocumentSchema	value	d617b60b841d313e	0054b5f6f375b7a6
-LAYOUT	value	12b83b5c283bd385	89cc3487c9826b6e
+LAYOUT	value	12b83b5c283bd385	0e853dc0ca343af2
 LEDGER_PREFIX_PATTERN	value	be414b07abc002a0	8b9f60e471e86a5c
 LEGACY_JOB_FIELDS	value	6e6683803c4a2a3a	4f36ea757ebce99a
 LEGACY_ROLE_ALIASES	value	aae3045414f95ecc	6a94f43a3c23d1f9
 LONG_TOOL_CALL_SECONDS	value	6b1b29c2819b6840	983bd614bb5afece
-Layout	type	53e8c03dcb9eb272	-
+Layout	type	d7c3a73e1b4e2bbe	-
 LegacyJobFields	type	223afe8be7d06be3	-
 LegacyTrackerLink	type	05ab940d5ec414a5	-
 LegacyTrackerLinkSchema	value	b46106a1823b10d3	58bf8498c85383af
@@ -425,8 +425,8 @@ PlanSummarySchema	value	209f133e0570f9b1	5549c35ae0a333d9
 PlannerBlocker	type	08e5796a23cb7faa	-
 PlannerBlockerSchema	value	ecb4bc1049897eaf	b417417c98a01569
 PrRemoteState	type	3f66cb04182d0f35	-
-ProfileFrontmatter	type	cbec462ee5fdaa6f	-
-ProfileFrontmatterSchema	value	5861cf2df2b7f877	956093b3749908c1
+ProfileFrontmatter	type	f412b244b92322c1	-
+ProfileFrontmatterSchema	value	2f85979d5984464d	2d54d401951ab792
 Project	type	7e05ebef591d0321	-
 ProjectMandateOverride	type	7c9741e9d89295c6	-
 ProjectRegistryFile	type	0a553c9c4f643cff	-
@@ -659,7 +659,7 @@ WORKER_REQUIRED_FLAGS	value	e45c2236cccc20e3	3e11a790ba9bfaf5
 WorkerHandle	type	84f268dcab8d84fc	-
 WorkerHandleSchema	value	21c1ae898916fe2b	aabf17b75ce303de
 WorkerProfile	type	3b597d36532d6d3f	-
-WorkerProfileSchema	value	2e98ddc5446fe493	da60a0742e39b5d1
+WorkerProfileSchema	value	2e98ddc5446fe493	041cfc02dbfbed63
 authorizationTrigger	value	36098f7163dc03cf	a015b5e75001c16b
 checkpointAwaitingId	value	dbc9f98683bbe7f4	1d99f7ffe720f481
 collectLegacyJobFields	value	4d4d8a6e1a1b4bed	b1ec26a83dad28f1
@@ -687,7 +687,7 @@ isScriptFleetRecord	value	95cbe4d9d4856a64	523b3872abd75820
 isoTimestamp	value	d5fa064e9682f2b7	8fffe8a7895366ce
 jobLabelErrors	value	9d30d4c561e439c6	f1649293814e8928
 jobsInvariantErrors	value	5be789582528685b	76c67dd2470a9390
-layoutFor	value	450180c26cf74160	ba0ec8ea54419432
+layoutFor	value	b1fd2908203a1ec7	ba0ec8ea54419432
 layoutForHome	value	3f3cc27b052470ae	1f4c4199de549bc9
 looksLikeAuthorization	value	0bbe1d31228aefc6	2ded89cfee1063a6
 missingArtifactSections	value	6dd5ba3ca05052c8	a83d546e09108cec

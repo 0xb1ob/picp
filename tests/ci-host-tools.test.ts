@@ -19,7 +19,7 @@ test("CI has treehouse on PATH so the lease suites run instead of skipping", () 
 
 test("the CI no-model-auth tolerance covers only 'no authenticated model at all'", () => {
 	const none =
-		"no usable model for planner job cp-doctor: every candidate for profile planner was refused — " +
+		"no usable model for planner job cp-doctor: every candidate for rubric row planner-default was refused — " +
 		"vendor-a/model-x (availability), vendor-b/model-y (availability). Authenticate one of those providers (`pi auth`), " +
 		"widen `allow`, or edit the candidates in data/routing.json. Available: (none).";
 	const single = "no available model for qa job cp-doctor: vendor-a/model-x (profile, qa) is not usable. A model must be in pi's registry with resolvable auth. Available: (none).";

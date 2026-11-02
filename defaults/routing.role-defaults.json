@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "rubric": [
+    { "id": "planner-default", "role": "planner", "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"] },
+    { "id": "implementer-default", "role": "implementer", "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"] },
+    { "id": "gate-reviewer-default", "role": "gate-reviewer", "model": "anthropic/claude-opus-5-5", "fallbacks": ["openai/gpt-6.1-sol"] }
+  ]
+}

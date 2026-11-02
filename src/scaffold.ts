@@ -24,19 +24,25 @@
  * on this home is that no other agent CLI runs here (T28 finding, answered).
  */
 
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
+	type DoctorFinding,
 	ENV_LEDGER_PREFIX,
 	isSafeLedgerPrefix,
 	LAYOUT,
 	LEDGER_PREFIX_PATTERN,
 	NEVER_COMMIT_PATHS,
+	type RoutingConfig,
 } from "./contracts.ts";
 import { describeHome, PACKAGE_ROOT, type HomeResolution } from "./home.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { initJobsDocument, LedgerError } from "./ledger.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "./mandate-defaults.ts";
+import { uncoveredRoles } from "./routed-models.ts";
+import { boundedList, loadRoutingConfig } from "./routing.ts";
 
 /** Id prefix for the ledger this package creates. Job ids are `cp-...`. */
 export const LEDGER_PREFIX = "cp";
@@ -127,6 +133,7 @@ export function scaffoldHome(options: ScaffoldOptions = {}): ScaffoldReport {
 	// A flat home is not a repository, and it has no dotdir to ignore: no `.gitignore` step at all.
 	if (!flat) steps.push(gitignoreStep(home));
 	steps.push(routingDefaultStep(home, options.packageRoot ?? PACKAGE_ROOT));
+	steps.push(routingRoleDefaultsStep(home, options.packageRoot ?? PACKAGE_ROOT));
 	steps.push(mandateDefaultsStep(home));
 	if (options.ledger !== false) steps.push(ledgerStep(home, env));
 
@@ -187,6 +194,129 @@ function routingDefaultStep(home: string, packageRoot: string): ScaffoldStep {
 	} catch (error) {
 		return { step: "routing.default", action: "failed", detail: (error as Error).message };
 	}
+}
+
+const ROLE_DEFAULTS_MIGRATION = "role-defaults-v1";
+
+/** One `state/routing-migrations.jsonl` line of the `role-defaults-v1` migration. */
+export interface RoleDefaultsJournalLine {
+	migration: string;
+	at: string;
+	outcome: "intent" | "done" | "covered" | "failed";
+	/** intent: the rows about to be appended. */
+	rows?: Array<Record<string, unknown>>;
+	/** done: the appended row ids. */
+	ids?: string[];
+	role?: string;
+	before_sha256?: string;
+	after_sha256?: string;
+}
+
+/** The migration's journal lines, in file order; a torn line (a crash mid-append) is not a migration fact. */
+export function readRoleDefaultsJournal(home: string): RoleDefaultsJournalLine[] {
+	const file = join(home, LAYOUT.routingMigrationsFile);
+	if (!existsSync(file)) return [];
+	return readFileSync(file, "utf8").split("\n").flatMap((line) => {
+		try {
+			const parsed = JSON.parse(line) as RoleDefaultsJournalLine;
+			return parsed?.migration === ROLE_DEFAULTS_MIGRATION ? [parsed] : [];
+		} catch {
+			return [];
+		}
+	});
+}
+
+const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
+
+/**
+ * Once per home (D1): append a default row (defaults/routing.role-defaults.json) for every role an existing
+ * data/routing.json leaves partly unrouted, so nothing that routed through its profile is now refused.
+ * Journaled intent → atomic write → done; existing rows are never rewritten or reordered, legacy role words kept.
+ */
+function routingRoleDefaultsStep(home: string, packageRoot: string): ScaffoldStep {
+	const step = "routing.roles";
+	const journal = readRoleDefaultsJournal(home);
+	if (journal.some((line) => line.outcome === "done" || line.outcome === "covered")) return { step, action: "present" };
+	const file = join(home, LAYOUT.routingFile);
+	if (!existsSync(file)) return { step, action: "skipped", detail: `no ${LAYOUT.routingFile}` };
+	const journalFile = join(home, LAYOUT.routingMigrationsFile);
+	const record = (line: Omit<RoleDefaultsJournalLine, "migration" | "at">): void => {
+		mkdirSync(dirname(journalFile), { recursive: true });
+		appendFileSync(journalFile, `${JSON.stringify({ migration: ROLE_DEFAULTS_MIGRATION, at: new Date().toISOString(), ...line })}\n`);
+	};
+	let text: string, raw: { rubric: Array<Record<string, unknown>> }, config: RoutingConfig;
+	try {
+		text = readFileSync(file, "utf8");
+		raw = JSON.parse(text);
+		config = loadRoutingConfig(home);
+	} catch (error) {
+		return { step, action: "skipped", detail: `${(error as Error).message.split("\n")[0]} (config.routing reports it)` };
+	}
+	try {
+		const intent = [...journal].reverse().find((line) => line.outcome === "intent");
+		if (intent?.rows?.length && isDeepStrictEqual(raw.rubric.slice(-intent.rows.length), intent.rows)) {
+			const ids = intent.rows.map((row) => String(row.id));
+			record({ outcome: "done", ids, after_sha256: sha256(text) });
+			return { step, action: "created", detail: `appended ${ids.join(", ")} to ${file}` };
+		}
+		const uncovered = uncoveredRoles(config);
+		if (uncovered.length === 0) {
+			record({ outcome: "covered" });
+			return { step, action: "present" };
+		}
+		const source = join(packageRoot, "defaults/routing.role-defaults.json");
+		if (!existsSync(source)) return { step, action: "skipped", detail: `no shipped role defaults at ${source}` };
+		const defaults = (JSON.parse(readFileSync(source, "utf8")) as { rubric: Array<Record<string, unknown>> }).rubric;
+		const taken = new Set(raw.rubric.map((row) => row.id));
+		const rows: Array<Record<string, unknown>> = [];
+		for (const { role } of uncovered) {
+			const row = defaults.find((each) => each.role === role);
+			const id = [`${role}-default`, `${role}-default-migrated`].find((each) => !taken.has(each));
+			if (!row || !id) {
+				record({ outcome: "failed", role });
+				continue;
+			}
+			taken.add(id);
+			rows.push({ ...row, id });
+		}
+		const ids = rows.map((row) => String(row.id));
+		if (rows.length > 0) {
+			record({ outcome: "intent", rows, before_sha256: sha256(text) });
+			const next = { ...raw, rubric: [...raw.rubric, ...rows] };
+			atomicWriteJson(file, next);
+			record({ outcome: "done", ids, after_sha256: sha256(`${JSON.stringify(next, null, 2)}\n`) });
+			return { step, action: "created", detail: `appended ${ids.join(", ")} to ${file}` };
+		}
+		record({ outcome: "done", ids });
+		return { step, action: "failed", detail: `no default row could be appended for ${uncovered.map((each) => each.role).join(", ")} (id taken)` };
+	} catch (error) {
+		return { step, action: "failed", detail: (error as Error).message };
+	}
+}
+
+/** Doctor: the `role-defaults-v1` migration's outcome, and any role a scope/risk cell leaves unrouted (P7). */
+export function routingCoverageFindings(home: string, config: RoutingConfig): DoctorFinding[] {
+	const journal = readRoleDefaultsJournal(home);
+	const settled = journal.find((line) => line.outcome === "done" || line.outcome === "covered");
+	const failed = journal.filter((line) => line.outcome === "failed").map((line) => line.role ?? "?");
+	const findings: DoctorFinding[] = [{
+		check: "config.routing.migration",
+		severity: "ok",
+		what: settled?.outcome === "done" ? `routing role defaults appended: ${settled.ids?.join(", ") || "(none)"}`
+			: settled ? "routing role defaults: every role was already routed, nothing appended" : "routing role defaults: not run on this home yet",
+		...(failed.length ? { detail: `no free id for: ${failed.join(", ")}` } : {}),
+	}];
+	const uncovered = uncoveredRoles(config);
+	if (uncovered.length > 0) {
+		findings.push({
+			check: "config.routing.unrouted",
+			severity: "warn",
+			what: `${uncovered.length} role(s) have scope/risk cells no rubric row routes: those jobs are refused`,
+			detail: boundedList(uncovered.map((each) => `${each.role}: ${each.cells.join(", ")}`), { cap: 600 }),
+			fix: `add a row for each role in ${LAYOUT.routingFile} (defaults/routing.role-defaults.json has one per role)`,
+		});
+	}
+	return findings;
 }
 
 /**

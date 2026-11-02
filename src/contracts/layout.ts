@@ -73,6 +73,8 @@ export interface Layout {
 	 */
 	jobsLegacyArchive: string;
 	routingFile: string;
+	/** Append-only journal of one-time routing.json migrations (`role-defaults-v1`). */
+	routingMigrationsFile: string;
 	projectsFile: string;
 	/** Rendered, human-readable view of the registry. Never read back. */
 	projectsView: string;
@@ -154,6 +156,7 @@ export function layoutFor(mode: Mode, runtimeDir: string = RUNTIME_DIR): Layout 
 		jobsFile: at("jobs.json"),
 		jobsLegacyArchive: at("jobs-legacy-fields.jsonl"),
 		routingFile: `${data}/routing.json`,
+		routingMigrationsFile: `${state}/routing-migrations.jsonl`,
 		projectsFile: `${data}/projects.json`,
 		projectsView: `${data}/projects.md`,
 		budgetsFile: `${data}/budgets.json`,

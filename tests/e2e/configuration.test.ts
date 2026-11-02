@@ -226,7 +226,8 @@ test("P16-scaffold: a first session scaffolds a fresh home once, an operator's o
 	assert.doesNotMatch(ownedSteps, /gitignore|routing\.default/, "present steps are not announced");
 	assert.match(ownedSteps, /\+ ledger: created — .*prefix cps/);
 	assert.equal(readFileSync(join(owned, ".gitignore"), "utf8"), "# mine\n");
-	assert.equal(readFileSync(join(owned, LAYOUT.routingFile), "utf8"), mine);
+	assert.deepEqual(JSON.parse(readFileSync(join(owned, LAYOUT.routingFile), "utf8")), { schema_version: 1, allow: ["mock/*"], rubric: JSON.parse(readFileSync(join(app, "defaults/routing.role-defaults.json"), "utf8")).rubric });
+	assert.match(ownedSteps, /\+ routing\.roles: created/);
 	assert.equal(JSON.parse(readFileSync(join(owned, LAYOUT.jobsFile), "utf8")).prefix, "cps");
 
 	for (const bad of ["CP", "1cp", "toolongprefix", "cp-x", "c p"]) {
@@ -1261,7 +1262,7 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	const absentBefore = listing(home);
 	const absent = await b.apply({ mode: "set", changes: { "models.rubric": [] } });
 	assert.equal(absent.status, 409);
-	assert.match(absent.error ?? "", /routing\.json is absent: worker routing uses each profile's model/);
+	assert.match(absent.error ?? "", /routing\.json is absent: no rubric rows, so every worker route is refused/);
 	assert.equal((await b.apply({ mode: "restore", keys: ["models.rubric"] })).state, "unchanged");
 	assert.equal(existsSync(routingFile), false);
 	assert.deepEqual(listing(home, settingsAuditFile(home)), absentBefore);

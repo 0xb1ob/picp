@@ -1965,7 +1965,6 @@ body. The body becomes the worker's appended system prompt.
 name: planner
 role: planner               # planner | implementer | gate-reviewer
 tools: [read, bash, glob]   # allowlist passed to `pi --tools`
-model: anthropic/claude-sonnet-5
 thinking: medium
 briefTemplate: brief-research
 readOnly: true
@@ -8926,15 +8925,16 @@ cp-cxt):
 2. **rubric** — first matching `rubric[]` row on `role` (required) plus
    optional `project`, `scope` and `risk`; a row may also set `thinking`
    (`source: "rubric"`)
-3. **profile default** — the profile's `model` and `thinking`
-   (`source: "profile"`)
+3. **no row** — refused (`refusal: "unrouted"`, `no rubric row in data/routing.json routes <role> job <id>`).
+   A profile carries no `model` or `fallbacks` (R1 PR4); its `thinking` is the
+   effort when neither the override nor the row names one.
 
 **Role deny (`deny_by_role`, cp-7re9).** An optional
 `deny_by_role: { planner?, implementer?, "gate-reviewer"? }` lists minimatch
 patterns (≤64 each, 1–128 chars) on `provider/model-id`. It is checked after
 `allow` on **every** candidate: the explicit override (`cp_dispatch model`, a
 `cp_gate`/`cp_review` model, a project or mandate `reviewer_model`, a
-`QualityConfig.model`), a single-model rubric row, the profile default, and each
+`QualityConfig.model`), a single-model rubric row, and each
 member of a fallback walk. A one-candidate source that matches refuses with
 `RoutingError` refusal `allowlist`, message
 `settings: model <ref> is not allowed for role <role> (…; data/routing.json deny_by_role.<role> matches <pattern>)`;
@@ -8948,14 +8948,14 @@ empty or overlong pattern) makes the whole file invalid, exactly like any
 invalid `routing.json` today. Absent, nothing is denied.
 
 **Fallback is capability-gated and confined to the picked source.** A rubric
-row and a profile may carry `fallbacks: […]` (≤4 refs) after `model`. The
+row may carry `fallbacks: […]` (≤4 refs) after `model`. The
 allowlist, availability and effective effort gates filter `[model, ...fallbacks]`
 first. When capacity is known, the highest free-slot provider wins; otherwise
 the first eligible candidate wins in file order. Ties keep file order. This
 keeps everything cp-eff was protecting:
 
 - **The installation contract is one provider.** Anthropic or OpenAI
-  authenticated in pi is enough: the shipped template and the shipped profiles
+  authenticated in pi is enough: the shipped template
   resolve **every** (role, scope, risk) route under either one alone, and
   `tests/e2e/routing.test.ts` (P16-route-default) proves both one-provider matrices against pi's own
   registry metadata. (xAI was dropped from every ladder in the 2026-09-23 model
@@ -8970,7 +8970,7 @@ keeps everything cp-eff was protecting:
   individual mandates may store optional `reviewer_model`: a trimmed exact
   `provider/model` reference, at most 128 characters and without whitespace (the
   first slash separates the provider). Existing records remain valid and unset
-  preferences keep rubric/profile routing. No subject worker model or objective
+  preferences keep rubric routing. No subject worker model or objective
   prose supplies a reviewer preference.
 
   ```text
@@ -9001,7 +9001,7 @@ keeps everything cp-eff was protecting:
   source (`explicit`, `mandate` or `project`) and optional mandate id beside
   `routing_resolved`; wholly unset settings add no selection event.
 - **No cross-source fall-through.** An exhausted rubric row refuses
-  (`refusal: "exhausted"`); it does not fall to the profile default. The row is
+  (`refusal: "exhausted"`); it never falls to another row. The row is
   operator policy for that class of job, and running something else there is the
   silent substitution cp-eff refused.
 - **The effort is never substituted.** The effective level is the override's,
@@ -9019,7 +9019,7 @@ keeps everything cp-eff was protecting:
   there is a list.** Narrowing `allow` to the providers you authenticate is
   exactly what this document tells operators to do, so with candidates a
   disallowed one is skipped *with provenance*; a **single**-candidate source (an
-  override, or a row/profile with no `fallbacks`) keeps the hard `allowlist`
+  override, or a row with no `fallbacks`) keeps the hard `allowlist`
   configuration error it always had. All candidates gone is `exhausted`, naming
   each candidate and the gate that refused it.
 
@@ -9054,7 +9054,6 @@ every doctor finding point at a name that no longer identifies a row. So:
   row.
 - **Configured effort is checked against pi's own metadata, before a job needs
   it.** `effortPolicyDrift()` walks the pairs a spawn would actually use — each
-  profile's own model+level and each of its `fallbacks` at that level, and each
   rubric row's model **and every candidate after it** at the level that row
   would apply (its own, else the profile's) — and applies exactly the rule
   `resolveModel` refuses with, through the one predicate both call
@@ -9466,8 +9465,8 @@ within a segment, `**` across segments, everything else literal. That covers
 every shape the allowlist uses (`anthropic/*`, `*/*`, `**`, exact refs) without
 importing brace/negation semantics nobody wanted.
 
-The allowlist gates **every** source, including the profile default: a rubric row
-or profile that names a refused model is a configuration error, not a silent
+The allowlist gates **every** source: a rubric row
+that names a refused model is a configuration error, not a silent
 skip. Availability means the pi model registry knows the model **and**
 its provider auth resolves (`registryProbe`) — known-but-unauthenticated is
 unavailable. It is probed *before* the lease, so an unavailable model never
@@ -9477,54 +9476,48 @@ leaves an orphan branch. Every decision is printed and stored as
 The shipped rows live in defaults/routing.default.json; cp_dispatch dry_run and /doctor show what each route resolves to
 (check `pi --list-models` for the ids this machine knows).
 
-The four shipped profiles carry the same shape, one `fallbacks:` line each,
-which is what makes the profile-sourced routes
-— ordinary planning and QA — resolve on a one-provider machine too. The
+Every shipped row carries a `fallbacks:` line, which is what makes every route
+resolve on a one-provider machine too. The
 candidates and the capability evidence behind them are in
 [`docs/routing-rollout.md`](routing-rollout.md); with Anthropic authenticated
 every route resolves to its preferred candidate, with no `attempted` list.
 
 Rows are matched in order, so the narrow ones come first: the two `risk: "high"`
-rows before the size rows. Both remaining planner rows resolve to the same model and
+rows before the size rows. The planner rows resolve to the same model and
 differ only in `thinking` — kept explicit rather than collapsed, because each row
 documents an operator decision and a later model change is then a one-row edit.
 Add `"project": "<registered name>"` to
 a row to make it apply in one repository only.
 
-**Ordinary planning and ordinary QA route through their profiles, not through a
-rubric row (cp-routing-t4).** The shipped template used to carry a broad
-`research` catch-all (`role: planner`, no `scope`, no `risk`) as its last planner
-row. Because `qa` shares the `planner` role — there is no separate role, purpose
-field or profile matcher, and none is being added — that row matched **every**
-small question `cp_ask` dispatched as well as every ordinary plan, and the two
-profiles' own `model`/`thinking` defaults could never take effect. The row is
-removed. What each case resolves to now:
+**Ordinary planning and ordinary QA share one last planner row, `planner-default`,
+with no `thinking` (R1 PR4).** `qa` shares the `planner` role — there is no
+separate role, purpose field or profile matcher — so the row carries no effort and
+each profile's own `thinking` still separates them. What each case resolves to:
 
 | case | source | model | effort |
 |---|---|---|---|
-| QA (`cp_ask`, S/low) | `profile qa` | `profiles/qa.md` (Opus 5.5) | `low` |
-| ordinary planning (S or M, low risk) | `profile planner` | `profiles/planner.md` (Opus 5.5) | `medium` |
+| QA (`cp_ask`, S/low) | rubric `planner-default` | Opus 5.5 | `low` (`profiles/qa.md`) |
+| ordinary planning (S or M, low risk) | rubric `planner-default` | Opus 5.5 | `medium` (`profiles/planner.md`) |
 | planning, scope L, low risk | rubric `research-big` | Opus 5.5 | `high` |
 | planning, any scope, high risk | rubric `risky-any` | Opus 5.5 | `xhigh` |
 | explicit `model`/`thinking` override | `override` | as named | as named |
 
-**History.** cp-routing-t4 moved ordinary low-risk planning off the catch-all
-(then Opus 5) onto the planner profile (then Sonnet 5), with `profiles/planner.md`'s
-`thinking` moved `high` → `medium` so the ordinary effort was retained rather
-than raised by the fall-through. Since the 2026-09-23 model refresh that profile
-is Opus 5.5 at `medium`, so ordinary planning is back on the top Anthropic tier
-without a row; large and high-risk planning still come from their narrow rows,
-which differ only in effort. Re-adding a planner catch-all is now only a way to
-change the ordinary *effort*.
+**History.** cp-routing-t4 removed the template's broad `research` catch-all,
+which matched every `cp_ask` too and set one effort for both, and let ordinary
+planning fall through to the profile's model. R1 PR4 took `model`/`fallbacks` out
+of profiles, so that fall-through became the `planner-default` row, effort-free.
 
-**An existing `data/routing.json` is unaffected by this, on upgrade and
-forever.** The scaffold's `routing.default` step is copy-once (`present`, never
-`created`, once the file exists), so a home that already carries the old
-seven-row rubric keeps its `research` catch-all byte for byte and keeps routing
-ordinary planning to Opus. That is not a stale file to be corrected: it is
-configured policy, and it stays in force until the operator deletes the row
-deliberately. Only a home with no `data/routing.json` at all gets the new
-six-row template.
+**An existing `data/routing.json` keeps every row it has, byte for byte.** The
+scaffold's `routing.default` step is copy-once. The `routing.roles` step then runs the
+one-time migration `role-defaults-v1`: for each role some scope/risk cell of which no
+project-free row covers (the cells the old profile fall-through served), it appends that
+role's row from `defaults/routing.role-defaults.json` — `<role>-default`, or
+`<role>-default-migrated` when the id is taken — at the end of the rubric, so it only
+catches what nothing else did. It never rewrites, reorders or removes a row. Each run is
+journaled in `state/routing-migrations.jsonl` (`intent` with the rows and the file's
+sha256, then `done`, or `covered`/`failed`); a `done` or `covered` line makes it a no-op forever, so a
+row the operator deletes later stays deleted, and doctor's `config.routing.unrouted`
+names the roles that left uncovered.
 
 The ported rubric (command-post `reports/model-routing.md`) becomes `rubric[]`
 rows on `role`/`project`/`scope`/`risk`, first match wins, with the ported
@@ -9610,7 +9603,7 @@ provenance can differ by process.
 
 **Model keys (cp-settings-minimal).** `models.rubric` is `data/routing.json` `rubric`
 (the rows as loaded; the snapshot's `routing` owner row says `absent` when there is no file,
-and then workers use each profile's model). `models.parent` and `models.operator` are
+and then every worker route is refused). `models.parent` and `models.operator` are
 `data/parent.json` and `data/operator.json` `model` (a `provider/id` ref; absent means
 unset). Their source is `file` when the owner has a valid key, else `env` for a set
 `CP_PARENT_MODEL` / `CP_OPERATOR_MODEL`, else `code` with value null; an invalid key is
@@ -9671,7 +9664,7 @@ the scaffold for `mandate-defaults.json`, `DEFAULT_BUDGET_CONFIG` for `budgets.j
 `{}` otherwise. `capacity.json` is never created here (409, use `cp-install --gateway-url`).
 An absent `parent.json` gets `{compact_at_tokens: 150000}` beside the new `model`, because
 a model-only file would read as invalid and turn compaction off. An absent `routing.json` is
-409 (workers use each profile's model; there is no rubric to edit).
+409 (no rubric rows, so every worker route is refused; there is no rubric to edit).
 
 **Policy keys outside the catalog (cp-7re9).** `routing.json` `deny_by_role`,
 `worker-bounds.json` `allow_dispatch_override` and `mandate-defaults.json`
