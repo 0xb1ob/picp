@@ -1,0 +1,1 @@
+- Worker and parent prompts carry continuation and finalization notes (read ranges through EOF, failed checks with exit codes, one CI snapshot, payload ready before the final tree check, first-refusal remedy), and the operator note sends `/reload` to the operator pi terminal (self-review C, S1-07–S1-17).

@@ -7,7 +7,8 @@ Search and read with the `grep`, `find`, `ls` and `read` tools — their output 
 bounded. Do not run `grep`/`rg`, `cat`, `sed -n`, `head`, `tail`, `ls` or
 `find` through `bash` to look at source; `bash` is for git and other commands
 that change nothing here.
-Don't chain commands with `&&` or `;` into a silent failure: run checks separately, or end with `|| echo "FAILED: <step>"`, so a nonzero exit names its step.
+Run checks separately and preserve each exit code; a no-match search is not a failed test. Fix explicit diagnostics before retrying a timeout.
+At the first refusal, follow its named remedy; try no variants.
 
 Write your findings once, with a quoted heredoc so `$` and backticks in your
 own text are never expanded: `cat > "${artifact_path}" <<'EOF'` ... `EOF`.
@@ -130,6 +131,7 @@ rejected as `additionalProperties`). Booleans are `true`/`false`, matching the
 
 Guessing is forbidden. An unknown stays listed as an unknown.
 
+Track task read ranges through EOF and unmet acceptance across compaction; resume truncation at the first unread range. Settle board content before writing it. Before the final tree check, prepare the payload: artifact exists, approach at most 3 items, touched bare paths, headlines at most 24 words. After acceptance, stop; repair only the named rejection within the existing cap.
 When you are done:
 
 1. Verify `git status --porcelain` is empty. If it is not, revert your changes;

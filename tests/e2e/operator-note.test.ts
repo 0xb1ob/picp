@@ -104,6 +104,8 @@ test("human and bridge turns share system bytes, including a relay after session
 	assert.ok(humanRequest, "no human request");
 	const humanSystem = JSON.stringify(humanRequest.body.messages?.filter((m) => m.role === "system"));
 	assert.ok(humanSystem.includes("Three tiers, smallest first"), "note missing from human request's SYSTEM messages");
+	const reload = "For `/reload`, ask the human to type it in the terminal running the operator pi session; dashboard chat does not execute slash commands.";
+	assert.ok(humanSystem.includes(reload), "the terminal /reload sentence is missing from the operator's SYSTEM messages");
 
 	const outbox = new OperatorRelayOutbox(operatorRelayOutboxFile(join(home.path, layoutForHome("multi", home.path).state)));
 	const enqueue = (text: string) => outbox.enqueue({
@@ -137,6 +139,7 @@ test("human and bridge turns share system bytes, including a relay after session
 	assert.ok(JSON.stringify(resumedRequest.body).includes("resumed cache-prefix probe"));
 	const resumedSystem = JSON.stringify(resumedRequest.body.messages?.filter((m) => m.role === "system"));
 	assert.ok(resumedSystem.includes("Three tiers, smallest first"), "note did not survive resume in SYSTEM messages");
+	assert.ok(resumedSystem.includes(reload), "the terminal /reload sentence did not survive resume");
 	assert.equal(resumedSystem, humanSystem, "resume changed the persisted system prompt");
 	assert.equal(provider.remaining(script), 0);
 });
