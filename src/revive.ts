@@ -32,11 +32,12 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, paths, type Role, type ThinkingLevel } from "./contracts.ts";
+import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type JobRouting, paths, type Role, type ThinkingLevel } from "./contracts.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
 import { loadProfile } from "./profiles.ts";
-import { requireRouted } from "./routed-models.ts";
-import { loadRoutingConfig, RoutingError } from "./routing.ts";
+import { type ModelProbe, RoutingError } from "./routing.ts";
+import { respawnRoute, type RespawnRoute } from "./reroute.ts";
+import { snapshotPickedAttempt } from "./operator-model-pick.ts";
 import type { RunRegistry } from "./runs.ts";
 import { type CarriedBounds, resolveJobHardBounds } from "./bounds.ts";
 import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts";
@@ -63,6 +64,7 @@ export const REVIVE_REFUSAL_CODES = [
 	"session_scan_failed",
 	"skill_unresolved",
 	"model_unrouted",
+	"route_refused",
 ] as const;
 export type ReviveRefusalCode = (typeof REVIVE_REFUSAL_CODES)[number];
 
@@ -119,6 +121,9 @@ export interface RevivePlan {
 	checkpoint?: { ref: string; sha?: string };
 	/** The record's operator-named skills, re-resolved by name at plan time. */
 	skills?: ResolvedSkill[];
+	/** R1 D2: the fresh routing that replaces a picked attempt's, and that attempt's id. */
+	routing?: JobRouting;
+	priorPick?: string;
 }
 
 export type RevivePlanResult = RevivePlan | ReviveRefusal;
@@ -191,6 +196,8 @@ export interface ReviverOptions {
 	released?: (jobId: string) => boolean;
 	/** pi's agent dir for skill re-resolution; tests pass a scratch dir. */
 	skillAgentDir?: string;
+	/** The live availability probe for a picked job's fresh route (absent: always available). */
+	probe?: () => ModelProbe;
 }
 
 async function safely(fn: () => Promise<unknown>): Promise<void> {
@@ -483,12 +490,14 @@ export class Reviver {
 			);
 		}
 
-		// P6: a respawn never resumes on a model data/routing.json does not route (an override it no longer names).
+		// P6: a respawn never resumes on a model data/routing.json does not route; R1 D2: a picked job reroutes.
+		let route: RespawnRoute;
 		try {
-			requireRouted(loadRoutingConfig(this.#options.home), record.worker.model, `the respawn of ${jobId} on its recorded model`);
+			route = respawnRoute({ home: this.#options.home, profilesDir: this.#options.profilesDir, record: { ...record, worker: record.worker }, ...(this.#options.probe ? { probe: this.#options.probe() } : {}), where: `the respawn of ${jobId} on its recorded model` });
 		} catch (error) {
-			if (!(error instanceof RoutingError && error.refusal === "unrouted")) throw error;
-			return refuse(jobId, "model_unrouted", `${error.message} Nothing was spawned: add the model to a rubric row and retry, or tear the job down and re-dispatch.`);
+			if (!(error instanceof RoutingError) || !error.refusal) throw error;
+			if (error.refusal === "unrouted") return refuse(jobId, "model_unrouted", `${error.message} Nothing was spawned: add the model to a rubric row and retry, or tear the job down and re-dispatch.`);
+			return refuse(jobId, "route_refused", `${error.message} Nothing was spawned.`);
 		}
 
 		// Operator-named skills are re-resolved by name: a directory is never trusted from the record.
@@ -502,11 +511,12 @@ export class Reviver {
 			job_id: jobId,
 			session_file: record.worker.session_file,
 			worktree: record.worktree,
-			model: record.worker.model,
+			model: route.model,
+			...(route.routing ? { routing: route.routing } : {}), ...(route.priorPick ? { priorPick: route.priorPick } : {}),
 			profile: record.worker.profile,
 			role: record.worker.role,
 			worktreeDirty: worktreeState.dirty,
-			...(record.routing?.thinking ? { thinking: record.routing.thinking } : {}),
+			...(route.thinking ? { thinking: route.thinking } : {}),
 			...(interruptedTool ? { interruptedTool } : {}),
 			...(record.phase === "failed" && record.failure ? { continuesFailure: record.failure } : {}),
 			...(closesWorker ? { closesWorker: true as const } : {}),
@@ -529,6 +539,8 @@ export class Reviver {
 			throw new ReviveError(`cannot revive ${jobId} (${plan.code}): ${plan.message}`);
 		}
 		const record = this.#options.fleet.require(jobId);
+		// R1 D2: the picked attempt is frozen before anything replaces it (a mismatched snapshot refuses here).
+		snapshotPickedAttempt(this.#options.home, record);
 		// Only `recovering` or `continueFailed` let a failed record through `plan`.
 		const continuing = record.phase === "failed";
 		const now = this.#options.now ?? (() => new Date());
@@ -573,6 +585,7 @@ export class Reviver {
 				session_file: plan.session_file,
 				model: plan.model,
 				...(plan.interruptedTool ? { interrupted_tool: plan.interruptedTool } : {}),
+				...(plan.priorPick ? { rerouted_after_pick: plan.priorPick } : {}),
 				...(continuing
 					? { continuation: options?.recovering ? "bounded_recovery" : "operator", ...(record.failure ? { prior_failure: record.failure } : {}) }
 					: restoring ? { continuation: "held_release" } : {}),
@@ -589,7 +602,7 @@ export class Reviver {
 					: {}),
 				...(this.#options.onUsage ? { onUsage: this.#options.onUsage } : {}),
 			});
-			const worker = { ...record.worker, pid: managed.worker.pid as number, started_at: isoTimestamp(now()) };
+			const worker = { ...record.worker, model: plan.model, pid: managed.worker.pid as number, started_at: isoTimestamp(now()) };
 			if (options?.recovering || continuing) {
 				// This record entered `revive()` as `phase: failed` (bounded recovery or
 				// operator continuation): the worker just relaunched, so `failed` is no
@@ -603,9 +616,10 @@ export class Reviver {
 					job.phase = "waiting";
 					delete job.failure;
 					job.worker = worker;
+					if (plan.routing) job.routing = plan.routing;
 				});
 			} else {
-				await this.#options.fleet.patch(jobId, { worker });
+				await this.#options.fleet.patch(jobId, { worker, ...(plan.routing ? { routing: plan.routing } : {}) });
 			}
 		} catch (error) {
 			// The fleet must never disagree with the manager: a worker the fleet

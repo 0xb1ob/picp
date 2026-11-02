@@ -6,12 +6,21 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolveProjectArg } from "../../src/mode.ts";
-import { type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, SkillNameSchema, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
+import { OperatorModelPickReferenceSchema, type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, SkillNameSchema, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
 import { BlockedDispatchError, formatDispatchPreview, formatDispatchResult } from "../../src/dispatch.ts";
+import { checkStoredPick } from "../../src/reroute.ts";
 import { SpawnSafetyError } from "../../src/worker-manager.ts";
 import { formatPreflight } from "../../src/preflight.ts";
 import { currentRuntime } from "./helpers.ts";
 import type { ExtensionDeps } from "./shared.ts";
+
+/** R1 D2: the reference `cp_parent model_pick` returned; only with an explicit model it names. */
+const OperatorQuoteParam = Type.Object(OperatorModelPickReferenceSchema.properties, {
+	additionalProperties: false,
+	description:
+		"Only the {version, proof_id, quote} the operator bridge's cp_parent model_pick returned, verbatim, with the model it names. " +
+		"Never invent, edit or reuse one: it is verified against the human's own message and honoured once for this job only.",
+});
 
 export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): void {
 	const { commandPost, setLive, refreshWidget, askQuestion } = deps;
@@ -47,6 +56,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			question: Type.String({ description: "The question, as the operator asked it. It becomes the job title and the worker's task." }),
 			model: Type.Optional(Type.String({ description: "Omit: routing decides (data/routing.json). An explicit model must already be named there, else refused." })),
 			thinking: Type.Optional(StringEnum([...THINKING_LEVELS], { description: "Explicit effort override" })),
+			operator_quote: Type.Optional(OperatorQuoteParam),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
@@ -55,6 +65,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				question: params.question,
 				...(params.model ? { model: params.model } : {}),
 				...(params.thinking ? { thinking: params.thinking as ThinkingLevel } : {}),
+				...(params.operator_quote ? { operatorQuote: params.operator_quote } : {}),
 				registry: ctx.modelRegistry,
 			});
 			refreshWidget(ctx);
@@ -112,6 +123,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			scope: Type.Optional(StringEnum([...SCOPES], { description: SCOPE_CRITERIA })),
 			risk: Type.Optional(StringEnum([...RISKS], { description: RISK_CRITERIA })),
 			model: Type.Optional(Type.String({ description: "Omit: routing decides (data/routing.json). An explicit model must already be named there, else refused." })),
+			operator_quote: Type.Optional(OperatorQuoteParam),
 			thinking: Type.Optional(
 				StringEnum([...THINKING_LEVELS], {
 					description:
@@ -168,6 +180,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
+			if (params.operator_quote && (await commandPost(ctx.modelRegistry).ledger().show(params.job_id)).script) throw new Error(`${params.job_id} is a script job: operator_quote is refused, a script runs no model`);
 			if (params.dry_run === true) {
 				// No `refreshWidget`: preview changes no fleet state.
 				const preview = await commandPost(ctx.modelRegistry).previewDispatch({
@@ -183,6 +196,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					...(params.wall_clock_seconds !== undefined ? { wallClockSeconds: params.wall_clock_seconds } : {}),
 					...(params.tool_call_cap !== undefined ? { toolCallCap: params.tool_call_cap } : {}),
 					...(params.skills ? { skills: params.skills } : {}),
+					...(params.operator_quote ? { operatorQuote: params.operator_quote } : {}),
 				});
 				return {
 					content: [{ type: "text", text: formatDispatchPreview(preview) }],
@@ -209,6 +223,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					...(params.tool_call_cap !== undefined ? { toolCallCap: params.tool_call_cap } : {}),
 					...(params.skills ? { skills: params.skills } : {}),
 					...(params.pr ? { pr: params.pr } : {}),
+					...(params.operator_quote ? { operatorQuote: params.operator_quote } : {}),
 				});
 			} catch (error) {
 				// unload-parent PR2: only open blockers arm, unless when_ready:false.
@@ -216,6 +231,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 					const { job_id: _id, dry_run: _dry, queue: _queue, when_ready: _ready, ...request } = params;
 					let armed: { rearmed: boolean };
 					try {
+						checkStoredPick(post.home, params.job_id, params.model, params.operator_quote);
 						armed = post.armedDispatches.arm(params.job_id, request as QueuedDispatchRequest, error.blockers);
 					} catch (armError) {
 						// The blocked refusal stands; why it was not armed is named on it.
@@ -234,6 +250,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				const { job_id: _id, dry_run: _dry, queue: _queue, when_ready: _ready, ...request } = params;
 				let position: number;
 				try {
+					checkStoredPick(post.home, params.job_id, params.model, params.operator_quote);
 					position = post.dispatchQueue.enqueue(params.job_id, request as QueuedDispatchRequest);
 				} catch (queueError) {
 					// Today's refusal stands; the queue failure is named on it.

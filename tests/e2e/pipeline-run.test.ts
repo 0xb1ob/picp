@@ -44,6 +44,7 @@ import {
 	treehouseAvailable,
 	waitFor,
 } from "../harness/index.ts";
+import { seedOperatorPick } from "../harness/operator-pick.ts";
 
 const SKIP = treehouseAvailable() ? false : "the pipeline e2e needs treehouse on PATH";
 
@@ -1450,6 +1451,53 @@ test("#648: cp_pipeline start carries implementer_model through the tool; recove
 	await call({ action: "advance", research_id: started.research_id, implementer_model: null });
 	assert.equal(b.post.pipeline().store.require(started.research_id).implementer_model, undefined, "advance null clears the pin");
 	await b.post.tearDown(started.research_id, { force: true });
+});
+
+// R1 D2: a pipeline ship whose own advance could not spawn is started by cp_dispatch with the operator's pick; advance
+// only observes it, and cp_pipeline recover routes freshly. Negative control: copying the pick to implementer_model.
+test("D2-pipeline: a picked ship advances by observation, recovers on the rubric, and never pins the pick", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const steps: ScriptStep[] = [];
+	const b = await bench(t, steps);
+	const file = join(b.home, LAYOUT.routingFile);
+	const routing = readFileSync(file, "utf8");
+	const implementer = (JSON.parse(routing).rubric as Array<{ role: string; model: string }>).find((row) => row.role === "implementer")!.model;
+	// No implementer row at the hand-off: the advance refuses the ship's spawn and leaves it approved, undispatched.
+	const ids = await handoff(b, steps, { task: BUMP, assessment: CONFIDENT, keep: true, prep: () => writeFileSync(file, JSON.stringify({
+		...JSON.parse(routing), rubric: JSON.parse(routing).rubric.filter((row: { role: string }) => row.role !== "implementer") })) });
+	assert.ok(ids.error, "the ship's own dispatch was refused");
+	assert.equal(b.post.fleet.get(ids.shipId), undefined);
+	writeFileSync(file, routing);
+	const quote = seedOperatorPick(b.home, b.named, { jobId: ids.shipId });
+	const taskFile = join(b.home, paths.taskFile(ids.shipId));
+	const task = readFileSync(taskFile, "utf8");
+	await b.post.dispatch({ jobId: ids.shipId, taskFile, model: b.named, operatorQuote: quote, fetch: false });
+	const picked = b.post.fleet.require(ids.shipId);
+	assert.deepEqual([picked.worker.model, picked.routing?.operator_pick?.proof_id], [b.named, quote.proof_id]);
+	const advanced = await b.post.advancePipeline(ids.researchId);
+	assert.deepEqual([advanced.next, b.post.fleet.require(ids.shipId).worker.pid], ["wait", picked.worker.pid], advanced.message);
+	assert.equal(b.post.pipeline().store.require(ids.researchId).implementer_model, undefined, "the pick is never a pin");
+
+	// The P11d-recover choreography, then recover: the rubric decides, the pick stays in the original attempt only.
+	const failure = { class: "crash" as const, message: "worker died", at: isoTimestamp() };
+	b.post.runs.open(ids.shipId).markFailure(failure);
+	await b.post.fail(ids.shipId, failure);
+	await b.post.tearDown(ids.shipId, { force: true });
+	execFileSync("git", ["-C", b.clone, "branch", "-D", ids.shipId], { stdio: "ignore" });
+	await b.post.pipeline().recoverShip(ids.researchId);
+	const recovered = b.post.fleet.require(ids.shipId);
+	const routed = routedOf(b, ids.shipId) ?? {};
+	assert.deepEqual([recovered.worker.model, recovered.routing?.operator_pick, routed.source, routed.model, routed.operator_pick, routed.prior_pick_attempt],
+		[implementer, undefined, "rubric", implementer, undefined, picked.routing!.operator_pick!.attempt_id]);
+	const snapshot = JSON.parse(readFileSync(join(b.home, LAYOUT.runs, ids.shipId, "attempts", `${picked.routing!.operator_pick!.attempt_id}.json`), "utf8"));
+	assert.deepEqual([snapshot.worker.model, snapshot.routing.operator_pick.quote], [b.named, quote.quote]);
+	assert.deepEqual([b.post.pipeline().store.require(ids.researchId).implementer_model, readFileSync(taskFile, "utf8"), readFileSync(file, "utf8")], [undefined, task, routing]);
+	await b.post.tearDown(ids.shipId, { force: true });
+
+	// The pipeline tool takes no pick at all.
+	const tools = new Map<string, { parameters: { properties: Record<string, unknown> } }>();
+	registerReviewTools({ registerTool: (tool: { name: string }) => tools.set(tool.name, tool as never) } as never,
+		{ commandPost: () => b.post, setLive: () => {}, refreshWidget: () => {} } as never);
+	assert.equal("operator_quote" in tools.get("cp_pipeline")!.parameters.properties, false);
 });
 
 test("P11d-plan-revise: a conversation revise re-gates the plan only once its artifact changes", { skip: SKIP, timeout: 300_000 }, async (t) => {

@@ -6,7 +6,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { HumanPrompt } from "../../src/awaiting-ui.ts";
 import type { CommandPost } from "../../src/command-post.ts";
-import type { ThinkingLevel } from "../../src/contracts.ts";
+import type { OperatorModelPickReference, ThinkingLevel } from "../../src/contracts.ts";
 import type { ParentLock } from "../../src/parent-lock.ts";
 import type { PlanTarget } from "../../src/plan-view.ts";
 import type { ScheduleRunner } from "../../src/schedule-runner.ts";
@@ -27,6 +27,7 @@ export interface ExtensionDeps {
 		question: string;
 		model?: string;
 		thinking?: ThinkingLevel;
+		operatorQuote?: OperatorModelPickReference;
 		registry?: unknown;
 	}) => Promise<{ job_id: string; dispatch: Awaited<ReturnType<CommandPost["dispatch"]>> }>;
 	/** An accessor like the rest: a module reads the session's current array at call time, never a registration-time copy. */

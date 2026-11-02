@@ -43,6 +43,7 @@ import { relaunchPorts } from "../../src/operator-relaunch.ts";
 import { parentRestartPorts, restartedLine } from "../../src/parent-restart.ts";
 import { settingsPorts } from "../../src/settings-control.ts";
 import { startVersionLine, type VersionLine } from "./version-line.ts";
+import { modelPick } from "./model-pick.ts";
 
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { registerOperatorCompact } from "../../src/operator-compact.ts";
@@ -616,7 +617,10 @@ export default function (pi: ExtensionAPI): void {
 			"Every relay to the human starts with its bracketed project, e.g. [demo-app] cp-78vu: \u2026; split an update spanning several projects into one section per project.",
 		],
 		parameters: Type.Object({
-			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "doctor", "version", "drain", "drain_cancel", "compact", "rotate", "model", "restart", "stop", "jobs"], { description: "manage or diagnose the parent; jobs reads the ledger directly" }),
+			action: StringEnum(["start", "send", "status", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "doctor", "version", "drain", "drain_cancel", "compact", "rotate", "model", "restart", "stop", "jobs", "model_pick"], { description: "manage or diagnose the parent; jobs reads the ledger directly" }),
+			quote: Type.Optional(Type.String({ minLength: 1, maxLength: 16_000, description: "model_pick: the human's own words naming the model, verbatim and contiguous" })),
+			source_entry_id: Type.Optional(Type.String({ description: "model_pick: that human message's session entry id; omit for the newest human message containing quote" })),
+			control_id: Type.Optional(Type.String({ description: "model_pick: the dashboard request id (dc-…) when the human typed it in the dashboard" })),
 			jobs: Type.Optional(OperatorJobsQuerySchema),
 			timeout_s: Type.Optional(Type.Number({ minimum: 0, maximum: DRAIN_MAX_TIMEOUT_S, description: `drain: seconds to wait for live workers to settle (default ${DRAIN_DEFAULT_TIMEOUT_S})` })),
 			freeze: Type.Optional(Type.Boolean({ description: "drain: also steer each mid-turn implementer to commit and push its WIP and end its turn without reporting (before a usage pause)" })),
@@ -640,6 +644,7 @@ export default function (pi: ExtensionAPI): void {
 		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 			try {
 				if (params.action === "jobs") { const read = operatorJobs(connectedTarget ?? resolveOperatorTarget(), params.jobs); return textResult(read.text, read.details); }
+				if (params.action === "model_pick") return textResult(...modelPick(params, ctx, connectedTarget ?? resolveOperatorTarget()));
 				if (params.action === "integration_hold" || params.action === "integration_release") {
 					if (!params.job_id) throw new CpBridgeError(`${params.action} needs job_id`);
 					const target = connectedTarget ?? resolveOperatorTarget();
@@ -788,7 +793,7 @@ export default function (pi: ExtensionAPI): void {
 				);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				return { ...textResult(message), ...(["doctor", "version", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "jobs"].includes(params.action) ? { isError: true } : {}) };
+				return { ...textResult(message), ...(["doctor", "version", "ask", "ask_answer", "ask_withdraw", "answer", "integration_hold", "integration_release", "jobs", "model_pick"].includes(params.action) ? { isError: true } : {}) };
 			}
 		},
 	});

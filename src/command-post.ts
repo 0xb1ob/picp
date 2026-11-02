@@ -528,7 +528,7 @@ export class CommandPost {
 		this.recovery = new BoundedRecovery({
 			home: options.home,
 			fleet: this.fleet,
-			runs: this.runs,
+			runs: this.runs, probe: () => this.probe(),
 			escalations: this.escalations,
 			reviver: () => this.reviver(),
 			sender: {
@@ -1222,7 +1222,7 @@ export class CommandPost {
 			profilesDir: this.profilesDir,
 			fleet: this.fleet,
 			manager: this.manager,
-			runs: this.runs,
+			runs: this.runs, probe: () => this.probe(),
 			...this.#observers(),
 		});
 	}

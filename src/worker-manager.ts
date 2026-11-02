@@ -348,6 +348,8 @@ export interface SpawnRequest {
 	sessionFile?: string;
 	sessionName?: string;
 	spawnGuard?: WorkerSpawnOptions["spawnGuard"];
+	/** Runs once the cap admits this spawn, before any process starts; a throw spawns nothing (R1 D2 pick claim). */
+	admit?: () => void;
 	extensions?: readonly string[];
 	extraArgs?: readonly string[];
 	parentEnv?: NodeJS.ProcessEnv;
@@ -616,6 +618,7 @@ export class WorkerManager {
 				{ code: reviewer ? "review_reserve" : "spawn_cap" },
 			);
 		}
+		request.admit?.();
 		const plan = this.plan(request);
 		if (plan.packagesError || plan.unresolvedTools) this.#options.recordEvent?.(jobId, "worker_packages_unresolved", {
 			key,

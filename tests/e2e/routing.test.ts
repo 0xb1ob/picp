@@ -9,7 +9,9 @@ import { test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
 import { type DoctorReport, EMPTY_USAGE, LAYOUT, THINKING_LEVELS, type ThinkingLevel } from "../../src/contracts.ts";
 import type { DispatchPreview } from "../../src/dispatch.ts";
+import { modelPicksDir } from "../../src/operator-model-pick.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
+import { seedOperatorPick } from "../harness/operator-pick.ts";
 import { COMMAND_POST_EXTENSION, readFleet, readRunEvents, REPO_ROOT, routeNamed, type RpcRecord, startPiChild, waitFor } from "../harness/index.ts";
 
 type Bench = Awaited<ReturnType<typeof dispatchS29>>;
@@ -453,6 +455,37 @@ test("P16-route-unrouted: an explicit model no rubric row names is refused in th
 	// The allowlist still gates a routed name: routing names it, the operator's allow refuses it.
 	routing(b.home, { allow: ["mock/routed"], rubric: [{ id: "small-ship", role: "implementer", model: "mock/routed", fallbacks: ["mock/spare"] }] });
 	assert.match(said(await preview(blind, { jobId: ship, task: "tidy up", model: "mock/spare" })), /override names mock\/spare, which the allowlist refuses/);
+});
+
+// R1 D2: a quote picks a model only by its exact, case-sensitive provider/model token; every other gate still holds.
+// Negative controls: case folding or substring matching issues the bad proofs; waiving requireAllowed passes allow/deny.
+test("D2-route-match: an exact token picks an unrouted model; partial, case and provider mismatches refuse; allowlist and role deny still gate", { timeout: 300_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	const ship = await job(b, "ship");
+	const blind = post(b);
+	const rubric = [{ id: "small-ship", role: "implementer", model: "mock/routed" }];
+	routing(b.home, { rubric });
+	const exact = seedOperatorPick(b.home, "mock/unrouted", { quote: "use mock/unrouted, please" });
+	const picked = await preview(blind, { jobId: ship, task: "tidy up", model: "mock/unrouted", operatorQuote: exact });
+	assert.deepEqual([picked.decision?.model, picked.decision?.source], ["mock/unrouted", "override"], said(picked));
+	for (const quote of ["use mock/unrouted-2", "use mock/unrouted.v2", "use xmock/unrouted", "use MOCK/unrouted", "use mock/Unrouted", "use other/unrouted", "use unrouted"]) {
+		assert.throws(() => seedOperatorPick(b.home, "mock/unrouted", { quote }), /operator_pick_fabricated: the quote does not name mock\/unrouted as a whole provider\/model token/, quote);
+	}
+	// The parent re-checks the proof's own quote: a proof forged with a partial token is refused, never trusted.
+	const file = join(modelPicksDir(b.home), `${exact.proof_id}.json`);
+	const proof = JSON.parse(readFileSync(file, "utf8"));
+	const forged = { ...exact, proof_id: `omp-${"e".repeat(32)}`, quote: "use mock/unrouted-2" };
+	writeFileSync(join(modelPicksDir(b.home), `${forged.proof_id}.json`), JSON.stringify({ ...proof, proof_id: forged.proof_id, quote: forged.quote }));
+	assert.match(said(await preview(blind, { jobId: ship, task: "tidy up", model: "mock/unrouted", operatorQuote: forged })), /operator_pick_fabricated: the quote does not name mock\/unrouted/);
+	assert.match(said(await preview(blind, { jobId: ship, task: "tidy up", model: "mock/routed", operatorQuote: exact })), /operator_pick_fabricated: proof \S+ picks mock\/unrouted, not mock\/routed/);
+	routing(b.home, { allow: ["mock/routed"], rubric });
+	assert.match(said(await preview(blind, { jobId: ship, task: "tidy up", model: "mock/unrouted", operatorQuote: exact })), /allowlist refuses/);
+	routing(b.home, { deny_by_role: { implementer: ["mock/unrouted*"] }, rubric });
+	assert.match(said(await preview(blind, { jobId: ship, task: "tidy up", model: "mock/unrouted", operatorQuote: exact })), /mock\/unrouted is not allowed for role implementer/);
+	// Without a quote nothing changed: the unrouted model is still refused, never substituted.
+	routing(b.home, { rubric });
+	assert.match(said(await preview(blind, { jobId: ship, task: "tidy up", model: "mock/unrouted" })), /override names mock\/unrouted, which data\/routing\.json does not route/);
+	assert.equal(existsSync(join(modelPicksDir(b.home), "claims")), false, "a preview never spends a pick");
 });
 
 // P16-route-effort: the effort a worker is spawned at, judged on pi's own models.json metadata in a real parent.

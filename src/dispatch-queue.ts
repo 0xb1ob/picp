@@ -67,6 +67,7 @@ export function toDispatchRequest(entry: Pick<DispatchQueueEntry, "job_id" | "re
 		...(r.tool_call_cap !== undefined ? { toolCallCap: r.tool_call_cap } : {}),
 		...(r.skills ? { skills: [...r.skills] } : {}),
 		...(r.pr ? { pr: r.pr } : {}),
+		...(r.operator_quote ? { operatorQuote: { ...r.operator_quote } } : {}),
 	};
 }
 

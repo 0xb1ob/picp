@@ -57,8 +57,9 @@ import { resolveJobHardBounds } from "./bounds.ts";
 import { raiseLoopExhausted, type EscalationStore } from "./escalation.ts";
 import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts";
 import { loadProfile } from "./profiles.ts";
-import { requireRouted } from "./routed-models.ts";
-import { loadRoutingConfig } from "./routing.ts";
+import type { ModelProbe } from "./routing.ts";
+import { respawnRoute } from "./reroute.ts";
+import { snapshotPickedAttempt } from "./operator-model-pick.ts";
 import { resolveJobSkills } from "./job-skills.ts";
 import type { RunRegistry } from "./runs.ts";
 import type { RevivePlanOptions, RevivePlanResult, ReviveResult } from "./revive.ts";
@@ -239,6 +240,8 @@ export interface BoundedRecoveryOptions {
 	profilesDir?: string;
 	/** pi's agent dir for a redispatch's skill re-resolution; tests pass a scratch dir. */
 	skillAgentDir?: string;
+	/** The live availability probe for a picked job's fresh route (absent: always available). */
+	probe?: () => ModelProbe;
 	/** Observer wiring for a `redispatch`'s fresh worker \u2014 the same options `Reviver` takes. */
 	intake?: WorkerObserverOptions["intake"];
 	failures?: WorkerObserverOptions["failures"];
@@ -486,7 +489,8 @@ export class BoundedRecovery {
 		if (!manager) throw new Error(`${jobId}: bounded recovery cannot redispatch without a manager`);
 		if (!profilesDir) throw new Error(`${jobId}: bounded recovery cannot redispatch without profilesDir`);
 		if (isScriptFleetRecord(record)) throw new Error(`${jobId} is a script job; bounded recovery cannot redispatch it`);
-		requireRouted(loadRoutingConfig(home), record.worker.model, `the redispatch of ${jobId} on its recorded model`);
+		const route = respawnRoute({ home, profilesDir, record, ...(this.#options.probe ? { probe: this.#options.probe() } : {}), where: `the redispatch of ${jobId} on its recorded model` });
+		snapshotPickedAttempt(home, record);
 		const profile = loadProfile(profilesDir, record.worker.profile);
 		const skills = resolveJobSkills(record.skills?.map((s) => s.name), { home, agentDir: this.#options.skillAgentDir, role: record.worker.role });
 		if (!skills.ok) throw new Error(`skill_unresolved: ${skills.error}`);
@@ -504,8 +508,8 @@ export class BoundedRecovery {
 				...(record.kind === "research" ? { artifactPath: `${home}/${paths.artifactFile(jobId)}` } : {}),
 			},
 			profile,
-			model: record.worker.model,
-			...(record.routing?.thinking ? { thinking: record.routing.thinking } : {}),
+			model: route.model,
+			...(route.thinking ? { thinking: route.thinking } : {}),
 			...(skills.skills.length ? { skills: skills.skills.map((s) => s.dir) } : {}),
 			sessionDir: `${home}/${LAYOUT.sessions}`,
 			sessionName: jobId,
@@ -514,7 +518,7 @@ export class BoundedRecovery {
 		// The marker goes in FIRST, before a single event of the new process can be
 		// teed (cp-0wq7): it is what reopens the projection's liveness after the
 		// previous attempt's observed close.
-		recorder.markSpawned({ pid: managed.worker.pid, model: record.worker.model, profile: profile.frontmatter.name });
+		recorder.markSpawned({ pid: managed.worker.pid, model: route.model, profile: profile.frontmatter.name });
 		try {
 			attachWorkerObservers({
 				recorder,
@@ -530,13 +534,14 @@ export class BoundedRecovery {
 			const sessionId = typeof state.sessionId === "string" ? state.sessionId : jobId;
 			const sessionFile = typeof state.sessionFile === "string" ? state.sessionFile : "";
 			const now = this.#options.now ?? (() => new Date());
-			const worker = { ...record.worker, pid: managed.worker.pid as number, session_id: sessionId, session_file: sessionFile, started_at: isoTimestamp(now()) };
+			const worker = { ...record.worker, model: route.model, pid: managed.worker.pid as number, session_id: sessionId, session_file: sessionFile, started_at: isoTimestamp(now()) };
 			await this.#options.fleet.mutate((jobs) => {
 				const job = jobs.find((candidate) => candidate.job_id === jobId);
 				if (!job) return;
 				job.phase = "waiting";
 				delete job.failure;
 				job.worker = worker;
+				if (route.routing) job.routing = route.routing;
 			});
 			return { pid: managed.worker.pid as number, session_file: sessionFile };
 		} catch (error) {
