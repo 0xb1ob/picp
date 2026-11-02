@@ -210,7 +210,9 @@ test("decisions: cp_parent ask journals open, answer and withdraw append-only; e
 		{ kind: "text", text: "journaled" },
 	], { PI_HOME: home.path, CP_MODE: "multi" });
 
+	const started = isoTimestamp();
 	const ends = await turn(pi, "Record the operator asks.");
+	const ended = isoTimestamp();
 	assert.equal(provider.remaining(script), 0);
 	for (const id of ["first", "answer", "second", "withdraw", "long", "trimmed"]) assert.notEqual(ends.get(id)?.isError, true, `${id}: ${said(ends.get(id))}`);
 	assert.match(String(JSON.parse(said(ends.get("first"))).details?.id), /^ask-[a-f0-9]+$/);
@@ -226,7 +228,52 @@ test("decisions: cp_parent ask journals open, answer and withdraw append-only; e
 	const [first, second, long, trimmed] = asks();
 	assert.deepEqual([first?.state, first?.answer, first?.source_escalation, first?.job_ids, first?.evidence_paths], ["answered", words, "es-example", ["cp-example"], ["report.md"]]);
 	assert.deepEqual([second?.state, second?.reason], ["withdrawn", "No longer needed"]);
+	// S1-04: a new withdrawal records its time; the raw event and the fold carry the same bounded value.
+	const withdrawal = text.trim().split("\n").map((line) => JSON.parse(line)).find((event) => event.type === "withdraw");
+	assert.match(String(withdrawal?.withdrawn_at), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+	assert.ok(withdrawal.withdrawn_at >= started && withdrawal.withdrawn_at <= ended, `${started} <= ${withdrawal.withdrawn_at} <= ${ended}`);
+	assert.equal(second?.withdrawn_at, withdrawal.withdrawn_at, "the fold carries the journaled withdrawal time");
 	assert.deepEqual([long?.state, long?.options[0]?.consequence], ["open", `${"x".repeat(199)}\u2026`]);
 	assert.equal(trimmed?.recommendation, " approve ", "a label after trim is accepted as given");
 	assert.deepEqual(new OperatorAsks(file).open().map((item) => item.id), [long?.id, trimmed?.id]);
+});
+
+test("decisions: cp_parent reads a legacy untimed withdrawal as withdrawn at an unknown time and refuses a malformed withdrawal time before append", { timeout: 180_000 }, async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	const file = join(home.path, layoutForHome("multi", home.path).state, "operator", "asks.jsonl");
+	mkdirSync(join(file, ".."), { recursive: true });
+	const open = (id: string) => ({ type: "open", id, created_at: "2026-10-01T00:00:00Z", project: "example", question: "Proceed?", options: [{ label: "yes", consequence: "Changes scope" }], recommendation: "yes" });
+	const jsonl = (events: object[]) => events.map((event) => `${JSON.stringify(event)}\n`).join("");
+	const legacy = jsonl([open("ask-aaaa"), { type: "withdraw", id: "ask-aaaa", reason: "Legacy withdrawal" }, open("ask-bbbb")]);
+	writeFileSync(file, legacy);
+	const input = { project: "example", question: "Next?", options: [{ label: "yes", consequence: "Proceeds" }], recommendation: "yes" };
+	const { pi, provider, script } = await child(t, home, CP_BRIDGE_EXTENSION, [
+		{ kind: "tool_calls", calls: [
+			{ id: "settled", name: "cp_parent", args: { action: "ask_answer", id: "ask-aaaa", answer: "yes" } },
+			{ id: "withdraw", name: "cp_parent", args: { action: "ask_withdraw", id: "ask-bbbb", reason: "Superseded" } },
+			{ id: "ask", name: "cp_parent", args: { action: "ask", ask: input } },
+		] },
+		{ kind: "text", text: "legacy read" },
+		{ kind: "tool_calls", calls: [{ id: "malformed", name: "cp_parent", args: { action: "ask", ask: input } }] },
+		{ kind: "text", text: "refused" },
+	], { PI_HOME: home.path, CP_MODE: "multi" });
+
+	const ends = await turn(pi, "Record the operator asks.");
+	assert.equal(ends.get("settled")?.isError, true, "the legacy withdrawal still settles its ask");
+	assert.match(said(ends.get("settled")), /operator ask ask-aaaa is not open/);
+	for (const id of ["withdraw", "ask"]) assert.notEqual(ends.get(id)?.isError, true, `${id}: ${said(ends.get(id))}`);
+	assert.ok(readFileSync(file, "utf8").startsWith(legacy), "legacy history is never rewritten or backfilled");
+	const [old, timed, fresh] = new OperatorAsks(file).list();
+	assert.deepEqual([old?.state, old?.reason, old && "withdrawn_at" in old], ["withdrawn", "Legacy withdrawal", false], "a legacy withdrawal's time stays unknown");
+	assert.match(String(timed?.withdrawn_at), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+	assert.deepEqual(new OperatorAsks(file).open().map((ask) => ask.id), [fresh?.id]);
+
+	const malformed = jsonl([open("ask-cccc"), { type: "withdraw", id: "ask-cccc", reason: "Gone", withdrawn_at: "2026-11-02 19:00" }]);
+	writeFileSync(file, malformed);
+	const refused = await turn(pi, "Ask the next question.");
+	assert.equal(refused.get("malformed")?.isError, true, "a malformed withdrawal time is refused");
+	assert.match(said(refused.get("malformed")), /invalid operator asks .*asks\.jsonl:2/);
+	assert.equal(readFileSync(file, "utf8"), malformed, "nothing is appended to a journal with a malformed withdrawal time");
+	assert.equal(provider.remaining(script), 0);
 });

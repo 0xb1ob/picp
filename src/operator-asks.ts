@@ -27,13 +27,14 @@ const AnswerEvent = Type.Object({
 	type: Type.Literal("answer"), id: Id, answered_at: IsoTimestampSchema, answer: Text,
 }, { additionalProperties: false });
 const WithdrawEvent = Type.Object({
-	type: Type.Literal("withdraw"), id: Id, reason: Text,
+	// withdrawn_at is optional on read only: a legacy withdrawal stays withdrawn at an unknown time.
+	type: Type.Literal("withdraw"), id: Id, reason: Text, withdrawn_at: Type.Optional(IsoTimestampSchema),
 }, { additionalProperties: false });
 const EventSchema = Type.Union([OpenEvent, AnswerEvent, WithdrawEvent]);
 type AskEvent = Static<typeof EventSchema>;
 export type OperatorAsk = OperatorAskInput & {
 	id: string; created_at: string; state: "open" | "answered" | "withdrawn";
-	answered_at?: string; answer?: string; reason?: string;
+	answered_at?: string; answer?: string; reason?: string; withdrawn_at?: string;
 };
 
 export class OperatorAsks {
@@ -67,7 +68,7 @@ export class OperatorAsks {
 
 	withdraw(id: string, reason: string): void {
 		this.requireOpen(id);
-		this.append({ type: "withdraw", id, reason });
+		this.append({ type: "withdraw", id, reason, withdrawn_at: isoTimestamp() });
 	}
 
 	list(): OperatorAsk[] {
@@ -93,7 +94,7 @@ export class OperatorAsks {
 				} else {
 					if (!prior || prior.state !== "open") throw new Error(`ask ${event.id} is not open`);
 					if (event.type === "answer") Object.assign(prior, { state: "answered", answer: event.answer, answered_at: event.answered_at });
-					else Object.assign(prior, { state: "withdrawn", reason: event.reason });
+					else Object.assign(prior, { state: "withdrawn", reason: event.reason, ...(event.withdrawn_at ? { withdrawn_at: event.withdrawn_at } : {}) });
 				}
 			} catch (error) { throw new Error(`invalid operator asks ${this.file}:${index + 1}: ${(error as Error).message}`); }
 		}

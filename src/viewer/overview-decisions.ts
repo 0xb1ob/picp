@@ -27,9 +27,9 @@ export function asks(state: ViewerState) {
     });
     records.set(id, {state:"open", answered_at:null, answer:null, reason:null, ask:{id, project:event.project, question:event.question, created_at:event.created_at, options, recommendation:event.recommendation, source_escalation:typeof event.source_escalation === "string" ? event.source_escalation : null, job_ids:strings(event.job_ids).filter(isSafeId), context:text(event.context) ? event.context : null, evidence_paths:strings(event.evidence_paths)}});
    } else {
-    const keys = event.type === "answer" ? ["type","id","answer","answered_at"] : ["type","id","reason"];
+    const keys = event.type === "answer" ? ["type","id","answer","answered_at"] : ["type","id","reason","withdrawn_at"];
     if (prior?.state !== "open" || Object.keys(event).some(k => !keys.includes(k)) || (event.type !== "answer" && event.type !== "withdraw")) throw new Error("invalid transition");
-    if (event.type === "answer" ? !text(event.answer) || !timestamp(event.answered_at) : !text(event.reason)) throw new Error("invalid transition");
+    if (event.type === "answer" ? !text(event.answer) || !timestamp(event.answered_at) : !text(event.reason) || (event.withdrawn_at !== undefined && !timestamp(event.withdrawn_at))) throw new Error("invalid transition");
     prior.state = event.type === "answer" ? "answered" : "withdrawn";
     if (event.type === "answer") { prior.answer = String(event.answer); prior.answered_at = String(event.answered_at); }
     else prior.reason = String(event.reason);
