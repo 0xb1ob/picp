@@ -150,12 +150,30 @@ time since the hand-off and grows; execution time and cost are frozen at parking
 only — the CI watch row, else the head's last `ci_observed` run event; an operator-forwarded result is marked
 `(forwarded)` and never gates. A parked job with a pending team event (changes requested, a moved head, a close) is In
 flight with its pending kind, the moved head and no old-head CI. Verified server-rendered only (no 390/1440 px browser
-pass for PR6, which changes no layout).
+pass for PR6, which changes no layout). Each row, on Overview and Jobs, carries an explicit `Review guide` link to the
+job page.
 
 
 **Job page** (`#job/<id>`). The phone header already has back and the id. At 900px and up, a breadcrumb `← Jobs` / the id sits above the title. Facts do not use a dash: the head is a 7-character sha with a copy button, or "no commits yet"; the PR is `#<n> ↗ <status>` (merged adds `as <sha7>` and a copy of the merge sha), or "none yet"; CI is `<state> on <sha7>` (from the CI watch, or from the last recorded CI event for this head once the watch has dropped a merged job), or "not run yet" when neither exists; review is `N / 5 · verdict`, or "not started · 0 / 5"; the model is the short name plus its provider; context is the chip, including the last compaction time, or "none"; the mandate links to `#map`, or "none"; cost is the recorded amount, or "not recorded". Fact text is 13px. The title is 17px below 900px and 22px from there up.
 
 **Job page tabs and transcript.** Desktop opens on `Transcript | Timeline` beside the facts rail; the phone opens on `Details | Transcript | Timeline` (Details holds the facts, the JOB card from the ledger `description`, and the mandate snippet with spend/cap). Asks, questions, the failure headline, the summary (clamped to one line, `more`) and `Web report` stay above the tabs. The job's ask action (`Ask about this failure` on a failed job, `Ask about this job` in every other phase) stays with Files and Run log in the facts rail (desktop, always beside the content) and the phone Details tab, where the phone opens; it is not shown on the phone Transcript or Timeline tabs. The Transcript is a read-only document (no composer, no POST) fetched from `GET /api/job/<id>/transcript`: the worker session through the same safe resolution as Sessions (inside `state/sessions`, `.jsonl`, non-script), last 300 entries, and the first Parent message kept when the window cut it. It works for done and torn-down jobs; a job with no readable session answers 200 with `warning: "No worker session recorded"`, and an unknown job id is 404.
+
+**Review guide** (P2). A job parked with the team, or merged with its reviews retained, shows `JobResponse.review_guide`
+above the tabs (null for every other job; `GET /api/job/<id>` only, never a list): five sections in reading order —
+Task and head (task text, PR link, full reviewed SHA, and the latest observed head with its time kept apart), Start here
+(the selected attempt's revisions then reasons, then earlier attempts' concerns marked historical and never "resolved";
+ten at most with an omitted count; ends with the PR Files link), Since the previous review (`full`, `delta` with an
+exact GitHub `compare/<from>..<to>` link, or `equivalent`, crediting the source attempt and head), CI and remaining
+judgment (CI for the reviewed head only: missing, unreadable on another head as a read failure, forwarded kept apart),
+and Handoff status. Sources are `runs/<id>/review-N.json` (newest five) and `review-equivalent-<sha>.json`, confined by
+realpath and bounded; the observed head comes only from this cycle's pending event, awaiting-merge watch row (same job,
+cycle and PR URL) or CI-watch head observation since hand-off — `current` when it equals the reviewed head, `historical`
+when it moved, `unknown` with none; the parking head is never an observation. The guide is keyed by
+`project|job|PR URL|observed head|attempt`, never a PR number. Prose is redacted and rendered as text; no link is built
+from it. Every gap (a skipped record, a missing equivalence source, retained-after-merge) is listed as incomplete. A read
+never writes, runs git, or calls a forge or model. Layout check: a disposable fixture home with the parked delta job,
+`./bin/cp-view --home <it> --host 127.0.0.1 --port 8766`, `#job/<id>` in a real browser at 390 and 1440 px: five
+sections in order, full SHAs wrap, no horizontal overflow.
 
 **Ask about evidence (P1).** `GET /api/job/<id>` adds `ask_reference` (the job's identifiers, or null without a ledger `project:` label — such a job gets no `Ask about this job` and no row references, and a failed one keeps only its plain failure question) and, on Review and CI-outcome timeline rows, a `reference` derived from recorded fields only: a review with its full head and attempt, a CI row with its head and the recorded `run_id`/`run_attempt`. A row without a full head or attempt falls back to the job (`Ask about this job`); a CI row without a run id reads `CI observations for <job> @ <head>`, never "this run". A review row lists the findings of exactly that `review-<attempt>.json` (same job, attempt and head; redacted, 160 characters a line, 12 kept, the rest counted) with their original list ordinals, each with its own `Ask`. Every action is navigation to `#sessions?view=you&transcript=1&ref=<identifiers JSON>` (plus the failure question as `draft=`); it never sends.
 

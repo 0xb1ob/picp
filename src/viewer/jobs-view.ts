@@ -19,6 +19,7 @@ import { boardReports } from "./reports-view.ts";
 import { reportFile } from "./job-report.ts";
 import { deployView } from "./deploy-view.ts";
 import { jobReference, reviewFindings, rowReference } from "./evidence-timeline.ts";
+import { type CiSeen, reviewGuide } from "./review-guide.ts";
 
 function records(state:ViewerState) {
  const fleet=objectList(join(state.stateDir,"fleet.json"),"jobs",j=>typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project));
@@ -145,7 +146,8 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
  const timeline:JobResponse["timeline"]=[];
  let malformed=false;
  let seenCi:{ci:string;head:string | undefined} | undefined;
- const ledger=records(state).ledger;
+ const ciSeen:CiSeen[]=[];
+ const {ledger,fleet}=records(state);
  const ask=jobReference(strings(ledger.find(j=>j.id===id)?.labels).find(l=>l.startsWith("project:"))?.slice(8),id);
  for(const line of events.value?.chunk.lines ?? []) {
   const event=parseObject(line.text); if(!event) {malformed=true;continue;}
@@ -159,7 +161,7 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
   const reference=rowReference(ask,event.type,payload);
   const {findings,elided}=reference?.kind==="review" ? reviewFindings(state,reference) : {findings:[],elided:0};
   timeline.push({at:event.ts,label,meta,tone:observation==="ci_failed" ? "red" : observation==="ci_green" ? "green" : "neutral",...(reference ? {reference} : {}),...(findings.length ? {findings} : {}),...(elided ? {findings_elided:elided} : {})});
-  if(observation==="ci_green" || observation==="ci_failed") seenCi={ci:observation==="ci_green" ? "green" : "failed",head:str(payload?.head_sha)};
+  if(observation==="ci_green" || observation==="ci_failed") {seenCi={ci:observation==="ci_green" ? "green" : "failed",head:str(payload?.head_sha)};if(seenCi.head) ciSeen.push({ci:seenCi.ci,head:seenCi.head,at:event.ts});}
  }
  // ci-watch.json drops a row once the job leaves the watch (merged, closed), so the CI fact falls back to the last recorded CI event for this head, the same source as the timeline.
  if(!job.ci && seenCi && job.head && seenCi.head===job.head) job.ci=seenCi.ci;
@@ -174,8 +176,11 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
  const full=str(obj(readObject(join(state.stateDir,"runs",id,"envelope.json"))?.envelope)?.summary)?.split("\n").find(l=>l.trim())?.trim();
  if(full) job.summary=full.length>600 ? `${full.slice(0,599)}…` : full;
  const deploy=deployView(state,id,data.jobs);
+ const ledgerJob=ledger.find(j=>j.id===id);
+ const review_guide=reviewGuide(state,{id,project:job.project,entry:fleet.find(j=>j.job_id===id),task:str(ledgerJob?.description) ?? str(ledgerJob?.title) ?? null,pr_url:job.pr_url,
+  merged:job.merge_sha && job.finished_at ? {at:job.finished_at,sha:job.merge_sha} : null,ci_seen:ciSeen});
  return {generated_at:data.generated_at,awaiting_count:data.awaiting_count,job,description:str(ledger.find(j=>j.id===id)?.description) ?? null,mandate,timeline:timeline.slice(-200),timeline_truncated:(events.value?.start ?? 0)>0 || timeline.length>200,ask_reference:ask,
-  ...(deploy ? {deploy} : {}),
+  ...(deploy ? {deploy} : {}),review_guide,
   files_href:root ? `/#files?${new URLSearchParams({root:root.id,path:""})}` : null,
   artifact_href:artifact?.href ?? null,artifact_name:artifact?.name ?? null,report_href:reportFile(state,id) ? `#report/${id}` : null,
   reports:boardReports(state).filter(report=>report.job_ids.includes(id)),
