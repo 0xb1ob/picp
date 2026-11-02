@@ -83,6 +83,23 @@ Live-model suites are operator-run only and skipped by default:
 [tests/e2e/README.md](../tests/e2e/README.md) and
 [tests/harness/README.md](../tests/harness/README.md).
 
+### Worker compaction telemetry
+
+`extensions/worker-reporter/compaction.ts` appends `worker-compaction-observation` custom session entries (`v: 1`);
+they are never sent to a model and change no compaction decision. Each attempt has a `start` and an `end` sharing one
+`attempt` id. `start` carries `reason` (manual/threshold/overflow), `willRetry`, `tokensBefore`, the resolved
+`enabled`/`reserveTokens`/`keepRecentTokens`, `contextWindow` and `threshold` = window − reserve (pi compacts when
+context tokens exceed it; for manual/overflow it is context, not cause). `end` carries `outcome`
+(compacted/failed/cancelled/incomplete) and, for a success, `closedBy`, the compaction `entryId`, `retainedEstimate` and
+`nextInput` (`input + cacheRead + cacheWrite` of the first later assistant reply, output excluded).
+
+A null value always has its reason: `settingsSourceUnavailable: hook_exposes_resolved_values_only` (which file or model
+override won is unknown), `retainedEstimateUnavailable: sdk_context_unknown` (pi knows no context size until the next
+reply), `nextInputUnavailable` `no_next_usage` (shutdown, session replacement or a superseding compaction came first),
+`next_response_failed` or `next_usage_missing`. A `start` with no `end` means the process died mid-attempt: treat its
+outcome as unknown, never as zero. Read a worker's records without touching it: `get_entries` over RPC, or the
+`"customType":"worker-compaction-observation"` lines of its session JSONL.
+
 ### Dagger (local, optional)
 
 `dagger.toml` and `.dagger/modules/picp-dev/` run the `checks` job of `.github/workflows/ci.yml` (plus
