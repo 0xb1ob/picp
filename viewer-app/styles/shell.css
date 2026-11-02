@@ -1,4 +1,6 @@
 * { box-sizing: border-box; letter-spacing: 0; }
+/* M3 dark-only: the root canvas, scrollbars and native controls stay dark on a light-scheme device too. */
+:root { color-scheme: dark; }
 body { margin: 0; color-scheme: dark; scrollbar-color: var(--faint) var(--background); background: var(--page); font-family: var(--font-sans); color: var(--text); -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; }
 /* No zooming (operator 2026-09-27): no double-tap zoom anywhere in the app. */
 html, body { touch-action: manipulation; }

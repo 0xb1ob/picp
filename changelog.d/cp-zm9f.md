@@ -1,0 +1,1 @@
+- Refresh dashboard colours and typography with a dark-only palette and compact chat transcripts.
