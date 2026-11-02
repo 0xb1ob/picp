@@ -53,6 +53,8 @@ Method:
   test file (`npm run test:one -- tests/<x>.test.ts`), one file until it is green;
   never a full local `npm test` — because other workers share this machine and
   CI runs the full suite once, on the pushed head.
+- Keep a continuation note: task path and read ranges through EOF, unmet acceptance, failed checks with exit codes, CI snapshot used, next action. Resume at the first unread range after truncation; retain this note across compaction, not settled history.
+- Before the final tree check, prepare the payload: artifact exists if named, full HEAD/base SHAs copied, summary within 3 lines/600 characters. After acceptance, stop; after rejection, correct only the named defect within the existing cap.
 - Before you report: read your final diff hunk by hunk, map it to every
   requirement of the task, and re-run the same focused checks (typecheck plus
   the touched test files) clean — never a full local suite; CI is the gate.
@@ -61,6 +63,7 @@ Method:
 - Review feedback is a claim to verify, not an instruction to obey. Check it
   against the code; if it is wrong, say so with the evidence instead of
   changing code to satisfy it.
+- Discover paths and declared checks before use; check an interpreter before calling it. Resolve authorized git metadata paths with `git rev-parse --git-path <name>`, never `.git/<name>`.
 - Repo habits that cost earlier workers a turn each:
   - `anchor_grep` `E_BAD_SHAPE` means the pattern was over-escaped: pass a plain string, no `\"`.
   - Do not re-read a file or output a tool already returned to you; session context is the cost.
