@@ -319,7 +319,7 @@ export interface ReportsResponse {
 	/** Job reports (`state/artifacts/<id>/report.md`), newest first, capped at 50. */
 	job_reports?: JobReportItem[];
 }
-/** One job report as the Reports page lists it: `href` is its `#report/<id>` page; `projects` its job's, if resolved. */
+/** One job report as the Reports page lists it: `href` is its `#report/<id>` page; `projects` its job's, if known. */
 export interface JobReportItem { job_id: string; title: string; modified_at: string; href: string; projects?: string[] }
 /** `GET /api/report/<id>`: the job's report.md text, capped; the app renders it (never as raw HTML). */
 export interface JobReportResponse { generated_at: string; job_id: string; title: string; text: string; bytes: number; truncated: boolean; modified_at: string }
@@ -465,7 +465,7 @@ export interface FlightJob {
  context?: ContextUsage | null;
  cost_usd?: number | null;
 }
-export interface ShippedJob { id: string; project?: string; title: string | null; merged_at: string; merge_sha: string; pr_url: string; cost_usd: number | null }
+export interface ShippedJob { id: string; project?: string | null; title: string | null; merged_at: string; merge_sha: string; pr_url: string; cost_usd: number | null }
 /**
  * A parked PR waiting on a human merge. `age_seconds` grows; `frozen_seconds` is execution time, stopped at handoff.
  * Null: unknown.

@@ -28,12 +28,15 @@ export function Decisions({data:all,control,selection=null}: {data:DecisionsResp
   <div class="decisions-log"><section id="decided" tabIndex={-1} aria-label="Decision log"><DecidedScreen data={{...data,items:data.decided}}/></section><aside class="decisions-log-aside"><WorthExplanation/>{data.availability.asks !== "unavailable" && data.awaiting_count === 0 && <DecisionKinds/>}</aside></div>
  </div>;
 }
-/** The page under a selection: each list and the counts it shows narrowed alike; action ids and availability untouched. */
+/** The page under a selection: each list and its counts narrowed alike; action ids and availability untouched. */
 function selected(data: DecisionsResponse, selection: ProjectSelection): DecisionsResponse {
  if (!selection) return data;
  const items = data.items.filter(a => matchesProject(a.project,selection)), decided = data.decided.filter(d => matchesSelection(d.projects,selection));
- const today = (source: string) => decided.filter(d => d.today && d.source === source).length;
+ // decisionsScreen counts today's uncapped `decided` the same way (delegated only, schedule-run excluded).
+ const today = (source: string) => decided.filter(d => d.today && d.source === source);
+ const delegated = today("operator-delegated"), {count, worth_count, by_you} = data.decided_today;
  return {...data, items, decided, parent_questions:data.parent_questions.filter(q => matchesSelection(q.projects,selection)),
   awaiting_count:data.awaiting_count === null ? null : items.length,
-  decided_today:{...data.decided_today, count:data.decided_today.count === null ? null : today("operator-delegated"), by_you:data.decided_today.by_you == null ? data.decided_today.by_you : today("you")}};
+  decided_today:{count:count === null ? null : delegated.length, worth_count:worth_count === null ? null : delegated.filter(d => d.worth.length).length,
+   by_you:by_you == null ? by_you : today("you").length}};
 }

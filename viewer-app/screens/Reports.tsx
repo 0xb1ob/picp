@@ -6,7 +6,8 @@ import { ProjectFilter } from "../components/ProjectFilter.tsx";
 import { matchesSelection, pickSelection, type ProjectSelection } from "../project-filter.ts";
 
 export function Reports({data:all, selection = null}: {data:ReportsResponse; selection?:ProjectSelection}) {
-	// `projects` is the API's attribution (board.json project first, job ids as the legacy fallback); counts follow the filter.
+	// `projects` is the API's attribution (board.json project first, legacy job ids as fallback).
+	// Counts follow the filter.
 	const names = [...all.reports, ...all.job_reports ?? []].flatMap(r => r.projects ?? []);
 	const reports = all.reports.filter(r => matchesSelection(r.projects, selection));
 	const jobReports = (all.job_reports ?? []).filter(r => matchesSelection(r.projects, selection));

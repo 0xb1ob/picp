@@ -1,5 +1,5 @@
 /**
- * M1 PR2: the project filter on Overview, Decisions, Jobs and Reports — `bin/cp-view` on a scratch home over real HTTP
+ * M1 PR2: the project filter on Overview, Decisions, Jobs and Reports: `bin/cp-view` on a scratch home over HTTP
  * and the served app in a linkedom tab (tests/harness/dashboard.ts). The selection lives in the hash, never the API.
  */
 import assert from "node:assert/strict";
@@ -40,7 +40,8 @@ function seed(home: string) {
 	const ask = (id: string, project: string) => ({ type: "open", id, created_at: iso(20), project, question: `Merge ${project}?`, options: [{ label: "Keep", consequence: "Paused" }], recommendation: "Keep" });
 	put(join(LAYOUT.state, "operator/asks.jsonl"), `${[ask("ask-b2", "picp"), ask("ask-a1", "atlas")].map((a) => JSON.stringify(a)).join("\n")}\n`);
 	const answered = (id: string, job_ids: string[]) => ({ id, status: "answered", question: `Ship ${id}?`, created_at: iso(40), answered_at: iso(10), answered_by: "operator-delegated", answer: "yes", options: [{ id: "yes", label: "Ship it" }], job_ids });
-	put(LAYOUT.escalationsFile, { items: [{ id: "es-q", status: "open", question: "Widen cp-pa?", created_at: iso(15), kind: "scope_expansion", job_ids: ["cp-pa"] }, answered("es-d", ["cp-at"]), answered("es-n", [])] });
+	put(LAYOUT.escalationsFile, { items: [{ id: "es-q", status: "open", question: "Widen cp-pa?", created_at: iso(15), kind: "scope_expansion", job_ids: ["cp-pa"] }, answered("es-d", ["cp-at"]), answered("es-n", []),
+		{ ...answered("es-s", []), answered_by: "schedule-run:run-1", basis: { run: "run-1" } }] });
 	put(join(LAYOUT.state, "next-snapshot.json"), { schema_version: 2, at: iso(5), project: null, empty_since: null, items: [{ kind: "job", id: "cp-wait", project: "atlas", title: "Title cp-wait", verdict: "blocked", reason: "waits on cp-pa" }], unavailable: [] });
 	const board = (slug: string, meta: object) => put(join(LAYOUT.state, "boards", slug, "board.json"), { title: `Board ${slug}`, description: slug, ...meta });
 	board("chat-atlas", { created_at: iso(10), job_ids: [], project: "atlas", source: "chat:es-d" });
@@ -76,7 +77,8 @@ test("M1-lists-api: reports carry M2 project/source with a legacy fallback; deci
 	assert.deepEqual(reports.job_reports?.map((r) => [r.job_id, r.projects]), [["cp-at", ["atlas"]]]);
 	const decisions = (await d.get("/api/decisions")).body as unknown as DecisionsResponse;
 	assert.deepEqual(decisions.parent_questions.map((q) => [q.id, q.projects]), [["es-q", ["picp"]]]);
-	assert.deepEqual(decisions.decided.map((x) => [x.id, x.projects]).sort(), [["es-d", ["atlas"]], ["es-n", []]]);
+	assert.deepEqual(decisions.decided.map((x) => [x.id, x.source, x.projects]).sort(), [["es-d", "operator-delegated", ["atlas"]], ["es-n", "operator-delegated", []], ["es-s", "schedule-run", []]]);
+	assert.equal(decisions.decided_today.count, 2, "the server counts delegated decisions only");
 	const overview = (await d.get("/api/overview")).body as unknown as OverviewResponse;
 	assert.deepEqual([overview.shipped_today.map((j) => [j.id, j.project]), overview.blocked.items.map((j) => [j.id, j.project])], [[["cp-merged", "picp"]], [["cp-wait", "atlas"]]]);
 });
@@ -119,7 +121,8 @@ test("M1-lists-reports-decisions: Reports and Decisions narrow their lists and c
 	await until(page, (s) => s.includes("Being handled") && s.includes("Decided for you 0"), "the picp decisions");
 	assert.ok(decisions.$$(".awaiting-card").every((c) => c.textContent?.includes("ask-b2")));
 	await choose(decisions, "/untagged");
-	await until(page, (s) => s.includes("Nothing needs you") && s.includes("Decided for you 1"), "untagged decisions");
+	// es-n (delegated) and es-s (schedule run) are untagged: the log lists both, decided_today counts es-n as the API does.
+	await until(page, (s) => s.includes("Decided for you 2") && s.includes("1 decided today · 1 for you, 0 by you"), "untagged decisions");
 });
 
 test("M1-lists-overview-jobs: Overview and Jobs filter before counts, keep global health, phase tabs and job links", { timeout: 120_000 }, async (t) => {
@@ -132,6 +135,8 @@ test("M1-lists-overview-jobs: Overview and Jobs filter before counts, keep globa
 	await overview.waitText(/In flight · 1/);
 	const ov = () => overview.$(".overview")?.textContent ?? "";
 	assert.equal(chosen(overview), "atlas");
+	const options = [...(overview.$(FILTER)?.querySelectorAll("option") ?? [])].map((o) => o.textContent);
+	assert.deepEqual(options, ["All", "Untagged", "atlas", "picp"], "every Landed/Blocked row names a real project, never \"undefined\"");
 	assert.match(ov(), /Needs you · 1/);
 	assert.match(ov(), /Blocked & failed · 2/);
 	assert.match(ov(), /Landed today · 0 merged/);

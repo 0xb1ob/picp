@@ -132,8 +132,9 @@ export function shipped(state: ViewerState, jobs: Json[], ledger: Json[], now: n
  return jobs.flatMap(j => {
   const id = String(j.job_id); const receipt = mergeReceipt(state,id);
   if (!receipt || !today(receipt.merged_at,now)) return [];
-  const row = rows.find(r => r.job_id === id);
-  return [{id, project:String(j.project), title:str(ledger.find(l => l.id === id)?.title) ?? null, merged_at:String(receipt.merged_at), merge_sha:String(receipt.merge_commit_sha), pr_url:String(receipt.pr_url), cost_usd:row ? row.cost_usd + row.reviewer_cost_usd : null}];
+  const row = rows.find(r => r.job_id === id), entry = ledger.find(l => l.id === id);
+  const project = str(j.project) ?? strings(entry?.labels).find(l => l.startsWith("project:"))?.slice(8) ?? null;
+  return [{id, project, title:str(entry?.title) ?? null, merged_at:String(receipt.merged_at), merge_sha:String(receipt.merge_commit_sha), pr_url:String(receipt.pr_url), cost_usd:row ? row.cost_usd + row.reviewer_cost_usd : null}];
  }).sort((a,b) => b.merged_at.localeCompare(a.merged_at));
 }
 /** Audit P3 #17: a failed fleet job is the top blocker. Its cause is the failure headline, one line of at most 80 chars. */
