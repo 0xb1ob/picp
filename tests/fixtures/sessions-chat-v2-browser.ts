@@ -1,7 +1,7 @@
 /**
  * Sessions chat v2 browser capture: the production app on loopback (production CSP, synthetic APIs), isolated headless
- * Chrome over CDP, PNGs plus manifest.json.
- * `--stage pr1|pr2|pr3|pr4|pr5|chips|rollup|notice [--chrome /usr/bin/google-chrome] --out <dir>`
+ * Chrome over CDP, PNGs plus manifest.json. `m3-transcript` serves the other screens' APIs from the real viewer.
+ * `--stage pr1|pr2|pr3|pr4|pr5|chips|rollup|notice|m3-transcript [--chrome /usr/bin/google-chrome] --out <dir>`
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,9 +14,10 @@ import { LAYOUT } from "../../src/contracts.ts";
 import type { ControlStatusResponse, JobResponse, JobTranscriptResponse, PrChip, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
 import { APP_CSP, appPage } from "../../src/viewer/app-page.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
+import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -180,6 +181,10 @@ try {
 			return;
 		}
 		if (path in routes) return send(200, "application/json", JSON.stringify(routes[path]));
+		// M3: every other screen reads the real viewer's APIs on this scratch home (empty state, same palette check).
+		if (args.stage === "m3-transcript" && path.startsWith("/api/") && !ABSENT.has(path)) {
+			return dispatch(req, res, { home: scratch, stateDir: join(scratch, LAYOUT.state), host: "127.0.0.1", port: (server.address() as AddressInfo).port, app });
+		}
 		if (!ABSENT.has(path) && path !== "/favicon.ico" && !path.startsWith("/manifest") && !path.endsWith(".png")) unexpected.push(path);
 		send(404, "application/json", '{"error":"not in fixture"}');
 	});
@@ -303,7 +308,7 @@ try {
 	if (stage === "pr1") {
 		await capture("pr1-overview-light-control-1440x1000", "#overview", 1440, 1000, "light", ".shell");
 		const leak = shots.at(-1) as { background: string };
-		if (leak.background !== "#111110") throw new Error(`Overview took the Sessions light palette (${leak.background})`);
+		if (leak.background !== "#0d0d0d") throw new Error(`Overview left the dark palette (${leak.background})`);
 	} else if (stage !== "chips" && stage !== "rollup") {
 		const wakeRun = ".session-steps:has(.session-bridge)";
 		const notice = `document.querySelector("${wakeRun} .session-notice-line").click()`, pill = `document.querySelector("${wakeRun} > .session-tools").click()`;
@@ -387,6 +392,16 @@ try {
 		await phone("jump-latest", [[`document.querySelector(".session-transcript").scrollTop = 400`, "!!document.querySelector('.session-new')"],
 			[`document.querySelector(".session-new").click()`, `!document.querySelector(".session-new")`]], "top");
 		if (posts.length) throw new Error(`pr5 sent ${posts.join(", ")}: menus, filters, edits and the keyboard must request nothing`);
+	}
+	if (stage === "m3-transcript") {
+		// All eight other screens on both devices and both scheme preferences: one dark palette, layouts unchanged.
+		const screens = [["overview", ".overview"], ["decisions", ".decisions"], ["jobs", ".jobs-screen"], ["stats", ".stats"], ["settings", ".settings-screen"],
+			["reports", ".jobs-screen"], ["files", ".files"], ["map", ".map-screen"]] as const;
+		for (const [device, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
+			for (const theme of ["dark", "light"] as const) for (const [id, root] of screens) await capture(`m3-${id}-${device}-${theme}-${width}x${height}`, `#${id}`, width, height, theme, `.shell-main > ${root}`);
+		}
+		const off = (shots as Array<{ file: string; background: string; color_scheme: string }>).filter(s => s.background !== "#0d0d0d" || s.color_scheme !== "dark");
+		if (off.length) throw new Error(`m3: not the dark palette: ${off.map(s => `${s.file} ${s.background} ${s.color_scheme}`).join(", ")}`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

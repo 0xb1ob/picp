@@ -7,7 +7,9 @@ import { REPO_ROOT } from "./harness/index.ts";
 // Sessions chat v2 (second line): computed properties of the four new-sessions-chat.html artboards, measured in Chrome
 // by cp-sessions-chat-v2-plan-rl8c: light palette, own bubble, avatar gradient, CP avatar, code ink.
 const palette = new Set(("#0b0b0a #111110 #141413 #191917 #1f1f1d #22221f #2a2926 #2c2b27 #eceae4 #d6d4cd #c9c7bf #a3a198 #8a887f #55544e #7fd49b #f0b35a #1c1810 #4d3b1f #93b4f5 #f2917f #5a2f28 #ffffff #20201d #131613 #243027 #2f4a37 #17201a #b9b7b0 #e2e0d9 #262521 #1a1408 #161615 #34332f #3a3322 #3a3935 #1a1a18 #6b6a64 #151514 #1b1b19 #6f6e67 #8a6a33 #34425e #ecebe6 #b5b3aa #8f8d84 #24241f #161614 #1c1c1a #7f9fd8 #5d5c56 " +
- "#f4f2ed #ebe8e1 #e0dcd2 #d6d2c8 #e2ded5 #1d1c1a #4f4c45 #6b675f #2c3a55 #eef2fb #2d5aa8 #2f6f4a #9a5b00 #d98b5f #b9654a #d9d4c8 #000000").split(" "));
+ "#f4f2ed #ebe8e1 #e0dcd2 #d6d2c8 #e2ded5 #1d1c1a #4f4c45 #6b675f #2c3a55 #eef2fb #2d5aa8 #2f6f4a #9a5b00 #d98b5f #b9654a #d9d4c8 #000000 " +
+ // M3: the dark-only palette of new-design-picp-2026-11-01.html (bg, panel, card, raised, selected, borders, text, success).
+ "#0d0d0d #121212 #161616 #1b1b1b #232323 #2a2a2a #1e1e1e #ededed #b4b4b4 #8a8a8a #5fd39a #10291d #1f4a35").split(" "));
 function violations(path: string, text: string): string[] {
  const out: string[] = [];
  for (const [i,line] of text.split("\n").entries()) {
@@ -22,7 +24,7 @@ function violations(path: string, text: string): string[] {
 function files(path: string): string[] { return readdirSync(path,{withFileTypes:true}).flatMap(e => e.isDirectory() ? files(join(path,e.name)) : /\.(?:css|tsx?)$/.test(e.name) ? [join(path,e.name)] : []); }
 test("app uses only cited design colors in tokens, never inline styles or color-function bypasses", () => {
  const root = join(REPO_ROOT,"viewer-app");
- assert.ok(readFileSync(join(root,"styles/tokens.css"),"utf8").includes("#111110"));
+ assert.ok(readFileSync(join(root,"styles/tokens.css"),"utf8").includes("--background: #0d0d0d;"));
  assert.deepEqual(files(root).flatMap(path => violations(relative(root,path),readFileSync(path,"utf8"))),[]);
 });
 test("palette guard rejects short, alpha, uppercase and functional bypasses", () => {

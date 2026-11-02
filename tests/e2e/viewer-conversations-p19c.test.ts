@@ -517,10 +517,10 @@ test("P19-transcript-scroll: the transcript stays pinned to the bottom unless sc
 	assert.equal(short!.querySelector(".session-notice-more") === null, true, "nothing to hide, no Show more");
 });
 
-test("P19-transcript-css: phone pills reach 84% and cards the column; desktop one 820 px column, 670 px cards, 72% pills; code and tables scroll inside; one light palette on Sessions and Report", { timeout: 120_000 }, async (t) => {
+test("P19-transcript-css: phone pills reach 84% and cards the column; desktop one 720 px column, 670 px cards, 72% pills; code and tables scroll inside; one dark palette on every device", { timeout: 120_000 }, async (t) => {
 	const css = await servedCss(await viewer(t));
-	const wide = css.indexOf(".session-entries{max-width:820px"), split = css.lastIndexOf("@media(min-width:900px)", wide);
-	assert.ok(split > 0 && wide > split, "the 820 px column is desktop only");
+	const wide = css.indexOf(".session-entries{max-width:720px"), split = css.lastIndexOf("@media(min-width:900px)", wide);
+	assert.ok(split > 0 && wide > split, "the 720 px column is desktop only");
 	const [phone, desktop] = [css.slice(0, split), css.slice(split)];
 	/** Every declaration the served CSS gives `selector` in `sheet`, in order. */
 	const rules = (sheet: string, selector: string) => [...sheet.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => m[1] === selector).map((m) => m[2]).join(";");
@@ -534,15 +534,15 @@ test("P19-transcript-css: phone pills reach 84% and cards the column; desktop on
 	assert.match(rules(phone, ".session-message.session-other"), /padding-left:34px/, "chat v2: the phone avatar gutter is 26 px plus an 8 px gap");
 	assert.match(rules(phone, ".session-other>.session-who>.session-avatar"), /position:absolute/, "the avatar sits in that gutter");
 	assert.match(rules(phone, ".session-avatar"), /^display:flex/, "the phone avatar is visible, not hidden below 900 px");
-	assert.match(rules(desktop, ".session-entries"), /^max-width:820px;margin:0 auto;padding:0 32px/);
+	assert.match(rules(desktop, ".session-entries"), /^max-width:720px;margin:0 auto;padding:0 28px/);
 	assert.match(rules(desktop, ".session-other>.session-body"), /max-width:670px/);
 	assert.match(rules(desktop, ".session-own>.session-body"), /max-width:72%/);
 	assert.match(rules(phone, ".session-transcript"), /flex:1;min-height:0;overflow-y:auto/, "the transcript is the one scroller");
 	assert.match(rules(css, ".operator-composer"), /flex-shrink:0/, "the composer keeps its height at the bottom of the panel");
-	const light = /@media\(prefers-color-scheme:light\)\{\.shell-sessions,\.shell-report\{([^}]*)\}\}/.exec(css)?.[1] ?? "";
-	assert.match(light, /color-scheme:light;color:var\(--text\)/, "native controls and inherited text follow");
-	for (const pair of ["--background: #f4f2ed;", "--nav: #ebe8e1;", "--raised: #ffffff;", "--text: #1d1c1a;", "--dim: #6b675f;", "--session-you: #2d5aa8;", "--session-code-mix: 5%"]) assert.ok(light.includes(pair), `measured light token: ${pair}`);
-	assert.equal(css.match(/prefers-color-scheme/g)?.length, 1, "one light block in every served stylesheet");
+	const root = rules(css, ":root");
+	assert.match(root, /color-scheme:dark/, "M3 dark-only: native controls and the canvas stay dark on a light-scheme device");
+	for (const pair of ["--background: #0d0d0d;", "--nav: #121212;", "--raised: #1b1b1b;", "--text: #ededed;", "--dim: #8a8a8a;", "--green: #5fd39a;"]) assert.ok(root.includes(pair), `M3 dark token: ${pair}`);
+	assert.equal(css.match(/prefers-color-scheme/g), null, "no light block in any served stylesheet");
 });
 
 // ---- tool calls and bridge notices in the transcript ----------------------------------------------------------------
@@ -734,7 +734,7 @@ test("P19-tools-sheet: the ⋯ sheet's tool toggle is the same remembered choice
 	assert.deepEqual(pick(await posted(tab, 1), ["kind", "ask_id", "label"]), { kind: "answer", ask_id: askId, label: "Keep" }, "the card's button answers, once");
 	assert.equal(await until(() => pinned().getAttribute("class"), (c) => c === "session-pinned", "the sheet collapsed"), "session-pinned", "and the sheet collapses after the click");
 	const css = await servedCss(d);
-	const wide = css.indexOf(".session-entries{max-width:820px"), desktop = css.slice(css.lastIndexOf("@media(min-width:900px)", wide), css.indexOf("}}", wide) + 2);
+	const wide = css.indexOf(".session-entries{max-width:720px"), desktop = css.slice(css.lastIndexOf("@media(min-width:900px)", wide), css.indexOf("}}", wide) + 2);
 	assert.match(cssRules(css, ".session-tools-toggle"), /^display:flex;.*min-height:44px;.*white-space:nowrap/, "a 44px touch target that never wraps at 390px");
 	assert.match(cssRules(css, ".session-system .session-notice-line"), /min-height:44px/, "the collapsed notice is a 44px target");
 	assert.match(cssRules(css, ".session-system .session-notice-line>span"), /text-overflow:ellipsis;.*white-space:nowrap/, "a long first line ellipsizes");

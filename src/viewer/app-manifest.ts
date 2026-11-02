@@ -14,7 +14,7 @@ import { crc32, deflateSync } from "node:zlib";
 export const MANIFEST_PATH = "/manifest.webmanifest";
 export const APPLE_TOUCH_ICON_PATH = "/apple-touch-icon.png";
 /** `--background` and `--amber`. */
-export const APP_COLORS = { background: "#111110", accent: "#f0b35a" } as const;
+export const APP_COLORS = { background: "#0d0d0d", accent: "#f0b35a" } as const;
 /** Icon URL → edge in pixels. 180 px is the apple-touch-icon size. */
 export const APP_ICONS: Readonly<Record<string, number>> = { "/icon-192.png": 192, "/icon-512.png": 512, [APPLE_TOUCH_ICON_PATH]: 180 };
 
