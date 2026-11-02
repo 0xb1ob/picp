@@ -1262,7 +1262,7 @@ test("P16-settings-write: the operator session's settings_apply sets, restores a
 	const absentBefore = listing(home);
 	const absent = await b.apply({ mode: "set", changes: { "models.rubric": [] } });
 	assert.equal(absent.status, 409);
-	assert.match(absent.error ?? "", /routing\.json is absent: worker routing uses each profile's model/);
+	assert.match(absent.error ?? "", /routing\.json is absent: no rubric rows, so every worker route is refused/);
 	assert.equal((await b.apply({ mode: "restore", keys: ["models.rubric"] })).state, "unchanged");
 	assert.equal(existsSync(routingFile), false);
 	assert.deepEqual(listing(home, settingsAuditFile(home)), absentBefore);

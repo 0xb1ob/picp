@@ -41,7 +41,7 @@ package: <PKG>
 ✓ [package.profiles] 5 profile(s) load and validate
     gate-reviewer (gate-reviewer), implementer (implementer), ops (planner), planner (planner), qa (planner)
 ✓ [package.briefs] every profile's brief template exists
-✓ [config.routing] no .pi-command-post/data/routing.json (profile defaults only)
+✓ [config.routing] no .pi-command-post/data/routing.json (no rubric rows: every route is refused until one exists)
 ✓ [config.budgets] no .pi-command-post/data/budgets.json (defaults)
 ✓ [config.projects] no .pi-command-post/data/projects.json (defaults)
 ✓ [config.budget.gate-reviewer] gate-reviewer effective budget: 10000000 tokens / $50 (not clamped)
@@ -54,7 +54,7 @@ package: <PKG>
 ✓ [config.bounds.wall_clock] per-job wall-clock cap: 5400s
 ✓ [config.bounds.tool_call_cap] per-job tool-call cap: 900 starts
 ✓ [models.probe] model availability not probed (no live model registry in this context)
-    gate-reviewer: anthropic/claude-opus-5-5, implementer: anthropic/claude-opus-5-5, ops: anthropic/claude-opus-5-5, planner: anthropic/claude-opus-5-5, qa: anthropic/claude-opus-5-5
+    (none)
 ✓ [mode] multi-project mode, home <HOME> (source: checkout; no runtime supplied; multi mode on the given home)
 ✓ [home.location] home (checkout): <HOME>
     running from a source checkout; the package root is the home

@@ -192,13 +192,14 @@ test("P16-route-default: the scaffolded template routes every role and size as d
 test("P16-route-migrate: a rubric that left a role to its profile gets one default row per role, once, and every profile routes as before", { timeout: 900_000 }, async (t) => {
 	const b = await dispatchS29(t);
 	const ship = await job(b, "ship"), plan = await job(b, "research");
+	const pull = (await b.ledger.create({ title: "pull the logs", project: "demo", delivery: "local", kind: "research", labels: ["ops:pull"] })).id;
 	const file = join(b.home, LAYOUT.routingFile), journal = join(b.home, LAYOUT.routingMigrationsFile);
 	const done = () => (existsSync(journal) ? readFileSync(journal, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : [])
 		.filter((line) => line.outcome === "done").map((line) => line.ids);
 	const THINKING: Record<string, string> = { planner: "medium", qa: "low", ops: "medium", implementer: "medium", "gate-reviewer": "high" };
 	const ROLE: Record<string, string> = { planner: "planner", qa: "planner", ops: "planner", implementer: "implementer", "gate-reviewer": "gate-reviewer" };
 	const grid = Object.keys(THINKING).flatMap((profile) => (["S", "M", "L"] as const).flatMap((scope) => (["low", "high"] as const)
-		.map((risk) => ({ job_id: profile === "implementer" ? ship : plan, task: "t", profile, scope, risk }))));
+		.map((risk) => ({ job_id: profile === "implementer" ? ship : profile === "ops" ? pull : plan, task: "t", profile, scope, risk }))));
 	const template = JSON.parse(SHIPPED) as { rubric: Array<{ id: string }> };
 	const legacy = [{ id: "risky-any", role: "researcher", risk: "high", model: "anthropic/claude-opus-5", thinking: "xhigh" },
 		{ id: "research", role: "researcher", model: "anthropic/claude-opus-5", thinking: "medium" },
@@ -220,10 +221,10 @@ test("P16-route-migrate: a rubric that left a role to its profile gets one defau
 		rmSync(journal, { force: true });
 		routing(b.home, `${JSON.stringify({ schema_version: 1, allow: ["*/*"], rubric: home.rubric }, null, 2)}\n`);
 		const turn = await parent(b, { phases: [{ calls: grid }], doctor: true, env: { ANTHROPIC_API_KEY: "sk-ant-test" } });
-		for (const got of turn.previews[0]!) {
-			const role = ROLE[got.profile]!, was = home.before(role, got.routing.scope!, got.routing.risk!);
-			const want = was ? ["rubric", ...was] : ["rubric", `${role}-default`, OPUS, THINKING[got.profile]];
-			assert.deepEqual([got.decision?.source, got.decision?.rule, got.decision?.model, got.decision?.thinking], want, `${home.name} ${got.profile} ${got.routing.scope}/${got.routing.risk}: ${said(got)}`);
+		for (const [i, got] of turn.previews[0]!.entries()) {
+			const { profile, scope, risk } = grid[i]!, role = ROLE[profile]!, was = home.before(role, scope, risk);
+			const want = was ? ["rubric", ...was] : ["rubric", `${role}-default`, OPUS, THINKING[profile]];
+			assert.deepEqual([got.decision?.source, got.decision?.rule, got.decision?.model, got.decision?.thinking], want, `${home.name} ${profile} ${scope}/${risk}: ${said(got)}`);
 		}
 		const rows = JSON.parse(readFileSync(file, "utf8")).rubric;
 		assert.deepEqual(rows.slice(0, home.rubric.length), home.rubric, `${home.name}: existing rows untouched, legacy words kept`);
@@ -429,7 +430,8 @@ test("P16-route-unrouted: an explicit model no rubric row names is refused in th
 	const ship = await job(b, "ship");
 	const blind = post(b);
 	routing(b.home, { rubric: [{ id: "small-ship", role: "implementer", model: "mock/routed", fallbacks: ["mock/spare"] }] });
-	const refused = /override names mock\/unrouted, which data\/routing\.json does not route: .*refused, never substituted.*Routed: mock\/routed, mock\/spare\./s;
+	// The parent's session appends role-default rows (P16-route-migrate), so the routed list may continue past these two.
+	const refused = /override names mock\/unrouted, which data\/routing\.json does not route: .*refused, never substituted.*Routed: mock\/routed, mock\/spare\b/s;
 	const previewed = await preview(blind, { jobId: ship, task: "tidy up", model: "mock/unrouted" });
 	assert.match(said(previewed), refused);
 	assert.equal(previewed.decision, undefined);

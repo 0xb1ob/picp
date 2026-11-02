@@ -172,7 +172,7 @@ function baseDocument(owner: SettingFileOwner, path: string): Record<string, unk
 			// A model-only parent.json would read as invalid and turn compaction off: keep the absent-file threshold.
 			return { compact_at_tokens: FIELD.get("sessions.parent_compact_at_tokens")?.default };
 		case "routing":
-			throw new Refusal(409, `${path} is absent: worker routing uses each profile's model; nothing to edit`);
+			throw new Refusal(409, `${path} is absent: no rubric rows, so every worker route is refused; nothing to edit`);
 		case "capacity":
 			throw new Refusal(409, `${path} is absent: configure the gateway with cp-install --gateway-url first`);
 		default:

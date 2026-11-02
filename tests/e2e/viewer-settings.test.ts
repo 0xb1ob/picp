@@ -554,7 +554,7 @@ test("P20-settings-readonly: no control token is read only with every control di
 	const controls = ui.tab.$$("section.settings-section").flatMap((s) => [...s.querySelectorAll("input, select, textarea, button")]);
 	assert.ok(controls.length > 0 && controls.every((el) => el.hasAttribute("disabled") || el.closest("fieldset[disabled]")), "every settings control is disabled");
 	const workers = ui.section("Model routing");
-	assert.equal(workers.querySelector(".settings-readonly")?.textContent, "No data/routing.json: workers use each profile's own model.");
+	assert.equal(workers.querySelector(".settings-readonly")?.textContent, "No data/routing.json: every worker route is refused until it exists.");
 	assert.equal(workers.querySelectorAll("input, button").length, 0);
 	assert.equal(ui.posts().length, 0);
 });

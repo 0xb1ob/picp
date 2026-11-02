@@ -506,8 +506,8 @@ chat, with no thread chips, sidebar section, composer picker or `cp-thread` sele
 **Save** and **Restore defaults** (a `confirm()` first) in each rounded hairline card's footer (≤1000 px wide), with `{n} unsaved change(s)` beside them (for Model routing, changed rubric rows; an edited row gets an accent left bar and tint): **Model routing** (one row per `data/routing.json` rubric entry,
 a desktop header row `Rule · Model · Fallbacks, in order · Thinking`: the mono id and `role · scope · risk:<level> · project` meta, a compact model select, fallbacks as inline mono chips with × that wrap only when needed, ending in a dashed `+ Add fallback` chip (still a native select; ×/chip hold the same 4-fallback cap),
 and a thinking select whose
-blank is the profile default; with no `routing.json`, one line "No data/routing.json: workers use each profile's own
-model." and no controls), **Parent and operator models** (`data/parent.json` / `data/operator.json` `model`, each with
+blank is the profile default; with no `routing.json`, one line "No data/routing.json: every worker route is refused
+until it exists." and no controls), **Parent and operator models** (`data/parent.json` / `data/operator.json` `model`, each with
 its source, then a Parent thinking / Operator thinking select of pi's levels for the same file's `thinking`, badged
 `from file` or `from code`; empty unsets it), **Grant defaults** (the `grants.*` fields from the catalog) and **Auto-compaction**
 (`sessions.parent_compact_at_tokens` / `sessions.operator_compact_at_tokens`, each with an "In force: N tokens, from

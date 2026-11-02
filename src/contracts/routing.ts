@@ -139,6 +139,7 @@ export type JobRouting = Replace<
 // Routing (T13) — data/routing.json
 // ---------------------------------------------------------------------------
 
+// "profile" is never decided now (R1 PR4); it stays so journals written before then still read.
 export const ROUTING_SOURCES = ["override", "rubric", "profile"] as const;
 export type RoutingSource = (typeof ROUTING_SOURCES)[number];
 export const RoutingSourceSchema = StringEnum([...ROUTING_SOURCES]);
