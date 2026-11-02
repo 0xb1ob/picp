@@ -31,6 +31,7 @@ import {
 	MockProvider, type MockToolCall, type PiChild, readFleet, readRunEvents, REPO_ROOT, routeNamed, type RpcRecord, type ScriptStep, startPiChild,
 	waitFor,
 } from "../harness/index.ts";
+import { seedOperatorPick } from "../harness/operator-pick.ts";
 
 type End = RpcRecord & { toolCallId: string; isError?: boolean; result?: { content?: Array<{ text?: string }> } };
 
@@ -1510,4 +1511,52 @@ if (worker) child.stdout.setEncoding("utf8").on("data", (chunk) => {
 	await closed("the run closed");
 	assert.equal(run().outcome, "completed");
 	assert.equal(readFileSync(batches, "utf8").split("\n").filter(Boolean).length, 7, "every reader and S1 reported in one batched read");
+});
+
+// R1 D2: a native run's pin is validated, then yields to the operator's pick for that one dispatch; the run's policy
+// never stores the pick, a same-job retry routes on the rubric despite the pin, and another run keeps its own pin.
+// Negative controls: saving the pick into the run (isolation fails), overlaying the pin on the retry (spawn fails).
+test("D2-schedule: a pinned native run honours a pick once, never stores it, and continues on the rubric", { timeout: 300_000 }, async (t) => {
+	const h = await schedulesHome(t);
+	const rubric = h.model("rubric", [{ kind: "text", text: "rubric worker" }]);
+	const pin = h.model("pin", [{ kind: "text", text: "pinned worker" }]);
+	const job = (name: string) => h.runs().openRun(h.idOf(name))!.anchor_job_id!;
+	const picked = h.model("picked", [{ kind: "tool_calls", calls: [{ name: "report_result", args: () => ({
+		job_id: job("pr-run"), kind: "ship", status: "blocked", summary: "Waiting on a human.", blockers: ["a human must pick the API"] }) }] }, { kind: "text", text: "filed" }]);
+	writeFileSync(join(h.home, LAYOUT.routingFile), JSON.stringify({ schema_version: SCHEMA_VERSION, allow: [`${MOCK_PROVIDER_ID}/*`], rubric: [
+		{ id: "implementer", role: "implementer", model: rubric }, { id: "pins", role: "implementer", project: "__pins__", model: pin }] }));
+	const quote = seedOperatorPick(h.home, picked);
+	const add = (name: string) => schedule(`add-${name}`, { action: "add", name, project: "demo", manual: true, title: `${name} task`, kind: "ship", delivery: "pr", operator_quote: `Add the ${name} schedule.` });
+	const first = await h.parent("P13: Add the pr-run schedule. Add the other-run schedule.", [
+		{ kind: "tool_calls", calls: [add("pr-run"), add("other-run")] },
+		{ kind: "tool_calls", calls: ["pr-run", "other-run"].map((name) => schedule(`run-${name}`, () => ({ action: "run_now", id: h.idOf(name), overrides: { model: pin } }))) },
+		{ kind: "tool_calls", calls: [
+			{ id: "picked", name: "cp_dispatch", args: () => ({ job_id: job("pr-run"), task: "Fix it.", model: picked, operator_quote: quote }) },
+			{ id: "other", name: "cp_dispatch", args: () => ({ job_id: job("other-run"), task: "Fix it." }) },
+		] },
+	]);
+	const results = ends(first);
+	assertCall(results, "picked", "ok", /cp-/);
+	assertCall(results, "other", "ok", /cp-/);
+	const [prJob, otherJob] = [job("pr-run"), job("other-run")];
+	const fleet = () => readFleet(h.home).jobs;
+	await waitFor(() => fleet().find((entry) => entry.job_id === prJob), (entry) => entry?.phase === "held", { timeoutMs: 60_000, what: "the picked worker's report" });
+	const honoured = fleet().find((entry) => entry.job_id === prJob)!;
+	assert.deepEqual([honoured.worker.model, honoured.routing?.operator_pick?.proof_id], [picked, quote.proof_id]);
+	assert.deepEqual([fleet().find((entry) => entry.job_id === otherJob)?.worker.model, fleet().find((entry) => entry.job_id === otherJob)?.routing?.operator_pick], [pin, undefined]);
+	const stored = JSON.stringify([h.runs().openRun(h.idOf("pr-run")), h.runs().activePolicy(h.idOf("pr-run"))]);
+	assert.equal(h.runs().openRun(h.idOf("pr-run"))?.execution?.effective.model, pin);
+	assert.ok(!stored.includes(quote.proof_id) && !stored.includes(picked), "the run and its policy never acquire the pick");
+	await h.closeParents();
+
+	const again = await h.parent(`P13: retry ${prJob}.`, [
+		{ kind: "tool_calls", calls: [{ id: "down", name: "cp_teardown", args: { job_id: prJob, force: true } }] },
+		{ kind: "tool_calls", calls: [{ id: "branch", name: "bash", args: { command: `git -C ${h.clone} branch -D ${prJob}` } }] },
+		{ kind: "tool_calls", calls: [{ id: "retry", name: "cp_dispatch", args: { job_id: prJob, task: "Fix it again." } }] },
+	]);
+	assertCall(ends(again), "retry", "ok", /cp-/);
+	const retried = fleet().find((entry) => entry.job_id === prJob)!;
+	const event = readRunEvents(h.home, prJob).findLast((entry) => entry.type === "routing_resolved")?.payload as Record<string, unknown>;
+	assert.deepEqual([retried.worker.model, retried.routing?.operator_pick, event.source, event.prior_pick_attempt], [rubric, undefined, "rubric", honoured.routing?.operator_pick?.attempt_id]);
+	assert.equal(h.runs().openRun(h.idOf("pr-run"))?.execution?.effective.model, pin, "the run keeps its own pin");
 });
