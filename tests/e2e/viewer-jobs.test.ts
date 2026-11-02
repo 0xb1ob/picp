@@ -12,6 +12,8 @@ import { pathToFileURL } from "node:url";
 import { type TestContext, test } from "node:test";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import { drainFile } from "../../src/drain.ts";
+import { PRODUCTION_QUOTA_RESET_ADAPTER } from "../../src/quota-reset-signal.ts";
+import { PRODUCTION_QUOTA_CAPABILITY } from "../../src/viewer/quota-view.ts";
 import type { BoardResponse, JobResponse, JobsResponse, JobTranscriptResponse, OverviewResponse } from "../../src/viewer/api-types.ts";
 import { routeNamed, createScratchHome, git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
 import { startViewer } from "../harness/dashboard.ts";
@@ -749,6 +751,7 @@ test("P3-quota-ui: Job detail serves quota continuation read-only — unsupporte
 		intents: [intent("cp-due", "waiting", reset), intent("cp-held", "ambiguous", reset, "revive refused: cannot revive cp-held (pid_alive)")] });
 	const view = await startViewer(t, { home: scratch.path, requireTailnet: false, at: new Date(NOON).toISOString() });
 	const api = async (id: string) => (await view.get(`/api/job/${id}`).then((r) => JSON.parse(r.text) as JobResponse)).quota_continuation;
+	assert.equal(PRODUCTION_QUOTA_CAPABILITY, PRODUCTION_QUOTA_RESET_ADAPTER.capabilityVersion, "the viewer's inlined capability is production's");
 	assert.deepEqual(await api("cp-plain"), { supported: false, capability_version: "none", policy: { enabled: false, source: "default" }, intent: null });
 	const due = await api("cp-due");
 	assert.deepEqual([due?.supported, due?.policy, due?.intent?.overdue, due?.intent?.resets_at], [false, { enabled: true, source: "job" }, true, reset]);

@@ -1,6 +1,6 @@
 /**
- * The operator's slash commands: /cp-version, /status, /memory, /doctor, /cp-drain, /cp-quota, /watch, /cp-ask, /cp-plan,
- * /cp-mandate-defaults and /cp-revive.
+ * The operator's slash commands: /cp-version, /status, /memory, /doctor, /cp-drain, /cp-quota, /watch, /cp-ask,
+ * /cp-plan, /cp-mandate-defaults and /cp-revive.
  * Moved from index.ts as is, except that index.ts's closure state is read through `deps` (./shared.ts).
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

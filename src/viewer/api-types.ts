@@ -234,7 +234,7 @@ export interface JobResponse {
  /** P3 quota continuation (state/quota-continuation.json): optional so an older server's response still renders. */
  quota_continuation?: JobQuotaContinuation;
 }
-/** `supported` is the production capability: false ("none") until a verified reset adapter ships; `policy` null: unreadable store. */
+/** `supported`: production capability, false ("none") until a verified adapter ships; null `policy`: unreadable. */
 export interface JobQuotaContinuation {
  supported: boolean; capability_version: string;
  policy: {enabled: boolean; source: "job" | "home" | "default"} | null;

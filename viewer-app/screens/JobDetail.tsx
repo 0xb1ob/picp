@@ -84,7 +84,7 @@ function DeployFact({deploy}: {deploy: JobDeploy}) {
   {detail && <p class="job-deploy-detail" title={detail}>{detail}</p>}</>;
 }
 
-/** P3: unsupported in production comes before any policy, so an "on" never reads as scheduled; cancel goes via the operator. */
+/** P3: "unsupported in production" precedes any policy, so "on" never reads as scheduled; the operator cancels. */
 function QuotaFact({jobId, q}: {jobId: string; q: JobQuotaContinuation}) {
  const policy = q.policy ? `policy ${q.policy.enabled ? "on" : "off"} (${q.policy.source})` : "policy unreadable";
  const head = q.supported ? `${policy} · adapter ${q.capability_version}` : `unsupported in production (capability ${q.capability_version}) · ${policy}, schedules nothing`;

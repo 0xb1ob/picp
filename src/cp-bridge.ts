@@ -433,7 +433,7 @@ export class CpBridge {
 	drainCancel(): Promise<ParentDiagnostic> {
 		return this.drain("cancel");
 	}
-	/** `/cp-quota <args>` in the live parent, beside a busy turn like a drain; an older parent refuses it as unregistered. */
+	/** `/cp-quota <args>` in the live parent, beside a busy turn like a drain; an older parent refuses it. */
 	quota(args: string): Promise<ParentDiagnostic> {
 		const proc = this.#proc;
 		if (!proc?.alive || !this.#ready || this.#stopping) throw new CpBridgeError("parent is not running; call cp_parent start");

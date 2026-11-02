@@ -498,30 +498,37 @@ test("closure revocation and manual replacement send nothing; restart and replay
 	const revoked = await f.job({ slug: "revoked" });
 	const replaced = await f.job({ slug: "replaced" });
 	const once = await f.job({ slug: "once" });
+	const reused = await f.job({ slug: "reused" });
 	const grant = f.post.mandates.issue({ projects: ["demo"], objective: `cover ${revoked}`, expiry: FAR, spend_cap: { usd: 100, tokens: 10_000_000 }, job_cap: 10, ask_on: [], job_ids: [revoked] });
 	const soon = resetIn(20_000);
-	for (const [jobId, name] of [[closed, "closed"], [revoked, "revoked"], [replaced, "replaced"]] as const) {
+	for (const [jobId, name] of [[closed, "closed"], [revoked, "revoked"], [replaced, "replaced"], [reused, "reused"]] as const) {
 		await f.dispatch(jobId, f.script(name, [quotaResetError(soon), { kind: "hang" }]));
 	}
 	await f.dispatch(once, f.script("once", [quotaResetError(soon), quotaResetError(resetIn(HOURS_5)), { kind: "hang" }]));
-	for (const jobId of [closed, revoked, replaced, once]) await failed(f, jobId);
-	await waitFor(() => f.post.quota.intents().length, (n) => n === 4, { timeoutMs: 10_000, what: "four pending intents" });
+	for (const jobId of [closed, revoked, replaced, once, reused]) await failed(f, jobId);
+	await waitFor(() => f.post.quota.intents().length, (n) => n === 5, { timeoutMs: 10_000, what: "five pending intents" });
 
 	assert.equal((await f.post.teardown.teardown(closed, { force: true })).failure, undefined);
 	f.post.mandates.revoke(grant.id);
 	await f.post.revive(replaced, { continueFailed: true });
+	// Internal seam: a reused pid cannot be produced on demand, so the record keeps its pid and gets a later start.
+	await f.post.fleet.mutate((jobs) => {
+		const record = jobs.find((job) => job.job_id === reused)!;
+		record.worker.started_at = isoTimestamp(new Date(Date.parse(record.worker.started_at) + 1_000));
+	});
 	// A restart before the reset: the new owner's startup timer is the only wake; replayed passes race it.
 	const post = await f.restart();
 	await new Promise((resolve) => setTimeout(resolve, Math.max(0, soon.getTime() - Date.now())));
 	await Promise.all([post.quota.tick(), post.quota.tick()]);
-	const [c, r, m, o] = await settled(f, [closed, revoked, replaced, once]);
+	const [c, r, m, o, u] = await settled(f, [closed, revoked, replaced, once, reused]);
 	assert.deepEqual([c?.state, c?.reason], ["cancelled", `${closed} is closed`]);
 	assert.deepEqual(r?.state, "cancelled");
 	assert.match(String(r?.reason), /^authority refused: /);
 	assert.deepEqual([m?.state, m?.reason], ["cancelled", `${replaced} was continued by other means (phase waiting)`]);
+	assert.deepEqual([u?.state, u?.reason], ["cancelled", `${reused} was continued by other means (phase failed)`], "same pid, new start");
 	assert.deepEqual([o?.state, o?.consumed?.receipt, o?.attempts], ["consumed", "delivered", 1]);
 	await waitFor(() => nudges(f, "once"), (n) => n === 1, { timeoutMs: 30_000, what: "the one continuation request" });
-	assert.deepEqual(["closed", "revoked", "replaced"].map((name) => nudges(f, name)), [0, 0, 0], "nothing sent where a stop applied");
+	assert.deepEqual(["closed", "revoked", "replaced", "reused"].map((name) => nudges(f, name)), [0, 0, 0, 0], "nothing sent where a stop applied");
 
 	// The continued turn hits a second limit: a new generation, the first stays consumed, and nothing resends.
 	const second = await waitFor(() => post.quota.intents(once), (rows) => rows.length === 2, { timeoutMs: 60_000, what: "the second limit's intent" });
@@ -746,65 +753,138 @@ test("drain defers a due intent and cp_next never offers its job", { skip: SKIP,
 	assert.deepEqual(await f.post.quota.tick(), []);
 	assert.deepEqual(f.post.quota.intents(held).map((row) => [row.state, row.delivery]), [["pending", "waiting"]]);
 	assert.equal(nudges(f, "drained"), 0, "nothing is sent while the parent drains");
-	// The restart a drain prepares clears it; the new owner continues the session once.
-	const post = await f.restart();
+	// The restart a drain prepares clears it; the new owner continues the session once. The intent is rewritten as an
+	// older build stored it, with neither worker_pid nor worker_started_at: it still loads and still continues.
+	const post = await f.restart(async () => {
+		const store = JSON.parse(readFileSync(quotaContinuationFile(f.home), "utf8")) as { intents: QuotaIntent[] };
+		for (const intent of store.intents) {
+			delete intent.worker_pid;
+			delete intent.worker_started_at;
+		}
+		writeFileSync(quotaContinuationFile(f.home), JSON.stringify(store));
+	});
 	await post.quota.tick();
 	const [done] = await settled(f, [held]);
 	assert.deepEqual([done?.state, done?.consumed?.receipt], ["consumed", "delivered"]);
 	await waitFor(() => nudges(f, "drained"), (n) => n === 1, { timeoutMs: 30_000, what: "the one continuation" });
 });
 
-test("the operator bridge reads and sets quota policy over a real parent, which says unsupported in production", { timeout: 180_000 }, async (t) => {
-	const home = createScratchHome();
+/** A real parent (`pi --mode rpc` plus the command-post extension) over `home`, driven via `CpBridge`, then stopped. */
+async function withParent(home: string, run: (bridge: CpBridge, parentPrompts: () => string[]) => Promise<void>): Promise<void> {
 	const provider = await MockProvider.start();
 	const model = provider.addScript("quota-parent", [{ kind: "text", text: "Ready." }], { onExhausted: "repeat" });
 	const agent = createAgentDir({ provider, settings: { retry: { enabled: false } } });
 	const previous = { ...process.env };
 	Object.assign(process.env, agent.env);
 	const bridge = new CpBridge();
-	t.after(async () => {
+	try {
+		await bridge.start({ home, mode: "multi", model, cwd: home, commandPostExtension: COMMAND_POST_EXTENSION });
+		await run(bridge, () => provider.requests("quota-parent").map(lastUserText));
+	} finally {
 		await bridge.stop();
 		for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key];
 		Object.assign(process.env, previous);
 		agent.cleanup();
 		await provider.stop();
-		home.cleanup();
+	}
+}
+
+test("the operator bridge reads and sets quota policy over a real parent, which says unsupported in production", { skip: SKIP, timeout: 180_000 }, async (t) => {
+	const home = createScratchHome();
+	t.after(() => home.cleanup());
+	await withParent(home.path, async (bridge, parentPrompts) => {
+		const status = await bridge.quota(quotaCommandArgs({ op: "status" }));
+		assert.equal(status.level, "info");
+		assert.match(status.text, /^QUOTA: unsupported in production: .*\(capability none\)/);
+		assert.match(status.text, /home default: off \(built-in default\)\nno intents$/);
+		const on = await bridge.quota(quotaCommandArgs({ op: "on" }));
+		assert.match(on.text, /^QUOTA: home default set on by operator — no effect while unsupported in production/);
+		assert.match((await bridge.quota("status")).text, /home default: on \(set by operator at \d{4}-/);
+		const stored = JSON.parse(readFileSync(quotaContinuationFile(home.path), "utf8")) as { policy: { home: { enabled: boolean; actor: string } }; intents: unknown[] };
+		assert.deepEqual([stored.policy.home.enabled, stored.policy.home.actor, stored.intents], [true, "operator", []], "a policy alone schedules nothing");
+		const refused = await bridge.quota(quotaCommandArgs({ op: "cancel", job_id: "cp-none", reason: "not needed" }));
+		assert.deepEqual([refused.level, /^QUOTA: refused: .*; nothing changed$/.test(refused.text)], ["error", true], refused.text);
+		const usage = await bridge.quota("cancel");
+		assert.deepEqual([usage.level, /usage: \/cp-quota/.test(usage.text)], ["error", true], usage.text);
+		assert.throws(() => quotaCommandArgs({ op: "cancel" }), /needs quota\.job_id/, "the bridge never sends a cancel without a job");
+		assert.deepEqual(parentPrompts(), [], "no quota command became a model turn");
 	});
-	await bridge.start({ home: home.path, mode: "multi", model, cwd: home.path, commandPostExtension: COMMAND_POST_EXTENSION });
-	const status = await bridge.quota(quotaCommandArgs({ op: "status" }));
-	assert.equal(status.level, "info");
-	assert.match(status.text, /^QUOTA: unsupported in production: .*\(capability none\)/);
-	assert.match(status.text, /home default: off \(built-in default\)\nno intents$/);
-	const on = await bridge.quota(quotaCommandArgs({ op: "on" }));
-	assert.match(on.text, /^QUOTA: home default set on by operator — no effect while unsupported in production/);
-	assert.match((await bridge.quota("status")).text, /home default: on \(set by operator at \d{4}-/);
-	const stored = JSON.parse(readFileSync(quotaContinuationFile(home.path), "utf8")) as { policy: { home: { enabled: boolean; actor: string } }; intents: unknown[] };
-	assert.deepEqual([stored.policy.home.enabled, stored.policy.home.actor, stored.intents], [true, "operator", []], "a policy alone schedules nothing");
-	const refused = await bridge.quota(quotaCommandArgs({ op: "cancel", job_id: "cp-none", reason: "not needed" }));
-	assert.deepEqual([refused.level, /^QUOTA: refused: .*; nothing changed$/.test(refused.text)], ["error", true], refused.text);
-	const usage = await bridge.quota("cancel");
-	assert.deepEqual([usage.level, /usage: \/cp-quota/.test(usage.text)], ["error", true], usage.text);
-	assert.throws(() => quotaCommandArgs({ op: "cancel" }), /needs quota\.job_id/, "the bridge never sends a cancel without a job");
-	assert.equal(provider.requests("quota-parent").length, 0, "no quota command became a model turn");
 });
 
-test("an operator cancel through the quota command is audited, once, and never sends", { skip: SKIP, timeout: 180_000 }, async (t) => {
+test("an operator cancel through cp_parent quota on a real parent is audited, once, and never sends", { skip: SKIP, timeout: 240_000 }, async (t) => {
 	const f = await fleet(t, { verified: true });
 	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
 	const jobId = await f.job({ slug: "stopped" });
 	await f.dispatch(jobId, f.script("stopped", [quotaResetError(resetIn(HOURS_5)), { kind: "hang" }]));
 	await failed(f, jobId);
 	const [intent] = f.post.quota.intents(jobId);
-	assert.match(runQuotaCommand(f.post.quota, `status ${jobId}`).text, new RegExp(`verified reset adapter mock-quota-reset/1[\\s\\S]*${intent?.continuation_id} pending/waiting`));
-	const cancelled = runQuotaCommand(f.post.quota, `cancel ${jobId} wrong   window`);
-	assert.deepEqual([cancelled.level, cancelled.text.startsWith(`QUOTA: cancelled ${intent?.continuation_id} by operator`)], ["info", true], cancelled.text);
-	const [after] = f.post.quota.intents(jobId);
-	assert.deepEqual([after?.state, after?.cancelled?.actor, after?.cancelled?.reason], ["cancelled", "operator", "wrong window"]);
-	const again = runQuotaCommand(f.post.quota, `cancel ${jobId}`);
-	assert.deepEqual([again.level, /^QUOTA: refused: .*; nothing changed$/.test(again.text)], ["error", true], again.text);
-	assert.deepEqual(f.post.quota.intents(jobId), [after], "a duplicate cancel changes nothing");
+	// The in-process owner that saw the quota error stops; a real parent over the same home takes the operator's
+	// cancel and its duplicate through the bridge, as production would.
+	const post = await f.restart(() => withParent(f.home, async (bridge, parentPrompts) => {
+		const status = await bridge.quota(quotaCommandArgs({ op: "status", job_id: jobId }));
+		assert.match(status.text, new RegExp(`^QUOTA: unsupported in production[\\s\\S]*${intent?.continuation_id} pending/waiting`));
+		const cancelled = await bridge.quota(quotaCommandArgs({ op: "cancel", job_id: jobId, reason: "wrong   window" }));
+		assert.deepEqual([cancelled.level, cancelled.text.startsWith(`QUOTA: cancelled ${intent?.continuation_id} by operator: wrong window.`)], ["info", true], cancelled.text);
+		const again = await bridge.quota(quotaCommandArgs({ op: "cancel", job_id: jobId }));
+		assert.deepEqual([again.level, again.text], ["error", `QUOTA: refused: ${jobId} has no pending quota continuation; nothing changed`]);
+		// The parent may take its own startup wake for the failed job; no quota command ever reaches it as a prompt.
+		assert.deepEqual(parentPrompts().filter((text) => /cp-quota|quota cancel|wrong window/.test(text)), [], parentPrompts().join("\n---\n"));
+	}));
+	const [after] = post.quota.intents(jobId);
+	assert.deepEqual([after?.state, after?.delivery, after?.cancelled?.actor, after?.cancelled?.reason], ["cancelled", "waiting", "operator", "wrong window"]);
+	assert.equal(f.events(jobId, "quota_continuation").filter((row) => row.state === "cancelled").length, 1, "one audited cancel");
 	assert.equal(nudges(f, "stopped"), 0);
-	assert.equal(f.post.fleet.require(jobId).phase, "failed", "the job, session and counters are kept");
+	assert.equal(post.fleet.require(jobId).phase, "failed", "the job, session and counters are kept");
+});
+
+test("a cancel racing the due pass wins before the claim and never sends; the pass's own revive is no replacement", { skip: SKIP, timeout: 240_000 }, async (t) => {
+	const f = await fleet(t, { verified: true, maxTrees: 4 });
+	f.post.quota.setPolicy({ enabled: true, actor: "operator" });
+	const first = await f.job({ slug: "first" });
+	const raced = await f.job({ slug: "raced" });
+	// Deterministic hold point: one due pass parks in `first`'s revive with `raced` due behind it; the operator's cancel
+	// lands there (the bridge's parent runs runQuotaCommand; this in-process owner has no bridge, so it is called here).
+	const post = f.post;
+	const real = post.revive.bind(post);
+	let parked!: () => void;
+	const reached = new Promise<void>((resolve) => { parked = resolve; });
+	let release!: () => void;
+	const released = new Promise<void>((resolve) => { release = resolve; });
+	let own: { holding?: string; pid?: number; started_at?: string } = {};
+	post.revive = async (jobId, options) => {
+		if (jobId !== first) return real(jobId, options);
+		parked();
+		await released;
+		const result = await real(jobId, options);
+		const worker = post.fleet.require(jobId).worker;
+		own = { holding: post.quota.holding(jobId), pid: worker.pid, started_at: worker.started_at };
+		return result;
+	};
+	const soon = resetIn(25_000);
+	for (const [jobId, name] of [[first, "first"], [raced, "raced"]] as const) {
+		await f.dispatch(jobId, f.script(name, [quotaResetError(soon), { kind: "text", text: "continued" }]));
+		await failed(f, jobId);
+	}
+	assert.ok(Date.now() < soon.getTime(), "both intents exist before the one pass that finds them due");
+	await reached;
+	assert.deepEqual([first, raced].map((jobId) => post.quota.intents(jobId)[0]?.delivery), ["claimed", "waiting"]);
+	const cancel = runQuotaCommand(post.quota, `cancel ${raced} lost the race`);
+	assert.equal(cancel.level, "info", cancel.text);
+	const late = runQuotaCommand(post.quota, `cancel ${first}`);
+	assert.match(late.text, /^QUOTA: refused: .* is claimed: past the point a cancel can stop; nothing changed$/);
+	release();
+	const [done] = await settled(f, [first]);
+	assert.equal(done?.state, "consumed", String(done?.reason));
+	await waitFor(() => nudges(f, "first"), (n) => n === 1, { timeoutMs: 30_000, what: "first's one continuation" });
+	await post.quota.tick();
+	const [lost] = post.quota.intents(raced);
+	assert.deepEqual([lost?.state, lost?.delivery, lost?.attempts, lost?.cancelled?.actor, lost?.cancelled?.reason], ["cancelled", "waiting", 0, "operator", "lost the race"]);
+	assert.equal(f.events(raced, "quota_continuation").filter((row) => row.state === "cancelled").length, 1, "one audited cancel");
+	assert.deepEqual([nudges(f, "raced"), post.fleet.require(raced).phase], [0, "failed"]);
+	// replaced() is consulted only while waiting: after the pass's own revive (a new pid and start) the intent still
+	// owns the job's next turn, and it ends consumed, never "continued by other means".
+	assert.ok(own.pid !== done?.worker_pid && own.started_at !== done?.worker_started_at, "the continuation started a new worker");
+	assert.equal(own.holding, done?.continuation_id);
 });
 
 /** Every `.ts`/`.tsx` file below `dir`, skipping dependencies. */

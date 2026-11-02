@@ -97,7 +97,7 @@ export interface QuotaContinuationOptions {
 /** The due timer's longest sleep, so a clock jump, a suspended host or a skipped pass is retried. */
 export const QUOTA_TICK_MAX_MS = 60_000;
 
-/** The interrupted worker was replaced since (a manual revive or re-dispatch); pid and start together survive pid reuse. */
+/** The interrupted worker was replaced since (a manual revive or re-dispatch); pid plus start survive pid reuse. */
 const replaced = (record: FleetRecord, intent: QuotaIntent): boolean =>
 	(intent.worker_pid !== undefined && record.worker.pid !== intent.worker_pid)
 	|| (intent.worker_started_at !== undefined && record.worker.started_at !== intent.worker_started_at);
