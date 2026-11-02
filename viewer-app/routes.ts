@@ -1,6 +1,6 @@
 /**
- * The route table (dashboard audit P4 §1): the seven desktop items (eight after S8b) and five phone tabs (`primaryNav`), then the views
- * reached through them — Board and Map are Jobs views, Schedules, Files and Settings live under More. Search lists them all.
+ * The route table: three primary items on both widths (`primaryNav`: Chat, Jobs, More), then the views reached through
+ * them — Board, Map and History are Jobs views, every other page lives under More. Search lists them all.
  */
 import type { EvidenceReference } from "../src/evidence-reference.ts";
 import { withoutSelection } from "./project-filter.ts";
@@ -8,7 +8,7 @@ export const navigation = [
  {id:"overview", label:"Overview", href:"#overview"},
  {id:"decisions", label:"Decisions", href:"#decisions"},
  {id:"jobs", label:"Jobs", href:"#jobs"},
- {id:"sessions", label:"Sessions", href:"#sessions"},
+ {id:"sessions", label:"Chat", href:"#sessions"},
  {id:"stats", label:"Stats", href:"#stats"},
  {id:"reports", label:"Reports", href:"#reports"},
  {id:"more", label:"More", href:"#more"},
@@ -21,14 +21,12 @@ export const navigation = [
 /** The README's "Words you will see" table: the one glossary that decision cards and Overview rows link to. */
 export const GLOSSARY_HREF = "https://github.com/0xb1ob/picp#words-you-will-see";
 export type NavId = typeof navigation[number]["id"];
-/** The sidebar (desktop) and the tab bar (phone); Reports sits under More on phone only. */
-export const primaryNav = (desktop: boolean): readonly NavId[] => desktop ? ["overview","decisions","jobs","sessions","stats","reports","settings","more"] : ["overview","decisions","jobs","sessions","more"];
-/** The top-level item a screen belongs to: Board and Map are Jobs views, Schedules and Files (and Reports on phone) are More. */
-export function navOwner(screen: Route["screen"], desktop: boolean): NavId {
+/** The sidebar (desktop) and the tab bar (phone): the same three items on both widths. */
+export const primaryNav: readonly NavId[] = ["sessions","jobs","more"];
+/** The primary item a screen belongs to: a job, Board and Map are Jobs views; every page but Chat and Jobs is More. */
+export function navOwner(screen: Route["screen"]): NavId {
  if (screen === "job" || screen === "board" || screen === "map") return "jobs";
- if (screen === "report") return desktop ? "reports" : "more";
- if (screen === "schedules" || screen === "files" || (screen === "settings" && !desktop) || (screen === "reports" && !desktop) || (screen === "stats" && !desktop)) return "more";
- return screen;
+ return screen === "sessions" || screen === "jobs" ? screen : "more";
 }
 export interface Route {screen:"overview" | "more" | "decisions" | "sessions" | "files" | "map" | "jobs" | "job" | "report" | "board" | "reports" | "schedules" | "settings" | "stats"; jobId?:string; section:"awaiting" | "decided" | null; query?:string; defaulted?:boolean}
 export function route(hash: string): Route {
