@@ -17,6 +17,6 @@
 | ID | Unit file | Scenario | Control | Failing assertion |
 |---|---|---|---|---|
 | B2-writer | tests/e2e/decisions.test.ts | B2-withdrawn-at | `withdraw` appends without `withdrawn_at` | the journaled withdrawal time matches the ISO pattern: 'undefined' |
-| B2-required | tests/e2e/decisions.test.ts | B2-legacy | `withdrawn_at` required on read | the legacy withdrawal still settles its ask: the bridge refuses the legacy journal |
+| B2-required | tests/e2e/decisions.test.ts | B2-legacy | `withdrawn_at` required on read | the legacy ask's answer is refused as not open: the bridge refuses the whole legacy journal instead |
 | B2-malformed | tests/e2e/decisions.test.ts | B2-legacy | `withdrawn_at` accepts any string | a malformed withdrawal time is refused |
 <!-- /manifest:regressions -->
