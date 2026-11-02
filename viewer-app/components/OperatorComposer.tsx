@@ -1,5 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import type { EvidenceReference } from "../../src/evidence-reference.ts";
 import { attachmentSize, attachRefusal, CONTROL_TEXT_MAX, type ControlView, controlFiles, controlImages, controlLine, controlReady, deliveryLine, isTextFile, uploadUrl } from "../control.ts";
+import { parseReference, referenceContext } from "../evidence-ref.ts";
+import { EvidenceChip } from "./EvidenceReference.tsx";
 import { Icon } from "./icons.tsx";
 import { StartSession } from "./StartSession.tsx";
 import { restartInFlight } from "../restart-control.ts";
@@ -13,6 +16,17 @@ type Picked = {name: string; type: string; size: number};
 /** The unsent text per operator session file (`offline` while none is known); absent when empty. */
 const DRAFT_KEY = "cp-composer-draft:";
 const OFFLINE_DRAFT_KEY = `${DRAFT_KEY}offline`;
+/** The draft's one evidence reference (identifiers JSON), a sibling of the text key; text keys are unchanged. */
+const REF_KEY = "cp-composer-ref:";
+const OFFLINE_REF_KEY = `${REF_KEY}offline`;
+/** A consumed reference link leaves the hash (replaced, not pushed), so reload or Back cannot re-add a removed chip. */
+function dropComposerLink() {
+ const [path = "", query = ""] = location.hash.split("?");
+ const params = new URLSearchParams(query);
+ params.delete("draft"); params.delete("ref");
+ const rest = params.toString();
+ location.replace(`${path}${rest ? `?${rest}` : ""}`);
+}
 let draftWarned = false;
 function readDraft(key: string): string {
  try { return window.localStorage?.getItem(key) ?? ""; } catch { return ""; }
@@ -25,8 +39,11 @@ function rememberDraft(key: string, text: string) {
  * The Full transcript's composer, into the running operator session. One rounded box (chat v2): the growing textarea
  * over attach, Options, busy ⋯ (steer, confirm-tap abort) and send; one row below 900 px. Up to 8 attachments.
  */
-export function OperatorComposer({control, draft}: {control:ControlView; draft?:string}) {
- const [text,setText] = useState((draft ?? "").slice(0, CONTROL_TEXT_MAX));
+export function OperatorComposer({control, draft, reference}: {control:ControlView; draft?:string; reference?:string}) {
+ // A reference link (composerHref) keeps saved text: its draft is only a suggestion for an empty composer.
+ const linked = useMemo(() => parseReference(reference), [reference]);
+ const [text,setText] = useState(linked ? "" : (draft ?? "").slice(0, CONTROL_TEXT_MAX));
+ const [attached,setAttached] = useState<EvidenceReference | null>(null);
  const [confirmAbort,setConfirmAbort] = useState(false);
  const [attachments,setAttachments] = useState<Attachment[]>([]);
  // `@skill` autocomplete: the catalogue (fetched on the first `@`), the caret, the highlighted option, and Escape's close.
@@ -51,24 +68,41 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
  const files = attachments.flatMap(a => a.state === "ready" && a.id && a.text ? [a.id] : []);
  // A failed or unfinished attachment blocks sending: remove it or wait.
  const pending = attachments.some(a => a.state !== "ready");
- const canSend = ready && !sending && !pending && (!!text.trim() || images.length > 0 || files.length > 0);
  const draftKey = ready ? status.session_file ? `${DRAFT_KEY}${status.session_file}` : OFFLINE_DRAFT_KEY : null;
+ const refKey = draftKey && `${REF_KEY}${draftKey.slice(DRAFT_KEY.length)}`;
  const restored = useRef<string | null>(null);
- // Restore once per key; an explicit draft link wins, and text already typed is never replaced.
+ const consumed = useRef<string | undefined>(undefined);
+ // Restore once per key; an explicit draft link without a reference wins, and text already typed is never replaced.
  useEffect(() => {
-  if (!draftKey || restored.current === draftKey) return;
+  // A link left the hash: selecting the same evidence again is a new selection.
+  if (!linked) consumed.current = undefined;
+  const link = linked && consumed.current !== reference ? linked : null;
+  if (!draftKey || !refKey || (restored.current === draftKey && !link)) return;
   restored.current = draftKey;
-  if (draft !== undefined) return;
-  let saved = readDraft(draftKey);
-  // The session came up: an empty session draft adopts what was typed while offline.
-  if (!saved && draftKey !== OFFLINE_DRAFT_KEY) {
-   saved = readDraft(OFFLINE_DRAFT_KEY);
-   if (saved) { rememberDraft(draftKey, saved); rememberDraft(OFFLINE_DRAFT_KEY, ""); }
+  if (draft !== undefined && !linked) return;
+  consumed.current = reference;
+  let saved = readDraft(draftKey), savedRef = readDraft(refKey);
+  // The session came up: an empty session draft adopts what was typed (and attached) while offline.
+  if (!saved && !savedRef && draftKey !== OFFLINE_DRAFT_KEY && (readDraft(OFFLINE_DRAFT_KEY) || readDraft(OFFLINE_REF_KEY))) {
+   saved = readDraft(OFFLINE_DRAFT_KEY); savedRef = readDraft(OFFLINE_REF_KEY);
+   rememberDraft(draftKey, saved); rememberDraft(refKey, savedRef); rememberDraft(OFFLINE_DRAFT_KEY, ""); rememberDraft(OFFLINE_REF_KEY, "");
   }
-  const text = saved.slice(0, CONTROL_TEXT_MAX);
-  if (text) setText(current => current || text);
- },[draftKey,draft]);
+  // A reference link's draft is a suggestion: saved (or typed) text is kept, and the suggestion is saved like typing.
+  const suggested = !saved && link && draft ? draft.slice(0, CONTROL_TEXT_MAX) : "";
+  if (suggested) rememberDraft(draftKey, suggested);
+  const restoredText = (saved || suggested).slice(0, CONTROL_TEXT_MAX);
+  if (restoredText) setText(current => current || restoredText);
+  const ref = link ?? parseReference(savedRef);
+  if (ref) { setAttached(ref); rememberDraft(refKey, JSON.stringify(ref)); }
+  // Consumed: the link leaves the URL, so a reload restores storage (a removed chip stays removed), never the link.
+  if (link) dropComposerLink();
+ },[draftKey,draft,linked,reference]);
  const edit = (next: string) => { setText(next); if (draftKey) rememberDraft(draftKey, next); };
+ const pin = (ref: EvidenceReference | null) => { setAttached(ref); if (refKey) rememberDraft(refKey, ref ? JSON.stringify(ref) : ""); };
+ const outgoing = [text.trim(), attached ? referenceContext(attached) : ""].filter(Boolean).join("\n\n");
+ // Never truncate the question to fit the reference: refuse visibly instead.
+ const tooLong = !!attached && outgoing.length > CONTROL_TEXT_MAX;
+ const canSend = ready && !sending && !pending && !tooLong && (!!text.trim() || images.length > 0 || files.length > 0);
  // Grow with the text; CSS max-height (about five lines) makes it scroll inside past that.
  useLayoutEffect(() => {
   const el = field.current;
@@ -121,12 +155,13 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
   setAttachments(list => [...list, ...added]);
  };
  const send = (deliver?: "followUp" | "steer") => {
-  const body = text.trim();
   if (!canSend) return;
   const extra = {...(deliver ? {deliver} : {}), ...(images.length ? {images} : {}), ...(files.length ? {files} : {})};
-  control.send({kind:"message",text:body,...extra});
+  control.send({kind:"message",text:outgoing,...extra});
   edit("");
+  pin(null);
   rememberDraft(OFFLINE_DRAFT_KEY, "");
+  rememberDraft(OFFLINE_REF_KEY, "");
   setAttachments([]);
  };
  const abort = () => {
@@ -148,6 +183,8 @@ export function OperatorComposer({control, draft}: {control:ControlView; draft?:
     <button type="button" class="operator-composer-thumb-remove" aria-label={`Remove ${a.name || "attachment"}`} title="Remove" onClick={() => setAttachments(list => list.filter(b => b.key !== a.key))}><Icon name="close" size={14}/></button>
    </li>)}
   </ul>}
+  {ready && attached && <EvidenceChip reference={attached} onRemove={() => pin(null)}/>}
+  {ready && tooLong && <p role="alert" class="operator-composer-hint">Too long with the reference: shorten the question by {outgoing.length - CONTROL_TEXT_MAX} characters, or remove the reference</p>}
   {ready && <div class="operator-composer-box">
    <div class="operator-composer-field">
    {listOpen && <ul role="listbox" id="operator-composer-skills" class="operator-composer-skills" aria-label="Installed skills">

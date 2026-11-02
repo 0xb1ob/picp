@@ -5,6 +5,9 @@ import type { SchedulePolicy } from "./schedule-policy.ts";
 import type { ScheduleRun } from "./schedule-run-core.ts";
 import type { SettingField, SettingKey, SettingsSnapshot, SettingValue } from "../contracts.ts";
 import type { DeviceLevel, DeviceView, PairingEvent } from "./device-files.ts";
+import type { EvidenceReference } from "../evidence-reference.ts";
+/** One identifiable finding of a review row: its list and zero-based ordinal in the verdict, the text redacted. */
+export interface TimelineFinding {list: "reasons" | "revisions" | "flags"; ordinal: number; text: string}
 
 export type SessionTier = "you" | "parent" | "workers";
 /**
@@ -204,7 +207,12 @@ export interface JobsHistoryResponse {
 }
 export interface JobResponse {
  generated_at: string; awaiting_count: number | null; job: ViewerJob;
- timeline: {at:string;label:string;meta:string;tone:string}[]; timeline_truncated: boolean;
+ /** `reference`: the row's identifiers for a question; `findings`: that exact verdict's, redacted and clipped. */
+ timeline: {at:string;label:string;meta:string;tone:string;reference?:EvidenceReference;findings?:TimelineFinding[];findings_elided?:number}[]; timeline_truncated: boolean;
+ /** The job's own reference; null when the ledger names no project for `cp_parent jobs show` to check. */
+ ask_reference: EvidenceReference | null;
+ /** Set on every `GET /api/job/<id>` (version-view.ts `evidenceLookup`); an unreadable commit is `supported: false`. */
+ evidence_lookup?: {supported: boolean; why: string};
  files_href: string | null; artifact_href: string | null; artifact_name: string | null; run_href: string | null;
  /** `#report/<id>` when the job has a report.md; absent or null otherwise. */
  report_href?: string | null;

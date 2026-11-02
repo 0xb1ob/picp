@@ -1,0 +1,14 @@
+.evidence-ask { display: inline-flex; align-items: center; min-height: 44px; font-size: 12px; color: var(--secondary); white-space: nowrap; }
+.evidence-chip { display: flex; align-items: flex-start; gap: 4px; max-width: 100%; min-width: 0; padding: 0 0 0 10px; border: 1px solid var(--tag-border); border-radius: 12px; background: var(--surface); font-size: 12px; color: var(--subtle); }
+.evidence-chip-details { flex: 1 1 auto; min-width: 0; }
+.evidence-chip-details > summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; overflow-wrap: anywhere; }
+.evidence-chip-details dl { margin: 0 0 8px; display: flex; flex-direction: column; gap: 2px; }
+.evidence-chip-details dl > div { display: flex; flex-wrap: wrap; gap: 0 8px; min-width: 0; }
+.evidence-chip-details dt { color: var(--dim); }
+.evidence-chip-details dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.evidence-chip-details p { margin: 0 0 8px; color: var(--dim); }
+.evidence-chip-remove { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.evidence-ask-unsupported { color: var(--dim); white-space: normal; }
+@media (min-width: 900px) {
+ .evidence-ask { min-height: 24px; }
+}

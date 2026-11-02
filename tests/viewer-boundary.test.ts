@@ -19,8 +19,13 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 		for (const match of text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)"/gm)) {
 			if (match[1]) continue;
 			if (name === "build.ts" && match[2] === "esbuild") continue;
-			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$|^\.\.\/forge-url\.ts$|^\.\.\/ledger-filter\.ts$|^\.\.\/service\/daemon-tunnel-files\.ts$|^\.\.\/push\/test-push\.ts$/, `${name} imports ${match[2]}`);
+			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$|^\.\.\/forge-url\.ts$|^\.\.\/ledger-filter\.ts$|^\.\.\/service\/daemon-tunnel-files\.ts$|^\.\.\/push\/test-push\.ts$|^\.\.\/evidence-reference-label\.ts$|^\.\.\/redact-secrets\.ts$/, `${name} imports ${match[2]}`);
 			if (match[2] === "../grant-order.ts") assert.equal(name, "overview-jobs.ts", "only the shared dependency-free comparator crosses the viewer boundary");
+			// P1 ask-about-evidence: the timeline shares the finding flag order and the decision pane's redaction, import-free.
+			if (match[2] === "../evidence-reference-label.ts" || match[2] === "../redact-secrets.ts") {
+				assert.equal(name, "evidence-timeline.ts", "only the timeline's evidence rows cross the boundary for these");
+				assert.doesNotMatch(readFileSync(join(VIEWER, "..", match[2].slice(3)), "utf8"), /^import\s+(?!type\b)|\bimport\s*\(|\brequire\s*\(/m, `${match[2]} has a runtime import`);
+			}
 			// P2 job history: only the history route shares the pure query, and only while it has no runtime import or write.
 			if (match[2] === "../ledger-filter.ts") {
 				assert.equal(name, "ledger-history.ts", "only the history route shares the pure ledger query");

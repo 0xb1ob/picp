@@ -29,7 +29,7 @@ function job(over: Partial<ViewerJob>): ViewerJob {
 
 function detail(over: Partial<ViewerJob> = {}, extra: Partial<JobResponse> = {}, props: {wide?: boolean; initial?: string} = {wide: true}): string {
  const data: JobResponse = {
-  generated_at: "2026-09-27T00:00:00Z", awaiting_count: 0, job: job(over), description: null, mandate: null, timeline: [], timeline_truncated: false,
+  generated_at: "2026-09-27T00:00:00Z", awaiting_count: 0, job: job(over), description: null, mandate: null, timeline: [], timeline_truncated: false, ask_reference: null,
   files_href: null, artifact_href: null, artifact_name: null, run_href: null, reports: [], asks: [], questions: [], warnings: [], ...extra,
  };
  return screen(data, props);
