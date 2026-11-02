@@ -3,8 +3,6 @@ name: implementer
 role: implementer
 description: Changes code in a leased worktree and delivers a branch or a PR.
 tools: [read, write, replace, insert, anchor_grep, undo_last_change, bash, find, ls, grep, report_result]
-model: anthropic/claude-opus-5-5
-fallbacks: [openai/gpt-6.1-sol]
 thinking: medium
 briefTemplate: brief-ship
 readOnly: false

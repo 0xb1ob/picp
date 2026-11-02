@@ -1,5 +1,5 @@
 /**
- * Model routing: explicit override, first matching rubric row, else profile.
+ * Model routing: explicit override, else the first matching rubric row; no row is a refusal.
  * Each source confines its own candidate list; allowlist, pi auth and effective
  * effort gate every candidate before any lease. Explicit overrides never fall
  * back or change effort. Unknown model metadata is not a refusal.
@@ -73,10 +73,9 @@ export class RoutingError extends Error {
 }
 
 /**
- * No `data/routing.json` means "no routing policy configured yet", not "no
- * models allowed": the reachable models are then exactly the profile's own and
- * whatever the operator explicitly names. An `allow: []` **in the file** still
- * means nothing is allowed — that is an operator statement, and it fails closed.
+ * No `data/routing.json` means "no routing policy configured yet": no rubric rows, so every route is refused
+ * until one exists (the scaffold copies the shipped template). An `allow: []` **in the file** still means
+ * nothing is allowed — that is an operator statement, and it fails closed.
  */
 export const DEFAULT_ROUTING_CONFIG: RoutingConfig = {
 	schema_version: SCHEMA_VERSION,
@@ -206,7 +205,7 @@ export interface EffortDrift {
 	thinking: ThinkingLevel;
 	/** What the model does serve. Empty means it does not reason at all. */
 	supported: ThinkingLevel[];
-	/** Every configured place that pair comes from (`rubric row x`, `profile y`). */
+	/** Every configured place that pair comes from (`rubric row x`, `rubric row x fallback`). */
 	sources: string[];
 }
 
@@ -215,7 +214,7 @@ export interface EffortDrift {
  * (routing T5), using T3's rule and nothing else.
  *
  * The pairs checked are the ones a dispatch would actually spawn: every
- * profile's own model+level, and every rubric row's model at the level that row
+ * rubric row's model at the level that row
  * would apply (its own, else the profile's — routing narrows policy rather than
  * resetting what a row did not mention). Identical pairs from several sources
  * are ONE probe and one entry naming all of them, so a big rubric cannot turn
@@ -245,12 +244,7 @@ export function effortPolicyDrift(
 		if (supported) byPair.set(key, { model, thinking, supported, sources: [where] });
 	};
 	for (const profile of profiles) {
-		const { name, role, model, thinking, fallbacks } = profile.frontmatter;
-		check(`profile ${name}`, model, thinking);
-		// A fallback candidate is a model a one-provider day will actually spawn, so
-		// its effort is checked here too — the alternative is discovering the drift
-		// on the day the preferred provider is the one that is down.
-		for (const candidate of fallbacks ?? []) check(`profile ${name} fallback`, candidate, thinking);
+		const { role, thinking } = profile.frontmatter;
 		for (const rule of config.rubric) {
 			if (rule.role !== role) continue;
 			const level = rule.thinking ?? thinking;
@@ -592,18 +586,11 @@ export function pickModel(request: RouteRequest, config: RoutingConfig): Candida
 		};
 	}
 
-	const profileModel = request.profile.frontmatter.model;
-	const profileCandidates = [profileModel, ...(request.profile.frontmatter.fallbacks ?? [])];
-	if (profileCandidates.length === 1) requireAllowed(config, profileModel, `profile ${request.profile.frontmatter.name}`, role);
-	const profileThinking = request.thinking ?? request.profile.frontmatter.thinking;
-	return {
-		model: profileModel,
-		candidates: profileCandidates,
-		source: "profile",
-		rule: `profile ${request.profile.frontmatter.name}`,
-		...(profileThinking ? { thinking: profileThinking } : {}),
-		effortFrom: request.thinking ? "override" : "profile",
-	};
+	throw new RoutingError(
+		`no rubric row in data/routing.json routes ${role} job ${request.jobId}: add a row for role ${role} ` +
+			"(defaults/routing.role-defaults.json has one)",
+		{ refusal: "unrouted" },
+	);
 }
 
 function requireAllowed(config: RoutingConfig, model: string, where: string, role: Role, rule?: string): void {
@@ -753,7 +740,7 @@ function unavailable(request: RouteRequest, picked: Candidate, model: string, pr
 	return new RoutingError(
 		`no available model for ${request.profile.frontmatter.role} job ${request.jobId}: ${model} (${picked.source}, ${picked.rule}) ` +
 			`is not usable. A model must be in pi's registry with resolvable auth. This route has no other candidate: fix the auth, ` +
-			`give the row or profile a \`fallbacks\` list, or route this role to a model you can reach in data/routing.json.${availableNote(probe)}`,
+			`give the row a \`fallbacks\` list, or route this role to a model you can reach in data/routing.json.${availableNote(probe)}`,
 		{ refusal: "availability", ...(picked.source === "rubric" ? { rule: picked.rule } : {}) },
 	);
 }

@@ -3,8 +3,6 @@ name: planner
 role: planner
 description: Reads a repository and reports findings to a file. Changes nothing.
 tools: [read, bash, find, ls, grep, report_result]
-model: anthropic/claude-opus-5-5
-fallbacks: [openai/gpt-6.1-sol]
 thinking: medium
 briefTemplate: brief-research
 readOnly: true

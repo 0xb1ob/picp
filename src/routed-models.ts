@@ -1,7 +1,7 @@
 /** The models data/routing.json names: an explicit model must be one of them, never a new one. */
 
 import { Value } from "typebox/value";
-import { ReviewerModelSchema, type RoutingConfig } from "./contracts.ts";
+import { ReviewerModelSchema, RISKS, type Role, ROLES, type RoutingConfig, SCOPES } from "./contracts.ts";
 import { boundedList, RoutingError } from "./routing.ts";
 
 /** Every rubric row's `model` and `fallbacks`, in file order, de-duplicated. */
@@ -25,4 +25,12 @@ export function requireRouted(config: RoutingConfig, model: string, where: strin
 /** A reviewer preference's write-time check; a malformed value passes through to its store's own schema refusal. */
 export function requireRoutedPreference(config: () => RoutingConfig, model: string, where: string): void {
 	if (Value.Check(ReviewerModelSchema, model.trim())) requireRouted(config(), model.trim(), where);
+}
+
+/** Roles with a scope/risk cell (`S/low`, …) no project-free rubric row matches: such a job is refused `unrouted`. */
+export function uncoveredRoles(config: RoutingConfig): Array<{ role: Role; cells: string[] }> {
+	const covers = (role: Role, scope: string, risk: string) => config.rubric.some((row) => row.role === role &&
+		row.project === undefined && (!row.scope || row.scope.some((each) => each === scope)) && (row.risk ?? risk) === risk);
+	return ROLES.map((role) => ({ role, cells: SCOPES.flatMap((scope) => RISKS.filter((risk) => !covers(role, scope, risk))
+		.map((risk) => `${scope}/${risk}`)) })).filter((entry) => entry.cells.length > 0);
 }
