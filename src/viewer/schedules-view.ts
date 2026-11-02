@@ -21,9 +21,8 @@ import { readSchedulePolicies, readScheduleRuns } from "./schedule-run-core.ts";
 import { isNativePolicy } from "./schedule-policy.ts";
 export const SCHEDULE_HISTORY = 40;
 
-/** A pre-M2 card's `ans-` id: its migrated `legacy:<id>` report (src/response-reports.ts responseReportSlug). */
-const legacyReportHref = (id: string | null): string | null =>
-	id ? `/boards/report-${createHash("sha256").update(`legacy:${id}`, "utf8").digest("hex").slice(0, 32)}/` : null;
+/** A pre-M2 card's `legacy:<ans-id>` report slug: responseReportSlug, inlined as the viewer may not import it. */
+const legacyReportSlug = (id: string): string => `report-${createHash("sha256").update(`legacy:${id}`, "utf8").digest("hex").slice(0, 32)}`;
 function next(schedule: Schedule, now: number): Pick<ScheduleItem, "next_at" | "next_note"> {
 	const trigger = schedule.trigger;
 	if (trigger.type === "manual") return { next_at: null, next_note: "manual: fires only on Run now" };
@@ -142,6 +141,11 @@ export function schedulesView(state: ViewerState, warn: BoardWarn = () => {}, no
 	const grants = readMandates(state);
 	const ledger = objectList(join(runtimeRoot(state.home), "jobs.json"), "jobs", (j) => typeof j.id === "string" && isSafeId(j.id)).value;
 	const boards = listBoards(state, warn);
+	// An unmigrated or conflicted home has no legacy board: the card shows no link rather than a 404.
+	const legacyReportHref = (id: string | null): string | null => {
+		const slug = id ? legacyReportSlug(id) : null;
+		return slug && boards.some((b) => b.slug === slug) ? `/boards/${slug}/` : null;
+	};
 	const factsOf = (id: string): RunJobFacts & { envelope: Json | undefined; record: Json | undefined } => {
 		const board = boards.find((b) => b.job_ids.includes(id));
 		const record = readObject(join(state.stateDir, "runs", id, "envelope.json"));

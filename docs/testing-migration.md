@@ -49,7 +49,8 @@ or waits; a partly converted file is never counted as removed.
 
 A test file whose production feature is removed is `deleted-with-feature`, not `deleted`: no consumer remains, so it
 needs no assertion map and no negative control. Its owner must name the removing PR (`#123`) or job (`cp-…`), and its
-evidence must cite the removed `src/` or `extensions/` modules it tested; the checker confirms each cited path is gone.
+evidence must cite the removed `src/`, `extensions/` or `viewer-app/` modules it tested; the checker confirms each cited path
+is gone.
 A kept file that loses declarations with a removed feature gets one `feature-removed` row per lost declaration in the
 Feature-removed section: its baseline title (still absent from the tree) and the removing PR/job. The checker accepts a
 net loss in a kept file only when that many rows cover it. Decided by the main session as programme owner under

@@ -18,7 +18,7 @@ import type { Ledger } from "../../src/ledger.ts";
 import { MandateStore } from "../../src/mandate.ts";
 import { loadMandateDefaults } from "../../src/mandate-defaults.ts";
 import { Scheduler } from "../../src/scheduler.ts";
-import { responseReportSlug } from "../../src/response-reports.ts";
+import { publishResponseReport, responseReportSlug } from "../../src/response-reports.ts";
 import { readScheduleFile } from "../../src/viewer/schedule-core.ts";
 import { nativePolicyDraft, policyFromLegacy } from "../../src/viewer/schedule-policy.ts";
 import type { ControlPorts } from "../../src/dashboard-control.ts";
@@ -1267,9 +1267,12 @@ test("P20-schedules-page-policy: a policy-only v2 schedule renders its saved run
 	assert.doesNotMatch(heads.join(" | "), /Result card in Answers/, "M2 PR3: no run links the retired Answers list");
 	assert.ok(heads.some((head) => new RegExp(`Result card pending: answers journal unwritable: x{900}`).test(head)), "a long error is text in the wrapping run head");
 	const reportLinks = [...card.querySelectorAll(".schedule-run-head a")].filter((a) => a.textContent === "Result report").map((a) => a.getAttribute("href"));
-	assert.deepEqual(reportLinks.toSorted(), [`/boards/${responseReportSlug("legacy:ans-aaaaaaaaaaaa")}/`, `/boards/report-${"a".repeat(32)}/`].toSorted(), "a pre-M2 card links its migrated legacy report");
+	assert.deepEqual(reportLinks, [`/boards/report-${"a".repeat(32)}/`], "an unmigrated pre-M2 card renders without a 404 link");
+	publishResponseReport(s.home, { project: "demo", question: "q", answer: "a", source: "legacy:ans-aaaaaaaaaaaa", time: "2026-09-21T04:05:30Z" });
+	const legacy = first(await s.read()).runs.find((r: Line) => r.run_id === "run-20260921040001-abcdef")?.card;
+	assert.equal(legacy?.report_href, `/boards/${responseReportSlug("legacy:ans-aaaaaaaaaaaa")}/`, "migrated, it links its legacy report");
 	assert.ok(heads.some((head) => / · Result delivered$/.test(head)), heads.join(" | "));
-	assert.deepEqual([...card.querySelectorAll(".schedule-history > li > .schedule-summary")].map((line) => line.textContent), ["done 4"], "only the short result shows its headline");
+	assert.deepEqual([...card.querySelectorAll(".schedule-history > li > .schedule-summary")].map((line) => line.textContent), ["done 1", "done 4"], "a short result and an unlinked legacy card show their headline");
 	assert.match(await servedCss(s.view), /overflow-wrap: ?anywhere/);
 });
 
