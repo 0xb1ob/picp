@@ -243,7 +243,7 @@ function SessionBar({data,control,context,toolCalls,showTools,hiddenTools,onTool
   </details>
  </header>;
 }
-export function Sessions({data,control,draft}: {data:SessionsResponse;control?:ControlView;draft?:string}) {
+export function Sessions({data,control,draft,reference}: {data:SessionsResponse;control?:ControlView;draft?:string;reference?:string}) {
  const scroller=useRef<HTMLDivElement>(null);
  const [atBottom,setAtBottom]=useState(true);
  const [showTools,setShowTools]=useState(readToolCalls);
@@ -351,7 +351,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
     <h2><button type="button" aria-expanded={pinOpen} onClick={togglePin}>{open.length === 1 ? "1 decision waiting" : `${open.length} decisions waiting`}<span aria-hidden="true"> ▾</span></button></h2>
     {open.map(ask=><DecisionCard key={ask.id} ask={ask} control={pinControl} level={3} contextOpen={false}/>)}
    </section>}
-   {data.transcript === true && control && <OperatorComposer control={control} draft={draft}/>}
+   {data.transcript === true && control && <OperatorComposer control={control} draft={draft} reference={reference}/>}
   </div>
  </div>;
 }

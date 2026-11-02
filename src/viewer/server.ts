@@ -57,7 +57,7 @@ import { OPERATOR_RESTART_PATH, PARENT_RESTART_PATH } from "./restart-status.ts"
 import { handleParentRestart } from "./parent-restart.ts";
 import { SERVICE_WORKER_JS, SERVICE_WORKER_PATH } from "./service-worker.ts";
 import { APP_ICONS, appIcon, MANIFEST_JSON, MANIFEST_PATH } from "./app-manifest.ts";
-import { readRunning, readVersion } from "./version-view.ts";
+import { evidenceLookup, readRunning, readVersion } from "./version-view.ts";
 import { SHA } from "./git-read.ts";
 import { accessOf, canRead, streamValidity } from "./access.ts";
 import { diffJson } from "./json-delta.ts";
@@ -465,11 +465,13 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 				}
 				if (!job) { sendJson(res, 404, { error: "no such job" }); return; }
 				const merge = job.job.merge_sha?.toLowerCase();
-				if (!merge || !SHA.test(merge)) { sendView(req, res, job); return; }
+				const versionOptions = { home: options.home, stateDir: options.stateDir };
 				// With a merge_sha, finished_at is the merge receipt's merged_at (jobs-view.ts).
-				readRunning(merge, { home: options.home, stateDir: options.stateDir }, job.job.finished_at)
-					.then((running) => sendView(req, res, { ...job, running }))
-					.catch(() => { if (!res.headersSent) sendView(req, res, { ...job, running: { checkout: "unknown", since: null, why: "version read failed", processes: [] } }); });
+				const running = merge && SHA.test(merge) ? readRunning(merge, versionOptions, job.job.finished_at)
+					.catch(() => ({ checkout: "unknown" as const, since: null, why: "version read failed", processes: [] })) : Promise.resolve(undefined);
+				const lookup = evidenceLookup(versionOptions).catch(() => undefined);
+				Promise.all([running, lookup]).then(([ran, evidence]) => sendView(req, res, { ...job, ...(ran ? { running: ran } : {}), ...(evidence ? { evidence_lookup: evidence } : {}) }))
+					.catch(() => { if (!res.headersSent) sendJson(res, 500, { error: "internal" }); });
 				return;
 			}
 			if (url.pathname.startsWith("/assets/viewer/")) {

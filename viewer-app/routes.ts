@@ -2,6 +2,7 @@
  * The route table (dashboard audit P4 §1): the seven desktop items (eight after S8b) and five phone tabs (`primaryNav`), then the views
  * reached through them — Board and Map are Jobs views, Schedules, Files and Settings live under More. Search lists them all.
  */
+import type { EvidenceReference } from "../src/evidence-reference.ts";
 export const navigation = [
  {id:"overview", label:"Overview", href:"#overview"},
  {id:"decisions", label:"Decisions", href:"#decisions"},
@@ -73,14 +74,16 @@ export function route(hash: string): Route {
 /** The JSON a detail screen (sessions, files) loads for `current`: the hash's own query, so a deep link reaches the API. */
 export function screenDataUrl(current: Route): string {
  const query=new URLSearchParams(current.query);
- // The composer's draft (composerHref) stays in the hash; it never reaches the API.
+ // The composer's draft and reference (composerHref) stay in the hash; they never reach the API.
  query.delete("draft");
+ query.delete("ref");
  if (current.screen !== "sessions") query.set("view","screen");
  return `/api/${current.screen}?${query}`;
 }
 export const sessionHref = (tier:"you" | "parent" | "workers", id?:string): string => `#sessions?${new URLSearchParams({view:tier,...(id ? {id} : {})})}`;
-/** The Full transcript with its composer prefilled (the Schedules page's Add schedule…). */
-export const composerHref = (draft: string): string => `#sessions?${new URLSearchParams({view:"you",transcript:"1",draft})}`;
+/** The Full transcript with its composer prefilled; with `reference` the draft only fills an empty composer. */
+export const composerHref = (draft: string, reference?: EvidenceReference): string =>
+ `#sessions?${new URLSearchParams({view:"you",transcript:"1",...(draft || !reference ? {draft} : {}),...(reference ? {ref:JSON.stringify(reference)} : {})})}`;
 /** Operator ↔ you's recorded Decisions: an explicit choice, since the bare view opens the Full transcript. */
 export const DECISIONS_HREF = "#sessions?view=you&transcript=0";
 /** A defaulted Full transcript the server refused (403: not served here) becomes Decisions, silently. */

@@ -253,6 +253,16 @@ export async function readRunning(sha: string, options: VersionOptions, mergedAt
 	};
 }
 
+/** P1 PR A (#704): the first commit whose `cp_parent jobs show` takes an evidence selector. */
+export const EVIDENCE_LOOKUP_SHA = "e49db4d18e5e6892863d791da0e6e21a8232448c";
+
+/** False only when the running operator session loaded a commit without PR A; down or unreadable stays undefined. */
+export async function evidenceLookup(options: VersionOptions): Promise<{ supported: boolean; why: string } | undefined> {
+	const state = (await readRunning(EVIDENCE_LOOKUP_SHA, options)).processes.find((p) => p.role === "operator")?.state;
+	if (state === "loaded") return { supported: true, why: "the operator session resolves evidence references" };
+	return state === "not_loaded" ? { supported: false, why: `the operator session predates evidence lookup — ${FIXES.operator}` } : undefined;
+}
+
 /** The cp-bridge footer line: the operator layer is this session's own loaded commit, not its record. */
 export function formatTerminal(view: VersionResponse, own: string | null | undefined): { level: VersionLevel; text: string } {
 	const deployed = view.deployed;

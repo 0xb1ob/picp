@@ -18,6 +18,7 @@ import { forwardedCi, grantCandidates, headCi, parkedHead, parkedSeconds, quiesc
 import { boardReports } from "./reports-view.ts";
 import { reportFile } from "./job-report.ts";
 import { deployView } from "./deploy-view.ts";
+import { jobReference, reviewFindings, rowReference } from "./evidence-timeline.ts";
 
 function records(state:ViewerState) {
  const fleet=objectList(join(state.stateDir,"fleet.json"),"jobs",j=>typeof j.job_id === "string" && isSafeId(j.job_id) && text(j.project));
@@ -144,6 +145,8 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
  const timeline:JobResponse["timeline"]=[];
  let malformed=false;
  let seenCi:{ci:string;head:string | undefined} | undefined;
+ const ledger=records(state).ledger;
+ const ask=jobReference(strings(ledger.find(j=>j.id===id)?.labels).find(l=>l.startsWith("project:"))?.slice(8),id);
  for(const line of events.value?.chunk.lines ?? []) {
   const event=parseObject(line.text); if(!event) {malformed=true;continue;}
   if(event.source!=="cp" || !timestamp(event.ts) || (event.job_id!==undefined && event.job_id!==id)) continue;
@@ -153,7 +156,9 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
   if(event.type==="review_decided") label=`Review ${nonnegative(payload?.attempt) ?? "-"} · ${verdict==="revise" ? "changes requested" : verdict ?? "unknown"}`;
   if(event.type==="ci_observed") label=({ci_green:"CI green",ci_failed:"CI red",pr_merged:"PR merged",pr_closed:"PR closed unmerged"} as Record<string,string>)[observation ?? ""] ?? "CI observed";
   const meta=[str(payload?.model),str(payload?.reason),str(payload?.deploy_job_id),str(payload?.head_sha)].filter(Boolean).join(" · ");
-  timeline.push({at:event.ts,label,meta,tone:observation==="ci_failed" ? "red" : observation==="ci_green" ? "green" : "neutral"});
+  const reference=rowReference(ask,event.type,payload);
+  const {findings,elided}=reference?.kind==="review" ? reviewFindings(state,reference) : {findings:[],elided:0};
+  timeline.push({at:event.ts,label,meta,tone:observation==="ci_failed" ? "red" : observation==="ci_green" ? "green" : "neutral",...(reference ? {reference} : {}),...(findings.length ? {findings} : {}),...(elided ? {findings_elided:elided} : {})});
   if(observation==="ci_green" || observation==="ci_failed") seenCi={ci:observation==="ci_green" ? "green" : "failed",head:str(payload?.head_sha)};
  }
  // ci-watch.json drops a row once the job leaves the watch (merged, closed), so the CI fact falls back to the last recorded CI event for this head, the same source as the timeline.
@@ -161,7 +166,7 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
  if(job.merge_sha && job.finished_at) timeline.push({at:job.finished_at,label:"Merge",meta:job.merge_sha,tone:"green"});
  timeline.sort((a,b)=>a.at.localeCompare(b.at));
  const root=jobRoot(state,id); const artifact=jobArtifact(state,id);
- const ledger=records(state).ledger; const grant=job.mandate_id ? readMandates(state).find(m=>m.id===job.mandate_id) : undefined;
+ const grant=job.mandate_id ? readMandates(state).find(m=>m.id===job.mandate_id) : undefined;
  const spend=grant ? dashboard(state,now).mandates.find(a=>a.id===grant.id)?.spend : undefined;
  const mandate:JobResponse["mandate"]=grant ? {id:String(grant.id),status:mandateDisplay(grant,ledger,mandateEscalations(state).value,now).status,objective:str(grant.objective) ?? "",spend_usd:spend?.usd ?? null,cap_usd:typeof obj(grant.spend_cap)?.usd==="number" ? obj(grant.spend_cap)!.usd as number : null,jobs:spend?.jobs ?? 0} : null;
  const base=overview(state,now); const decision=decisions(state,now);
@@ -169,7 +174,7 @@ export function jobView(state:ViewerState,id:string,now=Date.now()):JobResponse 
  const full=str(obj(readObject(join(state.stateDir,"runs",id,"envelope.json"))?.envelope)?.summary)?.split("\n").find(l=>l.trim())?.trim();
  if(full) job.summary=full.length>600 ? `${full.slice(0,599)}…` : full;
  const deploy=deployView(state,id,data.jobs);
- return {generated_at:data.generated_at,awaiting_count:data.awaiting_count,job,description:str(ledger.find(j=>j.id===id)?.description) ?? null,mandate,timeline:timeline.slice(-200),timeline_truncated:(events.value?.start ?? 0)>0 || timeline.length>200,
+ return {generated_at:data.generated_at,awaiting_count:data.awaiting_count,job,description:str(ledger.find(j=>j.id===id)?.description) ?? null,mandate,timeline:timeline.slice(-200),timeline_truncated:(events.value?.start ?? 0)>0 || timeline.length>200,ask_reference:ask,
   ...(deploy ? {deploy} : {}),
   files_href:root ? `/#files?${new URLSearchParams({root:root.id,path:""})}` : null,
   artifact_href:artifact?.href ?? null,artifact_name:artifact?.name ?? null,report_href:reportFile(state,id) ? `#report/${id}` : null,

@@ -47,7 +47,8 @@ export function DetailScreen({current:asked, workers}: {current:Route; workers?:
  const missing = resource.data ? null : notFoundFor(current, resource.code, workers);
  if (missing) return <NotFound {...missing}/>;
  const draft=sessions ? query.get("draft") ?? undefined : undefined;
- return <>{resource.error && <p role="alert" class="overview-error">{resource.error}</p>}{resource.data ? sessions ? <Sessions data={resource.data as SessionsResponse} control={control} draft={draft}/> : <Files data={resource.data as FilesResponse}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}</>;
+ const reference=sessions ? query.get("ref") ?? undefined : undefined;
+ return <>{resource.error && <p role="alert" class="overview-error">{resource.error}</p>}{resource.data ? sessions ? <Sessions data={resource.data as SessionsResponse} control={control} draft={draft} reference={reference}/> : <Files data={resource.data as FilesResponse}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}</>;
 }
 export function App() {
  const current = useRoute();

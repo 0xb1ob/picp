@@ -1,5 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import type { JobDeploy, JobResponse, JobRunning, ViewerJob } from "../../src/viewer/api-types.ts";
+import type { EvidenceReference } from "../../src/evidence-reference.ts";
+import type { JobDeploy, JobResponse, JobRunning, TimelineFinding, ViewerJob } from "../../src/viewer/api-types.ts";
+import { AskAbout } from "../components/EvidenceReference.tsx";
+import { findingReference } from "../evidence-ref.ts";
 import { ROLE } from "../components/VersionBadge.tsx";
 import { JobTranscript } from "./JobTranscript.tsx";
 import { elapsed, money, observedTime, prNumber, shortSha, time } from "../format.ts";
@@ -111,6 +114,24 @@ function Summary({text}: {text: string}) {
  return <div class="job-summary-row"><p ref={ref} class={more ? "job-summary" : "job-summary job-summary-clamp"}>{text}</p>{(clipped || more) && <button type="button" class="job-summary-more" aria-expanded={more} onClick={() => setMore(!more)}>{more ? "less" : "more"}</button>}</div>;
 }
 
+/** The job action in every phase; a failed job keeps its suggested question; an old operator bridge is unsupported. */
+function JobAsk({data}: {data: JobResponse}) {
+ const failed = data.job.phase === "failed";
+ const question = failed ? `Explain why picp job ${data.job.id} failed and the available recovery options.` : "";
+ const label = failed ? "Ask about this failure" : "Ask about this job";
+ const unsupported = data.evidence_lookup?.supported === false ? data.evidence_lookup.why : undefined;
+ // The plain failure question (no reference) names no record, so it stays when the reference cannot be resolved.
+ if (!data.ask_reference || (failed && unsupported)) return failed ? <a href={composerHref(question)}>{label}</a> : null;
+ return <AskAbout reference={data.ask_reference} draft={question} unsupported={unsupported}>{label}</AskAbout>;
+}
+
+function Findings({review, findings, elided, unsupported}: {review: EvidenceReference; findings: TimelineFinding[]; elided: number; unsupported?: string}) {
+ return <ul class="job-findings" aria-label="Review findings">
+  {findings.map(f => <li key={`${f.list}-${f.ordinal}`}><span><span class="job-finding-list">{f.list}[{f.ordinal}]</span> {f.text}</span><AskAbout reference={findingReference(review, f)} unsupported={unsupported}>Ask</AskAbout></li>)}
+  {elided > 0 && <li class="job-finding-elided">{elided} more not shown</li>}
+ </ul>;
+}
+
 type Tab = "details" | "transcript" | "timeline";
 const nowWide = () => typeof matchMedia === "function" ? matchMedia("(min-width: 900px)").matches : true;
 
@@ -131,6 +152,7 @@ export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: bool
  }, [wide]);
  const active: Tab = isWide && tab === "details" ? "transcript" : tab;
  const tabs: Tab[] = isWide ? ["transcript", "timeline"] : ["details", "transcript", "timeline"];
+ const unsupported = data.evidence_lookup?.supported === false ? data.evidence_lookup.why : undefined;
  return <div class="job-detail" data-tab={active}>
   <header class="job-detail-heading">
    <PageHeader stack back={{href:"#jobs", label:"Jobs"}} title={job.title ?? job.id} detail={job.title ? job.id : undefined}/>
@@ -148,7 +170,7 @@ export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: bool
   <div class="job-detail-body">
    <div class="job-detail-main">
     {active === "transcript" && <JobTranscript key={job.id} jobId={job.id} generatedAt={data.generated_at} model={job.model} reports={data.reports} finished={job.phase === "done" || job.phase === "failed"}/>}
-    {active === "timeline" && <section class="job-timeline"><h2>Timeline</h2>{data.timeline_truncated && <p class="job-meta">Recent recorded events shown</p>}{data.timeline.map((event, index) => <div class={`job-event job-event-${event.tone}`} key={`${event.at}-${index}`}><code>{time(event.at)}</code><span class="job-event-stem" aria-hidden="true"><span/></span><div><span>{event.label}</span><TimelineMeta meta={event.meta}/></div></div>)}{!data.timeline.length && <p class="jobs-empty">No recorded events.</p>}{job.phase !== "done" && <div class="job-event job-event-pending"><code></code><span class="job-event-stem" aria-hidden="true"><span/></span><div><span>Merge</span><p>not yet</p></div></div>}</section>}
+    {active === "timeline" && <section class="job-timeline"><h2>Timeline</h2>{data.timeline_truncated && <p class="job-meta">Recent recorded events shown</p>}{unsupported && <p role="status" class="job-meta">Asking about evidence is unsupported: {unsupported}</p>}{data.timeline.map((event, index) => <div class={`job-event job-event-${event.tone}`} key={`${event.at}-${index}`}><code>{time(event.at)}</code><span class="job-event-stem" aria-hidden="true"><span/></span><div><span>{event.label}</span><TimelineMeta meta={event.meta}/>{event.reference && <AskAbout reference={event.reference} unsupported={unsupported}>{event.reference.kind === "job" ? "Ask about this job" : "Ask about this"}</AskAbout>}{event.reference && event.findings && <Findings review={event.reference} findings={event.findings} elided={event.findings_elided ?? 0} unsupported={unsupported}/>}</div></div>)}{!data.timeline.length && <p class="jobs-empty">No recorded events.</p>}{job.phase !== "done" && <div class="job-event job-event-pending"><code></code><span class="job-event-stem" aria-hidden="true"><span/></span><div><span>Merge</span><p>not yet</p></div></div>}</section>}
    </div>
    <div class="job-detail-side">
     {data.description && <section class="job-card"><h2>Job</h2><p class="jt-clamp">{data.description}</p></section>}
@@ -168,7 +190,7 @@ export function JobDetail({data, wide, initial}: {data: JobResponse; wide?: bool
      <div class="job-fact-ci"><dt>CI</dt><dd>{ciFact(job)}</dd></div>
      <div class="job-fact-review"><dt>Review</dt><dd>{reviewFact(job)}</dd></div>
     </dl>
-    <div class="job-links">{data.artifact_href ? <a href={data.artifact_href}>Artifact · {data.artifact_name}</a> : data.files_href ? <a href={data.files_href}>Files</a> : <span>Files unavailable</span>}{data.run_href ? <a href={data.run_href}>Run log</a> : <span>Run log unavailable</span>}{job.phase === "failed" && <a href={composerHref(`Explain why picp job ${job.id} failed and the available recovery options.`)}>Ask about this failure</a>}</div>
+    <div class="job-links">{data.artifact_href ? <a href={data.artifact_href}>Artifact · {data.artifact_name}</a> : data.files_href ? <a href={data.files_href}>Files</a> : <span>Files unavailable</span>}{data.run_href ? <a href={data.run_href}>Run log</a> : <span>Run log unavailable</span>}<JobAsk data={data}/></div>
    </div>
   </div>
  </div>;
