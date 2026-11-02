@@ -1,6 +1,19 @@
 .sessions { display: flex; height: 100%; min-height: 0; }
 .sessions > .page-header { display: none; }
 .session-sidebar { display: none; }
+/* A chat row (the sidebar from 900 px, the phone's Conversations drawer): 32 px avatar beside a name/time line and a
+   muted status or two-line preview; workers nest unavatared. */
+.session-choice { display: grid; grid-template-columns: 32px minmax(0,1fr); column-gap: 10px; row-gap: 2px; margin: 0 8px; padding: 10px; border-radius: 10px; color: var(--text); text-decoration: none; }
+.session-choice > .session-avatar { grid-row: 1 / 3; width: 32px; height: 32px; font-size: 11px; }
+.session-choice-nested { grid-template-columns: minmax(0,1fr); padding: 6px 10px 6px 52px; }
+.session-choice[aria-current=page] { background: var(--nav-selected); }
+.session-choice-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.session-choice strong { min-width: 0; font-size: 14px; font-weight: 500; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-choice-nested strong { font-size: 13px; }
+.session-choice-head > strong + :not(.session-dot), .session-choice-head > .session-dot + * { margin-left: auto; }
+.session-choice-head > .session-ctx, .session-choice-head > .session-time { flex-shrink: 0; font-size: 12px; color: var(--dim); }
+.session-choice small { font-size: 12px; line-height: 17px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-choice small.session-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
 .session-panel { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* The phone top bar (chat v2): 48 px plus its hairline; back and ⋯ are 44 px, the avatar 28 px; the name (15 px) over a
    11 px state line. Desktop keeps the sidebar and heading. */
@@ -284,18 +297,6 @@
  .session-sidebar section:last-child > h2 { padding: 4px 10px 6px; }
  .session-sidebar section:last-child .session-choice { margin: 0; }
  .session-sidebar p { font-size: 12px; color: var(--muted); padding: 10px; }
- /* A chat row: 32 px avatar beside a name/time line and a muted status or two-line preview; workers nest unavatared. */
- .session-choice { display: grid; grid-template-columns: 32px minmax(0,1fr); column-gap: 10px; row-gap: 2px; margin: 0 8px; padding: 10px; border-radius: 10px; color: var(--text); text-decoration: none; }
- .session-choice > .session-avatar { grid-row: 1 / 3; width: 32px; height: 32px; font-size: 11px; }
- .session-choice-nested { grid-template-columns: minmax(0,1fr); padding: 6px 10px 6px 52px; }
- .session-choice[aria-current=page] { background: var(--nav-selected); }
- .session-choice-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
- .session-choice strong { min-width: 0; font-size: 14px; font-weight: 500; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
- .session-choice-nested strong { font-size: 13px; }
- .session-choice-head > strong + :not(.session-dot), .session-choice-head > .session-dot + * { margin-left: auto; }
- .session-choice-head > .session-ctx, .session-choice-head > .session-time { flex-shrink: 0; font-size: 12px; color: var(--dim); }
- .session-choice small { font-size: 12px; line-height: 17px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
- .session-choice small.session-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
  /* One 48px row: avatar, name over state · model · ctx; the shell's ⋮ sits at its right end. */
  .session-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; min-height: 48px; padding: 0 84px 0 16px; flex-shrink: 0; }
  .session-heading > div { flex: 1 1 140px; gap: 1px; }

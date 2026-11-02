@@ -644,6 +644,17 @@ chat from 1280 px, over the chat column from 900 px, full screen on a phone. Esc
 dialog or menu owns it; focus returns to the opener and the draft, reference, filter and scroll stay. Deferred:
 "From this chat" lists, Today totals, live-log tabs and `/jobs` (slice 4).
 
+**Chat context and Conversations (M3 slice 3, cp-zm9f).** The same Full transcript gains `Context` beside `Jobs ⌘J`
+(an amber badge counts the open asks). `ConversationContext.tsx` shows "This conversation": Asked you (the transcript's
+open asks; Answer opens the pinned decisions block) and In flight (the live workers in the M1 selection, each with
+project, model, context, cost and last activity, "not recorded" when absent, Open job into the slice 2 pane and its
+Session link), then All jobs (the drawer). It is a 340 px inspector beside the chat from 1280 px, over the chat's right
+edge from 900 px, and a modal bottom sheet below. The phone's session bar adds a Conversations button: a 316 px modal
+left drawer (`SessionDrawer.tsx`) with the sidebar's own rows, the Operator row keeping the selection. Escape closes the
+top surface and focus returns to its button; every surface closes on leaving the chat or switching its session file.
+Deferred: per-conversation job lists and totals (not recorded), threads and Cmd+N. `m3-context` captures both surfaces
+at 1440, 900, 899 and 390 px.
+
 Live PR and issue chips (Sessions chat): `GET /api/sessions` carries `pr_chips`, keyed by URL, built by
 `src/viewer/pr-chips.ts` from files the viewer already reads — fleet PR receipts and `bound_pr`, `merge.json`, the
 last 256 KB of `runs/<id>/events.jsonl` (`integration_advanced step:"ready"`, `ci_observed pr_closed`), `ci-watch.json`,
