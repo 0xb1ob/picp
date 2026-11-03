@@ -91,14 +91,15 @@ test("P19-kbd-css: the served page and stylesheet pin the phone shell, stop page
 	assert.doesNotMatch(css, /operator-composer-field>\.operator-composer-attach/, "the attach icon is never positioned over the field");
 	assert.match(css, /\.operator-composer textarea\{[^}]*padding:10px 12px;/, "the field keeps its own padding only");
 
-	// Chat v2 (PR5): below 900 px the footer flattens into the box's row; Options is desktop-only.
-	assert.match(css, /\.operator-composer-box\{display:flex;align-items:flex-end;/, "one flex row of 44 px targets");
-	assert.match(css, /\.operator-composer-footer\{display:contents\}/, "the footer's controls share the field's row");
-	assert.match(phone, /\.operator-composer-field\{order:1\}/);
-	assert.match(phone, /\.operator-composer-more,\.operator-composer-send\{order:2\}/, "send stays at the row's end");
+	// Full match S1 (design frames 6, 10) supersedes Chat v2's single phone row: the field has the card's top row,
+	// over a footer of 44 px targets with send at its end; Options stays desktop-only and the field stays 16 px.
+	assert.match(css, /\.operator-composer-box\{display:flex;align-items:flex-end;/, "the box is a flex container");
+	assert.match(phone, /\.operator-composer-box\{flex-direction:column;align-items:stretch;/, "the field over the footer");
+	assert.match(phone, /\.operator-composer-footer\{display:flex;align-items:center;/, "the footer is its own row");
+	assert.match(phone, /\.operator-composer-footer>\.operator-composer-more,\.operator-composer-footer>\.operator-composer-send\{margin-left:auto\}/, "send stays at the row's end");
 	assert.match(phone, /\.operator-composer-options\{display:none\}/, "Options is desktop-only");
 	assert.match(phone, /\.operator-composer-attach,\.operator-composer-send,\.operator-composer-more>summary\{width:44px;height:44px\}/);
-	assert.match(phone, /\.operator-composer textarea\{min-height:46px;padding:12px 16px;border-radius:22px;font-size:16px\}/, "a 16 px field");
+	assert.match(phone, /\.operator-composer textarea\{min-height:44px;[^}]*font-size:16px;/, "a 16 px field");
 	assert.match(css, /\.session-bar-id\{position:relative;flex:1;align-self:stretch;/, "the bar's name column");
 	assert.match(css, /\.session-bar-icon,\.session-bar-more>summary\{position:relative;width:44px;height:44px;/, "back and ⋯ are 44 px");
 });

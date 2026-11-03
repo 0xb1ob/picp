@@ -79,7 +79,7 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
   if (!active) return;
   const key = (e: KeyboardEvent) => {
    if (jobsKey(e)) { e.preventDefault(); if (drawer) closeDrawer(); else openDrawer(document.activeElement as HTMLElement | null); return; }
-   if (e.key !== "Escape" || e.defaultPrevented || document.querySelector(OWNERS) || !(drawer || sessions || panel || job)) return;
+   if (e.key !== "Escape" || e.isComposing || e.defaultPrevented || document.querySelector(OWNERS) || !(drawer || sessions || panel || job)) return;
    e.preventDefault();
    if (drawer) closeDrawer(); else if (sessions) closeSessions(); else if (panel === "sheet") closePanel(); else if (job) closeJob(); else dismiss();
   };

@@ -104,6 +104,8 @@ test("M3-composer-typed: a `/` draft offers /status and /jobs only; Enter/Tab ru
 	assert.deepEqual([tab.$('[role="listbox"]')!.getAttribute("aria-label"), options(tab)], ["Installed skills", ["@teachExplain step by step"]], "skills keep the @ list");
 	await type(tab, "1/jobs");
 	assert.equal(n(tab, '[role="listbox"]'), 0, "only a whole `/word` draft is a command");
+	// Full match S1: the inspector is open by default, so Escape with nothing else open is the chat's; an IME one is not.
+	assert.deepEqual([await press(tab, "Escape", true), !!tab.$("aside.workspace-context")], [false, true], "an IME Escape keeps the inspector");
 	const footer = [...tab.document.querySelectorAll(".operator-composer-attach, .operator-composer-slash")] as unknown as Element[];
 	assert.deepEqual(footer.map((el) => el.className), ["operator-composer-attach", "operator-composer-slash"], "the paperclip stays first");
 });
@@ -168,6 +170,12 @@ test("M3-composer-menu: the touch `/` menu runs commands and attaches a selectio
 	assert.match(rule(".operator-composer"), /padding-left:10px;padding-right:10px;padding:12px max\(28px,calc\(\(100% - 664px\) ?\/ ?2\)\) 16px$/,
 		"10 px phone sides; from 900 px the 720 px column's 28 px sides");
 	assert.match(rule(".operator-composer-box"), /gap:12px;padding:14px 12px 10px 16px;background:var\(--surface\)/, "the design box's 14/12/10/16 padding");
+	// Full match S1 (frames 6, 10): below 900 px the field takes the card's whole top row and the controls a row below.
+	// Negative control: restoring the single phone row (row box, `display:contents` footer, `order`) fails this.
+	assert.match(rule(".operator-composer-box"), /;flex-direction:column;align-items:stretch;[^;]*;padding:8px 6px 6px 14px;.*border-radius:18px;flex-direction:column;/,
+		"phone: a rounded card stacking the field over its footer");
+	assert.match(rule(".operator-composer-footer"), /^display:contents;display:flex;align-items:center;/, "phone: the footer is its own row");
+	assert.doesNotMatch(css, /\.operator-composer-field\{order:/, "the field is never reordered into the buttons' row");
 });
 
 test("M3-composer-attachments: an attached image and the draft survive /status and a job reference; a closed menu's late lookup attaches nothing", { timeout: 180_000 }, async (t) => {

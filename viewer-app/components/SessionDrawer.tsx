@@ -16,6 +16,6 @@ export function SessionDrawer({onClose, children}: {onClose: () => void; childre
    <button type="button" class="workspace-close" aria-label="Close conversations" onClick={onClose}><Icon name="close"/></button>
   </header>
   <nav class="workspace-sessions-list" aria-label="Session streams">{children}</nav>
-  {rail?.nav("Primary")}
+  {rail?.nav("Drawer primary")}
  </dialog>;
 }

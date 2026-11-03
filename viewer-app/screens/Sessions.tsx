@@ -360,7 +360,8 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:workerDot(w),at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section></>;
  const workspace=useWorkspaceSurfaces(filterable,selection,{session:data.operator_session ?? null,current:!history,asks:open,live:data.workers.filter(countedLive),chats,
   onAnswer:()=>{setPinOpen(true); remember(PINNED_KEY,"1","decisions bar");}});
- const live=data.workers.filter(countedLive), scope=!selection ? "All projects" : "project" in selection ? selection.project : "Untagged";
+ // Live counts held and idle workers too; the strip calls working only a recorded `working` run.
+ const working=data.workers.filter(w=>countedLive(w) && w.run_phase === "working"), scope=!selection ? "All projects" : "project" in selection ? selection.project : "Untagged";
  // A reply's job link opens Transcript beside the chat; renderRows reads it at render time, below this hook.
  const openJob=workspace.openJob, toTranscript:OpenTranscript | undefined=openJob ? (id,el)=>openJob(id,"transcript",el) : undefined;
  return <div class="sessions">
@@ -379,11 +380,11 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   </aside>
   <div class="session-panel">
    <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools} state={state} conversations={workspace.conversations}/>
-   {/* One compact row: identity and the chat's actions from 900 px; on a phone, the live/ask strip and the same actions. */}
+   {/* One compact row: identity and actions from 900 px; on a phone the live/ask strip and the same actions. */}
    <header class="session-heading">{data.selected !== "workers" && <span class={data.selected === "you" ? "session-avatar session-avatar-bot" : "session-avatar"} aria-hidden="true">{data.selected === "you" ? "OP" : "CP"}</span>}
     <div class="session-heading-id"><strong>{data.selected === "you" && data.transcript === true ? "Operator" : data.title}</strong><span class="session-heading-state"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><CtxPct usage={context} label/></span></div>
     {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}
-    {filterable && <div class="session-strip"><span class="session-strip-run" aria-hidden="true"/><span class="session-strip-count">{live.length} working</span>{live[0] && <span class="session-strip-job">· {live[0].id}</span>}
+    {filterable && <div class="session-strip"><span class="session-strip-run" aria-hidden="true"/><span class="session-strip-count">{working.length ? `${working.length} working` : "none working"}</span>{working[0] && <span class="session-strip-job" title={working[0].id}>· {working[0].id}</span>}
      {open.length > 0 && <><span class="session-strip-sep" aria-hidden="true"/><span class="workspace-badge workspace-badge-ask">{open.length}</span><span class="session-strip-what"> asked you</span></>}</div>}
     {filterable && <div class="session-filter"><details class="session-bar-menu session-filter-menu">
      <summary aria-label={`Project: ${scope}`} title="Filter by project"><span>{scope}</span><span aria-hidden="true">▾</span></summary>

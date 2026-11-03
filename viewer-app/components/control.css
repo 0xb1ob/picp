@@ -127,15 +127,18 @@
 .overview-services { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0 0 16px; }
 .overview-services-line { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 899px) {
- /* One row: attach, field, ⋯, send. The file name lives in the top bar's ⋯ sheet, so Options is desktop-only.
-    The composer's 10 px sides (design frame 6) sit inside the transcript's 14 px. */
+ /* Design frames 6 and 10: a rounded card, the full-width field over attach, / and ⋯, send at the row's end. Options
+    is desktop-only (the file name is in the top bar's ⋯ sheet). Sides are 10 px, inside the transcript's 14. */
  .operator-composer { padding-left: 10px; padding-right: 10px; }
- .operator-composer-field { order: 1; }
- .operator-composer-more, .operator-composer-send { order: 2; }
+ .operator-composer-box { flex-direction: column; align-items: stretch; gap: 2px; padding: 8px 6px 6px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; }
+ .operator-composer-box:focus-within { border-color: var(--focus); }
+ .operator-composer-footer { display: flex; align-items: center; gap: 2px; min-width: 0; }
+ .operator-composer-footer > .operator-composer-more, .operator-composer-footer > .operator-composer-send { margin-left: auto; }
+ .operator-composer-more + .operator-composer-send { margin-left: 0; }
  .operator-composer-options { display: none; }
  .operator-composer-attach, .operator-composer-send, .operator-composer-more > summary { width: 44px; height: 44px; }
  .operator-composer-slash { width: 44px; height: 44px; }
- .operator-composer textarea { min-height: 46px; padding: 12px 16px; border-radius: 22px; font-size: 16px; }
+ .operator-composer textarea { min-height: 44px; padding: 11px 8px 11px 0; background: none; border: 0; border-radius: 0; font-size: 16px; line-height: 22px; }
  /* The status and file name live in the top bar (dot and ⋯ sheet); only a failure or an unready session speaks here. */
  .operator-composer-delivery:not(.operator-composer-failed) { display: none; }
 }

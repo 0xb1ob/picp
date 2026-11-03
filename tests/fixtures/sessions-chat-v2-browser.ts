@@ -614,13 +614,17 @@ try {
 	}
 	if (stage === "full-match-shell") {
 		// Full match S1 (design frames 1/6/11): measured boxes on each capture. Negative control: the closed-until-asked
-		// inspector fails `inspector` at 1440 and a 48 px phone bar or 14 px composer sides fail `phone`.
-		const look = `(() => { const q = s => document.querySelector(s), h = s => Math.round(q(s)?.getBoundingClientRect().height ?? 0), cs = s => q(s) && getComputedStyle(q(s));
+		// inspector fails `inspector` at 1440 and a 48 px phone bar or 14 px composer sides fail `phone`; so does a
+		// single-row phone composer (`field`) or an idle worker counted as working (`strip`).
+		const look = `(() => { const q = s => document.querySelector(s), h = s => Math.round(q(s)?.getBoundingClientRect().height ?? 0), cs = s => q(s) && getComputedStyle(q(s)), r = s => q(s).getBoundingClientRect();
 			const shown = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
 			return { inspector: !!q("aside.workspace-context"), sheet: !!q("dialog[open]"), heading: h(".session-heading"), bar: h(".session-bar"),
 				rail: shown(".session-sidebar .shell-icon-nav > a").map(a => a.textContent).join(), drawer: shown(".workspace-sessions[open] .shell-icon-nav > a").map(a => a.textContent).join(),
 				sides: innerWidth < 900 ? cs(".operator-composer").paddingLeft + " " + cs(".session-entries").paddingLeft : null,
-				field: innerWidth < 900 ? q(".operator-composer textarea").tagName + " " + cs(".operator-composer textarea").maxHeight + " " + cs(".operator-composer textarea").borderTopLeftRadius : null,
+				field: innerWidth < 900 ? (() => { const t = r(".operator-composer textarea"), f = r(".operator-composer-footer"), b = q(".operator-composer-box"), p = cs(".operator-composer-box");
+					const inner = b.clientWidth - parseFloat(p.paddingLeft) - parseFloat(p.paddingRight);
+					return [p.borderTopLeftRadius, t.bottom <= f.top + 0.5 ? "field over footer" : "one row", t.width >= inner - 32 ? "full width" : "narrow"].join(" "); })() : null,
+				strip: innerWidth < 900 ? shown(".session-strip-count, .session-strip-job").map(e => e.textContent).join(" ") : null,
 				jobs: shown(".session-heading .workspace-jobs-open kbd").length ? q(".workspace-jobs-open").textContent + " " + q(".workspace-jobs-open").title : null,
 				drawer_width: Math.round(q(".workspace-sessions[open]")?.getBoundingClientRect().width ?? 0),
 				small: shown(".session-filter-menu > summary, .workspace-jobs-open, .workspace-context-open, .session-bar-icon, .workspace-sessions .shell-icon-nav > a, .workspace-sessions .shell-rail-search")
@@ -635,7 +639,8 @@ try {
 			["header-jobs", 1440, 1000, [header], { inspector: false, sheet: false, heading: 48, jobs: "Jobs⌘J Jobs (Ctrl/⌘ J)", small: "" }],
 			["1279", 1279, 1000, [], { inspector: true, sheet: false, heading: 48, small: "" }],
 			["900", 900, 1000, [], { inspector: true, sheet: false, heading: 48, small: "" }],
-			["phone", 390, 844, [], { inspector: false, sheet: false, heading: 45, bar: 53, sides: "10px 14px", field: "TEXTAREA 122px 22px", small: "" }],
+			["phone", 390, 844, [], { inspector: false, sheet: false, heading: 45, bar: 53, sides: "10px 14px", field: "18px field over footer full width",
+				strip: "1 working · cp-sessions-v2-pr3", small: "" }],
 			["899", 899, 1000, [], { inspector: false, sheet: false, heading: 45, bar: 53, small: "" }],
 			["drawer", 390, 844, [drawer], { drawer: "Chat,Jobs,More", drawer_width: 317, small: "" }],
 			["filter", 390, 844, [filter], { sheet: false, small: "" }],
