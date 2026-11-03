@@ -65,9 +65,10 @@
  /* M3 fidelity B: the own bubble is the design's neutral `.b` (the --border grey), its text the --text role. */
  --session-you: var(--border);
  --session-you-text: var(--text);
- --avatar-bot-from: #d98b5f;
- --avatar-bot-to: #b9654a;
- --avatar-bot-text: #ffffff;
+ /* Full match S1: the OP avatar stays neutral (operator's palette choice), never the design's warm gradient. */
+ --avatar-bot-from: #2a2a2a;
+ --avatar-bot-to: #232323;
+ --avatar-bot-text: #ededed;
  --avatar-cp: #232323;
  --session-code-ink: #ffffff;
  --session-code-mix: 7%;

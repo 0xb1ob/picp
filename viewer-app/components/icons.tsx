@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import type { NavId } from "../routes.ts";
 // Paths and stroke widths from design screens 00, 04, 05, 09, 10 and 11.
-export function Icon({name, size = 20}: {name:NavId | "awaiting" | "copy" | "check" | "search" | "file" | "back" | "down" | "send" | "vmore" | "attach" | "close" | "refresh" | "notifications"; size?:number}) {
+export function Icon({name, size = 20}: {name:NavId | "awaiting" | "copy" | "check" | "search" | "file" | "back" | "down" | "send" | "vmore" | "attach" | "close" | "refresh" | "notifications" | "panel"; size?:number}) {
  let content: ComponentChildren;
  switch (name) {
   case "overview": content = <><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></>; break;
@@ -29,6 +29,7 @@ export function Icon({name, size = 20}: {name:NavId | "awaiting" | "copy" | "che
   case "refresh": content = <><path d="M20 7v5h-5M19.5 12a7.5 7.5 0 1 1-2-5.5L20 9" stroke-linecap="round" stroke-linejoin="round"/></>; break;
   case "notifications": content = <><path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5zM10 20h4" stroke-linecap="round" stroke-linejoin="round"/></>; break;
   case "close": content = <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" stroke-linecap="round"/>; break;
+  case "panel": content = <><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M14.5 4.5v15"/></>; break;
  }
  const dots = name === "more" || name === "vmore";
  return <svg width={size} height={size} viewBox="0 0 24 24" fill={dots ? "currentColor" : "none"} stroke={dots ? "none" : "currentColor"} stroke-width={name === "check" ? 2 : 1.6} aria-hidden="true">{content}</svg>;

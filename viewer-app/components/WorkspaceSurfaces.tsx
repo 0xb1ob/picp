@@ -20,6 +20,8 @@ const nowWide = () => typeof matchMedia === "function" ? matchMedia("(min-width:
 /** What the chat lends its context and Conversations surfaces; `chats` renders the Chats list with an Operator href. */
 export interface ChatContext {
  session: string | null; asks: AwaitingDetail[]; live: SessionsResponse["workers"]; chats: (operatorHref: string) => ComponentChild; onAnswer: () => void;
+ /** False for a historical transcript file: only the current chat opens its inspector by default. */
+ current: boolean;
 }
 
 type JobTab = Parameters<typeof JobDetail>[0]["initial"];
@@ -44,14 +46,17 @@ function JobPane({id, tab, onClose}: {id: string; tab: JobTab; onClose: () => vo
 /**
  * The operator chat's Jobs drawer, the job picked from it, its context (inspector or phone sheet) and the phone's
  * Conversations drawer (M3). `active` registers Ctrl/Cmd+J; leaving, or another session file, drops every surface.
- * Escape closes the top surface; focus goes back to the opener. `openJob` (null when inactive) opens one job's tab.
+ * From 900 px the current chat opens its inspector by default until the user closes it; a phone never opens a sheet.
  */
 export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelection, chat: ChatContext): {trigger: ComponentChild; surfaces: ComponentChild; conversations: ComponentChild; composer: ComposerMenuContext | null; openJob: ((id: string, tab: JobTab, opener: HTMLElement | null) => void) | null} {
+ const opened = active && chat.current && nowWide();
  const [drawer, setDrawer] = useState(false);
  const [job, setJob] = useState<{id: string; tab: JobTab} | null>(null);
- const [panel, setPanel] = useState<"inspector" | "sheet" | null>(null);
+ const [panel, setPanel] = useState<"inspector" | "sheet" | null>(opened ? "inspector" : null);
  const [sessions, setSessions] = useState(false);
  const opener = useRef<HTMLElement | null>(null), toggle = useRef<HTMLButtonElement>(null);
+ // The user's own close of the default inspector holds until they leave the chat or reload.
+ const dismissed = useRef(false);
  const overlays = {drawer, job: job !== null, sheet: panel === "sheet", sessions};
  const restore = () => { const el = opener.current; opener.current = null; if (el?.isConnected) el.focus(); };
  /** Focus returns only once the last overlay closes; the inspector is a panel, never an overlay. */
@@ -64,15 +69,19 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
  const pickJob = (id: string) => openJob(id, undefined, panel === "inspector" ? toggle.current : null);
  const closeJob = () => { setJob(null); shut("job"); };
  const closePanel = () => { if (panel === "sheet") shut("sheet"); else toggle.current?.focus(); setPanel(null); };
+ const dismiss = () => { if (panel === "inspector") dismissed.current = true; closePanel(); };
  const closeSessions = () => { setSessions(false); shut("sessions"); };
- useEffect(() => { setDrawer(false); setJob(null); setPanel(null); setSessions(false); opener.current = null; }, [active, chat.session]);
+ useEffect(() => {
+  if (!active) dismissed.current = false;
+  setDrawer(false); setJob(null); setPanel(opened && !dismissed.current ? "inspector" : null); setSessions(false); opener.current = null;
+ }, [active, chat.session]);
  useEffect(() => {
   if (!active) return;
   const key = (e: KeyboardEvent) => {
    if (jobsKey(e)) { e.preventDefault(); if (drawer) closeDrawer(); else openDrawer(document.activeElement as HTMLElement | null); return; }
-   if (e.key !== "Escape" || e.defaultPrevented || document.querySelector(OWNERS) || !(drawer || sessions || panel || job)) return;
+   if (e.key !== "Escape" || e.isComposing || e.defaultPrevented || document.querySelector(OWNERS) || !(drawer || sessions || panel || job)) return;
    e.preventDefault();
-   if (drawer) closeDrawer(); else if (sessions) closeSessions(); else if (panel === "sheet") closePanel(); else if (job) closeJob(); else closePanel();
+   if (drawer) closeDrawer(); else if (sessions) closeSessions(); else if (panel === "sheet") closePanel(); else if (job) closeJob(); else dismiss();
   };
   window.addEventListener("keydown", key);
   return () => window.removeEventListener("keydown", key);
@@ -85,14 +94,14 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
   return () => query.removeEventListener("change", change);
  }, [active, panel, job]);
  if (!active) return {trigger: null, surfaces: null, conversations: null, composer: null, openJob: null};
- const context = {asks: chat.asks, live: chat.live.filter(w => matchesProject(w.project, selection)), selection, onClose: closePanel, onJob: pickJob,
+ const context = {asks: chat.asks, live: chat.live.filter(w => matchesProject(w.project, selection)), selection, onClose: dismiss, onJob: pickJob,
   onJobs: () => openDrawer(toggle.current), onAnswer: () => { if (panel === "sheet") closePanel(); chat.onAnswer(); }};
  const asked = chat.asks.length;
  return {
   trigger: <>
    <button type="button" class="workspace-jobs-open" aria-haspopup="dialog" aria-expanded={drawer} title="Jobs (Ctrl/⌘ J)" onClick={e => openDrawer(e.currentTarget)}>Jobs<kbd>⌘J</kbd></button>
-   <button ref={toggle} type="button" class="workspace-context-open" aria-expanded={panel !== null} aria-label={asked ? `Context, ${asked} asked you` : "Context"}
-    onClick={e => { if (panel) closePanel(); else if (nowWide()) setPanel("inspector"); else { from(e.currentTarget); setPanel("sheet"); } }}>Context{asked > 0 && <span class="workspace-badge workspace-badge-ask" aria-hidden="true">{asked}</span>}</button>
+   <button ref={toggle} type="button" class="workspace-context-open" aria-expanded={panel !== null} aria-label={asked ? `Context, ${asked} asked you` : "Context"} title="Context"
+    onClick={e => { if (panel) dismiss(); else if (nowWide()) setPanel("inspector"); else { from(e.currentTarget); setPanel("sheet"); } }}><Icon name="panel"/>{asked > 0 && <span class="workspace-badge workspace-badge-ask" aria-hidden="true">{asked}</span>}</button>
   </>,
   surfaces: <>
    {job && <JobPane key={`${job.id}:${job.tab}`} id={job.id} tab={job.tab} onClose={closeJob}/>}

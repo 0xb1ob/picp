@@ -61,11 +61,11 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	const field = await tab.find(".operator-composer textarea") as unknown as HTMLElement & { value: string };
 	tab.type(field as unknown as Element, "KEEP-DRAFT");
 	const toggle = await tab.find(".session-filter > .workspace-context-open", (b) => b.getAttribute("aria-label") === "Context, 1 asked you");
-	assert.deepEqual([toggle.getAttribute("aria-expanded"), tab.$(".workspace-context"), tab.$(".session-pinned-open")], ["false", null, null], "closed until asked");
+	// Full match S1: the current chat opens its inspector by default from 900 px (negative control: the old
+	// closed-until-asked default fails here); the phone test pins that 899 px never pops a sheet.
+	const panel = tab.$(".sessions > aside.workspace-context")!;
+	assert.deepEqual([toggle.getAttribute("aria-expanded"), !!panel, !!tab.$(".session-pinned-open"), toggle.querySelector("svg") !== null], ["true", true, false, true], "open by default, an icon toggle");
 	assert.equal(toggle.querySelector(".workspace-badge.workspace-badge-ask")?.textContent, "1", "an open ask paints the count");
-
-	tab.click(toggle);
-	const panel = await tab.find(".sessions > aside.workspace-context");
 	assert.equal(tab.$("dialog.workspace-context"), null, "desktop: a panel beside the chat, not a modal");
 	assert.deepEqual(texts(tab, "aside.workspace-context h3"), ["Asked you · 1", "In flight · 2"]);
 	assert.match(tab.$(".workspace-context-ask")!.textContent!, new RegExp(`picp${QUESTION.replace(/[?]/g, "\\?")}Suggested: Merge now`), "the real ask");
@@ -92,7 +92,22 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	assert.equal(escape(tab), true);
 	await until(() => tab.$(".workspace-context"), (el) => el === null, "Escape to close the inspector");
 	assert.deepEqual([focused() === toggle, field.value, tab.window.location.hash, escape(tab)], [true, "KEEP-DRAFT", `${CHAT}&project=atlas`, false], "focus, draft and filter kept");
-	tab.click(toggle);
+	// The user's close holds across a selection change and a new session file in the same chat (the dismissed ref; without
+	// it the new file re-applies the default); leaving and coming back opens it again.
+	await pick(tab, "picp");
+	assert.equal(tab.$(".workspace-context"), null, "a closed inspector stays closed in the chat");
+	const next = join(d.home, "pi-sessions", "next.jsonl");
+	writeFileSync(next, `${JSON.stringify({ type: "message", timestamp: iso(1), message: { role: "assistant", content: [{ type: "text", text: "NEXT-FILE" }] } })}\n`);
+	appendFileSync(operatorSessionsFile(join(d.stateDir, "sessions")), `${JSON.stringify({ at: iso(1), session_file: next })}\n`);
+	tab.refresh();
+	await tab.waitText(/NEXT-FILE/);
+	await new Promise((done) => setTimeout(done, 50));
+	// Booleans, not Elements: a failing deepEqual on a linkedom node inspects the whole DOM and runs out of memory.
+	assert.deepEqual([!!tab.$(".workspace-context"), toggle.getAttribute("aria-expanded")], [false, "false"], "a new session file keeps the user's close");
+	tab.go("#jobs");
+	await until(() => tab.$(".workspace-context-open"), (el) => el === null, "leaving the chat");
+	tab.go(`${CHAT}&project=atlas`);
+	await tab.find(".sessions > aside.workspace-context");
 	tab.click((await tab.find(".workspace-context-jobs")));
 	await tab.find("dialog.workspace-jobs[open]");
 	assert.ok(tab.$("aside.workspace-context"), "All jobs opens the Jobs drawer over the inspector");
@@ -117,6 +132,10 @@ test("M3-context-phone: the context sheet and the Conversations drawer are modal
 	await tab.waitText(/REPLY-CARD/);
 	tab.type(await tab.find(".operator-composer textarea"), "KEEP-DRAFT");
 	const button = await tab.find(".workspace-context-open");
+	assert.deepEqual([button.getAttribute("aria-expanded"), !!tab.$(".workspace-context")], ["false", false], "899 px and below: no sheet pops on load");
+	// Full match S1 strip: cp-other is live (held, idle) but not working, so only cp-live counts.
+	// Negative control: counting every live worker again reads "2 working" here.
+	assert.deepEqual(texts(tab, ".session-strip-count, .session-strip-job"), ["1 working", "· cp-live"], "an idle worker is not called working");
 	tab.click(button);
 	await tab.find("dialog.workspace-context-sheet[open] .workspace-context-ask");
 	assert.deepEqual([tab.$("aside.workspace-context"), texts(tab, "dialog.workspace-context h3")], [null, ["Asked you · 1", "In flight · 2"]], "phone: the same content in a sheet");
@@ -136,6 +155,8 @@ test("M3-context-phone: the context sheet and the Conversations drawer are modal
 	tab.click(conversations);
 	await tab.find("dialog.workspace-sessions[open]");
 	assert.deepEqual(texts(tab, ".workspace-sessions .session-choice strong"), ["Operator", "CP parent", "cp-live", "cp-other"], "current session, then the Fleet");
+	assert.deepEqual([!!tab.$(".workspace-sessions-head h2"), !!tab.$(".workspace-sessions-head .shell-rail-search"), tab.$$('.workspace-sessions nav[aria-label="Drawer primary"] a').map((a) => a.getAttribute("href"))],
+		[false, true, ["#sessions", "#jobs", "#more"]], "Full match S1: the rail's chrome replaces the Conversations title row");
 	assert.deepEqual(texts(tab, ".workspace-sessions-list h2"), ["Fleet · 2 live"]);
 	assert.equal(tab.$('.workspace-sessions .session-choice[aria-current="page"]')!.getAttribute("href"), "#sessions?view=you&project=atlas", "the current session keeps the selection");
 	assert.doesNotMatch(tab.$("dialog.workspace-sessions")!.textContent!, /New thread/, "no threads");

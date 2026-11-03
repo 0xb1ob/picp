@@ -20,7 +20,8 @@ const DESIGN = { page: "#0d0d0d", background: "#0d0d0d", nav: "#121212", surface
 	"check-border": "#1f4a35", coral: "#f2917f", amber: "#f0b35a", blue: "#93b4f5", focus: "#7f9fd8" };
 /** Each screen: its root class, the nav item it lights (desktop, phone) and its desktop section order on an empty home. */
 const SCREENS: Array<[string, string, string, string, string[]]> = [
-	["#sessions", "sessions", "Chat", "Chat", ["Fleet · 0 live"]],
+	// Full match S1: the current operator chat opens its inspector by default from 900 px.
+	["#sessions", "sessions", "Chat", "Chat", ["Fleet · 0 live", "This conversation"]],
 	["#overview", "overview", "More", "More", ["In flight · 0", "Lined up · -", "Landed today · 0 merged"]],
 	["#decisions", "decisions", "More", "More", ["Awaiting you · Nothing needs you", "Worth a look", "What comes to you"]],
 	["#jobs", "jobs-screen", "Jobs", "Jobs", ["In flight · 0", "Done today · 0"]],
@@ -195,7 +196,7 @@ test("M3-nav: Chat, Jobs and More are the primary items on phone and desktop; ev
 	}
 });
 
-test("M3-shell: desktop Chat is one 261 px column of brand, search, navigation, chats and status; other screens keep the 208 px rail; selects use the system sans", { timeout: 180_000 }, async (t) => {
+test("M3-shell: desktop Chat is one 261 px column of rail head, chats, status and icon navigation; other screens keep the 208 px rail; selects use the system sans", { timeout: 180_000 }, async (t) => {
 	const d = await viewer(t);
 	const css = await servedCss(d);
 	// Combine: negative control — the old 208 px rail beside a 281 px Chats column (56 px title row) fails here.
@@ -212,8 +213,17 @@ test("M3-shell: desktop Chat is one 261 px column of brand, search, navigation, 
 	await tab.find(".shell-main > .sessions");
 	assert.equal(await until(() => tab.$(".shell-sidebar"), (rail) => rail === null, "the rail claim"), null, "Chat drops the shell's rail");
 	const column = tab.$(".session-sidebar")!;
-	assert.deepEqual([...column.children].map((el) => el.getAttribute("class") ?? el.tagName), ["shell-brand", "shell-desktop-search", "shell-sidebar-nav", "session-sidebar-chats", "shell-sidebar-status"],
-		"brand, search, navigation, chats, status in one column");
+	// Full match S1 (design `.cvh`, `.inav`): brand and a search icon on top, the primary items as icons at the foot.
+	assert.deepEqual([...column.children].map((el) => el.getAttribute("class") ?? el.tagName), ["shell-rail-head", "session-sidebar-chats", "shell-sidebar-status", "shell-sidebar-nav shell-icon-nav"],
+		"rail head, chats, status, icon navigation in one column");
+	const search = tab.$(".shell-rail-head > .shell-rail-search")!;
+	assert.deepEqual([search.getAttribute("aria-label"), tab.$$('nav[aria-label="Desktop primary"] a').map((a) => [a.getAttribute("title"), a.textContent])],
+		["Search", [["Chat", "Chat"], ["Jobs", "Jobs"], ["More", "More"]]], "icons keep their names");
+	const proto = tab.window.HTMLElement.prototype as { showModal?: () => void; close?: () => void };
+	proto.showModal ??= function (this: Element) { this.setAttribute("open", ""); };
+	proto.close ??= function (this: Element) { this.removeAttribute("open"); };
+	tab.click(search);
+	await tab.find("dialog[open] .search-shortcuts a");
 	assert.equal(tab.$(".sessions > .page-header > h1")?.textContent, "Chats");
 	tab.go("#stats");
 	await tab.find(".shell-main > .stats");
