@@ -97,6 +97,41 @@ test("M3-transcript-chat: the operator chat keeps its steps pill and cards in a 
 	assert.doesNotMatch(answers.text(), /acknowledg/i);
 });
 
+test("M3-fidelity-transcript: replies are unboxed text, own bubbles neutral, an open run an inline rail; pending sends, asks and relays stay boxed", { timeout: 180_000 }, async (t) => {
+	const d = await viewer(t, { seed: (stateDir, home) => {
+		const file = join(home, "pi-sessions", "chat.jsonl");
+		write(file, jsonl([
+			line("14:00", { role: "user", content: [{ type: "text", text: "OWN-MESSAGE" }] }),
+			...call("t1", "read", "Read 42 lines"), ...call("t2", "bash", "Ran npm test"),
+			line("14:01", { role: "assistant", content: [{ type: "text", text: "REPLY-CARD" }] }),
+		]));
+		write(operatorSessionsFile(join(stateDir, "sessions")), jsonl([{ at: at("13:00"), session_file: file }]));
+	} });
+	const css = await servedCss(d);
+	// Negative control: restoring the raised reply card or the filled steps card (design frames 1, 5, 6, 12) fails here.
+	assert.match(rules(css, ":root"), /--session-you: var\(--border\);--session-you-text: var\(--text\);/, "the own bubble is the neutral palette role");
+	assert.equal(rules(css, ".session-other>.session-body"), "padding:0;background:transparent;border:0;border-radius:0;max-width:670px", "a reply is unboxed text");
+	assert.match(rules(css, ".session-own>.session-body"), /background:var\(--session-you\);color:var\(--session-you-text\);border:0;border-radius:16px 16px 4px;/);
+	assert.equal(rules(css, ".session-grouped.session-other>.session-body"), "", "a grouped reply has no card radius either");
+	assert.match(rules(css, ".session-body p"), /^font-size:15px;line-height:23px/, "phone reply text 15/23");
+	assert.equal(rules(css, ".session-own .session-body p,.session-own .md ul,.session-own .md ol"), "line-height:22px", "only the own bubble tightens to 22 px");
+	assert.match(rules(css, ".session-steps-open>.session-steps-card"), /padding:2px 0 2px 12px;background:transparent;border:0;border-left:2px solid var\(--border\);border-radius:0$/, "the open run is a rail");
+	assert.match(rules(css, ".session-steps-rows .session-tool summary"), /min-height:28px;padding:2px 0;font-size:12\.5px;line-height:18px$/, "28 px step rows");
+	assert.match(rules(css, ".session-pending>.session-body"), /background:var\(--surface\);border:1px dashed var\(--muted\)/, "a queued send keeps its dashed box");
+	assert.match(rules(css, ".session-pending-failed>.session-body"), /border-style:solid/, "a failed send keeps its solid box");
+	assert.match(rules(css, ".session-notice"), /background:var\(--surface\);border:1px solid var\(--border\);border-radius:14px/, "an ask keeps its card");
+	assert.match(rules(css, ".session-rollup"), /border:1px solid var\(--border\);border-radius:12px/, "a relay rollup keeps its card");
+	for (const desktop of [false, true]) {
+		const tab = await openTab(t, d.port, "#sessions?view=you&transcript=1", new Map(), undefined, {}, desktop);
+		await tab.waitText(/REPLY-CARD/);
+		tab.click(tab.$(".session-steps > .session-tools")!);
+		await tab.find(".session-steps-open > .session-steps-card > .session-steps-rows");
+		assert.equal(tab.$$(".session-steps-open .session-steps-rows .session-tool").length, 2, "both steps sit in the rail");
+		assert.ok(tab.$(".session-other .session-avatar") && tab.$(".session-own > .session-body"), "the reply keeps its avatar header; the own bubble its body");
+		tab.close();
+	}
+});
+
 /** Chat, Jobs, More and every page reached through them: [hash, the screen's marker, the primary item it lights]. */
 const TRAVERSE: Array<[string, string, string]> = [
 	["#sessions", ".shell-main > .sessions", "Chat"], ["#jobs", '.shell-main > .jobs-screen nav[aria-label="Jobs view"]', "Jobs"],
