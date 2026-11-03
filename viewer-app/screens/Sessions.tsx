@@ -30,7 +30,7 @@ import { type ControlView, controlReady } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
 import { QuickReplies } from "../components/QuickReplies.tsx";
 import { dayKey, dayStarts, isOwn, lastDay, replyAsk, rollups, type Row, rowHead, rows } from "../session-rows.ts";
-import { InRollup, RelayRollup } from "../components/RelayRollup.tsx";
+import { InRollup, type OpenTranscript, RelayRollup, transcriptClick } from "../components/RelayRollup.tsx";
 
 /** A tool call/result longer than this shows its head, with the rest behind one "show all" link. */
 const TOOL_TEXT_MAX = 1200;
@@ -120,12 +120,12 @@ function groupStarts(rowList: Row[], days: Map<string,string>): Set<string> {
  * A run of steps (chat v2): one pill opening one card — the wake notice with its own toggle, compact tool rows and,
  * for a recorded job, its transcript link. Tools on (no `onToggle`) shows every card open, without pills.
  */
-function Steps({row,open,onToggle}: {row:Extract<Row,{kind:"steps"}>;open:boolean;onToggle?:()=>void}) {
+function Steps({row,open,onToggle,onTranscript}: {row:Extract<Row,{kind:"steps"}>;open:boolean;onToggle?:()=>void;onTranscript?:OpenTranscript}) {
  const job=row.notice?.bridge?.job ?? null, tucked=useContext(InRollup);
  // Open, a summary preview would repeat the first row right below it; the job id never does.
  return <ToolRunRow steps count={row.entries.length+(row.notice ? 1 : 0)} detail={job ?? (open ? null : row.entries.find(e=>e.summary)?.summary)} open={open} onToggle={onToggle} notice={row.notice && (open || !tucked) && <BridgeNotice entry={row.notice} clock={clockOf(row.notice)} chips/>}>
   <div class="session-steps-rows">{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</div>
-  {job && <a class="session-steps-link" href={jobTranscriptHref(job)}>Open job transcript →</a>}
+  {job && <a class="session-steps-link" href={jobTranscriptHref(job)} onClick={transcriptClick(job,onTranscript)}>Open job transcript →</a>}
  </ToolRunRow>;
 }
 const clockOf=(e:SessionEntry)=><code class="session-time">{dayKey(e.at) ? time(e.at) : "-"}</code>;
@@ -326,7 +326,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const rowList=rows(shown,dayStarts(shown,null),order);
  // Tools on, every row stands alone: rollups fold relay turns only in the chat view of the operator transcript.
  const renderRows=(list:SessionEntry[],prev:string | null)=>{const days=dayStarts(list,prev), base=rows(list,days,order), rl=data.transcript === true && !showTools ? rollups(base,days,order,data.pr_chips ?? {},replyAt) : base, st=groupStarts(rl,days);
- const node=(row:Row):ComponentChild=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : row.kind === "steps" ? <Steps key={row.key} row={row} open={showTools || openRuns.includes(row.key)} onToggle={showTools ? undefined : ()=>toggleRun(row.key)}/> : <RelayRollup key={row.key} row={row} render={node}/>;
+ const node=(row:Row):ComponentChild=>row.kind === "entry" ? <Entry key={row.entry.id} entry={row.entry} first={st.has(row.entry.id)} you={data.selected === "you"}/> : row.kind === "steps" ? <Steps key={row.key} row={row} open={showTools || openRuns.includes(row.key)} onToggle={showTools ? undefined : ()=>toggleRun(row.key)} onTranscript={toTranscript}/> : <RelayRollup key={row.key} row={row} render={node} onTranscript={toTranscript}/>;
  return rl.flatMap(row=>{
   const head=rowHead(row), label=days.get(head.id);
   const out=label ? [dayPill(head.id,head.at,label),node(row)] : [node(row)];
@@ -360,6 +360,8 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
   <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:workerDot(w),at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section></>;
  const workspace=useWorkspaceSurfaces(filterable,selection,{session:data.operator_session ?? null,asks:open,live:data.workers.filter(countedLive),chats,
   onAnswer:()=>{setPinOpen(true); remember(PINNED_KEY,"1","decisions bar");}});
+ // A reply's job link opens Transcript beside the chat; renderRows reads it at render time, below this hook.
+ const openJob=workspace.openJob, toTranscript:OpenTranscript | undefined=openJob ? (id,el)=>openJob(id,"transcript",el) : undefined;
  return <div class="sessions">
   {/* The ⋮ menu carries the transcript file and the tool-call toggle; the phone's ⋯ sheet keeps its own. */}
   <PageHeader title="Chats" menu={(files.length > 0 && data.transcript === true) || toolCalls > 0 || data.selected === "parent" ? <div class="session-menu">

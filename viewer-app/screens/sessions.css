@@ -253,7 +253,7 @@
 .sessions .md :not(pre) > code { background: color-mix(in srgb, var(--session-code-ink) var(--session-code-mix), transparent); }
 .sessions .session-own .md :not(pre) > code { background: color-mix(in srgb, var(--session-own-code-ink) var(--session-own-code-mix), transparent); }
 /* An unboxed reply sits on --background, so its code blocks take the surface to stay a visible box. */
-.sessions .md .md-code { background: var(--surface); }
+.sessions .session-other .md .md-code { background: var(--surface); }
 .sessions .md-table table { width: 100%; font-size: 13px; line-height: 19px; }
 .sessions .md-table th, .sessions .md-table td { padding: 6px 14px 6px 0; border: 0; border-bottom: 1px solid var(--border); }
 .sessions .md-table th { padding: 2px 14px 6px 0; background: none; font-size: 12px; font-weight: 600; color: var(--muted); }
