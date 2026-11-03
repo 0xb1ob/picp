@@ -733,7 +733,8 @@ try {
 	}
 	if (stage === "full-match-jobs") {
 		// Full match S3 (frames 3/9, C1). Negative controls: dropped team/queued groups fail `groups`, an ignored query
-		// `rows`, Show more without focus `focus`, unknown CI painted passed `chip`, phone targets under 44 px `small`.
+		// `rows`, Show more without focus `focus`, unknown CI painted passed `chip`, phone targets under 44 px `small`,
+		// a green Working label `tones` (Working stays neutral; only Merged is blue).
 		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
 			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
 			const mid = e => Math.round(e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2);
@@ -745,7 +746,7 @@ try {
 				pill: all(".workspace-jobs-project > summary").map(s => s.textContent).join(), pill_dot: color(".workspace-jobs-project-dot") === null ? null : getComputedStyle(q(".workspace-jobs-project-dot")).backgroundColor,
 				select_shown: [...document.querySelectorAll(".workspace-jobs select")].filter(e => e.checkVisibility()).length, segs: all(".workspace-jobs .jobs-segments button").map(b => b.textContent).join(),
 				statuses: all(".workspace-jobs-status").slice(0, 6).map(s => s.textContent).join(),
-				tones: [color(".workspace-jobs-status-working"), color(".workspace-jobs-status-merged"), color(".workspace-jobs-row[data-job=cp-parent-perf-audit-68u3] .workspace-jobs-status")].join(" | "),
+				tones: [color(".workspace-jobs-row[data-job=cp-transcript-steps-t7ah] .workspace-jobs-status"), color(".workspace-jobs-status-merged"), color(".workspace-jobs-row[data-job=cp-parent-perf-audit-68u3] .workspace-jobs-status")].join(" | "),
 				cols: all(".workspace-jobs-cols span").map(s => s.textContent).join(), groups: all(".workspace-jobs-list h3").map(h => h.textContent).join(),
 				rows: all(".workspace-jobs-row").length, more: q(".workspace-jobs-more")?.textContent ?? null, focus: document.activeElement?.dataset?.job ?? null,
 				one_line: row ? Math.round(row.querySelector("b").getBoundingClientRect().height) <= 22 : null, meta: all(".workspace-jobs-meta")[0]?.textContent ?? null,
@@ -765,7 +766,7 @@ try {
 		const toFocus: Step = [`(() => { const l = document.querySelector(".workspace-jobs-list"); l.scrollTop += document.activeElement.getBoundingClientRect().top - l.getBoundingClientRect().top - 200; })()`, "true"];
 		const toChip: Step = [`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-message a.pr-chip").getBoundingClientRect().top - t.getBoundingClientRect().top - 200; })()`, "true"];
 		const groups = "In flight · 2,With the team · 1,Queued · 1,Done today · 7", cols = "Job,Title / context,Status,Done,Cost";
-		const statuses = "Working,Held,With the team,Queued,Merged #700,Done", tones = "rgb(95, 211, 154) | rgb(147, 180, 245) | rgb(180, 180, 180)";
+		const statuses = "Working,Held,With the team,Queued,Merged #700,Done", tones = "rgb(180, 180, 180) | rgb(147, 180, 245) | rgb(180, 180, 180)";
 		// The committed five: desktop, desktop-query, phone, phone-more and pr-chip (dark, picp only).
 		const shotsJ: [string, number, number, Step[], object][] = [
 			["desktop", 1440, 1000, [open], { drawer: "579 0 861 1000", one_row: true, query_row: true, pill: "All projects▾", select_shown: 0, segs: "Today11,In flight2", statuses, tones, cols, groups, rows: 9, more: "Show 2 more", outside: "" }],

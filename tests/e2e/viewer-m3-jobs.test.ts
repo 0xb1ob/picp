@@ -305,7 +305,7 @@ test("M3-jobs-query (full match S3): Today/In flight, project and query narrow c
 	const segments = () => tab.$$(`${DRAWER} .jobs-segments button`).map((b) => b.textContent);
 	const ids = (group: string) => tab.$$(`${DRAWER} section[aria-label="${group}"] .workspace-jobs-row`).map((b) => b.getAttribute("data-job"));
 	const head = tab.$(`${DRAWER} header.workspace-jobs-head`)!, pill = head.querySelector(".workspace-jobs-bar > details.workspace-jobs-project")!;
-	// Full match S3 R1.1: the bar's native select became frame 3/9's "● picp ▾" pill around the same M1 select.
+	// Full match S3: the bar's native select became frame 3/9's "● picp ▾" pill around the same M1 select.
 	assert.deepEqual([pill?.querySelector("summary")?.textContent ?? null, !!pill?.querySelector('select[aria-label="Filter by project"]'), !!head.querySelector(".workspace-jobs-bar > label.project-filter"),
 		!!head.querySelector(".workspace-jobs-bar > .jobs-segments"), head.querySelector('input[type="search"]')!.parentElement!.parentElement === head], ["All projects▾", true, false, true, true],
 		"one toolbar: the project pill, Today/In flight/All, and the query on its own row");
@@ -320,7 +320,7 @@ test("M3-jobs-query (full match S3): Today/In flight, project and query narrow c
 	const queued = tab.$$(".workspace-jobs-row").find((b) => b.getAttribute("data-job") === "cp-queued")!;
 	assert.deepEqual(["cost", "done", "meta"].map((c) => queued.querySelector(`.workspace-jobs-${c}`)!.textContent), ["not recorded", "not recorded", "queued · cost not recorded"],
 		"an unrecorded cost or time says so, never $0 or 0m");
-	// Full match S3 R1.2: lowercase neutral labels became capitalised ones, Merged blue (Working green in Chrome).
+	// Full match S3: lowercase neutral labels became capitalised ones; only Merged takes a colour (blue).
 	const status = (id: string) => { const s = tab.$(`${DRAWER} [data-job="${id}"] .workspace-jobs-status`)!, tone = ["merged", "working"].find((k) => s.classList.contains(`workspace-jobs-status-${k}`));
 		return `${s.textContent}/${tone ?? "neutral"}`; };
 	assert.deepEqual(["cp-merged", "cp-done-0", "cp-park", "cp-queued", "cp-live"].map(status), ["Merged #2/merged", "Done/neutral", "With the team/neutral", "Queued/neutral", "Held/neutral"],
