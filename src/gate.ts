@@ -11,6 +11,7 @@ import type { CapacityReader } from "./capacity.ts";
 import { basename, join, resolve, sep } from "node:path";
 import { ArtifactStore } from "./artifacts.ts";
 import { type EscalationStore, raiseForGate } from "./escalation.ts";
+import { authorityHold } from "./authority-hold.ts";
 import {
 	DEFAULT_GATE_CONFIG,
 	type Delivery,
@@ -1069,6 +1070,15 @@ export class Gate {
 		if (recovery) recoveryReplay(home, jobId, readFileSync(this.#options.artifacts.file(jobId)));
 		if (standing) finishRecoveryAttempt({ home, jobId, attemptId: standing.attempt_id,
 			outcome: verdict.verdict === "pass" ? "pass" : input.spawnFailure ? "spawn_failure" : operational ? "interrupted" : "nonpass", decisionPath: path });
+		let holdError: string | undefined;
+		let hold: ReturnType<typeof authorityHold>;
+		// Never discards a decided verdict; admission fails closed on an escalated pipeline without its hold.
+		if (verdict.verdict === "escalate" && verdict.cause === "policy") {
+			try { hold = authorityHold(home, this.#options.mandates, jobId, { attempt }); } catch (error) { holdError = String((error as Error).message).slice(0, 400); }
+		}
+		try {
+			if (this.#options.escalations) await raiseForGate(this.#options.escalations, verdict, hold);
+		} catch (error) { holdError ??= String((error as Error).message).slice(0, 400); }
 		// The job's own run log learns the outcome; the gate run keeps the detail.
 		runs?.open(jobId).cp("gate_decided", {
 			attempt,
@@ -1077,14 +1087,8 @@ export class Gate {
 			model,
 			next: result.next,
 			path,
+			...(holdError ? { authority_hold_error: holdError } : {}),
 		});
-		if (this.#options.escalations) {
-			try {
-				await raiseForGate(this.#options.escalations, verdict);
-			} catch {
-				// An escalation write must never discard a decided verdict.
-			}
-		}
 
 		if (result.next === "revise" && input.deliverRevise) {
 			await this.#deliverRevise(result);

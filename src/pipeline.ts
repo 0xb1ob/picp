@@ -79,6 +79,7 @@ import {
 } from "./contracts.ts";
 import { type DiffReviewWait, isDiffReviewWait } from "./diff-review.ts";
 import { raisePlanApproval } from "./escalation.ts";
+import { authorityHold } from "./authority-hold.ts";
 import type { Dispatcher, DispatchResult } from "./dispatch.ts";
 import { UpdateHoldError } from "./update-hold.ts";
 import type { QuestionStore } from "./questions.ts";
@@ -1140,8 +1141,14 @@ export class PipelineRunner {
 		if (last.verdict === "escalate" && !flagged && !override) {
 			this.store.setState(researchId, "escalated", this.#now());
 			if (this.#options.escalations) {
+				let hold: ReturnType<typeof authorityHold>;
 				try {
-					await raiseForGate(this.#options.escalations, last);
+					hold = authorityHold(this.#options.home, this.#options.mandates, researchId, { project: record.project, attempt: last.attempt });
+				} catch {
+					// Admission refuses an escalated pipeline whose hold is missing, so the escalation is still raised.
+				}
+				try {
+					await raiseForGate(this.#options.escalations, last, hold);
 				} catch {
 					// Surfacing still happens; the record is best-effort.
 				}
@@ -1438,6 +1445,7 @@ export class PipelineRunner {
 			verified: (verdict.reasons[0] ?? "gate passed").slice(0, 400),
 		};
 		const blocking = this.#blockingMandate(record);
+		const hold = blocking && authorityHold(this.#options.home, this.#options.mandates, record.research_id, { project: record.project, attempt: verdict.attempt, mandateId: blocking.mandate_id });
 		await raisePlanApproval(store, {
 			researchId: record.research_id,
 			shipId: record.ship_id,
@@ -1446,6 +1454,7 @@ export class PipelineRunner {
 			...(summary ? { plan_summary: summary } : {}),
 			decision_summary: decision,
 			...(blocking ?? {}),
+			...(hold ? { authority_hold: hold } : {}),
 		});
 	}
 
