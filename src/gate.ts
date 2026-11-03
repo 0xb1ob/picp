@@ -1071,10 +1071,14 @@ export class Gate {
 		if (standing) finishRecoveryAttempt({ home, jobId, attemptId: standing.attempt_id,
 			outcome: verdict.verdict === "pass" ? "pass" : input.spawnFailure ? "spawn_failure" : operational ? "interrupted" : "nonpass", decisionPath: path });
 		let holdError: string | undefined;
+		let hold: ReturnType<typeof authorityHold>;
 		// Never discards a decided verdict; admission fails closed on an escalated pipeline without its hold.
+		if (verdict.verdict === "escalate" && verdict.cause === "policy") {
+			try { hold = authorityHold(home, this.#options.mandates, jobId, { attempt }); } catch (error) { holdError = String((error as Error).message).slice(0, 400); }
+		}
 		try {
-			if (this.#options.escalations) await raiseForGate(this.#options.escalations, verdict, authorityHold(home, this.#options.mandates, jobId, { attempt }));
-		} catch (error) { holdError = String((error as Error).message).slice(0, 400); }
+			if (this.#options.escalations) await raiseForGate(this.#options.escalations, verdict, hold);
+		} catch (error) { holdError ??= String((error as Error).message).slice(0, 400); }
 		// The job's own run log learns the outcome; the gate run keeps the detail.
 		runs?.open(jobId).cp("gate_decided", {
 			attempt,

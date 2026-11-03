@@ -1141,8 +1141,14 @@ export class PipelineRunner {
 		if (last.verdict === "escalate" && !flagged && !override) {
 			this.store.setState(researchId, "escalated", this.#now());
 			if (this.#options.escalations) {
+				let hold: ReturnType<typeof authorityHold>;
 				try {
-					await raiseForGate(this.#options.escalations, last, authorityHold(this.#options.home, this.#options.mandates, researchId, { project: record.project, attempt: last.attempt }));
+					hold = authorityHold(this.#options.home, this.#options.mandates, researchId, { project: record.project, attempt: last.attempt });
+				} catch {
+					// Admission refuses an escalated pipeline whose hold is missing, so the escalation is still raised.
+				}
+				try {
+					await raiseForGate(this.#options.escalations, last, hold);
 				} catch {
 					// Surfacing still happens; the record is best-effort.
 				}

@@ -5010,6 +5010,24 @@ loaded A0-compatible code from `state/operator/dashboard.json` (loaded commit an
 every strict reader runs it; only then (4) A1, the separate writer PR, is dispatched — deploying A1 is the sole
 writer activation step, with no flag. Rollback before A1 writes may revert A0 only while journals carry neither field.
 
+**Authority hold (self-review A1).** Producers now write `authority_hold`, never from tool arguments: a `cause: policy`
+gate escalation (`raiseForGate`, from `cp_gate` and the pipeline) and a plan approval raised by an `ask_on` grant. The
+hold names the project, the source research job, its linked ships (the pipeline ship and ledger ships `blocked_by` it),
+the selected mandate, the gate attempt's evidence path and the artifact's sha256. `src/authority-hold.ts`
+(`assertNoAuthorityHold`) runs first in `assertDispatchAllowed`, before the schedule-run return, risk gate,
+continuation and lease: a ship is refused when an unreleased hold in its project lists it or the hold's recorded
+mandate covers it (a recorded mandate that no longer exists holds the whole project). Research is never held. Release is
+derived from the journal only (`releasesHold`): an `answered` record in the hold's chain whose option is `override` or
+`approve`, by `operator-quote` or `operator-delegated` with `send_id` and `delegation_rule`. Withdrawal, `deny`,
+`replan`, a mandate basis, a planner teardown, a ledger close or drop and a parent restart release nothing. The hold
+cannot be reopened: `cp_escalate action:replace escalation_id:<es-…>` on a closed, unreleased hold writes one open
+linked record (`replaces_escalation_id`, approve/deny, the same hold, evidence and mandate); a retry returns that
+record, a closed replacement is replaced in turn, and cp_decide must name the replacement's own id; a producer re-raise of
+the same source, kind and gate attempt joins the unreleased chain the same way. An escalated
+pipeline with no hold record refuses its ship until `cp_pipeline advance` records it. A hold-write failure in
+`cp_gate` never discards the verdict; `gate_decided` carries `authority_hold_error`. Release does not authorize: the
+gate override and checkpoint rules still apply.
+
 An open escalation is projected into Awaiting-you (`type: escalation`) from
 the same store. The bridge (`src/cp-bridge.ts`) reads this store for
 `cp_parent status` and relays `cp_escalate` tool calls on the RPC stream.

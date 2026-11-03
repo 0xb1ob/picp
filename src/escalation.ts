@@ -197,6 +197,7 @@ export class EscalationStore {
 				...(input.decision_summary ? { decision_summary: input.decision_summary } : {}),
 				...(input.original_text ? { original_text: input.original_text } : {}),
 				...(input.authority_hold ? { authority_hold: input.authority_hold } : {}),
+				...(input.authority_hold ? heldChain(items, input.kind, input.authority_hold) : {}),
 			};
 			const parsed = validateEscalation(created);
 			if (!parsed.ok) {
@@ -481,6 +482,15 @@ const HOLD_REPLACEMENT_OPTIONS: EscalationOption[] = [
 	{ id: "deny", label: "deny", consequence: "the hold stays; covered ships stay refused", cost: "none" },
 ];
 const HOLD_RELEASES = new Set(["override", "approve"]);
+
+/** A re-raise of a closed, unreleased hold (same source, kind and attempt) joins its chain, so one answer releases it. */
+function heldChain(items: readonly Escalation[], kind: EscalationKind, hold: EscalationAuthorityHold): { replaces_escalation_id?: string } {
+	const same = items.filter((item) => item.kind === kind && item.authority_hold?.source_job_id === hold.source_job_id &&
+		item.authority_hold.gate_attempt === hold.gate_attempt);
+	const last = same.at(-1);
+	if (!last || items.some((item) => holdRoot(items, item) === holdRoot(items, last) && releasesHold(item))) return {};
+	return { replaces_escalation_id: items.filter((item) => holdRoot(items, item) === holdRoot(items, last)).at(-1)!.id };
+}
 
 /** The first record of a replacement chain: every record in one chain shares one authority hold. */
 export function holdRoot(items: readonly Escalation[], item: Escalation): string {
