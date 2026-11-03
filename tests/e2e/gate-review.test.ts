@@ -17,6 +17,7 @@ import { isGateWait, ORIGINAL_TASK_COPY } from "../../src/gate.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { loadProfile } from "../../src/profiles.ts";
 import type { ReviewWakeup } from "../../src/review-runs.ts";
+import { MCP_CALL_TOOL } from "../../src/worker-mcp.ts";
 import {
 	routeNamed,
 	createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT, type ScriptOptions, type ScriptStep,
@@ -75,7 +76,7 @@ async function bench(t: { after(fn: () => void | Promise<void>): void }, env: No
 	const runEvents = (jobId: string, attempt = 1) => readFileSync(join(home.path, paths.gateRunDir(jobId, attempt), "events.jsonl"), "utf8")
 		.split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type: string; payload?: Record<string, unknown> });
 	return {
-		home: home.path, post, provider, sent, routing, script, subject, lowOnly, down, posts, options,
+		home: home.path, post, provider, agent, sent, routing, script, subject, lowOnly, down, posts, options,
 		gate: (jobId: string, extra: { model?: string; deliverRevise?: boolean } = {}) => post.gateModule().gateAndWait({ jobId, ...extra }),
 		decision: (jobId: string, attempt = 1) => JSON.parse(readFileSync(join(home.path, paths.gateFile(jobId, attempt)), "utf8")) as GateVerdict,
 		routed: (jobId: string, attempt = 1) => runEvents(jobId, attempt).find((event) => event.type === "routing_resolved")?.payload,
@@ -583,6 +584,26 @@ test("P11c-gate-diff-bar: cp_review's high-only bar downgrades a revise with no 
 	assert.deepEqual([kept.verdict, kept.revisions, kept.reasons.some((each) => each.includes(downgraded))], ["revise", ["reject empty token"], false]);
 	const escalated = await review("cp-bar-escalate", { verdict: "escalate", reasons: ["stat empty"] });
 	assert.deepEqual([escalated.verdict, escalated.cause], ["escalate", "policy"]);
+});
+
+test("MCP gate reviewer: a real gate reviewer lists and calls writable and destructive MCP tools, then its pass persists", { timeout: 120_000 }, async (t) => {
+	const b = await bench(t);
+	const log = join(b.agent.path, "calls.log");
+	const server = join(REPO_ROOT, "tests/fixtures/mcp-probe-server.mjs");
+	writeFileSync(join(b.agent.path, "mcp.json"), JSON.stringify({ mcpServers: { probe: { command: process.execPath, args: [server, "probe", log] } } }));
+	const jobId = "cp-mcp-gate";
+	await b.subject(jobId);
+	const mcp = (args: Record<string, unknown>): ScriptStep => ({ kind: "tool_calls", calls: [{ name: MCP_CALL_TOOL, args }] });
+	const tools = ["plain", "write_thing", "delete_thing", "odd_thing"];
+	const model = b.script(jobId, [mcp({}), ...tools.map((tool) => mcp({ tool: `mcp__probe__${tool}` })), verdict(jobId)]);
+	b.routing([{ id: "reviews", role: "gate-reviewer", model }]);
+	const result = await b.gate(jobId, { deliverRevise: false });
+	assert.deepEqual([result.verdict.verdict, result.verdict.cause, result.next], ["pass", null, "proceed"]);
+	assert.ok(validate(GateVerdictSchema, b.decision(jobId)).ok);
+	const seen = JSON.stringify(b.provider.requests(jobId).at(-1)?.body.messages ?? []);
+	for (const tool of tools) assert.match(seen, new RegExp(`mcp__probe__${tool}.*ok:${tool}`, "s"), `${tool}: listed, then its server result`);
+	const calls = readFileSync(log, "utf8").split("\n").filter((line) => line.startsWith("call ")).sort();
+	assert.deepEqual(calls, tools.map((tool) => `call probe ${tool}`).sort(), "every reviewer call reaches the server");
 });
 
 async function waitForRequests(provider: MockProvider, name: string, count: number) {

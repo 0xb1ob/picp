@@ -1,22 +1,11 @@
 /**
- * MCP for read-only workers (cp-fl8b). The `readOnly: true` profiles (planner, qa, gate-reviewer)
- * load every server of the operator's `<agent dir>/mcp.json`, read in place through the agent dir
- * the worker already inherits (`workerEnvironment`): nothing is copied, and OAuth tokens stay in
- * `mcp-auth.json`, which pi reads in place. The implementer, ship workers and the CP parent get no MCP.
- *
- * Why a gateway tool and not `-e builtin:mcp`: since pi 1.0.4 the worker's `--tools` allowlist no
- * longer removes MCP tools (pi `docs/mcp.md`: only an `mcp__*` entry filters them), so builtin MCP
- * would expose every server tool, writes included. What keeps it out is `--no-extensions`, which
- * also disables the `builtin:mcp` built-in (pi `docs/settings.md`); workers never pass `-e builtin:mcp`.
- * `extensions/worker-mcp` runs pi's own MCP runtime (`createMcpExtension`), keeps the tools it
- * registers, and serves them through one allowlisted tool, `mcp_call`. Only tools whose server
- * declares `readOnlyHint: true` and not `destructiveHint: true` are listed or callable; a missing
- * hint is refused (fail closed), at the `tool_call` hook and again in `execute`.
+ * MCP for every worker (cp-fl8b, cp-z402): each worker profile reaches every enabled, non-hidden tool of the operator's
+ * `<agent dir>/mcp.json`, read in place (OAuth via `mcp-auth.json` in place) through one gateway tool, `mcp_call`
+ * (`extensions/worker-mcp`), with no profile or tool-annotation filter. The CP parent is not a worker.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getAgentDir, type LoadedMcpConfig, type McpServerConfig, type ToolAnnotations } from "@earendil-works/pi-coding-agent";
-import type { WorkerProfile } from "./contracts.ts";
+import { getAgentDir, type LoadedMcpConfig, type McpServerConfig } from "@earendil-works/pi-coding-agent";
 import type { OptionalWorkerPackages } from "./worker-packages.ts";
 
 export const MCP_CALL_TOOL = "mcp_call";
@@ -80,20 +69,11 @@ export function workerMcpConfig(user: UserMcpServers): LoadedMcpConfig {
 	return { servers, autoEnableCodemode: false, errors };
 }
 
-/** Why a read-only worker may not call this MCP tool; undefined when its server declares it read-only. */
-export function mcpReadOnlyRefusal(tool: string, annotations: ToolAnnotations | undefined): string | undefined {
-	if (annotations?.readOnlyHint === true && annotations.destructiveHint !== true) return undefined;
-	const why = annotations?.destructiveHint === true ? "declared destructive (destructiveHint)" : "not declared read-only by its MCP server (readOnlyHint)";
-	return `${tool} is ${why}; read-only workers may call only read-only MCP tools`;
-}
-
 /**
- * The read-only profiles' MCP contribution, merged into `base`: the worker-mcp extension and the
- * `mcp_call` gateway. `base` unchanged (same object) for a writing profile or a home whose agent
- * dir has no enabled server, so those argvs stay byte-identical.
+ * Every worker's MCP contribution, merged into `base`: the worker-mcp extension and the `mcp_call`
+ * gateway. `base` unchanged (same object) when the agent dir has no enabled server, so that argv stays byte-identical.
  */
-export function withWorkerMcp(base: OptionalWorkerPackages, profile: WorkerProfile, env: NodeJS.ProcessEnv = process.env): OptionalWorkerPackages {
-	if (profile.frontmatter.readOnly !== true) return base;
+export function withWorkerMcp(base: OptionalWorkerPackages, env: NodeJS.ProcessEnv = process.env): OptionalWorkerPackages {
 	if (enabledServers(readUserMcpServers(agentDirOf(env)).servers).length === 0) return base;
 	return { ...base, extensions: [...base.extensions, WORKER_MCP_EXTENSION], tools: [...(base.tools ?? []), MCP_CALL_TOOL] };
 }
