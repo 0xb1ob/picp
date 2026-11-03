@@ -673,18 +673,24 @@ Crossing 900 px while the context is open closes it (the sheet hands focus back 
 expanded or keeps Escape and no bottom sheet remains on a desktop. Deferred: per-conversation job lists and totals (not
 recorded), threads and Cmd+N. `m3-context` captures both surfaces at 1440, 900, 899 and 390 px.
 
-**Full match S3 (jobs drawer and PR chip).** The Jobs drawer's header is one toolbar on desktop (frame 3): the project
-filter, Today / In flight with counts, a local query field (id, title or project, case-insensitive, applied before every
-count) and Full page; a phone keeps the title row with the scope ("All projects · today"), a search toggle and the
-segments below (frame 9). Desktop rows sit under Job, Title / context, Status, Done and Cost columns in an 861 px drawer
-clear of the status footer; phone rows show a one-line title, `suffix · model · cost` and the finished time or elapsed.
-Groups are In flight, With the team, Queued and Done today (newest first), five rows each before "Show N more", which
-moves focus to the first revealed row. A missing cost or time is "not recorded", never $0 or 0m; status glyphs stay
-neutral. PR chips (C1) render each slot as glyph and name (✓ Review, ◌ CI, ✕ CI, ○ Merge, ✓ Merged sha) with the
-recorded state in its title; only a pass or merge is green. `--stage full-match-jobs` fails unless the 1440 and 390 px
-captures show the one-row toolbar, the five columns, every group, the query narrowing to one row, Show more keeping
-focus, 44 px phone targets and nothing outside the viewport; the committed captures are `desktop`, `desktop-query`,
-`phone`, `phone-more` and `pr-chip` `.png` under `docs/tui-verification/full-match-jobs/`.
+**Full match S3 (jobs drawer and PR chip).** The Jobs drawer's header follows frame 3 on desktop: Jobs, the project
+pill ("● picp ▾", a neutral dot; S1's popover around the same M1 select and hash, closed by Escape or a tap outside
+before the drawer), Today / In flight with counts and a bordered "Open full page ↗", then the local query field (id,
+title or project, case-insensitive, applied before every count) on its own full-width row. A phone keeps frame 9's
+title row with the scope ("All projects · today"), a search toggle, Full page and close, then one row with the
+Today | In flight | All segment and the pill at its right; All drops the day filter over the same `/api/jobs` rows.
+Desktop rows sit under Job, Title / context, Status, Done and Cost columns in an 861 px drawer clear of the status
+footer; phone rows show a one-line title, a monospace `suffix · model · cost` and the finished time or elapsed. Groups
+are In flight, With the team, Queued and Done today (Done under All, newest first), five rows each before "Show N
+more", which moves focus to the first revealed row. Statuses are capitalised (Working, Held, With the team, Queued,
+Merged #N, Done); Working is green and Merged blue as in the design, the rest and every leading job glyph neutral. A
+missing cost or time is "not recorded", never $0 or 0m, and each filter names its own empty state. PR chips (C1)
+render each slot as glyph and name (✓ Review, ◌ CI, ✕ CI, ○ Merge, ✓ Merged sha) with the recorded state in its
+title; only a pass or merge is green. `--stage full-match-jobs` fails unless the 1440 and 390 px captures show the
+two-row toolbar, the pill (no visible select), the segments, the five columns, every group, capitalised statuses and
+their colours, the query narrowing to one row, Show more keeping focus, 44 px phone targets and nothing outside the
+viewport; the committed captures are `desktop`, `desktop-query`, `phone`, `phone-more` and `pr-chip` `.png` under
+`docs/tui-verification/full-match-jobs/`.
 
 **Full match S2 (transcript and context).** An Asked you card states who asked, when and the project, opens its
 recorded Context (or "Context not recorded") and lists each option as a card with its consequence, the recommendation

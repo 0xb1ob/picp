@@ -19,7 +19,7 @@ const CHAT = "#sessions?view=you&transcript=1";
 const LONG = "Repair the queue so that a very long job title keeps wrapping inside its drawer row instead of clipping";
 const DRAWER = "dialog.workspace-jobs";
 
-/** Full match S3's Show more: done-today extras, newest first (the third has a long id), and a queued job. */
+/** Full match S3: done-today extras for Show more, newest first (the third has a long id); a queued and an old job. */
 const EXTRA = Array.from({ length: 7 }, (_, i) => i === 2 ? "cp-done-with-a-very-long-identifier-that-keeps-going-q3x9" : `cp-done-${i}`);
 /** A chat, two projects, one job per Jobs group (a parked one with its P2 review), today's merge; `extra` adds more. */
 function seed(stateDir: string, home: string, extra = false) {
@@ -35,16 +35,17 @@ function seed(stateDir: string, home: string, extra = false) {
 	const job = (id: string, project: string, status: string, title = `Title ${id}`, extra: object = {}) =>
 		({ id, title, status, labels: [`project:${project}`, "kind:ship"], blocked_by: [], ...extra });
 	const extras = extra ? EXTRA : [];
-	put(".pi-command-post/jobs.json", { jobs: [job("cp-live", "picp", "in_progress", LONG), job("cp-other", "atlas", "in_progress"), job("cp-park", "picp", "in_progress"),
+	put(".pi-command-post/jobs.json", { jobs: [job("cp-live", "picp", "in_progress", LONG), job("cp-other", "picp-lab", "in_progress"), job("cp-park", "picp", "in_progress"),
 		job("cp-merged", "picp", "closed", undefined, { closed_at: iso(30) }), ...extras.map((id, i) => job(id, "picp", "closed", undefined, { closed_at: iso(40 + i) })),
-		...(extra ? [job("cp-queued", "picp", "open")] : [])] });
+		...(extra ? [job("cp-queued", "picp", "open"), job("cp-old-r2d2", "picp-old", "closed", undefined, { closed_at: iso(1800) })] : [])] });
 	put(LAYOUT.fleetFile, { jobs: [
 		{ job_id: "cp-live", project: "picp", kind: "ship", phase: "held", dispatched_at: iso(60) },
-		{ job_id: "cp-other", project: "atlas", kind: "ship", phase: "held", dispatched_at: iso(60) },
+		{ job_id: "cp-other", project: "picp-lab", kind: "ship", phase: "held", dispatched_at: iso(60) },
 		{ job_id: "cp-park", project: "picp", kind: "ship", delivery: "pr", phase: "awaiting_merge", branch: "cp-park", dispatched_at: iso(300), reported_at: iso(120),
 			awaiting_merge: { cycle: 1, pr_url: "https://github.com/o/r/pull/7", repo: "o/r", branch: "cp-park", head_sha: "b".repeat(40), base: "main", handed_at: iso(120), released_at: iso(120), frozen_seconds: 600, frozen_usage: {} } },
 		{ job_id: "cp-merged", project: "picp", kind: "ship", phase: "done", dispatched_at: iso(90), closed_at: iso(30) },
 		...extras.map((job_id, i) => ({ job_id, project: "picp", kind: "ship", phase: "done", dispatched_at: iso(100 + i), closed_at: iso(40 + i) })),
+		...(extra ? [{ job_id: "cp-old-r2d2", project: "picp-old", kind: "ship", phase: "done", dispatched_at: iso(1900), closed_at: iso(1800) }] : []),
 	] });
 	put(join(LAYOUT.runs, "cp-park/review-1.json"), { schema_version: 1, job_id: "cp-park", attempt: 1, verdict: "pass", cause: "ok", reasons: ["GUIDE-NOTE"], model: "rev/model-1",
 		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, decided_at: iso(150), head_sha: "b".repeat(40), diff_stat: { files: 3, truncated: false } });
@@ -100,26 +101,26 @@ test("M3-jobs-drawer: chat Cmd+J opens the Jobs drawer; segments and the M1 filt
 	const rows = tab.$$(".workspace-jobs-row");
 	// Full match S3: "wrapped by CSS" became one ellipsised line (frames 3/9); the full title stays in `title`.
 	assert.deepEqual([rows[0]!.querySelector("b")!.textContent, rows[0]!.querySelector("b")!.getAttribute("title")], [LONG, LONG], "a long title is the row's whole title");
-	assert.match(rows.at(-1)!.textContent!, /cp-merged · picp.*merged #2/, "id, project and its merge");
-	// Full match S3: the segments "All / In flight / Done today" became the design's "Today / In flight".
+	assert.match(rows.at(-1)!.textContent!, /cp-merged · picp.*Merged #2/, "id, project and its merge (S3: capitalised as in frames 3/9)");
+	// Full match S3: the segments "All / In flight / Done today" became the design's "Today / In flight / All" (frame 9).
 	tab.click(tab.$$(`${DRAWER} .jobs-segments button`).find((b) => b.textContent!.startsWith("In flight"))!);
 	await settle();
 	assert.deepEqual(headings(tab), ["In flight · 2"]);
 	tab.click(tab.$$(`${DRAWER} .jobs-segments button`).find((b) => b.textContent!.startsWith("Today"))!);
 
 	const select = tab.$(`${DRAWER} select[aria-label="Filter by project"]`)!;
-	for (const option of select.querySelectorAll("option")) option.toggleAttribute("selected", option.getAttribute("value") === "atlas");
+	for (const option of select.querySelectorAll("option")) option.toggleAttribute("selected", option.getAttribute("value") === "picp-lab");
 	select.dispatchEvent(new tab.window.Event("change", { bubbles: true }));
 	tab.go(tab.window.location.hash);
-	await until(() => headings(tab), (h) => h.length === 1, "the atlas selection");
-	assert.deepEqual([headings(tab), tab.window.location.hash], [["In flight · 1"], `${CHAT}&project=atlas`], "M1: the hash carries the chat's selection");
-	assert.equal(tab.$(`${DRAWER} .workspace-full`)!.getAttribute("href"), "#jobs?project=atlas", "Full page keeps the selection");
-	assert.equal((tab.$('.session-filter select[aria-label="Filter by project"]') as unknown as { value: string }).value, "atlas", "one selection for chat and drawer");
+	await until(() => headings(tab), (h) => h.length === 1, "the picp-lab selection");
+	assert.deepEqual([headings(tab), tab.window.location.hash], [["In flight · 1"], `${CHAT}&project=picp-lab`], "M1: the hash carries the chat's selection");
+	assert.equal(tab.$(`${DRAWER} .workspace-full`)!.getAttribute("href"), "#jobs?project=picp-lab", "Full page keeps the selection");
+	assert.equal((tab.$('.session-filter select[aria-label="Filter by project"]') as unknown as { value: string }).value, "picp-lab", "one selection for chat and drawer");
 	assert.equal(reads(tab), 4, "one read per opening plus the context's one; the selection never refetches");
 
 	assert.equal(escape(tab), true);
 	await until(() => tab.$(DRAWER), (el) => el === null, "Escape to close the drawer");
-	assert.deepEqual([focused() === field, field.value, tab.window.location.hash], [true, "KEEP-DRAFT", `${CHAT}&project=atlas`], "focus, draft and filter kept");
+	assert.deepEqual([focused() === field, field.value, tab.window.location.hash], [true, "KEEP-DRAFT", `${CHAT}&project=picp-lab`], "focus, draft and filter kept");
 	assert.equal(escape(tab), true, "Full match S1: Escape next closes the inspector the chat opened by default");
 	await until(() => tab.$(".workspace-context"), (el) => el === null, "Escape to close the inspector");
 	assert.equal(escape(tab), false, "with nothing open Escape is not the chat's");
@@ -303,14 +304,27 @@ test("M3-jobs-query (full match S3): Today/In flight, project and query narrow c
 	await tab.find(`${DRAWER}[open] .workspace-jobs-row`);
 	const segments = () => tab.$$(`${DRAWER} .jobs-segments button`).map((b) => b.textContent);
 	const ids = (group: string) => tab.$$(`${DRAWER} section[aria-label="${group}"] .workspace-jobs-row`).map((b) => b.getAttribute("data-job"));
-	const bar = tab.$(`${DRAWER} header .workspace-jobs-bar`)!;
-	assert.deepEqual([!!bar.querySelector('select[aria-label="Filter by project"]'), !!bar.querySelector(".jobs-segments"), !!bar.querySelector('input[type="search"]')], [true, true, true],
-		"one toolbar in the header: project, Today/In flight and the query");
+	const head = tab.$(`${DRAWER} header.workspace-jobs-head`)!, pill = head.querySelector(".workspace-jobs-bar > details.workspace-jobs-project")!;
+	// Full match S3 R1.1: the bar's native select became frame 3/9's "● picp ▾" pill around the same M1 select.
+	assert.deepEqual([pill?.querySelector("summary")?.textContent ?? null, !!pill?.querySelector('select[aria-label="Filter by project"]'), !!head.querySelector(".workspace-jobs-bar > label.project-filter"),
+		!!head.querySelector(".workspace-jobs-bar > .jobs-segments"), head.querySelector('input[type="search"]')!.parentElement!.parentElement === head], ["All projects▾", true, false, true, true],
+		"one toolbar: the project pill, Today/In flight/All, and the query on its own row");
+	pill.setAttribute("open", "");
+	assert.deepEqual([tab.key(pill.querySelector("summary")!, "Escape").defaultPrevented, pill.hasAttribute("open"), !!tab.$(`${DRAWER}[open]`)], [true, false, true],
+		"Escape closes the pill's popover first and keeps the drawer");
+	pill.setAttribute("open", "");
+	tab.$(`${DRAWER} .workspace-jobs-cols`)!.dispatchEvent(new tab.window.Event("pointerdown", { bubbles: true }));
+	assert.equal(pill.hasAttribute("open"), false, "a tap outside the pill closes it");
 	assert.deepEqual(tab.$$(`${DRAWER} .workspace-jobs-cols span`).map((s) => s.textContent), ["Job", "Title / context", "Status", "Done", "Cost"], "desktop column headings");
-	assert.deepEqual([segments(), headings(tab)], [["Today12", "In flight2"], ["In flight · 2", "With the team · 1", "Queued · 1", "Done today · 8"]], "every real group, team and queued included");
+	assert.deepEqual([segments(), headings(tab)], [["Today12", "In flight2", "All"], ["In flight · 2", "With the team · 1", "Queued · 1", "Done today · 8"]], "every real group, team and queued included");
 	const queued = tab.$$(".workspace-jobs-row").find((b) => b.getAttribute("data-job") === "cp-queued")!;
 	assert.deepEqual(["cost", "done", "meta"].map((c) => queued.querySelector(`.workspace-jobs-${c}`)!.textContent), ["not recorded", "not recorded", "queued · cost not recorded"],
 		"an unrecorded cost or time says so, never $0 or 0m");
+	// Full match S3 R1.2: lowercase neutral labels became capitalised ones, Merged blue (Working green in Chrome).
+	const status = (id: string) => { const s = tab.$(`${DRAWER} [data-job="${id}"] .workspace-jobs-status`)!, tone = ["merged", "working"].find((k) => s.classList.contains(`workspace-jobs-status-${k}`));
+		return `${s.textContent}/${tone ?? "neutral"}`; };
+	assert.deepEqual(["cp-merged", "cp-done-0", "cp-park", "cp-queued", "cp-live"].map(status), ["Merged #2/merged", "Done/neutral", "With the team/neutral", "Queued/neutral", "Held/neutral"],
+		"capitalised statuses; only Merged takes a colour here");
 
 	// Show more: five rows, then the rest; focus lands on the first revealed row instead of the vanished button.
 	assert.deepEqual(ids("Done today"), ["cp-merged", ...EXTRA.slice(0, 4)], "five rows, newest first");
@@ -318,22 +332,40 @@ test("M3-jobs-query (full match S3): Today/In flight, project and query narrow c
 	assert.equal(more.textContent, "Show 3 more");
 	tab.click(more);
 	await until(() => ids("Done today").length, (n) => n === 8, "the rest of Done today");
-	assert.deepEqual([tab.$(`${DRAWER} .workspace-jobs-more`), focused()?.getAttribute("data-job")], [null, EXTRA[4]], "Show more keeps focus on the next row");
+	assert.deepEqual([!!tab.$(`${DRAWER} .workspace-jobs-more`), focused()?.getAttribute("data-job")], [false, EXTRA[4]], "Show more keeps focus on the next row");
 	const long = tab.$$(".workspace-jobs-row").find((b) => b.getAttribute("data-job") === EXTRA[2])!;
 	assert.deepEqual([long.querySelector(".workspace-jobs-id code")!.getAttribute("title"), long.querySelector(".workspace-jobs-job code")!.textContent], [EXTRA[2], "q3x9"],
 		"a long id: whole in its title, the suffix in the Job cell");
 
 	// The query matches recorded id, title or project, case-insensitively, before every count.
 	const query = tab.$(`${DRAWER} input[type="search"]`)!;
-	for (const [text, want, rows] of [["ATLAS", ["Today1", "In flight1"], ["cp-other"]], ["title cp-park", ["Today1", "In flight0"], ["cp-park"]], ["done-5", ["Today1", "In flight0"], ["cp-done-5"]]] as const) {
+	for (const [text, want, rows] of [["PICP-LAB", ["Today1", "In flight1", "All"], ["cp-other"]], ["title cp-park", ["Today1", "In flight0", "All"], ["cp-park"]],
+		["done-5", ["Today1", "In flight0", "All"], ["cp-done-5"]]] as const) {
 		tab.type(query, text);
 		await until(() => segments().join(), (s) => s === want.join(), `the query ${text}`);
 		assert.deepEqual(tab.$$(".workspace-jobs-row").map((b) => b.getAttribute("data-job")), rows, `${text} matches its recorded job`);
 	}
-	tab.click(tab.$$(`${DRAWER} .jobs-segments button`).find((b) => b.textContent!.startsWith("In flight"))!);
+	const pick = (label: string) => tab.click(tab.$$(`${DRAWER} .jobs-segments button`).find((b) => b.textContent!.startsWith(label))!);
+	const shown = () => tab.$(`${DRAWER} [role=status]`)?.textContent ?? headings(tab).join();
+	pick("In flight");
 	tab.type(query, "park");
-	await until(() => tab.$(`${DRAWER} [role=status]`)?.textContent, (s) => s === "No in-flight jobs match “park”", "In flight hides the parked job");
-	tab.click(tab.$$(`${DRAWER} .jobs-segments button`).find((b) => b.textContent!.startsWith("Today"))!);
+	await until(shown, (s) => s === "No in-flight jobs match “park”", "In flight hides the parked job");
+	tab.type(query, "");
+	// Review 1: Today with only a yesterday job said "Nothing in flight"; each filter now names its own empty state.
+	const old = tab.$(`${DRAWER} select[aria-label="Filter by project"]`)!;
+	for (const option of old.querySelectorAll("option")) option.toggleAttribute("selected", option.getAttribute("value") === "picp-old");
+	old.dispatchEvent(new tab.window.Event("change", { bubbles: true }));
+	tab.go(tab.window.location.hash);
+	await until(shown, (s) => s === "Nothing in flight", "picp-old: nothing in flight");
+	pick("Today");
+	await until(shown, (s) => s === "Nothing today", "picp-old: nothing today");
+	// Frame 9's All: no day filter over the same recorded jobs, so yesterday's job is listed under Done.
+	pick("All");
+	await until(shown, (s) => s === "Done · 1", "picp-old: All lists yesterday's job");
+	assert.equal(tab.$(`${DRAWER} .workspace-jobs-scope`)!.textContent, "picp-old · all days");
+	tab.go(CHAT);
+	pick("Today");
+	await until(() => headings(tab).length, (n) => n === 4, "back to every project today");
 
 	// A pick from the query keeps the pane's Details default, its P2 review guide and the direct links.
 	tab.click(await tab.find(".workspace-jobs-row", (b) => b.getAttribute("data-job") === "cp-park"));

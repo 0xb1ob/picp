@@ -736,29 +736,42 @@ try {
 		// `rows`, Show more without focus `focus`, unknown CI painted passed `chip`, phone targets under 44 px `small`.
 		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
 			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
-			const tops = all(".workspace-jobs-bar > *, .workspace-jobs-head > h2").map(e => Math.round(e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2));
-			const row = q(".workspace-jobs-row"), chip = q(".session-message a.pr-chip");
+			const mid = e => Math.round(e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2);
+			const tops = all(".workspace-jobs-head > h2, .workspace-jobs-project > summary, .workspace-jobs .jobs-segments button, .workspace-jobs-head > .workspace-full, .workspace-jobs-head > .workspace-close").map(mid);
+			const row = q(".workspace-jobs-row"), chip = q(".session-message a.pr-chip"), find = all(".workspace-jobs-find")[0], head = q(".workspace-jobs-head");
+			const color = s => { const e = all(s)[0]; return e ? getComputedStyle(e).color : null; };
 			return { drawer: box("dialog.workspace-jobs[open]"), one_row: innerWidth >= 900 ? Math.max(...tops) - Math.min(...tops) <= 2 : null,
+				query_row: innerWidth >= 900 && find ? find.getBoundingClientRect().top > Math.max(...all(".workspace-jobs .jobs-segments button").map(b => b.getBoundingClientRect().bottom)) && find.getBoundingClientRect().width > head.getBoundingClientRect().width - 40 : null,
+				pill: all(".workspace-jobs-project > summary").map(s => s.textContent).join(), pill_dot: color(".workspace-jobs-project-dot") === null ? null : getComputedStyle(q(".workspace-jobs-project-dot")).backgroundColor,
+				select_shown: [...document.querySelectorAll(".workspace-jobs select")].filter(e => e.checkVisibility()).length, segs: all(".workspace-jobs .jobs-segments button").map(b => b.textContent).join(),
+				statuses: all(".workspace-jobs-status").slice(0, 6).map(s => s.textContent).join(),
+				tones: [color(".workspace-jobs-status-working"), color(".workspace-jobs-status-merged"), color(".workspace-jobs-row[data-job=cp-parent-perf-audit-68u3] .workspace-jobs-status")].join(" | "),
 				cols: all(".workspace-jobs-cols span").map(s => s.textContent).join(), groups: all(".workspace-jobs-list h3").map(h => h.textContent).join(),
 				rows: all(".workspace-jobs-row").length, more: q(".workspace-jobs-more")?.textContent ?? null, focus: document.activeElement?.dataset?.job ?? null,
 				one_line: row ? Math.round(row.querySelector("b").getBoundingClientRect().height) <= 22 : null, meta: all(".workspace-jobs-meta")[0]?.textContent ?? null,
+				meta_mono: row ? getComputedStyle(row.querySelector(".workspace-jobs-meta > code")).fontFamily.includes("Mono") : null,
 				chip: chip ? [...chip.querySelectorAll(".pr-chip-slot")].map(s => s.textContent + "/" + s.getAttribute("title")).join(" | ") + (chip.querySelector(".pr-chip-ci-unknown .pr-chip-glyph")?.textContent === "○" ? "" : " (unknown CI not hollow)") : null,
-				measure: { head: box(".workspace-jobs-head"), cols: box(".workspace-jobs-cols"), row: box(".workspace-jobs-row"), more: box(".workspace-jobs-more"), chip: box(".session-message a.pr-chip") },
-				small: innerWidth < 900 ? all(".workspace-close, .workspace-full, .workspace-jobs-search, .workspace-jobs-row, .workspace-jobs .jobs-segments button, .workspace-jobs select, .workspace-jobs-more, .workspace-jobs-find")
+				measure: { head: box(".workspace-jobs-head"), pill: box(".workspace-jobs-project > summary"), seg: box(".workspace-jobs .jobs-segments"), find: find ? box(".workspace-jobs-find") : null,
+					full: box(".workspace-jobs-head > .workspace-full"), cols: box(".workspace-jobs-cols"), h3: box(".workspace-jobs-list h3"), row: box(".workspace-jobs-row"), more: box(".workspace-jobs-more"), chip: box(".session-message a.pr-chip") },
+				small: innerWidth < 900 ? all(".workspace-close, .workspace-full, .workspace-jobs-search, .workspace-jobs-row, .workspace-jobs .jobs-segments button, .workspace-jobs-project > summary, .workspace-jobs-more, .workspace-jobs-find")
 					.filter(e => e.getBoundingClientRect().height < 44).map(e => e.className || e.textContent).join() : "",
-				outside: all(".workspace-jobs button, .workspace-jobs a, .workspace-jobs select, .workspace-jobs input, .pr-chip").filter(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className).join() }; })()`;
-		const open: Step = [`document.querySelector(".workspace-jobs-open").click()`, `!!document.querySelector(".workspace-jobs[open] .workspace-jobs-row")`];
-		const query: Step = [`(() => { const i = document.querySelector(".workspace-jobs-find input"); i.focus(); i.value = "toolbar"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+				outside: all(".workspace-jobs button, .workspace-jobs a, .workspace-jobs summary, .workspace-jobs input, .pr-chip").filter(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className || e.textContent).join() }; })()`;
+		// Resting captures: the modal's initial focus ring on the pill is dropped before the shot.
+		const open: Step = [`(() => { document.querySelector(".workspace-jobs-open").click(); setTimeout(() => document.activeElement?.blur(), 0); })()`,
+			`!!document.querySelector(".workspace-jobs[open] .workspace-jobs-row") && document.activeElement === document.body`];
+		const query: Step = [`(() => { const i = document.querySelector(".workspace-jobs-find input"); i.value = "toolbar"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
 			`document.querySelectorAll(".workspace-jobs-row").length === 1`];
 		const more: Step = [`document.querySelector(".workspace-jobs-more").click()`, `document.activeElement?.dataset?.job === "cp-viewer-fonts-f0nt"`];
 		const toFocus: Step = [`(() => { const l = document.querySelector(".workspace-jobs-list"); l.scrollTop += document.activeElement.getBoundingClientRect().top - l.getBoundingClientRect().top - 200; })()`, "true"];
 		const toChip: Step = [`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-message a.pr-chip").getBoundingClientRect().top - t.getBoundingClientRect().top - 200; })()`, "true"];
 		const groups = "In flight · 2,With the team · 1,Queued · 1,Done today · 7", cols = "Job,Title / context,Status,Done,Cost";
+		const statuses = "Working,Held,With the team,Queued,Merged #700,Done", tones = "rgb(95, 211, 154) | rgb(147, 180, 245) | rgb(180, 180, 180)";
 		// The committed five: desktop, desktop-query, phone, phone-more and pr-chip (dark, picp only).
 		const shotsJ: [string, number, number, Step[], object][] = [
-			["desktop", 1440, 1000, [open], { drawer: "579 0 861 1000", one_row: true, cols, groups, rows: 9, more: "Show 2 more", outside: "" }],
-			["desktop-query", 1440, 1000, [open, query], { one_row: true, groups: "In flight · 1", rows: 1, outside: "" }],
-			["phone", 390, 844, [open], { drawer: "0 96 390 748", cols: "", groups, rows: 9, more: "Show 2 more", one_line: true, meta: "t7ah · fixture-model · $1.54", small: "", outside: "" }],
+			["desktop", 1440, 1000, [open], { drawer: "579 0 861 1000", one_row: true, query_row: true, pill: "All projects▾", select_shown: 0, segs: "Today11,In flight2", statuses, tones, cols, groups, rows: 9, more: "Show 2 more", outside: "" }],
+			["desktop-query", 1440, 1000, [open, query], { one_row: true, query_row: true, groups: "In flight · 1", rows: 1, outside: "" }],
+			["phone", 390, 844, [open], { drawer: "0 96 390 748", cols: "", pill: "All projects▾", select_shown: 0, segs: "Today11,In flight2,All", statuses, tones, groups, rows: 9, more: "Show 2 more", one_line: true,
+				meta: "t7ah · fixture-model · $1.54", meta_mono: true, small: "", outside: "" }],
 			["phone-more", 390, 844, [open, more, toFocus], { rows: 11, more: null, focus: "cp-viewer-fonts-f0nt", small: "", outside: "" }],
 			["pr-chip", 1440, 1000, [toChip], { chip: "✓ Review/review pass | ○ CI/CI unknown | ○ Merge/open", outside: "" }],
 		];

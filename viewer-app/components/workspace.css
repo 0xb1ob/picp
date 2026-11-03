@@ -1,5 +1,5 @@
 /*
- * M3 chat Jobs surfaces (WorkspaceSurfaces): the operator chat's Jobs drawer (a bottom sheet on a phone, an 860 px
+ * M3 chat Jobs surfaces (WorkspaceSurfaces): the operator chat's Jobs drawer (a bottom sheet on a phone, an 861 px
  * right drawer from 900 px) and the picked job (full screen on a phone, beside the chat from 1280 px, over it between).
  */
 .workspace-jobs-open { display: flex; align-items: center; gap: 8px; flex-shrink: 0; margin-left: auto; min-height: 44px; padding: 0 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
@@ -14,12 +14,22 @@
 .workspace-jobs-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px 4px 8px 16px; border-bottom: 1px solid var(--divider); flex-shrink: 0; min-width: 0; }
 .workspace-jobs-head > h2 { margin: 0; font-size: 17px; font-weight: 600; }
 .workspace-jobs-scope { flex: 1; min-width: 0; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--dim); }
-.workspace-jobs-bar { order: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-basis: 100%; min-width: 0; padding: 4px 12px 0 0; }
-.workspace-jobs-bar > .jobs-segments { order: -1; }
-.workspace-jobs-bar > .project-filter { margin-left: auto; }
+.workspace-jobs-bar { order: 1; display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; flex-basis: 100%; min-width: 0; padding: 4px 12px 0 0; }
+.workspace-jobs-bar > .jobs-segments { order: -1; flex-shrink: 1; min-width: 0; }
+.workspace-jobs-bar > .workspace-jobs-project { margin-left: auto; }
 .workspace-jobs .project-filter > span { display: none; }
-.workspace-jobs-find { display: none; flex: 1 1 100%; align-items: center; gap: 8px; min-width: 0; min-height: 44px; padding: 0 12px; background: var(--background); color: var(--dim); border: 1px solid var(--border); border-radius: 10px; }
+/* Frames 3/9: the project filter is a "● picp ▾" pill opening S1's popover around the M1 select. */
+.workspace-jobs-project { position: relative; flex-shrink: 0; min-width: 0; }
+.workspace-jobs-project > summary { display: flex; align-items: center; gap: 7px; min-height: 44px; max-width: 160px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; color: var(--text); list-style: none; cursor: pointer; }
+.workspace-jobs-project > summary::-webkit-details-marker { display: none; }
+.workspace-jobs-project > summary > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-jobs-project > summary > span:last-child { font-size: 10px; color: var(--dim); }
+.workspace-jobs-project[open] > summary { background: var(--toggle); }
+.workspace-jobs-project-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.workspace-jobs-project-sheet { position: absolute; top: calc(100% + 4px); right: 0; z-index: 4; width: max-content; max-width: min(320px, calc(100vw - 28px)); padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
+.workspace-jobs-find { order: 2; display: none; flex: 1 1 100%; align-items: center; gap: 8px; min-width: 0; min-height: 44px; margin: 6px 12px 0 0; padding: 0 12px; background: var(--background); color: var(--dim); border: 1px solid var(--border); border-radius: 10px; }
 .workspace-jobs-find[data-open] { display: flex; }
+.workspace-jobs-head > .workspace-full .workspace-full-open, .workspace-jobs-head > .workspace-full .workspace-full-arrow { display: none; }
 .workspace-jobs-find > input { flex: 1; min-width: 0; min-height: 42px; padding: 0; background: none; color: var(--text); border: 0; outline: 0; font: inherit; font-size: 16px; }
 .workspace-jobs-search { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; background: none; color: var(--text); border: 0; border-radius: 10px; cursor: pointer; }
 .workspace-jobs-search[aria-expanded=true] { background: var(--toggle); }
@@ -42,6 +52,10 @@
 .workspace-jobs-title code { font-size: 12px; }
 .workspace-jobs-id { display: none; }
 .workspace-jobs-status { grid-column: 3; max-width: 140px; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--muted); white-space: nowrap; text-align: right; }
+/* Design frames 3/9: Working green, Merged blue (neither is an amber/coral ask colour); the rest stay neutral. */
+.workspace-jobs-status-working { color: var(--green); }
+.workspace-jobs-status-merged { color: var(--blue); }
+.workspace-jobs-meta > code { font-family: var(--font-mono); font-size: 12px; }
 .workspace-jobs-done { grid-column: 3; font-size: 12px; color: var(--dim); white-space: nowrap; text-align: right; }
 .workspace-jobs-cost { display: none; font-size: 13px; color: var(--muted); text-align: right; }
 .workspace-jobs-more { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 48px; padding: 0 16px; background: none; color: var(--muted); border: 0; border-bottom: 1px solid var(--divider); font: inherit; font-size: 13.5px; cursor: pointer; }
@@ -132,13 +146,19 @@
  .workspace-jobs-open > kbd { display: inline; }
  /* Frame 3: an 861 px drawer (its left border at x579); its height leaves `--workspace-status` (S5's footer) clear. */
  .workspace-jobs { inset: 0 0 auto auto; width: min(861px, 100%); height: calc(100% - var(--workspace-status, 0px)); background: var(--surface); border: 0; border-left: 1px solid var(--border); border-radius: 0; box-shadow: -24px 0 60px var(--page); }
- .workspace-jobs-head { flex-wrap: nowrap; gap: 8px; padding: 10px 8px 10px 16px; }
- .workspace-jobs-scope, .workspace-jobs-search { display: none; }
- .workspace-jobs-bar { order: 0; flex: 1; flex-wrap: nowrap; padding: 0; }
- .workspace-jobs-bar > .jobs-segments { order: 0; padding: 0; background: none; border: 0; gap: 8px; }
- .workspace-jobs-bar > .jobs-segments button { border: 1px solid var(--border); }
- .workspace-jobs-bar > .project-filter { margin-left: 0; }
- .workspace-jobs-find, .workspace-jobs-find[data-open] { display: flex; flex: 1 1 auto; }
+ /* Frame 3: Jobs, the pill, Today and In flight, then "Open full page ↗" and close; the query on its own full row. */
+ .workspace-jobs-head { gap: 8px; padding: 12px 8px 12px 16px; }
+ .workspace-jobs-scope, .workspace-jobs-search, .workspace-jobs .jobs-segments .workspace-jobs-seg-all, .workspace-jobs-head > .workspace-full .workspace-full-short { display: none; }
+ .workspace-jobs-head > .workspace-full .workspace-full-open, .workspace-jobs-head > .workspace-full .workspace-full-arrow { display: inline; }
+ .workspace-jobs-head > .workspace-full { min-height: 34px; margin-left: auto; padding: 0 11px; color: var(--text); border: 1px solid var(--border); border-radius: 8px; }
+ .workspace-jobs-head > h2 { margin-right: 8px; }
+ .workspace-jobs-bar { order: 0; flex: 0 1 auto; flex-basis: auto; padding: 0; }
+ .workspace-jobs-bar > .jobs-segments { order: 0; flex-shrink: 0; overflow: visible; padding: 0; background: none; border: 0; gap: 8px; }
+ .workspace-jobs-bar > .jobs-segments button { min-height: 34px; padding: 0 13px; border: 1px solid var(--border); }
+ .workspace-jobs-bar > .workspace-jobs-project { order: -1; margin-left: 0; }
+ .workspace-jobs-project > summary { min-height: 34px; }
+ .workspace-jobs-project-sheet { right: auto; left: 0; }
+ .workspace-jobs-find, .workspace-jobs-find[data-open] { display: flex; margin: 6px 8px 0 0; }
  .workspace-jobs-find > input { font-size: 14px; }
  .workspace-jobs-cols, .workspace-jobs-row { display: grid; grid-template-columns: 84px minmax(0,1fr) 130px 64px 72px; column-gap: 14px; padding: 0 20px; }
  .workspace-jobs-cols { flex-shrink: 0; align-items: center; min-height: 40px; border-bottom: 1px solid var(--divider); font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
@@ -150,6 +170,7 @@
  .workspace-jobs-id { display: block; }
  .workspace-jobs-meta { display: none; }
  .workspace-jobs-status { grid-column: auto; justify-self: start; max-width: 100%; padding: 2px 9px; border: 1px solid var(--border); border-radius: 999px; font-size: 12.5px; text-align: left; }
+ .workspace-jobs-status-working, .workspace-jobs-status-merged { border-color: currentColor; }
  .workspace-jobs-done { grid-column: auto; font-size: 13px; color: var(--muted); text-align: left; }
  .workspace-jobs-cost { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
  .workspace-jobs-more { justify-content: flex-start; padding: 0 20px; }
