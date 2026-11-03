@@ -17,7 +17,7 @@ import { buildViewer } from "../../src/viewer/build.ts";
 import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -157,6 +157,18 @@ const deadline = <T>(what: string, ms: number, run: Promise<T>) => {
 	return Promise.race([run, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${what} exceeded ${ms} ms`)), ms); })]).finally(() => clearTimeout(timer));
 };
 try {
+	if (args.stage === "p3-quota") {
+		// P3: two failed jobs and their intents on the scratch home; the real viewer projects them (overdue, held).
+		const put = (file: string, value: unknown) => { mkdirSync(join(scratch, file, ".."), { recursive: true }); writeFileSync(join(scratch, file), JSON.stringify(value)); };
+		const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+		const ids = ["cp-quota-due", "cp-quota-held"];
+		put(".pi-command-post/jobs.json", { jobs: ids.map(id => ({ id, title: `${id} fixture`, status: "in_progress", labels: ["project:demo", "kind:ship"] })) });
+		put(LAYOUT.fleetFile, { jobs: ids.map(job_id => ({ job_id, project: "demo", kind: "ship", phase: "failed", dispatched_at: ago(60), failure: { class: "model_call_failed", message: "quota continuation pending", at: ago(50) } })) });
+		const intent = (job_id: string, delivery: string, reason?: string) => ({ continuation_id: `${job_id}:quota:1`, job_id, generation: 1, state: "pending", delivery, capability_version: "mock-quota-reset/1",
+			signal: { resetsAtUtc: ago(30), resetsAtEpochSeconds: Math.floor(Date.parse(ago(30)) / 1000) }, attempts: delivery === "waiting" ? 0 : 1, ...(reason ? { reason } : {}) });
+		put(join(LAYOUT.state, "quota-continuation.json"), { schema_version: 1, eligibility: {}, policy: { home: { enabled: true, changed_at: ago(90), actor: "operator" }, jobs: {} },
+			intents: [intent("cp-quota-due", "waiting"), intent("cp-quota-held", "ambiguous", "revive refused: cannot revive cp-quota-held (tool_child_alive)")] });
+	}
 	const app = await buildViewer({ stateDir: join(scratch, LAYOUT.state) });
 	const empty = overview({ home: scratch, stateDir: join(scratch, LAYOUT.state) }, Date.parse(GENERATED));
 	const routes: Record<string, unknown> = { "/api/sessions": sessions, "/api/overview": empty, "/api/operator/control": control, [`/api/job/${JOB}`]: job, [`/api/job/${JOB}/transcript`]: jobTranscript };
@@ -192,7 +204,7 @@ try {
 		}
 		if (path in routes) return send(200, "application/json", JSON.stringify(routes[path]));
 		// M3: every other screen reads the real viewer's APIs on this scratch home (empty state, same palette check).
-		if ((args.stage === "m3-transcript" || args.stage === "nav-simplify") && path.startsWith("/api/") && !ABSENT.has(path)) {
+		if ((args.stage === "m3-transcript" || args.stage === "nav-simplify" || args.stage === "p3-quota") && path.startsWith("/api/") && !ABSENT.has(path)) {
 			return dispatch(req, res, { home: scratch, stateDir: join(scratch, LAYOUT.state), host: "127.0.0.1", port: (server.address() as AddressInfo).port, app });
 		}
 		if (!ABSENT.has(path) && path !== "/favicon.ico" && !path.startsWith("/manifest") && !path.endsWith(".png")) unexpected.push(path);
@@ -486,6 +498,17 @@ try {
 			await capture(`nav-${name}`, hash, width, height, "dark", ready, hash === transcript ? "bottom" : undefined, [fits(lit, rows)]);
 		}
 		if (posts.length) throw new Error(`nav-simplify sent ${posts.join(", ")}: navigation only reads`);
+	}
+	if (stage === "p3-quota") {
+		// The Job page's Quota continuation fact centred on screen; each capture fails unless it reads its state and fits.
+		const fact = (text: string): Step[] => [[`document.querySelector(".job-fact-quota").scrollIntoView({ block: "center" })`, "true"],
+			["true", `(() => { const f = document.querySelector(".job-fact-quota"), r = f.getBoundingClientRect();
+			return f.textContent.includes("unsupported in production") && f.textContent.includes(${JSON.stringify(text)}) && r.left >= -0.5 && r.right <= innerWidth + 0.5; })()`]];
+		for (const [device, width, height] of [["phone", 390, 844], ["desktop", 1440, 1000]] as const) {
+			await capture(`p3-quota-overdue-${device}-dark-${width}x${height}`, "#job/cp-quota-due", width, height, "dark", ".job-fact-quota", undefined, fact("waiting · overdue"));
+			await capture(`p3-quota-held-${device}-dark-${width}x${height}`, "#job/cp-quota-held", width, height, "dark", ".job-fact-quota", undefined, fact("held for the operator"));
+		}
+		if (posts.length) throw new Error(`p3-quota sent ${posts.join(", ")}: the Job page only reads`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

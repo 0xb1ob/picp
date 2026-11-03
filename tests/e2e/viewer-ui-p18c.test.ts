@@ -116,7 +116,8 @@ test("P18-job-detail-ui: Job detail's hero, facts, tabs, timeline, asks, failure
 	// A queued ledger-only job reads in words, never a dash.
 	const queued = await v.open("#job/cp-queued", false, ".job-facts");
 	const fact = (tab: Tab, name: string) => tab.$(`.job-fact-${name} dd`)?.textContent;
-	assert.deepEqual(tab_facts(queued), ["Wall clock:not recorded", "Cost:not recorded", "Model:not recorded", "Head:no commits yet", "Context:none", "Routing:Not recorded", "Skills:none", "Mandate:none", "PR:none yet", "CI:not run yet", "Review:not started · 0 / 5"]);
+	assert.deepEqual(tab_facts(queued), ["Wall clock:not recorded", "Cost:not recorded", "Model:not recorded", "Head:no commits yet", "Context:none", "Routing:Not recorded", "Skills:none", "Mandate:none", "PR:none yet",
+		"Quota continuation:unsupported in production (capability none) · policy off (default), schedules nothing · no continuation", "CI:not run yet", "Review:not started · 0 / 5"]);
 	assert.equal(queued.$$("dd").filter((dd) => /^-/.test(dd.textContent ?? "")).length, 0, "no dash-only fact");
 	assert.ok(queued.$(".job-summary-row") === null, "no summary, no summary row");
 	assert.equal(queued.root.querySelectorAll("script, [style], [onclick]").length, 0, "no inline script, style or handler");
@@ -161,7 +162,7 @@ test("P18-job-detail-ui: Job detail's hero, facts, tabs, timeline, asks, failure
 	assert.deepEqual(texts([...hero.querySelector(".job-badges")!.children]), ["held", "#12 open ↗", "CI green aaaaaaa", "review 1 / 5 · pass"]);
 	assert.equal(hero.querySelector(".job-badges a")?.getAttribute("href"), "https://github.com/acme/widgets/pull/12");
 	assert.deepEqual([...held.$(".job-detail-body")!.children].map((e) => e.className), ["job-detail-main", "job-detail-side"], "the tab content and the facts rail");
-	assert.deepEqual(texts(held.$$(".job-facts dt")), ["Wall clock", "Cost", "Model", "Head", "Context", "Routing", "Skills", "Mandate", "PR", "CI", "Review"]);
+	assert.deepEqual(texts(held.$$(".job-facts dt")), ["Wall clock", "Cost", "Model", "Head", "Context", "Routing", "Skills", "Mandate", "PR", "Quota continuation", "CI", "Review"]);
 	assert.equal(held.$(".job-detail-top > .job-summary-row > p.job-summary.job-summary-clamp")?.textContent, "Short");
 	assert.ok(held.$(".job-summary-more") === null, "more shows only on a measured overflow");
 	assert.ok(held.$(".job-detail-side .job-summary") === null, "the summary stays out of the facts");

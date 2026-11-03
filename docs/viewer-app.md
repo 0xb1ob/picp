@@ -194,6 +194,16 @@ never writes, runs git, or calls a forge or model. Layout check: a disposable fi
 `./bin/cp-view --home <it> --host 127.0.0.1 --port 8766`, `#job/<id>` in a real browser at 390 and 1440 px: five
 sections in order, full SHAs wrap, no horizontal overflow.
 
+**Quota continuation (P3).** `GET /api/job/<id>` adds an optional `quota_continuation` (absent from an older server,
+which the page then omits): `supported` and `capability_version` come from the production reset adapter, which is
+`none`, so every job reads **unsupported in production** before any policy; `policy` is the job's effective setting
+(`job`, `home` or `default`; null when `state/quota-continuation.json` will not parse) and `intent` the job's latest one
+(`overdue` is a waiting intent past its reset). The Job page shows it as one wide `Quota continuation` fact: the reset in
+the browser's local zone with its UTC instant, the recorded reason, and `held for the operator` for an ambiguous
+delivery. A waiting intent offers `Cancel through the operator`, a composer draft that names `cp_parent quota cancel`;
+the dashboard itself never writes the store. The fact reuses the existing wide-fact row and adds no CSS; no 390/1440 px
+browser pass was run for it.
+
 **Ask about evidence (P1).** `GET /api/job/<id>` adds `ask_reference` (the job's identifiers, or null without a ledger `project:` label — such a job gets no `Ask about this job` and no row references, and a failed one keeps only its plain failure question) and, on Review and CI-outcome timeline rows, a `reference` derived from recorded fields only: a review with its full head and attempt, a CI row with its head and the recorded `run_id`/`run_attempt`. A row without a full head or attempt falls back to the job (`Ask about this job`); a CI row without a run id reads `CI observations for <job> @ <head>`, never "this run". A review row lists the findings of exactly that `review-<attempt>.json` (same job, attempt and head; redacted, 160 characters a line, 12 kept, the rest counted) with their original list ordinals, each with its own `Ask`. Every action is navigation to `#sessions?view=you&transcript=1&ref=<identifiers JSON>` (plus the failure question as `draft=`); it never sends.
 
 Every job response also carries `evidence_lookup: {supported, why}` (`version-view.ts` `evidenceLookup`). It is `supported` only when the running operator session's loaded commit has `src/operator-evidence.ts` (PR A's `cp_parent jobs show` evidence selector) in its own tree — one `git diff --name-only <empty tree> <commit>`, no ancestry, so any checkout depth answers, cached per repo and commit (100 entries; an unreadable answer is not cached). With no operator session running it checks the checkout the next session starts from, so offline drafts keep their reference. An old commit, a commit this checkout cannot read, a record without a commit or a failed check is `supported: false`: every reference action reads `… · unsupported` with one status line on the Timeline — no reference is offered, and nothing falls back to the latest record; the failed job keeps its plain failure question.

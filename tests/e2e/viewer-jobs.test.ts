@@ -12,6 +12,8 @@ import { pathToFileURL } from "node:url";
 import { type TestContext, test } from "node:test";
 import { isoTimestamp, LAYOUT, paths } from "../../src/contracts.ts";
 import { drainFile } from "../../src/drain.ts";
+import { PRODUCTION_QUOTA_RESET_ADAPTER } from "../../src/quota-reset-signal.ts";
+import { PRODUCTION_QUOTA_CAPABILITY } from "../../src/viewer/quota-view.ts";
 import type { BoardResponse, JobResponse, JobsResponse, JobTranscriptResponse, OverviewResponse } from "../../src/viewer/api-types.ts";
 import { routeNamed, createScratchHome, git, readRunEvents, REPO_ROOT, waitFor } from "../harness/index.ts";
 import { startViewer } from "../harness/dashboard.ts";
@@ -733,6 +735,36 @@ test("P18-jobs-ui: the served Jobs, Job detail, Board and Overview tabs show not
 	await folded.find(".board-columns");
 	assert.ok(folded.$$(".board-strip").some((el) => el.getAttribute("aria-label") === "Waiting · 0"), "an empty Waiting column folds");
 	assert.equal(folded.$$(".board-column h2").some((h) => /Waiting/.test(h.textContent ?? "")), false);
+});
+
+test("P3-quota-ui: Job detail serves quota continuation read-only — unsupported in production, overdue and held with UTC detail", { timeout: 120_000 }, async (t) => {
+	const scratch = createScratchHome();
+	t.after(() => scratch.cleanup());
+	const s = seed(scratch.path);
+	const failed = (job_id: string) => ({ job_id, project: "demo", kind: "ship", phase: "failed", dispatched_at: iso(60), failure: { class: "model_call_failed", message: "quota continuation pending", at: iso(50) } });
+	s.ledger(["cp-due", "cp-held", "cp-plain"].map((id) => ({ id, title: id, status: "in_progress", labels: ["project:demo", "kind:ship"] })));
+	s.fleet([failed("cp-due"), failed("cp-held"), failed("cp-plain")]);
+	const intent = (job_id: string, delivery: string, resets: string, reason?: string) => ({ continuation_id: `${job_id}:quota:1`, job_id, generation: 1, state: "pending", delivery,
+		capability_version: "mock-quota-reset/1", signal: { resetsAtUtc: resets, resetsAtEpochSeconds: Date.parse(resets) / 1000 }, attempts: 0, ...(reason ? { reason } : {}) });
+	const reset = iso(30).replace(/\.\d{3}Z$/, "Z");
+	s.put(join(LAYOUT.state, "quota-continuation.json"), { schema_version: 1, eligibility: {}, policy: { jobs: { "cp-due": { enabled: true, changed_at: iso(90), actor: "operator" } } },
+		intents: [intent("cp-due", "waiting", reset), intent("cp-held", "ambiguous", reset, "revive refused: cannot revive cp-held (pid_alive)")] });
+	const view = await startViewer(t, { home: scratch.path, requireTailnet: false, at: new Date(NOON).toISOString() });
+	const api = async (id: string) => (await view.get(`/api/job/${id}`).then((r) => JSON.parse(r.text) as JobResponse)).quota_continuation;
+	assert.equal(PRODUCTION_QUOTA_CAPABILITY, PRODUCTION_QUOTA_RESET_ADAPTER.capabilityVersion, "the viewer's inlined capability is production's");
+	assert.deepEqual(await api("cp-plain"), { supported: false, capability_version: "none", policy: { enabled: false, source: "default" }, intent: null });
+	const due = await api("cp-due");
+	assert.deepEqual([due?.supported, due?.policy, due?.intent?.overdue, due?.intent?.resets_at], [false, { enabled: true, source: "job" }, true, reset]);
+
+	const detail = await view.open("#job/cp-due");
+	const fact = (await detail.find(".job-fact-quota dd")).textContent ?? "";
+	assert.match(fact, /^unsupported in production \(capability none\) · policy on \(job\), schedules nothing/);
+	assert.match(fact, new RegExp(`cp-due:quota:1 waiting · overdue, resets .+\\(${reset}\\)`), "local reset time with its UTC detail");
+	assert.match(detail.$(".job-fact-quota a")?.getAttribute("href") ?? "", /Cancel%20the%20quota%20continuation%20for%20cp-due|Cancel\+the\+quota/, "cancel goes through the operator");
+	const held = await view.open("#job/cp-held");
+	const heldFact = (await held.find(".job-fact-quota dd")).textContent ?? "";
+	assert.match(heldFact, /held for the operator, resets .* — revive refused: cannot revive cp-held \(pid_alive\)/);
+	assert.equal(held.$(".job-fact-quota a"), null, "a held continuation offers no cancel");
 });
 
 test("P18-not-found: a missing job or worker is a 404 page with a way back; only observed live workers are offered", { timeout: 120_000 }, async (t) => {

@@ -314,6 +314,7 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 		// Outside the queue: a drain waits minutes, and sends must still reach the parent meanwhile.
 		drain: (args) => bridge.drain(typeof args[0] === "number" ? args[0] : undefined, (args[1] ?? undefined) as DrainCause | undefined),
 		drainCancel: () => bridge.drainCancel(),
+		quota: (args) => bridge.quota(String(args[0] ?? "")),
 		restartGate: () => gate(),
 	};
 	const queued: Record<string, (args: unknown[]) => Promise<unknown>> = {

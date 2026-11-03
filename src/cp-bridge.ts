@@ -22,6 +22,7 @@ import { journalBridgeEvent, runAutoControl, trackAssistant } from "./parent-aut
 import { PARENT_COMPACT_TIMEOUT_MS } from "./parent-compact-hold.ts";
 import { type ModelCallError, readModelCallError } from "./failures.ts";
 import { PARENT_CONTROL_BUSY, PARENT_UNSETTLED, parentDiagnostic, type ParentDiagnostic } from "./parent-diagnostics.ts";
+export { QuotaCommandSchema, quotaCommandArgs } from "./quota-continuation-command.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S, type DrainCause, drainArgs } from "./drain.ts";
 import { durableIdsFromMessage, isLandedContinuation, KILLED_UNREPORTED_WAKEUP_PREFIX } from "./wakeup-outbox.ts";
 import { isRelayOnlyNotice, relayOnlyMessage } from "./wake-rules.ts";
@@ -431,6 +432,12 @@ export class CpBridge {
 	/** `/cp-drain cancel` (cp-update's drain timeout): withdraws a draining or timed-out drain, or a drained record an earlier parent left; never the live parent's own drained one. */
 	drainCancel(): Promise<ParentDiagnostic> {
 		return this.drain("cancel");
+	}
+	/** `/cp-quota <args>` in the live parent, beside a busy turn like a drain; an older parent refuses it. */
+	quota(args: string): Promise<ParentDiagnostic> {
+		const proc = this.#proc;
+		if (!proc?.alive || !this.#ready || this.#stopping) throw new CpBridgeError("parent is not running; call cp_parent start");
+		return parentDiagnostic(proc, "quota", this.#options?.requestTimeoutMs, args);
 	}
 	async compact(instructions?: string): Promise<{ tokensBefore?: number; estimatedTokensAfter?: number }> {
 		return this.#compact(this.#settledProc(), instructions);

@@ -11,10 +11,10 @@ export const PARENT_UNSETTLED = "parent must be settled with no pending send";
 export const PARENT_CONTROL_BUSY = "refused: parent control (compaction, rotation or a diagnostic) is in progress; no drain starts until it settles";
 
 /** Invoke only registered diagnostic commands: an unknown slash command would become an LLM prompt. */
-export async function parentDiagnostic(proc: WorkerProcess, action: "doctor" | "version" | "drain", timeoutMs = 120_000, args = ""): Promise<ParentDiagnostic> {
-	const command = action === "doctor" ? "doctor" : action === "drain" ? "cp-drain" : "cp-version";
+export async function parentDiagnostic(proc: WorkerProcess, action: "doctor" | "version" | "drain" | "quota", timeoutMs = 120_000, args = ""): Promise<ParentDiagnostic> {
+	const command = action === "doctor" ? "doctor" : action === "drain" ? "cp-drain" : action === "quota" ? "cp-quota" : "cp-version";
 	// "pi-command-post " is the pre-rename /cp-version line, accepted while a restart leaves versions mixed.
-	const prefixes = action === "doctor" ? ["DOCTOR "] : action === "drain" ? ["DRAIN: "] : ["picp ", "pi-command-post "];
+	const prefixes = action === "doctor" ? ["DOCTOR "] : action === "drain" ? ["DRAIN: "] : action === "quota" ? ["QUOTA: "] : ["picp ", "pi-command-post "];
 	const response = await proc.request("get_commands", {}, timeoutMs);
 	if (response.success === false) throw new Error(`parent diagnostics unavailable: ${response.error ?? "get_commands failed"}`);
 	const commands = (response.data as { commands?: Array<{ name: string; source: string }> } | undefined)?.commands;
