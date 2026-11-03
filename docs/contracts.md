@@ -5023,8 +5023,10 @@ derived from the journal only (`releasesHold`): an `answered` record in the hold
 cannot be reopened: `cp_escalate action:replace escalation_id:<es-…>` on a closed, unreleased hold writes one open
 linked record (`replaces_escalation_id`, approve/deny, the same hold, evidence and mandate); a retry returns that
 record, a closed replacement is replaced in turn, and cp_decide must name the replacement's own id; a producer re-raise of
-the same source, kind and gate attempt joins the unreleased chain the same way. An escalated
-pipeline with no hold record refuses its ship until `cp_pipeline advance` records it. A hold-write failure in
+the same source, kind and gate attempt joins the unreleased chain the same way. An escalated policy
+pipeline (its latest gate verdict's `cause`) with no hold record refuses its ship until `cp_pipeline advance` records
+it, and an unreadable pipeline file refuses ships in its research job's project (every project when that is unknown),
+naming the file. A hold-write failure in
 `cp_gate` never discards the verdict; `gate_decided` carries `authority_hold_error`. Release does not authorize: the
 gate override and checkpoint rules still apply.
 

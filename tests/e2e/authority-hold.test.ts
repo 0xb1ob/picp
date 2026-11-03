@@ -8,18 +8,15 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
-import { authorityHold } from "../../src/authority-hold.ts";
 import { CommandPost } from "../../src/command-post.ts";
-import { type GateVerdict, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
-import { EscalationStore, raiseForGate } from "../../src/escalation.ts";
-import { MandateStore } from "../../src/mandate.ts";
+import { isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { EscalationStore } from "../../src/escalation.ts";
 import { frameBatch } from "../../src/parent-outbox.ts";
 import type { Authorizer } from "../../src/pipeline.ts";
 import { ReviewRuns } from "../../src/review-runs.ts";
 import { ScheduleRunStore } from "../../src/schedule-runs.ts";
 import { policyFromLegacy } from "../../src/viewer/schedule-policy.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
-import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import {
 	COMMAND_POST_EXTENSION,
 	createAgentDir,
@@ -199,8 +196,13 @@ test("H1-H3, H5-H8, H15: a withdrawn, torn-down, denied policy hold refuses cove
 	assert.equal(b.post.fleet.get(policy.ship_id), undefined, "H1: no worker, no lease");
 	// H2: a fresh ship linked to nothing but covered by the held mandate; H3: another project's grant dispatches.
 	const fresh = await b.ship("fresh covered ship");
-	await b.refused(fresh, new RegExp(`authority hold ${es}.*cp_escalate action replace escalation_id ${es}`));
-	await b.accepted(await b.ship("unrelated ship", "other"));
+	const otherShip = await b.ship("unrelated ship", "other");
+	const admitted = await parent("Dispatch both.", [call("h2", "cp_dispatch", { job_id: fresh, task: "Bump x.", fetch: false })],
+		[call("h3", "cp_dispatch", { job_id: otherShip, task: "Bump x.", fetch: false })]);
+	admitted.failed("h2", new RegExp(`authority hold ${es}.*cp_escalate action replace escalation_id ${es}`));
+	admitted.ok("h3", /accepted/);
+	assert.equal(existsSync(join(b.home, paths.briefFile(fresh))), false, "H2: no brief, so no lease or spawn");
+	assert.ok(existsSync(join(b.home, paths.briefFile(otherShip))), "H3: the unrelated project's ship was briefed");
 	assert.equal(b.post.mandates.get(unrelated.id)?.status, "active");
 
 	// H7: replace is idempotent, links and preserves the hold; the withdrawn original stays unanswerable.
@@ -256,35 +258,35 @@ test("H4: the operator's quote naming the live policy hold releases it, and the 
 	await b.post.tearDown(policy.ship_id, { force: true });
 });
 
-test("H9-H10, H6: a schedule-run ship the hold links refuses before the schedule return; an uncovered run member keeps its run checks", { timeout: 300_000 }, async (t) => {
-	const b = await dispatchS29(t);
-	const mandates = new MandateStore(b.home);
-	const research = await b.ledger.create({ title: "research: nightly", project: "demo", delivery: "local", kind: "research" });
-	const linked = await b.ledger.create({ title: "linked member", project: "demo", delivery: "local", kind: "ship" });
-	const other = await b.ledger.create({ title: "other member", project: "demo", delivery: "local", kind: "ship" });
-	await b.ledger.addDep(linked.id, research.id);
-	mandates.issue({ projects: ["demo"], objective: "the linked ship only", ...GRANT, job_ids: [linked.id] });
-	const decided: GateVerdict = { schema_version: SCHEMA_VERSION, job_id: research.id, attempt: 1, verdict: "escalate", cause: "policy",
-		reasons: ["the plan skips a rollback step"], decided_at: isoTimestamp() } as GateVerdict;
-	const es = (await raiseForGate(new EscalationStore({ home: b.home }), decided, authorityHold(b.home, mandates, research.id, { attempt: 1 })))!.id;
-	await b.ledger.close(research.id, "planner closed");
+test("H9-H10, H6, H16: a schedule-run ship a real policy gate holds refuses before the schedule return; an uncovered run member keeps its run checks; an unreadable pipeline file refuses its project", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const b = await pipelineBench(t, []);
+	const policy = await b.policyEscalated("nightly");
+	const es = policy.held.id;
+	const other = await b.ship("other member");
+	await b.post.tearDown(policy.research_id, { force: true });
+	await b.post.ledger().close(policy.research_id, "planner closed");
 	const runs = new ScheduleRunStore({ home: b.home });
 	const at = isoTimestamp(new Date(Date.now() - 600_000));
-	const policy = policyFromLegacy({ id: "sch-123456", name: "Nightly work", project: "demo", mandate_id: "md-123456", enabled: true, created_at: at, trigger: { type: "manual" }, job: { title: "Nightly work", kind: "ship", delivery: "local" } }, {
+	const schedule = policyFromLegacy({ id: "sch-123456", name: "Nightly work", project: "demo", mandate_id: "md-123456", enabled: true, created_at: at, trigger: { type: "manual" }, job: { title: "Nightly work", kind: "ship", delivery: "local" } }, {
 		seed_mandate_id: "md-123456", channel: "operator_chat", objective: "Nightly work", expiry_hours: 1, spend_usd: 10, spend_tokens: 1000, job_cap: 3,
 		allowed_actions: ["implement", "review", "repair"], ask_on: ["merge", "risk:high"], approval: { operator_quote: "Run nightly work", decided_by: "operator-quote", approved_at: at },
 	});
-	await runs.savePolicyRevision(policy);
-	await runs.createRun({ schema_version: 1, id: "run-20261103030655-53ff68", schedule_id: policy.schedule_id, policy_revision: 1, policy, trigger: { via: "dashboard", at, request_id: "sc-20261103030653-11806a8e" }, anchor_job_id: other.id,
-		members: [{ job_id: other.id, role: null, admitted_at: at }, { job_id: linked.id, role: null, admitted_at: at }], phase: "running", outcome: null, started_at: at,
+	await runs.savePolicyRevision(schedule);
+	await runs.createRun({ schema_version: 1, id: "run-20261103030655-53ff68", schedule_id: schedule.schedule_id, policy_revision: 1, policy: schedule, trigger: { via: "dashboard", at, request_id: "sc-20261103030653-11806a8e" }, anchor_job_id: other,
+		members: [{ job_id: other, role: null, admitted_at: at }, { job_id: policy.ship_id, role: null, admitted_at: at }], phase: "running", outcome: null, started_at: at,
 		deadline_at: isoTimestamp(new Date(Date.now() + 3_600_000)), risk_preapproved: [], authority_log: [], cap_notices: [] });
-	const model = b.provider.addScript("worker", [{ kind: "text", text: "received" }]);
-	const dispatch = (jobId: string) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_dispatch", args: { job_id: jobId, task: "Bump x.", model } }] });
-	const replan = { kind: "tool_calls" as const, calls: [{ name: "cp_decide", args: { target: es, decision: "replan", basis: { operator_quote: `Replan ${es}.` } } }] };
-	const ends = await b.run([dispatch(linked.id), replan, dispatch(linked.id), dispatch(other.id)], {}, `Replan ${es}.`);
-	const said = (index: number) => JSON.stringify(ends[index]?.result);
-	assert.deepEqual(ends.map((end) => [end.toolName, end.isError === true]), [["cp_dispatch", true], ["cp_decide", false], ["cp_dispatch", true], ["cp_dispatch", false]], JSON.stringify(ends));
-	for (const index of [0, 2]) assert.match(said(index), new RegExp(`${linked.id}: refused before lease — authority hold ${es}`), "H9 and H6 replan: still held");
-	assert.equal(existsSync(join(b.home, paths.briefFile(linked.id))), false, "H9: no brief, so no lease or spawn");
-	assert.ok(readFileSync(join(b.home, paths.briefFile(other.id)), "utf8").includes("> Started via dashboard Run now"), "H10: the run's own checks still ran");
+	const dispatch = (id: string, jobId: string) => call(id, "cp_dispatch", { job_id: jobId, task: "Bump x.", fetch: false });
+	const parent = parents(b.home, b.provider, b.agentDir, "a1-h9");
+	const run = await parent(`Replan ${es}.`, [dispatch("linked", policy.ship_id)], [quote("replan", es, "replan", `Replan ${es}.`)],
+		[dispatch("again", policy.ship_id)], [dispatch("other", other)]);
+	for (const id of ["linked", "again"]) run.failed(id, new RegExp(`${policy.ship_id}: refused before lease — authority hold ${es}`));
+	run.ok("replan");
+	run.ok("other", /accepted/);
+	assert.equal(existsSync(join(b.home, paths.briefFile(policy.ship_id))), false, "H9: no brief, so no lease or spawn");
+	assert.ok(readFileSync(join(b.home, paths.briefFile(other)), "utf8").includes("> Started via dashboard Run now"), "H10: the run's own checks still ran");
+
+	// H16: a corrupt pipeline file may hide a hold's links, so its project refuses ships naming the file; others dispatch.
+	writeFileSync(join(b.home, paths.pipelineFile(policy.research_id)), "{ not json");
+	await b.refused(await b.ship("after corruption"), new RegExp(`pipeline file ${paths.pipelineFile(policy.research_id)} is unreadable`));
+	await b.accepted(await b.ship("other project", "other"));
 });

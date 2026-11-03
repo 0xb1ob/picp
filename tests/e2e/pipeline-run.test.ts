@@ -32,6 +32,8 @@ import { type Authorizer, formatAdvance, type AdvanceResult, composeImplementati
 import { registerReviewTools } from "../../extensions/command-post/tools-review.ts";
 import {
 	routeNamed,
+	COMMAND_POST_EXTENSION,
+	startPiChild,
 	createAgentDir,
 	createScratchHome,
 	createScratchRepo,
@@ -58,6 +60,7 @@ interface Bench {
 	named: string;
 	post: CommandPost;
 	provider: MockProvider;
+	agentDir: ReturnType<typeof createAgentDir>;
 	clone: string;
 	approvals: string[];
 	/** What the authorizer will answer next. */
@@ -132,6 +135,7 @@ async function bench(t: { after(fn: () => void | Promise<void>): void }, gateSte
 		named,
 		post: undefined as unknown as CommandPost,
 		provider,
+		agentDir,
 		clone: "",
 		approvals,
 		answer: { approved: true },
@@ -986,7 +990,19 @@ test(
 		// A1: reanchor is a replan and never releases the ship's authority hold; only the operator's answer does.
 		const [held] = b.post.escalations.list({ kind: "conflicting_acceptance" });
 		assert.equal(held?.authority_hold?.source_job_id, oldResearchId);
-		await b.post.escalations.answer(held!.id, { answer: "override", by: "operator-quote" });
+		rmSync(join(b.home, LAYOUT.wakeupsFile), { force: true });
+		const decide = b.provider.addScript("reanchor-decide", [{ kind: "tool_calls", calls: [{ name: "cp_decide", args: { target: held!.id, decision: "override", basis: { operator_quote: `Override ${held!.id}.` } } }] }, { kind: "text", text: "done" }]);
+		b.agentDir.writeModels(b.provider);
+		const parent = startPiChild({ cwd: b.home, model: decide, env: { ...b.agentDir.env, CP_HOME: b.home }, extensions: [COMMAND_POST_EXTENSION] });
+		try {
+			await parent.prompt(`Override ${held!.id}.`);
+			await parent.waitForSettled(90_000);
+			const end = parent.eventsOfType("tool_execution_end")[0];
+			assert.notEqual(end?.isError ?? true, true, JSON.stringify(end));
+		} finally {
+			await parent.close();
+		}
+		assert.equal(new EscalationStore({ home: b.home }).get(held!.id)?.answered_by, "operator-quote");
 
 		// The replacement research job: a real job, dep-linked like any other.
 		const ledger = b.post.ledger();
