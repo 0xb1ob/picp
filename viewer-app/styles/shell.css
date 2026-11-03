@@ -99,6 +99,17 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
  .shell-live { font-size: 11px; gap: 4px; }
  .shell-nav-icon { padding: 4px 10px; }
 }
+/* Chat's rail chrome (design `.cvh`, `.inav`): the desktop column and the phone drawer share it. Labels stay as names. */
+.shell-rail-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.shell-rail-head > .shell-brand { flex: 1; min-width: 0; padding: 0 8px; }
+.shell-rail-search { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; padding: 0; background: none; border: 0; border-radius: 8px; color: var(--dim); cursor: pointer; }
+.shell-rail-search:hover { background: var(--toggle); color: var(--text); }
+.shell-sidebar-nav.shell-icon-nav { display: flex; flex-direction: row; gap: 4px; padding: 8px 0 0; border-top: 1px solid var(--divider); }
+.shell-sidebar-nav.shell-icon-nav > a { display: flex; align-items: center; justify-content: center; width: 44px; min-height: 37px; padding: 0; border-radius: 8px; color: var(--dim); text-decoration: none; }
+.shell-sidebar-nav.shell-icon-nav > a[aria-current=page] { background: var(--nav-selected); color: var(--text); }
+.shell-icon-nav .shell-nav-icon { padding: 0; }
+.shell-sidebar-nav.shell-icon-nav .shell-count { top: -6px; left: auto; right: -8px; }
+.shell-icon-nav .shell-nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (min-width: 900px) {
  .shell { flex-direction: row; }
  .shell-header, .shell-tabs { display: none; }

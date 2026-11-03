@@ -18,7 +18,7 @@ import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
-	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer"];
+	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -79,14 +79,14 @@ const asked = (id: string, question: string) => ({ id, project: "picp", question
 const askCard = (ask: ReturnType<typeof asked>, at: string): SessionEntry => ({ ...say(`c-${ask.id}`, at, "Operator → you", ask.question), kind: "ask", ask_id: ask.id,
 	ask: { id: ask.id, question: ask.question, options: ask.options, recommendation: ask.recommendation, state: "open", answer: null, answered_at: null, reason: null } });
 if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context" || args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces"
-	|| args.stage === "m3-fidelity-composer") {
+	|| args.stage === "m3-fidelity-composer" || args.stage === "full-match-shell") {
 	const ask = asked("ask-pr4a", "PR #321 is green on its pushed head. Merge it, or hold it for another review?");
 	sessions.entries = [...entries, askCard(ask, "2026-10-15T08:04:40Z")];
 	sessions.open_asks = [ask];
 	sessions.operator_context = { tokens: 61_000, window: 200_000, percent: 30.5, level: "ok", reason: null, model: "fixture-model", last_compact_at: null, thinking: null } as SessionsResponse["operator_context"];
 }
 /** M3 shell: committed captures name picp only, so the table's second project reads picp too. */
-const picpOnly = args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces" || args.stage === "m3-fidelity-composer";
+const picpOnly = args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces" || args.stage === "m3-fidelity-composer" || args.stage === "full-match-shell";
 if (picpOnly) sessions.entries = sessions.entries.map(e => ({ ...e, text: e.text.replaceAll("demo-app", "picp") }));
 /** M3 fidelity B: an own message before the ask, so one capture holds a bubble, a reply, the ask and both sends. */
 if (args.stage === "m3-fidelity-transcript") sessions.entries.splice(-1, 0, say("e7", "2026-10-15T08:04:30Z", "Operator", "Hold the merge until I have read the review."));
@@ -457,7 +457,7 @@ try {
 	if (stage === "m3-context") {
 		// Real clicks open the context (inspector from 900 px, sheet below) and the phone's Conversations drawer.
 		const asked = `!!document.querySelector(".workspace-context .workspace-context-ask")`;
-		const context: Step = [`document.querySelector(".workspace-context-open").click()`, asked];
+		const context: Step = [`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`, asked];
 		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `!!document.querySelector(".workspace-sessions[open] .session-choice")`];
 		const fits: Step = ["true", `[...document.querySelectorAll(".workspace-close, .workspace-context-open, .workspace-sessions-open, .workspace-context button, .workspace-context a, .workspace-sessions .session-choice")]
 			.filter(e => e.getClientRects().length).every(e => { const r = e.getBoundingClientRect(); return r.left >= -0.5 && r.right <= innerWidth + 0.5; })`];
@@ -520,7 +520,7 @@ try {
 	}
 	if (stage === "m3-shell") {
 		// Combine: [shell rail, chat column, conversation] widths; Context open at 1440 leaves 1440 - 261 - 340.
-		const context: Step = [`document.querySelector(".workspace-context-open").click()`, `!!document.querySelector("aside.workspace-context .workspace-context-ask")`];
+		const context: Step = [`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`, `!!document.querySelector("aside.workspace-context .workspace-context-ask")`];
 		const family = `(() => { const s = document.querySelector(".stats select"); return !!s && getComputedStyle(s).fontFamily === getComputedStyle(document.body).fontFamily; })()`;
 		const shots6: [string, string, string, number, number, Step[], string][] = [
 			["desktop-dark-1440x1000", transcript, loaded, 1440, 1000, [context], "0,261,839"], ["900-dark-900x1000", transcript, loaded, 900, 1000, [], "0,261,639"],
@@ -588,7 +588,7 @@ try {
 		// Design frames 1/4/5/6/7/10: the box in the transcript column with `.cb` padding, a 20 px avatar and text 28 px in,
 		// the raised padding-6 menu from the box's edge, the ask fill. Negative control: a surface/padding-4 menu fails.
 		const slash: Step = [`document.querySelector(".operator-composer-slash").click()`, `document.querySelectorAll("#operator-composer-command-menu button").length === 5`];
-		const context: Step = [`document.querySelector(".workspace-context-open").click()`, `!!document.querySelector(".workspace-context .workspace-context-ask")`];
+		const context: Step = [`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`, `!!document.querySelector(".workspace-context .workspace-context-ask")`];
 		const reply: Step = [`(() => { const t = document.querySelector(".session-transcript"), m = [...document.querySelectorAll(".session-message.session-other")].at(-1);
 			t.scrollTop += m.getBoundingClientRect().top - t.getBoundingClientRect().top - 120; })()`, "true"];
 		const look = `(() => { const q = s => document.querySelector(s), r = s => q(s)?.getBoundingClientRect(), cs = s => q(s) && getComputedStyle(q(s)), n = Math.round;
@@ -611,6 +611,42 @@ try {
 			if (off.length) throw new Error(`m3-fidelity-composer-${name}: ${off.join("; ")}`);
 		}
 		if (posts.length) throw new Error(`m3-fidelity-composer sent ${posts.join(", ")}: the menu and context only read`);
+	}
+	if (stage === "full-match-shell") {
+		// Full match S1 (design frames 1/6/11): measured boxes on each capture. Negative control: the closed-until-asked
+		// inspector fails `inspector` at 1440 and a 48 px phone bar or 14 px composer sides fail `phone`.
+		const look = `(() => { const q = s => document.querySelector(s), h = s => Math.round(q(s)?.getBoundingClientRect().height ?? 0), cs = s => q(s) && getComputedStyle(q(s));
+			const shown = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
+			return { inspector: !!q("aside.workspace-context"), sheet: !!q("dialog[open]"), heading: h(".session-heading"), bar: h(".session-bar"),
+				rail: shown(".session-sidebar .shell-icon-nav > a").map(a => a.textContent).join(), drawer: shown(".workspace-sessions[open] .shell-icon-nav > a").map(a => a.textContent).join(),
+				sides: innerWidth < 900 ? cs(".operator-composer").paddingLeft + " " + cs(".session-entries").paddingLeft : null,
+				field: innerWidth < 900 ? q(".operator-composer textarea").tagName + " " + cs(".operator-composer textarea").maxHeight + " " + cs(".operator-composer textarea").borderTopLeftRadius : null,
+				jobs: shown(".session-heading .workspace-jobs-open kbd").length ? q(".workspace-jobs-open").textContent + " " + q(".workspace-jobs-open").title : null,
+				drawer_width: Math.round(q(".workspace-sessions[open]")?.getBoundingClientRect().width ?? 0),
+				small: shown(".session-filter-menu > summary, .workspace-jobs-open, .workspace-context-open, .session-bar-icon, .workspace-sessions .shell-icon-nav > a, .workspace-sessions .shell-rail-search")
+					.filter(e => { const r = e.getBoundingClientRect(); return (innerWidth < 900 && r.height < 44) || r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className).join() }; })()`;
+		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `!!document.querySelector(".workspace-sessions[open] .shell-icon-nav")`];
+		const filter: Step = [`document.querySelector(".session-filter-menu > summary").click()`, `!!document.querySelector(".session-filter-menu[open] select")`];
+		const header: Step = [`(() => { document.querySelector(".workspace-context-open").click(); document.querySelector(".workspace-jobs-open").focus(); })()`,
+			`!document.querySelector("aside.workspace-context") && document.activeElement === document.querySelector(".workspace-jobs-open")`];
+		// The committed six are desktop, phone, 899, 900, drawer and header-jobs; 1279 and filter stay in the artifacts.
+		const shotsS: [string, number, number, Step[], object][] = [
+			["desktop", 1440, 1000, [], { inspector: true, sheet: false, heading: 48, rail: "Chat,Jobs,More", jobs: "Jobs⌘J Jobs (Ctrl/⌘ J)", small: "" }],
+			["header-jobs", 1440, 1000, [header], { inspector: false, sheet: false, heading: 48, jobs: "Jobs⌘J Jobs (Ctrl/⌘ J)", small: "" }],
+			["1279", 1279, 1000, [], { inspector: true, sheet: false, heading: 48, small: "" }],
+			["900", 900, 1000, [], { inspector: true, sheet: false, heading: 48, small: "" }],
+			["phone", 390, 844, [], { inspector: false, sheet: false, heading: 45, bar: 53, sides: "10px 14px", field: "TEXTAREA 122px 22px", small: "" }],
+			["899", 899, 1000, [], { inspector: false, sheet: false, heading: 45, bar: 53, small: "" }],
+			["drawer", 390, 844, [drawer], { drawer: "Chat,Jobs,More", drawer_width: 317, small: "" }],
+			["filter", 390, 844, [filter], { sheet: false, small: "" }],
+		];
+		for (const [name, width, height, steps, want] of shotsS) {
+			await capture(`full-match-shell-${name}`, transcript, width, height, "dark", loaded, "bottom", steps);
+			const got = await evaluate(look);
+			const off = Object.entries(want).filter(([k, v]) => got[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k])} (want ${JSON.stringify(v)})`);
+			if (off.length) throw new Error(`full-match-shell-${name}: ${off.join("; ")}`);
+		}
+		if (posts.length) throw new Error(`full-match-shell sent ${posts.join(", ")}: the shell only reads`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

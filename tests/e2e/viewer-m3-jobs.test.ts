@@ -77,10 +77,12 @@ test("M3-jobs-drawer: chat Cmd+J opens the Jobs drawer; segments and the M1 filt
 	field.focus();
 	const trigger = await tab.find(".session-filter > .workspace-jobs-open");
 	assert.deepEqual([trigger.textContent, trigger.getAttribute("aria-expanded"), tab.$(DRAWER), reads(tab)], ["Jobs⌘J", "false", null, 0], "closed: one trigger, nothing read");
+	assert.deepEqual([trigger.closest("header.session-heading") !== null, trigger.getAttribute("title")], [true, "Jobs (Ctrl/⌘ J)"], "Full match S1: Jobs ⌘J sits in the compact header");
 
 	for (const modifier of ["metaKey", "ctrlKey"] as const) {
 		assert.equal(chord(tab, "j", modifier), true, `${modifier}+J is the chat's`);
 		await tab.find(`${DRAWER}[open] .workspace-jobs-row`);
+		assert.equal(trigger.getAttribute("aria-expanded"), "true", `${modifier}+J opens the drawer from the header's opener`);
 		assert.deepEqual(headings(tab), ["In flight · 2", "With the team · 1", "Done today · 1"], "every group, newest done first");
 		assert.equal(tab.$$(DRAWER).length, 1);
 		assert.equal(chord(tab, "J", modifier), true, "the same chord closes it");
@@ -110,6 +112,8 @@ test("M3-jobs-drawer: chat Cmd+J opens the Jobs drawer; segments and the M1 filt
 	assert.equal(escape(tab), true);
 	await until(() => tab.$(DRAWER), (el) => el === null, "Escape to close the drawer");
 	assert.deepEqual([focused() === field, field.value, tab.window.location.hash], [true, "KEEP-DRAFT", `${CHAT}&project=atlas`], "focus, draft and filter kept");
+	assert.equal(escape(tab), true, "Full match S1: Escape next closes the inspector the chat opened by default");
+	await until(() => tab.$(".workspace-context"), (el) => el === null, "Escape to close the inspector");
 	assert.equal(escape(tab), false, "with nothing open Escape is not the chat's");
 	tab.click(trigger);
 	(await tab.find(`${DRAWER}[open]`)).dispatchEvent(new tab.window.Event("cancel", { cancelable: true }));

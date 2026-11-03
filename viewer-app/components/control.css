@@ -127,8 +127,9 @@
 .overview-services { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0 0 16px; }
 .overview-services-line { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 899px) {
- /* One row: attach, field, ⋯, send. The file name lives in the top bar's ⋯ sheet, so Options is desktop-only. */
- .operator-composer { padding-left: 14px; padding-right: 14px; }
+ /* One row: attach, field, ⋯, send. The file name lives in the top bar's ⋯ sheet, so Options is desktop-only.
+    The composer's 10 px sides (design frame 6) sit inside the transcript's 14 px. */
+ .operator-composer { padding-left: 10px; padding-right: 10px; }
  .operator-composer-field { order: 1; }
  .operator-composer-more, .operator-composer-send { order: 2; }
  .operator-composer-options { display: none; }

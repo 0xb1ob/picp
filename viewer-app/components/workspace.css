@@ -36,8 +36,10 @@
 .job-detail-embedded .job-detail-title { order: 2; margin: 0; font-size: 18px; font-weight: 600; line-height: 24px; overflow-wrap: anywhere; }
 
 /* Slice 3: the context (a phone bottom sheet, a 340 px inspector from 900 px) and the phone's Conversations drawer. */
-.workspace-context-open { display: flex; align-items: center; gap: 6px; flex-shrink: 0; min-height: 44px; padding: 0 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
-.workspace-context-open[aria-expanded=true] { background: var(--toggle); }
+/* The inspector's icon toggle (design `.cvh` 32 px icons in a 44 px target); an open ask adds its count. */
+.workspace-context-open { position: relative; display: flex; align-items: center; justify-content: center; gap: 4px; flex-shrink: 0; min-width: 44px; min-height: 44px; padding: 0 6px; background: none; color: var(--dim); border: 0; border-radius: 9px; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.workspace-context-open:hover { color: var(--text); }
+.workspace-context-open[aria-expanded=true] { background: var(--toggle); color: var(--text); }
 .workspace-badge { min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--toggle); color: var(--text); font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
 .workspace-badge-ask { background: var(--amber); color: var(--background); }
 .workspace-sessions-open { padding: 0; background: none; border: 0; cursor: pointer; }
@@ -77,6 +79,11 @@
 .workspace-sessions-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 0 16px; }
 .workspace-sessions-list h2 { margin: 0; padding: 14px 18px 6px; font-size: 11px; font-weight: 500; color: var(--dim); }
 .workspace-sessions-list p { margin: 0; padding: 10px 18px; font-size: 12px; color: var(--muted); }
+/* The drawer wears the rail's chrome: brand and search on top, the icon navigation in 44 px targets at its foot. */
+.workspace-sessions-head > .shell-rail-head { flex: 1; }
+.workspace-sessions-head .shell-rail-head > .shell-rail-search { width: 44px; height: 44px; }
+.workspace-sessions > .shell-sidebar-nav.shell-icon-nav { flex-shrink: 0; padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+.workspace-sessions > .shell-sidebar-nav.shell-icon-nav > a { min-height: 44px; }
 
 @media (min-width: 900px) {
  .workspace-jobs-open > kbd { display: inline; }

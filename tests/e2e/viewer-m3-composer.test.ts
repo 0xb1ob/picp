@@ -164,8 +164,9 @@ test("M3-composer-menu: the touch `/` menu runs commands and attaches a selectio
 	assert.match(raised, /max-height:45dvh;.*padding:6px;background:var\(--raised\);border:1px solid var\(--border\);border-radius:12px;/, "raised, padding 6");
 	assert.match(raised, /left:14px;right:14px;.*;left:max\(28px,calc\(\(100% - 664px\) ?\/ ?2\)\);right:auto;width:min\(534px,calc\(100% - 56px\)\)$/,
 		"phone: 14 px from each side; desktop: the box's left edge, at most 534 px");
-	assert.match(rule(".operator-composer"), /padding-left:14px;padding-right:14px;padding:12px max\(28px,calc\(\(100% - 664px\) ?\/ ?2\)\) 16px$/,
-		"14 px phone sides; from 900 px the 720 px column's 28 px sides");
+	// Full match S1 (design frame 6): the phone composer's sides are 10 px, inside the transcript's 14 px.
+	assert.match(rule(".operator-composer"), /padding-left:10px;padding-right:10px;padding:12px max\(28px,calc\(\(100% - 664px\) ?\/ ?2\)\) 16px$/,
+		"10 px phone sides; from 900 px the 720 px column's 28 px sides");
 	assert.match(rule(".operator-composer-box"), /gap:12px;padding:14px 12px 10px 16px;background:var\(--surface\)/, "the design box's 14/12/10/16 padding");
 });
 
@@ -223,7 +224,7 @@ test("M3-composer-viewport: crossing 900 px with the context open closes it, so 
 	await tab.find(".operator-composer textarea");
 	await settle();
 	const toggle = await tab.find(".workspace-context-open");
-	tab.click(toggle);
+	// Full match S1: from 900 px the chat opens its inspector by default, so no click is needed here.
 	await tab.find(".sessions > aside.workspace-context");
 	await cross(false);
 	await until(() => n(tab, ".workspace-context"), (c) => c === 0, "crossing 900 px closes the inspector");
