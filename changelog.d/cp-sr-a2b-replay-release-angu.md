@@ -1,0 +1,1 @@
+- Self-review A2b: `cp_pipeline advance` replaying an unchanged policy gate attempt whose authority hold was released through a `cp_escalate action:replace` replacement no longer re-raises a new hold; a plan changed after the answer still needs `cp_gate`. `cp_decide` on a hold record now refuses an answer that is not one of its options, naming the valid ids, and records nothing.

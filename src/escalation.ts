@@ -246,6 +246,11 @@ export class EscalationStore {
 			throw new EscalationError(`${id}: choose proceed, drop or reopen`);
 		}
 		const planRevise = existing.kind === "plan_approval" && /^revise\b/i.test(options.answer.trim());
+		const choice = options.answer.trim();
+		// A hold releases only on an option id (`releasesHold`); an off-menu answer would close it releasing nothing.
+		if (!retry && existing.authority_hold && !planRevise && !existing.options.some((option) => option.id === choice || option.label === choice)) {
+			throw new EscalationError(`${id}: "${choice}" is not one of its options; answer with ${existing.options.map((option) => option.id).join(" or ")} naming ${id}`);
+		}
 		const decidesCheckpoint = Boolean(existing.checkpoint_job_id) && !planRevise;
 		let target: CheckpointStore | undefined;
 		if (decidesCheckpoint && !retry) {
@@ -555,6 +560,16 @@ export function gateOverride(store: EscalationStore | undefined, verdict: GateVe
 		item.evidence_paths.includes(paths.gateFile(verdict.job_id, verdict.attempt)) &&
 		item.answered_at !== undefined && item.answered_at >= verdict.decided_at &&
 		(!modifiedAt || modifiedAt <= item.answered_at));
+}
+
+/** A replayed policy verdict whose hold chain `releasesHold` released after the verdict and the artifact's change. */
+export function holdReleasedFor(items: readonly Escalation[], verdict: GateVerdict, modifiedAt?: string): Escalation | undefined {
+	const kind = kindForGate(verdict);
+	if (!kind || verdict.cause !== "policy") return undefined;
+	const evidence = paths.gateFile(verdict.job_id, verdict.attempt);
+	const roots = new Set(items.filter((item) => item.kind === kind && item.evidence_paths.includes(evidence)).map((item) => holdRoot(items, item)));
+	return items.find((item) => roots.has(holdRoot(items, item)) && releasesHold(item) && item.answered_at !== undefined &&
+		item.answered_at >= verdict.decided_at && (!modifiedAt || modifiedAt <= item.answered_at));
 }
 
 /** Gate ladder: escalate/policy (and operational_persistent) mint a record. Duplicate-safe. */
