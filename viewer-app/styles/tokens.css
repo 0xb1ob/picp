@@ -60,8 +60,9 @@
  --focus: #7f9fd8;
  --done: #5d5c56;
  /* Sessions chat v2 (new-sessions-chat.html, measured in Chrome): own bubble, avatars and inline-code ink. */
- --session-you: #2c3a55;
- --session-you-text: #eef2fb;
+ /* M3 fidelity B: the own bubble is the design's neutral `.b` (the --border grey), its text the --text role. */
+ --session-you: var(--border);
+ --session-you-text: var(--text);
  --avatar-bot-from: #d98b5f;
  --avatar-bot-to: #b9654a;
  --avatar-bot-text: #ffffff;
