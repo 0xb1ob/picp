@@ -24,13 +24,13 @@ const CONTEXT = "CI is green on PR 315's head.\nOne review attempt is recorded."
  * A chat carding one open ask (with recorded context), and two live workers in two projects: cp-live-t7ah with a
  * ledger title, a wall-clock limit and a recorded cost; cp-other with none of them, nor a dispatch time.
  */
-function seed(stateDir: string, home: string) {
+function seed(stateDir: string, home: string, context: string | null = CONTEXT) {
 	const put = (file: string, value: unknown) => {
 		mkdirSync(dirname(join(home, file)), { recursive: true });
 		writeFileSync(join(home, file), JSON.stringify(value));
 	};
 	mkdirSync(join(stateDir, "operator"), { recursive: true });
-	const { id } = new OperatorAsks(join(stateDir, "operator", "asks.jsonl")).open({ project: "picp", question: QUESTION, recommendation: "Merge now", context: CONTEXT,
+	const { id } = new OperatorAsks(join(stateDir, "operator", "asks.jsonl")).open({ project: "picp", question: QUESTION, recommendation: "Merge now", ...(context ? { context } : {}),
 		options: [{ label: "Merge now", consequence: "Lands on green CI" }, { label: "Hold", consequence: "Waits for a review" }] });
 	const chat = join(home, "pi-sessions", "chat.jsonl");
 	const say = (message: unknown) => JSON.stringify({ type: "message", timestamp: iso(10), message });
@@ -48,8 +48,8 @@ function seed(stateDir: string, home: string) {
 	put(join(LAYOUT.runs, "cp-live-t7ah/status.json"), { phase: "working", model: "fixture-model", usage: { cost_usd: 1.25 } });
 	put(join(LAYOUT.runs, "cp-other/status.json"), { phase: "idle" });
 }
-const start = async (t: Context) => {
-	const d = await dashboard(t, { at: new Date(NOON).toISOString(), seed });
+const start = async (t: Context, context: string | null = CONTEXT) => {
+	const d = await dashboard(t, { at: new Date(NOON).toISOString(), seed: (stateDir: string, home: string) => seed(stateDir, home, context) });
 	await operatorSession(t, d.stateDir);
 	return d;
 };
@@ -78,21 +78,25 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	assert.deepEqual(texts(tab, "aside.workspace-context h3"), ["Asked you · 1", "In flight · 2"]);
 	// Full match S2 (frame 1): the recorded context, the exact options with consequences, the suggested one marked.
 	const ask = tab.$(".workspace-context-ask")!;
-	assert.deepEqual([/^Operator asked · \d\d:\d\d · picp$/.test(ask.querySelector("small")!.textContent!), ask.querySelector("b")!.textContent, ask.querySelector("details[open] > p")?.textContent,
+	const context = [...ask.querySelectorAll("details.workspace-context-why[open] li")].map((li) => li.textContent).join("\n");
+	assert.deepEqual([/^Operator asked · \d\d:\d\d · picp$/.test(ask.querySelector("small")!.textContent!), ask.querySelector("b")!.textContent, ask.querySelector("details > summary")?.textContent, context,
 		tab.$$(".workspace-context-option").map((o) => [o.querySelector("b")!.textContent, o.querySelector("small")!.textContent, o.classList.contains("workspace-context-option-suggested")]),
-		ask.querySelector(".workspace-context-chat")?.textContent], [true, QUESTION, CONTEXT,
-		[["Merge now · suggested", "Lands on green CI", true], ["Hold", "Waits for a review", false]], "Answer in chat instead →"], "the real ask");
-	await tab.find(".workspace-context-job-head > b", (b) => b.textContent === "Ship the transcript slice");
+		ask.querySelector(".workspace-context-chat")?.textContent], [true, QUESTION, "Context", CONTEXT,
+		[["Merge now · suggested", "Lands on green CI", true], ["Hold", "Waits for a review", false]], "Answer in chat instead →"], "the real ask; its context one bullet a line");
+	await tab.find(".workspace-context-job-title", (b) => b.textContent === "Ship the transcript slice");
 	// The worker list's own order: cp-other (no dispatch time) first.
 	const [other, live] = tab.$$(".workspace-context-job");
 	assert.deepEqual([other, live].map((c) => [c!.querySelector("code")!.textContent, c!.querySelector("code")!.getAttribute("title")]), [["other", "cp-other"], ["t7ah", "cp-live-t7ah"]],
 		"a compact suffix, the full id in its title");
-	// Joined to /api/jobs by exact id. Negative control: a missing elapsed substituted with 0 reads "0m / …" on cp-other.
+	// Frame 1 order: glyph, short id, status on the right, then the title. Negative control: the old title-first head.
+	assert.deepEqual([...live!.children].slice(0, 2).map((c) => c.className).concat([...live!.firstElementChild!.children].map((c) => c.className || c.tagName)),
+		["workspace-context-job-head", "workspace-context-job-title", "workspace-context-job-glyph", "CODE", "workspace-context-job-status"], "head row, then the title");
+	// Joined to /api/jobs by exact id. Negative control: a missing elapsed substituted with 0 reads "0m / …".
 	const facts = (card: Element) => [...card.querySelectorAll("dt")].map((dt) => `${dt.textContent}=${dt.nextElementSibling!.textContent}`);
-	assert.deepEqual([live!.querySelector(".workspace-context-job-head > b")!.textContent, facts(live!).slice(0, 1), !!live!.querySelector("progress")],
+	assert.deepEqual([live!.querySelector(".workspace-context-job-title")!.textContent, facts(live!).slice(0, 1), !!live!.querySelector("progress")],
 		["Ship the transcript slice", ["Wall clock=1h 0m / 2h 0m"], true], "title and wall clock with its bar");
 	assert.match(live!.textContent!, /Cost\$1\.25/, "a recorded cost");
-	assert.deepEqual([other!.querySelector(".workspace-context-job-head > b")!.textContent, facts(other!).filter((f) => /^(Wall clock|Cost)=/.test(f)), !!other!.querySelector("progress")],
+	assert.deepEqual([other!.querySelector(".workspace-context-job-title")!.textContent, facts(other!).filter((f) => /^(Wall clock|Cost)=/.test(f)), !!other!.querySelector("progress")],
 		["Title not recorded", ["Wall clock=not recorded", "Cost=not recorded"], false], "a missing fact reads as not recorded, never zero");
 	assert.equal(other!.querySelector("a")!.getAttribute("href"), "#sessions?view=workers&id=cp-other", "the worker's existing session link");
 	assert.match(panel.textContent!, /not recorded per conversation/, "no invented chat associations or totals");
@@ -163,6 +167,28 @@ test("M3-context-answer: the context card's options and the inline chips share o
 	assert.deepEqual([answers().map((r) => JSON.parse(r.body!).label), held(".workspace-context-option"), held(".session-entries .session-reply")],
 		[["Merge now"], true, true], "one answer, both surfaces held");
 	assert.match(tab.$(".workspace-context-ask [role=status]")?.textContent ?? "", /the options close when the session records/, "the card says it is on its way");
+});
+
+test("M3-context-history: a context-less ask reads not recorded; on an older session file its options refuse, like the chips", { timeout: 180_000 }, async (t) => {
+	const d = await start(t, null);
+	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
+	browserShims(t, tab);
+	await tab.find(".workspace-context-option", (o) => !o.hasAttribute("disabled"));
+	assert.deepEqual([tab.$(".workspace-context-ask > .workspace-context-why")?.textContent, !!tab.$(".workspace-context-ask details"), !!tab.$(".workspace-context-history")],
+		["Context not recorded", false, false], "no recorded context: said so, no disclosure; the current file answers");
+	const next = join(d.home, "pi-sessions", "next.jsonl");
+	writeFileSync(next, `${JSON.stringify({ type: "message", timestamp: iso(1), message: { role: "assistant", content: [{ type: "text", text: "NEXT-FILE" }] } })}\n`);
+	appendFileSync(operatorSessionsFile(join(d.stateDir, "sessions")), `${JSON.stringify({ at: iso(1), session_file: next })}\n`);
+	tab.go(`${CHAT}&session=chat.jsonl`);
+	await tab.waitText(/Historical transcript/);
+	if (!tab.$("aside.workspace-context")) tab.click(await tab.find(".workspace-context-open"));
+	const option = await tab.find(".workspace-context-option");
+	// replyTo's rule on the card: an older file never answers the live ask. Negative control: dropping `!current`.
+	tab.click(option);
+	await new Promise((done) => setTimeout(done, 200));
+	assert.deepEqual([tab.$$(".workspace-context-option").every((o) => o.hasAttribute("disabled")), !!tab.$(".session-replies .session-reply"),
+		tab.$(".workspace-context-history")?.textContent, tab.requests.filter((r) => r.method === "POST" && /"kind":"answer"/.test(r.body ?? "")).length],
+		[true, false, "Open now; answer from the latest transcript, not this older file.", 0], "history: options and chips refuse, no answer sent");
 });
 
 test("M3-context-phone: the context sheet and the Conversations drawer are modal, close on Escape back to their button, keep the selection and drop on leaving", { timeout: 180_000 }, async (t) => {

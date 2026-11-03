@@ -101,7 +101,7 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
  }, [active, panel, job]);
  if (!active) return {trigger: null, surfaces: null, conversations: null, composer: null, openJob: null, flight: null};
  const context = {asks: chat.asks, live: chat.live.filter(w => matchesProject(w.project, selection)), selection, onClose: dismiss, onJob: pickJob,
-  control: chat.control, answering: chat.answering, jobs: flight, jobsError: jobs.error,
+  control: chat.control, answering: chat.answering, jobs: flight, jobsError: jobs.error, current: chat.current,
   onJobs: () => openDrawer(toggle.current), onAnswer: () => { if (panel === "sheet") closePanel(); chat.onAnswer(); }};
  const asked = chat.asks.length;
  return {

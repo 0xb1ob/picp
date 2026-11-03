@@ -78,6 +78,10 @@
  .session-heading > .session-avatar, .session-heading > .session-heading-id { display: none; }
  /* The strip already carries the ask count; the toggle's own name still says it. */
  .session-heading .workspace-context-open > .workspace-badge { display: none; }
+ /* C1: the project label ellipsizes before the strip's suffix and elapsed; the strip's own ellipsis is the fallback. */
+ .session-heading > .session-strip { flex: 1 1 auto; }
+ .session-heading > .session-filter { display: contents; }
+ .session-heading .session-filter-menu { flex-shrink: 100000; min-width: 44px; }
 }
 /* Chat v2 header: avatar, name over the state line (dot · state · model · ctx). */
 .session-heading > .session-avatar { color: var(--text); overflow: visible; }
