@@ -23,12 +23,16 @@
 ## Controls
 
 Treehouse was on PATH for every evidence run; every case ran, none skipped (`ℹ skipped 0`). Each control was one
-temporary `sed -i` mutation of `src/escalation.ts`: the file was first copied to `/tmp/a2b-esc.bak` and restored by an
-`EXIT` trap in the same subshell, a grep confirmed the mutation applied, then
-`NODE_OPTIONS=--max-old-space-size=1536 npm run test:one -- --test-name-pattern=<H17|H18> tests/e2e/authority-hold-parity.test.ts`
-ran. GNU `timeout` does not exist on this host, so the `timeout 180` wrapper was dropped; both controls finished in
-about 34 s. Both exited 1 at the assertion named above; afterwards `git diff --stat` showed only this branch's edits,
-and the restored file passes every case.
+temporary `sed -i` mutation of `src/escalation.ts` in one command: `cp src/escalation.ts /tmp/a2b-esc.bak`, then a
+subshell with `trap 'cp /tmp/a2b-esc.bak src/escalation.ts' EXIT`, the `sed -i`, `git diff --shortstat` confirming a
+one-line change, and the run below; afterwards `git status --porcelain` was empty.
+
+- NC-H17: `sed -i 's/^\tif (!kind || verdict.cause !== "policy") return undefined;$/\treturn undefined;/'`, then
+  `NODE_OPTIONS=--max-old-space-size=1536 timeout 180 npm run test:one -- --test-name-pattern=H17 tests/e2e/authority-hold-parity.test.ts`:
+  exit 1, `AssertionError: H17: the released replay proceeds: … (cause policy). This is yours now.` Restored: pass.
+- NC-H18: `sed -i 's/if (!retry && existing.authority_hold && !planRevise/if (false \&\& existing.authority_hold \&\& !planRevise/'`,
+  then `NODE_OPTIONS=--max-old-space-size=1536 timeout 180 npm run test:one -- --test-name-pattern=H18 tests/e2e/authority-hold-parity.test.ts`:
+  exit 1, `AssertionError: H18: the replacement stays open and unanswered`. Restored: pass.
 
 - H17 runs two pipelines on one bench: the unchanged replay (no new escalation, the covered ship dispatches through a
   real parent's `cp_dispatch`), then the variant whose artifact changes a second after the answer (timestamps have
