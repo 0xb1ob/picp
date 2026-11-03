@@ -183,7 +183,7 @@
 .session-original { margin-top: 6px; padding: 0; border: 0; background: none; color: var(--secondary); font-size: 11px; text-decoration: underline; cursor: pointer; }
 .session-message.session-other { position: relative; padding-left: 34px; }
 .session-other > .session-who { min-height: 16px; align-items: center; }
-.session-other > .session-who > .session-avatar { position: absolute; left: 0; top: 0; }
+.session-other > .session-who > .session-avatar { position: absolute; left: 0; top: 0; width: 20px; height: 20px; }
 .session-avatar { display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--avatar-cp); font-size: 10px; font-weight: 600; color: var(--text); }
 .session-avatar-bot { background: linear-gradient(135deg, var(--avatar-bot-from), var(--avatar-bot-to)); color: var(--avatar-bot-text); }
 .session-failed .session-bubble > .session-body { border-color: var(--border); }
@@ -309,8 +309,10 @@
  /* M3 chat: one centred 720 px column (28 px sides) on 16/8 transcript padding; cards at most 670 px, own pills 72%. */
  .session-transcript { padding: 16px 0 8px; }
  .session-entries { max-width: 720px; margin: 0 auto; padding: 0 28px; }
- .session-message.session-other { padding-left: 42px; }
+ /* M3 fidelity D: the design's 20 px `.mk` avatar and the `.tx` 28 px text inset (frames 1, 4, 5). */
+ .session-message.session-other { padding-left: 28px; }
  .session-avatar { width: 32px; height: 32px; font-size: 11px; }
+ .session-other > .session-who > .session-avatar { width: 20px; height: 20px; font-size: 10px; }
  .session-other > .session-body { max-width: 670px; }
  .session-own > .session-body { max-width: 72%; }
  .session-own > .session-body p, .session-own .md ul, .session-own .md ol { line-height: 21px; }
@@ -326,9 +328,9 @@
  .session-notice .session-awaiting { border-color: var(--ask-border); }
  .session-notice > .session-time { padding-top: 18px; }
  .session-trace { margin-left: 68px; }
- .session-steps { padding-left: 42px; }
+ .session-steps { padding-left: 28px; }
  .session-steps-link { min-height: 32px; }
- .session-rollup-head, .session-rollup-meta { padding-left: 42px; }
+ .session-rollup-head, .session-rollup-meta { padding-left: 28px; }
  .session-rollup-toggle { min-height: 32px; }
  .session-new-wrap { bottom: 24px; }
  .session-reply { min-height: 34px; border-radius: 17px; }

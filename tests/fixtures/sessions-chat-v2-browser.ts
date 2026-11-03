@@ -18,7 +18,7 @@ import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
-	"m3-fidelity-transcript", "m3-fidelity-surfaces"];
+	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -78,14 +78,15 @@ const asked = (id: string, question: string) => ({ id, project: "picp", question
 	mandate_objective: null, jobs: [], escalation: null, evidence: [] }) as unknown as NonNullable<SessionsResponse["open_asks"]>[number];
 const askCard = (ask: ReturnType<typeof asked>, at: string): SessionEntry => ({ ...say(`c-${ask.id}`, at, "Operator → you", ask.question), kind: "ask", ask_id: ask.id,
 	ask: { id: ask.id, question: ask.question, options: ask.options, recommendation: ask.recommendation, state: "open", answer: null, answered_at: null, reason: null } });
-if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context" || args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces") {
+if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context" || args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces"
+	|| args.stage === "m3-fidelity-composer") {
 	const ask = asked("ask-pr4a", "PR #321 is green on its pushed head. Merge it, or hold it for another review?");
 	sessions.entries = [...entries, askCard(ask, "2026-10-15T08:04:40Z")];
 	sessions.open_asks = [ask];
 	sessions.operator_context = { tokens: 61_000, window: 200_000, percent: 30.5, level: "ok", reason: null, model: "fixture-model", last_compact_at: null, thinking: null } as SessionsResponse["operator_context"];
 }
 /** M3 shell: committed captures name picp only, so the table's second project reads picp too. */
-const picpOnly = args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces";
+const picpOnly = args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces" || args.stage === "m3-fidelity-composer";
 if (picpOnly) sessions.entries = sessions.entries.map(e => ({ ...e, text: e.text.replaceAll("demo-app", "picp") }));
 /** M3 fidelity B: an own message before the ask, so one capture holds a bubble, a reply, the ask and both sends. */
 if (args.stage === "m3-fidelity-transcript") sessions.entries.splice(-1, 0, say("e7", "2026-10-15T08:04:30Z", "Operator", "Hold the merge until I have read the review."));
@@ -182,7 +183,7 @@ try {
 		{ name: "cp-pr-review", description: "Review a pull request against its task file", source: "agent" }, { name: "cp-memory", description: "Capture and curate lessons", source: "home" }] };
 	// M3 slice 2: the chat's Jobs drawer lists these; a long title and id wrap, the done job opens beside the chat.
 	const row = (id: string, project: string, phase: string, title: string, over: object = {}) => ({ ...job.job, id, project, phase, title, finished_at: null, ...over });
-	if (args.stage === "m3-jobs" || args.stage === "m3-composer" || args.stage === "m3-fidelity-surfaces") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
+	if (args.stage === "m3-jobs" || args.stage === "m3-composer" || args.stage === "m3-fidelity-surfaces" || args.stage === "m3-fidelity-composer") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
 		row("cp-m3-live-with-a-very-long-job-identifier", "picp", "working", "Repair the queue so a very long job title keeps wrapping inside its drawer row instead of clipping", { cost_usd: 1.42, model: "fixture-model" }),
 		row("cp-m3-held", picpOnly ? "picp" : "demo-app", "held", "Settings copy pass", { cost_usd: 0.31 }),
 		row("cp-m3-park", "picp", "awaiting_merge", "Parked with the team", { pr_url: "https://github.com/o/picp/pull/712", pr_status: "open" }),
@@ -582,6 +583,34 @@ try {
 			if (got !== want) throw new Error(`m3-fidelity-surfaces-${name}: ${selector} is ${got}, not ${want}`);
 		}
 		if (posts.length) throw new Error(`m3-fidelity-surfaces sent ${posts.join(", ")}: the log and surfaces only read`);
+	}
+	if (stage === "m3-fidelity-composer") {
+		// Design frames 1/4/5/6/7/10: the box in the transcript column with `.cb` padding, a 20 px avatar and text 28 px in,
+		// the raised padding-6 menu from the box's edge, the ask fill. Negative control: a surface/padding-4 menu fails.
+		const slash: Step = [`document.querySelector(".operator-composer-slash").click()`, `document.querySelectorAll("#operator-composer-command-menu button").length === 5`];
+		const context: Step = [`document.querySelector(".workspace-context-open").click()`, `!!document.querySelector(".workspace-context .workspace-context-ask")`];
+		const reply: Step = [`(() => { const t = document.querySelector(".session-transcript"), m = [...document.querySelectorAll(".session-message.session-other")].at(-1);
+			t.scrollTop += m.getBoundingClientRect().top - t.getBoundingClientRect().top - 120; })()`, "true"];
+		const look = `(() => { const q = s => document.querySelector(s), r = s => q(s)?.getBoundingClientRect(), cs = s => q(s) && getComputedStyle(q(s)), n = Math.round;
+			const box = r(".operator-composer-box"), list = r(".session-entries"), pad = cs(".session-entries"), avatar = r(".session-other > .session-who > .session-avatar");
+			const left = list.left + parseFloat(pad.paddingLeft), right = list.right - parseFloat(pad.paddingRight), menu = r("#operator-composer-command-menu"), ask = cs(".workspace-context-ask");
+			return { composer: [n(box.left - left), n(right - box.right), n(box.width), cs(".operator-composer-box").padding].join(" "),
+				avatar: avatar.width + "x" + avatar.height + " inset " + n(r(".session-other > .session-body").left - r(".session-message.session-other").left),
+				menu: menu ? [n(menu.left - box.left), n(menu.width), cs("#operator-composer-command-menu").backgroundColor, cs("#operator-composer-command-menu").padding].join(" ") : null,
+				ask: ask ? [ask.backgroundColor, ask.borderRadius, ask.padding].join(" ") : null }; })()`;
+		const shotsD: [string, number, number, Step[], object][] = [
+			["desktop", 1440, 1000, [], { composer: "0 0 664 14px 12px 10px 16px", avatar: "20x20 inset 28" }],
+			["phone", 390, 844, [reply], { composer: "0 0 362 0px", avatar: "20x20 inset 34" }],
+			["menu-desktop", 1440, 1000, [slash], { menu: "0 534 rgb(27, 27, 27) 6px" }], ["menu-phone", 390, 844, [slash], { menu: "0 362 rgb(27, 27, 27) 6px" }],
+			["ask-desktop", 1440, 1000, [context], { ask: "rgb(31, 26, 18) 12px 12px" }], ["ask-phone", 390, 844, [context], { ask: "rgb(31, 26, 18) 12px 12px" }],
+		];
+		for (const [name, width, height, steps, want] of shotsD) {
+			await capture(`m3-fidelity-composer-${name}`, transcript, width, height, "dark", loaded, "bottom", steps);
+			const got = await evaluate(look);
+			const off = Object.entries(want).filter(([k, v]) => got[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k])} (want ${JSON.stringify(v)})`);
+			if (off.length) throw new Error(`m3-fidelity-composer-${name}: ${off.join("; ")}`);
+		}
+		if (posts.length) throw new Error(`m3-fidelity-composer sent ${posts.join(", ")}: the menu and context only read`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

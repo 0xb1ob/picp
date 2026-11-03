@@ -10,7 +10,9 @@ const palette = new Set(("#0b0b0a #111110 #141413 #191917 #1f1f1d #22221f #2a292
  "#f4f2ed #ebe8e1 #e0dcd2 #d6d2c8 #e2ded5 #1d1c1a #4f4c45 #6b675f #2c3a55 #eef2fb #2d5aa8 #2f6f4a #9a5b00 #d98b5f #b9654a #d9d4c8 #000000 " +
  // M3: the dark-only palette of new-design-picp-2026-11-01.html
  // (bg, panel, card, raised, selected, borders, text, success).
- "#0d0d0d #121212 #161616 #1b1b1b #232323 #2a2a2a #1e1e1e #ededed #b4b4b4 #8a8a8a #5fd39a #10291d #1f4a35").split(" "));
+ "#0d0d0d #121212 #161616 #1b1b1b #232323 #2a2a2a #1e1e1e #ededed #b4b4b4 #8a8a8a #5fd39a #10291d #1f4a35 " +
+ // M3 fidelity D: the open-ask card's `.ask` fill, design frames 1 and 7.
+ "#1f1a12").split(" "));
 function violations(path: string, text: string): string[] {
  const out: string[] = [];
  for (const [i,line] of text.split("\n").entries()) {
@@ -70,7 +72,7 @@ const KEEP = [
  /^\.map-red-text(?![\w-])/,
  /^\.overview-dot-ci-red(?![\w-])/,
 ];
-const PAINT = /var\(--(?:amber|coral|ask-border|ask-background|error-border|map-stranded-border)\)/;
+const PAINT = /var\(--(?:amber|coral|ask-border|ask-background|ask-card|error-border|map-stranded-border)\)/;
 function painted(css: string): {selector:string; body:string}[] {
  const text = css.replace(/\/\*[\s\S]*?\*\//g, "");
  const out: {selector:string; body:string}[] = [];
@@ -99,6 +101,16 @@ test("amber and coral only on open human decisions and CI that is red", () => {
  assert.equal(allowed(".overview-dot-ci-red"), true);
  assert.equal(allowed(".workspace-badge"), false);
  assert.equal(allowed(".workspace-context"), false);
+});
+/** The design ask fill paints the open-ask context card alone, never a generic context or job surface. */
+test("the ask-card token paints only .workspace-context-ask", () => {
+ const root = join(REPO_ROOT, "viewer-app");
+ const owners = files(root).filter(path => path.endsWith(".css")).flatMap(path => painted(readFileSync(path, "utf8"))
+  .filter(rule => /var\(--ask-card\)/.test(rule.body)).map(rule => `${relative(root, path)}: ${rule.selector}`));
+ assert.deepEqual(owners, ["components/workspace.css: .workspace-context-ask"]);
+ const askOnly = (selector: string) => selector.split(",").every(part => part.trim() === ".workspace-context-ask");
+ for (const generic of [".workspace-context", ".workspace-context-job", ".workspace-context-ask, .workspace-context-job", ".job-detail"])
+  assert.deepEqual([askOnly(generic), allowed(generic)], [false, false], generic);
 });
 
 test("Needs-you attention comes only from an available open ask", async t => {
