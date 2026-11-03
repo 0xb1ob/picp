@@ -1,0 +1,1 @@
+- Viewer Jobs drawer (full match S3): one desktop toolbar (project, Today / In flight, a local id/title/project query), Job/Title/Status/Done/Cost columns, one-line phone rows with model and cost, bounded "Show more" per group that keeps focus, "not recorded" for missing cost or time; PR chips show glyph-and-name slots (✓ Review, ○ CI, ○ Merge) with the state in each title.

@@ -251,9 +251,12 @@ test("P19-rollup-chips: the header chip stays when the latest relay names no PR;
 	const chips = await chipped.open(FULL);
 	const notice = await chips.find(".session-bridge a.pr-chip"), card = await chips.find(".session-bubble a.pr-chip");
 	const parts = (a: Element) => [...a.children].map((c) => [c.className, c.textContent]);
-	assert.deepEqual(parts(notice), [["pr-chip-dot", ""], ["pr-chip-num", "#355"], ["pr-chip-review pr-chip-review-pass", "review pass"], ["pr-chip-ci pr-chip-ci-green", "CI green"], ["pr-chip-state", "draft"]], "(a) the notice's chip: Review → CI → Merge slots (full match S2)");
+	// Full match S3 C1: slot text "review pass"/"CI green"/"draft" became glyph + name; the state is the slot's title.
+	assert.deepEqual(parts(notice), [["pr-chip-dot", ""], ["pr-chip-num", "#355"], ["pr-chip-slot pr-chip-review pr-chip-review-pass", "✓ Review"], ["pr-chip-slot pr-chip-ci pr-chip-ci-green", "✓ CI"],
+		["pr-chip-slot pr-chip-state", "○ Draft"]], "(a) the notice's chip: Review → CI → Merge slots (full match S2)");
+	assert.deepEqual([...notice.querySelectorAll(".pr-chip-slot")].map((s) => s.getAttribute("title")), ["review pass", "CI green", "draft"], "(a) each slot names its state");
 	assert.deepEqual([notice.className, parts(notice)], [card.className, parts(card)], "(a) the turn card's chip, class for class");
-	assert.equal(notice.textContent, "#355 review pass CI green draft", "(b) separated, never #355review");
+	assert.equal(notice.textContent, "#355 ✓ Review ✓ CI ○ Draft", "(b) separated, never #355review");
 	const rule = /(?:^|\})([^{}]*a\.pr-chip)\{display:inline-flex[;}]/.exec(await servedCss(chipped))?.[1];
 	assert.ok(rule && notice.matches(rule) && card.matches(rule), `(a) the served pill rule reaches the notice row: ${rule}`);
 
@@ -472,7 +475,9 @@ test("P19-links: transcript URLs, .pi-command-post paths and #N refs render as l
 	assert.equal(anchors(/wrote/)[0]!.parentElement?.tagName, "CODE", "a code span keeps its link inside");
 	tab.click(tab.$("button.session-notice-line")!);
 	await tab.find(".session-bridge p a");
-	assert.deepEqual(links(/#12/).filter(([text]) => text?.startsWith("#")), [["#355 review unknown CI unknown draft", pr], ["#12", "https://github.com/o/r/issues/12"]], "#N refs resolve through the job's repo (#355 as its PR chip, unknown slots named); anchors, entities and ## never do");
+	// Full match S3 C1: "#355 review unknown CI unknown draft" became hollow slots; slot titles name the unknowns.
+	assert.deepEqual(links(/#12/).filter(([text]) => text?.startsWith("#")), [["#355 ○ Review ○ CI ○ Draft", pr], ["#12", "https://github.com/o/r/issues/12"]], "#N refs resolve through the job's repo (#355 as its PR chip, unknown slots hollow); anchors, entities and ## never do");
+	assert.deepEqual(tab.$$(".session-bridge a.pr-chip .pr-chip-slot").map((s) => s.getAttribute("title")).slice(0, 2), ["review unknown", "CI unknown"], "unknown slots named in their titles");
 	const plain = () => tab.$$(".session-bridge").find((n) => /landed/.test(n.textContent ?? ""))!;
 	assert.equal(plain().querySelector("a[target=_blank]") === null, true, "collapsed, a plain notice's first line is the button's label");
 	tab.click(plain().querySelector("button.session-notice-line")!);

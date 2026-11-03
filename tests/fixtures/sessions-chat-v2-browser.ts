@@ -18,7 +18,7 @@ import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
-	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript"];
+	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -28,8 +28,9 @@ const GENERATED = "2026-10-15T16:00:00Z";
 const say = (id: string, at: string, who: string, text: string, over: Partial<SessionEntry> = {}): SessionEntry =>
 	({ id, at, kind: "say", who, text, name: null, send_id: null, tag: null, failed: false, trace: [], ...over });
 const tool = (id: string, at: string, name: string, text: string, summary?: string): SessionEntry => ({ ...say(id, at, "Assistant", text), kind: "tool", name, ...(summary ? { summary } : {}) });
-/** Full match S2 shows job suffixes, so its ids end in four characters as real picp ids do. */
-const JOB = args.stage === "full-match-transcript" ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
+/** Full match S2 shows job suffixes, so its ids end in four characters like real picp ids; S3 reuses its data. */
+const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs";
+const JOB = S2 ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
 /** A cp-bridge wake as the transcript carries it: first line parsed off, `paths:` resolved (one left unresolved). */
 const wake: SessionEntry = say("w1", "2026-10-15T08:03:30Z", "cp-bridge", [
 	"PR #319 is waiting on CI. The diff review passed on 3f2a9c1; CI is still running on that head, so nothing is merged yet.",
@@ -79,7 +80,7 @@ const asked = (id: string, question: string) => ({ id, project: "picp", question
 	mandate_objective: null, jobs: [], escalation: null, evidence: [] }) as unknown as NonNullable<SessionsResponse["open_asks"]>[number];
 const askCard = (ask: ReturnType<typeof asked>, at: string): SessionEntry => ({ ...say(`c-${ask.id}`, at, "Operator → you", ask.question), kind: "ask", ask_id: ask.id,
 	ask: { id: ask.id, question: ask.question, options: ask.options, recommendation: ask.recommendation, state: "open", answer: null, answered_at: null, reason: null } });
-const fullMatch = args.stage === "full-match-shell" || args.stage === "full-match-transcript";
+const fullMatch = args.stage === "full-match-shell" || S2;
 if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context" || args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces"
 	|| args.stage === "m3-fidelity-composer" || fullMatch) {
 	const ask = asked("ask-pr4a", "PR #321 is green on its pushed head. Merge it, or hold it for another review?");
@@ -93,7 +94,7 @@ if (picpOnly) sessions.entries = sessions.entries.map(e => ({ ...e, text: e.text
 /** M3 fidelity B: an own message before the ask, so one capture holds a bubble, a reply, the ask and both sends. */
 if (args.stage === "m3-fidelity-transcript") sessions.entries.splice(-1, 0, say("e7", "2026-10-15T08:04:30Z", "Operator", "Hold the merge until I have read the review."));
 /** Full match S2: four-character suffixes, a recorded multi-line context, and a PR chip whose CI slot is unrecorded. */
-if (args.stage === "full-match-transcript") {
+if (S2) {
 	const ids: Record<string, string> = { "cp-sessions-v2-pr3": "cp-transcript-steps-t7ah", "cp-held-review-with-a-long-job-id": "cp-held-review-k2pq" };
 	sessions.workers = sessions.workers.map(w => ({ ...w, id: ids[w.id] ?? w.id, job_id: w.job_id && (ids[w.job_id] ?? w.job_id) }));
 	sessions.open_asks = sessions.open_asks!.map(a => ({ ...a, context: "- CI is green on the pushed head 3f2a9c1.\n- One review attempt passed; its two notes do not block the merge.\n- The PR changes viewer-app files only." }));
@@ -204,6 +205,23 @@ try {
 	// Full match S2: the chat's context joins /api/jobs by exact worker id; one recorded clock and a long title.
 	if (args.stage === "full-match-transcript") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
 		row("cp-transcript-steps-t7ah", "picp", "working", "Restyle the transcript steps so a long job title keeps wrapping inside its context card", { elapsed_seconds: 540, limit_seconds: 7200, cost_usd: 1.42, model: "fixture-model" })] };
+	// Full match S3: every real group (team and queued too), seven done today for Show more, unrecorded costs and times.
+	if (args.stage === "full-match-jobs") {
+		const done = (id: string, title: string, at: string, cost: number | null, over: object = {}) => row(id, "picp", "done", title, { finished_today: true, finished_at: at, cost_usd: cost, model: "fixture-model", ...over });
+		routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
+			row("cp-transcript-steps-t7ah", "picp", "working", "Restyle the Jobs drawer toolbar, columns and rows so a long job title keeps to one line", { elapsed_seconds: 540, limit_seconds: 7200, cost_usd: 1.54, model: "fixture-model" }),
+			row("cp-held-review-k2pq", "picp", "held", "Settings copy pass", { elapsed_seconds: 3720, cost_usd: 0.31, model: "fixture-model" }),
+			row("cp-parked-team-p4rk", "picp", "awaiting_merge", "Parked with the team", { pr_url: "https://github.com/o/picp/pull/712", pr_status: "open" }),
+			row("cp-queued-next-q8en", "picp", "queued", "Queued behind the drawer slice"),
+			done(JOB, "Sessions chat v2 PR 2", "2026-10-15T15:47:00Z", 2.05, { pr_url: "https://github.com/o/picp/pull/700", pr_status: "merged" }),
+			done("cp-parent-perf-audit-68u3", "Audit cp-parent turn latency, responsiveness, and performance", "2026-10-15T12:25:00Z", 5.22),
+			done("cp-tool-addition-400-research-with-a-very-long-identifier-tp0b", "Research the tool_addition 400 and draft an issue", "2026-10-15T12:11:00Z", 4.5),
+			done("cp-threads-aware-cdc2", "Pass dashboard thread tags through messages and bind created jobs to their thread", "2026-10-15T10:45:00Z", 2.49, { pr_url: "https://github.com/o/picp/pull/158", pr_status: "merged" }),
+			done("cp-sweep-held-ci-hsze", "Sweep item 14 B1: bounded red-CI repair while the integration hold parks", "2026-10-15T10:26:00Z", 2.67, { pr_url: "https://github.com/o/picp/pull/157", pr_status: "merged" }),
+			done("cp-viewer-fonts-f0nt", "Self-host the viewer fonts", "2026-10-15T09:58:00Z", null, { model: null }),
+			row("cp-flaky-shard-fl4k", "picp", "failed", "Rerun the flaky shard", { finished_today: true, finished_at: "2026-10-15T09:40:00Z", cost_usd: 0.12 }),
+		] };
+	}
 	// Every chat's context now reads /api/jobs; stages without their own list (or the real viewer's) get an empty one.
 	if (!routes["/api/jobs"] && !["m3-transcript", "nav-simplify", "p3-quota", "m3-shell"].includes(args.stage)) routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [] };
 	// M3 slice 4: the composer menu attaches the done job's own P1 reference, as its job page's Ask would.
@@ -590,7 +608,7 @@ try {
 			return [r.left, r.top, r.width, r.height].map(Math.round).join(" ") + " " + getComputedStyle(e).backgroundColor; })()`;
 		const shotsC: [string, number, number, Step[], string, string][] = [
 			["log-desktop", 1440, 1000, log, ".workspace-job", "919 0 521 1000 rgb(13, 13, 13)"], ["log-phone", 390, 844, log, ".workspace-job", "0 0 390 844 rgb(13, 13, 13)"],
-			["jobs-desktop", 1440, 1000, [jobs], ".workspace-jobs", "580 0 860 1000 rgb(22, 22, 22)"], ["jobs-phone", 390, 844, [jobs], ".workspace-jobs", "0 96 390 748 rgb(18, 18, 18)"],
+			["jobs-desktop", 1440, 1000, [jobs], ".workspace-jobs", "579 0 861 1000 rgb(22, 22, 22)"], ["jobs-phone", 390, 844, [jobs], ".workspace-jobs", "0 96 390 748 rgb(18, 18, 18)"],
 			["context-phone", 390, 844, [context], ".workspace-context-sheet", "0 96 390 748 rgb(18, 18, 18)"],
 			["conversations-phone", 390, 844, [drawer], ".workspace-sessions", "0 0 317 844 rgb(18, 18, 18)"],
 		];
@@ -702,7 +720,7 @@ try {
 		const shotsT: [string, number, number, Step[], object][] = [
 			["desktop", 1440, 1000, [joined, ...toggled], card], ["steps", 1440, 1000, [steps, toEarlier], disclosed],
 			["phone-ask", 390, 844, [context, joined], card], ["phone", 390, 844, [steps, toEarlier], { ...disclosed, strip: "1 working · t7ah · 9m" }],
-			["pr-chip", 1440, 1000, [toChip], { chip: "#321 | review pass | CI unknown | open", outside: "" }],
+			["pr-chip", 1440, 1000, [toChip], { chip: "#321 | ✓ Review | ○ CI | ○ Merge", outside: "" }],
 		];
 		for (const [name, width, height, run, want] of shotsT) {
 			await capture(`full-match-transcript-${name}`, transcript, width, height, "dark", loaded, "bottom", run);
@@ -712,6 +730,46 @@ try {
 			if (off.length) throw new Error(`full-match-transcript-${name}: ${off.join("; ")}`);
 		}
 		if (posts.length) throw new Error(`full-match-transcript sent ${posts.join(", ")}: the captures only read`);
+	}
+	if (stage === "full-match-jobs") {
+		// Full match S3 (frames 3/9, C1). Negative controls: dropped team/queued groups fail `groups`, an ignored query
+		// `rows`, Show more without focus `focus`, unknown CI painted passed `chip`, phone targets under 44 px `small`.
+		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
+			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
+			const tops = all(".workspace-jobs-bar > *, .workspace-jobs-head > h2").map(e => Math.round(e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2));
+			const row = q(".workspace-jobs-row"), chip = q(".session-message a.pr-chip");
+			return { drawer: box("dialog.workspace-jobs[open]"), one_row: innerWidth >= 900 ? Math.max(...tops) - Math.min(...tops) <= 2 : null,
+				cols: all(".workspace-jobs-cols span").map(s => s.textContent).join(), groups: all(".workspace-jobs-list h3").map(h => h.textContent).join(),
+				rows: all(".workspace-jobs-row").length, more: q(".workspace-jobs-more")?.textContent ?? null, focus: document.activeElement?.dataset?.job ?? null,
+				one_line: row ? Math.round(row.querySelector("b").getBoundingClientRect().height) <= 22 : null, meta: all(".workspace-jobs-meta")[0]?.textContent ?? null,
+				chip: chip ? [...chip.querySelectorAll(".pr-chip-slot")].map(s => s.textContent + "/" + s.getAttribute("title")).join(" | ") + (chip.querySelector(".pr-chip-ci-unknown .pr-chip-glyph")?.textContent === "○" ? "" : " (unknown CI not hollow)") : null,
+				measure: { head: box(".workspace-jobs-head"), cols: box(".workspace-jobs-cols"), row: box(".workspace-jobs-row"), more: box(".workspace-jobs-more"), chip: box(".session-message a.pr-chip") },
+				small: innerWidth < 900 ? all(".workspace-close, .workspace-full, .workspace-jobs-search, .workspace-jobs-row, .workspace-jobs .jobs-segments button, .workspace-jobs select, .workspace-jobs-more, .workspace-jobs-find")
+					.filter(e => e.getBoundingClientRect().height < 44).map(e => e.className || e.textContent).join() : "",
+				outside: all(".workspace-jobs button, .workspace-jobs a, .workspace-jobs select, .workspace-jobs input, .pr-chip").filter(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className).join() }; })()`;
+		const open: Step = [`document.querySelector(".workspace-jobs-open").click()`, `!!document.querySelector(".workspace-jobs[open] .workspace-jobs-row")`];
+		const query: Step = [`(() => { const i = document.querySelector(".workspace-jobs-find input"); i.focus(); i.value = "toolbar"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+			`document.querySelectorAll(".workspace-jobs-row").length === 1`];
+		const more: Step = [`document.querySelector(".workspace-jobs-more").click()`, `document.activeElement?.dataset?.job === "cp-viewer-fonts-f0nt"`];
+		const toFocus: Step = [`(() => { const l = document.querySelector(".workspace-jobs-list"); l.scrollTop += document.activeElement.getBoundingClientRect().top - l.getBoundingClientRect().top - 200; })()`, "true"];
+		const toChip: Step = [`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-message a.pr-chip").getBoundingClientRect().top - t.getBoundingClientRect().top - 200; })()`, "true"];
+		const groups = "In flight · 2,With the team · 1,Queued · 1,Done today · 7", cols = "Job,Title / context,Status,Done,Cost";
+		// The committed five: desktop, desktop-query, phone, phone-more and pr-chip (dark, picp only).
+		const shotsJ: [string, number, number, Step[], object][] = [
+			["desktop", 1440, 1000, [open], { drawer: "579 0 861 1000", one_row: true, cols, groups, rows: 9, more: "Show 2 more", outside: "" }],
+			["desktop-query", 1440, 1000, [open, query], { one_row: true, groups: "In flight · 1", rows: 1, outside: "" }],
+			["phone", 390, 844, [open], { drawer: "0 96 390 748", cols: "", groups, rows: 9, more: "Show 2 more", one_line: true, meta: "t7ah · fixture-model · $1.54", small: "", outside: "" }],
+			["phone-more", 390, 844, [open, more, toFocus], { rows: 11, more: null, focus: "cp-viewer-fonts-f0nt", small: "", outside: "" }],
+			["pr-chip", 1440, 1000, [toChip], { chip: "✓ Review/review pass | ○ CI/CI unknown | ○ Merge/open", outside: "" }],
+		];
+		for (const [name, width, height, run, want] of shotsJ) {
+			await capture(`full-match-jobs-${name}`, transcript, width, height, "dark", loaded, "bottom", run);
+			const got = await evaluate(look);
+			console.log(`measured ${name} ${JSON.stringify(got)}`);
+			const off = Object.entries(want).filter(([k, v]) => got[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k])} (want ${JSON.stringify(v)})`);
+			if (off.length) throw new Error(`full-match-jobs-${name}: ${off.join("; ")}`);
+		}
+		if (posts.length) throw new Error(`full-match-jobs sent ${posts.join(", ")}: the drawer only reads`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

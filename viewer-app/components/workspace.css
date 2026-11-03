@@ -10,22 +10,42 @@
 .workspace-jobs { inset: auto 0 0; width: 100%; max-width: none; height: calc(100dvh - 96px); max-height: none; margin: 0; padding: 0; background: var(--nav); color: var(--text); border: 1px solid var(--border); border-bottom: 0; border-radius: 18px 18px 0 0; box-shadow: 0 -18px 48px var(--page); }
 .workspace-jobs::backdrop { background: var(--page); opacity: 0.6; }
 .workspace-jobs-inner { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.workspace-jobs-head { display: flex; align-items: center; gap: 4px; padding: 8px 4px 0 16px; flex-shrink: 0; }
-.workspace-jobs-head > h2 { flex: 1; min-width: 0; margin: 0; font-size: 17px; font-weight: 600; }
-.workspace-jobs-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 16px; border-bottom: 1px solid var(--divider); flex-shrink: 0; min-width: 0; }
+/* Frame 9: title, scope, search and close, then the segments and project on one row; the query field when searched. */
+.workspace-jobs-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px 4px 8px 16px; border-bottom: 1px solid var(--divider); flex-shrink: 0; min-width: 0; }
+.workspace-jobs-head > h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.workspace-jobs-scope { flex: 1; min-width: 0; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--dim); }
+.workspace-jobs-bar { order: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex-basis: 100%; min-width: 0; padding: 4px 12px 0 0; }
+.workspace-jobs-bar > .jobs-segments { order: -1; }
+.workspace-jobs-bar > .project-filter { margin-left: auto; }
+.workspace-jobs .project-filter > span { display: none; }
+.workspace-jobs-find { display: none; flex: 1 1 100%; align-items: center; gap: 8px; min-width: 0; min-height: 44px; padding: 0 12px; background: var(--background); color: var(--dim); border: 1px solid var(--border); border-radius: 10px; }
+.workspace-jobs-find[data-open] { display: flex; }
+.workspace-jobs-find > input { flex: 1; min-width: 0; min-height: 42px; padding: 0; background: none; color: var(--text); border: 0; outline: 0; font: inherit; font-size: 16px; }
+.workspace-jobs-search { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; background: none; color: var(--text); border: 0; border-radius: 10px; cursor: pointer; }
+.workspace-jobs-search[aria-expanded=true] { background: var(--toggle); }
+.workspace-jobs-cols { display: none; }
 .workspace-jobs-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 0 12px; }
-.workspace-jobs-list > p { padding: 12px 16px; font-size: 13px; color: var(--muted); }
-.workspace-jobs-list h3 { margin: 0; padding: 14px 16px 6px; font-size: 12px; font-weight: 500; color: var(--dim); }
+.workspace-jobs-list > p { padding: 12px 16px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.workspace-jobs-list h3 { margin: 0; padding: 14px 16px 6px; font-size: 11.5px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
 .workspace-jobs-list ul { margin: 0; padding: 0; list-style: none; }
-.workspace-jobs-row { display: grid; grid-template-columns: 10px minmax(0,1fr) auto; align-items: center; column-gap: 10px; width: 100%; min-height: 68px; padding: 8px 16px; background: none; color: var(--text); border: 0; border-bottom: 1px solid var(--divider); font: inherit; text-align: left; cursor: pointer; }
+/* Phone rows (frame 9): glyph, a one-line title over `id · model · cost`, status over its time. */
+.workspace-jobs-row { display: grid; grid-template-columns: 10px minmax(0,1fr) auto; grid-template-rows: auto auto; align-items: center; column-gap: 12px; row-gap: 2px; width: 100%; min-height: 68px; padding: 10px 16px; background: none; color: var(--text); border: 0; border-bottom: 1px solid var(--divider); font: inherit; text-align: left; cursor: pointer; }
 .workspace-jobs-row:hover, .workspace-jobs-row:focus-visible { background: var(--raised); }
-.workspace-jobs-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.workspace-jobs-title > b { font-size: 14.5px; font-weight: 500; overflow-wrap: anywhere; }
-.workspace-jobs-title > span { font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-jobs-job { grid-row: 1 / 3; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.workspace-jobs-job > code { display: none; font-family: var(--font-mono); font-size: 12.5px; color: var(--text); }
+/* Palette rule: working, launching, held and parked glyphs stay neutral in this list. */
+.workspace-jobs-job > .job-dot-working, .workspace-jobs-job > .job-dot-awaiting_merge { background: var(--muted); border-color: var(--muted); }
+.workspace-jobs-job > .job-dot-launching, .workspace-jobs-job > .job-dot-held { border-color: var(--muted); }
+.workspace-jobs-title { grid-row: 1 / 3; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.workspace-jobs-title > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; font-weight: 500; }
+.workspace-jobs-title > span { min-width: 0; font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-jobs-title code { font-size: 12px; }
-.workspace-jobs-status { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 13px; color: var(--muted); white-space: nowrap; }
-.workspace-jobs-status > small { font-size: 12px; color: var(--dim); }
+.workspace-jobs-id { display: none; }
+.workspace-jobs-status { grid-column: 3; max-width: 140px; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--muted); white-space: nowrap; text-align: right; }
+.workspace-jobs-done { grid-column: 3; font-size: 12px; color: var(--dim); white-space: nowrap; text-align: right; }
 .workspace-jobs-cost { display: none; font-size: 13px; color: var(--muted); text-align: right; }
+.workspace-jobs-more { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 48px; padding: 0 16px; background: none; color: var(--muted); border: 0; border-bottom: 1px solid var(--divider); font: inherit; font-size: 13.5px; cursor: pointer; }
+.workspace-jobs-more:hover, .workspace-jobs-more:focus-visible { background: var(--raised); color: var(--text); }
 .workspace-jobs-hint { display: none; margin: 0; padding: 12px 20px; border-top: 1px solid var(--divider); font-size: 12.5px; color: var(--dim); }
 
 .workspace-job { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; min-width: 0; background: var(--background); }
@@ -110,12 +130,29 @@
 
 @media (min-width: 900px) {
  .workspace-jobs-open > kbd { display: inline; }
- .workspace-jobs { inset: 0 0 0 auto; width: min(860px, 100%); height: 100%; background: var(--surface); border: 0; border-left: 1px solid var(--border); border-radius: 0; box-shadow: -24px 0 60px var(--page); }
- .workspace-jobs-head { padding: 10px 8px 0 20px; }
- .workspace-jobs-bar { padding: 8px 20px 12px; }
+ /* Frame 3: an 861 px drawer (its left border at x579); its height leaves `--workspace-status` (S5's footer) clear. */
+ .workspace-jobs { inset: 0 0 auto auto; width: min(861px, 100%); height: calc(100% - var(--workspace-status, 0px)); background: var(--surface); border: 0; border-left: 1px solid var(--border); border-radius: 0; box-shadow: -24px 0 60px var(--page); }
+ .workspace-jobs-head { flex-wrap: nowrap; gap: 8px; padding: 10px 8px 10px 16px; }
+ .workspace-jobs-scope, .workspace-jobs-search { display: none; }
+ .workspace-jobs-bar { order: 0; flex: 1; flex-wrap: nowrap; padding: 0; }
+ .workspace-jobs-bar > .jobs-segments { order: 0; padding: 0; background: none; border: 0; gap: 8px; }
+ .workspace-jobs-bar > .jobs-segments button { border: 1px solid var(--border); }
+ .workspace-jobs-bar > .project-filter { margin-left: 0; }
+ .workspace-jobs-find, .workspace-jobs-find[data-open] { display: flex; flex: 1 1 auto; }
+ .workspace-jobs-find > input { font-size: 14px; }
+ .workspace-jobs-cols, .workspace-jobs-row { display: grid; grid-template-columns: 84px minmax(0,1fr) 130px 64px 72px; column-gap: 14px; padding: 0 20px; }
+ .workspace-jobs-cols { flex-shrink: 0; align-items: center; min-height: 40px; border-bottom: 1px solid var(--divider); font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); }
  .workspace-jobs-list h3 { padding: 14px 20px 6px; }
- .workspace-jobs-row { grid-template-columns: 10px minmax(0,1fr) 140px 64px; column-gap: 14px; min-height: 64px; padding: 8px 20px; }
- .workspace-jobs-cost { display: block; }
+ .workspace-jobs-row { grid-template-rows: auto; min-height: 64px; padding: 8px 20px; }
+ .workspace-jobs-job, .workspace-jobs-title { grid-row: auto; }
+ .workspace-jobs-job { justify-self: start; gap: 6px; min-height: 30px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; }
+ .workspace-jobs-job > code { display: inline; overflow: hidden; text-overflow: ellipsis; }
+ .workspace-jobs-id { display: block; }
+ .workspace-jobs-meta { display: none; }
+ .workspace-jobs-status { grid-column: auto; justify-self: start; max-width: 100%; padding: 2px 9px; border: 1px solid var(--border); border-radius: 999px; font-size: 12.5px; text-align: left; }
+ .workspace-jobs-done { grid-column: auto; font-size: 13px; color: var(--muted); text-align: left; }
+ .workspace-jobs-cost { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+ .workspace-jobs-more { justify-content: flex-start; padding: 0 20px; }
  .workspace-jobs-hint { display: block; }
  /* Over the chat column below 1280 px; the shell's ⋮ (z-index 2) stays on top of the bar's right end. */
  .workspace-job { position: relative; inset: auto; z-index: 1; grid-column: 2; grid-row: 1 / -1; min-height: 0; }

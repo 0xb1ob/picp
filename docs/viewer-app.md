@@ -673,6 +673,19 @@ Crossing 900 px while the context is open closes it (the sheet hands focus back 
 expanded or keeps Escape and no bottom sheet remains on a desktop. Deferred: per-conversation job lists and totals (not
 recorded), threads and Cmd+N. `m3-context` captures both surfaces at 1440, 900, 899 and 390 px.
 
+**Full match S3 (jobs drawer and PR chip).** The Jobs drawer's header is one toolbar on desktop (frame 3): the project
+filter, Today / In flight with counts, a local query field (id, title or project, case-insensitive, applied before every
+count) and Full page; a phone keeps the title row with the scope ("All projects · today"), a search toggle and the
+segments below (frame 9). Desktop rows sit under Job, Title / context, Status, Done and Cost columns in an 861 px drawer
+clear of the status footer; phone rows show a one-line title, `suffix · model · cost` and the finished time or elapsed.
+Groups are In flight, With the team, Queued and Done today (newest first), five rows each before "Show N more", which
+moves focus to the first revealed row. A missing cost or time is "not recorded", never $0 or 0m; status glyphs stay
+neutral. PR chips (C1) render each slot as glyph and name (✓ Review, ◌ CI, ✕ CI, ○ Merge, ✓ Merged sha) with the
+recorded state in its title; only a pass or merge is green. `--stage full-match-jobs` fails unless the 1440 and 390 px
+captures show the one-row toolbar, the five columns, every group, the query narrowing to one row, Show more keeping
+focus, 44 px phone targets and nothing outside the viewport; the committed captures are `desktop`, `desktop-query`,
+`phone`, `phone-more` and `pr-chip` `.png` under `docs/tui-verification/full-match-jobs/`.
+
 **Full match S2 (transcript and context).** An Asked you card states who asked, when and the project, opens its
 recorded Context (or "Context not recorded") and lists each option as a card with its consequence, the recommendation
 marked suggested; a click sends through the same `useAnswering` path as the inline chips, so one pending answer holds
