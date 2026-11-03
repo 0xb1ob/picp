@@ -681,7 +681,7 @@ test("P19-bridge-steps: a wake and the calls after it are one run of steps; noti
 	const tab = await d.open(OPERATOR);
 	const notice = () => tab.$(".session-steps .session-notice-line")!;
 	await tab.find(".session-steps");
-	assert.deepEqual(pills(tab), ["≡ 3 steps · cp-xrhq ▸"], "one pill: the wake plus two calls, named by the recorded job");
+	assert.deepEqual([pills(tab), tab.$(".session-steps > .session-tools")?.getAttribute("title")], [["≡ 3 steps · xrhq ▸"], "cp-xrhq"], "one pill: the wake plus two calls, named by the recorded job's suffix, its full id in the title (full match S2)");
 	assert.equal(tab.$$(".session-bridge").length, 1, "the notice is not repeated outside its run");
 	tab.click(notice());
 	await tab.waitText(/Mobile chat layout/);
@@ -700,7 +700,7 @@ test("P19-bridge-steps: a wake and the calls after it are one run of steps; noti
 	next.splice(5, 0, ...toolRun("t3", "read", "Read 1 line\nTOOL-THREE"));
 	write(file, jsonl(next));
 	tab.refresh();
-	assert.deepEqual(await until(() => pills(tab), (p) => p[0] === "≡ 4 steps · cp-xrhq ▾", "the streamed call"), ["≡ 4 steps · cp-xrhq ▾"], "a streamed call joins the open run");
+	assert.deepEqual(await until(() => pills(tab), (p) => p[0] === "≡ 4 steps · xrhq ▾", "the streamed call"), ["≡ 4 steps · xrhq ▾"], "a streamed call joins the open run");
 	assert.deepEqual([toolTexts(tab).length, notice().getAttribute("aria-expanded")], [3, "true"]);
 
 	const lone = await bridged(t, (stateDir) => [...toolRun("t0", "read", "ORPHAN"), line("14:01", { role: "assistant", content: [{ type: "text", text: "MESSAGE-ONE" }] }), wakeNotice(stateDir, "14:02")]);

@@ -6,7 +6,7 @@ import { ProjectFilter } from "../components/ProjectFilter.tsx";
 import type { ContextUsage, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
 import { contextText } from "../components/ContextChip.tsx";
 import { modelText } from "../../src/viewer/model-text.ts";
-import { stamp, time } from "../format.ts";
+import { elapsed, jobSuffix, stamp, time } from "../format.ts";
 import { jobHref, jobTranscriptHref, sessionHref } from "../routes.ts";
 import { InlineText, Linked, Markdown } from "../components/Markdown.tsx";
 import { PrChips } from "../components/PrChip.tsx";
@@ -28,7 +28,7 @@ import { RestartSession, restartShown } from "../components/RestartSession.tsx";
 import { ParentRestart } from "../components/ParentRestart.tsx";
 import { type ControlView, controlReady } from "../control.ts";
 import { useViewportFit } from "../viewport-fit.ts";
-import { QuickReplies } from "../components/QuickReplies.tsx";
+import { QuickReplies, useAnswering } from "../components/QuickReplies.tsx";
 import { dayKey, dayStarts, isOwn, lastDay, replyAsk, rollups, type Row, rowHead, rows } from "../session-rows.ts";
 import { InRollup, type OpenTranscript, RelayRollup, transcriptClick } from "../components/RelayRollup.tsx";
 
@@ -116,16 +116,20 @@ function groupStarts(rowList: Row[], days: Map<string,string>): Set<string> {
  }
  return starts;
 }
+/** An open run shows its last rows; the rest stay one "N earlier" toggle away (Tools on shows every row). */
+const STEPS_TAIL = 3;
 /**
- * A run of steps (chat v2): one pill opening one card — the wake notice with its own toggle, compact tool rows and,
- * for a recorded job, its transcript link. Tools on (no `onToggle`) shows every card open, without pills.
+ * A run of steps (chat v2): one pill opening one card — the wake notice with its own toggle, "N earlier", compact
+ * time-first tool rows and, for a recorded job, its transcript link. Tools on (no `onToggle`) shows every card open.
  */
 function Steps({row,open,onToggle,onTranscript}: {row:Extract<Row,{kind:"steps"}>;open:boolean;onToggle?:()=>void;onTranscript?:OpenTranscript}) {
  const job=row.notice?.bridge?.job ?? null, tucked=useContext(InRollup);
- // Open, a summary preview would repeat the first row right below it; the job id never does.
- return <ToolRunRow steps count={row.entries.length+(row.notice ? 1 : 0)} detail={job ?? (open ? null : row.entries.find(e=>e.summary)?.summary)} open={open} onToggle={onToggle} notice={row.notice && (open || !tucked) && <BridgeNotice entry={row.notice} clock={clockOf(row.notice)} chips/>}>
-  <div class="session-steps-rows">{row.entries.map(e=><Entry key={e.id} entry={e}/>)}</div>
-  {job && <a class="session-steps-link" href={jobTranscriptHref(job)} onClick={transcriptClick(job,onTranscript)}>Open job transcript →</a>}
+ const [all,setAll]=useState(false), extra=onToggle ? Math.max(0,row.entries.length-STEPS_TAIL) : 0;
+ // Open, a summary preview would repeat the first row right below it; the job suffix never does (its title is the id).
+ return <ToolRunRow steps count={row.entries.length+(row.notice ? 1 : 0)} detail={job ? jobSuffix(job) : open ? null : row.entries.find(e=>e.summary)?.summary} title={job ?? undefined} open={open} onToggle={onToggle} notice={row.notice && (open || !tucked) && <BridgeNotice entry={row.notice} clock={clockOf(row.notice)} chips/>}>
+  {extra > 0 && <button type="button" class="session-steps-earlier" aria-expanded={all} onClick={()=>setAll(!all)}>{extra} earlier <span aria-hidden="true">{all ? "▾" : "▸"}</span></button>}
+  <div class="session-steps-rows">{row.entries.slice(all ? 0 : extra).map(e=><Entry key={e.id} entry={e}/>)}</div>
+  {job && <a class="session-steps-link" href={jobTranscriptHref(job)} title={job} onClick={transcriptClick(job,onTranscript)}>Open job transcript →</a>}
  </ToolRunRow>;
 }
 const clockOf=(e:SessionEntry)=><code class="session-time">{dayKey(e.at) ? time(e.at) : "-"}</code>;
@@ -349,7 +353,8 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const preview=last && `${isOwn(last) ? "You: " : ""}${last.text.replace(/[`*#>|]/g,"").replace(/\s+/g," ").trim().slice(0,200)}`;
  // Quick replies follow the newest shown operator-session message or card (else the rows), before the pending tail.
  const replyTo=data.selected === "you" && data.transcript === true && !history ? replyAsk(data.entries,open) : null;
- const replies=replyTo && <QuickReplies key={`replies-${replyTo.id}`} ask={replyTo} control={control}/>;
+ const answering=useAnswering(control);
+ const replies=replyTo && <QuickReplies key={`replies-${replyTo.id}`} ask={replyTo} control={control} answering={answering}/>;
  const replyAt=replies ? shown.findLast(e=>!isOwn(e) && (isBubble(e) || e.kind === "ask"))?.id : undefined;
  const state=headerState(data,control?.status,history);
  const shell=useContext(ShellContext);
@@ -358,10 +363,12 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  /** Chats: the sidebar from 900 px; the phone's Conversations drawer passes an Operator href keeping the selection. */
  const chats=(you:string)=><><section aria-label="Operator">{row(you,"Operator",history ? "Historical transcript" : preview || modelText(data.operator_context ?? {}),data.selected === "you",{avatar:"OP",at:last?.at,context:preview ? null : data.operator_context,preview:!!preview})}</section>
   <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:workerDot(w),at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section></>;
- const workspace=useWorkspaceSurfaces(filterable,selection,{session:data.operator_session ?? null,current:!history,asks:open,live:data.workers.filter(countedLive),chats,
+ const workspace=useWorkspaceSurfaces(filterable,selection,{session:data.operator_session ?? null,current:!history,asks:open,live:data.workers.filter(countedLive),chats,control,answering,
   onAnswer:()=>{setPinOpen(true); remember(PINNED_KEY,"1","decisions bar");}});
  // Live counts held and idle workers too; the strip calls working only a recorded `working` run.
  const working=data.workers.filter(w=>countedLive(w) && w.run_phase === "working"), scope=!selection ? "All projects" : "project" in selection ? selection.project : "Untagged";
+ // C1: the first working job's elapsed, joined by exact id; unknown is omitted, never 0.
+ const stripClock=working[0] ? workspace.flight?.get(working[0].id)?.elapsed_seconds ?? null : null;
  // A reply's job link opens Transcript beside the chat; renderRows reads it at render time, below this hook.
  const openJob=workspace.openJob, toTranscript:OpenTranscript | undefined=openJob ? (id,el)=>openJob(id,"transcript",el) : undefined;
  return <div class="sessions">
@@ -384,7 +391,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    <header class="session-heading">{data.selected !== "workers" && <span class={data.selected === "you" ? "session-avatar session-avatar-bot" : "session-avatar"} aria-hidden="true">{data.selected === "you" ? "OP" : "CP"}</span>}
     <div class="session-heading-id"><strong>{data.selected === "you" && data.transcript === true ? "Operator" : data.title}</strong><span class="session-heading-state"><span class={`session-dot session-dot-${state.dot}`}/><span>{state.text}</span><CtxPct usage={context} label/></span></div>
     {data.selected === "you" && data.transcript !== true && <p>Trace a decision: parent’s question → operator’s answer → the message you saw.</p>}
-    {filterable && <div class="session-strip"><span class="session-strip-run" aria-hidden="true"/><span class="session-strip-count">{working.length ? `${working.length} working` : "none working"}</span>{working[0] && <span class="session-strip-job" title={working[0].id}>· {working[0].id}</span>}
+    {filterable && <div class="session-strip"><span class="session-strip-run" aria-hidden="true"/><span class="session-strip-count">{working.length ? `${working.length} working` : "none working"}</span>{working[0] && <span class="session-strip-job" title={working[0].id}>· {jobSuffix(working[0].id)}{stripClock !== null && ` · ${elapsed(stripClock)}`}</span>}
      {open.length > 0 && <><span class="session-strip-sep" aria-hidden="true"/><span class="workspace-badge workspace-badge-ask">{open.length}</span><span class="session-strip-what"> asked you</span></>}</div>}
     {filterable && <div class="session-filter"><details class="session-bar-menu session-filter-menu">
      <summary aria-label={`Project: ${scope}`} title="Filter by project"><span>{scope}</span><span aria-hidden="true">▾</span></summary>

@@ -76,7 +76,8 @@ test("M3-jobs-drawer: chat Cmd+J opens the Jobs drawer; segments and the M1 filt
 	tab.type(field as unknown as Element, "KEEP-DRAFT");
 	field.focus();
 	const trigger = await tab.find(".session-filter > .workspace-jobs-open");
-	assert.deepEqual([trigger.textContent, trigger.getAttribute("aria-expanded"), tab.$(DRAWER), reads(tab)], ["Jobs⌘J", "false", null, 0], "closed: one trigger, nothing read");
+	// Full match S2: the chat's context reads /api/jobs once (exact-id join); the closed drawer reads nothing more.
+	assert.deepEqual([trigger.textContent, trigger.getAttribute("aria-expanded"), tab.$(DRAWER), await until(() => reads(tab), (n) => n > 0, "the context read")], ["Jobs⌘J", "false", null, 1], "closed: one trigger, one context read");
 	assert.deepEqual([trigger.closest("header.session-heading") !== null, trigger.getAttribute("title")], [true, "Jobs (Ctrl/⌘ J)"], "Full match S1: Jobs ⌘J sits in the compact header");
 
 	for (const modifier of ["metaKey", "ctrlKey"] as const) {
@@ -107,7 +108,7 @@ test("M3-jobs-drawer: chat Cmd+J opens the Jobs drawer; segments and the M1 filt
 	assert.deepEqual([headings(tab), tab.window.location.hash], [["In flight · 1"], `${CHAT}&project=atlas`], "M1: the hash carries the chat's selection");
 	assert.equal(tab.$(`${DRAWER} .workspace-full`)!.getAttribute("href"), "#jobs?project=atlas", "Full page keeps the selection");
 	assert.equal((tab.$('.session-filter select[aria-label="Filter by project"]') as unknown as { value: string }).value, "atlas", "one selection for chat and drawer");
-	assert.equal(reads(tab), 3, "one read per opening; the selection never refetches");
+	assert.equal(reads(tab), 4, "one read per opening plus the context's one; the selection never refetches");
 
 	assert.equal(escape(tab), true);
 	await until(() => tab.$(DRAWER), (el) => el === null, "Escape to close the drawer");
@@ -214,7 +215,8 @@ test("M3-jobs-reply-log: a reply's job link opens Transcript in the pane and kee
 	await tab.waitText(/REPLY-CARD/);
 	const field = await tab.find(".operator-composer textarea") as unknown as HTMLElement & { value: string };
 	tab.type(field as unknown as Element, "KEEP-DRAFT");
-	const run = (job: string) => tab.$$(".session-steps").find((r) => r.querySelector(".session-steps-face")?.textContent?.includes(job))!;
+	// Full match S2: the pill shows a compact suffix; the full id is its toggle's title.
+	const run = (job: string) => tab.$$(".session-steps").find((r) => r.querySelector(".session-tools")?.getAttribute("title") === job)!;
 	const stepsLink = async (job: string) => {
 		if (!run(job).querySelector(".session-steps-link")) tab.click(run(job).querySelector(".session-tools")!);
 		return tab.find(".session-steps-link", (a) => a.getAttribute("href") === `#job/${job}?tab=transcript`);

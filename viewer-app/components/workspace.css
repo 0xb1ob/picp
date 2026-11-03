@@ -60,12 +60,30 @@
 .workspace-context-ask, .workspace-context-job { display: flex; flex-direction: column; gap: 6px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; font-size: 13px; }
 .workspace-context-ask { background: var(--ask-card); border-color: var(--ask-border); }
 .workspace-context-ask > b { font-size: 14.5px; font-weight: 600; line-height: 20px; }
-.workspace-context-ask > small { font-size: 12px; color: var(--muted); }
-.workspace-context-ask > button, .workspace-context-links > button, .workspace-context-jobs { min-height: 44px; padding: 0 12px; background: var(--background); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 13px; cursor: pointer; }
-.workspace-context-ask > button { align-self: flex-start; }
+.workspace-context-ask > small { font-size: 12px; color: var(--dim); }
+.workspace-context-ask > .workspace-context-why { font-size: 12.5px; color: var(--muted); }
+.workspace-context-ask > .workspace-context-why > summary { display: flex; align-items: center; min-height: 39px; border-top: 1px solid var(--ask-border); cursor: pointer; }
+.workspace-context-why > p { white-space: pre-line; font-size: 12.5px; line-height: 19px; }
+.workspace-context-ask > .workspace-context-options { gap: 8px; }
+/* The suggested option sits on an open ask: the palette rule's one sanctioned amber highlight. */
+.workspace-context-ask .workspace-context-option { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 44px; padding: 10px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 10px; font: inherit; text-align: left; cursor: pointer; }
+.workspace-context-ask .workspace-context-option-suggested { background: var(--ask-background); border-color: var(--ask-border); }
+.workspace-context-ask .workspace-context-suggested { font-size: 12px; font-weight: 400; color: var(--amber); }
+.workspace-context-option > b { font-size: 14px; font-weight: 500; }
+.workspace-context-option > small { font-size: 12.5px; line-height: 18px; color: var(--muted); }
+.workspace-context-option:disabled { cursor: default; opacity: 0.6; }
+.workspace-context-ask .session-replies-state { font-size: 12.5px; }
+.workspace-context-ask > .workspace-context-chat { align-self: flex-start; min-height: 44px; padding: 0; background: none; border: 0; font: inherit; font-size: 12.5px; color: var(--dim); cursor: pointer; }
+.workspace-context-links > button, .workspace-context-jobs { min-height: 44px; padding: 0 12px; background: var(--background); color: var(--text); border: 1px solid var(--border); border-radius: 9px; font: inherit; font-size: 13px; cursor: pointer; }
 .workspace-context-job-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.workspace-context-job-head > code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.workspace-context-job-head > b { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .workspace-context-job-head > span:last-child { flex-shrink: 0; font-size: 12px; color: var(--muted); }
+.workspace-context-job > code { font-size: 12px; color: var(--dim); }
+.workspace-context-clock { display: flex; flex-direction: column; gap: 4px; }
+.workspace-context-clock > progress { appearance: none; width: 100%; height: 4px; border: 0; border-radius: 2px; background: var(--border); overflow: hidden; }
+.workspace-context-clock > progress::-webkit-progress-bar { background: var(--border); }
+.workspace-context-clock > progress::-webkit-progress-value { background: var(--dim); }
+.workspace-context-clock > progress::-moz-progress-bar { background: var(--dim); }
 .workspace-context-job dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 12px; margin: 0; font-size: 12.5px; }
 .workspace-context-job dt { color: var(--dim); }
 .workspace-context-job dd { margin: 0; min-width: 0; }

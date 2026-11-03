@@ -18,7 +18,7 @@ import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
-	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell"];
+	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -78,15 +78,16 @@ const asked = (id: string, question: string) => ({ id, project: "picp", question
 	mandate_objective: null, jobs: [], escalation: null, evidence: [] }) as unknown as NonNullable<SessionsResponse["open_asks"]>[number];
 const askCard = (ask: ReturnType<typeof asked>, at: string): SessionEntry => ({ ...say(`c-${ask.id}`, at, "Operator → you", ask.question), kind: "ask", ask_id: ask.id,
 	ask: { id: ask.id, question: ask.question, options: ask.options, recommendation: ask.recommendation, state: "open", answer: null, answered_at: null, reason: null } });
+const fullMatch = args.stage === "full-match-shell" || args.stage === "full-match-transcript";
 if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context" || args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces"
-	|| args.stage === "m3-fidelity-composer" || args.stage === "full-match-shell") {
+	|| args.stage === "m3-fidelity-composer" || fullMatch) {
 	const ask = asked("ask-pr4a", "PR #321 is green on its pushed head. Merge it, or hold it for another review?");
 	sessions.entries = [...entries, askCard(ask, "2026-10-15T08:04:40Z")];
 	sessions.open_asks = [ask];
 	sessions.operator_context = { tokens: 61_000, window: 200_000, percent: 30.5, level: "ok", reason: null, model: "fixture-model", last_compact_at: null, thinking: null } as SessionsResponse["operator_context"];
 }
 /** M3 shell: committed captures name picp only, so the table's second project reads picp too. */
-const picpOnly = args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces" || args.stage === "m3-fidelity-composer" || args.stage === "full-match-shell";
+const picpOnly = args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces" || args.stage === "m3-fidelity-composer" || fullMatch;
 if (picpOnly) sessions.entries = sessions.entries.map(e => ({ ...e, text: e.text.replaceAll("demo-app", "picp") }));
 /** M3 fidelity B: an own message before the ask, so one capture holds a bubble, a reply, the ask and both sends. */
 if (args.stage === "m3-fidelity-transcript") sessions.entries.splice(-1, 0, say("e7", "2026-10-15T08:04:30Z", "Operator", "Hold the merge until I have read the review."));
@@ -189,6 +190,11 @@ try {
 		row("cp-m3-park", "picp", "awaiting_merge", "Parked with the team", { pr_url: "https://github.com/o/picp/pull/712", pr_status: "open" }),
 		row(JOB, "picp", "done", "Sessions chat v2 PR 2", { finished_today: true, finished_at: GENERATED, cost_usd: 2.05, pr_url: "https://github.com/o/picp/pull/700", pr_status: "merged" }),
 	] };
+	// Full match S2: the chat's context joins /api/jobs by exact worker id; one recorded clock and a long title.
+	if (args.stage === "full-match-transcript") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
+		row("cp-sessions-v2-pr3", "picp", "working", "Restyle the transcript steps so a long job title keeps wrapping inside its context card", { elapsed_seconds: 3600, limit_seconds: 7200, cost_usd: 1.42, model: "fixture-model" })] };
+	// Every chat's context now reads /api/jobs; stages without their own list (or the real viewer's) get an empty one.
+	if (!routes["/api/jobs"] && !["m3-transcript", "nav-simplify", "p3-quota", "m3-shell"].includes(args.stage)) routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [] };
 	// M3 slice 4: the composer menu attaches the done job's own P1 reference, as its job page's Ask would.
 	if (args.stage === "m3-composer") routes[`/api/job/${JOB}`] = { ...job, ask_reference: { kind: "job", project: "picp", job_id: JOB }, evidence_lookup: { supported: true, why: "fixture" } };
 	server.on("request", (req, res) => {
@@ -640,7 +646,7 @@ try {
 			["1279", 1279, 1000, [], { inspector: true, sheet: false, heading: 48, small: "" }],
 			["900", 900, 1000, [], { inspector: true, sheet: false, heading: 48, small: "" }],
 			["phone", 390, 844, [], { inspector: false, sheet: false, heading: 45, bar: 53, sides: "10px 14px", field: "18px field over footer full width",
-				strip: "1 working · cp-sessions-v2-pr3", small: "" }],
+				strip: "1 working · pr3", small: "" }],
 			["899", 899, 1000, [], { inspector: false, sheet: false, heading: 45, bar: 53, small: "" }],
 			["drawer", 390, 844, [drawer], { drawer: "Chat,Jobs,More", drawer_width: 317, small: "" }],
 			["filter", 390, 844, [filter], { sheet: false, small: "" }],
@@ -652,6 +658,29 @@ try {
 			if (off.length) throw new Error(`full-match-shell-${name}: ${off.join("; ")}`);
 		}
 		if (posts.length) throw new Error(`full-match-shell sent ${posts.join(", ")}: the shell only reads`);
+	}
+	if (stage === "full-match-transcript") {
+		// Full match S2 (design frames 5/7/12): the joined job card, option cards and time-first steps behind "N earlier".
+		// Negative control: a missing join (`clock`), time-last rows (`time_first`) or no disclosure fails a capture.
+		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
+			const row = q(".session-steps-open .session-steps-rows .session-tool > summary"), cell = (i) => row?.children[i]?.getBoundingClientRect().left ?? 0;
+			return { options: all(".workspace-context-option").length, clock: q(".workspace-context-job dd")?.textContent ?? null, job: q(".workspace-context-job code")?.textContent ?? null,
+				earlier: q(".session-steps-earlier")?.textContent ?? null, time_first: !!row && row.children[0].classList.contains("session-time") && cell(0) < cell(1),
+				outside: all(".workspace-context button, .workspace-context a, .session-steps-earlier, .session-steps-link, .pr-chip")
+					.filter(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className).join() }; })()`;
+		const context: Step = [`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`, `!!document.querySelector(".workspace-context .workspace-context-option")`];
+		const joined: Step = ["true", `document.querySelector(".workspace-context-job dd")?.textContent === "1h 0m / 2h 0m"`];
+		const steps: Step = [`document.querySelector('.session-steps > .session-tools[title="${JOB}"]').click()`, `!!document.querySelector(".session-steps-earlier")`];
+		const facts = { options: 3, clock: "1h 0m / 2h 0m", job: "pr3", outside: "" }, disclosed = { earlier: "2 earlier ▸", time_first: true, outside: "" };
+		const shotsT: [string, number, number, Step[], object][] = [["desktop-1440x1000", 1440, 1000, [joined, steps], { ...facts, ...disclosed }],
+			["context-phone-390x844", 390, 844, [context, joined], facts], ["steps-phone-390x844", 390, 844, [steps], disclosed]];
+		for (const [name, width, height, run, want] of shotsT) {
+			await capture(`full-match-transcript-${name}`, transcript, width, height, "dark", loaded, "bottom", run);
+			const got = await evaluate(look);
+			const off = Object.entries(want).filter(([k, v]) => got[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k])} (want ${JSON.stringify(v)})`);
+			if (off.length) throw new Error(`full-match-transcript-${name}: ${off.join("; ")}`);
+		}
+		if (posts.length) throw new Error(`full-match-transcript sent ${posts.join(", ")}: the captures only read`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

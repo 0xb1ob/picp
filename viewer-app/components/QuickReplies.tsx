@@ -1,34 +1,63 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { AwaitingDetail } from "../../src/viewer/api-types.ts";
 import { type ControlView, controlLine, controlReady, deliveryLine } from "../control.ts";
 import { restartInFlight } from "../restart-control.ts";
 
+/** The asks a click answered, shared by the inline chips and the context card so one answer request is in flight. */
+export interface Answering { asks: string[]; answer(ask: AwaitingDetail, label: string): void }
+const failedFor = (id: string, control?: ControlView) => control?.delivery?.ask_id === id ? control.delivery.state === "failed"
+ : control?.pending?.some(p => p.ask_id === id && p.state === "failed") === true;
+/** Only a failure re-enables an answer; the ref refuses a second click that lands before the first one re-renders. */
+export function useAnswering(control?: ControlView): Answering {
+ const [asks, setAsks] = useState<string[]>([]);
+ const inflight = useRef(new Set<string>());
+ const failed = asks.filter(id => failedFor(id, control)), key = failed.join();
+ useEffect(() => {
+  if (!failed.length) return;
+  for (const id of failed) inflight.current.delete(id);
+  setAsks(list => list.filter(id => !failed.includes(id)));
+ }, [key]);
+ return {asks, answer: (a, label) => {
+  if (inflight.current.has(a.id)) return;
+  inflight.current.add(a.id); setAsks(list => [...list, a.id]); control?.send({kind: "answer", ask_id: a.id, label});
+ }};
+}
 /**
- * Quick replies (chat v2): the verbatim options of one attributable open ask (session-rows.ts replyAsk), each sent as
- * its typed answer through DecisionCard's path. They hold while any answer to the ask is clicked here, pending or
- * recorded, until the journal closes it; only a failure re-enables. Key it by ask id.
+ * One ask's answer state: held while any answer to it is clicked (here or on the context card), pending or recorded,
+ * until the journal closes it; only a failure re-enables. A later send can replace `delivery`; `pending` then decides.
  */
-export function QuickReplies({ask, control}: {ask: AwaitingDetail; control?: ControlView | undefined}) {
+export function answerView(ask: AwaitingDetail, control: ControlView | undefined, answering: Answering) {
  const ready = controlReady(control?.status);
  const mine = control?.delivery?.ask_id === ask.id ? control.delivery : null;
- // A later send can replace `delivery`; the ask's own failed entry in `pending` then still re-enables the chips.
- const failed = mine ? mine.state === "failed" : control?.pending?.some(p => p.ask_id === ask.id && p.state === "failed") === true;
- // A click holds the chips even after a later send (the composer's, another card's) replaces `delivery`.
- const [clicked,setClicked] = useState(false);
- useEffect(() => { if (failed) setClicked(false); }, [failed]);
+ const failed = failedFor(ask.id, control);
  const status = control?.status;
  const recorded = controlReady(status) && status.recent.some(r => r.ask_id === ask.id && r.state !== "failed" && r.state !== "dropped");
  const pending = control?.pending?.some(p => p.ask_id === ask.id && p.state !== "failed") === true;
- const answered = (!failed && (clicked || mine !== null)) || recorded || pending;
+ const answered = (!failed && (answering.asks.includes(ask.id) || mine !== null)) || recorded || pending;
  const disabled = !ready || control?.delivery?.state === "sending" || control?.starting?.state === "starting" || restartInFlight(control?.restarting) || answered;
- return <section class="session-replies" aria-label={`Quick replies to ${ask.id}`}>
-  <p class="session-replies-to">Options from <code>{ask.id}</code>: {ask.question}</p>
-  <div class="session-replies-chips">{ask.options.map((option, i) => <span key={option.label} class="session-reply-wrap">
-   <button type="button" class={ask.recommendation === option.label ? "session-reply session-reply-recommended" : "session-reply"} disabled={disabled} title={option.consequence} aria-describedby={`${ask.id}-reply-${i}`} onClick={() => { setClicked(true); control?.send({kind: "answer", ask_id: ask.id, label: option.label}); }}>{option.label}</button>
-   <span id={`${ask.id}-reply-${i}`} class="session-replies-why">{ask.recommendation === option.label ? "Recommended. " : ""}{option.consequence}</span>
-  </span>)}</div>
+ return {ready, mine, answered, disabled};
+}
+/** The state line under either answer surface. */
+export function AnswerLine({ask, control, answering}: {ask: AwaitingDetail; control: ControlView | undefined; answering: Answering}) {
+ const {ready, mine, answered} = answerView(ask, control, answering);
+ return <>
   {!ready && <p class="session-replies-state" role="status">{controlLine(control?.status)}</p>}
   {mine ? <p role={mine.state === "failed" ? "alert" : "status"} class={mine.state === "failed" ? "session-replies-state session-replies-failed" : "session-replies-state"}>{deliveryLine(mine)}{mine.state === "failed" ? "" : " — the options close when the session records the answer"}</p>
    : answered && <p role="status" class="session-replies-state">An answer is on its way — the options close when the session records it</p>}
+ </>;
+}
+/**
+ * Quick replies (chat v2): the verbatim options of one attributable open ask (session-rows.ts replyAsk), each sent as
+ * its typed answer through `answering`, the state the context card shares. Key it by ask id.
+ */
+export function QuickReplies({ask, control, answering}: {ask: AwaitingDetail; control?: ControlView | undefined; answering: Answering}) {
+ const {disabled} = answerView(ask, control, answering);
+ return <section class="session-replies" aria-label={`Quick replies to ${ask.id}`}>
+  <p class="session-replies-to">Options from <code>{ask.id}</code>: {ask.question}</p>
+  <div class="session-replies-chips">{ask.options.map((option, i) => <span key={option.label} class="session-reply-wrap">
+   <button type="button" class={ask.recommendation === option.label ? "session-reply session-reply-recommended" : "session-reply"} disabled={disabled} title={option.consequence} aria-describedby={`${ask.id}-reply-${i}`} onClick={() => answering.answer(ask, option.label)}>{option.label}</button>
+   <span id={`${ask.id}-reply-${i}`} class="session-replies-why">{ask.recommendation === option.label ? "Recommended. " : ""}{option.consequence}</span>
+  </span>)}</div>
+  <AnswerLine ask={ask} control={control} answering={answering}/>
  </section>;
 }
