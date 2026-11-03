@@ -1,11 +1,11 @@
 /**
- * Self-review A2: script, promotion, freshness and replacement parity for the A1 authority hold. Cases H11–H14 of the
- * approved plan, plus a gate history past attempt 32. Admission runs through real pi parents' registered tools; the
- * pipeline and gate producers run on an in-process CommandPost, as in authority-hold.test.ts.
+ * Self-review A2/A2b: script, promotion, freshness, replacement and replay parity for the A1 authority hold: H11–H14,
+ * H17–H18 and a gate history past attempt 32. Admission runs through real pi parents' registered tools; the pipeline
+ * and gate producers run on an in-process CommandPost, as in authority-hold.test.ts.
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
@@ -363,6 +363,73 @@ test("H14c: a mechanical cp_gate handoff of a recovered plan keeps the ship hold
 	writeFileSync(b.post.artifacts.file(recovered), `${ARTIFACT_BODY}\n# Addendum\nAlso bump y in src/app.ts.\n`);
 	(await b.single("Dispatch the later ship.", [[dispatch("stale", later)]])).failed("stale", new RegExp(`was released, but .*cp_gate ${recovered}`));
 	b.untouched(later);
+});
+
+/** A real policy hold on a fresh pipeline, withdrawn and replaced through cp_escalate; returns the replacement id too. */
+async function releasedByReplacement(b: Awaited<ReturnType<typeof bench>>, slug: string) {
+	const policy = await b.gated(slug, { verdict: "escalate", reasons: ["the plan skips a rollback step"] });
+	const es = policy.held!.id;
+	const replaced = await b.single(`Replace ${es}.`, [[call("withdraw", "cp_escalate", { action: "withdraw", escalation_id: es, reason: "superseded" })],
+		[call("replace", "cp_escalate", { action: "replace", escalation_id: es })]]);
+	replaced.ok("withdraw");
+	replaced.ok("replace");
+	const rep = new EscalationStore({ home: b.home }).list().find((item) => item.replaces_escalation_id === es)!.id;
+	return { ...policy, es, rep };
+}
+
+test("H17: a replay of the unchanged gate attempt respects a replacement's release; a changed plan still needs cp_gate", { skip: SKIP, timeout: 900_000 }, async (t) => {
+	const b = await bench(t);
+	b.post.mandates.issue({ projects: ["demo"], objective: "a2b replay", ...GRANT });
+	const records = (jobId: string) => new EscalationStore({ home: b.home }).list({ jobId }).length;
+	const kept = await releasedByReplacement(b, "replay");
+	(await b.single(`Approve ${kept.rep}.`, [[quote("approve", kept.rep, "approve", `Approve ${kept.rep}.`)]])).ok("approve");
+	const fresh = await b.ship("fresh covered ship");
+	const before = records(kept.research_id);
+	// Before the fix the replay re-raised the released policy verdict as a new, unreleased hold that refused the ship.
+	const replayed = await b.advanceThrough(kept.research_id);
+	assert.notEqual(replayed.state, "escalated", `H17: the released replay proceeds: ${replayed.message}`);
+	assert.equal(records(kept.research_id), before, "H17: the replay records no new escalation");
+	(await b.single("Dispatch the ship.", [[dispatch("fresh", fresh)]])).ok("fresh", /accepted/);
+	await b.post.tearDown(fresh, { force: true });
+
+	// Variant: the artifact changes after the answer (a later second), so the replay surfaces cp_gate and admits nothing.
+	const stale = await releasedByReplacement(b, "replay-stale");
+	(await b.single(`Approve ${stale.rep}.`, [[quote("approve", stale.rep, "approve", `Approve ${stale.rep}.`)]])).ok("approve");
+	await new Promise((resolve) => setTimeout(resolve, 1100));
+	writeFileSync(b.post.artifacts.file(stale.research_id), `${ARTIFACT_BODY}\n# Addendum\nAlso bump y in src/app.ts.\n`);
+	const later = await b.ship("later covered ship");
+	const leased = b.leased();
+	const surfaced = await b.advanceThrough(stale.research_id);
+	assert.deepEqual([surfaced.state, surfaced.next], ["escalated", "surface"]);
+	assert.match(surfaced.message ?? "", /artifact has changed .*cp_gate/);
+	(await b.single("Dispatch the later ship.", [[dispatch("later", later)]])).failed("later", new RegExp(`${later}: refused before lease — authority hold`));
+	for (const jobId of [later, stale.ship_id]) b.untouched(jobId);
+	assert.deepEqual(b.leased(), leased, "H17: a stale consent takes no lease");
+});
+
+test("H18: cp_decide refuses an off-menu answer on a hold and writes nothing; approve then releases; a non-hold record keeps free answers", { skip: SKIP, timeout: 600_000 }, async (t) => {
+	const b = await bench(t);
+	b.post.mandates.issue({ projects: ["demo"], objective: "a2b off-menu", ...GRANT });
+	const held = await releasedByReplacement(b, "off-menu");
+	const fresh = await b.ship("fresh covered ship");
+	const store = () => new EscalationStore({ home: b.home });
+	const control = await b.post.escalations.raise({ job_ids: ["cp-control"], kind: "product_ambiguity", question: "which copy?",
+		options: [{ id: "approve", label: "approve", consequence: "proceed", cost: "none" }], recommended: "approve" });
+	const journal = () => readFileSync(join(b.home, LAYOUT.escalationsFile), "utf8");
+	const before = journal();
+	const off = await b.single(`Override ${held.rep}.`, [[quote("override", held.rep, "override", `Override ${held.rep}.`)]]);
+	assert.deepEqual([store().get(held.rep)?.status, store().get(held.rep)?.answer], ["open", undefined], "H18: the replacement stays open and unanswered");
+	assert.equal(journal(), before, "H18: the refusal writes nothing");
+	off.failed("override", new RegExp(`${held.rep}: \\\\"override\\\\" is not one of its options; answer with approve or deny naming ${held.rep}`));
+	const refused = await b.single("Dispatch the ship.", [[dispatch("held", fresh)]]);
+	refused.failed("held", new RegExp(`${fresh}: refused before lease — authority hold`));
+	b.untouched(fresh);
+	const on = await b.single(`Approve ${held.rep}. Use the blue copy for ${control.id}.`, [[quote("approve", held.rep, "approve", `Approve ${held.rep}.`),
+		quote("control", control.id, "use the blue copy", `Use the blue copy for ${control.id}.`)], [dispatch("released", fresh)]]);
+	on.ok("approve");
+	on.ok("control");
+	on.ok("released", /accepted/);
+	assert.deepEqual([store().get(control.id)?.status, store().get(control.id)?.answer], ["answered", "use the blue copy"], "a non-hold record keeps free answers");
 });
 
 test("carried low: an escalated pipeline's latest gate is read past attempt 32, and an unknown cause still fails closed", { skip: SKIP, timeout: 300_000 }, async (t) => {

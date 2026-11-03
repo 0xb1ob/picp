@@ -5033,6 +5033,10 @@ it, and an unreadable pipeline file refuses ships in its research job's project 
 naming the file. A hold-write failure in
 `cp_gate` never discards the verdict; `gate_decided` carries `authority_hold_error`. Release does not authorize: the
 gate override and checkpoint rules still apply.
+A2b: `cp_pipeline advance` replaying an unchanged policy verdict treats it as released (`holdReleasedFor`) when its
+chain `releasesHold` at or after the verdict and the artifact's `modified_at`; a later artifact change still needs `cp_gate`.
+A2b: `cp_decide` on a hold record refuses an answer that is no option id or label (plan approval's `revise …` excepted),
+naming the valid ids and the es-id, and writes nothing; other escalations keep accepting free answers.
 
 An open escalation is projected into Awaiting-you (`type: escalation`) from
 the same store. The bridge (`src/cp-bridge.ts`) reads this store for

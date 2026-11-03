@@ -42,7 +42,7 @@ import { CheckpointStore } from "./checkpoint.ts";
 import type { MandateStore, MandateUsageJob } from "./mandate.ts";
 import { inFlightRecord, selectGrant } from "./mandate-permission.ts";
 import { autoDecideCheckpoint } from "./mandate-autodecide.ts";
-import { gateOverride, type EscalationStore, raiseForGate } from "./escalation.ts";
+import { gateOverride, type EscalationStore, holdReleasedFor, raiseForGate } from "./escalation.ts";
 import {
 	type Checkpoint,
 	type Delivery,
@@ -1137,7 +1137,9 @@ export class PipelineRunner {
 		// reaches `#authorize` — that distinction is gate policy (T20/cp-n10), not
 		// something this method may weaken.
 		const flagged = last.verdict === "escalate" && last.cause === "flagged";
-		const override = gateOverride(this.#options.escalations, last, artifact.modified_at);
+		// A replay also honours an affirmative answer on the hold's replacement chain, so a released hold is not re-raised.
+		const override = gateOverride(this.#options.escalations, last, artifact.modified_at) ??
+			(gateResult ? undefined : holdReleasedFor(this.#options.escalations?.list() ?? [], last, artifact.modified_at));
 		if (last.verdict === "escalate" && !flagged && !override) {
 			this.store.setState(researchId, "escalated", this.#now());
 			if (this.#options.escalations) {
