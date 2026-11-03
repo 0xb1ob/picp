@@ -141,6 +141,8 @@ import {
 	WORKER_FORBIDDEN_TOOLS,
 	WORKER_REQUIRED_FLAGS,
 	PARENT_BRIDGE_FLAGS,
+	validateEscalation,
+	validateEscalationFile,
 } from "../src/contracts.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -160,6 +162,35 @@ test("reviewer model is additive, bounded and exact; legacy records still valida
 		assert.equal(validate(schema, incomplete).ok, false, "the optional field never relaxes mandatory fields");
 	}
 	assert.equal(validate(ReviewerModelSchema, "provider/model").ok, true);
+});
+
+test("escalation authority metadata is additive and closed: legacy and new records decode, malformed ones refuse", () => {
+	const legacy = { schema_version: 1, id: "es-a0a0a0", job_ids: ["cp-plan"], kind: "conflicting_acceptance", question: "override the gate?",
+		options: [{ id: "override", label: "override", consequence: "continue", cost: "risk" }], recommended: "override",
+		mandate_id: "md-abcd", mandate_clause: "md-abcd: ask_on", evidence_paths: ["state/gates/cp-plan/gate-1.json"],
+		created_at: "2026-11-03T00:00:00Z", status: "withdrawn" };
+	const hold = { mandate_id: "md-abcd", project: "picp", source_job_id: "cp-plan", ship_job_ids: ["cp-ship"], gate_attempt: 1,
+		evidence_path: "state/gates/cp-plan/gate-1.json", artifact_sha256: "a".repeat(64) };
+	const fresh = { ...legacy, id: "es-b1b1b1", status: "open", authority_hold: hold, replaces_escalation_id: legacy.id };
+	const file = (items: object[]) => validateEscalationFile({ schema_version: 1, updated_at: "2026-11-03T00:00:00Z", items });
+	assert.equal(validateEscalation(legacy).ok, true, "a record with neither field still decodes");
+	assert.equal(validateEscalation(fresh).ok, true);
+	assert.equal(validateEscalation({ ...legacy, authority_hold: { project: "picp", source_job_id: "cp-plan" } }).ok, true, "a no-mandate hold");
+	assert.equal(file([legacy, fresh]).ok, true, "one journal mixes both shapes");
+	const decoded = validateEscalation(legacy);
+	assert.ok(decoded.ok && !("authority_hold" in decoded.value) && !("replaces_escalation_id" in decoded.value), "decoding injects no default");
+	const malformed: Record<string, unknown>[] = [
+		{ replaces_escalation_id: "es-x" }, { replaces_escalation_id: "" }, { authority_hold: null }, { authority_hold: {} },
+		{ authority_hold: { ...hold, released: true } }, { authority_hold: { ...hold, project: "bad project" } },
+		{ authority_hold: { ...hold, mandate_id: "mandate" } }, { authority_hold: { ...hold, source_job_id: "../x" } },
+		{ authority_hold: { ...hold, ship_job_ids: [] } }, { authority_hold: { ...hold, gate_attempt: 0 } },
+		{ authority_hold: { ...hold, artifact_sha256: "abc" } }, { authority_hold: { ...hold, evidence_path: "" } },
+		{ authority_hold_v2: hold },
+	];
+	for (const change of malformed) {
+		assert.equal(validateEscalation({ ...fresh, ...change }).ok, false, JSON.stringify(change));
+		assert.equal(file([legacy, { ...fresh, ...change }]).ok, false, "one malformed record refuses the whole journal");
+	}
 });
 
 test("job ids are path-safe or rejected", () => {

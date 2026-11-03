@@ -4998,6 +4998,18 @@ it never decides a linked checkpoint — withdrawal is not an answer and not aut
 superseded record is refused, and so is an unknown id. The persisted schema has no withdrawal reason; the reason
 travels in the tool result only.
 
+**Authority metadata (self-review A0, decoder-only).** The schema reads two optional fields: `authority_hold`
+(`EscalationAuthorityHoldSchema`, a closed object: `project`, `source_job_id`, and optionally `mandate_id`,
+`ship_job_ids`, `gate_attempt`, `evidence_path`, `artifact_sha256`; no release flag) and `replaces_escalation_id`
+(an `es-…` id). A record without them still decodes and gets no default; a malformed value or an unknown key still
+refuses the whole journal. A0 ships no writer: no producer, constructor, admission or replacement path sets either
+field. Rollout order is binding, because every running reader validates the whole journal and an old strict reader
+refuses the first record that carries a new field: (1) A0 merges and is installed; (2) the operator performs A0's
+**own** terminal `/reload` (an earlier reload does not count); (3) the main session verifies the running operator
+loaded A0-compatible code from `state/operator/dashboard.json` (loaded commit and time, never its tokens) and that
+every strict reader runs it; only then (4) A1, the separate writer PR, is dispatched — deploying A1 is the sole
+writer activation step, with no flag. Rollback before A1 writes may revert A0 only while journals carry neither field.
+
 An open escalation is projected into Awaiting-you (`type: escalation`) from
 the same store. The bridge (`src/cp-bridge.ts`) reads this store for
 `cp_parent status` and relays `cp_escalate` tool calls on the RPC stream.
