@@ -152,7 +152,20 @@ async function bench(t: TestContext) {
 		const labels = requireJobLabels(await post.ledger().show(sourceId));
 		return (await post.ledger().create({ title, project: labels.project, kind: "research", delivery: labels.delivery })).id;
 	};
-	return { home: home.path, post, provider, gateSteps, single, advanceThrough, gated, ship, leased, untouched, closeResearch, replacement };
+	/** In-process planner run whose worker this bench can tear down; returns once its artifact exists. */
+	const plan = async (jobId: string, taskFile?: string) => {
+		assert.equal((await post.dispatch({ jobId, ...(taskFile ? { taskFile } : { task: "Plan bumping x to 2 in src/app.ts." }), fetch: false })).receipt, "accepted");
+		await waitFor(() => post.artifacts.has(jobId), (there) => there, { what: `${jobId}'s planner artifact` });
+	};
+	const gateOnce = async (jobId: string, overrides: Record<string, unknown> = {}) => {
+		gateSteps.push(verdict(jobId, overrides));
+		const result = await post.gate({ jobId });
+		if (isGateWait(result)) {
+			post.reviewRuns.handBack(result.key);
+			await post.reviewRuns.settled(result.key);
+		}
+	};
+	return { home: home.path, post, provider, gateSteps, single, advanceThrough, gated, ship, leased, untouched, closeResearch, replacement, plan, gateOnce };
 }
 
 test("H11-H12: a held script never leases or launches, and a held ship-task promotion never reopens or messages", { skip: SKIP, timeout: 600_000 }, async (t) => {
@@ -204,8 +217,22 @@ test("H13: a plan changed after its answered gate attempt needs a fresh gate for
 	const fresh = await b.ship("fresh covered ship");
 	(await b.single(`Override ${es}.`, [[quote("override", es, "override", `Override ${es}.`)]])).ok("override");
 	writeFileSync(b.post.artifacts.file(policy.research_id), `${ARTIFACT_BODY}\n# Addendum\nAlso bump y in src/app.ts.\n`);
+	const before = b.leased();
 	const stale = await b.single("Dispatch the ship.", [[dispatch("stale", fresh)]]);
 	stale.failed("stale", new RegExp(`authority hold ${es} \\(mandate [^)]+\\) was released, but .*answered gate attempt 1 .*cp_gate ${policy.research_id}`));
+	b.untouched(fresh);
+	const surfaced = await b.advanceThrough(policy.research_id);
+	assert.deepEqual([surfaced.state, surfaced.next], ["escalated", "surface"], "the pipeline's own admission surfaces the stale consent");
+	assert.match(surfaced.message ?? "", /artifact has changed .*cp_gate/);
+	assert.equal(b.post.fleet.get(policy.ship_id), undefined, "the pipeline ship was never dispatched");
+	assert.deepEqual(b.leased(), before, "a stale consent takes no lease");
+	// The replay holds again under a new id; overriding it still leaves the consent stale until a fresh gate binds.
+	const reheld = new EscalationStore({ home: b.home }).list({ jobId: policy.research_id }).filter((item) => item.authority_hold && item.status === "open");
+	assert.equal(reheld.length, 1, "the replayed policy verdict records one new hold");
+	const again = await b.single(`Override ${reheld[0]!.id}.`, [[quote("again", reheld[0]!.id, "override", `Override ${reheld[0]!.id}.`)],
+		[dispatch("still-stale", fresh)]]);
+	again.ok("again");
+	again.failed("still-stale", /was released, but .*cp_gate/);
 	b.untouched(fresh);
 	// A fresh gate on the changed plan binds its inputs; the same consent then admits again.
 	b.gateSteps.push(verdict(policy.research_id));
@@ -262,8 +289,80 @@ test("H14: replace_planner and authorized recovery run eligible research; neithe
 
 	// Closing every replacement planner grants no ship consent either.
 	for (const id of [ordinary, recovered]) await b.closeResearch(id, "replacement planner closed");
+	const before = b.leased();
 	(await b.single("Dispatch the ship.", [[dispatch("closed", fresh)]])).failed("closed", holdRefusal);
 	b.untouched(fresh);
+	assert.deepEqual(b.leased(), before, "the refused ship took no lease");
+});
+
+test("H14b: replace_work runs the replacement research of expired admitted work; the ship stays held until a named-id release", { skip: SKIP, timeout: 900_000 }, async (t) => {
+	const b = await bench(t);
+	// The original research is the named work of a default-expiry grant, admitted through continuation after expiry.
+	const original = (await b.post.ledger().create({ title: "original research", description: "Plan bumping x to 2 in src/app.ts.", project: "demo",
+		kind: "research", delivery: "local" })).id;
+	const expiry = new Date(Date.now() + 3000).toISOString().replace(/\.\d{3}Z$/, "Z");
+	const root = b.post.mandates.issue({ projects: ["demo"], objective: "complete only the original research", job_ids: [original], expiry,
+		provenance: { expiry_hours: "home" }, spend_cap: { usd: 50, tokens: 1_000_000 }, job_cap: 1, ask_on: [] });
+	await new Promise((resolve) => setTimeout(resolve, Math.max(0, Date.parse(expiry) - Date.now() + 50)));
+	await b.plan(original);
+	await b.gateOnce(original, { verdict: "revise", reasons: ["missing proof"], revisions: ["add the proof"] });
+	await waitFor(() => b.post.manager.get(original)?.worker.busy, (busy) => busy === false, { what: "the revised planner's turn" });
+	await b.closeResearch(original, "replaced by the same admitted work");
+	b.post.mandates.issue({ projects: ["demo"], objective: "a2 replace_work", ...GRANT });
+	const policy = await b.gated("held", { verdict: "escalate", reasons: ["the plan skips a rollback step"] });
+	const es = policy.held!.id;
+	const fresh = await b.ship("fresh covered ship");
+	const successor = await b.replacement(original, "same-work successor");
+	const run = await b.single("Bind the same-work successor, dispatch it, then the ship.", [
+		[call("link", "cp_mandate", { action: "replace_work", source_id: root.id, original_job_id: original, replacement_job_id: successor })],
+		[dispatch("research", successor, { task_file: join(b.home, paths.runDir(successor), "revision-task.md") })],
+		[dispatch("ship", fresh)]]);
+	run.ok("link", /committed/);
+	run.ok("research", /accepted/);
+	run.failed("ship", new RegExp(`${fresh}: refused before lease — authority hold ${es}`));
+	b.untouched(fresh);
+	const released = await b.single(`Override ${es}.`, [[quote("override", es, "override", `Override ${es}.`)], [dispatch("released", fresh)]]);
+	released.ok("override");
+	released.ok("released", /accepted/);
+});
+
+test("H14c: a mechanical cp_gate handoff of a recovered plan keeps the ship hold; a released consent follows the replacement's plan", { skip: SKIP, timeout: 900_000 }, async (t) => {
+	const b = await bench(t);
+	b.post.mandates.issue({ projects: ["demo"], objective: "a2 handoff", ...GRANT });
+	const capped = await b.gated("capped", { verdict: "escalate", reasons: ["revision max cap reached"] });
+	const es = capped.held!.id;
+	const [fresh, later] = [await b.ship("fresh covered ship"), await b.ship("later covered ship")];
+	await b.closeResearch(capped.research_id, "recovering a corrected plan");
+	const recovered = await b.replacement(capped.research_id, "recovery replacement");
+	(await b.single(`Replan ${es}.`, [[quote("replan", es, "replan", `Replan ${es}.`)]])).ok("replan");
+	(await b.single("Recover the planner.", [[call("recover", "cp_gate", { action: "replace_planner", job_id: capped.research_id, replacement_job_id: recovered,
+		replan_escalation_id: es })]])).ok("recover");
+	await b.plan(recovered, join(b.home, paths.runDir(recovered), "revision-task.md"));
+	await b.gateOnce(recovered);
+	await waitFor(() => b.post.manager.get(recovered)?.worker.busy, (busy) => busy === false, { what: "the recovered planner's turn" });
+	await b.closeResearch(recovered, "recovered plan passed");
+	const handoff = { action: "handoff", job_id: recovered, source_job_id: capped.research_id, dependent_job_ids: [capped.ship_id] };
+	const before = b.leased();
+	const run = await b.single("Hand the pipeline ship off to the passed replacement, then dispatch both ships.", [
+		[call("register", "cp_gate", handoff)], [call("commit", "cp_gate", handoff)], [dispatch("pipeline-ship", capped.ship_id)], [dispatch("ship", fresh)]]);
+	run.ok("register", /waiting_review/);
+	run.ok("commit", /committed/);
+	assert.deepEqual((await b.post.ledger().show(capped.ship_id)).blocked_by, [recovered], "the mechanical edge now points at the replacement");
+	for (const [id, jobId] of [["pipeline-ship", capped.ship_id], ["ship", fresh]] as const) {
+		run.failed(id, new RegExp(`${jobId}: refused before lease — authority hold ${es}`));
+		b.untouched(jobId);
+	}
+	assert.deepEqual(b.leased(), before, "neither refused ship took a lease");
+	// The replan answer closed the hold's chain: a named replacement escalation is the release path.
+	(await b.single(`Replace ${es}.`, [[call("replace", "cp_escalate", { action: "replace", escalation_id: es })]])).ok("replace");
+	const rep = new EscalationStore({ home: b.home }).list().find((item) => item.replaces_escalation_id === es)!.id;
+	const released = await b.single(`Approve ${rep}.`, [[quote("approve", rep, "approve", `Approve ${rep}.`)], [dispatch("released", fresh)]]);
+	released.ok("approve");
+	released.ok("released", /accepted/);
+	// The approved plan now lives in the replacement: changing it there makes the consent stale.
+	writeFileSync(b.post.artifacts.file(recovered), `${ARTIFACT_BODY}\n# Addendum\nAlso bump y in src/app.ts.\n`);
+	(await b.single("Dispatch the later ship.", [[dispatch("stale", later)]])).failed("stale", new RegExp(`was released, but .*cp_gate ${recovered}`));
+	b.untouched(later);
 });
 
 test("carried low: an escalated pipeline's latest gate is read past attempt 32, and an unknown cause still fails closed", { skip: SKIP, timeout: 300_000 }, async (t) => {
