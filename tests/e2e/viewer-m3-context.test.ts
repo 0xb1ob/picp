@@ -162,7 +162,7 @@ test("M3-context-phone: the context sheet and the Conversations drawer are modal
 	assert.equal((tab.$(".operator-composer textarea") as unknown as { value: string }).value, "KEEP-DRAFT", "the draft survives");
 });
 
-test("M3-context-css: phone sheet and 316 px drawer; inspector over the chat from 900 px, a 340 px column from 1280 px", { timeout: 120_000 }, async (t) => {
+test("M3-context-css: phone sheet and 317 px drawer; inspector over the chat from 900 px, a 340 px column from 1280 px", { timeout: 120_000 }, async (t) => {
 	const d = await start(t);
 	const css = (await d.get(String(/<link rel="stylesheet" href="([^"]+)"/.exec((await d.get("/")).text)?.[1]))).text;
 	const rule = (sheet: string, selector: string) => [...sheet.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => m[1] === selector).map((m) => m[2]).join(";");
@@ -171,7 +171,7 @@ test("M3-context-css: phone sheet and 316 px drawer; inspector over the chat fro
 	const [phone, desktop, beside] = [css.slice(0, split), css.slice(split, wide), css.slice(wide)];
 	assert.match(rule(phone, ".workspace-context"), /display:none/, "phone: no inspector");
 	assert.match(rule(phone, ".workspace-context-sheet"), /border-radius:18px 18px 0 0/, "phone: a bottom sheet with the design's 18 px radius");
-	assert.match(rule(phone, ".workspace-sessions"), /width:min\(316px,calc\(100% - 44px\)\)/, "phone: a 316 px left drawer");
+	assert.match(rule(phone, ".workspace-sessions"), /width:min\(317px,calc\(100% - 44px\)\)/, "phone: the design's 317 px left drawer");
 	const row = css.indexOf(".session-choice{display:grid"), depth = (at: number) => css.slice(0, at).split("{").length - css.slice(0, at).split("}").length;
 	assert.deepEqual([row > 0, depth(row)], [true, 0], "chat rows styled outside the desktop sidebar's media query");
 	assert.match(rule(desktop, "aside.workspace-context"), /position:absolute;.*width:min\(340px,100%\)/, "under 1280 px the inspector covers the chat's edge");

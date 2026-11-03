@@ -4,7 +4,7 @@
  * fixture's `m3-jobs` screenshots are the layout evidence).
  */
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
@@ -57,8 +57,12 @@ const escape = (tab: Tab) => tab.key(tab.document.body as unknown as Element, "E
 const headings = (tab: Tab) => tab.$$(`${DRAWER} h3`).map((h) => h.textContent);
 const reads = (tab: Tab) => tab.requests.filter((r) => r.path === "/api/jobs").length;
 const settle = () => new Promise((done) => setTimeout(done, 50));
-const start = async (t: Context) => {
-	const d = await dashboard(t, { at: new Date(NOON).toISOString(), seed });
+/** `lines`, when given, replace the chat's pi transcript. */
+const start = async (t: Context, lines?: object[]) => {
+	const d = await dashboard(t, { at: new Date(NOON).toISOString(), seed: (stateDir, home) => {
+		seed(stateDir, home);
+		if (lines) writeFileSync(join(home, "pi-sessions", "chat.jsonl"), `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+	} });
 	await operatorSession(t, d.stateDir);
 	return d;
 };
@@ -181,7 +185,103 @@ test("M3-jobs-scope: Cmd+J belongs to the operator chat only; elsewhere it is un
 	assert.ok(tab.$(DRAWER), "the drawer stays under it");
 });
 
-test("M3-jobs-css: phone bottom sheet and full-screen job; desktop 860 px drawer, job over the chat, beside it from 1280 px", { timeout: 120_000 }, async (t) => {
+const message = (minutes: number, m: object) => ({ type: "message", timestamp: iso(minutes), message: m });
+const wake = (minutes: number, job: string, text: string) => ({ type: "custom_message", timestamp: iso(minutes), customType: "cp-bridge", display: true, content: `[cp-bridge wake job=${job}]\n${text}` });
+const relay = (minutes: number, text: string) => message(minutes, { role: "assistant", content: [{ type: "text", text }] });
+const operator = (minutes: number, text: string) => message(minutes, { role: "user", content: [{ type: "text", text }] });
+const bash = (minutes: number, id: string) => [message(minutes, { role: "assistant", content: [{ type: "toolCall", id, name: "bash", arguments: { command: "ls" } }] }),
+	message(minutes, { role: "toolResult", toolCallId: id, toolName: "bash", content: [{ type: "text", text: "ok" }] })];
+/** A run of steps for cp-park, two folded cp-live turns (a rollup), then a run naming a job no record has. */
+const REPLIES = [wake(19, "cp-park", "PARK woke"), ...bash(19, "c1"), relay(19, "PARK relay"), operator(18, "break one"),
+	wake(17, "cp-live", "LIVE woke 1"), relay(17, "LIVE relay 1"), wake(16, "cp-live", "LIVE woke 2"), relay(16, "LIVE relay 2"), operator(15, "break two"),
+	wake(14, "cp-gone", "GONE woke"), ...bash(14, "c2"), relay(10, "REPLY-CARD")];
+/** A browser's click: the page's handler first, then, unless it prevented it, the link's own href is followed. */
+function activate(tab: Tab, link: Element) {
+	const followed = tab.click(link);
+	if (followed) tab.go(link.getAttribute("href")!);
+	return followed;
+}
+
+test("M3-jobs-reply-log: a reply's job link opens Transcript in the pane and keeps Chat; modified clicks and the direct URL keep the route", { timeout: 180_000 }, async (t) => {
+	const d = await start(t, REPLIES);
+	const filtered = `${CHAT}&untagged=1`;
+	const tab = await openTab(t, d.port, filtered, new Map(), undefined, {}, true);
+	const focused = browserShims(t, tab);
+	await tab.waitText(/REPLY-CARD/);
+	const field = await tab.find(".operator-composer textarea") as unknown as HTMLElement & { value: string };
+	tab.type(field as unknown as Element, "KEEP-DRAFT");
+	const run = (job: string) => tab.$$(".session-steps").find((r) => r.querySelector(".session-steps-face")?.textContent?.includes(job))!;
+	const stepsLink = async (job: string) => {
+		if (!run(job).querySelector(".session-steps-link")) tab.click(run(job).querySelector(".session-tools")!);
+		return tab.find(".session-steps-link", (a) => a.getAttribute("href") === `#job/${job}?tab=transcript`);
+	};
+	const pane = (job: string) => tab.find(`.sessions > section.workspace-job[aria-label='Job ${job}']`);
+	const tabOf = () => tab.find(".workspace-job .job-detail-embedded").then((el) => el.getAttribute("data-tab"));
+	const closed = () => until(() => tab.$(".workspace-job"), (el) => el === null, "the pane to close");
+
+	const park = await stepsLink("cp-park");
+	const transcript = tab.$(".session-transcript") as Element & { scrollTop: number };
+	transcript.scrollTop = 120;
+	const followed = activate(tab, park);
+	await settle();
+	assert.deepEqual([followed, !!tab.$(".sessions"), tab.window.location.hash], [false, true, filtered], "an unmodified primary click is the chat's: .sessions and the route stay");
+	await pane("cp-park");
+	assert.deepEqual([await tabOf(), tab.$(".session-transcript") === transcript], ["transcript", true], "the existing Job Transcript opens beside the same chat");
+	assert.ok(focused() === tab.$('.workspace-job button[aria-label="Close job"]'), "focus moves into the pane");
+	assert.equal(escape(tab), true);
+	await closed();
+	assert.deepEqual([focused() === park, field.value, tab.window.location.hash, tab.$(".session-transcript") === transcript, transcript.scrollTop], [true, "KEEP-DRAFT", filtered, true, 120],
+		"closing returns focus to the link with draft, filter and scroll kept");
+
+	const rollup = await tab.find("a.session-rollup-job");
+	assert.equal(activate(tab, rollup), false);
+	await pane("cp-live");
+	assert.deepEqual([await tabOf(), !!tab.$(".sessions")], ["transcript", true], "the rollup's job link opens the same pane");
+	tab.click(tab.$('.workspace-job button[aria-label="Close job"]')!);
+	await closed();
+	assert.ok(focused() === rollup);
+
+	tab.go(CHAT); // All projects: the drawer lists cp-park again
+	tab.click(tab.$(".workspace-jobs-open")!);
+	tab.click(await tab.find(".workspace-jobs-row", (b) => b.textContent!.includes("cp-park")));
+	await pane("cp-park");
+	assert.equal(await tabOf(), "details", "a drawer pick keeps the pane's Details default");
+	assert.equal(escape(tab), true);
+	await closed();
+
+	const gone = await stepsLink("cp-gone");
+	assert.equal(activate(tab, gone), false);
+	await pane("cp-gone");
+	await tab.find(".workspace-job [role=alert]");
+	assert.equal(tab.$(".workspace-job [role=status]")?.textContent, "Job unavailable", "the existing unavailable state, in the pane");
+	tab.click(tab.$('.workspace-job button[aria-label="Close job"]')!);
+	await closed();
+	assert.ok(focused() === gone, "its close action still works");
+
+	for (const modifier of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+		const event = new tab.window.Event("click", { bubbles: true, cancelable: true });
+		Object.assign(event, modifier);
+		park.dispatchEvent(event);
+		await settle();
+		assert.deepEqual([event.defaultPrevented, tab.$(".workspace-job")], [false, null], `${JSON.stringify(modifier)} keeps the link's href`);
+	}
+
+	activate(tab, park);
+	await pane("cp-park");
+	// The operator starts a new session file while the pane is open: the refreshed chat drops it.
+	const next = join(d.home, "pi-sessions", "next.jsonl");
+	writeFileSync(next, "");
+	appendFileSync(operatorSessionsFile(join(d.stateDir, "sessions")), `${JSON.stringify({ at: iso(1), session_file: next })}\n`);
+	tab.refresh();
+	await closed();
+
+	// Direct-link compatibility (retained): a fresh transcript URL still opens the full job route.
+	tab.go("#job/cp-park?tab=transcript");
+	assert.equal(await until(() => tab.$(".job-detail")?.getAttribute("data-tab"), (tabName) => !!tabName, "the job page"), "transcript");
+	assert.deepEqual([tab.$(".sessions"), tab.$(".job-detail-embedded")], [null, null], "the full route, not the pane");
+});
+
+test("M3-jobs-css: phone bottom sheet from y96 and full-screen job; desktop 860 px surface drawer, job over the chat, a 521 px pane from 1280 px", { timeout: 120_000 }, async (t) => {
 	const d = await start(t);
 	const css = (await d.get(String(/<link rel="stylesheet" href="([^"]+)"/.exec((await d.get("/")).text)?.[1]))).text;
 	const rule = (sheet: string, selector: string) => [...sheet.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => m[1] === selector).map((m) => m[2]).join(";");
@@ -189,10 +289,16 @@ test("M3-jobs-css: phone bottom sheet and full-screen job; desktop 860 px drawer
 	assert.ok(split > 0 && wide > split, "the 900 px switch, then 1280 px");
 	const [phone, desktop, beside] = [css.slice(0, split), css.slice(split, wide), css.slice(wide)];
 	assert.match(rule(phone, ".workspace-jobs"), /border-radius:18px 18px 0 0/, "phone: a bottom sheet with the design's 18 px radius");
+	assert.match(rule(phone, ".workspace-jobs"), /height:calc\(100dvh - 96px\)/, "phone: the sheet starts at y96, as Context's does");
 	assert.match(rule(phone, ".workspace-job"), /position:fixed;inset:0/, "phone: the job is full screen");
 	assert.match(rule(phone, ".workspace-jobs-title>b"), /overflow-wrap:anywhere/, "long titles wrap at 390 px");
 	assert.match(rule(phone, ".workspace-close"), /width:44px;height:44px/, "44 px close");
 	assert.match(rule(desktop, ".workspace-jobs"), /width:min\(860px,100%\)/, "desktop: the 860 px drawer");
+	assert.match(rule(desktop, ".workspace-jobs"), /background:var\(--surface\)/, "desktop: the drawer is the design's raised surface");
 	assert.match(rule(desktop, ".workspace-job"), /grid-column:2/, "under 1280 px the job covers the chat column");
-	assert.match(rule(beside, ".sessions:has(>.workspace-job)"), /grid-template-columns:261px minmax\(0,1fr\) 520px/, "from 1280 px a 520 px pane beside the chat");
+	assert.match(rule(beside, ".sessions:has(>.workspace-job)"), /grid-template-columns:261px minmax\(0,1fr\) 521px/, "from 1280 px a 521 px pane, border included");
+	// Only an unboxed reply's code block takes the surface: ask cards and pending sends sit on it, so theirs keep the page fill.
+	assert.deepEqual([rule(css, ".sessions .md .md-code"), /background:var\(--background\)/.test(rule(css, ".md .md-code"))], ["", true],
+		"ask and pending code blocks keep the page fill: no unscoped surface rule");
+	assert.match(rule(css, ".sessions .session-other .md .md-code"), /background:var\(--surface\)/, "a reply's code block stays a visible box");
 });
