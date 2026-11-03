@@ -2,7 +2,7 @@
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
-import { IsoTimestampSchema, JOB_ID_PATTERN, JobIdSchema, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
+import { IsoTimestampSchema, JOB_ID_PATTERN, JobIdSchema, PROJECT_NAME_PATTERN, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
 import { DecisionSummarySchema, PlanSummarySchema } from "./envelope.ts";
 import type { Narrow, Replace } from "./internal.ts";
 import { SCHEDULE_RUN_ID } from "../viewer/schedule-run-core.ts";
@@ -191,6 +191,24 @@ export const EscalationOptionSchema = Type.Object(
 );
 export type EscalationOption = Static<typeof EscalationOptionSchema>;
 
+/**
+ * Self-review A0: decoded only; nothing writes it until A1. Closed, so a malformed or unknown key still refuses the
+ * journal. Release derives from an authenticated answer on the same hold, so there is deliberately no release flag.
+ */
+export const EscalationAuthorityHoldSchema = Type.Object(
+	{
+		mandate_id: Type.Optional(Type.String({ pattern: "^md-[a-z0-9]{4,16}$" })),
+		project: Type.String({ pattern: PROJECT_NAME_PATTERN }),
+		source_job_id: JobIdSchema,
+		ship_job_ids: Type.Optional(Type.Array(JobIdSchema, { minItems: 1, maxItems: 16 })),
+		gate_attempt: Type.Optional(Type.Integer({ minimum: 1 })),
+		evidence_path: Type.Optional(Type.String({ minLength: 1, maxLength: 400 })),
+		artifact_sha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+	},
+	{ additionalProperties: false },
+);
+export type EscalationAuthorityHold = Static<typeof EscalationAuthorityHoldSchema>;
+
 export const EscalationSchema = Type.Object(
 	{
 		schema_version: Type.Integer({ minimum: 1 }),
@@ -226,6 +244,9 @@ export const EscalationSchema = Type.Object(
 		awaiting_id: Type.Optional(Type.String({ minLength: 1, maxLength: 160 })),
 		plan_summary: Type.Optional(PlanSummarySchema),
 		decision_summary: Type.Optional(DecisionSummarySchema),
+		/** Self-review A0: optional on read, so a legacy record still decodes; no producer writes either field yet. */
+		authority_hold: Type.Optional(EscalationAuthorityHoldSchema),
+		replaces_escalation_id: Type.Optional(EscalationIdSchema),
 		/** Full pre-trim escalation text when schema-capped fields were normalized at intake. */
 		original_text: Type.Optional(Type.Object({
 			question: Type.Optional(Type.String()),
