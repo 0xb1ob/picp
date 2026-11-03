@@ -34,6 +34,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { assertNoAuthorityHold } from "./authority-hold.ts";
 import { isScriptFleetRecord, type Risk, type SendReceipt } from "./contracts.ts";
 import { readTask, type ResolvedTask } from "./dispatch.ts";
 import { type BudgetCheck, checkBudget } from "./failures.ts";
@@ -241,6 +242,15 @@ export class Sender {
 		if (reopen.kind === "refuse") throw new SendError(reopen.reason);
 		const denied = projectDenial(home, record.project);
 		if (denied) throw new SendError(denied);
+		// A new ship-task promotion meets the authority hold before any continuation write, resume, restore or reopen.
+		if ((request.task !== undefined || request.taskFile !== undefined) && record.kind === "ship" && this.#options.mandates) {
+			const hint = readTask({ jobId: request.jobId, task: request.task, taskFile: request.taskFile }).forInference;
+			try {
+				assertNoAuthorityHold(this.#options.mandates, { jobId: request.jobId, project: record.project, kind: "ship", pathHints: [hint] });
+			} catch (error) {
+				throw new SendError((error as Error).message);
+			}
+		}
 
 		// Mandate permission for a repair comes first: a refused repair never relaunches a released worker.
 		// A parked job's resume takes a lease and a spawn, so it needs the same permission whatever the purpose.
