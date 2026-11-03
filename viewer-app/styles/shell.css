@@ -8,6 +8,8 @@ a { color: inherit; }
 a:hover { color: var(--hover); }
 code, pre { font-family: var(--font-mono); }
 button { font: inherit; color: inherit; }
+/* Native selects default to the UA's Arial; only the family is reset, each screen keeps its sizes. */
+select { font-family: var(--font-sans); }
 button, a, [role=link] { -webkit-tap-highlight-color: transparent; }
 button:not([aria-disabled=true]):not(:disabled), a { cursor: pointer; }
 [aria-disabled=true] { opacity: 0.6; cursor: default; }
@@ -110,8 +112,8 @@ h3 { font-size: 12px; font-weight: 600; color: var(--dim); }
  .shell-sidebar-nav .shell-nav-icon { padding: 0; }
  .shell-sidebar-nav .shell-count { left: 106px; right: auto; }
  .shell-sidebar-status { margin-top: auto; padding: 0 10px; }
- /* Sessions chat v2 measured the rail at 14×10 padding and a 12 px gap; other screens keep theirs. */
- .shell-sessions > .shell-sidebar { padding: 14px 10px; gap: 12px; }
+ /* Chat's rail is the 261 px combined column (Sessions draws it once loaded); other screens keep theirs. */
+ .shell-sessions > .shell-sidebar { width: 261px; padding: 14px 10px; gap: 12px; }
  .shell-main { min-width: 0; padding: 0 32px 48px; }
  /* One compact row on the page surface: title left, status and ⋮ right, a hairline under it. */
  .page-header { display: flex; align-items: center; gap: 10px; height: 48px; min-width: 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }

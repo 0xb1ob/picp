@@ -1,0 +1,1 @@
+- Viewer: desktop Chat now has one 261 px left column holding the brand, search, Chat/Jobs/More navigation, the conversations and the live status (Combine, M3 fidelity slice A); other screens keep the 208 px rail, the phone layout is unchanged, and native selects use the system sans family.

@@ -281,21 +281,23 @@
 .shell-main > .sessions { flex: 1 1 0; }
 @media (min-width: 900px) {
  .session-bar { display: none; }
- /* Frames 06/16: the list is a full-height column flush to the rail with a hairline; the transcript fills the rest edge to edge. */
- .sessions { position: relative; display: grid; grid-template-columns: 281px minmax(0,1fr); grid-template-rows: 56px minmax(0,1fr); gap: 0; padding: 0; }
+ /* Combine (design `.sb`): one 261 px column of the rail's chrome and the chats; the transcript fills the rest. */
+ .sessions { position: relative; display: grid; grid-template-columns: 261px minmax(0,1fr); grid-template-rows: minmax(0,1fr); gap: 0; padding: 0; }
  .sessions > .page-header { display: contents; }
- /* Chats (chat v2): a 56 px title row over a 280 px list plus its 1 px hairline. */
- .shell .sessions > .page-header > h1 { grid-column: 1; grid-row: 1; display: flex; align-items: center; height: 56px; margin: 0; padding: 0 16px; border-right: 1px solid var(--divider); font-size: 16px; font-weight: 500; line-height: 20px; }
+ /* The column holds the old title row's place; the <h1> stays for screen readers. */
+ .shell .sessions > .page-header > h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
  .sessions > .page-header > .page-header-end { position: absolute; top: 0; right: 8px; z-index: 2; height: 48px; }
  .sessions .page-header-end .shell-clock { display: none; }
  /* Only the dot: a status word ("unknown") would run under the heading's Tools N, which clears 84px. */
  .sessions .page-header-end > .shell-live { font-size: 0; }
  .session-panel { grid-column: 2; grid-row: 1 / -1; min-height: 0; border: 0; border-radius: 0; overflow: hidden; }
- .session-sidebar { grid-column: 1; grid-row: 2; min-height: 0; display: flex; flex-direction: column; gap: 2px; padding: 0 0 12px; border-right: 1px solid var(--divider); overflow-y: auto; }
+ .session-sidebar { grid-column: 1; grid-row: 1 / -1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px 10px; border-right: 1px solid var(--divider); background: var(--nav); overflow-y: auto; }
+ .session-sidebar .shell-brand { padding: 0 8px; height: 23px; }
+ .session-sidebar-chats { display: flex; flex-direction: column; gap: 2px; }
  .session-sidebar h2 { margin: 0; padding: 6px 18px; font-size: 11px; font-weight: 500; color: var(--dim); }
- .session-sidebar section:last-child { margin: 10px 8px 0; padding-top: 10px; border-top: 1px solid var(--divider); }
+ .session-sidebar section:last-child { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--divider); }
  .session-sidebar section:last-child > h2 { padding: 4px 10px 6px; }
- .session-sidebar section:last-child .session-choice { margin: 0; }
+ .session-sidebar .session-choice { margin: 0; }
  .session-sidebar p { font-size: 12px; color: var(--muted); padding: 10px; }
  /* One 48px row: avatar, name over state · model · ctx; the shell's ⋮ sits at its right end. */
  .session-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; min-height: 48px; padding: 0 84px 0 16px; flex-shrink: 0; }

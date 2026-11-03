@@ -13,8 +13,12 @@ import { PageHeader, routeTitle } from "./PageHeader.tsx";
 import { useVersion, type VersionState } from "../use-version.ts";
 import { DeviceNotices } from "./DeviceNotices.tsx";
 function Brand() { return <div class="shell-brand"><code>command-post</code></div>; }
-/** What a screen with its own top bar (Sessions on mobile) and every desktop page header need from the shell: the live state, search and the ⋮ menu's inputs. */
-export const ShellContext = createContext<{status:string;openSearch:() => void;control?:ControlView | undefined;version?:VersionState;updatedAt?:string | null}>({status:"unknown",openSearch:() => {}});
+/**
+ * What a screen with its own top bar (Sessions on mobile) and every desktop page header need from the shell: the live
+ * state, search and the ⋮ menu's inputs. `rail` is the desktop rail's chrome; a screen that draws it holds `claimRail`.
+ */
+export const ShellContext = createContext<{status:string;openSearch:() => void;control?:ControlView | undefined;version?:VersionState;updatedAt?:string | null;
+ rail?:{head:ComponentChildren;status:ComponentChildren};claimRail?:() => () => void}>({status:"unknown",openSearch:() => {}});
 /** A screen's PageHeader claims this once. The count survives a Shell-only re-render (search, control) that skips those children. */
 export type HeaderSlotApi = {readonly owned:boolean; claim:() => void; release:() => void; listen:(fn:() => void) => () => void};
 export const HeaderSlot = createContext<HeaderSlotApi | null>(null);
@@ -42,6 +46,9 @@ export function Shell({current,awaiting,status,updatedAt,children}: {current:Rou
  const version = useVersion();
  const headerSlot = useRef<HeaderSlotApi | null>(null);
  if (headerSlot.current === null) headerSlot.current = createHeaderSlot();
+ // Combine (desktop Chat): while a screen draws the rail's chrome in its own column, the shell drops its rail.
+ const [railClaims,setRailClaims] = useState(0);
+ const claimRail = useRef(() => { setRailClaims(n => n + 1); return () => setRailClaims(n => n - 1); }).current;
  const [searchOpen,setSearchOpen] = useState(false);
  const [search,setSearch] = useState<{jobs:FlightJob[] | null; landed:ShippedJob[] | null; error:string | null}>({jobs:null, landed:null, error:null});
  useEffect(() => {
@@ -69,12 +76,14 @@ export function Shell({current,awaiting,status,updatedAt,children}: {current:Rou
  const when = updatedAt ? <time class="shell-clock" dateTime={updatedAt}>{stamp(updatedAt)}</time> : null;
  const clockNow = updatedAt ? <time class="shell-clock" dateTime={updatedAt} title={stamp(updatedAt,true)}>{time(updatedAt)}</time> : null;
  const live = <span class={`shell-live shell-live-${status}`} role="status"><span/>{status === "live" ? clockNow ?? status : <>{status}{clockNow && <> · {clockNow}</>}</>}</span>;
+ const railHead = <><Brand/><button type="button" class="shell-desktop-search" aria-haspopup="dialog" title="Search (Ctrl/⌘ K)" onClick={openSearch}><Icon name="search" size={16}/><span>Search</span><kbd>⌘K</kbd></button><Navigation current={current} awaiting={awaiting} desktop/></>;
+ const railStatus = <div class="shell-sidebar-status"><span class={`shell-live shell-live-${status}`} role="status"><span/>{status}</span></div>;
  return <div class={`shell${current.screen === "sessions" ? " shell-sessions" : current.screen === "report" ? " shell-report" : ""}`}><header class={`shell-header${current.screen === "files" ? " shell-files-header" : subpage ? " shell-header-subpage" : ""}`}>
   {subpage ? <><a href="#more" aria-label="Back to More" class="shell-back"><Icon name="back"/></a><Brand/></> : current.screen === "job" || current.screen === "report" ? <><a class="shell-back" href={current.screen === "report" && current.jobId ? jobHref(current.jobId) : "#jobs"} aria-label={current.screen === "report" ? "Back to the job" : "Back to jobs"}><Icon name="back"/></a><code class="shell-detail-title">{current.jobId ?? "command-post"}</code></> : <Brand/>}
   <div class="shell-header-right">{plain ? live : when}<button type="button" aria-label="Search navigation and in-flight jobs" aria-haspopup="dialog" title="Search" onClick={openSearch} class="shell-search"><Icon name="search"/></button><MoreMenu control={control} version={version} updatedAt={updatedAt}/></div>
  </header>
-  <aside class="shell-sidebar"><Brand/><button type="button" class="shell-desktop-search" aria-haspopup="dialog" title="Search (Ctrl/⌘ K)" onClick={openSearch}><Icon name="search" size={16}/><span>Search</span><kbd>⌘K</kbd></button><Navigation current={current} awaiting={awaiting} desktop/><div class="shell-sidebar-status"><span class={`shell-live shell-live-${status}`} role="status"><span/>{status}</span></div></aside>
-  <main class={`shell-main${current.screen === "board" ? " shell-main-board" : ""}`}><DeviceNotices updatedAt={updatedAt}/><ShellContext.Provider value={{status,openSearch:() => setSearchOpen(true),control,version,updatedAt}}><HeaderSlot.Provider value={headerSlot.current}>{children}<FallbackHeader current={current}/></HeaderSlot.Provider></ShellContext.Provider></main><Navigation current={current} awaiting={awaiting}/>
+  {railClaims === 0 && <aside class="shell-sidebar">{railHead}{railStatus}</aside>}
+  <main class={`shell-main${current.screen === "board" ? " shell-main-board" : ""}`}><DeviceNotices updatedAt={updatedAt}/><ShellContext.Provider value={{status,openSearch:() => setSearchOpen(true),control,version,updatedAt,rail:{head:railHead,status:railStatus},claimRail}}><HeaderSlot.Provider value={headerSlot.current}>{children}<FallbackHeader current={current}/></HeaderSlot.Provider></ShellContext.Provider></main><Navigation current={current} awaiting={awaiting}/>
   {searchOpen && <SearchDialog jobs={search.jobs} landed={search.landed} error={search.error} onClose={() => setSearchOpen(false)}/>}
  </div>;
 }

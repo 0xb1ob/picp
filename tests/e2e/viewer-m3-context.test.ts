@@ -175,5 +175,5 @@ test("M3-context-css: phone sheet and 316 px drawer; inspector over the chat fro
 	const row = css.indexOf(".session-choice{display:grid"), depth = (at: number) => css.slice(0, at).split("{").length - css.slice(0, at).split("}").length;
 	assert.deepEqual([row > 0, depth(row)], [true, 0], "chat rows styled outside the desktop sidebar's media query");
 	assert.match(rule(desktop, "aside.workspace-context"), /position:absolute;.*width:min\(340px,100%\)/, "under 1280 px the inspector covers the chat's edge");
-	assert.match(rule(beside, ".sessions:has(>aside.workspace-context)"), /grid-template-columns:281px minmax\(0,1fr\) 340px/, "from 1280 px a 340 px column");
+	assert.match(rule(beside, ".sessions:has(>aside.workspace-context)"), /grid-template-columns:261px minmax\(0,1fr\) 340px/, "from 1280 px a 340 px column");
 });
