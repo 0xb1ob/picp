@@ -18,6 +18,8 @@
  --amber: #f0b35a;
  --ask-background: #1c1810;
  --ask-border: #4d3b1f;
+ /* M3 fidelity D: the open-ask card's `.ask` fill, design frames 1 and 7; paints `.workspace-context-ask` only. */
+ --ask-card: #1f1a12;
  --blue: #93b4f5;
  --coral: #f2917f;
  --error-border: #5a2f28;

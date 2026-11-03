@@ -121,6 +121,14 @@ test("M3-fidelity-transcript: replies are unboxed text, own bubbles neutral, an 
 	assert.match(rules(css, ".session-pending-failed>.session-body"), /border-style:solid/, "a failed send keeps its solid box");
 	assert.match(rules(css, ".session-notice"), /background:var\(--surface\);border:1px solid var\(--border\);border-radius:14px/, "an ask keeps its card");
 	assert.match(rules(css, ".session-rollup"), /border:1px solid var\(--border\);border-radius:12px/, "a relay rollup keeps its card");
+	// M3 fidelity D: the 20 px `.mk` avatar on both widths (frames 1, 4-7) and from 900 px the 28 px `.tx` inset.
+	// Negative control: restoring the 26/32 px avatar or the 42 px inset fails here.
+	assert.match(rules(css, ".session-other>.session-who>.session-avatar"), /^position:absolute;left:0;top:0;width:20px;height:20px;/,
+		"phone: a 20 px reply avatar in the 34 px gutter");
+	const wide = css.slice(css.lastIndexOf("@media(min-width:900px)", css.indexOf(".session-entries{max-width:720px")));
+	assert.equal(rules(wide, ".session-other>.session-who>.session-avatar"), "width:20px;height:20px;font-size:10px", "desktop: a 20 px reply avatar");
+	assert.deepEqual([".session-message.session-other", ".session-steps", ".session-rollup-head,.session-rollup-meta"].map((s) => rules(wide, s)),
+		["padding-left:28px", "padding-left:28px", "padding-left:28px"], "desktop: reply text, runs and rollups 28 px in");
 	for (const desktop of [false, true]) {
 		const tab = await openTab(t, d.port, "#sessions?view=you&transcript=1", new Map(), undefined, {}, desktop);
 		await tab.waitText(/REPLY-CARD/);

@@ -96,6 +96,10 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	tab.click((await tab.find(".workspace-context-jobs")));
 	await tab.find("dialog.workspace-jobs[open]");
 	assert.ok(tab.$("aside.workspace-context"), "All jobs opens the Jobs drawer over the inspector");
+	// M3 fidelity D: the design's ask fill (frames 1/7) is the open-ask card's own role, painted on nothing else.
+	const css = (await d.get(String(/<link rel="stylesheet" href="([^"]+)"/.exec((await d.get("/")).text)?.[1]))).text;
+	const askFill = [...css.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => /var\(--ask-card\)/.test(m[2]!)).map((m) => m[1]!);
+	assert.deepEqual([askFill, tab.$$(".workspace-context-ask").length], [[".workspace-context-ask"], 1], "one open ask: one ask-filled card");
 	// Negative control: with no open ask left, nothing amber remains (no badge, no asked class, no ask card).
 	const asks = new OperatorAsks(join(d.stateDir, "operator", "asks.jsonl"));
 	for (const ask of asks.open()) asks.withdraw(ask.id, "fixture");
@@ -103,6 +107,7 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 	await tab.find(".workspace-context-open", (b) => b.getAttribute("aria-label") === "Context");
 	assert.deepEqual([tab.$(".workspace-badge"), tab.$(".workspace-context-asked"), tab.$(".workspace-context-ask"), texts(tab, "aside.workspace-context h3")[0]],
 		[null, null, null, "Asked you · 0"], "no open ask: no badge and no amber class");
+	assert.equal(askFill.flatMap((selector) => tab.$$(selector)).length, 0, "the inspector stays open and nothing wears the ask fill");
 });
 
 test("M3-context-phone: the context sheet and the Conversations drawer are modal, close on Escape back to their button, keep the selection and drop on leaving", { timeout: 180_000 }, async (t) => {

@@ -158,6 +158,15 @@ test("M3-composer-menu: the touch `/` menu runs commands and attaches a selectio
 	const rule = (selector: string) => [...css.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => m[1] === selector).map((m) => m[2]).join(";");
 	assert.match(rule(".operator-composer-command-menu button"), /min-height:44px/, "44 px touch options");
 	assert.match(rule(".operator-composer-slash"), /width:44px;height:44px/, "a 44 px phone target");
+	// M3 fidelity D (design frames 1, 4, 10): the composer and `/` menu in the transcript's column, on the raised surface.
+	// Negative control: restoring the surface/padding 4 menu fails the first assertion.
+	const raised = rule(".operator-composer-command-menu");
+	assert.match(raised, /max-height:45dvh;.*padding:6px;background:var\(--raised\);border:1px solid var\(--border\);border-radius:12px;/, "raised, padding 6");
+	assert.match(raised, /left:14px;right:14px;.*;left:max\(28px,calc\(\(100% - 664px\) ?\/ ?2\)\);right:auto;width:min\(534px,calc\(100% - 56px\)\)$/,
+		"phone: 14 px from each side; desktop: the box's left edge, at most 534 px");
+	assert.match(rule(".operator-composer"), /padding-left:14px;padding-right:14px;padding:12px max\(28px,calc\(\(100% - 664px\) ?\/ ?2\)\) 16px$/,
+		"14 px phone sides; from 900 px the 720 px column's 28 px sides");
+	assert.match(rule(".operator-composer-box"), /gap:12px;padding:14px 12px 10px 16px;background:var\(--surface\)/, "the design box's 14/12/10/16 padding");
 });
 
 test("M3-composer-attachments: an attached image and the draft survive /status and a job reference; a closed menu's late lookup attaches nothing", { timeout: 180_000 }, async (t) => {
