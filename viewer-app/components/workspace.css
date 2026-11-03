@@ -43,7 +43,7 @@
 .workspace-jobs-row:hover, .workspace-jobs-row:focus-visible { background: var(--raised); }
 .workspace-jobs-job { grid-row: 1 / 3; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .workspace-jobs-job > code { display: none; font-family: var(--font-mono); font-size: 12.5px; color: var(--text); }
-/* Palette rule: working, launching, held and parked glyphs stay neutral in this list. */
+/* Palette: working, launching, held and parked glyphs stay neutral; only the status label below takes a tone. */
 .workspace-jobs-job > .job-dot-working, .workspace-jobs-job > .job-dot-awaiting_merge { background: var(--muted); border-color: var(--muted); }
 .workspace-jobs-job > .job-dot-launching, .workspace-jobs-job > .job-dot-held { border-color: var(--muted); }
 .workspace-jobs-title { grid-row: 1 / 3; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -52,7 +52,8 @@
 .workspace-jobs-title code { font-size: 12px; }
 .workspace-jobs-id { display: none; }
 .workspace-jobs-status { grid-column: 3; max-width: 140px; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--muted); white-space: nowrap; text-align: right; }
-/* Design frames 3/9: Working green, Merged blue (neither is an amber/coral ask colour); the rest stay neutral. */
+/* Working glyphs stay neutral; the Working status label is green and Merged blue, per design frames 3 and 9
+   (repair R1.2). Every other status stays neutral. */
 .workspace-jobs-status-working { color: var(--green); }
 .workspace-jobs-status-merged { color: var(--blue); }
 .workspace-jobs-meta > code { font-family: var(--font-mono); font-size: 12px; }

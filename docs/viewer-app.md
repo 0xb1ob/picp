@@ -683,8 +683,9 @@ Desktop rows sit under Job, Title / context, Status, Done and Cost columns in an
 footer; phone rows show a one-line title, a monospace `suffix · model · cost` and the finished time or elapsed. Groups
 are In flight, With the team, Queued and Done today (Done under All, newest first), five rows each before "Show N
 more", which moves focus to the first revealed row. Statuses are capitalised (Working, Held, With the team, Queued,
-Merged #N, Done); Working is green and Merged blue as in the design, the rest and every leading job glyph neutral. A
-missing cost or time is "not recorded", never $0 or 0m, and each filter names its own empty state. PR chips (C1)
+Merged #N, Done). Working glyphs stay neutral; the Working status label is green and Merged blue, per design frames 3
+and 9 (repair R1.2), and every other status stays neutral. A missing cost or time is "not recorded", never $0 or 0m,
+and each filter names its own empty state. PR chips (C1)
 render each slot as glyph and name (✓ Review, ◌ CI, ✕ CI, ○ Merge, ✓ Merged sha) with the recorded state in its
 title; only a pass or merge is green. `--stage full-match-jobs` fails unless the 1440 and 390 px captures show the
 two-row toolbar, the pill (no visible select), the segments, the five columns, every group, capitalised statuses and
