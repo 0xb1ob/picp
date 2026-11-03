@@ -358,12 +358,13 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 		description:
 			"Raise one structured escalation: the question, the options, a recommendation, cost of each option, " +
 			"and the mandate clause it exceeds. Duplicate (job + kind + question) returns the open record; a new question files its own. Answer via cp_decide. " +
-			"action withdraw closes a moot open escalation by id with a reason: not an answer, never decides a linked checkpoint.",
+			"action withdraw closes a moot open escalation by id with a reason: not an answer, never decides a linked checkpoint, never releases an authority hold.",
 		promptSnippet: "Raise a structured escalation instead of asking in prose (cp_escalate)",
 		promptGuidelines: [
 			"When you cannot decide under the mandate, call cp_escalate. Do not write should I… or waiting for you to…",
 			"Relay an open escalation; do not reword it. The operator (or parent with a valid basis) answers with cp_decide.",
 			"When an open escalation's question became moot, cp_escalate action withdraw escalation_id reason \u2014 never an answer, never authorization; an answered record is never withdrawn.",
+			"An authority hold (gate or plan decision) is released only by cp_decide with an affirmative option naming its id; withdrawal, planner closure, decline/deny/replan/drop, restart or ledger close never release it. For a withdrawn or closed hold: cp_escalate action replace escalation_id, then cp_decide the replacement approve naming its own id \u2014 never an alternate direct dispatch.",
 			"Several risk:high jobs refused under one asking mandate: cp_escalate action batch_risk_high job_ids [2..16] files one approve/drop record and withdraws their per-job rows \u2014 still cp_decide with an operator quote, never auto-permitted.",
 		],
 		parameters: Type.Object({
@@ -478,6 +479,7 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			"Call cp_decide with target (checkpoint id, awaiting id, or job id + kind), decision, and basis {mandate, clause}, {run, clause} or {operator_quote}.",
 			"A mandate basis is re-evaluated; a stale or revoked grant is refused. risk:high and merge need operator text unless the mandate explicitly allows them.",
 			"An operator_quote is copied verbatim from a user message in this session; a short reply like 'yes' or 'approve' is enough — never ask the operator to retype a sentence. For an escalation (es-…), the latest message containing the quote must also name that escalation id.",
+			"On an authority hold (plan_approval included) decision must be one of its option ids, e.g. approve; free text like yes or ok is refused (a plan approval's revise … still works). A plan changed after approval needs a fresh cp_gate.",
 		],
 		parameters: Type.Object({
 			target: Type.String({ description: "checkpoint id (aw-checkpoint-…), awaiting id, or job id" }),
