@@ -7,6 +7,7 @@ import type { MandateStore } from "./mandate.ts";
 import { HARD_STOP_SIGNALS, riskPreapproval } from "./risk-preapproval.ts";
 import { runStartedBy, scheduleRunVerdict, ScheduleAuthorityError } from "./schedule-authority.ts";
 import { continueForJob } from "./mandate-continuity.ts";
+import { assertNoAuthorityHold } from "./authority-hold.ts";
 
 export interface DispatchAuthorityJob {
 	jobId: string; project: string; kind?: "ship" | "research"; pathHints?: string[]; risk?: Risk;
@@ -20,6 +21,7 @@ export interface DispatchAuthorityJob {
 export const riskGateExempt = (job: Pick<DispatchAuthorityJob, "kind" | "readOnly" | "promotion" | "script" | "ops">): boolean =>
 	job.kind === "research" && job.readOnly === true && !job.promotion && !job.script && !job.ops;
 export async function assertDispatchAllowed(store: MandateStore, job: DispatchAuthorityJob, jobs: readonly MandateUsageJob[] = []): Promise<GrantPermission> {
+	assertNoAuthorityHold(store, job);
 	try {
 		const verdict = scheduleRunVerdict(store.runContext(), job.promotion ? "promote" : "dispatch", job, jobs, store.authorityNow());
 		if (verdict.source === "schedule-run") return { run: { id: verdict.run.id, schedule_id: verdict.run.schedule_id, started_by: runStartedBy(verdict.run) } };

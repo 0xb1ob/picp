@@ -1,7 +1,6 @@
 /**
- * Self-review A0 (decoder-only): the escalation schema reads the optional `authority_hold` and `replaces_escalation_id`,
- * and no production producer writes either yet. H0 drives real producers on a field-absent journal; the new-format
- * fixtures live in a separate scratch home and are read through a real pi parent.
+ * Self-review A0 decodes `authority_hold` and `replaces_escalation_id`; H0 drives real producers on a legacy journal
+ * (since A1 only the policy gate and asking plan approval hold), H0-decoder reads new-format fixtures in another home.
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -73,11 +72,14 @@ const writeJournal = (home: string, items: object[]) => {
 	writeFileSync(join(home, LAYOUT.escalationsFile), JSON.stringify({ schema_version: SCHEMA_VERSION, updated_at: "2026-11-01T00:00:00Z", items }));
 };
 
-/** The H0 absence check: one assertion per field, so each early-write control fails its own line. */
-function absent(home: string, after: string, count: number): void {
+/**
+ * The H0 field check, one assertion per field. A0 required both absent everywhere; since A1 only `held` ids (the policy
+ * gate and the asking plan approval) carry `authority_hold`, and nothing in H0 is a replacement.
+ */
+function absent(home: string, after: string, count: number, held: readonly string[] = []): void {
 	const items = journal(home);
 	assert.equal(items.length, count, `${after}: journal size`);
-	for (const item of items) assert.ok(!("authority_hold" in item), `${after}: ${item.id} carries authority_hold`);
+	for (const item of items) assert.equal("authority_hold" in item, held.includes(String(item.id)), `${after}: ${item.id} authority_hold presence`);
 	for (const item of items) assert.ok(!("replaces_escalation_id" in item), `${after}: ${item.id} carries replaces_escalation_id`);
 	assert.equal(new EscalationStore({ home }).read().items.length, count, `${after}: the strict reader decodes the journal`);
 }
@@ -158,9 +160,12 @@ test("H0: on a field-absent journal, cp_escalate raise/answer/withdraw, a policy
 	assert.equal((await b.advanceThrough(policy.research_id)).state, "escalated");
 	const gate = escalations.list({ kind: "conflicting_acceptance" });
 	assert.equal(gate.length, 1, "the gate raised one policy escalation");
-	absent(b.home, "policy escalation", 2);
+	const held = [gate[0]!.id];
+	absent(b.home, "policy escalation", 2, held);
+	assert.deepEqual([gate[0]!.authority_hold?.source_job_id, gate[0]!.authority_hold?.ship_job_ids, gate[0]!.authority_hold?.gate_attempt],
+		[policy.research_id, [policy.ship_id], 1], "A1: the policy gate records its hold");
 	await b.post.tearDown(policy.research_id, { force: true });
-	absent(b.home, "research teardown", 2);
+	absent(b.home, "research teardown", 2, held);
 
 	// A pending plan approval from the selected ask_on grant, as P11d-plan-ask drives it.
 	const plan = await b.post.startPipeline({ title: "bump y", project: "demo", task: "Bump x to 2 in src/app.ts.", delivery: "local", slug: "bump-y", fetch: false });
@@ -179,7 +184,9 @@ test("H0: on a field-absent journal, cp_escalate raise/answer/withdraw, a policy
 	assert.deepEqual([asked.next, asked.checkpoint?.decision, b.post.fleet.get(plan.ship_id)], ["authorize", "pending", undefined]);
 	const approval = escalations.list({ kind: "plan_approval" });
 	assert.deepEqual(approval.map((row) => [row.status, row.mandate_id]), [["open", grant.id]]);
-	absent(b.home, "plan approval", 3);
+	held.push(approval[0]!.id);
+	assert.equal(approval[0]!.authority_hold?.mandate_id, grant.id, "A1: the asking grant's plan approval records its hold");
+	absent(b.home, "plan approval", 3, held);
 	for (const id of [plan.research_id, plan.ship_id]) {
 		if (b.post.fleet.get(id) && b.post.fleet.get(id)?.phase !== "done") await b.post.tearDown(id, { force: true });
 	}
@@ -191,7 +198,7 @@ test("H0: on a field-absent journal, cp_escalate raise/answer/withdraw, a policy
 	const raised = await parent("File the escalations.", [raise("r1", "cp-job1", "which copy?"), raise("r2", "cp-job2", "which colour?")]);
 	raised.ok("r1");
 	raised.ok("r2");
-	absent(b.home, "cp_escalate raise", 5);
+	absent(b.home, "cp_escalate raise", 5, held);
 	const [r1, r2] = [raised.id("r1"), raised.id("r2")];
 	const decided = await parent(`Approve ${r1}.`, [
 		call("d-r1", "cp_decide", { target: r1, decision: "approve", basis: { operator_quote: `Approve ${r1}.` } }),
@@ -199,12 +206,12 @@ test("H0: on a field-absent journal, cp_escalate raise/answer/withdraw, a policy
 		call("wd-gate", "cp_escalate", { action: "withdraw", escalation_id: gate[0]!.id, reason: "superseded by a replan" }),
 	]);
 	for (const id of ["d-r1", "wd-r2", "wd-gate"]) decided.ok(id);
-	absent(b.home, "cp_decide answer and cp_escalate withdraw", 5);
+	absent(b.home, "cp_decide answer and cp_escalate withdraw", 5, held);
 	assert.deepEqual([r1, r2, gate[0]!.id, approval[0]!.id].map((id) => escalations.get(id)?.status), ["answered", "withdrawn", "withdrawn", "open"]);
 
 	const restarted = await parent("What awaits me?", [call("list", "cp_awaiting", { action: "list" })]);
 	restarted.ok("list");
-	absent(b.home, "parent restart", 5);
+	absent(b.home, "parent restart", 5, held);
 });
 
 test("H0-decoder: a separate home's legacy and new-format records decode through a real parent, and an answer keeps the metadata", { timeout: 300_000 }, async (t) => {

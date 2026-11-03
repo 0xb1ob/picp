@@ -25,6 +25,7 @@ import {
 	type Escalation,
 	type DecisionBasis,
 	type DelegationProvenance,
+	type EscalationAuthorityHold,
 	type EscalationFile,
 	type EscalationKind,
 	type EscalationOption,
@@ -67,6 +68,8 @@ export interface RaiseEscalationInput {
 	plan_summary?: PlanSummary;
 	decision_summary?: DecisionSummary;
 	original_text?: Escalation["original_text"];
+	/** Self-review A1: set only by gate/pipeline producers, never from tool arguments. */
+	authority_hold?: EscalationAuthorityHold;
 	at?: string;
 }
 
@@ -163,6 +166,7 @@ export class EscalationStore {
 				existing.evidence_paths = input.evidence_paths ?? existing.evidence_paths;
 				if (input.mandate_clause?.trim()) existing.mandate_clause = input.mandate_clause.trim();
 				if (input.original_text) existing.original_text = input.original_text;
+				if (input.authority_hold && !existing.authority_hold) existing.authority_hold = input.authority_hold;
 				result = existing;
 				return items;
 			}
@@ -192,6 +196,7 @@ export class EscalationStore {
 				...(input.plan_summary ? { plan_summary: input.plan_summary } : {}),
 				...(input.decision_summary ? { decision_summary: input.decision_summary } : {}),
 				...(input.original_text ? { original_text: input.original_text } : {}),
+				...(input.authority_hold ? { authority_hold: input.authority_hold } : {}),
 			};
 			const parsed = validateEscalation(created);
 			if (!parsed.ok) {
@@ -365,6 +370,38 @@ export class EscalationStore {
 	}
 
 	/**
+	 * Self-review A1: one open replacement for a closed, unreleased authority-hold record, copying its hold and
+	 * evidence. Idempotent: a retry returns the open replacement. The original stays as it is and unanswerable.
+	 */
+	async replaceHold(id: string): Promise<Escalation> {
+		let result: Escalation | undefined;
+		await this.#mutate((items) => {
+			const original = items.find((entry) => entry.id === id);
+			if (!original) throw new EscalationError(`no escalation ${id}`);
+			if (!original.authority_hold) throw new EscalationError(`${id} holds no authority; nothing to replace`);
+			if (original.status === "open") throw new EscalationError(`${id} is still open: cp_decide it with an operator answer naming ${id}`);
+			const root = holdRoot(items, original);
+			if (items.some((entry) => holdRoot(items, entry) === root && releasesHold(entry))) throw new EscalationError(`${id}'s authority hold is already released`);
+			const linked = items.find((entry) => entry.replaces_escalation_id === id);
+			if (linked && linked.status !== "open") throw new EscalationError(`${id} was already replaced by ${linked.id} (${linked.status}); replace ${linked.id} instead`);
+			if (linked) { result = linked; return items; }
+			const replacement: Escalation = {
+				schema_version: SCHEMA_VERSION, id: this.#mintId(items), job_ids: original.job_ids, kind: original.kind,
+				question: "", options: HOLD_REPLACEMENT_OPTIONS, recommended: "deny", mandate_id: original.mandate_id,
+				mandate_clause: original.mandate_clause, evidence_paths: original.evidence_paths, created_at: isoTimestamp(this.#now()),
+				status: "open", authority_hold: original.authority_hold, replaces_escalation_id: id,
+			};
+			replacement.question = `${replacement.id} replaces ${id} (${original.status}) and keeps its authority hold on ${original.authority_hold.ship_job_ids?.join(", ") ?? `mandate ${original.authority_hold.mandate_id ?? "none"}`}: release it for implementation? Only cp_decide ${replacement.id} with an operator answer naming ${replacement.id} releases it.`.slice(0, ESCALATION_QUESTION_MAX_CHARS);
+			const parsed = validateEscalation(replacement);
+			if (!parsed.ok) throw new EscalationError(`refusing to write an invalid escalation:\n  ${parsed.errors.join("\n  ")}`);
+			result = parsed.value;
+			return [...items, parsed.value];
+		});
+		if (!result) throw new EscalationError(`no escalation ${id}`);
+		return result;
+	}
+
+	/**
 	 * Close every open record `reasonFor` names a reason for as `superseded` \u2014 no answer, no linked
 	 * checkpoint decided. Synchronous so a mandate write can supersede in the same call: `#write`'s
 	 * body has no await, so this can never interleave with a queued mutation in this process. An
@@ -439,6 +476,34 @@ export function escalationApproves(answer: string, escalation: Escalation): bool
 	return false;
 }
 
+const HOLD_REPLACEMENT_OPTIONS: EscalationOption[] = [
+	{ id: "approve", label: "approve", consequence: "release the hold; normal gate and checkpoint rules still apply", cost: "commits to the held plan" },
+	{ id: "deny", label: "deny", consequence: "the hold stays; covered ships stay refused", cost: "none" },
+];
+const HOLD_RELEASES = new Set(["override", "approve"]);
+
+/** The first record of a replacement chain: every record in one chain shares one authority hold. */
+export function holdRoot(items: readonly Escalation[], item: Escalation): string {
+	const seen = new Set<string>();
+	let current = item;
+	while (current.replaces_escalation_id && !seen.has(current.id)) {
+		seen.add(current.id);
+		const previous = items.find((entry) => entry.id === current.replaces_escalation_id);
+		if (!previous) break;
+		current = previous;
+	}
+	return current.id;
+}
+
+/** An affirmative option id (never the recommendation) answered by an operator quote or authenticated delegation. */
+export function releasesHold(item: Escalation): boolean {
+	if (item.status !== "answered" || !item.authority_hold) return false;
+	const answer = item.answer?.trim() ?? "";
+	const option = item.options.find((entry) => entry.id === answer || entry.label === answer);
+	if (!option || !HOLD_RELEASES.has(option.id)) return false;
+	return item.answered_by === "operator-quote" || (item.answered_by === "operator-delegated" && Boolean(item.send_id && item.delegation_rule));
+}
+
 const GATE_OPTIONS: EscalationOption[] = [
 	{
 		id: "replan",
@@ -483,7 +548,7 @@ export function gateOverride(store: EscalationStore | undefined, verdict: GateVe
 }
 
 /** Gate ladder: escalate/policy (and operational_persistent) mint a record. Duplicate-safe. */
-export function raiseForGate(store: EscalationStore, verdict: GateVerdict): Promise<Escalation> | undefined {
+export function raiseForGate(store: EscalationStore, verdict: GateVerdict, hold?: EscalationAuthorityHold): Promise<Escalation> | undefined {
 	const kind = kindForGate(verdict);
 	if (!kind) return undefined;
 	return store.raise({
@@ -493,6 +558,8 @@ export function raiseForGate(store: EscalationStore, verdict: GateVerdict): Prom
 		options: GATE_OPTIONS,
 		recommended: "replan",
 		evidence_paths: [paths.gateFile(verdict.job_id, verdict.attempt)],
+		// Only a policy stop is an authority decision; an operational one releases with its successful re-gate.
+		...(hold && verdict.cause === "policy" ? { authority_hold: hold } : {}),
 	});
 }
 
@@ -574,6 +641,7 @@ export function raisePlanApproval(
 		decision_summary?: DecisionSummary;
 		mandate_id?: string;
 		mandate_clause?: string;
+		authority_hold?: EscalationAuthorityHold;
 	},
 ): Promise<Escalation> {
 	return store.raise({
@@ -589,6 +657,7 @@ export function raisePlanApproval(
 		...(input.decision_summary ? { decision_summary: input.decision_summary } : {}),
 		...(input.mandate_id ? { mandate_id: input.mandate_id } : {}),
 		...(input.mandate_clause ? { mandate_clause: input.mandate_clause } : {}),
+		...(input.authority_hold ? { authority_hold: input.authority_hold } : {}),
 	});
 }
 

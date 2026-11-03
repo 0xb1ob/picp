@@ -983,6 +983,10 @@ test(
 		await artifactWritten(b, oldResearchId);
 		const escalated = await b.advanceThrough(oldResearchId);
 		assert.equal(escalated.state, "escalated");
+		// A1: reanchor is a replan and never releases the ship's authority hold; only the operator's answer does.
+		const [held] = b.post.escalations.list({ kind: "conflicting_acceptance" });
+		assert.equal(held?.authority_hold?.source_job_id, oldResearchId);
+		await b.post.escalations.answer(held!.id, { answer: "override", by: "operator-quote" });
 
 		// The replacement research job: a real job, dep-linked like any other.
 		const ledger = b.post.ledger();
