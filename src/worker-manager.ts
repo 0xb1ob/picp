@@ -508,8 +508,8 @@ export class WorkerManager {
 	 * silent: nothing is added to the argv and nothing is logged (cp-5hui).
 	 */
 	#optionalPackages(profile: WorkerProfile): OptionalWorkerPackages {
-		// cp-fl8b: read-only profiles add the MCP gateway when the inherited agent dir has servers.
-		return withWorkerMcp(activePackagesForRole(this.#packages.packages, profile.frontmatter.role, profile.frontmatter.packages), profile, this.#options.parentEnv);
+		// cp-z402: every profile adds the MCP gateway when the inherited agent dir has enabled servers.
+		return withWorkerMcp(activePackagesForRole(this.#packages.packages, profile.frontmatter.role, profile.frontmatter.packages), this.#options.parentEnv);
 	}
 
 	/** Pure: everything the spawn will use, with every policy check applied. */

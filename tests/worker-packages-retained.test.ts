@@ -107,7 +107,7 @@ function managerWith(
 	spawnFn?: (options: WorkerSpawnOptions) => WorkerProcess,
 ): WorkerManager {
 	// Hermetic: a PI_LENS_HOME the test process inherited (a worker has one) must not read as the pin under test,
-	// nor a host mcp.json add the read-only workers' MCP gateway (cp-fl8b; P8b e2e 04-10 covers it).
+	// nor a host mcp.json add the workers' MCP gateway (cp-fl8b; P8b e2e 04-10 covers it).
 	const { PI_LENS_HOME: _inherited, ...inherited } = process.env;
 	const parentEnv = { ...inherited, PI_CODING_AGENT_DIR: join(tmpdir(), "cp-optpkg-no-agent-dir") };
 	return new WorkerManager({
@@ -504,7 +504,9 @@ test("the never-list is never activated, by any role or any profile override", a
 // ---------------------------------------------------------------------------
 
 function pendingManager(pending: Promise<WorkerPackageResolution>, events: Array<{ kind: string; payload: Record<string, unknown> }> = []) {
-	const { PI_LENS_HOME: _inherited, ...parentEnv } = process.env;
+	const { PI_LENS_HOME: _inherited, ...inherited } = process.env;
+	// Hermetic like managerWith: a host mcp.json now adds the MCP gateway to every profile (cp-z402).
+	const parentEnv = { ...inherited, PI_CODING_AGENT_DIR: join(tmpdir(), "cp-optpkg-no-agent-dir") };
 	const spawned: WorkerSpawnOptions[] = [];
 	const manager = new WorkerManager({
 		home: "/unused",

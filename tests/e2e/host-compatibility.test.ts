@@ -347,7 +347,7 @@ test("P24 MCP access: /doctor --json in a real parent reports mcp.operator and m
 	for (const servers of [undefined, { off: { command: "x", enabled: false } }]) {
 		p.servers(servers);
 		const [operator, workers] = mcp(await p.doctor());
-		assert.deepEqual([operator?.severity, workers?.what], ["ok", "read-only workers: no MCP servers configured"]);
+		assert.deepEqual([operator?.severity, workers?.what], ["ok", "workers: no MCP servers configured"]);
 	}
 	assert.deepEqual(p.calls(), [], "pi mcp list never runs without an enabled server");
 
@@ -359,8 +359,9 @@ test("P24 MCP access: /doctor --json in a real parent reports mcp.operator and m
 	], errors: [] }));
 	const [operator, workers] = mcp(await p.doctor());
 	assert.deepEqual(p.calls(), ["mcp list --json"], "one live probe");
-	assert.deepEqual([workers?.check, workers?.what], ["mcp.workers", "read-only workers: all 2 servers, read-only tools only"]);
-	assert.match(String(workers?.detail), /gate-reviewer, ops, planner, qa via mcp_call/);
+	assert.deepEqual([workers?.check, workers?.what], ["mcp.workers", "workers: all 2 enabled servers, all exposed tools"]);
+	assert.match(String(workers?.detail), /every worker profile \(gate-reviewer, implementer, ops, planner, qa; implementer\/ship workers and the gate, diff and quality reviewers included\) via mcp_call, all exposed tools, no annotation filter/);
+	assert.match(String(workers?.detail), /the CP parent: unchanged/);
 	assert.doesNotMatch(String(workers?.what) + String(workers?.detail), /allowlist/);
 	assert.deepEqual([operator?.severity, Boolean(operator?.fix)], ["warn", true]);
 	assert.match(String(operator?.what), /connected 1\/2; tools 2/);
@@ -377,6 +378,7 @@ test("P24 MCP access: /doctor --json in a real parent reports mcp.operator and m
 	const [invalid, invalidWorkers] = mcp(await p.doctor());
 	assert.deepEqual([invalid?.severity, Boolean(invalid?.fix)], ["warn", true]);
 	assert.equal(JSON.stringify([invalid, invalidWorkers]).includes("sk-live"), false);
+	assert.equal(invalidWorkers?.what, "workers: no MCP (mcp.json is not valid)");
 	assert.equal(p.calls().length, 2, "an invalid mcp.json is never probed");
 });
 

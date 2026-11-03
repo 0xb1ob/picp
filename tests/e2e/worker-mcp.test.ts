@@ -1,7 +1,7 @@
 /**
- * cp-fl8b: MCP in a real pi process. A read-only worker reaches every server of its inherited agent
- * dir's mcp.json through `mcp_call`, only for tools declared read-only; the operator argv has `/mcp`.
- * The fixture server is tests/fixtures/mcp-probe-server.mjs; the agent dir is a throwaway one.
+ * cp-fl8b, cp-z402: MCP in a real pi process. A worker reaches every enabled server of its inherited agent dir's
+ * mcp.json through `mcp_call`, every exposed tool whatever its hints; hidden exposures stay out. The operator argv
+ * has `/mcp`. The fixture server is tests/fixtures/mcp-probe-server.mjs; the agent dir is a throwaway one.
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,21 +17,26 @@ import { createAgentDir, MockProvider, startPiChild, startRpc } from "../harness
 const SERVER = join(PACKAGE_ROOT, "tests/fixtures/mcp-probe-server.mjs");
 
 function mcpJson(dir: string, log: string): void {
-	const server = (label: string) => ({ command: process.execPath, args: [SERVER, label, log] });
-	writeFileSync(join(dir, "mcp.json"), JSON.stringify({ mcpServers: { probe: server("probe"), other: server("other") } }));
+	const server = (label: string, extra: Record<string, unknown> = {}) => ({ command: process.execPath, args: [SERVER, label, log], ...extra });
+	writeFileSync(join(dir, "mcp.json"), JSON.stringify({ mcpServers: {
+		probe: server("probe"),
+		other: server("other", { toolExposure: { delete_thing: "hidden" } }),
+		secret: server("secret", { exposure: "hidden" }),
+	} }));
 }
 
-test("a read-only worker lists and calls only read-only MCP tools, of every server", { timeout: 120_000 }, async (t) => {
+test("a worker lists and calls every exposed MCP tool, whatever its hints, of every server", { timeout: 120_000 }, async (t) => {
 	const provider = await MockProvider.start();
 	const work = mkdtempSync(join(tmpdir(), "cp-worker-mcp-"));
 	const log = join(work, "calls.log");
 	const call = (args: Record<string, unknown>) => ({ kind: "tool_calls" as const, calls: [{ name: MCP_CALL_TOOL, args }] });
+	const exposed = ["read_thing", "plain", "write_thing", "delete_thing", "odd_thing"];
 	const model = provider.addScript("worker-mcp", [
 		call({}),
-		call({ tool: "mcp__probe__read_thing", arguments: {} }),
+		...exposed.map((tool) => call({ tool: `mcp__probe__${tool}`, arguments: {} })),
 		call({ tool: "mcp__other__read_thing" }),
-		call({ tool: "mcp__probe__plain" }),
-		call({ tool: "mcp__probe__delete_thing" }),
+		call({ tool: "mcp__other__delete_thing" }),
+		call({ tool: "mcp__secret__read_thing" }),
 		call({ tool: "mcp__probe__nope" }),
 		{ kind: "text", text: "done" },
 	]);
@@ -49,24 +54,25 @@ test("a read-only worker lists and calls only read-only MCP tools, of every serv
 	await child.waitForSettled(90_000);
 	const ends = child.eventsOfType("tool_execution_end").filter((r) => r.toolName === MCP_CALL_TOOL) as Array<{ isError?: boolean; result?: unknown }>;
 	const text = (i: number) => JSON.stringify(ends[i]?.result ?? {});
-	assert.equal(ends.length, 6, child.stderr());
+	assert.equal(ends.length, 10, child.stderr());
 
 	assert.equal(ends[0]?.isError, false);
-	assert.match(text(0), /mcp__probe__read_thing/);
+	for (const tool of exposed) assert.match(text(0), new RegExp(`mcp__probe__${tool}`), `listed: ${tool}`);
 	assert.match(text(0), /mcp__other__read_thing/);
-	assert.doesNotMatch(text(0), /plain|delete_thing/);
-	assert.equal(ends[1]?.isError, false);
-	assert.match(text(1), /ok:read_thing/);
-	assert.match(text(2), /ok:read_thing/);
-	assert.equal(ends[3]?.isError, true);
-	assert.match(text(3), /readOnlyHint/);
-	assert.equal(ends[4]?.isError, true);
-	assert.match(text(4), /destructiveHint/);
-	assert.equal(ends[5]?.isError, true);
-	assert.match(text(5), /not a connected MCP tool/);
+	assert.match(text(0), /\\"input\\": \{/, "listed with input schemas");
+	assert.doesNotMatch(text(0), /mcp__other__delete_thing|mcp__secret__/, "hidden tool and server exposures stay unlisted");
+	exposed.forEach((tool, i) => {
+		assert.equal(ends[i + 1]?.isError, false, tool);
+		assert.match(text(i + 1), new RegExp(`ok:${tool}`), tool);
+	});
+	assert.match(text(6), /ok:read_thing/);
+	for (const i of [7, 8, 9]) {
+		assert.equal(ends[i]?.isError, true, text(i));
+		assert.match(text(i), /not a connected MCP tool/);
+	}
 
-	const lines = readFileSync(log, "utf8").trim().split("\n").sort();
-	assert.deepEqual(lines, ["call other read_thing", "call probe read_thing", "start other", "start probe"], "refused calls never reach a server");
+	const lines = readFileSync(log, "utf8").trim().split("\n").filter((line) => line.startsWith("call ")).sort();
+	assert.deepEqual(lines, ["call other read_thing", ...exposed.map((tool) => `call probe ${tool}`).sort()], "hidden and unknown calls never reach a server");
 	assert.equal(existsSync(join(agentDir.path, "mcp-auth.json")), false);
 });
 

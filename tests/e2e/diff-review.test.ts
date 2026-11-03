@@ -10,13 +10,14 @@ import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_ORIGIN, DIFF_REVIEW_MAX_BYTES, DIFF_REVIEW_MAX_STAT_FILES, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, type DiffVerdict } from "../../src/contracts.ts";
 import { DiffVerdictSchema, validate } from "../../src/contracts.ts";
 import { isDiffReviewWait } from "../../src/diff-review.ts";
-import { routeNamed, COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT, startPiChild } from "../harness/index.ts";
+import { routeNamed, COMMAND_POST_EXTENSION, createAgentDir, createScratchHome, createScratchRepo, MockProvider, REPO_ROOT, type ScriptStep, startPiChild } from "../harness/index.ts";
 import type { PiModelRegistryLike } from "../../src/routing.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { enableTreehouse, readRunEvents, waitFor } from "../harness/index.ts";
 
 import { CheckpointStore } from "../../src/checkpoint.ts";
 import { listPendingReviews, readPendingReview } from "../../src/review-runs.ts";
+import { MCP_CALL_TOOL } from "../../src/worker-mcp.ts";
 async function stack(t: TestContext, registry?: PiModelRegistryLike, transport?: (content: string) => boolean, onDurableWakeup?: () => void) {
 	const home = createScratchHome();
 	const repo = createScratchRepo({ name: "demo" });
@@ -42,9 +43,9 @@ async function stack(t: TestContext, registry?: PiModelRegistryLike, transport?:
 		return jobId;
 	}
 	let reviews = 0;
-	async function review(jobId: string, observation: Record<string, unknown> = {}, source: "explicit" | "project" | "mandate" = "explicit") {
+	async function review(jobId: string, observation: Record<string, unknown> = {}, source: "explicit" | "project" | "mandate" = "explicit", before: ScriptStep[] = []) {
 		const name = `review-${jobId}-${++reviews}`;
-		const model = provider.addScript(name, [{ kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: jobId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["reviewed complete subject"], ...observation } }] }]);
+		const model = provider.addScript(name, [...before, { kind: "tool_calls", calls: [{ name: "report_verdict", args: { job_id: jobId, verdict: "pass", flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, reasons: ["reviewed complete subject"], ...observation } }] }]);
 		agent.writeModels(provider);
 		routeNamed(home.path, [model]);
 		if (source === "project") await post.registry.setReviewerModel("demo", model);
@@ -79,6 +80,22 @@ test("S04: cp_review gives the reviewer a complete three-dot subject from the ca
 	assert.doesNotMatch(diff, /base-only\.txt|## Omitted/);
 	assert.equal(existsSync(join(result.scratch, "task-addenda.md")), false, "no addenda, no addenda file");
 	assert.doesNotMatch(readFileSync(join(result.run, "brief.md"), "utf8"), /Authorized task addenda/, "and no brief change");
+});
+
+test("MCP diff reviewer: cp_review's real reviewer calls writable and destructive MCP tools, then its pass persists", { timeout: 120_000 }, async (t) => {
+	const s = await stack(t);
+	const log = join(s.agent.path, "calls.log");
+	const server = join(REPO_ROOT, "tests/fixtures/mcp-probe-server.mjs");
+	writeFileSync(join(s.agent.path, "mcp.json"), JSON.stringify({ mcpServers: { probe: { command: process.execPath, args: [server, "probe", log] } } }));
+	const job = await s.seed({ "a.txt": "one\n" });
+	const mcp = (args: Record<string, unknown>): ScriptStep => ({ kind: "tool_calls", calls: [{ name: MCP_CALL_TOOL, args }] });
+	const tools = ["plain", "write_thing", "delete_thing"];
+	const result = await s.review(job, {}, "explicit", [mcp({}), ...tools.map((tool) => mcp({ tool: `mcp__probe__${tool}` }))]);
+	assert.equal(result.verdict.verdict, "pass");
+	const seen = JSON.stringify(result.requests.at(-1)?.body.messages ?? []);
+	for (const tool of tools) assert.match(seen, new RegExp(`mcp__probe__${tool}.*ok:${tool}`, "s"), `${tool}: listed, then its server result`);
+	const calls = readFileSync(log, "utf8").split("\n").filter((line) => line.startsWith("call ")).sort();
+	assert.deepEqual(calls, tools.map((tool) => `call probe ${tool}`).sort(), "every reviewer call reaches the server");
 });
 
 test("S04: cp_review stops wide, oversized and unparseable subjects before a model sees them", { timeout: 120_000 }, async (t) => {
