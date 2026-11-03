@@ -141,6 +141,44 @@ test("M3-fidelity-transcript: replies are unboxed text, own bubbles neutral, an 
 	}
 });
 
+const JOB = "cp-s2-close-ie8w", PR = "https://github.com/o/picp/pull/316";
+test("full-match-transcript: time-first step rows behind \"N earlier\", a compact job suffix, and a PR chip whose unknown slots stay unknown", { timeout: 180_000 }, async (t) => {
+	const d = await viewer(t, { seed: (stateDir, home) => {
+		const file = join(home, "pi-sessions", "chat.jsonl");
+		const step = (id: string, hm: string) => [line(hm, { role: "assistant", content: [{ type: "toolCall", id, name: "bash", arguments: { id } }] }),
+			line(hm, { role: "toolResult", toolCallId: id, toolName: "bash", content: [{ type: "text", text: `ran ${id}` }] })];
+		write(file, jsonl([
+			{ type: "custom_message", timestamp: at("14:20"), customType: "cp-bridge", display: true, content: `[cp-bridge wake job=${JOB}]\nCI green` },
+			...["s1", "s2", "s3", "s4", "s5"].flatMap((id, i) => step(id, `14:2${i + 1}`)),
+			line("14:30", { role: "assistant", content: [{ type: "text", text: `REPLY-CARD on ${PR}` }] }),
+		]));
+		write(operatorSessionsFile(join(stateDir, "sessions")), jsonl([{ at: at("13:00"), session_file: file }]));
+		write(join(stateDir, "fleet.json"), { jobs: [{ job_id: JOB, project: "picp", phase: "held", receipts: [{ kind: "pr", url: PR }] }] });
+	} });
+	const css = await servedCss(d);
+	// Negative control: restoring the old progress ordering (time last, `order:1`) fails these two.
+	assert.match(rules(css, ".session-steps-rows"), /grid-template-columns:16px auto fit-content\(14ch\) minmax\(0,1fr\)/, "time, tool, summary");
+	assert.doesNotMatch(rules(css, ".session-steps-rows .session-tool summary>.session-time"), /order:/, "the time stays first in DOM and grid order");
+	const tab = await openTab(t, d.port, "#sessions?view=you&transcript=1", new Map(), undefined, {}, true);
+	await tab.waitText(/REPLY-CARD/);
+	const pill = tab.$(".session-steps > .session-tools")!;
+	assert.deepEqual([pill.textContent, pill.getAttribute("title")], ["≡ 6 steps · ie8w ▸", JOB], "a compact suffix; the full id in the title");
+	tab.click(pill);
+	const earlier = await tab.find(".session-steps-earlier");
+	const rows = () => tab.$$(".session-steps-rows .session-tool > summary").map((s) => [...s.children].map((c) => c.textContent).join("|"));
+	assert.deepEqual([earlier.textContent, rows()], ["2 earlier ▸", ["14:23|bash|ran s3", "14:24|bash|ran s4", "14:25|bash|ran s5"]], "the last three, time first");
+	assert.equal(tab.$(".session-steps-link")?.getAttribute("title"), JOB, "the job link keeps the full id");
+	tab.click(earlier);
+	await until(() => rows().length, (n) => n === 5, "the earlier rows");
+	assert.deepEqual([rows()[0], tab.$(".session-steps-earlier")?.getAttribute("aria-expanded")], ["14:21|bash|ran s1", "true"], "earlier events are recoverable");
+	// No stale-chip success: nothing recorded for review or CI reads as unknown, never as green or pass.
+	const chip = await tab.find("a.pr-chip");
+	assert.deepEqual([...chip.children].slice(1).map((c) => c.textContent), ["#316", "review unknown", "CI unknown", chip.querySelector(".pr-chip-state")!.textContent],
+		"Review → CI → Merge slots");
+	assert.deepEqual([chip.querySelector(".pr-chip-review-pass, .pr-chip-ci-green") === null, /latest recorded: review unknown, CI unknown/.test(chip.getAttribute("title")!)], [true, true],
+		"no success painted; the title says it is the latest record");
+});
+
 /** Chat, Jobs, More and every page reached through them: [hash, the screen's marker, the primary item it lights]. */
 const TRAVERSE: Array<[string, string, string]> = [
 	["#sessions", ".shell-main > .sessions", "Chat"], ["#jobs", '.shell-main > .jobs-screen nav[aria-label="Jobs view"]', "Jobs"],

@@ -557,7 +557,7 @@ test("P19-chat-steps: a run of steps takes the one wake notice above it and link
 	const tab = await openTab(t, d.port, OPERATOR);
 	await tab.waitText(/a message ends the run/);
 	const runs = tab.$$(".session-steps");
-	assert.deepEqual(runs.map((r) => r.querySelector(".session-steps-face")?.textContent?.replace(/[▸▾]/g, "").trim()), ["≡ 3 steps · cp-done", "≡ 1 step · ran t3"], "the notice joins its run; a message ends it");
+	assert.deepEqual(runs.map((r) => r.querySelector(".session-steps-face")?.textContent?.replace(/[▸▾]/g, "").trim()), ["≡ 3 steps · done", "≡ 1 step · ran t3"], "the notice joins its run (its job's suffix, full match S2); a message ends it");
 	tab.click(runs[0]!.querySelector(".session-tools")!);
 	const link = await tab.find(".session-steps-link");
 	// The two wakes fold into a rollup, where the notice shows only inside the open pill.
@@ -573,7 +573,7 @@ test("P19-chat-steps: a run of steps takes the one wake notice above it and link
 	assert.equal(await until(pane, (p) => p === "transcript", "Transcript again"), "transcript", "Forward to the explicit link lands on Transcript again");
 	assert.deepEqual([...new Set(tab.requests.filter((r) => r.path.startsWith("/api/job/cp-done") && !r.path.includes("/transcript")).map((r) => r.path))], ["/api/job/cp-done"], "the job read never carries the tab");
 	const css = await servedCss(d);
-	assert.match(cssRules(css, ".session-steps-rows"), /display:grid;grid-template-columns:16px fit-content\(14ch\) minmax\(0,1fr\) auto/);
+	assert.match(cssRules(css, ".session-steps-rows"), /display:grid;grid-template-columns:16px auto fit-content\(14ch\) minmax\(0,1fr\)/, "full match S2: time, name, summary");
 	assert.match(cssRules(css, ".session-steps-rows .session-tool summary,.session-steps-rows>.session-entry,.session-steps-rows>.session-entry>.session-tool") + cssRules(css, ".session-steps-rows>.session-entry,.session-steps-rows>.session-entry>.session-tool,.session-steps-rows .session-tool>summary"), /grid-template-columns:subgrid/);
 	assert.match(cssRules(css, ".session-steps-rows .session-tool summary>code:nth-child(2)") + cssRules(css, ".session-tool summary>code:nth-child(2)"), /overflow:hidden;.*text-overflow:ellipsis/, "a longer name ellipsizes");
 });

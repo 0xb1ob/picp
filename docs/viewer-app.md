@@ -673,6 +673,17 @@ Crossing 900 px while the context is open closes it (the sheet hands focus back 
 expanded or keeps Escape and no bottom sheet remains on a desktop. Deferred: per-conversation job lists and totals (not
 recorded), threads and Cmd+N. `m3-context` captures both surfaces at 1440, 900, 899 and 390 px.
 
+**Full match S2 (transcript and context).** An Asked you card states who asked, when and the project, opens its
+recorded Context (or "Context not recorded") and lists each option as a card with its consequence, the recommendation
+marked suggested; a click sends through the same `useAnswering` path as the inline chips, so one pending answer holds
+both surfaces and a failure re-enables both. While that chat is on screen the context reads `/api/jobs` once and joins
+each live worker by exact id for its title and wall clock (elapsed / limit, a bar when both are recorded); a missing fact
+is "not recorded", never 0. Labels show the id's last segment (`jobSuffix`) with the full id in `title` and links. The
+PR chip orders its slots review → CI → merge and names an unrecorded slot ("review unknown"); steps rows put the time
+first and show the last three behind an "N earlier" toggle; the bridge chip is a plain dim line.
+`--stage full-match-transcript` fails unless the 1440 and 390 px captures show the joined clock, three option cards,
+"2 earlier" and time-first rows with nothing outside the viewport.
+
 **Full match shell (Design full match S1).** Chat's rail chrome is shared by the desktop column and the phone's
 Conversations drawer (`ShellContext.rail`: `head`, `nav`, `status`): the brand with a search icon on top (design
 `.cvh`), the Chats, the live status, then Chat/Jobs/More as icons at the foot (design `.inav`), each link keeping its

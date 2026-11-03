@@ -18,7 +18,7 @@ import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
-	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell"];
+	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -28,7 +28,8 @@ const GENERATED = "2026-10-15T16:00:00Z";
 const say = (id: string, at: string, who: string, text: string, over: Partial<SessionEntry> = {}): SessionEntry =>
 	({ id, at, kind: "say", who, text, name: null, send_id: null, tag: null, failed: false, trace: [], ...over });
 const tool = (id: string, at: string, name: string, text: string, summary?: string): SessionEntry => ({ ...say(id, at, "Assistant", text), kind: "tool", name, ...(summary ? { summary } : {}) });
-const JOB = "cp-sessions-v2-pr2";
+/** Full match S2 shows job suffixes, so its ids end in four characters as real picp ids do. */
+const JOB = args.stage === "full-match-transcript" ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
 /** A cp-bridge wake as the transcript carries it: first line parsed off, `paths:` resolved (one left unresolved). */
 const wake: SessionEntry = say("w1", "2026-10-15T08:03:30Z", "cp-bridge", [
 	"PR #319 is waiting on CI. The diff review passed on 3f2a9c1; CI is still running on that head, so nothing is merged yet.",
@@ -78,18 +79,29 @@ const asked = (id: string, question: string) => ({ id, project: "picp", question
 	mandate_objective: null, jobs: [], escalation: null, evidence: [] }) as unknown as NonNullable<SessionsResponse["open_asks"]>[number];
 const askCard = (ask: ReturnType<typeof asked>, at: string): SessionEntry => ({ ...say(`c-${ask.id}`, at, "Operator → you", ask.question), kind: "ask", ask_id: ask.id,
 	ask: { id: ask.id, question: ask.question, options: ask.options, recommendation: ask.recommendation, state: "open", answer: null, answered_at: null, reason: null } });
+const fullMatch = args.stage === "full-match-shell" || args.stage === "full-match-transcript";
 if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context" || args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces"
-	|| args.stage === "m3-fidelity-composer" || args.stage === "full-match-shell") {
+	|| args.stage === "m3-fidelity-composer" || fullMatch) {
 	const ask = asked("ask-pr4a", "PR #321 is green on its pushed head. Merge it, or hold it for another review?");
 	sessions.entries = [...entries, askCard(ask, "2026-10-15T08:04:40Z")];
 	sessions.open_asks = [ask];
 	sessions.operator_context = { tokens: 61_000, window: 200_000, percent: 30.5, level: "ok", reason: null, model: "fixture-model", last_compact_at: null, thinking: null } as SessionsResponse["operator_context"];
 }
 /** M3 shell: committed captures name picp only, so the table's second project reads picp too. */
-const picpOnly = args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces" || args.stage === "m3-fidelity-composer" || args.stage === "full-match-shell";
+const picpOnly = args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces" || args.stage === "m3-fidelity-composer" || fullMatch;
 if (picpOnly) sessions.entries = sessions.entries.map(e => ({ ...e, text: e.text.replaceAll("demo-app", "picp") }));
 /** M3 fidelity B: an own message before the ask, so one capture holds a bubble, a reply, the ask and both sends. */
 if (args.stage === "m3-fidelity-transcript") sessions.entries.splice(-1, 0, say("e7", "2026-10-15T08:04:30Z", "Operator", "Hold the merge until I have read the review."));
+/** Full match S2: four-character suffixes, a recorded multi-line context, and a PR chip whose CI slot is unrecorded. */
+if (args.stage === "full-match-transcript") {
+	const ids: Record<string, string> = { "cp-sessions-v2-pr3": "cp-transcript-steps-t7ah", "cp-held-review-with-a-long-job-id": "cp-held-review-k2pq" };
+	sessions.workers = sessions.workers.map(w => ({ ...w, id: ids[w.id] ?? w.id, job_id: w.job_id && (ids[w.job_id] ?? w.job_id) }));
+	sessions.open_asks = sessions.open_asks!.map(a => ({ ...a, context: "- CI is green on the pushed head 3f2a9c1.\n- One review attempt passed; its two notes do not block the merge.\n- The PR changes viewer-app files only." }));
+	const url = "https://github.com/o/picp/pull/321";
+	sessions.pr_chips = { [url]: { kind: "pr", url, number: 321, repo: "o/picp", job_id: JOB, head_sha: "3f2a9c1e".padEnd(40, "0"), state: "open", merge_sha: null,
+		closed_by: null, job_status: null, ci: null, review: "pass" } };
+	sessions.entries.splice(-1, 0, say("e8", "2026-10-15T08:04:35Z", "Assistant", `**[picp]** ${url} passed its review; CI has not reported on that head yet.`));
+}
 /** Chips: every PR state, CI and review value, the three issue forms, a long repo name, and a `#7` code span. */
 if (args.stage === "chips") {
 	const gh = "https://github.com/o/picp", long = "https://github.com/an-organisation-with-a-long-name/a-repository-name-that-keeps-going-for-wrapping";
@@ -189,6 +201,11 @@ try {
 		row("cp-m3-park", "picp", "awaiting_merge", "Parked with the team", { pr_url: "https://github.com/o/picp/pull/712", pr_status: "open" }),
 		row(JOB, "picp", "done", "Sessions chat v2 PR 2", { finished_today: true, finished_at: GENERATED, cost_usd: 2.05, pr_url: "https://github.com/o/picp/pull/700", pr_status: "merged" }),
 	] };
+	// Full match S2: the chat's context joins /api/jobs by exact worker id; one recorded clock and a long title.
+	if (args.stage === "full-match-transcript") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
+		row("cp-transcript-steps-t7ah", "picp", "working", "Restyle the transcript steps so a long job title keeps wrapping inside its context card", { elapsed_seconds: 540, limit_seconds: 7200, cost_usd: 1.42, model: "fixture-model" })] };
+	// Every chat's context now reads /api/jobs; stages without their own list (or the real viewer's) get an empty one.
+	if (!routes["/api/jobs"] && !["m3-transcript", "nav-simplify", "p3-quota", "m3-shell"].includes(args.stage)) routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [] };
 	// M3 slice 4: the composer menu attaches the done job's own P1 reference, as its job page's Ask would.
 	if (args.stage === "m3-composer") routes[`/api/job/${JOB}`] = { ...job, ask_reference: { kind: "job", project: "picp", job_id: JOB }, evidence_lookup: { supported: true, why: "fixture" } };
 	server.on("request", (req, res) => {
@@ -613,9 +630,8 @@ try {
 		if (posts.length) throw new Error(`m3-fidelity-composer sent ${posts.join(", ")}: the menu and context only read`);
 	}
 	if (stage === "full-match-shell") {
-		// Full match S1 (design frames 1/6/11): measured boxes on each capture. Negative control: the closed-until-asked
-		// inspector fails `inspector` at 1440 and a 48 px phone bar or 14 px composer sides fail `phone`; so does a
-		// single-row phone composer (`field`) or an idle worker counted as working (`strip`).
+		// Full match S1 (frames 1/6/11) per capture. Negative controls: a closed inspector fails `inspector` at 1440; a 48 px
+		// bar or 14 px sides fail `phone`, a one-row composer `field`, an idle worker counted as working `strip`.
 		const look = `(() => { const q = s => document.querySelector(s), h = s => Math.round(q(s)?.getBoundingClientRect().height ?? 0), cs = s => q(s) && getComputedStyle(q(s)), r = s => q(s).getBoundingClientRect();
 			const shown = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
 			return { inspector: !!q("aside.workspace-context"), sheet: !!q("dialog[open]"), heading: h(".session-heading"), bar: h(".session-bar"),
@@ -640,7 +656,7 @@ try {
 			["1279", 1279, 1000, [], { inspector: true, sheet: false, heading: 48, small: "" }],
 			["900", 900, 1000, [], { inspector: true, sheet: false, heading: 48, small: "" }],
 			["phone", 390, 844, [], { inspector: false, sheet: false, heading: 45, bar: 53, sides: "10px 14px", field: "18px field over footer full width",
-				strip: "1 working · cp-sessions-v2-pr3", small: "" }],
+				strip: "1 working · pr3", small: "" }],
 			["899", 899, 1000, [], { inspector: false, sheet: false, heading: 45, bar: 53, small: "" }],
 			["drawer", 390, 844, [drawer], { drawer: "Chat,Jobs,More", drawer_width: 317, small: "" }],
 			["filter", 390, 844, [filter], { sheet: false, small: "" }],
@@ -652,6 +668,50 @@ try {
 			if (off.length) throw new Error(`full-match-shell-${name}: ${off.join("; ")}`);
 		}
 		if (posts.length) throw new Error(`full-match-shell sent ${posts.join(", ")}: the shell only reads`);
+	}
+	if (stage === "full-match-transcript") {
+		// Full match S2 (frames 1/5/7/12, C1) per capture. Negative controls: a missing join fails `clock`, time-last rows
+		// `time_first`, no disclosure `earlier`, a title-first card `head`, a closed context `context`, no clock `strip`.
+		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
+			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
+			const over = e => { const range = document.createRange(); range.selectNodeContents(e); return range.getBoundingClientRect().width - e.getBoundingClientRect().width; };
+			const row = q(".session-steps-open .session-steps-rows .session-tool > summary"), cell = (i) => row?.children[i]?.getBoundingClientRect().left ?? 0;
+			const chip = q(".session-bubble a.pr-chip, .session-message a.pr-chip"), strip = q(".session-strip-job"), job = q(".workspace-context-job");
+			return { options: all(".workspace-context-option").length, clock: q(".workspace-context-job dd")?.textContent ?? null, job: q(".workspace-context-job code")?.textContent ?? null,
+				head: job ? [...job.firstElementChild.children].map(c => c.className || c.tagName).join() + "|" + job.children[1].className : null,
+				context: [...document.querySelectorAll(".workspace-context-why[open] li")].length + (q(".workspace-context-why[open]") ? " open" : " closed"),
+				earlier: q(".session-steps-earlier")?.textContent ?? null, time_first: !!row && row.children[0].classList.contains("session-time") && cell(0) < cell(1),
+				chip: chip ? [...chip.children].slice(1).map(c => c.textContent).join(" | ") : null,
+				strip: innerWidth < 900 && strip ? q(".session-strip-count").textContent + " " + strip.textContent + (over(strip) > 0.01 ? " (clipped " + over(strip).toFixed(2) + "px)" : "") : null,
+				measure: { ask: box(".workspace-context-ask"), option: box(".workspace-context-option"), job: box(".workspace-context-job"), sheet: box("dialog.workspace-context[open]"),
+					cols: row ? [...row.children].map(c => Math.round(c.getBoundingClientRect().left - row.getBoundingClientRect().left)).join(" ") : null, step: box(".session-steps-rows .session-tool > summary"),
+					bridge: box(".session-bridge-line"), bridge_chip_border: q(".session-bridge-chip") ? getComputedStyle(q(".session-bridge-chip")).borderTopWidth : null, chip: box("a.pr-chip"), strip: box(".session-strip") },
+				outside: all(".workspace-context button, .workspace-context a, .session-steps-earlier, .session-steps-link, .pr-chip, .session-strip-job")
+					.filter(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className).join() }; })()`;
+		const context: Step = [`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`, `!!document.querySelector(".workspace-context .workspace-context-option")`];
+		const joined: Step = ["true", `document.querySelector(".workspace-context-job dd")?.textContent === "9m / 2h 0m"`];
+		const why = `document.querySelector(".workspace-context-why > summary")`;
+		const toggled: Step[] = [[`${why}.click()`, `!document.querySelector(".workspace-context-why").open`], [`${why}.click()`, `document.querySelector(".workspace-context-why").open`]];
+		const steps: Step = [`document.querySelector('.session-steps > .session-tools[title="${JOB}"]').click()`, `!!document.querySelector(".session-steps-earlier")`];
+		// Scroll only the transcript (scrollIntoView would pan the page and hide the header and strip).
+		const into = (s: string, gap: number) => `(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(${JSON.stringify(s)}).getBoundingClientRect().top - t.getBoundingClientRect().top - ${gap}; })()`;
+		const toEarlier: Step = [into(".session-steps-open", 12), "true"], toChip: Step = [into(".session-message a.pr-chip", 200), "true"];
+		const head = "workspace-context-job-glyph,CODE,workspace-context-job-status|workspace-context-job-title";
+		const card = { options: 3, clock: "9m / 2h 0m", job: "t7ah", head, context: "3 open", outside: "" }, disclosed = { earlier: "2 earlier ▸", time_first: true, outside: "" };
+		// The committed five: desktop, steps, phone-ask, phone and pr-chip (dark, picp only).
+		const shotsT: [string, number, number, Step[], object][] = [
+			["desktop", 1440, 1000, [joined, ...toggled], card], ["steps", 1440, 1000, [steps, toEarlier], disclosed],
+			["phone-ask", 390, 844, [context, joined], card], ["phone", 390, 844, [steps, toEarlier], { ...disclosed, strip: "1 working · t7ah · 9m" }],
+			["pr-chip", 1440, 1000, [toChip], { chip: "#321 | review pass | CI unknown | open", outside: "" }],
+		];
+		for (const [name, width, height, run, want] of shotsT) {
+			await capture(`full-match-transcript-${name}`, transcript, width, height, "dark", loaded, "bottom", run);
+			const got = await evaluate(look);
+			console.log(`measured ${name} ${JSON.stringify(got)}`);
+			const off = Object.entries(want).filter(([k, v]) => got[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k])} (want ${JSON.stringify(v)})`);
+			if (off.length) throw new Error(`full-match-transcript-${name}: ${off.join("; ")}`);
+		}
+		if (posts.length) throw new Error(`full-match-transcript sent ${posts.join(", ")}: the captures only read`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

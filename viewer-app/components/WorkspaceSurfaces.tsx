@@ -1,6 +1,7 @@
 import type { ComponentChild } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { AwaitingDetail, JobResponse, SessionsResponse } from "../../src/viewer/api-types.ts";
+import type { AwaitingDetail, JobResponse, JobsResponse, SessionsResponse, ViewerJob } from "../../src/viewer/api-types.ts";
+import type { ControlView } from "../control.ts";
 import { matchesProject, type ProjectSelection, selectionHash, selectionValue } from "../project-filter.ts";
 import { jobHref, sessionHref } from "../routes.ts";
 import { JobDetail } from "../screens/JobDetail.tsx";
@@ -9,6 +10,7 @@ import type { ComposerMenuContext } from "./ComposerMenu.tsx";
 import { ConversationContext } from "./ConversationContext.tsx";
 import { Icon } from "./icons.tsx";
 import { JobsDrawer } from "./JobsDrawer.tsx";
+import type { Answering } from "./QuickReplies.tsx";
 import { SessionDrawer } from "./SessionDrawer.tsx";
 import "./workspace.css";
 
@@ -20,6 +22,8 @@ const nowWide = () => typeof matchMedia === "function" ? matchMedia("(min-width:
 /** What the chat lends its context and Conversations surfaces; `chats` renders the Chats list with an Operator href. */
 export interface ChatContext {
  session: string | null; asks: AwaitingDetail[]; live: SessionsResponse["workers"]; chats: (operatorHref: string) => ComponentChild; onAnswer: () => void;
+ /** The chat's control and its one shared answer state: the context card answers through them, never a second path. */
+ control: ControlView | undefined; answering: Answering;
  /** False for a historical transcript file: only the current chat opens its inspector by default. */
  current: boolean;
 }
@@ -45,10 +49,12 @@ function JobPane({id, tab, onClose}: {id: string; tab: JobTab; onClose: () => vo
 
 /**
  * The operator chat's Jobs drawer, the job picked from it, its context (inspector or phone sheet) and the phone's
- * Conversations drawer (M3). `active` registers Ctrl/Cmd+J; leaving, or another session file, drops every surface.
- * From 900 px the current chat opens its inspector by default until the user closes it; a phone never opens a sheet.
+ * Conversations drawer (M3). `active` registers Ctrl/Cmd+J and reads `/api/jobs` (`flight`, by exact id); leaving,
+ * or another session file, drops every surface. From 900 px the current chat opens its inspector by default.
  */
-export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelection, chat: ChatContext): {trigger: ComponentChild; surfaces: ComponentChild; conversations: ComponentChild; composer: ComposerMenuContext | null; openJob: ((id: string, tab: JobTab, opener: HTMLElement | null) => void) | null} {
+export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelection, chat: ChatContext): {trigger: ComponentChild; surfaces: ComponentChild; conversations: ComponentChild; composer: ComposerMenuContext | null; openJob: ((id: string, tab: JobTab, opener: HTMLElement | null) => void) | null; flight: Map<string, ViewerJob> | null} {
+ const jobs = useScreenData<JobsResponse>(active ? "/api/jobs" : null, "/api/stream?view=jobs");
+ const flight = jobs.data ? new Map(jobs.data.jobs.map(j => [j.id, j])) : null;
  const opened = active && chat.current && nowWide();
  const [drawer, setDrawer] = useState(false);
  const [job, setJob] = useState<{id: string; tab: JobTab} | null>(null);
@@ -93,8 +99,9 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
   query.addEventListener("change", change);
   return () => query.removeEventListener("change", change);
  }, [active, panel, job]);
- if (!active) return {trigger: null, surfaces: null, conversations: null, composer: null, openJob: null};
+ if (!active) return {trigger: null, surfaces: null, conversations: null, composer: null, openJob: null, flight: null};
  const context = {asks: chat.asks, live: chat.live.filter(w => matchesProject(w.project, selection)), selection, onClose: dismiss, onJob: pickJob,
+  control: chat.control, answering: chat.answering, jobs: flight, jobsError: jobs.error, current: chat.current,
   onJobs: () => openDrawer(toggle.current), onAnswer: () => { if (panel === "sheet") closePanel(); chat.onAnswer(); }};
  const asked = chat.asks.length;
  return {
@@ -113,6 +120,6 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
   conversations: <button type="button" class="session-bar-icon workspace-sessions-open" aria-haspopup="dialog" aria-expanded={sessions} aria-label="Conversations"
    onClick={e => { from(e.currentTarget); setSessions(true); }}><Icon name="sessions"/></button>,
   composer: {onJobs: openDrawer, selection},
-  openJob,
+  openJob, flight,
  };
 }

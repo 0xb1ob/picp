@@ -2,6 +2,8 @@ export const count = (value: number | null): string => value === null ? "-" : St
 export const amount = (value: number | null): string => value === null ? "-" : Intl.NumberFormat("en",{notation:"compact",maximumFractionDigits:2}).format(value);
 export const money = (value: number | null): string => value === null ? "-" : `$${value.toFixed(2)}`;
 export const elapsed = (seconds: number | null): string => seconds === null ? "-" : seconds < 3600 ? `${Math.floor(seconds/60)}m` : `${Math.floor(seconds/3600)}h ${Math.floor(seconds%3600/60)}m`;
+/** A job id's last dash segment (`cp-ui-board-t7ah` → `t7ah`): the compact label; the full id stays in title/link. */
+export const jobSuffix = (id: string): string => id.slice(id.lastIndexOf("-") + 1) || id;
 // No timeZone option: every time is shown in the browser's own zone, never the server's.
 export function time(value: string, seconds = false): string {
  return new Intl.DateTimeFormat("en-GB", {hour:"2-digit",minute:"2-digit",...(seconds ? {second:"2-digit"} : {})}).format(new Date(value));
