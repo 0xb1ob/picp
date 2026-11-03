@@ -1256,7 +1256,8 @@ and optional `source_escalation`, `job_ids`, `evidence_paths`, and `context` —
 plain-text background up to 2,000 characters (what happened, what each option
 really does, the risk), so the question itself stays short. It returns an
 `ask-` id. `ask_answer` takes `id` and the human's verbatim `answer`;
-`ask_withdraw` takes `id` and `reason`. Both refuse unknown or closed ids.
+`ask_withdraw` takes `id` and `reason` and records `withdrawn_at`; a withdrawal journaled before that field
+existed stays withdrawn at an unknown time. Both refuse unknown or closed ids.
 These actions append durable events to `state/operator/asks.jsonl`,
 without sending to the parent or authorizing
 anything. Existing parent decision channels remain mandatory. Questions and

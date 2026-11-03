@@ -322,6 +322,25 @@ test("P19-sessions-qa: the operator tier shows decisions and every ask state, ne
 	assert.match(orphan.text, /"project":"demo"/);
 });
 
+test("B2-viewer: Decisions reads a timed withdrawal as withdrawn and refuses a malformed withdrawn_at like any bad event", { timeout: 120_000 }, async (t) => {
+	// S1-04: the viewer's own asks.jsonl parser must accept `withdrawn_at`, or the first timed withdrawal makes asks unavailable.
+	const at = "2026-11-02T10:00:00Z";
+	const d = await viewer(t);
+	const file = join(d.stateDir, "operator/asks.jsonl");
+	const open = { type: "open", id: "ask-cc", created_at: at, project: "demo", question: "Question ask-cc", options: [{ label: "Keep", consequence: "Paused" }], recommendation: "Keep" };
+	const you = async () => (await d.get("/api/sessions?view=you")).body as Json;
+	write(file, jsonl([open, { type: "withdraw", id: "ask-cc", reason: "Superseded", withdrawn_at: "2026-11-02T10:05:00Z" }]));
+	const timed = await you();
+	assert.equal(timed.warnings.includes("asks unavailable"), false, JSON.stringify(timed.warnings));
+	assert.equal(timed.entries.find((e: Json) => e.id === "ask-cc")?.tag, "withdrawn");
+	assert.match(await (await d.open("#sessions?view=you&transcript=0")).waitText(/Superseded/), /Question ask-cc/);
+
+	write(file, jsonl([open, { type: "withdraw", id: "ask-cc", reason: "Superseded", withdrawn_at: "2026-11-02 at ten past ten" }]));
+	const malformed = await you();
+	assert.ok(malformed.warnings.includes("asks unavailable"), "a malformed withdrawn_at refuses the journal like any bad event");
+	assert.equal(malformed.entries.some((e: Json) => e.id === "ask-cc"), false);
+});
+
 test("P19-sessions-transcript-ui: the Full transcript offers a file picker, renders system notices and hides tool calls behind a count", { timeout: 120_000 }, async (t) => {
 	const d = await viewer(t);
 	const newest = join(d.home, "pi-sessions", "newest.jsonl"), older = join(d.home, "pi-sessions", "older.jsonl");
