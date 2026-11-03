@@ -173,10 +173,14 @@ test("full-match-transcript: time-first step rows behind \"N earlier\", a compac
 	assert.deepEqual([rows()[0], tab.$(".session-steps-earlier")?.getAttribute("aria-expanded")], ["14:21|bash|ran s1", "true"], "earlier events are recoverable");
 	// No stale-chip success: nothing recorded for review or CI reads as unknown, never as green or pass.
 	const chip = await tab.find("a.pr-chip");
-	assert.deepEqual([...chip.children].slice(1).map((c) => c.textContent), ["#316", "review unknown", "CI unknown", chip.querySelector(".pr-chip-state")!.textContent],
+	// Full match S3 C1: "review unknown" / "CI unknown" (S2's slot text) became glyph + name, the state in its title.
+	assert.deepEqual([...chip.children].slice(1).map((c) => c.textContent), ["#316", "○ Review", "○ CI", chip.querySelector(".pr-chip-state")!.textContent],
 		"Review → CI → Merge slots");
 	assert.deepEqual([chip.querySelector(".pr-chip-review-pass, .pr-chip-ci-green") === null, /latest recorded: review unknown, CI unknown/.test(chip.getAttribute("title")!)], [true, true],
 		"no success painted; the title says it is the latest record");
+	const ci = chip.querySelector(".pr-chip-ci")!;
+	assert.deepEqual([ci.querySelector(".pr-chip-glyph")!.textContent, ci.getAttribute("title"), ci.className], ["○", "CI unknown", "pr-chip-slot pr-chip-ci pr-chip-ci-unknown"],
+		"C1: an unknown CI slot is the neutral hollow glyph, named in its title, never ✓");
 });
 
 /** Chat, Jobs, More and every page reached through them: [hash, the screen's marker, the primary item it lights]. */

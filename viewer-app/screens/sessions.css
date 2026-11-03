@@ -258,11 +258,15 @@
 .session-body a.pr-chip:hover, .session-rollup-head a.pr-chip:hover { border-color: var(--dim); }
 .pr-chip-num { color: var(--text); font-weight: 600; }
 .pr-chip-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
-.pr-chip-open .pr-chip-dot { background: var(--green); }
+/* C1: green only for a passed or merged slot; an open PR's dot stays neutral. */
+.pr-chip-open .pr-chip-dot { background: var(--dim); }
 .pr-chip-draft .pr-chip-dot { background: transparent; border: 1.5px solid var(--dim); }
 .pr-chip-merged .pr-chip-dot { background: var(--blue); }
 .pr-chip-closed .pr-chip-dot { border-radius: 2px; background: var(--dim); }
-.pr-chip-ci-green, .pr-chip-review-pass { color: var(--green); }
+/* Review — CI — Merge (design frames 1/5): a glyph per slot, a dim connector between slots. */
+.pr-chip-slot { display: inline-flex; align-items: center; gap: 4px; }
+.pr-chip-slot + .pr-chip-slot::before { content: "—"; margin-right: 2px; color: var(--faint); }
+.pr-chip-ci-green, .pr-chip-review-pass, .pr-chip-merged .pr-chip-state > .pr-chip-glyph { color: var(--green); }
 .pr-chip-ci-pending, .pr-chip-review-running { color: var(--dim); }
 .pr-chip-review-revise { color: var(--text); }
 .pr-chip-ci-unreadable, .pr-chip-ci-unknown, .pr-chip-review-unknown { color: var(--dim); }

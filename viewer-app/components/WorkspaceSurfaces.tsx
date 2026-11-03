@@ -1,5 +1,5 @@
 import type { ComponentChild } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { AwaitingDetail, JobResponse, JobsResponse, SessionsResponse, ViewerJob } from "../../src/viewer/api-types.ts";
 import type { ControlView } from "../control.ts";
 import { matchesProject, type ProjectSelection, selectionHash, selectionValue } from "../project-filter.ts";
@@ -81,7 +81,8 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
   if (!active) dismissed.current = false;
   setDrawer(false); setJob(null); setPanel(opened && !dismissed.current ? "inspector" : null); setSessions(false); opener.current = null;
  }, [active, chat.session]);
- useEffect(() => {
+ // Layout timing: the listener must see the drawer as soon as `showModal` opens it, or Escape closes a stale surface.
+ useLayoutEffect(() => {
   if (!active) return;
   const key = (e: KeyboardEvent) => {
    if (jobsKey(e)) { e.preventDefault(); if (drawer) closeDrawer(); else openDrawer(document.activeElement as HTMLElement | null); return; }

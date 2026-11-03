@@ -69,13 +69,15 @@ test("P18-pr-chips: a worker transcript's PR and issue links become chips read o
 
 	const tab = await view.open("#sessions?view=workers&id=cp-w");
 	const draft = await tab.find("a.pr-chip.pr-chip-draft");
-	for (const part of ["#355", "CI green", "review running"]) assert.ok(draft.textContent!.includes(part), part);
+	// Full match S3 C1: "CI green"/"review running" moved from slot text to titles; the slots read glyph + name.
+	for (const part of ["#355", "✓ CI", "◌ Review"]) assert.ok(draft.textContent!.includes(part), part);
+	assert.match(draft.getAttribute("title")!, /review running, CI green/);
 	assert.equal(draft.getAttribute("target"), "_blank");
 	assert.equal(draft.getAttribute("rel"), "noopener noreferrer");
 	assert.match(draft.getAttribute("title")!, /head aaaaaaa/);
 	assert.ok(tab.$$("code").some((code) => code.textContent === "#355" && !code.querySelector("a")), "a code span's #355 stays plain");
 	const merge = tab.$("a.pr-chip.pr-chip-merged")!;
-	assert.ok(merge.textContent!.includes("merged bbbbbbb"), merge.textContent!);
+	assert.ok(merge.textContent!.includes("✓ Merged bbbbbbb"), merge.textContent!);
 	assert.doesNotMatch(merge.getAttribute("title")!, /head /, "no recorded head, no head in the title");
 	assert.match(tab.root.innerHTML, /issue #328<\/span> <span class="pr-chip-state">closed by #360<\/span> <span class="pr-chip-job">job closed/);
 	assert.equal(tab.$("a.issue-chip.pr-chip-none")?.textContent, "#329");
