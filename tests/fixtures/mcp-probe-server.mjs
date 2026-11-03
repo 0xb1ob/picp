@@ -12,6 +12,8 @@ const tools = [
 	{ name: "read_thing", description: "Read a thing", inputSchema: object, annotations: { readOnlyHint: true } },
 	{ name: "delete_thing", description: "Delete a thing", inputSchema: object, annotations: { destructiveHint: true } },
 	{ name: "plain", description: "No hints", inputSchema: object },
+	{ name: "write_thing", description: "Write a thing", inputSchema: object, annotations: { readOnlyHint: false } },
+	{ name: "odd_thing", description: "Contradictory hints", inputSchema: object, annotations: { readOnlyHint: true, destructiveHint: true } },
 ];
 
 const send = (message) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);

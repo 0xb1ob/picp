@@ -1,7 +1,7 @@
 /**
  * `/doctor` MCP lines (cp-fl8b): `mcp.operator` (the operator's `<agent dir>/mcp.json` servers, probed
  * live with `pi mcp list --json` — once, bounded by the runner's 20 s, and only when a server is
- * enabled) and `mcp.workers` (which profiles reach them, read-only tools only). Never prints a value
+ * enabled) and `mcp.workers` (every worker profile reaches them, all exposed tools). Never prints a value
  * from `mcp.json`: no transport, command, args, url, headers or env; an error text is scrubbed of
  * every config value and every secret shape first. Kept out of doctor.ts, which sits at its ceiling.
  */
@@ -46,8 +46,8 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 	const user = readUserMcpServers(agentDir);
 	const enabled = enabledServers(user.servers);
 	const total = Object.keys(user.servers).length;
-	const readers = listProfiles(join(o.packageRoot, "profiles")).filter((p) => p.frontmatter.readOnly === true).map((p) => p.frontmatter.name);
-	const by = `${readers.join(", ")} via ${MCP_CALL_TOOL} (servers read in place from ${user.path}); implementer, ship workers and the CP parent: no MCP (by design)`;
+	const workerProfiles = listProfiles(join(o.packageRoot, "profiles")).map((p) => p.frontmatter.name);
+	const by = `every worker profile (${workerProfiles.join(", ")}; implementer/ship workers and the gate, diff and quality reviewers included) via ${MCP_CALL_TOOL}, all exposed tools, no annotation filter (servers read in place from ${user.path}); the CP parent: unchanged`;
 	const finding = (check: string, severity: DoctorFinding["severity"], what: string, fix?: string, detail?: string): DoctorFinding => ({
 		check,
 		severity,
@@ -59,17 +59,17 @@ export function mcpFindings(o: McpAccessOptions): DoctorFinding[] {
 		// The parse message can quote the file: name the path only.
 		return [
 			finding("mcp.operator", "warn", `MCP: ${user.path} is not valid (JSON with an "mcpServers" object)`, `fix ${user.path} by hand, then run \`pi mcp list\``),
-			finding("mcp.workers", "ok", "read-only workers: no MCP (mcp.json is not valid)", undefined, by),
+			finding("mcp.workers", "ok", "workers: no MCP (mcp.json is not valid)", undefined, by),
 		];
 	}
 	if (enabled.length === 0) {
 		const what = total === 0 ? "MCP: no servers configured (optional)" : `MCP: ${total} configured, none enabled`;
 		return [
 			finding("mcp.operator", "ok", what, undefined, `operator session: builtin:mcp, codemode, tool-search; servers from ${user.path}`),
-			finding("mcp.workers", "ok", "read-only workers: no MCP servers configured", undefined, by),
+			finding("mcp.workers", "ok", "workers: no MCP servers configured", undefined, by),
 		];
 	}
-	const workers = finding("mcp.workers", "ok", `read-only workers: all ${enabled.length} servers, read-only tools only`, undefined, by);
+	const workers = finding("mcp.workers", "ok", `workers: all ${enabled.length} enabled servers, all exposed tools`, undefined, by);
 	// cwd = the agent dir: no project `.pi/mcp.json` is read by the probe.
 	const result = o.run("pi", ["mcp", "list", "--json"], agentDir);
 	let listed: ListedServer[];

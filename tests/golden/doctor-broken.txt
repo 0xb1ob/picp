@@ -34,8 +34,8 @@ package: <PKG>
     fix: pi install npm:pi-web-access, then restart the parent (optional)
 ✓ [mcp.operator] MCP: no servers configured (optional)
     operator session: builtin:mcp, codemode, tool-search; servers from <HOME>/pi-agent/mcp.json
-✓ [mcp.workers] read-only workers: no MCP servers configured
-    gate-reviewer, ops, planner, qa via mcp_call (servers read in place from <HOME>/pi-agent/mcp.json); implementer, ship workers and the CP parent: no MCP (by design)
+✓ [mcp.workers] workers: no MCP servers configured
+    every worker profile (gate-reviewer, implementer, ops, planner, qa; implementer/ship workers and the gate, diff and quality reviewers included) via mcp_call, all exposed tools, no annotation filter (servers read in place from <HOME>/pi-agent/mcp.json); the CP parent: unchanged
 ✓ [session.tools] parent session tools not recorded (not a live parent)
 ✓ [package.worker_reporter] worker-reporter extension present
 ✓ [package.profiles] 5 profile(s) load and validate

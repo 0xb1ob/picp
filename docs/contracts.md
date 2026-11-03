@@ -2137,21 +2137,25 @@ allowlist, the guard and the package's SSRF protection; `fetch_content` covers i
 **MCP (cp-fl8b).** The operator session loads pi's built-in MCP with
 `-e builtin:mcp -e builtin:codemode -e builtin:tool-search`
 (`OPERATOR_BUILTIN_EXTENSIONS`, `src/viewer/operator.ts`; `--no-extensions` turns built-ins off, and
-pi-web-access registers none of `/mcp`, `codemode` or `tool_search`). The `readOnly` profiles
-(`planner`, `qa`, `gate-reviewer`) get **every** server of the operator's `<agent dir>/mcp.json`,
+pi-web-access registers none of `/mcp`, `codemode` or `tool_search`). **Every worker profile**
+(`planner`, `qa`, `ops`, `implementer` and ship workers, `gate-reviewer` and the diff and quality
+reviewers that load it; cp-z402) gets **every** enabled server of the operator's `<agent dir>/mcp.json`,
 read in place through the agent dir they inherit; nothing is copied, OAuth tokens stay in
 `mcp-auth.json` (read in place by pi), and the credential guard refuses a copy of it like
 `auth.json`. The daemon parent and its workers resolve the same `~/.pi/agent`
-(`BASE_ENV_KEYS` in `src/service/daemon-files.ts` passes no `PI_CODING_AGENT_DIR`). A worker's
-`--tools` is an exact allowlist that pi applies to every tool it registers, so runtime-discovered
-`mcp__*` tools cannot be named there: `extensions/worker-mcp` runs pi's own MCP runtime
+(`BASE_ENV_KEYS` in `src/service/daemon-files.ts` passes no `PI_CODING_AGENT_DIR`). Workers reach
+MCP through one gateway tool: `extensions/worker-mcp` runs pi's own MCP runtime
 (`createMcpExtension`; `autoEnableCodemode: false` in the loaded config, `startupWaitMs` 10 s in the
-options), keeps the tools it registers, and serves them through one allowlisted gateway,
-`mcp_call` (no `tool`: list; `tool`: call). Only tools whose server declares `readOnlyHint: true`
-and not `destructiveHint: true` are listed or callable — a missing hint is refused, at the
-`tool_call` hook and again in `execute`. Accepted risk: the hints are the server's own claim. The
-implementer, ship workers and the CP parent get no MCP; a home with no enabled server spawns
-read-only workers exactly as before. `/doctor` prints `mcp.operator` (a live `pi mcp list --json`,
+options), keeps the tools it registers, and serves them through `mcp_call` (no `tool`: list every
+connected tool with its input schema; `tool`: call it). There is no profile and no annotation filter:
+`readOnlyHint` and `destructiveHint` are not consulted, so writing and destructive tools are listed
+and callable by research and reviewer profiles too, by operator request. The operator's `mcp.json`
+stays the only source of truth: `enabled: false` servers never start, `hidden` server or tool
+exposures stay unlisted and uncallable, other exposures are served through the gateway, and an
+unknown name is refused. The CP parent is unchanged; a home with no enabled server (or an invalid
+`mcp.json`) spawns workers with no gateway. The change applies to newly launched and revived workers
+after the normal install; running workers keep the tools they loaded, and no operator reload is
+needed. `/doctor` prints `mcp.operator` (a live `pi mcp list --json`,
 bounded at 20 s, run only when a server is enabled; never a config value) and `mcp.workers`.
 
 **No worker gets a package `--skill` path (skillreads-vqy).** pi lists every loaded

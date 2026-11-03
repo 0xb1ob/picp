@@ -25,7 +25,7 @@ Each control below changed one guard, ran only the named case, failed as stated,
 | 04-7 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b bounds: a delivered send starts a fresh wall-clock round, and tool starts carry across it |
 | 04-8 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b bounds: a bound names the job, bound and work on disk, and the redispatched worker is bounded again |
 | 04-9 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b bounds: a legacy record without frozen bounds revives on env bounds, never the home file |
-| 04-10 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b MCP: dispatched read-only workers reach enabled servers through mcp_call; writers and disabled homes get none |
+| 04-10 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b MCP: every dispatched worker profile reaches every exposed tool of enabled servers through mcp_call; disabled homes get none |
 | 04-11 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b wedged: the parent announces a silent open tool call once, never a progressing one, and a new silent call again |
 | 04-12 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b wedged: two workers silent in one tick are one notice naming both |
 | 04-18 | tests/e2e/worker-lifecycle-p8b.test.ts | P8b wedged: at the default threshold a 31-minute silent call is news and a /status row; a talking or closed call is neither |
@@ -48,9 +48,9 @@ Each control below changed one guard, ran only the named case, failed as stated,
 | tests/worker-mcp.test.ts | agentDirOf follows PI_CODING_AGENT_DIR like pi's getAgentDir | — | retained | Verbatim in tests/worker-mcp-retained.test.ts. The HOME default and `~` forms would resolve the operator's real ~/.pi/agent, so no isolated entry point exists. The PI_CODING_AGENT_DIR half is 04-10 (NC-P8b-mcp-agentdir). |
 | tests/worker-mcp.test.ts | readUserMcpServers: missing is none, invalid is an error without the content | 04-10 | mapped | A missing, disabled-only or invalid mcp.json gives no gateway. /doctor names each case and never quotes the file. |
 | tests/worker-mcp.test.ts | workerMcpConfig keeps every server, credentials and all, and makes non-hidden tools direct | — | retained | Verbatim in tests/worker-mcp-retained.test.ts. URL servers (oauth, headers) need a network endpoint, and pi resolves `!pass` credentials itself. The hidden/direct half is 04-10 (NC-P8b-mcp-hidden). |
-| tests/worker-mcp.test.ts | mcpReadOnlyRefusal fails closed: only readOnlyHint true and not destructive passes | 04-10 | mapped | Planner and qa get read_thing; plain and delete_thing refuse with their reasons and never reach a server. |
-| tests/worker-mcp.test.ts | withWorkerMcp: read-only profiles only, and only when the agent dir has an enabled server | 04-10 | mapped | Planner and qa get mcp_call; implementer, disabled-only and invalid mcp.json dispatches do not. The gate-reviewer profile is not dispatched in 04-10. |
-| tests/worker-mcp.test.ts | a planner's spawn plan carries the gateway next to report_result; an implementer's does not | 04-10 | mapped | Dispatched planner calls mcp_call and report_result; the implementer's mcp_call is not found. |
+| tests/worker-mcp.test.ts | mcpReadOnlyRefusal fails closed: only readOnlyHint true and not destructive passes | 04-10 | mapped | Superseded by cp-z402 (operator request: no MCP allow/block list): the hint refusal is removed. 04-10 now pins the reverse: plain, write_thing, delete_thing and odd_thing are listed and reach the server; hidden and disabled names still refuse. |
+| tests/worker-mcp.test.ts | withWorkerMcp: read-only profiles only, and only when the agent dir has an enabled server | 04-10 | mapped | Superseded by cp-z402: every profile gets the gateway. Planner, qa, ops and implementer get mcp_call; disabled-only, missing and invalid mcp.json dispatches do not. |
+| tests/worker-mcp.test.ts | a planner's spawn plan carries the gateway next to report_result; an implementer's does not | 04-10 | mapped | Superseded by cp-z402: every dispatched profile, implementer included, calls mcp_call and report_result side by side. |
 | tests/wedged.test.ts | a wedged call is announced once, and again only if it is a different call | 04-11 | mapped | Parent notices: one per silent call across ticks, none for the loud call, again after a resumed call re-silences. |
 | tests/wedged.test.ts | two wedged workers are one notice naming both | 04-12 | mapped | Two barrier calls fall silent together: one "2 workers" notice names both jobs, says nothing was killed, and points at /watch. |
 | tests/wedged.test.ts | an unmatched tool_execution_start older than the threshold is surfaced | 04-18 | mapped | An open bash call seeded 31 min old is one WEDGED notice and a /status "possibly wedged" row, and no phase says stalled. |
@@ -87,9 +87,9 @@ Each control below changed one guard, ran only the named case, failed as stated,
 | NC-P8b-retrip | tests/bounds.test.ts | src/bounds.ts HardBoundsWatch watch | 04-8 | keep the tripped mark across a respawn | — | timed out waiting for a second bound | pass |
 | NC-P8b-notice | tests/bounds.test.ts | src/bounds.ts formatBoundNotice | 04-8 | drop "worktree left untouched" | — | notice does not match /job recorded failed; worktree left untouched/ | pass |
 | NC-P8b-legacy | tests/bounds.test.ts | src/revive.ts hardBounds fallback | 04-9 | legacy revive reads the home file | — | legacy-bounds never failed at 4 s (timed out) | pass |
-| NC-P8b-mcp-readonly | tests/worker-mcp.test.ts | src/worker-mcp.ts mcpReadOnlyRefusal | 04-10 | pass tools without readOnlyHint | — | planner list includes plain | pass |
-| NC-P8b-mcp-destructive | tests/worker-mcp.test.ts | src/worker-mcp.ts mcpReadOnlyRefusal | 04-10 | report destructive tools as not read-only | — | planner destructive reason | pass |
-| NC-P8b-mcp-profile | tests/worker-mcp.test.ts | src/worker-mcp.ts withWorkerMcp | 04-10 | give writing profiles the gateway | — | implementer mcp_call deepEqual | pass |
+| NC-P8b-mcp-readonly | tests/worker-mcp.test.ts | src/worker-mcp.ts mcpReadOnlyRefusal (removed by cp-z402; historical) | 04-10 | pass tools without readOnlyHint | — | planner list includes plain | pass |
+| NC-P8b-mcp-destructive | tests/worker-mcp.test.ts | src/worker-mcp.ts mcpReadOnlyRefusal (removed by cp-z402; historical) | 04-10 | report destructive tools as not read-only | — | planner destructive reason | pass |
+| NC-P8b-mcp-profile | tests/worker-mcp.test.ts | src/worker-mcp.ts withWorkerMcp profile gate (removed by cp-z402; historical) | 04-10 | give writing profiles the gateway | — | implementer mcp_call deepEqual | pass |
 | NC-P8b-mcp-enabled | tests/worker-mcp.test.ts | src/worker-mcp.ts enabledServers | 04-10 | count disabled servers as enabled | — | ro-disabled mcp_call isError | pass |
 | NC-P8b-mcp-hidden | tests/worker-mcp.test.ts | src/worker-mcp.ts workerMcpConfig | 04-10 | make hidden servers direct | — | planner list includes mcp__hidden__ | pass |
 | NC-P8b-wedged-once | tests/wedged.test.ts | src/wedged.ts WedgedWatch.observe | 04-11 | announce on every tick | — | three notices expected, more observed | pass |
@@ -107,6 +107,11 @@ Each control below changed one guard, ran only the named case, failed as stated,
 | NC-P8b-end-clears | tests/wedged.test.ts | src/run-artifacts.ts tool_execution_end | 04-18 | keep current_tool after its end | — | notice is not the "1 worker" notice | pass |
 | NC-P8b-legacy-progress | tests/wedged.test.ts | src/status.ts current_tool_idle_seconds | 04-18 | a missing last_progress_at reads as no silence | — | the 31-minute silence only: no notice | pass |
 | NC-P8b-default-idle | tests/wedged.test.ts | src/status-render.ts isWedgedToolCall | 04-18 | measure open time, not silence | — | notice is not the "1 worker" notice | pass |
+| NC-Z402-profile | tests/worker-mcp.test.ts | src/worker-mcp.ts withWorkerMcp | 04-10 | restore the readOnly profile gate | — | implementer: list isError expected false | pass |
+| NC-Z402-hints-list | tests/worker-mcp.test.ts | extensions/worker-mcp/index.ts list and execute | 04-10 | restore the annotation refusal in list and execute | — | tests/e2e/worker-mcp.test.ts "listed: plain" | pass |
+| NC-Z402-hints-hook | tests/worker-mcp.test.ts | extensions/worker-mcp/index.ts tool_call hook | 04-10 | restore only the tool_call hint hook | — | tests/e2e/worker-mcp.test.ts "plain" isError expected false | pass |
+| NC-Z402-hidden | tests/worker-mcp.test.ts | src/worker-mcp.ts workerMcpConfig | 04-10 | make hidden server and tool exposures direct | — | planner list matches mcp__hidden__ or mcp__other__delete_thing | pass |
+| NC-Z402-disabled | tests/worker-mcp.test.ts | src/worker-mcp.ts workerMcpConfig | 04-10 | force enabled: true on every loaded server | — | planner list matches mcp__off__ | pass |
 <!-- /manifest:regressions -->
 
 <!-- manifest:incoming -->

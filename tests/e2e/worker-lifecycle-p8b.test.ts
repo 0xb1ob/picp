@@ -1,5 +1,5 @@
 /**
- * P8b (behavior 04): worker hard bounds, read-only MCP and wedged-call notices through a real CommandPost (or parent
+ * P8b (behavior 04): worker hard bounds, all-worker MCP and wedged-call notices through a real CommandPost (or parent
  * pi), real pi workers on a treehouse pool and the mock provider. Outcomes are read from the fleet record, the worker's
  * run log, onHardBound and the parent's notices and /status, never from internals.
  */
@@ -259,24 +259,27 @@ function toolEnds(home: string, jobId: string): Array<{ tool: string; isError: b
 		.map(({ payload = {} }) => ({ tool: String(payload.toolName), isError: payload.isError === true, text: JSON.stringify(payload.result ?? {}) }));
 }
 
-test("P8b MCP: dispatched read-only workers reach enabled servers through mcp_call; writers and disabled homes get none", { skip: SKIP, timeout: 300_000 }, async (t) => {
-	const f = await fleet(t, { maxTrees: 6 });
+test("P8b MCP: every dispatched worker profile reaches every exposed tool of enabled servers through mcp_call; disabled homes get none", { skip: SKIP, timeout: 300_000 }, async (t) => {
+	const f = await fleet(t, { maxTrees: 7 });
 	const log = join(f.agentDir.path, "calls.log");
 	const server = (label: string, extra: Record<string, unknown> = {}) => ({ command: process.execPath, args: [SERVER, label, log], ...extra });
 	const mcpJson = (servers: Record<string, unknown> | string) =>
 		writeFileSync(join(f.agentDir.path, "mcp.json"), typeof servers === "string" ? servers : JSON.stringify({ mcpServers: servers }));
 	mcpJson({
 		probe: server("probe", { exposure: "deferred", toolExposure: { "read_*": "codemode" } }),
-		other: server("other"),
+		other: server("other", { toolExposure: { delete_thing: "hidden" } }),
 		hidden: server("hidden", { exposure: "hidden" }),
 		off: server("off", { enabled: false }),
 		broken: { args: [] },
 	});
-	const readOnly = [mcpCall({}), mcpCall({ tool: "mcp__probe__read_thing" }), mcpCall({ tool: "mcp__probe__plain" }),
-		mcpCall({ tool: "mcp__probe__delete_thing" }), mcpCall({ tool: "mcp__hidden__read_thing" }),
+	const exposed = ["read_thing", "plain", "write_thing", "delete_thing", "odd_thing"];
+	const steps = [mcpCall({}), ...exposed.map((tool) => mcpCall({ tool: `mcp__probe__${tool}` })), mcpCall({ tool: "mcp__hidden__read_thing" }),
+		mcpCall({ tool: "mcp__other__delete_thing" }), mcpCall({ tool: "mcp__off__read_thing" }),
 		{ kind: "tool_calls", calls: [{ name: "report_result", args: {} }] } as ScriptStep, { kind: "hang" } as ScriptStep];
 	const dispatch = async (slug: string, profile: string, kind: "ship" | "research", steps: ScriptStep[]) => {
-		const jobId = await f.intake(slug, kind);
+		const jobId = profile === "ops"
+			? (await f.post.ledger().create({ title: slug, project: "demo", delivery: "local", kind, slug, labels: ["ops:pull"] })).id
+			: await f.intake(slug, kind);
 		const model = f.script(`p8b-mcp-${slug}`, steps);
 		routeNamed(f.home, [model]);
 		await f.post.dispatch({ jobId, task: "Use MCP.", model: model, profile, fetch: false });
@@ -284,26 +287,26 @@ test("P8b MCP: dispatched read-only workers reach enabled servers through mcp_ca
 		return toolEnds(f.home, jobId);
 	};
 
-	for (const profile of ["planner", "qa"]) {
-		const ends = await dispatch(`ro-${profile}`, profile, "research", readOnly);
-		const [list, read, plain, destructive, hidden, report] = ends;
+	const profiles = [["planner", "research"], ["qa", "research"], ["ops", "research"], ["implementer", "ship"]] as const;
+	for (const [profile, kind] of profiles) {
+		const ends = await dispatch(`all-${profile}`, profile, kind, steps);
+		const [list, ...rest] = ends;
+		const calls = rest.slice(0, exposed.length);
+		const [hidden, hiddenTool, off, report] = rest.slice(exposed.length);
 		assert.equal(list?.isError, false, profile);
-		assert.match(list?.text ?? "", /mcp__probe__read_thing.*mcp__other__read_thing|mcp__other__read_thing.*mcp__probe__read_thing/, profile);
-		assert.doesNotMatch(list?.text ?? "", /plain|delete_thing|mcp__hidden__/, profile);
-		assert.match(read?.text ?? "", /ok:read_thing/, profile);
-		assert.equal(plain?.isError, true, profile);
-		assert.match(plain?.text ?? "", /not declared read-only by its MCP server \(readOnlyHint\)/, profile);
-		assert.match(destructive?.text ?? "", /declared destructive \(destructiveHint\)/, profile);
-		assert.match(hidden?.text ?? "", /not a connected MCP tool/, profile);
+		for (const tool of exposed) assert.match(list?.text ?? "", new RegExp(`mcp__probe__${tool}`), `${profile} lists ${tool}`);
+		assert.doesNotMatch(list?.text ?? "", /mcp__hidden__|mcp__other__delete_thing|mcp__off__/, profile);
+		exposed.forEach((tool, i) => {
+			assert.equal(calls[i]?.isError, false, `${profile} ${tool}`);
+			assert.match(calls[i]?.text ?? "", new RegExp(`ok:${tool}`), `${profile} ${tool}`);
+		});
+		for (const refused of [hidden, hiddenTool, off]) assert.match(refused?.text ?? "", /not a connected MCP tool/, profile);
 		assert.equal(report?.tool, "report_result", profile);
 		assert.doesNotMatch(report?.text ?? "", /not found/, `${profile}: report_result stays beside mcp_call`);
 	}
-	const writer = await dispatch("rw-implementer", "implementer", "ship", [mcpCall({}), { kind: "hang" }]);
-	assert.deepEqual(writer.map(({ tool, isError }) => ({ tool, isError })), [{ tool: MCP_CALL_TOOL, isError: true }]);
-	assert.match(writer[0]?.text ?? "", /not found/);
 	const calls = readFileSync(log, "utf8").split("\n");
-	assert.equal(calls.filter((line) => line === "call probe read_thing").length, 2, "only the allowed call reaches a server");
-	assert.equal(calls.some((line) => / (plain|delete_thing)$/.test(line) || line === "start off"), false);
+	for (const tool of exposed) assert.equal(calls.filter((line) => line === `call probe ${tool}`).length, profiles.length, `every profile reaches ${tool}`);
+	assert.equal(calls.some((line) => /^call (hidden|off) /.test(line) || line === "call other delete_thing" || line === "start off"), false);
 
 	// No mcp.json, no enabled server, or an unreadable one: no gateway, and /doctor (operator env) says why.
 	const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
