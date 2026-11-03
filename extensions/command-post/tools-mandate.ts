@@ -367,8 +367,8 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 			"Several risk:high jobs refused under one asking mandate: cp_escalate action batch_risk_high job_ids [2..16] files one approve/drop record and withdraws their per-job rows \u2014 still cp_decide with an operator quote, never auto-permitted.",
 		],
 		parameters: Type.Object({
-			action: Type.Optional(StringEnum(["raise", "withdraw", "batch_risk_high"], { description: "raise (default) a new escalation, withdraw a moot open one by id, or batch_risk_high: one approve/drop record for 2..16 risk:high-gated job_ids" })),
-			escalation_id: Type.Optional(Type.String({ description: "withdraw: the es-\u2026 id" })),
+			action: Type.Optional(StringEnum(["raise", "withdraw", "replace", "batch_risk_high"], { description: "raise (default) a new escalation, withdraw a moot open one by id, replace: one linked open decision for a withdrawn or otherwise closed unreleased authority hold, or batch_risk_high: one approve/drop record for 2..16 risk:high-gated job_ids" })),
+			escalation_id: Type.Optional(Type.String({ description: "withdraw or replace: the es-\u2026 id" })),
 			reason: Type.Optional(Type.String({ description: "withdraw: why the question is moot (required)" })),
 			job_ids: Type.Optional(Type.Array(Type.String(), { description: "raise: job id(s) this decision is about" })),
 			kind: Type.Optional(StringEnum([...ESCALATION_KINDS], { description: "raise: the escalation kind" })),
@@ -402,6 +402,16 @@ export function registerMandateTools(pi: ExtensionAPI, deps: ExtensionDeps): voi
 				return {
 					content: [{ type: "text", text: `${withdrawn.id} withdrawn: ${reason} \u2014 not an answer; no linked checkpoint was decided` }],
 					details: { escalation: withdrawn, reason },
+				};
+			}
+			if (params.action === "replace") {
+				const id = params.escalation_id?.trim();
+				if (!id) throw new EscalationError("cp_escalate replace needs escalation_id");
+				const replacement = await post.escalations.replaceHold(id);
+				refreshWidget(ctx);
+				return {
+					content: [{ type: "text", text: `${replacement.id} replaces ${id}; ${id} stays ${post.escalations.get(id)?.status ?? "closed"} and unanswerable. The authority hold is unchanged until cp_decide ${replacement.id} with an affirmative operator answer naming ${replacement.id}.` }],
+					details: { escalation: replacement, replaces: id },
 				};
 			}
 			if (params.action === "batch_risk_high") {
