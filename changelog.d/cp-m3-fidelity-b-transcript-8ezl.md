@@ -1,0 +1,1 @@
+- Viewer: the chat transcript follows the M3 design (fidelity slice B): replies are unboxed text, your own messages are neutral `#2a2a2a` bubbles (16/16/4 radius), phone replies read at 15/23 px, and an opened run of steps is an inline rail with 28 px rows; queued and failed sends, ask cards and relay rollups keep their boxes.

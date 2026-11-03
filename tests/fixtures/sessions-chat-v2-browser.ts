@@ -17,7 +17,8 @@ import { buildViewer } from "../../src/viewer/build.ts";
 import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
+	"m3-fidelity-transcript"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -77,14 +78,16 @@ const asked = (id: string, question: string) => ({ id, project: "picp", question
 	mandate_objective: null, jobs: [], escalation: null, evidence: [] }) as unknown as NonNullable<SessionsResponse["open_asks"]>[number];
 const askCard = (ask: ReturnType<typeof asked>, at: string): SessionEntry => ({ ...say(`c-${ask.id}`, at, "Operator → you", ask.question), kind: "ask", ask_id: ask.id,
 	ask: { id: ask.id, question: ask.question, options: ask.options, recommendation: ask.recommendation, state: "open", answer: null, answered_at: null, reason: null } });
-if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context" || args.stage === "m3-shell") {
+if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context" || args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript") {
 	const ask = asked("ask-pr4a", "PR #321 is green on its pushed head. Merge it, or hold it for another review?");
 	sessions.entries = [...entries, askCard(ask, "2026-10-15T08:04:40Z")];
 	sessions.open_asks = [ask];
 	sessions.operator_context = { tokens: 61_000, window: 200_000, percent: 30.5, level: "ok", reason: null, model: "fixture-model", last_compact_at: null, thinking: null } as SessionsResponse["operator_context"];
 }
 /** M3 shell: committed captures name picp only, so the table's second project reads picp too. */
-if (args.stage === "m3-shell") sessions.entries = sessions.entries.map(e => ({ ...e, text: e.text.replaceAll("demo-app", "picp") }));
+if (args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript") sessions.entries = sessions.entries.map(e => ({ ...e, text: e.text.replaceAll("demo-app", "picp") }));
+/** M3 fidelity B: an own message before the ask, so one capture holds a bubble, a reply, the ask and both sends. */
+if (args.stage === "m3-fidelity-transcript") sessions.entries.splice(-1, 0, say("e7", "2026-10-15T08:04:30Z", "Operator", "Hold the merge until I have read the review."));
 /** Chips: every PR state, CI and review value, the three issue forms, a long repo name, and a `#7` code span. */
 if (args.stage === "chips") {
 	const gh = "https://github.com/o/picp", long = "https://github.com/an-organisation-with-a-long-name/a-repository-name-that-keeps-going-for-wrapping";
@@ -530,6 +533,31 @@ try {
 		const lit = await evaluate(`[...document.querySelectorAll(".shell-sidebar-nav > a")].filter(a => a.getClientRects().length).map(a => a.textContent).join()`);
 		if (lit !== "Chat,Jobs,More") throw new Error(`m3-shell: Stats shows ${lit} as navigation, not Chat,Jobs,More`);
 		if (posts.length) throw new Error(`m3-shell sent ${posts.join(", ")}: layout and navigation only read`);
+	}
+	if (stage === "m3-fidelity-transcript") {
+		// Computed styles on each capture: an unboxed reply, the neutral own bubble, an inline steps rail with 28 px rows,
+		// and the pending sends and open ask still boxed apart. Negative control: a filled reply or rail fails here.
+		const open: Step = [`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-open .session-steps-rows")`];
+		const centre: Step = [`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-steps-open").getBoundingClientRect().top - t.getBoundingClientRect().top - 120; })()`, "true"];
+		const look = `(() => { const cs = s => { const e = document.querySelector(s); return e ? getComputedStyle(e) : null; };
+			const reply = cs(".session-other > .session-body"), own = cs(".session-own:not(.session-pending) > .session-body"), p = cs(".session-other > .session-body p");
+			const rail = cs(".session-steps-open > .session-steps-card"), row = document.querySelector(".session-steps-open .session-steps-rows .session-tool > summary");
+			const box = s => { const c = cs(s); return c && [c.backgroundColor, c.borderTopStyle, c.borderTopWidth].join(" "); };
+			return { reply: reply && [reply.backgroundColor, reply.borderRadius, reply.padding, reply.borderTopWidth].join(" "), own: own && [own.backgroundColor, own.color, own.borderRadius].join(" "),
+				text: p && p.fontSize + "/" + p.lineHeight, rail: rail && [rail.backgroundColor, rail.borderRadius, rail.padding, rail.borderLeftStyle, rail.borderLeftWidth].join(" "),
+				row: row && Math.round(row.getBoundingClientRect().height) + " " + getComputedStyle(row).fontSize + "/" + getComputedStyle(row).lineHeight,
+				queued: box(".session-pending:not(.session-pending-failed) > .session-body"), failed: box(".session-pending-failed > .session-body"),
+				ask: box(".session-message.session-notice:has(.session-oneline)" + (innerWidth < 900 ? "" : " > .session-body")) }; })()`;
+		const shotsB: [string, number, number, Step[]][] = [["desktop", 1440, 1000, []], ["phone", 390, 844, []], ["steps-desktop", 1440, 1000, [open, centre]], ["steps-phone", 390, 844, [open, centre]]];
+		for (const [name, width, height, steps] of shotsB) {
+			await capture(`m3-fidelity-transcript-${name}`, transcript, width, height, "dark", loaded, "bottom", steps);
+			const got = await evaluate(look), want = { reply: "rgba(0, 0, 0, 0) 0px 0px 0px", own: "rgb(42, 42, 42) rgb(237, 237, 237) 16px 16px 4px", text: width < 900 ? "15px/23px" : "14px/22px",
+				rail: steps.length ? "rgba(0, 0, 0, 0) 0px 2px 0px 2px 12px solid 2px" : null, row: steps.length ? "28 12.5px/18px" : null,
+				queued: "rgb(22, 22, 22) dashed 1px", failed: "rgb(22, 22, 22) solid 1px", ask: "rgb(22, 22, 22) solid 1px" };
+			const off = Object.entries(want).filter(([k, v]) => got[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k])} (want ${JSON.stringify(v)})`);
+			if (off.length) throw new Error(`m3-fidelity-transcript-${name}: ${off.join("; ")}`);
+		}
+		if (posts.length) throw new Error(`m3-fidelity-transcript sent ${posts.join(", ")}: the transcript only reads`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

@@ -526,7 +526,7 @@ test("P19-transcript-css: phone pills reach 84% and cards the column; desktop on
 	const rules = (sheet: string, selector: string) => [...sheet.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => m[1] === selector).map((m) => m[2]).join(";");
 	assert.match(rules(phone, ".session-bubble>.session-body"), /max-width:100%;.*overflow-wrap:anywhere/);
 	assert.match(rules(phone, ".session-own>.session-body"), /^max-width:84%;padding:9px 14px;background:var\(--session-you\);color:var\(--session-you-text\)/);
-	assert.match(rules(phone, ".session-other>.session-body"), /^padding:10px 14px;background:var\(--raised\);border:1px solid var\(--divider\);border-radius:4px 18px 18px/);
+	assert.match(rules(phone, ".session-other>.session-body"), /^padding:0;background:transparent;border:0;border-radius:0$/, "M3 fidelity B: a reply is unboxed text");
 	assert.match(rules(phone, ".md .md-code"), /max-width:100%;.*overflow-x:auto;.*white-space:pre/, "a long code line scrolls inside the bubble");
 	assert.match(rules(phone, ".md-table"), /^max-width:100%;overflow-x:auto/, "a wide table scrolls inside the bubble");
 	assert.match(rules(phone, ".sessions .md-table tbody tr:last-child td"), /border-bottom:0/, "Sessions tables have no rule under the last row");
