@@ -9,12 +9,20 @@ import { PrChipLink, PrChips } from "./PrChip.tsx";
 const isNotice = (r: Row) => r.kind === "entry" && r.entry.kind === "system" && !!r.entry.bridge;
 /** Inside a rollup a run of steps shows its wake notice only when its pill is open: one place, not two. */
 export const InRollup = createContext(false);
+/** Opens a job's transcript in place of following its link; absent outside the active operator chat. */
+export type OpenTranscript = (id: string, opener: HTMLElement) => void;
+/** An unmodified primary click opens the transcript in place; every other click keeps the link's own href. */
+export const transcriptClick = (id: string, open?: OpenTranscript) => open && jobTranscriptHref(id) !== "#jobs" ? (e: MouseEvent) => {
+ if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+ e.preventDefault();
+ open(id, e.currentTarget as HTMLElement);
+} : undefined;
 /**
  * Consecutive relay turns about one PR or job: the subject chip (unless the latest relay already chips it), the latest
  * turn's steps, one meta line (time · job · N earlier · N notice) right above the latest relay; one toggle opens the
  * earlier turns (on top, in order) and the latest wake notice in place, rendered through `render`, the screen's own.
  */
-export function RelayRollup({ row, render }: { row: Extract<Row, { kind: "rollup" }>; render: (row: Row) => ComponentChild }) {
+export function RelayRollup({ row, render, onTranscript }: { row: Extract<Row, { kind: "rollup" }>; render: (row: Row) => ComponentChild; onTranscript?: OpenTranscript }) {
  const [open, setOpen] = useState(false);
  const chips = useContext(PrChips);
  const url = row.subject.startsWith("pr:") ? row.subject.slice(3) : null, pr = url ? chips[url] : undefined;
@@ -32,7 +40,7 @@ export function RelayRollup({ row, render }: { row: Extract<Row, { kind: "rollup
   {(n > 0 || k > 0) && <div class="session-rollup-meta">
    {dayKey(at) && <><time class="session-time" dateTime={at}>{time(at)}</time><span aria-hidden="true">·</span></>}
    {/* The id ellipsizes in its middle: the suffix tells jobs apart. */}
-   {job && <><a class="session-rollup-job" href={jobTranscriptHref(job)} title={job}><span>{job.slice(0, -5)}</span>{job.slice(-5)}</a><span aria-hidden="true">·</span></>}
+   {job && <><a class="session-rollup-job" href={jobTranscriptHref(job)} title={job} onClick={transcriptClick(job, onTranscript)}><span>{job.slice(0, -5)}</span>{job.slice(-5)}</a><span aria-hidden="true">·</span></>}
    <button type="button" class="session-rollup-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
     {[n > 0 && `${n} earlier`, k > 0 && `${k} notice${k === 1 ? "" : "s"}`].filter(Boolean).join(" · ")} <span aria-hidden="true">{open ? "▾" : "▸"}</span>
    </button>

@@ -22,8 +22,9 @@ export interface ChatContext {
  session: string | null; asks: AwaitingDetail[]; live: SessionsResponse["workers"]; chats: (operatorHref: string) => ComponentChild; onAnswer: () => void;
 }
 
+type JobTab = Parameters<typeof JobDetail>[0]["initial"];
 /** One job beside the chat (desktop) or over it (phone): the existing job page, embedded, with a way back. */
-function JobPane({id, onClose}: {id: string; onClose: () => void}) {
+function JobPane({id, tab, onClose}: {id: string; tab: JobTab; onClose: () => void}) {
  const resource = useScreenData<JobResponse>(`/api/job/${encodeURIComponent(id)}`, "/api/stream?view=job");
  const close = useRef<HTMLButtonElement>(null);
  useEffect(() => { close.current?.focus(); }, [id]);
@@ -35,7 +36,7 @@ function JobPane({id, onClose}: {id: string; onClose: () => void}) {
   </header>
   <div class="workspace-job-body">
    {resource.error && <p role="alert">{resource.error}{resource.data && " · showing last recorded data"}</p>}
-   {resource.data ? <JobDetail key={id} data={resource.data} wide={false} embedded/> : <p role="status">{resource.error ? "Job unavailable" : "Loading"}</p>}
+   {resource.data ? <JobDetail key={`${id}:${tab}`} data={resource.data} wide={false} initial={tab} embedded/> : <p role="status">{resource.error ? "Job unavailable" : "Loading"}</p>}
   </div>
  </section>;
 }
@@ -43,11 +44,11 @@ function JobPane({id, onClose}: {id: string; onClose: () => void}) {
 /**
  * The operator chat's Jobs drawer, the job picked from it, its context (inspector or phone sheet) and the phone's
  * Conversations drawer (M3). `active` registers Ctrl/Cmd+J; leaving, or another session file, drops every surface.
- * Escape closes the top surface; focus goes back to the opener.
+ * Escape closes the top surface; focus goes back to the opener. `openJob` (null when inactive) opens one job's tab.
  */
-export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelection, chat: ChatContext): {trigger: ComponentChild; surfaces: ComponentChild; conversations: ComponentChild; composer: ComposerMenuContext | null} {
+export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelection, chat: ChatContext): {trigger: ComponentChild; surfaces: ComponentChild; conversations: ComponentChild; composer: ComposerMenuContext | null; openJob: ((id: string, tab: JobTab, opener: HTMLElement | null) => void) | null} {
  const [drawer, setDrawer] = useState(false);
- const [job, setJob] = useState<string | null>(null);
+ const [job, setJob] = useState<{id: string; tab: JobTab} | null>(null);
  const [panel, setPanel] = useState<"inspector" | "sheet" | null>(null);
  const [sessions, setSessions] = useState(false);
  const opener = useRef<HTMLElement | null>(null), toggle = useRef<HTMLButtonElement>(null);
@@ -58,7 +59,9 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
  const from = (el: HTMLElement | null) => { if (!Object.values(overlays).some(Boolean)) opener.current = el; };
  const openDrawer = (el: HTMLElement | null) => { from(el); setDrawer(true); setSessions(false); if (panel === "sheet") setPanel(null); };
  const closeDrawer = () => { setDrawer(false); shut("drawer"); };
- const pickJob = (id: string) => { if (panel === "inspector") from(toggle.current); setJob(id); setDrawer(false); if (panel === "sheet") setPanel(null); };
+ const openJob = (id: string, tab: JobTab, el: HTMLElement | null) => { if (el) from(el); setJob({id, tab}); setDrawer(false); if (panel === "sheet") setPanel(null); };
+ // The drawer and context keep the job page's own default tab (Details in the pane).
+ const pickJob = (id: string) => openJob(id, undefined, panel === "inspector" ? toggle.current : null);
  const closeJob = () => { setJob(null); shut("job"); };
  const closePanel = () => { if (panel === "sheet") shut("sheet"); else toggle.current?.focus(); setPanel(null); };
  const closeSessions = () => { setSessions(false); shut("sessions"); };
@@ -81,7 +84,7 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
   query.addEventListener("change", change);
   return () => query.removeEventListener("change", change);
  }, [active, panel, job]);
- if (!active) return {trigger: null, surfaces: null, conversations: null, composer: null};
+ if (!active) return {trigger: null, surfaces: null, conversations: null, composer: null, openJob: null};
  const context = {asks: chat.asks, live: chat.live.filter(w => matchesProject(w.project, selection)), selection, onClose: closePanel, onJob: pickJob,
   onJobs: () => openDrawer(toggle.current), onAnswer: () => { if (panel === "sheet") closePanel(); chat.onAnswer(); }};
  const asked = chat.asks.length;
@@ -92,7 +95,7 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
     onClick={e => { if (panel) closePanel(); else if (nowWide()) setPanel("inspector"); else { from(e.currentTarget); setPanel("sheet"); } }}>Context{asked > 0 && <span class="workspace-badge workspace-badge-ask" aria-hidden="true">{asked}</span>}</button>
   </>,
   surfaces: <>
-   {job && <JobPane key={job} id={job} onClose={closeJob}/>}
+   {job && <JobPane key={`${job.id}:${job.tab}`} id={job.id} tab={job.tab} onClose={closeJob}/>}
    {panel === "inspector" && !job && <ConversationContext {...context} sheet={false}/>}
    {panel === "sheet" && <ConversationContext {...context} sheet/>}
    {sessions && <SessionDrawer onClose={closeSessions}>{chat.chats(selectionHash(sessionHref("you"), selectionValue(selection)))}</SessionDrawer>}
@@ -101,5 +104,6 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
   conversations: <button type="button" class="session-bar-icon workspace-sessions-open" aria-haspopup="dialog" aria-expanded={sessions} aria-label="Conversations"
    onClick={e => { from(e.currentTarget); setSessions(true); }}><Icon name="sessions"/></button>,
   composer: {onJobs: openDrawer, selection},
+  openJob,
  };
 }

@@ -638,7 +638,7 @@ light-preference and dark-preference captures and `manifest.json`; `pr1` adds an
 notice opened alone, tools shown, and a done job's Transcript tab reached through the card's link. From `pr2` on, an
 open card fails the run if a `cp_integrate` or `fetch_content` name is clipped, or if its summaries start at more than
 one x. `pr3` adds Chats with an empty Fleet. `pr4` adds quick replies (one ask, a refused answer POST, two asks,
-history, offline). `m3-shell` fails unless Chat is one 261 px column at 1440 (Context open) and 900 px, the phone layout at 899 and 390 px, More and Stats keep the 208 px rail, and a Stats select computes the body's family. `m3-fidelity-transcript` (1440×1000 and 390×844, a run closed and open) fails unless a reply computes transparent with no radius or padding, the own bubble `#2a2a2a`/`#ededed` at 16/16/4, an open run a transparent 2 px rail with 28 px rows, and the queued, failed and open-ask boxes keep their surface and borders. `m3-jobs` adds the operator chat's Jobs drawer (Ctrl/Cmd+J, desktop and the phone sheet) and a
+history, offline). `m3-shell` fails unless Chat is one 261 px column at 1440 (Context open) and 900 px, the phone layout at 899 and 390 px, More and Stats keep the 208 px rail, and a Stats select computes the body's family. `m3-fidelity-transcript` (1440×1000 and 390×844, a run closed and open) fails unless a reply computes transparent with no radius or padding, the own bubble `#2a2a2a`/`#ededed` at 16/16/4, an open run a transparent 2 px rail with 28 px rows, and the queued, failed and open-ask boxes keep their surface and borders. `m3-fidelity-surfaces` fails unless a real click on a reply's "Open job transcript →" keeps `.sessions` and the hash and opens `.job-detail-embedded` on Transcript (a 521 px pane at 1440, full screen at 390), the desktop Jobs drawer is 860 px of `rgb(22, 22, 22)`, the phone Jobs and Context sheets start at y96, and the Conversations drawer is 317 px. `m3-jobs` adds the operator chat's Jobs drawer (Ctrl/Cmd+J, desktop and the phone sheet) and a
 picked job beside the chat at 1440 px, over it at 900 px and full screen at 390 px, failing on sideways scroll.
 
 **Chat Jobs surfaces (M3 slice 2, cp-zm9f).** Only the operator's Full transcript has them
@@ -649,17 +649,24 @@ from 900 px and a bottom sheet (18 px radius) below. It reads `/api/jobs` only w
 team, Queued and Done today rows (dot, wrapping title, id, project, status, cost from 900 px) under All / In flight /
 Done today segments and the chat's M1 project selection (one hash, shared with the transcript); Full page opens
 `#jobs` with that selection. Picking a row opens the existing job page (`JobDetail` `embedded`: an `<h2>` instead of the
-page header, P1 Ask and the P2 review guide unchanged) in a pane with Full page (`#job/<id>`) and ×: 520 px beside the
-chat from 1280 px, over the chat column from 900 px, full screen on a phone. Escape closes the top surface unless a
+page header, P1 Ask and the P2 review guide unchanged) in a pane with Full page (`#job/<id>`) and ×: 521 px (border
+included) beside the chat from 1280 px, over the chat column from 900 px, full screen on a phone. The drawer is the
+`--surface` panel from 900 px and a sheet from y96 (as Context's) below. Escape closes the top surface unless a
 dialog or menu owns it; focus returns to the opener and the draft, reference, filter and scroll stay. Deferred:
 "From this chat" lists, Today totals and live-log tabs (`/jobs` arrived with slice 4).
+
+**Reply log in Chat (M3 fidelity slice C).** In that chat a reply's job transcript link (a run of steps' "Open job
+transcript →" and a relay rollup's job id) opens the same pane on its Transcript tab instead of leaving Chat; the
+drawer and Context still open it on Details. Only an unmodified primary click is the chat's: a modified or middle
+click, and a fresh `#job/<id>?tab=transcript` URL, keep the full job route, and outside the operator chat the link is
+an ordinary link. An unreadable job shows the pane's existing alert; a new session file drops the pane.
 
 **Chat context and Conversations (M3 slice 3, cp-zm9f).** The same Full transcript gains `Context` beside `Jobs ⌘J`
 (an amber badge counts the open asks). `ConversationContext.tsx` shows "This conversation": Asked you (the transcript's
 open asks; Answer opens the pinned decisions block) and In flight (the live workers in the M1 selection, each with
 project, model, context, cost and last activity, "not recorded" when absent, Open job into the slice 2 pane and its
 Session link), then All jobs (the drawer). It is a 340 px inspector beside the chat from 1280 px, over the chat's right
-edge from 900 px, and a modal bottom sheet below. The phone's session bar adds a Conversations button: a 316 px modal
+edge from 900 px, and a modal bottom sheet below. The phone's session bar adds a Conversations button: a 317 px modal
 left drawer (`SessionDrawer.tsx`) with the sidebar's own rows, the Operator row keeping the selection. Escape closes the
 top surface and focus returns to its button; every surface closes on leaving the chat or switching its session file.
 Crossing 900 px while the context is open closes it (the sheet hands focus back to Context), so no hidden inspector stays

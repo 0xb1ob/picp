@@ -18,7 +18,7 @@ import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
-	"m3-fidelity-transcript"];
+	"m3-fidelity-transcript", "m3-fidelity-surfaces"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -78,14 +78,15 @@ const asked = (id: string, question: string) => ({ id, project: "picp", question
 	mandate_objective: null, jobs: [], escalation: null, evidence: [] }) as unknown as NonNullable<SessionsResponse["open_asks"]>[number];
 const askCard = (ask: ReturnType<typeof asked>, at: string): SessionEntry => ({ ...say(`c-${ask.id}`, at, "Operator → you", ask.question), kind: "ask", ask_id: ask.id,
 	ask: { id: ask.id, question: ask.question, options: ask.options, recommendation: ask.recommendation, state: "open", answer: null, answered_at: null, reason: null } });
-if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context" || args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript") {
+if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context" || args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces") {
 	const ask = asked("ask-pr4a", "PR #321 is green on its pushed head. Merge it, or hold it for another review?");
 	sessions.entries = [...entries, askCard(ask, "2026-10-15T08:04:40Z")];
 	sessions.open_asks = [ask];
 	sessions.operator_context = { tokens: 61_000, window: 200_000, percent: 30.5, level: "ok", reason: null, model: "fixture-model", last_compact_at: null, thinking: null } as SessionsResponse["operator_context"];
 }
 /** M3 shell: committed captures name picp only, so the table's second project reads picp too. */
-if (args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript") sessions.entries = sessions.entries.map(e => ({ ...e, text: e.text.replaceAll("demo-app", "picp") }));
+const picpOnly = args.stage === "m3-shell" || args.stage === "m3-fidelity-transcript" || args.stage === "m3-fidelity-surfaces";
+if (picpOnly) sessions.entries = sessions.entries.map(e => ({ ...e, text: e.text.replaceAll("demo-app", "picp") }));
 /** M3 fidelity B: an own message before the ask, so one capture holds a bubble, a reply, the ask and both sends. */
 if (args.stage === "m3-fidelity-transcript") sessions.entries.splice(-1, 0, say("e7", "2026-10-15T08:04:30Z", "Operator", "Hold the merge until I have read the review."));
 /** Chips: every PR state, CI and review value, the three issue forms, a long repo name, and a `#7` code span. */
@@ -181,9 +182,9 @@ try {
 		{ name: "cp-pr-review", description: "Review a pull request against its task file", source: "agent" }, { name: "cp-memory", description: "Capture and curate lessons", source: "home" }] };
 	// M3 slice 2: the chat's Jobs drawer lists these; a long title and id wrap, the done job opens beside the chat.
 	const row = (id: string, project: string, phase: string, title: string, over: object = {}) => ({ ...job.job, id, project, phase, title, finished_at: null, ...over });
-	if (args.stage === "m3-jobs" || args.stage === "m3-composer") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
+	if (args.stage === "m3-jobs" || args.stage === "m3-composer" || args.stage === "m3-fidelity-surfaces") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
 		row("cp-m3-live-with-a-very-long-job-identifier", "picp", "working", "Repair the queue so a very long job title keeps wrapping inside its drawer row instead of clipping", { cost_usd: 1.42, model: "fixture-model" }),
-		row("cp-m3-held", "demo-app", "held", "Settings copy pass", { cost_usd: 0.31 }),
+		row("cp-m3-held", picpOnly ? "picp" : "demo-app", "held", "Settings copy pass", { cost_usd: 0.31 }),
 		row("cp-m3-park", "picp", "awaiting_merge", "Parked with the team", { pr_url: "https://github.com/o/picp/pull/712", pr_status: "open" }),
 		row(JOB, "picp", "done", "Sessions chat v2 PR 2", { finished_today: true, finished_at: GENERATED, cost_usd: 2.05, pr_url: "https://github.com/o/picp/pull/700", pr_status: "merged" }),
 	] };
@@ -558,6 +559,29 @@ try {
 			if (off.length) throw new Error(`m3-fidelity-transcript-${name}: ${off.join("; ")}`);
 		}
 		if (posts.length) throw new Error(`m3-fidelity-transcript sent ${posts.join(", ")}: the transcript only reads`);
+	}
+	if (stage === "m3-fidelity-surfaces") {
+		// A real reply-link click keeps Chat mounted and opens the embedded Transcript; then the surfaces' measured boxes.
+		// Negative control: without the reply callback the click leaves for the job route and the log steps time out.
+		const log: Step[] = [[`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-link")`],
+			[`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".sessions > .workspace-job .job-detail-embedded[data-tab=transcript] .jt-say") && location.hash === ${JSON.stringify(transcript)}`]];
+		const jobs: Step = [`document.querySelector(".workspace-jobs-open").click()`, `document.querySelectorAll(".workspace-jobs[open] .workspace-jobs-row").length === 4`];
+		const context: Step = [`document.querySelector(".workspace-context-open").click()`, `!!document.querySelector("dialog.workspace-context-sheet[open] .workspace-context-ask")`];
+		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `!!document.querySelector(".workspace-sessions[open] .session-choice")`];
+		const box = (selector: string) => `(() => { const e = document.querySelector(${JSON.stringify(selector)}), r = e.getBoundingClientRect();
+			return [r.left, r.top, r.width, r.height].map(Math.round).join(" ") + " " + getComputedStyle(e).backgroundColor; })()`;
+		const shotsC: [string, number, number, Step[], string, string][] = [
+			["log-desktop", 1440, 1000, log, ".workspace-job", "919 0 521 1000 rgb(13, 13, 13)"], ["log-phone", 390, 844, log, ".workspace-job", "0 0 390 844 rgb(13, 13, 13)"],
+			["jobs-desktop", 1440, 1000, [jobs], ".workspace-jobs", "580 0 860 1000 rgb(22, 22, 22)"], ["jobs-phone", 390, 844, [jobs], ".workspace-jobs", "0 96 390 748 rgb(18, 18, 18)"],
+			["context-phone", 390, 844, [context], ".workspace-context-sheet", "0 96 390 748 rgb(18, 18, 18)"],
+			["conversations-phone", 390, 844, [drawer], ".workspace-sessions", "0 0 317 844 rgb(18, 18, 18)"],
+		];
+		for (const [name, width, height, steps, selector, want] of shotsC) {
+			await capture(`m3-fidelity-surfaces-${name}`, transcript, width, height, "dark", loaded, "bottom", steps);
+			const got = await evaluate(box(selector));
+			if (got !== want) throw new Error(`m3-fidelity-surfaces-${name}: ${selector} is ${got}, not ${want}`);
+		}
+		if (posts.length) throw new Error(`m3-fidelity-surfaces sent ${posts.join(", ")}: the log and surfaces only read`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);
