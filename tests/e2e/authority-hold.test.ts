@@ -143,8 +143,9 @@ async function pipelineBench(t: TestContext, gateSteps: ScriptStep[]) {
 		return { ...started, held };
 	};
 	const ship = async (title: string, project = "demo") => (await post.ledger().create({ title, project, delivery: "local", kind: "ship" })).id;
+	const dispatcher = parents(home.path, provider, agentDir, "a1-dispatch");
 	const refused = async (jobId: string, pattern: RegExp) => {
-		await assert.rejects(post.dispatch({ jobId, task: "Bump x.", fetch: false }), pattern, `${jobId} refused`);
+		(await dispatcher(`Dispatch ${jobId}.`, [call("refused", "cp_dispatch", { job_id: jobId, task: "Bump x.", fetch: false })])).failed("refused", pattern);
 		assert.equal(post.fleet.get(jobId), undefined, `${jobId}: no fleet record`);
 		assert.equal(existsSync(join(home.path, paths.briefFile(jobId))), false, `${jobId}: no brief, so no lease or spawn`);
 	};
