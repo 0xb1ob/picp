@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import { jsonl, viewer, write } from "../harness/conversations.ts";
-import { openTab } from "../harness/dashboard.ts";
+import { openTab, until } from "../harness/dashboard.ts";
 
 /** The minified stylesheet the served page links. */
 const servedCss = async (d: { get(path: string): Promise<{ text: string }> }) => (await d.get(String(/<link rel="stylesheet" href="([^"]+)"/.exec((await d.get("/")).text)?.[1]))).text;
@@ -150,4 +150,31 @@ test("M3-nav: Chat, Jobs and More are the primary items on phone and desktop; ev
 			fresh.close();
 		}
 	}
+});
+
+test("M3-shell: desktop Chat is one 261 px column of brand, search, navigation, chats and status; other screens keep the 208 px rail; selects use the system sans", { timeout: 180_000 }, async (t) => {
+	const d = await viewer(t);
+	const css = await servedCss(d);
+	// Combine: negative control — the old 208 px rail beside a 281 px Chats column (56 px title row) fails here.
+	const wide = css.indexOf(".sessions{position:relative;display:grid"), split = css.lastIndexOf("@media(min-width:900px)", wide);
+	assert.ok(split > 0 && wide > split, "the combined column is desktop only");
+	assert.match(rules(css.slice(split), ".sessions"), /grid-template-columns:261px minmax\(0,1fr\);grid-template-rows:minmax\(0,1fr\)/, "one 261 px column");
+	assert.match(rules(css.slice(split), ".session-sidebar"), /grid-row:1 \/ -1;.*padding:14px 10px;.*background:var\(--nav\)/, "full height on the rail's surface");
+	assert.match(rules(css, ".shell .sessions>.page-header>h1"), /clip-path:inset\(50%\)/, "no title row of its own; the <h1> stays");
+	assert.match(rules(css, ".shell-sessions>.shell-sidebar"), /width:261px/, "while Chat loads the shell's rail is the same column");
+	assert.match(rules(css, ".shell-sidebar"), /width:208px/, "other screens keep the 208 px rail");
+	assert.doesNotMatch(css, /281px/, "no second Chats column anywhere, open surfaces included");
+	assert.equal(rules(css, "select"), "font-family:var(--font-sans)", "Stats selects: the family only, sizes untouched");
+	const tab = await openTab(t, d.port, "#sessions", new Map(), undefined, {}, true);
+	await tab.find(".shell-main > .sessions");
+	assert.equal(await until(() => tab.$(".shell-sidebar"), (rail) => rail === null, "the rail claim"), null, "Chat drops the shell's rail");
+	const column = tab.$(".session-sidebar")!;
+	assert.deepEqual([...column.children].map((el) => el.getAttribute("class") ?? el.tagName), ["shell-brand", "shell-desktop-search", "shell-sidebar-nav", "session-sidebar-chats", "shell-sidebar-status"],
+		"brand, search, navigation, chats, status in one column");
+	assert.equal(tab.$(".sessions > .page-header > h1")?.textContent, "Chats");
+	tab.go("#stats");
+	await tab.find(".shell-main > .stats");
+	assert.ok(await until(() => tab.$(".shell-sidebar .shell-sidebar-nav"), (nav) => nav !== null, "the rail back"), "leaving Chat restores the shell's rail");
+	assert.ok(tab.$$(".stats select").length > 0, "Stats keeps its selects");
+	tab.close();
 });

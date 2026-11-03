@@ -17,7 +17,7 @@ import { buildViewer } from "../../src/viewer/build.ts";
 import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
-const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota"];
+const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -77,12 +77,14 @@ const asked = (id: string, question: string) => ({ id, project: "picp", question
 	mandate_objective: null, jobs: [], escalation: null, evidence: [] }) as unknown as NonNullable<SessionsResponse["open_asks"]>[number];
 const askCard = (ask: ReturnType<typeof asked>, at: string): SessionEntry => ({ ...say(`c-${ask.id}`, at, "Operator → you", ask.question), kind: "ask", ask_id: ask.id,
 	ask: { id: ask.id, question: ask.question, options: ask.options, recommendation: ask.recommendation, state: "open", answer: null, answered_at: null, reason: null } });
-if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context") {
+if (args.stage === "pr4" || args.stage === "pr5" || args.stage === "m3-context" || args.stage === "m3-shell") {
 	const ask = asked("ask-pr4a", "PR #321 is green on its pushed head. Merge it, or hold it for another review?");
 	sessions.entries = [...entries, askCard(ask, "2026-10-15T08:04:40Z")];
 	sessions.open_asks = [ask];
 	sessions.operator_context = { tokens: 61_000, window: 200_000, percent: 30.5, level: "ok", reason: null, model: "fixture-model", last_compact_at: null, thinking: null } as SessionsResponse["operator_context"];
 }
+/** M3 shell: committed captures name picp only, so the table's second project reads picp too. */
+if (args.stage === "m3-shell") sessions.entries = sessions.entries.map(e => ({ ...e, text: e.text.replaceAll("demo-app", "picp") }));
 /** Chips: every PR state, CI and review value, the three issue forms, a long repo name, and a `#7` code span. */
 if (args.stage === "chips") {
 	const gh = "https://github.com/o/picp", long = "https://github.com/an-organisation-with-a-long-name/a-repository-name-that-keeps-going-for-wrapping";
@@ -204,7 +206,7 @@ try {
 		}
 		if (path in routes) return send(200, "application/json", JSON.stringify(routes[path]));
 		// M3: every other screen reads the real viewer's APIs on this scratch home (empty state, same palette check).
-		if ((args.stage === "m3-transcript" || args.stage === "nav-simplify" || args.stage === "p3-quota") && path.startsWith("/api/") && !ABSENT.has(path)) {
+		if ((args.stage === "m3-transcript" || args.stage === "nav-simplify" || args.stage === "p3-quota" || args.stage === "m3-shell") && path.startsWith("/api/") && !ABSENT.has(path)) {
 			return dispatch(req, res, { home: scratch, stateDir: join(scratch, LAYOUT.state), host: "127.0.0.1", port: (server.address() as AddressInfo).port, app });
 		}
 		if (!ABSENT.has(path) && path !== "/favicon.ico" && !path.startsWith("/manifest") && !path.endsWith(".png")) unexpected.push(path);
@@ -349,7 +351,8 @@ try {
 	}
 	if (stage === "pr3") {
 		const base = shots.find(s => (s as { file: string }).file.endsWith("pr3-desktop-dark-1440x1000.png")) as { columns: number[] };
-		if (base.columns.join() !== "208,281,951") throw new Error(`pr3: rail, Chats and conversation are ${base.columns.join(" + ")} px, not 208 + 281 + 951`);
+		// Combine (m3-shell) replaced the 208 px rail + 281 px Chats with one 261 px column.
+		if (base.columns.join() !== "0,261,1179") throw new Error(`pr3: rail, Chats and conversation are ${base.columns.join(" + ")} px, not 0 + 261 + 1179`);
 		// Step names at phone width too: cp_integrate and fetch_content fit their column (the run fails on a clipped one).
 		await capture("pr3-steps-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom", [[`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-open")`],
 			[`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-steps-open").getBoundingClientRect().top - t.getBoundingClientRect().top - 60; })()`, "true"]]);
@@ -509,6 +512,24 @@ try {
 			await capture(`p3-quota-held-${device}-dark-${width}x${height}`, "#job/cp-quota-held", width, height, "dark", ".job-fact-quota", undefined, fact("held for the operator"));
 		}
 		if (posts.length) throw new Error(`p3-quota sent ${posts.join(", ")}: the Job page only reads`);
+	}
+	if (stage === "m3-shell") {
+		// Combine: [shell rail, chat column, conversation] widths; Context open at 1440 leaves 1440 - 261 - 340.
+		const context: Step = [`document.querySelector(".workspace-context-open").click()`, `!!document.querySelector("aside.workspace-context .workspace-context-ask")`];
+		const family = `(() => { const s = document.querySelector(".stats select"); return !!s && getComputedStyle(s).fontFamily === getComputedStyle(document.body).fontFamily; })()`;
+		const shots6: [string, string, string, number, number, Step[], string][] = [
+			["desktop-dark-1440x1000", transcript, loaded, 1440, 1000, [context], "0,261,839"], ["900-dark-900x1000", transcript, loaded, 900, 1000, [], "0,261,639"],
+			["899-dark-899x1000", transcript, loaded, 899, 1000, [], "0,0,899"], ["phone-dark-390x844", transcript, loaded, 390, 844, [], "0,0,390"],
+			["more-dark-1440x1000", "#more", ".more-menu", 1440, 1000, [], "208,0,0"], ["stats-dark-1440x1000", "#stats", ".stats select", 1440, 1000, [["true", family]], "208,0,0"],
+		];
+		for (const [name, hash, ready, width, height, steps, want] of shots6) {
+			await capture(`m3-shell-${name}`, hash, width, height, "dark", ready, hash === transcript ? "bottom" : undefined, steps);
+			const got = (shots.at(-1) as { columns: number[] }).columns.join();
+			if (got !== want) throw new Error(`m3-shell-${name}: rail, chat column and conversation are ${got} px, not ${want}`);
+		}
+		const lit = await evaluate(`[...document.querySelectorAll(".shell-sidebar-nav > a")].filter(a => a.getClientRects().length).map(a => a.textContent).join()`);
+		if (lit !== "Chat,Jobs,More") throw new Error(`m3-shell: Stats shows ${lit} as navigation, not Chat,Jobs,More`);
+		if (posts.length) throw new Error(`m3-shell sent ${posts.join(", ")}: layout and navigation only read`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

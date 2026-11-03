@@ -194,5 +194,5 @@ test("M3-jobs-css: phone bottom sheet and full-screen job; desktop 860 px drawer
 	assert.match(rule(phone, ".workspace-close"), /width:44px;height:44px/, "44 px close");
 	assert.match(rule(desktop, ".workspace-jobs"), /width:min\(860px,100%\)/, "desktop: the 860 px drawer");
 	assert.match(rule(desktop, ".workspace-job"), /grid-column:2/, "under 1280 px the job covers the chat column");
-	assert.match(rule(beside, ".sessions:has(>.workspace-job)"), /grid-template-columns:281px minmax\(0,1fr\) 520px/, "from 1280 px a 520 px pane beside the chat");
+	assert.match(rule(beside, ".sessions:has(>.workspace-job)"), /grid-template-columns:261px minmax\(0,1fr\) 520px/, "from 1280 px a 520 px pane beside the chat");
 });

@@ -1,6 +1,6 @@
 import { ToolRunRow } from "../components/ToolRunRow.tsx";
 import { type ComponentChild, createContext } from "preact";
-import { useContext, useEffect, useRef, useState } from "preact/hooks";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { matchesSelection, type ProjectSelection, selectionHash } from "../project-filter.ts";
 import { ProjectFilter } from "../components/ProjectFilter.tsx";
 import type { ContextUsage, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
@@ -353,6 +353,8 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  const replyAt=replies ? shown.findLast(e=>!isOwn(e) && (isBubble(e) || e.kind === "ask"))?.id : undefined;
  const state=headerState(data,control?.status,history);
  const shell=useContext(ShellContext);
+ // Combine: from 900 px the chat column carries the rail's chrome, so the shell drops its own rail.
+ useLayoutEffect(()=>shell.claimRail?.(),[shell.claimRail]);
  /** Chats: the sidebar from 900 px; the phone's Conversations drawer passes an Operator href keeping the selection. */
  const chats=(you:string)=><><section aria-label="Operator">{row(you,"Operator",history ? "Historical transcript" : preview || modelText(data.operator_context ?? {}),data.selected === "you",{avatar:"OP",at:last?.at,context:preview ? null : data.operator_context,preview:!!preview})}</section>
   <section><h2>Fleet · {data.workers.filter(countedLive).length} live</h2>{row(sessionHref("parent"),"CP parent",`${modelText(data.parent.context ?? {})} · ${data.parent.live ? "recent activity" : "no recent activity"}`,data.selected === "parent",{avatar:"CP",phase:data.parent.live ? "working" : "unknown",at:data.parent.last_activity,context:data.parent.context})}{data.workers.map(w=><div key={w.id}>{row(sessionHref("workers",w.id),w.id,`${modelText({model:w.context?.model ?? w.model,thinking:w.thinking})} · ${workerPhase(w)}`,data.session_id === w.id,{phase:workerDot(w),at:w.last_activity,context:w.context})}</div>)}{!data.workers.length && <p>No workers</p>}</section></>;
@@ -367,7 +369,9 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    {toolCalls > 0 && <button type="button" class="session-tools-toggle" aria-pressed={showTools} aria-label={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} title={showTools ? "Hide tool calls" : `Show tool calls (${hiddenTools})`} onClick={toggleTools}>Tools {toolCalls}</button>}
   </div> : undefined}/>
   <aside class="session-sidebar" aria-label="Session streams">
-   {chats(sessionHref("you"))}
+   {shell.rail?.head}
+   <div class="session-sidebar-chats">{chats(sessionHref("you"))}</div>
+   {shell.rail?.status}
   </aside>
   <div class="session-panel">
    <SessionBar data={data} control={control} context={context} toolCalls={toolCalls} showTools={showTools} hiddenTools={hiddenTools} onTools={toggleTools} state={state} conversations={workspace.conversations}/>
