@@ -4,7 +4,7 @@
  * fixture's `m3-jobs` screenshots are the layout evidence).
  */
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
@@ -39,7 +39,7 @@ function seed(stateDir: string, home: string, extra = false) {
 		job("cp-merged", "picp", "closed", undefined, { closed_at: iso(30) }), ...extras.map((id, i) => job(id, "picp", "closed", undefined, { closed_at: iso(40 + i) })),
 		...(extra ? [job("cp-queued", "picp", "open"), job("cp-old-r2d2", "picp-old", "closed", undefined, { closed_at: iso(1800) })] : [])] });
 	put(LAYOUT.fleetFile, { jobs: [
-		{ job_id: "cp-live", project: "picp", kind: "ship", phase: "held", dispatched_at: iso(60) },
+		{ job_id: "cp-live", project: "picp", kind: "ship", phase: "held", dispatched_at: iso(60), executor: "script", script_path: "scripts/live-check.sh" },
 		{ job_id: "cp-other", project: "picp-lab", kind: "ship", phase: "waiting", dispatched_at: iso(60) },
 		{ job_id: "cp-park", project: "picp", kind: "ship", delivery: "pr", phase: "awaiting_merge", branch: "cp-park", dispatched_at: iso(300), reported_at: iso(120),
 			awaiting_merge: { cycle: 1, pr_url: "https://github.com/o/r/pull/7", repo: "o/r", branch: "cp-park", head_sha: "b".repeat(40), base: "main", handed_at: iso(120), released_at: iso(120), frozen_seconds: 600, frozen_usage: {} } },
@@ -50,16 +50,18 @@ function seed(stateDir: string, home: string, extra = false) {
 	put(join(LAYOUT.runs, "cp-park/review-1.json"), { schema_version: 1, job_id: "cp-park", attempt: 1, verdict: "pass", cause: "ok", reasons: ["GUIDE-NOTE"], model: "rev/model-1",
 		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, decided_at: iso(150), head_sha: "b".repeat(40), diff_stat: { files: 3, truncated: false } });
 	put(join(LAYOUT.runs, "cp-merged/merge.json"), { job_id: "cp-merged", pr_url: "https://github.com/o/r/pull/2", merge_commit_sha: "c".repeat(40), merged_at: iso(30) });
-	// Full match S4: cp-other's run is working; cp-park has a worker session for its Log and a report.md.
+	// Full match S4: cp-other's run is working; cp-park has a worker session for its Log and a report.md; cp-live is a script.
 	put(join(LAYOUT.runs, "cp-other/status.json"), { phase: "working", started_at: iso(60) });
 	const worker = join(stateDir, "sessions", "cp-park.jsonl"), at = (minutes: number, message: object) => JSON.stringify({ type: "message", timestamp: iso(minutes), message });
 	put(join(LAYOUT.runs, "cp-park/status.json"), { session_file: worker });
 	mkdirSync(join(stateDir, "sessions"), { recursive: true });
 	writeFileSync(worker, `${[at(200, { role: "user", content: [{ type: "text", text: "LOG-BRIEF fix the route" }] }),
 		at(199, { role: "assistant", content: [{ type: "toolCall", id: "r1", name: "read", arguments: { path: "src/route.ts" } }] }),
-		at(199, { role: "toolResult", toolCallId: "r1", toolName: "read", content: [{ type: "text", text: "LOG-READ 212 lines" }] }),
+		at(199, { role: "toolResult", toolCallId: "r1", toolName: "read", content: [{ type: "text", text: "LOG-READ one\ntwo\nthree" }] }),
 		at(198, { role: "assistant", content: [{ type: "toolCall", id: "b1", name: "bash", arguments: { command: "npm test" } }] }),
 		at(198, { role: "toolResult", toolCallId: "b1", toolName: "bash", content: [{ type: "text", text: "PASS tests/route.test.ts" }] }),
+		at(198, { role: "assistant", content: [{ type: "toolCall", id: "e1", name: "edit", arguments: { path: "src/route.ts", oldText: "a\nb", newText: "a\nc\nd" } }] }),
+		at(198, { role: "toolResult", toolCallId: "e1", toolName: "edit", content: [{ type: "text", text: "Applied 1 edit" }] }),
 		at(197, { role: "assistant", content: [{ type: "text", text: "LOG-SAY the route is fixed" }] })].join("\n")}\n`);
 	put(join(LAYOUT.state, "artifacts/cp-park/report.md"), "# Park report\n\nREPORT-BODY\n");
 }
@@ -309,67 +311,107 @@ test("M3-jobs-reply-log: a reply's job link opens Log in the pane and keeps Chat
 });
 
 test("M3-jobs-log (full match S4): a reply's link opens Log with Report, Files and Details; the Ask footer drafts P1, never sends", { timeout: 180_000 }, async (t) => {
-	const d = await start(t, REPLIES);
+	// cp-orphan has a fleet record but no ledger project, so the server gives it no Ask reference (owner validation).
+	const d = await start(t, [...REPLIES.slice(0, -1), wake(12, "cp-orphan", "ORPHAN woke"), ...bash(12, "c3"), REPLIES.at(-1)!]);
+	const fleet = join(d.home, LAYOUT.fleetFile), record = JSON.parse(readFileSync(fleet, "utf8")) as { jobs: object[] };
+	writeFileSync(fleet, JSON.stringify({ ...record, jobs: [...record.jobs, { job_id: "cp-orphan", project: "picp", kind: "ship", phase: "held", dispatched_at: iso(30) }] }));
 	const filtered = `${CHAT}&untagged=1`;
 	const tab = await openTab(t, d.port, filtered, new Map(), undefined, {}, true);
 	const focused = browserShims(t, tab);
 	await tab.waitText(/REPLY-CARD/);
 	const field = await tab.find(".operator-composer textarea") as unknown as HTMLElement & { value: string };
 	tab.type(field as unknown as Element, "KEEP-DRAFT");
-	tab.click(tab.$$(".session-steps .session-tools").find((b) => b.getAttribute("title") === "cp-park")!);
-	const link = await tab.find(".session-steps-link", (a) => a.getAttribute("href") === "#job/cp-park?tab=transcript");
+	const stepsLink = async (job: string) => {
+		tab.click(tab.$$(".session-steps .session-tools").find((b) => b.getAttribute("title") === job)!);
+		return tab.find(".session-steps-link", (a) => a.getAttribute("href") === `#job/${job}?tab=transcript`);
+	};
+	const link = await stepsLink("cp-park");
 	const texts = (selector: string) => tab.$$(`.workspace-job ${selector}`).map((e) => e.textContent);
-	const view = (name: string) => tab.click(tab.$$(".workspace-log-tabs [role=tab]").find((b) => b.textContent === name)!);
+	// Each tab carries frame 8's segment label and frame 2's document label; CSS shows one per width.
+	const view = (key: string) => tab.click(tab.$(`.workspace-log-tabs [data-view="${key}"]`)!);
+	const transcript = tab.$(".session-transcript") as Element & { scrollTop: number };
+	transcript.scrollTop = 160;
 	assert.equal(activate(tab, link), false, "an unmodified click on the reply's link is the chat's");
 	const rows = await until(() => texts(".workspace-log-row"), (r) => r.length > 0, "the Log");
-	assert.deepEqual(rows, ["Parent · LOG-BRIEF fix the route", "read(src/route.ts)└ LOG-READ 212 lines", "bash(npm test)└ PASS tests/route.test.ts", "• LOG-SAY the route is fixed"],
-		"the worker's entries in order: tool, target and output, then the worker's own line");
-	assert.deepEqual([texts(".workspace-job-name > *"), texts(".workspace-job-phase"), texts(".workspace-log-who p"), texts(".workspace-log-tabs [role=tab]")],
-		[["Title cp-park", "cp-park"], ["With the team"], ["role not recorded · model not recorded · thinking not recorded", "worktree not recorded"], ["Log", "Report", "Files", "Details"]],
-		"title, id and phase; unrecorded worker facts say so; Log, Report, Files and Details, no Diff before S7");
-	assert.equal(tab.$$(".workspace-job textarea, .workspace-job form").length, 0, "the log has no composer of its own");
+	assert.deepEqual(rows, ["Parent · LOG-BRIEF fix the route", "Read(src/route.ts)└ Read 3 lines", "Ran 1 shell command• npm testPASS tests/route.test.ts",
+		"Update(src/route.ts)└ Added 2 lines, removed 1 line", "• LOG-SAY the route is fixed"], "frames 2/8 wording from the recorded calls, in order");
+	assert.deepEqual([texts(".workspace-job-name > *"), texts(".workspace-job-phase"), texts(".workspace-log-who p"), texts(".workspace-log-tab-short"), texts(".workspace-log-tab-doc"), texts(".workspace-log-live")],
+		[["Title cp-park", "cp-park"], ["With the team"], ["role not recorded · model not recorded · thinking not recorded", "not recorded"], ["Log", "Report", "Files", "Details"],
+			[">_cp-park", "report.md", "Files", "Details"], []], "title, id and phase; unrecorded facts say so; segment and document tabs, no Diff before S7; live only while working");
+	assert.equal(tab.$$(".workspace-job textarea, .workspace-job form").length, 0, "no composer of its own: the entry only links into Chat");
+	const more = tab.$(".workspace-job details.workspace-job-more")!, summary = more.querySelector("summary")!;
+	assert.deepEqual([summary.getAttribute("aria-label"), more.querySelector(".workspace-job-more-sheet a")!.getAttribute("href"), tab.$(".workspace-job .workspace-full")!.getAttribute("href")],
+		["More job actions", "#job/cp-park", "#job/cp-park"], "the phone's ⋯ menu holds Full page; desktop keeps it in the tab row");
+	more.setAttribute("open", "");
+	assert.deepEqual([tab.key(summary, "Escape").defaultPrevented, more.hasAttribute("open"), !!tab.$(".workspace-job")], [true, false, true], "Escape closes the ⋯ menu before the pane");
 
-	view("Report");
+	view("report");
 	await tab.find(".workspace-log-report");
 	assert.match(tab.$(".workspace-log-report")!.textContent!, /REPORT-BODY/, "the report reads through the report page's own endpoint");
 	rmSync(join(d.home, LAYOUT.state, "artifacts/cp-park/report.md"));
-	view("Files");
+	view("files");
 	assert.deepEqual(await until(() => texts(".workspace-log-files > *"), (f) => f.length > 0, "the Files view"), ["Files unavailable", "Run log unavailable"],
 		"the job page's file pointers, each missing one unavailable");
-	view("Report");
+	view("report");
 	assert.equal(await until(() => tab.$(".workspace-job [role=status]")?.textContent, (s) => !!s && s !== "Loading", "the report re-read"),
 		"Report unavailable · report.md could not be read", "a report that no longer reads is unavailable, never an empty page");
-	view("Details");
+	view("details");
 	await tab.find(".workspace-job .review-guide");
 	assert.deepEqual([/GUIDE-NOTE/.test(tab.$(".workspace-job .review-guide")!.textContent!), texts(".job-tab").includes("Timeline")], [true, true], "P2 guide and Timeline kept");
-	view("Log");
+	view("log");
 	await tab.find(".workspace-log-row");
 
 	assert.equal(escape(tab), true);
 	await until(() => tab.$(".workspace-job"), (el) => el === null, "Escape to close the pane");
-	assert.deepEqual([focused() === link, field.value, tab.window.location.hash], [true, "KEEP-DRAFT", filtered], "focus back on the link; draft and filter kept");
+	assert.deepEqual([focused() === link, field.value, tab.window.location.hash, tab.$(".session-transcript") === transcript, transcript.scrollTop], [true, "KEEP-DRAFT", filtered, true, 160],
+		"focus back on the link; the same Chat keeps its scroll, draft and filter");
 
-	// Plan S4: an unknown report reads unavailable and close still works.
+	// Plan S4: an unknown report reads unavailable and close still works; a script job names its script, not a model.
 	const rollup = await tab.find("a.session-rollup-job");
 	assert.equal(activate(tab, rollup), false);
 	await tab.find(".sessions > section.workspace-job[aria-label='Job cp-live'] .workspace-log");
-	view("Report");
+	assert.equal((await until(() => texts(".workspace-log-who p"), (p) => p.length > 0, "cp-live's facts"))[0], "role not recorded · script scripts/live-check.sh · thinking not recorded");
+	view("report");
 	assert.equal((await tab.find(".workspace-job [role=status]", (s) => s.textContent !== "Loading")).textContent, "Report unavailable · no report.md recorded", "no report.md: unavailable");
 	tab.click(tab.$('.workspace-job button[aria-label="Close job"]')!);
 	await until(() => tab.$(".workspace-job"), (el) => el === null, "close still works");
 	assert.ok(focused() === rollup, "focus returns to the rollup link");
 
+	// P1 owner validation: a job without its own reference offers no Ask at all, never another record's.
+	assert.equal(activate(tab, await stepsLink("cp-orphan")), false);
+	const orphan = await tab.find(".workspace-job .workspace-log-ask");
+	assert.deepEqual([orphan.textContent, !!tab.$(".workspace-job .workspace-log-entry"), !!tab.$(".workspace-job .evidence-ask")], ["Ask unavailable · no recorded reference for this job", false, false],
+		"no reference of its own: unavailable");
+	tab.click(tab.$('.workspace-job button[aria-label="Close job"]')!);
+	await until(() => tab.$(".workspace-job"), (el) => el === null, "the orphan pane to close");
+
 	activate(tab, link);
-	const ask = await tab.find(".workspace-log-ask a.evidence-ask");
+	const ask = await tab.find(".workspace-log-readonly a.evidence-ask");
 	const writes = () => tab.requests.filter((r) => r.method !== "GET" && r.method !== "HEAD").map((r) => r.path);
 	const before = writes();
-	assert.deepEqual([ask.textContent, JSON.parse(new URLSearchParams(ask.getAttribute("href")!.split("?")[1]).get("ref")!)], ["Ask about this job…", { kind: "job", project: "picp", job_id: "cp-park" }],
-		"P1: the footer carries this job's own reference");
-	assert.equal(activate(tab, ask), true, "the footer is a link into operator Chat");
+	assert.deepEqual([tab.$(".workspace-log-readonly")!.textContent, JSON.parse(new URLSearchParams(ask.getAttribute("href")!.split("?")[1]).get("ref")!)],
+		["Read-only. Steer this job from the chat with @cp-park", { kind: "job", project: "picp", job_id: "cp-park" }], "frame 2's read-only line; @id carries this job's own reference");
+	assert.equal(activate(tab, ask), true, "@id is a link into operator Chat");
 	await tab.find(".evidence-chip");
 	await settle();
 	assert.deepEqual([(tab.$(".operator-composer textarea") as unknown as { value: string }).value, writes()], ["KEEP-DRAFT", before],
 		"the reference joins the kept draft; nothing is sent");
+
+	// Frame 8's entry: what the operator typed becomes the (empty) Chat draft beside the reference, unsent.
+	const phone = await openTab(t, d.port, filtered, new Map(), undefined, {}, false);
+	browserShims(t, phone);
+	await phone.waitText(/REPLY-CARD/);
+	phone.click(phone.$$(".session-steps .session-tools").find((b) => b.getAttribute("title") === "cp-park")!);
+	activate(phone, await phone.find(".session-steps-link", (a) => a.getAttribute("href") === "#job/cp-park?tab=transcript"));
+	const entry = await phone.find(".workspace-log-entry input");
+	assert.equal(entry.getAttribute("placeholder"), "Ask the Operator about this job…");
+	phone.type(entry, "WHY-SLOW is the route slow?");
+	await settle();
+	assert.equal(activate(phone, phone.$(".workspace-log-entry a.workspace-log-send")!), true, "↑ is a link into operator Chat");
+	await phone.find(".evidence-chip");
+	await settle();
+	assert.deepEqual([(phone.$(".operator-composer textarea") as unknown as { value: string }).value, phone.requests.filter((r) => r.method !== "GET" && r.method !== "HEAD").length],
+		["WHY-SLOW is the route slow?", 0], "the typed text is the Chat draft with the reference; nothing is sent");
 });
 
 test("M3-jobs-query (full match S3): Today/In flight, project and query narrow counts and rows; Show more keeps focus; a pick keeps Details, links and P2", { timeout: 180_000 }, async (t) => {

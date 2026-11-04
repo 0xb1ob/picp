@@ -127,15 +127,22 @@ function Summary({text}: {text: string}) {
  return <div class="job-summary-row"><p ref={ref} class={more ? "job-summary" : "job-summary job-summary-clamp"}>{text}</p>{(clipped || more) && <button type="button" class="job-summary-more" aria-expanded={more} onClick={() => setMore(!more)}>{more ? "less" : "more"}</button>}</div>;
 }
 
-/** The job action in every phase; a failed job keeps its suggested question; an old operator bridge is unsupported. */
-export function JobAsk({data, label: own}: {data: JobResponse; label?: string}) {
+/** The job's Ask target: a failed job's suggested question, its reference (null when none applies) and why unsupported. */
+export function jobAskTarget(data: JobResponse) {
  const failed = data.job.phase === "failed";
  const question = failed ? `Explain why picp job ${data.job.id} failed and the available recovery options.` : "";
- const label = failed ? "Ask about this failure" : own ?? "Ask about this job";
  const unsupported = data.evidence_lookup?.supported === false ? data.evidence_lookup.why : undefined;
  // The plain failure question (no reference) names no record, so it stays when the reference cannot be resolved.
- if (!data.ask_reference || (failed && unsupported)) return failed ? <a href={composerHref(question)}>{label}</a> : null;
- return <AskAbout reference={data.ask_reference} draft={question} unsupported={unsupported}>{label}</AskAbout>;
+ const reference = !data.ask_reference || (failed && unsupported) ? null : data.ask_reference;
+ return {failed, question, reference, unsupported};
+}
+
+/** The job action in every phase; a failed job keeps its suggested question; an old operator bridge is unsupported. */
+export function JobAsk({data, label: own}: {data: JobResponse; label?: string}) {
+ const {failed, question, reference, unsupported} = jobAskTarget(data);
+ const label = own ?? (failed ? "Ask about this failure" : "Ask about this job");
+ if (!reference) return failed ? <a href={composerHref(question)}>{label}</a> : null;
+ return <AskAbout reference={reference} draft={question} unsupported={unsupported}>{label}</AskAbout>;
 }
 
 /** The job's file pointers (artifact or worktree files, run log); each missing one says unavailable. */

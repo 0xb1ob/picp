@@ -674,19 +674,23 @@ expanded or keeps Escape and no bottom sheet remains on a desktop. Deferred: per
 recorded), threads and Cmd+N. `m3-context` captures both surfaces at 1440, 900, 899 and 390 px.
 
 **Full match S4 (embedded job log).** The chat's job pane (`WorkspaceLog.tsx`, frames 2 and 8) heads with the job's
-title, id and phase (a neutral pill), Full page and close (a back chevron first on a phone). Its toolbar is Log, Report,
-Files and Details; Diff waits for S7. Log, Report and Files open with the worker's id, `role · model · thinking` and the
-worktree root, each unrecorded fact reading "role not recorded" and so on. Log is the worker transcript's own read
-(`/api/job/<id>/transcript`, the same poll as the job page) shown as chronological monospace lines: tool and target,
-its first output lines, then the worker's own words. Report reads the report page's `/api/report/<id>`; no report.md,
-or one that no longer reads, says "Report unavailable" and close still works. Files lists the job page's pointers.
-Details is the embedded job page with its P2 review guide and Timeline. The footer "Ask about this job…" is the job
-page's P1 link with this job's own reference only: it opens the operator composer with the chip and never sends, least
-of all to the worker. A reply's link opens Log; the drawer and Context still open Details. `--stage full-match-log`
-reaches the pane by clicking the reply's link and fails unless the 1440 and 390 px captures show the tabs (no Diff),
-the recorded facts, seven log rows in monospace, neutral tool names and phase, 44 px phone targets and nothing outside
-the viewport; the committed captures are `desktop`, `desktop-report`, `phone`, `phone-ask` and `unavailable` `.png`
-under `docs/tui-verification/full-match-log/`.
+title, id and phase (a neutral pill). At 900 px and wider the tab row is `>_ <id>`, report.md, Files and Details, with
+Full page and close at its right; on a phone a back chevron, title, id and phase sit above Log, Report, Files and
+Details, with "live · <elapsed>" while the worker runs and Full page inside a `⋯` menu. Diff waits for S7. Log,
+Report and Files open with the worker's id, `role · model · thinking` (a script job reads `script <path>`) and its
+recorded worktree or clone, each unrecorded fact reading "not recorded". Log is the worker transcript's own read
+(`/api/job/<id>/transcript`, the same poll as the job page) in monospace: `Read(path)` / `└ Read N lines`,
+`Ran 1 shell command` / `• <command>` and its output, `Update(path)` / `└ Added N lines, removed M lines`, then the
+worker's own words. Report reads the report page's `/api/report/<id>`; no report.md, or one that no longer reads, says
+"Report unavailable" and close still works. Files lists the job page's pointers; Details is the embedded job page with
+its P2 review guide and Timeline. The foot carries only this job's own reference: on desktop "Read-only. Steer this
+job from the chat with @<id>", on a phone "Ask the Operator about this job…"; both open the operator composer with the
+chip (a phone's typed text as the draft) and never send, least of all to the worker; with no reference of its own it
+reads "Ask unavailable". A reply's link opens Log; the drawer and Context still open Details. `--stage
+full-match-log` reaches the pane by clicking the reply's link and fails unless the resting 1440 and 390 px captures
+show these tabs, labels and facts, neutral tool names and phase, 44 px phone targets and nothing outside the viewport;
+the committed captures are `desktop`, `desktop-report`, `phone`, `phone-ask` and `unavailable` `.png` under
+`docs/tui-verification/full-match-log/`.
 
 **Full match S3 (jobs drawer and PR chip).** The Jobs drawer's header follows frame 3 on desktop: Jobs, the project
 pill ("● picp ▾", a neutral dot; S1's popover around the same M1 select and hash, closed by Escape or a tap outside

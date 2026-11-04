@@ -35,15 +35,24 @@ const capital = (text: string) => text[0]!.toUpperCase() + text.slice(1);
 /** One job beside the chat (desktop) or over it (phone): a reply's link opens its Log, a drawer pick its Details. */
 function JobPane({id, tab, onClose, worker}: {id: string; tab: JobTab; onClose: () => void; worker: SessionsResponse["workers"][number] | undefined}) {
  const resource = useScreenData<JobResponse>(`/api/job/${encodeURIComponent(id)}`, "/api/stream?view=job");
- const close = useRef<HTMLButtonElement>(null);
+ const close = useRef<HTMLButtonElement>(null), more = useRef<HTMLDetailsElement>(null);
  const [view, setView] = useState<LogView>(tab === "transcript" ? "log" : "details");
  useEffect(() => { close.current?.focus(); }, [id]);
  const job = resource.data?.job;
- return <section class="workspace-job" aria-label={`Job ${id}`}>
+ // The phone's ⋯ menu (S1's popover): Escape closes it before the pane, as does a tap outside it.
+ const menuOpen = () => !!more.current?.hasAttribute("open"), closeMenu = () => more.current?.removeAttribute("open");
+ const menuKey = (e: KeyboardEvent) => { if (e.key === "Escape" && menuOpen()) { e.preventDefault(); closeMenu(); more.current!.querySelector("summary")?.focus(); } };
+ return <section class="workspace-job" aria-label={`Job ${id}`} onKeyDown={menuKey} onPointerDown={e => { if (menuOpen() && !more.current!.contains(e.target as Node)) closeMenu(); }}>
   <header class="workspace-job-bar">
-   <div class="workspace-job-name"><b title={job?.title ?? id}>{job?.title ?? id}</b>{job?.title && <code title={id}>{id}</code>}</div>
-   {job && <span class="workspace-job-phase">{capital(phaseText(job.phase))}</span>}
+   <div class="workspace-job-head">
+    <div class="workspace-job-name"><b title={job?.title ?? id}>{job?.title ?? id}</b>{job?.title && <code title={id}>{id}</code>}</div>
+    {job && <span class="workspace-job-phase">{capital(phaseText(job.phase))}</span>}
+   </div>
    <a class="workspace-full" href={jobHref(id)}>Full page</a>
+   <details class="workspace-job-more" ref={more}>
+    <summary aria-label="More job actions" title="More"><Icon name="more"/></summary>
+    <div class="workspace-job-more-sheet"><a href={jobHref(id)} onClick={closeMenu}>Full page</a></div>
+   </details>
    <button ref={close} type="button" class="workspace-close" aria-label="Close job" onClick={onClose}><span class="workspace-close-back"><Icon name="back"/></span><span class="workspace-close-x"><Icon name="close"/></span></button>
   </header>
   {resource.error && resource.data && <p role="alert" class="workspace-job-alert">{resource.error} · showing last recorded data</p>}

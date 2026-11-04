@@ -229,12 +229,14 @@ try {
 		const read = (id: string, path: string, out: string) => tool(id, "2026-10-15T08:01:00Z", "read", `Arguments\n${JSON.stringify({ path })}\n\nResult\n${out}`);
 		const bash = (id: string, command: string, out: string) => tool(id, "2026-10-15T08:02:00Z", "bash", `Arguments\n${JSON.stringify({ command })}\n\nResult\n${out}`);
 		routes[`/api/job/${JOB}`] = { ...job, report_href: `#report/${JOB}`, files_href: `/#files?root=worktree%3A${JOB}&path=`, ask_reference: { kind: "job", project: "picp", job_id: JOB },
-			evidence_lookup: { supported: true, why: "fixture" }, job: { ...job.job, phase: "working", model: "fixture-model", title: "Restyle the embedded job log so a long title keeps to one line in the pane header" } };
+			evidence_lookup: { supported: true, why: "fixture" }, job: { ...job.job, phase: "working", model: "fixture-model", elapsed_seconds: 360, title: "Restyle the embedded job log so a long title keeps to one line in the pane header" } };
 		routes[`/api/job/${JOB}/transcript`] = { truncated: false, warning: null, from: null, to: null, entries: [
-			say("l1", "2026-10-15T08:00:00Z", "Parent", "Implement full match S4 from the task file."), read("l2", "viewer-app/components/WorkspaceSurfaces.tsx", "126 lines"),
+			say("l1", "2026-10-15T08:00:00Z", "Parent", "Implement full match S4 from the task file."),
+			read("l2", "viewer-app/components/WorkspaceSurfaces.tsx", "import type { ComponentChild } from \"preact\";\nimport { useEffect } from \"preact/hooks\";\n\nexport function JobPane() {\n return null;\n}"),
 			bash("l3", "rg -n \"JobPane\" viewer-app", "viewer-app/components/WorkspaceSurfaces.tsx:31\nviewer-app/components/WorkspaceSurfaces.tsx:112"),
 			say("l4", "2026-10-15T08:03:00Z", "Worker", "The pane reuses the job page's transcript read, so the Log adds no second loader."),
-			tool("l5", "2026-10-15T08:03:30Z", "edit", `Arguments\n${JSON.stringify({ path: "viewer-app/components/workspace-log-with-a-very-long-file-name-that-wraps.css" })}\n\nResult\nApplied 2 edits`),
+			tool("l5", "2026-10-15T08:03:30Z", "edit", `Arguments\n${JSON.stringify({ path: "viewer-app/components/workspace-log-with-a-very-long-file-name-that-wraps.css",
+				oldText: ".workspace-log { display: flex; }\n.workspace-log-tab { color: var(--dim); }", newText: ".workspace-log { display: flex; }\n.workspace-log-bar { display: flex; }\n.workspace-log-tab { color: var(--dim); }\n.workspace-log-live { margin-left: auto; }" })}\n\nResult\nApplied 1 edit`),
 			bash("l6", "npm run test:one -- tests/e2e/viewer-m3-jobs.test.ts", "ℹ tests 7\nℹ pass 7\nℹ fail 0"),
 			say("l7", "2026-10-15T08:04:00Z", "Worker", "Tests pass. Opening the draft PR next.")] };
 		routes[`/api/report/${JOB}`] = { generated_at: GENERATED, job_id: JOB, title: "Embedded job log", bytes: 160, truncated: false, modified_at: "2026-10-15T08:04:00Z",
@@ -811,29 +813,39 @@ try {
 		// the route fails `pane`, a Diff tab `tabs`, a coloured tool name or phase `tones`, an empty report `report`.
 		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
 			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
-			const color = s => q(s) ? getComputedStyle(q(s)).color : null;
-			return { pane: box("section.workspace-job"), chat: !!q(".sessions .session-transcript"), tabs: all(".workspace-log-tabs [role=tab]").map(b => b.textContent).join(),
-				name: all(".workspace-job-name > *").map(e => e.textContent).join(" | "), phase: q(".workspace-job-phase")?.textContent ?? null,
+			const color = s => q(s) ? getComputedStyle(q(s)).color : null, seen = s => all(s).map(e => e.innerText.replace(/\\s+/g, " ").trim());
+			return { pane: box("section.workspace-job"), chat: !!q(".sessions .session-transcript"), tabs: seen(".workspace-log-tab").join(), live: seen(".workspace-log-live").join(),
+				name: seen(".workspace-job-name > *").join(" | "), phase: seen(".workspace-job-phase").join(), more: all(".workspace-job-more > summary").length, full: seen(".workspace-job-bar > .workspace-full").join(),
 				who: all(".workspace-log-who p").map(p => p.textContent).join(" | "), rows: all(".workspace-log-row").length, mono: q(".workspace-log-lines") ? getComputedStyle(q(".workspace-log-lines")).fontFamily.includes("Mono") : null,
-				tones: [color(".workspace-log-tool b"), color(".workspace-job-phase")].join(" | "), ask: q(".workspace-log-ask a")?.textContent ?? null, chip: !!q(".evidence-chip"),
-				report: q(".workspace-log-report h1, .workspace-log-report h2")?.textContent ?? q(".workspace-job [role=status]")?.textContent ?? null,
-				measure: { bar: box(".workspace-job-bar"), tabs: box(".workspace-log-tabs"), tab: box(".workspace-log-tab"), who: box(".workspace-log-who"), row: box(".workspace-log-row"), ask: box(".workspace-log-ask"), entry: box(".workspace-log-ask a") },
-				small: innerWidth < 900 ? all(".workspace-job-bar button, .workspace-job-bar a, .workspace-log-tab, .workspace-log-ask a").filter(e => e.getBoundingClientRect().height < 44).map(e => e.className || e.textContent).join() : "",
+				labels: seen(".workspace-log-tool > p").join(" | "), tones: [color(".workspace-log-tool b"), color(".workspace-job-phase")].join(" | "),
+				ask: seen(".workspace-log-readonly").join() || (all(".workspace-log-entry input")[0]?.placeholder ?? null), chip: !!q(".evidence-chip"), draft: q(".operator-composer textarea")?.value ?? null,
+				report: q(".workspace-log-report h1, .workspace-log-report h2")?.textContent ?? q(".workspace-job [role=status]")?.textContent ?? null, ring: !!document.activeElement?.matches(":focus-visible"),
+				measure: { head: box(".session-heading"), bar: box(".workspace-job-bar"), tabrow: box(".workspace-log-bar"), tab: box(".workspace-log-tab"), line: box(".workspace-job-head"), who: box(".workspace-log-who"),
+					row: box(".workspace-log-row"), foot: box(".workspace-log-ask"), entry: box(innerWidth < 900 ? ".workspace-log-entry" : ".workspace-log-readonly"), close: box(".workspace-close"), full: box(".workspace-full") },
+				small: innerWidth < 900 ? all(".workspace-job-bar button, .workspace-job-more > summary, .workspace-log-tab, .workspace-log-send").filter(e => e.getBoundingClientRect().height < 44).map(e => e.className || e.textContent).join() : "",
 				outside: all(".workspace-job button, .workspace-job a, .workspace-job code, .workspace-log-row").filter(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className || e.textContent).join() }; })()`;
 		const steps: Step = [`document.querySelector('.session-steps > .session-tools[title="${JOB}"]').click()`, `!!document.querySelector(".session-steps-link")`];
 		const reply: Step = [`document.querySelector(".session-steps-link").click()`, `document.querySelectorAll(".workspace-log-row").length === 7`];
-		const report: Step = [`[...document.querySelectorAll(".workspace-log-tab")].find(b => b.textContent === "Report").click()`, `!!document.querySelector(".workspace-log-report, .workspace-log-empty")`];
-		const ask: Step = [`document.querySelector(".workspace-log-ask a").click()`, `!!document.querySelector(".evidence-chip")`];
+		// Captures are the resting state: the pane's opening focus on × / back is moved off, so no ring shows.
+		const rest: Step = ["document.activeElement?.blur()", "true"];
+		const report: Step = [`document.querySelector('.workspace-log-tab[data-view="report"]').click()`, `!!document.querySelector(".workspace-log-report, .workspace-log-empty")`];
+		const typed = "Why did the tab row move?";
+		const type: Step = [`(() => { const i = document.querySelector(".workspace-log-entry input"); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(i, ${JSON.stringify(typed)}); i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+			`document.querySelector(".workspace-log-send").getAttribute("href").includes("draft=")`];
+		const ask: Step = [`document.querySelector(".workspace-log-send").click()`, `!!document.querySelector(".evidence-chip")`];
 		const gone: Step = [`fetch("/fixture/report-gone")`, "true"];
-		const tabs = "Log,Report,Files,Details", tones = "rgb(237, 237, 237) | rgb(180, 180, 180)", who = "implementer · fixture-model · high | worktree:cp-sessions-v2-m4xq";
-		const logged = { chat: true, tabs, phase: "Working", who, rows: 7, mono: true, tones, ask: "Ask about this job…", small: "", outside: "" };
+		const tones = "rgb(237, 237, 237) | rgb(180, 180, 180)", who = "implementer · fixture-model · high | picp worktree", phone = "Log,Report,Files,Details";
+		const desk = `>_ ${JOB},report.md,Files,Details`, line = "Ran 1 shell command";
+		const logged = { chat: true, phase: "Working", who, rows: 7, mono: true, tones, ring: false, small: "", outside: "" };
+		const readonly = `Read-only. Steer this job from the chat with @${JOB}`;
 		// The committed five: desktop, desktop-report, phone, phone-ask and unavailable (dark, picp only).
 		const shotsL: [string, number, number, Step[], object][] = [
-			["desktop", 1440, 1000, [steps, reply], { ...logged, pane: "919 0 521 1000" }],
-			["desktop-report", 1440, 1000, [steps, reply, report], { tabs, report: "Embedded job log", outside: "" }],
-			["phone", 390, 844, [steps, reply], { ...logged, pane: "0 0 390 844" }],
-			["phone-ask", 390, 844, [steps, reply, ask], { pane: null, chip: true, outside: "" }],
-			["unavailable", 1440, 1000, [gone, steps, reply, report], { tabs, report: "Report unavailable · report.md could not be read", ask: "Ask about this job…", outside: "" }],
+			["desktop", 1440, 1000, [steps, reply, rest], { ...logged, pane: "919 0 521 1000", tabs: desk, live: "", more: 0, full: "Full page", ask: readonly,
+				labels: `Read(viewer-app/components/WorkspaceSurfaces.tsx) | ${line} | Update(viewer-app/components/workspace-log-with-a-very-long-file-name-that-wraps.css) | ${line}` }],
+			["desktop-report", 1440, 1000, [steps, reply, report, rest], { tabs: desk, report: "Embedded job log", ring: false, outside: "" }],
+			["phone", 390, 844, [steps, reply, rest], { ...logged, pane: "0 0 390 844", tabs: phone, live: "live · 6m", more: 1, full: "", ask: "Ask the Operator about this job…" }],
+			["phone-ask", 390, 844, [steps, reply, rest, type, ask], { pane: null, chip: true, draft: typed, outside: "" }],
+			["unavailable", 1440, 1000, [gone, steps, reply, report, rest], { tabs: desk, report: "Report unavailable · report.md could not be read", ask: readonly, ring: false, outside: "" }],
 		];
 		for (const [name, width, height, run, want] of shotsL) {
 			await capture(`full-match-log-${name}`, transcript, width, height, "dark", loaded, "bottom", run);
