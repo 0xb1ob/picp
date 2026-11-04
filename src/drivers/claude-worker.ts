@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { TurnTokenUsage } from "@t3tools/contracts";
-import type { Delivery, Usage } from "../contracts.ts";
+import { type Delivery, paths, type Usage } from "../contracts.ts";
 import { REPORT_TOOL, runClaudeSpike } from "./claude-spike.ts";
 import {
 	assertNativeResume,
@@ -140,7 +140,7 @@ async function dueFollowUps(ran: Turn): Promise<string | undefined> {
 	const runDir = env.CP_RUN_DIR ?? "";
 	const queued = queuedFollowUps(runDir);
 	if (queued.length === 0 || abort.signal.aborted) return undefined;
-	const events = join(runDir, "events.jsonl");
+	const events = join(env.CP_HOME ?? "", paths.eventsFile(env.CP_JOB_ID ?? ""));
 	const recorded = existsSync(events) && readFileSync(events, "utf8").includes(ran.runId);
 	try {
 		await assertNativeResume({ home: env.CP_HOME ?? "", jobId: env.CP_JOB_ID ?? "", what: "queued follow-up", ...(ran.pending && !recorded ? { pending: ran.pending } : {}) });
