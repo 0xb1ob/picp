@@ -624,6 +624,7 @@ const OWNER_FILE: Record<SettingFileOwner, string> = {
 	update: `${LAYOUT.data}/update.json`,
 	routing: LAYOUT.routingFile,
 	viewer: `${LAYOUT.data}/viewer.json`,
+	native: `${LAYOUT.data}/native.json`,
 };
 const CAPACITY_MIN = { url: "https://gw.example/", path: "/x" };
 const ownerPath = (home: string, owner: SettingFileOwner) => join(home, OWNER_FILE[owner]);
@@ -753,6 +754,7 @@ const SCHEMA_INVALID: Record<SettingFileOwner, unknown> = {
 	update: { enabled: true, interval_min: 0 },
 	routing: { schema_version: 1, allow: "x", rubric: [] },
 	viewer: { strict_host: "yes" },
+	native: { claude_research: "yes" },
 };
 const SECRET_CAPACITY = { url: "https://secret-gateway.example/", path: "/v1/secret-path" };
 /** One valid file per owner, the grant policy keys included. */
@@ -768,6 +770,7 @@ const OVERRIDES: Record<SettingFileOwner, unknown> = {
 	update: { enabled: true, interval_min: 30 },
 	routing: { schema_version: 1, allow: ["anthropic/*"], deny_by_role: { planner: ["mock/denied*"] }, rubric: [{ id: "small", role: "implementer", model: "anthropic/claude-haiku" }] },
 	viewer: { strict_host: true },
+	native: { claude_research: true },
 };
 
 // P16-settings-read: settings_get serves the catalog and each owner loader's value, source and status, a revision
@@ -786,7 +789,7 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 	const catalog = empty.catalog;
 	assert.deepEqual(catalog.map((field) => field.key), [...SETTING_KEYS]);
 	assert.deepEqual(catalog, JSON.parse(JSON.stringify(SETTING_FIELDS)));
-	assert.equal(new Set(catalog.map((field) => field.key)).size, 35);
+	assert.equal(new Set(catalog.map((field) => field.key)).size, 36);
 	for (const field of catalog) assert.ok(field.key.startsWith(`${field.section}.`), field.key);
 	assert.deepEqual(catalog.filter((field) => !field.editable).map((field) => field.key), ["sessions.tool_call_cap", "models.allow"]);
 	assert.deepEqual(empty.audit, []);

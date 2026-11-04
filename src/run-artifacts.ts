@@ -326,6 +326,9 @@ export function applyEvent(state: ProjectionState, event: RunEvent): ProjectionS
 				}
 				break;
 			}
+			case "usage_unavailable":
+				status.usage_unavailable = true;
+				break;
 			default:
 				break;
 		}

@@ -36,6 +36,7 @@
 import { existsSync } from "node:fs";
 import { assertNoAuthorityHold } from "./authority-hold.ts";
 import { isScriptFleetRecord, type Risk, type SendReceipt } from "./contracts.ts";
+import { nativeFollowUpRefusal } from "./worker-driver.ts";
 import { readTask, type ResolvedTask } from "./dispatch.ts";
 import { type BudgetCheck, checkBudget } from "./failures.ts";
 import type { FleetStore } from "./fleet.ts";
@@ -206,6 +207,7 @@ export class Sender {
 			throw new SendError(`no fleet record for ${request.jobId} — dispatch it first (cp_dispatch)`);
 		}
 		if (isScriptFleetRecord(record)) throw new SendError(`${request.jobId} is a script job; cp_send cannot promote or replay it`);
+		if (record.worker?.driver) throw new SendError(nativeFollowUpRefusal(request.jobId, "cp_send"));
 		if (record.phase === "failed") {
 			throw new SendError(
 				`${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); a brief does not revive it. Continue it on ` +

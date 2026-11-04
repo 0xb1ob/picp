@@ -60,6 +60,9 @@ test("skill mentions PR2: a queued request keeps skill names, refuses a path-sha
 	b.queue.enqueue("cp-sk1", { task: "x", skills: ["tdd-x", "writing-plans"] });
 	assert.deepEqual(toDispatchRequest({ job_id: "cp-sk1", request: { task: "x", skills: ["tdd-x", "writing-plans"] } }), { jobId: "cp-sk1", task: "x", skills: ["tdd-x", "writing-plans"] });
 	assert.deepEqual(toDispatchRequest({ job_id: "cp-sk2", request: { task: "x" } }), { jobId: "cp-sk2", task: "x" }, "no skills, no key");
+	// N3b F2: a queued/armed driver:"claude" request replays its driver, so Dispatcher.dispatch re-runs native selection.
+	b.queue.enqueue("cp-nat1", { task: "x", driver: "claude" });
+	assert.deepEqual(toDispatchRequest({ job_id: "cp-nat1", request: { task: "x", driver: "claude" } }), { jobId: "cp-nat1", task: "x", driver: "claude" });
 });
 
 

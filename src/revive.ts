@@ -33,6 +33,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type JobRouting, paths, type Role, type ThinkingLevel } from "./contracts.ts";
+import { nativeFollowUpRefusal } from "./worker-driver.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
 import { loadProfile } from "./profiles.ts";
 import { type ModelProbe, RoutingError } from "./routing.ts";
@@ -375,6 +376,7 @@ export class Reviver {
 		const record = this.#options.fleet.get(jobId);
 		if (!record) return refuse(jobId, "not_found", `no fleet record for ${jobId}`);
 		if (isScriptFleetRecord(record)) return refuse(jobId, "not_revivable_phase", `${jobId} is a script job; an unobserved exit cannot be replayed`);
+		if (record.worker?.driver) return refuse(jobId, "not_revivable_phase", nativeFollowUpRefusal(jobId, "cp_revive"));
 		if (record.phase === "awaiting_merge") {
 			return refuse(jobId, "not_revivable_phase", `${jobId} is parked awaiting a team merge: no lease, and ${record.worktree} is history — ` +
 				`cp_send ${jobId} resumes it on a fresh lease of ${record.branch}, never a revive on the old path`);

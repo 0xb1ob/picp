@@ -42,6 +42,7 @@ import { loadCapacityConfig } from "./quota.ts";
 import { loadRoutingConfig } from "./routing.ts";
 import { readUpdateConfig } from "./service/update.ts";
 import { loadViewerConfig } from "./viewer/host-config.ts";
+import { loadNativeConfig, nativeConfigFile } from "./worker-driver.ts";
 
 const ERROR_MAX = 500;
 const ENV_KEYS = ["CP_JOB_WALL_CLOCK_SECONDS", "CP_JOB_TOOL_CALL_CAP"] as const;
@@ -310,6 +311,11 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 		file: dataFile("viewer.json"),
 		read: (_home, _env, file) =>
 			settle("viewer", readOwnerConsistently(file, () => loadViewerConfig(file)), (v: ReturnType<typeof loadViewerConfig>) => ({ "viewer.strict_host": v.strict_host, "viewer.public_url": v.public_url })),
+	},
+	native: {
+		file: (home) => nativeConfigFile(home),
+		read: (_home, _env, file) =>
+			settle("native", readOwnerConsistently(file, () => loadNativeConfig(file)), (n: ReturnType<typeof loadNativeConfig>) => ({ "workers.native_claude_research": n.claude_research })),
 	},
 };
 
