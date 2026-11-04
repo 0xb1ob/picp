@@ -6594,7 +6594,7 @@ in order (a stale `thread` field is accepted and ignored; see Operator threads, 
 | body shape; text 1–16,000 characters | 400 |
 | the session's record exists | 503 `session not running: no dashboard control record at …` |
 | `x-cp-control-token` equals the record's `csrf` | 403 `control token missing or stale; reload the transcript` |
-| the socket answers within 5 s | 503 `session not running: … refused the connection (…)` / 504 |
+| the socket answers within 5 s | 503 `session not running: … refused the connection (…)` / 504 (no answer, or an answer that is not JSON) |
 | the session's own checks | 202 `{id, state, deliver}` (state `queued` or `delivered`), or 400/403/409/500/502 with the reason |
 
 `APP_CSP`, the Host guard (see Viewer Host guard), the push route and every read route are unchanged; a POST to any other `/api/*` route is
@@ -6602,6 +6602,19 @@ still 405 (the image upload route below is the one addition). The Full transcrip
 `--require-tailnet`.
 
 A composer's optional `client_id` must match `dc-<14 digits>-<8 lowercase hex>` or the body is 400. The bridge uses it as the request/marker id (the offline inbox as its held id), so a transcript arriving before the HTTP reply already matches the pending bubble. Without it the server generates an id. Reusing an id still in the bridge's open/recent sets or the held inbox is 409; this is a correlation field, not an idempotency or authorization mechanism. Retries use a fresh id. An older running bridge may ignore it until restarted.
+
+**Dashboard commands** (full match S6; [`src/dashboard-commands.ts`](../src/dashboard-commands.ts)). `POST /api/operator/message` also
+takes `{kind:"command", command:"status"|"stop", job_id?, client_id}`: `client_id` is required, `/stop` needs a job id and
+`/status` takes none (`commandGrammar` in `src/viewer/control-files.ts`; 400 with the reason otherwise). The viewer sends
+the socket op **`command`**; the bridge re-checks the grammar, journals a `request` line with `command` (`/stop cp-abcd`)
+and gives the session one ordinary message — never a shell, a tool call or a grant change, so `/stop` is a request the
+parent's own checks decide. Refusals: an older bridge without the op is 409 `unsupported: this session's cp-bridge predates
+dashboard commands; restart the session …`; no running session is 409 (a command is never held offline); the rest are
+the message refusals above. A busy session queues it like a message: `sends` carries its `command`, and the composer
+shows it labelled (`/stop @cp-abcd`) with Cancel send only. The composer keeps one `client_id` per prepared command and
+mints a fresh one after a refusal that injected nothing (any error answer below 503); after an unknown outcome (no answer,
+503 or 504) the id stays, so a retry is refused as a duplicate rather than injected twice. `GET /api/operator/control`
+advertises `commands: true` only while the running bridge takes the op.
 
 The guarded status also projects `sends: [{id, at, state, reason, ask_id, body}]` from the dashboard and inbox journals (`src/viewer/control-pending.ts`), preserving original message text and attachment ids. It is read-only, caps each journal read at 16 MiB, ignores a torn final line, and returns named `sends_error` warnings for unreadable, oversized or malformed journal content. All unresolved/failed accepted sends and the newest 100 delivered outcomes are retained. Known delivered bubbles wait for actual transcript appearance (including held ids in inbox replay), while historical delivered rows do not create new bubbles. Browser persistence keeps still-unseen sends and dismissed ids across reload; interrupted POSTs become an explicit failure without automatic replay. See `docs/viewer-app.md` for FIFO bubbles, scrolling and retry/discard.
 

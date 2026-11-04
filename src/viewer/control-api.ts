@@ -38,11 +38,11 @@ import type { IncomingMessage } from "node:http";
 import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 import { HERDR_TIMEOUT_MS, HERDR_WORKSPACE_LABEL, herdrCommand, herdrServerArgv, herdrServerRunning, type Launcher, OPERATOR_TMUX_SESSION, onPath, operatorWrapperPath, tmuxLaunch } from "./launchers.ts";
-import type { ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, ScheduleControlSendResponse, ScheduleControlStatusResponse } from "./api-types.ts";
+import type { ControlCommandBody, ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, ScheduleControlSendResponse, ScheduleControlStatusResponse } from "./api-types.ts";
 import { appendControlAudit, appendInboxLine, appendScheduleControlLine } from "./control-audit.ts";
 import {
 	CONTROL_BODY_MAX_BYTES, CONTROL_PROTOCOL, CONTROL_RATE_LIMIT, CONTROL_RATE_WINDOW_MS, CONTROL_TEXT_MAX, type ControlKind, type ControlRecord,
-	controlInboxFile, controlOrigin, controlRecordFile, DASHBOARD_ID_RE, INBOX_MAX_HELD, isAskId, readControlConfig, readControlRecord,
+	commandGrammar, controlInboxFile, controlOrigin, controlRecordFile, DASHBOARD_ID_RE, INBOX_MAX_HELD, isAskId, readControlConfig, readControlRecord,
 	REMOTE_PROVENANCE_VERSION, type RemoteDevice,
 	readScheduleControl, SCHEDULE_CONTROL_MAX_AGE_MS, SCHEDULE_CONTROL_MAX_PENDING, SCHEDULE_CONTROL_OPS, scheduleControlFile, type ScheduleControlOp, type ScheduleControlRequest,
 } from "./control-files.ts";
@@ -174,7 +174,8 @@ export function controlRequest(record: ControlRecord, op: string, args: Record<s
 				if (reply.ok === true) finish({ ok: true, result: reply.result });
 				else finish({ ok: false, status: typeof reply.status === "number" ? reply.status : 502, error: typeof reply.error === "string" ? reply.error : "the session refused the request", ...(reply.result !== undefined ? { result: reply.result } : {}) });
 			} catch {
-				finish({ ok: false, status: 502, error: "the session answered with a frame that is not JSON" });
+				// 504, not 502: the session may have acted before its unreadable answer, so the outcome is unknown.
+				finish({ ok: false, status: 504, error: "the session answered with a frame that is not JSON" });
 			}
 		});
 		socket.once("error", (error: NodeJS.ErrnoException) => finish({ ok: false, status: 503, error: `session not running: ${record.socket} refused the connection (${error.code ?? error.message})` }));
@@ -269,29 +270,36 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 			restart: restartStatus(status.restart), session_started_at: record.record.started_at,
 			...(status.images === true ? { images: true } : {}),
 			...(status.files === true ? { files: true } : {}),
+			...(status.commands === true ? { commands: true } : {}),
 			...(parent ? { parent_restart: parent } : {}),
 		} satisfies ControlStatusResponse,
 	};
 }
 
-type Parsed = { kind: ControlKind | "start" | "schedule" | "upload" | "settings" | "queue" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; images?: string[]; files?: string[]; mime?: string; queue_id?: string };
-type Body = ControlMessageBody | { kind: "answer"; ask_id: string; label: string } | { kind: "abort" };
+type Parsed = { kind: ControlKind | "command" | "start" | "schedule" | "upload" | "settings" | "queue" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; images?: string[]; files?: string[]; mime?: string; queue_id?: string };
+type Body = ControlMessageBody | ControlCommandBody | { kind: "answer"; ask_id: string; label: string } | { kind: "abort" };
 type Refuse = (status: number, reason: string, headers?: Record<string, string>, extra?: Record<string, unknown>) => ControlRouteResult;
 export interface Gate { peer: string | null; refuse: Refuse; parsed(value: Parsed): void }
 
 function parseBody(json: unknown): { ok: true; body: Body; parsed: Parsed } | { ok: false; reason: string; parsed: Parsed } {
 	const value = json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : undefined;
-	const kind = value?.kind === "message" || value?.kind === "answer" || value?.kind === "abort" ? value.kind : null;
+	const kind = value?.kind === "message" || value?.kind === "answer" || value?.kind === "abort" || value?.kind === "command" ? value.kind : null;
 	const text = typeof value?.text === "string" ? value.text : kind === "answer" && typeof value?.label === "string" ? value.label : null;
 	const images = Array.isArray(value?.images) ? value.images.slice(0, UPLOAD_MAX_PER_MESSAGE).map((image) => String(image).slice(0, 64)) : undefined;
 	const files = Array.isArray(value?.files) ? value.files.slice(0, UPLOAD_MAX_PER_MESSAGE).map((file) => String(file).slice(0, 64)) : undefined;
-	const parsed: Parsed = { kind, text, ask_id: typeof value?.ask_id === "string" ? value.ask_id.slice(0, 100) : null, ...(images ? { images } : {}), ...(files ? { files } : {}) };
+	const command = kind === "command" ? `/${String(value?.command).slice(0, 32)}${typeof value?.job_id === "string" ? ` ${value.job_id.slice(0, 128)}` : ""}` : null;
+	const parsed: Parsed = { kind, text: command ?? text, ask_id: typeof value?.ask_id === "string" ? value.ask_id.slice(0, 100) : null, ...(images ? { images } : {}), ...(files ? { files } : {}) };
 	// A stale tab may still send the retired `thread` (#588): allowed here, never read below.
-	const keys = { message: ["kind", "text", "deliver", "images", "files", "thread", "client_id"], answer: ["kind", "ask_id", "label", "thread"], abort: ["kind"] };
-	if (!value || !kind) return { ok: false, reason: 'kind must be "message", "answer" or "abort"', parsed };
+	const keys = { message: ["kind", "text", "deliver", "images", "files", "thread", "client_id"], answer: ["kind", "ask_id", "label", "thread"], abort: ["kind"], command: ["kind", "command", "job_id", "client_id"] };
+	if (!value || !kind) return { ok: false, reason: 'kind must be "message", "answer", "abort" or "command"', parsed };
 	const extra = Object.keys(value).filter((key) => !keys[kind].includes(key));
 	if (extra.length) return { ok: false, reason: `unknown field ${extra.join(", ")}`, parsed };
 	if (kind === "abort") return { ok: true, body: { kind }, parsed };
+	if (kind === "command") {
+		const grammar = commandGrammar(value), client_id = value.client_id as string;
+		if (!grammar.ok) return { ok: false, reason: grammar.reason, parsed };
+		return { ok: true, body: grammar.command === "stop" ? { kind, command: "stop", job_id: grammar.job_id, client_id } : { kind, command: "status", client_id }, parsed };
+	}
 	if (kind === "answer") {
 		if (!isAskId(value.ask_id)) return { ok: false, reason: "ask_id must be an ask id", parsed };
 		if (typeof value.label !== "string" || !value.label) return { ok: false, reason: "label must be one of the ask's options", parsed };
@@ -455,12 +463,13 @@ export function handleControlMessage(req: IncomingMessage, options: ControlRoute
 		const reply = files
 			? await controlRequest(record.record, "send_files", args, UPLOAD_SEND_TIMEOUT_MS)
 			: images ? await controlRequest(record.record, "send_images", args, UPLOAD_SEND_TIMEOUT_MS)
-			: await controlRequest(record.record, shape.body.kind === "abort" ? "abort" : "send", args);
+			: await controlRequest(record.record, shape.body.kind === "abort" ? "abort" : shape.body.kind === "command" ? "command" : "send", args);
 		if (reply.ok) return { status: 202, body: reply.result as ControlSendResponse };
 		// The bridge journals its own request/outcome once the frame reached it; only transport failures are ours.
 		if (reply.status === 503 || (reply.status === 504 && reply.error.startsWith("session "))) return refuse(reply.status, reply.error);
 		// An older cp-bridge has no send_images op and journals nothing for it: our refused line is the only record.
 		if (attachments.length && reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, `unsupported: this session's cp-bridge predates ${files ? "text" : "image"} attachments; restart the session (⋮ → Restart session) and attach again`);
+		if (shape.body.kind === "command" && reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, "unsupported: this session's cp-bridge predates dashboard commands; restart the session (⋮ → Restart session) or send the text as a message");
 		return { status: reply.status, body: { error: reply.error } };
 	});
 }
@@ -488,6 +497,7 @@ export async function remoteProvenance(record: ControlRecord, remote: RemoteDevi
 function hold(options: ControlRouteOptions, now: Date, body: Body, token: unknown, refuse: Refuse, remote: RemoteDevice | undefined): ControlRouteResult {
 	if (!tokenMatches(token, INBOX_TOKEN)) return refuse(403, "inbox token missing or stale; reload the page");
 	if (body.kind === "abort") return refuse(409, "nothing to abort; the operator session is offline");
+	if (body.kind === "command") return refuse(409, "dashboard commands need a running operator session; start it, or send the text as a message");
 	const inbox = readInbox(options.stateDir);
 	if (inbox.error) return refuse(500, `inbox unreadable: ${inbox.error}`);
 	if (inbox.held.length >= INBOX_MAX_HELD) return refuse(409, `the inbox already holds ${INBOX_MAX_HELD} messages; start the operator session to deliver them`);

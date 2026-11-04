@@ -22,7 +22,8 @@ export function PendingBubble({send,position,total,control,viewing,truncated}: {
  return <article class={`session-message session-say session-bubble session-own session-pending${failed ? " session-pending-failed" : ""}${draft === null ? "" : " session-pending-editing"}`}>
   <div class="session-body">
    <span class="session-pending-badge">{state}</span>
-   {draft === null ? <Markdown text={send.body.text}/> : <div class="session-pending-editor">
+   {draft !== null ? null : send.command ? <p><code class="session-pending-command">{send.command.replace(" ", " @")}</code></p> : <Markdown text={send.body.text}/>}
+   {draft !== null && <div class="session-pending-editor">
     <textarea aria-label="Edit queued message" rows={3} value={draft} disabled={busy} autoFocus onInput={event=>setDraft(event.currentTarget.value)} onKeyDown={event=>{
      if (event.key === "Escape") { event.preventDefault(); close(); }
      else if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); save(); }
@@ -37,7 +38,8 @@ export function PendingBubble({send,position,total,control,viewing,truncated}: {
    {failed && send.target_session && send.target_session === viewing && truncated && <p class="session-pending-detail">Older than this transcript's loaded window; it cannot be checked here.</p>}
    {failed && !send.target_session && send.reason?.startsWith("Not confirmed") && <p class="session-pending-detail">Its session is not available here; it cannot be checked.</p>}
    {note && <p class="session-pending-detail" role="alert">{note}</p>}
-   {changeable && draft === null && <div class="session-pending-actions"><button type="button" class="session-pending-edit" disabled={busy} onClick={()=>{setNote(null);setDraft(send.body.text);}}>Edit</button><button type="button" class="session-pending-cancel" disabled={busy} onClick={remove}>Cancel send</button></div>}
+   {/* Full match S6: a queued command offers Cancel only; editing its text would turn it into a plain message. */}
+   {changeable && draft === null && <div class="session-pending-actions">{!send.command && <button type="button" class="session-pending-edit" disabled={busy} onClick={()=>{setNote(null);setDraft(send.body.text);}}>Edit</button>}<button type="button" class="session-pending-cancel" disabled={busy} onClick={remove}>Cancel send</button></div>}
    {/* cp-y43c addendum 2: Send again is the only way a failed or lost message is sent again — a new message, on this click only. */}
    {failed && <div class="session-pending-actions"><button type="button" class="session-pending-again" disabled={!controlReady(control.status) || control.starting?.state === "starting" || restartInFlight(control.restarting)} onClick={()=>control.retry?.(send.key)}>Send again</button><button type="button" onClick={()=>control.discard?.(send.key)}>Discard</button></div>}
    {/* picp-cc0: a delivered bubble whose transcript entry never loads (older than the window) must still go away on request. */}

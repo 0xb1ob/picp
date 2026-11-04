@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { SessionEntry } from "../src/viewer/api-types.ts";
-import { ALREADY_SENT, canStart, type ControlBody, controlFiles, controlImages, type ControlStatus, type ControlView, controlReady, controlToken, type Delivery, type Launcher, queueControl, type QueueOutcome, readControl, sendControl, START_HINTS, START_WAIT_MS, type Starting, startOperator, uploadImage } from "./control.ts";
+import { ALREADY_SENT, canStart, type ControlBody, controlFiles, controlImages, type ControlStatus, type ControlView, controlReady, controlToken, type Delivery, type Launcher, newClientId, queueControl, type QueueOutcome, readControl, sendControl, START_HINTS, START_WAIT_MS, type Starting, startOperator, uploadImage } from "./control.ts";
+import type { ControlCommandBody } from "../src/viewer/api-types.ts";
 import { restartInFlight } from "./restart-control.ts";
 import { useRestart } from "./use-restart.ts";
 import { emptyPending, readPending, reconcilePending, rememberPending, type PendingState } from "./pending-sends.ts";
@@ -57,8 +58,7 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
  const enqueue = (body: Extract<ControlBody,{kind:"message"}>, card?: string, retryKey?: string, retryId?: string) => {
   if (!controlReady(status) || starting?.state === "starting" || restartInFlight(restarting)) return;
   const at = new Date().toISOString(), ask_id = card ?? null;
-  const random = [...crypto.getRandomValues(new Uint8Array(4))].map(byte=>byte.toString(16).padStart(2,"0")).join("");
-  const key = `dc-${at.replace(/[-:T]/g,"").slice(0,14)}-${random}`;
+  const key = newClientId(at);
   updatePending(value=>{
    return {...value,items:[...value.items.filter(item=>item.key !== retryKey),{key,at,id:key,state:"sending",reason:null,ask_id,body}],dismissed:retryId ? [...value.dismissed,retryId] : value.dismissed};
   });
@@ -81,6 +81,14 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
   };
   if (composer) requests.current = requests.current.then(perform);
   else void perform();
+ };
+ /** Full match S6: one command on the sends' FIFO; null once accepted, else its error and if it may have reached pi. */
+ const command = (body: ControlCommandBody): Promise<{error: string; unknown: boolean} | null> => {
+  if (!controlReady(status)) return Promise.resolve({error: "Dashboard control is not ready", unknown: false});
+  // No answer read (network, 503, 504): the bridge may have taken it, so only a retry under the same client_id is safe.
+  const run = requests.current.then(() => sendControl(fetcher, controlToken(status), body)).then(result => { setGeneration(value => value + 1); return "error" in result ? {error: result.error, unknown: result.status === 0 || result.status >= 503} : null; });
+  requests.current = run;
+  return run;
  };
  const start = (via: Launcher, resume = false) => {
   if (!canStart(status) || starting?.state === "starting") return;
@@ -122,5 +130,5 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
  const cardDelivery = visible?.findLast(item=>item.ask_id !== null);
  // The `@` catalogue: fetched lazily on the first mention, once per mount.
  const skills = controlReady(status) ? () => (skillList.current ??= fetchSkills(fetcher)) : undefined;
- return {status, delivery: cardDelivery ?? shown, send, ...(composer ? {pending:visible,pending_error:pending.error,retry,discard,edit,cancel} : {}), starting, start, restarting, restart, ...(upload ? {upload} : {}), ...(skills ? {skills} : {})};
+ return {status, delivery: cardDelivery ?? shown, send, ...(composer ? {pending:visible,pending_error:pending.error,retry,discard,edit,cancel,command} : {}), starting, start, restarting, restart, ...(upload ? {upload} : {}), ...(skills ? {skills} : {})};
 }

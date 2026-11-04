@@ -38,7 +38,7 @@ import { FleetStore, isPidAlive } from "../../src/fleet.ts";
 import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_MAX_TIMEOUT_S, restartNotice } from "../../src/drain.ts";
 import { ParentSendDelegationSchema, parentSendFile, sendIdOfMessage } from "../../src/parent-outbox.ts";
 import { recordOperatorSession } from "../../src/operator-session-log.ts";
-import { type DashboardControl, startDashboardControl, userMessageContent } from "../../src/dashboard-control.ts";
+import { type DashboardControl, dashboardCommand, startDashboardControl, userMessageContent } from "../../src/dashboard-control.ts";
 import { relaunchPorts } from "../../src/operator-relaunch.ts";
 import { parentRestartPorts, restartedLine } from "../../src/parent-restart.ts";
 import { settingsPorts } from "../../src/settings-control.ts";
@@ -511,7 +511,7 @@ export default function (pi: ExtensionAPI): void {
 					sessionFile: () => sessionCtx?.sessionManager?.getSessionFile() ?? process.env.PI_SESSION_FILE,
 					...relaunchPorts({ target: () => target, ctx: () => sessionCtx, whenIdle: compaction.whenIdle }),
 					...settingsPorts({ target: () => target }),
-					parentRestart: parentRestart.parentRestart, parentRestartState: parentRestart.parentRestartState,
+					parentRestart: parentRestart.parentRestart, parentRestartState: parentRestart.parentRestartState, command: dashboardCommand,
 				},
 			});
 			if (started.state === "listening") {

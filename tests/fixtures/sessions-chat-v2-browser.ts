@@ -19,7 +19,7 @@ import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
 	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs", "full-match-log", "full-match-status",
-	"full-match-diff"];
+	"full-match-diff", "full-match-commands"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -30,8 +30,8 @@ const say = (id: string, at: string, who: string, text: string, over: Partial<Se
 	({ id, at, kind: "say", who, text, name: null, send_id: null, tag: null, failed: false, trace: [], ...over });
 const tool = (id: string, at: string, name: string, text: string, summary?: string): SessionEntry => ({ ...say(id, at, "Assistant", text), kind: "tool", name, ...(summary ? { summary } : {}) });
 /** Full match S2 shows job suffixes, so its ids end in four characters like real picp ids; S3 reuses its data. */
-const S5 = args.stage === "full-match-status", S7 = args.stage === "full-match-diff";
-const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5 || S7;
+const S5 = args.stage === "full-match-status", S7 = args.stage === "full-match-diff", S6 = args.stage === "full-match-commands";
+const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5 || S7 || S6;
 const JOB = S2 ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
 /** A cp-bridge wake as the transcript carries it: first line parsed off, `paths:` resolved (one left unresolved). */
 const wake: SessionEntry = say("w1", "2026-10-15T08:03:30Z", "cp-bridge", [
@@ -235,7 +235,7 @@ try {
 	if (args.stage === "full-match-transcript") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
 		row("cp-transcript-steps-t7ah", "picp", "working", "Restyle the transcript steps so a long job title keeps wrapping inside its context card", { elapsed_seconds: 540, limit_seconds: 7200, cost_usd: 1.42, model: "fixture-model" })] };
 	// Full match S3: every real group (team and queued too), seven done today for Show more, unrecorded costs and times.
-	if (args.stage === "full-match-jobs" || S5) {
+	if (args.stage === "full-match-jobs" || S5 || S6) {
 		const done = (id: string, title: string, at: string, cost: number | null, over: object = {}) => row(id, "picp", "done", title, { finished_today: true, finished_at: at, cost_usd: cost, model: "fixture-model", ...over });
 		routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
 			row("cp-transcript-steps-t7ah", "picp", "working", "Restyle the Jobs drawer toolbar, columns and rows so a long job title keeps to one line", { elapsed_seconds: 540, limit_seconds: 7200, cost_usd: 1.54, model: "fixture-model" }),
@@ -284,7 +284,9 @@ try {
 	server.on("request", (req, res) => {
 		const path = new URL(req.url ?? "/", "http://fixture").pathname;
 		const send = (status: number, type: string, data: string | Uint8Array) => { res.writeHead(status, { "content-type": type, "content-security-policy": APP_CSP, "cache-control": "no-store" }); res.end(data); };
-		if (req.method !== "GET") { posts.push(`${req.method} ${path}`); return send(405, "application/json", '{"error":"fixture is read-only"}'); }
+		// Full match S6: this fixture's session is an older cp-bridge, so a command gets the restart-required refusal.
+		const oldBridge = '{"error":"unsupported: this session\'s cp-bridge predates dashboard commands; restart the session (⋮ → Restart session) or send the text as a message"}';
+		if (req.method !== "GET") { posts.push(`${req.method} ${path}`); return S6 && path === "/api/operator/message" ? send(409, "application/json", oldBridge) : send(405, "application/json", '{"error":"fixture is read-only"}'); }
 		// PR 5: a message arrives while the reader is scrolled up — appended here, announced on the stream like the viewer's.
 		if (path === "/fixture/new-message") {
 			sessions.entries = [...sessions.entries, say("n1", "2026-10-15T08:07:00Z", "Assistant", "New while you were reading: PR #321 merged.")];
@@ -300,7 +302,7 @@ try {
 			for (const stream of streams) stream.write("event: refresh\ndata: overview\n\n");
 			return send(200, "application/json", "{}");
 		}
-		if ((S5 || S7) && path === "/api/workspace/status") return send(200, "application/json", JSON.stringify(stale ? status(3 * 1440, null) : status(12, 58)));
+		if ((S5 || S7 || S6) && path === "/api/workspace/status") return send(200, "application/json", JSON.stringify(stale ? status(3 * 1440, null) : status(12, 58)));
 		// Full match S7: the recorded head moves to the oversized commit or an absent object; /api/diff is the real viewer's.
 		if (S7 && path.startsWith("/fixture/diff-")) {
 			diffAt(path === "/fixture/diff-big" ? diffShas.big! : path === "/fixture/diff-gone" ? "f".repeat(40) : diffShas.head!);
@@ -577,14 +579,15 @@ try {
 		if (posts.length) throw new Error(`m3-context sent ${posts.join(", ")}: the context and drawer only read`);
 	}
 	if (stage === "m3-composer") {
-		// Real clicks and input: the `/` menu, the typed list, /status and a P1 reference. Five menu buttons: 2 commands,
+		// Real clicks and input: the `/` menu, the typed list, /status and a P1 reference. Six menu buttons: 3 commands (S6),
 		// the 2 in-flight `/api/jobs` rows above (working, held) and JOB done today; cp-m3-park is With the team.
-		const slash: Step = [`document.querySelector(".operator-composer-slash").click()`, `document.querySelectorAll("#operator-composer-command-menu button").length === 5`];
+		const slash: Step = [`document.querySelector(".operator-composer-slash").click()`, `document.querySelectorAll("#operator-composer-command-menu button").length === 6`];
 		const typed: Step = [`(() => { const i = document.querySelector(".operator-composer textarea"); i.focus(); i.value = "/"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`,
-			`document.querySelectorAll(".operator-composer-skills [role=option]").length === 2`];
+			`document.querySelectorAll(".operator-composer-skills [role=option]").length === 3`];
+		// S6: /status prepares a command for an explicit Submit instead of drafting text.
 		const status: Step = [`[...document.querySelectorAll("#operator-composer-command-menu button")].find(b => b.textContent.startsWith("/status")).click()`,
-			`document.querySelector(".operator-composer textarea").value === "What is running and what needs me?"`];
-		const refer: Step = [`[...document.querySelectorAll("#operator-composer-command-menu button")].find(b => b.textContent.startsWith("${JOB}")).click()`, `!!document.querySelector(".evidence-chip")`];
+			`document.querySelector(".operator-composer-command code")?.textContent === "/status"`];
+		const refer: Step = [`[...document.querySelectorAll("#operator-composer-command-menu button")].find(b => b.textContent.startsWith("@${JOB}")).click()`, `!!document.querySelector(".evidence-chip")`];
 		const fits: Step = ["true", `[...document.querySelectorAll(".operator-composer-slash, #operator-composer-command-menu button, .operator-composer-skills [role=option]")]
 			.filter(e => e.getClientRects().length).every(e => { const r = e.getBoundingClientRect(); return (innerWidth >= 900 || r.height >= 44) && r.top >= 0 && r.left >= -0.5 && r.right <= innerWidth + 0.5; })`];
 		const shots4: [string, number, number, Step[]][] = [
@@ -696,7 +699,8 @@ try {
 	if (stage === "m3-fidelity-composer") {
 		// Design frames 1/4/5/6/7/10: the box in the transcript column with `.cb` padding, a 20 px avatar and text 28 px in,
 		// the raised padding-6 menu from the box's edge, the ask fill. Negative control: a surface/padding-4 menu fails.
-		const slash: Step = [`document.querySelector(".operator-composer-slash").click()`, `document.querySelectorAll("#operator-composer-command-menu button").length === 5`];
+		// S6: three commands, then the two in-flight jobs and the one done today.
+		const slash: Step = [`document.querySelector(".operator-composer-slash").click()`, `document.querySelectorAll("#operator-composer-command-menu button").length === 6`];
 		const context: Step = [`document.querySelector(".workspace-context-open[aria-expanded=false]")?.click()`, `!!document.querySelector(".workspace-context .workspace-context-ask")`];
 		const reply: Step = [`(() => { const t = document.querySelector(".session-transcript"), m = [...document.querySelectorAll(".session-message.session-other")].at(-1);
 			t.scrollTop += m.getBoundingClientRect().top - t.getBoundingClientRect().top - 120; })()`, "true"];
@@ -711,8 +715,8 @@ try {
 			["desktop", 1440, 1000, [], { composer: "0 0 664 14px 12px 10px 16px", avatar: "20x20 inset 28" }],
 			// Full match S1: the phone composer is frame 6's rounded box 4 px past the entries' sides (`full-match-shell` phone).
 			["phone", 390, 844, [reply], { composer: "-4 -4 370 8px 6px 6px 14px", avatar: "20x20 inset 34" }],
-			// S1's 370 px phone box keeps the 362 px menu, now 4 px inside each edge.
-			["menu-desktop", 1440, 1000, [slash], { menu: "0 534 rgb(27, 27, 27) 6px" }], ["menu-phone", 390, 844, [slash], { menu: "4 362 rgb(27, 27, 27) 6px" }],
+			// S6 (frame 10): the phone menu spans the 370 px box, 10 px from the screen edges.
+			["menu-desktop", 1440, 1000, [slash], { menu: "0 534 rgb(27, 27, 27) 6px" }], ["menu-phone", 390, 844, [slash], { menu: "0 370 rgb(27, 27, 27) 6px" }],
 			["ask-desktop", 1440, 1000, [context], { ask: "rgb(31, 26, 18) 12px 12px" }], ["ask-phone", 390, 844, [context], { ask: "rgb(31, 26, 18) 12px 12px" }],
 		];
 		for (const [name, width, height, steps, want] of shotsD) {
@@ -810,7 +814,7 @@ try {
 	if (stage === "full-match-jobs") {
 		// Full match S3 (frames 3/9, C1). Negative controls: dropped team/queued groups fail `groups`, an ignored query
 		// `rows`, Show more without focus `focus`, unknown CI painted passed `chip`, phone targets under 44 px `small`,
-		// a green Working label `tones` (Working stays neutral; only Merged is blue).
+		// a neutral Working label `tones` (S6: Working is green like the design; Merged is blue, Done stays neutral).
 		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
 			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
 			const mid = e => Math.round(e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2);
@@ -842,7 +846,7 @@ try {
 		const toFocus: Step = [`(() => { const l = document.querySelector(".workspace-jobs-list"); l.scrollTop += document.activeElement.getBoundingClientRect().top - l.getBoundingClientRect().top - 200; })()`, "true"];
 		const toChip: Step = [`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-message a.pr-chip").getBoundingClientRect().top - t.getBoundingClientRect().top - 200; })()`, "true"];
 		const groups = "In flight · 2,With the team · 1,Queued · 1,Done today · 7", cols = "Job,Title / context,Status,Done,Cost";
-		const statuses = "Working,Held,With the team,Queued,Merged #700,Done", tones = "rgb(180, 180, 180) | rgb(147, 180, 245) | rgb(180, 180, 180)";
+		const statuses = "Working,Held,With the team,Queued,Merged #700,Done", tones = "rgb(95, 211, 154) | rgb(147, 180, 245) | rgb(180, 180, 180)";
 		// The committed five: desktop, desktop-query, phone, phone-more and pr-chip (dark, picp only).
 		const shotsJ: [string, number, number, Step[], object][] = [
 			["desktop", 1440, 1000, [open], { drawer: "579 0 861 963", one_row: true, query_row: true, pill: "All projects▾", select_shown: 0, segs: "Today11,In flight2", statuses, tones, cols, groups, rows: 9, more: "Show 2 more", outside: "" }],
@@ -1010,6 +1014,66 @@ try {
 			if (off.length) throw new Error(`full-match-diff-${name}: ${off.join("; ")}`);
 		}
 		if (posts.length) throw new Error(`full-match-diff sent ${posts.join(", ")}: the diff only reads`);
+	}
+	if (stage === "full-match-commands") {
+		// Full match S6 (frames 4/10). Negative controls: a surface/padding-4 menu fails `menu`, 44 px desktop rows `rows`,
+		// a `#` chip `chips`, a pick that sends `posts`, a draft dropped after the refusal `draft`, a neutral `working`,
+		// bare ids or a 0m `jobs`, a second outline on the focused field `ring`.
+		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
+			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
+			const cs = s => q(s) && getComputedStyle(q(s)), menu = cs("#operator-composer-command-menu"), h3 = cs("#operator-composer-command-menu h3"), send = q(".operator-composer-send");
+			return { menu: menu ? [menu.backgroundColor, menu.padding, menu.borderRadius].join(" ") : null, head: h3 ? [h3.fontSize, h3.color, h3.textTransform].join(" ") : null,
+				heads: all("#operator-composer-command-menu h3").map(h => h.textContent).join(), commands: all("#operator-composer-command-menu code").map(c => c.textContent).filter(c => c.startsWith("/")).join(),
+				rows: [...new Set(all("#operator-composer-command-menu button").map(b => Math.round(b.getBoundingClientRect().height)))].join(),
+				inset: (b => b ? Math.round(b.querySelector("code").getBoundingClientRect().left - b.getBoundingClientRect().left) : null)(q("#operator-composer-command-menu button")),
+				chips: all(".operator-composer-at, .operator-composer-slash").map(c => c.innerText.replace(/\\s+/g, " ").trim() + " " + Math.round(c.getBoundingClientRect().height)).join(),
+				prepared: q(".operator-composer-command code")?.textContent ?? null, state: q(".operator-composer-command > span")?.textContent ?? null,
+				error: q(".operator-composer-command [role=alert]")?.textContent ?? null, send: send ? send.getAttribute("aria-label") + (send.disabled ? " disabled" : "") : null,
+				draft: q(".operator-composer textarea")?.value.length ?? null, working: cs(".workspace-jobs-status-working")?.color ?? null,
+				jobs: all("#operator-composer-command-menu li button").filter(b => b.querySelector("code").textContent.startsWith("@")).slice(0, 3).map(b => b.querySelector("code").textContent + " " + b.querySelector("small").textContent).join(),
+				ring: (t => { if (!t) return null; const p = document.createElement("i"); p.style.color = "var(--focus)"; document.body.append(p); const focus = getComputedStyle(p).color; p.remove();
+					return [document.activeElement === t, getComputedStyle(t).outlineStyle, getComputedStyle(q(".operator-composer-box")).borderTopColor === focus].join(" "); })(q(".operator-composer textarea")),
+				measure: { menu: box("#operator-composer-command-menu"), h3: box("#operator-composer-command-menu h3"), row: box("#operator-composer-command-menu button"),
+					at: box(".operator-composer-at"), slash: box(".operator-composer-slash"), command: box(".operator-composer-command"), send: box(".operator-composer-send") },
+				small: innerWidth < 900 ? all(".operator-composer-at, .operator-composer-slash, #operator-composer-command-menu button, .operator-composer-command-remove, .operator-composer-send")
+					.filter(e => e.getBoundingClientRect().height < 44).map(e => e.className || e.textContent).join() : "",
+				outside: document.documentElement.scrollWidth > innerWidth || all(".operator-composer button, .operator-composer-command, #operator-composer-command-menu, .workspace-jobs button")
+					.some(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }) }; })()`;
+		const long = "Before you answer, check the held PR for the drawer slice and whether a very long draft keeps wrapping inside the box";
+		const draft: Step = [`(() => { const t = document.querySelector(".operator-composer textarea"); t.value = ${JSON.stringify(long)}; t.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+			`document.querySelector(".operator-composer textarea").value.length === ${long.length}`];
+		const slash: Step = [`document.querySelector(".operator-composer-slash").click()`, `document.querySelectorAll("#operator-composer-command-menu code").length > 0`];
+		const pick = (name: string): Step => [`[...document.querySelectorAll("#operator-composer-command-menu button")].find(b => b.textContent.startsWith("/${name}")).click()`,
+			`!!document.querySelector(".operator-composer-command code")`];
+		const job: Step = [`document.querySelector("#operator-composer-command-menu button").click()`, `/^\\/stop cp-/.test(document.querySelector(".operator-composer-command code")?.textContent ?? "")`];
+		const submit: Step = [`document.querySelector(".operator-composer-send").click()`, `!!document.querySelector(".operator-composer-command [role=alert]")`];
+		const rest: Step = [`document.activeElement?.blur()`, `document.activeElement === document.body`];
+		const focus: Step = [`document.querySelector(".operator-composer textarea").focus()`, `document.activeElement === document.querySelector(".operator-composer textarea")`];
+		const open: Step = [`(() => { document.querySelector(".workspace-jobs-open").click(); setTimeout(() => document.activeElement?.blur(), 0); })()`,
+			`!!document.querySelector(".workspace-jobs[open] .workspace-jobs-row") && document.activeElement === document.body`];
+		const commands = "/status,/jobs,/stop", green = "rgb(95, 211, 154)", live = "@cp-transcript-steps-t7ah Working · 9m,@cp-held-review-k2pq Held · 1h 2m";
+		const rowsD = `${live},@cp-sessions-v2-m4xq Done 15:47`;
+		const menuD = { menu: "rgb(27, 27, 27) 6px 12px", head: "11px rgb(138, 138, 138) uppercase", commands, rows: "36", inset: 10, chips: "@ job 28,/ command 28", outside: false };
+		const refused = "unsupported: this session's cp-bridge predates dashboard commands; restart the session (⋮ → Restart session) or send the text as a message";
+		// Committed: desktop-menu, phone-menu, stop-target, refused, focused-composer, jobs-desktop; prepared-phone measures.
+		const shotsC: [string, number, number, Step[], object][] = [
+			["desktop-menu", 1440, 1000, [draft, slash], { ...menuD, heads: "Commands,Jobs", jobs: rowsD, draft: long.length }],
+			["phone-menu", 390, 844, [draft, slash], { ...menuD, rows: "52", inset: 12, chips: "@ 44,/ 44", heads: "Commands,Jobs", jobs: rowsD, draft: long.length, small: "" }],
+			["stop-target", 1440, 1000, [draft, slash, pick("stop")], { heads: "Stop which job?", jobs: live, prepared: "/stop", state: "Pick the job to stop with @ job", send: "Submit /stop disabled", outside: false }],
+			["prepared-phone", 390, 844, [draft, slash, pick("stop"), job, rest], { heads: "", prepared: "/stop cp-transcript-steps-t7ah", state: "Submit sends it to the operator once",
+				send: "Submit /stop", draft: long.length, small: "", ring: "false none false", outside: false }],
+			["refused", 1440, 1000, [draft, slash, pick("status"), submit, rest], { prepared: "/status", error: refused, send: "Submit /status", draft: long.length, ring: "false none false", outside: false }],
+			["focused-composer", 1440, 1000, [focus], { ring: "true none true", outside: false }],
+			["jobs-desktop", 1440, 1000, [open], { working: green, outside: false }],
+		];
+		for (const [name, width, height, run, want] of shotsC) {
+			await capture(`full-match-commands-${name}`, transcript, width, height, "dark", loaded, "bottom", run);
+			const got = await evaluate(look);
+			console.log(`measured ${name} ${JSON.stringify(got)}`);
+			const off = Object.entries(want).filter(([k, v]) => got[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k])} (want ${JSON.stringify(v)})`);
+			if (off.length) throw new Error(`full-match-commands-${name}: ${off.join("; ")}`);
+		}
+		if (posts.join() !== "POST /api/operator/message") throw new Error(`full-match-commands sent ${posts.join(", ") || "nothing"}: only the one explicit Submit sends`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);
