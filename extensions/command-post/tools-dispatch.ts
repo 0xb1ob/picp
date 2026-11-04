@@ -5,6 +5,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { SOURCE_SEND_DESCRIPTION } from "../../src/job-origins.ts";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { OperatorModelPickReferenceSchema, type QueuedDispatchRequest, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES, SkillNameSchema, type ThinkingLevel, THINKING_LEVELS } from "../../src/contracts.ts";
 import { BlockedDispatchError, formatDispatchPreview, formatDispatchResult } from "../../src/dispatch.ts";
@@ -57,6 +58,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 			model: Type.Optional(Type.String({ description: "Omit: routing decides (data/routing.json). An explicit model must already be named there, else refused." })),
 			thinking: Type.Optional(StringEnum([...THINKING_LEVELS], { description: "Explicit effort override" })),
 			operator_quote: Type.Optional(OperatorQuoteParam),
+			source_send_id: Type.Optional(Type.String({ description: SOURCE_SEND_DESCRIPTION })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			setLive(ctx);
@@ -66,6 +68,7 @@ export function registerDispatchTools(pi: ExtensionAPI, deps: ExtensionDeps): vo
 				...(params.model ? { model: params.model } : {}),
 				...(params.thinking ? { thinking: params.thinking as ThinkingLevel } : {}),
 				...(params.operator_quote ? { operatorQuote: params.operator_quote } : {}),
+				...(params.source_send_id !== undefined ? { sourceSendId: params.source_send_id } : {}),
 				registry: ctx.modelRegistry,
 			});
 			refreshWidget(ctx);

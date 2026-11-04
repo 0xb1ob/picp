@@ -213,8 +213,8 @@ test("thread-sends: unknown or unverifiable threads refused with nothing written
 	assert.equal((await transcript(d)).filter((e) => e.thread_id === A).length, 2, "repaired, the bindings read again");
 });
 
-// S10a C7: an owner from before S9 (status without `thread_sends`, stood in by a relay on its control socket) never gets
-// a threaded send: the viewer refuses it 409 restart-required with nothing journaled, while a No-thread send still works.
+// S10a C7: an owner from before S9 (status without `thread_sends`, stood in by a relay on its control socket) never
+// gets a threaded send: the viewer refuses it 409 restart-required, nothing journaled; a No-thread send still works.
 test("thread-sends: an owner without thread_sends refuses a threaded send 409 restart-required; a null send works", { timeout: 180_000 }, async (t) => {
 	const d = await dashboard(t, { requireTailnet: true });
 	const op = await operator(t, d, "s10a-c7", [{ kind: "text", text: "reply null" }]);

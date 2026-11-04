@@ -105,7 +105,15 @@ export interface NamedThread { id: string; name: string; created_at: string; ren
 /** Full match S8: one membership, keyed by `{kind, id, session_id?}`; `thread_id` null is an explicit No thread. */
 export interface ThreadBinding { kind: "message" | "ask" | "job" | "parent_send"; id: string; session_id?: string; thread_id: string | null; at: string }
 /** `GET /api/threads` (full match S8): absent is available and empty; corrupt or over cap names its `file:line`. */
-export interface ThreadsResponse { generated_at: string; available: boolean; reason: string | null; threads: NamedThread[]; bindings: ThreadBinding[] }
+export interface ThreadsResponse { generated_at: string; available: boolean; reason: string | null; threads: NamedThread[]; bindings: ThreadBinding[]; joins: ThreadJoins[]; join_diagnostics: ThreadJoinDiagnostics }
+/** Full match S10b: a job or ask in a thread; an ask's answer goes with the ask by id. Newest first. */
+export interface ThreadMember { id: string; title: string; state: string; created_at: string }
+/** Full match S10b: a job opened from a delivered dashboard send in this thread; `source_send_id` is that dc id. */
+export interface StartedFromChat { job_id: string; title: string; state: string; created_at: string; source_send_id: string }
+/** Full match S10b: jobs by `origin.thread_id`, asks by `source.thread_id`; each list capped, `omitted` counts the rest. */
+export interface ThreadJoins { thread_id: string; jobs: ThreadMember[]; asks: ThreadMember[]; started_from_chat: StartedFromChat[]; omitted: number }
+/** Full match S10b: records that join no thread, by reason, never guessed; `unreadable` names a source that failed. */
+export interface ThreadJoinDiagnostics { multi_origin: number; unknown_thread: number; malformed: number; unreadable: string[] }
 /** `POST /api/operator/threads` (full match S8): the operator session's answer; the same client_id replays it. */
 export interface ThreadWriteResponse { thread_id: string; name: string; state: "created" | "renamed"; replayed: boolean }
 /** `POST /api/operator/upload` stored an attachment: 201 with its upload id (the composer sends ids, never bytes). */

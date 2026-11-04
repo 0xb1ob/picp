@@ -53,7 +53,7 @@ import { discardBounded, handlePushSubscription, handlePushTest, PUSH_STATUS_PAT
 import type { PushFetch } from "../push/webpush.ts";
 import { CONTROL_MESSAGE_PATH, CONTROL_STATUS_PATH, type ControlLimiter, handleControlMessage, handleControlStatus, handleOperatorStart, handleScheduleControl, handleScheduleControlStatus, OPERATOR_START_PATH, type OperatorStart, SCHEDULE_CONTROL_PATH, SCHEDULE_CONTROL_STATUS_PATH } from "./control-api.ts";
 import { handleOperatorThreads, handleSchedulePolicy, OPERATOR_THREADS_PATH, SCHEDULE_POLICY_PATH } from "./control-api.ts";
-import { threadsView } from "./named-threads-view.ts";
+import { threadsJoinedView } from "./thread-joins.ts";
 import { handleOperatorRestart } from "./operator-restart.ts";
 import { handleOperatorQueue, OPERATOR_QUEUE_PATH } from "./operator-queue.ts";
 import { handleSettingsStatus, handleSettingsWrite, SETTINGS_APPLY_PATH, SETTINGS_PATH, SETTINGS_RESTORE_PATH } from "./settings-api.ts";
@@ -284,7 +284,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 		case "/api/threads":
 			// Free names are operator-typed text, gated like the operator's own transcript.
 			if (!canRead(accessOf(req), options.requireTailnet === true)) sendJson(res, 403, { error: "named threads are served only under --require-tailnet" });
-			else sendJson(res, 200, threadsView(options.stateDir));
+			else sendJson(res, 200, threadsJoinedView({ home: options.home, stateDir: options.stateDir }));
 			return;
 		case "/api/version":
 			readVersion({ home: options.home, stateDir: options.stateDir, script: options.app?.script ?? null })

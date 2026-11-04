@@ -177,7 +177,7 @@ function sessionIdOf(file: string): string | undefined {
 }
 
 /** `GET /api/threads`: the catalog and membership, or why the registry is unavailable. Never writes. */
-export function threadsView(stateDir: string, now = new Date()): ThreadsResponse {
+export function threadsView(stateDir: string, now = new Date()): Omit<ThreadsResponse, "joins" | "join_diagnostics"> {
 	const registry = readNamedThreads(stateDir);
 	const base = { generated_at: now.toISOString(), threads: [], bindings: [] };
 	if (!registry.available) return { ...base, available: false, reason: registry.reason };
