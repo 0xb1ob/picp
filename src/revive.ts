@@ -160,6 +160,8 @@ export interface ReviveResult {
 	interruptedTool?: InterruptedTool;
 	worktreeDirty: boolean;
 	continuedFailure?: Failure;
+	/** N3c: a native worker is not idle; it resumed its Claude session with picp's revive prompt. */
+	nativeResumed?: true;
 }
 
 export type GitRunner = (
@@ -576,6 +578,7 @@ export class Reviver {
 					delivery: record.delivery,
 					runDir: this.#options.runs.open(jobId).runDir,
 					worktree: record.worktree,
+					...(record.worker.driver ? { artifactPath: join(this.#options.home, paths.artifactFile(jobId)) } : {}),
 				},
 				profile,
 				model: plan.model,
@@ -660,6 +663,7 @@ export class Reviver {
 			worktreeDirty: plan.worktreeDirty,
 			...(plan.interruptedTool ? { interruptedTool: plan.interruptedTool } : {}),
 			...(plan.continuesFailure ? { continuedFailure: plan.continuesFailure } : {}),
+			...(record.worker.driver ? { nativeResumed: true as const } : {}),
 		};
 	}
 }
@@ -688,5 +692,6 @@ export function formatReviveResult(result: ReviveResult): string {
 	const tool = result.interruptedTool ? ` (interrupted: ${result.interruptedTool.name})` : "";
 	const dirty = result.worktreeDirty ? " (worktree has uncommitted changes)" : "";
 	const failed = result.continuedFailure ? ` (continued from failed: ${result.continuedFailure.class})` : "";
-	return `${result.job_id} revived${failed}: pid ${result.pid}, session ${result.session_file}${tool}${dirty} \u2014 idle; send it a message to continue`;
+	const next = result.nativeResumed ? "resumed its native Claude session with picp's revive prompt" : "idle; send it a message to continue";
+	return `${result.job_id} revived${failed}: pid ${result.pid}, session ${result.session_file}${tool}${dirty} \u2014 ${next}`;
 }

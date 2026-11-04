@@ -44,7 +44,8 @@ async function nativeHome(t: TestContext, script: readonly ClaudeStep[], usage =
 	return { b, claude, settings, toggle, job, envelope, waitFile, env: { HOME: fakeHome } };
 }
 
-test("P3a/c/d/e/h/i/j: a native research job reports once, refuses follow-ups and peers, and tears down on its observed exit", { skip, timeout: 300_000 }, async (t) => {
+// P3e (follow-ups refused) moved to native-worker-followups.test.ts, where N3c resumes them instead.
+test("P3a/c/d/h/i/j: a native research job reports once, refuses peers and ship roles, and tears down on its observed exit", { skip, timeout: 300_000 }, async (t) => {
 	const ids: string[] = [];
 	const h = await nativeHome(t, [
 		step("Bash", { command: "echo x > native-write.txt" }),
@@ -70,8 +71,6 @@ test("P3a/c/d/e/h/i/j: a native research job reports once, refuses follow-ups an
 		{ kind: "tool_calls", calls: [dispatch(peer.id)] },
 		{ kind: "tool_calls", calls: [dispatch(ship.id)] },
 		{ kind: "tool_calls", calls: [bash(h.waitFile(h.envelope(native.id)))] },
-		{ kind: "tool_calls", calls: [{ name: "cp_send", args: { job_id: native.id, message: "One more thing." } }] },
-		{ kind: "tool_calls", calls: [{ name: "cp_revive", args: { job_id: native.id } }] },
 		{ kind: "tool_calls", calls: [{ name: "cp_teardown", args: { job_id: native.id } }] },
 		{ kind: "tool_calls", calls: [dispatch(pi.id, false)] },
 		{ kind: "tool_calls", calls: [bash(h.waitFile(h.envelope(pi.id)))] },
@@ -108,10 +107,6 @@ test("P3a/c/d/e/h/i/j: a native research job reports once, refuses follow-ups an
 	assert.match(text(second), /concurrency is 1/);
 	assert.match(text(third), /only research jobs/);
 	for (const id of [peer.id, ship.id]) assert.equal(existsSync(join(h.b.home, paths.runDir(id))), false, `${id} has a run`);
-	// P3e: follow-ups are refused by name; nothing was queued.
-	assert.match(text(named("cp_send")[0]), /native follow-ups land in N3c/);
-	assert.match(text(named("cp_revive")[0]), /native follow-ups land in N3c/);
-	assert.equal(events.some((event) => event.type === "prompt_sent" && (event.payload as { receipt?: string }).receipt === "queued"), false);
 	// P3h: usage is measured, never zero, and the budget check reads it.
 	const status = readRunStatus(h.b.home, native.id);
 	assert.equal(status.usage_unavailable, undefined);
