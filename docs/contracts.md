@@ -1273,7 +1273,7 @@ option buttons and "Other answer…" field go through the guarded
 operator answers (a still-secret-shaped text is refused by pattern name) and keeps an answer of at most 4,000 Unicode
 code points inline (`delivery:"inline"`, `url: null`); a longer one becomes a permanent board
 `state/boards/report-<first 32 hex of sha256(source)>/` and returns `delivery:"report"`, `state` (`posted` or
-`duplicate`), `href` `/boards/<slug>/`, an absolute `url` and a headline-plus-link `text`. Sources are
+`duplicate`), `href` `/boards/<slug>/`, a `url` and a headline-plus-link `text`. Sources are
 `research:<job>#<generation>`, `schedule:<source_key>`, `legacy:<ans-id>` or `chat:<session>:<tool-call>`. The canonical
 payload is `JSON.stringify` of `{project, question, answer, evidence, job, source, time}` in that key order, stored
 as `site/content.json`; `board.json` adds `project`, `source` and `content_sha256` (SHA-256 of those UTF-8 bytes, never
@@ -1282,8 +1282,8 @@ rendered deterministically from the payload: escaped text, `http(s)` evidence as
 under the board CSP. Input over 1 MiB, payload plus page over 1 MiB or `board.json` over 16 KiB fails `too_large` with
 no URL and no truncation. A retry with the same source and content (its stored `time` wins) is `duplicate`; other
 content is a `conflict`, and a stored report whose payload, hash, source or HTML does not verify is `tampered` —
-nothing is ever overwritten. The URL is the running tunnel origin when `wantedListener` holds for its config, else the
-configured viewer host/port as intake builds a board URL; no usable address is `no_url` before anything is written.
+nothing is ever overwritten. The URL comes from the shared board-link resolver ("Board links" below): tunnel origin,
+`viewer.public_url`, viewer host, tailnet, else the relative `href` with the remedy note appended to `text`.
 Remote reads keep the paired-device gate; links carry no credentials. Reports have no expiry or cleanup in v1.
 
 **Operator answers** (M2 PR2, `src/operator-responses.ts`; cp-mxk4 journal before it). `cp_parent answer` delivers an
@@ -1305,7 +1305,8 @@ instruction (the operator note and tool guidelines), never by intercepting model
 and sends a long one through `deliverFinalAnswer` as `research:<job>#<generation>` before it accepts the card; the
 notice then carries the report link. A short body keeps today's card. A `secret`, `too_large` or `invalid` body keeps
 today's card too and journals `answer_report_kept` (the code and its named error) in the job's run log; any other
-failure (`conflict`, `no_url`, a migration error) leaves the card pending with one warning per distinct error.
+failure (`conflict`, a migration error) leaves the card pending with one warning per distinct error. With no address
+the card's link is the relative `/boards/<slug>/`.
 
 **Answer migration** (M2 PR2, `src/migrate-answer-reports.ts`). Every producer above and schedule results first run
 `answerMigrationGate` on `state/operator/answers.jsonl` (live) and `answers.jsonl.migrated` (archive): neither or the
@@ -6500,9 +6501,24 @@ port-forwarding proxy that passes its own name (Coder's `https://8766--…/`) re
 The control routes then also accept an `http(s)` `Origin` naming the request's own `Host`; every other control guard
 stands, and device pairing and revoke (`src/viewer/devices-api.ts`) stay pinned to the bind or configured origin. The
 cost is DNS rebinding: a page whose name resolves to this bind is same-origin with itself. `data/viewer.json`
-`{"strict_host": true}` (Settings → viewer) restores the old guard — Host must equal the bind address (421) and Origin
+`{"strict_host": true}` (Settings → Dashboard address) restores the old guard — Host must equal the bind address (421) and Origin
 the configured list only — read per request, no restart; an invalid file fails closed (strict) and `/doctor` warns.
 `/doctor` prints one `[viewer-host]` line either way. The remote listener keeps its own Host gate (Remote gate below).
+
+**Board links (`viewer.public_url`, `src/viewer/board-link.ts`).** One resolver builds every served board's link — the
+`delivery: board` receipt and wake-up line intake writes, and `responseReportUrl` (`cp_parent answer`, research answer
+cards, schedule results) — in this order: (1) the running tunnel origin when `wantedListener` holds for its config;
+(2) `viewer.public_url`; (3) an explicit viewer host, `CP_VIEWER_HOST` or `data/daemon.json` `viewer_host`, loopback
+included because it was configured; (4) the tailnet IPv4 (`tailscale ip -4`); (5) otherwise the relative
+`/boards/<slug>/` plus one note naming the remedy (Settings → Dashboard address → Public URL, or `cp-install --viewer-host <ip>`),
+in the wake-up, the receipt title and a report's reply text. There is no silent loopback guess (pi-command-post-1jz),
+and an address is never a refusal: a board envelope whose `artifact_path` and `board.json` pass is always published and
+recorded. `viewer.public_url` (`data/viewer.json` `public_url`) is an absolute `https://` or `http://` URL with no
+userinfo, query or fragment; an optional path prefix is kept verbatim and trailing slashes are dropped when a link is
+built. Anything else is refused with a reason; a hand-edited bad value voids only `public_url` (links skip the step
+and `/doctor` warns), while `strict_host` is still read from the file and a bad one still fails closed. Deleting it
+restores the order without it. It is read when a link is built (no restart) and only builds links: the bind address,
+the Host and Origin guards, push and pairing ignore it.
 
 **Two ways in, one effect: a user message.** The composer's text, or one click on a decision card, is delivered
 into the session with `pi.sendUserMessage` — exactly what the human could type at the CLI, and nothing more. Text

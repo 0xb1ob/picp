@@ -786,7 +786,7 @@ test("P16-settings-read: the operator session's settings_get serves the catalog 
 	const catalog = empty.catalog;
 	assert.deepEqual(catalog.map((field) => field.key), [...SETTING_KEYS]);
 	assert.deepEqual(catalog, JSON.parse(JSON.stringify(SETTING_FIELDS)));
-	assert.equal(new Set(catalog.map((field) => field.key)).size, 34);
+	assert.equal(new Set(catalog.map((field) => field.key)).size, 35);
 	for (const field of catalog) assert.ok(field.key.startsWith(`${field.section}.`), field.key);
 	assert.deepEqual(catalog.filter((field) => !field.editable).map((field) => field.key), ["sessions.tool_call_cap", "models.allow"]);
 	assert.deepEqual(empty.audit, []);

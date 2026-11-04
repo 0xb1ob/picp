@@ -121,10 +121,10 @@ test("M2-report-safety: hostile text is escaped, only http(s) evidence links, se
 	assert.throws(() => publishResponseReport(h.path, input({ source: "chat with spaces" })), { code: "invalid" });
 });
 
-test("M2-report-url: a running tunnel origin wins, else the configured viewer address; no address fails before publishing", (t) => {
+test("M2-report-url: a running tunnel origin wins, else the configured viewer address; no address publishes with a relative link and its remedy", (t) => {
 	const h = home(t);
 	const slug = responseReportSlug("chat:s:url");
-	assert.equal(responseReportUrl(h.path, slug, URL_OPTS), `http://127.0.0.2:9911/boards/${slug}/`);
+	assert.equal(responseReportUrl(h.path, slug, URL_OPTS).url, `http://127.0.0.2:9911/boards/${slug}/`);
 	const dataDir = join(h.path, LAYOUT.data), stateDir = join(h.path, LAYOUT.state);
 	mkdirSync(dataDir, { recursive: true });
 	mkdirSync(stateDir, { recursive: true });
@@ -132,9 +132,9 @@ test("M2-report-url: a running tunnel origin wins, else the configured viewer ad
 	const runtime = (patch: Record<string, unknown>) => writeFileSync(tunnelRuntimeFile(stateDir), JSON.stringify({ schema_version: 1, origin: "https://amber-otter.trycloudflare.com",
 		generation: 3, revision: 2, state: "running", mode: "quick", port: 40123, updated_at: T0, ...patch }));
 	runtime({});
-	assert.equal(responseReportUrl(h.path, slug, URL_OPTS), `https://amber-otter.trycloudflare.com/boards/${slug}/`);
+	assert.equal(responseReportUrl(h.path, slug, URL_OPTS).url, `https://amber-otter.trycloudflare.com/boards/${slug}/`);
 	runtime({ revision: 1 });
-	assert.equal(responseReportUrl(h.path, slug, URL_OPTS), `http://127.0.0.2:9911/boards/${slug}/`, "a runtime for another revision is not served");
+	assert.equal(responseReportUrl(h.path, slug, URL_OPTS).url, `http://127.0.0.2:9911/boards/${slug}/`, "a runtime for another revision is not served");
 
 	const bin = join(h.path, "bin");
 	mkdirSync(bin);
@@ -143,9 +143,11 @@ test("M2-report-url: a running tunnel origin wins, else the configured viewer ad
 	const path = process.env.PATH;
 	process.env.PATH = `${bin}:${path ?? ""}`;
 	try {
-		assert.throws(() => deliverFinalAnswer(h.path, input({ source: "chat:s:url" })), { code: "no_url", message: /url unavailable/ });
+		const sent = deliverFinalAnswer(h.path, input({ source: "chat:s:url" }));
+		assert.equal(sent.url, `/boards/${slug}/`);
+		assert.match(sent.text, new RegExp(`Full answer: /boards/${slug}/\\n\\(relative link: .*Settings → Dashboard address → Public URL .*cp-install --viewer-host`));
 	} finally { process.env.PATH = path; }
-	assert.deepEqual(h.entries(), [], "no address: nothing published, the caller keeps its work pending");
+	assert.deepEqual(h.entries(), [slug], "no address: the report is still published, never refused");
 });
 
 test("M2-report-remote: a paired device reads a report over the remote listener; unpaired and revoked callers get 401", async (t) => {

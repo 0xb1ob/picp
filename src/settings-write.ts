@@ -84,6 +84,7 @@ export const RESTORE_ACTIONS: Readonly<Partial<Record<SettingKey, "delete" | "de
 	"maintenance.update_enabled": "installer_seed",
 	"maintenance.update_interval_min": "installer_seed",
 	"viewer.strict_host": "delete",
+	"viewer.public_url": "delete",
 });
 
 /** What cp-install writes to `data/update.json` (src/service/install.ts step 7). */
@@ -373,7 +374,7 @@ function planWrites(home: string, snapshot: SettingsSnapshot, request: SettingsW
 			let value: SettingValue;
 			if (request.mode === "set") {
 				value = request.changes[field.key] as SettingValue;
-				if ((field.type === "model_ref" || field.type === "thinking_level") && value === null) action = "delete"; // unset, never a stored null
+				if ((field.type === "model_ref" || field.type === "thinking_level" || field.type === "url") && value === null) action = "delete"; // unset, never a stored null
 				if (field.type === "rubric") value = mergeRubric(present.value, value as unknown as Record<string, unknown>[]) as SettingValue;
 			} else {
 				const restore = RESTORE_ACTIONS[field.key];

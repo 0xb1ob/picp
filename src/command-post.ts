@@ -403,7 +403,7 @@ export class CommandPost {
 		// every job a default that may not be where the viewer actually binds.
 		// Only the port is resolved (and validated) up front; the host is passed
 		// through as-is (undefined when not explicitly configured) so intake's own
-		// board-delivery resolution can require the tailnet address instead.
+		// board-link resolver (src/viewer/board-link.ts) can try the tunnel, public URL and tailnet first.
 		const viewerPort = viewerAddress(viewerEnv).port;
 		const viewerHost = viewerEnv.CP_VIEWER_HOST;
 		this.intake = new EnvelopeIntake({

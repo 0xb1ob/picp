@@ -38,6 +38,11 @@ export function wantedListener(config: TunnelConfigRead, runtime: TunnelRuntimeR
 	return { origin: live.origin, generation: live.generation, revision, port, mode };
 }
 
+/** The running tunnel origin for this home's state dir when its listener is wanted, else null (board links). */
+export function liveTunnelOrigin(stateDir: string): string | null {
+	return wantedListener(readTunnelConfig(join(dirname(stateDir), "data")), readTunnelRuntime(stateDir))?.origin ?? null;
+}
+
 /**
  * No-tailnet remote-only mode: cp-tunnel enabled this home's remote dashboard (`data/tunnel.json` `enabled`). Only then
  * may a `--require-tailnet` viewer that found no tailnet address run without its local listener (cli.ts `listenPlan`).

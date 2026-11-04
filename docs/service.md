@@ -198,8 +198,16 @@ bind, `data/dashboard-control.json` `{"enabled": false}` stays the kill switch.
 **Opening the dashboard through a proxy (Coder port-forward, etc.).** It just works: the viewer serves whatever name
 the proxy forwards as Host (`https://8766--…/`), and the controls accept that page's own origin. Keep the proxy
 owner-only — whoever gets through it has full local control, with no device pairing. Pairing and revoking devices
-stay on the bind address. `data/viewer.json` `{"strict_host": true}` (Settings → viewer) restores the Host check and
+stay on the bind address. `data/viewer.json` `{"strict_host": true}` (Settings → Dashboard address) restores the Host check and
 with it the DNS-rebinding guard; the proxy then gets 421. `/doctor` `[viewer-host]` says which is in force.
+
+**Dashboard behind a reverse proxy (e.g. Coder).** When people reach the dashboard only through a proxy URL (the
+viewer on `127.0.0.1`, no tailnet), set that URL as the public URL — Settings → Dashboard address → Public URL, or
+`data/viewer.json` `{"public_url": "https://dash.example.test/"}` — so board and report links point there; it is read
+when a link is built and changes nothing else. Keep `viewer.strict_host` off so the viewer accepts the proxy's Host.
+The proxy must forward to the viewer's bind address and port, and, when the dashboard sits at a sub-path
+(`https://host/apps/cp/`), strip that prefix before forwarding: the viewer serves from `/`. Without a public URL,
+tunnel or tailnet, board links are relative (`/boards/<slug>/`) and the wake-up names this remedy; nothing is refused.
 
 ### 3c. The models
 

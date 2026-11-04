@@ -309,7 +309,7 @@ const OWNERS: Record<SettingFileOwner, Owner> = {
 	viewer: {
 		file: dataFile("viewer.json"),
 		read: (_home, _env, file) =>
-			settle("viewer", readOwnerConsistently(file, () => loadViewerConfig(file)), (v: ReturnType<typeof loadViewerConfig>) => ({ "viewer.strict_host": v.strict_host })),
+			settle("viewer", readOwnerConsistently(file, () => loadViewerConfig(file)), (v: ReturnType<typeof loadViewerConfig>) => ({ "viewer.strict_host": v.strict_host, "viewer.public_url": v.public_url })),
 	},
 };
 

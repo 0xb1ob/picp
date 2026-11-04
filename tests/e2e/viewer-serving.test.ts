@@ -13,6 +13,7 @@ import { test } from "node:test";
 import { brotliDecompressSync, gunzipSync, gzipSync } from "node:zlib";
 import { LAYOUT } from "../../src/contracts.ts";
 import { APP_CSP, APP_VIEWPORT, type ViewerApp } from "../../src/viewer/app-page.ts";
+import { boardLink } from "../../src/viewer/board-link.ts";
 import { buildViewer } from "../../src/viewer/build.ts";
 import { viewerConfigFile } from "../../src/viewer/host-config.ts";
 import { applyDelta } from "../../src/viewer/json-delta.ts";
@@ -684,6 +685,12 @@ test("P21-host-check: by default any Host is served; strict_host refuses all but
 	assert.match(await hostless(view.port), /^HTTP\/1\.\d 421/, "strict: no Host is refused");
 	writeFileSync(config, JSON.stringify({ strict_host: "no" }));
 	assert.equal((await view.get("/", { host: "evil.example" })).status, 421, "an invalid value fails closed");
+	// cp-board-url-proxy: a bad hand-edited public_url voids only the link step, never the guard it sits beside.
+	writeFileSync(config, JSON.stringify({ public_url: "ftp://x", strict_host: false }));
+	assert.equal((await view.get("/healthz", { host: "8766--dev--box.coder.example" })).status, 200, "a bad public_url keeps the guard off");
+	assert.equal(boardLink(view.home, "cp-b", { viewerHost: "127.0.0.1", viewerPort: 9911 }).url, "http://127.0.0.1:9911/boards/cp-b/", "link falls through");
+	writeFileSync(config, JSON.stringify({ public_url: "ftp://x", strict_host: "no" }));
+	assert.equal((await view.get("/", { host: "evil.example" })).status, 421, "a bad strict_host still fails closed");
 	writeFileSync(config, JSON.stringify({ strict_host: false }));
 	assert.equal((await view.get("/healthz", { host: "evil.example" })).status, 200, "read per request: no restart");
 });

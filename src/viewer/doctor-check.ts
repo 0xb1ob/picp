@@ -10,7 +10,7 @@
 import type { DoctorFinding } from "../contracts.ts";
 import type { CommandRunner } from "../doctor.ts";
 import { controlSocketFile, readControlConfig, readControlRecord } from "./control-files.ts";
-import { loadViewerConfig, viewerConfigFile } from "./host-config.ts";
+import { loadViewerConfig, strictHost, viewerConfigFile } from "./host-config.ts";
 import { pidAlive } from "./overview-health.ts";
 import { resolveStateDir } from "./sessions.ts";
 import { serviceFindings, viewerExpected } from "../service/status.ts";
@@ -53,7 +53,10 @@ export function viewerHostFinding(stateDir: string): DoctorFinding {
 		}
 		return { check: "viewer-host", severity: "ok", what: "viewer Host check on (viewer.strict_host=true): only the exact bind host:port is served" };
 	} catch (error) {
-		return { check: "viewer-host", severity: "warn", what: "viewer Host check on: data/viewer.json is invalid, so the bind Host is pinned", detail: (error as Error).message.slice(0, 2000), fix: "fix data/viewer.json (only {\"strict_host\": true|false}) or remove it" };
+		const message = (error as Error).message;
+		const what = strictHost(stateDir) ? "viewer Host check on: data/viewer.json is invalid, so the bind Host is pinned"
+			: "viewer Host check off: data/viewer.json public_url is invalid, so board links skip it";
+		return { check: "viewer-host", severity: "warn", what, detail: message.slice(0, 2000), fix: "fix data/viewer.json (only {\"strict_host\": true|false, \"public_url\": \"https://…\"}) or remove it" };
 	}
 }
 
