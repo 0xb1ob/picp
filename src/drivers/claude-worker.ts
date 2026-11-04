@@ -136,13 +136,13 @@ async function turn(prompt: string): Promise<Turn> {
 	};
 }
 
-/** Queued busy sends, delivered by a resume at turn end only after the same admission a cp_send resume passes. */
-async function dueFollowUps(ran: Turn): Promise<string | undefined> {
+/** Queued busy sends that passed the same admission a cp_send resume passes, still claimed; none when refused. */
+async function dueFollowUps(ran: Turn): Promise<string[]> {
 	const runDir = env.CP_RUN_DIR ?? "";
 	// Claimed before the admission await: a send queued during it waits for the next turn end, never lost.
 	const queued = claimFollowUps(runDir);
-	if (queued.length === 0) return undefined;
-	if (abort.signal.aborted) return void returnClaim(runDir);
+	if (queued.length === 0) return [];
+	if (abort.signal.aborted) return (returnClaim(runDir), []);
 	const events = join(env.CP_HOME ?? "", paths.eventsFile(env.CP_JOB_ID ?? ""));
 	const recorded = existsSync(events) && readFileSync(events, "utf8").includes(ran.runId);
 	try {
@@ -150,11 +150,9 @@ async function dueFollowUps(ran: Turn): Promise<string | undefined> {
 	} catch (error) {
 		returnClaim(runDir);
 		write({ type: "native_followup_refused", count: queued.length, reason: (error as Error).message });
-		return undefined;
+		return [];
 	}
-	settleClaim(runDir);
-	write({ type: "native_followup_delivered", count: queued.length });
-	return queued.join("\n\n");
+	return queued;
 }
 
 /** Turns until no admitted follow-up is queued; settles when any turn reported, else returns the failing exit code. */
@@ -165,15 +163,20 @@ async function serve(first: string): Promise<number> {
 	let code = 1;
 	try {
 		const runDir = env.CP_RUN_DIR ?? "";
-		const left = claimFollowUps(runDir);
-		settleClaim(runDir);
-		if (left.length > 0) write({ type: "native_followup_delivered", count: left.length });
-		let prompt: string | undefined = [first, ...left].join("\n\n");
+		let claimed = claimFollowUps(runDir);
+		let prompt: string | undefined = [first, ...claimed].join("\n\n");
 		while (prompt !== undefined) {
-			const ran = await turn(prompt);
+			// A claim settles only once its turn ran: a throw puts the sends back ahead of newer ones, never delivered.
+			const ran = await turn(prompt).catch((error: unknown) => {
+				returnClaim(runDir);
+				throw error;
+			});
+			settleClaim(runDir);
+			if (claimed.length > 0) write({ type: "native_followup_delivered", count: claimed.length });
 			reported ||= ran.reported;
 			code = ran.code;
-			prompt = await dueFollowUps(ran);
+			claimed = await dueFollowUps(ran);
+			prompt = claimed.length > 0 ? claimed.join("\n\n") : undefined;
 		}
 	} finally {
 		busy = false;
