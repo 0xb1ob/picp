@@ -18,7 +18,7 @@ process.env.TZ = "UTC";
 const NOON = Date.parse(`${new Date().toISOString().slice(0, 10)}T12:00:00Z`);
 const iso = (minutes: number) => new Date(NOON - minutes * 60_000).toISOString();
 const CHAT = "#sessions?view=you&transcript=1";
-const A = "th-aaaaaaaaaaaaaaaa", B = "th-bbbbbbbbbbbbbbbb";
+const A = "th-aaaaaaaaaaaaaaaa", B = "th-bbbbbbbbbbbbbbbb", BETA = "Бета 測試 🧵";
 const AT = "2026-11-04T12:00:00.000Z";
 const TEXTS = ["ALPHA-ASK", "ALPHA-REPLY", "BETA-ASK", "BETA-REPLY", "OLD-ASK", "OLD-REPLY"];
 
@@ -33,7 +33,7 @@ function seed(stateDir: string, home: string) {
 	put(operatorSessionsFile(join(stateDir, "sessions")), jsonl([{ at: iso(60), session_file: chat }]));
 	const create = (n: number, thread_id: string, name: string) => ({ v: 1, type: "create", at: AT, request_id: `dc-20261104120000-0000000${n}`, thread_id, name, peer: null });
 	const bind = (kind: string, id: string, thread_id: string, session_id?: string) => ({ v: 1, type: "bind", at: AT, key: { kind, id, ...(session_id ? { session_id } : {}) }, thread_id });
-	put(namedThreadsFile(stateDir), jsonl([create(1, A, "Alpha"), create(2, B, "Beta"), bind("message", "u0000002", A, "s11-session"), bind("message", "u0000003", B, "s11-session"),
+	put(namedThreadsFile(stateDir), jsonl([create(1, A, "Alpha"), create(2, B, BETA), bind("message", "u0000002", A, "s11-session"), bind("message", "u0000003", B, "s11-session"),
 		bind("ask", "ask-aaaa", A), bind("job", "cp-ja", A), bind("job", "cp-jb", B)]));
 	const ask = (id: string, question: string) => ({ type: "open", id, created_at: iso(20), project: "picp", question, options: [{ label: "Keep", consequence: "Stays" }], recommendation: "Keep", source_escalation: "es-open", job_ids: [] });
 	put(join(stateDir, "operator", "asks.jsonl"), jsonl([ask("ask-aaaa", "ALPHA-DECISION?"), ask("ask-0000", "UNTAGGED-DECISION?")]));
@@ -49,7 +49,7 @@ const shown = (tab: Tab) => TEXTS.filter((text) => tab.$(".session-entries")!.te
 const scope = (tab: Tab) => [shown(tab), tab.$(".session-strip-count")?.textContent, tab.$(".session-pinned")?.textContent?.match(/[A-Z]+-DECISION\?/g) ?? []];
 async function go(tab: Tab, thread: string) {
 	tab.go(thread ? `${CHAT}&thread=${thread}` : CHAT);
-	await until(() => tab.$(".session-heading-id strong")?.textContent, (s) => s === (thread === A ? "# Alpha" : thread === B ? "# Beta" : thread ? "# No thread" : "Operator"), `heading for ${thread || "All"}`);
+	await until(() => tab.$(".session-heading-id strong")?.textContent, (s) => s === (thread === A ? "# Alpha" : thread === B ? `# ${BETA}` : thread ? "# No thread" : "Operator"), `heading for ${thread || "All"}`);
 	await settle();
 }
 async function type(tab: Tab, value: string) {
@@ -57,19 +57,27 @@ async function type(tab: Tab, value: string) {
 	await settle();
 }
 const sent = (tab: Tab) => tab.requests.filter((r) => r.method === "POST" && r.path === "/api/operator/message").map((r) => JSON.parse(r.body!) as Record<string, unknown>);
+const queued = (tab: Tab) => ["TO-NO-THREAD", "DRAFT-A"].filter((text) => tab.$(".session-entries")!.textContent!.includes(text));
 
 test("S11-thread-ui: tabs and # scope rows, asks, jobs and drafts; No thread sends an explicit null; All shows everything", { timeout: 180_000 }, async (t) => {
 	const d = await dashboard(t, { at: new Date(NOON).toISOString(), seed });
-	await operatorSession(t, d.stateDir);
+	// A busy owner queues every send, so each stays a pending send under the thread it was sent from.
+	await operatorSession(t, d.stateDir, () => false);
 	const storage = new Map<string, string>();
 	const tab = await openTab(t, d.port, CHAT, storage, undefined, {}, true);
-	browserShims(t, tab);
+	const focused = browserShims(t, tab);
 	await tab.waitText(/BETA-REPLY/);
-	await tab.find(".thread-row", (a) => a.textContent!.includes("Beta"));
+	await tab.find(".thread-row", (a) => a.textContent!.includes(BETA));
 	await tab.find(".operator-composer-hash");
 	const all = scope(tab), context = tab.$(".session-heading-state")!.textContent;
 	assert.deepEqual(all, [TEXTS, "3 working", ["ALPHA-DECISION?", "UNTAGGED-DECISION?"]], "All messages: every loaded message, ask and job");
-	assert.deepEqual(tab.$$(".thread-row").map((a) => a.textContent!.replace(/\d+ new$/, "")), ["#All messages", "#Alpha", "#Beta", "#No thread"]);
+	assert.deepEqual(tab.$$(".thread-row").map((a) => a.textContent!.replace(/\d+ new$/, "")), ["#All messages", "#Alpha", `#${BETA}`, "#No thread"]);
+	// Ctrl+N opens New thread with focus in its name field; Escape closes it.
+	tab.window.dispatchEvent(Object.assign(new tab.window.Event("keydown", { bubbles: true, cancelable: true }), { key: "n", ctrlKey: true }));
+	await settle();
+	assert.equal(focused()?.getAttribute("aria-label"), "Thread name", "Ctrl+N focuses the new thread's name field");
+	tab.key(tab.$(".thread-create")!, "Escape");
+	await settle();
 
 	await go(tab, A);
 	assert.deepEqual(scope(tab), [["ALPHA-ASK", "ALPHA-REPLY"], "1 working", ["ALPHA-DECISION?"]], "Alpha: its recorded turn, ask and job only");
@@ -79,12 +87,18 @@ test("S11-thread-ui: tabs and # scope rows, asks, jobs and drafts; No thread sen
 	assert.equal(field(tab).value, "", "Beta does not reuse Alpha's draft");
 	await type(tab, "DRAFT-B");
 	// The `#` picker moves the selection as a tab does; it never sends.
+	const beta = tab.window.location.hash;
 	tab.click(tab.$(".operator-composer-hash")!);
 	tab.click(await tab.find("#operator-composer-command-menu button", (b) => b.textContent!.includes("Alpha")));
 	await settle();
 	tab.go(tab.window.location.hash);
 	await until(() => field(tab)?.value, (v) => v === "DRAFT-A", "Alpha's own draft back");
-	assert.deepEqual(tab.$$(".thread-tab a").map((a) => a.textContent), ["Operator · All messages", "# Alpha", "# Beta"], "each visited thread keeps a tab");
+	assert.deepEqual(tab.$$(".thread-tab a").map((a) => a.textContent), ["Operator · All messages", "# Alpha", `# ${BETA}`], "each visited thread keeps a tab");
+	assert.ok(tab.$$(".thread-tab a").every((a) => a.getAttribute("href")?.startsWith("#") && a.getAttribute("tabindex") !== "-1"), "every tab is a focusable link");
+	// Browser back fires hashchange to the previous hash: Beta's selection and its own draft return.
+	tab.go(beta);
+	await until(() => field(tab)?.value, (v) => v === "DRAFT-B", "Beta's own draft back");
+	assert.equal(tab.$(".operator-composer-hash")?.textContent?.includes(BETA), true, "the # chip names the Unicode thread");
 
 	await go(tab, "none");
 	assert.deepEqual(scope(tab), [["OLD-ASK", "OLD-REPLY"], "1 working", ["UNTAGGED-DECISION?"]], "No thread: untagged history, never inferred");
@@ -97,9 +111,13 @@ test("S11-thread-ui: tabs and # scope rows, asks, jobs and drafts; No thread sen
 	tab.click(tab.$(".operator-composer-send")!);
 	await until(() => sent(tab).length, (c) => c === 2, "the Alpha send");
 	assert.deepEqual([sent(tab)[1]!.text, sent(tab)[1]!.thread_id], ["DRAFT-A", A], "Alpha's draft sends to Alpha");
+	await until(() => queued(tab).join(), (q) => q === "DRAFT-A", "Alpha's pending send shown");
+	await go(tab, B);
+	assert.deepEqual(queued(tab), [], "Beta shows neither pending send");
 
 	await go(tab, "");
 	assert.deepEqual([scope(tab), tab.$(".session-heading-state")!.textContent], [all, context], "All messages again: every loaded message, the same model and context");
+	assert.deepEqual(queued(tab), ["TO-NO-THREAD", "DRAFT-A"], "All messages shows every pending send");
 });
 
 test("S11-thread-ui-old-owner: an owner from before S8 gets no # picker and a disabled New thread naming the restart", { timeout: 180_000 }, async (t) => {
