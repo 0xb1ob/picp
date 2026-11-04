@@ -1141,11 +1141,14 @@ try {
 			rail: [...document.querySelectorAll(".thread-row")].filter(r => r.getClientRects().length).map(r => Math.round(r.getBoundingClientRect().height)),
 			picker: [...document.querySelectorAll("#operator-composer-command-menu button")].map(b => b.getAttribute("aria-pressed") + " " + b.querySelector("code").textContent.slice(0, 20)) })`;
 		const picker: Step = [`document.querySelector(".operator-composer-hash").click()`, `!!document.querySelector("#operator-composer-command-menu[aria-label='Send to thread']")`];
+		// Resting: the drawer's dialog focuses its first control, so blur it (no focus ring in the shot).
+		const drawerT: Step = [`document.querySelector(".workspace-sessions-open").click()`, `(document.activeElement.blur(), !!document.querySelector(".workspace-sessions[open] .thread-row"))`];
 		const shotsT: Array<[string, string, number, number, Step[], Record<string, unknown>]> = [
 			["desktop", selected, 1440, 1000, [], { rows: "true,false", heading: "# Billing and invoices for the picp drawer slice, a thread name long enough to ellipsize" }],
 			["picker-desktop", selected, 1440, 1000, [picker], { rows: "true,false" }],
 			["phone", selected, 390, 844, [], { rows: "true,false" }],
 			["picker-phone", selected, 390, 844, [picker], { rows: "true,false" }],
+			["drawer", selected, 390, 844, [drawerT], { rows: "true,false" }],
 			["all-desktop", transcript, 1440, 1000, [], { rows: "true,true", heading: "Operator" }],
 		];
 		for (const [name, hash, width, height, steps, want] of shotsT) {
