@@ -6,8 +6,14 @@
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-/** Options a command accepts: letters, letters taking a value, long (or find primary) names, names taking a value. */
-type Options = { short?: string; shortValue?: string; long?: readonly string[]; longValue?: readonly string[]; digits?: boolean };
+/**
+ * Options a command accepts: letters, letters taking a value (`attached`: only as `-U3`), long (or find primary)
+ * names, names taking a value, and names whose value is optional so they count only in `--name=value` form.
+ */
+type Options = {
+	short?: string; shortValue?: string; attached?: string;
+	long?: readonly string[]; longValue?: readonly string[]; longEquals?: readonly string[]; digits?: boolean;
+};
 
 // Allow-lists, not deny-lists: an option that runs a program, writes a file or opens a pager is never added here.
 const READ_ONLY: Record<string, Options> = {
@@ -37,9 +43,10 @@ const READ_ONLY: Record<string, Options> = {
 };
 const GIT_PRETTY = ["--oneline", "--stat", "--name-only", "--name-status", "--no-ext-diff", "--no-textconv"];
 const GIT_READ: Record<string, Options> = {
-	log: { short: "p", shortValue: "n", digits: true, long: GIT_PRETTY, longValue: ["--since", "--until", "--author", "--format", "--pretty"] },
-	show: { short: "s", long: [...GIT_PRETTY, "--no-patch"], longValue: ["--format", "--pretty"] },
-	diff: { shortValue: "U", long: [...GIT_PRETTY, "--cached", "--staged"] },
+	// git's `--pretty[=<fmt>]`, `--format=<fmt>` and diff `-U[<n>]` take an optional value, never the next word.
+	log: { short: "p", shortValue: "n", digits: true, long: GIT_PRETTY, longValue: ["--since", "--until", "--author"], longEquals: ["--format", "--pretty"] },
+	show: { short: "s", long: [...GIT_PRETTY, "--no-patch"], longEquals: ["--format", "--pretty"] },
+	diff: { shortValue: "U", attached: "U", long: [...GIT_PRETTY, "--cached", "--staged"] },
 	status: { short: "sb", long: ["--short", "--porcelain", "--branch"] },
 	"ls-files": {},
 	blame: { short: "w", shortValue: "L" },
@@ -59,22 +66,34 @@ function own(table: Record<string, Options>, key: string): Options | undefined {
 	return Object.hasOwn(table, key) ? table[key] : undefined;
 }
 
-/** The first option in `args` that `options` does not name, as written; GNU tools and git bundle short letters. */
+/**
+ * The first option in `args` that `options` does not name, as written; GNU tools and git bundle short letters.
+ * A value is attached (`--opt=v`, `-n5`) or the next word, which must not start with `-`, so no value hides an option.
+ */
 function unlistedOption(options: Options, args: readonly string[], primaries: boolean): string | undefined {
+	const separateValue = (i: number) => args[i + 1] !== undefined && !(args[i + 1] as string).startsWith("-");
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i] as string;
 		if (arg === "--" && !primaries) return undefined;
 		if (!arg.startsWith("-") || arg === "-" || (options.digits === true && /^-\d+$/.test(arg))) continue;
 		if (primaries || arg.startsWith("--")) {
 			const key = arg.split("=")[0] as string;
-			if (options.longValue?.includes(key) === true) i += arg.includes("=") ? 0 : 1;
-			else if (options.long?.includes(key) !== true) return key;
+			if (options.longValue?.includes(key) === true) {
+				if (arg.includes("=")) continue;
+				if (!separateValue(i)) return key;
+				i++;
+			} else if (options.longEquals?.includes(key) === true ? !arg.includes("=") : options.long?.includes(key) !== true) {
+				return key;
+			}
 			continue;
 		}
 		for (let j = 1; j < arg.length; j++) {
 			const letter = arg[j] as string;
 			if (options.shortValue?.includes(letter) === true) {
-				i += j === arg.length - 1 ? 1 : 0;
+				const last = j === arg.length - 1;
+				if (options.attached?.includes(letter) === true && !/^\d+$/.test(arg.slice(j + 1))) return `-${letter}`;
+				if (last && !separateValue(i)) return `-${letter}`;
+				i += last ? 1 : 0;
 				break;
 			}
 			if (options.short?.includes(letter) !== true) return `-${letter}`;

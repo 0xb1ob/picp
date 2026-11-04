@@ -219,7 +219,9 @@ N3b, which must keep every layer below on.
   option; picp does not install it. The policy lexes the command and runs it only when every segment is a named
   read-only command (`rg`, `grep`, `ls`, `cat`, `head`, `wc`, `sort`, `find`, read-only `git` subcommands,
   `gh <noun> view|list|…`, and similar) using only options on that command's own allow-list: short clusters are
-  checked letter by letter (`git grep -nOrm` is refused at `O`) and long options match exactly, `=` form included;
+  checked letter by letter (`git grep -nOrm` is refused at `O`) and long options match exactly, `=` form included; a
+  value is attached (`--opt=v`, `-n5`) or the next word, which must not start with `-` (so `git log -n --output=f`
+  is refused); git's optional-value `--pretty`/`--format` count only as `--pretty=…` and `-U` only as `-U<digits>`;
   `find` takes only its listed primaries. A deny-list of dangerous flags did not converge (`sort --compress-program`,
   `rg --hostname-bin`, `git grep -O`, `file -C` each turned up in review), so nothing outside the lists runs and
   `file` is gone. Also refused: redirects (other than to `/dev/null` or fd dup), command substitution, every `$`
@@ -288,4 +290,4 @@ never opens it. Recommend an auth-only settings file for workers.
 | Lockdown check | 22–36 ms after init (fake cold start 390 ms) |
 | Live smoke (one run, before R1/R2) | exit 0, verdict ok, counts as in the table, no extras |
 | `node_modules` | 231 MB, unchanged (+39 MB over main before N2) |
-| Files | `claude-spike.ts` 522, `claude-bash-policy.ts` 210, `claude-lockdown.ts` 96, gates e2e 262 lines |
+| Files | `claude-spike.ts` 522, `claude-bash-policy.ts` 230, `claude-lockdown.ts` 96, gates e2e 268 lines |

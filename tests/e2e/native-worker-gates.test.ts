@@ -3,6 +3,7 @@
  * write scope, G2 resume and interrupt, G3 loaded-surface lockdown, R1 env and secret paths; synthetic config only.
  */
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,6 +55,8 @@ async function withFixture(body: (fixture: Fixture) => Promise<void>): Promise<v
 
 test("G1: a research run's Bash cannot write the worktree or anywhere else; named read-only commands still run", { skip, timeout: 180_000 }, async () => {
 	await withFixture(async ({ root, worktree, run }) => {
+		// A real repo, so the git `--output` shapes (controls n and o) would write into it if they ran.
+		execFileSync("git", ["init", "-q", worktree]);
 		const writes = [
 			`echo x > ${worktree}/redirect.txt`,
 			`echo x >> ${worktree}/append.txt`,
@@ -78,6 +81,9 @@ test("G1: a research run's Bash cannot write the worktree or anywhere else; name
 			`sort -S 1 --compress-program=sh ${worktree}/README.md`,
 			`git grep --no-index -nOrm gates`,
 			`file -C -m /dev/null`,
+			`git log --pretty --output=${worktree}/pretty.txt`,
+			`git show --format --output=${worktree}/format.txt`,
+			`git diff -U --output=${worktree}/diff.txt`,
 		];
 		const provider = await startClaudeMockProvider([
 			...writes.map(bash),
@@ -88,7 +94,7 @@ test("G1: a research run's Bash cannot write the worktree or anywhere else; name
 		await provider.close();
 		assert.equal(result.lockdown?.verdict, "ok", result.error);
 		// Every write shape was denied before it ran: the worktree and its parent hold only what the test made.
-		assert.deepEqual(readdirSync(worktree), ["README.md"]);
+		assert.deepEqual(readdirSync(worktree).sort(), [".git", "README.md"]);
 		assert.equal(readFileSync(join(worktree, "README.md"), "utf8"), "gates repo readme\n");
 		assert.deepEqual(readdirSync(root).sort(), ["artifacts", "repo"]);
 		assert.equal(result.denials.length, writes.length, result.denials.map((denial) => denial.reason).join("\n"));

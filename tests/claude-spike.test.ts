@@ -85,6 +85,7 @@ test("readOnlyBashRefusal: named read-only commands run; expansions, writers, en
 		"sort -nr -k 2 f",
 		"git grep -n -e x; tail -5 f; head -n5 f",
 		"git log -n 3 --format=%H -- src",
+		"git show --pretty=oneline HEAD; git diff -U3 HEAD",
 	]) assert.equal(bashRefusal(command), undefined, command);
 	for (const [command, why] of [
 		["echo x > f", "a redirect"],
@@ -105,6 +106,14 @@ test("readOnlyBashRefusal: named read-only commands run; expansions, writers, en
 		["git grep -nOrm x", "`git grep` option `-O`"],
 		["git grep -O rm x", "`git grep` option `-O`"],
 		["git grep --open-files-in-pager=rm x", "`git grep` option `--open-files-in-pager`"],
+		["git log --pretty --output=/repo/f", "`git log` option `--pretty`"],
+		["git show --format --output=/repo/f", "`git show` option `--format`"],
+		["git diff -U --output=f", "`git diff` option `-U`"],
+		["git diff -U3 --output=f", "`git diff` option `--output`"],
+		["git log -n --output=f", "`git log` option `-n`"],
+		["git log --since --output=f", "`git log` option `--since`"],
+		["rg -e -- --pre=sh x", "`rg` option `-e`"],
+		["head -n", "`head` option `-n`"],
 		["file -C -m f", "`file` (not on the read-only list)"],
 		["find . -delete", "`find` option `-delete`"],
 		["find . -name x -fprint f", "`find` option `-fprint`"],
