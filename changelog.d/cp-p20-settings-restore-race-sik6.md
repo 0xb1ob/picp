@@ -1,0 +1,1 @@
+- Settings: a Save or Restore click in another section while one write is in flight now queues instead of being dropped; each write carries the revision the previous one left.

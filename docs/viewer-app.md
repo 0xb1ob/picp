@@ -560,7 +560,9 @@ its source, then a Parent thinking / Operator thinking select of pi's levels for
 <source>" line, or "Off" with the diagnostic; a number below its minimum or not whole shows the reason and blocks Save,
 since an invalid parent value disables parent auto-compaction). It reads `GET /api/settings`
 on mount and after each write; a write is one `POST /api/settings/apply` (only the drafted keys) or `/restore` with
-`If-Match` and the operator session's `x-cp-control-token` from `/api/operator/control`. A 412 swaps in the fresh
+`If-Match` and the operator session's `x-cp-control-token` from `/api/operator/control`. Writes queue one at a time, each
+on the revision the previous one left: a click in another section is never dropped, and only the section in flight
+disables its own Save/Restore (fields stay locked while any write runs). A 412 swaps in the fresh
 snapshot and keeps the drafts ("Changed on disk"), a 400 lists its errors, and every control is disabled with the reason
 when the response is not `writable`. The last five audit lines sit at the foot. `screens/settings.css`: one column at
 390 px with 44 px controls (fallback chip selects and × have 44 px hit areas below 900 px) and `overflow-wrap: anywhere`; from 900 px the rubric columns are 200 px Rule / 250 px Model / flexible fallbacks / 110 px Thinking. Screenshots:

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { readControl } from "./control.ts";
 import { type Drafts, readSettings, type RestoreSelector, type SettingsStatus, type SettingsView, writeSettings } from "./settings-control.ts";
 
@@ -11,7 +11,8 @@ type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, init)): SettingsView {
  const [status, setStatus] = useState<SettingsStatus | null>(null);
  const [token, setToken] = useState<string | null>(null);
- const [busy, setBusy] = useState(false);
+ const [writes, setWrites] = useState(0);
+ const pending = useRef(0), revision = useRef<string | undefined>(undefined), queue = useRef<Promise<unknown>>(Promise.resolve());
  const [notice, setNotice] = useState<SettingsView["notice"]>(null);
  const [generation, setGeneration] = useState(0);
  useEffect(() => {
@@ -20,22 +21,24 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
   void Promise.all([readSettings(fetcher, controller.signal), readControl(fetcher, controller.signal, false)]).then(([settings, control]) => {
    if (controller.signal.aborted) return;
    setStatus(settings);
+   // A read that raced a queued write may predate it: only an idle page takes its revision.
+   if (!("error" in settings) && pending.current === 0) revision.current = settings.snapshot?.revision;
    setToken("error" in control || !control.running ? null : control.token ?? null);
    // The server answers at once while its first `pi --list-models` run is going: ask again shortly (bounded: that run ends in at most 8 s).
    if (!("error" in settings) && settings.models_loading) retry = setTimeout(() => setGeneration(value => value + 1), 2000);
   });
   return () => { controller.abort(); clearTimeout(retry); };
  }, [generation]);
- const write = async (body: {changes: Drafts} | RestoreSelector): Promise<boolean> => {
-  const revision = status && !("error" in status) ? status.snapshot?.revision : undefined;
-  if (!revision || !token || busy) return false;
-  setBusy(true);
-  const result = await writeSettings(fetcher, token, revision, body);
-  setBusy(false);
+ // Writes run one at a time, each on the revision the previous one left, so a click in another section is never dropped.
+ const send = async (body: {changes: Drafts} | RestoreSelector, token: string): Promise<boolean> => {
+  if (!revision.current) return false;
+  const result = await writeSettings(fetcher, token, revision.current, body);
   if ("error" in result) { setNotice({kind: "error", text: `Not saved: ${result.error}`, errors: []}); return false; }
   const answer = result.body;
-  if (result.status === 412 && answer.snapshot && status && !("error" in status)) {
-   setStatus({...status, snapshot: answer.snapshot});
+  if (answer.revision) revision.current = answer.revision;
+  if (result.status === 412 && answer.snapshot) {
+   const snapshot = answer.snapshot;
+   setStatus(current => current && !("error" in current) ? {...current, snapshot} : current);
    setNotice({kind: "stale", text: "Changed on disk since this page loaded: review your edits against the fresh values and save again", errors: []});
    return false;
   }
@@ -47,5 +50,13 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
   setNotice({kind: "error", text: `Not saved: ${answer.error ?? answer.state}`, errors: answer.errors ?? []});
   return false;
  };
- return {status, token, busy, notice, save: changes => write({changes}), restore: write};
+ const write = (body: {changes: Drafts} | RestoreSelector): Promise<boolean> => {
+  if (!token) return Promise.resolve(false);
+  pending.current++;
+  setWrites(count => count + 1);
+  const run = queue.current.then(() => send(body, token)).finally(() => { pending.current--; setWrites(count => count - 1); });
+  queue.current = run.catch(() => false);
+  return run;
+ };
+ return {status, token, busy: writes > 0, notice, save: changes => write({changes}), restore: write};
 }
