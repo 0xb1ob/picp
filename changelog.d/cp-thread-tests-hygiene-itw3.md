@@ -1,0 +1,1 @@
+- Thread tests hygiene (S10b/S11 review lows): pin self-review origin inheritance, serialize the intake test's cp_job updates, script its 503 retry up front, and cover thread-tab reload persistence and `session=` thread links; contracts note on the silent Decisions fallback. Tests and docs only.

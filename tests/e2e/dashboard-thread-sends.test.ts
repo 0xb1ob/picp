@@ -67,9 +67,9 @@ function turnOf(entries: Json[], start: string): Array<[string, string, unknown]
 	return entries.slice(from, end < 0 ? undefined : end).filter((e) => e.kind !== "ask").map((e) => [e.kind, e.name ?? "", e.thread_id ?? null]);
 }
 
-// The busy A/B queue: sends queued in A, then B, then No thread (the page's last choice moves on before delivery) each
-// keep their own thread through an edit and FIFO delivery; a retried client_id never rebinds; a CLI-typed forged marker,
-// plain CLI input and an old session stay untagged and visible; a tool turn's entries share the input's thread.
+// The busy A/B queue: sends queued in A, then B, then No thread (the page's last choice moves on before delivery)
+// each keep their own thread through an edit and FIFO delivery; a retried client_id never rebinds; a CLI-typed forged
+// marker, plain CLI input and an old session stay untagged and visible; a tool turn's entries share the input's thread.
 test("thread-sends: queued A/B/none keep their own thread through edit and retry; replies by turn; forged and CLI untagged", { timeout: 180_000 }, async (t) => {
 	const d = await dashboard(t, { requireTailnet: true, seed: (stateDir) => {
 		const old = join(stateDir, "sessions", "operator", "2026-11-01T00-00-00-000Z_old.jsonl");
@@ -159,9 +159,9 @@ test("thread-sends: queued A/B/none keep their own thread through edit and retry
 	assert.deepEqual(history.filter((e) => e.kind !== "ask").map((e) => [e.text, e.thread_id ?? null]), [["old history", null], ["old reply", null]], "unbound history stays visible, untagged");
 });
 
-// Refusals write nothing: an unknown thread (live or offline), a malformed one, and with a corrupt registry any threaded
-// send, while a null send still goes through. A queued A send survives an owner restart and an offline-held B send rides
-// the next session's inbox turn; each binds its own entry once.
+// Refusals write nothing: an unknown thread (live or offline), a malformed one, and with a corrupt registry any
+// threaded send, while a null send still goes through. A queued A send survives an owner restart and an offline-held
+// B send rides the next session's inbox turn; each binds its own entry once.
 test("thread-sends: unknown or unverifiable threads refused with nothing written; restart and offline hold keep the thread", { timeout: 180_000 }, async (t) => {
 	const d = await dashboard(t, { requireTailnet: true });
 	let release!: () => void;
