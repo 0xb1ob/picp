@@ -4,7 +4,8 @@ import type { AwaitingDetail, JobResponse, JobsResponse, SessionsResponse, Viewe
 import type { ControlView } from "../control.ts";
 import { matchesProject, type ProjectSelection, selectionHash, selectionValue } from "../project-filter.ts";
 import { jobHref, sessionHref } from "../routes.ts";
-import { JobDetail } from "../screens/JobDetail.tsx";
+import { phaseText } from "../format.ts";
+import type { JobDetail } from "../screens/JobDetail.tsx";
 import { useScreenData } from "../use-screen-data.ts";
 import type { ComposerMenuContext } from "./ComposerMenu.tsx";
 import { ConversationContext } from "./ConversationContext.tsx";
@@ -12,6 +13,7 @@ import { Icon } from "./icons.tsx";
 import { JobsDrawer } from "./JobsDrawer.tsx";
 import type { Answering } from "./QuickReplies.tsx";
 import { SessionDrawer } from "./SessionDrawer.tsx";
+import { type LogView, WorkspaceLog } from "./WorkspaceLog.tsx";
 import "./workspace.css";
 
 /** Ctrl/Cmd+J, matched the way Shell matches Ctrl/Cmd+K. */
@@ -29,21 +31,24 @@ export interface ChatContext {
 }
 
 type JobTab = Parameters<typeof JobDetail>[0]["initial"];
-/** One job beside the chat (desktop) or over it (phone): the existing job page, embedded, with a way back. */
-function JobPane({id, tab, onClose}: {id: string; tab: JobTab; onClose: () => void}) {
+const capital = (text: string) => text[0]!.toUpperCase() + text.slice(1);
+/** One job beside the chat (desktop) or over it (phone): a reply's link opens its Log, a drawer pick its Details. */
+function JobPane({id, tab, onClose, worker}: {id: string; tab: JobTab; onClose: () => void; worker: SessionsResponse["workers"][number] | undefined}) {
  const resource = useScreenData<JobResponse>(`/api/job/${encodeURIComponent(id)}`, "/api/stream?view=job");
  const close = useRef<HTMLButtonElement>(null);
+ const [view, setView] = useState<LogView>(tab === "transcript" ? "log" : "details");
  useEffect(() => { close.current?.focus(); }, [id]);
+ const job = resource.data?.job;
  return <section class="workspace-job" aria-label={`Job ${id}`}>
   <header class="workspace-job-bar">
-   <code title={id}>{id}</code>
+   <div class="workspace-job-name"><b title={job?.title ?? id}>{job?.title ?? id}</b>{job?.title && <code title={id}>{id}</code>}</div>
+   {job && <span class="workspace-job-phase">{capital(phaseText(job.phase))}</span>}
    <a class="workspace-full" href={jobHref(id)}>Full page</a>
-   <button ref={close} type="button" class="workspace-close" aria-label="Close job" onClick={onClose}><Icon name="close"/></button>
+   <button ref={close} type="button" class="workspace-close" aria-label="Close job" onClick={onClose}><span class="workspace-close-back"><Icon name="back"/></span><span class="workspace-close-x"><Icon name="close"/></span></button>
   </header>
-  <div class="workspace-job-body">
-   {resource.error && <p role="alert">{resource.error}{resource.data && " · showing last recorded data"}</p>}
-   {resource.data ? <JobDetail key={`${id}:${tab}`} data={resource.data} wide={false} initial={tab} embedded/> : <p role="status">{resource.error ? "Job unavailable" : "Loading"}</p>}
-  </div>
+  {resource.error && resource.data && <p role="alert" class="workspace-job-alert">{resource.error} · showing last recorded data</p>}
+  {resource.data ? <WorkspaceLog data={resource.data} view={view} onView={setView} initial={tab} worker={worker}/>
+   : <div class="workspace-job-body">{resource.error && <p role="alert">{resource.error}</p>}<p role="status">{resource.error ? "Job unavailable" : "Loading"}</p></div>}
  </section>;
 }
 
@@ -112,7 +117,7 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
     onClick={e => { if (panel) dismiss(); else if (nowWide()) setPanel("inspector"); else { from(e.currentTarget); setPanel("sheet"); } }}><Icon name="panel"/>{asked > 0 && <span class="workspace-badge workspace-badge-ask" aria-hidden="true">{asked}</span>}</button>
   </>,
   surfaces: <>
-   {job && <JobPane key={`${job.id}:${job.tab}`} id={job.id} tab={job.tab} onClose={closeJob}/>}
+   {job && <JobPane key={`${job.id}:${job.tab}`} id={job.id} tab={job.tab} onClose={closeJob} worker={chat.live.find(w => w.job_id === job.id)}/>}
    {panel === "inspector" && !job && <ConversationContext {...context} sheet={false}/>}
    {panel === "sheet" && <ConversationContext {...context} sheet/>}
    {sessions && <SessionDrawer onClose={closeSessions}>{chat.chats(selectionHash(sessionHref("you"), selectionValue(selection)))}</SessionDrawer>}

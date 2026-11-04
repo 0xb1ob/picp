@@ -18,7 +18,7 @@ import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
-	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs"];
+	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs", "full-match-log"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -29,7 +29,7 @@ const say = (id: string, at: string, who: string, text: string, over: Partial<Se
 	({ id, at, kind: "say", who, text, name: null, send_id: null, tag: null, failed: false, trace: [], ...over });
 const tool = (id: string, at: string, name: string, text: string, summary?: string): SessionEntry => ({ ...say(id, at, "Assistant", text), kind: "tool", name, ...(summary ? { summary } : {}) });
 /** Full match S2 shows job suffixes, so its ids end in four characters like real picp ids; S3 reuses its data. */
-const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs";
+const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log";
 const JOB = S2 ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
 /** A cp-bridge wake as the transcript carries it: first line parsed off, `paths:` resolved (one left unresolved). */
 const wake: SessionEntry = say("w1", "2026-10-15T08:03:30Z", "cp-bridge", [
@@ -171,6 +171,7 @@ const profile = mkdtempSync(join(tmpdir(), "cp-sessions-v2-chrome-"));
 const streams = new Set<ServerResponse>();
 const posts: string[] = [], unexpected: string[] = [];
 let chrome: ChildProcess | undefined;
+let reportGone = false;
 const server = createServer();
 const deadline = <T>(what: string, ms: number, run: Promise<T>) => {
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -222,6 +223,23 @@ try {
 			row("cp-flaky-shard-fl4k", "picp", "failed", "Rerun the flaky shard", { finished_today: true, finished_at: "2026-10-15T09:40:00Z", cost_usd: 0.12 }),
 		] };
 	}
+	// Full match S4: the reply's job is a working implementer with a log, a report.md and a worktree root.
+	if (args.stage === "full-match-log") {
+		sessions.workers = [...sessions.workers, { id: JOB, kind: "worker", job_id: JOB, role: "implementer", model: "fixture-model", thinking: "high", phase: "waiting", run_phase: "working", live: true, last_activity: "2026-10-15T08:04:30Z" }];
+		const read = (id: string, path: string, out: string) => tool(id, "2026-10-15T08:01:00Z", "read", `Arguments\n${JSON.stringify({ path })}\n\nResult\n${out}`);
+		const bash = (id: string, command: string, out: string) => tool(id, "2026-10-15T08:02:00Z", "bash", `Arguments\n${JSON.stringify({ command })}\n\nResult\n${out}`);
+		routes[`/api/job/${JOB}`] = { ...job, report_href: `#report/${JOB}`, files_href: `/#files?root=worktree%3A${JOB}&path=`, ask_reference: { kind: "job", project: "picp", job_id: JOB },
+			evidence_lookup: { supported: true, why: "fixture" }, job: { ...job.job, phase: "working", model: "fixture-model", title: "Restyle the embedded job log so a long title keeps to one line in the pane header" } };
+		routes[`/api/job/${JOB}/transcript`] = { truncated: false, warning: null, from: null, to: null, entries: [
+			say("l1", "2026-10-15T08:00:00Z", "Parent", "Implement full match S4 from the task file."), read("l2", "viewer-app/components/WorkspaceSurfaces.tsx", "126 lines"),
+			bash("l3", "rg -n \"JobPane\" viewer-app", "viewer-app/components/WorkspaceSurfaces.tsx:31\nviewer-app/components/WorkspaceSurfaces.tsx:112"),
+			say("l4", "2026-10-15T08:03:00Z", "Worker", "The pane reuses the job page's transcript read, so the Log adds no second loader."),
+			tool("l5", "2026-10-15T08:03:30Z", "edit", `Arguments\n${JSON.stringify({ path: "viewer-app/components/workspace-log-with-a-very-long-file-name-that-wraps.css" })}\n\nResult\nApplied 2 edits`),
+			bash("l6", "npm run test:one -- tests/e2e/viewer-m3-jobs.test.ts", "ℹ tests 7\nℹ pass 7\nℹ fail 0"),
+			say("l7", "2026-10-15T08:04:00Z", "Worker", "Tests pass. Opening the draft PR next.")] };
+		routes[`/api/report/${JOB}`] = { generated_at: GENERATED, job_id: JOB, title: "Embedded job log", bytes: 160, truncated: false, modified_at: "2026-10-15T08:04:00Z",
+			text: "# Embedded job log\n\nThe chat pane opens a job's **Log**, **Report** and **Files**.\n\n- Log: the worker's tool output in order\n- Ask: drafts a P1 reference in Chat" };
+	}
 	// Every chat's context now reads /api/jobs; stages without their own list (or the real viewer's) get an empty one.
 	if (!routes["/api/jobs"] && !["m3-transcript", "nav-simplify", "p3-quota", "m3-shell"].includes(args.stage)) routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [] };
 	// M3 slice 4: the composer menu attaches the done job's own P1 reference, as its job page's Ask would.
@@ -236,6 +254,9 @@ try {
 			for (const stream of streams) stream.write("event: refresh\ndata: sessions\n\n");
 			return send(200, "application/json", "{}");
 		}
+		// Full match S4: the report.md stops reading after the job lists it (unavailable, never an empty page).
+		if (path === "/fixture/report-gone") { delete routes[`/api/report/${JOB}`]; reportGone = true; return send(200, "application/json", "{}"); }
+		if (reportGone && path === `/api/report/${JOB}`) return send(404, "application/json", '{"error":"no such report"}');
 		if (path === "/") return send(200, "text/html; charset=utf-8", appPage(app));
 		const asset = app.assets[path];
 		if (asset) return send(200, asset.mime, asset.bytes);
@@ -784,6 +805,44 @@ try {
 			if (off.length) throw new Error(`full-match-jobs-${name}: ${off.join("; ")}`);
 		}
 		if (posts.length) throw new Error(`full-match-jobs sent ${posts.join(", ")}: the drawer only reads`);
+	}
+	if (stage === "full-match-log") {
+		// Full match S4 (frames 2/8), reached by a real click on the reply's job link. Negative controls: a link that follows
+		// the route fails `pane`, a Diff tab `tabs`, a coloured tool name or phase `tones`, an empty report `report`.
+		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
+			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
+			const color = s => q(s) ? getComputedStyle(q(s)).color : null;
+			return { pane: box("section.workspace-job"), chat: !!q(".sessions .session-transcript"), tabs: all(".workspace-log-tabs [role=tab]").map(b => b.textContent).join(),
+				name: all(".workspace-job-name > *").map(e => e.textContent).join(" | "), phase: q(".workspace-job-phase")?.textContent ?? null,
+				who: all(".workspace-log-who p").map(p => p.textContent).join(" | "), rows: all(".workspace-log-row").length, mono: q(".workspace-log-lines") ? getComputedStyle(q(".workspace-log-lines")).fontFamily.includes("Mono") : null,
+				tones: [color(".workspace-log-tool b"), color(".workspace-job-phase")].join(" | "), ask: q(".workspace-log-ask a")?.textContent ?? null, chip: !!q(".evidence-chip"),
+				report: q(".workspace-log-report h1, .workspace-log-report h2")?.textContent ?? q(".workspace-job [role=status]")?.textContent ?? null,
+				measure: { bar: box(".workspace-job-bar"), tabs: box(".workspace-log-tabs"), tab: box(".workspace-log-tab"), who: box(".workspace-log-who"), row: box(".workspace-log-row"), ask: box(".workspace-log-ask"), entry: box(".workspace-log-ask a") },
+				small: innerWidth < 900 ? all(".workspace-job-bar button, .workspace-job-bar a, .workspace-log-tab, .workspace-log-ask a").filter(e => e.getBoundingClientRect().height < 44).map(e => e.className || e.textContent).join() : "",
+				outside: all(".workspace-job button, .workspace-job a, .workspace-job code, .workspace-log-row").filter(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }).map(e => e.className || e.textContent).join() }; })()`;
+		const steps: Step = [`document.querySelector('.session-steps > .session-tools[title="${JOB}"]').click()`, `!!document.querySelector(".session-steps-link")`];
+		const reply: Step = [`document.querySelector(".session-steps-link").click()`, `document.querySelectorAll(".workspace-log-row").length === 7`];
+		const report: Step = [`[...document.querySelectorAll(".workspace-log-tab")].find(b => b.textContent === "Report").click()`, `!!document.querySelector(".workspace-log-report, .workspace-log-empty")`];
+		const ask: Step = [`document.querySelector(".workspace-log-ask a").click()`, `!!document.querySelector(".evidence-chip")`];
+		const gone: Step = [`fetch("/fixture/report-gone")`, "true"];
+		const tabs = "Log,Report,Files,Details", tones = "rgb(237, 237, 237) | rgb(180, 180, 180)", who = "implementer · fixture-model · high | worktree:cp-sessions-v2-m4xq";
+		const logged = { chat: true, tabs, phase: "Working", who, rows: 7, mono: true, tones, ask: "Ask about this job…", small: "", outside: "" };
+		// The committed five: desktop, desktop-report, phone, phone-ask and unavailable (dark, picp only).
+		const shotsL: [string, number, number, Step[], object][] = [
+			["desktop", 1440, 1000, [steps, reply], { ...logged, pane: "919 0 521 1000" }],
+			["desktop-report", 1440, 1000, [steps, reply, report], { tabs, report: "Embedded job log", outside: "" }],
+			["phone", 390, 844, [steps, reply], { ...logged, pane: "0 0 390 844" }],
+			["phone-ask", 390, 844, [steps, reply, ask], { pane: null, chip: true, outside: "" }],
+			["unavailable", 1440, 1000, [gone, steps, reply, report], { tabs, report: "Report unavailable · report.md could not be read", ask: "Ask about this job…", outside: "" }],
+		];
+		for (const [name, width, height, run, want] of shotsL) {
+			await capture(`full-match-log-${name}`, transcript, width, height, "dark", loaded, "bottom", run);
+			const got = await evaluate(look);
+			console.log(`measured ${name} ${JSON.stringify(got)}`);
+			const off = Object.entries(want).filter(([k, v]) => got[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k])} (want ${JSON.stringify(v)})`);
+			if (off.length) throw new Error(`full-match-log-${name}: ${off.join("; ")}`);
+		}
+		if (posts.length) throw new Error(`full-match-log sent ${posts.join(", ")}: the log and its Ask only read`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

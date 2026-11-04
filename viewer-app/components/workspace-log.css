@@ -1,0 +1,52 @@
+/*
+ * Full match S4 (frames 2/8): the chat's job pane as a read-only log surface. Palette: tool names, the log glyphs and
+ * the phase pill stay neutral; nothing here takes amber or coral.
+ */
+/* Specific enough to win over workspace.css, which the bundle loads after this file. */
+.workspace-job > .workspace-job-bar { gap: 8px; min-height: 56px; padding-left: 4px; }
+.workspace-job-bar > .workspace-close { order: -1; }
+.workspace-close-back, .workspace-close-x { display: flex; }
+.workspace-job-bar .workspace-close-x { display: none; }
+.workspace-job-name { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.workspace-job-name > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; line-height: 20px; }
+.workspace-job-name > code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; color: var(--dim); }
+.workspace-job-phase { flex-shrink: 0; max-width: 120px; padding: 2px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; }
+.workspace-job-alert { margin: 0; padding: 8px 16px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--divider); }
+.workspace-log { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.workspace-log-tabs { display: flex; flex-shrink: 0; gap: 2px; align-self: flex-start; max-width: calc(100% - 28px); margin: 10px 14px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
+.workspace-log-tab { flex-shrink: 0; min-height: 44px; padding: 0 12px; background: none; color: var(--dim); border: 0; border-radius: 7px; font: inherit; font-size: 13px; cursor: pointer; }
+.workspace-log-tab:hover { color: var(--text); }
+.workspace-log-tab-on { background: var(--toggle); color: var(--text); }
+.workspace-log .workspace-job-body { padding-top: 4px; }
+.workspace-log .job-detail-embedded .job-detail-title { display: none; }
+.workspace-log-who { display: flex; gap: 14px; align-items: flex-start; min-width: 0; padding-bottom: 14px; margin-bottom: 16px; border-bottom: 1px solid var(--divider); font-family: var(--font-mono); font-size: 13px; line-height: 20px; }
+.workspace-log-mark { flex-shrink: 0; width: 40px; padding: 4px 0; text-align: center; font-size: 12px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+.workspace-log-who > div { min-width: 0; }
+.workspace-log-who code { font-family: inherit; color: var(--text); overflow-wrap: anywhere; }
+.workspace-log-who p { margin: 0; color: var(--dim); overflow-wrap: anywhere; }
+.workspace-log-lines { display: flex; flex-direction: column; gap: 14px; font-family: var(--font-mono); font-size: 13px; line-height: 20px; color: var(--text); }
+.workspace-log-lines p, .workspace-log-lines pre { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.workspace-log-lines > p { color: var(--dim); }
+.workspace-log-tool b { font-weight: 600; }
+.workspace-log-tool pre { padding-left: 14px; font-family: inherit; color: var(--dim); }
+.workspace-log-note { color: var(--dim); }
+.workspace-log-empty, .workspace-log-meta { margin: 0 0 12px; font-size: 13px; color: var(--dim); overflow-wrap: anywhere; }
+.workspace-log-files { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.workspace-log-ask { flex-shrink: 0; padding: 12px 10px; padding-bottom: max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--divider); }
+.workspace-log-ask > .evidence-ask { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 0 8px 0 16px; background: var(--surface); color: var(--dim); border: 1px solid var(--border); border-radius: 14px; font-size: 15px; text-decoration: none; overflow-wrap: anywhere; }
+.workspace-log-ask > .evidence-ask::after { content: "↑"; display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 36px; border-radius: 9px; background: var(--text); color: var(--background); font-size: 16px; }
+.workspace-log-ask > .evidence-ask:hover { color: var(--text); }
+
+@media (min-width: 900px) {
+ .workspace-job > .workspace-job-bar { min-height: 48px; padding-left: 16px; }
+ .workspace-job-bar > .workspace-close { order: 0; }
+ .workspace-job-bar .workspace-close-back { display: none; }
+ .workspace-job-bar .workspace-close-x { display: flex; }
+ .workspace-job-name { flex-direction: row; align-items: baseline; gap: 10px; }
+ .workspace-job-name > b { flex-shrink: 1; font-size: 14px; }
+ .workspace-log-tabs { margin: 8px 20px; }
+ .workspace-log-tab { min-height: 30px; }
+ .workspace-log-ask { padding: 10px 16px; }
+ .workspace-log-ask > .evidence-ask { min-height: 44px; font-size: 13.5px; }
+ .workspace-log-ask > .evidence-ask::after { width: 32px; height: 32px; }
+}
