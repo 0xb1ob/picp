@@ -38,7 +38,7 @@ import type { IncomingMessage } from "node:http";
 import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 import { HERDR_TIMEOUT_MS, HERDR_WORKSPACE_LABEL, herdrCommand, herdrServerArgv, herdrServerRunning, type Launcher, OPERATOR_TMUX_SESSION, onPath, operatorWrapperPath, tmuxLaunch } from "./launchers.ts";
-import type { ControlCommandBody, ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, ScheduleControlSendResponse, ScheduleControlStatusResponse } from "./api-types.ts";
+import type { ControlCommandBody, ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, ScheduleControlSendResponse, ScheduleControlStatusResponse, ThreadWriteResponse } from "./api-types.ts";
 import { appendControlAudit, appendInboxLine, appendScheduleControlLine } from "./control-audit.ts";
 import {
 	CONTROL_BODY_MAX_BYTES, CONTROL_PROTOCOL, CONTROL_RATE_LIMIT, CONTROL_RATE_WINDOW_MS, CONTROL_TEXT_MAX, type ControlKind, type ControlRecord,
@@ -271,12 +271,13 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 			...(status.images === true ? { images: true } : {}),
 			...(status.files === true ? { files: true } : {}),
 			...(status.commands === true ? { commands: true } : {}),
+			...(status.threads === true ? { threads: true } : {}),
 			...(parent ? { parent_restart: parent } : {}),
 		} satisfies ControlStatusResponse,
 	};
 }
 
-type Parsed = { kind: ControlKind | "command" | "start" | "schedule" | "upload" | "settings" | "queue" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; images?: string[]; files?: string[]; mime?: string; queue_id?: string };
+type Parsed = { kind: ControlKind | "command" | "start" | "schedule" | "upload" | "settings" | "queue" | "thread" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp | "edit" | "cancel" | "create" | "rename"; schedule_id?: string; images?: string[]; files?: string[]; mime?: string; queue_id?: string; thread_id?: string };
 type Body = ControlMessageBody | ControlCommandBody | { kind: "answer"; ask_id: string; label: string } | { kind: "abort" };
 type Refuse = (status: number, reason: string, headers?: Record<string, string>, extra?: Record<string, unknown>) => ControlRouteResult;
 export interface Gate { peer: string | null; refuse: Refuse; parsed(value: Parsed): void }
@@ -470,6 +471,39 @@ export function handleControlMessage(req: IncomingMessage, options: ControlRoute
 		// An older cp-bridge has no send_images op and journals nothing for it: our refused line is the only record.
 		if (attachments.length && reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, `unsupported: this session's cp-bridge predates ${files ? "text" : "image"} attachments; restart the session (⋮ → Restart session) and attach again`);
 		if (shape.body.kind === "command" && reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, "unsupported: this session's cp-bridge predates dashboard commands; restart the session (⋮ → Restart session) or send the text as a message");
+		return { status: reply.status, body: { error: reply.error } };
+	});
+}
+
+export const OPERATOR_THREADS_PATH = "/api/operator/threads";
+const THREAD_BODY = '{"op": "create", "client_id": "dc-…", "name": "…"} or {"op": "rename", "client_id": "dc-…", "thread_id": "th-…", "name": "…"}';
+
+/**
+ * Full match S8: forwards one `thread_create` / `thread_rename` frame to the operator session, the registry's only
+ * writer. Needs a live session, its CSRF token and its `threads` capability; an older owner never gets the frame.
+ */
+export function handleOperatorThreads(req: IncomingMessage, options: ControlRouteOptions, now = new Date()): Promise<ControlRouteResult> {
+	return guarded(req, options, now, "thread", async (json, { peer, refuse, parsed }) => {
+		const value = json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : undefined;
+		const op = value?.op === "create" || value?.op === "rename" ? value.op : undefined;
+		const name = typeof value?.name === "string" ? value.name : undefined;
+		const threadId = typeof value?.thread_id === "string" ? value.thread_id.slice(0, 40) : undefined;
+		parsed({ kind: "thread", text: name?.slice(0, 200) ?? null, ask_id: null, ...(op ? { op } : {}), ...(threadId ? { thread_id: threadId } : {}) });
+		const keys = op === "rename" ? ["op", "client_id", "thread_id", "name"] : ["op", "client_id", "name"];
+		if (!value || !op || name === undefined || typeof value.client_id !== "string" || Object.keys(value).sort().join() !== [...keys].sort().join()) return refuse(400, `body must be ${THREAD_BODY}`);
+		const record = readControlRecord(options.stateDir);
+		const session = operatorSession(options.stateDir);
+		if (record.state !== "ok" || !session.running) return refuse(409, `no operator session is running (${session.reason}); named threads are written by the operator session`, undefined, { state: "offline" });
+		if (!tokenMatches(req.headers["x-cp-control-token"], record.record.csrf)) return refuse(403, "control token missing or stale; reload the page");
+		const status = await controlRequest(record.record, "status", {});
+		if (!status.ok) return refuse(status.status, status.error);
+		const unsupported = "unsupported: this operator session predates named threads; restart the session (⋮ → Restart session) and try again";
+		if ((status.result as { threads?: unknown } | null)?.threads !== true) return refuse(409, unsupported);
+		const reply = await controlRequest(record.record, op === "create" ? "thread_create" : "thread_rename", { ...value, peer });
+		if (reply.ok) return { status: op === "create" && !(reply.result as ThreadWriteResponse).replayed ? 201 : 200, body: reply.result as ThreadWriteResponse };
+		if (reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, unsupported);
+		// The owner journals its own `thread` line for every answer it gives; only transport failures are ours.
+		if (reply.status === 503 || reply.status === 504) return refuse(reply.status, reply.error);
 		return { status: reply.status, body: { error: reply.error } };
 	});
 }

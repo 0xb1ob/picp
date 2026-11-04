@@ -219,10 +219,10 @@ test("P19-upload-send: images and text files reach the operator session inline, 
 	assert.ok(last().text.includes("File: report_1_.HTML\n```text\n<script>UNIQUE_ATTACHMENT_CONTENT</script>\n```"));
 	assert.match(last().text, / — from the dashboard; images=im-[^;]+; files=tx-[^\]]+\]$/);
 	assert.doesNotMatch(last().text, /thread=/);
-	// #588: the thread routes are gone: GET falls through like any unknown path, POST is the read-only 405.
-	assert.equal("threads" in (await d.send("/api/threads")).body, false, "no threads response");
+	// Full match S8 supersedes #588's fall-through: GET /api/threads is the named-thread projection, empty with no
+	// registry; it never reads the retired journal. POST /api/threads/done stays the read-only 405.
 	const listed = await d.get("/api/threads");
-	assert.equal("threads" in listed.body, false, `GET /api/threads falls through like any unknown path (${listed.status})`);
+	assert.deepEqual([listed.status, listed.body.available, listed.body.threads, listed.body.bindings], [200, true, [], []], "an empty S8 projection");
 	const done = await d.send("/api/threads/done", d.json(csrf, { id: "th-aaaaaaaaaaaa" }));
 	assert.deepEqual([done.status, done.raw.toString("utf8")], [405, "read-only viewer: GET only\n"]);
 	for (const body of [{ files: [image] }, { images: [id] }, { files: [id, id] }, { files: [] }, { files: "x" }, { files: [id], images: Array.from({ length: 8 }, () => `im-${day()}-${"d".repeat(24)}.png`) }]) {
