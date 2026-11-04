@@ -22,6 +22,8 @@
  *    `send` message; a bridge without the port answers `unknown op` and the viewer refuses with restart-required.
  *  - `settings_get` / `settings_apply` → Settings (src/settings-control.ts), only with the `settings` port; they write
  *    no dashboard.jsonl line, their record is data/settings-audit.jsonl.
+ *  - `thread_create` / `thread_rename` → full match S8 named threads (src/operator-named-threads.ts), the registry's
+ *    one writer; a bridge from before S8 answers `unknown op` and the viewer refuses with restart-required.
  * Every `send`/`abort` appends its `request` line to `state/operator/dashboard.jsonl` before anything happens;
  * a request that cannot be journaled is refused and never injected. At listen (cp-daemon P3) the messages the
  * dashboard held in `state/operator/inbox.jsonl` while no session ran are delivered once (`deliverInbox`).
@@ -34,6 +36,7 @@ import { basename, join, resolve } from "node:path";
 import type { CommandResult } from "./dashboard-commands.ts";
 export { dashboardCommand } from "./dashboard-commands.ts";
 import { OperatorAsks } from "./operator-asks.ts";
+import { threadRequest } from "./operator-named-threads.ts";
 import { restartRequest, restartState } from "./dashboard-restart.ts";
 import { parentRestartRequest } from "./parent-restart.ts";
 import { appendControlAudit, appendInboxLine } from "./viewer/control-audit.ts";
@@ -475,7 +478,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (frame.op === "hello") return { ok: true, result: { pid: process.pid, protocol: CONTROL_PROTOCOL } };
 		if (frame.op === "status") {
 			const file = ports.sessionFile();
-			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, ...(ports.prepareImage ? { images: true } : {}), ...(ports.parentRestartState ? { parent_restart: ports.parentRestartState() } : {}), ...(ports.command ? { commands: true } : {}) } };
+			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, threads: true, ...(ports.prepareImage ? { images: true } : {}), ...(ports.parentRestartState ? { parent_restart: ports.parentRestartState() } : {}), ...(ports.command ? { commands: true } : {}) } };
 		}
 		if (frame.op === "send" || frame.op === "abort") return request(args, frame.op);
 		// A bridge without prepareImage answers `unknown op send_images`: the viewer says restart, never drops the images.
@@ -483,6 +486,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (frame.op === "send_files") return request(args, "send", true, true);
 		if (frame.op === "command" && ports.command) return request(args, "send", false, false, ports.command(args));
 		if (frame.op === "queue_edit" || frame.op === "queue_cancel") return queueRequest(args, frame.op);
+		if (frame.op === "thread_create" || frame.op === "thread_rename") return threadRequest(stateDir, frame.op, args, now(), (line) => void append(line));
 		if (frame.op === "restart") return restartRequest({ args, ports, stateDir, open, clicks, now, newId: newControlId, append, outcome });
 		if (frame.op === "parent_restart" && ports.parentRestart) return parentRestartRequest({ args, ports, stateDir, now, newId: newControlId, append, outcome });
 		if (frame.op === "settings_get" && ports.settings) return { ok: true, result: ports.settings.get() };
