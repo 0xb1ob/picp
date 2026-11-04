@@ -3,7 +3,7 @@
  * Chrome over CDP, PNGs plus manifest.json. `m3-transcript` serves the other screens' APIs from the real viewer.
  * `--stage <one of STAGES below> [--chrome <path>] --out <dir>`
  */
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -18,7 +18,8 @@ import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
-	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs", "full-match-log", "full-match-status"];
+	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs", "full-match-log", "full-match-status",
+	"full-match-diff"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -29,8 +30,8 @@ const say = (id: string, at: string, who: string, text: string, over: Partial<Se
 	({ id, at, kind: "say", who, text, name: null, send_id: null, tag: null, failed: false, trace: [], ...over });
 const tool = (id: string, at: string, name: string, text: string, summary?: string): SessionEntry => ({ ...say(id, at, "Assistant", text), kind: "tool", name, ...(summary ? { summary } : {}) });
 /** Full match S2 shows job suffixes, so its ids end in four characters like real picp ids; S3 reuses its data. */
-const S5 = args.stage === "full-match-status";
-const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5;
+const S5 = args.stage === "full-match-status", S7 = args.stage === "full-match-diff";
+const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5 || S7;
 const JOB = S2 ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
 /** A cp-bridge wake as the transcript carries it: first line parsed off, `paths:` resolved (one left unresolved). */
 const wake: SessionEntry = say("w1", "2026-10-15T08:03:30Z", "cp-bridge", [
@@ -173,6 +174,12 @@ const streams = new Set<ServerResponse>();
 const posts: string[] = [], unexpected: string[] = [];
 let chrome: ChildProcess | undefined;
 let reportGone = false;
+const diffShas: Record<string, string> = {};
+/** Full match S7: the job's recorded envelope; the browser never names a sha. */
+const diffAt = (head: string) => {
+	mkdirSync(join(scratch, LAYOUT.runs, JOB), { recursive: true });
+	writeFileSync(join(scratch, LAYOUT.runs, JOB, "envelope.json"), JSON.stringify({ envelope: { base_sha: diffShas.base, head_sha: head, branch: JOB } }));
+};
 const server = createServer();
 const deadline = <T>(what: string, ms: number, run: Promise<T>) => {
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -190,6 +197,26 @@ try {
 			signal: { resetsAtUtc: ago(30), resetsAtEpochSeconds: Math.floor(Date.parse(ago(30)) / 1000) }, attempts: delivery === "waiting" ? 0 : 1, ...(reason ? { reason } : {}) });
 		put(join(LAYOUT.state, "quota-continuation.json"), { schema_version: 1, eligibility: {}, policy: { home: { enabled: true, changed_at: ago(90), actor: "operator" }, jobs: {} },
 			intents: [intent("cp-quota-due", "waiting"), intent("cp-quota-held", "ambiguous", "revive refused: cannot revive cp-quota-held (tool_child_alive)")] });
+	}
+	if (S7) {
+		// Full match S7: a real picp clone the real viewer diffs (base, head, big); its fleet record names the PR.
+		const repo = join(scratch, LAYOUT.projects, "picp"), git = (...a: string[]) => execFileSync("git", ["-C", repo, ...a], { encoding: "utf8" }).trim();
+		const commit = (name: string, files: Record<string, string | Uint8Array>) => {
+			for (const [file, body] of Object.entries(files)) { mkdirSync(join(repo, file, ".."), { recursive: true }); writeFileSync(join(repo, file), body); }
+			git("add", "-A"); git("commit", "-m", name, "--quiet"); diffShas[name] = git("rev-parse", "HEAD");
+		};
+		mkdirSync(repo, { recursive: true }); git("init", "-b", "main", "--quiet");
+		for (const [k, v] of [["user.name", "cp fixture"], ["user.email", "cp@fixture.invalid"], ["commit.gpgsign", "false"]]) git("config", k!, v!);
+		const css = "viewer-app/components/workspace-log.css";
+		commit("base", { [css]: ".workspace-log { display: flex; }\n.workspace-log-tab { color: var(--dim); }\n" });
+		commit("head", { [css]: ".workspace-log { display: flex; }\n.workspace-log-tab { color: var(--muted); }\n.workspace-log-diff-add { color: var(--green); }\n",
+			"viewer-app/components/escaped-fixture.ts": `export const html = "<img src=x onerror=alert(1)>";\nexport const long = "${"a-very-long-unbroken-token-".repeat(8)}";\n`,
+			"docs/logo-fixture.png": Buffer.from([137, 80, 78, 71, 0, 0, 0, 13, 0, 255]) });
+		commit("big", { "docs/big-fixture.txt": "one line of the oversized fixture file that the diff cuts short\n".repeat(6000) });
+		mkdirSync(join(scratch, LAYOUT.fleetFile, ".."), { recursive: true });
+		writeFileSync(join(scratch, LAYOUT.fleetFile), JSON.stringify({ jobs: [{ job_id: JOB, project: "picp", kind: "ship", delivery: "pr", phase: "held", branch: JOB,
+			dispatched_at: GENERATED, receipts: [{ kind: "pr", status: "open", title: "Diff", url: "https://github.com/o/picp/pull/741" }] }] }));
+		diffAt(diffShas.head!);
 	}
 	const app = await buildViewer({ stateDir: join(scratch, LAYOUT.state) });
 	const empty = overview({ home: scratch, stateDir: join(scratch, LAYOUT.state) }, Date.parse(GENERATED));
@@ -225,7 +252,7 @@ try {
 		] };
 	}
 	// Full match S4: the reply's job is a working implementer with a log, a report.md and a worktree root.
-	if (args.stage === "full-match-log" || S5) {
+	if (args.stage === "full-match-log" || S5 || S7) {
 		sessions.workers = [...sessions.workers, { id: JOB, kind: "worker", job_id: JOB, role: "implementer", model: "fixture-model", thinking: "high", phase: "waiting", run_phase: "working", live: true, last_activity: "2026-10-15T08:04:30Z" }];
 		const read = (id: string, path: string, out: string) => tool(id, "2026-10-15T08:01:00Z", "read", `Arguments\n${JSON.stringify({ path })}\n\nResult\n${out}`);
 		const bash = (id: string, command: string, out: string) => tool(id, "2026-10-15T08:02:00Z", "bash", `Arguments\n${JSON.stringify({ command })}\n\nResult\n${out}`);
@@ -237,7 +264,7 @@ try {
 			bash("l3", "rg -n \"JobPane\" viewer-app", "viewer-app/components/WorkspaceSurfaces.tsx:31\nviewer-app/components/WorkspaceSurfaces.tsx:112"),
 			say("l4", "2026-10-15T08:03:00Z", "Worker", "The pane reuses the job page's transcript read, so the Log adds no second loader."),
 			tool("l5", "2026-10-15T08:03:30Z", "edit", `Arguments\n${JSON.stringify({ path: "viewer-app/components/workspace-log-with-a-very-long-file-name-that-wraps.css",
-				oldText: ".workspace-log { display: flex; }\n.workspace-log-tab { color: var(--dim); }", newText: ".workspace-log { display: flex; }\n.workspace-log-bar { display: flex; }\n.workspace-log-tab { color: var(--dim); }\n.workspace-log-live { margin-left: auto; }" })}\n\nResult\nApplied 1 edit`),
+				oldText: ".workspace-log { display: flex; }\n.workspace-log-tab { color: var(--dim); }", newText: ".workspace-log { display: flex; }\n.workspace-log-bar { display: flex; }\n.workspace-log-tab { color: var(--muted); }\n.workspace-log-live { margin-left: auto; }" })}\n\nResult\nApplied 1 edit`),
 			bash("l6", "npm run test:one -- tests/e2e/viewer-m3-jobs.test.ts", "ℹ tests 7\nℹ pass 7\nℹ fail 0"),
 			say("l7", "2026-10-15T08:04:00Z", "Worker", "Tests pass. Opening the draft PR next.")] };
 		routes[`/api/report/${JOB}`] = { generated_at: GENERATED, job_id: JOB, title: "Embedded job log", bytes: 160, truncated: false, modified_at: "2026-10-15T08:04:00Z",
@@ -273,7 +300,13 @@ try {
 			for (const stream of streams) stream.write("event: refresh\ndata: overview\n\n");
 			return send(200, "application/json", "{}");
 		}
-		if (S5 && path === "/api/workspace/status") return send(200, "application/json", JSON.stringify(stale ? status(3 * 1440, null) : status(12, 58)));
+		if ((S5 || S7) && path === "/api/workspace/status") return send(200, "application/json", JSON.stringify(stale ? status(3 * 1440, null) : status(12, 58)));
+		// Full match S7: the recorded head moves to the oversized commit or an absent object; /api/diff is the real viewer's.
+		if (S7 && path.startsWith("/fixture/diff-")) {
+			diffAt(path === "/fixture/diff-big" ? diffShas.big! : path === "/fixture/diff-gone" ? "f".repeat(40) : diffShas.head!);
+			return send(200, "application/json", "{}");
+		}
+		if (S7 && path === "/api/diff") return dispatch(req, res, { home: scratch, stateDir: join(scratch, LAYOUT.state), host: "127.0.0.1", port: (server.address() as AddressInfo).port, app });
 		if (path === "/") return send(200, "text/html; charset=utf-8", appPage(app));
 		const asset = app.assets[path];
 		if (asset) return send(200, asset.mime, asset.bytes);
@@ -419,7 +452,8 @@ try {
 		for (const theme of ["dark", "light"] as const) {
 			await capture(`${stage}-steps-${theme}-1440x1100`, transcript, 1440, 1100, theme, loaded, "bottom", [[`${notice}; ${pill}`, `!!document.querySelector(".session-steps-open .session-notice-rest")`], centre]);
 			if (stage === "pr2") await capture(`pr2-job-transcript-phone-${theme}-390x844`, transcript, 390, 844, theme, loaded, "bottom", [[pill, `!!document.querySelector(".session-steps-link")`],
-				[`document.querySelector(".session-steps-link").click()`, `document.querySelector(".job-detail")?.dataset.tab === "transcript" && !!document.querySelector(".jt-say")`]]);
+				// Full match S4: the reply's link opens the pane's Log, not the job page's Transcript (`full-match-log`).
+				[`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".workspace-job .workspace-log[data-view=log] .workspace-log-row")`]]);
 		}
 		if (stage === "pr2") {
 			await capture("pr2-notice-only-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom", [[notice, `!!document.querySelector(".session-steps .session-notice-rest") && !document.querySelector(".session-steps-open")`], centre]);
@@ -429,8 +463,9 @@ try {
 	}
 	if (stage === "pr3") {
 		const base = shots.find(s => (s as { file: string }).file.endsWith("pr3-desktop-dark-1440x1000.png")) as { columns: number[] };
-		// Combine (m3-shell) replaced the 208 px rail + 281 px Chats with one 261 px column.
-		if (base.columns.join() !== "0,261,1179") throw new Error(`pr3: rail, Chats and conversation are ${base.columns.join(" + ")} px, not 0 + 261 + 1179`);
+		// Combine (m3-shell) replaced the 208 px rail + 281 px Chats with one 261 px column; full match S1 opens the 340 px
+		// inspector by default at 1440 px (`full-match-shell` desktop), so the conversation is 839 px.
+		if (base.columns.join() !== "0,261,839") throw new Error(`pr3: rail, Chats and conversation are ${base.columns.join(" + ")} px, not 0 + 261 + 839`);
 		// Step names at phone width too: cp_integrate and fetch_content fit their column (the run fails on a clipped one).
 		await capture("pr3-steps-phone-dark-390x844", transcript, 390, 844, "dark", loaded, "bottom", [[`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-open")`],
 			[`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-steps-open").getBoundingClientRect().top - t.getBoundingClientRect().top - 60; })()`, "true"]]);
@@ -517,7 +552,7 @@ try {
 			`!document.querySelector(".workspace-job") && document.activeElement === document.querySelector(".workspace-jobs-open")`];
 		// The last step waits until no surface target is under 44 px or off screen; a clipped one times the capture out.
 		const fits: Step = ["true", `[...document.querySelectorAll(".workspace-close, .workspace-full, .workspace-jobs-row, .workspace-jobs .jobs-segments button, .workspace-jobs select")]
-			.filter(e => e.getClientRects().length).every(e => { const r = e.getBoundingClientRect(); return r.height >= 44 && r.left >= -0.5 && r.right <= innerWidth + 0.5; })`];
+			.filter(e => e.getClientRects().length).every(e => { const r = e.getBoundingClientRect(); return (innerWidth >= 900 || r.height >= 44) && r.left >= -0.5 && r.right <= innerWidth + 0.5; })`];
 		const shots3: [string, number, number, Step[]][] = [
 			["drawer-desktop-dark-1440x1000", 1440, 1000, [key]], ["job-desktop-dark-1440x1000", 1440, 1000, [open, pick]],
 			["escape-desktop-dark-1440x1000", 1440, 1000, [open, pick, escape]], ["job-desktop-dark-900x1000", 900, 1000, [open, pick]],
@@ -638,15 +673,16 @@ try {
 		// A real reply-link click keeps Chat mounted and opens the embedded Transcript; then the surfaces' measured boxes.
 		// Negative control: without the reply callback the click leaves for the job route and the log steps time out.
 		const log: Step[] = [[`document.querySelector(".session-steps:has(.session-bridge) > .session-tools").click()`, `!!document.querySelector(".session-steps-link")`],
-			[`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".sessions > .workspace-job .job-detail-embedded[data-tab=transcript] .jt-say") && location.hash === ${JSON.stringify(transcript)}`]];
+			[`document.querySelector(".session-steps-link").click()`, `!!document.querySelector(".sessions > .workspace-job .workspace-log[data-view=log] .workspace-log-row") && location.hash === ${JSON.stringify(transcript)}`]];
 		const jobs: Step = [`document.querySelector(".workspace-jobs-open").click()`, `document.querySelectorAll(".workspace-jobs[open] .workspace-jobs-row").length === 4`];
 		const context: Step = [`document.querySelector(".workspace-context-open").click()`, `!!document.querySelector("dialog.workspace-context-sheet[open] .workspace-context-ask")`];
 		const drawer: Step = [`document.querySelector(".workspace-sessions-open").click()`, `!!document.querySelector(".workspace-sessions[open] .session-choice")`];
 		const box = (selector: string) => `(() => { const e = document.querySelector(${JSON.stringify(selector)}), r = e.getBoundingClientRect();
 			return [r.left, r.top, r.width, r.height].map(Math.round).join(" ") + " " + getComputedStyle(e).backgroundColor; })()`;
 		const shotsC: [string, number, number, Step[], string, string][] = [
-			["log-desktop", 1440, 1000, log, ".workspace-job", "919 0 521 1000 rgb(13, 13, 13)"], ["log-phone", 390, 844, log, ".workspace-job", "0 0 390 844 rgb(13, 13, 13)"],
-			["jobs-desktop", 1440, 1000, [jobs], ".workspace-jobs", "579 0 861 1000 rgb(22, 22, 22)"], ["jobs-phone", 390, 844, [jobs], ".workspace-jobs", "0 96 390 748 rgb(18, 18, 18)"],
+			// Full match S5: from 900 px the pane and drawer end above the 37 px status footer (`full-match-status`).
+			["log-desktop", 1440, 1000, log, ".workspace-job", "919 0 521 963 rgb(13, 13, 13)"], ["log-phone", 390, 844, log, ".workspace-job", "0 0 390 844 rgb(13, 13, 13)"],
+			["jobs-desktop", 1440, 1000, [jobs], ".workspace-jobs", "579 0 861 963 rgb(22, 22, 22)"], ["jobs-phone", 390, 844, [jobs], ".workspace-jobs", "0 96 390 748 rgb(18, 18, 18)"],
 			["context-phone", 390, 844, [context], ".workspace-context-sheet", "0 96 390 748 rgb(18, 18, 18)"],
 			["conversations-phone", 390, 844, [drawer], ".workspace-sessions", "0 0 317 844 rgb(18, 18, 18)"],
 		];
@@ -673,8 +709,10 @@ try {
 				ask: ask ? [ask.backgroundColor, ask.borderRadius, ask.padding].join(" ") : null }; })()`;
 		const shotsD: [string, number, number, Step[], object][] = [
 			["desktop", 1440, 1000, [], { composer: "0 0 664 14px 12px 10px 16px", avatar: "20x20 inset 28" }],
-			["phone", 390, 844, [reply], { composer: "0 0 362 0px", avatar: "20x20 inset 34" }],
-			["menu-desktop", 1440, 1000, [slash], { menu: "0 534 rgb(27, 27, 27) 6px" }], ["menu-phone", 390, 844, [slash], { menu: "0 362 rgb(27, 27, 27) 6px" }],
+			// Full match S1: the phone composer is frame 6's rounded box 4 px past the entries' sides (`full-match-shell` phone).
+			["phone", 390, 844, [reply], { composer: "-4 -4 370 8px 6px 6px 14px", avatar: "20x20 inset 34" }],
+			// S1's 370 px phone box keeps the 362 px menu, now 4 px inside each edge.
+			["menu-desktop", 1440, 1000, [slash], { menu: "0 534 rgb(27, 27, 27) 6px" }], ["menu-phone", 390, 844, [slash], { menu: "4 362 rgb(27, 27, 27) 6px" }],
 			["ask-desktop", 1440, 1000, [context], { ask: "rgb(31, 26, 18) 12px 12px" }], ["ask-phone", 390, 844, [context], { ask: "rgb(31, 26, 18) 12px 12px" }],
 		];
 		for (const [name, width, height, steps, want] of shotsD) {
@@ -825,7 +863,7 @@ try {
 	}
 	if (stage === "full-match-log") {
 		// Full match S4 (frames 2/8), reached by a real click on the reply's job link. Negative controls: a link that follows
-		// the route fails `pane`, a Diff tab `tabs`, a coloured tool name or phase `tones`, an empty report `report`.
+		// the route fails `pane`, no Diff tab `tabs`, a coloured tool name or phase `tones`, an empty report `report`.
 		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
 			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
 			const color = s => q(s) ? getComputedStyle(q(s)).color : null, seen = s => all(s).map(e => e.innerText.replace(/\\s+/g, " ").trim());
@@ -849,8 +887,8 @@ try {
 			`document.querySelector(".workspace-log-send").getAttribute("href").includes("draft=")`];
 		const ask: Step = [`document.querySelector(".workspace-log-send").click()`, `!!document.querySelector(".evidence-chip")`];
 		const gone: Step = [`fetch("/fixture/report-gone")`, "true"];
-		const tones = "rgb(237, 237, 237) | rgb(180, 180, 180)", who = "implementer · fixture-model · high | picp worktree", phone = "Log,Report,Files,Details";
-		const desk = `>_ ${JOB},report.md,Files,Details`, line = "Ran 1 shell command";
+		const tones = "rgb(237, 237, 237) | rgb(180, 180, 180)", who = "implementer · fixture-model · high | picp worktree", phone = "Log,Report,Files,Diff,Details";
+		const desk = `>_ ${JOB},report.md,Files,Diff,Details`, line = "Ran 1 shell command";
 		const logged = { chat: true, phase: "Working", who, rows: 7, mono: true, tones, ring: false, small: "", outside: "" };
 		const readonly = `Read-only. Steer this job from the chat with @${JOB}`;
 		// The committed five: desktop, desktop-report, phone, phone-ask and unavailable (dark, picp only).
@@ -917,6 +955,61 @@ try {
 			}
 		}
 		if (posts.length) throw new Error(`full-match-status sent ${posts.join(", ")}: the footer only reads`);
+	}
+	if (stage === "full-match-diff") {
+		// Full match S7 (frames 2/8) on the real viewer's /api/diff of a scratch picp clone. Negative controls: a coral removal
+		// fails `tones`, an unlabelled cut `cut`, a request path or revision let through `refused`, HTML rendered `escaped`.
+		const look = `(async () => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
+			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
+			const css = (s, p) => q(s) ? getComputedStyle(q(s))[p] : null, seen = s => all(s).map(e => e.innerText.replace(/\\s+/g, " ").trim());
+			const gone = seen(".workspace-log-diff-view > .workspace-log-empty").join();
+			return { tabs: seen(".workspace-log-tab").join(), shas: seen(".workspace-log-shas > div").join(" | "), meta: seen(".workspace-log-diff-view .workspace-log-meta").join(),
+				binary: seen(".workspace-log-diff-note").join(), escaped: all(".workspace-job img").length === 0 && seen(".workspace-log-diff-add").some(t => t.includes("<img src=x")),
+				cut: seen(".workspace-log-diff-truncated").join() || null, unavailable: gone ? gone.replace(/shas: .+ · Files/, "shas: <git error> · Files") : null,
+				edit: seen(".workspace-log-edit .workspace-log-diff-line").join(" | ") || null, ring: !!document.activeElement?.matches(":focus-visible"),
+				tones: [css(".workspace-log-diff-add", "color"), css(".workspace-log-diff-add", "backgroundColor"), css(".workspace-log-diff-del", "color"), css(".workspace-log-diff-del", "backgroundColor"),
+					css(".workspace-log-diff-hunk", "color")].join(" | "),
+				measure: { tab: box('.workspace-log-tab[data-view="diff"]'), shas: box(".workspace-log-shas"), line: css(".workspace-log-diff-line", "lineHeight"), font: css(".workspace-log-diff-line", "fontSize"),
+					cut: box(".workspace-log-diff-truncated"), gone: box(".workspace-log-diff-view > .workspace-log-empty"), edit: box(".workspace-log-edit") },
+				small: innerWidth < 900 ? all(".workspace-log-tab, .workspace-close, .workspace-log-diff-view a").filter(e => e.getBoundingClientRect().height < 44 && !e.closest("p")).map(e => e.className).join() : "",
+				outside: document.documentElement.scrollWidth > innerWidth || all(".workspace-job button, .workspace-job a, .workspace-job code, .workspace-log-diff-line, .workspace-log-diff-view p")
+					.some(e => { const r = e.getBoundingClientRect(); return r.left < -0.5 || r.right > innerWidth + 0.5; }) }; })()`;
+		const at = (state: string): Step => [`fetch("/fixture/diff-${state}")`, "true"];
+		const steps: Step = [`document.querySelector('.session-steps > .session-tools[title="${JOB}"]').click()`, `!!document.querySelector(".session-steps-link")`];
+		const reply: Step = [`document.querySelector(".session-steps-link").click()`, `document.querySelectorAll(".workspace-log-row").length === 7`];
+		const diff: Step = [`document.querySelector('.workspace-log-tab[data-view="diff"]').click()`, `!!document.querySelector(".workspace-log-diff-view > .workspace-log-diff, .workspace-log-diff-view > [role=status]:not(:empty)") && !/^Loading/.test(document.querySelector(".workspace-log-diff-view, .workspace-job [role=status]")?.innerText ?? "Loading")`];
+		const rest: Step = ["document.activeElement?.blur()", "true"];
+		const update: Step = [`document.querySelector(".workspace-log-edit").scrollIntoView({ block: "center" })`, "true"];
+		const shas = `base ${diffShas.base} · envelope | head ${diffShas.head} · envelope`, tones = "rgb(95, 211, 154) | rgb(16, 41, 29) | rgb(138, 138, 138) | rgb(27, 27, 27) | rgb(147, 180, 245)";
+		const meta = `Recorded base...head of ${JOB} in the picp clone; not the live worktree or PR`;
+		// The page's six sockets are held by its streams, so the refusals are probed from here, on the same server.
+		const probes = ["&path=../../etc/passwd", "&rev=HEAD~1", "&id=cp-other"].map(x => `/api/diff?id=${JOB}${x}`).concat(["../x", "HEAD"].map(id => `/api/diff?id=${id}`));
+		const refused = (await Promise.all(probes.map(async u => (await fetch(`${origin}${u}`)).status))).join();
+		console.log(`measured refused ${refused}`);
+		if (refused !== "400,400,400,404,404") throw new Error(`full-match-diff: refused ${refused} (want 400,400,400,404,404)`);
+		const shown = { shas, meta, binary: "docs/logo-fixture.png · binary, not shown", escaped: true, cut: null, unavailable: null, tones, ring: false, small: "", outside: false };
+		const forge = " · Files on the forge";
+		// The committed six: desktop-diff, desktop-log-update, phone-diff, unavailable, truncated, phone-unavailable.
+		const shotsD: [string, number, number, Step[], object][] = [
+			["desktop-diff", 1440, 1000, [at("head"), steps, reply, diff, rest], { ...shown, tabs: `>_ ${JOB},report.md,Files,Diff,Details` }],
+			["desktop-log-update", 1440, 1000, [at("head"), steps, reply, rest, update], { ring: false, outside: false,
+				edit: "- .workspace-log-tab { color: var(--dim); } | + .workspace-log-bar { display: flex; } | + .workspace-log-tab { color: var(--muted); } | + .workspace-log-live { margin-left: auto; }" }],
+			["phone-diff", 390, 844, [at("head"), steps, reply, diff, rest], { ...shown, tabs: "Log,Report,Files,Diff,Details" }],
+			["unavailable", 1440, 1000, [at("gone"), steps, reply, diff, rest], { ring: false, outside: false, cut: null,
+				shas: `base ${diffShas.base} · envelope | head ${"f".repeat(40)} · envelope`, unavailable: `Diff unavailable · git could not read the recorded shas: <git error>${forge}` }],
+			["truncated", 1440, 1000, [at("big"), steps, reply, diff, rest], { ring: false, outside: false, unavailable: null,
+				shas: `base ${diffShas.base} · envelope | head ${diffShas.big} · envelope`, cut: `Truncated · only the first part of the diff is shown${forge}` }],
+			["phone-unavailable", 390, 844, [at("gone"), steps, reply, diff, rest], { ring: false, small: "", outside: false,
+				unavailable: `Diff unavailable · git could not read the recorded shas: <git error>${forge}` }],
+		];
+		for (const [name, width, height, run, want] of shotsD) {
+			await capture(`full-match-diff-${name}`, transcript, width, height, "dark", loaded, "bottom", run);
+			const got = await evaluate(look);
+			console.log(`measured ${name} ${JSON.stringify(got)}`);
+			const off = Object.entries(want).filter(([k, v]) => got[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k])} (want ${JSON.stringify(v)})`);
+			if (off.length) throw new Error(`full-match-diff-${name}: ${off.join("; ")}`);
+		}
+		if (posts.length) throw new Error(`full-match-diff sent ${posts.join(", ")}: the diff only reads`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

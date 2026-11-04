@@ -673,6 +673,21 @@ Crossing 900 px while the context is open closes it (the sheet hands focus back 
 expanded or keeps Escape and no bottom sheet remains on a desktop. Deferred: per-conversation job lists and totals (not
 recorded), threads and Cmd+N. `m3-context` captures both surfaces at 1440, 900, 899 and 390 px.
 
+**Full match S7 (recorded diff).** The job pane's tabs gain Diff (frame 8: Log, Report, Files, Diff, Details; on a
+phone the same segments). Diff reads `GET /api/diff?id=<job>` (`src/viewer/job-diff.ts`, the existing endpoint, now
+read from the registered project clone only): `git diff --no-ext-diff --no-textconv --no-color -M base...head` of the
+job's recorded full shas (base from the envelope, head from the CI watch or the envelope), through explorer.ts's
+bounded runner and deny list, capped at 256 KB. Any query key but `id` is 400 and an unknown id 404: no path, revision
+or git expression from the browser reaches git, nothing is fetched (`GIT_NO_LAZY_FETCH`) and nothing is written. The
+tab labels both full shas and their source, says it is the recorded base...head (never the live worktree or PR),
+renders each line as text (additions green, removals neutral, hunks blue), shows a binary file as "binary, not shown",
+and names truncation; a missing sha, clone or object reads "Diff unavailable · <reason>" with the forge Files link
+when a PR is recorded, never an empty diff. Under a Log `Update(path)` entry the recorded edit's removed, then added
+lines show in the same treatment, capped at 8 with "N more lines" (no line numbers are recorded, so none show); a read
+with pi's trailing `[Showing lines A-B of N …]` notice reads "Read lines A–B of N", and other notices are not counted.
+`tests/e2e/viewer-full-match-diff.test.ts` and `--stage full-match-diff` pin it; the captures are under
+`docs/tui-verification/full-match-diff/`.
+
 **Full match S5 (status footer).** At 900 px and wider the operator chat ends in a 37 px footer
 (`WorkspaceStatus.tsx`, frames 1 and 2) that the Jobs drawer, the job pane and Context stop above. Left: each
 provider's name, a neutral 64 px bar and `N% 5h · M% wk` from the newest recorded routing observation (utilization
@@ -683,7 +698,8 @@ reviewer spend of jobs finished in the browser's local calendar day, `N working 
 never names it. A phone has no footer and asks for nothing. The footer reads `GET
 /api/workspace/status?from=&to=&tz=<IANA zone>` (read-only; `from`/`to` are UTC instants spanning exactly one local
 day in `tz`, else 400 `{error}`), built in `src/viewer/workspace-status.ts` from the overview's quota and worker counts
-and the Stats custom range, and refreshes on the `overview` stream and at each minute. `--stage full-match-status`
+and the Stats custom range. It re-reads on each `overview` stream refresh; a 60 s tick only re-renders the age, and
+refetches only when the local day changes (a new range URL). `--stage full-match-status`
 fails unless the footer is 37 px, the drawer, pane and Context end at its top, a stale observation shows "— 5h" with
 no bar, and nothing overflows at 1440, 1100, 900 and 390 px; the committed captures are `desktop`, `desktop-log`,
 `stale` and `footer` `.png` under `docs/tui-verification/full-match-status/`.
@@ -691,7 +707,7 @@ no bar, and nothing overflows at 1440, 1100, 900 and 390 px; the committed captu
 **Full match S4 (embedded job log).** The chat's job pane (`WorkspaceLog.tsx`, frames 2 and 8) heads with the job's
 title, id and phase (a neutral pill). At 900 px and wider the tab row is `>_ <id>`, report.md, Files and Details, with
 Full page and close at its right; on a phone a back chevron, title, id and phase sit above Log, Report, Files and
-Details, with "live · <elapsed>" while the worker runs and Full page inside a `⋯` menu. Diff waits for S7. Log,
+Details, with "live · <elapsed>" while the worker runs and Full page inside a `⋯` menu. Diff arrived in S7. Log,
 Report and Files open with the worker's id, `role · model · thinking` (a script job reads `script <path>`) and its
 recorded worktree or clone, each unrecorded fact reading "not recorded". Log is the worker transcript's own read
 (`/api/job/<id>/transcript`, the same poll as the job page) in monospace: `Read(path)` / `└ Read N lines`,

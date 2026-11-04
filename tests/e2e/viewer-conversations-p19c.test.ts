@@ -871,7 +871,9 @@ test("P19-workbench-diff: /api/job carries PR, shas, CI and review; /api/diff se
 	const diff = (await d.get("/api/diff?id=cp-h1")).body as Json;
 	assert.deepEqual([diff.available, diff.root, diff.truncated], [true, "project:demo", false]);
 	assert.match(diff.text, /^\+two from head$/m, "base...head from the project clone");
-	assert.deepEqual((await d.get("/api/diff?id=cp-h2")).body, { available: false, reason: "no head/base sha recorded" });
+	// Full match S7: the old `{available:false, reason:"no head/base sha recorded"}` became the labelled projection.
+	const noBase = (await d.get("/api/diff?id=cp-h2")).body as Json;
+	assert.deepEqual([noBase.available, noBase.unavailable, noBase.base, noBase.head, noBase.text], [false, "no base sha recorded", null, head, ""]);
 	for (const path of ["/api/diff?id=../x", "/api/job?id=../x", "/api/job?id=cp-nope", "/api/diff?id=cp-nope"]) assert.equal((await d.get(path)).status, 404, path);
 	const index = join(repo, ".git", "index"), before = statSync(index).mtimeMs;
 	writeFileSync(join(repo, "a.txt"), "dirty\n");

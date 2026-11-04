@@ -1,5 +1,5 @@
 import { useState } from "preact/hooks";
-import type { JobReportResponse, JobResponse, JobTranscriptResponse, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
+import type { JobDiffResponse, JobReportResponse, JobResponse, JobTranscriptResponse, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
 import { elapsed, observedTime } from "../format.ts";
 import { composerHref } from "../routes.ts";
 import { JobAsk, jobAskTarget, JobDetail, JobFiles } from "../screens/JobDetail.tsx";
@@ -9,9 +9,9 @@ import { Icon } from "./icons.tsx";
 import { ReportDocument } from "./ReportDocument.tsx";
 import "./workspace-log.css";
 
-export type LogView = "log" | "report" | "files" | "details";
+export type LogView = "log" | "report" | "files" | "diff" | "details";
 type Worker = SessionsResponse["workers"][number];
-const VIEWS: [LogView, string][] = [["log", "Log"], ["report", "Report"], ["files", "Files"], ["details", "Details"]];
+const VIEWS: [LogView, string][] = [["log", "Log"], ["report", "Report"], ["files", "Files"], ["diff", "Diff"], ["details", "Details"]];
 const NOT = "not recorded";
 const ARGS = ["command", "path", "file_path", "url", "job_id", "action"];
 
@@ -31,18 +31,36 @@ function Identity({data, worker}: {data: JobResponse; worker: Worker | undefined
 
 const head = (text: string) => text.split("\n").filter(l => l.trim()).slice(0, 3).join("\n").slice(0, 400);
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-/** Added and removed lines from an edit's recorded old and new text (a line multiset diff); null when not recorded. */
-function changed(args: Record<string, unknown>): string | null {
+/** An edit's removed and added lines from its recorded old and new text (a line multiset diff); null if unrecorded. */
+function editLines(args: Record<string, unknown>): {removed: string[]; added: string[]} | null {
  const edits: unknown[] = Array.isArray(args.edits) ? args.edits : [args];
- let added = 0, removed = 0;
+ const removed: string[] = [], added: string[] = [];
  for (const edit of edits) {
   const {oldText, newText} = (edit ?? {}) as Record<string, unknown>;
   if (typeof oldText !== "string" || typeof newText !== "string") return null;
   const old = oldText.split("\n");
-  for (const line of newText.split("\n")) { const at = old.indexOf(line); if (at < 0) added++; else old.splice(at, 1); }
-  removed += old.length;
+  for (const line of newText.split("\n")) { const at = old.indexOf(line); if (at < 0) added.push(line); else old.splice(at, 1); }
+  removed.push(...old);
  }
- return edits.length ? `Added ${plural(added, "line")}, removed ${plural(removed, "line")}` : null;
+ return edits.length ? {removed, added} : null;
+}
+// pi's read appends `[Showing lines A-B of N. Use offset=…]` or `[K more lines in file. Use offset=…]` (C2).
+const NOTICE = /\n*\[(?:Showing lines (\d+)-(\d+) of (\d+)[^\]\n]*|[^\]\n]*Use offset=[^\]\n]*)\]\s*$/;
+/** "Read N lines" without pi's trailing notice, or the notice's own range when it names one. */
+function readNote(result: string): string {
+ const notice = NOTICE.exec(result);
+ if (notice?.[1]) return `Read lines ${notice[1]}–${notice[2]} of ${notice[3]}`;
+ const body = (notice ? result.slice(0, notice.index) : result).trimEnd();
+ return `Read ${plural(body ? body.split("\n").length : 0, "line")}`;
+}
+const INLINE_LINES = 8;
+/** Frame 2's block under Update: removed, then added lines from the recorded arguments; no line numbers are recorded */
+function EditBlock({lines}: {lines: {removed: string[]; added: string[]}}) {
+ const all = [...lines.removed.map(l => ["del", `- ${l}`]), ...lines.added.map(l => ["add", `+ ${l}`])], more = all.length - INLINE_LINES;
+ return <div class="workspace-log-diff workspace-log-edit">
+  {all.slice(0, INLINE_LINES).map(([kind, text], i) => <div key={i} class={`workspace-log-diff-line workspace-log-diff-${kind}`}>{text}</div>)}
+  {more > 0 && <div class="workspace-log-diff-more">{plural(more, "more line")}</div>}
+ </div>;
 }
 
 /** One entry as frames 2/8 word it: Read, Ran 1 shell command, Update; any other tool keeps its name, capitalised. */
@@ -54,9 +72,11 @@ function Line({entry}: {entry: SessionEntry}) {
    {typeof args.command === "string" && <pre>• {args.command}</pre>}{out && <pre>{out}</pre>}</div>;
   const target = ARGS.map(k => args[k]).find((v): v is string => typeof v === "string");
   const label = name === "read" ? "Read" : name === "edit" ? "Update" : name.charAt(0).toUpperCase() + name.slice(1);
-  const note = entry.failed ? out : name === "read" && result.trim() ? `Read ${plural(result.trimEnd().split("\n").length, "line")}`
-   : name === "edit" ? changed(args) ?? out : out;
-  return <div class="workspace-log-tool"><p><b>{label}</b>{target !== undefined && `(${target})`}{failed}</p>{note && <pre>└ {note}</pre>}</div>;
+  const lines = name === "edit" ? editLines(args) : null;
+  const note = entry.failed ? out : name === "read" && result.trim() ? readNote(result)
+   : lines ? `Added ${plural(lines.added.length, "line")}, removed ${plural(lines.removed.length, "line")}` : out;
+  return <div class="workspace-log-tool"><p><b>{label}</b>{target !== undefined && `(${target})`}{failed}</p>{note && <pre>└ {note}</pre>}
+   {lines && !entry.failed && (lines.removed.length + lines.added.length > 0) && <EditBlock lines={lines}/>}</div>;
  }
  if (entry.kind === "say" && entry.who === "Worker") return <p class="workspace-log-say">• {entry.text}</p>;
  return <p class="workspace-log-note">{entry.who} · {entry.text.split("\n")[0]?.slice(0, 200)}</p>;
@@ -83,6 +103,37 @@ function Report({data}: {data: JobResponse}) {
  </article>;
 }
 
+/** One `git diff` line as plain text (never HTML); a binary file reads "binary, not shown", never as bytes. */
+function DiffLine({line}: {line: string}) {
+ const binary = /^Binary files (.+) and (.+) differ$/.exec(line);
+ if (binary) return <div class="workspace-log-diff-line workspace-log-diff-note">{(binary[2] === "/dev/null" ? binary[1]! : binary[2]!).replace(/^[ab]\//, "")} · binary, not shown</div>;
+ const kind = /^(?:diff --git|index |--- |\+\+\+ |similarity |rename |new file|deleted file)/.test(line) ? "file" : line.startsWith("@@") ? "hunk"
+  : line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "ctx";
+ return <div class={`workspace-log-diff-line workspace-log-diff-${kind}`}>{line || " "}</div>;
+}
+
+/**
+ * S7's Diff: `/api/diff` of the job's recorded base...head, both full shas labelled. Historical evidence, never the
+ * live worktree or PR; unavailable keeps its reason and the forge Files link, truncation is always named.
+ */
+function Diff({data}: {data: JobResponse}) {
+ const read = useScreenData<JobDiffResponse>(`/api/diff?id=${encodeURIComponent(data.job.id)}`, "/api/stream?view=job");
+ if (!read.data) return <p role="status" class="workspace-log-empty">{read.error ? "Diff unavailable · the recorded diff could not be read" : "Loading"}</p>;
+ const d = read.data, lines = d.text.split("\n");
+ if (lines.at(-1) === "") lines.pop();
+ const from = (source: string | null) => source === "ci_watch" ? "CI watch" : source === "envelope" ? "envelope" : NOT;
+ return <section class="workspace-log-diff-view" aria-label="Recorded diff">
+  <dl class="workspace-log-shas">
+   <div><dt>base</dt><dd><code>{d.base ?? NOT}</code> · {from(d.provenance.base)}</dd></div>
+   <div><dt>head</dt><dd><code>{d.head ?? NOT}</code> · {from(d.provenance.head)}</dd></div>
+  </dl>
+  <p class="workspace-log-meta">Recorded base...head{d.branch && ` of ${d.branch}`}{d.root && ` in the ${data.job.project} clone`}; not the live worktree or PR</p>
+  {d.unavailable !== null ? <p role="status" class="workspace-log-empty">Diff unavailable · {d.unavailable}{d.files_href && <> · <a href={d.files_href} target="_blank" rel="noreferrer">Files on the forge</a></>}</p>
+   : <>{d.truncated && <p role="status" class="workspace-log-diff-truncated">Truncated · only the first part of the diff is shown{d.files_href && <> · <a href={d.files_href} target="_blank" rel="noreferrer">Files on the forge</a></>}</p>}
+    {lines.length ? <div class="workspace-log-diff">{lines.map((line, i) => <DiffLine key={i} line={line}/>)}</div> : <p role="status" class="workspace-log-empty">No changes between the recorded shas</p>}</>}
+ </section>;
+}
+
 /**
  * P1 only for this job's own reference. Desktop reads frame 2's read-only line, the phone frame 8's entry; both only
  * open operator Chat with the reference (typed text joins a kept draft) and never send, least of all to the worker.
@@ -104,14 +155,14 @@ function AskFooter({data}: {data: JobResponse}) {
  </footer>;
 }
 
-/** Frame 2's document tab (`>_ <id>`, report.md, Files, Details) beside frame 8's segment label. */
+/** Frame 2's document tab (`>_ <id>`, report.md, Files, Diff, Details) beside frame 8's segment label. */
 function TabLabel({view, id, short}: {view: LogView; id: string; short: string}) {
  const doc = view === "log" ? <><span class="workspace-log-tab-glyph" aria-hidden="true">&gt;_</span><span class="workspace-log-tab-id">{id}</span></>
-  : view === "report" ? <><Icon name="file" size={14}/>report.md</> : view === "files" ? <><Icon name="files" size={14}/>Files</> : "Details";
+  : view === "report" ? <><Icon name="file" size={14}/>report.md</> : view === "files" ? <><Icon name="files" size={14}/>Files</> : short;
  return <><span class="workspace-log-tab-short">{short}</span><span class="workspace-log-tab-doc">{doc}</span></>;
 }
 
-/** The chat pane's job surface (frames 2/8); Details keeps the job page's P2 guide and Timeline, Diff waits for S7. */
+/** The chat pane's job surface (frames 2/8); Details keeps the job page's P2 guide and Timeline. */
 export function WorkspaceLog({data, view, onView, initial, worker}: {data: JobResponse; view: LogView; onView: (view: LogView) => void; initial: Parameters<typeof JobDetail>[0]["initial"]; worker: Worker | undefined}) {
  const job = data.job;
  // S2's strip clock: the job's recorded elapsed, shown only while it works; an unknown never reads as 0.
@@ -127,6 +178,7 @@ export function WorkspaceLog({data, view, onView, initial, worker}: {data: JobRe
    {view === "log" && <JobTranscript key={job.id} jobId={job.id} generatedAt={data.generated_at} model={job.model} reports={data.reports} finished={job.phase === "done" || job.phase === "failed"} view={d => <LogLines data={d}/>}/>}
    {view === "report" && <Report data={data}/>}
    {view === "files" && <div class="job-links workspace-log-files"><JobFiles data={data}/></div>}
+   {view === "diff" && <Diff data={data}/>}
    {view === "details" && <JobDetail key={`${job.id}:${initial}`} data={data} wide={false} initial={initial} embedded/>}
   </div>
   {view !== "details" && <AskFooter data={data}/>}

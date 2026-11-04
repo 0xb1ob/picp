@@ -52,6 +52,23 @@
 .workspace-log-entry > input { flex: 1; min-width: 0; min-height: 44px; padding: 0; background: none; color: var(--text); border: 0; outline: 0; font: inherit; font-size: 16px; }
 .workspace-log-entry > input::placeholder { color: var(--dim); }
 .workspace-log-send { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; background: var(--text); color: var(--background); border-radius: 10px; }
+/* Full match S7 (frames 2/8): additions green, removals neutral (frame 2's red breaks the palette rule), hunks blue. */
+.workspace-log-diff { border: 1px solid var(--border); border-radius: 4px; overflow: hidden; font-family: var(--font-mono); font-size: 13px; line-height: 20px; }
+.workspace-log-diff-line { padding: 0 8px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.workspace-log-diff-add { background: var(--check-background); color: var(--green); }
+.workspace-log-diff-del { background: var(--raised); color: var(--dim); }
+.workspace-log-diff-hunk { color: var(--blue); }
+.workspace-log-diff-file { color: var(--text); font-weight: 600; }
+.workspace-log-diff-note, .workspace-log-diff-more { color: var(--dim); }
+.workspace-log-edit { margin-top: 6px; }
+.workspace-log-edit > .workspace-log-diff-line { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.workspace-log-shas { display: grid; gap: 2px; margin: 0 0 8px; font-family: var(--font-mono); font-size: 12.5px; line-height: 18px; color: var(--dim); }
+.workspace-log-shas > div { display: flex; gap: 8px; min-width: 0; }
+.workspace-log-shas dt { flex-shrink: 0; width: 36px; }
+.workspace-log-shas dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.workspace-log-shas code { font-family: inherit; color: var(--text); }
+.workspace-log-diff-truncated { margin: 0 0 12px; padding: 6px 10px; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow-wrap: anywhere; }
+.workspace-log-diff-view a, .workspace-log-empty a { color: inherit; }
 
 @media (min-width: 900px) {
  /* Frame 2: the tabs are the pane's top row (aligned with the chat header), Full page and × at its right. */

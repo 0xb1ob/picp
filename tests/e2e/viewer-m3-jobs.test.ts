@@ -335,10 +335,10 @@ test("M3-jobs-log (full match S4): a reply's link opens Log with Report, Files a
 	assert.equal(activate(tab, link), false, "an unmodified click on the reply's link is the chat's");
 	const rows = await until(() => texts(".workspace-log-row"), (r) => r.length > 0, "the Log");
 	assert.deepEqual(rows, ["Parent · LOG-BRIEF fix the route", "Read(src/route.ts)└ Read 3 lines", "Ran 1 shell command• npm testPASS tests/route.test.ts",
-		"Update(src/route.ts)└ Added 2 lines, removed 1 line", "• LOG-SAY the route is fixed"], "frames 2/8 wording from the recorded calls, in order");
+		"Update(src/route.ts)└ Added 2 lines, removed 1 line- b+ c+ d", "• LOG-SAY the route is fixed"], "frames 2/8 wording from the recorded calls, in order; S7: the edit's own block");
 	assert.deepEqual([texts(".workspace-job-name > *"), texts(".workspace-job-phase"), texts(".workspace-log-who p"), texts(".workspace-log-tab-short"), texts(".workspace-log-tab-doc"), texts(".workspace-log-live")],
-		[["Title cp-park", "cp-park"], ["With the team"], ["role not recorded · model not recorded · thinking not recorded", "not recorded"], ["Log", "Report", "Files", "Details"],
-			[">_cp-park", "report.md", "Files", "Details"], []], "title, id and phase; unrecorded facts say so; segment and document tabs, no Diff before S7; live only while working");
+		[["Title cp-park", "cp-park"], ["With the team"], ["role not recorded · model not recorded · thinking not recorded", "not recorded"], ["Log", "Report", "Files", "Diff", "Details"],
+			[">_cp-park", "report.md", "Files", "Diff", "Details"], []], "title, id and phase; unrecorded facts say so; segment and document tabs, Diff since S7; live only while working");
 	assert.equal(tab.$$(".workspace-job textarea, .workspace-job form").length, 0, "no composer of its own: the entry only links into Chat");
 	const more = tab.$(".workspace-job details.workspace-job-more")!, summary = more.querySelector("summary")!;
 	assert.deepEqual([summary.getAttribute("aria-label"), more.querySelector(".workspace-job-more-sheet a")!.getAttribute("href"), tab.$(".workspace-job .workspace-full")!.getAttribute("href")],
