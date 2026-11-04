@@ -55,6 +55,7 @@ import { type JobClaims, withJobClaim } from "./job-claims.ts";
 import { assertNotDraining } from "./drain.ts";
 import { resolveJobHardBounds } from "./bounds.ts";
 import { raiseLoopExhausted, type EscalationStore } from "./escalation.ts";
+import { nativeDoorRefusal } from "./drivers/claude-followup.ts";
 import { attachWorkerObservers, type WorkerObserverOptions } from "./dispatch.ts";
 import { loadProfile } from "./profiles.ts";
 import type { ModelProbe } from "./routing.ts";
@@ -392,6 +393,12 @@ export class BoundedRecovery {
 		const { home, fleet, runs } = this.#options;
 		const record = fleet.get(jobId);
 		if (record && isScriptFleetRecord(record)) return { action: "revive_refused", reason: `${jobId} is a script job; no automatic replay`, attempted: false, attemptsLeft: 0 };
+		if (record?.worker.driver) {
+			// N3c: never a pi redispatch or an unadmitted resume of a native job; the operator's cp_revive resumes it.
+			const reason = nativeDoorRefusal(jobId, "bounded recovery");
+			runs.open(jobId).cp("recovery_failed", { class: failure.class, stage: "native", error: reason });
+			return { action: "revive_refused", reason, attempted: false, attemptsLeft: 0 };
+		}
 		// A drain starts no process, and a refused revive spends no attempt: the restart report owns this job.
 		try { assertNotDraining(home, `automatic recovery of ${jobId}`); } catch (error) {
 			return { action: "revive_refused", reason: (error as Error).message, attempted: false, attemptsLeft: Math.max(RECOVERY_ATTEMPT_BOUND - readRecoveryAttempts(home, jobId, failure.class), 0) };

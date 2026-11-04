@@ -330,16 +330,55 @@ no longer test-only): every N3a gate is on and not optional.
 | Teardown | stdin close aborts the run; the lease returns only after the observed child exit (`src/teardown.ts`) |
 | Ledger and dashboard | job detail shows `native claude` next to the model |
 
-**Refused until N3c.** `cp_send` (busy or idle), `cp_revive` (also inside bounded recovery) and any second RPC
-command are refused with "native follow-ups land in N3c"; nothing is queued. Resume is not offered.
+**Follow-ups.** N3c replaced the N3b "Refused until N3c" list; see [N3c follow-ups](#n3c-follow-ups).
 
 **Usage.** A complete SDK usage with a finite cost and non-zero tokens is normalized to pi's `message_end` usage (input
 excludes cache read/write), so run status, the fleet record, mandate accounting and the per-job `checkBudget` read it
 exactly like pi usage. Anything else (SDK `partial`/`unavailable`, a missing or non-finite cost, zero tokens, which no
 real model call reports) writes no measurement: the worker emits `usage_unavailable`, run status carries
 `usage_unavailable: true` and the dashboard shows "unavailable (not measured)". Accounting then adds nothing for that
-run (the counters are never written as a measured zero) and admission does not wait on it; a native run is one research
-turn with no follow-ups, so no later per-job budget check reads it.
+run (the counters are never written as a measured zero) and admission does not wait on it. A resumed run follows the
+same rule over its delta (below).
 
-**Rollback.** Turning the switch off refuses new native dispatches only; a live native job keeps its driver until its
-own exit or teardown.
+**Rollback.** Turning the switch off refuses new native dispatches, resumes and revives; a live native job keeps its
+driver until its own exit or teardown, and teardown still works.
+
+## N3c follow-ups
+
+**Session metadata.** The worker keeps `<run dir>/native-claude` (`NativeSessionSchema`, `src/drivers/claude-followup.ts`,
+mode 0600, atomic write): driver, the kept scratch dir (`$TMPDIR/cp-claude-native-XXXXXX`, the Claude config dir), the
+Claude `session_id` from the init message, and the usage baseline. The id grants nothing; it is only the resume key, and
+every resume re-runs admission. Teardown removes the scratch dir only after the observed worker exit
+(`native_scratch_removed` in the run log); a record that fails validation keeps the dir and names why.
+
+**Admission.** Every resume and revive passes `assertNativeResume` before a claude process starts, in dispatch's order:
+the drain freeze and update hold, trust, the per-job budget on the recorded running total, then `assertNativeSelection`
+(switch, research role, concurrency 1, version floor). Every N3a gate stays on in a resumed run: `runClaudeSpike` is the
+only path, with the same Bash policy, R1, lockdown, managed hooks, env allow-list and fresh `CLAUDE_CONFIG_DIR`.
+
+| Follow-up | pi | native claude |
+|---|---|---|
+| `cp_send`, worker idle | prompt into the live session | admission, then ONE new claude process resumes the session with the message; worker disposition `resuming` (admitted, process starting, not yet run), ack `native: resuming: …`; a resume that throws journals `native_resume_failed` and the worker exits non-zero |
+| `cp_send`, worker busy (auto/follow_up) | steer (auto) or follow_up | queued in `native-followups.jsonl`; ack `receipt: queued`, `native: queued until the current turn ends …` |
+| `cp_send` mode `steer` | steer into the turn | refused by name; nothing sent |
+| `cp_revive` | respawn idle | respawn, then resume with picp's revive prompt (also from `failed`) |
+| `cp_revive continue_failed` / bounded recovery | continue / automatic | refused (`native_refused`): a plain revive already resumes under admission |
+
+**Busy-send choice: (ii), a durable picp queue.** Streaming user input into a live SDK session is a mid-turn steer
+whose arrival point picp cannot observe or gate, so the ack could not be truthful. A busy send is appended to the queue
+and acked as queued, never as delivered or steered. At turn end the worker first claims the queue atomically (a rename
+to `native-followups.jsonl.claimed`), so a send queued while admission runs lands in a fresh queue for the next turn end.
+It then re-runs `assertNativeResume`; if admitted it delivers exactly the claimed messages as one resumed turn
+(`native_followup_delivered`); if refused it puts them back ahead of any newer ones and logs
+`native_followup_refused` with the reason. A queued follow-up does not reopen the report slot; an idle send does, so
+reports stay one accepted per generation.
+
+**Usage across resume.** A resumed `claude` restores the session's cumulative `modelUsage` and `total_cost_usd`. The
+record keeps the last result's per-model ledger and cost as the baseline; a resumed run counts only the growth over it
+(the N3a G2 delta), so each run is counted once. A run without a full ledger and cost drops the baseline: that run and
+the next are "unavailable", never 0 and never the cumulative total again. The budget check reads the running total
+through the real admission path.
+
+**Switch-off and restart.** With the switch off, resume and revive of an existing native job are refused with the named
+switch reason and nothing starts; teardown still removes the worker and scratch dir. A parent restart or install drain
+kills the native worker; the job keeps its session record, and a plain `cp_revive` resumes it once the parent is up.

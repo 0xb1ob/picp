@@ -33,7 +33,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type JobRouting, paths, type Role, type ThinkingLevel } from "./contracts.ts";
-import { nativeFollowUpRefusal } from "./worker-driver.ts";
+import { nativeDoorRefusal, nativeReviveRefusal, sendNativeRevive } from "./drivers/claude-followup.ts";
+import type { NativeDriver } from "./worker-driver.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
 import { loadProfile } from "./profiles.ts";
 import { type ModelProbe, RoutingError } from "./routing.ts";
@@ -66,6 +67,7 @@ export const REVIVE_REFUSAL_CODES = [
 	"skill_unresolved",
 	"model_unrouted",
 	"route_refused",
+	"native_refused",
 ] as const;
 export type ReviveRefusalCode = (typeof REVIVE_REFUSAL_CODES)[number];
 
@@ -158,6 +160,8 @@ export interface ReviveResult {
 	interruptedTool?: InterruptedTool;
 	worktreeDirty: boolean;
 	continuedFailure?: Failure;
+	/** N3c: a native worker is not idle; it resumed its Claude session with picp's revive prompt. */
+	nativeResumed?: true;
 }
 
 export type GitRunner = (
@@ -376,12 +380,16 @@ export class Reviver {
 		const record = this.#options.fleet.get(jobId);
 		if (!record) return refuse(jobId, "not_found", `no fleet record for ${jobId}`);
 		if (isScriptFleetRecord(record)) return refuse(jobId, "not_revivable_phase", `${jobId} is a script job; an unobserved exit cannot be replayed`);
-		if (record.worker?.driver) return refuse(jobId, "not_revivable_phase", nativeFollowUpRefusal(jobId, "cp_revive"));
+		const native = record.worker?.driver !== undefined;
+		if (native && (options?.continueFailed || options?.recovering)) {
+			return refuse(jobId, "native_refused", nativeDoorRefusal(jobId, options.continueFailed ? "continue_failed" : "bounded recovery"));
+		}
 		if (record.phase === "awaiting_merge") {
 			return refuse(jobId, "not_revivable_phase", `${jobId} is parked awaiting a team merge: no lease, and ${record.worktree} is history — ` +
 				`cp_send ${jobId} resumes it on a fresh lease of ${record.branch}, never a revive on the old path`);
 		}
-		const revivablePhases: readonly typeof record.phase[] = options?.recovering || options?.continueFailed
+		// A native job that crashed or ended unreported failed on its observed exit; a plain revive resumes its session.
+		const revivablePhases: readonly typeof record.phase[] = native || options?.recovering || options?.continueFailed
 			? ["held", "waiting", "failed"]
 			: ["held", "waiting"];
 		if (!revivablePhases.includes(record.phase)) {
@@ -425,6 +433,8 @@ export class Reviver {
 			return refuse(jobId, "session_scan_failed", `${(error as Error).message}. Nothing was spawned; surface it and keep the lease.`);
 		}
 		if (policyBlocked) return refuse(jobId, "session_policy_blocked", policyBlockedRefusal(jobId, record.worker.session_file));
+		const nativeRefusal = native ? await nativeReviveRefusal(this.#options.home, jobId, record.worker.session_file) : undefined;
+		if (nativeRefusal) return refuse(jobId, "native_refused", nativeRefusal);
 
 		// cp-mub7: a failed job's registered worker is stale, not live work — the
 		// job is already failed, and cp_send refuses it for that reason and points
@@ -562,13 +572,16 @@ export class Reviver {
 					delivery: record.delivery,
 					runDir: this.#options.runs.open(jobId).runDir,
 					worktree: record.worktree,
+					...(record.worker.driver ? { artifactPath: join(this.#options.home, paths.artifactFile(jobId)) } : {}),
 				},
 				profile,
 				model: plan.model,
 				...(plan.thinking ? { thinking: plan.thinking } : {}),
 				...(plan.skills?.length ? { skills: plan.skills.map((s) => s.dir) } : {}),
 				sessionFile: plan.session_file,
-				// No `brief`: a revived worker resumes idle. `report_result` stays
+				// N3c: a native job respawns its native worker, which resumes the recorded Claude session.
+				...(record.worker.driver ? { driver: record.worker.driver as NativeDriver, extraEnv: { CP_NATIVE_RESUME: "1" } } : {}),
+				// No `brief`: a revived pi worker resumes idle. `report_result` stays
 				// write-once (worker-reporter), so nothing here can double-report.
 			});
 		} catch (error) {
@@ -630,6 +643,8 @@ export class Reviver {
 			await safely(() => this.#options.manager.shutdown(jobId));
 			throw new ReviveError(`revive ${jobId}: spawned but failed to record it (${(error as Error).message}); worker shut down`);
 		}
+		const refusedPrompt = record.worker.driver ? await sendNativeRevive(managed.worker, (payload) => this.#options.runs.open(jobId).cp("prompt_sent", payload)) : undefined;
+		if (refusedPrompt) throw new ReviveError(`revive ${jobId}: ${refusedPrompt}`);
 
 		return {
 			job_id: jobId,
@@ -639,6 +654,7 @@ export class Reviver {
 			worktreeDirty: plan.worktreeDirty,
 			...(plan.interruptedTool ? { interruptedTool: plan.interruptedTool } : {}),
 			...(plan.continuesFailure ? { continuedFailure: plan.continuesFailure } : {}),
+			...(record.worker.driver ? { nativeResumed: true as const } : {}),
 		};
 	}
 }
@@ -667,5 +683,6 @@ export function formatReviveResult(result: ReviveResult): string {
 	const tool = result.interruptedTool ? ` (interrupted: ${result.interruptedTool.name})` : "";
 	const dirty = result.worktreeDirty ? " (worktree has uncommitted changes)" : "";
 	const failed = result.continuedFailure ? ` (continued from failed: ${result.continuedFailure.class})` : "";
-	return `${result.job_id} revived${failed}: pid ${result.pid}, session ${result.session_file}${tool}${dirty} \u2014 idle; send it a message to continue`;
+	const next = result.nativeResumed ? "resumed its native Claude session with picp's revive prompt" : "idle; send it a message to continue";
+	return `${result.job_id} revived${failed}: pid ${result.pid}, session ${result.session_file}${tool}${dirty} \u2014 ${next}`;
 }

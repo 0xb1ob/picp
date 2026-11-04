@@ -13,10 +13,6 @@ export type WorkerDriverHandle = Pick<WorkerProcess, "pid" | "closed" | "exit" |
 export const NATIVE_DRIVERS = ["claude"] as const;
 export type NativeDriver = (typeof NATIVE_DRIVERS)[number];
 
-/** The named refusal for every follow-up into a native worker (cp_send, cp_revive, a recovery) until N3c. */
-export function nativeFollowUpRefusal(jobId: string, what: string): string {
-	return `${jobId} runs on the native claude driver: ${what} is refused, native follow-ups land in N3c; nothing was queued. Tear it down and dispatch a fresh job instead.`;
-}
 
 export const nativeConfigFile = (home: string): string => join(home, LAYOUT.data, "native.json");
 

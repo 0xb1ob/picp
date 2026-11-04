@@ -97,7 +97,8 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 	}
 }
 
-/** Starts the fake on 127.0.0.1; `script` steps are consumed by tool-offering requests in order; `usage: false` omits usage. */
+/** Starts the fake on 127.0.0.1; `script` steps are consumed by tool-offering requests in order;
+ * `usage: false` omits usage. */
 export async function startClaudeMockProvider(script: readonly ClaudeStep[], options: { usage?: boolean } = {}): Promise<ClaudeMockProvider> {
 	const usage = options.usage ?? true;
 	const requests: RecordedClaudeRequest[] = [];

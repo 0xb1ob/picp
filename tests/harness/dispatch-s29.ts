@@ -28,7 +28,7 @@ export async function dispatchS29(t: TestContext, options: { files?: Record<stri
 		home: home.path, clone, ledger: scratch.ledger, provider, agent, parents: children as readonly ReturnType<typeof startPiChild>[],
 		ownPost(post: CommandPost) { posts.push(post); return post; },
 		async closeParents() { for (const child of children) await child.close(); },
-		async run(steps: ScriptStep[], env: NodeJS.ProcessEnv = {}, prompt = "Execute the supplied dispatch checks.") {
+		async run(steps: ScriptStep[], env: NodeJS.ProcessEnv = {}, prompt = "Execute the supplied dispatch checks.", settleMs = 90_000) {
 			const name = `s29-parent-${serial++}`;
 			const model = provider.addScript(name, [...steps, { kind: "text", text: "observed" }]);
 			agent.writeModels(provider);
@@ -46,7 +46,7 @@ export async function dispatchS29(t: TestContext, options: { files?: Record<stri
 			const child = startPiChild({ cwd: home.path, model, env: { ...agent.env, CP_HOME: home.path, ...env }, extensions: [COMMAND_POST_EXTENSION] });
 			children.push(child);
 			await child.prompt(prompt);
-			await child.waitForSettled(90_000);
+			await child.waitForSettled(settleMs);
 			return child.eventsOfType("tool_execution_end") as unknown as Array<{ toolName: string; isError?: boolean; result: { details?: Record<string, unknown>; content?: unknown } }>;
 		},
 	};
