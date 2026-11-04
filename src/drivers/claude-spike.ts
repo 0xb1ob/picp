@@ -4,7 +4,7 @@
  */
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
@@ -12,6 +12,7 @@ import {
 	type HookCallback,
 	type HookJSONOutput,
 	type Options,
+	type Query,
 	query,
 	type SDKResultMessage,
 	type SpawnOptions,
@@ -19,7 +20,12 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { TurnTokenUsage } from "@t3tools/contracts";
 import { z } from "zod";
-import { claudeLedgerDelta, claudeModelLedger, normalizeClaudeTurnTokenUsage } from "../../vendor/t3code/ClaudeTurnTokenUsage.ts";
+import {
+	type ClaudeModelLedger,
+	claudeLedgerDelta,
+	claudeModelLedger,
+	normalizeClaudeTurnTokenUsage,
+} from "../../vendor/t3code/ClaudeTurnTokenUsage.ts";
 import { ENVELOPE_FILE, formatRejection, type JobContext, localChecks } from "../../extensions/worker-reporter/index.ts";
 import { ciStatusQuery, ciStatusRepeatRefusal, ciWaitRefusal, detectCiWait, shellPatchCommand, shellPatchRefusal } from "../ci-wait.ts";
 import {
@@ -48,6 +54,8 @@ import { detectWorkerHistoryRewrite, workerHistoryRefusal } from "../worker-hist
 import { workerHostGuard } from "../worker-host-guard.ts";
 import { assertBriefIsSafe } from "../worker-manager.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../worker-merge-guard.ts";
+import { readOnlyBashRefusal, secretPathIn, secretPaths } from "./claude-bash-policy.ts";
+import { type HooksListing, type Lockdown, lockdownVerdict } from "./claude-lockdown.ts";
 
 /** The lowest `claude --version` this spike measured working (docs/native-drivers.md "Spike result"). */
 export const CLAUDE_VERSION_FLOOR = "2.1.318";
@@ -149,8 +157,8 @@ export function normalizeToolCall(toolName: string, input: unknown): NormalizedC
 	return undefined;
 }
 
-/** picp's worker-reporter `tool_call` refusals, in the same order, plus the research write scope. */
-export function spikeGuards(job: SpikeJob): SpikeGuard[] {
+/** picp's worker-reporter `tool_call` refusals, in the same order, plus the research write scope and secret paths. */
+export function spikeGuards(job: SpikeJob, secrets: readonly string[] = secretPaths(null, [homedir(), userInfo().homedir])): SpikeGuard[] {
 	let ciStatusQueries = 0;
 	const writeRoot = dirname(resolve(job.artifactPath));
 	const bash: SpikeGuard = (call) => {
@@ -173,7 +181,7 @@ export function spikeGuards(job: SpikeJob): SpikeGuard[] {
 		if (keySearch) return credentialSearchRefusal(keySearch);
 		if (shellPatchCommand(command)) return shellPatchRefusal();
 		if (ciStatusQuery(command) && ciStatusQueries++ >= 1) return ciStatusRepeatRefusal();
-		return undefined;
+		return readOnlyBashRefusal(command, job.worktree, secrets);
 	};
 	const writeScope: SpikeGuard = (call) => {
 		if (call.name !== "write") return undefined;
@@ -186,6 +194,11 @@ export function spikeGuards(job: SpikeJob): SpikeGuard[] {
 		(call) => (WORKER_FORBIDDEN_TOOLS.includes(call.name) ? `${call.name} is a parent-only tool.` : undefined),
 		bash,
 		writeScope,
+		(call) => {
+			const paths = call.name === "find" ? [call.input.path, call.input.pattern] : call.name === "read" || call.name === "grep" ? [call.input.path] : [];
+			const secret = paths.find((path) => typeof path === "string" && secretPathIn(path, job.worktree, secrets));
+			return secret === undefined ? undefined : `Refused: a research worker never reads the Claude settings, its config, /proc or /dev/fd (${String(secret)}).`;
+		},
 		(call) => workerHostGuard(call.name, call.input, job.runDir),
 	];
 }
@@ -194,11 +207,19 @@ const deny = (reason: string): HookJSONOutput => ({
 	hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason },
 });
 
-/** The PreToolUse hook: deny-by-default tool set, then every guard; a guard that throws is a deny. */
-export function preToolUseHook(guards: readonly SpikeGuard[], onDeny: (tool: string, reason: string) => void = () => {}): HookCallback {
+/** The PreToolUse hook: nothing runs before `ready` settles clean (the lockdown); then the tool set and every guard. */
+export function preToolUseHook(
+	guards: readonly SpikeGuard[],
+	onDeny: (tool: string, reason: string) => void = () => {},
+	ready: Promise<string | undefined> = Promise.resolve(undefined),
+): HookCallback {
 	return async (input) => {
 		if (input.hook_event_name !== "PreToolUse") return {};
-		let reason: string | undefined;
+		let reason: string | undefined = await ready;
+		if (reason !== undefined) {
+			onDeny(input.tool_name, reason);
+			return deny(reason);
+		}
 		try {
 			const call = normalizeToolCall(input.tool_name, input.tool_input);
 			reason = call === undefined ? `Refused: ${input.tool_name} is not in the spike's tool set.` : undefined;
@@ -282,14 +303,20 @@ export interface SpikeRunOptions {
 	prompt: string;
 	/** Explicit provider variables for the child (a fake model's base URL and synthetic token). */
 	providerEnv?: Record<string, string>;
-	/** Live smoke only: a settings file path claude itself reads (the operator's login); never read here. */
-	userSettings?: string;
+	/** The operator's Claude settings path, which claude itself reads and picp never opens; null passes none. */
+	userSettings?: string | null;
 	model?: string;
 	maxTurns?: number;
 	tools?: readonly string[];
 	extraGuards?: readonly SpikeGuard[];
 	hostEnv?: NodeJS.ProcessEnv;
 	timeoutMs?: number;
+	/** Aborting it interrupts the run: the child is stopped and its observed exit reported. */
+	signal?: AbortSignal;
+	/** Caller-owned scratch outside the worktree, kept so a later run can resume; the caller removes it. */
+	scratchDir?: string;
+	/** Resume this session; `ledger` is the previous run's, so the resumed process's restored totals are not recounted. */
+	resume?: { sessionId: string; ledger?: ClaudeModelLedger };
 }
 
 export interface SpikeExit {
@@ -306,6 +333,8 @@ export interface SpikeResult {
 	sdkVersion: string;
 	/** What the SDK actually spawned; must be `claudePath`, never a bundled binary. */
 	spawnedCommand?: string;
+	/** The env keys (never values) the child was spawned with, sorted. */
+	spawnedEnvKeys?: string[];
 	/** Undefined only when no child was spawned. */
 	exit?: SpikeExit;
 	report?: Envelope;
@@ -313,29 +342,48 @@ export interface SpikeResult {
 	denials: Array<{ tool: string; reason: string }>;
 	resultSubtype?: string;
 	initModel?: string;
+	sessionId?: string;
+	/** This process's per-model totals; pass it as `resume.ledger` to the run that resumes this session. */
+	ledger?: ClaudeModelLedger;
+	lockdown?: Lockdown;
 	usage: TurnTokenUsage;
 	coldStartMs?: number;
 	durationMs: number;
 	error?: string;
 }
 
-/** One query's usage through T3's normalizer: unknown stays `unavailable`, never 0; the ledger adds subagent work. */
-export function spikeUsage(result: SDKResultMessage | undefined, rootModels: ReadonlySet<string>): TurnTokenUsage {
-	const ledger = claudeLedgerDelta(new Map(), claudeModelLedger(result?.modelUsage));
+/**
+ * One query's usage through T3's normalizer: unknown stays `unavailable`, never 0; the ledger adds subagent work.
+ * `previous` is the ledger this process started from: empty for a fresh run, the prior run's on a resume, else unknown.
+ */
+export function spikeUsage(result: SDKResultMessage | undefined, rootModels: ReadonlySet<string>, previous: ClaudeModelLedger | undefined): TurnTokenUsage {
+	const ledger = claudeLedgerDelta(previous, claudeModelLedger(result?.modelUsage));
 	const terminal = result?.subtype === "success" ? "completed" : "failed";
 	return normalizeClaudeTurnTokenUsage(result, false, terminal, [], { rootModels, ledger });
 }
 
-/** One isolated research run; the scratch dir (config, sessions, HOME, TMPDIR) is removed before returning. */
+/** One isolated research run; its own scratch dir (config, sessions, HOME, TMPDIR) is removed before returning. */
 export async function runClaudeSpike(options: SpikeRunOptions): Promise<SpikeResult> {
 	const hostEnv = options.hostEnv ?? process.env;
 	const claude = resolveClaude(hostEnv);
 	assertBriefIsSafe(options.prompt, "spike prompt");
-	const scratch = mkdtempSync(join(tmpdir(), "cp-claude-spike-"));
+	const scratch = options.scratchDir ?? mkdtempSync(join(tmpdir(), "cp-claude-spike-"));
 	try {
 		return await runInScratch(options, claude, hostEnv, scratch);
 	} finally {
-		rmSync(scratch, { recursive: true, force: true });
+		if (options.scratchDir === undefined) rmSync(scratch, { recursive: true, force: true });
+	}
+}
+
+/** Runs the lockdown on one init with the CLI's commands, agents and hook listing, read over the control channel. */
+async function checkSurface(q: Query, init: Parameters<typeof lockdownVerdict>[0], expectedTools: readonly string[]): Promise<Lockdown> {
+	const started = Date.now();
+	try {
+		const listing = (q as unknown as { getHooksListing?: () => Promise<HooksListing> }).getHooksListing;
+		const [initialized, hooks] = await Promise.all([q.initializationResult(), listing === undefined ? undefined : listing.call(q)]);
+		return { ...lockdownVerdict(init, expectedTools, initialized.commands, initialized.agents ?? [], hooks), checkMs: Date.now() - started };
+	} catch (err) {
+		return { verdict: "refused", refusal: `Refused: the Claude CLI lockdown check failed (${(err as Error).message}).`, checkMs: Date.now() - started };
 	}
 }
 
@@ -347,23 +395,34 @@ async function runInScratch(
 ): Promise<SpikeResult> {
 	if (!relative(resolve(options.job.worktree), scratch).startsWith("..")) throw new ClaudeSpikeError("scratch dir is inside the worktree");
 	const dirs = { home: join(scratch, "home"), configDir: join(scratch, "config"), tmp: join(scratch, "tmp") };
-	for (const dir of Object.values(dirs)) mkdirSync(dir, { mode: 0o700 });
+	const settingsPath = options.userSettings === undefined ? join(homedir(), ".claude", "settings.json") : options.userSettings;
+	const secrets = secretPaths(settingsPath, [homedir(), userInfo().homedir]);
+	for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const state: ReportState = { refusals: [], attempts: 0 };
 	const denials: SpikeResult["denials"] = [];
 	const models = new Set<string>();
 	let child: ChildProcess | undefined;
 	let spawnedCommand: string | undefined;
+	let spawnedEnvKeys: string[] | undefined;
 	let exited: Promise<Omit<SpikeExit, "killedByDriver">> | undefined;
 	let result: SDKResultMessage | undefined;
 	let initModel: string | undefined;
+	let sessionId: string | undefined;
 	let coldStartMs: number | undefined;
 	let error: string | undefined;
+	let checking: Promise<Lockdown> | undefined;
+	let release: (refusal: string | undefined) => void = () => {};
+	const ready = new Promise<string | undefined>((done) => (release = done));
 	const started = Date.now();
 	const abort = new AbortController();
 	// AbortSignal.timeout is unref'd, so nothing is left to clear or leak whichever way the run ends.
-	AbortSignal.timeout(options.timeoutMs ?? 180_000).addEventListener("abort", () => abort.abort(), { once: true });
+	for (const signal of [AbortSignal.timeout(options.timeoutMs ?? 180_000), options.signal]) {
+		if (signal?.aborted) abort.abort();
+		signal?.addEventListener("abort", () => abort.abort(), { once: true });
+	}
 	const spawnClaudeCodeProcess = (spawnOptions: SpawnOptions) => {
 		spawnedCommand = spawnOptions.command;
+		spawnedEnvKeys = Object.keys(spawnOptions.env).filter((key) => spawnOptions.env[key] !== undefined).sort();
 		const proc = spawn(spawnOptions.command, spawnOptions.args, {
 			cwd: spawnOptions.cwd,
 			env: spawnOptions.env,
@@ -384,7 +443,9 @@ async function runInScratch(
 		spawnClaudeCodeProcess,
 		env: buildChildEnv(dirs, hostEnv, options.providerEnv),
 		settingSources: [],
-		...(options.userSettings === undefined ? {} : { settings: options.userSettings }),
+		...(settingsPath === null ? {} : { settings: settingsPath }),
+		// Binds as allowManagedHooksOnly: settings-file and project hooks never run; picp's SDK callback still does.
+		managedSettings: { disableAllHooks: true },
 		strictMcpConfig: true,
 		mcpServers: { picp: reportServer(options.job, state) },
 		tools: [...(options.tools ?? SPIKE_TOOLS)],
@@ -396,18 +457,27 @@ async function runInScratch(
 		permissionMode: "dontAsk",
 		hooks: {
 			PreToolUse: [
-				{ hooks: [preToolUseHook([...spikeGuards(options.job), ...(options.extraGuards ?? [])], (tool, reason) => denials.push({ tool, reason }))], onFailure: "block" },
+				{ hooks: [preToolUseHook([...spikeGuards(options.job, secrets), ...(options.extraGuards ?? [])], (tool, reason) => denials.push({ tool, reason }), ready)], onFailure: "block" },
 			],
 		},
 		maxTurns: options.maxTurns ?? 12,
 		abortController: abort,
 		...(options.model === undefined ? {} : { model: options.model }),
+		...(options.resume === undefined ? {} : { resume: options.resume.sessionId }),
 	};
+	const expectedTools = [...(options.tools ?? SPIKE_TOOLS), REPORT_TOOL];
 	try {
-		for await (const message of query({ prompt: options.prompt, options: sdkOptions })) {
-			if (message.type === "system" && message.subtype === "init") {
+		const q = query({ prompt: options.prompt, options: sdkOptions });
+		for await (const message of q) {
+			if (message.type === "system" && message.subtype === "init" && checking === undefined) {
 				initModel = message.model;
+				sessionId = message.session_id;
 				coldStartMs = Date.now() - started;
+				checking = checkSurface(q, message, expectedTools).then((lockdown) => {
+					if (lockdown.verdict === "refused") abort.abort();
+					release(lockdown.refusal);
+					return lockdown;
+				});
 			}
 			if (message.type === "assistant" && message.parent_tool_use_id === null) models.add(message.message.model);
 			if (message.type === "result") result = message;
@@ -415,19 +485,27 @@ async function runInScratch(
 	} catch (err) {
 		error = (err as Error).message;
 	}
+	release("Refused: the run ended before the lockdown check.");
+	const lockdown = await checking;
+	if (lockdown?.verdict === "refused") error = lockdown.refusal;
 	const exit = await observeExit(child, exited);
+	const ledger = claudeModelLedger(result?.modelUsage);
 	return {
 		claudePath: claude.path,
 		claudeVersion: claude.version,
 		sdkVersion: sdkVersion(),
 		...(spawnedCommand === undefined ? {} : { spawnedCommand }),
+		...(spawnedEnvKeys === undefined ? {} : { spawnedEnvKeys }),
 		...(exit === undefined ? {} : { exit }),
 		...(state.accepted === undefined ? {} : { report: state.accepted }),
 		reportRefusals: state.refusals,
 		denials,
 		...(result === undefined ? {} : { resultSubtype: result.subtype }),
 		...(initModel === undefined ? {} : { initModel }),
-		usage: spikeUsage(result, models),
+		...(sessionId === undefined ? {} : { sessionId }),
+		...(ledger === undefined ? {} : { ledger }),
+		...(lockdown === undefined ? {} : { lockdown }),
+		usage: spikeUsage(result, models, options.resume === undefined ? new Map() : options.resume.ledger),
 		...(coldStartMs === undefined ? {} : { coldStartMs }),
 		durationMs: Date.now() - started,
 		...(error === undefined ? {} : { error }),

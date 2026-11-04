@@ -23,7 +23,7 @@ export class PicpDev {
     this.manifest = ws.file("src/tool-manifest.ts")
   }
 
-  /** Node 24 as the non-root `node` user, with `npm ci` keyed on package.json + package-lock.json + the binary stubs. */
+  /** Node 24 as the non-root `node` user, with `npm ci` keyed on package.json, package-lock.json and the stubs. */
   @func()
   base(): Container {
     return dag

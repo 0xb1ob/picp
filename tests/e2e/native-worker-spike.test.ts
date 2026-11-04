@@ -17,7 +17,12 @@ const JOB = "cp-native-spike-e2e";
 test("native spike: one research run reports once, refuses bad reports, denies forbidden calls before they run, keeps host env out and records the exit",
 	{ skip: CLAUDE === undefined ? "claude is not on PATH" : false, timeout: 180_000 }, async () => {
 	const root = mkdtempSync(join(tmpdir(), "cp-native-spike-e2e-"));
-	const PARENT_KEYS = ["TMPDIR", "PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR"] as const;
+	const PARENT_KEYS = ["TMPDIR", "PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_HOST_SENTINEL"] as const;
+	// The driver's provider, config and DISABLE_* keys, plus the three the SDK itself adds; never a host one.
+	const CHILD_CLAUDE_KEYS = [
+		"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_AGENT_SDK_CLIENT_APP", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CONFIG_DIR",
+		"CLAUDE_AGENT_SDK_VERSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SDK_READS_SESSION_STATE",
+	];
 	const saved = Object.fromEntries(PARENT_KEYS.map((key) => [key, process.env[key]]));
 	const host = await startClaudeMockProvider([]);
 	try {
@@ -64,11 +69,13 @@ test("native spike: one research run reports once, refuses bad reports, denies f
 			ANTHROPIC_API_KEY: "host-api-key-sentinel",
 			ANTHROPIC_BASE_URL: host.url,
 			CLAUDE_CONFIG_DIR: join(root, "hosthome", ".claude"),
+			CLAUDE_CODE_HOST_SENTINEL: "host-claude-code-sentinel",
 		});
 		const result = await runClaudeSpike({
 			job: { job_id: JOB, delivery: "local", runDir: join(root, "run"), worktree, artifactPath },
 			prompt: "Research the repo and report.",
 			providerEnv: { ANTHROPIC_BASE_URL: provider.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN },
+			userSettings: null,
 			extraGuards: [throwing],
 			maxTurns: 20,
 			timeoutMs: 150_000,
@@ -93,7 +100,7 @@ test("native spike: one research run reports once, refuses bad reports, denies f
 		assert.equal(existsSync(join(root, "gh-called")), false);
 		assert.equal(existsSync(join(root, "outside.txt")), false);
 		const reasons = result.denials.map((denial) => `${denial.tool}: ${denial.reason}`);
-		assert.equal(reasons.length, 4, reasons.join("\n"));
+		assert.equal(reasons.length, 5, reasons.join("\n"));
 		assert.match(reasons[0] ?? "", /^Bash: [\s\S]*auth/i);
 		assert.match(reasons[1] ?? "", /^Bash: Refused: a worker never merges/);
 		assert.match(reasons[2] ?? "", /^Write: [\s\S]*artifact directory/);
@@ -105,9 +112,13 @@ test("native spike: one research run reports once, refuses bad reports, denies f
 		assert.ok(results.some((text) => text.includes("spike repo readme")), results.join("\n---\n"));
 		assert.equal(readFileSync(artifactPath, "utf8"), "# Findings\n\nok\n");
 
-		// (6) no host ANTHROPIC_* reached the child: its env, the host endpoint and every request's credentials.
-		assert.ok(results.some((text) => text.includes(`no-host-api-key\n${provider.url}`)), results.join("\n---\n"));
+		// (6) no host ANTHROPIC_*/CLAUDE_* key reached the real spawn (keys only, never values), the host sentinel
+		// key included; the host endpoint is never called.
+		const hostKeys = (result.spawnedEnvKeys ?? []).filter((key) => /^(ANTHROPIC|CLAUDE)_/.test(key));
+		assert.deepEqual(hostKeys, [...CHILD_CLAUDE_KEYS].sort());
+		assert.match(reasons[4] ?? "", /^Bash: [\s\S]*`printenv` \(not on the read-only list\)/);
 		assert.equal(host.requests.length, 0);
+		assert.ok(!JSON.stringify(provider.requests.map((request) => request.body)).includes("host-api-key-sentinel"));
 		assert.ok(provider.requests.length > 0);
 		for (const request of provider.requests) {
 			assert.equal(request.apiKey, undefined);

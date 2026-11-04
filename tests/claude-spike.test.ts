@@ -5,7 +5,9 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { HookCallback, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { HookCallback, SDKResultMessage, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
+import { readOnlyBashRefusal, secretPaths } from "../src/drivers/claude-bash-policy.ts";
+import { CLI_BUILTIN_AGENTS, type InitSurface, lockdownVerdict } from "../src/drivers/claude-lockdown.ts";
 import {
 	buildChildEnv,
 	claudeVersionRefusal,
@@ -63,6 +65,127 @@ test("preToolUseHook: guards deny, a throwing guard denies, an unknown tool deni
 	assert.equal(thrown?.permissionDecision, "deny");
 	assert.match(thrown?.permissionDecisionReason ?? "", /a guard failed \(boom\)/);
 	assert.deepEqual(denied, ["Bash", "Bash", "Bash", "Write", "WebFetch"]);
+	const locked = preToolUseHook(spikeGuards(job), () => {}, Promise.resolve("Refused: lockdown"));
+	assert.equal((await call(locked, "Read", { file_path: "/repo/README.md" }))?.permissionDecisionReason, "Refused: lockdown");
+});
+
+const SECRETS = secretPaths("/op/settings.json", ["/op", "/op"]);
+const bashRefusal = (command: string) => readOnlyBashRefusal(command, "/repo", SECRETS);
+
+test("readOnlyBashRefusal: named read-only commands run; expansions, writers, env dumps and secret paths are refused", () => {
+	assert.deepEqual(SECRETS, ["/op/settings.json", "/op/.claude", "/op/.config/claude", "/proc", "/dev/fd"]);
+	for (const command of [
+		"rg -n foo src | head -5",
+		"cat README.md | wc -l && ls 2>/dev/null",
+		"git log --oneline -3; git status",
+		"gh pr view 7 --json title",
+		"ls nope || echo none $?",
+		"grep 'a > b $HOME ${X} {a,b} ~' file",
+		"find . -name '*.ts'",
+		"sort -nr -k 2 f",
+		"git grep -n -e x; tail -5 f; head -n5 f",
+		"git log -n 3 --format=%H -- src",
+		"git show --pretty=oneline HEAD; git diff -U3 HEAD",
+	]) assert.equal(bashRefusal(command), undefined, command);
+	for (const [command, why] of [
+		["echo x > f", "a redirect"],
+		["echo x >> f", "a redirect"],
+		["cat < f", "a redirect"],
+		["echo x | tee f", "`tee`"],
+		["cat $(touch f)", "a command substitution"],
+		["cat \"`touch f`\"", "a command substitution"],
+		["(touch f)", "a subshell"],
+		["sleep 9 &", "a background job"],
+		["FOO=1 cat f", "an env assignment"],
+		["cp a b", "`cp`"],
+		["sed -i s/a/b/ f", "`sed`"],
+		["git commit -m x", "`git commit`"],
+		["git -C /x status", "`git -C`"],
+		["git diff --output=f", "`git diff` option `--output`"],
+		["git log --outp=f", "`git log` option `--outp`"],
+		["git grep -nOrm x", "`git grep` option `-O`"],
+		["git grep -O rm x", "`git grep` option `-O`"],
+		["git grep --open-files-in-pager=rm x", "`git grep` option `--open-files-in-pager`"],
+		["git log --pretty --output=/repo/f", "`git log` option `--pretty`"],
+		["git show --format --output=/repo/f", "`git show` option `--format`"],
+		["git diff -U --output=f", "`git diff` option `-U`"],
+		["git diff -U3 --output=f", "`git diff` option `--output`"],
+		["git log -n --output=f", "`git log` option `-n`"],
+		["git log --since --output=f", "`git log` option `--since`"],
+		["rg -e -- --pre=sh x", "`rg` option `-e`"],
+		["head -n", "`head` option `-n`"],
+		["file -C -m f", "`file` (not on the read-only list)"],
+		["find . -delete", "`find` option `-delete`"],
+		["find . -name x -fprint f", "`find` option `-fprint`"],
+		["sort -o f g", "`sort` option `-o`"],
+		["sort -S 1 f", "`sort` option `-S`"],
+		["sort -nT /tmp f", "`sort` option `-T`"],
+		["sort --compress-program=sh f", "`sort` option `--compress-program`"],
+		["rg --pre sh x", "`rg` option `--pre`"],
+		["rg -nz x", "`rg` option `-z`"],
+		["rg --hostname-bin=sh x", "`rg` option `--hostname-bin`"],
+		["gh pr view 7 --web", "`gh pr view` option `--web`"],
+		["cat *", "an unquoted glob"],
+		["ls src/?.ts", "an unquoted glob"],
+		["ls [ab]", "an unquoted glob"],
+		["gh pr merge 7", "`gh pr merge`"],
+		["echo 'open", "an unterminated quote"],
+		["find /repo ${U:--delete}", "a parameter expansion"],
+		["find /repo $'-\\x64elete'", "an ANSI-C or locale quote"],
+		["find /repo $\"-delete\"", "an ANSI-C or locale quote"],
+		["echo $[1+1]", "an arithmetic expansion"],
+		["find /repo {-delete,}", "a brace expansion"],
+		["git log ${U:---output=/repo/f}", "a parameter expansion"],
+		["echo $ANTHROPIC_AUTH_TOKEN", "a variable expansion"],
+		["echo \"$CP_SENTINEL_SECRET\"", "a variable expansion"],
+		["cat ~op/.claude/settings.json", "a tilde expansion"],
+		["printenv", "`printenv` (not on the read-only list)"],
+		["env", "`env` (not on the read-only list)"],
+		["cd /repo/src", "`cd` (not on the read-only list)"],
+		["cat /proc/self/environ", "a secret path"],
+		["grep -a SECRET /proc/1/environ", "a secret path"],
+		["cat ../../proc/self/environ", "a secret path"],
+		["cat /op/settings.json", "a secret path"],
+		["head /op/.claude.json", "a secret path"],
+		["rg x '/op/.cl*/s'", "a secret path"],
+		["rg x /op", "a secret path"],
+		["grep --file=/op/.config/claude/x y", "a secret path"],
+		["cat /dev/fd/3", "a secret path"],
+	] as Array<[string, string]>) assert.match(bashRefusal(command) ?? "", new RegExp(`; ${why.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), command);
+});
+
+const INIT: InitSurface = {
+	tools: ["Read", REPORT_TOOL],
+	mcp_servers: [{ name: "picp", status: "connected" }],
+	skills: ["doctor"],
+	plugins: [{ name: "cc-plugin-privacy", path: "builtin" }],
+	agents: [],
+	slash_commands: ["doctor", "compact"],
+	output_style: "default",
+};
+const COMMANDS = [{ name: "doctor", builtin: true }, { name: "compact", builtin: true }] as SlashCommand[];
+const LOCKED = { hooks: [], policy: { managedOnly: true, policyHookCount: 0 } };
+
+test("lockdownVerdict: only picp's surface and CLI built-ins pass; any extra, a missing listing or an unbound lock refuses", () => {
+	const ok = lockdownVerdict(INIT, ["Read", REPORT_TOOL], COMMANDS, [], LOCKED);
+	assert.equal(ok.verdict, "ok");
+	assert.deepEqual(ok.seen, { tools: 2, mcpServers: 1, skills: 1, plugins: 1, agents: 0, slashCommands: 2, hooks: 0, managedHooks: 0 });
+	assert.equal(Object.keys(CLI_BUILTIN_AGENTS).length, 5);
+	// A loaded agent that reuses a built-in name is still an extra: its description does not match the pinned digest.
+	const loaded = lockdownVerdict({
+		...INIT,
+		tools: ["Read", "Bash"],
+		mcp_servers: [{ name: "other", status: "connected" }],
+		skills: ["doctor", "x"],
+		plugins: [{ name: "p", path: "/home/op/p" }],
+		agents: ["y", "Plan"],
+		output_style: "Explanatory",
+	}, ["Read", REPORT_TOOL], [...COMMANDS, { name: "doctor" } as SlashCommand], [{ name: "Plan", description: "impostor" }], { hooks: [{}], policy: { managedOnly: true } });
+	assert.deepEqual(loaded.extra, { tools: 2, mcpServers: 2, skills: 2, plugins: 1, agents: 2, slashCommands: 1, hooks: 1, outputStyle: 1 });
+	assert.match(loaded.refusal ?? "", /^Refused: the Claude CLI lockdown failed: it loaded a surface picp did not pass \(tools 2, mcpServers 2/);
+	assert.doesNotMatch(loaded.refusal ?? "", /home|Explanatory|other|impostor|Plan/);
+	assert.match(lockdownVerdict(INIT, ["Read", REPORT_TOOL], COMMANDS, [], undefined).refusal ?? "", /no hook listing/);
+	assert.match(lockdownVerdict(INIT, ["Read", REPORT_TOOL], COMMANDS, [], { hooks: [], policy: { managedOnly: false } }).refusal ?? "", /did not bind/);
 });
 
 test("version advisory: below the floor or unparsable names `claude update`; at or above passes", () => {
@@ -86,16 +209,20 @@ const RESULT = {
 } as unknown as SDKResultMessage;
 
 test("spikeUsage: complete on success with other-model work apart; unknown is unavailable, never 0", () => {
-	const usage = spikeUsage(RESULT, new Set(["claude-picp-fake"]));
+	const usage = spikeUsage(RESULT, new Set(["claude-picp-fake"]), new Map());
 	assert.equal(usage.usageStatus, "complete");
 	assert.equal(usage.inputTokens, 72);
 	assert.equal(usage.outputTokens, 42);
 	assert.deepEqual(usage.otherUsage, { inputTokens: 12, outputTokens: 7 });
 	assert.deepEqual(usage.models, ["claude-picp-fake"]);
-	for (const unknown of [spikeUsage(undefined, new Set()), spikeUsage({ ...RESULT, usage: {} } as unknown as SDKResultMessage, new Set())]) {
+	for (const unknown of [spikeUsage(undefined, new Set(), new Map()), spikeUsage({ ...RESULT, usage: {} } as unknown as SDKResultMessage, new Set(), new Map())]) {
 		assert.equal(unknown.usageStatus, "unavailable");
 		assert.equal("inputTokens" in unknown, false);
 	}
 	const failed = { ...RESULT, subtype: "error_during_execution", usage: { input_tokens: 0, output_tokens: 0 } } as unknown as SDKResultMessage;
-	assert.equal(spikeUsage(failed, new Set()).usageStatus, "unavailable");
+	assert.equal(spikeUsage(failed, new Set(), new Map()).usageStatus, "unavailable");
+	// A resumed process restores the session's modelUsage: the prior run's ledger keeps it from counting twice.
+	const prior = new Map([["claude-side-model", { input: 12, output: 7 }]]);
+	assert.deepEqual(spikeUsage(RESULT, new Set(["claude-picp-fake"]), prior).otherUsage, { inputTokens: 0, outputTokens: 0 });
+	assert.equal("otherUsage" in spikeUsage(RESULT, new Set(["claude-picp-fake"]), undefined), false);
 });
