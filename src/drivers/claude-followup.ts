@@ -25,7 +25,9 @@ export const NATIVE_REVIVE_PROMPT =
 	"Continue the research from where the session stopped and call report_result once when you are done.";
 
 export const NATIVE_ACK = {
-	resumed: "resumed: one new native claude process resumed this job's session with the message as its next prompt; nothing was steered",
+	resumed:
+		"resuming: one new native claude process resumes this job's session with the message as its next prompt (run event " +
+		"native_run, or the worker's named failure on its observed exit); nothing was steered",
 	queued:
 		"queued until the current turn ends: a resume after it delivers the message under the same admission and gates " +
 		"(run event native_followup_delivered), or native_followup_refused names why not; nothing was steered",
@@ -94,7 +96,13 @@ export function queuedFollowUps(runDir: string): string[] {
 	}
 }
 
-export const clearFollowUps = (runDir: string): void => rmSync(join(runDir, NATIVE_FOLLOWUPS_FILE), { force: true });
+/** Drops the `count` oldest queued follow-ups only; a send queued since they were read stays queued. */
+export function dropFollowUps(runDir: string, count: number): void {
+	const file = join(runDir, NATIVE_FOLLOWUPS_FILE);
+	const rest = existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).slice(count) : [];
+	if (rest.length === 0) rmSync(file, { force: true });
+	else writeFileSync(file, `${rest.join("\n")}\n`, { mode: 0o600 });
+}
 
 /**
  * Every native resume's admission, in dispatch's order and before any claude process starts: the drain freeze and the
@@ -129,6 +137,16 @@ export async function nativeReviveRefusal(home: string, jobId: string, sessionFi
 	} catch (error) {
 		return `${(error as Error).message}. Nothing was spawned.`;
 	}
+}
+
+/** After a native revive's spawn, picp's revive prompt starts the resumed run; returns why it was refused, or none. */
+export async function sendNativeRevive(
+	worker: { send(message: string, mode: "prompt"): Promise<{ receipt: string; disposition?: string; error?: string }> },
+	record: (payload: Record<string, unknown>) => void,
+): Promise<string | undefined> {
+	const sent = await worker.send(NATIVE_REVIVE_PROMPT, "prompt");
+	record({ receipt: sent.receipt, ...(sent.disposition ? { disposition: sent.disposition } : {}), native_revive: true, ...(sent.error ? { error: sent.error } : {}) });
+	return sent.receipt === "failed" ? `the native worker refused the revive prompt (${sent.error ?? "no error text"})` : undefined;
 }
 
 /** Why a native job takes no pi-only follow-up door (cp_revive continue_failed, bounded recovery, a mid-turn steer). */

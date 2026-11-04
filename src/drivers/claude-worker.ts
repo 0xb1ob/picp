@@ -14,7 +14,7 @@ import { type Delivery, paths, type Usage } from "../contracts.ts";
 import { REPORT_TOOL, runClaudeSpike } from "./claude-spike.ts";
 import {
 	assertNativeResume,
-	clearFollowUps,
+	dropFollowUps,
 	enqueueFollowUp,
 	NATIVE_SCRATCH_PREFIX,
 	NATIVE_SESSION_FILE,
@@ -148,7 +148,7 @@ async function dueFollowUps(ran: Turn): Promise<string | undefined> {
 		write({ type: "native_followup_refused", count: queued.length, reason: (error as Error).message });
 		return undefined;
 	}
-	clearFollowUps(runDir);
+	dropFollowUps(runDir, queued.length);
 	write({ type: "native_followup_delivered", count: queued.length });
 	return queued.join("\n\n");
 }
@@ -163,7 +163,7 @@ async function serve(first: string): Promise<number> {
 		const runDir = env.CP_RUN_DIR ?? "";
 		const left = queuedFollowUps(runDir);
 		if (left.length > 0) {
-			clearFollowUps(runDir);
+			dropFollowUps(runDir, left.length);
 			write({ type: "native_followup_delivered", count: left.length });
 		}
 		let prompt: string | undefined = [first, ...left].join("\n\n");

@@ -358,7 +358,7 @@ only path, with the same Bash policy, R1, lockdown, managed hooks, env allow-lis
 
 | Follow-up | pi | native claude |
 |---|---|---|
-| `cp_send`, worker idle | prompt into the live session | admission, then ONE new claude process resumes the session with the message; ack `native: resumed: …` |
+| `cp_send`, worker idle | prompt into the live session | admission, then ONE new claude process resumes the session with the message; ack `native: resuming: …` (sent before the run; a failed resume is the worker's named failure) |
 | `cp_send`, worker busy (auto/follow_up) | steer (auto) or follow_up | queued in `native-followups.jsonl`; ack `receipt: queued`, `native: queued until the current turn ends …` |
 | `cp_send` mode `steer` | steer into the turn | refused by name; nothing sent |
 | `cp_revive` | respawn idle | respawn, then resume with picp's revive prompt (also from `failed`) |

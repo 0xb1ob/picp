@@ -124,7 +124,7 @@ test("F1/F3/F4/F8: a busy send queues until the turn ends, idle sends resume the
 	for (const send of [first, second]) {
 		assert.notEqual(send?.isError, true, text(send));
 		assert.equal(send?.result.details?.receipt, "delivered", text(send));
-		assert.match(String(send?.result.details?.native), /^resumed:/);
+		assert.match(String(send?.result.details?.native), /^resuming:/);
 	}
 	const run3 = calls.find((request) => messages(request).includes("Idle follow-up one."));
 	assert.ok(messages(run3).includes("Noted the queued follow-up."), "the idle send resumed the same session");
@@ -212,7 +212,7 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 	assert.equal(frozenSend?.isError, true, text(frozenSend));
 	assert.match(text(frozenSend), /draining/);
 	assert.equal(runsBefore(/Switched off\.|Frozen\./), 0);
-	assert.match(String(resumed?.result.details?.native), /^resumed:/, text(resumed));
+	assert.match(String(resumed?.result.details?.native), /^resuming:/, text(resumed));
 	// F7, then F5/F6 on revive: the failed native job is not continued, not revived while off or frozen.
 	assert.match(text(continued), /continue_failed is refused/);
 	assert.match(text(offRevive), /native_refused.*workers\.native_claude_research is off/);

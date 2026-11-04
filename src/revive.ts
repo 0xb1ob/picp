@@ -33,7 +33,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type JobRouting, paths, type Role, type ThinkingLevel } from "./contracts.ts";
-import { NATIVE_REVIVE_PROMPT, nativeDoorRefusal, nativeReviveRefusal } from "./drivers/claude-followup.ts";
+import { nativeDoorRefusal, nativeReviveRefusal, sendNativeRevive } from "./drivers/claude-followup.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
 import { loadProfile } from "./profiles.ts";
@@ -643,11 +643,8 @@ export class Reviver {
 			await safely(() => this.#options.manager.shutdown(jobId));
 			throw new ReviveError(`revive ${jobId}: spawned but failed to record it (${(error as Error).message}); worker shut down`);
 		}
-		if (record.worker.driver) {
-			const sent = await managed.worker.send(NATIVE_REVIVE_PROMPT, "prompt");
-			this.#options.runs.open(jobId).cp("prompt_sent", { receipt: sent.receipt, ...(sent.disposition ? { disposition: sent.disposition } : {}), native_revive: true, ...(sent.error ? { error: sent.error } : {}) });
-			if (sent.receipt === "failed") throw new ReviveError(`revive ${jobId}: the native worker refused the revive prompt (${sent.error ?? "no error text"})`);
-		}
+		const refusedPrompt = record.worker.driver ? await sendNativeRevive(managed.worker, (payload) => this.#options.runs.open(jobId).cp("prompt_sent", payload)) : undefined;
+		if (refusedPrompt) throw new ReviveError(`revive ${jobId}: ${refusedPrompt}`);
 
 		return {
 			job_id: jobId,
