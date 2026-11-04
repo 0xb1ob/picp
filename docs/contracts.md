@@ -6614,7 +6614,9 @@ the message refusals above. A busy session queues it like a message: `sends` car
 shows it labelled (`/stop @cp-abcd`) with Cancel send only. The composer keeps one `client_id` per prepared command and
 mints a fresh one after a refusal that injected nothing (any error answer below 503); after an unknown outcome (no answer,
 503 or 504) the id stays, so a retry is refused as a duplicate rather than injected twice. `GET /api/operator/control`
-advertises `commands: true` only while the running bridge takes the op.
+advertises `commands: true` only while the running bridge takes the op. Full match S8 adds `threads: true` the same way:
+dashboard-control itself owns `thread_create` / `thread_rename`, so every session from S8 on advertises it (see
+[Named threads](#named-threads-full-match-s8)).
 
 The guarded status also projects `sends: [{id, at, state, reason, ask_id, body}]` from the dashboard and inbox journals (`src/viewer/control-pending.ts`), preserving original message text and attachment ids. It is read-only, caps each journal read at 16 MiB, ignores a torn final line, and returns named `sends_error` warnings for unreadable, oversized or malformed journal content. All unresolved/failed accepted sends and the newest 100 delivered outcomes are retained. Known delivered bubbles wait for actual transcript appearance (including held ids in inbox replay), while historical delivered rows do not create new bubbles. Browser persistence keeps still-unseen sends and dismissed ids across reload; interrupted POSTs become an explicit failure without automatic replay. See `docs/viewer-app.md` for FIFO bubbles, scrolling and retry/discard.
 
@@ -6954,12 +6956,42 @@ refusal lines in `state/operator/dashboard.jsonl` are left in place.
 
 ### Operator threads (retired by #588)
 
-The cp-xmw2 operator threads feature is deleted: no `/api/threads*` route (GET falls through to the default handler,
-POST is 405 `read-only viewer: GET only`), no `cp_parent thread_bind` or `thread` argument, no thread line in the
+The cp-xmw2 operator threads feature is deleted: none of its `/api/threads*` routes remain (`GET /api/threads` is now the
+read-only named-thread projection below, never this journal; any `POST /api/threads*`, `/api/threads/done` included, is
+405 `read-only viewer: GET only`), no `cp_parent thread_bind` or `thread` argument, no thread line in the
 operator note. `POST /api/operator/message` still accepts a stale `thread` field and ignores it, so an old client's send
 lands untagged. A legacy `; thread=<tag>` marker in a session file still parses (the tag is dropped), and a legacy
 `thread` key on an inbox `held` or dashboard request line is ignored. `state/operator/threads.jsonl` is left on disk,
 never read or written.
+
+### Named threads (full match S8)
+
+The decided named-threads product (es-99574f): a thread is an opaque, immutable id (`th-` + 16 random hex) plus a free
+display name (trimmed, 1–80 code points, no control characters; duplicates allowed). S8 ships only the registry and its
+read-only projection; nothing tags sends, asks, jobs or the parent outbox yet (S9/S10), and there is no thread UI (S11).
+
+- **Registry.** `state/operator/named-threads.jsonl` (0600), append-only, one complete fsynced line per event, schema
+  `NamedThreadEventSchema` (`src/contracts/threads.ts`), `v: 1`: `create` / `rename` (`request_id` = the dashboard
+  `client_id`, `thread_id`, `name`, `peer`) and `bind` (`key: {kind: message|ask|job|parent_send, id, session_id?}`,
+  `thread_id` or `null` for an explicit No thread). The retired `threads.jsonl` is never read: it yields no thread and
+  no membership, and never makes this registry unavailable.
+- **Bounded read.** One reader (`src/viewer/named-threads-view.ts`), capped at 1 MiB and 10 000 lines. Over a cap, a torn
+  final line, an unknown `v` or any invalid line makes the registry **unavailable** with a `file:line` reason; every
+  write is then refused (503) and nothing truncates, repairs or resets the file. An append that would pass a cap is
+  refused (409).
+- **One writer.** Only the operator session appends (`src/operator-named-threads.ts`). `POST /api/operator/threads` takes
+  `{"op": "create", "client_id", "name"}` or `{"op": "rename", "client_id", "thread_id", "name"}` through the shared
+  dashboard-control refusal chain (`--require-tailnet`, rate, Origin, Sec-Fetch-Site, JSON, CSRF token, a running
+  session) and forwards one `thread_create` / `thread_rename` frame. The session's `status` advertises `threads: true`;
+  without it (an owner from before S8) the viewer refuses 409 `unsupported: … predates named threads` and never sends
+  the frame. Create answers 201 `{thread_id, name, state, replayed}`; the same `client_id` again replays its first answer
+  (200, `replayed: true`, no line), another request under it is 409. The owner journals one `thread` line per answer in
+  `state/operator/dashboard.jsonl`; the viewer journals its own refusals.
+- **Bind.** `bindThread` (no producer until S9/S10): the same key and thread again writes nothing; the same key with
+  another thread (or `null` vs a thread) is refused 409 and the original stays. Membership is never inferred.
+- **Projection.** `GET /api/threads` (`--require-tailnet` only) answers `{generated_at, available, reason, threads,
+  bindings}`: absent registry is available and empty; unavailable carries the reason. It never writes.
+- No thread id or name grants a mandate, a decision or a merge, or appears in an authority label or a filesystem path.
 
 ### Remote devices (remote dashboard PR 1)
 

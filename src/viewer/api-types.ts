@@ -94,7 +94,17 @@ export interface ControlStatusResponse {
  parent_restart?: ParentRestartStatus;
  /** Running only, full match S6: true when this session's cp-bridge takes dashboard commands; absent otherwise. */
  commands?: boolean;
+ /** Running only, full match S8: true when this session's dashboard control owns the named-thread registry. */
+ threads?: boolean;
 }
+/** Full match S8: one named thread; `id` is opaque and immutable, `name` free and editable (duplicates allowed). */
+export interface NamedThread { id: string; name: string; created_at: string; renamed_at: string | null }
+/** Full match S8: one membership, keyed by `{kind, id, session_id?}`; `thread_id` null is an explicit No thread. */
+export interface ThreadBinding { kind: "message" | "ask" | "job" | "parent_send"; id: string; session_id?: string; thread_id: string | null; at: string }
+/** `GET /api/threads` (full match S8): absent is available and empty; corrupt or over cap names its `file:line`. */
+export interface ThreadsResponse { generated_at: string; available: boolean; reason: string | null; threads: NamedThread[]; bindings: ThreadBinding[] }
+/** `POST /api/operator/threads` (full match S8): the operator session's answer; the same client_id replays it. */
+export interface ThreadWriteResponse { thread_id: string; name: string; state: "created" | "renamed"; replayed: boolean }
 /** `POST /api/operator/upload` stored an attachment: 201 with its upload id (the composer sends ids, never bytes). */
 export interface OperatorUploadResponse { id: string; mime: string; bytes: number; expires_at: string; url: string; name?: string }
 export interface RestartStatus { supported: boolean; blockers: string[]; reason: string | null }

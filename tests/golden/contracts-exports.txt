@@ -380,7 +380,14 @@ ModeSetting	type	9f7883f937d32f8c	-
 ModeSettingSchema	value	a79ab3608ba3dd9d	9d70ed6a4429d91a
 ModeSettings	type	7fd1b6fa1c513410	-
 ModeSettingsSchema	value	285879f2a7ca51c6	2f609ffa2a8df8d0
+NAMED_THREADS_VERSION	value	a809ce76c3224c98	6b86b273ff34fce1
 NEVER_COMMIT_PATHS	value	f943508c3d8c3401	a9d4fe1ead24a645
+NamedThreadBindEvent	type	547edb0b5ec20ec3	-
+NamedThreadBindEventSchema	value	85eee80501d36de0	4fca04fab966a762
+NamedThreadEvent	type	d2e0080725531e91	-
+NamedThreadEventSchema	value	82e1bcdb41d618eb	7f0f34f5ae75fda0
+NamedThreadWriteEvent	type	9dd512be69edcd03	-
+NamedThreadWriteEventSchema	value	8ed46dddf5551a26	1301061c57241b77
 OPEN_JOB_STATUSES	value	8ae535ae0130c823	1fccd4d12c43ae6a
 OPERATOR_PICK_ERRORS	value	3a1292010ddcef55	7bd3ee8b670ed766
 OPERATOR_PICK_PROOF_ID	value	bc20fb89993a5aa4	c7799804e715f3d1
@@ -653,6 +660,7 @@ TaskImpactSource	type	5d781cd6f7f104a3	-
 TaskImpactSourceSchema	value	cb2ba0181100dae0	9c1155ceeee92662
 ThinkingLevel	type	6816fcb72f1193fd	-
 ThinkingLevelSchema	value	10da1e227bbc0e25	23880218f72e3798
+ThreadBindKeySchema	value	c765ae49d12c5757	a726ccbe9b7c99e9
 UNREPORTED_WORK_FILES_SHOWN	value	216feda080c95bcb	6b51d431df5d7f14
 UNREPORTED_WORK_STATES	value	a276e5736e4d4b01	bc152448660ada4e
 UnreportedWork	type	5a05f84d6bf40efa	-
