@@ -4,10 +4,12 @@
  * only: untagged history shows under All messages and No thread, never inferred into a named thread.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { createConnection, createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
+import { controlSocketFile } from "../../src/viewer/control-files.ts";
 import { namedThreadsFile } from "../../src/viewer/named-threads-view.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import { browserShims, dashboard, openTab, operatorSession, type Tab, until } from "../harness/dashboard.ts";
@@ -98,4 +100,37 @@ test("S11-thread-ui: tabs and # scope rows, asks, jobs and drafts; No thread sen
 
 	await go(tab, "");
 	assert.deepEqual([scope(tab), tab.$(".session-heading-state")!.textContent], [all, context], "All messages again: every loaded message, the same model and context");
+});
+
+test("S11-thread-ui-old-owner: an owner from before S8 gets no # picker and a disabled New thread naming the restart", { timeout: 180_000 }, async (t) => {
+	const d = await dashboard(t, { at: new Date(NOON).toISOString(), seed });
+	await operatorSession(t, d.stateDir);
+	// A relay drops `threads` from every owner answer, as a pre-S8 owner's status lacks it; the registry stays readable.
+	// Negative control (e): ignoring the capability shows the `#` chip and an enabled New thread, failing this test.
+	const socket = controlSocketFile(d.stateDir), moved = `${socket}.real`;
+	renameSync(socket, moved);
+	const relay = createServer((client) => {
+		client.on("error", () => {});
+		client.once("data", (frame) => {
+			const upstream = createConnection(moved, () => upstream.write(frame));
+			let reply = "";
+			upstream.on("error", () => client.destroy());
+			upstream.on("data", (part) => {
+				reply += String(part);
+				if (!reply.includes("\n")) return;
+				const answer = JSON.parse(reply.slice(0, reply.indexOf("\n"))) as { result?: Record<string, unknown> };
+				if (answer.result) delete answer.result.threads;
+				client.end(`${JSON.stringify(answer)}\n`);
+				upstream.destroy();
+			});
+		});
+	});
+	await new Promise<void>((done) => relay.listen(socket, done));
+	t.after(() => relay.close());
+	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
+	browserShims(t, tab);
+	await tab.waitText(/BETA-REPLY/);
+	const title = await until(() => tab.$(".thread-new")?.getAttribute("title"), (s) => !!s && !/running operator session|Loading/.test(s), "owner status read");
+	assert.deepEqual([/predates named threads; restart/.test(title!), tab.$(".thread-new")!.hasAttribute("disabled"), !!tab.$(".operator-composer-hash")],
+		[true, true, false], "old owner: New thread disabled with the restart hint, no # picker");
 });
