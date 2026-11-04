@@ -74,8 +74,7 @@ test("S11-thread-ui: tabs and # scope rows, asks, jobs and drafts; No thread sen
 	assert.deepEqual(tab.$$(".thread-row").map((a) => a.textContent!.replace(/\d+ new$/, "")), ["#All messages", "#Alpha", `#${BETA}`, "#No thread"]);
 	// Ctrl+N opens New thread with focus in its name field; Escape closes it.
 	tab.window.dispatchEvent(Object.assign(new tab.window.Event("keydown", { bubbles: true, cancelable: true }), { key: "n", ctrlKey: true }));
-	await settle();
-	assert.equal(focused()?.getAttribute("aria-label"), "Thread name", "Ctrl+N focuses the new thread's name field");
+	await until(() => focused()?.getAttribute("aria-label"), (label) => label === "Thread name", "Ctrl+N focuses the new thread's name field");
 	tab.key(tab.$(".thread-create")!, "Escape");
 	await settle();
 
