@@ -1,0 +1,6 @@
+{
+	"name": "@anthropic-ai/claude-agent-sdk-linux-arm64-musl",
+	"version": "0.3.318",
+	"private": true,
+	"description": "Empty stand-in: picp always passes the installed claude, so the SDK bundled binary is unused."
+}

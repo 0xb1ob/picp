@@ -34,7 +34,7 @@ type Entrypoint implements ModuleEntrypoint {
         .withObject("PicpDev", description: "The checks of .github/workflows/ci.yml, run in containers with per-step caching.", sourceMap: sourceMap("src/index.ts", 13, 14))
         .withFunction(
           function("base", typeDef.withObject("Container"))
-            .withDescription("Node 24 as the non-root `node` user, with `npm ci` keyed on package.json + package-lock.json only.")
+            .withDescription("Node 24 as the non-root `node` user, with `npm ci` keyed on package.json + package-lock.json + the binary stubs.")
             .withSourceMap(sourceMap("src/index.ts", 28, 3)),
         )
         .withFunction(
