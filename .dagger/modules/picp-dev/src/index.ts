@@ -18,12 +18,12 @@ export class PicpDev {
 
   constructor(ws: Workspace) {
     this.source = ws.directory("/", { gitignore: true, exclude: SOURCE_EXCLUDE })
-    this.deps = ws.directory("/", { include: ["package.json", "package-lock.json"] })
+    this.deps = ws.directory("/", { include: ["package.json", "package-lock.json", "vendor/claude-binary-stub/*/package.json"] })
     this.gitMeta = ws.git().directory()
     this.manifest = ws.file("src/tool-manifest.ts")
   }
 
-  /** Node 24 as the non-root `node` user, with `npm ci` keyed on package.json + package-lock.json only. */
+  /** Node 24 as the non-root `node` user, with `npm ci` keyed on package.json + package-lock.json + the binary stubs. */
   @func()
   base(): Container {
     return dag

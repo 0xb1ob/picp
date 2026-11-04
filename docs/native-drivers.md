@@ -195,7 +195,7 @@ agents, `Agent`/`Task`/`WebFetch`/`WebSearch` disallowed. The child env is an al
 |---|---|
 | SDK | 0.3.318, range `^0.3.318` |
 | `claude --version` | 2.1.318 |
-| `node_modules` delta | 192 → 231 MB (+39 MB) on a clean `npm ci`; the 323 MB `claude-agent-sdk-linux-x64` binary is not installed |
+| `node_modules` delta | +39 MB with the stubs (main 192 → 231 MB, clean `npm ci`); +351 MB before them (202 → 553 MB at the first head, with the bundled 323 MB `claude-agent-sdk-linux-x64` binary) |
 | Fake-model run | cold start (spawn to `system/init`) 473 ms; a five-step run 808 ms |
 | Live smoke (one run) | exit 0, `claude-opus-5-5`, 5.86 s (cold start 409 ms), usage complete: 947 in / 134 out |
 | Files | `src/drivers/claude-spike.ts` 444 lines; `tests/harness/claude-mock-provider.ts` 156 lines |
