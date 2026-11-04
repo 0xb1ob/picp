@@ -343,7 +343,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 			const fallback = paths.length ? `${paths.join("\n")}\n\n` : "";
 			// One plain line per image before the marker: where the upload lives, and that it is swept (UPLOAD_MAX_AGE_MS = 7 days).
 			const imageLines = images?.length ? `${images.map((image) => `image: ${resolve(uploadFile(root, image)!)} (deleted after 7 days; copy it if needed longer)`).join("\n")}\n\n` : "";
-			record.sent = `${text ? `${text}\n\n` : ""}${fallback}${imageLines}${fileText}${viaRemote ? `${viaRemote}\n` : ""}${dashboardMarker(id, askId, images, files, viaRemote !== null, entry.threadId)}`;
+			record.sent = `${text ? `${text}\n\n` : ""}${fallback}${imageLines}${fileText}${viaRemote ? `${viaRemote}\n` : ""}${dashboardMarker(id, askId, images, files, viaRemote !== null)}`;
 			result = ports.inject(record.sent, queued ? (ports.isIdle() ? undefined : "followUp") : deliverAs, inline.length ? inline : undefined);
 		} catch (error) {
 			open.delete(id);
@@ -395,6 +395,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 	const handoffEnded = (id: string) => {
 		if (handing !== id) return;
 		handing = null;
+		if (id === INBOX) inboxSent = null; // a failed inbox handoff is never observed, so nothing may bind to its text
 		settle(false); // no turn ran: the next one may go
 	};
 	/** Handoffs pi took but has not shown, with their handoff count: pi 1.1.0 drops a refused extension prompt silently. */

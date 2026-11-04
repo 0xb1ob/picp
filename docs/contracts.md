@@ -7024,10 +7024,11 @@ S11's picker sets it; a queued, held, retried or edited send keeps the thread it
   the reloaded queue keep it; an offline-held inbox line carries it too, and the combined inbox turn is threaded only
   when every fresh held line names the same thread. A retry re-posts the stored body, thread included; a second request
   under a used `client_id` is refused, never a rebind.
-- **Bound to the delivered entry.** The code-authored marker reads `[cp-dashboard <dc-id> — from the dashboard;
-  thread=<th-id>]` (provenance for the model; the parser ignores the field). Membership is one `bind` line keyed
+- **Bound to the delivered entry.** The marker stays `[cp-dashboard <dc-id> — from the dashboard]`: the retired
+  `; thread=` field is never written (the parser still ignores one). Membership is one `bind` line keyed
   `{kind: "message", id: <pi entry id>, session_id}`, written by the owner for the exact message object it injected and
-  only when that object's text is the text it injected: a typed copy of a marker binds nothing.
+  only when that object's text is the text it injected: a typed copy of a marker binds nothing, and a refused inbox
+  handoff leaves nothing to bind.
 - **Replies by turn.** `/api/sessions` gives every entry of a turn (replies, tools) its user entry's binding as
   `thread_id`; a `custom_message` (a wake) starts an untagged turn. CLI input, old history and an unavailable registry
   read untagged — still shown in All messages. Nothing is inferred from marker text, project headers, dates, nearby
