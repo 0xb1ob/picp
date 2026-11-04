@@ -309,7 +309,12 @@ any spawn. Each refusal reads `refused: <job> cannot run on the native claude dr
 | another native job is live (fleet record with `worker.driver`, no observed exit) | concurrency 1 and the live job |
 | `claude` missing or below the pinned floor `CLAUDE_VERSION_FLOOR` | `claude update` / install remedy |
 
-`WorkerManager.spawn` refuses a second live native worker again (`SpawnSafetyError`) before admission.
+`WorkerManager.spawn` refuses a second live native worker again (`SpawnSafetyError`) before admission. A `driver: "claude"`
+dispatch held by the spawn cap (queued) or by open blockers (armed) keeps its driver (`QueuedDispatchRequestSchema.driver`,
+`toDispatchRequest`), so its release re-runs this selection: it runs native or is refused, never on pi.
+
+Policy: a version floor (2.1.318), not an exact pin, because `claude` auto-updates and an exact pin would refuse every
+run after each update, while the N3a lockdown digest already refuses a changed built-in surface; remedy `claude update`.
 
 **Lifecycle.** The native worker is `src/drivers/claude-worker.ts`, a child that speaks the pi RPC lines dispatch already
 reads, so the recorder, intake, bounds, observers and teardown are pi's own. `runClaudeSpike` is the run core (folded in,
@@ -328,9 +333,10 @@ no longer test-only): every N3a gate is on and not optional.
 **Refused until N3c.** `cp_send` (busy or idle), `cp_revive` (also inside bounded recovery) and any second RPC
 command are refused with "native follow-ups land in N3c"; nothing is queued. Resume is not offered.
 
-**Usage.** A complete SDK usage is normalized to pi's `message_end` usage (input excludes cache read/write), so run
-status, the fleet record, mandate accounting and the per-job `checkBudget` read it exactly like pi usage. When the SDK
-reports `partial` or `unavailable`, the worker writes no measurement: it emits `usage_unavailable`, run status carries
+**Usage.** A complete SDK usage with a finite cost and non-zero tokens is normalized to pi's `message_end` usage (input
+excludes cache read/write), so run status, the fleet record, mandate accounting and the per-job `checkBudget` read it
+exactly like pi usage. Anything else (SDK `partial`/`unavailable`, a missing or non-finite cost, zero tokens, which no
+real model call reports) writes no measurement: the worker emits `usage_unavailable`, run status carries
 `usage_unavailable: true` and the dashboard shows "unavailable (not measured)". Accounting then adds nothing for that
 run (the counters are never written as a measured zero) and admission does not wait on it; a native run is one research
 turn with no follow-ups, so no later per-job budget check reads it.

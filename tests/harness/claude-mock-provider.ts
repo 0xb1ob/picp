@@ -58,17 +58,18 @@ function sse(res: ServerResponse, event: string, data: unknown): void {
 
 const USAGE = { input_tokens: 12, output_tokens: 7, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
 
-function answer(res: ServerResponse, body: Record<string, unknown>, blocks: Array<Record<string, unknown>>, stop: string, id: string): void {
+function answer(res: ServerResponse, body: Record<string, unknown>, blocks: Array<Record<string, unknown>>, stop: string, id: string, usage: boolean): void {
+	const counts = (value: Record<string, number>) => (usage ? { usage: value } : {});
 	const model = typeof body.model === "string" ? body.model : FAKE_CLAUDE_MODEL;
 	if (body.stream !== true) {
 		res.writeHead(200, { "content-type": "application/json" });
-		res.end(JSON.stringify({ id, type: "message", role: "assistant", model, content: blocks, stop_reason: stop, stop_sequence: null, usage: USAGE }));
+		res.end(JSON.stringify({ id, type: "message", role: "assistant", model, content: blocks, stop_reason: stop, stop_sequence: null, ...counts(USAGE) }));
 		return;
 	}
 	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
 	sse(res, "message_start", {
 		type: "message_start",
-		message: { id, type: "message", role: "assistant", model, content: [], stop_reason: null, stop_sequence: null, usage: { ...USAGE, output_tokens: 1 } },
+		message: { id, type: "message", role: "assistant", model, content: [], stop_reason: null, stop_sequence: null, ...counts({ ...USAGE, output_tokens: 1 }) },
 	});
 	blocks.forEach((block, index) => {
 		if (block.type === "text") {
@@ -80,7 +81,7 @@ function answer(res: ServerResponse, body: Record<string, unknown>, blocks: Arra
 		}
 		sse(res, "content_block_stop", { type: "content_block_stop", index });
 	});
-	sse(res, "message_delta", { type: "message_delta", delta: { stop_reason: stop, stop_sequence: null }, usage: { output_tokens: USAGE.output_tokens } });
+	sse(res, "message_delta", { type: "message_delta", delta: { stop_reason: stop, stop_sequence: null }, ...counts({ output_tokens: USAGE.output_tokens }) });
 	sse(res, "message_stop", { type: "message_stop" });
 	res.end();
 }
@@ -96,8 +97,9 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 	}
 }
 
-/** Starts the fake on 127.0.0.1; `script` steps are consumed by tool-offering requests in order. */
-export async function startClaudeMockProvider(script: readonly ClaudeStep[]): Promise<ClaudeMockProvider> {
+/** Starts the fake on 127.0.0.1; `script` steps are consumed by tool-offering requests in order; `usage: false` omits usage. */
+export async function startClaudeMockProvider(script: readonly ClaudeStep[], options: { usage?: boolean } = {}): Promise<ClaudeMockProvider> {
+	const usage = options.usage ?? true;
 	const requests: RecordedClaudeRequest[] = [];
 	let cursor = 0;
 	let overrun = 0;
@@ -135,10 +137,10 @@ export async function startClaudeMockProvider(script: readonly ClaudeStep[]): Pr
 					name: call.name,
 					input: typeof call.input === "function" ? (call.input as (r: RecordedClaudeRequest) => unknown)(recorded) : call.input,
 				}));
-				answer(res, body, blocks, "tool_use", id);
+				answer(res, body, blocks, "tool_use", id, usage);
 				return;
 			}
-			answer(res, body, [{ type: "text", text: step?.kind === "text" ? step.text : "ok" }], "end_turn", id);
+			answer(res, body, [{ type: "text", text: step?.kind === "text" ? step.text : "ok" }], "end_turn", id, usage);
 		})().catch((error: unknown) => {
 			res.writeHead(500, { "content-type": "application/json" });
 			res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: String(error) } }));

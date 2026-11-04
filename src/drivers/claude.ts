@@ -55,7 +55,8 @@ export function liveNativeJobs(jobs: readonly FleetRecord[]): string[] {
 	return jobs.filter((job) => job.worker?.driver !== undefined && job.worker.exited_at === undefined && LIVE_PHASES.includes(job.phase)).map((job) => job.job_id);
 }
 
-/** Overrides pi's argv with the native worker; the env stays the planned worker env, plus the routed Anthropic model. */
+/** Overrides pi's argv with the native worker; the env stays the planned worker env,
+ * plus the routed Anthropic model. */
 export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env"> {
 	const [provider, id] = model.includes("/") ? [model.slice(0, model.indexOf("/")), model.slice(model.indexOf("/") + 1)] : ["", model];
 	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, ...(provider === "anthropic" ? { CP_NATIVE_MODEL: id } : {}) } };

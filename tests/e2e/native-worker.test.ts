@@ -8,10 +8,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
-import { DEFAULT_BUDGET_CONFIG, LAYOUT, paths } from "../../src/contracts.ts";
+import { isDeepStrictEqual } from "node:util";
+import { DEFAULT_BUDGET_CONFIG, EMPTY_USAGE, LAYOUT, paths } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { checkBudget } from "../../src/failures.ts";
+import { jobsView } from "../../src/viewer/jobs-view.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
 import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, treehouseAvailable, waitFor } from "../harness/index.ts";
@@ -27,9 +29,9 @@ const report = (jobId: string, home: string) => ({
 });
 
 /** A fake HOME whose Claude settings file points the native worker at the fake model; the switch file is the test's. */
-async function nativeHome(t: TestContext, script: readonly ClaudeStep[]) {
+async function nativeHome(t: TestContext, script: readonly ClaudeStep[], usage = true) {
 	const b = await dispatchS29(t, { files: { ".claude/settings.json": JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "touch /tmp/picp-n3b-hook-ran" }] }] } }), ".claude/commands/extra.md": "extra\n" } });
-	const claude = await startClaudeMockProvider(script);
+	const claude = await startClaudeMockProvider(script, { usage });
 	const fakeHome = mkdtempSync(join(tmpdir(), "cp-n3b-home-"));
 	t.after(async () => { await claude.close(); rmSync(fakeHome, { recursive: true, force: true }); });
 	const settings = join(fakeHome, ".claude", "settings.json");
@@ -156,6 +158,35 @@ test("P3b/f/g: switch off and a drain freeze refuse before any spawn; a native r
 	assert.equal(run?.report, false);
 	assert.equal(existsSync(h.envelope(crash.id)), false);
 	assert.equal(h.claude.requests.filter((request) => request.path.startsWith("/v1/messages") && Array.isArray(request.body.tools)).length, 1, "only the crash run reached the model");
+});
+
+// F1: the fake model reports no usage, so the run's cost and tokens are unknown; recorded as unavailable, never a zero.
+test("P3h-unavailable: a native run whose usage the model omits is flagged unavailable, never a measured zero", { skip, timeout: 300_000 }, async (t) => {
+	const ids: string[] = [];
+	const h = await nativeHome(t, [
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
+		{ kind: "text", text: "Reported." },
+	], false);
+	h.toggle(true);
+	const native = await h.job();
+	ids.push(native.id);
+	const model = h.b.provider.addScript("n3b-unmeasured", [{ kind: "text", text: "unused" }]);
+	const ends = (await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: native.id, task: "Report the repo's package name.", model, queue: false, when_ready: false, driver: "claude" } }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(native.id)) } }] },
+	], h.env)) as Tool[];
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	const run = readRunEvents(h.b.home, native.id).find((event) => event.type === "native_run")?.payload as Record<string, unknown> | undefined;
+	t.diagnostic(JSON.stringify({ report: run?.report, usage: run?.usage }));
+	const status = readRunStatus(h.b.home, native.id);
+	assert.equal(status.usage_unavailable, true, `usage ${run?.usage} was recorded as measured: ${JSON.stringify(status.usage)}`);
+	assert.equal(readRunEvents(h.b.home, native.id).some((event) => event.type === "message_end"), false, "no measured usage was written");
+	assert.deepEqual(status.usage, EMPTY_USAGE, "run usage stays unwritten");
+	const record = readFleet(h.b.home).jobs.find((job) => job.job_id === native.id);
+	assert.ok(record?.usage === undefined || isDeepStrictEqual(record.usage, EMPTY_USAGE), `fleet usage: ${JSON.stringify(record?.usage)}`);
+	const flight = jobsView({ home: h.b.home, stateDir: join(h.b.home, LAYOUT.state) }).jobs.find((job) => job.id === native.id);
+	assert.equal(flight?.usage_unavailable, true, "the dashboard job says unavailable");
 });
 
 // The single live run of N3b: the operator's own claude settings (claude reads them; picp never does). Counts only.

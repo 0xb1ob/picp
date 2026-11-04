@@ -17,14 +17,16 @@ const abort = new AbortController();
 let run: Promise<number> | undefined;
 let costUsd: number | undefined;
 
-/** pi's usage shape (run-artifacts `readUsage`): `input` is uncached input, as pi reports it. */
+/** pi's usage shape (run-artifacts `readUsage`); undefined (unavailable) unless tokens are complete and non-zero and the
+ * cost is a finite number, since a real model call never costs zero tokens: a zero means nothing was reported. */
 export function piUsage(usage: TurnTokenUsage, cost: number | undefined): Record<string, unknown> | undefined {
-	if (usage.usageStatus !== "complete") return undefined;
+	if (usage.usageStatus !== "complete" || cost === undefined || !Number.isFinite(cost)) return undefined;
 	const cacheRead = usage.cachedInputTokens ?? 0;
 	const cacheWrite = usage.cacheCreationTokens ?? 0;
 	const input = usage.inputTokens - cacheRead - cacheWrite + (usage.otherUsage?.inputTokens ?? 0);
 	const output = usage.outputTokens + (usage.otherUsage?.outputTokens ?? 0);
-	return { input, output, cacheRead, cacheWrite, totalTokens: input + output + cacheRead + cacheWrite, cost: { total: cost ?? 0 } };
+	const totalTokens = input + output + cacheRead + cacheWrite;
+	return totalTokens > 0 ? { input, output, cacheRead, cacheWrite, totalTokens, cost: { total: cost } } : undefined;
 }
 
 /** SDK messages as the pi events the recorder, intake and bounds already watch; the report tool keeps pi's name. */

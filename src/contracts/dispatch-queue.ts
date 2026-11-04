@@ -25,6 +25,8 @@ export const QueuedDispatchRequestSchema = Type.Object(
 		pr: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })),
 		/** R1 D2: a reference only, never renewable authority; re-verified and claimed at admission. */
 		operator_quote: Type.Optional(OperatorModelPickReferenceSchema),
+		/** N3b: replayed so the release re-runs native selection; never dropped into a pi run. */
+		driver: Type.Optional(Type.Literal("claude")),
 	},
 	{ additionalProperties: false },
 );
