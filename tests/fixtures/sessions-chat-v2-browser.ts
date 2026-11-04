@@ -1095,9 +1095,14 @@ try {
 			return { text: title.textContent.slice(0, 32), inside: t.left >= c.left - 1 && t.right <= c.right + 1 && t.top >= c.top - 1 && t.bottom <= c.bottom + 1,
 				overflow: Math.round(Math.max(c.left - t.left, t.right - c.right, 0)), lines: Math.round(t.height / lh), two_lines: t.height <= 2 * lh + 1,
 				apart: t.right <= d.left || d.right <= t.left || t.bottom <= d.top || d.bottom <= t.top, named: title.getAttribute("title") === title.textContent }; })`;
+		// The page title against its one-line text width (canvas, so the DOM is never touched) and the intro under it.
+		const heading = `(() => { const h = document.querySelector(".jobs-heading h1"), p = document.querySelector(".jobs-heading > p"), cs = getComputedStyle(h);
+			const ctx = document.createElement("canvas").getContext("2d"); ctx.font = cs.font; const r = h.getBoundingClientRect(), lh = parseFloat(cs.lineHeight);
+			return { height: Math.round(r.height), line_height: Math.round(lh), lines: Math.round(r.height / lh), one_line: r.height <= 1.5 * lh,
+				fits: r.width >= ctx.measureText(h.textContent).width - 0.5, under: p.getBoundingClientRect().top >= r.bottom }; })()`;
 		for (const [name, width, height] of [["desktop", 1440, 1000], ["narrow", 1000, 800], ["phone", 390, 844]] as const) {
 			await capture(`reports-cards-${name}`, "#reports", width, height, "dark", ".reports-grid > article");
-			Object.assign(shots.at(-1)!, { cards: await evaluate(cards) });
+			Object.assign(shots.at(-1)!, { cards: await evaluate(cards), heading: await evaluate(heading) });
 		}
 		await capture("reports-cards-jobs-desktop", "#jobs", 1440, 1000, "dark", ".job-row-done");
 		Object.assign(shots.at(-1)!, { jobs: await evaluate(`[".job-row-flight", ".job-row-done"].map(s => Math.round(document.querySelector(s).getBoundingClientRect().height))`) });

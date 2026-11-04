@@ -645,7 +645,8 @@ picked job beside the chat at 1440 px, over it at 900 px and full screen at 390 
 title, card and date rects; `tests/e2e/viewer-reports-card-titles.test.ts` runs it and fails unless every title stays
 inside its card, at most two lines, apart from its date, with no sideways scroll and Jobs rows at 40/36 px. Report cards
 own their `report-card*` classes, so the Jobs table's row rules never reach them: a title wraps anywhere, clamps to two
-lines with its full text in `title`, and the date keeps its own column on the heading row.
+lines with its full text in `title`, and the date keeps its own column on the heading row. On a phone the Reports intro
+spans the heading's full width under the page title, which stays one line; the stage asserts both at 390 px.
 
 **Chat Jobs surfaces (M3 slice 2, cp-zm9f).** Only the operator's Full transcript has them
 (`viewer-app/components/WorkspaceSurfaces.tsx`): a `Jobs ⌘J` button on its filter row and Ctrl/Cmd+J, registered
