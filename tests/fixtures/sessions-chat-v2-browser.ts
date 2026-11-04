@@ -18,7 +18,7 @@ import { dispatch } from "../../src/viewer/server.ts";
 import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
-	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs", "full-match-log"];
+	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs", "full-match-log", "full-match-status"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -29,7 +29,8 @@ const say = (id: string, at: string, who: string, text: string, over: Partial<Se
 	({ id, at, kind: "say", who, text, name: null, send_id: null, tag: null, failed: false, trace: [], ...over });
 const tool = (id: string, at: string, name: string, text: string, summary?: string): SessionEntry => ({ ...say(id, at, "Assistant", text), kind: "tool", name, ...(summary ? { summary } : {}) });
 /** Full match S2 shows job suffixes, so its ids end in four characters like real picp ids; S3 reuses its data. */
-const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log";
+const S5 = args.stage === "full-match-status";
+const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5;
 const JOB = S2 ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
 /** A cp-bridge wake as the transcript carries it: first line parsed off, `paths:` resolved (one left unresolved). */
 const wake: SessionEntry = say("w1", "2026-10-15T08:03:30Z", "cp-bridge", [
@@ -164,7 +165,7 @@ const job = { generated_at: GENERATED, awaiting_count: 0, description: null, man
 	job: { id: JOB, project: "picp", title: "Sessions chat v2 PR 2", phase: "done", model: null, script_path: null, elapsed_seconds: null, limit_seconds: null, head: null, ci: null, review: null, review_attempts: 0, routing: null, note: null, ledger_status: "closed", ledger_disagrees: false, mandate_id: null, cost_usd: null, pr_url: null, pr_status: null, finished_at: GENERATED, finished_today: false, merge_sha: null, failure: null, summary: "Steps card and the Job transcript link.", blockers: [], context: null } } as unknown as JobResponse;
 const jobTranscript: JobTranscriptResponse = { entries: [say("j1", "2026-10-15T08:00:00Z", "Worker", "Reading the task file."), tool("j2", "2026-10-15T08:00:05Z", "read", "Arguments\n{}\n\nResult\nok", "Read the plan")], truncated: false, warning: null, from: null, to: null };
 /** GETs the app makes but this fixture leaves empty: answered 404, like a viewer without that feature. */
-const ABSENT = new Set(["/api/version", "/api/push", "/api/devices/notices", "/api/skills"]);
+const ABSENT = new Set(["/api/version", "/api/push", "/api/devices/notices", "/api/skills", "/api/workspace/status"]);
 
 const scratch = mkdtempSync(join(tmpdir(), "cp-sessions-v2-fixture-"));
 const profile = mkdtempSync(join(tmpdir(), "cp-sessions-v2-chrome-"));
@@ -207,7 +208,7 @@ try {
 	if (args.stage === "full-match-transcript") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
 		row("cp-transcript-steps-t7ah", "picp", "working", "Restyle the transcript steps so a long job title keeps wrapping inside its context card", { elapsed_seconds: 540, limit_seconds: 7200, cost_usd: 1.42, model: "fixture-model" })] };
 	// Full match S3: every real group (team and queued too), seven done today for Show more, unrecorded costs and times.
-	if (args.stage === "full-match-jobs") {
+	if (args.stage === "full-match-jobs" || S5) {
 		const done = (id: string, title: string, at: string, cost: number | null, over: object = {}) => row(id, "picp", "done", title, { finished_today: true, finished_at: at, cost_usd: cost, model: "fixture-model", ...over });
 		routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
 			row("cp-transcript-steps-t7ah", "picp", "working", "Restyle the Jobs drawer toolbar, columns and rows so a long job title keeps to one line", { elapsed_seconds: 540, limit_seconds: 7200, cost_usd: 1.54, model: "fixture-model" }),
@@ -224,7 +225,7 @@ try {
 		] };
 	}
 	// Full match S4: the reply's job is a working implementer with a log, a report.md and a worktree root.
-	if (args.stage === "full-match-log") {
+	if (args.stage === "full-match-log" || S5) {
 		sessions.workers = [...sessions.workers, { id: JOB, kind: "worker", job_id: JOB, role: "implementer", model: "fixture-model", thinking: "high", phase: "waiting", run_phase: "working", live: true, last_activity: "2026-10-15T08:04:30Z" }];
 		const read = (id: string, path: string, out: string) => tool(id, "2026-10-15T08:01:00Z", "read", `Arguments\n${JSON.stringify({ path })}\n\nResult\n${out}`);
 		const bash = (id: string, command: string, out: string) => tool(id, "2026-10-15T08:02:00Z", "bash", `Arguments\n${JSON.stringify({ command })}\n\nResult\n${out}`);
@@ -242,6 +243,13 @@ try {
 		routes[`/api/report/${JOB}`] = { generated_at: GENERATED, job_id: JOB, title: "Embedded job log", bytes: 160, truncated: false, modified_at: "2026-10-15T08:04:00Z",
 			text: "# Embedded job log\n\nThe chat pane opens a job's **Log**, **Report** and **Files**.\n\n- Log: the worker's tool output in order\n- Ask: drafts a P1 reference in Chat" };
 	}
+	// Full match S5: the footer's projection, observed 12 minutes before the browser's real clock; stale is 3 days old.
+	const observed = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+	const status = (minutes: number, opus: number | null) => ({ generated_at: GENERATED, day: { from: GENERATED, to: GENERATED, tz: "UTC" },
+		quota: { availability: "ok", observation: { observed_at: observed(minutes), source_job_id: JOB, historical: true, providers: [
+			{ provider: "anthropic", five_hour: opus, seven_day: 41, tight: false, free_slots: null }, { provider: "openai-codex", five_hour: 52, seven_day: 37, tight: false, free_slots: null }] } },
+		spend: { availability: "ok", usd: 100.12 }, working: { availability: "ok", count: 1 }, done: { availability: "ok", count: 33 } });
+	let stale = false;
 	// Every chat's context now reads /api/jobs; stages without their own list (or the real viewer's) get an empty one.
 	if (!routes["/api/jobs"] && !["m3-transcript", "nav-simplify", "p3-quota", "m3-shell"].includes(args.stage)) routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [] };
 	// M3 slice 4: the composer menu attaches the done job's own P1 reference, as its job page's Ask would.
@@ -259,6 +267,13 @@ try {
 		// Full match S4: the report.md stops reading after the job lists it (unavailable, never an empty page).
 		if (path === "/fixture/report-gone") { delete routes[`/api/report/${JOB}`]; reportGone = true; return send(200, "application/json", "{}"); }
 		if (reportGone && path === `/api/report/${JOB}`) return send(404, "application/json", '{"error":"no such report"}');
+		// Full match S5: the footer's observation goes stale with no 5h window, announced on the stream like a real change.
+		if (path === "/fixture/status-stale") {
+			stale = true;
+			for (const stream of streams) stream.write("event: refresh\ndata: overview\n\n");
+			return send(200, "application/json", "{}");
+		}
+		if (S5 && path === "/api/workspace/status") return send(200, "application/json", JSON.stringify(stale ? status(3 * 1440, null) : status(12, 58)));
 		if (path === "/") return send(200, "text/html; charset=utf-8", appPage(app));
 		const asset = app.assets[path];
 		if (asset) return send(200, asset.mime, asset.bytes);
@@ -792,7 +807,7 @@ try {
 		const statuses = "Working,Held,With the team,Queued,Merged #700,Done", tones = "rgb(180, 180, 180) | rgb(147, 180, 245) | rgb(180, 180, 180)";
 		// The committed five: desktop, desktop-query, phone, phone-more and pr-chip (dark, picp only).
 		const shotsJ: [string, number, number, Step[], object][] = [
-			["desktop", 1440, 1000, [open], { drawer: "579 0 861 1000", one_row: true, query_row: true, pill: "All projects▾", select_shown: 0, segs: "Today11,In flight2", statuses, tones, cols, groups, rows: 9, more: "Show 2 more", outside: "" }],
+			["desktop", 1440, 1000, [open], { drawer: "579 0 861 963", one_row: true, query_row: true, pill: "All projects▾", select_shown: 0, segs: "Today11,In flight2", statuses, tones, cols, groups, rows: 9, more: "Show 2 more", outside: "" }],
 			["desktop-query", 1440, 1000, [open, query], { one_row: true, query_row: true, groups: "In flight · 1", rows: 1, outside: "" }],
 			["phone", 390, 844, [open], { drawer: "0 96 390 748", cols: "", pill: "All projects▾", select_shown: 0, segs: "Today11,In flight2,All", statuses, tones, groups, rows: 9, more: "Show 2 more", one_line: true,
 				meta: "t7ah · fixture-model · $1.54", meta_mono: true, small: "", outside: "" }],
@@ -840,7 +855,7 @@ try {
 		const readonly = `Read-only. Steer this job from the chat with @${JOB}`;
 		// The committed five: desktop, desktop-report, phone, phone-ask and unavailable (dark, picp only).
 		const shotsL: [string, number, number, Step[], object][] = [
-			["desktop", 1440, 1000, [steps, reply, rest], { ...logged, pane: "919 0 521 1000", tabs: desk, live: "", more: 0, full: "Full page", ask: readonly,
+			["desktop", 1440, 1000, [steps, reply, rest], { ...logged, pane: "919 0 521 963", tabs: desk, live: "", more: 0, full: "Full page", ask: readonly,
 				labels: `Read(viewer-app/components/WorkspaceSurfaces.tsx) | ${line} | Update(viewer-app/components/workspace-log-with-a-very-long-file-name-that-wraps.css) | ${line}` }],
 			["desktop-report", 1440, 1000, [steps, reply, report, rest], { tabs: desk, report: "Embedded job log", ring: false, outside: "" }],
 			["phone", 390, 844, [steps, reply, rest], { ...logged, pane: "0 0 390 844", tabs: phone, live: "live · 6m", more: 1, full: "", ask: "Ask the Operator about this job…" }],
@@ -855,6 +870,53 @@ try {
 			if (off.length) throw new Error(`full-match-log-${name}: ${off.join("; ")}`);
 		}
 		if (posts.length) throw new Error(`full-match-log sent ${posts.join(", ")}: the log and its Ask only read`);
+	}
+	if (stage === "full-match-status") {
+		// Full match S5 (frames 1/2). Negative controls: a footer under the drawer or pane fails `drawer`/`pane`/`context`,
+		// a zero bar for an unrecorded 5h `bars`, a daemon claim `text`, a phone footer `phone`.
+		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
+			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
+			const css = (s, p) => q(s) ? getComputedStyle(q(s))[p] : null;
+			return { footer: box(".workspace-status"), drawer: box("dialog.workspace-jobs[open]"), pane: box("section.workspace-job"), context: box("aside.workspace-context"),
+				text: q(".workspace-status")?.innerText.replace(/\\s+/g, " ").trim() ?? null, bars: all(".workspace-status progress").map(p => p.value + "/" + Math.round(p.getBoundingClientRect().width)).join(),
+				phone: innerWidth < 900 ? !!q(".workspace-status") || performance.getEntriesByType("resource").some(e => e.name.includes("/api/workspace/status")) : null,
+				measure: { padding: css(".workspace-status", "padding"), border: css(".workspace-status", "borderTopColor"), background: css(".workspace-status", "backgroundColor"), color: css(".workspace-status", "color"),
+					font: css(".workspace-status", "fontSize"), segments: all(".workspace-status > *").map(e => Math.round(e.getBoundingClientRect().x) + ":" + e.innerText.replace(/\\s+/g, " ").trim()).join(" | "),
+					track: css(".workspace-status progress", "backgroundColor"), dot: css(".workspace-status-dot", "backgroundColor") },
+				overflow: document.documentElement.scrollWidth > innerWidth || (q(".workspace-status")?.scrollHeight ?? 0) > (q(".workspace-status")?.clientHeight ?? 0),
+				ring: !!document.activeElement?.matches(":focus-visible") }; })()`;
+		const rest: Step = ["document.activeElement?.blur()", "true"];
+		const footer: Step = ["true", `!!document.querySelector(".workspace-status progress") || innerWidth < 900`];
+		const open: Step = [`(() => { document.querySelector(".workspace-jobs-open").click(); setTimeout(() => document.activeElement?.blur(), 0); })()`,
+			`!!document.querySelector(".workspace-jobs[open] .workspace-jobs-row") && document.activeElement === document.body`];
+		const steps: Step = [`document.querySelector('.session-steps > .session-tools[title="${JOB}"]').click()`, `!!document.querySelector(".session-steps-link")`];
+		const reply: Step = [`document.querySelector(".session-steps-link").click()`, `document.querySelectorAll(".workspace-log-row").length === 7`];
+		const stale: Step = [`fetch("/fixture/status-stale")`, `/observed 3d ago/.test(document.querySelector(".workspace-status").innerText)`];
+		const live = "today $100.12 · 1 working · 33 done viewer connected";
+		const text = `anthropic 58% 5h · 41% wk openai-codex 52% 5h · 37% wk observed 12m ago ${live}`;
+		// The committed four: desktop (frame 1, context open), desktop-log (frame 2), stale, and footer (cropped).
+		const shotsS: [string, number, number, Step[], object][] = [
+			["desktop", 1440, 1000, [footer, rest], { footer: "0 963 1440 37", context: "1100 0 340 963", text, bars: "58/64,52/64", ring: false, overflow: false }],
+			["desktop-log", 1440, 1000, [footer, steps, reply, rest], { footer: "0 963 1440 37", pane: "919 0 521 963", text, ring: false }],
+			["desktop-jobs", 1440, 1000, [footer, open], { footer: "0 963 1440 37", drawer: "579 0 861 963", text }],
+			["context-1100", 1100, 800, [footer, rest], { footer: "0 763 1100 37", context: "760 0 340 763", text, overflow: false }],
+			["narrow-900", 900, 800, [footer, rest], { footer: "0 763 900 37", overflow: false }],
+			["stale", 1440, 1000, [footer, stale, rest], { footer: "0 963 1440 37", bars: "52/64", ring: false,
+				text: `anthropic — 5h · 41% wk openai-codex 52% 5h · 37% wk observed 3d ago ${live}` }],
+			["phone", 390, 844, [footer], { footer: null, phone: false, overflow: false }],
+		];
+		for (const [name, width, height, run, want] of shotsS) {
+			await capture(`full-match-status-${name}`, transcript, width, height, "dark", loaded, "bottom", run);
+			const got = await evaluate(look);
+			console.log(`measured ${name} ${JSON.stringify(got)}`);
+			const off = Object.entries(want).filter(([k, v]) => got[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k])} (want ${JSON.stringify(v)})`);
+			if (off.length) throw new Error(`full-match-status-${name}: ${off.join("; ")}`);
+			if (name === "desktop") {
+				const crop = await cdp("Page.captureScreenshot", { format: "png", clip: { x: 0, y: 963, width: 1440, height: 37, scale: 1 } });
+				writeFileSync(join(out, "full-match-status-footer.png"), Buffer.from(crop.data as string, "base64"));
+			}
+		}
+		if (posts.length) throw new Error(`full-match-status sent ${posts.join(", ")}: the footer only reads`);
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

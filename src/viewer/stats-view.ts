@@ -120,7 +120,8 @@ export function statsWarmSteps(state: ViewerState, now: number): (() => void)[] 
  ];
 }
 
-export function statsView(state: ViewerState, params: URLSearchParams, now: number, limits: ScanLimits = DEFAULT_LIMITS): { status: 200; body: StatsResponse } | { status: 400; body: { error: string } } {
+/** `parent: false` skips the parent session scan for a caller that never shows it (the chat footer). */
+export function statsView(state: ViewerState, params: URLSearchParams, now: number, limits: ScanLimits = DEFAULT_LIMITS, parent = true): { status: 200; body: StatsResponse } | { status: 400; body: { error: string } } {
  const q = parseStatsQuery(params, now);
  if ("error" in q) return { status: 400, body: { error: q.error } };
  const warnings: StatsResponse["warnings"] = [];
@@ -220,7 +221,7 @@ export function statsView(state: ViewerState, params: URLSearchParams, now: numb
   spend_by_model: [...spendByModel].map(([model, usd]) => ({ model, usd })).sort((a, b) => b.usd - a.usd),
   decisions: { for_you: forYou?.length ?? null, by_you: byYou?.length ?? null, worth: forYou ? forYou.filter(i => i.worth.length > 0).length : null },
   mandates: mandateRows,
-  parent: parentStats(state, now, warnings),
+  parent: parent ? parentStats(state, now, warnings) : null,
  };
  return { status: 200, body };
 }
