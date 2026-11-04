@@ -173,6 +173,8 @@ const R1_ALLOWED = [
 const R2_ALLOWED = [
 	"extensions/cp-bridge/index.ts",
 	"scripts/install-tools.ts",
+	// N2 spike: its throwaway claude config/session dir must sit outside the worktree and the home.
+	"src/drivers/claude-spike.ts",
 	"src/home.ts",
 	"src/pi-compat-probe.ts",
 	"src/projects.ts",

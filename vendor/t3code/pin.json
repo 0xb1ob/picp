@@ -1,0 +1,13 @@
+{
+	"repo": "https://github.com/pingdotgg/t3code",
+	"license": "MIT",
+	"commit": "8b44f42b14c8e273156474a924ccf29680dd7857",
+	"files": [
+		{
+			"upstream": "apps/server/src/provider/ClaudeTurnTokenUsage.ts",
+			"local": "vendor/t3code/ClaudeTurnTokenUsage.ts",
+			"git_blob": "118716c55c26d9abe038e4133ffa0376dcf7504c",
+			"sha256": "220d6d1f6361b9dae9d3d63fae15efe230d30c5225b0c566348cdbc3344d8e29"
+		}
+	]
+}

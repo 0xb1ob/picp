@@ -124,3 +124,65 @@ integrity, load and boundary checks before the pin moves.
   `^0.3.284`). Always use the user's installed `claude` executable, never the SDK's bundled platform binaries (T3
   `pnpm-workspace.yaml:281–289`, `Drivers/ClaudeExecutable.ts`). Give a version advisory, with no auto-update.
 - **Reuse:** only `apps/server/src/provider/ClaudeTurnTokenUsage.ts` (MIT, pin 8b44f42), copied unmodified.
+
+## Spike result (N2 step 1, 2026-11-04)
+
+`src/drivers/claude-spike.ts` runs one isolated Claude research-role query through SDK `query()` on the user's
+installed `claude`. It is not wired into dispatch, send, revive, routing or the fleet; pi stays the only production
+worker runtime.
+
+**Verdict: Go for step 2.** No kill condition fired: every forbidden action was denied before it ran, a wrong-job
+or conflicting report was refused, the exit is the observed one, and a throwing guard denies. Resume double-counting
+is P3 work (this spike never resumes), so it stays a kill condition for step 2.
+
+### Capability matrix (measured against `claude` 2.1.318, fake model)
+
+| Capability | Result | Evidence |
+|---|---|---|
+| Hooks | In-process `PreToolUse` hook, `onFailure: "block"`; picp's worker guards deny before execution, a throw is a deny | `tests/e2e/native-worker-spike.test.ts` (3), (5); `tests/claude-spike.test.ts` |
+| MCP | picp's `report_result` as an SDK in-process MCP server (`mcp__picp__report_result`), validated by the worker-reporter checks, written once | e2e (1), (2) |
+| Resume | Not exercised; the SDK's `resume` option exists. Step 2 (P3) measures it | — |
+| Interrupt | `AbortController` on the run's timeout; not exercised by a test | — |
+| Usage | T3's `ClaudeTurnTokenUsage.ts` normalizer: `complete` on success; unknown is `unavailable`, never 0 | e2e (7); unit `spikeUsage` |
+| Exit | The child's own exit code/signal; after a 10 s grace the driver kills and still reports the observed exit | e2e (7) |
+
+Isolation: every run gets a `mktemp -d` scratch dir (dirs mode 0700) outside the worktree holding `HOME`,
+`CLAUDE_CONFIG_DIR` and `TMPDIR`, removed in `finally`. `settingSources: []`, `strictMcpConfig`, no plugins, skills or
+agents, `Agent`/`Task`/`WebFetch`/`WebSearch` disallowed. The child env is an allow-list (`PATH`, `LANG`, `LC_ALL`,
+`LC_CTYPE`, `TZ`) plus the explicit provider variables; a host `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL` never reaches it.
+
+### Versions (as T3 handles them)
+
+- `@anthropic-ai/claude-agent-sdk` `^0.3.318` in `package.json`, exact `0.3.318` in `package-lock.json` (T3:
+  `apps/server/package.json:37` `^0.3.284`). `zod` `^4.6.7` is added because it is the SDK's peer. Both are
+  `devDependencies` while the driver has no runtime entry point; step 2 moves them to `dependencies`, which
+  `tests/structure.test.ts` (runtime dependency allow-list) must approve.
+- The SDK always gets the installed `claude` from PATH (`pathToClaudeCodeExecutable` plus `spawnClaudeCodeProcess`,
+  which records the spawned command); the e2e asserts it equals the resolved path.
+- Version advisory: `CLAUDE_VERSION_FLOOR` is 2.1.318, the version measured working. A missing `claude` or an older
+  one fails with "run `claude update`". No auto-update (`DISABLE_AUTOUPDATER=1` in the child).
+- **Bundled platform binaries stay installed but unused.** T3 drops them with pnpm overrides
+  (`pnpm-workspace.yaml:281–289`); npm has no per-package way to remove an optional dependency, and
+  `--omit=optional` would drop other packages' platform binaries too.
+
+### Licences
+
+- `@anthropic-ai/claude-agent-sdk`: `"SEE LICENSE IN README.md"`; its `LICENSE.md` reads "© Anthropic PBC. All rights
+  reserved. Use is subject to the Legal Agreements". picp depends on it from npm and never vendors, copies or patches
+  it. Its peers `@anthropic-ai/sdk` and `@modelcontextprotocol/sdk` are MIT.
+- `vendor/t3code/ClaudeTurnTokenUsage.ts`: MIT (T3 Tools Inc.), byte-identical at pin 8b44f42, recorded in
+  `vendor/t3code/pin.json` and `THIRD_PARTY_NOTICES.md`. `vendor/t3code/contracts-shim.d.ts` is picp's own type shim.
+
+### Measured
+
+| Item | Value |
+|---|---|
+| SDK | 0.3.318, range `^0.3.318` |
+| `claude --version` | 2.1.318 |
+| `node_modules` delta | +351 MB with the bundled binary (`claude-agent-sdk-linux-x64` is 323 MB), +28 MB without it |
+| Fake-model run | cold start (spawn to `system/init`) 473 ms; a five-step run 808 ms |
+| Live smoke (one run) | exit 0, `claude-opus-5-5`, 5.86 s (cold start 409 ms), usage complete: 947 in / 134 out |
+| Files | `src/drivers/claude-spike.ts` 439 lines; `tests/harness/claude-mock-provider.ts` 156 lines |
+
+The live smoke (`tests/e2e/native-worker-live-smoke.test.ts`) runs only with `CP_LIVE_TESTS=1`: one no-tool turn
+using the operator's login, which `claude` reads from its own settings file; picp passes the path and never reads it.
