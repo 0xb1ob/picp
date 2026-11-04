@@ -100,7 +100,7 @@ test("M3-context-inspector: Context opens the desktop inspector with the open as
 		["Title not recorded", ["Wall clock=not recorded", "Cost=not recorded"], false], "a missing fact reads as not recorded, never zero");
 	assert.equal(other!.querySelector("a")!.getAttribute("href"), "#sessions?view=workers&id=cp-other", "the worker's existing session link");
 	assert.match(panel.textContent!, /not recorded per conversation/, "no invented chat associations or totals");
-	assert.doesNotMatch(tab.text(), /New thread|Started from chat|Today on/, "no threads");
+	assert.doesNotMatch(tab.text(), /Started from chat|Today on/, "no thread joins to show");
 
 	await pick(tab, "atlas");
 	assert.deepEqual([texts(tab, "aside.workspace-context h3"), tab.$(".workspace-context-head > span")!.textContent], [["Asked you · 1", "In flight · 1"], "atlas"], "M1 narrows in-flight; asks stay whole like the pinned block");
@@ -227,7 +227,7 @@ test("M3-context-phone: the context sheet and the Conversations drawer are modal
 		[false, true, ["#sessions", "#jobs", "#more"]], "Full match S1: the rail's chrome replaces the Conversations title row");
 	assert.deepEqual(texts(tab, ".workspace-sessions-list h2"), ["Fleet · 2 live"]);
 	assert.equal(tab.$('.workspace-sessions .session-choice[aria-current="page"]')!.getAttribute("href"), "#sessions?view=you&project=atlas", "the current session keeps the selection");
-	assert.doesNotMatch(tab.$("dialog.workspace-sessions")!.textContent!, /New thread/, "no threads");
+	assert.match(tab.$("dialog.workspace-sessions")!.textContent!, /New thread/, "full match S11: the drawer carries the thread rail");
 	assert.equal(escape(tab), true);
 	await until(() => tab.$("dialog.workspace-sessions"), (el) => el === null, "Escape to close Conversations");
 	assert.ok(focused() === conversations);

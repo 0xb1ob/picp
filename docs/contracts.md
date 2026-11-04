@@ -6985,7 +6985,7 @@ never read or written.
 The decided named-threads product (es-99574f): a thread is an opaque, immutable id (`th-` + 16 random hex) plus a free
 display name (trimmed, 1–80 code points, no control characters; duplicates allowed). S8 ships only the registry and its
 read-only projection; S9 tags dashboard sends (below); S10a carries the source on asks and the parent outbox (below);
-S10b tags jobs and joins them (below), and there is no thread UI (S11).
+S10b tags jobs and joins them (below), and S11 shows them in the chat (Thread UI, below).
 
 - **Registry.** `state/operator/named-threads.jsonl` (0600), append-only, one complete fsynced line per event, schema
   `NamedThreadEventSchema` (`src/contracts/threads.ts`), `v: 1`: `create` / `rename` (`request_id` = the dashboard
@@ -7014,8 +7014,8 @@ S10b tags jobs and joins them (below), and there is no thread UI (S11).
 ### Thread sends (full match S9)
 
 A dashboard message names its thread explicitly: `POST /api/operator/message` takes `thread_id` (`th-` + 16 hex, or `null`
-/ absent for No thread), separate from the text and any P1 evidence reference. The composer sends `thread_id: null` until
-S11's picker sets it; a queued, held, retried or edited send keeps the thread it was sent with, never the page's selection.
+/ absent for No thread), separate from the text and any P1 evidence reference. The composer sends the S11 selection
+(below), else `thread_id: null`; a queued, held, retried or edited send keeps the thread it was sent with.
 
 - **Validated before journaling.** Malformed is 400 at the viewer. A named thread must be in the registry: unknown is 404
   `no thread <id>; nothing was sent`, an unavailable registry is 503 (`send without a thread or repair it: <file:line>`);
@@ -7039,8 +7039,8 @@ S11's picker sets it; a queued, held, retried or edited send keeps the thread it
 
 The main session names the dashboard message it relays or asks about: `cp_parent send` and `cp_parent ask` take an
 optional `source_send_id`, the `dc-…` id from that message's `[cp-dashboard dc-… — from the dashboard]` marker. Chat-typed
-messages have none and pass none. Parent intake, jobs and the "Started from chat" projection are S10b (below); no thread
-UI (S11).
+messages have none and pass none. Parent intake, jobs and the "Started from chat" projection are S10b (below); the
+thread UI is S11 (below).
 
 - **Resolved by the owner, from its own record.** The operator session reads `state/operator/dashboard.jsonl`: the id
   must be a `message` request whose latest outcome is `delivered`, and its thread is that request line's `thread_id`
@@ -7090,6 +7090,24 @@ untagged.
   not even through a registry `bind`); `join_diagnostics: {multi_origin, unknown_thread, malformed, unreadable}` counts
   it, and names a ledger, asks or journal it could not read.
 - **No authority.** An origin grants no mandate, decision, risk or merge, and appears in no label or path.
+
+### Thread UI (full match S11)
+
+The operator Full transcript shows the named threads (`viewer-app/components/ThreadRail.tsx`): the Operator row's rail
+(New thread, All messages, each named thread, No thread, Started from chat), a tab strip above the transcript and the
+composer's `#` picker (also `/thread`). It reads `GET /api/threads` and writes only through `POST /api/operator/threads`.
+
+- **Selection in the hash.** `thread=th-…` is one named thread, `thread=none` No thread, absent All messages
+  (`viewer-app/thread-selection.ts`). It never reaches an API and never remounts the screen; the project filter still
+  applies beside it.
+- **Recorded membership only.** A named thread shows the entries, pending sends, open asks and working jobs its
+  `thread_id`, ask join or job join names; No thread shows what no thread claims; All messages filters nothing and keeps
+  the one model and context line. Untagged history is never placed in a named thread.
+- **Sends.** The composer sends the selected thread's id, else an explicit `thread_id: null` (No thread and All
+  messages). Each selection keeps its own draft (`cp-composer-draft:<session file>#<selection>`; All keeps the old key).
+- **Local only.** Open tabs (`cp-thread-tabs`) and unread cursors (`cp-thread-seen:<id>`) are this browser's. The `#`
+  chip and `/thread` show once a named thread exists; New thread needs a running owner advertising `threads: true` and
+  says why it is disabled otherwise. An unknown selected id shows nothing under it and links back to All messages.
 
 ### Remote devices (remote dashboard PR 1)
 

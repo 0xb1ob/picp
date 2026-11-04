@@ -103,6 +103,12 @@
 .operator-composer-chip-label { display: none; }
 .operator-composer-at[aria-expanded="true"], .operator-composer-slash[aria-expanded="true"] { background: var(--nav-selected); color: var(--text); }
 .operator-composer-at:disabled, .operator-composer-slash:disabled { opacity: 0.4; }
+/* S11: the `#` thread chip, styled as `@`/`/`; a long thread name ellipsizes inside it. */
+.operator-composer-hash { display: flex; align-items: center; justify-content: center; min-width: 44px; max-width: 220px; height: 44px; padding: 0; background: none; color: var(--muted); border: 0; border-radius: 8px; font: inherit; font-size: 17px; white-space: nowrap; overflow: hidden; cursor: pointer; }
+.operator-composer-hash[aria-expanded="true"] { background: var(--nav-selected); color: var(--text); }
+.operator-composer-hash:disabled { opacity: 0.4; }
+.operator-composer-hash .operator-composer-chip-label { overflow: hidden; text-overflow: ellipsis; }
+.operator-composer-command-menu button[aria-pressed="true"] { background: var(--nav-selected); color: var(--text); }
 .operator-composer-command-menu { position: absolute; left: 10px; right: 10px; bottom: calc(100% + 6px); z-index: 3; max-height: 45dvh; overflow-y: auto; overscroll-behavior: contain; padding: 6px; background: var(--raised); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
 .operator-composer-command-menu h3 { margin: 0; padding: 8px 10px 4px; font-size: 11px; line-height: 20px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
 .operator-composer-command-menu ul { margin: 0; padding: 0; list-style: none; }
@@ -170,6 +176,7 @@
  .operator-composer-command-menu button, .operator-composer-skills > li { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; min-height: 36px; padding: 0 10px; }
  .operator-composer-command-menu code, .operator-composer-skills > li > span { flex: 0 0 230px; }
  .operator-composer-at, .operator-composer-slash { width: auto; height: 28px; padding: 0 8px; border: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
+ .operator-composer-hash { height: 28px; padding: 0 8px; border: 1px solid var(--border); font-size: 12.5px; }
  .operator-composer-chip-label { display: inline; white-space: pre; }
  .session-pinned { padding: 0 40px; }
  .session-pinned-open { padding-bottom: 12px; }

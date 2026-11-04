@@ -19,7 +19,7 @@ import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
 	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs", "full-match-log", "full-match-status",
-	"full-match-diff", "full-match-commands", "full-match-thread-sends", "reports-cards"];
+	"full-match-diff", "full-match-commands", "full-match-thread-sends", "full-match-thread-ui", "reports-cards"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -33,7 +33,9 @@ const tool = (id: string, at: string, name: string, text: string, summary?: stri
 const S5 = args.stage === "full-match-status", S7 = args.stage === "full-match-diff", S6 = args.stage === "full-match-commands";
 /** Full match S9: dashboard sends carry an explicit thread; two entries are thread members, drawn like any other. */
 const S9 = args.stage === "full-match-thread-sends";
-const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5 || S7 || S6 || S9;
+/** Full match S11: two named threads (one with a long name), the tabs, the rail and the `#` picker. */
+const S11 = args.stage === "full-match-thread-ui", THREAD_A = "th-0123456789abcdef", THREAD_B = "th-fedcba9876543210";
+const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5 || S7 || S6 || S9 || S11;
 /** Reports card titles: both Reports grids with long titles, plus S3's Jobs list as the unchanged control. */
 const RC = args.stage === "reports-cards";
 const JOB = S2 || RC ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
@@ -57,8 +59,8 @@ const entries: SessionEntry[] = [
 	tool("t1", "2026-10-14T09:13:00Z", "bash", "git log --oneline -3"),
 	tool("t2", "2026-10-14T09:13:05Z", "read", "viewer-app/screens/sessions.css"),
 	say("e3", "2026-10-14T09:14:00Z", "Assistant", "The theme lives on `.shell-sessions` only, so Overview keeps its palette:\n\n```css\n.shell-sessions { color-scheme: light; background: var(--background); }\n```"),
-	say("e4", "2026-10-15T08:02:00Z", "Operator", "Long words must wrap: https://github.com/example/picp/pull/1234/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", { project: "picp", ...(S9 ? { thread_id: "th-0123456789abcdef" } : {}) }),
-	say("e5", "2026-10-15T08:03:00Z", "Assistant", "They do; an inline `code-identifier-that-is-quite-long` chip wraps too.\n\nA second paragraph keeps the card readable on a phone without a horizontal page scroll, even when the reply runs to several lines of plain prose like this one.", S9 ? { thread_id: "th-0123456789abcdef" } : {}),
+	say("e4", "2026-10-15T08:02:00Z", "Operator", "Long words must wrap: https://github.com/example/picp/pull/1234/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", { project: "picp", ...(S9 || S11 ? { thread_id: THREAD_A } : {}) }),
+	say("e5", "2026-10-15T08:03:00Z", "Assistant", "They do; an inline `code-identifier-that-is-quite-long` chip wraps too.\n\nA second paragraph keeps the card readable on a phone without a horizontal page scroll, even when the reply runs to several lines of plain prose like this one.", S9 || S11 ? { thread_id: THREAD_A } : {}),
 	wake,
 	tool("k1", "2026-10-15T08:03:31Z", "thinking", "Let me verify the precedence claim before answering.", "Let me verify the precedence claim: docs say parent.json overrides CP_PARENT_MODEL"),
 	tool("k2", "2026-10-15T08:03:35Z", "bash", "Arguments\n{\"command\":\"rg -n Models docs\"}\n\nResult\n## Models", "## Models"),
@@ -170,7 +172,7 @@ const job = { generated_at: GENERATED, awaiting_count: 0, description: null, man
 	job: { id: JOB, project: "picp", title: "Sessions chat v2 PR 2", phase: "done", model: null, script_path: null, elapsed_seconds: null, limit_seconds: null, head: null, ci: null, review: null, review_attempts: 0, routing: null, note: null, ledger_status: "closed", ledger_disagrees: false, mandate_id: null, cost_usd: null, pr_url: null, pr_status: null, finished_at: GENERATED, finished_today: false, merge_sha: null, failure: null, summary: "Steps card and the Job transcript link.", blockers: [], context: null } } as unknown as JobResponse;
 const jobTranscript: JobTranscriptResponse = { entries: [say("j1", "2026-10-15T08:00:00Z", "Worker", "Reading the task file."), tool("j2", "2026-10-15T08:00:05Z", "read", "Arguments\n{}\n\nResult\nok", "Read the plan")], truncated: false, warning: null, from: null, to: null };
 /** GETs the app makes but this fixture leaves empty: answered 404, like a viewer without that feature. */
-const ABSENT = new Set(["/api/version", "/api/push", "/api/devices/notices", "/api/skills", "/api/workspace/status"]);
+const ABSENT = new Set(["/api/version", "/api/push", "/api/devices/notices", "/api/skills", "/api/workspace/status", "/api/threads"]);
 
 const scratch = mkdtempSync(join(tmpdir(), "cp-sessions-v2-fixture-"));
 const profile = mkdtempSync(join(tmpdir(), "cp-sessions-v2-chrome-"));
@@ -294,6 +296,16 @@ try {
 	if (!routes["/api/jobs"] && !["m3-transcript", "nav-simplify", "p3-quota", "m3-shell"].includes(args.stage)) routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [] };
 	// M3 slice 4: the composer menu attaches the done job's own P1 reference, as its job page's Ask would.
 	if (args.stage === "m3-composer") routes[`/api/job/${JOB}`] = { ...job, ask_reference: { kind: "job", project: "picp", job_id: JOB }, evidence_lookup: { supported: true, why: "fixture" } };
+	// Full match S11: a long-named thread with e4/e5, the working job and its Started from chat row; a short second one.
+	if (S11) {
+		const long = "Billing and invoices for the picp drawer slice, a thread name long enough to ellipsize";
+		routes["/api/operator/control"] = { ...control, threads: true };
+		routes["/api/threads"] = { generated_at: GENERATED, available: true, reason: null, bindings: [], join_diagnostics: { multi_origin: 0, unknown_thread: 0, malformed: 0, unreadable: [] },
+			threads: [{ id: THREAD_A, name: long, created_at: GENERATED, renamed_at: null }, { id: THREAD_B, name: "Release", created_at: GENERATED, renamed_at: null }],
+			joins: [{ thread_id: THREAD_A, jobs: [{ id: "cp-transcript-steps-t7ah", title: "Restyle the transcript steps", state: "in_progress", created_at: GENERATED }], asks: [], omitted: 0,
+				started_from_chat: [{ job_id: "cp-transcript-steps-t7ah", title: "Restyle the transcript steps so a long job title keeps to one line", state: "in_progress", created_at: GENERATED, source_send_id: "dc-20261015080200-00000001" }] },
+			{ thread_id: THREAD_B, jobs: [], asks: [], started_from_chat: [], omitted: 0 }] };
+	}
 	server.on("request", (req, res) => {
 		const path = new URL(req.url ?? "/", "http://fixture").pathname;
 		const send = (status: number, type: string, data: string | Uint8Array) => { res.writeHead(status, { "content-type": type, "content-security-policy": APP_CSP, "cache-control": "no-store" }); res.end(data); };
@@ -1118,6 +1130,35 @@ try {
 			if (off.length) throw new Error(`full-match-thread-sends-${name}: ${off.join("; ")}`);
 		}
 		if (posts.join() !== "POST /api/operator/message,POST /api/operator/message") throw new Error(`full-match-thread-sends sent ${posts.join(", ") || "nothing"}: one send per capture`);
+	}
+	if (S11) {
+		// Full match S11. Negative controls: a selection keeping untagged rows fails `rows`; tabs or the `#` chip that grow
+		// with a long name widen the page (capture throws) or fail `tab`/`chip`; a rail row that wraps fails `rail`.
+		const selected = `${transcript}&thread=${THREAD_A}`, ready = ".thread-tab[aria-current=page] + .thread-tab, .thread-tab[aria-current=page]";
+		const look = `({ rows: ["Long words must wrap", "Morning. Where is"].map(t => document.querySelector(".session-entries").innerText.includes(t)).join(),
+			heading: document.querySelector(".session-heading-id strong")?.textContent ?? null, tabs: [...document.querySelectorAll(".thread-tab a")].map(a => a.textContent.slice(0, 24)),
+			tab: Math.round(document.querySelector(".thread-tab[aria-current=page]")?.getBoundingClientRect().width ?? 0), chip: Math.round(document.querySelector(".operator-composer-hash")?.getBoundingClientRect().width ?? 0),
+			rail: [...document.querySelectorAll(".thread-row")].filter(r => r.getClientRects().length).map(r => Math.round(r.getBoundingClientRect().height)),
+			picker: [...document.querySelectorAll("#operator-composer-command-menu button")].map(b => b.getAttribute("aria-pressed") + " " + b.querySelector("code").textContent.slice(0, 20)) })`;
+		const picker: Step = [`document.querySelector(".operator-composer-hash").click()`, `!!document.querySelector("#operator-composer-command-menu[aria-label='Send to thread']")`];
+		const shotsT: Array<[string, string, number, number, Step[], Record<string, unknown>]> = [
+			["desktop", selected, 1440, 1000, [], { rows: "true,false", heading: "# Billing and invoices for the picp drawer slice, a thread name long enough to ellipsize" }],
+			["picker-desktop", selected, 1440, 1000, [picker], { rows: "true,false" }],
+			["phone", selected, 390, 844, [], { rows: "true,false" }],
+			["picker-phone", selected, 390, 844, [picker], { rows: "true,false" }],
+			["all-desktop", transcript, 1440, 1000, [], { rows: "true,true", heading: "Operator" }],
+		];
+		for (const [name, hash, width, height, steps, want] of shotsT) {
+			await capture(`full-match-thread-ui-${name}`, hash, width, height, "dark", ready, "bottom", steps);
+			const got = await evaluate(look);
+			console.log(`measured ${name} ${JSON.stringify(got)}`);
+			Object.assign(shots.at(-1)!, got);
+			const off = Object.entries(want).filter(([k, v]) => got[k] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k])} (want ${JSON.stringify(v)})`);
+			if (got.tab > 220 || got.chip > 220) off.push(`tab ${got.tab}px / chip ${got.chip}px over 220`);
+			if (got.rail.some((h: number) => h > 40)) off.push(`rail rows ${got.rail.join(",")} wrap`);
+			if (off.length) throw new Error(`full-match-thread-ui-${name}: ${off.join("; ")}`);
+		}
+		if (posts.length) throw new Error(`full-match-thread-ui sent ${posts.join(", ")}: picking a thread never sends`);
 	}
 	if (RC) {
 		// Structural selectors, so the same measure reads the cards before and after their own classes.
