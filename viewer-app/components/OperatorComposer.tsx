@@ -8,6 +8,7 @@ import { Icon } from "./icons.tsx";
 import { StartSession } from "./StartSession.tsx";
 import { restartInFlight } from "../restart-control.ts";
 import { composerMentions, matchSkills, mentionAt, type SkillCatalog } from "../skills.ts";
+import { sendThreadId, type ThreadSelection, threadValue } from "../thread-selection.ts";
 
 /** The composer's placeholder (chat v2): short enough for the one-row box at 390px, even with the busy ⋯ button. */
 export const COMPOSER_PLACEHOLDER = "Message Operator…";
@@ -40,13 +41,15 @@ function rememberDraft(key: string, text: string) {
  * The Full transcript's composer, into the running operator session. One rounded box (chat v2): the growing textarea
  * over attach, Options, busy ⋯ (steer, confirm-tap abort) and send; one row below 900 px. Up to 8 attachments.
  */
-export function OperatorComposer({control, draft, reference, chat}: {control:ControlView; draft?:string; reference?:string; chat?:ComposerMenuContext | null}) {
+export function OperatorComposer({control, draft, reference, chat, thread}: {control:ControlView; draft?:string; reference?:string; chat?:ComposerMenuContext | null; thread?:ThreadSelection}) {
  // A reference link (composerHref) keeps saved text: its draft is only a suggestion for an empty composer.
  const linked = useMemo(() => parseReference(reference), [reference]);
  const [text,setText] = useState(linked ? "" : (draft ?? "").slice(0, CONTROL_TEXT_MAX));
  const [attached,setAttached] = useState<EvidenceReference | null>(null);
- // Full match S9: each send carries this explicit thread (null: No thread); S11's picker is its only setter.
- const [threadId] = useState<string | null>(null);
+ // Full match S9/S11: each send carries the chat's thread explicitly (null: No thread, All messages), never inferred.
+ const threadId = sendThreadId(thread ?? null);
+ // S11: `/thread` opens the `#` list; each typed one bumps this.
+ const [threadAsk,setThreadAsk] = useState(0);
  const [confirmAbort,setConfirmAbort] = useState(false);
  // Full match S6: the prepared command beside the text draft; its client_id keys its Submits (see `submit`).
  const [command,setCommand] = useState<{name: "status" | "stop"; job?: string; client_id: string; error?: string; sending?: true; sticky?: true} | null>(null);
@@ -73,7 +76,10 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
  const files = attachments.flatMap(a => a.state === "ready" && a.id && a.text ? [a.id] : []);
  // A failed or unfinished attachment blocks sending: remove it or wait.
  const pending = attachments.some(a => a.state !== "ready");
- const draftKey = ready ? status.session_file ? `${DRAFT_KEY}${status.session_file}` : OFFLINE_DRAFT_KEY : null;
+ // S11: one draft per thread selection; All messages keeps the pre-thread keys.
+ const scope = threadValue(thread ?? null) ? `#${threadValue(thread ?? null)}` : "";
+ const offlineKey = `${OFFLINE_DRAFT_KEY}${scope}`, offlineRef = `${OFFLINE_REF_KEY}${scope}`;
+ const draftKey = ready ? status.session_file ? `${DRAFT_KEY}${status.session_file}${scope}` : offlineKey : null;
  const refKey = draftKey && `${REF_KEY}${draftKey.slice(DRAFT_KEY.length)}`;
  const restored = useRef<string | null>(null);
  const consumed = useRef<string | undefined>(undefined);
@@ -88,9 +94,9 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
   consumed.current = reference;
   let saved = readDraft(draftKey), savedRef = readDraft(refKey);
   // The session came up: an empty session draft adopts what was typed (and attached) while offline.
-  if (!saved && !savedRef && draftKey !== OFFLINE_DRAFT_KEY && (readDraft(OFFLINE_DRAFT_KEY) || readDraft(OFFLINE_REF_KEY))) {
-   saved = readDraft(OFFLINE_DRAFT_KEY); savedRef = readDraft(OFFLINE_REF_KEY);
-   rememberDraft(draftKey, saved); rememberDraft(refKey, savedRef); rememberDraft(OFFLINE_DRAFT_KEY, ""); rememberDraft(OFFLINE_REF_KEY, "");
+  if (!saved && !savedRef && draftKey !== offlineKey && (readDraft(offlineKey) || readDraft(offlineRef))) {
+   saved = readDraft(offlineKey); savedRef = readDraft(offlineRef);
+   rememberDraft(draftKey, saved); rememberDraft(refKey, savedRef); rememberDraft(offlineKey, ""); rememberDraft(offlineRef, "");
   }
   // A reference link's draft is a suggestion: saved (or typed) text is kept, and the suggestion is saved like typing.
   // Text typed into a job's Ask entry (`append=1`, full match C2) is no suggestion: it joins kept text on a new line.
@@ -124,7 +130,7 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
  const skills = catalog && !("error" in catalog) ? catalog.skills : null;
  const matches = mention && skills ? matchSkills(skills, mention.query) : [];
  // A `/word` draft offers the commands (operator chat only); anything else keeps the `@skill` list.
- const commands = chat ? slashCommands(text) : [];
+ const commands = chat ? slashCommands(text, chat) : [];
  const options = commands.length ? commands.map(c => ({name: `/${c.name}`, description: c.detail})) : matches.map(s => ({name: `@${s.name}`, description: s.description}));
  const listOpen = ready && !sending && !closed && options.length > 0;
  const highlighted = Math.min(active, options.length - 1);
@@ -152,6 +158,7 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
   setActive(0);
   edit(kept);
   if (name === "jobs") { chat?.onJobs(field.current); return; }
+  if (name === "thread") { setThreadAsk(n => n + 1); return; }
   setCommand({name, client_id: newClientId()});
   if (name === "status") field.current?.focus();
  };
@@ -197,8 +204,8 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
   control.send({kind:"message",text:outgoing,thread_id:threadId,...extra});
   edit("");
   pin(null);
-  rememberDraft(OFFLINE_DRAFT_KEY, "");
-  rememberDraft(OFFLINE_REF_KEY, "");
+  rememberDraft(offlineKey, "");
+  rememberDraft(offlineRef, "");
   setAttachments([]);
  };
  const abort = () => {
@@ -261,7 +268,7 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
    {/* The paperclip always leads the footer; disabled, its title says why it cannot attach now. */}
    {control.upload && <button type="button" class="operator-composer-attach" aria-label="Attach files or images" title={upload ? "Attach files or images (or paste/drop)" : status.running ? "This session does not take attachments (⋮ → Restart session)" : "Attachments need a running session"} disabled={sending || !upload} onClick={() => picker.current?.click()}><Icon name="attach"/></button>}
    {upload && <input ref={picker} type="file" accept={controlFiles(status) ? "image/*,.txt,.md,.html,.json" : "image/*"} multiple hidden onChange={e => { const input = e.currentTarget; attach([...(input.files ?? [])]); input.value = ""; }}/>}
-   {chat && <ComposerMenu context={chat} disabled={sending} target={command?.name === "stop" && !command.sending} onCommand={run} onRefer={ref => { pin(ref); field.current?.focus(); }}
+   {chat && <ComposerMenu context={chat} disabled={sending} target={command?.name === "stop" && !command.sending} threadAsk={threadAsk} onCommand={run} onRefer={ref => { pin(ref); field.current?.focus(); }}
     onTarget={job => { setCommand(current => current && {...current, job, error: undefined}); field.current?.focus(); }}/>}
    {status.running && status.session_file && <details class="operator-composer-options">
     <summary aria-label="Message options" title="Message options"><span>Options</span><span aria-hidden="true"> ▾</span></summary>

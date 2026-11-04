@@ -76,7 +76,7 @@ test("M3-composer-typed: a `/` draft offers /status, /jobs and /stop; Enter/Tab 
 	await tab.find(".operator-composer textarea");
 	await type(tab, "/");
 	assert.deepEqual([tab.$('[role="listbox"]')!.getAttribute("aria-label"), options(tab)], ["Commands", [`/status${STATUS}`, "/jobsOpen the jobs drawer", "/stopAsk the operator to stop a job"]]);
-	assert.doesNotMatch(tab.text(), /\/thread|New thread/, "no thread command until S11");
+	assert.doesNotMatch(tab.text(), /\/thread/, "full match S11: no /thread command until a named thread exists");
 
 	await type(tab, "/j");
 	assert.deepEqual(options(tab), ["/jobsOpen the jobs drawer"]);
@@ -111,7 +111,7 @@ test("M3-composer-typed: a `/` draft offers /status, /jobs and /stop; Enter/Tab 
 	assert.deepEqual([await press(tab, "Escape", true), !!tab.$("aside.workspace-context")], [false, true], "an IME Escape keeps the inspector");
 	const footer = [...tab.document.querySelectorAll(".operator-composer-attach, .operator-composer-at, .operator-composer-slash")] as unknown as Element[];
 	assert.deepEqual(footer.map((el) => el.textContent), ["", "@ job", "/ command"], "the paperclip first, then frame 4's `@ job` and `/ command`");
-	assert.doesNotMatch(tab.$(".operator-composer-footer")!.textContent!, /#|thread/i, "the # thread control stays hidden until S11");
+	assert.doesNotMatch(tab.$(".operator-composer-footer")!.textContent!, /#|thread/i, "full match S11: no # thread chip until a named thread exists");
 });
 
 test("M3-composer-menu: the `/ command` and `@ job` chips prepare commands and attach a selection's job as the P1 reference; Escape and removal keep the draft", { timeout: 180_000 }, async (t) => {

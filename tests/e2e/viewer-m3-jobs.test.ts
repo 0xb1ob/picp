@@ -520,6 +520,9 @@ test("M3-jobs-css: phone bottom sheet from y96 and full-screen job; desktop 861 
 	assert.match(rule(phone, ".workspace-jobs-title"), /min-width:0/, "the title column can shrink below its text");
 	assert.match(rule(phone, ".workspace-jobs-list>p"), /overflow-wrap:anywhere/, "a long query echoed in the empty state wraps");
 	assert.match(rule(phone, ".workspace-close"), /width:44px;height:44px/, "44 px close");
+	// Full match S11 (carried since S3): the find field's one focus ring is its wrapper's --focus border.
+	assert.deepEqual([rule(phone, ".workspace-jobs-find:focus-within"), /outline:0/.test(rule(phone, ".workspace-jobs-find>input"))],
+		["border-color:var(--focus)", true], "Jobs filter: focused, the wrapper border is --focus; the input draws no second ring");
 	// Full match S6 (ask-7532ed5924cb): the Working label is green like the design; other non-merged labels stay muted.
 	assert.deepEqual([rule(phone, ".workspace-jobs-status-working"), /color:var\(--muted\)/.test(rule(phone, ".workspace-jobs-status"))], ["color:var(--green)", true], "Working green");
 	// Full match S3: 860 px became frame 3's 861 (left border at x579), its height clear of S5's status footer.
