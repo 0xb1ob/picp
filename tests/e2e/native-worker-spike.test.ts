@@ -94,7 +94,7 @@ test("native spike: one research run reports once, refuses bad reports, denies f
 		assert.equal(existsSync(join(root, "gh-called")), false);
 		assert.equal(existsSync(join(root, "outside.txt")), false);
 		const reasons = result.denials.map((denial) => `${denial.tool}: ${denial.reason}`);
-		assert.equal(reasons.length, 4, reasons.join("\n"));
+		assert.equal(reasons.length, 5, reasons.join("\n"));
 		assert.match(reasons[0] ?? "", /^Bash: [\s\S]*auth/i);
 		assert.match(reasons[1] ?? "", /^Bash: Refused: a worker never merges/);
 		assert.match(reasons[2] ?? "", /^Write: [\s\S]*artifact directory/);
@@ -106,8 +106,9 @@ test("native spike: one research run reports once, refuses bad reports, denies f
 		assert.ok(results.some((text) => text.includes("spike repo readme")), results.join("\n---\n"));
 		assert.equal(readFileSync(artifactPath, "utf8"), "# Findings\n\nok\n");
 
-		// (6) no host ANTHROPIC_* reached the child: its env, the host endpoint and every request's credentials.
-		assert.ok(results.some((text) => text.includes(`no-host-api-key\n${provider.url}`)), results.join("\n---\n"));
+		// (6) no host ANTHROPIC_* reached the child: an env probe is refused since N3a R1 (`buildChildEnv`'s unit test
+		// pins the allow-list), the host endpoint is never called and every request carries only the provider token.
+		assert.match(reasons[4] ?? "", /^Bash: [\s\S]*`printenv` \(not on the read-only list\)/);
 		assert.equal(host.requests.length, 0);
 		assert.ok(provider.requests.length > 0);
 		for (const request of provider.requests) {

@@ -2,10 +2,21 @@
  * N3a G3: the loaded-surface lockdown. The CLI's `system/init`, its command list and its hook listing must show
  * only what picp passed plus the CLI's own built-ins; any extra refuses the run before a tool executes. Counts only.
  */
-import type { SDKSystemMessage, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
+import { createHash } from "node:crypto";
+import type { AgentInfo, SDKSystemMessage, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
 
-/** The CLI's own subagents at the version floor; init lists them whatever picp passes, and Agent/Task stay disallowed. */
-export const CLI_BUILTIN_AGENTS: readonly string[] = ["claude", "Explore", "general-purpose", "Plan", "statusline-setup"];
+/** The CLI's own subagents at the version floor, pinned by `agentDigest`, so a same-named loaded agent is an extra. */
+export const CLI_BUILTIN_AGENTS: Readonly<Record<string, string>> = {
+	claude: "140abfc2cbb35d00",
+	Explore: "ddb74f827301da47",
+	"general-purpose": "7093e5b15079a39a",
+	Plan: "bec305d778a9323d",
+	"statusline-setup": "191ea1783b908648",
+};
+
+/** A short sha-256 of an agent's name and description: what the CLI reports about where an agent came from. */
+export const agentDigest = (agent: Pick<AgentInfo, "name" | "description">): string =>
+	createHash("sha256").update(`${agent.name}\n${agent.description}`).digest("hex").slice(0, 16);
 
 /** The undocumented `get_hooks_listing` control response, as far as the lockdown reads it. */
 export interface HooksListing {
@@ -36,7 +47,18 @@ export interface Lockdown {
 }
 
 /** Compares one init against picp's expected surface; a missing hook listing or an unbound hook lock refuses. */
-export function lockdownVerdict(init: InitSurface, expectedTools: readonly string[], commands: readonly SlashCommand[], listing: HooksListing | undefined): Lockdown {
+export function lockdownVerdict(
+	init: InitSurface,
+	expectedTools: readonly string[],
+	commands: readonly SlashCommand[],
+	agents: readonly AgentInfo[],
+	listing: HooksListing | undefined,
+): Lockdown {
+	const pinned = (name: string) => {
+		const infos = agents.filter((agent) => agent.name === name);
+		return infos.length === 1 && infos[0] !== undefined && CLI_BUILTIN_AGENTS[name] === agentDigest(infos[0]);
+	};
+	const agentNames = new Set([...(init.agents ?? []), ...agents.map((agent) => agent.name)]);
 	const builtin = new Set(commands.filter((command) => command.builtin === true).map((command) => command.name));
 	const custom = new Set(commands.filter((command) => command.builtin !== true).map((command) => command.name));
 	const notBuiltin = (name: string) => !builtin.has(name) || custom.has(name);
@@ -58,7 +80,7 @@ export function lockdownVerdict(init: InitSurface, expectedTools: readonly strin
 		mcpServers: servers.filter((server) => server.name !== "picp").length + (servers.some((server) => server.name === "picp") ? 0 : 1),
 		skills: (init.skills ?? []).filter(notBuiltin).length,
 		plugins: (init.plugins ?? []).filter((plugin) => plugin.path !== "builtin").length,
-		agents: (init.agents ?? []).filter((name) => !CLI_BUILTIN_AGENTS.includes(name)).length,
+		agents: [...agentNames].filter((name) => !pinned(name)).length,
 		slashCommands: (init.slash_commands ?? []).filter(notBuiltin).length,
 		hooks,
 		outputStyle: init.output_style === "default" ? 0 : 1,

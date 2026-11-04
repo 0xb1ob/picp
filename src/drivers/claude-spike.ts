@@ -4,7 +4,7 @@
  */
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
@@ -54,7 +54,7 @@ import { detectWorkerHistoryRewrite, workerHistoryRefusal } from "../worker-hist
 import { workerHostGuard } from "../worker-host-guard.ts";
 import { assertBriefIsSafe } from "../worker-manager.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../worker-merge-guard.ts";
-import { readOnlyBashRefusal } from "./claude-bash-policy.ts";
+import { readOnlyBashRefusal, secretPathIn, secretPaths } from "./claude-bash-policy.ts";
 import { type HooksListing, type Lockdown, lockdownVerdict } from "./claude-lockdown.ts";
 
 /** The lowest `claude --version` this spike measured working (docs/native-drivers.md "Spike result"). */
@@ -157,8 +157,8 @@ export function normalizeToolCall(toolName: string, input: unknown): NormalizedC
 	return undefined;
 }
 
-/** picp's worker-reporter `tool_call` refusals, in the same order, plus the research write scope. */
-export function spikeGuards(job: SpikeJob): SpikeGuard[] {
+/** picp's worker-reporter `tool_call` refusals, in the same order, plus the research write scope and secret paths. */
+export function spikeGuards(job: SpikeJob, secrets: readonly string[] = secretPaths(null, [homedir(), userInfo().homedir])): SpikeGuard[] {
 	let ciStatusQueries = 0;
 	const writeRoot = dirname(resolve(job.artifactPath));
 	const bash: SpikeGuard = (call) => {
@@ -181,7 +181,7 @@ export function spikeGuards(job: SpikeJob): SpikeGuard[] {
 		if (keySearch) return credentialSearchRefusal(keySearch);
 		if (shellPatchCommand(command)) return shellPatchRefusal();
 		if (ciStatusQuery(command) && ciStatusQueries++ >= 1) return ciStatusRepeatRefusal();
-		return readOnlyBashRefusal(command);
+		return readOnlyBashRefusal(command, job.worktree, secrets);
 	};
 	const writeScope: SpikeGuard = (call) => {
 		if (call.name !== "write") return undefined;
@@ -194,6 +194,11 @@ export function spikeGuards(job: SpikeJob): SpikeGuard[] {
 		(call) => (WORKER_FORBIDDEN_TOOLS.includes(call.name) ? `${call.name} is a parent-only tool.` : undefined),
 		bash,
 		writeScope,
+		(call) => {
+			const paths = call.name === "find" ? [call.input.path, call.input.pattern] : call.name === "read" || call.name === "grep" ? [call.input.path] : [];
+			const secret = paths.find((path) => typeof path === "string" && secretPathIn(path, job.worktree, secrets));
+			return secret === undefined ? undefined : `Refused: a research worker never reads the Claude settings, its config, /proc or /dev/fd (${String(secret)}).`;
+		},
 		(call) => workerHostGuard(call.name, call.input, job.runDir),
 	];
 }
@@ -368,13 +373,13 @@ export async function runClaudeSpike(options: SpikeRunOptions): Promise<SpikeRes
 	}
 }
 
-/** Runs the lockdown against one init: the CLI's command list and its hook listing, both read over the control channel. */
+/** Runs the lockdown on one init with the CLI's commands, agents and hook listing, read over the control channel. */
 async function checkSurface(q: Query, init: Parameters<typeof lockdownVerdict>[0], expectedTools: readonly string[]): Promise<Lockdown> {
 	const started = Date.now();
 	try {
 		const listing = (q as unknown as { getHooksListing?: () => Promise<HooksListing> }).getHooksListing;
 		const [initialized, hooks] = await Promise.all([q.initializationResult(), listing === undefined ? undefined : listing.call(q)]);
-		return { ...lockdownVerdict(init, expectedTools, initialized.commands, hooks), checkMs: Date.now() - started };
+		return { ...lockdownVerdict(init, expectedTools, initialized.commands, initialized.agents ?? [], hooks), checkMs: Date.now() - started };
 	} catch (err) {
 		return { verdict: "refused", refusal: `Refused: the Claude CLI lockdown check failed (${(err as Error).message}).`, checkMs: Date.now() - started };
 	}
@@ -389,6 +394,7 @@ async function runInScratch(
 	if (!relative(resolve(options.job.worktree), scratch).startsWith("..")) throw new ClaudeSpikeError("scratch dir is inside the worktree");
 	const dirs = { home: join(scratch, "home"), configDir: join(scratch, "config"), tmp: join(scratch, "tmp") };
 	const settingsPath = options.userSettings === undefined ? join(homedir(), ".claude", "settings.json") : options.userSettings;
+	const secrets = secretPaths(settingsPath, [homedir(), userInfo().homedir]);
 	for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const state: ReportState = { refusals: [], attempts: 0 };
 	const denials: SpikeResult["denials"] = [];
@@ -447,7 +453,7 @@ async function runInScratch(
 		permissionMode: "dontAsk",
 		hooks: {
 			PreToolUse: [
-				{ hooks: [preToolUseHook([...spikeGuards(options.job), ...(options.extraGuards ?? [])], (tool, reason) => denials.push({ tool, reason }), ready)], onFailure: "block" },
+				{ hooks: [preToolUseHook([...spikeGuards(options.job, secrets), ...(options.extraGuards ?? [])], (tool, reason) => denials.push({ tool, reason }), ready)], onFailure: "block" },
 			],
 		},
 		maxTurns: options.maxTurns ?? 12,

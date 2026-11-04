@@ -1,18 +1,23 @@
 /**
  * N3a step-2 gates: the real installed `claude` against the loopback fake model, through `runClaudeSpike`. G1 shell
- * write scope, G2 resume and interrupt, G3 loaded-surface lockdown with synthetic config only. Skipped without `claude`.
+ * write scope, G2 resume and interrupt, G3 loaded-surface lockdown, R1 env and secret paths; synthetic config only.
  */
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import { whichAll } from "../../src/doctor.ts";
-import { runClaudeSpike, type SpikeRunOptions } from "../../src/drivers/claude-spike.ts";
+import { buildChildEnv, REPORT_TOOL, runClaudeSpike, SPIKE_TOOLS, type SpikeRunOptions } from "../../src/drivers/claude-spike.ts";
+import { CLI_BUILTIN_AGENTS } from "../../src/drivers/claude-lockdown.ts";
 import { type ClaudeMockProvider, type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
 
-const skip = whichAll("claude", process.env)[0] === undefined ? "claude is not on PATH" : false;
+const claudePath = whichAll("claude", process.env)[0];
+const skip = claudePath === undefined ? "claude is not on PATH" : false;
+
 const JOB = "cp-native-gates-e2e";
 const step = (name: string, input: unknown): ClaudeStep => ({ kind: "tool_use", calls: [{ name, input }] });
 const bash = (command: string) => step("Bash", { command });
@@ -37,7 +42,7 @@ async function withFixture(body: (fixture: Fixture) => Promise<void>): Promise<v
 			prompt: "Research the repo.",
 			providerEnv: { ANTHROPIC_BASE_URL: provider.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN },
 			userSettings: null,
-			maxTurns: 20,
+			maxTurns: 40,
 			timeoutMs: 150_000,
 			...extra,
 		});
@@ -66,6 +71,11 @@ test("G1: a research run's Bash cannot write the worktree or anywhere else; name
 			`FOO=1 cat ${worktree}/README.md`,
 			`(touch ${worktree}/subshell.txt)`,
 			`python3 -c "open('${worktree}/py.txt','w')"`,
+			`find ${worktree} \${U:--delete}`,
+			`find ${worktree} $'-\\x64elete'`,
+			`find ${worktree} {-delete,}`,
+			`git log \${U:---output=${worktree}/f}`,
+			`sort -S 1 --compress-program=sh ${worktree}/README.md`,
 		];
 		const provider = await startClaudeMockProvider([
 			...writes.map(bash),
@@ -120,12 +130,19 @@ test("G3: synthetic settings and worktree .claude config never load; a surface p
 
 		// L1: no settings-file or project hook ran, SessionStart included.
 		assert.deepEqual(readdirSync(root).filter((name) => name.startsWith("sentinel-")), []);
-		// L2: init shows only picp's surface and the CLI's built-ins; no skill, agent, command or CLAUDE.md reached the model.
+		// L2: init shows only picp's surface and the CLI's built-ins; no skill, agent, command or CLAUDE.md is sent.
 		assert.equal(result.lockdown?.verdict, "ok", result.lockdown?.refusal);
 		assert.ok(Object.values(result.lockdown?.extra ?? { missing: 1 }).every((count) => count === 0), JSON.stringify(result.lockdown));
 		assert.equal(result.lockdown?.seen?.hooks, 0);
 		const bodies = provider.requests.map((request) => JSON.stringify(request.body)).join("\n");
 		for (const marker of ["MARKER-SKILL", "MARKER-AGENT", "MARKER-CMD", "MARKER-CLAUDEMD"]) assert.equal(bodies.includes(marker), false, marker);
+		// R2: the model is offered picp's tools only (plus the CLI's never-called deferred-loading placeholder), and no
+		// built-in skill or agent listing reaches its prompt: those exist in init only, with no Skill, Agent or Task tool.
+		const first = provider.requests.find((request) => request.path.startsWith("/v1/messages"))?.body as { tools?: Array<{ name: string }>; system?: unknown; messages?: unknown };
+		assert.deepEqual(first.tools?.map((tool) => tool.name).filter((name) => name !== "DeferredToolPlaceholder").sort(), [...SPIKE_TOOLS, REPORT_TOOL].sort());
+		const prompt = JSON.stringify({ system: first.system, messages: first.messages });
+		assert.equal(/skill/i.test(prompt), false);
+		for (const agent of Object.keys(CLI_BUILTIN_AGENTS).filter((name) => name !== "claude")) assert.equal(new RegExp(`\\b${agent}\\b`).test(prompt), false, agent);
 		// L3: the permissions.allow widening let no denied action through; the in-scope write still ran.
 		assert.deepEqual(result.denials.map((denial) => denial.tool), ["Write", "Bash"]);
 		assert.deepEqual(readdirSync(worktree).sort(), [".claude", "CLAUDE.md", "README.md"]);
@@ -196,5 +213,45 @@ test("G2: a resumed session's usage is counted once across both runs; an interru
 		assert.equal(readdirSync(join(root, "artifacts")).length, 0);
 		assert.deepEqual(result.denials, []);
 		assert.equal(provider.requests.length, requestsAtExit);
+	});
+});
+
+test("R1: Bash and Read never reach the settings env, /proc environ or the settings file; no secret reaches the model", { skip, timeout: 180_000 }, async (t) => {
+	await withFixture(async ({ root, worktree, run }) => {
+		const secret = `sentinel-${randomBytes(12).toString("hex")}`;
+		const token = `synthetic-${randomBytes(12).toString("hex")}`;
+		const settings = join(root, "settings.json");
+		writeFileSync(settings, JSON.stringify({ env: { CP_SENTINEL_SECRET: secret, ANTHROPIC_AUTH_TOKEN: token } }));
+		const probes = [
+			bash("printenv"),
+			bash("env"),
+			bash("echo $ANTHROPIC_AUTH_TOKEN"),
+			bash("echo ${CP_SENTINEL_SECRET}"),
+			bash("cat /proc/self/environ"),
+			bash("grep -a SECRET /proc/self/environ"),
+			step("Read", { file_path: settings }),
+			bash(`cat ${settings}`),
+		];
+		const provider = await startClaudeMockProvider([...probes, { kind: "text", text: "done" }]);
+		const result = await run(provider, { userSettings: settings });
+		await provider.close();
+		const bodies = provider.requests.map((request) => JSON.stringify(request.body)).join("\n");
+		assert.equal(bodies.includes(secret) || bodies.includes(token), false, "a settings env value reached the model");
+		assert.equal(result.lockdown?.verdict, "ok", result.error);
+		assert.deepEqual(result.denials.map((denial) => denial.tool), ["Bash", "Bash", "Bash", "Bash", "Bash", "Bash", "Read", "Bash"]);
+
+		// The CLI scrub alone, no picp guard: CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 keeps the provider token out of Bash.
+		// It needs the OS sandbox (bwrap + socat); without socat every Bash call fails closed, so nothing prints either way.
+		const scrubProvider = await startClaudeMockProvider([bash("printenv; echo T=$ANTHROPIC_AUTH_TOKEN"), { kind: "text", text: "done" }]);
+		const dirs = { home: join(root, "scrub-home"), configDir: join(root, "scrub-config"), tmp: join(root, "scrub-tmp") };
+		for (const dir of Object.values(dirs)) mkdirSync(dir, { mode: 0o700 });
+		const env = { ...buildChildEnv(dirs, process.env, { ANTHROPIC_BASE_URL: scrubProvider.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN }), CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" };
+		const options = { cwd: worktree, env, settingSources: [], settings, managedSettings: { disableAllHooks: true }, strictMcpConfig: true, tools: ["Bash"], allowedTools: ["Bash"], maxTurns: 3 };
+		for await (const message of query({ prompt: "go", options: { ...options, pathToClaudeCodeExecutable: claudePath ?? "claude", permissionMode: "dontAsk" } })) void message;
+		await scrubProvider.close();
+		const scrubbed = toolResults(scrubProvider.requests).join("\n");
+		t.diagnostic(`scrub: ${/socat/.test(scrubbed) ? "Bash failed closed (sandbox needs socat)" : "Bash ran scrubbed"}; sentinel ${scrubbed.includes(secret) ? "visible" : "absent"}`);
+		assert.ok(scrubProvider.requests.length > 1, "the scrubbed run never answered the tool call");
+		assert.equal(scrubbed.includes(token), false);
 	});
 });

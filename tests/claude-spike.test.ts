@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { HookCallback, SDKResultMessage, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
-import { readOnlyBashRefusal } from "../src/drivers/claude-bash-policy.ts";
+import { readOnlyBashRefusal, secretPaths } from "../src/drivers/claude-bash-policy.ts";
 import { CLI_BUILTIN_AGENTS, type InitSurface, lockdownVerdict } from "../src/drivers/claude-lockdown.ts";
 import {
 	buildChildEnv,
@@ -69,16 +69,21 @@ test("preToolUseHook: guards deny, a throwing guard denies, an unknown tool deni
 	assert.equal((await call(locked, "Read", { file_path: "/repo/README.md" }))?.permissionDecisionReason, "Refused: lockdown");
 });
 
-test("readOnlyBashRefusal: named read-only commands run; redirects, substitutions, subshells and writers are refused", () => {
+const SECRETS = secretPaths("/op/settings.json", ["/op", "/op"]);
+const bashRefusal = (command: string) => readOnlyBashRefusal(command, "/repo", SECRETS);
+
+test("readOnlyBashRefusal: named read-only commands run; expansions, writers, env dumps and secret paths are refused", () => {
+	assert.deepEqual(SECRETS, ["/op/settings.json", "/op/.claude", "/op/.config/claude", "/proc", "/dev/fd"]);
 	for (const command of [
 		"rg -n foo src | head -5",
 		"cat README.md | wc -l && ls 2>/dev/null",
 		"git log --oneline -3; git status",
 		"gh pr view 7 --json title",
-		"printenv X || echo none",
-		"grep 'a > b' file",
+		"ls nope || echo none $?",
+		"grep 'a > b $HOME ${X} {a,b} ~' file",
 		"find . -name '*.ts'",
-	]) assert.equal(readOnlyBashRefusal(command), undefined, command);
+		"sort -S 1 f",
+	]) assert.equal(bashRefusal(command), undefined, command);
 	for (const [command, why] of [
 		["echo x > f", "a redirect"],
 		["echo x >> f", "a redirect"],
@@ -94,12 +99,37 @@ test("readOnlyBashRefusal: named read-only commands run; redirects, substitution
 		["git commit -m x", "`git commit`"],
 		["git -C /x status", "`git -C`"],
 		["git diff --output=f", "`git` with a write or exec flag"],
+		["git log --outp=f", "`git` with a write or exec flag"],
 		["find . -delete", "`find` with a write or exec flag"],
 		["sort -o f g", "`sort` with a write or exec flag"],
+		["sort -S 1 --compress-program=sh f", "`sort` with a write or exec flag"],
+		["sort --compress sh f", "`sort` with a write or exec flag"],
 		["rg --pre sh x", "`rg` with a write or exec flag"],
+		["rg --hostname-bin=sh x", "`rg` with a write or exec flag"],
 		["gh pr merge 7", "`gh pr merge`"],
 		["echo 'open", "an unterminated quote"],
-	] as Array<[string, string]>) assert.match(readOnlyBashRefusal(command) ?? "", new RegExp(`; ${why.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), command);
+		["find /repo ${U:--delete}", "a parameter expansion"],
+		["find /repo $'-\\x64elete'", "an ANSI-C or locale quote"],
+		["find /repo $\"-delete\"", "an ANSI-C or locale quote"],
+		["echo $[1+1]", "an arithmetic expansion"],
+		["find /repo {-delete,}", "a brace expansion"],
+		["git log ${U:---output=/repo/f}", "a parameter expansion"],
+		["echo $ANTHROPIC_AUTH_TOKEN", "a variable expansion"],
+		["echo \"$CP_SENTINEL_SECRET\"", "a variable expansion"],
+		["cat ~op/.claude/settings.json", "a tilde expansion"],
+		["printenv", "`printenv` (not on the read-only list)"],
+		["env", "`env` (not on the read-only list)"],
+		["cd /repo/src", "`cd` (not on the read-only list)"],
+		["cat /proc/self/environ", "a secret path"],
+		["grep -a SECRET /proc/1/environ", "a secret path"],
+		["cat ../../proc/self/environ", "a secret path"],
+		["cat /op/settings.json", "a secret path"],
+		["head /op/.claude.json", "a secret path"],
+		["rg x /op/.cl*/s", "a secret path"],
+		["rg x /op", "a secret path"],
+		["grep --file=/op/.config/claude/x y", "a secret path"],
+		["cat /dev/fd/3", "a secret path"],
+	] as Array<[string, string]>) assert.match(bashRefusal(command) ?? "", new RegExp(`; ${why.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), command);
 });
 
 const INIT: InitSurface = {
@@ -107,7 +137,7 @@ const INIT: InitSurface = {
 	mcp_servers: [{ name: "picp", status: "connected" }],
 	skills: ["doctor"],
 	plugins: [{ name: "cc-plugin-privacy", path: "builtin" }],
-	agents: [...CLI_BUILTIN_AGENTS],
+	agents: [],
 	slash_commands: ["doctor", "compact"],
 	output_style: "default",
 };
@@ -115,23 +145,25 @@ const COMMANDS = [{ name: "doctor", builtin: true }, { name: "compact", builtin:
 const LOCKED = { hooks: [], policy: { managedOnly: true, policyHookCount: 0 } };
 
 test("lockdownVerdict: only picp's surface and CLI built-ins pass; any extra, a missing listing or an unbound lock refuses", () => {
-	const ok = lockdownVerdict(INIT, ["Read", REPORT_TOOL], COMMANDS, LOCKED);
+	const ok = lockdownVerdict(INIT, ["Read", REPORT_TOOL], COMMANDS, [], LOCKED);
 	assert.equal(ok.verdict, "ok");
-	assert.deepEqual(ok.seen, { tools: 2, mcpServers: 1, skills: 1, plugins: 1, agents: 5, slashCommands: 2, hooks: 0, managedHooks: 0 });
+	assert.deepEqual(ok.seen, { tools: 2, mcpServers: 1, skills: 1, plugins: 1, agents: 0, slashCommands: 2, hooks: 0, managedHooks: 0 });
+	assert.equal(Object.keys(CLI_BUILTIN_AGENTS).length, 5);
+	// A loaded agent that reuses a built-in name is still an extra: its description does not match the pinned digest.
 	const loaded = lockdownVerdict({
 		...INIT,
 		tools: ["Read", "Bash"],
 		mcp_servers: [{ name: "other", status: "connected" }],
 		skills: ["doctor", "x"],
 		plugins: [{ name: "p", path: "/home/op/p" }],
-		agents: ["y"],
+		agents: ["y", "Plan"],
 		output_style: "Explanatory",
-	}, ["Read", REPORT_TOOL], [...COMMANDS, { name: "doctor" } as SlashCommand], { hooks: [{}], policy: { managedOnly: true } });
-	assert.deepEqual(loaded.extra, { tools: 2, mcpServers: 2, skills: 2, plugins: 1, agents: 1, slashCommands: 1, hooks: 1, outputStyle: 1 });
+	}, ["Read", REPORT_TOOL], [...COMMANDS, { name: "doctor" } as SlashCommand], [{ name: "Plan", description: "impostor" }], { hooks: [{}], policy: { managedOnly: true } });
+	assert.deepEqual(loaded.extra, { tools: 2, mcpServers: 2, skills: 2, plugins: 1, agents: 2, slashCommands: 1, hooks: 1, outputStyle: 1 });
 	assert.match(loaded.refusal ?? "", /^Refused: the Claude CLI lockdown failed: it loaded a surface picp did not pass \(tools 2, mcpServers 2/);
-	assert.doesNotMatch(loaded.refusal ?? "", /home|Explanatory|other/);
-	assert.match(lockdownVerdict(INIT, ["Read", REPORT_TOOL], COMMANDS, undefined).refusal ?? "", /no hook listing/);
-	assert.match(lockdownVerdict(INIT, ["Read", REPORT_TOOL], COMMANDS, { hooks: [], policy: { managedOnly: false } }).refusal ?? "", /did not bind/);
+	assert.doesNotMatch(loaded.refusal ?? "", /home|Explanatory|other|impostor|Plan/);
+	assert.match(lockdownVerdict(INIT, ["Read", REPORT_TOOL], COMMANDS, [], undefined).refusal ?? "", /no hook listing/);
+	assert.match(lockdownVerdict(INIT, ["Read", REPORT_TOOL], COMMANDS, [], { hooks: [], policy: { managedOnly: false } }).refusal ?? "", /did not bind/);
 });
 
 test("version advisory: below the floor or unparsable names `claude update`; at or above passes", () => {

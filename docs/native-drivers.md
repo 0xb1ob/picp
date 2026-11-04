@@ -209,23 +209,38 @@ using the operator's login, which `claude` reads from its own settings file; pic
 ## Step-2 gates result (N3a)
 
 Fake model through the real installed `claude` 2.1.318 unless stated; `tests/e2e/native-worker-gates.test.ts` holds
-G1–G3 and skips when `claude` is not on PATH (as in CI). Still no runtime wiring: dispatch, send and revive are N3b.
+G1–G3 and R1 and skips when `claude` is not on PATH (as in CI). Still no runtime wiring: dispatch, send and revive are
+N3b, which must keep every layer below on.
 
 - **G1, shell write scope: deny-by-default Bash policy shipped** (`src/drivers/claude-bash-policy.ts`, called from the
   Bash guard in `src/drivers/claude-spike.ts`). The SDK `sandbox` option was tried first: on this host bubblewrap works
   but `socat` is missing, and `sandbox: { enabled: true, failIfUnavailable: true }` fails closed at startup ("socat not
-  installed"), so it is never silently unsandboxed but cannot run here. The policy lexes the command and runs it only
-  when every segment is a named read-only command (`rg`, `grep`, `ls`, `cat`, `head`, `wc`, read-only `git`
-  subcommands, `gh <noun> view|list|…`, and similar). Redirects (other than to `/dev/null` or fd dup), command
-  substitution, subshells, background jobs, env assignments, unknown commands and write/exec flags (`find -exec`,
-  `sort -o`, `rg --pre`, `git -C`, `git diff --output`) are refused. The Write tool stays scoped to the artifact dir.
+  installed"), so it is never silently unsandboxed but cannot run here. The OS sandbox needs `socat` and stays a later
+  option; picp does not install it. The policy lexes the command and runs it only when every segment is a named
+  read-only command (`rg`, `grep`, `ls`, `cat`, `head`, `wc`, read-only `git` subcommands, `gh <noun> view|list|…`, and
+  similar). Refused: redirects (other than to `/dev/null` or fd dup), command substitution, every `$` expansion but
+  `$?` (`$NAME`, `${…}`, `$'…'`, `$"…"`, `$[…]`), unquoted braces and `~`, subshells, background jobs, env
+  assignments, unknown commands, and write/exec flags in any `=` or unambiguous-prefix form (`find -exec/-delete`,
+  `sort -o/-T/--compress-program`, `rg --pre/--hostname-bin`, `git -C/--output/-O/--ext-diff`). The Write tool stays
+  scoped to the artifact dir.
+- **R1, env and secret paths.** A passed settings file's `env` reaches the CLI and every Bash child, so it is kept out
+  in layers: `printenv`, `cd`, `env`, `set`, `declare`, `export`, `typeset` and `compgen` are not on the list, `$`
+  expansion is refused, and a secret-path guard refuses Read, Grep, Glob and Bash arguments that are, link to, or
+  contain the passed settings path, `<home>/.claude*`, `<home>/.config/claude*` (both `$HOME` and the passwd home),
+  `/proc` or `/dev/fd`. The existing guards do not match these paths (`workerHostGuard` covers ssh keys only), so the
+  guard is new and sits beside them. The CLI's own `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` exists in 2.1.318 but runs
+  Bash inside the same bwrap + `socat` sandbox: here every Bash call fails closed under it, so it is not set (it would
+  also stop the read-only commands G1 keeps). The e2e proves the scrub alone still keeps the provider token out.
 - **G2, resume and interrupt.** A resumed run keeps the session id, and its process restores the session's cumulative
   `modelUsage`; `spikeUsage` subtracts the prior run's ledger, so two runs of 2 model calls each count 24/14 and 24/14
   (48/28 for 4 calls, once). An `AbortSignal` interrupt during a tool_use turn exits `code 0`, not driver-killed,
   ~600 ms after the abort (the fake holds the answer 500 ms), and the pending Write never runs.
 - **G3, loaded-surface lockdown** (`src/drivers/claude-lockdown.ts`). On `system/init`, before any tool is allowed,
-  the driver compares init and the SDK's hook listing with what picp passed; on any extra it aborts with a named
-  refusal holding counts only. Every tool call waits on that verdict.
+  the driver compares init, `initializationResult()` (commands with their `builtin` flag, agents with descriptions)
+  and the SDK's hook listing with what picp passed; on any extra it aborts with a named refusal holding counts only.
+  Every tool call waits on that verdict. Built-in agents are pinned by a digest of name and description, so a loaded
+  agent reusing a built-in name counts as an extra; a CLI update that rewrites a built-in description refuses until
+  the pin is updated.
 - **G4, dependencies.** The SDK and `zod` are runtime `dependencies`; the 8 workspace stubs and their pin test stay.
 
 | Surface | picp passes | Allowed in init | Seen (fake / live) |
@@ -234,7 +249,7 @@ G1–G3 and skips when `claude` is not on PATH (as in CI). Still no runtime wiri
 | MCP servers | `picp` (in-process) | only `picp` | 1 / 1 |
 | skills | `skills: []`, `settingSources: []` | CLI-bundled only (`builtin` slash command) | 16 / 16 |
 | plugins | `plugins: []` | path `builtin` only | 4 / 4 |
-| agents | `agents: {}` | the CLI's 5 built-in agents | 5 / 5 |
+| agents | `agents: {}` | the CLI's 5 built-ins, by name and description digest | 5 / 5 |
 | slash commands | none | `builtin` only | 44 / 44 |
 | hooks | picp's in-process PreToolUse | none listed; `managedOnly` must bind | 0 / 0 |
 | output style | none | `default` | default / default |
@@ -246,10 +261,17 @@ file's hooks (`SessionStart` included) do not run, while picp's SDK callback hoo
 `permissions.allow` widening let no denied Write or Bash through). What it does NOT control:
 
 - admin-managed policy (`managed-settings.json`, MDM) always loads and cannot be turned off from the SDK;
-- `skills: []` is a context filter, not a sandbox: the CLI's bundled skills, built-in plugins, agents and slash
-  commands stay listed (allowed above only because they ship inside `claude`);
-- a passed settings file can still carry hooks (neutralized by the managed-only lock), `env` (reaches Bash) and
+- `skills: []` is a context filter, not a sandbox, and a no-op without setting sources on 2.1.318 (kept as defence in
+  depth): the CLI's bundled skills, built-in plugins, agents and slash commands stay listed in init;
+- a passed settings file can still carry hooks (neutralized by the managed-only lock), `env` (reaches Bash, see R1) and
   `permissions` (the guard denies first); an `outputStyle` or a non-builtin plugin there is refused by the lockdown.
+
+What the model sees (R2, first request to the fake model): the `tools` array is exactly the role list plus
+`mcp__picp__report_result`, plus the CLI's `DeferredToolPlaceholder` (described as reserved, "never call"); no `Skill`,
+`Agent`, `Task` or `SlashCommand` tool. The system prompt and messages list 0 built-in skill, agent or plugin
+descriptions: of 16 skill, 5 agent, 4 plugin and 44 command names, the only matches are common words (`run`, `effort`,
+`model`, and `claude` as the model's own name). The built-ins exist in init only and cannot be invoked: no tool calls
+them. The 4 built-in plugins contribute 0 hooks, 0 MCP servers and 0 non-builtin commands or skills.
 
 The settings path is a driver option: default `~/.claude/settings.json`, `null` for none; picp passes the path and
 never opens it. Recommend an auth-only settings file for workers.
@@ -258,6 +280,6 @@ never opens it. Recommend an auth-only settings file for workers.
 |---|---|
 | Sandbox | unavailable (`socat` missing); fails closed at startup, so no spawn delta to measure |
 | Lockdown check | 22–36 ms after init (fake cold start 390 ms) |
-| Live smoke (one run) | exit 0, verdict ok, counts as in the table, no extras |
+| Live smoke (one run, before R1/R2) | exit 0, verdict ok, counts as in the table, no extras |
 | `node_modules` | 231 MB, unchanged (+39 MB over main before N2) |
-| Files | `claude-spike.ts` 511, `claude-bash-policy.ts` 100, `claude-lockdown.ts` 74, gates e2e 200 lines |
+| Files | `claude-spike.ts` 517, `claude-bash-policy.ts` 144, `claude-lockdown.ts` 96, gates e2e 257 lines |
