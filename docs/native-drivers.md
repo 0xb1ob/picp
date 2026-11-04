@@ -144,17 +144,20 @@ is P3 work (this spike never resumes), so it stays a kill condition for step 2.
 |---|---|---|
 | Hooks | In-process `PreToolUse` hook, `onFailure: "block"`; picp's worker guards deny before execution, a throw is a deny | `tests/e2e/native-worker-spike.test.ts` (3), (5); `tests/claude-spike.test.ts` |
 | MCP | picp's `report_result` as an SDK in-process MCP server (`mcp__picp__report_result`), validated by the worker-reporter checks, written once | e2e (1), (2) |
-| Resume | Not exercised; the SDK's `resume` option exists. Step 2 (P3) measures it before any wiring | — |
-| Interrupt | `AbortController` on the run's timeout; not exercised by a test. Step 2 measures it before any wiring | — |
+| Resume | SDK `resume` on a caller-kept scratch dir; the resumed process restores the session's `modelUsage`, so the prior run's ledger is the baseline. Counted once (N3a G2) | `tests/e2e/native-worker-gates.test.ts` G2 |
+| Interrupt | The caller's `AbortSignal` aborts the run; the observed exit is reported and the pending tool never runs (N3a G2) | `tests/e2e/native-worker-gates.test.ts` G2 |
 | Usage | T3's `ClaudeTurnTokenUsage.ts` normalizer: `complete` on success; unknown is `unavailable`, never 0 | e2e (7); unit `spikeUsage` |
 | Exit | The child's own exit code/signal; after a 10 s grace the driver kills and still reports the observed exit | e2e (7) |
 
 Isolation: every run gets a `mktemp -d` scratch dir (dirs mode 0700) outside the worktree holding `HOME`,
-`CLAUDE_CONFIG_DIR` and `TMPDIR`, removed in `finally`. `settingSources: []`, `strictMcpConfig`, no plugins, skills or
-agents, `Agent`/`Task`/`WebFetch`/`WebSearch` disallowed. The child env is an allow-list (`PATH`, `LANG`, `LC_ALL`,
+`CLAUDE_CONFIG_DIR` and `TMPDIR`, removed in `finally` (a resume passes its own `scratchDir`, which the caller removes).
+`settingSources: []`, `strictMcpConfig`, `managedSettings: { disableAllHooks: true }`, no plugins, skills or agents,
+`Agent`/`Task`/`WebFetch`/`WebSearch` disallowed. The child env is an allow-list (`PATH`, `LANG`, `LC_ALL`,
 `LC_CTYPE`, `TZ`) plus the explicit provider variables; a host `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL` never reaches it.
 
 ### Step-2 gates (before any wiring)
+
+Both gates below are now measured and closed; see "Step-2 gates result (N3a)".
 
 - **Shell write scope must be enforced before wiring.** The Write tool is scoped to the artifact directory
   (`src/drivers/claude-spike.ts:178`), but Bash is not: a redirect (`echo x > file`) or a `cp`/`mv` into the worktree
@@ -166,9 +169,8 @@ agents, `Agent`/`Task`/`WebFetch`/`WebSearch` disallowed. The child env is an al
 ### Versions (as T3 handles them)
 
 - `@anthropic-ai/claude-agent-sdk` `^0.3.318` in `package.json`, exact `0.3.318` in `package-lock.json` (T3:
-  `apps/server/package.json:37` `^0.3.284`). `zod` `^4.6.7` is added because it is the SDK's peer. Both are
-  `devDependencies` while the driver has no runtime entry point; step 2 moves them to `dependencies`, which
-  `tests/structure.test.ts` (runtime dependency allow-list) must approve.
+  `apps/server/package.json:37` `^0.3.284`). `zod` `^4.6.7` is added because it is the SDK's peer. N3a moved both
+  to `dependencies`; `tests/structure.test.ts` approves them in its runtime dependency allow-list.
 - The SDK always gets the installed `claude` from PATH (`pathToClaudeCodeExecutable` plus `spawnClaudeCodeProcess`,
   which records the spawned command); the e2e asserts it equals the resolved path.
 - Version advisory: `CLAUDE_VERSION_FLOOR` is 2.1.318, the version measured working. A missing `claude` or an older
@@ -198,8 +200,64 @@ agents, `Agent`/`Task`/`WebFetch`/`WebSearch` disallowed. The child env is an al
 | `node_modules` delta | +39 MB with the stubs (main 192 → 231 MB, clean `npm ci`); +351 MB before them (202 → 553 MB at the first head, with the bundled 323 MB `claude-agent-sdk-linux-x64` binary) |
 | Fake-model run | cold start (spawn to `system/init`) 473 ms; a five-step run 808 ms |
 | Live smoke (one run) | exit 0, `claude-opus-5-5`, 5.86 s (cold start 409 ms), usage complete: 947 in / 134 out |
-| Files | `src/drivers/claude-spike.ts` 444 lines; `tests/harness/claude-mock-provider.ts` 156 lines |
+| Files | `src/drivers/claude-spike.ts` 444 lines; `tests/harness/claude-mock-provider.ts` 156 lines (N2; N3a sizes below) |
 
 The live smoke (`tests/e2e/native-worker-live-smoke.test.ts`) runs only with `CP_LIVE_TESTS=1`: one no-tool turn
 using the operator's login, which `claude` reads from its own settings file; picp passes the path and never reads it.
 `report_result` was registered in that run but never called (no tools, one turn).
+
+## Step-2 gates result (N3a)
+
+Fake model through the real installed `claude` 2.1.318 unless stated; `tests/e2e/native-worker-gates.test.ts` holds
+G1–G3 and skips when `claude` is not on PATH (as in CI). Still no runtime wiring: dispatch, send and revive are N3b.
+
+- **G1, shell write scope: deny-by-default Bash policy shipped** (`src/drivers/claude-bash-policy.ts`, called from the
+  Bash guard in `src/drivers/claude-spike.ts`). The SDK `sandbox` option was tried first: on this host bubblewrap works
+  but `socat` is missing, and `sandbox: { enabled: true, failIfUnavailable: true }` fails closed at startup ("socat not
+  installed"), so it is never silently unsandboxed but cannot run here. The policy lexes the command and runs it only
+  when every segment is a named read-only command (`rg`, `grep`, `ls`, `cat`, `head`, `wc`, read-only `git`
+  subcommands, `gh <noun> view|list|…`, and similar). Redirects (other than to `/dev/null` or fd dup), command
+  substitution, subshells, background jobs, env assignments, unknown commands and write/exec flags (`find -exec`,
+  `sort -o`, `rg --pre`, `git -C`, `git diff --output`) are refused. The Write tool stays scoped to the artifact dir.
+- **G2, resume and interrupt.** A resumed run keeps the session id, and its process restores the session's cumulative
+  `modelUsage`; `spikeUsage` subtracts the prior run's ledger, so two runs of 2 model calls each count 24/14 and 24/14
+  (48/28 for 4 calls, once). An `AbortSignal` interrupt during a tool_use turn exits `code 0`, not driver-killed,
+  ~600 ms after the abort (the fake holds the answer 500 ms), and the pending Write never runs.
+- **G3, loaded-surface lockdown** (`src/drivers/claude-lockdown.ts`). On `system/init`, before any tool is allowed,
+  the driver compares init and the SDK's hook listing with what picp passed; on any extra it aborts with a named
+  refusal holding counts only. Every tool call waits on that verdict.
+- **G4, dependencies.** The SDK and `zod` are runtime `dependencies`; the 8 workspace stubs and their pin test stay.
+
+| Surface | picp passes | Allowed in init | Seen (fake / live) |
+|---|---|---|---|
+| tools | role list + `mcp__picp__report_result` | exactly that | 6 / 1 |
+| MCP servers | `picp` (in-process) | only `picp` | 1 / 1 |
+| skills | `skills: []`, `settingSources: []` | CLI-bundled only (`builtin` slash command) | 16 / 16 |
+| plugins | `plugins: []` | path `builtin` only | 4 / 4 |
+| agents | `agents: {}` | the CLI's 5 built-in agents | 5 / 5 |
+| slash commands | none | `builtin` only | 44 / 44 |
+| hooks | picp's in-process PreToolUse | none listed; `managedOnly` must bind | 0 / 0 |
+| output style | none | `default` | default / default |
+
+What the SDK controls, for the operator's question: with `settingSources: []` the CLI loads no user, project or local
+settings, so the worktree `.claude/` skills, agents, commands, hooks and `CLAUDE.md` never load (L1/L2 markers absent
+from every model request). `managedSettings: { disableAllHooks: true }` binds as managed-only hooks: a passed settings
+file's hooks (`SessionStart` included) do not run, while picp's SDK callback hook still denies (L3: a
+`permissions.allow` widening let no denied Write or Bash through). What it does NOT control:
+
+- admin-managed policy (`managed-settings.json`, MDM) always loads and cannot be turned off from the SDK;
+- `skills: []` is a context filter, not a sandbox: the CLI's bundled skills, built-in plugins, agents and slash
+  commands stay listed (allowed above only because they ship inside `claude`);
+- a passed settings file can still carry hooks (neutralized by the managed-only lock), `env` (reaches Bash) and
+  `permissions` (the guard denies first); an `outputStyle` or a non-builtin plugin there is refused by the lockdown.
+
+The settings path is a driver option: default `~/.claude/settings.json`, `null` for none; picp passes the path and
+never opens it. Recommend an auth-only settings file for workers.
+
+| Measured (N3a) | Value |
+|---|---|
+| Sandbox | unavailable (`socat` missing); fails closed at startup, so no spawn delta to measure |
+| Lockdown check | 22–36 ms after init (fake cold start 390 ms) |
+| Live smoke (one run) | exit 0, verdict ok, counts as in the table, no extras |
+| `node_modules` | 231 MB, unchanged (+39 MB over main before N2) |
+| Files | `claude-spike.ts` 510, `claude-bash-policy.ts` 100, `claude-lockdown.ts` 74, gates e2e 200 lines |

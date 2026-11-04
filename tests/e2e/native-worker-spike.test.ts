@@ -69,6 +69,7 @@ test("native spike: one research run reports once, refuses bad reports, denies f
 			job: { job_id: JOB, delivery: "local", runDir: join(root, "run"), worktree, artifactPath },
 			prompt: "Research the repo and report.",
 			providerEnv: { ANTHROPIC_BASE_URL: provider.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN },
+			userSettings: null,
 			extraGuards: [throwing],
 			maxTurns: 20,
 			timeoutMs: 150_000,

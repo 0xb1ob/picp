@@ -5,7 +5,7 @@
  *   1. no single module exceeds PER_FILE_CAP unless it is grandfathered, and a
  *      grandfathered module is pinned to its 2026-09-24 line count plus a
  *      3% margin, rounded up to the next 10 lines;
- *   2. `package.json` permits only the two viewer runtime dependencies;
+ *   2. `package.json` permits only the two viewer runtime dependencies and the native driver's SDK and zod;
  *   3. AGENTS.md, the operator note, and a short list of identifiers for
  *      surfaces that were deliberately deleted (so they cannot quietly come
  *      back) stay capped/banned.
@@ -52,8 +52,8 @@ const GRANDFATHERED: Record<string, number> = {
 };
 
 /** Runtime dependencies allowed in package.json's `dependencies`. */
-const MAX_RUNTIME_DEPENDENCIES = 2;
-const RUNTIME_DEPENDENCIES = ["esbuild", "preact"];
+const MAX_RUNTIME_DEPENDENCIES = 4;
+const RUNTIME_DEPENDENCIES = ["@anthropic-ai/claude-agent-sdk", "esbuild", "preact", "zod"];
 
 /** Mirrors the diet cap on AGENTS.md (tests/contract.test.ts pins the same number). */
 const AGENTS_MD_MAX_LINES = 250;
@@ -111,7 +111,7 @@ test("no file exceeds the per-file cap unless it is grandfathered, and a grandfa
 	}
 });
 
-test("package.json permits only the two approved viewer runtime dependencies", () => {
+test("package.json permits only the approved viewer and native-driver runtime dependencies", () => {
 	const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
 		dependencies?: Record<string, string>;
 	};

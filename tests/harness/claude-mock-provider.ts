@@ -22,7 +22,8 @@ export interface ClaudeToolUse {
 	input: unknown | ((request: RecordedClaudeRequest) => unknown);
 }
 
-export type ClaudeStep = { kind: "tool_use"; calls: ClaudeToolUse[] } | { kind: "text"; text: string };
+/** `beforeAnswer` runs, and is awaited, after the request is recorded and before the step's answer is sent. */
+export type ClaudeStep = { kind: "tool_use"; calls: ClaudeToolUse[]; beforeAnswer?: () => Promise<void> } | { kind: "text"; text: string };
 
 export interface ClaudeMockProvider {
 	url: string;
@@ -127,6 +128,7 @@ export async function startClaudeMockProvider(script: readonly ClaudeStep[]): Pr
 			const step = offersTools ? script[cursor++] : undefined;
 			if (offersTools && step === undefined) overrun++;
 			if (step?.kind === "tool_use") {
+				await step.beforeAnswer?.();
 				const blocks = step.calls.map((call, index) => ({
 					type: "tool_use",
 					id: `toolu_fake_${ids}_${index}`,
