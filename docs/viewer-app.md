@@ -777,12 +777,14 @@ header's Jobs ⌘J; the committed captures are `desktop`, `phone`, `899`, `900`,
 draft that is exactly `/` or `/word` lists the matching commands — `/status`, `/jobs`, `/stop` — in the composer's
 listbox (arrows, Enter/Tab pick one, Escape closes it; an IME Enter is the composition's). The footer's `@ job` and
 `/ command` chips (28 px with their label at ≥900 px, 44 px glyphs on a phone) open the job references alone or the
-commands followed by the M1 selection's in-flight and done-today jobs; the menu is frame 4's 534 px raised list with 36 px
+commands followed by the M1 selection's in-flight and done-today jobs (`@<id>` with `Working · 9m` or `Done 14:27`, a
+missing time left out); the menu is frame 4's 534 px raised list with 36 px
 rows at 1440 and frame 10's 370 px list with 52 px rows at 390. `/jobs` opens the slice 2 drawer as Ctrl/Cmd+J does.
 `/status` and `/stop` only **prepare** a command shown above the field (the typed text and attachments stay); `/stop`
 needs its in-flight job, picked from the menu's "Stop which job?" list or `@ job`. Only the send button, then labelled
 `Submit /<name>`, sends it: one `POST /api/operator/message` `{kind:"command", command, job_id?, client_id}` per
-prepared command, its `client_id` the idempotency key for every retry. The viewer validates the grammar
+prepared command; a retry keeps its `client_id` unless the last answer proved nothing was injected (`docs/contracts.md`
+§Dashboard control). The viewer validates the grammar
 (`commandGrammar` in `src/viewer/control-files.ts`) and the operator session's cp-bridge validates it again
 (`src/dashboard-commands.ts`) before journaling `command: "/status"` (or `/stop <job>`) and injecting a human message
 — `/stop` asks the operator to stop the job; it never changes a grant. A cp-bridge from before S6 answers 409

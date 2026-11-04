@@ -59,6 +59,8 @@
 .operator-composer-box { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
 .operator-composer-footer { display: contents; }
 .operator-composer textarea { flex: 1; min-width: 0; display: block; min-height: 42px; max-height: 122px; resize: none; overflow-y: auto; padding: 10px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 21px; font: inherit; font-size: 15px; line-height: 20px; overflow-wrap: anywhere; }
+/* The box's focus-within border is the one focus ring (desktop and phone); a field outline would be a second. */
+.operator-composer-box textarea:focus-visible { outline: none; }
 .operator-composer textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .operator-composer-send, .operator-composer-more > summary { width: 42px; height: 42px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; }
 .operator-composer-send { padding: 0; background: var(--text); color: var(--background); border: 0; }

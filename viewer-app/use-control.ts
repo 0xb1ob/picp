@@ -82,10 +82,11 @@ export function useControl(active: boolean, refreshKey: string | null, entries: 
   if (composer) requests.current = requests.current.then(perform);
   else void perform();
  };
- /** Full match S6: one command on the same FIFO as sends; its error (draft kept) or null once accepted. */
- const command = (body: ControlCommandBody): Promise<string | null> => {
-  if (!controlReady(status)) return Promise.resolve("Dashboard control is not ready");
-  const run = requests.current.then(() => sendControl(fetcher, controlToken(status), body)).then(result => { setGeneration(value => value + 1); return "error" in result ? result.error : null; });
+ /** Full match S6: one command on the sends' FIFO; null once accepted, else its error and if it may have reached pi. */
+ const command = (body: ControlCommandBody): Promise<{error: string; unknown: boolean} | null> => {
+  if (!controlReady(status)) return Promise.resolve({error: "Dashboard control is not ready", unknown: false});
+  // No answer read (network, 503, 504): the bridge may have taken it, so only a retry under the same client_id is safe.
+  const run = requests.current.then(() => sendControl(fetcher, controlToken(status), body)).then(result => { setGeneration(value => value + 1); return "error" in result ? {error: result.error, unknown: result.status === 0 || result.status >= 503} : null; });
   requests.current = run;
   return run;
  };

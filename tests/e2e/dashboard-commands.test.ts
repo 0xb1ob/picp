@@ -57,9 +57,9 @@ async function pick(tab: Tab, command: string) {
 	tab.click(await tab.find("#operator-composer-command-menu button", (b) => b.textContent!.startsWith(command)));
 	await tab.find(".operator-composer-command code", (c) => c.textContent!.startsWith(command));
 }
-const open = async (t: Context, ports: Parameters<typeof operatorSession>[3]) => {
+const open = async (t: Context, ports: Parameters<typeof operatorSession>[3], isIdle = () => true) => {
 	const d = await dashboard(t, { at: new Date(NOON).toISOString(), seed });
-	const session = await operatorSession(t, d.stateDir, () => true, ports);
+	const session = await operatorSession(t, d.stateDir, isIdle, ports);
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
 	browserShims(t, tab);
 	await tab.waitText(/REPLY-CARD/);
@@ -101,7 +101,7 @@ test("commands-stop: /stop without a job never sends; its picked job sends one s
 	await press(tab, "Enter");
 	assert.deepEqual([sends(tab), injected.length], [0, 0], "Enter without a target sends nothing");
 	tab.click(tab.$(".operator-composer-at")!);
-	tab.click(await tab.find("#operator-composer-command-menu button", (b) => b.textContent!.startsWith("cp-live")));
+	tab.click(await tab.find("#operator-composer-command-menu button", (b) => b.textContent!.startsWith("@cp-live")));
 	await tab.find(".operator-composer-command code", (c) => c.textContent === "/stop cp-live");
 	tab.click(send(tab));
 	await until(() => injected.length, (c) => c === 1, "the stop request");
@@ -132,4 +132,49 @@ test("commands-old-bridge: a cp-bridge without the command port refuses with res
 	assert.match(alert.textContent!, /^unsupported: this session's cp-bridge predates dashboard commands; restart the session/);
 	assert.deepEqual([tab.$(".operator-composer-command code")!.textContent, field(tab).value, send(tab).hasAttribute("disabled"), injected.length], ["/status", "KEEP", false, 0],
 		"the command, the text and Submit stay for a retry after the restart");
+});
+
+test("commands-retry: a refusal that injected nothing frees its retry; an unknown outcome retries under the same id; one injection each", { timeout: 180_000 }, async (t) => {
+	let refuse = true;
+	const got: string[] = [];
+	const { tab } = await open(t, { command: dashboardCommand, inject: (text) => { if (refuse) { refuse = false; throw new Error("pi refused the turn"); } got.push(text); } });
+	await pick(tab, "/status");
+	tab.click(send(tab));
+	await tab.find(".operator-composer-command [role=alert]", (a) => a.textContent === "failed: pi refused the turn");
+	await until(() => send(tab).hasAttribute("disabled"), (off) => !off, "Submit again");
+	tab.click(send(tab));
+	await until(() => n(tab, ".operator-composer-command"), (c) => c === 0, "the retry is accepted");
+	const first = posts(tab).map((b) => b.client_id);
+	assert.deepEqual([got.length, first.length, first[0] !== first[1]], [1, 2, true], "the retry after a definite refusal sends once, under a fresh id");
+
+	// The bridge takes the command but its answer is lost: the retry keeps the id, and the bridge refuses the duplicate.
+	const real = tab.globals.fetch as (input: string, init?: RequestInit) => Promise<Response>;
+	let lose = true;
+	tab.globals.fetch = async (input: string, init?: RequestInit) => {
+		const response = await real(input, init);
+		if (lose && String(input).endsWith("/api/operator/message")) { lose = false; throw new TypeError("network lost"); }
+		return response;
+	};
+	await pick(tab, "/status");
+	tab.click(send(tab));
+	await tab.find(".operator-composer-command [role=alert]", (a) => a.textContent === "Could not reach this home");
+	await until(() => send(tab).hasAttribute("disabled"), (off) => !off, "Submit again");
+	tab.click(send(tab));
+	await tab.find(".operator-composer-command [role=alert]", (a) => /^client_id was already used/.test(a.textContent!));
+	const ids = posts(tab).map((b) => b.client_id).slice(2);
+	assert.deepEqual([got.length, ids.length, ids[0] === ids[1]], [2, 2, true], "an unknown outcome never injects twice");
+});
+
+test("commands-queued: a command the busy session queues is a pending send labelled with it; Cancel send injects nothing", { timeout: 180_000 }, async (t) => {
+	const { d, tab, injected } = await open(t, { command: dashboardCommand }, () => false);
+	await pick(tab, "/stop");
+	tab.click(await tab.find("#operator-composer-command-menu button", (b) => b.textContent!.startsWith("@cp-live")));
+	await tab.find(".operator-composer-command code", (c) => c.textContent === "/stop cp-live");
+	tab.click(send(tab));
+	const bubble = await tab.find(".session-pending", (b) => b.querySelector(".session-pending-command")?.textContent === "/stop @cp-live");
+	await until(() => bubble.querySelector(".session-pending-cancel"), Boolean, "Cancel send");
+	assert.deepEqual([bubble.querySelector(".session-pending-edit"), injected.length], [null, 0], "Cancel only, nothing given to pi yet");
+	tab.click(bubble.querySelector(".session-pending-cancel")!);
+	await until(() => n(tab, ".session-pending"), (c) => c === 0, "the cancelled command goes");
+	assert.deepEqual([injected.length, journal(d.stateDir).some((l) => l.type === "outcome" && l.state === "cancelled")], [0, true], "cancelled, never injected");
 });

@@ -36,7 +36,7 @@ function seed(stateDir: string, home: string) {
 	put(".pi-command-post/jobs.json", { jobs: [job("cp-live", "picp"), job("cp-other", "atlas")] });
 	put(LAYOUT.fleetFile, { jobs: ["cp-live:picp", "cp-other:atlas", "cp-orphan:picp"].map((pair) => {
 		const [job_id, project] = pair.split(":");
-		return { job_id, project, kind: "ship", phase: "held", dispatched_at: iso(60) };
+		return { job_id, project, kind: "ship", phase: "held", ...(job_id === "cp-orphan" ? {} : { dispatched_at: iso(60) }) };
 	}) });
 	put("skills/teach/SKILL.md", "---\ndescription: Explain step by step\n---\n\n# Body\n");
 }
@@ -125,11 +125,13 @@ test("M3-composer-menu: the `/ command` and `@ job` chips prepare commands and a
 	const slash = await tab.find(".operator-composer-footer > .operator-composer-commands > .operator-composer-slash");
 	tab.click(slash);
 	const menu = await tab.find("#operator-composer-command-menu");
-	await tab.find("#operator-composer-command-menu button code", (c) => c.textContent === "cp-orphan");
-	assert.deepEqual([slash.getAttribute("aria-expanded"), menu.querySelectorAll("h3").length, [...menu.querySelectorAll("button code")].map((c) => c.textContent)],
-		["true", 2, ["/status", "/jobs", "/stop", "cp-live", "cp-other", "cp-orphan"]], "offline: commands, then the in-flight jobs");
+	await tab.find("#operator-composer-command-menu button code", (c) => c.textContent === "@cp-orphan");
+	assert.deepEqual([slash.getAttribute("aria-expanded"), [...menu.querySelectorAll("h3")].map((h) => h.textContent), [...menu.querySelectorAll("button code")].map((c) => c.textContent)],
+		["true", ["Commands", "Jobs"], ["/status", "/jobs", "/stop", "@cp-live", "@cp-other", "@cp-orphan"]], "offline: commands, then the in-flight jobs");
+	// Frames 4/10: status and recorded elapsed; cp-orphan records no dispatch, so its time is left out, never 0m.
+	assert.deepEqual([...menu.querySelectorAll("button small")].slice(3).map((s) => s.textContent), ["Held · 1h 0m", "Held · 1h 0m", "Held"], "job row details");
 	assert.doesNotMatch(menu.textContent!, /\/thread/);
-	tab.click([...menu.querySelectorAll("button")].find((b) => b.textContent!.startsWith("cp-orphan"))!);
+	tab.click([...menu.querySelectorAll("button")].find((b) => b.textContent!.startsWith("@cp-orphan"))!);
 	await tab.find("#operator-composer-command-menu p[role=status]", (p) => /cp-orphan has no recorded project to reference/.test(p.textContent!));
 	assert.equal(n(tab, ".evidence-chip"), 0, "no reference is invented without the ledger's project");
 	assert.equal(tab.key(slash, "Escape").defaultPrevented, true);
@@ -147,11 +149,11 @@ test("M3-composer-menu: the `/ command` and `@ job` chips prepare commands and a
 	tab.go(`${CHAT}&project=atlas`);
 	await tab.find(".session-filter select option[selected][value=atlas]");
 	tab.click(slash);
-	await tab.find("#operator-composer-command-menu button code", (c) => c.textContent === "cp-other");
-	assert.deepEqual(tab.$$("#operator-composer-command-menu button code").map((c) => c.textContent), ["/status", "/jobs", "/stop", "cp-other"], "M1 narrows the jobs");
+	await tab.find("#operator-composer-command-menu button code", (c) => c.textContent === "@cp-other");
+	assert.deepEqual(tab.$$("#operator-composer-command-menu button code").map((c) => c.textContent), ["/status", "/jobs", "/stop", "@cp-other"], "M1 narrows the jobs");
 	tab.click(tab.$(".operator-composer-at")!);
-	await until(() => tab.$$("#operator-composer-command-menu h3").map((h) => h.textContent).join(), (h) => h === "Reference a job", "`@ job`: the jobs only");
-	tab.click(tab.$$("#operator-composer-command-menu button").find((b) => b.textContent!.startsWith("cp-other"))!);
+	await until(() => tab.$$("#operator-composer-command-menu h3").map((h) => h.textContent).join(), (h) => h === "Jobs", "`@ job`: the jobs only");
+	tab.click(tab.$$("#operator-composer-command-menu button").find((b) => b.textContent!.startsWith("@cp-other"))!);
 	const chip = await tab.find(".evidence-chip summary");
 	assert.match(chip.textContent!, /cp-other/);
 	assert.deepEqual(JSON.parse([...storage].find(([k]) => k.startsWith("cp-composer-ref:"))![1]), { kind: "job", project: "atlas", job_id: "cp-other" }, "the job page's own reference");
@@ -183,6 +185,9 @@ test("M3-composer-menu: the `/ command` and `@ job` chips prepare commands and a
 	assert.match(rule(".operator-composer"), /padding-left:10px;padding-right:10px;padding:12px max\(28px,calc\(\(100% - 664px\) ?\/ ?2\)\) 16px$/,
 		"10 px phone sides; from 900 px the 720 px column's 28 px sides");
 	assert.match(rule(".operator-composer-box"), /gap:12px;padding:14px 12px 10px 16px;background:var\(--surface\)/, "the design box's 14/12/10/16 padding");
+	// One focus ring (dc-20261104054137-77cdca05): the box's --focus border, never the global outline on its field too.
+	assert.deepEqual([rule(".operator-composer-box textarea:focus-visible"), rule(".operator-composer-box:focus-within")], ["outline:none", "border-color:var(--focus);border-color:var(--focus)"],
+		"the focused field draws no outline; the box border is --focus on phone and desktop");
 	// Full match S1 (frames 6, 10): below 900 px the field takes the card's whole top row and the controls a row below.
 	// Negative control: restoring the single phone row (row box, `display:contents` footer, `order`) fails this.
 	assert.match(rule(".operator-composer-box"), /;flex-direction:column;align-items:stretch;[^;]*;padding:8px 6px 6px 14px;.*border-radius:18px;flex-direction:column;/,
@@ -205,7 +210,7 @@ test("M3-composer-attachments: an attached image and the draft survive a prepare
 	const thumbs = () => tab.$$(".operator-composer-thumb").map((el) => el.getAttribute("src"));
 	const [image] = await until(thumbs, (s) => s.length === 1, "the uploaded thumbnail");
 	const slash = tab.$(".operator-composer-slash")!;
-	const job = (id: string) => tab.find("#operator-composer-command-menu button", (b) => b.textContent!.startsWith(id));
+	const job = (id: string) => tab.find("#operator-composer-command-menu button", (b) => b.textContent!.startsWith(`@${id}`));
 
 	tab.click(slash);
 	tab.click(await tab.find("#operator-composer-command-menu button", (b) => b.textContent!.startsWith("/status")));

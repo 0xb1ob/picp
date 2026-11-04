@@ -46,8 +46,8 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
  const [text,setText] = useState(linked ? "" : (draft ?? "").slice(0, CONTROL_TEXT_MAX));
  const [attached,setAttached] = useState<EvidenceReference | null>(null);
  const [confirmAbort,setConfirmAbort] = useState(false);
- // Full match S6: the prepared command beside the text draft; its client_id is the one idempotency key for its Submits.
- const [command,setCommand] = useState<{name: "status" | "stop"; job?: string; client_id: string; error?: string; sending?: true} | null>(null);
+ // Full match S6: the prepared command beside the text draft; its client_id keys its Submits (see `submit`).
+ const [command,setCommand] = useState<{name: "status" | "stop"; job?: string; client_id: string; error?: string; sending?: true; sticky?: true} | null>(null);
  const [attachments,setAttachments] = useState<Attachment[]>([]);
  // `@skill` autocomplete: the catalogue (fetched on the first `@`), the caret, the highlighted option, and Escape's close.
  const [catalog,setCatalog] = useState<SkillCatalog | null>(null);
@@ -162,7 +162,12 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
   submitting.current = true;
   setCommand({...prepared, sending: true, error: undefined});
   void control.command({kind: "command", command: prepared.name, ...(prepared.job ? {job_id: prepared.job} : {}), client_id: prepared.client_id})
-   .then(error => { submitting.current = false; setCommand(error === null ? null : {...prepared, error}); });
+   .then(refusal => {
+    submitting.current = false;
+    // A definite refusal injected nothing, so the retry takes a fresh id; once an outcome was unknown, the id stays.
+    const keep = prepared.sticky || refusal?.unknown;
+    setCommand(refusal === null ? null : {...prepared, error: refusal.error, ...(keep ? {sticky: true} : {client_id: newClientId()})});
+   });
  };
  const choose = (i: number) => { if (commands.length) run(commands[i]!.name); else pick(matches[i]!.name); };
  const closeMenu = () => { if (menu.current) menu.current.open = false; setConfirmAbort(false); };

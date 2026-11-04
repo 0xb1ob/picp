@@ -38,7 +38,7 @@ export function readPendingSends(stateDir: string, now = new Date(), session = o
    if (!line || typeof line.id !== "string" || !DASHBOARD_ID_RE.test(line.id)) continue;
    if ((line.type === "request" && line.kind === "message") || line.type === "held") {
     if (typeof line.text !== "string" || typeof line.at !== "string" || !Number.isFinite(Date.parse(line.at)) || sends.has(line.id)) continue;
-    sends.set(line.id, {id:line.id,at:line.at,state:line.type === "held" ? "held" : "queued",reason:null,ask_id:typeof line.ask_id === "string" ? line.ask_id : null,
+    sends.set(line.id, {id:line.id,at:line.at,state:line.type === "held" ? "held" : "queued",reason:null,ask_id:typeof line.ask_id === "string" ? line.ask_id : null,...(typeof line.command === "string" ? {command:line.command} : {}),
      body:{kind:"message",text:stripSkillLines(line.text),...(line.deliver === "followUp" || line.deliver === "steer" ? {deliver:line.deliver} : {}),...(Array.isArray(line.images) && line.images.every(id=>typeof id === "string") ? {images:line.images} : {}),...(Array.isArray(line.files) && line.files.every(id=>typeof id === "string") ? {files:line.files} : {})}});
     if (line.type === "request") targets.set(line.id, {since:typeof line.session_started_at === "string" ? line.session_started_at : undefined,file:typeof line.session_file === "string" ? line.session_file : undefined});
     if (line.type === "held") accepted.add(line.id);

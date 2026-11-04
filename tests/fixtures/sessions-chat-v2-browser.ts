@@ -302,7 +302,7 @@ try {
 			for (const stream of streams) stream.write("event: refresh\ndata: overview\n\n");
 			return send(200, "application/json", "{}");
 		}
-		if ((S5 || S7) && path === "/api/workspace/status") return send(200, "application/json", JSON.stringify(stale ? status(3 * 1440, null) : status(12, 58)));
+		if ((S5 || S7 || S6) && path === "/api/workspace/status") return send(200, "application/json", JSON.stringify(stale ? status(3 * 1440, null) : status(12, 58)));
 		// Full match S7: the recorded head moves to the oversized commit or an absent object; /api/diff is the real viewer's.
 		if (S7 && path.startsWith("/fixture/diff-")) {
 			diffAt(path === "/fixture/diff-big" ? diffShas.big! : path === "/fixture/diff-gone" ? "f".repeat(40) : diffShas.head!);
@@ -587,7 +587,7 @@ try {
 		// S6: /status prepares a command for an explicit Submit instead of drafting text.
 		const status: Step = [`[...document.querySelectorAll("#operator-composer-command-menu button")].find(b => b.textContent.startsWith("/status")).click()`,
 			`document.querySelector(".operator-composer-command code")?.textContent === "/status"`];
-		const refer: Step = [`[...document.querySelectorAll("#operator-composer-command-menu button")].find(b => b.textContent.startsWith("${JOB}")).click()`, `!!document.querySelector(".evidence-chip")`];
+		const refer: Step = [`[...document.querySelectorAll("#operator-composer-command-menu button")].find(b => b.textContent.startsWith("@${JOB}")).click()`, `!!document.querySelector(".evidence-chip")`];
 		const fits: Step = ["true", `[...document.querySelectorAll(".operator-composer-slash, #operator-composer-command-menu button, .operator-composer-skills [role=option]")]
 			.filter(e => e.getClientRects().length).every(e => { const r = e.getBoundingClientRect(); return (innerWidth >= 900 || r.height >= 44) && r.top >= 0 && r.left >= -0.5 && r.right <= innerWidth + 0.5; })`];
 		const shots4: [string, number, number, Step[]][] = [
@@ -1017,7 +1017,8 @@ try {
 	}
 	if (stage === "full-match-commands") {
 		// Full match S6 (frames 4/10). Negative controls: a surface/padding-4 menu fails `menu`, 44 px desktop rows `rows`,
-		// a `#` chip `chips`, a pick that sends `posts`, a draft dropped after the refusal `draft`, a neutral `working`.
+		// a `#` chip `chips`, a pick that sends `posts`, a draft dropped after the refusal `draft`, a neutral `working`,
+		// bare ids or a 0m `jobs`, a second outline on the focused field `ring`.
 		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
 			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
 			const cs = s => q(s) && getComputedStyle(q(s)), menu = cs("#operator-composer-command-menu"), h3 = cs("#operator-composer-command-menu h3"), send = q(".operator-composer-send");
@@ -1029,6 +1030,9 @@ try {
 				prepared: q(".operator-composer-command code")?.textContent ?? null, state: q(".operator-composer-command > span")?.textContent ?? null,
 				error: q(".operator-composer-command [role=alert]")?.textContent ?? null, send: send ? send.getAttribute("aria-label") + (send.disabled ? " disabled" : "") : null,
 				draft: q(".operator-composer textarea")?.value.length ?? null, working: cs(".workspace-jobs-status-working")?.color ?? null,
+				jobs: all("#operator-composer-command-menu li button").filter(b => b.querySelector("code").textContent.startsWith("@")).slice(0, 3).map(b => b.querySelector("code").textContent + " " + b.querySelector("small").textContent).join(),
+				ring: (t => { if (!t) return null; const p = document.createElement("i"); p.style.color = "var(--focus)"; document.body.append(p); const focus = getComputedStyle(p).color; p.remove();
+					return [document.activeElement === t, getComputedStyle(t).outlineStyle, getComputedStyle(q(".operator-composer-box")).borderTopColor === focus].join(" "); })(q(".operator-composer textarea")),
 				measure: { menu: box("#operator-composer-command-menu"), h3: box("#operator-composer-command-menu h3"), row: box("#operator-composer-command-menu button"),
 					at: box(".operator-composer-at"), slash: box(".operator-composer-slash"), command: box(".operator-composer-command"), send: box(".operator-composer-send") },
 				small: innerWidth < 900 ? all(".operator-composer-at, .operator-composer-slash, #operator-composer-command-menu button, .operator-composer-command-remove, .operator-composer-send")
@@ -1043,19 +1047,23 @@ try {
 			`!!document.querySelector(".operator-composer-command code")`];
 		const job: Step = [`document.querySelector("#operator-composer-command-menu button").click()`, `/^\\/stop cp-/.test(document.querySelector(".operator-composer-command code")?.textContent ?? "")`];
 		const submit: Step = [`document.querySelector(".operator-composer-send").click()`, `!!document.querySelector(".operator-composer-command [role=alert]")`];
+		const rest: Step = [`document.activeElement?.blur()`, `document.activeElement === document.body`];
+		const focus: Step = [`document.querySelector(".operator-composer textarea").focus()`, `document.activeElement === document.querySelector(".operator-composer textarea")`];
 		const open: Step = [`(() => { document.querySelector(".workspace-jobs-open").click(); setTimeout(() => document.activeElement?.blur(), 0); })()`,
 			`!!document.querySelector(".workspace-jobs[open] .workspace-jobs-row") && document.activeElement === document.body`];
-		const commands = "/status,/jobs,/stop", green = "rgb(95, 211, 154)";
+		const commands = "/status,/jobs,/stop", green = "rgb(95, 211, 154)", live = "@cp-transcript-steps-t7ah Working · 9m,@cp-held-review-k2pq Held · 1h 2m";
+		const rowsD = `${live},@cp-sessions-v2-m4xq Done 15:47`;
 		const menuD = { menu: "rgb(27, 27, 27) 6px 12px", head: "11px rgb(138, 138, 138) uppercase", commands, rows: "36", inset: 10, chips: "@ job 28,/ command 28", outside: false };
 		const refused = "unsupported: this session's cp-bridge predates dashboard commands; restart the session (⋮ → Restart session) or send the text as a message";
-		// The committed six: menu-desktop/phone, stop-desktop, prepared-phone, refused-desktop, jobs-desktop.
+		// Committed: desktop-menu, phone-menu, stop-target, prepared-phone, refused, focused-composer; jobs-desktop measures.
 		const shotsC: [string, number, number, Step[], object][] = [
-			["menu-desktop", 1440, 1000, [draft, slash], { ...menuD, heads: "Commands,Reference a job", draft: long.length }],
-			["menu-phone", 390, 844, [draft, slash], { ...menuD, rows: "52", inset: 12, chips: "@ 44,/ 44", heads: "Commands,Reference a job", draft: long.length, small: "" }],
-			["stop-desktop", 1440, 1000, [draft, slash, pick("stop")], { heads: "Stop which job?", prepared: "/stop", state: "Pick the job to stop with @ job", send: "Submit /stop disabled", outside: false }],
-			["prepared-phone", 390, 844, [draft, slash, pick("stop"), job], { heads: "", prepared: "/stop cp-transcript-steps-t7ah", state: "Submit sends it to the operator once",
-				send: "Submit /stop", draft: long.length, small: "", outside: false }],
-			["refused-desktop", 1440, 1000, [draft, slash, pick("status"), submit], { prepared: "/status", error: refused, send: "Submit /status", draft: long.length, outside: false }],
+			["desktop-menu", 1440, 1000, [draft, slash], { ...menuD, heads: "Commands,Jobs", jobs: rowsD, draft: long.length }],
+			["phone-menu", 390, 844, [draft, slash], { ...menuD, rows: "52", inset: 12, chips: "@ 44,/ 44", heads: "Commands,Jobs", jobs: rowsD, draft: long.length, small: "" }],
+			["stop-target", 1440, 1000, [draft, slash, pick("stop")], { heads: "Stop which job?", jobs: live, prepared: "/stop", state: "Pick the job to stop with @ job", send: "Submit /stop disabled", outside: false }],
+			["prepared-phone", 390, 844, [draft, slash, pick("stop"), job, rest], { heads: "", prepared: "/stop cp-transcript-steps-t7ah", state: "Submit sends it to the operator once",
+				send: "Submit /stop", draft: long.length, small: "", ring: "false none false", outside: false }],
+			["refused", 1440, 1000, [draft, slash, pick("status"), submit, rest], { prepared: "/status", error: refused, send: "Submit /status", draft: long.length, ring: "false none false", outside: false }],
+			["focused-composer", 1440, 1000, [focus], { ring: "true none true", outside: false }],
 			["jobs-desktop", 1440, 1000, [open], { working: green, outside: false }],
 		];
 		for (const [name, width, height, run, want] of shotsC) {

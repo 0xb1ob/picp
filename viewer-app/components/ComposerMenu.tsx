@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { EvidenceReference } from "../../src/evidence-reference.ts";
-import type { JobResponse, JobsResponse } from "../../src/viewer/api-types.ts";
-import { phaseText } from "../format.ts";
+import type { JobResponse, JobsResponse, ViewerJob } from "../../src/viewer/api-types.ts";
+import { elapsed, phaseText, time } from "../format.ts";
 import { matchesProject, type ProjectSelection } from "../project-filter.ts";
 import { inFlight, tagOf } from "../screens/Jobs.tsx";
 import { useScreenData } from "../use-screen-data.ts";
@@ -31,6 +31,12 @@ async function jobReference(id: string): Promise<EvidenceReference | string> {
 }
 
 type Mode = "all" | "jobs";
+/** Frames 4/10: `Working · 9m` while in flight, `Done 14:27` once finished; a missing time is left out, never 0m. */
+const jobDetail = (job: ViewerJob) => {
+ const status = phaseText(job.phase), label = status[0]!.toUpperCase() + status.slice(1);
+ if (job.finished_at) return `${label} ${time(job.finished_at)}`;
+ return job.elapsed_seconds === null || job.elapsed_seconds === undefined ? label : `${label} · ${elapsed(job.elapsed_seconds)}`;
+};
 function Panel({selection, mode, target, note, pending, onCommand, onPick}: {selection: ProjectSelection; mode: Mode; target: boolean; note: string | null; pending: string | null; onCommand: (name: Command) => void; onPick: (id: string) => void}) {
  const resource = useScreenData<JobsResponse>("/api/jobs", "/api/stream?view=jobs");
  const jobs = (resource.data?.jobs ?? []).filter(j => matchesProject(tagOf(j.project), selection));
@@ -39,11 +45,11 @@ function Panel({selection, mode, target, note, pending, onCommand, onPick}: {sel
  return <div id="operator-composer-command-menu" class="operator-composer-command-menu" role="group" aria-label={target ? "Stop which job" : mode === "jobs" ? "Job references" : "Commands and job references"}>
   {mode === "all" && !target && <><h3>Commands</h3>
   <ul>{COMMANDS.map(c => <li key={c.name}><button type="button" onClick={() => onCommand(c.name)}><code>/{c.name}</code><small>{c.detail}</small></button></li>)}</ul></>}
-  <h3>{target ? "Stop which job?" : "Reference a job"}</h3>
+  <h3>{target ? "Stop which job?" : "Jobs"}</h3>
   {note && <p role="status">{note}</p>}
   {!resource.data ? <p role="status">{resource.error ? "Jobs unavailable" : "Loading"}</p>
    : !shown.length ? <p>{target ? "No jobs in flight" : "No jobs in flight or done today"}</p>
-   : <ul>{shown.map(j => <li key={j.id}><button type="button" disabled={pending !== null} aria-busy={pending === j.id} onClick={() => onPick(j.id)}><code title={j.id}>{j.id}</code><small>{pending === j.id ? "Attaching…" : phaseText(j.phase)}</small></button></li>)}</ul>}
+   : <ul>{shown.map(j => <li key={j.id}><button type="button" disabled={pending !== null} aria-busy={pending === j.id} onClick={() => onPick(j.id)}><code title={j.id}>@{j.id}</code><small>{pending === j.id ? "Attaching…" : jobDetail(j)}</small></button></li>)}</ul>}
  </div>;
 }
 

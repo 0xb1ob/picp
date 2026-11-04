@@ -29,13 +29,13 @@ export const newClientId = (at = new Date().toISOString()): string =>
 export type ControlStatus = ControlStatusResponse | {error: string};
 export interface Delivery { id: string | null; state: "sending" | "queued" | "delivered" | "held" | "failed"; reason: string | null; ask_id: string | null }
 /** cp-y43c — `editable`: the dashboard still holds it; `edited`: a saved text the status has not confirmed yet; `sent`: the bridge said it was handed over, so no status read makes it editable again. */
-export interface PendingSend extends Delivery { key: string; at: string; body: ControlMessageBody; editable?: boolean; edited?: string; sent?: true; target_session?: string }
+export interface PendingSend extends Delivery { key: string; at: string; body: ControlMessageBody; editable?: boolean; edited?: string; sent?: true; target_session?: string; command?: string }
 /** cp-y43c Edit/Cancel outcome: saved, already sent (the text the session got), or refused. */
 export type QueueOutcome = { state: "queued" | "cancelled" } | { state: "sent"; text: string } | { error: string };
 /** Start session: offline → starting (polling the status) → running, or failed with the reason. */
 export interface Starting { state: "starting" | "running" | "failed"; reason: string | null; via?: Launcher }
 /** `send`'s `ask_id` ties a free-text reply to its decision card; an answer body carries its own. `upload` only while the session takes images; `skills` (the `@` catalogue, fetched once) only while control is ready. */
-export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; pending?: PendingSend[]; pending_error?: string; retry?(key: string): void; discard?(key: string): void; edit?(key: string, text: string): Promise<QueueOutcome>; cancel?(key: string): Promise<QueueOutcome>; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(fresh?: boolean): void; upload?(file: File): Promise<OperatorUploadResponse | {error: string}>; skills?(): Promise<SkillsResponse | {error: string}>; command?(body: ControlCommandBody): Promise<string | null> }
+export interface ControlView { status: ControlStatus | null; delivery: Delivery | null; pending?: PendingSend[]; pending_error?: string; retry?(key: string): void; discard?(key: string): void; edit?(key: string, text: string): Promise<QueueOutcome>; cancel?(key: string): Promise<QueueOutcome>; send(body: ControlBody, ask_id?: string): void; starting?: Starting | null; start?(via: Launcher, resume?: boolean): void; restarting?: Restarting | null; restart?(fresh?: boolean): void; upload?(file: File): Promise<OperatorUploadResponse | {error: string}>; skills?(): Promise<SkillsResponse | {error: string}>; command?(body: ControlCommandBody): Promise<{error: string; unknown: boolean} | null> }
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export async function failure(response: Response): Promise<string> {
