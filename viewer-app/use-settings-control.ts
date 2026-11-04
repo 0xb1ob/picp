@@ -29,7 +29,8 @@ export function useSettingsControl(fetcher: Fetch = (url, init) => fetch(url, in
   });
   return () => { controller.abort(); clearTimeout(retry); };
  }, [generation]);
- // Writes run one at a time, each on the revision the previous one left, so a click in another section is never dropped.
+ // Writes run one at a time, each on the revision the previous one left,
+ // so a click in another section is never dropped.
  const send = async (body: {changes: Drafts} | RestoreSelector, token: string): Promise<boolean> => {
   if (!revision.current) return false;
   const result = await writeSettings(fetcher, token, revision.current, body);
