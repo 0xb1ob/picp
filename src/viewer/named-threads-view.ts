@@ -8,7 +8,10 @@ import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import type { NamedThread, SessionEntry, ThreadBinding, ThreadsResponse } from "./api-types.ts";
 import { DASHBOARD_ID_RE } from "./control-files.ts";
-import { THREAD_AT_SOURCE, THREAD_BIND_KINDS, THREAD_ID_SOURCE, THREAD_KEY_ID_MAX, THREAD_NAME_MAX, THREADS_MAX_BYTES, THREADS_MAX_LINES, THREADS_VERSION } from "../contracts/thread-limits.ts";
+import { THREAD_AT_SOURCE, THREAD_BIND_KINDS, THREAD_ID_SOURCE, THREAD_JOINS_MAX, THREAD_KEY_ID_MAX, THREAD_NAME_MAX, THREADS_MAX_BYTES, THREADS_MAX_LINES, THREADS_VERSION } from "../contracts/thread-limits.ts";
+
+/** The S10b join cap, re-exported: this is the viewer's one reader of the thread limits (viewer-boundary). */
+export { THREAD_JOINS_MAX };
 
 const THREAD_ID_RE = new RegExp(`^${THREAD_ID_SOURCE}$`);
 const CONTROL_CHAR = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;

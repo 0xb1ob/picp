@@ -7076,15 +7076,19 @@ untagged.
   written once by `ledger.create` and never by update, claim, close, notes or labels. A duplicate create (same
   project+title or `external_ref`) returns the existing job unchanged, so another thread's intake never rebinds it. A
   record without `origin` (every older ledger) reads untagged.
-- **Inheritance.** `cp_pipeline start` tags its research job and the ship inherits the research job's origin. A job
-  created with no `source_send_id` (after-merge deploys, mandates, schedules, plain `cp_job create`) is untagged.
+- **Inheritance.** `cp_pipeline start` tags its research job and the ship inherits the research job's origin; an
+  after-merge deploy job inherits its merged job's origin (`src/after-merge.ts`), a self-review member its run anchor's
+  (`src/schedule-self-review.ts`). Promotions, continuations and repairs reuse their job, so it keeps its origin. A job
+  with no parent and no `source_send_id` (mandate objective jobs, schedule anchors, plain `cp_job create`) is untagged.
 - **Joins.** `GET /api/threads` adds `joins: [{thread_id, jobs, asks, started_from_chat, omitted}]`, one per registry
   thread (`src/viewer/thread-joins.ts`). Jobs join by ledger `origin.thread_id`, asks by `source.thread_id` (an answer
   goes with its ask by id); a `job`/`ask` registry `bind` that disagrees makes the record multi-origin. Started from chat
   lists jobs whose origin names a `delivered` dashboard send, with `{job_id, title, state, created_at, source_send_id}`.
-  Each list is newest first, capped at 100, with `omitted` counting the rest.
-- **Ambiguity stays untagged.** A multi-origin, malformed or unknown-thread record joins no thread; `join_diagnostics:
-  {multi_origin, unknown_thread, malformed, unreadable}` counts it, and names a ledger, asks or journal it could not read.
+  Each list is newest first, capped at `THREAD_JOINS_MAX` (100, `src/contracts/thread-limits.ts`), with `omitted`
+  counting the rest; there is no paging.
+- **Ambiguity stays untagged.** A multi-origin, malformed or unknown-thread record joins no thread (a malformed origin
+  not even through a registry `bind`); `join_diagnostics: {multi_origin, unknown_thread, malformed, unreadable}` counts
+  it, and names a ledger, asks or journal it could not read.
 - **No authority.** An origin grants no mandate, decision, risk or merge, and appears in no label or path.
 
 ### Remote devices (remote dashboard PR 1)

@@ -7,13 +7,10 @@ import { join } from "node:path";
 import type { StartedFromChat, ThreadJoinDiagnostics, ThreadJoins, ThreadMember, ThreadsResponse } from "./api-types.ts";
 import { DASHBOARD_ID_RE } from "./control-files.ts";
 import { readQueueJournal } from "./control-queue.ts";
-import { isThreadId, threadsView } from "./named-threads-view.ts";
+import { isThreadId, THREAD_JOINS_MAX, threadsView } from "./named-threads-view.ts";
 import { asks } from "./overview-decisions.ts";
 import { objectList } from "./overview-read.ts";
 import { obj, runtimeRoot, type Json, type ViewerState } from "./sessions.ts";
-
-/** Per thread and list; the rest is counted in `omitted`, never silently dropped. */
-export const THREAD_JOINS_MAX = 100;
 
 const origin = (value: unknown): { source_send_id: string; thread_id: string | null } | undefined => {
 	const o = obj(value);
@@ -54,7 +51,8 @@ export function threadsJoinedView(state: ViewerState, now = new Date()): Threads
 	};
 	for (const job of ledger.value as Json[]) {
 		const recorded = job.origin === undefined ? undefined : origin(job.origin);
-		if (job.origin !== undefined && !recorded) diagnostics.malformed += 1;
+		// A malformed origin is unresolvable: it joins no thread, even one a registry bind names.
+		if (job.origin !== undefined && !recorded) { diagnostics.malformed += 1; continue; }
 		const thread = threadOf("job", String(job.id), recorded?.thread_id);
 		if (!thread) continue;
 		const row: ThreadMember = { id: String(job.id), title: String(job.title ?? ""), state: String(job.status ?? ""), created_at: String(job.created_at ?? "") };
