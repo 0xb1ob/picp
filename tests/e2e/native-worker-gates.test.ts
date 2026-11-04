@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -76,6 +76,8 @@ test("G1: a research run's Bash cannot write the worktree or anywhere else; name
 			`find ${worktree} {-delete,}`,
 			`git log \${U:---output=${worktree}/f}`,
 			`sort -S 1 --compress-program=sh ${worktree}/README.md`,
+			`git grep --no-index -nOrm gates`,
+			`file -C -m /dev/null`,
 		];
 		const provider = await startClaudeMockProvider([
 			...writes.map(bash),
@@ -222,6 +224,8 @@ test("R1: Bash and Read never reach the settings env, /proc environ or the setti
 		const token = `synthetic-${randomBytes(12).toString("hex")}`;
 		const settings = join(root, "settings.json");
 		writeFileSync(settings, JSON.stringify({ env: { CP_SENTINEL_SECRET: secret, ANTHROPIC_AUTH_TOKEN: token } }));
+		// A planted link only a shell glob reaches: `cat <worktree>/*` would print the settings file through it.
+		symlinkSync(settings, join(worktree, "notes"));
 		const probes = [
 			bash("printenv"),
 			bash("env"),
@@ -231,6 +235,7 @@ test("R1: Bash and Read never reach the settings env, /proc environ or the setti
 			bash("grep -a SECRET /proc/self/environ"),
 			step("Read", { file_path: settings }),
 			bash(`cat ${settings}`),
+			bash(`cat ${worktree}/*`),
 		];
 		const provider = await startClaudeMockProvider([...probes, { kind: "text", text: "done" }]);
 		const result = await run(provider, { userSettings: settings });
@@ -238,7 +243,7 @@ test("R1: Bash and Read never reach the settings env, /proc environ or the setti
 		const bodies = provider.requests.map((request) => JSON.stringify(request.body)).join("\n");
 		assert.equal(bodies.includes(secret) || bodies.includes(token), false, "a settings env value reached the model");
 		assert.equal(result.lockdown?.verdict, "ok", result.error);
-		assert.deepEqual(result.denials.map((denial) => denial.tool), ["Bash", "Bash", "Bash", "Bash", "Bash", "Bash", "Read", "Bash"]);
+		assert.deepEqual(result.denials.map((denial) => denial.tool), ["Bash", "Bash", "Bash", "Bash", "Bash", "Bash", "Read", "Bash", "Bash"]);
 
 		// The CLI scrub alone, no picp guard: CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 keeps the provider token out of Bash.
 		// It needs the OS sandbox (bwrap + socat); without socat every Bash call fails closed, so nothing prints either way.

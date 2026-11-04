@@ -1,29 +1,86 @@
 /**
  * N3a G1: the research run's Bash is deny-by-default. Only named read-only commands run; a redirect, a substitution,
- * an expansion, a subshell, a background job, an env assignment, an unknown command or a secret path is refused.
+ * an expansion, a glob, a subshell, a background job, an env assignment, an unknown command, an option off that
+ * command's allow-list or a secret path is refused.
  */
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-const READ_ONLY = new Set(["rg", "grep", "ls", "cat", "head", "tail", "wc", "pwd", "echo", "stat", "file", "diff", "basename", "dirname", "realpath", "find", "sort", "true"]);
-const GIT_READ = new Set(["log", "show", "diff", "status", "rev-parse", "ls-files", "blame", "grep", "cat-file"]);
+/** Options a command accepts: letters, letters taking a value, long (or find primary) names, names taking a value. */
+type Options = { short?: string; shortValue?: string; long?: readonly string[]; longValue?: readonly string[]; digits?: boolean };
+
+// Allow-lists, not deny-lists: an option that runs a program, writes a file or opens a pager is never added here.
+const READ_ONLY: Record<string, Options> = {
+	rg: {
+		short: "nilcwFSsvU", shortValue: "egtABCm",
+		long: ["--files", "--hidden", "--json"], longValue: ["--glob", "--type", "--max-count"],
+	},
+	grep: { short: "nirlLcEFwvxhHosq", shortValue: "ABCem" },
+	ls: { short: "laAhR1tSdrF" },
+	cat: { short: "n" },
+	head: { shortValue: "nc", digits: true },
+	tail: { shortValue: "nc", digits: true },
+	wc: { short: "lwcm" },
+	sort: { short: "nrufhV", shortValue: "kt" },
+	find: {
+		long: ["-print", "-not", "-o", "-a", "-and", "-or"],
+		longValue: ["-name", "-iname", "-type", "-path", "-ipath", "-maxdepth", "-mindepth", "-size", "-mtime", "-newer"],
+	},
+	stat: { short: "Lt", shortValue: "c", longValue: ["--format"] },
+	diff: { short: "uqrNwbBiy", shortValue: "U" },
+	echo: { short: "neE" },
+	basename: { short: "a", shortValue: "s" },
+	dirname: {},
+	realpath: { short: "emsqLP" },
+	pwd: {},
+	true: {},
+};
+const GIT_PRETTY = ["--oneline", "--stat", "--name-only", "--name-status", "--no-ext-diff", "--no-textconv"];
+const GIT_READ: Record<string, Options> = {
+	log: { short: "p", shortValue: "n", digits: true, long: GIT_PRETTY, longValue: ["--since", "--until", "--author", "--format", "--pretty"] },
+	show: { short: "s", long: [...GIT_PRETTY, "--no-patch"], longValue: ["--format", "--pretty"] },
+	diff: { shortValue: "U", long: [...GIT_PRETTY, "--cached", "--staged"] },
+	status: { short: "sb", long: ["--short", "--porcelain", "--branch"] },
+	"ls-files": {},
+	blame: { short: "w", shortValue: "L" },
+	"rev-parse": { long: ["--abbrev-ref", "--short", "--show-toplevel", "--git-dir"] },
+	"cat-file": { short: "ptse" },
+	grep: { short: "nilcwFEv", shortValue: "e", long: ["--name-only", "--no-index"] },
+};
 const GH_NOUNS = new Set(["pr", "issue", "run", "repo", "release"]);
 const GH_READ = new Set(["view", "list", "diff", "checks", "status"]);
-/** Flags that make an otherwise read-only command write a file or run another program; long ones match any prefix. */
-const WRITE_OR_EXEC_FLAGS: Record<string, { short?: RegExp; long: readonly string[] }> = {
-	find: { long: ["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"] },
-	sort: { short: /^-[a-zA-Z]*[oT]/, long: ["--output", "--compress-program", "--temporary-directory"] },
-	rg: { long: ["--pre", "--hostname-bin"] },
-	git: { short: /^-O/, long: ["--output", "--open-files-in-pager", "--ext-diff", "--textconv"] },
+const GH_OPTIONS: Options = {
+	shortValue: "qRLs", long: ["--comments", "--log", "--log-failed", "--name-only", "--patch"],
+	longValue: ["--json", "--jq", "--repo", "--limit", "--state"],
 };
 
-function writeOrExecFlag(name: string, arg: string): boolean {
-	const flags = WRITE_OR_EXEC_FLAGS[name];
-	if (flags === undefined) return false;
-	if (flags.short?.test(arg) === true) return true;
-	const key = arg.split("=")[0] ?? "";
-	// GNU getopt and git take any unambiguous long-option prefix, so `--compress=sh` is `--compress-program=sh`.
-	return name === "find" ? flags.long.includes(key) : key.startsWith("--") && key.length > 2 && flags.long.some((flag) => flag.startsWith(key));
+/** A table's own entry, so a prototype key such as `constructor` is never a command. */
+function own(table: Record<string, Options>, key: string): Options | undefined {
+	return Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
+/** The first option in `args` that `options` does not name, as written; GNU tools and git bundle short letters. */
+function unlistedOption(options: Options, args: readonly string[], primaries: boolean): string | undefined {
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i] as string;
+		if (arg === "--" && !primaries) return undefined;
+		if (!arg.startsWith("-") || arg === "-" || (options.digits === true && /^-\d+$/.test(arg))) continue;
+		if (primaries || arg.startsWith("--")) {
+			const key = arg.split("=")[0] as string;
+			if (options.longValue?.includes(key) === true) i += arg.includes("=") ? 0 : 1;
+			else if (options.long?.includes(key) !== true) return key;
+			continue;
+		}
+		for (let j = 1; j < arg.length; j++) {
+			const letter = arg[j] as string;
+			if (options.shortValue?.includes(letter) === true) {
+				i += j === arg.length - 1 ? 1 : 0;
+				break;
+			}
+			if (options.short?.includes(letter) !== true) return `-${letter}`;
+		}
+	}
+	return undefined;
 }
 
 /** Paths no research tool reads: the passed settings file, the homes' Claude config, `/proc` and `/dev/fd`. */
@@ -113,8 +170,11 @@ function lex(command: string): Lexed {
 			if ((c === "&" || c === "|") && next === c) i++;
 			flush();
 			segments.push([]);
+		} else if (c === "*" || c === "?" || c === "[") {
+			// The shell expands a glob after this check, so an unquoted one could name a secret through a link.
+			return { denied: "an unquoted glob" };
 		} else {
-			word += c;
+			word += c === "$" && next === "?" ? `$${command[++i]}` : c;
 			inWord = true;
 		}
 	}
@@ -126,13 +186,20 @@ function lex(command: string): Lexed {
 function segmentRefusal(words: readonly string[], cwd: string, secrets: readonly string[]): string | undefined {
 	const [name = "", ...args] = words;
 	if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(name)) return "an env assignment";
-	if (args.some((arg) => writeOrExecFlag(name, arg))) return `\`${name}\` with a write or exec flag`;
 	const paths = args.flatMap((arg) => [arg, arg.slice(arg.indexOf("=") + 1), arg.startsWith("-") ? arg.slice(arg.indexOf("/")) : ""]);
 	if (paths.some((path) => path !== "" && secretPathIn(path, cwd, secrets))) return "a secret path (settings, Claude config, /proc or /dev/fd)";
-	if (READ_ONLY.has(name)) return undefined;
-	if (name === "git") return GIT_READ.has(args[0] ?? "") ? undefined : `\`git ${args[0] ?? ""}\``;
-	if (name === "gh") return GH_NOUNS.has(args[0] ?? "") && GH_READ.has(args[1] ?? "") ? undefined : `\`gh ${args.slice(0, 2).join(" ")}\``;
-	return `\`${name}\` (not on the read-only list)`;
+	const [sub = "", verb = ""] = args;
+	if (name === "git" || name === "gh") {
+		const known = name === "git" ? own(GIT_READ, sub) : GH_NOUNS.has(sub) && GH_READ.has(verb) ? GH_OPTIONS : undefined;
+		const label = name === "git" ? `git ${sub}` : `gh ${sub} ${verb}`;
+		if (known === undefined) return `\`${label}\``;
+		const option = unlistedOption(known, args.slice(name === "git" ? 1 : 2), false);
+		return option === undefined ? undefined : `\`${label}\` option \`${option}\` (not on its allow-list)`;
+	}
+	const known = own(READ_ONLY, name);
+	if (known === undefined) return `\`${name}\` (not on the read-only list)`;
+	const option = unlistedOption(known, args, name === "find");
+	return option === undefined ? undefined : `\`${name}\` option \`${option}\` (not on its allow-list)`;
 }
 
 /** Undefined when every part of `command`, run in `cwd`, is a named read-only command; else the refusal naming why. */

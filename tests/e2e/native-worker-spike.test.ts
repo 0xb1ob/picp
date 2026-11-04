@@ -17,7 +17,12 @@ const JOB = "cp-native-spike-e2e";
 test("native spike: one research run reports once, refuses bad reports, denies forbidden calls before they run, keeps host env out and records the exit",
 	{ skip: CLAUDE === undefined ? "claude is not on PATH" : false, timeout: 180_000 }, async () => {
 	const root = mkdtempSync(join(tmpdir(), "cp-native-spike-e2e-"));
-	const PARENT_KEYS = ["TMPDIR", "PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR"] as const;
+	const PARENT_KEYS = ["TMPDIR", "PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_HOST_SENTINEL"] as const;
+	// The driver's provider, config and DISABLE_* keys, plus the three the SDK itself adds; never a host one.
+	const CHILD_CLAUDE_KEYS = [
+		"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_AGENT_SDK_CLIENT_APP", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CONFIG_DIR",
+		"CLAUDE_AGENT_SDK_VERSION", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SDK_READS_SESSION_STATE",
+	];
 	const saved = Object.fromEntries(PARENT_KEYS.map((key) => [key, process.env[key]]));
 	const host = await startClaudeMockProvider([]);
 	try {
@@ -64,6 +69,7 @@ test("native spike: one research run reports once, refuses bad reports, denies f
 			ANTHROPIC_API_KEY: "host-api-key-sentinel",
 			ANTHROPIC_BASE_URL: host.url,
 			CLAUDE_CONFIG_DIR: join(root, "hosthome", ".claude"),
+			CLAUDE_CODE_HOST_SENTINEL: "host-claude-code-sentinel",
 		});
 		const result = await runClaudeSpike({
 			job: { job_id: JOB, delivery: "local", runDir: join(root, "run"), worktree, artifactPath },
@@ -106,10 +112,13 @@ test("native spike: one research run reports once, refuses bad reports, denies f
 		assert.ok(results.some((text) => text.includes("spike repo readme")), results.join("\n---\n"));
 		assert.equal(readFileSync(artifactPath, "utf8"), "# Findings\n\nok\n");
 
-		// (6) no host ANTHROPIC_* reached the child: an env probe is refused since N3a R1 (`buildChildEnv`'s unit test
-		// pins the allow-list), the host endpoint is never called and every request carries only the provider token.
+		// (6) no host ANTHROPIC_*/CLAUDE_* key reached the real spawn (keys only, never values), the host sentinel
+		// key included; the host endpoint is never called.
+		const hostKeys = (result.spawnedEnvKeys ?? []).filter((key) => /^(ANTHROPIC|CLAUDE)_/.test(key));
+		assert.deepEqual(hostKeys, [...CHILD_CLAUDE_KEYS].sort());
 		assert.match(reasons[4] ?? "", /^Bash: [\s\S]*`printenv` \(not on the read-only list\)/);
 		assert.equal(host.requests.length, 0);
+		assert.ok(!JSON.stringify(provider.requests.map((request) => request.body)).includes("host-api-key-sentinel"));
 		assert.ok(provider.requests.length > 0);
 		for (const request of provider.requests) {
 			assert.equal(request.apiKey, undefined);

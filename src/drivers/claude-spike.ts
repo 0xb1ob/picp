@@ -333,6 +333,8 @@ export interface SpikeResult {
 	sdkVersion: string;
 	/** What the SDK actually spawned; must be `claudePath`, never a bundled binary. */
 	spawnedCommand?: string;
+	/** The env keys (never values) the child was spawned with, sorted. */
+	spawnedEnvKeys?: string[];
 	/** Undefined only when no child was spawned. */
 	exit?: SpikeExit;
 	report?: Envelope;
@@ -401,6 +403,7 @@ async function runInScratch(
 	const models = new Set<string>();
 	let child: ChildProcess | undefined;
 	let spawnedCommand: string | undefined;
+	let spawnedEnvKeys: string[] | undefined;
 	let exited: Promise<Omit<SpikeExit, "killedByDriver">> | undefined;
 	let result: SDKResultMessage | undefined;
 	let initModel: string | undefined;
@@ -419,6 +422,7 @@ async function runInScratch(
 	}
 	const spawnClaudeCodeProcess = (spawnOptions: SpawnOptions) => {
 		spawnedCommand = spawnOptions.command;
+		spawnedEnvKeys = Object.keys(spawnOptions.env).filter((key) => spawnOptions.env[key] !== undefined).sort();
 		const proc = spawn(spawnOptions.command, spawnOptions.args, {
 			cwd: spawnOptions.cwd,
 			env: spawnOptions.env,
@@ -491,6 +495,7 @@ async function runInScratch(
 		claudeVersion: claude.version,
 		sdkVersion: sdkVersion(),
 		...(spawnedCommand === undefined ? {} : { spawnedCommand }),
+		...(spawnedEnvKeys === undefined ? {} : { spawnedEnvKeys }),
 		...(exit === undefined ? {} : { exit }),
 		...(state.accepted === undefined ? {} : { report: state.accepted }),
 		reportRefusals: state.refusals,

@@ -217,12 +217,15 @@ N3b, which must keep every layer below on.
   but `socat` is missing, and `sandbox: { enabled: true, failIfUnavailable: true }` fails closed at startup ("socat not
   installed"), so it is never silently unsandboxed but cannot run here. The OS sandbox needs `socat` and stays a later
   option; picp does not install it. The policy lexes the command and runs it only when every segment is a named
-  read-only command (`rg`, `grep`, `ls`, `cat`, `head`, `wc`, read-only `git` subcommands, `gh <noun> view|list|…`, and
-  similar). Refused: redirects (other than to `/dev/null` or fd dup), command substitution, every `$` expansion but
-  `$?` (`$NAME`, `${…}`, `$'…'`, `$"…"`, `$[…]`), unquoted braces and `~`, subshells, background jobs, env
-  assignments, unknown commands, and write/exec flags in any `=` or unambiguous-prefix form (`find -exec/-delete`,
-  `sort -o/-T/--compress-program`, `rg --pre/--hostname-bin`, `git -C/--output/-O/--ext-diff`). The Write tool stays
-  scoped to the artifact dir.
+  read-only command (`rg`, `grep`, `ls`, `cat`, `head`, `wc`, `sort`, `find`, read-only `git` subcommands,
+  `gh <noun> view|list|…`, and similar) using only options on that command's own allow-list: short clusters are
+  checked letter by letter (`git grep -nOrm` is refused at `O`) and long options match exactly, `=` form included;
+  `find` takes only its listed primaries. A deny-list of dangerous flags did not converge (`sort --compress-program`,
+  `rg --hostname-bin`, `git grep -O`, `file -C` each turned up in review), so nothing outside the lists runs and
+  `file` is gone. Also refused: redirects (other than to `/dev/null` or fd dup), command substitution, every `$`
+  expansion but `$?` (`$NAME`, `${…}`, `$'…'`, `$"…"`, `$[…]`), unquoted braces, `~` and globs (`*`, `?`, `[`: the
+  shell expands them after the check, so a planted link could name a secret), subshells, background jobs, env
+  assignments and unknown commands. The Write tool stays scoped to the artifact dir.
 - **R1, env and secret paths.** A passed settings file's `env` reaches the CLI and every Bash child, so it is kept out
   in layers: `printenv`, `cd`, `env`, `set`, `declare`, `export`, `typeset` and `compgen` are not on the list, `$`
   expansion is refused, and a secret-path guard refuses Read, Grep, Glob and Bash arguments that are, link to, or
@@ -230,7 +233,8 @@ N3b, which must keep every layer below on.
   `/proc` or `/dev/fd`. The existing guards do not match these paths (`workerHostGuard` covers ssh keys only), so the
   guard is new and sits beside them. The CLI's own `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` exists in 2.1.318 but runs
   Bash inside the same bwrap + `socat` sandbox: here every Bash call fails closed under it, so it is not set (it would
-  also stop the read-only commands G1 keeps). The e2e proves the scrub alone still keeps the provider token out.
+  also stop the read-only commands G1 keeps). The e2e proves the scrub alone still keeps the provider token out, and
+  the N2 spike e2e checks the env keys handed to the real spawn: no host `ANTHROPIC_*`/`CLAUDE_*` key reaches it.
 - **G2, resume and interrupt.** A resumed run keeps the session id, and its process restores the session's cumulative
   `modelUsage`; `spikeUsage` subtracts the prior run's ledger, so two runs of 2 model calls each count 24/14 and 24/14
   (48/28 for 4 calls, once). An `AbortSignal` interrupt during a tool_use turn exits `code 0`, not driver-killed,
@@ -240,7 +244,9 @@ N3b, which must keep every layer below on.
   and the SDK's hook listing with what picp passed; on any extra it aborts with a named refusal holding counts only.
   Every tool call waits on that verdict. Built-in agents are pinned by a digest of name and description, so a loaded
   agent reusing a built-in name counts as an extra; a CLI update that rewrites a built-in description refuses until
-  the pin is updated.
+  the pin is updated. Init cannot list empty skills, plugins and agents on 2.1.318, so only the CLI's own built-ins
+  (`builtin` flag, `path: "builtin"`, agent digest) are allowed; the operator accepted this narrowing
+  (ask-5e8f9aefe0df).
 - **G4, dependencies.** The SDK and `zod` are runtime `dependencies`; the 8 workspace stubs and their pin test stay.
 
 | Surface | picp passes | Allowed in init | Seen (fake / live) |
@@ -282,4 +288,4 @@ never opens it. Recommend an auth-only settings file for workers.
 | Lockdown check | 22–36 ms after init (fake cold start 390 ms) |
 | Live smoke (one run, before R1/R2) | exit 0, verdict ok, counts as in the table, no extras |
 | `node_modules` | 231 MB, unchanged (+39 MB over main before N2) |
-| Files | `claude-spike.ts` 517, `claude-bash-policy.ts` 144, `claude-lockdown.ts` 96, gates e2e 257 lines |
+| Files | `claude-spike.ts` 522, `claude-bash-policy.ts` 210, `claude-lockdown.ts` 96, gates e2e 262 lines |
