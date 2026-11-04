@@ -792,8 +792,8 @@ prepared command; a retry keeps its `client_id` unless the last answer proved no
 attachments. Picking a job otherwise attaches its own P1 reference (the `ask_reference` of `GET /api/job/<id>`, refused
 with the reason when it has no ledger project or the lookup is unsupported) as the composer's one chip. Not offered:
 `/thread` and `#` threads. `m3-composer` captures the menu, the typed list, `/status` and a reference at 1440, 900, 899
-and 390 px; `full-match-commands` captures frames 4 and 10, a `/stop` waiting for its job, the old-bridge refusal and the
-Jobs drawer's green Working label into `docs/tui-verification/full-match-commands/`.
+and 390 px; `full-match-commands` captures frames 4 and 10, a `/stop` waiting for its job, the old-bridge refusal, the
+focused composer's one ring and the Jobs drawer's green Working label into `docs/tui-verification/full-match-commands/`.
 
 Live PR and issue chips (Sessions chat): `GET /api/sessions` carries `pr_chips`, keyed by URL, built by
 `src/viewer/pr-chips.ts` from files the viewer already reads — fleet PR receipts and `bound_pr`, `merge.json`, the

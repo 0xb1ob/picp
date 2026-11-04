@@ -222,7 +222,8 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
   {ready && tooLong && <p role="alert" class="operator-composer-hint">Too long with the reference: shorten the question by {outgoing.length - CONTROL_TEXT_MAX} characters, or remove the reference</p>}
   {ready && command && <div class="operator-composer-command" role="group" aria-label="Prepared command">
    <code>/{command.name}{command.job ? ` ${command.job}` : ""}</code>
-   <span>{command.sending ? "Submitting…" : !status.running ? "Commands need a running operator session" : command.name === "stop" && !command.job ? "Pick the job to stop with @ job" : "Submit sends it to the operator once"}</span>
+   <span>{command.sending ? "Submitting…" : !status.running ? "Commands need a running operator session" : command.name === "stop" && !command.job ? "Pick the job to stop with @ job"
+    : command.sticky ? "It may already have been sent: check the transcript, or remove it and prepare it again" : "Submit sends it to the operator once"}</span>
    <button type="button" class="operator-composer-command-remove" aria-label="Remove the command" title="Remove" disabled={command.sending} onClick={() => setCommand(null)}><Icon name="close" size={14}/></button>
    {command.error && <p role="alert" class="operator-composer-failed">{command.error}</p>}
   </div>}

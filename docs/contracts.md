@@ -6594,7 +6594,7 @@ in order (a stale `thread` field is accepted and ignored; see Operator threads, 
 | body shape; text 1–16,000 characters | 400 |
 | the session's record exists | 503 `session not running: no dashboard control record at …` |
 | `x-cp-control-token` equals the record's `csrf` | 403 `control token missing or stale; reload the transcript` |
-| the socket answers within 5 s | 503 `session not running: … refused the connection (…)` / 504 |
+| the socket answers within 5 s | 503 `session not running: … refused the connection (…)` / 504 (no answer, or an answer that is not JSON) |
 | the session's own checks | 202 `{id, state, deliver}` (state `queued` or `delivered`), or 400/403/409/500/502 with the reason |
 
 `APP_CSP`, the Host guard (see Viewer Host guard), the push route and every read route are unchanged; a POST to any other `/api/*` route is

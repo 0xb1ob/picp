@@ -1055,7 +1055,7 @@ try {
 		const rowsD = `${live},@cp-sessions-v2-m4xq Done 15:47`;
 		const menuD = { menu: "rgb(27, 27, 27) 6px 12px", head: "11px rgb(138, 138, 138) uppercase", commands, rows: "36", inset: 10, chips: "@ job 28,/ command 28", outside: false };
 		const refused = "unsupported: this session's cp-bridge predates dashboard commands; restart the session (⋮ → Restart session) or send the text as a message";
-		// Committed: desktop-menu, phone-menu, stop-target, prepared-phone, refused, focused-composer; jobs-desktop measures.
+		// Committed: desktop-menu, phone-menu, stop-target, refused, focused-composer, jobs-desktop; prepared-phone measures.
 		const shotsC: [string, number, number, Step[], object][] = [
 			["desktop-menu", 1440, 1000, [draft, slash], { ...menuD, heads: "Commands,Jobs", jobs: rowsD, draft: long.length }],
 			["phone-menu", 390, 844, [draft, slash], { ...menuD, rows: "52", inset: 12, chips: "@ 44,/ 44", heads: "Commands,Jobs", jobs: rowsD, draft: long.length, small: "" }],

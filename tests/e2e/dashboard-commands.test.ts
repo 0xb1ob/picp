@@ -4,12 +4,13 @@
  * message; refusals keep the draft.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createConnection, createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { dashboardCommand } from "../../src/dashboard-commands.ts";
-import { controlJournalFile } from "../../src/viewer/control-files.ts";
+import { controlJournalFile, controlSocketFile } from "../../src/viewer/control-files.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import type { Context } from "../harness/conversations.ts";
 import { browserShims, dashboard, openTab, operatorSession, type Tab, until } from "../harness/dashboard.ts";
@@ -137,7 +138,7 @@ test("commands-old-bridge: a cp-bridge without the command port refuses with res
 test("commands-retry: a refusal that injected nothing frees its retry; an unknown outcome retries under the same id; one injection each", { timeout: 180_000 }, async (t) => {
 	let refuse = true;
 	const got: string[] = [];
-	const { tab } = await open(t, { command: dashboardCommand, inject: (text) => { if (refuse) { refuse = false; throw new Error("pi refused the turn"); } got.push(text); } });
+	const { d, tab } = await open(t, { command: dashboardCommand, inject: (text) => { if (refuse) { refuse = false; throw new Error("pi refused the turn"); } got.push(text); } });
 	await pick(tab, "/status");
 	tab.click(send(tab));
 	await tab.find(".operator-composer-command [role=alert]", (a) => a.textContent === "failed: pi refused the turn");
@@ -163,6 +164,34 @@ test("commands-retry: a refusal that injected nothing frees its retry; an unknow
 	await tab.find(".operator-composer-command [role=alert]", (a) => /^client_id was already used/.test(a.textContent!));
 	const ids = posts(tab).map((b) => b.client_id).slice(2);
 	assert.deepEqual([got.length, ids.length, ids[0] === ids[1]], [2, 2, true], "an unknown outcome never injects twice");
+	assert.equal(tab.$(".operator-composer-command > span")!.textContent, "It may already have been sent: check the transcript, or remove it and prepare it again");
+
+	// The session injects but its answer frame is unreadable: an unknown outcome (504), never a fresh-id retry.
+	tab.click(tab.$(".operator-composer-command-remove")!);
+	tab.globals.fetch = real;
+	// The record must name the standard socket path, so the bridge's socket moves aside behind a garbling relay.
+	const socket = controlSocketFile(d.stateDir), moved = `${socket}.real`;
+	renameSync(socket, moved);
+	let garble = true;
+	const proxy = createServer((client) => {
+		const upstream = createConnection(moved);
+		let command = false;
+		client.on("data", (chunk) => { command ||= String(chunk).includes('"op":"command"'); upstream.write(chunk); });
+		upstream.on("data", (chunk) => { if (command && garble) { garble = false; client.write("not json\n"); } else client.write(chunk); });
+		upstream.on("error", () => client.destroy());
+		client.on("error", () => upstream.destroy());
+		client.on("close", () => upstream.destroy());
+	});
+	await new Promise<void>((done) => proxy.listen(socket, done));
+	t.after(() => proxy.close());
+	await pick(tab, "/status");
+	tab.click(send(tab));
+	await tab.find(".operator-composer-command [role=alert]", (a) => a.textContent === "the session answered with a frame that is not JSON");
+	await until(() => send(tab).hasAttribute("disabled"), (off) => !off, "Submit again");
+	tab.click(send(tab));
+	await tab.find(".operator-composer-command [role=alert]", (a) => /^client_id was already used/.test(a.textContent!));
+	const garbled = posts(tab).map((b) => b.client_id).slice(4);
+	assert.deepEqual([got.length, garbled.length, garbled[0] === garbled[1]], [3, 2, true], "an unreadable answer never injects twice");
 });
 
 test("commands-queued: a command the busy session queues is a pending send labelled with it; Cancel send injects nothing", { timeout: 180_000 }, async (t) => {

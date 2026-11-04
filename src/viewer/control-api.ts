@@ -174,7 +174,8 @@ export function controlRequest(record: ControlRecord, op: string, args: Record<s
 				if (reply.ok === true) finish({ ok: true, result: reply.result });
 				else finish({ ok: false, status: typeof reply.status === "number" ? reply.status : 502, error: typeof reply.error === "string" ? reply.error : "the session refused the request", ...(reply.result !== undefined ? { result: reply.result } : {}) });
 			} catch {
-				finish({ ok: false, status: 502, error: "the session answered with a frame that is not JSON" });
+				// 504, not 502: the session may have acted before its unreadable answer, so the outcome is unknown.
+				finish({ ok: false, status: 504, error: "the session answered with a frame that is not JSON" });
 			}
 		});
 		socket.once("error", (error: NodeJS.ErrnoException) => finish({ ok: false, status: 503, error: `session not running: ${record.socket} refused the connection (${error.code ?? error.message})` }));
