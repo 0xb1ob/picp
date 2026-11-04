@@ -19,7 +19,7 @@ import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
 	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs", "full-match-log", "full-match-status",
-	"full-match-diff", "full-match-commands"];
+	"full-match-diff", "full-match-commands", "reports-cards"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -32,7 +32,9 @@ const tool = (id: string, at: string, name: string, text: string, summary?: stri
 /** Full match S2 shows job suffixes, so its ids end in four characters like real picp ids; S3 reuses its data. */
 const S5 = args.stage === "full-match-status", S7 = args.stage === "full-match-diff", S6 = args.stage === "full-match-commands";
 const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5 || S7 || S6;
-const JOB = S2 ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
+/** Reports card titles: both Reports grids with long titles, plus S3's Jobs list as the unchanged control. */
+const RC = args.stage === "reports-cards";
+const JOB = S2 || RC ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
 /** A cp-bridge wake as the transcript carries it: first line parsed off, `paths:` resolved (one left unresolved). */
 const wake: SessionEntry = say("w1", "2026-10-15T08:03:30Z", "cp-bridge", [
 	"PR #319 is waiting on CI. The diff review passed on 3f2a9c1; CI is still running on that head, so nothing is merged yet.",
@@ -235,7 +237,7 @@ try {
 	if (args.stage === "full-match-transcript") routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
 		row("cp-transcript-steps-t7ah", "picp", "working", "Restyle the transcript steps so a long job title keeps wrapping inside its context card", { elapsed_seconds: 540, limit_seconds: 7200, cost_usd: 1.42, model: "fixture-model" })] };
 	// Full match S3: every real group (team and queued too), seven done today for Show more, unrecorded costs and times.
-	if (args.stage === "full-match-jobs" || S5 || S6) {
+	if (args.stage === "full-match-jobs" || S5 || S6 || RC) {
 		const done = (id: string, title: string, at: string, cost: number | null, over: object = {}) => row(id, "picp", "done", title, { finished_today: true, finished_at: at, cost_usd: cost, model: "fixture-model", ...over });
 		routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [
 			row("cp-transcript-steps-t7ah", "picp", "working", "Restyle the Jobs drawer toolbar, columns and rows so a long job title keeps to one line", { elapsed_seconds: 540, limit_seconds: 7200, cost_usd: 1.54, model: "fixture-model" }),
@@ -250,6 +252,15 @@ try {
 			done("cp-viewer-fonts-f0nt", "Self-host the viewer fonts", "2026-10-15T09:58:00Z", null, { model: null }),
 			row("cp-flaky-shard-fl4k", "picp", "failed", "Rerun the flaky shard", { finished_today: true, finished_at: "2026-10-15T09:40:00Z", cost_usd: 0.12 }),
 		] };
+	}
+	if (RC) {
+		const question = "Why does the picp Reports page let a long card title run past its card on a wide desktop, and what should change so every title wraps inside its card, clamps to two lines with an ellipsis, keeps the full text in a tooltip and never covers the date, while the Jobs page rows stay exactly as they were?";
+		const url = `https://github.com/o/picp/pull/700/files#diff-${"0123456789abcdef".repeat(4)}`;
+		const titles = [question, url, "Reports cards", "Viewer fonts audit"];
+		const at = (i: number) => `2026-11-0${4 - i}T0${i}:30:00Z`;
+		routes["/api/reports"] = { generated_at: GENERATED, reports: titles.map((title, i) => ({ slug: `picp-board-${i}`, title, created_at: at(i), href: `/boards/picp-board-${i}/`,
+			description: "Evidence-backed notes on the Reports cards: the measured title rects and the screenshots at three widths.", job_ids: [`cp-reports-card-titles-q${i}rd`], projects: ["picp"] })),
+			job_reports: titles.slice(0, 3).map((title, i) => ({ job_id: `cp-report-${i}a7k`, title, modified_at: at(i), href: `#report/cp-report-${i}a7k`, projects: ["picp"] })) };
 	}
 	// Full match S4: the reply's job is a working implementer with a log, a report.md and a worktree root.
 	if (args.stage === "full-match-log" || S5 || S7) {
@@ -397,7 +408,8 @@ try {
 				small_targets: [...document.querySelectorAll(".session-bar-icon, .session-bar-more > summary, .session-bar-sheet button, .session-bar-views > a, .operator-composer-box button, .operator-composer-more > summary, .session-pending-actions button")]
 					.filter(e => e.getClientRects().length && e.getBoundingClientRect().height < 44).map(e => e.className || e.textContent),
 				small_fields: [...document.querySelectorAll("textarea, select, input")].filter(e => e.getClientRects().length && parseFloat(getComputedStyle(e).fontSize) < 16).map(e => e.getAttribute("aria-label")) }; })()`);
-		if (facts.overflow > 0) throw new Error(`${name}: the page scrolls sideways by ${facts.overflow}px`);
+		// reports-cards leaves a sideways scroll to its test, which names it beside the card geometry.
+		if (facts.overflow > 0 && !RC) throw new Error(`${name}: the page scrolls sideways by ${facts.overflow}px`);
 		if (stage === "chips") {
 			const chips = await evaluate(`[...document.querySelectorAll(".pr-chip")].map(c => { const body = c.closest(".session-body"); return { text: c.textContent, wide: !!body && c.getBoundingClientRect().width > body.getBoundingClientRect().width + 0.5 }; })`);
 			if (chips.length !== 9) throw new Error(`${name}: ${chips.length} chips rendered, not 9`);
@@ -430,7 +442,7 @@ try {
 	const transcript = "#sessions?view=you&transcript=1";
 	const loaded = ".session-entries .session-pending";
 	const stage = args.stage!;
-	for (const [device, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
+	for (const [device, width, height] of RC ? [] : [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
 		for (const theme of ["dark", "light"] as const) {
 			// Scroll only the transcript to the rollup: the card's head sits above the bottom-pinned view.
 			const toRollup: Step = [`(() => { const t = document.querySelector(".session-transcript"); t.scrollTop += document.querySelector(".session-rollup").getBoundingClientRect().top - t.getBoundingClientRect().top - 48; })()`, "true"];
@@ -446,7 +458,7 @@ try {
 		await capture("pr1-overview-light-control-1440x1000", "#overview", 1440, 1000, "light", ".shell");
 		const leak = shots.at(-1) as { background: string };
 		if (leak.background !== "#0d0d0d") throw new Error(`Overview left the dark palette (${leak.background})`);
-	} else if (stage !== "chips" && stage !== "rollup") {
+	} else if (stage !== "chips" && stage !== "rollup" && !RC) {
 		const wakeRun = ".session-steps:has(.session-bridge)";
 		const notice = `document.querySelector("${wakeRun} .session-notice-line").click()`, pill = `document.querySelector("${wakeRun} > .session-tools").click()`;
 		// Scroll only the transcript: scrollIntoView would also pan the phone's visual viewport.
@@ -1074,6 +1086,21 @@ try {
 			if (off.length) throw new Error(`full-match-commands-${name}: ${off.join("; ")}`);
 		}
 		if (posts.join() !== "POST /api/operator/message") throw new Error(`full-match-commands sent ${posts.join(", ") || "nothing"}: only the one explicit Submit sends`);
+	}
+	if (RC) {
+		// Structural selectors, so the same measure reads the cards before and after their own classes.
+		const cards = `[...document.querySelectorAll(".reports-grid > article")].map(card => {
+			const title = card.querySelector(":scope > :first-child > a"), date = card.querySelector(":scope > :first-child > :last-child");
+			const c = card.getBoundingClientRect(), t = title.getBoundingClientRect(), d = date.getBoundingClientRect(), lh = parseFloat(getComputedStyle(title).lineHeight);
+			return { text: title.textContent.slice(0, 32), inside: t.left >= c.left - 1 && t.right <= c.right + 1 && t.top >= c.top - 1 && t.bottom <= c.bottom + 1,
+				overflow: Math.round(Math.max(c.left - t.left, t.right - c.right, 0)), lines: Math.round(t.height / lh), two_lines: t.height <= 2 * lh + 1,
+				apart: t.right <= d.left || d.right <= t.left || t.bottom <= d.top || d.bottom <= t.top, named: title.getAttribute("title") === title.textContent }; })`;
+		for (const [name, width, height] of [["desktop", 1440, 1000], ["narrow", 1000, 800], ["phone", 390, 844]] as const) {
+			await capture(`reports-cards-${name}`, "#reports", width, height, "dark", ".reports-grid > article");
+			Object.assign(shots.at(-1)!, { cards: await evaluate(cards) });
+		}
+		await capture("reports-cards-jobs-desktop", "#jobs", 1440, 1000, "dark", ".job-row-done");
+		Object.assign(shots.at(-1)!, { jobs: await evaluate(`[".job-row-flight", ".job-row-done"].map(s => Math.round(document.querySelector(s).getBoundingClientRect().height))`) });
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
 	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);

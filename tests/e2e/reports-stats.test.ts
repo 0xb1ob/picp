@@ -143,7 +143,7 @@ test("P22-reports-screen: Reports lists each board's link, description and job, 
 	const tab = await s.viewer.open("#reports");
 	const grid = await tab.find(".reports-grid");
 	const html = grid.outerHTML;
-	assert.match(html, /^<div class="reports-grid"><article class="job-row"/, "cards sit in the grid container desktop lays out");
+	assert.match(html, /^<div class="reports-grid"><article class="report-card"/, "cards sit in the grid container desktop lays out");
 	assert.match(html, /href="\/boards\/alpha\/"/); assert.match(html, /href="\/boards\/alpha\/"[^>]*target="_blank"|target="_blank"[^>]*href="\/boards\/alpha\/"/);
 	assert.match(html, /the first/);
 	assert.match(html, /href="#job\/cp-1"/);

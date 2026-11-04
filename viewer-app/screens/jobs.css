@@ -68,6 +68,11 @@
 .job-ledger { font-size: 11px; color: var(--subtle); border: 1px solid var(--ledger-border); border-radius: 999px; padding: 1px 7px; }
 .job-row-done .job-ledger { display: none; }
 .jobs-empty { font-size: 13px; padding: 12px 0; color: var(--muted); }
+/* Reports cards have their own classes so the Jobs-table row rules never reach them; the date keeps its own column. */
+.report-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 14px 0; border-bottom: 1px solid var(--divider); }
+.report-card-heading { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: baseline; gap: 10px; }
+.report-card-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; line-height: 1.4; color: var(--secondary); }
+.report-card-heading > .decided-time { white-space: nowrap; }
 .jobs-more { min-height: 44px; margin: 8px 0; padding: 0 14px; border: 1px solid var(--border); border-radius: 10px; background: transparent; color: var(--muted); font: inherit; text-align: left; }
 .jobs-done-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0 16px; min-height: 44px; }
 .jobs-done-foot .jobs-more { margin: 0; }
@@ -118,7 +123,8 @@
  .job-guide-link { min-height: 24px; }
  .job-row-done .job-cost { margin-left: 0; }
  .reports-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(min(100%,20rem),1fr)); gap: 16px; padding-top: 16px; }
- .reports-grid > .job-row { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 14px; }
+ .reports-grid > .report-card { gap: 10px; padding: 16px; border: 1px solid var(--border); border-radius: 14px; }
+ .report-card-title { font-size: 13px; }
  .reports-grid .decided-job { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0 14px; }
 }
 /* Narrow desktop keeps every fact in two compact lines instead of squeezing eight columns. */
