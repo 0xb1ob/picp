@@ -1,5 +1,5 @@
 // shortcut: a copy of contracts/settings.ts publicUrlError, as the viewer boundary bars ../contracts.ts here;
-// tests/settings-retained.test.ts (c) fails if the two disagree on any probe.
+// tests/settings-retained.test.ts:239 "(n) publicUrlError parity" fails if the two disagree on any probe.
 const PUBLIC_URL_MAX = 400;
 
 /** Why `value` is not a usable `viewer.public_url`, or undefined: absolute http(s), no userinfo, query or fragment. */

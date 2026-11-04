@@ -26,6 +26,7 @@ import {
 	type SettingKey,
 	validate,
 	validateSettingValue,
+	publicUrlError,
 } from "../src/contracts.ts";
 import { SCAFFOLD_MANDATE_DEFAULTS } from "../src/mandate-defaults.ts";
 import { operatorCompactThreshold, operatorModelSetting, operatorThinkingSetting } from "../src/operator-compact.ts";
@@ -34,6 +35,7 @@ import { loadCapacityConfig } from "../src/quota.ts";
 import { DEFAULT_ROUTING_CONFIG } from "../src/routing.ts";
 import { readUpdateConfig } from "../src/service/update.ts";
 import { loadViewerConfig } from "../src/viewer/host-config.ts";
+import { publicUrlError as viewerPublicUrlError } from "../src/viewer/public-url.ts";
 import { readOwnerConsistently } from "../src/settings.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
@@ -230,4 +232,13 @@ test("(m) loadBudgetConfig keeps CommandPost.budgets()'s outcomes: default, Cont
 	assert.throws(() => loadBudgetConfig(home), ContractError);
 	write(home, "budgets", { ...DEFAULT_BUDGET_CONFIG, spawn_cap: 0 });
 	assert.throws(() => loadBudgetConfig(home), (error: Error) => !(error instanceof ContractError) && error.message.includes("violates the budget contract"));
+});
+
+// cp-board-url-proxy: src/viewer/public-url.ts copies the contract's publicUrlError (the viewer boundary bars
+// ../contracts.ts); both copies must return the same reason, or none, for every probe.
+test("(n) publicUrlError parity: the viewer copy and the contract agree on every probe", () => {
+	const probes: unknown[] = ["https://dash.example.test", "http://127.0.0.1:8766/", "https://dash.example.test/apps/cp/", "https://x.test:8443/p//",
+		"", "   ", " https://x.test/", 5, null, true, `https://x.test/${"a".repeat(400)}`, "https://u:p@x.test/", "https://@x.test/",
+		"https://x.test/?q=1", "https://x.test/#f", "https://x.test\\evil/", "https://x.test/a\\b", "ftp://x.test/", "/boards", "x.test"];
+	for (const value of probes) assert.strictEqual(viewerPublicUrlError(value), publicUrlError(value), JSON.stringify(value));
 });

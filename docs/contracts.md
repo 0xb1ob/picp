@@ -6515,9 +6515,10 @@ in the wake-up, the receipt title and a report's reply text. There is no silent 
 and an address is never a refusal: a board envelope whose `artifact_path` and `board.json` pass is always published and
 recorded. `viewer.public_url` (`data/viewer.json` `public_url`) is an absolute `https://` or `http://` URL with no
 userinfo, query or fragment; an optional path prefix is kept verbatim and trailing slashes are dropped when a link is
-built. Anything else is refused with a reason (a hand-edited bad value makes `data/viewer.json` invalid, so the Host
-guard fails closed as above and links skip the step); deleting it restores the order without it. It is read when a link
-is built (no restart) and only builds links: the bind address, the Host and Origin guards, push and pairing ignore it.
+built. Anything else is refused with a reason; a hand-edited bad value voids only `public_url` (links skip the step
+and `/doctor` warns), while `strict_host` is still read from the file and a bad one still fails closed. Deleting it
+restores the order without it. It is read when a link is built (no restart) and only builds links: the bind address,
+the Host and Origin guards, push and pairing ignore it.
 
 **Two ways in, one effect: a user message.** The composer's text, or one click on a decision card, is delivered
 into the session with `pi.sendUserMessage` — exactly what the human could type at the CLI, and nothing more. Text
