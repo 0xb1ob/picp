@@ -108,6 +108,7 @@ test("thread-origins: interleaved sends and asks keep their own source; retry, r
 	assert.deepEqual(origin("relay alpha"), [{ source_send_id: ID(10), thread_id: A }, { source_send_id: ID(11), thread_id: B }], "a duplicate text from B never rebinds A's send");
 	for (const id of ["s-forged", "a-forged"]) assert.match(o.result(id), new RegExp(`source_send_id ${FORGED} is not a dashboard message this operator session delivered; nothing was sent or recorded`), `${id}: a forged dc id is refused`);
 	assert.match(o.result("a-bad"), /source_send_id must be a dashboard send id/);
+	assert.deepEqual(Array.isArray(asks) && asks.filter(([q]) => q === "Forged?" || q === "Malformed?"), [], "a refused ask writes no question");
 	assert.equal(JSON.stringify(entries).includes("relay forged"), false, "a forged id enqueues nothing");
 	const known = new Set(entries.map((entry) => entry.id));
 	assert.equal(readFileSync(ids, "utf8").split("\n").filter(Boolean).every((id) => known.has(id)), true, "only enqueued sends reached the parent");

@@ -49,6 +49,7 @@ import {
 	JOB_KINDS,
 	JOB_SLUG_PATTERN,
 	type JobKind,
+	type JobOrigin,
 	type JobsDocument,
 	type JobStatus,
 	LAYOUT,
@@ -333,6 +334,8 @@ export interface IntakeInput {
 	assignee?: string;
 	/** Extra labels beyond the job contract. */
 	labels?: readonly string[];
+	/** Full match S10b: resolved by the caller (src/job-origins.ts), written once here and never updated. */
+	origin?: JobOrigin;
 }
 
 export interface UpdatePatch {
@@ -471,6 +474,7 @@ export class Ledger {
 			updated_at: at,
 			...(input.description !== undefined ? { description: input.description } : {}),
 			...(input.scriptPath !== undefined ? { script: { path: input.scriptPath } } : {}),
+			...(input.origin ? { origin: { source_send_id: input.origin.source_send_id, thread_id: input.origin.thread_id } } : {}),
 			...(prepared.externalRef !== undefined ? { external_ref: prepared.externalRef } : {}),
 			...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
 		};

@@ -5,8 +5,9 @@ import { objectList, parseObject, readBounded, source, strings, text, timestamp,
 import { DASHBOARD_ID_RE } from "./control-files.ts";
 import { isThreadId } from "./named-threads-view.ts";
 
-interface RecordedAsk { ask: Ask; state: "open" | "answered" | "withdrawn"; answered_at: string | null; answer: string | null; reason: string | null }
-/** Full match S10a: an ask's optional `{send_id, thread_id|null}` (src/operator-origins.ts); read, not yet shown. */
+interface RecordedAsk { ask: Ask; state: "open" | "answered" | "withdrawn"; answered_at: string | null; answer: string | null; reason: string | null; source: AskSource | null }
+type AskSource = { send_id: string; thread_id: string | null };
+/** Full match S10a: an ask's optional `{send_id, thread_id|null}` (src/operator-origins.ts); S10b joins it. */
 const askSource = (value: unknown): boolean => {
  const s = obj(value);
  return !!s && Object.keys(s).length === 2 && typeof s.send_id === "string" && DASHBOARD_ID_RE.test(s.send_id) && (s.thread_id === null || isThreadId(s.thread_id));
@@ -33,7 +34,7 @@ export function asks(state: ViewerState) {
      if (!option || !text(option.label) || !text(option.consequence) || Object.keys(option).some(k => k !== "label" && k !== "consequence")) throw new Error("invalid option");
      return {label:option.label, consequence:option.consequence, reply:`${id}: ${option.label}`};
     });
-    records.set(id, {state:"open", answered_at:null, answer:null, reason:null, ask:{id, project:event.project, question:event.question, created_at:event.created_at, options, recommendation:event.recommendation, source_escalation:typeof event.source_escalation === "string" ? event.source_escalation : null, job_ids:strings(event.job_ids).filter(isSafeId), context:text(event.context) ? event.context : null, evidence_paths:strings(event.evidence_paths)}});
+    records.set(id, {state:"open", answered_at:null, answer:null, reason:null, source:event.source === undefined ? null : event.source as AskSource, ask:{id, project:event.project, question:event.question, created_at:event.created_at, options, recommendation:event.recommendation, source_escalation:typeof event.source_escalation === "string" ? event.source_escalation : null, job_ids:strings(event.job_ids).filter(isSafeId), context:text(event.context) ? event.context : null, evidence_paths:strings(event.evidence_paths)}});
    } else {
     const keys = event.type === "answer" ? ["type","id","answer","answered_at"] : ["type","id","reason","withdrawn_at"];
     if (prior?.state !== "open" || Object.keys(event).some(k => !keys.includes(k)) || (event.type !== "answer" && event.type !== "withdraw")) throw new Error("invalid transition");

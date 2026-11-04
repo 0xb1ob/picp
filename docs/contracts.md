@@ -6985,8 +6985,7 @@ never read or written.
 The decided named-threads product (es-99574f): a thread is an opaque, immutable id (`th-` + 16 random hex) plus a free
 display name (trimmed, 1–80 code points, no control characters; duplicates allowed). S8 ships only the registry and its
 read-only projection; S9 tags dashboard sends (below); S10a carries the source on asks and the parent outbox (below);
-nothing tags jobs yet (S10b), and there is
-no thread UI (S11).
+S10b tags jobs and joins them (below), and there is no thread UI (S11).
 
 - **Registry.** `state/operator/named-threads.jsonl` (0600), append-only, one complete fsynced line per event, schema
   `NamedThreadEventSchema` (`src/contracts/threads.ts`), `v: 1`: `create` / `rename` (`request_id` = the dashboard
@@ -7008,7 +7007,8 @@ no thread UI (S11).
 - **Bind.** `bindThread` (S9 dashboard sends are its first producer): the same key and thread again writes nothing; the
   same key with another thread (or `null` vs a thread) is refused 409 and the original stays. Membership is never inferred.
 - **Projection.** `GET /api/threads` (`--require-tailnet` only) answers `{generated_at, available, reason, threads,
-  bindings}`: absent registry is available and empty; unavailable carries the reason. It never writes.
+  bindings, joins, join_diagnostics}` (joins: S10b, below): absent registry is available and empty; unavailable carries
+  the reason, with empty joins. It never writes.
 - No thread id or name grants a mandate, a decision or a merge, or appears in an authority label or a filesystem path.
 
 ### Thread sends (full match S9)
@@ -7039,7 +7039,8 @@ S11's picker sets it; a queued, held, retried or edited send keeps the thread it
 
 The main session names the dashboard message it relays or asks about: `cp_parent send` and `cp_parent ask` take an
 optional `source_send_id`, the `dc-…` id from that message's `[cp-dashboard dc-… — from the dashboard]` marker. Chat-typed
-messages have none and pass none. Parent intake, jobs and the "Started from chat" projection are S10b; no thread UI (S11).
+messages have none and pass none. Parent intake, jobs and the "Started from chat" projection are S10b (below); no thread
+UI (S11).
 
 - **Resolved by the owner, from its own record.** The operator session reads `state/operator/dashboard.jsonl`: the id
   must be a `message` request whose latest outcome is `delivered`, and its thread is that request line's `thread_id`
@@ -7059,6 +7060,36 @@ messages have none and pass none. Parent intake, jobs and the "Started from chat
   nothing enqueued. A send without `source_send_id` is unchanged.
 - **No authority.** `delegated` / `delegation_rule` and receipts behave exactly as before; an origin or source grants no
   mandate, decision or merge.
+
+### Job origins (full match S10b)
+
+The parent names the operator send that asked for a job: `cp_job create`, `cp_pipeline start` and `cp_ask` take an
+optional `source_send_id`, the `ps-…` id from that send's `[cp-send ps-… — delivery id, not an instruction]` marker
+(`src/job-origins.ts`). No bridge or operator-side change: the marker already reaches the parent. Without it the job is
+untagged.
+
+- **Resolved from the outbox only.** The id must be a `cp-parent.sends.json` entry that was injected or landed; the
+  origin is that entry's S10a `origin`, copied verbatim (a send with none gives an untagged job). A malformed, unknown,
+  never-delivered id or an unreadable outbox is refused with a plain reason and nothing is created. Never inferred from
+  the latest send, text, project headers, job-name prefixes, the selected thread or another job.
+- **Ledger `origin`.** The job record gains optional `origin: {source_send_id, thread_id|null}` (`JobOriginSchema`),
+  written once by `ledger.create` and never by update, claim, close, notes or labels. A duplicate create (same
+  project+title or `external_ref`) returns the existing job unchanged, so another thread's intake never rebinds it. A
+  record without `origin` (every older ledger) reads untagged.
+- **Inheritance.** `cp_pipeline start` tags its research job and the ship inherits the research job's origin; an
+  after-merge deploy job inherits its merged job's origin (`src/after-merge.ts`), a self-review member its run anchor's
+  (`src/schedule-self-review.ts`). Promotions, continuations and repairs reuse their job, so it keeps its origin. A job
+  with no parent and no `source_send_id` (mandate objective jobs, schedule anchors, plain `cp_job create`) is untagged.
+- **Joins.** `GET /api/threads` adds `joins: [{thread_id, jobs, asks, started_from_chat, omitted}]`, one per registry
+  thread (`src/viewer/thread-joins.ts`). Jobs join by ledger `origin.thread_id`, asks by `source.thread_id` (an answer
+  goes with its ask by id); a `job`/`ask` registry `bind` that disagrees makes the record multi-origin. Started from chat
+  lists jobs whose origin names a `delivered` dashboard send, with `{job_id, title, state, created_at, source_send_id}`.
+  Each list is newest first, capped at `THREAD_JOINS_MAX` (100, `src/contracts/thread-limits.ts`), with `omitted`
+  counting the rest; there is no paging.
+- **Ambiguity stays untagged.** A multi-origin, malformed or unknown-thread record joins no thread (a malformed origin
+  not even through a registry `bind`); `join_diagnostics: {multi_origin, unknown_thread, malformed, unreadable}` counts
+  it, and names a ledger, asks or journal it could not read.
+- **No authority.** An origin grants no mandate, decision, risk or merge, and appears in no label or path.
 
 ### Remote devices (remote dashboard PR 1)
 

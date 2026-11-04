@@ -8,7 +8,10 @@ import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import type { NamedThread, SessionEntry, ThreadBinding, ThreadsResponse } from "./api-types.ts";
 import { DASHBOARD_ID_RE } from "./control-files.ts";
-import { THREAD_AT_SOURCE, THREAD_BIND_KINDS, THREAD_ID_SOURCE, THREAD_KEY_ID_MAX, THREAD_NAME_MAX, THREADS_MAX_BYTES, THREADS_MAX_LINES, THREADS_VERSION } from "../contracts/thread-limits.ts";
+import { THREAD_AT_SOURCE, THREAD_BIND_KINDS, THREAD_ID_SOURCE, THREAD_JOINS_MAX, THREAD_KEY_ID_MAX, THREAD_NAME_MAX, THREADS_MAX_BYTES, THREADS_MAX_LINES, THREADS_VERSION } from "../contracts/thread-limits.ts";
+
+/** The S10b join cap, re-exported: this is the viewer's one reader of the thread limits (viewer-boundary). */
+export { THREAD_JOINS_MAX };
 
 const THREAD_ID_RE = new RegExp(`^${THREAD_ID_SOURCE}$`);
 const CONTROL_CHAR = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
@@ -177,7 +180,7 @@ function sessionIdOf(file: string): string | undefined {
 }
 
 /** `GET /api/threads`: the catalog and membership, or why the registry is unavailable. Never writes. */
-export function threadsView(stateDir: string, now = new Date()): ThreadsResponse {
+export function threadsView(stateDir: string, now = new Date()): Omit<ThreadsResponse, "joins" | "join_diagnostics"> {
 	const registry = readNamedThreads(stateDir);
 	const base = { generated_at: now.toISOString(), threads: [], bindings: [] };
 	if (!registry.available) return { ...base, available: false, reason: registry.reason };

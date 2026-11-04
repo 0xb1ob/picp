@@ -12,6 +12,7 @@ import { type OperatorModelPickReference, PLAN_VIEW_MAX_BYTES, type ThinkingLeve
 import { checkStoredPick } from "../../src/reroute.ts";
 import { PACKAGE_ROOT } from "../../src/home.ts";
 import { formatIntake, type IntakeResult } from "../../src/intake.ts";
+import { resolveJobOrigin } from "../../src/job-origins.ts";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { type Authorizer } from "../../src/pipeline.ts";
 import { type PlanTarget, readPlanSource, renderGateDocument } from "../../src/plan-view.ts";
@@ -377,6 +378,7 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 		thinking?: ThinkingLevel;
 		operatorQuote?: OperatorModelPickReference;
 		registry?: unknown;
+		sourceSendId?: string;
 	}): Promise<{ job_id: string; dispatch: Awaited<ReturnType<CommandPost["dispatch"]>> }> => {
 		const question = request.question.trim();
 		if (question.length === 0) throw new Error("cp_ask needs a question");
@@ -384,12 +386,14 @@ export function createSessionPost(pi: ExtensionAPI, s: SessionState, wakeups: Wa
 		const post = commandPost(request.registry);
 		// R1 D2: a bad quote refuses before a job exists; the dispatch binds and claims it for the new job.
 		checkStoredPick(post.home, "(new cp_ask job)", request.model, request.operatorQuote);
+		const origin = resolveJobOrigin(post.home, request.sourceSendId);
 		const issue = await post.ledger().create({
 			title: question,
 			project,
 			delivery: "answer",
 			kind: "research",
 			description: question,
+			...(origin ? { origin } : {}),
 		});
 		const dispatch = await post.dispatch({
 			jobId: issue.id,
