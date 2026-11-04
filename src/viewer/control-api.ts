@@ -47,6 +47,7 @@ import {
 	readScheduleControl, SCHEDULE_CONTROL_MAX_AGE_MS, SCHEDULE_CONTROL_MAX_PENDING, SCHEDULE_CONTROL_OPS, scheduleControlFile, type ScheduleControlOp, type ScheduleControlRequest,
 } from "./control-files.ts";
 import { heldId, INBOX_TOKEN, operatorSession, parentHolder, readInbox } from "./control-inbox.ts";
+import { isThreadId, sendThread } from "./named-threads-view.ts";
 import { parentRestartStatus, restartStatus } from "./restart-status.ts";
 import { allowedOrigins, bindOrigin, discardAllowance, readBody } from "./push-api.ts";
 import { readScheduleFile, SCHEDULE_ID } from "./schedule-core.ts";
@@ -290,8 +291,8 @@ function parseBody(json: unknown): { ok: true; body: Body; parsed: Parsed } | { 
 	const files = Array.isArray(value?.files) ? value.files.slice(0, UPLOAD_MAX_PER_MESSAGE).map((file) => String(file).slice(0, 64)) : undefined;
 	const command = kind === "command" ? `/${String(value?.command).slice(0, 32)}${typeof value?.job_id === "string" ? ` ${value.job_id.slice(0, 128)}` : ""}` : null;
 	const parsed: Parsed = { kind, text: command ?? text, ask_id: typeof value?.ask_id === "string" ? value.ask_id.slice(0, 100) : null, ...(images ? { images } : {}), ...(files ? { files } : {}) };
-	// A stale tab may still send the retired `thread` (#588): allowed here, never read below.
-	const keys = { message: ["kind", "text", "deliver", "images", "files", "thread", "client_id"], answer: ["kind", "ask_id", "label", "thread"], abort: ["kind"], command: ["kind", "command", "job_id", "client_id"] };
+	// A stale tab may still send the retired `thread` (#588): allowed here, never read below. S9's `thread_id` is explicit.
+	const keys = { message: ["kind", "text", "deliver", "images", "files", "thread", "client_id", "thread_id"], answer: ["kind", "ask_id", "label", "thread"], abort: ["kind"], command: ["kind", "command", "job_id", "client_id"] };
 	if (!value || !kind) return { ok: false, reason: 'kind must be "message", "answer", "abort" or "command"', parsed };
 	const extra = Object.keys(value).filter((key) => !keys[kind].includes(key));
 	if (extra.length) return { ok: false, reason: `unknown field ${extra.join(", ")}`, parsed };
@@ -315,7 +316,8 @@ function parseBody(json: unknown): { ok: true; body: Body; parsed: Parsed } | { 
 	if (trimmed.length > CONTROL_TEXT_MAX) return { ok: false, reason: `text is longer than ${CONTROL_TEXT_MAX} characters`, parsed };
 	if (value.client_id !== undefined && (typeof value.client_id !== "string" || !DASHBOARD_ID_RE.test(value.client_id))) return { ok: false, reason: "client_id must be a dashboard id", parsed };
 	if (value.deliver !== undefined && value.deliver !== "followUp" && value.deliver !== "steer") return { ok: false, reason: 'deliver must be "followUp" or "steer"', parsed };
-	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}), ...(fileIds ? { files: fileIds as string[] } : {}), ...(typeof value.client_id === "string" ? { client_id: value.client_id } : {}) }, parsed };
+	if (value.thread_id !== undefined && value.thread_id !== null && !isThreadId(value.thread_id)) return { ok: false, reason: "thread_id must be th-<16 hex> or null", parsed };
+	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}), ...(fileIds ? { files: fileIds as string[] } : {}), ...(typeof value.client_id === "string" ? { client_id: value.client_id } : {}), ...(isThreadId(value.thread_id) ? { thread_id: value.thread_id } : {}) }, parsed };
 }
 
 /** A message's `@skill` mentions as code-written `[cp-skill <name> <dir>]` lines (typed ones dropped), within CONTROL_TEXT_MAX. */
@@ -460,6 +462,8 @@ export function handleControlMessage(req: IncomingMessage, options: ControlRoute
 		if (!tokenMatches(req.headers["x-cp-control-token"], record.record.csrf)) return refuse(403, "control token missing or stale; reload the transcript");
 		const provenance = await remoteProvenance(record.record, remote);
 		if (!provenance.ok) return refuse(provenance.status, provenance.reason);
+		// S9: an owner from before threaded sends would deliver the message and drop its thread, so it never gets one.
+		if (shape.body.kind === "message" && shape.body.thread_id && ((await controlRequest(record.record, "status", {})).result as { thread_sends?: unknown } | null)?.thread_sends !== true) return refuse(409, "unsupported: this operator session predates threaded sends; restart the session (⋮ → Restart session), or send without a thread");
 		const args = { ...shape.body, peer, ...provenance.args };
 		const reply = files
 			? await controlRequest(record.record, "send_files", args, UPLOAD_SEND_TIMEOUT_MS)
@@ -537,7 +541,10 @@ function hold(options: ControlRouteOptions, now: Date, body: Body, token: unknow
 	if (inbox.held.length >= INBOX_MAX_HELD) return refuse(409, `the inbox already holds ${INBOX_MAX_HELD} messages; start the operator session to deliver them`);
 	const id = body.kind === "message" && body.client_id ? body.client_id : heldId(now);
 	if (inbox.held.some(message=>message.id === id)) return refuse(409, "client_id was already used; check the transcript before retrying");
-	const written = appendInboxLine(options.stateDir, { type: "held", id, at: now.toISOString(), text: body.kind === "answer" ? `${body.ask_id}: ${body.label}` : body.text, ask_id: body.kind === "answer" ? body.ask_id : null, ...(remote ? { remote } : {}) });
+	// S9: no owner runs, so the registry is checked here (read-only); the next owner keeps the held line's thread.
+	const thread = body.kind === "message" ? sendThread(options.stateDir, body.thread_id) : { ok: true as const, threadId: null };
+	if (!thread.ok) return refuse(thread.status, thread.error);
+	const written = appendInboxLine(options.stateDir, { type: "held", id, at: now.toISOString(), text: body.kind === "answer" ? `${body.ask_id}: ${body.label}` : body.text, ask_id: body.kind === "answer" ? body.ask_id : null, ...(remote ? { remote } : {}), ...(thread.threadId ? { thread_id: thread.threadId } : {}) });
 	if (!written.ok) return refuse(500, `inbox unwritable (${controlInboxFile(options.stateDir)}): ${written.error}`);
 	return { status: 202, body: { id, state: "held", deliver: "prompt" } satisfies ControlSendResponse };
 }

@@ -2,7 +2,7 @@
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
-import { THREAD_AT_SOURCE, THREAD_BIND_KINDS, THREAD_ID_SOURCE, THREAD_KEY_ID_MAX, THREAD_NAME_MAX, THREADS_VERSION } from "../viewer/named-threads-view.ts";
+import { THREAD_AT_SOURCE, THREAD_BIND_KINDS, THREAD_ID_SOURCE, THREAD_KEY_ID_MAX, THREAD_NAME_MAX, THREADS_VERSION } from "./thread-limits.ts";
 
 export const NAMED_THREADS_VERSION = THREADS_VERSION;
 const ThreadIdSchema = Type.String({ pattern: `^${THREAD_ID_SOURCE}$` });

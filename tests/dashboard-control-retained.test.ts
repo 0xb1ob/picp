@@ -122,7 +122,7 @@ test("delivery: a message is injected as a user message with the marker; idle is
 
 	const status = await controlRequest(record, "status", {});
 	assert.ok(status.ok);
-	assert.deepEqual({ ...(status.result as object), recent: undefined, restart: undefined }, { busy: true, pending: false, session_file: "operator-session.jsonl", recent: undefined, restart: undefined, files: true, remote_provenance: 1, threads: true });
+	assert.deepEqual({ ...(status.result as object), recent: undefined, restart: undefined }, { busy: true, pending: false, session_file: "operator-session.jsonl", recent: undefined, restart: undefined, files: true, remote_provenance: 1, threads: true, thread_sends: true });
 	assert.equal((status.result as { restart: { supported: boolean } }).restart.supported, false, "ports without the restart members: Restart session unsupported");
 	assert.equal(journal(stateDir).filter((l) => l.type === "request").length, 3, "status writes no journal line");
 
@@ -240,6 +240,23 @@ test("inbox (cp-daemon P3): at listen the held messages arrive once, oldest firs
 	assert.equal(again.state.injected.length, 0, "a second session start delivers nothing twice");
 });
 
+// Full match S9 review-1: a refused inbox handoff (its lines all in one thread) is never observed, so a later CLI-typed
+// exact copy of its text must bind nothing; a leaked inbox record would bind that copy to the held thread.
+test("inbox thread: after a refused inbox handoff, a CLI copy of the same text gets no bind line", async (t) => {
+	const { stateDir } = scratch(t);
+	const thread = "th-0123456789abcdef", at = "2026-09-28T11:00:00.000Z";
+	put(join(stateDir, "operator", "named-threads.jsonl"), `${JSON.stringify({ v: 1, type: "create", at, request_id: "dc-20260928100000-00000001", thread_id: thread, name: "Alpha", peer: null })}\n`);
+	put(controlInboxFile(stateDir), `${JSON.stringify({ type: "held", id: "dc-20260928110000-00000002", at, text: "typed offline", ask_id: null, thread_id: thread })}\n`);
+	const sent: string[] = [];
+	const { ports } = fakePorts({ inject: (text) => { sent.push(text); return Promise.reject(new Error("prompt refused")); }, entryOf: () => ({ id: "cli00001", session_id: "s-1" }) });
+	const { control } = await listening(t, stateDir, ports, { now: () => new Date("2026-09-28T12:00:00Z") });
+	await tick();
+	assert.equal(sent.length, 1, "the inbox turn was handed over once, then refused");
+	control.observe({ role: "user", content: [{ type: "text", text: sent[0] }] });
+	control.settled();
+	await tick();
+	assert.equal(readFileSync(join(stateDir, "operator", "named-threads.jsonl"), "utf8").includes('"type":"bind"'), false, "a CLI copy of a refused inbox turn binds nothing");
+});
 // cp-y43c: the dashboard holds busy messages; one handoff per settled turn, FIFO; edit/cancel until the handoff.
 const head = (injected: Array<[string, string | undefined]>) => injected.map(([text]) => text.split("\n\n")[0]);
 const states = (stateDir: string, id: string) => journal(stateDir).filter((l) => l.id === id).map((l) => l.type === "outcome" ? l.state : l.type);

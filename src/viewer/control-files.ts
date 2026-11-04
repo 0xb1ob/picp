@@ -38,7 +38,7 @@ export const INBOX_MAX_HELD = 20;
 /** A held message older than this is dropped and reported at delivery, never injected. */
 export const INBOX_MAX_AGE_MS = 24 * 3_600_000;
 export type InboxLine =
-	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; remote?: RemoteDevice }
+	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; remote?: RemoteDevice; thread_id?: string }
 	| { type: "delivered"; id: string; at: string }
 	| { type: "dropped"; id: string; at: string; reason: string };
 
@@ -271,7 +271,7 @@ export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restar
  * and one `upload` line per stored attachment: ids, mime, bytes and optional display names, never contents.
  */
 export type ControlAuditLine =
-	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; session_started_at?: string; session_file?: string; remote?: RemoteDevice; command?: string }
+	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; session_started_at?: string; session_file?: string; remote?: RemoteDevice; command?: string; thread_id?: string }
 	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting" | "restarted" | "dropped" | "cancelled"; reason: string | null }
 	/** cp-y43c: a dashboard-queued message's text replaced before its handoff; every revision stays in the journal. */
 	| { type: "edited"; by: "bridge"; id: string; at: string; peer: string | null; text: string; remote?: RemoteDevice }
