@@ -278,6 +278,8 @@ export const CP_EVENT_KINDS = [
 	 * GitHub remote. The url is kept and marked unverified — ignorance is never a pass.
 	 */
 	"pr_url_unverified",
+	/** N3c: teardown removed a native job's kept Claude scratch dir after the observed exit (or kept it, naming why). */
+	"native_scratch_removed",
 ] as const;
 export type CpEventKind = (typeof CP_EVENT_KINDS)[number];
 export const CpEventKindSchema = StringEnum([...CP_EVENT_KINDS]);

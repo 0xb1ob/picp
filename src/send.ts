@@ -36,7 +36,7 @@
 import { existsSync } from "node:fs";
 import { assertNoAuthorityHold } from "./authority-hold.ts";
 import { isScriptFleetRecord, type Risk, type SendReceipt } from "./contracts.ts";
-import { nativeFollowUpRefusal } from "./worker-driver.ts";
+import { assertNativeResume, NATIVE_ACK, nativeDoorRefusal } from "./drivers/claude-followup.ts";
 import { readTask, type ResolvedTask } from "./dispatch.ts";
 import { type BudgetCheck, checkBudget } from "./failures.ts";
 import type { FleetStore } from "./fleet.ts";
@@ -116,6 +116,8 @@ export interface SendResult {
 	task_updated?: TaskUpdate;
 	/** H6: an inferred-only risk:high against a recorded low promoted under ask_on risk:high; one line naming the keywords. */
 	risk_warning?: string;
+	/** N3c: what a native send actually did (resumed the session, or queued until the turn ends); never "steered". */
+	native?: string;
 }
 
 export interface SenderOptions {
@@ -207,12 +209,15 @@ export class Sender {
 			throw new SendError(`no fleet record for ${request.jobId} — dispatch it first (cp_dispatch)`);
 		}
 		if (isScriptFleetRecord(record)) throw new SendError(`${request.jobId} is a script job; cp_send cannot promote or replay it`);
-		if (record.worker?.driver) throw new SendError(nativeFollowUpRefusal(request.jobId, "cp_send"));
+		const native = record.worker?.driver !== undefined;
+		if (native && request.mode === "steer") throw new SendError(nativeDoorRefusal(request.jobId, "steer"));
 		if (record.phase === "failed") {
 			throw new SendError(
-				`${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); a brief does not revive it. Continue it on ` +
-					`its original lease: cp_revive ${request.jobId} continue_failed:true (plan, then confirm), then cp_send — never a ` +
-					"takeover job, a new branch or a force push.",
+				native
+					? `${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); cp_revive ${request.jobId} resumes its native Claude session (continue_failed is refused for native jobs).`
+					: `${request.jobId} is failed (${record.failure?.class ?? "no class recorded"}); a brief does not revive it. Continue it on ` +
+						`its original lease: cp_revive ${request.jobId} continue_failed:true (plan, then confirm), then cp_send — never a ` +
+						"takeover job, a new branch or a force push.",
 			);
 		}
 		const parked = record.phase === "awaiting_merge";
@@ -325,7 +330,7 @@ export class Sender {
 		// A drain lets a running turn settle, so only a steer into a busy worker's run passes. Anything else
 		// (a prompt or brief, any send to an idle worker, a follow_up that queues a turn after the settle point)
 		// starts or queues new work, and names the drain instead.
-		const steerIntoRun = managed.worker.busy && (request.mode === undefined || request.mode === "auto" || request.mode === "steer") && request.task === undefined && request.taskFile === undefined;
+		const steerIntoRun = !native && managed.worker.busy && (request.mode === undefined || request.mode === "auto" || request.mode === "steer") && request.task === undefined && request.taskFile === undefined;
 		if (!steerIntoRun) assertNotDraining(home, `promotion or ${request.mode ?? "auto"} send to ${managed.worker.busy ? "busy" : "idle"} ${request.jobId}`);
 		if ((request.mode === "steer" || request.mode === "follow_up") && !managed.worker.busy) {
 			throw new SendError(
@@ -337,7 +342,7 @@ export class Sender {
 		}
 
 		const busy = managed.worker.busy;
-		const mode: DeliveryMode = request.mode && request.mode !== "auto" ? request.mode : busy ? "steer" : "prompt";
+		const mode: DeliveryMode = request.mode && request.mode !== "auto" ? request.mode : busy ? (native ? "follow_up" : "steer") : "prompt";
 
 		// cp-promote-task-record: a scope change only becomes the frozen task a
 		// reviewer scores against when it arrives through a genuine promotion of an
@@ -427,6 +432,8 @@ export class Sender {
 		if (budget?.state === "warn") {
 			runs.open(request.jobId).cp("budget_warning", { ...budget });
 		}
+		// N3c: a native send starts or queues a claude process, so it passes the native admission before anything moves.
+		if (native) await assertNativeResume({ home, jobId: request.jobId, what: busy ? "queued follow-up" : "resume" }).catch((error: unknown) => { throw new SendError((error as Error).message); });
 
 		// Reopen BEFORE delivering: for the window between the two, the worker must
 		// never be holding work it cannot report (see supersede.ts for the ordering
@@ -501,6 +508,7 @@ export class Sender {
 			...(superseded ? { superseded } : {}),
 			...(taskUpdate ? { task_updated: taskUpdate } : {}),
 			...(riskWarning ? { risk_warning: riskWarning } : {}),
+			...(native && outcome.disposition === "resumed" ? { native: NATIVE_ACK.resumed } : native && outcome.receipt === "queued" ? { native: NATIVE_ACK.queued } : {}),
 		};
 	}
 

@@ -33,7 +33,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type JobRouting, paths, type Role, type ThinkingLevel } from "./contracts.ts";
-import { nativeFollowUpRefusal } from "./worker-driver.ts";
+import { assertNativeResume, NATIVE_REVIVE_PROMPT, nativeDoorRefusal, readNativeSession } from "./drivers/claude-followup.ts";
+import type { NativeDriver } from "./worker-driver.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
 import { loadProfile } from "./profiles.ts";
 import { type ModelProbe, RoutingError } from "./routing.ts";
@@ -66,6 +67,7 @@ export const REVIVE_REFUSAL_CODES = [
 	"skill_unresolved",
 	"model_unrouted",
 	"route_refused",
+	"native_refused",
 ] as const;
 export type ReviveRefusalCode = (typeof REVIVE_REFUSAL_CODES)[number];
 
@@ -376,12 +378,16 @@ export class Reviver {
 		const record = this.#options.fleet.get(jobId);
 		if (!record) return refuse(jobId, "not_found", `no fleet record for ${jobId}`);
 		if (isScriptFleetRecord(record)) return refuse(jobId, "not_revivable_phase", `${jobId} is a script job; an unobserved exit cannot be replayed`);
-		if (record.worker?.driver) return refuse(jobId, "not_revivable_phase", nativeFollowUpRefusal(jobId, "cp_revive"));
+		const native = record.worker?.driver !== undefined;
+		if (native && (options?.continueFailed || options?.recovering)) {
+			return refuse(jobId, "native_refused", nativeDoorRefusal(jobId, options.continueFailed ? "continue_failed" : "bounded recovery"));
+		}
 		if (record.phase === "awaiting_merge") {
 			return refuse(jobId, "not_revivable_phase", `${jobId} is parked awaiting a team merge: no lease, and ${record.worktree} is history — ` +
 				`cp_send ${jobId} resumes it on a fresh lease of ${record.branch}, never a revive on the old path`);
 		}
-		const revivablePhases: readonly typeof record.phase[] = options?.recovering || options?.continueFailed
+		// A native job that crashed or ended unreported failed on its observed exit; a plain revive resumes its session.
+		const revivablePhases: readonly typeof record.phase[] = native || options?.recovering || options?.continueFailed
 			? ["held", "waiting", "failed"]
 			: ["held", "waiting"];
 		if (!revivablePhases.includes(record.phase)) {
@@ -425,6 +431,14 @@ export class Reviver {
 			return refuse(jobId, "session_scan_failed", `${(error as Error).message}. Nothing was spawned; surface it and keep the lease.`);
 		}
 		if (policyBlocked) return refuse(jobId, "session_policy_blocked", policyBlockedRefusal(jobId, record.worker.session_file));
+		if (native) {
+			try {
+				if (readNativeSession(record.worker.session_file).session_id === undefined) throw new Error(`${record.worker.session_file} holds no session id`);
+				await assertNativeResume({ home: this.#options.home, jobId, what: "revive" });
+			} catch (error) {
+				return refuse(jobId, "native_refused", `${(error as Error).message}. Nothing was spawned.`);
+			}
+		}
 
 		// cp-mub7: a failed job's registered worker is stale, not live work — the
 		// job is already failed, and cp_send refuses it for that reason and points
@@ -568,7 +582,9 @@ export class Reviver {
 				...(plan.thinking ? { thinking: plan.thinking } : {}),
 				...(plan.skills?.length ? { skills: plan.skills.map((s) => s.dir) } : {}),
 				sessionFile: plan.session_file,
-				// No `brief`: a revived worker resumes idle. `report_result` stays
+				// N3c: a native job respawns its native worker, which resumes the recorded Claude session.
+				...(record.worker.driver ? { driver: record.worker.driver as NativeDriver, extraEnv: { CP_NATIVE_RESUME: "1" } } : {}),
+				// No `brief`: a revived pi worker resumes idle. `report_result` stays
 				// write-once (worker-reporter), so nothing here can double-report.
 			});
 		} catch (error) {
@@ -629,6 +645,11 @@ export class Reviver {
 			// close, in reverse.
 			await safely(() => this.#options.manager.shutdown(jobId));
 			throw new ReviveError(`revive ${jobId}: spawned but failed to record it (${(error as Error).message}); worker shut down`);
+		}
+		if (record.worker.driver) {
+			const sent = await managed.worker.send(NATIVE_REVIVE_PROMPT, "prompt");
+			this.#options.runs.open(jobId).cp("prompt_sent", { receipt: sent.receipt, ...(sent.disposition ? { disposition: sent.disposition } : {}), native_revive: true, ...(sent.error ? { error: sent.error } : {}) });
+			if (sent.receipt === "failed") throw new ReviveError(`revive ${jobId}: the native worker refused the revive prompt (${sent.error ?? "no error text"})`);
 		}
 
 		return {
