@@ -1,0 +1,1 @@
+- Native Claude research jobs take follow-ups (N3c): an idle `cp_send` resumes the Claude session, a busy one queues until the turn ends, `cp_revive` resumes with picp's revive prompt, all behind the native admission; usage counts each resumed run's delta once, and teardown removes the kept scratch dir.

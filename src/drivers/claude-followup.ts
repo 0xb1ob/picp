@@ -67,7 +67,7 @@ export function writeNativeSession(file: string, session: NativeSession): void {
 	renameSync(`${file}.tmp`, file);
 }
 
-/** Teardown, after the worker's observed exit: removes the kept scratch dir; a record that fails validation keeps it. */
+/** Teardown, after the worker's observed exit: removes the kept scratch dir; an invalid record keeps it. */
 export function removeNativeScratch(sessionFile: string): { removed?: string; kept?: string } {
 	if (!existsSync(sessionFile)) return {};
 	try {
@@ -98,8 +98,8 @@ export const clearFollowUps = (runDir: string): void => rmSync(join(runDir, NATI
 
 /**
  * Every native resume's admission, in dispatch's order and before any claude process starts: the drain freeze and the
- * update hold, trust (a denied project), the per-job budget on the recorded running total (plus `pending`, usage a turn
- * reported that the run log has not recorded yet), then the N3b selection (switch, research role, concurrency 1, floor).
+ * update hold, trust (a denied project), the per-job budget on the recorded running total (plus `pending`, usage a
+ * turn reported that the run log has not yet recorded), then the N3b selection (switch, role, concurrency 1, floor).
  */
 export async function assertNativeResume(input: { home: string; jobId: string; what: string; pending?: Usage; env?: NodeJS.ProcessEnv }): Promise<void> {
 	const jobs = new FleetStore({ home: input.home }).read().jobs;
@@ -118,6 +118,17 @@ export async function assertNativeResume(input: { home: string; jobId: string; w
 		if (check.state === "exceeded") refuse(`the per-job budget is spent (${check.tokens.used}/${check.tokens.limit} billable tokens, $${check.cost.used.toFixed(4)}/$${check.cost.limit.toFixed(2)})`);
 	}
 	await assertNativeSelection({ home: input.home, jobId: input.jobId, driver: record.worker.driver as NativeDriver, kind: record.kind, role: record.worker.role, delivery: record.delivery, jobs, ...(input.env ? { env: input.env } : {}) });
+}
+
+/** cp_revive's native admission: a recorded session id to resume, then `assertNativeResume`; the refusal, or none. */
+export async function nativeReviveRefusal(home: string, jobId: string, sessionFile: string): Promise<string | undefined> {
+	try {
+		if (readNativeSession(sessionFile).session_id === undefined) throw new Error(`${sessionFile} holds no session id`);
+		await assertNativeResume({ home, jobId, what: "revive" });
+		return undefined;
+	} catch (error) {
+		return `${(error as Error).message}. Nothing was spawned.`;
+	}
 }
 
 /** Why a native job takes no pi-only follow-up door (cp_revive continue_failed, bounded recovery, a mid-turn steer). */

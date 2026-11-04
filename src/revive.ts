@@ -33,7 +33,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type JobRouting, paths, type Role, type ThinkingLevel } from "./contracts.ts";
-import { assertNativeResume, NATIVE_REVIVE_PROMPT, nativeDoorRefusal, readNativeSession } from "./drivers/claude-followup.ts";
+import { NATIVE_REVIVE_PROMPT, nativeDoorRefusal, nativeReviveRefusal } from "./drivers/claude-followup.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
 import { loadProfile } from "./profiles.ts";
@@ -433,14 +433,8 @@ export class Reviver {
 			return refuse(jobId, "session_scan_failed", `${(error as Error).message}. Nothing was spawned; surface it and keep the lease.`);
 		}
 		if (policyBlocked) return refuse(jobId, "session_policy_blocked", policyBlockedRefusal(jobId, record.worker.session_file));
-		if (native) {
-			try {
-				if (readNativeSession(record.worker.session_file).session_id === undefined) throw new Error(`${record.worker.session_file} holds no session id`);
-				await assertNativeResume({ home: this.#options.home, jobId, what: "revive" });
-			} catch (error) {
-				return refuse(jobId, "native_refused", `${(error as Error).message}. Nothing was spawned.`);
-			}
-		}
+		const nativeRefusal = native ? await nativeReviveRefusal(this.#options.home, jobId, record.worker.session_file) : undefined;
+		if (nativeRefusal) return refuse(jobId, "native_refused", nativeRefusal);
 
 		// cp-mub7: a failed job's registered worker is stale, not live work — the
 		// job is already failed, and cp_send refuses it for that reason and points
