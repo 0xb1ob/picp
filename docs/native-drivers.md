@@ -104,7 +104,8 @@ handling in C, which would be re-earned case by case.
 
 **No-go** for N2 on the vendored-adapter path until the operator decides all three findings: allow the four
 Drivers helpers, accept the serverSettings chain (or wait for upstream to make it optional), and accept the SDK
-licence. If any answer is no, N2 should start from the thin driver above.
+licence. If any answer is no, N2 should start from the thin picp driver on the official Agent SDK in "Decision
+(2026-11-04)" below (the stream-json pointer to the thin driver above is superseded).
 
 ## Bump procedure (if vendoring is ever approved)
 
