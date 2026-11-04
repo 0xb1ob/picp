@@ -1,7 +1,6 @@
 /**
- * Full match S5 (cp-dfm-s5-status-yy1q): the desktop chat's status footer through `bin/cp-view` on a scratch home and
- * the served app in its linkedom tab. Recorded quota, the local day's spend and finishes, and the working count come
- * from real run files; layout is the browser fixture's `full-match-status` stage.
+ * Full match S5 (cp-dfm-s5-status-yy1q): the desktop chat's status footer through `bin/cp-view` and the served app,
+ * from real scratch run files; layout is the browser fixture's `full-match-status` stage.
  */
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";

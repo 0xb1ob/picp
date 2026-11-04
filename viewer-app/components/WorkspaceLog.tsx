@@ -84,9 +84,8 @@ function Report({data}: {data: JobResponse}) {
 }
 
 /**
- * P1 only for this job's own reference. Desktop reads frame 2's read-only line, the phone frame 8's entry; both
- * only open operator Chat with the reference (the entry's typed text as its draft, joining a kept one on a new line)
- * and never send, least of all to the worker.
+ * P1 only for this job's own reference. Desktop reads frame 2's read-only line, the phone frame 8's entry; both only
+ * open operator Chat with the reference (typed text joins a kept draft) and never send, least of all to the worker.
  */
 function AskFooter({data}: {data: JobResponse}) {
  const [text, setText] = useState("");

@@ -524,9 +524,8 @@ export interface QuotaObservation {
  providers: {provider: string; five_hour: number | null; seven_day: number | null; tight: boolean; free_slots: number | null}[];
 }
 /**
- * `GET /api/workspace/status?from&to&tz` (full match S5): the chat footer. `day` is one local calendar day in `tz`;
- * spend and done are Stats' worker+reviewer spend and finished jobs inside it. A null value is unknown, never 0;
- * `observed_at` is the routing record's time for quota (null: none) and this read's for the rest.
+ * `GET /api/workspace/status?from&to&tz` (full match S5): the chat footer for one local calendar day in `tz`. Spend
+ * and done are Stats' worker+reviewer figures; null is unknown, never 0; `observed_at`: quota's record or this read.
  */
 export interface WorkspaceStatusResponse {
  generated_at: string; day: {from: string; to: string; tz: string};
