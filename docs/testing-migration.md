@@ -418,6 +418,7 @@ Test files added after the baseline, with the PR that owns them.
 | tests/e2e/native-worker-spike.test.ts | cp-native-n2-claude-sdk-spike-demb (PR URL on the branch) | N2 spike P1/P2: the installed `claude` against the fake model reports once; wrong-job, invalid and conflicting reports refused; credential-copy, merge, out-of-scope and throwing-guard writes denied before they run; host ANTHROPIC_* kept out; observed exit. Skipped by name without `claude` on PATH |
 | tests/e2e/native-worker-live-smoke.test.ts | cp-native-n2-claude-sdk-spike-demb (PR URL on the branch) | N2 spike live smoke: one no-tool turn on the installed `claude` with the operator's login; skipped unless `CP_LIVE_TESTS=1` |
 | tests/claude-spike.test.ts | cp-native-n2-claude-sdk-spike-demb (PR URL on the branch) | N2 spike units CI reaches without `claude`: env allow-list, guard-to-hook deny on throw, version advisory, usage normalization. The driver has no product entry point yet (step 2) |
+| tests/claude-binary-stub.test.ts | cp-native-n2-claude-sdk-spike-demb (PR URL on the branch) | N2 spike R1-W: every `@anthropic-ai/claude-agent-sdk-<platform>` lock entry is a workspace link to a `package.json`-only stub whose version equals the SDK's pinned optional version (structural lock check, no entry point) |
 <!-- /manifest:incoming -->
 
 ## Feature-removed

@@ -113,6 +113,9 @@ Pick the new commit, rerun the closure resolver from both roots, diff the file l
 previous pin, re-audit every new licence, recopy byte-identical with fresh git blob SHA-1s, rebuild, and rerun the
 integrity, load and boundary checks before the pin moves.
 
+An Agent SDK bump (N2 driver) also bumps the 8 `vendor/claude-binary-stub/<platform>/package.json` versions to the
+SDK's new `optionalDependencies` pin; `tests/claude-binary-stub.test.ts` fails until they match.
+
 ## Decision (2026-11-04)
 
 - **Choice:** the operator chose "Thin driver on Agent SDK" (ask-5bc51801aafe). picp builds its own small Claude worker
@@ -141,8 +144,8 @@ is P3 work (this spike never resumes), so it stays a kill condition for step 2.
 |---|---|---|
 | Hooks | In-process `PreToolUse` hook, `onFailure: "block"`; picp's worker guards deny before execution, a throw is a deny | `tests/e2e/native-worker-spike.test.ts` (3), (5); `tests/claude-spike.test.ts` |
 | MCP | picp's `report_result` as an SDK in-process MCP server (`mcp__picp__report_result`), validated by the worker-reporter checks, written once | e2e (1), (2) |
-| Resume | Not exercised; the SDK's `resume` option exists. Step 2 (P3) measures it | — |
-| Interrupt | `AbortController` on the run's timeout; not exercised by a test | — |
+| Resume | Not exercised; the SDK's `resume` option exists. Step 2 (P3) measures it before any wiring | — |
+| Interrupt | `AbortController` on the run's timeout; not exercised by a test. Step 2 measures it before any wiring | — |
 | Usage | T3's `ClaudeTurnTokenUsage.ts` normalizer: `complete` on success; unknown is `unavailable`, never 0 | e2e (7); unit `spikeUsage` |
 | Exit | The child's own exit code/signal; after a 10 s grace the driver kills and still reports the observed exit | e2e (7) |
 
@@ -150,6 +153,15 @@ Isolation: every run gets a `mktemp -d` scratch dir (dirs mode 0700) outside the
 `CLAUDE_CONFIG_DIR` and `TMPDIR`, removed in `finally`. `settingSources: []`, `strictMcpConfig`, no plugins, skills or
 agents, `Agent`/`Task`/`WebFetch`/`WebSearch` disallowed. The child env is an allow-list (`PATH`, `LANG`, `LC_ALL`,
 `LC_CTYPE`, `TZ`) plus the explicit provider variables; a host `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL` never reaches it.
+
+### Step-2 gates (before any wiring)
+
+- **Shell write scope must be enforced before wiring.** The Write tool is scoped to the artifact directory
+  (`src/drivers/claude-spike.ts:178`), but Bash is not: a redirect (`echo x > file`) or a `cp`/`mv` into the worktree
+  passes. Bash is covered only for specific shapes: host auth copies (`src/worker-credential-guard.ts:46`), bulk copies
+  of the home (`:183`), history rewrites (`src/worker-history-guard.ts:52`), shell `apply_patch`
+  (`src/ci-wait.ts:229`), and key-path reads plus audited remote-host calls (`src/worker-host-guard.ts:44`).
+- **Resume and interrupt** are measured before wiring; resume double-counting usage stays a kill condition.
 
 ### Versions (as T3 handles them)
 
@@ -161,9 +173,13 @@ agents, `Agent`/`Task`/`WebFetch`/`WebSearch` disallowed. The child env is an al
   which records the spawned command); the e2e asserts it equals the resolved path.
 - Version advisory: `CLAUDE_VERSION_FLOOR` is 2.1.318, the version measured working. A missing `claude` or an older
   one fails with "run `claude update`". No auto-update (`DISABLE_AUTOUPDATER=1` in the child).
-- **Bundled platform binaries stay installed but unused.** T3 drops them with pnpm overrides
-  (`pnpm-workspace.yaml:281–289`); npm has no per-package way to remove an optional dependency, and
-  `--omit=optional` would drop other packages' platform binaries too.
+- **Bundled platform binaries are never installed.** T3 drops them with pnpm overrides (`pnpm-workspace.yaml:281–289`).
+  picp gets the same result with npm workspaces: `vendor/claude-binary-stub/<platform>/` holds 8 empty stubs (only a
+  `package.json` with the SDK's pinned name and version), and root `package.json` `workspaces` links them in. npm
+  then satisfies the SDK's optional dependencies with in-checkout links, so it never downloads the binaries. npm
+  `overrides` with a local `file:` stub were tried first and refused: the lock and the installed links resolve the
+  path differently, either failing `npm ci` or linking outside the checkout. `tests/claude-binary-stub.test.ts` pins
+  every lock entry to a stub link and each stub version to the SDK's pin.
 
 ### Licences
 
@@ -179,10 +195,11 @@ agents, `Agent`/`Task`/`WebFetch`/`WebSearch` disallowed. The child env is an al
 |---|---|
 | SDK | 0.3.318, range `^0.3.318` |
 | `claude --version` | 2.1.318 |
-| `node_modules` delta | +351 MB with the bundled binary (`claude-agent-sdk-linux-x64` is 323 MB), +28 MB without it |
+| `node_modules` delta | 192 → 231 MB (+39 MB) on a clean `npm ci`; the 323 MB `claude-agent-sdk-linux-x64` binary is not installed |
 | Fake-model run | cold start (spawn to `system/init`) 473 ms; a five-step run 808 ms |
 | Live smoke (one run) | exit 0, `claude-opus-5-5`, 5.86 s (cold start 409 ms), usage complete: 947 in / 134 out |
-| Files | `src/drivers/claude-spike.ts` 439 lines; `tests/harness/claude-mock-provider.ts` 156 lines |
+| Files | `src/drivers/claude-spike.ts` 444 lines; `tests/harness/claude-mock-provider.ts` 156 lines |
 
 The live smoke (`tests/e2e/native-worker-live-smoke.test.ts`) runs only with `CP_LIVE_TESTS=1`: one no-tool turn
 using the operator's login, which `claude` reads from its own settings file; picp passes the path and never reads it.
+`report_result` was registered in that run but never called (no tools, one turn).

@@ -67,5 +67,8 @@
 	"dependencies": {
 		"esbuild": "^0.28.2",
 		"preact": "^10.29.8"
-	}
+	},
+	"workspaces": [
+		"vendor/claude-binary-stub/*"
+	]
 }

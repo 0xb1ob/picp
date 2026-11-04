@@ -332,10 +332,20 @@ export async function runClaudeSpike(options: SpikeRunOptions): Promise<SpikeRes
 	const claude = resolveClaude(hostEnv);
 	assertBriefIsSafe(options.prompt, "spike prompt");
 	const scratch = mkdtempSync(join(tmpdir(), "cp-claude-spike-"));
-	if (!relative(resolve(options.job.worktree), scratch).startsWith("..")) {
+	try {
+		return await runInScratch(options, claude, hostEnv, scratch);
+	} finally {
 		rmSync(scratch, { recursive: true, force: true });
-		throw new ClaudeSpikeError("scratch dir is inside the worktree");
 	}
+}
+
+async function runInScratch(
+	options: SpikeRunOptions,
+	claude: { path: string; version: string },
+	hostEnv: NodeJS.ProcessEnv,
+	scratch: string,
+): Promise<SpikeResult> {
+	if (!relative(resolve(options.job.worktree), scratch).startsWith("..")) throw new ClaudeSpikeError("scratch dir is inside the worktree");
 	const dirs = { home: join(scratch, "home"), configDir: join(scratch, "config"), tmp: join(scratch, "tmp") };
 	for (const dir of Object.values(dirs)) mkdirSync(dir, { mode: 0o700 });
 	const state: ReportState = { refusals: [], attempts: 0 };
@@ -350,7 +360,8 @@ export async function runClaudeSpike(options: SpikeRunOptions): Promise<SpikeRes
 	let error: string | undefined;
 	const started = Date.now();
 	const abort = new AbortController();
-	const timer = setTimeout(() => abort.abort(), options.timeoutMs ?? 180_000);
+	// AbortSignal.timeout is unref'd, so nothing is left to clear or leak whichever way the run ends.
+	AbortSignal.timeout(options.timeoutMs ?? 180_000).addEventListener("abort", () => abort.abort(), { once: true });
 	const spawnClaudeCodeProcess = (spawnOptions: SpawnOptions) => {
 		spawnedCommand = spawnOptions.command;
 		const proc = spawn(spawnOptions.command, spawnOptions.args, {
@@ -403,30 +414,24 @@ export async function runClaudeSpike(options: SpikeRunOptions): Promise<SpikeRes
 		}
 	} catch (err) {
 		error = (err as Error).message;
-	} finally {
-		clearTimeout(timer);
 	}
-	try {
-		const exit = await observeExit(child, exited);
-		return {
-			claudePath: claude.path,
-			claudeVersion: claude.version,
-			sdkVersion: sdkVersion(),
-			...(spawnedCommand === undefined ? {} : { spawnedCommand }),
-			...(exit === undefined ? {} : { exit }),
-			...(state.accepted === undefined ? {} : { report: state.accepted }),
-			reportRefusals: state.refusals,
-			denials,
-			...(result === undefined ? {} : { resultSubtype: result.subtype }),
-			...(initModel === undefined ? {} : { initModel }),
-			usage: spikeUsage(result, models),
-			...(coldStartMs === undefined ? {} : { coldStartMs }),
-			durationMs: Date.now() - started,
-			...(error === undefined ? {} : { error }),
-		};
-	} finally {
-		rmSync(scratch, { recursive: true, force: true });
-	}
+	const exit = await observeExit(child, exited);
+	return {
+		claudePath: claude.path,
+		claudeVersion: claude.version,
+		sdkVersion: sdkVersion(),
+		...(spawnedCommand === undefined ? {} : { spawnedCommand }),
+		...(exit === undefined ? {} : { exit }),
+		...(state.accepted === undefined ? {} : { report: state.accepted }),
+		reportRefusals: state.refusals,
+		denials,
+		...(result === undefined ? {} : { resultSubtype: result.subtype }),
+		...(initModel === undefined ? {} : { initModel }),
+		usage: spikeUsage(result, models),
+		...(coldStartMs === undefined ? {} : { coldStartMs }),
+		durationMs: Date.now() - started,
+		...(error === undefined ? {} : { error }),
+	};
 }
 
 /** Waits for the child's own exit; after the grace it kills and still reports the observed exit, never a guess. */

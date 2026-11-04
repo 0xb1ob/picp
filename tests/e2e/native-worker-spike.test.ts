@@ -17,7 +17,8 @@ const JOB = "cp-native-spike-e2e";
 test("native spike: one research run reports once, refuses bad reports, denies forbidden calls before they run, keeps host env out and records the exit",
 	{ skip: CLAUDE === undefined ? "claude is not on PATH" : false, timeout: 180_000 }, async () => {
 	const root = mkdtempSync(join(tmpdir(), "cp-native-spike-e2e-"));
-	const savedTmp = process.env.TMPDIR;
+	const PARENT_KEYS = ["TMPDIR", "PATH", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR"] as const;
+	const saved = Object.fromEntries(PARENT_KEYS.map((key) => [key, process.env[key]]));
 	const host = await startClaudeMockProvider([]);
 	try {
 		const worktree = join(root, "repo");
@@ -56,18 +57,18 @@ test("native spike: one research run reports once, refuses bad reports, denies f
 			if (String(call.input.path).endsWith("throw-me.md")) throw new Error("detector crashed");
 			return undefined;
 		};
-		process.env.TMPDIR = driverTmp;
+		// (6) sets the host sentinels in the real parent process.env; the driver reads it as its default host env.
+		Object.assign(process.env, {
+			TMPDIR: driverTmp,
+			PATH: `${fakebin}:${saved.PATH ?? ""}`,
+			ANTHROPIC_API_KEY: "host-api-key-sentinel",
+			ANTHROPIC_BASE_URL: host.url,
+			CLAUDE_CONFIG_DIR: join(root, "hosthome", ".claude"),
+		});
 		const result = await runClaudeSpike({
 			job: { job_id: JOB, delivery: "local", runDir: join(root, "run"), worktree, artifactPath },
 			prompt: "Research the repo and report.",
 			providerEnv: { ANTHROPIC_BASE_URL: provider.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN },
-			hostEnv: {
-				...process.env,
-				PATH: `${fakebin}:${process.env.PATH ?? ""}`,
-				ANTHROPIC_API_KEY: "host-api-key-sentinel",
-				ANTHROPIC_BASE_URL: host.url,
-				CLAUDE_CONFIG_DIR: join(root, "hosthome", ".claude"),
-			},
 			extraGuards: [throwing],
 			maxTurns: 20,
 			timeoutMs: 150_000,
@@ -122,8 +123,10 @@ test("native spike: one research run reports once, refuses bad reports, denies f
 		assert.deepEqual(readdirSync(driverTmp), []);
 		assert.equal(provider.overrun(), 0);
 	} finally {
-		if (savedTmp === undefined) delete process.env.TMPDIR;
-		else process.env.TMPDIR = savedTmp;
+		for (const key of PARENT_KEYS) {
+			if (saved[key] === undefined) delete process.env[key];
+			else process.env[key] = saved[key];
+		}
 		await host.close();
 		rmSync(root, { recursive: true, force: true });
 	}
