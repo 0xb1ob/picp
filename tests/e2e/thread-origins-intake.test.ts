@@ -49,9 +49,8 @@ test("thread-origins intake: explicit ps ids tag jobs once; children inherit; re
 	const by = (title: string): Job[] => jobs().filter((job) => job.title === title);
 	const origin = (title: string) => by(title).map((job) => job.origin ?? "untagged");
 
-	// The mock parent "reads" its prompt: the ps id in its latest user message names that send's `op:title` directives
-	// (`&`-joined); a wake carries them in `[s10b-wake …]`. Each turn calls four cp_job slots, cp_pipeline and cp_ask;
-	// a slot with no directive is idle. `queued:` enqueues a send that cannot drain before this turn ends.
+	// The mock parent "reads" its prompt: the ps id or `[s10b-wake …]` names `&`-joined `op:title` directives.
+	// Each turn fills four cp_job slots, cp_pipeline and cp_ask (idle if none); `queued:` enqueues an undrainable send.
 	let queued: string | undefined;
 	const directives = (request: RecordedRequest): string[] => {
 		const last = JSON.stringify(((request.body as Json).messages as Json[]).filter((m) => m.role === "user").at(-1) ?? "");
@@ -76,10 +75,9 @@ test("thread-origins intake: explicit ps ids tag jobs once; children inherit; re
 		if (op === "ask") return [["cp_ask", { project: "picp", question: title, source_send_id: id }]];
 		if (op === "comment") return [["cp_job", { action: "comment", job_id: job(), text: "woken" }]];
 		if (op === "claim") return [["cp_job", { action: "claim", job_id: job() }]];
-		if (op === "touch") {
-			return [["cp_job", { action: "update", job_id: job(), status: "open" }], ["cp_job", { action: "update", job_id: job(), notes: "touched" }],
-				["cp_job", { action: "update", job_id: job(), add_labels: ["s10b-touched"] }]];
-		}
+		if (op === "status") return [["cp_job", { action: "update", job_id: job(), status: "open" }]];
+		if (op === "notes") return [["cp_job", { action: "update", job_id: job(), notes: "touched" }]];
+		if (op === "label") return [["cp_job", { action: "update", job_id: job(), add_labels: ["s10b-touched"] }]];
 		return [];
 	})).get(request)!;
 	const slot = (name: string, n: number) => ({ name, args: (request: RecordedRequest) => plan(request).filter(([tool]) => tool === name)[n]?.[1] ?? IDLE[name] });
@@ -89,7 +87,10 @@ test("thread-origins intake: explicit ps ids tag jobs once; children inherit; re
 	];
 	const provider = await MockProvider.start();
 	// The first send's turn hangs so the test can kill the parent mid-turn; every later turn is the reading step.
-	const steps: ScriptStep[] = [{ kind: "hang" }, ...Array.from({ length: 30 }, () => turn).flat()];
+	// Turn BEFORE_RETRY + 1 (R1.2) answers its tool calls, then a 503; the outer retry replays the whole turn.
+	const BEFORE_RETRY = 8;
+	const steps: ScriptStep[] = [{ kind: "hang" }, ...Array.from({ length: BEFORE_RETRY }, () => turn).flat(), turn[0]!,
+		{ kind: "error", status: 503, message: "S10B service unavailable" }, ...turn, ...Array.from({ length: 30 }, () => turn).flat()];
 	const model = provider.addScript("s10b-parent", steps);
 	// The operator relays once it was asked to; every other turn (relays the host replays on attach) reads status.
 	let relayCalled = false;
@@ -171,7 +172,7 @@ test("thread-origins intake: explicit ps ids tag jobs once; children inherit; re
 	assert.deepEqual([origin("Ship gamma?"), by("Ship gamma?")[0]?.labels.includes("delivery:answer")], [[ALPHA], true], "cp_ask's job carries its send's origin");
 
 	// R1.2 retry: the turn creates `retried`, then fails on a transient 503; the outer retry resumes under the same id.
-	steps.splice(steps.length - provider.remaining("s10b-parent") + 1, 0, { kind: "error", status: 503, message: "S10B service unavailable" }, turn[0]!);
+	assert.equal(provider.remaining("s10b-parent"), steps.length - 1 - 2 * BEFORE_RETRY, "the next turn is the scripted retry");
 	at = performance.now();
 	const retried = await settled(await send("job:retried", { source_send_id: DC(2), thread_id: B }));
 	t.diagnostic(`transient send → settled after the outer retry ${(performance.now() - at).toFixed(1)} ms`);
@@ -182,10 +183,10 @@ test("thread-origins intake: explicit ps ids tag jobs once; children inherit; re
 	await waitFor(() => by("alpha")[0]!, (job) => job.comments.some((c) => c.text === "woken"), { timeoutMs: 60_000, what: "the wake turn comments on alpha" });
 	assert.deepEqual(origin("alpha"), [ALPHA], "R1.1 wake: origin unchanged");
 
-	// R1.3 claim, then a status change, notes and labels through cp_job (tool calls in one turn may run concurrently).
+	// R1.3 claim, then a status change, notes and labels through cp_job, one turn each so no write order is assumed.
 	await settled(await send("claim:alpha", { source_send_id: DC(2), thread_id: B }));
 	assert.deepEqual([by("alpha")[0]!.status, origin("alpha")], ["in_progress", [ALPHA]], "R1.3 cp_job claim: origin unchanged");
-	await settled(await send("touch:alpha", { source_send_id: DC(2), thread_id: B }));
+	for (const op of ["status", "notes", "label"]) await settled(await send(`${op}:alpha`, { source_send_id: DC(2), thread_id: B }));
 	const touched = by("alpha")[0]!;
 	assert.deepEqual([touched.status, touched.notes, touched.labels.includes("s10b-touched")], ["open", "touched", true], "the updates landed");
 	assert.deepEqual(origin("alpha"), [ALPHA], "R1.3 cp_job claim/status/notes/labels: origin unchanged");

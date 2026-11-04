@@ -7099,7 +7099,8 @@ composer's `#` picker (also `/thread`). It reads `GET /api/threads` and writes o
 
 - **Selection in the hash.** `thread=th-…` is one named thread, `thread=none` No thread, absent All messages
   (`viewer-app/thread-selection.ts`). It never reaches an API and never remounts the screen; the project filter still
-  applies beside it.
+  applies beside it. A thread link drops `transcript=1` (keeping `session=`), so it opens a `defaulted` Full transcript:
+  if the server refuses the transcript (403), it falls back silently to Decisions, not to the explicit-route error.
 - **Recorded membership only.** A named thread shows the entries, pending sends, open asks and working jobs its
   `thread_id`, ask join or job join names; No thread shows what no thread claims; All messages filters nothing and keeps
   the one model and context line. Untagged history is never placed in a named thread.
