@@ -6,16 +6,17 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { LAYOUT, paths } from "../../src/contracts.ts";
+import { CommandPost } from "../../src/command-post.ts";
+import { DEFAULT_BUDGET_CONFIG, type Failure, LAYOUT, paths } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { NATIVE_REVIVE_PROMPT, NATIVE_SESSION_FILE, readNativeSession } from "../../src/drivers/claude-followup.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, type RecordedClaudeRequest, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
-import { readFleet, readRunEvents, readRunStatus, treehouseAvailable } from "../harness/index.ts";
+import { readFleet, readRunEvents, readRunStatus, REPO_ROOT, routeNamed, treehouseAvailable, waitFor } from "../harness/index.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
 const skip = missing.length > 0 ? `needs ${missing.join(" and ")} on PATH` : false;
@@ -199,6 +200,10 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 		h.thawed,
 		tool("cp_revive", { job_id: id, confirm: true }),
 		h.wait(id, "agent_settled", 2),
+		// M1: a record that lost its session id makes the next resume throw after the "resuming" ack.
+		h.sh(`sed -i 's/,"session_id":"[^"]*"//' "${join(h.b.home, paths.runDir(id), NATIVE_SESSION_FILE)}"`),
+		tool("cp_send", { job_id: id, message: "Resume that cannot start." }),
+		h.wait(id, "native_resume_failed", 1),
 		h.off,
 		tool("cp_teardown", { job_id: id }),
 	], h.env)) as Tool[];
@@ -224,6 +229,11 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 	const events = readRunEvents(h.b.home, id);
 	assert.equal(events.filter((event) => event.type === "envelope_received").length, 2);
 	assert.equal(events.filter((event) => event.type === "native_run").length, 3);
+	// M1: the "resuming" ack is not a delivery claim; the resume that threw is journaled by name, and no run was counted.
+	const failedSend = ends.find((end) => end.toolName === "cp_send");
+	assert.match(String(failedSend?.result.details?.native), /^resuming:/, text(failedSend));
+	const failedResume = events.find((event) => event.type === "native_resume_failed")?.payload as { reason?: string } | undefined;
+	assert.match(failedResume?.reason ?? "", /holds no session id/);
 	// F5 teardown: with the switch off, the job still tears down on an observed exit and its scratch dir goes.
 	const down = ends.find((end) => end.toolName === "cp_teardown");
 	assert.notEqual(down?.isError, true, text(down));
@@ -231,4 +241,95 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 	assert.ok(removed?.removed && !existsSync(removed.removed), JSON.stringify(removed));
 	assert.equal(readFleet(h.b.home).jobs.find((job) => job.job_id === id)?.phase, "done");
 	assert.equal(h.claude.overrun(), 0);
+});
+
+test("F9: a queued driver:claude dispatch releases native, and an armed one is refused by name, never pi", { skip, timeout: 420_000 }, async (t) => {
+	const ids: Record<string, string> = {};
+	const h = await nativeHome(t, [
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids.queued!)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids.queued!, h.b.home) }] },
+		{ kind: "text", text: "Reported." },
+	]);
+	writeFileSync(join(h.b.home, LAYOUT.budgetsFile), JSON.stringify({ ...DEFAULT_BUDGET_CONFIG, spawn_cap: 1 }));
+	const pi = (await h.b.ledger.create({ title: "pi slot holder", project: "demo", delivery: "local", kind: "research" })).id;
+	ids.queued = (await h.job()).id;
+	ids.armed = (await h.job()).id;
+	await h.b.ledger.addDep(ids.armed, ids.queued);
+	const artifact = join(h.b.home, paths.artifactFile(pi));
+	const piModel = h.b.provider.addScript("n3c-pi-slot", [
+		tool("bash", { command: `mkdir -p "${dirname(artifact)}" && printf '# pi\\n' > "${artifact}"` }),
+		tool("report_result", report(pi, h.b.home)),
+		{ kind: "text", text: "reported" },
+	]);
+	const model = h.b.provider.addScript("n3c-unused-3", [{ kind: "text", text: "unused" }]);
+	const armedFile = join(h.b.home, LAYOUT.armedDispatchFile);
+	const native = (id: string) => tool("cp_dispatch", { job_id: id, task: "Report the repo's package name.", model, driver: "claude" });
+	const ends = (await h.b.run([
+		tool("cp_dispatch", { job_id: pi, task: "Report.", model: piModel, queue: false, when_ready: false }),
+		h.wait(pi, "envelope_received", 1),
+		native(ids.queued),
+		native(ids.armed),
+		tool("cp_teardown", { job_id: pi }),
+		h.wait(ids.queued, "agent_settled", 1),
+		h.off,
+		tool("cp_teardown", { job_id: ids.queued }),
+		h.sh(`for i in $(seq 450); do grep -q '${ids.armed}' "${armedFile}" 2>/dev/null || break; sleep 0.2; done`),
+	], h.env, undefined, 300_000)) as Tool[];
+	const dispatches = ends.filter((end) => end.toolName === "cp_dispatch");
+	const teardowns = ends.filter((end) => end.toolName === "cp_teardown");
+	t.diagnostic(JSON.stringify(ends.map((end) => [end.toolName, end.isError, text(end).slice(0, 200)])));
+	assert.match(text(dispatches[1]), /queue/i, "the spawn cap queued the native dispatch");
+	assert.match(text(dispatches[2]), /armed/i, "the open blocker armed the native dispatch");
+	for (const end of teardowns) assert.notEqual(end.isError, true, text(end));
+	// The queued request released on the native driver: its run log has a native run, its record keeps the driver.
+	assert.equal(readFleet(h.b.home).jobs.find((job) => job.job_id === ids.queued)?.worker.driver, "claude");
+	assert.equal(readRunEvents(h.b.home, ids.queued!).filter((event) => event.type === "native_run").length, 1);
+	// The armed request released with the switch off: refused by name, nothing spawned, no pi worker.
+	assert.equal(readFleet(h.b.home).jobs.some((job) => job.job_id === ids.armed), false);
+	assert.equal(existsSync(join(h.b.home, paths.runDir(ids.armed!))), false);
+	const wakeups = readFileSync(join(h.b.home, LAYOUT.wakeupsFile), "utf8");
+	assert.match(wakeups, new RegExp(`ARMED DISPATCH DROPPED: [^"]*workers\\.native_claude_research is off[^"]*${ids.armed}`));
+	assert.equal(h.claude.overrun(), 0);
+});
+
+async function boundsPost(t: TestContext, script: readonly ClaudeStep[], ids: Record<string, string>) {
+	const h = await nativeHome(t, script);
+	const bounds: Failure[] = [];
+	const post = h.b.ownPost(new CommandPost({
+		home: h.b.home, packageRoot: REPO_ROOT, holdsParentLock: () => true, parentEnv: { ...process.env, ...h.b.agent.env, ...h.env },
+		onHardBound: (_jobId, failure) => void bounds.push(failure),
+	}));
+	ids.job = (await h.job()).id;
+	const model = h.b.provider.addScript(`n3c-bound-${ids.job}`, [{ kind: "text", text: "unused" }]);
+	h.b.agent.writeModels(h.b.provider);
+	routeNamed(h.b.home, [model]);
+	return { h, post, bounds, model };
+}
+
+async function assertBoundEnds(f: Awaited<ReturnType<typeof boundsPost>>, jobId: string, failureClass: string): Promise<void> {
+	const failed = await waitFor(() => f.post.fleet.get(jobId), (record) => record?.phase === "failed", { timeoutMs: 120_000, what: `${failureClass} to fail the native job` });
+	await waitFor(() => f.bounds.length, (n) => n === 1, { timeoutMs: 15_000, what: "one bound wake-up" });
+	assert.equal(failed?.failure?.class, failureClass);
+	assert.equal(f.bounds[0]?.class, failureClass);
+	assert.ok(readRunEvents(f.h.b.home, jobId).some((event) => event.type === "process_exit"), "no observed exit");
+	const down = await f.post.tearDown(jobId);
+	assert.equal(down.torn_down, true, JSON.stringify(down));
+	const removed = readRunEvents(f.h.b.home, jobId).find((event) => event.type === "native_scratch_removed")?.payload as { removed?: string } | undefined;
+	assert.ok(removed?.removed && !existsSync(removed.removed), JSON.stringify(removed));
+	assert.equal(f.post.fleet.get(jobId)?.lease_id, undefined, "the lease was not returned");
+}
+
+test("F10a: a native worker past its tool-call cap ends as a pi worker does", { skip, timeout: 240_000 }, async (t) => {
+	const ids: Record<string, string> = {};
+	const read = (): ClaudeStep => ({ kind: "tool_use", calls: [{ name: "Read", input: () => ({ file_path: join(readFleet(f.h.b.home).jobs[0]!.worktree, "README.md") }) }] });
+	const f = await boundsPost(t, [read(), read(), read(), read(), read()], ids);
+	await f.post.dispatch({ jobId: ids.job!, task: "Read the README.", model: f.model, driver: "claude", fetch: false, toolCallCap: 3, wallClockSeconds: 600 });
+	await assertBoundEnds(f, ids.job!, "tool_call_cap_exceeded");
+});
+
+test("F10b: a native worker past its wall-clock ends as a pi worker does", { skip, timeout: 240_000 }, async (t) => {
+	const ids: Record<string, string> = {};
+	const f = await boundsPost(t, [{ kind: "tool_use", calls: [{ name: "Read", input: { file_path: "/nonexistent" } }], beforeAnswer: () => sleep(60_000) }], ids);
+	await f.post.dispatch({ jobId: ids.job!, task: "Read the README.", model: f.model, driver: "claude", fetch: false, toolCallCap: 900, wallClockSeconds: 15 });
+	await assertBoundEnds(f, ids.job!, "wall_clock_exceeded");
 });

@@ -86,8 +86,7 @@ export function enqueueFollowUp(runDir: string, message: string): void {
 }
 
 /** The durable busy-send queue, oldest first; an unreadable queue throws a named error, never an empty one. */
-export function queuedFollowUps(runDir: string): string[] {
-	const file = join(runDir, NATIVE_FOLLOWUPS_FILE);
+export function queuedFollowUps(runDir: string, file = join(runDir, NATIVE_FOLLOWUPS_FILE)): string[] {
 	if (!existsSync(file)) return [];
 	try {
 		return readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => String((JSON.parse(line) as { message: unknown }).message));
@@ -96,12 +95,30 @@ export function queuedFollowUps(runDir: string): string[] {
 	}
 }
 
-/** Drops the `count` oldest queued follow-ups only; a send queued since they were read stays queued. */
-export function dropFollowUps(runDir: string, count: number): void {
-	const file = join(runDir, NATIVE_FOLLOWUPS_FILE);
-	const rest = existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).slice(count) : [];
-	if (rest.length === 0) rmSync(file, { force: true });
-	else writeFileSync(file, `${rest.join("\n")}\n`, { mode: 0o600 });
+const claimedFile = (runDir: string): string => join(runDir, `${NATIVE_FOLLOWUPS_FILE}.claimed`);
+
+/**
+ * Atomically claims the queue for one delivery: renames it aside, so a send queued after this lands in a fresh queue
+ * for the next turn end. A claim left by a crash is kept ahead of it. Then `settleClaim` or `returnClaim`.
+ */
+export function claimFollowUps(runDir: string): string[] {
+	const file = join(runDir, NATIVE_FOLLOWUPS_FILE), claimed = claimedFile(runDir);
+	if (existsSync(file) && existsSync(claimed)) {
+		writeFileSync(claimed, readFileSync(file, "utf8"), { flag: "a", mode: 0o600 });
+		rmSync(file);
+	} else if (existsSync(file)) renameSync(file, claimed);
+	return queuedFollowUps(runDir, claimed);
+}
+
+/** The claimed follow-ups were delivered: drop exactly them. */
+export const settleClaim = (runDir: string): void => rmSync(claimedFile(runDir), { force: true });
+
+/** Delivery was refused: the claimed follow-ups go back ahead of any queued since, none lost or duplicated. */
+export function returnClaim(runDir: string): void {
+	const file = join(runDir, NATIVE_FOLLOWUPS_FILE), claimed = claimedFile(runDir);
+	if (!existsSync(claimed)) return;
+	if (existsSync(file)) writeFileSync(claimed, readFileSync(file, "utf8"), { flag: "a", mode: 0o600 });
+	renameSync(claimed, file);
 }
 
 /**

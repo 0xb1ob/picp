@@ -14,15 +14,16 @@ import { type Delivery, paths, type Usage } from "../contracts.ts";
 import { REPORT_TOOL, runClaudeSpike } from "./claude-spike.ts";
 import {
 	assertNativeResume,
-	dropFollowUps,
+	claimFollowUps,
 	enqueueFollowUp,
 	NATIVE_SCRATCH_PREFIX,
 	NATIVE_SESSION_FILE,
 	type NativeSession,
 	nativeDoorRefusal,
-	queuedFollowUps,
 	readNativeSession,
 	removeNativeScratch,
+	returnClaim,
+	settleClaim,
 	writeNativeSession,
 } from "./claude-followup.ts";
 
@@ -138,17 +139,20 @@ async function turn(prompt: string): Promise<Turn> {
 /** Queued busy sends, delivered by a resume at turn end only after the same admission a cp_send resume passes. */
 async function dueFollowUps(ran: Turn): Promise<string | undefined> {
 	const runDir = env.CP_RUN_DIR ?? "";
-	const queued = queuedFollowUps(runDir);
-	if (queued.length === 0 || abort.signal.aborted) return undefined;
+	// Claimed before the admission await: a send queued during it waits for the next turn end, never lost.
+	const queued = claimFollowUps(runDir);
+	if (queued.length === 0) return undefined;
+	if (abort.signal.aborted) return void returnClaim(runDir);
 	const events = join(env.CP_HOME ?? "", paths.eventsFile(env.CP_JOB_ID ?? ""));
 	const recorded = existsSync(events) && readFileSync(events, "utf8").includes(ran.runId);
 	try {
 		await assertNativeResume({ home: env.CP_HOME ?? "", jobId: env.CP_JOB_ID ?? "", what: "queued follow-up", ...(ran.pending && !recorded ? { pending: ran.pending } : {}) });
 	} catch (error) {
+		returnClaim(runDir);
 		write({ type: "native_followup_refused", count: queued.length, reason: (error as Error).message });
 		return undefined;
 	}
-	dropFollowUps(runDir, queued.length);
+	settleClaim(runDir);
 	write({ type: "native_followup_delivered", count: queued.length });
 	return queued.join("\n\n");
 }
@@ -161,11 +165,9 @@ async function serve(first: string): Promise<number> {
 	let code = 1;
 	try {
 		const runDir = env.CP_RUN_DIR ?? "";
-		const left = queuedFollowUps(runDir);
-		if (left.length > 0) {
-			dropFollowUps(runDir, left.length);
-			write({ type: "native_followup_delivered", count: left.length });
-		}
+		const left = claimFollowUps(runDir);
+		settleClaim(runDir);
+		if (left.length > 0) write({ type: "native_followup_delivered", count: left.length });
 		let prompt: string | undefined = [first, ...left].join("\n\n");
 		while (prompt !== undefined) {
 			const ran = await turn(prompt);
@@ -201,8 +203,10 @@ function command(line: string): void {
 		return reply({ success: true, data: { disposition: "queued" } });
 	}
 	if (message !== undefined && request.type === "prompt") {
-		reply({ success: true, data: { disposition: resuming ? "resumed" : "started" } });
+		// "resuming" is admitted and starting, not yet run: a resume that throws is journaled as native_resume_failed.
+		reply({ success: true, data: { disposition: resuming ? "resuming" : "started" } });
 		run = serve(message).catch((error: unknown) => {
+			if (resuming) write({ type: "native_resume_failed", reason: (error as Error).message });
 			process.stderr.write(`[native claude] refused: ${(error as Error).message}\n`);
 			return 1;
 		});

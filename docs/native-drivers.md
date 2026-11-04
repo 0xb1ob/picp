@@ -358,7 +358,7 @@ only path, with the same Bash policy, R1, lockdown, managed hooks, env allow-lis
 
 | Follow-up | pi | native claude |
 |---|---|---|
-| `cp_send`, worker idle | prompt into the live session | admission, then ONE new claude process resumes the session with the message; ack `native: resuming: …` (sent before the run; a failed resume is the worker's named failure) |
+| `cp_send`, worker idle | prompt into the live session | admission, then ONE new claude process resumes the session with the message; worker disposition `resuming` (admitted, process starting, not yet run), ack `native: resuming: …`; a resume that throws journals `native_resume_failed` and the worker exits non-zero |
 | `cp_send`, worker busy (auto/follow_up) | steer (auto) or follow_up | queued in `native-followups.jsonl`; ack `receipt: queued`, `native: queued until the current turn ends …` |
 | `cp_send` mode `steer` | steer into the turn | refused by name; nothing sent |
 | `cp_revive` | respawn idle | respawn, then resume with picp's revive prompt (also from `failed`) |
@@ -366,8 +366,10 @@ only path, with the same Bash policy, R1, lockdown, managed hooks, env allow-lis
 
 **Busy-send choice: (ii), a durable picp queue.** Streaming user input into a live SDK session is a mid-turn steer
 whose arrival point picp cannot observe or gate, so the ack could not be truthful. A busy send is appended to the queue
-and acked as queued, never as delivered or steered. At turn end the worker re-runs `assertNativeResume` and, if admitted,
-delivers the whole queue as one resumed turn (`native_followup_delivered`); if refused it keeps the queue and logs
+and acked as queued, never as delivered or steered. At turn end the worker first claims the queue atomically (a rename
+to `native-followups.jsonl.claimed`), so a send queued while admission runs lands in a fresh queue for the next turn end.
+It then re-runs `assertNativeResume`; if admitted it delivers exactly the claimed messages as one resumed turn
+(`native_followup_delivered`); if refused it puts them back ahead of any newer ones and logs
 `native_followup_refused` with the reason. A queued follow-up does not reopen the report slot; an idle send does, so
 reports stay one accepted per generation.
 

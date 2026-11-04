@@ -508,7 +508,7 @@ export class Sender {
 			...(superseded ? { superseded } : {}),
 			...(taskUpdate ? { task_updated: taskUpdate } : {}),
 			...(riskWarning ? { risk_warning: riskWarning } : {}),
-			...(native && outcome.disposition === "resumed" ? { native: NATIVE_ACK.resumed } : native && outcome.receipt === "queued" ? { native: NATIVE_ACK.queued } : {}),
+			...(native && outcome.disposition === "resuming" ? { native: NATIVE_ACK.resumed } : native && outcome.receipt === "queued" ? { native: NATIVE_ACK.queued } : {}),
 		};
 	}
 
