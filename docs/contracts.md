@@ -6984,7 +6984,8 @@ never read or written.
 
 The decided named-threads product (es-99574f): a thread is an opaque, immutable id (`th-` + 16 random hex) plus a free
 display name (trimmed, 1–80 code points, no control characters; duplicates allowed). S8 ships only the registry and its
-read-only projection; S9 tags dashboard sends (below); nothing tags asks, jobs or the parent outbox yet (S10), and there is
+read-only projection; S9 tags dashboard sends (below); S10a carries the source on asks and the parent outbox (below);
+nothing tags jobs yet (S10b), and there is
 no thread UI (S11).
 
 - **Registry.** `state/operator/named-threads.jsonl` (0600), append-only, one complete fsynced line per event, schema
@@ -7028,11 +7029,36 @@ S11's picker sets it; a queued, held, retried or edited send keeps the thread it
   `; thread=` field is never written (the parser still ignores one). Membership is one `bind` line keyed
   `{kind: "message", id: <pi entry id>, session_id}`, written by the owner for the exact message object it injected and
   only when that object's text is the text it injected: a typed copy of a marker binds nothing, and a refused inbox
-  handoff leaves nothing to bind.
+  handoff, or an accepted one pi never showed by the settle (nothing pending in pi), leaves nothing to bind.
 - **Replies by turn.** `/api/sessions` gives every entry of a turn (replies, tools) its user entry's binding as
   `thread_id`; a `custom_message` (a wake) starts an untagged turn. CLI input, old history and an unavailable registry
   read untagged — still shown in All messages. Nothing is inferred from marker text, project headers, dates, nearby
   messages or job-name prefixes.
+
+### Thread origins (full match S10a)
+
+The main session names the dashboard message it relays or asks about: `cp_parent send` and `cp_parent ask` take an
+optional `source_send_id`, the `dc-…` id from that message's `[cp-dashboard dc-… — from the dashboard]` marker. Chat-typed
+messages have none and pass none. Parent intake, jobs and the "Started from chat" projection are S10b; no thread UI (S11).
+
+- **Resolved by the owner, from its own record.** The operator session reads `state/operator/dashboard.jsonl`: the id
+  must be a `message` request whose latest outcome is `delivered`, and its thread is that request line's `thread_id`
+  (absent: `null`, No thread — untagged, not an error). A malformed id, an id it never delivered (forged, queued,
+  refused, failed, or an offline inbox id) or an unreadable journal is refused with a plain reason and nothing is sent,
+  enqueued or opened. Never resolved from text, the latest delivered or bound send, or a selected thread.
+- **Ask `source`.** The `open` line in `state/operator/asks.jsonl` gains optional `source: {send_id, thread_id|null}`,
+  written once at creation; `ask_answer` / `ask_withdraw` lines never carry or change it, so an answer inherits its
+  ask's thread by id. A line without `source` (every older journal) reads untagged.
+- **Outbox `origin`.** A send's `cp-parent.sends.json` entry gains optional `origin: {source_send_id, thread_id|null}`,
+  set at enqueue and never rewritten: the outer retry, a replay after a parent or owner restart and pending → settled
+  keep it; a duplicate text from another thread is its own entry with its own origin. The `ps-…` send id the parent
+  sees is the key S10b's intake resolves, so the parent never echoes a thread id.
+- **Capability.** The owner's `status` advertises `thread_origins: true`. A send with an origin goes to the parent host
+  as its own `sendFrom` op; a host from before S10a answers it as an unknown op, and `cp_parent send` refuses
+  `source_send_id is unsupported: this parent host predates thread origins; reload the operator session …` with
+  nothing enqueued. A send without `source_send_id` is unchanged.
+- **No authority.** `delegated` / `delegation_rule` and receipts behave exactly as before; an origin or source grants no
+  mandate, decision or merge.
 
 ### Remote devices (remote dashboard PR 1)
 

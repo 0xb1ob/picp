@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { Type, type Static } from "typebox";
 import { IsoTimestampSchema, isoTimestamp, validate } from "./contracts.ts";
 import { durableAppend } from "./json-store.ts";
+import { type AskSource, AskSourceSchema } from "./operator-origins.ts";
 
 const Text = Type.String({ minLength: 1, pattern: "\\S" });
 export const OperatorAskInputSchema = Type.Object({
@@ -22,6 +23,8 @@ const Id = Type.String({ pattern: "^ask-[a-f0-9]+$" });
 const OpenEvent = Type.Object({
 	...OperatorAskInputSchema.properties,
 	type: Type.Literal("open"), id: Id, created_at: IsoTimestampSchema,
+	/** Full match S10a: the dashboard send this ask is about, resolved by the owner; absent is untagged. */
+	source: Type.Optional(AskSourceSchema),
 }, { additionalProperties: false });
 const AnswerEvent = Type.Object({
 	type: Type.Literal("answer"), id: Id, answered_at: IsoTimestampSchema, answer: Text,
@@ -33,7 +36,7 @@ const WithdrawEvent = Type.Object({
 const EventSchema = Type.Union([OpenEvent, AnswerEvent, WithdrawEvent]);
 type AskEvent = Static<typeof EventSchema>;
 export type OperatorAsk = OperatorAskInput & {
-	id: string; created_at: string; state: "open" | "answered" | "withdrawn";
+	id: string; created_at: string; state: "open" | "answered" | "withdrawn"; source?: AskSource;
 	answered_at?: string; answer?: string; reason?: string; withdrawn_at?: string;
 };
 
@@ -42,8 +45,8 @@ export class OperatorAsks {
 	constructor(file: string) { this.file = file; }
 
 	open(): OperatorAsk[];
-	open(input: OperatorAskInput): OperatorAsk;
-	open(input?: OperatorAskInput): OperatorAsk | OperatorAsk[] {
+	open(input: OperatorAskInput, source?: AskSource): OperatorAsk;
+	open(input?: OperatorAskInput, source?: AskSource): OperatorAsk | OperatorAsk[] {
 		if (input === undefined) return this.list().filter((ask) => ask.state === "open");
 		const checked = validate<OperatorAskInput>(OperatorAskInputSchema, input);
 		if (!checked.ok) throw new Error(`invalid operator ask: ${JSON.stringify(checked.errors)}`);
@@ -53,7 +56,7 @@ export class OperatorAsks {
 		const event: Static<typeof OpenEvent> = {
 			...checked.value,
 			options: checked.value.options.map((option) => ({ ...option, consequence: option.consequence.length > 200 ? `${option.consequence.slice(0, 199)}\u2026` : option.consequence })),
-			type: "open", id: `ask-${randomBytes(6).toString("hex")}`, created_at: isoTimestamp(),
+			type: "open", id: `ask-${randomBytes(6).toString("hex")}`, created_at: isoTimestamp(), ...(source ? { source } : {}),
 		};
 		this.list(); // Refuse a corrupt journal before appending more history.
 		this.append(event);
