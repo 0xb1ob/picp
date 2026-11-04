@@ -291,3 +291,49 @@ never opens it. Recommend an auth-only settings file for workers.
 | Live smoke (one run, before R1/R2) | exit 0, verdict ok, counts as in the table, no extras |
 | `node_modules` | 231 MB, unchanged (+39 MB over main before N2) |
 | Files | `claude-spike.ts` 522, `claude-bash-policy.ts` 230, `claude-lockdown.ts` 96, gates e2e 268 lines |
+
+## N3b research wiring
+
+**The switch.** `workers.native_claude_research` (dashboard Settings → *Native workers*, file `data/native.json`, key
+`claude_research`) is OFF by default. It changes nothing on its own: a job runs native only when `cp_dispatch` also
+names `driver: "claude"`. pi stays the default driver and routing rows are unchanged.
+
+**Selection and refusals.** `assertNativeSelection` (`src/drivers/claude.ts`) runs inside `Dispatcher.dispatch` after
+the existing holds, the drain/update freeze (`assertDispatchOpen`), trust and budget preflight, and before the lease and
+any spawn. Each refusal reads `refused: <job> cannot run on the native claude driver: <reason>`, in this order:
+
+| Condition | Refusal names |
+|---|---|
+| switch file unreadable or off | the setting and where to turn it on |
+| not research (role `planner`, delivery `local` or `answer`) | the job's kind/role/delivery; ship, review, plan, parent and operator roles never run native |
+| another native job is live (fleet record with `worker.driver`, no observed exit) | concurrency 1 and the live job |
+| `claude` missing or below the pinned floor `CLAUDE_VERSION_FLOOR` | `claude update` / install remedy |
+
+`WorkerManager.spawn` refuses a second live native worker again (`SpawnSafetyError`) before admission.
+
+**Lifecycle.** The native worker is `src/drivers/claude-worker.ts`, a child that speaks the pi RPC lines dispatch already
+reads, so the recorder, intake, bounds, observers and teardown are pi's own. `runClaudeSpike` is the run core (folded in,
+no longer test-only): every N3a gate is on and not optional.
+
+| Step | Native behaviour |
+|---|---|
+| Dispatch | `worker.driver: "claude"` on the fleet record; the brief is the first `prompt`; the routed model is passed only when it is `anthropic/…` |
+| Gates | read-only Bash policy, secret-path guard (R1), lockdown, managed-only hooks, env allow-list, fresh `CLAUDE_CONFIG_DIR`, no setting sources |
+| Report | `mcp__picp__report_result` through the existing validators and intake; one accepted generation; a wrong-job report is refused |
+| Bounds | tool calls arrive as `tool_execution_start`; wall-clock and tool-call caps apply as for pi |
+| No report or crash | the worker exits non-zero; the job fails on the observed exit, never a guessed completion |
+| Teardown | stdin close aborts the run; the lease returns only after the observed child exit (`src/teardown.ts`) |
+| Ledger and dashboard | job detail shows `native claude` next to the model |
+
+**Refused until N3c.** `cp_send` (busy or idle), `cp_revive` (also inside bounded recovery) and any second RPC
+command are refused with "native follow-ups land in N3c"; nothing is queued. Resume is not offered.
+
+**Usage.** A complete SDK usage is normalized to pi's `message_end` usage (input excludes cache read/write), so run
+status, the fleet record, mandate accounting and the per-job `checkBudget` read it exactly like pi usage. When the SDK
+reports `partial` or `unavailable`, the worker writes no measurement: it emits `usage_unavailable`, run status carries
+`usage_unavailable: true` and the dashboard shows "unavailable (not measured)". Accounting then adds nothing for that
+run (the counters are never written as a measured zero) and admission does not wait on it; a native run is one research
+turn with no follow-ups, so no later per-job budget check reads it.
+
+**Rollback.** Turning the switch off refuses new native dispatches only; a live native job keeps its driver until its
+own exit or teardown.

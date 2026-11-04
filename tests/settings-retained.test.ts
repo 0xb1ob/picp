@@ -37,6 +37,7 @@ import { readUpdateConfig } from "../src/service/update.ts";
 import { loadViewerConfig } from "../src/viewer/host-config.ts";
 import { publicUrlError as viewerPublicUrlError } from "../src/viewer/public-url.ts";
 import { readOwnerConsistently } from "../src/settings.ts";
+import { loadNativeConfig } from "../src/worker-driver.ts";
 import { createScratchHome, REPO_ROOT } from "./harness/index.ts";
 
 const OWNER_FILE: Record<SettingFileOwner, string> = {
@@ -51,6 +52,7 @@ const OWNER_FILE: Record<SettingFileOwner, string> = {
 	update: `${LAYOUT.data}/update.json`,
 	routing: LAYOUT.routingFile,
 	viewer: `${LAYOUT.data}/viewer.json`,
+	native: `${LAYOUT.data}/native.json`,
 };
 const CAPACITY_MIN = { url: "https://gw.example/", path: "/x" };
 
@@ -67,10 +69,10 @@ const write = (home: string, owner: SettingFileOwner, body: unknown) =>
 const fieldOf = (key: SettingKey) => SETTING_FIELDS.find((field) => field.key === key) as SettingField;
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
-test("(a) catalog: 35 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
-	assert.equal(SETTING_KEYS.length, 35);
+test("(a) catalog: 36 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
+	assert.equal(SETTING_KEYS.length, 36);
 	assert.deepEqual(SETTING_FIELDS.map((field) => field.key), [...SETTING_KEYS]);
-	assert.equal(new Set(SETTING_KEYS).size, 35);
+	assert.equal(new Set(SETTING_KEYS).size, 36);
 	assert.ok(Object.isFrozen(SETTING_FIELDS));
 	for (const field of SETTING_FIELDS) {
 		assert.ok(field.key.startsWith(`${field.section}.`), `${field.key} sits in section ${field.section}`);
@@ -170,6 +172,7 @@ test("(c) range agreement: validateSettingValue accepts exactly what the owner s
 			write(home, "viewer", { [key]: value });
 			return accepts(() => loadViewerConfig(ownerFile(home, "viewer"))[key], value);
 		},
+		native: (field, value) => (write(home, "native", { [field.file_key as string]: value }), accepts(() => loadNativeConfig(ownerFile(home, "native")).claude_research, value)),
 	};
 	let compared = 0;
 	for (const field of SETTING_FIELDS) {

@@ -63,6 +63,8 @@ export const WorkerHandleSchema = Type.Object(
 		role: RoleSchema,
 		model: Type.String({ minLength: 1 }),
 		started_at: IsoTimestampSchema,
+		/** Set only for a native worker (N3b); absent is pi, the default. A live job keeps the driver it started on. */
+		driver: Type.Optional(StringEnum(["claude"])),
 		/** Set once the child close event is OBSERVED. Never inferred. */
 		exited_at: Type.Optional(IsoTimestampSchema),
 		exit_code: Type.Optional(Type.Union([Type.Integer(), Type.Null()])),

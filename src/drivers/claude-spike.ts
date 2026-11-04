@@ -1,6 +1,6 @@
 /**
- * Native worker spike (N2 step 1): one isolated Claude research-role run through the official Agent SDK `query()`,
- * on the user's installed `claude`. Not wired into dispatch, send, revive, routing or the fleet; pi stays the runtime.
+ * Native worker run core (N2 spike, production since N3b): one isolated Claude research-role run through the official
+ * Agent SDK `query()` on the user's installed `claude`. src/drivers/claude-worker.ts wraps it for dispatch.
  */
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -14,6 +14,7 @@ import {
 	type Options,
 	type Query,
 	query,
+	type SDKMessage,
 	type SDKResultMessage,
 	type SpawnOptions,
 	tool,
@@ -313,6 +314,8 @@ export interface SpikeRunOptions {
 	timeoutMs?: number;
 	/** Aborting it interrupts the run: the child is stopped and its observed exit reported. */
 	signal?: AbortSignal;
+	/** Sees every SDK message as it arrives (the native worker's event stream); a throw here is swallowed. */
+	onMessage?: (message: SDKMessage) => void;
 	/** Caller-owned scratch outside the worktree, kept so a later run can resume; the caller removes it. */
 	scratchDir?: string;
 	/** Resume this session; `ledger` is the previous run's, so the resumed process's restored totals are not recounted. */
@@ -469,6 +472,11 @@ async function runInScratch(
 	try {
 		const q = query({ prompt: options.prompt, options: sdkOptions });
 		for await (const message of q) {
+			try {
+				options.onMessage?.(message);
+			} catch {
+				// An observer must never end the run.
+			}
 			if (message.type === "system" && message.subtype === "init" && checking === undefined) {
 				initModel = message.model;
 				sessionId = message.session_id;

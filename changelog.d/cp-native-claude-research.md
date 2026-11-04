@@ -1,0 +1,1 @@
+- Native Claude research workers (N3b): `cp_dispatch driver:"claude"` runs a research job on the installed `claude` with every N3a gate on, behind the OFF-by-default Settings switch *Native workers*; one native job at a time, follow-ups refused until N3c, and job detail shows the driver.

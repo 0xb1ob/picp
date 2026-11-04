@@ -85,6 +85,7 @@ export const RESTORE_ACTIONS: Readonly<Partial<Record<SettingKey, "delete" | "de
 	"maintenance.update_interval_min": "installer_seed",
 	"viewer.strict_host": "delete",
 	"viewer.public_url": "delete",
+	"workers.native_claude_research": "delete",
 });
 
 /** What cp-install writes to `data/update.json` (src/service/install.ts step 7). */

@@ -62,6 +62,7 @@ import type { RunRecorder } from "./run-artifacts.ts";
 import { RunRegistry } from "./runs.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import type { WorkerProcess } from "./worker-process.ts";
+import { assertNativeSelection, type NativeSelection } from "./drivers/claude.ts";
 import { type DepsPorts, prepareNodeDeps } from "./worktree-deps.ts";
 import type { MandateStore } from "./mandate.ts";
 import { assertContinuationTask, continuityInputsBlock } from "./mandate-continuity.ts";
@@ -253,9 +254,6 @@ function selectProfile(
 	return profileForRole(profilesDir, ROLE_FOR_KIND[labels.kind]);
 }
 
-// The resolution boundary itself lives in pipeline.ts (see the import above);
-// this keeps `import { resolveRoutingInputs } from "./dispatch.ts"` working for
-// every caller and test that already reaches for it here.
 export { resolveRoutingInputs } from "./pipeline.ts";
 
 /** R1 D2: `operatorQuote` is the operator's reference; `pick`/`pickSpent` are set only by withOperatorPick. */
@@ -292,6 +290,8 @@ export interface DispatchRequest extends PickRequest {
 	inputsFrom?: SuppliedBy;
 	/** H6: a risk the pipeline recorded (`src/pipeline.ts`) that routing is not given; only the risk:high gate reads it. */
 	recordedRisk?: PipelineRecordedRisk;
+	/** N3b: `claude` runs this research job on the native driver when every selection condition holds; absent is pi. */
+	driver?: NativeSelection["driver"];
 	/** Explicit model override (still allowlisted). */
 	model?: string;
 	/**
@@ -642,6 +642,7 @@ export class Dispatcher {
 			throw (error instanceof MandateError && error.code) || (error instanceof ScheduleAuthorityError && error.code === "parallelism_full") ? error : new DispatchError((error as Error).message); // coded: dispatch queue
 		}
 
+		if (request.driver) await assertNativeSelection({ home: options.home, jobId: issue.id, driver: request.driver, kind, role: profile.frontmatter.role, delivery, jobs: options.fleet.read().jobs });
 		// --- 4. lease, then everything that can fail must clean up -----------
 		const lease = await options.leases.acquire(clone, { holder: issue.id, project: labels.project });
 		let recorder: RunRecorder | undefined;
@@ -732,6 +733,7 @@ export class Dispatcher {
 				sessionName: issue.id,
 				...(skills.length ? { skills: skills.map((s) => s.dir) } : {}),
 				admit: () => void (operatorPick = admitOperatorPick(options.home, request, options.fleet.get(issue.id), now())),
+				...(request.driver ? { driver: request.driver } : {}),
 			});
 			recorder.markSpawned({
 				pid: managed.worker.pid,
@@ -801,6 +803,7 @@ export class Dispatcher {
 					role: profile.frontmatter.role,
 					model: routing.model,
 					started_at: isoTimestamp(now()),
+					...(request.driver ? { driver: request.driver } : {}),
 				},
 				worktree: lease.path,
 				...(lease.lease_id ? { lease_id: lease.lease_id } : {}),
@@ -812,10 +815,7 @@ export class Dispatcher {
 				usage: EMPTY_USAGE,
 				budget: managed.plan.budget,
 				bounds: hardBounds,
-				// cp-status-scope-risk: the same scope/risk/thinking already recorded on
-				// `cp:routing_resolved`, persisted where a read-only view (status, the
-				// status block) can reach it without re-running `inferScopeAndRisk` at
-				// render time. One source of truth: this IS the routing decision.
+				// cp-status-scope-risk: the routing decision itself (`cp:routing_resolved`), persisted for read-only views.
 				...(skills.length ? { skills } : {}),
 				routing: recorded,
 			};

@@ -18,7 +18,7 @@ function ModelFact({job}: {job: ViewerJob}) {
  const id = job.script_path ?? job.model;
  if (!id) return <>not recorded</>;
  const provider = !job.script_path && id.includes("/") ? id.slice(0,id.lastIndexOf("/")) : null;
- return job.script_path ? <code>{job.script_path}</code> : <><ModelName job={job}/>{provider && <span class="job-provider">{provider}</span>}</>;
+ return job.script_path ? <code>{job.script_path}</code> : <><ModelName job={job}/>{provider && <span class="job-provider">{provider}</span>}{job.driver && <span class="job-provider">native {job.driver}</span>}</>;
 }
 
 function reviewFact(job: ViewerJob): string {
@@ -204,7 +204,7 @@ export function JobDetail({data, wide, initial, embedded = false}: {data: JobRes
     {data.mandate && <MandateSnippet mandate={data.mandate}/>}
     <dl class="job-facts">
      <div class="job-fact-clock"><dt>Wall clock</dt><dd>{clockFact(job)}</dd></div>
-     <div class="job-fact-cost"><dt>Cost</dt><dd>{job.cost_usd === null ? "not recorded" : money(job.cost_usd)}</dd></div>
+     <div class="job-fact-cost"><dt>Cost</dt><dd>{job.usage_unavailable ? "unavailable (not measured)" : job.cost_usd === null ? "not recorded" : money(job.cost_usd)}</dd></div>
      <div class="job-fact-model"><dt>Model</dt><dd><ModelFact job={job}/></dd></div>
      <div class="job-fact-head"><dt>Head</dt><dd>{job.head ? <ShaCopy sha={job.head}/> : "no commits yet"}</dd></div>
      <div class="job-fact-wide job-fact-context"><dt>Context</dt><dd>{job.context ? <ContextChip usage={job.context}/> : "none"}</dd></div>

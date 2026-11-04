@@ -342,6 +342,8 @@ export const RunStatusSchema = Type.Object(
 		turns: Type.Integer({ minimum: 0 }),
 		tool_calls: Type.Integer({ minimum: 0 }),
 		usage: UsageSchema,
+		/** A native worker whose run could not be measured: `usage` is then unknown, never a measured zero (N3b). */
+		usage_unavailable: Type.Optional(Type.Literal(true)),
 		started_at: IsoTimestampSchema,
 		last_activity_at: IsoTimestampSchema,
 		settled_at: Type.Optional(IsoTimestampSchema),

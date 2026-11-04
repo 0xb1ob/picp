@@ -43,7 +43,8 @@ const READ_ONLY: Record<string, Options> = {
 };
 const GIT_PRETTY = ["--oneline", "--stat", "--name-only", "--name-status", "--no-ext-diff", "--no-textconv"];
 const GIT_READ: Record<string, Options> = {
-	// git's `--pretty[=<fmt>]`, `--format=<fmt>` and diff `-U[<n>]` take an optional value, never the next word.
+	// `--format=<fmt>` takes a required value and `--pretty[=<fmt>]` and diff `-U[<n>]` an optional one; none takes
+	// the next word.
 	log: { short: "p", shortValue: "n", digits: true, long: GIT_PRETTY, longValue: ["--since", "--until", "--author"], longEquals: ["--format", "--pretty"] },
 	show: { short: "s", long: [...GIT_PRETTY, "--no-patch"], longEquals: ["--format", "--pretty"] },
 	diff: { shortValue: "U", attached: "U", long: [...GIT_PRETTY, "--cached", "--staged"] },

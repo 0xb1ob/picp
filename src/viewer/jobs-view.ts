@@ -85,6 +85,7 @@ export function jobsView(state:ViewerState, now=Date.now(), base=overview(state,
   const ledgerStatus=str(job?.status) ?? null;
   const expected=phase==="done" ? "closed" : phase==="queued" ? "open" : "in_progress";
   return {id,project,title:str(job?.title) ?? null,phase,model:detail?.model ?? null,script_path:detail?.script_path ?? null,
+   driver:str(obj(entry?.worker)?.driver) ?? null,usage_unavailable:status?.usage_unavailable===true,
    elapsed_seconds:live?.elapsed_seconds ?? duration,limit_seconds:live?.limit_seconds ?? nonnegative(obj(entry?.bounds)?.wall_clock_seconds),head:head ?? null,
    ci:headCi(state,id,ci,head ?? null),ci_forwarded:forwardedCi(state,id,head),review:str(review?.verdict) ?? null,review_attempts:Math.min(5,attempts.length),
    routing:live?.routing ?? (entry ? routingText(state,entry) : null),note:live?.note ?? null,ledger_status:ledgerStatus,ledger_disagrees:ledgerStatus!==null && (phase==="failed" || ledgerStatus!==expected),mandate_id:mandate,

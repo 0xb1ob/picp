@@ -23,6 +23,7 @@ const OWNER_FILE: Record<Exclude<SettingFileOwner, "routing">, string> = {
 	capacity: `${LAYOUT.data}/capacity.json`,
 	update: `${LAYOUT.data}/update.json`,
 	viewer: `${LAYOUT.data}/viewer.json`,
+	native: `${LAYOUT.data}/native.json`,
 };
 type Owner = keyof typeof OWNER_FILE;
 const CAPACITY = { url: "https://secret-gateway.example/", path: "/v1/secret-path" };

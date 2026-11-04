@@ -328,13 +328,14 @@ export class WorkerProcess {
 		const args = options.argv ? [...options.argv] : buildWorkerArgs(options);
 		const env = options.replaceEnv ? options.env : { ...process.env, ...options.env };
 		const guarded = guardedReviewerCommand(options.piBin ?? "pi", args, options.spawnGuard);
-		// Only a worker gets a scope: an `argv` child is the headless parent bridge, not a worker.
-		const command = options.argv ? guarded : scopedCommand(guarded.binary, guarded.args, env ?? {}, options.jobId);
+		// Only a worker gets a scope: an `argv` child without a job (the headless parent bridge) is not a worker.
+		const bridge = options.argv !== undefined && options.jobId === undefined;
+		const command = bridge ? guarded : scopedCommand(guarded.binary, guarded.args, env ?? {}, options.jobId);
 		// The scope holds the limit; a worker that kept it would scope its own nested test spawns outside that limit.
 		const { [WORKER_MEMORY_MAX_ENV]: _limit, ...workerEnv } = env ?? process.env;
 		const child = spawn(command.binary, command.args, {
 			cwd: options.cwd,
-			env: options.argv ? env : workerEnv,
+			env: bridge ? env : workerEnv,
 			stdio: ["pipe", "pipe", "pipe"],
 		});
 		return new WorkerProcess(child, options);

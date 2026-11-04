@@ -50,6 +50,8 @@ import {
 	WorkerProcess,
 	type WorkerSpawnOptions,
 } from "./worker-process.ts";
+import { nativeSpawnOptions } from "./drivers/claude.ts";
+import type { NativeDriver } from "./worker-driver.ts";
 
 /** Why a spawn was refused; the message text is unchanged, the code is for callers that branch (cp_dispatch queues `spawn_cap`). */
 export type SpawnRefusalCode = "spawn_cap" | "review_reserve" | "closing" | "duplicate";
@@ -356,6 +358,7 @@ export interface SpawnRequest {
 	extraEnv?: NodeJS.ProcessEnv;
 	/** Per-job operator-named skill dirs (`cp_dispatch skills`): absolute realpaths resolved upstream; package skills stay off. */
 	skills?: readonly string[];
+	driver?: NativeDriver; // N3b: set only after assertNativeSelection passed; absent spawns pi
 }
 
 export interface WorkerManagerOptions {
@@ -405,6 +408,7 @@ export interface ManagedWorker {
 	model: string;
 	profile: string;
 	startedAt: number;
+	driver?: NativeDriver;
 }
 
 /**
@@ -618,6 +622,7 @@ export class WorkerManager {
 				{ code: reviewer ? "review_reserve" : "spawn_cap" },
 			);
 		}
+		if (request.driver && this.active.some((w) => w.driver)) throw new SpawnSafetyError(`job ${key}: native concurrency is 1 and a native worker is live`);
 		request.admit?.();
 		const plan = this.plan(request);
 		if (plan.packagesError || plan.unresolvedTools) this.#options.recordEvent?.(jobId, "worker_packages_unresolved", {
@@ -659,6 +664,7 @@ export class WorkerManager {
 				? { extraArgs: [...(request.extraArgs ?? []), ...(optional.flags ?? [])] }
 				: {}),
 			...(this.#options.piBin ? { piBin: this.#options.piBin } : {}),
+			...(request.driver ? nativeSpawnOptions(request.model, plan.env) : {}),
 		});
 		const managed: ManagedWorker = {
 			key,
@@ -668,6 +674,7 @@ export class WorkerManager {
 			model: request.model,
 			profile: request.profile.frontmatter.name,
 			startedAt: Date.now(),
+			...(request.driver ? { driver: request.driver } : {}),
 		};
 		this.#workers.set(key, managed);
 		// The reserved slot (if any) is now this worker's: consumed, no notify.

@@ -16,6 +16,7 @@ const PEOPLE_MODELS: SettingKey[] = ["models.parent", "models.parent_thinking", 
 const GRANTS: SettingKey[] = ["grants.expiry_hours", "grants.spend_usd", "grants.spend_tokens", "grants.token_ceiling", "grants.job_cap", "grants.dispatch_parallelism", "grants.allowed_actions", "grants.ask_on", "grants.exclude_paths"];
 const COMPACTION: SettingKey[] = ["sessions.parent_compact_at_tokens", "sessions.operator_compact_at_tokens"];
 const VIEWER: SettingKey[] = ["viewer.public_url", "viewer.strict_host"];
+const WORKERS: SettingKey[] = ["workers.native_claude_research"];
 const lines = (text: string): string[] => text.split(/[\n,]/).map(line => line.trim()).filter(Boolean);
 const pick = (drafts: Drafts, keys: SettingKey[]): Drafts => Object.fromEntries(keys.filter(key => key in drafts).map(key => [key, drafts[key]]));
 const omit = (drafts: Drafts, keys: SettingKey[]): Drafts => Object.fromEntries(Object.entries(drafts).filter(([key]) => !keys.includes(key as SettingKey)));
@@ -206,6 +207,9 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
   </Section>
   <Section title="Dashboard address" help="Public URL applies to the next board or report link; the Host pin applies to the next dashboard request. Neither restarts anything." keys={VIEWER} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: VIEWER}} restoreText="Unset the public URL and turn the Host pin off?" disabled={disabled}>
    {VIEWER.map(field)}
+  </Section>
+  <Section title="Native workers" help="Off by default. On: a research job dispatched with driver claude runs on the installed Claude CLI, one at a time. Off again stops new native jobs only; a running one keeps its driver." keys={WORKERS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: WORKERS}} restoreText="Turn native Claude research workers off?" disabled={disabled}>
+   {WORKERS.map(field)}
   </Section>
   {children}
   <footer class="settings-audit"><h2>Recent changes</h2>{data.audit.length ? <ul>{data.audit.slice(-5).reverse().map((row, index) => <li key={`${row.at}-${index}`} class="job-meta">{auditLine(row)}</li>)}</ul> : <p class="job-meta">No settings change recorded</p>}</footer>

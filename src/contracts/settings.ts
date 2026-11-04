@@ -16,7 +16,7 @@ import { MANDATE_ACTIONS, MANDATE_ASK_ON } from "./mandates.ts";
 import { DEFAULT_QUALITY_THRESHOLD, DEFAULT_QUALITY_VOTERS, GATE_REVIEW_TIMEOUT_MAX_MS, GATE_REVIEW_TIMEOUT_MIN_MS } from "./reviews.ts";
 import { ReviewerModelSchema, RoutingRuleSchema, ThinkingLevelSchema } from "./routing.ts";
 
-export const SETTING_SECTIONS = ["grants", "budgets", "sessions", "models", "review", "capacity", "maintenance", "viewer"] as const;
+export const SETTING_SECTIONS = ["grants", "budgets", "sessions", "models", "review", "capacity", "maintenance", "viewer", "workers"] as const;
 export type SettingSection = (typeof SETTING_SECTIONS)[number];
 
 /** Owner files in revision order; `env` is the one owner without a file. */
@@ -32,6 +32,7 @@ export const SETTING_OWNERS = [
 	"update",
 	"routing",
 	"viewer",
+	"native",
 	"env",
 ] as const;
 export type SettingOwner = (typeof SETTING_OWNERS)[number];
@@ -107,6 +108,7 @@ export const SETTING_KEYS = [
 	"maintenance.update_interval_min",
 	"viewer.strict_host",
 	"viewer.public_url",
+	"workers.native_claude_research",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 
@@ -153,7 +155,7 @@ function deepFreeze<T>(value: T): T {
 
 const SAFE_MAX = Number.MAX_SAFE_INTEGER;
 
-/** The 35 fields, in `SETTING_KEYS` order. */
+/** The 36 fields, in `SETTING_KEYS` order. */
 export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	...group("grants", "mandate-defaults", { applies: "next_grant", on_invalid: "refuse" }, {
 		expiry_hours: { file_key: "expiry_hours", type: "number", minimum: 0.1, maximum: 720, default: 8, label: "Grant expiry (hours)", help: "How long a new grant stands before it must be re-issued." },
@@ -221,6 +223,9 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	...group("viewer", "viewer", { applies: "next_viewer_request", on_invalid: "refuse" }, {
 		strict_host: { file_key: "strict_host", type: "boolean", default: false, label: "Pin the dashboard Host", help: "Serve the local dashboard only under its exact bind host:port (the DNS-rebinding guard). Off: any name that reaches the port, such as a proxy's, is served with full control; an invalid file pins it." },
 		public_url: { file_key: "public_url", type: "url", default: null, applies: "next_board_link", label: "Public URL", help: "Where people reach this dashboard, e.g. a reverse proxy's https URL; board and report links use it. Links only: the bind address and the Host and Origin guards stay as they are. Empty clears it." },
+	}),
+	...group("workers", "native", { applies: "next_dispatch", on_invalid: "refuse" }, {
+		native_claude_research: { file_key: "claude_research", type: "boolean", default: false, label: "Native Claude research workers", help: "Off: every job runs on pi. On: a research job dispatched with driver claude runs on the installed Claude CLI, one at a time; nothing else changes. Turning it off stops new native jobs only." },
 	}),
 ]);
 
