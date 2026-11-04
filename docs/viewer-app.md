@@ -385,7 +385,8 @@ the operator steers its own running session (docs/contracts.md §Dashboard contr
   is busy, a plain send while it is idle — and Shift+Enter starts a new line
   (Ctrl/Cmd+Enter does the same as Enter; Enter never sends while an IME is
   composing). The text arrives in the
-  session as a user message, literally (no slash commands or templates). The
+  session as a user message, literally (no slash commands or templates; a prepared Composer menu command is the one
+  bounded exception, below). The
   delivery line remains for decision clicks and aborts; composer sends have their own queued bubbles below.
   `Session not running` or `Dashboard control is off (…)` replaces the controls when they cannot work.
 - **Composer draft**: unsent text is kept in `localStorage` under `cp-composer-draft:<session file>` and restored on return or reload; a send clears it, an explicit `draft=` link wins (a `ref=` evidence link keeps the saved text instead — see Composer reference), and a refusing browser still types and sends.
@@ -733,7 +734,7 @@ Desktop rows sit under Job, Title / context, Status, Done and Cost columns in an
 footer; phone rows show a one-line title, a monospace `suffix · model · cost` and the finished time or elapsed. Groups
 are In flight, With the team, Queued and Done today (Done under All, newest first), five rows each before "Show N
 more", which moves focus to the first revealed row. Statuses are capitalised (Working, Held, With the team, Queued,
-Merged #N, Done). The working glyph and the Working label stay neutral like every non-merged status; Merged is blue,
+Merged #N, Done). The Working label is green like the design (S6); the working glyph and every other non-merged status stay neutral; Merged is blue,
 as in design frames 3 and 9. A missing cost or time is "not recorded", never $0 or 0m,
 and each filter names its own empty state. PR chips (C1)
 render each slot as glyph and name (✓ Review, ◌ CI, ✕ CI, ○ Merge, ✓ Merged sha) with the recorded state in its
@@ -772,15 +773,25 @@ a historical file and a phone never open it on load, and a session change still 
 header's Jobs ⌘J; the committed captures are `desktop`, `phone`, `899`, `900`, `drawer` and `header-jobs` `.png` under
 `docs/tui-verification/full-match-shell/`.
 
-**Composer menu (M3 slice 4, cp-zm9f).** In the operator chat's composer (`ComposerMenu.tsx`), a draft that is exactly
-`/` or `/word` lists the matching commands in the composer's listbox (arrows, Enter/Tab run one, Escape closes it; an
-IME Enter is the composition's), and a 44 px `/` button after the paperclip opens the same commands for touch, then the
-M1 selection's in-flight and done-today jobs. `/status` writes "What is running and what needs me?" as an editable
-draft (below any typed text); `/jobs` opens the slice 2 drawer as Ctrl/Cmd+J does, focus returning to the field.
-Picking a job attaches its own P1 reference (the `ask_reference` of `GET /api/job/<id>`, refused with the reason when
-it has no ledger project or the lookup is unsupported) as the composer's one chip. Nothing in the menu sends; `@skill`
-completion, attachments, drafts and the offline composer are unchanged. Not offered: `/stop` (revocation), `/thread`
-and threads. `m3-composer` captures the menu, the typed list, `/status` and a reference at 1440, 900, 899 and 390 px.
+**Composer menu (M3 slice 4, cp-zm9f; commands full match S6).** In the operator chat's composer (`ComposerMenu.tsx`), a
+draft that is exactly `/` or `/word` lists the matching commands — `/status`, `/jobs`, `/stop` — in the composer's
+listbox (arrows, Enter/Tab pick one, Escape closes it; an IME Enter is the composition's). The footer's `@ job` and
+`/ command` chips (28 px with their label at ≥900 px, 44 px glyphs on a phone) open the job references alone or the
+commands followed by the M1 selection's in-flight and done-today jobs; the menu is frame 4's 534 px raised list with 36 px
+rows at 1440 and frame 10's 370 px list with 52 px rows at 390. `/jobs` opens the slice 2 drawer as Ctrl/Cmd+J does.
+`/status` and `/stop` only **prepare** a command shown above the field (the typed text and attachments stay); `/stop`
+needs its in-flight job, picked from the menu's "Stop which job?" list or `@ job`. Only the send button, then labelled
+`Submit /<name>`, sends it: one `POST /api/operator/message` `{kind:"command", command, job_id?, client_id}` per
+prepared command, its `client_id` the idempotency key for every retry. The viewer validates the grammar
+(`commandGrammar` in `src/viewer/control-files.ts`) and the operator session's cp-bridge validates it again
+(`src/dashboard-commands.ts`) before journaling `command: "/status"` (or `/stop <job>`) and injecting a human message
+— `/stop` asks the operator to stop the job; it never changes a grant. A cp-bridge from before S6 answers 409
+`unsupported: … restart the session`, a stopped session 409 too; a refusal keeps the command, the text and the
+attachments. Picking a job otherwise attaches its own P1 reference (the `ask_reference` of `GET /api/job/<id>`, refused
+with the reason when it has no ledger project or the lookup is unsupported) as the composer's one chip. Not offered:
+`/thread` and `#` threads. `m3-composer` captures the menu, the typed list, `/status` and a reference at 1440, 900, 899
+and 390 px; `full-match-commands` captures frames 4 and 10, a `/stop` waiting for its job, the old-bridge refusal and the
+Jobs drawer's green Working label into `docs/tui-verification/full-match-commands/`.
 
 Live PR and issue chips (Sessions chat): `GET /api/sessions` carries `pr_chips`, keyed by URL, built by
 `src/viewer/pr-chips.ts` from files the viewer already reads — fleet PR receipts and `bound_pr`, `merge.json`, the

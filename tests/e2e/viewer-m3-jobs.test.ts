@@ -441,12 +441,12 @@ test("M3-jobs-query (full match S3): Today/In flight, project and query narrow c
 	const queued = tab.$$(".workspace-jobs-row").find((b) => b.getAttribute("data-job") === "cp-queued")!;
 	assert.deepEqual(["cost", "done", "meta"].map((c) => queued.querySelector(`.workspace-jobs-${c}`)!.textContent), ["not recorded", "not recorded", "queued · cost not recorded"],
 		"an unrecorded cost or time says so, never $0 or 0m");
-	// Full match S3: lowercase neutral labels became capitalised ones; only Merged takes a colour (blue).
+	// Full match S3: capitalised labels; Merged is blue and, since S6 (ask-7532ed5924cb), Working green.
 	const status = (id: string) => { const s = tab.$(`${DRAWER} [data-job="${id}"] .workspace-jobs-status`)!, tone = ["merged", "working"].find((k) => s.classList.contains(`workspace-jobs-status-${k}`));
 		return `${s.textContent}/${tone ?? "neutral"}`; };
-	// Full match S4 (S3 review 4): cp-other's run is working, so the list pins the neutral Working label too.
+	// Full match S4 (S3 review 4): cp-other's run is working, so the list pins the Working label's green tone too.
 	assert.deepEqual(["cp-merged", "cp-done-0", "cp-park", "cp-queued", "cp-live", "cp-other"].map(status),
-		["Merged #2/merged", "Done/neutral", "With the team/neutral", "Queued/neutral", "Held/neutral", "Working/neutral"], "capitalised statuses; only Merged takes a colour here");
+		["Merged #2/merged", "Done/neutral", "With the team/neutral", "Queued/neutral", "Held/neutral", "Working/working"], "capitalised statuses; Merged and Working take a colour");
 
 	// Show more: five rows, then the rest; focus lands on the first revealed row instead of the vanished button.
 	assert.deepEqual(ids("Done today"), ["cp-merged", ...EXTRA.slice(0, 4)], "five rows, newest first");
@@ -520,6 +520,8 @@ test("M3-jobs-css: phone bottom sheet from y96 and full-screen job; desktop 861 
 	assert.match(rule(phone, ".workspace-jobs-title"), /min-width:0/, "the title column can shrink below its text");
 	assert.match(rule(phone, ".workspace-jobs-list>p"), /overflow-wrap:anywhere/, "a long query echoed in the empty state wraps");
 	assert.match(rule(phone, ".workspace-close"), /width:44px;height:44px/, "44 px close");
+	// Full match S6 (ask-7532ed5924cb): the Working label is green like the design; other non-merged labels stay muted.
+	assert.deepEqual([rule(phone, ".workspace-jobs-status-working"), /color:var\(--muted\)/.test(rule(phone, ".workspace-jobs-status"))], ["color:var(--green)", true], "Working green");
 	// Full match S3: 860 px became frame 3's 861 (left border at x579), its height clear of S5's status footer.
 	assert.match(rule(desktop, ".workspace-jobs"), /width:min\(861px,100%\);height:calc\(100% - var\(--workspace-status, ?0px\)\)/, "desktop: the 861 px drawer");
 	assert.match(rule(desktop, ".workspace-jobs"), /background:var\(--surface\)/, "desktop: the drawer is the design's raised surface");

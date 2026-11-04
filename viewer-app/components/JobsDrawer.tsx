@@ -19,8 +19,8 @@ const when = (job: ViewerJob) => job.finished_at ? time(job.finished_at) : job.e
 function JobButton({job, onSelect}: {job: ViewerJob; onSelect: (id: string) => void}) {
  const merged = job.pr_status === "merged" || job.merge_sha !== null, pr = prNumber(job.pr_url);
  const status = merged ? `merged${pr ? ` ${pr}` : ""}` : phaseText(job.phase), cost = job.cost_usd === null ? null : money(job.cost_usd);
- // Working glyph and Working label stay neutral, like every non-merged status; Merged is blue (design frames 3/9).
- const tone = merged ? " workspace-jobs-status-merged" : "";
+ // Merged is blue and the Working label green (design frames 3/9, ask-7532ed5924cb); the Working glyph stays neutral.
+ const tone = merged ? " workspace-jobs-status-merged" : job.phase === "working" ? " workspace-jobs-status-working" : "";
  return <li><button type="button" class="workspace-jobs-row" data-job={job.id} onClick={() => onSelect(job.id)}>
   <span class="workspace-jobs-job"><PhaseDot phase={job.phase}/><code title={job.id}>{jobSuffix(job.id)}</code></span>
   <span class="workspace-jobs-title"><b title={job.title ?? job.id}>{job.title ?? job.id}</b>

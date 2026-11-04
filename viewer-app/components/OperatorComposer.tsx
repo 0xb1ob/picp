@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { EvidenceReference } from "../../src/evidence-reference.ts";
-import { attachmentSize, attachRefusal, CONTROL_TEXT_MAX, type ControlView, controlFiles, controlImages, controlLine, controlReady, deliveryLine, isTextFile, uploadUrl } from "../control.ts";
+import { attachmentSize, attachRefusal, CONTROL_TEXT_MAX, type ControlView, controlFiles, controlImages, controlLine, controlReady, deliveryLine, isTextFile, newClientId, uploadUrl } from "../control.ts";
 import { parseReference, referenceContext } from "../evidence-ref.ts";
-import { type Command, ComposerMenu, type ComposerMenuContext, slashCommands, STATUS_DRAFT } from "./ComposerMenu.tsx";
+import { type Command, ComposerMenu, type ComposerMenuContext, slashCommands } from "./ComposerMenu.tsx";
 import { EvidenceChip } from "./EvidenceReference.tsx";
 import { Icon } from "./icons.tsx";
 import { StartSession } from "./StartSession.tsx";
@@ -46,6 +46,8 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
  const [text,setText] = useState(linked ? "" : (draft ?? "").slice(0, CONTROL_TEXT_MAX));
  const [attached,setAttached] = useState<EvidenceReference | null>(null);
  const [confirmAbort,setConfirmAbort] = useState(false);
+ // Full match S6: the prepared command beside the text draft; its client_id is the one idempotency key for its Submits.
+ const [command,setCommand] = useState<{name: "status" | "stop"; job?: string; client_id: string; error?: string; sending?: true} | null>(null);
  const [attachments,setAttachments] = useState<Attachment[]>([]);
  // `@skill` autocomplete: the catalogue (fetched on the first `@`), the caret, the highlighted option, and Escape's close.
  const [catalog,setCatalog] = useState<SkillCatalog | null>(null);
@@ -142,15 +144,25 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
   setActive(0);
   placeCaret.current = at;
  };
- /** A command never sends: `/status` writes its editable question (typed text kept); `/jobs` opens the drawer. */
+ /** Choosing never sends: `/jobs` opens the drawer; `/status` and `/stop` prepare a command (typed text kept). */
  const run = (name: Command) => {
   const kept = /^\/[a-z]*$/.test(text) ? "" : text;
   setActive(0);
-  if (name === "jobs") { edit(kept); chat?.onJobs(field.current); return; }
-  const next = (kept.trim() ? `${kept}\n${STATUS_DRAFT}` : STATUS_DRAFT).slice(0, CONTROL_TEXT_MAX);
-  edit(next);
-  placeCaret.current = next.length;
-  field.current?.focus();
+  edit(kept);
+  if (name === "jobs") { chat?.onJobs(field.current); return; }
+  setCommand({name, client_id: newClientId()});
+  if (name === "status") field.current?.focus();
+ };
+ const commandReady = !!command && !command.sending && ready && status.running && !sending && (command.name === "status" || !!command.job);
+ /** One POST per prepared command (its client_id); a refusal keeps the command, the text and the attachments. */
+ const submitting = useRef(false);
+ const submit = () => {
+  if (!command || !commandReady || !control.command || submitting.current) return;
+  const prepared = command;
+  submitting.current = true;
+  setCommand({...prepared, sending: true, error: undefined});
+  void control.command({kind: "command", command: prepared.name, ...(prepared.job ? {job_id: prepared.job} : {}), client_id: prepared.client_id})
+   .then(error => { submitting.current = false; setCommand(error === null ? null : {...prepared, error}); });
  };
  const choose = (i: number) => { if (commands.length) run(commands[i]!.name); else pick(matches[i]!.name); };
  const closeMenu = () => { if (menu.current) menu.current.open = false; setConfirmAbort(false); };
@@ -172,6 +184,7 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
   setAttachments(list => [...list, ...added]);
  };
  const send = (deliver?: "followUp" | "steer") => {
+  if (command) { submit(); return; }
   if (!canSend) return;
   const extra = {...(deliver ? {deliver} : {}), ...(images.length ? {images} : {}), ...(files.length ? {files} : {})};
   control.send({kind:"message",text:outgoing,...extra});
@@ -188,7 +201,7 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
  };
  const line = deliveryLine(control.delivery);
  const flagged = control.delivery?.state === "failed" || !!control.delivery?.reason;
- const sendLabel = busy ? "Send after this turn" : "Send";
+ const sendLabel = command ? `Submit /${command.name}` : busy ? "Send after this turn" : "Send";
  return <section class="operator-composer" aria-label="Message the operator session"
   onDragOver={e => { if (upload && !sending && e.dataTransfer?.types.includes("Files")) e.preventDefault(); }}
   onDrop={e => { if (!upload || sending || !e.dataTransfer?.files.length) return; e.preventDefault(); attach([...e.dataTransfer.files]); }}>
@@ -202,6 +215,12 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
   </ul>}
   {ready && attached && <EvidenceChip reference={attached} onRemove={() => pin(null)}/>}
   {ready && tooLong && <p role="alert" class="operator-composer-hint">Too long with the reference: shorten the question by {outgoing.length - CONTROL_TEXT_MAX} characters, or remove the reference</p>}
+  {ready && command && <div class="operator-composer-command" role="group" aria-label="Prepared command">
+   <code>/{command.name}{command.job ? ` ${command.job}` : ""}</code>
+   <span>{command.sending ? "Submitting…" : !status.running ? "Commands need a running operator session" : command.name === "stop" && !command.job ? "Pick the job to stop with @ job" : "Submit sends it to the operator once"}</span>
+   <button type="button" class="operator-composer-command-remove" aria-label="Remove the command" title="Remove" disabled={command.sending} onClick={() => setCommand(null)}><Icon name="close" size={14}/></button>
+   {command.error && <p role="alert" class="operator-composer-failed">{command.error}</p>}
+  </div>}
   {ready && <div class="operator-composer-box">
    <div class="operator-composer-field">
    {listOpen && <ul role="listbox" id="operator-composer-skills" class="operator-composer-skills" aria-label={commands.length ? "Commands" : "Installed skills"}>
@@ -234,7 +253,8 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
    {/* The paperclip always leads the footer; disabled, its title says why it cannot attach now. */}
    {control.upload && <button type="button" class="operator-composer-attach" aria-label="Attach files or images" title={upload ? "Attach files or images (or paste/drop)" : status.running ? "This session does not take attachments (⋮ → Restart session)" : "Attachments need a running session"} disabled={sending || !upload} onClick={() => picker.current?.click()}><Icon name="attach"/></button>}
    {upload && <input ref={picker} type="file" accept={controlFiles(status) ? "image/*,.txt,.md,.html,.json" : "image/*"} multiple hidden onChange={e => { const input = e.currentTarget; attach([...(input.files ?? [])]); input.value = ""; }}/>}
-   {chat && <ComposerMenu context={chat} disabled={sending} onCommand={run} onRefer={ref => { pin(ref); field.current?.focus(); }}/>}
+   {chat && <ComposerMenu context={chat} disabled={sending} target={command?.name === "stop" && !command.sending} onCommand={run} onRefer={ref => { pin(ref); field.current?.focus(); }}
+    onTarget={job => { setCommand(current => current && {...current, job, error: undefined}); field.current?.focus(); }}/>}
    {status.running && status.session_file && <details class="operator-composer-options">
     <summary aria-label="Message options" title="Message options"><span>Options</span><span aria-hidden="true"> ▾</span></summary>
     <div class="operator-composer-options-panel"><p>Delivers to the running session <code>{status.session_file}</code></p></div>
@@ -242,11 +262,11 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
    {busy && <details class="operator-composer-more" ref={menu} onToggle={() => setConfirmAbort(false)}>
     <summary aria-label="Steer or abort" title="Steer or abort"><Icon name="more"/></summary>
     <div class="operator-composer-menu">
-     <button type="button" disabled={!canSend} onClick={() => { send("steer"); closeMenu(); }}>Steer now</button>
+     <button type="button" disabled={!canSend || !!command} onClick={() => { send("steer"); closeMenu(); }}>Steer now</button>
      <button type="button" class="operator-composer-abort" disabled={sending} onClick={abort}>{confirmAbort ? "Tap again to abort" : "Abort turn"}</button>
     </div>
    </details>}
-   <button type="button" class="operator-composer-send" aria-label={sendLabel} title={sendLabel} disabled={!canSend} onClick={() => send(busy ? "followUp" : undefined)}><Icon name="send"/></button>
+   <button type="button" class="operator-composer-send" aria-label={sendLabel} title={sendLabel} disabled={command ? !commandReady : !canSend} onClick={() => send(busy ? "followUp" : undefined)}><Icon name="send"/></button>
    </div>
   </div>}
   {ready && mentions.known.length > 0 && <ul class="operator-composer-mentions" aria-label="Skills mentioned">{mentions.known.map(name => <li key={name}><code>@{name}</code></li>)}</ul>}

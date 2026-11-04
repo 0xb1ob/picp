@@ -18,7 +18,7 @@ process.env.TZ = "UTC";
 const NOON = Date.parse(`${new Date().toISOString().slice(0, 10)}T12:00:00Z`);
 const iso = (minutes: number) => new Date(NOON - minutes * 60_000).toISOString();
 const CHAT = "#sessions?view=you&transcript=1";
-const STATUS = "What is running and what needs me?";
+const STATUS = "What is running and what needs me";
 
 /** A chat with one open ask, two ledger jobs in two projects, a fleet-only job (no ledger project) and one skill. */
 function seed(stateDir: string, home: string) {
@@ -68,15 +68,15 @@ async function press(tab: Tab, key: string, isComposing = false) {
 }
 const escapeBody = (tab: Tab) => tab.key(tab.document.body as unknown as Element, "Escape").defaultPrevented;
 
-test("M3-composer-typed: a `/` draft offers /status and /jobs only; Enter/Tab run them without sending, Escape and IME never send, @ skills stay", { timeout: 180_000 }, async (t) => {
+test("M3-composer-typed: a `/` draft offers /status, /jobs and /stop; Enter/Tab pick them without sending, Escape and IME never send, @ skills stay", { timeout: 180_000 }, async (t) => {
 	const d = await start(t);
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
 	const focused = browserShims(t, tab);
 	await tab.waitText(/REPLY-CARD/);
 	await tab.find(".operator-composer textarea");
 	await type(tab, "/");
-	assert.deepEqual([tab.$('[role="listbox"]')!.getAttribute("aria-label"), options(tab)], ["Commands", [`/status${STATUS}`, "/jobsOpen the jobs drawer"]]);
-	assert.doesNotMatch(tab.text(), /\/stop|\/thread|New thread/, "no revoke or thread commands");
+	assert.deepEqual([tab.$('[role="listbox"]')!.getAttribute("aria-label"), options(tab)], ["Commands", [`/status${STATUS}`, "/jobsOpen the jobs drawer", "/stopAsk the operator to stop a job"]]);
+	assert.doesNotMatch(tab.text(), /\/thread|New thread/, "no thread command until S11");
 
 	await type(tab, "/j");
 	assert.deepEqual(options(tab), ["/jobsOpen the jobs drawer"]);
@@ -89,9 +89,12 @@ test("M3-composer-typed: a `/` draft offers /status and /jobs only; Enter/Tab ru
 
 	await type(tab, "/st");
 	assert.equal(await press(tab, "Tab"), true);
-	assert.deepEqual([field(tab).value, n(tab, '[role="listbox"]'), sends(tab)], [STATUS, 0, 0], "/status writes its question, unsent");
-	await type(tab, `${STATUS} On picp only.`);
-	assert.equal(field(tab).value, `${STATUS} On picp only.`, "the draft stays editable");
+	// Full match S6: /status prepares a command beside the draft (it wrote an editable question before); Submit sends.
+	assert.deepEqual([field(tab).value, n(tab, '[role="listbox"]'), tab.$(".operator-composer-command code")?.textContent, sends(tab)], ["", 0, "/status", 0], "/status prepared, unsent");
+	await type(tab, "On picp only.");
+	assert.deepEqual([field(tab).value, n(tab, ".operator-composer-command")], ["On picp only.", 1], "the draft stays editable beside it");
+	tab.click(tab.$(".operator-composer-command-remove")!);
+	await until(() => n(tab, ".operator-composer-command"), (c) => c === 0, "Remove drops the command");
 
 	await type(tab, "/s");
 	assert.equal(await press(tab, "Escape"), true);
@@ -106,11 +109,12 @@ test("M3-composer-typed: a `/` draft offers /status and /jobs only; Enter/Tab ru
 	assert.equal(n(tab, '[role="listbox"]'), 0, "only a whole `/word` draft is a command");
 	// Full match S1: the inspector is open by default, so Escape with nothing else open is the chat's; an IME one is not.
 	assert.deepEqual([await press(tab, "Escape", true), !!tab.$("aside.workspace-context")], [false, true], "an IME Escape keeps the inspector");
-	const footer = [...tab.document.querySelectorAll(".operator-composer-attach, .operator-composer-slash")] as unknown as Element[];
-	assert.deepEqual(footer.map((el) => el.className), ["operator-composer-attach", "operator-composer-slash"], "the paperclip stays first");
+	const footer = [...tab.document.querySelectorAll(".operator-composer-attach, .operator-composer-at, .operator-composer-slash")] as unknown as Element[];
+	assert.deepEqual(footer.map((el) => el.textContent), ["", "@ job", "/ command"], "the paperclip first, then frame 4's `@ job` and `/ command`");
+	assert.doesNotMatch(tab.$(".operator-composer-footer")!.textContent!, /#|thread/i, "the # thread control stays hidden until S11");
 });
 
-test("M3-composer-menu: the touch `/` menu runs commands and attaches a selection's job as the P1 reference; Escape and removal keep the draft", { timeout: 180_000 }, async (t) => {
+test("M3-composer-menu: the `/ command` and `@ job` chips prepare commands and attach a selection's job as the P1 reference; Escape and removal keep the draft", { timeout: 180_000 }, async (t) => {
 	const d = await start(t, false);
 	const storage = new Map<string, string>();
 	const tab = await openTab(t, d.port, CHAT, storage);
@@ -123,8 +127,8 @@ test("M3-composer-menu: the touch `/` menu runs commands and attaches a selectio
 	const menu = await tab.find("#operator-composer-command-menu");
 	await tab.find("#operator-composer-command-menu button code", (c) => c.textContent === "cp-orphan");
 	assert.deepEqual([slash.getAttribute("aria-expanded"), menu.querySelectorAll("h3").length, [...menu.querySelectorAll("button code")].map((c) => c.textContent)],
-		["true", 2, ["/status", "/jobs", "cp-live", "cp-other", "cp-orphan"]], "offline: commands, then the in-flight jobs");
-	assert.doesNotMatch(menu.textContent!, /\/stop|\/thread/);
+		["true", 2, ["/status", "/jobs", "/stop", "cp-live", "cp-other", "cp-orphan"]], "offline: commands, then the in-flight jobs");
+	assert.doesNotMatch(menu.textContent!, /\/thread/);
 	tab.click([...menu.querySelectorAll("button")].find((b) => b.textContent!.startsWith("cp-orphan"))!);
 	await tab.find("#operator-composer-command-menu p[role=status]", (p) => /cp-orphan has no recorded project to reference/.test(p.textContent!));
 	assert.equal(n(tab, ".evidence-chip"), 0, "no reference is invented without the ledger's project");
@@ -134,22 +138,27 @@ test("M3-composer-menu: the touch `/` menu runs commands and attaches a selectio
 
 	tab.click(slash);
 	tab.click(await tab.find("#operator-composer-command-menu button", (b) => b.textContent!.startsWith("/status")));
-	await until(() => field(tab).value, (v) => v === `KEEP-DRAFT\n${STATUS}`, "/status below the kept text");
+	// Full match S6: a picked /status is a prepared command; offline it says why Submit cannot send it.
+	const prepared = await tab.find(".operator-composer-command > span");
+	assert.deepEqual([prepared.textContent, tab.$(".operator-composer-send")!.hasAttribute("disabled"), field(tab).value],
+		["Commands need a running operator session", true, "KEEP-DRAFT"], "/status beside the kept text, unsendable offline");
 	assert.deepEqual([n(tab, "#operator-composer-command-menu"), focused() === field(tab), sends(tab)], [0, true, 0]);
 
 	tab.go(`${CHAT}&project=atlas`);
 	await tab.find(".session-filter select option[selected][value=atlas]");
 	tab.click(slash);
 	await tab.find("#operator-composer-command-menu button code", (c) => c.textContent === "cp-other");
-	assert.deepEqual(tab.$$("#operator-composer-command-menu button code").map((c) => c.textContent), ["/status", "/jobs", "cp-other"], "M1 narrows the jobs");
+	assert.deepEqual(tab.$$("#operator-composer-command-menu button code").map((c) => c.textContent), ["/status", "/jobs", "/stop", "cp-other"], "M1 narrows the jobs");
+	tab.click(tab.$(".operator-composer-at")!);
+	await until(() => tab.$$("#operator-composer-command-menu h3").map((h) => h.textContent).join(), (h) => h === "Reference a job", "`@ job`: the jobs only");
 	tab.click(tab.$$("#operator-composer-command-menu button").find((b) => b.textContent!.startsWith("cp-other"))!);
 	const chip = await tab.find(".evidence-chip summary");
 	assert.match(chip.textContent!, /cp-other/);
 	assert.deepEqual(JSON.parse([...storage].find(([k]) => k.startsWith("cp-composer-ref:"))![1]), { kind: "job", project: "atlas", job_id: "cp-other" }, "the job page's own reference");
-	assert.deepEqual([n(tab, "#operator-composer-command-menu"), field(tab).value, sends(tab)], [0, `KEEP-DRAFT\n${STATUS}`, 0], "attached, unsent, text kept");
+	assert.deepEqual([n(tab, "#operator-composer-command-menu"), field(tab).value, sends(tab)], [0, "KEEP-DRAFT", 0], "attached, unsent, text kept");
 	tab.click(tab.$(".evidence-chip-remove")!);
 	await until(() => n(tab, ".evidence-chip"), (c) => c === 0, "Remove drops the reference");
-	assert.equal(field(tab).value, `KEEP-DRAFT\n${STATUS}`, "and keeps the text");
+	assert.equal(field(tab).value, "KEEP-DRAFT", "and keeps the text");
 
 	tab.click(slash);
 	tab.click(await tab.find("#operator-composer-command-menu button", (b) => b.textContent!.startsWith("/jobs")));
@@ -158,14 +167,18 @@ test("M3-composer-menu: the touch `/` menu runs commands and attaches a selectio
 
 	const css = (await d.get(String(/<link rel="stylesheet" href="([^"]+)"/.exec((await d.get("/")).text)?.[1]))).text;
 	const rule = (selector: string) => [...css.matchAll(/(?<=^|[{}])([^{}@]+)\{([^{}]*)\}/g)].filter((m) => m[1] === selector).map((m) => m[2]).join(";");
-	assert.match(rule(".operator-composer-command-menu button"), /min-height:44px/, "44 px touch options");
-	assert.match(rule(".operator-composer-slash"), /width:44px;height:44px/, "a 44 px phone target");
+	// Full match S6 (frame 10): 52 px phone rows with the description under the command; frame 4's 36 px rows from 900 px.
+	assert.match(rule(".operator-composer-command-menu button"), /flex-direction:column;.*min-height:52px/, "phone rows, description below");
+	assert.match(rule(".operator-composer-command-menu button,.operator-composer-skills>li"), /flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;min-height:36px/, "desktop rows");
+	assert.match(rule(".operator-composer-at,.operator-composer-slash"), /width:44px;height:44px/, "44 px phone targets");
 	// M3 fidelity D (design frames 1, 4, 10): the composer and `/` menu in the transcript's column, on the raised surface.
 	// Negative control: restoring the surface/padding 4 menu fails the first assertion.
 	const raised = rule(".operator-composer-command-menu");
 	assert.match(raised, /max-height:45dvh;.*padding:6px;background:var\(--raised\);border:1px solid var\(--border\);border-radius:12px;/, "raised, padding 6");
-	assert.match(raised, /left:14px;right:14px;.*;left:max\(28px,calc\(\(100% - 664px\) ?\/ ?2\)\);right:auto;width:min\(534px,calc\(100% - 56px\)\)$/,
-		"phone: 14 px from each side; desktop: the box's left edge, at most 534 px");
+	// Full match S6 (frame 10): 10 px phone sides, a 370 px menu at 390 (was 14 px, 362); desktop keeps the box's edge.
+	assert.match(raised, /^position:absolute;left:10px;right:10px;/, "phone: 10 px from each side");
+	assert.match(rule(".operator-composer-command-menu,.operator-composer-skills"), /^left:max\(28px,calc\(\(100% - 664px\) ?\/ ?2\)\);right:auto;width:min\(534px,calc\(100% - 56px\)\)$/,
+		"desktop: the box's left edge, at most 534 px, typed lists included");
 	// Full match S1 (design frame 6): the phone composer's sides are 10 px, inside the transcript's 14 px.
 	assert.match(rule(".operator-composer"), /padding-left:10px;padding-right:10px;padding:12px max\(28px,calc\(\(100% - 664px\) ?\/ ?2\)\) 16px$/,
 		"10 px phone sides; from 900 px the 720 px column's 28 px sides");
@@ -178,7 +191,7 @@ test("M3-composer-menu: the touch `/` menu runs commands and attaches a selectio
 	assert.doesNotMatch(css, /\.operator-composer-field\{order:/, "the field is never reordered into the buttons' row");
 });
 
-test("M3-composer-attachments: an attached image and the draft survive /status and a job reference; a closed menu's late lookup attaches nothing", { timeout: 180_000 }, async (t) => {
+test("M3-composer-attachments: an attached image and the draft survive a prepared /status and a job reference; a closed menu's late lookup attaches nothing", { timeout: 180_000 }, async (t) => {
 	const d = await viewer(t, { at: new Date(NOON).toISOString(), seed });
 	await operatorSession(t, d.stateDir, () => true, { prepareImage: async (bytes, mimeType) => ({ data: Buffer.from(bytes).toString("base64"), mimeType }) });
 	const tab = await openTab(t, d.port, CHAT, new Map(), /^\/api\/job\//);
@@ -196,8 +209,8 @@ test("M3-composer-attachments: an attached image and the draft survive /status a
 
 	tab.click(slash);
 	tab.click(await tab.find("#operator-composer-command-menu button", (b) => b.textContent!.startsWith("/status")));
-	await until(() => field(tab).value, (v) => v === `KEEP\n${STATUS}`, "/status below the kept text");
-	assert.deepEqual([thumbs(), sends(tab)], [[image], 0], "/status keeps the attachment and sends nothing");
+	await tab.find(".operator-composer-command code", (c) => c.textContent === "/status");
+	assert.deepEqual([field(tab).value, thumbs(), sends(tab)], ["KEEP", [image], 0], "/status keeps the text and the attachment and sends nothing");
 
 	// A double tap starts one lookup; Escape closes the menu before it answers, so the late answer attaches no chip.
 	tab.click(slash);
@@ -215,7 +228,7 @@ test("M3-composer-attachments: an attached image and the draft survive /status a
 	tab.click(slash);
 	tab.click(await job("cp-live"));
 	await tab.find(".evidence-chip summary", (s) => /cp-live/.test(s.textContent!));
-	assert.deepEqual([tab.$$(".evidence-chip").length, thumbs(), field(tab).value, sends(tab)], [1, [image], `KEEP\n${STATUS}`, 0],
+	assert.deepEqual([tab.$$(".evidence-chip").length, thumbs(), field(tab).value, sends(tab)], [1, [image], "KEEP", 0],
 		"one chip; the attachment and draft survive the reference, unsent");
 });
 

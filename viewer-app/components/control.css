@@ -54,7 +54,7 @@
 .operator-composer-state, .operator-composer-delivery { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 /* The header and the top bar carry the session's state; this line speaks only while the session is not ready. */
 .operator-composer-state-ready { display: none; }
-.operator-composer-field { position: relative; flex: 1; min-width: 0; display: flex; }
+.operator-composer-field { flex: 1; min-width: 0; display: flex; }
 .operator-composer-failed { color: var(--secondary); }
 .operator-composer-box { display: flex; align-items: flex-end; gap: 6px; min-width: 0; }
 .operator-composer-footer { display: contents; }
@@ -88,25 +88,34 @@
 .operator-composer-file-name small { display: block; font-size: 12px; color: var(--muted); }
 .operator-composer-file .operator-composer-thumb-remove { width: 44px; height: 44px; top: 9px; }
 .operator-composer-file .operator-composer-thumb-remove::after { inset: 0; }
-/* Skill mentions: a listbox above the field (44 px options, a one-line description), then mentioned-skill chips and plain-text hints that wrap at 390 px. */
-.operator-composer-skills { position: absolute; left: 0; right: 0; bottom: calc(100% + 6px); z-index: 3; max-height: 45dvh; overflow-y: auto; margin: 0; padding: 4px; list-style: none; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
-.operator-composer-skills > li { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 44px; min-width: 0; padding: 4px 10px; border-radius: 8px; font-size: 14px; color: var(--text); overflow-wrap: anywhere; cursor: pointer; }
+/* Typed `/` and `@skill` lists share the `/ command` menu's raised panel (full match S6, frames 4 and 10): 10 px
+   from the composer's sides on a phone, the description under the name; from 900 px a 534 px panel, one column. */
+.operator-composer-skills { position: absolute; left: 10px; right: 10px; bottom: calc(100% + 6px); z-index: 3; max-height: 45dvh; overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 6px; list-style: none; background: var(--raised); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
+.operator-composer-skills > li { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 44px; min-width: 0; padding: 4px 12px; border-radius: 8px; font-size: 14px; color: var(--text); overflow-wrap: anywhere; cursor: pointer; }
+.operator-composer-skills > li > span { font-family: var(--font-mono); font-size: 13px; }
 .operator-composer-skills > li[aria-selected="true"] { background: var(--nav-selected); }
 .operator-composer-skills small { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* M3 composer menu: the `/` button beside attach opens commands and job references above the box; 44 px options. */
-.operator-composer-slash { width: 42px; height: 42px; flex-shrink: 0; padding: 0; background: none; color: var(--muted); border: 0; border-radius: 50%; font-family: var(--font-mono); font-size: 17px; cursor: pointer; }
-.operator-composer-slash[aria-expanded="true"] { background: var(--surface); color: var(--text); }
-.operator-composer-slash:disabled { opacity: 0.4; }
-.operator-composer-command-menu { position: absolute; left: 14px; right: 14px; bottom: calc(100% + 6px); z-index: 3; max-height: 45dvh; overflow-y: auto; overscroll-behavior: contain; padding: 6px; background: var(--raised); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
-.operator-composer-command-menu h3 { margin: 0; padding: 8px 10px 4px; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+/* The footer's `@ job` and `/ command` chips (frame 4); 44 px glyph targets below 900 px (frame 10). */
+.operator-composer-commands { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.operator-composer-at, .operator-composer-slash { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; background: none; color: var(--muted); border: 0; border-radius: 8px; font: inherit; font-size: 17px; white-space: nowrap; cursor: pointer; }
+.operator-composer-chip-label { display: none; }
+.operator-composer-at[aria-expanded="true"], .operator-composer-slash[aria-expanded="true"] { background: var(--nav-selected); color: var(--text); }
+.operator-composer-at:disabled, .operator-composer-slash:disabled { opacity: 0.4; }
+.operator-composer-command-menu { position: absolute; left: 10px; right: 10px; bottom: calc(100% + 6px); z-index: 3; max-height: 45dvh; overflow-y: auto; overscroll-behavior: contain; padding: 6px; background: var(--raised); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
+.operator-composer-command-menu h3 { margin: 0; padding: 8px 10px 4px; font-size: 11px; line-height: 20px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
 .operator-composer-command-menu ul { margin: 0; padding: 0; list-style: none; }
-.operator-composer-command-menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 44px; padding: 4px 10px; background: none; color: var(--text); border: 0; border-radius: 8px; font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.operator-composer-command-menu button { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; width: 100%; min-width: 0; min-height: 52px; padding: 4px 12px; background: none; color: var(--text); border: 0; border-radius: 8px; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .operator-composer-command-menu button:hover, .operator-composer-command-menu button:focus-visible { background: var(--nav-selected); }
 .operator-composer-command-menu button:disabled { cursor: progress; opacity: 0.6; }
-.operator-composer-command-menu code, .operator-composer-command-menu small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.operator-composer-command-menu code { flex-shrink: 0; max-width: 60%; }
-.operator-composer-command-menu small { margin-left: auto; font-size: 12px; color: var(--muted); }
+.operator-composer-command-menu code, .operator-composer-command-menu small { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.operator-composer-command-menu small { font-size: 12px; color: var(--muted); }
 .operator-composer-command-menu p { margin: 0; padding: 8px 10px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+/* A prepared command (S6): its line, what Submit does or what it still needs, Remove, and a refusal that keeps it. */
+.operator-composer-command { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; padding: 4px 4px 4px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; font-size: 13px; }
+.operator-composer-command > code { min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.operator-composer-command > span { flex: 1 1 160px; min-width: 0; color: var(--muted); overflow-wrap: anywhere; }
+.operator-composer-command-remove { flex-shrink: 0; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; background: none; color: var(--muted); border: 0; border-radius: 8px; cursor: pointer; }
+.operator-composer-command > p { flex-basis: 100%; margin: 0 0 6px; overflow-wrap: anywhere; }
 .operator-composer-mentions { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
 .operator-composer-mentions > li { min-width: 0; max-width: 100%; padding: 2px 10px; background: var(--nav-selected); color: var(--text); border-radius: 999px; font-size: 12px; overflow-wrap: anywhere; }
 .operator-composer-hint { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
@@ -137,7 +146,6 @@
  .operator-composer-more + .operator-composer-send { margin-left: 0; }
  .operator-composer-options { display: none; }
  .operator-composer-attach, .operator-composer-send, .operator-composer-more > summary { width: 44px; height: 44px; }
- .operator-composer-slash { width: 44px; height: 44px; }
  .operator-composer textarea { min-height: 44px; padding: 11px 8px 11px 0; background: none; border: 0; border-radius: 0; font-size: 16px; line-height: 22px; }
  /* The status and file name live in the top bar (dot and ⋯ sheet); only a failure or an unready session speaks here. */
  .operator-composer-delivery:not(.operator-composer-failed) { display: none; }
@@ -155,7 +163,12 @@
  .operator-composer-footer > .operator-composer-send { margin-left: auto; }
  .operator-composer-more + .operator-composer-send { margin-left: 0; }
  .operator-composer-options > summary { border: 0; background: none; color: var(--muted); }
- .operator-composer-command-menu { left: max(28px, calc((100% - 664px) / 2)); right: auto; width: min(534px, calc(100% - 56px)); }
+ /* Frame 4: the menu and typed lists from the box's left edge, 534 px; 36 px rows, details in a column 250 px in. */
+ .operator-composer-command-menu, .operator-composer-skills { left: max(28px, calc((100% - 664px) / 2)); right: auto; width: min(534px, calc(100% - 56px)); }
+ .operator-composer-command-menu button, .operator-composer-skills > li { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; min-height: 36px; padding: 0 10px; }
+ .operator-composer-command-menu code, .operator-composer-skills > li > span { flex: 0 0 230px; }
+ .operator-composer-at, .operator-composer-slash { width: auto; height: 28px; padding: 0 8px; border: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
+ .operator-composer-chip-label { display: inline; white-space: pre; }
  .session-pinned { padding: 0 40px; }
  .session-pinned-open { padding-bottom: 12px; }
  .session-pinned > * { max-width: none; }

@@ -18,6 +18,8 @@
  *  - `abort` → abort the running turn;
  *  - `restart` → Restart session (src/dashboard-restart.ts): checks, a relaunch marker, then pi's own shutdown.
  *  - `parent_restart` → the CP parent's drain-gated host restart, resume or clean (src/parent-restart.ts).
+ *  - `command` → full match S6: a dashboard command (src/dashboard-commands.ts, the bridge's `command` port) is one
+ *    `send` message; a bridge without the port answers `unknown op` and the viewer refuses with restart-required.
  *  - `settings_get` / `settings_apply` → Settings (src/settings-control.ts), only with the `settings` port; they write
  *    no dashboard.jsonl line, their record is data/settings-audit.jsonl.
  * Every `send`/`abort` appends its `request` line to `state/operator/dashboard.jsonl` before anything happens;
@@ -29,6 +31,8 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { basename, join, resolve } from "node:path";
+import type { CommandResult } from "./dashboard-commands.ts";
+export { dashboardCommand } from "./dashboard-commands.ts";
 import { OperatorAsks } from "./operator-asks.ts";
 import { restartRequest, restartState } from "./dashboard-restart.ts";
 import { parentRestartRequest } from "./parent-restart.ts";
@@ -82,6 +86,8 @@ export interface ControlPorts {
 	/** Parent restart (src/parent-restart.ts); absent: `parent_restart` is an unknown op, and status omits it. */
 	parentRestart?(mode: "resume" | "clean"): Promise<{ refused: string } | { done: Promise<string> }>;
 	parentRestartState?(): { safe: boolean; reason: string; last: string | null };
+	/** Full match S6: a dashboard command's text (src/dashboard-commands.ts); absent: `command` is an unknown op. */
+	command?(args: Record<string, unknown>): CommandResult;
 }
 
 export interface ControlOutcome { id: string; kind: ControlKind; state: string; at: string; reason: string | null; ask_id: string | null }
@@ -203,17 +209,18 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		}
 	};
 
-	const request = async (args: Record<string, unknown>, op: "send" | "abort", withImages = false, withFiles = false): Promise<Reply> => {
-		const kind: ControlKind = op === "abort" ? "abort" : args.kind === "answer" ? "answer" : "message";
+	/** `command` (full match S6): the grammar's verdict; its text is the message, a refusal is journaled and returned. */
+	const request = async (args: Record<string, unknown>, op: "send" | "abort", withImages = false, withFiles = false, command?: CommandResult): Promise<Reply> => {
+		const kind: ControlKind = op === "abort" ? "abort" : !command && args.kind === "answer" ? "answer" : "message";
 		const peer = typeof args.peer === "string" ? args.peer.slice(0, 100) : null;
 		const askId = kind === "answer" && isAskId(args.ask_id) ? args.ask_id : null;
 		const label = typeof args.label === "string" ? args.label : "";
-		const text = kind === "message" ? (typeof args.text === "string" ? args.text.trim() : "") : kind === "answer" ? `${askId ?? String(args.ask_id)}: ${label}` : null;
+		const text = command ? (command.ok ? command.text : null) : kind === "message" ? (typeof args.text === "string" ? args.text.trim() : "") : kind === "answer" ? `${askId ?? String(args.ask_id)}: ${label}` : null;
 		// Attachment ids as sent (clipped), journaled with the request; never contents.
 		const images = withImages && (args.images !== undefined || !withFiles) ? (Array.isArray(args.images) ? args.images.slice(0, UPLOAD_MAX_PER_MESSAGE + 1).map((image) => String(image).slice(0, 64)) : []) : undefined;
 		const files = withFiles ? (Array.isArray(args.files) ? args.files.slice(0, UPLOAD_MAX_PER_MESSAGE + 1).map((file) => String(file).slice(0, 64)) : []) : undefined;
 		const idle = ports.isIdle();
-		const deliverAs = kind === "abort" || idle ? undefined : args.deliver === "steer" ? "steer" : "followUp";
+		const deliverAs = kind === "abort" || idle ? undefined : !command && args.deliver === "steer" ? "steer" : "followUp";
 		const deliver: ControlDeliver = kind === "abort" ? "abort" : deliverAs ?? "prompt";
 		const supplied = kind === "message" && typeof args.client_id === "string" && DASHBOARD_ID_RE.test(args.client_id) ? args.client_id : null;
 		const duplicate = supplied !== null && (open.has(supplied) || recent.some(row=>row.id === supplied) || queue.some((entry) => entry.id === supplied) || handed.has(supplied));
@@ -221,13 +228,14 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		// PR 1c: the viewer's remote gate names the paired device; a malformed one is journaled bare, then refused below.
 		const remote = remoteDevice(args.remote);
 		const sessionFile = ports.sessionFile();
-		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, session_started_at: startedAt, ...(sessionFile ? {session_file: sessionFile} : {}), ...(images ? { images } : {}), ...(files ? { files } : {}), ...(remote ? { remote } : {}) });
+		const journaled = append({ type: "request", by: "bridge", id, at: now().toISOString(), peer, kind, text, ask_id: askId, deliver, session_started_at: startedAt, ...(sessionFile ? {session_file: sessionFile} : {}), ...(images ? { images } : {}), ...(files ? { files } : {}), ...(remote ? { remote } : {}), ...(command ? { command: command.line } : {}) });
 		if (!journaled.ok) return { ok: false, status: 500, error: `failed: audit journal unwritable (${journaled.error})` };
 		const refuse = (status: number, reason: string): Reply => {
 			outcome(id, kind, askId, peer, "refused", reason);
 			return { ok: false, status, error: reason };
 		};
 		if (args.remote !== undefined && !remote) return refuse(400, "remote must be {device_id, name} of a paired device");
+		if (command && !command.ok) return refuse(400, command.reason);
 		const latest = readControlConfig(stateDir);
 		if (duplicate) return refuse(409, "client_id was already used; check the transcript before retrying");
 		if (latest.state !== "on") return refuse(403, `dashboard control is off (${latest.reason})`);
@@ -467,12 +475,13 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (frame.op === "hello") return { ok: true, result: { pid: process.pid, protocol: CONTROL_PROTOCOL } };
 		if (frame.op === "status") {
 			const file = ports.sessionFile();
-			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, ...(ports.prepareImage ? { images: true } : {}), ...(ports.parentRestartState ? { parent_restart: ports.parentRestartState() } : {}) } };
+			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, ...(ports.prepareImage ? { images: true } : {}), ...(ports.parentRestartState ? { parent_restart: ports.parentRestartState() } : {}), ...(ports.command ? { commands: true } : {}) } };
 		}
 		if (frame.op === "send" || frame.op === "abort") return request(args, frame.op);
 		// A bridge without prepareImage answers `unknown op send_images`: the viewer says restart, never drops the images.
 		if (frame.op === "send_images" && ports.prepareImage) return request(args, "send", true);
 		if (frame.op === "send_files") return request(args, "send", true, true);
+		if (frame.op === "command" && ports.command) return request(args, "send", false, false, ports.command(args));
 		if (frame.op === "queue_edit" || frame.op === "queue_cancel") return queueRequest(args, frame.op);
 		if (frame.op === "restart") return restartRequest({ args, ports, stateDir, open, clicks, now, newId: newControlId, append, outcome });
 		if (frame.op === "parent_restart" && ports.parentRestart) return parentRestartRequest({ args, ports, stateDir, now, newId: newControlId, append, outcome });

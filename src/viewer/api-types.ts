@@ -62,6 +62,8 @@ export interface TranscriptAsk {
 }
 /** Composer request and its durable status projection; attachment ids stay on the original body for retry. */
 export type ControlMessageBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; client_id?: string};
+/** Full match S6: one bounded dashboard command, idempotent by `client_id`; the bridge turns it into one message. */
+export type ControlCommandBody = {kind: "command"; command: "status" | "stop"; job_id?: string; client_id: string};
 export interface ControlPendingSend { id: string; at: string; state: "queued" | "held" | "delivered" | "failed" | "dropped"; reason: string | null; ask_id: string | null; body: ControlMessageBody; /** cp-y43c: queued by the dashboard, not yet handed to the session: Edit and Cancel apply. */ editable?: boolean; /** picp-96n: basename of the listed operator session a Not confirmed send was handed to; never the current one. */ target_session?: string }
 /** `POST /api/operator/queue` (cp-y43c): 200 with the queued message's committed text, or `cancelled`. A refusal for a message already handed over carries `state: "sent"` and the `text` the session was given. */
 export type OperatorQueueResponse = { id: string; state: "queued"; text: string; editable: true } | { id: string; state: "cancelled" };
@@ -90,6 +92,8 @@ export interface ControlStatusResponse {
  files?: boolean;
  /** Running only: the CP parent's restart gate (advisory; the parent host re-checks) and its last outcome line. */
  parent_restart?: ParentRestartStatus;
+ /** Running only, full match S6: true when this session's cp-bridge takes dashboard commands; absent otherwise. */
+ commands?: boolean;
 }
 /** `POST /api/operator/upload` stored an attachment: 201 with its upload id (the composer sends ids, never bytes). */
 export interface OperatorUploadResponse { id: string; mime: string; bytes: number; expires_at: string; url: string; name?: string }

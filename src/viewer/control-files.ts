@@ -252,6 +252,17 @@ export function parseDashboardText(text: string): { body: string; id: string; as
 
 export const isAskId = (value: unknown): value is string => typeof value === "string" && ASK_ID_RE.test(value);
 
+export type DashboardCommand = { command: "status" } | { command: "stop"; job_id: string };
+/** Full match S6: the bounded command grammar, checked by the viewer and again by the bridge; the rest is refused. */
+export function commandGrammar(value: Record<string, unknown>): ({ ok: true } & DashboardCommand) | { ok: false; reason: string } {
+	const job = value.job_id;
+	if (typeof value.client_id !== "string" || !DASHBOARD_ID_RE.test(value.client_id)) return { ok: false, reason: "client_id must be a dashboard id" };
+	if (value.command === "status") return job === undefined ? { ok: true, command: "status" } : { ok: false, reason: "/status takes no job" };
+	if (value.command !== "stop") return { ok: false, reason: 'command must be "status" or "stop"; send anything else as a message' };
+	if (job === undefined || job === "") return { ok: false, reason: "/stop needs the job to stop" };
+	if (typeof job !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(job)) return { ok: false, reason: "job_id must be a job id" };
+	return { ok: true, command: "stop", job_id: job };
+}
 export type ControlKind = "message" | "answer" | "abort" | "restart" | "parent_restart";
 export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restart" | "parent_restart";
 
@@ -260,12 +271,12 @@ export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restar
  * and one `upload` line per stored attachment: ids, mime, bytes and optional display names, never contents.
  */
 export type ControlAuditLine =
-	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; session_started_at?: string; session_file?: string; remote?: RemoteDevice }
+	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; session_started_at?: string; session_file?: string; remote?: RemoteDevice; command?: string }
 	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting" | "restarted" | "dropped" | "cancelled"; reason: string | null }
 	/** cp-y43c: a dashboard-queued message's text replaced before its handoff; every revision stays in the journal. */
 	| { type: "edited"; by: "bridge"; id: string; at: string; peer: string | null; text: string; remote?: RemoteDevice }
 	| { type: "outcome"; by: "viewer"; id: string; at: string; peer: string | null; state: "dropped"; reason: string }
-	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "start" | "schedule" | "upload" | "settings" | "queue" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; images?: string[]; files?: string[]; mime?: string; queue_id?: string }
+	| { type: "refused"; by: "viewer"; id: null; at: string; peer: string | null; kind: ControlKind | "command" | "start" | "schedule" | "upload" | "settings" | "queue" | null; text: string | null; ask_id: string | null; status: number; reason: string; bytes?: number; via?: "herdr" | "tmux"; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; images?: string[]; files?: string[]; mime?: string; queue_id?: string }
 	| { type: "upload"; by: "viewer"; id: string; at: string; peer: string | null; mime: string; bytes: number; name?: string }
 	/** Remote dashboard: secret-free device events from `device-store.ts`; `id` stays null so the composer readers skip them. */
 	| { type: "device"; by: "viewer"; id: null; at: string; peer: string | null; event: "code_issued" | "paired" | "claim_refused" | "signin_refused" | "revoked"; reason: string | null; pairing_id?: string; device_id?: string; name?: string; level?: "full" | "view"; route?: "cli-up" | "cli-pair" | "loopback-dashboard" | "tailnet-dashboard" }
