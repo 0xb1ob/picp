@@ -287,8 +287,10 @@ test("F9: a queued driver:claude dispatch releases native, and an armed one is r
 	// The armed request released with the switch off: refused by name, nothing spawned, no pi worker.
 	assert.equal(readFleet(h.b.home).jobs.some((job) => job.job_id === ids.armed), false);
 	assert.equal(existsSync(join(h.b.home, paths.runDir(ids.armed!))), false);
-	const wakeups = readFileSync(join(h.b.home, LAYOUT.wakeupsFile), "utf8");
-	assert.match(wakeups, new RegExp(`ARMED DISPATCH DROPPED: [^"]*workers\\.native_claude_research is off[^"]*${ids.armed}`));
+	// The drop wake-up reached the parent session (the outbox keeps only its id once delivered).
+	const parent = JSON.stringify(h.b.parents.at(-1)?.records() ?? []);
+	assert.match(parent, new RegExp(`ARMED DISPATCH DROPPED: [^"]*workers\\.native_claude_research is off[^"]*${ids.armed}`));
+	assert.match(readFileSync(join(h.b.home, LAYOUT.wakeupsFile), "utf8"), new RegExp(`armed-dispatch:dropped:${ids.armed}`));
 	assert.equal(h.claude.overrun(), 0);
 });
 
@@ -311,12 +313,18 @@ async function assertBoundEnds(f: Awaited<ReturnType<typeof boundsPost>>, jobId:
 	await waitFor(() => f.bounds.length, (n) => n === 1, { timeoutMs: 15_000, what: "one bound wake-up" });
 	assert.equal(failed?.failure?.class, failureClass);
 	assert.equal(f.bounds[0]?.class, failureClass);
-	assert.ok(readRunEvents(f.h.b.home, jobId).some((event) => event.type === "process_exit"), "no observed exit");
-	const down = await f.post.tearDown(jobId);
+	await waitFor(() => readRunEvents(f.h.b.home, jobId).some((event) => event.type === "process_exit"), (seen) => seen, { timeoutMs: 30_000, what: "the observed exit" });
+	// Bounded recovery runs on the bound first (and refuses native by name); teardown waits for it, as for pi.
+	let down = await f.post.tearDown(jobId);
+	for (let i = 0; i < 60 && down.failure?.code === "job_in_flight"; i++) down = await sleep(1_000).then(() => f.post.tearDown(jobId));
 	assert.equal(down.torn_down, true, JSON.stringify(down));
+	assert.equal(f.post.fleet.get(jobId)?.worker.driver, "claude", "recovery relaunched the job off the native driver");
+	const recovery = readRunEvents(f.h.b.home, jobId).find((event) => event.type === "recovery_failed")?.payload as { stage?: string; error?: string } | undefined;
+	assert.equal(recovery?.stage, "native", "bounded recovery must refuse a native job by name, never redispatch it on pi");
+	assert.match(recovery?.error ?? "", /bounded recovery is refused/);
 	const removed = readRunEvents(f.h.b.home, jobId).find((event) => event.type === "native_scratch_removed")?.payload as { removed?: string } | undefined;
 	assert.ok(removed?.removed && !existsSync(removed.removed), JSON.stringify(removed));
-	assert.equal(f.post.fleet.get(jobId)?.lease_id, undefined, "the lease was not returned");
+	assert.equal(down.lease_returned, true, "the lease was not returned");
 }
 
 test("F10a: a native worker past its tool-call cap ends as a pi worker does", { skip, timeout: 240_000 }, async (t) => {

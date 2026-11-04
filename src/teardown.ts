@@ -299,8 +299,10 @@ export class Teardown {
 			// It died before we got here; the recorded close is the fact we have.
 			exitCode = record.worker.exit_code ?? null;
 		}
-		// N3c: the kept Claude scratch dir goes only after the native worker's observed exit.
-		if (exitCode !== undefined && !isScriptFleetRecord(record) && record.worker.driver) runs.open(jobId).cp("native_scratch_removed", removeNativeScratch(record.worker.session_file));
+		// N3c: the kept Claude scratch dir goes only after the native worker's observed exit (or its pid is gone).
+		if (!isScriptFleetRecord(record) && record.worker.driver && (exitCode !== undefined || !isPidAlive(record.worker.pid))) {
+			runs.open(jobId).cp("native_scratch_removed", removeNativeScratch(record.worker.session_file));
+		}
 
 		const ignored = isDirectory(record.worktree) ? await ignoredEntries((c, args) => this.#git(c, args), record.worktree) : undefined;
 		// --- then the lease: nothing is left inside the worktree to terminate -
