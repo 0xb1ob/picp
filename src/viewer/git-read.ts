@@ -59,7 +59,8 @@ export async function runGit(cwd: string, args: readonly string[], opts: { maxBy
 			const child = spawn(
 				"git",
 				["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.quotePath=false", "-c", "log.showSignature=false", "-C", cwd, ...args],
-				{ stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", LC_ALL: "C" } },
+				// GIT_NO_LAZY_FETCH: a partial clone's missing object reads as an error, never a network fetch (S7).
+				{ stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", GIT_NO_LAZY_FETCH: "1", LC_ALL: "C" } },
 			);
 			const chunks: Buffer[] = [];
 			let size = 0;

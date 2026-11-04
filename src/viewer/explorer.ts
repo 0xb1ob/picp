@@ -117,7 +117,7 @@ const deniedPath = (path: string): boolean => path.split("/").some(denied);
 const incompletePaths = (): GitResult => ({ ok: false, stdout: "", truncated: false, reason: "incomplete git path list" });
 
 /** Inspect unfiltered, NUL-delimited names first: pathspec filtering before -M loses rename provenance. */
-export async function safePatch(root: string, view: "diff" | "show", revision: string): Promise<GitResult> {
+export async function safePatch(root: string, view: "diff" | "show", revision: string, opts: { maxBytes?: number } = {}): Promise<GitResult> {
 	const args = [view, "--no-ext-diff", "--no-textconv", "--no-color", "-M", ...(view === "show" ? ["--diff-merges=first-parent"] : []), revision];
 	const names = await runGit(root, [...args, "--format=", "--name-status", "-z"]);
 	if (!names.ok) return names;
@@ -134,7 +134,7 @@ export async function safePatch(root: string, view: "diff" | "show", revision: s
 		if (paths.length !== count || paths.some((path) => !path)) return incompletePaths();
 		if (paths.some(deniedPath)) for (const path of paths) excluded.add(path);
 	}
-	return runGit(root, [...args, ...(view === "show" ? ["--stat", "--patch", "--format=fuller"] : []), "--", ...DENY_PATHSPEC, ...[...excluded].map((path) => `:(top,exclude,literal)${path}`)]);
+	return runGit(root, [...args, ...(view === "show" ? ["--stat", "--patch", "--format=fuller"] : []), "--", ...DENY_PATHSPEC, ...[...excluded].map((path) => `:(top,exclude,literal)${path}`)], opts);
 }
 
 /** Porcelain -z keeps both rename paths intact, including tabs/newlines in names. */

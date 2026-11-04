@@ -332,6 +332,16 @@ export interface ReportsResponse {
 export interface JobReportItem { job_id: string; title: string; modified_at: string; href: string; projects?: string[] }
 /** `GET /api/report/<id>`: the job's report.md text, capped; the app renders it (never as raw HTML). */
 export interface JobReportResponse { generated_at: string; job_id: string; title: string; text: string; bytes: number; truncated: boolean; modified_at: string }
+/**
+ * `GET /api/diff?id=<job>` (src/viewer/job-diff.ts): `git diff base...head` of the recorded shas, historical evidence,
+ * never the live worktree or PR. `unavailable` says why nothing was read; `available` is its negation for old readers.
+ */
+export interface JobDiffResponse {
+ job_id: string; available: boolean; unavailable: string | null;
+ base: string | null; head: string | null; branch: string | null;
+ provenance: {base: "envelope" | null; head: "ci_watch" | "envelope" | null; root: string | null; command: string};
+ root: string | null; truncated: boolean; text: string; files_href: string | null;
+}
 /** Why a handoff belongs to a project: an exact ledger job id, a registered project name or repository URL. */
 export interface HandoffEvidence { kind: "job" | "project" | "repo"; value: string; project: string | null }
 /** One handoff note as a pointer (never its body); `href` is the gated detail route. */

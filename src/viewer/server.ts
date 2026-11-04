@@ -42,7 +42,8 @@ import { APP_CSP, appPage, type ViewerApp } from "./app-page.ts";
 import { refreshStream, refreshStreams } from "./refresh-stream.ts";
 import { awaitingScreen, decidedScreen, decisionsScreen } from "./decision-views.ts";
 import { BOARD_CSP, BOARD_CSS, type BoardWarn, contentType, listBoards, onceWarner, readBoard, resolveBoardFile } from "./boards.ts";
-import { gitView, jobRoot, listOrRead, roots, safePatch } from "./explorer.ts";
+import { gitView, listOrRead, roots } from "./explorer.ts";
+import { jobDiff } from "./job-diff.ts";
 import { dashboard, jobDetail } from "./fleet-view.ts";
 import { sidebar, type ViewerState } from "./sessions.ts";
 import { discardBounded, handlePushSubscription, handlePushTest, PUSH_STATUS_PATH, PUSH_SUBSCRIPTION_PATH, PUSH_TEST_PATH, pushStatus } from "./push-api.ts";
@@ -170,18 +171,6 @@ function sendView(req: IncomingMessage, res: ServerResponse, value: unknown, ext
 		if (delta.length < json.length / 2) return send(res, 200, "application/json; charset=utf-8", delta, { ...JSON_CSP, ...extra, "x-cp-version": version, "x-cp-delta-base": asked as string });
 	}
 	send(res, 200, "application/json; charset=utf-8", json, { ...JSON_CSP, ...extra, "x-cp-version": version });
-}
-
-/** `git diff base...head` for a held job, from its live worktree or its project clone; never fetched. */
-async function diff(res: ServerResponse, options: ViewerOptions, id: string): Promise<void> {
-	const job = jobDetail(options, id);
-	if (!job) return sendJson(res, 404, { error: "no such job" });
-	if (!job.head || !job.base) return sendJson(res, 200, { available: false, reason: "no head/base sha recorded" });
-	const root = jobRoot(options, id);
-	if (!root) return sendJson(res, 200, { available: false, reason: "no worktree or project clone to read" });
-	const out = await safePatch(root.path, "diff", `${job.base}...${job.head}`);
-	if (!out.ok) return sendJson(res, 200, { available: false, reason: out.reason });
-	sendJson(res, 200, { available: true, base: job.base, head: job.head, root: root.id, truncated: out.truncated, text: out.stdout });
 }
 
 /** Streams whose refresh intervals are still running in this process. */
@@ -404,7 +393,7 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			return;
 		}
 		case "/api/diff":
-			diff(res, options, url.searchParams.get("id") ?? "").catch(() => {
+			jobDiff(options, url.searchParams).then((out) => sendJson(res, out.status, out.body)).catch(() => {
 				if (!res.headersSent) sendJson(res, 500, { error: "internal" });
 			});
 			return;
