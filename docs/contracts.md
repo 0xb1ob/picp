@@ -7108,6 +7108,8 @@ composer's `#` picker (also `/thread`). It reads `GET /api/threads` and writes o
 - **Local only.** Open tabs (`cp-thread-tabs`) and unread cursors (`cp-thread-seen:<id>`) are this browser's. The `#`
   chip and `/thread` show once a named thread exists; New thread needs a running owner advertising `threads: true` and
   says why it is disabled otherwise. An unknown selected id shows nothing under it and links back to All messages.
+- **Capped joins.** Started from chat shows the join's first 8 rows and "N more" counting the rest plus its `omitted`
+  (joins are capped at `THREAD_JOINS_MAX`, 100); there is no paging.
 
 ### Remote devices (remote dashboard PR 1)
 
