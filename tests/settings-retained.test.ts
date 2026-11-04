@@ -65,10 +65,10 @@ const write = (home: string, owner: SettingFileOwner, body: unknown) =>
 const fieldOf = (key: SettingKey) => SETTING_FIELDS.find((field) => field.key === key) as SettingField;
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
-test("(a) catalog: 34 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
-	assert.equal(SETTING_KEYS.length, 34);
+test("(a) catalog: 35 unique keys in SETTING_KEYS order, every default valid, everything frozen", () => {
+	assert.equal(SETTING_KEYS.length, 35);
 	assert.deepEqual(SETTING_FIELDS.map((field) => field.key), [...SETTING_KEYS]);
-	assert.equal(new Set(SETTING_KEYS).size, 34);
+	assert.equal(new Set(SETTING_KEYS).size, 35);
 	assert.ok(Object.isFrozen(SETTING_FIELDS));
 	for (const field of SETTING_FIELDS) {
 		assert.ok(field.key.startsWith(`${field.section}.`), `${field.key} sits in section ${field.section}`);
@@ -118,6 +118,8 @@ function probes(field: SettingField): unknown[] {
 				[{ ...row, role: "researcher" }], [{ ...row, thinking: "huge" }], [{ ...row, fallbacks: Array(5).fill("c/d") }], Array((field.max_items ?? 1) + 1).fill(row), "x", null,
 			];
 		}
+		case "url":
+			return [null, "https://dash.example.test/", "http://127.0.0.1:8766/p/", "https://u:p@x.test/", "https://@x.test/", "https://x.test/?q=1", "https://x.test/#f", "ftp://x.test/", "/boards", "", 5, true];
 	}
 }
 
@@ -161,7 +163,11 @@ test("(c) range agreement: validateSettingValue accepts exactly what the owner s
 			const config = readUpdateConfig(join(home, LAYOUT.data));
 			return typeof config !== "string" && config[field.file_key as "enabled"] === value;
 		},
-		viewer: (_field, value) => (write(home, "viewer", { strict_host: value }), accepts(() => loadViewerConfig(ownerFile(home, "viewer")).strict_host, value)),
+		viewer: (field, value) => {
+			const key = field.file_key as "strict_host" | "public_url";
+			write(home, "viewer", { [key]: value });
+			return accepts(() => loadViewerConfig(ownerFile(home, "viewer"))[key], value);
+		},
 	};
 	let compared = 0;
 	for (const field of SETTING_FIELDS) {

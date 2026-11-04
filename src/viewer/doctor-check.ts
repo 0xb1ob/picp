@@ -53,7 +53,7 @@ export function viewerHostFinding(stateDir: string): DoctorFinding {
 		}
 		return { check: "viewer-host", severity: "ok", what: "viewer Host check on (viewer.strict_host=true): only the exact bind host:port is served" };
 	} catch (error) {
-		return { check: "viewer-host", severity: "warn", what: "viewer Host check on: data/viewer.json is invalid, so the bind Host is pinned", detail: (error as Error).message.slice(0, 2000), fix: "fix data/viewer.json (only {\"strict_host\": true|false}) or remove it" };
+		return { check: "viewer-host", severity: "warn", what: "viewer Host check on: data/viewer.json is invalid, so the bind Host is pinned", detail: (error as Error).message.slice(0, 2000), fix: "fix data/viewer.json (only {\"strict_host\": true|false, \"public_url\": \"https://…\"}) or remove it" };
 	}
 }
 

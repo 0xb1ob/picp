@@ -157,7 +157,7 @@ test("P9f-intake-board: a board envelope publishes its site at the viewer's addr
 	}
 	configured.endInput(); await configured.close();
 
-	// No configured viewer: the url is the tailnet address the viewer binds, and with no tailnet the board is refused.
+	// No configured viewer: the url is the tailnet address the viewer binds; with no tailnet the board is still accepted.
 	const bin = join(f.home, "bin");
 	mkdirSync(bin);
 	writeFileSync(join(bin, "tailscale"), "#!/bin/sh\necho 100.64.9.9\n");
@@ -167,10 +167,19 @@ test("P9f-intake-board: a board envelope publishes its site at the viewer's addr
 	await waitFor(() => f.job("cp-tailnet")?.receipts?.find((r) => r.kind === "board")?.url, (found) => found !== undefined, { timeoutMs: 30_000, what: "the tailnet board" });
 	assert.equal(f.job("cp-tailnet")?.receipts?.find((r) => r.kind === "board")?.url, "http://100.64.9.9:8766/boards/cp-tailnet/", "never the loopback default");
 	tailnet.endInput(); await tailnet.close();
+	// cp-board-url-proxy (a): no tailnet, host or public URL used to refuse and quarantine finished work the worker
+	// could not fix; it is published and accepted with a relative link, and the wake and receipt name the remedy.
 	writeFileSync(join(bin, "tailscale"), "#!/bin/sh\nexit 1\n");
 	await board("cp-no-tailnet");
 	const none = await f.start({ PATH: `${bin}:${process.env.PATH ?? ""}` });
-	await waitFor(() => JSON.stringify(none.records()), (evidence) => /cp-no-tailnet[\s\S]*require-tailnet/.test(evidence), { timeoutMs: 30_000, what: "the no-tailnet refusal" });
-	assert.equal(f.job("cp-no-tailnet")?.reported_at, undefined, "never silently defaulted");
+	await waitFor(() => f.job("cp-no-tailnet")?.reported_at, (stamped) => stamped !== undefined, { timeoutMs: 30_000, what: "the no-tailnet board accepted" });
+	const receipt = f.job("cp-no-tailnet")?.receipts?.find((r) => r.kind === "board");
+	assert.deepEqual([f.job("cp-no-tailnet")?.phase, receipt?.status, receipt?.url], ["held", "published", "/boards/cp-no-tailnet/"], "accepted, never refused");
+	assert.match(receipt?.title ?? "", /relative link: set viewer\.public_url or cp-install --viewer-host/);
+	assert.ok(published("cp-no-tailnet"), "the board is published");
+	assert.ok(!existsSync(join(f.home, paths.invalidEnvelopeFile("cp-no-tailnet", 1, 1))), "nothing quarantined");
+	const wake = (await f.wakes(none)).join("\n");
+	assert.match(wake, /board: \/boards\/cp-no-tailnet\/\\n {2}relative link: .*Settings → viewer → Public URL .*cp-install --viewer-host <ip>/);
+	assert.doesNotMatch(wake, /refused/);
 	none.endInput(); await none.close();
 });

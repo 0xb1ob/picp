@@ -53,8 +53,7 @@ import {
 	EnvelopeRecordSchema,
 } from "./contracts.ts";
 import { publishBoard } from "./board-delivery.ts";
-import { DEFAULT_PORT, defaultHost } from "./viewer/cli.ts";
-import { hostHeaderFor } from "./viewer/server.ts";
+import { boardLink } from "./viewer/board-link.ts";
 import { type EscalationStore, raiseLoopExhausted } from "./escalation.ts";
 import type { FleetStore } from "./fleet.ts";
 import { readStatusFile } from "./run-artifacts.ts";
@@ -94,6 +93,8 @@ export interface IntakeResult {
 	escalation_id?: string;
 	artifact?: IntakeArtifact;
 	board_url?: string;
+	/** Set with a relative `board_url`: no address was usable, and this names the remedy. */
+	board_url_note?: string;
 	receipts?: Receipt[];
 	/**
 	 * A named line about the `pr_url` intake stored (pi-command-post-fbn): either the
@@ -289,22 +290,23 @@ export class EnvelopeIntake {
 		const receipts: Receipt[] = [...(record.receipts ?? [])];
 		let artifact: IntakeArtifact | undefined;
 		let boardUrl: string | undefined;
+		let boardNote: string | undefined;
 		if (record.delivery === "board" && envelope.status === "done") {
+			let slug: string;
 			try {
 				const expected = join(home, paths.artifactDir(jobId), "board.json");
 				if (envelope.artifact_path !== expected) throw new Error(`artifact_path must be ${expected}`);
-				const slug = publishBoard(home, jobId, expected);
-				// pi-command-post-1jz: a configured host is trusted as-is; an unconfigured
-				// one must be the tailnet address the viewer actually binds under
-				// `--require-tailnet`, never a silent loopback default.
-				boardUrl = `http://${hostHeaderFor(this.#options.viewerHost ?? defaultHost(undefined, true), this.#options.viewerPort ?? DEFAULT_PORT)}/boards/${slug}/`;
+				slug = publishBoard(home, jobId, expected);
 			} catch (error) {
 				return this.#refuse(record, `board for ${jobId} refused: ${(error as Error).message}`, now);
 			}
+			// The address is never the worker's to fix: none usable is a relative link plus the remedy, never a refusal.
+			({ url: boardUrl, note: boardNote } = boardLink(home, slug, { viewerHost: this.#options.viewerHost, viewerPort: this.#options.viewerPort }));
 			// The wake-up text is a one-time turn; the receipt is the durable record a
 			// later status read or relay falls back to (pi-command-post-1jz: a missed
 			// wake-up left the parent with no served URL, only the local artifact path).
-			mergeReceipt(receipts, { kind: "board", status: "published", title: `board for ${jobId}`, url: boardUrl });
+			const title = `board for ${jobId}${boardNote ? " (relative link: set viewer.public_url or cp-install --viewer-host)" : ""}`;
+			mergeReceipt(receipts, { kind: "board", status: "published", title, url: boardUrl });
 		}
 		if (envelope.artifact_path && record.delivery !== "board") {
 			// pi-command-post-uad: an envelope naming an artifact that is not there is
@@ -409,6 +411,7 @@ export class EnvelopeIntake {
 			phase,
 			...(artifact ? { artifact } : {}),
 			...(boardUrl ? { board_url: boardUrl } : {}),
+			...(boardNote ? { board_url_note: boardNote } : {}),
 			...(receipts.length > 0 ? { receipts } : {}),
 		};
 		if (plannerAction === "escalate") {
@@ -672,7 +675,8 @@ export function formatIntake(result: IntakeResult): string {
 			: result.next === "advance"
 				? `\n  call cp_pipeline advance ${result.job_id} (keep the planner: a gate revise is promoted to it)`
 				: "";
-	return `${parts.join(" ")}\n  ${result.summary}${pr?.url ? `\n  PR: ${pr.url}` : ""}${prNote}${result.board_url ? `\n  board: ${result.board_url}` : ""}${artifact}${escalated}${blockers}`;
+	const board = result.board_url ? `\n  board: ${result.board_url}${result.board_url_note ? `\n  ${result.board_url_note}` : ""}` : "";
+	return `${parts.join(" ")}\n  ${result.summary}${pr?.url ? `\n  PR: ${pr.url}` : ""}${prNote}${board}${artifact}${escalated}${blockers}`;
 }
 
 /** Planner blockers travel verbatim. Strings stay the one-line join they always were. */

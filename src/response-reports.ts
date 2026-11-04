@@ -4,16 +4,14 @@
  */
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { publishBoard } from "./board-delivery.ts";
 import { isIsoTimestamp } from "./contracts.ts";
 import { redactSecrets } from "./decision-context.ts";
-import { readTunnelConfig, readTunnelRuntime } from "./service/daemon-tunnel-files.ts";
 import { SECRET_PATTERNS } from "./secret-patterns.ts";
+import { type BoardLink, boardLink } from "./viewer/board-link.ts";
 import { boardsDir, isBoardSlug, readBoard, resolveBoardFile } from "./viewer/boards.ts";
-import { DEFAULT_PORT, defaultHost, viewerAddress } from "./viewer/cli.ts";
-import { wantedListener } from "./viewer/remote-runtime.ts";
-import { hostHeaderFor } from "./viewer/server.ts";
+import { viewerAddress } from "./viewer/cli.ts";
 import { resolveStateDir, type ViewerState } from "./viewer/sessions.ts";
 
 /** More Unicode code points than this in the redacted answer publishes a report; exactly this many stays inline. */
@@ -33,7 +31,7 @@ export type FinalAnswerDelivery =
 	| { delivery: "inline"; state: "inline"; text: string; url: null; href: null }
 	| ({ delivery: "report"; text: string; url: string } & PublishedReport);
 
-export type ResponseReportErrorCode = "invalid" | "secret" | "too_large" | "no_url" | "conflict" | "tampered";
+export type ResponseReportErrorCode = "invalid" | "secret" | "too_large" | "conflict" | "tampered";
 export class ResponseReportError extends Error {
 	readonly code: ResponseReportErrorCode;
 	constructor(code: ResponseReportErrorCode, message: string) {
@@ -212,18 +210,12 @@ export function reportUrlOptions(env: NodeJS.ProcessEnv = process.env): ReportUr
 }
 
 /**
- * The absolute URL for a served board: the running tunnel origin when the remote listener is wanted for it, else the
- * configured viewer host/port as intake builds it. No usable address throws `no_url`; links never carry credentials.
+ * The link for a served board through the shared resolver (src/viewer/board-link.ts): tunnel origin, public URL, viewer
+ * host, tailnet, else a relative `/boards/<slug>/` with a remedy `note`. Links never carry credentials.
  */
-export function responseReportUrl(home: string, slug: string, options: ReportUrlOptions = {}): string {
+export function responseReportUrl(home: string, slug: string, options: ReportUrlOptions = {}): BoardLink {
 	if (!isBoardSlug(slug)) throw new ResponseReportError("invalid", `board slug ${JSON.stringify(slug)} is not valid`);
-	const stateDir = resolveStateDir(home);
-	const live = wantedListener(readTunnelConfig(join(dirname(stateDir), "data")), readTunnelRuntime(stateDir));
-	if (live) return `${live.origin}/boards/${slug}/`;
-	let host: string;
-	try { host = options.viewerHost ?? defaultHost(undefined, true); }
-	catch (error) { throw new ResponseReportError("no_url", `response report url unavailable: ${(error as Error).message}`); }
-	return `http://${hostHeaderFor(host, options.viewerPort ?? DEFAULT_PORT)}/boards/${slug}/`;
+	return boardLink(home, slug, options);
 }
 
 function headline(answer: string): string {
@@ -234,7 +226,7 @@ function headline(answer: string): string {
 export function deliverFinalAnswer(home: string, input: FinalAnswerInput, options: ReportUrlOptions = {}): FinalAnswerDelivery {
 	const payload = normalize(input);
 	if (codePoints(payload.answer) <= RESPONSE_INLINE_MAX) return { delivery: "inline", state: "inline", text: payload.answer, url: null, href: null };
-	const url = responseReportUrl(home, responseReportSlug(payload.source), options);
+	const { url, note } = responseReportUrl(home, responseReportSlug(payload.source), options);
 	const published = publishPayload(home, payload);
-	return { delivery: "report", text: `${headline(payload.answer)}\n\nFull answer: ${url}`, url, ...published };
+	return { delivery: "report", text: `${headline(payload.answer)}\n\nFull answer: ${url}${note ? `\n(${note})` : ""}`, url, ...published };
 }

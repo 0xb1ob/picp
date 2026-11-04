@@ -64,10 +64,11 @@ export const SETTING_APPLIES = [
 	"next_parent_start",
 	"next_operator_launch",
 	"next_viewer_request",
+	"next_board_link",
 ] as const;
 export type SettingApplies = (typeof SETTING_APPLIES)[number];
 
-export const SETTING_VALUE_TYPES = ["integer", "number", "nullable_number", "boolean", "enum_list", "string_list", "model_ref", "thinking_level", "rubric"] as const;
+export const SETTING_VALUE_TYPES = ["integer", "number", "nullable_number", "boolean", "enum_list", "string_list", "model_ref", "thinking_level", "rubric", "url"] as const;
 export type SettingValueType = (typeof SETTING_VALUE_TYPES)[number];
 
 export const SETTING_KEYS = [
@@ -105,6 +106,7 @@ export const SETTING_KEYS = [
 	"maintenance.update_enabled",
 	"maintenance.update_interval_min",
 	"viewer.strict_host",
+	"viewer.public_url",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 
@@ -151,7 +153,7 @@ function deepFreeze<T>(value: T): T {
 
 const SAFE_MAX = Number.MAX_SAFE_INTEGER;
 
-/** The 34 fields, in `SETTING_KEYS` order. */
+/** The 35 fields, in `SETTING_KEYS` order. */
 export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	...group("grants", "mandate-defaults", { applies: "next_grant", on_invalid: "refuse" }, {
 		expiry_hours: { file_key: "expiry_hours", type: "number", minimum: 0.1, maximum: 720, default: 8, label: "Grant expiry (hours)", help: "How long a new grant stands before it must be re-issued." },
@@ -218,6 +220,7 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	}),
 	...group("viewer", "viewer", { applies: "next_viewer_request", on_invalid: "refuse" }, {
 		strict_host: { file_key: "strict_host", type: "boolean", default: false, label: "Pin the dashboard Host", help: "Serve the local dashboard only under its exact bind host:port (the DNS-rebinding guard). Off: any name that reaches the port, such as a proxy's, is served with full control; an invalid file pins it." },
+		public_url: { file_key: "public_url", type: "url", default: null, applies: "next_board_link", label: "Public URL", help: "Where people reach this dashboard, e.g. a reverse proxy's https URL; board and report links use it. Links only: the bind address and the Host and Origin guards stay as they are. Empty unsets it." },
 	}),
 ]);
 
@@ -253,14 +256,31 @@ export function settingValueSchema(field: SettingField): TSchema {
 			return Type.Union([ThinkingLevelSchema, Type.Null()]);
 		case "rubric":
 			return Type.Array(RoutingRuleSchema, items);
+		case "url":
+			return Type.Union([Type.String(), Type.Null()]);
 	}
+}
+
+const PUBLIC_URL_MAX = 400;
+
+/** Why `value` is not a usable `viewer.public_url`, or undefined: absolute http(s), no userinfo, query or fragment. */
+export function publicUrlError(value: unknown): string | undefined {
+	if (typeof value !== "string") return "must be a string";
+	if (value.length > PUBLIC_URL_MAX) return `must be at most ${PUBLIC_URL_MAX} characters`;
+	let url: URL;
+	try { url = new URL(value); } catch { return `${JSON.stringify(value)} is not an absolute URL; use https://host[/prefix]`; }
+	if (url.protocol !== "https:" && url.protocol !== "http:") return `${url.protocol} is not allowed; use https:// or http://`;
+	if (!/^https?:\/\/[^/?#@\\\s]+(?:\/[^?#\\\s]*)?$/i.test(value)) return "must be http(s)://host[:port][/prefix] with no user name, password, query or fragment";
+	return undefined;
 }
 
 /** Validate one value against its catalog field; an unknown key is refused. */
 export function validateSettingValue(key: string, value: unknown): ValidationResult<SettingValue> {
 	const field = FIELD_BY_KEY.get(key);
 	if (!field) return { ok: false, errors: [`unknown setting ${key}`] };
-	return validate<SettingValue>(settingValueSchema(field), value);
+	const checked = validate<SettingValue>(settingValueSchema(field), value);
+	const why = checked.ok && field.type === "url" && value !== null ? publicUrlError(value) : undefined;
+	return why ? { ok: false, errors: [`${key} ${why}`] } : checked;
 }
 
 const SHA256_PATTERN = "^[0-9a-f]{64}$";

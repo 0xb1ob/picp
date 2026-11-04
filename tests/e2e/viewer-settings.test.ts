@@ -308,7 +308,7 @@ test("P20-settings-relay: the session's outcomes pass through with no viewer lin
 	const status = await view.get("/api/settings");
 	assert.equal(status.status, 200);
 	assert.deepEqual([status.body.enabled, status.body.running, status.body.supported, status.body.writable], [true, true, true, true]);
-	assert.equal((status.body.catalog as unknown[]).length, 34);
+	assert.equal((status.body.catalog as unknown[]).length, 35);
 	assert.ok("available_models" in status.body && "models_error" in status.body, "the model list rides the read: a list or a note, never missing");
 	for (const secret of ["secret-gateway", "/v1/secret-path", home]) assert.ok(!status.text.includes(secret), `GET leaks ${secret}`);
 	const revision = (status.body.snapshot as { revision: string }).revision;
@@ -367,7 +367,7 @@ test("P20-model-list: GET /api/settings never waits for pi --list-models; one sh
 	const models = (body: Line) => [body.available_models, body.models_error, body.models_loading];
 	stub.hold();
 	const first = await read();
-	assert.deepEqual([...models(first), (first.catalog as unknown[]).length], [null, null, true, 34], "a listing that never returns answers loading at once");
+	assert.deepEqual([...models(first), (first.catalog as unknown[]).length], [null, null, true, 35], "a listing that never returns answers loading at once");
 	assert.deepEqual(models(await read()), [null, null, true]);
 	await until(stub.calls, (n) => n === 1, "the one background run");
 	assert.equal(stub.calls(), 1, "repeat reads share the one background run");
