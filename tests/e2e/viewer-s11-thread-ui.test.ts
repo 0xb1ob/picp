@@ -95,7 +95,23 @@ test("S11-thread-ui: tabs and # scope rows, asks, jobs and drafts; No thread sen
 	await until(() => field(tab)?.value, (v) => v === "DRAFT-A", "Alpha's own draft back");
 	assert.deepEqual(tab.$$(".thread-tab a").map((a) => a.textContent), ["Operator · All messages", "# Alpha", `# ${BETA}`], "each visited thread keeps a tab");
 	assert.ok(tab.$$(".thread-tab a").every((a) => a.getAttribute("href")?.startsWith("#") && a.getAttribute("tabindex") !== "-1"), "every tab is a focusable link");
-	// Browser back fires hashchange to the previous hash: Beta's selection and its own draft return.
+	// Reload (C18): a second tab on the same storage, at this tab's hash, gets back the open tabs, Alpha and its draft.
+	const reloaded = await openTab(t, d.port, tab.window.location.hash, storage, undefined, {}, true);
+	const restored = () => [reloaded.$(".session-heading-id strong")?.textContent, field(reloaded)?.value, reloaded.$$(".thread-tab a").map((a) => a.textContent)];
+	const expected = ["# Alpha", "DRAFT-A", ["Operator · All messages", "# Alpha", `# ${BETA}`]];
+	await until(restored, (r) => JSON.stringify(r) === JSON.stringify(expected), "the reloaded selection").catch(() => undefined);
+	assert.deepEqual(restored(), expected, "reload: the open tabs, the selected thread and its draft come back");
+	// C20: a thread link built while `session=` is set keeps it and drops only `transcript=1`; it opens the Full
+	// transcript (the routes.ts default), so the heading names the thread.
+	const file = reloaded.$("select[aria-label='Operator session file'] option")!.getAttribute("value")!;
+	reloaded.go(`${CHAT}&session=${encodeURIComponent(file)}`);
+	const link = (await reloaded.find(".thread-row", (a) => a.textContent!.includes("Alpha") && a.getAttribute("href")!.includes("session="))).getAttribute("href")!;
+	reloaded.go(link);
+	const heading = await until(() => reloaded.$(".session-heading-id strong")?.textContent, (s) => s === "# Alpha", "the thread link's Full transcript");
+	assert.deepEqual([Object.fromEntries(new URLSearchParams(link.split("?")[1])), heading], [{ view: "you", session: file, thread: A }, "# Alpha"]);
+	reloaded.close();
+	// Back: the linkedom tab has no history.back() or popstate, so a browser back is replayed as a hashchange to the
+	// previous hash; Beta's selection and its own draft return.
 	tab.go(beta);
 	await until(() => field(tab)?.value, (v) => v === "DRAFT-B", "Beta's own draft back");
 	assert.equal(tab.$(".operator-composer-hash")?.textContent?.includes(BETA), true, "the # chip names the Unicode thread");
