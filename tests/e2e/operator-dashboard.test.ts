@@ -476,7 +476,7 @@ test("P9e-control: the real bridge's dashboard control delivers, holds, steers, 
 	const status = await op.send("status", {});
 	assert.ok(status.ok);
 	assert.deepEqual({ ...(status.result as Json), recent: undefined, restart: undefined, parent_restart: undefined },
-		{ busy: false, pending: false, session_file: sessionFile.split("/").pop(), recent: undefined, restart: undefined, parent_restart: undefined, images: true, files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, commands: true });
+		{ busy: false, pending: false, session_file: sessionFile.split("/").pop(), recent: undefined, restart: undefined, parent_restart: undefined, images: true, files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, commands: true, threads: true });
 	assert.deepEqual({ ...(status.result as Json).parent_restart as Json, reason: undefined }, { safe: false, reason: undefined, last: null }, "undrained");
 
 	const hello = await op.send("send", { kind: "message", text: "  hello there  ", peer: "100.64.0.9" });
