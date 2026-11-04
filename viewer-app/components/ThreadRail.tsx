@@ -1,5 +1,5 @@
 import type { ComponentChild } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { NamedThread, SessionEntry, StartedFromChat, ThreadsResponse } from "../../src/viewer/api-types.ts";
 import { type ControlView, createThread, newClientId } from "../control.ts";
 import { jobHref } from "../routes.ts";
@@ -87,7 +87,8 @@ export function useThreads({active, selection, entries, control}: {active: boole
   if (!active || !selection || !("thread" in selection) || !newest || readSeen(selection.thread) >= newest) return;
   rememberSeen(selection.thread, newest); setSeenTick(n => n + 1);
  }, [active, value, newest]);
- useEffect(() => {
+ // Layout effect: the shortcut listens from the same commit that enables New thread, never a frame later.
+ useLayoutEffect(() => {
   if (!active || gate) return;
   const key = (e: KeyboardEvent) => { if (newKey(e)) { e.preventDefault(); open(document.activeElement as HTMLElement | null); } };
   window.addEventListener("keydown", key);

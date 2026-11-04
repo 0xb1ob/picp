@@ -19,6 +19,8 @@ export function threadHash(hash: string, value: string): string {
  const [path = "", query = ""] = hash.replace(/^#/,"").split("?");
  const q = new URLSearchParams(query);
  if (value) q.set("thread", value); else q.delete("thread");
+ // A thread link never names the transcript view: Operator ↔ you opens on the Full transcript by default.
+ if (q.get("transcript") === "1") q.delete("transcript");
  const rest = q.toString();
  return `#${path}${rest ? `?${rest}` : ""}`;
 }
