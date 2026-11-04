@@ -5,7 +5,7 @@
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { publicUrlError } from "../contracts.ts";
+import { publicUrlError } from "./public-url.ts";
 
 export const viewerConfigFile = (stateDir: string): string => join(dirname(stateDir), "data", "viewer.json");
 
