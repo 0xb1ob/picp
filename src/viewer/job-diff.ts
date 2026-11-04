@@ -6,6 +6,7 @@
 import { parseChangeRequestUrl } from "../forge-url.ts";
 import type { JobDiffResponse } from "./api-types.ts";
 import { projectRoot, safePatch } from "./explorer.ts";
+import { SHA } from "./git-read.ts";
 import { jobDetail } from "./fleet-view.ts";
 import type { ViewerState } from "./sessions.ts";
 
@@ -25,7 +26,8 @@ export async function jobDiff(state: ViewerState, query: URLSearchParams): Promi
 	if ([...query.keys()].some((key) => key !== "id") || query.getAll("id").length > 1) return { status: 400, body: { error: "only id is read: a path or revision is never accepted" } };
 	const job = jobDetail(state, query.get("id") ?? "");
 	if (!job) return { status: 404, body: { error: "no such job" } };
-	const base = job.base ?? null, head = job.head ?? null;
+	// The raw recorded values, not fleet-view's filtered ones, so a malformed sha reads as such below.
+	const base = job.envelope?.base_sha ?? null, head = job.ci?.head_sha ?? job.envelope?.head_sha ?? null;
 	const root = job.project ? projectRoot(state, job.project) : undefined, rootId = root ? `project:${job.project}` : null;
 	const body: JobDiffResponse = {
 		job_id: job.job_id, available: false, unavailable: null, base, head, branch: job.envelope?.branch ?? job.branch ?? null,
@@ -34,6 +36,8 @@ export async function jobDiff(state: ViewerState, query: URLSearchParams): Promi
 	};
 	const unavailable = (why: string) => ({ status: 200, body: { ...body, unavailable: why } });
 	if (!base || !head) return unavailable(!base && !head ? "no base or head sha recorded" : !base ? "no base sha recorded" : "no head sha recorded");
+	// A ref name, short sha or dash-led string is never handed to git as a revision.
+	if (!SHA.test(base) || !SHA.test(head)) return unavailable("recorded base/head is not a full sha");
 	if (!root) return unavailable("no project clone to read");
 	const out = await safePatch(root, "diff", `${base}...${head}`, { maxBytes: DIFF_MAX_BYTES });
 	if (!out.ok) return unavailable(`git could not read the recorded shas: ${out.reason ?? "unknown"}`);

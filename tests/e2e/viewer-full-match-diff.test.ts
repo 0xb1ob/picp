@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
@@ -115,6 +115,17 @@ test("S7-diff-http: /api/diff serves the recorded base...head from the picp clon
 		assert.equal((await d.get(`/api/diff?id=${id}`)).status, 404, `id ${JSON.stringify(id)}`);
 	}
 	assert.equal((await d.get(`/api/diff?id=${JOB}`, { method: "POST" })).status, 405);
+	// Review 1 (security): a recorded short sha, ref name or dash-led string never reaches git as a revision; with the
+	// check gone, `main` and the short sha diff, and `--output=` writes `/tmp/x...<head>` (removed below if created).
+	const outputs = ["/tmp/x", `/tmp/x...${shas.head}`], existed = outputs.map((file) => existsSync(file));
+	t.after(() => { if (!existed[1]) rmSync(outputs[1]!, { force: true }); });
+	for (const [base, head] of [[shas.base, shas.head.slice(0, 12)], ["main", shas.head], ["--output=/tmp/x", shas.head], [shas.base, "--output=/tmp/x"]]) {
+		envelope(d.home, base!, head!);
+		const bad = await read();
+		assert.deepEqual([bad.available, bad.unavailable, bad.text, bad.base, bad.head], [false, "recorded base/head is not a full sha", "", base, head],
+			`${base}...${head} is unavailable before any git call`);
+	}
+	assert.deepEqual(outputs.map((file) => existsSync(file)), existed, "no git --output file was written");
 	envelope(d.home, shas.base, shas.head);
 	assert.deepEqual(snapshot(join(d.home, ".pi-command-post")), before, "the endpoint never writes to the clone or the state");
 });
