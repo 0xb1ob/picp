@@ -32,18 +32,21 @@ const rowEdited = (row: RoutingRule, was: RoutingRule | undefined): boolean => J
 function Section({title, help, keys, drafts, setDrafts, view, restore, restoreText, disabled, invalid, unsavedCount, children}: {title: string; help: string; keys: SettingKey[]; drafts: Drafts; setDrafts: (next: (drafts: Drafts) => Drafts) => void; view: SettingsView; restore: RestoreSelector | null; restoreText: string; disabled: boolean; invalid?: boolean; unsavedCount?: number; children: ComponentChildren}) {
  const changes = pick(drafts, keys);
  const unsaved = unsavedCount ?? Object.keys(changes).length;
- const save = async () => { if (await view.save(changes)) setDrafts(current => omit(current, keys)); };
- const reset = async () => {
-  if (!restore || !(globalThis.confirm?.(restoreText) ?? true)) return;
-  if (await view.restore(restore)) setDrafts(current => omit(current, keys));
+ const [busy, setBusy] = useState(false);
+ // Only this section's own write locks its buttons: another section's click queues behind it instead of being dropped.
+ const run = async (write: () => Promise<boolean>) => {
+  if (busy) return;
+  setBusy(true);
+  try { if (await write()) setDrafts(current => omit(current, keys)); } finally { setBusy(false); }
  };
+ const reset = () => { if (restore && (globalThis.confirm?.(restoreText) ?? true)) void run(() => view.restore(restore)); };
  return <section class="settings-section" aria-label={title}>
   <h2>{title}</h2>
   <p class="settings-help">{help}</p>
   <div class="settings-body">{children}</div>
   {restore && <div class="settings-actions">
-   <button type="button" class="settings-primary" disabled={disabled || invalid || !Object.keys(changes).length} onClick={() => void save()}>Save</button>
-   <button type="button" disabled={disabled} onClick={() => void reset()}>Restore defaults</button>
+   <button type="button" class="settings-primary" disabled={disabled || busy || invalid || !Object.keys(changes).length} onClick={() => void run(() => view.save(changes))}>Save</button>
+   <button type="button" disabled={disabled || busy} onClick={reset}>Restore defaults</button>
    {unsaved > 0 && <span class="settings-unsaved">{unsaved} unsaved change{unsaved === 1 ? "" : "s"}</span>}
   </div>}
  </section>;
@@ -165,7 +168,8 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
  if (!status) return <div class="settings-screen">{header}<p role="status">Loading</p>{children}</div>;
  if ("error" in status || !status.snapshot || !status.catalog) return <div class="settings-screen">{header}<p role="alert" class="overview-error">Settings unavailable: {"error" in status ? status.error : status.reason ?? "no snapshot"}</p>{children}</div>;
  const data: SettingsResponse = status;
- const disabled = !data.writable || !view.token || view.busy;
+ const disabled = !data.writable || !view.token;
+ const editing = disabled || view.busy;
  const set = (key: SettingKey, value: SettingValue) => setDrafts(current => ({...current, [key]: value}));
  const view_ = (key: SettingKey) => data.snapshot?.fields.find(field => field.key === key);
  const routingAbsent = status.snapshot.owners.find(owner => owner.owner === "routing")?.state === "absent";
@@ -182,7 +186,7 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
   const spec = fieldOf(data, key);
   // A server refusal (a bad Public URL) shows under its field too, beside the notice's list.
   const refused = view.notice?.kind === "error" ? view.notice.errors.find(error => error.includes(key)) ?? null : null;
-  return spec && <Field key={key} field={spec} value={valueOf(data, drafts, key)} source={view_(key)?.source} error={key in drafts ? fieldError(spec, drafts[key]) ?? refused : null} set={value => set(key, value)} disabled={disabled} models={models}/>;
+  return spec && <Field key={key} field={spec} value={valueOf(data, drafts, key)} source={view_(key)?.source} error={key in drafts ? fieldError(spec, drafts[key]) ?? refused : null} set={value => set(key, value)} disabled={editing} models={models}/>;
  };
  const invalid = (keys: SettingKey[]) => keys.some(key => { const spec = fieldOf(data, key); return !!spec && key in drafts && fieldError(spec, drafts[key]) !== null; });
  const models = data.available_models;
@@ -193,7 +197,7 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
   {!data.writable || !view.token ? <p role="status" class="settings-readonly">Read only: {data.reason ?? "no operator session serves dashboard control; start it to change settings"}</p> : null}
   {notice && <div role={notice.kind === "ok" ? "status" : "alert"} class={`settings-notice settings-${notice.kind}`}><p>{notice.text}</p>{notice.errors.length > 0 && <ul>{notice.errors.map(error => <li key={error}>{error}</li>)}</ul>}</div>}
   <Section title="Model routing" help="First matching rule wins. Model, fallbacks and thinking apply from the next job or review; role, scope and risk stay fixed." keys={["models.rubric"]} drafts={drafts} setDrafts={setDrafts} view={view} restore={routingAbsent ? null : {keys: ["models.rubric"]}} restoreText="Restore the shipped model, fallbacks and thinking on every rubric row whose id matches? Rows you added stay." disabled={disabled} unsavedCount={rows.filter((row, index) => rowEdited(row, original[index])).length}>
-   {routingAbsent ? <p class="settings-readonly">No data/routing.json: every worker route is refused until it exists.</p> : <Rubric rows={rows} original={original} setRow={setRow} disabled={disabled} models={models}/>}
+   {routingAbsent ? <p class="settings-readonly">No data/routing.json: every worker route is refused until it exists.</p> : <Rubric rows={rows} original={original} setRow={setRow} disabled={editing} models={models}/>}
    {modelsNote}
   </Section>
   <Section title="Parent and operator models" help="Empty means unset: the env pin, else today's behaviour. Nothing switches live." keys={PEOPLE_MODELS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: PEOPLE_MODELS}} restoreText="Unset the parent and operator models and thinking?" disabled={disabled}>

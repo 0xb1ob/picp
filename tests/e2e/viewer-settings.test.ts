@@ -422,14 +422,14 @@ const optionTexts = (select: Element) => [...select.querySelectorAll("option")].
 const settle = () => new Promise((done) => setTimeout(done, 150));
 
 /** Settings in a tab on a home with the shipped routing.json (unless `routing` is false) and a live session. */
-async function settingsTab(t: TestContext, { routing = true, models = MODELS, status = 0, pending = false, ports = {} }: { routing?: boolean; models?: string; status?: number; pending?: boolean; ports?: Partial<ControlPorts> } = {}) {
+async function settingsTab(t: TestContext, { routing = true, models = MODELS, status = 0, pending = false, ports = {}, hold }: { routing?: boolean; models?: string; status?: number; pending?: boolean; ports?: Partial<ControlPorts>; hold?: RegExp } = {}) {
 	const { view, stub } = await settingsHome(t);
 	if (routing) copyFileSync(join(REPO_ROOT, "defaults/routing.default.json"), join(view.home, LAYOUT.routingFile));
 	stub.answer(models, status);
 	if (pending) stub.hold();
 	const csrf = await session(t, view.home, view.stateDir, true, ports);
 	if (!pending) await until(() => view.get("/api/settings").then((reply) => reply.body.models_loading), (loading) => loading === false, "the first model listing");
-	const tab = await view.open("#settings");
+	const tab = await view.open("#settings", hold);
 	await tab.find('section[aria-label="Auto-compaction"]');
 	const section = (title: string) => tab.$(`section[aria-label="${title}"]`)!;
 	const press = async (scope: Element, label: string) => { tab.click([...scope.querySelectorAll("button")].find((b) => b.textContent === label)!); await settle(); };
@@ -520,6 +520,29 @@ test("P20-settings-rubric: rubric edits post the whole row list; restore bodies 
 	const errors = await ui.tab.find(".settings-error");
 	assert.equal(ui.posts().at(-1)?.status, 400);
 	assert.deepEqual([...errors.querySelectorAll("li")].map((li) => li.textContent), ["models.rubric: 7 rows sent for 6; rows cannot be added, removed or reordered here"]);
+});
+
+test("P20-settings-restore-race: Restore in other sections while one is in flight posts each once, in order, on a fresh revision", { timeout: 120_000 }, async (t) => {
+	// Every restore POST waits for release(): the old page-wide busy flag dropped the other sections' clicks
+	// (main red twice at "three restores", last = 3); a busy section's own second click must not post again.
+	const ui = await settingsTab(t, { hold: /^\/api\/settings\/restore$/ });
+	const restoreButton = (title: string) => [...ui.section(title).querySelectorAll("button")].find((b) => b.textContent === "Restore defaults")!;
+	await ui.press(ui.section("Model routing"), "Restore defaults");
+	assert.ok(restoreButton("Model routing").hasAttribute("disabled"), "the section in flight is busy");
+	assert.equal(restoreButton("Parent and operator models").hasAttribute("disabled"), false, "another section stays actionable");
+	await ui.press(ui.section("Parent and operator models"), "Restore defaults");
+	await ui.press(ui.section("Grant defaults"), "Restore defaults");
+	await ui.press(ui.section("Model routing"), "Restore defaults");
+	ui.tab.release();
+	const restores = () => ui.posts().filter((p) => p.path === "/api/settings/restore");
+	await until(() => restores().length, (n) => n === 3, "three restores after the held one");
+	await until(() => restoreButton("Grant defaults").hasAttribute("disabled"), (busy) => !busy, "the last section settles");
+	assert.deepEqual(restores().map((p) => [p.status, p.json.keys ?? p.json.section]), [
+		[200, ["models.rubric"]],
+		[200, ["models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"]],
+		[200, "grants"],
+	], "each section once, in click order, none refused as stale");
+	assert.equal(ui.posts().length, 3, "no duplicate POST");
 });
 
 test("P20-settings-compaction: both keys with what is in force; a bad threshold blocks Save; save and restore round-trip the file", { timeout: 120_000 }, async (t) => {
