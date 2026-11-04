@@ -79,13 +79,15 @@ export function screenDataUrl(current: Route): string {
  // The composer's draft and reference (composerHref) and the project selection stay in the hash, never the API.
  query.delete("draft");
  query.delete("ref");
+ query.delete("append");
  if (current.screen !== "sessions") query.set("view","screen");
  return `/api/${current.screen}?${query}`;
 }
 export const sessionHref = (tier:"you" | "parent" | "workers", id?:string): string => `#sessions?${new URLSearchParams({view:tier,...(id ? {id} : {})})}`;
-/** The Full transcript with its composer prefilled; with `reference` the draft only fills an empty composer. */
-export const composerHref = (draft: string, reference?: EvidenceReference): string =>
- `#sessions?${new URLSearchParams({view:"you",transcript:"1",...(draft || !reference ? {draft} : {}),...(reference ? {ref:JSON.stringify(reference)} : {})})}`;
+/** The Full transcript with its composer prefilled; with `reference` the draft only fills an empty composer, unless
+ * `append` (typed text, not a suggestion) joins it to a kept draft on a new line. */
+export const composerHref = (draft: string, reference?: EvidenceReference, append = false): string =>
+ `#sessions?${new URLSearchParams({view:"you",transcript:"1",...(draft || !reference ? {draft} : {}),...(reference ? {ref:JSON.stringify(reference)} : {}),...(append && draft ? {append:"1"} : {})})}`;
 /** Operator ↔ you's recorded Decisions: an explicit choice, since the bare view opens the Full transcript. */
 export const DECISIONS_HREF = "#sessions?view=you&transcript=0";
 /** A defaulted Full transcript the server refused (403: not served here) becomes Decisions, silently. */

@@ -50,7 +50,8 @@ function seed(stateDir: string, home: string, extra = false) {
 	put(join(LAYOUT.runs, "cp-park/review-1.json"), { schema_version: 1, job_id: "cp-park", attempt: 1, verdict: "pass", cause: "ok", reasons: ["GUIDE-NOTE"], model: "rev/model-1",
 		flags: { destructive_scope: false, scope_growth: false, blocking_unknowns: false }, decided_at: iso(150), head_sha: "b".repeat(40), diff_stat: { files: 3, truncated: false } });
 	put(join(LAYOUT.runs, "cp-merged/merge.json"), { job_id: "cp-merged", pr_url: "https://github.com/o/r/pull/2", merge_commit_sha: "c".repeat(40), merged_at: iso(30) });
-	// Full match S4: cp-other's run is working; cp-park has a worker session for its Log and a report.md; cp-live is a script.
+	// Full match S4: cp-other's run is working; cp-park has a worker session for its Log and a report.md;
+	// cp-live is a script.
 	put(join(LAYOUT.runs, "cp-other/status.json"), { phase: "working", started_at: iso(60) });
 	const worker = join(stateDir, "sessions", "cp-park.jsonl"), at = (minutes: number, message: object) => JSON.stringify({ type: "message", timestamp: iso(minutes), message });
 	put(join(LAYOUT.runs, "cp-park/status.json"), { session_file: worker });
@@ -397,10 +398,11 @@ test("M3-jobs-log (full match S4): a reply's link opens Log with Report, Files a
 	assert.deepEqual([(tab.$(".operator-composer textarea") as unknown as { value: string }).value, writes()], ["KEEP-DRAFT", before],
 		"the reference joins the kept draft; nothing is sent");
 
-	// Frame 8's entry: what the operator typed becomes the (empty) Chat draft beside the reference, unsent.
+	// Frame 8's entry: what the operator typed joins Chat's kept draft on a new line (C2), beside the reference, unsent.
 	const phone = await openTab(t, d.port, filtered, new Map(), undefined, {}, false);
 	browserShims(t, phone);
 	await phone.waitText(/REPLY-CARD/);
+	phone.type(await phone.find(".operator-composer textarea"), "KEEP-DRAFT");
 	phone.click(phone.$$(".session-steps .session-tools").find((b) => b.getAttribute("title") === "cp-park")!);
 	activate(phone, await phone.find(".session-steps-link", (a) => a.getAttribute("href") === "#job/cp-park?tab=transcript"));
 	const entry = await phone.find(".workspace-log-entry input");
@@ -411,7 +413,7 @@ test("M3-jobs-log (full match S4): a reply's link opens Log with Report, Files a
 	await phone.find(".evidence-chip");
 	await settle();
 	assert.deepEqual([(phone.$(".operator-composer textarea") as unknown as { value: string }).value, phone.requests.filter((r) => r.method !== "GET" && r.method !== "HEAD").length],
-		["WHY-SLOW is the route slow?", 0], "the typed text is the Chat draft with the reference; nothing is sent");
+		["KEEP-DRAFT\nWHY-SLOW is the route slow?", 0], "the typed text joins the kept Chat draft on a new line; nothing is sent");
 });
 
 test("M3-jobs-query (full match S3): Today/In flight, project and query narrow counts and rows; Show more keeps focus; a pick keeps Details, links and P2", { timeout: 180_000 }, async (t) => {

@@ -182,8 +182,24 @@
  .workspace-job .job-detail-side { display: none; }
  .workspace-job .job-detail[data-tab="details"] .job-detail-side { display: flex; }
  /* The inspector covers the chat's right edge below 1280 px; the shell's ⋮ stays on top of its header's right end. */
- aside.workspace-context { position: absolute; top: 0; right: 0; bottom: 0; z-index: 1; display: flex; width: min(340px, 100%); border-left: 1px solid var(--border); box-shadow: -24px 0 60px var(--page); }
+ aside.workspace-context { position: absolute; top: 0; right: 0; bottom: var(--workspace-status, 0px); z-index: 1; display: flex; width: min(340px, 100%); border-left: 1px solid var(--border); box-shadow: -24px 0 60px var(--page); }
  aside.workspace-context .workspace-context-head { padding-right: 84px; }
+ /* Frames 1–2 (design `.sbar`): a 37 px footer across every column, in the grid's one implicit row below the rest. */
+ .sessions { --workspace-status: 37px; }
+ .workspace-status { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; gap: 16px; height: var(--workspace-status); min-width: 0; padding: 0 18px; border-top: 1px solid var(--divider); background: var(--nav); font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+ .workspace-status > * { flex-shrink: 0; }
+ .workspace-status > .workspace-status-meter { display: flex; align-items: center; gap: 8px; flex-shrink: 1; min-width: 0; overflow: hidden; }
+ .workspace-status-meter > :last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+ .workspace-status-meter > progress { appearance: none; flex: none; width: 64px; height: 5px; border: 0; border-radius: 3px; background: var(--border); overflow: hidden; }
+ .workspace-status-meter > progress::-webkit-progress-bar { background: var(--border); }
+ .workspace-status-meter > progress::-webkit-progress-value { background: var(--muted); border-radius: 3px; }
+ .workspace-status-meter > progress::-moz-progress-bar { background: var(--muted); }
+ .workspace-status-dim { color: var(--dim); }
+ .workspace-status-sep { color: var(--faint); }
+ .workspace-status > .workspace-status-today { margin-left: auto; }
+ .workspace-status-link { display: flex; align-items: center; gap: 7px; margin-left: 8px; }
+ .workspace-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+ .workspace-status-live > .workspace-status-dot { background: var(--green); }
 }
 @media (min-width: 1280px) {
  .sessions:has(> .workspace-job) { grid-template-columns: 261px minmax(0,1fr) 521px; }

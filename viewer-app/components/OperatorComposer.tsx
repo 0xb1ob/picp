@@ -24,7 +24,7 @@ const OFFLINE_REF_KEY = `${REF_KEY}offline`;
 function dropComposerLink() {
  const [path = "", query = ""] = location.hash.split("?");
  const params = new URLSearchParams(query);
- params.delete("draft"); params.delete("ref");
+ params.delete("draft"); params.delete("ref"); params.delete("append");
  const rest = params.toString();
  location.replace(`${path}${rest ? `?${rest}` : ""}`);
 }
@@ -89,10 +89,12 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
    rememberDraft(draftKey, saved); rememberDraft(refKey, savedRef); rememberDraft(OFFLINE_DRAFT_KEY, ""); rememberDraft(OFFLINE_REF_KEY, "");
   }
   // A reference link's draft is a suggestion: saved (or typed) text is kept, and the suggestion is saved like typing.
-  const suggested = !saved && link && draft ? draft.slice(0, CONTROL_TEXT_MAX) : "";
+  // Text typed into a job's Ask entry (`append=1`, full match C2) is no suggestion: it joins kept text on a new line.
+  const typed = !!link && !!draft && new URLSearchParams(location.hash.split("?")[1] ?? "").get("append") === "1";
+  const suggested = link && draft && (!saved || typed) ? (saved ? `${saved}\n${draft}` : draft).slice(0, CONTROL_TEXT_MAX) : "";
   if (suggested) rememberDraft(draftKey, suggested);
-  const restoredText = (saved || suggested).slice(0, CONTROL_TEXT_MAX);
-  if (restoredText) setText(current => current || restoredText);
+  const restoredText = (suggested || saved).slice(0, CONTROL_TEXT_MAX);
+  if (restoredText) setText(current => typed ? restoredText : current || restoredText);
   const ref = link ?? parseReference(savedRef);
   if (ref) { setAttached(ref); rememberDraft(refKey, JSON.stringify(ref)); }
   // Consumed: the link leaves the URL, so a reload restores storage (a removed chip stays removed), never the link.

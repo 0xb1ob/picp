@@ -20,7 +20,8 @@ function Identity({data, worker}: {data: JobResponse; worker: Worker | undefined
  const job = data.job, root = data.files_href ? new URLSearchParams(data.files_href.split("?")[1]).get("root") : null;
  const model = job.model ?? worker?.model ?? (job.script_path ? `script ${job.script_path}` : `model ${NOT}`);
  const facts = [worker?.role ?? `role ${NOT}`, model, worker?.thinking ?? job.context?.thinking ?? `thinking ${NOT}`];
- // Roots are named by id, never by path (src/viewer/explorer.ts), and /api/job carries no branch: the root links to Files.
+ // Roots are named by id, never by path (src/viewer/explorer.ts), and /api/job carries no branch:
+ // the root links to Files.
  const where = root?.startsWith("worktree:") ? `${job.project} worktree` : root?.startsWith("project:") ? `${job.project} clone` : null;
  return <div class="workspace-log-who">
   <span class="workspace-log-mark" aria-hidden="true">&gt;_</span>
@@ -83,15 +84,16 @@ function Report({data}: {data: JobResponse}) {
 }
 
 /**
- * P1 only for this job's own reference. Desktop reads frame 2's read-only line, the phone frame 8's entry; both only open
- * operator Chat with the reference (the entry's text as its draft) and never send, least of all to the worker.
+ * P1 only for this job's own reference. Desktop reads frame 2's read-only line, the phone frame 8's entry; both
+ * only open operator Chat with the reference (the entry's typed text as its draft, joining a kept one on a new line)
+ * and never send, least of all to the worker.
  */
 function AskFooter({data}: {data: JobResponse}) {
  const [text, setText] = useState("");
  const own = data.ask_reference?.kind === "job" && data.ask_reference.job_id === data.job.id;
  if (!own && data.job.phase !== "failed") return <footer class="workspace-log-ask"><span class="workspace-log-empty">Ask unavailable · no recorded reference for this job</span></footer>;
  const safe = own ? data : {...data, ask_reference: null}, ask = jobAskTarget(safe);
- const href = composerHref(text.trim() || ask.question, ask.reference ?? undefined);
+ const href = composerHref(text.trim() || ask.question, ask.reference ?? undefined, !!text.trim());
  return <footer class="workspace-log-ask">
   <p class="workspace-log-readonly">Read-only. Steer this job from the chat with <JobAsk data={safe} label={`@${data.job.id}`}/></p>
   {ask.reference && ask.unsupported ? <span class="workspace-log-entry workspace-log-empty">Ask unavailable · {ask.unsupported}</span>

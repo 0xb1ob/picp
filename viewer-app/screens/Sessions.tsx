@@ -21,6 +21,7 @@ import { TranscriptSkills } from "../components/TranscriptSkills.tsx";
 import { PendingBubble } from "../components/PendingBubble.tsx";
 import { transcriptHasSend } from "../pending-sends.ts";
 import { ShellContext } from "../components/Shell.tsx";
+import { WorkspaceStatus } from "../components/WorkspaceStatus.tsx";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { VersionBadge } from "../components/VersionBadge.tsx";
 import { badgeView } from "../use-version.ts";
@@ -410,5 +411,6 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
    {data.transcript === true && control && <OperatorComposer control={control} draft={draft} reference={reference} chat={workspace.composer}/>}
   </div>
   {workspace.surfaces}
+  <WorkspaceStatus/>
  </div>;
 }

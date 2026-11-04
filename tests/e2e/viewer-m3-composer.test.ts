@@ -243,5 +243,6 @@ test("M3-composer-viewport: crossing 900 px with the context open closes it, so 
 	await cross(true);
 	await until(() => n(tab, ".workspace-context"), (c) => c === 0, "crossing back closes the sheet");
 	assert.deepEqual([toggle.getAttribute("aria-expanded"), focused() === toggle, escapeBody(tab)], ["false", true, false], "focus back on Context");
-	assert.equal(listeners.size, 0, "a closed panel stops listening");
+	// Full match S5: the status footer watches the 900 px boundary while the chat is mounted; a leaked panel watch is 2.
+	assert.equal(listeners.size, 1, "a closed panel stops listening");
 });

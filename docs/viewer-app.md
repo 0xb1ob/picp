@@ -595,7 +595,7 @@ request accepts it, with `vary: accept-encoding`; the event stream never is. Has
 `public, max-age=31536000, immutable` on the local listener only; the remote listener keeps `no-store`.
 
 Each tick still GETs the screen's URL; only the body shrinks. Screen views (`/api/overview`, `/api/jobs`, `/api/board`,
-`/api/map`, `/api/decisions`, `/api/awaiting`, `/api/decided`, `/api/reports`, `/api/schedules`, `/api/stats`, `/api/jobs/history`, `/api/handoffs`,
+`/api/map`, `/api/decisions`, `/api/awaiting`, `/api/decided`, `/api/reports`, `/api/schedules`, `/api/stats`, `/api/workspace/status`, `/api/jobs/history`, `/api/handoffs`,
 `/api/sessions?view=…`, `/api/files?view=screen`, `/api/job/<id>`, `/api/report/<id>`, plus `/api/job/<id>/transcript` and
 `/api/operator/control`, keyed with its `?sends=` query) tag each 200 with `x-cp-version`. The app sends the
 version it holds as `x-cp-delta-base`; when the server still holds that version for the same principal (local or the
@@ -673,6 +673,21 @@ Crossing 900 px while the context is open closes it (the sheet hands focus back 
 expanded or keeps Escape and no bottom sheet remains on a desktop. Deferred: per-conversation job lists and totals (not
 recorded), threads and Cmd+N. `m3-context` captures both surfaces at 1440, 900, 899 and 390 px.
 
+**Full match S5 (status footer).** At 900 px and wider the operator chat ends in a 37 px footer
+(`WorkspaceStatus.tsx`, frames 1 and 2) that the Jobs drawer, the job pane and Context stop above. Left: each
+provider's name, a neutral 64 px bar and `N% 5h · M% wk` from the newest recorded routing observation (utilization
+used, not remaining; an unreported 5h window reads "— 5h" and draws no bar), then "observed <age> ago", titled as
+recorded at routing, not a live feed; none recorded reads "quota not recorded". Right: "today" with the worker and
+reviewer spend of jobs finished in the browser's local calendar day, `N working · M done`, and "viewer connected"
+(also connecting, reconnecting or offline): the event stream proves this viewer's link, not cp-daemon's, so the label
+never names it. A phone has no footer and asks for nothing. The footer reads `GET
+/api/workspace/status?from=&to=&tz=<IANA zone>` (read-only; `from`/`to` are UTC instants spanning exactly one local
+day in `tz`, else 400 `{error}`), built in `src/viewer/workspace-status.ts` from the overview's quota and worker counts
+and the Stats custom range, and refreshes on the `overview` stream and at each minute. `--stage full-match-status`
+fails unless the footer is 37 px, the drawer, pane and Context end at its top, a stale observation shows "— 5h" with
+no bar, and nothing overflows at 1440, 1100, 900 and 390 px; the committed captures are `desktop`, `desktop-log`,
+`stale` and `footer` `.png` under `docs/tui-verification/full-match-status/`.
+
 **Full match S4 (embedded job log).** The chat's job pane (`WorkspaceLog.tsx`, frames 2 and 8) heads with the job's
 title, id and phase (a neutral pill). At 900 px and wider the tab row is `>_ <id>`, report.md, Files and Details, with
 Full page and close at its right; on a phone a back chevron, title, id and phase sit above Log, Report, Files and
@@ -685,7 +700,7 @@ worker's own words. Report reads the report page's `/api/report/<id>`; no report
 "Report unavailable" and close still works. Files lists the job page's pointers; Details is the embedded job page with
 its P2 review guide and Timeline. The foot carries only this job's own reference: on desktop "Read-only. Steer this
 job from the chat with @<id>", on a phone "Ask the Operator about this job…"; both open the operator composer with the
-chip (a phone's typed text as the draft) and never send, least of all to the worker; with no reference of its own it
+chip (a phone's typed text as the draft, joining a kept draft on a new line) and never send, least of all to the worker; with no reference of its own it
 reads "Ask unavailable". A reply's link opens Log; the drawer and Context still open Details. `--stage
 full-match-log` reaches the pane by clicking the reply's link and fails unless the resting 1440 and 390 px captures
 show these tabs, labels and facts, neutral tool names and phase, 44 px phone targets and nothing outside the viewport;

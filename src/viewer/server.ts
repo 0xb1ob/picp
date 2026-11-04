@@ -28,6 +28,7 @@ import { boardView, jobsView, jobView, jobEvents } from "./jobs-view.ts";
 import { ledgerHistoryView } from "./ledger-history.ts";
 import { handoffDetail, handoffsView } from "./handoffs-view.ts";
 import { statsView } from "./stats-view.ts";
+import { workspaceStatus } from "./workspace-status.ts";
 import { statScope } from "./file-cache.ts";
 import { prewarm, warming } from "./prewarm.ts";
 import { reportsView } from "./reports-view.ts";
@@ -347,6 +348,12 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 		case "/api/stats":
 			afterWarm(res, options, "stats", () => {
 				const out = statScope(() => statsView(options, url.searchParams, Date.now()));
+				if (out.status === 200) sendView(req, res, out.body); else sendJson(res, out.status, out.body);
+			});
+			return;
+		case "/api/workspace/status":
+			afterWarm(res, options, "stats", () => {
+				const out = statScope(() => workspaceStatus(options, url.searchParams, Date.now()));
 				if (out.status === 200) sendView(req, res, out.body); else sendJson(res, out.status, out.body);
 			});
 			return;

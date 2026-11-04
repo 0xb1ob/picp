@@ -523,6 +523,18 @@ export interface QuotaObservation {
  observed_at: string; source_job_id: string; historical: true;
  providers: {provider: string; five_hour: number | null; seven_day: number | null; tight: boolean; free_slots: number | null}[];
 }
+/**
+ * `GET /api/workspace/status?from&to&tz` (full match S5): the chat footer. `day` is one local calendar day in `tz`;
+ * spend and done are Stats' worker+reviewer spend and finished jobs inside it. A null value is unknown, never 0;
+ * `observed_at` is the routing record's time for quota (null: none) and this read's for the rest.
+ */
+export interface WorkspaceStatusResponse {
+ generated_at: string; day: {from: string; to: string; tz: string};
+ quota: {availability: SourceAvailability; observed_at: string | null; observation: QuotaObservation | null};
+ spend: {availability: SourceAvailability; observed_at: string; usd: number | null};
+ working: {availability: SourceAvailability; observed_at: string; count: number | null};
+ done: {availability: SourceAvailability; observed_at: string; count: number | null};
+}
 /** One "Lined up" row: a ready, blocked or queued job with its cp_next verdict. */
 export interface LinedUpItem {kind: "job"; id: string; project: string; title: string | null; verdict: string; reason: string}
 export interface OverviewResponse {
