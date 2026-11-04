@@ -260,4 +260,4 @@ never opens it. Recommend an auth-only settings file for workers.
 | Lockdown check | 22–36 ms after init (fake cold start 390 ms) |
 | Live smoke (one run) | exit 0, verdict ok, counts as in the table, no extras |
 | `node_modules` | 231 MB, unchanged (+39 MB over main before N2) |
-| Files | `claude-spike.ts` 510, `claude-bash-policy.ts` 100, `claude-lockdown.ts` 74, gates e2e 200 lines |
+| Files | `claude-spike.ts` 511, `claude-bash-policy.ts` 100, `claude-lockdown.ts` 74, gates e2e 200 lines |
