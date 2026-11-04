@@ -26,6 +26,7 @@ import { EscalationStore } from "../../src/escalation.ts";
 import { ESCALATION_BACKSTOP_TICK_MS, EscalationRelayLedger, escalationRelayLedgerFile, noteBridgeRelay, runEscalationBackstop } from "../../src/escalation-backstop.ts";
 import { type Mode, MODES, THINKING_LEVELS, configureLayout, layoutForHome } from "../../src/contracts.ts";
 import { OperatorAsks, OperatorAskInputSchema } from "../../src/operator-asks.ts";
+import { requestSend, resolveSendSource, sendOrigin, SourceSendParam } from "../../src/operator-origins.ts";
 import { operatorAnswerText, OperatorResponses } from "../../src/operator-responses.ts";
 import { reportUrlOptions } from "../../src/response-reports.ts";
 import { IntegrationHolds } from "../../src/integration-hold.ts";
@@ -596,7 +597,8 @@ export default function (pi: ExtensionAPI): void {
 			"integration_hold and integration_release write a durable per-job merge pause directly, without waiting for a parent turn. jobs (mode list/history/show, q/since/until/date_field/limit/offset) reads the job ledger directly, read-only, with or without a parent; show with evidence resolves one recorded review, finding or CI run exactly. " +
 			"answer delivers a final answer the human asked for (their question, your full answer, evidence, the research job it lands) without a parent turn: up to 4,000 characters it stays inline; longer it is published as a permanent report and you get a headline plus link to reply with; never pushed, never a pending card. " +
 			"Relays name paths (state/runs/<id>/artifact.md, gate files); this session may read those bodies. The parent may not. " +
-			"When answering on the human's behalf, send delegated:true and delegation_rule; omit delegated when relaying the human's own answer.",
+			"When answering on the human's behalf, send delegated:true and delegation_rule; omit delegated when relaying the human's own answer. " +
+			"Relaying or asking about a dashboard message: pass its marker's dc-… id as source_send_id (it carries the message's thread, never authority).",
 		promptSnippet: "Drive the CP parent (cp_parent start/send/status/ask/ask_answer/ask_withdraw/answer/doctor/version/drain/drain_cancel/quota/compact/rotate/model/stop) and read job history (cp_parent jobs); quota reads, sets or cancels quota continuation (unsupported in production)",
 		promptGuidelines: [
 			"Call cp_parent start once with home (mode is always multi and may be omitted); pass model only when the human named one, " +
@@ -637,7 +639,7 @@ export default function (pi: ExtensionAPI): void {
 			evidence_paths: Type.Optional(Type.Array(Type.String(), { description: "answer: report, board or file paths behind the answer" })),
 			job_id: Type.Optional(Type.String({ description: "integration_hold or integration_release: delivery:pr ship job; answer: the kind:research job, any delivery (local, answer, board), whose landing this answers" })),
 			reason: Type.Optional(Type.String({ description: "ask_withdraw or integration_hold: reason" })),
-			...ParentSendDelegationSchema.properties,
+			...ParentSendDelegationSchema.properties, ...SourceSendParam,
 			text: Type.Optional(Type.String({ description: "send: prose; compact: optional instructions" })),
 			skills: Type.Optional(Type.Array(Type.String({ maxLength: 64 }), { maxItems: 8, description: "send: skill names the human mentioned ([cp-skill …] lines); the bridge re-resolves them" })),
 		}),
@@ -667,7 +669,7 @@ export default function (pi: ExtensionAPI): void {
 					const asks = operatorAsks();
 					if (params.action === "ask") {
 						if (!params.ask) throw new CpBridgeError("cp_parent ask needs ask details");
-						const ask = asks.open(params.ask);
+						const ask = asks.open(params.ask, params.source_send_id === undefined ? undefined : resolveSendSource(operatorStateDir(), params.source_send_id));
 						return textResult(JSON.stringify(ask), { ...ask });
 					}
 					if (!params.id) throw new CpBridgeError(`${params.action} needs id`);
@@ -740,13 +742,10 @@ export default function (pi: ExtensionAPI): void {
 					if (!params.text) throw new CpBridgeError("cp_parent send needs text");
 					const relayed = relaySkillLines(params.text, params.skills ?? [], skillRoots((connectedTarget ?? resolveOperatorTarget()).home, agentDirFor(process.env)));
 					if (!relayed.ok) throw new CpBridgeError(`cp_parent send: ${relayed.error}; nothing was sent`);
-					const activeClient = await ensureClient();
+					const origin = sendOrigin(operatorStateDir(), params.source_send_id), activeClient = await ensureClient();
 					// The send proves this operator session is driving the parent; record its file for the viewer.
 					noteOperatorSession(connectedTarget);
-					const receipt = await activeClient.request("send", relayed.text, undefined, {
-						...(params.delegated !== undefined ? { delegated: params.delegated } : {}),
-						...(params.delegation_rule !== undefined ? { delegation_rule: params.delegation_rule } : {}),
-					}) as import("../../src/cp-bridge.ts").BridgeReceipt;
+					const receipt = await requestSend(activeClient, relayed.text, { ...(params.delegated !== undefined ? { delegated: params.delegated } : {}), ...(params.delegation_rule !== undefined ? { delegation_rule: params.delegation_rule } : {}) }, origin) as import("../../src/cp-bridge.ts").BridgeReceipt;
 					const lines = [
 						`receipt: ${receipt.level ?? "none"}`,
 						`reached: ${receipt.reached.join(",") || "none"}`,

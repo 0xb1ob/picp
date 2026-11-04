@@ -496,7 +496,7 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		if (frame.op === "hello") return { ok: true, result: { pid: process.pid, protocol: CONTROL_PROTOCOL } };
 		if (frame.op === "status") {
 			const file = ports.sessionFile();
-			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, threads: true, thread_sends: true, ...(ports.prepareImage ? { images: true } : {}), ...(ports.parentRestartState ? { parent_restart: ports.parentRestartState() } : {}), ...(ports.command ? { commands: true } : {}) } };
+			return { ok: true, result: { busy: !ports.isIdle(), pending: ports.hasPendingMessages(), session_file: file ? basename(file) : null, recent: [...recent], restart: restartState({ ports, stateDir, open, clicks }), files: true, remote_provenance: REMOTE_PROVENANCE_VERSION, threads: true, thread_sends: true, thread_origins: true, ...(ports.prepareImage ? { images: true } : {}), ...(ports.parentRestartState ? { parent_restart: ports.parentRestartState() } : {}), ...(ports.command ? { commands: true } : {}) } };
 		}
 		if (frame.op === "send" || frame.op === "abort") return request(args, frame.op);
 		// A bridge without prepareImage answers `unknown op send_images`: the viewer says restart, never drops the images.
@@ -623,6 +623,8 @@ export async function startDashboardControl(options: StartOptions): Promise<{ st
 		},
 		settled() {
 			binder.flush(true);
+			// C5: an inbox turn unseen by now, with nothing pending in pi, was dropped; a later copy of its text binds nothing.
+			if (inboxSent && !ports.hasPendingMessages()) inboxSent = null;
 			settle(true);
 		},
 		stop() {

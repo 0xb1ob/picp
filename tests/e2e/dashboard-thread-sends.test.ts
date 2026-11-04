@@ -4,12 +4,13 @@
  * one bind line per delivered threaded send; replies are members by turn at read time.
  */
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createConnection, createServer } from "node:net";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { test, type TestContext } from "node:test";
 import { controlRequest } from "../../src/viewer/control-api.ts";
-import { controlInboxFile, controlJournalFile, readControlRecord } from "../../src/viewer/control-files.ts";
+import { controlInboxFile, controlJournalFile, controlSocketFile, readControlRecord } from "../../src/viewer/control-files.ts";
 import { namedThreadsFile } from "../../src/viewer/named-threads-view.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import { saveOperatorTarget } from "../../extensions/cp-bridge/index.ts";
@@ -210,4 +211,45 @@ test("thread-sends: unknown or unverifiable threads refused with nothing written
 	assert.deepEqual(untagged.filter((e) => e.thread_id), [], "an unavailable registry leaves every entry untagged");
 	writeFileSync(registry, broken[1].replace("{not json}\n", ""));
 	assert.equal((await transcript(d)).filter((e) => e.thread_id === A).length, 2, "repaired, the bindings read again");
+});
+
+// S10a C7: an owner from before S9 (status without `thread_sends`, stood in by a relay on its control socket) never gets
+// a threaded send: the viewer refuses it 409 restart-required with nothing journaled, while a No-thread send still works.
+test("thread-sends: an owner without thread_sends refuses a threaded send 409 restart-required; a null send works", { timeout: 180_000 }, async (t) => {
+	const d = await dashboard(t, { requireTailnet: true });
+	const op = await operator(t, d, "s10a-c7", [{ kind: "text", text: "reply null" }]);
+	const A = await op.thread(1, "Alpha");
+	const socket = controlSocketFile(d.stateDir), moved = `${socket}.real`;
+	renameSync(socket, moved);
+	const threaded: unknown[] = [];
+	const relay = createServer((client) => {
+		let buffer = "";
+		client.on("error", () => {});
+		client.on("data", (chunk) => {
+			buffer += String(chunk);
+			if (!buffer.includes("\n")) return;
+			const frame = JSON.parse(buffer.slice(0, buffer.indexOf("\n"))) as { op: string; args?: Json };
+			if (frame.op === "send" && frame.args?.thread_id) threaded.push(frame.args.thread_id);
+			const upstream = createConnection(moved, () => upstream.write(buffer));
+			let reply = "";
+			upstream.on("error", () => client.destroy());
+			upstream.on("data", (part) => {
+				reply += String(part);
+				if (!reply.includes("\n")) return;
+				const answer = JSON.parse(reply.slice(0, reply.indexOf("\n"))) as { result?: Json };
+				if (answer.result) delete answer.result.thread_sends;
+				client.end(`${JSON.stringify(answer)}\n`);
+				upstream.destroy();
+			});
+		});
+	});
+	await new Promise<void>((done) => relay.listen(socket, done));
+	t.after(() => relay.close());
+	const before = sends(controlJournalFile(d.stateDir));
+	const refused = await post(d, { kind: "message", text: "threaded to an old owner", client_id: ID(30), thread_id: A });
+	assert.equal(refused.status, 409);
+	assert.match(String(refused.body.error), /^unsupported: this operator session predates threaded sends; restart the session/);
+	assert.deepEqual([threaded, sends(controlJournalFile(d.stateDir))], [[], before], "the threaded send never reached the old owner; no request line");
+	assert.equal((await post(d, { kind: "message", text: "null to an old owner", client_id: ID(31), thread_id: null })).status, 202, "No thread still sends");
+	await delivered(d, ID(31));
 });
