@@ -16,7 +16,7 @@ import { NATIVE_FOLLOWUPS_FILE, NATIVE_REVIVE_PROMPT, NATIVE_SESSION_FILE, queue
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, type RecordedClaudeRequest, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
-import { readFleet, readRunEvents, readRunStatus, REPO_ROOT, routeNamed, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, REPO_ROOT, routeNamed, treehouseAvailable, waitFor } from "../harness/index.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
 const skip = missing.length > 0 ? `needs ${missing.join(" and ")} on PATH` : false;
@@ -356,6 +356,42 @@ test("L1/F11: a native worker killed by a parent restart resumes on a plain cp_r
 	assert.equal(piSend?.result.details?.receipt, "delivered", text(piSend));
 	assert.equal(piSend?.result.details?.native, undefined);
 	assert.equal(h.claude.overrun(), 0);
+});
+
+// N3d's one live run: the operator's own claude settings (claude reads them; picp never does). Counts only.
+test("native live follow-up smoke: a research dispatch, then one idle cp_send resumes the same session", { skip: LIVE_TESTS_ENABLED ? skip : "set CP_LIVE_TESTS=1 to run live smokes", timeout: 900_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	writeFileSync(join(b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true }));
+	const id = (await b.ledger.create({ title: "native live follow-up smoke", project: "demo", delivery: "local", kind: "research" })).id;
+	const model = b.provider.addScript("n3d-live-unused", [{ kind: "text", text: "unused" }]);
+	const events = join(b.home, paths.eventsFile(id));
+	const sessionFile = join(b.home, paths.runDir(id), NATIVE_SESSION_FILE);
+	const settled = (count: number) => tool("bash", { command: `for i in $(seq 1500); do [ "$(grep -c '"agent_settled"\\|"process_exit"' "${events}" 2>/dev/null)" -ge ${count} ] && break; sleep 0.2; done; sleep 2` });
+	let firstSession: string | undefined;
+	const ends = (await b.run([
+		tool("cp_dispatch", { job_id: id, task: "Report the repo's package name from README.md in one line.", model, queue: false, when_ready: false, driver: "claude" }),
+		settled(1),
+		tool("bash", () => ((firstSession = readNativeSession(sessionFile).session_id), { command: "true" })),
+		tool("cp_send", { job_id: id, message: "Follow-up: confirm the name once more and call report_result again with the same report." }),
+		settled(2),
+		tool("cp_teardown", { job_id: id }),
+	], {}, undefined, 900_000)) as Tool[];
+	const log = readRunEvents(b.home, id);
+	const runs = log.filter((event) => event.type === "native_run").map((event) => event.payload as Record<string, unknown>);
+	const status = readRunStatus(b.home, id);
+	const session = readNativeSession(sessionFile);
+	const removed = log.find((event) => event.type === "native_scratch_removed")?.payload as { removed?: string } | undefined;
+	const counts = {
+		exit_codes: runs.map((run) => run.exit_code), lockdown: runs.map((run) => run.lockdown),
+		reports_accepted: log.filter((event) => event.type === "envelope_received").length,
+		same_session_resumed: runs[1]?.resumed === true && firstSession !== undefined && session.session_id === firstSession,
+		usage_measured: runs.length === 2 && runs.every((run) => run.usage === "measured"),
+		counted_once: Math.abs(status.usage.cost_usd - (session.baseline?.cost_usd ?? Number.NaN)) < 1e-9,
+		scratch_removed: Boolean(removed?.removed && !existsSync(removed.removed)),
+	};
+	t.diagnostic(JSON.stringify(counts));
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	assert.deepEqual(counts, { ...counts, exit_codes: [0, 0], lockdown: ["ok", "ok"], reports_accepted: 2, same_session_resumed: true, usage_measured: true, counted_once: true, scratch_removed: true });
 });
 
 test("F9: a queued driver:claude dispatch releases native, and an armed one is refused by name, never pi", { skip, timeout: 420_000 }, async (t) => {
