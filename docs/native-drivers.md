@@ -91,6 +91,8 @@ exist: the stop rules fire before the copy, the install and the build.
 
 ## Thin-driver fallback (estimate)
 
+**Superseded by the decision below:** the stream-json suggestion in this section is not the chosen design.
+
 A picp-owned Claude driver that spawns the user's `claude` CLI in `--print --output-format stream-json` mode and
 parses its NDJSON avoids the Drivers, settings/DB/secret/forge chain and the SDK dependency (picp would not
 redistribute the SDK; the CLI's own terms still apply to whoever runs it). Estimate: 600–900 lines of picp
@@ -109,3 +111,15 @@ licence. If any answer is no, N2 should start from the thin driver above.
 Pick the new commit, rerun the closure resolver from both roots, diff the file list and the npm list against the
 previous pin, re-audit every new licence, recopy byte-identical with fresh git blob SHA-1s, rebuild, and rerun the
 integrity, load and boundary checks before the pin moves.
+
+## Decision (2026-11-04)
+
+- **Choice:** the operator chose "Thin driver on Agent SDK" (ask-5bc51801aafe). picp builds its own small Claude worker
+  driver on the official `@anthropic-ai/claude-agent-sdk`, as a pinned npm dependency, not vendored. T3's
+  ClaudeAdapterV2 serves as a reference only.
+- **Licence:** the SDK's "All rights reserved" licence rules out copying or patching it. It does not rule out
+  depending on it, which is how T3 uses it.
+- **Versions, the same way T3 handles them:** a caret range plus the lockfile (T3 `apps/server/package.json:37`,
+  `^0.3.284`). Always use the user's installed `claude` executable, never the SDK's bundled platform binaries (T3
+  `pnpm-workspace.yaml:281–289`, `Drivers/ClaudeExecutable.ts`). Give a version advisory, with no auto-update.
+- **Reuse:** only `apps/server/src/provider/ClaudeTurnTokenUsage.ts` (MIT, pin 8b44f42), copied unmodified.
