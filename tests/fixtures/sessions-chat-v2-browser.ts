@@ -339,9 +339,14 @@ try {
 	await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
 	const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
+	// CI runs the suite as an unprivileged setpriv user where Chrome's sandbox aborts startup; it only loads 127.0.0.1.
 	chrome = spawn(args.chrome!, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
-		"--disable-background-networking", "--disable-sync", "--disable-breakpad", "--disable-extensions", "--hide-scrollbars", "about:blank"], { stdio: "ignore" });
-	const exited = new Promise<never>((_, reject) => { chrome!.once("error", reject); chrome!.once("exit", code => reject(new Error(`Chrome exited (${code}) before the capture finished`))); });
+		"--disable-background-networking", "--disable-sync", "--disable-breakpad", "--disable-extensions", "--hide-scrollbars", ...(process.env.CI ? ["--no-sandbox"] : []),
+		"about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+	let stderr = "";
+	chrome.stderr!.on("data", chunk => { stderr = (stderr + chunk).slice(-2000); });
+	const exited = new Promise<never>((_, reject) => { chrome!.once("error", reject); chrome!.once("exit", (code, signal) =>
+		reject(new Error(`Chrome exited (${code ?? signal}) before the capture finished; stderr tail:\n${stderr}`))); });
 	exited.catch(() => {});
 	const port = await deadline("Chrome startup", 20_000, Promise.race([exited, (async () => {
 		for (;;) {
