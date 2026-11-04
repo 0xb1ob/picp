@@ -19,7 +19,7 @@ import { overview } from "../../src/viewer/overview-view.ts";
 
 const STAGES = ["pr1", "pr2", "pr3", "pr4", "pr5", "chips", "rollup", "notice", "m3-transcript", "m3-jobs", "m3-context", "m3-composer", "nav-simplify", "p3-quota", "m3-shell",
 	"m3-fidelity-transcript", "m3-fidelity-surfaces", "m3-fidelity-composer", "full-match-shell", "full-match-transcript", "full-match-jobs", "full-match-log", "full-match-status",
-	"full-match-diff", "full-match-commands", "reports-cards"];
+	"full-match-diff", "full-match-commands", "full-match-thread-sends", "reports-cards"];
 const { values: args } = parseArgs({ options: { stage: { type: "string" }, chrome: { type: "string", default: "/usr/bin/google-chrome" }, out: { type: "string" } } });
 if (!args.stage || !STAGES.includes(args.stage)) throw new Error(`--stage must be one of ${STAGES.join(", ")} (later stages land with their PRs)`);
 if (!args.out) throw new Error("--out <dir> is required");
@@ -31,7 +31,9 @@ const say = (id: string, at: string, who: string, text: string, over: Partial<Se
 const tool = (id: string, at: string, name: string, text: string, summary?: string): SessionEntry => ({ ...say(id, at, "Assistant", text), kind: "tool", name, ...(summary ? { summary } : {}) });
 /** Full match S2 shows job suffixes, so its ids end in four characters like real picp ids; S3 reuses its data. */
 const S5 = args.stage === "full-match-status", S7 = args.stage === "full-match-diff", S6 = args.stage === "full-match-commands";
-const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5 || S7 || S6;
+/** Full match S9: dashboard sends carry an explicit thread; two entries are thread members, drawn like any other. */
+const S9 = args.stage === "full-match-thread-sends";
+const S2 = args.stage === "full-match-transcript" || args.stage === "full-match-jobs" || args.stage === "full-match-log" || S5 || S7 || S6 || S9;
 /** Reports card titles: both Reports grids with long titles, plus S3's Jobs list as the unchanged control. */
 const RC = args.stage === "reports-cards";
 const JOB = S2 || RC ? "cp-sessions-v2-m4xq" : "cp-sessions-v2-pr2";
@@ -55,8 +57,8 @@ const entries: SessionEntry[] = [
 	tool("t1", "2026-10-14T09:13:00Z", "bash", "git log --oneline -3"),
 	tool("t2", "2026-10-14T09:13:05Z", "read", "viewer-app/screens/sessions.css"),
 	say("e3", "2026-10-14T09:14:00Z", "Assistant", "The theme lives on `.shell-sessions` only, so Overview keeps its palette:\n\n```css\n.shell-sessions { color-scheme: light; background: var(--background); }\n```"),
-	say("e4", "2026-10-15T08:02:00Z", "Operator", "Long words must wrap: https://github.com/example/picp/pull/1234/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", { project: "picp" }),
-	say("e5", "2026-10-15T08:03:00Z", "Assistant", "They do; an inline `code-identifier-that-is-quite-long` chip wraps too.\n\nA second paragraph keeps the card readable on a phone without a horizontal page scroll, even when the reply runs to several lines of plain prose like this one."),
+	say("e4", "2026-10-15T08:02:00Z", "Operator", "Long words must wrap: https://github.com/example/picp/pull/1234/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef", { project: "picp", ...(S9 ? { thread_id: "th-0123456789abcdef" } : {}) }),
+	say("e5", "2026-10-15T08:03:00Z", "Assistant", "They do; an inline `code-identifier-that-is-quite-long` chip wraps too.\n\nA second paragraph keeps the card readable on a phone without a horizontal page scroll, even when the reply runs to several lines of plain prose like this one.", S9 ? { thread_id: "th-0123456789abcdef" } : {}),
 	wake,
 	tool("k1", "2026-10-15T08:03:31Z", "thinking", "Let me verify the precedence claim before answering.", "Let me verify the precedence claim: docs say parent.json overrides CP_PARENT_MODEL"),
 	tool("k2", "2026-10-15T08:03:35Z", "bash", "Arguments\n{\"command\":\"rg -n Models docs\"}\n\nResult\n## Models", "## Models"),
@@ -173,7 +175,7 @@ const ABSENT = new Set(["/api/version", "/api/push", "/api/devices/notices", "/a
 const scratch = mkdtempSync(join(tmpdir(), "cp-sessions-v2-fixture-"));
 const profile = mkdtempSync(join(tmpdir(), "cp-sessions-v2-chrome-"));
 const streams = new Set<ServerResponse>();
-const posts: string[] = [], unexpected: string[] = [];
+const posts: string[] = [], unexpected: string[] = [], sent: Record<string, unknown>[] = [];
 let chrome: ChildProcess | undefined;
 let reportGone = false;
 const diffShas: Record<string, string> = {};
@@ -297,6 +299,13 @@ try {
 		const send = (status: number, type: string, data: string | Uint8Array) => { res.writeHead(status, { "content-type": type, "content-security-policy": APP_CSP, "cache-control": "no-store" }); res.end(data); };
 		// Full match S6: this fixture's session is an older cp-bridge, so a command gets the restart-required refusal.
 		const oldBridge = '{"error":"unsupported: this session\'s cp-bridge predates dashboard commands; restart the session (⋮ → Restart session) or send the text as a message"}';
+		if (S9 && req.method === "POST" && path === "/api/operator/message") {
+			posts.push(`POST ${path}`);
+			let raw = "";
+			req.on("data", (chunk) => (raw += chunk));
+			req.on("end", () => { sent.push(JSON.parse(raw) as Record<string, unknown>); send(202, "application/json", JSON.stringify({ id: sent.at(-1)!.client_id, state: "delivered", deliver: "prompt" })); });
+			return;
+		}
 		if (req.method !== "GET") { posts.push(`${req.method} ${path}`); return S6 && path === "/api/operator/message" ? send(409, "application/json", oldBridge) : send(405, "application/json", '{"error":"fixture is read-only"}'); }
 		// PR 5: a message arrives while the reader is scrolled up — appended here, announced on the stream like the viewer's.
 		if (path === "/fixture/new-message") {
@@ -313,7 +322,7 @@ try {
 			for (const stream of streams) stream.write("event: refresh\ndata: overview\n\n");
 			return send(200, "application/json", "{}");
 		}
-		if ((S5 || S7 || S6) && path === "/api/workspace/status") return send(200, "application/json", JSON.stringify(stale ? status(3 * 1440, null) : status(12, 58)));
+		if ((S5 || S7 || S6 || S9) && path === "/api/workspace/status") return send(200, "application/json", JSON.stringify(stale ? status(3 * 1440, null) : status(12, 58)));
 		// Full match S7: the recorded head moves to the oversized commit or an absent object; /api/diff is the real viewer's.
 		if (S7 && path.startsWith("/fixture/diff-")) {
 			diffAt(path === "/fixture/diff-big" ? diffShas.big! : path === "/fixture/diff-gone" ? "f".repeat(40) : diffShas.head!);
@@ -1090,6 +1099,26 @@ try {
 		}
 		if (posts.join() !== "POST /api/operator/message") throw new Error(`full-match-commands sent ${posts.join(", ") || "nothing"}: only the one explicit Submit sends`);
 	}
+	if (S9) {
+		// Full match S9. Negative controls: a composer that omits `thread_id` (or sends the page's selection) fails `thread`;
+		// a drawn member id or thread chrome fails `shown`; a long draft that widens the page fails `outside`.
+		const long = "Please check the held PR for the drawer slice and whether a very long message keeps wrapping inside its bubble";
+		const look = `({ shown: document.body.innerText.includes("th-0123456789abcdef") || !!document.querySelector("[data-thread], .thread-chip"),
+			outside: document.documentElement.scrollWidth > innerWidth, draft: document.querySelector(".operator-composer textarea")?.value.length ?? null })`;
+		const type: Step = [`(() => { const t = document.querySelector(".operator-composer textarea"); t.value = ${JSON.stringify(long)}; t.dispatchEvent(new Event("input", { bubbles: true })); })()`,
+			`document.querySelector(".operator-composer textarea").value.length === ${long.length} && !document.querySelector(".operator-composer-send").disabled`];
+		const submit: Step = [`document.querySelector(".operator-composer-send").click()`, `document.querySelector(".operator-composer textarea").value === ""`];
+		for (const [name, width, height] of [["desktop", 1440, 1000], ["phone", 390, 844]] as const) {
+			await capture(`full-match-thread-sends-${name}`, transcript, width, height, "dark", loaded, "bottom", [type, submit]);
+			const got = { ...await evaluate(look), thread: JSON.stringify([sent.at(-1)?.text, sent.at(-1) && "thread_id" in sent.at(-1)! ? sent.at(-1)!.thread_id : "absent"]) };
+			console.log(`measured ${name} ${JSON.stringify(got)}`);
+			Object.assign(shots.at(-1)!, got);
+			const want = { shown: false, outside: false, draft: 0, thread: JSON.stringify([long, null]) };
+			const off = Object.entries(want).filter(([k, v]) => got[k as keyof typeof got] !== v).map(([k, v]) => `${k} ${JSON.stringify(got[k as keyof typeof got])} (want ${JSON.stringify(v)})`);
+			if (off.length) throw new Error(`full-match-thread-sends-${name}: ${off.join("; ")}`);
+		}
+		if (posts.join() !== "POST /api/operator/message,POST /api/operator/message") throw new Error(`full-match-thread-sends sent ${posts.join(", ") || "nothing"}: one send per capture`);
+	}
 	if (RC) {
 		// Structural selectors, so the same measure reads the cards before and after their own classes.
 		const cards = `[...document.querySelectorAll(".reports-grid > article")].map(card => {
@@ -1111,7 +1140,7 @@ try {
 		Object.assign(shots.at(-1)!, { jobs: await evaluate(`[".job-row-flight", ".job-row-done"].map(s => Math.round(document.querySelector(s).getBoundingClientRect().height))`) });
 	}
 	if (unexpected.length) throw new Error(`unexpected routes: ${[...new Set(unexpected)].join(", ")}`);
-	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, shots }, null, 2)}\n`);
+	writeFileSync(join(out, "manifest.json"), `${JSON.stringify({ stage: args.stage, chrome: version.product, posts, ...(S9 ? { sent } : {}), shots }, null, 2)}\n`);
 	await cdp("Browser.close").catch(() => {});
 	ws.close();
 	console.log(`${shots.length} screenshots in ${out} (${version.product})`);

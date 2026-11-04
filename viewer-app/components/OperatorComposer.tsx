@@ -45,6 +45,8 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
  const linked = useMemo(() => parseReference(reference), [reference]);
  const [text,setText] = useState(linked ? "" : (draft ?? "").slice(0, CONTROL_TEXT_MAX));
  const [attached,setAttached] = useState<EvidenceReference | null>(null);
+ // Full match S9: each send carries this explicit thread (null: No thread); S11's picker is its only setter.
+ const [threadId] = useState<string | null>(null);
  const [confirmAbort,setConfirmAbort] = useState(false);
  // Full match S6: the prepared command beside the text draft; its client_id keys its Submits (see `submit`).
  const [command,setCommand] = useState<{name: "status" | "stop"; job?: string; client_id: string; error?: string; sending?: true; sticky?: true} | null>(null);
@@ -192,7 +194,7 @@ export function OperatorComposer({control, draft, reference, chat}: {control:Con
   if (command) { submit(); return; }
   if (!canSend) return;
   const extra = {...(deliver ? {deliver} : {}), ...(images.length ? {images} : {}), ...(files.length ? {files} : {})};
-  control.send({kind:"message",text:outgoing,...extra});
+  control.send({kind:"message",text:outgoing,thread_id:threadId,...extra});
   edit("");
   pin(null);
   rememberDraft(OFFLINE_DRAFT_KEY, "");

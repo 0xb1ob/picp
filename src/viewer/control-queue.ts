@@ -10,6 +10,7 @@
  */
 import { readFileSync, statSync } from "node:fs";
 import { controlJournalFile, DASHBOARD_ID_RE, type RemoteDevice, remoteDevice, withEditor } from "./control-files.ts";
+import { isThreadId } from "./named-threads-view.ts";
 
 export interface QueuedMessage {
 	id: string;
@@ -24,6 +25,8 @@ export interface QueuedMessage {
 	/** Remote dashboard PR 1c: the paired device that sent it, and every remote device that edited it (first-edit order). */
 	remote?: RemoteDevice;
 	editors?: RemoteDevice[];
+	/** Full match S9: the send's explicit thread, kept from its request line through queue, edit and owner restart. */
+	thread_id?: string;
 	/** The latest outcome, or `requested` before the first one. */
 	state: string;
 	/** True once a handoff (`injected`) line exists: never queued, edited or handed over again. */
@@ -59,7 +62,7 @@ export function readQueueJournal(stateDir: string): { messages: Map<string, Queu
 			messages.set(line.id, {
 				id: line.id, at: line.at, peer: typeof line.peer === "string" ? line.peer : null, text: typeof line.text === "string" ? line.text : "", ask_id: typeof line.ask_id === "string" ? line.ask_id : null,
 				deliver: typeof line.deliver === "string" ? line.deliver : "prompt", ...(images ? { images } : {}), ...(files ? { files } : {}),
-				...(remote ? { remote } : {}), state: "requested", injected: false, edits: 0,
+				...(remote ? { remote } : {}), ...(isThreadId(line.thread_id) ? { thread_id: line.thread_id } : {}), state: "requested", injected: false, edits: 0,
 			});
 			continue;
 		}

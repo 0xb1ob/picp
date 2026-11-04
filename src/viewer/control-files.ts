@@ -38,7 +38,7 @@ export const INBOX_MAX_HELD = 20;
 /** A held message older than this is dropped and reported at delivery, never injected. */
 export const INBOX_MAX_AGE_MS = 24 * 3_600_000;
 export type InboxLine =
-	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; remote?: RemoteDevice }
+	| { type: "held"; id: string; at: string; text: string; ask_id: string | null; remote?: RemoteDevice; thread_id?: string }
 	| { type: "delivered"; id: string; at: string }
 	| { type: "dropped"; id: string; at: string; reason: string };
 
@@ -179,9 +179,10 @@ export function readControlRecord(stateDir: string): { state: "absent" } | { sta
 	return { state: "ok", record: raw as ControlRecord };
 }
 
-/** The trailing marker keeps ask/images ordering; files and then `; remote` are additive final fields. */
-export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[], files?: readonly string[], remote = false): string {
-	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}${files?.length ? `; files=${files.join(",")}` : ""}${remote ? "; remote" : ""}]`;
+/** The trailing marker keeps ask/images ordering; files and then `; remote` are additive final fields. S9's `; thread=` is
+ * provenance for the model only: membership is the registry's bind line, never this text. */
+export function dashboardMarker(id: string, askId?: string | null, images?: readonly string[], files?: readonly string[], remote = false, threadId?: string): string {
+	return `[cp-dashboard ${id} — from the dashboard${askId ? `; ask=${askId}` : ""}${threadId ? `; thread=${threadId}` : ""}${images?.length ? `; images=${images.join(",")}` : ""}${files?.length ? `; files=${files.join(",")}` : ""}${remote ? "; remote" : ""}]`;
 }
 
 /**
@@ -228,7 +229,7 @@ function parseRemoteLine(line: string): RemoteInvolvement | undefined {
 	return out;
 }
 
-// `; thread=` is a legacy (#588) marker field: still parsed so old transcripts keep their entries, never written.
+// `; thread=` is parsed and ignored: a legacy (#588) slug, or S9's th-id provenance that the binding, not this text, carries.
 const MARKER_RE = new RegExp(`(?:^|\\n)\\[cp-dashboard (dc-\\d{14}-[0-9a-f]{8}) — from the dashboard(?:; ask=(ask-[a-f0-9]+))?(?:; thread=[a-z0-9][a-z0-9-]{0,31})?(?:; images=(${IMAGE_ID_SOURCE}(?:,${IMAGE_ID_SOURCE}){0,7}))?(?:; files=(${TEXT_ID_SOURCE}(?:,${TEXT_ID_SOURCE}){0,7}))?(; remote)?\\]\\s*$`);
 
 /**
@@ -271,7 +272,7 @@ export type ControlDeliver = "prompt" | "followUp" | "steer" | "abort" | "restar
  * and one `upload` line per stored attachment: ids, mime, bytes and optional display names, never contents.
  */
 export type ControlAuditLine =
-	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; session_started_at?: string; session_file?: string; remote?: RemoteDevice; command?: string }
+	| { type: "request"; by: "bridge"; id: string; at: string; peer: string | null; kind: ControlKind; text: string | null; ask_id: string | null; deliver: ControlDeliver; images?: string[]; files?: string[]; session_started_at?: string; session_file?: string; remote?: RemoteDevice; command?: string; thread_id?: string }
 	| { type: "outcome"; by: "bridge"; id: string; at: string; peer: string | null; state: "injected" | "delivered" | "queued" | "failed" | "refused" | "restarting" | "restarted" | "dropped" | "cancelled"; reason: string | null }
 	/** cp-y43c: a dashboard-queued message's text replaced before its handoff; every revision stays in the journal. */
 	| { type: "edited"; by: "bridge"; id: string; at: string; peer: string | null; text: string; remote?: RemoteDevice }

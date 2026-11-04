@@ -31,6 +31,8 @@ export interface SessionEntry {
  dashboard_id?: string; ask_id?: string; ask?: TranscriptAsk;
  /** Full transcript: a dashboard message from a paired remote device — its sender (null: a local message a device edited) and remote editors. */
  remote?: {sender: {device_id: string; name: string} | null; editors: {device_id: string; name: string}[]};
+ /** Full match S9: the named thread of this entry's turn — its input entry's binding; absent is untagged (All messages). */
+ thread_id?: string;
  /** Full transcript: the upload ids a dashboard message's marker names (`; images=`), shown as thumbnails from `/api/operator/uploads/<id>`. */
  images?: string[];
  /** Text upload ids and display metadata from the upload journal; links serve text/plain only. */
@@ -61,7 +63,8 @@ export interface TranscriptAsk {
  state: "open" | "answered" | "withdrawn"; answer: string | null; answered_at: string | null; reason: string | null;
 }
 /** Composer request and its durable status projection; attachment ids stay on the original body for retry. */
-export type ControlMessageBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; client_id?: string};
+/** Full match S9: `thread_id` is the send's explicit thread (null or absent: No thread), never the page's current selection. */
+export type ControlMessageBody = {kind: "message"; text: string; deliver?: "followUp" | "steer"; images?: string[]; files?: string[]; client_id?: string; thread_id?: string | null};
 /** Full match S6: one bounded dashboard command, idempotent by `client_id`; the bridge turns it into one message. */
 export type ControlCommandBody = {kind: "command"; command: "status" | "stop"; job_id?: string; client_id: string};
 export interface ControlPendingSend { id: string; at: string; state: "queued" | "held" | "delivered" | "failed" | "dropped"; reason: string | null; ask_id: string | null; body: ControlMessageBody; /** cp-y43c: queued by the dashboard, not yet handed to the session: Edit and Cancel apply. */ editable?: boolean; /** picp-96n: basename of the listed operator session a Not confirmed send was handed to; never the current one. */ target_session?: string; /** Full match S6: the dashboard command this message carries (`/stop cp-abcd`), as journaled. */ command?: string }

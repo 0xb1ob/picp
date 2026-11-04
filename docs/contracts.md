@@ -6984,7 +6984,8 @@ never read or written.
 
 The decided named-threads product (es-99574f): a thread is an opaque, immutable id (`th-` + 16 random hex) plus a free
 display name (trimmed, 1–80 code points, no control characters; duplicates allowed). S8 ships only the registry and its
-read-only projection; nothing tags sends, asks, jobs or the parent outbox yet (S9/S10), and there is no thread UI (S11).
+read-only projection; S9 tags dashboard sends (below); nothing tags asks, jobs or the parent outbox yet (S10), and there is
+no thread UI (S11).
 
 - **Registry.** `state/operator/named-threads.jsonl` (0600), append-only, one complete fsynced line per event, schema
   `NamedThreadEventSchema` (`src/contracts/threads.ts`), `v: 1`: `create` / `rename` (`request_id` = the dashboard
@@ -7003,11 +7004,34 @@ read-only projection; nothing tags sends, asks, jobs or the parent outbox yet (S
   the frame. Create answers 201 `{thread_id, name, state, replayed}`; the same `client_id` again replays its first answer
   (200, `replayed: true`, no line), another request under it is 409. The owner journals one `thread` line per answer in
   `state/operator/dashboard.jsonl`; the viewer journals its own refusals.
-- **Bind.** `bindThread` (no producer until S9/S10): the same key and thread again writes nothing; the same key with
-  another thread (or `null` vs a thread) is refused 409 and the original stays. Membership is never inferred.
+- **Bind.** `bindThread` (S9 dashboard sends are its first producer): the same key and thread again writes nothing; the
+  same key with another thread (or `null` vs a thread) is refused 409 and the original stays. Membership is never inferred.
 - **Projection.** `GET /api/threads` (`--require-tailnet` only) answers `{generated_at, available, reason, threads,
   bindings}`: absent registry is available and empty; unavailable carries the reason. It never writes.
 - No thread id or name grants a mandate, a decision or a merge, or appears in an authority label or a filesystem path.
+
+### Thread sends (full match S9)
+
+A dashboard message names its thread explicitly: `POST /api/operator/message` takes `thread_id` (`th-` + 16 hex, or `null`
+/ absent for No thread), separate from the text and any P1 evidence reference. The composer sends `thread_id: null` until
+S11's picker sets it; a queued, held, retried or edited send keeps the thread it was sent with, never the page's selection.
+
+- **Validated before journaling.** Malformed is 400 at the viewer. A named thread must be in the registry: unknown is 404
+  `no thread <id>; nothing was sent`, an unavailable registry is 503 (`send without a thread or repair it: <file:line>`);
+  either way no request, queue, inbox or bind line is written. No thread never reads the registry. A live threaded send
+  to a session whose `status` lacks `thread_sends: true` (from before S9) is refused 409 restart-required.
+- **Kept.** The owner's `request` line, queue entry and queue journal carry `thread_id`, so an edit, an owner restart and
+  the reloaded queue keep it; an offline-held inbox line carries it too, and the combined inbox turn is threaded only
+  when every fresh held line names the same thread. A retry re-posts the stored body, thread included; a second request
+  under a used `client_id` is refused, never a rebind.
+- **Bound to the delivered entry.** The code-authored marker reads `[cp-dashboard <dc-id> — from the dashboard;
+  thread=<th-id>]` (provenance for the model; the parser ignores the field). Membership is one `bind` line keyed
+  `{kind: "message", id: <pi entry id>, session_id}`, written by the owner for the exact message object it injected and
+  only when that object's text is the text it injected: a typed copy of a marker binds nothing.
+- **Replies by turn.** `/api/sessions` gives every entry of a turn (replies, tools) its user entry's binding as
+  `thread_id`; a `custom_message` (a wake) starts an untagged turn. CLI input, old history and an unavailable registry
+  read untagged — still shown in All messages. Nothing is inferred from marker text, project headers, dates, nearby
+  messages or job-name prefixes.
 
 ### Remote devices (remote dashboard PR 1)
 

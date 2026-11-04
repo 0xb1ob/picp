@@ -6,22 +6,12 @@
 
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
-import type { NamedThread, ThreadBinding, ThreadsResponse } from "./api-types.ts";
+import type { NamedThread, SessionEntry, ThreadBinding, ThreadsResponse } from "./api-types.ts";
 import { DASHBOARD_ID_RE } from "./control-files.ts";
-
-export const THREADS_VERSION = 1;
-/** Read caps: past either the registry is unavailable, never truncated; the owner refuses an append past one. */
-export const THREADS_MAX_BYTES = 1024 * 1024;
-export const THREADS_MAX_LINES = 10_000;
-/** Names are trimmed, 1–80 characters (code points), no control characters; duplicates are allowed. */
-export const THREAD_NAME_MAX = 80;
-export const THREAD_ID_SOURCE = "th-[0-9a-f]{16}";
-export const THREAD_BIND_KINDS = ["message", "ask", "job", "parent_send"] as const;
-export const THREAD_KEY_ID_MAX = 200;
+import { THREAD_AT_SOURCE, THREAD_BIND_KINDS, THREAD_ID_SOURCE, THREAD_KEY_ID_MAX, THREAD_NAME_MAX, THREADS_MAX_BYTES, THREADS_MAX_LINES, THREADS_VERSION } from "../contracts/thread-limits.ts";
 
 const THREAD_ID_RE = new RegExp(`^${THREAD_ID_SOURCE}$`);
 const CONTROL_CHAR = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
-export const THREAD_AT_SOURCE = "\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z";
 const ISO_RE = new RegExp(`^${THREAD_AT_SOURCE}$`);
 
 export type ThreadKey = Omit<ThreadBinding, "thread_id" | "at">;
@@ -142,6 +132,48 @@ export function readNamedThreads(stateDir: string): ThreadRegistry {
 		if (why) return fail(index + 1, why);
 	}
 	return { ...registry, bytes: size, lines: rows.length };
+}
+
+/** S9, a send's explicit thread: absent or null is No thread and never reads the registry; an id must be registered. */
+export function sendThread(stateDir: string, value: unknown): { ok: true; threadId: string | null } | { ok: false; status: number; error: string } {
+	if (value === undefined || value === null) return { ok: true, threadId: null };
+	if (!isThreadId(value)) return { ok: false, status: 400, error: "thread_id must be th-<16 hex> or null" };
+	const registry = readNamedThreads(stateDir);
+	if (!registry.available) return { ok: false, status: 503, error: `thread registry unavailable, so a send to a thread is refused; send without a thread or repair it: ${registry.reason}` };
+	if (!registry.threads.has(value)) return { ok: false, status: 404, error: `no thread ${value}; nothing was sent` };
+	return { ok: true, threadId: value };
+}
+
+/**
+ * S9 membership by turn, read-only: each entry takes its turn input's `message` binding in this pi session (`turns`
+ * maps an entry to that input's entry id). Unbound, cut off by the window or an unavailable registry: untagged.
+ */
+export function applyThreadMembership(stateDir: string, file: string, entries: SessionEntry[], turns: Map<SessionEntry, string>): void {
+	if (!turns.size) return;
+	const registry = readNamedThreads(stateDir);
+	if (!registry.available || !registry.bindings.size) return;
+	const sessionId = sessionIdOf(file);
+	if (!sessionId) return;
+	for (const entry of entries) {
+		const input = turns.get(entry);
+		const bound = input ? registry.bindings.get(bindingKey({ kind: "message", id: input, session_id: sessionId }))?.thread_id : null;
+		if (bound) entry.thread_id = bound;
+	}
+}
+
+/** The pi session id from the file's header line (its first 4 KiB), the id the owner binds under. */
+function sessionIdOf(file: string): string | undefined {
+	let fd: number | undefined;
+	try {
+		fd = openSync(file, "r");
+		const buffer = Buffer.alloc(4096);
+		const header = JSON.parse(buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, 0)).toString("utf8").split("\n")[0]!) as { type?: unknown; id?: unknown };
+		return header?.type === "session" && typeof header.id === "string" ? header.id : undefined;
+	} catch {
+		return undefined; // unreadable or no header: untagged, never guessed
+	} finally {
+		if (fd !== undefined) closeSync(fd);
+	}
 }
 
 /** `GET /api/threads`: the catalog and membership, or why the registry is unavailable. Never writes. */

@@ -19,8 +19,13 @@ test("viewer request/projection modules stay dependency-free and read-only; only
 		for (const match of text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+"([^"]+)"/gm)) {
 			if (match[1]) continue;
 			if (name === "build.ts" && match[2] === "esbuild") continue;
-			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$|^\.\.\/forge-url\.ts$|^\.\.\/ledger-filter\.ts$|^\.\.\/service\/daemon-tunnel-files\.ts$|^\.\.\/push\/test-push\.ts$|^\.\.\/evidence-reference-label\.ts$|^\.\.\/redact-secrets\.ts$/, `${name} imports ${match[2]}`);
+			assert.match(match[2] ?? "", /^node:|^\.\/|^\.\.\/home\.ts$|^\.\.\/grant-order\.ts$|^\.\.\/forge-url\.ts$|^\.\.\/ledger-filter\.ts$|^\.\.\/service\/daemon-tunnel-files\.ts$|^\.\.\/push\/test-push\.ts$|^\.\.\/evidence-reference-label\.ts$|^\.\.\/redact-secrets\.ts$|^\.\.\/contracts\/thread-limits\.ts$/, `${name} imports ${match[2]}`);
 			if (match[2] === "../grant-order.ts") assert.equal(name, "overview-jobs.ts", "only the shared dependency-free comparator crosses the viewer boundary");
+			// S9 (C2): the named-thread limits live contracts-side; only the registry reader takes them, while they import nothing.
+			if (match[2] === "../contracts/thread-limits.ts") {
+				assert.equal(name, "named-threads-view.ts", "only the registry reader shares the thread limits");
+				assert.doesNotMatch(readFileSync(join(VIEWER, "..", "contracts", "thread-limits.ts"), "utf8"), /^\s*import\b|\bimport\s*\(|\brequire\s*\(/m, "thread-limits.ts imports nothing");
+			}
 			// P1 ask-about-evidence: the timeline shares the finding flag order and the decision pane's redaction, import-free.
 			// P2: the review guide shares only the same pure redaction.
 			if (match[2] === "../evidence-reference-label.ts" || match[2] === "../redact-secrets.ts") {

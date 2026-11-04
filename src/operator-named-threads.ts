@@ -9,7 +9,8 @@ import { type NamedThreadEvent, NamedThreadEventSchema, validate } from "./contr
 import { durableAppend } from "./json-store.ts";
 import type { ThreadBinding, ThreadWriteResponse } from "./viewer/api-types.ts";
 import { type ControlAuditLine, DASHBOARD_ID_RE } from "./viewer/control-files.ts";
-import { bindingKey, isThreadId, readNamedThreads, threadKey, threadName, type ThreadRegistry, THREADS_MAX_BYTES, THREADS_MAX_LINES, THREADS_VERSION } from "./viewer/named-threads-view.ts";
+import { THREADS_MAX_BYTES, THREADS_MAX_LINES, THREADS_VERSION } from "./contracts/thread-limits.ts";
+import { bindingKey, isThreadId, readNamedThreads, threadKey, threadName, type ThreadRegistry } from "./viewer/named-threads-view.ts";
 
 type Refusal = { ok: false; status: number; error: string };
 export type ThreadReply = { ok: true; result: ThreadWriteResponse } | Refusal;
