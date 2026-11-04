@@ -127,15 +127,27 @@ function Summary({text}: {text: string}) {
  return <div class="job-summary-row"><p ref={ref} class={more ? "job-summary" : "job-summary job-summary-clamp"}>{text}</p>{(clipped || more) && <button type="button" class="job-summary-more" aria-expanded={more} onClick={() => setMore(!more)}>{more ? "less" : "more"}</button>}</div>;
 }
 
-/** The job action in every phase; a failed job keeps its suggested question; an old operator bridge is unsupported. */
-function JobAsk({data}: {data: JobResponse}) {
+/** The job's Ask target: a failed job's suggested question, its reference (null when none applies) and why unsupported. */
+export function jobAskTarget(data: JobResponse) {
  const failed = data.job.phase === "failed";
  const question = failed ? `Explain why picp job ${data.job.id} failed and the available recovery options.` : "";
- const label = failed ? "Ask about this failure" : "Ask about this job";
  const unsupported = data.evidence_lookup?.supported === false ? data.evidence_lookup.why : undefined;
  // The plain failure question (no reference) names no record, so it stays when the reference cannot be resolved.
- if (!data.ask_reference || (failed && unsupported)) return failed ? <a href={composerHref(question)}>{label}</a> : null;
- return <AskAbout reference={data.ask_reference} draft={question} unsupported={unsupported}>{label}</AskAbout>;
+ const reference = !data.ask_reference || (failed && unsupported) ? null : data.ask_reference;
+ return {failed, question, reference, unsupported};
+}
+
+/** The job action in every phase; a failed job keeps its suggested question; an old operator bridge is unsupported. */
+export function JobAsk({data, label: own}: {data: JobResponse; label?: string}) {
+ const {failed, question, reference, unsupported} = jobAskTarget(data);
+ const label = own ?? (failed ? "Ask about this failure" : "Ask about this job");
+ if (!reference) return failed ? <a href={composerHref(question)}>{label}</a> : null;
+ return <AskAbout reference={reference} draft={question} unsupported={unsupported}>{label}</AskAbout>;
+}
+
+/** The job's file pointers (artifact or worktree files, run log); each missing one says unavailable. */
+export function JobFiles({data}: {data: JobResponse}) {
+ return <>{data.artifact_href ? <a href={data.artifact_href}>Artifact · {data.artifact_name}</a> : data.files_href ? <a href={data.files_href}>Files</a> : <span>Files unavailable</span>}{data.run_href ? <a href={data.run_href}>Run log</a> : <span>Run log unavailable</span>}</>;
 }
 
 function Findings({review, findings, elided, unsupported}: {review: EvidenceReference; findings: TimelineFinding[]; elided: number; unsupported?: string}) {
@@ -206,7 +218,7 @@ export function JobDetail({data, wide, initial, embedded = false}: {data: JobRes
      <div class="job-fact-ci"><dt>CI</dt><dd>{ciFact(job)}</dd></div>
      <div class="job-fact-review"><dt>Review</dt><dd>{reviewFact(job)}</dd></div>
     </dl>
-    <div class="job-links">{data.artifact_href ? <a href={data.artifact_href}>Artifact · {data.artifact_name}</a> : data.files_href ? <a href={data.files_href}>Files</a> : <span>Files unavailable</span>}{data.run_href ? <a href={data.run_href}>Run log</a> : <span>Run log unavailable</span>}<JobAsk data={data}/></div>
+    <div class="job-links"><JobFiles data={data}/><JobAsk data={data}/></div>
    </div>
   </div>
  </div>;

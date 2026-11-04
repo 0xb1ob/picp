@@ -63,7 +63,6 @@
 
 .workspace-job { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; min-width: 0; background: var(--background); }
 .workspace-job-bar { display: flex; align-items: center; gap: 4px; min-height: 48px; padding: 0 4px 0 16px; padding-top: env(safe-area-inset-top); border-bottom: 1px solid var(--divider); flex-shrink: 0; min-width: 0; }
-.workspace-job-bar > code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--muted); }
 .workspace-job-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 14px 32px; overflow-wrap: anywhere; }
 .workspace-job-body > p { font-size: 13px; color: var(--muted); }
 .job-detail-embedded .job-detail-title { order: 2; margin: 0; font-size: 18px; font-weight: 600; line-height: 24px; overflow-wrap: anywhere; }

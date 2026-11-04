@@ -1,0 +1,87 @@
+/*
+ * Full match S4 (frames 2/8): the chat's job pane as a read-only log surface. Palette: tool names, the log glyphs and
+ * the phase pill stay neutral; nothing here takes amber or coral.
+ */
+/* Specific enough to win over workspace.css, which the bundle loads after this file. */
+.workspace-job > .workspace-job-bar { gap: 4px; min-height: 56px; padding-left: 4px; padding-right: 4px; }
+.workspace-job-bar > .workspace-close { order: -1; }
+.workspace-close-back, .workspace-close-x { display: flex; }
+.workspace-job-bar .workspace-close-x, .workspace-job-bar > .workspace-full { display: none; }
+.workspace-job-head { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.workspace-job-name { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.workspace-job-name > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; line-height: 20px; }
+.workspace-job-name > code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12px; color: var(--dim); }
+.workspace-job-phase { flex-shrink: 0; max-width: 120px; padding: 2px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; }
+.workspace-job-more { position: relative; flex-shrink: 0; }
+.workspace-job-more > summary { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; color: var(--text); border-radius: 10px; list-style: none; cursor: pointer; }
+.workspace-job-more > summary::-webkit-details-marker { display: none; }
+.workspace-job-more[open] > summary { background: var(--toggle); }
+.workspace-job-more-sheet { position: absolute; top: calc(100% + 4px); right: 0; z-index: 4; min-width: 160px; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px var(--page); }
+.workspace-job-more-sheet > a { display: flex; align-items: center; min-height: 44px; padding: 0 12px; color: var(--text); border-radius: 8px; font-size: 14px; text-decoration: none; }
+.workspace-job-more-sheet > a:hover { background: var(--raised); }
+.workspace-job-alert { margin: 0; padding: 8px 16px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--divider); }
+.workspace-log { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.workspace-log-bar { display: flex; flex-shrink: 0; align-items: center; gap: 12px; min-width: 0; margin: 10px 14px; }
+.workspace-log-tabs { display: flex; flex-shrink: 1; gap: 2px; min-width: 0; padding: 3px; border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; }
+.workspace-log-tab { flex-shrink: 0; min-height: 44px; padding: 0 12px; background: none; color: var(--dim); border: 0; border-radius: 7px; font: inherit; font-size: 13px; cursor: pointer; }
+.workspace-log-tab:hover { color: var(--text); }
+.workspace-log-tab-on { background: var(--toggle); color: var(--text); }
+.workspace-log-tab-doc { display: none; }
+.workspace-log-live { flex-shrink: 0; margin-left: auto; font-size: 12.5px; color: var(--dim); white-space: nowrap; }
+.workspace-log .workspace-job-body { padding-top: 4px; }
+.workspace-log .job-detail-embedded .job-detail-title { display: none; }
+.workspace-log-who { display: flex; gap: 14px; align-items: flex-start; min-width: 0; padding-bottom: 14px; margin-bottom: 16px; border-bottom: 1px solid var(--divider); font-family: var(--font-mono); font-size: 13px; line-height: 20px; }
+.workspace-log-mark { flex-shrink: 0; width: 40px; padding: 4px 0; text-align: center; font-size: 12px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+.workspace-log-who > div { min-width: 0; }
+.workspace-log-who code { font-family: inherit; color: var(--text); overflow-wrap: anywhere; }
+.workspace-log-who p { margin: 0; color: var(--dim); overflow-wrap: anywhere; }
+.workspace-log-who a { color: inherit; }
+.workspace-log-lines { display: flex; flex-direction: column; gap: 14px; font-family: var(--font-mono); font-size: 13px; line-height: 20px; color: var(--text); }
+.workspace-log-lines p, .workspace-log-lines pre { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.workspace-log-lines > p { color: var(--dim); }
+.workspace-log-tool b { font-weight: 600; }
+.workspace-log-tool pre { padding-left: 14px; font-family: inherit; color: var(--dim); }
+.workspace-log-note { color: var(--dim); }
+.workspace-log-empty, .workspace-log-meta { margin: 0 0 12px; font-size: 13px; color: var(--dim); overflow-wrap: anywhere; }
+.workspace-log-files { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.workspace-log-ask { flex-shrink: 0; padding: 12px 10px; padding-bottom: max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--divider); }
+.workspace-log-ask > .workspace-log-empty { display: block; margin: 0; }
+.workspace-log-readonly { display: none; }
+.workspace-log-entry { display: flex; align-items: center; gap: 8px; min-height: 52px; margin: 0; padding: 0 4px 0 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
+.workspace-log-entry:focus-within { border-color: var(--muted); }
+.workspace-log-entry > input { flex: 1; min-width: 0; min-height: 44px; padding: 0; background: none; color: var(--text); border: 0; outline: 0; font: inherit; font-size: 16px; }
+.workspace-log-entry > input::placeholder { color: var(--dim); }
+.workspace-log-send { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 44px; height: 44px; background: var(--text); color: var(--background); border-radius: 10px; }
+
+@media (min-width: 900px) {
+ /* Frame 2: the tabs are the pane's top row (aligned with the chat header), Full page and × at its right. */
+ section.workspace-job { display: grid; grid-template-columns: minmax(0,1fr) auto auto; grid-template-rows: 48px auto auto minmax(0,1fr) auto;
+  grid-template-areas: "tabs full close" "head head head" "alert alert alert" "body body body" "foot foot foot"; }
+ section.workspace-job::before { content: ""; grid-area: 1 / 1 / 2 / -1; border-bottom: 1px solid var(--divider); }
+ .workspace-job > .workspace-job-bar, .workspace-job > .workspace-log { display: contents; }
+ .workspace-job-bar > .workspace-close { grid-area: close; order: 0; width: 48px; height: 47px; border-radius: 0; }
+ .workspace-job-bar .workspace-close-back, .workspace-job-more { display: none; }
+ .workspace-job-bar .workspace-close-x { display: flex; }
+ .workspace-job-bar > .workspace-full { grid-area: full; display: flex; min-height: 0; height: 47px; }
+ .workspace-job-head { grid-area: head; gap: 10px; padding: 12px 20px 0; }
+ .workspace-job-name > b { font-size: 14px; }
+ .workspace-job-name > code { display: none; }
+ .workspace-job-alert { grid-area: alert; }
+ .workspace-job-body { grid-area: body; }
+ .workspace-log-bar { grid-area: tabs; align-items: stretch; height: 47px; margin: 0; }
+ .workspace-log-tabs { flex: 1; gap: 0; padding: 0; border: 0; border-radius: 0; overflow-y: hidden; }
+ .workspace-log-tab { display: flex; align-items: center; min-height: 0; padding: 0 14px; border-radius: 0; border-right: 1px solid var(--divider); }
+ .workspace-log-tab-short, .workspace-log-live { display: none; }
+ .workspace-log-tab-doc { display: flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
+ .workspace-log-tab-glyph, .workspace-log-tab-id { font-family: var(--font-mono); font-size: 12.5px; }
+ .workspace-log-tab[data-view="log"] { flex-shrink: 1; min-width: 72px; }
+ .workspace-log-tab-id { min-width: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+ .workspace-log-ask { grid-area: foot; padding: 12px 16px; }
+ .workspace-log-readonly { display: block; margin: 0; font-size: 13px; color: var(--dim); overflow-wrap: anywhere; }
+ .workspace-log-readonly > .evidence-ask { font-family: var(--font-mono); color: var(--text); }
+ .workspace-log-entry { display: none; }
+}
+/* Below 1280 px the pane sits under the page header's end controls (workspace.css). */
+@media (min-width: 900px) and (max-width: 1279px) {
+ .workspace-job-bar > .workspace-close { margin-right: 80px; }
+}

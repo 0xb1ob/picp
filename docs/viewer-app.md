@@ -656,7 +656,7 @@ dialog or menu owns it; focus returns to the opener and the draft, reference, fi
 "From this chat" lists, Today totals and live-log tabs (`/jobs` arrived with slice 4).
 
 **Reply log in Chat (M3 fidelity slice C).** In that chat a reply's job transcript link (a run of steps' "Open job
-transcript →" and a relay rollup's job id) opens the same pane on its Transcript tab instead of leaving Chat; the
+transcript →" and a relay rollup's job id) opens the same pane on its Log (Full match S4) instead of leaving Chat; the
 drawer and Context still open it on Details. Only an unmodified primary click is the chat's: a modified or middle
 click, and a fresh `#job/<id>?tab=transcript` URL, keep the full job route, and outside the operator chat the link is
 an ordinary link. An unreadable job shows the pane's existing alert; a new session file drops the pane.
@@ -672,6 +672,25 @@ top surface and focus returns to its button; every surface closes on leaving the
 Crossing 900 px while the context is open closes it (the sheet hands focus back to Context), so no hidden inspector stays
 expanded or keeps Escape and no bottom sheet remains on a desktop. Deferred: per-conversation job lists and totals (not
 recorded), threads and Cmd+N. `m3-context` captures both surfaces at 1440, 900, 899 and 390 px.
+
+**Full match S4 (embedded job log).** The chat's job pane (`WorkspaceLog.tsx`, frames 2 and 8) heads with the job's
+title, id and phase (a neutral pill). At 900 px and wider the tab row is `>_ <id>`, report.md, Files and Details, with
+Full page and close at its right; on a phone a back chevron, title, id and phase sit above Log, Report, Files and
+Details, with "live · <elapsed>" while the worker runs and Full page inside a `⋯` menu. Diff waits for S7. Log,
+Report and Files open with the worker's id, `role · model · thinking` (a script job reads `script <path>`) and its
+recorded worktree or clone, each unrecorded fact reading "not recorded". Log is the worker transcript's own read
+(`/api/job/<id>/transcript`, the same poll as the job page) in monospace: `Read(path)` / `└ Read N lines`,
+`Ran 1 shell command` / `• <command>` and its output, `Update(path)` / `└ Added N lines, removed M lines`, then the
+worker's own words. Report reads the report page's `/api/report/<id>`; no report.md, or one that no longer reads, says
+"Report unavailable" and close still works. Files lists the job page's pointers; Details is the embedded job page with
+its P2 review guide and Timeline. The foot carries only this job's own reference: on desktop "Read-only. Steer this
+job from the chat with @<id>", on a phone "Ask the Operator about this job…"; both open the operator composer with the
+chip (a phone's typed text as the draft) and never send, least of all to the worker; with no reference of its own it
+reads "Ask unavailable". A reply's link opens Log; the drawer and Context still open Details. `--stage
+full-match-log` reaches the pane by clicking the reply's link and fails unless the resting 1440 and 390 px captures
+show these tabs, labels and facts, neutral tool names and phase, 44 px phone targets and nothing outside the viewport;
+the committed captures are `desktop`, `desktop-report`, `phone`, `phone-ask` and `unavailable` `.png` under
+`docs/tui-verification/full-match-log/`.
 
 **Full match S3 (jobs drawer and PR chip).** The Jobs drawer's header follows frame 3 on desktop: Jobs, the project
 pill ("● picp ▾", a neutral dot; S1's popover around the same M1 select and hash, closed by Escape or a tap outside

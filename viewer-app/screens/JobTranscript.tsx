@@ -1,3 +1,4 @@
+import type { ComponentChild } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { JobTranscriptResponse, ReportItem, SessionEntry } from "../../src/viewer/api-types.ts";
 import { ToolRunRow } from "../components/ToolRunRow.tsx";
@@ -6,7 +7,7 @@ import { time } from "../format.ts";
 import { type Held, readDelta } from "../resource.ts";
 
 /** A tool call's arguments and result, split the way parseTranscript joins them (`Arguments\n…\n\nResult\n…`). */
-function parts(entry: SessionEntry): {args: Record<string, unknown>; result: string} {
+export function parts(entry: SessionEntry): {args: Record<string, unknown>; result: string} {
  const [head = "", ...rest] = entry.text.split("\n\nResult\n");
  let args: Record<string, unknown> = {};
  try { const parsed = JSON.parse(head.replace(/^Arguments\n/, "")); if (parsed && typeof parsed === "object") args = parsed as Record<string, unknown>; } catch { /* Not JSON: shown as the raw result only. */ }
@@ -62,7 +63,7 @@ export function shouldFetch(s: {inflight: boolean; loaded: boolean; loadedLive: 
  * a screen refresh at most every POLL_MS, one request at a time (aborting on each tick would never let a big session land).
  * The caller keys this by job id, so a switch mounts fresh: no stale transcript, and unmount aborts the request.
  */
-export function JobTranscript({jobId, generatedAt, model, reports, finished}: {jobId: string; generatedAt: string; model: string | null; reports: ReportItem[]; finished: boolean}) {
+export function JobTranscript({jobId, generatedAt, model, reports, finished, view}: {jobId: string; generatedAt: string; model: string | null; reports: ReportItem[]; finished: boolean; view?: (data: JobTranscriptResponse) => ComponentChild}) {
  const [data, setData] = useState<JobTranscriptResponse | null>(null);
  const [failed, setFailed] = useState(false);
  const inflight = useRef<AbortController | null>(null);
@@ -82,7 +83,7 @@ export function JobTranscript({jobId, generatedAt, model, reports, finished}: {j
  }, [jobId, generatedAt, finished, settled]);
  if (failed && !data) return <p class="jobs-empty" role="status">Transcript unavailable</p>;
  if (!data) return <p role="status">Loading</p>;
- return <TranscriptDocument data={data} model={model} reports={reports}/>;
+ return view ? <>{view(data)}</> : <TranscriptDocument data={data} model={model} reports={reports}/>;
 }
 
 /** The transcript page from a fetched response; pure of fetching so a fixture renders it. */
