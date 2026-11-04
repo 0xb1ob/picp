@@ -17,7 +17,8 @@ type Heading = { height: number; line_height: number; lines: number; one_line: b
 type Shot = { file: string; overflow: number; cards?: Card[]; heading?: Heading; jobs?: number[] };
 
 test("reports-card-titles: titles wrap inside their cards in two lines beside the date at 1440, 1000 and 390; Jobs rows hold",
-	{ skip: existsSync(CHROME) ? false : `no Chrome at ${CHROME}`, timeout: 240_000 }, async (t) => {
+	{ skip: process.env.CI ? "Chrome cannot start as the CI cpci user (sandbox, crashpad); run locally: npm run test:one -- tests/e2e/viewer-reports-card-titles.test.ts"
+		: existsSync(CHROME) ? false : `no Chrome at ${CHROME}`, timeout: 240_000 }, async (t) => {
 	const out = mkdtempSync(join(tmpdir(), "cp-reports-cards-"));
 	t.after(() => rmSync(out, { recursive: true, force: true }));
 	await promisify(execFile)(process.execPath, ["tests/fixtures/sessions-chat-v2-browser.ts", "--stage", "reports-cards", "--chrome", CHROME, "--out", out],
