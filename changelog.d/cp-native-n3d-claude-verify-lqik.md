@@ -1,0 +1,1 @@
+- Native Claude workers (N3d): queued follow-ups are journaled delivered only after their resumed turn returns; a resume that throws puts them back in the queue and logs `native_resume_failed`, so the next admitted turn delivers them once. New named cases pin it, a parent-restart revive of a native job (L1), and pi `cp_send`/`cp_revive` unchanged (F11).

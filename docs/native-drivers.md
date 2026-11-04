@@ -350,6 +350,7 @@ mode 0600, atomic write): driver, the kept scratch dir (`$TMPDIR/cp-claude-nativ
 Claude `session_id` from the init message, and the usage baseline. The id grants nothing; it is only the resume key, and
 every resume re-runs admission. Teardown removes the scratch dir only after the observed worker exit
 (`native_scratch_removed` in the run log); a record that fails validation keeps the dir and names why.
+It also removes it when the recorded worker pid is gone even though no exit code was recorded (`src/teardown.ts`).
 
 **Admission.** Every resume and revive passes `assertNativeResume` before a claude process starts, in dispatch's order:
 the drain freeze and update hold, trust, the per-job budget on the recorded running total, then `assertNativeSelection`
@@ -368,9 +369,11 @@ only path, with the same Bash policy, R1, lockdown, managed hooks, env allow-lis
 whose arrival point picp cannot observe or gate, so the ack could not be truthful. A busy send is appended to the queue
 and acked as queued, never as delivered or steered. At turn end the worker first claims the queue atomically (a rename
 to `native-followups.jsonl.claimed`), so a send queued while admission runs lands in a fresh queue for the next turn end.
-It then re-runs `assertNativeResume`; if admitted it delivers exactly the claimed messages as one resumed turn
-(`native_followup_delivered`); if refused it puts them back ahead of any newer ones and logs
-`native_followup_refused` with the reason. A queued follow-up does not reopen the report slot; an idle send does, so
+It then re-runs `assertNativeResume`; if admitted it delivers exactly the claimed messages as one resumed turn; if
+refused it puts them back ahead of any newer ones and logs `native_followup_refused` with the reason. A claim (this
+one, or sends left queued when an idle send or revive starts a turn) settles and logs `native_followup_delivered` only
+after its turn returns; a turn that throws puts them back the same way and logs `native_resume_failed`, so the next
+admitted turn delivers them once. A queued follow-up does not reopen the report slot; an idle send does, so
 reports stay one accepted per generation.
 
 **Usage across resume.** A resumed `claude` restores the session's cumulative `modelUsage` and `total_cost_usd`. The

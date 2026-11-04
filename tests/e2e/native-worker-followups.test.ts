@@ -4,7 +4,7 @@
  * HOME's settings file, a temp CLAUDE_CONFIG_DIR per job and no user setting sources. F1–F8 of the N3c task.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
@@ -12,11 +12,11 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_BUDGET_CONFIG, type Failure, LAYOUT, paths } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
-import { NATIVE_REVIVE_PROMPT, NATIVE_SESSION_FILE, readNativeSession } from "../../src/drivers/claude-followup.ts";
+import { NATIVE_FOLLOWUPS_FILE, NATIVE_REVIVE_PROMPT, NATIVE_SESSION_FILE, queuedFollowUps, readNativeSession } from "../../src/drivers/claude-followup.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, type RecordedClaudeRequest, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
-import { readFleet, readRunEvents, readRunStatus, REPO_ROOT, routeNamed, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, REPO_ROOT, routeNamed, treehouseAvailable, waitFor } from "../harness/index.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
 const skip = missing.length > 0 ? `needs ${missing.join(" and ")} on PATH` : false;
@@ -241,6 +241,157 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 	assert.ok(removed?.removed && !existsSync(removed.removed), JSON.stringify(removed));
 	assert.equal(readFleet(h.b.home).jobs.find((job) => job.job_id === id)?.phase, "done");
 	assert.equal(h.claude.overrun(), 0);
+});
+
+test("H2: a resume that throws returns its claimed sends undelivered, and the next admitted turn end delivers them once", { skip, timeout: 420_000 }, async (t) => {
+	const ids: string[] = [];
+	const h = await nativeHome(t, [
+		// The dispatched turn holds its first answer so the send lands mid-turn and queues.
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }], beforeAnswer: () => sleep(6_000) },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
+		{ kind: "text", text: "Reported." },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
+		{ kind: "text", text: "Reported after the revive." },
+	]);
+	const id = (await h.job()).id;
+	ids.push(id);
+	const model = h.b.provider.addScript("n3d-h2-unused", [{ kind: "text", text: "unused" }]);
+	const runDir = join(h.b.home, paths.runDir(id));
+	const record = join(runDir, NATIVE_SESSION_FILE);
+	const queued = "Queued follow-up: also note the license.";
+	// Switched off at turn end, the queued send is refused back into the queue; the idle send's resume then claims it
+	// and throws (its record lost the session id). Settling that claim before the turn ran lost the send (N3c H2).
+	const first = (await h.b.run([
+		h.dispatch(id, model),
+		tool("cp_send", { job_id: id, message: queued }),
+		h.off,
+		h.wait(id, "agent_settled", 1),
+		h.on,
+		h.sh(`cp "${record}" "${record}.kept" && sed -i 's/,"session_id":"[^"]*"//' "${record}"`),
+		tool("cp_send", { job_id: id, message: "Idle send whose resume throws." }),
+		h.wait(id, "process_exit", 1),
+	], h.env)) as Tool[];
+	const [queuedSend, idleSend] = first.filter((end) => end.toolName === "cp_send");
+	assert.equal(queuedSend?.result.details?.receipt, "queued", text(queuedSend));
+	assert.match(String(idleSend?.result.details?.native), /^resuming:/, text(idleSend));
+	const failed = readRunEvents(h.b.home, id);
+	assert.equal(failed.filter((event) => event.type === "native_followup_refused").length, 1);
+	assert.match((failed.find((event) => event.type === "native_resume_failed")?.payload as { reason?: string } | undefined)?.reason ?? "", /holds no session id/);
+	assert.equal(failed.some((event) => event.type === "native_followup_delivered"), false, "a resume that threw journaled a delivery");
+	assert.deepEqual(queuedFollowUps(runDir), [queued], "the claimed send was lost when the resume threw");
+	await h.b.closeParents();
+	renameSync(`${record}.kept`, record);
+
+	const ends = (await h.b.run([
+		tool("cp_revive", { job_id: id, confirm: true }),
+		h.wait(id, "agent_settled", 2),
+		tool("cp_teardown", { job_id: id }),
+	], h.env)) as Tool[];
+	const revived = ends.find((end) => end.toolName === "cp_revive");
+	assert.match(text(revived), /resumed its native Claude session/, text(revived));
+	const events = readRunEvents(h.b.home, id);
+	assert.deepEqual(events.filter((event) => event.type === "native_followup_delivered").map((event) => (event.payload as { count?: number }).count), [1]);
+	assert.deepEqual(queuedFollowUps(runDir), []);
+	assert.equal(existsSync(join(runDir, `${NATIVE_FOLLOWUPS_FILE}.claimed`)), false);
+	const last = messages(modelCalls(h.claude.requests).at(-1));
+	assert.equal(last.split(queued).length - 1, 1, "the queued send reached the model exactly once");
+	assert.ok(last.includes(NATIVE_REVIVE_PROMPT.slice(0, 40)), "the revive turn delivered it");
+	assert.equal(events.filter((event) => event.type === "envelope_received").length, 2);
+	assert.equal(h.claude.overrun(), 0);
+});
+
+test("L1/F11: a native worker killed by a parent restart resumes on a plain cp_revive and reports once; pi cp_revive and cp_send are unchanged", { skip, timeout: 420_000 }, async (t) => {
+	const ids: Record<string, string> = {};
+	const h = await nativeHome(t, [
+		// The dispatched turn never gets its answer: closing the parent kills the worker inside it.
+		{ kind: "tool_use", calls: [{ name: "Read", input: { file_path: "/nonexistent" } }], beforeAnswer: () => new Promise<void>(() => {}) },
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids.native!)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids.native!, h.b.home) }] },
+		{ kind: "text", text: "Reported after the restart." },
+	]);
+	ids.native = (await h.job()).id;
+	ids.pi = (await h.b.ledger.create({ title: "pi beside native", project: "demo", delivery: "local", kind: "research" })).id;
+	const artifact = join(h.b.home, paths.artifactFile(ids.pi));
+	const piModel = h.b.provider.addScript("n3d-l1-pi", [
+		tool("bash", { command: `mkdir -p "${dirname(artifact)}" && printf '# pi\\n' > "${artifact}"` }),
+		tool("report_result", report(ids.pi, h.b.home)),
+		{ kind: "text", text: "reported" },
+		...Array.from({ length: 4 }, () => ({ kind: "text" as const, text: "pi follow-up noted" })),
+	]);
+	const model = h.b.provider.addScript("n3d-l1-unused", [{ kind: "text", text: "unused" }]);
+	await h.b.run([
+		tool("cp_dispatch", { job_id: ids.pi, task: "Report.", model: piModel, queue: false, when_ready: false }),
+		h.wait(ids.pi, "envelope_received", 1),
+		h.dispatch(ids.native, model),
+	], h.env);
+	await waitFor(() => modelCalls(h.claude.requests).length, (n) => n >= 1, { timeoutMs: 60_000, what: "the native turn's first model call" });
+	const sessionFile = join(h.b.home, paths.runDir(ids.native), NATIVE_SESSION_FILE);
+	const before = readNativeSession(sessionFile).session_id;
+	assert.ok(before, "the native session id was recorded before the restart");
+	await h.b.closeParents();
+
+	const ends = (await h.b.run([
+		tool("cp_revive", { job_id: ids.native, confirm: true }),
+		h.wait(ids.native, "agent_settled", 1),
+		tool("cp_revive", { job_id: ids.pi, confirm: true }),
+		tool("cp_send", { job_id: ids.pi, message: "Pi follow-up." }),
+		tool("cp_teardown", { job_id: ids.native }),
+	], h.env)) as Tool[];
+	const [nativeRevive, piRevive] = ends.filter((end) => end.toolName === "cp_revive");
+	// L1: the plain revive resumed the same session with picp's revive prompt, and the job reported exactly once.
+	assert.match(text(nativeRevive), /resumed its native Claude session/, text(nativeRevive));
+	const revivedRun = modelCalls(h.claude.requests).find((request) => messages(request).includes(NATIVE_REVIVE_PROMPT.slice(0, 40)));
+	assert.ok(messages(revivedRun).includes("Report the repo"), "the revive resumed the killed turn's conversation");
+	assert.equal(readNativeSession(sessionFile).session_id, before);
+	const events = readRunEvents(h.b.home, ids.native);
+	assert.equal(events.filter((event) => event.type === "envelope_received").length, 1);
+	assert.equal((events.filter((event) => event.type === "native_run").at(-1)?.payload as { resumed?: boolean } | undefined)?.resumed, true);
+	const down = ends.find((end) => end.toolName === "cp_teardown");
+	assert.notEqual(down?.isError, true, text(down));
+	// F11: a pi job beside it still revives idle with no native prompt, and its send is delivered with no native ack.
+	assert.notEqual(piRevive?.isError, true, text(piRevive));
+	assert.match(text(piRevive), /idle; send it a message to continue/);
+	assert.equal(readRunEvents(h.b.home, ids.pi).some((event) => (event.payload as { native_revive?: unknown } | undefined)?.native_revive), false);
+	const piSend = ends.find((end) => end.toolName === "cp_send");
+	assert.equal(piSend?.result.details?.receipt, "delivered", text(piSend));
+	assert.equal(piSend?.result.details?.native, undefined);
+	assert.equal(h.claude.overrun(), 0);
+});
+
+// N3d's one live run: the operator's own claude settings (claude reads them; picp never does). Counts only.
+test("native live follow-up smoke: a research dispatch, then one idle cp_send resumes the same session", { skip: LIVE_TESTS_ENABLED ? skip : "set CP_LIVE_TESTS=1 to run live smokes", timeout: 900_000 }, async (t) => {
+	const b = await dispatchS29(t);
+	writeFileSync(join(b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true }));
+	const id = (await b.ledger.create({ title: "native live follow-up smoke", project: "demo", delivery: "local", kind: "research" })).id;
+	const model = b.provider.addScript("n3d-live-unused", [{ kind: "text", text: "unused" }]);
+	const events = join(b.home, paths.eventsFile(id));
+	const sessionFile = join(b.home, paths.runDir(id), NATIVE_SESSION_FILE);
+	const settled = (count: number) => tool("bash", { command: `for i in $(seq 1500); do [ "$(grep -c '"agent_settled"\\|"process_exit"' "${events}" 2>/dev/null)" -ge ${count} ] && break; sleep 0.2; done; sleep 2` });
+	let firstSession: string | undefined;
+	const ends = (await b.run([
+		tool("cp_dispatch", { job_id: id, task: "Report the repo's package name from README.md in one line.", model, queue: false, when_ready: false, driver: "claude" }),
+		settled(1),
+		tool("bash", () => ((firstSession = readNativeSession(sessionFile).session_id), { command: "true" })),
+		tool("cp_send", { job_id: id, message: "Follow-up: confirm the name once more and call report_result again with the same report." }),
+		settled(2),
+		tool("cp_teardown", { job_id: id }),
+	], {}, undefined, 900_000)) as Tool[];
+	const log = readRunEvents(b.home, id);
+	const runs = log.filter((event) => event.type === "native_run").map((event) => event.payload as Record<string, unknown>);
+	const status = readRunStatus(b.home, id);
+	const session = readNativeSession(sessionFile);
+	const removed = log.find((event) => event.type === "native_scratch_removed")?.payload as { removed?: string } | undefined;
+	const counts = {
+		exit_codes: runs.map((run) => run.exit_code), lockdown: runs.map((run) => run.lockdown),
+		reports_accepted: log.filter((event) => event.type === "envelope_received").length,
+		same_session_resumed: runs[1]?.resumed === true && firstSession !== undefined && session.session_id === firstSession,
+		usage_measured: runs.length === 2 && runs.every((run) => run.usage === "measured"),
+		counted_once: Math.abs(status.usage.cost_usd - (session.baseline?.cost_usd ?? Number.NaN)) < 1e-9,
+		scratch_removed: Boolean(removed?.removed && !existsSync(removed.removed)),
+	};
+	t.diagnostic(JSON.stringify(counts));
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	assert.deepEqual(counts, { ...counts, exit_codes: [0, 0], lockdown: ["ok", "ok"], reports_accepted: 2, same_session_resumed: true, usage_measured: true, counted_once: true, scratch_removed: true });
 });
 
 test("F9: a queued driver:claude dispatch releases native, and an armed one is refused by name, never pi", { skip, timeout: 420_000 }, async (t) => {
