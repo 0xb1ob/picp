@@ -145,7 +145,7 @@ test("M2-report-url: a running tunnel origin wins, else the configured viewer ad
 	try {
 		const sent = deliverFinalAnswer(h.path, input({ source: "chat:s:url" }));
 		assert.equal(sent.url, `/boards/${slug}/`);
-		assert.match(sent.text, new RegExp(`Full answer: /boards/${slug}/\\n\\(relative link: .*Settings → viewer → Public URL .*cp-install --viewer-host`));
+		assert.match(sent.text, new RegExp(`Full answer: /boards/${slug}/\\n\\(relative link: .*Settings → Dashboard address → Public URL .*cp-install --viewer-host`));
 	} finally { process.env.PATH = path; }
 	assert.deepEqual(h.entries(), [slug], "no address: the report is still published, never refused");
 });

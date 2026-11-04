@@ -1,5 +1,5 @@
 /**
- * The one link builder for a served board (intake's `delivery: board` receipt and `responseReportUrl`); docs/contracts.md
+ * The one link builder for a served board (intake's board receipt and `responseReportUrl`); docs/contracts.md
  * "Board links". Never a throw and never a guessed loopback (pi-command-post-1jz): with no address it is relative.
  */
 import { dirname, join } from "node:path";
@@ -16,7 +16,7 @@ export interface BoardLinkOptions { viewerHost?: string; viewerPort?: number }
 export interface BoardLink { url: string; note?: string }
 
 const BOARD_LINK_REMEDY =
-	"relative link: no tunnel, public URL, viewer host or tailnet address; set Settings → viewer → Public URL (data/viewer.json public_url) or cp-install --viewer-host <ip>";
+	"relative link: no tunnel, public URL, viewer host or tailnet address; set Settings → Dashboard address → Public URL (data/viewer.json public_url) or cp-install --viewer-host <ip>";
 
 /** Tunnel origin, else `viewer.public_url`, else the configured host (loopback too), else the tailnet IPv4, else relative. */
 export function boardLink(home: string, slug: string, options: BoardLinkOptions = {}, tailnet: () => string | undefined = tailscaleIp): BoardLink {

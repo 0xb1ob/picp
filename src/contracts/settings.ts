@@ -220,7 +220,7 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 	}),
 	...group("viewer", "viewer", { applies: "next_viewer_request", on_invalid: "refuse" }, {
 		strict_host: { file_key: "strict_host", type: "boolean", default: false, label: "Pin the dashboard Host", help: "Serve the local dashboard only under its exact bind host:port (the DNS-rebinding guard). Off: any name that reaches the port, such as a proxy's, is served with full control; an invalid file pins it." },
-		public_url: { file_key: "public_url", type: "url", default: null, applies: "next_board_link", label: "Public URL", help: "Where people reach this dashboard, e.g. a reverse proxy's https URL; board and report links use it. Links only: the bind address and the Host and Origin guards stay as they are. Empty unsets it." },
+		public_url: { file_key: "public_url", type: "url", default: null, applies: "next_board_link", label: "Public URL", help: "Where people reach this dashboard, e.g. a reverse proxy's https URL; board and report links use it. Links only: the bind address and the Host and Origin guards stay as they are. Empty clears it." },
 	}),
 ]);
 

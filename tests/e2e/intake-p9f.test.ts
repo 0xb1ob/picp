@@ -179,7 +179,7 @@ test("P9f-intake-board: a board envelope publishes its site at the viewer's addr
 	assert.ok(published("cp-no-tailnet"), "the board is published");
 	assert.ok(!existsSync(join(f.home, paths.invalidEnvelopeFile("cp-no-tailnet", 1, 1))), "nothing quarantined");
 	const wake = (await f.wakes(none)).join("\n");
-	assert.match(wake, /board: \/boards\/cp-no-tailnet\/\\n {2}relative link: .*Settings → viewer → Public URL .*cp-install --viewer-host <ip>/);
+	assert.match(wake, /board: \/boards\/cp-no-tailnet\/\\n {2}relative link: .*Settings → Dashboard address → Public URL .*cp-install --viewer-host <ip>/);
 	assert.doesNotMatch(wake, /refused/);
 	none.endInput(); await none.close();
 });

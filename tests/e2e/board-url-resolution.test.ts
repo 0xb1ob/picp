@@ -1,6 +1,6 @@
 /**
- * cp-board-url-proxy: the one board-link resolver (tunnel, public_url, host, tailnet, relative) through the real parent's
- * intake, `responseReportUrl` and the settings write. Cases (a) no address and (f) artifact_path live in intake-p9f.
+ * cp-board-url-proxy: the one board-link resolver (tunnel, public_url, host, tailnet, relative) through the real
+ * parent's intake, `responseReportUrl` and the settings write. Cases (a) no address and (f) artifact_path: intake-p9f.
  */
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";

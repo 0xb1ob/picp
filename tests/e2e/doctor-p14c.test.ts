@@ -399,6 +399,8 @@ test("P14-doctor-fleet: fleet records, the parent lock, the worktree pool, the v
 	assert.match(one(await p.doctor(), "viewer-host")?.what ?? "", /^viewer Host check on \(viewer\.strict_host=true\)/);
 	writeFileSync(viewerFile, '{"strict_host": "yes"}');
 	assert.match(JSON.stringify(one(await p.doctor(), "viewer-host")), /"warn".*remove it/);
+	writeFileSync(viewerFile, '{"public_url": "https://dash.example.test/?a=1"}');
+	assert.match(JSON.stringify(one(await p.doctor(), "viewer-host")), /"warn".*public_url must be http\(s\).*\\"public_url\\": \\"https:/);
 
 	// cp-txbb: a cp-daemon home with the legacy units left over still produces a valid report.
 	const unitDir = join(h, "xdg", "systemd/user");

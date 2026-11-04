@@ -1,7 +1,7 @@
 /**
- * `data/viewer.json` (settings keys `viewer.strict_host`, `viewer.public_url`): whether the local listener pins its exact
- * bind Host, the DNS-rebinding guard (off by default, operator decision ask-1946d8fc2bf8, so a proxied URL works), and
- * the public URL board links use. Nothing here writes.
+ * `data/viewer.json` (keys `viewer.strict_host`, `viewer.public_url`): whether the local listener pins its exact bind
+ * Host, the DNS-rebinding guard (off by default, operator decision ask-1946d8fc2bf8, so a proxied URL works), and the
+ * public URL board links use. Nothing here writes.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

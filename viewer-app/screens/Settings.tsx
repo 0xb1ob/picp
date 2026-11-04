@@ -15,6 +15,7 @@ const MAX_FALLBACKS = 4;
 const PEOPLE_MODELS: SettingKey[] = ["models.parent", "models.parent_thinking", "models.operator", "models.operator_thinking"];
 const GRANTS: SettingKey[] = ["grants.expiry_hours", "grants.spend_usd", "grants.spend_tokens", "grants.token_ceiling", "grants.job_cap", "grants.dispatch_parallelism", "grants.allowed_actions", "grants.ask_on", "grants.exclude_paths"];
 const COMPACTION: SettingKey[] = ["sessions.parent_compact_at_tokens", "sessions.operator_compact_at_tokens"];
+const VIEWER: SettingKey[] = ["viewer.public_url", "viewer.strict_host"];
 const lines = (text: string): string[] => text.split(/[\n,]/).map(line => line.trim()).filter(Boolean);
 const pick = (drafts: Drafts, keys: SettingKey[]): Drafts => Object.fromEntries(keys.filter(key => key in drafts).map(key => [key, drafts[key]]));
 const omit = (drafts: Drafts, keys: SettingKey[]): Drafts => Object.fromEntries(Object.entries(drafts).filter(([key]) => !keys.includes(key as SettingKey)));
@@ -147,6 +148,10 @@ function Field({field, value, source, error, set, disabled, models}: {field: Set
    ? <ModelSelect id={id} label={field.label} value={typeof value === "string" ? value : ""} set={next => set(next || null)} models={models} unset disabled={disabled}/>
    : field.type === "thinking_level"
    ? <select id={id} value={typeof value === "string" ? value : ""} disabled={disabled} onChange={event => set(event.currentTarget.value || null)}><option value="">(unset)</option>{THINKING.map(level => <option key={level} value={level}>{level}</option>)}</select>
+   : field.type === "url"
+   ? <input id={id} type="text" inputMode="url" spellcheck={false} autoComplete="off" placeholder="https://dash.example.test/" value={typeof value === "string" ? value : ""} aria-invalid={error ? true : undefined} disabled={disabled} onInput={event => set(event.currentTarget.value.trim() || null)}/>
+   : field.type === "boolean"
+   ? <div class="settings-checks"><label><input id={id} type="checkbox" checked={value === true} disabled={disabled} onChange={event => set(event.currentTarget.checked)}/>{value === true ? "On" : "Off"}</label></div>
    : <input id={id} type="number" value={typeof value === "number" ? String(value) : ""} min={field.minimum ?? field.exclusive_minimum} max={field.maximum} step={field.type === "integer" ? 1 : "any"} aria-invalid={error ? true : undefined} disabled={disabled} onInput={event => set(event.currentTarget.value === "" ? null : Number(event.currentTarget.value))}/>;
  return <div class="settings-field"><label for={id}>{field.label} {meta}</label><p class="settings-help">{field.help}</p>{input}{error && <small class="settings-warn" role="alert">{error}</small>}{field.type === "model_ref" && typeof value === "string" && <ModelNote models={models} values={[value]}/>}</div>;
 }
@@ -174,7 +179,9 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
  }) as SettingValue);
  const field = (key: SettingKey) => {
   const spec = fieldOf(data, key);
-  return spec && <Field key={key} field={spec} value={valueOf(data, drafts, key)} source={view_(key)?.source} error={key in drafts ? fieldError(spec, drafts[key]) : null} set={value => set(key, value)} disabled={disabled} models={models}/>;
+  // A server refusal (a bad Public URL) shows under its field too, beside the notice's list.
+  const refused = view.notice?.kind === "error" ? view.notice.errors.find(error => error.includes(key)) ?? null : null;
+  return spec && <Field key={key} field={spec} value={valueOf(data, drafts, key)} source={view_(key)?.source} error={key in drafts ? fieldError(spec, drafts[key]) ?? refused : null} set={value => set(key, value)} disabled={disabled} models={models}/>;
  };
  const invalid = (keys: SettingKey[]) => keys.some(key => { const spec = fieldOf(data, key); return !!spec && key in drafts && fieldError(spec, drafts[key]) !== null; });
  const models = data.available_models;
@@ -196,6 +203,9 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
   </Section>
   <Section title="Auto-compaction" help="A session compacts once its context reaches this many tokens; a change takes effect at the next compaction check. A whole number of at least 1: an invalid parent value turns parent auto-compaction off." keys={COMPACTION} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: COMPACTION}} restoreText="Restore the parent and operator compaction thresholds to their defaults?" disabled={disabled} invalid={invalid(COMPACTION)}>
    {COMPACTION.flatMap(key => [field(key), <Effective key={`${key}-effective`} field={view_(key)}/>])}
+  </Section>
+  <Section title="Dashboard address" help="Public URL applies to the next board or report link; the Host pin applies to the next dashboard request. Neither restarts anything." keys={VIEWER} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: VIEWER}} restoreText="Unset the public URL and turn the Host pin off?" disabled={disabled}>
+   {VIEWER.map(field)}
   </Section>
   {children}
   <footer class="settings-audit"><h2>Recent changes</h2>{data.audit.length ? <ul>{data.audit.slice(-5).reverse().map((row, index) => <li key={`${row.at}-${index}`} class="job-meta">{auditLine(row)}</li>)}</ul> : <p class="job-meta">No settings change recorded</p>}</footer>

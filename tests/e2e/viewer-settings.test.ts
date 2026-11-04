@@ -450,7 +450,7 @@ async function settingsTab(t: TestContext, { routing = true, models = MODELS, st
 
 test("P20-settings-page: four sections; Save posts If-Match, the control token and only the drafted keys; a 412 keeps the draft", { timeout: 120_000 }, async (t) => {
 	const ui = await settingsTab(t);
-	assert.deepEqual(ui.tab.$$("section.settings-section > h2").map((h) => h.textContent), ["Model routing", "Parent and operator models", "Grant defaults", "Auto-compaction", "Devices"], "the four settings sections, then the served page's Devices");
+	assert.deepEqual(ui.tab.$$("section.settings-section > h2").map((h) => h.textContent), ["Model routing", "Parent and operator models", "Grant defaults", "Auto-compaction", "Dashboard address", "Devices"], "the five settings sections, then the served page's Devices");
 	assert.equal(ui.section("Model routing").querySelectorAll("li.settings-rule").length, 7, "one row per shipped rubric entry");
 	const people = ui.section("Parent and operator models");
 	const parent = people.querySelector("#setting-models-parent")!;
@@ -547,6 +547,42 @@ test("P20-settings-compaction: both keys with what is in force; a bad threshold 
 	await ui.press(compaction, "Restore defaults");
 	assert.deepEqual(ui.posts()[1]!.json.keys, ["sessions.parent_compact_at_tokens", "sessions.operator_compact_at_tokens"]);
 	assert.equal(await until(async () => (await ui.snapshot()).fields.find((f) => f.key === "sessions.parent_compact_at_tokens")!.value, (value) => typeof value === "number" && value !== 175000, "the restore"), 150000, "the restored default");
+});
+
+// cp-board-url-proxy R1: the remedy note sends people to Settings → Dashboard address → Public URL, so it must
+// exist and write through the one apply path; a bad URL shows the server's reason inline, an empty input clears it.
+test("cp-board-url-proxy-settings: Dashboard address renders Public URL and the Host pin; refuse, save, read back, clear", { timeout: 120_000 }, async (t) => {
+	const ui = await settingsTab(t);
+	const address = ui.tab.$('section[aria-label="Dashboard address"]');
+	assert.equal(address !== null, true, "the Dashboard address section renders");
+	const url = address!.querySelector("#setting-viewer-public_url") as HTMLInputElement | null;
+	const pin = address!.querySelector("#setting-viewer-strict_host") as HTMLInputElement | null;
+	assert.deepEqual([url?.getAttribute("type"), url?.value, pin?.getAttribute("type"), Boolean(pin?.checked), pin?.parentElement?.textContent], ["text", "", "checkbox", false, "Off"]);
+	assert.deepEqual([...address!.querySelectorAll("label[for]")].map((l) => l.textContent?.split(" ")[0]), ["Public", "Pin"]);
+	assert.match(address!.textContent ?? "", /next board or report link.*Empty clears it/s);
+	const value = async () => (await ui.snapshot()).fields.find((f) => f.key === "viewer.public_url")?.value;
+	const file = join(ui.view.home, LAYOUT.data, "viewer.json");
+
+	await ui.enter(url!, "https://dash.example.test/?a=1");
+	await ui.press(address!, "Save");
+	await ui.tab.find(".settings-error");
+	assert.equal(ui.posts()[0]?.status, 400);
+	assert.match(address!.querySelector(".settings-warn[role=alert]")?.textContent ?? "", /public_url .*no user name, password, query or fragment/, "inline");
+	assert.equal(await value(), null, "a refusal writes nothing");
+
+	await ui.enter(url!, "https://dash.example.test/apps/cp/");
+	await ui.press(address!, "Save");
+	await ui.tab.find(".settings-ok");
+	assert.deepEqual([ui.posts()[1]?.path, ui.posts()[1]?.status, ui.posts()[1]?.json.changes], ["/api/settings/apply", 200, { "viewer.public_url": "https://dash.example.test/apps/cp/" }]);
+	assert.equal(await value(), "https://dash.example.test/apps/cp/", "read back from the owner");
+	assert.equal((JSON.parse(readFileSync(file, "utf8")) as Line).public_url, "https://dash.example.test/apps/cp/");
+
+	await ui.enter(url!, "   ");
+	await ui.press(address!, "Save");
+	await until(() => ui.posts().length, (n) => n === 3, "the clearing save");
+	assert.deepEqual(ui.posts()[2]?.json.changes, { "viewer.public_url": null }, "an empty input sends null");
+	assert.equal(await until(value, (v) => v === null, "cleared"), null);
+	assert.equal(existsSync(file) && "public_url" in (JSON.parse(readFileSync(file, "utf8")) as Line), false, "a delete, never a stored null");
 });
 
 test("P20-settings-readonly: no control token is read only with every control disabled; an absent routing.json is one line, no rubric controls", { timeout: 120_000 }, async (t) => {

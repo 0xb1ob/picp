@@ -6501,7 +6501,7 @@ port-forwarding proxy that passes its own name (Coder's `https://8766--…/`) re
 The control routes then also accept an `http(s)` `Origin` naming the request's own `Host`; every other control guard
 stands, and device pairing and revoke (`src/viewer/devices-api.ts`) stay pinned to the bind or configured origin. The
 cost is DNS rebinding: a page whose name resolves to this bind is same-origin with itself. `data/viewer.json`
-`{"strict_host": true}` (Settings → viewer) restores the old guard — Host must equal the bind address (421) and Origin
+`{"strict_host": true}` (Settings → Dashboard address) restores the old guard — Host must equal the bind address (421) and Origin
 the configured list only — read per request, no restart; an invalid file fails closed (strict) and `/doctor` warns.
 `/doctor` prints one `[viewer-host]` line either way. The remote listener keeps its own Host gate (Remote gate below).
 
@@ -6510,7 +6510,7 @@ the configured list only — read per request, no restart; an invalid file fails
 cards, schedule results) — in this order: (1) the running tunnel origin when `wantedListener` holds for its config;
 (2) `viewer.public_url`; (3) an explicit viewer host, `CP_VIEWER_HOST` or `data/daemon.json` `viewer_host`, loopback
 included because it was configured; (4) the tailnet IPv4 (`tailscale ip -4`); (5) otherwise the relative
-`/boards/<slug>/` plus one note naming the remedy (Settings → viewer → Public URL, or `cp-install --viewer-host <ip>`),
+`/boards/<slug>/` plus one note naming the remedy (Settings → Dashboard address → Public URL, or `cp-install --viewer-host <ip>`),
 in the wake-up, the receipt title and a report's reply text. There is no silent loopback guess (pi-command-post-1jz),
 and an address is never a refusal: a board envelope whose `artifact_path` and `board.json` pass is always published and
 recorded. `viewer.public_url` (`data/viewer.json` `public_url`) is an absolute `https://` or `http://` URL with no
