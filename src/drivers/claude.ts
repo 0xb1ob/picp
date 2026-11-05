@@ -9,7 +9,7 @@ import { type Delivery, type FleetRecord, type JobKind, paths, type Role } from 
 import { loadNativeConfig, nativeConfigFile, type NativeDriver } from "../worker-driver.ts";
 import type { WorkerSpawnOptions } from "../worker-process.ts";
 
-/** Why a job may not run native (native routing S1): the resolver falls back to pi on these, an explicit request refuses. */
+/** Why a job may not run native (S1): the resolver falls back to pi on these; an explicit request refuses. */
 export type NativeRefusal = "switch" | "pipeline" | "ineligible" | "occupied" | "cli_missing" | "cli_version" | "model" | "effort" | "denied";
 
 export class NativeDriverError extends Error {
@@ -22,11 +22,11 @@ export class NativeDriverError extends Error {
 
 const WORKER_ENTRY = fileURLToPath(new URL("./claude-worker.ts", import.meta.url));
 const LIVE_PHASES: readonly string[] = ["launching", "waiting", "held"];
-// One shared load: concurrent admissions awaiting their own import() could see the module before it finished evaluating.
+// One shared load: concurrent admissions awaiting their own import() could see a half-evaluated module.
 let spike: Promise<typeof import("./claude-spike.ts")> | undefined;
 const DELIVERIES: readonly Delivery[] = ["local", "answer"];
 const NATIVE_MODEL = /^anthropic\/(claude-[A-Za-z0-9][A-Za-z0-9._[\]-]*)$/;
-/** Routed thinking levels the SDK serves as `effort`; `off` disables thinking and `minimal` has no native equivalent. */
+/** Routed levels the SDK serves as `effort`; `off` disables thinking and `minimal` has no native equivalent. */
 export const NATIVE_EFFORTS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
 
 export interface NativeSelection {
@@ -40,8 +40,8 @@ export interface NativeSelection {
 	env?: NodeJS.ProcessEnv;
 }
 
-/** The first N3b condition that fails, typed, or undefined: switch on, local/answer research not owned by a pipeline (D2),
- * concurrency 1, pinned claude. */
+/** The first N3b condition that fails, typed, or undefined: switch on, local/answer research not owned by a
+ * pipeline (D2), concurrency 1, pinned claude. */
 export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ category: NativeRefusal; why: string } | undefined> {
 	let on: boolean;
 	try {
@@ -89,7 +89,7 @@ export function nativeModelId(model: string): string {
 	return id;
 }
 
-/** Overrides pi's argv with the native worker; the env stays the planned worker env, plus the routed Anthropic model. */
+/** Overrides pi's argv with the native worker; the env is the planned worker env plus the routed Anthropic model. */
 export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env"> {
 	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model) } };
 }

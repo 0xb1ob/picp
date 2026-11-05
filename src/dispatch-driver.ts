@@ -25,7 +25,7 @@ type Capacity = Parameters<typeof resolveWithCapacity>[3];
 /** Per home, the job holding the native slot between route resolution and its fleet record (or its failure). */
 const slots = new Map<string, string>();
 
-/** Runs one admission; whatever native slot it reserved is released when it settles, by then the fleet record holds it. */
+/** Runs one admission and releases the native slot it reserved when it settles (the fleet record holds it by then). */
 export async function holdNativeSlot<T>(home: string, jobId: string, run: () => Promise<T>): Promise<T> {
 	try {
 		return await run();

@@ -14,7 +14,7 @@ export const FAKE_CLAUDE_MODEL = "claude-picp-fake";
 /** The routed ref a native dispatch names: an explicit `anthropic/claude-…` id, as S1 requires. */
 export const FAKE_NATIVE_MODEL = `anthropic/${FAKE_CLAUDE_MODEL}`;
 
-/** Allows and routes `models` (default the fake native model) in `home`'s data/routing.json, so a native dispatch may name them. */
+/** Allows and routes `models` (default: the fake native model) in `home`, so a native dispatch may name them. */
 export function routeNativeModel(home: string, models: readonly string[] = [FAKE_NATIVE_MODEL]): void {
 	routeNamed(home, models);
 	const file = join(home, LAYOUT.routingFile);

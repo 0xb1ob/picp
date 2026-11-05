@@ -26,7 +26,7 @@ const report = (jobId: string, home: string) => ({
 	plan_summary: { goal: "Name the package.", approach: ["Read README.md."], acceptance: ["The name is reported."], risk: "None.", touched: ["README.md"] },
 });
 
-/** A home whose S rows prefer claude (pi lane: the fake native model, then a mock pi model) and whose L rows are plain pi. */
+/** A home whose S rows prefer claude (pi lane: the fake native model, then a mock pi model); L rows are plain pi. */
 async function routedHome(t: TestContext, script: readonly ClaudeStep[]) {
 	const b = await dispatchS29(t);
 	const claude = await startClaudeMockProvider(script);
@@ -77,7 +77,7 @@ test("S1 native: a claude row runs native with its model and effort; peers, plai
 	const winner = native[0]!;
 	ids.push(winner.job_id);
 	const loser = h.fleet(winner.job_id === a.id ? b.id : a.id)!;
-	// The native job: its record, its routing record and the cp_dispatch response all name claude, the row's model and effort.
+	// The native job: its record, routing record and cp_dispatch response name claude, the row's model and effort.
 	assert.equal(winner.worker.model, FAKE_NATIVE_MODEL);
 	assert.deepEqual([winner.routing?.requested_driver, winner.routing?.driver, winner.routing?.thinking], ["claude", "claude", "high"]);
 	assert.match(winner.routing?.driver_reason ?? "", /^rule: native-research prefers claude; effort high$/);
@@ -125,7 +125,7 @@ test("S1 fallback: switch off, CLI missing or too old, and a pipeline-owned plan
 	const absentEnds = await runAlone([{ kind: "tool_calls", calls: [dispatch(absent.id)] }], { ...h.env, PATH: [shim, ...kept].join(delimiter) });
 	const oldEnds = await runAlone([{ kind: "tool_calls", calls: [dispatch(old.id)] }], { ...h.env, PATH: [oldDir, process.env.PATH].join(delimiter) });
 	const pipelineEnds = await runAlone([tool("cp_pipeline", { action: "start", title: `s1 pipeline ${Math.random()}`, project: "demo", task: "Plan a README tweak.", delivery: "local", scope: "S" })], h.env);
-	// A row with fallbacks skips pickModel's allowlist check, so a primary denied for the role must still never run native.
+	// A row with fallbacks skips pickModel's allowlist check; a primary denied for the role still never runs native.
 	const denyRole = { ...JSON.parse(h.routing()) as object, deny_by_role: { planner: [FAKE_NATIVE_MODEL] } };
 	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify(denyRole));
 	const deniedEnds = await runAlone([dispatch(denied.id), dispatch(deniedExplicit.id, { driver: "claude" })].map((call) => ({ kind: "tool_calls" as const, calls: [call] })), h.env);
