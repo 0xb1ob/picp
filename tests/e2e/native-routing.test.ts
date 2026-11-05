@@ -200,6 +200,18 @@ test("S1 config: an unknown driver or a non-anthropic claude model refuses with 
 	const revived = h.fleet(locked.id);
 	assert.deepEqual([revived?.worker.driver, revived?.worker.model], ["claude", FAKE_NATIVE_MODEL], "the job was rerouted off its driver");
 	assert.equal(readRunEvents(h.b.home, locked.id).filter((event) => event.type === "worker_revived").length, 1, text(revive));
+	// A native record whose model the CLI cannot run (hand-edited here) refuses revive at admission, before any spawn.
+	await waitFailed(h.fleet, locked.id);
+	await h.b.closeParents();
+	const fleetFile = join(h.b.home, LAYOUT.fleetFile);
+	const file = readFleet(h.b.home);
+	for (const record of file.jobs) if (record.job_id === locked.id) record.worker.model = h.piModel;
+	writeFileSync(fleetFile, JSON.stringify(file));
+	const requests = h.claude.requests.length;
+	const refused = ((await h.b.run([tool("cp_revive", { job_id: locked.id, confirm: true })], h.env)) as Tool[]).find((end) => end.toolName === "cp_revive");
+	assert.match(text(refused), /native_refused.*explicit anthropic\/claude-… model.*Nothing was spawned/);
+	assert.equal(readRunEvents(h.b.home, locked.id).filter((event) => event.type === "worker_revived").length, 1, "a second spawn ran");
+	assert.equal(h.claude.requests.length, requests);
 });
 
 async function waitFailed(fleet: (id: string) => ReturnType<typeof readFleet>["jobs"][number] | undefined, id: string) {

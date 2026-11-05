@@ -13,7 +13,7 @@ import { FleetStore } from "../fleet.ts";
 import { projectDenial } from "../mandate-defaults.ts";
 import { rebuildStatus } from "../run-artifacts.ts";
 import type { NativeDriver } from "../worker-driver.ts";
-import { assertNativeSelection, NativeDriverError } from "./claude.ts";
+import { assertNativeSelection, NativeDriverError, nativeModelId } from "./claude.ts";
 
 export const NATIVE_SESSION_FILE = "native-claude";
 export const NATIVE_FOLLOWUPS_FILE = "native-followups.jsonl";
@@ -134,6 +134,11 @@ export async function assertNativeResume(input: { home: string; jobId: string; w
 	};
 	if (!record || isScriptFleetRecord(record) || !record.worker.driver) return refuse("no native fleet record");
 	assertDispatchOpen(input.home, `${input.what} of native ${input.jobId}`);
+	try {
+		nativeModelId(record.worker.model);
+	} catch (error) {
+		refuse((error as Error).message);
+	}
 	const denied = projectDenial(input.home, record.project);
 	if (denied) refuse(denied);
 	if (record.budget) {
