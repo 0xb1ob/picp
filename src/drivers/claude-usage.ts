@@ -1,9 +1,11 @@
-/** N4a: a native run's usage, measured from the SDK result's `modelUsage` on every subtype, and its denial diagnostics. */
+/** N4a: a native run's usage, measured from the SDK result's `modelUsage` on every subtype, and its denials. */
 import type { SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { NativeSession } from "./claude-followup.ts";
 
 export type NativeBaseline = NonNullable<NativeSession["baseline"]>;
 type Counts = { input: number; output: number; cache_read: number; cache_write: number };
+/** A shutdown's wait for an in-flight turn's `result`; under the parent's 5 s stdin grace, so no SIGTERM cuts it. */
+export const NATIVE_RESULT_GRACE_MS = 4_000;
 
 /** pi's `message_end` usage shape (run-artifacts `readUsage`); `input` excludes cache read and write. */
 export interface PiUsage { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } }

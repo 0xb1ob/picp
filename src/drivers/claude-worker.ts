@@ -6,11 +6,12 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { setTimeout as sleep } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { type Delivery, paths, type Usage } from "../contracts.ts";
-import { nativeDenials, nativeRunUsage } from "./claude-usage.ts";
+import { NATIVE_RESULT_GRACE_MS, nativeDenials, nativeRunUsage } from "./claude-usage.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
 import { type NativeTranscript, nativeTranscript, nativeTranscriptFile } from "./claude-transcript.ts";
 import { modelFamily, type NativeObservation, OBSERVATION_EVENT, turnObserver } from "./claude-observation.ts";
@@ -43,6 +44,8 @@ let busy = false;
 // A revived worker (CP_NATIVE_RESUME=1) resumes from its first prompt; a dispatched one after its first turn.
 let resuming = env.CP_NATIVE_RESUME === "1";
 let finalResult: SDKResultMessage | undefined;
+// Set by the first stop: no queued follow-up starts a new turn after it.
+let stopping = false;
 let session: NativeSession | undefined;
 let transcript: NativeTranscript | undefined;
 
@@ -166,7 +169,7 @@ async function dueFollowUps(ran: Turn): Promise<string[]> {
 	// Claimed before the admission await: a send queued during it waits for the next turn end, never lost.
 	const queued = claimFollowUps(runDir);
 	if (queued.length === 0) return [];
-	if (abort.signal.aborted) return (returnClaim(runDir), []);
+	if (abort.signal.aborted || stopping) return (returnClaim(runDir), []);
 	const events = join(env.CP_HOME ?? "", paths.eventsFile(env.CP_JOB_ID ?? ""));
 	const recorded = existsSync(events) && readFileSync(events, "utf8").includes(ran.runId);
 	try {
@@ -244,8 +247,16 @@ function command(line: string): void {
 	reply({ success: false, error: why });
 }
 
-/** Stdin end or SIGTERM aborts a live run; the exit waits for claude's observed exit inside the run. */
+/**
+ * Stdin end or SIGTERM aborts a live run; the exit waits for claude's observed exit inside the run. A turn still in
+ * flight first gets `NATIVE_RESULT_GRACE_MS` for its `result`, so its usage is measured; a second stop aborts at once.
+ */
 async function stop(): Promise<void> {
+	const deadline = Date.now() + NATIVE_RESULT_GRACE_MS;
+	if (!stopping) {
+		stopping = true;
+		while (busy && finalResult === undefined && Date.now() < deadline) await sleep(50);
+	}
 	abort.abort();
 	process.exit((await run) ?? 0);
 }

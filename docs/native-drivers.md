@@ -351,6 +351,9 @@ measurement: the worker emits `usage_unavailable`, run status carries `usage_una
 "unavailable (not measured)". Accounting then adds nothing for that run (never a measured zero) and admission does not
 wait on it. Every `native_run` event names `result_subtype`, `usage_status` (`complete`, `unavailable` or
 `unbaselined`) and `denied`: at most 5 `tool: reason` lines of at most 200 characters, paths and env values redacted.
+A teardown that reaches a turn still in flight (typically after its `report_result`, before the closing `result`)
+waits up to `NATIVE_RESULT_GRACE_MS` (4 s, under the parent's 5 s stdin grace) for that result, measures it, then
+stops; queued follow-ups stay queued. A result that does not arrive in time is abandoned and the run stays unavailable.
 
 **Rollback.** Turning the switch off refuses new native dispatches, resumes and revives; a live native job keeps its
 driver until its own exit or teardown, and teardown still works.
