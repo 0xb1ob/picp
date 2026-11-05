@@ -465,4 +465,21 @@ and nothing moves to pi. Bounded recovery never resumes a native job (N3c).
 
 **Rollback.** Turn the switch OFF (every job runs pi), or delete the snapshot file (unknown again); no state migrates.
 
-Left for S3: the Settings and dashboard view of the snapshot.
+## Operator view (S3)
+
+Viewer and parent-side only; nothing here changes selection.
+
+- **Job detail** (`/api/job/<id>` `job.driver_note`, the Driver fact): `claude, effort <level>` (or `effort CLI
+  default`) for a native job, and `pi (preferred claude: <driver_reason, at most 200 chars>)` when a claude preference
+  fell back. Records with no driver fields (legacy, plain pi) show nothing new.
+- **Quota line** (`/api/workspace/status` `claude`, the chat footer): a separate Claude item, read through
+  `nativeQuotaLine` (`src/native-availability.ts`) and never merged into the gateway `quota`. It is absent while the
+  switch is OFF. States, in precedence order: `Claude blocked (sign-in)` (or `(lockdown)`), `Claude limited (reset
+  unknown)`, `Claude limited until HH:MMZ` (the latest pending reset), `Claude unknown` (no readable snapshot, or a
+  rejected window whose reset passed or was voided), `Claude ok`. The tooltip names each window. Entries the switch
+  voided (ii) are ignored; the CLI-version check (iii) is not run here, since it would spawn `claude`.
+- **Settings** help states the rule-plus-switch condition, OFF refusing resumes and revives, and that OFF then ON
+  clears a remembered sign-in, lockdown or no-reset block.
+
+The opt-in soak (a claude row, the switch, what to watch, rollback) is in
+[`docs/routing-rollout.md`](routing-rollout.md#native-claude-research-soak-opt-in).

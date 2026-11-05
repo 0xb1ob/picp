@@ -171,3 +171,32 @@ its conversation or thinking state. The next spawn re-scores independently.
   attempt re-scores before its spawn.
 - It does not let a fallback change the effort, cross from a rubric row to a
   row, or rescue an explicit override.
+
+## Native Claude research soak (opt-in)
+
+This section documents the soak; nothing here performs it, and no shipped row or default changes. Defaults stay pi and
+the switch stays OFF. The mechanism is in [`docs/native-drivers.md`](native-drivers.md) (S1 to S3).
+
+1. **A claude row of its own.** A `driver: "claude"` row must name an explicit `anthropic/claude-…` model; any other
+   model refuses the dispatch with no lease. The shipped research rows name pi models, so adding `driver` to one of
+   them is a configuration error. Add a separate planner row above the research row it should shadow, keep pi models
+   as its `fallbacks`, and add the claude model to `allow`:
+
+   ```json
+   { "id": "native-research", "role": "planner", "scope": ["S"], "model": "anthropic/claude-<model>",
+     "fallbacks": ["<the pi research model>"], "thinking": "high", "driver": "claude" }
+   ```
+
+   Back up `data/routing.json` first (`cp -p data/routing.json data/routing.json.bak-<stamp>`), then check it with
+   `/doctor`: `models.planner` reports `driver=claude <model>; pi fallback …`.
+2. **The switch.** Dashboard Settings → Native workers, or `data/native.json` `{"claude_research": true}`. Only local
+   and answer research runs native, one job at a time; pipeline research, reviews, gates and ship jobs stay pi.
+3. **What to watch.**
+   - Job detail's Driver fact: `claude, effort high` for a native job, `pi (preferred claude: <reason>)` for a fallback.
+   - The Quota line's separate Claude item (shown only while the switch is ON): `Claude ok`, `Claude limited until
+     HH:MMZ`, `Claude blocked (sign-in)` or `Claude unknown`. It is never merged into the gateway percentages.
+   - Cost: a native run with no complete usage reads "unavailable (not measured)", never 0.
+   - The run log's `routing_resolved` event carries `requested_driver`, `driver` and `driver_reason`.
+4. **Rollback.** Remove the row: new jobs route to pi again, and a started native job keeps its driver. Or turn the
+   switch OFF: new jobs run on pi, and resumes and revives of native jobs are refused (never moved to pi); teardown
+   still works. Deleting `state/native-availability.json` only resets the snapshot to unknown.
