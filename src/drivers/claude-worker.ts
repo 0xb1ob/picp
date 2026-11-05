@@ -12,6 +12,7 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { TurnTokenUsage } from "@t3tools/contracts";
 import { type Delivery, paths, type Usage } from "../contracts.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
+import { type NativeTranscript, nativeTranscript, nativeTranscriptFile } from "./claude-transcript.ts";
 import { modelFamily, type NativeObservation, OBSERVATION_EVENT, turnObserver } from "./claude-observation.ts";
 import {
 	assertNativeResume,
@@ -43,6 +44,7 @@ let busy = false;
 let resuming = env.CP_NATIVE_RESUME === "1";
 let costTotal: number | undefined;
 let session: NativeSession | undefined;
+let transcript: NativeTranscript | undefined;
 /** pi's usage shape (run-artifacts `readUsage`); undefined (unavailable) unless tokens are complete and non-zero and
  * the cost is a finite number, since a real model call never costs zero tokens: a zero means nothing was reported. */
 export function piUsage(usage: TurnTokenUsage, cost: number | undefined): Record<string, unknown> | undefined {
@@ -71,6 +73,7 @@ function observed(seen: NativeObservation | undefined): void {
 /** SDK messages as the pi events the recorder, intake and bounds already watch; the report tool keeps pi's name. */
 function relay(message: SDKMessage): void {
 	observed(observe(message));
+	transcript?.relay(message);
 	if (message.type === "result") costTotal = Number.isFinite(message.total_cost_usd) ? message.total_cost_usd : undefined;
 	if (message.type === "system" && message.subtype === "init" && session && session.session_id !== message.session_id) {
 		session.session_id = message.session_id;
@@ -120,6 +123,11 @@ async function turn(prompt: string): Promise<Turn> {
 	costTotal = undefined;
 	observe = turnObserver();
 	const resumed = resuming;
+	if (!transcript) {
+		transcript = nativeTranscript(nativeTranscriptFile(runDir, jobId), { jobId, cwd: worktree }, (name) => (name === REPORT_TOOL ? "report_result" : name));
+		write({ type: "native_transcript", transcript_file: transcript.file });
+	}
+	transcript.prompt(prompt, resumed);
 	const result = await runClaudeSpike({
 		job: { job_id: jobId, delivery: env.CP_DELIVERY as Delivery, runDir, worktree, artifactPath },
 		prompt,

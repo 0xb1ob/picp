@@ -339,6 +339,7 @@ export function applyEvent(state: ProjectionState, event: RunEvent): ProjectionS
 	if (typeof sessionId === "string" && !status.session_id) status.session_id = sessionId;
 	const sessionFile = payload.sessionFile ?? payload.session_file;
 	if (typeof sessionFile === "string" && !status.session_file) status.session_file = sessionFile;
+	if (event.type === "native_transcript" && typeof payload.transcript_file === "string" && payload.transcript_file) status.transcript_file = payload.transcript_file;
 
 	status.usage = addUsage(baseUsage, currentUsage);
 	// The invariant `validateRunStatus` enforces, kept here rather than hoped

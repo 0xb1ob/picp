@@ -280,7 +280,9 @@ export function resolveSessionFile(state: ViewerState, id: string): string | und
 	else {
 		const job = fleetJob(state, id);
 		if (!job || job.executor === "script") return undefined;
-		file = str(readStatus(state, id)?.session_file) ?? str(obj(job.worker)?.session_file);
+		const worker = obj(job.worker), status = readStatus(state, id);
+		// A native worker's session_file is its resume record; its Log is the recorded transcript.
+		file = str(worker?.driver) ? str(status?.transcript_file) : str(status?.session_file) ?? str(worker?.session_file);
 	}
 	if (!file || !file.endsWith(".jsonl")) return undefined;
 	return realInside(file, sessionRoots(state));
