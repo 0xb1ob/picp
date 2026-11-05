@@ -1356,8 +1356,8 @@ test("P16-settings-frames: settings_apply refuses malformed frames before the tr
 	const r = await rig(t, "cp-p16-predate-");
 	const source = join(r.app, "extensions/cp-bridge/index.ts");
 	const wired = readFileSync(source, "utf8");
-	assert.match(wired, /\.\.\.settingsPorts\(\{ target: \(\) => target \}\),\n/);
-	writeFileSync(source, wired.replace(/\.\.\.settingsPorts\(\{ target: \(\) => target \}\),\n/, ""));
+	assert.match(wired, /\.\.\.settingsPorts\(\{ target: \(\) => target, applied: modelApply\.check \}\),\n/);
+	writeFileSync(source, wired.replace(/\.\.\.settingsPorts\(\{ target: \(\) => target, applied: modelApply\.check \}\),\n/, ""));
 	const old = await bridge(t, home, { ext: source });
 	for (const op of ["settings_get", "settings_apply"]) {
 		const reply = await controlRequest(old.record, op, {});
