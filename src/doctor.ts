@@ -1190,6 +1190,9 @@ export class Doctor {
 		} catch (error) {
 			if (error instanceof RoutingError && error.rule) matched = error.rule;
 		}
+		// Native routing S1: a claude row's primary runs on the CLI, never pi credentials; only its pi fallback is probed.
+		const native = routing.rubric.find((rule) => rule.id === matched && rule.driver === "claude");
+		const lane = native ? `driver=claude ${native.model}; pi fallback ` : "";
 		try {
 			const decision = resolveModel(request, routing, probe);
 			// A resolvable model is simply ok, and a route with no usable candidate
@@ -1199,7 +1202,7 @@ export class Doctor {
 			// operator still has to be able to see that today's Anthropic route is
 			// running on OpenAI.
 			const preferred = decision.attempted?.[0]?.model;
-			const summary =
+			const summary = lane +
 				`${decision.model} (source=${decision.source}${decision.thinking ? `, thinking=${decision.thinking}` : ""}` +
 				`${preferred ? `, fallback from ${preferred}` : ""})`;
 			// cp-u3o4: the finding is identified by the profile's own name (unique by
@@ -1220,11 +1223,11 @@ export class Doctor {
 			if (error instanceof RoutingError && error.rule) matched = error.rule;
 			return {
 				signature: `error:${message}`,
-				summary: refusal === undefined ? "no usable model" : REFUSAL_SUMMARY[refusal],
+				summary: lane + (refusal === undefined ? "no usable model" : REFUSAL_SUMMARY[refusal]),
 				finding: {
 					check: `models.${who}`,
-					severity: "error",
-					what: `${who} has no usable model`,
+					severity: native ? "warn" : "error",
+					what: native ? `${who}: native ${native.model} needs no pi credentials, but its pi fallback has no usable model` : `${who} has no usable model`,
 					detail: message,
 					fix: cappedFix(refusalFix(refusal, who)),
 				},

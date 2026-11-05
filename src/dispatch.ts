@@ -57,12 +57,12 @@ import { formatPreflight, type Preflight, type PreflightResult } from "./preflig
 import { assertPipelineProjectionReady, routingRecord, type SuppliedBy } from "./pipeline.ts";
 import { assembleBrief, loadProfile, profileForRole, readBriefTemplate } from "./profiles.ts";
 import type { ProjectRegistry } from "./projects.ts";
-import { formatRoutingDecision, type ModelProbe, resolveWithCapacity, RoutingError } from "./routing.ts";
+import { formatRoutingDecision, type ModelProbe, RoutingError } from "./routing.ts";
 import type { RunRecorder } from "./run-artifacts.ts";
 import { RunRegistry } from "./runs.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import type { WorkerProcess } from "./worker-process.ts";
-import { assertNativeSelection, type NativeSelection } from "./drivers/claude.ts";
+import { type DriverContext, driverFields, holdNativeSlot, nativeSpawn, resolveDriverRoute } from "./dispatch-driver.ts";
 import { type DepsPorts, prepareNodeDeps } from "./worktree-deps.ts";
 import type { MandateStore } from "./mandate.ts";
 import { assertContinuationTask, continuityInputsBlock } from "./mandate-continuity.ts";
@@ -290,8 +290,8 @@ export interface DispatchRequest extends PickRequest {
 	inputsFrom?: SuppliedBy;
 	/** H6: a risk the pipeline recorded (`src/pipeline.ts`) that routing is not given; only the risk:high gate reads it. */
 	recordedRisk?: PipelineRecordedRisk;
-	/** N3b: `claude` runs this research job on the native driver when every selection condition holds; absent is pi. */
-	driver?: NativeSelection["driver"];
+	/** N3b: `claude` runs this research job on the native driver when every selection condition holds, or refuses. */
+	driver?: DriverContext["explicit"];
 	/** Explicit model override (still allowlisted). */
 	model?: string;
 	/**
@@ -477,7 +477,7 @@ export class Dispatcher {
 		let decision: RoutingDecision | undefined;
 		let error: string | undefined;
 		try {
-			decision = await resolveWithCapacity(
+			decision = await resolveDriverRoute(
 				{
 					profile,
 					jobId: issue.id,
@@ -490,7 +490,7 @@ export class Dispatcher {
 				},
 				options.routing,
 				options.probe,
-				options.capacity,
+				options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, jobs: options.fleet.read().jobs, ...(request.driver ? { explicit: request.driver } : {}) },
 			);
 		} catch (thrown) {
 			if (!(thrown instanceof RoutingError)) throw thrown;
@@ -530,7 +530,8 @@ export class Dispatcher {
 		};
 	}
 
-	async dispatch(request: DispatchRequest): Promise<DispatchResult> {
+	dispatch(request: DispatchRequest): Promise<DispatchResult> { return holdNativeSlot(this.#options.home, request.jobId, () => this.#dispatch(request)); }
+	async #dispatch(request: DispatchRequest): Promise<DispatchResult> {
 		const options = this.#options;
 		const now = options.now ?? (() => new Date());
 		const issue = await options.ledger.show(request.jobId);
@@ -557,7 +558,7 @@ export class Dispatcher {
 		const skillNames = skills.map((s) => s.name);
 		const inputs = composeRoutingInputs(request, issue, task);
 		const { scope, risk } = inputs;
-		const routing: RoutingDecision = await resolveWithCapacity(
+		const routing: RoutingDecision = await resolveDriverRoute(
 			{
 				profile,
 				jobId: issue.id,
@@ -570,7 +571,7 @@ export class Dispatcher {
 			},
 			options.routing,
 			options.probe,
-			options.capacity,
+			options.capacity, { home: options.home, jobId: issue.id, kind, delivery, role: profile.frontmatter.role, jobs: options.fleet.read().jobs, reserve: true, ...(request.driver ? { explicit: request.driver } : {}) },
 		);
 
 		// Frozen on the record below; an invalid data/worker-bounds.json refuses before any lease.
@@ -642,7 +643,6 @@ export class Dispatcher {
 			throw (error instanceof MandateError && error.code) || (error instanceof ScheduleAuthorityError && error.code === "parallelism_full") ? error : new DispatchError((error as Error).message); // coded: dispatch queue
 		}
 
-		if (request.driver) await assertNativeSelection({ home: options.home, jobId: issue.id, driver: request.driver, kind, role: profile.frontmatter.role, delivery, jobs: options.fleet.read().jobs });
 		// --- 4. lease, then everything that can fail must clean up -----------
 		const lease = await options.leases.acquire(clone, { holder: issue.id, project: labels.project });
 		let recorder: RunRecorder | undefined;
@@ -733,7 +733,7 @@ export class Dispatcher {
 				sessionName: issue.id,
 				...(skills.length ? { skills: skills.map((s) => s.dir) } : {}),
 				admit: () => void (operatorPick = admitOperatorPick(options.home, request, options.fleet.get(issue.id), now())),
-				...(request.driver ? { driver: request.driver } : {}),
+				...nativeSpawn(routing),
 			});
 			recorder.markSpawned({
 				pid: managed.worker.pid,
@@ -760,7 +760,7 @@ export class Dispatcher {
 			});
 			// cp-rte/cp-routing-provenance: what routing was told and where it came from; `inputs` is the legacy
 			// one-word summary older readers carry, `provenance` the per-axis truth beside it.
-			const recorded = { ...routingRecord(inputs, routing.thinking), ...(gate.recorded && gate.recorded.risk !== risk ? { recorded_risk: gate.recorded.risk } : {}), ...(operatorPick ? { operator_pick: operatorPick } : {}) };
+			const recorded = { ...routingRecord(inputs, routing.thinking), ...driverFields(routing), ...(gate.recorded && gate.recorded.risk !== risk ? { recorded_risk: gate.recorded.risk } : {}), ...(operatorPick ? { operator_pick: operatorPick } : {}) };
 			recorder.cp("routing_resolved", {
 				...decisionFields(routing),
 				scope,
@@ -803,7 +803,7 @@ export class Dispatcher {
 					role: profile.frontmatter.role,
 					model: routing.model,
 					started_at: isoTimestamp(now()),
-					...(request.driver ? { driver: request.driver } : {}),
+					...(routing.driver === "claude" ? { driver: "claude" as const } : {}),
 				},
 				worktree: lease.path,
 				...(lease.lease_id ? { lease_id: lease.lease_id } : {}),

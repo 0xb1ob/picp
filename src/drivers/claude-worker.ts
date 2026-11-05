@@ -110,6 +110,7 @@ async function turn(prompt: string): Promise<Turn> {
 		scratchDir: current.scratch_dir,
 		...(resumed ? { resume: { sessionId: current.session_id as string, ...(ledger ? { ledger } : {}) } } : {}),
 		...(env.CP_NATIVE_MODEL ? { model: env.CP_NATIVE_MODEL } : {}),
+		...(env.CP_NATIVE_THINKING ? { thinking: env.CP_NATIVE_THINKING } : {}),
 	});
 	resuming = current.session_id !== undefined;
 	// The resumed process restores the session's cumulative modelUsage and cost: count only the growth over the baseline.

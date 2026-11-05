@@ -15,7 +15,7 @@ import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { checkBudget } from "../../src/failures.ts";
 import { jobsView } from "../../src/viewer/jobs-view.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
+import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_NATIVE_MODEL, routeNativeModel, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
 import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, treehouseAvailable, waitFor } from "../harness/index.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
@@ -32,6 +32,7 @@ const report = (jobId: string, home: string) => ({
 async function nativeHome(t: TestContext, script: readonly ClaudeStep[], usage = true) {
 	const b = await dispatchS29(t, { files: { ".claude/settings.json": JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "touch /tmp/picp-n3b-hook-ran" }] }] } }), ".claude/commands/extra.md": "extra\n" } });
 	const claude = await startClaudeMockProvider(script, { usage });
+	routeNativeModel(b.home);
 	const fakeHome = mkdtempSync(join(tmpdir(), "cp-n3b-home-"));
 	t.after(async () => { await claude.close(); rmSync(fakeHome, { recursive: true, force: true }); });
 	const settings = join(fakeHome, ".claude", "settings.json");
@@ -64,7 +65,7 @@ test("P3a/c/d/h/i/j: a native research job reports once, refuses peers and ship 
 		{ kind: "text", text: "Reported." },
 	]);
 	const model = worker;
-	const dispatch = (id: string, driver = true) => ({ name: "cp_dispatch", args: { job_id: id, task: "Report the repo's package name.", model, queue: false, when_ready: false, ...(driver ? { driver: "claude" } : {}) } });
+	const dispatch = (id: string, driver = true) => ({ name: "cp_dispatch", args: { job_id: id, task: "Report the repo's package name.", model: driver ? FAKE_NATIVE_MODEL : model, queue: false, when_ready: false, ...(driver ? { driver: "claude" } : {}) } });
 	const bash = (command: string) => ({ name: "bash", args: { command } });
 	const ends = (await h.b.run([
 		{ kind: "tool_calls", calls: [dispatch(native.id)] },
@@ -126,8 +127,7 @@ test("P3a/c/d/h/i/j: a native research job reports once, refuses peers and ship 
 test("P3b/f/g: switch off and a drain freeze refuse before any spawn; a native run without a report fails on its observed exit", { skip, timeout: 300_000 }, async (t) => {
 	const h = await nativeHome(t, [{ kind: "text", text: "No report from me." }]);
 	const [off, frozen, crash] = await Promise.all([h.job(), h.job(), h.job()]);
-	const model = h.b.provider.addScript("n3b-unused", [{ kind: "text", text: "unused" }]);
-	const dispatch = (id: string) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_dispatch", args: { job_id: id, task: "Report the repo's package name.", model, queue: false, when_ready: false, driver: "claude" } }] });
+	const dispatch = (id: string) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_dispatch", args: { job_id: id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] });
 	const drain = join(h.b.home, LAYOUT.state, "drain.json");
 	const now = new Date().toISOString();
 	const freeze = JSON.stringify({ state: "drained", started_at: now, deadline: now, timeout_s: 0, jobs: [], cause: { reason: "freeze" } });
@@ -166,9 +166,8 @@ test("P3h-unavailable: a native run whose usage the model omits is flagged unava
 	h.toggle(true);
 	const native = await h.job();
 	ids.push(native.id);
-	const model = h.b.provider.addScript("n3b-unmeasured", [{ kind: "text", text: "unused" }]);
 	const ends = (await h.b.run([
-		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: native.id, task: "Report the repo's package name.", model, queue: false, when_ready: false, driver: "claude" } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: native.id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] },
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(native.id)) } }] },
 	], h.env)) as Tool[];
 	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
@@ -185,11 +184,13 @@ test("P3h-unavailable: a native run whose usage the model omits is flagged unava
 });
 
 // The single live run of N3b: the operator's own claude settings (claude reads them; picp never does). Counts only.
-test("native live smoke: one research job through cp_dispatch on the installed claude", { skip: LIVE_TESTS_ENABLED ? skip : "set CP_LIVE_TESTS=1 to run live smokes", timeout: 300_000 }, async (t) => {
+test("native live smoke: one research job through cp_dispatch on the installed claude", { skip: !LIVE_TESTS_ENABLED ? "set CP_LIVE_TESTS=1 to run live smokes" : !process.env.CP_LIVE_NATIVE_MODEL ? "set CP_LIVE_NATIVE_MODEL to the account's anthropic/claude-… id" : skip, timeout: 300_000 }, async (t) => {
 	const b = await dispatchS29(t);
 	writeFileSync(join(b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true }));
 	const job = await b.ledger.create({ title: "native live smoke", project: "demo", delivery: "local", kind: "research" });
-	const model = b.provider.addScript("n3b-live-unused", [{ kind: "text", text: "unused" }]);
+	// S1: a native dispatch names an explicit model; the live account's own id, from the env, routed here.
+	const model = process.env.CP_LIVE_NATIVE_MODEL!;
+	routeNativeModel(b.home, [model]);
 	const envelope = join(b.home, paths.envelopeFile(job.id));
 	const status = join(b.home, paths.runDir(job.id), "status.json");
 	const wait = `for i in $(seq 900); do [ -f "${envelope}" ] && break; grep -q '"exited"' "${status}" 2>/dev/null && break; sleep 0.2; done; sleep 2`;

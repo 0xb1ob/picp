@@ -57,6 +57,7 @@ import { assertBriefIsSafe } from "../worker-manager.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../worker-merge-guard.ts";
 import { readOnlyBashRefusal, secretPathIn, secretPaths } from "./claude-bash-policy.ts";
 import { type HooksListing, type Lockdown, lockdownVerdict } from "./claude-lockdown.ts";
+import { assertNativeEffort } from "./claude.ts";
 
 /** The lowest `claude --version` this spike measured working (docs/native-drivers.md "Spike result"). */
 export const CLAUDE_VERSION_FLOOR = "2.1.318";
@@ -65,7 +66,17 @@ export const REPORT_TOOL = "mcp__picp__report_result";
 const HOST_ENV_ALLOW = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"] as const;
 const EXIT_GRACE_MS = 10_000;
 
-export class ClaudeSpikeError extends Error {}
+export class ClaudeSpikeError extends Error {
+	/** Set by `resolveClaude`: no CLI on PATH, or one that cannot prove the floor. */
+	cli?: "missing" | "version";
+}
+
+/** A routed thinking level as SDK options: off disables thinking, low…max is `effort`, absent is the CLI default. */
+export function nativeEffortOptions(level: string | undefined): Pick<Options, "thinking" | "effort"> {
+	assertNativeEffort(level);
+	if (level === undefined || level === "") return {};
+	return level === "off" ? { thinking: { type: "disabled" } } : { effort: level };
+}
 
 export interface SpikeJob {
 	job_id: string;
@@ -99,16 +110,16 @@ export function claudeVersionRefusal(version: string | undefined, floor = CLAUDE
 /** The first `claude` on PATH and its version; throws with a named remedy when missing or too old. */
 export function resolveClaude(env: NodeJS.ProcessEnv = process.env): { path: string; version: string } {
 	const path = whichAll("claude", env)[0];
-	if (path === undefined) throw new ClaudeSpikeError("claude is not on PATH: install Claude Code, then run `claude update`");
+	if (path === undefined) throw Object.assign(new ClaudeSpikeError("claude is not on PATH: install Claude Code, then run `claude update`"), { cli: "missing" as const });
 	let raw = "";
 	try {
 		raw = execFileSync(path, ["--version"], { encoding: "utf8", env: { PATH: env.PATH ?? "" }, stdio: ["ignore", "pipe", "ignore"] });
 	} catch (error) {
-		throw new ClaudeSpikeError(`${path} --version failed (${(error as Error).message}): run \`claude update\``);
+		throw Object.assign(new ClaudeSpikeError(`${path} --version failed (${(error as Error).message}): run \`claude update\``), { cli: "version" as const });
 	}
 	const version = parseClaudeVersion(raw);
 	const refusal = claudeVersionRefusal(version);
-	if (refusal !== undefined || version === undefined) throw new ClaudeSpikeError(refusal);
+	if (refusal !== undefined || version === undefined) throw Object.assign(new ClaudeSpikeError(refusal), { cli: "version" as const });
 	return { path, version };
 }
 
@@ -307,6 +318,8 @@ export interface SpikeRunOptions {
 	/** The operator's Claude settings path, which claude itself reads and picp never opens; null passes none. */
 	userSettings?: string | null;
 	model?: string;
+	/** The routed thinking level (`nativeEffortOptions`); absent leaves the CLI's default effort. */
+	thinking?: string;
 	maxTurns?: number;
 	tools?: readonly string[];
 	extraGuards?: readonly SpikeGuard[];
@@ -466,6 +479,7 @@ async function runInScratch(
 		maxTurns: options.maxTurns ?? 12,
 		abortController: abort,
 		...(options.model === undefined ? {} : { model: options.model }),
+		...nativeEffortOptions(options.thinking),
 		...(options.resume === undefined ? {} : { resume: options.resume.sessionId }),
 	};
 	const expectedTools = [...(options.tools ?? SPIKE_TOOLS), REPORT_TOOL];
