@@ -403,7 +403,7 @@ export class CpBridge {
 			rotate: async (mission) => this.#rotate(this.#settledProc(true), mission), compact: async () => this.#compact(this.#settledProc(true)), applySettings: () => this.applySettings(),
 		}, (text) => this.#emit({ kind: "error", stale: false, text, receipt: emptyReceipt(), paths: [] })).finally(() => { this.#autoControl = undefined; });
 	}
-	/** Settings `models.parent`/`parent_thinking` switch the live parent once settled (session-model-apply.ts); never rejects. */
+	/** Settings `models.parent`/`parent_thinking` switch the settled parent (session-model-apply.ts); never rejects. */
 	applySettings(): Promise<void> {
 		const home = this.#home, track = this.#settingsSeen, proc = () => this.#settledProc(true);
 		return !home || !track ? Promise.resolve() : applyParentSettings(home, track, { unsettled: () => this.#unsettled(true), model: () => this.#model, start: () => this.#options,

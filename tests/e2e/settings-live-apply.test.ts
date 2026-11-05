@@ -1,6 +1,6 @@
 /**
- * Settings live apply, slice 1: a `models.parent`/`parent_thinking` write through `POST /api/settings/apply` switches the
- * real parent host's pi parent (mock provider) in place at its next idle point. One host, scenarios S1–S7 in order.
+ * Settings live apply, slice 1: a `models.parent`/`parent_thinking` write through `POST /api/settings/apply`
+ * switches the real parent host's pi parent (mock provider) in place at its next idle point; S1–S7 in order.
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

@@ -1,4 +1,4 @@
-/** A Settings model/thinking change switches a live session at its next idle point; `state/model-apply.jsonl` says how. */
+/** A Settings model/thinking change switches a live session at its next idle point (`state/model-apply.jsonl`). */
 import { join } from "node:path";
 import { LAYOUT, type ThinkingLevel } from "./contracts.ts";
 import { durableAppend } from "./json-store.ts";
@@ -27,7 +27,7 @@ export function appendModelApply(home: string, row: Omit<ModelApplyLine, "v" | "
 	}
 }
 
-/** What to do now: a change waits (`queue`) while busy, a revert to `seen` cancels a wait, a settled session applies. */
+/** What to do now: a change waits (`queue`) while busy, a revert to `seen` cancels it, a settled session applies. */
 export function planModelApply(input: { seen: ModelSettings; desired: ModelSettings; settled: boolean; queued: boolean }): ModelApplyPlan {
 	const changed = input.desired.model !== input.seen.model || input.desired.thinking !== input.seen.thinking;
 	if (!changed) return input.queued ? "cancel" : "none";
