@@ -341,13 +341,16 @@ no longer test-only): every N3a gate is on and not optional.
 and a stderr line. If the worker then exits without a report, the job fails as `turn_limit` ("Stopped at turn limit"),
 not `crash`; the worktree and session are kept, and like every native failure it is never auto-recovered.
 
-**Usage.** A complete SDK usage with a finite cost and non-zero tokens is normalized to pi's `message_end` usage (input
-excludes cache read/write), so run status, the fleet record, mandate accounting and the per-job `checkBudget` read it
-exactly like pi usage. Anything else (SDK `partial`/`unavailable`, a missing or non-finite cost, zero tokens, which no
-real model call reports) writes no measurement: the worker emits `usage_unavailable`, run status carries
-`usage_unavailable: true` and the dashboard shows "unavailable (not measured)". Accounting then adds nothing for that
-run (the counters are never written as a measured zero) and admission does not wait on it. A resumed run follows the
-same rule over its delta (below).
+**Usage.** N4a measures every native run from its SDK result's `modelUsage` (`src/drivers/claude-usage.ts`), on any
+subtype: `success` and every `error_*` result, so a run stopped at the turn limit is counted too. Per model it reads
+input, output, cache read, cache write and `costUSD`; the cost is the larger of the per-model sum and `total_cost_usd`
+(the cross-check). The growth over the session baseline becomes pi's `message_end` usage (input excludes cache
+read/write), so run status, the fleet record, mandate accounting and the per-job `checkBudget` read it exactly like pi
+usage. A run with no result message (the process was stopped first), an unreadable `modelUsage` or zero tokens writes no
+measurement: the worker emits `usage_unavailable`, run status carries `usage_unavailable: true` and the dashboard shows
+"unavailable (not measured)". Accounting then adds nothing for that run (never a measured zero) and admission does not
+wait on it. Every `native_run` event names `result_subtype`, `usage_status` (`complete`, `unavailable` or
+`unbaselined`) and `denied`: at most 5 `tool: reason` lines of at most 200 characters, paths and env values redacted.
 
 **Rollback.** Turning the switch off refuses new native dispatches, resumes and revives; a live native job keeps its
 driver until its own exit or teardown, and teardown still works.
@@ -386,10 +389,11 @@ admitted turn delivers them once. A queued follow-up does not reopen the report 
 reports stay one accepted per generation.
 
 **Usage across resume.** A resumed `claude` restores the session's cumulative `modelUsage` and `total_cost_usd`. The
-record keeps the last result's per-model ledger and cost as the baseline; a resumed run counts only the growth over it
-(the N3a G2 delta), so each run is counted once. A run without a full ledger and cost drops the baseline: that run and
-the next are "unavailable", never 0 and never the cumulative total again. The budget check reads the running total
-through the real admission path.
+record keeps the last result's per-model ledger (with its `cache_read`/`cache_write` split) and cost as the baseline; a
+resumed run counts only the growth over it, so each run is counted once. A record from before the split still parses;
+its input growth counts as uncached input. A run without a readable ledger drops the baseline: that run and the next
+are "unavailable", never 0 and never the cumulative total again. The budget check reads the running total through the
+real admission path.
 
 **Switch-off and restart.** With the switch off, resume and revive of an existing native job are refused with the named
 switch reason and nothing starts; teardown still removes the worker and scratch dir. A parent restart or install drain

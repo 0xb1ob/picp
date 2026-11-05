@@ -206,6 +206,32 @@ test("turn limit: a native run stopped at CP_NATIVE_MAX_TURNS fails as turn_limi
 	assert.equal(h.claude.overrun(), 0);
 });
 
+// N4a: cp-s26-flake-research-dudi cost $1.81 at error_max_turns but recorded 0, and its denials logged a count only.
+test("N4a: an error_max_turns run is measured from modelUsage, and its refused Bash calls are named in native_run", { skip, timeout: 300_000 }, async (t) => {
+	const h = await nativeHome(t, [{ kind: "tool_use", calls: [{ name: "Bash", input: { command: "echo x > native-write.txt" } }, { name: "Bash", input: { command: "rm -rf native-dir" } }] }]);
+	h.toggle(true);
+	const job = await h.job();
+	const ends = (await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] },
+	], { ...h.env, CP_NATIVE_MAX_TURNS: "1" })) as Tool[];
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	const record = await waitFor(() => readFleet(h.b.home).jobs.find((entry) => entry.job_id === job.id), (entry) => entry?.phase === "failed", { timeoutMs: 120_000, what: "failed native job" });
+	assert.equal(record?.failure?.class, "turn_limit");
+	const run = readRunEvents(h.b.home, job.id).find((event) => event.type === "native_run")?.payload as Record<string, unknown> | undefined;
+	assert.deepEqual([run?.result_subtype, run?.usage, run?.usage_status], ["error_max_turns", "measured", "complete"], JSON.stringify(run));
+	const status = readRunStatus(h.b.home, job.id);
+	assert.equal(status.usage_unavailable, undefined);
+	assert.ok(status.usage.cost_usd > 0 && status.usage.total_tokens > 0, JSON.stringify(status.usage));
+	// Both refusals are named, each cut at 200 chars (the policy's text runs longer).
+	const denied = run?.denied as string[];
+	assert.equal(run?.denials, 2);
+	assert.equal(denied.length, 2, JSON.stringify(denied));
+	assert.ok(denied.every((line) => line.length === 200 && line.startsWith("Bash: Refused: ")), JSON.stringify(denied));
+	assert.match(denied[0]!, /a redirect is denied/);
+	assert.match(denied[1]!, /`rm` \(not on the read-only list\) is denied/);
+	assert.equal(h.claude.overrun(), 0);
+});
+
 // F1: the fake model reports no usage, so the run's cost and tokens are unknown; recorded as unavailable, never a zero.
 test("P3h-unavailable: a native run whose usage the model omits is flagged unavailable, never a measured zero", { skip, timeout: 300_000 }, async (t) => {
 	const ids: string[] = [];
