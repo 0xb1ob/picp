@@ -7,7 +7,9 @@ import { mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
-import { nativeAvailabilityFile } from "../../src/native-availability.ts";
+import { NATIVE_AUTH_CODES, NATIVE_WINDOWS, OBSERVATION_EVENT, WINDOW_STATUSES } from "../../src/drivers/claude-observation.ts";
+import { nativeAvailabilityFile, recordNativeObservation } from "../../src/native-availability.ts";
+import { QUOTA_AUTH_CODES, QUOTA_STATUSES, QUOTA_WINDOWS } from "../../src/viewer/native-quota.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import type { Context } from "../harness/conversations.ts";
 import { dashboard, openTab, operatorSession, type Tab, until } from "../harness/dashboard.ts";
@@ -141,6 +143,7 @@ test("S5-status-css: from 900 px the footer is the chat's 37 px second row; the 
 });
 
 test("S3-claude-line: a separate Claude item only with the switch on — no snapshot is unknown, a future reset limited, an auth entry blocked", { timeout: 120_000 }, async (t) => {
+	assert.deepEqual([QUOTA_WINDOWS, QUOTA_AUTH_CODES, QUOTA_STATUSES], [NATIVE_WINDOWS, NATIVE_AUTH_CODES, WINDOW_STATUSES], "viewer copies match");
 	const d = await start(t);
 	const url = day(`${DAY}T00:00:00Z`, new Date(NOON + 12 * 60 * MIN).toISOString(), "UTC");
 	const claude = async () => ((await d.get(url)).body as any).claude;
@@ -166,6 +169,16 @@ test("S3-claude-line: a separate Claude item only with the switch on — no snap
 	assert.equal(await label(), "Claude blocked (sign-in)");
 	write({});
 	assert.equal(await label(), "Claude ok");
+	// The S2 writer's own file: a no-reset window it records is what the viewer reads.
+	const event = { type: OBSERVATION_EVENT, observed_at: NOON - 30 * MIN, kind: "window", window: "seven_day_opus", status: "rejected" };
+	assert.equal(recordNativeObservation(d.home, event), true);
+	assert.deepEqual(await claude(), { state: "limited", label: "Claude limited (reset unknown)", detail: "seven_day_opus rejected, reset unknown" });
+	write({ windows: { five_hour: { status: "spent", observed_at: NOON } } });
+	assert.equal(await label(), "Claude unknown", "an unknown status is the wrong shape, never ok");
+	write({ windows: { weekly: { status: "rejected", observed_at: NOON } } });
+	assert.equal(await label(), "Claude unknown", "an unknown window is the wrong shape");
+	write({ auth: { code: "expired", observed_at: NOON } });
+	assert.equal(await label(), "Claude unknown", "an unknown auth code is the wrong shape");
 	writeFileSync(switchFile, JSON.stringify({ claude_research: false }));
 	assert.equal(await claude(), undefined, "switch off again: the line is as short as before");
 });

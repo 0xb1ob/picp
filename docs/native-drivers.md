@@ -473,7 +473,7 @@ Viewer and parent-side only; nothing here changes selection.
   default`) for a native job, and `pi (preferred claude: <driver_reason, at most 200 chars>)` when a claude preference
   fell back. Records with no driver fields (legacy, plain pi) show nothing new.
 - **Quota line** (`/api/workspace/status` `claude`, the chat footer): a separate Claude item, read through
-  `nativeQuotaLine` (`src/native-availability.ts`) and never merged into the gateway `quota`. It is absent while the
+  `nativeQuotaLine` (`src/viewer/native-quota.ts`) and never merged into the gateway `quota`. It is absent while the
   switch is OFF. States, in precedence order: `Claude blocked (sign-in)` (or `(lockdown)`), `Claude limited (reset
   unknown)`, `Claude limited until HH:MMZ` (the latest pending reset), `Claude unknown` (no readable snapshot, or a
   rejected window whose reset passed or was voided), `Claude ok`. The tooltip names each window. Entries the switch
