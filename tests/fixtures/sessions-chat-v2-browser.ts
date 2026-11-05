@@ -200,7 +200,8 @@ try {
 		const ids = ["cp-quota-due", "cp-quota-held"];
 		put(".pi-command-post/jobs.json", { jobs: ids.map(id => ({ id, title: `${id} fixture`, status: "in_progress", labels: ["project:demo", "kind:ship"] })) });
 		put(LAYOUT.fleetFile, { jobs: [...ids.map(job_id => ({ job_id, project: "demo", kind: "ship", phase: "failed", dispatched_at: ago(60), failure: { class: "model_call_failed", message: "quota continuation pending", at: ago(50) } })),
-			// Native routing S3: picp research jobs for the Driver fact, a fallback reason at its 200-character cap and a native run.
+			// Native routing S3: picp research jobs for the Driver fact, a fallback reason at its
+			// 200-character cap and a native run.
 			{ job_id: "cp-s3-fallback-f4bk", project: "picp", kind: "research", phase: "held", dispatched_at: ago(40), worker: { model: "fixture-model" }, routing: { requested_driver: "claude",
 				driver: "pi", driver_reason: `window: seven_day_opus rejected with no reset time; ${"a-long-unbroken-native-availability-reason-".repeat(4)}`.slice(0, 200) } },
 			{ job_id: "cp-s3-native-n4tv", project: "picp", kind: "research", phase: "held", dispatched_at: ago(30), worker: { model: "anthropic/claude-opus-4-5", driver: "claude" },
@@ -306,7 +307,8 @@ try {
 		detail: `seven_day_opus rejected (no reset); five_hour rejected until 2026-10-15T18:00:00Z; ${"seven_day_overage_included rejected (no reset); ".repeat(3)}` };
 	// Every chat's context now reads /api/jobs; stages without their own list (or the real viewer's) get an empty one.
 	if (!routes["/api/jobs"] && !["m3-transcript", "nav-simplify", "p3-quota", "m3-shell"].includes(args.stage)) routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [] };
-	// Native routing S3: Settings as the bridge's settings_get answers it for this scratch home (the live session is the only fake).
+	// Native routing S3: Settings as the bridge's settings_get answers it for this scratch home
+	// (the live session is the only fake).
 	if (args.stage === "p3-quota") routes["/api/settings"] = { generated_at: GENERATED, enabled: true, running: true, supported: true, writable: true, reason: null,
 		snapshot: readSettings(scratch, {}), catalog: SETTING_FIELDS, audit: [], available_models: [], models_error: null, models_loading: false };
 	// M3 slice 4: the composer menu attaches the done job's own P1 reference, as its job page's Ask would.
@@ -685,7 +687,8 @@ try {
 			await capture(`p3-quota-overdue-${device}-dark-${width}x${height}`, "#job/cp-quota-due", width, height, "dark", ".job-fact-quota", undefined, fact("waiting · overdue"));
 			await capture(`p3-quota-held-${device}-dark-${width}x${height}`, "#job/cp-quota-held", width, height, "dark", ".job-fact-quota", undefined, fact("held for the operator"));
 		}
-		// Native routing S3: the Driver fact (a 200-char fallback reason at both widths, a native run on a phone) and the Settings help.
+		// Native routing S3: the Driver fact (a 200-char fallback reason at both widths, a native run on a phone)
+		// and the Settings help.
 		const fits = (selector: string, text: string): Step[] => [[`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: "center" })`, "true"],
 			["true", `(() => { const e = document.querySelector(${JSON.stringify(selector)}), r = e.getBoundingClientRect();
 			return e.textContent.includes(${JSON.stringify(text)}) && r.left >= -0.5 && r.right <= innerWidth + 0.5 && document.documentElement.scrollWidth <= innerWidth; })()`],

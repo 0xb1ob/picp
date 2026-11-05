@@ -171,7 +171,8 @@ export function nativeQuotaLine(home: string, now: number): NativeQuotaLine | un
 	}
 	const snapshot = readNativeAvailability(home, layout);
 	if (!snapshot) return { state: "unknown", label: "Claude unknown", detail: "no readable native-availability snapshot yet" };
-	// shortcut: CLI-version invalidation (iii) is skipped (it spawns claude); add it if a CLI update leaves the line stale.
+	// shortcut: CLI-version invalidation (iii) is skipped (it spawns claude); add it if a CLI update leaves the line
+	// stale.
 	const switched = mtime(switchFile);
 	const live = <E extends { observed_at: number }>(entry: E | undefined): E | undefined => (entry && !(switched !== undefined && switched > entry.observed_at) ? entry : undefined);
 	const auth = live(snapshot.auth), lockdown = live(snapshot.lockdown);
