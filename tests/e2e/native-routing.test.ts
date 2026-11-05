@@ -88,11 +88,12 @@ test("S1 native: a claude row runs native with its model and effort; peers, plai
 	assert.equal(first?.body.model, FAKE_CLAUDE_MODEL, "the CLI ran the row's model");
 	assert.equal((first?.body.output_config as { effort?: string } | undefined)?.effort, "high", "the CLI ran the row's effort");
 	// The concurrent loser and a later peer fall back to pi by name; a plain row and an override never ask for claude.
-	for (const record of [loser, h.fleet(peer.id)!]) {
+	for (const [record, held] of [[loser, /is being admitted$/], [h.fleet(peer.id)!, /is live; tear it down first$/]] as const) {
 		assert.equal(record.worker.driver, undefined, `${record.job_id} ran native`);
 		assert.equal(record.worker.model, h.piModel);
 		assert.deepEqual([record.routing?.requested_driver, record.routing?.driver], ["claude", "pi"]);
-		assert.match(record.routing?.driver_reason ?? "", /^occupied: native concurrency is 1 and /);
+		// The loser met the admission-time slot, not the winner's fleet record: the reservation itself is proven.
+		assert.match(record.routing?.driver_reason ?? "", new RegExp(`^occupied: native concurrency is 1 and ${winner.job_id} ${held.source}`));
 	}
 	for (const id of [plain.id, override.id]) {
 		const record = h.fleet(id)!;
