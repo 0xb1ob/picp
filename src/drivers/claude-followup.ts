@@ -34,7 +34,11 @@ export const NATIVE_ACK = {
 		"(run event native_followup_delivered), or native_followup_refused names why not; nothing was steered",
 } as const;
 
-const LedgerSchema = Type.Record(Type.String(), Type.Object({ input: Type.Integer({ minimum: 0 }), output: Type.Integer({ minimum: 0 }) }, { additionalProperties: false }));
+// `input` includes cache read and write; the split is optional so a pre-N4a record still parses.
+const LedgerSchema = Type.Record(Type.String(), Type.Object({
+	input: Type.Integer({ minimum: 0 }), output: Type.Integer({ minimum: 0 }),
+	cache_read: Type.Optional(Type.Integer({ minimum: 0 })), cache_write: Type.Optional(Type.Integer({ minimum: 0 })),
+}, { additionalProperties: false }));
 
 /** `<runDir>/native-claude`, one JSON line. The session id grants nothing: it is only a resume key. */
 export const NativeSessionSchema = Type.Object(

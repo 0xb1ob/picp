@@ -42,7 +42,7 @@ export interface FakeRateLimit { status: "allowed" | "allowed_warning" | "reject
 
 /** `beforeAnswer` runs, and is awaited, after the request is recorded and before the step's answer is sent.
  * `auth_error` is sticky: it and every tool-offering request after it answer 401 until `endAuthError()`. */
-export type ClaudeStep = ({ kind: "tool_use"; calls: ClaudeToolUse[]; beforeAnswer?: () => Promise<void> } | { kind: "text"; text: string }) & { limit?: FakeRateLimit }
+export type ClaudeStep = ({ kind: "tool_use"; calls: ClaudeToolUse[] } | { kind: "text"; text: string }) & { limit?: FakeRateLimit; beforeAnswer?: () => Promise<void> }
 	| { kind: "auth_error" };
 
 /** Settings env for a fake claude.ai subscriber (OAuth): the CLI reads rate-limit headers only on that path. Every
@@ -192,6 +192,7 @@ export async function startClaudeMockProvider(script: readonly ClaudeStep[], opt
 				answer(res, body, blocks, "tool_use", id, usage, headers);
 				return;
 			}
+			if (step?.kind === "text") await step.beforeAnswer?.();
 			answer(res, body, [{ type: "text", text: step?.kind === "text" ? step.text : "ok" }], "end_turn", id, usage, headers);
 		})().catch((error: unknown) => {
 			res.writeHead(500, { "content-type": "application/json" });
