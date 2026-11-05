@@ -8,7 +8,9 @@ import { join } from "node:path";
 import { type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
 import { LAYOUT } from "./contracts.ts";
-import { NATIVE_AUTH_CODES, NATIVE_WINDOWS, type NativeAuthCode, type NativeWindow, OBSERVATION_EVENT, WINDOW_STATUSES } from "./drivers/claude-observation.ts";
+import {
+	type ModelFamily, modelFamily, NATIVE_AUTH_CODES, NATIVE_WINDOWS, type NativeAuthCode, type NativeWindow, OBSERVATION_EVENT, WINDOW_STATUSES,
+} from "./drivers/claude-observation.ts";
 import { installedClaudeVersion, nativeModelId, type NativeRefusal } from "./drivers/claude.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { nativeConfigFile } from "./worker-driver.ts";
@@ -35,7 +37,7 @@ const EventSchema = Type.Intersect([
 		Type.Object({ kind: Type.Literal("window"), window: literals(NATIVE_WINDOWS), status: literals(WINDOW_STATUSES), uuid: Type.Optional(Type.String({ maxLength: 64 })), resets_at: Type.Optional(at), utilization: Type.Optional(Type.Number()) }),
 		Type.Object({ kind: Type.Literal("auth"), code: literals(NATIVE_AUTH_CODES) }),
 		Type.Object({ kind: Type.Literal("lockdown"), code: Type.Literal("lockdown") }),
-		Type.Object({ kind: Type.Literal("turn_ok") }),
+		Type.Object({ kind: Type.Literal("turn_ok"), family: Type.Optional(literals(["opus", "sonnet"])) }),
 	]),
 ]);
 
@@ -51,7 +53,7 @@ export interface NativeAvailabilitySnapshot {
 }
 type ObservationEvent = { observed_at: number; claude_version?: string } & (
 	| { kind: "window"; window: NativeWindow; status: WindowEntry["status"]; uuid?: string; resets_at?: number; utilization?: number }
-	| { kind: "auth"; code: NativeAuthCode } | { kind: "lockdown"; code: "lockdown" } | { kind: "turn_ok" });
+	| { kind: "auth"; code: NativeAuthCode } | { kind: "lockdown"; code: "lockdown" } | { kind: "turn_ok"; family?: ModelFamily });
 
 export const nativeAvailabilityFile = (home: string): string => join(home, LAYOUT.state, "native-availability.json");
 
@@ -80,10 +82,11 @@ export function recordNativeObservation(home: string, input: unknown): boolean {
 		const { status, resets_at, utilization } = event;
 		snapshot.windows[event.window] = { status, ...stamp, ...(resets_at === undefined ? {} : { resets_at }), ...(utilization === undefined ? {} : { utilization }) };
 	} else if (event.kind === "turn_ok") {
-		// A successful turn is positive evidence: it clears every sticky entry observed before it (invalidation i).
+		// A successful turn clears sticky entries observed before it (invalidation i); windows only for its model family.
 		if ((snapshot.auth?.observed_at ?? Infinity) <= event.observed_at) delete snapshot.auth;
 		if ((snapshot.lockdown?.observed_at ?? Infinity) <= event.observed_at) delete snapshot.lockdown;
-		for (const window of NATIVE_WINDOWS) {
+		const cleared: NativeWindow[] = ["five_hour", "seven_day", "unspecified", ...(event.family ? [`seven_day_${event.family}` as const] : [])];
+		for (const window of cleared) {
 			const entry = snapshot.windows[window];
 			if (entry && isSticky(entry) && entry.observed_at <= event.observed_at) delete snapshot.windows[window];
 		}
@@ -131,7 +134,7 @@ export async function nativeAvailability(home: string, model: string, options: {
 		return current !== undefined && current !== entry.claude_version;
 	};
 	const id = nativeModelId(model);
-	const family = /opus/.test(id) ? "opus" : /sonnet/.test(id) ? "sonnet" : undefined;
+	const family = modelFamily(id);
 	let note: string | undefined;
 	for (const window of NATIVE_WINDOWS) {
 		const entry = snapshot.windows[window];

@@ -322,6 +322,13 @@ test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; 
 	await runAlone(signedIn.id);
 	ranNative(signedIn.id);
 	await waitFailed(h.fleet, signedIn.id);
+	// A successful turn clears only its own family's window: a sonnet turn leaves an opus block standing (F5).
+	const opus = { type: "native_observation", kind: "window", window: "seven_day_opus", status: "rejected", observed_at: Date.now() - 1000 };
+	assert.equal(recordNativeObservation(h.b.home, opus), true);
+	recordNativeObservation(h.b.home, { type: "native_observation", kind: "turn_ok", family: "sonnet", observed_at: Date.now() });
+	assert.equal(readNativeAvailability(h.b.home)?.windows.seven_day_opus?.status, "rejected", "a sonnet turn cleared the opus block");
+	recordNativeObservation(h.b.home, { type: "native_observation", kind: "turn_ok", family: "opus", observed_at: Date.now() });
+	assert.equal(readNativeAvailability(h.b.home)?.windows.seven_day_opus, undefined, "an opus turn left the opus block");
 	assert.doesNotMatch(readFileSync(file, "utf8"), /fake: |invalid credentials|limit reached|Ran after/, "raw SDK text in the snapshot");
 });
 

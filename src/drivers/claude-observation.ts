@@ -18,7 +18,11 @@ export type NativeObservation =
 	| { kind: "window"; window: NativeWindow; status: (typeof WINDOW_STATUSES)[number]; uuid?: string; resets_at?: number; utilization?: number }
 	| { kind: "auth"; code: NativeAuthCode }
 	| { kind: "lockdown"; code: "lockdown" }
-	| { kind: "turn_ok" };
+	| { kind: "turn_ok"; family?: ModelFamily };
+
+export type ModelFamily = "opus" | "sonnet";
+/** The family a `seven_day_<family>` window binds, from a native model id; none for any other model. */
+export const modelFamily = (model: string): ModelFamily | undefined => (/opus/.test(model) ? "opus" : /sonnet/.test(model) ? "sonnet" : undefined);
 
 /** `resetsAt` is epoch seconds (the T3 adapter multiplies by 1000); anything else is no reset at all. */
 export function resetMs(resetsAt: unknown): number | undefined {

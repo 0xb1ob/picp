@@ -454,8 +454,9 @@ A missing or corrupt snapshot is **unknown**: neither spent nor free.
 | `lockdown` | blocked: `lockdown: …` until invalidated |
 
 **Invalidation** of a cached `auth`, `lockdown` or no-reset window entry: (i) a later observed `allowed` event for that
-window, or a successful native turn; (ii) the Settings switch turned OFF then ON (the switch file rewritten after the
-observation); (iii) a different installed CLI version than the one that observed it.
+window, or a successful native turn (which clears only `five_hour`, `seven_day`, `unspecified` and its own model
+family's window); (ii) the Settings switch turned OFF then ON (the switch file rewritten after the observation); (iii) a
+different installed CLI version than the one that observed it.
 
 **Lock.** The snapshot only steers NEW automatic jobs, which fall back to pi with the reason; an explicit
 `driver: "claude"` and a started native job are refused by name instead. A native resume (`cp_send`, a queued

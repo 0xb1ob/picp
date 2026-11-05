@@ -12,7 +12,7 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { TurnTokenUsage } from "@t3tools/contracts";
 import { type Delivery, paths, type Usage } from "../contracts.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
-import { type NativeObservation, OBSERVATION_EVENT, turnObserver } from "./claude-observation.ts";
+import { modelFamily, type NativeObservation, OBSERVATION_EVENT, turnObserver } from "./claude-observation.ts";
 import {
 	assertNativeResume,
 	claimFollowUps,
@@ -141,7 +141,10 @@ async function turn(prompt: string): Promise<Turn> {
 	write(usage ? { type: "message_end", message: { role: "assistant", model: result.initModel ?? "claude", usage } } : { type: "usage_unavailable", status: result.usage.usageStatus });
 	const lockdown = result.lockdown?.verdict ?? "unchecked";
 	if (lockdown === "refused") observed({ kind: "lockdown", code: "lockdown" });
-	else if (result.resultSubtype === "success" && result.error === undefined && lockdown === "ok") observed({ kind: "turn_ok" });
+	else if (result.resultSubtype === "success" && result.error === undefined && lockdown === "ok") {
+		const family = modelFamily(env.CP_NATIVE_MODEL ?? "");
+		observed({ kind: "turn_ok", ...(family ? { family } : {}) });
+	}
 	const counts = { seen: result.lockdown?.seen, extra: result.lockdown?.extra };
 	const runId = randomUUID();
 	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: Boolean(result.report), usage: usage ? "measured" : "unavailable", denials: result.denials.length, report_refusals: result.reportRefusals.length });
