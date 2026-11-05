@@ -141,6 +141,9 @@ export const FAILURE_CLASSES = [
 	"spawn_failed",
 	/** Per-job `tool_execution_start` count (`src/bounds.ts`). */
 	"tool_call_cap_exceeded",
+	/** A native run stopped at its SDK turn cap (`error_max_turns`) before reporting; worktree and session are kept.
+	 * Never auto-recovered: a human decides whether to revive it with more turns. */
+	"turn_limit",
 ] as const;
 export type FailureClass = (typeof FAILURE_CLASSES)[number];
 export const FailureClassSchema = StringEnum([...FAILURE_CLASSES]);
@@ -170,6 +173,7 @@ export const FAILURE_RECOVERABLE: Readonly<Record<FailureClass, boolean>> = Obje
 	script_signal: false,
 	spawn_failed: false,
 	tool_call_cap_exceeded: false,
+	turn_limit: false,
 });
 
 // ---------------------------------------------------------------------------
@@ -222,6 +226,7 @@ export const RECOVERY_POLICY: Readonly<Record<FailureClass, RecoveryPolicyAction
 	script_signal: "none",
 	spawn_failed: "none",
 	tool_call_cap_exceeded: "redispatch",
+	turn_limit: "none",
 });
 
 export const FailureSchema = Type.Object(

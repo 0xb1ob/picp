@@ -32,6 +32,10 @@ const write = (record: Record<string, unknown>): void => void process.stdout.wri
 const toolNames = new Map<string, string>();
 const abort = new AbortController();
 const env = process.env;
+/** The SDK turn cap per claude process; `CP_NATIVE_MAX_TURNS` overrides it with a positive integer only. */
+const NATIVE_MAX_TURNS = 500;
+const turnOverride = Number(env.CP_NATIVE_MAX_TURNS);
+const maxTurns = Number.isInteger(turnOverride) && turnOverride > 0 ? turnOverride : NATIVE_MAX_TURNS;
 const sessionFile = join(env.CP_RUN_DIR ?? "", NATIVE_SESSION_FILE);
 let run: Promise<number> | undefined;
 let busy = false;
@@ -121,7 +125,7 @@ async function turn(prompt: string): Promise<Turn> {
 		prompt,
 		signal: abort.signal,
 		onMessage: relay,
-		maxTurns: Number(env.CP_NATIVE_MAX_TURNS) || 40,
+		maxTurns,
 		timeoutMs: 24 * 60 * 60_000,
 		scratchDir: current.scratch_dir,
 		...(resumed ? { resume: { sessionId: current.session_id as string, ...(ledger ? { ledger } : {}) } } : {}),
@@ -147,7 +151,9 @@ async function turn(prompt: string): Promise<Turn> {
 	}
 	const counts = { seen: result.lockdown?.seen, extra: result.lockdown?.extra };
 	const runId = randomUUID();
-	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: Boolean(result.report), usage: usage ? "measured" : "unavailable", denials: result.denials.length, report_refusals: result.reportRefusals.length });
+	const turnLimit = result.resultSubtype === "error_max_turns";
+	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: Boolean(result.report), usage: usage ? "measured" : "unavailable", denials: result.denials.length, report_refusals: result.reportRefusals.length, max_turns: maxTurns, ...(turnLimit ? { stop: "max_turns" } : {}) });
+	if (turnLimit) process.stderr.write(`[native claude] stopped at the turn limit (${maxTurns} turns)\n`);
 	process.stderr.write(`[native claude] exit ${result.exit?.code ?? result.exit?.signal ?? "none"}; lockdown ${lockdown}; report ${result.report ? "accepted" : "none"}${result.error ? `; ${result.error}` : ""}\n`);
 	const pending = usage as { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } } | undefined;
 	return {

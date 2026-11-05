@@ -971,8 +971,9 @@ test("budget defaults and failure taxonomy are complete", () => {
 	assert.equal(FAILURE_RECOVERABLE.model_call_failed, false);
 	assert.equal(FAILURE_RECOVERABLE.wall_clock_exceeded, false);
 	assert.equal(FAILURE_RECOVERABLE.tool_call_cap_exceeded, false);
+	assert.equal(FAILURE_RECOVERABLE.turn_limit, false);
 	assert.equal(Object.keys(FAILURE_RECOVERABLE).length, FAILURE_CLASSES.length);
-	assert.equal(FAILURE_CLASSES.length, 14);
+	assert.equal(FAILURE_CLASSES.length, 15);
 });
 
 // ---------------------------------------------------------------------------

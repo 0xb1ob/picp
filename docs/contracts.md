@@ -10013,6 +10013,7 @@ Failure classes (`FailureClassSchema`) and whether a retry is even permitted
 | `budget_exceeded` | no | soft gate breached |
 | `wall_clock_exceeded` | no | per-job wall-clock per round (`DEFAULT_JOB_WALL_CLOCK_SECONDS`, `data/worker-bounds.json`, `CP_JOB_WALL_CLOCK_SECONDS`) |
 | `tool_call_cap_exceeded` | no | per-job `tool_execution_start` count (`DEFAULT_JOB_TOOL_CALL_CAP`, `CP_JOB_TOOL_CALL_CAP`) |
+| `turn_limit` | no | Stopped at turn limit: the native run's `native_run` event has `stop: "max_turns"` and the worker exited without a report |
 | `envelope_invalid` | yes | repair attempts exhausted |
 | `spawn_failed` | no | child exited without emitting a single event |
 
@@ -10227,7 +10228,7 @@ is worth more money is an operator decision either way.
 | `crash`, `timeout`, `agent_empty_output` | re-dispatch the **same brief**, up to `MAX_RECOVERY_ATTEMPTS` |
 | `provider_limit` | retry the **same** model (transient), up to the cap, then escalate |
 | `envelope_invalid` | escalate — the worker already exhausted its in-run repairs |
-| `tool_loop`, `budget_exceeded`, `spawn_failed`, `wall_clock_exceeded`, `tool_call_cap_exceeded` | escalate — never retried |
+| `tool_loop`, `budget_exceeded`, `spawn_failed`, `wall_clock_exceeded`, `tool_call_cap_exceeded`, `turn_limit` | escalate — never retried |
 | `settled_without_report` | escalate — the delivery may already exist; look at the branch/PR, then promote, revive or tear down. Never re-run the brief blind |
 | `model_call_failed` | escalate — the worker never ran a turn, so there is nothing to recover, and the same call with the same credentials fails identically. Fix the credential or the routed model, then re-dispatch |
 
@@ -10253,7 +10254,7 @@ The policy table (`RECOVERY_POLICY` in `src/contracts.ts`):
 |---|---|
 | `crash`, `timeout`, `provider_limit`, `agent_empty_output`, `settled_without_report` | `revive` — relaunch on the same session file (`cp_revive`), then send a brief that says continue, do not redo, and names the interrupted call (name and id, never its arguments) whose synthetic "No result provided" error does not show whether it ran |
 | `wall_clock_exceeded`, `tool_call_cap_exceeded` | `redispatch` — the worktree is intact and the process is already stopped; the brief carries the on-disk evidence (`describeUnreportedWork`) and says finish from exactly that state |
-| `tool_loop`, `budget_exceeded`, `envelope_invalid`, `spawn_failed`, `model_call_failed` | `none` — a policy cause, escalated on the very first occurrence, never auto-recovered |
+| `tool_loop`, `budget_exceeded`, `envelope_invalid`, `spawn_failed`, `model_call_failed`, `turn_limit` | `none` — a policy cause, escalated on the very first occurrence, never auto-recovered |
 
 A `risk:high` job never auto-recovers either, whatever the class — checked
 separately from the table, because risk lives on the job

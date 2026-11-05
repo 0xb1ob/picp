@@ -133,6 +133,8 @@ interface Scan {
 	 * may call the run dead on account of it.
 	 */
 	retryOpen: boolean;
+	/** The latest native run stopped at this SDK turn cap (`native_run` `stop: "max_turns"`). */
+	turnLimit?: number;
 }
 
 function scan(events: readonly RunEvent[]): Scan {
@@ -209,6 +211,9 @@ function scan(events: readonly RunEvent[]): Scan {
 					// started this retry is history, not a dead call.
 					state.modelError = undefined;
 				}
+				break;
+			case "native_run":
+				state.turnLimit = payload.stop === "max_turns" ? Number(payload.max_turns) : undefined;
 				break;
 			default:
 				break;
@@ -318,6 +323,13 @@ export function classifyRun(events: readonly RunEvent[], options: ClassifyOption
 					"the work may be finished and merely unreported. Check the branch and any PR before re-dispatching; " +
 					"cp_revive relaunches this worker on its own session file so it can still file its envelope.",
 				evidence: ["agent_settled", "cp:process_exit"],
+			};
+		}
+		if (state.turnLimit !== undefined) {
+			return {
+				class: "turn_limit",
+				message: `native run stopped at the turn limit (${state.turnLimit} turns) before reporting; the worktree and session are kept`,
+				evidence: ["native_run stop=max_turns", "cp:process_exit"],
 			};
 		}
 		return {
