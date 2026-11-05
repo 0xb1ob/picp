@@ -11,7 +11,6 @@ import { type TestContext, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
-import { installedClaudeVersion } from "../../src/drivers/claude.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { nativeAvailabilityFile, readNativeAvailability, recordNativeObservation } from "../../src/native-availability.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
@@ -240,11 +239,11 @@ test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; 
 	const h = await routedHome(t, [
 		{ kind: "text", text: "Spent.", limit: { status: "rejected", claim: "five_hour", resetsAt: reset } },
 		{ kind: "text", text: "Ran after the reset.", limit: { status: "allowed", claim: "seven_day", resetsAt: reset } },
+		{ kind: "text", text: "Spent again.", limit: { status: "rejected", claim: "five_hour", resetsAt: reset * 1000 } },
 		{ kind: "auth_error" },
 		{ kind: "text", text: "Ran after sign-in." },
 	], { subscriber: true });
 	const file = nativeAvailabilityFile(h.b.home);
-	const version = await installedClaudeVersion();
 	const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
 	const runAlone = async (id: string, extra: Record<string, unknown> = {}) => { await h.b.closeParents(); return (await h.b.run([{ kind: "tool_calls", calls: [dispatch(id, extra)] }], h.env)) as Tool[]; };
 	const reason = (id: string) => h.fleet(id)?.routing?.driver_reason ?? "";
@@ -253,7 +252,7 @@ test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; 
 		assert.deepEqual([h.fleet(id)?.worker.driver, h.fleet(id)?.worker.model], [undefined, h.piModel], reason(id));
 		assert.match(reason(id), pattern);
 	};
-	const [spent, fallback, afterReset, noReset, signedOut, authFallback, signedIn] = await Promise.all([h.job(), h.job(), h.job(), h.job(), h.job(), h.job(), h.job()]);
+	const [spent, fallback, afterReset, invalidReset, noReset, signedOut, authFallback, signedIn] = await Promise.all([h.job(), h.job(), h.job(), h.job(), h.job(), h.job(), h.job(), h.job()]);
 	h.toggle(true);
 	// A corrupt snapshot is unknown, never spent: the first job runs native and its 429 writes a fresh snapshot.
 	mkdirSync(dirname(file), { recursive: true });
@@ -281,6 +280,7 @@ test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; 
 	assert.equal(redispatch?.isError, true, text(redispatch));
 	assert.match(text(redispatch), /cannot run on the native claude driver: five_hour rejected until/);
 	assert.equal(reroute?.isError, true, text(reroute));
+	assert.match(text(reroute), new RegExp(`runs an explicit anthropic/claude-… model, and ${h.piModel} is not one`));
 	ranNative(spent.id);
 	const events = readRunEvents(h.b.home, spent.id);
 	assert.equal(events.filter((event) => event.type === "worker_revived").length, 0, "the spent native job was respawned");
@@ -302,9 +302,13 @@ test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; 
 	await waitFailed(h.fleet, afterReset.id);
 	assert.equal(readNativeAvailability(h.b.home)?.windows.seven_day?.status, "allowed");
 
-	// A rejected window with no reset stays blocked until the switch goes off and on (ii).
-	const seen = { type: "native_observation", kind: "window", window: "five_hour", status: "rejected", observed_at: Date.now() - 1000, ...(version ? { claude_version: version } : {}) };
-	assert.equal(recordNativeObservation(h.b.home, seen), true);
+	// A 429 whose reset has the wrong magnitude (milliseconds) is stored with no reset (F1), and stays blocked until the
+	// switch goes off and on (ii).
+	await runAlone(invalidReset.id);
+	ranNative(invalidReset.id);
+	await waitFailed(h.fleet, invalidReset.id);
+	const noResetEntry = readNativeAvailability(h.b.home)?.windows.five_hour;
+	assert.deepEqual([noResetEntry?.status, noResetEntry?.resets_at], ["rejected", undefined]);
 	await runAlone(noReset.id);
 	ranPi(noReset.id, /^window: five_hour rejected, reset unknown \(observed /);
 	h.toggle(false);
