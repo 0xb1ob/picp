@@ -329,6 +329,8 @@ export const RunStatusSchema = Type.Object(
 		phase: RunPhaseSchema,
 		session_id: Type.Optional(Type.String({ minLength: 1 })),
 		session_file: Type.Optional(Type.String({ minLength: 1 })),
+		/** A native worker's Log transcript (`state/sessions/native/<job>.jsonl`); `session_file` stays its resume record. */
+		transcript_file: Type.Optional(Type.String({ minLength: 1 })),
 		pid: Type.Optional(Type.Integer({ minimum: 1 })),
 		model: Type.Optional(Type.String({ minLength: 1 })),
 		profile: Type.Optional(Type.String({ minLength: 1 })),

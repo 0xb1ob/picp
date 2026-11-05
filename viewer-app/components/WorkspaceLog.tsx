@@ -68,12 +68,14 @@ function Line({entry}: {entry: SessionEntry}) {
  if (entry.kind === "tool" && entry.name === "report_result") return <p class="workspace-log-say">• Report filed</p>;
  if (entry.kind === "tool") {
   const {args, result} = parts(entry), name = entry.name ?? "tool", out = head(result), failed = entry.failed ? " · failed" : "";
-  if (name === "bash") return <div class="workspace-log-tool"><p><b>Ran 1 shell command</b>{failed}</p>
+  // Native tools are capitalised (Bash, Read, Write); pi's are lower case.
+  const tool = name.toLowerCase(), search = name === "Grep" || name === "Glob";
+  if (tool === "bash") return <div class="workspace-log-tool"><p><b>Ran 1 shell command</b>{failed}</p>
    {typeof args.command === "string" && <pre>• {args.command}</pre>}{out && <pre>{out}</pre>}</div>;
-  const target = ARGS.map(k => args[k]).find((v): v is string => typeof v === "string");
-  const label = name === "read" ? "Read" : name === "edit" ? "Update" : name.charAt(0).toUpperCase() + name.slice(1);
-  const lines = name === "edit" ? editLines(args) : null;
-  const note = entry.failed ? out : name === "read" && result.trim() ? readNote(result)
+  const target = search && typeof args.pattern === "string" ? args.pattern : ARGS.map(k => args[k]).find((v): v is string => typeof v === "string");
+  const label = search ? "Search" : tool === "read" ? "Read" : tool === "edit" ? "Update" : name.charAt(0).toUpperCase() + name.slice(1);
+  const lines = tool === "edit" ? editLines(args) : null;
+  const note = entry.failed ? out : tool === "read" && result.trim() ? readNote(result)
    : lines ? `Added ${plural(lines.added.length, "line")}, removed ${plural(lines.removed.length, "line")}` : out;
   return <div class="workspace-log-tool"><p><b>{label}</b>{target !== undefined && `(${target})`}{failed}</p>{note && <pre>└ {note}</pre>}
    {lines && !entry.failed && (lines.removed.length + lines.added.length > 0) && <EditBlock lines={lines}/>}</div>;

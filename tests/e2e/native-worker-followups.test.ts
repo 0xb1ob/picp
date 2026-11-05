@@ -162,6 +162,12 @@ test("F1/F3/F4/F8: a busy send queues until the turn ends, idle sends resume the
 	const removed = readRunEvents(h.b.home, id).find((event) => event.type === "native_scratch_removed")?.payload as { removed?: string } | undefined;
 	assert.equal(removed?.removed, session.scratch_dir);
 	assert.equal(existsSync(session.scratch_dir), false, "the scratch dir survived teardown");
+	// The Log: every resumed turn (the queued one, then each idle send) appends to the one transcript, marked resumed.
+	const transcript = readFileSync(status.transcript_file!, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type: string; content?: string; message?: { content?: Array<{ text?: string }> } });
+	assert.equal(transcript.filter((line) => line.type === "session").length, 1, "one transcript, one header");
+	assert.equal(transcript.filter((line) => line.type === "custom_message" && line.content === "Resumed the recorded Claude session").length, 3);
+	const said = transcript.flatMap((line) => line.message?.content?.map((block) => block.text ?? "") ?? []).join("\n");
+	for (const text of ["Queued follow-up: also note the license.", "Idle follow-up two.", "Reported a third time."]) assert.ok(said.includes(text), text);
 	assert.equal(h.claude.overrun(), 0);
 });
 

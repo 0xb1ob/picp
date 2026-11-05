@@ -4,7 +4,7 @@
  * CLAUDE_CONFIG_DIR per run and no user setting sources. P3a–P3j of the N3b task.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
@@ -13,7 +13,9 @@ import { DEFAULT_BUDGET_CONFIG, EMPTY_USAGE, LAYOUT, paths } from "../../src/con
 import { whichAll } from "../../src/doctor.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { checkBudget } from "../../src/failures.ts";
+import type { JobTranscriptResponse } from "../../src/viewer/api-types.ts";
 import { jobsView } from "../../src/viewer/jobs-view.ts";
+import { startViewer } from "../harness/dashboard.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_NATIVE_MODEL, routeNativeModel, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
 import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, treehouseAvailable, waitFor } from "../harness/index.ts";
@@ -30,7 +32,8 @@ const report = (jobId: string, home: string) => ({
 
 /** A fake HOME whose Claude settings file points the native worker at the fake model; the switch file is the test's. */
 async function nativeHome(t: TestContext, script: readonly ClaudeStep[], usage = true) {
-	const b = await dispatchS29(t, { files: { ".claude/settings.json": JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "touch /tmp/picp-n3b-hook-ran" }] }] } }), ".claude/commands/extra.md": "extra\n" } });
+	const big = Array.from({ length: 1800 }, (_, i) => `line ${String(i).padStart(4, "0")} of the over-cap file, padded past the cap\n`).join("");
+	const b = await dispatchS29(t, { files: { ".claude/settings.json": JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "touch /tmp/picp-n3b-hook-ran" }] }] } }), ".claude/commands/extra.md": "extra\n", "big.txt": big } });
 	const claude = await startClaudeMockProvider(script, { usage });
 	routeNativeModel(b.home);
 	const fakeHome = mkdtempSync(join(tmpdir(), "cp-n3b-home-"));
@@ -51,6 +54,7 @@ test("P3a/c/d/h/i/j: a native research job reports once, refuses peers and ship 
 	const h = await nativeHome(t, [
 		step("Bash", { command: "echo x > native-write.txt" }),
 		{ kind: "tool_use", calls: [{ name: "Read", input: () => ({ file_path: h.settings }) }] },
+		{ kind: "tool_use", calls: [{ name: "Read", input: () => ({ file_path: join(readFleet(h.b.home).jobs.find((job) => job.job_id === ids[0])!.worktree, "big.txt") }) }] },
 		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }] },
 		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report("cp-someone-else", h.b.home) }] },
 		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
@@ -123,6 +127,27 @@ test("P3a/c/d/h/i/j: a native research job reports once, refuses peers and ship 
 	assert.equal(piRecord?.worker.driver, undefined);
 	assert.equal(piRecord?.phase, "done");
 	assert.equal(h.claude.overrun(), 0);
+
+	// The Log: the transcript outlives teardown (the scratch dir does not) and the job's transcript route serves it.
+	const transcript = status.transcript_file;
+	assert.equal(transcript, join(h.b.home, LAYOUT.sessions, "native", `${native.id}.jsonl`));
+	assert.equal(statSync(transcript!).mode & 0o777, 0o600);
+	const removed = events.find((event) => event.type === "native_scratch_removed")?.payload as { removed?: string } | undefined;
+	assert.ok(removed?.removed && !existsSync(removed.removed), "the scratch dir survived teardown");
+	const raw = readFileSync(transcript!, "utf8");
+	assert.doesNotMatch(raw, /signature|"subtype"|"type":"system"|apiKeySource|claude_code_version/, "no signature or system/init content");
+	assert.equal(raw.includes(FAKE_CLAUDE_AUTH_TOKEN), false);
+	const viewer = await startViewer(t, { home: h.b.home });
+	const served = (await viewer.get(`/api/job/${native.id}/transcript`)).body as unknown as JobTranscriptResponse;
+	assert.equal(served.warning, null);
+	const entries = served.entries;
+	assert.ok(entries.some((e) => e.kind === "say" && e.who === "Parent" && e.text.includes("Report the repo's package name.")), "the brief");
+	assert.ok(entries.some((e) => e.kind === "say" && e.who === "Worker" && e.text === "Reported."), "assistant text");
+	const shell = entries.find((e) => e.name === "Bash");
+	assert.match(shell?.text ?? "", /echo x > native-write\.txt[\s\S]*\n\nResult\n\S/, "the Bash call and its result");
+	assert.ok(entries.some((e) => e.name === "report_result" && e.text.includes(native.id) && e.text.includes("\n\nResult\n")), "the report call");
+	const over = entries.find((e) => e.name === "Read" && e.text.includes("big.txt"));
+	assert.match(over?.text ?? "", /\n\[picp: truncated \d+ bytes over the 64 KiB block cap\]$/, "an over-cap result is cut with the marker");
 });
 
 test("P3b/f/g: switch off and a drain freeze refuse before any spawn; a native run without a report fails on its observed exit", { skip, timeout: 300_000 }, async (t) => {

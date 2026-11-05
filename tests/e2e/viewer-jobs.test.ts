@@ -393,25 +393,32 @@ test("P18-lanes: a job's grant is its dispatch provenance, and Board lanes close
 
 test("P18-transcript: /api/job/<id>/transcript reads only a recorded session under state/sessions, windowed, and detail keeps stored text", { timeout: 120_000 }, async (t) => {
 	const line = (role: string, content: unknown, i: number) => JSON.stringify({ type: "message", timestamp: iso(60 - i / 60), message: { role, content } });
-	const ids = ["cp-done", "cp-small", "cp-gone", "cp-outside", "cp-script"];
+	const ids = ["cp-done", "cp-small", "cp-gone", "cp-outside", "cp-script", "cp-native", "cp-native-outside", "cp-native-txt"];
 	const v = await viewer(t, (s, dir) => {
 		const session = (name: string) => join(dir, LAYOUT.state, "sessions", `${name}.jsonl`);
 		s.put(join(LAYOUT.state, "sessions/cp-done.jsonl"), [line("user", "The brief", 0), ...Array.from({ length: 400 }, (_, i) => line("assistant", [{ type: "text", text: `step ${i}` }], i + 1))].join("\n") + "\n");
 		s.put(join(LAYOUT.state, "sessions/cp-small.jsonl"), [line("user", "Small brief", 0), line("assistant", [{ type: "text", text: "hello" }], 1)].join("\n") + "\n");
+		s.put(join(LAYOUT.state, "sessions/native/cp-native.jsonl"), [line("user", "Native brief", 0), line("assistant", [{ type: "text", text: "native hello" }], 1)].join("\n") + "\n");
+		s.put(join(LAYOUT.state, "sessions/native/cp-native.txt"), line("user", "secret", 0) + "\n");
 		s.put("outside.jsonl", line("user", "secret", 0) + "\n");
 		s.ledger([...ids, "cp-ledger-only"].map((id) => ({ id, title: id, status: "closed", closed_at: iso(5), labels: ["project:demo", "kind:ship"], ...(id === "cp-done" ? { description: "Why this  job exists\nSecond line" } : {}) })));
-		s.fleet(ids.map((job_id) => ({ job_id, project: "demo", kind: "ship", phase: "done", dispatched_at: iso(60), closed_at: iso(5), ...(job_id === "cp-script" ? { executor: "script" } : {}) })));
+		s.fleet(ids.map((job_id) => ({ job_id, project: "demo", kind: "ship", phase: "done", dispatched_at: iso(60), closed_at: iso(5), ...(job_id === "cp-script" ? { executor: "script" } : {}), ...(job_id.startsWith("cp-native") ? { worker: { driver: "claude", session_file: session("cp-small") } } : {}) })));
 		for (const [id, file] of [["cp-done", session("cp-done")], ["cp-small", session("cp-small")], ["cp-gone", session("missing")], ["cp-outside", join(dir, "outside.jsonl")]] as const) s.put(s.run(id, "status.json"), { session_file: file });
+		// A native job reads only its recorded transcript_file, never its session_file, and only a .jsonl under sessions/.
+		for (const [id, file] of [["cp-native", "native/cp-native.jsonl"], ["cp-native-outside", "../../outside.jsonl"], ["cp-native-txt", "native/cp-native.txt"]] as const) {
+			s.put(s.run(id, "status.json"), { session_file: session("cp-small"), transcript_file: join(dir, LAYOUT.state, "sessions", file) });
+		}
 		s.grant("md-a", "active", { objective: "Goal  A\nline two", job_ids: ["cp-done"], spend_cap: { usd: 20, tokens: 10000 } });
 	});
 	const body = (id: string) => v.json<JobTranscriptResponse>(`/api/job/${id}/transcript`);
 	const small = await body("cp-small");
 	assert.deepEqual(small.entries.map((e) => [e.who, e.text]), [["Parent", "Small brief"], ["Worker", "hello"]]);
 	assert.deepEqual([small.warning, small.truncated, small.from, small.to], [null, false, small.entries[0]!.at, small.entries[1]!.at]);
+	assert.deepEqual((await body("cp-native")).entries.map((e) => [e.who, e.text]), [["Parent", "Native brief"], ["Worker", "native hello"]]);
 	const big = await body("cp-done");
 	assert.equal(big.entries.length, 301, "window 300 plus the brief the window cut");
 	assert.deepEqual([big.entries[0]!.who, big.entries[0]!.text, big.entries.at(-1)!.text, big.truncated], ["Parent", "The brief", "step 399", true]);
-	for (const id of ["cp-gone", "cp-outside", "cp-script", "cp-ledger-only"]) {
+	for (const id of ["cp-gone", "cp-outside", "cp-script", "cp-ledger-only", "cp-native-outside", "cp-native-txt"]) {
 		const reply = await body(id);
 		assert.deepEqual([reply.entries, reply.warning], [[], "No worker session recorded"], id);
 	}
