@@ -75,7 +75,7 @@ export class ClaudeSpikeError extends Error {
 export function nativeEffortOptions(level: string | undefined): Pick<Options, "thinking" | "effort"> {
 	assertNativeEffort(level);
 	if (level === undefined || level === "") return {};
-	return level === "off" ? { thinking: { type: "disabled" } } : { effort: level as NonNullable<Options["effort"]> };
+	return level === "off" ? { thinking: { type: "disabled" } } : { effort: level };
 }
 
 export interface SpikeJob {

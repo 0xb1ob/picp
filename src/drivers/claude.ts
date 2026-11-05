@@ -27,7 +27,7 @@ let spike: Promise<typeof import("./claude-spike.ts")> | undefined;
 const DELIVERIES: readonly Delivery[] = ["local", "answer"];
 const NATIVE_MODEL = /^anthropic\/(claude-[A-Za-z0-9][A-Za-z0-9._[\]-]*)$/;
 /** Routed levels the SDK serves as `effort`; `off` disables thinking and `minimal` has no native equivalent. */
-export const NATIVE_EFFORTS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
+export const NATIVE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export interface NativeSelection {
 	home: string;
@@ -95,8 +95,8 @@ export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv): Pick<
 }
 
 /** Refuses a routed level with no native effort; absent (the CLI default), `off` and low…max pass. */
-export function assertNativeEffort(level: string | undefined): void {
-	if (level === undefined || level === "" || level === "off" || NATIVE_EFFORTS.includes(level)) return;
+export function assertNativeEffort(level: string | undefined): asserts level is (typeof NATIVE_EFFORTS)[number] | "off" | "" | undefined {
+	if (level === undefined || level === "" || level === "off" || (NATIVE_EFFORTS as readonly string[]).includes(level)) return;
 	throw new NativeDriverError(`thinking=${level} has no native claude effort; route off, low, medium, high, xhigh or max`, "effort");
 }
 
