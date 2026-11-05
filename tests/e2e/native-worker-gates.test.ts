@@ -14,6 +14,8 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { whichAll } from "../../src/doctor.ts";
 import { buildChildEnv, REPORT_TOOL, runClaudeSpike, SPIKE_TOOLS, type SpikeRunOptions } from "../../src/drivers/claude-spike.ts";
 import { CLI_BUILTIN_AGENTS } from "../../src/drivers/claude-lockdown.ts";
+import { roleTools } from "../../src/drivers/claude-roles.ts";
+import { nativeDenials } from "../../src/drivers/claude-usage.ts";
 import { type ClaudeMockProvider, type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
 
 const claudePath = whichAll("claude", process.env)[0];
@@ -275,7 +277,7 @@ test("N4b: a report is checked against the SpikeJob's kind and role", { skip, ti
 			{ kind: "text", text: "done" },
 		]);
 		const result = await runClaudeSpike({
-			job: { job_id: JOB, kind: "ship", role: "implementer", delivery: "local", runDir: join(root, "run"), worktree, artifactPath },
+			job: { job_id: JOB, kind: "ship", role: "implementer", delivery: "local", runDir: join(root, "run"), worktree, artifactPath, excludePaths: [] },
 			prompt: "Report.",
 			providerEnv: { ANTHROPIC_BASE_URL: provider.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN },
 			userSettings: null,
@@ -285,5 +287,37 @@ test("N4b: a report is checked against the SpikeJob's kind and role", { skip, ti
 		await provider.close();
 		assert.equal(result.report, undefined);
 		assert.match(result.reportRefusals.join("\n"), /kind: must be "ship" for this job, got "research"/);
+	});
+});
+
+// N4c: an implementer run gets the implementer tool set and its guards; only the in-worktree Edit lands.
+test("N4c: an implementer's Edit inside the worktree lands; a Write outside is denied by name; the lockdown holds", { skip, timeout: 180_000 }, async () => {
+	await withFixture(async ({ root, worktree, artifactPath }) => {
+		const file = join(worktree, "src", "x.ts");
+		mkdirSync(join(worktree, "src"));
+		writeFileSync(file, "export const x = 1;\n");
+		const outside = join(root, "outside.txt");
+		const provider = await startClaudeMockProvider([
+			step("Read", { file_path: file }),
+			step("Edit", { file_path: file, old_string: "x = 1", new_string: "x = 2" }),
+			step("Write", { file_path: outside, content: "escaped\n" }),
+			{ kind: "text", text: "done" },
+		]);
+		const result = await runClaudeSpike({
+			job: { job_id: JOB, kind: "ship", role: "implementer", delivery: "pr", runDir: join(root, "run"), worktree, artifactPath, excludePaths: [".github/workflows/"] },
+			prompt: "Edit src/x.ts.",
+			providerEnv: { ANTHROPIC_BASE_URL: provider.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN },
+			userSettings: null,
+			maxTurns: 10,
+			timeoutMs: 150_000,
+		});
+		await provider.close();
+		assert.equal(result.lockdown?.verdict, "ok", result.lockdown?.refusal ?? result.error);
+		const first = provider.requests.find((request) => request.path.startsWith("/v1/messages"))?.body as { tools?: Array<{ name: string }> };
+		const offered = first.tools?.map((tool) => tool.name).filter((name) => name !== "DeferredToolPlaceholder").sort();
+		assert.deepEqual(offered, [...roleTools("implementer"), REPORT_TOOL].sort());
+		assert.equal(readFileSync(file, "utf8"), "export const x = 2;\n");
+		assert.deepEqual(readdirSync(root).sort(), ["artifacts", "repo"]);
+		assert.deepEqual(nativeDenials(result.denials), ["Write: Refused: an implementer edits only inside its worktree <path>, outside .git; a path outside the worktree (<path>) is denied."]);
 	});
 });

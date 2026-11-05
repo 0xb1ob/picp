@@ -507,3 +507,17 @@ native addendum (the Claude tool names, and the research artifact written with W
 every turn, fresh or resumed, and passes it as the SDK `systemPrompt`; a missing, unreadable or empty file is a named start
 error. The file path is in the worker's env only, never the claude child's. `SpikeJob` now carries the job's `kind` and
 `role`, and `report_result` validates against them; the worker still refuses anything but research/planner.
+
+## Implementer tool surface (N4c)
+
+`src/drivers/claude-roles.ts` picks the tool set by role: planner keeps the research set (Read, Grep, Glob, Bash, Write)
+unchanged; implementer gets Read, Grep, Glob, Edit, Write and Bash plus `report_result`; any other role is refused by
+name. The lockdown's expected tools follow the role. An implementer's Edit/Write lands only where the realpath of the
+target's nearest existing parent is inside the worktree (no symlink escapes, a dangling one included), outside `.git`,
+off the secret paths and clear of the home's and every live grant's `exclude_paths`, which the worker process reads,
+never the CLI child. Its Bash (`src/drivers/claude-ship-policy.ts`) runs pi's pattern guards first, then a default-deny
+allow-list: the read-only list, local git verbs, `npm ci|run typecheck|test:one|lint|build|changelog:*`, `node`/`npx
+tsx` on worktree scripts, and `mkdir|mv|cp|rm` and redirects on worktree paths only. Push, fetch, `gh`, `cd`, network
+tools, env dumps and `$` expansion are denied; network actions arrive as picp tools in N4d. The honest limit: `npm run`
+and `node` execute repo code, so this is defence in depth at pi parity, not a sandbox. Selection stays research-only
+until N4f, so no production job reaches this yet.
