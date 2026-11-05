@@ -4,7 +4,7 @@
  */
 import { type Delivery, type FleetRecord, isScriptFleetRecord, type JobKind, type Role, type RoutingConfig, type RoutingDecision } from "./contracts.ts";
 import { assertNativeEffort, nativeModelId, NativeDriverError, nativeSelectionRefusal, type NativeRefusal, nativeThinkingEnv } from "./drivers/claude.ts";
-import { type ModelProbe, pickModel, resolveWithCapacity, type RouteRequest } from "./routing.ts";
+import { deniedFor, isAllowed, type ModelProbe, pickModel, resolveWithCapacity, type RouteRequest } from "./routing.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 
 export interface DriverContext {
@@ -57,7 +57,9 @@ export async function resolveDriverRoute(
 		...(route.override ? { requested: route.override } : {}),
 		...(route.thinking ? { requested_thinking: route.thinking } : {}),
 	};
-	const refusal = await nativeSelectionRefusal({ home: ctx.home, jobId: ctx.jobId, driver: "claude", kind: ctx.kind, role: ctx.role, delivery: ctx.delivery, jobs: ctx.jobs }) ?? slotRefusal(ctx);
+	const refusal = allowRefusal(config, ctx.role, picked.model)
+		?? await nativeSelectionRefusal({ home: ctx.home, jobId: ctx.jobId, driver: "claude", kind: ctx.kind, role: ctx.role, delivery: ctx.delivery, jobs: ctx.jobs })
+		?? slotRefusal(ctx);
 	if (refusal && (ctx.explicit || locked)) {
 		throw new NativeDriverError(`refused: ${ctx.jobId} cannot run on the native claude driver: ${refusal.why}`, refusal.category);
 	}
@@ -67,6 +69,13 @@ export async function resolveDriverRoute(
 	}
 	if (ctx.reserve) slots.set(ctx.home, ctx.jobId);
 	return { ...native, requested_driver: "claude", driver: "claude", driver_reason: bounded(`${why}; effort ${picked.thinking ?? "CLI default"}`) };
+}
+
+/** `pickModel` skips the allowlist for a row with fallbacks (the pi walk filters there): check the native primary. */
+function allowRefusal(config: RoutingConfig, role: Role, model: string): { category: NativeRefusal; why: string } | undefined {
+	if (!isAllowed(config, model)) return { category: "denied", why: `the allowlist refuses ${model}` };
+	const pattern = deniedFor(config, role, model);
+	return pattern === undefined ? undefined : { category: "denied", why: `deny_by_role.${role} matches ${pattern} for ${model}` };
 }
 
 /** Checked synchronously after the last await, so two admissions in one parent never both pass. */

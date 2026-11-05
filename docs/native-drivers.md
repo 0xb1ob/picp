@@ -403,8 +403,9 @@ changes until a row carries `driver: "claude"` **and** the switch is ON; the shi
 | row without `driver` (legacy) or `pi` | pi | — |
 | a job whose fleet record already started (D1) | the recorded driver | a native job refuses rather than move to pi |
 
-**Fallback reasons** (`driver_reason` is `<code>: <why>`): `switch`, `pipeline`, `ineligible`, `occupied`,
-`cli_missing`, `cli_version`. The pi lane is the row's `[model, ...fallbacks]` through `resolveWithCapacity`, unchanged.
+**Fallback reasons** (`driver_reason` is `<code>: <why>`): `denied` (the native primary is outside `allow` or hit by
+`deny_by_role`), `switch`, `pipeline`, `ineligible`, `occupied`, `cli_missing`, `cli_version`. The pi lane is the row's
+`[model, ...fallbacks]` through `resolveWithCapacity`, unchanged.
 
 **Model and effort.** The native model is the row's own `model` (or an explicit override's), an explicit
 `anthropic/claude-…` id; any other ref refuses the dispatch with no lease. The row's effort maps to SDK options: `off`

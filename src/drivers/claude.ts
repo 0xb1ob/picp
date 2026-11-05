@@ -10,7 +10,7 @@ import { loadNativeConfig, nativeConfigFile, type NativeDriver } from "../worker
 import type { WorkerSpawnOptions } from "../worker-process.ts";
 
 /** Why a job may not run native (native routing S1): the resolver falls back to pi on these, an explicit request refuses. */
-export type NativeRefusal = "switch" | "pipeline" | "ineligible" | "occupied" | "cli_missing" | "cli_version" | "model" | "effort";
+export type NativeRefusal = "switch" | "pipeline" | "ineligible" | "occupied" | "cli_missing" | "cli_version" | "model" | "effort" | "denied";
 
 export class NativeDriverError extends Error {
 	readonly category?: NativeRefusal;

@@ -102,7 +102,7 @@ test("S1 native: a claude row runs native with its model and effort; peers, plai
 
 test("S1 fallback: switch off, CLI missing or too old, and a pipeline-owned planner run pi with the reason named", { skip, timeout: 300_000 }, async (t) => {
 	const h = await routedHome(t, []);
-	const [off, absent, old, explicit] = await Promise.all([h.job(), h.job(), h.job(), h.job()]);
+	const [off, absent, old, explicit, denied, deniedExplicit] = await Promise.all([h.job(), h.job(), h.job(), h.job(), h.job(), h.job()]);
 	// Missing: PATH keeps every other tool from claude's directories, minus claude. Too old: a fake that prints 2.1.0.
 	const shim = join(h.scratch, "no-claude");
 	mkdirSync(shim, { mode: 0o700 });
@@ -125,7 +125,13 @@ test("S1 fallback: switch off, CLI missing or too old, and a pipeline-owned plan
 	const absentEnds = await runAlone([{ kind: "tool_calls", calls: [dispatch(absent.id)] }], { ...h.env, PATH: [shim, ...kept].join(delimiter) });
 	const oldEnds = await runAlone([{ kind: "tool_calls", calls: [dispatch(old.id)] }], { ...h.env, PATH: [oldDir, process.env.PATH].join(delimiter) });
 	const pipelineEnds = await runAlone([tool("cp_pipeline", { action: "start", title: `s1 pipeline ${Math.random()}`, project: "demo", task: "Plan a README tweak.", delivery: "local", scope: "S" })], h.env);
-	for (const [end, id, reason] of [[offEnds[0], off.id, /^switch: /], [absentEnds[0], absent.id, /^cli_missing: /], [oldEnds[0], old.id, /^cli_version: /]] as const) {
+	// A row with fallbacks skips pickModel's allowlist check, so a primary denied for the role must still never run native.
+	const denyRole = { ...JSON.parse(h.routing()) as object, deny_by_role: { planner: [FAKE_NATIVE_MODEL] } };
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify(denyRole));
+	const deniedEnds = await runAlone([dispatch(denied.id), dispatch(deniedExplicit.id, { driver: "claude" })].map((call) => ({ kind: "tool_calls" as const, calls: [call] })), h.env);
+	const fellBack = [[offEnds[0], off.id, /^switch: /], [absentEnds[0], absent.id, /^cli_missing: /], [oldEnds[0], old.id, /^cli_version: /],
+		[deniedEnds[0], denied.id, /^denied: deny_by_role\.planner matches /]] as const;
+	for (const [end, id, reason] of fellBack) {
 		assert.notEqual(end?.isError, true, text(end));
 		const record = h.fleet(id)!;
 		assert.deepEqual([record.worker.driver, record.worker.model, record.routing?.driver], [undefined, h.piModel, "pi"]);
@@ -136,6 +142,9 @@ test("S1 fallback: switch off, CLI missing or too old, and a pipeline-owned plan
 	assert.equal(offEnds[1]?.isError, true, text(offEnds[1]));
 	assert.match(text(offEnds[1]), /workers\.native_claude_research is off/);
 	h.noLease(explicit.id);
+	assert.equal(deniedEnds[1]?.isError, true, text(deniedEnds[1]));
+	assert.match(text(deniedEnds[1]), /cannot run on the native claude driver: deny_by_role\.planner matches /);
+	h.noLease(deniedExplicit.id);
 	// D2: the pipeline's research child is planner research, yet stays on pi because the pipeline owns it.
 	const research = (pipelineEnds[0]?.result.details as { research_id?: string } | undefined)?.research_id;
 	assert.ok(research, text(pipelineEnds[0]));
