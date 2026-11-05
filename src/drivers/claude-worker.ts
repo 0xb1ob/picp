@@ -6,11 +6,12 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { setTimeout as sleep } from "node:timers/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { TurnTokenUsage } from "@t3tools/contracts";
+import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { type Delivery, paths, type Usage } from "../contracts.ts";
+import { NATIVE_RESULT_GRACE_MS, nativeDenials, nativeRunUsage } from "./claude-usage.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
 import { type NativeTranscript, nativeTranscript, nativeTranscriptFile } from "./claude-transcript.ts";
 import { modelFamily, type NativeObservation, OBSERVATION_EVENT, turnObserver } from "./claude-observation.ts";
@@ -42,20 +43,11 @@ let run: Promise<number> | undefined;
 let busy = false;
 // A revived worker (CP_NATIVE_RESUME=1) resumes from its first prompt; a dispatched one after its first turn.
 let resuming = env.CP_NATIVE_RESUME === "1";
-let costTotal: number | undefined;
+let finalResult: SDKResultMessage | undefined;
+// Set by the first stop: no queued follow-up starts a new turn after it.
+let stopping = false;
 let session: NativeSession | undefined;
 let transcript: NativeTranscript | undefined;
-/** pi's usage shape (run-artifacts `readUsage`); undefined (unavailable) unless tokens are complete and non-zero and
- * the cost is a finite number, since a real model call never costs zero tokens: a zero means nothing was reported. */
-export function piUsage(usage: TurnTokenUsage, cost: number | undefined): Record<string, unknown> | undefined {
-	if (usage.usageStatus !== "complete" || cost === undefined || !Number.isFinite(cost)) return undefined;
-	const cacheRead = usage.cachedInputTokens ?? 0;
-	const cacheWrite = usage.cacheCreationTokens ?? 0;
-	const input = usage.inputTokens - cacheRead - cacheWrite + (usage.otherUsage?.inputTokens ?? 0);
-	const output = usage.outputTokens + (usage.otherUsage?.outputTokens ?? 0);
-	const totalTokens = input + output + cacheRead + cacheWrite;
-	return totalTokens > 0 ? { input, output, cacheRead, cacheWrite, totalTokens, cost: { total: cost } } : undefined;
-}
 
 let observe = turnObserver();
 let cliVersion: string | undefined;
@@ -74,7 +66,7 @@ function observed(seen: NativeObservation | undefined): void {
 function relay(message: SDKMessage): void {
 	observed(observe(message));
 	transcript?.relay(message);
-	if (message.type === "result") costTotal = Number.isFinite(message.total_cost_usd) ? message.total_cost_usd : undefined;
+	if (message.type === "result") finalResult = message;
 	if (message.type === "system" && message.subtype === "init" && session && session.session_id !== message.session_id) {
 		session.session_id = message.session_id;
 		writeNativeSession(sessionFile, session);
@@ -120,7 +112,7 @@ async function turn(prompt: string): Promise<Turn> {
 	if (resuming && current.session_id === undefined) throw new Error(`${sessionFile} holds no session id; there is nothing to resume`);
 	const baseline = current.baseline;
 	const ledger = baseline ? new Map(Object.entries(baseline.ledger)) : undefined;
-	costTotal = undefined;
+	finalResult = undefined;
 	observe = turnObserver();
 	const resumed = resuming;
 	if (!transcript) {
@@ -142,15 +134,15 @@ async function turn(prompt: string): Promise<Turn> {
 	});
 	resuming = current.session_id !== undefined;
 	// The resumed process restores the session's cumulative modelUsage and cost: count only the growth over the baseline.
-	const cost = baseline && costTotal !== undefined && costTotal >= baseline.cost_usd ? costTotal - baseline.cost_usd : undefined;
+	const measured = nativeRunUsage(finalResult, baseline);
 	if (result.resultSubtype !== undefined) {
-		// A result without a full ledger and cost leaves no baseline, so the next resume is unmeasured, never recounted.
-		if (result.ledger && costTotal !== undefined) current.baseline = { ledger: Object.fromEntries(result.ledger), cost_usd: costTotal };
+		// A result without a readable ledger and cost leaves no baseline, so the next resume is unmeasured, never recounted.
+		if (measured.baseline) current.baseline = measured.baseline;
 		else delete current.baseline;
 		writeNativeSession(sessionFile, current);
 	}
-	const usage = piUsage(result.usage, cost);
-	write(usage ? { type: "message_end", message: { role: "assistant", model: result.initModel ?? "claude", usage } } : { type: "usage_unavailable", status: result.usage.usageStatus });
+	const usage = measured.usage;
+	write(usage ? { type: "message_end", message: { role: "assistant", model: result.initModel ?? "claude", usage } } : { type: "usage_unavailable", status: measured.status });
 	const lockdown = result.lockdown?.verdict ?? "unchecked";
 	if (lockdown === "refused") observed({ kind: "lockdown", code: "lockdown" });
 	else if (result.resultSubtype === "success" && result.error === undefined && lockdown === "ok") {
@@ -160,15 +152,14 @@ async function turn(prompt: string): Promise<Turn> {
 	const counts = { seen: result.lockdown?.seen, extra: result.lockdown?.extra };
 	const runId = randomUUID();
 	const turnLimit = result.resultSubtype === "error_max_turns";
-	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: Boolean(result.report), usage: usage ? "measured" : "unavailable", denials: result.denials.length, report_refusals: result.reportRefusals.length, max_turns: maxTurns, ...(turnLimit ? { stop: "max_turns" } : {}) });
+	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: Boolean(result.report), result_subtype: result.resultSubtype ?? null, usage: usage ? "measured" : "unavailable", usage_status: measured.status, denials: result.denials.length, denied: nativeDenials(result.denials), report_refusals: result.reportRefusals.length, max_turns: maxTurns, ...(turnLimit ? { stop: "max_turns" } : {}) });
 	if (turnLimit) process.stderr.write(`[native claude] stopped at the turn limit (${maxTurns} turns)\n`);
 	process.stderr.write(`[native claude] exit ${result.exit?.code ?? result.exit?.signal ?? "none"}; lockdown ${lockdown}; report ${result.report ? "accepted" : "none"}${result.error ? `; ${result.error}` : ""}\n`);
-	const pending = usage as { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } } | undefined;
 	return {
 		reported: Boolean(result.report),
 		code: result.exit?.code || 1,
 		runId,
-		...(pending ? { pending: { input: pending.input, output: pending.output, cache_read: pending.cacheRead, cache_write: pending.cacheWrite, total_tokens: pending.totalTokens, cost_usd: pending.cost.total } } : {}),
+		...(usage ? { pending: { input: usage.input, output: usage.output, cache_read: usage.cacheRead, cache_write: usage.cacheWrite, total_tokens: usage.totalTokens, cost_usd: usage.cost.total } } : {}),
 	};
 }
 
@@ -178,7 +169,7 @@ async function dueFollowUps(ran: Turn): Promise<string[]> {
 	// Claimed before the admission await: a send queued during it waits for the next turn end, never lost.
 	const queued = claimFollowUps(runDir);
 	if (queued.length === 0) return [];
-	if (abort.signal.aborted) return (returnClaim(runDir), []);
+	if (abort.signal.aborted || stopping) return (returnClaim(runDir), []);
 	const events = join(env.CP_HOME ?? "", paths.eventsFile(env.CP_JOB_ID ?? ""));
 	const recorded = existsSync(events) && readFileSync(events, "utf8").includes(ran.runId);
 	try {
@@ -256,8 +247,16 @@ function command(line: string): void {
 	reply({ success: false, error: why });
 }
 
-/** Stdin end or SIGTERM aborts a live run; the exit waits for claude's observed exit inside the run. */
+/**
+ * Stdin end or SIGTERM aborts a live run; the exit waits for claude's observed exit inside the run. A turn still in
+ * flight first gets `NATIVE_RESULT_GRACE_MS` for its `result`, so its usage is measured; a second stop aborts at once.
+ */
 async function stop(): Promise<void> {
+	const deadline = Date.now() + NATIVE_RESULT_GRACE_MS;
+	if (!stopping) {
+		stopping = true;
+		while (busy && finalResult === undefined && Date.now() < deadline) await sleep(50);
+	}
 	abort.abort();
 	process.exit((await run) ?? 0);
 }

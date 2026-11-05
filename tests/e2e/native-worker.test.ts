@@ -11,7 +11,9 @@ import { type TestContext, test } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_BUDGET_CONFIG, EMPTY_USAGE, LAYOUT, paths } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
+import { setTimeout as sleep } from "node:timers/promises";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
+import { NATIVE_RESULT_GRACE_MS } from "../../src/drivers/claude-usage.ts";
 import { checkBudget } from "../../src/failures.ts";
 import type { JobTranscriptResponse } from "../../src/viewer/api-types.ts";
 import { jobsView } from "../../src/viewer/jobs-view.ts";
@@ -204,6 +206,76 @@ test("turn limit: a native run stopped at CP_NATIVE_MAX_TURNS fails as turn_limi
 	const after = readFleet(h.b.home).jobs.find((entry) => entry.job_id === job.id);
 	assert.deepEqual([after?.phase, after?.worker.driver], ["failed", "claude"]);
 	assert.equal(h.claude.overrun(), 0);
+});
+
+// N4a: cp-s26-flake-research-dudi cost $1.81 at error_max_turns but recorded 0, and its denials logged a count only.
+test("N4a: an error_max_turns run is measured from modelUsage, and its refused Bash calls are named in native_run", { skip, timeout: 300_000 }, async (t) => {
+	const refused = ["echo x > native-write.txt", "rm -rf native-dir", "touch native-a", "mkdir native-b", "cp README.md native-c", "mv README.md native-d"];
+	const h = await nativeHome(t, [{ kind: "tool_use", calls: refused.map((command) => ({ name: "Bash", input: { command } })) }]);
+	h.toggle(true);
+	const job = await h.job();
+	const ends = (await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] },
+	], { ...h.env, CP_NATIVE_MAX_TURNS: "1" })) as Tool[];
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	const record = await waitFor(() => readFleet(h.b.home).jobs.find((entry) => entry.job_id === job.id), (entry) => entry?.phase === "failed", { timeoutMs: 120_000, what: "failed native job" });
+	assert.equal(record?.failure?.class, "turn_limit");
+	const run = readRunEvents(h.b.home, job.id).find((event) => event.type === "native_run")?.payload as Record<string, unknown> | undefined;
+	assert.deepEqual([run?.result_subtype, run?.usage, run?.usage_status], ["error_max_turns", "measured", "complete"], JSON.stringify(run));
+	const status = readRunStatus(h.b.home, job.id);
+	assert.equal(status.usage_unavailable, undefined);
+	assert.ok(status.usage.cost_usd > 0 && status.usage.total_tokens > 0, JSON.stringify(status.usage));
+	// Six refusals: five are named, each cut at 200 chars (the policy's text runs longer).
+	const denied = run?.denied as string[];
+	assert.equal(run?.denials, 6);
+	assert.equal(denied.length, 5, JSON.stringify(denied));
+	assert.ok(denied.every((line) => line.length <= 200 && line.startsWith("Bash: Refused: ") && / is denied/.test(line)), JSON.stringify(denied));
+	assert.ok(denied.some((line) => line.length === 200), "a reason past 200 chars is cut");
+	assert.equal(h.claude.overrun(), 0);
+});
+
+/** A native job that reports, then holds its last model answer (and so its `result`) on `hold`; torn down in between. */
+async function teardownBeforeResult(t: TestContext, hold: () => Promise<void>) {
+	const ids: string[] = [];
+	const h = await nativeHome(t, [
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
+		{ kind: "text", text: "Reported.", beforeAnswer: hold },
+	]);
+	h.toggle(true);
+	const native = await h.job();
+	ids.push(native.id);
+	const ends = (await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: native.id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `for i in $(seq 600); do [ -f "${h.envelope(native.id)}" ] && break; sleep 0.1; done` } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_teardown", args: { job_id: native.id } }] },
+	], h.env)) as Tool[];
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	const down = ends.find((end) => end.toolName === "cp_teardown");
+	assert.notEqual(down?.isError, true, text(down));
+	assert.equal(down?.result.details?.lease_returned, true, text(down));
+	const events = readRunEvents(h.b.home, native.id);
+	const removed = events.find((event) => event.type === "native_scratch_removed")?.payload as { removed?: string } | undefined;
+	assert.ok(removed?.removed && !existsSync(removed.removed), "the scratch dir survived teardown");
+	const run = events.find((event) => event.type === "native_run")?.payload as Record<string, unknown> | undefined;
+	return { down, events, run, status: readRunStatus(h.b.home, native.id) };
+}
+
+// N4a R1: the soak runs read unavailable because teardown stopped claude between the report and its result.
+test("N4a grace: a teardown before the result waits for it, measures the run and still tears down", { skip, timeout: 300_000 }, async (t) => {
+	const { events, run, status } = await teardownBeforeResult(t, () => sleep(2_500));
+	const seq = (type: string) => events.find((event) => event.type === type)?.seq ?? Number.NaN;
+	assert.ok(seq("shutdown_requested") < seq("message_end"), "teardown was requested before the result was measured");
+	assert.deepEqual([run?.report, run?.result_subtype, run?.usage_status], [true, "success", "complete"], JSON.stringify(run));
+	assert.equal(status.usage_unavailable, undefined);
+	assert.ok(status.usage.cost_usd > 0, JSON.stringify(status.usage));
+});
+
+test("N4a grace: a result that never comes is abandoned after the grace and stays unavailable", { skip, timeout: 300_000 }, async (t) => {
+	const { down, run, status } = await teardownBeforeResult(t, () => new Promise(() => {}));
+	assert.ok((down?.durationMs ?? Infinity) < NATIVE_RESULT_GRACE_MS + 3_000, `teardown took ${down?.durationMs} ms`);
+	assert.deepEqual([run?.report, run?.usage_status], [true, "unavailable"], JSON.stringify(run));
+	assert.equal(status.usage_unavailable, true);
 });
 
 // F1: the fake model reports no usage, so the run's cost and tokens are unknown; recorded as unavailable, never a zero.
