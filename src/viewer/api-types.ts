@@ -209,6 +209,8 @@ export interface ViewerJob extends FlightJob {
  board_lane_id?: string;
  phase: JobPhase; ledger_status: string | null; ledger_disagrees: boolean; mandate_id: string | null;
  cost_usd: number | null; pr_url: string | null; pr_status: string | null; finished_at: string | null;
+ /** S3: "claude, effort high" or "pi (preferred claude: <bounded reason>)"; null when claude was never asked for. */
+ driver_note?: string | null;
  finished_today: boolean; merge_sha: string | null; failure: string | null; blockers: string[];
  /** The envelope headline, one line of at most 80 chars; null until the run reports. */
  summary: string | null;
@@ -571,6 +573,8 @@ export interface WorkspaceStatusResponse {
  spend: {availability: SourceAvailability; observed_at: string; usd: number | null};
  working: {availability: SourceAvailability; observed_at: string; count: number | null};
  done: {availability: SourceAvailability; observed_at: string; count: number | null};
+ /** S3: the Claude subscription item from native runs, never merged into `quota`; absent while the switch is off. */
+ claude?: {state: "ok" | "limited" | "blocked" | "unknown"; label: string; detail: string};
 }
 /** One "Lined up" row: a ready, blocked or queued job with its cp_next verdict. */
 export interface LinedUpItem {kind: "job"; id: string; project: string; title: string | null; verdict: string; reason: string}

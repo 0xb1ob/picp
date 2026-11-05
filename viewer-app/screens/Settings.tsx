@@ -212,7 +212,7 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
   <Section title="Dashboard address" help="Public URL applies to the next board or report link; the Host pin applies to the next dashboard request. Neither restarts anything." keys={VIEWER} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: VIEWER}} restoreText="Unset the public URL and turn the Host pin off?" disabled={disabled}>
    {VIEWER.map(field)}
   </Section>
-  <Section title="Native workers" help="Off by default. On: a research job dispatched with driver claude runs on the installed Claude CLI, one at a time. Off again stops new native jobs only; a running one keeps its driver." keys={WORKERS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: WORKERS}} restoreText="Turn native Claude research workers off?" disabled={disabled}>
+  <Section title="Native workers" help="Off by default, and pi stays every job's driver; no shipped routing rule names claude." keys={WORKERS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: WORKERS}} restoreText="Turn native Claude research workers off?" disabled={disabled}>
    {WORKERS.map(field)}
   </Section>
   {children}

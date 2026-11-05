@@ -206,6 +206,7 @@ export function JobDetail({data, wide, initial, embedded = false}: {data: JobRes
      <div class="job-fact-clock"><dt>Wall clock</dt><dd>{clockFact(job)}</dd></div>
      <div class="job-fact-cost"><dt>Cost</dt><dd>{job.usage_unavailable ? "unavailable (not measured)" : job.cost_usd === null ? "not recorded" : money(job.cost_usd)}</dd></div>
      <div class="job-fact-model"><dt>Model</dt><dd><ModelFact job={job}/></dd></div>
+     {job.driver_note && <div class="job-fact-wide job-fact-driver"><dt>Driver</dt><dd>{job.driver_note}</dd></div>}
      <div class="job-fact-head"><dt>Head</dt><dd>{job.head ? <ShaCopy sha={job.head}/> : "no commits yet"}</dd></div>
      <div class="job-fact-wide job-fact-context"><dt>Context</dt><dd>{job.context ? <ContextChip usage={job.context}/> : "none"}</dd></div>
      <div class="job-fact-wide job-fact-routing"><dt>Routing</dt><dd><RoutingFact job={job}/></dd></div>

@@ -225,7 +225,7 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		public_url: { file_key: "public_url", type: "url", default: null, applies: "next_board_link", label: "Public URL", help: "Where people reach this dashboard, e.g. a reverse proxy's https URL; board and report links use it. Links only: the bind address and the Host and Origin guards stay as they are. Empty clears it." },
 	}),
 	...group("workers", "native", { applies: "next_dispatch", on_invalid: "refuse" }, {
-		native_claude_research: { file_key: "claude_research", type: "boolean", default: false, label: "Native Claude research workers", help: "Off: every job runs on pi. On: a research job dispatched with driver claude runs on the installed Claude CLI, one at a time; nothing else changes. Turning it off stops new native jobs only." },
+		native_claude_research: { file_key: "claude_research", type: "boolean", default: false, label: "Native Claude research workers", help: "A job runs on the installed Claude CLI only when a routing rule (or the dispatch) says driver \"claude\" and this switch is on. Off stops new native jobs and refuses resumes and revives of native ones; they never move to pi. Turning it off then on clears a remembered sign-in, lockdown or no-reset limit block." },
 	}),
 ]);
 
