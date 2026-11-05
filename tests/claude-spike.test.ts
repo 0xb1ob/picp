@@ -3,8 +3,12 @@
  * the version advisory and usage normalization. The driver has no product entry point yet (not wired, step 2).
  */
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import type { HookCallback, SDKResultMessage, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
 import { readOnlyBashRefusal, secretPaths } from "../src/drivers/claude-bash-policy.ts";
 import { CLI_BUILTIN_AGENTS, type InitSurface, lockdownVerdict } from "../src/drivers/claude-lockdown.ts";
@@ -225,4 +229,31 @@ test("spikeUsage: complete on success with other-model work apart; unknown is un
 	const prior = new Map([["claude-side-model", { input: 12, output: 7 }]]);
 	assert.deepEqual(spikeUsage(RESULT, new Set(["claude-picp-fake"]), prior).otherUsage, { inputTokens: 0, outputTokens: 0 });
 	assert.equal("otherUsage" in spikeUsage(RESULT, new Set(["claude-picp-fake"]), undefined), false);
+});
+
+const WORKER = fileURLToPath(new URL("../src/drivers/claude-worker.ts", import.meta.url));
+const startWorker = (env: Record<string, string>) =>
+	spawnSync(process.execPath, [WORKER], { input: `${JSON.stringify({ id: 1, type: "prompt", message: "go" })}\n`, env: { PATH: process.env.PATH ?? "", ...env }, encoding: "utf8", timeout: 60_000 });
+
+// N4b review (#761): until N4f opens ship, the worker refuses a non-research job, and a missing or empty role contract
+// is a named start error; each exits 1 before any claude process starts.
+test("claude-worker: a non-research CP_KIND and a missing or empty system prompt file are named start errors", () => {
+	const dir = mkdtempSync(join(tmpdir(), "cp-native-start-"));
+	try {
+		const job = { CP_JOB_ID: "cp-unit", CP_RUN_DIR: dir, CP_WORKTREE: dir, CP_ARTIFACT_PATH: join(dir, "report.md"), CP_DELIVERY: "local" };
+		const ship = startWorker({ ...job, CP_KIND: "ship", CP_ROLE: "implementer" });
+		assert.equal(ship.status, 1, ship.stderr);
+		assert.match(ship.stderr, /refused: native claude runs research jobs only, not ship\/implementer/);
+		const research = { ...job, CP_KIND: "research", CP_ROLE: "planner" };
+		const missing = startWorker(research);
+		assert.equal(missing.status, 1, missing.stderr);
+		assert.match(missing.stderr, /started without its system prompt file \(CP_NATIVE_SYSTEM_PROMPT_FILE\)/);
+		const file = join(dir, "system-prompt.md");
+		writeFileSync(file, " \n");
+		const empty = startWorker({ ...research, CP_NATIVE_SYSTEM_PROMPT_FILE: file });
+		assert.equal(empty.status, 1, empty.stderr);
+		assert.match(empty.stderr, /system prompt .*system-prompt\.md is empty/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });

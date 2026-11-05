@@ -107,7 +107,10 @@ export const NATIVE_ADDENDUM = [
 	"path (CP_ARTIFACT_PATH), never with a shell heredoc, then call report_result.",
 ].join("\n");
 
-/** Overrides pi's argv with the native worker; the role contract goes to a 0600 file in the run dir, not the argv or env. */
+/**
+ * Overrides pi's argv with the native worker; the role contract goes to a 0600 file in the run dir,
+ * not the argv or env.
+ */
 export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env"> {
 	const runDir = env.CP_RUN_DIR;
 	if (!runDir) throw new NativeDriverError("the native claude worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");

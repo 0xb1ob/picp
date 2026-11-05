@@ -10,7 +10,7 @@ import { join, resolve } from "node:path";
  * Options a command accepts: letters, letters taking a value (`attached`: only as `-U3`), long (or find primary)
  * names, names taking a value, and names whose value is optional so they count only in `--name=value` form.
  */
-type Options = {
+export type Options = {
 	short?: string; shortValue?: string; attached?: string;
 	long?: readonly string[]; longValue?: readonly string[]; longEquals?: readonly string[]; digits?: boolean;
 };
@@ -63,7 +63,7 @@ const GH_OPTIONS: Options = {
 };
 
 /** A table's own entry, so a prototype key such as `constructor` is never a command. */
-function own(table: Record<string, Options>, key: string): Options | undefined {
+export function own(table: Record<string, Options>, key: string): Options | undefined {
 	return Object.hasOwn(table, key) ? table[key] : undefined;
 }
 
@@ -71,7 +71,7 @@ function own(table: Record<string, Options>, key: string): Options | undefined {
  * The first option in `args` that `options` does not name, as written; GNU tools and git bundle short letters.
  * A value is attached (`--opt=v`, `-n5`) or the next word, which must not start with `-`, so no value hides an option.
  */
-function unlistedOption(options: Options, args: readonly string[], primaries: boolean): string | undefined {
+export function unlistedOption(options: Options, args: readonly string[], primaries: boolean): string | undefined {
 	const separateValue = (i: number) => args[i + 1] !== undefined && !(args[i + 1] as string).startsWith("-");
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i] as string;
@@ -124,7 +124,7 @@ export function secretPathIn(path: string, cwd: string, secrets: readonly string
 /** The only redirects allowed: to /dev/null or between stdout and stderr. */
 const HARMLESS_REDIRECT = /^>(\/dev\/null|&[12])(?=[\s;|&)]|$)/;
 
-type Lexed = { segments: string[][] } | { denied: string };
+type Lexed = { segments: string[][]; redirects: string[] } | { denied: string };
 
 /** Names what a `$` followed by `next` expands; only `$?` (and a lone `$`) stays literal enough to run. */
 function expansionAt(next: string | undefined, quote: string | undefined): string | undefined {
@@ -133,14 +133,20 @@ function expansionAt(next: string | undefined, quote: string | undefined): strin
 	if (next === "'" || (next === '"' && quote === undefined)) return "an ANSI-C or locale quote";
 	return next !== undefined && /[A-Za-z0-9_@*#!$-]/.test(next) ? "a variable expansion" : undefined;
 }
-/** Splits on `;`, `&&`, `||`, `|` and newlines with shell quoting; anything that can write or nest is `denied`. */
-function lex(command: string): Lexed {
+/**
+ * Splits on `;`, `&&`, `||`, `|` and newlines with shell quoting; anything that can write or nest is `denied`.
+ * With `redirects`, a `>`, `>>` or `<` file redirect is kept as its target word in `redirects` for the caller to check.
+ */
+export function lex(command: string, options: { redirects?: boolean } = {}): Lexed {
 	const segments: string[][] = [[]];
+	const redirects: string[] = [];
 	let word = "";
 	let inWord = false;
 	let quote: string | undefined;
+	let target = false;
 	const flush = () => {
-		if (inWord) segments[segments.length - 1]?.push(word);
+		if (inWord) (target ? redirects : segments[segments.length - 1])?.push(word);
+		if (inWord) target = false;
 		word = "";
 		inWord = false;
 	};
@@ -172,10 +178,19 @@ function lex(command: string): Lexed {
 			flush();
 		} else if (c === ">" || c === "<") {
 			const harmless = c === ">" && (word === "" || word === "1" || word === "2") ? HARMLESS_REDIRECT.exec(command.slice(i)) : null;
-			if (harmless === null) return { denied: "a redirect" };
-			i += harmless[0].length - 1;
-			word = "";
-			inWord = false;
+			if (harmless !== null) {
+				i += harmless[0].length - 1;
+				word = "";
+				inWord = false;
+			} else if (options.redirects !== true || target) {
+				return { denied: "a redirect" };
+			} else {
+				// `2>f` names a stream; any other word before the operator is an argument.
+				if (word === "1" || word === "2") inWord = false;
+				flush();
+				if (c === ">" && next === ">") i++;
+				target = true;
+			}
 		} else if (c === "(" || c === ")") {
 			return { denied: "a subshell" };
 		} else if (c === "{" || c === "}") {
@@ -189,6 +204,7 @@ function lex(command: string): Lexed {
 		} else if (c === ";" || c === "\n" || c === "&" || c === "|") {
 			if ((c === "&" || c === "|") && next === c) i++;
 			flush();
+			if (target) return { denied: "a redirect without a target" };
 			segments.push([]);
 		} else if (c === "*" || c === "?" || c === "[") {
 			// The shell expands a glob after this check, so an unquoted one could name a secret through a link.
@@ -200,14 +216,24 @@ function lex(command: string): Lexed {
 	}
 	if (quote !== undefined) return { denied: "an unterminated quote" };
 	flush();
-	return { segments: segments.filter((segment) => segment.length > 0) };
+	if (target) return { denied: "a redirect without a target" };
+	return { segments: segments.filter((segment) => segment.length > 0), redirects };
 }
 
-function segmentRefusal(words: readonly string[], cwd: string, secrets: readonly string[]): string | undefined {
+/** The checks every allow-list shares: no env assignment and no secret path in any argument. */
+export function wordsRefusal(words: readonly string[], cwd: string, secrets: readonly string[]): string | undefined {
 	const [name = "", ...args] = words;
 	if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(name)) return "an env assignment";
 	const paths = args.flatMap((arg) => [arg, arg.slice(arg.indexOf("=") + 1), arg.startsWith("-") ? arg.slice(arg.indexOf("/")) : ""]);
 	if (paths.some((path) => path !== "" && secretPathIn(path, cwd, secrets))) return "a secret path (settings, Claude config, /proc or /dev/fd)";
+	return undefined;
+}
+
+/** One segment against the read-only list (and git/gh reads); undefined when it may run. */
+export function segmentRefusal(words: readonly string[], cwd: string, secrets: readonly string[]): string | undefined {
+	const shared = wordsRefusal(words, cwd, secrets);
+	if (shared !== undefined) return shared;
+	const [name = "", ...args] = words;
 	const [sub = "", verb = ""] = args;
 	if (name === "git" || name === "gh") {
 		const known = name === "git" ? own(GIT_READ, sub) : GH_NOUNS.has(sub) && GH_READ.has(verb) ? GH_OPTIONS : undefined;

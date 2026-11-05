@@ -5,7 +5,7 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
 	createSdkMcpServer,
@@ -58,12 +58,14 @@ import { workerHostGuard } from "../worker-host-guard.ts";
 import { assertBriefIsSafe } from "../worker-manager.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../worker-merge-guard.ts";
 import { readOnlyBashRefusal, secretPathIn, secretPaths } from "./claude-bash-policy.ts";
+import { nativeRole, RESEARCH_TOOLS, roleTools, writeScopeGuard } from "./claude-roles.ts";
+import { shipBashRefusal } from "./claude-ship-policy.ts";
 import { type HooksListing, type Lockdown, lockdownVerdict } from "./claude-lockdown.ts";
 import { assertNativeEffort } from "./claude.ts";
 
 /** The lowest `claude --version` this spike measured working (docs/native-drivers.md "Spike result"). */
 export const CLAUDE_VERSION_FLOOR = "2.1.318";
-export const SPIKE_TOOLS: readonly string[] = ["Read", "Grep", "Glob", "Bash", "Write"];
+export const SPIKE_TOOLS: readonly string[] = RESEARCH_TOOLS;
 export const REPORT_TOOL = "mcp__picp__report_result";
 const HOST_ENV_ALLOW = ["PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ"] as const;
 const EXIT_GRACE_MS = 10_000;
@@ -89,6 +91,8 @@ export interface SpikeJob {
 	worktree: string;
 	/** Predeclared research artifact; its directory is the only place Write may touch. */
 	artifactPath: string;
+	/** Implementer only: grant and home `exclude_paths` no Edit/Write may touch, read by the worker process. */
+	excludePaths?: readonly string[];
 }
 
 /** A Claude tool call in picp's worker-guard vocabulary (`bash` {command}, `read`/`write` {path}, …). */
@@ -167,16 +171,22 @@ export function normalizeToolCall(toolName: string, input: unknown): NormalizedC
 	if (toolName === "Bash") return { name: "bash", input: { command: args.command } };
 	if (toolName === "Read") return { name: "read", input: { path: args.file_path } };
 	if (toolName === "Write") return { name: "write", input: { path: args.file_path } };
+	if (toolName === "Edit") return { name: "edit", input: { path: args.file_path } };
 	if (toolName === "Grep") return { name: "grep", input: { pattern: args.pattern, path: args.path } };
 	if (toolName === "Glob") return { name: "find", input: { pattern: args.pattern, path: args.path } };
 	if (toolName === REPORT_TOOL) return { name: "report_result", input: args };
 	return undefined;
 }
 
-/** picp's worker-reporter `tool_call` refusals, in the same order, plus the research write scope and secret paths. */
-export function spikeGuards(job: SpikeJob, secrets: readonly string[] = secretPaths(null, [homedir(), userInfo().homedir])): SpikeGuard[] {
+/** picp's worker-reporter `tool_call` refusals, in the same order, plus the role's Bash and write scope and secret paths. */
+export function spikeGuards(
+	job: SpikeJob,
+	secrets: readonly string[] = secretPaths(null, [homedir(), userInfo().homedir]),
+	role: Role = job.role,
+): SpikeGuard[] {
+	const native = nativeRole(role);
+	const writeScope = writeScopeGuard(job, secrets, native);
 	let ciStatusQueries = 0;
-	const writeRoot = dirname(resolve(job.artifactPath));
 	const bash: SpikeGuard = (call) => {
 		if (call.name !== "bash") return undefined;
 		const command = call.input.command;
@@ -197,14 +207,8 @@ export function spikeGuards(job: SpikeJob, secrets: readonly string[] = secretPa
 		if (keySearch) return credentialSearchRefusal(keySearch);
 		if (shellPatchCommand(command)) return shellPatchRefusal();
 		if (ciStatusQuery(command) && ciStatusQueries++ >= 1) return ciStatusRepeatRefusal();
+		if (native === "implementer") return shipBashRefusal(command, job.worktree, secrets, job.job_id, job.excludePaths);
 		return readOnlyBashRefusal(command, job.worktree, secrets);
-	};
-	const writeScope: SpikeGuard = (call) => {
-		if (call.name !== "write") return undefined;
-		const path = call.input.path;
-		const rel = typeof path === "string" ? relative(writeRoot, resolve(job.worktree, path)) : "..";
-		const inside = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-		return inside ? undefined : `Refused: a research worker writes only its artifact directory ${writeRoot} (got ${String(path)}).`;
 	};
 	return [
 		(call) => (WORKER_FORBIDDEN_TOOLS.includes(call.name) ? `${call.name} is a parent-only tool.` : undefined),
@@ -213,7 +217,8 @@ export function spikeGuards(job: SpikeJob, secrets: readonly string[] = secretPa
 		(call) => {
 			const paths = call.name === "find" ? [call.input.path, call.input.pattern] : call.name === "read" || call.name === "grep" ? [call.input.path] : [];
 			const secret = paths.find((path) => typeof path === "string" && secretPathIn(path, job.worktree, secrets));
-			return secret === undefined ? undefined : `Refused: a research worker never reads the Claude settings, its config, /proc or /dev/fd (${String(secret)}).`;
+			const who = native === "research" ? "a research worker" : "an implementer";
+			return secret === undefined ? undefined : `Refused: ${who} never reads the Claude settings, its config, /proc or /dev/fd (${String(secret)}).`;
 		},
 		(call) => workerHostGuard(call.name, call.input, job.runDir),
 	];
@@ -422,6 +427,7 @@ async function runInScratch(
 	const secrets = secretPaths(settingsPath, [homedir(), userInfo().homedir]);
 	for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const state: ReportState = { refusals: [], attempts: 0 };
+	const tools = options.tools ?? roleTools(options.job.role);
 	const denials: SpikeResult["denials"] = [];
 	const models = new Set<string>();
 	let child: ChildProcess | undefined;
@@ -471,8 +477,8 @@ async function runInScratch(
 		managedSettings: { disableAllHooks: true },
 		strictMcpConfig: true,
 		mcpServers: { picp: reportServer(options.job, state) },
-		tools: [...(options.tools ?? SPIKE_TOOLS)],
-		allowedTools: [...(options.tools ?? SPIKE_TOOLS), REPORT_TOOL],
+		tools: [...tools],
+		allowedTools: [...tools, REPORT_TOOL],
 		disallowedTools: ["Agent", "Task", "WebFetch", "WebSearch"],
 		agents: {},
 		plugins: [],
@@ -490,7 +496,7 @@ async function runInScratch(
 		...nativeEffortOptions(options.thinking),
 		...(options.resume === undefined ? {} : { resume: options.resume.sessionId }),
 	};
-	const expectedTools = [...(options.tools ?? SPIKE_TOOLS), REPORT_TOOL];
+	const expectedTools = [...tools, REPORT_TOOL];
 	try {
 		const q = query({ prompt: options.prompt, options: sdkOptions });
 		for await (const message of q) {

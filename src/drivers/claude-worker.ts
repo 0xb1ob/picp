@@ -12,6 +12,7 @@ import { join } from "node:path";
 import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { type Delivery, paths, type Usage } from "../contracts.ts";
 import { NATIVE_RESULT_GRACE_MS, nativeDenials, nativeRunUsage } from "./claude-usage.ts";
+import { implementerExclusions, nativeRole } from "./claude-roles.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
 import { type NativeTranscript, nativeTranscript, nativeTranscriptFile } from "./claude-transcript.ts";
 import { modelFamily, type NativeObservation, OBSERVATION_EVENT, turnObserver } from "./claude-observation.ts";
@@ -135,7 +136,10 @@ async function turn(prompt: string): Promise<Turn> {
 	}
 	transcript.prompt(prompt, resumed);
 	const result = await runClaudeSpike({
-		job: { job_id: jobId, kind: env.CP_KIND, role: env.CP_ROLE, delivery: env.CP_DELIVERY as Delivery, runDir, worktree, artifactPath },
+		job: {
+			job_id: jobId, kind: env.CP_KIND, role: env.CP_ROLE, delivery: env.CP_DELIVERY as Delivery, runDir, worktree, artifactPath,
+			...(nativeRole(env.CP_ROLE) === "implementer" ? { excludePaths: implementerExclusions(env.CP_HOME ?? "") } : {}),
+		},
 		systemPrompt,
 		prompt,
 		signal: abort.signal,
