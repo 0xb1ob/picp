@@ -22,6 +22,8 @@ export class NativeDriverError extends Error {
 
 const WORKER_ENTRY = fileURLToPath(new URL("./claude-worker.ts", import.meta.url));
 const LIVE_PHASES: readonly string[] = ["launching", "waiting", "held"];
+// One shared load: concurrent admissions awaiting their own import() could see the module before it finished evaluating.
+let spike: Promise<typeof import("./claude-spike.ts")> | undefined;
 const DELIVERIES: readonly Delivery[] = ["local", "answer"];
 const NATIVE_MODEL = /^anthropic\/(claude-[A-Za-z0-9][A-Za-z0-9._[\]-]*)$/;
 /** Routed thinking levels the SDK serves as `effort`; `off` disables thinking and `minimal` has no native equivalent. */
@@ -58,7 +60,8 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 	if (live.length > 0) return { category: "occupied", why: `native concurrency is 1 and ${live.join(", ")} is live; tear it down first` };
 	try {
 		// Loaded on use: the SDK it imports is not on the extension's startup path.
-		const { resolveClaude } = await import("./claude-spike.ts");
+		spike ??= import("./claude-spike.ts");
+		const { resolveClaude } = await spike;
 		resolveClaude(input.env ?? process.env);
 	} catch (error) {
 		return { category: (error as { cli?: string }).cli === "missing" ? "cli_missing" : "cli_version", why: (error as Error).message };
