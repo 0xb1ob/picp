@@ -48,6 +48,8 @@ test("implementer guards: network, escapes, expansions, secrets, .git and exclus
 			bash("printenv"), bash("echo $HOME"), bash("sudo ls"), bash("gh pr merge 1"), bash("gh pr view 1"), bash("git switch main"),
 			bash("node -e 1"), bash("npm install x"), bash("npm run evil"), bash("rm -rf .git"), bash("cp README.md /tmp/x"),
 			bash("mv README.md ../x"), bash("cat /proc/self/environ"), bash("echo x > .github/workflows/x"), bash("cat <<EOF"),
+			bash("git restore .github/workflows/x.yml"), bash("git restore --source HEAD~1 -- .github/workflows/x.yml"),
+			bash("git checkout -- .github/workflows/x.yml"),
 			write("Edit", join(worktree, ".env")), write("Write", ".github/workflows/x.yml"), write("Write", "../x"), write("Write", "out/x"),
 			write("Write", "dangling.md"), write("Write", ".git/hooks/pre-commit"), write("Edit", join(worktree, ".git", "config")),
 			write("Write", "/op/.claude/settings.json"), write("Write", worktree), ["Read", { file_path: "/proc/self/environ" }],
@@ -57,6 +59,7 @@ test("implementer guards: network, escapes, expansions, secrets, .git and exclus
 			bash("git add -A"), bash("git commit -m x"), bash("npm run test:one -- tests/x.test.ts"), bash("npm run typecheck"), bash("npm ci"),
 			bash("git status --porcelain && git diff --stat"), bash("git switch cp-ship-unit"), bash("npx tsx scripts/x.ts"),
 			bash("node scripts/x.ts arg"), bash("mkdir -p src/new && echo x > src/new/a.txt 2>/dev/null"), bash("rm -f src/old.ts"),
+			bash("git restore src/x.ts"),
 			write("Edit", join(worktree, "src", "x.ts")), write("Write", "src/new.ts"), ["Read", { file_path: join(worktree, "README.md") }],
 		];
 		for (const [tool, input] of allowed) assert.equal((await decide(hook, tool, input))?.permissionDecision, "allow", JSON.stringify(input));

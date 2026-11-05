@@ -67,11 +67,16 @@ function optionRefusal(options: Options, args: readonly string[], label: string)
 	return option === undefined ? undefined : `\`${label}\` option \`${option}\` (not on its allow-list)`;
 }
 
-function gitRefusal(args: readonly string[], worktree: string, secrets: readonly string[], branch: string): string | undefined {
+function gitRefusal(args: readonly string[], worktree: string, secrets: readonly string[], branch: string, excluded: readonly string[]): string | undefined {
 	const [sub = "", ...rest] = args;
 	if (sub.startsWith("-") || GIT_DENIED.has(sub)) return `\`git ${sub}\` (no network, config or other checkout; picp's tools push)`;
 	if (sub === "stash") return rest[0] === "push" ? optionRefusal(STASH_PUSH, rest.slice(1), "git stash push") : "`git stash` (only `git stash push`)";
-	if (sub === "checkout") return rest[0] === "--" && rest.length > 1 ? pathArgsRefusal(rest, worktree, []) : "`git checkout` (only `git checkout -- <path>`)";
+	if (sub === "checkout") return rest[0] === "--" && rest.length > 1 ? pathArgsRefusal(rest, worktree, excluded) : "`git checkout` (only `git checkout -- <path>`)";
+	if (sub === "restore") {
+		// The `--source`/`-s` value is a ref, not a path; every other positional must be a writable worktree path.
+		const paths = rest.filter((_, i) => !(rest[i - 1] === "--source" || /^-[SW]*s$/.test(rest[i - 1] ?? "")));
+		return optionRefusal(GIT_WRITE.restore as Options, rest, "git restore") ?? pathArgsRefusal(paths, worktree, excluded);
+	}
 	if (sub === "switch") return rest.length === 1 && rest[0] === branch ? undefined : `\`git switch\` (only to ${branch})`;
 	const known = own(GIT_WRITE, sub);
 	return known === undefined ? segmentRefusal(["git", ...args], worktree, secrets) : optionRefusal(known, rest, `git ${sub}`);
@@ -90,7 +95,7 @@ function segmentShipRefusal(words: readonly string[], worktree: string, secrets:
 	if (shared !== undefined) return shared;
 	const [name = "", ...args] = words;
 	if (DENIED.has(name)) return `\`${name}\` (denied to an implementer)`;
-	if (name === "git") return gitRefusal(args, worktree, secrets, branch);
+	if (name === "git") return gitRefusal(args, worktree, secrets, branch, excluded);
 	if (name === "npm") return npmRefusal(args, worktree, excluded);
 	if (name === "node" || (name === "npx" && args[0] === "tsx")) {
 		const scriptArgs = name === "node" ? args : args.slice(1);
