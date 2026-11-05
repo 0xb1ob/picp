@@ -36,7 +36,7 @@ import { readParentLock } from "../../src/parent-lock.ts";
 import type { ParentStartResult } from "../../src/parent-control.ts";
 import { parentModelSetting } from "../../src/parent-context.ts";
 import { FleetStore, isPidAlive } from "../../src/fleet.ts";
-import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_MAX_TIMEOUT_S, restartNotice } from "../../src/drain.ts";
+import { DRAIN_DEFAULT_TIMEOUT_S, DRAIN_MAX_TIMEOUT_S, killNotice } from "../../src/drain.ts";
 import { ParentSendDelegationSchema, parentSendFile, sendIdOfMessage } from "../../src/parent-outbox.ts";
 import { recordOperatorSession } from "../../src/operator-session-log.ts";
 import { type DashboardControl, dashboardCommand, entryOfMessage, startDashboardControl, userMessageContent } from "../../src/dashboard-control.ts";
@@ -45,6 +45,7 @@ import { parentRestartPorts, restartedLine } from "../../src/parent-restart.ts";
 import { settingsPorts } from "../../src/settings-control.ts";
 import { startVersionLine, type VersionLine } from "./version-line.ts";
 import { modelPick } from "./model-pick.ts";
+import { registerOperatorModelApply } from "./model-apply.ts";
 import { atomicWriteJson } from "../../src/json-store.ts";
 import { registerOperatorCompact } from "../../src/operator-compact.ts";
 import { OPERATOR_NOTE } from "../../src/operator-note.ts";
@@ -229,16 +230,7 @@ export default function (pi: ExtensionAPI): void {
 	const compaction = registerOperatorCompact(pi, () => connectedTarget ?? resolveOperatorTarget());
 	const operatorStateDir = () => { const target = connectedTarget ?? resolveOperatorTarget(); return resolve(target.home, layoutForHome(target.mode, target.home).state); };
 	const operatorAsks = () => new OperatorAsks(resolve(operatorStateDir(), "operator/asks.jsonl"));
-	// Read before a stop or rotate kills the parent's workers: drained, or how many die.
-	const killNotice = (): string => {
-		try {
-			const target = connectedTarget ?? resolveOperatorTarget();
-			configureLayout(target.mode, target.home);
-			return restartNotice(target.home, () => new FleetStore({ home: target.home }).list());
-		} catch (error) {
-			return `warning: drain state and live workers unknown (${(error as Error).message})`;
-		}
-	};
+	const modelApply = registerOperatorModelApply(pi, () => connectedTarget ?? resolveOperatorTarget(), compaction);
 	const parentRestart = parentRestartPorts({ home: () => { const t = connectedTarget ?? resolveOperatorTarget(); configureLayout(t.mode, t.home); return t.home; },
 		client: () => ensureClient(undefined, undefined, true), restarted: (r) => { if (connectedTarget?.parentPid && r.pid) saveOperatorTarget(connectedTarget = { ...connectedTarget, parentPid: r.pid }); } });
 	const ensureClient = async (home?: string, mode?: Mode, readOnly = false): Promise<ParentHostClient> => {
@@ -511,7 +503,7 @@ export default function (pi: ExtensionAPI): void {
 					hasPendingMessages: () => sessionCtx?.hasPendingMessages() ?? false, entryOf: (message) => entryOfMessage(sessionCtx?.sessionManager, message),
 					sessionFile: () => sessionCtx?.sessionManager?.getSessionFile() ?? process.env.PI_SESSION_FILE,
 					...relaunchPorts({ target: () => target, ctx: () => sessionCtx, whenIdle: compaction.whenIdle }),
-					...settingsPorts({ target: () => target }),
+					...settingsPorts({ target: () => target, applied: modelApply.check }),
 					parentRestart: parentRestart.parentRestart, parentRestartState: parentRestart.parentRestartState, command: dashboardCommand,
 				},
 			});
@@ -770,7 +762,7 @@ export default function (pi: ExtensionAPI): void {
 				if (params.action === "restart") { const r = await parentRestart.restart(params.fresh ? "clean" : "resume"); return textResult(restartedLine(r), { ...r }); }
 				if (["status", "compact", "rotate", "model"].includes(params.action)) {
 					const activeClient = await ensureClient();
-					const notice = params.action === "rotate" ? killNotice() : undefined;
+					const notice = params.action === "rotate" ? killNotice(() => connectedTarget ?? resolveOperatorTarget()) : undefined;
 					const result = params.action === "status" ? { ...await activeClient.request("statusWithContext") as Record<string, unknown>, asks: operatorAsks().open() }
 						: params.action === "compact" ? await activeClient.request("compact", params.text)
 						: params.action === "rotate" ? await activeClient.request("rotate") : await activeClient.request("model", params.model!);
@@ -778,7 +770,7 @@ export default function (pi: ExtensionAPI): void {
 				}
 				const activeClient = await ensureClient();
 				const target = connectedTarget;
-				const notice = killNotice();
+				const notice = killNotice(() => connectedTarget ?? resolveOperatorTarget());
 				const exit = await activeClient.request("stop", { discardPending: true }) as { code: number | null; signal: NodeJS.Signals | null } | null;
 				if (exit && target) clearOperatorTarget(target);
 				activeClient.disconnect();

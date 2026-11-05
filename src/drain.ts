@@ -16,9 +16,9 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { type FleetRecord, isoTimestamp, LAYOUT, type RunPhase } from "./contracts.ts";
+import { configureLayout, type FleetRecord, isoTimestamp, LAYOUT, type Mode, type RunPhase } from "./contracts.ts";
 import type { DurableWakeupEntry } from "./contracts/wakeups.ts";
-import { isPidAlive } from "./fleet.ts";
+import { FleetStore, isPidAlive } from "./fleet.ts";
 import { atomicWriteJson } from "./json-store.ts";
 import { PARENT_CONTROL_BUSY } from "./parent-diagnostics.ts";
 import { assertNoUpdatePending } from "./update-hold.ts";
@@ -502,6 +502,17 @@ export function formatDrain(record: DrainRecord, home: string): string {
 /** What `cp_parent stop`/`rotate` says before it kills the parent's workers. */
 export function restartNotice(home: string, records: () => readonly FleetRecord[]): string {
 	return restartSafety(home, records).reason;
+}
+
+/** `restartNotice` for the operator's target home, read before a stop or rotate; a failed read is a warning line. */
+export function killNotice(target: () => { home: string; mode: Mode }): string {
+	try {
+		const { home, mode } = target();
+		configureLayout(mode, home);
+		return restartNotice(home, () => new FleetStore({ home }).list());
+	} catch (error) {
+		return `warning: drain state and live workers unknown (${(error as Error).message})`;
+	}
 }
 
 /** The one safe-to-restart truth: safe only once drained; `reason` is what stop, rotate and the dashboard show. */

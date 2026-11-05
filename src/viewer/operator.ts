@@ -166,7 +166,6 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 	process.on("exit", stopViewer);
 	// Restart session: pi gets the marker path; a marker naming the exited child relaunches it here (src/operator-relaunch.ts).
 	const relaunchFile = options.relaunchFile ?? defaultRelaunchFile();
-	const model = configuredOperatorModel(home);
 	const skills = operatorSkillPaths(home);
 	let current: ChildProcess | undefined;
 	let signalled = false;
@@ -178,7 +177,8 @@ export async function runOperator(argv: readonly string[], options: { piBin?: st
 	for (const signal of OPERATOR_SIGNALS) process.on(signal, onSignal);
 	try {
 		return await superviseOperatorPi({
-			spawnPi: (args, env) => spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args, process.env, model), [...OPERATOR_BUILTIN_EXTENSIONS, ...web.extensions], skills), {
+			// Each spawn re-reads data/operator.json: a launcher started days ago must not relaunch on stale flags.
+			spawnPi: (args, env) => spawn(options.piBin ?? "pi", operatorPiArgs(PACKAGE_ROOT, operatorModelArgs(args, process.env, configuredOperatorModel(home)), [...OPERATOR_BUILTIN_EXTENSIONS, ...web.extensions], skills), {
 				stdio: "inherit",
 				env: { ...process.env, ...env, ...(address.local ? { CP_VIEWER_HOST: host } : {}), CP_VIEWER_PORT: String(port), CP_OPERATOR_WEB_STATUS: web.status ?? "" },
 			}),

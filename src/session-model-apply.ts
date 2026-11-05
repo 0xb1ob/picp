@@ -1,7 +1,8 @@
 /** A Settings model/thinking change switches a live session at its next idle point (`state/model-apply.jsonl`). */
 import { join } from "node:path";
-import { LAYOUT, type ThinkingLevel } from "./contracts.ts";
+import { LAYOUT, layoutForHome, type ThinkingLevel } from "./contracts.ts";
 import { durableAppend } from "./json-store.ts";
+import { operatorModelSetting, operatorThinkingSetting } from "./operator-compact.ts";
 import { parentModelSetting, parentThinkingSetting } from "./parent-context.ts";
 import { CpBridgeError } from "./cp-bridge-error.ts";
 import type { WorkerProcess } from "./worker-process.ts";
@@ -12,7 +13,7 @@ export type ModelApplyOutcome = "queued" | "applied" | "cancelled" | "failed";
 export interface ModelApplyLine { v: 1; type: "model_apply"; at: string; session: ModelApplySession; state: ModelApplyOutcome; model: string | null; thinking: string | null; reason?: string }
 export interface ModelSettings { model: string | undefined; thinking: ThinkingLevel | undefined }
 /** `seen`: the file values at session start or at the last apply; `queued`: a `queued` row waits for its outcome. */
-export interface ModelApplyTrack { seen: ModelSettings; queued: boolean }
+export interface ModelApplyTrack { seen: ModelSettings; queued: boolean; relayed?: string }
 export type ModelApplyPlan = "none" | "queue" | "cancel" | "apply";
 
 export const modelApplyFile = (home: string): string => join(home, LAYOUT.state, "model-apply.jsonl");
@@ -35,7 +36,16 @@ export function planModelApply(input: { seen: ModelSettings; desired: ModelSetti
 	return "apply";
 }
 
-export const parentFileSettings = (home: string): ModelSettings => ({ model: parentModelSetting(home), thinking: parentThinkingSetting(home) });
+/** An owner file's `model`/`thinking`: absent file → unset; unreadable or invalid JSON throws. */
+export const fileSettings = (file: string): ModelSettings => ({ model: operatorModelSetting(file), thinking: operatorThinkingSetting(file) });
+export const parentFileSettings = (home: string): ModelSettings => fileSettings(join(home, layoutForHome("multi", home).data, "parent.json"));
+
+/** Relays `text` unless it was the last one relayed for this track: a broken file says so once, not every tick. */
+export function relayOnce(track: ModelApplyTrack, text: string, relay: (text: string) => void): void {
+	if (track.relayed === text) return;
+	track.relayed = text;
+	relay(text);
+}
 
 export interface ParentApplyPorts {
 	/** Why the parent is not settled; `not_running` skips (a stopped parent takes the file at its next start). */
@@ -58,7 +68,10 @@ export async function requestThinking(proc: Pick<WorkerProcess, "request">, leve
 export async function applyParentSettings(home: string, track: ModelApplyTrack, ports: ParentApplyPorts): Promise<void> {
 	const unsettled = ports.unsettled();
 	if (unsettled === "not_running") return;
-	const desired = parentFileSettings(home);
+	let desired: ModelSettings;
+	try { desired = parentFileSettings(home); }
+	catch (error) { return relayOnce(track, `parent Settings model apply skipped: data/parent.json unreadable (${(error as Error).message})`, ports.relayError); }
+	track.relayed = undefined;
 	const plan = planModelApply({ seen: track.seen, desired, settled: !unsettled, queued: track.queued });
 	const row = (state: ModelApplyOutcome, values: ModelSettings, reason?: string) => {
 		const failed = appendModelApply(home, { session: "parent", state, model: values.model ?? null, thinking: values.thinking ?? null, ...(reason ? { reason } : {}) });
@@ -90,13 +103,15 @@ export async function applyParentSettings(home: string, track: ModelApplyTrack, 
 	} catch (error) {
 		const reason = `${(error as Error).message}; ${ports.model() ?? kept ?? "the old model"} still runs`;
 		row("failed", desired, reason);
-		ports.relayError(`parent Settings model apply failed: ${reason}`);
+		relayOnce(track, `parent Settings model apply failed: ${reason}`, ports.relayError);
 	}
 }
 
 /** A fresh track at a (re)start; a switch still queued before it gets `cancelled`: the start rules applied instead. */
 export function seedParentApply(home: string, previous: ModelApplyTrack | undefined): ModelApplyTrack {
-	const seen = parentFileSettings(home);
+	let seen: ModelSettings;
+	try { seen = parentFileSettings(home); }
+	catch { seen = { model: parentModelSetting(home), thinking: parentThinkingSetting(home) }; } // unreadable: the next tick relays it
 	if (previous?.queued) appendModelApply(home, { session: "parent", state: "cancelled", model: seen.model ?? null, thinking: seen.thinking ?? null, reason: "parent restarted; start rules applied" });
 	return { seen, queued: false };
 }
