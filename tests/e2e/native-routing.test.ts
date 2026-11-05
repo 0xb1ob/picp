@@ -4,16 +4,19 @@
  * in a mode-0700 temp HOME; fake `claude` executables only stand in for the missing and too-old CLI cases.
  */
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
+import { installedClaudeVersion } from "../../src/drivers/claude.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
+import { nativeAvailabilityFile, readNativeAvailability, recordNativeObservation } from "../../src/native-availability.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_CLAUDE_MODEL, FAKE_NATIVE_MODEL, startClaudeMockProvider } from "../harness/claude-mock-provider.ts";
+import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_CLAUDE_MODEL, FAKE_NATIVE_MODEL, startClaudeMockProvider, subscriberEnv } from "../harness/claude-mock-provider.ts";
+import { seedOperatorPick } from "../harness/operator-pick.ts";
 import { readFleet, readRunEvents, treehouseAvailable } from "../harness/index.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
@@ -27,7 +30,7 @@ const report = (jobId: string, home: string) => ({
 });
 
 /** A home whose S rows prefer claude (pi lane: the fake native model, then a mock pi model); L rows are plain pi. */
-async function routedHome(t: TestContext, script: readonly ClaudeStep[]) {
+async function routedHome(t: TestContext, script: readonly ClaudeStep[], options: { subscriber?: boolean } = {}) {
 	const b = await dispatchS29(t);
 	const claude = await startClaudeMockProvider(script);
 	const scratch = mkdtempSync(join(tmpdir(), "cp-s1-native-"));
@@ -35,7 +38,8 @@ async function routedHome(t: TestContext, script: readonly ClaudeStep[]) {
 	t.after(async () => { await claude.close(); rmSync(scratch, { recursive: true, force: true }); });
 	const fakeHome = join(scratch, "home");
 	mkdirSync(join(fakeHome, ".claude"), { recursive: true, mode: 0o700 });
-	writeFileSync(join(fakeHome, ".claude", "settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: claude.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN } }));
+	const settingsEnv = options.subscriber ? subscriberEnv(claude.url) : { ANTHROPIC_BASE_URL: claude.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN };
+	writeFileSync(join(fakeHome, ".claude", "settings.json"), JSON.stringify({ env: settingsEnv }));
 	const piModel = b.provider.addScript(`s1-pi-${Math.random().toString(36).slice(2, 8)}`, Array.from({ length: 12 }, () => ({ kind: "text" as const, text: "idle" })));
 	const rows = (native: Record<string, unknown>) => [
 		{ id: "native-research", role: "planner", scope: ["S"], model: FAKE_NATIVE_MODEL, fallbacks: [piModel], thinking: "high", ...native },
@@ -212,6 +216,113 @@ test("S1 config: an unknown driver or a non-anthropic claude model refuses with 
 	assert.match(text(refused), /native_refused.*explicit anthropic\/claude-… model.*Nothing was spawned/);
 	assert.equal(readRunEvents(h.b.home, locked.id).filter((event) => event.type === "worker_revived").length, 1, "a second spawn ran");
 	assert.equal(h.claude.requests.length, requests);
+});
+
+test("S1 carry: a native primary missing from a plain allowlist falls back with denied:, and an explicit driver refuses", { skip, timeout: 300_000 }, async (t) => {
+	const h = await routedHome(t, []);
+	h.toggle(true);
+	const [fallback, explicit] = await Promise.all([h.job(), h.job()]);
+	writeFileSync(join(h.b.home, LAYOUT.routingFile), JSON.stringify({ ...JSON.parse(h.routing()) as object, allow: ["mock/*"] }));
+	const ends = (await h.b.run([dispatch(fallback.id), dispatch(explicit.id, { driver: "claude", model: FAKE_NATIVE_MODEL })].map((call) => ({ kind: "tool_calls" as const, calls: [call] })), h.env)) as Tool[];
+	const [first, second] = ends.filter((end) => end.toolName === "cp_dispatch");
+	assert.notEqual(first?.isError, true, text(first));
+	const record = h.fleet(fallback.id)!;
+	assert.deepEqual([record.worker.driver, record.worker.model, record.routing?.driver], [undefined, h.piModel, "pi"]);
+	assert.match(record.routing?.driver_reason ?? "", new RegExp(`^denied: the allowlist refuses ${FAKE_NATIVE_MODEL}$`));
+	assert.equal(second?.isError, true, text(second));
+	assert.match(text(second), /allowlist/);
+	h.noLease(explicit.id);
+	assert.equal(h.claude.requests.length, 0);
+});
+
+test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; a started native job never moves", { skip, timeout: 600_000 }, async (t) => {
+	const reset = Math.floor(Date.now() / 1000) + 3600;
+	const h = await routedHome(t, [
+		{ kind: "text", text: "Spent.", limit: { status: "rejected", claim: "five_hour", resetsAt: reset } },
+		{ kind: "text", text: "Ran after the reset.", limit: { status: "allowed", claim: "seven_day", resetsAt: reset } },
+		{ kind: "auth_error" },
+		{ kind: "text", text: "Ran after sign-in." },
+	], { subscriber: true });
+	const file = nativeAvailabilityFile(h.b.home);
+	const version = await installedClaudeVersion();
+	const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+	const runAlone = async (id: string, extra: Record<string, unknown> = {}) => { await h.b.closeParents(); return (await h.b.run([{ kind: "tool_calls", calls: [dispatch(id, extra)] }], h.env)) as Tool[]; };
+	const reason = (id: string) => h.fleet(id)?.routing?.driver_reason ?? "";
+	const ranNative = (id: string) => assert.deepEqual([h.fleet(id)?.worker.driver, h.fleet(id)?.worker.model], ["claude", FAKE_NATIVE_MODEL], reason(id));
+	const ranPi = (id: string, pattern: RegExp) => {
+		assert.deepEqual([h.fleet(id)?.worker.driver, h.fleet(id)?.worker.model], [undefined, h.piModel], reason(id));
+		assert.match(reason(id), pattern);
+	};
+	const [spent, fallback, afterReset, noReset, signedOut, authFallback, signedIn] = await Promise.all([h.job(), h.job(), h.job(), h.job(), h.job(), h.job(), h.job()]);
+	h.toggle(true);
+	// A corrupt snapshot is unknown, never spent: the first job runs native and its 429 writes a fresh snapshot.
+	mkdirSync(dirname(file), { recursive: true });
+	writeFileSync(file, "{not json");
+	await runAlone(spent.id);
+	ranNative(spent.id);
+	assert.equal((await waitFailed(h.fleet, spent.id))?.phase, "failed");
+	const window = readNativeAvailability(h.b.home)?.windows.five_hour;
+	assert.deepEqual([window?.status, window?.resets_at], ["rejected", reset * 1000], "resetsAt is epoch seconds, kept as epoch ms");
+	const requests = h.claude.requests.length;
+
+	// A spent window sends the next new job to pi by name; the failed native job is never revived, re-dispatched or
+	// rerouted onto pi (R1: an operator pick of a pi model), and bounded recovery refused it.
+	await runAlone(fallback.id);
+	ranPi(fallback.id, new RegExp(`^window: five_hour rejected until ${iso(reset * 1000)}$`));
+	const quote = seedOperatorPick(h.b.home, h.piModel, { jobId: spent.id });
+	await h.b.closeParents();
+	const lock = (await h.b.run([
+		tool("cp_revive", { job_id: spent.id, confirm: true }),
+		{ kind: "tool_calls", calls: [dispatch(spent.id)] },
+		{ kind: "tool_calls", calls: [dispatch(spent.id, { model: h.piModel, operator_quote: quote })] },
+	], h.env)) as Tool[];
+	const [revive, redispatch, reroute] = lock.filter((end) => end.toolName === "cp_revive" || end.toolName === "cp_dispatch");
+	assert.match(text(revive), /native_refused.*subscription window is spent.*Nothing was spawned/);
+	assert.equal(redispatch?.isError, true, text(redispatch));
+	assert.match(text(redispatch), /cannot run on the native claude driver: five_hour rejected until/);
+	assert.equal(reroute?.isError, true, text(reroute));
+	ranNative(spent.id);
+	const events = readRunEvents(h.b.home, spent.id);
+	assert.equal(events.filter((event) => event.type === "worker_revived").length, 0, "the spent native job was respawned");
+	assert.equal((events.find((event) => event.type === "recovery_failed")?.payload as { stage?: string } | undefined)?.stage, "native");
+	assert.equal(h.claude.requests.length, requests, "no claude request after the window was spent");
+
+	// At the reset the window is unknown and native is attempted; a no-reset entry from another CLI version is void (iii).
+	// A replayed uuid is ignored; the later allowed seven_day event replaces its rejected entry (i).
+	const snapshot = readNativeAvailability(h.b.home)!;
+	assert.ok(snapshot.seen.length > 0, "the rate-limit event's uuid was kept");
+	snapshot.windows.five_hour = { ...window!, resets_at: Date.now() - 1000 };
+	snapshot.windows.seven_day = { status: "rejected", observed_at: Date.now() - 1000, claude_version: "2.0.0" };
+	writeFileSync(file, JSON.stringify(snapshot));
+	const replay = { type: "native_observation", kind: "window", window: "seven_day", status: "allowed", uuid: snapshot.seen[0], observed_at: Date.now() };
+	assert.equal(recordNativeObservation(h.b.home, replay), false);
+	await runAlone(afterReset.id);
+	ranNative(afterReset.id);
+	assert.match(reason(afterReset.id), /; five_hour unknown since its reset /);
+	await waitFailed(h.fleet, afterReset.id);
+	assert.equal(readNativeAvailability(h.b.home)?.windows.seven_day?.status, "allowed");
+
+	// A rejected window with no reset stays blocked until the switch goes off and on (ii).
+	const seen = { type: "native_observation", kind: "window", window: "five_hour", status: "rejected", observed_at: Date.now() - 1000, ...(version ? { claude_version: version } : {}) };
+	assert.equal(recordNativeObservation(h.b.home, seen), true);
+	await runAlone(noReset.id);
+	ranPi(noReset.id, /^window: five_hour rejected, reset unknown \(observed /);
+	h.toggle(false);
+	h.toggle(true);
+	// An auth error sends the next new job to pi with auth:; switching off then on clears it.
+	await runAlone(signedOut.id);
+	ranNative(signedOut.id);
+	await waitFailed(h.fleet, signedOut.id);
+	assert.equal(readNativeAvailability(h.b.home)?.auth?.code, "authentication_failed");
+	await runAlone(authFallback.id);
+	ranPi(authFallback.id, /^auth: authentication_failed at /);
+	h.claude.endAuthError();
+	h.toggle(false);
+	h.toggle(true);
+	await runAlone(signedIn.id);
+	ranNative(signedIn.id);
+	await waitFailed(h.fleet, signedIn.id);
+	assert.doesNotMatch(readFileSync(file, "utf8"), /fake: |invalid credentials|limit reached|Ran after/, "raw SDK text in the snapshot");
 });
 
 async function waitFailed(fleet: (id: string) => ReturnType<typeof readFleet>["jobs"][number] | undefined, id: string) {

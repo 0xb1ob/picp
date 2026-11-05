@@ -62,7 +62,7 @@ import type { RunRecorder } from "./run-artifacts.ts";
 import { RunRegistry } from "./runs.ts";
 import type { WorkerManager } from "./worker-manager.ts";
 import type { WorkerProcess } from "./worker-process.ts";
-import { type DriverContext, driverFields, holdNativeSlot, nativeSpawn, resolveDriverRoute } from "./dispatch-driver.ts";
+import { type DriverContext, driverFields, holdNativeSlot, nativeSpawn, observeNative, resolveDriverRoute } from "./dispatch-driver.ts";
 import { type DepsPorts, prepareNodeDeps } from "./worktree-deps.ts";
 import type { MandateStore } from "./mandate.ts";
 import { assertContinuationTask, continuityInputsBlock } from "./mandate-continuity.ts";
@@ -716,7 +716,7 @@ export class Dispatcher {
 			await options.manager.ready();
 			assertPipelineProjectionReady(options.home, issue.id);
 			let operatorPick: OperatorPickRecord | undefined;
-			const managed = options.manager.spawn({
+			const managed = observeNative(options.home, options.manager.spawn({
 				budgetLimit: continuationBudget(options.mandates, issue.id, options.fleet.read().jobs, "dispatch"),
 				identity: {
 					jobId: issue.id, kind, delivery,
@@ -734,7 +734,7 @@ export class Dispatcher {
 				...(skills.length ? { skills: skills.map((s) => s.dir) } : {}),
 				admit: () => void (operatorPick = admitOperatorPick(options.home, request, options.fleet.get(issue.id), now())),
 				...nativeSpawn(routing),
-			});
+			}));
 			recorder.markSpawned({
 				pid: managed.worker.pid,
 				model: routing.model,

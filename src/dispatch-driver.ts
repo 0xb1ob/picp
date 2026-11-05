@@ -5,6 +5,8 @@
 import { type Delivery, type FleetRecord, isScriptFleetRecord, type JobKind, type Role, type RoutingConfig, type RoutingDecision } from "./contracts.ts";
 import { assertNativeEffort, nativeModelId, NativeDriverError, nativeSelectionRefusal, type NativeRefusal, nativeThinkingEnv } from "./drivers/claude.ts";
 import { deniedFor, isAllowed, type ModelProbe, pickModel, resolveWithCapacity, type RouteRequest } from "./routing.ts";
+import { nativeAvailability } from "./native-availability.ts";
+export { observeNative } from "./native-availability-observer.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 
 export interface DriverContext {
@@ -57,8 +59,12 @@ export async function resolveDriverRoute(
 		...(route.override ? { requested: route.override } : {}),
 		...(route.thinking ? { requested_thinking: route.thinking } : {}),
 	};
+	const selection = { home: ctx.home, jobId: ctx.jobId, driver: "claude" as const, kind: ctx.kind, role: ctx.role, delivery: ctx.delivery, jobs: ctx.jobs };
+	let note: string | undefined;
+	// S2: passive subscription evidence from earlier native runs; the slot is still taken after the last await.
 	const refusal = allowRefusal(config, ctx.role, picked.model)
-		?? await nativeSelectionRefusal({ home: ctx.home, jobId: ctx.jobId, driver: "claude", kind: ctx.kind, role: ctx.role, delivery: ctx.delivery, jobs: ctx.jobs })
+		?? await nativeSelectionRefusal(selection)
+		?? await nativeAvailability(ctx.home, picked.model).then((seen) => ((note = seen.note), seen.blocked))
 		?? slotRefusal(ctx);
 	if (refusal && (ctx.explicit || locked)) {
 		throw new NativeDriverError(`refused: ${ctx.jobId} cannot run on the native claude driver: ${refusal.why}`, refusal.category);
@@ -68,7 +74,7 @@ export async function resolveDriverRoute(
 		return { ...pi, requested_driver: "claude", driver: "pi", driver_reason: bounded(`${refusal.category}: ${refusal.why}`) };
 	}
 	if (ctx.reserve) slots.set(ctx.home, ctx.jobId);
-	return { ...native, requested_driver: "claude", driver: "claude", driver_reason: bounded(`${why}; effort ${picked.thinking ?? "CLI default"}`) };
+	return { ...native, requested_driver: "claude", driver: "claude", driver_reason: bounded(`${why}; effort ${picked.thinking ?? "CLI default"}${note ? `; ${note}` : ""}`) };
 }
 
 /** `pickModel` skips the allowlist for a row with fallbacks (the pi walk filters there): check the native primary. */

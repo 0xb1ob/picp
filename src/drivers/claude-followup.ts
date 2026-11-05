@@ -13,6 +13,7 @@ import { FleetStore } from "../fleet.ts";
 import { projectDenial } from "../mandate-defaults.ts";
 import { rebuildStatus } from "../run-artifacts.ts";
 import type { NativeDriver } from "../worker-driver.ts";
+import { nativeAvailability } from "../native-availability.ts";
 import { assertNativeSelection, NativeDriverError, nativeModelId } from "./claude.ts";
 
 export const NATIVE_SESSION_FILE = "native-claude";
@@ -148,6 +149,9 @@ export async function assertNativeResume(input: { home: string; jobId: string; w
 		if (check.state === "exceeded") refuse(`the per-job budget is spent (${check.tokens.used}/${check.tokens.limit} billable tokens, $${check.cost.used.toFixed(4)}/$${check.cost.limit.toFixed(2)})`);
 	}
 	await assertNativeSelection({ home: input.home, jobId: input.jobId, driver: record.worker.driver as NativeDriver, kind: record.kind, role: record.worker.role, delivery: record.delivery, jobs, ...(input.env ? { env: input.env } : {}) });
+	// S2: a rejected window refuses the resume; queued sends stay queued and never move to pi.
+	const window = (await nativeAvailability(input.home, record.worker.model, { windowsOnly: true, ...(input.env ? { env: input.env } : {}) })).blocked;
+	if (window) refuse(`the subscription window is spent (${window.why})`);
 }
 
 /** cp_revive's native admission: a recorded session id to resume, then `assertNativeResume`; the refusal, or none. */

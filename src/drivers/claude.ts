@@ -10,7 +10,7 @@ import { loadNativeConfig, nativeConfigFile, type NativeDriver } from "../worker
 import type { WorkerSpawnOptions } from "../worker-process.ts";
 
 /** Why a job may not run native (S1): the resolver falls back to pi on these; an explicit request refuses. */
-export type NativeRefusal = "switch" | "pipeline" | "ineligible" | "occupied" | "cli_missing" | "cli_version" | "model" | "effort" | "denied";
+export type NativeRefusal = "switch" | "pipeline" | "ineligible" | "occupied" | "cli_missing" | "cli_version" | "model" | "effort" | "denied" | "window" | "auth" | "lockdown";
 
 export class NativeDriverError extends Error {
 	readonly category?: NativeRefusal;
@@ -73,6 +73,16 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 export async function assertNativeSelection(input: NativeSelection): Promise<void> {
 	const refusal = await nativeSelectionRefusal(input);
 	if (refusal) throw new NativeDriverError(`refused: ${input.jobId} cannot run on the native ${input.driver} driver: ${refusal.why}`, refusal.category);
+}
+
+/** The installed CLI's version (S2 invalidation iii), or undefined when it cannot be resolved. */
+export async function installedClaudeVersion(env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
+	try {
+		spike ??= import("./claude-spike.ts");
+		return (await spike).resolveClaude(env).version;
+	} catch {
+		return undefined;
+	}
 }
 
 /** Fleet jobs whose native worker has not been observed to exit. */
