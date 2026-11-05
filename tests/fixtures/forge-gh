@@ -1,0 +1,10 @@
+#!/bin/sh
+# A scripted gh for the N4d forge tools: logs every call to $FORGE_GH_LOG; prints $FORGE_GH_TOKEN where a leak would be.
+printf '%s\n' "$*" >> "$FORGE_GH_LOG"
+case "$1 $2" in
+	"pr create" | "pr edit") echo "https://github.com/picp-e2e/forge/pull/7" ;;
+	"pr view") printf 'title:\tnative forge\nbody:\ttoken %s\n' "$FORGE_GH_TOKEN" ;;
+	"pr checks") printf 'test\tpass\t1m\n' ;;
+	"run view") printf 'run %s failed: token %s\n' "$3" "$FORGE_GH_TOKEN" ;;
+	*) echo "forge gh shim: unscripted gh $*" >&2; exit 1 ;;
+esac

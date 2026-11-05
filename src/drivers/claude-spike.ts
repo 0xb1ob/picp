@@ -58,7 +58,8 @@ import { workerHostGuard } from "../worker-host-guard.ts";
 import { assertBriefIsSafe } from "../worker-manager.ts";
 import { detectWorkerMerge, workerMergeRefusal } from "../worker-merge-guard.ts";
 import { readOnlyBashRefusal, secretPathIn, secretPaths } from "./claude-bash-policy.ts";
-import { nativeRole, RESEARCH_TOOLS, roleTools, writeScopeGuard } from "./claude-roles.ts";
+import { forgeTools } from "./claude-forge-tools.ts";
+import { FORGE_TOOL_NAMES, nativeRole, RESEARCH_TOOLS, roleMcpTools, roleTools, writeScopeGuard } from "./claude-roles.ts";
 import { shipBashRefusal } from "./claude-ship-policy.ts";
 import { type HooksListing, type Lockdown, lockdownVerdict } from "./claude-lockdown.ts";
 import { assertNativeEffort } from "./claude.ts";
@@ -175,10 +176,15 @@ export function normalizeToolCall(toolName: string, input: unknown): NormalizedC
 	if (toolName === "Grep") return { name: "grep", input: { pattern: args.pattern, path: args.path } };
 	if (toolName === "Glob") return { name: "find", input: { pattern: args.pattern, path: args.path } };
 	if (toolName === REPORT_TOOL) return { name: "report_result", input: args };
+	const forge = FORGE_TOOL_NAMES.find((name) => toolName === `mcp__picp__${name}`);
+	if (forge !== undefined) return { name: forge, input: args };
 	return undefined;
 }
 
-/** picp's worker-reporter `tool_call` refusals, in the same order, plus the role's Bash and write scope and secret paths. */
+/**
+ * picp's worker-reporter `tool_call` refusals, in the same order, plus the role's Bash and write scope and secret
+ * paths.
+ */
 export function spikeGuards(
 	job: SpikeJob,
 	secrets: readonly string[] = secretPaths(null, [homedir(), userInfo().homedir]),
@@ -264,7 +270,7 @@ interface ReportState {
 }
 
 /** picp's `report_result` as an in-process SDK MCP tool: validated, written once, wrong-job refused. */
-function reportServer(job: SpikeJob, state: ReportState) {
+function reportServer(job: SpikeJob, state: ReportState, extra: ReturnType<typeof forgeTools> = []) {
 	const context: JobContext = {
 		job_id: job.job_id,
 		kind: job.kind,
@@ -316,7 +322,7 @@ function reportServer(job: SpikeJob, state: ReportState) {
 			return text(`Reported ${job.job_id}. Stop now.`, false);
 		},
 	);
-	return createSdkMcpServer({ name: "picp", version: "0.0.0", tools: [report] });
+	return createSdkMcpServer({ name: "picp", version: "0.0.0", tools: [report, ...extra] });
 }
 
 export interface SpikeRunOptions {
@@ -428,6 +434,8 @@ async function runInScratch(
 	for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const state: ReportState = { refusals: [], attempts: 0 };
 	const tools = options.tools ?? roleTools(options.job.role);
+	const mcpTools = [REPORT_TOOL, ...roleMcpTools(options.job.role)];
+	const forge = nativeRole(options.job.role) === "implementer" ? forgeTools(options.job, hostEnv) : [];
 	const denials: SpikeResult["denials"] = [];
 	const models = new Set<string>();
 	let child: ChildProcess | undefined;
@@ -476,9 +484,9 @@ async function runInScratch(
 		// Binds as allowManagedHooksOnly: settings-file and project hooks never run; picp's SDK callback still does.
 		managedSettings: { disableAllHooks: true },
 		strictMcpConfig: true,
-		mcpServers: { picp: reportServer(options.job, state) },
+		mcpServers: { picp: reportServer(options.job, state, forge) },
 		tools: [...tools],
-		allowedTools: [...tools, REPORT_TOOL],
+		allowedTools: [...tools, ...mcpTools],
 		disallowedTools: ["Agent", "Task", "WebFetch", "WebSearch"],
 		agents: {},
 		plugins: [],
@@ -496,7 +504,7 @@ async function runInScratch(
 		...nativeEffortOptions(options.thinking),
 		...(options.resume === undefined ? {} : { resume: options.resume.sessionId }),
 	};
-	const expectedTools = [...tools, REPORT_TOOL];
+	const expectedTools = [...tools, ...mcpTools];
 	try {
 		const q = query({ prompt: options.prompt, options: sdkOptions });
 		for await (const message of q) {
