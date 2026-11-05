@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import type { RoutingRule, SettingField, SettingFieldView, SettingKey, SettingValue, ThinkingLevel } from "../../src/contracts.ts";
-import type { SettingsAuditRow, SettingsResponse } from "../../src/viewer/api-types.ts";
+import type { ModelApplyRow, SettingsAuditRow, SettingsResponse } from "../../src/viewer/api-types.ts";
 import { PageHeader } from "../components/PageHeader.tsx";
 import { type Drafts, fieldError, fieldOf, type RestoreSelector, type SettingsView, valueOf } from "../settings-control.ts";
 import "./settings.css";
@@ -21,10 +21,24 @@ const lines = (text: string): string[] => text.split(/[\n,]/).map(line => line.t
 const pick = (drafts: Drafts, keys: SettingKey[]): Drafts => Object.fromEntries(keys.filter(key => key in drafts).map(key => [key, drafts[key]]));
 const omit = (drafts: Drafts, keys: SettingKey[]): Drafts => Object.fromEntries(Object.entries(drafts).filter(([key]) => !keys.includes(key as SettingKey)));
 
-function auditLine(row: SettingsAuditRow): string {
+function auditLine(row: SettingsAuditRow | ModelApplyRow): string {
+ if (row.type === "model_apply") return `${row.at} · ${row.session} model ${row.state}${row.reason ? `: ${row.reason}` : ""}`;
  const reason = typeof row.reason === "string" ? `: ${row.reason}` : "";
  const mode = typeof row.mode === "string" ? ` ${row.mode}` : "";
  return `${row.at} · ${row.type}${mode}${reason}`;
+}
+
+/** The latest `state/model-apply.jsonl` row of one session, in words. */
+function applyText(row: ModelApplyRow): string {
+ if (row.state === "queued") return `Applies to the ${row.session} when its current turn ends (a stopped ${row.session} takes it at its next start)`;
+ if (row.state === "applied") return `Applied ${row.model ?? "the running model"} · thinking ${row.thinking ?? "unchanged"} at ${row.at}`;
+ if (row.state === "cancelled") return row.reason === "changed back before it applied" ? "Cancelled: changed back before it applied" : `Cancelled: ${row.reason ?? "no reason recorded"}`;
+ return `Not applied: ${row.reason ?? "no reason recorded"}`;
+}
+
+function ApplyStatus({rows}: {rows: ModelApplyRow[]}) {
+ const latest = (["parent", "operator"] as const).flatMap(session => rows.filter(row => row.session === session).slice(-1));
+ return <>{latest.map(row => <p key={row.session} class={`settings-apply settings-apply-${row.state}`} role="status" data-session={row.session}>{row.session === "parent" ? "Parent" : "Operator"}: {applyText(row)}</p>)}</>;
 }
 const rowEdited = (row: RoutingRule, was: RoutingRule | undefined): boolean => JSON.stringify(row) !== JSON.stringify(was);
 
@@ -192,6 +206,7 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
  const models = data.available_models;
  const modelsNote = models === null ? <p class="settings-readonly" role="status">{data.models_loading ? "Loading the model list…" : `Model list unavailable${data.models_error ? ` (${data.models_error})` : ""}: type a provider/model.`}</p> : null;
  const notice = view.notice;
+ const recent = [...data.audit, ...(data.model_apply ?? [])].sort((a, b) => a.at.localeCompare(b.at)).slice(-5).reverse();
  return <div class="settings-screen">
   {header}
   {!data.writable || !view.token ? <p role="status" class="settings-readonly">Read only: {data.reason ?? "no operator session serves dashboard control; start it to change settings"}</p> : null}
@@ -200,8 +215,9 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
    {routingAbsent ? <p class="settings-readonly">No data/routing.json: every worker route is refused until it exists.</p> : <Rubric rows={rows} original={original} setRow={setRow} disabled={editing} models={models}/>}
    {modelsNote}
   </Section>
-  <Section title="Parent and operator models" help="Empty means unset: the env pin, else today's behaviour. Nothing switches live." keys={PEOPLE_MODELS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: PEOPLE_MODELS}} restoreText="Unset the parent and operator models and thinking?" disabled={disabled}>
+  <Section title="Parent and operator models" help="Empty means unset. A change switches the running session at its next idle point; nothing restarts." keys={PEOPLE_MODELS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{keys: PEOPLE_MODELS}} restoreText="Unset the parent and operator models and thinking?" disabled={disabled}>
    {PEOPLE_MODELS.map(field)}
+   <ApplyStatus rows={data.model_apply ?? []}/>
   </Section>
   <Section title="Grant defaults" help="What a new grant starts with (data/mandate-defaults.json); grants already issued keep theirs." keys={GRANTS} drafts={drafts} setDrafts={setDrafts} view={view} restore={{section: "grants"}} restoreText="Restore every grant default?" disabled={disabled} invalid={invalid(GRANTS)}>
    {GRANTS.map(field)}
@@ -216,6 +232,6 @@ export function Settings({view, children}: {view: SettingsView; children?: Compo
    {WORKERS.map(field)}
   </Section>
   {children}
-  <footer class="settings-audit"><h2>Recent changes</h2>{data.audit.length ? <ul>{data.audit.slice(-5).reverse().map((row, index) => <li key={`${row.at}-${index}`} class="job-meta">{auditLine(row)}</li>)}</ul> : <p class="job-meta">No settings change recorded</p>}</footer>
+  <footer class="settings-audit"><h2>Recent changes</h2>{recent.length ? <ul>{recent.map((row, index) => <li key={`${row.at}-${index}`} class="job-meta">{auditLine(row)}</li>)}</ul> : <p class="job-meta">No settings change recorded</p>}</footer>
  </div>;
 }

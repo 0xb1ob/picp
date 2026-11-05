@@ -57,6 +57,8 @@ const RELAY_BACKLOG = 200;
 const MAX_FRAME_CHARS = 1_000_000;
 /** Prune the relay outbox, sweep sends (cp-6fyl B1), confirm acked send outcomes. */
 export const HOST_RELAY_TICK_MS = 60_000;
+/** A Settings `models.parent`/`parent_thinking` change reaches an idle parent within this tick. */
+export const HOST_SETTINGS_TICK_MS = 5_000;
 /** Direct relay of code-raised escalations (`escalation-relay-watch.ts`): 10 s grace + this tick ≤ ~20 s. */
 export const HOST_ESCALATION_TICK_MS = 10_000;
 /** `CP_HOST_ESCALATION_TICK_SECONDS` (default 10). */
@@ -308,6 +310,13 @@ export async function runParentHost(home: string, modeArg: string, gen: number):
 	let queue: Promise<unknown> = Promise.resolve();
 	const gate = () => restartSafety(home, () => new FleetStore({ home }).list());
 	let stopping = false;
+	// A Settings model change switches an idle parent; a busy one takes it at its settle (`runAutoControl`).
+	const settingsTick = setInterval(() => {
+		if (stopping) return;
+		const run = queue.then(() => (stopping ? undefined : bridge.applySettings()));
+		queue = run.catch((error: Error) => console.error(`parent host ${process.pid}: settings tick failed: ${error.message}`));
+	}, HOST_SETTINGS_TICK_MS);
+	settingsTick.unref();
 	const reads: Record<string, (args: unknown[]) => unknown> = {
 		status: () => bridge.status(),
 		sendReceipt: (args) => bridge.sendReceipt(String(args[0])) ?? null,

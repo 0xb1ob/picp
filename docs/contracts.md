@@ -9866,6 +9866,19 @@ reports only what this process sees. An unset `model` keeps today's behaviour ex
 `max`; absent or null means unset). They have no env pin: the source is `file` for a valid key, else `code` with value
 null; an invalid key is `fallback` ("invalid thinking level; ignored"). Null in a write deletes the key.
 
+**Live apply (cp-settings-model-apply, slice 1).** A `models.parent` or `models.parent_thinking` write switches the
+running parent in place at its next idle point: never a restart, a drain or a `restartSafety` read, and the parent and
+host pids stay. The host compares `data/parent.json` with the values it last saw (at start or at the last apply) on a
+5 s tick (`HOST_SETTINGS_TICK_MS`) and after every settle, before queued sends go out. A busy parent finishes its turn
+on the old model. pi's `set_model`, then `set_thinking_level` (re-sent after a model switch), persist in the session.
+Two writes in one turn apply once with the last value; a revert before the apply cancels. An apply clears
+`modelExplicit` and an explicit start thinking, so a later Settings change beats an earlier `cp_parent model`. Every
+outcome is one 0600 row in `state/model-apply.jsonl`, `{v:1, type:"model_apply", at, session, state, model, thinking,
+reason?}`, with `state` one of `queued`, `applied`, `cancelled` or `failed`. A failure keeps the old model, relays a
+cp-bridge error to the operator, and is not retried until the next change. A restart cancels a queued row (the start
+rules apply). `GET /api/settings` returns the last 10 rows as `model_apply`; the Settings page shows each session's
+latest row and polls every 5 s while one is pending, for at most 10 minutes. The operator session is slice 2.
+
 ### Settings writes
 
 The dashboard changes and restores the editable fields through the operator session

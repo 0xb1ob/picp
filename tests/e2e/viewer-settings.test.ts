@@ -738,6 +738,22 @@ test("P20-settings-thinking-launch: a parent thinking saved in Settings is the n
 	assert.equal(explicit[explicit.indexOf("--thinking") + 1], "xhigh", "an explicit start model keeps the saved thinking");
 });
 
+test("P20-settings-apply-status: a queued model-apply row renders the parent's status line; the page polls until the applied row replaces it", { timeout: 120_000 }, async (t) => {
+	const row = (state: string, at: string) => JSON.stringify({ v: 1, type: "model_apply", at, session: "parent", state, model: "openai/gpt-5", thinking: null });
+	const ui = await settingsTab(t);
+	const journal = join(ui.view.stateDir, "model-apply.jsonl");
+	writeFileSync(journal, `${row("queued", "2026-11-05T10:00:00.000Z")}\n`);
+	const tab = await ui.view.open("#settings");
+	const line = () => tab.$('section[aria-label="Parent and operator models"] .settings-apply[data-session="parent"]');
+	const queued = await until(line, (el) => el !== null, "the queued line");
+	assert.deepEqual([queued!.className.includes("settings-apply-queued"), queued!.getAttribute("role")], [true, "status"]);
+	assert.match(queued!.textContent ?? "", /^Parent: Applies to the parent when its current turn ends/);
+	writeFileSync(journal, `${row("queued", "2026-11-05T10:00:00.000Z")}\n${row("applied", "2026-11-05T10:00:04.000Z")}\n`);
+	await until(() => line()?.textContent ?? "", (text) => text === "Parent: Applied openai/gpt-5 · thinking unchanged at 2026-11-05T10:00:04.000Z", "the applied line, by the 5 s poll");
+	assert.equal(tab.$$(".settings-apply").length, 1, "one line per session, the latest row only");
+	assert.deepEqual(((await ui.view.get("/api/settings")).body.model_apply as Line[]).map((r) => r.state), ["queued", "applied"]);
+});
+
 test("P20-settings-listing: while pi's first listing runs, the current value and Custom… only, then the list after a retry", { timeout: 120_000 }, async (t) => {
 	const ui = await settingsTab(t, { models: "provider model\nopenai gpt-5\n", pending: true });
 	const status = () => ui.section("Model routing").querySelector("p[role=status]");

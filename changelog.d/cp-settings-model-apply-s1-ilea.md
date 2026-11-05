@@ -1,0 +1,1 @@
+- A Settings `models.parent`/`models.parent_thinking` change now switches the running parent at its next idle point (no restart, no drain); each outcome is a row in `state/model-apply.jsonl`, shown per session on the Settings page.

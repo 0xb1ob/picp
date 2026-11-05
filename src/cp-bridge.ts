@@ -49,6 +49,7 @@ import {
 	type WorkerExit,
 } from "./worker-process.ts";
 import { WORKER_MEMORY_MAX_ENV } from "./worker-scope.ts";
+import { applyParentSettings, type ModelApplyTrack, requestThinking, rotationSettings, seedParentApply } from "./session-model-apply.ts";
 
 export const DEFAULT_BRIDGE_SETTLE_MS = 120_000;
 /** Immediate deaths before the child is ready. Then stop, don't spin. */
@@ -272,6 +273,7 @@ export class CpBridge {
 	#autoControl: Promise<void> | undefined;
 	/** The last valid assistant `message_end` (N6: a length stop's discarded output is not context). */
 	#lastAssistant: AssistantLike | undefined;
+	#settingsSeen: ModelApplyTrack | undefined;
 
 	onRelay(listener: RelayListener): () => void {
 		this.#listeners.add(listener);
@@ -310,6 +312,7 @@ export class CpBridge {
 		this.#model = model;
 		this.#home = home;
 		this.#mode = options.mode;
+		this.#settingsSeen = seedParentApply(home, this.#settingsSeen);
 		const outbox = new ParentSendOutbox({ file: parentSendFile(join(home, LAYOUT.sessions, "cp-parent.jsonl")) });
 		outbox.read(); // a corrupt outbox refuses the start, naming the file
 		this.#delivery = new ParentDelivery(outbox, {
@@ -397,8 +400,14 @@ export class CpBridge {
 		if (!home || this.#unsettled(true) === "not_running") return Promise.resolve();
 		return this.#autoControl ??= runAutoControl(home, this.#missionEnd, this.#lastAssistant, {
 			unsettled: () => this.#unsettled(true), status: () => this.statusWithContext(),
-			rotate: async (mission) => this.#rotate(this.#settledProc(true), mission), compact: async () => this.#compact(this.#settledProc(true)),
+			rotate: async (mission) => this.#rotate(this.#settledProc(true), mission), compact: async () => this.#compact(this.#settledProc(true)), applySettings: () => this.applySettings(),
 		}, (text) => this.#emit({ kind: "error", stale: false, text, receipt: emptyReceipt(), paths: [] })).finally(() => { this.#autoControl = undefined; });
+	}
+	/** Settings `models.parent`/`parent_thinking` switch the settled parent (session-model-apply.ts); never rejects. */
+	applySettings(): Promise<void> {
+		const home = this.#home, track = this.#settingsSeen, proc = () => this.#settledProc(true);
+		return !home || !track ? Promise.resolve() : applyParentSettings(home, track, { unsettled: () => this.#unsettled(true), model: () => this.#model, start: () => this.#options,
+			relayError: (text) => this.#emit({ kind: "error", stale: false, text, receipt: emptyReceipt(), paths: [] }), setModel: (model) => this.#setModel(proc(), model), setThinking: (level) => requestThinking(proc(), level, this.#options?.requestTimeoutMs) });
 	}
 	#settledProc(allowQueued = false): WorkerProcess {
 		const proc = this.#proc;
@@ -470,13 +479,7 @@ export class CpBridge {
 			if (!existsSync(old)) throw new CpBridgeError(`session file missing; cannot archive ${old}`);
 			const archivedFile = archiveSessionFile(old);
 			this.#recordControl({ lastRotateAt: new Date().toISOString(), contextTokens: null, totalCostUsd: 0, ...(mission ? { lastMissionEnd: mission } : {}) });
-			// dashboard Settings: a configured parent model applies at rotation, as at a start without an explicit model;
-			// an explicit start model or a live `cp_parent model` switch stays (modelExplicit). A refusal keeps the running one.
-			const configured = this.#options?.modelExplicit ? undefined : parentModelSetting(this.#home);
-			const kept = this.#model;
-			if (configured && configured !== kept) await this.#setModel(proc, configured).catch((error: Error) => this.#emit({ kind: "error", stale: false, text: `parent rotate kept ${kept}: ${error.message}`, receipt: emptyReceipt(), paths: [] }));
-			const level = this.#options?.thinking ? undefined : parentThinkingSetting(this.#home);
-			if (level) await proc.request("set_thinking_level", { level }, this.#options?.requestTimeoutMs).then((response) => { if (response.success === false) throw new CpBridgeError(`set_thinking_level ${level} rejected: ${response.error ?? "unknown error"}`); }).catch((error: Error) => this.#emit({ kind: "error", stale: false, text: `parent rotate kept thinking: ${error.message}`, receipt: emptyReceipt(), paths: [] }));
+			await rotationSettings(this.#home, { model: this.#options?.modelExplicit === true, thinking: Boolean(this.#options?.thinking) }, this.#model, { setModel: (model) => this.#setModel(proc, model), setThinking: (level) => requestThinking(proc, level, this.#options?.requestTimeoutMs), relayError: (text) => this.#emit({ kind: "error", stale: false, text, receipt: emptyReceipt(), paths: [] }) });
 			return { sessionFile: current, archivedFile };
 		} finally { this.#controlBusy = false; }
 	}
