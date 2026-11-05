@@ -15,8 +15,8 @@ import { whichAll } from "../../src/doctor.ts";
 import { NATIVE_FOLLOWUPS_FILE, NATIVE_REVIVE_PROMPT, NATIVE_SESSION_FILE, queuedFollowUps, readNativeSession } from "../../src/drivers/claude-followup.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, type RecordedClaudeRequest, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
-import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, REPO_ROOT, routeNamed, treehouseAvailable, waitFor } from "../harness/index.ts";
+import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_NATIVE_MODEL, type RecordedClaudeRequest, routeNativeModel, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
+import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, REPO_ROOT, treehouseAvailable, waitFor } from "../harness/index.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
 const skip = missing.length > 0 ? `needs ${missing.join(" and ")} on PATH` : false;
@@ -34,6 +34,7 @@ const modelCalls = (requests: readonly RecordedClaudeRequest[]) => requests.filt
 async function nativeHome(t: TestContext, script: readonly ClaudeStep[]) {
 	const b = await dispatchS29(t);
 	const claude = await startClaudeMockProvider(script);
+	routeNativeModel(b.home);
 	const fakeHome = mkdtempSync(join(tmpdir(), "cp-n3c-home-"));
 	t.after(async () => { await claude.close(); rmSync(fakeHome, { recursive: true, force: true }); });
 	const settings = join(fakeHome, ".claude", "settings.json");
@@ -56,7 +57,7 @@ async function nativeHome(t: TestContext, script: readonly ClaudeStep[]) {
 		on: sh(`echo '{"claude_research":true}' > "${switchFile}"`),
 		frozen: sh(`echo '{"claude_research":true}' > "${switchFile}" && echo '${freeze}' > "${drain}"`),
 		thawed: sh(`rm -f "${drain}"`),
-		dispatch: (id: string, model: string) => tool("cp_dispatch", { job_id: id, task: "Report the repo's package name.", model, queue: false, when_ready: false, driver: "claude" }),
+		dispatch: (id: string) => tool("cp_dispatch", { job_id: id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" }),
 	};
 }
 
@@ -78,7 +79,6 @@ test("F1/F3/F4/F8: a busy send queues until the turn ends, idle sends resume the
 	const native = await h.job();
 	ids.push(native.id);
 	const id = native.id;
-	const model = h.b.provider.addScript("n3c-unused", [{ kind: "text", text: "unused" }]);
 	// The budget is set to exactly the billable total after two resumes, so the next resume's admission must refuse it.
 	const spendAll = { kind: "tool_calls" as const, calls: [{ name: "bash", args: () => {
 		const fleetFile = join(h.b.home, LAYOUT.fleetFile);
@@ -89,7 +89,7 @@ test("F1/F3/F4/F8: a busy send queues until the turn ends, idle sends resume the
 		return { command: "true" };
 	} }] };
 	const ends = (await h.b.run([
-		h.dispatch(id, model),
+		h.dispatch(id),
 		tool("cp_send", { job_id: id, message: "Queued follow-up: also note the license." }),
 		tool("cp_send", { job_id: id, message: "Steer now.", mode: "steer" }),
 		h.wait(id, "agent_settled", 1),
@@ -176,11 +176,10 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 	const native = await h.job();
 	ids.push(native.id);
 	const id = native.id;
-	const model = h.b.provider.addScript("n3c-unused-2", [{ kind: "text", text: "unused" }]);
 	const fleet = join(h.b.home, LAYOUT.fleetFile);
 	// Two parent runs keep each under the harness's 90 s settle bound; the no-report turn ends the worker failed.
 	const first = (await h.b.run([
-		h.dispatch(id, model),
+		h.dispatch(id),
 		h.wait(id, "agent_settled", 1),
 		h.off,
 		tool("cp_send", { job_id: id, message: "Switched off." }),
@@ -255,14 +254,13 @@ test("H2: a resume that throws returns its claimed sends undelivered, and the ne
 	]);
 	const id = (await h.job()).id;
 	ids.push(id);
-	const model = h.b.provider.addScript("n3d-h2-unused", [{ kind: "text", text: "unused" }]);
 	const runDir = join(h.b.home, paths.runDir(id));
 	const record = join(runDir, NATIVE_SESSION_FILE);
 	const queued = "Queued follow-up: also note the license.";
 	// Switched off at turn end, the queued send is refused back into the queue; the idle send's resume then claims it
 	// and throws (its record lost the session id). Settling that claim before the turn ran lost the send (N3c H2).
 	const first = (await h.b.run([
-		h.dispatch(id, model),
+		h.dispatch(id),
 		tool("cp_send", { job_id: id, message: queued }),
 		h.off,
 		h.wait(id, "agent_settled", 1),
@@ -318,11 +316,10 @@ test("L1/F11: a native worker killed by a parent restart resumes on a plain cp_r
 		{ kind: "text", text: "reported" },
 		...Array.from({ length: 4 }, () => ({ kind: "text" as const, text: "pi follow-up noted" })),
 	]);
-	const model = h.b.provider.addScript("n3d-l1-unused", [{ kind: "text", text: "unused" }]);
 	await h.b.run([
 		tool("cp_dispatch", { job_id: ids.pi, task: "Report.", model: piModel, queue: false, when_ready: false }),
 		h.wait(ids.pi, "envelope_received", 1),
-		h.dispatch(ids.native, model),
+		h.dispatch(ids.native),
 	], h.env);
 	await waitFor(() => modelCalls(h.claude.requests).length, (n) => n >= 1, { timeoutMs: 60_000, what: "the native turn's first model call" });
 	const sessionFile = join(h.b.home, paths.runDir(ids.native), NATIVE_SESSION_FILE);
@@ -363,7 +360,9 @@ test("native live follow-up smoke: a research dispatch, then one idle cp_send re
 	const b = await dispatchS29(t);
 	writeFileSync(join(b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true }));
 	const id = (await b.ledger.create({ title: "native live follow-up smoke", project: "demo", delivery: "local", kind: "research" })).id;
-	const model = b.provider.addScript("n3d-live-unused", [{ kind: "text", text: "unused" }]);
+	// S1: a native dispatch names an explicit anthropic/claude-… model; the live account's own id, routed here.
+	const model = process.env.CP_LIVE_NATIVE_MODEL ?? "anthropic/claude-sonnet-4-5";
+	routeNativeModel(b.home, [model]);
 	const events = join(b.home, paths.eventsFile(id));
 	const sessionFile = join(b.home, paths.runDir(id), NATIVE_SESSION_FILE);
 	const settled = (count: number) => tool("bash", { command: `for i in $(seq 1500); do [ "$(grep -c '"agent_settled"\\|"process_exit"' "${events}" 2>/dev/null)" -ge ${count} ] && break; sleep 0.2; done; sleep 2` });
@@ -412,9 +411,8 @@ test("F9: a queued driver:claude dispatch releases native, and an armed one is r
 		tool("report_result", report(pi, h.b.home)),
 		{ kind: "text", text: "reported" },
 	]);
-	const model = h.b.provider.addScript("n3c-unused-3", [{ kind: "text", text: "unused" }]);
 	const armedFile = join(h.b.home, LAYOUT.armedDispatchFile);
-	const native = (id: string) => tool("cp_dispatch", { job_id: id, task: "Report the repo's package name.", model, driver: "claude" });
+	const native = (id: string) => tool("cp_dispatch", { job_id: id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, driver: "claude" });
 	const ends = (await h.b.run([
 		tool("cp_dispatch", { job_id: pi, task: "Report.", model: piModel, queue: false, when_ready: false }),
 		h.wait(pi, "envelope_received", 1),
@@ -453,10 +451,7 @@ async function boundsPost(t: TestContext, script: readonly ClaudeStep[], ids: Re
 		onHardBound: (_jobId, failure) => void bounds.push(failure),
 	}));
 	ids.job = (await h.job()).id;
-	const model = h.b.provider.addScript(`n3c-bound-${ids.job}`, [{ kind: "text", text: "unused" }]);
-	h.b.agent.writeModels(h.b.provider);
-	routeNamed(h.b.home, [model]);
-	return { h, post, bounds, model };
+	return { h, post, bounds, model: FAKE_NATIVE_MODEL };
 }
 
 async function assertBoundEnds(f: Awaited<ReturnType<typeof boundsPost>>, jobId: string, failureClass: string): Promise<void> {

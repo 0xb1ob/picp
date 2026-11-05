@@ -8,6 +8,8 @@ import { claimOperatorPick, pickedJobClaim, snapshotPickedAttempt, type Verified
 import { loadProfile } from "./profiles.ts";
 import { requireRouted } from "./routed-models.ts";
 import { ALWAYS_AVAILABLE, loadRoutingConfig, type ModelProbe, resolveModel } from "./routing.ts";
+import { driverFields } from "./dispatch-driver.ts";
+import { nativeModelId } from "./drivers/claude.ts";
 
 /** The pick fields a dispatch request carries; `pick`/`pickSpent` are set only by `withOperatorPick`. */
 export interface PickRequest { jobId: string; model?: string; operatorQuote?: OperatorModelPickReference; pick?: VerifiedPick; pickSpent?: string }
@@ -45,7 +47,7 @@ export function admitOperatorPick(home: string, request: PickRequest, previous: 
 /** The decision half of `cp:routing_resolved`. */
 export function decisionFields(d: RoutingDecision): Record<string, unknown> {
 	return { model: d.model, source: d.source, rule: d.rule, ...(d.thinking ? { thinking: d.thinking } : {}), ...(d.attempted ? { attempted: d.attempted } : {}),
-		...(d.capacity ? { capacity: d.capacity } : {}), ...(d.quota ? { quota: d.quota } : {}) };
+		...(d.capacity ? { capacity: d.capacity } : {}), ...(d.quota ? { quota: d.quota } : {}), ...driverFields(d) };
 }
 
 export interface RespawnRoute { model: string; thinking?: ThinkingLevel; routing?: JobRouting; priorPick?: string }
@@ -70,6 +72,8 @@ export function respawnRoute(options: {
 		profile: loadProfile(options.profilesDir, record.worker.profile), jobId: record.job_id, project: record.project, kind: record.kind,
 		...(kept.scope ? { scope: kept.scope } : {}), ...(kept.risk ? { risk: kept.risk } : {}),
 	}, config, options.probe ?? ALWAYS_AVAILABLE);
+	// D1: a fresh pick never moves a native job to pi; a model the recorded driver cannot run refuses the respawn.
+	if (record.worker.driver) nativeModelId(decision.model);
 	const thinking = decision.thinking ? { thinking: decision.thinking } : {};
 	return { model: decision.model, ...thinking, routing: { ...kept, ...thinking }, priorPick: spent.attempt_id };
 }

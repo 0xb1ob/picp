@@ -18,6 +18,13 @@ export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhig
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 export const ThinkingLevelSchema = StringEnum([...THINKING_LEVELS]);
 
+/** Native routing S1: the drivers a rubric row may prefer; absent means pi. */
+export const ROUTING_DRIVERS = ["pi", "claude"] as const;
+export type RoutingDriver = (typeof ROUTING_DRIVERS)[number];
+export const RoutingDriverSchema = StringEnum([...ROUTING_DRIVERS]);
+/** `<code>: <why>` for the driver a dispatch ran on, e.g. `switch: … is off`; bounded, never credentials. */
+export const DriverReasonSchema = Type.String({ minLength: 1, maxLength: 200 });
+
 /**
  * Routing rubric inputs (T13/cp-rte). Defined here for the same reason as
  * `ThinkingLevel` above — `JobRoutingSchema` needs them before the routing
@@ -124,6 +131,10 @@ export const JobRoutingSchema = Type.Object(
 		recorded_risk: Type.Optional(RiskSchema),
 		/** R1 D2: the operator's verified one-job pick; only the picked attempt carries it (src/operator-model-pick.ts). */
 		operator_pick: Type.Optional(OperatorPickRecordSchema),
+		/** Native routing S1: present only when claude was requested or chosen; absent is pi (legacy included). */
+		requested_driver: Type.Optional(RoutingDriverSchema),
+		driver: Type.Optional(RoutingDriverSchema),
+		driver_reason: Type.Optional(DriverReasonSchema),
 	},
 	{ additionalProperties: false },
 );
@@ -134,6 +145,8 @@ export type JobRouting = Replace<
 		risk?: Risk;
 		thinking?: ThinkingLevel;
 		provenance?: { scope: RoutingProvenance; risk: RoutingProvenance };
+		requested_driver?: RoutingDriver;
+		driver?: RoutingDriver;
 	}
 >;
 
@@ -194,12 +207,17 @@ export const RoutingRuleSchema = Type.Object(
 		 */
 		fallbacks: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 4 })),
 		note: Type.Optional(Type.String({ maxLength: 300 })),
+		/**
+		 * Native routing S1: `claude` prefers the native driver for an eligible research job; absent or `pi` is pi.
+		 * A claude row's `model` must be an explicit `anthropic/claude-…` id; `[model, ...fallbacks]` stays the pi lane.
+		 */
+		driver: Type.Optional(RoutingDriverSchema),
 	},
 	{ additionalProperties: false },
 );
 export type RoutingRule = Replace<
 	Static<typeof RoutingRuleSchema>,
-	{ role: Role; scope?: Scope[]; risk?: Risk; thinking?: ThinkingLevel; fallbacks?: string[] }
+	{ role: Role; scope?: Scope[]; risk?: Risk; thinking?: ThinkingLevel; fallbacks?: string[]; driver?: RoutingDriver }
 >;
 
 const DENY_LIST = Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 64 });
@@ -288,7 +306,11 @@ export const RoutingDecisionSchema = Type.Object(
 				{ maxItems: 8 },
 			),
 		),
+		/** Native routing S1: the same three fields `JobRouting` persists; absent is pi. */
+		requested_driver: Type.Optional(RoutingDriverSchema),
+		driver: Type.Optional(RoutingDriverSchema),
+		driver_reason: Type.Optional(DriverReasonSchema),
 	},
 	{ additionalProperties: false },
 );
-export type RoutingDecision = Narrow<Static<typeof RoutingDecisionSchema>, "source", RoutingSource>;
+export type RoutingDecision = Replace<Narrow<Static<typeof RoutingDecisionSchema>, "source", RoutingSource>, { requested_driver?: RoutingDriver; driver?: RoutingDriver }>;

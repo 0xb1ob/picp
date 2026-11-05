@@ -2,11 +2,26 @@
  * Loopback fake of the Anthropic Messages API for the real `claude` CLI (native worker spike), synthetic credentials
  * only. A scripted step answers each request that offers tools; others get a short text. Auth headers are recorded.
  */
+import { readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
+import { LAYOUT } from "../../src/contracts.ts";
+import { routeNamed } from "./routing-names.ts";
 
 export const FAKE_CLAUDE_AUTH_TOKEN = "picp-synthetic-claude-token";
 export const FAKE_CLAUDE_MODEL = "claude-picp-fake";
+/** The routed ref a native dispatch names: an explicit `anthropic/claude-…` id, as S1 requires. */
+export const FAKE_NATIVE_MODEL = `anthropic/${FAKE_CLAUDE_MODEL}`;
+
+/** Allows and routes `models` (default the fake native model) in `home`'s data/routing.json, so a native dispatch may name them. */
+export function routeNativeModel(home: string, models: readonly string[] = [FAKE_NATIVE_MODEL]): void {
+	routeNamed(home, models);
+	const file = join(home, LAYOUT.routingFile);
+	const config = JSON.parse(readFileSync(file, "utf8")) as { allow: string[] };
+	config.allow = [...new Set([...config.allow, ...models])];
+	writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+}
 
 export interface RecordedClaudeRequest {
 	method: string;
