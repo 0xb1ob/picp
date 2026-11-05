@@ -1,0 +1,1 @@
+- CI runs the test suite in 10 shards instead of 8 (`SHARDS` in `scripts/test-shards.ts`, the `ci.yml` matrix and the `picp-dev` Dagger `testShard` range); the step name reads the count from `strategy.job-total`, and `scripts/test-timings.json` is refreshed from a main spec log so the 37 untimed files are weighed.

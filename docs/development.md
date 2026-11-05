@@ -111,7 +111,7 @@ curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=1.0.0-beta.21
 dagger generate                          # once per clone: writes the gitignored SDK client
 dagger check                             # every static check, before each push
 dagger check --check=typecheck           # rerun one check
-dagger api call test-shard --shard=1     # one CI shard (1..8); `node scripts/test-shards.ts files 1` lists it
+dagger api call test-shard --shard=1     # one CI shard (1..10); `node scripts/test-shards.ts files 1` lists it
 ```
 
 Run at most one shard at a time, and only when the 1-minute load is under 6. `migration-ledger` reads
