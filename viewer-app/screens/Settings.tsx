@@ -38,7 +38,7 @@ function applyText(row: ModelApplyRow): string {
 
 function ApplyStatus({rows}: {rows: ModelApplyRow[]}) {
  const latest = (["parent", "operator"] as const).flatMap(session => rows.filter(row => row.session === session).slice(-1));
- return <>{latest.map(row => <p key={row.session} class={`settings-meta settings-apply settings-apply-${row.state}`} role="status" data-session={row.session}>{row.session === "parent" ? "Parent" : "Operator"}: {applyText(row)}</p>)}</>;
+ return <>{latest.map(row => <p key={row.session} class={`settings-apply settings-apply-${row.state}`} role="status" data-session={row.session}>{row.session === "parent" ? "Parent" : "Operator"}: {applyText(row)}</p>)}</>;
 }
 const rowEdited = (row: RoutingRule, was: RoutingRule | undefined): boolean => JSON.stringify(row) !== JSON.stringify(was);
 
