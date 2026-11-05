@@ -122,6 +122,8 @@ test("F1/F3/F4/F8: a busy send queues until the turn ends, idle sends resume the
 	const run2 = calls.find((request) => messages(request).includes("Queued follow-up: also note the license."));
 	assert.ok(run2, "the queued message reached the model");
 	assert.ok(messages(run2).includes("Report the repo"), "the queued follow-up resumed the dispatched conversation");
+	// N4b: the resumed process carries the role contract again, not only the dispatched one.
+	for (const request of [calls[0], run2]) assert.match(JSON.stringify(request?.body.system ?? ""), /A plan is executable or it is not a plan\./);
 
 	// F1: idle sends resume the same session (the earlier turns are in the conversation) and the replies land.
 	for (const send of [first, second]) {

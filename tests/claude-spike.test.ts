@@ -45,7 +45,7 @@ const call = async (hook: HookCallback, tool_name: string, tool_input: unknown) 
 };
 
 test("preToolUseHook: guards deny, a throwing guard denies, an unknown tool denies, a clean call is allowed", async () => {
-	const job = { job_id: "cp-unit", delivery: "local" as const, runDir: "/run/cp-unit", worktree: "/repo", artifactPath: "/art/cp-unit/report.md" };
+	const job = { job_id: "cp-unit", kind: "research" as const, role: "planner" as const, delivery: "local" as const, runDir: "/run/cp-unit", worktree: "/repo", artifactPath: "/art/cp-unit/report.md" };
 	const denied: string[] = [];
 	const hook = preToolUseHook(spikeGuards(job), (tool) => denied.push(tool));
 	assert.equal((await call(hook, "Read", { file_path: "/repo/README.md" }))?.permissionDecision, "allow");

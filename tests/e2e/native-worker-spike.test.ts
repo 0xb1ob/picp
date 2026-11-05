@@ -72,7 +72,7 @@ test("native spike: one research run reports once, refuses bad reports, denies f
 			CLAUDE_CODE_HOST_SENTINEL: "host-claude-code-sentinel",
 		});
 		const result = await runClaudeSpike({
-			job: { job_id: JOB, delivery: "local", runDir: join(root, "run"), worktree, artifactPath },
+			job: { job_id: JOB, kind: "research", role: "planner", delivery: "local", runDir: join(root, "run"), worktree, artifactPath },
 			prompt: "Research the repo and report.",
 			providerEnv: { ANTHROPIC_BASE_URL: provider.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN },
 			userSettings: null,

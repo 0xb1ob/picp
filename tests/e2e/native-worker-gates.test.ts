@@ -39,7 +39,7 @@ async function withFixture(body: (fixture: Fixture) => Promise<void>): Promise<v
 		mkdirSync(join(root, "artifacts"), { mode: 0o700 });
 		writeFileSync(join(worktree, "README.md"), "gates repo readme\n");
 		const run = (provider: ClaudeMockProvider, extra: Partial<SpikeRunOptions> = {}) => runClaudeSpike({
-			job: { job_id: JOB, delivery: "local", runDir: join(root, "run"), worktree, artifactPath },
+			job: { job_id: JOB, kind: "research", role: "planner", delivery: "local", runDir: join(root, "run"), worktree, artifactPath },
 			prompt: "Research the repo.",
 			providerEnv: { ANTHROPIC_BASE_URL: provider.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN },
 			userSettings: null,
@@ -264,5 +264,26 @@ test("R1: Bash and Read never reach the settings env, /proc environ or the setti
 		t.diagnostic(`scrub: ${/socat/.test(scrubbed) ? "Bash failed closed (sandbox needs socat)" : "Bash ran scrubbed"}; sentinel ${scrubbed.includes(secret) ? "visible" : "absent"}`);
 		assert.ok(scrubProvider.requests.length > 1, "the scrubbed run never answered the tool call");
 		assert.equal(scrubbed.includes(token), false);
+	});
+});
+
+// N4b: the report tool's context is the job's own kind and role, not a research/planner literal.
+test("N4b: a report is checked against the SpikeJob's kind and role", { skip, timeout: 180_000 }, async () => {
+	await withFixture(async ({ root, worktree, artifactPath }) => {
+		const provider = await startClaudeMockProvider([
+			step(REPORT_TOOL, { job_id: JOB, kind: "research", status: "done", summary: "Done.", artifact_path: artifactPath }),
+			{ kind: "text", text: "done" },
+		]);
+		const result = await runClaudeSpike({
+			job: { job_id: JOB, kind: "ship", role: "implementer", delivery: "local", runDir: join(root, "run"), worktree, artifactPath },
+			prompt: "Report.",
+			providerEnv: { ANTHROPIC_BASE_URL: provider.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN },
+			userSettings: null,
+			maxTurns: 5,
+			timeoutMs: 150_000,
+		});
+		await provider.close();
+		assert.equal(result.report, undefined);
+		assert.match(result.reportRefusals.join("\n"), /kind: must be "ship" for this job, got "research"/);
 	});
 });

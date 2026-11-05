@@ -17,7 +17,7 @@ test("native live smoke: one no-tool turn on the installed claude passes the loc
 	const root = mkdtempSync(join(tmpdir(), "cp-native-live-"));
 	try {
 		const result = await runClaudeSpike({
-			job: { job_id: "cp-native-live-smoke", delivery: "local", runDir: join(root, "run"), worktree: root, artifactPath: join(root, "a", "r.md") },
+			job: { job_id: "cp-native-live-smoke", kind: "research", role: "planner", delivery: "local", runDir: join(root, "run"), worktree: root, artifactPath: join(root, "a", "r.md") },
 			prompt: "Reply with the single word: ok",
 			tools: [],
 			maxTurns: 1,

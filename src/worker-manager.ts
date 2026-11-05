@@ -664,7 +664,7 @@ export class WorkerManager {
 				? { extraArgs: [...(request.extraArgs ?? []), ...(optional.flags ?? [])] }
 				: {}),
 			...(this.#options.piBin ? { piBin: this.#options.piBin } : {}),
-			...(request.driver ? nativeSpawnOptions(request.model, plan.env) : {}),
+			...(request.driver ? nativeSpawnOptions(request.model, plan.env, request.profile.systemPrompt) : {}),
 		});
 		const managed: ManagedWorker = {
 			key,
