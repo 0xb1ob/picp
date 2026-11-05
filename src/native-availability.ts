@@ -7,13 +7,13 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
-import { LAYOUT } from "./contracts.ts";
+import { LAYOUT, type Layout, layoutForHome } from "./contracts.ts";
 import {
 	type ModelFamily, modelFamily, NATIVE_AUTH_CODES, NATIVE_WINDOWS, type NativeAuthCode, type NativeWindow, OBSERVATION_EVENT, WINDOW_STATUSES,
 } from "./drivers/claude-observation.ts";
 import { installedClaudeVersion, nativeModelId, type NativeRefusal } from "./drivers/claude.ts";
 import { atomicWriteJson } from "./json-store.ts";
-import { nativeConfigFile } from "./worker-driver.ts";
+import { loadNativeConfig, nativeConfigFile } from "./worker-driver.ts";
 
 const SEEN_MAX = 256;
 const literals = (values: readonly string[]) => Type.Union(values.map((value) => Type.Literal(value)));
@@ -55,12 +55,12 @@ type ObservationEvent = { observed_at: number; claude_version?: string } & (
 	| { kind: "window"; window: NativeWindow; status: WindowEntry["status"]; uuid?: string; resets_at?: number; utilization?: number }
 	| { kind: "auth"; code: NativeAuthCode } | { kind: "lockdown"; code: "lockdown" } | { kind: "turn_ok"; family?: ModelFamily });
 
-export const nativeAvailabilityFile = (home: string): string => join(home, LAYOUT.state, "native-availability.json");
+export const nativeAvailabilityFile = (home: string, layout: Layout = LAYOUT): string => join(home, layout.state, "native-availability.json");
 
 /** The snapshot, or undefined when it is missing or corrupt (unknown). */
-export function readNativeAvailability(home: string): NativeAvailabilitySnapshot | undefined {
+export function readNativeAvailability(home: string, layout: Layout = LAYOUT): NativeAvailabilitySnapshot | undefined {
 	try {
-		const raw: unknown = JSON.parse(readFileSync(nativeAvailabilityFile(home), "utf8"));
+		const raw: unknown = JSON.parse(readFileSync(nativeAvailabilityFile(home, layout), "utf8"));
 		return Value.Check(SnapshotSchema, raw) ? (raw as NativeAvailabilitySnapshot) : undefined;
 	} catch {
 		return undefined;
@@ -153,4 +153,38 @@ export async function nativeAvailability(home: string, model: string, options: {
 		return { blocked: { category: "lockdown", why: `the CLI surface lockdown refused a run at ${iso(snapshot.lockdown.observed_at)}; fix the CLI, then turn the switch off and on` } };
 	}
 	return note ? { note } : {};
+}
+
+export interface NativeQuotaLine { state: "ok" | "limited" | "blocked" | "unknown"; label: string; detail: string }
+
+/**
+ * The dashboard's separate Claude item (S3), never gateway quota; undefined while the switch is off or unreadable.
+ * Paths come from `home`'s own layout, since the viewer configures none. Precedence: blocked, limited, unknown, ok.
+ */
+export function nativeQuotaLine(home: string, now: number): NativeQuotaLine | undefined {
+	const layout = layoutForHome("multi", home);
+	const switchFile = nativeConfigFile(home, layout);
+	try {
+		if (!loadNativeConfig(switchFile).claude_research) return undefined;
+	} catch {
+		return undefined;
+	}
+	const snapshot = readNativeAvailability(home, layout);
+	if (!snapshot) return { state: "unknown", label: "Claude unknown", detail: "no readable native-availability snapshot yet" };
+	// shortcut: CLI-version invalidation (iii) is skipped (it spawns claude); add it if a CLI update leaves the line stale.
+	const switched = mtime(switchFile);
+	const live = <E extends { observed_at: number }>(entry: E | undefined): E | undefined => (entry && !(switched !== undefined && switched > entry.observed_at) ? entry : undefined);
+	const auth = live(snapshot.auth), lockdown = live(snapshot.lockdown);
+	if (auth) return { state: "blocked", label: "Claude blocked (sign-in)", detail: `${auth.code} at ${iso(auth.observed_at)}; sign in to claude again, then turn the switch off and on` };
+	if (lockdown) return { state: "blocked", label: "Claude blocked (lockdown)", detail: `surface lockdown refused a run at ${iso(lockdown.observed_at)}` };
+	const rejected = NATIVE_WINDOWS.flatMap((window) => (snapshot.windows[window]?.status === "rejected" ? [{ window, ...snapshot.windows[window]! }] : []));
+	const sticky = rejected.filter((entry) => entry.resets_at === undefined && live(entry));
+	if (sticky.length) return { state: "limited", label: "Claude limited (reset unknown)", detail: sticky.map((e) => `${e.window} rejected, reset unknown`).join("; ") };
+	const pending = rejected.filter((entry) => entry.resets_at !== undefined && now < entry.resets_at);
+	if (pending.length) {
+		const until = Math.max(...pending.map((entry) => entry.resets_at!));
+		return { state: "limited", label: `Claude limited until ${iso(until).slice(11, 16)}Z`, detail: pending.map((e) => `${e.window} rejected until ${iso(e.resets_at!)}`).join("; ") };
+	}
+	if (rejected.length) return { state: "unknown", label: "Claude unknown", detail: "a rejected window reset or was voided; unknown until the next native run" };
+	return { state: "ok", label: "Claude ok", detail: "no spent window, sign-in or lockdown block recorded by native runs" };
 }

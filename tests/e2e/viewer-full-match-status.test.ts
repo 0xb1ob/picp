@@ -3,10 +3,11 @@
  * from real scratch run files; layout is the browser fixture's `full-match-status` stage.
  */
 import assert from "node:assert/strict";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
+import { nativeAvailabilityFile } from "../../src/native-availability.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import type { Context } from "../harness/conversations.ts";
 import { dashboard, openTab, operatorSession, type Tab, until } from "../harness/dashboard.ts";
@@ -137,6 +138,36 @@ test("S5-status-css: from 900 px the footer is the chat's 37 px second row; the 
 	assert.match(rule(desktop, "aside.workspace-context"), /bottom:var\(--workspace-status, ?0px\)/, "Context stops at the footer");
 	assert.match(rule(desktop, ".workspace-jobs"), /height:calc\(100% - var\(--workspace-status, ?0px\)\)/, "so does the drawer");
 	assert.match(rule(desktop, ".workspace-status-meter>progress::-webkit-progress-value"), /background:var\(--muted\)/, "a neutral fill at any utilization");
+});
+
+test("S3-claude-line: a separate Claude item only with the switch on — no snapshot is unknown, a future reset limited, an auth entry blocked", { timeout: 120_000 }, async (t) => {
+	const d = await start(t);
+	const url = day(`${DAY}T00:00:00Z`, new Date(NOON + 12 * 60 * MIN).toISOString(), "UTC");
+	const claude = async () => ((await d.get(url)).body as any).claude;
+	assert.equal(await claude(), undefined, "switch off: no Claude item");
+	const switchFile = join(d.home, LAYOUT.data, "native.json");
+	mkdirSync(dirname(switchFile), { recursive: true });
+	writeFileSync(switchFile, JSON.stringify({ claude_research: true }));
+	utimesSync(switchFile, 0, 0); // the viewer runs at NOON; an older switch never voids the entries below
+	const label = async () => (await claude())?.label;
+	assert.equal(await label(), "Claude unknown", "no snapshot is unknown, never ok or 0%");
+	const snapshot = nativeAvailabilityFile(d.home);
+	writeFileSync(snapshot, "{not json");
+	assert.equal(await label(), "Claude unknown", "a corrupt snapshot is unknown");
+	const write = (over: object) => writeFileSync(snapshot, JSON.stringify({ version: 1, windows: {}, seen: [], ...over }));
+	write({ windows: { five_hour: { status: "rejected", observed_at: NOON - 60 * MIN, resets_at: NOON + 120 * MIN, utilization: 1 } } });
+	assert.deepEqual(await claude(), { state: "limited", label: "Claude limited until 14:00Z", detail: `five_hour rejected until ${DAY}T14:00:00Z` });
+	const status = await d.get(url);
+	assert.deepEqual((status.body as any).quota.observation.providers.map((p: any) => p.provider), ["anthropic", "openai-codex"], "never merged into gateway quota");
+	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
+	tab.shift(NOON - Date.now());
+	await until(() => footer(tab), (text) => text.includes("observed 12m ago | Claude limited until 14:00Z | today"), "the Claude item after the gateway quota");
+	write({ auth: { code: "authentication_failed", observed_at: NOON - 60 * MIN } });
+	assert.equal(await label(), "Claude blocked (sign-in)");
+	write({});
+	assert.equal(await label(), "Claude ok");
+	writeFileSync(switchFile, JSON.stringify({ claude_research: false }));
+	assert.equal(await claude(), undefined, "switch off again: the line is as short as before");
 });
 
 test("S5-status-missing-phone: no observation reads as not recorded; a phone has no footer and asks for none", { timeout: 120_000 }, async (t) => {

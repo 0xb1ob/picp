@@ -5,7 +5,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { LAYOUT } from "./contracts.ts";
+import { LAYOUT, type Layout } from "./contracts.ts";
 import type { WorkerProcess } from "./worker-process.ts";
 
 export type WorkerDriverHandle = Pick<WorkerProcess, "pid" | "closed" | "exit" | "alive" | "busy" | "settledCount" | "onEvent" | "send" | "getState" | "shutdown" | "kill" | "stderrTail">;
@@ -14,7 +14,7 @@ export const NATIVE_DRIVERS = ["claude"] as const;
 export type NativeDriver = (typeof NATIVE_DRIVERS)[number];
 
 
-export const nativeConfigFile = (home: string): string => join(home, LAYOUT.data, "native.json");
+export const nativeConfigFile = (home: string, layout: Layout = LAYOUT): string => join(home, layout.data, "native.json");
 
 /** `data/native.json` (`workers.native_claude_research`): absent means off; another key or a non-boolean throws. */
 export function loadNativeConfig(file: string): { claude_research: boolean } {
