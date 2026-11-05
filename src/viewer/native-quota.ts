@@ -4,8 +4,8 @@ import { dirname, join } from "node:path";
 import type { WorkspaceStatusResponse } from "./api-types.ts";
 import { num, obj, type Json } from "./sessions.ts";
 
-/** Viewer copies of `NATIVE_WINDOWS`, `NATIVE_AUTH_CODES` and `WINDOW_STATUSES` (`drivers/claude-observation.ts`); a test
- * pins parity. */
+/** Viewer copies of `NATIVE_WINDOWS`, `NATIVE_AUTH_CODES` and `WINDOW_STATUSES` (`drivers/claude-observation.ts`);
+ * tests pin list parity and that this parse accepts exactly what S2's `SnapshotSchema` accepts. */
 export const QUOTA_WINDOWS = ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet", "seven_day_overage_included", "unspecified"] as const;
 export const QUOTA_AUTH_CODES = ["authentication_failed", "oauth_org_not_allowed", "account_on_hold"] as const;
 export const QUOTA_STATUSES = ["allowed", "allowed_warning", "rejected"] as const;
@@ -16,17 +16,24 @@ const iso = (ms: number): string => new Date(ms).toISOString().replace(/\.\d{3}Z
 const readJson = (file: string): Json | undefined => {
 	try { return obj(JSON.parse(readFileSync(file, "utf8"))); } catch { return undefined; }
 };
+const only = (value: Json, keys: readonly string[]) => Object.keys(value).every((key) => keys.includes(key));
+const at = (value: unknown) => (typeof value === "number" && value >= 0 ? value : undefined);
+const version = (value: unknown) => value === undefined || (typeof value === "string" && value.length >= 1 && value.length <= 40);
+/** S2's entry schemas (no extra keys): a window entry, or a sticky auth/lockdown entry when `codes` is set. */
 const entry = (value: unknown, codes?: readonly string[]): Entry | undefined => {
-	const e = obj(value), at = num(e?.observed_at), resets = num(e?.resets_at);
-	if (!e || at === undefined || at < 0 || (e.resets_at !== undefined && resets === undefined)) return undefined;
-	if (!(codes ? codes.includes(e.code as string) : (QUOTA_STATUSES as readonly unknown[]).includes(e.status))) return undefined;
-	return { observed_at: at, status: e.status as string | undefined, resets_at: resets, code: e.code as string | undefined };
+	const e = obj(value);
+	if (!e || at(e.observed_at) === undefined || !version(e.claude_version)) return undefined;
+	if (codes) return only(e, ["code", "observed_at", "claude_version"]) && codes.includes(e.code as string) ? { observed_at: at(e.observed_at)!, code: e.code as string } : undefined;
+	const shaped = only(e, ["status", "observed_at", "resets_at", "utilization", "claude_version"]) && (QUOTA_STATUSES as readonly unknown[]).includes(e.status)
+		&& (e.resets_at === undefined || at(e.resets_at) !== undefined) && (e.utilization === undefined || num(e.utilization) !== undefined);
+	return shaped ? { observed_at: at(e.observed_at)!, status: e.status as string, resets_at: at(e.resets_at) } : undefined;
 };
 
-/** The snapshot's windows, auth and lockdown, or undefined when any part has the wrong shape (read as unknown). */
+/** The snapshot, or undefined when S2 would reject it (read as unknown); like S2, unknown window names are ignored. */
 function parse(raw: Json | undefined) {
-	const windows = obj(raw?.windows);
-	if (raw?.version !== 1 || !windows || Object.keys(windows).some((w) => !(QUOTA_WINDOWS as readonly string[]).includes(w))) return undefined;
+	const windows = obj(raw?.windows), seen = raw?.seen;
+	if (!raw || raw.version !== 1 || !windows || !only(raw, ["version", "windows", "auth", "lockdown", "seen"])) return undefined;
+	if (!Array.isArray(seen) || seen.length > 256 || seen.some((s) => typeof s !== "string" || s.length > 64)) return undefined;
 	const parsed = QUOTA_WINDOWS.flatMap((window) => (windows[window] === undefined ? [] : [{ window, entry: entry(windows[window]) }]));
 	const auth = raw.auth === undefined ? undefined : entry(raw.auth, QUOTA_AUTH_CODES);
 	const lockdown = raw.lockdown === undefined ? undefined : entry(raw.lockdown, ["lockdown"]);

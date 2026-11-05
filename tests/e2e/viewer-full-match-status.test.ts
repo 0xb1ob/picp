@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { NATIVE_AUTH_CODES, NATIVE_WINDOWS, OBSERVATION_EVENT, WINDOW_STATUSES } from "../../src/drivers/claude-observation.ts";
-import { nativeAvailabilityFile, recordNativeObservation } from "../../src/native-availability.ts";
+import { nativeAvailabilityFile, readNativeAvailability, recordNativeObservation } from "../../src/native-availability.ts";
 import { QUOTA_AUTH_CODES, QUOTA_STATUSES, QUOTA_WINDOWS } from "../../src/viewer/native-quota.ts";
 import { operatorSessionsFile } from "../../src/viewer/operator-sessions.ts";
 import type { Context } from "../harness/conversations.ts";
@@ -173,12 +173,33 @@ test("S3-claude-line: a separate Claude item only with the switch on — no snap
 	const event = { type: OBSERVATION_EVENT, observed_at: NOON - 30 * MIN, kind: "window", window: "seven_day_opus", status: "rejected" };
 	assert.equal(recordNativeObservation(d.home, event), true);
 	assert.deepEqual(await claude(), { state: "limited", label: "Claude limited (reset unknown)", detail: "seven_day_opus rejected, reset unknown" });
-	write({ windows: { five_hour: { status: "spent", observed_at: NOON } } });
-	assert.equal(await label(), "Claude unknown", "an unknown status is the wrong shape, never ok");
-	write({ windows: { weekly: { status: "rejected", observed_at: NOON } } });
-	assert.equal(await label(), "Claude unknown", "an unknown window is the wrong shape");
-	write({ auth: { code: "expired", observed_at: NOON } });
-	assert.equal(await label(), "Claude unknown", "an unknown auth code is the wrong shape");
+	// Differential parity: the viewer reads a snapshot (not "no readable snapshot") exactly when S2's SnapshotSchema
+	// accepts it; `accepted` pins today's S2 answer so neither side drifts alone.
+	const valid = { version: 1, windows: {}, seen: [] }, entry = { status: "allowed", observed_at: NOON };
+	const table: [string, unknown, boolean][] = [
+		["minimal", valid, true],
+		["utilization and claude_version", { ...valid, windows: { five_hour: { ...entry, utilization: 0.5, claude_version: "2.1.0" } } }, true],
+		["an unknown window name (ignored, as S2's Partial does)", { ...valid, windows: { weekly: { status: "rejected", observed_at: NOON } } }, true],
+		["no seen list", { version: 1, windows: {} }, false],
+		["an extra top-level key", { ...valid, extra: true }, false],
+		["an extra window-entry key", { ...valid, windows: { five_hour: { ...entry, extra: 1 } } }, false],
+		["an extra auth key", { ...valid, auth: { code: "authentication_failed", observed_at: NOON, extra: 1 } }, false],
+		["seen with 257 items", { ...valid, seen: Array(257).fill("uuid") }, false],
+		["a negative observed_at", { ...valid, windows: { five_hour: { ...entry, observed_at: -1 } } }, false],
+		["an unknown status", { ...valid, windows: { five_hour: { ...entry, status: "spent" } } }, false],
+		["version 2", { ...valid, version: 2 }, false],
+		["an unknown auth code", { ...valid, auth: { code: "expired", observed_at: NOON } }, false],
+		["an empty claude_version", { ...valid, windows: { five_hour: { ...entry, claude_version: "" } } }, false],
+	];
+	for (const [why, raw, accepted] of table) {
+		writeFileSync(snapshot, JSON.stringify(raw));
+		assert.equal(readNativeAvailability(d.home) !== undefined, accepted, `S2 on ${why}`);
+		assert.equal((await claude())?.detail !== "no readable native-availability snapshot yet", accepted, `viewer on ${why}`);
+	}
+	writeFileSync(snapshot, JSON.stringify({ version: 1, windows: {} }));
+	assert.equal(await label(), "Claude unknown", "a snapshot with no seen list reads unknown with the switch on");
+	writeFileSync(snapshot, JSON.stringify({ ...valid, extra: true }));
+	assert.equal(await label(), "Claude unknown", "an extra top-level key reads unknown with the switch on");
 	writeFileSync(switchFile, JSON.stringify({ claude_research: false }));
 	assert.equal(await claude(), undefined, "switch off again: the line is as short as before");
 });
