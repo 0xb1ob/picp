@@ -146,7 +146,11 @@ export interface SettingsResponse {
 	models_error?: string | null;
 	/** True while the first `pi --list-models` run has not landed; the page asks again shortly. */
 	models_loading?: boolean;
+	/** The last rows of `state/model-apply.jsonl`, oldest first: how a model/thinking change reached each live session. */
+	model_apply?: ModelApplyRow[];
 }
+/** One `state/model-apply.jsonl` row (src/session-model-apply.ts `ModelApplyLine`). */
+export interface ModelApplyRow { v: 1; type: "model_apply"; at: string; session: "parent" | "operator"; state: "queued" | "applied" | "cancelled" | "failed"; model: string | null; thinking: string | null; reason?: string }
 /** `POST /api/settings/apply|restore`: the owner transaction's result, passed through with its status. */
 export interface SettingsWriteResponse {
 	status: number;

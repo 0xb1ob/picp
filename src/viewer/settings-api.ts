@@ -10,8 +10,10 @@
  * (409 `offline`), its CSRF token (403), then the frame. Each refusal here is one `refused` line (kind `settings`)
  * through `guarded`'s refuse; the session's own outcomes pass through with their status and its audit is the record.
  */
+import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
-import type { SettingsResponse, SettingsWriteResponse } from "./api-types.ts";
+import { join } from "node:path";
+import type { ModelApplyRow, SettingsResponse, SettingsWriteResponse } from "./api-types.ts";
 import { type ControlRouteOptions, type ControlRouteResult, controlRequest, guarded, mayWrite, readAllowed, tokenMatches } from "./control-api.ts";
 import { readControlConfig, readControlRecord } from "./control-files.ts";
 import { operatorSession } from "./control-inbox.ts";
@@ -92,6 +94,28 @@ function settingsBase(now: Date): SettingsResponse {
 	return { generated_at: now.toISOString(), enabled: false, running: false, supported: false, writable: false, reason: null, snapshot: null, catalog: null, audit: [] };
 }
 
+const APPLY_TAIL_BYTES = 16_384;
+/** The last 10 `state/model-apply.jsonl` rows (the parent host writes them); absent or unreadable is none. */
+export function modelApplyTail(stateDir: string): ModelApplyRow[] {
+	let fd: number | undefined;
+	try {
+		fd = openSync(join(stateDir, "model-apply.jsonl"), "r");
+		const size = fstatSync(fd).size, buffer = Buffer.alloc(Math.min(size, APPLY_TAIL_BYTES));
+		readSync(fd, buffer, 0, buffer.length, size - buffer.length);
+		const lines = buffer.toString("utf8").split("\n").slice(size > buffer.length ? 1 : 0);
+		return lines.flatMap((line): ModelApplyRow[] => {
+			try {
+				const row: unknown = JSON.parse(line);
+				return isObject(row) && row.type === "model_apply" && typeof row.at === "string" && typeof row.session === "string" && typeof row.state === "string" ? [row as unknown as ModelApplyRow] : [];
+			} catch { return []; }
+		}).slice(-10);
+	} catch {
+		return [];
+	} finally {
+		if (fd !== undefined) closeSync(fd);
+	}
+}
+
 export async function handleSettingsStatus(req: IncomingMessage, options: ControlRouteOptions, now = new Date(), listModels: () => ModelList = availableModels): Promise<ControlRouteResult> {
 	if (!readAllowed(req, options)) return { status: 403, body: { error: "Settings are served only under --require-tailnet" } };
 	const config = readControlConfig(options.stateDir);
@@ -115,7 +139,7 @@ export async function handleSettingsStatus(req: IncomingMessage, options: Contro
 			snapshot: isObject(result?.snapshot) ? (result.snapshot as SettingsResponse["snapshot"]) : null,
 			catalog: Array.isArray(result?.catalog) ? result.catalog : null,
 			audit: Array.isArray(result?.audit) ? result.audit : [],
-			available_models: models.models, models_error: models.error, models_loading: models.loading,
+			available_models: models.models, models_error: models.error, models_loading: models.loading, model_apply: modelApplyTail(options.stateDir),
 		} satisfies SettingsResponse,
 	};
 }

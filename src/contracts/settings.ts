@@ -191,13 +191,13 @@ export const SETTING_FIELDS: readonly SettingField[] = deepFreeze([
 		rubric: { file_key: "rubric", type: "rubric", max_items: 64, default: [], label: "Worker models", help: "Model, fallbacks and thinking per rubric row; restore puts back the shipped rows." },
 	}),
 	...group("models", "parent", { applies: "next_parent_start", on_invalid: "default" }, {
-		parent: { file_key: "model", env: "CP_PARENT_MODEL", type: "model_ref", default: null, label: "Parent model", help: "Next parent start or rotation when cp_parent start names no model; beats CP_PARENT_MODEL and the saved control model. Empty unsets it; cp_parent model switches now and is kept at rotation." },
+		parent: { file_key: "model", env: "CP_PARENT_MODEL", type: "model_ref", default: null, label: "Parent model", help: "Switches the running parent when its current turn ends; else the next start. A later Settings change beats an earlier cp_parent model. Beats CP_PARENT_MODEL and the saved control model. Empty unsets it." },
 	}),
 	...group("models", "operator", { applies: "next_operator_launch", on_invalid: "default" }, {
 		operator: { file_key: "model", env: "CP_OPERATOR_MODEL", type: "model_ref", default: null, label: "Operator model", help: "Next fresh cp-operator launch; beats CP_OPERATOR_MODEL, never an explicit --model. A resumed or restarted session keeps its recorded model. Empty unsets it." },
 	}),
 	...group("models", "parent", { applies: "next_parent_start", on_invalid: "default" }, {
-		parent_thinking: { file_key: "thinking", type: "thinking_level", default: null, label: "Parent thinking", help: "Next parent start or rotation; an explicit cp_parent start thinking beats it, a start model does not. No env pin. pi clamps a level the model cannot serve. Empty unsets it." },
+		parent_thinking: { file_key: "thinking", type: "thinking_level", default: null, label: "Parent thinking", help: "Switches the running parent when its current turn ends; else the next start. A later Settings change beats an earlier cp_parent start thinking. No env pin. pi clamps a level the model cannot serve. Empty unsets it." },
 	}),
 	...group("models", "operator", { applies: "next_operator_launch", on_invalid: "default" }, {
 		operator_thinking: { file_key: "thinking", type: "thinking_level", default: null, label: "Operator thinking", help: "Next fresh cp-operator launch; never over an explicit --thinking or a resumed session (an explicit --model keeps it). No env pin. pi clamps a level the model cannot serve. Empty unsets it." },
