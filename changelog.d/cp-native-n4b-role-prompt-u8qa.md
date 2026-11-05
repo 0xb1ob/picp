@@ -1,0 +1,1 @@
+- Native Claude workers now receive their role profile (plus a short native addendum) as the SDK system prompt, and `report_result` takes the job's own kind and role instead of research/planner literals; the research/planner-only refusal is unchanged (N4b).

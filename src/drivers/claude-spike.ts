@@ -36,6 +36,8 @@ import {
 	type EnvelopeRecord,
 	EnvelopeSchema,
 	isoTimestamp,
+	type JobKind,
+	type Role,
 	SCHEMA_VERSION,
 	validateEnvelope,
 	WORKER_FORBIDDEN_TOOLS,
@@ -80,6 +82,8 @@ export function nativeEffortOptions(level: string | undefined): Pick<Options, "t
 
 export interface SpikeJob {
 	job_id: string;
+	kind: JobKind;
+	role: Role;
 	delivery: Delivery;
 	runDir: string;
 	worktree: string;
@@ -258,9 +262,9 @@ interface ReportState {
 function reportServer(job: SpikeJob, state: ReportState) {
 	const context: JobContext = {
 		job_id: job.job_id,
-		kind: "research",
+		kind: job.kind,
 		delivery: job.delivery,
-		role: "planner",
+		role: job.role,
 		runDir: job.runDir,
 		worktree: job.worktree,
 		artifactPath: job.artifactPath,
@@ -318,6 +322,8 @@ export interface SpikeRunOptions {
 	/** The operator's Claude settings path, which claude itself reads and picp never opens; null passes none. */
 	userSettings?: string | null;
 	model?: string;
+	/** The role contract as the SDK system prompt (a string replaces the CLI default); absent runs without one. */
+	systemPrompt?: string;
 	/** The routed thinking level (`nativeEffortOptions`); absent leaves the CLI's default effort. */
 	thinking?: string;
 	maxTurns?: number;
@@ -395,6 +401,7 @@ export async function runClaudeSpike(options: SpikeRunOptions): Promise<SpikeRes
 async function checkSurface(q: Query, init: Parameters<typeof lockdownVerdict>[0], expectedTools: readonly string[]): Promise<Lockdown> {
 	const started = Date.now();
 	try {
+		// SAFETY: getHooksListing exists only on newer SDKs; it is optional here and its absence is handled below.
 		const listing = (q as unknown as { getHooksListing?: () => Promise<HooksListing> }).getHooksListing;
 		const [initialized, hooks] = await Promise.all([q.initializationResult(), listing === undefined ? undefined : listing.call(q)]);
 		return { ...lockdownVerdict(init, expectedTools, initialized.commands, initialized.agents ?? [], hooks), checkMs: Date.now() - started };
@@ -479,6 +486,7 @@ async function runInScratch(
 		maxTurns: options.maxTurns ?? 12,
 		abortController: abort,
 		...(options.model === undefined ? {} : { model: options.model }),
+		...(options.systemPrompt === undefined ? {} : { systemPrompt: options.systemPrompt }),
 		...nativeEffortOptions(options.thinking),
 		...(options.resume === undefined ? {} : { resume: options.resume.sessionId }),
 	};

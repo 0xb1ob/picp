@@ -152,6 +152,32 @@ test("P3a/c/d/h/i/j: a native research job reports once, refuses peers and ship 
 	assert.match(over?.text ?? "", /\n\[picp: truncated \d+ bytes over the 64 KiB block cap\]$/, "an over-cap result is cut with the marker");
 });
 
+// N4b: a native worker never saw its role contract; the profile body and the native addendum now reach the model.
+test("N4b: a native research dispatch sends the planner profile and the native addendum as the system prompt, and reports", { skip, timeout: 300_000 }, async (t) => {
+	const ids: string[] = [];
+	const h = await nativeHome(t, [
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
+		{ kind: "text", text: "Reported." },
+	]);
+	h.toggle(true);
+	const native = await h.job();
+	ids.push(native.id);
+	const ends = (await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: native.id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(native.id)) } }] },
+	], h.env)) as Tool[];
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	const first = h.claude.requests.find((request) => request.path.startsWith("/v1/messages") && Array.isArray(request.body.tools));
+	const system = JSON.stringify(first?.body.system ?? "");
+	assert.match(system, /A plan is executable or it is not a plan\./, "a line of profiles/planner.md");
+	assert.match(system, /Write the research artifact with the Write tool/, "the native addendum");
+	const file = join(h.b.home, paths.runDir(native.id), "native-system-prompt.md");
+	assert.equal(statSync(file).mode & 0o777, 0o600);
+	assert.equal(readRunEvents(h.b.home, native.id).filter((event) => event.type === "envelope_received").length, 1, "the run still reports");
+	assert.equal(h.claude.overrun(), 0);
+});
+
 test("P3b/f/g: switch off and a drain freeze refuse before any spawn; a native run without a report fails on its observed exit", { skip, timeout: 300_000 }, async (t) => {
 	const h = await nativeHome(t, [{ kind: "text", text: "No report from me." }]);
 	const [off, frozen, crash] = await Promise.all([h.job(), h.job(), h.job()]);

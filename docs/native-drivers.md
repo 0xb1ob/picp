@@ -498,3 +498,12 @@ Viewer and parent-side only; nothing here changes selection.
 
 The opt-in soak (a claude row, the switch, what to watch, rollback) is in
 [`docs/routing-rollout.md`](routing-rollout.md#native-claude-research-soak-opt-in).
+
+## Role contract (N4b)
+
+A native worker gets the same role contract a pi worker does: `nativeSpawnOptions` writes the profile body plus a short
+native addendum (the Claude tool names, and the research artifact written with Write, not a heredoc) to
+`<run dir>/native-system-prompt.md` (0600) and names it in `CP_NATIVE_SYSTEM_PROMPT_FILE`. `claude-worker.ts` reads it on
+every turn, fresh or resumed, and passes it as the SDK `systemPrompt`; a missing, unreadable or empty file is a named start
+error. The file path is in the worker's env only, never the claude child's. `SpikeJob` now carries the job's `kind` and
+`role`, and `report_result` validates against them; the worker still refuses anything but research/planner.

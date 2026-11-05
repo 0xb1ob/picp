@@ -2,7 +2,7 @@
  * The native Claude research driver's dispatch side (N3b): which job may run on it, and the spawn that starts
  * src/drivers/claude-worker.ts in place of pi. Every refusal names its reason and happens before any process starts.
  */
-import { existsSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Delivery, type FleetRecord, type JobKind, paths, type Role } from "../contracts.ts";
@@ -21,6 +21,7 @@ export class NativeDriverError extends Error {
 }
 
 const WORKER_ENTRY = fileURLToPath(new URL("./claude-worker.ts", import.meta.url));
+const NATIVE_SYSTEM_PROMPT_FILE = "native-system-prompt.md";
 const LIVE_PHASES: readonly string[] = ["launching", "waiting", "held"];
 // One shared load: concurrent admissions awaiting their own import() could see a half-evaluated module.
 let spike: Promise<typeof import("./claude-spike.ts")> | undefined;
@@ -99,9 +100,22 @@ export function nativeModelId(model: string): string {
 	return id;
 }
 
-/** Overrides pi's argv with the native worker; the env is the planned worker env plus the routed Anthropic model. */
-export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env"> {
-	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model) } };
+/** What the native model is told after the profile body: its tools are Claude's, and the artifact is Written. */
+export const NATIVE_ADDENDUM = [
+	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Bash, Write) plus report_result;",
+	"ignore any other tool names above. Write the research artifact with the Write tool to the predeclared artifact",
+	"path (CP_ARTIFACT_PATH), never with a shell heredoc, then call report_result.",
+].join("\n");
+
+/** Overrides pi's argv with the native worker; the role contract goes to a 0600 file in the run dir, not the argv or env. */
+export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env"> {
+	const runDir = env.CP_RUN_DIR;
+	if (!runDir) throw new NativeDriverError("the native claude worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
+	const file = join(runDir, NATIVE_SYSTEM_PROMPT_FILE);
+	mkdirSync(runDir, { recursive: true });
+	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${NATIVE_ADDENDUM}\n`, { mode: 0o600 });
+	chmodSync(file, 0o600);
+	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file } };
 }
 
 /** Refuses a routed level with no native effort; absent (the CLI default), `off` and low…max pass. */

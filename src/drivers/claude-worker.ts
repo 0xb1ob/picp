@@ -94,6 +94,19 @@ function freshSession(): NativeSession {
 	return fresh;
 }
 
+/** The role contract the dispatch wrote; a missing or unreadable file stops the turn, never a run without it. */
+function readSystemPrompt(): string {
+	const file = env.CP_NATIVE_SYSTEM_PROMPT_FILE;
+	if (!file) throw new Error("native claude worker started without its system prompt file (CP_NATIVE_SYSTEM_PROMPT_FILE)");
+	try {
+		const body = readFileSync(file, "utf8");
+		if (body.trim() !== "") return body;
+	} catch (error) {
+		throw new Error(`native claude worker cannot read its system prompt ${file}: ${(error as Error).message}`);
+	}
+	throw new Error(`native claude worker's system prompt ${file} is empty`);
+}
+
 interface Turn {
 	reported: boolean;
 	code: number;
@@ -107,6 +120,7 @@ async function turn(prompt: string): Promise<Turn> {
 	if (env.CP_KIND !== "research" || env.CP_ROLE !== "planner") throw new Error(`native claude runs research jobs only, not ${env.CP_KIND}/${env.CP_ROLE}`);
 	const [jobId, runDir, worktree, artifactPath] = [env.CP_JOB_ID, env.CP_RUN_DIR, env.CP_WORKTREE, env.CP_ARTIFACT_PATH];
 	if (!jobId || !runDir || !worktree || !artifactPath) throw new Error("native claude worker started without its job identity");
+	const systemPrompt = readSystemPrompt();
 	const current = resuming ? readNativeSession(sessionFile) : freshSession();
 	session = current;
 	if (resuming && current.session_id === undefined) throw new Error(`${sessionFile} holds no session id; there is nothing to resume`);
@@ -121,7 +135,8 @@ async function turn(prompt: string): Promise<Turn> {
 	}
 	transcript.prompt(prompt, resumed);
 	const result = await runClaudeSpike({
-		job: { job_id: jobId, delivery: env.CP_DELIVERY as Delivery, runDir, worktree, artifactPath },
+		job: { job_id: jobId, kind: env.CP_KIND, role: env.CP_ROLE, delivery: env.CP_DELIVERY as Delivery, runDir, worktree, artifactPath },
+		systemPrompt,
 		prompt,
 		signal: abort.signal,
 		onMessage: relay,
