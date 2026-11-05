@@ -907,6 +907,7 @@ export const FAILURE_CLASS_WAKEUP: Readonly<Record<FailureClass, DurableWakeupKi
 	script_signal: "death",
 	wall_clock_exceeded: "bound",
 	tool_call_cap_exceeded: "bound",
+	turn_limit: "death",
 });
 
 export function formatDeathNotice(jobId: string, failure: Failure, work: UnreportedWork): string {

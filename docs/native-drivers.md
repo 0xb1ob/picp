@@ -334,6 +334,12 @@ no longer test-only): every N3a gate is on and not optional.
 
 **Follow-ups.** N3c replaced the N3b "Refused until N3c" list; see [N3c follow-ups](#n3c-follow-ups).
 
+**Turn limit.** Each native claude process runs with an SDK turn cap of 500 (`NATIVE_MAX_TURNS` in
+`src/drivers/claude-worker.ts`); `CP_NATIVE_MAX_TURNS` overrides it with a positive integer, and any other value keeps
+500. Every `native_run` event records `max_turns`; a run the SDK ends with `error_max_turns` adds `stop: "max_turns"`
+and a stderr line. If the worker then exits without a report, the job fails as `turn_limit` ("Stopped at turn limit"),
+not `crash`; the worktree and session are kept, and like every native failure it is never auto-recovered.
+
 **Usage.** A complete SDK usage with a finite cost and non-zero tokens is normalized to pi's `message_end` usage (input
 excludes cache read/write), so run status, the fleet record, mandate accounting and the per-job `checkBudget` read it
 exactly like pi usage. Anything else (SDK `partial`/`unavailable`, a missing or non-finite cost, zero tokens, which no

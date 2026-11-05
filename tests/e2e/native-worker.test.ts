@@ -100,6 +100,7 @@ test("P3a/c/d/h/i/j: a native research job reports once, refuses peers and ship 
 	assert.equal(events.filter((event) => event.type === "envelope_received").length, 1, "exactly one accepted report");
 	const run = events.find((event) => event.type === "native_run")?.payload as Record<string, unknown> | undefined;
 	assert.equal(run?.lockdown, "ok", "the lockdown ran and passed");
+	assert.deepEqual([run?.max_turns, run?.stop], [500, undefined], "an unset CP_NATIVE_MAX_TURNS runs with the 500 default");
 	assert.equal(existsSync("/tmp/picp-n3b-hook-ran"), false, "no project hook ran");
 	// P3i: the wrong-job report was refused; the filed envelope is this job's.
 	assert.match(toolResults(h.claude.requests).join("\n"), /job_id/);
@@ -137,7 +138,7 @@ test("P3b/f/g: switch off and a drain freeze refuse before any spawn; a native r
 		dispatch(frozen.id),
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `rm "${drain}"` } }] },
 		dispatch(crash.id),
-	], h.env)) as Tool[];
+	], { ...h.env, CP_NATIVE_MAX_TURNS: "forty" })) as Tool[];
 	const [first, second, third] = ends.filter((end) => end.toolName === "cp_dispatch");
 	// P3b: off by default; refused with no child, no request to the model.
 	assert.match(text(first), /workers\.native_claude_research is off/);
@@ -149,10 +150,35 @@ test("P3b/f/g: switch off and a drain freeze refuse before any spawn; a native r
 	assert.equal(record?.failure?.class, "crash");
 	const status = readRunStatus(h.b.home, crash.id);
 	assert.deepEqual([status.phase, status.exit_code], ["exited", 1], "the observed exit");
-	const run = readRunEvents(h.b.home, crash.id).find((event) => event.type === "native_run")?.payload as { report?: boolean } | undefined;
+	const run = readRunEvents(h.b.home, crash.id).find((event) => event.type === "native_run")?.payload as { report?: boolean; max_turns?: number; stop?: string } | undefined;
 	assert.equal(run?.report, false);
+	assert.deepEqual([run?.max_turns, run?.stop], [500, undefined], "an invalid CP_NATIVE_MAX_TURNS keeps the default and no stop");
 	assert.equal(existsSync(h.envelope(crash.id)), false);
 	assert.equal(h.claude.requests.filter((request) => request.path.startsWith("/v1/messages") && Array.isArray(request.body.tools)).length, 1, "only the crash run reached the model");
+});
+
+// cp-s26-flake-research-dudi exited at the SDK turn cap and was recorded as a crash; the stop is now named turn_limit.
+test("turn limit: a native run stopped at CP_NATIVE_MAX_TURNS fails as turn_limit and is never auto-recovered", { skip, timeout: 300_000 }, async (t) => {
+	const h = await nativeHome(t, [step("Bash", { command: "ls" })]);
+	h.toggle(true);
+	const job = await h.job();
+	const ends = (await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] },
+	], { ...h.env, CP_NATIVE_MAX_TURNS: "1" })) as Tool[];
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	const record = await waitFor(() => readFleet(h.b.home).jobs.find((entry) => entry.job_id === job.id), (entry) => entry?.phase === "failed", { timeoutMs: 120_000, what: "failed native job" });
+	assert.equal(record?.failure?.class, "turn_limit");
+	assert.equal(record?.failure?.message, "native run stopped at the turn limit (1 turns) before reporting; the worktree and session are kept");
+	const run = readRunEvents(h.b.home, job.id).find((event) => event.type === "native_run")?.payload as { max_turns?: number; stop?: string } | undefined;
+	assert.deepEqual([run?.max_turns, run?.stop], [1, "max_turns"], "the override is honoured and the stop recorded");
+	// D1: bounded recovery refuses the native job by name; nothing revives, redispatches or moves it to pi.
+	const refused = await waitFor(() => readRunEvents(h.b.home, job.id).find((event) => event.type === "recovery_failed"), (event) => event !== undefined, { timeoutMs: 30_000, what: "recovery refusal" });
+	assert.equal((refused?.payload as { stage?: string }).stage, "native");
+	const events = readRunEvents(h.b.home, job.id).map((event) => event.type);
+	assert.equal(events.includes("worker_revived") || events.includes("recovery_attempted"), false, events.join(","));
+	const after = readFleet(h.b.home).jobs.find((entry) => entry.job_id === job.id);
+	assert.deepEqual([after?.phase, after?.worker.driver], ["failed", "claude"]);
+	assert.equal(h.claude.overrun(), 0);
 });
 
 // F1: the fake model reports no usage, so the run's cost and tokens are unknown; recorded as unavailable, never a zero.

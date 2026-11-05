@@ -28,10 +28,10 @@ test("every failed announcement and terminal class names an emitter scenario", (
 	const classes: Record<string, string> = {
 		tool_loop: "S21-intake", budget_exceeded: "S21-budget", settled_without_report: "S21-unreported",
 		model_call_failed: "S21-budget", wall_clock_exceeded: "S21-clock", tool_call_cap_exceeded: "S21-bound",
-		spawn_failed: "S21-host", script_exit: "script_exit", script_signal: "script_signal",
+		spawn_failed: "S21-host", script_exit: "script_exit", script_signal: "script_signal", turn_limit: "turn_limit",
 	};
 	const registry = readFileSync(join(REPO_ROOT, "docs/testing-migration/s21.md"), "utf8");
-	const scripts = readFileSync(join(REPO_ROOT, "tests/e2e/script-jobs-p8e.test.ts"), "utf8");
+	const scripts = ["tests/e2e/script-jobs-p8e.test.ts", "tests/e2e/native-worker.test.ts"].map((file) => readFileSync(join(REPO_ROOT, file), "utf8")).join("\n");
 	const events: Record<string, string> = {
 		worker_death: "S21-intake", hard_bound: "S21-bound", envelope_invalid: "S21-intake",
 		budget_exceeded: "S21-budget", model_call_failed: "S21-budget", reconcile_unsalvageable: "S21-restart",
