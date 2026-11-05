@@ -1,0 +1,1 @@
+- Native routing S1: a rubric row may carry `driver: "claude"` (absent is pi); with the native switch ON, eligible local/answer research runs on the Claude CLI with the row's explicit `anthropic/claude-…` model and effort, otherwise falls back to pi with a named `driver_reason`; a started job keeps its driver.

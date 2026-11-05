@@ -208,8 +208,8 @@ export const RoutingRuleSchema = Type.Object(
 		fallbacks: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 4 })),
 		note: Type.Optional(Type.String({ maxLength: 300 })),
 		/**
-		 * Native routing S1: `claude` prefers the native driver for an eligible research job; absent or `pi` is pi.
-		 * A claude row's `model` must be an explicit `anthropic/claude-…` id; `[model, ...fallbacks]` stays the pi lane.
+		 * Native routing S1: `claude` prefers the native driver for eligible research; absent or `pi` is pi.
+		 * A claude row's `model` is an explicit Anthropic Claude id; `[model, ...fallbacks]` stays the pi lane.
 		 */
 		driver: Type.Optional(RoutingDriverSchema),
 	},

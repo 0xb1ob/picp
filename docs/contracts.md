@@ -9189,6 +9189,17 @@ keeps the model it has. An invalid `deny_by_role` (unknown role key, non-array,
 empty or overlong pattern) makes the whole file invalid, exactly like any
 invalid `routing.json` today. Absent, nothing is denied.
 
+**Driver (native routing S1).** A rubric row may carry `driver: "pi" | "claude"`; absent (every legacy row) is
+`pi`, and any other value makes the whole file invalid. `claude` is a preference, resolved at dispatch by
+`src/dispatch-driver.ts`: an eligible job runs on the native Claude CLI with the row's own `model`, which must be an
+explicit Anthropic Claude id (provider `anthropic`, model id starting `claude-`; anything else refuses the dispatch
+before any lease, never a silent fallback), and
+the row's effort (`off` disables thinking, `low`…`max` is the SDK `effort`, `minimal` refuses, absent is the CLI
+default). `[model, ...fallbacks]` stays the pi lane, resolved by `resolveWithCapacity` unchanged when the job falls
+back. `cp:routing_resolved`, the routing decision and the fleet's `routing` record carry `requested_driver`, `driver`
+and a bounded `driver_reason` (`<code>: <why>`, ≤200 chars) only when claude was requested or chosen; absent is pi.
+Precedence, eligibility and the lock are in [`docs/native-drivers.md`](native-drivers.md#routing-level-driver-s1).
+
 **Fallback is capability-gated and confined to the picked source.** A rubric
 row may carry `fallbacks: […]` (≤4 refs) after `model`. The
 allowlist, availability and effective effort gates filter `[model, ...fallbacks]`

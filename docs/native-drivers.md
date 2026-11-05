@@ -296,15 +296,17 @@ never opens it. Recommend an auth-only settings file for workers.
 
 **The switch.** `workers.native_claude_research` (dashboard Settings → *Native workers*, file `data/native.json`, key
 `claude_research`) is OFF by default. It changes nothing on its own: a job runs native only when `cp_dispatch` also
-names `driver: "claude"`. pi stays the default driver and routing rows are unchanged.
+names `driver: "claude"` or its rubric row carries `driver: "claude"` ([S1](#routing-level-driver-s1)). pi stays the
+default driver, and no shipped routing row names claude.
 
-**Selection and refusals.** `assertNativeSelection` (`src/drivers/claude.ts`) runs inside `Dispatcher.dispatch` after
-the existing holds, the drain/update freeze (`assertDispatchOpen`), trust and budget preflight, and before the lease and
-any spawn. Each refusal reads `refused: <job> cannot run on the native claude driver: <reason>`, in this order:
+**Selection and refusals.** `nativeSelectionRefusal` (`src/drivers/claude.ts`) runs from `resolveDriverRoute`
+(`src/dispatch-driver.ts`) when `Dispatcher` resolves the route, before preflight, the lease and any spawn. An explicit
+request refuses as `refused: <job> cannot run on the native claude driver: <reason>`, in this order:
 
 | Condition | Refusal names |
 |---|---|
 | switch file unreadable or off | the setting and where to turn it on |
+| owned by a pipeline (`state/pipelines/<research id>`) | pipeline research stays on pi (D2) |
 | not research (role `planner`, delivery `local` or `answer`) | the job's kind/role/delivery; ship, review, plan, parent and operator roles never run native |
 | another native job is live (fleet record with `worker.driver`, no observed exit) | concurrency 1 and the live job |
 | `claude` missing or below the pinned floor `CLAUDE_VERSION_FLOOR` | `claude update` / install remedy |
@@ -322,7 +324,7 @@ no longer test-only): every N3a gate is on and not optional.
 
 | Step | Native behaviour |
 |---|---|
-| Dispatch | `worker.driver: "claude"` on the fleet record; the brief is the first `prompt`; the routed model is passed only when it is `anthropic/…` |
+| Dispatch | `worker.driver: "claude"` on the fleet record; the brief is the first `prompt`; the routed model must be an explicit `anthropic/claude-…` id, passed to the CLI, or the spawn is refused |
 | Gates | read-only Bash policy, secret-path guard (R1), lockdown, managed-only hooks, env allow-list, fresh `CLAUDE_CONFIG_DIR`, no setting sources |
 | Report | `mcp__picp__report_result` through the existing validators and intake; one accepted generation; a wrong-job report is refused |
 | Bounds | tool calls arrive as `tool_execution_start`; wall-clock and tool-call caps apply as for pi |
@@ -385,3 +387,42 @@ through the real admission path.
 **Switch-off and restart.** With the switch off, resume and revive of an existing native job are refused with the named
 switch reason and nothing starts; teardown still removes the worker and scratch dir. A parent restart or install drain
 kills the native worker; the job keeps its session record, and a plain `cp_revive` resumes it once the parent is up.
+
+## Routing-level driver (S1)
+
+A rubric row's `driver` (`docs/contracts.md`, routing) makes native a routing choice, still behind the switch. Nothing
+changes until a row carries `driver: "claude"` **and** the switch is ON; the shipped defaults name no driver.
+
+**Precedence** (`resolveDriverRoute`, `src/dispatch-driver.ts`, for `cp_dispatch` preview and admission alike):
+
+| Request | Driver | On a failed condition |
+|---|---|---|
+| explicit `driver: "claude"` | claude | refused by name, today's semantics; no lease |
+| explicit `model` override, no `driver` | pi | (the row is not consulted) |
+| matching row `driver: "claude"` | claude | pi, `driver_reason` names the condition |
+| row without `driver` (legacy) or `pi` | pi | — |
+| a job whose fleet record already started (D1) | the recorded driver | a native job refuses rather than move to pi |
+
+**Fallback reasons** (`driver_reason` is `<code>: <why>`): `switch`, `pipeline`, `ineligible`, `occupied`,
+`cli_missing`, `cli_version`. The pi lane is the row's `[model, ...fallbacks]` through `resolveWithCapacity`, unchanged.
+
+**Model and effort.** The native model is the row's own `model` (or an explicit override's), an explicit
+`anthropic/claude-…` id; any other ref refuses the dispatch with no lease. The row's effort maps to SDK options: `off`
+disables thinking, `low`/`medium`/`high`/`xhigh`/`max` set `effort`, `minimal` refuses, absent leaves the CLI default and
+the reason records `effort CLI default`. The worker gets it as `CP_NATIVE_THINKING`; revive passes the same level.
+
+**Eligibility (D2).** Only local and answer research (role `planner`) routes native; a pipeline's research child is
+recognised by its pipeline record, not its role, and stays on pi.
+
+**Lock (D1).** The driver is fixed at the first admitted spawn and persisted as `worker.driver` plus `routing.driver`
+and `routing.driver_reason`. A re-dispatch, revive, follow-up, continuation or recovery never reselects it; a fresh
+operator-pick reroute (`src/reroute.ts`) must yield a model the recorded driver runs, or the respawn is refused.
+
+**Concurrency.** Admission reserves the home's single native slot synchronously after the last await, so two
+dispatches in one parent cannot both take it; the reservation ends when the dispatch settles (by then the fleet record
+holds the slot) and on any pre-start failure. `WorkerManager.spawn` keeps its own final guard.
+
+**Doctor.** A claude row's primary needs no pi credentials: `models.<profile>` reports `driver=claude <model>; pi
+fallback …`, and an unusable pi lane is a warning, not an error.
+
+Left for S2/S3: cached native startup failures and a spent subscription window falling new jobs back to pi.
