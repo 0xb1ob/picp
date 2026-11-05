@@ -198,7 +198,10 @@ try {
 		const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
 		const ids = ["cp-quota-due", "cp-quota-held"];
 		put(".pi-command-post/jobs.json", { jobs: ids.map(id => ({ id, title: `${id} fixture`, status: "in_progress", labels: ["project:demo", "kind:ship"] })) });
-		put(LAYOUT.fleetFile, { jobs: ids.map(job_id => ({ job_id, project: "demo", kind: "ship", phase: "failed", dispatched_at: ago(60), failure: { class: "model_call_failed", message: "quota continuation pending", at: ago(50) } })) });
+		// Native routing S3: the held job's Driver fact carries a claude fallback's reason at its 200-character cap.
+		const reason = `window: seven_day_opus rejected with no reset time; ${"a-long-unbroken-native-availability-reason-".repeat(4)}`.slice(0, 200);
+		put(LAYOUT.fleetFile, { jobs: ids.map(job_id => ({ job_id, project: "demo", kind: "ship", phase: "failed", dispatched_at: ago(60), failure: { class: "model_call_failed", message: "quota continuation pending", at: ago(50) },
+			...(job_id === "cp-quota-held" ? { routing: { requested_driver: "claude", driver: "pi", driver_reason: reason } } : {}) })) });
 		const intent = (job_id: string, delivery: string, reason?: string) => ({ continuation_id: `${job_id}:quota:1`, job_id, generation: 1, state: "pending", delivery, capability_version: "mock-quota-reset/1",
 			signal: { resetsAtUtc: ago(30), resetsAtEpochSeconds: Math.floor(Date.parse(ago(30)) / 1000) }, attempts: delivery === "waiting" ? 0 : 1, ...(reason ? { reason } : {}) });
 		put(join(LAYOUT.state, "quota-continuation.json"), { schema_version: 1, eligibility: {}, policy: { home: { enabled: true, changed_at: ago(90), actor: "operator" }, jobs: {} },
@@ -291,7 +294,10 @@ try {
 		quota: { availability: "ok", observation: { observed_at: observed(minutes), source_job_id: JOB, historical: true, providers: [
 			{ provider: "anthropic", five_hour: opus, seven_day: 41, tight: false, free_slots: null }, { provider: "openai-codex", five_hour: 52, seven_day: 37, tight: false, free_slots: null }] } },
 		spend: { availability: "ok", usd: 100.12 }, working: { availability: "ok", count: 1 }, done: { availability: "ok", count: 33 } });
-	let stale = false;
+	let stale = false, claude = false;
+	// Native routing S3: the separate Claude item, its longest label, and a long per-window tooltip.
+	const claudeItem = { state: "limited", label: "Claude limited (reset unknown)",
+		detail: `seven_day_opus rejected (no reset); five_hour rejected until 2026-10-15T18:00:00Z; ${"seven_day_overage_included rejected (no reset); ".repeat(3)}` };
 	// Every chat's context now reads /api/jobs; stages without their own list (or the real viewer's) get an empty one.
 	if (!routes["/api/jobs"] && !["m3-transcript", "nav-simplify", "p3-quota", "m3-shell"].includes(args.stage)) routes["/api/jobs"] = { generated_at: GENERATED, awaiting_count: 0, projects: [], warnings: [], jobs: [] };
 	// M3 slice 4: the composer menu attaches the done job's own P1 reference, as its job page's Ask would.
@@ -334,7 +340,14 @@ try {
 			for (const stream of streams) stream.write("event: refresh\ndata: overview\n\n");
 			return send(200, "application/json", "{}");
 		}
-		if ((S5 || S7 || S6 || S9) && path === "/api/workspace/status") return send(200, "application/json", JSON.stringify(stale ? status(3 * 1440, null) : status(12, 58)));
+		if (path === "/fixture/status-claude") {
+			claude = true;
+			for (const stream of streams) stream.write("event: refresh\ndata: overview\n\n");
+			return send(200, "application/json", "{}");
+		}
+		if ((S5 || S7 || S6 || S9) && path === "/api/workspace/status") {
+			return send(200, "application/json", JSON.stringify({ ...(stale ? status(3 * 1440, null) : status(12, 58)), ...(claude ? { claude: claudeItem } : {}) }));
+		}
 		// Full match S7: the recorded head moves to the oversized commit or an absent object; /api/diff is the real viewer's.
 		if (S7 && path.startsWith("/fixture/diff-")) {
 			diffAt(path === "/fixture/diff-big" ? diffShas.big! : path === "/fixture/diff-gone" ? "f".repeat(40) : diffShas.head!);
@@ -662,6 +675,11 @@ try {
 		for (const [device, width, height] of [["phone", 390, 844], ["desktop", 1440, 1000]] as const) {
 			await capture(`p3-quota-overdue-${device}-dark-${width}x${height}`, "#job/cp-quota-due", width, height, "dark", ".job-fact-quota", undefined, fact("waiting · overdue"));
 			await capture(`p3-quota-held-${device}-dark-${width}x${height}`, "#job/cp-quota-held", width, height, "dark", ".job-fact-quota", undefined, fact("held for the operator"));
+			await capture(`p3-quota-driver-${device}-dark-${width}x${height}`, "#job/cp-quota-held", width, height, "dark", ".job-fact-driver", undefined, [
+				[`document.querySelector(".job-fact-driver").scrollIntoView({ block: "center" })`, "true"],
+				["true", `(() => { const r = document.querySelector(".job-fact-driver dd").getBoundingClientRect();
+				return document.querySelector(".job-fact-driver dd").textContent.startsWith("pi (preferred claude: window seven_day_opus rejected")
+					&& r.left >= -0.5 && r.right <= innerWidth + 0.5 && document.documentElement.scrollWidth <= innerWidth; })()`]]);
 		}
 		if (posts.length) throw new Error(`p3-quota sent ${posts.join(", ")}: the Job page only reads`);
 	}
@@ -972,6 +990,8 @@ try {
 		const stale: Step = [`fetch("/fixture/status-stale")`, `/observed 3d ago/.test(document.querySelector(".workspace-status").innerText)`];
 		const live = "today $100.12 · 1 working · 33 done viewer connected";
 		const text = `anthropic 58% 5h · 41% wk openai-codex 52% 5h · 37% wk observed 12m ago ${live}`;
+		const claudeText = `anthropic — 5h · 41% wk openai-codex 52% 5h · 37% wk observed 3d ago Claude limited (reset unknown) ${live}`;
+		const withClaude: Step = [`fetch("/fixture/status-claude")`, `/Claude limited/.test(document.querySelector(".workspace-status").innerText)`];
 		// The committed four: desktop (frame 1, context open), desktop-log (frame 2), stale, and footer (cropped).
 		const shotsS: [string, number, number, Step[], object][] = [
 			["desktop", 1440, 1000, [footer, rest], { footer: "0 963 1440 37", context: "1100 0 340 963", text, bars: "58/64,52/64", ring: false, overflow: false }],
@@ -982,6 +1002,9 @@ try {
 			["stale", 1440, 1000, [footer, stale, rest], { footer: "0 963 1440 37", bars: "52/64", ring: false,
 				text: `anthropic — 5h · 41% wk openai-codex 52% 5h · 37% wk observed 3d ago ${live}` }],
 			["phone", 390, 844, [footer], { footer: null, phone: false, overflow: false }],
+			// Last, after stale (which stays on): the Claude item follows the gateway quota and fits from 900 px.
+			["claude", 1440, 1000, [footer, withClaude, rest], { footer: "0 963 1440 37", text: claudeText, bars: "52/64", overflow: false }],
+			["claude-900", 900, 800, [footer, withClaude, rest], { footer: "0 763 900 37", overflow: false }],
 		];
 		for (const [name, width, height, run, want] of shotsS) {
 			await capture(`full-match-status-${name}`, transcript, width, height, "dark", loaded, "bottom", run);
