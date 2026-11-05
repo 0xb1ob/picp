@@ -339,7 +339,7 @@ test("S2 lock: a spent window refuses a native resume, its queued sends stay que
 	assert.equal(spent?.isError, true, text(spent));
 	assert.match(text(spent), /subscription window is spent/);
 	assert.match(text(ends.find((end) => end.toolName === "cp_revive")), /native_refused.*subscription window is spent/);
-	// Released: one resume delivers both queued sends, in order, then the idle one; nothing ran on pi.
+	// Released: one resume delivers both queued sends in order; the refused idle send never reaches the model or pi.
 	assert.match(String(released?.result.details?.native), /^resuming:/, text(released));
 	const last = messages(modelCalls(h.claude.requests).at(-1));
 	assert.ok(last.indexOf("Queued one.") < last.indexOf("Queued two.") && last.indexOf("Queued one.") >= 0, last);
