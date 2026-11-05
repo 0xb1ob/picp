@@ -521,3 +521,20 @@ tsx` on worktree scripts, and `mkdir|mv|cp|rm` and redirects on worktree paths o
 tools, env dumps and `$` expansion are denied; network actions arrive as picp tools in N4d. The honest limit: `npm run`
 and `node` execute repo code, so this is defence in depth at pi parity, not a sandbox. Selection stays research-only
 until N4f, so no production job reaches this yet.
+
+## Implementer forge tools (N4d)
+
+`src/drivers/claude-forge-tools.ts` gives the implementer its network as in-process picp MCP tools beside
+`report_result`. They run in the claude-worker process, which holds the inherited worker env, so no credential enters
+the CLI child; the lockdown expects them for the implementer only. `git_push` pushes `HEAD` to `origin/<CP_JOB_ID>` in
+the worktree and refuses `force`, main, the base branch (`CP_BASE_BRANCH`) and any other branch by name; a rejected
+non-fast-forward push is refused by name too, never retried forced. `git_fetch` fetches `origin` in the worktree and
+refuses any other `cwd`, the canonical clone included. `pr_create` opens a draft from the job branch (to
+`CP_BASE_BRANCH` when set, else the repository's default) and records it in the run dir; a second call returns that
+URL. `pr_edit` edits the title and/or body of that PR and refuses any other number. `gh_read` runs `pr view|checks`
+on that PR or `run view <id> [--log-failed]` in this repo; `pr checks` and a status `run view` share one snapshot per
+worker process, then the ci-wait repeat refusal answers. Every output passes `redactGithubTokens` and is capped at 20,000
+characters. The worker also reads `user.name`/`user.email` from the worktree's git config and passes them as
+`GIT_AUTHOR_*`/`GIT_COMMITTER_*`, so `git commit` works under the scratch HOME; no token, HOME or credential helper is
+passed. The same slice makes `git checkout -- <path>` and `git restore` paths honour `exclude_paths`. Dispatch does not
+set `CP_BASE_BRANCH` yet; selection stays research-only until N4f.

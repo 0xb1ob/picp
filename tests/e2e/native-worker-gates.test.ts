@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -14,9 +14,11 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { whichAll } from "../../src/doctor.ts";
 import { buildChildEnv, REPORT_TOOL, runClaudeSpike, SPIKE_TOOLS, type SpikeRunOptions } from "../../src/drivers/claude-spike.ts";
 import { CLI_BUILTIN_AGENTS } from "../../src/drivers/claude-lockdown.ts";
-import { roleTools } from "../../src/drivers/claude-roles.ts";
+import { commitIdentityEnv } from "../../src/drivers/claude-forge-tools.ts";
+import { roleMcpTools, roleTools } from "../../src/drivers/claude-roles.ts";
 import { nativeDenials } from "../../src/drivers/claude-usage.ts";
 import { type ClaudeMockProvider, type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
+import { createScratchRepo } from "../harness/scratch-repo.ts";
 
 const claudePath = whichAll("claude", process.env)[0];
 const skip = claudePath === undefined ? "claude is not on PATH" : false;
@@ -315,9 +317,66 @@ test("N4c: an implementer's Edit inside the worktree lands; a Write outside is d
 		assert.equal(result.lockdown?.verdict, "ok", result.lockdown?.refusal ?? result.error);
 		const first = provider.requests.find((request) => request.path.startsWith("/v1/messages"))?.body as { tools?: Array<{ name: string }> };
 		const offered = first.tools?.map((tool) => tool.name).filter((name) => name !== "DeferredToolPlaceholder").sort();
-		assert.deepEqual(offered, [...roleTools("implementer"), REPORT_TOOL].sort());
+		assert.deepEqual(offered, [...roleTools("implementer"), REPORT_TOOL, ...roleMcpTools("implementer")].sort());
 		assert.equal(readFileSync(file, "utf8"), "export const x = 2;\n");
 		assert.deepEqual(readdirSync(root).sort(), ["artifacts", "repo"]);
 		assert.deepEqual(nativeDenials(result.denials), ["Write: Refused: an implementer edits only inside its worktree <path>, outside .git; a path outside the worktree (<path>) is denied."]);
 	});
+});
+
+// N4d: the implementer ships through the forge tools in this process; the CLI child gets the commit identity, no token.
+test("N4d: an implementer commits, git_push lands origin/<job> at HEAD, pr_create opens the draft; no token in the CLI env", { skip, timeout: 180_000 }, async () => {
+	const repo = createScratchRepo({ name: "forge-e2e" });
+	const root = mkdtempSync(join(tmpdir(), "cp-native-forge-"));
+	try {
+		const bin = join(root, "bin");
+		mkdirSync(bin);
+		copyFileSync(join(import.meta.dirname, "..", "fixtures", "forge-gh"), join(bin, "gh"));
+		chmodSync(join(bin, "gh"), 0o755);
+		const log = join(root, "gh.log");
+		repo.git("checkout", "-q", "-b", JOB);
+		repo.write("src/x.ts", "export const x = 1;\n");
+		repo.commitAll("x");
+		// Only the global config names the committer, and the child's scratch HOME has none: the identity env must carry it.
+		for (const key of ["user.name", "user.email"]) repo.git("config", "--unset", key);
+		writeFileSync(join(root, "gitconfig"), "[user]\n\tname = forge e2e\n\temail = forge@test.invalid\n");
+		const identity = commitIdentityEnv(repo.path, { ...process.env, GIT_CONFIG_GLOBAL: join(root, "gitconfig") });
+		const token = `ghp_${randomBytes(18).toString("hex")}`;
+		const prUrl = "https://github.com/picp-e2e/forge/pull/7";
+		const head = () => repo.git("rev-parse", "HEAD");
+		const provider = await startClaudeMockProvider([
+			step("Edit", { file_path: join(repo.path, "src", "x.ts"), old_string: "x = 1", new_string: "x = 2" }),
+			bash("git add -A && git commit -q -m x2"),
+			step("mcp__picp__git_push", {}),
+			step("mcp__picp__pr_create", { title: "x = 2", body: "Native forge e2e." }),
+			{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => ({ job_id: JOB, kind: "ship", status: "done", summary: "Shipped.", branch: JOB, head_sha: head(), pr_url: prUrl }) }] },
+			{ kind: "text", text: "done" },
+		]);
+		const result = await runClaudeSpike({
+			job: { job_id: JOB, kind: "ship", role: "implementer", delivery: "pr", runDir: join(root, "run"), worktree: repo.path, artifactPath: join(root, "art", "report.md"), excludePaths: [] },
+			prompt: "Ship src/x.ts.",
+			providerEnv: { ANTHROPIC_BASE_URL: provider.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN, ...identity },
+			hostEnv: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, FORGE_GH_LOG: log, GH_TOKEN: token, GITHUB_TOKEN: token, CP_BASE_BRANCH: "main" },
+			userSettings: null,
+			maxTurns: 12,
+			timeoutMs: 150_000,
+		});
+		await provider.close();
+		assert.equal(result.lockdown?.verdict, "ok", result.lockdown?.refusal ?? result.error);
+		const first = provider.requests.find((request) => request.path.startsWith("/v1/messages"))?.body as { tools?: Array<{ name: string }> };
+		const offered = first.tools?.map((tool) => tool.name).filter((name) => name !== "DeferredToolPlaceholder").sort();
+		assert.deepEqual(offered, [...roleTools("implementer"), REPORT_TOOL, ...roleMcpTools("implementer")].sort());
+		assert.deepEqual(result.denials, []);
+		assert.equal(repo.git("log", "-1", "--format=%an <%ae>"), "forge e2e <forge@test.invalid>");
+		assert.equal(repo.git("ls-remote", "origin", `refs/heads/${JOB}`).split("\t")[0], head());
+		assert.equal(result.report?.head_sha, head(), result.reportRefusals.join("\n"));
+		assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [`pr create --draft --head ${JOB} --base main --title x = 2 --body Native forge e2e.`]);
+		assert.ok(toolResults(provider.requests).some((text) => text === `Draft PR for ${JOB}: ${prUrl}`), toolResults(provider.requests).join("\n---\n"));
+		for (const key of ["GH_TOKEN", "GITHUB_TOKEN"]) assert.equal(result.spawnedEnvKeys?.includes(key), false, key);
+		assert.ok(result.spawnedEnvKeys?.includes("GIT_AUTHOR_NAME"));
+		assert.equal(provider.requests.some((request) => JSON.stringify(request.body).includes(token)), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+		repo.cleanup();
+	}
 });
