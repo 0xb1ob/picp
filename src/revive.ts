@@ -34,6 +34,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { type Failure, type FleetRecord, isScriptFleetRecord, isoTimestamp, type JobRouting, paths, type Role, type ThinkingLevel } from "./contracts.ts";
 import { nativeDoorRefusal, nativeReviveRefusal, sendNativeRevive } from "./drivers/claude-followup.ts";
+import { observeNative } from "./native-availability-observer.ts";
 import { nativeThinkingEnv } from "./drivers/claude.ts";
 import type { NativeDriver } from "./worker-driver.ts";
 import { type FleetStore, isPidAlive } from "./fleet.ts";
@@ -566,7 +567,7 @@ export class Reviver {
 		let managed: ReturnType<WorkerManager["spawn"]>;
 		try {
 			await this.#options.manager.ready();
-			managed = this.#options.manager.spawn({
+			managed = observeNative(this.#options.home, this.#options.manager.spawn({
 				identity: {
 					jobId,
 					kind: record.kind,
@@ -584,7 +585,7 @@ export class Reviver {
 				...(record.worker.driver ? { driver: record.worker.driver as NativeDriver, extraEnv: { CP_NATIVE_RESUME: "1", ...nativeThinkingEnv(plan.thinking) } } : {}),
 				// No `brief`: a revived pi worker resumes idle. `report_result` stays
 				// write-once (worker-reporter), so nothing here can double-report.
-			});
+			}));
 		} catch (error) {
 			reservation?.();
 			throw error;

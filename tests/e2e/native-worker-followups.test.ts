@@ -13,6 +13,8 @@ import { CommandPost } from "../../src/command-post.ts";
 import { DEFAULT_BUDGET_CONFIG, type Failure, LAYOUT, paths } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { NATIVE_FOLLOWUPS_FILE, NATIVE_REVIVE_PROMPT, NATIVE_SESSION_FILE, queuedFollowUps, readNativeSession } from "../../src/drivers/claude-followup.ts";
+import { OBSERVATION_EVENT } from "../../src/drivers/claude-observation.ts";
+import { recordNativeObservation } from "../../src/native-availability.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
 import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_NATIVE_MODEL, type RecordedClaudeRequest, routeNativeModel, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
@@ -295,6 +297,61 @@ test("H2: a resume that throws returns its claimed sends undelivered, and the ne
 	assert.equal(last.split(queued).length - 1, 1, "the queued send reached the model exactly once");
 	assert.ok(last.includes(NATIVE_REVIVE_PROMPT.slice(0, 40)), "the revive turn delivered it");
 	assert.equal(events.filter((event) => event.type === "envelope_received").length, 2);
+	assert.equal(h.claude.overrun(), 0);
+});
+
+test("S2 lock: a spent window refuses a native resume, its queued sends stay queued in order, and none reaches pi", { skip, timeout: 420_000 }, async (t) => {
+	const ids: string[] = [];
+	const reset = Date.now() + 3_600_000;
+	const observe = (status: string, observedAt: number) => recordNativeObservation(h.b.home, {
+		type: OBSERVATION_EVENT, kind: "window", window: "five_hour", status, observed_at: observedAt, ...(status === "rejected" ? { resets_at: reset } : {}),
+	});
+	const h = await nativeHome(t, [
+		// The dispatched turn holds its first answer: the window is spent meanwhile and two sends queue behind it.
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }], beforeAnswer: async () => { observe("rejected", Date.now()); await sleep(6_000); } },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
+		{ kind: "text", text: "Reported." },
+		{ kind: "text", text: "Noted the released follow-ups." },
+	]);
+	const id = (await h.job()).id;
+	ids.push(id);
+	const runDir = join(h.b.home, paths.runDir(id));
+	let held: string[] = [];
+	const step = (run: () => void) => ({ kind: "tool_calls" as const, calls: [{ name: "bash", args: () => (run(), { command: "true" }) }] });
+	const ends = (await h.b.run([
+		h.dispatch(id),
+		tool("cp_send", { job_id: id, message: "Queued one." }),
+		tool("cp_send", { job_id: id, message: "Queued two." }),
+		h.wait(id, "native_followup_refused", 1),
+		step(() => { held = queuedFollowUps(runDir); }),
+		tool("cp_send", { job_id: id, message: "Idle while spent." }),
+		tool("cp_revive", { job_id: id, confirm: true }),
+		step(() => observe("allowed", Date.now())),
+		tool("cp_send", { job_id: id, message: "Released." }),
+		h.wait(id, "native_followup_delivered", 1),
+		tool("cp_teardown", { job_id: id }),
+	], h.env)) as Tool[];
+	const [one, two, spent, released] = ends.filter((end) => end.toolName === "cp_send");
+	const events = readRunEvents(h.b.home, id);
+	for (const send of [one, two]) assert.equal(send?.result.details?.receipt, "queued", text(send));
+	assert.match((events.find((event) => event.type === "native_followup_refused")?.payload as { reason?: string } | undefined)?.reason ?? "", /subscription window is spent \(five_hour rejected until /);
+	assert.deepEqual(held, ["Queued one.", "Queued two."], "the refused sends left the queue or changed order");
+	assert.equal(spent?.isError, true, text(spent));
+	assert.match(text(spent), /subscription window is spent/);
+	assert.match(text(ends.find((end) => end.toolName === "cp_revive")), /native_refused.*subscription window is spent/);
+	// Released: one resume delivers both queued sends in order; the refused idle send never reaches the model or pi.
+	assert.match(String(released?.result.details?.native), /^resuming:/, text(released));
+	const last = messages(modelCalls(h.claude.requests).at(-1));
+	assert.ok(last.indexOf("Queued one.") < last.indexOf("Queued two.") && last.indexOf("Queued one.") >= 0, last);
+	assert.equal(last.includes("Idle while spent."), false, "the refused idle send reached the model");
+	const record = readFleet(h.b.home).jobs.find((job) => job.job_id === id);
+	assert.equal(record?.worker.driver, "claude");
+	assert.equal(events.filter((event) => event.type === "worker_revived").length, 0);
+	// Usage once: two measured runs sum to exactly the model calls made.
+	const runs = readRunEvents(h.b.home, id).filter((event) => event.type === "native_run");
+	assert.equal(runs.length, 2);
+	const calls = modelCalls(h.claude.requests);
+	assert.deepEqual(((usage) => [usage.input, usage.output])(readRunStatus(h.b.home, id).usage), [calls.length * 12, calls.length * 7]);
 	assert.equal(h.claude.overrun(), 0);
 });
 

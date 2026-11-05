@@ -37,14 +37,37 @@ export interface ClaudeToolUse {
 	input: unknown | ((request: RecordedClaudeRequest) => unknown);
 }
 
-/** `beforeAnswer` runs, and is awaited, after the request is recorded and before the step's answer is sent. */
-export type ClaudeStep = { kind: "tool_use"; calls: ClaudeToolUse[]; beforeAnswer?: () => Promise<void> } | { kind: "text"; text: string };
+/** The unified rate-limit headers the API sends a subscriber; `rejected` answers 429. `resetsAt` is epoch seconds. */
+export interface FakeRateLimit { status: "allowed" | "allowed_warning" | "rejected"; claim?: string; resetsAt?: number }
+
+/** `beforeAnswer` runs, and is awaited, after the request is recorded and before the step's answer is sent.
+ * `auth_error` is sticky: it and every tool-offering request after it answer 401 until `endAuthError()`. */
+export type ClaudeStep = ({ kind: "tool_use"; calls: ClaudeToolUse[]; beforeAnswer?: () => Promise<void> } | { kind: "text"; text: string }) & { limit?: FakeRateLimit }
+	| { kind: "auth_error" };
+
+/** Settings env for a fake claude.ai subscriber (OAuth): the CLI reads rate-limit headers only on that path. Every
+ * non-loopback request goes to a dead proxy, so the synthetic token never leaves the host. */
+export const subscriberEnv = (url: string): Record<string, string> => ({
+	ANTHROPIC_BASE_URL: url, CLAUDE_CODE_OAUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN,
+	HTTPS_PROXY: "http://127.0.0.1:9", HTTP_PROXY: "http://127.0.0.1:9", NO_PROXY: "127.0.0.1,localhost",
+});
+
+function limitHeaders(limit: FakeRateLimit | undefined): Record<string, string> {
+	if (!limit) return {};
+	return {
+		"anthropic-ratelimit-unified-status": limit.status,
+		...(limit.claim ? { "anthropic-ratelimit-unified-representative-claim": limit.claim } : {}),
+		...(limit.resetsAt === undefined ? {} : { "anthropic-ratelimit-unified-reset": String(limit.resetsAt) }),
+	};
+}
 
 export interface ClaudeMockProvider {
 	url: string;
 	requests: RecordedClaudeRequest[];
 	/** Requests answered past the script's end (fail-closed tests assert this stays 0). */
 	overrun: () => number;
+	/** Ends a sticky `auth_error`: the next tool-offering request takes the next scripted step. */
+	endAuthError: () => void;
 	close: () => Promise<void>;
 }
 
@@ -73,15 +96,15 @@ function sse(res: ServerResponse, event: string, data: unknown): void {
 
 const USAGE = { input_tokens: 12, output_tokens: 7, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
 
-function answer(res: ServerResponse, body: Record<string, unknown>, blocks: Array<Record<string, unknown>>, stop: string, id: string, usage: boolean): void {
+function answer(res: ServerResponse, body: Record<string, unknown>, blocks: Array<Record<string, unknown>>, stop: string, id: string, usage: boolean, headers: Record<string, string> = {}): void {
 	const counts = (value: Record<string, number>) => (usage ? { usage: value } : {});
 	const model = typeof body.model === "string" ? body.model : FAKE_CLAUDE_MODEL;
 	if (body.stream !== true) {
-		res.writeHead(200, { "content-type": "application/json" });
+		res.writeHead(200, { "content-type": "application/json", ...headers });
 		res.end(JSON.stringify({ id, type: "message", role: "assistant", model, content: blocks, stop_reason: stop, stop_sequence: null, ...counts(USAGE) }));
 		return;
 	}
-	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+	res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", ...headers });
 	sse(res, "message_start", {
 		type: "message_start",
 		message: { id, type: "message", role: "assistant", model, content: [], stop_reason: null, stop_sequence: null, ...counts({ ...USAGE, output_tokens: 1 }) },
@@ -118,6 +141,7 @@ export async function startClaudeMockProvider(script: readonly ClaudeStep[], opt
 	const usage = options.usage ?? true;
 	const requests: RecordedClaudeRequest[] = [];
 	let cursor = 0;
+	let authError = false;
 	let overrun = 0;
 	let ids = 0;
 	const server = createServer((req, res) => {
@@ -143,8 +167,20 @@ export async function startClaudeMockProvider(script: readonly ClaudeStep[], opt
 			}
 			const id = `msg_fake_${++ids}`;
 			const offersTools = Array.isArray(body.tools) && body.tools.length > 0;
-			const step = offersTools ? script[cursor++] : undefined;
+			const step = offersTools ? (authError ? { kind: "auth_error" as const } : script[cursor++]) : undefined;
 			if (offersTools && step === undefined) overrun++;
+			if (step?.kind === "auth_error") {
+				authError = true;
+				res.writeHead(401, { "content-type": "application/json" });
+				res.end(JSON.stringify({ type: "error", error: { type: "authentication_error", message: "fake: invalid credentials" } }));
+				return;
+			}
+			const headers = limitHeaders(step?.limit);
+			if (step?.limit?.status === "rejected") {
+				res.writeHead(429, { "content-type": "application/json", ...headers });
+				res.end(JSON.stringify({ type: "error", error: { type: "rate_limit_error", message: "fake: limit reached" } }));
+				return;
+			}
 			if (step?.kind === "tool_use") {
 				await step.beforeAnswer?.();
 				const blocks = step.calls.map((call, index) => ({
@@ -153,10 +189,10 @@ export async function startClaudeMockProvider(script: readonly ClaudeStep[], opt
 					name: call.name,
 					input: typeof call.input === "function" ? (call.input as (r: RecordedClaudeRequest) => unknown)(recorded) : call.input,
 				}));
-				answer(res, body, blocks, "tool_use", id, usage);
+				answer(res, body, blocks, "tool_use", id, usage, headers);
 				return;
 			}
-			answer(res, body, [{ type: "text", text: step?.kind === "text" ? step.text : "ok" }], "end_turn", id, usage);
+			answer(res, body, [{ type: "text", text: step?.kind === "text" ? step.text : "ok" }], "end_turn", id, usage, headers);
 		})().catch((error: unknown) => {
 			res.writeHead(500, { "content-type": "application/json" });
 			res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: String(error) } }));
@@ -168,6 +204,7 @@ export async function startClaudeMockProvider(script: readonly ClaudeStep[], opt
 		url: `http://127.0.0.1:${port}`,
 		requests,
 		overrun: () => overrun,
+		endAuthError: () => { authError = false; },
 		close: () => new Promise<void>((resolve) => {
 			server.closeAllConnections();
 			server.close(() => resolve());

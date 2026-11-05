@@ -11,7 +11,8 @@ import { join } from "node:path";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { TurnTokenUsage } from "@t3tools/contracts";
 import { type Delivery, paths, type Usage } from "../contracts.ts";
-import { REPORT_TOOL, runClaudeSpike } from "./claude-spike.ts";
+import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
+import { modelFamily, type NativeObservation, OBSERVATION_EVENT, turnObserver } from "./claude-observation.ts";
 import {
 	assertNativeResume,
 	claimFollowUps,
@@ -50,8 +51,22 @@ export function piUsage(usage: TurnTokenUsage, cost: number | undefined): Record
 	return totalTokens > 0 ? { input, output, cacheRead, cacheWrite, totalTokens, cost: { total: cost } } : undefined;
 }
 
+let observe = turnObserver();
+let cliVersion: string | undefined;
+/** Relays one sanitized availability observation (S2) for the parent's snapshot; never SDK auth or error text. */
+function observed(seen: NativeObservation | undefined): void {
+	if (!seen) return;
+	try {
+		cliVersion ??= resolveClaude(env).version;
+	} catch {
+		// No version: the entry is never invalidated by a CLI change, only by the other two rules.
+	}
+	write({ type: OBSERVATION_EVENT, ...seen, observed_at: Date.now(), ...(cliVersion ? { claude_version: cliVersion } : {}) });
+}
+
 /** SDK messages as the pi events the recorder, intake and bounds already watch; the report tool keeps pi's name. */
 function relay(message: SDKMessage): void {
+	observed(observe(message));
 	if (message.type === "result") costTotal = Number.isFinite(message.total_cost_usd) ? message.total_cost_usd : undefined;
 	if (message.type === "system" && message.subtype === "init" && session && session.session_id !== message.session_id) {
 		session.session_id = message.session_id;
@@ -99,6 +114,7 @@ async function turn(prompt: string): Promise<Turn> {
 	const baseline = current.baseline;
 	const ledger = baseline ? new Map(Object.entries(baseline.ledger)) : undefined;
 	costTotal = undefined;
+	observe = turnObserver();
 	const resumed = resuming;
 	const result = await runClaudeSpike({
 		job: { job_id: jobId, delivery: env.CP_DELIVERY as Delivery, runDir, worktree, artifactPath },
@@ -124,6 +140,11 @@ async function turn(prompt: string): Promise<Turn> {
 	const usage = piUsage(result.usage, cost);
 	write(usage ? { type: "message_end", message: { role: "assistant", model: result.initModel ?? "claude", usage } } : { type: "usage_unavailable", status: result.usage.usageStatus });
 	const lockdown = result.lockdown?.verdict ?? "unchecked";
+	if (lockdown === "refused") observed({ kind: "lockdown", code: "lockdown" });
+	else if (result.resultSubtype === "success" && result.error === undefined && lockdown === "ok") {
+		const family = modelFamily(env.CP_NATIVE_MODEL ?? "");
+		observed({ kind: "turn_ok", ...(family ? { family } : {}) });
+	}
 	const counts = { seen: result.lockdown?.seen, extra: result.lockdown?.extra };
 	const runId = randomUUID();
 	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: Boolean(result.report), usage: usage ? "measured" : "unavailable", denials: result.denials.length, report_refusals: result.reportRefusals.length });

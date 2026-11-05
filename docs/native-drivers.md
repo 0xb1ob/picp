@@ -404,8 +404,8 @@ changes until a row carries `driver: "claude"` **and** the switch is ON; the shi
 | a job whose fleet record already started (D1) | the recorded driver | a native job refuses rather than move to pi |
 
 **Fallback reasons** (`driver_reason` is `<code>: <why>`): `denied` (the native primary is outside `allow` or hit by
-`deny_by_role`), `switch`, `pipeline`, `ineligible`, `occupied`, `cli_missing`, `cli_version`. The pi lane is the row's
-`[model, ...fallbacks]` through `resolveWithCapacity`, unchanged.
+`deny_by_role`), `switch`, `pipeline`, `ineligible`, `occupied`, `cli_missing`, `cli_version`, and from S2 `window`,
+`auth`, `lockdown` (below). The pi lane is the row's `[model, ...fallbacks]` through `resolveWithCapacity`, unchanged.
 
 **Model and effort.** The native model is the row's own `model` (or an explicit override's), an explicit
 `anthropic/claude-…` id; any other ref refuses the dispatch with no lease. The row's effort maps to SDK options: `off`
@@ -426,4 +426,43 @@ holds the slot) and on any pre-start failure. `WorkerManager.spawn` keeps its ow
 **Doctor.** A claude row's primary needs no pi credentials: `models.<profile>` reports `driver=claude <model>; pi
 fallback …`, and an unusable pi lane is a warning, not an error.
 
-Left for S2/S3: cached native startup failures and a spent subscription window falling new jobs back to pi.
+## Availability snapshot (S2)
+
+Native selection reads passive subscription evidence from earlier native runs; picp sends no extra request for it.
+
+**Observation** (`src/drivers/claude-observation.ts`). From SDK `rate_limit_event` the worker keeps `status`
+(`allowed`/`allowed_warning`/`rejected`), `rateLimitType`, `resetsAt` and `utilization`; everything else is dropped.
+`resetsAt` is epoch **seconds** (the T3 adapter multiplies by 1000) and is stored as epoch ms; a non-numeric or absurd
+value is no reset. `utilization` is display-only, and the overage fields are never read. Assistant errors
+`authentication_failed`, `oauth_org_not_allowed` and `account_on_hold` become an `auth` code; a `rate_limit` error with
+no rejected event marks an `unspecified` window rejected with no reset; a refused surface lockdown is `lockdown`. No
+SDK text is stored or logged. The worker relays each as a `native_observation` event with its observation time and the
+installed CLI version; a successful, lockdown-clean turn relays `turn_ok`.
+
+**Cache** (`src/native-availability.ts`). `state/native-availability.json` under the home, written atomically by the
+parent-side observer (`src/native-availability-observer.ts`) on native dispatch and revive, separate from the gateway
+quota projection. Window events are deduplicated by `uuid` (the last 256 kept) and an older observation never replaces
+a newer one. `seven_day_opus` and `seven_day_sonnet` apply only to that model family; the others apply to every model.
+A missing or corrupt snapshot is **unknown**: neither spent nor free.
+
+| Entry | New native selection |
+|---|---|
+| window `rejected`, reset in the future | blocked until the reset: `window: five_hour rejected until <UTC>` |
+| window `rejected`, reset passed | unknown, attempted; the reason notes `unknown since its reset`, never "0% used" |
+| window `rejected`, no reset | blocked: `window: … reset unknown` until invalidated |
+| `auth` | blocked: `auth: <code> at <UTC>` until invalidated |
+| `lockdown` | blocked: `lockdown: …` until invalidated |
+
+**Invalidation** of a cached `auth`, `lockdown` or no-reset window entry: (i) a later observed `allowed` event for that
+window, or a successful native turn (which clears only `five_hour`, `seven_day`, `unspecified` and its own model
+family's window); (ii) the Settings switch turned OFF then ON (the switch file rewritten after the observation); (iii) a
+different installed CLI version than the one that observed it.
+
+**Lock.** The snapshot only steers NEW automatic jobs, which fall back to pi with the reason; an explicit
+`driver: "claude"` and a started native job are refused by name instead. A native resume (`cp_send`, a queued
+follow-up at turn end, `cp_revive`) is refused while a relevant window is rejected; queued sends stay queued in order,
+and nothing moves to pi. Bounded recovery never resumes a native job (N3c).
+
+**Rollback.** Turn the switch OFF (every job runs pi), or delete the snapshot file (unknown again); no state migrates.
+
+Left for S3: the Settings and dashboard view of the snapshot.
