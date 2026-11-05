@@ -17,7 +17,7 @@ const readJson = (file: string): Json | undefined => {
 	try { return obj(JSON.parse(readFileSync(file, "utf8"))); } catch { return undefined; }
 };
 const only = (value: Json, keys: readonly string[]) => Object.keys(value).every((key) => keys.includes(key));
-const at = (value: unknown) => (typeof value === "number" && value >= 0 ? value : undefined);
+const at = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined);
 const version = (value: unknown) => value === undefined || (typeof value === "string" && value.length >= 1 && value.length <= 40);
 /** S2's entry schemas (no extra keys): a window entry, or a sticky auth/lockdown entry when `codes` is set. */
 const entry = (value: unknown, codes?: readonly string[]): Entry | undefined => {

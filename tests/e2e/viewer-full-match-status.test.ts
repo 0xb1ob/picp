@@ -190,9 +190,32 @@ test("S3-claude-line: a separate Claude item only with the switch on — no snap
 		["version 2", { ...valid, version: 2 }, false],
 		["an unknown auth code", { ...valid, auth: { code: "expired", observed_at: NOON } }, false],
 		["an empty claude_version", { ...valid, windows: { five_hour: { ...entry, claude_version: "" } } }, false],
+		// Final fix (operator ask-d563b9af3a3a): non-object containers, wrong-typed fields and length bounds.
+		...[null, [], "x", 1].map((windows): [string, unknown, boolean] => [`windows ${JSON.stringify(windows)}`, { ...valid, windows }, false]),
+		...["auth", "lockdown"].flatMap((key) => [null, [], "x"].map((value): [string, unknown, boolean] => [`${key} ${JSON.stringify(value)}`, { ...valid, [key]: value }, false])),
+		...[null, [], "x"].map((value): [string, unknown, boolean] => [`window entry ${JSON.stringify(value)}`, { ...valid, windows: { five_hour: value } }, false]),
+		...[{}, "x", null].map((seen): [string, unknown, boolean] => [`seen ${JSON.stringify(seen)}`, { ...valid, seen }, false]),
+		...[1, null, {}].map((item): [string, unknown, boolean] => [`a seen item ${JSON.stringify(item)}`, { ...valid, seen: [item] }, false]),
+		["a 65-char seen item", { ...valid, seen: ["u".repeat(65)] }, false],
+		["exactly 256 seen items", { ...valid, seen: Array(256).fill("uuid") }, true],
+		["utilization as a string", { ...valid, windows: { five_hour: { ...entry, utilization: "0.5" } } }, false],
+		["utilization null", { ...valid, windows: { five_hour: { ...entry, utilization: null } } }, false],
+		["a negative resets_at", { ...valid, windows: { five_hour: { ...entry, resets_at: -1 } } }, false],
+		["resets_at as a string", { ...valid, windows: { five_hour: { ...entry, resets_at: "5" } } }, false],
+		["observed_at as a string", { ...valid, windows: { five_hour: { ...entry, observed_at: "5" } } }, false],
+		["no observed_at", { ...valid, windows: { five_hour: { status: "allowed" } } }, false],
+		["a 41-char claude_version", { ...valid, windows: { five_hour: { ...entry, claude_version: "v".repeat(41) } } }, false],
+		["a 40-char claude_version", { ...valid, windows: { five_hour: { ...entry, claude_version: "v".repeat(40) } } }, true],
+		["version \"1\"", { ...valid, version: "1" }, false],
+		["no version", { windows: {}, seen: [] }, false],
+		...[[], null, 1].map((top): [string, unknown, boolean] => [`top level ${JSON.stringify(top)}`, top, false]),
+		["auth without a code", { ...valid, auth: { observed_at: NOON } }, false],
+		["lockdown without a code", { ...valid, lockdown: { observed_at: NOON } }, false],
+		["an infinite observed_at (1e400)", "RAW", false],
 	];
 	for (const [why, raw, accepted] of table) {
-		writeFileSync(snapshot, JSON.stringify(raw));
+		const text = raw === "RAW" ? `{"version":1,"windows":{"five_hour":{"status":"allowed","observed_at":1e400}},"seen":[]}` : JSON.stringify(raw);
+		writeFileSync(snapshot, text);
 		assert.equal(readNativeAvailability(d.home) !== undefined, accepted, `S2 on ${why}`);
 		assert.equal((await claude())?.detail !== "no readable native-availability snapshot yet", accepted, `viewer on ${why}`);
 	}
