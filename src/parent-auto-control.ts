@@ -16,12 +16,18 @@ export async function runAutoControl(
 	home: string,
 	missionEnd: string | undefined,
 	lastAssistant: AssistantLike | undefined,
-	control: Parameters<typeof autoParentContext>[3],
+	control: Parameters<typeof autoParentContext>[3] & { applySettings?: () => Promise<void> },
 	relayError: (text: string) => void,
 ): Promise<void> {
 	// An unreadable store (mandates, parent.json) is a failure the operator sees, never an unhandled rejection.
 	const outcome = await autoParentContext(home, missionEnd, lastAssistant, control)
 		.catch((error: Error): Awaited<ReturnType<typeof autoParentContext>> => ({ event: "failed", error: error.message }));
+	logOutcome(home, outcome, relayError);
+	// A Settings model switch lands between turns, before the queued sends go out (session-model-apply.ts).
+	await control.applySettings?.().catch((error: Error) => relayError(`parent Settings model apply failed: ${error.message}`));
+}
+
+function logOutcome(home: string, outcome: Awaited<ReturnType<typeof autoParentContext>>, relayError: (text: string) => void): void {
 	const log = (line: string) => parentContextLog(home, SOURCE, line);
 	if (outcome.rotated) log(`rotated mission=${outcome.rotated} trigger=${JSON.stringify(outcome.trigger)}`);
 	if (outcome.rotateFailed !== undefined) {
