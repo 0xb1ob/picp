@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { pathToFileURL } from "node:url";
 import { waitFor } from "../harness/index.ts";
+import { layoutForHome } from "../../src/contracts.ts";
 import { OPERATOR_BUILTIN_EXTENSIONS, runOperator } from "../../src/viewer/operator.ts";
 import { REPO_ROOT } from "../harness/index.ts";
 
@@ -58,6 +59,29 @@ for (const [index, mode] of (["once", "other", "never", "gone", "always", "bad-j
 		if (mode === "always") assert.ok(lines.some((line) => line.startsWith(`cp-operator: not restarting: 2 restarts within 10 min; resume by hand: cp-operator --session ${session}`)));
 	});
 }
+
+// B (cp-settings-model-apply-s2): the long-lived launcher re-reads data/operator.json on every spawn; a launcher that
+// read it once at its own start relaunched Restart clean on the stale model.
+test("S27 launcher: every spawn re-reads data/operator.json, so a fresh relaunch takes the saved model", async (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "cp-s27-reread-"));
+	const home = join(dir, "home");
+	const settings = join(home, layoutForHome("multi", home).data, "operator.json");
+	mkdirSync(dirname(settings), { recursive: true });
+	writeFileSync(settings, JSON.stringify({ model: "mock/before" }));
+	const log = join(dir, "argv.log");
+	const env = { PI_CODING_AGENT_DIR: dir, CP_OPERATOR_VIEWER: "service", CP_OPERATOR_WEB: "0", CP_OPERATOR_MODEL: "test-model",
+		FAKE_RELAUNCH_LOG: log, FAKE_RELAUNCH_MODE: "fresh", FAKE_RELAUNCH_SESSION: join(dir, "session.jsonl"), FAKE_RELAUNCH_REWRITE: settings };
+	const saved = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+	Object.assign(process.env, env);
+	t.after(() => {
+		for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+		rmSync(dir, { recursive: true, force: true });
+	});
+	await runOperator([], { piBin: join(REPO_ROOT, "tests/fixtures/fake-relaunch-pi.mjs"), viewer: { home, host: "127.0.0.1", port: 1 }, relaunchFile: join(dir, "relaunch.json") });
+	const runs = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+	const builtins = OPERATOR_BUILTIN_EXTENSIONS.flatMap((entry) => ["-e", entry]);
+	assert.deepEqual(runs, [[...builtins, "--model", "mock/before"], [...builtins, "--model", "mock/after"]]);
+});
 
 test("S27 launcher: a real launcher signal forwards to its child and preserves the restart marker without relaunching", { timeout: 30_000 }, async (t) => {
 	const dir = mkdtempSync(join(tmpdir(), "cp-s27-signal-"));

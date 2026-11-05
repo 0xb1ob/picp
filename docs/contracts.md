@@ -9877,7 +9877,20 @@ outcome is one 0600 row in `state/model-apply.jsonl`, `{v:1, type:"model_apply",
 reason?}`, with `state` one of `queued`, `applied`, `cancelled` or `failed`. A failure keeps the old model, relays a
 cp-bridge error to the operator, and is not retried until the next change. A restart cancels a queued row (the start
 rules apply). `GET /api/settings` returns the last 10 rows as `model_apply`; the Settings page shows each session's
-latest row and polls every 5 s while one is pending, for at most 10 minutes. The operator session is slice 2.
+latest row and polls every 5 s while one is pending, for at most 10 minutes. An unreadable `data/parent.json` never
+rejects the host's check: it relays one cp-bridge error, and the same text is not relayed again on later ticks or settles.
+
+**Live apply, the operator session (slice 2).** A `models.operator` or `models.operator_thinking` write switches the
+running operator session in place (`extensions/cp-bridge/model-apply.ts`): at once when it is idle and not compacting,
+else after its turn settles, with the same queued, coalescing, cancel and `failed` rules and rows with
+`session: "operator"`. It uses pi's `setModel` (through the model registry), then `setThinkingLevel` (the saved level,
+else the one in force, re-sent after a model switch because pi resets it to its default). A failure (a model pi does not
+know, no auth) keeps the old model, writes a `failed` row and shows the TUI status line `settings-apply`; an unreadable
+`data/operator.json` says so once there. At every `session_start` (a fresh launch, a resume, Restart clean, `/reload`)
+the session's LIVE model and thinking are compared with the keys the file sets, and a difference applies at once: the
+saved Settings value wins at every start, over `--model`/`--thinking`, and an in-session pick or shift+tab lasts until the
+next start. `cp-operator` re-reads `data/operator.json` on every spawn, not once at its own start. This code runs in the
+operator process, so a deployed change takes effect after one operator `/reload`.
 
 ### Settings writes
 

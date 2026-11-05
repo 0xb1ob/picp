@@ -47,7 +47,8 @@ export function checkApplyArgs(args: Record<string, unknown>): Checked {
 	return { ok: true, request: { mode: "restore", all: true }, ...base };
 }
 
-export function settingsPorts(input: { target: () => { home: string; mode: Mode }; env?: NodeJS.ProcessEnv }): Required<Pick<ControlPorts, "settings">> {
+/** `applied`: called after a write lands, so the operator session can switch its model in place; it never fails a write. */
+export function settingsPorts(input: { target: () => { home: string; mode: Mode }; env?: NodeJS.ProcessEnv; applied?: () => void }): Required<Pick<ControlPorts, "settings">> {
 	const env = () => input.env ?? process.env;
 	return {
 		settings: {
@@ -65,7 +66,11 @@ export function settingsPorts(input: { target: () => { home: string; mode: Mode 
 					const checked = checkApplyArgs(args);
 					if (!checked.ok) return { status: 400, state: "refused", error: checked.error };
 					const { ok: _ok, ...rest } = checked;
-					return applySettings(home, { ...rest, actor: "dashboard", env: env() });
+					const result = applySettings(home, { ...rest, actor: "dashboard", env: env() });
+					if (result.state === "applied") {
+						try { input.applied?.(); } catch (error) { console.error(`settings applied hook failed: ${(error as Error).message}`); }
+					}
+					return result;
 				} catch (error) {
 					return { status: 500, state: "failed", error: redact(error instanceof Error ? error.message : String(error), home) };
 				}

@@ -15,6 +15,7 @@ if (file && mode.startsWith("bad-")) {
   process.exit(1);
 }
 if (file && mode === "signal") { marker(process.pid); process.on("SIGTERM", () => process.exit(143)); setInterval(() => {}, 1000); await new Promise(() => {}); }
+if (process.env.FAKE_RELAUNCH_REWRITE && runs === 1) writeFileSync(process.env.FAKE_RELAUNCH_REWRITE, JSON.stringify({ model: "mock/after" }));
 if (file && (mode === "always" || ((mode === "once" || mode === "fresh") && runs === 1))) {
 	marker(process.pid);
 	process.exit(0);
