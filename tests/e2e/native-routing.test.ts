@@ -14,7 +14,7 @@ import { whichAll } from "../../src/doctor.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { nativeAvailabilityFile, readNativeAvailability, recordNativeObservation } from "../../src/native-availability.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_CLAUDE_MODEL, FAKE_NATIVE_MODEL, startClaudeMockProvider, subscriberEnv } from "../harness/claude-mock-provider.ts";
+import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_CLAUDE_MODEL, FAKE_NATIVE_MODEL, routeNativeModel, startClaudeMockProvider, subscriberEnv } from "../harness/claude-mock-provider.ts";
 import { seedOperatorPick } from "../harness/operator-pick.ts";
 import { readFleet, readRunEvents, treehouseAvailable } from "../harness/index.ts";
 
@@ -326,14 +326,44 @@ test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; 
 	await runAlone(signedIn.id);
 	ranNative(signedIn.id);
 	await waitFailed(h.fleet, signedIn.id);
-	// A successful turn clears only its own family's window: a sonnet turn leaves an opus block standing (F5).
-	const opus = { type: "native_observation", kind: "window", window: "seven_day_opus", status: "rejected", observed_at: Date.now() - 1000 };
-	assert.equal(recordNativeObservation(h.b.home, opus), true);
-	recordNativeObservation(h.b.home, { type: "native_observation", kind: "turn_ok", family: "sonnet", observed_at: Date.now() });
-	assert.equal(readNativeAvailability(h.b.home)?.windows.seven_day_opus?.status, "rejected", "a sonnet turn cleared the opus block");
-	recordNativeObservation(h.b.home, { type: "native_observation", kind: "turn_ok", family: "opus", observed_at: Date.now() });
-	assert.equal(readNativeAvailability(h.b.home)?.windows.seven_day_opus, undefined, "an opus turn left the opus block");
 	assert.doesNotMatch(readFileSync(file, "utf8"), /fake: |invalid credentials|limit reached|Ran after/, "raw SDK text in the snapshot");
+});
+
+test("S3 carry: real opus and sonnet turns clear no-reset blocks by family; seven_day_overage_included clears on either", { skip, timeout: 600_000 }, async (t) => {
+	// A millisecond-magnitude reset is stored as no reset (F1), so each 429 leaves a sticky block.
+	const spent = (claim: string): ClaudeStep => ({ kind: "text", text: "Spent.", limit: { status: "rejected", claim, resetsAt: (Math.floor(Date.now() / 1000) + 3600) * 1000 } });
+	const h = await routedHome(t, [spent("seven_day_opus"), spent("seven_day_overage_included"), { kind: "text", text: "Sonnet ran." },
+		spent("seven_day_overage_included"), { kind: "text", text: "Opus ran." }], { subscriber: true });
+	const [opus, sonnet] = [`${FAKE_NATIVE_MODEL}-opus`, `${FAKE_NATIVE_MODEL}-sonnet`];
+	routeNativeModel(h.b.home, [opus, sonnet]);
+	h.toggle(true);
+	const windows = () => readNativeAvailability(h.b.home)?.windows ?? {};
+	const turn = async (model: string) => {
+		const job = await h.job();
+		await h.b.closeParents();
+		const ends = (await h.b.run([{ kind: "tool_calls", calls: [dispatch(job.id, { driver: "claude", model })] }], h.env)) as Tool[];
+		const end = ends.find((e) => e.toolName === "cp_dispatch");
+		assert.notEqual(end?.isError, true, text(end));
+		assert.deepEqual([h.fleet(job.id)?.worker.driver, h.fleet(job.id)?.worker.model], ["claude", model]);
+		await waitFailed(h.fleet, job.id);
+	};
+	const offOn = () => { h.toggle(false); h.toggle(true); };
+	await turn(opus);
+	assert.deepEqual([windows().seven_day_opus?.status, windows().seven_day_opus?.resets_at], ["rejected", undefined]);
+	await turn(sonnet);
+	assert.deepEqual([windows().seven_day_overage_included?.status, windows().seven_day_overage_included?.resets_at], ["rejected", undefined]);
+	// Off then on admits new runs past both blocks (ii) but deletes neither; only a successful turn does.
+	offOn();
+	assert.ok(windows().seven_day_opus && windows().seven_day_overage_included, JSON.stringify(windows()));
+	await turn(sonnet);
+	assert.equal(windows().seven_day_overage_included, undefined, "a sonnet turn left the overage block");
+	assert.equal(windows().seven_day_opus?.status, "rejected", "a sonnet turn cleared the opus block");
+	await turn(sonnet);
+	assert.equal(windows().seven_day_overage_included?.status, "rejected");
+	offOn();
+	await turn(opus);
+	assert.deepEqual([windows().seven_day_opus, windows().seven_day_overage_included], [undefined, undefined], "an opus turn left a block");
+	assert.equal(h.claude.overrun(), 0);
 });
 
 async function waitFailed(fleet: (id: string) => ReturnType<typeof readFleet>["jobs"][number] | undefined, id: string) {

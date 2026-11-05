@@ -85,7 +85,7 @@ export function recordNativeObservation(home: string, input: unknown): boolean {
 		// A successful turn clears sticky entries observed before it (invalidation i); windows only for its model family.
 		if ((snapshot.auth?.observed_at ?? Infinity) <= event.observed_at) delete snapshot.auth;
 		if ((snapshot.lockdown?.observed_at ?? Infinity) <= event.observed_at) delete snapshot.lockdown;
-		const cleared: NativeWindow[] = ["five_hour", "seven_day", "unspecified", ...(event.family ? [`seven_day_${event.family}` as const] : [])];
+		const cleared: NativeWindow[] = ["five_hour", "seven_day", "seven_day_overage_included", "unspecified", ...(event.family ? [`seven_day_${event.family}` as const] : [])];
 		for (const window of cleared) {
 			const entry = snapshot.windows[window];
 			if (entry && isSticky(entry) && entry.observed_at <= event.observed_at) delete snapshot.windows[window];
