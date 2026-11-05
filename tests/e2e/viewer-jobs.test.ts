@@ -767,6 +767,29 @@ test("P3-quota-ui: Job detail serves quota continuation read-only — unsupporte
 	assert.equal(held.$(".job-fact-quota a"), null, "a held continuation offers no cancel");
 });
 
+test("S3-driver: Job detail names the driver and a claude fallback's reason; a legacy record shows nothing new", { timeout: 120_000 }, async (t) => {
+	const scratch = createScratchHome();
+	t.after(() => scratch.cleanup());
+	const s = seed(scratch.path);
+	const ids = ["cp-fellback", "cp-native", "cp-legacy"];
+	s.ledger(ids.map((id) => ({ id, title: id, status: "in_progress", labels: ["project:picp", "kind:research"] })));
+	const job = (job_id: string, over: object) => ({ job_id, project: "picp", kind: "research", phase: "failed", dispatched_at: iso(60), ...over });
+	s.fleet([
+		job("cp-fellback", { worker: { model: "mock/pi-model" }, routing: { requested_driver: "claude", driver: "pi", driver_reason: "window: five_hour rejected until 2026-11-05T14:00:00Z" } }),
+		job("cp-native", { worker: { model: "anthropic/claude-opus-5-5", driver: "claude" }, routing: { requested_driver: "claude", driver: "claude", thinking: "high", driver_reason: "rule: r prefers claude; effort high" } }),
+		job("cp-legacy", { worker: { model: "mock/pi-model" }, routing: { scope: "S" } }),
+	]);
+	const view = await startViewer(t, { home: scratch.path, requireTailnet: false, at: new Date(NOON).toISOString() });
+	const note = async (id: string) => (await view.get(`/api/job/${id}`).then((r) => JSON.parse(r.text) as JobResponse)).job.driver_note;
+	assert.deepEqual(await Promise.all(ids.map(note)), ["pi (preferred claude: window five_hour rejected until 2026-11-05T14:00:00Z)", "claude, effort high", null]);
+	for (const [id, shown] of [["cp-fellback", /^pi \(preferred claude: window five_hour rejected until 2026-11-05T14:00:00Z\)$/], ["cp-native", /^claude, effort high$/]] as const) {
+		assert.match((await (await view.open(`#job/${id}`)).find(".job-fact-driver dd")).textContent ?? "", shown, id);
+	}
+	const legacy = await view.open("#job/cp-legacy");
+	await legacy.find(".job-fact-model");
+	assert.equal(legacy.$(".job-fact-driver"), null, "a legacy record grew a Driver fact");
+});
+
 test("P18-not-found: a missing job or worker is a 404 page with a way back; only observed live workers are offered", { timeout: 120_000 }, async (t) => {
 	const scratch = createScratchHome();
 	t.after(() => scratch.cleanup());

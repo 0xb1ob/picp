@@ -209,6 +209,8 @@ export interface ViewerJob extends FlightJob {
  board_lane_id?: string;
  phase: JobPhase; ledger_status: string | null; ledger_disagrees: boolean; mandate_id: string | null;
  cost_usd: number | null; pr_url: string | null; pr_status: string | null; finished_at: string | null;
+ /** S3: "claude, effort high" or "pi (preferred claude: <bounded reason>)"; null when claude was never asked for. */
+ driver_note?: string | null;
  finished_today: boolean; merge_sha: string | null; failure: string | null; blockers: string[];
  /** The envelope headline, one line of at most 80 chars; null until the run reports. */
  summary: string | null;
