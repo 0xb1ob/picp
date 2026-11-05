@@ -334,7 +334,7 @@ for (const outcome of ["timeout", "drained"] as const) test(`S26: a ${outcome} f
 	// The drained record a freeze leaves while its workers stay frozen until the restart.
 	if (outcome === "drained") writeFileSync(join(home.path, LAYOUT.state, "drain.json"), JSON.stringify({ ...readDrain(home.path), state: "drained" }));
 	writeFileSync(gate, "open\n");
-	const settled = await waitFor(() => readRunEvents(home.path, job.id).filter((event) => ["settled_without_report", "report_nudged"].includes(event.type)), (rows) => rows.length > 0, { timeoutMs: 60_000, what: `${job.id} settles` });
-	assert.deepEqual(settled.map((event) => event.type), [outcome === "timeout" ? "report_nudged" : "settled_without_report"]);
+	const settled = await waitFor(() => readRunEvents(home.path, job.id).filter((event) => ["settled_without_report", "report_nudged"].includes(event.type)), (rows) => rows.length >= (outcome === "timeout" ? 2 : 1), { timeoutMs: 60_000, what: `${job.id} settles${outcome === "timeout" ? " twice (nudge, then the nudged turn)" : ""}` });
+	assert.deepEqual(settled.map((event) => event.type), outcome === "timeout" ? ["report_nudged", "settled_without_report"] : ["settled_without_report"]);
 	assert.equal(readDrain(home.path)?.state, outcome, `the ${outcome} freeze record is still on disk`);
 });

@@ -49,7 +49,7 @@ test("P11c-answer-tui: answer cards render collapsed, capped, degraded and expan
 	queue("cp-q5", undefined);
 	mkdirSync(dirPath, { recursive: true });
 	queue("cp-q6", "Answer\n", { project: undefined, summary: "" });
-	queue("cp-q7", big); // M2 PR3: kept as a card with no run log, so the reason must reach the operator as a notice
+	const q7Path = queue("cp-q7", big); // M2 PR3: kept as a card with no run log, so the reason must reach the operator as a notice
 
 	const env = { ...agent.env, CP_HOME: home.path, CP_MODE: "multi" };
 	const args = ["--no-session", "--no-extensions", "--no-context-files", "-e", COMMAND_POST_EXTENSION, "--model", model];
@@ -72,8 +72,9 @@ test("P11c-answer-tui: answer cards render collapsed, capped, degraded and expan
 	const kept = readFileSync(join(home.path, paths.eventsFile("cp-q3")), "utf8").trim().split("\n").map((line) => JSON.parse(line));
 	assert.deepEqual(kept.filter((e) => e.type === "answer_report_kept").map((e) => [e.payload.code, e.payload.message]),
 		[["too_large", `response report too large: ${Buffer.byteLength(big)} bytes > ${RESPONSE_REPORT_MAX_BYTES}`]]);
-	await waitFor(tui.screen, (screen) => /answer for \S+ kept as a card \(too_large\): response report too large/.test(screen),
-		{ timeoutMs: 30_000, what: "the no-run-log job's kept card as an operator notice" });
+	// q7 is drawn after the notice; wait for its last collapsed line so no stale tail lands after the ctrl+o mark.
+	await waitFor(tui.screen, (screen) => /answer for \S+ kept as a card \(too_large\): response report too large/.test(screen) && screen.includes(`— capped at ${ANSWER_MAX_BYTES} bytes; full file at ${q7Path}`),
+		{ timeoutMs: 30_000, what: "the kept-card notice and the whole collapsed cp-q7 card" });
 
 	const q4 = between(drawn, "ANSWER — cp-q4", "ANSWER — cp-q5");
 	assert.ok(q4.includes("ANSWER — cp-q4 · demo · 13 B"), "the header still renders once the file is gone");

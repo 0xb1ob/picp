@@ -1,0 +1,1 @@
+- Tests only: the P11c answer-card TUI test and the S26 late-settle drain test now wait on named events/text instead of sampling early.
