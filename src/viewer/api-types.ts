@@ -573,7 +573,7 @@ export interface WorkspaceStatusResponse {
  spend: {availability: SourceAvailability; observed_at: string; usd: number | null};
  working: {availability: SourceAvailability; observed_at: string; count: number | null};
  done: {availability: SourceAvailability; observed_at: string; count: number | null};
- /** S3: the Claude subscription item from native runs' evidence, kept apart from `quota`; absent while the switch is off. */
+ /** S3: the Claude subscription item from native runs, never merged into `quota`; absent while the switch is off. */
  claude?: {state: "ok" | "limited" | "blocked" | "unknown"; label: string; detail: string};
 }
 /** One "Lined up" row: a ready, blocked or queued job with its cp_next verdict. */

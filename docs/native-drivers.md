@@ -477,7 +477,8 @@ Viewer and parent-side only; nothing here changes selection.
   switch is OFF. States, in precedence order: `Claude blocked (sign-in)` (or `(lockdown)`), `Claude limited (reset
   unknown)`, `Claude limited until HH:MMZ` (the latest pending reset), `Claude unknown` (no readable snapshot, or a
   rejected window whose reset passed or was voided), `Claude ok`. The tooltip names each window. Entries the switch
-  voided (ii) are ignored; the CLI-version check (iii) is not run here, since it would spawn `claude`.
+  voided (ii) are ignored; the CLI-version check (iii) is not run here, since it would spawn `claude`, so after a CLI
+  update the line may still show limited or blocked until the next dispatch re-checks and clears it.
 - **Settings** help states the rule-plus-switch condition, OFF refusing resumes and revives, and that OFF then ON
   clears a remembered sign-in, lockdown or no-reset block.
 
