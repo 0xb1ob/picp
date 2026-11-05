@@ -356,12 +356,12 @@ test("L1/F11: a native worker killed by a parent restart resumes on a plain cp_r
 });
 
 // N3d's one live run: the operator's own claude settings (claude reads them; picp never does). Counts only.
-test("native live follow-up smoke: a research dispatch, then one idle cp_send resumes the same session", { skip: LIVE_TESTS_ENABLED ? skip : "set CP_LIVE_TESTS=1 to run live smokes", timeout: 900_000 }, async (t) => {
+test("native live follow-up smoke: a research dispatch, then one idle cp_send resumes the same session", { skip: !LIVE_TESTS_ENABLED ? "set CP_LIVE_TESTS=1 to run live smokes" : !process.env.CP_LIVE_NATIVE_MODEL ? "set CP_LIVE_NATIVE_MODEL to the account's anthropic/claude-… id" : skip, timeout: 900_000 }, async (t) => {
 	const b = await dispatchS29(t);
 	writeFileSync(join(b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true }));
 	const id = (await b.ledger.create({ title: "native live follow-up smoke", project: "demo", delivery: "local", kind: "research" })).id;
-	// S1: a native dispatch names an explicit anthropic/claude-… model; the live account's own id, routed here.
-	const model = process.env.CP_LIVE_NATIVE_MODEL ?? "anthropic/claude-sonnet-4-5";
+	// S1: a native dispatch names an explicit model; the live account's own id, from the env, routed here.
+	const model = process.env.CP_LIVE_NATIVE_MODEL!;
 	routeNativeModel(b.home, [model]);
 	const events = join(b.home, paths.eventsFile(id));
 	const sessionFile = join(b.home, paths.runDir(id), NATIVE_SESSION_FILE);

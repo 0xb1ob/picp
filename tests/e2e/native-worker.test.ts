@@ -184,12 +184,12 @@ test("P3h-unavailable: a native run whose usage the model omits is flagged unava
 });
 
 // The single live run of N3b: the operator's own claude settings (claude reads them; picp never does). Counts only.
-test("native live smoke: one research job through cp_dispatch on the installed claude", { skip: LIVE_TESTS_ENABLED ? skip : "set CP_LIVE_TESTS=1 to run live smokes", timeout: 300_000 }, async (t) => {
+test("native live smoke: one research job through cp_dispatch on the installed claude", { skip: !LIVE_TESTS_ENABLED ? "set CP_LIVE_TESTS=1 to run live smokes" : !process.env.CP_LIVE_NATIVE_MODEL ? "set CP_LIVE_NATIVE_MODEL to the account's anthropic/claude-… id" : skip, timeout: 300_000 }, async (t) => {
 	const b = await dispatchS29(t);
 	writeFileSync(join(b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true }));
 	const job = await b.ledger.create({ title: "native live smoke", project: "demo", delivery: "local", kind: "research" });
-	// S1: a native dispatch names an explicit anthropic/claude-… model; the live account's own id, routed here.
-	const model = process.env.CP_LIVE_NATIVE_MODEL ?? "anthropic/claude-sonnet-4-5";
+	// S1: a native dispatch names an explicit model; the live account's own id, from the env, routed here.
+	const model = process.env.CP_LIVE_NATIVE_MODEL!;
 	routeNativeModel(b.home, [model]);
 	const envelope = join(b.home, paths.envelopeFile(job.id));
 	const status = join(b.home, paths.runDir(job.id), "status.json");
