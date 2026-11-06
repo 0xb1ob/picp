@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { type Delivery, type FleetRecord, type JobKind, paths, type Role } from "../contracts.ts";
 import { loadNativeConfig, type NativeClass, nativeConfigFile, type NativeDriver } from "../worker-driver.ts";
 import type { WorkerSpawnOptions } from "../worker-process.ts";
+import { NATIVE_SHUTDOWN_GRACE_MS } from "./claude-usage.ts";
 
 /** Why a job may not run native (S1): the resolver falls back to pi on these; an explicit request refuses. */
 export type NativeRefusal = "switch" | "pipeline" | "ineligible" | "occupied" | "cli_missing" | "cli_version" | "model" | "effort" | "denied" | "window" | "auth" | "lockdown";
@@ -173,14 +174,15 @@ export function nativeAddendum(kind: string | undefined, delivery: string | unde
  * Overrides pi's argv with the native worker; the role contract goes to a 0600 file in the run dir,
  * not the argv or env.
  */
-export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env"> {
+export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, systemPrompt: string): Pick<WorkerSpawnOptions, "piBin" | "argv" | "env" | "shutdownGraceMs"> {
 	const runDir = env.CP_RUN_DIR;
 	if (!runDir) throw new NativeDriverError("the native claude worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
 	const file = join(runDir, NATIVE_SYSTEM_PROMPT_FILE);
 	mkdirSync(runDir, { recursive: true });
 	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${nativeAddendum(env.CP_KIND, env.CP_DELIVERY, env.CP_ROLE)}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
-	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file } };
+	// A reported run waits up to NATIVE_REPORTED_GRACE_MS for its result after stdin ends; a SIGTERM would cut it.
+	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file }, shutdownGraceMs: NATIVE_SHUTDOWN_GRACE_MS };
 }
 
 /** Refuses a routed level with no native effort; absent (the CLI default), `off` and low…max pass. */
