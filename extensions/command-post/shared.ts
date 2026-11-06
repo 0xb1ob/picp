@@ -29,8 +29,6 @@ export interface ExtensionDeps {
 		thinking?: ThinkingLevel;
 		operatorQuote?: OperatorModelPickReference;
 		registry?: unknown;
-		/** Full match S10b: the `ps-…` send that asked; resolved before the job exists (src/job-origins.ts). */
-		sourceSendId?: string;
 	}) => Promise<{ job_id: string; dispatch: Awaited<ReturnType<CommandPost["dispatch"]>> }>;
 	/** An accessor like the rest: a module reads the session's current array at call time, never a registration-time copy. */
 	readonly createdThisTurn: string[];

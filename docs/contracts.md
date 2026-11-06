@@ -6595,7 +6595,7 @@ repository; `CP_VERSION_REPO` (or the `repo` option) names another checkout.
 /api/operator/control` returns `{enabled, running, reason, token, busy, pending, session_file, recent}` — the
 session's CSRF token, which the page fetches itself; it never writes. `POST /api/operator/message` takes
 `{kind:"message", text, deliver?, images?, files?, client_id?}`, `{kind:"answer", ask_id, label}` or `{kind:"abort"}` and refuses,
-in order (a stale `thread` field is accepted and ignored; see Operator threads, retired):
+in order:
 
 | Check | Refusal |
 |---|---|
@@ -6630,9 +6630,7 @@ the message refusals above. A busy session queues it like a message: `sends` car
 shows it labelled (`/stop @cp-abcd`) with Cancel send only. The composer keeps one `client_id` per prepared command and
 mints a fresh one after a refusal that injected nothing (any error answer below 503); after an unknown outcome (no answer,
 503 or 504) the id stays, so a retry is refused as a duplicate rather than injected twice. `GET /api/operator/control`
-advertises `commands: true` only while the running bridge takes the op. Full match S8 adds `threads: true` the same way:
-dashboard-control itself owns `thread_create` / `thread_rename`, so every session from S8 on advertises it (see
-[Named threads](#named-threads-full-match-s8)).
+advertises `commands: true` only while the running bridge takes the op.
 
 The guarded status also projects `sends: [{id, at, state, reason, ask_id, body}]` from the dashboard and inbox journals (`src/viewer/control-pending.ts`), preserving original message text and attachment ids. It is read-only, caps each journal read at 16 MiB, ignores a torn final line, and returns named `sends_error` warnings for unreadable, oversized or malformed journal content. All unresolved/failed accepted sends and the newest 100 delivered outcomes are retained. Known delivered bubbles wait for actual transcript appearance (including held ids in inbox replay), while historical delivered rows do not create new bubbles. Browser persistence keeps still-unseen sends and dismissed ids across reload; interrupted POSTs become an explicit failure without automatic replay. See `docs/viewer-app.md` for FIFO bubbles, scrolling and retry/discard.
 
@@ -6970,133 +6968,17 @@ The cp-mxk4 Answers list is deleted (cp-m2-pr3-mh3m): final answers are response
 `state/operator/answers.jsonl`; only the upgrade one-shot (`src/migrate-answer-reports.ts`) does. Old `answer_ack`
 refusal lines in `state/operator/dashboard.jsonl` are left in place.
 
-### Operator threads (retired by #588)
+### Threads (retired by #588, cp-2tf2 and cp-chat-cleanup)
 
-The cp-xmw2 operator threads feature is deleted: none of its `/api/threads*` routes remain (`GET /api/threads` is now the
-read-only named-thread projection below, never this journal; any `POST /api/threads*`, `/api/threads/done` included, is
-405 `read-only viewer: GET only`), no `cp_parent thread_bind` or `thread` argument, no thread line in the
-operator note. `POST /api/operator/message` still accepts a stale `thread` field and ignores it, so an old client's send
-lands untagged. A legacy `; thread=<tag>` marker in a session file still parses (the tag is dropped), and a legacy
-`thread` key on an inbox `held` or dashboard request line is ignored. `state/operator/threads.jsonl` is left on disk,
-never read or written.
-
-### Named threads (full match S8)
-
-The decided named-threads product (es-99574f): a thread is an opaque, immutable id (`th-` + 16 random hex) plus a free
-display name (trimmed, 1–80 code points, no control characters; duplicates allowed). S8 ships only the registry and its
-read-only projection; S9 tags dashboard sends (below); S10a carries the source on asks and the parent outbox (below);
-S10b tags jobs and joins them (below); S11's chat UI was retired by cp-2tf2 (Thread UI, below).
-
-- **Registry.** `state/operator/named-threads.jsonl` (0600), append-only, one complete fsynced line per event, schema
-  `NamedThreadEventSchema` (`src/contracts/threads.ts`), `v: 1`: `create` / `rename` (`request_id` = the dashboard
-  `client_id`, `thread_id`, `name`, `peer`) and `bind` (`key: {kind: message|ask|job|parent_send, id, session_id?}`,
-  `thread_id` or `null` for an explicit No thread). The retired `threads.jsonl` is never read: it yields no thread and
-  no membership, and never makes this registry unavailable.
-- **Bounded read.** One reader (`src/viewer/named-threads-view.ts`), capped at 1 MiB and 10 000 lines. Over a cap, a torn
-  final line, an unknown `v` or any invalid line makes the registry **unavailable** with a `file:line` reason; every
-  write is then refused (503) and nothing truncates, repairs or resets the file. An append that would pass a cap is
-  refused (409).
-- **One writer.** Only the operator session appends (`src/operator-named-threads.ts`). `POST /api/operator/threads` takes
-  `{"op": "create", "client_id", "name"}` or `{"op": "rename", "client_id", "thread_id", "name"}` through the shared
-  dashboard-control refusal chain (`--require-tailnet`, rate, Origin, Sec-Fetch-Site, JSON, CSRF token, a running
-  session) and forwards one `thread_create` / `thread_rename` frame. The session's `status` advertises `threads: true`;
-  without it (an owner from before S8) the viewer refuses 409 `unsupported: … predates named threads` and never sends
-  the frame. Create answers 201 `{thread_id, name, state, replayed}`; the same `client_id` again replays its first answer
-  (200, `replayed: true`, no line), another request under it is 409. The owner journals one `thread` line per answer in
-  `state/operator/dashboard.jsonl`; the viewer journals its own refusals.
-- **Bind.** `bindThread` (S9 dashboard sends are its first producer): the same key and thread again writes nothing; the
-  same key with another thread (or `null` vs a thread) is refused 409 and the original stays. Membership is never inferred.
-- **Projection.** `GET /api/threads` (`--require-tailnet` only) answers `{generated_at, available, reason, threads,
-  bindings, joins, join_diagnostics}` (joins: S10b, below): absent registry is available and empty; unavailable carries
-  the reason, with empty joins. It never writes.
-- No thread id or name grants a mandate, a decision or a merge, or appears in an authority label or a filesystem path.
-
-### Thread sends (full match S9)
-
-A dashboard message names its thread explicitly: `POST /api/operator/message` takes `thread_id` (`th-` + 16 hex, or `null`
-/ absent for No thread), separate from the text and any P1 evidence reference. The dashboard composer sends none since
-cp-2tf2 (below), and Send again drops a stored thread; a queued, held or edited send keeps the thread it was sent with.
-
-- **Validated before journaling.** Malformed is 400 at the viewer. A named thread must be in the registry: unknown is 404
-  `no thread <id>; nothing was sent`, an unavailable registry is 503 (`send without a thread or repair it: <file:line>`);
-  either way no request, queue, inbox or bind line is written. No thread never reads the registry. A live threaded send
-  to a session whose `status` lacks `thread_sends: true` (from before S9) is refused 409 restart-required.
-- **Kept.** The owner's `request` line, queue entry and queue journal carry `thread_id`, so an edit, an owner restart and
-  the reloaded queue keep it; an offline-held inbox line carries it too, and the combined inbox turn is threaded only
-  when every fresh held line names the same thread. A retry re-posts the stored body, thread included; a second request
-  under a used `client_id` is refused, never a rebind.
-- **Bound to the delivered entry.** The marker stays `[cp-dashboard <dc-id> — from the dashboard]`: the retired
-  `; thread=` field is never written (the parser still ignores one). Membership is one `bind` line keyed
-  `{kind: "message", id: <pi entry id>, session_id}`, written by the owner for the exact message object it injected and
-  only when that object's text is the text it injected: a typed copy of a marker binds nothing, and a refused inbox
-  handoff, or an accepted one pi never showed by the settle (nothing pending in pi), leaves nothing to bind.
-- **Replies by turn.** `/api/sessions` gives every entry of a turn (replies, tools) its user entry's binding as
-  `thread_id`; a `custom_message` (a wake) starts an untagged turn. CLI input, old history and an unavailable registry
-  read untagged — still shown in All messages. Nothing is inferred from marker text, project headers, dates, nearby
-  messages or job-name prefixes.
-
-### Thread origins (full match S10a)
-
-The main session names the dashboard message it relays or asks about: `cp_parent send` and `cp_parent ask` take an
-optional `source_send_id`, the `dc-…` id from that message's `[cp-dashboard dc-… — from the dashboard]` marker. Chat-typed
-messages have none and pass none. Parent intake, jobs and the "Started from chat" projection are S10b (below); the
-thread UI is S11 (below).
-
-- **Resolved by the owner, from its own record.** The operator session reads `state/operator/dashboard.jsonl`: the id
-  must be a `message` request whose latest outcome is `delivered`, and its thread is that request line's `thread_id`
-  (absent: `null`, No thread — untagged, not an error). A malformed id, an id it never delivered (forged, queued,
-  refused, failed, or an offline inbox id) or an unreadable journal is refused with a plain reason and nothing is sent,
-  enqueued or opened. Never resolved from text, the latest delivered or bound send, or a selected thread.
-- **Ask `source`.** The `open` line in `state/operator/asks.jsonl` gains optional `source: {send_id, thread_id|null}`,
-  written once at creation; `ask_answer` / `ask_withdraw` lines never carry or change it, so an answer inherits its
-  ask's thread by id. A line without `source` (every older journal) reads untagged.
-- **Outbox `origin`.** A send's `cp-parent.sends.json` entry gains optional `origin: {source_send_id, thread_id|null}`,
-  set at enqueue and never rewritten: the outer retry, a replay after a parent or owner restart and pending → settled
-  keep it; a duplicate text from another thread is its own entry with its own origin. The `ps-…` send id the parent
-  sees is the key S10b's intake resolves, so the parent never echoes a thread id.
-- **Capability.** The owner's `status` advertises `thread_origins: true`. A send with an origin goes to the parent host
-  as its own `sendFrom` op; a host from before S10a answers it as an unknown op, and `cp_parent send` refuses
-  `source_send_id is unsupported: this parent host predates thread origins; reload the operator session …` with
-  nothing enqueued. A send without `source_send_id` is unchanged.
-- **No authority.** `delegated` / `delegation_rule` and receipts behave exactly as before; an origin or source grants no
-  mandate, decision or merge.
-
-### Job origins (full match S10b)
-
-The parent names the operator send that asked for a job: `cp_job create`, `cp_pipeline start` and `cp_ask` take an
-optional `source_send_id`, the `ps-…` id from that send's `[cp-send ps-… — delivery id, not an instruction]` marker
-(`src/job-origins.ts`). No bridge or operator-side change: the marker already reaches the parent. Without it the job is
-untagged.
-
-- **Resolved from the outbox only.** The id must be a `cp-parent.sends.json` entry that was injected or landed; the
-  origin is that entry's S10a `origin`, copied verbatim (a send with none gives an untagged job). A malformed, unknown,
-  never-delivered id or an unreadable outbox is refused with a plain reason and nothing is created. Never inferred from
-  the latest send, text, project headers, job-name prefixes, the selected thread or another job.
-- **Ledger `origin`.** The job record gains optional `origin: {source_send_id, thread_id|null}` (`JobOriginSchema`),
-  written once by `ledger.create` and never by update, claim, close, notes or labels. A duplicate create (same
-  project+title or `external_ref`) returns the existing job unchanged, so another thread's intake never rebinds it. A
-  record without `origin` (every older ledger) reads untagged.
-- **Inheritance.** `cp_pipeline start` tags its research job and the ship inherits the research job's origin; an
-  after-merge deploy job inherits its merged job's origin (`src/after-merge.ts`), a self-review member its run anchor's
-  (`src/schedule-self-review.ts`). Promotions, continuations and repairs reuse their job, so it keeps its origin. A job
-  with no parent and no `source_send_id` (mandate objective jobs, schedule anchors, plain `cp_job create`) is untagged.
-- **Joins.** `GET /api/threads` adds `joins: [{thread_id, jobs, asks, started_from_chat, omitted}]`, one per registry
-  thread (`src/viewer/thread-joins.ts`). Jobs join by ledger `origin.thread_id`, asks by `source.thread_id` (an answer
-  goes with its ask by id); a `job`/`ask` registry `bind` that disagrees makes the record multi-origin. Started from chat
-  lists jobs whose origin names a `delivered` dashboard send, with `{job_id, title, state, created_at, source_send_id}`.
-  Each list is newest first, capped at `THREAD_JOINS_MAX` (100, `src/contracts/thread-limits.ts`), with `omitted`
-  counting the rest; there is no paging.
-- **Ambiguity stays untagged.** A multi-origin, malformed or unknown-thread record joins no thread (a malformed origin
-  not even through a registry `bind`); `join_diagnostics: {multi_origin, unknown_thread, malformed, unreadable}` counts
-  it, and names a ledger, asks or journal it could not read.
-- **No authority.** An origin grants no mandate, decision, risk or merge, and appears in no label or path.
-
-### Thread UI (retired by cp-2tf2)
-
-The S11 thread rail, tab strip, `#` picker and `/thread` are gone: the operator Full transcript's sidebar lists "All
-projects" then one row per registered project (`projects` on its `/api/sessions` response, from `data/projects.json`),
-and a row sets the same `project=` hash filter the header select did, the one filter control. The dashboard sends no
-`thread_id` and reads no `GET /api/threads`; a stored pending send's retired `thread`/`thread_id` is dropped on read.
+The thread concept is deleted end to end: no `/api/threads*` route (`GET /api/threads` is 404; any `POST /api/threads*`
+is 405 `read-only viewer: GET only`), no `POST /api/operator/threads`, no `thread_id` on a dashboard send, request,
+queue or inbox line, no `threads` / `thread_sends` / `thread_origins` status capability, no `source_send_id` on
+`cp_parent send` / `ask`, `cp_job create`, `cp_pipeline start`, `cp_ask` or `cp_dispatch`, no ask `source`, outbox
+`origin` or ledger job `origin`, and no thread UI. Retired fields on persisted records are dropped on read, never
+migrated: an ask `open` line's `source`, a `cp-parent.sends.json` entry's `origin`, a ledger job's `origin`, an inbox
+or request line's `thread`/`thread_id`. A legacy `; thread=<tag>` marker in a session file is no longer recognized
+and shows as plain text. `state/operator/threads.jsonl` and `state/operator/named-threads.jsonl` are left on disk,
+never read or written. A send body carrying `thread` or `thread_id` is an unknown field (400), nothing journaled.
 
 ### Remote devices (remote dashboard PR 1)
 

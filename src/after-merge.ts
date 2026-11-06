@@ -81,10 +81,9 @@ export async function afterMergeDeploy(ports: AfterMergePorts, receipt: MergeRec
 		}
 		const ledger = ports.ledger();
 		const label = `after-merge:${merged}`;
-		const origin = ledger.read().jobs.find((job) => job.id === merged)?.origin;
 		const deployJob = ledger.read().jobs.find((job) => job.labels.includes(label)) ?? await ledger.create({
 			title: `Deploy ${project} ${receipt.merge_commit_sha.slice(0, 12)} after ${merged}`, project, kind: "research", delivery: "local",
-			risk: "high", slug: "deploy", labels: ["ops:deploy", ...deploy.resources.map((r) => `resource:${r}`), label], ...(origin ? { origin } : {}),
+			risk: "high", slug: "deploy", labels: ["ops:deploy", ...deploy.resources.map((r) => `resource:${r}`), label],
 		});
 		if (ledger.read().jobs.some((job) => job.id === merged)) await ledger.addDep(deployJob.id, merged);
 		const taskFile = join(ports.home, paths.afterMergeTaskFile(merged));

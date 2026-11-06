@@ -4,7 +4,6 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 import { ContractError, DELIVERIES, IsoTimestampSchema, isSafeProjectName, JOB_KINDS, JobIdSchema, LEDGER_PREFIX_PATTERN, SCHEMA_VERSION, validate, type ValidationResult } from "./core.ts";
 import { RISKS } from "./routing.ts";
-import { THREAD_ID_SOURCE } from "./thread-limits.ts";
 
 import { REVIEW_ORIGINAL_TASK_MAX_BYTES } from "./reviews.ts";
 import { DelegationProvenanceFields } from "./escalations.ts";
@@ -59,12 +58,6 @@ export const JOB_ID_MINT_RETRIES = 8;
 export const JOBS_SIZE_WARNING = 5000;
 
 export const ScriptDeclarationSchema = Type.Object({ path: Type.String({ minLength: 1, maxLength: 1000 }) }, { additionalProperties: false });
-/** Full match S10b: the dashboard send a job was opened from (the parent send's outbox `origin`); grants nothing. */
-export const JobOriginSchema = Type.Object({
-	source_send_id: Type.String({ pattern: "^dc-\\d{14}-[0-9a-f]{8}$" }),
-	thread_id: Type.Union([Type.String({ pattern: `^${THREAD_ID_SOURCE}$` }), Type.Null()]),
-}, { additionalProperties: false });
-export type JobOrigin = Static<typeof JobOriginSchema>;
 export type ScriptDeclaration = Static<typeof ScriptDeclarationSchema>;
 
 /** Syntax only at intake; the runner checks realpath, symlinks and git tracking after lease. */
@@ -100,8 +93,6 @@ export const JobSchema = Type.Object(
 		/** Where the issue lives: a tracker url, a file path, or the command that shows it. One line; a pointer, never a body. */
 		external_ref: Type.Optional(Type.String({ minLength: 1, maxLength: 1000, pattern: "^[^\\r\\n]+$" })),
 		script: Type.Optional(ScriptDeclarationSchema),
-		/** Written once at creation, never changed; absent (every older record) reads untagged. */
-		origin: Type.Optional(JobOriginSchema),
 		/** Legacy link, inert: nothing reads it to act; still unique across open and closed jobs. */
 		tracker: Type.Optional(LegacyTrackerLinkSchema),
 		blocked_by: Type.Array(JobIdSchema),
@@ -251,10 +242,10 @@ export function collectLegacyJobFields(value: unknown): LegacyJobFields[] {
 }
 
 /**
- * Tolerate a document written before `type` and `priority` were removed
- * (2026-09-05). Returns a copy with those keys deleted from every job; any
- * value that is not `{ jobs: [...] }` is returned as is, so the schema still
- * names the real fault.
+ * Tolerate a document written before `type` and `priority` (2026-09-05) or
+ * `origin` were removed. Returns a copy with those keys deleted from every job;
+ * any value that is not `{ jobs: [...] }` is returned as is, so the schema
+ * still names the real fault.
  */
 type LegacyJobsInput = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -270,6 +261,7 @@ export function stripLegacyJobFields(value: unknown): LegacyJobsInput {
 			if (typeof job !== "object" || job === null) return job;
 			const copy: Record<string, unknown> = { ...(job as Record<string, unknown>) };
 			for (const field of LEGACY_JOB_FIELDS) delete copy[field];
+			delete copy.origin; // retired dashboard-send origin: ignored on read, never archived or migrated
 			return copy;
 		}),
 	};

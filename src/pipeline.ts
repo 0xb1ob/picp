@@ -721,7 +721,6 @@ export interface StartRequest {
 	run?: { runs: import("./schedule-runs.ts").ScheduleRunStore; runId: string; anchorId: string; scheduleId: string };
 	/** Operator-named implementer model (explicit routing override); `model` stays the planner's. */
 	implementerModel?: string;
-	/** Full match S10b: the research job's origin; the ship inherits it. */ origin?: import("./contracts.ts").JobOrigin;
 }
 
 export interface AdvanceOptions {
@@ -874,7 +873,7 @@ export class PipelineRunner {
 			project: request.project,
 			delivery: "pipeline", kind: "research",
 			description: request.task,
-			...(request.risk ? { risk: request.risk } : {}), ...(request.origin ? { origin: request.origin } : {}),
+			...(request.risk ? { risk: request.risk } : {}),
 			...(request.slug ? { slug: `${request.slug}-research` } : {}),
 		});
 		const shipTitle = bound ? `ship: ${title} (${bound.runId})` : `ship: ${title}`;
@@ -888,7 +887,7 @@ export class PipelineRunner {
 			delivery,
 			kind: "ship",
 			description: request.task,
-			...(request.risk ? { risk: request.risk } : {}), ...(research.origin ? { origin: research.origin } : {}),
+			...(request.risk ? { risk: request.risk } : {}),
 			...(request.slug ? { slug: `${request.slug}-ship` } : {}),
 			...(bound ? { labels: [`schedule:${bound.scheduleId}`] } : {}),
 		});

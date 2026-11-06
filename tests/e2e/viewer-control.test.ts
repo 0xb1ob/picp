@@ -710,7 +710,7 @@ test("P17-control-queue: busy sends wait editable until handed over; the queue s
 	rmSync(controlRecordFile(s.stateDir), { force: true });
 	const recovered = (await s.get("/api/operator/control")).body as Json;
 	assert.deepEqual(recovered.recent, []);
-	// Legacy (#588): the journal line's `thread` key is ignored, never projected.
+	// A retired `thread` key on a stored journal line is ignored, never projected.
 	assert.deepEqual(pick(row(recovered.sends, attached), ["state", "reason", "body"]), { state: "failed", reason: "late rejection", body: { kind: "message", text: "attached", deliver: "followUp", images: [image] } });
 	assert.equal(row(recovered.sends, offline)?.state, "failed", "dropped held sends remain visible failures");
 	assert.equal(recovered.sends_error, null);

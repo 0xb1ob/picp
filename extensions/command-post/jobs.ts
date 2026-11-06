@@ -25,7 +25,6 @@ import { type EscalationStore, raiseConflictingRef } from "../../src/escalation.
 import { type Ledger, assertScriptIntake, formatJobLabels, parseJobLabels } from "../../src/ledger.ts";
 import { HISTORY_DATE_FIELDS, HISTORY_LIMITS, type HistoryQueryInput } from "../../src/ledger-filter.ts";
 import { formatHistory, historyDetails, isQueryList, queryJobs } from "../../src/job-history.ts";
-import { resolveJobOrigin, SOURCE_SEND_DESCRIPTION } from "../../src/job-origins.ts";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { admitScheduledMember, readSchedulesOrEmpty, scheduleLabelRefusal, scheduleRiskRefusal } from "../../src/schedule-expand.ts";
 import { openScheduleRunStore, type ScheduleRunStore } from "../../src/schedule-runs.ts";
@@ -71,7 +70,6 @@ export const JobActionSchema = Type.Object(
 			}),
 		),
 		script_path: Type.Optional(Type.String({ description: "create only: checked-in POSIX repository-relative shell script; requires kind:ship delivery:local" })),
-		source_send_id: Type.Optional(Type.String({ description: SOURCE_SEND_DESCRIPTION })),
 		slug: Type.Optional(Type.String({ description: "create: optional readable stem, e.g. fix-login -> cp-fix-login-a1b2" })),
 		labels: Type.Optional(Type.Array(Type.String(), { description: "create: extra labels (remote-host ops job: one ops:<pull|deploy|process>, any resource:<name>, kind research, delivery local); list: AND filter" })),
 		status: Type.Optional(StringEnum([...JOB_STATUSES], { description: "update: open|in_progress|deferred (never closed); list: filter" })),
@@ -185,7 +183,6 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 	const { ledger } = ports;
 	const runs = ports.runs ?? openScheduleRunStore(ledger.home);
 	if (params.script_path !== undefined && params.action !== "create") throw new Error("script_path is create only");
-	if (params.source_send_id !== undefined && params.action !== "create") throw new Error("source_send_id is create only; an origin is written once at creation");
 	if (params.risk !== undefined && params.action !== "create") throw new Error("risk is create only; change a recorded risk with cp_job update add_labels/remove_labels (risk:<low|high>)");
 	if (isQueryList(params) && params.action !== "list" && params.action !== "history") throw new Error("q, since, until, date_field and offset are history/list only");
 	switch (params.action) {
@@ -198,8 +195,6 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 				throw new Error("cp_job create refuses delivery:answer — a Q&A job is created and dispatched together; use `cp_ask`");
 			}
 			const title = need(params, "title");
-			// Resolved before the duplicate check: a forged key is refused even when the title exists; duplicates never rebind.
-			const origin = resolveJobOrigin(ledger.home, params.source_send_id);
 			assertScriptIntake({ delivery, kind: params.kind, scriptPath: params.script_path });
 			const project = ports.resolveProject(params.project);
 			const labelErrors = jobLabelErrors([...formatJobLabels({ project, delivery, kind: params.kind, risk: params.risk }), ...(params.labels ?? [])]);
@@ -249,7 +244,6 @@ export async function runJobAction(params: JobActionInput, ports: JobPorts): Pro
 				...(params.script_path !== undefined ? { scriptPath: params.script_path } : {}),
 				...(params.slug !== undefined ? { slug: params.slug } : {}),
 				...(params.labels ? { labels: params.labels } : {}),
-				...(origin ? { origin } : {}),
 			});
 			const job = refNote ? await ledger.update(created.id, { notes: refNote }) : created;
 			await admitScheduledMember(runs, job);
@@ -501,7 +495,6 @@ export function registerJobs(pi: ExtensionAPI, ports: JobsRegistration): void {
 			"Pass risk on cp_job create only when the operator or the spec states it (never invent it): a recorded low turns a keyword-only risk:high into a warning, a recorded high always gates.",
 			"When the operator names an issue, store where it lives as external_ref: one opaque line (url, path, or the command that shows it), stored verbatim and never run — the ledger points at issues, it does not copy them.",
 			"cp_job create is idempotent: the same project + title, or the same external_ref, returns the existing open job. Echo each id. A repeated list creates nothing new.",
-			"Pass source_send_id on cp_job create only as the ps-… id from the [cp-send ps-… — delivery id] marker of the send asking for that job, never another send's; the existing job of a repeated create keeps its first origin.",
 			"cp_job ready is the queue; cp_next says which of it the active mandate covers and what to do next.",
 			"cp_job close/drop is for dropping work (`dropped: …`). Finished research and Q&A close on cp_teardown; ship jobs close on cp_integrate. A live worker is torn down first.",
 			"cp_job amend adds authorized scope: job_id, task_file (or text), quote from an operator message, and reason. It freezes an append-only addendum without replacing the original task; cp_send delivers it to the worker. Closed jobs refuse.",

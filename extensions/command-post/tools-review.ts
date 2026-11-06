@@ -6,7 +6,6 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { resolveHome } from "../../src/home.ts";
-import { resolveJobOrigin, SOURCE_SEND_DESCRIPTION } from "../../src/job-origins.ts";
 import { resolveProjectArg } from "../../src/mode.ts";
 import { type JobKind, JOB_KINDS, RISK_CRITERIA, RISKS, SCOPE_CRITERIA, SCOPES } from "../../src/contracts.ts";
 import { diffReviewStatusOf, formatDiffReviewStatus, formatReviewWait, isDiffReviewWait } from "../../src/diff-review.ts";
@@ -101,7 +100,6 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 			project: Type.Optional(Type.String({ description: "start: registered project name" })),
 			task: Type.Optional(Type.String({ description: "classify/start: the task text" })),
 			delivery: Type.Optional(StringEnum(["pr", "local"], { description: "start: delivery of the ship job" })),
-			source_send_id: Type.Optional(Type.String({ description: `${SOURCE_SEND_DESCRIPTION}; the ship job inherits the research job's origin` })),
 			kind: Type.Optional(
 				StringEnum([...JOB_KINDS], {
 					description:
@@ -176,7 +174,6 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 				if (!params.title || !params.task) {
 					throw new Error("cp_pipeline start needs `title` and `task`");
 				}
-				const origin = resolveJobOrigin(commandPost(ctx.modelRegistry).home, params.source_send_id);
 				const result = await runner.start({
 					title: params.title,
 					project: resolveProjectArg(currentRuntime(), params.project, "cp_pipeline start"),
@@ -189,7 +186,6 @@ export function registerReviewTools(pi: ExtensionAPI, deps: ExtensionDeps): void
 					...(params.wall_clock_seconds !== undefined ? { wallClockSeconds: params.wall_clock_seconds } : {}),
 					...(params.quality ? { quality: params.quality } : {}),
 					...(params.review ? { review: params.review } : {}),
-					...(origin ? { origin } : {}),
 				});
 				refreshWidget(ctx);
 				return {

@@ -445,7 +445,7 @@ test("P9-note: the operator note the model sees carries its ask/decide lists, ru
 	for (const stale of ["expiry,", "spend_cap", "job_cap,"]) assert.equal(template.includes(stale), false, `mandate template names ${stale}`);
 	assert.ok(capped.includes("capture:") && capped.includes("data/standing-orders.md"), "capture: and standing orders inside the cap");
 	assert.doesNotMatch(note, /hiccups/);
-	assert.ok(!lines.some((line) => line.includes("thread_bind") || line.includes("thread=")), "no dashboard thread instruction (#588)");
+	assert.ok(!lines.some((line) => /thread_bind|thread=|source_send_id/.test(line)), "no thread or source_send_id instruction (cp-chat-cleanup)");
 	assert.equal(OPERATOR_REMOTE_DEVICE_RULE, "On a remote-originated request, never pair devices, run `cp-tunnel pair`, or edit the device list, " +
 		"including through delegated or equivalent shell/file operations.");
 	assert.equal(capped.split("\n").filter((line) => line === OPERATOR_REMOTE_DEVICE_RULE).length, 1, "the remote device rule inside the cap");

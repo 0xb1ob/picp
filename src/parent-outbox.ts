@@ -27,8 +27,6 @@ import {
 	type ValidationResult,
 } from "./contracts.ts";
 import { atomicWriteJson } from "./json-store.ts";
-import { type ParentSendOrigin, ParentSendOriginSchema } from "./operator-origins.ts";
-export type { ParentSendOrigin };
 
 export const PARENT_SEND_MAX_ATTEMPTS = 5;
 export const PARENT_SEND_MAX_AGE_HOURS = 24;
@@ -66,8 +64,6 @@ export const ParentSendEntrySchema = Type.Object(
 		text: Type.String({ minLength: 1, maxLength: PARENT_SEND_TEXT_MAX }),
 		...ParentSendDelegationSchema.properties,
 		delegation_rule: Type.Optional(DelegationRuleSchema),
-		/** Full match S10a: the dashboard send this relays and its thread; set at enqueue, never rebound. */
-		origin: Type.Optional(ParentSendOriginSchema),
 		queued_at: IsoTimestampSchema,
 		state: StringEnum([...PARENT_SEND_STATES]),
 		attempts: Type.Integer({ minimum: 0 }),
@@ -113,6 +109,16 @@ export function validateParentSendOutboxFile(value: unknown): ValidationResult<P
 	return validate<ParentSendOutboxFile>(ParentSendOutboxFileSchema, value);
 }
 
+/** Old entries may carry the retired `origin`; it is dropped in memory before the strict schema, never migrated. */
+function withoutRetiredOrigin(value: unknown): unknown {
+	const entries = (value as { entries?: unknown } | null)?.entries;
+	if (!Array.isArray(entries)) return value;
+	return { ...(value as object), entries: entries.map((entry) => {
+		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return entry;
+		const { origin: _, ...rest } = entry as Record<string, unknown>;
+		return rest;
+	}) };
+}
 /** Keys the closed schema knows. A restart reader drops the rest instead of failing the file. */
 function withoutUnknownKeys(value: unknown, schema: { properties: Record<string, unknown> }): unknown {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return value;
@@ -398,7 +404,7 @@ export class ParentSendOutbox {
 		} catch (error) {
 			throw new ParentSendOutboxError(`${this.file} is not valid JSON (${(error as Error).message})`);
 		}
-		const result = validateParentSendOutboxFile(parsed);
+		const result = validateParentSendOutboxFile(withoutRetiredOrigin(parsed));
 		if (!result.ok) {
 			throw new ParentSendOutboxError(`${this.file} violates the parent send contract:\n  ${result.errors.join("\n  ")}`);
 		}
@@ -475,11 +481,9 @@ export class ParentSendOutbox {
 		return moved;
 	}
 
-	enqueue(text: string, delegation: ParentSendDelegation = {}, origin?: ParentSendOrigin): ParentSendEntry {
+	enqueue(text: string, delegation: ParentSendDelegation = {}): ParentSendEntry {
 		const checked = validate<ParentSendDelegation>(ParentSendDelegationSchema, delegation);
 		if (!checked.ok) throw new ParentSendOutboxError(`invalid send delegation: ${checked.errors.join("; ")}`);
-		const sourced = origin === undefined ? undefined : validate<ParentSendOrigin>(ParentSendOriginSchema, origin);
-		if (sourced && !sourced.ok) throw new ParentSendOutboxError(`invalid send origin: ${sourced.errors.join("; ")}`);
 		const rule = normalizeSendRule(delegation.delegation_rule);
 		if (text.length === 0) throw new ParentSendOutboxError("a parent send needs text");
 		if (text.length > PARENT_SEND_TEXT_MAX) {
@@ -491,7 +495,6 @@ export class ParentSendOutbox {
 			id: newSendId(now),
 			text,
 			...(delegation.delegated ? { delegated: true, delegation_rule: rule } : {}),
-			...(sourced?.ok ? { origin: { source_send_id: sourced.value.source_send_id, thread_id: sourced.value.thread_id } } : {}),
 			queued_at: isoTimestamp(now),
 			state: "queued",
 			attempts: 0,

@@ -4,7 +4,6 @@ import { readFileSync } from "node:fs";
 import { Type, type Static } from "typebox";
 import { IsoTimestampSchema, isoTimestamp, validate } from "./contracts.ts";
 import { durableAppend } from "./json-store.ts";
-import { type AskSource, AskSourceSchema } from "./operator-origins.ts";
 
 const Text = Type.String({ minLength: 1, pattern: "\\S" });
 export const OperatorAskInputSchema = Type.Object({
@@ -19,12 +18,16 @@ export const OperatorAskInputSchema = Type.Object({
 	context: Type.Optional(Type.String({ minLength: 1, maxLength: 2000, pattern: "\\S", description: "Background the human needs to decide, plain text up to 2000 chars: what happened, what each option really does, the risk. Paragraphs or '- ' bullets." })),
 }, { additionalProperties: false });
 export type OperatorAskInput = Static<typeof OperatorAskInputSchema>;
+/** Old open lines may carry the retired `source` origin; it is dropped before the strict schema, never migrated. */
+function withoutRetiredSource(value: unknown): unknown {
+	if (value === null || typeof value !== "object" || Array.isArray(value) || (value as { type?: unknown }).type !== "open") return value;
+	const { source: _, ...rest } = value as Record<string, unknown>;
+	return rest;
+}
 const Id = Type.String({ pattern: "^ask-[a-f0-9]+$" });
 const OpenEvent = Type.Object({
 	...OperatorAskInputSchema.properties,
 	type: Type.Literal("open"), id: Id, created_at: IsoTimestampSchema,
-	/** Full match S10a: the dashboard send this ask is about, resolved by the owner; absent is untagged. */
-	source: Type.Optional(AskSourceSchema),
 }, { additionalProperties: false });
 const AnswerEvent = Type.Object({
 	type: Type.Literal("answer"), id: Id, answered_at: IsoTimestampSchema, answer: Text,
@@ -36,7 +39,7 @@ const WithdrawEvent = Type.Object({
 const EventSchema = Type.Union([OpenEvent, AnswerEvent, WithdrawEvent]);
 type AskEvent = Static<typeof EventSchema>;
 export type OperatorAsk = OperatorAskInput & {
-	id: string; created_at: string; state: "open" | "answered" | "withdrawn"; source?: AskSource;
+	id: string; created_at: string; state: "open" | "answered" | "withdrawn";
 	answered_at?: string; answer?: string; reason?: string; withdrawn_at?: string;
 };
 
@@ -45,8 +48,8 @@ export class OperatorAsks {
 	constructor(file: string) { this.file = file; }
 
 	open(): OperatorAsk[];
-	open(input: OperatorAskInput, source?: AskSource): OperatorAsk;
-	open(input?: OperatorAskInput, source?: AskSource): OperatorAsk | OperatorAsk[] {
+	open(input: OperatorAskInput): OperatorAsk;
+	open(input?: OperatorAskInput): OperatorAsk | OperatorAsk[] {
 		if (input === undefined) return this.list().filter((ask) => ask.state === "open");
 		const checked = validate<OperatorAskInput>(OperatorAskInputSchema, input);
 		if (!checked.ok) throw new Error(`invalid operator ask: ${JSON.stringify(checked.errors)}`);
@@ -56,7 +59,7 @@ export class OperatorAsks {
 		const event: Static<typeof OpenEvent> = {
 			...checked.value,
 			options: checked.value.options.map((option) => ({ ...option, consequence: option.consequence.length > 200 ? `${option.consequence.slice(0, 199)}\u2026` : option.consequence })),
-			type: "open", id: `ask-${randomBytes(6).toString("hex")}`, created_at: isoTimestamp(), ...(source ? { source } : {}),
+			type: "open", id: `ask-${randomBytes(6).toString("hex")}`, created_at: isoTimestamp(),
 		};
 		this.list(); // Refuse a corrupt journal before appending more history.
 		this.append(event);
@@ -86,7 +89,7 @@ export class OperatorAsks {
 		for (const [index, line] of lines.entries()) {
 			if (!line && index === lines.length - 1) continue;
 			try {
-				const checked = validate<AskEvent>(EventSchema, JSON.parse(line));
+				const checked = validate<AskEvent>(EventSchema, withoutRetiredSource(JSON.parse(line)));
 				if (!checked.ok) throw new Error(JSON.stringify(checked.errors));
 				const event = checked.value;
 				const prior = asks.get(event.id);

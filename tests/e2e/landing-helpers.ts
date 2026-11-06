@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { TestContext } from "node:test";
 import { CommandPost } from "../../src/command-post.ts";
-import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, type JobOrigin, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
+import { DEFAULT_ORIGIN, EMPTY_USAGE, isoTimestamp, LAYOUT, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import type { ForgeConfig } from "../../src/forge-url.ts";
 import { initJobsDocument } from "../../src/ledger.ts";
 import { COMMAND_POST_EXTENSION, startPiChild, createAgentDir, createScratchHome, createScratchRepo, enableTreehouse, git, MockProvider, readFleet, REPO_ROOT, routeNamed, type ScratchRepo, type ScriptStep, treehouseAvailable, waitFor } from "../harness/index.ts";
@@ -328,8 +328,8 @@ export async function startStack(t: TestContext, options: { project?: boolean; e
 	const remoteHead = (branch: string) =>
 		execFileSync("git", ["ls-remote", repo.remote as string, `refs/heads/${branch}`], { encoding: "utf8" }).split("\t")[0]?.trim() ?? "";
 	/** A fresh job whose implementer runs `command` (default: commit and push), reports and stands by; resolves once held. */
-	const held = async (title: string, number: number, over: { delivery?: "local"; command?: (branch: string) => string; repair?: boolean; repairGate?: string; before?: string[]; reportUrl?: string; refusal?: RegExp; origin?: JobOrigin } = {}) => {
-		const job = await post.ledger().create({ title, project: "demo", delivery: over.delivery ?? "pr", kind: "ship", ...(over.origin ? { origin: over.origin } : {}) });
+	const held = async (title: string, number: number, over: { delivery?: "local"; command?: (branch: string) => string; repair?: boolean; repairGate?: string; before?: string[]; reportUrl?: string; refusal?: RegExp } = {}) => {
+		const job = await post.ledger().create({ title, project: "demo", delivery: over.delivery ?? "pr", kind: "ship" });
 		const prUrl = `https://github.com/example/demo/pull/${number}`;
 		const pr = over.delivery ? {} : { pr_url: over.reportUrl ?? prUrl };
 		const report: ScriptStep = {

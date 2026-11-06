@@ -27,8 +27,6 @@
  * `POST /api/schedules/request` takes exactly `{op, schedule_id}` behind the same chain (kind `schedule`), then body
  * shape, the parent running, the schedule token, the schedule existing, at most 20 pending, and appends one
  * `request` line to `state/schedule-control.jsonl` before it answers 202. The parent applies it (src/schedule-control.ts).
- *
- * #588 retired operator threads: a stale tab's `thread` on a message or answer body is accepted and dropped, never sent.
  */
 
 import { execFile } from "node:child_process";
@@ -38,7 +36,7 @@ import type { IncomingMessage } from "node:http";
 import { createConnection } from "node:net";
 import { join, resolve } from "node:path";
 import { HERDR_TIMEOUT_MS, HERDR_WORKSPACE_LABEL, herdrCommand, herdrServerArgv, herdrServerRunning, type Launcher, OPERATOR_TMUX_SESSION, onPath, operatorWrapperPath, tmuxLaunch } from "./launchers.ts";
-import type { ControlCommandBody, ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, ScheduleControlSendResponse, ScheduleControlStatusResponse, ThreadWriteResponse } from "./api-types.ts";
+import type { ControlCommandBody, ControlMessageBody, ControlSendResponse, ControlStatusResponse, OperatorStartResponse, ScheduleControlSendResponse, ScheduleControlStatusResponse } from "./api-types.ts";
 import { appendControlAudit, appendInboxLine, appendScheduleControlLine } from "./control-audit.ts";
 import {
 	CONTROL_BODY_MAX_BYTES, CONTROL_PROTOCOL, CONTROL_RATE_LIMIT, CONTROL_RATE_WINDOW_MS, CONTROL_TEXT_MAX, type ControlKind, type ControlRecord,
@@ -47,7 +45,6 @@ import {
 	readScheduleControl, SCHEDULE_CONTROL_MAX_AGE_MS, SCHEDULE_CONTROL_MAX_PENDING, SCHEDULE_CONTROL_OPS, scheduleControlFile, type ScheduleControlOp, type ScheduleControlRequest,
 } from "./control-files.ts";
 import { heldId, INBOX_TOKEN, operatorSession, parentHolder, readInbox } from "./control-inbox.ts";
-import { isThreadId, sendThread } from "./named-threads-view.ts";
 import { parentRestartStatus, restartStatus } from "./restart-status.ts";
 import { allowedOrigins, bindOrigin, discardAllowance, readBody } from "./push-api.ts";
 import { readScheduleFile, SCHEDULE_ID } from "./schedule-core.ts";
@@ -272,13 +269,12 @@ export async function handleControlStatus(req: IncomingMessage, options: Control
 			...(status.images === true ? { images: true } : {}),
 			...(status.files === true ? { files: true } : {}),
 			...(status.commands === true ? { commands: true } : {}),
-			...(status.threads === true ? { threads: true } : {}),
 			...(parent ? { parent_restart: parent } : {}),
 		} satisfies ControlStatusResponse,
 	};
 }
 
-type Parsed = { kind: ControlKind | "command" | "start" | "schedule" | "upload" | "settings" | "queue" | "thread" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp | "edit" | "cancel" | "create" | "rename"; schedule_id?: string; images?: string[]; files?: string[]; mime?: string; queue_id?: string; thread_id?: string };
+type Parsed = { kind: ControlKind | "command" | "start" | "schedule" | "upload" | "settings" | "queue" | null; text: string | null; ask_id: string | null; bytes?: number; via?: Launcher; op?: ScheduleControlOp | "edit" | "cancel"; schedule_id?: string; images?: string[]; files?: string[]; mime?: string; queue_id?: string };
 type Body = ControlMessageBody | ControlCommandBody | { kind: "answer"; ask_id: string; label: string } | { kind: "abort" };
 type Refuse = (status: number, reason: string, headers?: Record<string, string>, extra?: Record<string, unknown>) => ControlRouteResult;
 export interface Gate { peer: string | null; refuse: Refuse; parsed(value: Parsed): void }
@@ -291,8 +287,7 @@ function parseBody(json: unknown): { ok: true; body: Body; parsed: Parsed } | { 
 	const files = Array.isArray(value?.files) ? value.files.slice(0, UPLOAD_MAX_PER_MESSAGE).map((file) => String(file).slice(0, 64)) : undefined;
 	const command = kind === "command" ? `/${String(value?.command).slice(0, 32)}${typeof value?.job_id === "string" ? ` ${value.job_id.slice(0, 128)}` : ""}` : null;
 	const parsed: Parsed = { kind, text: command ?? text, ask_id: typeof value?.ask_id === "string" ? value.ask_id.slice(0, 100) : null, ...(images ? { images } : {}), ...(files ? { files } : {}) };
-	// A stale tab may still send the retired `thread` (#588): allowed here, never read below. S9's `thread_id` is explicit.
-	const keys = { message: ["kind", "text", "deliver", "images", "files", "thread", "client_id", "thread_id"], answer: ["kind", "ask_id", "label", "thread"], abort: ["kind"], command: ["kind", "command", "job_id", "client_id"] };
+	const keys = { message: ["kind", "text", "deliver", "images", "files", "client_id"], answer: ["kind", "ask_id", "label"], abort: ["kind"], command: ["kind", "command", "job_id", "client_id"] };
 	if (!value || !kind) return { ok: false, reason: 'kind must be "message", "answer", "abort" or "command"', parsed };
 	const extra = Object.keys(value).filter((key) => !keys[kind].includes(key));
 	if (extra.length) return { ok: false, reason: `unknown field ${extra.join(", ")}`, parsed };
@@ -316,8 +311,7 @@ function parseBody(json: unknown): { ok: true; body: Body; parsed: Parsed } | { 
 	if (trimmed.length > CONTROL_TEXT_MAX) return { ok: false, reason: `text is longer than ${CONTROL_TEXT_MAX} characters`, parsed };
 	if (value.client_id !== undefined && (typeof value.client_id !== "string" || !DASHBOARD_ID_RE.test(value.client_id))) return { ok: false, reason: "client_id must be a dashboard id", parsed };
 	if (value.deliver !== undefined && value.deliver !== "followUp" && value.deliver !== "steer") return { ok: false, reason: 'deliver must be "followUp" or "steer"', parsed };
-	if (value.thread_id !== undefined && value.thread_id !== null && !isThreadId(value.thread_id)) return { ok: false, reason: "thread_id must be th-<16 hex> or null", parsed };
-	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}), ...(fileIds ? { files: fileIds as string[] } : {}), ...(typeof value.client_id === "string" ? { client_id: value.client_id } : {}), ...(isThreadId(value.thread_id) ? { thread_id: value.thread_id } : {}) }, parsed };
+	return { ok: true, body: { kind, text: trimmed, ...(value.deliver ? { deliver: value.deliver } : {}), ...(ids ? { images: ids as string[] } : {}), ...(fileIds ? { files: fileIds as string[] } : {}), ...(typeof value.client_id === "string" ? { client_id: value.client_id } : {}) }, parsed };
 }
 
 /** A message's `@skill` mentions as code-written `[cp-skill <name> <dir>]` lines (typed ones dropped), within CONTROL_TEXT_MAX. */
@@ -462,8 +456,6 @@ export function handleControlMessage(req: IncomingMessage, options: ControlRoute
 		if (!tokenMatches(req.headers["x-cp-control-token"], record.record.csrf)) return refuse(403, "control token missing or stale; reload the transcript");
 		const provenance = await remoteProvenance(record.record, remote);
 		if (!provenance.ok) return refuse(provenance.status, provenance.reason);
-		// S9: an owner from before threaded sends would deliver the message and drop its thread, so it never gets one.
-		if (shape.body.kind === "message" && shape.body.thread_id && ((await controlRequest(record.record, "status", {})).result as { thread_sends?: unknown } | null)?.thread_sends !== true) return refuse(409, "unsupported: this operator session predates threaded sends; restart the session (⋮ → Restart session), or send without a thread");
 		const args = { ...shape.body, peer, ...provenance.args };
 		const reply = files
 			? await controlRequest(record.record, "send_files", args, UPLOAD_SEND_TIMEOUT_MS)
@@ -475,39 +467,6 @@ export function handleControlMessage(req: IncomingMessage, options: ControlRoute
 		// An older cp-bridge has no send_images op and journals nothing for it: our refused line is the only record.
 		if (attachments.length && reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, `unsupported: this session's cp-bridge predates ${files ? "text" : "image"} attachments; restart the session (⋮ → Restart session) and attach again`);
 		if (shape.body.kind === "command" && reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, "unsupported: this session's cp-bridge predates dashboard commands; restart the session (⋮ → Restart session) or send the text as a message");
-		return { status: reply.status, body: { error: reply.error } };
-	});
-}
-
-export const OPERATOR_THREADS_PATH = "/api/operator/threads";
-const THREAD_BODY = '{"op": "create", "client_id": "dc-…", "name": "…"} or {"op": "rename", "client_id": "dc-…", "thread_id": "th-…", "name": "…"}';
-
-/**
- * Full match S8: forwards one `thread_create` / `thread_rename` frame to the operator session, the registry's only
- * writer. Needs a live session, its CSRF token and its `threads` capability; an older owner never gets the frame.
- */
-export function handleOperatorThreads(req: IncomingMessage, options: ControlRouteOptions, now = new Date()): Promise<ControlRouteResult> {
-	return guarded(req, options, now, "thread", async (json, { peer, refuse, parsed }) => {
-		const value = json !== null && typeof json === "object" && !Array.isArray(json) ? (json as Record<string, unknown>) : undefined;
-		const op = value?.op === "create" || value?.op === "rename" ? value.op : undefined;
-		const name = typeof value?.name === "string" ? value.name : undefined;
-		const threadId = typeof value?.thread_id === "string" ? value.thread_id.slice(0, 40) : undefined;
-		parsed({ kind: "thread", text: name?.slice(0, 200) ?? null, ask_id: null, ...(op ? { op } : {}), ...(threadId ? { thread_id: threadId } : {}) });
-		const keys = op === "rename" ? ["op", "client_id", "thread_id", "name"] : ["op", "client_id", "name"];
-		if (!value || !op || name === undefined || typeof value.client_id !== "string" || Object.keys(value).sort().join() !== [...keys].sort().join()) return refuse(400, `body must be ${THREAD_BODY}`);
-		const record = readControlRecord(options.stateDir);
-		const session = operatorSession(options.stateDir);
-		if (record.state !== "ok" || !session.running) return refuse(409, `no operator session is running (${session.reason}); named threads are written by the operator session`, undefined, { state: "offline" });
-		if (!tokenMatches(req.headers["x-cp-control-token"], record.record.csrf)) return refuse(403, "control token missing or stale; reload the page");
-		const status = await controlRequest(record.record, "status", {});
-		if (!status.ok) return refuse(status.status, status.error);
-		const unsupported = "unsupported: this operator session predates named threads; restart the session (⋮ → Restart session) and try again";
-		if ((status.result as { threads?: unknown } | null)?.threads !== true) return refuse(409, unsupported);
-		const reply = await controlRequest(record.record, op === "create" ? "thread_create" : "thread_rename", { ...value, peer });
-		if (reply.ok) return { status: op === "create" && !(reply.result as ThreadWriteResponse).replayed ? 201 : 200, body: reply.result as ThreadWriteResponse };
-		if (reply.status === 400 && /^unknown op/.test(reply.error)) return refuse(409, unsupported);
-		// The owner journals its own `thread` line for every answer it gives; only transport failures are ours.
-		if (reply.status === 503 || reply.status === 504) return refuse(reply.status, reply.error);
 		return { status: reply.status, body: { error: reply.error } };
 	});
 }
@@ -541,10 +500,7 @@ function hold(options: ControlRouteOptions, now: Date, body: Body, token: unknow
 	if (inbox.held.length >= INBOX_MAX_HELD) return refuse(409, `the inbox already holds ${INBOX_MAX_HELD} messages; start the operator session to deliver them`);
 	const id = body.kind === "message" && body.client_id ? body.client_id : heldId(now);
 	if (inbox.held.some(message=>message.id === id)) return refuse(409, "client_id was already used; check the transcript before retrying");
-	// S9: no owner runs, so the registry is checked here (read-only); the next owner keeps the held line's thread.
-	const thread = body.kind === "message" ? sendThread(options.stateDir, body.thread_id) : { ok: true as const, threadId: null };
-	if (!thread.ok) return refuse(thread.status, thread.error);
-	const written = appendInboxLine(options.stateDir, { type: "held", id, at: now.toISOString(), text: body.kind === "answer" ? `${body.ask_id}: ${body.label}` : body.text, ask_id: body.kind === "answer" ? body.ask_id : null, ...(remote ? { remote } : {}), ...(thread.threadId ? { thread_id: thread.threadId } : {}) });
+	const written = appendInboxLine(options.stateDir, { type: "held", id, at: now.toISOString(), text: body.kind === "answer" ? `${body.ask_id}: ${body.label}` : body.text, ask_id: body.kind === "answer" ? body.ask_id : null, ...(remote ? { remote } : {}) });
 	if (!written.ok) return refuse(500, `inbox unwritable (${controlInboxFile(options.stateDir)}): ${written.error}`);
 	return { status: 202, body: { id, state: "held", deliver: "prompt" } satisfies ControlSendResponse };
 }

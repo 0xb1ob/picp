@@ -210,7 +210,7 @@ test("P19-transcript-cards: each cp_parent ask is followed by its decision card,
 	assert.deepEqual(pick(entries[8]!, ["tag", "text", "dashboard_id", "images"]), { tag: "dashboard", text: "look", dashboard_id: "dc-20260927082700-89abcdef", images: ["im-20260927-0123456789abcdef01234567.png"] }, "image parts follow the marker: its ids are the thumbnails");
 	assert.equal(entries[9]!.text, "from the CLI\n[image]", "a CLI message with an image is unchanged");
 	const fileId = "tx-20260927-0123456789abcdef01234567.html";
-	appendFileSync(file, message({ role: "user", content: `File: original.html\n\`\`\`text\n<script>literal</script>\n\`\`\`\n\n[cp-dashboard dc-20260927082800-0123abcd — from the dashboard; thread=notes; files=${fileId}]` }) + "\n");
+	appendFileSync(file, message({ role: "user", content: `File: original.html\n\`\`\`text\n<script>literal</script>\n\`\`\`\n\n[cp-dashboard dc-20260927082800-0123abcd — from the dashboard; files=${fileId}]` }) + "\n");
 	write(controlJournalFile(d.stateDir), jsonl([{ type: "upload", id: fileId, mime: "text/plain", bytes: 24, name: "original.html" }]));
 	const withFile = (await full()).entries.at(-1);
 	assert.deepEqual(pick(withFile, ["tag", "files", "file_metadata"]), { tag: "dashboard", files: [fileId], file_metadata: { [fileId]: { name: "original.html", bytes: 24 } } });

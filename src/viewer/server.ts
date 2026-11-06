@@ -10,14 +10,12 @@
  * `POST /api/schedules/request` (with its status `GET /api/schedules/control`) journals one Schedules page request;
  * `POST /api/settings/apply|restore` (with `GET /api/settings`, settings-api.ts) forward one `settings_apply` frame to the
  * operator session, which validates, audits and writes the owner files; the viewer writes no settings file.
- * `POST /api/operator/threads` forwards one named-thread create/rename to the operator session, the registry's only
- * writer; `GET /api/threads` (named-threads-view.ts) reads `state/operator/named-threads.jsonl` and never writes.
  * The one request that reaches the parent does so only as a line in `state/schedule-control.jsonl`, which the
  * parent reads. Every route answers any Host unless `viewer.strict_host` (data/viewer.json) pins the bind Host
  * (host-config.ts); the operator's own Full transcript
  * (`/api/sessions?view=you&transcript=1`), a handoff note's text (`/api/handoffs/file/…`),
  * both dashboard-control routes, both schedule-control routes,
- * the three settings routes, both thread routes and the skills list (`/api/skills`, names and descriptions only)
+ * the three settings routes and the skills list (`/api/skills`, names and descriptions only)
  * are served only by a viewer started with `--require-tailnet` and refused 403 otherwise.
  * Remote dashboard: `dispatch` is also reached through the remote listener's gate (remote-server.ts), which binds an
  * authenticated device context to the request (access.ts); with `devices` set, three device routes are added (devices-api.ts).
@@ -52,8 +50,7 @@ import { sidebar, type ViewerState } from "./sessions.ts";
 import { discardBounded, handlePushSubscription, handlePushTest, PUSH_STATUS_PATH, PUSH_SUBSCRIPTION_PATH, PUSH_TEST_PATH, pushStatus } from "./push-api.ts";
 import type { PushFetch } from "../push/webpush.ts";
 import { CONTROL_MESSAGE_PATH, CONTROL_STATUS_PATH, type ControlLimiter, handleControlMessage, handleControlStatus, handleOperatorStart, handleScheduleControl, handleScheduleControlStatus, OPERATOR_START_PATH, type OperatorStart, SCHEDULE_CONTROL_PATH, SCHEDULE_CONTROL_STATUS_PATH } from "./control-api.ts";
-import { handleOperatorThreads, handleSchedulePolicy, OPERATOR_THREADS_PATH, SCHEDULE_POLICY_PATH } from "./control-api.ts";
-import { threadsJoinedView } from "./thread-joins.ts";
+import { handleSchedulePolicy, SCHEDULE_POLICY_PATH } from "./control-api.ts";
 import { handleOperatorRestart } from "./operator-restart.ts";
 import { handleOperatorQueue, OPERATOR_QUEUE_PATH } from "./operator-queue.ts";
 import { handleSettingsStatus, handleSettingsWrite, SETTINGS_APPLY_PATH, SETTINGS_PATH, SETTINGS_RESTORE_PATH } from "./settings-api.ts";
@@ -225,8 +222,8 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			});
 		return;
 	}
-	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === PUSH_TEST_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === PARENT_RESTART_PATH || requestPath === OPERATOR_QUEUE_PATH || requestPath === OPERATOR_THREADS_PATH || requestPath === OPERATOR_UPLOAD_PATH || requestPath === SCHEDULE_CONTROL_PATH || requestPath === SETTINGS_APPLY_PATH || requestPath === SETTINGS_RESTORE_PATH) {
-		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === PUSH_TEST_PATH ? handlePushTest(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : requestPath === PARENT_RESTART_PATH ? handleParentRestart(req, options) : requestPath === OPERATOR_QUEUE_PATH ? handleOperatorQueue(req, options) : requestPath === OPERATOR_THREADS_PATH ? handleOperatorThreads(req, options) : requestPath === OPERATOR_UPLOAD_PATH ? handleOperatorUpload(req, options) : requestPath === SETTINGS_APPLY_PATH ? handleSettingsWrite(req, options, "set") : requestPath === SETTINGS_RESTORE_PATH ? handleSettingsWrite(req, options, "restore") : handleOperatorStart(req, options))
+	if (requestPath === PUSH_SUBSCRIPTION_PATH || requestPath === PUSH_TEST_PATH || requestPath === CONTROL_MESSAGE_PATH || requestPath === OPERATOR_START_PATH || requestPath === OPERATOR_RESTART_PATH || requestPath === PARENT_RESTART_PATH || requestPath === OPERATOR_QUEUE_PATH || requestPath === OPERATOR_UPLOAD_PATH || requestPath === SCHEDULE_CONTROL_PATH || requestPath === SETTINGS_APPLY_PATH || requestPath === SETTINGS_RESTORE_PATH) {
+		(requestPath === PUSH_SUBSCRIPTION_PATH ? handlePushSubscription(req, options) : requestPath === PUSH_TEST_PATH ? handlePushTest(req, options) : requestPath === CONTROL_MESSAGE_PATH ? handleControlMessage(req, options) : requestPath === SCHEDULE_CONTROL_PATH ? handleScheduleControl(req, options) : requestPath === OPERATOR_RESTART_PATH ? handleOperatorRestart(req, options) : requestPath === PARENT_RESTART_PATH ? handleParentRestart(req, options) : requestPath === OPERATOR_QUEUE_PATH ? handleOperatorQueue(req, options) : requestPath === OPERATOR_UPLOAD_PATH ? handleOperatorUpload(req, options) : requestPath === SETTINGS_APPLY_PATH ? handleSettingsWrite(req, options, "set") : requestPath === SETTINGS_RESTORE_PATH ? handleSettingsWrite(req, options, "restore") : handleOperatorStart(req, options))
 			.then((out) => { sendJson(res, out.status, out.body, out.headers); if (out.discard) discardBounded(req, res, out.discard); })
 			.catch(() => {
 				if (!res.headersSent) sendJson(res, 500, { error: "internal" });
@@ -280,11 +277,6 @@ export function dispatch(req: IncomingMessage, res: ServerResponse, options: Vie
 			return;
 		case "/api/identity":
 			sendJson(res, 200, { viewer: "command-post", home: resolve(options.home) });
-			return;
-		case "/api/threads":
-			// Free names are operator-typed text, gated like the operator's own transcript.
-			if (!canRead(accessOf(req), options.requireTailnet === true)) sendJson(res, 403, { error: "named threads are served only under --require-tailnet" });
-			else sendJson(res, 200, threadsJoinedView({ home: options.home, stateDir: options.stateDir }));
 			return;
 		case "/api/version":
 			readVersion({ home: options.home, stateDir: options.stateDir, script: options.app?.script ?? null })
