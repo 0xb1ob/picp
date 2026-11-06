@@ -1,0 +1,1 @@
+- CI: `scripts/test-timings.json` regenerated from main CI run 42203341745 (shard 10 from its attempt 2, the complete one), so the 15 shards balance on current weights; `settings-live-apply` is now measured and `viewer-project-sidebar` holds the median fill; predicted longest shard 515 s → 471 s, shortest 163 s → 238 s. Migration: none.
