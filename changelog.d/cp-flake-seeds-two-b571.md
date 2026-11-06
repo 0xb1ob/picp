@@ -1,0 +1,1 @@
+- Known CI flakes: `defaults/ci-flakes.json` seeds the S29 public-validation e2e ("waiting for worker script untouched") and the P13c runner-reports e2e ("waiting for the refused teardown's wake"); an e2e row pins that a corrupt or invalid registry refuses the flake path and the red head takes the normal red path.

@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { build } from "esbuild";
 import { CI_READ_NEEDED, CI_UNREADABLE_LABEL } from "../../src/ci-access.ts";
 import { CommandPost } from "../../src/command-post.ts";
@@ -835,16 +835,21 @@ test(
 	},
 );
 
+/** A package root that differs from this repo only in defaults/ci-flakes.json, which the caller writes. */
+function flakesRoot(t: TestContext): string {
+	const root = mkdtempSync(join(tmpdir(), "cp-flakes-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	for (const name of readdirSync(REPO_ROOT)) if (name !== "defaults") symlinkSync(join(REPO_ROOT, name), join(root, name));
+	mkdirSync(join(root, "defaults"));
+	for (const name of readdirSync(join(REPO_ROOT, "defaults"))) if (name !== "ci-flakes.json") symlinkSync(join(REPO_ROOT, "defaults", name), join(root, "defaults", name));
+	return root;
+}
+
 test(
 	"landing: a red head whose every listed failure is a known flake reruns once without spending the repair; unknown, unreadable or gate-only failures go to the parent",
 	{ skip: SKIP, timeout: 600_000 },
 	async (t) => {
-		// A package root that differs from this repo only in defaults/ci-flakes.json (synthetic fixture, not a seed).
-		const root = mkdtempSync(join(tmpdir(), "cp-flakes-"));
-		t.after(() => rmSync(root, { recursive: true, force: true }));
-		for (const name of readdirSync(REPO_ROOT)) if (name !== "defaults") symlinkSync(join(REPO_ROOT, name), join(root, name));
-		mkdirSync(join(root, "defaults"));
-		for (const name of readdirSync(join(REPO_ROOT, "defaults"))) if (name !== "ci-flakes.json") symlinkSync(join(REPO_ROOT, "defaults", name), join(root, "defaults", name));
+		const root = flakesRoot(t);
 		const flaky = { project: "demo", file: "tests/flaky.test.ts", test: "flaky case", text: "ECONNREFUSED", evidence: "synthetic e2e fixture" };
 		writeFileSync(join(root, "defaults/ci-flakes.json"), JSON.stringify({ schema_version: 1, entries: [flaky,
 			{ project: "other", file: "tests/other.test.ts", test: "other case", evidence: "synthetic e2e fixture" },
@@ -951,6 +956,48 @@ test(
 		assert.notEqual(second.next, "wait", second.facts.join("\n"));
 		assert.match(second.facts.join("\n"), /run 81 is on attempt 2: a second failure is the parent's/);
 		assert.deepEqual(reruns(), ["run rerun 71 --failed", "run rerun 81 --failed", "run rerun 82 --failed"], "one rerun per run and head, ever");
+	},
+);
+
+test(
+	"landing: a corrupt or invalid defaults/ci-flakes.json refuses the flake path; the red head takes the normal red path",
+	{ skip: SKIP, timeout: 300_000 },
+	async (t) => {
+		const root = flakesRoot(t);
+		const registry = join(root, "defaults/ci-flakes.json");
+		const flaky = { project: "demo", file: "tests/flaky.test.ts", test: "flaky case", evidence: "synthetic e2e fixture" };
+		const s = await startStack(t, { packageRoot: root });
+		const e = await s.held("flake registry invalid", 87);
+		const claimsFile = join(s.home, LAYOUT.ciRerunsFile);
+		const reruns = () => s.ghCalls().filter((call) => call.startsWith("run rerun"));
+		const shard = { id: 1, name: "shard 1", status: "completed", conclusion: "failure", steps: [{ name: "Run suite shard", status: "completed", conclusion: "failure" }] };
+		const at = "2026-11-06T10:00:00.0000000Z";
+		const log = ["ℹ fail 1", "✖ failing tests:", "", "test at tests/flaky.test.ts:12:1", "✖ flaky case (5.1ms)", "  Error: boom", ""].map((text) => `shard 1\tRun suite shard\t${at} ${text}`).join("\n");
+		const advance = async () => {
+			s.setGh({ runs: [run(91, e.head, "completed", "failure")], jobs: { 91: [shard] }, routes: [{ match: "run view 91 -R example/demo --attempt 1 --log-failed", replies: [{ stdout: log }] }] });
+			const result = await s.integrate(e.jobId);
+			assert.deepEqual(mergedCalls(result.calls), []);
+			return { ...result, fact: result.record.facts.find((entry) => entry.startsWith("ci rerun: ")) ?? "" };
+		};
+
+		// On a log the valid registry covers, an unparseable or schema-invalid file reads no log and claims or reruns
+		// nothing; the red resolves as any red does (no wait; the implementer's, never a merge ask).
+		for (const [content, reason] of [["{ not json", /not a known flake: .*JSON/], [JSON.stringify({ schema_version: 1, entries: [{ ...flaky, rerun: true }] }), /not a known flake: refusing an invalid .*defaults\/ci-flakes\.json/]] as Array<[string, RegExp]>) {
+			writeFileSync(registry, content);
+			const refused = await advance();
+			assert.match(refused.fact, /^ci rerun: none — run 91: job shard 1 failed in "Run suite shard"/, refused.text);
+			assert.match(refused.fact, reason, refused.text);
+			assert.notEqual(refused.record.next, "wait", refused.text);
+			assert.match(refused.record.reason, /No merge, and no merge authorization was requested/, refused.text);
+			assert.equal(refused.calls.filter((call) => call.includes("--log-failed")).length, 0, "an invalid registry reads no failed log");
+			assert.deepEqual([reruns(), existsSync(claimsFile)], [[], false], "nothing reran or was claimed");
+		}
+		// Control: the valid registry takes the flake path on the same red.
+		writeFileSync(registry, JSON.stringify({ schema_version: 1, entries: [flaky] }));
+		const rerun = await advance();
+		assert.equal(rerun.record.next, "wait", rerun.text);
+		assert.match(rerun.fact, /^ci rerun: known-flake failure in run 91 \("known flake: flaky case"\); reran the failed jobs once/);
+		assert.deepEqual(reruns(), ["run rerun 91 --failed"]);
 	},
 );
 
