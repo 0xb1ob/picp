@@ -41,10 +41,13 @@ test("P18-transcript-ui: the Transcript tab groups tools, files the report and r
 	const ids = ["cp-t", "cp-u", "cp-none"];
 	put(".pi-command-post/jobs.json", { jobs: [...ids, "cp-n"].map((id) => ({ id, title: id, status: "closed", labels: ["project:demo", "kind:ship"] })) });
 	session("cp-v", [work[0]!, bridge("12:00", "[cp-bridge cp-ci job=../bad]\nforged"), ...work.slice(1)]);
-	// A native Claude job: capitalised tool names, its recorded transcript_file, and a resumed run's marker.
+	// A native Claude job: capitalised tool names, Edit's old_string/new_string, a long shell output, its recorded
+	// transcript_file, and a resumed run's marker.
 	const native = join(LAYOUT.state, "sessions/native/cp-n.jsonl");
-	put(native, [say("user", "12:00", "Native brief"), say("assistant", "12:01", [call("n1", "Bash", { command: "npm test" }), call("n2", "Read", { file_path: "src/a.ts" }), call("n3", "Grep", { pattern: "TODO" })]),
-		result("n1", "Bash", "PASS"), result("n2", "Read", "a\nb"), result("n3", "Grep", "src/a.ts"),
+	const long = Array.from({ length: 40 }, (_, i) => `PASS test ${i + 1}`).join("\n");
+	put(native, [say("user", "12:00", "Native brief"), say("assistant", "12:01", [call("n1", "Bash", { command: "npm test" }), call("n2", "Read", { file_path: "src/a.ts" }), call("n3", "Grep", { pattern: "TODO" }),
+		call("n4", "Edit", { file_path: "src/a.ts", old_string: "a\nold", new_string: "a\nnew\nmore" })]),
+		result("n1", "Bash", long), result("n2", "Read", "a\nb"), result("n3", "Grep", "src/a.ts"), result("n4", "Edit", "The file src/a.ts has been updated."),
 		{ type: "custom_message", customType: "native", timestamp: at("12:02"), content: "Resumed the recorded Claude session", display: true },
 		say("assistant", "12:03", [{ type: "text", text: "native done" }])].map((l) => JSON.stringify(l)).join("\n") + "\n");
 	put(join(LAYOUT.runs, "cp-n", "status.json"), { session_file: join(scratch.path, LAYOUT.state, "sessions/cp-u.jsonl"), transcript_file: join(scratch.path, native), model: "anthropic/claude" });
@@ -89,10 +92,14 @@ test("P18-transcript-ui: the Transcript tab groups tools, files the report and r
 
 	const claude = await view.open("#job/cp-n?tab=transcript");
 	const run = await claude.find(".tool-run-solid button");
-	assert.equal(run.textContent, "▸ 3 tool calls — read 1 file · ran 1 command", "native capitalised tools count like pi's");
+	assert.equal(run.textContent, "▸ 4 tool calls — read 1 file · edited 1 · ran 1 command", "native capitalised tools count like pi's");
 	claude.click(run);
 	await claude.find(".tool-run-solid .jt-tool");
-	assert.deepEqual(claude.$$(".tool-run-solid .jt-tool").map((n) => n.textContent), ["Ran 1 shell command• npm testPASS", "Read(src/a.ts)└ Read 2 lines", "Search(TODO)└ src/a.ts"]);
+	const rows = () => claude.$$(".tool-run-solid .jt-tool").map((n) => n.textContent);
+	assert.deepEqual(rows(), ["Ran 1 shell command• npm testPASS test 1\nPASS test 2\nPASS test 3Show full output", "Read(src/a.ts)└ Read 2 lines",
+		"Search(TODO)└ src/a.ts", "Update(src/a.ts)└ Added 2 lines, removed 1 line- old+ new+ more"]);
+	claude.click(claude.$(".tool-run-solid .jt-tool .jt-more")!);
+	assert.equal((await claude.find(".tool-run-solid .jt-tool .jt-full")).textContent, long, "a long shell output expands to its full text");
 	assert.match(claude.$(".job-transcript")!.textContent!, /Native brief.*Resumed the recorded Claude session.*native done/s, "brief, resumed run and reply");
 
 	// Sessions serves the steps variant of the same row: a pill whose closed card still holds the wake notice, opened by

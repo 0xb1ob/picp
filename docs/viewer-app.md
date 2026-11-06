@@ -739,8 +739,9 @@ never send, least of all to the worker; with no reference of its own it reads "A
 Details on the job's Transcript tab; the drawer and Context open Details on its default tab. The pane's former Log tab
 (`>_ <id>`) was a second rendering of the same transcript and is gone: the Transcript tab words each tool call the way
 it did — `Read(path)` / `└ Read N lines`, `Ran 1 shell command` / `• <command>` and its output, `Update(path)` /
-`└ Added N lines, removed M lines` with the edit's block — for pi and native Claude tool names alike, plus
-`Search(pattern)` for native Grep and Glob.
+`└ Added N lines, removed M lines` with the edit's block (pi's `oldText`/`newText` or native `old_string`/`new_string`)
+— for pi and native Claude tool names alike, plus `Search(pattern)` for native Grep and Glob. A shell or failed call
+shows its output's head, with the first 2000 characters behind "Show full output".
 The `--stage full-match-log` captures under `docs/tui-verification/full-match-log/` predate that removal.
 
 **Full match S3 (jobs drawer and PR chip).** The Jobs drawer's header follows frame 3 on desktop: Jobs, the project

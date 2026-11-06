@@ -20,10 +20,10 @@
 .jt-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; color: var(--dim); }
 .jt-chip { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; }
 .jt-jump { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
-.jt-jump button, .jt-brief > button { min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.jt-jump button, .jt-brief > button, .jt-tool > .jt-more { min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
 .jt-brief { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--muted); overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
 .jt-brief > div { min-width: 0; max-width: 100%; }
-.jt-brief > button { align-self: flex-start; }
+.jt-brief > button, .jt-tool > .jt-more { align-self: flex-start; }
 .jt-clamp { max-height: 6.5em; overflow: hidden; overflow-wrap: anywhere; }
 .jt-say { overflow-wrap: anywhere; min-width: 0; }
 .jt-note { font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
@@ -116,7 +116,7 @@ details[open] > summary > .jt-caret { transform: rotate(90deg); }
  .jt-review > summary, .jt-trailing > summary { min-height: 44px; }
 }
 @media (min-width: 900px) {
- .jt-jump button, .jt-brief > button, .job-summary-more { min-height: 24px; }
+ .jt-jump button, .jt-brief > button, .jt-tool > .jt-more, .job-summary-more { min-height: 24px; }
  .job-detail-body { display: grid; grid-template-columns: minmax(0,1fr) minmax(18rem,25rem); grid-template-rows: auto 1fr; gap: 24px 40px; align-items: start; }
  .job-detail-main { grid-column: 1; display: flex; flex-direction: column; gap: 24px; min-width: 0; }
  .job-detail-main:empty { display: none; }

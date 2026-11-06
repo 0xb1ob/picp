@@ -15,12 +15,13 @@ export function parts(entry: SessionEntry): {args: Record<string, unknown>; resu
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const ARGS = ["command", "path", "file_path", "url", "job_id", "action"];
 const head = (text: string) => text.split("\n").filter(l => l.trim()).slice(0, 3).join("\n").slice(0, 400);
-/** An edit's removed and added lines from its recorded old and new text (a line multiset diff); null if unrecorded. */
+/** An edit's removed and added lines from its recorded old and new text (a line multiset diff); null if unrecorded.
+ * pi records `oldText`/`newText`, native Claude `old_string`/`new_string`. */
 function editLines(args: Record<string, unknown>): {removed: string[]; added: string[]} | null {
  const edits: unknown[] = Array.isArray(args.edits) ? args.edits : [args];
  const removed: string[] = [], added: string[] = [];
  for (const edit of edits) {
-  const {oldText, newText} = (edit ?? {}) as Record<string, unknown>;
+  const e = (edit ?? {}) as Record<string, unknown>, oldText = e.oldText ?? e.old_string, newText = e.newText ?? e.new_string;
   if (typeof oldText !== "string" || typeof newText !== "string") return null;
   const old = oldText.split("\n");
   for (const line of newText.split("\n")) { const at = old.indexOf(line); if (at < 0) added.push(line); else old.splice(at, 1); }
@@ -46,18 +47,28 @@ function EditBlock({lines}: {lines: {removed: string[]; added: string[]}}) {
   {more > 0 && <div class="workspace-log-diff-more">{plural(more, "more line")}</div>}
  </div>;
 }
-/** One tool call worded Read, Ran 1 shell command, Update or Search; pi's lower-case and native capitalised names alike. */
+const FULL_MAX = 2000;
+/** The output's first FULL_MAX characters behind a toggle, when they hold more than the shown head. */
+function FullOutput({result, shown}: {result: string; shown: string}) {
+ const [open, setOpen] = useState(false), full = result.slice(0, FULL_MAX);
+ if (full.trim() === shown) return null;
+ return <>{open && <pre class="jt-full">{full}</pre>}
+  <button type="button" class="jt-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show full output"}</button></>;
+}
+/** One tool call worded Read, Ran 1 shell command, Update or Search; pi's lower-case and native capitalised names
+ * alike. A shell or failed call keeps its full output behind a toggle. */
 function ToolLine({entry}: {entry: SessionEntry}) {
  const {args, result} = parts(entry), name = entry.name ?? "tool", out = head(result), failed = entry.failed ? " · failed" : "";
  const tool = name.toLowerCase(), search = name === "Grep" || name === "Glob";
- if (tool === "bash") return <><p><b>Ran 1 shell command</b>{failed}</p>{typeof args.command === "string" && <pre>• {args.command}</pre>}{out && <pre>{out}</pre>}</>;
+ if (tool === "bash") return <><p><b>Ran 1 shell command</b>{failed}</p>{typeof args.command === "string" && <pre>• {args.command}</pre>}{out && <pre>{out}</pre>}
+  <FullOutput result={result} shown={out}/></>;
  const target = search && typeof args.pattern === "string" ? args.pattern : ARGS.map(k => args[k]).find((v): v is string => typeof v === "string");
  const label = search ? "Search" : tool === "read" ? "Read" : tool === "edit" ? "Update" : name.charAt(0).toUpperCase() + name.slice(1);
  const lines = tool === "edit" ? editLines(args) : null;
  const note = entry.failed ? out : tool === "read" && result.trim() ? readNote(result)
   : lines ? `Added ${plural(lines.added.length, "line")}, removed ${plural(lines.removed.length, "line")}` : out;
  return <><p><b>{label}</b>{target !== undefined && `(${target})`}{failed}</p>{note && <pre>└ {note}</pre>}
-  {lines && !entry.failed && (lines.removed.length + lines.added.length > 0) && <EditBlock lines={lines}/>}</>;
+  {lines && !entry.failed && (lines.removed.length + lines.added.length > 0) && <EditBlock lines={lines}/>}{entry.failed && <FullOutput result={result} shown={out}/>}</>;
 }
 
 /** A run of tool calls as the shared collapsible row; `open` is only the initial state. */

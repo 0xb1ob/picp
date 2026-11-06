@@ -940,7 +940,8 @@ try {
 	}
 	if (stage === "full-match-log") {
 		// Full match S4 (frames 2/8), reached by a real click on the reply's job link, which lands on the job's Transcript tab.
-		// Negative controls: a link that follows the route fails `pane`, no Diff tab `tabs`, a coloured phase `tones`, an empty report `report`.
+		// Negative controls: a link that follows the route fails `pane`, no Diff tab `tabs`, a coloured phase `tones`,
+		// an empty report `report`.
 		const look = `(() => { const q = s => document.querySelector(s), all = s => [...document.querySelectorAll(s)].filter(e => e.getClientRects().length);
 			const box = s => { const r = q(s)?.getBoundingClientRect(); return r ? [r.x, r.y, r.width, r.height].map(Math.round).join(" ") : null; };
 			const color = s => q(s) ? getComputedStyle(q(s)).color : null, seen = s => all(s).map(e => e.innerText.replace(/\\s+/g, " ").trim());
