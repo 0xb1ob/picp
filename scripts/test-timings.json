@@ -129,6 +129,7 @@
 	"tests/e2e/memory.test.ts": 16353,
 	"tests/e2e/merge-ask.test.ts": 241622,
 	"tests/e2e/mission.test.ts": 67940,
+	"tests/e2e/native-flat-home-resume.test.ts": 1827,
 	"tests/e2e/native-routing.test.ts": 1827,
 	"tests/e2e/native-worker-followups.test.ts": 1827,
 	"tests/e2e/native-worker-gates.test.ts": 1827,

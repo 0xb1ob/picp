@@ -4,11 +4,11 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, paths } from "../src/contracts.ts";
+import { DEFAULT_ORIGIN, EMPTY_USAGE, type FleetRecord, isoTimestamp, LAYOUT, paths } from "../src/contracts.ts";
 import { FleetStore } from "../src/fleet.ts";
 import { copyOriginalTask } from "../src/gate.ts";
 import { EnvelopeIntake } from "../src/intake.ts";
@@ -412,4 +412,43 @@ test("N4f: a kind-changing promotion of a native research worker is refused by n
 	assert.deepEqual(live.sent, []);
 	// A plain prompt passes this guard and reaches native admission (here refused for the bench's non-claude model).
 	await assert.rejects(b.sender.send({ jobId: b.jobId, message: "one more source" }), /^Error: refused: resume of native cp-aaa1: /);
+});
+
+// N4l: a native worker's own resume admission refused a repair after the parent reopened the slot, stranding the job
+// with no envelope. No entry point makes the worker refuse what the parent admitted, so a fake worker refuses it here.
+test("N4l: a refused native promotion restores the superseded envelope, reported_at and phase; a pi refusal keeps it open", async (t) => {
+	const bin = mkdtempSync(join(tmpdir(), "cp-n4l-bin-"));
+	const path = process.env.PATH;
+	t.after(() => { process.env.PATH = path; rmSync(bin, { recursive: true, force: true }); });
+	writeFileSync(join(bin, "claude"), "#!/bin/sh\necho '9.9.9 (Claude Code)'\n", { mode: 0o755 });
+	process.env.PATH = `${bin}:${path ?? ""}`;
+	const refusal = "prompt rejected by worker: refused: resume of native cp-aaa1: the switch is off. Nothing was resumed.";
+	for (const driver of ["claude", undefined] as const) {
+		const b = await releaseBench(t);
+		const fleet = new FleetStore({ home: b.home });
+		if (driver) await fleet.mutate((jobs) => { Object.assign(jobs[0]!.worker, { driver, model: "anthropic/claude-test" }); });
+		mkdirSync(join(b.home, LAYOUT.data), { recursive: true });
+		writeFileSync(join(b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_ship: true }));
+		const envelope = join(b.home, paths.envelopeFile(b.jobId));
+		mkdirSync(dirname(envelope), { recursive: true });
+		writeFileSync(envelope, JSON.stringify({ job_id: b.jobId, envelope: { status: "done" } }));
+		const before = fleet.require(b.jobId);
+		const live = fakeWorker();
+		live.send = (async () => ({ receipt: "failed", error: refusal })) as never;
+		b.workers.spawn(b.jobId, live);
+		const sent = await b.sender.send({ jobId: b.jobId, message: "CI is red: fix it.", purpose: "repair" });
+		assert.equal(sent.receipt, "failed");
+		const after = fleet.require(b.jobId);
+		const archived = join(b.home, paths.supersededEnvelopeFile(b.jobId, 1));
+		if (driver) {
+			assert.deepEqual([after.phase, after.reported_at, after.supersessions ?? 0], [before.phase, before.reported_at, 0]);
+			assert.equal(existsSync(envelope), true, "the envelope was not restored");
+			assert.equal(existsSync(archived), false);
+			assert.deepEqual(readRunEvents(b.home, b.jobId).filter((e) => e.type.startsWith("envelope_")).map((e) => e.type), ["envelope_superseded", "envelope_restored"]);
+		} else {
+			assert.deepEqual([after.phase, after.reported_at, after.supersessions], ["waiting", undefined, 1]);
+			assert.equal(existsSync(envelope), false, "a pi refusal must keep the reopened slot");
+			assert.equal(existsSync(archived), true);
+		}
+	}
 });

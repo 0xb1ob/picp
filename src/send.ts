@@ -37,6 +37,7 @@ import { existsSync } from "node:fs";
 import { assertNoAuthorityHold } from "./authority-hold.ts";
 import { isScriptFleetRecord, type Risk, type SendReceipt } from "./contracts.ts";
 import { assertNativeResume, NATIVE_ACK, nativeDoorRefusal } from "./drivers/claude-followup.ts";
+import { NOT_RESUMED } from "./drivers/claude-lifecycle.ts";
 import { readTask, type ResolvedTask } from "./dispatch.ts";
 import { type BudgetCheck, checkBudget } from "./failures.ts";
 import type { FleetStore } from "./fleet.ts";
@@ -52,7 +53,7 @@ import { inferredRiskGate, recordedProvenance, recordedRisk } from "./risk-warni
 import { OPS_PROFILE_NAME } from "./ops-jobs.ts";
 import { rebuildStatus } from "./run-artifacts.ts";
 import type { RunRegistry } from "./runs.ts";
-import { decideReopen, reopenEnvelopeSlot, type Supersession, type TaskUpdate, updateFrozenTask } from "./supersede.ts";
+import { decideReopen, reopenEnvelopeSlot, restoreEnvelopeSlot, type Supersession, type TaskUpdate, updateFrozenTask } from "./supersede.ts";
 import { type BudgetSource, resolveBudgetSource } from "./worker-manager.ts";
 import { readTaskAddenda, taskAddendaText } from "./task-addenda.ts";
 import type { WorkerManager } from "./worker-manager.ts";
@@ -457,6 +458,10 @@ export class Sender {
 
 		this.#assertContinuationPermission(request.jobId);
 		const outcome = await managed.worker.send(message, mode);
+		// A native worker that refused its resume started no turn: the envelope it already filed stands again (N4l).
+		if (native && superseded && outcome.receipt === "failed" && outcome.error?.includes(NOT_RESUMED)) {
+			await restoreEnvelopeSlot({ home: this.#options.home ?? fleet.home, fleet, runs, jobId: request.jobId, reason: outcome.error, supersession: superseded, phase: record.phase });
+		}
 
 		// Same delivered-only rule as the task-replacement below: a revise that was never
 		// actually taken by the worker must not close the one-open-revise window.
