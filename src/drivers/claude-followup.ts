@@ -58,6 +58,8 @@ export const NativeSessionSchema = Type.Object(
 		session_id: Type.Optional(Type.String({ minLength: 1 })),
 		/** The worktree the session started in; the CLI keys sessions by cwd. Absent on a pre-N4f record. */
 		cwd: Type.Optional(Type.String({ minLength: 1 })),
+		/** The dispatch base (`CP_BASE_BRANCH`) at the session's first turn, so a revive keeps it (N4i). */
+		base: Type.Optional(Type.String({ minLength: 1 })),
 		/** The session's cumulative per-model tokens and cost at its last result; absent means a resume is unmeasured. */
 		baseline: Type.Optional(Type.Object({ ledger: LedgerSchema, cost_usd: Type.Number({ minimum: 0 }) }, { additionalProperties: false })),
 	},
@@ -84,6 +86,17 @@ export function readNativeSession(file: string): NativeSession {
 export function writeNativeSession(file: string, session: NativeSession): void {
 	writeFileSync(`${file}.tmp`, `${JSON.stringify(session)}\n`, { mode: 0o600 });
 	renameSync(`${file}.tmp`, file);
+}
+
+/** A revived native job's base: its bound PR's base, then the recorded dispatch base, then the project base. */
+export function nativeReviveBase(prBase: string | undefined, sessionFile: string | undefined, projectBase: () => string | undefined): string | undefined {
+	let recorded: string | undefined;
+	try {
+		recorded = sessionFile ? readNativeSession(sessionFile).base : undefined;
+	} catch {
+		recorded = undefined; // nativeReviveRefusal already refuses an unreadable record by name.
+	}
+	return prBase ?? recorded ?? projectBase();
 }
 
 /** Teardown, after the worker's observed exit: removes the kept scratch dir; an invalid record keeps it. */

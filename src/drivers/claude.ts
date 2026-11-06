@@ -56,7 +56,7 @@ export function nativeClassOf(kind: JobKind, role: Role, delivery: Delivery): Na
 }
 
 /** The first selection condition that fails, typed, or undefined: a native class whose switch is on, not owned by a
- * pipeline (D2), concurrency 1, pinned claude. */
+ * pipeline (D2), a free slot under `max_concurrent`, pinned claude. */
 export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ category: NativeRefusal; why: string } | undefined> {
 	let config: ReturnType<typeof loadNativeConfig>;
 	try {
@@ -74,8 +74,8 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 	if (nativeClass === "claude_research" && !RESEARCH_DELIVERIES.includes(input.delivery)) return ineligible;
 	// N4h builds the reviewer path; until then claude_review gates nothing and a reviewer stays on pi.
 	if (nativeClass === "claude_review") return { category: "ineligible", why: "the native reviewer path is not built yet; gate-reviewers run on pi" };
-	const live = liveNativeJobs(input.jobs).filter((id) => id !== input.jobId);
-	if (live.length > 0) return { category: "occupied", why: `native concurrency is 1 and ${live.join(", ")} is live; tear it down first` };
+	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs), input.jobId, config.max_concurrent);
+	if (occupied) return occupied;
 	try {
 		// Loaded on use: the SDK it imports is not on the extension's startup path.
 		spike ??= import("./claude-spike.ts");
@@ -108,6 +108,23 @@ export function liveNativeJobs(jobs: readonly FleetRecord[]): string[] {
 	return jobs.filter((job) => job.worker?.driver !== undefined && job.worker.exited_at === undefined && LIVE_PHASES.includes(job.phase)).map((job) => job.job_id);
 }
 
+/** The home's native slot count (`max_concurrent`); an unreadable data/native.json keeps the safe 1. */
+export function nativeMaxConcurrent(home: string): number {
+	try {
+		return loadNativeConfig(nativeConfigFile(home)).max_concurrent;
+	} catch {
+		return 1; // selection already refused this home by name (`switch`); the spawn check stays strict.
+	}
+}
+
+/** `occupied` when holders other than the job itself fill all `max` native slots: a held job's repair keeps its own. */
+export function nativeSlotRefusal(holders: Iterable<string>, jobId: string, max: number, state = "live"): { category: NativeRefusal; why: string } | undefined {
+	const others = [...new Set(holders)].filter((id) => id !== jobId);
+	if (others.length < max) return undefined;
+	const one = others.length === 1;
+	return { category: "occupied", why: `native concurrency is ${max} and ${others.join(", ")} ${one ? "is" : "are"} ${state}; tear ${one ? "it" : "one"} down first` };
+}
+
 /** The CLI's model id from an explicit `anthropic/claude-…` ref; any other ref is refused, never silently omitted. */
 export function nativeModelId(model: string): string {
 	const id = NATIVE_MODEL.exec(model)?.[1];
@@ -132,6 +149,20 @@ export const NATIVE_SHIP_ADDENDUM = [
 	"report_result once with head_sha = git rev-parse HEAD.",
 ].join("\n");
 
+/** Delivery `local` (N4i): picp integrates the branch itself, so the worker commits and never pushes or opens a PR. */
+export const NATIVE_LOCAL_SHIP_ADDENDUM = [
+	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Edit, Write, Bash) and report_result;",
+	"ignore any other tool names above. This job is delivery local: commit with git in Bash and stop there. Never call",
+	"git_push or pr_create and never open a PR; picp integrates the branch locally. Then call report_result once with",
+	"head_sha = git rev-parse HEAD.",
+].join("\n");
+
+/** The addendum for a job's kind and delivery: research, a PR ship job, or a local ship job. */
+export function nativeAddendum(kind: string | undefined, delivery: string | undefined): string {
+	if (kind !== "ship") return NATIVE_ADDENDUM;
+	return delivery === "local" ? NATIVE_LOCAL_SHIP_ADDENDUM : NATIVE_SHIP_ADDENDUM;
+}
+
 /**
  * Overrides pi's argv with the native worker; the role contract goes to a 0600 file in the run dir,
  * not the argv or env.
@@ -141,7 +172,7 @@ export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, system
 	if (!runDir) throw new NativeDriverError("the native claude worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
 	const file = join(runDir, NATIVE_SYSTEM_PROMPT_FILE);
 	mkdirSync(runDir, { recursive: true });
-	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${env.CP_KIND === "ship" ? NATIVE_SHIP_ADDENDUM : NATIVE_ADDENDUM}\n`, { mode: 0o600 });
+	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${nativeAddendum(env.CP_KIND, env.CP_DELIVERY)}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
 	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file } };
 }
