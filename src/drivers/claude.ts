@@ -123,6 +123,14 @@ export const NATIVE_ADDENDUM = [
 	"path (CP_ARTIFACT_PATH), never with a shell heredoc, then call report_result.",
 ].join("\n");
 
+/** The ship counterpart (N4f): the forge tools replace pi's push and gh; the PR base is the job's base branch. */
+export const NATIVE_SHIP_ADDENDUM = [
+	"Native worker: your tools are the Claude tools you were given (Read, Grep, Glob, Edit, Write, Bash), the picp forge",
+	"tools (git_push, git_fetch, pr_create, pr_edit, gh_read) and report_result; ignore any other tool names above.",
+	"Commit with git in Bash, push only with git_push, open the draft PR with pr_create (never gh in Bash), then call",
+	"report_result once with head_sha = git rev-parse HEAD.",
+].join("\n");
+
 /**
  * Overrides pi's argv with the native worker; the role contract goes to a 0600 file in the run dir,
  * not the argv or env.
@@ -132,7 +140,7 @@ export function nativeSpawnOptions(model: string, env: NodeJS.ProcessEnv, system
 	if (!runDir) throw new NativeDriverError("the native claude worker has no run dir to hold its system prompt (CP_RUN_DIR unset)");
 	const file = join(runDir, NATIVE_SYSTEM_PROMPT_FILE);
 	mkdirSync(runDir, { recursive: true });
-	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${NATIVE_ADDENDUM}\n`, { mode: 0o600 });
+	writeFileSync(file, `${systemPrompt.trimEnd()}\n\n${env.CP_KIND === "ship" ? NATIVE_SHIP_ADDENDUM : NATIVE_ADDENDUM}\n`, { mode: 0o600 });
 	chmodSync(file, 0o600);
 	return { piBin: process.execPath, argv: [WORKER_ENTRY], env: { ...env, CP_NATIVE_MODEL: nativeModelId(model), CP_NATIVE_SYSTEM_PROMPT_FILE: file } };
 }
