@@ -21,7 +21,7 @@ import {
 	type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_CLAUDE_MODEL, FAKE_NATIVE_MODEL, routeNativeModel, startClaudeMockProvider, subscriberEnv, toolResults,
 } from "../harness/claude-mock-provider.ts";
 import { seedOperatorPick } from "../harness/operator-pick.ts";
-import { createAgentDir, createScratchHome, createScratchRepo, MockProvider, readFleet, readRunEvents, REPO_ROOT, treehouseAvailable } from "../harness/index.ts";
+import { createAgentDir, createScratchHome, createScratchRepo, MockProvider, readFleet, readRunEvents, REPO_ROOT, treehouseAvailable, waitFor } from "../harness/index.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
 const skip = missing.length > 0 ? `needs ${missing.join(" and ")} on PATH` : false;
@@ -253,6 +253,49 @@ test("S1 carry: a native primary missing from a plain allowlist falls back with 
 	h.noLease(explicit.id);
 	assert.equal(h.claude.requests.length, 0);
 });
+
+test("S1 pi pin: driver pi bypasses a claude row and a job started on claude refuses it", { skip, timeout: 300_000 }, async (t) => {
+	const bash = { kind: "tool_use" as const, calls: [{ name: "Bash", input: { command: "ls" } }] };
+	const h = await routedHome(t, [bash, bash]);
+	const limited = { ...h.env, CP_NATIVE_MAX_TURNS: "1" };
+	h.toggle(true);
+	const [pinned, locked] = await Promise.all([h.job(), h.job()]);
+	const ends = (await h.b.run([{ kind: "tool_calls", calls: [dispatch(pinned.id, { driver: "pi" })] }], limited)) as Tool[];
+	const end = ends.find((e) => e.toolName === "cp_dispatch");
+	assert.notEqual(end?.isError, true, text(end));
+	const record = h.fleet(pinned.id)!;
+	assert.deepEqual([record.worker.driver, record.worker.model, record.routing?.requested_driver, record.routing?.driver], [undefined, h.piModel, "pi", "pi"]);
+	assert.equal(record.routing?.driver_reason, "explicit: cp_dispatch driver pi");
+	assert.equal(h.claude.requests.length, 0, "the pin never reached the native model");
+	// A job that started on claude keeps its driver: the pin is refused before any spawn.
+	await h.b.closeParents();
+	await h.b.run([{ kind: "tool_calls", calls: [dispatch(locked.id)] }], limited);
+	assert.equal((await waitFailed(h.fleet, locked.id))?.worker.driver, "claude");
+	await h.b.closeParents();
+	const requests = h.claude.requests.length;
+	const refused = ((await h.b.run([{ kind: "tool_calls", calls: [dispatch(locked.id, { driver: "pi" })] }], limited)) as Tool[]).find((e) => e.toolName === "cp_dispatch");
+	assert.equal(refused?.isError, true, text(refused));
+	assert.match(text(refused), /started on claude and a started job keeps its driver/);
+	assert.deepEqual([h.fleet(locked.id)?.worker.driver, h.fleet(locked.id)?.routing?.driver], ["claude", "claude"]);
+	assert.equal(h.claude.requests.length, requests, "nothing was spawned");
+});
+
+for (const kind of ["queue", "armed"] as const) {
+	test(`S1 pi pin: ${kind === "queue" ? "a queued" : "an armed"} request with driver pi is released as pi on a claude row`, { skip, timeout: 300_000 }, async (t) => {
+		const h = await routedHome(t, []);
+		h.toggle(true);
+		const job = await h.job();
+		const file = join(h.b.home, kind === "queue" ? LAYOUT.dispatchQueueFile : LAYOUT.armedDispatchFile);
+		mkdirSync(dirname(file), { recursive: true });
+		const stamp = kind === "queue" ? { queued_at: "2026-10-04T15:00:00Z", attempts: 0 } : { armed_at: "2026-10-04T15:00:00Z", blockers: [] };
+		writeFileSync(file, JSON.stringify({ schema_version: 1, entries: [{ job_id: job.id, request: { task: "Report the repo's package name.", scope: "S", driver: "pi" }, ...stamp }] }));
+		await h.b.run([], h.env);
+		const record = await waitFor(() => h.fleet(job.id), (r) => r?.worker !== undefined, { timeoutMs: 60_000, what: `${kind} release reaches a worker` });
+		assert.deepEqual([record?.worker.driver, record?.worker.model, record?.routing?.requested_driver, record?.routing?.driver], [undefined, h.piModel, "pi", "pi"]);
+		assert.equal(record?.routing?.driver_reason, "explicit: cp_dispatch driver pi");
+		assert.equal(h.claude.requests.length, 0);
+	});
+}
 
 test("S2 availability: spent, reset, no-reset and auth evidence steer new jobs; a started native job never moves", { skip, timeout: 600_000 }, async (t) => {
 	const reset = Math.floor(Date.now() / 1000) + 3600;
