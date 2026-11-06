@@ -17,7 +17,8 @@ jobs:
     # then the operator's ephemeral self-hosted runner keeps gating PRs. A
     # public repository never selects the privileged self-hosted runner.
     # See docs/development.md "CI".
-    runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted","nomad"]') || 'ubuntu-latest' }}
+    # runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted","nomad"]') || 'ubuntu-latest' }}
+    runs-on: boat
     timeout-minutes: 15
     steps:
       - name: Checkout
