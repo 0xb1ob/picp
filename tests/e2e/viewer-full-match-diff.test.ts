@@ -130,7 +130,7 @@ test("S7-diff-http: /api/diff serves the recorded base...head from the picp clon
 	assert.deepEqual(snapshot(join(d.home, ".pi-command-post")), before, "the endpoint never writes to the clone or the state");
 });
 
-test("S7-diff-tab: the pane's Diff labels both shas and renders lines as text; truncated and unavailable say so; the Log's Update shows its block", { timeout: 180_000 }, async (t) => {
+test("S7-diff-tab: the pane's Diff labels both shas and renders lines as text; truncated and unavailable say so; the Transcript's Update shows its block", { timeout: 180_000 }, async (t) => {
 	const d = await start(t);
 	const tab = await openTab(t, d.port, CHAT, new Map(), undefined, {}, true);
 	browserShims(t, tab);
@@ -138,12 +138,13 @@ test("S7-diff-tab: the pane's Diff labels both shas and renders lines as text; t
 	tab.click(tab.$$(".session-steps .session-tools").find((b) => b.getAttribute("title") === JOB)!);
 	tab.click(await tab.find(".session-steps-link", (a) => a.getAttribute("href") === `#job/${JOB}?tab=transcript`));
 	const texts = (selector: string) => tab.$$(`.workspace-job ${selector}`).map((e) => e.textContent ?? "");
-	const rows = await until(() => texts(".workspace-log-tool > pre"), (r) => r.length === 3, "the Log");
+	for (const run of await until(() => tab.$$(".workspace-job .job-transcript .tool-run-solid > button"), (r) => r.length > 0, "the Transcript's tool runs")) tab.click(run);
+	const rows = await until(() => texts(".jt-tool > pre"), (r) => r.length === 3, "the Transcript's tool lines");
 	// C2: pi's trailing notice is never counted as file lines; a range notice words the note itself.
 	assert.deepEqual(rows, ["└ Read lines 1–2 of 5000", "└ Read 2 lines", "└ Added 10 lines, removed 1 line"]);
 	assert.deepEqual([texts(".workspace-log-edit .workspace-log-diff-line"), texts(".workspace-log-diff-more"), tab.$$(".workspace-log-edit b").length],
 		[["- <b>old</b>", "+ <b>new</b>", ...Array.from({ length: 6 }, (_, i) => `+ l${i + 1}`)], ["3 more lines"], 0], "frame 2's block: removed, then added, capped, as text");
-	assert.deepEqual(texts(".workspace-log-tab-short"), ["Log", "Report", "Files", "Diff", "Details"], "frame 8's toolbar gains Diff");
+	assert.deepEqual(texts(".workspace-log-tab-short"), ["Report", "Files", "Diff", "Details"], "frame 8's toolbar gains Diff");
 
 	tab.click(tab.$('.workspace-log-tabs [data-view="diff"]')!);
 	await tab.find(".workspace-log-diff-view .workspace-log-diff");
@@ -164,8 +165,8 @@ test("S7-diff-tab: the pane's Diff labels both shas and renders lines as text; t
 	const gone = await tab.find(".workspace-log-diff-view [role=status]", (s) => s.textContent!.startsWith("Diff unavailable"));
 	assert.match(gone.textContent!, /^Diff unavailable · git could not read the recorded shas: .+ · Files on the forge$/);
 	assert.deepEqual([tab.$$(".workspace-log-diff-view .workspace-log-diff").length, texts(".workspace-log-shas code")[1]], [0, "f".repeat(40)], "no empty diff; the recorded head stays labelled");
-	tab.click(tab.$('.workspace-log-tabs [data-view="log"]')!);
-	await tab.find(".workspace-log-row");
+	tab.click(tab.$('.workspace-log-tabs [data-view="details"]')!);
+	await tab.find(".workspace-job .job-transcript");
 	tab.click(tab.$('.workspace-job button[aria-label="Close job"]')!);
 	await until(() => tab.$(".workspace-job"), (el) => el === null, "close still works");
 	assert.equal(tab.requests.filter((r) => r.method !== "GET" && r.method !== "HEAD").length, 0, "the pane only reads");

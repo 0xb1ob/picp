@@ -332,7 +332,7 @@ no longer test-only): every N3a gate is on and not optional.
 | No report or crash | the worker exits non-zero; the job fails on the observed exit, never a guessed completion |
 | Teardown | stdin close aborts the run; the lease returns only after the observed child exit (`src/teardown.ts`) |
 | Ledger and dashboard | job detail shows `native claude` next to the model |
-| Log transcript | each top-level assistant/user message (text, tool calls, tool result text, thinking text; never signatures, the init message or CLI config) is appended, flushed per message, as pi session lines to `state/sessions/native/<job>.jsonl` (mode 0600); each block is capped at 64 KiB with a visible truncation marker, a resumed run appends a "resumed" entry to the same file, and run status records it as `transcript_file`, which the dashboard Log reads. It survives teardown; only the scratch dir is removed (`src/drivers/claude-transcript.ts`) |
+| Log transcript | each top-level assistant/user message (text, tool calls, tool result text, thinking text; never signatures, the init message or CLI config) is appended, flushed per message, as pi session lines to `state/sessions/native/<job>.jsonl` (mode 0600); each block is capped at 64 KiB with a visible truncation marker, a resumed run appends a "resumed" entry to the same file, and run status records it as `transcript_file`, which the dashboard job page's Transcript tab reads. It survives teardown; only the scratch dir is removed (`src/drivers/claude-transcript.ts`) |
 
 **Follow-ups.** N3c replaced the N3b "Refused until N3c" list; see [N3c follow-ups](#n3c-follow-ups).
 

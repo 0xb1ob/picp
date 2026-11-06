@@ -1,19 +1,17 @@
 import { useState } from "preact/hooks";
-import type { JobDiffResponse, JobReportResponse, JobResponse, JobTranscriptResponse, SessionEntry, SessionsResponse } from "../../src/viewer/api-types.ts";
+import type { JobDiffResponse, JobReportResponse, JobResponse, SessionsResponse } from "../../src/viewer/api-types.ts";
 import { elapsed, observedTime } from "../format.ts";
 import { composerHref } from "../routes.ts";
 import { JobAsk, jobAskTarget, JobDetail, JobFiles } from "../screens/JobDetail.tsx";
-import { JobTranscript, parts } from "../screens/JobTranscript.tsx";
 import { useScreenData } from "../use-screen-data.ts";
 import { Icon } from "./icons.tsx";
 import { ReportDocument } from "./ReportDocument.tsx";
 import "./workspace-log.css";
 
-export type LogView = "log" | "report" | "files" | "diff" | "details";
+export type LogView = "report" | "files" | "diff" | "details";
 type Worker = SessionsResponse["workers"][number];
-const VIEWS: [LogView, string][] = [["log", "Log"], ["report", "Report"], ["files", "Files"], ["diff", "Diff"], ["details", "Details"]];
+const VIEWS: [LogView, string][] = [["report", "Report"], ["files", "Files"], ["diff", "Diff"], ["details", "Details"]];
 const NOT = "not recorded";
-const ARGS = ["command", "path", "file_path", "url", "job_id", "action"];
 
 /** Frames 2/8: the job's id, worker role · model · thinking, and where it works; each unrecorded fact says so. */
 function Identity({data, worker}: {data: JobResponse; worker: Worker | undefined}) {
@@ -27,71 +25,6 @@ function Identity({data, worker}: {data: JobResponse; worker: Worker | undefined
   <span class="workspace-log-mark" aria-hidden="true">&gt;_</span>
   <div><code title={job.id}>{job.id}</code><p>{facts.join(" · ")}</p><p>{where && data.files_href ? <a href={data.files_href}>{where}</a> : NOT}</p></div>
  </div>;
-}
-
-const head = (text: string) => text.split("\n").filter(l => l.trim()).slice(0, 3).join("\n").slice(0, 400);
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-/** An edit's removed and added lines from its recorded old and new text (a line multiset diff); null if unrecorded. */
-function editLines(args: Record<string, unknown>): {removed: string[]; added: string[]} | null {
- const edits: unknown[] = Array.isArray(args.edits) ? args.edits : [args];
- const removed: string[] = [], added: string[] = [];
- for (const edit of edits) {
-  const {oldText, newText} = (edit ?? {}) as Record<string, unknown>;
-  if (typeof oldText !== "string" || typeof newText !== "string") return null;
-  const old = oldText.split("\n");
-  for (const line of newText.split("\n")) { const at = old.indexOf(line); if (at < 0) added.push(line); else old.splice(at, 1); }
-  removed.push(...old);
- }
- return edits.length ? {removed, added} : null;
-}
-// pi's read appends `[Showing lines A-B of N. Use offset=…]` or `[K more lines in file. Use offset=…]` (C2).
-const NOTICE = /\n*\[(?:Showing lines (\d+)-(\d+) of (\d+)[^\]\n]*|[^\]\n]*Use offset=[^\]\n]*)\]\s*$/;
-/** "Read N lines" without pi's trailing notice, or the notice's own range when it names one. */
-function readNote(result: string): string {
- const notice = NOTICE.exec(result);
- if (notice?.[1]) return `Read lines ${notice[1]}–${notice[2]} of ${notice[3]}`;
- const body = (notice ? result.slice(0, notice.index) : result).trimEnd();
- return `Read ${plural(body ? body.split("\n").length : 0, "line")}`;
-}
-const INLINE_LINES = 8;
-/** Frame 2's block under Update: removed, then added lines from the recorded arguments; no line numbers are recorded */
-function EditBlock({lines}: {lines: {removed: string[]; added: string[]}}) {
- const all = [...lines.removed.map(l => ["del", `- ${l}`]), ...lines.added.map(l => ["add", `+ ${l}`])], more = all.length - INLINE_LINES;
- return <div class="workspace-log-diff workspace-log-edit">
-  {all.slice(0, INLINE_LINES).map(([kind, text], i) => <div key={i} class={`workspace-log-diff-line workspace-log-diff-${kind}`}>{text}</div>)}
-  {more > 0 && <div class="workspace-log-diff-more">{plural(more, "more line")}</div>}
- </div>;
-}
-
-/** One entry as frames 2/8 word it: Read, Ran 1 shell command, Update; any other tool keeps its name, capitalised. */
-function Line({entry}: {entry: SessionEntry}) {
- if (entry.kind === "tool" && entry.name === "report_result") return <p class="workspace-log-say">• Report filed</p>;
- if (entry.kind === "tool") {
-  const {args, result} = parts(entry), name = entry.name ?? "tool", out = head(result), failed = entry.failed ? " · failed" : "";
-  // Native tools are capitalised (Bash, Read, Write); pi's are lower case.
-  const tool = name.toLowerCase(), search = name === "Grep" || name === "Glob";
-  if (tool === "bash") return <div class="workspace-log-tool"><p><b>Ran 1 shell command</b>{failed}</p>
-   {typeof args.command === "string" && <pre>• {args.command}</pre>}{out && <pre>{out}</pre>}</div>;
-  const target = search && typeof args.pattern === "string" ? args.pattern : ARGS.map(k => args[k]).find((v): v is string => typeof v === "string");
-  const label = search ? "Search" : tool === "read" ? "Read" : tool === "edit" ? "Update" : name.charAt(0).toUpperCase() + name.slice(1);
-  const lines = tool === "edit" ? editLines(args) : null;
-  const note = entry.failed ? out : tool === "read" && result.trim() ? readNote(result)
-   : lines ? `Added ${plural(lines.added.length, "line")}, removed ${plural(lines.removed.length, "line")}` : out;
-  return <div class="workspace-log-tool"><p><b>{label}</b>{target !== undefined && `(${target})`}{failed}</p>{note && <pre>└ {note}</pre>}
-   {lines && !entry.failed && (lines.removed.length + lines.added.length > 0) && <EditBlock lines={lines}/>}</div>;
- }
- if (entry.kind === "say" && entry.who === "Worker") return <p class="workspace-log-say">• {entry.text}</p>;
- return <p class="workspace-log-note">{entry.who} · {entry.text.split("\n")[0]?.slice(0, 200)}</p>;
-}
-
-/** The worker's recorded entries in order, as plain monospace lines: read-only. */
-function LogLines({data}: {data: JobTranscriptResponse}) {
- const rows = data.entries.filter(e => e.name !== "thinking");
- return <section class="workspace-log-lines" aria-label="Worker log">
-  {data.warning && <p role="status">{data.warning}</p>}{data.truncated && <p>Recent events shown; the session is longer.</p>}
-  {rows.map(e => <div class="workspace-log-row" key={e.id}><Line entry={e}/></div>)}
-  {!rows.length && !data.warning && <p role="status">No recorded tool output yet</p>}
- </section>;
 }
 
 /** The report page's own read (`/api/report/<id>`); no report.md, or one that no longer reads, is unavailable. */
@@ -157,10 +90,9 @@ function AskFooter({data}: {data: JobResponse}) {
  </footer>;
 }
 
-/** Frame 2's document tab (`>_ <id>`, report.md, Files, Diff, Details) beside frame 8's segment label. */
-function TabLabel({view, id, short}: {view: LogView; id: string; short: string}) {
- const doc = view === "log" ? <><span class="workspace-log-tab-glyph" aria-hidden="true">&gt;_</span><span class="workspace-log-tab-id">{id}</span></>
-  : view === "report" ? <><Icon name="file" size={14}/>report.md</> : view === "files" ? <><Icon name="files" size={14}/>Files</> : short;
+/** Frame 2's document tab (report.md, Files, Diff, Details) beside frame 8's segment label. */
+function TabLabel({view, short}: {view: LogView; short: string}) {
+ const doc = view === "report" ? <><Icon name="file" size={14}/>report.md</> : view === "files" ? <><Icon name="files" size={14}/>Files</> : short;
  return <><span class="workspace-log-tab-short">{short}</span><span class="workspace-log-tab-doc">{doc}</span></>;
 }
 
@@ -172,12 +104,11 @@ export function WorkspaceLog({data, view, onView, initial, worker}: {data: JobRe
  return <div class="workspace-log" data-view={view}>
   <div class="workspace-log-bar">
    <div class="workspace-log-tabs" role="tablist" aria-label="Job views">{VIEWS.map(([key, short]) =>
-    <button type="button" role="tab" key={key} data-view={key} aria-selected={view === key} class={view === key ? "workspace-log-tab workspace-log-tab-on" : "workspace-log-tab"} onClick={() => onView(key)}><TabLabel view={key} id={job.id} short={short}/></button>)}</div>
+    <button type="button" role="tab" key={key} data-view={key} aria-selected={view === key} class={view === key ? "workspace-log-tab workspace-log-tab-on" : "workspace-log-tab"} onClick={() => onView(key)}><TabLabel view={key} short={short}/></button>)}</div>
    {live && <span class="workspace-log-live">{live}</span>}
   </div>
   <div class="workspace-job-body">
    {view !== "details" && <Identity data={data} worker={worker}/>}
-   {view === "log" && <JobTranscript key={job.id} jobId={job.id} generatedAt={data.generated_at} model={job.model} reports={data.reports} finished={job.phase === "done" || job.phase === "failed"} view={d => <LogLines data={d}/>}/>}
    {view === "report" && <Report data={data}/>}
    {view === "files" && <div class="job-links workspace-log-files"><JobFiles data={data}/></div>}
    {view === "diff" && <Diff data={data}/>}
