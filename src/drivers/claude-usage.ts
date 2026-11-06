@@ -119,6 +119,12 @@ export function estimatedRunUsage(seen: StreamedUsage, baseline: NativeBaseline 
 	return { status: "estimated", usage, cost_unknown: true, ...(baseline ? { baseline: { ledger, cost_usd: baseline.cost_usd } } : {}) };
 }
 
+/** The unlogged in-flight `message_update` for status.json: the turn's streamed usage so far; none streamed is zero. */
+export function liveUsageUpdate(seen: StreamedUsage): { type: "message_update"; usage: PiUsage } {
+	const usage = estimatedRunUsage(seen, undefined).usage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } };
+	return { type: "message_update", usage };
+}
+
 const MAX_DENIED = 5;
 const MAX_REASON = 200;
 const PATH = /(?<=^|[\s(=:'"`])(?:~|\.{1,2})?\/[^\s)'"`,;]*/g;

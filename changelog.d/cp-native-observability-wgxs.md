@@ -1,0 +1,1 @@
+- A native Claude run's usage now streams into status.json while the run goes (an estimate per assistant message), instead of reading 0 until the run returns; a CI-run unit test pins the worker's flat-home layout.
