@@ -190,7 +190,7 @@ the switch stays OFF. The mechanism is in [`docs/native-drivers.md`](native-driv
    Back up `data/routing.json` first (`cp -p data/routing.json data/routing.json.bak-<stamp>`), then check it with
    `/doctor`: `models.planner` reports `driver=claude <model>; pi fallback …`.
 2. **The switch.** Dashboard Settings → Native workers, or `data/native.json` `{"claude_research": true}`. Only local
-   and answer research runs native, one job at a time; pipeline research, reviews, gates and ship jobs stay pi. Ship
+   and answer research runs native, `max_concurrent` jobs at a time (default 1); pipeline research, reviews, gates and ship jobs stay pi. Ship
    implementers have their own switch, `claude_ship` (off by default; [native-drivers.md](native-drivers.md#native-ship-jobs-n4f)).
 3. **What to watch.**
    - Job detail's Driver fact: `claude, effort high` for a native job, `pi (preferred claude: <reason>)` for a fallback.
@@ -201,3 +201,20 @@ the switch stays OFF. The mechanism is in [`docs/native-drivers.md`](native-driv
 4. **Rollback.** Remove the row: new jobs route to pi again, and a started native job keeps its driver. Or turn the
    switch OFF: new jobs run on pi, and resumes and revives of native jobs are refused (never moved to pi); teardown
    still works. Deleting `state/native-availability.json` only resets the snapshot to unknown.
+
+## Native Claude for ship and review workers (the flip)
+
+The operator does this by hand. picp never edits the home's data files. The mechanism and the concurrency rules are in
+[native-drivers.md](native-drivers.md#native-concurrency-and-the-flip-n4i).
+
+1. **Back up** both files with dated copies: `cp data/routing.json data/routing.json.<date>.bak` and
+   `cp data/native.json data/native.json.<date>.bak`.
+2. **Rows.** In `data/routing.json`, set `"driver": "claude"` on `risky-ship`, `big-ship`, `small-ship` and `reviews`.
+   Each row keeps its explicit `anthropic/claude-…` model, and that model stays in `allow`.
+3. **Switches.** In `data/native.json`, set `"claude_ship": true` and `"claude_review": true`, and keep
+   `"max_concurrent": 1`. When every slot is taken, a new row-preferred job runs on pi with `driver_reason`
+   `occupied: …`.
+4. **Raise `max_concurrent`** (up to 4) only after 5 native ship jobs show no `allowed_warning` in the availability
+   snapshot.
+5. **Rollback** means restoring both `.bak` files. New dispatches follow them at once, and a started job keeps its
+   driver.
