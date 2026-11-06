@@ -553,8 +553,8 @@ passed. The same slice makes `git checkout -- <path>` and `git restore` paths ho
 nothing on its own: an implementer runs native only when its routing row (or the dispatch) says `driver: "claude"`,
 the job is `kind:ship` with delivery `pr` or `local`, and `claude_ship` is on. Off, a claude row falls back to pi with
 `driver_reason` `switch: the switch workers.native_claude_ship is off …`; an explicit `driver: "claude"` is refused
-with no lease. The other keys: `claude_research` (unchanged), `claude_review` (validated, gates nothing until N4h; a
-gate-reviewer stays on pi) and `max_concurrent` (integer 1–4, default 1, validated and stored; concurrency stays 1
+with no lease. The other keys: `claude_research` (unchanged), `claude_review` (the native reviewer, N4h, below) and
+`max_concurrent` (integer 1–4, default 1, validated and stored; concurrency stays 1
 until N4i). Any other key, a non-boolean switch or an out-of-range count is refused by name, by every reader.
 
 **What runs.** The native implementer gets the profile body plus a ship addendum (forge tools, commit in Bash, push only
@@ -574,3 +574,15 @@ no `cwd` and resumes as before.
 **Rollback.** Set `claude_ship` false. New ship dispatches go to pi at once; jobs already started keep their driver (D1:
 no pi fallback mid-job), and their resumes and revives are refused until the switch is back on or they are torn down.
 Rows stay pi until the routing flip: this slice leaves the home's `data/native.json` and `data/routing.json` alone.
+
+## Native reviewer (N4h)
+
+`cp_review`, `cp_gate` and the quality review resolve their reviewer through the driver resolver. A reviewer runs native
+only when its rubric row (the `reviews` row) says `driver: "claude"`, `claude_review` is on, and no other native worker
+holds the slot (dispatched jobs and live reviewers alike); otherwise it runs on pi exactly as before, with the reason in
+the routing line. The subject job's own driver never binds its reviewer, and a pipeline-owned subject may be reviewed
+natively (a reviewer takes no sends). The native reviewer gets Read, Grep and Glob confined to its scratch packet plus
+`report_verdict`, an in-process MCP tool on pi's own handler: the same clamp, `verdictChecks`, repair cap and write-once
+`verdict.json` (and `verdict-raw.json`), a wrong job or a different second call refused by name. No Bash, Edit, Write
+or forge tools. A run that ends without a verdict is pi's no-verdict case (settled or exited), inside the same deadline;
+`native_run` records the lockdown and measured usage in the review's run dir. Rollback: set `claude_review` false.
