@@ -44,21 +44,38 @@ const toolResult = (child: ReturnType<typeof startPiChild>, id: string) =>
 	JSON.stringify(child.eventsOfType("tool_execution_end").find((row) => row.toolCallId === id) ?? null);
 
 // Scenario: thread routes and owner ops are gone; a send carrying a retired field is refused before anything is
-// journaled; an offline-held line with retired thread keys and a plain send are still delivered beside a corrupt registry.
+// journaled; an offline-held line and a queued journal request, both with retired thread keys, and plain sends are
+// still delivered beside a corrupt registry.
 test("chat-routing: removed thread routes and ops refuse; plain and offline-held sends deliver beside a corrupt registry", { timeout: 120_000 }, async (t) => {
+	const QUEUED = "dc-20261104120000-00000002";
 	const d = await viewer(t, { seed: (stateDir) => {
 		write(join(stateDir, "operator", "named-threads.jsonl"), "{not json\n");
 		write(join(stateDir, "operator", "asks.jsonl"), jsonl([OLD_ASK]));
 		write(controlInboxFile(stateDir), jsonl([{ type: "held", id: "dc-20261104130000-00000001", at: new Date().toISOString(), text: "typed offline",
 			ask_id: null, thread: "ops", thread_id: "th-00000000000000a1" }]));
+		const at = new Date(Date.now() - 60_000).toISOString();
+		write(controlJournalFile(stateDir), jsonl([
+			{ type: "request", by: "bridge", id: QUEUED, at, peer: null, kind: "message", text: "queued before restart", ask_id: null, deliver: "prompt",
+				thread: "ops", thread_id: "th-00000000000000a1" },
+			{ type: "outcome", by: "bridge", id: QUEUED, at, kind: "message", state: "queued" },
+		]));
 	} });
 	let idle = true;
 	const { injected, control } = await operatorSession(t, d.stateDir, () => idle);
 	const record = (readControlRecord(d.stateDir) as { record: Parameters<typeof controlRequest>[0] & { csrf: string } }).record;
-	await waitFor(() => injected.length, (n) => n >= 1, { timeoutMs: 10_000, what: "the offline inbox turn" });
-	assert.match(injected[0]![0], /typed offline/, "the held line is delivered");
-	assert.doesNotMatch(injected[0]![0], /thread/, "its retired thread keys reach no marker or text");
+	// The stub session shows each handoff in its transcript, as pi would; an unseen one is re-handed.
+	const seen = () => control.observe({ role: "user", content: [{ type: "text", text: injected.at(-1)![0] }] });
+	await waitFor(() => injected.length, (n) => n >= 1, { timeoutMs: 10_000, what: "the first reloaded turn" });
+	seen();
 	control.settled();
+	await waitFor(() => injected.length, (n) => n >= 2, { timeoutMs: 10_000, what: "the second reloaded turn" });
+	seen();
+	control.settled();
+	const reloaded = injected.slice(0, 2).map(([text]) => text);
+	assert.ok(reloaded.some((text) => text.includes("(dc-20261104130000-00000001): typed offline")), "the offline inbox line is replayed");
+	assert.ok(reloaded.some((text) => text.startsWith("queued before restart\n\n")), "the queued journal request is delivered");
+	assert.ok(reloaded.some((text) => text.includes(`[cp-dashboard ${QUEUED} — from the dashboard]`)), "the reloaded request keeps its id");
+	assert.equal(reloaded.some((text) => /thread/.test(text)), false, "retired thread keys reach no marker or text");
 
 	assert.equal((await d.send("/api/threads")).status, 404, "GET /api/threads is an unknown route");
 	assert.equal((await d.send("/api/operator/threads", d.json(record.csrf, { op: "create", client_id: DC, name: "Alpha" }))).status, 405, "no thread write route");
@@ -73,8 +90,8 @@ test("chat-routing: removed thread routes and ops refuse; plain and offline-held
 	}
 	const plain = await d.send(MESSAGE, d.json(record.csrf, { kind: "message", text: "PLAIN-SEND" }));
 	assert.equal(plain.status, 202, JSON.stringify(plain.body));
-	await waitFor(() => injected.length, (n) => n >= 2, { timeoutMs: 10_000, what: "the plain send" });
-	assert.match(injected[1]![0], /^PLAIN-SEND\n\n\[cp-dashboard dc-\d{14}-[0-9a-f]{8} — from the dashboard\]$/);
+	await waitFor(() => injected.length, (n) => n >= 3, { timeoutMs: 10_000, what: "the plain send" });
+	assert.match(injected[2]![0], /^PLAIN-SEND\n\n\[cp-dashboard dc-\d{14}-[0-9a-f]{8} — from the dashboard\]$/);
 	control.settled();
 
 	// Busy: the send is held, its queue edit applies, and an answer click delivers first once the session idles.
@@ -87,13 +104,13 @@ test("chat-routing: removed thread routes and ops refuse; plain and offline-held
 	assert.equal(click.status, 202, JSON.stringify(click.body));
 	idle = true;
 	control.settled();
-	await waitFor(() => injected.length, (n) => n >= 3, { timeoutMs: 10_000, what: "the answer click" });
+	await waitFor(() => injected.length, (n) => n >= 4, { timeoutMs: 10_000, what: "the answer click" });
 	control.settled();
-	await waitFor(() => injected.length, (n) => n >= 4, { timeoutMs: 10_000, what: "the edited send" });
-	assert.deepEqual(injected.slice(2, 4).map(([text]) => text.split("\n\n[cp-dashboard")[0]), ["ask-0123456789ab: Yes", "BUSY-EDITED"]);
-	assert.match(injected[2]![0], /; ask=ask-0123456789ab\]$/, "the click's marker keeps its ask id, nothing about threads");
+	await waitFor(() => injected.length, (n) => n >= 5, { timeoutMs: 10_000, what: "the edited send" });
+	assert.deepEqual(injected.slice(3, 5).map(([text]) => text.split("\n\n[cp-dashboard")[0]), ["ask-0123456789ab: Yes", "BUSY-EDITED"]);
+	assert.match(injected[3]![0], /; ask=ask-0123456789ab\]$/, "the click's marker keeps its ask id, nothing about threads");
 
-	const requests = lines(controlJournalFile(d.stateDir)).filter((line) => line.type === "request");
+	const requests = lines(controlJournalFile(d.stateDir)).filter((line) => line.type === "request" && line.id !== QUEUED);
 	assert.deepEqual(requests.map((line) => "thread_id" in line || "thread" in line), [false, false, false], "a refused send journals no request");
 	assert.equal(injected.some(([text]) => text.includes("RETIRED-FIELD")), false, "a refused send is never injected");
 });
@@ -183,6 +200,8 @@ test("chat-routing: cp_job create, cp_pipeline start and cp_ask create jobs with
 	const model = provider.addScript("chat-routing-parent", [
 		{ kind: "tool_calls", calls: [
 			{ id: "stale", name: "cp_job", args: { action: "create", project: "picp", title: "stale job", delivery: "pr", kind: "ship", source_send_id: PS } },
+			{ id: "stale-pipeline", name: "cp_pipeline", args: { action: "start", project: "picp", title: "stale piped", task: "plan", source_send_id: PS } },
+			{ id: "stale-ask", name: "cp_ask", args: { project: "picp", question: "Stale ask?", source_send_id: PS } },
 			{ id: "job", name: "cp_job", args: { action: "create", project: "picp", title: "plain job", delivery: "pr", kind: "ship" } },
 			{ id: "pipeline", name: "cp_pipeline", args: { action: "start", project: "picp", title: "piped", task: "plan piped" } },
 			{ id: "ask", name: "cp_ask", args: { project: "picp", question: "Ship it?" } },
@@ -196,13 +215,18 @@ test("chat-routing: cp_job create, cp_pipeline start and cp_ask create jobs with
 	await child.prompt("Take the requests.");
 	await child.waitFor(() => child.eventsOfType("agent_settled").length >= 1, 120_000);
 
-	assert.match(toolResult(child, "stale"), /source_send_id[\s\S]*must not have additional properties/, "the removed param is refused");
+	assert.match(toolResult(child, "stale"), /source_send_id[\s\S]*must not have additional properties/, "cp_job's closed schema refuses it");
+	// cp_pipeline and cp_ask schemas are open: a stale source_send_id is ignored, never resolved into an origin.
+	for (const id of ["stale-pipeline", "stale-ask"]) {
+		const reply = toolResult(child, id);
+		assert.ok(/must not have additional properties/.test(reply) || !/source_send_id|origin/.test(reply), `${id}: ${reply}`);
+	}
 	assert.match(toolResult(child, "job"), /created cp-/, `cp_job create: ${toolResult(child, "job")}`);
 	const jobs = readJobsDocument(home.path).jobs;
 	const titles = jobs.map((job) => job.title);
 	for (const title of ["old tagged job", "plain job", "Ship it?"]) assert.ok(titles.includes(title), `${title} in ${titles.join(", ")}`);
 	assert.equal(titles.includes("stale job"), false, "the refused create made nothing");
-	assert.ok(titles.some((title) => /piped/.test(title)), `cp_pipeline start created its jobs: ${titles.join(", ")}`);
+	assert.ok(titles.some((title) => /: piped$|^piped$/.test(title)), `cp_pipeline start created its jobs: ${titles.join(", ")}`);
 	assert.ok(jobs.some((job) => job.id === oldJob), "the old job survives the rewrite");
 	assert.doesNotMatch(readFileSync(new Ledger({ home: home.path }).file, "utf8"), /"origin"/, "no job carries an origin");
 });
