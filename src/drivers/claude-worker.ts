@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { configureLayout, type Delivery, paths, type Usage } from "../contracts.ts";
-import { NATIVE_RESULT_GRACE_MS, nativeDenials, nativeRunUsage } from "./claude-usage.ts";
+import { estimatedRunUsage, NATIVE_REPORTED_GRACE_MS, NATIVE_RESULT_GRACE_MS, nativeDenials, nativeRunUsage, noteStreamedUsage, type StreamedUsage } from "./claude-usage.ts";
 import { commitIdentityEnv } from "./claude-forge-tools.ts";
 import { implementerExclusions, nativeRole } from "./claude-roles.ts";
 import { REPORT_TOOL, resolveClaude, runClaudeSpike } from "./claude-spike.ts";
@@ -51,6 +51,9 @@ let busy = false;
 // A revived worker (CP_NATIVE_RESUME=1) resumes from its first prompt; a dispatched one after its first turn.
 let resuming = env.CP_NATIVE_RESUME === "1";
 let finalResult: SDKResultMessage | undefined;
+let streamed: StreamedUsage = new Map();
+// Set once a report or verdict tool result is accepted: a stop then waits the longer grace for the result.
+let accepted = false;
 // Set by the first stop: no queued follow-up starts a new turn after it.
 let stopping = false;
 let session: NativeSession | undefined;
@@ -80,6 +83,7 @@ function relay(message: SDKMessage): void {
 	observed(seen);
 	transcript?.relay(message);
 	if (message.type === "result") finalResult = message;
+	noteStreamedUsage(streamed, message);
 	if (message.type === "system" && message.subtype === "init" && session && session.session_id !== message.session_id) {
 		session.session_id = message.session_id;
 		writeNativeSession(sessionFile, session);
@@ -93,7 +97,9 @@ function relay(message: SDKMessage): void {
 			toolNames.set(String(block.id), name);
 			write({ type: "tool_execution_start", toolCallId: block.id, toolName: name, args: block.input });
 		} else if (block.type === "tool_result") {
-			write({ type: "tool_execution_end", toolCallId: block.tool_use_id, toolName: toolNames.get(String(block.tool_use_id)) ?? "unknown", isError: block.is_error === true });
+			const name = toolNames.get(String(block.tool_use_id)) ?? "unknown";
+			if ((name === "report_result" || name === "report_verdict") && block.is_error !== true) accepted = true;
+			write({ type: "tool_execution_end", toolCallId: block.tool_use_id, toolName: name, isError: block.is_error === true });
 		}
 	}
 	if (message.type === "assistant") write({ type: "turn_end" });
@@ -159,6 +165,7 @@ async function turn(prompt: string): Promise<Turn> {
 	const baseline = current.baseline;
 	const ledger = baseline ? new Map(Object.entries(baseline.ledger)) : undefined;
 	finalResult = undefined;
+	streamed = new Map();
 	observe = turnObserver();
 	turnSeen = [];
 	const resumed = resuming;
@@ -187,15 +194,16 @@ async function turn(prompt: string): Promise<Turn> {
 	});
 	resuming = current.session_id !== undefined;
 	// The resumed process restores the session's cumulative modelUsage and cost: count only the growth over the baseline.
-	const measured = nativeRunUsage(finalResult, baseline);
-	if (result.resultSubtype !== undefined) {
+	const measured = finalResult === undefined ? estimatedRunUsage(streamed, baseline) : nativeRunUsage(finalResult, baseline);
+	if (result.resultSubtype !== undefined || measured.status === "estimated") {
 		// A result without a readable ledger and cost leaves no baseline, so the next resume is unmeasured, never recounted.
 		if (measured.baseline) current.baseline = measured.baseline;
 		else delete current.baseline;
 		writeNativeSession(sessionFile, current);
 	}
 	const usage = measured.usage;
-	write(usage ? { type: "message_end", message: { role: "assistant", model: result.initModel ?? "claude", usage } } : { type: "usage_unavailable", status: measured.status });
+	const costUnknown = measured.cost_unknown ? { cost_unknown: true } : {};
+	write(usage ? { type: "message_end", message: { role: "assistant", model: result.initModel ?? "claude", usage }, usage_status: measured.status, ...costUnknown } : { type: "usage_unavailable", status: measured.status });
 	const lockdown = result.lockdown?.verdict ?? "unchecked";
 	if (lockdown === "refused") observed({ kind: "lockdown", code: "lockdown" });
 	else if (result.resultSubtype === "success" && result.error === undefined && lockdown === "ok") {
@@ -209,7 +217,7 @@ async function turn(prompt: string): Promise<Turn> {
 	const reported = Boolean(result.report ?? result.verdict);
 	const end = classifyTurn({ reported, resultSubtype: result.resultSubtype, isError, error: result.error, lockdown, observations: turnSeen });
 	const stop = nativeRunStop(end, maxTurns);
-	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: reported, result_subtype: result.resultSubtype ?? null, usage: usage ? "measured" : "unavailable", usage_status: measured.status, denials: result.denials.length, denied: nativeDenials(result.denials), report_refusals: result.reportRefusals.length, max_turns: maxTurns, ...stop.fields });
+	write({ type: "native_run", run: runId, resumed, claude_version: result.claudeVersion, lockdown, ...counts, exit_code: result.exit?.code ?? null, report: reported, result_subtype: result.resultSubtype ?? null, usage: measured.status === "estimated" ? "estimated" : usage ? "measured" : "unavailable", usage_status: measured.status, ...costUnknown, denials: result.denials.length, denied: nativeDenials(result.denials), report_refusals: result.reportRefusals.length, max_turns: maxTurns, ...stop.fields });
 	if (stop.line) process.stderr.write(`[native claude] ${stop.line}\n`);
 	process.stderr.write(`[native claude] exit ${result.exit?.code ?? result.exit?.signal ?? "none"}; lockdown ${lockdown}; report ${reported ? "accepted" : "none"}${result.error ? `; ${result.error}` : ""}\n`);
 	return {
@@ -319,11 +327,12 @@ function command(line: string): void {
 }
 
 /**
- * Stdin end or SIGTERM aborts a live run; the exit waits for claude's observed exit inside the run. A turn still in
- * flight first gets `NATIVE_RESULT_GRACE_MS` for its `result`, so its usage is measured; a second stop aborts at once.
+ * Stdin end or SIGTERM aborts a live run; the exit waits for claude's observed exit inside the run. A turn in flight
+ * first waits for its `result` (`NATIVE_REPORTED_GRACE_MS` once a report was accepted, else `NATIVE_RESULT_GRACE_MS`),
+ * so its usage is measured; a second stop aborts at once.
  */
 async function stop(): Promise<void> {
-	const deadline = Date.now() + NATIVE_RESULT_GRACE_MS;
+	const deadline = Date.now() + (accepted ? NATIVE_REPORTED_GRACE_MS : NATIVE_RESULT_GRACE_MS);
 	if (!stopping) {
 		stopping = true;
 		while (busy && finalResult === undefined && Date.now() < deadline) await sleep(50);

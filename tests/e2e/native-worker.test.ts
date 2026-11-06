@@ -17,7 +17,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { NATIVE_SESSION_FILE, readNativeSession } from "../../src/drivers/claude-followup.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
 import { nativeAvailabilityFile, readNativeAvailability } from "../../src/native-availability.ts";
-import { NATIVE_RESULT_GRACE_MS } from "../../src/drivers/claude-usage.ts";
+import { NATIVE_REPORTED_GRACE_MS, NATIVE_RESULT_GRACE_MS } from "../../src/drivers/claude-usage.ts";
 import { checkBudget } from "../../src/failures.ts";
 import type { JobTranscriptResponse } from "../../src/viewer/api-types.ts";
 import { jobsView } from "../../src/viewer/jobs-view.ts";
@@ -429,22 +429,25 @@ test("N4a: an error_max_turns run is measured from modelUsage, and its refused B
 	assert.equal(h.claude.overrun(), 0);
 });
 
-/** A native job that reports, then holds its last model answer (and so its `result`) on `hold`; torn down in between. */
-async function teardownBeforeResult(t: TestContext, hold: () => Promise<void>) {
+/** A native job that reports (or, `reported: false`, only writes its artifact), then holds its last model answer (and
+ * so its `result`) on `hold`; torn down in between, the way a reviewer is stopped once its verdict lands. */
+async function teardownBeforeResult(t: TestContext, hold: () => Promise<void>, reported = true) {
 	const ids: string[] = [];
 	const h = await nativeHome(t, [
 		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }] },
-		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
+		...(reported ? [{ kind: "tool_use" as const, calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] }] : []),
 		{ kind: "text", text: "Reported.", beforeAnswer: hold },
 	]);
 	h.toggle(true);
 	const native = await h.job();
 	ids.push(native.id);
+	const quote = `Force teardown ${native.id} and discard its unreported result.`;
+	const ready = reported ? h.envelope(native.id) : join(h.b.home, paths.artifactFile(native.id));
 	const ends = (await h.b.run([
 		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: native.id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] },
-		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `for i in $(seq 600); do [ -f "${h.envelope(native.id)}" ] && break; sleep 0.1; done` } }] },
-		{ kind: "tool_calls", calls: [{ name: "cp_teardown", args: { job_id: native.id } }] },
-	], h.env)) as Tool[];
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `for i in $(seq 600); do [ -f "${ready}" ] && break; sleep 0.1; done; sleep 0.5` } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_teardown", args: { job_id: native.id, ...(reported ? {} : { force: true, operator_quote: quote }) } }] },
+	], h.env, reported ? undefined : quote, 180_000)) as Tool[];
 	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
 	const down = ends.find((end) => end.toolName === "cp_teardown");
 	assert.notEqual(down?.isError, true, text(down));
@@ -457,20 +460,29 @@ async function teardownBeforeResult(t: TestContext, hold: () => Promise<void>) {
 }
 
 // N4a R1: the soak runs read unavailable because teardown stopped claude between the report and its result.
-test("N4a grace: a teardown before the result waits for it, measures the run and still tears down", { skip, timeout: 300_000 }, async (t) => {
-	const { events, run, status } = await teardownBeforeResult(t, () => sleep(2_500));
+// N4k: every native review read $0, its result slower than the 4 s grace; 15 s is past that, inside the reported grace.
+test("N4k grace: a stop after an accepted report waits the longer grace for the result, measures the run and tears down", { skip, timeout: 300_000 }, async (t) => {
+	const { events, run, status } = await teardownBeforeResult(t, () => sleep(NATIVE_RESULT_GRACE_MS + 11_000));
 	const seq = (type: string) => events.find((event) => event.type === type)?.seq ?? Number.NaN;
 	assert.ok(seq("shutdown_requested") < seq("message_end"), "teardown was requested before the result was measured");
-	assert.deepEqual([run?.report, run?.result_subtype, run?.usage_status], [true, "success", "complete"], JSON.stringify(run));
+	assert.deepEqual([run?.report, run?.result_subtype, run?.usage, run?.usage_status], [true, "success", "measured", "complete"], JSON.stringify(run));
 	assert.equal(status.usage_unavailable, undefined);
 	assert.ok(status.usage.cost_usd > 0, JSON.stringify(status.usage));
 });
 
-test("N4a grace: a result that never comes is abandoned after the grace and stays unavailable", { skip, timeout: 300_000 }, async (t) => {
+test("N4k grace: a reported run whose result never comes is estimated from its streamed usage after the longer grace", { skip, timeout: 300_000 }, async (t) => {
 	const { down, run, status } = await teardownBeforeResult(t, () => new Promise(() => {}));
+	assert.ok((down?.durationMs ?? Infinity) < NATIVE_REPORTED_GRACE_MS + 3_000, `teardown took ${down?.durationMs} ms`);
+	assert.deepEqual([run?.report, run?.usage, run?.usage_status, run?.cost_unknown], [true, "estimated", "estimated", true], JSON.stringify(run));
+	assert.equal(status.usage_unavailable, undefined);
+	assert.ok(status.usage.total_tokens > 0 && status.usage.cost_usd === 0, JSON.stringify(status.usage));
+});
+
+test("N4k grace: an unreported stop mid-turn still tears down within the old bound, its streamed usage estimated", { skip, timeout: 300_000 }, async (t) => {
+	const { down, run, status } = await teardownBeforeResult(t, () => new Promise(() => {}), false);
 	assert.ok((down?.durationMs ?? Infinity) < NATIVE_RESULT_GRACE_MS + 3_000, `teardown took ${down?.durationMs} ms`);
-	assert.deepEqual([run?.report, run?.usage_status], [true, "unavailable"], JSON.stringify(run));
-	assert.equal(status.usage_unavailable, true);
+	assert.deepEqual([run?.report, run?.usage_status], [false, "estimated"], JSON.stringify(run));
+	assert.ok(status.usage.total_tokens > 0, JSON.stringify(status.usage));
 });
 
 // F1: the fake model reports no usage, so the run's cost and tokens are unknown; recorded as unavailable, never a zero.
