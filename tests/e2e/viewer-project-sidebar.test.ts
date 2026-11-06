@@ -53,12 +53,15 @@ test("project-sidebar: registered rows select the hash's project; no thread chro
 
 	tab.type(await tab.find(".operator-composer textarea"), "KEEP-DRAFT");
 	const picp = tab.$$(ROWS).find((a) => a.textContent === "#picp")!;
-	assert.equal(picp.getAttribute("href"), `${CHAT}&session=chat.jsonl&project=picp`, "a row moves only the selection");
-	tab.go(picp.getAttribute("href")!);
+	assert.equal(picp.getAttribute("href"), "#sessions?view=you&session=chat.jsonl&project=picp", "a row's link drops only transcript=");
+	tab.click(picp);
+	assert.equal(tab.window.location.hash, `${CHAT}&session=chat.jsonl&project=picp`, "a click moves only the selection");
+	tab.go(tab.window.location.hash);
 	await until(() => current(tab), (name) => name === "#picp", "the picp row current");
 	await until(() => tab.$(".session-entries")?.textContent ?? "", (text) => /No loaded entries for picp/.test(text), "picp filters the transcript");
 	assert.equal((tab.$(".operator-composer textarea") as unknown as { value: string }).value, "KEEP-DRAFT", "one draft per session file, not per selection");
-	tab.go(tab.$$(ROWS).find((a) => a.textContent === "#All projects")!.getAttribute("href")!);
+	tab.click(tab.$$(ROWS).find((a) => a.textContent === "#All projects")!);
+	tab.go(tab.window.location.hash);
 	await tab.waitText(/REPLY-CARD/);
 	assert.equal(tab.window.location.hash, `${CHAT}&session=chat.jsonl`, "All clears the selection, keeping the session file");
 

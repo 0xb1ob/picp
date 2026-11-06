@@ -34,6 +34,18 @@ import { InRollup, type OpenTranscript, RelayRollup, transcriptClick } from "../
 
 /** A tool call/result longer than this shows its head, with the rest behind one "show all" link. */
 const TOOL_TEXT_MAX = 1200;
+/** A project row's href drops `transcript=` (a fresh open gets the defaulted Full transcript); a plain click
+ * keeps the route and only moves the selection, as the dropdown did: no re-read, no remount. */
+function rowHash(hash: string, value: string): string {
+ const [path = "", query = ""] = selectionHash(hash, value).split("?"), q = new URLSearchParams(query);
+ q.delete("transcript");
+ return q.size ? `${path}?${q}` : path;
+}
+function pickRow(e: MouseEvent, value: string): void {
+ if (e.button > 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+ e.preventDefault();
+ location.hash = selectionHash(location.hash, value);
+}
 type Worker = SessionsResponse["workers"][number];
 /** Live the way the Overview's `health()` counts it: an in-flight job whose run has not exited, held-idle included. */
 export const countedLive = (w: Worker): boolean => ["waiting","held","launching"].includes(w.phase ?? "") && ["starting","working","idle"].includes(w.run_phase ?? "");
@@ -361,7 +373,7 @@ useViewportFit(()=>{if(follow.current) scrollToEnd();});
  useLayoutEffect(()=>shell.claimRail?.(),[shell.claimRail]);
  /** The project rows under Operator (All projects, then each registered name); a click only moves the hash. */
  const projectRows=(you:string)=>{const current=selectionValue(selection); return <ul class="project-rows" aria-label="Projects">{["",...(data.projects ?? [])].map(v=><li key={v || "all"}>
-  <a href={selectionHash(filterable ? location.hash : you,v)} class="project-row" aria-current={filterable && v === current ? "page" : undefined} title={v || "All projects"}>
+  <a href={rowHash(filterable ? location.hash : you,v)} onClick={filterable ? (e => pickRow(e,v)) : undefined} class="project-row" aria-current={filterable && v === current ? "page" : undefined} title={v || "All projects"}>
    <span aria-hidden="true">#</span><span class="project-row-name">{v || "All projects"}</span></a></li>)}</ul>;};
  /** Chats: the sidebar from 900 px; the phone's Conversations drawer passes an Operator href keeping the selection. */
  const chats=(you:string)=><><section aria-label="Operator">{row(you,"Operator",history ? "Historical transcript" : preview || modelText(data.operator_context ?? {}),data.selected === "you",{avatar:"OP",at:last?.at,context:preview ? null : data.operator_context,preview:!!preview})}{projectRows(you)}</section>

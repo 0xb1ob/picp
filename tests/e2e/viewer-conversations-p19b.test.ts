@@ -521,10 +521,10 @@ const ROWS = ".session-sidebar .project-row";
 const chosen = (tab: Tab) => tab.$(`${ROWS}[aria-current="page"]`)?.textContent?.replace(/^#/, "");
 /** The transcript's text alone: the sidebar's Operator preview reads the full data by design. */
 const shown = (tab: Tab) => tab.$(".session-entries")?.textContent ?? "";
-/** Follows the sidebar row named `name` as a browser would (linkedom does not navigate links), then settles. */
+/** Clicks the sidebar row named `name` as a browser would, lets the route see the hash it wrote, then settles. */
 async function choose(tab: Tab, name: string) {
-	const row = await tab.find(ROWS, (a) => a.textContent === `#${name}`);
-	tab.go(row.getAttribute("href")!);
+	tab.click(await tab.find(ROWS, (a) => a.textContent === `#${name}`));
+	tab.go(tab.window.location.hash);
 	await settle();
 }
 const bubble = (tab: Tab, text: string) => tab.$$(".session-bubble").find((b) => b.textContent?.includes(text));

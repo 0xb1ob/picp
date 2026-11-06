@@ -686,8 +686,9 @@ recorded. `m3-context` captures both surfaces at 1440, 900, 899 and 390 px.
 **Project rows (cp-2tf2, `screens/Sessions.tsx`).** The project filter is the sidebar: in the operator's Full transcript
 the Operator row is followed by "All projects" then one row per registered project (`projects` on the operator's
 `/api/sessions` response: `data/projects.json`, sorted, unique), styled like the chat rows (36 px, selected fill, a long
-name ellipsized with its full name in `title`), in the desktop column and the phone drawer alike. A row is a link that
-moves only `project=`/`untagged=` in the hash (other params kept) and filters exactly as M1's select did; an untagged or
+name ellipsized with its full name in `title`), in the desktop column and the phone drawer alike. A plain click moves
+only `project=`/`untagged=` in the hash (no re-read, no remount) and filters exactly as M1's select did; the row's href
+also drops `transcript=`, so a new tab opens the defaulted Full transcript. An untagged or
 unknown selection still filters with no row current. There is no header dropdown, thread rail, tab strip or `#` picker,
 the draft is kept across selections, and a send carries no `thread_id`. `--stage project-sidebar` captures 1440 and
 390 px with a long name, drawer included.
