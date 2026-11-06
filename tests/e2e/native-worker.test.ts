@@ -198,6 +198,12 @@ test("N4f: a claude small-ship row ships natively with claude_ship on; off, the 
 		step("mcp__picp__pr_create", { title: "Ship it", body: "Native ship e2e." }),
 		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => ({ job_id: ids[0], kind: "ship", status: "done", summary: "Shipped natively.", branch: ids[0], head_sha: git("rev-parse", "HEAD"), pr_url: PR_URL }) }] },
 		{ kind: "text", text: "Reported." },
+		// The CI-repair promotion's turn: the same session resumes and fixes the head.
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(worktree(), "repaired.txt"), content: "fixed\n" }) }] },
+		step("Bash", { command: "git add -A && git commit -q -m repaired" }),
+		step("mcp__picp__git_push", {}),
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => ({ job_id: ids[0], kind: "ship", status: "done", summary: "Repaired natively.", branch: ids[0], head_sha: git("rev-parse", "HEAD"), pr_url: PR_URL }) }] },
+		{ kind: "text", text: "Repaired." },
 	]);
 	const PR_URL = "https://github.com/picp-e2e/forge/pull/7";
 	const piModel = h.b.provider.addScript("n4f-pi-ship", Array.from({ length: 6 }, () => ({ kind: "text" as const, text: "idle" })));
@@ -222,6 +228,8 @@ test("N4f: a claude small-ship row ships natively with claude_ship on; off, the 
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `echo '{"claude_ship":true}' > "${switchFile}"` } }] },
 		dispatch(native!.id),
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(native!.id)) } }] },
+		{ kind: "tool_calls", calls: [{ name: "cp_send", args: { job_id: native!.id, message: "CI is red on the pushed head: fix it.", purpose: "repair" } }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(native!.id)) } }] },
 	], { ...h.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`, FORGE_GH_LOG: ghLog, GIT_CONFIG_GLOBAL: join(bin, "gitconfig") }, undefined, 300_000)) as Tool[];
 	const [offEnd, nativeEnd] = ends.filter((end) => end.toolName === "cp_dispatch");
 	assert.notEqual(offEnd?.isError, true, text(offEnd));
@@ -233,13 +241,11 @@ test("N4f: a claude small-ship row ships natively with claude_ship on; off, the 
 	// Switch on: the Driver fact is claude, and the report's head_sha is the worktree HEAD and origin/<job>.
 	const record = readFleet(h.b.home).jobs.find((job) => job.job_id === native!.id)!;
 	assert.deepEqual([record.worker.driver, record.routing?.driver], ["claude", "claude"]);
-	const filed = (JSON.parse(readFileSync(h.envelope(native!.id), "utf8")) as { envelope: Envelope }).envelope;
-	const head = git("rev-parse", "HEAD");
-	assert.equal(filed.head_sha, head, toolResults(h.claude.requests).join("\n---\n"));
-	assert.equal(git("ls-remote", "origin", `refs/heads/${native!.id}`).split("\t")[0], head);
-	assert.equal(git("log", "-1", "--format=%s"), "shipped");
-	assert.deepEqual(localChecks(filed, { job_id: native!.id, kind: "ship", delivery: "pr", role: "implementer", runDir: join(h.b.home, paths.runDir(native!.id)), worktree: worktree(), mayAskOperator: false }), []);
-	assert.equal(readRunEvents(h.b.home, native!.id).filter((event) => event.type === "envelope_received").length, 1);
+	// The repair below reopened the slot: the first accepted envelope is archived as generation 1, at the shipped commit.
+	const filed = (JSON.parse(readFileSync(join(h.b.home, paths.supersededEnvelopeFile(native!.id, 1)), "utf8")) as { envelope: Envelope }).envelope;
+	assert.equal(filed.head_sha, git("rev-parse", "HEAD~1"), toolResults(h.claude.requests).join("\n---\n"));
+	assert.equal(git("log", "-1", "--format=%s", "HEAD~1"), "shipped");
+	assert.equal(readRunEvents(h.b.home, native!.id).filter((event) => event.type === "envelope_received").length, 2, "the ship and the repair");
 	// CP_BASE_BRANCH reached the worker from the dispatch base: pr_create targets it and git_push refuses it.
 	assert.match(toolResults(h.claude.requests).join("\n"), /Refused: git_push never pushes release \(main and the base branch/);
 	// The parent's own forge reads (`api user`, `pr view`) share the shim; only the worker creates a PR.
@@ -251,6 +257,17 @@ test("N4f: a claude small-ship row ships natively with claude_ship on; off, the 
 	const run = readRunEvents(h.b.home, native!.id).find((event) => event.type === "native_run")?.payload as Record<string, unknown> | undefined;
 	assert.equal(run?.lockdown, "ok");
 	assert.ok(readRunStatus(h.b.home, native!.id).usage.total_tokens > 0);
+	// The CI-repair promotion (same kind) is admitted and resumes the reporting session: its prompt rides the transcript.
+	const sent = ends.find((end) => end.toolName === "cp_send");
+	assert.notEqual(sent?.isError, true, text(sent));
+	const repair = h.claude.requests.filter((request) => JSON.stringify(request.body.messages ?? "").includes("CI is red on the pushed head"));
+	assert.ok(repair.length > 0, "the repair prompt reached the model");
+	assert.match(JSON.stringify(repair[0]!.body.messages), /Shipped natively\.[\s\S]*CI is red on the pushed head/, "the repair turn resumed the same session");
+	const repaired = (JSON.parse(readFileSync(h.envelope(native!.id), "utf8")) as { envelope: Envelope }).envelope;
+	assert.deepEqual([repaired.summary, repaired.head_sha, git("log", "-1", "--format=%s")], ["Repaired natively.", git("rev-parse", "HEAD"), "repaired"]);
+	assert.equal(git("ls-remote", "origin", `refs/heads/${native!.id}`).split("\t")[0], repaired.head_sha);
+	assert.deepEqual(localChecks(repaired, { job_id: native!.id, kind: "ship", delivery: "pr", role: "implementer", runDir: join(h.b.home, paths.runDir(native!.id)), worktree: worktree(), mayAskOperator: false }), []);
+	assert.ok(readNativeSession(join(h.b.home, paths.runDir(native!.id), NATIVE_SESSION_FILE)).session_id);
 	assert.equal(h.claude.overrun(), 0);
 });
 
