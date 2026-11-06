@@ -84,6 +84,9 @@ function relay(message: SDKMessage): void {
 	transcript?.relay(message);
 	if (message.type === "result") finalResult = message;
 	noteStreamedUsage(streamed, message);
+	// Live in-flight usage for status.json (unlogged; the turn's message_end replaces it), so a run never reads 0.
+	const live = message.type === "assistant" ? estimatedRunUsage(streamed, undefined).usage : undefined;
+	if (live) write({ type: "message_update", usage: live });
 	if (message.type === "system" && message.subtype === "init" && session && session.session_id !== message.session_id) {
 		session.session_id = message.session_id;
 		writeNativeSession(sessionFile, session);
@@ -203,6 +206,8 @@ async function turn(prompt: string): Promise<Turn> {
 	}
 	const usage = measured.usage;
 	const costUnknown = measured.cost_unknown ? { cost_unknown: true } : {};
+	// An unmeasured turn clears the live estimate, so status.json matches the log a rebuild replays.
+	if (!usage) write({ type: "message_update", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } } });
 	write(usage ? { type: "message_end", message: { role: "assistant", model: result.initModel ?? "claude", usage }, usage_status: measured.status, ...costUnknown } : { type: "usage_unavailable", status: measured.status });
 	const lockdown = result.lockdown?.verdict ?? "unchecked";
 	if (lockdown === "refused") observed({ kind: "lockdown", code: "lockdown" });

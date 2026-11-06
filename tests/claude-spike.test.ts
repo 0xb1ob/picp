@@ -279,6 +279,22 @@ test("claude-worker: a role/kind pair selection never allows and a missing or em
 	}
 });
 
+// N4l: in a flat home the worker read the nested layout, so a resume found no fleet record. The e2e needs `claude` on
+// PATH and skips in CI; a malformed flat fleet.json named in the refusal proves the worker read the flat path.
+test("claude-worker: a flat CP_HOME configures the flat layout, so the resume admission reads its state/fleet.json", (t) => {
+	const root = mkdtempSync(join(tmpdir(), "cp-native-flat-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const home = join(root, ".pi-command-post");
+	mkdirSync(join(home, "state"), { recursive: true });
+	writeFileSync(join(home, "state", "fleet.json"), "{");
+	const env = { CP_HOME: home, CP_NATIVE_RESUME: "1", CP_JOB_ID: "cp-flat", CP_RUN_DIR: root, CP_WORKTREE: root, CP_KIND: "ship", CP_ROLE: "implementer" };
+	const worker = startWorker(env);
+	const reply = worker.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type?: string; error?: string }).find((line) => line.type === "response");
+	const error = reply?.error ?? "";
+	assert.ok(error.startsWith(`${join(home, "state", "fleet.json")} is not valid JSON`), `${error}\n${worker.stderr}`);
+	assert.ok(error.endsWith("Nothing was resumed."), error);
+});
+
 test("N4f native.json: absent is every class off at concurrency 1; switches are booleans, max_concurrent 1-4, unknown keys refused", (t) => {
 	const home = mkdtempSync(join(tmpdir(), "cp-native-config-"));
 	t.after(() => rmSync(home, { recursive: true, force: true }));
