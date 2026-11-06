@@ -91,7 +91,7 @@ test("S1 native: a claude row runs native with its model and effort; peers, plai
 	assert.equal(first?.body.model, FAKE_CLAUDE_MODEL, "the CLI ran the row's model");
 	assert.equal((first?.body.output_config as { effort?: string } | undefined)?.effort, "high", "the CLI ran the row's effort");
 	// The concurrent loser and a later peer fall back to pi by name; a plain row and an override never ask for claude.
-	for (const [record, held] of [[loser, /is being admitted$/], [h.fleet(peer.id)!, /is live; tear it down first$/]] as const) {
+	for (const [record, held] of [[loser, /is live or being admitted; tear it down first$/], [h.fleet(peer.id)!, /is live; tear it down first$/]] as const) {
 		assert.equal(record.worker.driver, undefined, `${record.job_id} ran native`);
 		assert.equal(record.worker.model, h.piModel);
 		assert.deepEqual([record.routing?.requested_driver, record.routing?.driver], ["claude", "pi"]);
@@ -102,6 +102,18 @@ test("S1 native: a claude row runs native with its model and effort; peers, plai
 		const record = h.fleet(id)!;
 		assert.deepEqual([record.worker.driver, record.worker.model, record.routing?.driver, record.routing?.requested_driver], [undefined, h.piModel, undefined, undefined]);
 	}
+});
+
+test("N4i concurrency: with max_concurrent 2 two row-preferred jobs run native and the third falls back to pi as occupied", { skip, timeout: 300_000 }, async (t) => {
+	const h = await routedHome(t, []);
+	writeFileSync(join(h.b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: true, max_concurrent: 2 }));
+	const [first, second, third] = await Promise.all([h.job(), h.job(), h.job()]);
+	const ends = (await h.b.run([first, second, third].map((job) => ({ kind: "tool_calls" as const, calls: [dispatch(job.id)] })), h.env)) as Tool[];
+	for (const end of ends.filter((e) => e.toolName === "cp_dispatch")) assert.notEqual(end.isError, true, text(end));
+	for (const job of [first, second]) assert.deepEqual([h.fleet(job.id)?.worker.driver, h.fleet(job.id)?.routing?.driver], ["claude", "claude"]);
+	const fell = h.fleet(third.id)!;
+	assert.deepEqual([fell.worker.driver, fell.worker.model, fell.routing?.requested_driver, fell.routing?.driver], [undefined, h.piModel, "claude", "pi"]);
+	assert.match(fell.routing?.driver_reason ?? "", new RegExp(`^occupied: native concurrency is 2 and ${first.id}, ${second.id} are live`));
 });
 
 test("S1 fallback: switch off, CLI missing or too old, and a pipeline-owned planner run pi with the reason named", { skip, timeout: 300_000 }, async (t) => {

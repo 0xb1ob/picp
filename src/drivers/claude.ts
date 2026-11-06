@@ -56,7 +56,7 @@ export function nativeClassOf(kind: JobKind, role: Role, delivery: Delivery): Na
 }
 
 /** The first selection condition that fails, typed, or undefined: a native class whose switch is on, not owned by a
- * pipeline (D2), concurrency 1, pinned claude. */
+ * pipeline (D2), a free slot under `max_concurrent`, pinned claude. */
 export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ category: NativeRefusal; why: string } | undefined> {
 	let config: ReturnType<typeof loadNativeConfig>;
 	try {
@@ -74,8 +74,8 @@ export async function nativeSelectionRefusal(input: NativeSelection): Promise<{ 
 	if (nativeClass === "claude_research" && !RESEARCH_DELIVERIES.includes(input.delivery)) return ineligible;
 	// N4h builds the reviewer path; until then claude_review gates nothing and a reviewer stays on pi.
 	if (nativeClass === "claude_review") return { category: "ineligible", why: "the native reviewer path is not built yet; gate-reviewers run on pi" };
-	const live = liveNativeJobs(input.jobs).filter((id) => id !== input.jobId);
-	if (live.length > 0) return { category: "occupied", why: `native concurrency is 1 and ${live.join(", ")} is live; tear it down first` };
+	const occupied = nativeSlotRefusal(liveNativeJobs(input.jobs), input.jobId, config.max_concurrent);
+	if (occupied) return occupied;
 	try {
 		// Loaded on use: the SDK it imports is not on the extension's startup path.
 		spike ??= import("./claude-spike.ts");
@@ -106,6 +106,23 @@ export async function installedClaudeVersion(env: NodeJS.ProcessEnv = process.en
 /** Fleet jobs whose native worker has not been observed to exit. */
 export function liveNativeJobs(jobs: readonly FleetRecord[]): string[] {
 	return jobs.filter((job) => job.worker?.driver !== undefined && job.worker.exited_at === undefined && LIVE_PHASES.includes(job.phase)).map((job) => job.job_id);
+}
+
+/** The home's native slot count (`max_concurrent`); an unreadable data/native.json keeps the safe 1. */
+export function nativeMaxConcurrent(home: string): number {
+	try {
+		return loadNativeConfig(nativeConfigFile(home)).max_concurrent;
+	} catch {
+		return 1; // selection already refused this home by name (`switch`); the spawn check stays strict.
+	}
+}
+
+/** `occupied` when holders other than the job itself fill all `max` native slots: a held job's repair keeps its own. */
+export function nativeSlotRefusal(holders: Iterable<string>, jobId: string, max: number, state = "live"): { category: NativeRefusal; why: string } | undefined {
+	const others = [...new Set(holders)].filter((id) => id !== jobId);
+	if (others.length < max) return undefined;
+	const one = others.length === 1;
+	return { category: "occupied", why: `native concurrency is ${max} and ${others.join(", ")} ${one ? "is" : "are"} ${state}; tear ${one ? "it" : "one"} down first` };
 }
 
 /** The CLI's model id from an explicit `anthropic/claude-…` ref; any other ref is refused, never silently omitted. */
