@@ -7,7 +7,7 @@ import { jobHref, sessionHref } from "../routes.ts";
 import { phaseText } from "../format.ts";
 import type { JobDetail } from "../screens/JobDetail.tsx";
 import { useScreenData } from "../use-screen-data.ts";
-import type { ComposerMenuContext, ThreadPicker } from "./ComposerMenu.tsx";
+import type { ComposerMenuContext } from "./ComposerMenu.tsx";
 import { ConversationContext } from "./ConversationContext.tsx";
 import { Icon } from "./icons.tsx";
 import { JobsDrawer } from "./JobsDrawer.tsx";
@@ -28,8 +28,6 @@ export interface ChatContext {
  control: ControlView | undefined; answering: Answering;
  /** False for a historical transcript file: only the current chat opens its inspector by default. */
  current: boolean;
- /** Full match S11: the composer's `#` picker; absent or null hides it. */
- threads?: ThreadPicker | null;
 }
 
 type JobTab = Parameters<typeof JobDetail>[0]["initial"];
@@ -136,7 +134,7 @@ export function useWorkspaceSurfaces(active: boolean, selection: ProjectSelectio
   </>,
   conversations: <button type="button" class="session-bar-icon workspace-sessions-open" aria-haspopup="dialog" aria-expanded={sessions} aria-label="Conversations"
    onClick={e => { from(e.currentTarget); setSessions(true); }}><Icon name="sessions"/></button>,
-  composer: {onJobs: openDrawer, selection, threads: chat.threads},
+  composer: {onJobs: openDrawer, selection},
   openJob, flight,
  };
 }

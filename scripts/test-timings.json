@@ -231,7 +231,6 @@
 	"tests/e2e/viewer-parent-restart.test.ts": 23831,
 	"tests/e2e/viewer-reports-card-titles.test.ts": 1827,
 	"tests/e2e/viewer-restart-s27.test.ts": 8402,
-	"tests/e2e/viewer-s11-thread-ui.test.ts": 4569,
 	"tests/e2e/viewer-serving.test.ts": 49291,
 	"tests/e2e/viewer-sessions-p18.test.ts": 2736,
 	"tests/e2e/viewer-settings.test.ts": 96461,

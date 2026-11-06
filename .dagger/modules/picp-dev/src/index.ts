@@ -105,10 +105,10 @@ export class PicpDev {
     ])
   }
 
-  /** One CI test shard (1..10) as `node`, with the pinned treehouse on PATH. Not a check: run one at a time. */
+  /** One CI test shard (1..15) as `node`, with the pinned treehouse on PATH. Not a check: run one at a time. */
   @func()
   async testShard(shard: number): Promise<void> {
-    if (!Number.isInteger(shard) || shard < 1 || shard > 10) throw new Error(`shard must be 1..10, got ${shard}`)
+    if (!Number.isInteger(shard) || shard < 1 || shard > 15) throw new Error(`shard must be 1..15, got ${shard}`)
     // Treehouse goes in before the source so a source edit never re-downloads it.
     const ctr = this.withSource(await this.withTreehouse(this.base()))
     await ctr

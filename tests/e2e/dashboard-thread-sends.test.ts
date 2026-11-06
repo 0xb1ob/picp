@@ -125,17 +125,17 @@ test("thread-sends: queued A/B/none keep their own thread through edit and retry
 	await op.child.prompt("typed at the terminal");
 	await op.settled(7);
 
-	// Send again on a failed bubble (kept in browser storage) re-posts its original body, thread included.
+	// Send again on a failed bubble (kept in browser storage) re-posts its text but drops the retired thread (cp-2tf2).
 	const failed = { key: ID(14), id: ID(14), at: new Date().toISOString(), state: "failed", reason: "socket refused", ask_id: null, body: { kind: "message", text: "retry me", thread_id: B } };
 	const tab = await openTab(t, d.port, OPERATOR, new Map([["cp-operator-pending-sends", JSON.stringify({ items: [failed], dismissed: [] })]]));
 	tab.click(await tab.find(".session-pending-again", (b) => !b.hasAttribute("disabled")));
 	const again = JSON.parse((await until(() => tab.requests.filter((r) => r.path === "/api/operator/message"), (rows) => rows.length >= 1, "the retry POST"))[0]!.body!) as Json;
-	assert.deepEqual([again.text, again.thread_id], ["retry me", B], "the retry keeps the original send's thread");
+	assert.deepEqual([again.text, "thread_id" in again], ["retry me", false], "the retry carries no stored thread");
 	await delivered(d, String(again.client_id));
 	await op.settled(8);
 
 	const bound = binds(d);
-	assert.deepEqual(bound.map((l) => l.thread_id), [A, A, B, B], "exactly one bind line per delivered threaded send; none for null, forged or CLI");
+	assert.deepEqual(bound.map((l) => l.thread_id), [A, A, B], "exactly one bind line per delivered threaded send; none for null, forged, CLI or retry");
 	const session = JSON.parse(readFileSync(await op.sessionFile(), "utf8").split("\n")[0]!).id as string;
 	const entries = new Map(readFileSync(await op.sessionFile(), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as Json).map((e) => [e.id, e]));
 	for (const [i, line] of bound.entries()) {
@@ -154,7 +154,7 @@ test("thread-sends: queued A/B/none keep their own thread through edit and retry
 	assert.deepEqual(turnOf(shown, "queued none"), [["via", "", null], ["say", "", null]]);
 	assert.deepEqual(turnOf(shown, "forged").map(([, , thread]) => thread), [null, null], "a typed marker of a sent id binds nothing");
 	assert.deepEqual(turnOf(shown, "typed at the terminal"), [["say", "", null], ["say", "", null]], "CLI input stays untagged");
-	assert.deepEqual(turnOf(shown, "retry me"), [["via", "", B], ["say", "", B]]);
+	assert.deepEqual(turnOf(shown, "retry me"), [["via", "", null], ["say", "", null]]);
 	const history = await transcript(d, "2026-11-01T00-00-00-000Z_old.jsonl");
 	assert.deepEqual(history.filter((e) => e.kind !== "ask").map((e) => [e.text, e.thread_id ?? null]), [["old history", null], ["old reply", null]], "unbound history stays visible, untagged");
 });

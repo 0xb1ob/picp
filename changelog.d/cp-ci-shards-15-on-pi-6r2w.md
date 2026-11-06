@@ -1,0 +1,1 @@
+- CI runs the test suite in 15 shards instead of 10 (`SHARDS` in `scripts/test-shards.ts`, the `ci.yml` matrix and the `picp-dev` Dagger `testShard` range); `scripts/test-timings.json` predicts the longest shard drops from 1,148.8 s to 765.9 s. Per-shard checks `test-shard (11..15)` are new; required check `test` is unchanged. Migration: none.

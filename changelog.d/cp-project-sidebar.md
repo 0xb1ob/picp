@@ -1,0 +1,1 @@
+- Dashboard chat: the sidebar's thread rail is now the project filter ("All projects", then one row per registered project) and the header project dropdown is gone; the thread tabs, `#` picker, `/thread`, New thread and per-thread drafts are removed, and sends no longer carry `thread_id` (cp-2tf2).
