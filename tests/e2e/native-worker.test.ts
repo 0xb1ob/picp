@@ -12,14 +12,16 @@ import { isDeepStrictEqual } from "node:util";
 import { DEFAULT_BUDGET_CONFIG, EMPTY_USAGE, LAYOUT, paths } from "../../src/contracts.ts";
 import { whichAll } from "../../src/doctor.ts";
 import { setTimeout as sleep } from "node:timers/promises";
+import { NATIVE_SESSION_FILE, readNativeSession } from "../../src/drivers/claude-followup.ts";
 import { REPORT_TOOL } from "../../src/drivers/claude-spike.ts";
+import { nativeAvailabilityFile, readNativeAvailability } from "../../src/native-availability.ts";
 import { NATIVE_RESULT_GRACE_MS } from "../../src/drivers/claude-usage.ts";
 import { checkBudget } from "../../src/failures.ts";
 import type { JobTranscriptResponse } from "../../src/viewer/api-types.ts";
 import { jobsView } from "../../src/viewer/jobs-view.ts";
 import { startViewer } from "../harness/dashboard.ts";
 import { dispatchS29 } from "../harness/dispatch-s29.ts";
-import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_NATIVE_MODEL, routeNativeModel, startClaudeMockProvider, toolResults } from "../harness/claude-mock-provider.ts";
+import { type ClaudeStep, FAKE_CLAUDE_AUTH_TOKEN, FAKE_NATIVE_MODEL, routeNativeModel, startClaudeMockProvider, subscriberEnv, toolResults } from "../harness/claude-mock-provider.ts";
 import { LIVE_TESTS_ENABLED, readFleet, readRunEvents, readRunStatus, treehouseAvailable, waitFor } from "../harness/index.ts";
 
 const missing = [whichAll("claude", process.env)[0] === undefined && "claude", !treehouseAvailable() && "treehouse"].filter(Boolean);
@@ -32,22 +34,24 @@ const report = (jobId: string, home: string) => ({
 	plan_summary: { goal: "Name the package.", approach: ["Read README.md."], acceptance: ["The name is reported."], risk: "None.", touched: ["README.md"] },
 });
 
-/** A fake HOME whose Claude settings file points the native worker at the fake model; the switch file is the test's. */
-async function nativeHome(t: TestContext, script: readonly ClaudeStep[], usage = true) {
+/** A fake HOME whose Claude settings file points the native worker at the fake model; the switch file is the test's.
+ * `settings` adds keys to that file; `subscriber` uses OAuth, the only path where the CLI reads rate-limit headers. */
+async function nativeHome(t: TestContext, script: readonly ClaudeStep[], usage = true, settings: Record<string, unknown> = {}, subscriber = false) {
 	const big = Array.from({ length: 1800 }, (_, i) => `line ${String(i).padStart(4, "0")} of the over-cap file, padded past the cap\n`).join("");
 	const b = await dispatchS29(t, { files: { ".claude/settings.json": JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "touch /tmp/picp-n3b-hook-ran" }] }] } }), ".claude/commands/extra.md": "extra\n", "big.txt": big } });
 	const claude = await startClaudeMockProvider(script, { usage });
 	routeNativeModel(b.home);
 	const fakeHome = mkdtempSync(join(tmpdir(), "cp-n3b-home-"));
 	t.after(async () => { await claude.close(); rmSync(fakeHome, { recursive: true, force: true }); });
-	const settings = join(fakeHome, ".claude", "settings.json");
+	const settingsFile = join(fakeHome, ".claude", "settings.json");
 	mkdirSync(join(fakeHome, ".claude"), { recursive: true, mode: 0o700 });
-	writeFileSync(settings, JSON.stringify({ env: { ANTHROPIC_BASE_URL: claude.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN } }));
+	const env = subscriber ? subscriberEnv(claude.url) : { ANTHROPIC_BASE_URL: claude.url, ANTHROPIC_AUTH_TOKEN: FAKE_CLAUDE_AUTH_TOKEN };
+	writeFileSync(settingsFile, JSON.stringify({ env, ...settings }));
 	const toggle = (on: boolean) => writeFileSync(join(b.home, LAYOUT.data, "native.json"), JSON.stringify({ claude_research: on }));
 	const job = (kind: "research" | "ship" = "research") => b.ledger.create({ title: `native ${kind} ${Math.random()}`, project: "demo", delivery: "local", kind });
 	const envelope = (id: string) => join(b.home, paths.envelopeFile(id));
 	const waitFile = (file: string) => `for i in $(seq 300); do [ -f "${file}" ] && break; sleep 0.2; done; sleep 2`;
-	return { b, claude, settings, toggle, job, envelope, waitFile, env: { HOME: fakeHome } };
+	return { b, claude, settings: settingsFile, toggle, job, envelope, waitFile, env: { HOME: fakeHome } };
 }
 
 // P3e (follow-ups refused) moved to native-worker-followups.test.ts, where N3c resumes them instead.
@@ -178,9 +182,17 @@ test("N4b: a native research dispatch sends the planner profile and the native a
 	assert.equal(h.claude.overrun(), 0);
 });
 
-test("P3b/f/g: switch off and a drain freeze refuse before any spawn; a native run without a report fails on its observed exit", { skip, timeout: 300_000 }, async (t) => {
-	const h = await nativeHome(t, [{ kind: "text", text: "No report from me." }]);
-	const [off, frozen, crash] = await Promise.all([h.job(), h.job(), h.job()]);
+// N4e: an unreported clean turn used to exit non-zero and fail the job (old P3g); it now settles idle for the nudge.
+test("P3b/f/g: switch off and a drain freeze refuse before any spawn; an unreported turn settles idle and the nudge lands it", { skip, timeout: 300_000 }, async (t) => {
+	const ids: string[] = [];
+	const h = await nativeHome(t, [
+		{ kind: "text", text: "No report from me." },
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
+		{ kind: "text", text: "Reported after the nudge." },
+	]);
+	const [off, frozen, settle] = await Promise.all([h.job(), h.job(), h.job()]);
+	ids.push(settle.id);
 	const dispatch = (id: string) => ({ kind: "tool_calls" as const, calls: [{ name: "cp_dispatch", args: { job_id: id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] });
 	const drain = join(h.b.home, LAYOUT.state, "drain.json");
 	const now = new Date().toISOString();
@@ -190,24 +202,92 @@ test("P3b/f/g: switch off and a drain freeze refuse before any spawn; a native r
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `echo '{"claude_research":true}' > "${join(h.b.home, LAYOUT.data, "native.json")}" && echo '${freeze}' > "${drain}"` } }] },
 		dispatch(frozen.id),
 		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: `rm "${drain}"` } }] },
-		dispatch(crash.id),
+		dispatch(settle.id),
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(settle.id)) } }] },
 	], { ...h.env, CP_NATIVE_MAX_TURNS: "forty" })) as Tool[];
 	const [first, second, third] = ends.filter((end) => end.toolName === "cp_dispatch");
 	// P3b: off by default; refused with no child, no request to the model.
 	assert.match(text(first), /workers\.native_claude_research is off/);
 	assert.match(text(second), /draining/);
 	for (const id of [off.id, frozen.id]) assert.equal(existsSync(join(h.b.home, paths.runDir(id))), false, `${id} has a run`);
-	// P3g: the run ended without a report; the job fails on the worker's observed exit, never a guessed completion.
+	// P3g: the unreported turn settled idle (no exit, no failure); the settle watcher's nudge resumed the same session.
 	assert.notEqual(third?.isError, true, text(third));
-	const record = await waitFor(() => readFleet(h.b.home).jobs.find((job) => job.job_id === crash.id), (job) => job?.phase === "failed", { timeoutMs: 120_000, what: "failed native job" });
-	assert.equal(record?.failure?.class, "crash");
-	const status = readRunStatus(h.b.home, crash.id);
-	assert.deepEqual([status.phase, status.exit_code], ["exited", 1], "the observed exit");
-	const run = readRunEvents(h.b.home, crash.id).find((event) => event.type === "native_run")?.payload as { report?: boolean; max_turns?: number; stop?: string } | undefined;
-	assert.equal(run?.report, false);
-	assert.deepEqual([run?.max_turns, run?.stop], [500, undefined], "an invalid CP_NATIVE_MAX_TURNS keeps the default and no stop");
-	assert.equal(existsSync(h.envelope(crash.id)), false);
-	assert.equal(h.claude.requests.filter((request) => request.path.startsWith("/v1/messages") && Array.isArray(request.body.tools)).length, 1, "only the crash run reached the model");
+	const events = readRunEvents(h.b.home, settle.id);
+	const types = events.map((event) => event.type);
+	const runs = events.filter((event) => event.type === "native_run").map((event) => event.payload as { report?: boolean; resumed?: boolean; max_turns?: number; stop?: string });
+	assert.deepEqual(runs.map((run) => [run.report, run.resumed]), [[false, false], [true, true]], JSON.stringify(runs));
+	assert.deepEqual([runs[0]?.max_turns, runs[0]?.stop], [500, undefined], "an invalid CP_NATIVE_MAX_TURNS keeps the default and no stop");
+	assert.ok(types.indexOf("agent_settled") >= 0 && types.indexOf("agent_settled") < types.indexOf("report_nudged"), types.join(","));
+	assert.equal((events.find((event) => event.type === "report_nudged")?.payload as { receipt?: string } | undefined)?.receipt, "delivered");
+	assert.equal(types.includes("process_exit") || types.includes("failure"), false, types.join(","));
+	const record = readFleet(h.b.home).jobs.find((job) => job.job_id === settle.id);
+	assert.equal(record?.failure, undefined, JSON.stringify(record?.failure));
+	assert.notEqual(record?.phase, "failed");
+	assert.equal(types.filter((type) => type === "envelope_received").length, 1, "the nudged turn landed one report");
+	const calls = h.claude.requests.filter((request) => request.path.startsWith("/v1/messages") && Array.isArray(request.body.tools));
+	assert.match(JSON.stringify(calls.at(-1)?.body.messages ?? ""), /No report from me\.[\s\S]*You have stopped without calling report_result/, "the nudge resumed the same session");
+	assert.equal(h.claude.overrun(), 0);
+});
+
+test("N4e lockdown: a refused lockdown is a named failure, never a nudge", { skip, timeout: 300_000 }, async (t) => {
+	const h = await nativeHome(t, [{ kind: "text", text: "Never reached." }], true, { outputStyle: "Explanatory" });
+	h.toggle(true);
+	const job = await h.job();
+	const ends = (await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] },
+	], h.env)) as Tool[];
+	assert.notEqual(ends[0]?.isError, true, text(ends[0]));
+	const record = await waitFor(() => readFleet(h.b.home).jobs.find((entry) => entry.job_id === job.id), (entry) => entry?.phase === "failed", { timeoutMs: 120_000, what: "failed native job" });
+	assert.equal(record?.failure?.class, "spawn_failed");
+	assert.match(record?.failure?.message ?? "", /^native run stopped: the Claude CLI lockdown refused the loaded surface before any tool ran; not nudged\./);
+	const events = readRunEvents(h.b.home, job.id);
+	const run = events.find((event) => event.type === "native_run")?.payload as { lockdown?: string; stop?: string } | undefined;
+	assert.deepEqual([run?.lockdown, run?.stop], ["refused", "lockdown"], JSON.stringify(run));
+	assert.equal(events.some((event) => event.type === "agent_settled" || event.type === "report_nudged"), false, "a lockdown stop was nudged");
+});
+
+// N4e: a rejected window mid-run was an unnamed crash; it is now provider_limit, and a revive after the reset resumes.
+test("N4e window: a rejected window ends the run as provider_limit by name, and a revive after the reset resumes the session", { skip, timeout: 420_000 }, async (t) => {
+	const ids: string[] = [];
+	const reset = Math.floor(Date.now() / 1000) + 3600;
+	const h = await nativeHome(t, [
+		{ kind: "text", text: "Spent.", limit: { status: "rejected", claim: "five_hour", resetsAt: reset } },
+		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }] },
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
+		{ kind: "text", text: "Reported after the reset." },
+	], true, {}, true);
+	h.toggle(true);
+	const job = await h.job();
+	ids.push(job.id);
+	const dispatched = (await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_dispatch", args: { job_id: job.id, task: "Report the repo's package name.", model: FAKE_NATIVE_MODEL, queue: false, when_ready: false, driver: "claude" } }] },
+	], h.env)) as Tool[];
+	assert.notEqual(dispatched[0]?.isError, true, text(dispatched[0]));
+	const record = await waitFor(() => readFleet(h.b.home).jobs.find((entry) => entry.job_id === job.id), (entry) => entry?.phase === "failed", { timeoutMs: 120_000, what: "failed native job" });
+	const at = new Date(reset * 1000).toISOString();
+	assert.equal(record?.failure?.class, "provider_limit");
+	assert.equal(record?.failure?.message, `native run stopped: the Claude subscription window five_hour is spent (resets ${at}); the worktree and session are kept, and cp_revive after the reset resumes the same session`);
+	const before = readRunEvents(h.b.home, job.id);
+	const run = before.find((event) => event.type === "native_run")?.payload as Record<string, unknown> | undefined;
+	assert.deepEqual([run?.stop, run?.window, run?.resets_at, run?.report], ["window", "five_hour", reset * 1000, false], JSON.stringify(run));
+	assert.equal(before.some((event) => event.type === "agent_settled" || event.type === "report_nudged"), false, "a window stop was nudged");
+	// The reset passes (the snapshot says so); a plain revive then resumes the same session through the existing path.
+	const sessionFile = join(h.b.home, paths.runDir(job.id), NATIVE_SESSION_FILE);
+	const session = readNativeSession(sessionFile).session_id;
+	const snapshot = readNativeAvailability(h.b.home)!;
+	snapshot.windows.five_hour = { ...snapshot.windows.five_hour!, resets_at: Date.now() - 1000 };
+	writeFileSync(nativeAvailabilityFile(h.b.home), JSON.stringify(snapshot));
+	await h.b.closeParents();
+	const revived = (await h.b.run([
+		{ kind: "tool_calls", calls: [{ name: "cp_revive", args: { job_id: job.id, confirm: true } }] },
+		{ kind: "tool_calls", calls: [{ name: "bash", args: { command: h.waitFile(h.envelope(job.id)) } }] },
+	], h.env)) as Tool[];
+	assert.match(text(revived.find((end) => end.toolName === "cp_revive")), /resumed its native Claude session/);
+	const runs = readRunEvents(h.b.home, job.id).filter((event) => event.type === "native_run").map((event) => event.payload as { resumed?: boolean; report?: boolean });
+	assert.deepEqual(runs.map((entry) => [entry.resumed, entry.report]), [[false, false], [true, true]], JSON.stringify(runs));
+	assert.equal(readNativeSession(sessionFile).session_id, session, "the revive started a new session");
+	assert.equal(readRunEvents(h.b.home, job.id).filter((event) => event.type === "envelope_received").length, 1);
+	assert.equal(h.claude.overrun(), 0);
 });
 
 // cp-s26-flake-research-dudi exited at the SDK turn cap and was recorded as a crash; the stop is now named turn_limit.
