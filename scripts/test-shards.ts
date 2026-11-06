@@ -9,7 +9,7 @@ import { spec } from "node:test/reporters";
 import { fileURLToPath } from "node:url";
 import TestFileGuard from "./test-file-guard.ts";
 
-export const SHARDS = 10;
+export const SHARDS = 15;
 const TABLE = fileURLToPath(new URL("./test-timings.json", import.meta.url));
 const CI_YML = fileURLToPath(new URL("../.github/workflows/ci.yml", import.meta.url));
 const GLOB = "tests/**/*.test.ts";
