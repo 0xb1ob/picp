@@ -307,11 +307,11 @@ request refuses as `refused: <job> cannot run on the native claude driver: <reas
 |---|---|
 | switch file unreadable or off | the setting and where to turn it on |
 | owned by a pipeline (`state/pipelines/<research id>`) | pipeline research stays on pi (D2) |
-| not research (role `planner`, delivery `local` or `answer`) | the job's kind/role/delivery; ship, review, plan, parent and operator roles never run native |
-| another native job is live (fleet record with `worker.driver`, no observed exit) | concurrency 1 and the live job |
+| not research (role `planner`, delivery `local` or `answer`) | the job's kind/role/delivery; ship implementers run native since [N4f](#native-ship-jobs-n4f); review, plan, parent and operator roles never do |
+| the home's native slots are full (fleet records with `worker.driver`, no observed exit, the job's own excluded) | `max_concurrent` and the live jobs ([N4i](#native-concurrency-and-the-flip-n4i)) |
 | `claude` missing or below the pinned floor `CLAUDE_VERSION_FLOOR` | `claude update` / install remedy |
 
-`WorkerManager.spawn` refuses a second live native worker again (`SpawnSafetyError`) before admission. A `driver: "claude"`
+`WorkerManager.spawn` refuses a native worker past `max_concurrent` again (`SpawnSafetyError`) before admission. A `driver: "claude"`
 dispatch held by the spawn cap (queued) or by open blockers (armed) keeps its driver (`QueuedDispatchRequestSchema.driver`,
 `toDispatchRequest`), so its release re-runs this selection: it runs native or is refused, never on pi.
 
@@ -525,8 +525,9 @@ target's nearest existing parent is inside the worktree (no symlink escapes, a d
 off the secret paths and clear of the home's and every live grant's `exclude_paths`, which the worker process reads,
 never the CLI child. Its Bash (`src/drivers/claude-ship-policy.ts`) runs pi's pattern guards first, then a default-deny
 allow-list: the read-only list, local git verbs, `npm ci|run typecheck|test:one|lint|build|changelog:*`, `node`/`npx
-tsx` on worktree scripts, and `mkdir|mv|cp|rm` and redirects on worktree paths only. Push, fetch, `gh`, `cd`, network
-tools, env dumps and `$` expansion are denied; network actions arrive as picp tools in N4d. The honest limit: `npm run`
+tsx` on worktree scripts, and `mkdir|mv|cp|rm` and redirects on worktree paths only. Push, fetch, `gh`, `cd`, env dumps
+and `$` expansion are denied; there is no network tool beyond `npm ci`/`npx tsx`, which reach the package registry, and
+network actions arrive as picp tools in N4d. The honest limit: `npm run`
 and `node` execute repo code, so this is defence in depth at pi parity, not a sandbox. Selection stays research-only
 until N4f, so no production job reaches this yet.
 
@@ -554,13 +555,15 @@ nothing on its own: an implementer runs native only when its routing row (or the
 the job is `kind:ship` with delivery `pr` or `local`, and `claude_ship` is on. Off, a claude row falls back to pi with
 `driver_reason` `switch: the switch workers.native_claude_ship is off …`; an explicit `driver: "claude"` is refused
 with no lease. The other keys: `claude_research` (unchanged), `claude_review` (the native reviewer, N4h, below) and
-`max_concurrent` (integer 1–4, default 1, validated and stored; concurrency stays 1
-until N4i). Any other key, a non-boolean switch or an out-of-range count is refused by name, by every reader.
+`max_concurrent` (integer 1–4, default 1; applied since
+[N4i](#native-concurrency-and-the-flip-n4i)). Any other key, a non-boolean switch or an out-of-range count is refused by name, by every reader.
 
 **What runs.** The native implementer gets the profile body plus a ship addendum (forge tools, commit in Bash, push only
-with `git_push`, `pr_create` for the draft, then `report_result` with `head_sha`). Dispatch passes the job's base
-branch (the PR base for a bound PR, else the preflight base) as `CP_BASE_BRANCH`, the only new child env; a revive
-passes the bound PR's base or the project's `base_branch`. `pr_create` targets it and `git_push` refuses it.
+with `git_push`, `pr_create` for the draft, then `report_result` with `head_sha`); a delivery `local` job's addendum
+(N4i) says commit only, never `git_push` or `pr_create`, because picp integrates the branch locally. Dispatch passes the
+job's base branch (the PR base for a bound PR, else the preflight base) as `CP_BASE_BRANCH`, the only new child env,
+and the worker records it in its session record at its first turn. A revive passes the bound PR's base, then that
+recorded dispatch base, then the project's `base_branch`. `pr_create` targets it and `git_push` refuses it.
 
 **Follow-ups.** A CI-repair `cp_send` to the job's own native implementer (same kind) is admitted and resumes the same
 session. A kind-changing promotion of a native research worker (a new brief via `task`/`task_file`) is refused by name:
@@ -575,14 +578,37 @@ no `cwd` and resumes as before.
 no pi fallback mid-job), and their resumes and revives are refused until the switch is back on or they are torn down.
 Rows stay pi until the routing flip: this slice leaves the home's `data/native.json` and `data/routing.json` alone.
 
+## Native concurrency and the flip (N4i)
+
+**Concurrency.** `data/native.json` `max_concurrent` (1–4, default 1) is the home's native slot count. Three places
+apply it: selection (`nativeSelectionRefusal`, live fleet records), dispatch admission (`src/dispatch-driver.ts`, a
+per-home set of jobs being admitted, checked with the live records after the last await) and `WorkerManager.spawn`. A
+live native process counts whether it is working or held, because a held PR keeps its idle worker for repairs. A job
+never counts against itself, so a held job's own repair resumes its own slot. When the slots are full, a new job that
+only prefers claude on its routing row falls back to pi, with a `driver_reason` starting `occupied:` that names the
+live jobs. An explicit or locked native job is refused by name and never moved to pi (D1).
+
+**The flip** (operator, by hand; picp never edits these files):
+
+1. Back up both files with dated copies, e.g. `cp data/routing.json data/routing.json.2026-11-06.bak` and
+   `cp data/native.json data/native.json.2026-11-06.bak`.
+2. In `data/routing.json`, set `driver: "claude"` on the `risky-ship`, `big-ship`, `small-ship` and `reviews` rows
+   (each keeps its explicit `anthropic/claude-…` model).
+3. In `data/native.json`, set `claude_ship` and `claude_review` to `true`. Leave `max_concurrent` at 1 at first.
+4. Raise `max_concurrent` only after 5 native ship jobs show no `allowed_warning` in the availability snapshot (S2).
+
+**Rollback** means restoring both `.bak` files. New dispatches follow the restored files at once. Jobs that already
+started keep their driver.
+
 ## Native reviewer (N4h)
 
 `cp_review`, `cp_gate` and the quality review resolve their reviewer through the driver resolver. A reviewer runs native
-only when its rubric row (the `reviews` row) says `driver: "claude"`, `claude_review` is on, and no other native worker
-holds the slot (dispatched jobs and live reviewers alike); otherwise it runs on pi exactly as before, with the reason in
-the routing line. The subject job's own driver never binds its reviewer, and a pipeline-owned subject may be reviewed
-natively (a reviewer takes no sends). The native reviewer gets Read, Grep and Glob confined to its scratch packet plus
-`report_verdict`, an in-process MCP tool on pi's own handler: the same clamp, `verdictChecks`, repair cap and write-once
-`verdict.json` (and `verdict-raw.json`), a wrong job or a different second call refused by name. No Bash, Edit, Write
-or forge tools. A run that ends without a verdict is pi's no-verdict case (settled or exited), inside the same deadline;
-`native_run` records the lockdown and measured usage in the review's run dir. Rollback: set `claude_review` false.
+only when its rubric row (the `reviews` row) says `driver: "claude"`, `claude_review` is on, and a native slot is free
+(`max_concurrent`: dispatched jobs, live reviewers and the subject's own native worker all count); otherwise it runs on
+pi exactly as before, with the reason in the routing line. The subject job's own driver never binds its reviewer, and a
+pipeline-owned subject may be reviewed natively (a reviewer takes no sends). The native reviewer gets Read, Grep and
+Glob confined to its scratch packet plus `report_verdict`, an in-process MCP tool on pi's own handler: the same clamp,
+`verdictChecks`, repair cap and write-once `verdict.json` (and `verdict-raw.json`), a wrong job or a different second
+call refused by name. No Bash, Edit, Write or forge tools. A run that ends without a verdict is pi's no-verdict case
+(settled or exited), inside the same deadline; `native_run` records the lockdown and measured usage in the review's run
+dir. Rollback: set `claude_review` false.

@@ -13,20 +13,21 @@ export interface ReviewerDriverContext {
 }
 
 /**
- * The reviewer is its own worker, so the subject job's D1 driver lock never binds it: the subject leaves `jobs`, and
- * every native worker this parent runs (the subject's own included) holds the slot, so a busy slot routes to pi.
+ * The reviewer is its own worker under its own slot id, so the subject's D1 driver lock never binds it, while every
+ * native worker this parent runs (the subject's own included) holds a slot: a full home routes the reviewer to pi.
  */
 export function resolveReviewerRoute(
 	route: RouteRequest, config: RoutingConfig, probe: ModelProbe, capacity: Parameters<typeof resolveWithCapacity>[3], ctx: ReviewerDriverContext,
 ): Promise<RoutingDecision> {
 	return resolveDriverRoute(route, config, probe, capacity, {
 		home: ctx.home,
-		jobId: ctx.jobId,
+		jobId: `${ctx.jobId}/review`,
 		kind: "research",
 		delivery: (ctx.record?.delivery ?? "pipeline") as Delivery,
 		role: "gate-reviewer",
-		jobs: ctx.jobs.filter((job) => job.job_id !== ctx.jobId),
-		// shortcut: no reservation between route and spawn, so two reviews racing in one parent could both go native.
+		jobs: ctx.jobs,
+		// shortcut: no reservation between route and spawn; a racing second native review fails at WorkerManager.spawn's
+		// slot check instead of moving to pi. Reserve via holdNativeSlot if reviews start racing.
 		nativeLive: liveNativeWorkers(ctx.manager, ""),
 	});
 }

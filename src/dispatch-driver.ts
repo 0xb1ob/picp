@@ -3,7 +3,10 @@
  * strict, and a started job keeps its driver (D1). Only local/answer research may run native (D2).
  */
 import { type Delivery, type FleetRecord, isScriptFleetRecord, type JobKind, type Role, type RoutingConfig, type RoutingDecision } from "./contracts.ts";
-import { assertNativeEffort, nativeBaseEnv, nativeModelId, NativeDriverError, nativeSelectionRefusal, type NativeRefusal, nativeThinkingEnv } from "./drivers/claude.ts";
+import {
+	assertNativeEffort, liveNativeJobs, nativeBaseEnv, nativeMaxConcurrent, nativeModelId, NativeDriverError, nativeSelectionRefusal, type NativeRefusal,
+	nativeSlotRefusal, nativeThinkingEnv,
+} from "./drivers/claude.ts";
 import { deniedFor, isAllowed, type ModelProbe, pickModel, resolveWithCapacity, type RouteRequest } from "./routing.ts";
 import { nativeAvailability } from "./native-availability.ts";
 export { observeNative } from "./native-availability-observer.ts";
@@ -27,15 +30,17 @@ export interface DriverContext {
 
 type Capacity = Parameters<typeof resolveWithCapacity>[3];
 
-/** Per home, the job holding the native slot between route resolution and its fleet record (or its failure). */
-const slots = new Map<string, string>();
+/** Per home, the jobs holding a native slot between route resolution and their fleet record (or their failure). */
+const slots = new Map<string, Set<string>>();
 
 /** Runs one admission and releases the native slot it reserved when it settles (the fleet record holds it by then). */
 export async function holdNativeSlot<T>(home: string, jobId: string, run: () => Promise<T>): Promise<T> {
 	try {
 		return await run();
 	} finally {
-		if (slots.get(home) === jobId) slots.delete(home);
+		const held = slots.get(home);
+		held?.delete(jobId);
+		if (held?.size === 0) slots.delete(home);
 	}
 }
 
@@ -76,7 +81,7 @@ export async function resolveDriverRoute(
 		const pi = await resolveWithCapacity(route, config, probe, capacity);
 		return { ...pi, requested_driver: "claude", driver: "pi", driver_reason: bounded(`${refusal.category}: ${refusal.why}`) };
 	}
-	if (ctx.reserve) slots.set(ctx.home, ctx.jobId);
+	if (ctx.reserve) slots.set(ctx.home, (slots.get(ctx.home) ?? new Set<string>()).add(ctx.jobId));
 	return { ...native, requested_driver: "claude", driver: "claude", driver_reason: bounded(`${why}; effort ${picked.thinking ?? "CLI default"}${note ? `; ${note}` : ""}`) };
 }
 
@@ -87,12 +92,10 @@ function allowRefusal(config: RoutingConfig, role: Role, model: string): { categ
 	return pattern === undefined ? undefined : { category: "denied", why: `deny_by_role.${role} matches ${pattern} for ${model}` };
 }
 
-/** Checked synchronously after the last await, so two admissions in one parent never both pass. */
+/** Checked synchronously after the last await, so admissions in one parent never overfill the home's N slots. */
 function slotRefusal(ctx: DriverContext): { category: NativeRefusal; why: string } | undefined {
-	const holder = slots.get(ctx.home);
-	if (holder !== undefined && holder !== ctx.jobId) return { category: "occupied", why: `native concurrency is 1 and ${holder} is being admitted` };
-	const live = ctx.nativeLive?.[0];
-	return live === undefined ? undefined : { category: "occupied", why: `native concurrency is 1 and ${live} is live` };
+	const holders = [...liveNativeJobs(ctx.jobs), ...(slots.get(ctx.home) ?? []), ...(ctx.nativeLive ?? [])];
+	return nativeSlotRefusal(holders, ctx.jobId, nativeMaxConcurrent(ctx.home), "live or being admitted");
 }
 
 /** Keys of this parent's live native workers other than `except`'s: reviewers hold the slot without a fleet record. */

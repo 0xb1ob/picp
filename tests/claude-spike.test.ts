@@ -11,13 +11,13 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { HookCallback, SDKResultMessage, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
 import workerReporter, { VERDICT_FILE, VERDICT_RAW_FILE } from "../extensions/worker-reporter/index.ts";
-import { type Delivery, type JobKind, paths, type Role, type RoutingConfig } from "../src/contracts.ts";
+import { type Delivery, type FleetRecord, type JobKind, paths, type Role, type RoutingConfig } from "../src/contracts.ts";
 import { verdictReport } from "../src/drivers/claude-verdict.ts";
 import { resolveReviewerRoute } from "../src/reviewer-route.ts";
 import { ALWAYS_AVAILABLE } from "../src/routing.ts";
 import { nativeSpawn } from "../src/dispatch-driver.ts";
-import { nativeBaseEnv, nativeSelectionRefusal } from "../src/drivers/claude.ts";
-import { nativeRevivePrompt, nativeSessionMoved } from "../src/drivers/claude-followup.ts";
+import { assertNativeSelection, nativeAddendum, nativeBaseEnv, NativeDriverError, nativeMaxConcurrent, nativeSelectionRefusal, nativeSlotRefusal } from "../src/drivers/claude.ts";
+import { nativeRevivePrompt, nativeReviveBase, nativeSessionMoved, writeNativeSession } from "../src/drivers/claude-followup.ts";
 import { readOnlyBashRefusal, secretPaths } from "../src/drivers/claude-bash-policy.ts";
 import { CLI_BUILTIN_AGENTS, type InitSurface, lockdownVerdict } from "../src/drivers/claude-lockdown.ts";
 import {
@@ -328,6 +328,58 @@ test("N4f eligibility: research, ship and review map to their own switch; a disa
 	assert.equal((await refusal("research", "gate-reviewer", "pipeline"))?.category, "cli_missing");
 });
 
+test("N4i concurrency: max_concurrent N admits N native jobs, refuses the next by name, and never counts a job's own slot", async (t) => {
+	const home = mkdtempSync(join(tmpdir(), "cp-native-slots-"));
+	t.after(() => rmSync(home, { recursive: true, force: true }));
+	mkdirSync(dirname(nativeConfigFile(home)), { recursive: true });
+	const live = (id: string, phase = "waiting") => ({ job_id: id, phase, worker: { driver: "claude" } }) as unknown as FleetRecord;
+	const select = (jobId: string, jobs: FleetRecord[]) =>
+		({ home, jobId, driver: "claude" as const, kind: "ship" as const, role: "implementer" as const, delivery: "pr" as const, jobs, env: { PATH: "" } });
+	// The default stays 1: one live native job fills the home.
+	writeFileSync(nativeConfigFile(home), JSON.stringify({ claude_ship: true }));
+	assert.equal(nativeMaxConcurrent(home), 1);
+	assert.match((await nativeSelectionRefusal(select("cp-b", [live("cp-a")])))?.why ?? "", /^native concurrency is 1 and cp-a is live/);
+	writeFileSync(nativeConfigFile(home), JSON.stringify({ claude_ship: true, max_concurrent: 2 }));
+	assert.equal(nativeMaxConcurrent(home), 2);
+	// N=2: the second passes every slot gate (it ends at the empty PATH), the third is occupied naming both holders.
+	assert.equal((await nativeSelectionRefusal(select("cp-b", [live("cp-a")])))?.category, "cli_missing");
+	const third = await nativeSelectionRefusal(select("cp-c", [live("cp-a"), live("cp-b", "held")]));
+	assert.deepEqual(third, { category: "occupied", why: "native concurrency is 2 and cp-a, cp-b are live; tear one down first" });
+	// A held job's own repair resumes its own slot; an explicit request is refused by name, never moved.
+	assert.equal((await nativeSelectionRefusal(select("cp-b", [live("cp-a"), live("cp-b", "held")])))?.category, "cli_missing");
+	await assert.rejects(assertNativeSelection(select("cp-c", [live("cp-a"), live("cp-b", "held")])),
+		(error: NativeDriverError) => error.category === "occupied" && /^refused: cp-c cannot run on the native claude driver: native concurrency is 2/.test(error.message));
+	// Admission reservations and live records count once each; an unreadable file keeps the safe 1.
+	assert.equal(nativeSlotRefusal(["cp-a", "cp-a"], "cp-c", 2), undefined);
+	assert.equal(nativeSlotRefusal(["cp-a", "cp-b"], "cp-c", 2, "live or being admitted")?.why, "native concurrency is 2 and cp-a, cp-b are live or being admitted; tear one down first");
+	writeFileSync(nativeConfigFile(home), "{");
+	assert.equal(nativeMaxConcurrent(home), 1);
+});
+
+test("N4i ship addendum by delivery: pr pushes and opens the PR, local only commits, research writes its artifact", () => {
+	const rows = [["ship", "pr", true], ["ship", "local", false]] as const;
+	for (const [kind, delivery, forge] of rows) {
+		const text = nativeAddendum(kind, delivery);
+		assert.match(text, /report_result once with\s+head_sha = git rev-parse HEAD/, delivery);
+		assert.equal(/push only with git_push, open the draft PR with pr_create/.test(text), forge, delivery);
+	}
+	assert.match(nativeAddendum("ship", "local"), /commit with git in Bash and stop there\. Never call\s+git_push or pr_create/);
+	assert.match(nativeAddendum("research", "local"), /Write the research artifact/);
+});
+
+test("N4i revive base: the bound PR base wins, then the recorded dispatch base (non-default), then the project base", (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "cp-native-base-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const file = join(dir, "native-claude");
+	const project = () => "main";
+	writeNativeSession(file, { driver: "claude", scratch_dir: "/tmp/cp-claude-native-abc123", cwd: dir, base: "release/2.x" });
+	assert.equal(nativeReviveBase("hotfix", file, project), "hotfix");
+	assert.equal(nativeReviveBase(undefined, file, project), "release/2.x");
+	writeNativeSession(file, { driver: "claude", scratch_dir: "/tmp/cp-claude-native-abc123", cwd: dir });
+	assert.equal(nativeReviveBase(undefined, file, project), "main", "a pre-N4i record falls back to the project base");
+	assert.equal(nativeReviveBase(undefined, join(dir, "absent"), project), "main");
+});
+
 test("N4f follow-ups: the revive prompt names the job's kind, a moved worktree refuses the session resume, the base rides the env", () => {
 	assert.match(nativeRevivePrompt("research"), /Continue the research/);
 	const ship = nativeRevivePrompt("ship");
@@ -415,5 +467,7 @@ test("N4h reviewer route: off is pi, on is claude, a pi row is pi, a live native
 	assert.equal((await route({ driver: "claude" })).driver, "claude");
 	assert.equal((await route({})).driver, undefined, "a row on pi never asks for claude");
 	const busy = await route({ driver: "claude" }, ["cp-other"]);
-	assert.match(`${busy.driver} ${busy.driver_reason}`, /^pi occupied: native concurrency is 1 and cp-other is live$/);
+	assert.match(`${busy.driver} ${busy.driver_reason}`, /^pi occupied: native concurrency is 1 and cp-other is live or being admitted/);
+	const own = await route({ driver: "claude" }, ["cp-subj"]);
+	assert.match(`${own.driver} ${own.driver_reason}`, /^pi occupied: .* cp-subj is live/, "the subject's own native worker holds a slot");
 });
