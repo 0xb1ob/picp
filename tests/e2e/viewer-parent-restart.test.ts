@@ -5,7 +5,8 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { LAYOUT } from "../../src/contracts.ts";
 import { drainFile, readDrain } from "../../src/drain.ts";
-import { attachParentHost } from "../../src/parent-host.ts";
+import { attachParentHost, type ParentHostClient } from "../../src/parent-host.ts";
+import { PARENT_CONTROL_BUSY } from "../../src/parent-diagnostics.ts";
 import { controlJournalFile, readControlRecord } from "../../src/viewer/control-files.ts";
 import { pushConfigFile, pushDataDir } from "../../src/viewer/push-files.ts";
 import { createViewer, type ViewerOptions } from "../../src/viewer/server.ts";
@@ -16,6 +17,16 @@ import { stopParentHosts } from "../harness/parent-hosts.ts";
 
 const ORIGIN = "https://cp.example.ts.net";
 const put = (file: string, text: string) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, text); };
+
+// A settle starts an automatic control pass the host does not expose; a drain sent inside it is refused before
+// anything starts, so retry only that refusal, bounded.
+const drainWhenSettled = async (host: ParentHostClient) => {
+	const text = await until(async () => {
+		try { return (await host.request("drain", 7) as { text: string }).text; }
+		catch (error) { if ((error as Error).message.includes(PARENT_CONTROL_BUSY)) return null; throw error; }
+	}, (answer) => answer !== null, "the parent control pass to settle", 20_000);
+	assert.match(text!, /^DRAIN: drained: safe to restart/);
+};
 
 // B2-B5 through the real viewer, operator bridge and parent host (mock parent model): undrained is refused 409 with
 // the parent untouched; a drained restart resumes, then cleans (archived file); the new parent consumes the drain; a
@@ -96,7 +107,7 @@ test("B: dashboard parent restart is drain-gated by the host, reports resumed/cl
 		assert.ok(last !== null && last !== before, `${mode} restart outcome within 90 s`);
 		return { id: accepted.body.id as string, last };
 	};
-	const drain = async () => assert.match((await host.request("drain", 7) as { text: string }).text, /^DRAIN: drained: safe to restart/);
+	const drain = () => drainWhenSettled(host);
 
 	await drain();
 	assert.equal((await gate()).safe, true);
@@ -171,7 +182,7 @@ test("B: cp_parent restart, the host's queued re-check, and a held host request 
 	await host.request("start", { home: home.path, mode: "multi", model: parentModel, requestTimeoutMs: 15_000 });
 	await host.request("send", "Say ready.");
 	const parent = async () => (await host.request("status") as { pid?: number; alive: boolean });
-	const drain = async () => assert.match((await host.request("drain", 7) as { text: string }).text, /^DRAIN: drained: safe to restart/);
+	const drain = () => drainWhenSettled(host);
 
 	saveOperatorTarget({ home: home.path, mode: "multi", hostPid: 0, parentPid: 0 });
 	const rpc = startRpc({ cwd: home.path, env: { ...env, CP_PARENT_RESTART_TIMEOUT_MS: "8000" }, args: ["--no-extensions", "-e", CP_BRIDGE_EXTENSION, "--session", join(home.path, "operator.jsonl"), "--model", operatorModel] });

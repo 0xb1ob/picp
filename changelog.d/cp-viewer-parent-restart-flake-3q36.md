@@ -1,0 +1,1 @@
+- Test: the viewer parent-restart e2e retries a drain refused only while the parent's automatic control pass settles, so it no longer flakes in CI.
