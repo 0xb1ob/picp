@@ -10,6 +10,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { pathToFileURL } from "node:url";
 import { LAYOUT, MINIMAL_PLAN_SUMMARY, paths, SCHEMA_VERSION } from "../../src/contracts.ts";
 import { parentSkillPaths } from "../../src/cp-bridge.ts";
 import { EscalationStore } from "../../src/escalation.ts";
@@ -32,6 +33,9 @@ import {
 	waitFor,
 } from "../harness/index.ts";
 import { seedOperatorPick } from "../harness/operator-pick.ts";
+
+/** A one-second scheduler tick: negative checks wait for completed ticks (`ticked`) instead of one 30 s tick. */
+const FAST_TICK = { CP_SCHEDULER_TICK_SECONDS: "1" };
 
 type End = RpcRecord & { toolCallId: string; isError?: boolean; result?: { content?: Array<{ text?: string }> } };
 
@@ -71,6 +75,16 @@ async function schedulesHome(t: TestContext, options: { held?: boolean; cloneUrl
 		home: home.path, stateDir, ledger: scratch.ledger, provider, schedules, idOf, model, clone,
 		runs: () => openScheduleRunStore(home.path),
 		grants: () => new MandateStore(home.path).list(),
+		/** Resolves after `count` scheduler ticks begun after this call checkpointed cron schedule `name` (last_checked_at).
+		 * A tick checkpoints its cron schedules last, after its runner sweep, pending retries and result sync. */
+		async ticked(name: string, count = 3): Promise<void> {
+			let since = Date.now();
+			for (let tick = 1; tick <= count; tick++) {
+				const at = await waitFor(() => schedules().find((entry) => entry.name === name)?.last_checked_at, (value) => value !== undefined && Date.parse(value) > since,
+					{ timeoutMs: 30_000, what: `${name}'s checkpoint by tick ${tick} of ${count}` });
+				since = Date.parse(at as string);
+			}
+		},
 		/** A parent pi on this home: prompts `prompt` (the operator's words), runs `steps`, then `settle` each later turn. */
 		async parent(prompt: string, steps: ScriptStep[], settle: ScriptStep = { kind: "text", text: "P13 parent settled." }): Promise<PiChild> {
 			const child = startPiChild({ cwd: home.path, model: model("parent", [...steps, settle]),
@@ -97,6 +111,9 @@ const said = (end: End | undefined): string => end?.result?.content?.map((part) 
 const wakes = (child: PiChild) => child.records().filter((r) => r.type === "message_start" && (r.message as { customType?: string })?.customType === "cp-schedule");
 const schedule = (id: string, args: Record<string, unknown> | (() => Record<string, unknown>)): MockToolCall =>
 	({ id, name: "cp_schedule", args: typeof args === "function" ? () => args() : args });
+/** A cron schedule whose slot (1 January 00:00 UTC) a run never reaches; an answer fire would wake nobody anyway. */
+const TICKER_QUOTE = "Add the ticker schedule.";
+const addTicker = schedule("add-ticker", { action: "add", name: "ticker", project: "demo", cron: "0 0 1 1 *", tz: "UTC", title: "ticker", kind: "research", delivery: "answer", operator_quote: TICKER_QUOTE });
 
 /** The `nth` result of call `id`: `ok` must not be an error, `refused` must be one; either way it matches `pattern`. */
 function assertCall(results: Map<string, End[]>, id: string, outcome: "ok" | "refused", pattern: RegExp, nth = 0): string {
@@ -544,10 +561,11 @@ test("P13 dashboard schedule control: a live parent claims each journaled reques
 	const again = request("run_now", id);
 	assert.deepEqual([(await answered(again))?.state, /already_running/.test(state(again)?.reason ?? "")], ["refused", true]);
 	const size = readFileSync(file).length;
-	await new Promise((resolve) => setTimeout(resolve, 4_500));
-	assert.equal(readFileSync(file).length, size, "later polls append nothing");
 	const revive = request("enable", dormant);
 	assert.match((await answered(revive))?.reason ?? "", new RegExp(`enable ${dormant} refused: schedule ${dormant} has no active native policy`));
+	// The pass that answered revive re-read every earlier request: past `size` the journal holds only revive's lines.
+	const later = readFileSync(file).subarray(size).toString("utf8").trim().split("\n").map((line) => (JSON.parse(line) as { id: string; type: string }));
+	assert.deepEqual(later.map((line) => [line.id, line.type]), [[revive, "request"], [revive, "claimed"], [revive, "outcome"]], "later polls append nothing");
 	assert.equal(enabled(dormant), false);
 
 	// Negative controls: none of these act, and the journal says why.
@@ -559,10 +577,12 @@ test("P13 dashboard schedule control: a live parent claims each journaled reques
 	const unjournaled = request("disable", id);
 	// A directory where the journal belongs fails the parent's read and claim even as root; the stash keeps the request.
 	const stash = `${file}.stash`;
+	const unreadable = () => parent.stderr().split("schedule control journal unreadable").length - 1;
+	const failedBefore = unreadable();
 	renameSync(file, stash);
 	mkdirSync(file);
 	t.after(() => { if (existsSync(stash)) { rmSync(file, { recursive: true, force: true }); renameSync(stash, file); } });
-	await new Promise((resolve) => setTimeout(resolve, 4_500));
+	await waitFor(unreadable, (count) => count >= failedBefore + 2, { timeoutMs: 15_000, what: "two passes over the unreadable journal" });
 	assert.deepEqual([types(unjournaled, stash), enabled(id)], [["request"], true], "no claim, no act");
 	rmSync(file, { recursive: true });
 	renameSync(stash, file);
@@ -854,7 +874,7 @@ test("P13b org-review schedules: cp_schedule add validates the config and floors
 });
 
 test("P13b schedule labels: cp_job adds a schedule: job only to a parent-expanded schedule's open run, and an org-review run holds at most max_reviewers reviewers plus one synthesis", { timeout: 180_000 }, async (t) => {
-	const h = await schedulesHome(t);
+	const h = await schedulesHome(t, { env: FAST_TICK });
 	const ids = new Map<string, string>();
 	let saved = "";
 	const label = (name: string) => () => `schedule:${ids.get(name) ?? ids.set(name, h.idOf(name)).get(name)}`;
@@ -901,9 +921,9 @@ test("P13b schedule labels: cp_job adds a schedule: job only to a parent-expande
 	const run = await h.ledger.list({ labels: [org()], all: true });
 	assert.deepEqual(run.filter((entry) => entry.id !== anchor.id).map((entry) => entry.title).sort(), ["reviewer 1", "reviewer 2", "synthesis"], "refusals create nothing; a re-create reuses its job");
 	assert.equal(run.filter((entry) => entry.labels.includes("risk:high")).length, 2);
-	// P13c: a parent-expanded run's open members are the parent's; past a runner tick none is dispatched or noted.
+	// P13c: a parent-expanded run's open members are the parent's; past completed runner ticks none is dispatched or noted.
 	writeFileSync(join(h.stateDir, "schedules.json"), saved);
-	await new Promise((resolve) => setTimeout(resolve, 35_000));
+	await h.ticked("nightly");
 	const fleet = existsSync(join(h.stateDir, "fleet.json")) ? readFleet(h.home).jobs : [];
 	for (const member of h.ledger.read().jobs.filter((entry) => entry.labels.includes(org()) && entry.id !== anchor.id)) {
 		assert.deepEqual([fleet.some((record) => record.job_id === member.id), member.comments.some((comment) => comment.text.startsWith("dispatch refused"))], [false, false], member.title);
@@ -912,21 +932,23 @@ test("P13b schedule labels: cp_job adds a schedule: job only to a parent-expande
 
 test("P13c same-process new_session: an unexpanded skill anchor is offered once per process, again by a new process", { timeout: 180_000 }, async (t) => {
 	// KD-P13c-new-session fixed: the dedupe set outlives new_session, so the next session does not re-offer the anchor.
-	const h = await schedulesHome(t, { cloneUrl: "https://github.com/acme/demo.git" });
-	const parent = await h.parent("P13c: Add the pr-review schedule.", [{ kind: "tool_calls", calls: [
+	const h = await schedulesHome(t, { cloneUrl: "https://github.com/acme/demo.git", env: FAST_TICK });
+	const parent = await h.parent(`P13c: Add the pr-review schedule. ${TICKER_QUOTE}`, [{ kind: "tool_calls", calls: [
 		schedule("add", { action: "add", name: "pr-review", project: "demo", manual: true, title: "PR review", kind: "research", delivery: "local",
 			skill: "cp-pr-review", description: "pr: https://github.com/acme/demo/pull/1", operator_quote: "Add the pr-review schedule." }),
+		addTicker,
 	] }]);
 	assertCall(ends(parent), "add", "ok", /added sch-/);
+	assertCall(ends(parent), "add-ticker", "ok", /added sch-/);
 	const id = h.idOf("pr-review");
 	assert.equal((await dashboard(h.stateDir).ask("run_now", id))[0], "done");
 	await waitFor(() => wakes(parent).length, (count) => count === 1, { timeoutMs: 20_000, what: "the skill fire's wake" });
 	await parent.waitForSettled(30_000);
 	parent.send({ type: "new_session", id: "fresh" });
 	assert.equal((await parent.waitFor((r) => r.type === "response" && r.id === "fresh", 30_000)).success, true);
-	// The new session's catch-up tick runs right after start; a settle and a pause leave room for a second offer.
+	// Each completed tick of the new session re-reads the pending expansions: none may offer the anchor again.
 	await parent.waitForSettled(30_000);
-	await new Promise((resolve) => setTimeout(resolve, 5_000));
+	await h.ticked("ticker");
 	const [anchor] = await h.ledger.list({ labels: [`schedule:${id}`], all: true });
 	const offered = wakes(parent).map((wake) => wake.message as { details?: { job_id?: string } });
 	assert.deepEqual(offered.map((message) => message.details?.job_id), [anchor!.id], "one anchor, offered once in one process");
@@ -938,7 +960,7 @@ test("P13c same-process new_session: an unexpanded skill anchor is offered once 
 	assert.equal((await dashboard(h.stateDir).ask("run_now", id))[0], "done");
 	await waitFor(() => wakes(parent).length, (count) => count === 2, { timeoutMs: 20_000, what: "the second fire's wake" });
 	await parent.waitForSettled(30_000);
-	await new Promise((resolve) => setTimeout(resolve, 5_000));
+	await h.ticked("ticker");
 	const anchors = (await h.ledger.list({ labels: [`schedule:${id}`], all: true })).map((entry) => entry.id);
 	assert.equal(anchors.length, 2);
 	assert.deepEqual(wakes(parent).map((wake) => (wake.message as { details?: { job_id?: string } }).details?.job_id), [anchor!.id, anchors.find((entry) => entry !== anchor!.id)], "the second anchor is offered exactly once");
@@ -953,7 +975,13 @@ test("P13c same-process new_session: an unexpanded skill anchor is offered once 
 });
 
 test("P13c cron and watch fires at parent start: a missed slot is caught up once, an open run holds the next, a watch fires on exit 0 or changed output, an untracked script and a deactivated schedule fire nothing", { timeout: 240_000 }, async (t) => {
-	const h = await schedulesHome(t, { files: { "scripts/ready.sh": "exit 0\n", "scripts/diff.sh": "cat marker.txt\n" } });
+	// Every parent's clock reads this offset (tests/harness/process-clock.ts): the third starts a minute ahead, not a minute later.
+	const clockDir = mkdtempSync(join(tmpdir(), "cp-p13c-clock-"));
+	t.after(() => rmSync(clockDir, { recursive: true, force: true }));
+	const clock = join(clockDir, "offset");
+	writeFileSync(clock, "0");
+	const h = await schedulesHome(t, { files: { "scripts/ready.sh": "exit 0\n", "scripts/diff.sh": "cat marker.txt\n" },
+		env: { CP_TEST_CLOCK_FILE: clock, NODE_OPTIONS: `--import ${pathToFileURL(join(REPO_ROOT, "tests/harness/process-clock.ts")).href}` } });
 	const DAY = 86_400_000;
 	const cron = { cron: "0 9 * * *", tz: "UTC" };
 	const watch = (script: string, on: string) => ({ watch_script: script, every_seconds: 30, on });
@@ -1011,8 +1039,8 @@ test("P13c cron and watch fires at parent start: a missed slot is caught up once
 	rewind({ nightly: 3 * DAY, diff: 60_000 });
 	writeFileSync(join(h.clone, "marker.txt"), "v2\n");
 	const minute = h.runs().openRun(h.idOf("minutely"))!;
-	const fired = byName("minutely").last_fire!.slot;
-	await waitFor(() => new Date().toISOString().slice(0, 16), (now) => now !== fired.slice(0, 16), { timeoutMs: 70_000, what: "the next minute slot" });
+	// The minutely slot fired at or before now; a parent 60 s ahead is past it, so its first tick finds the next slot.
+	writeFileSync(clock, "60000");
 	const third = await h.parent("P13c: third process.", [{ kind: "tool_calls", calls: [{ id: "next", name: "cp_next", args: { project: "demo" } }] }]);
 	await waitFor(() => wakes(third).length, (count) => count === 1, { timeoutMs: 30_000, what: "the changed watch's wake" });
 	await third.waitForSettled(30_000);
@@ -1161,7 +1189,7 @@ test("P13c runner pending jobs: a refused dispatch is noted once and retried; a 
 });
 
 test("P13c runner reports: answer and script runs are torn down in code with one result card and no wake; a local run whose teardown is refused wakes the parent once per process", { timeout: 300_000 }, async (t) => {
-	const h = await schedulesHome(t, { files: { "scripts/tidy.sh": "echo tidied\n" } });
+	const h = await schedulesHome(t, { files: { "scripts/tidy.sh": "echo tidied\n" }, env: FAST_TICK });
 	const anchorOf = (name: string) => h.runs().runs().find((run) => run.schedule_id === h.idOf(name))?.anchor_job_id as string;
 	const fleetOf = (id: string) => (existsSync(join(h.stateDir, "fleet.json")) ? readFleet(h.home).jobs : []).find((job) => job.job_id === id);
 	const answer = h.model("answer", [{ kind: "tool_calls", calls: [{ name: "report_result", args: () => {
@@ -1179,11 +1207,11 @@ test("P13c runner reports: answer and script runs are torn down in code with one
 	const recipes = { ask: ["research", "answer", answer], tidy: ["ship", "local", local], scripted: ["ship", "local", undefined] } as const;
 	const names = Object.keys(recipes) as Array<keyof typeof recipes>;
 	routeNamed(h.home, [answer, local], { seed: "template" });
-	const parent = await h.parent(`P13c: ${names.map((name) => `Add the ${name} schedule.`).join(" ")}`, [
-		{ kind: "tool_calls", calls: names.map((name) => schedule(`add-${name}`, {
+	const parent = await h.parent(`P13c: ${names.map((name) => `Add the ${name} schedule.`).join(" ")} ${TICKER_QUOTE}`, [
+		{ kind: "tool_calls", calls: [...names.map((name) => schedule(`add-${name}`, {
 			action: "add", name, project: "demo", manual: true, title: `${name} task`, kind: recipes[name][0], delivery: recipes[name][1], operator_quote: `Add the ${name} schedule.`,
 			...(name === "scripted" ? { script_path: "scripts/tidy.sh", description: "ignored" } : {}),
-		})) },
+		})), addTicker] },
 		{ kind: "tool_calls", calls: names.map((name) => schedule(`run-${name}`, () => ({ action: "run_now", id: h.idOf(name), ...(recipes[name][2] ? { overrides: { model: recipes[name][2] } } : {}) }))) },
 	]);
 	for (const name of names) assertCall(ends(parent), `run-${name}`, "ok", /fired: created cp-/);
@@ -1198,8 +1226,9 @@ test("P13c runner reports: answer and script runs are torn down in code with one
 	const cards = () => h.runs().runs().filter((run) => run.result?.delivered_at && run.result.job_id === ask).map((run) => run.result!);
 	await waitFor(() => cards().length, (count) => count === 1, { timeoutMs: 60_000, what: "the answer run's card" });
 	const delivered = cards()[0]!.delivered_at;
-	// Past one 30 s tick: no later tick wakes the parent again or posts a second card.
-	await new Promise((resolve) => setTimeout(resolve, 35_000));
+	// Past completed ticks: no later tick wakes the parent again or posts a second card.
+	assertCall(ends(parent), "add-ticker", "ok", /added sch-/);
+	await h.ticked("ticker");
 	await parent.waitForSettled(60_000);
 	assert.deepEqual([cards()[0]?.report_href, cards()[0]?.headline], [undefined, "No merges yesterday."]);
 	assert.deepEqual([envelopes(parent, ask).length, envelopes(parent, scripted).length], [0, 0], "answer and script runs are torn down in code, with no wake");
@@ -1229,7 +1258,7 @@ test("P13c runner reports: answer and script runs are torn down in code with one
 });
 
 test("P13c result cards: a migration conflict keeps the card queued with its error and the next process delivers it once; a lost card is healed from the filed envelope inside the reconcile window only", { timeout: 300_000 }, async (t) => {
-	const h = await schedulesHome(t);
+	const h = await schedulesHome(t, { env: FAST_TICK });
 	const { live, archive } = answerJournals(h.home);
 	// M2 PR2: both journals present is the fail-closed migration state: no producer writes until a human diagnoses it.
 	const legacy = `${JSON.stringify({ type: "posted", by: "bridge", id: "ans-0123456789ab", at: "2026-03-01T00:00:00Z", project: "demo", question: "q", answer: "a", evidence_paths: [], job_id: null })}\n`;
@@ -1244,8 +1273,8 @@ test("P13c result cards: a migration conflict keeps the card queued with its err
 		return { job_id: id, kind: "research", status: "done", summary: "No merges yesterday.", artifact_path: report };
 	} }] }, { kind: "hang" }]);
 	routeNamed(h.home, [answer], { seed: "template" });
-	const parent = await h.parent("P13c: Add the ask schedule.", [
-		{ kind: "tool_calls", calls: [schedule("add", { action: "add", name: "ask", project: "demo", manual: true, title: "ask task", kind: "research", delivery: "answer", operator_quote: "Add the ask schedule." })] },
+	const parent = await h.parent(`P13c: Add the ask schedule. ${TICKER_QUOTE}`, [
+		{ kind: "tool_calls", calls: [schedule("add", { action: "add", name: "ask", project: "demo", manual: true, title: "ask task", kind: "research", delivery: "answer", operator_quote: "Add the ask schedule." }), addTicker] },
 		{ kind: "tool_calls", calls: [schedule("run", () => ({ action: "run_now", id: h.idOf("ask"), overrides: { model: answer } }))] },
 	]);
 	assertCall(ends(parent), "run", "ok", /fired: created cp-/);
@@ -1283,7 +1312,9 @@ test("P13c result cards: a migration conflict keeps the card queued with its err
 		return h.parent("P13c: restarted again.", []);
 	};
 	const old = await lose(new Date(Date.now() - 8 * 86_400_000).toISOString().replace(/\.\d+Z$/, "Z"));
-	await new Promise((resolve) => setTimeout(resolve, 35_000));
+	// Every completed tick syncs result cards: none of them may heal a card outside the window.
+	assertCall(ends(parent), "add-ticker", "ok", /added sch-/);
+	await h.ticked("ticker");
 	await old.waitForSettled(30_000);
 	assert.deepEqual([cards().length, runOf()!.result], [0, undefined], "older than the window: no card");
 	await lose(run.closed_at!);
