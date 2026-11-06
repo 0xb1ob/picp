@@ -58,7 +58,7 @@ jobs:
 
   test-shard:
     name: test-shard (${{ matrix.shard }})
-    runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted","nomad"]') || 'ubuntu-latest' }}
+    runs-on: boat
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -149,7 +149,7 @@ jobs:
     name: test
     needs: [checks, test-shard]
     if: always()
-    runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted","nomad"]') || 'ubuntu-latest' }}
+    runs-on: boat
     timeout-minutes: 5
     steps:
       - name: Require every shard and the checks
@@ -163,7 +163,7 @@ jobs:
   # skips tests/e2e/installer.test.ts; this job opts in and fails when Docker is missing.
   install-sandbox:
     name: install sandbox
-    runs-on: ${{ github.event.repository.private && fromJSON('["self-hosted","nomad"]') || 'ubuntu-latest' }}
+    runs-on: boat
     timeout-minutes: 40
     steps:
       - name: Checkout
