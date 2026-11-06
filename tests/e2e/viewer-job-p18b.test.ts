@@ -32,7 +32,7 @@ test("P18-transcript-ui: the Transcript tab groups tools, files the report and r
 	};
 	const work = [say("user", "12:00", "The brief <b>x</b>"),
 		say("assistant", "12:01", [call("t1", "read", { path: "a.ts" }), call("t2", "read", { path: "b.ts" }), call("t3", "bash", { command: "npm test" })]),
-		result("t1", "read", "x"), result("t2", "read", "y"), result("t3", "bash", "boom", true),
+		result("t1", "read", "x"), result("t2", "read", "y"), result("t3", "bash", "boom\n\nagain", true),
 		say("assistant", "12:05", [{ type: "text", text: "Done with **it** <script>alert(1)</script>" }]),
 		say("assistant", "12:06", [call("r", "report_result", { status: "done" })]), result("r", "report_result", "ok")];
 	session("cp-t", [...work, bridge("12:09", "[cp-bridge review-verdict]\nVerdict: pass"), bridge("12:10", "late notice")]);
@@ -70,8 +70,8 @@ test("P18-transcript-ui: the Transcript tab groups tools, files the report and r
 	assert.match(tab.$(".tool-run-solid button")!.textContent!, /^▾ 3 tool calls/);
 	assert.equal(tab.$(".tool-run-solid button")!.getAttribute("aria-expanded"), "true");
 	assert.equal(tab.$$(".tool-run-solid .jt-tool").length, 3);
-	assert.deepEqual(tab.$$(".tool-run-solid .jt-tool").map((n) => n.textContent), ["Read(a.ts)└ Read 1 line", "Read(b.ts)└ Read 1 line", "Ran 1 shell command · failed• npm testboom"],
-		"the former chat Log's wording, ported: a failed call says so with its output");
+	assert.deepEqual(tab.$$(".tool-run-solid .jt-tool").map((n) => n.textContent), ["Read(a.ts)└ Read 1 line", "Read(b.ts)└ Read 1 line", "Ran 1 shell command · failed• npm testboom\nagain"],
+		"the former chat Log's wording, ported: a failed call says so with its output, and no toggle when nothing was cut");
 	assert.equal(tab.$$(".tool-run-solid .jt-tool-failed").length, 1);
 	const done = tab.$(".jt-report")!;
 	assert.match(done.textContent!, /Report filed.*12:06.*Open report/);

@@ -48,10 +48,10 @@ function EditBlock({lines}: {lines: {removed: string[]; added: string[]}}) {
  </div>;
 }
 const FULL_MAX = 2000;
-/** The output's first FULL_MAX characters behind a toggle, when they hold more than the shown head. */
+/** The output's first FULL_MAX characters behind a toggle, only when the shown head cut lines or characters. */
 function FullOutput({result, shown}: {result: string; shown: string}) {
  const [open, setOpen] = useState(false), full = result.slice(0, FULL_MAX);
- if (full.trim() === shown) return null;
+ if (full.split("\n").filter(l => l.trim()).join("\n") === shown) return null;
  return <>{open && <pre class="jt-full">{full}</pre>}
   <button type="button" class="jt-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Show less" : "Show full output"}</button></>;
 }
