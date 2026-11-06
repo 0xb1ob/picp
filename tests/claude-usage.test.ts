@@ -5,7 +5,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
-import { estimatedRunUsage, type NativeBaseline, nativeRunUsage, noteStreamedUsage, type StreamedUsage } from "../src/drivers/claude-usage.ts";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { estimatedRunUsage, liveUsageUpdate, type NativeBaseline, nativeRunUsage, noteStreamedUsage, type StreamedUsage } from "../src/drivers/claude-usage.ts";
+import { rebuildStatus, RunRecorder } from "../src/run-artifacts.ts";
 
 const MODEL = "claude-fake";
 const fresh = (): NativeBaseline => ({ ledger: {}, cost_usd: 0 });
@@ -47,4 +52,34 @@ test("N4k: an estimate with no streamed tokens stays unavailable; no baseline le
 	noteStreamedUsage(seen, assistant("m1", { input_tokens: 4, output_tokens: 2 }));
 	const estimate = estimatedRunUsage(seen, undefined);
 	assert.deepEqual([estimate.status, estimate.usage?.totalTokens, estimate.baseline], ["estimated", 6, undefined]);
+});
+
+// status.json read 0 until a native run returned. The worker's live update (relay needs a real `claude`, so no CI entry
+// point reaches it) must show in status.json unlogged, be replaced by message_end, and a zero reset must match a rebuild.
+test("live native usage: message_update shows in status.json, message_end replaces it, the zero reset matches a rebuild", async (t) => {
+	const home = mkdtempSync(join(tmpdir(), "cp-native-live-"));
+	t.after(() => rmSync(home, { recursive: true, force: true }));
+	const recorder = RunRecorder.open({ home, jobId: "cp-live", flushIntervalMs: 1 });
+	const send = async (event: Record<string, unknown>) => (recorder.pi(event as never), await sleep(30));
+	const onDisk = () => (JSON.parse(readFileSync(recorder.statusFile, "utf8")) as { usage: { total_tokens: number } }).usage.total_tokens;
+	const seen: StreamedUsage = new Map();
+	noteStreamedUsage(seen, assistant("m1", { input_tokens: 100, output_tokens: 20 }));
+	await send(liveUsageUpdate(seen));
+	assert.equal(onDisk(), 120, "the in-flight estimate is in status.json before the run returns");
+	noteStreamedUsage(seen, assistant("m2", { input_tokens: 50, output_tokens: 30 }));
+	await send(liveUsageUpdate(seen));
+	assert.equal(onDisk(), 200, "each update replaces the last, never adds to it");
+	const measured = { input: 150, output: 60, cacheRead: 0, cacheWrite: 0, totalTokens: 210, cost: { total: 0.1 } };
+	await send({ type: "message_end", message: { role: "assistant", model: MODEL, usage: measured } });
+	assert.equal(onDisk(), 210, "the measured message_end replaces the estimate");
+	const next: StreamedUsage = new Map();
+	noteStreamedUsage(next, assistant("m3", { input_tokens: 25, output_tokens: 5 }));
+	await send(liveUsageUpdate(next));
+	assert.equal(onDisk(), 240);
+	await send(liveUsageUpdate(new Map()));
+	await send({ type: "usage_unavailable", status: "unbaselined" });
+	assert.equal(onDisk(), 210, "an unmeasured turn's zero reset drops its estimate");
+	assert.doesNotMatch(readFileSync(recorder.eventsFile, "utf8"), /message_update/, "the live updates are never logged");
+	assert.equal(rebuildStatus(home, "cp-live").usage.total_tokens, onDisk());
+	recorder.close();
 });

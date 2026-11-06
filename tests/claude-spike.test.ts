@@ -11,7 +11,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { HookCallback, SDKResultMessage, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
 import workerReporter, { VERDICT_FILE, VERDICT_RAW_FILE } from "../extensions/worker-reporter/index.ts";
-import { type Delivery, type FleetRecord, type JobKind, paths, type Role, type RoutingConfig } from "../src/contracts.ts";
+import { type Delivery, type FleetRecord, type JobKind, layoutForHome, paths, type Role, type RoutingConfig } from "../src/contracts.ts";
 import { verdictReport } from "../src/drivers/claude-verdict.ts";
 import { holdReviewerSlot, resolveReviewerRoute } from "../src/reviewer-route.ts";
 import { ALWAYS_AVAILABLE } from "../src/routing.ts";
@@ -277,6 +277,24 @@ test("claude-worker: a role/kind pair selection never allows and a missing or em
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+// N4l: in a flat home the worker read the nested layout, so a resume found no fleet record. The e2e needs `claude` on
+// PATH and skips in CI; a malformed flat fleet.json named in the refusal proves the worker read the flat path.
+test("claude-worker: a flat CP_HOME configures the flat layout, so the resume admission reads its state/fleet.json", (t) => {
+	const root = mkdtempSync(join(tmpdir(), "cp-native-flat-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const home = join(root, ".pi-command-post");
+	const fleet = join(home, layoutForHome("multi", home).fleetFile);
+	mkdirSync(dirname(fleet), { recursive: true });
+	writeFileSync(fleet, "{");
+	const env = { CP_HOME: home, CP_NATIVE_RESUME: "1", CP_JOB_ID: "cp-flat", CP_RUN_DIR: root, CP_WORKTREE: root, CP_KIND: "ship", CP_ROLE: "implementer" };
+	const worker = startWorker(env);
+	const reply = worker.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line) as { type?: string; error?: string }).find((line) => line.type === "response");
+	const error = reply?.error ?? "";
+	assert.equal(fleet, `${home}/state/fleet.json`, "the flat layout under test");
+	assert.ok(error.startsWith(`${fleet} is not valid JSON`), `${error}\n${worker.stderr}`);
+	assert.ok(error.endsWith("Nothing was resumed."), error);
 });
 
 test("N4f native.json: absent is every class off at concurrency 1; switches are booleans, max_concurrent 1-4, unknown keys refused", (t) => {
