@@ -1,0 +1,1 @@
+- CI: `scripts/test-timings.json` regenerated from main CI run 42203341745 (shard 10's log was unavailable, so its 29 files keep their prior timings; the two untimed e2e files are now timed), so the 15 shards balance on current weights; predicted longest shard 515 s → 471 s, shortest 163 s → 241 s. Migration: none.
