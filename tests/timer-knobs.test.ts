@@ -4,6 +4,7 @@ import { CI_WATCH_MAX_BACKOFF_MS } from "../src/contracts.ts";
 import { hostProbeMs, reattachFirstMs, reattachMaxMs } from "../src/bridge-reattach.ts";
 import { hostEscalationTickMs } from "../src/parent-host.ts";
 import { parentCompactHoldMs } from "../src/parent-compact-hold.ts";
+import { schedulerTickMs } from "../src/scheduler.ts";
 import {
 	ciWatchDeliveryRetryMs,
 	reviewMergeWindowMs,
@@ -21,6 +22,7 @@ const knobs = [
 	["CP_HOST_PROBE_SECONDS", hostProbeMs, 60_000],
 	["CP_BRIDGE_REATTACH_FIRST_SECONDS", reattachFirstMs, 1_000],
 	["CP_BRIDGE_REATTACH_MAX_SECONDS", reattachMaxMs, 30_000],
+	["CP_SCHEDULER_TICK_SECONDS", schedulerTickMs, 30_000],
 ] as const;
 
 for (const [name, read, dflt] of knobs) {

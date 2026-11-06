@@ -38,11 +38,16 @@ import { formatNativeEvent, nativeStart } from "./schedule-native.ts";
 import { nativeMigrationReason } from "./schedule-native-migration.ts";
 import { effectivePolicyBounds } from "./schedule-policy.ts";
 import { loadRoutingConfig } from "./routing.ts";
+import { knobMs } from "./timer-knobs.ts";
 
 import { policyImportBackups } from "./schedule-migrations.ts";
 export { assertTimeZone, type CronSpec, latestCronSlot, nextCronSlot, ORG_REVIEW_MAX_REVIEWERS, orgReviewConfig, type OrgReviewConfig, orgReviewMaxReviewers, parseCron, readScheduleFile, type Schedule, SCHEDULE_SKILLS, scheduleFileErrors, SchedulerError } from "./viewer/schedule-core.ts";
 
 export const SCHEDULER_TICK_MS = 30_000;
+/** `CP_SCHEDULER_TICK_SECONDS` (default 30): how often the parent host ticks the scheduler and the schedule runner. */
+export function schedulerTickMs(env: NodeJS.ProcessEnv = process.env): number {
+	return knobMs("CP_SCHEDULER_TICK_SECONDS", SCHEDULER_TICK_MS, env);
+}
 const WATCH_TIMEOUT_CAP_S = 600;
 /** How far back a cron checkpoint survives a clock set back; also the DST fall-back repeat window. */
 const CLOCK_BACK_BOUND_MS = 2 * 3_600_000;

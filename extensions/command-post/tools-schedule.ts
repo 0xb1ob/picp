@@ -21,7 +21,7 @@ import type { IntakeResult } from "../../src/intake.ts";
 import { RUNNER_DELIVERIES, ScheduleRunner } from "../../src/schedule-runner.ts";
 import { formatExpansionWake, pendingExpansions } from "../../src/schedule-expand.ts";
 import { SCHEDULE_CONTROL_POLL_MS, ScheduleControl } from "../../src/schedule-control.ts";
-import { formatScheduleEvent, formatSchedules, SCHEDULE_SKILLS, type ScheduleEvent, Scheduler, SCHEDULER_TICK_MS } from "../../src/scheduler.ts";
+import { formatScheduleEvent, formatSchedules, SCHEDULE_SKILLS, type ScheduleEvent, Scheduler, schedulerTickMs } from "../../src/scheduler.ts";
 import type { ExtensionDeps } from "./shared.ts";
 
 import { schedulePolicyView } from "../../src/viewer/schedule-policy-view.ts";
@@ -178,7 +178,7 @@ export function registerScheduleTools(
 	// Registered after the session hooks, so the lock is already decided when this runs.
 	pi.on("session_start", async () => {
 		if (!holdsLock() || timer) return;
-		timer = setInterval(() => void tick(), SCHEDULER_TICK_MS);
+		timer = setInterval(() => void tick(), schedulerTickMs());
 		timer.unref();
 		setTimeout(() => void tick(), 0).unref(); // catch-up pass, after startup returns
 		controlTimer = setInterval(() => void drain(), SCHEDULE_CONTROL_POLL_MS);

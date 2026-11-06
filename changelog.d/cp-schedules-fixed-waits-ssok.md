@@ -1,0 +1,1 @@
+- Added `CP_SCHEDULER_TICK_SECONDS` to override the parent's schedule tick (default stays 30 s). `tests/e2e/schedules.test.ts` drops its fixed sleeps and its next-minute wall-clock wait: negative checks now wait for completed scheduler ticks or control-journal passes, and the cron restart case shifts the parent's clock instead of waiting for the minute to roll.
