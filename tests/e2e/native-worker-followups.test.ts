@@ -179,7 +179,10 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }] },
 		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
 		{ kind: "text", text: "Reported." },
-		{ kind: "text", text: "I will not report this time." },
+		// N4e: an unreported clean turn would settle idle and be nudged, so this follow-up ends at its turn limit (3).
+		call("Bash", { command: "ls" }),
+		call("Bash", { command: "ls -a" }),
+		call("Bash", { command: "ls -l" }),
 		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
 		{ kind: "text", text: "Reported after the revive." },
 	]);
@@ -187,7 +190,8 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 	ids.push(native.id);
 	const id = native.id;
 	const fleet = join(h.b.home, LAYOUT.fleetFile);
-	// Two parent runs keep each under the harness's 90 s settle bound; the no-report turn ends the worker failed.
+	// Two parent runs keep each under the harness's 90 s settle bound; the turn-limit follow-up ends the worker failed.
+	const limited = { ...h.env, CP_NATIVE_MAX_TURNS: "3" };
 	const first = (await h.b.run([
 		h.dispatch(id),
 		h.wait(id, "agent_settled", 1),
@@ -198,7 +202,7 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 		h.thawed,
 		tool("cp_send", { job_id: id, message: "Follow-up without a report." }),
 		h.wait(id, "process_exit", 1),
-	], h.env)) as Tool[];
+	], limited)) as Tool[];
 	await h.b.closeParents();
 	const ends = (await h.b.run([
 		tool("cp_revive", { job_id: id, continue_failed: true, confirm: true }),
@@ -215,7 +219,7 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 		h.wait(id, "native_resume_failed", 1),
 		h.off,
 		tool("cp_teardown", { job_id: id }),
-	], h.env)) as Tool[];
+	], limited)) as Tool[];
 	const [offSend, frozenSend, resumed] = first.filter((end) => end.toolName === "cp_send");
 	const [continued, offRevive, frozenRevive, revived] = ends.filter((end) => end.toolName === "cp_revive");
 	const runsBefore = (pattern: RegExp) => modelCalls(h.claude.requests).filter((request) => pattern.test(messages(request))).length;
@@ -234,7 +238,9 @@ test("F2/F5/F6/F7: switch-off and freeze refuse resume and revive, continue_fail
 	// F2: the revive resumes the session with picp's revive prompt and the job reports once more (generation 2).
 	assert.match(text(revived), /resumed its native Claude session/, text(revived));
 	const revivedRun = modelCalls(h.claude.requests).find((request) => messages(request).includes(NATIVE_REVIVE_PROMPT.slice(0, 40)));
-	assert.ok(messages(revivedRun).includes("I will not report this time."), "the revive resumed the same session");
+	assert.ok(messages(revivedRun).includes("ls -l"), "the revive resumed the same session");
+	const stops = readRunEvents(h.b.home, id).filter((event) => event.type === "native_run").map((event) => (event.payload as { stop?: string }).stop);
+	assert.deepEqual(stops, [undefined, "max_turns", undefined], "the unreported follow-up ended at its turn limit, never settled");
 	const events = readRunEvents(h.b.home, id);
 	assert.equal(events.filter((event) => event.type === "envelope_received").length, 2);
 	assert.equal(events.filter((event) => event.type === "native_run").length, 3);
@@ -319,6 +325,8 @@ test("S2 lock: a spent window refuses a native resume, its queued sends stay que
 		{ kind: "tool_use", calls: [{ name: "Write", input: () => ({ file_path: join(h.b.home, paths.artifactFile(ids[0]!)), content: "# native\n" }) }], beforeAnswer: async () => { observe("rejected", Date.now()); await sleep(6_000); } },
 		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
 		{ kind: "text", text: "Reported." },
+		// N4e: an unreported follow-up settles idle and is nudged, so the released follow-up re-reports.
+		{ kind: "tool_use", calls: [{ name: REPORT_TOOL, input: () => report(ids[0]!, h.b.home) }] },
 		{ kind: "text", text: "Noted the released follow-ups." },
 	]);
 	const id = (await h.job()).id;

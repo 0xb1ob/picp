@@ -341,6 +341,14 @@ no longer test-only): every N3a gate is on and not optional.
 and a stderr line. If the worker then exits without a report, the job fails as `turn_limit` ("Stopped at turn limit"),
 not `crash`; the worktree and session are kept, and like every native failure it is never auto-recovered.
 
+**Settle and named stops (N4e).** A native turn that ends with a clean `success` and no report no longer exits: the
+worker emits `agent_settled` and stays idle, so settle.ts's existing nudge, correction and recovery prompts (same caps)
+resume the same session. Every idle prompt passes `assertNativeResume` first (`src/drivers/claude-lifecycle.ts`), so a
+switch-off, freeze, drain or spent window refuses it by name and nothing resumes. A turn ending on a rejected window, an
+auth failure or a lockdown refusal records `native_run.stop: "window" | "auth" | "lockdown"` and exits non-zero, never
+nudged: `window` fails as `provider_limit` naming the window and its reset (a plain `cp_revive` after the reset
+resumes the session), `auth` as `model_call_failed` and `lockdown` as `spawn_failed`.
+
 **Usage.** N4a measures every native run from its SDK result's `modelUsage` (`src/drivers/claude-usage.ts`), on any
 subtype: `success` and every `error_*` result, so a run stopped at the turn limit is counted too. Per model it reads
 input, output, cache read, cache write and `costUSD`; the cost is the larger of the per-model sum and `total_cost_usd`
