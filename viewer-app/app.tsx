@@ -3,7 +3,6 @@ import type { DecisionsResponse, OverviewResponse, BoardResponse, HandoffsRespon
 import { Stats, statsApiUrl } from "./screens/Stats.tsx";
 import { type Route, decisionsFallback, screenDataUrl } from "./routes.ts";
 import { readSelection, withoutSelection } from "./project-filter.ts";
-import { readThread } from "./thread-selection.ts";
 import { useControl } from "./use-control.ts";
 import { useScheduleControl } from "./use-schedule-control.ts";
 import { Decisions } from "./screens/Decisions.tsx";
@@ -50,7 +49,7 @@ export function DetailScreen({current:asked, workers}: {current:Route; workers?:
  if (missing) return <NotFound {...missing}/>;
  const draft=sessions ? query.get("draft") ?? undefined : undefined;
  const reference=sessions ? query.get("ref") ?? undefined : undefined;
- return <>{resource.error && <p role="alert" class="overview-error">{resource.error}</p>}{resource.data ? sessions ? <Sessions data={resource.data as SessionsResponse} control={control} draft={draft} reference={reference} selection={readSelection(current.query)} thread={readThread(current.query)}/> : <Files data={resource.data as FilesResponse}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}</>;
+ return <>{resource.error && <p role="alert" class="overview-error">{resource.error}</p>}{resource.data ? sessions ? <Sessions data={resource.data as SessionsResponse} control={control} draft={draft} reference={reference} selection={readSelection(current.query)}/> : <Files data={resource.data as FilesResponse}/> : <p role="status">{resource.error ? "View unavailable" : "Loading"}</p>}</>;
 }
 export function App() {
  const current = useRoute();

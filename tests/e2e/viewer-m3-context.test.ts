@@ -39,6 +39,8 @@ function seed(stateDir: string, home: string, context: string | null = CONTEXT) 
 		say({ role: "toolResult", toolCallId: "call-ask", toolName: "cp_parent", content: [{ type: "text", text: JSON.stringify({ id }) }] }),
 		say({ role: "assistant", content: [{ type: "text", text: "REPLY-CARD" }] })].join("\n")}\n`);
 	mkdirSync(join(stateDir, "sessions"), { recursive: true });
+	mkdirSync(join(dirname(stateDir), "data"), { recursive: true });
+	writeFileSync(join(dirname(stateDir), "data", "projects.json"), JSON.stringify({ projects: [{ name: "picp" }, { name: "atlas" }] }));
 	writeFileSync(operatorSessionsFile(join(stateDir, "sessions")), `${JSON.stringify({ at: iso(20), session_file: chat })}\n`);
 	put(LAYOUT.fleetFile, { jobs: [
 		{ job_id: "cp-live-t7ah", project: "picp", kind: "ship", phase: "held", dispatched_at: iso(60), bounds: { wall_clock_seconds: 7200 } },
@@ -55,10 +57,10 @@ const start = async (t: Context, context: string | null = CONTEXT) => {
 };
 const escape = (tab: Tab) => tab.key(tab.document.body as unknown as Element, "Escape").defaultPrevented;
 const texts = (tab: Tab, selector: string) => tab.$$(selector).map((el) => el.textContent);
-/** M1: the selection lives in the hash; the chat's select offers only projects its entries name (none here). */
+/** M1: the selection lives in the hash; the sidebar's registered-project row marks it current. */
 async function pick(tab: Tab, project: string) {
 	tab.go(`${CHAT}&project=${project}`);
-	await until(() => tab.$(".session-filter select")?.querySelector("option[selected]")?.getAttribute("value"), (value) => value === project, `the ${project} selection`);
+	await until(() => tab.$('.session-sidebar .project-row[aria-current="page"]')?.textContent, (name) => name === `#${project}`, `the ${project} selection`);
 }
 
 test("M3-context-inspector: Context opens the desktop inspector with the open ask and the selection's live workers; Answer, a job and Escape keep the chat", { timeout: 180_000 }, async (t) => {
@@ -227,7 +229,9 @@ test("M3-context-phone: the context sheet and the Conversations drawer are modal
 		[false, true, ["#sessions", "#jobs", "#more"]], "Full match S1: the rail's chrome replaces the Conversations title row");
 	assert.deepEqual(texts(tab, ".workspace-sessions-list h2"), ["Fleet · 2 live"]);
 	assert.equal(tab.$('.workspace-sessions .session-choice[aria-current="page"]')!.getAttribute("href"), "#sessions?view=you&project=atlas", "the current session keeps the selection");
-	assert.match(tab.$("dialog.workspace-sessions")!.textContent!, /New thread/, "full match S11: the drawer carries the thread rail");
+	// The drawer carries the sidebar's project rows, atlas current; negative control: the retired thread rail.
+	assert.deepEqual([texts(tab, ".workspace-sessions .project-row"), tab.$('.workspace-sessions .project-row[aria-current="page"]')?.textContent, /New thread/.test(tab.$("dialog.workspace-sessions")!.textContent!)],
+		[["#All projects", "#atlas", "#picp"], "#atlas", false], "the drawer carries the project rows");
 	assert.equal(escape(tab), true);
 	await until(() => tab.$("dialog.workspace-sessions"), (el) => el === null, "Escape to close Conversations");
 	assert.ok(focused() === conversations);
